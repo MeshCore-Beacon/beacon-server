@@ -25,10 +25,10 @@ ON CONFLICT (public_key) DO UPDATE SET
   observation_count = observers.observation_count + 1
 RETURNING *;
 
--- name: UpdateObserverStatus :exec
+-- name: UpdateObserverStatus :one
 UPDATE observers SET
-  display_name     = COALESCE($2, display_name),
-  observer_type    = COALESCE($3, observer_type),
+  display_name     = COALESCE(NULLIF($2, ''), display_name),
+  observer_type    = COALESCE(NULLIF($3, ''), observer_type),
   software_version = COALESCE($4, software_version),
   hardware_model   = COALESCE($5, hardware_model),
   firmware_version = COALESCE($6, firmware_version),
@@ -42,13 +42,25 @@ UPDATE observers SET
   status_metadata  = $14,
   last_status_at   = NOW(),
   last_seen        = NOW()
-WHERE public_key = $1;
+WHERE public_key = $1
+RETURNING id;
 
 -- name: GetObserverByPubkey :one
 SELECT * FROM observers WHERE public_key = $1;
 
 -- name: ListObservers :many
 SELECT * FROM observers ORDER BY last_seen DESC;
+
+-- name: GetObserverLastIATA :one
+SELECT iata FROM packet_observations
+WHERE observer_id = $1
+ORDER BY heard_at DESC
+LIMIT 1;
+
+-- name: GetObserverRadio :one
+SELECT radio_freq_mhz, radio_bw_khz, radio_sf, radio_cr
+FROM observers
+WHERE id = $1;
 
 -- ============================================================
 -- OBSERVER BROKERS
@@ -264,3 +276,20 @@ SELECT * FROM mv_top_nodes_by_iata
 WHERE ($1::char(3) IS NULL OR iata = $1)
 ORDER BY observation_count DESC
 LIMIT $2;
+
+-- ============================================================
+-- HELPERS
+-- ============================================================
+
+-- name: ResolvePathHashes :many
+SELECT DISTINCT n.id
+FROM node_short_ids ns
+JOIN nodes n ON n.id = ns.node_id
+WHERE ns.iata = $1
+  AND CASE
+    WHEN cardinality($2::bytea[]) > 0 AND length($2[1]) = 1 THEN ns.prefix_1 = ANY($2)
+    WHEN cardinality($2::bytea[]) > 0 AND length($2[1]) = 2 THEN ns.prefix_2 = ANY($2)
+    WHEN cardinality($2::bytea[]) > 0 AND length($2[1]) = 3 THEN ns.prefix_3 = ANY($2)
+    WHEN cardinality($2::bytea[]) > 0 AND length($2[1]) = 4 THEN ns.prefix_4 = ANY($2)
+    ELSE FALSE
+  END;

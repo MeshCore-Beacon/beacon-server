@@ -9,10 +9,13 @@ import (
 	"os/signal"
 	"syscall"
 
+	"tower/db"
 	"tower/internal/api/router"
 	"tower/internal/hub"
 	"tower/internal/ingest"
+	"tower/internal/keystore"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 )
 
@@ -28,10 +31,17 @@ func main() {
 	go h.Run()
 
 	// ── MQTT ingest workers ──────────────────────────────────────────────────
-	// TODO: wire in a real DB handle and ChannelKeyStore once those are built.
-	// For now the workers start but immediately hit the decode TODO stub.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	pool, err := pgxpool.New(ctx, mustEnv("POSTGRES_DSN"))
+	if err != nil {
+		log.Fatalf("failed to connect to postgres at %s: %v", os.Getenv("POSTGRES_DSN_HOST"), err)
+	}
+	defer pool.Close()
+
+	store := db.New(pool)
+	keys := keystore.NewMapKeyStore(map[string][]byte{})
 
 	broker1 := ingest.New(
 		ingest.Config{
@@ -40,9 +50,9 @@ func main() {
 			Username:   mustEnv("MQTT_BROKER_1_USERNAME"),
 			Password:   mustEnv("MQTT_BROKER_1_PASSWORD"),
 		},
-		nil, // TODO: replace with *db.Queries or pgxpool handle
+		store,
 		h,
-		nil, // TODO: replace with channel key store
+		keys,
 	)
 
 	broker2 := ingest.New(
@@ -52,9 +62,9 @@ func main() {
 			Username:   mustEnv("MQTT_BROKER_2_USERNAME"),
 			Password:   mustEnv("MQTT_BROKER_2_PASSWORD"),
 		},
-		nil, // TODO: replace with *db.Queries or pgxpool handle
+		store,
 		h,
-		nil, // TODO: replace with channel key store
+		keys,
 	)
 
 	go broker1.Start(ctx)
@@ -87,8 +97,9 @@ func main() {
 	}
 }
 
-// mustEnv returns the value of an env var, or empty string if unset.
-// Workers handle missing config gracefully (log + retry), so we don't fatal here.
+// mustEnv returns the value of an env var and logs a warning if it is unset.
+// Callers that require the value to be non-empty should fatal themselves;
+// ingest workers tolerate missing broker config and will fail on connect instead.
 func mustEnv(key string) string {
 	v := os.Getenv(key)
 	if v == "" {

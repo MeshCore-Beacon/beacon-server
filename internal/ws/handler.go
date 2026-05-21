@@ -25,23 +25,26 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/google/uuid"
 
 	"tower/internal/hub"
 )
 
 const (
-	pingTimeout  = 90 * time.Second
-	writeTimeout = 10 * time.Second
+	pingTimeout  = 90 * time.Second // server closes connection if no message received within this window
+	writeTimeout = 10 * time.Second // TODO: apply per-write deadline once nhooyr supports it cleanly
 )
 
 // Handler returns an http.HandlerFunc that requires the hub to be injected.
 // Wire it via router.New(h) so the hub is available at startup.
 func Handler(h *hub.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// TODO: upgrade to WebSocket using nhooyr.io/websocket or gorilla/websocket.
-		// The structure below shows the intended shape; swap the stub conn calls
-		// for real ones once the library is chosen.
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			log.Printf("ws: failed to accept connection: %v", err)
+			return
+		}
 
 		connID := uuid.NewString()
 		client := h.NewClient()
@@ -59,7 +62,11 @@ func Handler(h *hub.Hub) http.HandlerFunc {
 		}
 		helloBytes, _ := json.Marshal(hello)
 		log.Printf("ws[%s]: connected, hello: %s", connID, helloBytes)
-		// TODO: conn.Write(ctx, websocket.MessageText, helloBytes)
+		err = conn.Write(ctx, websocket.MessageText, helloBytes)
+		if err != nil {
+			log.Printf("ws[%s]: failed to send hello: %v", connID, err)
+			return
+		}
 
 		// Write pump: forward hub events to the WS connection.
 		go func() {
@@ -76,8 +83,11 @@ func Handler(h *hub.Hub) http.HandlerFunc {
 						"data":  json.RawMessage(evt.Payload),
 					}
 					msgBytes, _ := json.Marshal(msg)
-					_ = msgBytes
-					// TODO: conn.Write(ctx, websocket.MessageText, msgBytes)
+					err = conn.Write(ctx, websocket.MessageText, msgBytes)
+					if err != nil {
+						log.Printf("ws[%s]: failed to write hub event: %v", connID, err)
+						return
+					}
 				case <-ctx.Done():
 					return
 				}
@@ -87,18 +97,14 @@ func Handler(h *hub.Hub) http.HandlerFunc {
 		// Read pump: handle subscribe / unsubscribe / ping from the client.
 		// Drives the idle timeout; any message resets the deadline.
 		for {
-			// TODO: _, msgBytes, err := conn.Read(ctx)
-			// if err != nil { return }
-			// w.handleClientMessage(ctx, client, h, connID, msgBytes)
-
-			// Stub: block until context cancelled.
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(pingTimeout):
-				log.Printf("ws[%s]: idle timeout", connID)
+			readCtx, readCancel := context.WithTimeout(ctx, pingTimeout)
+			_, msgBytes, err := conn.Read(readCtx)
+			readCancel()
+			if err != nil {
+				log.Printf("ws[%s]: read error: %v", connID, err)
 				return
 			}
+			handleClientMessage(ctx, client, h, conn, connID, msgBytes)
 		}
 	}
 }
@@ -124,8 +130,7 @@ type subscribeScope struct {
 }
 
 // handleClientMessage dispatches a parsed client message.
-// TODO: call this from the read pump once the WS library is wired.
-func handleClientMessage(ctx context.Context, client *hub.Client, h *hub.Hub, connID string, raw []byte) {
+func handleClientMessage(ctx context.Context, client *hub.Client, h *hub.Hub, conn *websocket.Conn, connID string, raw []byte) {
 	var msg clientMessage
 	if err := json.Unmarshal(raw, &msg); err != nil {
 		log.Printf("ws[%s]: bad message: %v", connID, err)
@@ -142,7 +147,7 @@ func handleClientMessage(ctx context.Context, client *hub.Client, h *hub.Hub, co
 			PayloadTypes:  msg.Scope.PayloadTypes,
 			ChannelHashes: msg.Scope.ChannelHashes,
 			Events:        msg.Scope.Events,
-			// RegionIATAs: TODO expand msg.Scope.RegionIDs → IATA list via DB/config lookup
+			// RegionIATAs: TODO expand msg.Scope.RegionIDs → IATA slice via region_iatas DB lookup
 		}
 		h.AddScope(client, scope)
 		subID := uuid.NewString()
@@ -150,8 +155,10 @@ func handleClientMessage(ctx context.Context, client *hub.Client, h *hub.Hub, co
 			"v": 1, "type": "subscribed", "id": msg.ID, "subscriptionId": subID,
 		})
 		log.Printf("ws[%s]: subscribed %s → %s", connID, msg.ID, subID)
-		_ = reply
-		// TODO: conn.Write(ctx, websocket.MessageText, reply)
+		err := conn.Write(ctx, websocket.MessageText, reply)
+		if err != nil {
+			log.Printf("ws[%s]: failed to send subscribed reply: %v", connID, err)
+		}
 
 	case "unsubscribe":
 		// TODO: remove the specific subscriptionId from client.scope.
@@ -160,12 +167,12 @@ func handleClientMessage(ctx context.Context, client *hub.Client, h *hub.Hub, co
 
 	case "ping":
 		reply, _ := json.Marshal(map[string]any{"v": 1, "type": "pong", "id": msg.ID})
-		_ = reply
-		// TODO: conn.Write(ctx, websocket.MessageText, reply)
+		err := conn.Write(ctx, websocket.MessageText, reply)
+		if err != nil {
+			log.Printf("ws[%s]: failed to send pong: %v", connID, err)
+		}
 
 	default:
 		log.Printf("ws[%s]: unknown message type %q", connID, msg.Type)
 	}
-
-	_ = ctx
 }

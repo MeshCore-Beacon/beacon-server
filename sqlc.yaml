@@ -6,6 +6,7 @@ sql:
     gen:
       go:
         package: "db"
+        sql_package: "pgx/v5"
         out: "db/sqlc"
         emit_json_tags: true
         emit_pointers_for_null_types: true
@@ -15,5 +16,3 @@ sql:
             go_type: "github.com/google/uuid.UUID"
           - db_type: "jsonb"
             go_type: "encoding/json.RawMessage"
-          - db_type: "bytea"
-            go_type: "[]byte"

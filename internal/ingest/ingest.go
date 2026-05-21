@@ -21,14 +21,17 @@ package ingest
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/google/uuid"
 	"github.com/meshcore-go/meshcore-go"
 
 	"tower/internal/hub"
@@ -51,10 +54,10 @@ type Config struct {
 // Wire in your real *pgxpool.Pool implementation here.
 type DB interface {
 	// UpsertObserver upserts the observers row keyed on pubkey.
-	UpsertObserver(ctx context.Context, pubkey []byte, iata string) error
+	UpsertObserver(ctx context.Context, pubkey []byte) (uuid.UUID, error)
 
 	// UpsertObserverBroker records that this observer was seen on brokerName.
-	UpsertObserverBroker(ctx context.Context, pubkey []byte, brokerName string) error
+	UpsertObserverBroker(ctx context.Context, observerID uuid.UUID, brokerName string) error
 
 	// UpsertIATA auto-creates an iata_codes row if it doesn't exist yet.
 	UpsertIATA(ctx context.Context, iata string) error
@@ -68,19 +71,32 @@ type DB interface {
 
 	// SetNodeCapability flips supports_multibyte_paths or supports_multibyte_traces
 	// for a node, never downgrading an existing TRUE.
-	SetNodeCapability(ctx context.Context, nodeID string, paths, traces bool) error
+	SetNodeCapability(ctx context.Context, nodeID uuid.UUID, paths, traces bool) error
 
 	// UpsertNode upserts a nodes row from an advert payload.
-	UpsertNode(ctx context.Context, n UpsertNodeParams) error
+	UpsertNode(ctx context.Context, n UpsertNodeParams) (uuid.UUID, error)
 
 	// UpsertNodeIATA upserts a node_iatas row.
-	UpsertNodeIATA(ctx context.Context, nodeID string, iata string) error
+	UpsertNodeIATA(ctx context.Context, nodeID uuid.UUID, iata string) error
 
 	// InsertChannelMessage stores a decrypted group text message.
 	InsertChannelMessage(ctx context.Context, m InsertChannelMessageParams) error
 
-	// UpdateObserverStatus updates the observer row from a /status message.
-	UpdateObserverStatus(ctx context.Context, p UpdateObserverStatusParams) error
+	// UpdateObserverStatus updates the observer row from a /status message. Returns the OberserID
+	// and any error.
+	UpdateObserverStatus(ctx context.Context, p UpdateObserverStatusParams) (uuid.UUID, error)
+
+	// GetObserverLastIATA returns the IATA from the most recent observation for the given observer.
+	GetObserverLastIATA(ctx context.Context, observerID uuid.UUID) (string, error)
+
+	// GetObserverRadio returns the current radio settings for the given observer.
+	GetObserverRadio(ctx context.Context, observerID uuid.UUID) (RadioSettings, error)
+
+	// ResolvePathHashes returns a list of node UUIDs for the given path hash prefixes and IATA.
+	ResolvePathHashes(ctx context.Context, iata string, hashes [][]byte) ([]uuid.UUID, error)
+
+	// UpsertChannel upserts a channel row and returns its integer ID.
+	UpsertChannel(ctx context.Context, channelHash []byte) (int, error)
 }
 
 // UpsertPacketParams mirrors the columns written on packets upsert.
@@ -99,7 +115,7 @@ type UpsertPacketParams struct {
 // InsertObservationParams mirrors the columns written on packet_observations insert.
 type InsertObservationParams struct {
 	PacketHash        []byte
-	ObserverID        string
+	ObserverID        uuid.UUID
 	IATA              string
 	HeardAt           time.Time
 	PathLengthByte    uint8
@@ -127,12 +143,11 @@ type UpsertNodeParams struct {
 
 // InsertChannelMessageParams carries a decrypted group text message.
 type InsertChannelMessageParams struct {
-	ChannelID    int
-	PacketHash   []byte
-	SenderName   string
-	SenderPubkey []byte
-	Content      string
-	SentAt       time.Time
+	ChannelID  int
+	PacketHash []byte
+	SenderName string
+	Content    string
+	SentAt     time.Time
 }
 
 // UpdateObserverStatusParams carries the fields parsed from a /status message.
@@ -140,19 +155,66 @@ type UpdateObserverStatusParams struct {
 	PublicKey       []byte
 	StatusMetadata  json.RawMessage
 	LastStatusAt    time.Time
-	BatteryLevel    *int
+	BatteryLevel    *float32
 	UptimeSeconds   *int64
 	SoftwareVersion string
 	ObserverType    string // only set if we can detect it; never downgrade to unknown
 	DisplayName     string // only set if current value is NULL
+	HardwareModel   string
+	FirmwareVersion string
+	FirmwareBuild   string
+	RadioFreqMHz    float32
+	RadioSF         int16
+	RadioBWKHz      float32
+	RadioCR         int16
+}
+
+// RadioSettings holds the radio configuration for an observer, populated from
+// /status messages and copied onto each observation row for RF analysis.
+type RadioSettings struct {
+	FreqMHz float32 // MHz, e.g. 910.525
+	SF      int16   // LoRa spreading factor, e.g. 7
+	BWKHz   float32 // bandwidth in kHz, e.g. 62.5
+	CR      int16   // coding rate denominator, e.g. 5 means 4/5
+}
+
+// statusEvent is the JSON payload for an observerStatus WS event.
+// Shape matches the design doc § Server → Client events.
+type statusEvent struct {
+	ObserverID    string `json:"observerId"`
+	DisplayName   string `json:"displayName"`
+	IATA          string `json:"iata,omitempty"`
+	Online        bool   `json:"online"`
+	BatteryMV     int    `json:"batteryMv,omitempty"`
+	UptimeSeconds int64  `json:"uptimeSeconds"`
+	LastStatusAt  int64  `json:"lastStatusAt"` // epoch ms
+}
+
+// packetObservationEvent is the JSON payload for a packetObservation WS event.
+// Shape matches the design doc § Server → Client events.
+type packetObservationEvent struct {
+	PacketHash string `json:"packetHash"`
+	Packet     struct {
+		PayloadType        uint8  `json:"payloadType"`
+		PayloadTypeName    string `json:"payloadTypeName"`
+		RouteType          uint8  `json:"routeType"`
+		IsFirstObservation bool   `json:"isFirstObservation"`
+	} `json:"packet"`
+	Observation struct {
+		ObserverID   string  `json:"observerId"`
+		IATA         string  `json:"iata"`
+		HeardAt      int64   `json:"heardAt"`
+		RSSI         int16   `json:"rssi"`
+		SNR          float32 `json:"snr"`
+		SourceBroker string  `json:"sourceBroker"`
+	} `json:"observation"`
 }
 
 // ChannelKeyStore is a read-only view of the channel keys loaded from config.
 // The ingest layer calls Decrypt and never touches key material directly.
 type ChannelKeyStore interface {
-	// Decrypt attempts to decrypt groupText bytes using the key for channelHash.
-	// Returns ("", false) if the key is unknown.
-	Decrypt(channelHash []byte, ciphertext []byte) (plaintext string, ok bool)
+	// GetKey returns the channel key for the given hash, or nil if unknown
+	GetKey(channelHash []byte) []byte
 }
 
 // Worker holds the dependencies for one broker's ingest loop.
@@ -236,77 +298,264 @@ func (w *Worker) handleMessage(msg mqtt.Message) {
 // handlePacket runs the full observation pipeline for a /packets message.
 func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw []byte) {
 	var envelope struct {
-		Raw        string `json:"raw"` // hex-encoded raw LoRa packet bytes
-		Timestamp  string `json:"timestamp"`
-		Hash       string `json:"hash"`
-		Origin     string `json:"origin"`
-		Type       string `json:"type"`
-		Direction  string `json:"direction"`
-		Time       string `json:"time"`
-		Date       string `json:"date"`
-		Len        string `json:"len"`
-		PacketType string `json:"packet_type"`
-		Route      string `json:"route"`
-		PayloadLen string `json:"payload_len"`
-		OriginID   string `json:"origin_id"`
-		SNR        string `json:"SNR"`
-		RSSI       string `json:"RSSI"`
+		Raw        string          `json:"raw"` // hex-encoded raw LoRa packet bytes
+		Timestamp  string          `json:"timestamp"`
+		Hash       string          `json:"hash"`
+		Origin     string          `json:"origin"`
+		Type       string          `json:"type"`
+		Direction  string          `json:"direction"`
+		Time       string          `json:"time"`
+		Date       string          `json:"date"`
+		Len        string          `json:"len"`
+		PacketType string          `json:"packet_type"`
+		Route      string          `json:"route"`
+		PayloadLen string          `json:"payload_len"`
+		OriginID   string          `json:"origin_id"`
+		SNR        json.RawMessage `json:"SNR"`
+		RSSI       json.RawMessage `json:"RSSI"`
 	}
-	if err := json.Unmarshal(raw, &envelope); err != nil || envelope.Raw == "" {
+	err := json.Unmarshal(raw, &envelope)
+	if err != nil {
 		log.Printf("ingest[%s]: malformed packet envelope from %s/%s", w.cfg.BrokerName, iata, pubkeyHex)
 		return
 	}
-	hexBytes, err := hex.DecodeString(envelope.Raw)
+	if envelope.Raw == "" {
+		if envelope.Len == "0" || envelope.Len == "" {
+			return // observer keepalive with no packet data
+		}
+		log.Printf("ingest[%s]: malformed packet envelope from %s/%s", w.cfg.BrokerName, iata, pubkeyHex)
+		return
+	}
+	hexBytes, err := hex.DecodeString(strings.ReplaceAll(envelope.Raw, " ", ""))
 	if err != nil {
 		log.Printf("ingest[%s]: invalid hex from %s/%s: %v", w.cfg.BrokerName, iata, pubkeyHex, err)
+		return
 	}
 
-	// ── Step 2: decode via meshcore-go ──────────────────────────────────────
 	packet, err := meshcore.PacketFromBytes(hexBytes)
 	if err != nil {
 		log.Printf("ingest[%s]: error decoding packet from %s/%s: %v", w.cfg.BrokerName, iata, pubkeyHex, err)
 		return
 	}
+
+	pubkeyBytes, err := hex.DecodeString(pubkeyHex)
+	if err != nil {
+		log.Printf("ingest[%s]: invalid pubkey hex from %s/%s: %v", w.cfg.BrokerName, iata, pubkeyHex, err)
+		return
+	}
+
+	id, err := w.db.UpsertObserver(ctx, pubkeyBytes)
+	if err != nil {
+		log.Printf("ingest[%s]: db: upsert observer failed with packet from %s/%s: %v", w.cfg.BrokerName, iata, pubkeyHex, err)
+		return
+	}
+	err = w.db.UpsertObserverBroker(ctx, id, w.cfg.BrokerName)
+	if err != nil {
+		log.Printf("ingest[%s]: db: update observer broker failed with packet from %s/%s: %v", w.cfg.BrokerName, iata, pubkeyHex, err)
+		return
+	}
+	err = w.db.UpsertIATA(ctx, iata)
+	if err != nil {
+		log.Printf("ingest[%s]: db: upsert IATA failed with packet from %s/%s: %v", w.cfg.BrokerName, iata, pubkeyHex, err)
+		return
+	}
 	packetHash := packet.PacketHash()
-	pathHashes := packet.PathHashes()
-	parsed := packet.PayloadTypeString()
-	// NOTE:
-	// For now we just log and return so the scaffolding compiles.
-	log.Printf("ingest[%s]: packet from %s/%s", w.cfg.BrokerName, iata, pubkeyHex)
-	log.Printf("hash[%x]: path[%x], payload type: %s", packetHash, pathHashes, parsed)
+	var transportCodes []byte
+	if packet.IsTransport() {
+		transportCodes = make([]byte, 4)
+		binary.LittleEndian.PutUint16(transportCodes[0:2], packet.TransportCode1)
+		binary.LittleEndian.PutUint16(transportCodes[2:4], packet.TransportCode2)
+	}
+	parsedPayload, err := json.Marshal(packet.Payload)
+	if err != nil {
+		log.Printf("ingest[%s]: failed to marshal payload from %s/%s: %v", w.cfg.BrokerName, iata, pubkeyHex, err)
+		return
+	}
+	var channelHash []byte
+	if packet.PayloadType() == meshcore.PayloadTypeGrpTxt {
+		grpTxt, err := meshcore.GroupTextFromBytes(packet.Payload)
+		if err != nil {
+			log.Printf("ingest[%s]: error decoding group text payload from %s/%s: %v", w.cfg.BrokerName, iata, pubkeyHex, err)
+			return
+		}
+		channelHash = []byte{grpTxt.ChannelHash}
+	}
+	pParams := UpsertPacketParams{
+		PacketHash:     packetHash[:],
+		RouteType:      packet.RouteType(),
+		PayloadType:    packet.PayloadType(),
+		PayloadVersion: packet.PayloadVer(),
+		TransportCodes: transportCodes,
+		RawPayload:     hexBytes,
+		ParsedPayload:  parsedPayload,
+		OriginPubkey:   pubkeyBytes,
+		ChannelHash:    channelHash,
+	}
+	isNew, err := w.db.UpsertPacket(ctx, pParams)
+	if err != nil {
+		log.Printf("ingest[%s]: db: upsert packet failed from %s/%s: %v", w.cfg.BrokerName, iata, pubkeyHex, err)
+		return
+	}
+	heardAt, err := time.Parse("2006-01-02T15:04:05.000000", envelope.Timestamp)
+	if err != nil {
+		log.Printf("ingest[%s]: error parsing time from %s/%s: %v", w.cfg.BrokerName, iata, pubkeyHex, err)
+		return
+	}
 
-	// ── Step 3–6: DB writes ──────────────────────────────────────────────────
-	// TODO: fill in once meshcore-go is wired.
-	//
-	//   _ = w.db.UpsertObserver(ctx, pubkeyBytes, iata)
-	//   _ = w.db.UpsertObserverBroker(ctx, pubkeyBytes, w.cfg.BrokerName)
-	//   _ = w.db.UpsertIATA(ctx, iata)
-	//   isNew, _ := w.db.UpsertPacket(ctx, UpsertPacketParams{...})
-	//   inserted, _ := w.db.InsertObservation(ctx, InsertObservationParams{...})
+	radio, err := w.db.GetObserverRadio(ctx, id)
+	if err != nil {
+		log.Printf("ingest[%s]: db: get observer radio failed for %s: %v", w.cfg.BrokerName, pubkeyHex, err)
+	}
+	oParams := InsertObservationParams{
+		PacketHash:        packetHash[:],
+		ObserverID:        id,
+		IATA:              iata,
+		HeardAt:           heardAt,
+		PathLengthByte:    packet.PathLength,
+		HashSize:          packet.PathHashSize(),
+		HopCount:          packet.PathHashCount(),
+		PathBytes:         packet.Path,
+		RSSI:              int16(parseNumber(envelope.RSSI)),
+		SNR:               float32(parseNumber(envelope.SNR)),
+		PropagationTimeMs: 0, // TODO: figure out how to calculate this
+		RadioFreqMHz:      radio.FreqMHz,
+		SpreadFactor:      radio.SF,
+		BandwidthKHz:      radio.BWKHz,
+		CodingRate:        radio.CR,
+		SourceBroker:      w.cfg.BrokerName,
+	}
+	inserted, err := w.db.InsertObservation(ctx, oParams)
+	if err != nil {
+		log.Printf("ingest[%s]: db: insert observation failed from %s/%s: %v", w.cfg.BrokerName, iata, pubkeyHex, err)
+		return
+	}
 
-	// ── Step 7: side effects (only if observation INSERT succeeded) ──────────
-	// TODO:
-	//   if inserted {
-	//       w.runCapabilityDetection(ctx, packet, iata)
-	//       w.handlePayloadTypeSideEffects(ctx, packet, iata)
-	//       w.fanOut(packet, observation, isNew)
-	//   }
-
-	_ = ctx // suppress unused warning until TODOs are filled in
+	resolvedIDs, err := w.db.ResolvePathHashes(ctx, iata, packet.PathHashes())
+	if err != nil {
+		log.Printf("ingest[%s]: db: resolve path hashes failed: %v", w.cfg.BrokerName, err)
+		resolvedIDs = []uuid.UUID{}
+	}
+	if inserted {
+		w.runCapabilityDetection(ctx, packet.PayloadType(), packet.PathHashSize(), resolvedIDs)
+		w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:])
+		w.fanOut(packetHash[:], packet, iata, isNew, id, envelope.Origin, heardAt, oParams.RSSI, oParams.SNR, w.cfg.BrokerName)
+	}
 }
 
 // handleStatus processes a /status message and fans out an observerStatus event.
 func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte) {
-	// TODO: parse status JSON, call w.db.UpdateObserverStatus, fan out event.
-	//
-	//   params := UpdateObserverStatusParams{...}
-	//   _ = w.db.UpdateObserverStatus(ctx, params)
-	//
-	//   payload, _ := json.Marshal(statusEvent{...})
-	//   w.hub.Broadcast(hub.Event{Type: hub.EventObserverStatus, Payload: payload})
+	var envelope struct {
+		ObserverType    string `json:"source"`
+		SoftwareVersion string `json:"client_version"`
+		HardwareModel   string `json:"model"`
+		FirmwareVersion string `json:"firmware_version"`
+		DisplayName     string `json:"origin"`
+		RadioString     string `json:"radio"`
+		Stats           struct {
+			UptimeSeconds int64   `json:"uptime_secs"`
+			BatteryMV     int     `json:"battery_mv"`
+			NoiseFloor    float32 `json:"noise_floor"`
+			QueueLen      int     `json:"queue_len"`
+			DebugFlags    int     `json:"debug_flags"`
+			TxAirSecs     float64 `json:"tx_air_secs"`
+			RxAirSecs     float64 `json:"rx_air_secs"`
+			RecvErrors    int     `json:"recv_errors"`
+		} `json:"stats"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		log.Printf("ingest[%s]: malformed status envelope from %s: %v", w.cfg.BrokerName, pubkeyHex, err)
+		return
+	}
+	pubkey, err := hex.DecodeString(pubkeyHex)
+	if err != nil {
+		log.Printf("ingest[%s]: invalid pubkey hex in status from %s: %v", w.cfg.BrokerName, pubkeyHex, err)
+		return
+	}
+	_, err = w.db.UpsertObserver(ctx, pubkey)
+	if err != nil {
+		log.Printf("ingest[%s]: db: upsert observer failed in status from %s: %v", w.cfg.BrokerName, pubkeyHex, err)
+		return
+	}
+	params := UpdateObserverStatusParams{
+		PublicKey:      pubkey,
+		StatusMetadata: raw,
+		LastStatusAt:   time.Now(),
+	}
+	params.UptimeSeconds = &envelope.Stats.UptimeSeconds
+	if envelope.Stats.BatteryMV != 0 {
+		batteryLevel := float32(envelope.Stats.BatteryMV) / 1000
+		params.BatteryLevel = &batteryLevel
+	}
+	if envelope.SoftwareVersion != "" {
+		params.SoftwareVersion = envelope.SoftwareVersion
+	}
+	if envelope.ObserverType != "" {
+		params.ObserverType = envelope.ObserverType
+	}
+	if envelope.DisplayName != "" {
+		params.DisplayName = envelope.DisplayName
+	}
+	if envelope.HardwareModel != "" {
+		params.HardwareModel = envelope.HardwareModel
+	}
+	if envelope.FirmwareVersion != "" {
+		params.FirmwareVersion = envelope.FirmwareVersion
+	}
 
-	log.Printf("ingest[%s]: status from %s (TODO)", w.cfg.BrokerName, pubkeyHex)
-	_ = ctx
+	radio := strings.Split(envelope.RadioString, ",")
+	if len(radio) != 4 {
+		log.Printf("ingest[%s]: missing or malformed radio params in status from %s, skipping radio fields", w.cfg.BrokerName, pubkeyHex)
+	} else {
+		freq, err := strconv.ParseFloat(radio[0], 32)
+		if err != nil {
+			log.Printf("ingest[%s]: error parsing radio freq in status from %s: %v", w.cfg.BrokerName, pubkeyHex, err)
+		} else {
+			params.RadioFreqMHz = float32(freq)
+		}
+		bw, err := strconv.ParseFloat(radio[1], 32)
+		if err != nil {
+			log.Printf("ingest[%s]: error parsing radio bw in status from %s: %v", w.cfg.BrokerName, pubkeyHex, err)
+		} else {
+			params.RadioBWKHz = float32(bw)
+		}
+		sf, err := strconv.ParseInt(radio[2], 10, 16)
+		if err != nil {
+			log.Printf("ingest[%s]: error parsing radio sf in status from %s: %v", w.cfg.BrokerName, pubkeyHex, err)
+		} else {
+			params.RadioSF = int16(sf)
+		}
+		cr, err := strconv.ParseInt(radio[3], 10, 16)
+		if err != nil {
+			log.Printf("ingest[%s]: error parsing radio cr in status from %s: %v", w.cfg.BrokerName, pubkeyHex, err)
+		} else {
+			params.RadioCR = int16(cr)
+		}
+	}
+
+	observerID, err := w.db.UpdateObserverStatus(ctx, params)
+	if err != nil {
+		log.Printf("ingest[%s]: db: update observer status failed for %s: %v", w.cfg.BrokerName, pubkeyHex, err)
+		return
+	}
+	iata, err := w.db.GetObserverLastIATA(ctx, observerID)
+	if err != nil {
+		iata = "" // non-fatal, continue
+	}
+	evt := statusEvent{
+		ObserverID:    observerID.String(),
+		DisplayName:   envelope.DisplayName,
+		IATA:          iata,
+		Online:        true,
+		BatteryMV:     envelope.Stats.BatteryMV,
+		UptimeSeconds: envelope.Stats.UptimeSeconds,
+		LastStatusAt:  time.Now().UnixMilli(),
+	}
+	payload, err := json.Marshal(evt)
+	if err != nil {
+		log.Printf("ingest[%s]: failed to marshal status event payload for %s: %v", w.cfg.BrokerName, pubkeyHex, err)
+		return
+	}
+	w.hub.Broadcast(hub.Event{Type: hub.EventObserverStatus, Payload: payload, IATA: iata})
 }
 
 // runCapabilityDetection checks hash sizes and flips firmware capability flags.
@@ -317,9 +566,7 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 //   - duplicate hash prefixes within the path: skip entirely
 //   - non-trace + hash_size 2 or 3 → supports_multibyte_paths = TRUE
 //   - trace (0x09)  + hash_size 2 or 4 → supports_multibyte_traces = TRUE
-//
-// TODO: implement once meshcore-go PathHashes() is wired.
-func (w *Worker) runCapabilityDetection(ctx context.Context, payloadType uint8, hashSize uint8, resolvedNodeIDs []string) {
+func (w *Worker) runCapabilityDetection(ctx context.Context, payloadType uint8, hashSize uint8, resolvedNodeIDs []uuid.UUID) {
 	if hashSize < 2 {
 		return
 	}
@@ -333,13 +580,121 @@ func (w *Worker) runCapabilityDetection(ctx context.Context, payloadType uint8, 
 	}
 }
 
+// handlePayloadTypeSideEffects runs payload-type-specific processing after a
+// new observation is confirmed inserted. Currently handles:
+//   - PayloadTypeAdvert (0x04): upsert node and node_iatas
+//   - PayloadTypeGrpTxt (0x05): decrypt and store channel message if key is known
+func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshcore.Packet, iata string, packetHash []byte) {
+	if packet.PayloadType() == meshcore.PayloadTypeAdvert {
+		advert, err := meshcore.AdvertFromBytes(packet.Payload)
+		if err != nil {
+			log.Printf("ingest[%s]: error decoding advert payload: %v", w.cfg.BrokerName, err)
+			return
+		}
+		var lat, lon *float64
+		if advert.AppData().Lat != 0 || advert.AppData().Lon != 0 {
+			la := float64(advert.AppData().Lat)
+			lo := float64(advert.AppData().Lon)
+			lat = &la
+			lon = &lo
+		}
+		params := UpsertNodeParams{
+			PublicKey: advert.PublicKey.PublicKeyBytes(),
+			Name:      advert.AppData().Name,
+			NodeType:  advert.Type(),
+			Latitude:  lat,
+			Longitude: lon,
+		}
+		nodeID, err := w.db.UpsertNode(ctx, params)
+		if err != nil {
+			log.Printf("ingest[%s]: db: upsert node failed: %v", w.cfg.BrokerName, err)
+			return
+		}
+		if err := w.db.UpsertNodeIATA(ctx, nodeID, iata); err != nil {
+			log.Printf("ingest[%s]: db: upsert node IATA failed: %v", w.cfg.BrokerName, err)
+		}
+		return
+	}
+	if packet.PayloadType() == meshcore.PayloadTypeGrpTxt {
+		grpTxt, err := meshcore.GroupTextFromBytes(packet.Payload)
+		if err != nil {
+			log.Printf("ingest[%s]: error decoding group text payload: %v", w.cfg.BrokerName, err)
+			return
+		}
+		key := w.keys.GetKey([]byte{grpTxt.ChannelHash})
+		if key == nil {
+			return // channel key unknown; message stored as encrypted blob only
+		}
+		channelID, err := w.db.UpsertChannel(ctx, []byte{grpTxt.ChannelHash})
+		if err != nil {
+			log.Printf("ingest[%s]: db: upsert channel failed: %v", w.cfg.BrokerName, err)
+			return
+		}
+		payload, err := grpTxt.DecryptStruct(key)
+		if err != nil {
+			log.Printf("ingest[%s]: error decrypting group text: %v", w.cfg.BrokerName, err)
+			return
+		}
+		params := InsertChannelMessageParams{
+			ChannelID:  channelID,
+			PacketHash: packetHash[:],
+			SenderName: payload.Sender,
+			SentAt:     time.Unix(int64(payload.Timestamp), 0),
+			Content:    payload.Text,
+		}
+		err = w.db.InsertChannelMessage(ctx, params)
+		if err != nil {
+			log.Printf("ingest[%s]: db: insert channel message failed: %v", w.cfg.BrokerName, err)
+		}
+		return
+	}
+}
+
 // fanOut builds and broadcasts the packetObservation event to connected WS clients.
-func (w *Worker) fanOut(packetHash string, payloadType uint8, iata string, isFirst bool, observationCount int64, payload json.RawMessage) {
-	evt := hub.Event{
+func (w *Worker) fanOut(packetHash []byte, p *meshcore.Packet, iata string, isFirst bool, observerID uuid.UUID, observerName string, heardAt time.Time, rssi int16, snr float32, sourceBroker string) {
+	evt := packetObservationEvent{}
+	evt.PacketHash = hex.EncodeToString(packetHash)
+	evt.Packet.PayloadType = p.PayloadType()
+	evt.Packet.PayloadTypeName = p.PayloadTypeString()
+	evt.Packet.RouteType = p.RouteType()
+	evt.Packet.IsFirstObservation = isFirst
+	evt.Observation.ObserverID = observerID.String()
+	evt.Observation.IATA = iata
+	evt.Observation.HeardAt = heardAt.UnixMilli()
+	evt.Observation.RSSI = rssi
+	evt.Observation.SNR = snr
+	evt.Observation.SourceBroker = sourceBroker
+
+	payload, err := json.Marshal(evt)
+	if err != nil {
+		log.Printf("ingest[%s]: failed to marshal packetObservation event: %v", w.cfg.BrokerName, err)
+		return
+	}
+	w.hub.Broadcast(hub.Event{
 		Type:        hub.EventPacketObservation,
 		Payload:     payload,
 		IATA:        iata,
-		PayloadType: payloadType,
+		PayloadType: p.PayloadType(),
+	})
+}
+
+// parseNumber handles RSSI and SNR fields that different observer types send as
+// either a bare JSON number (e.g. -108) or a quoted string (e.g. "-108").
+// Returns 0 if the value is missing or unparseable.
+func parseNumber(raw json.RawMessage) float64 {
+	if len(raw) == 0 {
+		return 0
 	}
-	w.hub.Broadcast(evt)
+	// try unquoted number first
+	var f float64
+	if err := json.Unmarshal(raw, &f); err == nil {
+		return f
+	}
+	// try quoted string
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		f, _ = strconv.ParseFloat(s, 64)
+		return f
+	}
+	return 0
 }
