@@ -9,6 +9,7 @@ import (
 	"errors"
 
 	sqlc "tower/db/sqlc"
+	"tower/internal/api"
 	"tower/internal/ingest"
 
 	"github.com/google/uuid"
@@ -210,4 +211,38 @@ func (s *Store) UpsertChannel(ctx context.Context, channelHash []byte) (int, err
 		return 0, err
 	}
 	return int(row.ID), nil
+}
+
+// ListIATAs returns all known IATA codes with display name and coordinates.
+// IATAs are auto-created on first packet arrival from that location.
+func (s *Store) ListIATAs(ctx context.Context) ([]api.IATA, error) {
+	rows, err := s.q.ListIATAs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	iatas := make([]api.IATA, 0, len(rows))
+	for _, v := range rows {
+		iatas = append(iatas, api.IATA{
+			IATA:        v.Iata,
+			DisplayName: v.DisplayName,
+			Lat:         v.ApproxLat,
+			Lng:         v.ApproxLng,
+		})
+	}
+	return iatas, nil
+}
+
+// GetIATA returns a single IATA code by its 3-letter identifier.
+// Returns nil, error if the IATA code is not found.
+func (s *Store) GetIATA(ctx context.Context, iata string) (*api.IATA, error) {
+	i, err := s.q.GetIATA(ctx, iata)
+	if err != nil {
+		return nil, err
+	}
+	return &api.IATA{
+		IATA:        i.Iata,
+		DisplayName: i.DisplayName,
+		Lat:         i.ApproxLat,
+		Lng:         i.ApproxLng,
+	}, nil
 }

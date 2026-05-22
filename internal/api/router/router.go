@@ -6,6 +6,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"tower/internal/api"
 	"tower/internal/api/handlers"
 	mw "tower/internal/api/middleware"
 	"tower/internal/hub"
@@ -28,7 +29,7 @@ import (
 //
 // The private group is stubbed and ready for the auth middleware drop-in
 // described in Future Features → Admin authentication.
-func New(h *hub.Hub) http.Handler {
+func New(h *hub.Hub, reader api.Reader) http.Handler {
 	r := chi.NewRouter()
 
 	// ── Global middleware ────────────────────────────────────────────────────
@@ -50,8 +51,8 @@ func New(h *hub.Hub) http.Handler {
 			r.Mount("/nodes", handlers.NodesRouter())
 			r.Mount("/observers", handlers.ObserversRouter())
 			r.Mount("/channels", handlers.ChannelsRouter())
-			r.Mount("/iatas", handlers.IATAsRouter())
 			r.Mount("/regions", handlers.RegionsRouter())
+			r.Mount("/iatas", handlers.IATAsRouter(reader))
 			r.Mount("/stats", handlers.StatsRouter())
 		})
 

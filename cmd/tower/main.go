@@ -71,7 +71,7 @@ func main() {
 	go broker2.Start(ctx)
 
 	// ── HTTP server ──────────────────────────────────────────────────────────
-	r := router.New(h)
+	r := router.New(h, store)
 
 	srv := &http.Server{
 		Addr:    addr,
