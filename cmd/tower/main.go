@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net/http"
@@ -11,6 +13,7 @@ import (
 
 	"tower/db"
 	"tower/internal/api/router"
+	"tower/internal/config"
 	"tower/internal/hub"
 	"tower/internal/ingest"
 	"tower/internal/keystore"
@@ -26,6 +29,15 @@ func main() {
 		addr = ":8080"
 	}
 
+	configPath := os.Getenv("CONFIG_PATH")
+	if configPath == "" {
+		configPath = "config.yaml"
+	}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		log.Fatalf("failed to load config: %v", err)
+	}
 	// ── Hub ──────────────────────────────────────────────────────────────────
 	h := hub.New()
 	go h.Run()
@@ -41,7 +53,32 @@ func main() {
 	defer pool.Close()
 
 	store := db.New(pool)
-	keys := keystore.NewMapKeyStore(map[string][]byte{})
+
+	// ── Seed config data ─────────────────────────────────────────────────────
+	if err := config.Seed(ctx, cfg, store); err != nil {
+		log.Fatalf("failed to seed config: %v", err)
+	}
+
+	channelKeys := make(map[string][][]byte)
+	for hash, keyHex := range cfg.ChannelKeys {
+		key, err := hex.DecodeString(keyHex)
+		if err != nil {
+			log.Printf("warning: invalid channel key for hash %s, skipping: %v", hash, err)
+			continue
+		}
+		// skip if exact pair already exists
+		duplicate := false
+		for _, existing := range channelKeys[hash] {
+			if bytes.Equal(existing, key) {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			channelKeys[hash] = append(channelKeys[hash], key)
+		}
+	}
+	keys := keystore.NewMapKeyStore(channelKeys)
 
 	broker1 := ingest.New(
 		ingest.Config{

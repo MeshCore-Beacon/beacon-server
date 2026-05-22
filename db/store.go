@@ -295,3 +295,42 @@ func (s *Store) GetRegion(ctx context.Context, regionID int32) (*api.Region, err
 	result.IATAs = iatas
 	return &result, nil
 }
+
+// UpsertIATADetails updates an existing iata_codes row with display name and coordinates.
+// The row must already exist (auto-created on first packet arrival).
+// Safe to call on startup — does nothing if the IATA has not been seen yet.
+func (s *Store) UpsertIATADetails(ctx context.Context, iata string, name string, lat, lng *float64) error {
+	return s.q.UpsertIATADetails(ctx, sqlc.UpsertIATADetailsParams{
+		Iata:        iata,
+		DisplayName: &name,
+		ApproxLat:   lat,
+		ApproxLng:   lng,
+	})
+}
+
+// UpsertRegion inserts or updates a region row by slug. Returns the region ID.
+func (s *Store) UpsertRegion(ctx context.Context, slug, name, description string, displayOrder int, centerLat, centerLng *float64, zoomLevel *int) (int32, error) {
+	var zl *int32
+	if zoomLevel != nil {
+		z := int32(*zoomLevel)
+		zl = &z
+	}
+	do := int32(displayOrder)
+	return s.q.UpsertRegion(ctx, sqlc.UpsertRegionParams{
+		Slug:         slug,
+		Name:         name,
+		Description:  &description,
+		DisplayOrder: &do,
+		CenterLat:    centerLat,
+		CenterLng:    centerLng,
+		ZoomLevel:    zl,
+	})
+}
+
+// UpsertRegionIATA adds an IATA code to a region. Safe to call repeatedly.
+func (s *Store) UpsertRegionIATA(ctx context.Context, regionID int32, iata string) error {
+	return s.q.UpsertRegionIATA(ctx, sqlc.UpsertRegionIATAParams{
+		RegionID: regionID,
+		Iata:     iata,
+	})
+}

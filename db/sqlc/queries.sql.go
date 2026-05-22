@@ -1088,6 +1088,31 @@ func (q *Queries) UpsertIATA(ctx context.Context, iata string) error {
 	return err
 }
 
+const upsertIATADetails = `-- name: UpsertIATADetails :exec
+UPDATE iata_codes SET
+    display_name = $2,
+    approx_lat   = $3,
+    approx_lng   = $4
+WHERE iata = $1
+`
+
+type UpsertIATADetailsParams struct {
+	Iata        string   `json:"iata"`
+	DisplayName *string  `json:"display_name"`
+	ApproxLat   *float64 `json:"approx_lat"`
+	ApproxLng   *float64 `json:"approx_lng"`
+}
+
+func (q *Queries) UpsertIATADetails(ctx context.Context, arg UpsertIATADetailsParams) error {
+	_, err := q.db.Exec(ctx, upsertIATADetails,
+		arg.Iata,
+		arg.DisplayName,
+		arg.ApproxLat,
+		arg.ApproxLng,
+	)
+	return err
+}
+
 const upsertNode = `-- name: UpsertNode :one
 
 INSERT INTO nodes (public_key, node_type, name, latitude, longitude, location_source, last_advert_at, last_seen)
@@ -1340,4 +1365,59 @@ func (q *Queries) UpsertPacket(ctx context.Context, arg UpsertPacketParams) (Ups
 		&i.Inserted,
 	)
 	return i, err
+}
+
+const upsertRegion = `-- name: UpsertRegion :one
+INSERT INTO regions (slug, name, description, display_order, center_lat, center_lng, zoom_level, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+ON CONFLICT (slug) DO UPDATE SET
+    name          = EXCLUDED.name,
+    description   = EXCLUDED.description,
+    display_order = EXCLUDED.display_order,
+    center_lat    = EXCLUDED.center_lat,
+    center_lng    = EXCLUDED.center_lng,
+    zoom_level    = EXCLUDED.zoom_level,
+    updated_at    = NOW()
+RETURNING id
+`
+
+type UpsertRegionParams struct {
+	Slug         string   `json:"slug"`
+	Name         string   `json:"name"`
+	Description  *string  `json:"description"`
+	DisplayOrder *int32   `json:"display_order"`
+	CenterLat    *float64 `json:"center_lat"`
+	CenterLng    *float64 `json:"center_lng"`
+	ZoomLevel    *int32   `json:"zoom_level"`
+}
+
+func (q *Queries) UpsertRegion(ctx context.Context, arg UpsertRegionParams) (int32, error) {
+	row := q.db.QueryRow(ctx, upsertRegion,
+		arg.Slug,
+		arg.Name,
+		arg.Description,
+		arg.DisplayOrder,
+		arg.CenterLat,
+		arg.CenterLng,
+		arg.ZoomLevel,
+	)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
+}
+
+const upsertRegionIATA = `-- name: UpsertRegionIATA :exec
+INSERT INTO region_iatas (region_id, iata)
+VALUES ($1, $2)
+ON CONFLICT (region_id, iata) DO NOTHING
+`
+
+type UpsertRegionIATAParams struct {
+	RegionID int32  `json:"region_id"`
+	Iata     string `json:"iata"`
+}
+
+func (q *Queries) UpsertRegionIATA(ctx context.Context, arg UpsertRegionIATAParams) error {
+	_, err := q.db.Exec(ctx, upsertRegionIATA, arg.RegionID, arg.Iata)
+	return err
 }

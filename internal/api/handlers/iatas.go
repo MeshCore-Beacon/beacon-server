@@ -25,6 +25,7 @@ func IATAsRouter(reader api.Reader) http.Handler {
 		}
 		respond(w, http.StatusOK, iatas)
 	})
+
 	// Returns detail for a single IATA code including associated region memberships
 	// and basic recent stats.
 	r.Get("/{iata}", func(w http.ResponseWriter, r *http.Request) {

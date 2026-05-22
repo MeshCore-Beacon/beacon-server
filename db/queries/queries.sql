@@ -13,6 +13,13 @@ SELECT * FROM iata_codes WHERE iata = $1;
 -- name: ListIATAs :many
 SELECT * FROM iata_codes ORDER BY iata;
 
+-- name: UpsertIATADetails :exec
+UPDATE iata_codes SET
+    display_name = $2,
+    approx_lat   = $3,
+    approx_lng   = $4
+WHERE iata = $1;
+
 -- ============================================================
 -- OBSERVERS
 -- ============================================================
@@ -295,6 +302,24 @@ WHERE id = $1;
 SELECT iata FROM region_iatas
 WHERE region_id = $1
 ORDER BY iata;
+
+-- name: UpsertRegion :one
+INSERT INTO regions (slug, name, description, display_order, center_lat, center_lng, zoom_level, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+ON CONFLICT (slug) DO UPDATE SET
+    name          = EXCLUDED.name,
+    description   = EXCLUDED.description,
+    display_order = EXCLUDED.display_order,
+    center_lat    = EXCLUDED.center_lat,
+    center_lng    = EXCLUDED.center_lng,
+    zoom_level    = EXCLUDED.zoom_level,
+    updated_at    = NOW()
+RETURNING id;
+
+-- name: UpsertRegionIATA :exec
+INSERT INTO region_iatas (region_id, iata)
+VALUES ($1, $2)
+ON CONFLICT (region_id, iata) DO NOTHING;
 
 -- ============================================================
 -- HELPERS

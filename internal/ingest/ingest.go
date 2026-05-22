@@ -213,8 +213,8 @@ type packetObservationEvent struct {
 // ChannelKeyStore is a read-only view of the channel keys loaded from config.
 // The ingest layer calls Decrypt and never touches key material directly.
 type ChannelKeyStore interface {
-	// GetKey returns the channel key for the given hash, or nil if unknown
-	GetKey(channelHash []byte) []byte
+	// GetKey returns the channel hash key pairs for the given hash, or nil if unknown
+	GetKey(channelHash []byte) [][]byte
 }
 
 // Worker holds the dependencies for one broker's ingest loop.
@@ -622,19 +622,24 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 			log.Printf("ingest[%s]: error decoding group text payload: %v", w.cfg.BrokerName, err)
 			return
 		}
-		key := w.keys.GetKey([]byte{grpTxt.ChannelHash})
-		if key == nil {
-			return // channel key unknown; message stored as encrypted blob only
-		}
 		channelID, err := w.db.UpsertChannel(ctx, []byte{grpTxt.ChannelHash})
 		if err != nil {
 			log.Printf("ingest[%s]: db: upsert channel failed: %v", w.cfg.BrokerName, err)
 			return
 		}
-		payload, err := grpTxt.DecryptStruct(key)
-		if err != nil {
-			log.Printf("ingest[%s]: error decrypting group text: %v", w.cfg.BrokerName, err)
-			return
+		keys := w.keys.GetKey([]byte{grpTxt.ChannelHash})
+		if len(keys) == 0 {
+			return // channel key unknown; message stored as encrypted blob only
+		}
+		var payload *meshcore.GroupTextPayload
+		for _, key := range keys {
+			if p, err := grpTxt.DecryptStruct(key); err == nil {
+				payload = p
+				break
+			}
+		}
+		if payload == nil {
+			return // none of the keys worked
 		}
 		params := InsertChannelMessageParams{
 			ChannelID:  channelID,

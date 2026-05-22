@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 
 	"tower/internal/api"
 
@@ -18,27 +19,32 @@ import (
 func RegionsRouter(reader api.Reader) http.Handler {
 	r := chi.NewRouter()
 
-	r.Get("/", ListRegions)
-	r.Get("/{regionId}", GetRegion)
+	// Returns all super-regions with their associated IATA codes, center
+	// coordinates, and zoom level for map initialisation.
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		regions, err := reader.ListRegions(r.Context())
+		if err != nil {
+			respond(w, http.StatusNotFound, map[string]string{"error": "no regions found"})
+		}
+		respond(w, http.StatusOK, regions)
+	})
+
+	// Returns detail for a single super-region including its full IATA membership
+	// list and recent aggregate stats.
+	r.Get("/{regionId}", func(w http.ResponseWriter, r *http.Request) {
+		regionID := chi.URLParam(r, "regionId")
+		regionInt, err := strconv.ParseInt(regionID, 10, 32)
+		if err != nil {
+			respond(w, http.StatusBadRequest, map[string]string{"error": "invalid region ID"})
+			return
+		}
+		region, err := reader.GetRegion(r.Context(), int32(regionInt))
+		if err != nil {
+			respond(w, http.StatusNotFound, map[string]string{"error": "region not found"})
+			return
+		}
+		respond(w, http.StatusOK, region)
+	})
 
 	return r
-}
-
-// ListRegions handles GET /api/v1/regions
-//
-// Returns all super-regions with their associated IATA codes, center
-// coordinates, and zoom level for map initialisation.
-func ListRegions(w http.ResponseWriter, r *http.Request) {
-	// TODO: query regions + region_iatas, write JSON response.
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// GetRegion handles GET /api/v1/regions/{regionId}
-//
-// Returns detail for a single super-region including its full IATA membership
-// list and recent aggregate stats.
-func GetRegion(w http.ResponseWriter, r *http.Request) {
-	// regionId := chi.URLParam(r, "regionId")
-	// TODO: fetch region + iatas, write JSON response.
-	w.WriteHeader(http.StatusNotImplemented)
 }
