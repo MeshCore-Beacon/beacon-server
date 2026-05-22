@@ -278,6 +278,25 @@ ORDER BY observation_count DESC
 LIMIT $2;
 
 -- ============================================================
+-- REGIONS
+-- ============================================================
+
+-- name: ListRegions :many
+SELECT id, slug, name
+FROM regions
+ORDER BY display_order, name;
+
+-- name: GetRegion :one
+SELECT id, slug, name, description, center_lat, center_lng, zoom_level
+FROM regions
+WHERE id = $1;
+
+-- name: GetRegionIATAs :many
+SELECT iata FROM region_iatas
+WHERE region_id = $1
+ORDER BY iata;
+
+-- ============================================================
 -- HELPERS
 -- ============================================================
 

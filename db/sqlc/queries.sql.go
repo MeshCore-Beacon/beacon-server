@@ -212,6 +212,63 @@ func (q *Queries) GetPacket(ctx context.Context, packetHash []byte) (Packet, err
 	return i, err
 }
 
+const getRegion = `-- name: GetRegion :one
+SELECT id, slug, name, description, center_lat, center_lng, zoom_level
+FROM regions
+WHERE id = $1
+`
+
+type GetRegionRow struct {
+	ID          int32    `json:"id"`
+	Slug        string   `json:"slug"`
+	Name        string   `json:"name"`
+	Description *string  `json:"description"`
+	CenterLat   *float64 `json:"center_lat"`
+	CenterLng   *float64 `json:"center_lng"`
+	ZoomLevel   *int32   `json:"zoom_level"`
+}
+
+func (q *Queries) GetRegion(ctx context.Context, id int32) (GetRegionRow, error) {
+	row := q.db.QueryRow(ctx, getRegion, id)
+	var i GetRegionRow
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.Name,
+		&i.Description,
+		&i.CenterLat,
+		&i.CenterLng,
+		&i.ZoomLevel,
+	)
+	return i, err
+}
+
+const getRegionIATAs = `-- name: GetRegionIATAs :many
+SELECT iata FROM region_iatas
+WHERE region_id = $1
+ORDER BY iata
+`
+
+func (q *Queries) GetRegionIATAs(ctx context.Context, regionID int32) ([]string, error) {
+	rows, err := q.db.Query(ctx, getRegionIATAs, regionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var iata string
+		if err := rows.Scan(&iata); err != nil {
+			return nil, err
+		}
+		items = append(items, iata)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getStatsOverview = `-- name: GetStatsOverview :one
 
 SELECT
@@ -803,6 +860,42 @@ func (q *Queries) ListPacketsAfterID(ctx context.Context, arg ListPacketsAfterID
 			&i.LastHeardAt,
 			&i.ObservationCount,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRegions = `-- name: ListRegions :many
+
+SELECT id, slug, name
+FROM regions
+ORDER BY display_order, name
+`
+
+type ListRegionsRow struct {
+	ID   int32  `json:"id"`
+	Slug string `json:"slug"`
+	Name string `json:"name"`
+}
+
+// ============================================================
+// REGIONS
+// ============================================================
+func (q *Queries) ListRegions(ctx context.Context) ([]ListRegionsRow, error) {
+	rows, err := q.db.Query(ctx, listRegions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRegionsRow{}
+	for rows.Next() {
+		var i ListRegionsRow
+		if err := rows.Scan(&i.ID, &i.Slug, &i.Name); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

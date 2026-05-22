@@ -246,3 +246,52 @@ func (s *Store) GetIATA(ctx context.Context, iata string) (*api.IATA, error) {
 		Lng:         i.ApproxLng,
 	}, nil
 }
+
+// ListRegions returns a summary list of all regions ordered by display_order then name.
+// Use GetRegion for full detail including associated IATAs.
+func (s *Store) ListRegions(ctx context.Context) ([]api.RegionSummary, error) {
+	rows, err := s.q.ListRegions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	regions := make([]api.RegionSummary, 0, len(rows))
+	for _, v := range rows {
+		regions = append(regions, api.RegionSummary{
+			ID:   int(v.ID),
+			Slug: v.Slug,
+			Name: v.Name,
+		})
+	}
+	return regions, nil
+}
+
+// GetRegion returns full detail for a single region including its associated IATA codes.
+// Returns nil, pgx.ErrNoRows if the region is not found.
+func (s *Store) GetRegion(ctx context.Context, regionID int32) (*api.Region, error) {
+	region, err := s.q.GetRegion(ctx, regionID)
+	if err != nil {
+		return nil, err
+	}
+	result := api.Region{
+		RegionSummary: api.RegionSummary{
+			ID:   int(region.ID),
+			Slug: region.Slug,
+			Name: region.Name,
+		},
+		Description: region.Description,
+		CenterLat:   region.CenterLat,
+		CenterLng:   region.CenterLng,
+	}
+	var zoomLevel *int
+	if region.ZoomLevel != nil {
+		z := int(*region.ZoomLevel)
+		zoomLevel = &z
+	}
+	result.ZoomLevel = zoomLevel
+	iatas, err := s.q.GetRegionIATAs(ctx, regionID)
+	if err != nil {
+		return nil, err
+	}
+	result.IATAs = iatas
+	return &result, nil
+}

@@ -3,6 +3,8 @@ package handlers
 import (
 	"net/http"
 
+	"tower/internal/api"
+
 	"github.com/go-chi/chi/v5"
 )
 
@@ -13,7 +15,7 @@ import (
 //
 // Note: region creation and IATA assignment are managed via the server config
 // file, not the API (v1). These endpoints are read-only.
-func RegionsRouter() http.Handler {
+func RegionsRouter(reader api.Reader) http.Handler {
 	r := chi.NewRouter()
 
 	r.Get("/", ListRegions)
