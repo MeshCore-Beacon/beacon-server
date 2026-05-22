@@ -284,7 +284,8 @@ func (w *Worker) handleMessage(msg mqtt.Message) {
 	}
 	iata, pubkeyHex, subtopic := parts[1], parts[2], parts[3]
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	switch subtopic {
 	case "packets":
@@ -438,7 +439,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	if inserted {
 		w.runCapabilityDetection(ctx, packet.PayloadType(), packet.PathHashSize(), resolvedIDs)
 		w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:])
-		w.fanOut(packetHash[:], packet, iata, isNew, id, envelope.Origin, heardAt, oParams.RSSI, oParams.SNR, w.cfg.BrokerName)
+		w.fanOut(packetHash[:], packet, iata, isNew, id, heardAt, oParams.RSSI, oParams.SNR, w.cfg.BrokerName)
 	}
 }
 
@@ -651,7 +652,7 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 }
 
 // fanOut builds and broadcasts the packetObservation event to connected WS clients.
-func (w *Worker) fanOut(packetHash []byte, p *meshcore.Packet, iata string, isFirst bool, observerID uuid.UUID, observerName string, heardAt time.Time, rssi int16, snr float32, sourceBroker string) {
+func (w *Worker) fanOut(packetHash []byte, p *meshcore.Packet, iata string, isFirst bool, observerID uuid.UUID, heardAt time.Time, rssi int16, snr float32, sourceBroker string) {
 	evt := packetObservationEvent{}
 	evt.PacketHash = hex.EncodeToString(packetHash)
 	evt.Packet.PayloadType = p.PayloadType()

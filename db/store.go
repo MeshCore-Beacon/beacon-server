@@ -103,6 +103,9 @@ func (s *Store) InsertObservation(ctx context.Context, o ingest.InsertObservatio
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil // conflict, not an error
 	}
+	if err != nil {
+		return false, err
+	}
 	return row.ID != 0, nil
 }
 

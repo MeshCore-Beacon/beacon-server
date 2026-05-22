@@ -86,6 +86,7 @@ func Handler(h *hub.Hub) http.HandlerFunc {
 					err = conn.Write(ctx, websocket.MessageText, msgBytes)
 					if err != nil {
 						log.Printf("ws[%s]: failed to write hub event: %v", connID, err)
+						cancel()
 						return
 					}
 				case <-ctx.Done():
