@@ -26,6 +26,7 @@ import (
 //	  /iatas           → iatas subrouter
 //	  /regions         → regions subrouter
 //	  /stats           → stats subrouter
+//	  /map             → map state subrouter
 //
 // The private group is stubbed and ready for the auth middleware drop-in
 // described in Future Features → Admin authentication.
@@ -54,6 +55,7 @@ func New(h *hub.Hub, reader api.Reader) http.Handler {
 			r.Mount("/iatas", handlers.IATAsRouter(reader))
 			r.Mount("/regions", handlers.RegionsRouter(reader))
 			r.Mount("/stats", handlers.StatsRouter())
+			r.Mount("/map", handlers.MapRouter(reader))
 		})
 
 		// Private group — auth middleware applied.

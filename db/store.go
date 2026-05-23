@@ -7,6 +7,9 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"strings"
+	"time"
 
 	sqlc "github.com/MeshCore-Tower/tower-server/db/sqlc"
 	"github.com/MeshCore-Tower/tower-server/internal/api"
@@ -19,11 +22,12 @@ import (
 )
 
 type Store struct {
-	q *sqlc.Queries
+	q    *sqlc.Queries
+	pool *pgxpool.Pool
 }
 
 func New(pool *pgxpool.Pool) *Store {
-	return &Store{q: sqlc.New(pool)}
+	return &Store{q: sqlc.New(pool), pool: pool}
 }
 
 // UpsertObserver upserts the observers row keyed on pubkey.
@@ -201,6 +205,211 @@ func (s *Store) ResolvePathHashes(ctx context.Context, iata string, hashes [][]b
 	return ids, nil
 }
 
+// GetMapState returns the sanitized, mappable state used by the Tower web map.
+// Route topology remains empty until ordered per-hop path confidence is complete.
+func (s *Store) GetMapState(ctx context.Context, filter api.MapStateFilter) (*api.MapState, error) {
+	iatas := normalizeMapIATAs(filter.IATAs)
+
+	nodes, err := s.listMapNodes(ctx, iatas)
+	if err != nil {
+		return nil, err
+	}
+	observers, err := s.listMapObservers(ctx, iatas)
+	if err != nil {
+		return nil, err
+	}
+	activity, err := s.mapActivitySummary(ctx, iatas)
+	if err != nil {
+		return nil, err
+	}
+
+	return &api.MapState{
+		ServerTime: time.Now().UnixMilli(),
+		Scope: api.MapScope{
+			IATAs:    iatas,
+			RegionID: filter.RegionID,
+		},
+		Metadata: api.MapMetadata{
+			Basemap:            "openfreemap",
+			RoutesComplete:     false,
+			RoutesStatus:       "blocked_by_ordered_path_confidence",
+			LiveDefaultEnabled: false,
+		},
+		Nodes:           nodes,
+		Observers:       observers,
+		Routes:          []api.MapRoute{},
+		ActivitySummary: activity,
+	}, nil
+}
+
+func (s *Store) listMapNodes(ctx context.Context, iatas []string) ([]api.MapNode, error) {
+	rows, err := s.pool.Query(ctx, `
+SELECT
+  n.id,
+  n.node_type,
+  n.name,
+  n.latitude,
+  n.longitude,
+  n.first_seen,
+  n.last_seen,
+  COALESCE(SUM(ni.observation_count), 0)::bigint AS activity_count,
+  COALESCE(
+    array_agg(DISTINCT trim(ni.iata)::text ORDER BY trim(ni.iata)::text)
+      FILTER (WHERE ni.iata IS NOT NULL),
+    ARRAY[]::text[]
+  ) AS iatas_heard_in
+FROM nodes n
+LEFT JOIN node_iatas ni ON ni.node_id = n.id
+WHERE n.latitude IS NOT NULL
+  AND n.longitude IS NOT NULL
+  AND (
+    $1::text[] IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM node_iatas scoped
+      WHERE scoped.node_id = n.id
+        AND trim(scoped.iata)::text = ANY($1::text[])
+    )
+  )
+GROUP BY n.id
+ORDER BY n.last_seen DESC
+LIMIT 2000
+`, mapIATAParam(iatas))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	nodes := []api.MapNode{}
+	for rows.Next() {
+		var id uuid.UUID
+		var nodeType int16
+		var name *string
+		var lat, lng float64
+		var firstSeen, lastSeen time.Time
+		var activityCount int64
+		var heardIn []string
+		if err := rows.Scan(&id, &nodeType, &name, &lat, &lng, &firstSeen, &lastSeen, &activityCount, &heardIn); err != nil {
+			return nil, err
+		}
+		role := mapNodeRole(nodeType)
+		nodes = append(nodes, api.MapNode{
+			ID:            id.String(),
+			Label:         mapDisplayLabel(name, role),
+			Role:          role,
+			Lat:           lat,
+			Lng:           lng,
+			FirstSeen:     firstSeen.UnixMilli(),
+			LastSeen:      lastSeen.UnixMilli(),
+			IATAsHeardIn:  heardIn,
+			ActivityCount: activityCount,
+		})
+	}
+	return nodes, rows.Err()
+}
+
+func (s *Store) listMapObservers(ctx context.Context, iatas []string) ([]api.MapObserver, error) {
+	rows, err := s.pool.Query(ctx, `
+WITH latest_iata AS (
+  SELECT DISTINCT ON (observer_id)
+    observer_id,
+    trim(iata)::text AS iata
+  FROM packet_observations
+  ORDER BY observer_id, heard_at DESC
+),
+latest_location AS (
+  SELECT DISTINCT ON (observer_id)
+    observer_id,
+    NULLIF(trim(iata)::text, '') AS iata,
+    latitude,
+    longitude
+  FROM observer_locations
+  WHERE latitude IS NOT NULL
+    AND longitude IS NOT NULL
+  ORDER BY observer_id, reported_at DESC
+)
+SELECT
+  o.id,
+  o.display_name,
+  o.observer_type,
+  COALESCE(ll.iata, li.iata, '') AS iata,
+  ll.latitude,
+  ll.longitude,
+  o.last_seen,
+  COALESCE(o.observation_count, 0)::bigint AS observation_count,
+  o.last_seen >= NOW() - INTERVAL '5 minutes' AS online
+FROM observers o
+JOIN latest_location ll ON ll.observer_id = o.id
+LEFT JOIN latest_iata li ON li.observer_id = o.id
+WHERE (
+  $1::text[] IS NULL
+  OR COALESCE(ll.iata, li.iata, '') = ANY($1::text[])
+)
+ORDER BY o.last_seen DESC
+LIMIT 1000
+`, mapIATAParam(iatas))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	observers := []api.MapObserver{}
+	for rows.Next() {
+		var id uuid.UUID
+		var name, observerType *string
+		var iata string
+		var lat, lng float64
+		var lastSeen time.Time
+		var observationCount int64
+		var online bool
+		if err := rows.Scan(&id, &name, &observerType, &iata, &lat, &lng, &lastSeen, &observationCount, &online); err != nil {
+			return nil, err
+		}
+		observers = append(observers, api.MapObserver{
+			ID:               id.String(),
+			Label:            mapObserverLabel(name, iata),
+			Type:             ptrString(observerType, "unknown"),
+			IATA:             iata,
+			Lat:              lat,
+			Lng:              lng,
+			Online:           online,
+			LastSeen:         lastSeen.UnixMilli(),
+			ObservationCount: observationCount,
+		})
+	}
+	return observers, rows.Err()
+}
+
+func (s *Store) mapActivitySummary(ctx context.Context, iatas []string) (api.MapActivitySummary, error) {
+	var summary api.MapActivitySummary
+	var lastHeard pgtype.Timestamptz
+	err := s.pool.QueryRow(ctx, `
+SELECT
+  COUNT(DISTINCT packet_hash)::bigint AS packets_24h,
+  COUNT(*)::bigint AS observations_24h,
+  COUNT(DISTINCT observer_id)::bigint AS active_observers_24h,
+  COUNT(DISTINCT trim(iata)::text)::bigint AS active_iatas_24h,
+  MAX(heard_at) AS last_heard_at
+FROM packet_observations
+WHERE heard_at > NOW() - INTERVAL '24 hours'
+  AND ($1::text[] IS NULL OR trim(iata)::text = ANY($1::text[]))
+`, mapIATAParam(iatas)).Scan(
+		&summary.Packets24h,
+		&summary.Observations24h,
+		&summary.ActiveObservers24h,
+		&summary.ActiveIATAs24h,
+		&lastHeard,
+	)
+	if err != nil {
+		return api.MapActivitySummary{}, err
+	}
+	if lastHeard.Valid {
+		ms := lastHeard.Time.UnixMilli()
+		summary.LastHeardAt = &ms
+	}
+	return summary, nil
+}
+
 // UpsertChannel upserts a channel row by (hash, keyFingerprint) and returns its integer ID.
 // Pass nil keyFingerprint to record a hash-only row when the key is unknown.
 // name and hashtag are optional metadata stored on the channel row.
@@ -347,4 +556,90 @@ func (s *Store) UpsertRegionIATA(ctx context.Context, regionID int32, iata strin
 		RegionID: regionID,
 		Iata:     iata,
 	})
+}
+
+func normalizeMapIATAs(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := []string{}
+	for _, value := range values {
+		iata := strings.ToUpper(strings.TrimSpace(value))
+		if iata == "" || iata == "*" {
+			continue
+		}
+		if _, ok := seen[iata]; ok {
+			continue
+		}
+		seen[iata] = struct{}{}
+		out = append(out, iata)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func mapIATAParam(iatas []string) any {
+	if len(iatas) == 0 {
+		return nil
+	}
+	return iatas
+}
+
+func mapNodeRole(nodeType int16) string {
+	switch nodeType {
+	case 1:
+		return "companion"
+	case 2:
+		return "repeater"
+	case 3:
+		return "room_server"
+	default:
+		return "unknown"
+	}
+}
+
+func mapDisplayLabel(name *string, role string) string {
+	if name != nil {
+		trimmed := strings.TrimSpace(*name)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	switch role {
+	case "repeater":
+		return "Repeater"
+	case "room_server":
+		return "Room server"
+	case "companion":
+		return "Companion"
+	default:
+		return "Node"
+	}
+}
+
+func mapObserverLabel(name *string, iata string) string {
+	if name != nil {
+		trimmed := strings.TrimSpace(*name)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	if iata != "" {
+		return fmt.Sprintf("%s observer", iata)
+	}
+	return "Observer"
+}
+
+func ptrString(value *string, fallback string) string {
+	if value == nil {
+		return fallback
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return fallback
+	}
+	return trimmed
 }
