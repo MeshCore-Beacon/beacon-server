@@ -7,6 +7,7 @@ import (
 
 // Seeder is the database interface required to seed config data on startup.
 type Seeder interface {
+	UpsertIATA(ctx context.Context, iata string) error
 	UpsertIATADetails(ctx context.Context, iata string, name string, lat, lng *float64) error
 	UpsertRegion(ctx context.Context, slug, name, description string, displayOrder int, centerLat, centerLng *float64, zoomLevel *int) (int32, error)
 	UpsertRegionIATA(ctx context.Context, regionID int32, iata string) error
@@ -29,6 +30,9 @@ func Seed(ctx context.Context, cfg *Config, db Seeder) error {
 			return err
 		}
 		for _, iata := range r.IATAs {
+			if err := db.UpsertIATA(ctx, iata); err != nil {
+				return err
+			}
 			if err := db.UpsertRegionIATA(ctx, id, iata); err != nil {
 				return err
 			}

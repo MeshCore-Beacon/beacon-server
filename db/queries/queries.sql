@@ -226,21 +226,32 @@ ON CONFLICT (node_id, iata) DO NOTHING;
 -- ============================================================
 
 -- name: UpsertChannel :one
-INSERT INTO channels (channel_hash, last_seen)
-VALUES ($1, NOW())
-ON CONFLICT (channel_hash) DO UPDATE SET
+-- Upsert a channel by (hash, key_fingerprint). Pass NULL fingerprint for
+-- hash-only records (key unknown). Returns the channel row.
+INSERT INTO channels (channel_hash, key_fingerprint, name, hashtag, is_hashtag, key_known, last_seen)
+VALUES ($1, $2::bytea, $3, $4, $5, ($2 IS NOT NULL), NOW())
+ON CONFLICT (channel_hash, key_fingerprint) DO UPDATE SET
   last_seen     = NOW(),
-  message_count = CASE WHEN $2 THEN channels.message_count + 1 ELSE channels.message_count END
+  name          = COALESCE(EXCLUDED.name, channels.name),
+  message_count = CASE WHEN $6 THEN channels.message_count + 1 ELSE channels.message_count END
 RETURNING *;
 
 -- name: SetChannelKeyKnown :exec
-UPDATE channels SET key_known = TRUE WHERE channel_hash = $1;
+UPDATE channels SET key_known = TRUE
+WHERE channel_hash = $1 AND key_fingerprint = $2;
 
 -- name: ListChannels :many
 SELECT * FROM channels ORDER BY last_seen DESC LIMIT $1;
 
--- name: GetChannel :one
-SELECT * FROM channels WHERE channel_hash = $1;
+-- name: GetChannelsByHash :many
+-- Returns all channels for a given hash (may be multiple on hash collision).
+SELECT * FROM channels WHERE channel_hash = $1 ORDER BY last_seen DESC;
+
+-- name: GetChannelByHashAndFingerprint :one
+SELECT * FROM channels WHERE channel_hash = $1 AND key_fingerprint = $2;
+
+-- name: GetChannelByHashtag :one
+SELECT * FROM channels WHERE hashtag = $1;
 
 -- ============================================================
 -- CHANNEL MESSAGES

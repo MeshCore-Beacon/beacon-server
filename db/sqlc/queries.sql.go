@@ -12,17 +12,24 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const getChannel = `-- name: GetChannel :one
-SELECT id, channel_hash, name, is_hashtag, is_public, key_known, first_seen, last_seen, message_count FROM channels WHERE channel_hash = $1
+const getChannelByHashAndFingerprint = `-- name: GetChannelByHashAndFingerprint :one
+SELECT id, channel_hash, key_fingerprint, name, hashtag, is_hashtag, is_public, key_known, first_seen, last_seen, message_count FROM channels WHERE channel_hash = $1 AND key_fingerprint = $2
 `
 
-func (q *Queries) GetChannel(ctx context.Context, channelHash []byte) (Channel, error) {
-	row := q.db.QueryRow(ctx, getChannel, channelHash)
+type GetChannelByHashAndFingerprintParams struct {
+	ChannelHash    []byte `json:"channel_hash"`
+	KeyFingerprint []byte `json:"key_fingerprint"`
+}
+
+func (q *Queries) GetChannelByHashAndFingerprint(ctx context.Context, arg GetChannelByHashAndFingerprintParams) (Channel, error) {
+	row := q.db.QueryRow(ctx, getChannelByHashAndFingerprint, arg.ChannelHash, arg.KeyFingerprint)
 	var i Channel
 	err := row.Scan(
 		&i.ID,
 		&i.ChannelHash,
+		&i.KeyFingerprint,
 		&i.Name,
+		&i.Hashtag,
 		&i.IsHashtag,
 		&i.IsPublic,
 		&i.KeyKnown,
@@ -31,6 +38,66 @@ func (q *Queries) GetChannel(ctx context.Context, channelHash []byte) (Channel, 
 		&i.MessageCount,
 	)
 	return i, err
+}
+
+const getChannelByHashtag = `-- name: GetChannelByHashtag :one
+SELECT id, channel_hash, key_fingerprint, name, hashtag, is_hashtag, is_public, key_known, first_seen, last_seen, message_count FROM channels WHERE hashtag = $1
+`
+
+func (q *Queries) GetChannelByHashtag(ctx context.Context, hashtag *string) (Channel, error) {
+	row := q.db.QueryRow(ctx, getChannelByHashtag, hashtag)
+	var i Channel
+	err := row.Scan(
+		&i.ID,
+		&i.ChannelHash,
+		&i.KeyFingerprint,
+		&i.Name,
+		&i.Hashtag,
+		&i.IsHashtag,
+		&i.IsPublic,
+		&i.KeyKnown,
+		&i.FirstSeen,
+		&i.LastSeen,
+		&i.MessageCount,
+	)
+	return i, err
+}
+
+const getChannelsByHash = `-- name: GetChannelsByHash :many
+SELECT id, channel_hash, key_fingerprint, name, hashtag, is_hashtag, is_public, key_known, first_seen, last_seen, message_count FROM channels WHERE channel_hash = $1 ORDER BY last_seen DESC
+`
+
+// Returns all channels for a given hash (may be multiple on hash collision).
+func (q *Queries) GetChannelsByHash(ctx context.Context, channelHash []byte) ([]Channel, error) {
+	rows, err := q.db.Query(ctx, getChannelsByHash, channelHash)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Channel{}
+	for rows.Next() {
+		var i Channel
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChannelHash,
+			&i.KeyFingerprint,
+			&i.Name,
+			&i.Hashtag,
+			&i.IsHashtag,
+			&i.IsPublic,
+			&i.KeyKnown,
+			&i.FirstSeen,
+			&i.LastSeen,
+			&i.MessageCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getHourlyStats = `-- name: GetHourlyStats :many
@@ -506,7 +573,7 @@ func (q *Queries) ListChannelMessages(ctx context.Context, arg ListChannelMessag
 }
 
 const listChannels = `-- name: ListChannels :many
-SELECT id, channel_hash, name, is_hashtag, is_public, key_known, first_seen, last_seen, message_count FROM channels ORDER BY last_seen DESC LIMIT $1
+SELECT id, channel_hash, key_fingerprint, name, hashtag, is_hashtag, is_public, key_known, first_seen, last_seen, message_count FROM channels ORDER BY last_seen DESC LIMIT $1
 `
 
 func (q *Queries) ListChannels(ctx context.Context, limit int32) ([]Channel, error) {
@@ -521,7 +588,9 @@ func (q *Queries) ListChannels(ctx context.Context, limit int32) ([]Channel, err
 		if err := rows.Scan(
 			&i.ID,
 			&i.ChannelHash,
+			&i.KeyFingerprint,
 			&i.Name,
+			&i.Hashtag,
 			&i.IsHashtag,
 			&i.IsPublic,
 			&i.KeyKnown,
@@ -950,11 +1019,17 @@ func (q *Queries) ResolvePathHashes(ctx context.Context, arg ResolvePathHashesPa
 }
 
 const setChannelKeyKnown = `-- name: SetChannelKeyKnown :exec
-UPDATE channels SET key_known = TRUE WHERE channel_hash = $1
+UPDATE channels SET key_known = TRUE
+WHERE channel_hash = $1 AND key_fingerprint = $2
 `
 
-func (q *Queries) SetChannelKeyKnown(ctx context.Context, channelHash []byte) error {
-	_, err := q.db.Exec(ctx, setChannelKeyKnown, channelHash)
+type SetChannelKeyKnownParams struct {
+	ChannelHash    []byte `json:"channel_hash"`
+	KeyFingerprint []byte `json:"key_fingerprint"`
+}
+
+func (q *Queries) SetChannelKeyKnown(ctx context.Context, arg SetChannelKeyKnownParams) error {
+	_, err := q.db.Exec(ctx, setChannelKeyKnown, arg.ChannelHash, arg.KeyFingerprint)
 	return err
 }
 
@@ -1040,29 +1115,45 @@ func (q *Queries) UpdateObserverStatus(ctx context.Context, arg UpdateObserverSt
 
 const upsertChannel = `-- name: UpsertChannel :one
 
-INSERT INTO channels (channel_hash, last_seen)
-VALUES ($1, NOW())
-ON CONFLICT (channel_hash) DO UPDATE SET
+INSERT INTO channels (channel_hash, key_fingerprint, name, hashtag, is_hashtag, key_known, last_seen)
+VALUES ($1, $2::bytea, $3, $4, $5, ($2 IS NOT NULL), NOW())
+ON CONFLICT (channel_hash, key_fingerprint) DO UPDATE SET
   last_seen     = NOW(),
-  message_count = CASE WHEN $2 THEN channels.message_count + 1 ELSE channels.message_count END
-RETURNING id, channel_hash, name, is_hashtag, is_public, key_known, first_seen, last_seen, message_count
+  name          = COALESCE(EXCLUDED.name, channels.name),
+  message_count = CASE WHEN $6 THEN channels.message_count + 1 ELSE channels.message_count END
+RETURNING id, channel_hash, key_fingerprint, name, hashtag, is_hashtag, is_public, key_known, first_seen, last_seen, message_count
 `
 
 type UpsertChannelParams struct {
-	ChannelHash  []byte `json:"channel_hash"`
-	MessageCount *int64 `json:"message_count"`
+	ChannelHash  []byte  `json:"channel_hash"`
+	Column2      []byte  `json:"column_2"`
+	Name         *string `json:"name"`
+	Hashtag      *string `json:"hashtag"`
+	IsHashtag    *bool   `json:"is_hashtag"`
+	MessageCount *int64  `json:"message_count"`
 }
 
 // ============================================================
 // CHANNELS
 // ============================================================
+// Upsert a channel by (hash, key_fingerprint). Pass NULL fingerprint for
+// hash-only records (key unknown). Returns the channel row.
 func (q *Queries) UpsertChannel(ctx context.Context, arg UpsertChannelParams) (Channel, error) {
-	row := q.db.QueryRow(ctx, upsertChannel, arg.ChannelHash, arg.MessageCount)
+	row := q.db.QueryRow(ctx, upsertChannel,
+		arg.ChannelHash,
+		arg.Column2,
+		arg.Name,
+		arg.Hashtag,
+		arg.IsHashtag,
+		arg.MessageCount,
+	)
 	var i Channel
 	err := row.Scan(
 		&i.ID,
 		&i.ChannelHash,
+		&i.KeyFingerprint,
 		&i.Name,
+		&i.Hashtag,
 		&i.IsHashtag,
 		&i.IsPublic,
 		&i.KeyKnown,

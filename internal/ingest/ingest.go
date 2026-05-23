@@ -35,6 +35,7 @@ import (
 	"github.com/meshcore-go/meshcore-go"
 
 	"github.com/MeshCore-Tower/tower-server/internal/hub"
+	"github.com/MeshCore-Tower/tower-server/internal/keystore"
 )
 
 // Config holds the connection parameters for one broker.
@@ -95,8 +96,9 @@ type DB interface {
 	// ResolvePathHashes returns a list of node UUIDs for the given path hash prefixes and IATA.
 	ResolvePathHashes(ctx context.Context, iata string, hashes [][]byte) ([]uuid.UUID, error)
 
-	// UpsertChannel upserts a channel row and returns its integer ID.
-	UpsertChannel(ctx context.Context, channelHash []byte) (int, error)
+	// UpsertChannel upserts a channel row by (hash, keyFingerprint) and returns its integer ID.
+	// Pass nil keyFingerprint to record a hash-only row when the key is unknown.
+	UpsertChannel(ctx context.Context, channelHash []byte, keyFingerprint []byte, name string, hashtag string) (int, error)
 }
 
 // UpsertPacketParams mirrors the columns written on packets upsert.
@@ -211,10 +213,10 @@ type packetObservationEvent struct {
 }
 
 // ChannelKeyStore is a read-only view of the channel keys loaded from config.
-// The ingest layer calls Decrypt and never touches key material directly.
 type ChannelKeyStore interface {
-	// GetKey returns the channel hash key pairs for the given hash, or nil if unknown
-	GetKey(channelHash []byte) [][]byte
+	// GetKey returns all known key entries for the given channel hash byte.
+	// Returns nil if no keys are known for this hash.
+	GetKey(channelHash []byte) []keystore.Entry
 }
 
 // Worker holds the dependencies for one broker's ingest loop.
@@ -503,7 +505,7 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 		params.FirmwareVersion = envelope.FirmwareVersion
 	}
 
-	radio := strings.Split(envelope.RadioString, ",")
+	radio := strings.Split(strings.TrimSpace(envelope.RadioString), ",")
 	if len(radio) != 4 {
 		log.Printf("ingest[%s]: missing or malformed radio params in status from %s, skipping radio fields", w.cfg.BrokerName, pubkeyHex)
 	} else {
@@ -622,24 +624,34 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 			log.Printf("ingest[%s]: error decoding group text payload: %v", w.cfg.BrokerName, err)
 			return
 		}
-		channelID, err := w.db.UpsertChannel(ctx, []byte{grpTxt.ChannelHash})
-		if err != nil {
-			log.Printf("ingest[%s]: db: upsert channel failed: %v", w.cfg.BrokerName, err)
-			return
-		}
-		keys := w.keys.GetKey([]byte{grpTxt.ChannelHash})
-		if len(keys) == 0 {
+		channelHashBytes := []byte{grpTxt.ChannelHash}
+
+		// Always upsert a hash-only row so unknown channels are recorded.
+		_, _ = w.db.UpsertChannel(ctx, channelHashBytes, nil, "", "")
+
+		// Try each known key entry for this hash.
+		entries := w.keys.GetKey(channelHashBytes)
+		if len(entries) == 0 {
 			return // channel key unknown; message stored as encrypted blob only
 		}
 		var payload *meshcore.GroupTextPayload
-		for _, key := range keys {
-			if p, err := grpTxt.DecryptStruct(key); err == nil {
+		var usedEntry keystore.Entry
+		for _, entry := range entries {
+			if p, err := grpTxt.DecryptStruct(entry.Key); err == nil {
 				payload = p
+				usedEntry = entry
 				break
 			}
 		}
 		if payload == nil {
 			return // none of the keys worked
+		}
+
+		// Upsert the keyed channel row — messages are associated with this row.
+		channelID, err := w.db.UpsertChannel(ctx, channelHashBytes, usedEntry.Fingerprint, usedEntry.Name, usedEntry.Hashtag)
+		if err != nil {
+			log.Printf("ingest[%s]: db: upsert keyed channel failed: %v", w.cfg.BrokerName, err)
+			return
 		}
 		params := InsertChannelMessageParams{
 			ChannelID:  channelID,

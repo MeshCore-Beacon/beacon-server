@@ -45,4 +45,14 @@ regions:
     iatas: [YOW, YYZ]
 
 channel_keys:
-  "11": "8b3387e9c5cdea6ac9e5edbaa115cd72"
+  # Hashtag channels: Tower derives the PSK automatically from the tag name.
+  # secret = SHA256("#tag")[:16], channel_hash = SHA256(secret)[0]
+  hashtags:
+    - meshcore
+
+  # Explicit keys: provide the channel hash (hex) and key (hex) directly.
+  # An optional name can be set for display purposes.
+  keys:
+    "11":
+      key: "8b3387e9c5cdea6ac9e5edbaa115cd72"
+      name: "Public"

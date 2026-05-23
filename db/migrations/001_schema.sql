@@ -254,24 +254,37 @@ CREATE INDEX idx_observations_packet ON packet_observations(packet_hash);
 -- ============================================================
 
 CREATE TABLE channels (
-  id            SERIAL PRIMARY KEY,
-  channel_hash  BYTEA UNIQUE NOT NULL,
-  name          TEXT,
-  is_hashtag    BOOLEAN DEFAULT FALSE,
-  is_public     BOOLEAN DEFAULT FALSE,
-  key_known     BOOLEAN DEFAULT FALSE,
-  first_seen    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  last_seen     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  message_count BIGINT DEFAULT 0
+  id               SERIAL PRIMARY KEY,
+  channel_hash     BYTEA NOT NULL,
+  -- key_fingerprint is the first 8 bytes of SHA256(key_bytes).
+  -- Combined with channel_hash it uniquely identifies a channel,
+  -- since a 1-byte hash has high collision probability.
+  -- NULL when the key is unknown (hash-only record).
+  key_fingerprint  BYTEA,
+  name             TEXT,
+  hashtag          TEXT UNIQUE,         -- e.g. "meshcore"; only set for hashtag-derived channels
+  is_hashtag       BOOLEAN DEFAULT FALSE,
+  is_public        BOOLEAN DEFAULT FALSE,
+  key_known        BOOLEAN DEFAULT FALSE,
+  first_seen       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  message_count    BIGINT DEFAULT 0,
+  -- Unique on (hash, fingerprint): allows multiple channels with the same
+  -- hash as long as they have different keys. NULL fingerprint is allowed
+  -- once per hash (the unknown-key record).
+  UNIQUE (channel_hash, key_fingerprint)
 );
 
 CREATE INDEX idx_channels_last_seen ON channels(last_seen DESC);
+CREATE INDEX idx_channels_hash ON channels(channel_hash);
+CREATE INDEX idx_channels_hashtag ON channels(hashtag) WHERE hashtag IS NOT NULL;
 
 CREATE TABLE channel_keys (
-  channel_id INT PRIMARY KEY REFERENCES channels(id) ON DELETE CASCADE,
-  key_bytes  BYTEA NOT NULL,
-  added_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  added_by   TEXT
+  channel_id      INT PRIMARY KEY REFERENCES channels(id) ON DELETE CASCADE,
+  key_bytes       BYTEA NOT NULL,
+  key_fingerprint BYTEA NOT NULL, -- first 8 bytes of SHA256(key_bytes)
+  added_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  added_by        TEXT
 );
 
 CREATE TABLE channel_messages (

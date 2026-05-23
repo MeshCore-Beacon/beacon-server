@@ -12,7 +12,26 @@ import (
 type Config struct {
 	IATAs       map[string]IATAConfig `yaml:"iatas"`
 	Regions     []RegionConfig        `yaml:"regions"`
-	ChannelKeys map[string]string     `yaml:"channel_keys"` // hash hex → key hex
+	ChannelKeys ChannelKeysConfig     `yaml:"channel_keys"`
+}
+
+// ChannelKeysConfig holds both hashtag-derived and explicit channel keys.
+// Hashtag keys are derived automatically: secret = SHA256("#tag")[:16],
+// channel_hash = SHA256(secret)[0]. Explicit keys are provided as hex strings
+// keyed by the channel hash hex (e.g. "11" for 0x11).
+type ChannelKeysConfig struct {
+	// Hashtags is a list of hashtag names (without the # prefix).
+	// Tower derives the PSK and channel hash automatically.
+	Hashtags []string `yaml:"hashtags"`
+
+	// Keys maps channel hash hex → explicit key config.
+	Keys map[string]ExplicitKeyConfig `yaml:"keys"`
+}
+
+// ExplicitKeyConfig holds an explicit channel key and optional display name.
+type ExplicitKeyConfig struct {
+	Key  string `yaml:"key"`  // hex-encoded key bytes
+	Name string `yaml:"name"` // optional display name
 }
 
 // IATAConfig holds optional overrides for a known IATA code.

@@ -59,26 +59,44 @@ func main() {
 		log.Fatalf("failed to seed config: %v", err)
 	}
 
-	channelKeys := make(map[string][][]byte)
-	for hash, keyHex := range cfg.ChannelKeys {
-		key, err := hex.DecodeString(keyHex)
-		if err != nil {
-			log.Printf("warning: invalid channel key for hash %s, skipping: %v", hash, err)
-			continue
+	// ── Build channel keystore ──────────────────────────────────────────────
+	entries := make(map[string][]keystore.Entry)
+
+	// Hashtag-derived channels: secret = SHA256("#tag")[:16], hash = SHA256(secret)[0]
+	for _, tag := range cfg.ChannelKeys.Hashtags {
+		secret, channelHash, fingerprint := keystore.DeriveHashtagKey(tag)
+		hashHex := fmt.Sprintf("%02x", channelHash)
+		entry := keystore.Entry{
+			Key:         secret,
+			Fingerprint: fingerprint,
+			Hashtag:     tag,
+			Name:        "#" + tag,
 		}
-		// skip if exact pair already exists
-		duplicate := false
-		for _, existing := range channelKeys[hash] {
-			if bytes.Equal(existing, key) {
-				duplicate = true
-				break
-			}
-		}
-		if !duplicate {
-			channelKeys[hash] = append(channelKeys[hash], key)
+		if !entryExists(entries[hashHex], entry) {
+			entries[hashHex] = append(entries[hashHex], entry)
+			log.Printf("config: loaded hashtag channel #%s (hash=%s)", tag, hashHex)
 		}
 	}
-	keys := keystore.NewMapKeyStore(channelKeys)
+
+	// Explicit keys: hash provided directly, key is hex-encoded
+	for hashHex, keyCfg := range cfg.ChannelKeys.Keys {
+		key, err := hex.DecodeString(keyCfg.Key)
+		if err != nil {
+			log.Printf("warning: invalid channel key for hash %s, skipping: %v", hashHex, err)
+			continue
+		}
+		entry := keystore.Entry{
+			Key:         key,
+			Fingerprint: keystore.Fingerprint(key),
+			Name:        keyCfg.Name,
+		}
+		if !entryExists(entries[hashHex], entry) {
+			entries[hashHex] = append(entries[hashHex], entry)
+			log.Printf("config: loaded explicit channel key for hash %s name=%q", hashHex, keyCfg.Name)
+		}
+	}
+
+	keys := keystore.NewMapKeyStore(entries)
 
 	broker1 := ingest.New(
 		ingest.Config{
@@ -132,6 +150,17 @@ func main() {
 	if err := srv.Shutdown(context.Background()); err != nil {
 		log.Printf("server shutdown error: %v", err)
 	}
+}
+
+// entryExists checks if an identical key entry already exists in the slice
+// to prevent loading duplicate key/hash pairs from config.
+func entryExists(entries []keystore.Entry, e keystore.Entry) bool {
+	for _, existing := range entries {
+		if bytes.Equal(existing.Key, e.Key) {
+			return true
+		}
+	}
+	return false
 }
 
 // mustEnv returns the value of an env var and logs a warning if it is unset.

@@ -201,10 +201,24 @@ func (s *Store) ResolvePathHashes(ctx context.Context, iata string, hashes [][]b
 	return ids, nil
 }
 
-// UpsertChannel upserts a channel row and returns its integer ID.
-func (s *Store) UpsertChannel(ctx context.Context, channelHash []byte) (int, error) {
+// UpsertChannel upserts a channel row by (hash, keyFingerprint) and returns its integer ID.
+// Pass nil keyFingerprint to record a hash-only row when the key is unknown.
+// name and hashtag are optional metadata stored on the channel row.
+func (s *Store) UpsertChannel(ctx context.Context, channelHash []byte, keyFingerprint []byte, name string, hashtag string) (int, error) {
+	var namePtr, hashtagPtr *string
+	if name != "" {
+		namePtr = &name
+	}
+	if hashtag != "" {
+		hashtagPtr = &hashtag
+	}
+	isHashtag := hashtag != ""
 	row, err := s.q.UpsertChannel(ctx, sqlc.UpsertChannelParams{
 		ChannelHash:  channelHash,
+		Column2:      keyFingerprint, // key_fingerprint
+		Name:         namePtr,
+		Hashtag:      hashtagPtr,
+		IsHashtag:    &isHashtag,
 		MessageCount: nil, // message count bumped separately by InsertChannelMessage
 	})
 	if err != nil {

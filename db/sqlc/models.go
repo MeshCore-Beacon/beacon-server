@@ -10,22 +10,25 @@ import (
 )
 
 type Channel struct {
-	ID           int32              `json:"id"`
-	ChannelHash  []byte             `json:"channel_hash"`
-	Name         *string            `json:"name"`
-	IsHashtag    *bool              `json:"is_hashtag"`
-	IsPublic     *bool              `json:"is_public"`
-	KeyKnown     *bool              `json:"key_known"`
-	FirstSeen    pgtype.Timestamptz `json:"first_seen"`
-	LastSeen     pgtype.Timestamptz `json:"last_seen"`
-	MessageCount *int64             `json:"message_count"`
+	ID             int32              `json:"id"`
+	ChannelHash    []byte             `json:"channel_hash"`
+	KeyFingerprint []byte             `json:"key_fingerprint"`
+	Name           *string            `json:"name"`
+	Hashtag        *string            `json:"hashtag"`
+	IsHashtag      *bool              `json:"is_hashtag"`
+	IsPublic       *bool              `json:"is_public"`
+	KeyKnown       *bool              `json:"key_known"`
+	FirstSeen      pgtype.Timestamptz `json:"first_seen"`
+	LastSeen       pgtype.Timestamptz `json:"last_seen"`
+	MessageCount   *int64             `json:"message_count"`
 }
 
 type ChannelKey struct {
-	ChannelID int32              `json:"channel_id"`
-	KeyBytes  []byte             `json:"key_bytes"`
-	AddedAt   pgtype.Timestamptz `json:"added_at"`
-	AddedBy   *string            `json:"added_by"`
+	ChannelID      int32              `json:"channel_id"`
+	KeyBytes       []byte             `json:"key_bytes"`
+	KeyFingerprint []byte             `json:"key_fingerprint"`
+	AddedAt        pgtype.Timestamptz `json:"added_at"`
+	AddedBy        *string            `json:"added_by"`
 }
 
 type ChannelMessage struct {
