@@ -47,6 +47,8 @@ regions:
 channel_keys:
   # Hashtag channels: Tower derives the PSK automatically from the tag name.
   # secret = SHA256("#tag")[:16], channel_hash = SHA256(secret)[0]
+  # Hashtag names should be provided without the # prefix.
+  # Tower prepends # automatically before deriving the key.
   hashtags:
     - meshcore
 
