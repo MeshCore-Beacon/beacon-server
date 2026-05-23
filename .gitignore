@@ -1,2 +1,6 @@
+.prettierrc
+
 .env
 config.yaml
+notes.md
+roadmap.md
