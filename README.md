@@ -142,8 +142,6 @@ channel_keys:
 
 IATAs are auto-created on first packet arrival. The config file adds display names and coordinates. Regions and channel keys must be defined here — they are not auto-created.
 
-The public MeshCore channel (hash `0x11`) key is built into the keystore by default and does not need to be in the config file.
-
 ---
 
 ## WebSocket API
@@ -263,7 +261,7 @@ This starts PostgreSQL, Redis (reserved for future caching), and the MeshCore To
 - [ ] REST API: Packets, Nodes, Observers, Channels, Stats
 - [ ] Path resolution (node short ID lookup)
 - [ ] Propagation time calculation
-- [ ] Observer radio settings on observations
+- [x] Observer radio settings on observations
 - [ ] Routes and traces endpoints
 - [ ] Packet search endpoint (requirements TBD)
 
