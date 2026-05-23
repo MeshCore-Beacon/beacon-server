@@ -34,7 +34,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/meshcore-go/meshcore-go"
 
-	"tower/internal/hub"
+	"github.com/MeshCore-Tower/tower-server/internal/hub"
 )
 
 // Config holds the connection parameters for one broker.

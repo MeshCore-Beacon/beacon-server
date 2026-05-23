@@ -28,7 +28,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 
-	"tower/internal/hub"
+	"github.com/MeshCore-Tower/tower-server/internal/hub"
 )
 
 const (

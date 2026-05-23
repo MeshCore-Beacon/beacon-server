@@ -1,4 +1,4 @@
-module tower
+module github.com/MeshCore-Tower/tower-server
 
 go 1.26.1
 

@@ -6,11 +6,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"tower/internal/api"
-	"tower/internal/api/handlers"
-	mw "tower/internal/api/middleware"
-	"tower/internal/hub"
-	"tower/internal/ws"
+	"github.com/MeshCore-Tower/tower-server/internal/api"
+	"github.com/MeshCore-Tower/tower-server/internal/api/handlers"
+	mw "github.com/MeshCore-Tower/tower-server/internal/api/middleware"
+	"github.com/MeshCore-Tower/tower-server/internal/hub"
+	"github.com/MeshCore-Tower/tower-server/internal/ws"
 )
 
 // New builds and returns the top-level Chi router.

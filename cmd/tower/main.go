@@ -11,12 +11,12 @@ import (
 	"os/signal"
 	"syscall"
 
-	"tower/db"
-	"tower/internal/api/router"
-	"tower/internal/config"
-	"tower/internal/hub"
-	"tower/internal/ingest"
-	"tower/internal/keystore"
+	"github.com/MeshCore-Tower/tower-server/db"
+	"github.com/MeshCore-Tower/tower-server/internal/api/router"
+	"github.com/MeshCore-Tower/tower-server/internal/config"
+	"github.com/MeshCore-Tower/tower-server/internal/hub"
+	"github.com/MeshCore-Tower/tower-server/internal/ingest"
+	"github.com/MeshCore-Tower/tower-server/internal/keystore"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"

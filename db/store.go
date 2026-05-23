@@ -8,9 +8,9 @@ import (
 	"encoding/binary"
 	"errors"
 
-	sqlc "tower/db/sqlc"
-	"tower/internal/api"
-	"tower/internal/ingest"
+	sqlc "github.com/MeshCore-Tower/tower-server/db/sqlc"
+	"github.com/MeshCore-Tower/tower-server/internal/api"
+	"github.com/MeshCore-Tower/tower-server/internal/ingest"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
