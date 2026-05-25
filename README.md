@@ -1,33 +1,40 @@
 # MeshCore Tower
 
-MeshCore Tower is a MeshCore network observation backend. It connects to one or more MeshCore MQTT brokers, ingests LoRa packet traffic in real time, stores it in PostgreSQL, and streams live events to WebSocket clients.
+MeshCore Tower is a MeshCore network observation backend. It connects to one or
+more MeshCore MQTT brokers, ingests LoRa packet traffic in real time, stores it
+in PostgreSQL, and streams live events to WebSocket clients.
 
 ## What it does
 
-- Subscribes to MeshCore MQTT brokers and decodes incoming LoRa packets using [meshcore-go](https://github.com/meshcore-go/meshcore-go)
-- Stores packets, observations, nodes, observers, and channel messages in PostgreSQL
-- Deduplicates observations across multiple brokers (same packet heard by two brokers is one observation per observer)
+- Subscribes to MeshCore MQTT brokers and decodes incoming LoRa packets using
+  [meshcore-go](https://github.com/meshcore-go/meshcore-go)
+- Stores packets, observations, nodes, observers, and channel messages in
+  PostgreSQL
+- Deduplicates observations across multiple brokers (same packet heard by two
+  brokers is one observation per observer)
 - Decrypts group text messages for known channel keys
 - Detects firmware capability flags from path hash sizes
-- Streams live events to WebSocket clients with subscription filtering by IATA, payload type, and event type
+- Streams live events to WebSocket clients with subscription filtering by IATA,
+  payload type, and event type
 - Serves a REST API for querying stored data
-- Seeds regions, IATA display names, and channel keys from a YAML config file on startup
+- Seeds regions, IATA display names, and channel keys from a YAML config file on
+  startup
 
 ---
 
 ## Stack
 
-| Component | Technology |
-|-----------|-----------|
-| Language | Go 1.26 |
-| Router | [Chi v5](https://github.com/go-chi/chi) |
-| Database | PostgreSQL 16 |
-| DB queries | [sqlc](https://sqlc.dev) + pgx/v5 |
-| MQTT | [paho.mqtt.golang](https://github.com/eclipse/paho.mqtt.golang) |
-| WebSocket | [coder/websocket](https://github.com/coder/websocket) |
-| Packet decode | [meshcore-go](https://github.com/meshcore-go/meshcore-go) |
-| Config | YAML via gopkg.in/yaml.v3 |
-| Env | godotenv |
+| Component     | Technology                                                      |
+| ------------- | --------------------------------------------------------------- |
+| Language      | Go 1.26                                                         |
+| Router        | [Chi v5](https://github.com/go-chi/chi)                         |
+| Database      | PostgreSQL 16                                                   |
+| DB queries    | [sqlc](https://sqlc.dev) + pgx/v5                               |
+| MQTT          | [paho.mqtt.golang](https://github.com/eclipse/paho.mqtt.golang) |
+| WebSocket     | [coder/websocket](https://github.com/coder/websocket)           |
+| Packet decode | [meshcore-go](https://github.com/meshcore-go/meshcore-go)       |
+| Config        | YAML via gopkg.in/yaml.v3                                       |
+| Env           | godotenv                                                        |
 
 ---
 
@@ -77,7 +84,8 @@ cp env.example .env
 cp config.yaml.example config.yaml
 ```
 
-Edit `.env` with your broker credentials and database DSN. Edit `config.yaml` to define your regions, IATA display names, and channel keys.
+Edit `.env` with your broker credentials and database DSN. Edit `config.yaml` to
+define your regions, IATA display names, and channel keys.
 
 ### 2. Start PostgreSQL
 
@@ -85,7 +93,8 @@ Edit `.env` with your broker credentials and database DSN. Edit `config.yaml` to
 docker compose up postgres -d
 ```
 
-The schema in `db/migrations/001_schema.sql` is applied automatically on first start via `docker-entrypoint-initdb.d`.
+The schema in `db/migrations/001_schema.sql` is applied automatically on first
+start via `docker-entrypoint-initdb.d`.
 
 ### 3. Run
 
@@ -106,17 +115,17 @@ Tower will:
 
 ### Environment variables (`.env`)
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LISTEN_ADDR` | `:8080` | HTTP listen address |
-| `POSTGRES_DSN` | — | PostgreSQL connection string |
-| `CONFIG_PATH` | `config.yaml` | Path to YAML config file |
-| `MQTT_BROKER_1_URL` | — | Broker 1 WebSocket URL (e.g. `wss://mqtt1.example.com:443`) |
-| `MQTT_BROKER_1_USERNAME` | — | Broker 1 username |
-| `MQTT_BROKER_1_PASSWORD` | — | Broker 1 password |
-| `MQTT_BROKER_2_URL` | — | Broker 2 WebSocket URL |
-| `MQTT_BROKER_2_USERNAME` | — | Broker 2 username |
-| `MQTT_BROKER_2_PASSWORD` | — | Broker 2 password |
+| Variable                 | Default       | Description                                                 |
+| ------------------------ | ------------- | ----------------------------------------------------------- |
+| `LISTEN_ADDR`            | `:8080`       | HTTP listen address                                         |
+| `POSTGRES_DSN`           | —             | PostgreSQL connection string                                |
+| `CONFIG_PATH`            | `config.yaml` | Path to YAML config file                                    |
+| `MQTT_BROKER_1_URL`      | —             | Broker 1 WebSocket URL (e.g. `wss://mqtt1.example.com:443`) |
+| `MQTT_BROKER_1_USERNAME` | —             | Broker 1 username                                           |
+| `MQTT_BROKER_1_PASSWORD` | —             | Broker 1 password                                           |
+| `MQTT_BROKER_2_URL`      | —             | Broker 2 WebSocket URL                                      |
+| `MQTT_BROKER_2_USERNAME` | —             | Broker 2 username                                           |
+| `MQTT_BROKER_2_PASSWORD` | —             | Broker 2 password                                           |
 
 ### Config file (`config.yaml`)
 
@@ -137,10 +146,12 @@ regions:
     iatas: [YVR, YYJ, YYC, YEG]
 
 channel_keys:
-  "11": "8b3387e9c5cdea6ac9e5edbaa115cd72"  # hash hex: key hex
+  "11": "8b3387e9c5cdea6ac9e5edbaa115cd72" # hash hex: key hex
 ```
 
-IATAs are auto-created on first packet arrival. The config file adds display names and coordinates. Regions and channel keys must be defined here — they are not auto-created.
+IATAs are auto-created on first packet arrival. The config file adds display
+names and coordinates. Regions and channel keys must be defined here — they are
+not auto-created.
 
 ---
 
@@ -156,17 +167,22 @@ On connect the server sends a hello message:
 
 ### Client → Server messages
 
-**Subscribe**
+- **Subscribe**
 
 ```json
-{ "v": 1, "type": "subscribe", "id": "sub-1", "scope": {
+{
+  "v": 1,
+  "type": "subscribe",
+  "id": "sub-1",
+  "scope": {
     "iatas": ["YOW", "YYZ"],
     "payloadTypes": [4, 5],
     "events": ["packetObservation"]
-}}
+  }
+}
 ```
 
-**Ping** (send every 30s; connection closes after 90s idle)
+- **Ping** (send every 30s; connection closes after 90s idle)
 
 ```json
 { "v": 1, "type": "ping", "id": "ping-1" }
@@ -174,12 +190,12 @@ On connect the server sends a hello message:
 
 ### Server → Client events
 
-| Type | Description |
-|------|-------------|
+| Type                | Description                   |
+| ------------------- | ----------------------------- |
 | `packetObservation` | New observation written to DB |
-| `observerStatus` | Observer status update |
-| `nodeUpdate` | Node upserted from advert |
-| `channelMessage` | Decrypted channel message |
+| `observerStatus`    | Observer status update        |
+| `nodeUpdate`        | Node upserted from advert     |
+| `channelMessage`    | Decrypted channel message     |
 
 ---
 
@@ -189,34 +205,34 @@ Base path: `/api/v1`
 
 ### Implemented
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/iatas` | List all known IATA codes |
-| `GET` | `/iatas/{iata}` | Get a single IATA code |
-| `GET` | `/regions` | List all regions (summary) |
-| `GET` | `/regions/{id}` | Get a single region with IATA list |
+| Method | Path            | Description                        |
+| ------ | --------------- | ---------------------------------- |
+| `GET`  | `/iatas`        | List all known IATA codes          |
+| `GET`  | `/iatas/{iata}` | Get a single IATA code             |
+| `GET`  | `/regions`      | List all regions (summary)         |
+| `GET`  | `/regions/{id}` | Get a single region with IATA list |
 
 ### Stubbed (501 Not Implemented)
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/packets` | List packets with filters |
-| `GET` | `/packets/{packetHash}` | Get packet with all observations |
-| `GET` | `/nodes` | List nodes |
-| `GET` | `/nodes/{nodeId}` | Get node detail |
-| `GET` | `/nodes/{nodeId}/observations` | List observations for a node |
-| `GET` | `/observers` | List observers |
-| `GET` | `/observers/{observerId}` | Get observer detail |
-| `GET` | `/observers/{observerId}/telemetry` | Observer telemetry history |
-| `GET` | `/observers/{observerId}/adverts` | Adverts heard by observer |
-| `GET` | `/channels` | List channels |
-| `GET` | `/channels/{channelHash}` | Get channel detail |
-| `GET` | `/channels/{channelHash}/messages` | List channel messages |
-| `GET` | `/stats/overview` | Network overview stats |
-| `GET` | `/stats/observations` | Observation time series |
-| `GET` | `/stats/payloadBreakdown` | Observations by payload type |
-| `GET` | `/stats/topNodes` | Top nodes by observation count |
-| `GET` | `/stats/topObservers` | Top observers by observation count |
+| Method | Path                                | Description                        |
+| ------ | ----------------------------------- | ---------------------------------- |
+| `GET`  | `/packets`                          | List packets with filters          |
+| `GET`  | `/packets/{packetHash}`             | Get packet with all observations   |
+| `GET`  | `/nodes`                            | List nodes                         |
+| `GET`  | `/nodes/{nodeId}`                   | Get node detail                    |
+| `GET`  | `/nodes/{nodeId}/observations`      | List observations for a node       |
+| `GET`  | `/observers`                        | List observers                     |
+| `GET`  | `/observers/{observerId}`           | Get observer detail                |
+| `GET`  | `/observers/{observerId}/telemetry` | Observer telemetry history         |
+| `GET`  | `/observers/{observerId}/adverts`   | Adverts heard by observer          |
+| `GET`  | `/channels`                         | List channels                      |
+| `GET`  | `/channels/{channelHash}`           | Get channel detail                 |
+| `GET`  | `/channels/{channelHash}/messages`  | List channel messages              |
+| `GET`  | `/stats/overview`                   | Network overview stats             |
+| `GET`  | `/stats/observations`               | Observation time series            |
+| `GET`  | `/stats/payloadBreakdown`           | Observations by payload type       |
+| `GET`  | `/stats/topNodes`                   | Top nodes by observation count     |
+| `GET`  | `/stats/topObservers`               | Top observers by observation count |
 
 ---
 
@@ -236,7 +252,8 @@ sqlc generate
 docker compose up
 ```
 
-This starts PostgreSQL, Redis (reserved for future caching), and the MeshCore Tower server.
+This starts PostgreSQL, Redis (reserved for future caching), and the MeshCore
+Tower server.
 
 ---
 
