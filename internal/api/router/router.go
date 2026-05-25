@@ -50,7 +50,7 @@ func New(h *hub.Hub, reader api.Reader) http.Handler {
 			r.Mount("/packets", handlers.PacketsRouter())
 			r.Mount("/nodes", handlers.NodesRouter())
 			r.Mount("/observers", handlers.ObserversRouter())
-			r.Mount("/channels", handlers.ChannelsRouter())
+			r.Mount("/channels", handlers.ChannelsRouter(reader))
 			r.Mount("/iatas", handlers.IATAsRouter(reader))
 			r.Mount("/regions", handlers.RegionsRouter(reader))
 			r.Mount("/stats", handlers.StatsRouter())

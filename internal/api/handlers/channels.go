@@ -1,59 +1,132 @@
 package handlers
 
 import (
+	"encoding/hex"
 	"net/http"
+	"strconv"
+	"time"
 
+	"github.com/MeshCore-Tower/tower-server/internal/api"
 	"github.com/go-chi/chi/v5"
 )
 
 // ChannelsRouter mounts all /channels routes onto a subrouter.
 //
-// GET  /channels                             → ListChannels
-// GET  /channels/{channelHash}               → GetChannel
-// GET  /channels/{channelHash}/messages      → ListChannelMessages
-func ChannelsRouter() http.Handler {
+// GET  /channels                           → ListChannels
+// GET  /channels/{channelID}               → GetChannel
+// GET  /channels/{channelID}/messages      → ListChannelMessages
+func ChannelsRouter(reader api.Reader) http.Handler {
 	r := chi.NewRouter()
 
-	r.Get("/", ListChannels)
+	// ListChannels handles GET /api/v1/channels
+	//
+	// Query params (all optional):
+	//
+	//	hash=<hex>
+	//	limit=50
+	//	cursor=<opaque>
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		var limit int64 = 50
+		if limitParam := r.URL.Query().Get("limit"); limitParam != "" {
+			l, err := strconv.ParseInt(limitParam, 10, 32)
+			if err != nil {
+				respond(w, http.StatusBadRequest, map[string]string{"error": "limit must be an integer"})
+				return
+			} else {
+				limit = l
+			}
+		}
+		var channels []api.ChannelSummary
+		var err error
+		if hash := r.URL.Query().Get("hash"); hash != "" {
+			hashHex, decodeErr := hex.DecodeString(hash)
+			if decodeErr != nil {
+				respond(w, http.StatusBadRequest, map[string]string{"error": "invalid channel hash"})
+				return
+			}
+			if len(hashHex) != 1 {
+				respond(w, http.StatusBadRequest, map[string]string{"error": "hash must be a single hex byte"})
+				return
+			}
+			channels, err = reader.ListChannels(r.Context(), int32(limit), hashHex)
+		} else {
+			channels, err = reader.ListChannels(r.Context(), int32(limit), nil)
+		}
+		if err != nil {
+			respond(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+			return
+		}
+		respond(w, http.StatusOK, channels)
+	})
 
-	r.Route("/{channelHash}", func(r chi.Router) {
-		r.Get("/", GetChannel)
-		r.Get("/messages", ListChannelMessages)
+	r.Route("/{channelID}", func(r chi.Router) {
+		// GetChannel handles GET /api/v1/channels/{channelID}
+		//
+		// Returns channel detail including key for hashtag channels and message count.
+		// Other channel keys are server-side config; key material is never exposed via the API.
+		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+			var id int64
+			if channelID := chi.URLParam(r, "channelID"); channelID != "" {
+				i, err := strconv.ParseInt(channelID, 10, 32)
+				if err != nil {
+					respond(w, http.StatusBadRequest, map[string]string{"error": "channelID should be an int 32"})
+					return
+				}
+				id = i
+			}
+			channel, err := reader.GetChannel(r.Context(), int32(id))
+			if err != nil {
+				respond(w, http.StatusNotFound, map[string]string{"error": "channel not found"})
+				return
+			}
+			respond(w, http.StatusOK, channel)
+		})
+		// ListChannelMessages handles GET /api/v1/channels/{channelID}/messages
+		//
+		// Query params (all optional):
+		//
+		//	since=<epoch ms>
+		//	limit=50
+		//	cursor=<opaque>
+		//
+		// Returns paginated decrypted channel messages.
+		r.Get("/messages", func(w http.ResponseWriter, r *http.Request) {
+			var id int64
+			if channelID := chi.URLParam(r, "channelID"); channelID != "" {
+				i, err := strconv.ParseInt(channelID, 10, 32)
+				if err != nil {
+					respond(w, http.StatusBadRequest, map[string]string{"error": "channelID should be an int 32"})
+					return
+				}
+				id = i
+			}
+			var limit int64 = 50
+			if limitParam := r.URL.Query().Get("limit"); limitParam != "" {
+				l, err := strconv.ParseInt(limitParam, 10, 32)
+				if err != nil {
+					respond(w, http.StatusBadRequest, map[string]string{"error": "limit must be an integer"})
+					return
+				} else {
+					limit = l
+				}
+			}
+			var since time.Time
+			if sinceParam := r.URL.Query().Get("since"); sinceParam != "" {
+				ms, err := strconv.ParseInt(sinceParam, 10, 64)
+				if err != nil {
+					respond(w, http.StatusBadRequest, map[string]string{"error": "since must be epoch milliseconds"})
+					return
+				}
+				since = time.UnixMilli(ms)
+			}
+			messages, err := reader.ListChannelMessages(r.Context(), int32(id), since, int32(limit))
+			if err != nil {
+				respond(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+				return
+			}
+			respond(w, http.StatusOK, messages)
+		})
 	})
 
 	return r
-}
-
-// ListChannels handles GET /api/v1/channels
-//
-// Query params (all optional):
-//   limit=50
-func ListChannels(w http.ResponseWriter, r *http.Request) {
-	// TODO: query channels ORDER BY last_seen DESC, write JSON response.
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// GetChannel handles GET /api/v1/channels/{channelHash}
-//
-// Returns channel detail including key_known status and message count.
-// Channel keys are server-side config; key material is never exposed via the API.
-func GetChannel(w http.ResponseWriter, r *http.Request) {
-	// channelHash := chi.URLParam(r, "channelHash")
-	// TODO: fetch channel, write JSON response.
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// ListChannelMessages handles GET /api/v1/channels/{channelHash}/messages
-//
-// Query params (all optional):
-//   since=<epoch ms>
-//   limit=50
-//   cursor=<opaque>
-//
-// Returns paginated decrypted channel messages. Messages where key_known=false
-// will have content=null.
-func ListChannelMessages(w http.ResponseWriter, r *http.Request) {
-	// channelHash := chi.URLParam(r, "channelHash")
-	// TODO: fetch channel_messages, paginate, write JSON response.
-	w.WriteHeader(http.StatusNotImplemented)
 }

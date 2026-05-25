@@ -245,7 +245,7 @@ SELECT * FROM channels ORDER BY last_seen DESC LIMIT $1;
 
 -- name: GetChannelsByHash :many
 -- Returns all channels for a given hash (may be multiple on hash collision).
-SELECT * FROM channels WHERE channel_hash = $1 ORDER BY last_seen DESC;
+SELECT * FROM channels WHERE channel_hash = $1 ORDER BY last_seen DESC LIMIT $2;
 
 -- name: GetChannelByHashAndFingerprint :one
 SELECT * FROM channels WHERE channel_hash = $1 AND key_fingerprint = $2;
@@ -253,20 +253,35 @@ SELECT * FROM channels WHERE channel_hash = $1 AND key_fingerprint = $2;
 -- name: GetChannelByHashtag :one
 SELECT * FROM channels WHERE hashtag = $1;
 
+-- name: GetChannelByID :one
+SELECT * FROM channels WHERE id = $1;
+
+
 -- ============================================================
 -- CHANNEL MESSAGES
 -- ============================================================
 
 -- name: InsertChannelMessage :exec
-INSERT INTO channel_messages (channel_id, packet_hash, sender_name, sender_pubkey, content, sent_at)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO channel_messages (channel_id, packet_hash, sender_name, content, sent_at)
+VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (packet_hash) DO NOTHING;
 
 -- name: ListChannelMessages :many
-SELECT * FROM channel_messages
-WHERE channel_id = $1
-  AND ($2::timestamptz IS NULL OR sent_at >= $2)
-ORDER BY sent_at DESC
+SELECT cm.*, encode(p.packet_hash, 'hex') as packet_hash_hex, c.channel_hash
+FROM channel_messages cm
+JOIN packets p ON p.packet_hash = cm.packet_hash
+JOIN channels c ON c.id = cm.channel_id
+WHERE cm.channel_id = $1
+  AND ($2::timestamptz IS NULL OR cm.sent_at >= $2)
+ORDER BY cm.sent_at DESC
+LIMIT $3;
+
+-- name: ListChannelMessagesByHash :many
+SELECT cm.*, c.channel_hash FROM channel_messages cm
+JOIN channels c ON c.id = cm.channel_id
+WHERE c.channel_hash = $1
+  AND ($2::timestamptz IS NULL OR cm.sent_at >= $2)
+ORDER BY cm.sent_at DESC
 LIMIT $3;
 
 -- ============================================================

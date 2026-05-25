@@ -63,13 +63,41 @@ func (q *Queries) GetChannelByHashtag(ctx context.Context, hashtag *string) (Cha
 	return i, err
 }
 
-const getChannelsByHash = `-- name: GetChannelsByHash :many
-SELECT id, channel_hash, key_fingerprint, name, hashtag, is_hashtag, is_public, key_known, first_seen, last_seen, message_count FROM channels WHERE channel_hash = $1 ORDER BY last_seen DESC
+const getChannelByID = `-- name: GetChannelByID :one
+SELECT id, channel_hash, key_fingerprint, name, hashtag, is_hashtag, is_public, key_known, first_seen, last_seen, message_count FROM channels WHERE id = $1
 `
 
+func (q *Queries) GetChannelByID(ctx context.Context, id int32) (Channel, error) {
+	row := q.db.QueryRow(ctx, getChannelByID, id)
+	var i Channel
+	err := row.Scan(
+		&i.ID,
+		&i.ChannelHash,
+		&i.KeyFingerprint,
+		&i.Name,
+		&i.Hashtag,
+		&i.IsHashtag,
+		&i.IsPublic,
+		&i.KeyKnown,
+		&i.FirstSeen,
+		&i.LastSeen,
+		&i.MessageCount,
+	)
+	return i, err
+}
+
+const getChannelsByHash = `-- name: GetChannelsByHash :many
+SELECT id, channel_hash, key_fingerprint, name, hashtag, is_hashtag, is_public, key_known, first_seen, last_seen, message_count FROM channels WHERE channel_hash = $1 ORDER BY last_seen DESC LIMIT $2
+`
+
+type GetChannelsByHashParams struct {
+	ChannelHash []byte `json:"channel_hash"`
+	Limit       int32  `json:"limit"`
+}
+
 // Returns all channels for a given hash (may be multiple on hash collision).
-func (q *Queries) GetChannelsByHash(ctx context.Context, channelHash []byte) ([]Channel, error) {
-	rows, err := q.db.Query(ctx, getChannelsByHash, channelHash)
+func (q *Queries) GetChannelsByHash(ctx context.Context, arg GetChannelsByHashParams) ([]Channel, error) {
+	rows, err := q.db.Query(ctx, getChannelsByHash, arg.ChannelHash, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -411,18 +439,17 @@ func (q *Queries) GetTopNodes(ctx context.Context, arg GetTopNodesParams) ([]MvT
 
 const insertChannelMessage = `-- name: InsertChannelMessage :exec
 
-INSERT INTO channel_messages (channel_id, packet_hash, sender_name, sender_pubkey, content, sent_at)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO channel_messages (channel_id, packet_hash, sender_name, content, sent_at)
+VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (packet_hash) DO NOTHING
 `
 
 type InsertChannelMessageParams struct {
-	ChannelID    int32              `json:"channel_id"`
-	PacketHash   []byte             `json:"packet_hash"`
-	SenderName   *string            `json:"sender_name"`
-	SenderPubkey []byte             `json:"sender_pubkey"`
-	Content      *string            `json:"content"`
-	SentAt       pgtype.Timestamptz `json:"sent_at"`
+	ChannelID  int32              `json:"channel_id"`
+	PacketHash []byte             `json:"packet_hash"`
+	SenderName *string            `json:"sender_name"`
+	Content    *string            `json:"content"`
+	SentAt     pgtype.Timestamptz `json:"sent_at"`
 }
 
 // ============================================================
@@ -433,7 +460,6 @@ func (q *Queries) InsertChannelMessage(ctx context.Context, arg InsertChannelMes
 		arg.ChannelID,
 		arg.PacketHash,
 		arg.SenderName,
-		arg.SenderPubkey,
 		arg.Content,
 		arg.SentAt,
 	)
@@ -531,10 +557,13 @@ func (q *Queries) InsertObservation(ctx context.Context, arg InsertObservationPa
 }
 
 const listChannelMessages = `-- name: ListChannelMessages :many
-SELECT id, channel_id, packet_hash, sender_name, sender_pubkey, content, sent_at FROM channel_messages
-WHERE channel_id = $1
-  AND ($2::timestamptz IS NULL OR sent_at >= $2)
-ORDER BY sent_at DESC
+SELECT cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at, encode(p.packet_hash, 'hex') as packet_hash_hex, c.channel_hash
+FROM channel_messages cm
+JOIN packets p ON p.packet_hash = cm.packet_hash
+JOIN channels c ON c.id = cm.channel_id
+WHERE cm.channel_id = $1
+  AND ($2::timestamptz IS NULL OR cm.sent_at >= $2)
+ORDER BY cm.sent_at DESC
 LIMIT $3
 `
 
@@ -544,15 +573,27 @@ type ListChannelMessagesParams struct {
 	Limit     int32              `json:"limit"`
 }
 
-func (q *Queries) ListChannelMessages(ctx context.Context, arg ListChannelMessagesParams) ([]ChannelMessage, error) {
+type ListChannelMessagesRow struct {
+	ID            int64              `json:"id"`
+	ChannelID     int32              `json:"channel_id"`
+	PacketHash    []byte             `json:"packet_hash"`
+	SenderName    *string            `json:"sender_name"`
+	SenderPubkey  []byte             `json:"sender_pubkey"`
+	Content       *string            `json:"content"`
+	SentAt        pgtype.Timestamptz `json:"sent_at"`
+	PacketHashHex string             `json:"packet_hash_hex"`
+	ChannelHash   []byte             `json:"channel_hash"`
+}
+
+func (q *Queries) ListChannelMessages(ctx context.Context, arg ListChannelMessagesParams) ([]ListChannelMessagesRow, error) {
 	rows, err := q.db.Query(ctx, listChannelMessages, arg.ChannelID, arg.Column2, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ChannelMessage{}
+	items := []ListChannelMessagesRow{}
 	for rows.Next() {
-		var i ChannelMessage
+		var i ListChannelMessagesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ChannelID,
@@ -561,6 +602,63 @@ func (q *Queries) ListChannelMessages(ctx context.Context, arg ListChannelMessag
 			&i.SenderPubkey,
 			&i.Content,
 			&i.SentAt,
+			&i.PacketHashHex,
+			&i.ChannelHash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChannelMessagesByHash = `-- name: ListChannelMessagesByHash :many
+SELECT cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at, c.channel_hash FROM channel_messages cm
+JOIN channels c ON c.id = cm.channel_id
+WHERE c.channel_hash = $1
+  AND ($2::timestamptz IS NULL OR cm.sent_at >= $2)
+ORDER BY cm.sent_at DESC
+LIMIT $3
+`
+
+type ListChannelMessagesByHashParams struct {
+	ChannelHash []byte             `json:"channel_hash"`
+	Column2     pgtype.Timestamptz `json:"column_2"`
+	Limit       int32              `json:"limit"`
+}
+
+type ListChannelMessagesByHashRow struct {
+	ID           int64              `json:"id"`
+	ChannelID    int32              `json:"channel_id"`
+	PacketHash   []byte             `json:"packet_hash"`
+	SenderName   *string            `json:"sender_name"`
+	SenderPubkey []byte             `json:"sender_pubkey"`
+	Content      *string            `json:"content"`
+	SentAt       pgtype.Timestamptz `json:"sent_at"`
+	ChannelHash  []byte             `json:"channel_hash"`
+}
+
+func (q *Queries) ListChannelMessagesByHash(ctx context.Context, arg ListChannelMessagesByHashParams) ([]ListChannelMessagesByHashRow, error) {
+	rows, err := q.db.Query(ctx, listChannelMessagesByHash, arg.ChannelHash, arg.Column2, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChannelMessagesByHashRow{}
+	for rows.Next() {
+		var i ListChannelMessagesByHashRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChannelID,
+			&i.PacketHash,
+			&i.SenderName,
+			&i.SenderPubkey,
+			&i.Content,
+			&i.SentAt,
+			&i.ChannelHash,
 		); err != nil {
 			return nil, err
 		}

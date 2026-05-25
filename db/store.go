@@ -6,7 +6,9 @@ package db
 import (
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
+	"time"
 
 	sqlc "github.com/MeshCore-Tower/tower-server/db/sqlc"
 	"github.com/MeshCore-Tower/tower-server/internal/api"
@@ -32,7 +34,11 @@ func (s *Store) UpsertObserver(ctx context.Context, pubkey []byte) (uuid.UUID, s
 	if err != nil {
 		return uuid.Nil, "", err
 	}
-	return row.ID, *row.DisplayName, err
+	displayName := ""
+	if row.DisplayName != nil {
+		displayName = *row.DisplayName
+	}
+	return row.ID, displayName, err
 }
 
 // UpsertObserverBroker records that this observer was seen on brokerName.
@@ -347,4 +353,139 @@ func (s *Store) UpsertRegionIATA(ctx context.Context, regionID int32, iata strin
 		RegionID: regionID,
 		Iata:     iata,
 	})
+}
+
+// ListChannels returns a summary list of all known channels ordered by last seen.
+// Includes both hashtag-derived and explicit key channels.
+// Channels with unknown keys are included with KeyKnown=false.
+// Filters on hash if provided, this is the hex channel hash
+func (s *Store) ListChannels(ctx context.Context, limit int32, hash []byte) ([]api.ChannelSummary, error) {
+	var rows []sqlc.Channel
+	if hash != nil {
+		r, err := s.q.GetChannelsByHash(ctx, sqlc.GetChannelsByHashParams{
+			ChannelHash: hash,
+			Limit:       limit,
+		})
+		if err != nil {
+			return nil, err
+		}
+		rows = r
+	} else {
+		r, err := s.q.ListChannels(ctx, limit)
+		if err != nil {
+			return nil, err
+		}
+		rows = r
+	}
+	channels := make([]api.ChannelSummary, 0, len(rows))
+	for _, v := range rows {
+		channels = append(channels, api.ChannelSummary{
+			ID:          int(v.ID),
+			Name:        v.Name,
+			ChannelHash: hex.EncodeToString(v.ChannelHash),
+			LastSeen:    v.LastSeen.Time.Format(time.RFC3339),
+			IsHashtag:   v.IsHashtag != nil && *v.IsHashtag,
+			KeyKnown:    v.KeyKnown != nil && *v.KeyKnown,
+		})
+	}
+
+	return channels, nil
+}
+
+// GetChannel returns full detail for a single channel by its integer ID.
+// Returns nil, pgx.ErrNoRows if the channel is not found.
+func (s *Store) GetChannel(ctx context.Context, channelID int32) (*api.Channel, error) {
+	row, err := s.q.GetChannelByID(ctx, channelID)
+	if err != nil {
+		return nil, err
+	}
+	channel := api.Channel{
+		ChannelSummary: api.ChannelSummary{
+			ID:          int(row.ID),
+			Name:        row.Name,
+			ChannelHash: hex.EncodeToString(row.ChannelHash),
+			LastSeen:    row.LastSeen.Time.Format(time.RFC3339),
+			IsHashtag:   row.IsHashtag != nil && *row.IsHashtag,
+			KeyKnown:    row.KeyKnown != nil && *row.KeyKnown,
+		},
+		Hashtag:      row.Hashtag,
+		MessageCount: 0,
+	}
+	if row.MessageCount != nil {
+		channel.MessageCount = *row.MessageCount
+	}
+	if row.IsHashtag != nil && *row.IsHashtag && row.KeyFingerprint != nil {
+		fp := hex.EncodeToString(row.KeyFingerprint)
+		channel.KeyFingerprint = &fp
+	}
+	return &channel, nil
+}
+
+// ListChannelMessages returns paginated messages for a channel identified by its integer ID.
+// Used by the /channels/{id}/messages endpoint.
+// Pass a zero time.Time for since to return all messages up to limit.
+func (s *Store) ListChannelMessages(ctx context.Context, channelID int32, since time.Time, limit int32) ([]api.ChannelMessage, error) {
+	rows, err := s.q.ListChannelMessages(ctx, sqlc.ListChannelMessagesParams{
+		ChannelID: channelID,
+		Column2:   pgtype.Timestamptz{Time: since, Valid: !since.IsZero()},
+		Limit:     limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	messages := make([]api.ChannelMessage, 0, len(rows))
+	for _, v := range rows {
+		senderName := ""
+		if v.SenderName != nil {
+			senderName = *v.SenderName
+		}
+		content := ""
+		if v.Content != nil {
+			content = *v.Content
+		}
+		messages = append(messages, api.ChannelMessage{
+			ID:          v.ID,
+			PacketHash:  v.PacketHashHex,
+			ChannelHash: hex.EncodeToString(v.ChannelHash),
+			SenderName:  senderName,
+			Content:     content,
+			SentAt:      v.SentAt.Time.Format(time.RFC3339),
+		})
+	}
+	return messages, nil
+}
+
+// ListChannelMessagesByHash returns paginated messages for all channels matching the given hash.
+// Used by the /messages?hash= endpoint. May return messages from multiple channels
+// if the hash collides across different keys.
+// Pass a zero time.Time for since to return all messages up to limit.
+func (s *Store) ListChannelMessagesByHash(ctx context.Context, hash []byte, since time.Time, limit int32) ([]api.ChannelMessage, error) {
+	rows, err := s.q.ListChannelMessagesByHash(ctx, sqlc.ListChannelMessagesByHashParams{
+		ChannelHash: hash,
+		Column2:     pgtype.Timestamptz{Time: since, Valid: !since.IsZero()},
+		Limit:       limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	messages := make([]api.ChannelMessage, 0, len(rows))
+	for _, v := range rows {
+		senderName := ""
+		if v.SenderName != nil {
+			senderName = *v.SenderName
+		}
+		content := ""
+		if v.Content != nil {
+			content = *v.Content
+		}
+		messages = append(messages, api.ChannelMessage{
+			ID:          v.ID,
+			ChannelHash: hex.EncodeToString(v.ChannelHash),
+			PacketHash:  hex.EncodeToString(v.PacketHash),
+			SenderName:  senderName,
+			Content:     content,
+			SentAt:      v.SentAt.Time.Format(time.RFC3339),
+		})
+	}
+	return messages, nil
 }
