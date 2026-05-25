@@ -556,8 +556,65 @@ func (q *Queries) InsertObservation(ctx context.Context, arg InsertObservationPa
 	return i, err
 }
 
+const listAllChannelMessages = `-- name: ListAllChannelMessages :many
+SELECT cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash
+FROM channel_messages cm
+JOIN packets p ON p.packet_hash = cm.packet_hash
+JOIN channels c ON c.id = cm.channel_id
+WHERE ($1::timestamptz IS NULL OR cm.sent_at >= $1)
+ORDER BY cm.sent_at DESC
+LIMIT $2
+`
+
+type ListAllChannelMessagesParams struct {
+	Column1 pgtype.Timestamptz `json:"column_1"`
+	Limit   int32              `json:"limit"`
+}
+
+type ListAllChannelMessagesRow struct {
+	ID            int64              `json:"id"`
+	ChannelID     int32              `json:"channel_id"`
+	PacketHash    []byte             `json:"packet_hash"`
+	SenderName    *string            `json:"sender_name"`
+	SenderPubkey  []byte             `json:"sender_pubkey"`
+	Content       *string            `json:"content"`
+	SentAt        pgtype.Timestamptz `json:"sent_at"`
+	PacketHashHex string             `json:"packet_hash_hex"`
+	ChannelHash   []byte             `json:"channel_hash"`
+}
+
+func (q *Queries) ListAllChannelMessages(ctx context.Context, arg ListAllChannelMessagesParams) ([]ListAllChannelMessagesRow, error) {
+	rows, err := q.db.Query(ctx, listAllChannelMessages, arg.Column1, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllChannelMessagesRow{}
+	for rows.Next() {
+		var i ListAllChannelMessagesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChannelID,
+			&i.PacketHash,
+			&i.SenderName,
+			&i.SenderPubkey,
+			&i.Content,
+			&i.SentAt,
+			&i.PacketHashHex,
+			&i.ChannelHash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChannelMessages = `-- name: ListChannelMessages :many
-SELECT cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at, encode(p.packet_hash, 'hex') as packet_hash_hex, c.channel_hash
+SELECT cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash
 FROM channel_messages cm
 JOIN packets p ON p.packet_hash = cm.packet_hash
 JOIN channels c ON c.id = cm.channel_id

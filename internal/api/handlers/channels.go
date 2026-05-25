@@ -32,9 +32,8 @@ func ChannelsRouter(reader api.Reader) http.Handler {
 			if err != nil {
 				respond(w, http.StatusBadRequest, map[string]string{"error": "limit must be an integer"})
 				return
-			} else {
-				limit = l
 			}
+			limit = l
 		}
 		var channels []api.ChannelSummary
 		var err error
@@ -119,7 +118,8 @@ func ChannelsRouter(reader api.Reader) http.Handler {
 				}
 				since = time.UnixMilli(ms)
 			}
-			messages, err := reader.ListChannelMessages(r.Context(), int32(id), since, int32(limit))
+			chanID := int32(id)
+			messages, err := reader.ListChannelMessages(r.Context(), &chanID, since, int32(limit))
 			if err != nil {
 				respond(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 				return

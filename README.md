@@ -205,12 +205,16 @@ Base path: `/api/v1`
 
 ### Implemented
 
-| Method | Path            | Description                        |
-| ------ | --------------- | ---------------------------------- |
-| `GET`  | `/iatas`        | List all known IATA codes          |
-| `GET`  | `/iatas/{iata}` | Get a single IATA code             |
-| `GET`  | `/regions`      | List all regions (summary)         |
-| `GET`  | `/regions/{id}` | Get a single region with IATA list |
+| Method | Path                      | Description                                                                            |
+| ------ | ------------------------- | -------------------------------------------------------------------------------------- |
+| `GET`  | `/iatas`                  | List all known IATA codes                                                              |
+| `GET`  | `/iatas/{iata}`           | Get a single IATA code                                                                 |
+| `GET`  | `/regions`                | List all regions (summary)                                                             |
+| `GET`  | `/regions/{id}`           | Get a single region with IATA list                                                     |
+| `GET`  | `/channels`               | List channels (optional: `?hash=<hex>&since=<ms>&limit=50`)                            |
+| `GET`  | `/channels/{id}`          | Get channel detail by integer ID                                                       |
+| `GET`  | `/channels/{id}/messages` | List messages for a channel                                                            |
+| `GET`  | `/messages`               | List all messages (optional: `?channelId=<int>&channelHash=<hex>&since=<ms>&limit=50`) |
 
 ### Stubbed (501 Not Implemented)
 
@@ -225,9 +229,6 @@ Base path: `/api/v1`
 | `GET`  | `/observers/{observerId}`           | Get observer detail                |
 | `GET`  | `/observers/{observerId}/telemetry` | Observer telemetry history         |
 | `GET`  | `/observers/{observerId}/adverts`   | Adverts heard by observer          |
-| `GET`  | `/channels`                         | List channels                      |
-| `GET`  | `/channels/{channelHash}`           | Get channel detail                 |
-| `GET`  | `/channels/{channelHash}/messages`  | List channel messages              |
 | `GET`  | `/stats/overview`                   | Network overview stats             |
 | `GET`  | `/stats/observations`               | Observation time series            |
 | `GET`  | `/stats/payloadBreakdown`           | Observations by payload type       |

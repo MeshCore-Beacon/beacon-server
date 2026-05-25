@@ -267,7 +267,7 @@ VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (packet_hash) DO NOTHING;
 
 -- name: ListChannelMessages :many
-SELECT cm.*, encode(p.packet_hash, 'hex') as packet_hash_hex, c.channel_hash
+SELECT cm.*, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash
 FROM channel_messages cm
 JOIN packets p ON p.packet_hash = cm.packet_hash
 JOIN channels c ON c.id = cm.channel_id
@@ -275,6 +275,15 @@ WHERE cm.channel_id = $1
   AND ($2::timestamptz IS NULL OR cm.sent_at >= $2)
 ORDER BY cm.sent_at DESC
 LIMIT $3;
+
+-- name: ListAllChannelMessages :many
+SELECT cm.*, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash
+FROM channel_messages cm
+JOIN packets p ON p.packet_hash = cm.packet_hash
+JOIN channels c ON c.id = cm.channel_id
+WHERE ($1::timestamptz IS NULL OR cm.sent_at >= $1)
+ORDER BY cm.sent_at DESC
+LIMIT $2;
 
 -- name: ListChannelMessagesByHash :many
 SELECT cm.*, c.channel_hash FROM channel_messages cm

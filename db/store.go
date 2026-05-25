@@ -424,33 +424,33 @@ func (s *Store) GetChannel(ctx context.Context, channelID int32) (*api.Channel, 
 // ListChannelMessages returns paginated messages for a channel identified by its integer ID.
 // Used by the /channels/{id}/messages endpoint.
 // Pass a zero time.Time for since to return all messages up to limit.
-func (s *Store) ListChannelMessages(ctx context.Context, channelID int32, since time.Time, limit int32) ([]api.ChannelMessage, error) {
-	rows, err := s.q.ListChannelMessages(ctx, sqlc.ListChannelMessagesParams{
-		ChannelID: channelID,
-		Column2:   pgtype.Timestamptz{Time: since, Valid: !since.IsZero()},
-		Limit:     limit,
-	})
-	if err != nil {
-		return nil, err
-	}
-	messages := make([]api.ChannelMessage, 0, len(rows))
-	for _, v := range rows {
-		senderName := ""
-		if v.SenderName != nil {
-			senderName = *v.SenderName
-		}
-		content := ""
-		if v.Content != nil {
-			content = *v.Content
-		}
-		messages = append(messages, api.ChannelMessage{
-			ID:          v.ID,
-			PacketHash:  v.PacketHashHex,
-			ChannelHash: hex.EncodeToString(v.ChannelHash),
-			SenderName:  senderName,
-			Content:     content,
-			SentAt:      v.SentAt.Time.Format(time.RFC3339),
+func (s *Store) ListChannelMessages(ctx context.Context, channelID *int32, since time.Time, limit int32) ([]api.ChannelMessage, error) {
+	var messages []api.ChannelMessage
+	if channelID == nil {
+		rows, err := s.q.ListAllChannelMessages(ctx, sqlc.ListAllChannelMessagesParams{
+			Column1: pgtype.Timestamptz{Time: since, Valid: !since.IsZero()},
+			Limit:   limit,
 		})
+		messages = make([]api.ChannelMessage, 0, len(rows))
+		if err != nil {
+			return nil, err
+		}
+		for _, v := range rows {
+			messages = append(messages, toChannelMessage(v.ID, v.PacketHashHex, v.ChannelHash, v.SenderName, v.Content, v.SentAt))
+		}
+	} else {
+		rows, err := s.q.ListChannelMessages(ctx, sqlc.ListChannelMessagesParams{
+			ChannelID: *channelID,
+			Column2:   pgtype.Timestamptz{Time: since, Valid: !since.IsZero()},
+			Limit:     limit,
+		})
+		messages = make([]api.ChannelMessage, 0, len(rows))
+		if err != nil {
+			return nil, err
+		}
+		for _, v := range rows {
+			messages = append(messages, toChannelMessage(v.ID, v.PacketHashHex, v.ChannelHash, v.SenderName, v.Content, v.SentAt))
+		}
 	}
 	return messages, nil
 }
@@ -470,22 +470,26 @@ func (s *Store) ListChannelMessagesByHash(ctx context.Context, hash []byte, sinc
 	}
 	messages := make([]api.ChannelMessage, 0, len(rows))
 	for _, v := range rows {
-		senderName := ""
-		if v.SenderName != nil {
-			senderName = *v.SenderName
-		}
-		content := ""
-		if v.Content != nil {
-			content = *v.Content
-		}
-		messages = append(messages, api.ChannelMessage{
-			ID:          v.ID,
-			ChannelHash: hex.EncodeToString(v.ChannelHash),
-			PacketHash:  hex.EncodeToString(v.PacketHash),
-			SenderName:  senderName,
-			Content:     content,
-			SentAt:      v.SentAt.Time.Format(time.RFC3339),
-		})
+		messages = append(messages, toChannelMessage(v.ID, hex.EncodeToString(v.PacketHash), v.ChannelHash, v.SenderName, v.Content, v.SentAt))
 	}
 	return messages, nil
+}
+
+func toChannelMessage(id int64, packetHashHex string, channelHash []byte, senderName *string, content *string, sentAt pgtype.Timestamptz) api.ChannelMessage {
+	sn := ""
+	if senderName != nil {
+		sn = *senderName
+	}
+	ct := ""
+	if content != nil {
+		ct = *content
+	}
+	return api.ChannelMessage{
+		ID:          id,
+		PacketHash:  packetHashHex,
+		ChannelHash: hex.EncodeToString(channelHash),
+		SenderName:  sn,
+		Content:     ct,
+		SentAt:      sentAt.Time.Format(time.RFC3339),
+	}
 }

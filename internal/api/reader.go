@@ -88,7 +88,7 @@ type Reader interface {
 	// ListChannelMessages returns paginated messages for a channel identified by its integer ID.
 	// Used by the /channels/{id}/messages endpoint.
 	// Pass a zero time.Time for since to return all messages up to limit.
-	ListChannelMessages(ctx context.Context, channelID int32, since time.Time, limit int32) ([]ChannelMessage, error)
+	ListChannelMessages(ctx context.Context, channelID *int32, since time.Time, limit int32) ([]ChannelMessage, error)
 	// ListChannelMessagesByHash returns paginated messages for all channels matching the given hash.
 	// Used by the /messages?hash= endpoint. May return messages from multiple channels
 	// if the hash collides across different keys.
