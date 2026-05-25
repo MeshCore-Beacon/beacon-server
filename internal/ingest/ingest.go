@@ -54,8 +54,9 @@ type Config struct {
 // DB is the minimal database interface the ingest pipeline depends on.
 // Wire in your real *pgxpool.Pool implementation here.
 type DB interface {
-	// UpsertObserver upserts the observers row keyed on pubkey.
-	UpsertObserver(ctx context.Context, pubkey []byte) (uuid.UUID, error)
+	// UpsertObserver upserts the observers row keyed on pubkey, and returns
+	// the Observer ID, Display Name and an error if any.
+	UpsertObserver(ctx context.Context, pubkey []byte) (uuid.UUID, string, error)
 
 	// UpsertObserverBroker records that this observer was seen on brokerName.
 	UpsertObserverBroker(ctx context.Context, observerID uuid.UUID, brokerName string) error
@@ -204,6 +205,7 @@ type packetObservationEvent struct {
 	} `json:"packet"`
 	Observation struct {
 		ObserverID   string  `json:"observerId"`
+		ObserverName string  `json:"observerName"`
 		IATA         string  `json:"iata"`
 		HeardAt      int64   `json:"heardAt"`
 		RSSI         int16   `json:"rssi"`
@@ -347,7 +349,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		return
 	}
 
-	id, err := w.db.UpsertObserver(ctx, pubkeyBytes)
+	id, observerName, err := w.db.UpsertObserver(ctx, pubkeyBytes)
 	if err != nil {
 		log.Printf("ingest[%s]: db: upsert observer failed with packet from %s/%s: %v", w.cfg.BrokerName, iata, pubkeyHex, err)
 		return
@@ -441,7 +443,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	if inserted {
 		w.runCapabilityDetection(ctx, packet.PayloadType(), packet.PathHashSize(), resolvedIDs)
 		w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:])
-		w.fanOut(packetHash[:], packet, iata, isNew, id, heardAt, oParams.RSSI, oParams.SNR, w.cfg.BrokerName)
+		w.fanOut(packetHash[:], packet, iata, isNew, observerName, id, heardAt, oParams.RSSI, oParams.SNR, w.cfg.BrokerName)
 	}
 }
 
@@ -474,7 +476,7 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 		log.Printf("ingest[%s]: invalid pubkey hex in status from %s: %v", w.cfg.BrokerName, pubkeyHex, err)
 		return
 	}
-	_, err = w.db.UpsertObserver(ctx, pubkey)
+	_, _, err = w.db.UpsertObserver(ctx, pubkey)
 	if err != nil {
 		log.Printf("ingest[%s]: db: upsert observer failed in status from %s: %v", w.cfg.BrokerName, pubkeyHex, err)
 		return
@@ -669,7 +671,7 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 }
 
 // fanOut builds and broadcasts the packetObservation event to connected WS clients.
-func (w *Worker) fanOut(packetHash []byte, p *meshcore.Packet, iata string, isFirst bool, observerID uuid.UUID, heardAt time.Time, rssi int16, snr float32, sourceBroker string) {
+func (w *Worker) fanOut(packetHash []byte, p *meshcore.Packet, iata string, isFirst bool, observerName string, observerID uuid.UUID, heardAt time.Time, rssi int16, snr float32, sourceBroker string) {
 	evt := packetObservationEvent{}
 	evt.PacketHash = hex.EncodeToString(packetHash)
 	evt.Packet.PayloadType = p.PayloadType()
@@ -677,6 +679,7 @@ func (w *Worker) fanOut(packetHash []byte, p *meshcore.Packet, iata string, isFi
 	evt.Packet.RouteType = p.RouteType()
 	evt.Packet.IsFirstObservation = isFirst
 	evt.Observation.ObserverID = observerID.String()
+	evt.Observation.ObserverName = observerName
 	evt.Observation.IATA = iata
 	evt.Observation.HeardAt = heardAt.UnixMilli()
 	evt.Observation.RSSI = rssi

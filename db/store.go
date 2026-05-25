@@ -27,12 +27,12 @@ func New(pool *pgxpool.Pool) *Store {
 }
 
 // UpsertObserver upserts the observers row keyed on pubkey.
-func (s *Store) UpsertObserver(ctx context.Context, pubkey []byte) (uuid.UUID, error) {
+func (s *Store) UpsertObserver(ctx context.Context, pubkey []byte) (uuid.UUID, string, error) {
 	row, err := s.q.UpsertObserver(ctx, pubkey)
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, "", err
 	}
-	return row.ID, err
+	return row.ID, *row.DisplayName, err
 }
 
 // UpsertObserverBroker records that this observer was seen on brokerName.
