@@ -53,6 +53,7 @@ tower-server/
 │   │   ├── handlers/   HTTP route handlers
 │   │   ├── middleware/  Auth middleware stub
 │   │   ├── router/     Chi router wiring
+│   │   ├── helpers.go  Node type name helpers
 │   │   └── reader.go   Read-only DB interface + response types
 │   ├── config/         Config file loading and DB seeding
 │   ├── hub/            WebSocket fan-out broker
@@ -71,7 +72,7 @@ tower-server/
 
 ### Prerequisites
 
-- Go 1.23+
+- Go 1.26+
 - Docker and Docker Compose
 - [sqlc](https://sqlc.dev) (only needed if modifying queries)
 
@@ -126,6 +127,8 @@ Tower will:
 | `MQTT_BROKER_2_URL`      | —             | Broker 2 WebSocket URL                                      |
 | `MQTT_BROKER_2_USERNAME` | —             | Broker 2 username                                           |
 | `MQTT_BROKER_2_PASSWORD` | —             | Broker 2 password                                           |
+| `REDIS_ADDR`             | —             | Redis address (e.g. `localhost:6379`)                       |
+| `PACKET_RETENTION_DAYS`  | `30`          | How many days of packet observations to retain              |
 
 ### Config file (`config.yaml`)
 
@@ -146,7 +149,15 @@ regions:
     iatas: [YVR, YYJ, YYC, YEG]
 
 channel_keys:
-  "11": "8b3387e9c5cdea6ac9e5edbaa115cd72" # hash hex: key hex
+  # Hashtag channels: Tower derives the PSK from the tag name automatically.
+  hashtags:
+    - meshcore
+
+  # Explicit keys: channel hash (hex) and key (hex), with optional display name.
+  keys:
+    "11":
+      key: "8b3387e9c5cdea6ac9e5edbaa115cd72"
+      name: "Public"
 ```
 
 IATAs are auto-created on first packet arrival. The config file adds display
@@ -271,15 +282,20 @@ Tower server.
 - [x] Hub-based WebSocket fan-out with subscription filtering
 - [x] WebSocket server (hello, subscribe, ping/pong, events)
 - [x] Config file loading (regions, IATA overrides, channel keys)
+- [x] Observer radio settings on observations
 - [x] DB seeding on startup
 - [x] REST API: IATAs, Regions
+- [x] REST API: Channels (list + detail + messages)
 
 ### In progress / next
 
-- [ ] REST API: Packets, Nodes, Observers, Channels, Stats
+- [ ] REST API: Nodes (list + detail + observations)
+- [ ] REST API: Packets (list + detail)
+- [ ] REST API: Observers (list + detail done; telemetry + adverts stubbed)
+- [ ] REST API: Observer telemetry + adverts sub-endpoints
+- [ ] REST API: Stats
 - [ ] Path resolution (node short ID lookup)
 - [ ] Propagation time calculation
-- [x] Observer radio settings on observations
 - [ ] Routes and traces endpoints
 - [ ] Packet search endpoint (requirements TBD)
 
