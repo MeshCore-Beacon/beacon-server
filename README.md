@@ -215,6 +215,8 @@ Base path: `/api/v1`
 | `GET`  | `/channels/{id}`          | Get channel detail by integer ID                                                       |
 | `GET`  | `/channels/{id}/messages` | List messages for a channel                                                            |
 | `GET`  | `/messages`               | List all messages (optional: `?channelId=<int>&channelHash=<hex>&since=<ms>&limit=50`) |
+| `GET`  | `/observers`              | List observers                                                                         |
+| `GET`  | `/observers/{observerId}` | Get observer detail                                                                    |
 
 ### Stubbed (501 Not Implemented)
 
@@ -225,8 +227,6 @@ Base path: `/api/v1`
 | `GET`  | `/nodes`                            | List nodes                         |
 | `GET`  | `/nodes/{nodeId}`                   | Get node detail                    |
 | `GET`  | `/nodes/{nodeId}/observations`      | List observations for a node       |
-| `GET`  | `/observers`                        | List observers                     |
-| `GET`  | `/observers/{observerId}`           | Get observer detail                |
 | `GET`  | `/observers/{observerId}/telemetry` | Observer telemetry history         |
 | `GET`  | `/observers/{observerId}/adverts`   | Adverts heard by observer          |
 | `GET`  | `/stats/overview`                   | Network overview stats             |
