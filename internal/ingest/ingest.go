@@ -203,6 +203,16 @@ type channelMessageEvent struct {
 	SentAt      int64  `json:"sentAt"` // epoch ms
 }
 
+// nodeUpdateEvent is the JSON payload for a nodeUpdate WS event.
+type nodeUpdateEvent struct {
+	NodeID   string   `json:"nodeId"` // UUID string
+	Name     string   `json:"name"`
+	NodeType uint8    `json:"nodeType"`
+	IATA     string   `json:"iata"`
+	Lat      *float64 `json:"lat,omitempty"`
+	Lng      *float64 `json:"lng,omitempty"`
+}
+
 // packetObservationEvent is the JSON payload for a packetObservation WS event.
 // Shape matches the design doc § Server → Client events.
 type packetObservationEvent struct {
@@ -453,7 +463,20 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	if inserted {
 		w.runCapabilityDetection(ctx, packet.PayloadType(), packet.PathHashSize(), resolvedIDs)
 		w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:])
-		w.fanOut(packetHash[:], packet, iata, isNew, observerName, id, heardAt, oParams.RSSI, oParams.SNR, w.cfg.BrokerName)
+		evt := packetObservationEvent{}
+		evt.PacketHash = hex.EncodeToString(packetHash[:])
+		evt.Packet.PayloadType = packet.PayloadType()
+		evt.Packet.PayloadTypeName = packet.PayloadTypeString()
+		evt.Packet.RouteType = packet.RouteType()
+		evt.Packet.IsFirstObservation = isNew
+		evt.Observation.ObserverID = id.String()
+		evt.Observation.ObserverName = observerName
+		evt.Observation.IATA = iata
+		evt.Observation.HeardAt = heardAt.UnixMilli()
+		evt.Observation.RSSI = oParams.RSSI
+		evt.Observation.SNR = oParams.SNR
+		evt.Observation.SourceBroker = w.cfg.BrokerName
+		w.broadcast(hub.EventPacketObservation, iata, packet.PayloadType(), "", evt)
 	}
 }
 
@@ -628,6 +651,15 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 		if err := w.db.UpsertNodeIATA(ctx, nodeID, iata); err != nil {
 			log.Printf("ingest[%s]: db: upsert node IATA failed: %v", w.cfg.BrokerName, err)
 		}
+		evt := nodeUpdateEvent{
+			NodeID:   nodeID.String(),
+			Name:     advert.AppData().Name,
+			NodeType: advert.Type(),
+			IATA:     iata,
+			Lat:      lat,
+			Lng:      lon,
+		}
+		w.broadcast(hub.EventNodeUpdate, iata, meshcore.PayloadTypeAdvert, "", evt)
 		return
 	}
 	if packet.PayloadType() == meshcore.PayloadTypeGrpTxt {
@@ -703,25 +735,6 @@ func (w *Worker) broadcast(eventType hub.EventType, iata string, payloadType uin
 		PayloadType: payloadType,
 		ChannelHash: channelHash,
 	})
-}
-
-// fanOut builds and broadcasts the packetObservation event to connected WS clients.
-func (w *Worker) fanOut(packetHash []byte, p *meshcore.Packet, iata string, isFirst bool, observerName string, observerID uuid.UUID, heardAt time.Time, rssi int16, snr float32, sourceBroker string) {
-	evt := packetObservationEvent{}
-	evt.PacketHash = hex.EncodeToString(packetHash)
-	evt.Packet.PayloadType = p.PayloadType()
-	evt.Packet.PayloadTypeName = p.PayloadTypeString()
-	evt.Packet.RouteType = p.RouteType()
-	evt.Packet.IsFirstObservation = isFirst
-	evt.Observation.ObserverID = observerID.String()
-	evt.Observation.ObserverName = observerName
-	evt.Observation.IATA = iata
-	evt.Observation.HeardAt = heardAt.UnixMilli()
-	evt.Observation.RSSI = rssi
-	evt.Observation.SNR = snr
-	evt.Observation.SourceBroker = sourceBroker
-
-	w.broadcast(hub.EventPacketObservation, iata, p.PayloadType(), "", evt)
 }
 
 // parseNumber handles RSSI and SNR fields that different observer types send as
