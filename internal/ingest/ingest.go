@@ -429,8 +429,11 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	}
 	heardAt, err := time.Parse("2006-01-02T15:04:05.000000", envelope.Timestamp)
 	if err != nil {
-		log.Printf("ingest[%s]: error parsing time from %s/%s: %v", w.cfg.BrokerName, iata, pubkeyHex, err)
-		return
+		heardAt, err = time.Parse("2006-01-02T15:04:05", envelope.Timestamp)
+		if err != nil {
+			log.Printf("ingest[%s]: error parsing time from %s/%s: %v", w.cfg.BrokerName, iata, pubkeyHex, err)
+			return
+		}
 	}
 
 	radio, err := w.db.GetObserverRadio(ctx, id)
