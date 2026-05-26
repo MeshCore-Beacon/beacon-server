@@ -18,7 +18,7 @@ import (
 func ChannelsRouter(reader api.Reader) http.Handler {
 	r := chi.NewRouter()
 
-	// ListChannels handles GET /api/v1/channels
+	// GET /api/v1/channels
 	//
 	// Query params (all optional):
 	//
@@ -59,7 +59,7 @@ func ChannelsRouter(reader api.Reader) http.Handler {
 	})
 
 	r.Route("/{channelID}", func(r chi.Router) {
-		// GetChannel handles GET /api/v1/channels/{channelID}
+		// GET /api/v1/channels/{channelID}
 		//
 		// Returns channel detail including key for hashtag channels and message count.
 		// Other channel keys are server-side config; key material is never exposed via the API.
@@ -80,7 +80,7 @@ func ChannelsRouter(reader api.Reader) http.Handler {
 			}
 			respond(w, http.StatusOK, channel)
 		})
-		// ListChannelMessages handles GET /api/v1/channels/{channelID}/messages
+		// GET /api/v1/channels/{channelID}/messages
 		//
 		// Query params (all optional):
 		//

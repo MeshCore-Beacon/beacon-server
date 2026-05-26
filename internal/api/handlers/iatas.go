@@ -15,6 +15,8 @@ import (
 func IATAsRouter(reader api.Reader) http.Handler {
 	r := chi.NewRouter()
 
+	// GET  /iatas                                → ListIATAs
+	//
 	// Returns all known IATA codes with display name and coordinates where set.
 	// IATAs are auto-created on first packet arrival; config file overrides name/coords.
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
@@ -26,6 +28,8 @@ func IATAsRouter(reader api.Reader) http.Handler {
 		respond(w, http.StatusOK, iatas)
 	})
 
+	// GET  /iatas/{iata}                         → GetIATA
+	//
 	// Returns detail for a single IATA code including associated region memberships
 	// and basic recent stats.
 	r.Get("/{iata}", func(w http.ResponseWriter, r *http.Request) {

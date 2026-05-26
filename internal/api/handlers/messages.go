@@ -16,7 +16,7 @@ import (
 func MessagesRouter(reader api.Reader) http.Handler {
 	r := chi.NewRouter()
 
-	// ListMessages handles GET /api/v1/messages
+	// GET /api/v1/messages
 	//
 	// Query params (all optional)
 	//

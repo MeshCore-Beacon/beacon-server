@@ -19,6 +19,8 @@ import (
 func RegionsRouter(reader api.Reader) http.Handler {
 	r := chi.NewRouter()
 
+	// GET  /regions                              → ListRegions
+	//
 	// Returns all super-regions with their associated IATA codes, center
 	// coordinates, and zoom level for map initialisation.
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
@@ -29,6 +31,8 @@ func RegionsRouter(reader api.Reader) http.Handler {
 		respond(w, http.StatusOK, regions)
 	})
 
+	// GET  /regions/{regionId}                   → GetRegion
+	//
 	// Returns detail for a single super-region including its full IATA membership
 	// list and recent aggregate stats.
 	r.Get("/{regionId}", func(w http.ResponseWriter, r *http.Request) {
