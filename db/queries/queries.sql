@@ -55,8 +55,47 @@ RETURNING id;
 -- name: GetObserverByPubkey :one
 SELECT * FROM observers WHERE public_key = $1;
 
+-- name: GetObserverByID :one
+SELECT * FROM observers WHERE id = $1;
+
+-- name: GetObserverBrokers :many
+SELECT broker_name FROM observer_brokers
+WHERE observer_id = $1
+ORDER BY last_seen DESC;
+
 -- name: ListObservers :many
-SELECT * FROM observers ORDER BY last_seen DESC;
+SELECT
+  o.id,
+  o.display_name,
+  o.observer_type,
+  o.last_status_at,
+COALESCE(CASE
+    WHEN o.last_status_at > NOW() - INTERVAL '5 minutes' THEN 'online'
+    ELSE 'offline'
+END, 'offline')::text AS status,
+COALESCE((
+    SELECT po.iata
+    FROM packet_observations po
+    WHERE po.observer_id = o.id
+    ORDER BY po.heard_at DESC
+    LIMIT 1
+), '')::text AS iata
+FROM observers o
+LEFT JOIN observer_brokers ob ON ob.observer_id = o.id
+WHERE
+  ($1 = '' OR (
+    SELECT po.iata FROM packet_observations po
+    WHERE po.observer_id = o.id
+    ORDER BY po.heard_at DESC LIMIT 1
+  ) = $1)
+  AND ($2 = '' OR o.observer_type = $2)
+  AND ($3 = '' OR ob.broker_name = $3)
+  AND ($4 = '' OR CASE
+    WHEN o.last_status_at > NOW() - INTERVAL '5 minutes' THEN 'online'
+    ELSE 'offline'
+  END = $4)
+GROUP BY o.id
+ORDER BY o.last_seen DESC;
 
 -- name: GetObserverLastIATA :one
 SELECT iata FROM packet_observations

@@ -209,6 +209,64 @@ func (q *Queries) GetNodeByPubkey(ctx context.Context, publicKey []byte) (Node, 
 	return i, err
 }
 
+const getObserverBrokers = `-- name: GetObserverBrokers :many
+SELECT broker_name FROM observer_brokers
+WHERE observer_id = $1
+ORDER BY last_seen DESC
+`
+
+func (q *Queries) GetObserverBrokers(ctx context.Context, observerID uuid.UUID) ([]string, error) {
+	rows, err := q.db.Query(ctx, getObserverBrokers, observerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var broker_name string
+		if err := rows.Scan(&broker_name); err != nil {
+			return nil, err
+		}
+		items = append(items, broker_name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getObserverByID = `-- name: GetObserverByID :one
+SELECT id, public_key, display_name, observer_type, software_version, hardware_model, firmware_version, firmware_build, radio_freq_mhz, radio_sf, radio_bw_khz, radio_cr, battery_level, uptime_seconds, status_metadata, last_status_at, first_seen, last_seen, observation_count, metadata FROM observers WHERE id = $1
+`
+
+func (q *Queries) GetObserverByID(ctx context.Context, id uuid.UUID) (Observer, error) {
+	row := q.db.QueryRow(ctx, getObserverByID, id)
+	var i Observer
+	err := row.Scan(
+		&i.ID,
+		&i.PublicKey,
+		&i.DisplayName,
+		&i.ObserverType,
+		&i.SoftwareVersion,
+		&i.HardwareModel,
+		&i.FirmwareVersion,
+		&i.FirmwareBuild,
+		&i.RadioFreqMhz,
+		&i.RadioSf,
+		&i.RadioBwKhz,
+		&i.RadioCr,
+		&i.BatteryLevel,
+		&i.UptimeSeconds,
+		&i.StatusMetadata,
+		&i.LastStatusAt,
+		&i.FirstSeen,
+		&i.LastSeen,
+		&i.ObservationCount,
+		&i.Metadata,
+	)
+	return i, err
+}
+
 const getObserverByPubkey = `-- name: GetObserverByPubkey :one
 SELECT id, public_key, display_name, observer_type, software_version, hardware_model, firmware_version, firmware_build, radio_freq_mhz, radio_sf, radio_bw_khz, radio_cr, battery_level, uptime_seconds, status_metadata, last_status_at, first_seen, last_seen, observation_count, metadata FROM observers WHERE public_key = $1
 `
@@ -938,39 +996,77 @@ func (q *Queries) ListObservationsForPacket(ctx context.Context, packetHash []by
 }
 
 const listObservers = `-- name: ListObservers :many
-SELECT id, public_key, display_name, observer_type, software_version, hardware_model, firmware_version, firmware_build, radio_freq_mhz, radio_sf, radio_bw_khz, radio_cr, battery_level, uptime_seconds, status_metadata, last_status_at, first_seen, last_seen, observation_count, metadata FROM observers ORDER BY last_seen DESC
+SELECT
+  o.id,
+  o.display_name,
+  o.observer_type,
+  o.last_status_at,
+COALESCE(CASE
+    WHEN o.last_status_at > NOW() - INTERVAL '5 minutes' THEN 'online'
+    ELSE 'offline'
+END, 'offline')::text AS status,
+COALESCE((
+    SELECT po.iata
+    FROM packet_observations po
+    WHERE po.observer_id = o.id
+    ORDER BY po.heard_at DESC
+    LIMIT 1
+), '')::text AS iata
+FROM observers o
+LEFT JOIN observer_brokers ob ON ob.observer_id = o.id
+WHERE
+  ($1 = '' OR (
+    SELECT po.iata FROM packet_observations po
+    WHERE po.observer_id = o.id
+    ORDER BY po.heard_at DESC LIMIT 1
+  ) = $1)
+  AND ($2 = '' OR o.observer_type = $2)
+  AND ($3 = '' OR ob.broker_name = $3)
+  AND ($4 = '' OR CASE
+    WHEN o.last_status_at > NOW() - INTERVAL '5 minutes' THEN 'online'
+    ELSE 'offline'
+  END = $4)
+GROUP BY o.id
+ORDER BY o.last_seen DESC
 `
 
-func (q *Queries) ListObservers(ctx context.Context) ([]Observer, error) {
-	rows, err := q.db.Query(ctx, listObservers)
+type ListObserversParams struct {
+	Column1 interface{} `json:"column_1"`
+	Column2 interface{} `json:"column_2"`
+	Column3 interface{} `json:"column_3"`
+	Column4 interface{} `json:"column_4"`
+}
+
+type ListObserversRow struct {
+	ID           uuid.UUID          `json:"id"`
+	DisplayName  *string            `json:"display_name"`
+	ObserverType *string            `json:"observer_type"`
+	LastStatusAt pgtype.Timestamptz `json:"last_status_at"`
+	Status       string             `json:"status"`
+	Iata         string             `json:"iata"`
+}
+
+func (q *Queries) ListObservers(ctx context.Context, arg ListObserversParams) ([]ListObserversRow, error) {
+	rows, err := q.db.Query(ctx, listObservers,
+		arg.Column1,
+		arg.Column2,
+		arg.Column3,
+		arg.Column4,
+	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Observer{}
+	items := []ListObserversRow{}
 	for rows.Next() {
-		var i Observer
+		var i ListObserversRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.PublicKey,
 			&i.DisplayName,
 			&i.ObserverType,
-			&i.SoftwareVersion,
-			&i.HardwareModel,
-			&i.FirmwareVersion,
-			&i.FirmwareBuild,
-			&i.RadioFreqMhz,
-			&i.RadioSf,
-			&i.RadioBwKhz,
-			&i.RadioCr,
-			&i.BatteryLevel,
-			&i.UptimeSeconds,
-			&i.StatusMetadata,
 			&i.LastStatusAt,
-			&i.FirstSeen,
-			&i.LastSeen,
-			&i.ObservationCount,
-			&i.Metadata,
+			&i.Status,
+			&i.Iata,
 		); err != nil {
 			return nil, err
 		}

@@ -3,8 +3,43 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"time"
+
+	"github.com/google/uuid"
 )
+
+// ObserverSummary is the minimal observer representation used in list responses.
+type ObserverSummary struct {
+	ID           uuid.UUID `json:"id"`
+	DisplayName  *string   `json:"displayName,omitempty"`  // friendly name from /status messages
+	ObserverType *string   `json:"observerType,omitempty"` // e.g. "meshcoretomqtt", "meshcoreha"
+	IATA         string    `json:"iata"`                   // most recently heard IATA
+	Status       string    `json:"status"`                 // "online" or "offline" derived from last_status_at
+}
+
+// Observer is the full observer representation including radio config,
+// telemetry, broker memberships and raw status metadata.
+type Observer struct {
+	ObserverSummary
+	PublicKey        string          `json:"publicKey"` // hex-encoded public key
+	SoftwareVersion  *string         `json:"softwareVersion,omitempty"`
+	HardwareModel    *string         `json:"hardwareModel,omitempty"`
+	FirmwareVersion  *string         `json:"firmwareVersion,omitempty"`
+	FirmwareBuild    *string         `json:"firmwareBuild,omitempty"`
+	RadioFreqMHz     *float32        `json:"radioFreqMhz,omitempty"` // MHz e.g. 910.525
+	RadioSF          *int16          `json:"radioSf,omitempty"`      // LoRa spreading factor
+	RadioBWKHz       *float32        `json:"radioBwKhz,omitempty"`   // bandwidth in kHz
+	RadioCR          *int16          `json:"radioCr,omitempty"`      // coding rate denominator
+	BatteryLevel     *float32        `json:"batteryLevel,omitempty"` // volts, nil if mains powered
+	UptimeSeconds    *int64          `json:"uptimeSeconds,omitempty"`
+	StatusMetadata   json.RawMessage `json:"statusMetadata,omitempty"` // raw /status JSON payload
+	LastStatusAt     *string         `json:"lastStatusAt,omitempty"`   // RFC3339
+	FirstSeen        string          `json:"firstSeen"`                // RFC3339
+	LastSeen         string          `json:"lastSeen"`                 // RFC3339
+	ObservationCount int64           `json:"observationCount"`
+	Brokers          []string        `json:"brokers"` // broker names this observer has been seen on
+}
 
 // ChannelMessage represents a single decrypted channel message.
 // Only messages for channels with a known key are stored and returned.
@@ -94,4 +129,11 @@ type Reader interface {
 	// if the hash collides across different keys.
 	// Pass a zero time.Time for since to return all messages up to limit.
 	ListChannelMessagesByHash(ctx context.Context, hash []byte, since time.Time, limit int32) ([]ChannelMessage, error)
+	// ListObservers returns a summary list of observers with optional filters.
+	// All filter params are optional — pass empty string to skip a filter.
+	// status is "online" or "offline" derived from last_status_at recency.
+	ListObservers(ctx context.Context, iata, observerType, broker, status string) ([]ObserverSummary, error)
+	// GetObserver returns full detail for a single observer by UUID.
+	// Returns nil, pgx.ErrNoRows if the observer is not found.
+	GetObserver(ctx context.Context, observerID uuid.UUID) (*Observer, error)
 }

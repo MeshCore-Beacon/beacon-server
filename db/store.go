@@ -487,6 +487,86 @@ func (s *Store) ListChannelMessagesByHash(ctx context.Context, hash []byte, sinc
 	return messages, nil
 }
 
+// ListObservers returns a summary list of observers with optional filters.
+// All filter params are optional — pass empty string to skip a filter.
+// status is "online" or "offline" derived from last_status_at recency.
+func (s *Store) ListObservers(ctx context.Context, iata, observerType, broker, status string) ([]api.ObserverSummary, error) {
+	params := sqlc.ListObserversParams{
+		Column1: iata,
+		Column2: observerType,
+		Column3: broker,
+		Column4: status,
+	}
+	rows, err := s.q.ListObservers(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	observers := make([]api.ObserverSummary, 0, len(rows))
+	for _, v := range rows {
+		observer := api.ObserverSummary{
+			ID:     v.ID,
+			IATA:   v.Iata,
+			Status: v.Status,
+		}
+		if v.DisplayName != nil {
+			observer.DisplayName = v.DisplayName
+		}
+		if v.ObserverType != nil {
+			observer.ObserverType = v.ObserverType
+		}
+		observers = append(observers, observer)
+	}
+	return observers, nil
+}
+
+// GetObserver returns full detail for a single observer by UUID.
+// Returns nil, pgx.ErrNoRows if the observer is not found.
+func (s *Store) GetObserver(ctx context.Context, observerID uuid.UUID) (*api.Observer, error) {
+	obs, err := s.q.GetObserverByID(ctx, observerID)
+	if err != nil {
+		return nil, err
+	}
+	brokers, err := s.q.GetObserverBrokers(ctx, observerID)
+	if err != nil {
+		return nil, err
+	}
+	observer := api.Observer{
+		ObserverSummary: api.ObserverSummary{
+			ID:           obs.ID,
+			DisplayName:  obs.DisplayName,
+			ObserverType: obs.ObserverType,
+			Status:       "offline",
+		},
+		PublicKey:        hex.EncodeToString(obs.PublicKey),
+		SoftwareVersion:  obs.SoftwareVersion,
+		HardwareModel:    obs.HardwareModel,
+		FirmwareVersion:  obs.FirmwareVersion,
+		FirmwareBuild:    obs.FirmwareBuild,
+		RadioFreqMHz:     obs.RadioFreqMhz,
+		RadioSF:          obs.RadioSf,
+		RadioBWKHz:       obs.RadioBwKhz,
+		RadioCR:          obs.RadioCr,
+		BatteryLevel:     obs.BatteryLevel,
+		UptimeSeconds:    obs.UptimeSeconds,
+		StatusMetadata:   obs.StatusMetadata,
+		FirstSeen:        obs.FirstSeen.Time.Format(time.RFC3339),
+		LastSeen:         obs.LastSeen.Time.Format(time.RFC3339),
+		ObservationCount: *obs.ObservationCount,
+		Brokers:          brokers,
+	}
+	if obs.LastStatusAt.Valid && time.Since(obs.LastStatusAt.Time) < 5*time.Minute {
+		observer.Status = "online"
+	}
+	var lastStatusAt *string
+	if obs.LastStatusAt.Valid {
+		s := obs.LastStatusAt.Time.Format(time.RFC3339)
+		lastStatusAt = &s
+	}
+	observer.LastStatusAt = lastStatusAt
+	observer.IATA, _ = s.GetObserverLastIATA(ctx, observerID)
+	return &observer, nil
+}
+
 func toChannelMessage(id int64, packetHashHex string, channelHash []byte, senderName *string, content *string, sentAt pgtype.Timestamptz) api.ChannelMessage {
 	sn := ""
 	if senderName != nil {

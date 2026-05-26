@@ -3,7 +3,9 @@ package handlers
 import (
 	"net/http"
 
+	"github.com/MeshCore-Tower/tower-server/internal/api"
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 // ObserversRouter mounts all /observers routes onto a subrouter.
@@ -12,41 +14,55 @@ import (
 // GET  /observers/{observerId}               → GetObserver
 // GET  /observers/{observerId}/telemetry     → GetObserverTelemetry
 // GET  /observers/{observerId}/adverts       → ListObserverAdverts
-func ObserversRouter() http.Handler {
+func ObserversRouter(reader api.Reader) http.Handler {
 	r := chi.NewRouter()
 
-	r.Get("/", ListObservers)
+	// GET /api/v1/observers
+	//
+	// Query params (all optional):
+	//
+	//	iata=YOW
+	//	type=meshcoretomqtt
+	//	broker=mqtt1
+	//	status=online
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		iata := r.URL.Query().Get("iata")
+		observerType := r.URL.Query().Get("type")
+		broker := r.URL.Query().Get("broker")
+		status := r.URL.Query().Get("status")
+		observers, err := reader.ListObservers(r.Context(), iata, observerType, broker, status)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to get list of observers")
+			return
+		}
+		respond(w, http.StatusOK, observers)
+	})
 
 	r.Route("/{observerId}", func(r chi.Router) {
-		r.Get("/", GetObserver)
+		// GET /api/v1/observers/{observerId}
+		//
+		// Returns full observer detail including broker badges, type, and recent stats.
+		// Note: observer_owners data is never exposed via the public API.
+		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+			observerID := chi.URLParam(r, "observerId")
+			id, err := uuid.Parse(observerID)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "falied to parse observer UUID")
+				return
+			}
+
+			obs, err := reader.GetObserver(r.Context(), id)
+			if err != nil {
+				respondError(w, http.StatusNotFound, "observer not found")
+				return
+			}
+			respond(w, http.StatusOK, obs)
+		})
 		r.Get("/telemetry", GetObserverTelemetry)
 		r.Get("/adverts", ListObserverAdverts)
 	})
 
 	return r
-}
-
-// ListObservers handles GET /api/v1/observers
-//
-// Query params (all optional):
-//
-//	iata=YOW
-//	type=meshcoretomqtt
-//	broker=mqtt1
-//	status=online
-func ListObservers(w http.ResponseWriter, r *http.Request) {
-	// TODO: query observers with optional filters, write JSON response.
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// GetObserver handles GET /api/v1/observers/{observerId}
-//
-// Returns full observer detail including broker badges, type, and recent stats.
-// Note: observer_owners data is never exposed via the public API.
-func GetObserver(w http.ResponseWriter, r *http.Request) {
-	// observerId := chi.URLParam(r, "observerId")
-	// TODO: fetch observer (exclude observer_owners fields), write JSON response.
-	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // GetObserverTelemetry handles GET /api/v1/observers/{observerId}/telemetry
