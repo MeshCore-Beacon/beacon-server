@@ -233,6 +233,18 @@ func (s *Store) UpsertChannel(ctx context.Context, channelHash []byte, keyFinger
 	return int(row.ID), nil
 }
 
+// UpsertChannelHashOnly upserts a hash-only channel row for cases where the
+// channel key is unknown. Uses the partial unique index to ensure only one
+// hash-only row exists per channel hash. The return value is the channel ID
+// but can be safely ignored since unknown-key channels have no messages.
+func (s *Store) UpsertChannelHashOnly(ctx context.Context, channelHash []byte) (int, error) {
+	rowID, err := s.q.UpsertChannelHashOnly(ctx, channelHash)
+	if err != nil {
+		return 0, err
+	}
+	return int(rowID), nil
+}
+
 // ListIATAs returns all known IATA codes with display name and coordinates.
 // IATAs are auto-created on first packet arrival from that location.
 func (s *Store) ListIATAs(ctx context.Context) ([]api.IATA, error) {

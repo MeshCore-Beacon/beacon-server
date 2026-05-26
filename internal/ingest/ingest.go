@@ -100,6 +100,12 @@ type DB interface {
 	// UpsertChannel upserts a channel row by (hash, keyFingerprint) and returns its integer ID.
 	// Pass nil keyFingerprint to record a hash-only row when the key is unknown.
 	UpsertChannel(ctx context.Context, channelHash []byte, keyFingerprint []byte, name string, hashtag string) (int, error)
+
+	// UpsertChannelHashOnly upserts a hash-only channel row for cases where the
+	// channel key is unknown. Uses the partial unique index to ensure only one
+	// hash-only row exists per channel hash. The return value is the channel ID
+	// but can be safely ignored since unknown-key channels have no messages.
+	UpsertChannelHashOnly(ctx context.Context, channelHash []byte) (int, error)
 }
 
 // UpsertPacketParams mirrors the columns written on packets upsert.
@@ -671,7 +677,7 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 		channelHashBytes := []byte{grpTxt.ChannelHash}
 
 		// Always upsert a hash-only row so unknown channels are recorded.
-		_, _ = w.db.UpsertChannel(ctx, channelHashBytes, nil, "", "")
+		_, _ = w.db.UpsertChannelHashOnly(ctx, channelHashBytes)
 
 		// Try each known key entry for this hash.
 		entries := w.keys.GetKey(channelHashBytes)

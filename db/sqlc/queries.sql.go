@@ -1319,6 +1319,21 @@ func (q *Queries) UpsertChannel(ctx context.Context, arg UpsertChannelParams) (C
 	return i, err
 }
 
+const upsertChannelHashOnly = `-- name: UpsertChannelHashOnly :one
+INSERT INTO channels (channel_hash, last_seen)
+VALUES ($1, NOW())
+ON CONFLICT (channel_hash) WHERE key_fingerprint IS NULL DO UPDATE SET
+  last_seen = NOW()
+RETURNING id
+`
+
+func (q *Queries) UpsertChannelHashOnly(ctx context.Context, channelHash []byte) (int32, error) {
+	row := q.db.QueryRow(ctx, upsertChannelHashOnly, channelHash)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
+}
+
 const upsertIATA = `-- name: UpsertIATA :exec
 
 INSERT INTO iata_codes (iata)

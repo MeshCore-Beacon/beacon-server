@@ -236,6 +236,13 @@ ON CONFLICT (channel_hash, key_fingerprint) DO UPDATE SET
   message_count = CASE WHEN $6 THEN channels.message_count + 1 ELSE channels.message_count END
 RETURNING *;
 
+-- name: UpsertChannelHashOnly :one
+INSERT INTO channels (channel_hash, last_seen)
+VALUES ($1, NOW())
+ON CONFLICT (channel_hash) WHERE key_fingerprint IS NULL DO UPDATE SET
+  last_seen = NOW()
+RETURNING id;
+
 -- name: SetChannelKeyKnown :exec
 UPDATE channels SET key_known = TRUE
 WHERE channel_hash = $1 AND key_fingerprint = $2;
