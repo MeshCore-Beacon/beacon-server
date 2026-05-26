@@ -275,6 +275,10 @@ CREATE TABLE channels (
   UNIQUE (channel_hash, key_fingerprint)
 );
 
+CREATE UNIQUE INDEX idx_channels_hash_no_key 
+ON channels (channel_hash) 
+WHERE key_fingerprint IS NULL;
+
 CREATE INDEX idx_channels_last_seen ON channels(last_seen DESC);
 CREATE INDEX idx_channels_hash ON channels(channel_hash);
 CREATE INDEX idx_channels_hashtag ON channels(hashtag) WHERE hashtag IS NOT NULL;
