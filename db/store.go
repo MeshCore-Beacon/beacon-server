@@ -152,9 +152,16 @@ func (s *Store) UpsertNodeIATA(ctx context.Context, nodeID uuid.UUID, iata strin
 }
 
 // InsertChannelMessage stores a decrypted group text message.
-func (s *Store) InsertChannelMessage(ctx context.Context, m ingest.InsertChannelMessageParams) error {
+func (s *Store) InsertChannelMessage(ctx context.Context, m ingest.InsertChannelMessageParams) (bool, error) {
 	params := sqlc.InsertChannelMessageParams{ChannelID: int32(m.ChannelID), PacketHash: m.PacketHash, SenderName: &m.SenderName, Content: &m.Content, SentAt: pgtype.Timestamptz{Time: m.SentAt, Valid: true}}
-	return s.q.InsertChannelMessage(ctx, params)
+	_, err := s.q.InsertChannelMessage(ctx, params)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil // duplicate
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // UpdateObserverStatus updates the observer row from a /status message.

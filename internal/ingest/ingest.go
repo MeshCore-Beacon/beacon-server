@@ -81,8 +81,8 @@ type DB interface {
 	// UpsertNodeIATA upserts a node_iatas row.
 	UpsertNodeIATA(ctx context.Context, nodeID uuid.UUID, iata string) error
 
-	// InsertChannelMessage stores a decrypted group text message.
-	InsertChannelMessage(ctx context.Context, m InsertChannelMessageParams) error
+	// InsertChannelMessage stores a decrypted group text message. Returns insert success and an error.
+	InsertChannelMessage(ctx context.Context, m InsertChannelMessageParams) (bool, error)
 
 	// UpdateObserverStatus updates the observer row from a /status message. Returns the OberserID
 	// and any error.
@@ -713,20 +713,23 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 			SentAt:     time.Unix(int64(payload.Timestamp), 0),
 			Content:    payload.Text,
 		}
-		err = w.db.InsertChannelMessage(ctx, params)
+		newMsg, err := w.db.InsertChannelMessage(ctx, params)
 		if err != nil {
 			log.Printf("ingest[%s]: db: insert channel message failed: %v", w.cfg.BrokerName, err)
+			return
 		}
 
-		evt := channelMessageEvent{
-			ChannelID:   channelID,
-			ChannelHash: hex.EncodeToString(channelHashBytes),
-			PacketHash:  hex.EncodeToString(packetHash),
-			SenderName:  payload.Sender,
-			Content:     payload.Text,
-			SentAt:      time.Unix(int64(payload.Timestamp), 0).UnixMilli(),
+		if newMsg {
+			evt := channelMessageEvent{
+				ChannelID:   channelID,
+				ChannelHash: hex.EncodeToString(channelHashBytes),
+				PacketHash:  hex.EncodeToString(packetHash),
+				SenderName:  payload.Sender,
+				Content:     payload.Text,
+				SentAt:      time.Unix(int64(payload.Timestamp), 0).UnixMilli(),
+			}
+			w.broadcast(hub.EventChannelMessage, iata, 0, fmt.Sprintf("%02x", grpTxt.ChannelHash), evt)
 		}
-		w.broadcast(hub.EventChannelMessage, iata, 0, fmt.Sprintf("%02x", grpTxt.ChannelHash), evt)
 		return
 	}
 }

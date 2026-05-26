@@ -495,11 +495,12 @@ func (q *Queries) GetTopNodes(ctx context.Context, arg GetTopNodesParams) ([]MvT
 	return items, nil
 }
 
-const insertChannelMessage = `-- name: InsertChannelMessage :exec
+const insertChannelMessage = `-- name: InsertChannelMessage :one
 
 INSERT INTO channel_messages (channel_id, packet_hash, sender_name, content, sent_at)
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (packet_hash) DO NOTHING
+RETURNING id
 `
 
 type InsertChannelMessageParams struct {
@@ -513,15 +514,17 @@ type InsertChannelMessageParams struct {
 // ============================================================
 // CHANNEL MESSAGES
 // ============================================================
-func (q *Queries) InsertChannelMessage(ctx context.Context, arg InsertChannelMessageParams) error {
-	_, err := q.db.Exec(ctx, insertChannelMessage,
+func (q *Queries) InsertChannelMessage(ctx context.Context, arg InsertChannelMessageParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertChannelMessage,
 		arg.ChannelID,
 		arg.PacketHash,
 		arg.SenderName,
 		arg.Content,
 		arg.SentAt,
 	)
-	return err
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const insertObservation = `-- name: InsertObservation :one

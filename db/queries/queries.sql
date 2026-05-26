@@ -316,10 +316,11 @@ SELECT * FROM channels WHERE id = $1;
 -- CHANNEL MESSAGES
 -- ============================================================
 
--- name: InsertChannelMessage :exec
+-- name: InsertChannelMessage :one
 INSERT INTO channel_messages (channel_id, packet_hash, sender_name, content, sent_at)
 VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (packet_hash) DO NOTHING;
+ON CONFLICT (packet_hash) DO NOTHING
+RETURNING id;
 
 -- name: ListChannelMessages :many
 -- Returns messages for a channel identified by integer ID.
