@@ -398,7 +398,7 @@ func (s *Store) ListChannels(ctx context.Context, limit int32, hash []byte, iata
 			ID:          int(v.ID),
 			Name:        v.Name,
 			ChannelHash: hex.EncodeToString(v.ChannelHash),
-			LastSeen:    v.LastSeen.Time.Format(time.RFC3339),
+			LastSeen:    v.LastSeen.Time.UnixMilli(),
 			IsHashtag:   v.IsHashtag != nil && *v.IsHashtag,
 			KeyKnown:    v.KeyKnown != nil && *v.KeyKnown,
 		})
@@ -418,7 +418,7 @@ func (s *Store) GetChannel(ctx context.Context, channelID int32) (*api.Channel, 
 			ID:          int(row.ID),
 			Name:        row.Name,
 			ChannelHash: hex.EncodeToString(row.ChannelHash),
-			LastSeen:    row.LastSeen.Time.Format(time.RFC3339),
+			LastSeen:    row.LastSeen.Time.UnixMilli(),
 			IsHashtag:   row.IsHashtag != nil && *row.IsHashtag,
 			KeyKnown:    row.KeyKnown != nil && *row.KeyKnown,
 		},
@@ -559,18 +559,18 @@ func (s *Store) GetObserver(ctx context.Context, observerID uuid.UUID) (*api.Obs
 		BatteryLevel:     obs.BatteryLevel,
 		UptimeSeconds:    obs.UptimeSeconds,
 		StatusMetadata:   obs.StatusMetadata,
-		FirstSeen:        obs.FirstSeen.Time.Format(time.RFC3339),
-		LastSeen:         obs.LastSeen.Time.Format(time.RFC3339),
+		FirstSeen:        obs.FirstSeen.Time.UnixMilli(),
+		LastSeen:         obs.LastSeen.Time.UnixMilli(),
 		ObservationCount: *obs.ObservationCount,
 		Brokers:          brokers,
 	}
 	if obs.LastStatusAt.Valid && time.Since(obs.LastStatusAt.Time) < 5*time.Minute {
 		observer.Status = "online"
 	}
-	var lastStatusAt *string
+	var lastStatusAt *int64
 	if obs.LastStatusAt.Valid {
-		s := obs.LastStatusAt.Time.Format(time.RFC3339)
-		lastStatusAt = &s
+		ms := obs.LastStatusAt.Time.UnixMilli()
+		lastStatusAt = &ms
 	}
 	observer.LastStatusAt = lastStatusAt
 	observer.IATA, _ = s.GetObserverLastIATA(ctx, observerID)
@@ -592,6 +592,6 @@ func toChannelMessage(id int64, packetHashHex string, channelHash []byte, sender
 		ChannelHash: hex.EncodeToString(channelHash),
 		SenderName:  sn,
 		Content:     ct,
-		SentAt:      sentAt.Time.Format(time.RFC3339),
+		SentAt:      sentAt.Time.UnixMilli(),
 	}
 }

@@ -34,9 +34,9 @@ type Observer struct {
 	BatteryLevel     *float32        `json:"batteryLevel,omitempty"` // volts, nil if mains powered
 	UptimeSeconds    *int64          `json:"uptimeSeconds,omitempty"`
 	StatusMetadata   json.RawMessage `json:"statusMetadata,omitempty"` // raw /status JSON payload
-	LastStatusAt     *string         `json:"lastStatusAt,omitempty"`   // RFC3339
-	FirstSeen        string          `json:"firstSeen"`                // RFC3339
-	LastSeen         string          `json:"lastSeen"`                 // RFC3339
+	LastStatusAt     *int64          `json:"lastStatusAt,omitempty"`   // epoch ms
+	FirstSeen        int64           `json:"firstSeen"`                // epoch ms
+	LastSeen         int64           `json:"lastSeen"`                 // epoch ms
 	ObservationCount int64           `json:"observationCount"`
 	Brokers          []string        `json:"brokers"` // broker names this observer has been seen on
 }
@@ -49,7 +49,7 @@ type ChannelMessage struct {
 	ChannelHash string `json:"channelHash"` // hex-encoded single-byte channel hash
 	SenderName  string `json:"senderName"`  // display name from the decrypted payload
 	Content     string `json:"content"`     // decrypted message text
-	SentAt      string `json:"sentAt"`      // RFC3339 timestamp from the packet payload
+	SentAt      int64  `json:"sentAt"`      // epoch ms
 }
 
 // ChannelSummary is the minimal channel representation used in list responses.
@@ -57,7 +57,7 @@ type ChannelSummary struct {
 	ID          int     `json:"id"`
 	Name        *string `json:"name,omitempty"` // display name, nil if not set
 	ChannelHash string  `json:"channelHash"`    // hex-encoded single-byte hash
-	LastSeen    string  `json:"lastSeen"`       // ISO 8601 timestamp
+	LastSeen    int64   `json:"lastSeen"`       // epoch ms
 	IsHashtag   bool    `json:"isHashtag"`      // true if derived from a hashtag PSK
 	KeyKnown    bool    `json:"keyKnown"`       // true if Tower has a decryption key
 }
