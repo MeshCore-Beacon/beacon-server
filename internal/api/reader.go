@@ -116,19 +116,22 @@ type Reader interface {
 	// ListChannels returns a summary list of all known channels ordered by last seen.
 	// Includes both hashtag-derived and explicit key channels.
 	// Channels with unknown keys are included with KeyKnown=false.
-	ListChannels(ctx context.Context, limit int32, hash []byte) ([]ChannelSummary, error)
+	// Pass nil hash to skip hash filtering. Pass empty string iata to return all channels.
+	ListChannels(ctx context.Context, limit int32, hash []byte, iata string) ([]ChannelSummary, error)
 	// GetChannel returns full detail for a single channel by its integer ID.
 	// Returns nil, pgx.ErrNoRows if the channel is not found.
 	GetChannel(ctx context.Context, channelID int32) (*Channel, error)
 	// ListChannelMessages returns paginated messages for a channel identified by its integer ID.
 	// Used by the /channels/{id}/messages endpoint.
 	// Pass a zero time.Time for since to return all messages up to limit.
-	ListChannelMessages(ctx context.Context, channelID *int32, since time.Time, limit int32) ([]ChannelMessage, error)
+	// Pass empty string iata to return messages from all IATAs.
+	ListChannelMessages(ctx context.Context, channelID *int32, since time.Time, limit int32, iata string) ([]ChannelMessage, error)
 	// ListChannelMessagesByHash returns paginated messages for all channels matching the given hash.
 	// Used by the /messages?hash= endpoint. May return messages from multiple channels
 	// if the hash collides across different keys.
 	// Pass a zero time.Time for since to return all messages up to limit.
-	ListChannelMessagesByHash(ctx context.Context, hash []byte, since time.Time, limit int32) ([]ChannelMessage, error)
+	// Pass empty string iata to return messages from all IATAs.
+	ListChannelMessagesByHash(ctx context.Context, hash []byte, since time.Time, limit int32, iata string) ([]ChannelMessage, error)
 	// ListObservers returns a summary list of observers with optional filters.
 	// All filter params are optional — pass empty string to skip a filter.
 	// status is "online" or "offline" derived from last_status_at recency.

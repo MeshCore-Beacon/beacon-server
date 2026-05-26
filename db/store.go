@@ -371,23 +371,19 @@ func (s *Store) UpsertRegionIATA(ctx context.Context, regionID int32, iata strin
 // Includes both hashtag-derived and explicit key channels.
 // Channels with unknown keys are included with KeyKnown=false.
 // Filters on hash if provided, this is the hex channel hash
-func (s *Store) ListChannels(ctx context.Context, limit int32, hash []byte) ([]api.ChannelSummary, error) {
-	var rows []sqlc.Channel
-	if hash != nil {
-		r, err := s.q.GetChannelsByHash(ctx, sqlc.GetChannelsByHashParams{
-			ChannelHash: hash,
-			Limit:       limit,
-		})
-		if err != nil {
-			return nil, err
-		}
-		rows = r
-	} else {
-		r, err := s.q.ListChannels(ctx, limit)
-		if err != nil {
-			return nil, err
-		}
-		rows = r
+// ListChannels returns a summary list of all known channels ordered by last seen.
+// Pass nil hash to skip hash filtering. Pass empty string iata to return channels from all IATAs.
+// IATA filtering returns channels that have messages heard in the given IATA.
+func (s *Store) ListChannels(ctx context.Context, limit int32, hash []byte, iata string) ([]api.ChannelSummary, error) {
+	// Note: after sqlc generate, verify Column1/Column2/Column3 param names
+	// match what sqlc generated for the updated ListChannels query.
+	rows, err := s.q.ListChannels(ctx, sqlc.ListChannelsParams{
+		Column1: hash,
+		Column2: iata,
+		Limit:   limit,
+	})
+	if err != nil {
+		return nil, err
 	}
 	channels := make([]api.ChannelSummary, 0, len(rows))
 	for _, v := range rows {
@@ -400,7 +396,6 @@ func (s *Store) ListChannels(ctx context.Context, limit int32, hash []byte) ([]a
 			KeyKnown:    v.KeyKnown != nil && *v.KeyKnown,
 		})
 	}
-
 	return channels, nil
 }
 
@@ -433,33 +428,38 @@ func (s *Store) GetChannel(ctx context.Context, channelID int32) (*api.Channel, 
 	return &channel, nil
 }
 
-// ListChannelMessages returns paginated messages for a channel identified by its integer ID.
-// Used by the /channels/{id}/messages endpoint.
+// ListChannelMessages returns paginated messages with optional channel ID, time and IATA filters.
+// Pass nil channelID to return messages across all channels.
 // Pass a zero time.Time for since to return all messages up to limit.
-func (s *Store) ListChannelMessages(ctx context.Context, channelID *int32, since time.Time, limit int32) ([]api.ChannelMessage, error) {
+// Pass empty string iata to return messages from all IATAs.
+// Note: after sqlc generate, verify generated param field names match.
+func (s *Store) ListChannelMessages(ctx context.Context, channelID *int32, since time.Time, limit int32, iata string) ([]api.ChannelMessage, error) {
+	ts := pgtype.Timestamptz{Time: since, Valid: !since.IsZero()}
 	var messages []api.ChannelMessage
 	if channelID == nil {
 		rows, err := s.q.ListAllChannelMessages(ctx, sqlc.ListAllChannelMessagesParams{
-			Column1: pgtype.Timestamptz{Time: since, Valid: !since.IsZero()},
+			Column1: ts,
+			Column2: iata,
 			Limit:   limit,
 		})
-		messages = make([]api.ChannelMessage, 0, len(rows))
 		if err != nil {
 			return nil, err
 		}
+		messages = make([]api.ChannelMessage, 0, len(rows))
 		for _, v := range rows {
 			messages = append(messages, toChannelMessage(v.ID, v.PacketHashHex, v.ChannelHash, v.SenderName, v.Content, v.SentAt))
 		}
 	} else {
 		rows, err := s.q.ListChannelMessages(ctx, sqlc.ListChannelMessagesParams{
 			ChannelID: *channelID,
-			Column2:   pgtype.Timestamptz{Time: since, Valid: !since.IsZero()},
+			Column2:   ts,
+			Column3:   iata,
 			Limit:     limit,
 		})
-		messages = make([]api.ChannelMessage, 0, len(rows))
 		if err != nil {
 			return nil, err
 		}
+		messages = make([]api.ChannelMessage, 0, len(rows))
 		for _, v := range rows {
 			messages = append(messages, toChannelMessage(v.ID, v.PacketHashHex, v.ChannelHash, v.SenderName, v.Content, v.SentAt))
 		}
@@ -471,10 +471,13 @@ func (s *Store) ListChannelMessages(ctx context.Context, channelID *int32, since
 // Used by the /messages?hash= endpoint. May return messages from multiple channels
 // if the hash collides across different keys.
 // Pass a zero time.Time for since to return all messages up to limit.
-func (s *Store) ListChannelMessagesByHash(ctx context.Context, hash []byte, since time.Time, limit int32) ([]api.ChannelMessage, error) {
+// Pass empty string iata to return messages from all IATAs.
+// Note: after sqlc generate, verify generated param field names match.
+func (s *Store) ListChannelMessagesByHash(ctx context.Context, hash []byte, since time.Time, limit int32, iata string) ([]api.ChannelMessage, error) {
 	rows, err := s.q.ListChannelMessagesByHash(ctx, sqlc.ListChannelMessagesByHashParams{
 		ChannelHash: hash,
 		Column2:     pgtype.Timestamptz{Time: since, Valid: !since.IsZero()},
+		Column3:     iata,
 		Limit:       limit,
 	})
 	if err != nil {

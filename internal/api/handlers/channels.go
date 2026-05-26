@@ -22,9 +22,9 @@ func ChannelsRouter(reader api.Reader) http.Handler {
 	//
 	// Query params (all optional):
 	//
-	//	hash=<hex>
+	//	hash=<hex>       filter by single-byte channel hash
+	//	iata=<code>      filter by IATA code (channels with messages heard in that IATA)
 	//	limit=50
-	//	cursor=<opaque>
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		var limit int64 = 50
 		if limitParam := r.URL.Query().Get("limit"); limitParam != "" {
@@ -35,22 +35,21 @@ func ChannelsRouter(reader api.Reader) http.Handler {
 			}
 			limit = l
 		}
-		var channels []api.ChannelSummary
-		var err error
+		iata := r.URL.Query().Get("iata")
+		var hashHex []byte
 		if hash := r.URL.Query().Get("hash"); hash != "" {
-			hashHex, decodeErr := hex.DecodeString(hash)
+			h, decodeErr := hex.DecodeString(hash)
 			if decodeErr != nil {
 				respondError(w, http.StatusBadRequest, "invalid channel hash")
 				return
 			}
-			if len(hashHex) != 1 {
+			if len(h) != 1 {
 				respondError(w, http.StatusBadRequest, "hash must be a single hex byte")
 				return
 			}
-			channels, err = reader.ListChannels(r.Context(), int32(limit), hashHex)
-		} else {
-			channels, err = reader.ListChannels(r.Context(), int32(limit), nil)
+			hashHex = h
 		}
+		channels, err := reader.ListChannels(r.Context(), int32(limit), hashHex, iata)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
@@ -84,9 +83,9 @@ func ChannelsRouter(reader api.Reader) http.Handler {
 		//
 		// Query params (all optional):
 		//
-		//	since=<epoch ms>
+		//	since=<epoch ms>   return messages after this timestamp
+		//	iata=<code>        filter by IATA code
 		//	limit=50
-		//	cursor=<opaque>
 		//
 		// Returns paginated decrypted channel messages.
 		r.Get("/messages", func(w http.ResponseWriter, r *http.Request) {
@@ -105,9 +104,8 @@ func ChannelsRouter(reader api.Reader) http.Handler {
 				if err != nil {
 					respondError(w, http.StatusBadRequest, "limit must be an integer")
 					return
-				} else {
-					limit = l
 				}
+				limit = l
 			}
 			var since time.Time
 			if sinceParam := r.URL.Query().Get("since"); sinceParam != "" {
@@ -118,8 +116,9 @@ func ChannelsRouter(reader api.Reader) http.Handler {
 				}
 				since = time.UnixMilli(ms)
 			}
+			iata := r.URL.Query().Get("iata")
 			chanID := int32(id)
-			messages, err := reader.ListChannelMessages(r.Context(), &chanID, since, int32(limit))
+			messages, err := reader.ListChannelMessages(r.Context(), &chanID, since, int32(limit), iata)
 			if err != nil {
 				respondError(w, http.StatusInternalServerError, "internal server error")
 				return

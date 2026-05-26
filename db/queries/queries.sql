@@ -287,7 +287,16 @@ UPDATE channels SET key_known = TRUE
 WHERE channel_hash = $1 AND key_fingerprint = $2;
 
 -- name: ListChannels :many
-SELECT * FROM channels ORDER BY last_seen DESC LIMIT $1;
+-- Returns channels ordered by last seen, optionally filtered by hash and/or IATA.
+-- Pass NULL for hash to skip hash filtering. Pass empty string for iata to skip IATA filtering.
+-- IATA filter returns channels that have been active (have messages heard) in that IATA.
+SELECT DISTINCT c.* FROM channels c
+LEFT JOIN channel_messages cm ON cm.channel_id = c.id
+LEFT JOIN packet_observations po ON po.packet_hash = cm.packet_hash
+WHERE ($1::bytea IS NULL OR c.channel_hash = $1)
+  AND ($2 = '' OR po.iata = $2)
+ORDER BY c.last_seen DESC
+LIMIT $3;
 
 -- name: GetChannelsByHash :many
 -- Returns all channels for a given hash (may be multiple on hash collision).
@@ -313,31 +322,43 @@ VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (packet_hash) DO NOTHING;
 
 -- name: ListChannelMessages :many
-SELECT cm.*, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash
+-- Returns messages for a channel identified by integer ID.
+-- Pass a zero/null timestamp for since to return all messages up to limit.
+-- Pass empty string for iata to skip IATA filtering.
+SELECT DISTINCT ON (cm.id) cm.*, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash
 FROM channel_messages cm
-JOIN packets p ON p.packet_hash = cm.packet_hash
 JOIN channels c ON c.id = cm.channel_id
+JOIN packet_observations po ON po.packet_hash = cm.packet_hash
 WHERE cm.channel_id = $1
   AND ($2::timestamptz IS NULL OR cm.sent_at >= $2)
-ORDER BY cm.sent_at DESC
-LIMIT $3;
+  AND ($3 = '' OR po.iata = $3)
+ORDER BY cm.id, cm.sent_at DESC
+LIMIT $4;
 
 -- name: ListAllChannelMessages :many
-SELECT cm.*, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash
+-- Returns all messages across all channels with optional time and IATA filters.
+-- Pass empty string for iata to skip IATA filtering.
+SELECT DISTINCT ON (cm.id) cm.*, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash
 FROM channel_messages cm
-JOIN packets p ON p.packet_hash = cm.packet_hash
 JOIN channels c ON c.id = cm.channel_id
+JOIN packet_observations po ON po.packet_hash = cm.packet_hash
 WHERE ($1::timestamptz IS NULL OR cm.sent_at >= $1)
-ORDER BY cm.sent_at DESC
-LIMIT $2;
+  AND ($2 = '' OR po.iata = $2)
+ORDER BY cm.id, cm.sent_at DESC
+LIMIT $3;
 
 -- name: ListChannelMessagesByHash :many
-SELECT cm.*, c.channel_hash FROM channel_messages cm
+-- Returns messages for all channels matching a hash byte.
+-- May return messages from multiple channels if the hash collides across different keys.
+-- Pass empty string for iata to skip IATA filtering.
+SELECT DISTINCT ON (cm.id) cm.*, c.channel_hash FROM channel_messages cm
 JOIN channels c ON c.id = cm.channel_id
+JOIN packet_observations po ON po.packet_hash = cm.packet_hash
 WHERE c.channel_hash = $1
   AND ($2::timestamptz IS NULL OR cm.sent_at >= $2)
-ORDER BY cm.sent_at DESC
-LIMIT $3;
+  AND ($3 = '' OR po.iata = $3)
+ORDER BY cm.id, cm.sent_at DESC
+LIMIT $4;
 
 -- ============================================================
 -- STATS

@@ -18,12 +18,13 @@ func MessagesRouter(reader api.Reader) http.Handler {
 
 	// GET /api/v1/messages
 	//
-	// Query params (all optional)
+	// Query params (all optional):
 	//
-	//	since=<epoch ms>
+	//	since=<epoch ms>    return messages after this timestamp
+	//	iata=<code>         filter by IATA code
 	//	limit=50
 	//
-	// (mutually exclusive — provide one or neither, not both):
+	// Mutually exclusive — provide one or neither, not both:
 	//
 	//	channelId=<int32>   filter by channel integer ID
 	//	channelHash=<hex>   filter by channel hash byte
@@ -75,12 +76,15 @@ func MessagesRouter(reader api.Reader) http.Handler {
 				respondError(w, http.StatusBadRequest, "channel hash must be a single hex byte")
 				return
 			}
-			messages, err = reader.ListChannelMessagesByHash(r.Context(), hashHex, since, int32(limit))
+			iata := r.URL.Query().Get("iata")
+		messages, err = reader.ListChannelMessagesByHash(r.Context(), hashHex, since, int32(limit), iata)
 		} else if channelIDParam != "" {
+			iata := r.URL.Query().Get("iata")
 			chanID := int32(id)
-			messages, err = reader.ListChannelMessages(r.Context(), &chanID, since, int32(limit))
+			messages, err = reader.ListChannelMessages(r.Context(), &chanID, since, int32(limit), iata)
 		} else {
-			messages, err = reader.ListChannelMessages(r.Context(), nil, since, int32(limit))
+			iata := r.URL.Query().Get("iata")
+			messages, err = reader.ListChannelMessages(r.Context(), nil, since, int32(limit), iata)
 		}
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "internal server error")
