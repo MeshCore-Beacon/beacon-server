@@ -20,7 +20,7 @@ func IATAsRouter(reader api.Reader) http.Handler {
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		iatas, err := reader.ListIATAs(r.Context())
 		if err != nil {
-			respond(w, http.StatusNotFound, map[string]string{"error": "no IATAs found"})
+			respondError(w, http.StatusNotFound, "no IATAs found")
 			return
 		}
 		respond(w, http.StatusOK, iatas)
@@ -32,7 +32,7 @@ func IATAsRouter(reader api.Reader) http.Handler {
 		iata := chi.URLParam(r, "iata")
 		result, err := reader.GetIATA(r.Context(), iata)
 		if err != nil {
-			respond(w, http.StatusNotFound, map[string]string{"error": "IATA not found"})
+			respondError(w, http.StatusNotFound, "IATA not found")
 			return
 		}
 		respond(w, http.StatusOK, result)

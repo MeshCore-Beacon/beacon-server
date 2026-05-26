@@ -24,7 +24,7 @@ func RegionsRouter(reader api.Reader) http.Handler {
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		regions, err := reader.ListRegions(r.Context())
 		if err != nil {
-			respond(w, http.StatusNotFound, map[string]string{"error": "no regions found"})
+			respondError(w, http.StatusNotFound, "no regions found")
 		}
 		respond(w, http.StatusOK, regions)
 	})
@@ -35,12 +35,12 @@ func RegionsRouter(reader api.Reader) http.Handler {
 		regionID := chi.URLParam(r, "regionId")
 		regionInt, err := strconv.ParseInt(regionID, 10, 32)
 		if err != nil {
-			respond(w, http.StatusBadRequest, map[string]string{"error": "invalid region ID"})
+			respondError(w, http.StatusBadRequest, "invalid region ID")
 			return
 		}
 		region, err := reader.GetRegion(r.Context(), int32(regionInt))
 		if err != nil {
-			respond(w, http.StatusNotFound, map[string]string{"error": "region not found"})
+			respondError(w, http.StatusNotFound, "region not found")
 			return
 		}
 		respond(w, http.StatusOK, region)

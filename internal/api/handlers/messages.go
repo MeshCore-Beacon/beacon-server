@@ -32,7 +32,7 @@ func MessagesRouter(reader api.Reader) http.Handler {
 		channelIDParam := r.URL.Query().Get("channelID")
 		channelHashParam := r.URL.Query().Get("channelHash")
 		if channelIDParam != "" && channelHashParam != "" {
-			respond(w, http.StatusBadRequest, map[string]string{"error": "filter by either channelId or channelHash, not both"})
+			respondError(w, http.StatusBadRequest, "filter by either channelId or channelHash, not both")
 			return
 		}
 
@@ -40,7 +40,7 @@ func MessagesRouter(reader api.Reader) http.Handler {
 		if channelIDParam != "" {
 			i, err := strconv.ParseInt(channelIDParam, 10, 32)
 			if err != nil {
-				respond(w, http.StatusBadRequest, map[string]string{"error": "channelID should be an int 32"})
+				respondError(w, http.StatusBadRequest, "channelID should be an int 32")
 				return
 			}
 			id = i
@@ -49,7 +49,7 @@ func MessagesRouter(reader api.Reader) http.Handler {
 		if limitParam := r.URL.Query().Get("limit"); limitParam != "" {
 			l, err := strconv.ParseInt(limitParam, 10, 32)
 			if err != nil {
-				respond(w, http.StatusBadRequest, map[string]string{"error": "limit must be an integer"})
+				respondError(w, http.StatusBadRequest, "limit must be an integer")
 				return
 			}
 			limit = l
@@ -58,7 +58,7 @@ func MessagesRouter(reader api.Reader) http.Handler {
 		if sinceParam := r.URL.Query().Get("since"); sinceParam != "" {
 			ms, err := strconv.ParseInt(sinceParam, 10, 64)
 			if err != nil {
-				respond(w, http.StatusBadRequest, map[string]string{"error": "since must be epoch milliseconds"})
+				respondError(w, http.StatusBadRequest, "since must be epoch milliseconds")
 				return
 			}
 			since = time.UnixMilli(ms)
@@ -68,11 +68,11 @@ func MessagesRouter(reader api.Reader) http.Handler {
 		if channelHashParam != "" {
 			hashHex, decodeErr := hex.DecodeString(channelHashParam)
 			if decodeErr != nil {
-				respond(w, http.StatusBadRequest, map[string]string{"error": "invalid channel hash"})
+				respondError(w, http.StatusBadRequest, "invalid channel hash")
 				return
 			}
 			if len(hashHex) != 1 {
-				respond(w, http.StatusBadRequest, map[string]string{"error": "channel hash must be a single hex byte"})
+				respondError(w, http.StatusBadRequest, "channel hash must be a single hex byte")
 				return
 			}
 			messages, err = reader.ListChannelMessagesByHash(r.Context(), hashHex, since, int32(limit))
@@ -83,7 +83,7 @@ func MessagesRouter(reader api.Reader) http.Handler {
 			messages, err = reader.ListChannelMessages(r.Context(), nil, since, int32(limit))
 		}
 		if err != nil {
-			respond(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, messages)
