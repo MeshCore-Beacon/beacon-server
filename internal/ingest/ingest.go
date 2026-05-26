@@ -193,6 +193,16 @@ type statusEvent struct {
 	LastStatusAt  int64  `json:"lastStatusAt"` // epoch ms
 }
 
+// channelMessageEvent is the JSON payload for a channelMessage WS event.
+type channelMessageEvent struct {
+	ChannelID   int    `json:"channelId"`
+	ChannelHash string `json:"channelHash"` // hex-encoded single byte
+	PacketHash  string `json:"packetHash"`  // hex-encoded
+	SenderName  string `json:"senderName"`
+	Content     string `json:"content"`
+	SentAt      int64  `json:"sentAt"` // epoch ms
+}
+
 // packetObservationEvent is the JSON payload for a packetObservation WS event.
 // Shape matches the design doc § Server → Client events.
 type packetObservationEvent struct {
@@ -666,8 +676,33 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 		if err != nil {
 			log.Printf("ingest[%s]: db: insert channel message failed: %v", w.cfg.BrokerName, err)
 		}
+
+		evt := channelMessageEvent{
+			ChannelID:   channelID,
+			ChannelHash: hex.EncodeToString(channelHashBytes),
+			PacketHash:  hex.EncodeToString(packetHash),
+			SenderName:  payload.Sender,
+			Content:     payload.Text,
+			SentAt:      time.Unix(int64(payload.Timestamp), 0).UnixMilli(),
+		}
+		w.broadcast(hub.EventChannelMessage, iata, 0, fmt.Sprintf("%02x", grpTxt.ChannelHash), evt)
 		return
 	}
+}
+
+func (w *Worker) broadcast(eventType hub.EventType, iata string, payloadType uint8, channelHash string, payload any) {
+	b, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("ingest[%s]: failed to marshal %s event: %v", w.cfg.BrokerName, eventType, err)
+		return
+	}
+	w.hub.Broadcast(hub.Event{
+		Type:        eventType,
+		Payload:     b,
+		IATA:        iata,
+		PayloadType: payloadType,
+		ChannelHash: channelHash,
+	})
 }
 
 // fanOut builds and broadcasts the packetObservation event to connected WS clients.
@@ -686,17 +721,7 @@ func (w *Worker) fanOut(packetHash []byte, p *meshcore.Packet, iata string, isFi
 	evt.Observation.SNR = snr
 	evt.Observation.SourceBroker = sourceBroker
 
-	payload, err := json.Marshal(evt)
-	if err != nil {
-		log.Printf("ingest[%s]: failed to marshal packetObservation event: %v", w.cfg.BrokerName, err)
-		return
-	}
-	w.hub.Broadcast(hub.Event{
-		Type:        hub.EventPacketObservation,
-		Payload:     payload,
-		IATA:        iata,
-		PayloadType: p.PayloadType(),
-	})
+	w.broadcast(hub.EventPacketObservation, iata, p.PayloadType(), "", evt)
 }
 
 // parseNumber handles RSSI and SNR fields that different observer types send as

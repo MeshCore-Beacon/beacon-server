@@ -45,11 +45,11 @@ type Event struct {
 // nil/empty means "no filter on this dimension" (match everything).
 // An empty non-nil slice means "match nothing on this dimension".
 type Scope struct {
-	IATAs        []string
-	RegionIATAs  []string // pre-expanded from regionId by the WS handler
-	PayloadTypes []uint8
+	IATAs         []string
+	RegionIATAs   []string // pre-expanded from regionId by the WS handler
+	PayloadTypes  []uint8
 	ChannelHashes []string
-	Events       []EventType
+	Events        []EventType
 }
 
 // Client represents a connected WebSocket consumer.
@@ -100,9 +100,9 @@ type Hub struct {
 }
 
 type subscribeMsg struct {
-	client      *Client
-	scope       Scope
-	hasScope    bool // true when this is an AddScope call, false for NewClient registration
+	client   *Client
+	scope    Scope
+	hasScope bool // true when this is an AddScope call, false for NewClient registration
 }
 
 type unsubscribeMsg struct {
