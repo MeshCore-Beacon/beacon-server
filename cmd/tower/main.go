@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"time"
 	"syscall"
 
 	"github.com/MeshCore-Tower/tower-server/db"
@@ -38,6 +39,20 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
+	// ── Retention and resolution from config with env var overrides ────────────
+	telemetryResolution := cfg.Telemetry.Resolution.Duration
+	if telemetryResolution == 0 {
+		telemetryResolution = time.Hour
+	}
+	telemetryRetention := cfg.Telemetry.Retention.Duration
+	if telemetryRetention == 0 {
+		telemetryRetention = 28 * 24 * time.Hour // 4 weeks
+	}
+	packetRetention := cfg.Packets.Retention.Duration
+	if packetRetention == 0 {
+		packetRetention = 30 * 24 * time.Hour // 30 days
+	}
+
 	// ── Hub ──────────────────────────────────────────────────────────────────
 	h := hub.New()
 	go h.Run()
@@ -100,10 +115,11 @@ func main() {
 
 	broker1 := ingest.New(
 		ingest.Config{
-			BrokerName: "mqtt1",
-			URL:        mustEnv("MQTT_BROKER_1_URL"),
-			Username:   mustEnv("MQTT_BROKER_1_USERNAME"),
-			Password:   mustEnv("MQTT_BROKER_1_PASSWORD"),
+			BrokerName:          "mqtt1",
+			URL:                 mustEnv("MQTT_BROKER_1_URL"),
+			Username:            mustEnv("MQTT_BROKER_1_USERNAME"),
+			Password:            mustEnv("MQTT_BROKER_1_PASSWORD"),
+			TelemetryResolution: telemetryResolution,
 		},
 		store,
 		h,
@@ -112,10 +128,11 @@ func main() {
 
 	broker2 := ingest.New(
 		ingest.Config{
-			BrokerName: "mqtt2",
-			URL:        mustEnv("MQTT_BROKER_2_URL"),
-			Username:   mustEnv("MQTT_BROKER_2_USERNAME"),
-			Password:   mustEnv("MQTT_BROKER_2_PASSWORD"),
+			BrokerName:          "mqtt2",
+			URL:                 mustEnv("MQTT_BROKER_2_URL"),
+			Username:            mustEnv("MQTT_BROKER_2_USERNAME"),
+			Password:            mustEnv("MQTT_BROKER_2_PASSWORD"),
+			TelemetryResolution: telemetryResolution,
 		},
 		store,
 		h,
@@ -124,6 +141,25 @@ func main() {
 
 	go broker1.Start(ctx)
 	go broker2.Start(ctx)
+	// ── Retention cleanup goroutine ─────────────────────────────────────────
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := store.DeleteOldTelemetry(ctx, time.Now().Add(-telemetryRetention)); err != nil {
+					log.Printf("cleanup: delete old telemetry failed: %v", err)
+				}
+				if err := store.DeleteOldPackets(ctx, time.Now().Add(-packetRetention)); err != nil {
+					log.Printf("cleanup: delete old packets failed: %v", err)
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
 	// ── HTTP server ──────────────────────────────────────────────────────────
 	r := router.New(h, store, []*ingest.Worker{broker1, broker2})
 

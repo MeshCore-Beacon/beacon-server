@@ -12,6 +12,27 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteOldPackets = `-- name: DeleteOldPackets :exec
+DELETE FROM packets WHERE last_heard_at < $1
+`
+
+// Deletes packets and their observations older than the given cutoff.
+// packet_observations cascade-delete via FK.
+func (q *Queries) DeleteOldPackets(ctx context.Context, lastHeardAt pgtype.Timestamptz) error {
+	_, err := q.db.Exec(ctx, deleteOldPackets, lastHeardAt)
+	return err
+}
+
+const deleteOldTelemetry = `-- name: DeleteOldTelemetry :exec
+DELETE FROM observer_telemetry WHERE reported_at < $1
+`
+
+// Deletes telemetry rows older than the given cutoff. Called by the cleanup goroutine.
+func (q *Queries) DeleteOldTelemetry(ctx context.Context, reportedAt pgtype.Timestamptz) error {
+	_, err := q.db.Exec(ctx, deleteOldTelemetry, reportedAt)
+	return err
+}
+
 const getChannelByHashAndFingerprint = `-- name: GetChannelByHashAndFingerprint :one
 SELECT id, channel_hash, key_fingerprint, name, hashtag, is_hashtag, is_public, key_known, first_seen, last_seen, message_count FROM channels WHERE channel_hash = $1 AND key_fingerprint = $2
 `
@@ -622,6 +643,46 @@ func (q *Queries) InsertObservation(ctx context.Context, arg InsertObservationPa
 		&i.SourceBroker,
 	)
 	return i, err
+}
+
+const insertObserverTelemetry = `-- name: InsertObserverTelemetry :exec
+INSERT INTO observer_telemetry (
+    observer_id, reported_at, battery_voltage_mv, airtime_tx_pct,
+    airtime_rx_pct, noise_floor_db, uptime_seconds, queue_length,
+    debug_flags, receive_errors
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (observer_id, reported_at) DO NOTHING
+`
+
+type InsertObserverTelemetryParams struct {
+	ObserverID       uuid.UUID          `json:"observer_id"`
+	ReportedAt       pgtype.Timestamptz `json:"reported_at"`
+	BatteryVoltageMv *int32             `json:"battery_voltage_mv"`
+	AirtimeTxPct     *float32           `json:"airtime_tx_pct"`
+	AirtimeRxPct     *float32           `json:"airtime_rx_pct"`
+	NoiseFloorDb     *float32           `json:"noise_floor_db"`
+	UptimeSeconds    *int64             `json:"uptime_seconds"`
+	QueueLength      *int32             `json:"queue_length"`
+	DebugFlags       *int32             `json:"debug_flags"`
+	ReceiveErrors    *int32             `json:"receive_errors"`
+}
+
+// Inserts a telemetry snapshot for an observer. The reported_at timestamp should
+// be truncated to the configured resolution before calling to ensure deduplication.
+func (q *Queries) InsertObserverTelemetry(ctx context.Context, arg InsertObserverTelemetryParams) error {
+	_, err := q.db.Exec(ctx, insertObserverTelemetry,
+		arg.ObserverID,
+		arg.ReportedAt,
+		arg.BatteryVoltageMv,
+		arg.AirtimeTxPct,
+		arg.AirtimeRxPct,
+		arg.NoiseFloorDb,
+		arg.UptimeSeconds,
+		arg.QueueLength,
+		arg.DebugFlags,
+		arg.ReceiveErrors,
+	)
+	return err
 }
 
 const listAllChannelMessages = `-- name: ListAllChannelMessages :many

@@ -4,6 +4,7 @@ package config
 
 import (
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -13,6 +14,46 @@ type Config struct {
 	IATAs       map[string]IATAConfig `yaml:"iatas"`
 	Regions     []RegionConfig        `yaml:"regions"`
 	ChannelKeys ChannelKeysConfig     `yaml:"channel_keys"`
+	Telemetry   TelemetryConfig       `yaml:"telemetry"`
+	Packets     PacketsConfig         `yaml:"packets"`
+}
+
+// TelemetryConfig controls observer telemetry storage behaviour.
+type TelemetryConfig struct {
+	// Retention is how long telemetry rows are kept before the cleanup job removes them.
+	// Defaults to 672h (4 weeks) if not set.
+	Retention duration `yaml:"retention"`
+
+	// Resolution is how frequently a telemetry snapshot is stored per observer.
+	// Status messages arriving within the same resolution window are deduplicated.
+	// Defaults to 1h if not set.
+	Resolution duration `yaml:"resolution"`
+}
+
+// PacketsConfig controls packet retention behaviour.
+type PacketsConfig struct {
+	// Retention is how long packet and observation rows are kept.
+	// Defaults to 720h (30 days) if not set.
+	Retention duration `yaml:"retention"`
+}
+
+// duration is a wrapper around time.Duration that supports YAML unmarshalling
+// from human-readable strings like "24h", "7d", "30d".
+type duration struct {
+	time.Duration
+}
+
+func (d *duration) UnmarshalYAML(value *yaml.Node) error {
+	var s string
+	if err := value.Decode(&s); err != nil {
+		return err
+	}
+	parsed, err := time.ParseDuration(s)
+	if err != nil {
+		return err
+	}
+	d.Duration = parsed
+	return nil
 }
 
 // ChannelKeysConfig holds both hashtag-derived and explicit channel keys.

@@ -49,6 +49,11 @@ type Config struct {
 
 	Username string
 	Password string
+
+	// TelemetryResolution controls how frequently telemetry snapshots are stored.
+	// Status messages within the same window are deduplicated via ON CONFLICT.
+	// Defaults to 1 hour if zero.
+	TelemetryResolution time.Duration
 }
 
 // DB is the minimal database interface the ingest pipeline depends on.
@@ -90,6 +95,10 @@ type DB interface {
 
 	// GetObserverLastIATA returns the IATA from the most recent observation for the given observer.
 	GetObserverLastIATA(ctx context.Context, observerID uuid.UUID) (string, error)
+
+	// InsertObserverTelemetry stores a telemetry snapshot for an observer.
+	// The caller should truncate reportedAt to the configured resolution before calling.
+	InsertObserverTelemetry(ctx context.Context, observerID uuid.UUID, reportedAt time.Time, batteryMV *int32, txAirSecs, rxAirSecs *float32, noiseFloor float32, uptimeSeconds int64, queueLen, debugFlags, recvErrors *int32) error
 
 	// GetObserverRadio returns the current radio settings for the given observer.
 	GetObserverRadio(ctx context.Context, observerID uuid.UUID) (RadioSettings, error)
@@ -594,6 +603,35 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 		log.Printf("ingest[%s]: db: update observer status failed for %s: %v", w.cfg.BrokerName, pubkeyHex, err)
 		return
 	}
+	// Store a telemetry snapshot at the configured resolution.
+	resolution := w.cfg.TelemetryResolution
+	if resolution == 0 {
+		resolution = time.Hour
+	}
+	reportedAt := time.Now().Truncate(resolution)
+	batteryMV := int32(envelope.Stats.BatteryMV)
+	txAirSecs := float32(envelope.Stats.TxAirSecs)
+	rxAirSecs := float32(envelope.Stats.RxAirSecs)
+	queueLen := int32(envelope.Stats.QueueLen)
+	debugFlags := int32(envelope.Stats.DebugFlags)
+	recvErrors := int32(envelope.Stats.RecvErrors)
+
+	if err := w.db.InsertObserverTelemetry(
+		ctx,
+		observerID,
+		reportedAt,
+		&batteryMV,
+		&txAirSecs,
+		&rxAirSecs,
+		envelope.Stats.NoiseFloor,
+		envelope.Stats.UptimeSeconds,
+		&queueLen,
+		&debugFlags,
+		&recvErrors,
+	); err != nil {
+		log.Printf("ingest[%s]: db: insert telemetry failed for %s: %v", w.cfg.BrokerName, pubkeyHex, err)
+	}
+
 	iata, err := w.db.GetObserverLastIATA(ctx, observerID)
 	if err != nil {
 		iata = "" // non-fatal, continue

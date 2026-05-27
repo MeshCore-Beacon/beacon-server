@@ -58,3 +58,10 @@ channel_keys:
     "11":
       key: "8b3387e9c5cdea6ac9e5edbaa115cd72"
       name: "Public"
+
+telemetry:
+  retention: 672h   # 4 weeks
+  resolution: 1h    # store one snapshot per observer per hour
+
+packets:
+  retention: 720h   # 30 days

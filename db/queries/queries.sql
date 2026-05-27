@@ -365,6 +365,25 @@ WHERE c.channel_hash = $1
 ORDER BY cm.id, cm.sent_at DESC
 LIMIT $4;
 
+-- name: InsertObserverTelemetry :exec
+-- Inserts a telemetry snapshot for an observer. The reported_at timestamp should
+-- be truncated to the configured resolution before calling to ensure deduplication.
+INSERT INTO observer_telemetry (
+    observer_id, reported_at, battery_voltage_mv, airtime_tx_pct,
+    airtime_rx_pct, noise_floor_db, uptime_seconds, queue_length,
+    debug_flags, receive_errors
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (observer_id, reported_at) DO NOTHING;
+
+-- name: DeleteOldTelemetry :exec
+-- Deletes telemetry rows older than the given cutoff. Called by the cleanup goroutine.
+DELETE FROM observer_telemetry WHERE reported_at < $1;
+
+-- name: DeleteOldPackets :exec
+-- Deletes packets and their observations older than the given cutoff.
+-- packet_observations cascade-delete via FK.
+DELETE FROM packets WHERE last_heard_at < $1;
+
 -- ============================================================
 -- STATS
 -- ============================================================

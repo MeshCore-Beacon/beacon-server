@@ -607,3 +607,34 @@ func toChannelMessage(id int64, packetHashHex string, channelHash []byte, sender
 		SentAt:      sentAt.Time.UnixMilli(),
 	}
 }
+
+// InsertObserverTelemetry stores a telemetry snapshot for an observer.
+// reportedAt should be truncated to the configured resolution before calling
+// so that ON CONFLICT deduplicates within the resolution window.
+func (s *Store) InsertObserverTelemetry(ctx context.Context, observerID uuid.UUID, reportedAt time.Time, batteryMV *int32, txAirSecs, rxAirSecs *float32, noiseFloor float32, uptimeSeconds int64, queueLen, debugFlags, recvErrors *int32) error {
+	return s.q.InsertObserverTelemetry(ctx, sqlc.InsertObserverTelemetryParams{
+		ObserverID:       observerID,
+		ReportedAt:       pgtype.Timestamptz{Time: reportedAt, Valid: true},
+		BatteryVoltageMv: batteryMV,
+		AirtimeTxPct:     txAirSecs,
+		AirtimeRxPct:     rxAirSecs,
+		NoiseFloorDb:     &noiseFloor,
+		UptimeSeconds:    &uptimeSeconds,
+		QueueLength:      queueLen,
+		DebugFlags:       debugFlags,
+		ReceiveErrors:    recvErrors,
+	})
+}
+
+// DeleteOldTelemetry removes telemetry rows older than cutoff.
+// Called by the cleanup goroutine in main.
+func (s *Store) DeleteOldTelemetry(ctx context.Context, cutoff time.Time) error {
+	return s.q.DeleteOldTelemetry(ctx, pgtype.Timestamptz{Time: cutoff, Valid: true})
+}
+
+// DeleteOldPackets removes packets older than cutoff.
+// packet_observations cascade-delete via FK constraint.
+// Called by the cleanup goroutine in main.
+func (s *Store) DeleteOldPackets(ctx context.Context, cutoff time.Time) error {
+	return s.q.DeleteOldPackets(ctx, pgtype.Timestamptz{Time: cutoff, Valid: true})
+}
