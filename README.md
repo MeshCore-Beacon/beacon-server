@@ -86,7 +86,7 @@ cp config.yaml.example config.yaml
 ```
 
 Edit `.env` with your broker credentials and database DSN. Edit `config.yaml` to
-define your regions, IATA display names, and channel keys.
+define your regions, IATA display names, channel keys, and retention settings.
 
 ### 2. Start PostgreSQL
 
@@ -127,8 +127,6 @@ Tower will:
 | `MQTT_BROKER_2_URL`      | —             | Broker 2 WebSocket URL                                      |
 | `MQTT_BROKER_2_USERNAME` | —             | Broker 2 username                                           |
 | `MQTT_BROKER_2_PASSWORD` | —             | Broker 2 password                                           |
-| `REDIS_ADDR`             | —             | Redis address (e.g. `localhost:6379`)                       |
-| `PACKET_RETENTION_DAYS`  | `30`          | How many days of packet observations to retain              |
 
 ### Config file (`config.yaml`)
 
@@ -150,6 +148,8 @@ regions:
 
 channel_keys:
   # Hashtag channels: Tower derives the PSK from the tag name automatically.
+  # secret = SHA256("#tag")[:16], channel_hash = SHA256(secret)[0]
+  # Tag names should be provided without the # prefix.
   hashtags:
     - meshcore
 
@@ -158,11 +158,23 @@ channel_keys:
     "11":
       key: "8b3387e9c5cdea6ac9e5edbaa115cd72"
       name: "Public"
+
+# Observer telemetry storage settings.
+telemetry:
+  retention: 672h # how long to keep telemetry snapshots (default: 4 weeks)
+  resolution: 1h # snapshot frequency per observer; duplicates within window are dropped (default: 1h)
+
+# Packet and observation retention.
+packets:
+  retention: 720h # how long to keep packets and observations (default: 30 days)
 ```
 
 IATAs are auto-created on first packet arrival. The config file adds display
 names and coordinates. Regions and channel keys must be defined here — they are
 not auto-created.
+
+The public MeshCore channel (hash `0x11`) key is included in
+`config.yaml.example` and should be copied to your `config.yaml`.
 
 ---
 
@@ -216,18 +228,19 @@ Base path: `/api/v1`
 
 ### Implemented
 
-| Method | Path                      | Description                                                                            |
-| ------ | ------------------------- | -------------------------------------------------------------------------------------- |
-| `GET`  | `/iatas`                  | List all known IATA codes                                                              |
-| `GET`  | `/iatas/{iata}`           | Get a single IATA code                                                                 |
-| `GET`  | `/regions`                | List all regions (summary)                                                             |
-| `GET`  | `/regions/{id}`           | Get a single region with IATA list                                                     |
-| `GET`  | `/channels`               | List channels (optional: `?hash=<hex>&since=<ms>&limit=50`)                            |
-| `GET`  | `/channels/{id}`          | Get channel detail by integer ID                                                       |
-| `GET`  | `/channels/{id}/messages` | List messages for a channel                                                            |
-| `GET`  | `/messages`               | List all messages (optional: `?channelId=<int>&channelHash=<hex>&since=<ms>&limit=50`) |
-| `GET`  | `/observers`              | List observers                                                                         |
-| `GET`  | `/observers/{observerId}` | Get observer detail                                                                    |
+| Method | Path                      | Description                                                                                        |
+| ------ | ------------------------- | -------------------------------------------------------------------------------------------------- |
+| `GET`  | `/brokers`                | List MQTT brokers and connection status                                                            |
+| `GET`  | `/iatas`                  | List all known IATA codes                                                                          |
+| `GET`  | `/iatas/{iata}`           | Get a single IATA code                                                                             |
+| `GET`  | `/regions`                | List all regions (summary)                                                                         |
+| `GET`  | `/regions/{id}`           | Get a single region with IATA list                                                                 |
+| `GET`  | `/channels`               | List channels (optional: `?hash=<hex>&iata=<code>&limit=50`)                                       |
+| `GET`  | `/channels/{id}`          | Get channel detail by integer ID                                                                   |
+| `GET`  | `/channels/{id}/messages` | List messages for a channel (optional: `?since=<ms>&iata=<code>&limit=50`)                         |
+| `GET`  | `/messages`               | List all messages (optional: `?channelId=<int>&channelHash=<hex>&iata=<code>&since=<ms>&limit=50`) |
+| `GET`  | `/observers`              | List observers (optional: `?iata=<code>&type=<str>&broker=<name>&status=online\|offline`)          |
+| `GET`  | `/observers/{observerId}` | Get observer detail including broker last-seen timestamps                                          |
 
 ### Stubbed (501 Not Implemented)
 
@@ -284,16 +297,23 @@ Tower server.
 - [x] Config file loading (regions, IATA overrides, channel keys)
 - [x] Observer radio settings on observations
 - [x] DB seeding on startup
+- [x] Observer telemetry storage with configurable resolution and retention
+- [x] Packet retention cleanup goroutine
+- [x] Hashtag channel PSK derivation (SHA256("#tag")[:16])
+- [x] Channel hash collision handling via key fingerprint
 - [x] REST API: IATAs, Regions
-- [x] REST API: Channels (list + detail + messages)
+- [x] REST API: Channels (list + detail + messages) with IATA filter
+- [x] REST API: Messages (cross-channel) with IATA filter
+- [x] REST API: Observers (list + detail with broker last-seen)
+- [x] REST API: Brokers (list with connection status)
 
 ### In progress / next
 
 - [ ] REST API: Nodes (list + detail + observations)
 - [ ] REST API: Packets (list + detail)
-- [ ] REST API: Observers (list + detail done; telemetry + adverts stubbed)
 - [ ] REST API: Observer telemetry + adverts sub-endpoints
 - [ ] REST API: Stats
+- [ ] REST API: Pagination
 - [ ] Path resolution (node short ID lookup)
 - [ ] Propagation time calculation
 - [ ] Routes and traces endpoints
@@ -308,3 +328,4 @@ Tower server.
 - [ ] Region management via API (currently config-file only)
 - [ ] WebSocket subscription unsubscribe (scaffolded, not implemented)
 - [ ] Observer owner tracking (schema exists, API excluded by design)
+- [ ] Swagger/OpenAPI documentation
