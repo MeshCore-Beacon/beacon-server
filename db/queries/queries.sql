@@ -291,10 +291,13 @@ WHERE channel_hash = $1 AND key_fingerprint = $2;
 -- Pass NULL for hash to skip hash filtering. Pass empty string for iata to skip IATA filtering.
 -- IATA filter returns channels that have been active (have messages heard) in that IATA.
 SELECT DISTINCT c.* FROM channels c
-LEFT JOIN channel_messages cm ON cm.channel_id = c.id
-LEFT JOIN packet_observations po ON po.packet_hash = cm.packet_hash
 WHERE ($1::bytea IS NULL OR c.channel_hash = $1)
-  AND ($2 = '' OR po.iata = $2)
+  AND ($2 = '' OR EXISTS (
+    SELECT 1 FROM packets p
+    JOIN packet_observations po ON po.packet_hash = p.packet_hash
+    WHERE p.channel_hash = c.channel_hash
+      AND po.iata = $2
+  ))
 ORDER BY c.last_seen DESC
 LIMIT $3;
 

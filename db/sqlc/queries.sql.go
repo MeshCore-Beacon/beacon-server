@@ -815,10 +815,13 @@ func (q *Queries) ListChannelMessagesByHash(ctx context.Context, arg ListChannel
 
 const listChannels = `-- name: ListChannels :many
 SELECT DISTINCT c.id, c.channel_hash, c.key_fingerprint, c.name, c.hashtag, c.is_hashtag, c.is_public, c.key_known, c.first_seen, c.last_seen, c.message_count FROM channels c
-LEFT JOIN channel_messages cm ON cm.channel_id = c.id
-LEFT JOIN packet_observations po ON po.packet_hash = cm.packet_hash
 WHERE ($1::bytea IS NULL OR c.channel_hash = $1)
-  AND ($2 = '' OR po.iata = $2)
+  AND ($2 = '' OR EXISTS (
+    SELECT 1 FROM packets p
+    JOIN packet_observations po ON po.packet_hash = p.packet_hash
+    WHERE p.channel_hash = c.channel_hash
+      AND po.iata = $2
+  ))
 ORDER BY c.last_seen DESC
 LIMIT $3
 `
