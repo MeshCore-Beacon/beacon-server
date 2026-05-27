@@ -536,9 +536,7 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 	if envelope.SoftwareVersion != "" {
 		params.SoftwareVersion = envelope.SoftwareVersion
 	}
-	if envelope.ObserverType != "" {
-		params.ObserverType = envelope.ObserverType
-	}
+	params.ObserverType = inferObserverType(envelope.ObserverType, envelope.SoftwareVersion)
 	if envelope.DisplayName != "" {
 		params.DisplayName = envelope.DisplayName
 	}
@@ -768,4 +766,37 @@ func parseNumber(raw json.RawMessage) float64 {
 		return f
 	}
 	return 0
+}
+
+func inferObserverType(source, clientVersion string) string {
+	if source != "" {
+		return normalizeObserverType(source)
+	}
+	if clientVersion != "" {
+		return clientVersion // use raw version string for custom firmware observers
+	}
+	return ""
+}
+
+func normalizeObserverType(source string) string {
+	if source == "" {
+		return ""
+	}
+	s := source
+	// strip org prefix e.g. "meshcore-dev/meshcore-ha" → "meshcore-ha"
+	if i := strings.LastIndex(s, "/"); i >= 0 {
+		s = s[i+1:]
+	}
+	// strip version suffix e.g. "meshcoretomqtt:1.1.0" → "meshcoretomqtt"
+	if i := strings.Index(s, ":"); i >= 0 {
+		s = s[:i]
+	}
+	// strip build suffix e.g. "meshcoretomqtt/1.1.0.0-622ce04" → "meshcoretomqtt"
+	if i := strings.Index(s, "/"); i >= 0 {
+		s = s[:i]
+	}
+	if s == "" {
+		return source // fall back to raw if parsing produced nothing
+	}
+	return s
 }

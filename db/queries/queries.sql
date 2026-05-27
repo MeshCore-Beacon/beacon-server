@@ -25,8 +25,8 @@ WHERE iata = $1;
 -- ============================================================
 
 -- name: UpsertObserver :one
-INSERT INTO observers (public_key, last_seen)
-VALUES ($1, NOW())
+INSERT INTO observers (public_key, observer_type, last_seen)
+VALUES ($1, 'unknown', NOW())
 ON CONFLICT (public_key) DO UPDATE SET
   last_seen         = NOW(),
   observation_count = observers.observation_count + 1
