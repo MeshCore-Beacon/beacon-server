@@ -550,7 +550,7 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 	}
 	params.ObserverType = inferObserverType(envelope.ObserverType, envelope.SoftwareVersion)
 	if envelope.DisplayName != "" {
-		params.DisplayName = envelope.DisplayName
+		params.DisplayName = strings.ToValidUTF8(envelope.DisplayName, "\uFFFD")
 	}
 	if envelope.HardwareModel != "" {
 		params.HardwareModel = envelope.HardwareModel
@@ -657,7 +657,7 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 		}
 		params := UpsertNodeParams{
 			PublicKey: advert.PublicKey.PublicKeyBytes(),
-			Name:      advert.AppData().Name,
+			Name:      strings.ToValidUTF8(advert.AppData().Name, "\uFFFD"),
 			NodeType:  advert.Type(),
 			Latitude:  lat,
 			Longitude: lon,
