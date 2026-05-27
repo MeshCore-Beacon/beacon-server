@@ -59,7 +59,8 @@ SELECT * FROM observers WHERE public_key = $1;
 SELECT * FROM observers WHERE id = $1;
 
 -- name: GetObserverBrokers :many
-SELECT broker_name FROM observer_brokers
+SELECT broker_name, last_seen, last_packet_at
+FROM observer_brokers
 WHERE observer_id = $1
 ORDER BY last_seen DESC;
 

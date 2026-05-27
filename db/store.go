@@ -536,7 +536,7 @@ func (s *Store) GetObserver(ctx context.Context, observerID uuid.UUID) (*api.Obs
 	if err != nil {
 		return nil, err
 	}
-	brokers, err := s.q.GetObserverBrokers(ctx, observerID)
+	brokerRows, err := s.q.GetObserverBrokers(ctx, observerID)
 	if err != nil {
 		return nil, err
 	}
@@ -562,8 +562,20 @@ func (s *Store) GetObserver(ctx context.Context, observerID uuid.UUID) (*api.Obs
 		FirstSeen:        obs.FirstSeen.Time.UnixMilli(),
 		LastSeen:         obs.LastSeen.Time.UnixMilli(),
 		ObservationCount: *obs.ObservationCount,
-		Brokers:          brokers,
 	}
+	brokers := make([]api.ObserverBroker, 0, len(brokerRows))
+	for _, v := range brokerRows {
+		var lastPacketAt int64
+		if v.LastPacketAt.Valid {
+			lastPacketAt = v.LastPacketAt.Time.UnixMilli()
+		}
+		brokers = append(brokers, api.ObserverBroker{
+			Name:         v.BrokerName,
+			LastPacketAt: lastPacketAt,
+			LastSeenAt:   v.LastSeen.Time.UnixMilli(),
+		})
+	}
+	observer.Brokers = brokers
 	if obs.LastStatusAt.Valid && time.Since(obs.LastStatusAt.Time) < 5*time.Minute {
 		observer.Status = "online"
 	}

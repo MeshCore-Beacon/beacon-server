@@ -210,24 +210,31 @@ func (q *Queries) GetNodeByPubkey(ctx context.Context, publicKey []byte) (Node, 
 }
 
 const getObserverBrokers = `-- name: GetObserverBrokers :many
-SELECT broker_name FROM observer_brokers
+SELECT broker_name, last_seen, last_packet_at
+FROM observer_brokers
 WHERE observer_id = $1
 ORDER BY last_seen DESC
 `
 
-func (q *Queries) GetObserverBrokers(ctx context.Context, observerID uuid.UUID) ([]string, error) {
+type GetObserverBrokersRow struct {
+	BrokerName   string             `json:"broker_name"`
+	LastSeen     pgtype.Timestamptz `json:"last_seen"`
+	LastPacketAt pgtype.Timestamptz `json:"last_packet_at"`
+}
+
+func (q *Queries) GetObserverBrokers(ctx context.Context, observerID uuid.UUID) ([]GetObserverBrokersRow, error) {
 	rows, err := q.db.Query(ctx, getObserverBrokers, observerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []string{}
+	items := []GetObserverBrokersRow{}
 	for rows.Next() {
-		var broker_name string
-		if err := rows.Scan(&broker_name); err != nil {
+		var i GetObserverBrokersRow
+		if err := rows.Scan(&i.BrokerName, &i.LastSeen, &i.LastPacketAt); err != nil {
 			return nil, err
 		}
-		items = append(items, broker_name)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
