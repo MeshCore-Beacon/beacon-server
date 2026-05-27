@@ -249,10 +249,11 @@ type ChannelKeyStore interface {
 
 // Worker holds the dependencies for one broker's ingest loop.
 type Worker struct {
-	cfg  Config
-	db   DB
-	hub  *hub.Hub
-	keys ChannelKeyStore
+	cfg    Config
+	db     DB
+	hub    *hub.Hub
+	keys   ChannelKeyStore
+	client mqtt.Client
 }
 
 // New creates an ingest Worker. Call Start() to connect and begin processing.
@@ -281,15 +282,26 @@ func (w *Worker) Start(ctx context.Context) {
 			log.Printf("ingest[%s]: connection lost: %v", w.cfg.BrokerName, err)
 		})
 
-	client := mqtt.NewClient(opts)
-	if tok := client.Connect(); tok.Wait() && tok.Error() != nil {
+	w.client = mqtt.NewClient(opts)
+	if tok := w.client.Connect(); tok.Wait() && tok.Error() != nil {
 		log.Printf("ingest[%s]: initial connect failed: %v", w.cfg.BrokerName, tok.Error())
 		// paho will retry; we fall through and wait for ctx
 	}
 
 	<-ctx.Done()
-	client.Disconnect(500)
+	w.client.Disconnect(500)
 	log.Printf("ingest[%s]: stopped", w.cfg.BrokerName)
+}
+
+func (w *Worker) BrokerName() string {
+	return w.cfg.BrokerName
+}
+
+func (w *Worker) IsConnected() bool {
+	if w.client == nil {
+		return false
+	}
+	return w.client.IsConnected()
 }
 
 // subscribe registers the wildcard topic handler after (re)connect.

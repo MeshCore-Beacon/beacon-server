@@ -10,6 +10,7 @@ import (
 	"github.com/MeshCore-Tower/tower-server/internal/api/handlers"
 	mw "github.com/MeshCore-Tower/tower-server/internal/api/middleware"
 	"github.com/MeshCore-Tower/tower-server/internal/hub"
+	"github.com/MeshCore-Tower/tower-server/internal/ingest"
 	"github.com/MeshCore-Tower/tower-server/internal/ws"
 )
 
@@ -21,6 +22,7 @@ import (
 //	/api/v1/           → public group
 //	  /packets         → packets subrouter
 //	  /nodes           → nodes subrouter
+//	  /brokers         → brokers subrouter
 //	  /observers       → observers subrouter
 //	  /channels        → channels subrouter
 //	  /iatas           → iatas subrouter
@@ -29,7 +31,7 @@ import (
 //
 // The private group is stubbed and ready for the auth middleware drop-in
 // described in Future Features → Admin authentication.
-func New(h *hub.Hub, reader api.Reader) http.Handler {
+func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker) http.Handler {
 	r := chi.NewRouter()
 
 	// ── Global middleware ────────────────────────────────────────────────────
@@ -49,6 +51,7 @@ func New(h *hub.Hub, reader api.Reader) http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Mount("/packets", handlers.PacketsRouter())
 			r.Mount("/nodes", handlers.NodesRouter())
+			r.Mount("/brokers", handlers.BrokersRouter(workers))
 			r.Mount("/observers", handlers.ObserversRouter(reader))
 			r.Mount("/channels", handlers.ChannelsRouter(reader))
 			r.Mount("/messages", handlers.MessagesRouter(reader))

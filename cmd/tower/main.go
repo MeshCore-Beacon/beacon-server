@@ -124,9 +124,8 @@ func main() {
 
 	go broker1.Start(ctx)
 	go broker2.Start(ctx)
-
 	// ── HTTP server ──────────────────────────────────────────────────────────
-	r := router.New(h, store)
+	r := router.New(h, store, []*ingest.Worker{broker1, broker2})
 
 	srv := &http.Server{
 		Addr:    addr,
