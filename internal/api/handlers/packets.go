@@ -1,8 +1,12 @@
 package handlers
 
 import (
+	"encoding/hex"
 	"net/http"
+	"strconv"
+	"time"
 
+	"github.com/MeshCore-Tower/tower-server/internal/api"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -10,45 +14,106 @@ import (
 //
 // GET  /packets                              → ListPackets
 // GET  /packets/{packetHash}                 → GetPacket
-func PacketsRouter() http.Handler {
+func PacketsRouter(reader api.Reader) http.Handler {
 	r := chi.NewRouter()
 
-	r.Get("/", ListPackets)
-	r.Get("/{packetHash}", GetPacket)
+	// GET /api/v1/packets
+	//
+	// Query params (all optional):
+	//
+	//	payloadType=<int>        filter by payload type integer
+	//	payloadTypeName=<string> filter by payload type name (advert, grp_txt, txt_msg, trace, anon_req)
+	//	routeType=<int>          filter by route type integer (0=transport_flood, 1=flood, 2=direct, 3=transport_direct)
+	//	iata=<code>              filter by latest observation IATA (case-insensitive)
+	//	since=<epoch ms>         filter by first_heard_at >= since
+	//	until=<epoch ms>         filter by first_heard_at <= until
+	//	cursor=<int>             last_heard_at epoch ms of last item for pagination
+	//	limit=50
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		var payloadType int16
+		if p := r.URL.Query().Get("payloadType"); p != "" {
+			t, err := strconv.ParseInt(p, 10, 16)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "payloadType must be an integer")
+				return
+			}
+			payloadType = int16(t)
+		}
+		if payloadType == 0 {
+			if p := r.URL.Query().Get("payloadTypeName"); p != "" {
+				payloadType = api.PayloadTypeFromString(p)
+			}
+		}
+		var routeType int16
+		if p := r.URL.Query().Get("routeType"); p != "" {
+			t, err := strconv.ParseInt(p, 10, 16)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "routeType must be an integer")
+				return
+			}
+			routeType = int16(t)
+		}
+		var since, until time.Time
+		if p := r.URL.Query().Get("since"); p != "" {
+			ms, err := strconv.ParseInt(p, 10, 64)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "since must be epoch milliseconds")
+				return
+			}
+			since = time.UnixMilli(ms)
+		}
+		if p := r.URL.Query().Get("until"); p != "" {
+			ms, err := strconv.ParseInt(p, 10, 64)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "until must be epoch milliseconds")
+				return
+			}
+			until = time.UnixMilli(ms)
+		}
+		var cursor int64
+		if p := r.URL.Query().Get("cursor"); p != "" {
+			c, err := strconv.ParseInt(p, 10, 64)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "cursor must be an integer")
+				return
+			}
+			cursor = c
+		}
+		var limit int32 = 50
+		if p := r.URL.Query().Get("limit"); p != "" {
+			l, err := strconv.ParseInt(p, 10, 32)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "limit must be an integer")
+				return
+			}
+			limit = int32(l)
+		}
+		iata := r.URL.Query().Get("iata")
+		packets, err := reader.ListPackets(r.Context(), payloadType, routeType, iata, since, until, cursor, limit)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		respond(w, http.StatusOK, packets)
+	})
+
+	// GET /api/v1/packets/{packetHash}
+	//
+	// Returns full packet detail including all observations and resolved paths.
+	r.Get("/{packetHash}", func(w http.ResponseWriter, r *http.Request) {
+		hashHex := chi.URLParam(r, "packetHash")
+		hash, err := hex.DecodeString(hashHex)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "invalid packet hash")
+			return
+		}
+		packet, err := reader.GetPacket(r.Context(), hash)
+		if err != nil {
+			respondError(w, http.StatusNotFound, "packet not found")
+			return
+		}
+		respond(w, http.StatusOK, packet)
+	})
 
 	return r
-}
-
-// ListPackets handles GET /api/v1/packets
-//
-// Query params (all optional):
-//
-//	iata=YOW
-//	payloadType=4
-//	routeType=1
-//	since=<epoch ms>
-//	until=<epoch ms>
-//	afterId=<observation id>   used for deterministic WS reconnection backfill
-//	limit=50
-//	cursor=<opaque>
-//
-// Returns a paginated list of packet summaries with the latest observation
-// rolled in, newest first.
-func ListPackets(w http.ResponseWriter, r *http.Request) {
-	// TODO: parse query params, query DB/cache, write JSON response.
-	//
-	// afterId (int64) takes precedence over cursor for reconnection backfill:
-	//   WHERE id > afterId ORDER BY id ASC LIMIT limit
-	// Normal pagination uses cursor (opaque, encodes last seen id+timestamp).
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// GetPacket handles GET /api/v1/packets/{packetHash}
-//
-// Returns the full packet with all observations and each observation's
-// resolved path inline.
-func GetPacket(w http.ResponseWriter, r *http.Request) {
-	// packetHash := chi.URLParam(r, "packetHash")
-	// TODO: fetch packet + observations, resolve paths, write JSON response.
-	w.WriteHeader(http.StatusNotImplemented)
 }

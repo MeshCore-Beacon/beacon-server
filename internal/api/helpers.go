@@ -28,6 +28,25 @@ func PayloadTypeName(t int16) string {
 	}
 }
 
+// PayloadTypeFromString returns the integer payload type for a given name.
+// Returns 0 (no filter) if the string is empty or unrecognized.
+func PayloadTypeFromString(s string) int16 {
+	switch strings.ToLower(s) {
+	case "advert":
+		return int16(meshcore.PayloadTypeAdvert)
+	case "grp_txt", "grptxt", "group_text":
+		return int16(meshcore.PayloadTypeGrpTxt)
+	case "txt_msg", "txtmsg", "text":
+		return int16(meshcore.PayloadTypeTxtMsg)
+	case "trace":
+		return int16(meshcore.PayloadTypeTrace)
+	case "anon_req", "anonreq":
+		return int16(meshcore.PayloadTypeAnonReq)
+	default:
+		return 0
+	}
+}
+
 // NodeTypeName returns a human-readable name for a node type integer.
 func NodeTypeName(t int16) string {
 	switch byte(t) {
@@ -58,5 +77,21 @@ func NodeTypeFromString(s string) int16 {
 		return int16(meshcore.AdvertTypeSensor)
 	default:
 		return 0
+	}
+}
+
+// RouteTypeName returns a human-readable name for a route type integer.
+func RouteTypeName(t int16) string {
+	switch byte(t) {
+	case meshcore.RouteTypeFlood:
+		return "FLOOD"
+	case meshcore.RouteTypeDirect:
+		return "DIRECT"
+	case meshcore.RouteTypeTransportFlood:
+		return "TRANSPORT_FLOOD"
+	case meshcore.RouteTypeTransportDirect:
+		return "TRANSPORT_DIRECT"
+	default:
+		return "unknown"
 	}
 }

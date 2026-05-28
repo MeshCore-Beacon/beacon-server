@@ -914,3 +914,137 @@ func (s *Store) ListNodeObservations(ctx context.Context, nodeID uuid.UUID, curs
 		HasMore:    hasMore,
 	}, nil
 }
+
+func (s *Store) ListPackets(ctx context.Context, payloadType, routeType int16, iata string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
+	var cursorTS pgtype.Timestamptz
+	if cursor > 0 {
+		cursorTS = pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}
+	}
+	var sinceTS pgtype.Timestamptz
+	if !since.IsZero() {
+		sinceTS = pgtype.Timestamptz{Time: since, Valid: true}
+	}
+	var untilTS pgtype.Timestamptz
+	if !until.IsZero() {
+		untilTS = pgtype.Timestamptz{Time: until, Valid: true}
+	}
+	rows, err := s.q.ListPackets(ctx, sqlc.ListPacketsParams{
+		Column1: payloadType,
+		Column2: routeType,
+		Column3: iata,
+		Column4: sinceTS,
+		Column5: untilTS,
+		Column6: cursorTS,
+		Limit:   limit + 1,
+	})
+	if err != nil {
+		return api.Page[api.PacketSummary]{}, err
+	}
+	hasMore := len(rows) > int(limit)
+	if hasMore {
+		rows = rows[:limit]
+	}
+	items := make([]api.PacketSummary, 0, len(rows))
+	for _, v := range rows {
+		item := api.PacketSummary{
+			PacketHash:       hex.EncodeToString(v.PacketHash),
+			PayloadType:      v.PayloadType,
+			PayloadTypeName:  api.PayloadTypeName(v.PayloadType),
+			RouteType:        v.RouteType,
+			RouteTypeName:    api.RouteTypeName(v.RouteType),
+			FirstHeardAt:     v.FirstHeardAt.Time.UnixMilli(),
+			LastHeardAt:      v.LastHeardAt.Time.UnixMilli(),
+			ObservationCount: *v.ObservationCount,
+		}
+		if v.LatestObserverID != (uuid.UUID{}) {
+			item.LatestObserver = &api.PacketLatestObserver{
+				ID:          v.LatestObserverID,
+				DisplayName: v.LatestObserverName,
+				IATA:        v.LatestObserverIata,
+			}
+		}
+		items = append(items, item)
+	}
+	var nextCursor *int64
+	if hasMore && len(items) > 0 {
+		last := items[len(items)-1].LastHeardAt
+		nextCursor = &last
+	}
+	return api.Page[api.PacketSummary]{
+		Items:      items,
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
+	}, nil
+}
+
+func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, error) {
+	row, err := s.q.GetPacketByHash(ctx, packetHash)
+	if err != nil {
+		return nil, err
+	}
+	obsRows, err := s.q.ListObservationsForPacket(ctx, packetHash)
+	if err != nil {
+		return nil, err
+	}
+	p := &api.Packet{
+		PacketHash:      hex.EncodeToString(row.PacketHash),
+		PayloadType:     row.PayloadType,
+		PayloadTypeName: api.PayloadTypeName(row.PayloadType),
+		PayloadVersion:  row.PayloadVersion,
+		RouteType:       row.RouteType,
+		RouteTypeName:   api.RouteTypeName(row.RouteType),
+		RawPayload:      hex.EncodeToString(row.RawPayload),
+		ParsedPayload:   row.ParsedPayload,
+		Decrypted:       row.Decrypted != nil && *row.Decrypted,
+		FirstHeardAt:    row.FirstHeardAt.Time.UnixMilli(),
+		LastHeardAt:     row.LastHeardAt.Time.UnixMilli(),
+		Observations:    make([]api.PacketObservationDetail, 0, len(obsRows)),
+	}
+	if row.ObservationCount != nil {
+		p.ObservationCount = *row.ObservationCount
+	}
+	if row.OriginPubkey != nil {
+		s := hex.EncodeToString(row.OriginPubkey)
+		p.OriginPubkey = &s
+	}
+	if row.ChannelHash != nil {
+		ch := hex.EncodeToString(row.ChannelHash)
+		p.ChannelHash = &ch
+	}
+	if row.TransportCodesPresent != nil && *row.TransportCodesPresent {
+		// TODO: decode transport codes from region_code/sub_region_code
+	}
+	for _, v := range obsRows {
+		obs := api.PacketObservationDetail{
+			ID:             v.ID,
+			ObserverID:     v.ObserverID,
+			ObserverName:   v.ObserverName,
+			IATA:           v.Iata,
+			HeardAt:        v.HeardAt.Time.UnixMilli(),
+			PathLengthByte: v.PathLengthByte,
+			HashSize:       v.HashSize,
+			HopCount:       v.HopCount,
+			RSSI:           v.Rssi,
+			SNR:            v.Snr,
+			SourceBroker:   *v.SourceBroker,
+			ResolvedPath:   []api.ResolvedHop{}, // TODO: implement path resolution
+		}
+		if v.PathBytes != nil {
+			pb := hex.EncodeToString(v.PathBytes)
+			obs.PathBytes = &pb
+		}
+		if v.PropagationTimeMs != nil {
+			obs.PropagationTimeMs = v.PropagationTimeMs
+		}
+		if v.RadioFreqMhz != nil || v.SpreadFactor != nil || v.BandwidthKhz != nil || v.CodingRate != nil {
+			obs.Radio = &api.PacketRadio{
+				FreqMHz:      v.RadioFreqMhz,
+				SpreadFactor: v.SpreadFactor,
+				BandwidthKHz: v.BandwidthKhz,
+				CodingRate:   v.CodingRate,
+			}
+		}
+		p.Observations = append(p.Observations, obs)
+	}
+	return p, nil
+}

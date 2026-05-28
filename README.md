@@ -309,10 +309,10 @@ Tower server.
 - [x] REST API: Brokers (list with connection status)
 - [x] REST API: Pagination
 - [x] REST API: Nodes (list + detail + observations)
+- [x] REST API: Packets (list + detail)
 
 ### In progress / next
 
-- [ ] REST API: Packets (list + detail)
 - [ ] REST API: Stats
 - [ ] Path resolution (node short ID lookup)
 - [ ] Propagation time calculation

@@ -9,6 +9,90 @@ import (
 	"github.com/google/uuid"
 )
 
+// PacketLatestObserver is the most recent observer summary rolled into a packet list item.
+type PacketLatestObserver struct {
+	ID          uuid.UUID `json:"id"`
+	DisplayName *string   `json:"displayName,omitempty"`
+	IATA        string    `json:"iata"`
+}
+
+// PacketSummary is the minimal packet representation used in list responses.
+// Includes the latest observation rolled in for display purposes.
+type PacketSummary struct {
+	PacketHash       string                `json:"packetHash"` // hex-encoded
+	PayloadType      int16                 `json:"payloadType"`
+	PayloadTypeName  string                `json:"payloadTypeName"`
+	RouteType        int16                 `json:"routeType"`
+	RouteTypeName    string                `json:"routeTypeName"`
+	FirstHeardAt     int64                 `json:"firstHeardAt"` // epoch ms
+	LastHeardAt      int64                 `json:"lastHeardAt"`  // epoch ms
+	ObservationCount int32                 `json:"observationCount"`
+	LatestObserver   *PacketLatestObserver `json:"latestObserver,omitempty"`
+	Summary          *string               `json:"summary,omitempty"` // human-readable payload summary
+}
+
+// PacketObservationDetail is a full observation including radio settings and resolved path.
+type PacketObservationDetail struct {
+	ID                int64         `json:"id"`
+	ObserverID        uuid.UUID     `json:"observerId"`
+	ObserverName      *string       `json:"observerName,omitempty"`
+	IATA              string        `json:"iata"`
+	HeardAt           int64         `json:"heardAt"` // epoch ms
+	PathLengthByte    int16         `json:"pathLengthByte"`
+	HashSize          int16         `json:"hashSize"`
+	HopCount          int16         `json:"hopCount"`
+	PathBytes         *string       `json:"pathBytes,omitempty"` // hex-encoded
+	RSSI              *int16        `json:"rssi,omitempty"`
+	SNR               *float32      `json:"snr,omitempty"`
+	PropagationTimeMs *int32        `json:"propagationTimeMs,omitempty"`
+	Radio             *PacketRadio  `json:"radio,omitempty"`
+	SourceBroker      string        `json:"sourceBroker"`
+	ResolvedPath      []ResolvedHop `json:"resolvedPath"`
+}
+
+// PacketRadio holds the radio settings from the observation.
+type PacketRadio struct {
+	FreqMHz      *float32 `json:"freqMhz,omitempty"`
+	SpreadFactor *int16   `json:"spreadFactor,omitempty"`
+	BandwidthKHz *float32 `json:"bandwidthKhz,omitempty"`
+	CodingRate   *int16   `json:"codingRate,omitempty"`
+}
+
+// ResolvedHop is a single hop in a packet's resolved path.
+type ResolvedHop struct {
+	Confidence string        `json:"confidence"` // "high", "low", "unknown"
+	Node       *ResolvedNode `json:"node,omitempty"`
+}
+
+// ResolvedNode is a node reference within a resolved path hop.
+type ResolvedNode struct {
+	ID        uuid.UUID `json:"id"`
+	Name      *string   `json:"name,omitempty"`
+	PublicKey string    `json:"publicKey"` // hex-encoded prefix
+	Latitude  *float64  `json:"latitude,omitempty"`
+	Longitude *float64  `json:"longitude,omitempty"`
+}
+
+// Packet is the full packet representation including all observations and resolved paths.
+type Packet struct {
+	PacketHash       string                    `json:"packetHash"` // hex-encoded
+	PayloadType      int16                     `json:"payloadType"`
+	PayloadTypeName  string                    `json:"payloadTypeName"`
+	PayloadVersion   int16                     `json:"payloadVersion"`
+	RouteType        int16                     `json:"routeType"`
+	RouteTypeName    string                    `json:"routeTypeName"`
+	TransportCodes   *string                   `json:"transportCodes,omitempty"` // hex-encoded
+	OriginPubkey     *string                   `json:"originPubkey,omitempty"`   // hex-encoded
+	ParsedPayload    json.RawMessage           `json:"parsedPayload,omitempty"`
+	RawPayload       string                    `json:"rawPayload"` // hex-encoded
+	Decrypted        bool                      `json:"decrypted"`
+	ChannelHash      *string                   `json:"channelHash,omitempty"` // hex-encoded
+	FirstHeardAt     int64                     `json:"firstHeardAt"`          // epoch ms
+	LastHeardAt      int64                     `json:"lastHeardAt"`           // epoch ms
+	ObservationCount int32                     `json:"observationCount"`
+	Observations     []PacketObservationDetail `json:"observations"`
+}
+
 // AdvertObservation extends PacketObservationSummary with node identity fields
 // specific to advert packets (payload_type=4).
 type AdvertObservation struct {
@@ -247,4 +331,12 @@ type Reader interface {
 	// ListNodeObservations returns a paginated list of packet observations originating from a node.
 	// Pass cursor=0 to start from the beginning.
 	ListNodeObservations(ctx context.Context, nodeID uuid.UUID, cursor int64, limit int32) (Page[PacketObservationSummary], error)
+	// ListPackets returns a paginated list of packets with the latest observation rolled in.
+	// Pass 0 for payloadType/routeType to skip those filters.
+	// Pass empty string for iata, zero times for since/until to skip those filters.
+	// cursor is last_heard_at epoch ms; pass 0 to start from the beginning.
+	ListPackets(ctx context.Context, payloadType, routeType int16, iata string, since, until time.Time, cursor int64, limit int32) (Page[PacketSummary], error)
+	// GetPacket returns full packet detail including all observations with radio settings.
+	// Returns nil, pgx.ErrNoRows if not found.
+	GetPacket(ctx context.Context, packetHash []byte) (*Packet, error)
 }

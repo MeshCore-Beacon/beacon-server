@@ -186,19 +186,40 @@ ON CONFLICT (packet_hash) DO UPDATE SET
   observation_count = packets.observation_count + 1
 RETURNING *, (xmax = 0) AS inserted;
 
--- name: GetPacket :one
+-- name: GetPacketByHash :one
 SELECT * FROM packets WHERE packet_hash = $1;
 
 -- name: ListPackets :many
-SELECT p.*
+-- Returns packets with the latest observation rolled in for display.
+-- Pass cursor=0 to start from the beginning.
+SELECT
+  p.packet_hash,
+  p.payload_type,
+  p.route_type,
+  p.first_heard_at,
+  p.last_heard_at,
+  p.observation_count,
+  po.observer_id AS latest_observer_id,
+  o.display_name AS latest_observer_name,
+  po.iata AS latest_observer_iata
 FROM packets p
+LEFT JOIN LATERAL (
+  SELECT observer_id, iata
+  FROM packet_observations
+  WHERE packet_hash = p.packet_hash
+  ORDER BY heard_at DESC
+  LIMIT 1
+) po ON true
+LEFT JOIN observers o ON o.id = po.observer_id
 WHERE
-  ($1::smallint IS NULL OR p.payload_type = $1)
-  AND ($2::smallint IS NULL OR p.route_type = $2)
-  AND ($3::timestamptz IS NULL OR p.first_heard_at >= $3)
-  AND ($4::timestamptz IS NULL OR p.first_heard_at <= $4)
+  ($1 = 0 OR p.payload_type = $1)
+  AND ($2 = 0 OR p.route_type = $2)
+  AND ($3 = '' OR po.iata ILIKE $3)
+  AND ($4::timestamptz IS NULL OR p.first_heard_at >= $4)
+  AND ($5::timestamptz IS NULL OR p.first_heard_at <= $5)
+  AND ($6::timestamptz IS NULL OR p.last_heard_at < $6)
 ORDER BY p.last_heard_at DESC
-LIMIT $5;
+LIMIT $7;
 
 -- name: ListPacketsAfterID :many
 SELECT p.*
@@ -237,9 +258,11 @@ ON CONFLICT (packet_hash, observer_id, heard_at) DO NOTHING
 RETURNING *;
 
 -- name: ListObservationsForPacket :many
-SELECT * FROM packet_observations
-WHERE packet_hash = $1
-ORDER BY heard_at ASC;
+SELECT po.*, o.display_name AS observer_name
+FROM packet_observations po
+LEFT JOIN observers o ON o.id = po.observer_id
+WHERE po.packet_hash = $1
+ORDER BY po.heard_at ASC;
 
 -- name: ListObservationsForObserver :many
 SELECT * FROM packet_observations
