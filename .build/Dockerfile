@@ -6,7 +6,10 @@ COPY . .
 RUN go build -o tower ./cmd/tower
 
 FROM alpine:3.19
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata postgresql-client
 WORKDIR /app
 COPY --from=builder /app/tower .
-ENTRYPOINT ["./tower"]
+COPY db/migrations/ ./migrations/
+COPY .build/docker-entrypoint.sh .
+RUN chmod +x docker-entrypoint.sh
+ENTRYPOINT ["./docker-entrypoint.sh"]
