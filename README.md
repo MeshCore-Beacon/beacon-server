@@ -308,10 +308,10 @@ Tower server.
       last-seen)
 - [x] REST API: Brokers (list with connection status)
 - [x] REST API: Pagination
+- [x] REST API: Nodes (list + detail + observations)
 
 ### In progress / next
 
-- [ ] REST API: Nodes (list + detail + observations)
 - [ ] REST API: Packets (list + detail)
 - [ ] REST API: Stats
 - [ ] Path resolution (node short ID lookup)
