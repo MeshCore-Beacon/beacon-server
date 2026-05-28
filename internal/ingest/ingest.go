@@ -432,6 +432,19 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		}
 		channelHash = []byte{grpTxt.ChannelHash}
 	}
+	originPubkey := pubkeyBytes
+	switch packet.PayloadType() {
+	case meshcore.PayloadTypeAdvert:
+		advert, err := meshcore.AdvertFromBytes(packet.Payload)
+		if err == nil {
+			originPubkey = advert.PublicKey.PublicKeyBytes()
+		}
+	case meshcore.PayloadTypeAnonReq:
+		anonReq, err := meshcore.AnonReqFromBytes(packet.Payload)
+		if err == nil {
+			originPubkey = anonReq.EphemeralPubKey[:]
+		}
+	}
 	pParams := UpsertPacketParams{
 		PacketHash:     packetHash[:],
 		RouteType:      packet.RouteType(),
@@ -440,7 +453,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		TransportCodes: transportCodes,
 		RawPayload:     hexBytes,
 		ParsedPayload:  parsedPayload,
-		OriginPubkey:   pubkeyBytes,
+		OriginPubkey:   originPubkey,
 		ChannelHash:    channelHash,
 	}
 	isNew, err := w.db.UpsertPacket(ctx, pParams)

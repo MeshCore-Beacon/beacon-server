@@ -275,12 +275,35 @@ WHERE id = $1 AND supports_multibyte_traces = FALSE;
 -- name: GetNodeByPubkey :one
 SELECT * FROM nodes WHERE public_key = $1;
 
+-- name: GetNodeByID :one
+SELECT * FROM nodes WHERE id = $1;
+
 -- name: ListNodes :many
-SELECT * FROM nodes
+SELECT DISTINCT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen
+FROM nodes n
+LEFT JOIN node_iatas ni ON ni.node_id = n.id
 WHERE
-  ($1::smallint IS NULL OR node_type = $1)
-ORDER BY last_seen DESC
-LIMIT $2;
+  ($1 = 0 OR n.node_type = $1)
+  AND ($2 = '' OR ni.iata = $2)
+  AND (NOT $3 OR n.supports_multibyte_paths = TRUE)
+  AND (NOT $4 OR n.supports_multibyte_traces = TRUE)
+  AND ($5::bytea IS NULL OR n.public_key = $5)
+  AND ($6 = '' OR n.name ILIKE '%' || $6 || '%')
+  AND ($7::timestamptz IS NULL OR n.last_seen < $7)
+GROUP BY n.id
+ORDER BY n.last_seen DESC
+LIMIT $8;
+
+-- name: ListNodeObservations :many
+SELECT po.id, encode(po.packet_hash, 'hex') AS packet_hash_hex,
+  p.payload_type, po.iata, po.heard_at, po.rssi, po.snr, po.hop_count
+FROM packet_observations po
+JOIN packets p ON p.packet_hash = po.packet_hash
+JOIN nodes n ON n.public_key = p.origin_pubkey
+WHERE n.id = $1
+  AND ($2 = 0 OR po.id > $2)
+ORDER BY po.id ASC
+LIMIT $3;
 
 -- ============================================================
 -- NODE IATAS

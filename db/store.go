@@ -793,3 +793,123 @@ func (s *Store) ListObserverAdverts(ctx context.Context, observerID uuid.UUID, c
 		HasMore:    hasMore,
 	}, nil
 }
+
+// ListNodes returns a paginated list of nodes with optional filters.
+// Pass 0 for nodeType, empty string for iata/name, nil for pubkey to skip those filters.
+// cursor is last_seen epoch ms; pass 0 to start from the beginning.
+func (s *Store) ListNodes(ctx context.Context, nodeType int16, iata string, supportsMultibytePaths, supportsMultibyteTraces bool, pubkey []byte, name string, cursor int64, limit int32) (api.Page[api.NodeSummary], error) {
+	var cursorTS pgtype.Timestamptz
+	if cursor > 0 {
+		cursorTS = pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}
+	}
+	rows, err := s.q.ListNodes(ctx, sqlc.ListNodesParams{
+		Column1: nodeType,
+		Column2: iata,
+		Column3: supportsMultibytePaths,
+		Column4: supportsMultibyteTraces,
+		Column5: pubkey,
+		Column6: name,
+		Column7: cursorTS,
+		Limit:   limit + 1,
+	})
+	if err != nil {
+		return api.Page[api.NodeSummary]{}, err
+	}
+	hasMore := len(rows) > int(limit)
+	if hasMore {
+		rows = rows[:limit]
+	}
+	items := make([]api.NodeSummary, 0, len(rows))
+	for _, v := range rows {
+		items = append(items, api.NodeSummary{
+			ID:           v.ID,
+			PublicKey:    hex.EncodeToString(v.PublicKey),
+			NodeType:     v.NodeType,
+			NodeTypeName: api.NodeTypeName(v.NodeType),
+			Name:         v.Name,
+			Latitude:     v.Latitude,
+			Longitude:    v.Longitude,
+		})
+	}
+	var nextCursor *int64
+	if hasMore && len(items) > 0 {
+		ms := rows[len(rows)-1].LastSeen.Time.UnixMilli()
+		nextCursor = &ms
+	}
+	return api.Page[api.NodeSummary]{
+		Items:      items,
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
+	}, nil
+}
+
+// GetNode returns full detail for a single node by UUID.
+// Returns nil, pgx.ErrNoRows if the node is not found.
+func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error) {
+	row, err := s.q.GetNodeByID(ctx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	node := &api.Node{
+		NodeSummary: api.NodeSummary{
+			ID:           row.ID,
+			PublicKey:    hex.EncodeToString(row.PublicKey),
+			NodeType:     row.NodeType,
+			NodeTypeName: api.NodeTypeName(row.NodeType),
+			Name:         row.Name,
+			Latitude:     row.Latitude,
+			Longitude:    row.Longitude,
+		},
+		LocationSource:          row.LocationSource,
+		SupportsMultibytePaths:  row.SupportsMultibytePaths,
+		SupportsMultibyteTraces: row.SupportsMultibyteTraces,
+		MinFirmwareVersion:      row.MinFirmwareVersion,
+		FirstSeen:               row.FirstSeen.Time.UnixMilli(),
+		LastSeen:                row.LastSeen.Time.UnixMilli(),
+		Metadata:                row.Metadata,
+	}
+	if row.LastAdvertAt.Valid {
+		ms := row.LastAdvertAt.Time.UnixMilli()
+		node.LastAdvertAt = &ms
+	}
+	return node, nil
+}
+
+func (s *Store) ListNodeObservations(ctx context.Context, nodeID uuid.UUID, cursor int64, limit int32) (api.Page[api.PacketObservationSummary], error) {
+	rows, err := s.q.ListNodeObservations(ctx, sqlc.ListNodeObservationsParams{
+		ID:      nodeID,
+		Column2: cursor,
+		Limit:   limit + 1,
+	})
+	if err != nil {
+		return api.Page[api.PacketObservationSummary]{}, err
+	}
+	hasMore := len(rows) > int(limit)
+	if hasMore {
+		rows = rows[:limit]
+	}
+	items := make([]api.PacketObservationSummary, 0, len(rows))
+	for _, v := range rows {
+		items = append(items, api.PacketObservationSummary{
+			ID:              v.ID,
+			PacketHash:      v.PacketHashHex,
+			PayloadType:     v.PayloadType,
+			PayloadTypeName: api.PayloadTypeName(v.PayloadType),
+			IATA:            v.Iata,
+			HeardAt:         v.HeardAt.Time.UnixMilli(),
+			RSSI:            v.Rssi,
+			SNR:             v.Snr,
+			HopCount:        &v.HopCount,
+		})
+	}
+	var nextCursor *int64
+	if hasMore && len(items) > 0 {
+		last := items[len(items)-1].ID
+		nextCursor = &last
+	}
+	return api.Page[api.PacketObservationSummary]{
+		Items:      items,
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
+	}, nil
+}

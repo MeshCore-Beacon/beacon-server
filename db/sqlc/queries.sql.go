@@ -204,6 +204,32 @@ func (q *Queries) GetIATA(ctx context.Context, iata string) (IataCode, error) {
 	return i, err
 }
 
+const getNodeByID = `-- name: GetNodeByID :one
+SELECT id, public_key, node_type, name, latitude, longitude, location_source, last_advert_at, supports_multibyte_paths, supports_multibyte_traces, min_firmware_version, first_seen, last_seen, metadata FROM nodes WHERE id = $1
+`
+
+func (q *Queries) GetNodeByID(ctx context.Context, id uuid.UUID) (Node, error) {
+	row := q.db.QueryRow(ctx, getNodeByID, id)
+	var i Node
+	err := row.Scan(
+		&i.ID,
+		&i.PublicKey,
+		&i.NodeType,
+		&i.Name,
+		&i.Latitude,
+		&i.Longitude,
+		&i.LocationSource,
+		&i.LastAdvertAt,
+		&i.SupportsMultibytePaths,
+		&i.SupportsMultibyteTraces,
+		&i.MinFirmwareVersion,
+		&i.FirstSeen,
+		&i.LastSeen,
+		&i.Metadata,
+	)
+	return i, err
+}
+
 const getNodeByPubkey = `-- name: GetNodeByPubkey :one
 SELECT id, public_key, node_type, name, latitude, longitude, location_source, last_advert_at, supports_multibyte_paths, supports_multibyte_traces, min_firmware_version, first_seen, last_seen, metadata FROM nodes WHERE public_key = $1
 `
@@ -1056,28 +1082,120 @@ func (q *Queries) ListIATAs(ctx context.Context) ([]IataCode, error) {
 	return items, nil
 }
 
-const listNodes = `-- name: ListNodes :many
-SELECT id, public_key, node_type, name, latitude, longitude, location_source, last_advert_at, supports_multibyte_paths, supports_multibyte_traces, min_firmware_version, first_seen, last_seen, metadata FROM nodes
-WHERE
-  ($1::smallint IS NULL OR node_type = $1)
-ORDER BY last_seen DESC
-LIMIT $2
+const listNodeObservations = `-- name: ListNodeObservations :many
+SELECT po.id, encode(po.packet_hash, 'hex') AS packet_hash_hex,
+  p.payload_type, po.iata, po.heard_at, po.rssi, po.snr, po.hop_count
+FROM packet_observations po
+JOIN packets p ON p.packet_hash = po.packet_hash
+JOIN nodes n ON n.public_key = p.origin_pubkey
+WHERE n.id = $1
+  AND ($2 = 0 OR po.id > $2)
+ORDER BY po.id ASC
+LIMIT $3
 `
 
-type ListNodesParams struct {
-	Column1 int16 `json:"column_1"`
-	Limit   int32 `json:"limit"`
+type ListNodeObservationsParams struct {
+	ID      uuid.UUID   `json:"id"`
+	Column2 interface{} `json:"column_2"`
+	Limit   int32       `json:"limit"`
 }
 
-func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]Node, error) {
-	rows, err := q.db.Query(ctx, listNodes, arg.Column1, arg.Limit)
+type ListNodeObservationsRow struct {
+	ID            int64              `json:"id"`
+	PacketHashHex string             `json:"packet_hash_hex"`
+	PayloadType   int16              `json:"payload_type"`
+	Iata          string             `json:"iata"`
+	HeardAt       pgtype.Timestamptz `json:"heard_at"`
+	Rssi          *int16             `json:"rssi"`
+	Snr           *float32           `json:"snr"`
+	HopCount      int16              `json:"hop_count"`
+}
+
+func (q *Queries) ListNodeObservations(ctx context.Context, arg ListNodeObservationsParams) ([]ListNodeObservationsRow, error) {
+	rows, err := q.db.Query(ctx, listNodeObservations, arg.ID, arg.Column2, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Node{}
+	items := []ListNodeObservationsRow{}
 	for rows.Next() {
-		var i Node
+		var i ListNodeObservationsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PacketHashHex,
+			&i.PayloadType,
+			&i.Iata,
+			&i.HeardAt,
+			&i.Rssi,
+			&i.Snr,
+			&i.HopCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNodes = `-- name: ListNodes :many
+SELECT DISTINCT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen
+FROM nodes n
+LEFT JOIN node_iatas ni ON ni.node_id = n.id
+WHERE
+  ($1 = 0 OR n.node_type = $1)
+  AND ($2 = '' OR ni.iata = $2)
+  AND (NOT $3 OR n.supports_multibyte_paths = TRUE)
+  AND (NOT $4 OR n.supports_multibyte_traces = TRUE)
+  AND ($5::bytea IS NULL OR n.public_key = $5)
+  AND ($6 = '' OR n.name ILIKE '%' || $6 || '%')
+  AND ($7::timestamptz IS NULL OR n.last_seen < $7)
+GROUP BY n.id
+ORDER BY n.last_seen DESC
+LIMIT $8
+`
+
+type ListNodesParams struct {
+	Column1 interface{}        `json:"column_1"`
+	Column2 interface{}        `json:"column_2"`
+	Column3 interface{}        `json:"column_3"`
+	Column4 interface{}        `json:"column_4"`
+	Column5 []byte             `json:"column_5"`
+	Column6 interface{}        `json:"column_6"`
+	Column7 pgtype.Timestamptz `json:"column_7"`
+	Limit   int32              `json:"limit"`
+}
+
+type ListNodesRow struct {
+	ID        uuid.UUID          `json:"id"`
+	PublicKey []byte             `json:"public_key"`
+	NodeType  int16              `json:"node_type"`
+	Name      *string            `json:"name"`
+	Latitude  *float64           `json:"latitude"`
+	Longitude *float64           `json:"longitude"`
+	LastSeen  pgtype.Timestamptz `json:"last_seen"`
+}
+
+func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNodesRow, error) {
+	rows, err := q.db.Query(ctx, listNodes,
+		arg.Column1,
+		arg.Column2,
+		arg.Column3,
+		arg.Column4,
+		arg.Column5,
+		arg.Column6,
+		arg.Column7,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListNodesRow{}
+	for rows.Next() {
+		var i ListNodesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.PublicKey,
@@ -1085,14 +1203,7 @@ func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]Node, e
 			&i.Name,
 			&i.Latitude,
 			&i.Longitude,
-			&i.LocationSource,
-			&i.LastAdvertAt,
-			&i.SupportsMultibytePaths,
-			&i.SupportsMultibyteTraces,
-			&i.MinFirmwareVersion,
-			&i.FirstSeen,
 			&i.LastSeen,
-			&i.Metadata,
 		); err != nil {
 			return nil, err
 		}

@@ -50,7 +50,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker) http.Handler {
 		// Public group — no authentication required (all of v1 is public).
 		r.Group(func(r chi.Router) {
 			r.Mount("/packets", handlers.PacketsRouter())
-			r.Mount("/nodes", handlers.NodesRouter())
+			r.Mount("/nodes", handlers.NodesRouter(reader))
 			r.Mount("/brokers", handlers.BrokersRouter(workers))
 			r.Mount("/observers", handlers.ObserversRouter(reader))
 			r.Mount("/channels", handlers.ChannelsRouter(reader))

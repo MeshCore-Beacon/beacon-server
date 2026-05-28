@@ -51,6 +51,31 @@ type ObserverTelemetry struct {
 	Points   []ObserverTelemetryPoint `json:"points"`
 }
 
+// NodeSummary is the minimal node representation used in list responses.
+type NodeSummary struct {
+	ID           uuid.UUID `json:"id"`
+	PublicKey    string    `json:"publicKey"` // hex-encoded public key
+	NodeType     int16     `json:"nodeType"`  // 1=companion, 2=repeater, 3=room server
+	NodeTypeName string    `json:"nodeTypeName"`
+	Name         *string   `json:"name,omitempty"`
+	Latitude     *float64  `json:"lat,omitempty"`
+	Longitude    *float64  `json:"lng,omitempty"`
+}
+
+// Node is the full node representation including firmware capability flags,
+// location source, and timing metadata.
+type Node struct {
+	NodeSummary
+	LocationSource          *string         `json:"locationSource,omitempty"`     // e.g. "advert", "manual"
+	LastAdvertAt            *int64          `json:"lastAdvertAt,omitempty"`       // epoch ms, nil if no advert received
+	SupportsMultibytePaths  bool            `json:"supportsMultibytePaths"`       // firmware >= 1.14.0
+	SupportsMultibyteTraces bool            `json:"supportsMultibyteTraces"`      // firmware >= 1.11.0
+	MinFirmwareVersion      *string         `json:"minFirmwareVersion,omitempty"` // derived from capability flags
+	FirstSeen               int64           `json:"firstSeen"`                    // epoch ms
+	LastSeen                int64           `json:"lastSeen"`                     // epoch ms
+	Metadata                json.RawMessage `json:"metadata,omitempty"`           // raw JSONB metadata
+}
+
 // ObserverSummary is the minimal observer representation used in list responses.
 type ObserverSummary struct {
 	ID           uuid.UUID `json:"id"`
@@ -211,4 +236,15 @@ type Reader interface {
 	// ListObserverAdverts returns a paginated list of advert packets heard by an observer.
 	// Pass cursor=0 to start from the beginning.
 	ListObserverAdverts(ctx context.Context, observerID uuid.UUID, cursor int64, limit int32) (Page[AdvertObservation], error)
+	// ListNodes returns a paginated list of nodes with optional filters.
+	// Pass 0 for nodeType, empty string for iata, nil for pubkey to skip those filters.
+	// cursor is last_seen epoch ms; pass 0 to start from the beginning.
+	ListNodes(ctx context.Context, nodeType int16, iata string, supportsMultibytePaths, supportsMultibyteTraces bool, pubkey []byte, name string, cursor int64, limit int32) (Page[NodeSummary], error)
+
+	// GetNode returns full detail for a single node by UUID.
+	// Returns nil, pgx.ErrNoRows if the node is not found.
+	GetNode(ctx context.Context, nodeID uuid.UUID) (*Node, error)
+	// ListNodeObservations returns a paginated list of packet observations originating from a node.
+	// Pass cursor=0 to start from the beginning.
+	ListNodeObservations(ctx context.Context, nodeID uuid.UUID, cursor int64, limit int32) (Page[PacketObservationSummary], error)
 }
