@@ -90,17 +90,18 @@ WHERE
     SELECT po.iata FROM packet_observations po
     WHERE po.observer_id = o.id
     ORDER BY po.heard_at DESC LIMIT 1
-  ) = $1)
+  ) ILIKE $1)
   AND ($2 = '' OR o.observer_type = $2)
   AND ($3 = '' OR ob.broker_name = $3)
   AND ($4 = '' OR CASE
     WHEN o.last_status_at > NOW() - INTERVAL '5 minutes' THEN 'online'
     ELSE 'offline'
   END = $4)
-  AND ($5::timestamptz IS NULL OR o.last_seen < $5)
+  AND ($5 = '' OR o.display_name ILIKE '%' || $5 || '%')
+  AND ($6::timestamptz IS NULL OR o.last_seen < $6)
 GROUP BY o.id
 ORDER BY o.last_seen DESC
-LIMIT $6;
+LIMIT $7;
 
 -- name: GetObserverLastIATA :one
 SELECT iata FROM packet_observations

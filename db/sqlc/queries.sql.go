@@ -1409,17 +1409,18 @@ WHERE
     SELECT po.iata FROM packet_observations po
     WHERE po.observer_id = o.id
     ORDER BY po.heard_at DESC LIMIT 1
-  ) = $1)
+  ) ILIKE $1)
   AND ($2 = '' OR o.observer_type = $2)
   AND ($3 = '' OR ob.broker_name = $3)
   AND ($4 = '' OR CASE
     WHEN o.last_status_at > NOW() - INTERVAL '5 minutes' THEN 'online'
     ELSE 'offline'
   END = $4)
-  AND ($5::timestamptz IS NULL OR o.last_seen < $5)
+  AND ($5 = '' OR o.display_name ILIKE '%' || $5 || '%')
+  AND ($6::timestamptz IS NULL OR o.last_seen < $6)
 GROUP BY o.id
 ORDER BY o.last_seen DESC
-LIMIT $6
+LIMIT $7
 `
 
 type ListObserversParams struct {
@@ -1427,7 +1428,8 @@ type ListObserversParams struct {
 	Column2 interface{}        `json:"column_2"`
 	Column3 interface{}        `json:"column_3"`
 	Column4 interface{}        `json:"column_4"`
-	Column5 pgtype.Timestamptz `json:"column_5"`
+	Column5 interface{}        `json:"column_5"`
+	Column6 pgtype.Timestamptz `json:"column_6"`
 	Limit   int32              `json:"limit"`
 }
 
@@ -1449,6 +1451,7 @@ func (q *Queries) ListObservers(ctx context.Context, arg ListObserversParams) ([
 		arg.Column3,
 		arg.Column4,
 		arg.Column5,
+		arg.Column6,
 		arg.Limit,
 	)
 	if err != nil {

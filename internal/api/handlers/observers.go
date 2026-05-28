@@ -33,6 +33,7 @@ func ObserversRouter(reader api.Reader) http.Handler {
 		iata := r.URL.Query().Get("iata")
 		observerType := r.URL.Query().Get("type")
 		broker := r.URL.Query().Get("broker")
+		name := r.URL.Query().Get("name")
 		status := r.URL.Query().Get("status")
 		var cursor int64
 		if cursorParam := r.URL.Query().Get("cursor"); cursorParam != "" {
@@ -52,7 +53,7 @@ func ObserversRouter(reader api.Reader) http.Handler {
 			}
 			limit = int32(l)
 		}
-		observers, err := reader.ListObservers(r.Context(), iata, observerType, broker, status, cursor, limit)
+		observers, err := reader.ListObservers(r.Context(), iata, observerType, broker, status, name, cursor, limit)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "failed to get list of observers")
 			return
