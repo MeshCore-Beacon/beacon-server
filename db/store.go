@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"log"
 	"time"
 
 	sqlc "github.com/MeshCore-Tower/tower-server/db/sqlc"
@@ -667,4 +668,50 @@ func (s *Store) GetObserverTelemetry(ctx context.Context, observerID uuid.UUID, 
 		})
 	}
 	return &api.ObserverTelemetry{Points: points}, nil
+}
+
+// ListObserverAdverts returns a paginated list of advert packets heard by an observer.
+// Pass cursor=0 to start from the beginning.
+func (s *Store) ListObserverAdverts(ctx context.Context, observerID uuid.UUID, cursor int64, limit int32) (api.Page[api.AdvertObservation], error) {
+	rows, err := s.q.ListObserverAdverts(ctx, sqlc.ListObserverAdvertsParams{
+		ObserverID: observerID,
+		Column2:    cursor,
+		Limit:      limit + 1, // fetch one extra to detect hasMore
+	})
+	if err != nil {
+		log.Printf("api: ListObserverAdverts failed: %v", err)
+		return api.Page[api.AdvertObservation]{}, err
+	}
+	hasMore := len(rows) > int(limit)
+	if hasMore {
+		rows = rows[:limit]
+	}
+	items := make([]api.AdvertObservation, 0, len(rows))
+	for _, v := range rows {
+		items = append(items, api.AdvertObservation{
+			PacketObservationSummary: api.PacketObservationSummary{
+				ID:              v.ID,
+				PacketHash:      v.PacketHashHex,
+				PayloadType:     v.PayloadType,
+				PayloadTypeName: api.PayloadTypeName(v.PayloadType),
+				IATA:            v.Iata,
+				HeardAt:         v.HeardAt.Time.UnixMilli(),
+				RSSI:            v.Rssi,
+				SNR:             v.Snr,
+				HopCount:        &v.HopCount,
+			},
+			NodeName:      v.NodeName,
+			NodePublicKey: &v.NodePublicKey,
+		})
+	}
+	var nextCursor *int64
+	if hasMore {
+		last := items[len(items)-1].ID
+		nextCursor = &last
+	}
+	return api.Page[api.AdvertObservation]{
+		Items:      items,
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
+	}, nil
 }

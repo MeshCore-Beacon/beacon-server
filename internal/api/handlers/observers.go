@@ -60,7 +60,47 @@ func ObserversRouter(reader api.Reader) http.Handler {
 			}
 			respond(w, http.StatusOK, obs)
 		})
-		r.Get("/adverts", ListObserverAdverts)
+		// /api/v1/observers/{observerId}/adverts
+		//
+		// Query params (all optional):
+		//
+		//	limit=50
+		//	cursor=<opaque>
+
+		r.Get("/adverts", func(w http.ResponseWriter, r *http.Request) {
+			observerID, err := uuid.Parse(chi.URLParam(r, "observerId"))
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "invalid observer ID")
+				return
+			}
+
+			var cursor int64
+			if cursorParam := r.URL.Query().Get("cursor"); cursorParam != "" {
+				c, err := strconv.ParseInt(cursorParam, 10, 64)
+				if err != nil {
+					respondError(w, http.StatusBadRequest, "cursor must be an integer")
+					return
+				}
+				cursor = c
+			}
+
+			var limit int32 = 50
+			if limitParam := r.URL.Query().Get("limit"); limitParam != "" {
+				l, err := strconv.ParseInt(limitParam, 10, 32)
+				if err != nil {
+					respondError(w, http.StatusBadRequest, "limit must be an integer")
+					return
+				}
+				limit = int32(l)
+			}
+
+			adverts, err := reader.ListObserverAdverts(r.Context(), observerID, cursor, limit)
+			if err != nil {
+				respondError(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+			respond(w, http.StatusOK, adverts)
+		})
 		// GET /api/v1/observers/{observerId}/telemetry
 		//
 		// Query params (all optional):
@@ -114,16 +154,4 @@ func ObserversRouter(reader api.Reader) http.Handler {
 	})
 
 	return r
-}
-
-// ListObserverAdverts handles GET /api/v1/observers/{observerId}/adverts
-//
-// Query params (all optional):
-//
-//	limit=50
-//	cursor=<opaque>
-func ListObserverAdverts(w http.ResponseWriter, r *http.Request) {
-	// observerId := chi.URLParam(r, "observerId")
-	// TODO: fetch advert packets heard by this observer, paginate, write JSON response.
-	w.WriteHeader(http.StatusNotImplemented)
 }

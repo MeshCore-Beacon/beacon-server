@@ -9,6 +9,28 @@ import (
 	"github.com/google/uuid"
 )
 
+// AdvertObservation extends PacketObservationSummary with node identity fields
+// specific to advert packets (payload_type=4).
+type AdvertObservation struct {
+	PacketObservationSummary
+	NodeName      *string `json:"nodeName,omitempty"`
+	NodePublicKey *string `json:"nodePublicKey,omitempty"`
+}
+
+// PacketObservationSummary is a lightweight packet+observation pair used in
+// list contexts such as observer adverts and node observations.
+type PacketObservationSummary struct {
+	ID              int64    `json:"id"`         // observation ID, use as cursor for pagination
+	PacketHash      string   `json:"packetHash"` // hex-encoded
+	PayloadType     int16    `json:"payloadType"`
+	PayloadTypeName string   `json:"payloadTypeName"`
+	IATA            string   `json:"iata"`
+	HeardAt         int64    `json:"heardAt"` // epoch ms
+	RSSI            *int16   `json:"rssi,omitempty"`
+	SNR             *float32 `json:"snr,omitempty"`
+	HopCount        *int16   `json:"hopCount,omitempty"`
+}
+
 // ObserverTelemetryPoint is a single telemetry snapshot for an observer.
 type ObserverTelemetryPoint struct {
 	T             int64    `json:"t"` // epoch ms
@@ -182,4 +204,8 @@ type Reader interface {
 	// since and until define the window; pass zero times to use defaults (last 24h).
 	GetObserverTelemetry(ctx context.Context, observerID uuid.UUID, since, until time.Time, afterID int64) (*ObserverTelemetry, error)
 	// TODO: add interval time.Duration param for server-side bucketing
+
+	// ListObserverAdverts returns a paginated list of advert packets heard by an observer.
+	// Pass cursor=0 to start from the beginning.
+	ListObserverAdverts(ctx context.Context, observerID uuid.UUID, cursor int64, limit int32) (Page[AdvertObservation], error)
 }

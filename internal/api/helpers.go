@@ -6,6 +6,28 @@ import (
 	"github.com/meshcore-go/meshcore-go"
 )
 
+// PayloadTypeName returns a human-readable name for a payload type integer.
+func PayloadTypeName(t int16) string {
+	switch t {
+	case 0:
+		return "raw"
+	case 1:
+		return "txt_msg"
+	case 2:
+		return "sensor_data"
+	case 4:
+		return "advert"
+	case 5:
+		return "grp_txt"
+	case 8:
+		return "sign"
+	case 9:
+		return "trace"
+	default:
+		return "unknown"
+	}
+}
+
 // NodeTypeName returns a human-readable name for a node type integer.
 func NodeTypeName(t int16) string {
 	switch byte(t) {
