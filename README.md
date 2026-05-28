@@ -277,6 +277,67 @@ Tower server.
 
 ---
 
+## API Documentation (Swagger)
+
+Tower uses [swaggo/swag](https://github.com/swaggo/swag) to generate OpenAPI
+documentation from annotations in the handler comments.
+
+### Viewing the docs
+
+Start the server and open:
+
+```
+http://localhost:8080/swagger/index.html
+```
+
+### Regenerating after API changes
+
+After adding or modifying any handler, regenerate the docs:
+
+```bash
+swag init -g cmd/tower/main.go -o docs
+```
+
+Commit the updated `docs/` directory alongside your handler changes.
+
+### Install swag
+
+```bash
+go install github.com/swaggo/swag/cmd/swag@latest
+```
+
+### Annotation format
+
+Each handler closure should have a godoc-style annotation block immediately
+above the `r.Get()`/`r.Post()` call:
+
+```go
+// listThings godoc
+//
+//	@Summary	Short description shown in the UI
+//	@Tags		TagName
+//	@Produce	json
+//	@Param		paramName	query		string	false	"Description"
+//	@Param		id			path		string	true	"Resource ID"
+//	@Success	200			{object}	api.MyResponseType
+//	@Failure	400			{object}	handlers.APIError
+//	@Failure	500			{object}	handlers.APIError
+//	@Router		/things [get]
+r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+```
+
+**Param types:** `query`, `path`, `header`, `body`  
+**Required:** use `true` or `false` as the fifth field  
+**Pagination params** (`cursor`, `limit`) should always be `false`
+
+For paginated responses use the generic page wrapper:
+
+```go
+//	@Success	200	{object}	api.Page[api.MyType]
+```
+
+---
+
 ## Road Map
 
 ### Done
@@ -307,12 +368,14 @@ Tower server.
 - [x] REST API: Packets (list + detail)
 - [x] REST API: Stats
 - [x] Materialized view refresh (mv_hourly_iata_stats, mv_top_nodes_by_iata)
+- [x] Swagger/OpenAPI documentation via swaggo/swag
 
 ### In progress / next
 
 - [ ] Path resolution (node short ID lookup)
 - [ ] Propagation time calculation
 - [ ] Routes and traces endpoints
+- [ ] WebSocket subscription unsubscribe (scaffolded, not implemented)
 
 ### Future
 
@@ -321,6 +384,4 @@ Tower server.
 - [ ] Channel key rotation / multi-key support (scaffolded)
 - [ ] Caddy reverse proxy config for production
 - [ ] Region management via API (currently config-file only)
-- [ ] WebSocket subscription unsubscribe (scaffolded, not implemented)
 - [ ] Observer owner tracking (schema exists, API excluded by design)
-- [ ] Swagger/OpenAPI documentation via swaggo/swag

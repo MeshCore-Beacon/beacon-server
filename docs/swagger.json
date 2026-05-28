@@ -1,0 +1,1766 @@
+{
+    "schemes": [
+        "http",
+        "https"
+    ],
+    "swagger": "2.0",
+    "info": {
+        "description": "MeshCore network observation backend. Ingests LoRa packets from MQTT brokers, stores in PostgreSQL, and streams live events via WebSocket.",
+        "title": "MeshCore Tower API",
+        "termsOfService": "https://github.com/MeshCore-Tower/tower-server",
+        "contact": {
+            "name": "MeshCore Tower",
+            "url": "https://github.com/MeshCore-Tower/tower-server"
+        },
+        "license": {
+            "name": "MIT"
+        },
+        "version": "1.0"
+    },
+    "host": "localhost:8080",
+    "basePath": "/api/v1",
+    "paths": {
+        "/brokers": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Brokers"
+                ],
+                "summary": "List all MQTT brokers and their connection status",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/handlers.BrokerStatus"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/channels": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Channels"
+                ],
+                "summary": "List channels",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Single-byte channel hash (hex)",
+                        "name": "hash",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by IATA code (case-insensitive)",
+                        "name": "iata",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "last_seen epoch ms of last item for pagination",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max results (default 50)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/channels/{channelID}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Channels"
+                ],
+                "summary": "Get channel detail",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Channel integer ID",
+                        "name": "channelID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.Channel"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/channels/{channelID}/messages": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Channels"
+                ],
+                "summary": "List messages for a channel",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Channel integer ID",
+                        "name": "channelID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Return messages after this epoch ms",
+                        "name": "since",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by IATA code",
+                        "name": "iata",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Message ID of last item for pagination",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max results (default 50)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/iatas": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "IATAs"
+                ],
+                "summary": "List all IATA codes",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.IATA"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/iatas/{iata}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "IATAs"
+                ],
+                "summary": "Get a single IATA code",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "3-letter IATA code",
+                        "name": "iata",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.IATA"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/messages": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Messages"
+                ],
+                "summary": "List channel messages",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Filter by channel integer ID (mutually exclusive with channelHash)",
+                        "name": "channelID",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by channel hash byte hex (mutually exclusive with channelID)",
+                        "name": "channelHash",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Return messages after this epoch ms",
+                        "name": "since",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by IATA code",
+                        "name": "iata",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Message ID of last item for pagination",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max results (default 50)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/nodes": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Nodes"
+                ],
+                "summary": "List nodes",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Node type integer (1=companion, 2=repeater, 3=room_server, 4=sensor)",
+                        "name": "type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Node type name (companion, repeater, room_server, sensor)",
+                        "name": "typeName",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by IATA code (case-insensitive)",
+                        "name": "iata",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Partial case-insensitive name match",
+                        "name": "name",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exact public key match (hex)",
+                        "name": "pubkey",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Filter to nodes with firmware \u003e= 1.14.0",
+                        "name": "supportsMultibytePaths",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Filter to nodes with firmware \u003e= 1.11.0",
+                        "name": "supportsMultibyteTraces",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "last_seen epoch ms of last item for pagination",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max results (default 50)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/nodes/{nodeId}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Nodes"
+                ],
+                "summary": "Get node detail",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Node UUID",
+                        "name": "nodeId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.Node"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/nodes/{nodeId}/observations": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Nodes"
+                ],
+                "summary": "List packet observations originating from a node",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Node UUID",
+                        "name": "nodeId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Observation ID of last item for pagination",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max results (default 50)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/observers": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Observers"
+                ],
+                "summary": "List observers",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by IATA code (case-insensitive)",
+                        "name": "iata",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by observer type (e.g. meshcoretomqtt, meshcore-ha)",
+                        "name": "type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by broker name",
+                        "name": "broker",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by status (online or offline)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Partial case-insensitive display name match",
+                        "name": "name",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "last_seen epoch ms of last item for pagination",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max results (default 50)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/observers/{observerId}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Observers"
+                ],
+                "summary": "Get observer detail",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Observer UUID",
+                        "name": "observerId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.Observer"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/observers/{observerId}/adverts": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Observers"
+                ],
+                "summary": "List advert packets heard by an observer",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Observer UUID",
+                        "name": "observerId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Observation ID of last item for pagination",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max results (default 50)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/observers/{observerId}/telemetry": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Observers"
+                ],
+                "summary": "Get observer telemetry history",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Observer UUID",
+                        "name": "observerId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Duration window e.g. 24h, 48h, 168h (default 24h)",
+                        "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Return points after this telemetry ID for WS reconnection backfill",
+                        "name": "afterId",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.ObserverTelemetry"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/packets": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Packets"
+                ],
+                "summary": "List packets",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Filter by payload type integer",
+                        "name": "payloadType",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by payload type name (advert, grp_txt, txt_msg, trace, anon_req)",
+                        "name": "payloadTypeName",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by route type (0=transport_flood, 1=flood, 2=direct, 3=transport_direct)",
+                        "name": "routeType",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by latest observation IATA (case-insensitive)",
+                        "name": "iata",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by first_heard_at \u003e= since (epoch ms)",
+                        "name": "since",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by first_heard_at \u003c= until (epoch ms)",
+                        "name": "until",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "last_heard_at epoch ms of last item for pagination",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max results (default 50)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/packets/{packetHash}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Packets"
+                ],
+                "summary": "Get full packet detail",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Packet hash (hex)",
+                        "name": "packetHash",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.Packet"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/regions": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Regions"
+                ],
+                "summary": "List all regions",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.RegionSummary"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/regions/{regionId}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Regions"
+                ],
+                "summary": "Get a single region",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Region ID",
+                        "name": "regionId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.Region"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/stats/observations": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Stats"
+                ],
+                "summary": "Hourly observation time series",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by IATA code (case-insensitive)",
+                        "name": "iata",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Start of window epoch ms (default 7 days ago)",
+                        "name": "since",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.ObservationPoint"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/stats/overview": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Stats"
+                ],
+                "summary": "Network overview stats (last 24h)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by IATA code (case-insensitive)",
+                        "name": "iata",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.StatsOverview"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/stats/payload-breakdown": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Stats"
+                ],
+                "summary": "Observation counts by payload type (last 24h by default)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by IATA code (case-insensitive)",
+                        "name": "iata",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Start of window epoch ms (default last 24h)",
+                        "name": "since",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.PayloadBreakdownItem"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/stats/top-nodes": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Stats"
+                ],
+                "summary": "Top N nodes by observation count (from materialized view)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by IATA code (case-insensitive)",
+                        "name": "iata",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max results (default 10)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.TopNode"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/stats/top-observers": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Stats"
+                ],
+                "summary": "Top N observers by observation count (last 24h by default)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by IATA code (case-insensitive)",
+                        "name": "iata",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Start of window epoch ms (default last 24h)",
+                        "name": "since",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max results (default 10)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.TopObserver"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIError"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "api.Channel": {
+            "type": "object",
+            "properties": {
+                "channelHash": {
+                    "description": "hex-encoded single-byte hash",
+                    "type": "string"
+                },
+                "hashtag": {
+                    "description": "tag name without # prefix",
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "isHashtag": {
+                    "description": "true if derived from a hashtag PSK",
+                    "type": "boolean"
+                },
+                "keyFingerprint": {
+                    "description": "first 8 bytes of SHA256(key), hex-encoded",
+                    "type": "string"
+                },
+                "keyKnown": {
+                    "description": "true if Tower has a decryption key",
+                    "type": "boolean"
+                },
+                "lastSeen": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "messageCount": {
+                    "type": "integer"
+                },
+                "name": {
+                    "description": "display name, nil if not set",
+                    "type": "string"
+                }
+            }
+        },
+        "api.IATA": {
+            "type": "object",
+            "properties": {
+                "displayName": {
+                    "type": "string"
+                },
+                "iata": {
+                    "type": "string"
+                },
+                "lat": {
+                    "type": "number"
+                },
+                "lon": {
+                    "type": "number"
+                }
+            }
+        },
+        "api.Node": {
+            "type": "object",
+            "properties": {
+                "firstSeen": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "lastAdvertAt": {
+                    "description": "epoch ms, nil if no advert received",
+                    "type": "integer"
+                },
+                "lastSeen": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "lat": {
+                    "type": "number"
+                },
+                "lng": {
+                    "type": "number"
+                },
+                "locationSource": {
+                    "description": "e.g. \"advert\", \"manual\"",
+                    "type": "string"
+                },
+                "metadata": {
+                    "description": "raw JSONB metadata"
+                },
+                "minFirmwareVersion": {
+                    "description": "derived from capability flags",
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "nodeType": {
+                    "description": "1=companion, 2=repeater, 3=room server",
+                    "type": "integer"
+                },
+                "nodeTypeName": {
+                    "type": "string"
+                },
+                "publicKey": {
+                    "description": "hex-encoded public key",
+                    "type": "string"
+                },
+                "supportsMultibytePaths": {
+                    "description": "firmware \u003e= 1.14.0",
+                    "type": "boolean"
+                },
+                "supportsMultibyteTraces": {
+                    "description": "firmware \u003e= 1.11.0",
+                    "type": "boolean"
+                }
+            }
+        },
+        "api.ObservationPoint": {
+            "type": "object",
+            "properties": {
+                "activeObservers": {
+                    "type": "integer"
+                },
+                "hour": {
+                    "description": "epoch ms, start of bucket",
+                    "type": "integer"
+                },
+                "iata": {
+                    "type": "string"
+                },
+                "observationCount": {
+                    "type": "integer"
+                },
+                "uniquePackets": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.Observer": {
+            "type": "object",
+            "properties": {
+                "batteryLevel": {
+                    "description": "volts, nil if mains powered",
+                    "type": "number"
+                },
+                "brokers": {
+                    "description": "broker names this observer has been seen on",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.ObserverBroker"
+                    }
+                },
+                "displayName": {
+                    "description": "friendly name from /status messages",
+                    "type": "string"
+                },
+                "firmwareBuild": {
+                    "type": "string"
+                },
+                "firmwareVersion": {
+                    "type": "string"
+                },
+                "firstSeen": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "hardwareModel": {
+                    "type": "string"
+                },
+                "iata": {
+                    "description": "most recently heard IATA",
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "lastSeen": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "lastStatusAt": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "observationCount": {
+                    "type": "integer"
+                },
+                "observerType": {
+                    "description": "e.g. \"meshcoretomqtt\", \"meshcoreha\"",
+                    "type": "string"
+                },
+                "publicKey": {
+                    "description": "hex-encoded public key",
+                    "type": "string"
+                },
+                "radioBwKhz": {
+                    "description": "bandwidth in kHz",
+                    "type": "number"
+                },
+                "radioCr": {
+                    "description": "coding rate denominator",
+                    "type": "integer"
+                },
+                "radioFreqMhz": {
+                    "description": "MHz e.g. 910.525",
+                    "type": "number"
+                },
+                "radioSf": {
+                    "description": "LoRa spreading factor",
+                    "type": "integer"
+                },
+                "softwareVersion": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "\"online\" or \"offline\" derived from last_status_at",
+                    "type": "string"
+                },
+                "statusMetadata": {
+                    "description": "raw /status JSON payload"
+                },
+                "uptimeSeconds": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.ObserverBroker": {
+            "type": "object",
+            "properties": {
+                "lastPacketAt": {
+                    "description": "epoch ms, last packet received via this broker; 0 if none",
+                    "type": "integer"
+                },
+                "lastSeenAt": {
+                    "description": "epoch ms, last time observer was seen on this broker",
+                    "type": "integer"
+                },
+                "name": {
+                    "description": "broker name e.g. \"mqtt1\"",
+                    "type": "string"
+                }
+            }
+        },
+        "api.ObserverTelemetry": {
+            "type": "object",
+            "properties": {
+                "interval": {
+                    "type": "string"
+                },
+                "points": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.ObserverTelemetryPoint"
+                    }
+                },
+                "range": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.ObserverTelemetryPoint": {
+            "type": "object",
+            "properties": {
+                "airtimeRxPct": {
+                    "type": "number"
+                },
+                "airtimeTxPct": {
+                    "type": "number"
+                },
+                "batteryMv": {
+                    "type": "integer"
+                },
+                "noiseFloorDb": {
+                    "type": "number"
+                },
+                "queueLength": {
+                    "type": "integer"
+                },
+                "receiveErrors": {
+                    "type": "integer"
+                },
+                "t": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "uptimeSeconds": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.Packet": {
+            "type": "object",
+            "properties": {
+                "channelHash": {
+                    "description": "hex-encoded",
+                    "type": "string"
+                },
+                "decrypted": {
+                    "type": "boolean"
+                },
+                "firstHeardAt": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "lastHeardAt": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "observationCount": {
+                    "type": "integer"
+                },
+                "observations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.PacketObservationDetail"
+                    }
+                },
+                "originPubkey": {
+                    "description": "hex-encoded",
+                    "type": "string"
+                },
+                "packetHash": {
+                    "description": "hex-encoded",
+                    "type": "string"
+                },
+                "parsedPayload": {},
+                "payloadType": {
+                    "type": "integer"
+                },
+                "payloadTypeName": {
+                    "type": "string"
+                },
+                "payloadVersion": {
+                    "type": "integer"
+                },
+                "rawPayload": {
+                    "description": "hex-encoded",
+                    "type": "string"
+                },
+                "routeType": {
+                    "type": "integer"
+                },
+                "routeTypeName": {
+                    "type": "string"
+                },
+                "transportCodes": {
+                    "description": "hex-encoded",
+                    "type": "string"
+                }
+            }
+        },
+        "api.PacketObservationDetail": {
+            "type": "object",
+            "properties": {
+                "hashSize": {
+                    "type": "integer"
+                },
+                "heardAt": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "hopCount": {
+                    "type": "integer"
+                },
+                "iata": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "observerId": {
+                    "type": "string"
+                },
+                "observerName": {
+                    "type": "string"
+                },
+                "pathBytes": {
+                    "description": "hex-encoded",
+                    "type": "string"
+                },
+                "pathLengthByte": {
+                    "type": "integer"
+                },
+                "propagationTimeMs": {
+                    "type": "integer"
+                },
+                "radio": {
+                    "$ref": "#/definitions/api.PacketRadio"
+                },
+                "resolvedPath": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.ResolvedHop"
+                    }
+                },
+                "rssi": {
+                    "type": "integer"
+                },
+                "snr": {
+                    "type": "number"
+                },
+                "sourceBroker": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.PacketRadio": {
+            "type": "object",
+            "properties": {
+                "bandwidthKhz": {
+                    "type": "number"
+                },
+                "codingRate": {
+                    "type": "integer"
+                },
+                "freqMhz": {
+                    "type": "number"
+                },
+                "spreadFactor": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.PayloadBreakdownItem": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "payloadType": {
+                    "type": "integer"
+                },
+                "payloadTypeName": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.Region": {
+            "type": "object",
+            "properties": {
+                "centerLat": {
+                    "description": "map center latitude",
+                    "type": "number"
+                },
+                "centerLng": {
+                    "description": "map center longitude",
+                    "type": "number"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "iatas": {
+                    "description": "member IATA codes",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "slug": {
+                    "description": "URL-safe identifier e.g. \"western-canada\"",
+                    "type": "string"
+                },
+                "zoomLevel": {
+                    "description": "suggested map zoom level",
+                    "type": "integer"
+                }
+            }
+        },
+        "api.RegionSummary": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "slug": {
+                    "description": "URL-safe identifier e.g. \"western-canada\"",
+                    "type": "string"
+                }
+            }
+        },
+        "api.ResolvedHop": {
+            "type": "object",
+            "properties": {
+                "confidence": {
+                    "description": "\"high\", \"low\", \"unknown\"",
+                    "type": "string"
+                },
+                "node": {
+                    "$ref": "#/definitions/api.ResolvedNode"
+                }
+            }
+        },
+        "api.ResolvedNode": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "latitude": {
+                    "type": "number"
+                },
+                "longitude": {
+                    "type": "number"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "publicKey": {
+                    "description": "hex-encoded prefix",
+                    "type": "string"
+                }
+            }
+        },
+        "api.StatsOverview": {
+            "type": "object",
+            "properties": {
+                "activeIatas": {
+                    "type": "integer"
+                },
+                "activeObservers": {
+                    "type": "integer"
+                },
+                "totalObservations": {
+                    "type": "integer"
+                },
+                "totalPackets": {
+                    "type": "integer"
+                },
+                "windowHours": {
+                    "description": "always 24 for now",
+                    "type": "integer"
+                }
+            }
+        },
+        "api.TopNode": {
+            "type": "object",
+            "properties": {
+                "iata": {
+                    "type": "string"
+                },
+                "lastHeard": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "nodeId": {
+                    "type": "string"
+                },
+                "nodeName": {
+                    "type": "string"
+                },
+                "nodeType": {
+                    "type": "integer"
+                },
+                "nodeTypeName": {
+                    "type": "string"
+                },
+                "observationCount": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.TopObserver": {
+            "type": "object",
+            "properties": {
+                "displayName": {
+                    "type": "string"
+                },
+                "iata": {
+                    "type": "string"
+                },
+                "observationCount": {
+                    "type": "integer"
+                },
+                "observerId": {
+                    "type": "string"
+                },
+                "observerType": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.APIError": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "description": "e.g. \"not_found\", \"bad_request\"",
+                    "type": "string"
+                },
+                "message": {
+                    "description": "e.g. \"channel not found\"",
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.BrokerStatus": {
+            "type": "object",
+            "properties": {
+                "connected": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        }
+    },
+    "tags": [
+        {
+            "description": "Airport/location codes that group observers and packets",
+            "name": "IATAs"
+        },
+        {
+            "description": "Super-regions grouping multiple IATAs",
+            "name": "Regions"
+        },
+        {
+            "description": "MeshCore MQTT observers (gateways)",
+            "name": "Observers"
+        },
+        {
+            "description": "MeshCore radio nodes",
+            "name": "Nodes"
+        },
+        {
+            "description": "LoRa packets heard by observers",
+            "name": "Packets"
+        },
+        {
+            "description": "MeshCore group text channels",
+            "name": "Channels"
+        },
+        {
+            "description": "Decrypted channel messages",
+            "name": "Messages"
+        },
+        {
+            "description": "MQTT broker connection status",
+            "name": "Brokers"
+        },
+        {
+            "description": "Network statistics and time series",
+            "name": "Stats"
+        }
+    ]
+}

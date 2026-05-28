@@ -12,23 +12,35 @@ import (
 
 // StatsRouter mounts all /stats routes onto a subrouter.
 //
-// GET  /stats/overview         → GetStatsOverview
-// GET  /stats/observations     → GetStatsObservations
-// GET  /stats/payload-breakdown → GetStatsPayloadBreakdown
-// GET  /stats/top-nodes         → GetStatsTopNodes
-// GET  /stats/top-observers     → GetStatsTopObservers
+// GET  /stats/overview          → getStatsOverview
+// GET  /stats/observations      → getStatsObservations
+// GET  /stats/payload-breakdown → getStatsPayloadBreakdown
+// GET  /stats/top-nodes         → getStatsTopNodes
+// GET  /stats/top-observers     → getStatsTopObservers
 //
 // All endpoints accept an optional iata= filter (case-insensitive).
 // regionId= expansion and comma-separated IATAs are not yet implemented.
 func StatsRouter(reader api.Reader) http.Handler {
 	r := chi.NewRouter()
+	r.Get("/overview", getStatsOverview(reader))
+	r.Get("/observations", getStatsObservations(reader))
+	r.Get("/payload-breakdown", getStatsPayloadBreakdown(reader))
+	r.Get("/top-nodes", getStatsTopNodes(reader))
+	r.Get("/top-observers", getStatsTopObservers(reader))
+	return r
+}
 
-	// GET /api/v1/stats/overview
-	//
-	// Query params (all optional):
-	//
-	//	iata=<code>   filter to a single IATA (case-insensitive)
-	r.Get("/overview", func(w http.ResponseWriter, r *http.Request) {
+// getStatsOverview godoc
+//
+//	@Summary	Network overview stats (last 24h)
+//	@Tags		Stats
+//	@Produce	json
+//	@Param		iata	query		string	false	"Filter by IATA code (case-insensitive)"
+//	@Success	200		{object}	api.StatsOverview
+//	@Failure	500		{object}	handlers.APIError
+//	@Router		/stats/overview [get]
+func getStatsOverview(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		iata := r.URL.Query().Get("iata")
 		overview, err := reader.GetStatsOverview(r.Context(), iata)
 		if err != nil {
@@ -37,15 +49,21 @@ func StatsRouter(reader api.Reader) http.Handler {
 			return
 		}
 		respond(w, http.StatusOK, overview)
-	})
+	}
+}
 
-	// GET /api/v1/stats/observations
-	//
-	// Query params (all optional):
-	//
-	//	iata=<code>        filter to a single IATA (case-insensitive)
-	//	since=<epoch ms>   start of window; defaults to 7 days ago
-	r.Get("/observations", func(w http.ResponseWriter, r *http.Request) {
+// getStatsObservations godoc
+//
+//	@Summary	Hourly observation time series
+//	@Tags		Stats
+//	@Produce	json
+//	@Param		iata	query		string	false	"Filter by IATA code (case-insensitive)"
+//	@Param		since	query		int		false	"Start of window epoch ms (default 7 days ago)"
+//	@Success	200		{array}		api.ObservationPoint
+//	@Failure	500		{object}	handlers.APIError
+//	@Router		/stats/observations [get]
+func getStatsObservations(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		iata := r.URL.Query().Get("iata")
 		var since time.Time
 		if p := r.URL.Query().Get("since"); p != "" {
@@ -63,15 +81,21 @@ func StatsRouter(reader api.Reader) http.Handler {
 			return
 		}
 		respond(w, http.StatusOK, points)
-	})
+	}
+}
 
-	// GET /api/v1/stats/payload-breakdown
-	//
-	// Query params (all optional):
-	//
-	//	iata=<code>        filter to a single IATA (case-insensitive)
-	//	since=<epoch ms>   start of window; defaults to last 24h
-	r.Get("/payload-breakdown", func(w http.ResponseWriter, r *http.Request) {
+// getStatsPayloadBreakdown godoc
+//
+//	@Summary	Observation counts by payload type (last 24h by default)
+//	@Tags		Stats
+//	@Produce	json
+//	@Param		iata	query		string	false	"Filter by IATA code (case-insensitive)"
+//	@Param		since	query		int		false	"Start of window epoch ms (default last 24h)"
+//	@Success	200		{array}		api.PayloadBreakdownItem
+//	@Failure	500		{object}	handlers.APIError
+//	@Router		/stats/payload-breakdown [get]
+func getStatsPayloadBreakdown(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		iata := r.URL.Query().Get("iata")
 		var since time.Time
 		if p := r.URL.Query().Get("since"); p != "" {
@@ -89,15 +113,21 @@ func StatsRouter(reader api.Reader) http.Handler {
 			return
 		}
 		respond(w, http.StatusOK, breakdown)
-	})
+	}
+}
 
-	// GET /api/v1/stats/top-nodes
-	//
-	// Query params (all optional):
-	//
-	//	iata=<code>   filter to a single IATA (case-insensitive)
-	//	limit=10
-	r.Get("/top-nodes", func(w http.ResponseWriter, r *http.Request) {
+// getStatsTopNodes godoc
+//
+//	@Summary	Top N nodes by observation count (from materialized view)
+//	@Tags		Stats
+//	@Produce	json
+//	@Param		iata	query		string	false	"Filter by IATA code (case-insensitive)"
+//	@Param		limit	query		int		false	"Max results (default 10)"
+//	@Success	200		{array}		api.TopNode
+//	@Failure	500		{object}	handlers.APIError
+//	@Router		/stats/top-nodes [get]
+func getStatsTopNodes(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		iata := r.URL.Query().Get("iata")
 		var limit int32 = 10
 		if p := r.URL.Query().Get("limit"); p != "" {
@@ -115,16 +145,22 @@ func StatsRouter(reader api.Reader) http.Handler {
 			return
 		}
 		respond(w, http.StatusOK, nodes)
-	})
+	}
+}
 
-	// GET /api/v1/stats/top-observers
-	//
-	// Query params (all optional):
-	//
-	//	iata=<code>        filter to a single IATA (case-insensitive)
-	//	since=<epoch ms>   start of window; defaults to last 24h
-	//	limit=10
-	r.Get("/top-observers", func(w http.ResponseWriter, r *http.Request) {
+// getStatsTopObservers godoc
+//
+//	@Summary	Top N observers by observation count (last 24h by default)
+//	@Tags		Stats
+//	@Produce	json
+//	@Param		iata	query		string	false	"Filter by IATA code (case-insensitive)"
+//	@Param		since	query		int		false	"Start of window epoch ms (default last 24h)"
+//	@Param		limit	query		int		false	"Max results (default 10)"
+//	@Success	200		{array}		api.TopObserver
+//	@Failure	500		{object}	handlers.APIError
+//	@Router		/stats/top-observers [get]
+func getStatsTopObservers(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		iata := r.URL.Query().Get("iata")
 		var since time.Time
 		if p := r.URL.Query().Get("since"); p != "" {
@@ -151,7 +187,5 @@ func StatsRouter(reader api.Reader) http.Handler {
 			return
 		}
 		respond(w, http.StatusOK, observers)
-	})
-
-	return r
+	}
 }

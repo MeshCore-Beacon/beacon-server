@@ -1,0 +1,1167 @@
+basePath: /api/v1
+definitions:
+  api.Channel:
+    properties:
+      channelHash:
+        description: hex-encoded single-byte hash
+        type: string
+      hashtag:
+        description: 'tag name without # prefix'
+        type: string
+      id:
+        type: integer
+      isHashtag:
+        description: true if derived from a hashtag PSK
+        type: boolean
+      keyFingerprint:
+        description: first 8 bytes of SHA256(key), hex-encoded
+        type: string
+      keyKnown:
+        description: true if Tower has a decryption key
+        type: boolean
+      lastSeen:
+        description: epoch ms
+        type: integer
+      messageCount:
+        type: integer
+      name:
+        description: display name, nil if not set
+        type: string
+    type: object
+  api.IATA:
+    properties:
+      displayName:
+        type: string
+      iata:
+        type: string
+      lat:
+        type: number
+      lon:
+        type: number
+    type: object
+  api.Node:
+    properties:
+      firstSeen:
+        description: epoch ms
+        type: integer
+      id:
+        type: string
+      lastAdvertAt:
+        description: epoch ms, nil if no advert received
+        type: integer
+      lastSeen:
+        description: epoch ms
+        type: integer
+      lat:
+        type: number
+      lng:
+        type: number
+      locationSource:
+        description: e.g. "advert", "manual"
+        type: string
+      metadata:
+        description: raw JSONB metadata
+      minFirmwareVersion:
+        description: derived from capability flags
+        type: string
+      name:
+        type: string
+      nodeType:
+        description: 1=companion, 2=repeater, 3=room server
+        type: integer
+      nodeTypeName:
+        type: string
+      publicKey:
+        description: hex-encoded public key
+        type: string
+      supportsMultibytePaths:
+        description: firmware >= 1.14.0
+        type: boolean
+      supportsMultibyteTraces:
+        description: firmware >= 1.11.0
+        type: boolean
+    type: object
+  api.ObservationPoint:
+    properties:
+      activeObservers:
+        type: integer
+      hour:
+        description: epoch ms, start of bucket
+        type: integer
+      iata:
+        type: string
+      observationCount:
+        type: integer
+      uniquePackets:
+        type: integer
+    type: object
+  api.Observer:
+    properties:
+      batteryLevel:
+        description: volts, nil if mains powered
+        type: number
+      brokers:
+        description: broker names this observer has been seen on
+        items:
+          $ref: '#/definitions/api.ObserverBroker'
+        type: array
+      displayName:
+        description: friendly name from /status messages
+        type: string
+      firmwareBuild:
+        type: string
+      firmwareVersion:
+        type: string
+      firstSeen:
+        description: epoch ms
+        type: integer
+      hardwareModel:
+        type: string
+      iata:
+        description: most recently heard IATA
+        type: string
+      id:
+        type: string
+      lastSeen:
+        description: epoch ms
+        type: integer
+      lastStatusAt:
+        description: epoch ms
+        type: integer
+      observationCount:
+        type: integer
+      observerType:
+        description: e.g. "meshcoretomqtt", "meshcoreha"
+        type: string
+      publicKey:
+        description: hex-encoded public key
+        type: string
+      radioBwKhz:
+        description: bandwidth in kHz
+        type: number
+      radioCr:
+        description: coding rate denominator
+        type: integer
+      radioFreqMhz:
+        description: MHz e.g. 910.525
+        type: number
+      radioSf:
+        description: LoRa spreading factor
+        type: integer
+      softwareVersion:
+        type: string
+      status:
+        description: '"online" or "offline" derived from last_status_at'
+        type: string
+      statusMetadata:
+        description: raw /status JSON payload
+      uptimeSeconds:
+        type: integer
+    type: object
+  api.ObserverBroker:
+    properties:
+      lastPacketAt:
+        description: epoch ms, last packet received via this broker; 0 if none
+        type: integer
+      lastSeenAt:
+        description: epoch ms, last time observer was seen on this broker
+        type: integer
+      name:
+        description: broker name e.g. "mqtt1"
+        type: string
+    type: object
+  api.ObserverTelemetry:
+    properties:
+      interval:
+        type: string
+      points:
+        items:
+          $ref: '#/definitions/api.ObserverTelemetryPoint'
+        type: array
+      range:
+        type: string
+    type: object
+  api.ObserverTelemetryPoint:
+    properties:
+      airtimeRxPct:
+        type: number
+      airtimeTxPct:
+        type: number
+      batteryMv:
+        type: integer
+      noiseFloorDb:
+        type: number
+      queueLength:
+        type: integer
+      receiveErrors:
+        type: integer
+      t:
+        description: epoch ms
+        type: integer
+      uptimeSeconds:
+        type: integer
+    type: object
+  api.Packet:
+    properties:
+      channelHash:
+        description: hex-encoded
+        type: string
+      decrypted:
+        type: boolean
+      firstHeardAt:
+        description: epoch ms
+        type: integer
+      lastHeardAt:
+        description: epoch ms
+        type: integer
+      observationCount:
+        type: integer
+      observations:
+        items:
+          $ref: '#/definitions/api.PacketObservationDetail'
+        type: array
+      originPubkey:
+        description: hex-encoded
+        type: string
+      packetHash:
+        description: hex-encoded
+        type: string
+      parsedPayload: {}
+      payloadType:
+        type: integer
+      payloadTypeName:
+        type: string
+      payloadVersion:
+        type: integer
+      rawPayload:
+        description: hex-encoded
+        type: string
+      routeType:
+        type: integer
+      routeTypeName:
+        type: string
+      transportCodes:
+        description: hex-encoded
+        type: string
+    type: object
+  api.PacketObservationDetail:
+    properties:
+      hashSize:
+        type: integer
+      heardAt:
+        description: epoch ms
+        type: integer
+      hopCount:
+        type: integer
+      iata:
+        type: string
+      id:
+        type: integer
+      observerId:
+        type: string
+      observerName:
+        type: string
+      pathBytes:
+        description: hex-encoded
+        type: string
+      pathLengthByte:
+        type: integer
+      propagationTimeMs:
+        type: integer
+      radio:
+        $ref: '#/definitions/api.PacketRadio'
+      resolvedPath:
+        items:
+          $ref: '#/definitions/api.ResolvedHop'
+        type: array
+      rssi:
+        type: integer
+      snr:
+        type: number
+      sourceBroker:
+        type: string
+    type: object
+  api.PacketRadio:
+    properties:
+      bandwidthKhz:
+        type: number
+      codingRate:
+        type: integer
+      freqMhz:
+        type: number
+      spreadFactor:
+        type: integer
+    type: object
+  api.PayloadBreakdownItem:
+    properties:
+      count:
+        type: integer
+      payloadType:
+        type: integer
+      payloadTypeName:
+        type: string
+    type: object
+  api.Region:
+    properties:
+      centerLat:
+        description: map center latitude
+        type: number
+      centerLng:
+        description: map center longitude
+        type: number
+      description:
+        type: string
+      iatas:
+        description: member IATA codes
+        items:
+          type: string
+        type: array
+      id:
+        type: integer
+      name:
+        type: string
+      slug:
+        description: URL-safe identifier e.g. "western-canada"
+        type: string
+      zoomLevel:
+        description: suggested map zoom level
+        type: integer
+    type: object
+  api.RegionSummary:
+    properties:
+      id:
+        type: integer
+      name:
+        type: string
+      slug:
+        description: URL-safe identifier e.g. "western-canada"
+        type: string
+    type: object
+  api.ResolvedHop:
+    properties:
+      confidence:
+        description: '"high", "low", "unknown"'
+        type: string
+      node:
+        $ref: '#/definitions/api.ResolvedNode'
+    type: object
+  api.ResolvedNode:
+    properties:
+      id:
+        type: string
+      latitude:
+        type: number
+      longitude:
+        type: number
+      name:
+        type: string
+      publicKey:
+        description: hex-encoded prefix
+        type: string
+    type: object
+  api.StatsOverview:
+    properties:
+      activeIatas:
+        type: integer
+      activeObservers:
+        type: integer
+      totalObservations:
+        type: integer
+      totalPackets:
+        type: integer
+      windowHours:
+        description: always 24 for now
+        type: integer
+    type: object
+  api.TopNode:
+    properties:
+      iata:
+        type: string
+      lastHeard:
+        description: epoch ms
+        type: integer
+      nodeId:
+        type: string
+      nodeName:
+        type: string
+      nodeType:
+        type: integer
+      nodeTypeName:
+        type: string
+      observationCount:
+        type: integer
+    type: object
+  api.TopObserver:
+    properties:
+      displayName:
+        type: string
+      iata:
+        type: string
+      observationCount:
+        type: integer
+      observerId:
+        type: string
+      observerType:
+        type: string
+    type: object
+  handlers.APIError:
+    properties:
+      code:
+        description: e.g. "not_found", "bad_request"
+        type: string
+      message:
+        description: e.g. "channel not found"
+        type: string
+    type: object
+  handlers.BrokerStatus:
+    properties:
+      connected:
+        type: boolean
+      name:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    name: MeshCore Tower
+    url: https://github.com/MeshCore-Tower/tower-server
+  description: MeshCore network observation backend. Ingests LoRa packets from MQTT
+    brokers, stores in PostgreSQL, and streams live events via WebSocket.
+  license:
+    name: MIT
+  termsOfService: https://github.com/MeshCore-Tower/tower-server
+  title: MeshCore Tower API
+  version: "1.0"
+paths:
+  /brokers:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handlers.BrokerStatus'
+            type: array
+      summary: List all MQTT brokers and their connection status
+      tags:
+      - Brokers
+  /channels:
+    get:
+      parameters:
+      - description: Single-byte channel hash (hex)
+        in: query
+        name: hash
+        type: string
+      - description: Filter by IATA code (case-insensitive)
+        in: query
+        name: iata
+        type: string
+      - description: last_seen epoch ms of last item for pagination
+        in: query
+        name: cursor
+        type: integer
+      - description: Max results (default 50)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+      summary: List channels
+      tags:
+      - Channels
+  /channels/{channelID}:
+    get:
+      parameters:
+      - description: Channel integer ID
+        in: path
+        name: channelID
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.Channel'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+      summary: Get channel detail
+      tags:
+      - Channels
+  /channels/{channelID}/messages:
+    get:
+      parameters:
+      - description: Channel integer ID
+        in: path
+        name: channelID
+        required: true
+        type: integer
+      - description: Return messages after this epoch ms
+        in: query
+        name: since
+        type: integer
+      - description: Filter by IATA code
+        in: query
+        name: iata
+        type: string
+      - description: Message ID of last item for pagination
+        in: query
+        name: cursor
+        type: integer
+      - description: Max results (default 50)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+      summary: List messages for a channel
+      tags:
+      - Channels
+  /iatas:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/api.IATA'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+      summary: List all IATA codes
+      tags:
+      - IATAs
+  /iatas/{iata}:
+    get:
+      parameters:
+      - description: 3-letter IATA code
+        in: path
+        name: iata
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.IATA'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+      summary: Get a single IATA code
+      tags:
+      - IATAs
+  /messages:
+    get:
+      parameters:
+      - description: Filter by channel integer ID (mutually exclusive with channelHash)
+        in: query
+        name: channelID
+        type: integer
+      - description: Filter by channel hash byte hex (mutually exclusive with channelID)
+        in: query
+        name: channelHash
+        type: string
+      - description: Return messages after this epoch ms
+        in: query
+        name: since
+        type: integer
+      - description: Filter by IATA code
+        in: query
+        name: iata
+        type: string
+      - description: Message ID of last item for pagination
+        in: query
+        name: cursor
+        type: integer
+      - description: Max results (default 50)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+      summary: List channel messages
+      tags:
+      - Messages
+  /nodes:
+    get:
+      parameters:
+      - description: Node type integer (1=companion, 2=repeater, 3=room_server, 4=sensor)
+        in: query
+        name: type
+        type: integer
+      - description: Node type name (companion, repeater, room_server, sensor)
+        in: query
+        name: typeName
+        type: string
+      - description: Filter by IATA code (case-insensitive)
+        in: query
+        name: iata
+        type: string
+      - description: Partial case-insensitive name match
+        in: query
+        name: name
+        type: string
+      - description: Exact public key match (hex)
+        in: query
+        name: pubkey
+        type: string
+      - description: Filter to nodes with firmware >= 1.14.0
+        in: query
+        name: supportsMultibytePaths
+        type: boolean
+      - description: Filter to nodes with firmware >= 1.11.0
+        in: query
+        name: supportsMultibyteTraces
+        type: boolean
+      - description: last_seen epoch ms of last item for pagination
+        in: query
+        name: cursor
+        type: integer
+      - description: Max results (default 50)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+      summary: List nodes
+      tags:
+      - Nodes
+  /nodes/{nodeId}:
+    get:
+      parameters:
+      - description: Node UUID
+        in: path
+        name: nodeId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.Node'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+      summary: Get node detail
+      tags:
+      - Nodes
+  /nodes/{nodeId}/observations:
+    get:
+      parameters:
+      - description: Node UUID
+        in: path
+        name: nodeId
+        required: true
+        type: string
+      - description: Observation ID of last item for pagination
+        in: query
+        name: cursor
+        type: integer
+      - description: Max results (default 50)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+      summary: List packet observations originating from a node
+      tags:
+      - Nodes
+  /observers:
+    get:
+      parameters:
+      - description: Filter by IATA code (case-insensitive)
+        in: query
+        name: iata
+        type: string
+      - description: Filter by observer type (e.g. meshcoretomqtt, meshcore-ha)
+        in: query
+        name: type
+        type: string
+      - description: Filter by broker name
+        in: query
+        name: broker
+        type: string
+      - description: Filter by status (online or offline)
+        in: query
+        name: status
+        type: string
+      - description: Partial case-insensitive display name match
+        in: query
+        name: name
+        type: string
+      - description: last_seen epoch ms of last item for pagination
+        in: query
+        name: cursor
+        type: integer
+      - description: Max results (default 50)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+      summary: List observers
+      tags:
+      - Observers
+  /observers/{observerId}:
+    get:
+      parameters:
+      - description: Observer UUID
+        in: path
+        name: observerId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.Observer'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+      summary: Get observer detail
+      tags:
+      - Observers
+  /observers/{observerId}/adverts:
+    get:
+      parameters:
+      - description: Observer UUID
+        in: path
+        name: observerId
+        required: true
+        type: string
+      - description: Observation ID of last item for pagination
+        in: query
+        name: cursor
+        type: integer
+      - description: Max results (default 50)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+      summary: List advert packets heard by an observer
+      tags:
+      - Observers
+  /observers/{observerId}/telemetry:
+    get:
+      parameters:
+      - description: Observer UUID
+        in: path
+        name: observerId
+        required: true
+        type: string
+      - description: Duration window e.g. 24h, 48h, 168h (default 24h)
+        in: query
+        name: range
+        type: string
+      - description: Return points after this telemetry ID for WS reconnection backfill
+        in: query
+        name: afterId
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.ObserverTelemetry'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+      summary: Get observer telemetry history
+      tags:
+      - Observers
+  /packets:
+    get:
+      parameters:
+      - description: Filter by payload type integer
+        in: query
+        name: payloadType
+        type: integer
+      - description: Filter by payload type name (advert, grp_txt, txt_msg, trace,
+          anon_req)
+        in: query
+        name: payloadTypeName
+        type: string
+      - description: Filter by route type (0=transport_flood, 1=flood, 2=direct, 3=transport_direct)
+        in: query
+        name: routeType
+        type: integer
+      - description: Filter by latest observation IATA (case-insensitive)
+        in: query
+        name: iata
+        type: string
+      - description: Filter by first_heard_at >= since (epoch ms)
+        in: query
+        name: since
+        type: integer
+      - description: Filter by first_heard_at <= until (epoch ms)
+        in: query
+        name: until
+        type: integer
+      - description: last_heard_at epoch ms of last item for pagination
+        in: query
+        name: cursor
+        type: integer
+      - description: Max results (default 50)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+      summary: List packets
+      tags:
+      - Packets
+  /packets/{packetHash}:
+    get:
+      parameters:
+      - description: Packet hash (hex)
+        in: path
+        name: packetHash
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.Packet'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+      summary: Get full packet detail
+      tags:
+      - Packets
+  /regions:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/api.RegionSummary'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+      summary: List all regions
+      tags:
+      - Regions
+  /regions/{regionId}:
+    get:
+      parameters:
+      - description: Region ID
+        in: path
+        name: regionId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.Region'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+      summary: Get a single region
+      tags:
+      - Regions
+  /stats/observations:
+    get:
+      parameters:
+      - description: Filter by IATA code (case-insensitive)
+        in: query
+        name: iata
+        type: string
+      - description: Start of window epoch ms (default 7 days ago)
+        in: query
+        name: since
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/api.ObservationPoint'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+      summary: Hourly observation time series
+      tags:
+      - Stats
+  /stats/overview:
+    get:
+      parameters:
+      - description: Filter by IATA code (case-insensitive)
+        in: query
+        name: iata
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.StatsOverview'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+      summary: Network overview stats (last 24h)
+      tags:
+      - Stats
+  /stats/payload-breakdown:
+    get:
+      parameters:
+      - description: Filter by IATA code (case-insensitive)
+        in: query
+        name: iata
+        type: string
+      - description: Start of window epoch ms (default last 24h)
+        in: query
+        name: since
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/api.PayloadBreakdownItem'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+      summary: Observation counts by payload type (last 24h by default)
+      tags:
+      - Stats
+  /stats/top-nodes:
+    get:
+      parameters:
+      - description: Filter by IATA code (case-insensitive)
+        in: query
+        name: iata
+        type: string
+      - description: Max results (default 10)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/api.TopNode'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+      summary: Top N nodes by observation count (from materialized view)
+      tags:
+      - Stats
+  /stats/top-observers:
+    get:
+      parameters:
+      - description: Filter by IATA code (case-insensitive)
+        in: query
+        name: iata
+        type: string
+      - description: Start of window epoch ms (default last 24h)
+        in: query
+        name: since
+        type: integer
+      - description: Max results (default 10)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/api.TopObserver'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.APIError'
+      summary: Top N observers by observation count (last 24h by default)
+      tags:
+      - Stats
+schemes:
+- http
+- https
+swagger: "2.0"
+tags:
+- description: Airport/location codes that group observers and packets
+  name: IATAs
+- description: Super-regions grouping multiple IATAs
+  name: Regions
+- description: MeshCore MQTT observers (gateways)
+  name: Observers
+- description: MeshCore radio nodes
+  name: Nodes
+- description: LoRa packets heard by observers
+  name: Packets
+- description: MeshCore group text channels
+  name: Channels
+- description: Decrypted channel messages
+  name: Messages
+- description: MQTT broker connection status
+  name: Brokers
+- description: Network statistics and time series
+  name: Stats

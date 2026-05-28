@@ -12,24 +12,38 @@ import (
 
 // ObserversRouter mounts all /observers routes onto a subrouter.
 //
-// GET  /observers                            → ListObservers
-// GET  /observers/{observerId}               → GetObserver
-// GET  /observers/{observerId}/telemetry     → GetObserverTelemetry
-// GET  /observers/{observerId}/adverts       → ListObserverAdverts
+// GET  /observers                        → listObservers
+// GET  /observers/{observerId}           → getObserver
+// GET  /observers/{observerId}/telemetry → getObserverTelemetry
+// GET  /observers/{observerId}/adverts   → listObserverAdverts
 func ObserversRouter(reader api.Reader) http.Handler {
 	r := chi.NewRouter()
+	r.Get("/", listObservers(reader))
+	r.Route("/{observerId}", func(r chi.Router) {
+		r.Get("/", getObserver(reader))
+		r.Get("/adverts", listObserverAdverts(reader))
+		r.Get("/telemetry", getObserverTelemetry(reader))
+	})
+	return r
+}
 
-	// GET /api/v1/observers
-	//
-	// Query params (all optional):
-	//
-	//	iata=YOW
-	//	type=meshcoretomqtt
-	//	broker=mqtt1
-	//	status=online
-	//	cursor=<int>     last_seen epoch ms of last observer for pagination
-	//	limit=50
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+// listObservers godoc
+//
+//	@Summary	List observers
+//	@Tags		Observers
+//	@Produce	json
+//	@Param		iata	query		string	false	"Filter by IATA code (case-insensitive)"
+//	@Param		type	query		string	false	"Filter by observer type (e.g. meshcoretomqtt, meshcore-ha)"
+//	@Param		broker	query		string	false	"Filter by broker name"
+//	@Param		status	query		string	false	"Filter by status (online or offline)"
+//	@Param		name	query		string	false	"Partial case-insensitive display name match"
+//	@Param		cursor	query		int		false	"last_seen epoch ms of last item for pagination"
+//	@Param		limit	query		int		false	"Max results (default 50)"
+//	@Success	200		{object}	object
+//	@Failure	500		{object}	handlers.APIError
+//	@Router		/observers [get]
+func listObservers(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		iata := r.URL.Query().Get("iata")
 		observerType := r.URL.Query().Get("type")
 		broker := r.URL.Query().Get("broker")
@@ -59,120 +73,128 @@ func ObserversRouter(reader api.Reader) http.Handler {
 			return
 		}
 		respond(w, http.StatusOK, observers)
-	})
+	}
+}
 
-	r.Route("/{observerId}", func(r chi.Router) {
-		// GET /api/v1/observers/{observerId}
-		//
-		// Returns full observer detail including broker badges, type, and recent stats.
-		// Note: observer_owners data is never exposed via the public API.
-		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-			observerID := chi.URLParam(r, "observerId")
-			id, err := uuid.Parse(observerID)
+// getObserver godoc
+//
+//	@Summary	Get observer detail
+//	@Tags		Observers
+//	@Produce	json
+//	@Param		observerId	path		string	true	"Observer UUID"
+//	@Success	200			{object}	api.Observer
+//	@Failure	400			{object}	handlers.APIError
+//	@Failure	404			{object}	handlers.APIError
+//	@Router		/observers/{observerId} [get]
+func getObserver(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		observerID := chi.URLParam(r, "observerId")
+		id, err := uuid.Parse(observerID)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "failed to parse observer UUID")
+			return
+		}
+		obs, err := reader.GetObserver(r.Context(), id)
+		if err != nil {
+			respondError(w, http.StatusNotFound, "observer not found")
+			return
+		}
+		respond(w, http.StatusOK, obs)
+	}
+}
+
+// listObserverAdverts godoc
+//
+//	@Summary	List advert packets heard by an observer
+//	@Tags		Observers
+//	@Produce	json
+//	@Param		observerId	path		string	true	"Observer UUID"
+//	@Param		cursor		query		int		false	"Observation ID of last item for pagination"
+//	@Param		limit		query		int		false	"Max results (default 50)"
+//	@Success	200			{object}	object
+//	@Failure	400			{object}	handlers.APIError
+//	@Failure	500			{object}	handlers.APIError
+//	@Router		/observers/{observerId}/adverts [get]
+func listObserverAdverts(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		observerID, err := uuid.Parse(chi.URLParam(r, "observerId"))
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "invalid observer ID")
+			return
+		}
+		var cursor int64
+		if cursorParam := r.URL.Query().Get("cursor"); cursorParam != "" {
+			c, err := strconv.ParseInt(cursorParam, 10, 64)
 			if err != nil {
-				respondError(w, http.StatusBadRequest, "falied to parse observer UUID")
+				respondError(w, http.StatusBadRequest, "cursor must be an integer")
 				return
 			}
-
-			obs, err := reader.GetObserver(r.Context(), id)
+			cursor = c
+		}
+		var limit int32 = 50
+		if limitParam := r.URL.Query().Get("limit"); limitParam != "" {
+			l, err := strconv.ParseInt(limitParam, 10, 32)
 			if err != nil {
-				respondError(w, http.StatusNotFound, "observer not found")
+				respondError(w, http.StatusBadRequest, "limit must be an integer")
 				return
 			}
-			respond(w, http.StatusOK, obs)
-		})
-		// /api/v1/observers/{observerId}/adverts
-		//
-		// Query params (all optional):
-		//
-		//	limit=50
-		//	cursor=<opaque>
+			limit = int32(l)
+		}
+		adverts, err := reader.ListObserverAdverts(r.Context(), observerID, cursor, limit)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		respond(w, http.StatusOK, adverts)
+	}
+}
 
-		r.Get("/adverts", func(w http.ResponseWriter, r *http.Request) {
-			observerID, err := uuid.Parse(chi.URLParam(r, "observerId"))
+// getObserverTelemetry godoc
+//
+//	@Summary	Get observer telemetry history
+//	@Tags		Observers
+//	@Produce	json
+//	@Param		observerId	path		string	true	"Observer UUID"
+//	@Param		range		query		string	false	"Duration window e.g. 24h, 48h, 168h (default 24h)"
+//	@Param		afterId		query		int		false	"Return points after this telemetry ID for WS reconnection backfill"
+//	@Success	200			{object}	api.ObserverTelemetry
+//	@Failure	400			{object}	handlers.APIError
+//	@Failure	500			{object}	handlers.APIError
+//	@Router		/observers/{observerId}/telemetry [get]
+func getObserverTelemetry(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		observerID, err := uuid.Parse(chi.URLParam(r, "observerId"))
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "invalid observer ID")
+			return
+		}
+		rangeParam := r.URL.Query().Get("range")
+		if rangeParam == "" {
+			rangeParam = "24h"
+		}
+		duration, err := time.ParseDuration(rangeParam)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "invalid range, use e.g. 24h, 48h, 168h")
+			return
+		}
+		afterID := int64(0)
+		if afterIDParam := r.URL.Query().Get("afterId"); afterIDParam != "" {
+			id, err := strconv.ParseInt(afterIDParam, 10, 64)
 			if err != nil {
-				respondError(w, http.StatusBadRequest, "invalid observer ID")
+				respondError(w, http.StatusBadRequest, "afterId must be an integer")
 				return
 			}
-
-			var cursor int64
-			if cursorParam := r.URL.Query().Get("cursor"); cursorParam != "" {
-				c, err := strconv.ParseInt(cursorParam, 10, 64)
-				if err != nil {
-					respondError(w, http.StatusBadRequest, "cursor must be an integer")
-					return
-				}
-				cursor = c
-			}
-
-			var limit int32 = 50
-			if limitParam := r.URL.Query().Get("limit"); limitParam != "" {
-				l, err := strconv.ParseInt(limitParam, 10, 32)
-				if err != nil {
-					respondError(w, http.StatusBadRequest, "limit must be an integer")
-					return
-				}
-				limit = int32(l)
-			}
-
-			adverts, err := reader.ListObserverAdverts(r.Context(), observerID, cursor, limit)
-			if err != nil {
-				respondError(w, http.StatusInternalServerError, "internal server error")
-				return
-			}
-			respond(w, http.StatusOK, adverts)
-		})
-		// GET /api/v1/observers/{observerId}/telemetry
-		//
-		// Query params (all optional):
-		//
-		//	range=24h              duration string: 24h, 7d, 30d
-		//	afterId=<status id>    for deterministic WS reconnection backfill
-		//
-		// Returns a time-bucketed array of telemetry points suitable for charting
-		// (battery, airtime, noise floor, uptime, queue depth, receive errors).
-		r.Get("/telemetry", func(w http.ResponseWriter, r *http.Request) {
-			observerID, err := uuid.Parse(chi.URLParam(r, "observerId"))
-			if err != nil {
-				respondError(w, http.StatusBadRequest, "invalid observer ID")
-				return
-			}
-
-			rangeParam := r.URL.Query().Get("range")
-			if rangeParam == "" {
-				rangeParam = "24h"
-			}
-
-			duration, err := time.ParseDuration(rangeParam)
-			if err != nil {
-				respondError(w, http.StatusBadRequest, "invalid range, use e.g. 24h, 48h, 168h")
-				return
-			}
-
-			afterID := int64(0)
-			if afterIDParam := r.URL.Query().Get("afterId"); afterIDParam != "" {
-				id, err := strconv.ParseInt(afterIDParam, 10, 64)
-				if err != nil {
-					respondError(w, http.StatusBadRequest, "afterId must be an integer")
-					return
-				}
-				afterID = id
-			}
-
-			since := time.Now().Add(-duration)
-			until := time.Time{} // no upper bound
-
-			telemetry, err := reader.GetObserverTelemetry(r.Context(), observerID, since, until, afterID)
-			if err != nil {
-				respondError(w, http.StatusInternalServerError, "internal server error")
-				return
-			}
-
-			telemetry.Range = rangeParam
-			telemetry.Interval = r.URL.Query().Get("interval") // echoed back, not used server-side yet
-			respond(w, http.StatusOK, telemetry)
-		})
-	})
-
-	return r
+			afterID = id
+		}
+		since := time.Now().Add(-duration)
+		until := time.Time{} // no upper bound
+		telemetry, err := reader.GetObserverTelemetry(r.Context(), observerID, since, until, afterID)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		telemetry.Range = rangeParam
+		telemetry.Interval = r.URL.Query().Get("interval") // echoed back, not used server-side yet
+		respond(w, http.StatusOK, telemetry)
+	}
 }

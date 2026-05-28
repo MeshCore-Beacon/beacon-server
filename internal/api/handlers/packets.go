@@ -12,24 +12,33 @@ import (
 
 // PacketsRouter mounts all /packets routes onto a subrouter.
 //
-// GET  /packets                              → ListPackets
-// GET  /packets/{packetHash}                 → GetPacket
+// GET  /packets              → listPackets
+// GET  /packets/{packetHash} → getPacket
 func PacketsRouter(reader api.Reader) http.Handler {
 	r := chi.NewRouter()
+	r.Get("/", listPackets(reader))
+	r.Get("/{packetHash}", getPacket(reader))
+	return r
+}
 
-	// GET /api/v1/packets
-	//
-	// Query params (all optional):
-	//
-	//	payloadType=<int>        filter by payload type integer
-	//	payloadTypeName=<string> filter by payload type name (advert, grp_txt, txt_msg, trace, anon_req)
-	//	routeType=<int>          filter by route type integer (0=transport_flood, 1=flood, 2=direct, 3=transport_direct)
-	//	iata=<code>              filter by latest observation IATA (case-insensitive)
-	//	since=<epoch ms>         filter by first_heard_at >= since
-	//	until=<epoch ms>         filter by first_heard_at <= until
-	//	cursor=<int>             last_heard_at epoch ms of last item for pagination
-	//	limit=50
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+// listPackets godoc
+//
+//	@Summary	List packets
+//	@Tags		Packets
+//	@Produce	json
+//	@Param		payloadType		query		int		false	"Filter by payload type integer"
+//	@Param		payloadTypeName	query		string	false	"Filter by payload type name (advert, grp_txt, txt_msg, trace, anon_req)"
+//	@Param		routeType		query		int		false	"Filter by route type (0=transport_flood, 1=flood, 2=direct, 3=transport_direct)"
+//	@Param		iata			query		string	false	"Filter by latest observation IATA (case-insensitive)"
+//	@Param		since			query		int		false	"Filter by first_heard_at >= since (epoch ms)"
+//	@Param		until			query		int		false	"Filter by first_heard_at <= until (epoch ms)"
+//	@Param		cursor			query		int		false	"last_heard_at epoch ms of last item for pagination"
+//	@Param		limit			query		int		false	"Max results (default 50)"
+//	@Success	200				{object}	object
+//	@Failure	500				{object}	handlers.APIError
+//	@Router		/packets [get]
+func listPackets(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		var payloadType int16
 		if p := r.URL.Query().Get("payloadType"); p != "" {
 			t, err := strconv.ParseInt(p, 10, 16)
@@ -95,12 +104,21 @@ func PacketsRouter(reader api.Reader) http.Handler {
 			return
 		}
 		respond(w, http.StatusOK, packets)
-	})
+	}
+}
 
-	// GET /api/v1/packets/{packetHash}
-	//
-	// Returns full packet detail including all observations and resolved paths.
-	r.Get("/{packetHash}", func(w http.ResponseWriter, r *http.Request) {
+// getPacket godoc
+//
+//	@Summary	Get full packet detail
+//	@Tags		Packets
+//	@Produce	json
+//	@Param		packetHash	path		string	true	"Packet hash (hex)"
+//	@Success	200			{object}	api.Packet
+//	@Failure	400			{object}	handlers.APIError
+//	@Failure	404			{object}	handlers.APIError
+//	@Router		/packets/{packetHash} [get]
+func getPacket(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		hashHex := chi.URLParam(r, "packetHash")
 		hash, err := hex.DecodeString(hashHex)
 		if err != nil {
@@ -113,7 +131,5 @@ func PacketsRouter(reader api.Reader) http.Handler {
 			return
 		}
 		respond(w, http.StatusOK, packet)
-	})
-
-	return r
+	}
 }

@@ -12,25 +12,30 @@ import (
 
 // MessagesRouter mounts all /messages routes onto a subrouter.
 //
-// GET  /messages                           → ListMessages
+// GET  /messages → listMessages
 func MessagesRouter(reader api.Reader) http.Handler {
 	r := chi.NewRouter()
+	r.Get("/", listMessages(reader))
+	return r
+}
 
-	// GET /api/v1/messages
-	//
-	// Query params (all optional):
-	//
-	//	since=<epoch ms>    return messages after this timestamp
-	//	iata=<code>         filter by IATA code
-	//	cursor=<int>        message ID of last item for pagination
-	//	limit=50
-	//
-	// Mutually exclusive — provide one or neither, not both:
-	//
-	//	channelId=<int32>   filter by channel integer ID
-	//	channelHash=<hex>   filter by channel hash byte
-	//
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+// listMessages godoc
+//
+//	@Summary	List channel messages
+//	@Tags		Messages
+//	@Produce	json
+//	@Param		channelID	query		int		false	"Filter by channel integer ID (mutually exclusive with channelHash)"
+//	@Param		channelHash	query		string	false	"Filter by channel hash byte hex (mutually exclusive with channelID)"
+//	@Param		since		query		int		false	"Return messages after this epoch ms"
+//	@Param		iata		query		string	false	"Filter by IATA code"
+//	@Param		cursor		query		int		false	"Message ID of last item for pagination"
+//	@Param		limit		query		int		false	"Max results (default 50)"
+//	@Success	200			{object}	object
+//	@Failure	400			{object}	handlers.APIError
+//	@Failure	500			{object}	handlers.APIError
+//	@Router		/messages [get]
+func listMessages(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		channelIDParam := r.URL.Query().Get("channelID")
 		channelHashParam := r.URL.Query().Get("channelHash")
 		if channelIDParam != "" && channelHashParam != "" {
@@ -99,7 +104,5 @@ func MessagesRouter(reader api.Reader) http.Handler {
 			return
 		}
 		respond(w, http.StatusOK, messages)
-	})
-
-	return r
+	}
 }

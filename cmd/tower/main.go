@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/MeshCore-Tower/tower-server/db"
+	_ "github.com/MeshCore-Tower/tower-server/docs"
 	"github.com/MeshCore-Tower/tower-server/internal/api/router"
 	"github.com/MeshCore-Tower/tower-server/internal/config"
 	"github.com/MeshCore-Tower/tower-server/internal/hub"
@@ -23,6 +24,39 @@ import (
 	"github.com/joho/godotenv"
 )
 
+//	@title			MeshCore Tower API
+//	@version		1.0
+//	@description	MeshCore network observation backend. Ingests LoRa packets from MQTT brokers, stores in PostgreSQL, and streams live events via WebSocket.
+//	@termsOfService	https://github.com/MeshCore-Tower/tower-server
+
+//	@contact.name	MeshCore Tower
+//	@contact.url	https://github.com/MeshCore-Tower/tower-server
+
+//	@license.name	MIT
+
+//	@host		localhost:8080
+//	@BasePath	/api/v1
+
+//	@schemes	http https
+
+// @tag.name			IATAs
+// @tag.description	Airport/location codes that group observers and packets
+// @tag.name			Regions
+// @tag.description	Super-regions grouping multiple IATAs
+// @tag.name			Observers
+// @tag.description	MeshCore MQTT observers (gateways)
+// @tag.name			Nodes
+// @tag.description	MeshCore radio nodes
+// @tag.name			Packets
+// @tag.description	LoRa packets heard by observers
+// @tag.name			Channels
+// @tag.description	MeshCore group text channels
+// @tag.name			Messages
+// @tag.description	Decrypted channel messages
+// @tag.name			Brokers
+// @tag.description	MQTT broker connection status
+// @tag.name			Stats
+// @tag.description	Network statistics and time series
 func main() {
 	_ = godotenv.Load()
 	addr := os.Getenv("LISTEN_ADDR")

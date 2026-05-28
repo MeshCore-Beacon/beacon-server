@@ -16,6 +16,7 @@ import (
 	"github.com/MeshCore-Tower/tower-server/internal/hub"
 	"github.com/MeshCore-Tower/tower-server/internal/ingest"
 	"github.com/MeshCore-Tower/tower-server/internal/ws"
+	httpSwagger "github.com/swaggo/http-swagger"
 )
 
 // New builds and returns the top-level Chi router.
@@ -45,6 +46,15 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker) http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.CleanPath)
 	r.Use(middleware.StripSlashes)
+
+	// ── Swagger UI ──────────────────────────────────────────────────────────
+	r.Get("/swagger", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/swagger/index.html", http.StatusMovedPermanently)
+	})
+
+	r.Get("/swagger/*", httpSwagger.Handler(
+		httpSwagger.URL("/swagger/doc.json"),
+	))
 
 	// ── WebSocket ────────────────────────────────────────────────────────────
 	r.Get("/ws", ws.Handler(h))

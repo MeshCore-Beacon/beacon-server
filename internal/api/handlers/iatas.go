@@ -4,35 +4,50 @@ import (
 	"net/http"
 
 	"github.com/MeshCore-Tower/tower-server/internal/api"
-
 	"github.com/go-chi/chi/v5"
 )
 
 // IATAsRouter mounts all /iatas routes onto a subrouter.
 //
-// GET  /iatas                                → ListIATAs
-// GET  /iatas/{iata}                         → GetIATA
+// GET  /iatas        → listIATAs
+// GET  /iatas/{iata} → getIATA
 func IATAsRouter(reader api.Reader) http.Handler {
 	r := chi.NewRouter()
+	r.Get("/", listIATAs(reader))
+	r.Get("/{iata}", getIATA(reader))
+	return r
+}
 
-	// GET  /iatas                                → ListIATAs
-	//
-	// Returns all known IATA codes with display name and coordinates where set.
-	// IATAs are auto-created on first packet arrival; config file overrides name/coords.
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+// listIATAs godoc
+//
+//	@Summary	List all IATA codes
+//	@Tags		IATAs
+//	@Produce	json
+//	@Success	200	{array}		api.IATA
+//	@Failure	404	{object}	handlers.APIError
+//	@Router		/iatas [get]
+func listIATAs(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		iatas, err := reader.ListIATAs(r.Context())
 		if err != nil {
 			respondError(w, http.StatusNotFound, "no IATAs found")
 			return
 		}
 		respond(w, http.StatusOK, iatas)
-	})
+	}
+}
 
-	// GET  /iatas/{iata}                         → GetIATA
-	//
-	// Returns detail for a single IATA code including associated region memberships
-	// and basic recent stats.
-	r.Get("/{iata}", func(w http.ResponseWriter, r *http.Request) {
+// getIATA godoc
+//
+//	@Summary	Get a single IATA code
+//	@Tags		IATAs
+//	@Produce	json
+//	@Param		iata	path		string	true	"3-letter IATA code"
+//	@Success	200		{object}	api.IATA
+//	@Failure	404		{object}	handlers.APIError
+//	@Router		/iatas/{iata} [get]
+func getIATA(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		iata := chi.URLParam(r, "iata")
 		result, err := reader.GetIATA(r.Context(), iata)
 		if err != nil {
@@ -40,7 +55,5 @@ func IATAsRouter(reader api.Reader) http.Handler {
 			return
 		}
 		respond(w, http.StatusOK, result)
-	})
-
-	return r
+	}
 }

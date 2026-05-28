@@ -3,7 +3,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -128,7 +127,7 @@ type Packet struct {
 	RouteTypeName    string                    `json:"routeTypeName"`
 	TransportCodes   *string                   `json:"transportCodes,omitempty"` // hex-encoded
 	OriginPubkey     *string                   `json:"originPubkey,omitempty"`   // hex-encoded
-	ParsedPayload    json.RawMessage           `json:"parsedPayload,omitempty"`
+	ParsedPayload    any                       `json:"parsedPayload,omitempty"`
 	RawPayload       string                    `json:"rawPayload"` // hex-encoded
 	Decrypted        bool                      `json:"decrypted"`
 	ChannelHash      *string                   `json:"channelHash,omitempty"` // hex-encoded
@@ -195,14 +194,14 @@ type NodeSummary struct {
 // location source, and timing metadata.
 type Node struct {
 	NodeSummary
-	LocationSource          *string         `json:"locationSource,omitempty"`     // e.g. "advert", "manual"
-	LastAdvertAt            *int64          `json:"lastAdvertAt,omitempty"`       // epoch ms, nil if no advert received
-	SupportsMultibytePaths  bool            `json:"supportsMultibytePaths"`       // firmware >= 1.14.0
-	SupportsMultibyteTraces bool            `json:"supportsMultibyteTraces"`      // firmware >= 1.11.0
-	MinFirmwareVersion      *string         `json:"minFirmwareVersion,omitempty"` // derived from capability flags
-	FirstSeen               int64           `json:"firstSeen"`                    // epoch ms
-	LastSeen                int64           `json:"lastSeen"`                     // epoch ms
-	Metadata                json.RawMessage `json:"metadata,omitempty"`           // raw JSONB metadata
+	LocationSource          *string `json:"locationSource,omitempty"`     // e.g. "advert", "manual"
+	LastAdvertAt            *int64  `json:"lastAdvertAt,omitempty"`       // epoch ms, nil if no advert received
+	SupportsMultibytePaths  bool    `json:"supportsMultibytePaths"`       // firmware >= 1.14.0
+	SupportsMultibyteTraces bool    `json:"supportsMultibyteTraces"`      // firmware >= 1.11.0
+	MinFirmwareVersion      *string `json:"minFirmwareVersion,omitempty"` // derived from capability flags
+	FirstSeen               int64   `json:"firstSeen"`                    // epoch ms
+	LastSeen                int64   `json:"lastSeen"`                     // epoch ms
+	Metadata                any     `json:"metadata,omitempty"`           // raw JSONB metadata
 }
 
 // ObserverSummary is the minimal observer representation used in list responses.
@@ -238,7 +237,7 @@ type Observer struct {
 	RadioCR          *int16           `json:"radioCr,omitempty"`      // coding rate denominator
 	BatteryLevel     *float32         `json:"batteryLevel,omitempty"` // volts, nil if mains powered
 	UptimeSeconds    *int64           `json:"uptimeSeconds,omitempty"`
-	StatusMetadata   json.RawMessage  `json:"statusMetadata,omitempty"` // raw /status JSON payload
+	StatusMetadata   any              `json:"statusMetadata,omitempty"` // raw /status JSON payload
 	LastStatusAt     *int64           `json:"lastStatusAt,omitempty"`   // epoch ms
 	FirstSeen        int64            `json:"firstSeen"`                // epoch ms
 	LastSeen         int64            `json:"lastSeen"`                 // epoch ms
