@@ -784,7 +784,7 @@ FROM channel_messages cm
 JOIN channels c ON c.id = cm.channel_id
 JOIN packet_observations po ON po.packet_hash = cm.packet_hash
 WHERE ($1::timestamptz IS NULL OR cm.sent_at >= $1)
-  AND ($2 = '' OR po.iata = $2)
+  AND ($2 = '' OR po.iata ILIKE $2)
   AND ($3 = 0 OR cm.id > $3)
 ORDER BY cm.id ASC
 LIMIT $4
@@ -810,7 +810,7 @@ type ListAllChannelMessagesRow struct {
 }
 
 // Returns all messages across all channels with optional time, IATA and cursor filters.
-// Pass empty string for iata to skip IATA filtering.
+// Pass empty string for iata to skip IATA filtering (case-insensitive).
 // Pass cursor=0 to start from the beginning.
 func (q *Queries) ListAllChannelMessages(ctx context.Context, arg ListAllChannelMessagesParams) ([]ListAllChannelMessagesRow, error) {
 	rows, err := q.db.Query(ctx, listAllChannelMessages,
@@ -854,7 +854,7 @@ JOIN channels c ON c.id = cm.channel_id
 JOIN packet_observations po ON po.packet_hash = cm.packet_hash
 WHERE cm.channel_id = $1
   AND ($2::timestamptz IS NULL OR cm.sent_at >= $2)
-  AND ($3 = '' OR po.iata = $3)
+  AND ($3 = '' OR po.iata ILIKE $3)
   AND ($4 = 0 OR cm.id > $4)
 ORDER BY cm.id ASC
 LIMIT $5
@@ -882,7 +882,7 @@ type ListChannelMessagesRow struct {
 
 // Returns messages for a channel identified by integer ID.
 // Pass a zero/null timestamp for since to return all messages up to limit.
-// Pass empty string for iata to skip IATA filtering.
+// Pass empty string for iata to skip IATA filtering (case-insensitive).
 // Pass cursor=0 to start from the beginning.
 func (q *Queries) ListChannelMessages(ctx context.Context, arg ListChannelMessagesParams) ([]ListChannelMessagesRow, error) {
 	rows, err := q.db.Query(ctx, listChannelMessages,
@@ -926,7 +926,7 @@ JOIN channels c ON c.id = cm.channel_id
 JOIN packet_observations po ON po.packet_hash = cm.packet_hash
 WHERE c.channel_hash = $1
   AND ($2::timestamptz IS NULL OR cm.sent_at >= $2)
-  AND ($3 = '' OR po.iata = $3)
+  AND ($3 = '' OR po.iata ILIKE $3)
   AND ($4 = 0 OR cm.id > $4)
 ORDER BY cm.id ASC
 LIMIT $5
@@ -953,7 +953,7 @@ type ListChannelMessagesByHashRow struct {
 
 // Returns messages for all channels matching a hash byte.
 // May return messages from multiple channels if the hash collides across different keys.
-// Pass empty string for iata to skip IATA filtering.
+// Pass empty string for iata to skip IATA filtering (case-insensitive).
 // Pass cursor=0 to start from the beginning.
 func (q *Queries) ListChannelMessagesByHash(ctx context.Context, arg ListChannelMessagesByHashParams) ([]ListChannelMessagesByHashRow, error) {
 	rows, err := q.db.Query(ctx, listChannelMessagesByHash,
@@ -997,7 +997,7 @@ WHERE ($1::bytea IS NULL OR c.channel_hash = $1)
     SELECT 1 FROM packets p
     JOIN packet_observations po ON po.packet_hash = p.packet_hash
     WHERE p.channel_hash = c.channel_hash
-      AND po.iata = $2
+      AND po.iata ILIKE $2
   ))
   AND ($3::timestamptz IS NULL OR c.last_seen < $3)
 ORDER BY c.last_seen DESC
@@ -1013,7 +1013,7 @@ type ListChannelsParams struct {
 
 // Returns channels ordered by last seen, optionally filtered by hash and/or IATA.
 // Pass NULL for hash to skip hash filtering. Pass empty string for iata to skip IATA filtering.
-// IATA filter returns channels that have active packets in that IATA.
+// IATA filter returns channels that have active packets in that IATA (case-insensitive).
 // Pass cursor=0 to start from the beginning (cursor is last_seen epoch ms).
 func (q *Queries) ListChannels(ctx context.Context, arg ListChannelsParams) ([]Channel, error) {
 	rows, err := q.db.Query(ctx, listChannels,
@@ -1146,7 +1146,7 @@ FROM nodes n
 LEFT JOIN node_iatas ni ON ni.node_id = n.id
 WHERE
   ($1 = 0 OR n.node_type = $1)
-  AND ($2 = '' OR ni.iata = $2)
+  AND ($2 = '' OR ni.iata ILIKE $2)
   AND (NOT $3 OR n.supports_multibyte_paths = TRUE)
   AND (NOT $4 OR n.supports_multibyte_traces = TRUE)
   AND ($5::bytea IS NULL OR n.public_key = $5)
