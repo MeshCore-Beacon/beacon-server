@@ -22,6 +22,7 @@ func MessagesRouter(reader api.Reader) http.Handler {
 	//
 	//	since=<epoch ms>    return messages after this timestamp
 	//	iata=<code>         filter by IATA code
+	//	cursor=<int>        message ID of last item for pagination
 	//	limit=50
 	//
 	// Mutually exclusive — provide one or neither, not both:
@@ -64,7 +65,17 @@ func MessagesRouter(reader api.Reader) http.Handler {
 			}
 			since = time.UnixMilli(ms)
 		}
-		var messages []api.ChannelMessage
+		var cursor int64
+		if cursorParam := r.URL.Query().Get("cursor"); cursorParam != "" {
+			c, err := strconv.ParseInt(cursorParam, 10, 64)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "cursor must be an integer")
+				return
+			}
+			cursor = c
+		}
+		iata := r.URL.Query().Get("iata")
+		var messages api.Page[api.ChannelMessage]
 		var err error
 		if channelHashParam != "" {
 			hashHex, decodeErr := hex.DecodeString(channelHashParam)
@@ -76,15 +87,12 @@ func MessagesRouter(reader api.Reader) http.Handler {
 				respondError(w, http.StatusBadRequest, "channel hash must be a single hex byte")
 				return
 			}
-			iata := r.URL.Query().Get("iata")
-		messages, err = reader.ListChannelMessagesByHash(r.Context(), hashHex, since, int32(limit), iata)
+			messages, err = reader.ListChannelMessagesByHash(r.Context(), hashHex, since, int32(limit), iata, cursor)
 		} else if channelIDParam != "" {
-			iata := r.URL.Query().Get("iata")
 			chanID := int32(id)
-			messages, err = reader.ListChannelMessages(r.Context(), &chanID, since, int32(limit), iata)
+			messages, err = reader.ListChannelMessages(r.Context(), &chanID, since, int32(limit), iata, cursor)
 		} else {
-			iata := r.URL.Query().Get("iata")
-			messages, err = reader.ListChannelMessages(r.Context(), nil, since, int32(limit), iata)
+			messages, err = reader.ListChannelMessages(r.Context(), nil, since, int32(limit), iata, cursor)
 		}
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "internal server error")

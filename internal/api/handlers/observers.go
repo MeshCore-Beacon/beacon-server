@@ -27,12 +27,32 @@ func ObserversRouter(reader api.Reader) http.Handler {
 	//	type=meshcoretomqtt
 	//	broker=mqtt1
 	//	status=online
+	//	cursor=<int>     last_seen epoch ms of last observer for pagination
+	//	limit=50
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		iata := r.URL.Query().Get("iata")
 		observerType := r.URL.Query().Get("type")
 		broker := r.URL.Query().Get("broker")
 		status := r.URL.Query().Get("status")
-		observers, err := reader.ListObservers(r.Context(), iata, observerType, broker, status)
+		var cursor int64
+		if cursorParam := r.URL.Query().Get("cursor"); cursorParam != "" {
+			c, err := strconv.ParseInt(cursorParam, 10, 64)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "cursor must be an integer")
+				return
+			}
+			cursor = c
+		}
+		var limit int32 = 50
+		if limitParam := r.URL.Query().Get("limit"); limitParam != "" {
+			l, err := strconv.ParseInt(limitParam, 10, 32)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "limit must be an integer")
+				return
+			}
+			limit = int32(l)
+		}
+		observers, err := reader.ListObservers(r.Context(), iata, observerType, broker, status, cursor, limit)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "failed to get list of observers")
 			return

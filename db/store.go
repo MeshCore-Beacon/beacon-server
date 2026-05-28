@@ -382,20 +382,30 @@ func (s *Store) UpsertRegionIATA(ctx context.Context, regionID int32, iata strin
 // ListChannels returns a summary list of all known channels ordered by last seen.
 // Pass nil hash to skip hash filtering. Pass empty string iata to return channels from all IATAs.
 // IATA filtering returns channels that have messages heard in the given IATA.
-func (s *Store) ListChannels(ctx context.Context, limit int32, hash []byte, iata string) ([]api.ChannelSummary, error) {
-	// Note: after sqlc generate, verify Column1/Column2/Column3 param names
-	// match what sqlc generated for the updated ListChannels query.
+// ListChannels returns a paginated list of channels ordered by last seen.
+// cursor is last_seen epoch ms of the last item; pass 0 to start from the beginning.
+// Note: after sqlc generate, verify Column param names match generated types.
+func (s *Store) ListChannels(ctx context.Context, limit int32, hash []byte, iata string, cursor int64) (api.Page[api.ChannelSummary], error) {
+	var cursorTs pgtype.Timestamptz
+	if cursor > 0 {
+		cursorTs = pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}
+	}
 	rows, err := s.q.ListChannels(ctx, sqlc.ListChannelsParams{
 		Column1: hash,
 		Column2: iata,
-		Limit:   limit,
+		Column3: cursorTs,
+		Limit:   limit + 1,
 	})
 	if err != nil {
-		return nil, err
+		return api.Page[api.ChannelSummary]{}, err
 	}
-	channels := make([]api.ChannelSummary, 0, len(rows))
+	hasMore := len(rows) > int(limit)
+	if hasMore {
+		rows = rows[:limit]
+	}
+	items := make([]api.ChannelSummary, 0, len(rows))
 	for _, v := range rows {
-		channels = append(channels, api.ChannelSummary{
+		items = append(items, api.ChannelSummary{
 			ID:          int(v.ID),
 			Name:        v.Name,
 			ChannelHash: hex.EncodeToString(v.ChannelHash),
@@ -404,7 +414,16 @@ func (s *Store) ListChannels(ctx context.Context, limit int32, hash []byte, iata
 			KeyKnown:    v.KeyKnown != nil && *v.KeyKnown,
 		})
 	}
-	return channels, nil
+	var nextCursor *int64
+	if hasMore {
+		last := items[len(items)-1].LastSeen
+		nextCursor = &last
+	}
+	return api.Page[api.ChannelSummary]{
+		Items:      items,
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
+	}, nil
 }
 
 // GetChannel returns full detail for a single channel by its integer ID.
@@ -436,22 +455,29 @@ func (s *Store) GetChannel(ctx context.Context, channelID int32) (*api.Channel, 
 	return &channel, nil
 }
 
-// ListChannelMessages returns paginated messages with optional channel ID, time and IATA filters.
+// ListChannelMessages returns paginated messages with optional channel ID, time, IATA and cursor filters.
 // Pass nil channelID to return messages across all channels.
 // Pass a zero time.Time for since to return all messages up to limit.
 // Pass empty string iata to return messages from all IATAs.
-// Note: after sqlc generate, verify generated param field names match.
-func (s *Store) ListChannelMessages(ctx context.Context, channelID *int32, since time.Time, limit int32, iata string) ([]api.ChannelMessage, error) {
+// Pass cursor=0 to start from the beginning.
+func (s *Store) ListChannelMessages(ctx context.Context, channelID *int32, since time.Time, limit int32, iata string, cursor int64) (api.Page[api.ChannelMessage], error) {
 	ts := pgtype.Timestamptz{Time: since, Valid: !since.IsZero()}
 	var messages []api.ChannelMessage
+	var hasMore bool
+
 	if channelID == nil {
 		rows, err := s.q.ListAllChannelMessages(ctx, sqlc.ListAllChannelMessagesParams{
 			Column1: ts,
 			Column2: iata,
-			Limit:   limit,
+			Column3: cursor,
+			Limit:   limit + 1,
 		})
 		if err != nil {
-			return nil, err
+			return api.Page[api.ChannelMessage]{}, err
+		}
+		hasMore = len(rows) > int(limit)
+		if hasMore {
+			rows = rows[:limit]
 		}
 		messages = make([]api.ChannelMessage, 0, len(rows))
 		for _, v := range rows {
@@ -462,57 +488,97 @@ func (s *Store) ListChannelMessages(ctx context.Context, channelID *int32, since
 			ChannelID: *channelID,
 			Column2:   ts,
 			Column3:   iata,
-			Limit:     limit,
+			Column4:   cursor,
+			Limit:     limit + 1,
 		})
 		if err != nil {
-			return nil, err
+			return api.Page[api.ChannelMessage]{}, err
+		}
+		hasMore = len(rows) > int(limit)
+		if hasMore {
+			rows = rows[:limit]
 		}
 		messages = make([]api.ChannelMessage, 0, len(rows))
 		for _, v := range rows {
 			messages = append(messages, toChannelMessage(v.ID, v.PacketHashHex, v.ChannelHash, v.SenderName, v.Content, v.SentAt))
 		}
 	}
-	return messages, nil
+
+	var nextCursor *int64
+	if hasMore && len(messages) > 0 {
+		last := messages[len(messages)-1].ID
+		nextCursor = &last
+	}
+	return api.Page[api.ChannelMessage]{
+		Items:      messages,
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
+	}, nil
 }
 
 // ListChannelMessagesByHash returns paginated messages for all channels matching the given hash.
-// Used by the /messages?hash= endpoint. May return messages from multiple channels
-// if the hash collides across different keys.
+// May return messages from multiple channels if the hash collides across different keys.
 // Pass a zero time.Time for since to return all messages up to limit.
 // Pass empty string iata to return messages from all IATAs.
-// Note: after sqlc generate, verify generated param field names match.
-func (s *Store) ListChannelMessagesByHash(ctx context.Context, hash []byte, since time.Time, limit int32, iata string) ([]api.ChannelMessage, error) {
+// Pass cursor=0 to start from the beginning.
+func (s *Store) ListChannelMessagesByHash(ctx context.Context, hash []byte, since time.Time, limit int32, iata string, cursor int64) (api.Page[api.ChannelMessage], error) {
 	rows, err := s.q.ListChannelMessagesByHash(ctx, sqlc.ListChannelMessagesByHashParams{
 		ChannelHash: hash,
 		Column2:     pgtype.Timestamptz{Time: since, Valid: !since.IsZero()},
 		Column3:     iata,
-		Limit:       limit,
+		Column4:     cursor,
+		Limit:       limit + 1,
 	})
 	if err != nil {
-		return nil, err
+		return api.Page[api.ChannelMessage]{}, err
+	}
+	hasMore := len(rows) > int(limit)
+	if hasMore {
+		rows = rows[:limit]
 	}
 	messages := make([]api.ChannelMessage, 0, len(rows))
 	for _, v := range rows {
 		messages = append(messages, toChannelMessage(v.ID, hex.EncodeToString(v.PacketHash), v.ChannelHash, v.SenderName, v.Content, v.SentAt))
 	}
-	return messages, nil
+	var nextCursor *int64
+	if hasMore && len(messages) > 0 {
+		last := messages[len(messages)-1].ID
+		nextCursor = &last
+	}
+	return api.Page[api.ChannelMessage]{
+		Items:      messages,
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
+	}, nil
 }
 
 // ListObservers returns a summary list of observers with optional filters.
 // All filter params are optional — pass empty string to skip a filter.
 // status is "online" or "offline" derived from last_status_at recency.
-func (s *Store) ListObservers(ctx context.Context, iata, observerType, broker, status string) ([]api.ObserverSummary, error) {
+// ListObservers returns a paginated list of observers with optional filters.
+// cursor is last_seen epoch ms of the last observer; pass 0 to start from the beginning.
+func (s *Store) ListObservers(ctx context.Context, iata, observerType, broker, status string, cursor int64, limit int32) (api.Page[api.ObserverSummary], error) {
+	var cursorTs pgtype.Timestamptz
+	if cursor > 0 {
+		cursorTs = pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}
+	}
 	params := sqlc.ListObserversParams{
 		Column1: iata,
 		Column2: observerType,
 		Column3: broker,
 		Column4: status,
+		Column5: cursorTs,
+		Limit:   limit + 1,
 	}
 	rows, err := s.q.ListObservers(ctx, params)
 	if err != nil {
-		return nil, err
+		return api.Page[api.ObserverSummary]{}, err
 	}
-	observers := make([]api.ObserverSummary, 0, len(rows))
+	hasMore := len(rows) > int(limit)
+	if hasMore {
+		rows = rows[:limit]
+	}
+	items := make([]api.ObserverSummary, 0, len(rows))
 	for _, v := range rows {
 		observer := api.ObserverSummary{
 			ID:     v.ID,
@@ -525,9 +591,21 @@ func (s *Store) ListObservers(ctx context.Context, iata, observerType, broker, s
 		if v.ObserverType != nil {
 			observer.ObserverType = v.ObserverType
 		}
-		observers = append(observers, observer)
+		items = append(items, observer)
 	}
-	return observers, nil
+	var nextCursor *int64
+	if hasMore {
+		// observers use UUID so encode last_seen as cursor
+		if rows[len(rows)-1].LastStatusAt.Valid {
+			ms := rows[len(rows)-1].LastStatusAt.Time.UnixMilli()
+			nextCursor = &ms
+		}
+	}
+	return api.Page[api.ObserverSummary]{
+		Items:      items,
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
+	}, nil
 }
 
 // GetObserver returns full detail for a single observer by UUID.

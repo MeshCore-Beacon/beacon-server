@@ -174,11 +174,11 @@ type Reader interface {
 	// GetRegion returns full detail for a single region including its associated IATA codes.
 	// Returns nil, pgx.ErrNoRows if the region is not found.
 	GetRegion(ctx context.Context, regionID int32) (*Region, error)
-	// ListChannels returns a summary list of all known channels ordered by last seen.
+	// ListChannels returns a paginated list of channels ordered by last seen.
 	// Includes both hashtag-derived and explicit key channels.
-	// Channels with unknown keys are included with KeyKnown=false.
 	// Pass nil hash to skip hash filtering. Pass empty string iata to return all channels.
-	ListChannels(ctx context.Context, limit int32, hash []byte, iata string) ([]ChannelSummary, error)
+	// cursor is last_seen epoch ms of the last item; pass 0 to start from the beginning.
+	ListChannels(ctx context.Context, limit int32, hash []byte, iata string, cursor int64) (Page[ChannelSummary], error)
 	// GetChannel returns full detail for a single channel by its integer ID.
 	// Returns nil, pgx.ErrNoRows if the channel is not found.
 	GetChannel(ctx context.Context, channelID int32) (*Channel, error)
@@ -186,17 +186,20 @@ type Reader interface {
 	// Used by the /channels/{id}/messages endpoint.
 	// Pass a zero time.Time for since to return all messages up to limit.
 	// Pass empty string iata to return messages from all IATAs.
-	ListChannelMessages(ctx context.Context, channelID *int32, since time.Time, limit int32, iata string) ([]ChannelMessage, error)
+	// Pass cursor=0 to start from the beginning.
+	ListChannelMessages(ctx context.Context, channelID *int32, since time.Time, limit int32, iata string, cursor int64) (Page[ChannelMessage], error)
 	// ListChannelMessagesByHash returns paginated messages for all channels matching the given hash.
 	// Used by the /messages?hash= endpoint. May return messages from multiple channels
 	// if the hash collides across different keys.
 	// Pass a zero time.Time for since to return all messages up to limit.
 	// Pass empty string iata to return messages from all IATAs.
-	ListChannelMessagesByHash(ctx context.Context, hash []byte, since time.Time, limit int32, iata string) ([]ChannelMessage, error)
-	// ListObservers returns a summary list of observers with optional filters.
+	// Pass cursor=0 to start from the beginning.
+	ListChannelMessagesByHash(ctx context.Context, hash []byte, since time.Time, limit int32, iata string, cursor int64) (Page[ChannelMessage], error)
+	// ListObservers returns a paginated list of observers with optional filters.
 	// All filter params are optional — pass empty string to skip a filter.
 	// status is "online" or "offline" derived from last_status_at recency.
-	ListObservers(ctx context.Context, iata, observerType, broker, status string) ([]ObserverSummary, error)
+	// cursor is last_seen epoch ms of the last observer; pass 0 to start from the beginning.
+	ListObservers(ctx context.Context, iata, observerType, broker, status string, cursor int64, limit int32) (Page[ObserverSummary], error)
 	// GetObserver returns full detail for a single observer by UUID.
 	// Returns nil, pgx.ErrNoRows if the observer is not found.
 	GetObserver(ctx context.Context, observerID uuid.UUID) (*Observer, error)

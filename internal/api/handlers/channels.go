@@ -24,6 +24,7 @@ func ChannelsRouter(reader api.Reader) http.Handler {
 	//
 	//	hash=<hex>       filter by single-byte channel hash
 	//	iata=<code>      filter by IATA code (channels with messages heard in that IATA)
+	//	cursor=<int>     last_seen epoch ms of last item for pagination
 	//	limit=50
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		var limit int64 = 50
@@ -36,6 +37,15 @@ func ChannelsRouter(reader api.Reader) http.Handler {
 			limit = l
 		}
 		iata := r.URL.Query().Get("iata")
+		var cursor int64
+		if cursorParam := r.URL.Query().Get("cursor"); cursorParam != "" {
+			c, err := strconv.ParseInt(cursorParam, 10, 64)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "cursor must be an integer")
+				return
+			}
+			cursor = c
+		}
 		var hashHex []byte
 		if hash := r.URL.Query().Get("hash"); hash != "" {
 			h, decodeErr := hex.DecodeString(hash)
@@ -49,7 +59,7 @@ func ChannelsRouter(reader api.Reader) http.Handler {
 			}
 			hashHex = h
 		}
-		channels, err := reader.ListChannels(r.Context(), int32(limit), hashHex, iata)
+		channels, err := reader.ListChannels(r.Context(), int32(limit), hashHex, iata, cursor)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
@@ -85,6 +95,7 @@ func ChannelsRouter(reader api.Reader) http.Handler {
 		//
 		//	since=<epoch ms>   return messages after this timestamp
 		//	iata=<code>        filter by IATA code
+		//	cursor=<int>       message ID of last item for pagination
 		//	limit=50
 		//
 		// Returns paginated decrypted channel messages.
@@ -117,8 +128,17 @@ func ChannelsRouter(reader api.Reader) http.Handler {
 				since = time.UnixMilli(ms)
 			}
 			iata := r.URL.Query().Get("iata")
+			var cursor int64
+			if cursorParam := r.URL.Query().Get("cursor"); cursorParam != "" {
+				c, err := strconv.ParseInt(cursorParam, 10, 64)
+				if err != nil {
+					respondError(w, http.StatusBadRequest, "cursor must be an integer")
+					return
+				}
+				cursor = c
+			}
 			chanID := int32(id)
-			messages, err := reader.ListChannelMessages(r.Context(), &chanID, since, int32(limit), iata)
+			messages, err := reader.ListChannelMessages(r.Context(), &chanID, since, int32(limit), iata, cursor)
 			if err != nil {
 				respondError(w, http.StatusInternalServerError, "internal server error")
 				return

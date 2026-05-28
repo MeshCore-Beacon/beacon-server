@@ -759,13 +759,15 @@ JOIN channels c ON c.id = cm.channel_id
 JOIN packet_observations po ON po.packet_hash = cm.packet_hash
 WHERE ($1::timestamptz IS NULL OR cm.sent_at >= $1)
   AND ($2 = '' OR po.iata = $2)
-ORDER BY cm.id, cm.sent_at DESC
-LIMIT $3
+  AND ($3 = 0 OR cm.id > $3)
+ORDER BY cm.id ASC
+LIMIT $4
 `
 
 type ListAllChannelMessagesParams struct {
 	Column1 pgtype.Timestamptz `json:"column_1"`
 	Column2 interface{}        `json:"column_2"`
+	Column3 interface{}        `json:"column_3"`
 	Limit   int32              `json:"limit"`
 }
 
@@ -781,10 +783,16 @@ type ListAllChannelMessagesRow struct {
 	ChannelHash   []byte             `json:"channel_hash"`
 }
 
-// Returns all messages across all channels with optional time and IATA filters.
+// Returns all messages across all channels with optional time, IATA and cursor filters.
 // Pass empty string for iata to skip IATA filtering.
+// Pass cursor=0 to start from the beginning.
 func (q *Queries) ListAllChannelMessages(ctx context.Context, arg ListAllChannelMessagesParams) ([]ListAllChannelMessagesRow, error) {
-	rows, err := q.db.Query(ctx, listAllChannelMessages, arg.Column1, arg.Column2, arg.Limit)
+	rows, err := q.db.Query(ctx, listAllChannelMessages,
+		arg.Column1,
+		arg.Column2,
+		arg.Column3,
+		arg.Limit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -821,14 +829,16 @@ JOIN packet_observations po ON po.packet_hash = cm.packet_hash
 WHERE cm.channel_id = $1
   AND ($2::timestamptz IS NULL OR cm.sent_at >= $2)
   AND ($3 = '' OR po.iata = $3)
-ORDER BY cm.id, cm.sent_at DESC
-LIMIT $4
+  AND ($4 = 0 OR cm.id > $4)
+ORDER BY cm.id ASC
+LIMIT $5
 `
 
 type ListChannelMessagesParams struct {
 	ChannelID int32              `json:"channel_id"`
 	Column2   pgtype.Timestamptz `json:"column_2"`
 	Column3   interface{}        `json:"column_3"`
+	Column4   interface{}        `json:"column_4"`
 	Limit     int32              `json:"limit"`
 }
 
@@ -847,11 +857,13 @@ type ListChannelMessagesRow struct {
 // Returns messages for a channel identified by integer ID.
 // Pass a zero/null timestamp for since to return all messages up to limit.
 // Pass empty string for iata to skip IATA filtering.
+// Pass cursor=0 to start from the beginning.
 func (q *Queries) ListChannelMessages(ctx context.Context, arg ListChannelMessagesParams) ([]ListChannelMessagesRow, error) {
 	rows, err := q.db.Query(ctx, listChannelMessages,
 		arg.ChannelID,
 		arg.Column2,
 		arg.Column3,
+		arg.Column4,
 		arg.Limit,
 	)
 	if err != nil {
@@ -889,14 +901,16 @@ JOIN packet_observations po ON po.packet_hash = cm.packet_hash
 WHERE c.channel_hash = $1
   AND ($2::timestamptz IS NULL OR cm.sent_at >= $2)
   AND ($3 = '' OR po.iata = $3)
-ORDER BY cm.id, cm.sent_at DESC
-LIMIT $4
+  AND ($4 = 0 OR cm.id > $4)
+ORDER BY cm.id ASC
+LIMIT $5
 `
 
 type ListChannelMessagesByHashParams struct {
 	ChannelHash []byte             `json:"channel_hash"`
 	Column2     pgtype.Timestamptz `json:"column_2"`
 	Column3     interface{}        `json:"column_3"`
+	Column4     interface{}        `json:"column_4"`
 	Limit       int32              `json:"limit"`
 }
 
@@ -914,11 +928,13 @@ type ListChannelMessagesByHashRow struct {
 // Returns messages for all channels matching a hash byte.
 // May return messages from multiple channels if the hash collides across different keys.
 // Pass empty string for iata to skip IATA filtering.
+// Pass cursor=0 to start from the beginning.
 func (q *Queries) ListChannelMessagesByHash(ctx context.Context, arg ListChannelMessagesByHashParams) ([]ListChannelMessagesByHashRow, error) {
 	rows, err := q.db.Query(ctx, listChannelMessagesByHash,
 		arg.ChannelHash,
 		arg.Column2,
 		arg.Column3,
+		arg.Column4,
 		arg.Limit,
 	)
 	if err != nil {
@@ -957,21 +973,29 @@ WHERE ($1::bytea IS NULL OR c.channel_hash = $1)
     WHERE p.channel_hash = c.channel_hash
       AND po.iata = $2
   ))
+  AND ($3::timestamptz IS NULL OR c.last_seen < $3)
 ORDER BY c.last_seen DESC
-LIMIT $3
+LIMIT $4
 `
 
 type ListChannelsParams struct {
-	Column1 []byte      `json:"column_1"`
-	Column2 interface{} `json:"column_2"`
-	Limit   int32       `json:"limit"`
+	Column1 []byte             `json:"column_1"`
+	Column2 interface{}        `json:"column_2"`
+	Column3 pgtype.Timestamptz `json:"column_3"`
+	Limit   int32              `json:"limit"`
 }
 
 // Returns channels ordered by last seen, optionally filtered by hash and/or IATA.
 // Pass NULL for hash to skip hash filtering. Pass empty string for iata to skip IATA filtering.
-// IATA filter returns channels that have been active (have messages heard) in that IATA.
+// IATA filter returns channels that have active packets in that IATA.
+// Pass cursor=0 to start from the beginning (cursor is last_seen epoch ms).
 func (q *Queries) ListChannels(ctx context.Context, arg ListChannelsParams) ([]Channel, error) {
-	rows, err := q.db.Query(ctx, listChannels, arg.Column1, arg.Column2, arg.Limit)
+	rows, err := q.db.Query(ctx, listChannels,
+		arg.Column1,
+		arg.Column2,
+		arg.Column3,
+		arg.Limit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1281,15 +1305,19 @@ WHERE
     WHEN o.last_status_at > NOW() - INTERVAL '5 minutes' THEN 'online'
     ELSE 'offline'
   END = $4)
+  AND ($5::timestamptz IS NULL OR o.last_seen < $5)
 GROUP BY o.id
 ORDER BY o.last_seen DESC
+LIMIT $6
 `
 
 type ListObserversParams struct {
-	Column1 interface{} `json:"column_1"`
-	Column2 interface{} `json:"column_2"`
-	Column3 interface{} `json:"column_3"`
-	Column4 interface{} `json:"column_4"`
+	Column1 interface{}        `json:"column_1"`
+	Column2 interface{}        `json:"column_2"`
+	Column3 interface{}        `json:"column_3"`
+	Column4 interface{}        `json:"column_4"`
+	Column5 pgtype.Timestamptz `json:"column_5"`
+	Limit   int32              `json:"limit"`
 }
 
 type ListObserversRow struct {
@@ -1301,12 +1329,16 @@ type ListObserversRow struct {
 	Iata         string             `json:"iata"`
 }
 
+// Pass cursor=0 to start from the beginning, or the last seen observer's rownum for pagination.
+// Note: observers use UUID PKs so we order by last_seen and use a keyset on last_seen+id.
 func (q *Queries) ListObservers(ctx context.Context, arg ListObserversParams) ([]ListObserversRow, error) {
 	rows, err := q.db.Query(ctx, listObservers,
 		arg.Column1,
 		arg.Column2,
 		arg.Column3,
 		arg.Column4,
+		arg.Column5,
+		arg.Limit,
 	)
 	if err != nil {
 		return nil, err
