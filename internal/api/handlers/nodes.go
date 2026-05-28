@@ -144,16 +144,3 @@ func NodesRouter(reader api.Reader) http.Handler {
 
 	return r
 }
-
-// ListNodeObservations handles GET /api/v1/nodes/{nodeId}/observations
-//
-// Query params (all optional):
-//
-//	since=<epoch ms>
-//	limit=50
-//	cursor=<opaque>
-func ListNodeObservations(w http.ResponseWriter, r *http.Request) {
-	// nodeId := chi.URLParam(r, "nodeId")
-	// TODO: fetch observations for node, paginate, write JSON response.
-	w.WriteHeader(http.StatusNotImplemented)
-}
