@@ -9,6 +9,26 @@ import (
 	"github.com/google/uuid"
 )
 
+// ObserverTelemetryPoint is a single telemetry snapshot for an observer.
+type ObserverTelemetryPoint struct {
+	T             int64    `json:"t"` // epoch ms
+	BatteryMV     *int32   `json:"batteryMv,omitempty"`
+	AirtimeTxPct  *float32 `json:"airtimeTxPct,omitempty"`
+	AirtimeRxPct  *float32 `json:"airtimeRxPct,omitempty"`
+	NoiseFloorDB  *float32 `json:"noiseFloorDb,omitempty"`
+	UptimeSeconds *int64   `json:"uptimeSeconds,omitempty"`
+	QueueLength   *int32   `json:"queueLength,omitempty"`
+	ReceiveErrors *int32   `json:"receiveErrors,omitempty"`
+}
+
+// ObserverTelemetry is the full telemetry response for an observer.
+// Range and interval reflect the query parameters used.
+type ObserverTelemetry struct {
+	Range    string                   `json:"range"`
+	Interval string                   `json:"interval"`
+	Points   []ObserverTelemetryPoint `json:"points"`
+}
+
 // ObserverSummary is the minimal observer representation used in list responses.
 type ObserverSummary struct {
 	ID           uuid.UUID `json:"id"`
@@ -109,6 +129,16 @@ type IATA struct {
 	Lng         *float64 `json:"lon"`
 }
 
+// Page is a generic paginated response envelope used by all list endpoints
+// that support cursor-based pagination. NextCursor is the ID of the last item
+// returned and should be passed as the cursor param in the next request.
+// HasMore is true when additional results exist beyond the current page.
+type Page[T any] struct {
+	Items      []T    `json:"items"`
+	NextCursor *int64 `json:"nextCursor,omitempty"`
+	HasMore    bool   `json:"hasMore"`
+}
+
 type Reader interface {
 	// ListIATAs returns all known IATA codes with display name and coordinates.
 	// IATAs are auto-created on first packet arrival from that location.
@@ -148,4 +178,8 @@ type Reader interface {
 	// GetObserver returns full detail for a single observer by UUID.
 	// Returns nil, pgx.ErrNoRows if the observer is not found.
 	GetObserver(ctx context.Context, observerID uuid.UUID) (*Observer, error)
+	// GetObserverTelemetry returns telemetry points for an observer within the given time range.
+	// since and until define the window; pass zero times to use defaults (last 24h).
+	GetObserverTelemetry(ctx context.Context, observerID uuid.UUID, since, until time.Time, afterID int64) (*ObserverTelemetry, error)
+	// TODO: add interval time.Duration param for server-side bucketing
 }

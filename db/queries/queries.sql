@@ -109,6 +109,16 @@ SELECT radio_freq_mhz, radio_bw_khz, radio_sf, radio_cr
 FROM observers
 WHERE id = $1;
 
+-- name: GetObserverTelemetry :many
+SELECT id, reported_at, battery_voltage_mv, airtime_tx_pct, airtime_rx_pct,
+       noise_floor_db, uptime_seconds, queue_length, debug_flags, receive_errors
+FROM observer_telemetry
+WHERE observer_id = $1
+  AND ($2::timestamptz IS NULL OR reported_at >= $2)
+  AND ($3::timestamptz IS NULL OR reported_at <= $3)
+  AND ($4 = 0 OR id > $4)
+ORDER BY reported_at ASC;
+
 -- ============================================================
 -- OBSERVER BROKERS
 -- ============================================================

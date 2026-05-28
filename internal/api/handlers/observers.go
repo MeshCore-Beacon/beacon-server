@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/MeshCore-Tower/tower-server/internal/api"
 	"github.com/go-chi/chi/v5"
@@ -58,28 +60,60 @@ func ObserversRouter(reader api.Reader) http.Handler {
 			}
 			respond(w, http.StatusOK, obs)
 		})
-		r.Get("/telemetry", GetObserverTelemetry)
 		r.Get("/adverts", ListObserverAdverts)
+		// GET /api/v1/observers/{observerId}/telemetry
+		//
+		// Query params (all optional):
+		//
+		//	range=24h              duration string: 24h, 7d, 30d
+		//	afterId=<status id>    for deterministic WS reconnection backfill
+		//
+		// Returns a time-bucketed array of telemetry points suitable for charting
+		// (battery, airtime, noise floor, uptime, queue depth, receive errors).
+		r.Get("/telemetry", func(w http.ResponseWriter, r *http.Request) {
+			observerID, err := uuid.Parse(chi.URLParam(r, "observerId"))
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "invalid observer ID")
+				return
+			}
+
+			rangeParam := r.URL.Query().Get("range")
+			if rangeParam == "" {
+				rangeParam = "24h"
+			}
+
+			duration, err := time.ParseDuration(rangeParam)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "invalid range, use e.g. 24h, 48h, 168h")
+				return
+			}
+
+			afterID := int64(0)
+			if afterIDParam := r.URL.Query().Get("afterId"); afterIDParam != "" {
+				id, err := strconv.ParseInt(afterIDParam, 10, 64)
+				if err != nil {
+					respondError(w, http.StatusBadRequest, "afterId must be an integer")
+					return
+				}
+				afterID = id
+			}
+
+			since := time.Now().Add(-duration)
+			until := time.Time{} // no upper bound
+
+			telemetry, err := reader.GetObserverTelemetry(r.Context(), observerID, since, until, afterID)
+			if err != nil {
+				respondError(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+
+			telemetry.Range = rangeParam
+			telemetry.Interval = r.URL.Query().Get("interval") // echoed back, not used server-side yet
+			respond(w, http.StatusOK, telemetry)
+		})
 	})
 
 	return r
-}
-
-// GetObserverTelemetry handles GET /api/v1/observers/{observerId}/telemetry
-//
-// Query params (all optional):
-//
-//	range=24h              duration string: 24h, 7d, 30d
-//	afterId=<status id>    for deterministic WS reconnection backfill
-//	limit=100
-//
-// Returns a time-bucketed array of telemetry points suitable for charting
-// (battery, airtime, noise floor, uptime, queue depth, receive errors).
-func GetObserverTelemetry(w http.ResponseWriter, r *http.Request) {
-	// observerId := chi.URLParam(r, "observerId")
-	// TODO: query status_metadata history, bucket by interval, write JSON response.
-	// afterId (int64): WHERE id > afterId ORDER BY id ASC LIMIT limit
-	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // ListObserverAdverts handles GET /api/v1/observers/{observerId}/adverts

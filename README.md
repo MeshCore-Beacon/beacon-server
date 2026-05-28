@@ -304,14 +304,14 @@ Tower server.
 - [x] REST API: IATAs, Regions
 - [x] REST API: Channels (list + detail + messages) with IATA filter
 - [x] REST API: Messages (cross-channel) with IATA filter
-- [x] REST API: Observers (list + detail with broker last-seen)
+- [x] REST API: Observers (telemetry, list + detail with broker last-seen)
 - [x] REST API: Brokers (list with connection status)
 
 ### In progress / next
 
 - [ ] REST API: Nodes (list + detail + observations)
 - [ ] REST API: Packets (list + detail)
-- [ ] REST API: Observer telemetry + adverts sub-endpoints
+- [ ] REST API: Observer + adverts sub-endpoints
 - [ ] REST API: Stats
 - [ ] REST API: Pagination
 - [ ] Path resolution (node short ID lookup)

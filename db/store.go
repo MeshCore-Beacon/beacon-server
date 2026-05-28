@@ -638,3 +638,33 @@ func (s *Store) DeleteOldTelemetry(ctx context.Context, cutoff time.Time) error 
 func (s *Store) DeleteOldPackets(ctx context.Context, cutoff time.Time) error {
 	return s.q.DeleteOldPackets(ctx, pgtype.Timestamptz{Time: cutoff, Valid: true})
 }
+
+// GetObserverTelemetry returns telemetry points for an observer within the given time range.
+// since and until define the window; pass zero times to use defaults (last 24h).
+// TODO: implement server-side bucketing by interval when needed.
+// Currently returns all points in the range at stored resolution.
+func (s *Store) GetObserverTelemetry(ctx context.Context, observerID uuid.UUID, since, until time.Time, afterID int64) (*api.ObserverTelemetry, error) {
+	rows, err := s.q.GetObserverTelemetry(ctx, sqlc.GetObserverTelemetryParams{
+		ObserverID: observerID,
+		Column2:    pgtype.Timestamptz{Time: since, Valid: !since.IsZero()},
+		Column3:    pgtype.Timestamptz{Time: until, Valid: !until.IsZero()},
+		Column4:    afterID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	points := make([]api.ObserverTelemetryPoint, 0, len(rows))
+	for _, v := range rows {
+		points = append(points, api.ObserverTelemetryPoint{
+			T:             v.ReportedAt.Time.Unix(),
+			BatteryMV:     v.BatteryVoltageMv,
+			AirtimeTxPct:  v.AirtimeTxPct,
+			AirtimeRxPct:  v.AirtimeRxPct,
+			NoiseFloorDB:  v.NoiseFloorDb,
+			UptimeSeconds: v.UptimeSeconds,
+			QueueLength:   v.QueueLength,
+			ReceiveErrors: v.ReceiveErrors,
+		})
+	}
+	return &api.ObserverTelemetry{Points: points}, nil
+}

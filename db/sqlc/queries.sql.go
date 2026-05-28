@@ -366,6 +366,73 @@ func (q *Queries) GetObserverRadio(ctx context.Context, id uuid.UUID) (GetObserv
 	return i, err
 }
 
+const getObserverTelemetry = `-- name: GetObserverTelemetry :many
+SELECT id, reported_at, battery_voltage_mv, airtime_tx_pct, airtime_rx_pct,
+       noise_floor_db, uptime_seconds, queue_length, debug_flags, receive_errors
+FROM observer_telemetry
+WHERE observer_id = $1
+  AND ($2::timestamptz IS NULL OR reported_at >= $2)
+  AND ($3::timestamptz IS NULL OR reported_at <= $3)
+  AND ($4 = 0 OR id > $4)
+ORDER BY reported_at ASC
+`
+
+type GetObserverTelemetryParams struct {
+	ObserverID uuid.UUID          `json:"observer_id"`
+	Column2    pgtype.Timestamptz `json:"column_2"`
+	Column3    pgtype.Timestamptz `json:"column_3"`
+	Column4    interface{}        `json:"column_4"`
+}
+
+type GetObserverTelemetryRow struct {
+	ID               int64              `json:"id"`
+	ReportedAt       pgtype.Timestamptz `json:"reported_at"`
+	BatteryVoltageMv *int32             `json:"battery_voltage_mv"`
+	AirtimeTxPct     *float32           `json:"airtime_tx_pct"`
+	AirtimeRxPct     *float32           `json:"airtime_rx_pct"`
+	NoiseFloorDb     *float32           `json:"noise_floor_db"`
+	UptimeSeconds    *int64             `json:"uptime_seconds"`
+	QueueLength      *int32             `json:"queue_length"`
+	DebugFlags       *int32             `json:"debug_flags"`
+	ReceiveErrors    *int32             `json:"receive_errors"`
+}
+
+func (q *Queries) GetObserverTelemetry(ctx context.Context, arg GetObserverTelemetryParams) ([]GetObserverTelemetryRow, error) {
+	rows, err := q.db.Query(ctx, getObserverTelemetry,
+		arg.ObserverID,
+		arg.Column2,
+		arg.Column3,
+		arg.Column4,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetObserverTelemetryRow{}
+	for rows.Next() {
+		var i GetObserverTelemetryRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ReportedAt,
+			&i.BatteryVoltageMv,
+			&i.AirtimeTxPct,
+			&i.AirtimeRxPct,
+			&i.NoiseFloorDb,
+			&i.UptimeSeconds,
+			&i.QueueLength,
+			&i.DebugFlags,
+			&i.ReceiveErrors,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getPacket = `-- name: GetPacket :one
 SELECT packet_hash, payload_type, payload_version, route_type, transport_codes_present, region_code, sub_region_code, origin_pubkey, raw_payload, parsed_payload, decrypted, channel_hash, first_heard_at, last_heard_at, observation_count FROM packets WHERE packet_hash = $1
 `
