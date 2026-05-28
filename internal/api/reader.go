@@ -9,6 +9,51 @@ import (
 	"github.com/google/uuid"
 )
 
+// StatsOverview is the top-level network summary for the overview endpoint.
+type StatsOverview struct {
+	TotalPackets      int64 `json:"totalPackets"`
+	TotalObservations int64 `json:"totalObservations"`
+	ActiveObservers   int64 `json:"activeObservers"`
+	ActiveIATAs       int64 `json:"activeIatas"`
+	WindowHours       int   `json:"windowHours"` // always 24 for now
+}
+
+// ObservationPoint is a single time-bucketed observation count.
+type ObservationPoint struct {
+	Hour             int64  `json:"hour"` // epoch ms, start of bucket
+	IATA             string `json:"iata"`
+	ObservationCount int64  `json:"observationCount"`
+	UniquePackets    int64  `json:"uniquePackets"`
+	ActiveObservers  int64  `json:"activeObservers"`
+}
+
+// PayloadBreakdownItem is a single payload type with its observation count.
+type PayloadBreakdownItem struct {
+	PayloadType     int16  `json:"payloadType"`
+	PayloadTypeName string `json:"payloadTypeName"`
+	Count           int64  `json:"count"`
+}
+
+// TopNode is a node ranked by observation count.
+type TopNode struct {
+	NodeID           uuid.UUID `json:"nodeId"`
+	NodeName         *string   `json:"nodeName,omitempty"`
+	NodeType         int16     `json:"nodeType"`
+	NodeTypeName     string    `json:"nodeTypeName"`
+	IATA             string    `json:"iata"`
+	ObservationCount int64     `json:"observationCount"`
+	LastHeard        int64     `json:"lastHeard"` // epoch ms
+}
+
+// TopObserver is an observer ranked by observation count.
+type TopObserver struct {
+	ObserverID       uuid.UUID `json:"observerId"`
+	DisplayName      *string   `json:"displayName,omitempty"`
+	ObserverType     *string   `json:"observerType,omitempty"`
+	IATA             string    `json:"iata"`
+	ObservationCount int64     `json:"observationCount"`
+}
+
 // PacketLatestObserver is the most recent observer summary rolled into a packet list item.
 type PacketLatestObserver struct {
 	ID          uuid.UUID `json:"id"`
@@ -339,4 +384,22 @@ type Reader interface {
 	// GetPacket returns full packet detail including all observations with radio settings.
 	// Returns nil, pgx.ErrNoRows if not found.
 	GetPacket(ctx context.Context, packetHash []byte) (*Packet, error)
+	// GetStatsOverview returns top-line network figures for the last 24 hours.
+	// Pass empty string iata to return stats across all IATAs.
+	GetStatsOverview(ctx context.Context, iata string) (*StatsOverview, error)
+	// GetStatsObservations returns hourly observation counts for charting.
+	// Pass empty string iata to return stats across all IATAs.
+	// since defines the start of the window; pass zero time for default (last 7 days).
+	GetStatsObservations(ctx context.Context, iata string, since time.Time) ([]ObservationPoint, error)
+	// GetStatsPayloadBreakdown returns observation counts grouped by payload type.
+	// Pass empty string iata to return stats across all IATAs.
+	// since defines the start of the window; pass zero time for default (last 24h).
+	GetStatsPayloadBreakdown(ctx context.Context, iata string, since time.Time) ([]PayloadBreakdownItem, error)
+	// GetStatsTopNodes returns the top N nodes by observation count.
+	// Pass empty string iata to return stats across all IATAs.
+	GetStatsTopNodes(ctx context.Context, iata string, limit int32) ([]TopNode, error)
+	// GetStatsTopObservers returns the top N observers by observation count.
+	// Pass empty string iata to return stats across all IATAs.
+	// since defines the start of the window; pass zero time for default (last 24h).
+	GetStatsTopObservers(ctx context.Context, iata string, since time.Time, limit int32) ([]TopObserver, error)
 }

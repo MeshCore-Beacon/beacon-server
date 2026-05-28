@@ -1,3 +1,7 @@
+// Package router wires all HTTP routes onto the Chi router and injects
+// dependencies (hub, reader, ingest workers) into the handler closures.
+// All routes are mounted under /api/v1 with public and private groups
+// stubbed for future auth middleware.
 package router
 
 import (
@@ -57,7 +61,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker) http.Handler {
 			r.Mount("/messages", handlers.MessagesRouter(reader))
 			r.Mount("/iatas", handlers.IATAsRouter(reader))
 			r.Mount("/regions", handlers.RegionsRouter(reader))
-			r.Mount("/stats", handlers.StatsRouter())
+			r.Mount("/stats", handlers.StatsRouter(reader))
 		})
 
 		// Private group — auth middleware applied.

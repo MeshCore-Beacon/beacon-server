@@ -228,36 +228,31 @@ Base path: `/api/v1`
 
 ### Implemented
 
-| Method | Path                      | Description                                                                                        |
-| ------ | ------------------------- | -------------------------------------------------------------------------------------------------- |
-| `GET`  | `/brokers`                | List MQTT brokers and connection status                                                            |
-| `GET`  | `/iatas`                  | List all known IATA codes                                                                          |
-| `GET`  | `/iatas/{iata}`           | Get a single IATA code                                                                             |
-| `GET`  | `/regions`                | List all regions (summary)                                                                         |
-| `GET`  | `/regions/{id}`           | Get a single region with IATA list                                                                 |
-| `GET`  | `/channels`               | List channels (optional: `?hash=<hex>&iata=<code>&limit=50`)                                       |
-| `GET`  | `/channels/{id}`          | Get channel detail by integer ID                                                                   |
-| `GET`  | `/channels/{id}/messages` | List messages for a channel (optional: `?since=<ms>&iata=<code>&limit=50`)                         |
-| `GET`  | `/messages`               | List all messages (optional: `?channelId=<int>&channelHash=<hex>&iata=<code>&since=<ms>&limit=50`) |
-| `GET`  | `/observers`              | List observers (optional: `?iata=<code>&type=<str>&broker=<name>&status=online\|offline`)          |
-| `GET`  | `/observers/{observerId}` | Get observer detail including broker last-seen timestamps                                          |
-
-### Stubbed (501 Not Implemented)
-
-| Method | Path                                | Description                        |
-| ------ | ----------------------------------- | ---------------------------------- |
-| `GET`  | `/packets`                          | List packets with filters          |
-| `GET`  | `/packets/{packetHash}`             | Get packet with all observations   |
-| `GET`  | `/nodes`                            | List nodes                         |
-| `GET`  | `/nodes/{nodeId}`                   | Get node detail                    |
-| `GET`  | `/nodes/{nodeId}/observations`      | List observations for a node       |
-| `GET`  | `/observers/{observerId}/telemetry` | Observer telemetry history         |
-| `GET`  | `/observers/{observerId}/adverts`   | Adverts heard by observer          |
-| `GET`  | `/stats/overview`                   | Network overview stats             |
-| `GET`  | `/stats/observations`               | Observation time series            |
-| `GET`  | `/stats/payloadBreakdown`           | Observations by payload type       |
-| `GET`  | `/stats/topNodes`                   | Top nodes by observation count     |
-| `GET`  | `/stats/topObservers`               | Top observers by observation count |
+| Method | Path                                | Description                                                                                        |
+| ------ | ----------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `GET`  | `/brokers`                          | List MQTT brokers and connection status                                                            |
+| `GET`  | `/iatas`                            | List all known IATA codes                                                                          |
+| `GET`  | `/iatas/{iata}`                     | Get a single IATA code                                                                             |
+| `GET`  | `/regions`                          | List all regions (summary)                                                                         |
+| `GET`  | `/regions/{id}`                     | Get a single region with IATA list                                                                 |
+| `GET`  | `/channels`                         | List channels (optional: `?hash=<hex>&iata=<code>&limit=50`)                                       |
+| `GET`  | `/channels/{id}`                    | Get channel detail by integer ID                                                                   |
+| `GET`  | `/channels/{id}/messages`           | List messages for a channel (optional: `?since=<ms>&iata=<code>&limit=50`)                         |
+| `GET`  | `/messages`                         | List all messages (optional: `?channelId=<int>&channelHash=<hex>&iata=<code>&since=<ms>&limit=50`) |
+| `GET`  | `/observers`                        | List observers (optional: `?iata=<code>&type=<str>&broker=<name>&status=online\|offline`)          |
+| `GET`  | `/observers/{observerId}`           | Get observer detail including broker last-seen timestamps                                          |
+| `GET`  | `/packets`                          | List packets with filters                                                                          |
+| `GET`  | `/packets/{packetHash}`             | Get packet with all observations                                                                   |
+| `GET`  | `/nodes`                            | List nodes                                                                                         |
+| `GET`  | `/nodes/{nodeId}`                   | Get node detail                                                                                    |
+| `GET`  | `/nodes/{nodeId}/observations`      | List observations for a node                                                                       |
+| `GET`  | `/observers/{observerId}/telemetry` | Observer telemetry history                                                                         |
+| `GET`  | `/observers/{observerId}/adverts`   | Adverts heard by observer                                                                          |
+| `GET`  | `/stats/overview`                   | Network overview stats                                                                             |
+| `GET`  | `/stats/observations`               | Hourly observation time series (last 7 days by default)                                            |
+| `GET`  | `/stats/payload-breakdown`          | Observation counts by payload type (last 24h by default)                                           |
+| `GET`  | `/stats/top-nodes`                  | Top N nodes by observation count (from materialized view)                                          |
+| `GET`  | `/stats/top-observers`              | Top N observers by observation count (last 24h by default)                                         |
 
 ---
 
@@ -310,10 +305,11 @@ Tower server.
 - [x] REST API: Pagination
 - [x] REST API: Nodes (list + detail + observations)
 - [x] REST API: Packets (list + detail)
+- [x] REST API: Stats
 
 ### In progress / next
 
-- [ ] REST API: Stats
+- [ ] Materialized view refresh (mv_hourly_iata_stats, mv_top_nodes_by_iata)
 - [ ] Path resolution (node short ID lookup)
 - [ ] Propagation time calculation
 - [ ] Routes and traces endpoints
@@ -328,4 +324,4 @@ Tower server.
 - [ ] Region management via API (currently config-file only)
 - [ ] WebSocket subscription unsubscribe (scaffolded, not implemented)
 - [ ] Observer owner tracking (schema exists, API excluded by design)
-- [ ] Swagger/OpenAPI documentation
+- [ ] Swagger/OpenAPI documentation via swaggo/swag

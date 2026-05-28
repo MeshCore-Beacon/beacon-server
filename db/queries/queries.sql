@@ -488,11 +488,12 @@ SELECT
   COUNT(DISTINCT po.iata)         AS active_iatas
 FROM packet_observations po
 WHERE po.heard_at > NOW() - INTERVAL '24 hours'
-  AND ($1::char(3) IS NULL OR po.iata = $1);
+  AND ($1 = '' OR po.iata ILIKE $1);
 
 -- name: GetHourlyStats :many
-SELECT * FROM mv_hourly_iata_stats
-WHERE ($1::char(3) IS NULL OR iata = $1)
+SELECT iata, hour, observation_count, unique_packets, active_observers
+FROM mv_hourly_iata_stats
+WHERE ($1 = '' OR iata ILIKE $1)
   AND hour >= NOW() - $2::interval
 ORDER BY iata, hour;
 
@@ -501,6 +502,38 @@ SELECT * FROM mv_top_nodes_by_iata
 WHERE ($1::char(3) IS NULL OR iata = $1)
 ORDER BY observation_count DESC
 LIMIT $2;
+
+-- name: GetStatsPayloadBreakdown :many
+-- Returns observation counts grouped by payload type for the given window and IATA.
+SELECT
+  p.payload_type,
+  COUNT(*) AS count
+FROM packet_observations po
+JOIN packets p ON p.packet_hash = po.packet_hash
+WHERE po.heard_at > $1
+  AND ($2 = '' OR po.iata ILIKE $2)
+GROUP BY p.payload_type
+ORDER BY count DESC;
+
+-- name: GetStatsTopObservers :many
+-- Returns the top N observers by observation count for the given window and IATA.
+SELECT
+  o.id,
+  o.display_name,
+  o.observer_type,
+  COUNT(*) AS observation_count,
+  COALESCE((
+    SELECT po2.iata FROM packet_observations po2
+    WHERE po2.observer_id = o.id
+    ORDER BY po2.heard_at DESC LIMIT 1
+  ), '') AS iata
+FROM packet_observations po
+JOIN observers o ON o.id = po.observer_id
+WHERE po.heard_at > $1
+  AND ($2 = '' OR po.iata ILIKE $2)
+GROUP BY o.id
+ORDER BY observation_count DESC
+LIMIT $3;
 
 -- ============================================================
 -- REGIONS

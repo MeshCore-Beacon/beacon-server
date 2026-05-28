@@ -386,14 +386,14 @@ func (s *Store) UpsertRegionIATA(ctx context.Context, regionID int32, iata strin
 // cursor is last_seen epoch ms of the last item; pass 0 to start from the beginning.
 // Note: after sqlc generate, verify Column param names match generated types.
 func (s *Store) ListChannels(ctx context.Context, limit int32, hash []byte, iata string, cursor int64) (api.Page[api.ChannelSummary], error) {
-	var cursorTs pgtype.Timestamptz
+	var cursorTS pgtype.Timestamptz
 	if cursor > 0 {
-		cursorTs = pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}
+		cursorTS = pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}
 	}
 	rows, err := s.q.ListChannels(ctx, sqlc.ListChannelsParams{
 		Column1: hash,
 		Column2: iata,
-		Column3: cursorTs,
+		Column3: cursorTS,
 		Limit:   limit + 1,
 	})
 	if err != nil {
@@ -1047,4 +1047,120 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 		p.Observations = append(p.Observations, obs)
 	}
 	return p, nil
+}
+
+// GetStatsOverview returns top-line network figures for the last 24 hours.
+func (s *Store) GetStatsOverview(ctx context.Context, iata string) (*api.StatsOverview, error) {
+	row, err := s.q.GetStatsOverview(ctx, iata)
+	if err != nil {
+		return nil, err
+	}
+	return &api.StatsOverview{
+		TotalPackets:      row.TotalPackets,
+		TotalObservations: row.TotalObservations,
+		ActiveObservers:   row.ActiveObservers,
+		ActiveIATAs:       row.ActiveIatas,
+		WindowHours:       24,
+	}, nil
+}
+
+// GetStatsObservations returns hourly observation counts for charting.
+func (s *Store) GetStatsObservations(ctx context.Context, iata string, since time.Time) ([]api.ObservationPoint, error) {
+	if since.IsZero() {
+		since = time.Now().Add(-7 * 24 * time.Hour)
+	}
+	interval := time.Since(since)
+	rows, err := s.q.GetHourlyStats(ctx, sqlc.GetHourlyStatsParams{
+		Column1: iata,
+		Column2: pgtype.Interval{Microseconds: int64(interval.Hours()) * 3600 * 1e6, Valid: true},
+	})
+	if err != nil {
+		return nil, err
+	}
+	points := make([]api.ObservationPoint, 0, len(rows))
+	for _, v := range rows {
+		points = append(points, api.ObservationPoint{
+			Hour:             v.Hour.Time.UnixMilli(),
+			IATA:             v.Iata,
+			ObservationCount: v.ObservationCount,
+			UniquePackets:    v.UniquePackets,
+			ActiveObservers:  v.ActiveObservers,
+		})
+	}
+	return points, nil
+}
+
+func (s *Store) GetStatsPayloadBreakdown(ctx context.Context, iata string, since time.Time) ([]api.PayloadBreakdownItem, error) {
+	if since.IsZero() {
+		since = time.Now().Add(-24 * time.Hour)
+	}
+	rows, err := s.q.GetStatsPayloadBreakdown(ctx, sqlc.GetStatsPayloadBreakdownParams{
+		HeardAt: pgtype.Timestamptz{Time: since, Valid: true},
+		Column2: iata,
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]api.PayloadBreakdownItem, 0, len(rows))
+	for _, v := range rows {
+		items = append(items, api.PayloadBreakdownItem{
+			PayloadType:     v.PayloadType,
+			PayloadTypeName: api.PayloadTypeName(v.PayloadType),
+			Count:           v.Count,
+		})
+	}
+	return items, nil
+}
+
+func (s *Store) GetStatsTopNodes(ctx context.Context, iata string, limit int32) ([]api.TopNode, error) {
+	rows, err := s.q.GetTopNodes(ctx, sqlc.GetTopNodesParams{
+		Column1: iata,
+		Limit:   limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]api.TopNode, 0, len(rows))
+	for _, v := range rows {
+		var count int64
+		if v.ObservationCount != nil {
+			count = *v.ObservationCount
+		}
+		items = append(items, api.TopNode{
+			NodeID:           v.NodeID,
+			NodeName:         v.Name,
+			NodeType:         v.NodeType,
+			NodeTypeName:     api.NodeTypeName(v.NodeType),
+			IATA:             v.Iata,
+			ObservationCount: count,
+			LastHeard:        v.LastHeard.Time.UnixMilli(),
+		})
+	}
+	return items, nil
+}
+
+func (s *Store) GetStatsTopObservers(ctx context.Context, iata string, since time.Time, limit int32) ([]api.TopObserver, error) {
+	if since.IsZero() {
+		since = time.Now().Add(-24 * time.Hour)
+	}
+	rows, err := s.q.GetStatsTopObservers(ctx, sqlc.GetStatsTopObserversParams{
+		HeardAt: pgtype.Timestamptz{Time: since, Valid: true},
+		Column2: iata,
+		Limit:   limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]api.TopObserver, 0, len(rows))
+	for _, v := range rows {
+		iata, _ := v.Iata.(string)
+		items = append(items, api.TopObserver{
+			ObserverID:       v.ID,
+			DisplayName:      v.DisplayName,
+			ObserverType:     v.ObserverType,
+			IATA:             iata,
+			ObservationCount: v.ObservationCount,
+		})
+	}
+	return items, nil
 }

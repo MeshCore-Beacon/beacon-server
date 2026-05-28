@@ -150,14 +150,15 @@ func (q *Queries) GetChannelsByHash(ctx context.Context, arg GetChannelsByHashPa
 }
 
 const getHourlyStats = `-- name: GetHourlyStats :many
-SELECT iata, hour, observation_count, unique_packets, active_observers FROM mv_hourly_iata_stats
-WHERE ($1::char(3) IS NULL OR iata = $1)
+SELECT iata, hour, observation_count, unique_packets, active_observers
+FROM mv_hourly_iata_stats
+WHERE ($1 = '' OR iata ILIKE $1)
   AND hour >= NOW() - $2::interval
 ORDER BY iata, hour
 `
 
 type GetHourlyStatsParams struct {
-	Column1 string          `json:"column_1"`
+	Column1 interface{}     `json:"column_1"`
 	Column2 pgtype.Interval `json:"column_2"`
 }
 
@@ -552,7 +553,7 @@ SELECT
   COUNT(DISTINCT po.iata)         AS active_iatas
 FROM packet_observations po
 WHERE po.heard_at > NOW() - INTERVAL '24 hours'
-  AND ($1::char(3) IS NULL OR po.iata = $1)
+  AND ($1 = '' OR po.iata ILIKE $1)
 `
 
 type GetStatsOverviewRow struct {
@@ -565,7 +566,7 @@ type GetStatsOverviewRow struct {
 // ============================================================
 // STATS
 // ============================================================
-func (q *Queries) GetStatsOverview(ctx context.Context, dollar_1 string) (GetStatsOverviewRow, error) {
+func (q *Queries) GetStatsOverview(ctx context.Context, dollar_1 interface{}) (GetStatsOverviewRow, error) {
 	row := q.db.QueryRow(ctx, getStatsOverview, dollar_1)
 	var i GetStatsOverviewRow
 	err := row.Scan(
@@ -575,6 +576,110 @@ func (q *Queries) GetStatsOverview(ctx context.Context, dollar_1 string) (GetSta
 		&i.ActiveIatas,
 	)
 	return i, err
+}
+
+const getStatsPayloadBreakdown = `-- name: GetStatsPayloadBreakdown :many
+SELECT
+  p.payload_type,
+  COUNT(*) AS count
+FROM packet_observations po
+JOIN packets p ON p.packet_hash = po.packet_hash
+WHERE po.heard_at > $1
+  AND ($2 = '' OR po.iata ILIKE $2)
+GROUP BY p.payload_type
+ORDER BY count DESC
+`
+
+type GetStatsPayloadBreakdownParams struct {
+	HeardAt pgtype.Timestamptz `json:"heard_at"`
+	Column2 interface{}        `json:"column_2"`
+}
+
+type GetStatsPayloadBreakdownRow struct {
+	PayloadType int16 `json:"payload_type"`
+	Count       int64 `json:"count"`
+}
+
+// Returns observation counts grouped by payload type for the given window and IATA.
+func (q *Queries) GetStatsPayloadBreakdown(ctx context.Context, arg GetStatsPayloadBreakdownParams) ([]GetStatsPayloadBreakdownRow, error) {
+	rows, err := q.db.Query(ctx, getStatsPayloadBreakdown, arg.HeardAt, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetStatsPayloadBreakdownRow{}
+	for rows.Next() {
+		var i GetStatsPayloadBreakdownRow
+		if err := rows.Scan(&i.PayloadType, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getStatsTopObservers = `-- name: GetStatsTopObservers :many
+SELECT
+  o.id,
+  o.display_name,
+  o.observer_type,
+  COUNT(*) AS observation_count,
+  COALESCE((
+    SELECT po2.iata FROM packet_observations po2
+    WHERE po2.observer_id = o.id
+    ORDER BY po2.heard_at DESC LIMIT 1
+  ), '') AS iata
+FROM packet_observations po
+JOIN observers o ON o.id = po.observer_id
+WHERE po.heard_at > $1
+  AND ($2 = '' OR po.iata ILIKE $2)
+GROUP BY o.id
+ORDER BY observation_count DESC
+LIMIT $3
+`
+
+type GetStatsTopObserversParams struct {
+	HeardAt pgtype.Timestamptz `json:"heard_at"`
+	Column2 interface{}        `json:"column_2"`
+	Limit   int32              `json:"limit"`
+}
+
+type GetStatsTopObserversRow struct {
+	ID               uuid.UUID   `json:"id"`
+	DisplayName      *string     `json:"display_name"`
+	ObserverType     *string     `json:"observer_type"`
+	ObservationCount int64       `json:"observation_count"`
+	Iata             interface{} `json:"iata"`
+}
+
+// Returns the top N observers by observation count for the given window and IATA.
+func (q *Queries) GetStatsTopObservers(ctx context.Context, arg GetStatsTopObserversParams) ([]GetStatsTopObserversRow, error) {
+	rows, err := q.db.Query(ctx, getStatsTopObservers, arg.HeardAt, arg.Column2, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetStatsTopObserversRow{}
+	for rows.Next() {
+		var i GetStatsTopObserversRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DisplayName,
+			&i.ObserverType,
+			&i.ObservationCount,
+			&i.Iata,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getTopNodes = `-- name: GetTopNodes :many

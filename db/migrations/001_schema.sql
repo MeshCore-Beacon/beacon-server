@@ -312,16 +312,13 @@ CREATE INDEX idx_channel_messages_sent_brin ON channel_messages USING BRIN (sent
 CREATE MATERIALIZED VIEW mv_hourly_iata_stats AS
 SELECT
   iata,
-  date_trunc('hour', heard_at) AS hour,
+  date_trunc('hour', heard_at)::timestamptz AS hour,
   COUNT(*) AS observation_count,
   COUNT(DISTINCT packet_hash) AS unique_packets,
   COUNT(DISTINCT observer_id) AS active_observers
 FROM packet_observations
 WHERE heard_at > NOW() - INTERVAL '7 days'
 GROUP BY iata, date_trunc('hour', heard_at);
-
-CREATE UNIQUE INDEX idx_mv_hourly_iata
-  ON mv_hourly_iata_stats(iata, hour);
 
 CREATE MATERIALIZED VIEW mv_top_nodes_by_iata AS
 SELECT

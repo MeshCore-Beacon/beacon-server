@@ -50,11 +50,11 @@ type IataCode struct {
 }
 
 type MvHourlyIataStat struct {
-	Iata             string          `json:"iata"`
-	Hour             pgtype.Interval `json:"hour"`
-	ObservationCount int64           `json:"observation_count"`
-	UniquePackets    int64           `json:"unique_packets"`
-	ActiveObservers  int64           `json:"active_observers"`
+	Iata             string             `json:"iata"`
+	Hour             pgtype.Timestamptz `json:"hour"`
+	ObservationCount int64              `json:"observation_count"`
+	UniquePackets    int64              `json:"unique_packets"`
+	ActiveObservers  int64              `json:"active_observers"`
 }
 
 type MvTopNodesByIatum struct {
