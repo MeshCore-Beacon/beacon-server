@@ -1787,6 +1787,24 @@ func (q *Queries) ListRegions(ctx context.Context) ([]ListRegionsRow, error) {
 	return items, nil
 }
 
+const refreshHourlyStats = `-- name: RefreshHourlyStats :exec
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_hourly_iata_stats
+`
+
+func (q *Queries) RefreshHourlyStats(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, refreshHourlyStats)
+	return err
+}
+
+const refreshTopNodes = `-- name: RefreshTopNodes :exec
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_top_nodes_by_iata
+`
+
+func (q *Queries) RefreshTopNodes(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, refreshTopNodes)
+	return err
+}
+
 const resolvePathHashes = `-- name: ResolvePathHashes :many
 
 SELECT DISTINCT n.id

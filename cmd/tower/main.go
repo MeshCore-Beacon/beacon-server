@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"time"
 	"syscall"
+	"time"
 
 	"github.com/MeshCore-Tower/tower-server/db"
 	"github.com/MeshCore-Tower/tower-server/internal/api/router"
@@ -141,7 +141,8 @@ func main() {
 
 	go broker1.Start(ctx)
 	go broker2.Start(ctx)
-	// ── Retention cleanup goroutine ─────────────────────────────────────────
+
+	// ── cleanup and materialized view refresh goroutine ─────────────────────────────────────────
 	go func() {
 		ticker := time.NewTicker(time.Hour)
 		defer ticker.Stop()
@@ -153,6 +154,12 @@ func main() {
 				}
 				if err := store.DeleteOldPackets(ctx, time.Now().Add(-packetRetention)); err != nil {
 					log.Printf("cleanup: delete old packets failed: %v", err)
+				}
+				if err := store.RefreshHourlyStats(ctx); err != nil {
+					log.Printf("cleanup: refresh materialized view for hourly stats failed: %v", err)
+				}
+				if err := store.RefreshTopNodes(ctx); err != nil {
+					log.Printf("cleanup: refresh materialized view for top nodes failed: %v", err)
 				}
 			case <-ctx.Done():
 				return

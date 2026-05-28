@@ -147,6 +147,10 @@ WHERE po.observer_id = $1
 ORDER BY po.id ASC
 LIMIT $3;
 
+-- name: DeleteOldTelemetry :exec
+-- Deletes telemetry rows older than the given cutoff. Called by the cleanup goroutine.
+DELETE FROM observer_telemetry WHERE reported_at < $1;
+
 -- ============================================================
 -- OBSERVER BROKERS
 -- ============================================================
@@ -228,6 +232,12 @@ JOIN packet_observations po ON po.packet_hash = p.packet_hash
 WHERE po.id > $1
 ORDER BY po.id ASC
 LIMIT $2;
+
+
+-- name: DeleteOldPackets :exec
+-- Deletes packets and their observations older than the given cutoff.
+-- packet_observations cascade-delete via FK.
+DELETE FROM packets WHERE last_heard_at < $1;
 
 -- ============================================================
 -- PACKET OBSERVATIONS
@@ -467,15 +477,6 @@ INSERT INTO observer_telemetry (
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (observer_id, reported_at) DO NOTHING;
 
--- name: DeleteOldTelemetry :exec
--- Deletes telemetry rows older than the given cutoff. Called by the cleanup goroutine.
-DELETE FROM observer_telemetry WHERE reported_at < $1;
-
--- name: DeleteOldPackets :exec
--- Deletes packets and their observations older than the given cutoff.
--- packet_observations cascade-delete via FK.
-DELETE FROM packets WHERE last_heard_at < $1;
-
 -- ============================================================
 -- STATS
 -- ============================================================
@@ -588,3 +589,9 @@ WHERE ns.iata = $1
     WHEN cardinality($2::bytea[]) > 0 AND length($2[1]) = 4 THEN ns.prefix_4 = ANY($2)
     ELSE FALSE
   END;
+
+-- name: RefreshHourlyStats :exec
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_hourly_iata_stats;
+
+-- name: RefreshTopNodes :exec
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_top_nodes_by_iata;

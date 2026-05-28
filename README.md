@@ -306,14 +306,13 @@ Tower server.
 - [x] REST API: Nodes (list + detail + observations)
 - [x] REST API: Packets (list + detail)
 - [x] REST API: Stats
+- [x] Materialized view refresh (mv_hourly_iata_stats, mv_top_nodes_by_iata)
 
 ### In progress / next
 
-- [ ] Materialized view refresh (mv_hourly_iata_stats, mv_top_nodes_by_iata)
 - [ ] Path resolution (node short ID lookup)
 - [ ] Propagation time calculation
 - [ ] Routes and traces endpoints
-- [ ] Packet search endpoint (requirements TBD)
 
 ### Future
 

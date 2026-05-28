@@ -719,6 +719,18 @@ func (s *Store) DeleteOldPackets(ctx context.Context, cutoff time.Time) error {
 	return s.q.DeleteOldPackets(ctx, pgtype.Timestamptz{Time: cutoff, Valid: true})
 }
 
+// RefreshHourlyStats refreshes the mv_hourly_iata_stats materialized view.
+// Called by the cleanup goroutine to keep hourly observation stats current.
+func (s *Store) RefreshHourlyStats(ctx context.Context) error {
+	return s.q.RefreshHourlyStats(ctx)
+}
+
+// RefreshTopNodes refreshes the mv_top_nodes_by_iata materialized view.
+// Called by the cleanup goroutine to keep top node rankings current.
+func (s *Store) RefreshTopNodes(ctx context.Context) error {
+	return s.q.RefreshTopNodes(ctx)
+}
+
 // GetObserverTelemetry returns telemetry points for an observer within the given time range.
 // since and until define the window; pass zero times to use defaults (last 24h).
 // TODO: implement server-side bucketing by interval when needed.
