@@ -23,11 +23,13 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 
+	"github.com/MeshCore-Tower/tower-server/internal/api"
 	"github.com/MeshCore-Tower/tower-server/internal/hub"
 )
 
@@ -38,7 +40,7 @@ const (
 
 // Handler returns an http.HandlerFunc that requires the hub to be injected.
 // Wire it via router.New(h) so the hub is available at startup.
-func Handler(h *hub.Hub) http.HandlerFunc {
+func Handler(h *hub.Hub, reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)
 		if err != nil {
@@ -123,7 +125,7 @@ func Handler(h *hub.Hub) http.HandlerFunc {
 				log.Printf("ws[%s]: read error: %v", connID, err)
 				return
 			}
-			handleClientMessage(ctx, client, h, conn, connID, msgBytes)
+			handleClientMessage(ctx, client, reader, h, conn, connID, msgBytes)
 		}
 	}
 }
@@ -149,7 +151,7 @@ type subscribeScope struct {
 }
 
 // handleClientMessage dispatches a parsed client message.
-func handleClientMessage(ctx context.Context, client *hub.Client, h *hub.Hub, conn *websocket.Conn, connID string, raw []byte) {
+func handleClientMessage(ctx context.Context, client *hub.Client, reader api.Reader, h *hub.Hub, conn *websocket.Conn, connID string, raw []byte) {
 	var msg clientMessage
 	if err := json.Unmarshal(raw, &msg); err != nil {
 		log.Printf("ws[%s]: bad message: %v", connID, err)
@@ -161,12 +163,26 @@ func handleClientMessage(ctx context.Context, client *hub.Client, h *hub.Hub, co
 		if msg.Scope == nil {
 			return
 		}
+		var regionIATAs []string
+		for _, ridStr := range msg.Scope.RegionIDs {
+			rid, err := strconv.Atoi(ridStr)
+			if err != nil {
+				log.Printf("ws[%s]: invalid regionId %q, skipping", connID, ridStr)
+				continue
+			}
+			region, err := reader.GetRegion(ctx, int32(rid))
+			if err != nil {
+				log.Printf("ws[%s]: region %d not found, skipping: %v", connID, rid, err)
+				continue
+			}
+			regionIATAs = append(regionIATAs, region.IATAs...)
+		}
 		scope := hub.Scope{
 			IATAs:         msg.Scope.IATAs,
 			PayloadTypes:  msg.Scope.PayloadTypes,
 			ChannelHashes: msg.Scope.ChannelHashes,
 			Events:        msg.Scope.Events,
-			// RegionIATAs: TODO expand msg.Scope.RegionIDs → IATA slice via region_iatas DB lookup
+			RegionIATAs:   regionIATAs,
 		}
 		subID := uuid.NewString()
 		h.AddScope(client, subID, scope)

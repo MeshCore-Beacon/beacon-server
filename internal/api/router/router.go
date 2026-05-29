@@ -57,7 +57,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker) http.Handler {
 	))
 
 	// ── WebSocket ────────────────────────────────────────────────────────────
-	r.Get("/ws", ws.Handler(h))
+	r.Get("/ws", ws.Handler(h, reader))
 
 	// ── Public REST API (v1) ─────────────────────────────────────────────────
 	r.Route("/api/v1", func(r chi.Router) {
