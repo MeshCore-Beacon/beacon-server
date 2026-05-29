@@ -74,7 +74,7 @@ func Handler(h *hub.Hub) http.HandlerFunc {
 				select {
 				case evt, ok := <-client.Send:
 					if !ok {
-						return // hub closed the channel (client removed)
+						return
 					}
 					msg := map[string]any{
 						"v":     1,
@@ -89,6 +89,24 @@ func Handler(h *hub.Hub) http.HandlerFunc {
 						cancel()
 						return
 					}
+
+				case lag, ok := <-client.LaggedCH():
+					if !ok {
+						return
+					}
+					lagged := map[string]any{
+						"v":            1,
+						"type":         "lagged",
+						"droppedCount": lag.DroppedCount,
+						"since":        time.Now().UnixMilli(),
+					}
+					lagBytes, _ := json.Marshal(lagged)
+					if err := conn.Write(ctx, websocket.MessageText, lagBytes); err != nil {
+						log.Printf("ws[%s]: failed to write lagged notice: %v", connID, err)
+						cancel()
+						return
+					}
+
 				case <-ctx.Done():
 					return
 				}
@@ -150,8 +168,8 @@ func handleClientMessage(ctx context.Context, client *hub.Client, h *hub.Hub, co
 			Events:        msg.Scope.Events,
 			// RegionIATAs: TODO expand msg.Scope.RegionIDs → IATA slice via region_iatas DB lookup
 		}
-		h.AddScope(client, scope)
 		subID := uuid.NewString()
+		h.AddScope(client, subID, scope)
 		reply, _ := json.Marshal(map[string]any{
 			"v": 1, "type": "subscribed", "id": msg.ID, "subscriptionId": subID,
 		})
@@ -162,9 +180,17 @@ func handleClientMessage(ctx context.Context, client *hub.Client, h *hub.Hub, co
 		}
 
 	case "unsubscribe":
-		// TODO: remove the specific subscriptionId from client.scope.
-		// For now scope entries are append-only; implement removal when needed.
-		log.Printf("ws[%s]: unsubscribe %s (TODO)", connID, msg.SubscriptionID)
+		if msg.SubscriptionID == "" {
+			return
+		}
+		h.RemoveScope(client, msg.SubscriptionID)
+		reply, _ := json.Marshal(map[string]any{
+			"v": 1, "type": "unsubscribed", "id": msg.ID, "subscriptionId": msg.SubscriptionID,
+		})
+		log.Printf("ws[%s]: unsubscribed %s", connID, msg.SubscriptionID)
+		if err := conn.Write(ctx, websocket.MessageText, reply); err != nil {
+			log.Printf("ws[%s]: failed to send unsubscribed reply: %v", connID, err)
+		}
 
 	case "ping":
 		reply, _ := json.Marshal(map[string]any{"v": 1, "type": "pong", "id": msg.ID})

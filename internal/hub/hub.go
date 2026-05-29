@@ -52,24 +52,35 @@ type Scope struct {
 	Events        []EventType
 }
 
+type LaggedNotification struct {
+	DroppedCount int
+}
+
 // Client represents a connected WebSocket consumer.
 type Client struct {
-	Send  chan Event
-	scope []Scope // OR semantics: event matches if it matches any scope entry
+	Send          chan Event
+	laggedCH      chan LaggedNotification
+	subscriptions map[string]Scope // OR semantics: event matches if it matches any scope entry
 }
 
 // matches returns true if the event satisfies at least one of the client's
 // active subscriptions.
 func (c *Client) matches(e Event) bool {
-	if len(c.scope) == 0 {
-		return true // no subscriptions yet → receive nothing
+	if len(c.subscriptions) == 0 {
+		return false
 	}
-	for _, s := range c.scope {
+	for _, s := range c.subscriptions {
 		if scopeMatches(s, e) {
 			return true
 		}
 	}
 	return false
+}
+
+// LaggedCH returns the channel on which lagged notifications are delivered.
+// The WS write pump selects on this alongside Send.
+func (c *Client) LaggedCH() <-chan LaggedNotification {
+	return c.laggedCH
 }
 
 func scopeMatches(s Scope, e Event) bool {
@@ -100,9 +111,9 @@ type Hub struct {
 }
 
 type subscribeMsg struct {
-	client   *Client
-	scope    Scope
-	hasScope bool // true when this is an AddScope call, false for NewClient registration
+	client         *Client
+	scope          Scope
+	subscriptionID string
 }
 
 type unsubscribeMsg struct {
@@ -124,18 +135,27 @@ func New() *Hub {
 // The caller is responsible for calling Remove when the connection closes.
 func (h *Hub) NewClient() *Client {
 	c := &Client{
-		Send: make(chan Event, 256),
+		Send:          make(chan Event, 256),
+		laggedCH:      make(chan LaggedNotification, 8),
+		subscriptions: make(map[string]Scope),
 	}
 	// We don't add it to the map here; we send it through the channel so
 	// Run() is the only goroutine that touches the client map.
-	h.subscribe <- subscribeMsg{client: c, hasScope: false}
+	h.subscribe <- subscribeMsg{client: c}
 	return c
 }
 
 // AddScope appends a subscription scope to a client. Called by the WS handler
 // when it receives a "subscribe" message from the client.
-func (h *Hub) AddScope(c *Client, s Scope) {
-	h.subscribe <- subscribeMsg{client: c, scope: s, hasScope: true}
+func (h *Hub) AddScope(c *Client, id string, s Scope) {
+	h.subscribe <- subscribeMsg{client: c, scope: s, subscriptionID: id}
+}
+
+// RemoveScope removes a single subscription by ID. Called by the WS handler
+// when it receives an "unsubscribe" message from the client. Silently ignored
+// if the ID is not found.
+func (h *Hub) RemoveScope(c *Client, id string) {
+	h.unsubscribe <- unsubscribeMsg{client: c, subscriptionID: id}
 }
 
 // Remove deregisters a client and closes its Send channel.
@@ -168,20 +188,26 @@ func (h *Hub) Run() {
 		select {
 
 		case msg := <-h.subscribe:
-			if !msg.hasScope {
+			if msg.subscriptionID == "" {
 				// Registration with no scope yet (NewClient path).
 				clients[msg.client] = struct{}{}
 			} else {
 				// AddScope path — client must already be registered.
 				if _, ok := clients[msg.client]; ok {
-					msg.client.scope = append(msg.client.scope, msg.scope)
+					msg.client.subscriptions[msg.subscriptionID] = msg.scope
 				}
+			}
+
+		case msg := <-h.unsubscribe:
+			if _, ok := clients[msg.client]; ok {
+				delete(msg.client.subscriptions, msg.subscriptionID)
 			}
 
 		case c := <-h.remove:
 			if _, ok := clients[c]; ok {
 				delete(clients, c)
 				close(c.Send)
+				close(c.laggedCH)
 			}
 
 		case evt := <-h.broadcast:
@@ -192,13 +218,15 @@ func (h *Hub) Run() {
 				select {
 				case c.Send <- evt:
 				default:
-					// Client send buffer full. The WS write pump is responsible
-					// for detecting its own lagged state and sending the lagged
-					// message. We just drain one slot so the broadcast loop
-					// doesn't block.
+					dropped := 1
 					select {
 					case <-c.Send:
 					default:
+					}
+					select {
+					case c.laggedCH <- LaggedNotification{DroppedCount: dropped}:
+					default:
+						// laggedCh itself full; write pump will catch up on next drain
 					}
 					log.Printf("hub: client send buffer full, dropped event type=%s", evt.Type)
 				}

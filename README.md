@@ -205,6 +205,17 @@ On connect the server sends a hello message:
 }
 ```
 
+- **Unsubscribe**
+
+```json
+{
+  "v": 1,
+  "type": "unsubscribe",
+  "id": "unsub-1",
+  "subscriptionId": "<subscription-uuid>"
+}
+```
+
 - **Ping** (send every 30s; connection closes after 90s idle)
 
 ```json
@@ -369,13 +380,13 @@ For paginated responses use the generic page wrapper:
 - [x] REST API: Stats
 - [x] Materialized view refresh (mv_hourly_iata_stats, mv_top_nodes_by_iata)
 - [x] Swagger/OpenAPI documentation via swaggo/swag
+- [x] WebSocket subscription unsubscribe (scaffolded, not implemented)
 
 ### In progress / next
 
 - [ ] Path resolution (node short ID lookup)
 - [ ] Propagation time calculation
 - [ ] Routes and traces endpoints
-- [ ] WebSocket subscription unsubscribe (scaffolded, not implemented)
 
 ### Future
 
