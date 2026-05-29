@@ -168,16 +168,16 @@ channel_keys:
 
 # Observer telemetry storage settings.
 telemetry:
-  retention: 672h  # how long to keep telemetry snapshots (default: 4 weeks)
-  resolution: 1h   # snapshot frequency per observer; duplicates within window are dropped (default: 1h)
+  retention: 672h # how long to keep telemetry snapshots (default: 4 weeks)
+  resolution: 1h # snapshot frequency per observer; duplicates within window are dropped (default: 1h)
 
 # Packet and observation retention.
 packets:
-  retention: 720h  # how long to keep packets and observations (default: 30 days)
+  retention: 720h # how long to keep packets and observations (default: 30 days)
 
 # WebSocket settings.
 websocket:
-  max_connections_per_ip: 5  # default: 5
+  max_connections_per_ip: 5 # default: 5
 ```
 
 IATAs are auto-created on first packet arrival. The config file adds display
@@ -202,8 +202,9 @@ The connection closes after 90 seconds of inactivity. Clients should send a
 ### Client → Server messages
 
 **Subscribe** — add a filter to this connection. Multiple subscriptions are
-unioned (OR semantics): an event matches if it satisfies any active subscription.
-The server replies with a `subscriptionId` to use for unsubscribing.
+unioned (OR semantics): an event matches if it satisfies any active
+subscription. The server replies with a `subscriptionId` to use for
+unsubscribing.
 
 ```json
 {
@@ -243,11 +244,11 @@ expanded to their member IATAs server-side.
 
 ### Server → Client events
 
-| Type                | Description                                        |
-| ------------------- | -------------------------------------------------- |
-| `packetObservation` | New observation written to DB                      |
-| `observerStatus`    | Observer status update                             |
-| `nodeUpdate`        | Node upserted from advert                          |
+| Type                | Description                                         |
+| ------------------- | --------------------------------------------------- |
+| `packetObservation` | New observation written to DB                       |
+| `observerStatus`    | Observer status update                              |
+| `nodeUpdate`        | Node upserted from advert                           |
 | `channelMessage`    | Decrypted channel message (scope must include hash) |
 
 ### Backpressure
@@ -267,7 +268,8 @@ to backfill missed events, then resume streaming.
 
 Subscriptions are not persisted — they exist only for the lifetime of the
 connection. On any disconnect the client should reconnect with backoff, re-issue
-all subscriptions, and backfill via REST using `afterId=<last seen observation id>`.
+all subscriptions, and backfill via REST using
+`afterId=<last seen observation id>`.
 
 ### Connection limits
 
@@ -384,7 +386,8 @@ For paginated responses use the generic page wrapper:
 - [x] Channel message storage with key-based decryption
 - [x] Firmware capability detection scaffolding
 - [x] Hub-based WebSocket fan-out with subscription filtering
-- [x] WebSocket server (hello, subscribe, unsubscribe, ping/pong, lagged, events)
+- [x] WebSocket server (hello, subscribe, unsubscribe, ping/pong, lagged,
+      events)
 - [x] WebSocket regionId expansion via region_iatas DB lookup
 - [x] WebSocket per-IP connection limits
 - [x] Config file loading (regions, IATA overrides, channel keys)
@@ -397,7 +400,8 @@ For paginated responses use the generic page wrapper:
 - [x] REST API: IATAs, Regions
 - [x] REST API: Channels (list + detail + messages) with IATA filter
 - [x] REST API: Messages (cross-channel) with IATA filter
-- [x] REST API: Observers (heard adverts, telemetry, list + detail with broker last-seen)
+- [x] REST API: Observers (heard adverts, telemetry, list + detail with broker
+      last-seen)
 - [x] REST API: Brokers (list with connection status)
 - [x] REST API: Pagination
 - [x] REST API: Nodes (list + detail + observations)
@@ -411,10 +415,11 @@ For paginated responses use the generic page wrapper:
 - [ ] Path resolution (node short ID lookup)
 - [ ] Propagation time calculation
 - [ ] Routes and traces endpoints
+- [ ] Parse payloads (that we can decrypt) into DB and return with packet
+      details
 
 ### Future
 
-- [ ] Parse decryptable payloads into DB and return with packet details
 - [ ] Redis caching for stats endpoints
 - [ ] Admin authentication middleware
 - [ ] Channel key persistence to DB
