@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -40,8 +41,19 @@ const (
 
 // Handler returns an http.HandlerFunc that requires the hub to be injected.
 // Wire it via router.New(h) so the hub is available at startup.
-func Handler(h *hub.Hub, reader api.Reader) http.HandlerFunc {
+func Handler(h *hub.Hub, reader api.Reader, maxConnsPerIP int) http.HandlerFunc {
+	limiter := newIPLimiter(maxConnsPerIP)
 	return func(w http.ResponseWriter, r *http.Request) {
+		ip := r.RemoteAddr
+		if host, _, err := net.SplitHostPort(ip); err == nil {
+			ip = host
+		}
+		if !limiter.acquire(ip) {
+			log.Printf("ws: connection limit reached for IP %s", ip)
+			http.Error(w, "too many connections from this IP", http.StatusTooManyRequests)
+			return
+		}
+		defer limiter.release(ip)
 		conn, err := websocket.Accept(w, r, nil)
 		if err != nil {
 			log.Printf("ws: failed to accept connection: %v", err)

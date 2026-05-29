@@ -65,3 +65,7 @@ telemetry:
 
 packets:
   retention: 720h   # 30 days
+
+websocket:
+  max_connections_per_ip: 5 # default: 5
+

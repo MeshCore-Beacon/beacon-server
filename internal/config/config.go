@@ -15,6 +15,7 @@ type Config struct {
 	Regions     []RegionConfig        `yaml:"regions"`
 	ChannelKeys ChannelKeysConfig     `yaml:"channel_keys"`
 	Telemetry   TelemetryConfig       `yaml:"telemetry"`
+	WebSocket   WebSocketConfig       `yaml:"websocket"`
 	Packets     PacketsConfig         `yaml:"packets"`
 }
 
@@ -28,6 +29,14 @@ type TelemetryConfig struct {
 	// Status messages arriving within the same resolution window are deduplicated.
 	// Defaults to 1h if not set.
 	Resolution duration `yaml:"resolution"`
+}
+
+// WebSocketConfig controls WebSocket connection behaviour.
+// Settings here apply to the /ws endpoint only.
+type WebSocketConfig struct {
+	// MaxConnectionsPerIP is the maximum number of concurrent WebSocket
+	// connections allowed from a single IP address. Defaults to 5 if not set.
+	MaxConnectionsPerIP int `yaml:"max_connections_per_ip"`
 }
 
 // PacketsConfig controls packet retention behaviour.

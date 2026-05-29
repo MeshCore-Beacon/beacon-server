@@ -73,7 +73,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
-	// ── Retention and resolution from config with env var overrides ────────────
+
 	telemetryResolution := cfg.Telemetry.Resolution.Duration
 	if telemetryResolution == 0 {
 		telemetryResolution = time.Hour
@@ -85,6 +85,11 @@ func main() {
 	packetRetention := cfg.Packets.Retention.Duration
 	if packetRetention == 0 {
 		packetRetention = 30 * 24 * time.Hour // 30 days
+	}
+
+	maxConnsPerIP := cfg.WebSocket.MaxConnectionsPerIP
+	if maxConnsPerIP == 0 {
+		maxConnsPerIP = 5
 	}
 
 	// ── Hub ──────────────────────────────────────────────────────────────────
@@ -202,7 +207,7 @@ func main() {
 	}()
 
 	// ── HTTP server ──────────────────────────────────────────────────────────
-	r := router.New(h, store, []*ingest.Worker{broker1, broker2})
+	r := router.New(h, store, []*ingest.Worker{broker1, broker2}, maxConnsPerIP)
 
 	srv := &http.Server{
 		Addr:    addr,

@@ -167,6 +167,9 @@ telemetry:
 # Packet and observation retention.
 packets:
   retention: 720h # how long to keep packets and observations (default: 30 days)
+# WebSocket settings.
+websocket:
+  max_connections_per_ip: 5 # default: 5
 ```
 
 IATAs are auto-created on first packet arrival. The config file adds display
