@@ -177,18 +177,20 @@ INSERT INTO packets (
   sub_region_code,
   origin_pubkey,
   raw_payload,
+  raw_header,
   parsed_payload,
   channel_hash,
   first_heard_at,
   last_heard_at,
   observation_count
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW(), 1
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW(), 1
 )
 ON CONFLICT (packet_hash) DO UPDATE SET
   last_heard_at     = NOW(),
   observation_count = packets.observation_count + 1
-RETURNING *, (xmax = 0) AS inserted;
+RETURNING packet_hash, payload_type, payload_version, route_type, transport_codes_present, region_code, sub_region_code, origin_pubkey, raw_payload, raw_header, parsed_payload, decrypted, channel_hash, first_heard_at, last_heard_at, observation_count, (xmax = 0)
+AS inserted;
 
 -- name: GetPacketByHash :one
 SELECT * FROM packets WHERE packet_hash = $1;

@@ -176,6 +176,7 @@ type Packet struct {
 	SubRegionCode         *int32             `json:"sub_region_code"`
 	OriginPubkey          []byte             `json:"origin_pubkey"`
 	RawPayload            []byte             `json:"raw_payload"`
+	RawHeader             []byte             `json:"raw_header"`
 	ParsedPayload         []byte             `json:"parsed_payload"`
 	Decrypted             *bool              `json:"decrypted"`
 	ChannelHash           []byte             `json:"channel_hash"`

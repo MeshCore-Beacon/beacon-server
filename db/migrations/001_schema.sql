@@ -203,6 +203,7 @@ CREATE TABLE packets (
   sub_region_code         INT,
   origin_pubkey           BYTEA,
   raw_payload             BYTEA NOT NULL,
+  raw_header              BYTEA NOT NULL,
   parsed_payload          JSONB,
   decrypted               BOOLEAN DEFAULT FALSE,
   channel_hash            BYTEA,

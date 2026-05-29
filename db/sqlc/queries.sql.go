@@ -485,7 +485,7 @@ func (q *Queries) GetObserverTelemetry(ctx context.Context, arg GetObserverTelem
 }
 
 const getPacketByHash = `-- name: GetPacketByHash :one
-SELECT packet_hash, payload_type, payload_version, route_type, transport_codes_present, region_code, sub_region_code, origin_pubkey, raw_payload, parsed_payload, decrypted, channel_hash, first_heard_at, last_heard_at, observation_count FROM packets WHERE packet_hash = $1
+SELECT packet_hash, payload_type, payload_version, route_type, transport_codes_present, region_code, sub_region_code, origin_pubkey, raw_payload, raw_header, parsed_payload, decrypted, channel_hash, first_heard_at, last_heard_at, observation_count FROM packets WHERE packet_hash = $1
 `
 
 func (q *Queries) GetPacketByHash(ctx context.Context, packetHash []byte) (Packet, error) {
@@ -501,6 +501,7 @@ func (q *Queries) GetPacketByHash(ctx context.Context, packetHash []byte) (Packe
 		&i.SubRegionCode,
 		&i.OriginPubkey,
 		&i.RawPayload,
+		&i.RawHeader,
 		&i.ParsedPayload,
 		&i.Decrypted,
 		&i.ChannelHash,
@@ -1739,7 +1740,7 @@ func (q *Queries) ListPackets(ctx context.Context, arg ListPacketsParams) ([]Lis
 }
 
 const listPacketsAfterID = `-- name: ListPacketsAfterID :many
-SELECT p.packet_hash, p.payload_type, p.payload_version, p.route_type, p.transport_codes_present, p.region_code, p.sub_region_code, p.origin_pubkey, p.raw_payload, p.parsed_payload, p.decrypted, p.channel_hash, p.first_heard_at, p.last_heard_at, p.observation_count
+SELECT p.packet_hash, p.payload_type, p.payload_version, p.route_type, p.transport_codes_present, p.region_code, p.sub_region_code, p.origin_pubkey, p.raw_payload, p.raw_header, p.parsed_payload, p.decrypted, p.channel_hash, p.first_heard_at, p.last_heard_at, p.observation_count
 FROM packets p
 JOIN packet_observations po ON po.packet_hash = p.packet_hash
 WHERE po.id > $1
@@ -1771,6 +1772,7 @@ func (q *Queries) ListPacketsAfterID(ctx context.Context, arg ListPacketsAfterID
 			&i.SubRegionCode,
 			&i.OriginPubkey,
 			&i.RawPayload,
+			&i.RawHeader,
 			&i.ParsedPayload,
 			&i.Decrypted,
 			&i.ChannelHash,
@@ -2254,18 +2256,20 @@ INSERT INTO packets (
   sub_region_code,
   origin_pubkey,
   raw_payload,
+  raw_header,
   parsed_payload,
   channel_hash,
   first_heard_at,
   last_heard_at,
   observation_count
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW(), 1
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW(), 1
 )
 ON CONFLICT (packet_hash) DO UPDATE SET
   last_heard_at     = NOW(),
   observation_count = packets.observation_count + 1
-RETURNING packet_hash, payload_type, payload_version, route_type, transport_codes_present, region_code, sub_region_code, origin_pubkey, raw_payload, parsed_payload, decrypted, channel_hash, first_heard_at, last_heard_at, observation_count, (xmax = 0) AS inserted
+RETURNING packet_hash, payload_type, payload_version, route_type, transport_codes_present, region_code, sub_region_code, origin_pubkey, raw_payload, raw_header, parsed_payload, decrypted, channel_hash, first_heard_at, last_heard_at, observation_count, (xmax = 0)
+AS inserted
 `
 
 type UpsertPacketParams struct {
@@ -2278,6 +2282,7 @@ type UpsertPacketParams struct {
 	SubRegionCode         *int32 `json:"sub_region_code"`
 	OriginPubkey          []byte `json:"origin_pubkey"`
 	RawPayload            []byte `json:"raw_payload"`
+	RawHeader             []byte `json:"raw_header"`
 	ParsedPayload         []byte `json:"parsed_payload"`
 	ChannelHash           []byte `json:"channel_hash"`
 }
@@ -2292,6 +2297,7 @@ type UpsertPacketRow struct {
 	SubRegionCode         *int32             `json:"sub_region_code"`
 	OriginPubkey          []byte             `json:"origin_pubkey"`
 	RawPayload            []byte             `json:"raw_payload"`
+	RawHeader             []byte             `json:"raw_header"`
 	ParsedPayload         []byte             `json:"parsed_payload"`
 	Decrypted             *bool              `json:"decrypted"`
 	ChannelHash           []byte             `json:"channel_hash"`
@@ -2315,6 +2321,7 @@ func (q *Queries) UpsertPacket(ctx context.Context, arg UpsertPacketParams) (Ups
 		arg.SubRegionCode,
 		arg.OriginPubkey,
 		arg.RawPayload,
+		arg.RawHeader,
 		arg.ParsedPayload,
 		arg.ChannelHash,
 	)
@@ -2329,6 +2336,7 @@ func (q *Queries) UpsertPacket(ctx context.Context, arg UpsertPacketParams) (Ups
 		&i.SubRegionCode,
 		&i.OriginPubkey,
 		&i.RawPayload,
+		&i.RawHeader,
 		&i.ParsedPayload,
 		&i.Decrypted,
 		&i.ChannelHash,

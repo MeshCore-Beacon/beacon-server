@@ -124,6 +124,7 @@ type UpsertPacketParams struct {
 	PayloadType    uint8
 	PayloadVersion uint8
 	TransportCodes []byte // nil if not FLOOD/DIRECT
+	RawHeader      []byte
 	RawPayload     []byte
 	ParsedPayload  json.RawMessage
 	OriginPubkey   []byte
@@ -384,7 +385,6 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		log.Printf("ingest[%s]: invalid hex from %s/%s: %v", w.cfg.BrokerName, iata, pubkeyHex, err)
 		return
 	}
-
 	packet, err := meshcore.PacketFromBytes(hexBytes)
 	if err != nil {
 		log.Printf("ingest[%s]: error decoding packet from %s/%s: %v", w.cfg.BrokerName, iata, pubkeyHex, err)
@@ -446,13 +446,18 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 			originPubkey = anonReq.EphemeralPubKey[:]
 		}
 	}
+	rawHeader := []byte{packet.Header}
+	if transportCodes != nil {
+		rawHeader = append(rawHeader, transportCodes...)
+	}
 	pParams := UpsertPacketParams{
 		PacketHash:     packetHash[:],
 		RouteType:      packet.RouteType(),
 		PayloadType:    packet.PayloadType(),
 		PayloadVersion: packet.PayloadVer(),
 		TransportCodes: transportCodes,
-		RawPayload:     hexBytes,
+		RawHeader:      rawHeader,
+		RawPayload:     packet.Payload,
 		ParsedPayload:  parsedPayload,
 		OriginPubkey:   originPubkey,
 		ChannelHash:    channelHash,

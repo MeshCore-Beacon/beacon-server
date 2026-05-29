@@ -128,6 +128,7 @@ type Packet struct {
 	TransportCodes   *string                   `json:"transportCodes,omitempty"` // hex-encoded
 	OriginPubkey     *string                   `json:"originPubkey,omitempty"`   // hex-encoded
 	ParsedPayload    any                       `json:"parsedPayload,omitempty"`
+	RawHeader        string                    `json:"rawHeader"`
 	RawPayload       string                    `json:"rawPayload"` // hex-encoded
 	Decrypted        bool                      `json:"decrypted"`
 	ChannelHash      *string                   `json:"channelHash,omitempty"` // hex-encoded
