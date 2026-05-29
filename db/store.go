@@ -375,16 +375,11 @@ func (s *Store) UpsertRegionIATA(ctx context.Context, regionID int32, iata strin
 	})
 }
 
-// ListChannels returns a summary list of all known channels ordered by last seen.
-// Includes both hashtag-derived and explicit key channels.
-// Channels with unknown keys are included with KeyKnown=false.
-// Filters on hash if provided, this is the hex channel hash
-// ListChannels returns a summary list of all known channels ordered by last seen.
+// ListChannels returns a paginated list of channels ordered by last seen.
 // Pass nil hash to skip hash filtering. Pass empty string iata to return channels from all IATAs.
 // IATA filtering returns channels that have messages heard in the given IATA.
-// ListChannels returns a paginated list of channels ordered by last seen.
+// Channels with unknown keys are included with KeyKnown=false.
 // cursor is last_seen epoch ms of the last item; pass 0 to start from the beginning.
-// Note: after sqlc generate, verify Column param names match generated types.
 func (s *Store) ListChannels(ctx context.Context, limit int32, hash []byte, iata string, cursor int64) (api.Page[api.ChannelSummary], error) {
 	var cursorTS pgtype.Timestamptz
 	if cursor > 0 {
