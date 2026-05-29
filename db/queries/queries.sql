@@ -427,7 +427,8 @@ RETURNING id;
 -- Pass a zero/null timestamp for since to return all messages up to limit.
 -- Pass empty string for iata to skip IATA filtering (case-insensitive).
 -- Pass cursor=0 to start from the beginning.
-SELECT DISTINCT ON (cm.id) cm.*, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash
+SELECT DISTINCT ON (cm.id) cm.*, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash,
+(SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = cm.packet_hash) AS observation_count
 FROM channel_messages cm
 JOIN channels c ON c.id = cm.channel_id
 JOIN packet_observations po ON po.packet_hash = cm.packet_hash
@@ -442,7 +443,8 @@ LIMIT $5;
 -- Returns all messages across all channels with optional time, IATA and cursor filters.
 -- Pass empty string for iata to skip IATA filtering (case-insensitive).
 -- Pass cursor=0 to start from the beginning.
-SELECT DISTINCT ON (cm.id) cm.*, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash
+SELECT DISTINCT ON (cm.id) cm.*, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash,
+(SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = cm.packet_hash) AS observation_count
 FROM channel_messages cm
 JOIN channels c ON c.id = cm.channel_id
 JOIN packet_observations po ON po.packet_hash = cm.packet_hash
@@ -457,7 +459,9 @@ LIMIT $4;
 -- May return messages from multiple channels if the hash collides across different keys.
 -- Pass empty string for iata to skip IATA filtering (case-insensitive).
 -- Pass cursor=0 to start from the beginning.
-SELECT DISTINCT ON (cm.id) cm.*, c.channel_hash FROM channel_messages cm
+SELECT DISTINCT ON (cm.id) cm.*, c.channel_hash,
+  (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = cm.packet_hash) AS observation_count
+FROM channel_messages cm
 JOIN channels c ON c.id = cm.channel_id
 JOIN packet_observations po ON po.packet_hash = cm.packet_hash
 WHERE c.channel_hash = $1

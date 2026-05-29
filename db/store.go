@@ -476,7 +476,7 @@ func (s *Store) ListChannelMessages(ctx context.Context, channelID *int32, since
 		}
 		messages = make([]api.ChannelMessage, 0, len(rows))
 		for _, v := range rows {
-			messages = append(messages, toChannelMessage(v.ID, v.PacketHashHex, v.ChannelHash, v.SenderName, v.Content, v.SentAt))
+			messages = append(messages, toChannelMessage(v.ID, v.PacketHashHex, v.ChannelHash, v.SenderName, v.Content, v.SentAt, v.ObservationCount))
 		}
 	} else {
 		rows, err := s.q.ListChannelMessages(ctx, sqlc.ListChannelMessagesParams{
@@ -495,7 +495,7 @@ func (s *Store) ListChannelMessages(ctx context.Context, channelID *int32, since
 		}
 		messages = make([]api.ChannelMessage, 0, len(rows))
 		for _, v := range rows {
-			messages = append(messages, toChannelMessage(v.ID, v.PacketHashHex, v.ChannelHash, v.SenderName, v.Content, v.SentAt))
+			messages = append(messages, toChannelMessage(v.ID, v.PacketHashHex, v.ChannelHash, v.SenderName, v.Content, v.SentAt, v.ObservationCount))
 		}
 	}
 
@@ -533,7 +533,7 @@ func (s *Store) ListChannelMessagesByHash(ctx context.Context, hash []byte, sinc
 	}
 	messages := make([]api.ChannelMessage, 0, len(rows))
 	for _, v := range rows {
-		messages = append(messages, toChannelMessage(v.ID, hex.EncodeToString(v.PacketHash), v.ChannelHash, v.SenderName, v.Content, v.SentAt))
+		messages = append(messages, toChannelMessage(v.ID, hex.EncodeToString(v.PacketHash), v.ChannelHash, v.SenderName, v.Content, v.SentAt, v.ObservationCount))
 	}
 	var nextCursor *int64
 	if hasMore && len(messages) > 0 {
@@ -664,7 +664,7 @@ func (s *Store) GetObserver(ctx context.Context, observerID uuid.UUID) (*api.Obs
 	return &observer, nil
 }
 
-func toChannelMessage(id int64, packetHashHex string, channelHash []byte, senderName *string, content *string, sentAt pgtype.Timestamptz) api.ChannelMessage {
+func toChannelMessage(id int64, packetHashHex string, channelHash []byte, senderName *string, content *string, sentAt pgtype.Timestamptz, observationCount int64) api.ChannelMessage {
 	sn := ""
 	if senderName != nil {
 		sn = *senderName
@@ -674,12 +674,13 @@ func toChannelMessage(id int64, packetHashHex string, channelHash []byte, sender
 		ct = *content
 	}
 	return api.ChannelMessage{
-		ID:          id,
-		PacketHash:  packetHashHex,
-		ChannelHash: hex.EncodeToString(channelHash),
-		SenderName:  sn,
-		Content:     ct,
-		SentAt:      sentAt.Time.UnixMilli(),
+		ID:               id,
+		PacketHash:       packetHashHex,
+		ChannelHash:      hex.EncodeToString(channelHash),
+		SenderName:       sn,
+		Content:          ct,
+		SentAt:           sentAt.Time.UnixMilli(),
+		ObservationCount: observationCount,
 	}
 }
 

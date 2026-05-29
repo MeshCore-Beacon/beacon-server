@@ -884,7 +884,8 @@ func (q *Queries) InsertObserverTelemetry(ctx context.Context, arg InsertObserve
 }
 
 const listAllChannelMessages = `-- name: ListAllChannelMessages :many
-SELECT DISTINCT ON (cm.id) cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash
+SELECT DISTINCT ON (cm.id) cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash,
+(SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = cm.packet_hash) AS observation_count
 FROM channel_messages cm
 JOIN channels c ON c.id = cm.channel_id
 JOIN packet_observations po ON po.packet_hash = cm.packet_hash
@@ -903,15 +904,16 @@ type ListAllChannelMessagesParams struct {
 }
 
 type ListAllChannelMessagesRow struct {
-	ID            int64              `json:"id"`
-	ChannelID     int32              `json:"channel_id"`
-	PacketHash    []byte             `json:"packet_hash"`
-	SenderName    *string            `json:"sender_name"`
-	SenderPubkey  []byte             `json:"sender_pubkey"`
-	Content       *string            `json:"content"`
-	SentAt        pgtype.Timestamptz `json:"sent_at"`
-	PacketHashHex string             `json:"packet_hash_hex"`
-	ChannelHash   []byte             `json:"channel_hash"`
+	ID               int64              `json:"id"`
+	ChannelID        int32              `json:"channel_id"`
+	PacketHash       []byte             `json:"packet_hash"`
+	SenderName       *string            `json:"sender_name"`
+	SenderPubkey     []byte             `json:"sender_pubkey"`
+	Content          *string            `json:"content"`
+	SentAt           pgtype.Timestamptz `json:"sent_at"`
+	PacketHashHex    string             `json:"packet_hash_hex"`
+	ChannelHash      []byte             `json:"channel_hash"`
+	ObservationCount int64              `json:"observation_count"`
 }
 
 // Returns all messages across all channels with optional time, IATA and cursor filters.
@@ -941,6 +943,7 @@ func (q *Queries) ListAllChannelMessages(ctx context.Context, arg ListAllChannel
 			&i.SentAt,
 			&i.PacketHashHex,
 			&i.ChannelHash,
+			&i.ObservationCount,
 		); err != nil {
 			return nil, err
 		}
@@ -953,7 +956,8 @@ func (q *Queries) ListAllChannelMessages(ctx context.Context, arg ListAllChannel
 }
 
 const listChannelMessages = `-- name: ListChannelMessages :many
-SELECT DISTINCT ON (cm.id) cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash
+SELECT DISTINCT ON (cm.id) cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash,
+(SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = cm.packet_hash) AS observation_count
 FROM channel_messages cm
 JOIN channels c ON c.id = cm.channel_id
 JOIN packet_observations po ON po.packet_hash = cm.packet_hash
@@ -974,15 +978,16 @@ type ListChannelMessagesParams struct {
 }
 
 type ListChannelMessagesRow struct {
-	ID            int64              `json:"id"`
-	ChannelID     int32              `json:"channel_id"`
-	PacketHash    []byte             `json:"packet_hash"`
-	SenderName    *string            `json:"sender_name"`
-	SenderPubkey  []byte             `json:"sender_pubkey"`
-	Content       *string            `json:"content"`
-	SentAt        pgtype.Timestamptz `json:"sent_at"`
-	PacketHashHex string             `json:"packet_hash_hex"`
-	ChannelHash   []byte             `json:"channel_hash"`
+	ID               int64              `json:"id"`
+	ChannelID        int32              `json:"channel_id"`
+	PacketHash       []byte             `json:"packet_hash"`
+	SenderName       *string            `json:"sender_name"`
+	SenderPubkey     []byte             `json:"sender_pubkey"`
+	Content          *string            `json:"content"`
+	SentAt           pgtype.Timestamptz `json:"sent_at"`
+	PacketHashHex    string             `json:"packet_hash_hex"`
+	ChannelHash      []byte             `json:"channel_hash"`
+	ObservationCount int64              `json:"observation_count"`
 }
 
 // Returns messages for a channel identified by integer ID.
@@ -1014,6 +1019,7 @@ func (q *Queries) ListChannelMessages(ctx context.Context, arg ListChannelMessag
 			&i.SentAt,
 			&i.PacketHashHex,
 			&i.ChannelHash,
+			&i.ObservationCount,
 		); err != nil {
 			return nil, err
 		}
@@ -1026,7 +1032,9 @@ func (q *Queries) ListChannelMessages(ctx context.Context, arg ListChannelMessag
 }
 
 const listChannelMessagesByHash = `-- name: ListChannelMessagesByHash :many
-SELECT DISTINCT ON (cm.id) cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at, c.channel_hash FROM channel_messages cm
+SELECT DISTINCT ON (cm.id) cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at, c.channel_hash,
+  (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = cm.packet_hash) AS observation_count
+FROM channel_messages cm
 JOIN channels c ON c.id = cm.channel_id
 JOIN packet_observations po ON po.packet_hash = cm.packet_hash
 WHERE c.channel_hash = $1
@@ -1046,14 +1054,15 @@ type ListChannelMessagesByHashParams struct {
 }
 
 type ListChannelMessagesByHashRow struct {
-	ID           int64              `json:"id"`
-	ChannelID    int32              `json:"channel_id"`
-	PacketHash   []byte             `json:"packet_hash"`
-	SenderName   *string            `json:"sender_name"`
-	SenderPubkey []byte             `json:"sender_pubkey"`
-	Content      *string            `json:"content"`
-	SentAt       pgtype.Timestamptz `json:"sent_at"`
-	ChannelHash  []byte             `json:"channel_hash"`
+	ID               int64              `json:"id"`
+	ChannelID        int32              `json:"channel_id"`
+	PacketHash       []byte             `json:"packet_hash"`
+	SenderName       *string            `json:"sender_name"`
+	SenderPubkey     []byte             `json:"sender_pubkey"`
+	Content          *string            `json:"content"`
+	SentAt           pgtype.Timestamptz `json:"sent_at"`
+	ChannelHash      []byte             `json:"channel_hash"`
+	ObservationCount int64              `json:"observation_count"`
 }
 
 // Returns messages for all channels matching a hash byte.
@@ -1084,6 +1093,7 @@ func (q *Queries) ListChannelMessagesByHash(ctx context.Context, arg ListChannel
 			&i.Content,
 			&i.SentAt,
 			&i.ChannelHash,
+			&i.ObservationCount,
 		); err != nil {
 			return nil, err
 		}

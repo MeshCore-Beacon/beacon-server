@@ -248,12 +248,13 @@ type Observer struct {
 // ChannelMessage represents a single decrypted channel message.
 // Only messages for channels with a known key are stored and returned.
 type ChannelMessage struct {
-	ID          int64  `json:"id"`
-	PacketHash  string `json:"packetHash"`  // hex-encoded packet hash for correlation with packet events
-	ChannelHash string `json:"channelHash"` // hex-encoded single-byte channel hash
-	SenderName  string `json:"senderName"`  // display name from the decrypted payload
-	Content     string `json:"content"`     // decrypted message text
-	SentAt      int64  `json:"sentAt"`      // epoch ms
+	ID               int64  `json:"id"`
+	PacketHash       string `json:"packetHash"`       // hex-encoded packet hash for correlation with packet events
+	ChannelHash      string `json:"channelHash"`      // hex-encoded single-byte channel hash
+	SenderName       string `json:"senderName"`       // display name from the decrypted payload
+	Content          string `json:"content"`          // decrypted message text
+	SentAt           int64  `json:"sentAt"`           // epoch ms
+	ObservationCount int64  `json:"observationCount"` // the number of observations for this message packet hash
 }
 
 // ChannelSummary is the minimal channel representation used in list responses.
