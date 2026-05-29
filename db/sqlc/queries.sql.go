@@ -257,6 +257,30 @@ func (q *Queries) GetNodeByPubkey(ctx context.Context, publicKey []byte) (Node, 
 	return i, err
 }
 
+const getNodeIATAs = `-- name: GetNodeIATAs :many
+SELECT iata FROM node_iatas WHERE node_id = $1 ORDER BY iata ASC
+`
+
+func (q *Queries) GetNodeIATAs(ctx context.Context, nodeID uuid.UUID) ([]string, error) {
+	rows, err := q.db.Query(ctx, getNodeIATAs, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var iata string
+		if err := rows.Scan(&iata); err != nil {
+			return nil, err
+		}
+		items = append(items, iata)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getObserverBrokers = `-- name: GetObserverBrokers :many
 SELECT broker_name, last_seen, last_packet_at
 FROM observer_brokers
@@ -1256,7 +1280,8 @@ func (q *Queries) ListNodeObservations(ctx context.Context, arg ListNodeObservat
 }
 
 const listNodes = `-- name: ListNodes :many
-SELECT DISTINCT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen
+SELECT DISTINCT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen,
+  array_remove(array_agg(DISTINCT ni.iata ORDER BY ni.iata), NULL)::text[] AS iatas
 FROM nodes n
 LEFT JOIN node_iatas ni ON ni.node_id = n.id
 WHERE
@@ -1291,6 +1316,7 @@ type ListNodesRow struct {
 	Latitude  *float64           `json:"latitude"`
 	Longitude *float64           `json:"longitude"`
 	LastSeen  pgtype.Timestamptz `json:"last_seen"`
+	Iatas     []string           `json:"iatas"`
 }
 
 func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNodesRow, error) {
@@ -1319,6 +1345,7 @@ func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNod
 			&i.Latitude,
 			&i.Longitude,
 			&i.LastSeen,
+			&i.Iatas,
 		); err != nil {
 			return nil, err
 		}

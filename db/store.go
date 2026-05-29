@@ -838,6 +838,7 @@ func (s *Store) ListNodes(ctx context.Context, nodeType int16, iata string, supp
 			Name:         v.Name,
 			Latitude:     v.Latitude,
 			Longitude:    v.Longitude,
+			IATAs:        v.Iatas,
 		})
 	}
 	var nextCursor *int64
@@ -859,6 +860,10 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 	if err != nil {
 		return nil, err
 	}
+	iatas, err := s.q.GetNodeIATAs(ctx, nodeID)
+	if err != nil {
+		return nil, err
+	}
 	node := &api.Node{
 		NodeSummary: api.NodeSummary{
 			ID:           row.ID,
@@ -868,6 +873,7 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 			Name:         row.Name,
 			Latitude:     row.Latitude,
 			Longitude:    row.Longitude,
+			IATAs:        iatas,
 		},
 		LocationSource:          row.LocationSource,
 		SupportsMultibytePaths:  row.SupportsMultibytePaths,

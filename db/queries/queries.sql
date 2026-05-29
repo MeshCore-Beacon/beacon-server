@@ -313,7 +313,8 @@ SELECT * FROM nodes WHERE public_key = $1;
 SELECT * FROM nodes WHERE id = $1;
 
 -- name: ListNodes :many
-SELECT DISTINCT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen
+SELECT DISTINCT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen,
+  array_remove(array_agg(DISTINCT ni.iata ORDER BY ni.iata), NULL)::text[] AS iatas
 FROM nodes n
 LEFT JOIN node_iatas ni ON ni.node_id = n.id
 WHERE
@@ -327,6 +328,9 @@ WHERE
 GROUP BY n.id
 ORDER BY n.last_seen DESC
 LIMIT $8;
+
+-- name: GetNodeIATAs :many
+SELECT iata FROM node_iatas WHERE node_id = $1 ORDER BY iata ASC;
 
 -- name: ListNodeObservations :many
 SELECT po.id, encode(po.packet_hash, 'hex') AS packet_hash_hex,

@@ -188,6 +188,7 @@ type NodeSummary struct {
 	Name         *string   `json:"name,omitempty"`
 	Latitude     *float64  `json:"lat,omitempty"`
 	Longitude    *float64  `json:"lng,omitempty"`
+	IATAs        []string  `json:"iatas"`
 }
 
 // Node is the full node representation including firmware capability flags,
