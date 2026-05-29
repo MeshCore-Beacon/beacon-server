@@ -390,6 +390,7 @@ For paginated responses use the generic page wrapper:
 
 ### Future
 
+- [ ] Parse decryptable payloads into DB and return with packet details
 - [ ] Redis caching for stats endpoints
 - [ ] Admin authentication middleware
 - [ ] Channel key rotation / multi-key support (scaffolded)
