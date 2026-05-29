@@ -15,10 +15,12 @@ in PostgreSQL, and streams live events to WebSocket clients.
 - Decrypts group text messages for known channel keys
 - Detects firmware capability flags from path hash sizes
 - Streams live events to WebSocket clients with subscription filtering by IATA,
-  payload type, and event type
+  region, payload type, and event type
 - Serves a REST API for querying stored data
 - Seeds regions, IATA display names, and channel keys from a YAML config file on
   startup
+
+For deployment instructions including the frontend app, see the deployment docs.
 
 ---
 
@@ -131,12 +133,15 @@ Tower will:
 ### Config file (`config.yaml`)
 
 ```yaml
+# Optional IATA overrides — auto-created on first packet arrival,
+# only needed if you want to customise display name or coordinates.
 iatas:
   YVR:
     name: Vancouver International
     lat: 49.1967
     lng: -123.1815
 
+# Super-regions grouping multiple IATAs.
 regions:
   - slug: western-canada
     name: Western Canada
@@ -146,6 +151,7 @@ regions:
     zoom_level: 5
     iatas: [YVR, YYJ, YYC, YEG]
 
+# Channel keys for decrypting group messages.
 channel_keys:
   # Hashtag channels: Tower derives the PSK from the tag name automatically.
   # secret = SHA256("#tag")[:16], channel_hash = SHA256(secret)[0]
@@ -154,6 +160,7 @@ channel_keys:
     - meshcore
 
   # Explicit keys: channel hash (hex) and key (hex), with optional display name.
+  # The public MeshCore channel key is included in config.yaml.example.
   keys:
     "11":
       key: "8b3387e9c5cdea6ac9e5edbaa115cd72"
@@ -161,23 +168,21 @@ channel_keys:
 
 # Observer telemetry storage settings.
 telemetry:
-  retention: 672h # how long to keep telemetry snapshots (default: 4 weeks)
-  resolution: 1h # snapshot frequency per observer; duplicates within window are dropped (default: 1h)
+  retention: 672h  # how long to keep telemetry snapshots (default: 4 weeks)
+  resolution: 1h   # snapshot frequency per observer; duplicates within window are dropped (default: 1h)
 
 # Packet and observation retention.
 packets:
-  retention: 720h # how long to keep packets and observations (default: 30 days)
+  retention: 720h  # how long to keep packets and observations (default: 30 days)
+
 # WebSocket settings.
 websocket:
-  max_connections_per_ip: 5 # default: 5
+  max_connections_per_ip: 5  # default: 5
 ```
 
 IATAs are auto-created on first packet arrival. The config file adds display
 names and coordinates. Regions and channel keys must be defined here — they are
 not auto-created.
-
-The public MeshCore channel (hash `0x11`) key is included in
-`config.yaml.example` and should be copied to your `config.yaml`.
 
 ---
 
@@ -185,15 +190,20 @@ The public MeshCore channel (hash `0x11`) key is included in
 
 Connect to `ws://host:8080/ws`.
 
-On connect the server sends a hello message:
+On connect the server sends a `hello`:
 
 ```json
 { "v": 1, "type": "hello", "serverTime": 1234567890000, "connectionId": "uuid" }
 ```
 
+The connection closes after 90 seconds of inactivity. Clients should send a
+`ping` every 30 seconds.
+
 ### Client → Server messages
 
-- **Subscribe**
+**Subscribe** — add a filter to this connection. Multiple subscriptions are
+unioned (OR semantics): an event matches if it satisfies any active subscription.
+The server replies with a `subscriptionId` to use for unsubscribing.
 
 ```json
 {
@@ -202,24 +212,30 @@ On connect the server sends a hello message:
   "id": "sub-1",
   "scope": {
     "iatas": ["YOW", "YYZ"],
+    "regionIds": ["1"],
     "payloadTypes": [4, 5],
-    "events": ["packetObservation"]
+    "channelHashes": ["11"],
+    "events": ["packetObservation", "channelMessage"]
   }
 }
 ```
 
-- **Unsubscribe**
+All scope fields are optional. Omitted means no filter on that dimension (match
+everything). Empty array means match nothing on that dimension. `regionIds` are
+expanded to their member IATAs server-side.
+
+**Unsubscribe** — remove a specific subscription by ID.
 
 ```json
 {
   "v": 1,
   "type": "unsubscribe",
   "id": "unsub-1",
-  "subscriptionId": "<subscription-uuid>"
+  "subscriptionId": "<uuid from subscribed reply>"
 }
 ```
 
-- **Ping** (send every 30s; connection closes after 90s idle)
+**Ping**
 
 ```json
 { "v": 1, "type": "ping", "id": "ping-1" }
@@ -227,18 +243,49 @@ On connect the server sends a hello message:
 
 ### Server → Client events
 
-| Type                | Description                   |
-| ------------------- | ----------------------------- |
-| `packetObservation` | New observation written to DB |
-| `observerStatus`    | Observer status update        |
-| `nodeUpdate`        | Node upserted from advert     |
-| `channelMessage`    | Decrypted channel message     |
+| Type                | Description                                        |
+| ------------------- | -------------------------------------------------- |
+| `packetObservation` | New observation written to DB                      |
+| `observerStatus`    | Observer status update                             |
+| `nodeUpdate`        | Node upserted from advert                          |
+| `channelMessage`    | Decrypted channel message (scope must include hash) |
+
+### Backpressure
+
+The server write buffer per connection is bounded at 256 events. If a client
+falls behind, the server drops the oldest queued events and sends a `lagged`
+notice:
+
+```json
+{ "v": 1, "type": "lagged", "droppedCount": 12, "since": 1234567890000 }
+```
+
+Clients should respond by re-fetching the relevant REST endpoint using `afterId`
+to backfill missed events, then resume streaming.
+
+### Reconnection
+
+Subscriptions are not persisted — they exist only for the lifetime of the
+connection. On any disconnect the client should reconnect with backoff, re-issue
+all subscriptions, and backfill via REST using `afterId=<last seen observation id>`.
+
+### Connection limits
+
+By default a maximum of 5 concurrent WebSocket connections are allowed per IP
+address. Connections beyond this limit receive `HTTP 429`. The limit is
+configurable via `websocket.max_connections_per_ip` in `config.yaml`.
 
 ---
 
 ## REST API
 
 Base path: `/api/v1`
+
+All list endpoints support `afterId` for cursor-based pagination:
+
+```
+GET /api/v1/packets?iata=YOW&afterId=12345&limit=100
+```
 
 ### Implemented
 
@@ -255,13 +302,13 @@ Base path: `/api/v1`
 | `GET`  | `/messages`                         | List all messages (optional: `?channelId=<int>&channelHash=<hex>&iata=<code>&since=<ms>&limit=50`) |
 | `GET`  | `/observers`                        | List observers (optional: `?iata=<code>&type=<str>&broker=<name>&status=online\|offline`)          |
 | `GET`  | `/observers/{observerId}`           | Get observer detail including broker last-seen timestamps                                          |
+| `GET`  | `/observers/{observerId}/telemetry` | Observer telemetry history                                                                         |
+| `GET`  | `/observers/{observerId}/adverts`   | Adverts heard by observer                                                                          |
 | `GET`  | `/packets`                          | List packets with filters                                                                          |
 | `GET`  | `/packets/{packetHash}`             | Get packet with all observations                                                                   |
 | `GET`  | `/nodes`                            | List nodes                                                                                         |
 | `GET`  | `/nodes/{nodeId}`                   | Get node detail                                                                                    |
 | `GET`  | `/nodes/{nodeId}/observations`      | List observations for a node                                                                       |
-| `GET`  | `/observers/{observerId}/telemetry` | Observer telemetry history                                                                         |
-| `GET`  | `/observers/{observerId}/adverts`   | Adverts heard by observer                                                                          |
 | `GET`  | `/stats/overview`                   | Network overview stats                                                                             |
 | `GET`  | `/stats/observations`               | Hourly observation time series (last 7 days by default)                                            |
 | `GET`  | `/stats/payload-breakdown`          | Observation counts by payload type (last 24h by default)                                           |
@@ -280,47 +327,25 @@ Edit `db/queries/queries.sql`, then regenerate:
 sqlc generate
 ```
 
-### Running with Docker
-
-```bash
-docker compose up
-```
-
-This starts PostgreSQL, Redis (reserved for future caching), and the MeshCore
-Tower server.
-
----
-
-## API Documentation (Swagger)
+### API documentation (Swagger)
 
 Tower uses [swaggo/swag](https://github.com/swaggo/swag) to generate OpenAPI
 documentation from annotations in the handler comments.
 
-### Viewing the docs
+Start the server and open `http://localhost:8080/swagger/index.html`.
 
-Start the server and open:
-
-```
-http://localhost:8080/swagger/index.html
-```
-
-### Regenerating after API changes
-
-After adding or modifying any handler, regenerate the docs:
+After adding or modifying any handler, regenerate the docs and commit the
+updated `docs/` directory alongside your handler changes:
 
 ```bash
 swag init -g cmd/tower/main.go -o docs
 ```
 
-Commit the updated `docs/` directory alongside your handler changes.
-
-### Install swag
+Install swag:
 
 ```bash
 go install github.com/swaggo/swag/cmd/swag@latest
 ```
-
-### Annotation format
 
 Each handler closure should have a godoc-style annotation block immediately
 above the `r.Get()`/`r.Post()` call:
@@ -339,10 +364,6 @@ above the `r.Get()`/`r.Post()` call:
 //	@Router		/things [get]
 r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 ```
-
-**Param types:** `query`, `path`, `header`, `body`  
-**Required:** use `true` or `false` as the fifth field  
-**Pagination params** (`cursor`, `limit`) should always be `false`
 
 For paginated responses use the generic page wrapper:
 
@@ -363,7 +384,9 @@ For paginated responses use the generic page wrapper:
 - [x] Channel message storage with key-based decryption
 - [x] Firmware capability detection scaffolding
 - [x] Hub-based WebSocket fan-out with subscription filtering
-- [x] WebSocket server (hello, subscribe, ping/pong, events)
+- [x] WebSocket server (hello, subscribe, unsubscribe, ping/pong, lagged, events)
+- [x] WebSocket regionId expansion via region_iatas DB lookup
+- [x] WebSocket per-IP connection limits
 - [x] Config file loading (regions, IATA overrides, channel keys)
 - [x] Observer radio settings on observations
 - [x] DB seeding on startup
@@ -374,8 +397,7 @@ For paginated responses use the generic page wrapper:
 - [x] REST API: IATAs, Regions
 - [x] REST API: Channels (list + detail + messages) with IATA filter
 - [x] REST API: Messages (cross-channel) with IATA filter
-- [x] REST API: Observers (heard adverts, telemetry, list + detail with broker
-      last-seen)
+- [x] REST API: Observers (heard adverts, telemetry, list + detail with broker last-seen)
 - [x] REST API: Brokers (list with connection status)
 - [x] REST API: Pagination
 - [x] REST API: Nodes (list + detail + observations)
@@ -383,7 +405,6 @@ For paginated responses use the generic page wrapper:
 - [x] REST API: Stats
 - [x] Materialized view refresh (mv_hourly_iata_stats, mv_top_nodes_by_iata)
 - [x] Swagger/OpenAPI documentation via swaggo/swag
-- [x] WebSocket subscription unsubscribe (scaffolded, not implemented)
 
 ### In progress / next
 
@@ -396,7 +417,7 @@ For paginated responses use the generic page wrapper:
 - [ ] Parse decryptable payloads into DB and return with packet details
 - [ ] Redis caching for stats endpoints
 - [ ] Admin authentication middleware
-- [ ] Channel key rotation / multi-key support (scaffolded)
+- [ ] Channel key persistence to DB
 - [ ] Caddy reverse proxy config for production
 - [ ] Region management via API (currently config-file only)
 - [ ] Observer owner tracking (schema exists, API excluded by design)
