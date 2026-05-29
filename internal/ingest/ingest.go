@@ -69,8 +69,8 @@ type DB interface {
 	// UpsertIATA auto-creates an iata_codes row if it doesn't exist yet.
 	UpsertIATA(ctx context.Context, iata string) error
 
-	// UpsertPacket inserts or bumps the packets row. Returns (isNew, error).
-	UpsertPacket(ctx context.Context, p UpsertPacketParams) (bool, error)
+	// UpsertPacket inserts or bumps the packets row. Returns (isNew, observationCount, error).
+	UpsertPacket(ctx context.Context, p UpsertPacketParams) (bool, int64, error)
 
 	// InsertObservation inserts a packet_observations row.
 	// Returns (inserted, error); inserted=false means ON CONFLICT DO NOTHING fired.
@@ -237,6 +237,7 @@ type packetObservationEvent struct {
 		PayloadTypeName    string `json:"payloadTypeName"`
 		RouteType          uint8  `json:"routeType"`
 		IsFirstObservation bool   `json:"isFirstObservation"`
+		ObservationCount   int64  `json:"observationCount"`
 	} `json:"packet"`
 	Observation struct {
 		ObserverID   string  `json:"observerId"`
@@ -456,7 +457,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		OriginPubkey:   originPubkey,
 		ChannelHash:    channelHash,
 	}
-	isNew, err := w.db.UpsertPacket(ctx, pParams)
+	isNew, observationCount, err := w.db.UpsertPacket(ctx, pParams)
 	if err != nil {
 		log.Printf("ingest[%s]: db: upsert packet failed from %s/%s: %v", w.cfg.BrokerName, iata, pubkeyHex, err)
 		return
@@ -512,6 +513,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		evt.Packet.PayloadTypeName = packet.PayloadTypeString()
 		evt.Packet.RouteType = packet.RouteType()
 		evt.Packet.IsFirstObservation = isNew
+		evt.Packet.ObservationCount = observationCount
 		evt.Observation.ObserverID = id.String()
 		evt.Observation.ObserverName = observerName
 		evt.Observation.IATA = iata

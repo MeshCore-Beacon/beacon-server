@@ -57,7 +57,7 @@ func (s *Store) UpsertIATA(ctx context.Context, iata string) error {
 }
 
 // UpsertPacket inserts or bumps the packets row. Returns (isNew, error).
-func (s *Store) UpsertPacket(ctx context.Context, p ingest.UpsertPacketParams) (bool, error) {
+func (s *Store) UpsertPacket(ctx context.Context, p ingest.UpsertPacketParams) (bool, int64, error) {
 	var regionCode, subRegionCode *int32
 	hasTransportCodes := len(p.TransportCodes) == 4
 	if hasTransportCodes {
@@ -81,9 +81,9 @@ func (s *Store) UpsertPacket(ctx context.Context, p ingest.UpsertPacketParams) (
 	}
 	row, err := s.q.UpsertPacket(ctx, params)
 	if err != nil {
-		return false, err
+		return false, 0, err
 	}
-	return row.Inserted, nil
+	return row.Inserted, int64(*row.ObservationCount), nil
 }
 
 // InsertObservation inserts a packet_observations row.
