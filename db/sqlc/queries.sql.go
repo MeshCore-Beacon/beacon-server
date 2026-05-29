@@ -1204,8 +1204,8 @@ FROM packet_observations po
 JOIN packets p ON p.packet_hash = po.packet_hash
 JOIN nodes n ON n.public_key = p.origin_pubkey
 WHERE n.id = $1
-  AND ($2 = 0 OR po.id > $2)
-ORDER BY po.id ASC
+  AND ($2 = 0 OR po.id < $2)
+ORDER BY po.id DESC
 LIMIT $3
 `
 
