@@ -100,7 +100,7 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 				respondError(w, http.StatusBadRequest, "invalid supportsMultibyteTraces value")
 				return
 			}
-			supportsMultibytePaths = &b
+			supportsMultibyteTraces = &b
 		}
 		nodes, err := reader.ListNodes(r.Context(), nodeType, iata, supportsMultibytePaths, supportsMultibyteTraces, pubkey, name, cursor, limit)
 		if err != nil {
