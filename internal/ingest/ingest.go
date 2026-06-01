@@ -69,8 +69,8 @@ type DB interface {
 	// UpsertIATA auto-creates an iata_codes row if it doesn't exist yet.
 	UpsertIATA(ctx context.Context, iata string) error
 
-	// UpsertPacket inserts or bumps the packets row. Returns (isNew, observationCount, error).
-	UpsertPacket(ctx context.Context, p UpsertPacketParams) (bool, int64, error)
+	// UpsertPacket inserts or bumps the packets row. Returns (isNew, error).
+	UpsertPacket(ctx context.Context, p UpsertPacketParams) (bool, error)
 
 	// InsertObservation inserts a packet_observations row.
 	// Returns (inserted, error); inserted=false means ON CONFLICT DO NOTHING fired.
@@ -115,6 +115,8 @@ type DB interface {
 	// hash-only row exists per channel hash. The return value is the channel ID
 	// but can be safely ignored since unknown-key channels have no messages.
 	UpsertChannelHashOnly(ctx context.Context, channelHash []byte) (int, error)
+	// GetPacketObservationCount returns the number of rows for the packet observations
+	GetPacketObservationCount(ctx context.Context, packetHash []byte) (int64, error)
 }
 
 // UpsertPacketParams mirrors the columns written on packets upsert.
@@ -462,7 +464,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		OriginPubkey:   originPubkey,
 		ChannelHash:    channelHash,
 	}
-	isNew, observationCount, err := w.db.UpsertPacket(ctx, pParams)
+	isNew, err := w.db.UpsertPacket(ctx, pParams)
 	if err != nil {
 		log.Printf("ingest[%s]: db: upsert packet failed from %s/%s: %v", w.cfg.BrokerName, iata, pubkeyHex, err)
 		return
@@ -518,7 +520,6 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		evt.Packet.PayloadTypeName = packet.PayloadTypeString()
 		evt.Packet.RouteType = packet.RouteType()
 		evt.Packet.IsFirstObservation = isNew
-		evt.Packet.ObservationCount = observationCount
 		evt.Observation.ObserverID = id.String()
 		evt.Observation.ObserverName = observerName
 		evt.Observation.IATA = iata
@@ -526,6 +527,12 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		evt.Observation.RSSI = oParams.RSSI
 		evt.Observation.SNR = oParams.SNR
 		evt.Observation.SourceBroker = w.cfg.BrokerName
+		count, err := w.db.GetPacketObservationCount(ctx, packetHash[:])
+		if err != nil {
+			log.Printf("ingest[%s]: failed to get observation count: %v", w.cfg.BrokerName, err)
+			count = 0
+		}
+		evt.Packet.ObservationCount = count
 		w.broadcast(hub.EventPacketObservation, iata, packet.PayloadType(), "", evt)
 	}
 }

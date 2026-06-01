@@ -208,8 +208,7 @@ CREATE TABLE packets (
   decrypted               BOOLEAN DEFAULT FALSE,
   channel_hash            BYTEA,
   first_heard_at          TIMESTAMPTZ NOT NULL,
-  last_heard_at           TIMESTAMPTZ NOT NULL,
-  observation_count       INT DEFAULT 0
+  last_heard_at           TIMESTAMPTZ NOT NULL
 );
 
 CREATE INDEX idx_packets_first_heard_brin ON packets USING BRIN (first_heard_at);

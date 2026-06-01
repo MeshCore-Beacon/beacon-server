@@ -485,7 +485,7 @@ func (q *Queries) GetObserverTelemetry(ctx context.Context, arg GetObserverTelem
 }
 
 const getPacketByHash = `-- name: GetPacketByHash :one
-SELECT packet_hash, payload_type, payload_version, route_type, transport_codes_present, region_code, sub_region_code, origin_pubkey, raw_payload, raw_header, parsed_payload, decrypted, channel_hash, first_heard_at, last_heard_at, observation_count FROM packets WHERE packet_hash = $1
+SELECT packet_hash, payload_type, payload_version, route_type, transport_codes_present, region_code, sub_region_code, origin_pubkey, raw_payload, raw_header, parsed_payload, decrypted, channel_hash, first_heard_at, last_heard_at FROM packets WHERE packet_hash = $1
 `
 
 func (q *Queries) GetPacketByHash(ctx context.Context, packetHash []byte) (Packet, error) {
@@ -507,9 +507,19 @@ func (q *Queries) GetPacketByHash(ctx context.Context, packetHash []byte) (Packe
 		&i.ChannelHash,
 		&i.FirstHeardAt,
 		&i.LastHeardAt,
-		&i.ObservationCount,
 	)
 	return i, err
+}
+
+const getPacketObservationCount = `-- name: GetPacketObservationCount :one
+SELECT COUNT(*) FROM packet_observations WHERE packet_hash = $1
+`
+
+func (q *Queries) GetPacketObservationCount(ctx context.Context, packetHash []byte) (int64, error) {
+	row := q.db.QueryRow(ctx, getPacketObservationCount, packetHash)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const getRegion = `-- name: GetRegion :one
@@ -1653,7 +1663,7 @@ SELECT
   p.route_type,
   p.first_heard_at,
   p.last_heard_at,
-  p.observation_count,
+  (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = p.packet_hash) AS observation_count,
   po.observer_id AS latest_observer_id,
   o.display_name AS latest_observer_name,
   po.iata AS latest_observer_iata
@@ -1693,7 +1703,7 @@ type ListPacketsRow struct {
 	RouteType          int16              `json:"route_type"`
 	FirstHeardAt       pgtype.Timestamptz `json:"first_heard_at"`
 	LastHeardAt        pgtype.Timestamptz `json:"last_heard_at"`
-	ObservationCount   *int32             `json:"observation_count"`
+	ObservationCount   int64              `json:"observation_count"`
 	LatestObserverID   uuid.UUID          `json:"latest_observer_id"`
 	LatestObserverName *string            `json:"latest_observer_name"`
 	LatestObserverIata string             `json:"latest_observer_iata"`
@@ -1740,7 +1750,7 @@ func (q *Queries) ListPackets(ctx context.Context, arg ListPacketsParams) ([]Lis
 }
 
 const listPacketsAfterID = `-- name: ListPacketsAfterID :many
-SELECT p.packet_hash, p.payload_type, p.payload_version, p.route_type, p.transport_codes_present, p.region_code, p.sub_region_code, p.origin_pubkey, p.raw_payload, p.raw_header, p.parsed_payload, p.decrypted, p.channel_hash, p.first_heard_at, p.last_heard_at, p.observation_count
+SELECT p.packet_hash, p.payload_type, p.payload_version, p.route_type, p.transport_codes_present, p.region_code, p.sub_region_code, p.origin_pubkey, p.raw_payload, p.raw_header, p.parsed_payload, p.decrypted, p.channel_hash, p.first_heard_at, p.last_heard_at
 FROM packets p
 JOIN packet_observations po ON po.packet_hash = p.packet_hash
 WHERE po.id > $1
@@ -1778,7 +1788,6 @@ func (q *Queries) ListPacketsAfterID(ctx context.Context, arg ListPacketsAfterID
 			&i.ChannelHash,
 			&i.FirstHeardAt,
 			&i.LastHeardAt,
-			&i.ObservationCount,
 		); err != nil {
 			return nil, err
 		}
@@ -2260,15 +2269,13 @@ INSERT INTO packets (
   parsed_payload,
   channel_hash,
   first_heard_at,
-  last_heard_at,
-  observation_count
+  last_heard_at
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW(), 1
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW()
 )
 ON CONFLICT (packet_hash) DO UPDATE SET
-  last_heard_at     = NOW(),
-  observation_count = packets.observation_count + 1
-RETURNING packet_hash, payload_type, payload_version, route_type, transport_codes_present, region_code, sub_region_code, origin_pubkey, raw_payload, raw_header, parsed_payload, decrypted, channel_hash, first_heard_at, last_heard_at, observation_count, (xmax = 0)
+  last_heard_at     = NOW()
+RETURNING packet_hash, payload_type, payload_version, route_type, transport_codes_present, region_code, sub_region_code, origin_pubkey, raw_payload, raw_header, parsed_payload, decrypted, channel_hash, first_heard_at, last_heard_at, (xmax = 0)
 AS inserted
 `
 
@@ -2303,7 +2310,6 @@ type UpsertPacketRow struct {
 	ChannelHash           []byte             `json:"channel_hash"`
 	FirstHeardAt          pgtype.Timestamptz `json:"first_heard_at"`
 	LastHeardAt           pgtype.Timestamptz `json:"last_heard_at"`
-	ObservationCount      *int32             `json:"observation_count"`
 	Inserted              bool               `json:"inserted"`
 }
 
@@ -2342,7 +2348,6 @@ func (q *Queries) UpsertPacket(ctx context.Context, arg UpsertPacketParams) (Ups
 		&i.ChannelHash,
 		&i.FirstHeardAt,
 		&i.LastHeardAt,
-		&i.ObservationCount,
 		&i.Inserted,
 	)
 	return i, err

@@ -181,19 +181,20 @@ INSERT INTO packets (
   parsed_payload,
   channel_hash,
   first_heard_at,
-  last_heard_at,
-  observation_count
+  last_heard_at
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW(), 1
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW()
 )
 ON CONFLICT (packet_hash) DO UPDATE SET
-  last_heard_at     = NOW(),
-  observation_count = packets.observation_count + 1
-RETURNING packet_hash, payload_type, payload_version, route_type, transport_codes_present, region_code, sub_region_code, origin_pubkey, raw_payload, raw_header, parsed_payload, decrypted, channel_hash, first_heard_at, last_heard_at, observation_count, (xmax = 0)
+  last_heard_at     = NOW()
+RETURNING packet_hash, payload_type, payload_version, route_type, transport_codes_present, region_code, sub_region_code, origin_pubkey, raw_payload, raw_header, parsed_payload, decrypted, channel_hash, first_heard_at, last_heard_at, (xmax = 0)
 AS inserted;
 
 -- name: GetPacketByHash :one
 SELECT * FROM packets WHERE packet_hash = $1;
+
+-- name: GetPacketObservationCount :one
+SELECT COUNT(*) FROM packet_observations WHERE packet_hash = $1;
 
 -- name: ListPackets :many
 -- Returns packets with the latest observation rolled in for display.
@@ -204,7 +205,7 @@ SELECT
   p.route_type,
   p.first_heard_at,
   p.last_heard_at,
-  p.observation_count,
+  (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = p.packet_hash) AS observation_count,
   po.observer_id AS latest_observer_id,
   o.display_name AS latest_observer_name,
   po.iata AS latest_observer_iata

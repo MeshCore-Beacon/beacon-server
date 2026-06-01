@@ -57,7 +57,7 @@ func (s *Store) UpsertIATA(ctx context.Context, iata string) error {
 }
 
 // UpsertPacket inserts or bumps the packets row. Returns (isNew, error).
-func (s *Store) UpsertPacket(ctx context.Context, p ingest.UpsertPacketParams) (bool, int64, error) {
+func (s *Store) UpsertPacket(ctx context.Context, p ingest.UpsertPacketParams) (bool, error) {
 	var regionCode, subRegionCode *int32
 	hasTransportCodes := len(p.TransportCodes) == 4
 	if hasTransportCodes {
@@ -82,9 +82,9 @@ func (s *Store) UpsertPacket(ctx context.Context, p ingest.UpsertPacketParams) (
 	}
 	row, err := s.q.UpsertPacket(ctx, params)
 	if err != nil {
-		return false, 0, err
+		return false, err
 	}
-	return row.Inserted, int64(*row.ObservationCount), nil
+	return row.Inserted, nil
 }
 
 // InsertObservation inserts a packet_observations row.
@@ -969,7 +969,7 @@ func (s *Store) ListPackets(ctx context.Context, payloadType, routeType int16, i
 			RouteTypeName:    api.RouteTypeName(v.RouteType),
 			FirstHeardAt:     v.FirstHeardAt.Time.UnixMilli(),
 			LastHeardAt:      v.LastHeardAt.Time.UnixMilli(),
-			ObservationCount: *v.ObservationCount,
+			ObservationCount: int32(v.ObservationCount),
 		}
 		if v.LatestObserverID != (uuid.UUID{}) {
 			item.LatestObserver = &api.PacketLatestObserver{
@@ -1002,22 +1002,20 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 		return nil, err
 	}
 	p := &api.Packet{
-		PacketHash:      hex.EncodeToString(row.PacketHash),
-		PayloadType:     row.PayloadType,
-		PayloadTypeName: api.PayloadTypeName(row.PayloadType),
-		PayloadVersion:  row.PayloadVersion,
-		RouteType:       row.RouteType,
-		RouteTypeName:   api.RouteTypeName(row.RouteType),
-		RawHeader:       hex.EncodeToString(row.RawHeader),
-		RawPayload:      hex.EncodeToString(row.RawPayload),
-		ParsedPayload:   row.ParsedPayload,
-		Decrypted:       row.Decrypted != nil && *row.Decrypted,
-		FirstHeardAt:    row.FirstHeardAt.Time.UnixMilli(),
-		LastHeardAt:     row.LastHeardAt.Time.UnixMilli(),
-		Observations:    make([]api.PacketObservationDetail, 0, len(obsRows)),
-	}
-	if row.ObservationCount != nil {
-		p.ObservationCount = *row.ObservationCount
+		PacketHash:       hex.EncodeToString(row.PacketHash),
+		PayloadType:      row.PayloadType,
+		PayloadTypeName:  api.PayloadTypeName(row.PayloadType),
+		PayloadVersion:   row.PayloadVersion,
+		RouteType:        row.RouteType,
+		RouteTypeName:    api.RouteTypeName(row.RouteType),
+		RawHeader:        hex.EncodeToString(row.RawHeader),
+		RawPayload:       hex.EncodeToString(row.RawPayload),
+		ParsedPayload:    row.ParsedPayload,
+		Decrypted:        row.Decrypted != nil && *row.Decrypted,
+		FirstHeardAt:     row.FirstHeardAt.Time.UnixMilli(),
+		LastHeardAt:      row.LastHeardAt.Time.UnixMilli(),
+		Observations:     make([]api.PacketObservationDetail, 0, len(obsRows)),
+		ObservationCount: int32(len(obsRows)),
 	}
 	if row.OriginPubkey != nil {
 		s := hex.EncodeToString(row.OriginPubkey)
@@ -1063,6 +1061,10 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 		p.Observations = append(p.Observations, obs)
 	}
 	return p, nil
+}
+
+func (s *Store) GetPacketObservationCount(ctx context.Context, packetHash []byte) (int64, error) {
+	return s.q.GetPacketObservationCount(ctx, packetHash)
 }
 
 // GetStatsOverview returns top-line network figures for the last 24 hours.

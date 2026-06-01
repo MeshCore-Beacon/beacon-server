@@ -182,7 +182,6 @@ type Packet struct {
 	ChannelHash           []byte             `json:"channel_hash"`
 	FirstHeardAt          pgtype.Timestamptz `json:"first_heard_at"`
 	LastHeardAt           pgtype.Timestamptz `json:"last_heard_at"`
-	ObservationCount      *int32             `json:"observation_count"`
 }
 
 type PacketObservation struct {
