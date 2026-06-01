@@ -80,6 +80,9 @@ type Node struct {
 	MinFirmwareVersion      *string            `json:"min_firmware_version"`
 	FirstSeen               pgtype.Timestamptz `json:"first_seen"`
 	LastSeen                pgtype.Timestamptz `json:"last_seen"`
+	RadioFreqMhz            *float32           `json:"radio_freq_mhz"`
+	RadioSf                 *int16             `json:"radio_sf"`
+	RadioBwKhz              *float32           `json:"radio_bw_khz"`
 	Metadata                []byte             `json:"metadata"`
 }
 

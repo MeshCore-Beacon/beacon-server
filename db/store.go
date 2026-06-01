@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -132,13 +133,18 @@ func (s *Store) SetNodeCapability(ctx context.Context, nodeID uuid.UUID, paths, 
 }
 
 // UpsertNode upserts a nodes row from an advert payload.
-func (s *Store) UpsertNode(ctx context.Context, n ingest.UpsertNodeParams) (uuid.UUID, error) {
+func (s *Store) UpsertNode(ctx context.Context, n ingest.UpsertNodeParams, radio ingest.RadioSettings) (uuid.UUID, error) {
 	params := sqlc.UpsertNodeParams{
 		PublicKey: n.PublicKey,
 		NodeType:  int16(n.NodeType),
 		Name:      &n.Name,
 		Latitude:  n.Latitude,
 		Longitude: n.Longitude,
+	}
+	if radio.FreqMHz != 0 {
+		params.RadioFreqMhz = &radio.FreqMHz
+		params.RadioSf = &radio.SF
+		params.RadioBwKhz = &radio.BWKHz
 	}
 	row, err := s.q.UpsertNode(ctx, params)
 	if err != nil {
@@ -582,6 +588,10 @@ func (s *Store) ListObservers(ctx context.Context, iata, observerType, broker, s
 			IATA:   v.Iata,
 			Status: v.Status,
 		}
+		if v.RadioFreqMhz != nil && v.RadioSf != nil && v.RadioBwKhz != nil {
+			s := fmt.Sprintf("%.1f,%g,%d", *v.RadioFreqMhz, *v.RadioBwKhz, *v.RadioSf)
+			observer.Radio = &s
+		}
 		if v.DisplayName != nil {
 			observer.DisplayName = v.DisplayName
 		}
@@ -831,7 +841,7 @@ func (s *Store) ListNodes(ctx context.Context, nodeType int16, iata string, supp
 	}
 	items := make([]api.NodeSummary, 0, len(rows))
 	for _, v := range rows {
-		items = append(items, api.NodeSummary{
+		node := api.NodeSummary{
 			ID:           v.ID,
 			PublicKey:    hex.EncodeToString(v.PublicKey),
 			NodeType:     v.NodeType,
@@ -842,7 +852,12 @@ func (s *Store) ListNodes(ctx context.Context, nodeType int16, iata string, supp
 			IATAs:        v.Iatas,
 			IsObserver:   v.IsObserver,
 			ObvserverID:  nullableUUID(v.ObserverID),
-		})
+		}
+		if v.RadioFreqMhz != nil && v.RadioSf != nil && v.RadioBwKhz != nil {
+			s := fmt.Sprintf("%.1f,%g,%d", *v.RadioFreqMhz, *v.RadioBwKhz, *v.RadioSf)
+			node.Radio = &s
+		}
+		items = append(items, node)
 	}
 	var nextCursor *int64
 	if hasMore && len(items) > 0 {
@@ -887,6 +902,10 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 		FirstSeen:               row.FirstSeen.Time.UnixMilli(),
 		LastSeen:                row.LastSeen.Time.UnixMilli(),
 		Metadata:                row.Metadata,
+	}
+	if row.RadioFreqMhz != nil && row.RadioSf != nil && row.RadioBwKhz != nil {
+		s := fmt.Sprintf("%.1f,%g,%d", *row.RadioFreqMhz, *row.RadioBwKhz, *row.RadioSf)
+		node.Radio = &s
 	}
 	if row.LastAdvertAt.Valid {
 		ms := row.LastAdvertAt.Time.UnixMilli()

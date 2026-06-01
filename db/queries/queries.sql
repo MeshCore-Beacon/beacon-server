@@ -72,6 +72,9 @@ SELECT
   o.display_name,
   o.observer_type,
   o.last_status_at,
+  o.radio_freq_mhz,
+  o.radio_sf,
+  o.radio_bw_khz,
 COALESCE(CASE
     WHEN o.last_status_at > NOW() - INTERVAL '5 minutes' THEN 'online'
     ELSE 'offline'
@@ -289,8 +292,8 @@ LIMIT $3;
 -- ============================================================
 
 -- name: UpsertNode :one
-INSERT INTO nodes (public_key, node_type, name, latitude, longitude, location_source, last_advert_at, last_seen)
-VALUES ($1, $2, $3, $4, $5, 'advert', NOW(), NOW())
+INSERT INTO nodes (public_key, node_type, name, latitude, longitude, location_source, last_advert_at, last_seen, radio_freq_mhz, radio_sf, radio_bw_khz)
+VALUES ($1, $2, $3, $4, $5, 'advert', NOW(), NOW(), $6, $7, $8)
 ON CONFLICT (public_key) DO UPDATE SET
   node_type       = EXCLUDED.node_type,
   name            = COALESCE(EXCLUDED.name, nodes.name),
@@ -298,7 +301,10 @@ ON CONFLICT (public_key) DO UPDATE SET
   longitude       = COALESCE(EXCLUDED.longitude, nodes.longitude),
   location_source = CASE WHEN EXCLUDED.latitude IS NOT NULL THEN 'advert' ELSE nodes.location_source END,
   last_advert_at  = NOW(),
-  last_seen       = NOW()
+  last_seen       = NOW(),
+  radio_freq_mhz  = EXCLUDED.radio_freq_mhz,
+  radio_sf        = EXCLUDED.radio_sf,
+  radio_bw_khz    = EXCLUDED.radio_bw_khz
 RETURNING *;
 
 -- name: SetNodeMultibytePaths :exec
@@ -326,6 +332,7 @@ WHERE n.id = $1;
 
 -- name: ListNodes :many
 SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen,
+  n.radio_freq_mhz, n.radio_sf, n.radio_bw_khz,
   array_remove(array_agg(DISTINCT ni.iata ORDER BY ni.iata), NULL)::text[] AS iatas,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id

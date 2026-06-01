@@ -64,6 +64,9 @@ CREATE TABLE nodes (
   ) STORED,
   first_seen      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   last_seen       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  radio_freq_mhz  REAL,
+  radio_sf        SMALLINT,
+  radio_bw_khz    REAL,
   metadata        JSONB
 );
 

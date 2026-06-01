@@ -81,7 +81,7 @@ type DB interface {
 	SetNodeCapability(ctx context.Context, nodeID uuid.UUID, paths, traces bool) error
 
 	// UpsertNode upserts a nodes row from an advert payload.
-	UpsertNode(ctx context.Context, n UpsertNodeParams) (uuid.UUID, error)
+	UpsertNode(ctx context.Context, n UpsertNodeParams, r RadioSettings) (uuid.UUID, error)
 
 	// UpsertNodeIATA upserts a node_iatas row.
 	UpsertNodeIATA(ctx context.Context, nodeID uuid.UUID, iata string) error
@@ -513,7 +513,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	}
 	if inserted {
 		w.runCapabilityDetection(ctx, packet.PayloadType(), packet.PathHashSize(), resolvedIDs)
-		w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:])
+		w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio)
 		evt := packetObservationEvent{}
 		evt.PacketHash = hex.EncodeToString(packetHash[:])
 		evt.Packet.PayloadType = packet.PayloadType()
@@ -706,7 +706,7 @@ func (w *Worker) runCapabilityDetection(ctx context.Context, payloadType uint8, 
 // new observation is confirmed inserted. Currently handles:
 //   - PayloadTypeAdvert (0x04): upsert node and node_iatas
 //   - PayloadTypeGrpTxt (0x05): decrypt and store channel message if key is known
-func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshcore.Packet, iata string, packetHash []byte) {
+func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshcore.Packet, iata string, packetHash []byte, radio RadioSettings) {
 	if packet.PayloadType() == meshcore.PayloadTypeAdvert {
 		advert, err := meshcore.AdvertFromBytes(packet.Payload)
 		if err != nil {
@@ -727,7 +727,7 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 			Latitude:  lat,
 			Longitude: lon,
 		}
-		nodeID, err := w.db.UpsertNode(ctx, params)
+		nodeID, err := w.db.UpsertNode(ctx, params, radio)
 		if err != nil {
 			log.Printf("ingest[%s]: db: upsert node failed: %v", w.cfg.BrokerName, err)
 			return

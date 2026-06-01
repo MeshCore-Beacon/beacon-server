@@ -206,7 +206,7 @@ func (q *Queries) GetIATA(ctx context.Context, iata string) (IataCode, error) {
 }
 
 const getNodeByID = `-- name: GetNodeByID :one
-SELECT id, public_key, node_type, name, latitude, longitude, location_source, last_advert_at, supports_multibyte_paths, supports_multibyte_traces, min_firmware_version, first_seen, last_seen, metadata,
+SELECT id, public_key, node_type, name, latitude, longitude, location_source, last_advert_at, supports_multibyte_paths, supports_multibyte_traces, min_firmware_version, first_seen, last_seen, radio_freq_mhz, radio_sf, radio_bw_khz, metadata,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id
 FROM nodes n
@@ -227,6 +227,9 @@ type GetNodeByIDRow struct {
 	MinFirmwareVersion      *string            `json:"min_firmware_version"`
 	FirstSeen               pgtype.Timestamptz `json:"first_seen"`
 	LastSeen                pgtype.Timestamptz `json:"last_seen"`
+	RadioFreqMhz            *float32           `json:"radio_freq_mhz"`
+	RadioSf                 *int16             `json:"radio_sf"`
+	RadioBwKhz              *float32           `json:"radio_bw_khz"`
 	Metadata                []byte             `json:"metadata"`
 	IsObserver              bool               `json:"is_observer"`
 	ObserverID              uuid.UUID          `json:"observer_id"`
@@ -249,6 +252,9 @@ func (q *Queries) GetNodeByID(ctx context.Context, id uuid.UUID) (GetNodeByIDRow
 		&i.MinFirmwareVersion,
 		&i.FirstSeen,
 		&i.LastSeen,
+		&i.RadioFreqMhz,
+		&i.RadioSf,
+		&i.RadioBwKhz,
 		&i.Metadata,
 		&i.IsObserver,
 		&i.ObserverID,
@@ -257,7 +263,7 @@ func (q *Queries) GetNodeByID(ctx context.Context, id uuid.UUID) (GetNodeByIDRow
 }
 
 const getNodeByPubkey = `-- name: GetNodeByPubkey :one
-SELECT id, public_key, node_type, name, latitude, longitude, location_source, last_advert_at, supports_multibyte_paths, supports_multibyte_traces, min_firmware_version, first_seen, last_seen, metadata,
+SELECT id, public_key, node_type, name, latitude, longitude, location_source, last_advert_at, supports_multibyte_paths, supports_multibyte_traces, min_firmware_version, first_seen, last_seen, radio_freq_mhz, radio_sf, radio_bw_khz, metadata,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id
 FROM nodes n
@@ -278,6 +284,9 @@ type GetNodeByPubkeyRow struct {
 	MinFirmwareVersion      *string            `json:"min_firmware_version"`
 	FirstSeen               pgtype.Timestamptz `json:"first_seen"`
 	LastSeen                pgtype.Timestamptz `json:"last_seen"`
+	RadioFreqMhz            *float32           `json:"radio_freq_mhz"`
+	RadioSf                 *int16             `json:"radio_sf"`
+	RadioBwKhz              *float32           `json:"radio_bw_khz"`
 	Metadata                []byte             `json:"metadata"`
 	IsObserver              bool               `json:"is_observer"`
 	ObserverID              uuid.UUID          `json:"observer_id"`
@@ -300,6 +309,9 @@ func (q *Queries) GetNodeByPubkey(ctx context.Context, publicKey []byte) (GetNod
 		&i.MinFirmwareVersion,
 		&i.FirstSeen,
 		&i.LastSeen,
+		&i.RadioFreqMhz,
+		&i.RadioSf,
+		&i.RadioBwKhz,
 		&i.Metadata,
 		&i.IsObserver,
 		&i.ObserverID,
@@ -1342,6 +1354,7 @@ func (q *Queries) ListNodeObservations(ctx context.Context, arg ListNodeObservat
 
 const listNodes = `-- name: ListNodes :many
 SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen,
+  n.radio_freq_mhz, n.radio_sf, n.radio_bw_khz,
   array_remove(array_agg(DISTINCT ni.iata ORDER BY ni.iata), NULL)::text[] AS iatas,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id
@@ -1372,16 +1385,19 @@ type ListNodesParams struct {
 }
 
 type ListNodesRow struct {
-	ID         uuid.UUID          `json:"id"`
-	PublicKey  []byte             `json:"public_key"`
-	NodeType   int16              `json:"node_type"`
-	Name       *string            `json:"name"`
-	Latitude   *float64           `json:"latitude"`
-	Longitude  *float64           `json:"longitude"`
-	LastSeen   pgtype.Timestamptz `json:"last_seen"`
-	Iatas      []string           `json:"iatas"`
-	IsObserver bool               `json:"is_observer"`
-	ObserverID uuid.UUID          `json:"observer_id"`
+	ID           uuid.UUID          `json:"id"`
+	PublicKey    []byte             `json:"public_key"`
+	NodeType     int16              `json:"node_type"`
+	Name         *string            `json:"name"`
+	Latitude     *float64           `json:"latitude"`
+	Longitude    *float64           `json:"longitude"`
+	LastSeen     pgtype.Timestamptz `json:"last_seen"`
+	RadioFreqMhz *float32           `json:"radio_freq_mhz"`
+	RadioSf      *int16             `json:"radio_sf"`
+	RadioBwKhz   *float32           `json:"radio_bw_khz"`
+	Iatas        []string           `json:"iatas"`
+	IsObserver   bool               `json:"is_observer"`
+	ObserverID   uuid.UUID          `json:"observer_id"`
 }
 
 func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNodesRow, error) {
@@ -1410,6 +1426,9 @@ func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNod
 			&i.Latitude,
 			&i.Longitude,
 			&i.LastSeen,
+			&i.RadioFreqMhz,
+			&i.RadioSf,
+			&i.RadioBwKhz,
 			&i.Iatas,
 			&i.IsObserver,
 			&i.ObserverID,
@@ -1624,6 +1643,9 @@ SELECT
   o.display_name,
   o.observer_type,
   o.last_status_at,
+  o.radio_freq_mhz,
+  o.radio_sf,
+  o.radio_bw_khz,
 COALESCE(CASE
     WHEN o.last_status_at > NOW() - INTERVAL '5 minutes' THEN 'online'
     ELSE 'offline'
@@ -1671,6 +1693,9 @@ type ListObserversRow struct {
 	DisplayName  *string            `json:"display_name"`
 	ObserverType *string            `json:"observer_type"`
 	LastStatusAt pgtype.Timestamptz `json:"last_status_at"`
+	RadioFreqMhz *float32           `json:"radio_freq_mhz"`
+	RadioSf      *int16             `json:"radio_sf"`
+	RadioBwKhz   *float32           `json:"radio_bw_khz"`
 	Status       string             `json:"status"`
 	Iata         string             `json:"iata"`
 }
@@ -1699,6 +1724,9 @@ func (q *Queries) ListObservers(ctx context.Context, arg ListObserversParams) ([
 			&i.DisplayName,
 			&i.ObserverType,
 			&i.LastStatusAt,
+			&i.RadioFreqMhz,
+			&i.RadioSf,
+			&i.RadioBwKhz,
 			&i.Status,
 			&i.Iata,
 		); err != nil {
@@ -2155,8 +2183,8 @@ func (q *Queries) UpsertIATADetails(ctx context.Context, arg UpsertIATADetailsPa
 
 const upsertNode = `-- name: UpsertNode :one
 
-INSERT INTO nodes (public_key, node_type, name, latitude, longitude, location_source, last_advert_at, last_seen)
-VALUES ($1, $2, $3, $4, $5, 'advert', NOW(), NOW())
+INSERT INTO nodes (public_key, node_type, name, latitude, longitude, location_source, last_advert_at, last_seen, radio_freq_mhz, radio_sf, radio_bw_khz)
+VALUES ($1, $2, $3, $4, $5, 'advert', NOW(), NOW(), $6, $7, $8)
 ON CONFLICT (public_key) DO UPDATE SET
   node_type       = EXCLUDED.node_type,
   name            = COALESCE(EXCLUDED.name, nodes.name),
@@ -2164,16 +2192,22 @@ ON CONFLICT (public_key) DO UPDATE SET
   longitude       = COALESCE(EXCLUDED.longitude, nodes.longitude),
   location_source = CASE WHEN EXCLUDED.latitude IS NOT NULL THEN 'advert' ELSE nodes.location_source END,
   last_advert_at  = NOW(),
-  last_seen       = NOW()
-RETURNING id, public_key, node_type, name, latitude, longitude, location_source, last_advert_at, supports_multibyte_paths, supports_multibyte_traces, min_firmware_version, first_seen, last_seen, metadata
+  last_seen       = NOW(),
+  radio_freq_mhz  = EXCLUDED.radio_freq_mhz,
+  radio_sf        = EXCLUDED.radio_sf,
+  radio_bw_khz    = EXCLUDED.radio_bw_khz
+RETURNING id, public_key, node_type, name, latitude, longitude, location_source, last_advert_at, supports_multibyte_paths, supports_multibyte_traces, min_firmware_version, first_seen, last_seen, radio_freq_mhz, radio_sf, radio_bw_khz, metadata
 `
 
 type UpsertNodeParams struct {
-	PublicKey []byte   `json:"public_key"`
-	NodeType  int16    `json:"node_type"`
-	Name      *string  `json:"name"`
-	Latitude  *float64 `json:"latitude"`
-	Longitude *float64 `json:"longitude"`
+	PublicKey    []byte   `json:"public_key"`
+	NodeType     int16    `json:"node_type"`
+	Name         *string  `json:"name"`
+	Latitude     *float64 `json:"latitude"`
+	Longitude    *float64 `json:"longitude"`
+	RadioFreqMhz *float32 `json:"radio_freq_mhz"`
+	RadioSf      *int16   `json:"radio_sf"`
+	RadioBwKhz   *float32 `json:"radio_bw_khz"`
 }
 
 // ============================================================
@@ -2186,6 +2220,9 @@ func (q *Queries) UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, e
 		arg.Name,
 		arg.Latitude,
 		arg.Longitude,
+		arg.RadioFreqMhz,
+		arg.RadioSf,
+		arg.RadioBwKhz,
 	)
 	var i Node
 	err := row.Scan(
@@ -2202,6 +2239,9 @@ func (q *Queries) UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, e
 		&i.MinFirmwareVersion,
 		&i.FirstSeen,
 		&i.LastSeen,
+		&i.RadioFreqMhz,
+		&i.RadioSf,
+		&i.RadioBwKhz,
 		&i.Metadata,
 	)
 	return i, err

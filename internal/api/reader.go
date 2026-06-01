@@ -191,6 +191,7 @@ type NodeSummary struct {
 	ObvserverID  *uuid.UUID `json:"observerId,omitempty"`
 	Latitude     *float64   `json:"lat,omitempty"`
 	Longitude    *float64   `json:"lng,omitempty"`
+	Radio        *string    `json:"radio,omitempty"`
 	IATAs        []string   `json:"iatas"`
 }
 
@@ -215,6 +216,7 @@ type ObserverSummary struct {
 	ObserverType *string   `json:"observerType,omitempty"` // e.g. "meshcoretomqtt", "meshcoreha"
 	IATA         string    `json:"iata"`                   // most recently heard IATA
 	Status       string    `json:"status"`                 // "online" or "offline" derived from last_status_at
+	Radio        *string   `json:"radio,omitempty"`
 }
 
 // ObserverBroker represents a single MQTT broker an observer has been seen on,
