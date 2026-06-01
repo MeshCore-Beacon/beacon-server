@@ -818,7 +818,7 @@ func (s *Store) ListObserverAdverts(ctx context.Context, observerID uuid.UUID, c
 // ListNodes returns a paginated list of nodes with optional filters.
 // Pass 0 for nodeType, empty string for iata/name, nil for pubkey to skip those filters.
 // cursor is last_seen epoch ms; pass 0 to start from the beginning.
-func (s *Store) ListNodes(ctx context.Context, nodeType int16, iata string, supportsMultibytePaths, supportsMultibyteTraces bool, pubkey []byte, name string, cursor int64, limit int32) (api.Page[api.NodeSummary], error) {
+func (s *Store) ListNodes(ctx context.Context, nodeType int16, iata string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, name string, cursor int64, limit int32) (api.Page[api.NodeSummary], error) {
 	var cursorTS pgtype.Timestamptz
 	if cursor > 0 {
 		cursorTS = pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}
@@ -826,8 +826,8 @@ func (s *Store) ListNodes(ctx context.Context, nodeType int16, iata string, supp
 	rows, err := s.q.ListNodes(ctx, sqlc.ListNodesParams{
 		Column1: nodeType,
 		Column2: iata,
-		Column3: supportsMultibytePaths,
-		Column4: supportsMultibyteTraces,
+		Column3: tristate(supportsMultibytePaths),
+		Column4: tristate(supportsMultibyteTraces),
 		Column5: pubkey,
 		Column6: name,
 		Column7: cursorTS,
@@ -1218,4 +1218,14 @@ func nullableUUID(id uuid.UUID) *uuid.UUID {
 		return nil
 	}
 	return &id
+}
+
+func tristate(b *bool) string {
+	if b == nil {
+		return "any"
+	}
+	if *b {
+		return "true"
+	}
+	return "false"
 }

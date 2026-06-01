@@ -29,12 +29,12 @@ func PacketsRouter(reader api.Reader) http.Handler {
 //	@Param		payloadType		query		int		false	"Filter by payload type integer"
 //	@Param		payloadTypeName	query		string	false	"Filter by payload type name (advert, grp_txt, txt_msg, trace, anon_req)"
 //	@Param		routeType		query		int		false	"Filter by route type (0=transport_flood, 1=flood, 2=direct, 3=transport_direct)"
-//	@Param		iata			query		string	false	"Filter by latest observation IATA (case-insensitive)"
+//	@Param		iata			query		string	false	"Filter by IATA code"
 //	@Param		since			query		int		false	"Filter by first_heard_at >= since (epoch ms)"
 //	@Param		until			query		int		false	"Filter by first_heard_at <= until (epoch ms)"
 //	@Param		cursor			query		int		false	"last_heard_at epoch ms of last item for pagination"
 //	@Param		limit			query		int		false	"Max results (default 50)"
-//	@Success	200				{object}	object
+//	@Success	200				{object}	api.Page[api.PacketSummary]
 //	@Failure	500				{object}	handlers.APIError
 //	@Router		/packets [get]
 func listPackets(reader api.Reader) http.HandlerFunc {
@@ -116,6 +116,7 @@ func listPackets(reader api.Reader) http.HandlerFunc {
 //	@Success	200			{object}	api.Packet
 //	@Failure	400			{object}	handlers.APIError
 //	@Failure	404			{object}	handlers.APIError
+//	@Failure	500			{object}	handlers.APIError
 //	@Router		/packets/{packetHash} [get]
 func getPacket(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

@@ -1370,8 +1370,16 @@ FROM nodes n
 LEFT JOIN node_iatas ni ON ni.node_id = n.id
 WHERE
   ($1 = 0 OR n.node_type = $1)
-  AND (NOT $3 OR n.supports_multibyte_paths = TRUE)
-  AND (NOT $4 OR n.supports_multibyte_traces = TRUE)
+  AND (
+    $3::text = 'any'
+    OR ($3::text = 'true' AND n.supports_multibyte_paths = TRUE)
+    OR ($3::text = 'false' AND n.supports_multibyte_paths = FALSE)
+  )
+  AND (
+    $4::text = 'any'
+    OR ($4::text = 'true' AND n.supports_multibyte_traces = TRUE)
+    OR ($4::text = 'false' AND n.supports_multibyte_traces = FALSE)
+  )
   AND ($5::bytea IS NULL OR n.public_key = $5)
   AND ($6 = '' OR n.name ILIKE '%' || $6 || '%')
   AND ($7::timestamptz IS NULL OR n.last_seen < $7)
@@ -1384,8 +1392,8 @@ LIMIT $8
 type ListNodesParams struct {
 	Column1 interface{}        `json:"column_1"`
 	Column2 interface{}        `json:"column_2"`
-	Column3 interface{}        `json:"column_3"`
-	Column4 interface{}        `json:"column_4"`
+	Column3 string             `json:"column_3"`
+	Column4 string             `json:"column_4"`
 	Column5 []byte             `json:"column_5"`
 	Column6 interface{}        `json:"column_6"`
 	Column7 pgtype.Timestamptz `json:"column_7"`

@@ -32,14 +32,14 @@ func NodesRouter(reader api.Reader) http.Handler {
 //	@Produce	json
 //	@Param		type					query		int		false	"Node type integer (1=companion, 2=repeater, 3=room_server, 4=sensor)"
 //	@Param		typeName				query		string	false	"Node type name (companion, repeater, room_server, sensor)"
-//	@Param		iata					query		string	false	"Filter by IATA code (case-insensitive)"
+//	@Param		iata					query		string	false	"Filter by IATA code (case-insensitive); comma-separated for multiple"
 //	@Param		name					query		string	false	"Partial case-insensitive name match"
 //	@Param		pubkey					query		string	false	"Exact public key match (hex)"
-//	@Param		supportsMultibytePaths	query		bool	false	"Filter to nodes with firmware >= 1.14.0"
-//	@Param		supportsMultibyteTraces	query		bool	false	"Filter to nodes with firmware >= 1.11.0"
+//	@Param		supportsMultibytePaths	query		string	false	"Multibyte path support filter: any (default), true, false"
+//	@Param		supportsMultibyteTraces	query		string	false	"Multibyte trace support filter: any (default), true, false"
 //	@Param		cursor					query		int		false	"last_seen epoch ms of last item for pagination"
 //	@Param		limit					query		int		false	"Max results (default 50)"
-//	@Success	200						{object}	object
+//	@Success	200						{object}	api.Page[api.NodeSummary]
 //	@Failure	500						{object}	handlers.APIError
 //	@Router		/nodes [get]
 func listNodes(reader api.Reader) http.HandlerFunc {
@@ -84,8 +84,24 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 		}
 		iata := r.URL.Query().Get("iata")
 		name := r.URL.Query().Get("name")
-		supportsMultibytePaths := r.URL.Query().Get("supportsMultibytePaths") == "true"
-		supportsMultibyteTraces := r.URL.Query().Get("supportsMultibyteTraces") == "true"
+		var supportsMultibytePaths *bool
+		if v := r.URL.Query().Get("supportsMultibytePaths"); v != "" {
+			b, err := strconv.ParseBool(v)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "invalid supportsMultibytePaths value")
+				return
+			}
+			supportsMultibytePaths = &b
+		}
+		var supportsMultibyteTraces *bool
+		if v := r.URL.Query().Get("supportsMultibyteTraces"); v != "" {
+			b, err := strconv.ParseBool(v)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "invalid supportsMultibyteTraces value")
+				return
+			}
+			supportsMultibytePaths = &b
+		}
 		nodes, err := reader.ListNodes(r.Context(), nodeType, iata, supportsMultibytePaths, supportsMultibyteTraces, pubkey, name, cursor, limit)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "internal server error")
@@ -104,6 +120,7 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 //	@Success	200		{object}	api.Node
 //	@Failure	400		{object}	handlers.APIError
 //	@Failure	404		{object}	handlers.APIError
+//	@Failure	500		{object}	handlers.APIError
 //	@Router		/nodes/{nodeId} [get]
 func getNode(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -129,7 +146,7 @@ func getNode(reader api.Reader) http.HandlerFunc {
 //	@Param		nodeId	path		string	true	"Node UUID"
 //	@Param		cursor	query		int		false	"Observation ID of last item for pagination"
 //	@Param		limit	query		int		false	"Max results (default 50)"
-//	@Success	200		{object}	object
+//	@Success	200		{object}	api.Page[api.NodeObservation]
 //	@Failure	400		{object}	handlers.APIError
 //	@Failure	500		{object}	handlers.APIError
 //	@Router		/nodes/{nodeId}/observations [get]
