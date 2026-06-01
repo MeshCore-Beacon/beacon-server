@@ -335,3 +335,6 @@ WHERE ni.last_heard > NOW() - INTERVAL '7 days';
 
 CREATE UNIQUE INDEX idx_mv_top_nodes
   ON mv_top_nodes_by_iata(iata, node_id);
+
+CREATE UNIQUE INDEX idx_mv_hourly_iata_stats
+  ON mv_hourly_iata_stats(iata, hour);
