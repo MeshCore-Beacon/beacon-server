@@ -44,8 +44,14 @@ definitions:
       firstSeen:
         description: epoch ms
         type: integer
+      iatas:
+        items:
+          type: string
+        type: array
       id:
         type: string
+      isObserver:
+        type: boolean
       lastAdvertAt:
         description: epoch ms, nil if no advert received
         type: integer
@@ -70,6 +76,8 @@ definitions:
         description: 1=companion, 2=repeater, 3=room server
         type: integer
       nodeTypeName:
+        type: string
+      observerId:
         type: string
       publicKey:
         description: hex-encoded public key
@@ -233,6 +241,8 @@ definitions:
         type: string
       payloadVersion:
         type: integer
+      rawHeader:
+        type: string
       rawPayload:
         description: hex-encoded
         type: string

@@ -1177,8 +1177,17 @@ const docTemplate = `{
                     "description": "epoch ms",
                     "type": "integer"
                 },
+                "iatas": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "id": {
                     "type": "string"
+                },
+                "isObserver": {
+                    "type": "boolean"
                 },
                 "lastAdvertAt": {
                     "description": "epoch ms, nil if no advert received",
@@ -1213,6 +1222,9 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "nodeTypeName": {
+                    "type": "string"
+                },
+                "observerId": {
                     "type": "string"
                 },
                 "publicKey": {
@@ -1446,6 +1458,9 @@ const docTemplate = `{
                 },
                 "payloadVersion": {
                     "type": "integer"
+                },
+                "rawHeader": {
+                    "type": "string"
                 },
                 "rawPayload": {
                     "description": "hex-encoded",

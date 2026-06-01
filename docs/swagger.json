@@ -1175,8 +1175,17 @@
                     "description": "epoch ms",
                     "type": "integer"
                 },
+                "iatas": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "id": {
                     "type": "string"
+                },
+                "isObserver": {
+                    "type": "boolean"
                 },
                 "lastAdvertAt": {
                     "description": "epoch ms, nil if no advert received",
@@ -1211,6 +1220,9 @@
                     "type": "integer"
                 },
                 "nodeTypeName": {
+                    "type": "string"
+                },
+                "observerId": {
                     "type": "string"
                 },
                 "publicKey": {
@@ -1444,6 +1456,9 @@
                 },
                 "payloadVersion": {
                     "type": "integer"
+                },
+                "rawHeader": {
+                    "type": "string"
                 },
                 "rawPayload": {
                     "description": "hex-encoded",
