@@ -9,20 +9,38 @@ import (
 // PayloadTypeName returns a human-readable name for a payload type integer.
 func PayloadTypeName(t int16) string {
 	switch t {
-	case 0:
-		return "raw"
-	case 1:
-		return "txt_msg"
-	case 2:
-		return "sensor_data"
-	case 4:
+	case 0x00:
+		return "request"
+	case 0x01:
+		return "response"
+	case 0x02:
+		return "text_message"
+	case 0x03:
+		return "acknowledgement"
+	case 0x04:
 		return "advert"
-	case 5:
-		return "grp_txt"
-	case 8:
-		return "sign"
-	case 9:
+	case 0x05:
+		return "group_text"
+	case 0x06:
+		return "group_data"
+	case 0x07:
+		return "anonymous_request"
+	case 0x08:
+		return "path"
+	case 0x09:
 		return "trace"
+	case 0x0A:
+		return "multipart"
+	case 0x0B:
+		return "control"
+	case 0x0C:
+		fallthrough
+	case 0x0D:
+		fallthrough
+	case 0x0E:
+		return "reserved"
+	case 0x0F:
+		return "raw_custom"
 	default:
 		return "unknown"
 	}
@@ -32,16 +50,32 @@ func PayloadTypeName(t int16) string {
 // Returns 0 (no filter) if the string is empty or unrecognized.
 func PayloadTypeFromString(s string) int16 {
 	switch strings.ToLower(s) {
-	case "advert":
-		return int16(meshcore.PayloadTypeAdvert)
-	case "grp_txt", "grptxt", "group_text":
-		return int16(meshcore.PayloadTypeGrpTxt)
-	case "txt_msg", "txtmsg", "text":
+	case "request", "req":
+		return int16(meshcore.PayloadTypeReq)
+	case "response":
+		return int16(meshcore.PayloadTypeResponse)
+	case "txt_msg", "txtmsg", "text", "direct":
 		return int16(meshcore.PayloadTypeTxtMsg)
+	case "acknowledgement", "ack":
+		return int16(meshcore.PayloadTypeAck)
+	case "advertisement", "advert":
+		return int16(meshcore.PayloadTypeAdvert)
+	case "grp_txt", "grptxt", "group_text", "group":
+		return int16(meshcore.PayloadTypeGrpTxt)
+	case "grp_data", "grpdata", "group_data", "data":
+		return int16(meshcore.PayloadTypeGrpData)
+	case "anonymous_request", "anon_req", "anonreq":
+		return int16(meshcore.PayloadTypeAnonReq)
+	case "path":
+		return int16(meshcore.PayloadTypePath)
 	case "trace":
 		return int16(meshcore.PayloadTypeTrace)
-	case "anon_req", "anonreq":
-		return int16(meshcore.PayloadTypeAnonReq)
+	case "multipart", "multi-part":
+		return int16(meshcore.PayloadTypeMultiPart)
+	case "control":
+		return int16(meshcore.PayloadTypeControl)
+	case "raw_custom", "raw", "custom":
+		return int16(meshcore.PayloadTypeRawCustom)
 	default:
 		return 0
 	}
