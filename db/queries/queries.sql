@@ -315,18 +315,18 @@ SELECT * FROM nodes WHERE public_key = $1;
 SELECT * FROM nodes WHERE id = $1;
 
 -- name: ListNodes :many
-SELECT DISTINCT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen,
+SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen,
   array_remove(array_agg(DISTINCT ni.iata ORDER BY ni.iata), NULL)::text[] AS iatas
 FROM nodes n
 LEFT JOIN node_iatas ni ON ni.node_id = n.id
 WHERE
   ($1 = 0 OR n.node_type = $1)
-  AND ($2 = '' OR ni.iata ILIKE $2)
   AND (NOT $3 OR n.supports_multibyte_paths = TRUE)
   AND (NOT $4 OR n.supports_multibyte_traces = TRUE)
   AND ($5::bytea IS NULL OR n.public_key = $5)
   AND ($6 = '' OR n.name ILIKE '%' || $6 || '%')
   AND ($7::timestamptz IS NULL OR n.last_seen < $7)
+  AND ($2 = '' OR n.id IN (SELECT node_id FROM node_iatas WHERE iata ILIKE $2))
 GROUP BY n.id
 ORDER BY n.last_seen DESC
 LIMIT $8;
