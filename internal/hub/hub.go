@@ -15,6 +15,7 @@ package hub
 import (
 	"encoding/json"
 	"log"
+	"slices"
 )
 
 // EventType identifies the kind of server-push event. These match the
@@ -84,19 +85,19 @@ func (c *Client) LaggedCH() <-chan LaggedNotification {
 }
 
 func scopeMatches(s Scope, e Event) bool {
-	if len(s.Events) > 0 && !containsEventType(s.Events, e.Type) {
+	if len(s.Events) > 0 && !slices.Contains(s.Events, e.Type) {
 		return false
 	}
 	if len(s.IATAs) > 0 || len(s.RegionIATAs) > 0 {
 		allIATAs := append(s.IATAs, s.RegionIATAs...) //nolint:gocritic
-		if !containsString(allIATAs, e.IATA) {
+		if !slices.Contains(allIATAs, e.IATA) {
 			return false
 		}
 	}
-	if len(s.PayloadTypes) > 0 && !containsUint8(s.PayloadTypes, e.PayloadType) {
+	if len(s.PayloadTypes) > 0 && !slices.Contains(s.PayloadTypes, e.PayloadType) {
 		return false
 	}
-	if len(s.ChannelHashes) > 0 && !containsString(s.ChannelHashes, e.ChannelHash) {
+	if len(s.ChannelHashes) > 0 && !slices.Contains(s.ChannelHashes, e.ChannelHash) {
 		return false
 	}
 	return true
@@ -233,33 +234,4 @@ func (h *Hub) Run() {
 			}
 		}
 	}
-}
-
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-func containsString(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
-		}
-	}
-	return false
-}
-
-func containsUint8(haystack []uint8, needle uint8) bool {
-	for _, v := range haystack {
-		if v == needle {
-			return true
-		}
-	}
-	return false
-}
-
-func containsEventType(haystack []EventType, needle EventType) bool {
-	for _, v := range haystack {
-		if v == needle {
-			return true
-		}
-	}
-	return false
 }
