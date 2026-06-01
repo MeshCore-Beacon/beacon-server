@@ -310,14 +310,25 @@ UPDATE nodes SET supports_multibyte_traces = TRUE
 WHERE id = $1 AND supports_multibyte_traces = FALSE;
 
 -- name: GetNodeByPubkey :one
-SELECT * FROM nodes WHERE public_key = $1;
+SELECT *,
+  EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
+  (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id
+FROM nodes n
+WHERE n.public_key = $1;
 
 -- name: GetNodeByID :one
-SELECT * FROM nodes WHERE id = $1;
+SELECT *,
+  EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
+  (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id
+FROM nodes n
+WHERE n.id = $1;
+
 
 -- name: ListNodes :many
 SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen,
-  array_remove(array_agg(DISTINCT ni.iata ORDER BY ni.iata), NULL)::text[] AS iatas
+  array_remove(array_agg(DISTINCT ni.iata ORDER BY ni.iata), NULL)::text[] AS iatas,
+  EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
+  (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id
 FROM nodes n
 LEFT JOIN node_iatas ni ON ni.node_id = n.id
 WHERE

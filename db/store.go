@@ -840,6 +840,8 @@ func (s *Store) ListNodes(ctx context.Context, nodeType int16, iata string, supp
 			Latitude:     v.Latitude,
 			Longitude:    v.Longitude,
 			IATAs:        v.Iatas,
+			IsObserver:   v.IsObserver,
+			ObvserverID:  nullableUUID(v.ObserverID),
 		})
 	}
 	var nextCursor *int64
@@ -875,6 +877,8 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 			Latitude:     row.Latitude,
 			Longitude:    row.Longitude,
 			IATAs:        iatas,
+			IsObserver:   row.IsObserver,
+			ObvserverID:  nullableUUID(row.ObserverID),
 		},
 		LocationSource:          row.LocationSource,
 		SupportsMultibytePaths:  row.SupportsMultibytePaths,
@@ -1181,4 +1185,11 @@ func (s *Store) GetStatsTopObservers(ctx context.Context, iata string, since tim
 		})
 	}
 	return items, nil
+}
+
+func nullableUUID(id uuid.UUID) *uuid.UUID {
+	if id == (uuid.UUID{}) {
+		return nil
+	}
+	return &id
 }

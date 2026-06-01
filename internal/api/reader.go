@@ -182,14 +182,16 @@ type ObserverTelemetry struct {
 
 // NodeSummary is the minimal node representation used in list responses.
 type NodeSummary struct {
-	ID           uuid.UUID `json:"id"`
-	PublicKey    string    `json:"publicKey"` // hex-encoded public key
-	NodeType     int16     `json:"nodeType"`  // 1=companion, 2=repeater, 3=room server
-	NodeTypeName string    `json:"nodeTypeName"`
-	Name         *string   `json:"name,omitempty"`
-	Latitude     *float64  `json:"lat,omitempty"`
-	Longitude    *float64  `json:"lng,omitempty"`
-	IATAs        []string  `json:"iatas"`
+	ID           uuid.UUID  `json:"id"`
+	PublicKey    string     `json:"publicKey"` // hex-encoded public key
+	NodeType     int16      `json:"nodeType"`  // 1=companion, 2=repeater, 3=room server
+	NodeTypeName string     `json:"nodeTypeName"`
+	Name         *string    `json:"name,omitempty"`
+	IsObserver   bool       `json:"isObserver"`
+	ObvserverID  *uuid.UUID `json:"observerId,omitempty"`
+	Latitude     *float64   `json:"lat,omitempty"`
+	Longitude    *float64   `json:"lng,omitempty"`
+	IATAs        []string   `json:"iatas"`
 }
 
 // Node is the full node representation including firmware capability flags,

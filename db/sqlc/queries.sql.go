@@ -206,12 +206,35 @@ func (q *Queries) GetIATA(ctx context.Context, iata string) (IataCode, error) {
 }
 
 const getNodeByID = `-- name: GetNodeByID :one
-SELECT id, public_key, node_type, name, latitude, longitude, location_source, last_advert_at, supports_multibyte_paths, supports_multibyte_traces, min_firmware_version, first_seen, last_seen, metadata FROM nodes WHERE id = $1
+SELECT id, public_key, node_type, name, latitude, longitude, location_source, last_advert_at, supports_multibyte_paths, supports_multibyte_traces, min_firmware_version, first_seen, last_seen, metadata,
+  EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
+  (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id
+FROM nodes n
+WHERE n.id = $1
 `
 
-func (q *Queries) GetNodeByID(ctx context.Context, id uuid.UUID) (Node, error) {
+type GetNodeByIDRow struct {
+	ID                      uuid.UUID          `json:"id"`
+	PublicKey               []byte             `json:"public_key"`
+	NodeType                int16              `json:"node_type"`
+	Name                    *string            `json:"name"`
+	Latitude                *float64           `json:"latitude"`
+	Longitude               *float64           `json:"longitude"`
+	LocationSource          *string            `json:"location_source"`
+	LastAdvertAt            pgtype.Timestamptz `json:"last_advert_at"`
+	SupportsMultibytePaths  bool               `json:"supports_multibyte_paths"`
+	SupportsMultibyteTraces bool               `json:"supports_multibyte_traces"`
+	MinFirmwareVersion      *string            `json:"min_firmware_version"`
+	FirstSeen               pgtype.Timestamptz `json:"first_seen"`
+	LastSeen                pgtype.Timestamptz `json:"last_seen"`
+	Metadata                []byte             `json:"metadata"`
+	IsObserver              bool               `json:"is_observer"`
+	ObserverID              uuid.UUID          `json:"observer_id"`
+}
+
+func (q *Queries) GetNodeByID(ctx context.Context, id uuid.UUID) (GetNodeByIDRow, error) {
 	row := q.db.QueryRow(ctx, getNodeByID, id)
-	var i Node
+	var i GetNodeByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.PublicKey,
@@ -227,17 +250,42 @@ func (q *Queries) GetNodeByID(ctx context.Context, id uuid.UUID) (Node, error) {
 		&i.FirstSeen,
 		&i.LastSeen,
 		&i.Metadata,
+		&i.IsObserver,
+		&i.ObserverID,
 	)
 	return i, err
 }
 
 const getNodeByPubkey = `-- name: GetNodeByPubkey :one
-SELECT id, public_key, node_type, name, latitude, longitude, location_source, last_advert_at, supports_multibyte_paths, supports_multibyte_traces, min_firmware_version, first_seen, last_seen, metadata FROM nodes WHERE public_key = $1
+SELECT id, public_key, node_type, name, latitude, longitude, location_source, last_advert_at, supports_multibyte_paths, supports_multibyte_traces, min_firmware_version, first_seen, last_seen, metadata,
+  EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
+  (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id
+FROM nodes n
+WHERE n.public_key = $1
 `
 
-func (q *Queries) GetNodeByPubkey(ctx context.Context, publicKey []byte) (Node, error) {
+type GetNodeByPubkeyRow struct {
+	ID                      uuid.UUID          `json:"id"`
+	PublicKey               []byte             `json:"public_key"`
+	NodeType                int16              `json:"node_type"`
+	Name                    *string            `json:"name"`
+	Latitude                *float64           `json:"latitude"`
+	Longitude               *float64           `json:"longitude"`
+	LocationSource          *string            `json:"location_source"`
+	LastAdvertAt            pgtype.Timestamptz `json:"last_advert_at"`
+	SupportsMultibytePaths  bool               `json:"supports_multibyte_paths"`
+	SupportsMultibyteTraces bool               `json:"supports_multibyte_traces"`
+	MinFirmwareVersion      *string            `json:"min_firmware_version"`
+	FirstSeen               pgtype.Timestamptz `json:"first_seen"`
+	LastSeen                pgtype.Timestamptz `json:"last_seen"`
+	Metadata                []byte             `json:"metadata"`
+	IsObserver              bool               `json:"is_observer"`
+	ObserverID              uuid.UUID          `json:"observer_id"`
+}
+
+func (q *Queries) GetNodeByPubkey(ctx context.Context, publicKey []byte) (GetNodeByPubkeyRow, error) {
 	row := q.db.QueryRow(ctx, getNodeByPubkey, publicKey)
-	var i Node
+	var i GetNodeByPubkeyRow
 	err := row.Scan(
 		&i.ID,
 		&i.PublicKey,
@@ -253,6 +301,8 @@ func (q *Queries) GetNodeByPubkey(ctx context.Context, publicKey []byte) (Node, 
 		&i.FirstSeen,
 		&i.LastSeen,
 		&i.Metadata,
+		&i.IsObserver,
+		&i.ObserverID,
 	)
 	return i, err
 }
@@ -1292,7 +1342,9 @@ func (q *Queries) ListNodeObservations(ctx context.Context, arg ListNodeObservat
 
 const listNodes = `-- name: ListNodes :many
 SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen,
-  array_remove(array_agg(DISTINCT ni.iata ORDER BY ni.iata), NULL)::text[] AS iatas
+  array_remove(array_agg(DISTINCT ni.iata ORDER BY ni.iata), NULL)::text[] AS iatas,
+  EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
+  (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id
 FROM nodes n
 LEFT JOIN node_iatas ni ON ni.node_id = n.id
 WHERE
@@ -1320,14 +1372,16 @@ type ListNodesParams struct {
 }
 
 type ListNodesRow struct {
-	ID        uuid.UUID          `json:"id"`
-	PublicKey []byte             `json:"public_key"`
-	NodeType  int16              `json:"node_type"`
-	Name      *string            `json:"name"`
-	Latitude  *float64           `json:"latitude"`
-	Longitude *float64           `json:"longitude"`
-	LastSeen  pgtype.Timestamptz `json:"last_seen"`
-	Iatas     []string           `json:"iatas"`
+	ID         uuid.UUID          `json:"id"`
+	PublicKey  []byte             `json:"public_key"`
+	NodeType   int16              `json:"node_type"`
+	Name       *string            `json:"name"`
+	Latitude   *float64           `json:"latitude"`
+	Longitude  *float64           `json:"longitude"`
+	LastSeen   pgtype.Timestamptz `json:"last_seen"`
+	Iatas      []string           `json:"iatas"`
+	IsObserver bool               `json:"is_observer"`
+	ObserverID uuid.UUID          `json:"observer_id"`
 }
 
 func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNodesRow, error) {
@@ -1357,6 +1411,8 @@ func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNod
 			&i.Longitude,
 			&i.LastSeen,
 			&i.Iatas,
+			&i.IsObserver,
+			&i.ObserverID,
 		); err != nil {
 			return nil, err
 		}
