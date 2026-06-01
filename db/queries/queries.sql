@@ -318,14 +318,18 @@ WHERE id = $1 AND supports_multibyte_traces = FALSE;
 -- name: GetNodeByPubkey :one
 SELECT *,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
-  (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id
+  (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
+  (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', extract(epoch from ni.last_heard) * 1000)::bigint ORDER BY ni.last_heard DESC)
+   FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas
 FROM nodes n
 WHERE n.public_key = $1;
 
 -- name: GetNodeByID :one
 SELECT *,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
-  (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id
+  (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
+  (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', extract(epoch from ni.last_heard) * 1000)::bigint ORDER BY ni.last_heard DESC)
+   FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas
 FROM nodes n
 WHERE n.id = $1;
 
@@ -333,7 +337,7 @@ WHERE n.id = $1;
 -- name: ListNodes :many
 SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen,
   n.radio_freq_mhz, n.radio_sf, n.radio_bw_khz,
-  array_remove(array_agg(DISTINCT ni.iata ORDER BY ni.iata), NULL)::text[] AS iatas,
+  json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC) FILTER (WHERE ni.iata IS NOT NULL) AS iatas,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id
 FROM nodes n

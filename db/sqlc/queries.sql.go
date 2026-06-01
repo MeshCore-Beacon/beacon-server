@@ -208,7 +208,9 @@ func (q *Queries) GetIATA(ctx context.Context, iata string) (IataCode, error) {
 const getNodeByID = `-- name: GetNodeByID :one
 SELECT id, public_key, node_type, name, latitude, longitude, location_source, last_advert_at, supports_multibyte_paths, supports_multibyte_traces, min_firmware_version, first_seen, last_seen, radio_freq_mhz, radio_sf, radio_bw_khz, metadata,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
-  (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id
+  (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
+  (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', extract(epoch from ni.last_heard) * 1000)::bigint ORDER BY ni.last_heard DESC)
+   FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas
 FROM nodes n
 WHERE n.id = $1
 `
@@ -233,6 +235,7 @@ type GetNodeByIDRow struct {
 	Metadata                []byte             `json:"metadata"`
 	IsObserver              bool               `json:"is_observer"`
 	ObserverID              uuid.UUID          `json:"observer_id"`
+	Iatas                   []byte             `json:"iatas"`
 }
 
 func (q *Queries) GetNodeByID(ctx context.Context, id uuid.UUID) (GetNodeByIDRow, error) {
@@ -258,6 +261,7 @@ func (q *Queries) GetNodeByID(ctx context.Context, id uuid.UUID) (GetNodeByIDRow
 		&i.Metadata,
 		&i.IsObserver,
 		&i.ObserverID,
+		&i.Iatas,
 	)
 	return i, err
 }
@@ -265,7 +269,9 @@ func (q *Queries) GetNodeByID(ctx context.Context, id uuid.UUID) (GetNodeByIDRow
 const getNodeByPubkey = `-- name: GetNodeByPubkey :one
 SELECT id, public_key, node_type, name, latitude, longitude, location_source, last_advert_at, supports_multibyte_paths, supports_multibyte_traces, min_firmware_version, first_seen, last_seen, radio_freq_mhz, radio_sf, radio_bw_khz, metadata,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
-  (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id
+  (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
+  (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', extract(epoch from ni.last_heard) * 1000)::bigint ORDER BY ni.last_heard DESC)
+   FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas
 FROM nodes n
 WHERE n.public_key = $1
 `
@@ -290,6 +296,7 @@ type GetNodeByPubkeyRow struct {
 	Metadata                []byte             `json:"metadata"`
 	IsObserver              bool               `json:"is_observer"`
 	ObserverID              uuid.UUID          `json:"observer_id"`
+	Iatas                   []byte             `json:"iatas"`
 }
 
 func (q *Queries) GetNodeByPubkey(ctx context.Context, publicKey []byte) (GetNodeByPubkeyRow, error) {
@@ -315,6 +322,7 @@ func (q *Queries) GetNodeByPubkey(ctx context.Context, publicKey []byte) (GetNod
 		&i.Metadata,
 		&i.IsObserver,
 		&i.ObserverID,
+		&i.Iatas,
 	)
 	return i, err
 }
@@ -1355,7 +1363,7 @@ func (q *Queries) ListNodeObservations(ctx context.Context, arg ListNodeObservat
 const listNodes = `-- name: ListNodes :many
 SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen,
   n.radio_freq_mhz, n.radio_sf, n.radio_bw_khz,
-  array_remove(array_agg(DISTINCT ni.iata ORDER BY ni.iata), NULL)::text[] AS iatas,
+  json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC) FILTER (WHERE ni.iata IS NOT NULL) AS iatas,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id
 FROM nodes n
@@ -1395,7 +1403,7 @@ type ListNodesRow struct {
 	RadioFreqMhz *float32           `json:"radio_freq_mhz"`
 	RadioSf      *int16             `json:"radio_sf"`
 	RadioBwKhz   *float32           `json:"radio_bw_khz"`
-	Iatas        []string           `json:"iatas"`
+	Iatas        []byte             `json:"iatas"`
 	IsObserver   bool               `json:"is_observer"`
 	ObserverID   uuid.UUID          `json:"observer_id"`
 }

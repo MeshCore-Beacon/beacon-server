@@ -180,6 +180,12 @@ type ObserverTelemetry struct {
 	Points   []ObserverTelemetryPoint `json:"points"`
 }
 
+// NodeIATA represents a single IATA code and the last time the node was heard there.
+type NodeIATA struct {
+	IATA      string `json:"iata"`
+	LastHeard int64  `json:"lastHeard"` // epoch ms
+}
+
 // NodeSummary is the minimal node representation used in list responses.
 type NodeSummary struct {
 	ID           uuid.UUID  `json:"id"`
@@ -192,7 +198,7 @@ type NodeSummary struct {
 	Latitude     *float64   `json:"lat,omitempty"`
 	Longitude    *float64   `json:"lng,omitempty"`
 	Radio        *string    `json:"radio,omitempty"`
-	IATAs        []string   `json:"iatas"`
+	IATAs        []NodeIATA `json:"iatas"`
 }
 
 // Node is the full node representation including firmware capability flags,

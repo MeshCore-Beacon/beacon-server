@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -849,9 +850,14 @@ func (s *Store) ListNodes(ctx context.Context, nodeType int16, iata string, supp
 			Name:         v.Name,
 			Latitude:     v.Latitude,
 			Longitude:    v.Longitude,
-			IATAs:        v.Iatas,
 			IsObserver:   v.IsObserver,
 			ObvserverID:  nullableUUID(v.ObserverID),
+		}
+		if len(v.Iatas) > 0 {
+			if err := json.Unmarshal(v.Iatas, &node.IATAs); err != nil {
+				log.Printf("store: failed to unmarshal node iatas: %v", err)
+				node.IATAs = []api.NodeIATA{}
+			}
 		}
 		if v.RadioFreqMhz != nil && v.RadioSf != nil && v.RadioBwKhz != nil {
 			s := fmt.Sprintf("%.1f,%g,%d", *v.RadioFreqMhz, *v.RadioBwKhz, *v.RadioSf)
@@ -878,10 +884,6 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 	if err != nil {
 		return nil, err
 	}
-	iatas, err := s.q.GetNodeIATAs(ctx, nodeID)
-	if err != nil {
-		return nil, err
-	}
 	node := &api.Node{
 		NodeSummary: api.NodeSummary{
 			ID:           row.ID,
@@ -891,7 +893,6 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 			Name:         row.Name,
 			Latitude:     row.Latitude,
 			Longitude:    row.Longitude,
-			IATAs:        iatas,
 			IsObserver:   row.IsObserver,
 			ObvserverID:  nullableUUID(row.ObserverID),
 		},
@@ -902,6 +903,12 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 		FirstSeen:               row.FirstSeen.Time.UnixMilli(),
 		LastSeen:                row.LastSeen.Time.UnixMilli(),
 		Metadata:                row.Metadata,
+	}
+	if len(row.Iatas) > 0 {
+		if err := json.Unmarshal(row.Iatas, &node.IATAs); err != nil {
+			log.Printf("store: failed to unmarshal node iatas: %v", err)
+			node.IATAs = []api.NodeIATA{}
+		}
 	}
 	if row.RadioFreqMhz != nil && row.RadioSf != nil && row.RadioBwKhz != nil {
 		s := fmt.Sprintf("%.1f,%g,%d", *row.RadioFreqMhz, *row.RadioBwKhz, *row.RadioSf)
