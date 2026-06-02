@@ -619,7 +619,7 @@ ON CONFLICT (region_id, iata) DO NOTHING;
 -- ============================================================
 
 -- name: ResolvePathHashes :many
-SELECT DISTINCT n.id
+SELECT ns.prefix_4 AS hash, n.id AS node_id, n.name, n.latitude, n.longitude, n.public_key
 FROM node_short_ids ns
 JOIN nodes n ON n.id = ns.node_id
 WHERE ns.iata = $1

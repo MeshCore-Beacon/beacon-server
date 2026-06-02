@@ -160,6 +160,14 @@ func (s *Store) UpsertNodeIATA(ctx context.Context, nodeID uuid.UUID, iata strin
 	return s.q.UpsertNodeIATA(ctx, params)
 }
 
+func (s *Store) UpsertNodeShortID(ctx context.Context, nodeID uuid.UUID, iata string, prefix4 []byte) error {
+	return s.q.UpsertNodeShortID(ctx, sqlc.UpsertNodeShortIDParams{
+		NodeID:  nodeID,
+		Iata:    iata,
+		Prefix4: prefix4,
+	})
+}
+
 // InsertChannelMessage stores a decrypted group text message.
 func (s *Store) InsertChannelMessage(ctx context.Context, m ingest.InsertChannelMessageParams) (bool, error) {
 	params := sqlc.InsertChannelMessageParams{ChannelID: int32(m.ChannelID), PacketHash: m.PacketHash, SenderName: &m.SenderName, Content: &m.Content, SentAt: pgtype.Timestamptz{Time: m.SentAt, Valid: true}}
@@ -207,9 +215,13 @@ func (s *Store) GetObserverRadio(ctx context.Context, observerID uuid.UUID) (ing
 	return settings, nil
 }
 
-// ResolvePathHashes returns a list of node UUIDs for the given path hash prefixes and IATA.
+// ResolvePathHashes returns a map of path hash prefix → matching node UUIDs for the given IATA.
 // Hash size is inferred from the length of the first element in hashes.
-func (s *Store) ResolvePathHashes(ctx context.Context, iata string, hashes [][]byte) ([]uuid.UUID, error) {
+// Confidence: len == 1 → HIGH, len > 1 → AMBIGUOUS, len == 0 → NONE.
+func (s *Store) ResolvePathHashes(ctx context.Context, iata string, hashes [][]byte) (map[string][]api.ResolvedPathEntry, error) {
+	if len(hashes) == 0 {
+		return nil, nil
+	}
 	rows, err := s.q.ResolvePathHashes(ctx, sqlc.ResolvePathHashesParams{
 		Iata:    iata,
 		Column2: hashes,
@@ -217,10 +229,18 @@ func (s *Store) ResolvePathHashes(ctx context.Context, iata string, hashes [][]b
 	if err != nil {
 		return nil, err
 	}
-
-	ids := make([]uuid.UUID, len(rows))
-	copy(ids, rows)
-	return ids, nil
+	result := make(map[string][]api.ResolvedPathEntry)
+	for _, row := range rows {
+		key := hex.EncodeToString(row.Hash[:len(hashes[0])])
+		result[key] = append(result[key], api.ResolvedPathEntry{
+			NodeID:    row.NodeID,
+			Name:      row.Name,
+			Latitude:  row.Latitude,
+			Longitude: row.Longitude,
+			PublicKey: row.PublicKey,
+		})
+	}
+	return result, nil
 }
 
 // UpsertChannel upserts a channel row by (hash, keyFingerprint) and returns its integer ID.
@@ -1071,8 +1091,46 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 			RSSI:           v.Rssi,
 			SNR:            v.Snr,
 			SourceBroker:   *v.SourceBroker,
-			ResolvedPath:   []api.ResolvedHop{}, // TODO: implement path resolution
 		}
+		resolvedPath := []api.ResolvedHop{}
+		if v.PathBytes != nil && v.HashSize > 0 {
+			hashSize := int(v.HashSize)
+			hashes := make([][]byte, 0, len(v.PathBytes)/hashSize)
+			for i := 0; i+hashSize <= len(v.PathBytes); i += hashSize {
+				hashes = append(hashes, v.PathBytes[i:i+hashSize])
+			}
+			resolved, err := s.ResolvePathHashes(ctx, v.Iata, hashes)
+			if err != nil {
+				log.Printf("store: path resolution failed for observation %d: %v", v.ID, err)
+			} else {
+				for _, hash := range hashes {
+					key := hex.EncodeToString(hash)
+					entries := resolved[key]
+					hop := api.ResolvedHop{
+						Nodes: make([]api.ResolvedNode, 0, len(entries)),
+					}
+					switch len(entries) {
+					case 0:
+						hop.Confidence = "none"
+					case 1:
+						hop.Confidence = "high"
+					default:
+						hop.Confidence = "ambiguous"
+					}
+					for _, e := range entries {
+						hop.Nodes = append(hop.Nodes, api.ResolvedNode{
+							ID:        e.NodeID,
+							Name:      e.Name,
+							Latitude:  e.Latitude,
+							Longitude: e.Longitude,
+							PublicKey: hex.EncodeToString(e.PublicKey),
+						})
+					}
+					resolvedPath = append(resolvedPath, hop)
+				}
+			}
+		}
+		obs.ResolvedPath = resolvedPath
 		if v.PathBytes != nil {
 			pb := hex.EncodeToString(v.PathBytes)
 			obs.PathBytes = &pb

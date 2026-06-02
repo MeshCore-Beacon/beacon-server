@@ -1955,7 +1955,7 @@ func (q *Queries) RefreshTopNodes(ctx context.Context) error {
 
 const resolvePathHashes = `-- name: ResolvePathHashes :many
 
-SELECT DISTINCT n.id
+SELECT ns.prefix_4 AS hash, n.id AS node_id, n.name, n.latitude, n.longitude, n.public_key
 FROM node_short_ids ns
 JOIN nodes n ON n.id = ns.node_id
 WHERE ns.iata = $1
@@ -1973,22 +1973,38 @@ type ResolvePathHashesParams struct {
 	Column2 [][]byte `json:"column_2"`
 }
 
+type ResolvePathHashesRow struct {
+	Hash      []byte    `json:"hash"`
+	NodeID    uuid.UUID `json:"node_id"`
+	Name      *string   `json:"name"`
+	Latitude  *float64  `json:"latitude"`
+	Longitude *float64  `json:"longitude"`
+	PublicKey []byte    `json:"public_key"`
+}
+
 // ============================================================
 // HELPERS
 // ============================================================
-func (q *Queries) ResolvePathHashes(ctx context.Context, arg ResolvePathHashesParams) ([]uuid.UUID, error) {
+func (q *Queries) ResolvePathHashes(ctx context.Context, arg ResolvePathHashesParams) ([]ResolvePathHashesRow, error) {
 	rows, err := q.db.Query(ctx, resolvePathHashes, arg.Iata, arg.Column2)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []uuid.UUID{}
+	items := []ResolvePathHashesRow{}
 	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
+		var i ResolvePathHashesRow
+		if err := rows.Scan(
+			&i.Hash,
+			&i.NodeID,
+			&i.Name,
+			&i.Latitude,
+			&i.Longitude,
+			&i.PublicKey,
+		); err != nil {
 			return nil, err
 		}
-		items = append(items, id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

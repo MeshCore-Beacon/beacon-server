@@ -34,6 +34,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/meshcore-go/meshcore-go"
 
+	"github.com/MeshCore-Tower/tower-server/internal/api"
 	"github.com/MeshCore-Tower/tower-server/internal/hub"
 	"github.com/MeshCore-Tower/tower-server/internal/keystore"
 )
@@ -86,6 +87,9 @@ type DB interface {
 	// UpsertNodeIATA upserts a node_iatas row.
 	UpsertNodeIATA(ctx context.Context, nodeID uuid.UUID, iata string) error
 
+	// UpsertNodeShortID upserts a node_short_ids row for path resolution.
+	UpsertNodeShortID(ctx context.Context, nodeID uuid.UUID, iata string, prefix4 []byte) error
+
 	// InsertChannelMessage stores a decrypted group text message. Returns insert success and an error.
 	InsertChannelMessage(ctx context.Context, m InsertChannelMessageParams) (bool, error)
 
@@ -104,7 +108,7 @@ type DB interface {
 	GetObserverRadio(ctx context.Context, observerID uuid.UUID) (RadioSettings, error)
 
 	// ResolvePathHashes returns a list of node UUIDs for the given path hash prefixes and IATA.
-	ResolvePathHashes(ctx context.Context, iata string, hashes [][]byte) ([]uuid.UUID, error)
+	ResolvePathHashes(ctx context.Context, iata string, hashes [][]byte) (map[string][]api.ResolvedPathEntry, error)
 
 	// UpsertChannel upserts a channel row by (hash, keyFingerprint) and returns its integer ID.
 	// Pass nil keyFingerprint to record a hash-only row when the key is unknown.
@@ -532,13 +536,18 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		return
 	}
 
-	resolvedIDs, err := w.db.ResolvePathHashes(ctx, iata, packet.PathHashes())
+	resolved, err := w.db.ResolvePathHashes(ctx, iata, packet.PathHashes())
 	if err != nil {
-		log.Printf("ingest[%s]: db: resolve path hashes failed: %v", w.cfg.BrokerName, err)
-		resolvedIDs = []uuid.UUID{}
+		log.Printf("ingest[%s]: path resolution failed: %v", w.cfg.BrokerName, err)
 	}
+	var resolvedIDs []uuid.UUID
+	for _, entries := range resolved {
+		for _, e := range entries {
+			resolvedIDs = append(resolvedIDs, e.NodeID)
+		}
+	}
+	w.runCapabilityDetection(ctx, packet.PayloadType(), packet.PathHashSize(), resolvedIDs)
 	if inserted {
-		w.runCapabilityDetection(ctx, packet.PayloadType(), packet.PathHashSize(), resolvedIDs)
 		w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio)
 		evt := packetObservationEvent{}
 		evt.PacketHash = hex.EncodeToString(packetHash[:])
@@ -741,8 +750,8 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 		}
 		var lat, lon *float64
 		if advert.AppData().Lat != 0 || advert.AppData().Lon != 0 {
-			la := float64(advert.AppData().Lat)
-			lo := float64(advert.AppData().Lon)
+			la := float64(advert.AppData().Lat) / 1e7
+			lo := float64(advert.AppData().Lon) / 1e7
 			lat = &la
 			lon = &lo
 		}
@@ -760,6 +769,10 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 		}
 		if err := w.db.UpsertNodeIATA(ctx, nodeID, iata); err != nil {
 			log.Printf("ingest[%s]: db: upsert node IATA failed: %v", w.cfg.BrokerName, err)
+		}
+		prefix4 := advert.PublicKey.PublicKeyBytes()[:4]
+		if err := w.db.UpsertNodeShortID(ctx, nodeID, iata, prefix4); err != nil {
+			log.Printf("ingest[%s]: failed to upsert node short ID for %s: %v", w.cfg.BrokerName, hex.EncodeToString(prefix4), err)
 		}
 		evt := nodeUpdateEvent{
 			NodeID:   nodeID.String(),

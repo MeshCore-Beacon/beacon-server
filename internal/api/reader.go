@@ -105,8 +105,8 @@ type PacketRadio struct {
 
 // ResolvedHop is a single hop in a packet's resolved path.
 type ResolvedHop struct {
-	Confidence string        `json:"confidence"` // "high", "low", "unknown"
-	Node       *ResolvedNode `json:"node,omitempty"`
+	Confidence string         `json:"confidence"` // "high", "low", "unknown"
+	Nodes      []ResolvedNode `json:"nodes"`
 }
 
 // ResolvedNode is a node reference within a resolved path hop.
@@ -116,6 +116,14 @@ type ResolvedNode struct {
 	PublicKey string    `json:"publicKey"` // hex-encoded prefix
 	Latitude  *float64  `json:"latitude,omitempty"`
 	Longitude *float64  `json:"longitude,omitempty"`
+}
+
+type ResolvedPathEntry struct {
+	NodeID    uuid.UUID
+	Name      *string
+	Latitude  *float64
+	Longitude *float64
+	PublicKey []byte
 }
 
 // Packet is the full packet representation including all observations and resolved paths.
