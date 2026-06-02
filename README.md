@@ -409,14 +409,14 @@ For paginated responses use the generic page wrapper:
 - [x] REST API: Stats
 - [x] Materialized view refresh (mv_hourly_iata_stats, mv_top_nodes_by_iata)
 - [x] Swagger/OpenAPI documentation via swaggo/swag
+- [x] Path resolution (node short ID lookup)
+- [x] Parse payloads (that we can decrypt) into DB and return with packet
+      details
 
 ### In progress / next
 
-- [ ] Path resolution (node short ID lookup)
 - [ ] Propagation time calculation
 - [ ] Routes and traces endpoints
-- [ ] Parse payloads (that we can decrypt) into DB and return with packet
-      details
 
 ### Future
 
