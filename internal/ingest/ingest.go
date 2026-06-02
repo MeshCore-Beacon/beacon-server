@@ -823,9 +823,9 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 		params := InsertChannelMessageParams{
 			ChannelID:  channelID,
 			PacketHash: packetHash[:],
-			SenderName: payload.Sender,
+			SenderName: strings.ReplaceAll(strings.ToValidUTF8(payload.Sender, "\uFFFD"), "\x00", ""),
 			SentAt:     time.Unix(int64(payload.Timestamp), 0),
-			Content:    payload.Text,
+			Content:    strings.ReplaceAll(strings.ToValidUTF8(payload.Text, "\uFFFD"), "\x00", ""),
 		}
 		newMsg, err := w.db.InsertChannelMessage(ctx, params)
 		if err != nil {
@@ -838,8 +838,8 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 				ChannelID:   channelID,
 				ChannelHash: hex.EncodeToString(channelHashBytes),
 				PacketHash:  hex.EncodeToString(packetHash),
-				SenderName:  payload.Sender,
-				Content:     payload.Text,
+				SenderName:  strings.ReplaceAll(strings.ToValidUTF8(payload.Sender, "\uFFFD"), "\x00", ""),
+				Content:     strings.ReplaceAll(strings.ToValidUTF8(payload.Text, "\uFFFD"), "\x00", ""),
 				SentAt:      time.Unix(int64(payload.Timestamp), 0).UnixMilli(),
 			}
 			w.broadcast(hub.EventChannelMessage, iata, 0, fmt.Sprintf("%02x", grpTxt.ChannelHash), evt)
