@@ -39,7 +39,8 @@ func ObserversRouter(reader api.Reader) http.Handler {
 //	@Param		name	query		string	false	"Partial case-insensitive display name match"
 //	@Param		cursor	query		int		false	"last_seen epoch ms of last item for pagination"
 //	@Param		limit	query		int		false	"Max results (default 50)"
-//	@Success	200		{object}	object
+//	@Success	200		{object}	api.Page[api.ObserverSummary]
+//	@Failure	400		{object}	handlers.APIError
 //	@Failure	500		{object}	handlers.APIError
 //	@Router		/observers [get]
 func listObservers(reader api.Reader) http.HandlerFunc {
@@ -111,7 +112,7 @@ func getObserver(reader api.Reader) http.HandlerFunc {
 //	@Param		observerId	path		string	true	"Observer UUID"
 //	@Param		cursor		query		int		false	"Observation ID of last item for pagination"
 //	@Param		limit		query		int		false	"Max results (default 50)"
-//	@Success	200			{object}	object
+//	@Success	200			{object}	api.Page[api.AdvertObservation]
 //	@Failure	400			{object}	handlers.APIError
 //	@Failure	500			{object}	handlers.APIError
 //	@Router		/observers/{observerId}/adverts [get]
@@ -157,6 +158,7 @@ func listObserverAdverts(reader api.Reader) http.HandlerFunc {
 //	@Param		observerId	path		string	true	"Observer UUID"
 //	@Param		range		query		string	false	"Duration window e.g. 24h, 48h, 168h (default 24h)"
 //	@Param		afterId		query		int		false	"Return points after this telemetry ID for WS reconnection backfill"
+//	@Param		interval	query		string	false	"Bucketing interval, echoed back in the response; not yet applied server-side"
 //	@Success	200			{object}	api.ObserverTelemetry
 //	@Failure	400			{object}	handlers.APIError
 //	@Failure	500			{object}	handlers.APIError

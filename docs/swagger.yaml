@@ -1,6 +1,34 @@
 basePath: /api/v1
 definitions:
-  api.Channel:
+  github_com_MeshCore-Tower_tower-server_internal_api.AdvertObservation:
+    properties:
+      heardAt:
+        description: epoch ms
+        type: integer
+      hopCount:
+        type: integer
+      iata:
+        type: string
+      id:
+        description: observation ID, use as cursor for pagination
+        type: integer
+      nodeName:
+        type: string
+      nodePublicKey:
+        type: string
+      packetHash:
+        description: hex-encoded
+        type: string
+      payloadType:
+        type: integer
+      payloadTypeName:
+        type: string
+      rssi:
+        type: integer
+      snr:
+        type: number
+    type: object
+  github_com_MeshCore-Tower_tower-server_internal_api.Channel:
     properties:
       channelHash:
         description: hex-encoded single-byte hash
@@ -28,7 +56,50 @@ definitions:
         description: display name, nil if not set
         type: string
     type: object
-  api.IATA:
+  github_com_MeshCore-Tower_tower-server_internal_api.ChannelMessage:
+    properties:
+      channelHash:
+        description: hex-encoded single-byte channel hash
+        type: string
+      content:
+        description: decrypted message text
+        type: string
+      id:
+        type: integer
+      observationCount:
+        description: the number of observations for this message packet hash
+        type: integer
+      packetHash:
+        description: hex-encoded packet hash for correlation with packet events
+        type: string
+      senderName:
+        description: display name from the decrypted payload
+        type: string
+      sentAt:
+        description: epoch ms
+        type: integer
+    type: object
+  github_com_MeshCore-Tower_tower-server_internal_api.ChannelSummary:
+    properties:
+      channelHash:
+        description: hex-encoded single-byte hash
+        type: string
+      id:
+        type: integer
+      isHashtag:
+        description: true if derived from a hashtag PSK
+        type: boolean
+      keyKnown:
+        description: true if Tower has a decryption key
+        type: boolean
+      lastSeen:
+        description: epoch ms
+        type: integer
+      name:
+        description: display name, nil if not set
+        type: string
+    type: object
+  github_com_MeshCore-Tower_tower-server_internal_api.IATA:
     properties:
       displayName:
         type: string
@@ -39,14 +110,14 @@ definitions:
       lon:
         type: number
     type: object
-  api.Node:
+  github_com_MeshCore-Tower_tower-server_internal_api.Node:
     properties:
       firstSeen:
         description: epoch ms
         type: integer
       iatas:
         items:
-          type: string
+          $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.NodeIATA'
         type: array
       id:
         type: string
@@ -82,6 +153,8 @@ definitions:
       publicKey:
         description: hex-encoded public key
         type: string
+      radio:
+        type: string
       supportsMultibytePaths:
         description: firmware >= 1.14.0
         type: boolean
@@ -89,7 +162,44 @@ definitions:
         description: firmware >= 1.11.0
         type: boolean
     type: object
-  api.ObservationPoint:
+  github_com_MeshCore-Tower_tower-server_internal_api.NodeIATA:
+    properties:
+      iata:
+        type: string
+      lastHeard:
+        description: epoch ms
+        type: integer
+    type: object
+  github_com_MeshCore-Tower_tower-server_internal_api.NodeSummary:
+    properties:
+      iatas:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.NodeIATA'
+        type: array
+      id:
+        type: string
+      isObserver:
+        type: boolean
+      lat:
+        type: number
+      lng:
+        type: number
+      name:
+        type: string
+      nodeType:
+        description: 1=companion, 2=repeater, 3=room server
+        type: integer
+      nodeTypeName:
+        type: string
+      observerId:
+        type: string
+      publicKey:
+        description: hex-encoded public key
+        type: string
+      radio:
+        type: string
+    type: object
+  github_com_MeshCore-Tower_tower-server_internal_api.ObservationPoint:
     properties:
       activeObservers:
         type: integer
@@ -103,7 +213,7 @@ definitions:
       uniquePackets:
         type: integer
     type: object
-  api.Observer:
+  github_com_MeshCore-Tower_tower-server_internal_api.Observer:
     properties:
       batteryLevel:
         description: volts, nil if mains powered
@@ -111,7 +221,7 @@ definitions:
       brokers:
         description: broker names this observer has been seen on
         items:
-          $ref: '#/definitions/api.ObserverBroker'
+          $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.ObserverBroker'
         type: array
       displayName:
         description: friendly name from /status messages
@@ -144,6 +254,8 @@ definitions:
       publicKey:
         description: hex-encoded public key
         type: string
+      radio:
+        type: string
       radioBwKhz:
         description: bandwidth in kHz
         type: number
@@ -166,7 +278,7 @@ definitions:
       uptimeSeconds:
         type: integer
     type: object
-  api.ObserverBroker:
+  github_com_MeshCore-Tower_tower-server_internal_api.ObserverBroker:
     properties:
       lastPacketAt:
         description: epoch ms, last packet received via this broker; 0 if none
@@ -178,18 +290,37 @@ definitions:
         description: broker name e.g. "mqtt1"
         type: string
     type: object
-  api.ObserverTelemetry:
+  github_com_MeshCore-Tower_tower-server_internal_api.ObserverSummary:
+    properties:
+      displayName:
+        description: friendly name from /status messages
+        type: string
+      iata:
+        description: most recently heard IATA
+        type: string
+      id:
+        type: string
+      observerType:
+        description: e.g. "meshcoretomqtt", "meshcoreha"
+        type: string
+      radio:
+        type: string
+      status:
+        description: '"online" or "offline" derived from last_status_at'
+        type: string
+    type: object
+  github_com_MeshCore-Tower_tower-server_internal_api.ObserverTelemetry:
     properties:
       interval:
         type: string
       points:
         items:
-          $ref: '#/definitions/api.ObserverTelemetryPoint'
+          $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.ObserverTelemetryPoint'
         type: array
       range:
         type: string
     type: object
-  api.ObserverTelemetryPoint:
+  github_com_MeshCore-Tower_tower-server_internal_api.ObserverTelemetryPoint:
     properties:
       airtimeRxPct:
         type: number
@@ -209,7 +340,7 @@ definitions:
       uptimeSeconds:
         type: integer
     type: object
-  api.Packet:
+  github_com_MeshCore-Tower_tower-server_internal_api.Packet:
     properties:
       channelHash:
         description: hex-encoded
@@ -226,7 +357,7 @@ definitions:
         type: integer
       observations:
         items:
-          $ref: '#/definitions/api.PacketObservationDetail'
+          $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.PacketObservationDetail'
         type: array
       originPubkey:
         description: hex-encoded
@@ -254,7 +385,16 @@ definitions:
         description: hex-encoded
         type: string
     type: object
-  api.PacketObservationDetail:
+  github_com_MeshCore-Tower_tower-server_internal_api.PacketLatestObserver:
+    properties:
+      displayName:
+        type: string
+      iata:
+        type: string
+      id:
+        type: string
+    type: object
+  github_com_MeshCore-Tower_tower-server_internal_api.PacketObservationDetail:
     properties:
       hashSize:
         type: integer
@@ -279,10 +419,10 @@ definitions:
       propagationTimeMs:
         type: integer
       radio:
-        $ref: '#/definitions/api.PacketRadio'
+        $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.PacketRadio'
       resolvedPath:
         items:
-          $ref: '#/definitions/api.ResolvedHop'
+          $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.ResolvedHop'
         type: array
       rssi:
         type: integer
@@ -291,7 +431,31 @@ definitions:
       sourceBroker:
         type: string
     type: object
-  api.PacketRadio:
+  github_com_MeshCore-Tower_tower-server_internal_api.PacketObservationSummary:
+    properties:
+      heardAt:
+        description: epoch ms
+        type: integer
+      hopCount:
+        type: integer
+      iata:
+        type: string
+      id:
+        description: observation ID, use as cursor for pagination
+        type: integer
+      packetHash:
+        description: hex-encoded
+        type: string
+      payloadType:
+        type: integer
+      payloadTypeName:
+        type: string
+      rssi:
+        type: integer
+      snr:
+        type: number
+    type: object
+  github_com_MeshCore-Tower_tower-server_internal_api.PacketRadio:
     properties:
       bandwidthKhz:
         type: number
@@ -302,7 +466,111 @@ definitions:
       spreadFactor:
         type: integer
     type: object
-  api.PayloadBreakdownItem:
+  github_com_MeshCore-Tower_tower-server_internal_api.PacketSummary:
+    properties:
+      firstHeardAt:
+        description: epoch ms
+        type: integer
+      lastHeardAt:
+        description: epoch ms
+        type: integer
+      latestObserver:
+        $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.PacketLatestObserver'
+      observationCount:
+        type: integer
+      packetHash:
+        description: hex-encoded
+        type: string
+      payloadType:
+        type: integer
+      payloadTypeName:
+        type: string
+      routeType:
+        type: integer
+      routeTypeName:
+        type: string
+      summary:
+        description: human-readable payload summary
+        type: string
+    type: object
+  github_com_MeshCore-Tower_tower-server_internal_api.Page-github_com_MeshCore-Tower_tower-server_internal_api_AdvertObservation:
+    properties:
+      hasMore:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.AdvertObservation'
+        type: array
+      nextCursor:
+        type: integer
+    type: object
+  github_com_MeshCore-Tower_tower-server_internal_api.Page-github_com_MeshCore-Tower_tower-server_internal_api_ChannelMessage:
+    properties:
+      hasMore:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.ChannelMessage'
+        type: array
+      nextCursor:
+        type: integer
+    type: object
+  github_com_MeshCore-Tower_tower-server_internal_api.Page-github_com_MeshCore-Tower_tower-server_internal_api_ChannelSummary:
+    properties:
+      hasMore:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.ChannelSummary'
+        type: array
+      nextCursor:
+        type: integer
+    type: object
+  github_com_MeshCore-Tower_tower-server_internal_api.Page-github_com_MeshCore-Tower_tower-server_internal_api_NodeSummary:
+    properties:
+      hasMore:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.NodeSummary'
+        type: array
+      nextCursor:
+        type: integer
+    type: object
+  github_com_MeshCore-Tower_tower-server_internal_api.Page-github_com_MeshCore-Tower_tower-server_internal_api_ObserverSummary:
+    properties:
+      hasMore:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.ObserverSummary'
+        type: array
+      nextCursor:
+        type: integer
+    type: object
+  ? github_com_MeshCore-Tower_tower-server_internal_api.Page-github_com_MeshCore-Tower_tower-server_internal_api_PacketObservationSummary
+  : properties:
+      hasMore:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.PacketObservationSummary'
+        type: array
+      nextCursor:
+        type: integer
+    type: object
+  github_com_MeshCore-Tower_tower-server_internal_api.Page-github_com_MeshCore-Tower_tower-server_internal_api_PacketSummary:
+    properties:
+      hasMore:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.PacketSummary'
+        type: array
+      nextCursor:
+        type: integer
+    type: object
+  github_com_MeshCore-Tower_tower-server_internal_api.PayloadBreakdownItem:
     properties:
       count:
         type: integer
@@ -311,7 +579,7 @@ definitions:
       payloadTypeName:
         type: string
     type: object
-  api.Region:
+  github_com_MeshCore-Tower_tower-server_internal_api.Region:
     properties:
       centerLat:
         description: map center latitude
@@ -337,7 +605,7 @@ definitions:
         description: suggested map zoom level
         type: integer
     type: object
-  api.RegionSummary:
+  github_com_MeshCore-Tower_tower-server_internal_api.RegionSummary:
     properties:
       id:
         type: integer
@@ -347,15 +615,15 @@ definitions:
         description: URL-safe identifier e.g. "western-canada"
         type: string
     type: object
-  api.ResolvedHop:
+  github_com_MeshCore-Tower_tower-server_internal_api.ResolvedHop:
     properties:
       confidence:
         description: '"high", "low", "unknown"'
         type: string
       node:
-        $ref: '#/definitions/api.ResolvedNode'
+        $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.ResolvedNode'
     type: object
-  api.ResolvedNode:
+  github_com_MeshCore-Tower_tower-server_internal_api.ResolvedNode:
     properties:
       id:
         type: string
@@ -369,7 +637,7 @@ definitions:
         description: hex-encoded prefix
         type: string
     type: object
-  api.StatsOverview:
+  github_com_MeshCore-Tower_tower-server_internal_api.StatsOverview:
     properties:
       activeIatas:
         type: integer
@@ -383,7 +651,7 @@ definitions:
         description: always 24 for now
         type: integer
     type: object
-  api.TopNode:
+  github_com_MeshCore-Tower_tower-server_internal_api.TopNode:
     properties:
       iata:
         type: string
@@ -401,7 +669,7 @@ definitions:
       observationCount:
         type: integer
     type: object
-  api.TopObserver:
+  github_com_MeshCore-Tower_tower-server_internal_api.TopObserver:
     properties:
       displayName:
         type: string
@@ -414,7 +682,7 @@ definitions:
       observerType:
         type: string
     type: object
-  handlers.APIError:
+  internal_api_handlers.APIError:
     properties:
       code:
         description: e.g. "not_found", "bad_request"
@@ -423,7 +691,7 @@ definitions:
         description: e.g. "channel not found"
         type: string
     type: object
-  handlers.BrokerStatus:
+  internal_api_handlers.BrokerStatus:
     properties:
       connected:
         type: boolean
@@ -452,7 +720,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/handlers.BrokerStatus'
+              $ref: '#/definitions/internal_api_handlers.BrokerStatus'
             type: array
       summary: List all MQTT brokers and their connection status
       tags:
@@ -482,15 +750,15 @@ paths:
         "200":
           description: OK
           schema:
-            type: object
+            $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.Page-github_com_MeshCore-Tower_tower-server_internal_api_ChannelSummary'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List channels
       tags:
       - Channels
@@ -508,15 +776,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.Channel'
+            $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.Channel'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get channel detail
       tags:
       - Channels
@@ -550,15 +818,15 @@ paths:
         "200":
           description: OK
           schema:
-            type: object
+            $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.Page-github_com_MeshCore-Tower_tower-server_internal_api_ChannelMessage'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List messages for a channel
       tags:
       - Channels
@@ -571,12 +839,12 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/api.IATA'
+              $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.IATA'
             type: array
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List all IATA codes
       tags:
       - IATAs
@@ -594,11 +862,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.IATA'
+            $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.IATA'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get a single IATA code
       tags:
       - IATAs
@@ -635,15 +903,15 @@ paths:
         "200":
           description: OK
           schema:
-            type: object
+            $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.Page-github_com_MeshCore-Tower_tower-server_internal_api_ChannelMessage'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List channel messages
       tags:
       - Messages
@@ -670,11 +938,11 @@ paths:
         in: query
         name: pubkey
         type: string
-      - description: Filter to nodes with firmware >= 1.14.0
+      - description: Filter by multibyte path support (true/false); omit for no filter
         in: query
         name: supportsMultibytePaths
         type: boolean
-      - description: Filter to nodes with firmware >= 1.11.0
+      - description: Filter by multibyte trace support (true/false); omit for no filter
         in: query
         name: supportsMultibyteTraces
         type: boolean
@@ -692,11 +960,15 @@ paths:
         "200":
           description: OK
           schema:
-            type: object
+            $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.Page-github_com_MeshCore-Tower_tower-server_internal_api_NodeSummary'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List nodes
       tags:
       - Nodes
@@ -714,15 +986,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.Node'
+            $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.Node'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get node detail
       tags:
       - Nodes
@@ -748,15 +1020,15 @@ paths:
         "200":
           description: OK
           schema:
-            type: object
+            $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.Page-github_com_MeshCore-Tower_tower-server_internal_api_PacketObservationSummary'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List packet observations originating from a node
       tags:
       - Nodes
@@ -797,11 +1069,15 @@ paths:
         "200":
           description: OK
           schema:
-            type: object
+            $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.Page-github_com_MeshCore-Tower_tower-server_internal_api_ObserverSummary'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List observers
       tags:
       - Observers
@@ -819,15 +1095,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.Observer'
+            $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.Observer'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get observer detail
       tags:
       - Observers
@@ -853,15 +1129,15 @@ paths:
         "200":
           description: OK
           schema:
-            type: object
+            $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.Page-github_com_MeshCore-Tower_tower-server_internal_api_AdvertObservation'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List advert packets heard by an observer
       tags:
       - Observers
@@ -881,21 +1157,26 @@ paths:
         in: query
         name: afterId
         type: integer
+      - description: Bucketing interval, echoed back in the response; not yet applied
+          server-side
+        in: query
+        name: interval
+        type: string
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.ObserverTelemetry'
+            $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.ObserverTelemetry'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get observer telemetry history
       tags:
       - Observers
@@ -915,7 +1196,7 @@ paths:
         in: query
         name: routeType
         type: integer
-      - description: Filter by latest observation IATA (case-insensitive)
+      - description: Filter by IATA code
         in: query
         name: iata
         type: string
@@ -941,11 +1222,15 @@ paths:
         "200":
           description: OK
           schema:
-            type: object
+            $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.Page-github_com_MeshCore-Tower_tower-server_internal_api_PacketSummary'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List packets
       tags:
       - Packets
@@ -963,15 +1248,19 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.Packet'
+            $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.Packet'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get full packet detail
       tags:
       - Packets
@@ -984,12 +1273,12 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/api.RegionSummary'
+              $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.RegionSummary'
             type: array
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List all regions
       tags:
       - Regions
@@ -1007,15 +1296,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.Region'
+            $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.Region'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get a single region
       tags:
       - Regions
@@ -1037,12 +1326,12 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/api.ObservationPoint'
+              $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.ObservationPoint'
             type: array
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Hourly observation time series
       tags:
       - Stats
@@ -1059,11 +1348,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/api.StatsOverview'
+            $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.StatsOverview'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Network overview stats (last 24h)
       tags:
       - Stats
@@ -1085,19 +1374,19 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/api.PayloadBreakdownItem'
+              $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.PayloadBreakdownItem'
             type: array
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Observation counts by payload type (last 24h by default)
       tags:
       - Stats
   /stats/top-nodes:
     get:
       parameters:
-      - description: Filter by IATA code (case-insensitive)
+      - description: Filter by exact IATA code (case-sensitive)
         in: query
         name: iata
         type: string
@@ -1112,12 +1401,12 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/api.TopNode'
+              $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.TopNode'
             type: array
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Top N nodes by observation count (from materialized view)
       tags:
       - Stats
@@ -1143,12 +1432,12 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/api.TopObserver'
+              $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.TopObserver'
             type: array
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.APIError'
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Top N observers by observation count (last 24h by default)
       tags:
       - Stats

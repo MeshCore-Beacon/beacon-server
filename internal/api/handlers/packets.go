@@ -35,6 +35,7 @@ func PacketsRouter(reader api.Reader) http.Handler {
 //	@Param		cursor			query		int		false	"last_heard_at epoch ms of last item for pagination"
 //	@Param		limit			query		int		false	"Max results (default 50)"
 //	@Success	200				{object}	api.Page[api.PacketSummary]
+//	@Failure	400				{object}	handlers.APIError
 //	@Failure	500				{object}	handlers.APIError
 //	@Router		/packets [get]
 func listPackets(reader api.Reader) http.HandlerFunc {

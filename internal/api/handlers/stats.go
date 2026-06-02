@@ -121,7 +121,7 @@ func getStatsPayloadBreakdown(reader api.Reader) http.HandlerFunc {
 //	@Summary	Top N nodes by observation count (from materialized view)
 //	@Tags		Stats
 //	@Produce	json
-//	@Param		iata	query		string	false	"Filter by IATA code (case-insensitive)"
+//	@Param		iata	query		string	false	"Filter by exact IATA code (case-sensitive)"
 //	@Param		limit	query		int		false	"Max results (default 10)"
 //	@Success	200		{array}		api.TopNode
 //	@Failure	500		{object}	handlers.APIError

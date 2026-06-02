@@ -340,7 +340,7 @@ After adding or modifying any handler, regenerate the docs and commit the
 updated `docs/` directory alongside your handler changes:
 
 ```bash
-swag init -g cmd/tower/main.go -o docs
+swag init -g cmd/tower/main.go -o docs --parseDependecy
 ```
 
 Install swag:

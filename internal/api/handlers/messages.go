@@ -30,7 +30,7 @@ func MessagesRouter(reader api.Reader) http.Handler {
 //	@Param		iata		query		string	false	"Filter by IATA code"
 //	@Param		cursor		query		int		false	"Message ID of last item for pagination"
 //	@Param		limit		query		int		false	"Max results (default 50)"
-//	@Success	200			{object}	object
+//	@Success	200			{object}	api.Page[api.ChannelMessage]
 //	@Failure	400			{object}	handlers.APIError
 //	@Failure	500			{object}	handlers.APIError
 //	@Router		/messages [get]

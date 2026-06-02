@@ -32,14 +32,15 @@ func NodesRouter(reader api.Reader) http.Handler {
 //	@Produce	json
 //	@Param		type					query		int		false	"Node type integer (1=companion, 2=repeater, 3=room_server, 4=sensor)"
 //	@Param		typeName				query		string	false	"Node type name (companion, repeater, room_server, sensor)"
-//	@Param		iata					query		string	false	"Filter by IATA code (case-insensitive); comma-separated for multiple"
+//	@Param		iata					query		string	false	"Filter by IATA code (case-insensitive)"
 //	@Param		name					query		string	false	"Partial case-insensitive name match"
 //	@Param		pubkey					query		string	false	"Exact public key match (hex)"
-//	@Param		supportsMultibytePaths	query		string	false	"Multibyte path support filter: any (default), true, false"
-//	@Param		supportsMultibyteTraces	query		string	false	"Multibyte trace support filter: any (default), true, false"
+//	@Param		supportsMultibytePaths	query		bool	false	"Filter by multibyte path support (true/false); omit for no filter"
+//	@Param		supportsMultibyteTraces	query		bool	false	"Filter by multibyte trace support (true/false); omit for no filter"
 //	@Param		cursor					query		int		false	"last_seen epoch ms of last item for pagination"
 //	@Param		limit					query		int		false	"Max results (default 50)"
 //	@Success	200						{object}	api.Page[api.NodeSummary]
+//	@Failure	400						{object}	handlers.APIError
 //	@Failure	500						{object}	handlers.APIError
 //	@Router		/nodes [get]
 func listNodes(reader api.Reader) http.HandlerFunc {
@@ -120,7 +121,6 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 //	@Success	200		{object}	api.Node
 //	@Failure	400		{object}	handlers.APIError
 //	@Failure	404		{object}	handlers.APIError
-//	@Failure	500		{object}	handlers.APIError
 //	@Router		/nodes/{nodeId} [get]
 func getNode(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -146,7 +146,7 @@ func getNode(reader api.Reader) http.HandlerFunc {
 //	@Param		nodeId	path		string	true	"Node UUID"
 //	@Param		cursor	query		int		false	"Observation ID of last item for pagination"
 //	@Param		limit	query		int		false	"Max results (default 50)"
-//	@Success	200		{object}	api.Page[api.NodeObservation]
+//	@Success	200		{object}	api.Page[api.PacketObservationSummary]
 //	@Failure	400		{object}	handlers.APIError
 //	@Failure	500		{object}	handlers.APIError
 //	@Router		/nodes/{nodeId}/observations [get]
