@@ -3,6 +3,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -127,7 +128,7 @@ type Packet struct {
 	RouteTypeName    string                    `json:"routeTypeName"`
 	TransportCodes   *string                   `json:"transportCodes,omitempty"` // hex-encoded
 	OriginPubkey     *string                   `json:"originPubkey,omitempty"`   // hex-encoded
-	ParsedPayload    any                       `json:"parsedPayload,omitempty"`
+	ParsedPayload    json.RawMessage           `json:"parsedPayload,omitempty"`
 	RawHeader        string                    `json:"rawHeader"`
 	RawPayload       string                    `json:"rawPayload"` // hex-encoded
 	Decrypted        bool                      `json:"decrypted"`

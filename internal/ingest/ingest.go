@@ -253,6 +253,20 @@ type packetObservationEvent struct {
 	} `json:"observation"`
 }
 
+type parsedAnonReq struct {
+	Destination     byte   `json:"destination"`
+	EphemeralPubKey string `json:"ephemeralPubKey"` // hex
+}
+
+type parsedAdvert struct {
+	PublicKey string `json:"publicKey"` // hex
+	Timestamp uint32 `json:"timestamp"` // unix seconds
+	NodeType  string `json:"nodeType"`
+	Name      string `json:"name"`
+	Lat       int32  `json:"lat"`
+	Lon       int32  `json:"lon"`
+}
+
 // ChannelKeyStore is a read-only view of the channel keys loaded from config.
 type ChannelKeyStore interface {
 	// GetKey returns all known key entries for the given channel hash byte.
@@ -427,25 +441,37 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		return
 	}
 	var channelHash []byte
-	if packet.PayloadType() == meshcore.PayloadTypeGrpTxt {
-		grpTxt, err := meshcore.GroupTextFromBytes(packet.Payload)
-		if err != nil {
-			log.Printf("ingest[%s]: error decoding group text payload from %s/%s: %v", w.cfg.BrokerName, iata, pubkeyHex, err)
-			return
-		}
-		channelHash = []byte{grpTxt.ChannelHash}
-	}
 	originPubkey := pubkeyBytes
 	switch packet.PayloadType() {
+	case meshcore.PayloadTypeGrpTxt:
+		grpTxt, err := meshcore.GroupTextFromBytes(packet.Payload)
+		if err == nil {
+			channelHash = []byte{grpTxt.ChannelHash}
+		}
 	case meshcore.PayloadTypeAdvert:
 		advert, err := meshcore.AdvertFromBytes(packet.Payload)
 		if err == nil {
 			originPubkey = advert.PublicKey.PublicKeyBytes()
+			appData := advert.AppData()
+			pa := parsedAdvert{
+				PublicKey: hex.EncodeToString(advert.PublicKey.PublicKeyBytes()),
+				Timestamp: advert.Timestamp,
+				NodeType:  appData.Type,
+				Name:      appData.Name,
+				Lat:       appData.Lat,
+				Lon:       appData.Lon,
+			}
+			parsedPayload, _ = json.Marshal(pa)
 		}
 	case meshcore.PayloadTypeAnonReq:
 		anonReq, err := meshcore.AnonReqFromBytes(packet.Payload)
 		if err == nil {
 			originPubkey = anonReq.EphemeralPubKey[:]
+			par := parsedAnonReq{
+				Destination:     anonReq.Destination,
+				EphemeralPubKey: hex.EncodeToString(anonReq.EphemeralPubKey[:]),
+			}
+			parsedPayload, _ = json.Marshal(par)
 		}
 	}
 	rawHeader := []byte{packet.Header}
