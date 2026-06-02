@@ -1370,6 +1370,7 @@ FROM nodes n
 LEFT JOIN node_iatas ni ON ni.node_id = n.id
 WHERE
   ($1 = 0 OR n.node_type = $1)
+  AND ($2 = '' OR n.id IN (SELECT node_id FROM node_iatas WHERE iata ILIKE $2))
   AND (
     $3::text = 'any'
     OR ($3::text = 'true' AND n.supports_multibyte_paths = TRUE)
@@ -1383,7 +1384,6 @@ WHERE
   AND ($5::bytea IS NULL OR n.public_key = $5)
   AND ($6 = '' OR n.name ILIKE '%' || $6 || '%')
   AND ($7::timestamptz IS NULL OR n.last_seen < $7)
-  AND ($2 = '' OR n.id IN (SELECT node_id FROM node_iatas WHERE iata ILIKE $2))
 GROUP BY n.id
 ORDER BY n.last_seen DESC
 LIMIT $8
