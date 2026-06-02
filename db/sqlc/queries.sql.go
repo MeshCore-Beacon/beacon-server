@@ -209,7 +209,7 @@ const getNodeByID = `-- name: GetNodeByID :one
 SELECT id, public_key, node_type, name, latitude, longitude, location_source, last_advert_at, supports_multibyte_paths, supports_multibyte_traces, min_firmware_version, first_seen, last_seen, radio_freq_mhz, radio_sf, radio_bw_khz, metadata,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
-  (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', extract(epoch from ni.last_heard) * 1000)::bigint ORDER BY ni.last_heard DESC)
+  (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
    FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas
 FROM nodes n
 WHERE n.id = $1
@@ -270,7 +270,7 @@ const getNodeByPubkey = `-- name: GetNodeByPubkey :one
 SELECT id, public_key, node_type, name, latitude, longitude, location_source, last_advert_at, supports_multibyte_paths, supports_multibyte_traces, min_firmware_version, first_seen, last_seen, radio_freq_mhz, radio_sf, radio_bw_khz, metadata,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
-  (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', extract(epoch from ni.last_heard) * 1000)::bigint ORDER BY ni.last_heard DESC)
+  (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
    FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas
 FROM nodes n
 WHERE n.public_key = $1
