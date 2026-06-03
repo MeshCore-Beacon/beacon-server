@@ -1745,11 +1745,11 @@ COALESCE((
 FROM observers o
 LEFT JOIN observer_brokers ob ON ob.observer_id = o.id
 WHERE
-  ($1 = '' OR (
-    SELECT po.iata FROM packet_observations po
-    WHERE po.observer_id = o.id
-    ORDER BY po.heard_at DESC LIMIT 1
-  ) ILIKE $1)
+  ($1::text = '' OR (
+      SELECT po.iata FROM packet_observations po
+      WHERE po.observer_id = o.id
+      ORDER BY po.heard_at DESC LIMIT 1
+  ) = ANY(string_to_array($1::text, ',')))
   AND ($2 = '' OR o.observer_type = $2)
   AND ($3 = '' OR ob.broker_name = $3)
   AND ($4 = '' OR CASE
@@ -1764,7 +1764,7 @@ LIMIT $7
 `
 
 type ListObserversParams struct {
-	Column1 interface{}        `json:"column_1"`
+	Column1 string             `json:"column_1"`
 	Column2 interface{}        `json:"column_2"`
 	Column3 interface{}        `json:"column_3"`
 	Column4 interface{}        `json:"column_4"`

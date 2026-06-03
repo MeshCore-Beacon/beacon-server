@@ -1029,9 +1029,21 @@ paths:
   /observers:
     get:
       parameters:
-      - description: Filter by IATA code (case-insensitive)
+      - description: Filter by single IATA code (case-insensitive)
         in: query
         name: iata
+        type: string
+      - description: Filter by multiple IATA codes, comma-separated e.g. YVR,YYJ
+        in: query
+        name: iatas
+        type: string
+      - description: Filter by region ID, expands to member IATAs
+        in: query
+        name: regionId
+        type: integer
+      - description: Filter by region slug, expands to member IATAs
+        in: query
+        name: region
         type: string
       - description: Filter by observer type (e.g. meshcoretomqtt, meshcore-ha)
         in: query

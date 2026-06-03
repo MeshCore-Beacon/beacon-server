@@ -612,13 +612,14 @@ func (s *Store) ListChannelMessagesByHash(ctx context.Context, hash []byte, sinc
 // status is "online" or "offline" derived from last_status_at recency.
 // ListObservers returns a paginated list of observers with optional filters.
 // cursor is last_seen epoch ms of the last observer; pass 0 to start from the beginning.
-func (s *Store) ListObservers(ctx context.Context, iata, observerType, broker, status, name string, cursor int64, limit int32) (api.Page[api.ObserverSummary], error) {
+func (s *Store) ListObservers(ctx context.Context, iatas []string, observerType, broker, status, name string, cursor int64, limit int32) (api.Page[api.ObserverSummary], error) {
 	var cursorTS pgtype.Timestamptz
 	if cursor > 0 {
 		cursorTS = pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}
 	}
+	iataFilter := strings.Join(iatas, ",")
 	params := sqlc.ListObserversParams{
-		Column1: iata,
+		Column1: iataFilter,
 		Column2: observerType,
 		Column3: broker,
 		Column4: status,

@@ -32,7 +32,10 @@ func ObserversRouter(reader api.Reader) http.Handler {
 //	@Summary	List observers
 //	@Tags		Observers
 //	@Produce	json
-//	@Param		iata	query		string	false	"Filter by IATA code (case-insensitive)"
+//	@Param		iata			query		string	false	"Filter by single IATA code (case-insensitive)"
+//	@Param		iatas			query		string	false	"Filter by multiple IATA codes, comma-separated e.g. YVR,YYJ"
+//	@Param		regionId		query		int		false	"Filter by region ID, expands to member IATAs"
+//	@Param		region			query		string	false	"Filter by region slug, expands to member IATAs"
 //	@Param		type	query		string	false	"Filter by observer type (e.g. meshcoretomqtt, meshcore-ha)"
 //	@Param		broker	query		string	false	"Filter by broker name"
 //	@Param		status	query		string	false	"Filter by status (online or offline)"
@@ -45,7 +48,6 @@ func ObserversRouter(reader api.Reader) http.Handler {
 //	@Router		/observers [get]
 func listObservers(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		iata := r.URL.Query().Get("iata")
 		observerType := r.URL.Query().Get("type")
 		broker := r.URL.Query().Get("broker")
 		name := r.URL.Query().Get("name")
@@ -68,7 +70,16 @@ func listObservers(reader api.Reader) http.HandlerFunc {
 			}
 			limit = int32(l)
 		}
-		observers, err := reader.ListObservers(r.Context(), iata, observerType, broker, status, name, cursor, limit)
+		iatas := parseIATAs(r)
+		if regionIDStr := r.URL.Query().Get("regionId"); regionIDStr != "" || r.URL.Query().Get("region") != "" {
+			regionIATAs, err := resolveRegionIATAs(r.Context(), regionIDStr, r.URL.Query().Get("region"), reader)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			iatas = append(iatas, regionIATAs...)
+		}
+		observers, err := reader.ListObservers(r.Context(), iatas, observerType, broker, status, name, cursor, limit)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "failed to get list of observers")
 			return

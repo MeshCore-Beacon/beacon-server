@@ -396,10 +396,10 @@ type Reader interface {
 	// Pass cursor=0 to start from the beginning.
 	ListChannelMessagesByHash(ctx context.Context, hash []byte, since time.Time, limit int32, iata string, cursor int64) (Page[ChannelMessage], error)
 	// ListObservers returns a paginated list of observers with optional filters.
-	// All filter params are optional — pass empty string to skip a filter.
+	// All filter params are optional — pass empty string or nil to skip a filter.
 	// status is "online" or "offline" derived from last_status_at recency.
 	// cursor is last_seen epoch ms of the last observer; pass 0 to start from the beginning.
-	ListObservers(ctx context.Context, iata, observerType, broker, status, name string, cursor int64, limit int32) (Page[ObserverSummary], error)
+	ListObservers(ctx context.Context, iatas []string, observerType, broker, status, name string, cursor int64, limit int32) (Page[ObserverSummary], error)
 	// GetObserver returns full detail for a single observer by UUID.
 	// Returns nil, pgx.ErrNoRows if the observer is not found.
 	GetObserver(ctx context.Context, observerID uuid.UUID) (*Observer, error)
