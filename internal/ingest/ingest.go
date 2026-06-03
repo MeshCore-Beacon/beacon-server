@@ -445,7 +445,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		return
 	}
 	var channelHash []byte
-	originPubkey := pubkeyBytes
+	originPubkey := []byte(nil) // only set for payload types that carry a sender key
 	switch packet.PayloadType() {
 	case meshcore.PayloadTypeGrpTxt:
 		grpTxt, err := meshcore.GroupTextFromBytes(packet.Payload)
