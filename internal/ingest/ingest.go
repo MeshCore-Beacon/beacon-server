@@ -323,12 +323,13 @@ type parsedGroupEnvelope struct {
 }
 
 type parsedTrace struct {
-	Raw        string   `json:"raw"`
-	Type       string   `json:"type"`
-	TraceTag   string   `json:"traceTag"`
-	AuthCode   uint32   `json:"authCode"`
-	Flags      byte     `json:"flags"`
-	PathHashes []string `json:"pathHashes"`
+	Raw        string    `json:"raw"`
+	Type       string    `json:"type"`
+	TraceTag   string    `json:"traceTag"`
+	AuthCode   uint32    `json:"authCode"`
+	Flags      byte      `json:"flags"`
+	PathHashes []string  `json:"pathHashes"`
+	SNRValues  []float32 `json:"snrValues"`
 }
 
 type parsedAck struct {
@@ -700,10 +701,15 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	case meshcore.PayloadTypeTrace:
 		trace, err := meshcore.TraceFromBytes(packet.Payload)
 		if err == nil {
-			hashSize := int((trace.Flags & 0x03)) + 1
+			hashSize := int(trace.PathHashSize())
 			hashes := make([]string, 0)
 			for i := 0; i+hashSize <= len(trace.PathHashes); i += hashSize {
 				hashes = append(hashes, hex.EncodeToString(trace.PathHashes[i:i+hashSize]))
+			}
+			// SNR values are in packet.Path, one signed int8 per consumed hop
+			snrValues := make([]float32, 0, len(packet.Path))
+			for _, b := range packet.Path {
+				snrValues = append(snrValues, float32(int8(b))/4.0)
 			}
 			pt := parsedTrace{
 				Raw:        hex.EncodeToString(packet.Payload),
@@ -712,6 +718,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 				AuthCode:   trace.AuthCode,
 				Flags:      trace.Flags,
 				PathHashes: hashes,
+				SNRValues:  snrValues,
 			}
 			parsedPayload, _ = json.Marshal(pt)
 		}
