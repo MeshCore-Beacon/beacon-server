@@ -1439,7 +1439,7 @@ FROM nodes n
 LEFT JOIN node_iatas ni ON ni.node_id = n.id
 WHERE
   ($1 = 0 OR n.node_type = $1)
-  AND ($2 = '' OR n.id IN (SELECT node_id FROM node_iatas WHERE iata ILIKE $2))
+  AND ($2::text = '' OR n.id IN (SELECT node_id FROM node_iatas WHERE iata = ANY(string_to_array($2::text, ','))))
   AND (
     $3::text = 'any'
     OR ($3::text = 'true' AND n.supports_multibyte_paths = TRUE)
@@ -1460,7 +1460,7 @@ LIMIT $8
 
 type ListNodesParams struct {
 	Column1 interface{}        `json:"column_1"`
-	Column2 interface{}        `json:"column_2"`
+	Column2 string             `json:"column_2"`
 	Column3 string             `json:"column_3"`
 	Column4 string             `json:"column_4"`
 	Column5 []byte             `json:"column_5"`

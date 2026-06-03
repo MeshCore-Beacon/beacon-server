@@ -348,7 +348,7 @@ FROM nodes n
 LEFT JOIN node_iatas ni ON ni.node_id = n.id
 WHERE
   ($1 = 0 OR n.node_type = $1)
-  AND ($2 = '' OR n.id IN (SELECT node_id FROM node_iatas WHERE iata ILIKE $2))
+  AND ($2::text = '' OR n.id IN (SELECT node_id FROM node_iatas WHERE iata = ANY(string_to_array($2::text, ','))))
   AND (
     $3::text = 'any'
     OR ($3::text = 'true' AND n.supports_multibyte_paths = TRUE)

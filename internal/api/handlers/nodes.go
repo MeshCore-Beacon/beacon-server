@@ -32,7 +32,10 @@ func NodesRouter(reader api.Reader) http.Handler {
 //	@Produce	json
 //	@Param		type					query		int		false	"Node type integer (1=companion, 2=repeater, 3=room_server, 4=sensor)"
 //	@Param		typeName				query		string	false	"Node type name (companion, repeater, room_server, sensor)"
-//	@Param		iata					query		string	false	"Filter by IATA code (case-insensitive)"
+//	@Param		iata			query		string	false	"Filter by single IATA code (case-insensitive)"
+//	@Param		iatas			query		string	false	"Filter by multiple IATA codes, comma-separated e.g. YVR,YYJ"
+//	@Param		regionId		query		int		false	"Filter by region ID, expands to member IATAs"
+//	@Param		region			query		string	false	"Filter by region slug, expands to member IATAs"
 //	@Param		name					query		string	false	"Partial case-insensitive name match"
 //	@Param		pubkey					query		string	false	"Exact public key match (hex)"
 //	@Param		supportsMultibytePaths	query		bool	false	"Filter by multibyte path support (true/false); omit for no filter"
@@ -83,7 +86,15 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 			}
 			pubkey = b
 		}
-		iata := r.URL.Query().Get("iata")
+		iatas := parseIATAs(r)
+		if regionIDStr := r.URL.Query().Get("regionId"); regionIDStr != "" || r.URL.Query().Get("region") != "" {
+			regionIATAs, err := resolveRegionIATAs(r.Context(), regionIDStr, r.URL.Query().Get("region"), reader)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			iatas = append(iatas, regionIATAs...)
+		}
 		name := r.URL.Query().Get("name")
 		var supportsMultibytePaths *bool
 		if v := r.URL.Query().Get("supportsMultibytePaths"); v != "" {
@@ -103,7 +114,7 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 			}
 			supportsMultibyteTraces = &b
 		}
-		nodes, err := reader.ListNodes(r.Context(), nodeType, iata, supportsMultibytePaths, supportsMultibyteTraces, pubkey, name, cursor, limit)
+		nodes, err := reader.ListNodes(r.Context(), nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, name, cursor, limit)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return

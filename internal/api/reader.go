@@ -412,9 +412,9 @@ type Reader interface {
 	// Pass cursor=0 to start from the beginning.
 	ListObserverAdverts(ctx context.Context, observerID uuid.UUID, cursor int64, limit int32) (Page[AdvertObservation], error)
 	// ListNodes returns a paginated list of nodes with optional filters.
-	// Pass 0 for nodeType, empty string for iata, nil for pubkey to skip those filters.
+	// Pass 0 for nodeType, nil iatas, nil for pubkey to skip those filters.
 	// cursor is last_seen epoch ms; pass 0 to start from the beginning.
-	ListNodes(ctx context.Context, nodeType int16, iata string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, name string, cursor int64, limit int32) (Page[NodeSummary], error)
+	ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, name string, cursor int64, limit int32) (Page[NodeSummary], error)
 
 	// GetNode returns full detail for a single node by UUID.
 	// Returns nil, pgx.ErrNoRows if the node is not found.

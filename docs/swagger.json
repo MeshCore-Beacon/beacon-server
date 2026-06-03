@@ -358,8 +358,26 @@
                     },
                     {
                         "type": "string",
-                        "description": "Filter by IATA code (case-insensitive)",
+                        "description": "Filter by single IATA code (case-insensitive)",
                         "name": "iata",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by multiple IATA codes, comma-separated e.g. YVR,YYJ",
+                        "name": "iatas",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by region ID, expands to member IATAs",
+                        "name": "regionId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by region slug, expands to member IATAs",
+                        "name": "region",
                         "in": "query"
                     },
                     {
