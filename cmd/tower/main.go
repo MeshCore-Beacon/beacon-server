@@ -108,6 +108,9 @@ func main() {
 
 	store := db.New(pool)
 
+	// refresh meterialized views on boot or restart to stay fresh
+	refreshMaterializedViews(ctx, store)
+
 	// ── Seed config data ─────────────────────────────────────────────────────
 	if err := config.Seed(ctx, cfg, store); err != nil {
 		log.Fatalf("failed to seed config: %v", err)
@@ -194,12 +197,7 @@ func main() {
 				if err := store.DeleteOldPackets(ctx, time.Now().Add(-packetRetention)); err != nil {
 					log.Printf("cleanup: delete old packets failed: %v", err)
 				}
-				if err := store.RefreshHourlyStats(ctx); err != nil {
-					log.Printf("cleanup: refresh materialized view for hourly stats failed: %v", err)
-				}
-				if err := store.RefreshTopNodes(ctx); err != nil {
-					log.Printf("cleanup: refresh materialized view for top nodes failed: %v", err)
-				}
+				refreshMaterializedViews(ctx, store)
 			case <-ctx.Done():
 				return
 			}
@@ -253,4 +251,16 @@ func mustEnv(key string) string {
 		log.Printf("warning: %s is not set", key)
 	}
 	return v
+}
+
+func refreshMaterializedViews(ctx context.Context, store *db.Store) {
+	if err := store.RefreshHourlyStats(ctx); err != nil {
+		log.Printf("refresh: materialized view for hourly stats failed: %v", err)
+	}
+	if err := store.RefreshTopNodes(ctx); err != nil {
+		log.Printf("refresh: materialized view for top nodes failed: %v", err)
+	}
+	if err := store.RefreshRadioPresets(ctx); err != nil {
+		log.Printf("refresh: materialized view for radio presets failed: %v", err)
+	}
 }

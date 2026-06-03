@@ -636,3 +636,6 @@ REFRESH MATERIALIZED VIEW CONCURRENTLY mv_hourly_iata_stats;
 
 -- name: RefreshTopNodes :exec
 REFRESH MATERIALIZED VIEW CONCURRENTLY mv_top_nodes_by_iata;
+
+-- name: RefreshRadioPresets :exec
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_radio_presets;

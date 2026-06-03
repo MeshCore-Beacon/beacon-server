@@ -759,6 +759,12 @@ func (s *Store) RefreshTopNodes(ctx context.Context) error {
 	return s.q.RefreshTopNodes(ctx)
 }
 
+// RefreshRadioPresets refreshes the mv_radio_presets materialized view.
+// Called by the cleanup goroutine to keep top node rankings current.
+func (s *Store) RefreshRadioPresets(ctx context.Context) error {
+	return s.q.RefreshRadioPresets(ctx)
+}
+
 // GetObserverTelemetry returns telemetry points for an observer within the given time range.
 // since and until define the window; pass zero times to use defaults (last 24h).
 // TODO: implement server-side bucketing by interval when needed.

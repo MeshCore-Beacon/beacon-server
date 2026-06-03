@@ -340,3 +340,34 @@ CREATE UNIQUE INDEX idx_mv_top_nodes
 
 CREATE UNIQUE INDEX idx_mv_hourly_iata_stats
   ON mv_hourly_iata_stats(iata, hour);
+
+CREATE MATERIALIZED VIEW mv_radio_presets AS
+SELECT
+    concat(o.radio_freq_mhz, ',', o.radio_bw_khz, ',', o.radio_sf) AS preset,
+    (SELECT po.iata FROM packet_observations po WHERE po.observer_id = o.id ORDER BY po.heard_at DESC LIMIT 1) AS iata,
+    'observer' AS source_type,
+    COUNT(*) AS count
+FROM observers o
+WHERE o.radio_freq_mhz IS NOT NULL
+    AND o.radio_sf IS NOT NULL
+    AND o.radio_bw_khz IS NOT NULL
+GROUP BY concat(o.radio_freq_mhz, ',', o.radio_bw_khz, ',', o.radio_sf),
+         (SELECT po.iata FROM packet_observations po WHERE po.observer_id = o.id ORDER BY po.heard_at DESC LIMIT 1)
+HAVING (SELECT po.iata FROM packet_observations po WHERE po.observer_id = o.id ORDER BY po.heard_at DESC LIMIT 1) IS NOT NULL
+
+UNION ALL
+
+SELECT
+    concat(n.radio_freq_mhz, ',', n.radio_bw_khz, ',', n.radio_sf) AS preset,
+    ni.iata,
+    'node' AS source_type,
+    COUNT(*) AS count
+FROM nodes n
+JOIN node_iatas ni ON ni.node_id = n.id
+WHERE n.radio_freq_mhz IS NOT NULL
+    AND n.radio_sf IS NOT NULL
+    AND n.radio_bw_khz IS NOT NULL
+GROUP BY concat(n.radio_freq_mhz, ',', n.radio_bw_khz, ',', n.radio_sf), ni.iata;
+
+CREATE UNIQUE INDEX idx_mv_radio_presets
+    ON mv_radio_presets(preset, iata, source_type);
