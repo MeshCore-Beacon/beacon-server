@@ -47,7 +47,7 @@ func PayloadTypeName(t int16) string {
 }
 
 // PayloadTypeFromString returns the integer payload type for a given name.
-// Returns 0 (no filter) if the string is empty or unrecognized.
+// Returns -1 (no filter) if the string is empty or unrecognized.
 func PayloadTypeFromString(s string) int16 {
 	switch strings.ToLower(s) {
 	case "request", "req":
@@ -77,7 +77,7 @@ func PayloadTypeFromString(s string) int16 {
 	case "raw_custom", "raw", "custom":
 		return int16(meshcore.PayloadTypeRawCustom)
 	default:
-		return 0
+		return -1
 	}
 }
 

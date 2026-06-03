@@ -40,7 +40,7 @@ func PacketsRouter(reader api.Reader) http.Handler {
 //	@Router		/packets [get]
 func listPackets(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var payloadType int16
+		var payloadType int16 = -1
 		if p := r.URL.Query().Get("payloadType"); p != "" {
 			t, err := strconv.ParseInt(p, 10, 16)
 			if err != nil {
@@ -49,12 +49,12 @@ func listPackets(reader api.Reader) http.HandlerFunc {
 			}
 			payloadType = int16(t)
 		}
-		if payloadType == 0 {
+		if payloadType == -1 {
 			if p := r.URL.Query().Get("payloadTypeName"); p != "" {
 				payloadType = api.PayloadTypeFromString(p)
 			}
 		}
-		var routeType int16
+		var routeType int16 = -1
 		if p := r.URL.Query().Get("routeType"); p != "" {
 			t, err := strconv.ParseInt(p, 10, 16)
 			if err != nil {

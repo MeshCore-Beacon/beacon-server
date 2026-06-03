@@ -222,8 +222,8 @@ LEFT JOIN LATERAL (
 ) po ON true
 LEFT JOIN observers o ON o.id = po.observer_id
 WHERE
-  ($1 = 0 OR p.payload_type = $1)
-  AND ($2 = 0 OR p.route_type = $2)
+  ($1::smallint = -1 OR p.payload_type = $1::smallint)
+  AND ($2::smallint = -1 OR p.route_type = $2::smallint)
   AND ($3 = '' OR po.iata ILIKE $3)
   AND ($4::timestamptz IS NULL OR p.first_heard_at >= $4)
   AND ($5::timestamptz IS NULL OR p.first_heard_at <= $5)

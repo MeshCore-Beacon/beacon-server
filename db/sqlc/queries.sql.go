@@ -1777,8 +1777,8 @@ LEFT JOIN LATERAL (
 ) po ON true
 LEFT JOIN observers o ON o.id = po.observer_id
 WHERE
-  ($1 = 0 OR p.payload_type = $1)
-  AND ($2 = 0 OR p.route_type = $2)
+  ($1::smallint = -1 OR p.payload_type = $1::smallint)
+  AND ($2::smallint = -1 OR p.route_type = $2::smallint)
   AND ($3 = '' OR po.iata ILIKE $3)
   AND ($4::timestamptz IS NULL OR p.first_heard_at >= $4)
   AND ($5::timestamptz IS NULL OR p.first_heard_at <= $5)
@@ -1788,8 +1788,8 @@ LIMIT $7
 `
 
 type ListPacketsParams struct {
-	Column1 interface{}        `json:"column_1"`
-	Column2 interface{}        `json:"column_2"`
+	Column1 int16              `json:"column_1"`
+	Column2 int16              `json:"column_2"`
 	Column3 interface{}        `json:"column_3"`
 	Column4 pgtype.Timestamptz `json:"column_4"`
 	Column5 pgtype.Timestamptz `json:"column_5"`
