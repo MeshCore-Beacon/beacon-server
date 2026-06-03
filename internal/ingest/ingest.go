@@ -258,17 +258,69 @@ type packetObservationEvent struct {
 }
 
 type parsedAnonReq struct {
+	Type            string `josn:"type"`
 	Destination     byte   `json:"destination"`
 	EphemeralPubKey string `json:"ephemeralPubKey"` // hex
 }
 
 type parsedAdvert struct {
-	PublicKey string `json:"publicKey"` // hex
-	Timestamp uint32 `json:"timestamp"` // unix seconds
-	NodeType  string `json:"nodeType"`
-	Name      string `json:"name"`
-	Lat       int32  `json:"lat"`
-	Lon       int32  `json:"lon"`
+	Type      string  `json:"type"`
+	PublicKey string  `json:"publicKey"`
+	Timestamp uint32  `json:"timestamp"`
+	NodeType  string  `json:"nodeType"`
+	Name      string  `json:"name"`
+	Lat       float64 `json:"lat"`
+	Lon       float64 `json:"lon"`
+}
+
+type parsedEnvelope struct {
+	Type             string `json:"type"`
+	DestinationHash  string `json:"destinationHash"`
+	SourceHash       string `json:"sourceHash"`
+	CipherMac        string `json:"cipherMac"`
+	Ciphertext       string `json:"ciphertext"`
+	CiphertextLength int    `json:"ciphertextLength"`
+	Decrypted        any    `json:"decrypted"`
+}
+
+type parsedGroupEnvelope struct {
+	Type             string `json:"type"`
+	ChannelHash      string `json:"channelHash"`
+	CipherMac        string `json:"cipherMac"`
+	Ciphertext       string `json:"ciphertext"`
+	CiphertextLength int    `json:"ciphertextLength"`
+	Decrypted        any    `json:"decrypted"`
+}
+
+type parsedTrace struct {
+	Type       string   `json:"type"`
+	TraceTag   string   `json:"traceTag"`
+	AuthCode   uint32   `json:"authCode"`
+	Flags      byte     `json:"flags"`
+	PathHashes []string `json:"pathHashes"`
+}
+
+type parsedAck struct {
+	Type     string `json:"type"`
+	Checksum string `json:"checksum"`
+}
+
+type parsedMultipart struct {
+	Type           string `json:"type"`
+	Remaining      uint8  `json:"remaining"`
+	WrappedType    byte   `json:"wrappedType"`
+	WrappedPayload string `json:"wrappedPayload"`
+}
+
+type parsedControl struct {
+	Type  string `json:"type"`
+	Flags byte   `json:"flags"`
+	Data  string `json:"data"`
+}
+
+type parsedRaw struct {
+	Type string `json:"type"`
+	Data string `json:"data"`
 }
 
 // ChannelKeyStore is a read-only view of the channel keys loaded from config.
@@ -439,45 +491,184 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		binary.LittleEndian.PutUint16(transportCodes[0:2], packet.TransportCode1)
 		binary.LittleEndian.PutUint16(transportCodes[2:4], packet.TransportCode2)
 	}
-	parsedPayload, err := json.Marshal(packet.Payload)
-	if err != nil {
-		log.Printf("ingest[%s]: failed to marshal payload from %s/%s: %v", w.cfg.BrokerName, iata, pubkeyHex, err)
-		return
-	}
+
+	// begin parse payloads
 	var channelHash []byte
-	originPubkey := []byte(nil) // only set for payload types that carry a sender key
+	originPubkey := []byte(nil)
+	var parsedPayload json.RawMessage
+
 	switch packet.PayloadType() {
 	case meshcore.PayloadTypeGrpTxt:
 		grpTxt, err := meshcore.GroupTextFromBytes(packet.Payload)
 		if err == nil {
 			channelHash = []byte{grpTxt.ChannelHash}
+			pg := parsedGroupEnvelope{
+				Type:             "GROUP_TEXT",
+				ChannelHash:      hex.EncodeToString([]byte{grpTxt.ChannelHash}),
+				CipherMac:        hex.EncodeToString(grpTxt.MAC[:]),
+				Ciphertext:       hex.EncodeToString(grpTxt.EncryptedPayload),
+				CiphertextLength: len(grpTxt.EncryptedPayload),
+			}
+			parsedPayload, _ = json.Marshal(pg)
 		}
+
+	case meshcore.PayloadTypeGrpData:
+		grpData, err := meshcore.GroupDataFromBytes(packet.Payload)
+		if err == nil {
+			pg := parsedGroupEnvelope{
+				Type:             "GROUP_DATA",
+				ChannelHash:      hex.EncodeToString([]byte{grpData.ChannelHash}),
+				CipherMac:        hex.EncodeToString(grpData.MAC[:]),
+				Ciphertext:       hex.EncodeToString(grpData.EncryptedPayload),
+				CiphertextLength: len(grpData.EncryptedPayload),
+			}
+			parsedPayload, _ = json.Marshal(pg)
+		}
+
 	case meshcore.PayloadTypeAdvert:
 		advert, err := meshcore.AdvertFromBytes(packet.Payload)
 		if err == nil {
 			originPubkey = advert.PublicKey.PublicKeyBytes()
 			appData := advert.AppData()
 			pa := parsedAdvert{
+				Type:      "ADVERT",
 				PublicKey: hex.EncodeToString(advert.PublicKey.PublicKeyBytes()),
 				Timestamp: advert.Timestamp,
 				NodeType:  appData.Type,
 				Name:      appData.Name,
-				Lat:       appData.Lat,
-				Lon:       appData.Lon,
+				Lat:       float64(appData.Lat) / 1e6,
+				Lon:       float64(appData.Lon) / 1e6,
 			}
 			parsedPayload, _ = json.Marshal(pa)
 		}
+
 	case meshcore.PayloadTypeAnonReq:
 		anonReq, err := meshcore.AnonReqFromBytes(packet.Payload)
 		if err == nil {
 			originPubkey = anonReq.EphemeralPubKey[:]
 			par := parsedAnonReq{
+				Type:            "ANON_REQUEST",
 				Destination:     anonReq.Destination,
 				EphemeralPubKey: hex.EncodeToString(anonReq.EphemeralPubKey[:]),
 			}
 			parsedPayload, _ = json.Marshal(par)
 		}
+
+	case meshcore.PayloadTypeReq:
+		req, err := meshcore.RequestFromBytes(packet.Payload)
+		if err == nil {
+			pe := parsedEnvelope{
+				Type:             "REQUEST",
+				DestinationHash:  hex.EncodeToString([]byte{req.Destination}),
+				SourceHash:       hex.EncodeToString([]byte{req.Source}),
+				CipherMac:        hex.EncodeToString(req.MAC[:]),
+				Ciphertext:       hex.EncodeToString(req.EncryptedPayload),
+				CiphertextLength: len(req.EncryptedPayload),
+			}
+			parsedPayload, _ = json.Marshal(pe)
+		}
+
+	case meshcore.PayloadTypeResponse:
+		resp, err := meshcore.ResponseFromBytes(packet.Payload)
+		if err == nil {
+			pe := parsedEnvelope{
+				Type:             "RESPONSE",
+				DestinationHash:  hex.EncodeToString([]byte{resp.Destination}),
+				SourceHash:       hex.EncodeToString([]byte{resp.Source}),
+				CipherMac:        hex.EncodeToString(resp.MAC[:]),
+				Ciphertext:       hex.EncodeToString(resp.EncryptedPayload),
+				CiphertextLength: len(resp.EncryptedPayload),
+			}
+			parsedPayload, _ = json.Marshal(pe)
+		}
+
+	case meshcore.PayloadTypeTxtMsg:
+		txt, err := meshcore.TextMessageFromBytes(packet.Payload)
+		if err == nil {
+			pe := parsedEnvelope{
+				Type:             "TEXT_MESSAGE",
+				DestinationHash:  hex.EncodeToString([]byte{txt.Destination}),
+				SourceHash:       hex.EncodeToString([]byte{txt.Source}),
+				CipherMac:        hex.EncodeToString(txt.MAC[:]),
+				Ciphertext:       hex.EncodeToString(txt.EncryptedPayload),
+				CiphertextLength: len(txt.EncryptedPayload),
+			}
+			parsedPayload, _ = json.Marshal(pe)
+		}
+
+	case meshcore.PayloadTypePath:
+		path, err := meshcore.PathFromBytes(packet.Payload)
+		if err == nil {
+			pe := parsedEnvelope{
+				Type:             "PATH",
+				DestinationHash:  hex.EncodeToString([]byte{path.Destination}),
+				SourceHash:       hex.EncodeToString([]byte{path.Source}),
+				CipherMac:        hex.EncodeToString(path.MAC[:]),
+				Ciphertext:       hex.EncodeToString(path.EncryptedPayload),
+				CiphertextLength: len(path.EncryptedPayload),
+			}
+			parsedPayload, _ = json.Marshal(pe)
+		}
+
+	case meshcore.PayloadTypeTrace:
+		trace, err := meshcore.TraceFromBytes(packet.Payload)
+		if err == nil {
+			hashSize := int((trace.Flags & 0x03)) + 1
+			hashes := make([]string, 0)
+			for i := 0; i+hashSize <= len(trace.PathHashes); i += hashSize {
+				hashes = append(hashes, hex.EncodeToString(trace.PathHashes[i:i+hashSize]))
+			}
+			pt := parsedTrace{
+				Type:       "TRACE",
+				TraceTag:   hex.EncodeToString(uint32ToBytes(trace.Tag)),
+				AuthCode:   trace.AuthCode,
+				Flags:      trace.Flags,
+				PathHashes: hashes,
+			}
+			parsedPayload, _ = json.Marshal(pt)
+		}
+
+	case meshcore.PayloadTypeAck:
+		ack, err := meshcore.AckFromBytes(packet.Payload)
+		if err == nil {
+			pa := parsedAck{
+				Type:     "ACK",
+				Checksum: hex.EncodeToString(uint32ToBytes(ack.AckCRC)),
+			}
+			parsedPayload, _ = json.Marshal(pa)
+		}
+
+	case meshcore.PayloadTypeMultiPart:
+		mp, err := meshcore.MultiPartFromBytes(packet.Payload)
+		if err == nil {
+			pm := parsedMultipart{
+				Type:           "MULTIPART",
+				Remaining:      mp.Remaining,
+				WrappedType:    mp.WrappedType,
+				WrappedPayload: hex.EncodeToString(mp.WrappedPayload),
+			}
+			parsedPayload, _ = json.Marshal(pm)
+		}
+
+	case meshcore.PayloadTypeControl:
+		ctrl, err := meshcore.ControlFromBytes(packet.Payload)
+		if err == nil {
+			pc := parsedControl{
+				Type:  "CONTROL",
+				Flags: ctrl.Flags,
+				Data:  hex.EncodeToString(ctrl.Data),
+			}
+			parsedPayload, _ = json.Marshal(pc)
+		}
+
+	default:
+		pr := parsedRaw{
+			Type: "RAW",
+			Data: hex.EncodeToString(packet.Payload),
+		}
+		parsedPayload, _ = json.Marshal(pr)
 	}
+
 	rawHeader := []byte{packet.Header}
 	if transportCodes != nil {
 		rawHeader = append(rawHeader, transportCodes...)
@@ -750,8 +941,8 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 		}
 		var lat, lon *float64
 		if advert.AppData().Lat != 0 || advert.AppData().Lon != 0 {
-			la := float64(advert.AppData().Lat) / 1e7
-			lo := float64(advert.AppData().Lon) / 1e7
+			la := float64(advert.AppData().Lat) / 1e6
+			lo := float64(advert.AppData().Lon) / 1e6
 			lat = &la
 			lon = &lo
 		}
@@ -915,4 +1106,10 @@ func normalizeObserverType(source string) string {
 		return source // fall back to raw if parsing produced nothing
 	}
 	return s
+}
+
+func uint32ToBytes(v uint32) []byte {
+	b := make([]byte, 4)
+	binary.LittleEndian.PutUint32(b, v)
+	return b
 }
