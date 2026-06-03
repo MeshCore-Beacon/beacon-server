@@ -243,6 +243,7 @@ type packetObservationEvent struct {
 		PayloadType        uint8  `json:"payloadType"`
 		PayloadTypeName    string `json:"payloadTypeName"`
 		RouteType          uint8  `json:"routeType"`
+		RouteTypeName      string `json:"routeTypeName"`
 		IsFirstObservation bool   `json:"isFirstObservation"`
 		ObservationCount   int64  `json:"observationCount"`
 	} `json:"packet"`
@@ -254,10 +255,18 @@ type packetObservationEvent struct {
 		RSSI         int16   `json:"rssi"`
 		SNR          float32 `json:"snr"`
 		SourceBroker string  `json:"sourceBroker"`
+		PathBytes    string  `json:"pathBytes"`
+		PathLength   struct {
+			Raw      string `json:"raw"`
+			HashSize uint8  `json:"hashSize"`
+			HopCount uint8  `json:"hopCount"`
+		} `json:"pathLength"`
+		PropagationTimeMs int32 `json:"propagationTimeMs"`
 	} `json:"observation"`
 }
 
 type parsedAnonReq struct {
+	Raw             string `json:"raw"`
 	Type            string `josn:"type"`
 	Destination     byte   `json:"destination"`
 	EphemeralPubKey string `json:"ephemeralPubKey"` // hex
@@ -293,6 +302,7 @@ type parsedAdvert struct {
 }
 
 type parsedEnvelope struct {
+	Raw              string `json:"raw"`
 	Type             string `json:"type"`
 	DestinationHash  string `json:"destinationHash"`
 	SourceHash       string `json:"sourceHash"`
@@ -303,6 +313,7 @@ type parsedEnvelope struct {
 }
 
 type parsedGroupEnvelope struct {
+	Raw              string `json:"raw"`
 	Type             string `json:"type"`
 	ChannelHash      string `json:"channelHash"`
 	CipherMac        string `json:"cipherMac"`
@@ -312,6 +323,7 @@ type parsedGroupEnvelope struct {
 }
 
 type parsedTrace struct {
+	Raw        string   `json:"raw"`
 	Type       string   `json:"type"`
 	TraceTag   string   `json:"traceTag"`
 	AuthCode   uint32   `json:"authCode"`
@@ -320,11 +332,13 @@ type parsedTrace struct {
 }
 
 type parsedAck struct {
+	Raw      string `json:"raw"`
 	Type     string `json:"type"`
 	Checksum string `json:"checksum"`
 }
 
 type parsedMultipart struct {
+	Raw            string `json:"raw"`
 	Type           string `json:"type"`
 	Remaining      uint8  `json:"remaining"`
 	WrappedType    byte   `json:"wrappedType"`
@@ -332,6 +346,7 @@ type parsedMultipart struct {
 }
 
 type parsedControl struct {
+	Raw   string `json:"raw"`
 	Type  string `json:"type"`
 	Flags byte   `json:"flags"`
 	Data  string `json:"data"`
@@ -339,7 +354,7 @@ type parsedControl struct {
 
 type parsedRaw struct {
 	Type string `json:"type"`
-	Data string `json:"data"`
+	Raw  string `json:"raw"`
 }
 
 // ChannelKeyStore is a read-only view of the channel keys loaded from config.
@@ -522,6 +537,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		if err == nil {
 			channelHash = []byte{grpTxt.ChannelHash}
 			pg := parsedGroupEnvelope{
+				Raw:              hex.EncodeToString(packet.Payload),
 				Type:             "GROUP_TEXT",
 				ChannelHash:      hex.EncodeToString([]byte{grpTxt.ChannelHash}),
 				CipherMac:        hex.EncodeToString(grpTxt.MAC[:]),
@@ -535,6 +551,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		grpData, err := meshcore.GroupDataFromBytes(packet.Payload)
 		if err == nil {
 			pg := parsedGroupEnvelope{
+				Raw:              hex.EncodeToString(packet.Payload),
 				Type:             "GROUP_DATA",
 				ChannelHash:      hex.EncodeToString([]byte{grpData.ChannelHash}),
 				CipherMac:        hex.EncodeToString(grpData.MAC[:]),
@@ -612,6 +629,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		if err == nil {
 			originPubkey = anonReq.EphemeralPubKey[:]
 			par := parsedAnonReq{
+				Raw:             hex.EncodeToString(packet.Payload),
 				Type:            "ANON_REQUEST",
 				Destination:     anonReq.Destination,
 				EphemeralPubKey: hex.EncodeToString(anonReq.EphemeralPubKey[:]),
@@ -623,6 +641,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		req, err := meshcore.RequestFromBytes(packet.Payload)
 		if err == nil {
 			pe := parsedEnvelope{
+				Raw:              hex.EncodeToString(packet.Payload),
 				Type:             "REQUEST",
 				DestinationHash:  hex.EncodeToString([]byte{req.Destination}),
 				SourceHash:       hex.EncodeToString([]byte{req.Source}),
@@ -637,6 +656,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		resp, err := meshcore.ResponseFromBytes(packet.Payload)
 		if err == nil {
 			pe := parsedEnvelope{
+				Raw:              hex.EncodeToString(packet.Payload),
 				Type:             "RESPONSE",
 				DestinationHash:  hex.EncodeToString([]byte{resp.Destination}),
 				SourceHash:       hex.EncodeToString([]byte{resp.Source}),
@@ -651,6 +671,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		txt, err := meshcore.TextMessageFromBytes(packet.Payload)
 		if err == nil {
 			pe := parsedEnvelope{
+				Raw:              hex.EncodeToString(packet.Payload),
 				Type:             "TEXT_MESSAGE",
 				DestinationHash:  hex.EncodeToString([]byte{txt.Destination}),
 				SourceHash:       hex.EncodeToString([]byte{txt.Source}),
@@ -665,6 +686,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		path, err := meshcore.PathFromBytes(packet.Payload)
 		if err == nil {
 			pe := parsedEnvelope{
+				Raw:              hex.EncodeToString(packet.Payload),
 				Type:             "PATH",
 				DestinationHash:  hex.EncodeToString([]byte{path.Destination}),
 				SourceHash:       hex.EncodeToString([]byte{path.Source}),
@@ -684,6 +706,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 				hashes = append(hashes, hex.EncodeToString(trace.PathHashes[i:i+hashSize]))
 			}
 			pt := parsedTrace{
+				Raw:        hex.EncodeToString(packet.Payload),
 				Type:       "TRACE",
 				TraceTag:   hex.EncodeToString(uint32ToBytes(trace.Tag)),
 				AuthCode:   trace.AuthCode,
@@ -697,6 +720,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		ack, err := meshcore.AckFromBytes(packet.Payload)
 		if err == nil {
 			pa := parsedAck{
+				Raw:      hex.EncodeToString(packet.Payload),
 				Type:     "ACK",
 				Checksum: hex.EncodeToString(uint32ToBytes(ack.AckCRC)),
 			}
@@ -707,6 +731,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		mp, err := meshcore.MultiPartFromBytes(packet.Payload)
 		if err == nil {
 			pm := parsedMultipart{
+				Raw:            hex.EncodeToString(packet.Payload),
 				Type:           "MULTIPART",
 				Remaining:      mp.Remaining,
 				WrappedType:    mp.WrappedType,
@@ -719,6 +744,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		ctrl, err := meshcore.ControlFromBytes(packet.Payload)
 		if err == nil {
 			pc := parsedControl{
+				Raw:   hex.EncodeToString(packet.Payload),
 				Type:  "CONTROL",
 				Flags: ctrl.Flags,
 				Data:  hex.EncodeToString(ctrl.Data),
@@ -729,7 +755,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	default:
 		pr := parsedRaw{
 			Type: "RAW",
-			Data: hex.EncodeToString(packet.Payload),
+			Raw:  hex.EncodeToString(packet.Payload),
 		}
 		parsedPayload, _ = json.Marshal(pr)
 	}
@@ -810,6 +836,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		evt.Packet.PayloadType = packet.PayloadType()
 		evt.Packet.PayloadTypeName = packet.PayloadTypeString()
 		evt.Packet.RouteType = packet.RouteType()
+		evt.Packet.RouteTypeName = api.RouteTypeName(int16(packet.RouteType()))
 		evt.Packet.IsFirstObservation = isNew
 		evt.Observation.ObserverID = id.String()
 		evt.Observation.ObserverName = observerName
@@ -818,6 +845,11 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		evt.Observation.RSSI = oParams.RSSI
 		evt.Observation.SNR = oParams.SNR
 		evt.Observation.SourceBroker = w.cfg.BrokerName
+		evt.Observation.PathBytes = hex.EncodeToString(packet.Path)
+		evt.Observation.PathLength.Raw = fmt.Sprintf("%02x", packet.PathLength)
+		evt.Observation.PathLength.HashSize = packet.PathHashSize()
+		evt.Observation.PathLength.HopCount = packet.PathHashCount()
+		evt.Observation.PropagationTimeMs = 0 // not yet calculated
 		count, err := w.db.GetPacketObservationCount(ctx, packetHash[:])
 		if err != nil {
 			log.Printf("ingest[%s]: failed to get observation count: %v", w.cfg.BrokerName, err)
