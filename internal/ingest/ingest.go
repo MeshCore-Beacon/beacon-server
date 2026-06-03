@@ -263,17 +263,33 @@ type parsedAnonReq struct {
 	EphemeralPubKey string `json:"ephemeralPubKey"` // hex
 }
 
+type advertFlags struct {
+	Raw            string `json:"raw"`
+	DeviceRole     int    `json:"deviceRole"`
+	DeviceRoleName string `json:"deviceRoleName"`
+	HasLocation    bool   `json:"hasLocation"`
+	HasName        bool   `json:"hasName"`
+	HasFeature1    bool   `json:"hasFeature1"`
+	HasFeature2    bool   `json:"hasFeature2"`
+}
+
+type advertAppData struct {
+	Raw       string      `json:"raw"`
+	Flags     advertFlags `json:"flags"`
+	Latitude  *float64    `json:"latitude"`
+	Longitude *float64    `json:"longitude"`
+	Feature1  *uint16     `json:"feature1"`
+	Feature2  *uint16     `json:"feature2"`
+	Name      *string     `json:"name"`
+}
+
 type parsedAdvert struct {
-	Type           string  `json:"type"`
-	PublicKey      string  `json:"publicKey"`
-	Timestamp      uint32  `json:"timestamp"`
-	Signature      string  `json:"signature"` // hex 64 bytes
-	Flags          string  `json:"flags"`
-	DeviceRole     int     `json:"deviceRole"`
-	DeviceRoleName string  `json:"deviceRoleName"`
-	Name           string  `json:"name"`
-	Lat            float64 `json:"lat"`
-	Lon            float64 `json:"lon"`
+	Type      string        `json:"type"`
+	Raw       string        `json:"raw"`
+	PublicKey string        `json:"publicKey"`
+	Timestamp uint32        `json:"timestamp"`
+	Signature string        `json:"signature"`
+	AppData   advertAppData `json:"appData"`
 }
 
 type parsedEnvelope struct {
@@ -533,17 +549,60 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		if err == nil {
 			originPubkey = advert.PublicKey.PublicKeyBytes()
 			appData := advert.AppData()
+			flags := advert.Flags()
+
+			hasLocation := flags&0x10 != 0
+			hasFeature1 := flags&0x20 != 0
+			hasFeature2 := flags&0x40 != 0
+			hasName := flags&0x80 != 0
+
+			var lat, lon *float64
+			if hasLocation {
+				la := float64(appData.Lat) / 1e6
+				lo := float64(appData.Lon) / 1e6
+				lat = &la
+				lon = &lo
+			}
+
+			var feat1, feat2 *uint16
+			if hasFeature1 {
+				feat1 = &appData.Feat1
+			}
+			if hasFeature2 {
+				feat2 = &appData.Feat2
+			}
+
+			var name *string
+			if hasName {
+				n := strings.ToValidUTF8(appData.Name, "\uFFFD")
+				name = &n
+			}
+
+			deviceRole := int(flags & 0x0F)
+
 			pa := parsedAdvert{
-				Type:           "ADVERT",
-				PublicKey:      hex.EncodeToString(advert.PublicKey.PublicKeyBytes()),
-				Timestamp:      advert.Timestamp,
-				Signature:      hex.EncodeToString(advert.Signature),
-				Flags:          fmt.Sprintf("%02x", advert.Flags()),
-				DeviceRole:     int(advert.Type()),
-				DeviceRoleName: advert.TypeString(),
-				Name:           appData.Name,
-				Lat:            float64(appData.Lat) / 1e6,
-				Lon:            float64(appData.Lon) / 1e6,
+				Type:      "ADVERT",
+				Raw:       hex.EncodeToString(packet.Payload),
+				PublicKey: hex.EncodeToString(advert.PublicKey.PublicKeyBytes()),
+				Timestamp: advert.Timestamp,
+				Signature: hex.EncodeToString(advert.Signature),
+				AppData: advertAppData{
+					Raw: hex.EncodeToString(advert.RawAppData),
+					Flags: advertFlags{
+						Raw:            fmt.Sprintf("%02x", flags),
+						DeviceRole:     deviceRole,
+						DeviceRoleName: appData.Type,
+						HasLocation:    hasLocation,
+						HasName:        hasName,
+						HasFeature1:    hasFeature1,
+						HasFeature2:    hasFeature2,
+					},
+					Latitude:  lat,
+					Longitude: lon,
+					Feature1:  feat1,
+					Feature2:  feat2,
+					Name:      name,
+				},
 			}
 			parsedPayload, _ = json.Marshal(pa)
 		}

@@ -1052,20 +1052,22 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 		return nil, err
 	}
 	p := &api.Packet{
-		PacketHash:       hex.EncodeToString(row.PacketHash),
-		PayloadType:      row.PayloadType,
-		PayloadTypeName:  api.PayloadTypeName(row.PayloadType),
-		PayloadVersion:   row.PayloadVersion,
-		RouteType:        row.RouteType,
-		RouteTypeName:    api.RouteTypeName(row.RouteType),
-		RawHeader:        hex.EncodeToString(row.RawHeader),
-		RawPayload:       hex.EncodeToString(row.RawPayload),
+		PacketHash: hex.EncodeToString(row.PacketHash),
+		Header: api.PacketHeader{
+			Raw:             hex.EncodeToString(row.RawHeader),
+			RouteType:       row.RouteType,
+			RouteTypeName:   api.RouteTypeName(row.RouteType),
+			PayloadType:     row.PayloadType,
+			PayloadTypeName: api.PayloadTypeName(row.PayloadType),
+			PayloadVersion:  row.PayloadVersion,
+		},
 		ParsedPayload:    row.ParsedPayload,
+		RawPayload:       hex.EncodeToString(row.RawPayload),
 		Decrypted:        row.Decrypted != nil && *row.Decrypted,
 		FirstHeardAt:     row.FirstHeardAt.Time.UnixMilli(),
 		LastHeardAt:      row.LastHeardAt.Time.UnixMilli(),
-		Observations:     make([]api.PacketObservationDetail, 0, len(obsRows)),
 		ObservationCount: int32(len(obsRows)),
+		Observations:     make([]api.PacketObservationDetail, 0, len(obsRows)),
 	}
 	if row.OriginPubkey != nil {
 		s := hex.EncodeToString(row.OriginPubkey)
@@ -1076,21 +1078,30 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 		p.ChannelHash = &ch
 	}
 	if row.TransportCodesPresent != nil && *row.TransportCodesPresent {
-		// TODO: decode transport codes from region_code/sub_region_code
+		tc := &api.PacketTransportCodes{}
+		if row.RegionCode != nil {
+			tc.RegionCode = *row.RegionCode
+		}
+		if row.SubRegionCode != nil {
+			tc.SubRegionCode = *row.SubRegionCode
+		}
+		p.TransportCodes = tc
 	}
 	for _, v := range obsRows {
 		obs := api.PacketObservationDetail{
-			ID:             v.ID,
-			ObserverID:     v.ObserverID,
-			ObserverName:   v.ObserverName,
-			IATA:           v.Iata,
-			HeardAt:        v.HeardAt.Time.UnixMilli(),
-			PathLengthByte: v.PathLengthByte,
-			HashSize:       v.HashSize,
-			HopCount:       v.HopCount,
-			RSSI:           v.Rssi,
-			SNR:            v.Snr,
-			SourceBroker:   *v.SourceBroker,
+			ID:           v.ID,
+			ObserverID:   v.ObserverID,
+			ObserverName: v.ObserverName,
+			IATA:         v.Iata,
+			HeardAt:      v.HeardAt.Time.UnixMilli(),
+			PathLength: api.PacketPathLength{
+				Raw:      fmt.Sprintf("%02x", v.PathLengthByte),
+				HashSize: v.HashSize,
+				HopCount: v.HopCount,
+			},
+			RSSI:         v.Rssi,
+			SNR:          v.Snr,
+			SourceBroker: *v.SourceBroker,
 		}
 		resolvedPath := []api.ResolvedHop{}
 		if v.PathBytes != nil && v.HashSize > 0 {

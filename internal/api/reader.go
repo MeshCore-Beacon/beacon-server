@@ -76,23 +76,27 @@ type PacketSummary struct {
 	Summary          *string               `json:"summary,omitempty"` // human-readable payload summary
 }
 
+type PacketPathLength struct {
+	Raw      string `json:"raw"`
+	HashSize int16  `json:"hashSize"`
+	HopCount int16  `json:"hopCount"`
+}
+
 // PacketObservationDetail is a full observation including radio settings and resolved path.
 type PacketObservationDetail struct {
-	ID                int64         `json:"id"`
-	ObserverID        uuid.UUID     `json:"observerId"`
-	ObserverName      *string       `json:"observerName,omitempty"`
-	IATA              string        `json:"iata"`
-	HeardAt           int64         `json:"heardAt"` // epoch ms
-	PathLengthByte    int16         `json:"pathLengthByte"`
-	HashSize          int16         `json:"hashSize"`
-	HopCount          int16         `json:"hopCount"`
-	PathBytes         *string       `json:"pathBytes,omitempty"` // hex-encoded
-	RSSI              *int16        `json:"rssi,omitempty"`
-	SNR               *float32      `json:"snr,omitempty"`
-	PropagationTimeMs *int32        `json:"propagationTimeMs,omitempty"`
-	Radio             *PacketRadio  `json:"radio,omitempty"`
-	SourceBroker      string        `json:"sourceBroker"`
-	ResolvedPath      []ResolvedHop `json:"resolvedPath"`
+	ID                int64            `json:"id"`
+	ObserverID        uuid.UUID        `json:"observerId"`
+	ObserverName      *string          `json:"observerName,omitempty"`
+	IATA              string           `json:"iata"`
+	HeardAt           int64            `json:"heardAt"` // epoch ms
+	PathLength        PacketPathLength `json:"pathLength"`
+	PathBytes         *string          `json:"pathBytes,omitempty"` // hex-encoded
+	RSSI              *int16           `json:"rssi,omitempty"`
+	SNR               *float32         `json:"snr,omitempty"`
+	PropagationTimeMs *int32           `json:"propagationTimeMs,omitempty"`
+	Radio             *PacketRadio     `json:"radio,omitempty"`
+	SourceBroker      string           `json:"sourceBroker"`
+	ResolvedPath      []ResolvedHop    `json:"resolvedPath"`
 }
 
 // PacketRadio holds the radio settings from the observation.
@@ -126,23 +130,32 @@ type ResolvedPathEntry struct {
 	PublicKey []byte
 }
 
+type PacketHeader struct {
+	Raw             string `json:"raw"`
+	RouteType       int16  `json:"routeType"`
+	RouteTypeName   string `json:"routeTypeName"`
+	PayloadType     int16  `json:"payloadType"`
+	PayloadTypeName string `json:"payloadTypeName"`
+	PayloadVersion  int16  `json:"payloadVersion"`
+}
+
+type PacketTransportCodes struct {
+	RegionCode    int32 `json:"regionCode"`
+	SubRegionCode int32 `json:"subRegionCode"`
+}
+
 // Packet is the full packet representation including all observations and resolved paths.
 type Packet struct {
-	PacketHash       string                    `json:"packetHash"` // hex-encoded
-	PayloadType      int16                     `json:"payloadType"`
-	PayloadTypeName  string                    `json:"payloadTypeName"`
-	PayloadVersion   int16                     `json:"payloadVersion"`
-	RouteType        int16                     `json:"routeType"`
-	RouteTypeName    string                    `json:"routeTypeName"`
-	TransportCodes   *string                   `json:"transportCodes,omitempty"` // hex-encoded
-	OriginPubkey     *string                   `json:"originPubkey,omitempty"`   // hex-encoded
+	PacketHash       string                    `json:"packetHash"`
+	Header           PacketHeader              `json:"header"`
+	TransportCodes   *PacketTransportCodes     `json:"transportCodes,omitempty"`
+	OriginPubkey     *string                   `json:"originPubkey,omitempty"`
 	ParsedPayload    json.RawMessage           `json:"parsedPayload,omitempty"`
-	RawHeader        string                    `json:"rawHeader"`
-	RawPayload       string                    `json:"rawPayload"` // hex-encoded
+	RawPayload       string                    `json:"rawPayload"`
 	Decrypted        bool                      `json:"decrypted"`
-	ChannelHash      *string                   `json:"channelHash,omitempty"` // hex-encoded
-	FirstHeardAt     int64                     `json:"firstHeardAt"`          // epoch ms
-	LastHeardAt      int64                     `json:"lastHeardAt"`           // epoch ms
+	ChannelHash      *string                   `json:"channelHash,omitempty"`
+	FirstHeardAt     int64                     `json:"firstHeardAt"`
+	LastHeardAt      int64                     `json:"lastHeardAt"`
 	ObservationCount int32                     `json:"observationCount"`
 	Observations     []PacketObservationDetail `json:"observations"`
 }
