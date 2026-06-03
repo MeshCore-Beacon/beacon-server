@@ -392,12 +392,18 @@ func (w *Worker) Start(ctx context.Context) {
 		SetPassword(w.cfg.Password).
 		SetAutoReconnect(true).
 		SetMaxReconnectInterval(30 * time.Second).
+		SetKeepAlive(30 * time.Second).
+		SetPingTimeout(10 * time.Second).
+		SetConnectTimeout(15 * time.Second).
+		SetWriteTimeout(10 * time.Second).
+		SetConnectRetry(true).
+		SetConnectRetryInterval(5 * time.Second).
 		SetOnConnectHandler(func(c mqtt.Client) {
 			log.Printf("ingest[%s]: connected to %s", w.cfg.BrokerName, w.cfg.URL)
 			w.subscribe(c)
 		}).
 		SetConnectionLostHandler(func(_ mqtt.Client, err error) {
-			log.Printf("ingest[%s]: connection lost: %v", w.cfg.BrokerName, err)
+			log.Printf("ingest[%s]: connection lost, will reconnect: %v", w.cfg.BrokerName, err)
 		})
 
 	w.client = mqtt.NewClient(opts)
