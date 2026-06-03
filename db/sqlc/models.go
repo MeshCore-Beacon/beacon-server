@@ -57,6 +57,13 @@ type MvHourlyIataStat struct {
 	ActiveObservers  int64              `json:"active_observers"`
 }
 
+type MvRadioPreset struct {
+	Preset     string `json:"preset"`
+	Iata       string `json:"iata"`
+	SourceType string `json:"source_type"`
+	Count      int64  `json:"count"`
+}
+
 type MvTopNodesByIatum struct {
 	Iata             string             `json:"iata"`
 	NodeID           uuid.UUID          `json:"node_id"`

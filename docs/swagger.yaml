@@ -343,15 +343,16 @@ definitions:
   github_com_MeshCore-Tower_tower-server_internal_api.Packet:
     properties:
       channelHash:
-        description: hex-encoded
         type: string
       decrypted:
         type: boolean
       firstHeardAt:
-        description: epoch ms
         type: integer
+      firstToLastMs:
+        type: integer
+      header:
+        $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.PacketHeader'
       lastHeardAt:
-        description: epoch ms
         type: integer
       observationCount:
         type: integer
@@ -360,29 +361,31 @@ definitions:
           $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.PacketObservationDetail'
         type: array
       originPubkey:
-        description: hex-encoded
         type: string
       packetHash:
-        description: hex-encoded
         type: string
-      parsedPayload: {}
+      parsedPayload:
+        items:
+          type: integer
+        type: array
+      rawPayload:
+        type: string
+      transportCodes:
+        $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.PacketTransportCodes'
+    type: object
+  github_com_MeshCore-Tower_tower-server_internal_api.PacketHeader:
+    properties:
       payloadType:
         type: integer
       payloadTypeName:
         type: string
       payloadVersion:
         type: integer
-      rawHeader:
-        type: string
-      rawPayload:
-        description: hex-encoded
+      raw:
         type: string
       routeType:
         type: integer
       routeTypeName:
-        type: string
-      transportCodes:
-        description: hex-encoded
         type: string
     type: object
   github_com_MeshCore-Tower_tower-server_internal_api.PacketLatestObserver:
@@ -396,12 +399,8 @@ definitions:
     type: object
   github_com_MeshCore-Tower_tower-server_internal_api.PacketObservationDetail:
     properties:
-      hashSize:
-        type: integer
       heardAt:
         description: epoch ms
-        type: integer
-      hopCount:
         type: integer
       iata:
         type: string
@@ -414,8 +413,8 @@ definitions:
       pathBytes:
         description: hex-encoded
         type: string
-      pathLengthByte:
-        type: integer
+      pathLength:
+        $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.PacketPathLength'
       propagationTimeMs:
         type: integer
       radio:
@@ -455,6 +454,15 @@ definitions:
       snr:
         type: number
     type: object
+  github_com_MeshCore-Tower_tower-server_internal_api.PacketPathLength:
+    properties:
+      hashSize:
+        type: integer
+      hopCount:
+        type: integer
+      raw:
+        type: string
+    type: object
   github_com_MeshCore-Tower_tower-server_internal_api.PacketRadio:
     properties:
       bandwidthKhz:
@@ -492,6 +500,13 @@ definitions:
       summary:
         description: human-readable payload summary
         type: string
+    type: object
+  github_com_MeshCore-Tower_tower-server_internal_api.PacketTransportCodes:
+    properties:
+      regionCode:
+        type: integer
+      subRegionCode:
+        type: integer
     type: object
   github_com_MeshCore-Tower_tower-server_internal_api.Page-github_com_MeshCore-Tower_tower-server_internal_api_AdvertObservation:
     properties:
@@ -579,6 +594,18 @@ definitions:
       payloadTypeName:
         type: string
     type: object
+  github_com_MeshCore-Tower_tower-server_internal_api.RadioPreset:
+    properties:
+      count:
+        type: integer
+      iata:
+        type: string
+      preset:
+        type: string
+      sourceType:
+        description: '"observer" or "node"'
+        type: string
+    type: object
   github_com_MeshCore-Tower_tower-server_internal_api.Region:
     properties:
       centerLat:
@@ -620,8 +647,10 @@ definitions:
       confidence:
         description: '"high", "low", "unknown"'
         type: string
-      node:
-        $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.ResolvedNode'
+      nodes:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.ResolvedNode'
+        type: array
     type: object
   github_com_MeshCore-Tower_tower-server_internal_api.ResolvedNode:
     properties:
@@ -1381,6 +1410,33 @@ paths:
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Observation counts by payload type (last 24h by default)
+      tags:
+      - Stats
+  /stats/radio-presets:
+    get:
+      parameters:
+      - description: Filter by preset string e.g. 910.525,62.5,7
+        in: query
+        name: preset
+        type: string
+      - description: Filter by IATA code
+        in: query
+        name: iata
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.RadioPreset'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+      summary: Radio preset usage by IATA
       tags:
       - Stats
   /stats/top-nodes:

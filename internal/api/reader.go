@@ -9,6 +9,14 @@ import (
 	"github.com/google/uuid"
 )
 
+// RadioPreset represents a unique radio configuration and where it is heard.
+type RadioPreset struct {
+	Preset     string `json:"preset"`
+	IATA       string `json:"iata"`
+	SourceType string `json:"sourceType"` // "observer" or "node"
+	Count      int64  `json:"count"`
+}
+
 // StatsOverview is the top-level network summary for the overview endpoint.
 type StatsOverview struct {
 	TotalPackets      int64 `json:"totalPackets"`
@@ -419,6 +427,9 @@ type Reader interface {
 	// GetPacket returns full packet detail including all observations with radio settings.
 	// Returns nil, pgx.ErrNoRows if not found.
 	GetPacket(ctx context.Context, packetHash []byte) (*Packet, error)
+	// GetRadioPresets returns radio preset usage grouped by preset and IATA.
+	// Pass empty string for preset or iata to skip those filters.
+	GetRadioPresets(ctx context.Context, preset, iata string) ([]RadioPreset, error)
 	// GetStatsOverview returns top-line network figures for the last 24 hours.
 	// Pass empty string iata to return stats across all IATAs.
 	GetStatsOverview(ctx context.Context, iata string) (*StatsOverview, error)

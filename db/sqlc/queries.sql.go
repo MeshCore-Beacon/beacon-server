@@ -592,6 +592,44 @@ func (q *Queries) GetPacketObservationCount(ctx context.Context, packetHash []by
 	return count, err
 }
 
+const getRadioPresets = `-- name: GetRadioPresets :many
+SELECT preset, iata, source_type, count
+FROM mv_radio_presets
+WHERE ($1::text = '' OR preset = $1::text)
+  AND ($2::text = '' OR iata = $2::text)
+ORDER BY preset, iata, source_type
+`
+
+type GetRadioPresetsParams struct {
+	Column1 string `json:"column_1"`
+	Column2 string `json:"column_2"`
+}
+
+func (q *Queries) GetRadioPresets(ctx context.Context, arg GetRadioPresetsParams) ([]MvRadioPreset, error) {
+	rows, err := q.db.Query(ctx, getRadioPresets, arg.Column1, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MvRadioPreset{}
+	for rows.Next() {
+		var i MvRadioPreset
+		if err := rows.Scan(
+			&i.Preset,
+			&i.Iata,
+			&i.SourceType,
+			&i.Count,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getRegion = `-- name: GetRegion :one
 SELECT id, slug, name, description, center_lat, center_lng, zoom_level
 FROM regions
@@ -1941,6 +1979,15 @@ REFRESH MATERIALIZED VIEW CONCURRENTLY mv_hourly_iata_stats
 
 func (q *Queries) RefreshHourlyStats(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, refreshHourlyStats)
+	return err
+}
+
+const refreshRadioPresets = `-- name: RefreshRadioPresets :exec
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_radio_presets
+`
+
+func (q *Queries) RefreshRadioPresets(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, refreshRadioPresets)
 	return err
 }
 

@@ -1052,6 +1052,48 @@ const docTemplate = `{
                 }
             }
         },
+        "/stats/radio-presets": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Stats"
+                ],
+                "summary": "Radio preset usage by IATA",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by preset string e.g. 910.525,62.5,7",
+                        "name": "preset",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by IATA code",
+                        "name": "iata",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.RadioPreset"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
         "/stats/top-nodes": {
             "get": {
                 "produces": [
@@ -1637,18 +1679,21 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "channelHash": {
-                    "description": "hex-encoded",
                     "type": "string"
                 },
                 "decrypted": {
                     "type": "boolean"
                 },
                 "firstHeardAt": {
-                    "description": "epoch ms",
                     "type": "integer"
                 },
+                "firstToLastMs": {
+                    "type": "integer"
+                },
+                "header": {
+                    "$ref": "#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.PacketHeader"
+                },
                 "lastHeardAt": {
-                    "description": "epoch ms",
                     "type": "integer"
                 },
                 "observationCount": {
@@ -1661,14 +1706,28 @@ const docTemplate = `{
                     }
                 },
                 "originPubkey": {
-                    "description": "hex-encoded",
                     "type": "string"
                 },
                 "packetHash": {
-                    "description": "hex-encoded",
                     "type": "string"
                 },
-                "parsedPayload": {},
+                "parsedPayload": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "rawPayload": {
+                    "type": "string"
+                },
+                "transportCodes": {
+                    "$ref": "#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.PacketTransportCodes"
+                }
+            }
+        },
+        "github_com_MeshCore-Tower_tower-server_internal_api.PacketHeader": {
+            "type": "object",
+            "properties": {
                 "payloadType": {
                     "type": "integer"
                 },
@@ -1678,21 +1737,13 @@ const docTemplate = `{
                 "payloadVersion": {
                     "type": "integer"
                 },
-                "rawHeader": {
-                    "type": "string"
-                },
-                "rawPayload": {
-                    "description": "hex-encoded",
+                "raw": {
                     "type": "string"
                 },
                 "routeType": {
                     "type": "integer"
                 },
                 "routeTypeName": {
-                    "type": "string"
-                },
-                "transportCodes": {
-                    "description": "hex-encoded",
                     "type": "string"
                 }
             }
@@ -1714,14 +1765,8 @@ const docTemplate = `{
         "github_com_MeshCore-Tower_tower-server_internal_api.PacketObservationDetail": {
             "type": "object",
             "properties": {
-                "hashSize": {
-                    "type": "integer"
-                },
                 "heardAt": {
                     "description": "epoch ms",
-                    "type": "integer"
-                },
-                "hopCount": {
                     "type": "integer"
                 },
                 "iata": {
@@ -1740,8 +1785,8 @@ const docTemplate = `{
                     "description": "hex-encoded",
                     "type": "string"
                 },
-                "pathLengthByte": {
-                    "type": "integer"
+                "pathLength": {
+                    "$ref": "#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.PacketPathLength"
                 },
                 "propagationTimeMs": {
                     "type": "integer"
@@ -1801,6 +1846,20 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_MeshCore-Tower_tower-server_internal_api.PacketPathLength": {
+            "type": "object",
+            "properties": {
+                "hashSize": {
+                    "type": "integer"
+                },
+                "hopCount": {
+                    "type": "integer"
+                },
+                "raw": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_MeshCore-Tower_tower-server_internal_api.PacketRadio": {
             "type": "object",
             "properties": {
@@ -1854,6 +1913,17 @@ const docTemplate = `{
                 "summary": {
                     "description": "human-readable payload summary",
                     "type": "string"
+                }
+            }
+        },
+        "github_com_MeshCore-Tower_tower-server_internal_api.PacketTransportCodes": {
+            "type": "object",
+            "properties": {
+                "regionCode": {
+                    "type": "integer"
+                },
+                "subRegionCode": {
+                    "type": "integer"
                 }
             }
         },
@@ -1990,6 +2060,24 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_MeshCore-Tower_tower-server_internal_api.RadioPreset": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "iata": {
+                    "type": "string"
+                },
+                "preset": {
+                    "type": "string"
+                },
+                "sourceType": {
+                    "description": "\"observer\" or \"node\"",
+                    "type": "string"
+                }
+            }
+        },
         "github_com_MeshCore-Tower_tower-server_internal_api.Region": {
             "type": "object",
             "properties": {
@@ -2049,8 +2137,11 @@ const docTemplate = `{
                     "description": "\"high\", \"low\", \"unknown\"",
                     "type": "string"
                 },
-                "node": {
-                    "$ref": "#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.ResolvedNode"
+                "nodes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.ResolvedNode"
+                    }
                 }
             }
         },

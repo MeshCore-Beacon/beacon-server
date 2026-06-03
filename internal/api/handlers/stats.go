@@ -17,9 +17,9 @@ import (
 // GET  /stats/payload-breakdown → getStatsPayloadBreakdown
 // GET  /stats/top-nodes         → getStatsTopNodes
 // GET  /stats/top-observers     → getStatsTopObservers
+// GET  /stats/radio-presets     → getStatsRadioPresets
 //
 // All endpoints accept an optional iata= filter (case-insensitive).
-// regionId= expansion and comma-separated IATAs are not yet implemented.
 func StatsRouter(reader api.Reader) http.Handler {
 	r := chi.NewRouter()
 	r.Get("/overview", getStatsOverview(reader))
@@ -27,6 +27,7 @@ func StatsRouter(reader api.Reader) http.Handler {
 	r.Get("/payload-breakdown", getStatsPayloadBreakdown(reader))
 	r.Get("/top-nodes", getStatsTopNodes(reader))
 	r.Get("/top-observers", getStatsTopObservers(reader))
+	r.Get("/radio-presets", getStatsRadioPresets(reader))
 	return r
 }
 
@@ -187,5 +188,28 @@ func getStatsTopObservers(reader api.Reader) http.HandlerFunc {
 			return
 		}
 		respond(w, http.StatusOK, observers)
+	}
+}
+
+// getStatsRadioPresets godoc
+//
+//	@Summary	Radio preset usage by IATA
+//	@Tags		Stats
+//	@Produce	json
+//	@Param		preset	query		string	false	"Filter by preset string e.g. 910.525,62.5,7"
+//	@Param		iata	query		string	false	"Filter by IATA code"
+//	@Success	200		{object}	[]api.RadioPreset
+//	@Failure	500		{object}	handlers.APIError
+//	@Router		/stats/radio-presets [get]
+func getStatsRadioPresets(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		preset := r.URL.Query().Get("preset")
+		iata := r.URL.Query().Get("iata")
+		presets, err := reader.GetRadioPresets(r.Context(), preset, iata)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		respond(w, http.StatusOK, presets)
 	}
 }

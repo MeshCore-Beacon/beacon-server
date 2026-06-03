@@ -343,7 +343,7 @@ CREATE UNIQUE INDEX idx_mv_hourly_iata_stats
 
 CREATE MATERIALIZED VIEW mv_radio_presets AS
 SELECT
-    concat(o.radio_freq_mhz, ',', o.radio_bw_khz, ',', o.radio_sf) AS preset,
+    concat(o.radio_freq_mhz, ',', o.radio_bw_khz, ',', o.radio_sf)::text AS preset,
     (SELECT po.iata FROM packet_observations po WHERE po.observer_id = o.id ORDER BY po.heard_at DESC LIMIT 1) AS iata,
     'observer' AS source_type,
     COUNT(*) AS count
@@ -351,7 +351,7 @@ FROM observers o
 WHERE o.radio_freq_mhz IS NOT NULL
     AND o.radio_sf IS NOT NULL
     AND o.radio_bw_khz IS NOT NULL
-GROUP BY concat(o.radio_freq_mhz, ',', o.radio_bw_khz, ',', o.radio_sf),
+GROUP BY concat(o.radio_freq_mhz, ',', o.radio_bw_khz, ',', o.radio_sf)::text,
          (SELECT po.iata FROM packet_observations po WHERE po.observer_id = o.id ORDER BY po.heard_at DESC LIMIT 1)
 HAVING (SELECT po.iata FROM packet_observations po WHERE po.observer_id = o.id ORDER BY po.heard_at DESC LIMIT 1) IS NOT NULL
 

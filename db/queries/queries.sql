@@ -577,6 +577,13 @@ GROUP BY o.id
 ORDER BY observation_count DESC
 LIMIT $3;
 
+-- name: GetRadioPresets :many
+SELECT preset, iata, source_type, count
+FROM mv_radio_presets
+WHERE ($1::text = '' OR preset = $1::text)
+  AND ($2::text = '' OR iata = $2::text)
+ORDER BY preset, iata, source_type;
+
 -- ============================================================
 -- REGIONS
 -- ============================================================

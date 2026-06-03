@@ -1300,6 +1300,27 @@ func (s *Store) GetStatsTopObservers(ctx context.Context, iata string, since tim
 	return items, nil
 }
 
+// GetRadioPresets returns radio preset usage from the mv_radio_presets materialized view.
+func (s *Store) GetRadioPresets(ctx context.Context, preset, iata string) ([]api.RadioPreset, error) {
+	rows, err := s.q.GetRadioPresets(ctx, sqlc.GetRadioPresetsParams{
+		Column1: preset,
+		Column2: iata,
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]api.RadioPreset, 0, len(rows))
+	for _, v := range rows {
+		items = append(items, api.RadioPreset{
+			Preset:     v.Preset,
+			IATA:       v.Iata,
+			SourceType: v.SourceType,
+			Count:      v.Count,
+		})
+	}
+	return items, nil
+}
+
 func nullableUUID(id uuid.UUID) *uuid.UUID {
 	if id == (uuid.UUID{}) {
 		return nil
