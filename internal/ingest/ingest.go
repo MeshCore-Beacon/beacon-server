@@ -896,10 +896,13 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 		log.Printf("ingest[%s]: invalid pubkey hex in status from %s: %v", w.cfg.BrokerName, pubkeyHex, err)
 		return
 	}
-	_, _, err = w.db.UpsertObserver(ctx, pubkey)
+	id, _, err := w.db.UpsertObserver(ctx, pubkey)
 	if err != nil {
 		log.Printf("ingest[%s]: db: upsert observer failed in status from %s: %v", w.cfg.BrokerName, pubkeyHex, err)
 		return
+	}
+	if err := w.db.UpsertObserverBroker(ctx, id, w.cfg.BrokerName); err != nil {
+		log.Printf("ingest[%s]: db: upsert observer broker failed in status from %s: %v", w.cfg.BrokerName, pubkeyHex, err)
 	}
 	params := UpdateObserverStatusParams{
 		PublicKey:      pubkey,
