@@ -264,13 +264,16 @@ type parsedAnonReq struct {
 }
 
 type parsedAdvert struct {
-	Type      string  `json:"type"`
-	PublicKey string  `json:"publicKey"`
-	Timestamp uint32  `json:"timestamp"`
-	NodeType  string  `json:"nodeType"`
-	Name      string  `json:"name"`
-	Lat       float64 `json:"lat"`
-	Lon       float64 `json:"lon"`
+	Type           string  `json:"type"`
+	PublicKey      string  `json:"publicKey"`
+	Timestamp      uint32  `json:"timestamp"`
+	Signature      string  `json:"signature"` // hex 64 bytes
+	Flags          string  `json:"flags"`
+	DeviceRole     int     `json:"deviceRole"`
+	DeviceRoleName string  `json:"deviceRoleName"`
+	Name           string  `json:"name"`
+	Lat            float64 `json:"lat"`
+	Lon            float64 `json:"lon"`
 }
 
 type parsedEnvelope struct {
@@ -531,13 +534,16 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 			originPubkey = advert.PublicKey.PublicKeyBytes()
 			appData := advert.AppData()
 			pa := parsedAdvert{
-				Type:      "ADVERT",
-				PublicKey: hex.EncodeToString(advert.PublicKey.PublicKeyBytes()),
-				Timestamp: advert.Timestamp,
-				NodeType:  appData.Type,
-				Name:      appData.Name,
-				Lat:       float64(appData.Lat) / 1e6,
-				Lon:       float64(appData.Lon) / 1e6,
+				Type:           "ADVERT",
+				PublicKey:      hex.EncodeToString(advert.PublicKey.PublicKeyBytes()),
+				Timestamp:      advert.Timestamp,
+				Signature:      hex.EncodeToString(advert.Signature),
+				Flags:          fmt.Sprintf("%02x", advert.Flags()),
+				DeviceRole:     int(advert.Type()),
+				DeviceRoleName: advert.TypeString(),
+				Name:           appData.Name,
+				Lat:            float64(appData.Lat) / 1e6,
+				Lon:            float64(appData.Lon) / 1e6,
 			}
 			parsedPayload, _ = json.Marshal(pa)
 		}
