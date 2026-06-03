@@ -267,7 +267,7 @@ type packetObservationEvent struct {
 
 type parsedAnonReq struct {
 	Raw             string `json:"raw"`
-	Type            string `josn:"type"`
+	Type            string `json:"type"`
 	Destination     byte   `json:"destination"`
 	EphemeralPubKey string `json:"ephemeralPubKey"` // hex
 }
