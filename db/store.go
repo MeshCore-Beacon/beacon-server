@@ -1069,6 +1069,19 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 		ObservationCount: int32(len(obsRows)),
 		Observations:     make([]api.PacketObservationDetail, 0, len(obsRows)),
 	}
+	minHeardAt := obsRows[0].HeardAt.Time
+	if len(obsRows) > 1 {
+		maxHeardAt := obsRows[0].HeardAt.Time
+		for _, v := range obsRows[1:] {
+			if v.HeardAt.Time.Before(minHeardAt) {
+				minHeardAt = v.HeardAt.Time
+			}
+			if v.HeardAt.Time.After(maxHeardAt) {
+				maxHeardAt = v.HeardAt.Time
+			}
+		}
+		p.FirstToLastMs = maxHeardAt.Sub(minHeardAt).Milliseconds()
+	}
 	if row.OriginPubkey != nil {
 		s := hex.EncodeToString(row.OriginPubkey)
 		p.OriginPubkey = &s
@@ -1103,6 +1116,8 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 			SNR:          v.Snr,
 			SourceBroker: *v.SourceBroker,
 		}
+		prop := int32(v.HeardAt.Time.Sub(minHeardAt).Milliseconds())
+		obs.PropagationTimeMs = &prop
 		resolvedPath := []api.ResolvedHop{}
 		if v.PathBytes != nil && v.HashSize > 0 {
 			hashSize := int(v.HashSize)
@@ -1145,9 +1160,6 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 		if v.PathBytes != nil {
 			pb := hex.EncodeToString(v.PathBytes)
 			obs.PathBytes = &pb
-		}
-		if v.PropagationTimeMs != nil {
-			obs.PropagationTimeMs = v.PropagationTimeMs
 		}
 		if v.RadioFreqMhz != nil || v.SpreadFactor != nil || v.BandwidthKhz != nil || v.CodingRate != nil {
 			obs.Radio = &api.PacketRadio{

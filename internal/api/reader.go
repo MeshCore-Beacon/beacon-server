@@ -93,7 +93,7 @@ type PacketObservationDetail struct {
 	PathBytes         *string          `json:"pathBytes,omitempty"` // hex-encoded
 	RSSI              *int16           `json:"rssi,omitempty"`
 	SNR               *float32         `json:"snr,omitempty"`
-	PropagationTimeMs *int32           `json:"propagationTimeMs,omitempty"`
+	PropagationTimeMs *int32           `json:"propagationTimeMs"`
 	Radio             *PacketRadio     `json:"radio,omitempty"`
 	SourceBroker      string           `json:"sourceBroker"`
 	ResolvedPath      []ResolvedHop    `json:"resolvedPath"`
@@ -156,6 +156,7 @@ type Packet struct {
 	ChannelHash      *string                   `json:"channelHash,omitempty"`
 	FirstHeardAt     int64                     `json:"firstHeardAt"`
 	LastHeardAt      int64                     `json:"lastHeardAt"`
+	FirstToLastMs    int64                     `json:"firstToLastMs"`
 	ObservationCount int32                     `json:"observationCount"`
 	Observations     []PacketObservationDetail `json:"observations"`
 }

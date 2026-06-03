@@ -412,10 +412,10 @@ For paginated responses use the generic page wrapper:
 - [x] Path resolution (node short ID lookup)
 - [x] Parse payloads (that we can decrypt) into DB and return with packet
       details
+- [x] Propagation time calculation
 
 ### In progress / next
 
-- [ ] Propagation time calculation
 - [ ] Routes and traces endpoints
 
 ### Future
