@@ -224,7 +224,11 @@ LEFT JOIN observers o ON o.id = po.observer_id
 WHERE
   ($1::smallint = -1 OR p.payload_type = $1::smallint)
   AND ($2::smallint = -1 OR p.route_type = $2::smallint)
-  AND ($3 = '' OR po.iata ILIKE $3)
+  AND ($3::text = '' OR EXISTS (
+      SELECT 1 FROM packet_observations po3
+      WHERE po3.packet_hash = p.packet_hash
+      AND po3.iata = ANY(string_to_array($3::text, ','))
+  ))
   AND ($4::timestamptz IS NULL OR p.first_heard_at >= $4)
   AND ($5::timestamptz IS NULL OR p.first_heard_at <= $5)
   AND ($6::timestamptz IS NULL OR p.last_heard_at < $6)
@@ -597,6 +601,11 @@ ORDER BY display_order, name;
 SELECT id, slug, name, description, center_lat, center_lng, zoom_level
 FROM regions
 WHERE id = $1;
+
+-- name: GetRegionBySlug :one
+SELECT id, slug, name, description, center_lat, center_lng, zoom_level
+FROM regions
+WHERE slug = $1;
 
 -- name: GetRegionIATAs :many
 SELECT iata FROM region_iatas

@@ -770,8 +770,26 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Filter by IATA code",
+                        "description": "Filter by single IATA code (case-insensitive)",
                         "name": "iata",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by multiple IATA codes, comma-separated e.g. YVR,YYJ",
+                        "name": "iatas",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by region ID, expands to member IATAs",
+                        "name": "regionId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by region slug, expands to member IATAs",
+                        "name": "region",
                         "in": "query"
                     },
                     {
@@ -803,7 +821,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.Page-github_com_MeshCore-Tower_tower-server_internal_api_PacketSummary"
+                            "type": "object"
                         }
                     },
                     "400": {
@@ -1748,20 +1766,6 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_MeshCore-Tower_tower-server_internal_api.PacketLatestObserver": {
-            "type": "object",
-            "properties": {
-                "displayName": {
-                    "type": "string"
-                },
-                "iata": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                }
-            }
-        },
         "github_com_MeshCore-Tower_tower-server_internal_api.PacketObservationDetail": {
             "type": "object",
             "properties": {
@@ -1877,45 +1881,6 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_MeshCore-Tower_tower-server_internal_api.PacketSummary": {
-            "type": "object",
-            "properties": {
-                "firstHeardAt": {
-                    "description": "epoch ms",
-                    "type": "integer"
-                },
-                "lastHeardAt": {
-                    "description": "epoch ms",
-                    "type": "integer"
-                },
-                "latestObserver": {
-                    "$ref": "#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.PacketLatestObserver"
-                },
-                "observationCount": {
-                    "type": "integer"
-                },
-                "packetHash": {
-                    "description": "hex-encoded",
-                    "type": "string"
-                },
-                "payloadType": {
-                    "type": "integer"
-                },
-                "payloadTypeName": {
-                    "type": "string"
-                },
-                "routeType": {
-                    "type": "integer"
-                },
-                "routeTypeName": {
-                    "type": "string"
-                },
-                "summary": {
-                    "description": "human-readable payload summary",
-                    "type": "string"
-                }
-            }
-        },
         "github_com_MeshCore-Tower_tower-server_internal_api.PacketTransportCodes": {
             "type": "object",
             "properties": {
@@ -2022,23 +1987,6 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.PacketObservationSummary"
-                    }
-                },
-                "nextCursor": {
-                    "type": "integer"
-                }
-            }
-        },
-        "github_com_MeshCore-Tower_tower-server_internal_api.Page-github_com_MeshCore-Tower_tower-server_internal_api_PacketSummary": {
-            "type": "object",
-            "properties": {
-                "hasMore": {
-                    "type": "boolean"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.PacketSummary"
                     }
                 },
                 "nextCursor": {

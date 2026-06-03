@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	sqlc "github.com/MeshCore-Tower/tower-server/db/sqlc"
@@ -357,6 +358,37 @@ func (s *Store) GetRegion(ctx context.Context, regionID int32) (*api.Region, err
 	}
 	result.ZoomLevel = zoomLevel
 	iatas, err := s.q.GetRegionIATAs(ctx, regionID)
+	if err != nil {
+		return nil, err
+	}
+	result.IATAs = iatas
+	return &result, nil
+}
+
+// GetRegionBySlug returns full detail for a single region including its associated IATA codes.
+// Returns nil, pgx.ErrNoRows if the region is not found.
+func (s *Store) GetRegionBySlug(ctx context.Context, slug string) (*api.Region, error) {
+	region, err := s.q.GetRegionBySlug(ctx, slug)
+	if err != nil {
+		return nil, err
+	}
+	result := api.Region{
+		RegionSummary: api.RegionSummary{
+			ID:   int(region.ID),
+			Slug: region.Slug,
+			Name: region.Name,
+		},
+		Description: region.Description,
+		CenterLat:   region.CenterLat,
+		CenterLng:   region.CenterLng,
+	}
+	var zoomLevel *int
+	if region.ZoomLevel != nil {
+		z := int(*region.ZoomLevel)
+		zoomLevel = &z
+	}
+	result.ZoomLevel = zoomLevel
+	iatas, err := s.q.GetRegionIATAs(ctx, region.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -986,7 +1018,7 @@ func (s *Store) ListNodeObservations(ctx context.Context, nodeID uuid.UUID, curs
 	}, nil
 }
 
-func (s *Store) ListPackets(ctx context.Context, payloadType, routeType int16, iata string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
+func (s *Store) ListPackets(ctx context.Context, payloadType, routeType int16, iatas []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
 	var cursorTS pgtype.Timestamptz
 	if cursor > 0 {
 		cursorTS = pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}
@@ -999,10 +1031,11 @@ func (s *Store) ListPackets(ctx context.Context, payloadType, routeType int16, i
 	if !until.IsZero() {
 		untilTS = pgtype.Timestamptz{Time: until, Valid: true}
 	}
+	iataFilter := strings.Join(iatas, ",")
 	rows, err := s.q.ListPackets(ctx, sqlc.ListPacketsParams{
 		Column1: payloadType,
 		Column2: routeType,
-		Column3: iata,
+		Column3: iataFilter,
 		Column4: sinceTS,
 		Column5: untilTS,
 		Column6: cursorTS,

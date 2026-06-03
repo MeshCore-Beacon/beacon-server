@@ -29,12 +29,15 @@ func PacketsRouter(reader api.Reader) http.Handler {
 //	@Param		payloadType		query		int		false	"Filter by payload type integer"
 //	@Param		payloadTypeName	query		string	false	"Filter by payload type name (advert, grp_txt, txt_msg, trace, anon_req)"
 //	@Param		routeType		query		int		false	"Filter by route type (0=transport_flood, 1=flood, 2=direct, 3=transport_direct)"
-//	@Param		iata			query		string	false	"Filter by IATA code"
+//	@Param		iata			query		string	false	"Filter by single IATA code (case-insensitive)"
+//	@Param		iatas			query		string	false	"Filter by multiple IATA codes, comma-separated e.g. YVR,YYJ"
+//	@Param		regionId		query		int		false	"Filter by region ID, expands to member IATAs"
+//	@Param		region			query		string	false	"Filter by region slug, expands to member IATAs"
 //	@Param		since			query		int		false	"Filter by first_heard_at >= since (epoch ms)"
 //	@Param		until			query		int		false	"Filter by first_heard_at <= until (epoch ms)"
 //	@Param		cursor			query		int		false	"last_heard_at epoch ms of last item for pagination"
 //	@Param		limit			query		int		false	"Max results (default 50)"
-//	@Success	200				{object}	api.Page[api.PacketSummary]
+//	@Success	200				{object}	object
 //	@Failure	400				{object}	handlers.APIError
 //	@Failure	500				{object}	handlers.APIError
 //	@Router		/packets [get]
@@ -98,8 +101,16 @@ func listPackets(reader api.Reader) http.HandlerFunc {
 			}
 			limit = int32(l)
 		}
-		iata := r.URL.Query().Get("iata")
-		packets, err := reader.ListPackets(r.Context(), payloadType, routeType, iata, since, until, cursor, limit)
+		iatas := parseIATAs(r)
+		if regionIDStr := r.URL.Query().Get("regionId"); regionIDStr != "" || r.URL.Query().Get("region") != "" {
+			regionIATAs, err := resolveRegionIATAs(r.Context(), regionIDStr, r.URL.Query().Get("region"), reader)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			iatas = append(iatas, regionIATAs...)
+		}
+		packets, err := reader.ListPackets(r.Context(), payloadType, routeType, iatas, since, until, cursor, limit)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return

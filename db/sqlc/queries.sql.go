@@ -661,6 +661,37 @@ func (q *Queries) GetRegion(ctx context.Context, id int32) (GetRegionRow, error)
 	return i, err
 }
 
+const getRegionBySlug = `-- name: GetRegionBySlug :one
+SELECT id, slug, name, description, center_lat, center_lng, zoom_level
+FROM regions
+WHERE slug = $1
+`
+
+type GetRegionBySlugRow struct {
+	ID          int32    `json:"id"`
+	Slug        string   `json:"slug"`
+	Name        string   `json:"name"`
+	Description *string  `json:"description"`
+	CenterLat   *float64 `json:"center_lat"`
+	CenterLng   *float64 `json:"center_lng"`
+	ZoomLevel   *int32   `json:"zoom_level"`
+}
+
+func (q *Queries) GetRegionBySlug(ctx context.Context, slug string) (GetRegionBySlugRow, error) {
+	row := q.db.QueryRow(ctx, getRegionBySlug, slug)
+	var i GetRegionBySlugRow
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.Name,
+		&i.Description,
+		&i.CenterLat,
+		&i.CenterLng,
+		&i.ZoomLevel,
+	)
+	return i, err
+}
+
 const getRegionIATAs = `-- name: GetRegionIATAs :many
 SELECT iata FROM region_iatas
 WHERE region_id = $1
@@ -1817,7 +1848,11 @@ LEFT JOIN observers o ON o.id = po.observer_id
 WHERE
   ($1::smallint = -1 OR p.payload_type = $1::smallint)
   AND ($2::smallint = -1 OR p.route_type = $2::smallint)
-  AND ($3 = '' OR po.iata ILIKE $3)
+  AND ($3::text = '' OR EXISTS (
+      SELECT 1 FROM packet_observations po3
+      WHERE po3.packet_hash = p.packet_hash
+      AND po3.iata = ANY(string_to_array($3::text, ','))
+  ))
   AND ($4::timestamptz IS NULL OR p.first_heard_at >= $4)
   AND ($5::timestamptz IS NULL OR p.first_heard_at <= $5)
   AND ($6::timestamptz IS NULL OR p.last_heard_at < $6)
@@ -1828,7 +1863,7 @@ LIMIT $7
 type ListPacketsParams struct {
 	Column1 int16              `json:"column_1"`
 	Column2 int16              `json:"column_2"`
-	Column3 interface{}        `json:"column_3"`
+	Column3 string             `json:"column_3"`
 	Column4 pgtype.Timestamptz `json:"column_4"`
 	Column5 pgtype.Timestamptz `json:"column_5"`
 	Column6 pgtype.Timestamptz `json:"column_6"`

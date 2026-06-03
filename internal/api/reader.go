@@ -371,6 +371,9 @@ type Reader interface {
 	// GetRegion returns full detail for a single region including its associated IATA codes.
 	// Returns nil, pgx.ErrNoRows if the region is not found.
 	GetRegion(ctx context.Context, regionID int32) (*Region, error)
+	// GetRegionBySlug returns full detail for a single region by its URL-safe slug.
+	// Returns nil, pgx.ErrNoRows if the region is not found.
+	GetRegionBySlug(ctx context.Context, slug string) (*Region, error)
 	// ListChannels returns a paginated list of channels ordered by last seen.
 	// Includes both hashtag-derived and explicit key channels.
 	// Pass nil hash to skip hash filtering. Pass empty string iata to return all channels.
@@ -421,9 +424,9 @@ type Reader interface {
 	ListNodeObservations(ctx context.Context, nodeID uuid.UUID, cursor int64, limit int32) (Page[PacketObservationSummary], error)
 	// ListPackets returns a paginated list of packets with the latest observation rolled in.
 	// Pass 0 for payloadType/routeType to skip those filters.
-	// Pass empty string for iata, zero times for since/until to skip those filters.
+	// Pass nil for iatas, zero times for since/until to skip those filters.
 	// cursor is last_heard_at epoch ms; pass 0 to start from the beginning.
-	ListPackets(ctx context.Context, payloadType, routeType int16, iata string, since, until time.Time, cursor int64, limit int32) (Page[PacketSummary], error)
+	ListPackets(ctx context.Context, payloadType, routeType int16, iatas []string, since, until time.Time, cursor int64, limit int32) (Page[PacketSummary], error)
 	// GetPacket returns full packet detail including all observations with radio settings.
 	// Returns nil, pgx.ErrNoRows if not found.
 	GetPacket(ctx context.Context, packetHash []byte) (*Packet, error)

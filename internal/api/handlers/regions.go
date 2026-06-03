@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/MeshCore-Tower/tower-server/internal/api"
 	"github.com/go-chi/chi/v5"
@@ -66,4 +69,47 @@ func getRegion(reader api.Reader) http.HandlerFunc {
 		}
 		respond(w, http.StatusOK, region)
 	}
+}
+
+// parseIATAs splits a comma-separated iatas query param and uppercases each value.
+func parseIATAs(r *http.Request) []string {
+	raw := r.URL.Query().Get("iatas")
+	if raw == "" {
+		// fall back to single iata param for backwards compatibility
+		if single := r.URL.Query().Get("iata"); single != "" {
+			return []string{strings.ToUpper(strings.TrimSpace(single))}
+		}
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	iatas := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			iatas = append(iatas, strings.ToUpper(p))
+		}
+	}
+	return iatas
+}
+
+// resolveRegionIATAs expands a regionId or region slug to a slice of IATA codes.
+func resolveRegionIATAs(ctx context.Context, regionID, regionSlug string, reader api.Reader) ([]string, error) {
+	var region *api.Region
+	var err error
+	switch {
+	case regionID != "":
+		rid, e := strconv.Atoi(regionID)
+		if e != nil {
+			return nil, fmt.Errorf("invalid regionId: %w", e)
+		}
+		region, err = reader.GetRegion(ctx, int32(rid))
+	case regionSlug != "":
+		region, err = reader.GetRegionBySlug(ctx, regionSlug)
+	default:
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("region not found: %w", err)
+	}
+	return region.IATAs, nil
 }
