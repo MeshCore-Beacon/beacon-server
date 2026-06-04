@@ -15,14 +15,18 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// Store wraps the sqlc-generated Queries and implements both ingest.DB and api.Reader.
 type Store struct {
 	q *sqlc.Queries
 }
 
+// New creates a Store backed by the given pgxpool connection pool.
 func New(pool *pgxpool.Pool) *Store {
 	return &Store{q: sqlc.New(pool)}
 }
 
+// ResolvePathHashes returns a map of hex-encoded path hash → matching node entries for
+// the given IATA. Hash size is inferred from the length of the first element in hashes.
 func (s *Store) ResolvePathHashes(ctx context.Context, iata string, hashes [][]byte) (map[string][]api.ResolvedPathEntry, error) {
 	if len(hashes) == 0 {
 		return nil, nil
@@ -48,6 +52,7 @@ func (s *Store) ResolvePathHashes(ctx context.Context, iata string, hashes [][]b
 	return result, nil
 }
 
+// nullableUUID returns nil for a zero UUID, or a pointer to the UUID otherwise.
 func nullableUUID(id uuid.UUID) *uuid.UUID {
 	if id == (uuid.UUID{}) {
 		return nil
@@ -55,6 +60,8 @@ func nullableUUID(id uuid.UUID) *uuid.UUID {
 	return &id
 }
 
+// tristate converts a *bool to a SQL-friendly string for the ListNodes filter:
+// nil → "any", true → "true", false → "false".
 func tristate(b *bool) string {
 	if b == nil {
 		return "any"
@@ -65,6 +72,7 @@ func tristate(b *bool) string {
 	return "false"
 }
 
+// toChannelMessage maps raw sqlc row fields to an api.ChannelMessage.
 func toChannelMessage(id int64, packetHashHex string, channelHash []byte, senderName *string, content *string, sentAt pgtype.Timestamptz, observationCount int64) api.ChannelMessage {
 	sn := ""
 	if senderName != nil {

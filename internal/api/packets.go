@@ -23,18 +23,20 @@ type PacketSummary struct {
 	PayloadTypeName  string                `json:"payloadTypeName"`
 	RouteType        int16                 `json:"routeType"`
 	RouteTypeName    string                `json:"routeTypeName"`
-	Scope            *string               `json:"scope,omitempty"`
-	FirstHeardAt     int64                 `json:"firstHeardAt"` // epoch ms
-	LastHeardAt      int64                 `json:"lastHeardAt"`  // epoch ms
+	Scope            *string               `json:"scope,omitempty"`            // matched transport scope name e.g. "#bc"
+	FirstHeardAt     int64                 `json:"firstHeardAt"`               // epoch ms
+	LastHeardAt      int64                 `json:"lastHeardAt"`                // epoch ms
 	ObservationCount int32                 `json:"observationCount"`
 	LatestObserver   *PacketLatestObserver `json:"latestObserver,omitempty"`
 	Summary          *string               `json:"summary,omitempty"` // human-readable payload summary
 }
 
+// PacketPathLength is the decoded path_length byte from a packet observation.
+// The raw byte encodes both hash size and hop count in a bit-packed format (§2.5).
 type PacketPathLength struct {
-	Raw      string `json:"raw"`
-	HashSize int16  `json:"hashSize"`
-	HopCount int16  `json:"hopCount"`
+	Raw      string `json:"raw"`      // hex-encoded single byte
+	HashSize int16  `json:"hashSize"` // per-hop hash size in bytes (1, 2, or 3)
+	HopCount int16  `json:"hopCount"` // number of path hashes present
 }
 
 // PacketObservationDetail is a full observation including radio settings and resolved path.
@@ -45,16 +47,16 @@ type PacketObservationDetail struct {
 	IATA              string           `json:"iata"`
 	HeardAt           int64            `json:"heardAt"` // epoch ms
 	PathLength        PacketPathLength `json:"pathLength"`
-	PathBytes         *string          `json:"pathBytes,omitempty"` // hex-encoded
+	PathBytes         *string          `json:"pathBytes,omitempty"` // hex-encoded accumulated path hashes
 	RSSI              *int16           `json:"rssi,omitempty"`
 	SNR               *float32         `json:"snr,omitempty"`
-	PropagationTimeMs *int32           `json:"propagationTimeMs"`
+	PropagationTimeMs *int32           `json:"propagationTimeMs"` // ms since first observation; 0 for first
 	Radio             *PacketRadio     `json:"radio,omitempty"`
 	SourceBroker      string           `json:"sourceBroker"`
-	ResolvedPath      []ResolvedHop    `json:"resolvedPath"`
+	ResolvedPath      []ResolvedHop    `json:"resolvedPath"` // per-observation resolved path hashes
 }
 
-// PacketRadio holds the radio settings from the observation.
+// PacketRadio holds the radio settings copied from the observer at observation time.
 type PacketRadio struct {
 	FreqMHz      *float32 `json:"freqMhz,omitempty"`
 	SpreadFactor *int16   `json:"spreadFactor,omitempty"`
@@ -63,20 +65,23 @@ type PacketRadio struct {
 }
 
 // ResolvedHop is a single hop in a packet's resolved path.
+// Confidence is "high" (exactly one match), "ambiguous" (multiple matches), or "none" (no match).
 type ResolvedHop struct {
-	Confidence string         `json:"confidence"` // "high", "low", "unknown"
-	Nodes      []ResolvedNode `json:"nodes"`
+	Confidence string         `json:"confidence"` // "high", "ambiguous", or "none"
+	Nodes      []ResolvedNode `json:"nodes"`      // empty for "none", one for "high", multiple for "ambiguous"
 }
 
 // ResolvedNode is a node reference within a resolved path hop.
 type ResolvedNode struct {
 	ID        uuid.UUID `json:"id"`
 	Name      *string   `json:"name,omitempty"`
-	PublicKey string    `json:"publicKey"` // hex-encoded prefix
+	PublicKey string    `json:"publicKey"` // hex-encoded prefix used for resolution
 	Latitude  *float64  `json:"latitude,omitempty"`
 	Longitude *float64  `json:"longitude,omitempty"`
 }
 
+// ResolvedPathEntry is an internal type used by the store layer to carry node
+// details returned from ResolvePathHashes before mapping to ResolvedNode.
 type ResolvedPathEntry struct {
 	NodeID    uuid.UUID
 	Name      *string
@@ -85,15 +90,20 @@ type ResolvedPathEntry struct {
 	PublicKey []byte
 }
 
+// PacketHeader holds the decoded header byte and its bit-packed fields.
+// The raw header byte encodes payload version, payload type, and route type (§2.3).
 type PacketHeader struct {
-	Raw             string `json:"raw"`
-	RouteType       int16  `json:"routeType"`
-	RouteTypeName   string `json:"routeTypeName"`
-	PayloadType     int16  `json:"payloadType"`
-	PayloadTypeName string `json:"payloadTypeName"`
-	PayloadVersion  int16  `json:"payloadVersion"`
+	Raw             string `json:"raw"`             // hex-encoded single byte
+	RouteType       int16  `json:"routeType"`       // bits 0-1
+	RouteTypeName   string `json:"routeTypeName"`   // FLOOD, DIRECT, TRANSPORT_FLOOD, TRANSPORT_DIRECT
+	PayloadType     int16  `json:"payloadType"`     // bits 2-5
+	PayloadTypeName string `json:"payloadTypeName"` // advert, request, group_text, etc.
+	PayloadVersion  int16  `json:"payloadVersion"`  // bits 6-7
 }
 
+// PacketTransportCodes holds the decoded transport codes present in TRANSPORT_FLOOD
+// and TRANSPORT_DIRECT packets. RegionCode is transport_code_1; SubRegionCode is
+// transport_code_2 (reserved in v1, always 0 on the wire).
 type PacketTransportCodes struct {
 	RegionCode    int32 `json:"regionCode"`
 	SubRegionCode int32 `json:"subRegionCode"`
@@ -104,17 +114,17 @@ type Packet struct {
 	PacketHash       string                    `json:"packetHash"`
 	Header           PacketHeader              `json:"header"`
 	TransportCodes   *PacketTransportCodes     `json:"transportCodes,omitempty"`
-	OriginPubkey     *string                   `json:"originPubkey,omitempty"`
+	OriginPubkey     *string                   `json:"originPubkey,omitempty"` // hex-encoded; nil when not extractable from payload
 	ParsedPayload    json.RawMessage           `json:"parsedPayload,omitempty"`
-	RawPayload       string                    `json:"rawPayload"`
-	Decrypted        bool                      `json:"decrypted"`
-	ChannelHash      *string                   `json:"channelHash,omitempty"`
-	Scope            *string                   `json:"scope,omitempty"`
-	FirstHeardAt     int64                     `json:"firstHeardAt"`
-	LastHeardAt      int64                     `json:"lastHeardAt"`
-	FirstToLastMs    int64                     `json:"firstToLastMs"`
+	RawPayload       string                    `json:"rawPayload"`              // hex-encoded payload bytes (excludes header and path)
+	Decrypted        bool                      `json:"decrypted"`               // true if group text was successfully decrypted
+	ChannelHash      *string                   `json:"channelHash,omitempty"`   // hex-encoded single byte; non-nil for group_text/group_data
+	Scope            *string                   `json:"scope,omitempty"`         // matched transport scope name e.g. "#bc"
+	FirstHeardAt     int64                     `json:"firstHeardAt"`            // epoch ms
+	LastHeardAt      int64                     `json:"lastHeardAt"`             // epoch ms
+	FirstToLastMs    int64                     `json:"firstToLastMs"`           // ms between first and last observation
 	ObservationCount int32                     `json:"observationCount"`
-	ResolvedRoute    []ResolvedHop             `json:"resolvedRoute,omitempty"`
+	ResolvedRoute    []ResolvedHop             `json:"resolvedRoute,omitempty"` // trace packets only: resolved intended route
 	Observations     []PacketObservationDetail `json:"observations"`
 }
 
@@ -123,14 +133,14 @@ type Packet struct {
 type AdvertObservation struct {
 	PacketObservationSummary
 	NodeName      *string `json:"nodeName,omitempty"`
-	NodePublicKey *string `json:"nodePublicKey,omitempty"`
+	NodePublicKey *string `json:"nodePublicKey,omitempty"` // hex-encoded
 }
 
 // PacketObservationSummary is a lightweight packet+observation pair used in
 // list contexts such as observer adverts and node observations.
 type PacketObservationSummary struct {
-	ID              int64    `json:"id"`         // observation ID, use as cursor for pagination
-	PacketHash      string   `json:"packetHash"` // hex-encoded
+	ID              int64    `json:"id"`          // observation ID, use as cursor for pagination
+	PacketHash      string   `json:"packetHash"`  // hex-encoded
 	PayloadType     int16    `json:"payloadType"`
 	PayloadTypeName string   `json:"payloadTypeName"`
 	IATA            string   `json:"iata"`

@@ -44,25 +44,43 @@ For deployment instructions including the frontend app, see the deployment docs.
 
 ```
 tower-server/
-├── cmd/tower/          entry point
+├── cmd/tower/              entry point
 ├── db/
-│   ├── migrations/     SQL schema (001_schema.sql)
-│   ├── queries/        sqlc query definitions
-│   ├── sqlc/           generated Go DB code (do not edit)
-│   └── store.go        DB interface implementations
+│   ├── migrations/         SQL schema (001_schema.sql)
+│   ├── queries/            sqlc query definitions
+│   ├── sqlc/               generated Go DB code (do not edit)
+│   ├── store.go            Store type, shared helpers
+│   ├── packets.go          packet and observation store methods
+│   ├── nodes.go            node store methods
+│   ├── observers.go        observer store methods
+│   ├── channels.go         channel and message store methods
+│   ├── stats.go            stats and materialized view methods
+│   ├── config.go           IATA and region store methods
+│   └── scopes.go           transport scope store methods
 ├── internal/
 │   ├── api/
-│   │   ├── handlers/   HTTP route handlers
-│   │   ├── middleware/  Auth middleware stub
-│   │   ├── router/     Chi router wiring
-│   │   ├── helpers.go  Node type name helpers
-│   │   └── reader.go   Read-only DB interface + response types
-│   ├── config/         Config file loading and DB seeding
-│   ├── hub/            WebSocket fan-out broker
-│   ├── ingest/         MQTT ingest pipeline
-│   ├── keystore/       Channel key store
-│   ├── scopestore/     Transport scope key store
-│   └── ws/             WebSocket handler
+│   │   ├── handlers/       HTTP route handlers
+│   │   ├── middleware/      Auth middleware stub
+│   │   ├── router/         Chi router wiring
+│   │   ├── reader.go       Reader interface and Page type
+│   │   ├── packets.go      packet response types and helpers
+│   │   ├── nodes.go        node response types and helpers
+│   │   ├── observers.go    observer response types
+│   │   ├── channels.go     channel and message response types
+│   │   ├── stats.go        stats response types
+│   │   ├── iata.go         IATA response type
+│   │   └── regions.go      region response types
+│   ├── config/             config file loading and DB seeding
+│   ├── hub/                WebSocket fan-out broker
+│   ├── ingest/
+│   │   ├── ingest.go       Worker, DB interface, MQTT connection
+│   │   ├── packet.go       packet pipeline, payload parsing
+│   │   ├── status.go       status message handling
+│   │   ├── side_effects.go payload-type side effects (node upsert, channel messages)
+│   │   └── capability.go   firmware capability detection
+│   ├── keystore/           channel key store
+│   ├── scopestore/         transport scope key store
+│   └── ws/                 WebSocket handler and IP limiter
 ├── config.yaml.example
 ├── env.example
 ├── docker-compose.yml

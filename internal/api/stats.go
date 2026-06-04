@@ -2,12 +2,13 @@ package api
 
 import "github.com/google/uuid"
 
-// RadioPreset represents a unique radio configuration and where it is heard.
+// RadioPreset represents a unique radio configuration observed in a given IATA,
+// aggregated from both observer status messages and node adverts.
 type RadioPreset struct {
-	Preset     string `json:"preset"`
+	Preset     string `json:"preset"`     // "freqMhz,bwKhz,sf" e.g. "910.525,62.5,7"
 	IATA       string `json:"iata"`
 	SourceType string `json:"sourceType"` // "observer" or "node"
-	Count      int64  `json:"count"`
+	Count      int64  `json:"count"`      // number of observers or nodes on this preset in this IATA
 }
 
 // StatsOverview is the top-level network summary for the overview endpoint.
@@ -19,9 +20,9 @@ type StatsOverview struct {
 	WindowHours       int   `json:"windowHours"` // always 24 for now
 }
 
-// ObservationPoint is a single time-bucketed observation count.
+// ObservationPoint is a single time-bucketed observation count for charting.
 type ObservationPoint struct {
-	Hour             int64  `json:"hour"` // epoch ms, start of bucket
+	Hour             int64  `json:"hour"`             // epoch ms, start of the 1-hour bucket
 	IATA             string `json:"iata"`
 	ObservationCount int64  `json:"observationCount"`
 	UniquePackets    int64  `json:"uniquePackets"`
@@ -37,13 +38,13 @@ type PayloadBreakdownItem struct {
 
 // ScopeStats represents aggregate statistics for a single transport scope.
 type ScopeStats struct {
-	Name          string `json:"name"`
-	PacketCount   int64  `json:"packetCount"`
-	ObserverCount int64  `json:"observerCount"`
-	NodeCount     int64  `json:"nodeCount"`
+	Name          string `json:"name"`          // normalized scope name e.g. "#bc"
+	PacketCount   int64  `json:"packetCount"`   // distinct packets matched to this scope
+	ObserverCount int64  `json:"observerCount"` // distinct observers that forwarded packets in this scope
+	NodeCount     int64  `json:"nodeCount"`     // distinct nodes with this as their default scope
 }
 
-// TopNode is a node ranked by observation count.
+// TopNode is a node ranked by observation count from the mv_top_nodes_by_iata materialized view.
 type TopNode struct {
 	NodeID           uuid.UUID `json:"nodeId"`
 	NodeName         *string   `json:"nodeName,omitempty"`
