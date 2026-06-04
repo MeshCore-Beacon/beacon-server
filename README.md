@@ -78,6 +78,7 @@ tower-server/
 │   │   ├── status.go       status message handling
 │   │   ├── side_effects.go payload-type side effects (node upsert, channel messages)
 │   │   └── capability.go   firmware capability detection
+│   ├── iatadb/             static IATA → country/continent map (generated)
 │   ├── keystore/           channel key store
 │   ├── scopestore/         transport scope key store
 │   └── ws/                 WebSocket handler and IP limiter
@@ -203,6 +204,15 @@ packets:
 # WebSocket settings.
 websocket:
   max_connections_per_ip: 5 # default: 5
+
+# Geographic ingest filter (optional).
+# Drop packets from observers outside the specified area.
+# Country codes are ISO 3166-1 alpha-2. Continent codes: AF AN AS EU NA OC SA.
+# If both are set an IATA passes if it matches either (OR semantics).
+# Omit entirely to accept all IATAs (default).
+ingest:
+  allow_countries: [CA, US] # only store packets from these countries
+  allow_continents: [NA] # or: accept all of North America
 ```
 
 IATAs are auto-created on first packet arrival. The config file adds display
@@ -397,6 +407,28 @@ For paginated responses use the generic page wrapper:
 
 ```go
 //	@Success	200	{object}	api.Page[api.MyType]
+```
+
+### Updating the IATA database
+
+Tower includes a static IATA → country/continent mapping compiled into the
+binary, generated from the [OurAirports](https://ourairports.com/data/) public
+dataset.
+
+To refresh it with the latest airport data:
+
+```bash
+rm internal/iatadb/gen/airports.csv
+go generate ./internal/iatadb/
+```
+
+This fetches a fresh `airports.csv` from OurAirports, saves it locally, and
+regenerates `internal/iatadb/db.go`. Commit both files.
+
+To use a local CSV instead (e.g. in a restricted network environment):
+
+```bash
+AIRPORTS_CSV=/path/to/airports.csv go run ./internal/iatadb/gen
 ```
 
 ---

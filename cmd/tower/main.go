@@ -17,6 +17,7 @@ import (
 	"github.com/MeshCore-Tower/tower-server/internal/api/router"
 	"github.com/MeshCore-Tower/tower-server/internal/config"
 	"github.com/MeshCore-Tower/tower-server/internal/hub"
+	"github.com/MeshCore-Tower/tower-server/internal/iatadb"
 	"github.com/MeshCore-Tower/tower-server/internal/ingest"
 	"github.com/MeshCore-Tower/tower-server/internal/keystore"
 	"github.com/MeshCore-Tower/tower-server/internal/scopestore"
@@ -165,6 +166,13 @@ func main() {
 
 	keys := keystore.NewMapKeyStore(entries)
 
+	// ── Build geographic ingest filter ───────────────────────────────────────────────────────────
+	allowedIATAs := iatadb.BuildAllowedSet(cfg.Ingest.AllowCountries, cfg.Ingest.AllowContinents)
+	if allowedIATAs != nil {
+		log.Printf("config: ingest filter active — %d allowed IATAs (countries=%v continents=%v)",
+			len(allowedIATAs), cfg.Ingest.AllowCountries, cfg.Ingest.AllowContinents)
+	}
+
 	broker1 := ingest.New(
 		ingest.Config{
 			BrokerName:          "mqtt1",
@@ -172,6 +180,7 @@ func main() {
 			Username:            mustEnv("MQTT_BROKER_1_USERNAME"),
 			Password:            mustEnv("MQTT_BROKER_1_PASSWORD"),
 			TelemetryResolution: telemetryResolution,
+			AllowedIATAs:        allowedIATAs,
 		},
 		store,
 		h,
@@ -186,6 +195,7 @@ func main() {
 			Username:            mustEnv("MQTT_BROKER_2_USERNAME"),
 			Password:            mustEnv("MQTT_BROKER_2_PASSWORD"),
 			TelemetryResolution: telemetryResolution,
+			AllowedIATAs:        allowedIATAs,
 		},
 		store,
 		h,

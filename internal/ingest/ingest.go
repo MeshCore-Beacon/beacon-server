@@ -51,6 +51,11 @@ type Config struct {
 	Username string
 	Password string
 
+	// AllowedIATAs is a pre-computed set of IATA codes derived from the ingest
+	// filter config. If non-nil, packets from IATAs not in this set are dropped.
+	// Build this set at startup from IngestFilterConfig using iatadb.
+	AllowedIATAs map[string]struct{}
+
 	// TelemetryResolution controls how frequently telemetry snapshots are stored.
 	// Status messages within the same window are deduplicated via ON CONFLICT.
 	// Defaults to 1 hour if zero.
@@ -235,6 +240,14 @@ func (w *Worker) handleMessage(msg mqtt.Message) {
 		return
 	}
 	iata, pubkeyHex, subtopic := parts[1], parts[2], parts[3]
+
+	// Drop packets from IATAs outside the configured geographic filter.
+	if w.cfg.AllowedIATAs != nil {
+		if _, ok := w.cfg.AllowedIATAs[iata]; !ok {
+			log.Printf("ingest[%s]: dropped packet from %s (not in allowed IATAs)", w.cfg.BrokerName, iata)
+			return
+		}
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

@@ -17,6 +17,7 @@ type Config struct {
 	Telemetry   TelemetryConfig       `yaml:"telemetry"`
 	WebSocket   WebSocketConfig       `yaml:"websocket"`
 	Packets     PacketsConfig         `yaml:"packets"`
+	Ingest      IngestFilterConfig    `yaml:"ingest"`
 	Scopes      []ScopeConfig         `yaml:"scopes"`
 }
 
@@ -109,6 +110,24 @@ type RegionConfig struct {
 	CenterLng    *float64 `yaml:"center_lng"`
 	ZoomLevel    *int     `yaml:"zoom_level"`
 	IATAs        []string `yaml:"iatas"`
+}
+
+
+// IngestFilterConfig restricts which packets Tower stores based on the
+// observer's IATA geographic location. Both filters are optional — if neither
+// is set all IATAs are accepted. If both are set an IATA passes if it matches
+// either (OR semantics).
+//
+// Country codes are ISO 3166-1 alpha-2 (e.g. "CA", "US").
+// Continent codes are two-letter OurAirports codes: AF, AN, AS, EU, NA, OC, SA.
+type IngestFilterConfig struct {
+	// AllowCountries is a list of ISO 3166-1 alpha-2 country codes to accept.
+	// Packets from observers in other countries are dropped at ingest.
+	AllowCountries []string `yaml:"allow_countries"`
+
+	// AllowContinents is a list of continent codes to accept.
+	// Packets from observers in other continents are dropped at ingest.
+	AllowContinents []string `yaml:"allow_continents"`
 }
 
 // Load reads and parses the config file at path.
