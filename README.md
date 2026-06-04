@@ -167,11 +167,11 @@ channel_keys:
       key: "8b3387e9c5cdea6ac9e5edbaa115cd72"
       name: "Public"
 
-  # Regional transport scopes for matching TRANSPORT_FLOOD packets.
-  # Plain names have # prepended automatically (e.g. "bc" → "#bc").
-  scopes:
-    - name: bc
-    - name: "#west"
+# Regional transport scopes for matching TRANSPORT_FLOOD packets.
+# Plain names have # prepended automatically (e.g. "bc" → "#bc").
+scopes:
+  - name: bc
+  - name: "#west"
 
 # Observer telemetry storage settings.
 telemetry:
