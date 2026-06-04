@@ -61,6 +61,7 @@ tower-server/
 │   ├── hub/            WebSocket fan-out broker
 │   ├── ingest/         MQTT ingest pipeline
 │   ├── keystore/       Channel key store
+│   ├── scopestore/     Transport scope key store
 │   └── ws/             WebSocket handler
 ├── config.yaml.example
 ├── env.example
@@ -165,6 +166,12 @@ channel_keys:
     "11":
       key: "8b3387e9c5cdea6ac9e5edbaa115cd72"
       name: "Public"
+
+  # Regional transport scopes for matching TRANSPORT_FLOOD packets.
+  # Plain names have # prepended automatically (e.g. "bc" → "#bc").
+  scopes:
+    - name: bc
+    - name: "#west"
 
 # Observer telemetry storage settings.
 telemetry:
