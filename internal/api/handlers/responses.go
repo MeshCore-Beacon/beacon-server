@@ -29,6 +29,9 @@ func respond(w http.ResponseWriter, status int, data any) {
 // respondError writes a standard JSON error response.
 // The error code is derived automatically from the HTTP status text.
 func respondError(w http.ResponseWriter, status int, message string) {
+	if status >= 500 {
+		log.Printf("api: error %d: %s", status, message)
+	}
 	code := strings.ToLower(strings.ReplaceAll(http.StatusText(status), " ", "_"))
 	respond(w, status, map[string]APIError{"error": {Code: code, Message: message}})
 }

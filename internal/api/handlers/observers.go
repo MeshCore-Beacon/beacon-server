@@ -40,6 +40,7 @@ func ObserversRouter(reader api.Reader) http.Handler {
 //	@Param		broker	query		string	false	"Filter by broker name"
 //	@Param		status	query		string	false	"Filter by status (online or offline)"
 //	@Param		name	query		string	false	"Partial case-insensitive display name match"
+//	@Param		scope	query		string	false	"Filter by transport scope name e.g. %23bc (URL-encoded #bc)"
 //	@Param		cursor	query		int		false	"last_seen epoch ms of last item for pagination"
 //	@Param		limit	query		int		false	"Max results (default 50)"
 //	@Success	200		{object}	api.Page[api.ObserverSummary]
@@ -52,6 +53,7 @@ func listObservers(reader api.Reader) http.HandlerFunc {
 		broker := r.URL.Query().Get("broker")
 		name := r.URL.Query().Get("name")
 		status := r.URL.Query().Get("status")
+		scope := r.URL.Query().Get("scope")
 		var cursor int64
 		if cursorParam := r.URL.Query().Get("cursor"); cursorParam != "" {
 			c, err := strconv.ParseInt(cursorParam, 10, 64)
@@ -79,7 +81,7 @@ func listObservers(reader api.Reader) http.HandlerFunc {
 			}
 			iatas = append(iatas, regionIATAs...)
 		}
-		observers, err := reader.ListObservers(r.Context(), iatas, observerType, broker, status, name, cursor, limit)
+		observers, err := reader.ListObservers(r.Context(), iatas, observerType, broker, status, name, scope, cursor, limit)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "failed to get list of observers")
 			return

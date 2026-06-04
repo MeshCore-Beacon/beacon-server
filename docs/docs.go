@@ -390,6 +390,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by transport scope name e.g. %23bc (URL-encoded #bc)",
+                        "name": "scope",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Exact public key match (hex)",
                         "name": "pubkey",
                         "in": "query"
@@ -589,6 +595,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Partial case-insensitive display name match",
                         "name": "name",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by transport scope name e.g. %23bc (URL-encoded #bc)",
+                        "name": "scope",
                         "in": "query"
                     },
                     {
@@ -814,6 +826,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Filter by multiple IATA codes, comma-separated e.g. YVR,YYJ",
                         "name": "iatas",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by transport scope name e.g. %23bc (URL-encoded #bc)",
+                        "name": "scope",
                         "in": "query"
                     },
                     {
@@ -1400,6 +1418,9 @@ const docTemplate = `{
         "github_com_MeshCore-Tower_tower-server_internal_api.Node": {
             "type": "object",
             "properties": {
+                "defaultScope": {
+                    "type": "string"
+                },
                 "firstSeen": {
                     "description": "epoch ms",
                     "type": "integer"
@@ -1486,6 +1507,9 @@ const docTemplate = `{
         "github_com_MeshCore-Tower_tower-server_internal_api.NodeSummary": {
             "type": "object",
             "properties": {
+                "defaultScope": {
+                    "type": "string"
+                },
                 "iatas": {
                     "type": "array",
                     "items": {
@@ -1605,6 +1629,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "radio": {
+                    "description": "friendly radio param string: freqMhz,BwKhz,SF",
                     "type": "string"
                 },
                 "radioBwKhz": {
@@ -1622,6 +1647,13 @@ const docTemplate = `{
                 "radioSf": {
                     "description": "LoRa spreading factor",
                     "type": "integer"
+                },
+                "scopes": {
+                    "description": "list of observer forwarded scopes matched to config",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "softwareVersion": {
                     "type": "string"
@@ -1674,7 +1706,15 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "radio": {
+                    "description": "friendly radio param string: freqMhz,BwKhz,SF",
                     "type": "string"
+                },
+                "scopes": {
+                    "description": "list of observer forwarded scopes matched to config",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "status": {
                     "description": "\"online\" or \"offline\" derived from last_status_at",
@@ -1772,6 +1812,9 @@ const docTemplate = `{
                     }
                 },
                 "rawPayload": {
+                    "type": "string"
+                },
+                "scope": {
                     "type": "string"
                 },
                 "transportCodes": {

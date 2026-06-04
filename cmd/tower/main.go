@@ -19,6 +19,7 @@ import (
 	"github.com/MeshCore-Tower/tower-server/internal/hub"
 	"github.com/MeshCore-Tower/tower-server/internal/ingest"
 	"github.com/MeshCore-Tower/tower-server/internal/keystore"
+	"github.com/MeshCore-Tower/tower-server/internal/scopestore"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
@@ -116,6 +117,15 @@ func main() {
 		log.Fatalf("failed to seed config: %v", err)
 	}
 
+	// ── Build transport scope keystore ───────────────────────────────────────
+	scopes := scopestore.New()
+	scopeEntries, err := store.GetTransportScopes(ctx)
+	if err != nil {
+		log.Fatalf("failed to load transport scopes: %v", err)
+	}
+	scopes.Load(scopeEntries)
+	log.Printf("loaded %d transport scopes", len(scopeEntries))
+
 	// ── Build channel keystore ──────────────────────────────────────────────
 	entries := make(map[string][]keystore.Entry)
 
@@ -166,6 +176,7 @@ func main() {
 		store,
 		h,
 		keys,
+		scopes,
 	)
 
 	broker2 := ingest.New(
@@ -179,6 +190,7 @@ func main() {
 		store,
 		h,
 		keys,
+		scopes,
 	)
 
 	go broker1.Start(ctx)

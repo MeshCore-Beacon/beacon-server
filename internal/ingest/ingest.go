@@ -21,6 +21,8 @@ package ingest
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -37,6 +39,7 @@ import (
 	"github.com/MeshCore-Tower/tower-server/internal/api"
 	"github.com/MeshCore-Tower/tower-server/internal/hub"
 	"github.com/MeshCore-Tower/tower-server/internal/keystore"
+	"github.com/MeshCore-Tower/tower-server/internal/scopestore"
 )
 
 // Config holds the connection parameters for one broker.
@@ -81,6 +84,10 @@ type DB interface {
 	// for a node, never downgrading an existing TRUE.
 	SetNodeCapability(ctx context.Context, nodeID uuid.UUID, paths, traces bool) error
 
+	// SetNodeDefaultScope records the most recent scope attached to a node advert
+	// scopes are matched against configured regional transport scopes
+	SetNodeDefaultScope(ctx context.Context, nodeID uuid.UUID, scopeID int32) error
+
 	// UpsertNode upserts a nodes row from an advert payload.
 	UpsertNode(ctx context.Context, n UpsertNodeParams, r RadioSettings) (uuid.UUID, error)
 
@@ -121,6 +128,12 @@ type DB interface {
 	UpsertChannelHashOnly(ctx context.Context, channelHash []byte) (int, error)
 	// GetPacketObservationCount returns the number of rows for the packet observations
 	GetPacketObservationCount(ctx context.Context, packetHash []byte) (int64, error)
+	// GetTransportScopeByName returns the ID of a transport scope by its normalized name.
+	GetTransportScopeByName(ctx context.Context, name string) (int32, error)
+	// UpsertObserverScope records or updates a scope association for an observer.
+	// Called when a TRANSPORT_FLOOD packet is observed, linking the observer to
+	// the matched regional transport scope.
+	UpsertObserverScope(ctx context.Context, observerID uuid.UUID, scopeID int32) error
 }
 
 // UpsertPacketParams mirrors the columns written on packets upsert.
@@ -135,6 +148,7 @@ type UpsertPacketParams struct {
 	ParsedPayload  json.RawMessage
 	OriginPubkey   []byte
 	ChannelHash    []byte
+	ScopeID        *int32
 }
 
 // InsertObservationParams mirrors the columns written on packet_observations insert.
@@ -365,18 +379,24 @@ type ChannelKeyStore interface {
 	GetKey(channelHash []byte) []keystore.Entry
 }
 
+// ScopeStore provides transport scope key lookup for matching TRANSPORT_FLOOD packets.
+type ScopeStore interface {
+	Entries() []scopestore.Entry
+}
+
 // Worker holds the dependencies for one broker's ingest loop.
 type Worker struct {
 	cfg    Config
 	db     DB
 	hub    *hub.Hub
 	keys   ChannelKeyStore
+	scopes ScopeStore
 	client mqtt.Client
 }
 
 // New creates an ingest Worker. Call Start() to connect and begin processing.
-func New(cfg Config, db DB, h *hub.Hub, keys ChannelKeyStore) *Worker {
-	return &Worker{cfg: cfg, db: db, hub: h, keys: keys}
+func New(cfg Config, db DB, h *hub.Hub, keys ChannelKeyStore, scopes ScopeStore) *Worker {
+	return &Worker{cfg: cfg, db: db, hub: h, keys: keys, scopes: scopes}
 }
 
 // Start connects to the broker and blocks until ctx is cancelled. It
@@ -773,6 +793,26 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		parsedPayload, _ = json.Marshal(pr)
 	}
 
+	var matchedScope *string
+	if packet.RouteType() == meshcore.RouteTypeTransportFlood || packet.RouteType() == meshcore.RouteTypeTransportDirect {
+		for _, entry := range w.scopes.Entries() {
+			code := computeTransportCode(entry.TransportKey, packet.PayloadType(), packet.Payload)
+			if code == packet.TransportCode1 {
+				s := entry.Name
+				matchedScope = &s
+				break
+			}
+		}
+	}
+	var scopeID *int32
+	if matchedScope != nil {
+		id, err := w.db.GetTransportScopeByName(ctx, *matchedScope)
+		if err != nil {
+			log.Printf("ingest[%s]: failed to get scope ID for %s: %v", w.cfg.BrokerName, *matchedScope, err)
+		} else {
+			scopeID = &id
+		}
+	}
 	rawHeader := []byte{packet.Header}
 	if transportCodes != nil {
 		rawHeader = append(rawHeader, transportCodes...)
@@ -788,6 +828,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		ParsedPayload:  parsedPayload,
 		OriginPubkey:   originPubkey,
 		ChannelHash:    channelHash,
+		ScopeID:        scopeID,
 	}
 	isNew, err := w.db.UpsertPacket(ctx, pParams)
 	if err != nil {
@@ -831,6 +872,12 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		return
 	}
 
+	if scopeID != nil && inserted {
+		if err := w.db.UpsertObserverScope(ctx, id, *scopeID); err != nil {
+			log.Printf("ingest[%s]: failed to upsert observer scope for %s: %v", w.cfg.BrokerName, id, err)
+		}
+	}
+
 	resolved, err := w.db.ResolvePathHashes(ctx, iata, packet.PathHashes())
 	if err != nil {
 		log.Printf("ingest[%s]: path resolution failed: %v", w.cfg.BrokerName, err)
@@ -843,7 +890,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	}
 	w.runCapabilityDetection(ctx, packet.PayloadType(), packet.PathHashSize(), resolvedIDs)
 	if inserted {
-		w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio)
+		w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio, scopeID)
 		evt := packetObservationEvent{}
 		evt.PacketHash = hex.EncodeToString(packetHash[:])
 		evt.Packet.PayloadType = packet.PayloadType()
@@ -1045,7 +1092,7 @@ func (w *Worker) runCapabilityDetection(ctx context.Context, payloadType uint8, 
 // new observation is confirmed inserted. Currently handles:
 //   - PayloadTypeAdvert (0x04): upsert node and node_iatas
 //   - PayloadTypeGrpTxt (0x05): decrypt and store channel message if key is known
-func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshcore.Packet, iata string, packetHash []byte, radio RadioSettings) {
+func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshcore.Packet, iata string, packetHash []byte, radio RadioSettings, scopeID *int32) {
 	if packet.PayloadType() == meshcore.PayloadTypeAdvert {
 		advert, err := meshcore.AdvertFromBytes(packet.Payload)
 		if err != nil {
@@ -1073,6 +1120,11 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 		}
 		if err := w.db.UpsertNodeIATA(ctx, nodeID, iata); err != nil {
 			log.Printf("ingest[%s]: db: upsert node IATA failed: %v", w.cfg.BrokerName, err)
+		}
+		if scopeID != nil && (packet.RouteType() == meshcore.RouteTypeTransportFlood || packet.RouteType() == meshcore.RouteTypeTransportDirect) {
+			if err := w.db.SetNodeDefaultScope(ctx, nodeID, *scopeID); err != nil {
+				log.Printf("ingest[%s]: failed to set default scope for node %s: %v", w.cfg.BrokerName, hex.EncodeToString(advert.PublicKey.PublicKeyBytes()), err)
+			}
 		}
 		prefix4 := advert.PublicKey.PublicKeyBytes()[:4]
 		if err := w.db.UpsertNodeShortID(ctx, nodeID, iata, prefix4); err != nil {
@@ -1225,4 +1277,22 @@ func uint32ToBytes(v uint32) []byte {
 	b := make([]byte, 4)
 	binary.LittleEndian.PutUint32(b, v)
 	return b
+}
+
+// computeTransportCode derives transport_code_1 from a transport key and packet payload.
+// code = HMAC-SHA256(key, payload_type_byte || payload)[0:2] as little-endian uint16.
+// Coerces reserved values 0x0000 → 0x0001 and 0xFFFF → 0xFFFE per §2.4.
+func computeTransportCode(key []byte, payloadType uint8, payload []byte) uint16 {
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte{payloadType})
+	mac.Write(payload)
+	sum := mac.Sum(nil)
+	code := uint16(sum[0]) | uint16(sum[1])<<8
+	if code == 0x0000 {
+		code = 0x0001
+	}
+	if code == 0xFFFF {
+		code = 0xFFFE
+	}
+	return code
 }

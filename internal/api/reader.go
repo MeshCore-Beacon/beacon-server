@@ -77,6 +77,7 @@ type PacketSummary struct {
 	PayloadTypeName  string                `json:"payloadTypeName"`
 	RouteType        int16                 `json:"routeType"`
 	RouteTypeName    string                `json:"routeTypeName"`
+	Scope            *string               `json:"scope,omitempty"`
 	FirstHeardAt     int64                 `json:"firstHeardAt"` // epoch ms
 	LastHeardAt      int64                 `json:"lastHeardAt"`  // epoch ms
 	ObservationCount int32                 `json:"observationCount"`
@@ -162,6 +163,7 @@ type Packet struct {
 	RawPayload       string                    `json:"rawPayload"`
 	Decrypted        bool                      `json:"decrypted"`
 	ChannelHash      *string                   `json:"channelHash,omitempty"`
+	Scope            *string                   `json:"scope,omitempty"`
 	FirstHeardAt     int64                     `json:"firstHeardAt"`
 	LastHeardAt      int64                     `json:"lastHeardAt"`
 	FirstToLastMs    int64                     `json:"firstToLastMs"`
@@ -230,6 +232,7 @@ type NodeSummary struct {
 	Longitude    *float64   `json:"lng,omitempty"`
 	Radio        *string    `json:"radio,omitempty"`
 	IATAs        []NodeIATA `json:"iatas"`
+	DefaultScope *string    `json:"defaultScope,omitempty"`
 }
 
 // Node is the full node representation including firmware capability flags,
@@ -253,7 +256,8 @@ type ObserverSummary struct {
 	ObserverType *string   `json:"observerType,omitempty"` // e.g. "meshcoretomqtt", "meshcoreha"
 	IATA         string    `json:"iata"`                   // most recently heard IATA
 	Status       string    `json:"status"`                 // "online" or "offline" derived from last_status_at
-	Radio        *string   `json:"radio,omitempty"`
+	Radio        *string   `json:"radio,omitempty"`        // friendly radio param string: freqMhz,BwKhz,SF
+	Scopes       []string  `json:"scopes,omitempty"`       // list of observer forwarded scopes matched to config
 }
 
 // ObserverBroker represents a single MQTT broker an observer has been seen on,
@@ -399,7 +403,7 @@ type Reader interface {
 	// All filter params are optional — pass empty string or nil to skip a filter.
 	// status is "online" or "offline" derived from last_status_at recency.
 	// cursor is last_seen epoch ms of the last observer; pass 0 to start from the beginning.
-	ListObservers(ctx context.Context, iatas []string, observerType, broker, status, name string, cursor int64, limit int32) (Page[ObserverSummary], error)
+	ListObservers(ctx context.Context, iatas []string, observerType, broker, status, name, scope string, cursor int64, limit int32) (Page[ObserverSummary], error)
 	// GetObserver returns full detail for a single observer by UUID.
 	// Returns nil, pgx.ErrNoRows if the observer is not found.
 	GetObserver(ctx context.Context, observerID uuid.UUID) (*Observer, error)
@@ -408,13 +412,17 @@ type Reader interface {
 	GetObserverTelemetry(ctx context.Context, observerID uuid.UUID, since, until time.Time, afterID int64) (*ObserverTelemetry, error)
 	// TODO: add interval time.Duration param for server-side bucketing
 
+	// GetObserverScopes returns the names of all transport scopes an observer has
+	// been seen forwarding packets for, ordered alphabetically.
+	GetObserverScopes(ctx context.Context, observerID uuid.UUID) ([]string, error)
+
 	// ListObserverAdverts returns a paginated list of advert packets heard by an observer.
 	// Pass cursor=0 to start from the beginning.
 	ListObserverAdverts(ctx context.Context, observerID uuid.UUID, cursor int64, limit int32) (Page[AdvertObservation], error)
 	// ListNodes returns a paginated list of nodes with optional filters.
 	// Pass 0 for nodeType, nil iatas, nil for pubkey to skip those filters.
 	// cursor is last_seen epoch ms; pass 0 to start from the beginning.
-	ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, name string, cursor int64, limit int32) (Page[NodeSummary], error)
+	ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, name, scope string, cursor int64, limit int32) (Page[NodeSummary], error)
 
 	// GetNode returns full detail for a single node by UUID.
 	// Returns nil, pgx.ErrNoRows if the node is not found.
@@ -426,7 +434,7 @@ type Reader interface {
 	// Pass 0 for payloadType/routeType to skip those filters.
 	// Pass nil for iatas, zero times for since/until to skip those filters.
 	// cursor is last_heard_at epoch ms; pass 0 to start from the beginning.
-	ListPackets(ctx context.Context, payloadType, routeType int16, iatas []string, since, until time.Time, cursor int64, limit int32) (Page[PacketSummary], error)
+	ListPackets(ctx context.Context, payloadType, routeType int16, iatas []string, scope string, since, until time.Time, cursor int64, limit int32) (Page[PacketSummary], error)
 	// GetPacket returns full packet detail including all observations with radio settings.
 	// Returns nil, pgx.ErrNoRows if not found.
 	GetPacket(ctx context.Context, packetHash []byte) (*Packet, error)

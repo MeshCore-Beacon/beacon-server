@@ -37,6 +37,7 @@ func NodesRouter(reader api.Reader) http.Handler {
 //	@Param		regionId		query		int		false	"Filter by region ID, expands to member IATAs"
 //	@Param		region			query		string	false	"Filter by region slug, expands to member IATAs"
 //	@Param		name					query		string	false	"Partial case-insensitive name match"
+//	@Param		scope	query		string	false	"Filter by transport scope name e.g. %23bc (URL-encoded #bc)"
 //	@Param		pubkey					query		string	false	"Exact public key match (hex)"
 //	@Param		supportsMultibytePaths	query		bool	false	"Filter by multibyte path support (true/false); omit for no filter"
 //	@Param		supportsMultibyteTraces	query		bool	false	"Filter by multibyte trace support (true/false); omit for no filter"
@@ -96,6 +97,7 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 			iatas = append(iatas, regionIATAs...)
 		}
 		name := r.URL.Query().Get("name")
+		scope := r.URL.Query().Get("scope")
 		var supportsMultibytePaths *bool
 		if v := r.URL.Query().Get("supportsMultibytePaths"); v != "" {
 			b, err := strconv.ParseBool(v)
@@ -114,7 +116,7 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 			}
 			supportsMultibyteTraces = &b
 		}
-		nodes, err := reader.ListNodes(r.Context(), nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, name, cursor, limit)
+		nodes, err := reader.ListNodes(r.Context(), nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, name, scope, cursor, limit)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return

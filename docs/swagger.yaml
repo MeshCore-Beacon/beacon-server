@@ -112,6 +112,8 @@ definitions:
     type: object
   github_com_MeshCore-Tower_tower-server_internal_api.Node:
     properties:
+      defaultScope:
+        type: string
       firstSeen:
         description: epoch ms
         type: integer
@@ -172,6 +174,8 @@ definitions:
     type: object
   github_com_MeshCore-Tower_tower-server_internal_api.NodeSummary:
     properties:
+      defaultScope:
+        type: string
       iatas:
         items:
           $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.NodeIATA'
@@ -255,6 +259,7 @@ definitions:
         description: hex-encoded public key
         type: string
       radio:
+        description: 'friendly radio param string: freqMhz,BwKhz,SF'
         type: string
       radioBwKhz:
         description: bandwidth in kHz
@@ -268,6 +273,11 @@ definitions:
       radioSf:
         description: LoRa spreading factor
         type: integer
+      scopes:
+        description: list of observer forwarded scopes matched to config
+        items:
+          type: string
+        type: array
       softwareVersion:
         type: string
       status:
@@ -304,7 +314,13 @@ definitions:
         description: e.g. "meshcoretomqtt", "meshcoreha"
         type: string
       radio:
+        description: 'friendly radio param string: freqMhz,BwKhz,SF'
         type: string
+      scopes:
+        description: list of observer forwarded scopes matched to config
+        items:
+          type: string
+        type: array
       status:
         description: '"online" or "offline" derived from last_status_at'
         type: string
@@ -369,6 +385,8 @@ definitions:
           type: integer
         type: array
       rawPayload:
+        type: string
+      scope:
         type: string
       transportCodes:
         $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.PacketTransportCodes'
@@ -928,6 +946,10 @@ paths:
         in: query
         name: name
         type: string
+      - description: 'Filter by transport scope name e.g. %23bc (URL-encoded #bc)'
+        in: query
+        name: scope
+        type: string
       - description: Exact public key match (hex)
         in: query
         name: pubkey
@@ -1060,6 +1082,10 @@ paths:
       - description: Partial case-insensitive display name match
         in: query
         name: name
+        type: string
+      - description: 'Filter by transport scope name e.g. %23bc (URL-encoded #bc)'
+        in: query
+        name: scope
         type: string
       - description: last_seen epoch ms of last item for pagination
         in: query
@@ -1209,6 +1235,10 @@ paths:
       - description: Filter by multiple IATA codes, comma-separated e.g. YVR,YYJ
         in: query
         name: iatas
+        type: string
+      - description: 'Filter by transport scope name e.g. %23bc (URL-encoded #bc)'
+        in: query
+        name: scope
         type: string
       - description: Filter by region ID, expands to member IATAs
         in: query

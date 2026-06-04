@@ -21,6 +21,24 @@ UPDATE iata_codes SET
 WHERE iata = $1;
 
 -- ============================================================
+-- TRANSPORT CODES
+-- ============================================================
+
+-- name: UpsertTransportScope :exec
+INSERT INTO transport_scopes (name, display_name, transport_key, key_fingerprint)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (name) DO UPDATE SET
+  display_name    = EXCLUDED.display_name,
+  transport_key   = EXCLUDED.transport_key,
+  key_fingerprint = EXCLUDED.key_fingerprint;
+
+-- name: GetTransportScopes :many
+SELECT name, transport_key, key_fingerprint FROM transport_scopes ORDER BY name;
+
+-- name: GetTransportScopeByName :one
+SELECT id FROM transport_scopes WHERE name = $1;
+
+-- ============================================================
 -- OBSERVERS
 -- ============================================================
 
@@ -52,6 +70,18 @@ UPDATE observers SET
 WHERE public_key = $1
 RETURNING id;
 
+-- name: UpsertObserverScope :exec
+INSERT INTO observer_scopes (observer_id, scope_id, last_seen)
+VALUES ($1, $2, NOW())
+ON CONFLICT (observer_id, scope_id) DO UPDATE SET
+  last_seen = NOW();
+
+-- name: GetObserverScopes :many
+SELECT ts.name FROM observer_scopes os
+JOIN transport_scopes ts ON ts.id = os.scope_id
+WHERE os.observer_id = $1
+ORDER BY ts.name;
+
 -- name: GetObserverByPubkey :one
 SELECT * FROM observers WHERE public_key = $1;
 
@@ -75,6 +105,7 @@ SELECT
   o.radio_freq_mhz,
   o.radio_sf,
   o.radio_bw_khz,
+  array_remove(array_agg(DISTINCT ts.name ORDER BY ts.name), NULL)::text[] AS scopes,
 COALESCE(CASE
     WHEN o.last_status_at > NOW() - INTERVAL '5 minutes' THEN 'online'
     ELSE 'offline'
@@ -88,6 +119,8 @@ COALESCE((
 ), '')::text AS iata
 FROM observers o
 LEFT JOIN observer_brokers ob ON ob.observer_id = o.id
+LEFT JOIN observer_scopes os ON os.observer_id = o.id
+LEFT JOIN transport_scopes ts ON ts.id = os.scope_id
 WHERE
   ($1::text = '' OR (
       SELECT po.iata FROM packet_observations po
@@ -102,6 +135,11 @@ WHERE
   END = $4)
   AND ($5 = '' OR o.display_name ILIKE '%' || $5 || '%')
   AND ($6::timestamptz IS NULL OR o.last_seen < $6)
+  AND ($8::text = '' OR EXISTS (
+    SELECT 1 FROM observer_scopes os2
+    JOIN transport_scopes ts2 ON ts2.id = os2.scope_id
+    WHERE os2.observer_id = o.id AND ts2.name = $8::text
+  ))
 GROUP BY o.id
 ORDER BY o.last_seen DESC
 LIMIT $7;
@@ -183,18 +221,22 @@ INSERT INTO packets (
   raw_header,
   parsed_payload,
   channel_hash,
+  scope_id,
   first_heard_at,
   last_heard_at
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW()
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW()
 )
 ON CONFLICT (packet_hash) DO UPDATE SET
-  last_heard_at     = NOW()
+  last_heard_at = NOW()
 RETURNING packet_hash, payload_type, payload_version, route_type, transport_codes_present, region_code, sub_region_code, origin_pubkey, raw_payload, raw_header, parsed_payload, decrypted, channel_hash, first_heard_at, last_heard_at, (xmax = 0)
 AS inserted;
 
 -- name: GetPacketByHash :one
-SELECT * FROM packets WHERE packet_hash = $1;
+SELECT p.*, ts.name AS scope_name
+FROM packets p
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+WHERE p.packet_hash = $1;
 
 -- name: GetPacketObservationCount :one
 SELECT COUNT(*) FROM packet_observations WHERE packet_hash = $1;
@@ -208,6 +250,8 @@ SELECT
   p.route_type,
   p.first_heard_at,
   p.last_heard_at,
+  p.scope_id,
+  ts.name AS scope_name,
   (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = p.packet_hash) AS observation_count,
   po.observer_id AS latest_observer_id,
   o.display_name AS latest_observer_name,
@@ -221,6 +265,7 @@ LEFT JOIN LATERAL (
   LIMIT 1
 ) po ON true
 LEFT JOIN observers o ON o.id = po.observer_id
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE
   ($1::smallint = -1 OR p.payload_type = $1::smallint)
   AND ($2::smallint = -1 OR p.route_type = $2::smallint)
@@ -232,6 +277,7 @@ WHERE
   AND ($4::timestamptz IS NULL OR p.first_heard_at >= $4)
   AND ($5::timestamptz IS NULL OR p.first_heard_at <= $5)
   AND ($6::timestamptz IS NULL OR p.last_heard_at < $6)
+  AND ($8::text = '' OR ts.name = $8::text)
 ORDER BY p.last_heard_at DESC
 LIMIT $7;
 
@@ -319,33 +365,40 @@ WHERE id = $1 AND supports_multibyte_paths = FALSE;
 UPDATE nodes SET supports_multibyte_traces = TRUE
 WHERE id = $1 AND supports_multibyte_traces = FALSE;
 
+-- name: SetNodeDefaultScope :exec
+UPDATE nodes SET default_scope_id = $2 WHERE id = $1;
+
 -- name: GetNodeByPubkey :one
-SELECT *,
+SELECT n.*, ts.name AS default_scope_name,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
   (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
    FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas
 FROM nodes n
+LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id
 WHERE n.public_key = $1;
 
 -- name: GetNodeByID :one
-SELECT *,
+SELECT n.*, ts.name AS default_scope_name,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
   (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
    FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas
 FROM nodes n
+LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id
 WHERE n.id = $1;
 
 
 -- name: ListNodes :many
 SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen,
   n.radio_freq_mhz, n.radio_sf, n.radio_bw_khz,
+  ts.name AS default_scope_name,
   json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC) FILTER (WHERE ni.iata IS NOT NULL) AS iatas,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id
 FROM nodes n
 LEFT JOIN node_iatas ni ON ni.node_id = n.id
+LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id
 WHERE
   ($1 = 0 OR n.node_type = $1)
   AND ($2::text = '' OR n.id IN (SELECT node_id FROM node_iatas WHERE iata = ANY(string_to_array($2::text, ','))))
@@ -362,7 +415,8 @@ WHERE
   AND ($5::bytea IS NULL OR n.public_key = $5)
   AND ($6 = '' OR n.name ILIKE '%' || $6 || '%')
   AND ($7::timestamptz IS NULL OR n.last_seen < $7)
-GROUP BY n.id
+  AND ($9::text = '' OR ts.name = $9::text)
+GROUP BY n.id, ts.name
 ORDER BY n.last_seen DESC
 LIMIT $8;
 

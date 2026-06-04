@@ -41,6 +41,21 @@ CREATE TABLE region_iatas (
 CREATE INDEX idx_region_iatas_iata ON region_iatas(iata);
 
 -- ============================================================
+-- TRANSPORT SCOPES
+-- ============================================================
+
+CREATE TABLE transport_scopes (
+  id                SERIAL PRIMARY KEY,
+  name              TEXT NOT NULL UNIQUE,        -- normalized key string e.g. "#bc"
+  display_name      TEXT,                        -- optional friendly name
+  transport_key     BYTEA NOT NULL,              -- 16-byte derived key
+  key_fingerprint   BYTEA NOT NULL,              -- SHA256(transport_key)[:8] for fast lookup
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_transport_scopes_fingerprint ON transport_scopes(key_fingerprint);
+
+-- ============================================================
 -- NODES (must come before observers due to observer_owners FK)
 -- ============================================================
 
@@ -55,6 +70,7 @@ CREATE TABLE nodes (
   last_advert_at  TIMESTAMPTZ,
   supports_multibyte_paths  BOOLEAN NOT NULL DEFAULT FALSE,
   supports_multibyte_traces BOOLEAN NOT NULL DEFAULT FALSE,
+  default_scope_id INT REFERENCES transport_scopes(id),
   min_firmware_version TEXT GENERATED ALWAYS AS (
     CASE
       WHEN supports_multibyte_paths  THEN '1.14.0+'
@@ -126,6 +142,14 @@ CREATE TABLE observer_locations (
   longitude     DOUBLE PRECISION,
   reported_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (observer_id, reported_at)
+);
+
+CREATE TABLE observer_scopes (
+  observer_id UUID NOT NULL REFERENCES observers(id) ON DELETE CASCADE,
+  scope_id    INT NOT NULL REFERENCES transport_scopes(id) ON DELETE CASCADE,
+  first_seen  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (observer_id, scope_id)
 );
 
 CREATE INDEX idx_observer_locations_recent ON observer_locations(observer_id, reported_at DESC);
@@ -204,6 +228,7 @@ CREATE TABLE packets (
   transport_codes_present BOOLEAN DEFAULT FALSE,
   region_code             INT,
   sub_region_code         INT,
+  scope_id INT REFERENCES transport_scopes(id),
   origin_pubkey           BYTEA,
   raw_payload             BYTEA NOT NULL,
   raw_header              BYTEA NOT NULL,

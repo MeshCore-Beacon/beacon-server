@@ -17,6 +17,14 @@ type Config struct {
 	Telemetry   TelemetryConfig       `yaml:"telemetry"`
 	WebSocket   WebSocketConfig       `yaml:"websocket"`
 	Packets     PacketsConfig         `yaml:"packets"`
+	Scopes      []ScopeConfig         `yaml:"scopes"`
+}
+
+// ScopeConfig defines a regional transport scope.
+// Name can be provided with or without the # or $ prefix.
+// Tower normalizes plain names by prepending #.
+type ScopeConfig struct {
+	Name string `yaml:"name"` // e.g. "bc", "#west", "$private"
 }
 
 // TelemetryConfig controls observer telemetry storage behaviour.

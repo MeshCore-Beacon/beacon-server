@@ -206,12 +206,13 @@ func (q *Queries) GetIATA(ctx context.Context, iata string) (IataCode, error) {
 }
 
 const getNodeByID = `-- name: GetNodeByID :one
-SELECT id, public_key, node_type, name, latitude, longitude, location_source, last_advert_at, supports_multibyte_paths, supports_multibyte_traces, min_firmware_version, first_seen, last_seen, radio_freq_mhz, radio_sf, radio_bw_khz, metadata,
+SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.location_source, n.last_advert_at, n.supports_multibyte_paths, n.supports_multibyte_traces, n.default_scope_id, n.min_firmware_version, n.first_seen, n.last_seen, n.radio_freq_mhz, n.radio_sf, n.radio_bw_khz, n.metadata, ts.name AS default_scope_name,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
   (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
    FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas
 FROM nodes n
+LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id
 WHERE n.id = $1
 `
 
@@ -226,6 +227,7 @@ type GetNodeByIDRow struct {
 	LastAdvertAt            pgtype.Timestamptz `json:"last_advert_at"`
 	SupportsMultibytePaths  bool               `json:"supports_multibyte_paths"`
 	SupportsMultibyteTraces bool               `json:"supports_multibyte_traces"`
+	DefaultScopeID          *int32             `json:"default_scope_id"`
 	MinFirmwareVersion      *string            `json:"min_firmware_version"`
 	FirstSeen               pgtype.Timestamptz `json:"first_seen"`
 	LastSeen                pgtype.Timestamptz `json:"last_seen"`
@@ -233,6 +235,7 @@ type GetNodeByIDRow struct {
 	RadioSf                 *int16             `json:"radio_sf"`
 	RadioBwKhz              *float32           `json:"radio_bw_khz"`
 	Metadata                []byte             `json:"metadata"`
+	DefaultScopeName        *string            `json:"default_scope_name"`
 	IsObserver              bool               `json:"is_observer"`
 	ObserverID              uuid.UUID          `json:"observer_id"`
 	Iatas                   []byte             `json:"iatas"`
@@ -252,6 +255,7 @@ func (q *Queries) GetNodeByID(ctx context.Context, id uuid.UUID) (GetNodeByIDRow
 		&i.LastAdvertAt,
 		&i.SupportsMultibytePaths,
 		&i.SupportsMultibyteTraces,
+		&i.DefaultScopeID,
 		&i.MinFirmwareVersion,
 		&i.FirstSeen,
 		&i.LastSeen,
@@ -259,6 +263,7 @@ func (q *Queries) GetNodeByID(ctx context.Context, id uuid.UUID) (GetNodeByIDRow
 		&i.RadioSf,
 		&i.RadioBwKhz,
 		&i.Metadata,
+		&i.DefaultScopeName,
 		&i.IsObserver,
 		&i.ObserverID,
 		&i.Iatas,
@@ -267,12 +272,13 @@ func (q *Queries) GetNodeByID(ctx context.Context, id uuid.UUID) (GetNodeByIDRow
 }
 
 const getNodeByPubkey = `-- name: GetNodeByPubkey :one
-SELECT id, public_key, node_type, name, latitude, longitude, location_source, last_advert_at, supports_multibyte_paths, supports_multibyte_traces, min_firmware_version, first_seen, last_seen, radio_freq_mhz, radio_sf, radio_bw_khz, metadata,
+SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.location_source, n.last_advert_at, n.supports_multibyte_paths, n.supports_multibyte_traces, n.default_scope_id, n.min_firmware_version, n.first_seen, n.last_seen, n.radio_freq_mhz, n.radio_sf, n.radio_bw_khz, n.metadata, ts.name AS default_scope_name,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
   (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
    FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas
 FROM nodes n
+LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id
 WHERE n.public_key = $1
 `
 
@@ -287,6 +293,7 @@ type GetNodeByPubkeyRow struct {
 	LastAdvertAt            pgtype.Timestamptz `json:"last_advert_at"`
 	SupportsMultibytePaths  bool               `json:"supports_multibyte_paths"`
 	SupportsMultibyteTraces bool               `json:"supports_multibyte_traces"`
+	DefaultScopeID          *int32             `json:"default_scope_id"`
 	MinFirmwareVersion      *string            `json:"min_firmware_version"`
 	FirstSeen               pgtype.Timestamptz `json:"first_seen"`
 	LastSeen                pgtype.Timestamptz `json:"last_seen"`
@@ -294,6 +301,7 @@ type GetNodeByPubkeyRow struct {
 	RadioSf                 *int16             `json:"radio_sf"`
 	RadioBwKhz              *float32           `json:"radio_bw_khz"`
 	Metadata                []byte             `json:"metadata"`
+	DefaultScopeName        *string            `json:"default_scope_name"`
 	IsObserver              bool               `json:"is_observer"`
 	ObserverID              uuid.UUID          `json:"observer_id"`
 	Iatas                   []byte             `json:"iatas"`
@@ -313,6 +321,7 @@ func (q *Queries) GetNodeByPubkey(ctx context.Context, publicKey []byte) (GetNod
 		&i.LastAdvertAt,
 		&i.SupportsMultibytePaths,
 		&i.SupportsMultibyteTraces,
+		&i.DefaultScopeID,
 		&i.MinFirmwareVersion,
 		&i.FirstSeen,
 		&i.LastSeen,
@@ -320,6 +329,7 @@ func (q *Queries) GetNodeByPubkey(ctx context.Context, publicKey []byte) (GetNod
 		&i.RadioSf,
 		&i.RadioBwKhz,
 		&i.Metadata,
+		&i.DefaultScopeName,
 		&i.IsObserver,
 		&i.ObserverID,
 		&i.Iatas,
@@ -487,6 +497,33 @@ func (q *Queries) GetObserverRadio(ctx context.Context, id uuid.UUID) (GetObserv
 	return i, err
 }
 
+const getObserverScopes = `-- name: GetObserverScopes :many
+SELECT ts.name FROM observer_scopes os
+JOIN transport_scopes ts ON ts.id = os.scope_id
+WHERE os.observer_id = $1
+ORDER BY ts.name
+`
+
+func (q *Queries) GetObserverScopes(ctx context.Context, observerID uuid.UUID) ([]string, error) {
+	rows, err := q.db.Query(ctx, getObserverScopes, observerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		items = append(items, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getObserverTelemetry = `-- name: GetObserverTelemetry :many
 SELECT id, reported_at, battery_voltage_mv, airtime_tx_pct, airtime_rx_pct,
        noise_floor_db, uptime_seconds, queue_length, debug_flags, receive_errors
@@ -555,12 +592,35 @@ func (q *Queries) GetObserverTelemetry(ctx context.Context, arg GetObserverTelem
 }
 
 const getPacketByHash = `-- name: GetPacketByHash :one
-SELECT packet_hash, payload_type, payload_version, route_type, transport_codes_present, region_code, sub_region_code, origin_pubkey, raw_payload, raw_header, parsed_payload, decrypted, channel_hash, first_heard_at, last_heard_at FROM packets WHERE packet_hash = $1
+SELECT p.packet_hash, p.payload_type, p.payload_version, p.route_type, p.transport_codes_present, p.region_code, p.sub_region_code, p.scope_id, p.origin_pubkey, p.raw_payload, p.raw_header, p.parsed_payload, p.decrypted, p.channel_hash, p.first_heard_at, p.last_heard_at, ts.name AS scope_name
+FROM packets p
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+WHERE p.packet_hash = $1
 `
 
-func (q *Queries) GetPacketByHash(ctx context.Context, packetHash []byte) (Packet, error) {
+type GetPacketByHashRow struct {
+	PacketHash            []byte             `json:"packet_hash"`
+	PayloadType           int16              `json:"payload_type"`
+	PayloadVersion        int16              `json:"payload_version"`
+	RouteType             int16              `json:"route_type"`
+	TransportCodesPresent *bool              `json:"transport_codes_present"`
+	RegionCode            *int32             `json:"region_code"`
+	SubRegionCode         *int32             `json:"sub_region_code"`
+	ScopeID               *int32             `json:"scope_id"`
+	OriginPubkey          []byte             `json:"origin_pubkey"`
+	RawPayload            []byte             `json:"raw_payload"`
+	RawHeader             []byte             `json:"raw_header"`
+	ParsedPayload         []byte             `json:"parsed_payload"`
+	Decrypted             *bool              `json:"decrypted"`
+	ChannelHash           []byte             `json:"channel_hash"`
+	FirstHeardAt          pgtype.Timestamptz `json:"first_heard_at"`
+	LastHeardAt           pgtype.Timestamptz `json:"last_heard_at"`
+	ScopeName             *string            `json:"scope_name"`
+}
+
+func (q *Queries) GetPacketByHash(ctx context.Context, packetHash []byte) (GetPacketByHashRow, error) {
 	row := q.db.QueryRow(ctx, getPacketByHash, packetHash)
-	var i Packet
+	var i GetPacketByHashRow
 	err := row.Scan(
 		&i.PacketHash,
 		&i.PayloadType,
@@ -569,6 +629,7 @@ func (q *Queries) GetPacketByHash(ctx context.Context, packetHash []byte) (Packe
 		&i.TransportCodesPresent,
 		&i.RegionCode,
 		&i.SubRegionCode,
+		&i.ScopeID,
 		&i.OriginPubkey,
 		&i.RawPayload,
 		&i.RawHeader,
@@ -577,6 +638,7 @@ func (q *Queries) GetPacketByHash(ctx context.Context, packetHash []byte) (Packe
 		&i.ChannelHash,
 		&i.FirstHeardAt,
 		&i.LastHeardAt,
+		&i.ScopeName,
 	)
 	return i, err
 }
@@ -885,6 +947,47 @@ func (q *Queries) GetTopNodes(ctx context.Context, arg GetTopNodesParams) ([]MvT
 			&i.ObservationCount,
 			&i.LastHeard,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getTransportScopeByName = `-- name: GetTransportScopeByName :one
+SELECT id FROM transport_scopes WHERE name = $1
+`
+
+func (q *Queries) GetTransportScopeByName(ctx context.Context, name string) (int32, error) {
+	row := q.db.QueryRow(ctx, getTransportScopeByName, name)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
+}
+
+const getTransportScopes = `-- name: GetTransportScopes :many
+SELECT name, transport_key, key_fingerprint FROM transport_scopes ORDER BY name
+`
+
+type GetTransportScopesRow struct {
+	Name           string `json:"name"`
+	TransportKey   []byte `json:"transport_key"`
+	KeyFingerprint []byte `json:"key_fingerprint"`
+}
+
+func (q *Queries) GetTransportScopes(ctx context.Context) ([]GetTransportScopesRow, error) {
+	rows, err := q.db.Query(ctx, getTransportScopes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetTransportScopesRow{}
+	for rows.Next() {
+		var i GetTransportScopesRow
+		if err := rows.Scan(&i.Name, &i.TransportKey, &i.KeyFingerprint); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1432,11 +1535,13 @@ func (q *Queries) ListNodeObservations(ctx context.Context, arg ListNodeObservat
 const listNodes = `-- name: ListNodes :many
 SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen,
   n.radio_freq_mhz, n.radio_sf, n.radio_bw_khz,
+  ts.name AS default_scope_name,
   json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC) FILTER (WHERE ni.iata IS NOT NULL) AS iatas,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id
 FROM nodes n
 LEFT JOIN node_iatas ni ON ni.node_id = n.id
+LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id
 WHERE
   ($1 = 0 OR n.node_type = $1)
   AND ($2::text = '' OR n.id IN (SELECT node_id FROM node_iatas WHERE iata = ANY(string_to_array($2::text, ','))))
@@ -1453,7 +1558,8 @@ WHERE
   AND ($5::bytea IS NULL OR n.public_key = $5)
   AND ($6 = '' OR n.name ILIKE '%' || $6 || '%')
   AND ($7::timestamptz IS NULL OR n.last_seen < $7)
-GROUP BY n.id
+  AND ($9::text = '' OR ts.name = $9::text)
+GROUP BY n.id, ts.name
 ORDER BY n.last_seen DESC
 LIMIT $8
 `
@@ -1467,22 +1573,24 @@ type ListNodesParams struct {
 	Column6 interface{}        `json:"column_6"`
 	Column7 pgtype.Timestamptz `json:"column_7"`
 	Limit   int32              `json:"limit"`
+	Column9 string             `json:"column_9"`
 }
 
 type ListNodesRow struct {
-	ID           uuid.UUID          `json:"id"`
-	PublicKey    []byte             `json:"public_key"`
-	NodeType     int16              `json:"node_type"`
-	Name         *string            `json:"name"`
-	Latitude     *float64           `json:"latitude"`
-	Longitude    *float64           `json:"longitude"`
-	LastSeen     pgtype.Timestamptz `json:"last_seen"`
-	RadioFreqMhz *float32           `json:"radio_freq_mhz"`
-	RadioSf      *int16             `json:"radio_sf"`
-	RadioBwKhz   *float32           `json:"radio_bw_khz"`
-	Iatas        []byte             `json:"iatas"`
-	IsObserver   bool               `json:"is_observer"`
-	ObserverID   uuid.UUID          `json:"observer_id"`
+	ID               uuid.UUID          `json:"id"`
+	PublicKey        []byte             `json:"public_key"`
+	NodeType         int16              `json:"node_type"`
+	Name             *string            `json:"name"`
+	Latitude         *float64           `json:"latitude"`
+	Longitude        *float64           `json:"longitude"`
+	LastSeen         pgtype.Timestamptz `json:"last_seen"`
+	RadioFreqMhz     *float32           `json:"radio_freq_mhz"`
+	RadioSf          *int16             `json:"radio_sf"`
+	RadioBwKhz       *float32           `json:"radio_bw_khz"`
+	DefaultScopeName *string            `json:"default_scope_name"`
+	Iatas            []byte             `json:"iatas"`
+	IsObserver       bool               `json:"is_observer"`
+	ObserverID       uuid.UUID          `json:"observer_id"`
 }
 
 func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNodesRow, error) {
@@ -1495,6 +1603,7 @@ func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNod
 		arg.Column6,
 		arg.Column7,
 		arg.Limit,
+		arg.Column9,
 	)
 	if err != nil {
 		return nil, err
@@ -1514,6 +1623,7 @@ func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNod
 			&i.RadioFreqMhz,
 			&i.RadioSf,
 			&i.RadioBwKhz,
+			&i.DefaultScopeName,
 			&i.Iatas,
 			&i.IsObserver,
 			&i.ObserverID,
@@ -1731,6 +1841,7 @@ SELECT
   o.radio_freq_mhz,
   o.radio_sf,
   o.radio_bw_khz,
+  array_remove(array_agg(DISTINCT ts.name ORDER BY ts.name), NULL)::text[] AS scopes,
 COALESCE(CASE
     WHEN o.last_status_at > NOW() - INTERVAL '5 minutes' THEN 'online'
     ELSE 'offline'
@@ -1744,6 +1855,8 @@ COALESCE((
 ), '')::text AS iata
 FROM observers o
 LEFT JOIN observer_brokers ob ON ob.observer_id = o.id
+LEFT JOIN observer_scopes os ON os.observer_id = o.id
+LEFT JOIN transport_scopes ts ON ts.id = os.scope_id
 WHERE
   ($1::text = '' OR (
       SELECT po.iata FROM packet_observations po
@@ -1758,6 +1871,11 @@ WHERE
   END = $4)
   AND ($5 = '' OR o.display_name ILIKE '%' || $5 || '%')
   AND ($6::timestamptz IS NULL OR o.last_seen < $6)
+  AND ($8::text = '' OR EXISTS (
+    SELECT 1 FROM observer_scopes os2
+    JOIN transport_scopes ts2 ON ts2.id = os2.scope_id
+    WHERE os2.observer_id = o.id AND ts2.name = $8::text
+  ))
 GROUP BY o.id
 ORDER BY o.last_seen DESC
 LIMIT $7
@@ -1771,6 +1889,7 @@ type ListObserversParams struct {
 	Column5 interface{}        `json:"column_5"`
 	Column6 pgtype.Timestamptz `json:"column_6"`
 	Limit   int32              `json:"limit"`
+	Column8 string             `json:"column_8"`
 }
 
 type ListObserversRow struct {
@@ -1781,6 +1900,7 @@ type ListObserversRow struct {
 	RadioFreqMhz *float32           `json:"radio_freq_mhz"`
 	RadioSf      *int16             `json:"radio_sf"`
 	RadioBwKhz   *float32           `json:"radio_bw_khz"`
+	Scopes       []string           `json:"scopes"`
 	Status       string             `json:"status"`
 	Iata         string             `json:"iata"`
 }
@@ -1796,6 +1916,7 @@ func (q *Queries) ListObservers(ctx context.Context, arg ListObserversParams) ([
 		arg.Column5,
 		arg.Column6,
 		arg.Limit,
+		arg.Column8,
 	)
 	if err != nil {
 		return nil, err
@@ -1812,6 +1933,7 @@ func (q *Queries) ListObservers(ctx context.Context, arg ListObserversParams) ([
 			&i.RadioFreqMhz,
 			&i.RadioSf,
 			&i.RadioBwKhz,
+			&i.Scopes,
 			&i.Status,
 			&i.Iata,
 		); err != nil {
@@ -1832,6 +1954,8 @@ SELECT
   p.route_type,
   p.first_heard_at,
   p.last_heard_at,
+  p.scope_id,
+  ts.name AS scope_name,
   (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = p.packet_hash) AS observation_count,
   po.observer_id AS latest_observer_id,
   o.display_name AS latest_observer_name,
@@ -1845,6 +1969,7 @@ LEFT JOIN LATERAL (
   LIMIT 1
 ) po ON true
 LEFT JOIN observers o ON o.id = po.observer_id
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE
   ($1::smallint = -1 OR p.payload_type = $1::smallint)
   AND ($2::smallint = -1 OR p.route_type = $2::smallint)
@@ -1856,6 +1981,7 @@ WHERE
   AND ($4::timestamptz IS NULL OR p.first_heard_at >= $4)
   AND ($5::timestamptz IS NULL OR p.first_heard_at <= $5)
   AND ($6::timestamptz IS NULL OR p.last_heard_at < $6)
+  AND ($8::text = '' OR ts.name = $8::text)
 ORDER BY p.last_heard_at DESC
 LIMIT $7
 `
@@ -1868,6 +1994,7 @@ type ListPacketsParams struct {
 	Column5 pgtype.Timestamptz `json:"column_5"`
 	Column6 pgtype.Timestamptz `json:"column_6"`
 	Limit   int32              `json:"limit"`
+	Column8 string             `json:"column_8"`
 }
 
 type ListPacketsRow struct {
@@ -1876,6 +2003,8 @@ type ListPacketsRow struct {
 	RouteType          int16              `json:"route_type"`
 	FirstHeardAt       pgtype.Timestamptz `json:"first_heard_at"`
 	LastHeardAt        pgtype.Timestamptz `json:"last_heard_at"`
+	ScopeID            *int32             `json:"scope_id"`
+	ScopeName          *string            `json:"scope_name"`
 	ObservationCount   int64              `json:"observation_count"`
 	LatestObserverID   uuid.UUID          `json:"latest_observer_id"`
 	LatestObserverName *string            `json:"latest_observer_name"`
@@ -1893,6 +2022,7 @@ func (q *Queries) ListPackets(ctx context.Context, arg ListPacketsParams) ([]Lis
 		arg.Column5,
 		arg.Column6,
 		arg.Limit,
+		arg.Column8,
 	)
 	if err != nil {
 		return nil, err
@@ -1907,6 +2037,8 @@ func (q *Queries) ListPackets(ctx context.Context, arg ListPacketsParams) ([]Lis
 			&i.RouteType,
 			&i.FirstHeardAt,
 			&i.LastHeardAt,
+			&i.ScopeID,
+			&i.ScopeName,
 			&i.ObservationCount,
 			&i.LatestObserverID,
 			&i.LatestObserverName,
@@ -1923,7 +2055,7 @@ func (q *Queries) ListPackets(ctx context.Context, arg ListPacketsParams) ([]Lis
 }
 
 const listPacketsAfterID = `-- name: ListPacketsAfterID :many
-SELECT p.packet_hash, p.payload_type, p.payload_version, p.route_type, p.transport_codes_present, p.region_code, p.sub_region_code, p.origin_pubkey, p.raw_payload, p.raw_header, p.parsed_payload, p.decrypted, p.channel_hash, p.first_heard_at, p.last_heard_at
+SELECT p.packet_hash, p.payload_type, p.payload_version, p.route_type, p.transport_codes_present, p.region_code, p.sub_region_code, p.scope_id, p.origin_pubkey, p.raw_payload, p.raw_header, p.parsed_payload, p.decrypted, p.channel_hash, p.first_heard_at, p.last_heard_at
 FROM packets p
 JOIN packet_observations po ON po.packet_hash = p.packet_hash
 WHERE po.id > $1
@@ -1953,6 +2085,7 @@ func (q *Queries) ListPacketsAfterID(ctx context.Context, arg ListPacketsAfterID
 			&i.TransportCodesPresent,
 			&i.RegionCode,
 			&i.SubRegionCode,
+			&i.ScopeID,
 			&i.OriginPubkey,
 			&i.RawPayload,
 			&i.RawHeader,
@@ -2106,6 +2239,20 @@ type SetChannelKeyKnownParams struct {
 
 func (q *Queries) SetChannelKeyKnown(ctx context.Context, arg SetChannelKeyKnownParams) error {
 	_, err := q.db.Exec(ctx, setChannelKeyKnown, arg.ChannelHash, arg.KeyFingerprint)
+	return err
+}
+
+const setNodeDefaultScope = `-- name: SetNodeDefaultScope :exec
+UPDATE nodes SET default_scope_id = $2 WHERE id = $1
+`
+
+type SetNodeDefaultScopeParams struct {
+	ID             uuid.UUID `json:"id"`
+	DefaultScopeID *int32    `json:"default_scope_id"`
+}
+
+func (q *Queries) SetNodeDefaultScope(ctx context.Context, arg SetNodeDefaultScopeParams) error {
+	_, err := q.db.Exec(ctx, setNodeDefaultScope, arg.ID, arg.DefaultScopeID)
 	return err
 }
 
@@ -2310,7 +2457,7 @@ ON CONFLICT (public_key) DO UPDATE SET
   radio_freq_mhz  = EXCLUDED.radio_freq_mhz,
   radio_sf        = EXCLUDED.radio_sf,
   radio_bw_khz    = EXCLUDED.radio_bw_khz
-RETURNING id, public_key, node_type, name, latitude, longitude, location_source, last_advert_at, supports_multibyte_paths, supports_multibyte_traces, min_firmware_version, first_seen, last_seen, radio_freq_mhz, radio_sf, radio_bw_khz, metadata
+RETURNING id, public_key, node_type, name, latitude, longitude, location_source, last_advert_at, supports_multibyte_paths, supports_multibyte_traces, default_scope_id, min_firmware_version, first_seen, last_seen, radio_freq_mhz, radio_sf, radio_bw_khz, metadata
 `
 
 type UpsertNodeParams struct {
@@ -2350,6 +2497,7 @@ func (q *Queries) UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, e
 		&i.LastAdvertAt,
 		&i.SupportsMultibytePaths,
 		&i.SupportsMultibyteTraces,
+		&i.DefaultScopeID,
 		&i.MinFirmwareVersion,
 		&i.FirstSeen,
 		&i.LastSeen,
@@ -2463,6 +2611,23 @@ func (q *Queries) UpsertObserverBroker(ctx context.Context, arg UpsertObserverBr
 	return err
 }
 
+const upsertObserverScope = `-- name: UpsertObserverScope :exec
+INSERT INTO observer_scopes (observer_id, scope_id, last_seen)
+VALUES ($1, $2, NOW())
+ON CONFLICT (observer_id, scope_id) DO UPDATE SET
+  last_seen = NOW()
+`
+
+type UpsertObserverScopeParams struct {
+	ObserverID uuid.UUID `json:"observer_id"`
+	ScopeID    int32     `json:"scope_id"`
+}
+
+func (q *Queries) UpsertObserverScope(ctx context.Context, arg UpsertObserverScopeParams) error {
+	_, err := q.db.Exec(ctx, upsertObserverScope, arg.ObserverID, arg.ScopeID)
+	return err
+}
+
 const upsertPacket = `-- name: UpsertPacket :one
 
 INSERT INTO packets (
@@ -2478,13 +2643,14 @@ INSERT INTO packets (
   raw_header,
   parsed_payload,
   channel_hash,
+  scope_id,
   first_heard_at,
   last_heard_at
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW()
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW()
 )
 ON CONFLICT (packet_hash) DO UPDATE SET
-  last_heard_at     = NOW()
+  last_heard_at = NOW()
 RETURNING packet_hash, payload_type, payload_version, route_type, transport_codes_present, region_code, sub_region_code, origin_pubkey, raw_payload, raw_header, parsed_payload, decrypted, channel_hash, first_heard_at, last_heard_at, (xmax = 0)
 AS inserted
 `
@@ -2502,6 +2668,7 @@ type UpsertPacketParams struct {
 	RawHeader             []byte `json:"raw_header"`
 	ParsedPayload         []byte `json:"parsed_payload"`
 	ChannelHash           []byte `json:"channel_hash"`
+	ScopeID               *int32 `json:"scope_id"`
 }
 
 type UpsertPacketRow struct {
@@ -2540,6 +2707,7 @@ func (q *Queries) UpsertPacket(ctx context.Context, arg UpsertPacketParams) (Ups
 		arg.RawHeader,
 		arg.ParsedPayload,
 		arg.ChannelHash,
+		arg.ScopeID,
 	)
 	var i UpsertPacketRow
 	err := row.Scan(
@@ -2615,5 +2783,35 @@ type UpsertRegionIATAParams struct {
 
 func (q *Queries) UpsertRegionIATA(ctx context.Context, arg UpsertRegionIATAParams) error {
 	_, err := q.db.Exec(ctx, upsertRegionIATA, arg.RegionID, arg.Iata)
+	return err
+}
+
+const upsertTransportScope = `-- name: UpsertTransportScope :exec
+
+INSERT INTO transport_scopes (name, display_name, transport_key, key_fingerprint)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (name) DO UPDATE SET
+  display_name    = EXCLUDED.display_name,
+  transport_key   = EXCLUDED.transport_key,
+  key_fingerprint = EXCLUDED.key_fingerprint
+`
+
+type UpsertTransportScopeParams struct {
+	Name           string  `json:"name"`
+	DisplayName    *string `json:"display_name"`
+	TransportKey   []byte  `json:"transport_key"`
+	KeyFingerprint []byte  `json:"key_fingerprint"`
+}
+
+// ============================================================
+// TRANSPORT CODES
+// ============================================================
+func (q *Queries) UpsertTransportScope(ctx context.Context, arg UpsertTransportScopeParams) error {
+	_, err := q.db.Exec(ctx, upsertTransportScope,
+		arg.Name,
+		arg.DisplayName,
+		arg.TransportKey,
+		arg.KeyFingerprint,
+	)
 	return err
 }

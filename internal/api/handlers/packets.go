@@ -31,6 +31,7 @@ func PacketsRouter(reader api.Reader) http.Handler {
 //	@Param		routeType		query		int		false	"Filter by route type (0=transport_flood, 1=flood, 2=direct, 3=transport_direct)"
 //	@Param		iata			query		string	false	"Filter by single IATA code (case-insensitive)"
 //	@Param		iatas			query		string	false	"Filter by multiple IATA codes, comma-separated e.g. YVR,YYJ"
+//	@Param		scope	query		string	false	"Filter by transport scope name e.g. %23bc (URL-encoded #bc)"
 //	@Param		regionId		query		int		false	"Filter by region ID, expands to member IATAs"
 //	@Param		region			query		string	false	"Filter by region slug, expands to member IATAs"
 //	@Param		since			query		int		false	"Filter by first_heard_at >= since (epoch ms)"
@@ -110,7 +111,8 @@ func listPackets(reader api.Reader) http.HandlerFunc {
 			}
 			iatas = append(iatas, regionIATAs...)
 		}
-		packets, err := reader.ListPackets(r.Context(), payloadType, routeType, iatas, since, until, cursor, limit)
+		scope := r.URL.Query().Get("scope")
+		packets, err := reader.ListPackets(r.Context(), payloadType, routeType, iatas, scope, since, until, cursor, limit)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return

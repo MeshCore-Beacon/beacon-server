@@ -84,6 +84,7 @@ type Node struct {
 	LastAdvertAt            pgtype.Timestamptz `json:"last_advert_at"`
 	SupportsMultibytePaths  bool               `json:"supports_multibyte_paths"`
 	SupportsMultibyteTraces bool               `json:"supports_multibyte_traces"`
+	DefaultScopeID          *int32             `json:"default_scope_id"`
 	MinFirmwareVersion      *string            `json:"min_firmware_version"`
 	FirstSeen               pgtype.Timestamptz `json:"first_seen"`
 	LastSeen                pgtype.Timestamptz `json:"last_seen"`
@@ -162,6 +163,13 @@ type ObserverOwner struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
+type ObserverScope struct {
+	ObserverID uuid.UUID          `json:"observer_id"`
+	ScopeID    int32              `json:"scope_id"`
+	FirstSeen  pgtype.Timestamptz `json:"first_seen"`
+	LastSeen   pgtype.Timestamptz `json:"last_seen"`
+}
+
 type ObserverTelemetry struct {
 	ID               int64              `json:"id"`
 	ObserverID       uuid.UUID          `json:"observer_id"`
@@ -184,6 +192,7 @@ type Packet struct {
 	TransportCodesPresent *bool              `json:"transport_codes_present"`
 	RegionCode            *int32             `json:"region_code"`
 	SubRegionCode         *int32             `json:"sub_region_code"`
+	ScopeID               *int32             `json:"scope_id"`
 	OriginPubkey          []byte             `json:"origin_pubkey"`
 	RawPayload            []byte             `json:"raw_payload"`
 	RawHeader             []byte             `json:"raw_header"`
@@ -231,4 +240,13 @@ type RegionIata struct {
 	RegionID int32              `json:"region_id"`
 	Iata     string             `json:"iata"`
 	AddedAt  pgtype.Timestamptz `json:"added_at"`
+}
+
+type TransportScope struct {
+	ID             int32              `json:"id"`
+	Name           string             `json:"name"`
+	DisplayName    *string            `json:"display_name"`
+	TransportKey   []byte             `json:"transport_key"`
+	KeyFingerprint []byte             `json:"key_fingerprint"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }

@@ -17,6 +17,7 @@ import (
 	sqlc "github.com/MeshCore-Tower/tower-server/db/sqlc"
 	"github.com/MeshCore-Tower/tower-server/internal/api"
 	"github.com/MeshCore-Tower/tower-server/internal/ingest"
+	"github.com/MeshCore-Tower/tower-server/internal/scopestore"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -54,9 +55,58 @@ func (s *Store) UpsertObserverBroker(ctx context.Context, observerID uuid.UUID, 
 	return s.q.UpsertObserverBroker(ctx, params)
 }
 
+func (s *Store) UpsertObserverScope(ctx context.Context, observerID uuid.UUID, scopeID int32) error {
+	return s.q.UpsertObserverScope(ctx, sqlc.UpsertObserverScopeParams{
+		ObserverID: observerID,
+		ScopeID:    scopeID,
+	})
+}
+
+func (s *Store) GetObserverScopes(ctx context.Context, observerID uuid.UUID) ([]string, error) {
+	return nil, nil
+}
+
 // UpsertIATA auto-creates an iata_codes row if it doesn't exist yet.
 func (s *Store) UpsertIATA(ctx context.Context, iata string) error {
 	return s.q.UpsertIATA(ctx, iata)
+}
+
+// UpsertTransportScope inserts or updates a transport scope derived from config.
+// The transport key is SHA256(name)[:16] and the fingerprint is SHA256(key)[:8].
+// Called on startup via config.Seed(); safe to call multiple times.
+func (s *Store) UpsertTransportScope(ctx context.Context, name, displayName string, transportKey, keyFingerprint []byte) error {
+	var dn *string
+	if displayName != "" {
+		dn = &displayName
+	}
+	return s.q.UpsertTransportScope(ctx, sqlc.UpsertTransportScopeParams{
+		Name:           name,
+		DisplayName:    dn,
+		TransportKey:   transportKey,
+		KeyFingerprint: keyFingerprint,
+	})
+}
+
+// GetTransportScopes returns all transport scope keys for loading into the scopestore.
+func (s *Store) GetTransportScopes(ctx context.Context) ([]scopestore.Entry, error) {
+	rows, err := s.q.GetTransportScopes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]scopestore.Entry, 0, len(rows))
+	for _, r := range rows {
+		entries = append(entries, scopestore.Entry{
+			Name:           r.Name,
+			TransportKey:   r.TransportKey,
+			KeyFingerprint: r.KeyFingerprint,
+		})
+	}
+	return entries, nil
+}
+
+// GetTransportScopeByName returns the ID of a transport scope by its normalized name.
+func (s *Store) GetTransportScopeByName(ctx context.Context, name string) (int32, error) {
+	return s.q.GetTransportScopeByName(ctx, name)
 }
 
 // UpsertPacket inserts or bumps the packets row. Returns (isNew, error).
@@ -82,6 +132,7 @@ func (s *Store) UpsertPacket(ctx context.Context, p ingest.UpsertPacketParams) (
 		RawHeader:             p.RawHeader,
 		ParsedPayload:         p.ParsedPayload,
 		ChannelHash:           p.ChannelHash,
+		ScopeID:               p.ScopeID,
 	}
 	row, err := s.q.UpsertPacket(ctx, params)
 	if err != nil {
@@ -132,6 +183,15 @@ func (s *Store) SetNodeCapability(ctx context.Context, nodeID uuid.UUID, paths, 
 		errs = append(errs, s.q.SetNodeMultibyteTraces(ctx, nodeID))
 	}
 	return errors.Join(errs...)
+}
+
+// SetNodeDefaultScope records the most recent scope attached to a node advert
+// scopes are matched against configured regional transport scopes
+func (s *Store) SetNodeDefaultScope(ctx context.Context, nodeID uuid.UUID, scopeID int32) error {
+	return s.q.SetNodeDefaultScope(ctx, sqlc.SetNodeDefaultScopeParams{
+		ID:             nodeID,
+		DefaultScopeID: &scopeID,
+	})
 }
 
 // UpsertNode upserts a nodes row from an advert payload.
@@ -612,7 +672,7 @@ func (s *Store) ListChannelMessagesByHash(ctx context.Context, hash []byte, sinc
 // status is "online" or "offline" derived from last_status_at recency.
 // ListObservers returns a paginated list of observers with optional filters.
 // cursor is last_seen epoch ms of the last observer; pass 0 to start from the beginning.
-func (s *Store) ListObservers(ctx context.Context, iatas []string, observerType, broker, status, name string, cursor int64, limit int32) (api.Page[api.ObserverSummary], error) {
+func (s *Store) ListObservers(ctx context.Context, iatas []string, observerType, broker, status, name, scope string, cursor int64, limit int32) (api.Page[api.ObserverSummary], error) {
 	var cursorTS pgtype.Timestamptz
 	if cursor > 0 {
 		cursorTS = pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}
@@ -626,6 +686,7 @@ func (s *Store) ListObservers(ctx context.Context, iatas []string, observerType,
 		Column5: name,
 		Column6: cursorTS,
 		Limit:   limit + 1,
+		Column8: scope,
 	}
 	rows, err := s.q.ListObservers(ctx, params)
 	if err != nil {
@@ -641,6 +702,7 @@ func (s *Store) ListObservers(ctx context.Context, iatas []string, observerType,
 			ID:     v.ID,
 			IATA:   v.Iata,
 			Status: v.Status,
+			Scopes: v.Scopes,
 		}
 		if v.RadioFreqMhz != nil && v.RadioSf != nil && v.RadioBwKhz != nil {
 			s := fmt.Sprintf("%.1f,%g,%d", *v.RadioFreqMhz, *v.RadioBwKhz, *v.RadioSf)
@@ -703,6 +765,12 @@ func (s *Store) GetObserver(ctx context.Context, observerID uuid.UUID) (*api.Obs
 		LastSeen:         obs.LastSeen.Time.UnixMilli(),
 		ObservationCount: *obs.ObservationCount,
 	}
+	scopes, err := s.GetObserverScopes(ctx, observerID)
+	if err != nil {
+		log.Printf("store: GetObserverScopes failed for %s: %v", observerID, err)
+		scopes = []string{}
+	}
+	observer.Scopes = scopes
 	brokers := make([]api.ObserverBroker, 0, len(brokerRows))
 	for _, v := range brokerRows {
 		var lastPacketAt int64
@@ -877,7 +945,7 @@ func (s *Store) ListObserverAdverts(ctx context.Context, observerID uuid.UUID, c
 // ListNodes returns a paginated list of nodes with optional filters.
 // Pass 0 for nodeType, empty string for iata/name, nil for pubkey to skip those filters.
 // cursor is last_seen epoch ms; pass 0 to start from the beginning.
-func (s *Store) ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, name string, cursor int64, limit int32) (api.Page[api.NodeSummary], error) {
+func (s *Store) ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, name, scope string, cursor int64, limit int32) (api.Page[api.NodeSummary], error) {
 	var cursorTS pgtype.Timestamptz
 	if cursor > 0 {
 		cursorTS = pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}
@@ -892,6 +960,7 @@ func (s *Store) ListNodes(ctx context.Context, nodeType int16, iatas []string, s
 		Column6: name,
 		Column7: cursorTS,
 		Limit:   limit + 1,
+		Column9: scope,
 	})
 	if err != nil {
 		return api.Page[api.NodeSummary]{}, err
@@ -955,6 +1024,7 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 			Longitude:    row.Longitude,
 			IsObserver:   row.IsObserver,
 			ObvserverID:  nullableUUID(row.ObserverID),
+			DefaultScope: row.DefaultScopeName,
 		},
 		LocationSource:          row.LocationSource,
 		SupportsMultibytePaths:  row.SupportsMultibytePaths,
@@ -1020,7 +1090,7 @@ func (s *Store) ListNodeObservations(ctx context.Context, nodeID uuid.UUID, curs
 	}, nil
 }
 
-func (s *Store) ListPackets(ctx context.Context, payloadType, routeType int16, iatas []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
+func (s *Store) ListPackets(ctx context.Context, payloadType, routeType int16, iatas []string, scope string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
 	var cursorTS pgtype.Timestamptz
 	if cursor > 0 {
 		cursorTS = pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}
@@ -1042,6 +1112,7 @@ func (s *Store) ListPackets(ctx context.Context, payloadType, routeType int16, i
 		Column5: untilTS,
 		Column6: cursorTS,
 		Limit:   limit + 1,
+		Column8: scope,
 	})
 	if err != nil {
 		return api.Page[api.PacketSummary]{}, err
@@ -1058,6 +1129,7 @@ func (s *Store) ListPackets(ctx context.Context, payloadType, routeType int16, i
 			PayloadTypeName:  api.PayloadTypeName(v.PayloadType),
 			RouteType:        v.RouteType,
 			RouteTypeName:    api.RouteTypeName(v.RouteType),
+			Scope:            v.ScopeName,
 			FirstHeardAt:     v.FirstHeardAt.Time.UnixMilli(),
 			LastHeardAt:      v.LastHeardAt.Time.UnixMilli(),
 			ObservationCount: int32(v.ObservationCount),
@@ -1105,6 +1177,7 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 		ParsedPayload:    row.ParsedPayload,
 		RawPayload:       hex.EncodeToString(row.RawPayload),
 		Decrypted:        row.Decrypted != nil && *row.Decrypted,
+		Scope:            row.ScopeName,
 		FirstHeardAt:     row.FirstHeardAt.Time.UnixMilli(),
 		LastHeardAt:      row.LastHeardAt.Time.UnixMilli(),
 		ObservationCount: int32(len(obsRows)),
