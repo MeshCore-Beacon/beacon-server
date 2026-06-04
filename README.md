@@ -316,6 +316,7 @@ GET /api/v1/packets?iata=YOW&afterId=12345&limit=100
 | `GET`  | `/stats/payload-breakdown`          | Observation counts by payload type (last 24h by default)                                           |
 | `GET`  | `/stats/top-nodes`                  | Top N nodes by observation count (from materialized view)                                          |
 | `GET`  | `/stats/top-observers`              | Top N observers by observation count (last 24h by default)                                         |
+| `GET`  | `/stats/scopes`                     | Configured region scopes and breakdown of packets, nodes, observers                                |
 
 ---
 
