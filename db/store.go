@@ -575,16 +575,17 @@ func (s *Store) GetChannel(ctx context.Context, channelID int32) (*api.Channel, 
 // Pass a zero time.Time for since to return all messages up to limit.
 // Pass empty string iata to return messages from all IATAs.
 // Pass cursor=0 to start from the beginning.
-func (s *Store) ListChannelMessages(ctx context.Context, channelID *int32, since time.Time, limit int32, iata string, cursor int64) (api.Page[api.ChannelMessage], error) {
+func (s *Store) ListChannelMessages(ctx context.Context, channelID *int32, since time.Time, limit int32, iatas []string, scope string, cursor int64) (api.Page[api.ChannelMessage], error) {
 	ts := pgtype.Timestamptz{Time: since, Valid: !since.IsZero()}
 	var messages []api.ChannelMessage
 	var hasMore bool
-
+	iataFilter := strings.Join(iatas, ",")
 	if channelID == nil {
 		rows, err := s.q.ListAllChannelMessages(ctx, sqlc.ListAllChannelMessagesParams{
 			Column1: ts,
-			Column2: iata,
-			Column3: cursor,
+			Column2: iataFilter,
+			Column3: scope,
+			Column4: cursor,
 			Limit:   limit + 1,
 		})
 		if err != nil {
@@ -602,8 +603,9 @@ func (s *Store) ListChannelMessages(ctx context.Context, channelID *int32, since
 		rows, err := s.q.ListChannelMessages(ctx, sqlc.ListChannelMessagesParams{
 			ChannelID: *channelID,
 			Column2:   ts,
-			Column3:   iata,
-			Column4:   cursor,
+			Column3:   iataFilter,
+			Column4:   scope,
+			Column5:   cursor,
 			Limit:     limit + 1,
 		})
 		if err != nil {
@@ -636,12 +638,14 @@ func (s *Store) ListChannelMessages(ctx context.Context, channelID *int32, since
 // Pass a zero time.Time for since to return all messages up to limit.
 // Pass empty string iata to return messages from all IATAs.
 // Pass cursor=0 to start from the beginning.
-func (s *Store) ListChannelMessagesByHash(ctx context.Context, hash []byte, since time.Time, limit int32, iata string, cursor int64) (api.Page[api.ChannelMessage], error) {
+func (s *Store) ListChannelMessagesByHash(ctx context.Context, hash []byte, since time.Time, limit int32, iatas []string, scope string, cursor int64) (api.Page[api.ChannelMessage], error) {
+	iataFilter := strings.Join(iatas, ",")
 	rows, err := s.q.ListChannelMessagesByHash(ctx, sqlc.ListChannelMessagesByHashParams{
 		ChannelHash: hash,
 		Column2:     pgtype.Timestamptz{Time: since, Valid: !since.IsZero()},
-		Column3:     iata,
-		Column4:     cursor,
+		Column3:     iataFilter,
+		Column4:     scope,
+		Column5:     cursor,
 		Limit:       limit + 1,
 	})
 	if err != nil {

@@ -1166,17 +1166,21 @@ SELECT DISTINCT ON (cm.id) cm.id, cm.channel_id, cm.packet_hash, cm.sender_name,
 FROM channel_messages cm
 JOIN channels c ON c.id = cm.channel_id
 JOIN packet_observations po ON po.packet_hash = cm.packet_hash
+JOIN packets p ON p.packet_hash = cm.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE ($1::timestamptz IS NULL OR cm.sent_at >= $1)
-  AND ($2 = '' OR po.iata ILIKE $2)
-  AND ($3 = 0 OR cm.id > $3)
+  AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
+  AND ($3::text = '' OR ts.name = $3::text)
+  AND ($4 = 0 OR cm.id > $4)
 ORDER BY cm.id ASC
-LIMIT $4
+LIMIT $5
 `
 
 type ListAllChannelMessagesParams struct {
 	Column1 pgtype.Timestamptz `json:"column_1"`
-	Column2 interface{}        `json:"column_2"`
-	Column3 interface{}        `json:"column_3"`
+	Column2 string             `json:"column_2"`
+	Column3 string             `json:"column_3"`
+	Column4 interface{}        `json:"column_4"`
 	Limit   int32              `json:"limit"`
 }
 
@@ -1193,14 +1197,15 @@ type ListAllChannelMessagesRow struct {
 	ObservationCount int64              `json:"observation_count"`
 }
 
-// Returns all messages across all channels with optional time, IATA and cursor filters.
-// Pass empty string for iata to skip IATA filtering (case-insensitive).
+// Returns all messages across all channels with optional time, IATA, scope and cursor filters.
+// Pass empty string for iata or scope to skip those filters.
 // Pass cursor=0 to start from the beginning.
 func (q *Queries) ListAllChannelMessages(ctx context.Context, arg ListAllChannelMessagesParams) ([]ListAllChannelMessagesRow, error) {
 	rows, err := q.db.Query(ctx, listAllChannelMessages,
 		arg.Column1,
 		arg.Column2,
 		arg.Column3,
+		arg.Column4,
 		arg.Limit,
 	)
 	if err != nil {
@@ -1238,19 +1243,23 @@ SELECT DISTINCT ON (cm.id) cm.id, cm.channel_id, cm.packet_hash, cm.sender_name,
 FROM channel_messages cm
 JOIN channels c ON c.id = cm.channel_id
 JOIN packet_observations po ON po.packet_hash = cm.packet_hash
+JOIN packets p ON p.packet_hash = cm.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE cm.channel_id = $1
   AND ($2::timestamptz IS NULL OR cm.sent_at >= $2)
-  AND ($3 = '' OR po.iata ILIKE $3)
-  AND ($4 = 0 OR cm.id > $4)
+  AND ($3::text = '' OR po.iata = ANY(string_to_array($3::text, ',')))
+  AND ($4::text = '' OR ts.name = $4::text)
+  AND ($5::bigint = 0 OR cm.id > $5::bigint)
 ORDER BY cm.id ASC
-LIMIT $5
+LIMIT $6
 `
 
 type ListChannelMessagesParams struct {
 	ChannelID int32              `json:"channel_id"`
 	Column2   pgtype.Timestamptz `json:"column_2"`
-	Column3   interface{}        `json:"column_3"`
-	Column4   interface{}        `json:"column_4"`
+	Column3   string             `json:"column_3"`
+	Column4   string             `json:"column_4"`
+	Column5   int64              `json:"column_5"`
 	Limit     int32              `json:"limit"`
 }
 
@@ -1269,7 +1278,7 @@ type ListChannelMessagesRow struct {
 
 // Returns messages for a channel identified by integer ID.
 // Pass a zero/null timestamp for since to return all messages up to limit.
-// Pass empty string for iata to skip IATA filtering (case-insensitive).
+// Pass empty string for iata to skip IATA filtering.
 // Pass cursor=0 to start from the beginning.
 func (q *Queries) ListChannelMessages(ctx context.Context, arg ListChannelMessagesParams) ([]ListChannelMessagesRow, error) {
 	rows, err := q.db.Query(ctx, listChannelMessages,
@@ -1277,6 +1286,7 @@ func (q *Queries) ListChannelMessages(ctx context.Context, arg ListChannelMessag
 		arg.Column2,
 		arg.Column3,
 		arg.Column4,
+		arg.Column5,
 		arg.Limit,
 	)
 	if err != nil {
@@ -1314,19 +1324,23 @@ SELECT DISTINCT ON (cm.id) cm.id, cm.channel_id, cm.packet_hash, cm.sender_name,
 FROM channel_messages cm
 JOIN channels c ON c.id = cm.channel_id
 JOIN packet_observations po ON po.packet_hash = cm.packet_hash
+JOIN packets p ON p.packet_hash = cm.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE c.channel_hash = $1
   AND ($2::timestamptz IS NULL OR cm.sent_at >= $2)
-  AND ($3 = '' OR po.iata ILIKE $3)
-  AND ($4 = 0 OR cm.id > $4)
+  AND ($3::text = '' OR po.iata = ANY(string_to_array($3::text, ',')))
+  AND ($4::text = '' OR ts.name = $4::text)
+  AND ($5::bigint = 0 OR cm.id > $5::bigint)
 ORDER BY cm.id ASC
-LIMIT $5
+LIMIT $6
 `
 
 type ListChannelMessagesByHashParams struct {
 	ChannelHash []byte             `json:"channel_hash"`
 	Column2     pgtype.Timestamptz `json:"column_2"`
-	Column3     interface{}        `json:"column_3"`
-	Column4     interface{}        `json:"column_4"`
+	Column3     string             `json:"column_3"`
+	Column4     string             `json:"column_4"`
+	Column5     int64              `json:"column_5"`
 	Limit       int32              `json:"limit"`
 }
 
@@ -1344,7 +1358,7 @@ type ListChannelMessagesByHashRow struct {
 
 // Returns messages for all channels matching a hash byte.
 // May return messages from multiple channels if the hash collides across different keys.
-// Pass empty string for iata to skip IATA filtering (case-insensitive).
+// Pass empty string for iata or scope to skip those filters.
 // Pass cursor=0 to start from the beginning.
 func (q *Queries) ListChannelMessagesByHash(ctx context.Context, arg ListChannelMessagesByHashParams) ([]ListChannelMessagesByHashRow, error) {
 	rows, err := q.db.Query(ctx, listChannelMessagesByHash,
@@ -1352,6 +1366,7 @@ func (q *Queries) ListChannelMessagesByHash(ctx context.Context, arg ListChannel
 		arg.Column2,
 		arg.Column3,
 		arg.Column4,
+		arg.Column5,
 		arg.Limit,
 	)
 	if err != nil {

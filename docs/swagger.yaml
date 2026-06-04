@@ -56,29 +56,6 @@ definitions:
         description: display name, nil if not set
         type: string
     type: object
-  github_com_MeshCore-Tower_tower-server_internal_api.ChannelMessage:
-    properties:
-      channelHash:
-        description: hex-encoded single-byte channel hash
-        type: string
-      content:
-        description: decrypted message text
-        type: string
-      id:
-        type: integer
-      observationCount:
-        description: the number of observations for this message packet hash
-        type: integer
-      packetHash:
-        description: hex-encoded packet hash for correlation with packet events
-        type: string
-      senderName:
-        description: display name from the decrypted payload
-        type: string
-      sentAt:
-        description: epoch ms
-        type: integer
-    type: object
   github_com_MeshCore-Tower_tower-server_internal_api.ChannelSummary:
     properties:
       channelHash:
@@ -501,17 +478,6 @@ definitions:
       nextCursor:
         type: integer
     type: object
-  github_com_MeshCore-Tower_tower-server_internal_api.Page-github_com_MeshCore-Tower_tower-server_internal_api_ChannelMessage:
-    properties:
-      hasMore:
-        type: boolean
-      items:
-        items:
-          $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.ChannelMessage'
-        type: array
-      nextCursor:
-        type: integer
-    type: object
   github_com_MeshCore-Tower_tower-server_internal_api.Page-github_com_MeshCore-Tower_tower-server_internal_api_ChannelSummary:
     properties:
       hasMore:
@@ -800,9 +766,21 @@ paths:
         in: query
         name: since
         type: integer
-      - description: Filter by IATA code
+      - description: Filter by IATA code(s), comma-separated e.g. YVR or YVR,YYJ
         in: query
-        name: iata
+        name: iatas
+        type: string
+      - description: Filter by region ID, expands to member IATAs
+        in: query
+        name: regionId
+        type: integer
+      - description: Filter by region slug, expands to member IATAs
+        in: query
+        name: region
+        type: string
+      - description: 'Filter by transport scope name e.g. %23bc (URL-encoded #bc)'
+        in: query
+        name: scope
         type: string
       - description: Message ID of last item for pagination
         in: query
@@ -818,7 +796,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.Page-github_com_MeshCore-Tower_tower-server_internal_api_ChannelMessage'
+            type: object
         "400":
           description: Bad Request
           schema:
@@ -885,9 +863,21 @@ paths:
         in: query
         name: since
         type: integer
-      - description: Filter by IATA code
+      - description: Filter by IATA code(s), comma-separated e.g. YVR or YVR,YYJ
         in: query
-        name: iata
+        name: iatas
+        type: string
+      - description: Filter by region ID, expands to member IATAs
+        in: query
+        name: regionId
+        type: integer
+      - description: Filter by region slug, expands to member IATAs
+        in: query
+        name: region
+        type: string
+      - description: 'Filter by transport scope name e.g. %23bc (URL-encoded #bc)'
+        in: query
+        name: scope
         type: string
       - description: Message ID of last item for pagination
         in: query
@@ -903,7 +893,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.Page-github_com_MeshCore-Tower_tower-server_internal_api_ChannelMessage'
+            type: object
         "400":
           description: Bad Request
           schema:

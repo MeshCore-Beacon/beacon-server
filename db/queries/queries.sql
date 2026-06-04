@@ -520,51 +520,60 @@ RETURNING id;
 -- name: ListChannelMessages :many
 -- Returns messages for a channel identified by integer ID.
 -- Pass a zero/null timestamp for since to return all messages up to limit.
--- Pass empty string for iata to skip IATA filtering (case-insensitive).
+-- Pass empty string for iata to skip IATA filtering.
 -- Pass cursor=0 to start from the beginning.
 SELECT DISTINCT ON (cm.id) cm.*, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash,
 (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = cm.packet_hash) AS observation_count
 FROM channel_messages cm
 JOIN channels c ON c.id = cm.channel_id
 JOIN packet_observations po ON po.packet_hash = cm.packet_hash
+JOIN packets p ON p.packet_hash = cm.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE cm.channel_id = $1
   AND ($2::timestamptz IS NULL OR cm.sent_at >= $2)
-  AND ($3 = '' OR po.iata ILIKE $3)
+  AND ($3::text = '' OR po.iata = ANY(string_to_array($3::text, ',')))
+  AND ($4::text = '' OR ts.name = $4::text)
+  AND ($5::bigint = 0 OR cm.id > $5::bigint)
+ORDER BY cm.id ASC
+LIMIT $6;
+
+-- name: ListAllChannelMessages :many
+-- Returns all messages across all channels with optional time, IATA, scope and cursor filters.
+-- Pass empty string for iata or scope to skip those filters.
+-- Pass cursor=0 to start from the beginning.
+SELECT DISTINCT ON (cm.id) cm.*, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash,
+(SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = cm.packet_hash) AS observation_count
+FROM channel_messages cm
+JOIN channels c ON c.id = cm.channel_id
+JOIN packet_observations po ON po.packet_hash = cm.packet_hash
+JOIN packets p ON p.packet_hash = cm.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+WHERE ($1::timestamptz IS NULL OR cm.sent_at >= $1)
+  AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
+  AND ($3::text = '' OR ts.name = $3::text)
   AND ($4 = 0 OR cm.id > $4)
 ORDER BY cm.id ASC
 LIMIT $5;
 
--- name: ListAllChannelMessages :many
--- Returns all messages across all channels with optional time, IATA and cursor filters.
--- Pass empty string for iata to skip IATA filtering (case-insensitive).
--- Pass cursor=0 to start from the beginning.
-SELECT DISTINCT ON (cm.id) cm.*, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash,
-(SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = cm.packet_hash) AS observation_count
-FROM channel_messages cm
-JOIN channels c ON c.id = cm.channel_id
-JOIN packet_observations po ON po.packet_hash = cm.packet_hash
-WHERE ($1::timestamptz IS NULL OR cm.sent_at >= $1)
-  AND ($2 = '' OR po.iata ILIKE $2)
-  AND ($3 = 0 OR cm.id > $3)
-ORDER BY cm.id ASC
-LIMIT $4;
-
 -- name: ListChannelMessagesByHash :many
 -- Returns messages for all channels matching a hash byte.
 -- May return messages from multiple channels if the hash collides across different keys.
--- Pass empty string for iata to skip IATA filtering (case-insensitive).
+-- Pass empty string for iata or scope to skip those filters.
 -- Pass cursor=0 to start from the beginning.
 SELECT DISTINCT ON (cm.id) cm.*, c.channel_hash,
   (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = cm.packet_hash) AS observation_count
 FROM channel_messages cm
 JOIN channels c ON c.id = cm.channel_id
 JOIN packet_observations po ON po.packet_hash = cm.packet_hash
+JOIN packets p ON p.packet_hash = cm.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE c.channel_hash = $1
   AND ($2::timestamptz IS NULL OR cm.sent_at >= $2)
-  AND ($3 = '' OR po.iata ILIKE $3)
-  AND ($4 = 0 OR cm.id > $4)
+  AND ($3::text = '' OR po.iata = ANY(string_to_array($3::text, ',')))
+  AND ($4::text = '' OR ts.name = $4::text)
+  AND ($5::bigint = 0 OR cm.id > $5::bigint)
 ORDER BY cm.id ASC
-LIMIT $5;
+LIMIT $6;
 
 -- name: InsertObserverTelemetry :exec
 -- Inserts a telemetry snapshot for an observer. The reported_at timestamp should

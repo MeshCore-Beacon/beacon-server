@@ -164,8 +164,26 @@
                     },
                     {
                         "type": "string",
-                        "description": "Filter by IATA code",
-                        "name": "iata",
+                        "description": "Filter by IATA code(s), comma-separated e.g. YVR or YVR,YYJ",
+                        "name": "iatas",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by region ID, expands to member IATAs",
+                        "name": "regionId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by region slug, expands to member IATAs",
+                        "name": "region",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by transport scope name e.g. %23bc (URL-encoded #bc)",
+                        "name": "scope",
                         "in": "query"
                     },
                     {
@@ -185,7 +203,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.Page-github_com_MeshCore-Tower_tower-server_internal_api_ChannelMessage"
+                            "type": "object"
                         }
                     },
                     "400": {
@@ -295,8 +313,26 @@
                     },
                     {
                         "type": "string",
-                        "description": "Filter by IATA code",
-                        "name": "iata",
+                        "description": "Filter by IATA code(s), comma-separated e.g. YVR or YVR,YYJ",
+                        "name": "iatas",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by region ID, expands to member IATAs",
+                        "name": "regionId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by region slug, expands to member IATAs",
+                        "name": "region",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by transport scope name e.g. %23bc (URL-encoded #bc)",
+                        "name": "scope",
                         "in": "query"
                     },
                     {
@@ -316,7 +352,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.Page-github_com_MeshCore-Tower_tower-server_internal_api_ChannelMessage"
+                            "type": "object"
                         }
                     },
                     "400": {
@@ -1336,38 +1372,6 @@
                 }
             }
         },
-        "github_com_MeshCore-Tower_tower-server_internal_api.ChannelMessage": {
-            "type": "object",
-            "properties": {
-                "channelHash": {
-                    "description": "hex-encoded single-byte channel hash",
-                    "type": "string"
-                },
-                "content": {
-                    "description": "decrypted message text",
-                    "type": "string"
-                },
-                "id": {
-                    "type": "integer"
-                },
-                "observationCount": {
-                    "description": "the number of observations for this message packet hash",
-                    "type": "integer"
-                },
-                "packetHash": {
-                    "description": "hex-encoded packet hash for correlation with packet events",
-                    "type": "string"
-                },
-                "senderName": {
-                    "description": "display name from the decrypted payload",
-                    "type": "string"
-                },
-                "sentAt": {
-                    "description": "epoch ms",
-                    "type": "integer"
-                }
-            }
-        },
         "github_com_MeshCore-Tower_tower-server_internal_api.ChannelSummary": {
             "type": "object",
             "properties": {
@@ -1979,23 +1983,6 @@
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.AdvertObservation"
-                    }
-                },
-                "nextCursor": {
-                    "type": "integer"
-                }
-            }
-        },
-        "github_com_MeshCore-Tower_tower-server_internal_api.Page-github_com_MeshCore-Tower_tower-server_internal_api_ChannelMessage": {
-            "type": "object",
-            "properties": {
-                "hasMore": {
-                    "type": "boolean"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.ChannelMessage"
                     }
                 },
                 "nextCursor": {

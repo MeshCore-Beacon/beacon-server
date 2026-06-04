@@ -391,14 +391,14 @@ type Reader interface {
 	// Pass a zero time.Time for since to return all messages up to limit.
 	// Pass empty string iata to return messages from all IATAs.
 	// Pass cursor=0 to start from the beginning.
-	ListChannelMessages(ctx context.Context, channelID *int32, since time.Time, limit int32, iata string, cursor int64) (Page[ChannelMessage], error)
+	ListChannelMessages(ctx context.Context, channelID *int32, since time.Time, limit int32, iatas []string, scope string, cursor int64) (Page[ChannelMessage], error)
 	// ListChannelMessagesByHash returns paginated messages for all channels matching the given hash.
 	// Used by the /messages?hash= endpoint. May return messages from multiple channels
 	// if the hash collides across different keys.
 	// Pass a zero time.Time for since to return all messages up to limit.
 	// Pass empty string iata to return messages from all IATAs.
 	// Pass cursor=0 to start from the beginning.
-	ListChannelMessagesByHash(ctx context.Context, hash []byte, since time.Time, limit int32, iata string, cursor int64) (Page[ChannelMessage], error)
+	ListChannelMessagesByHash(ctx context.Context, hash []byte, since time.Time, limit int32, iatas []string, scope string, cursor int64) (Page[ChannelMessage], error)
 	// ListObservers returns a paginated list of observers with optional filters.
 	// All filter params are optional — pass empty string or nil to skip a filter.
 	// status is "online" or "offline" derived from last_status_at recency.

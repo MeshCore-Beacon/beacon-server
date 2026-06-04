@@ -118,10 +118,13 @@ func getChannel(reader api.Reader) http.HandlerFunc {
 //	@Produce	json
 //	@Param		channelID	path		int		true	"Channel integer ID"
 //	@Param		since		query		int		false	"Return messages after this epoch ms"
-//	@Param		iata		query		string	false	"Filter by IATA code"
+//	@Param		iatas		query		string	false	"Filter by IATA code(s), comma-separated e.g. YVR or YVR,YYJ"
+//	@Param		regionId	query		int		false	"Filter by region ID, expands to member IATAs"
+//	@Param		region		query		string	false	"Filter by region slug, expands to member IATAs"
+//	@Param		scope		query		string	false	"Filter by transport scope name e.g. %23bc (URL-encoded #bc)"
 //	@Param		cursor		query		int		false	"Message ID of last item for pagination"
 //	@Param		limit		query		int		false	"Max results (default 50)"
-//	@Success	200			{object}	api.Page[api.ChannelMessage]
+//	@Success	200			{object}	object
 //	@Failure	400			{object}	handlers.APIError
 //	@Failure	500			{object}	handlers.APIError
 //	@Router		/channels/{channelID}/messages [get]
@@ -154,7 +157,7 @@ func listChannelMessages(reader api.Reader) http.HandlerFunc {
 			}
 			since = time.UnixMilli(ms)
 		}
-		iata := r.URL.Query().Get("iata")
+		iatas := parseIATAs(r)
 		var cursor int64
 		if cursorParam := r.URL.Query().Get("cursor"); cursorParam != "" {
 			c, err := strconv.ParseInt(cursorParam, 10, 64)
@@ -164,8 +167,9 @@ func listChannelMessages(reader api.Reader) http.HandlerFunc {
 			}
 			cursor = c
 		}
+		scope := r.URL.Query().Get("scope")
 		chanID := int32(id)
-		messages, err := reader.ListChannelMessages(r.Context(), &chanID, since, int32(limit), iata, cursor)
+		messages, err := reader.ListChannelMessages(r.Context(), &chanID, since, int32(limit), iatas, scope, cursor)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
