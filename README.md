@@ -421,8 +421,10 @@ For paginated responses use the generic page wrapper:
 ### Future
 
 - [ ] Redis caching for stats endpoints
-- [ ] Admin authentication middleware
-- [ ] Channel key persistence to DB
 - [ ] Caddy reverse proxy config for production
-- [ ] Region management via API (currently config-file only)
+
+- [ ] Admin authentication middleware
+  - [ ] Server management via API (currently config-file only)
+- [ ] Channel key persistence to DB
 - [ ] Observer owner tracking (schema exists, API excluded by design)
+- [ ] Log levels, debug and info
