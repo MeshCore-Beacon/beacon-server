@@ -1433,6 +1433,24 @@ func (s *Store) GetRadioPresets(ctx context.Context, preset, iata string) ([]api
 	return items, nil
 }
 
+// GetScopeStats returns aggregate packet, observer and node counts per transport scope.
+func (s *Store) GetScopeStats(ctx context.Context) ([]api.ScopeStats, error) {
+	rows, err := s.q.GetScopeStats(ctx)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]api.ScopeStats, 0, len(rows))
+	for _, r := range rows {
+		items = append(items, api.ScopeStats{
+			Name:          r.Name,
+			PacketCount:   r.PacketCount,
+			ObserverCount: r.ObserverCount,
+			NodeCount:     r.NodeCount,
+		})
+	}
+	return items, nil
+}
+
 func nullableUUID(id uuid.UUID) *uuid.UUID {
 	if id == (uuid.UUID{}) {
 		return nil

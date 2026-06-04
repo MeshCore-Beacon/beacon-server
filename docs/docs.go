@@ -1202,6 +1202,34 @@ const docTemplate = `{
                 }
             }
         },
+        "/stats/scopes": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Stats"
+                ],
+                "summary": "Scope statistics",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.ScopeStats"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
         "/stats/top-nodes": {
             "get": {
                 "produces": [
@@ -2177,6 +2205,23 @@ const docTemplate = `{
                 "publicKey": {
                     "description": "hex-encoded prefix",
                     "type": "string"
+                }
+            }
+        },
+        "github_com_MeshCore-Tower_tower-server_internal_api.ScopeStats": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "nodeCount": {
+                    "type": "integer"
+                },
+                "observerCount": {
+                    "type": "integer"
+                },
+                "packetCount": {
+                    "type": "integer"
                 }
             }
         },

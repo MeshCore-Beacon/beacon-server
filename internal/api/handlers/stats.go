@@ -18,6 +18,7 @@ import (
 // GET  /stats/top-nodes         → getStatsTopNodes
 // GET  /stats/top-observers     → getStatsTopObservers
 // GET  /stats/radio-presets     → getStatsRadioPresets
+// GET  /stats/scopes            → GetStatsScopes
 //
 // All endpoints accept an optional iata= filter (case-insensitive).
 func StatsRouter(reader api.Reader) http.Handler {
@@ -28,6 +29,7 @@ func StatsRouter(reader api.Reader) http.Handler {
 	r.Get("/top-nodes", getStatsTopNodes(reader))
 	r.Get("/top-observers", getStatsTopObservers(reader))
 	r.Get("/radio-presets", getStatsRadioPresets(reader))
+	r.Get("/scopes", getStatsScopes(reader))
 	return r
 }
 
@@ -211,5 +213,24 @@ func getStatsRadioPresets(reader api.Reader) http.HandlerFunc {
 			return
 		}
 		respond(w, http.StatusOK, presets)
+	}
+}
+
+// getStatsScopes godoc
+//
+//	@Summary	Scope statistics
+//	@Tags		Stats
+//	@Produce	json
+//	@Success	200	{object}	[]api.ScopeStats
+//	@Failure	500	{object}	handlers.APIError
+//	@Router		/stats/scopes [get]
+func getStatsScopes(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		stats, err := reader.GetScopeStats(r.Context())
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		respond(w, http.StatusOK, stats)
 	}
 }

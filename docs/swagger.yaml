@@ -603,6 +603,17 @@ definitions:
         description: hex-encoded prefix
         type: string
     type: object
+  github_com_MeshCore-Tower_tower-server_internal_api.ScopeStats:
+    properties:
+      name:
+        type: string
+      nodeCount:
+        type: integer
+      observerCount:
+        type: integer
+      packetCount:
+        type: integer
+    type: object
   github_com_MeshCore-Tower_tower-server_internal_api.StatsOverview:
     properties:
       activeIatas:
@@ -1446,6 +1457,24 @@ paths:
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Radio preset usage by IATA
+      tags:
+      - Stats
+  /stats/scopes:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.ScopeStats'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+      summary: Scope statistics
       tags:
       - Stats
   /stats/top-nodes:

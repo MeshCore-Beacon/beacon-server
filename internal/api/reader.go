@@ -42,6 +42,14 @@ type PayloadBreakdownItem struct {
 	Count           int64  `json:"count"`
 }
 
+// ScopeStats represents aggregate statistics for a single transport scope.
+type ScopeStats struct {
+	Name          string `json:"name"`
+	PacketCount   int64  `json:"packetCount"`
+	ObserverCount int64  `json:"observerCount"`
+	NodeCount     int64  `json:"nodeCount"`
+}
+
 // TopNode is a node ranked by observation count.
 type TopNode struct {
 	NodeID           uuid.UUID `json:"nodeId"`
@@ -459,4 +467,6 @@ type Reader interface {
 	// Pass empty string iata to return stats across all IATAs.
 	// since defines the start of the window; pass zero time for default (last 24h).
 	GetStatsTopObservers(ctx context.Context, iata string, since time.Time, limit int32) ([]TopObserver, error)
+	// GetScopeStats returns aggregate packet, observer and node counts per transport scope.
+	GetScopeStats(ctx context.Context) ([]ScopeStats, error)
 }
