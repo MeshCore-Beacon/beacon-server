@@ -421,10 +421,11 @@ For paginated responses use the generic page wrapper:
 - [x] Parse payloads (that we can decrypt) into DB and return with packet
       details
 - [x] Propagation time calculation
+- [x] Trace route resolution via path hashes (resolvedRoute on packet detail)
 
 ### In progress / next
 
-- [ ] Routes and traces endpoints
+- [ ] Dedicated routes and traces endpoints (see issue #32)
 
 ### Future
 

@@ -176,6 +176,7 @@ type Packet struct {
 	LastHeardAt      int64                     `json:"lastHeardAt"`
 	FirstToLastMs    int64                     `json:"firstToLastMs"`
 	ObservationCount int32                     `json:"observationCount"`
+	ResolvedRoute    []ResolvedHop             `json:"resolvedRoute,omitempty"`
 	Observations     []PacketObservationDetail `json:"observations"`
 }
 

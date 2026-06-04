@@ -937,7 +937,7 @@ const docTemplate = `{
                 "tags": [
                     "Packets"
                 ],
-                "summary": "Get full packet detail",
+                "summary": "Get full packet detail. For trace packets (payloadType=9), includes resolvedRoute",
                 "parameters": [
                     {
                         "type": "string",
@@ -1845,6 +1845,12 @@ const docTemplate = `{
                 },
                 "rawPayload": {
                     "type": "string"
+                },
+                "resolvedRoute": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.ResolvedHop"
+                    }
                 },
                 "scope": {
                     "type": "string"

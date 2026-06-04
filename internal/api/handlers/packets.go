@@ -123,7 +123,7 @@ func listPackets(reader api.Reader) http.HandlerFunc {
 
 // getPacket godoc
 //
-//	@Summary	Get full packet detail
+//	@Summary	Get full packet detail. For trace packets (payloadType=9), includes resolvedRoute
 //	@Tags		Packets
 //	@Produce	json
 //	@Param		packetHash	path		string	true	"Packet hash (hex)"

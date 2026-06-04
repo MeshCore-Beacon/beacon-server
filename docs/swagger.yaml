@@ -363,6 +363,10 @@ definitions:
         type: array
       rawPayload:
         type: string
+      resolvedRoute:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Tower_tower-server_internal_api.ResolvedHop'
+        type: array
       scope:
         type: string
       transportCodes:
@@ -1310,7 +1314,8 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
-      summary: Get full packet detail
+      summary: Get full packet detail. For trace packets (payloadType=9), includes
+        resolvedRoute
       tags:
       - Packets
   /regions:
