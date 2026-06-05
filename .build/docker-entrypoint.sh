@@ -24,4 +24,4 @@ if [ -n "$POSTGRES_DSN" ]; then
   echo "Migrations complete."
 fi
 
-exec ./tower "$@"
+exec ./beacon "$@"

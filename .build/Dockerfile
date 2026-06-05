@@ -3,12 +3,12 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN go build -o tower ./cmd/tower
+RUN go build -o beacon ./cmd/beacon
 
 FROM alpine:3.19
 RUN apk add --no-cache ca-certificates tzdata postgresql-client
 WORKDIR /app
-COPY --from=builder /app/tower .
+COPY --from=builder /app/beacon .
 COPY db/migrations/ ./migrations/
 COPY .build/docker-entrypoint.sh .
 RUN chmod +x docker-entrypoint.sh
