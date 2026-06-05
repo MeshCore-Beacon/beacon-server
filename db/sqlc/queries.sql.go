@@ -1713,6 +1713,57 @@ func (q *Queries) ListIATAs(ctx context.Context) ([]IataCode, error) {
 	return items, nil
 }
 
+const listKnownRoutes = `-- name: ListKnownRoutes :many
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen
+FROM known_routes
+WHERE ($1 = '' OR iata = $1)
+  AND ($2 = 0 OR hop_count = $2)
+  AND ($3 = 0 OR id < $3)
+ORDER BY last_seen DESC
+LIMIT $4
+`
+
+type ListKnownRoutesParams struct {
+	Column1 interface{} `json:"column_1"`
+	Column2 interface{} `json:"column_2"`
+	Column3 interface{} `json:"column_3"`
+	Limit   int32       `json:"limit"`
+}
+
+// Returns known routes filtered by IATA, ordered by most recently seen.
+func (q *Queries) ListKnownRoutes(ctx context.Context, arg ListKnownRoutesParams) ([]KnownRoute, error) {
+	rows, err := q.db.Query(ctx, listKnownRoutes,
+		arg.Column1,
+		arg.Column2,
+		arg.Column3,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []KnownRoute{}
+	for rows.Next() {
+		var i KnownRoute
+		if err := rows.Scan(
+			&i.ID,
+			&i.NodeIds,
+			&i.HashPrefix,
+			&i.Iata,
+			&i.HopCount,
+			&i.FirstSeen,
+			&i.LastSeen,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMessagesAfterID = `-- name: ListMessagesAfterID :many
 SELECT DISTINCT ON (cm.id) cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash,
 (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = cm.packet_hash) AS observation_count
@@ -2650,6 +2701,51 @@ func (q *Queries) ResolvePathHashes(ctx context.Context, arg ResolvePathHashesPa
 	return items, nil
 }
 
+const searchKnownRoutes = `-- name: SearchKnownRoutes :many
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen
+FROM known_routes
+WHERE iata = $1
+  AND hash_prefix @> ARRAY[$2::bytea]
+  AND hash_prefix @> ARRAY[$3::bytea]
+ORDER BY hop_count ASC, last_seen DESC
+`
+
+type SearchKnownRoutesParams struct {
+	Iata    string `json:"iata"`
+	Column2 []byte `json:"column_2"`
+	Column3 []byte `json:"column_3"`
+}
+
+// Returns known routes containing a subsequence from source to destination hash prefix.
+// Matches routes where source hash appears before destination hash in the hash_prefix array.
+func (q *Queries) SearchKnownRoutes(ctx context.Context, arg SearchKnownRoutesParams) ([]KnownRoute, error) {
+	rows, err := q.db.Query(ctx, searchKnownRoutes, arg.Iata, arg.Column2, arg.Column3)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []KnownRoute{}
+	for rows.Next() {
+		var i KnownRoute
+		if err := rows.Scan(
+			&i.ID,
+			&i.NodeIds,
+			&i.HashPrefix,
+			&i.Iata,
+			&i.HopCount,
+			&i.FirstSeen,
+			&i.LastSeen,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setChannelKeyKnown = `-- name: SetChannelKeyKnown :exec
 UPDATE channels SET key_known = TRUE
 WHERE channel_hash = $1 AND key_fingerprint = $2
@@ -2870,6 +2966,37 @@ func (q *Queries) UpsertIATADetails(ctx context.Context, arg UpsertIATADetailsPa
 		arg.DisplayName,
 		arg.ApproxLat,
 		arg.ApproxLng,
+	)
+	return err
+}
+
+const upsertKnownRoute = `-- name: UpsertKnownRoute :exec
+
+INSERT INTO known_routes (node_ids, hash_prefix, iata, hop_count)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (node_ids, iata) DO UPDATE SET
+  last_seen = NOW()
+`
+
+type UpsertKnownRouteParams struct {
+	NodeIds    []uuid.UUID `json:"node_ids"`
+	HashPrefix [][]byte    `json:"hash_prefix"`
+	Iata       string      `json:"iata"`
+	HopCount   int32       `json:"hop_count"`
+}
+
+// ============================================================
+// ROUTES
+// ============================================================
+// Inserts or updates a known route (all hops resolved to high confidence).
+// node_ids and hash_prefix are ordered arrays of the resolved node UUIDs and
+// their hash bytes. last_seen is bumped on conflict.
+func (q *Queries) UpsertKnownRoute(ctx context.Context, arg UpsertKnownRouteParams) error {
+	_, err := q.db.Exec(ctx, upsertKnownRoute,
+		arg.NodeIds,
+		arg.HashPrefix,
+		arg.Iata,
+		arg.HopCount,
 	)
 	return err
 }

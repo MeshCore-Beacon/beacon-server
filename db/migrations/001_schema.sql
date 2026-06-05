@@ -336,6 +336,24 @@ CREATE INDEX idx_channel_messages_channel ON channel_messages(channel_id, sent_a
 CREATE INDEX idx_channel_messages_sent_brin ON channel_messages USING BRIN (sent_at);
 
 -- ============================================================
+-- ROUTES
+-- ============================================================
+
+CREATE TABLE known_routes (
+  id          BIGSERIAL PRIMARY KEY,
+  node_ids    UUID[]    NOT NULL,  -- resolved node UUIDs in hop order
+  hash_prefix BYTEA[]   NOT NULL,  -- raw hash bytes in hop order for prefix matching
+  iata        CHAR(3)   NOT NULL REFERENCES iata_codes(iata) ON DELETE CASCADE,
+  hop_count   INT       NOT NULL,
+  first_seen  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (node_ids, iata)
+);
+
+CREATE INDEX idx_known_routes_iata ON known_routes(iata);
+CREATE INDEX idx_known_routes_hop_count ON known_routes(iata, hop_count);
+
+-- ============================================================
 -- MATERIALIZED VIEWS
 -- ============================================================
 

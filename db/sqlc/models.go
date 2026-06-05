@@ -49,6 +49,16 @@ type IataCode struct {
 	AddedAt     pgtype.Timestamptz `json:"added_at"`
 }
 
+type KnownRoute struct {
+	ID         int64              `json:"id"`
+	NodeIds    []uuid.UUID        `json:"node_ids"`
+	HashPrefix [][]byte           `json:"hash_prefix"`
+	Iata       string             `json:"iata"`
+	HopCount   int32              `json:"hop_count"`
+	FirstSeen  pgtype.Timestamptz `json:"first_seen"`
+	LastSeen   pgtype.Timestamptz `json:"last_seen"`
+}
+
 type MvHourlyIataStat struct {
 	Iata             string             `json:"iata"`
 	Hour             pgtype.Timestamptz `json:"hour"`

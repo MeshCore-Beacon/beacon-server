@@ -822,6 +822,39 @@ ORDER BY MAX(p.last_heard_at) DESC
 LIMIT $6;
 
 -- ============================================================
+-- ROUTES
+-- ============================================================
+
+-- name: UpsertKnownRoute :exec
+-- Inserts or updates a known route (all hops resolved to high confidence).
+-- node_ids and hash_prefix are ordered arrays of the resolved node UUIDs and
+-- their hash bytes. last_seen is bumped on conflict.
+INSERT INTO known_routes (node_ids, hash_prefix, iata, hop_count)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (node_ids, iata) DO UPDATE SET
+  last_seen = NOW();
+
+-- name: ListKnownRoutes :many
+-- Returns known routes filtered by IATA, ordered by most recently seen.
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen
+FROM known_routes
+WHERE ($1 = '' OR iata = $1)
+  AND ($2 = 0 OR hop_count = $2)
+  AND ($3 = 0 OR id < $3)
+ORDER BY last_seen DESC
+LIMIT $4;
+
+-- name: SearchKnownRoutes :many
+-- Returns known routes containing a subsequence from source to destination hash prefix.
+-- Matches routes where source hash appears before destination hash in the hash_prefix array.
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen
+FROM known_routes
+WHERE iata = $1
+  AND hash_prefix @> ARRAY[$2::bytea]
+  AND hash_prefix @> ARRAY[$3::bytea]
+ORDER BY hop_count ASC, last_seen DESC;
+
+-- ============================================================
 -- HELPERS
 -- ============================================================
 

@@ -142,6 +142,9 @@ type DB interface {
 	// Called when a TRANSPORT_FLOOD packet is observed, linking the observer to
 	// the matched regional transport scope.
 	UpsertObserverScope(ctx context.Context, observerID uuid.UUID, scopeID int32) error
+
+	// UpsertKnownRoute stores a fully resolved path where all hops have high confidence.
+	UpsertKnownRoute(ctx context.Context, nodeIDs []uuid.UUID, hashPrefix [][]byte, iata string, hopCount int32) error
 }
 
 // ChannelKeyStore is a read-only view of the channel keys loaded from config.

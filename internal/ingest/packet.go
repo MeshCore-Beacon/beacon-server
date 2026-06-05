@@ -596,6 +596,27 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 			resolvedIDs = append(resolvedIDs, e.NodeID)
 		}
 	}
+	hashes := packet.PathHashes()
+	if len(hashes) > 0 && resolved != nil {
+		allHigh := true
+		nodeIDs := make([]uuid.UUID, 0, len(hashes))
+		hashPrefixes := make([][]byte, 0, len(hashes))
+		for _, hash := range hashes {
+			key := hex.EncodeToString(hash)
+			entries := resolved[key]
+			if len(entries) != 1 {
+				allHigh = false
+				break
+			}
+			nodeIDs = append(nodeIDs, entries[0].NodeID)
+			hashPrefixes = append(hashPrefixes, hash)
+		}
+		if allHigh && len(nodeIDs) > 0 {
+			if err := w.db.UpsertKnownRoute(ctx, nodeIDs, hashPrefixes, iata, int32(len(nodeIDs))); err != nil {
+				log.Printf("ingest[%s]: failed to upsert known route: %v", w.cfg.BrokerName, err)
+			}
+		}
+	}
 	w.runCapabilityDetection(ctx, packet.PayloadType(), packet.PathHashSize(), resolvedIDs)
 	if inserted {
 		w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio, scopeID)

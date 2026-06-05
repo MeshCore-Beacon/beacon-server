@@ -71,6 +71,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP 
 			r.Mount("/messages", handlers.MessagesRouter(reader))
 			r.Mount("/iatas", handlers.IATAsRouter(reader))
 			r.Mount("/regions", handlers.RegionsRouter(reader))
+			r.Mount("/routes", handlers.RoutesRouter(reader))
 			r.Mount("/scopes", handlers.ScopesRouter(reader))
 			r.Mount("/stats", handlers.StatsRouter(reader))
 			r.Mount("/traces", handlers.TracesRouter(reader))
