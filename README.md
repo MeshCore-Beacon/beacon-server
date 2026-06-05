@@ -109,6 +109,15 @@ Beacon will:
 - Connect to the configured MQTT brokers
 - Start the HTTP server on `LISTEN_ADDR` (default `:8080`)
 
+### Cold start and path resolution
+
+Path resolution, firmware capability detection, and known route storage all
+depend on nodes having advertised at least once to a local observer. On a fresh
+deployment `resolvedPath` will show `"confidence": "none"` for all hops and
+`supportsMultibytePaths` will be `false` for all nodes until advert traffic
+arrives and populates `node_short_ids`. This is expected behaviour — resolution
+improves automatically as the mesh is observed over time.
+
 ---
 
 ## Configuration
