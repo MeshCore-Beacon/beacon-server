@@ -1,0 +1,7 @@
+# Default owners for everything
+* @446564
+
+
+# EXAMPLE Specific ownership by directory
+#/internal/ingest/ @your-github-username
+#/db/ @your-github-username
