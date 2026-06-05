@@ -267,10 +267,11 @@ INSERT INTO packets (
   parsed_payload,
   channel_hash,
   scope_id,
+  trace_tag,
   first_heard_at,
   last_heard_at
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW()
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW()
 )
 ON CONFLICT (packet_hash) DO UPDATE SET
   last_heard_at = NOW()
@@ -289,6 +290,20 @@ FROM packets p
 LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 LEFT JOIN channel_messages cm ON cm.packet_hash = p.packet_hash
 WHERE p.packet_hash = $1;
+
+-- name: GetPacketsByTraceTag :many
+-- Returns all packets for a given trace tag with observations.
+SELECT encode(p.packet_hash, 'hex') AS packet_hash_hex,
+    p.route_type,
+    p.first_heard_at,
+    p.last_heard_at,
+    p.parsed_payload,
+    p.scope_id,
+    ts.name AS scope_name
+FROM packets p
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+WHERE p.trace_tag = decode($1, 'hex')
+ORDER BY p.first_heard_at ASC;
 
 -- name: GetPacketObservationCount :one
 SELECT COUNT(*) FROM packet_observations WHERE packet_hash = $1;
@@ -781,6 +796,30 @@ RETURNING id;
 INSERT INTO region_iatas (region_id, iata)
 VALUES ($1, $2)
 ON CONFLICT (region_id, iata) DO NOTHING;
+
+-- ============================================================
+-- TRACES
+-- ============================================================
+
+-- name: ListTraceTags :many
+-- Returns distinct trace tags with summary info, ordered by most recent first.
+SELECT
+    encode(p.trace_tag, 'hex') AS trace_tag,
+    MIN(p.first_heard_at)::timestamptz AS first_heard_at,
+    MAX(p.last_heard_at)::timestamptz AS last_heard_at,
+    COUNT(DISTINCT p.packet_hash) AS packet_count,
+    COUNT(DISTINCT po.iata) AS iata_count
+FROM packets p
+LEFT JOIN packet_observations po ON po.packet_hash = p.packet_hash
+WHERE p.trace_tag IS NOT NULL
+  AND ($1::text = '' OR po.iata = ANY(string_to_array($1::text, ',')))
+  AND ($2::text = '' OR p.scope_id = (SELECT id FROM transport_scopes WHERE name = $2))
+  AND ($3::timestamptz IS NULL OR p.first_heard_at >= $3)
+  AND ($4::timestamptz IS NULL OR p.first_heard_at <= $4)
+  AND ($5::timestamptz IS NULL OR p.last_heard_at < $5)
+GROUP BY p.trace_tag
+ORDER BY MAX(p.last_heard_at) DESC
+LIMIT $6;
 
 -- ============================================================
 -- HELPERS

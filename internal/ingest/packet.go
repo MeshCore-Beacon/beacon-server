@@ -31,6 +31,7 @@ type UpsertPacketParams struct {
 	OriginPubkey   []byte
 	ChannelHash    []byte
 	ScopeID        *int32
+	TraceTag       []byte
 }
 
 // InsertObservationParams mirrors the columns written on packet_observations insert.
@@ -261,6 +262,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	var channelHash []byte
 	originPubkey := []byte(nil)
 	var parsedPayload json.RawMessage
+	var traceTag []byte
 
 	switch packet.PayloadType() {
 	case meshcore.PayloadTypeGrpTxt:
@@ -431,6 +433,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	case meshcore.PayloadTypeTrace:
 		trace, err := meshcore.TraceFromBytes(packet.Payload)
 		if err == nil {
+			traceTag = uint32ToBytes(trace.Tag)
 			hashSize := int(trace.PathHashSize())
 			hashes := make([]string, 0)
 			for i := 0; i+hashSize <= len(trace.PathHashes); i += hashSize {
@@ -533,6 +536,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		OriginPubkey:   originPubkey,
 		ChannelHash:    channelHash,
 		ScopeID:        scopeID,
+		TraceTag:       traceTag,
 	}
 	isNew, err := w.db.UpsertPacket(ctx, pParams)
 	if err != nil {

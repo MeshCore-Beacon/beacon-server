@@ -73,6 +73,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP 
 			r.Mount("/regions", handlers.RegionsRouter(reader))
 			r.Mount("/scopes", handlers.ScopesRouter(reader))
 			r.Mount("/stats", handlers.StatsRouter(reader))
+			r.Mount("/traces", handlers.TracesRouter(reader))
 		})
 
 		// Private group — auth middleware applied.

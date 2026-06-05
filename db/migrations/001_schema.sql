@@ -235,6 +235,7 @@ CREATE TABLE packets (
   parsed_payload          JSONB,
   decrypted               BOOLEAN DEFAULT FALSE,
   channel_hash            BYTEA,
+  trace_tag               BYTEA,
   first_heard_at          TIMESTAMPTZ NOT NULL,
   last_heard_at           TIMESTAMPTZ NOT NULL
 );
@@ -246,6 +247,7 @@ CREATE INDEX idx_packets_origin ON packets(origin_pubkey, first_heard_at DESC)
   WHERE origin_pubkey IS NOT NULL;
 CREATE INDEX idx_packets_channel ON packets(channel_hash, first_heard_at DESC)
   WHERE channel_hash IS NOT NULL;
+  CREATE INDEX idx_packets_trace_tag ON packets(trace_tag) WHERE trace_tag IS NOT NULL;
 
 -- ============================================================
 -- PACKET OBSERVATIONS

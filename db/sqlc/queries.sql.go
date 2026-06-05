@@ -592,7 +592,7 @@ func (q *Queries) GetObserverTelemetry(ctx context.Context, arg GetObserverTelem
 }
 
 const getPacketByHash = `-- name: GetPacketByHash :one
-SELECT p.packet_hash, p.payload_type, p.payload_version, p.route_type, p.transport_codes_present, p.region_code, p.sub_region_code, p.scope_id, p.origin_pubkey, p.raw_payload, p.raw_header, p.parsed_payload, p.decrypted, p.channel_hash, p.first_heard_at, p.last_heard_at, ts.name AS scope_name,
+SELECT p.packet_hash, p.payload_type, p.payload_version, p.route_type, p.transport_codes_present, p.region_code, p.sub_region_code, p.scope_id, p.origin_pubkey, p.raw_payload, p.raw_header, p.parsed_payload, p.decrypted, p.channel_hash, p.trace_tag, p.first_heard_at, p.last_heard_at, ts.name AS scope_name,
     cm.sender_name AS cm_sender_name,
     cm.content AS cm_content,
     cm.sent_at AS cm_sent_at
@@ -617,6 +617,7 @@ type GetPacketByHashRow struct {
 	ParsedPayload         []byte             `json:"parsed_payload"`
 	Decrypted             *bool              `json:"decrypted"`
 	ChannelHash           []byte             `json:"channel_hash"`
+	TraceTag              []byte             `json:"trace_tag"`
 	FirstHeardAt          pgtype.Timestamptz `json:"first_heard_at"`
 	LastHeardAt           pgtype.Timestamptz `json:"last_heard_at"`
 	ScopeName             *string            `json:"scope_name"`
@@ -643,6 +644,7 @@ func (q *Queries) GetPacketByHash(ctx context.Context, packetHash []byte) (GetPa
 		&i.ParsedPayload,
 		&i.Decrypted,
 		&i.ChannelHash,
+		&i.TraceTag,
 		&i.FirstHeardAt,
 		&i.LastHeardAt,
 		&i.ScopeName,
@@ -662,6 +664,59 @@ func (q *Queries) GetPacketObservationCount(ctx context.Context, packetHash []by
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const getPacketsByTraceTag = `-- name: GetPacketsByTraceTag :many
+SELECT encode(p.packet_hash, 'hex') AS packet_hash_hex,
+    p.route_type,
+    p.first_heard_at,
+    p.last_heard_at,
+    p.parsed_payload,
+    p.scope_id,
+    ts.name AS scope_name
+FROM packets p
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+WHERE p.trace_tag = decode($1, 'hex')
+ORDER BY p.first_heard_at ASC
+`
+
+type GetPacketsByTraceTagRow struct {
+	PacketHashHex string             `json:"packet_hash_hex"`
+	RouteType     int16              `json:"route_type"`
+	FirstHeardAt  pgtype.Timestamptz `json:"first_heard_at"`
+	LastHeardAt   pgtype.Timestamptz `json:"last_heard_at"`
+	ParsedPayload []byte             `json:"parsed_payload"`
+	ScopeID       *int32             `json:"scope_id"`
+	ScopeName     *string            `json:"scope_name"`
+}
+
+// Returns all packets for a given trace tag with observations.
+func (q *Queries) GetPacketsByTraceTag(ctx context.Context, decode string) ([]GetPacketsByTraceTagRow, error) {
+	rows, err := q.db.Query(ctx, getPacketsByTraceTag, decode)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetPacketsByTraceTagRow{}
+	for rows.Next() {
+		var i GetPacketsByTraceTagRow
+		if err := rows.Scan(
+			&i.PacketHashHex,
+			&i.RouteType,
+			&i.FirstHeardAt,
+			&i.LastHeardAt,
+			&i.ParsedPayload,
+			&i.ScopeID,
+			&i.ScopeName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getRadioPresets = `-- name: GetRadioPresets :many
@@ -2434,6 +2489,81 @@ func (q *Queries) ListRegions(ctx context.Context) ([]ListRegionsRow, error) {
 	return items, nil
 }
 
+const listTraceTags = `-- name: ListTraceTags :many
+
+SELECT
+    encode(p.trace_tag, 'hex') AS trace_tag,
+    MIN(p.first_heard_at)::timestamptz AS first_heard_at,
+    MAX(p.last_heard_at)::timestamptz AS last_heard_at,
+    COUNT(DISTINCT p.packet_hash) AS packet_count,
+    COUNT(DISTINCT po.iata) AS iata_count
+FROM packets p
+LEFT JOIN packet_observations po ON po.packet_hash = p.packet_hash
+WHERE p.trace_tag IS NOT NULL
+  AND ($1::text = '' OR po.iata = ANY(string_to_array($1::text, ',')))
+  AND ($2::text = '' OR p.scope_id = (SELECT id FROM transport_scopes WHERE name = $2))
+  AND ($3::timestamptz IS NULL OR p.first_heard_at >= $3)
+  AND ($4::timestamptz IS NULL OR p.first_heard_at <= $4)
+  AND ($5::timestamptz IS NULL OR p.last_heard_at < $5)
+GROUP BY p.trace_tag
+ORDER BY MAX(p.last_heard_at) DESC
+LIMIT $6
+`
+
+type ListTraceTagsParams struct {
+	Column1 string             `json:"column_1"`
+	Column2 string             `json:"column_2"`
+	Column3 pgtype.Timestamptz `json:"column_3"`
+	Column4 pgtype.Timestamptz `json:"column_4"`
+	Column5 pgtype.Timestamptz `json:"column_5"`
+	Limit   int32              `json:"limit"`
+}
+
+type ListTraceTagsRow struct {
+	TraceTag     string             `json:"trace_tag"`
+	FirstHeardAt pgtype.Timestamptz `json:"first_heard_at"`
+	LastHeardAt  pgtype.Timestamptz `json:"last_heard_at"`
+	PacketCount  int64              `json:"packet_count"`
+	IataCount    int64              `json:"iata_count"`
+}
+
+// ============================================================
+// TRACES
+// ============================================================
+// Returns distinct trace tags with summary info, ordered by most recent first.
+func (q *Queries) ListTraceTags(ctx context.Context, arg ListTraceTagsParams) ([]ListTraceTagsRow, error) {
+	rows, err := q.db.Query(ctx, listTraceTags,
+		arg.Column1,
+		arg.Column2,
+		arg.Column3,
+		arg.Column4,
+		arg.Column5,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTraceTagsRow{}
+	for rows.Next() {
+		var i ListTraceTagsRow
+		if err := rows.Scan(
+			&i.TraceTag,
+			&i.FirstHeardAt,
+			&i.LastHeardAt,
+			&i.PacketCount,
+			&i.IataCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const refreshHourlyStats = `-- name: RefreshHourlyStats :exec
 REFRESH MATERIALIZED VIEW CONCURRENTLY mv_hourly_iata_stats
 `
@@ -2946,10 +3076,11 @@ INSERT INTO packets (
   parsed_payload,
   channel_hash,
   scope_id,
+  trace_tag,
   first_heard_at,
   last_heard_at
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW()
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW()
 )
 ON CONFLICT (packet_hash) DO UPDATE SET
   last_heard_at = NOW()
@@ -2971,6 +3102,7 @@ type UpsertPacketParams struct {
 	ParsedPayload         []byte `json:"parsed_payload"`
 	ChannelHash           []byte `json:"channel_hash"`
 	ScopeID               *int32 `json:"scope_id"`
+	TraceTag              []byte `json:"trace_tag"`
 }
 
 type UpsertPacketRow struct {
@@ -3010,6 +3142,7 @@ func (q *Queries) UpsertPacket(ctx context.Context, arg UpsertPacketParams) (Ups
 		arg.ParsedPayload,
 		arg.ChannelHash,
 		arg.ScopeID,
+		arg.TraceTag,
 	)
 	var i UpsertPacketRow
 	err := row.Scan(

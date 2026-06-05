@@ -133,4 +133,8 @@ type Reader interface {
 	// including packet count, observer count, node count, and the list of IATAs it is active in.
 	// Returns nil if the scope is not found.
 	GetScopeByName(ctx context.Context, name string) (*ScopeDetail, error)
+	// ListTraceTags returns a paginated list of trace tags with aggregate metadata.
+	ListTraceTags(ctx context.Context, iatas []string, scope string, since, until time.Time, cursor time.Time, limit int32) ([]TraceTagSummary, error)
+	// GetTraceByTag returns all packets for a given trace tag with resolved routes.
+	GetTraceByTag(ctx context.Context, tag string) (*TraceDetail, error)
 }

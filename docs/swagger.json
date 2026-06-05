@@ -1566,6 +1566,124 @@
                     }
                 }
             }
+        },
+        "/traces": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Traces"
+                ],
+                "summary": "List trace tags",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by IATA code(s), comma-separated",
+                        "name": "iatas",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by region slug",
+                        "name": "region",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by region ID",
+                        "name": "regionId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by transport scope name",
+                        "name": "scope",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by first_heard_at \u003e= since (epoch ms)",
+                        "name": "since",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by first_heard_at \u003c= until (epoch ms)",
+                        "name": "until",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "last_heard_at epoch ms of last item for pagination",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max results (default 50)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TraceTagSummary"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/traces/{tag}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Traces"
+                ],
+                "summary": "Get full trace detail by tag",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Trace tag hex e.g. a3f1b2c4",
+                        "name": "tag",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TraceDetail"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -2699,6 +2817,77 @@
                     "type": "string"
                 },
                 "observerType": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.TraceDetail": {
+            "type": "object",
+            "properties": {
+                "packets": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TracePacket"
+                    }
+                },
+                "traceTag": {
+                    "description": "hex-encoded 4-byte tag",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.TracePacket": {
+            "type": "object",
+            "properties": {
+                "firstHeardAt": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "lastHeardAt": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "packetHash": {
+                    "type": "string"
+                },
+                "resolvedRoute": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ResolvedHop"
+                    }
+                },
+                "routeType": {
+                    "type": "integer"
+                },
+                "routeTypeName": {
+                    "type": "string"
+                },
+                "scope": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.TraceTagSummary": {
+            "type": "object",
+            "properties": {
+                "firstHeardAt": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "iataCount": {
+                    "description": "number of distinct IATAs where heard",
+                    "type": "integer"
+                },
+                "lastHeardAt": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "packetCount": {
+                    "description": "number of packets with this trace tag",
+                    "type": "integer"
+                },
+                "traceTag": {
+                    "description": "hex-encoded 4-byte tag",
                     "type": "string"
                 }
             }

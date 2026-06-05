@@ -785,6 +785,55 @@ definitions:
       observerType:
         type: string
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.TraceDetail:
+    properties:
+      packets:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TracePacket'
+        type: array
+      traceTag:
+        description: hex-encoded 4-byte tag
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.TracePacket:
+    properties:
+      firstHeardAt:
+        description: epoch ms
+        type: integer
+      lastHeardAt:
+        description: epoch ms
+        type: integer
+      packetHash:
+        type: string
+      resolvedRoute:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ResolvedHop'
+        type: array
+      routeType:
+        type: integer
+      routeTypeName:
+        type: string
+      scope:
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.TraceTagSummary:
+    properties:
+      firstHeardAt:
+        description: epoch ms
+        type: integer
+      iataCount:
+        description: number of distinct IATAs where heard
+        type: integer
+      lastHeardAt:
+        description: epoch ms
+        type: integer
+      packetCount:
+        description: number of packets with this trace tag
+        type: integer
+      traceTag:
+        description: hex-encoded 4-byte tag
+        type: string
+    type: object
   internal_api_handlers.APIError:
     properties:
       code:
@@ -1828,6 +1877,83 @@ paths:
       summary: Top N observers by observation count (last 24h by default)
       tags:
       - Stats
+  /traces:
+    get:
+      parameters:
+      - description: Filter by IATA code(s), comma-separated
+        in: query
+        name: iatas
+        type: string
+      - description: Filter by region slug
+        in: query
+        name: region
+        type: string
+      - description: Filter by region ID
+        in: query
+        name: regionId
+        type: integer
+      - description: Filter by transport scope name
+        in: query
+        name: scope
+        type: string
+      - description: Filter by first_heard_at >= since (epoch ms)
+        in: query
+        name: since
+        type: integer
+      - description: Filter by first_heard_at <= until (epoch ms)
+        in: query
+        name: until
+        type: integer
+      - description: last_heard_at epoch ms of last item for pagination
+        in: query
+        name: cursor
+        type: integer
+      - description: Max results (default 50)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TraceTagSummary'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+      summary: List trace tags
+      tags:
+      - Traces
+  /traces/{tag}:
+    get:
+      parameters:
+      - description: Trace tag hex e.g. a3f1b2c4
+        in: path
+        name: tag
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TraceDetail'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+      summary: Get full trace detail by tag
+      tags:
+      - Traces
 schemes:
 - http
 - https

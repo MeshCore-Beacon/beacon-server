@@ -43,6 +43,7 @@ func (s *Store) UpsertPacket(ctx context.Context, p ingest.UpsertPacketParams) (
 		ParsedPayload:         p.ParsedPayload,
 		ChannelHash:           p.ChannelHash,
 		ScopeID:               p.ScopeID,
+		TraceTag:              p.TraceTag,
 	}
 	row, err := s.q.UpsertPacket(ctx, params)
 	if err != nil {
@@ -323,82 +324,15 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 		p.Observations = append(p.Observations, obs)
 	}
 	if row.PayloadType == 9 && len(obsRows) > 0 {
-		var tracePayload struct {
-			PathHashes []string `json:"pathHashes"`
-			Flags      byte     `json:"flags"`
+		iatas := make([]string, 0, len(obsRows))
+		seen := make(map[string]struct{})
+		for _, v := range obsRows {
+			if _, ok := seen[v.Iata]; !ok {
+				seen[v.Iata] = struct{}{}
+				iatas = append(iatas, v.Iata)
+			}
 		}
-		if err := json.Unmarshal(row.ParsedPayload, &tracePayload); err == nil && len(tracePayload.PathHashes) > 0 {
-			hashSize := int(1 << (tracePayload.Flags & 0x03))
-			hashes := make([][]byte, 0, len(tracePayload.PathHashes))
-			for _, h := range tracePayload.PathHashes {
-				b, err := hex.DecodeString(h)
-				if err == nil {
-					hashes = append(hashes, b)
-				}
-			}
-
-			// collect unique IATAs from observations
-			seenIATAs := make(map[string]struct{})
-			for _, v := range obsRows {
-				seenIATAs[v.Iata] = struct{}{}
-			}
-
-			// merge results across all IATAs — best confidence per hop wins
-			// confidence priority: high > ambiguous > none
-			type hopResult struct {
-				confidence string
-				entries    []api.ResolvedPathEntry
-			}
-			merged := make([]hopResult, len(hashes))
-			for i := range merged {
-				merged[i] = hopResult{confidence: "none"}
-			}
-
-			confidenceRank := map[string]int{"none": 0, "ambiguous": 1, "high": 2}
-
-			for iata := range seenIATAs {
-				resolved, err := s.ResolvePathHashes(ctx, iata, hashes)
-				if err != nil {
-					log.Printf("store: trace route resolution failed for iata=%s: %v", iata, err)
-					continue
-				}
-				for i, hash := range hashes {
-					key := hex.EncodeToString(hash[:hashSize])
-					entries := resolved[key]
-					var confidence string
-					switch len(entries) {
-					case 0:
-						confidence = "none"
-					case 1:
-						confidence = "high"
-					default:
-						confidence = "ambiguous"
-					}
-					if confidenceRank[confidence] > confidenceRank[merged[i].confidence] {
-						merged[i] = hopResult{confidence: confidence, entries: entries}
-					}
-				}
-			}
-
-			route := make([]api.ResolvedHop, 0, len(hashes))
-			for _, hr := range merged {
-				hop := api.ResolvedHop{
-					Confidence: hr.confidence,
-					Nodes:      make([]api.ResolvedNode, 0, len(hr.entries)),
-				}
-				for _, e := range hr.entries {
-					hop.Nodes = append(hop.Nodes, api.ResolvedNode{
-						ID:        e.NodeID,
-						Name:      e.Name,
-						Latitude:  e.Latitude,
-						Longitude: e.Longitude,
-						PublicKey: hex.EncodeToString(e.PublicKey),
-					})
-				}
-				route = append(route, hop)
-			}
-			p.ResolvedRoute = route
-		}
+		p.ResolvedRoute = s.resolveTraceRoute(ctx, row.ParsedPayload, iatas)
 	}
 	return p, nil
 }

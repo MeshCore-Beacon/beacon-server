@@ -199,6 +199,7 @@ type Packet struct {
 	ParsedPayload         []byte             `json:"parsed_payload"`
 	Decrypted             *bool              `json:"decrypted"`
 	ChannelHash           []byte             `json:"channel_hash"`
+	TraceTag              []byte             `json:"trace_tag"`
 	FirstHeardAt          pgtype.Timestamptz `json:"first_heard_at"`
 	LastHeardAt           pgtype.Timestamptz `json:"last_heard_at"`
 }
