@@ -232,10 +232,17 @@ ON CONFLICT (packet_hash) DO UPDATE SET
 RETURNING packet_hash, payload_type, payload_version, route_type, transport_codes_present, region_code, sub_region_code, origin_pubkey, raw_payload, raw_header, parsed_payload, decrypted, channel_hash, first_heard_at, last_heard_at, (xmax = 0)
 AS inserted;
 
+-- name: SetPacketDecrypted :exec
+UPDATE packets SET decrypted = true WHERE packet_hash = $1;
+
 -- name: GetPacketByHash :one
-SELECT p.*, ts.name AS scope_name
+SELECT p.*, ts.name AS scope_name,
+    cm.sender_name AS cm_sender_name,
+    cm.content AS cm_content,
+    cm.sent_at AS cm_sent_at
 FROM packets p
 LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+LEFT JOIN channel_messages cm ON cm.packet_hash = p.packet_hash
 WHERE p.packet_hash = $1;
 
 -- name: GetPacketObservationCount :one

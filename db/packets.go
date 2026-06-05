@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/meshcore-go/meshcore-go"
 )
 
 func (s *Store) UpsertPacket(ctx context.Context, p ingest.UpsertPacketParams) (bool, error) {
@@ -48,6 +49,10 @@ func (s *Store) UpsertPacket(ctx context.Context, p ingest.UpsertPacketParams) (
 		return false, err
 	}
 	return row.Inserted, nil
+}
+
+func (s *Store) SetPacketDecrypted(ctx context.Context, hash []byte) error {
+	return s.q.SetPacketDecrypted(ctx, hash)
 }
 
 func (s *Store) ListPackets(ctx context.Context, payloadType, routeType int16, iatas []string, scope string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
@@ -119,6 +124,40 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 	row, err := s.q.GetPacketByHash(ctx, packetHash)
 	if err != nil {
 		return nil, err
+	}
+	if row.PayloadType == int16(meshcore.PayloadTypeGrpTxt) && row.CmSenderName != nil {
+		var base struct {
+			Type             string `json:"type"`
+			Raw              string `json:"raw"`
+			ChannelHash      string `json:"channelHash"`
+			CipherMac        string `json:"cipherMac"`
+			Ciphertext       string `json:"ciphertext"`
+			CiphertextLength int    `json:"ciphertextLength"`
+			Decrypted        *struct {
+				Sender  string `json:"sender"`
+				Content string `json:"content"`
+				SentAt  int64  `json:"sentAt"`
+			} `json:"decrypted"`
+		}
+		if err := json.Unmarshal(row.ParsedPayload, &base); err == nil {
+			base.Decrypted = &struct {
+				Sender  string `json:"sender"`
+				Content string `json:"content"`
+				SentAt  int64  `json:"sentAt"`
+			}{
+				Sender: *row.CmSenderName,
+				Content: func() string {
+					if row.CmContent != nil {
+						return *row.CmContent
+					}
+					return ""
+				}(),
+				SentAt: row.CmSentAt.Time.UnixMilli(),
+			}
+			if updated, err := json.Marshal(base); err == nil {
+				row.ParsedPayload = updated
+			}
+		}
 	}
 	obsRows, err := s.q.ListObservationsForPacket(ctx, packetHash)
 	if err != nil {

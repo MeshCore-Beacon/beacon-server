@@ -592,9 +592,13 @@ func (q *Queries) GetObserverTelemetry(ctx context.Context, arg GetObserverTelem
 }
 
 const getPacketByHash = `-- name: GetPacketByHash :one
-SELECT p.packet_hash, p.payload_type, p.payload_version, p.route_type, p.transport_codes_present, p.region_code, p.sub_region_code, p.scope_id, p.origin_pubkey, p.raw_payload, p.raw_header, p.parsed_payload, p.decrypted, p.channel_hash, p.first_heard_at, p.last_heard_at, ts.name AS scope_name
+SELECT p.packet_hash, p.payload_type, p.payload_version, p.route_type, p.transport_codes_present, p.region_code, p.sub_region_code, p.scope_id, p.origin_pubkey, p.raw_payload, p.raw_header, p.parsed_payload, p.decrypted, p.channel_hash, p.first_heard_at, p.last_heard_at, ts.name AS scope_name,
+    cm.sender_name AS cm_sender_name,
+    cm.content AS cm_content,
+    cm.sent_at AS cm_sent_at
 FROM packets p
 LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+LEFT JOIN channel_messages cm ON cm.packet_hash = p.packet_hash
 WHERE p.packet_hash = $1
 `
 
@@ -616,6 +620,9 @@ type GetPacketByHashRow struct {
 	FirstHeardAt          pgtype.Timestamptz `json:"first_heard_at"`
 	LastHeardAt           pgtype.Timestamptz `json:"last_heard_at"`
 	ScopeName             *string            `json:"scope_name"`
+	CmSenderName          *string            `json:"cm_sender_name"`
+	CmContent             *string            `json:"cm_content"`
+	CmSentAt              pgtype.Timestamptz `json:"cm_sent_at"`
 }
 
 func (q *Queries) GetPacketByHash(ctx context.Context, packetHash []byte) (GetPacketByHashRow, error) {
@@ -639,6 +646,9 @@ func (q *Queries) GetPacketByHash(ctx context.Context, packetHash []byte) (GetPa
 		&i.FirstHeardAt,
 		&i.LastHeardAt,
 		&i.ScopeName,
+		&i.CmSenderName,
+		&i.CmContent,
+		&i.CmSentAt,
 	)
 	return i, err
 }
@@ -2334,6 +2344,15 @@ WHERE id = $1 AND supports_multibyte_traces = FALSE
 
 func (q *Queries) SetNodeMultibyteTraces(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, setNodeMultibyteTraces, id)
+	return err
+}
+
+const setPacketDecrypted = `-- name: SetPacketDecrypted :exec
+UPDATE packets SET decrypted = true WHERE packet_hash = $1
+`
+
+func (q *Queries) SetPacketDecrypted(ctx context.Context, packetHash []byte) error {
+	_, err := q.db.Exec(ctx, setPacketDecrypted, packetHash)
 	return err
 }
 

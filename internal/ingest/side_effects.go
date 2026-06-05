@@ -153,6 +153,9 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 		}
 
 		if newMsg {
+			if err := w.db.SetPacketDecrypted(ctx, packetHash[:]); err != nil {
+				log.Printf("ingest[%s]: failed to set packet decrypted: %v", w.cfg.BrokerName, err)
+			}
 			evt := channelMessageEvent{
 				ChannelID:   channelID,
 				ChannelHash: hex.EncodeToString(channelHashBytes),

@@ -78,6 +78,9 @@ type DB interface {
 	// UpsertPacket inserts or bumps the packets row. Returns (isNew, error).
 	UpsertPacket(ctx context.Context, p UpsertPacketParams) (bool, error)
 
+	// SetPacketDecrypted marks a packet as decrypted in the DB
+	SetPacketDecrypted(ctx context.Context, hash []byte) error
+
 	// InsertObservation inserts a packet_observations row.
 	// Returns (inserted, error); inserted=false means ON CONFLICT DO NOTHING fired.
 	InsertObservation(ctx context.Context, o InsertObservationParams) (bool, error)
