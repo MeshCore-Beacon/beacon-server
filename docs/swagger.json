@@ -1205,6 +1205,91 @@
                 }
             }
         },
+        "/scopes": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Scopes"
+                ],
+                "summary": "List transport scopes",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by IATA code(s), comma-separated",
+                        "name": "iatas",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by region slug",
+                        "name": "region",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by region ID",
+                        "name": "regionId",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/scopes/{name}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Scopes"
+                ],
+                "summary": "Get scope detail by name",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Scope name e.g. %23bc (URL-encoded #bc)",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ScopeDetail"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
         "/stats/observations": {
             "get": {
                 "produces": [
@@ -2500,6 +2585,32 @@
                 "publicKey": {
                     "description": "hex-encoded prefix used for resolution",
                     "type": "string"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.ScopeDetail": {
+            "type": "object",
+            "properties": {
+                "iataCount": {
+                    "type": "integer"
+                },
+                "iatas": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "nodeCount": {
+                    "type": "integer"
+                },
+                "observerCount": {
+                    "type": "integer"
+                },
+                "packetCount": {
+                    "type": "integer"
                 }
             }
         },

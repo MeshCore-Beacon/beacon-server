@@ -708,6 +708,23 @@ definitions:
         description: hex-encoded prefix used for resolution
         type: string
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.ScopeDetail:
+    properties:
+      iataCount:
+        type: integer
+      iatas:
+        items:
+          type: string
+        type: array
+      name:
+        type: string
+      nodeCount:
+        type: integer
+      observerCount:
+        type: integer
+      packetCount:
+        type: integer
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.ScopeStats:
     properties:
       name:
@@ -1576,6 +1593,61 @@ paths:
       summary: Get a single region
       tags:
       - Regions
+  /scopes:
+    get:
+      parameters:
+      - description: Filter by IATA code(s), comma-separated
+        in: query
+        name: iatas
+        type: string
+      - description: Filter by region slug
+        in: query
+        name: region
+        type: string
+      - description: Filter by region ID
+        in: query
+        name: regionId
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+      summary: List transport scopes
+      tags:
+      - Scopes
+  /scopes/{name}:
+    get:
+      parameters:
+      - description: 'Scope name e.g. %23bc (URL-encoded #bc)'
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ScopeDetail'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+      summary: Get scope detail by name
+      tags:
+      - Scopes
   /stats/observations:
     get:
       parameters:

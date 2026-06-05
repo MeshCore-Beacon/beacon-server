@@ -790,6 +790,71 @@ func (q *Queries) GetRegionIATAs(ctx context.Context, regionID int32) ([]string,
 	return items, nil
 }
 
+const getScopeByName = `-- name: GetScopeByName :one
+SELECT
+    ts.name,
+    COUNT(DISTINCT p.packet_hash) AS packet_count,
+    COUNT(DISTINCT os.observer_id) AS observer_count,
+    COUNT(DISTINCT n.id) AS node_count,
+    COUNT(DISTINCT po.iata) AS iata_count,
+    array_remove(array_agg(DISTINCT po.iata ORDER BY po.iata), NULL)::text[] AS iatas
+FROM transport_scopes ts
+LEFT JOIN packets p ON p.scope_id = ts.id
+LEFT JOIN observer_scopes os ON os.scope_id = ts.id
+LEFT JOIN observers o ON o.id = os.observer_id
+LEFT JOIN packet_observations po ON po.observer_id = o.id
+LEFT JOIN nodes n ON n.default_scope_id = ts.id
+WHERE ts.name = $1
+GROUP BY ts.name
+`
+
+type GetScopeByNameRow struct {
+	Name          string   `json:"name"`
+	PacketCount   int64    `json:"packet_count"`
+	ObserverCount int64    `json:"observer_count"`
+	NodeCount     int64    `json:"node_count"`
+	IataCount     int64    `json:"iata_count"`
+	Iatas         []string `json:"iatas"`
+}
+
+func (q *Queries) GetScopeByName(ctx context.Context, name string) (GetScopeByNameRow, error) {
+	row := q.db.QueryRow(ctx, getScopeByName, name)
+	var i GetScopeByNameRow
+	err := row.Scan(
+		&i.Name,
+		&i.PacketCount,
+		&i.ObserverCount,
+		&i.NodeCount,
+		&i.IataCount,
+		&i.Iatas,
+	)
+	return i, err
+}
+
+const getScopeNames = `-- name: GetScopeNames :many
+SELECT name FROM transport_scopes ORDER BY name
+`
+
+func (q *Queries) GetScopeNames(ctx context.Context) ([]string, error) {
+	rows, err := q.db.Query(ctx, getScopeNames)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		items = append(items, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getScopeStats = `-- name: GetScopeStats :many
 SELECT
     ts.name,
@@ -825,6 +890,54 @@ func (q *Queries) GetScopeStats(ctx context.Context) ([]GetScopeStatsRow, error)
 			&i.PacketCount,
 			&i.ObserverCount,
 			&i.NodeCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getScopesByIATAs = `-- name: GetScopesByIATAs :many
+SELECT
+    ts.name,
+    COUNT(DISTINCT os.observer_id) AS observer_count,
+    COUNT(DISTINCT n.id) AS node_count,
+    COUNT(DISTINCT po.iata) AS iata_count
+FROM transport_scopes ts
+LEFT JOIN observer_scopes os ON os.scope_id = ts.id
+LEFT JOIN observers o ON o.id = os.observer_id
+LEFT JOIN packet_observations po ON po.observer_id = o.id
+LEFT JOIN nodes n ON n.default_scope_id = ts.id
+WHERE ($1::text = '' OR po.iata = ANY(string_to_array($1::text, ',')))
+GROUP BY ts.name
+ORDER BY ts.name
+`
+
+type GetScopesByIATAsRow struct {
+	Name          string `json:"name"`
+	ObserverCount int64  `json:"observer_count"`
+	NodeCount     int64  `json:"node_count"`
+	IataCount     int64  `json:"iata_count"`
+}
+
+func (q *Queries) GetScopesByIATAs(ctx context.Context, dollar_1 string) ([]GetScopesByIATAsRow, error) {
+	rows, err := q.db.Query(ctx, getScopesByIATAs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetScopesByIATAsRow{}
+	for rows.Next() {
+		var i GetScopesByIATAsRow
+		if err := rows.Scan(
+			&i.Name,
+			&i.ObserverCount,
+			&i.NodeCount,
+			&i.IataCount,
 		); err != nil {
 			return nil, err
 		}

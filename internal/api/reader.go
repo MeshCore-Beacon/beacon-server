@@ -123,4 +123,14 @@ type Reader interface {
 	GetStatsTopObservers(ctx context.Context, iata string, since time.Time, limit int32) ([]TopObserver, error)
 	// GetScopeStats returns aggregate packet, observer and node counts per transport scope.
 	GetScopeStats(ctx context.Context) ([]ScopeStats, error)
+	// GetScopeNames returns the names of all configured transport scopes, ordered alphabetically.
+	// Use when no geographic filter is applied — returns names only for a lightweight response.
+	GetScopeNames(ctx context.Context) ([]string, error)
+	// GetScopesByIATAs returns scope summaries filtered by the given IATA codes,
+	// including observer, node and IATA counts. Expands region/regionId to IATAs automatically.
+	GetScopesByIATAs(ctx context.Context, iatas []string) ([]ScopeSummary, error)
+	// GetScopeByName returns full detail for a single scope by its normalized name (e.g. "#bc"),
+	// including packet count, observer count, node count, and the list of IATAs it is active in.
+	// Returns nil if the scope is not found.
+	GetScopeByName(ctx context.Context, name string) (*ScopeDetail, error)
 }

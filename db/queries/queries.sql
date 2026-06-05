@@ -38,6 +38,41 @@ SELECT name, transport_key, key_fingerprint FROM transport_scopes ORDER BY name;
 -- name: GetTransportScopeByName :one
 SELECT id FROM transport_scopes WHERE name = $1;
 
+-- name: GetScopeNames :many
+SELECT name FROM transport_scopes ORDER BY name;
+
+-- name: GetScopesByIATAs :many
+SELECT
+    ts.name,
+    COUNT(DISTINCT os.observer_id) AS observer_count,
+    COUNT(DISTINCT n.id) AS node_count,
+    COUNT(DISTINCT po.iata) AS iata_count
+FROM transport_scopes ts
+LEFT JOIN observer_scopes os ON os.scope_id = ts.id
+LEFT JOIN observers o ON o.id = os.observer_id
+LEFT JOIN packet_observations po ON po.observer_id = o.id
+LEFT JOIN nodes n ON n.default_scope_id = ts.id
+WHERE ($1::text = '' OR po.iata = ANY(string_to_array($1::text, ',')))
+GROUP BY ts.name
+ORDER BY ts.name;
+
+-- name: GetScopeByName :one
+SELECT
+    ts.name,
+    COUNT(DISTINCT p.packet_hash) AS packet_count,
+    COUNT(DISTINCT os.observer_id) AS observer_count,
+    COUNT(DISTINCT n.id) AS node_count,
+    COUNT(DISTINCT po.iata) AS iata_count,
+    array_remove(array_agg(DISTINCT po.iata ORDER BY po.iata), NULL)::text[] AS iatas
+FROM transport_scopes ts
+LEFT JOIN packets p ON p.scope_id = ts.id
+LEFT JOIN observer_scopes os ON os.scope_id = ts.id
+LEFT JOIN observers o ON o.id = os.observer_id
+LEFT JOIN packet_observations po ON po.observer_id = o.id
+LEFT JOIN nodes n ON n.default_scope_id = ts.id
+WHERE ts.name = $1
+GROUP BY ts.name;
+
 -- ============================================================
 -- OBSERVERS
 -- ============================================================
