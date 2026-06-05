@@ -846,12 +846,13 @@ LIMIT $4;
 
 -- name: SearchKnownRoutes :many
 -- Returns known routes containing a subsequence from source to destination hash prefix.
--- Matches routes where source hash appears before destination hash in the hash_prefix array.
+-- Verifies source appears before destination in the route.
 SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen
 FROM known_routes
 WHERE iata = $1
-  AND hash_prefix @> ARRAY[$2::bytea]
-  AND hash_prefix @> ARRAY[$3::bytea]
+  AND array_position(hash_prefix, $2::bytea) IS NOT NULL
+  AND array_position(hash_prefix, $3::bytea) IS NOT NULL
+  AND array_position(hash_prefix, $2::bytea) < array_position(hash_prefix, $3::bytea)
 ORDER BY hop_count ASC, last_seen DESC;
 
 -- ============================================================
