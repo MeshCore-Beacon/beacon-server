@@ -171,6 +171,8 @@ func main() {
 	if allowedIATAs != nil {
 		log.Printf("config: ingest filter active — %d allowed IATAs (countries=%v continents=%v)",
 			len(allowedIATAs), cfg.Ingest.AllowCountries, cfg.Ingest.AllowContinents)
+	} else {
+		log.Printf("config: ingest filter inactive — accepting all IATAs")
 	}
 
 	broker1 := ingest.New(
