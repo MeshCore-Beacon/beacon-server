@@ -67,12 +67,13 @@ type RadioSettings struct {
 type packetObservationEvent struct {
 	PacketHash string `json:"packetHash"`
 	Packet     struct {
-		PayloadType        uint8  `json:"payloadType"`
-		PayloadTypeName    string `json:"payloadTypeName"`
-		RouteType          uint8  `json:"routeType"`
-		RouteTypeName      string `json:"routeTypeName"`
-		IsFirstObservation bool   `json:"isFirstObservation"`
-		ObservationCount   int64  `json:"observationCount"`
+		PayloadType        uint8   `json:"payloadType"`
+		PayloadTypeName    string  `json:"payloadTypeName"`
+		RouteType          uint8   `json:"routeType"`
+		RouteTypeName      string  `json:"routeTypeName"`
+		IsFirstObservation bool    `json:"isFirstObservation"`
+		ObservationCount   int64   `json:"observationCount"`
+		Scope              *string `json:"scope,omitempty"`
 	} `json:"packet"`
 	Observation struct {
 		ObserverID   string  `json:"observerId"`
@@ -619,6 +620,9 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 			count = 0
 		}
 		evt.Packet.ObservationCount = count
+		if matchedScope != nil {
+			evt.Packet.Scope = matchedScope
+		}
 		w.broadcast(hub.EventPacketObservation, iata, packet.PayloadType(), "", evt)
 	}
 }
