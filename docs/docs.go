@@ -190,7 +190,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "Message ID of last item for pagination",
+                        "description": "Message ID of last item for pagination (results ordered newest first)",
                         "name": "cursor",
                         "in": "query"
                     },
@@ -339,7 +339,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "Message ID of last item for pagination",
+                        "description": "Message ID of last item for pagination (results ordered newest first)",
                         "name": "cursor",
                         "in": "query"
                     },

@@ -919,7 +919,8 @@ paths:
         in: query
         name: scope
         type: string
-      - description: Message ID of last item for pagination
+      - description: Message ID of last item for pagination (results ordered newest
+          first)
         in: query
         name: cursor
         type: integer
@@ -1016,7 +1017,8 @@ paths:
         in: query
         name: scope
         type: string
-      - description: Message ID of last item for pagination
+      - description: Message ID of last item for pagination (results ordered newest
+          first)
         in: query
         name: cursor
         type: integer
