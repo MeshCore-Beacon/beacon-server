@@ -155,6 +155,16 @@ SELECT radio_freq_mhz, radio_bw_khz, radio_sf, radio_cr
 FROM observers
 WHERE id = $1;
 
+-- name: InsertObserverTelemetry :exec
+-- Inserts a telemetry snapshot for an observer. The reported_at timestamp should
+-- be truncated to the configured resolution before calling to ensure deduplication.
+INSERT INTO observer_telemetry (
+    observer_id, reported_at, battery_voltage_mv, airtime_tx_pct,
+    airtime_rx_pct, noise_floor_db, uptime_seconds, queue_length,
+    debug_flags, receive_errors
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (observer_id, reported_at) DO NOTHING;
+
 -- name: GetObserverTelemetry :many
 SELECT id, reported_at, battery_voltage_mv, airtime_tx_pct, airtime_rx_pct,
        noise_floor_db, uptime_seconds, queue_length, debug_flags, receive_errors
@@ -289,12 +299,30 @@ ORDER BY p.last_heard_at DESC
 LIMIT $7;
 
 -- name: ListPacketsAfterID :many
-SELECT p.*
+-- Returns packets with observations after the given observation ID, ordered oldest first.
+-- Used for WS reconnect backfill. Pass afterObservationId=0 to start from the beginning.
+SELECT
+  p.packet_hash,
+  p.payload_type,
+  p.route_type,
+  p.first_heard_at,
+  p.last_heard_at,
+  (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = p.packet_hash) AS observation_count,
+  po.observer_id AS latest_observer_id,
+  o.display_name AS latest_observer_name,
+  po.iata AS latest_observer_iata,
+  ts.name AS scope_name
 FROM packets p
 JOIN packet_observations po ON po.packet_hash = p.packet_hash
+LEFT JOIN observers o ON o.id = po.observer_id
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE po.id > $1
+  AND ($2::smallint = -1 OR p.payload_type = $2::smallint)
+  AND ($3::smallint = -1 OR p.route_type = $3::smallint)
+  AND ($4::text = '' OR po.iata = ANY(string_to_array($4::text, ',')))
+  AND ($5::text = '' OR ts.name = $5::text)
 ORDER BY po.id ASC
-LIMIT $2;
+LIMIT $6;
 
 
 -- name: DeleteOldPackets :exec
@@ -582,15 +610,21 @@ WHERE c.channel_hash = $1
 ORDER BY cm.id ASC
 LIMIT $6;
 
--- name: InsertObserverTelemetry :exec
--- Inserts a telemetry snapshot for an observer. The reported_at timestamp should
--- be truncated to the configured resolution before calling to ensure deduplication.
-INSERT INTO observer_telemetry (
-    observer_id, reported_at, battery_voltage_mv, airtime_tx_pct,
-    airtime_rx_pct, noise_floor_db, uptime_seconds, queue_length,
-    debug_flags, receive_errors
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-ON CONFLICT (observer_id, reported_at) DO NOTHING;
+-- name: ListMessagesAfterID :many
+-- Returns messages after the given message ID, ordered oldest first.
+-- Used for WS reconnect backfill.
+SELECT DISTINCT ON (cm.id) cm.*, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash,
+(SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = cm.packet_hash) AS observation_count
+FROM channel_messages cm
+JOIN channels c ON c.id = cm.channel_id
+JOIN packet_observations po ON po.packet_hash = cm.packet_hash
+JOIN packets p ON p.packet_hash = cm.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+WHERE cm.id > $1
+  AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
+  AND ($3::text = '' OR ts.name = $3::text)
+ORDER BY cm.id ASC
+LIMIT $4;
 
 -- ============================================================
 -- STATS

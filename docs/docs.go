@@ -372,6 +372,79 @@ const docTemplate = `{
                 }
             }
         },
+        "/messages/backfill": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Messages"
+                ],
+                "summary": "Backfill messages after a given message ID",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Return messages after this ID (use last WS event message ID)",
+                        "name": "afterId",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by IATA code(s), comma-separated",
+                        "name": "iatas",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by region slug",
+                        "name": "region",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by region ID",
+                        "name": "regionId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by transport scope name",
+                        "name": "scope",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max results (default 100)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ChannelMessage"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
         "/nodes": {
             "get": {
                 "produces": [
@@ -929,6 +1002,97 @@ const docTemplate = `{
                 }
             }
         },
+        "/packets/backfill": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Packets"
+                ],
+                "summary": "Backfill packets after a given observation ID",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Return packets with observations after this ID (use last WS event observation ID)",
+                        "name": "afterObservationId",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by payload type integer",
+                        "name": "payloadType",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by payload type name",
+                        "name": "payloadTypeName",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by route type",
+                        "name": "routeType",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by IATA code(s), comma-separated",
+                        "name": "iatas",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by region slug",
+                        "name": "region",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by region ID",
+                        "name": "regionId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by transport scope name",
+                        "name": "scope",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max results (default 100)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PacketSummary"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
         "/packets/{packetHash}": {
             "get": {
                 "produces": [
@@ -1400,6 +1564,38 @@ const docTemplate = `{
                 "name": {
                     "description": "display name from config or nil",
                     "type": "string"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.ChannelMessage": {
+            "type": "object",
+            "properties": {
+                "channelHash": {
+                    "description": "hex-encoded single-byte channel hash",
+                    "type": "string"
+                },
+                "content": {
+                    "description": "decrypted message text",
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "observationCount": {
+                    "description": "number of packet_observations rows for this message's packet hash",
+                    "type": "integer"
+                },
+                "packetHash": {
+                    "description": "hex-encoded packet hash for correlation with packet events",
+                    "type": "string"
+                },
+                "senderName": {
+                    "description": "display name from the decrypted payload",
+                    "type": "string"
+                },
+                "sentAt": {
+                    "description": "epoch ms, from the sender's embedded timestamp",
+                    "type": "integer"
                 }
             }
         },
@@ -1913,6 +2109,20 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.PacketLatestObserver": {
+            "type": "object",
+            "properties": {
+                "displayName": {
+                    "type": "string"
+                },
+                "iata": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_MeshCore-Beacon_beacon-server_internal_api.PacketObservationDetail": {
             "type": "object",
             "properties": {
@@ -2030,6 +2240,49 @@ const docTemplate = `{
                 },
                 "spreadFactor": {
                     "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.PacketSummary": {
+            "type": "object",
+            "properties": {
+                "firstHeardAt": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "lastHeardAt": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "latestObserver": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PacketLatestObserver"
+                },
+                "observationCount": {
+                    "type": "integer"
+                },
+                "packetHash": {
+                    "description": "hex-encoded",
+                    "type": "string"
+                },
+                "payloadType": {
+                    "type": "integer"
+                },
+                "payloadTypeName": {
+                    "type": "string"
+                },
+                "routeType": {
+                    "type": "integer"
+                },
+                "routeTypeName": {
+                    "type": "string"
+                },
+                "scope": {
+                    "description": "matched transport scope name e.g. \"#bc\"",
+                    "type": "string"
+                },
+                "summary": {
+                    "description": "human-readable payload summary",
+                    "type": "string"
                 }
             }
         },

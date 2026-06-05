@@ -55,6 +55,9 @@ type Reader interface {
 	// Pass empty string iata to return messages from all IATAs.
 	// Pass cursor=0 to start from the beginning.
 	ListChannelMessagesByHash(ctx context.Context, hash []byte, since time.Time, limit int32, iatas []string, scope string, cursor int64) (Page[ChannelMessage], error)
+	// ListMessagesAfterID returns channel messages after the given message ID,
+	// ordered oldest first. Used for WS reconnect backfill.
+	ListMessagesAfterID(ctx context.Context, afterID int64, iatas []string, scope string, limit int32) ([]ChannelMessage, error)
 	// ListObservers returns a paginated list of observers with optional filters.
 	// All filter params are optional — pass empty string or nil to skip a filter.
 	// status is "online" or "offline" derived from last_status_at recency.
@@ -91,6 +94,9 @@ type Reader interface {
 	// Pass nil for iatas, zero times for since/until to skip those filters.
 	// cursor is last_heard_at epoch ms; pass 0 to start from the beginning.
 	ListPackets(ctx context.Context, payloadType, routeType int16, iatas []string, scope string, since, until time.Time, cursor int64, limit int32) (Page[PacketSummary], error)
+	// ListPacketsAfterID returns packets with observations after the given observation ID,
+	// ordered oldest first. Used for WS reconnect backfill.
+	ListPacketsAfterID(ctx context.Context, afterObservationID int64, payloadType, routeType int16, iatas []string, scope string, limit int32) ([]PacketSummary, error)
 	// GetPacket returns full packet detail including all observations with radio settings.
 	// Returns nil, pgx.ErrNoRows if not found.
 	GetPacket(ctx context.Context, packetHash []byte) (*Packet, error)

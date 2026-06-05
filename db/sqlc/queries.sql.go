@@ -1545,6 +1545,79 @@ func (q *Queries) ListIATAs(ctx context.Context) ([]IataCode, error) {
 	return items, nil
 }
 
+const listMessagesAfterID = `-- name: ListMessagesAfterID :many
+SELECT DISTINCT ON (cm.id) cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash,
+(SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = cm.packet_hash) AS observation_count
+FROM channel_messages cm
+JOIN channels c ON c.id = cm.channel_id
+JOIN packet_observations po ON po.packet_hash = cm.packet_hash
+JOIN packets p ON p.packet_hash = cm.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+WHERE cm.id > $1
+  AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
+  AND ($3::text = '' OR ts.name = $3::text)
+ORDER BY cm.id ASC
+LIMIT $4
+`
+
+type ListMessagesAfterIDParams struct {
+	ID      int64  `json:"id"`
+	Column2 string `json:"column_2"`
+	Column3 string `json:"column_3"`
+	Limit   int32  `json:"limit"`
+}
+
+type ListMessagesAfterIDRow struct {
+	ID               int64              `json:"id"`
+	ChannelID        int32              `json:"channel_id"`
+	PacketHash       []byte             `json:"packet_hash"`
+	SenderName       *string            `json:"sender_name"`
+	SenderPubkey     []byte             `json:"sender_pubkey"`
+	Content          *string            `json:"content"`
+	SentAt           pgtype.Timestamptz `json:"sent_at"`
+	PacketHashHex    string             `json:"packet_hash_hex"`
+	ChannelHash      []byte             `json:"channel_hash"`
+	ObservationCount int64              `json:"observation_count"`
+}
+
+// Returns messages after the given message ID, ordered oldest first.
+// Used for WS reconnect backfill.
+func (q *Queries) ListMessagesAfterID(ctx context.Context, arg ListMessagesAfterIDParams) ([]ListMessagesAfterIDRow, error) {
+	rows, err := q.db.Query(ctx, listMessagesAfterID,
+		arg.ID,
+		arg.Column2,
+		arg.Column3,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListMessagesAfterIDRow{}
+	for rows.Next() {
+		var i ListMessagesAfterIDRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChannelID,
+			&i.PacketHash,
+			&i.SenderName,
+			&i.SenderPubkey,
+			&i.Content,
+			&i.SentAt,
+			&i.PacketHashHex,
+			&i.ChannelHash,
+			&i.ObservationCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listNodeObservations = `-- name: ListNodeObservations :many
 SELECT po.id, encode(po.packet_hash, 'hex') AS packet_hash_hex,
   p.payload_type, po.iata, po.heard_at, po.rssi, po.snr, po.hop_count
@@ -2126,45 +2199,81 @@ func (q *Queries) ListPackets(ctx context.Context, arg ListPacketsParams) ([]Lis
 }
 
 const listPacketsAfterID = `-- name: ListPacketsAfterID :many
-SELECT p.packet_hash, p.payload_type, p.payload_version, p.route_type, p.transport_codes_present, p.region_code, p.sub_region_code, p.scope_id, p.origin_pubkey, p.raw_payload, p.raw_header, p.parsed_payload, p.decrypted, p.channel_hash, p.first_heard_at, p.last_heard_at
+SELECT
+  p.packet_hash,
+  p.payload_type,
+  p.route_type,
+  p.first_heard_at,
+  p.last_heard_at,
+  (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = p.packet_hash) AS observation_count,
+  po.observer_id AS latest_observer_id,
+  o.display_name AS latest_observer_name,
+  po.iata AS latest_observer_iata,
+  ts.name AS scope_name
 FROM packets p
 JOIN packet_observations po ON po.packet_hash = p.packet_hash
+LEFT JOIN observers o ON o.id = po.observer_id
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE po.id > $1
+  AND ($2::smallint = -1 OR p.payload_type = $2::smallint)
+  AND ($3::smallint = -1 OR p.route_type = $3::smallint)
+  AND ($4::text = '' OR po.iata = ANY(string_to_array($4::text, ',')))
+  AND ($5::text = '' OR ts.name = $5::text)
 ORDER BY po.id ASC
-LIMIT $2
+LIMIT $6
 `
 
 type ListPacketsAfterIDParams struct {
-	ID    int64 `json:"id"`
-	Limit int32 `json:"limit"`
+	ID      int64  `json:"id"`
+	Column2 int16  `json:"column_2"`
+	Column3 int16  `json:"column_3"`
+	Column4 string `json:"column_4"`
+	Column5 string `json:"column_5"`
+	Limit   int32  `json:"limit"`
 }
 
-func (q *Queries) ListPacketsAfterID(ctx context.Context, arg ListPacketsAfterIDParams) ([]Packet, error) {
-	rows, err := q.db.Query(ctx, listPacketsAfterID, arg.ID, arg.Limit)
+type ListPacketsAfterIDRow struct {
+	PacketHash         []byte             `json:"packet_hash"`
+	PayloadType        int16              `json:"payload_type"`
+	RouteType          int16              `json:"route_type"`
+	FirstHeardAt       pgtype.Timestamptz `json:"first_heard_at"`
+	LastHeardAt        pgtype.Timestamptz `json:"last_heard_at"`
+	ObservationCount   int64              `json:"observation_count"`
+	LatestObserverID   uuid.UUID          `json:"latest_observer_id"`
+	LatestObserverName *string            `json:"latest_observer_name"`
+	LatestObserverIata string             `json:"latest_observer_iata"`
+	ScopeName          *string            `json:"scope_name"`
+}
+
+// Returns packets with observations after the given observation ID, ordered oldest first.
+// Used for WS reconnect backfill. Pass afterObservationId=0 to start from the beginning.
+func (q *Queries) ListPacketsAfterID(ctx context.Context, arg ListPacketsAfterIDParams) ([]ListPacketsAfterIDRow, error) {
+	rows, err := q.db.Query(ctx, listPacketsAfterID,
+		arg.ID,
+		arg.Column2,
+		arg.Column3,
+		arg.Column4,
+		arg.Column5,
+		arg.Limit,
+	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Packet{}
+	items := []ListPacketsAfterIDRow{}
 	for rows.Next() {
-		var i Packet
+		var i ListPacketsAfterIDRow
 		if err := rows.Scan(
 			&i.PacketHash,
 			&i.PayloadType,
-			&i.PayloadVersion,
 			&i.RouteType,
-			&i.TransportCodesPresent,
-			&i.RegionCode,
-			&i.SubRegionCode,
-			&i.ScopeID,
-			&i.OriginPubkey,
-			&i.RawPayload,
-			&i.RawHeader,
-			&i.ParsedPayload,
-			&i.Decrypted,
-			&i.ChannelHash,
 			&i.FirstHeardAt,
 			&i.LastHeardAt,
+			&i.ObservationCount,
+			&i.LatestObserverID,
+			&i.LatestObserverName,
+			&i.LatestObserverIata,
+			&i.ScopeName,
 		); err != nil {
 			return nil, err
 		}

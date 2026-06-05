@@ -215,3 +215,29 @@ func (s *Store) ListChannelMessagesByHash(ctx context.Context, hash []byte, sinc
 		HasMore:    hasMore,
 	}, nil
 }
+
+func (s *Store) ListMessagesAfterID(ctx context.Context, afterID int64, iatas []string, scope string, limit int32) ([]api.ChannelMessage, error) {
+	iataFilter := strings.Join(iatas, ",")
+	rows, err := s.q.ListMessagesAfterID(ctx, sqlc.ListMessagesAfterIDParams{
+		ID:      afterID,
+		Column2: iataFilter,
+		Column3: scope,
+		Limit:   limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]api.ChannelMessage, 0, len(rows))
+	for _, v := range rows {
+		items = append(items, toChannelMessage(
+			v.ID,
+			v.PacketHashHex,
+			v.ChannelHash,
+			v.SenderName,
+			v.Content,
+			v.SentAt,
+			v.ObservationCount,
+		))
+	}
+	return items, nil
+}

@@ -16,6 +16,7 @@ import (
 func MessagesRouter(reader api.Reader) http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", listMessages(reader))
+	r.Get("/backfill", listMessagesBackfill(reader))
 	return r
 }
 
@@ -103,6 +104,61 @@ func listMessages(reader api.Reader) http.HandlerFunc {
 		} else {
 			messages, err = reader.ListChannelMessages(r.Context(), nil, since, int32(limit), iatas, scope, cursor)
 		}
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		respond(w, http.StatusOK, messages)
+	}
+}
+
+// listMessagesBackfill godoc
+//
+//	@Summary	Backfill messages after a given message ID
+//	@Tags		Messages
+//	@Produce	json
+//	@Param		afterId		query		int		true	"Return messages after this ID (use last WS event message ID)"
+//	@Param		iatas		query		string	false	"Filter by IATA code(s), comma-separated"
+//	@Param		region		query		string	false	"Filter by region slug"
+//	@Param		regionId	query		int		false	"Filter by region ID"
+//	@Param		scope		query		string	false	"Filter by transport scope name"
+//	@Param		limit		query		int		false	"Max results (default 100)"
+//	@Success	200			{object}	[]api.ChannelMessage
+//	@Failure	400			{object}	handlers.APIError
+//	@Failure	500			{object}	handlers.APIError
+//	@Router		/messages/backfill [get]
+func listMessagesBackfill(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		afterIDStr := r.URL.Query().Get("afterId")
+		if afterIDStr == "" {
+			respondError(w, http.StatusBadRequest, "afterId is required")
+			return
+		}
+		afterID, err := strconv.ParseInt(afterIDStr, 10, 64)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "afterId must be an integer")
+			return
+		}
+		var limit int32 = 100
+		if limitParam := r.URL.Query().Get("limit"); limitParam != "" {
+			l, err := strconv.ParseInt(limitParam, 10, 32)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "limit must be an integer")
+				return
+			}
+			limit = int32(l)
+		}
+		iatas := parseIATAs(r)
+		if regionIDStr := r.URL.Query().Get("regionId"); regionIDStr != "" || r.URL.Query().Get("region") != "" {
+			regionIATAs, err := resolveRegionIATAs(r.Context(), r.URL.Query().Get("regionId"), r.URL.Query().Get("region"), reader)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			iatas = append(iatas, regionIATAs...)
+		}
+		scope := r.URL.Query().Get("scope")
+		messages, err := reader.ListMessagesAfterID(r.Context(), afterID, iatas, scope, limit)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return

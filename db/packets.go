@@ -120,6 +120,44 @@ func (s *Store) ListPackets(ctx context.Context, payloadType, routeType int16, i
 	}, nil
 }
 
+func (s *Store) ListPacketsAfterID(ctx context.Context, afterObservationID int64, payloadType, routeType int16, iatas []string, scope string, limit int32) ([]api.PacketSummary, error) {
+	iataFilter := strings.Join(iatas, ",")
+	rows, err := s.q.ListPacketsAfterID(ctx, sqlc.ListPacketsAfterIDParams{
+		ID:      afterObservationID,
+		Column2: payloadType,
+		Column3: routeType,
+		Column4: iataFilter,
+		Column5: scope,
+		Limit:   limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]api.PacketSummary, 0, len(rows))
+	for _, v := range rows {
+		item := api.PacketSummary{
+			PacketHash:       hex.EncodeToString(v.PacketHash),
+			PayloadType:      v.PayloadType,
+			PayloadTypeName:  api.PayloadTypeName(v.PayloadType),
+			RouteType:        v.RouteType,
+			RouteTypeName:    api.RouteTypeName(v.RouteType),
+			Scope:            v.ScopeName,
+			FirstHeardAt:     v.FirstHeardAt.Time.UnixMilli(),
+			LastHeardAt:      v.LastHeardAt.Time.UnixMilli(),
+			ObservationCount: int32(v.ObservationCount),
+		}
+		if v.LatestObserverID != (uuid.UUID{}) {
+			item.LatestObserver = &api.PacketLatestObserver{
+				ID:          v.LatestObserverID,
+				DisplayName: v.LatestObserverName,
+				IATA:        v.LatestObserverIata,
+			}
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
 func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, error) {
 	row, err := s.q.GetPacketByHash(ctx, packetHash)
 	if err != nil {
