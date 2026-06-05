@@ -3,7 +3,7 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/MeshCore-Tower/tower-server/internal/ingest"
+	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
 	"github.com/go-chi/chi/v5"
 )
 

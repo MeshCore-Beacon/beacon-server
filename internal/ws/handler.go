@@ -30,8 +30,8 @@ import (
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
 
-	"github.com/MeshCore-Tower/tower-server/internal/api"
-	"github.com/MeshCore-Tower/tower-server/internal/hub"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
 )
 
 const (

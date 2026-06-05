@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	sqlc "github.com/MeshCore-Tower/tower-server/db/sqlc"
-	"github.com/MeshCore-Tower/tower-server/internal/api"
+	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 

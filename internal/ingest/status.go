@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MeshCore-Tower/tower-server/internal/hub"
+	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
 )
 
 // UpdateObserverStatusParams carries the fields parsed from a /status message.

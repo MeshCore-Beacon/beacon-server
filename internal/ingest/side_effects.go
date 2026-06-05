@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MeshCore-Tower/tower-server/internal/hub"
-	"github.com/MeshCore-Tower/tower-server/internal/keystore"
+	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
+	"github.com/MeshCore-Beacon/beacon-server/internal/keystore"
 	"github.com/meshcore-go/meshcore-go"
 )
 

@@ -1,4 +1,4 @@
-// Package config loads the Tower configuration file and seeds the database
+// Package config loads the Beacon configuration file and seeds the database
 // with regions, IATA overrides, and channel keys on startup.
 package config
 
@@ -9,7 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config is the top-level structure of the Tower config file.
+// Config is the top-level structure of the Beacon config file.
 type Config struct {
 	IATAs       map[string]IATAConfig `yaml:"iatas"`
 	Regions     []RegionConfig        `yaml:"regions"`
@@ -23,7 +23,7 @@ type Config struct {
 
 // ScopeConfig defines a regional transport scope.
 // Name can be provided with or without the # or $ prefix.
-// Tower normalizes plain names by prepending #.
+// Beacon normalizes plain names by prepending #.
 type ScopeConfig struct {
 	Name string `yaml:"name"` // e.g. "bc", "#west", "$private"
 }
@@ -80,7 +80,7 @@ func (d *duration) UnmarshalYAML(value *yaml.Node) error {
 // keyed by the channel hash hex (e.g. "11" for 0x11).
 type ChannelKeysConfig struct {
 	// Hashtags is a list of hashtag names (without the # prefix).
-	// Tower derives the PSK and channel hash automatically.
+	// Beacon derives the PSK and channel hash automatically.
 	Hashtags []string `yaml:"hashtags"`
 
 	// Keys maps channel hash hex → explicit key config.
@@ -113,7 +113,7 @@ type RegionConfig struct {
 }
 
 
-// IngestFilterConfig restricts which packets Tower stores based on the
+// IngestFilterConfig restricts which packets Beacon stores based on the
 // observer's IATA geographic location. Both filters are optional — if neither
 // is set all IATAs are accepted. If both are set an IATA passes if it matches
 // either (OR semantics).
@@ -132,7 +132,7 @@ type IngestFilterConfig struct {
 
 // Load reads and parses the config file at path.
 // Returns an empty Config (not an error) if the file does not exist,
-// so Tower starts cleanly without a config file.
+// so Beacon starts cleanly without a config file.
 func Load(path string) (*Config, error) {
 	cfg := &Config{}
 	data, err := os.ReadFile(path)

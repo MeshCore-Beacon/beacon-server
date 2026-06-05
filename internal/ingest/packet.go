@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MeshCore-Tower/tower-server/internal/api"
-	"github.com/MeshCore-Tower/tower-server/internal/hub"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
 	"github.com/google/uuid"
 	"github.com/meshcore-go/meshcore-go"
 )

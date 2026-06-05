@@ -7,8 +7,8 @@ import (
 	"context"
 	"encoding/hex"
 
-	sqlc "github.com/MeshCore-Tower/tower-server/db/sqlc"
-	"github.com/MeshCore-Tower/tower-server/internal/api"
+	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/google/uuid"
 
 	"github.com/jackc/pgx/v5/pgtype"

@@ -182,7 +182,7 @@ func (h *Hub) Broadcast(e Event) {
 func (h *Hub) Run() {
 	// clients maps a *Client to the set of subscription IDs it holds.
 	// We use a map[*Client]struct{} for O(1) presence checks and O(n)
-	// broadcast — fine at the scale Tower targets.
+	// broadcast — fine at the scale Beacon targets.
 	clients := make(map[*Client]struct{})
 
 	for {

@@ -1,4 +1,4 @@
-module github.com/MeshCore-Tower/tower-server
+module github.com/MeshCore-Beacon/beacon-server
 
 go 1.26.1
 

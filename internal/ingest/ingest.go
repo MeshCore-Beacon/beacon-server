@@ -33,10 +33,10 @@ import (
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/google/uuid"
 
-	"github.com/MeshCore-Tower/tower-server/internal/api"
-	"github.com/MeshCore-Tower/tower-server/internal/hub"
-	"github.com/MeshCore-Tower/tower-server/internal/keystore"
-	"github.com/MeshCore-Tower/tower-server/internal/scopestore"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
+	"github.com/MeshCore-Beacon/beacon-server/internal/keystore"
+	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
 )
 
 // Config holds the connection parameters for one broker.
@@ -176,7 +176,7 @@ func New(cfg Config, db DB, h *hub.Hub, keys ChannelKeyStore, scopes ScopeStore)
 func (w *Worker) Start(ctx context.Context) {
 	opts := mqtt.NewClientOptions().
 		AddBroker(w.cfg.URL).
-		SetClientID(fmt.Sprintf("tower-%s", w.cfg.BrokerName)).
+		SetClientID(fmt.Sprintf("beacon-%s", w.cfg.BrokerName)).
 		SetUsername(w.cfg.Username).
 		SetPassword(w.cfg.Password).
 		SetAutoReconnect(true).

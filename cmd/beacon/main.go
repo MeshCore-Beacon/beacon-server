@@ -12,27 +12,27 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/MeshCore-Tower/tower-server/db"
-	_ "github.com/MeshCore-Tower/tower-server/docs"
-	"github.com/MeshCore-Tower/tower-server/internal/api/router"
-	"github.com/MeshCore-Tower/tower-server/internal/config"
-	"github.com/MeshCore-Tower/tower-server/internal/hub"
-	"github.com/MeshCore-Tower/tower-server/internal/iatadb"
-	"github.com/MeshCore-Tower/tower-server/internal/ingest"
-	"github.com/MeshCore-Tower/tower-server/internal/keystore"
-	"github.com/MeshCore-Tower/tower-server/internal/scopestore"
+	"github.com/MeshCore-Beacon/beacon-server/db"
+	_ "github.com/MeshCore-Beacon/beacon-server/docs"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api/router"
+	"github.com/MeshCore-Beacon/beacon-server/internal/config"
+	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
+	"github.com/MeshCore-Beacon/beacon-server/internal/iatadb"
+	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
+	"github.com/MeshCore-Beacon/beacon-server/internal/keystore"
+	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 )
 
-//	@title			MeshCore Tower API
+//	@title			MeshCore Beacon API
 //	@version		1.0
 //	@description	MeshCore network observation backend. Ingests LoRa packets from MQTT brokers, stores in PostgreSQL, and streams live events via WebSocket.
-//	@termsOfService	https://github.com/MeshCore-Tower/tower-server
+//	@termsOfService	https://github.com/MeshCore-Beacon/beacon-server
 
-//	@contact.name	MeshCore Tower
-//	@contact.url	https://github.com/MeshCore-Tower/tower-server
+//	@contact.name	MeshCore Beacon
+//	@contact.url	https://github.com/MeshCore-Beacon/beacon-server
 
 //	@license.name	MIT
 
@@ -235,7 +235,7 @@ func main() {
 	}
 
 	go func() {
-		fmt.Printf("Tower listening on %s\n", addr)
+		fmt.Printf("Beacon listening on %s\n", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server error: %v", err)
 		}

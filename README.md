@@ -1,6 +1,6 @@
-# MeshCore Tower
+# MeshCore Beacon
 
-MeshCore Tower is a MeshCore network observation backend. It connects to one or
+MeshCore Beacon is a MeshCore network observation backend. It connects to one or
 more MeshCore MQTT brokers, ingests LoRa packet traffic in real time, stores it
 in PostgreSQL, and streams live events to WebSocket clients.
 
@@ -43,8 +43,8 @@ For deployment instructions including the frontend app, see the deployment docs.
 ## Project layout
 
 ```
-tower-server/
-├── cmd/tower/              entry point
+beacon-server/
+├── cmd/beacon/              entry point
 ├── db/
 │   ├── migrations/         SQL schema (001_schema.sql)
 │   ├── queries/            sqlc query definitions
@@ -101,8 +101,8 @@ tower-server/
 ### 1. Clone and configure
 
 ```bash
-git clone https://github.com/MeshCore-Tower/tower-server.git
-cd tower-server
+git clone https://github.com/MeshCore-Beacon/beacon-server.git
+cd beacon-server
 cp env.example .env
 cp config.yaml.example config.yaml
 ```
@@ -122,10 +122,10 @@ start via `docker-entrypoint-initdb.d`.
 ### 3. Run
 
 ```bash
-go run ./cmd/tower
+go run ./cmd/beacon
 ```
 
-Tower will:
+Beacon will:
 
 - Load `.env` and `config.yaml`
 - Connect to PostgreSQL and seed config data
@@ -173,7 +173,7 @@ regions:
 
 # Channel keys for decrypting group messages.
 channel_keys:
-  # Hashtag channels: Tower derives the PSK from the tag name automatically.
+  # Hashtag channels: Beacon derives the PSK from the tag name automatically.
   # secret = SHA256("#tag")[:16], channel_hash = SHA256(secret)[0]
   # Tag names should be provided without the # prefix.
   hashtags:
@@ -367,7 +367,7 @@ sqlc generate
 
 ### API documentation (Swagger)
 
-Tower uses [swaggo/swag](https://github.com/swaggo/swag) to generate OpenAPI
+Beacon uses [swaggo/swag](https://github.com/swaggo/swag) to generate OpenAPI
 documentation from annotations in the handler comments.
 
 Start the server and open `http://localhost:8080/swagger/index.html`.
@@ -376,7 +376,7 @@ After adding or modifying any handler, regenerate the docs and commit the
 updated `docs/` directory alongside your handler changes:
 
 ```bash
-swag init -g cmd/tower/main.go -o docs --parseDependecy
+swag init -g cmd/beacon/main.go -o docs --parseDependecy
 ```
 
 Install swag:
@@ -411,7 +411,7 @@ For paginated responses use the generic page wrapper:
 
 ### Updating the IATA database
 
-Tower includes a static IATA → country/continent mapping compiled into the
+Beacon includes a static IATA → country/continent mapping compiled into the
 binary, generated from the [OurAirports](https://ourairports.com/data/) public
 dataset.
 

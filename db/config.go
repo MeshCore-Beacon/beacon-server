@@ -3,8 +3,8 @@ package db
 import (
 	"context"
 
-	sqlc "github.com/MeshCore-Tower/tower-server/db/sqlc"
-	"github.com/MeshCore-Tower/tower-server/internal/api"
+	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 )
 
 func (s *Store) UpsertIATADetails(ctx context.Context, iata string, name string, lat, lng *float64) error {

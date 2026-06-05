@@ -1,4 +1,4 @@
-# Tower configuration file
+# Beacon configuration file
 # Copy to config.yaml and adjust as needed.
 
 iatas:
@@ -45,10 +45,10 @@ regions:
     iatas: [YOW, YYZ]
 
 channel_keys:
-  # Hashtag channels: Tower derives the PSK automatically from the tag name.
+  # Hashtag channels: Beacon derives the PSK automatically from the tag name.
   # secret = SHA256("#tag")[:16], channel_hash = SHA256(secret)[0]
   # Hashtag names should be provided without the # prefix.
-  # Tower prepends # automatically before deriving the key.
+  # Beacon prepends # automatically before deriving the key.
   hashtags:
     - meshcore
 

@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	sqlc "github.com/MeshCore-Tower/tower-server/db/sqlc"
-	"github.com/MeshCore-Tower/tower-server/internal/api"
-	"github.com/MeshCore-Tower/tower-server/internal/ingest"
+	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )

@@ -19,7 +19,7 @@ type ChannelSummary struct {
 	ChannelHash string  `json:"channelHash"`    // hex-encoded single-byte hash
 	LastSeen    int64   `json:"lastSeen"`       // epoch ms, time of most recent message
 	IsHashtag   bool    `json:"isHashtag"`      // true if key was derived from a hashtag PSK
-	KeyKnown    bool    `json:"keyKnown"`       // true if Tower has a decryption key for this channel
+	KeyKnown    bool    `json:"keyKnown"`       // true if Beacon has a decryption key for this channel
 }
 
 // Channel is the full channel representation including decryption metadata.

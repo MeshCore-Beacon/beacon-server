@@ -10,12 +10,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/MeshCore-Tower/tower-server/internal/api"
-	"github.com/MeshCore-Tower/tower-server/internal/api/handlers"
-	mw "github.com/MeshCore-Tower/tower-server/internal/api/middleware"
-	"github.com/MeshCore-Tower/tower-server/internal/hub"
-	"github.com/MeshCore-Tower/tower-server/internal/ingest"
-	"github.com/MeshCore-Tower/tower-server/internal/ws"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api/handlers"
+	mw "github.com/MeshCore-Beacon/beacon-server/internal/api/middleware"
+	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
+	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
+	"github.com/MeshCore-Beacon/beacon-server/internal/ws"
 	httpSwagger "github.com/swaggo/http-swagger"
 )
 

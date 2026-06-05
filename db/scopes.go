@@ -3,8 +3,8 @@ package db
 import (
 	"context"
 
-	sqlc "github.com/MeshCore-Tower/tower-server/db/sqlc"
-	"github.com/MeshCore-Tower/tower-server/internal/scopestore"
+	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
+	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
 )
 
 func (s *Store) UpsertTransportScope(ctx context.Context, name, displayName string, transportKey, keyFingerprint []byte) error {

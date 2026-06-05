@@ -1,4 +1,4 @@
-// Package api defines the response types and read interface for the Tower REST API.
+// Package api defines the response types and read interface for the Beacon REST API.
 package api
 
 import (

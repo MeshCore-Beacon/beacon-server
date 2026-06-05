@@ -1,4 +1,4 @@
-// Package handlers provides HTTP route handlers for the Tower REST API.
+// Package handlers provides HTTP route handlers for the Beacon REST API.
 package handlers
 
 import (
@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// APIError is the standard error response shape for all Tower API endpoints.
+// APIError is the standard error response shape for all Beacon API endpoints.
 // Code is a stable snake_case identifier derived from the HTTP status text,
 // safe to match against in client code. Message is a human-readable description.
 type APIError struct {
