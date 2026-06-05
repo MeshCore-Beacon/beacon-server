@@ -471,3 +471,8 @@ AIRPORTS_CSV=/path/to/airports.csv go run ./internal/iatadb/gen
   - [ ] Server management via API (currently config-file only)
 - [ ] Observer owner tracking (schema exists, API excluded by design)
 - [ ] Log levels, debug and info
+
+## Acknowledgements
+
+Beacon stands on the shoulders of giants. See [SHOULDERS.md](SHOULDERS.md) for
+the full list of open source projects that make this possible.
