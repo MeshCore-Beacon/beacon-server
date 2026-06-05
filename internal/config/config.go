@@ -112,7 +112,6 @@ type RegionConfig struct {
 	IATAs        []string `yaml:"iatas"`
 }
 
-
 // IngestFilterConfig restricts which packets Beacon stores based on the
 // observer's IATA geographic location. Both filters are optional — if neither
 // is set all IATAs are accepted. If both are set an IATA passes if it matches

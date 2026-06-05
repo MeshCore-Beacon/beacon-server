@@ -23,9 +23,9 @@ type PacketSummary struct {
 	PayloadTypeName  string                `json:"payloadTypeName"`
 	RouteType        int16                 `json:"routeType"`
 	RouteTypeName    string                `json:"routeTypeName"`
-	Scope            *string               `json:"scope,omitempty"`            // matched transport scope name e.g. "#bc"
-	FirstHeardAt     int64                 `json:"firstHeardAt"`               // epoch ms
-	LastHeardAt      int64                 `json:"lastHeardAt"`                // epoch ms
+	Scope            *string               `json:"scope,omitempty"` // matched transport scope name e.g. "#bc"
+	FirstHeardAt     int64                 `json:"firstHeardAt"`    // epoch ms
+	LastHeardAt      int64                 `json:"lastHeardAt"`     // epoch ms
 	ObservationCount int32                 `json:"observationCount"`
 	LatestObserver   *PacketLatestObserver `json:"latestObserver,omitempty"`
 	Summary          *string               `json:"summary,omitempty"` // human-readable payload summary
@@ -116,13 +116,13 @@ type Packet struct {
 	TransportCodes   *PacketTransportCodes     `json:"transportCodes,omitempty"`
 	OriginPubkey     *string                   `json:"originPubkey,omitempty"` // hex-encoded; nil when not extractable from payload
 	ParsedPayload    json.RawMessage           `json:"parsedPayload,omitempty"`
-	RawPayload       string                    `json:"rawPayload"`              // hex-encoded payload bytes (excludes header and path)
-	Decrypted        bool                      `json:"decrypted"`               // true if group text was successfully decrypted
-	ChannelHash      *string                   `json:"channelHash,omitempty"`   // hex-encoded single byte; non-nil for group_text/group_data
-	Scope            *string                   `json:"scope,omitempty"`         // matched transport scope name e.g. "#bc"
-	FirstHeardAt     int64                     `json:"firstHeardAt"`            // epoch ms
-	LastHeardAt      int64                     `json:"lastHeardAt"`             // epoch ms
-	FirstToLastMs    int64                     `json:"firstToLastMs"`           // ms between first and last observation
+	RawPayload       string                    `json:"rawPayload"`            // hex-encoded payload bytes (excludes header and path)
+	Decrypted        bool                      `json:"decrypted"`             // true if group text was successfully decrypted
+	ChannelHash      *string                   `json:"channelHash,omitempty"` // hex-encoded single byte; non-nil for group_text/group_data
+	Scope            *string                   `json:"scope,omitempty"`       // matched transport scope name e.g. "#bc"
+	FirstHeardAt     int64                     `json:"firstHeardAt"`          // epoch ms
+	LastHeardAt      int64                     `json:"lastHeardAt"`           // epoch ms
+	FirstToLastMs    int64                     `json:"firstToLastMs"`         // ms between first and last observation
 	ObservationCount int32                     `json:"observationCount"`
 	ResolvedRoute    []ResolvedHop             `json:"resolvedRoute,omitempty"` // trace packets only: resolved intended route
 	Observations     []PacketObservationDetail `json:"observations"`
@@ -139,8 +139,8 @@ type AdvertObservation struct {
 // PacketObservationSummary is a lightweight packet+observation pair used in
 // list contexts such as observer adverts and node observations.
 type PacketObservationSummary struct {
-	ID              int64    `json:"id"`          // observation ID, use as cursor for pagination
-	PacketHash      string   `json:"packetHash"`  // hex-encoded
+	ID              int64    `json:"id"`         // observation ID, use as cursor for pagination
+	PacketHash      string   `json:"packetHash"` // hex-encoded
 	PayloadType     int16    `json:"payloadType"`
 	PayloadTypeName string   `json:"payloadTypeName"`
 	IATA            string   `json:"iata"`

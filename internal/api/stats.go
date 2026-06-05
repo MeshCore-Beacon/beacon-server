@@ -5,7 +5,7 @@ import "github.com/google/uuid"
 // RadioPreset represents a unique radio configuration observed in a given IATA,
 // aggregated from both observer status messages and node adverts.
 type RadioPreset struct {
-	Preset     string `json:"preset"`     // "freqMhz,bwKhz,sf" e.g. "910.525,62.5,7"
+	Preset     string `json:"preset"` // "freqMhz,bwKhz,sf" e.g. "910.525,62.5,7"
 	IATA       string `json:"iata"`
 	SourceType string `json:"sourceType"` // "observer" or "node"
 	Count      int64  `json:"count"`      // number of observers or nodes on this preset in this IATA
@@ -22,7 +22,7 @@ type StatsOverview struct {
 
 // ObservationPoint is a single time-bucketed observation count for charting.
 type ObservationPoint struct {
-	Hour             int64  `json:"hour"`             // epoch ms, start of the 1-hour bucket
+	Hour             int64  `json:"hour"` // epoch ms, start of the 1-hour bucket
 	IATA             string `json:"iata"`
 	ObservationCount int64  `json:"observationCount"`
 	UniquePackets    int64  `json:"uniquePackets"`

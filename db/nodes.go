@@ -103,7 +103,7 @@ func (s *Store) ListNodes(ctx context.Context, nodeType int16, iatas []string, s
 			Latitude:     v.Latitude,
 			Longitude:    v.Longitude,
 			IsObserver:   v.IsObserver,
-			ObserverID:  nullableUUID(v.ObserverID),
+			ObserverID:   nullableUUID(v.ObserverID),
 		}
 		if len(v.Iatas) > 0 {
 			if err := json.Unmarshal(v.Iatas, &node.IATAs); err != nil {
@@ -144,7 +144,7 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 			Latitude:     row.Latitude,
 			Longitude:    row.Longitude,
 			IsObserver:   row.IsObserver,
-			ObserverID:  nullableUUID(row.ObserverID),
+			ObserverID:   nullableUUID(row.ObserverID),
 			DefaultScope: row.DefaultScopeName,
 		},
 		LocationSource:          row.LocationSource,
