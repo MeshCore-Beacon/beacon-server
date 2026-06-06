@@ -76,7 +76,11 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 			Latitude:  lat,
 			Longitude: lon,
 		}
-		nodeID, err := w.db.UpsertNode(ctx, params, radio)
+		var nodeRadio RadioSettings
+		if packet.PathHashCount() == 0 {
+			nodeRadio = radio
+		}
+		nodeID, err := w.db.UpsertNode(ctx, params, nodeRadio)
 		if err != nil {
 			log.Printf("ingest[%s]: db: upsert node failed: %v", w.cfg.BrokerName, err)
 			return
