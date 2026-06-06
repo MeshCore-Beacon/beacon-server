@@ -1395,7 +1395,7 @@ LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE ($1::timestamptz IS NULL OR cm.sent_at >= $1)
   AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
   AND ($3::text = '' OR ts.name = $3::text)
-  AND ($4 = 0 OR cm.id > $4)
+  AND ($4 = 0 OR cm.id < $4)
 ORDER BY cm.id DESC
 LIMIT $5
 `
@@ -1473,7 +1473,7 @@ WHERE cm.channel_id = $1
   AND ($2::timestamptz IS NULL OR cm.sent_at >= $2)
   AND ($3::text = '' OR po.iata = ANY(string_to_array($3::text, ',')))
   AND ($4::text = '' OR ts.name = $4::text)
-  AND ($5::bigint = 0 OR cm.id > $5::bigint)
+  AND ($5::bigint = 0 OR cm.id < $5::bigint)
 ORDER BY cm.id DESC
 LIMIT $6
 `
@@ -1554,7 +1554,7 @@ WHERE c.channel_hash = $1
   AND ($2::timestamptz IS NULL OR cm.sent_at >= $2)
   AND ($3::text = '' OR po.iata = ANY(string_to_array($3::text, ',')))
   AND ($4::text = '' OR ts.name = $4::text)
-  AND ($5::bigint = 0 OR cm.id > $5::bigint)
+  AND ($5::bigint = 0 OR cm.id < $5::bigint)
 ORDER BY cm.id DESC
 LIMIT $6
 `
