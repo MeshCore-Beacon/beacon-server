@@ -68,7 +68,8 @@ type PacketRadio struct {
 // Confidence is "high" (exactly one match), "ambiguous" (multiple matches), or "none" (no match).
 type ResolvedHop struct {
 	Confidence string         `json:"confidence"` // "high", "ambiguous", or "none"
-	Nodes      []ResolvedNode `json:"nodes"`      // empty for "none", one for "high", multiple for "ambiguous"
+	SNR        *float32       `json:"snr,omitempty"`
+	Nodes      []ResolvedNode `json:"nodes"` // empty for "none", one for "high", multiple for "ambiguous"
 }
 
 // ResolvedNode is a node reference within a resolved path hop.
