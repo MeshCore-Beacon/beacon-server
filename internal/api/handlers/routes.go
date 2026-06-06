@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/go-chi/chi/v5"
@@ -40,10 +41,10 @@ func listKnownRoutes(reader api.Reader) http.HandlerFunc {
 				hopCount = int32(h)
 			}
 		}
-		var cursor int64
+		var cursor time.Time
 		if v := r.URL.Query().Get("cursor"); v != "" {
-			if c, err := strconv.ParseInt(v, 10, 64); err == nil {
-				cursor = c
+			if ms, err := strconv.ParseInt(v, 10, 64); err == nil {
+				cursor = time.UnixMilli(ms)
 			}
 		}
 		var limit int32 = 50

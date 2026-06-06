@@ -835,12 +835,11 @@ ON CONFLICT (node_ids, iata) DO UPDATE SET
   last_seen = NOW();
 
 -- name: ListKnownRoutes :many
--- Returns known routes filtered by IATA, ordered by most recently seen.
 SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen
 FROM known_routes
 WHERE ($1 = '' OR iata = $1)
   AND ($2 = 0 OR hop_count = $2)
-  AND ($3 = 0 OR id < $3)
+  AND ($3::timestamptz IS NULL OR last_seen < $3)
 ORDER BY last_seen DESC
 LIMIT $4;
 

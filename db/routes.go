@@ -3,10 +3,12 @@ package db
 import (
 	"context"
 	"encoding/hex"
+	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 func (s *Store) UpsertKnownRoute(ctx context.Context, nodeIDs []uuid.UUID, hashPrefix [][]byte, iata string, hopCount int32) error {
@@ -18,11 +20,15 @@ func (s *Store) UpsertKnownRoute(ctx context.Context, nodeIDs []uuid.UUID, hashP
 	})
 }
 
-func (s *Store) ListKnownRoutes(ctx context.Context, iata string, hopCount int32, cursor int64, limit int32) ([]api.KnownRoute, error) {
+func (s *Store) ListKnownRoutes(ctx context.Context, iata string, hopCount int32, cursor time.Time, limit int32) ([]api.KnownRoute, error) {
+	var cursorTS pgtype.Timestamptz
+	if !cursor.IsZero() {
+		cursorTS = pgtype.Timestamptz{Time: cursor, Valid: true}
+	}
 	rows, err := s.q.ListKnownRoutes(ctx, sqlc.ListKnownRoutesParams{
 		Column1: iata,
 		Column2: hopCount,
-		Column3: cursor,
+		Column3: cursorTS,
 		Limit:   limit,
 	})
 	if err != nil {
