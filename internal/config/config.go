@@ -1,5 +1,5 @@
 // Copyright 2026 Beacon Contributors
-// SPDX-License-Identifier: agpl
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package config loads the Beacon configuration file and seeds the database
 // with regions, IATA overrides, and channel keys on startup.

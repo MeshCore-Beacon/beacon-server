@@ -1,5 +1,5 @@
 // Copyright 2026 Beacon Contributors
-// SPDX-License-Identifier: agpl
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package db implements the ingest.DB interface using sqlc-generated queries
 // over a pgx/v5 connection pool. Each method is a thin mapping layer between

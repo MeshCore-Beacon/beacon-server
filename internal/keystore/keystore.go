@@ -1,5 +1,5 @@
 // Copyright 2026 Beacon Contributors
-// SPDX-License-Identifier: agpl
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package keystore provides channel key lookup for the ingest pipeline.
 // Keys are loaded from config at startup and never written at runtime.
