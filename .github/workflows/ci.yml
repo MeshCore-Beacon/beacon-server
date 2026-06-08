@@ -35,15 +35,23 @@ jobs:
       - name: Test
         run: go test ./...
 
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Vulnerability check
+        run: govulncheck ./...
+
       - name: Install swag
         run: go install github.com/swaggo/swag/cmd/swag@latest
 
       - name: Swagger docs up to date
         run: |
+          cp docs/swagger.json docs/swagger.json.bak
           swag init -g cmd/beacon/main.go -o docs --parseInternal --parseDependency
-          if [ -n "$(git diff --name-only docs/)" ]; then
+          if ! diff -q docs/swagger.json docs/swagger.json.bak > /dev/null; then
             echo "Swagger docs are out of date. Run swag init and commit the result."
-            git diff --name-only docs/
+            rm docs/swagger.json.bak
             exit 1
           fi
+          rm docs/swagger.json.bak
 
