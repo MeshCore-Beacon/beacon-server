@@ -155,6 +155,7 @@ type clientMessage struct {
 type subscribeScope struct {
 	IATAs         []string        `json:"iatas"`
 	RegionIDs     []string        `json:"regionIds"`
+	RegionSlugs   []string        `json:"reagionSlugs"`
 	PayloadTypes  []uint8         `json:"payloadTypes"`
 	RouteTypes    []uint8         `json:"routeTypes"`
 	ChannelHashes []string        `json:"channelHashes"`
@@ -175,7 +176,7 @@ func handleClientMessage(ctx context.Context, client *hub.Client, reader api.Rea
 		if msg.Scope == nil {
 			return
 		}
-		var regionIATAs []string
+		iatas := msg.Scope.IATAs
 		for _, ridStr := range msg.Scope.RegionIDs {
 			rid, err := strconv.Atoi(ridStr)
 			if err != nil {
@@ -187,14 +188,21 @@ func handleClientMessage(ctx context.Context, client *hub.Client, reader api.Rea
 				log.Printf("ws[%s]: region %d not found, skipping: %v", connID, rid, err)
 				continue
 			}
-			regionIATAs = append(regionIATAs, region.IATAs...)
+			iatas = append(iatas, region.IATAs...)
+		}
+		for _, slug := range msg.Scope.RegionSlugs {
+			region, err := reader.GetRegionBySlug(ctx, slug)
+			if err != nil {
+				log.Printf("ws[%s]: region slug %q not found, skipping: %v", connID, slug, err)
+				continue
+			}
+			iatas = append(iatas, region.IATAs...)
 		}
 		scope := hub.Scope{
-			IATAs:         msg.Scope.IATAs,
+			IATAs:         iatas,
 			PayloadTypes:  msg.Scope.PayloadTypes,
 			ChannelHashes: msg.Scope.ChannelHashes,
 			Events:        msg.Scope.Events,
-			RegionIATAs:   regionIATAs,
 		}
 		subID := uuid.NewString()
 		h.AddScope(client, subID, scope)

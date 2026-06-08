@@ -47,7 +47,6 @@ type Event struct {
 // An empty non-nil slice means "match nothing on this dimension".
 type Scope struct {
 	IATAs         []string
-	RegionIATAs   []string // pre-expanded from regionId by the WS handler
 	PayloadTypes  []uint8
 	ChannelHashes []string
 	Events        []EventType
@@ -88,11 +87,8 @@ func scopeMatches(s Scope, e Event) bool {
 	if len(s.Events) > 0 && !slices.Contains(s.Events, e.Type) {
 		return false
 	}
-	if len(s.IATAs) > 0 || len(s.RegionIATAs) > 0 {
-		allIATAs := append(s.IATAs, s.RegionIATAs...) //nolint:gocritic
-		if !slices.Contains(allIATAs, e.IATA) {
-			return false
-		}
+	if len(s.IATAs) > 0 && !slices.Contains(s.IATAs, e.IATA) {
+		return false
 	}
 	if len(s.PayloadTypes) > 0 && !slices.Contains(s.PayloadTypes, e.PayloadType) {
 		return false

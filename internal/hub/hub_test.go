@@ -26,33 +26,8 @@ func TestScopeMatches_IATAFilter(t *testing.T) {
 	if !scopeMatches(s, Event{Type: EventPacketObservation, IATA: "YVR"}) {
 		t.Error("expected YVR to match")
 	}
-	if scopeMatches(s, Event{Type: EventPacketObservation, IATA: "YYC"}) {
-		t.Error("expected YYC not to match")
-	}
-}
-
-func TestScopeMatches_RegionIATAs(t *testing.T) {
-	s := Scope{Events: []EventType{EventPacketObservation}, RegionIATAs: []string{"YYJ"}}
 	if !scopeMatches(s, Event{Type: EventPacketObservation, IATA: "YYJ"}) {
-		t.Error("expected YYJ to match via RegionIATAs")
-	}
-	if scopeMatches(s, Event{Type: EventPacketObservation, IATA: "YVR"}) {
-		t.Error("expected YVR not to match")
-	}
-}
-
-func TestScopeMatches_IATAandRegionIATAUnion(t *testing.T) {
-	// IATAs and RegionIATAs are OR'd together
-	s := Scope{
-		Events:      []EventType{EventPacketObservation},
-		IATAs:       []string{"YVR"},
-		RegionIATAs: []string{"YYJ"},
-	}
-	if !scopeMatches(s, Event{Type: EventPacketObservation, IATA: "YVR"}) {
-		t.Error("expected YVR to match via IATAs")
-	}
-	if !scopeMatches(s, Event{Type: EventPacketObservation, IATA: "YYJ"}) {
-		t.Error("expected YYJ to match via RegionIATAs")
+		t.Error("expected YYJ to match")
 	}
 	if scopeMatches(s, Event{Type: EventPacketObservation, IATA: "YYC"}) {
 		t.Error("expected YYC not to match")
@@ -85,8 +60,7 @@ func TestScopeMatches_AllFiltersPass(t *testing.T) {
 		IATAs:        []string{"YVR"},
 		PayloadTypes: []uint8{4},
 	}
-	e := Event{Type: EventPacketObservation, IATA: "YVR", PayloadType: 4}
-	if !scopeMatches(s, e) {
+	if !scopeMatches(s, Event{Type: EventPacketObservation, IATA: "YVR", PayloadType: 4}) {
 		t.Error("expected all-matching event to pass")
 	}
 }
@@ -97,11 +71,9 @@ func TestScopeMatches_OneFilterFails(t *testing.T) {
 		IATAs:        []string{"YVR"},
 		PayloadTypes: []uint8{4},
 	}
-	// wrong IATA
 	if scopeMatches(s, Event{Type: EventPacketObservation, IATA: "YYC", PayloadType: 4}) {
 		t.Error("expected wrong IATA to fail")
 	}
-	// wrong payload type
 	if scopeMatches(s, Event{Type: EventPacketObservation, IATA: "YVR", PayloadType: 5}) {
 		t.Error("expected wrong payload type to fail")
 	}

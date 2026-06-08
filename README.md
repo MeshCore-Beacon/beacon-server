@@ -235,6 +235,7 @@ unsubscribing.
   "scope": {
     "iatas": ["YOW", "YYZ"],
     "regionIds": ["1"],
+    "regionSlugs": ["western-canada"],
     "payloadTypes": [4, 5],
     "channelHashes": ["11"],
     "events": ["packetObservation", "channelMessage"]
@@ -243,8 +244,8 @@ unsubscribing.
 ```
 
 All scope fields are optional. Omitted means no filter on that dimension (match
-everything). Empty array means match nothing on that dimension. `regionIds` are
-expanded to their member IATAs server-side.
+everything). Empty array means match nothing on that dimension. `regionIds` and
+`regionSlugs` are both expanded to their member IATAs server-side.
 
 **Unsubscribe** — remove a specific subscription by ID.
 
