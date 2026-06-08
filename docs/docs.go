@@ -2151,6 +2151,9 @@ const docTemplate = `{
                 "lastSeen": {
                     "description": "epoch ms",
                     "type": "integer"
+                },
+                "observationCount": {
+                    "type": "integer"
                 }
             }
         },

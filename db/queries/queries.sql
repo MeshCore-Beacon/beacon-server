@@ -832,10 +832,11 @@ LIMIT $6;
 INSERT INTO known_routes (node_ids, hash_prefix, iata, hop_count)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (node_ids, iata) DO UPDATE SET
-  last_seen = NOW();
+  last_seen = NOW(),
+  observation_count = known_routes.observation_count + 1;
 
 -- name: ListKnownRoutes :many
-SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
 FROM known_routes
 WHERE ($1 = '' OR iata = $1)
   AND ($2 = 0 OR hop_count = $2)
@@ -846,7 +847,7 @@ LIMIT $4;
 -- name: SearchKnownRoutes :many
 -- Returns known routes containing a subsequence from source to destination hash prefix.
 -- Verifies source appears before destination in the route.
-SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
 FROM known_routes
 WHERE iata = $1
   AND array_position(hash_prefix, $2::bytea) IS NOT NULL
@@ -855,7 +856,7 @@ WHERE iata = $1
 ORDER BY hop_count ASC, last_seen DESC;
 
 -- name: GetKnownRoutesByNode :many
-SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
 FROM known_routes
 WHERE iata = $1
   AND $2::uuid = ANY(node_ids)

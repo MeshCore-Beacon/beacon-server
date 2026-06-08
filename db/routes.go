@@ -81,12 +81,13 @@ func (s *Store) SearchKnownRoutes(ctx context.Context, iata, fromHash, toHash st
 			hops = append(hops, hop)
 		}
 		items = append(items, api.KnownRoute{
-			ID:        r.ID,
-			IATA:      r.Iata,
-			HopCount:  int32(len(hops)),
-			Hops:      hops,
-			FirstSeen: r.FirstSeen.Time.UnixMilli(),
-			LastSeen:  r.LastSeen.Time.UnixMilli(),
+			ID:               r.ID,
+			IATA:             r.Iata,
+			HopCount:         int32(len(hops)),
+			Hops:             hops,
+			FirstSeen:        r.FirstSeen.Time.UnixMilli(),
+			LastSeen:         r.LastSeen.Time.UnixMilli(),
+			ObservationCount: r.ObservationCount,
 		})
 	}
 	return items, nil
@@ -262,12 +263,13 @@ func toKnownRoutes(rows []sqlc.KnownRoute) []api.KnownRoute {
 			hops = append(hops, hop)
 		}
 		items = append(items, api.KnownRoute{
-			ID:        r.ID,
-			IATA:      r.Iata,
-			HopCount:  r.HopCount,
-			Hops:      hops,
-			FirstSeen: r.FirstSeen.Time.UnixMilli(),
-			LastSeen:  r.LastSeen.Time.UnixMilli(),
+			ID:               r.ID,
+			IATA:             r.Iata,
+			HopCount:         r.HopCount,
+			Hops:             hops,
+			FirstSeen:        r.FirstSeen.Time.UnixMilli(),
+			LastSeen:         r.LastSeen.Time.UnixMilli(),
+			ObservationCount: r.ObservationCount,
 		})
 	}
 	return items

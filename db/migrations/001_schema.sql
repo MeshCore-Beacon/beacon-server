@@ -347,6 +347,7 @@ CREATE TABLE known_routes (
   hop_count   INT       NOT NULL,
   first_seen  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   last_seen   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  observation_count BIGINT NOt NULL DEFAULT 1,
   UNIQUE (node_ids, iata)
 );
 

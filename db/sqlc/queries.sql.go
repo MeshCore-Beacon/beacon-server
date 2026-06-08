@@ -263,7 +263,7 @@ func (q *Queries) GetIATA(ctx context.Context, iata string) (IataCode, error) {
 }
 
 const getKnownRoutesByNode = `-- name: GetKnownRoutesByNode :many
-SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
 FROM known_routes
 WHERE iata = $1
   AND $2::uuid = ANY(node_ids)
@@ -292,6 +292,7 @@ func (q *Queries) GetKnownRoutesByNode(ctx context.Context, arg GetKnownRoutesBy
 			&i.HopCount,
 			&i.FirstSeen,
 			&i.LastSeen,
+			&i.ObservationCount,
 		); err != nil {
 			return nil, err
 		}
@@ -1865,7 +1866,7 @@ func (q *Queries) ListIATAs(ctx context.Context) ([]IataCode, error) {
 }
 
 const listKnownRoutes = `-- name: ListKnownRoutes :many
-SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
 FROM known_routes
 WHERE ($1 = '' OR iata = $1)
   AND ($2 = 0 OR hop_count = $2)
@@ -1903,6 +1904,7 @@ func (q *Queries) ListKnownRoutes(ctx context.Context, arg ListKnownRoutesParams
 			&i.HopCount,
 			&i.FirstSeen,
 			&i.LastSeen,
+			&i.ObservationCount,
 		); err != nil {
 			return nil, err
 		}
@@ -2852,7 +2854,7 @@ func (q *Queries) ResolvePathHashes(ctx context.Context, arg ResolvePathHashesPa
 }
 
 const searchKnownRoutes = `-- name: SearchKnownRoutes :many
-SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
 FROM known_routes
 WHERE iata = $1
   AND array_position(hash_prefix, $2::bytea) IS NOT NULL
@@ -2886,6 +2888,7 @@ func (q *Queries) SearchKnownRoutes(ctx context.Context, arg SearchKnownRoutesPa
 			&i.HopCount,
 			&i.FirstSeen,
 			&i.LastSeen,
+			&i.ObservationCount,
 		); err != nil {
 			return nil, err
 		}
@@ -3126,7 +3129,8 @@ const upsertKnownRoute = `-- name: UpsertKnownRoute :exec
 INSERT INTO known_routes (node_ids, hash_prefix, iata, hop_count)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (node_ids, iata) DO UPDATE SET
-  last_seen = NOW()
+  last_seen = NOW(),
+  observation_count = known_routes.observation_count + 1
 `
 
 type UpsertKnownRouteParams struct {

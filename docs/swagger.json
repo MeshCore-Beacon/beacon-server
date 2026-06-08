@@ -2149,6 +2149,9 @@
                 "lastSeen": {
                     "description": "epoch ms",
                     "type": "integer"
+                },
+                "observationCount": {
+                    "type": "integer"
                 }
             }
         },

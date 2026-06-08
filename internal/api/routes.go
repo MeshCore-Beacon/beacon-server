@@ -12,12 +12,13 @@ type RouteHop struct {
 // KnownRoute is a fully resolved path through the mesh where all hops
 // have been confirmed as high confidence.
 type KnownRoute struct {
-	ID        int64      `json:"id"`
-	IATA      string     `json:"iata"`
-	HopCount  int32      `json:"hopCount"`
-	Hops      []RouteHop `json:"hops"`
-	FirstSeen int64      `json:"firstSeen"` // epoch ms
-	LastSeen  int64      `json:"lastSeen"`  // epoch ms
+	ID               int64      `json:"id"`
+	IATA             string     `json:"iata"`
+	HopCount         int32      `json:"hopCount"`
+	Hops             []RouteHop `json:"hops"`
+	FirstSeen        int64      `json:"firstSeen"` // epoch ms
+	LastSeen         int64      `json:"lastSeen"`  // epoch ms
+	ObservationCount int64      `json:"observationCount"`
 }
 
 // CrossIATAHop represents the boundary hop between two IATAs in a cross-IATA route.
