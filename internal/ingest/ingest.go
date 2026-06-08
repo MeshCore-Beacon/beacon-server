@@ -328,7 +328,7 @@ func normalizeObserverType(source string) string {
 		return ""
 	}
 	s := source
-	// strip org prefix e.g. "meshcore-dev/meshcore-ha" → "meshcore-ha"
+	// strip org/path prefix e.g. "meshcore-dev/meshcore-ha" → "meshcore-ha"
 	if i := strings.LastIndex(s, "/"); i >= 0 {
 		s = s[i+1:]
 	}
