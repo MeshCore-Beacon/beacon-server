@@ -235,3 +235,8 @@ Key patterns to understand before contributing:
 
 Merges from `dev` to `main` are done by maintainers and represent a versioned
 release. Do not open PRs directly against `main`.
+
+## Recognition
+
+If you'd like to be listed as a contributor, add yourself to
+[CONTRIBUTORS.md](CONTRIBUTORS.md) in your PR.

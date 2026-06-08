@@ -355,5 +355,8 @@ Not yet implemented — see the Authentication section above.
 
 ## Acknowledgements
 
+See [CONTRIBUTORS.md](CONTRIBUTORS.md) for the people who have helped build
+Beacon.
+
 Beacon stands on the shoulders of giants. See [SHOULDERS.md](SHOULDERS.md) for
 the full list of open source projects that make this possible.
