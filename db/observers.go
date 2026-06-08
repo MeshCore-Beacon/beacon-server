@@ -286,6 +286,11 @@ func (s *Store) GetObserverScopes(ctx context.Context, observerID uuid.UUID) ([]
 	return s.q.GetObserverScopes(ctx, observerID)
 }
 
+func (s *Store) IsObserverByPubkey(ctx context.Context, pubkey []byte) bool {
+	_, err := s.q.GetObserverByPubkey(ctx, pubkey)
+	return err == nil
+}
+
 func (s *Store) DeleteOldTelemetry(ctx context.Context, cutoff time.Time) error {
 	return s.q.DeleteOldTelemetry(ctx, pgtype.Timestamptz{Time: cutoff, Valid: true})
 }

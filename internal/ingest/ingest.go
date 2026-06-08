@@ -119,6 +119,12 @@ type DB interface {
 	// GetObserverRadio returns the current radio settings for the given observer.
 	GetObserverRadio(ctx context.Context, observerID uuid.UUID) (RadioSettings, error)
 
+	// IsObserverByPubkey returns true if the given public key belongs to a known observer.
+	IsObserverByPubkey(ctx context.Context, pubkey []byte) bool
+
+	// GetObserverScopes returns the list of scope names associated with the given observer.
+	GetObserverScopes(ctx context.Context, observerID uuid.UUID) ([]string, error)
+
 	// ResolvePathHashes returns a list of node UUIDs for the given path hash prefixes and IATA.
 	ResolvePathHashes(ctx context.Context, iata string, hashes [][]byte) (map[string][]api.ResolvedPathEntry, error)
 
