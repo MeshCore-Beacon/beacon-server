@@ -854,6 +854,13 @@ WHERE iata = $1
   AND array_position(hash_prefix, $2::bytea) < array_position(hash_prefix, $3::bytea)
 ORDER BY hop_count ASC, last_seen DESC;
 
+-- name: GetKnownRoutesByNode :many
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen
+FROM known_routes
+WHERE iata = $1
+  AND $2::uuid = ANY(node_ids)
+ORDER BY hop_count ASC, last_seen DESC;
+
 -- ============================================================
 -- NEIGHBORS
 -- ============================================================
@@ -875,6 +882,17 @@ SELECT
 FROM node_neighbors nn
 JOIN nodes n ON n.id = nn.neighbor_id
 WHERE nn.node_id = $1
+ORDER BY nn.last_seen DESC;
+
+-- name: GetCrossIATANeighbors :many
+-- Returns neighbors of a node that are in a different IATA.
+SELECT
+    n.id, n.name, n.node_type, n.latitude, n.longitude,
+    nn.iata AS neighbor_iata, nn.observation_count, nn.last_seen
+FROM node_neighbors nn
+JOIN nodes n ON n.id = nn.neighbor_id
+WHERE nn.node_id = $1
+  AND nn.iata != $2
 ORDER BY nn.last_seen DESC;
 
 -- ============================================================

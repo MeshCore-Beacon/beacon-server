@@ -1302,6 +1302,70 @@
                 }
             }
         },
+        "/routes/cross": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Routes"
+                ],
+                "summary": "Search for routes that cross IATA boundaries",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Source node hash prefix (hex)",
+                        "name": "fromHash",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Source IATA code",
+                        "name": "fromIata",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Destination node hash prefix (hex)",
+                        "name": "toHash",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Destination IATA code",
+                        "name": "toIata",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.CrossIATARoute"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
         "/routes/search": {
             "get": {
                 "produces": [
@@ -1979,6 +2043,67 @@
                 "name": {
                     "description": "display name from config or nil",
                     "type": "string"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.CrossIATAHop": {
+            "type": "object",
+            "properties": {
+                "fromIata": {
+                    "type": "string"
+                },
+                "fromNode": {
+                    "description": "last node in source IATA",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ResolvedNode"
+                        }
+                    ]
+                },
+                "lastSeen": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "toIata": {
+                    "type": "string"
+                },
+                "toNode": {
+                    "description": "first node in target IATA",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ResolvedNode"
+                        }
+                    ]
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.CrossIATARoute": {
+            "type": "object",
+            "properties": {
+                "crossHop": {
+                    "description": "the boundary hop",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.CrossIATAHop"
+                        }
+                    ]
+                },
+                "sourceSegment": {
+                    "description": "route segment in source IATA",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.RouteHop"
+                    }
+                },
+                "targetSegment": {
+                    "description": "route segment in target IATA",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.RouteHop"
+                    }
+                },
+                "totalHops": {
+                    "type": "integer"
                 }
             }
         },

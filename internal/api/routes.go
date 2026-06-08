@@ -19,3 +19,20 @@ type KnownRoute struct {
 	FirstSeen int64      `json:"firstSeen"` // epoch ms
 	LastSeen  int64      `json:"lastSeen"`  // epoch ms
 }
+
+// CrossIATAHop represents the boundary hop between two IATAs in a cross-IATA route.
+type CrossIATAHop struct {
+	FromNode ResolvedNode `json:"fromNode"` // last node in source IATA
+	ToNode   ResolvedNode `json:"toNode"`   // first node in target IATA
+	FromIATA string       `json:"fromIata"`
+	ToIATA   string       `json:"toIata"`
+	LastSeen int64        `json:"lastSeen"` // epoch ms
+}
+
+// CrossIATARoute is a route that crosses IATA boundaries.
+type CrossIATARoute struct {
+	SourceSegment []RouteHop   `json:"sourceSegment"` // route segment in source IATA
+	CrossHop      CrossIATAHop `json:"crossHop"`      // the boundary hop
+	TargetSegment []RouteHop   `json:"targetSegment"` // route segment in target IATA
+	TotalHops     int          `json:"totalHops"`
+}

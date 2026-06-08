@@ -143,4 +143,13 @@ type Reader interface {
 	SearchKnownRoutes(ctx context.Context, iata, fromHash, toHash string) ([]KnownRoute, error)
 	// GetNodeNeighbors returns the neighbors of a node ordered by most recently seen.
 	GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]NodeNeighbor, error)
+	// GetKnownRoutesByNode returns all known routes in a given IATA that contain
+	// the specified node UUID anywhere in their hop sequence.
+	GetKnownRoutesByNode(ctx context.Context, iata string, nodeID uuid.UUID) ([]KnownRoute, error)
+	// GetCrossIATANeighbors returns neighbors of a node that were observed in a
+	// different IATA — indicating a potential cross-IATA radio link.
+	GetCrossIATANeighbors(ctx context.Context, nodeID uuid.UUID, iata string) ([]NodeNeighbor, error)
+	// SearchCrossIATARoutes finds routes that cross IATA boundaries between
+	// a source node/IATA and a destination node/IATA.
+	SearchCrossIATARoutes(ctx context.Context, fromHash, fromIATA, toHash, toIATA string) ([]CrossIATARoute, error)
 }

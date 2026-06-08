@@ -16,6 +16,7 @@ import (
 func RoutesRouter(reader api.Reader) http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", listKnownRoutes(reader))
+	r.Get("/cross", searchCrossIATARoutes(reader))
 	r.Get("/search", searchKnownRoutes(reader))
 	return r
 }
@@ -87,6 +88,41 @@ func searchKnownRoutes(reader api.Reader) http.HandlerFunc {
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
+		}
+		respond(w, http.StatusOK, routes)
+	}
+}
+
+// searchCrossIATARoutes godoc
+//
+//	@Summary	Search for routes that cross IATA boundaries
+//	@Tags		Routes
+//	@Produce	json
+//	@Param		fromHash	query		string	true	"Source node hash prefix (hex)"
+//	@Param		fromIata	query		string	true	"Source IATA code"
+//	@Param		toHash		query		string	true	"Destination node hash prefix (hex)"
+//	@Param		toIata		query		string	true	"Destination IATA code"
+//	@Success	200			{object}	[]api.CrossIATARoute
+//	@Failure	400			{object}	handlers.APIError
+//	@Failure	500			{object}	handlers.APIError
+//	@Router		/routes/cross [get]
+func searchCrossIATARoutes(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		fromHash := r.URL.Query().Get("fromHash")
+		fromIATA := r.URL.Query().Get("fromIata")
+		toHash := r.URL.Query().Get("toHash")
+		toIATA := r.URL.Query().Get("toIata")
+		if fromHash == "" || fromIATA == "" || toHash == "" || toIATA == "" {
+			respondError(w, http.StatusBadRequest, "fromHash, fromIata, toHash and toIata are required")
+			return
+		}
+		routes, err := reader.SearchCrossIATARoutes(r.Context(), fromHash, fromIATA, toHash, toIATA)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		if routes == nil {
+			routes = []api.CrossIATARoute{}
 		}
 		respond(w, http.StatusOK, routes)
 	}

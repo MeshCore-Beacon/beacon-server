@@ -149,6 +149,63 @@ func (q *Queries) GetChannelsByHash(ctx context.Context, arg GetChannelsByHashPa
 	return items, nil
 }
 
+const getCrossIATANeighbors = `-- name: GetCrossIATANeighbors :many
+SELECT
+    n.id, n.name, n.node_type, n.latitude, n.longitude,
+    nn.iata AS neighbor_iata, nn.observation_count, nn.last_seen
+FROM node_neighbors nn
+JOIN nodes n ON n.id = nn.neighbor_id
+WHERE nn.node_id = $1
+  AND nn.iata != $2
+ORDER BY nn.last_seen DESC
+`
+
+type GetCrossIATANeighborsParams struct {
+	NodeID uuid.UUID `json:"node_id"`
+	Iata   string    `json:"iata"`
+}
+
+type GetCrossIATANeighborsRow struct {
+	ID               uuid.UUID          `json:"id"`
+	Name             *string            `json:"name"`
+	NodeType         int16              `json:"node_type"`
+	Latitude         *float64           `json:"latitude"`
+	Longitude        *float64           `json:"longitude"`
+	NeighborIata     string             `json:"neighbor_iata"`
+	ObservationCount int64              `json:"observation_count"`
+	LastSeen         pgtype.Timestamptz `json:"last_seen"`
+}
+
+// Returns neighbors of a node that are in a different IATA.
+func (q *Queries) GetCrossIATANeighbors(ctx context.Context, arg GetCrossIATANeighborsParams) ([]GetCrossIATANeighborsRow, error) {
+	rows, err := q.db.Query(ctx, getCrossIATANeighbors, arg.NodeID, arg.Iata)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetCrossIATANeighborsRow{}
+	for rows.Next() {
+		var i GetCrossIATANeighborsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.NodeType,
+			&i.Latitude,
+			&i.Longitude,
+			&i.NeighborIata,
+			&i.ObservationCount,
+			&i.LastSeen,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getHourlyStats = `-- name: GetHourlyStats :many
 SELECT iata, hour, observation_count, unique_packets, active_observers
 FROM mv_hourly_iata_stats
@@ -203,6 +260,47 @@ func (q *Queries) GetIATA(ctx context.Context, iata string) (IataCode, error) {
 		&i.AddedAt,
 	)
 	return i, err
+}
+
+const getKnownRoutesByNode = `-- name: GetKnownRoutesByNode :many
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen
+FROM known_routes
+WHERE iata = $1
+  AND $2::uuid = ANY(node_ids)
+ORDER BY hop_count ASC, last_seen DESC
+`
+
+type GetKnownRoutesByNodeParams struct {
+	Iata    string    `json:"iata"`
+	Column2 uuid.UUID `json:"column_2"`
+}
+
+func (q *Queries) GetKnownRoutesByNode(ctx context.Context, arg GetKnownRoutesByNodeParams) ([]KnownRoute, error) {
+	rows, err := q.db.Query(ctx, getKnownRoutesByNode, arg.Iata, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []KnownRoute{}
+	for rows.Next() {
+		var i KnownRoute
+		if err := rows.Scan(
+			&i.ID,
+			&i.NodeIds,
+			&i.HashPrefix,
+			&i.Iata,
+			&i.HopCount,
+			&i.FirstSeen,
+			&i.LastSeen,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getNodeByID = `-- name: GetNodeByID :one
