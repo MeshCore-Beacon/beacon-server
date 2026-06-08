@@ -1,3 +1,6 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Package db implements the ingest.DB interface using sqlc-generated queries
 // over a pgx/v5 connection pool. Each method is a thin mapping layer between
 // the ingest param structs and the sqlc-generated param structs.
@@ -26,8 +29,6 @@ func New(pool *pgxpool.Pool) *Store {
 	return &Store{q: sqlc.New(pool)}
 }
 
-// ResolvePathHashes returns a map of hex-encoded path hash → matching node entries for
-// the given IATA. Hash size is inferred from the length of the first element in hashes.
 func (s *Store) ResolvePathHashes(ctx context.Context, iata string, hashes [][]byte) (map[string][]api.ResolvedPathEntry, error) {
 	if len(hashes) == 0 {
 		return nil, nil
@@ -99,8 +100,9 @@ func toChannelMessage(id int64, packetHashHex string, channelHash []byte, sender
 // Returns nil if the payload cannot be parsed or contains no path hashes.
 func (s *Store) resolveTraceRoute(ctx context.Context, parsedPayload []byte, iatas []string) []api.ResolvedHop {
 	var tracePayload struct {
-		PathHashes []string `json:"pathHashes"`
-		Flags      byte     `json:"flags"`
+		PathHashes []string  `json:"pathHashes"`
+		Flags      byte      `json:"flags"`
+		SNRValues  []float32 `json:"snrValues"`
 	}
 	if err := json.Unmarshal(parsedPayload, &tracePayload); err != nil || len(tracePayload.PathHashes) == 0 {
 		return nil
@@ -145,10 +147,14 @@ func (s *Store) resolveTraceRoute(ctx context.Context, parsedPayload []byte, iat
 		}
 	}
 	route := make([]api.ResolvedHop, 0, len(hashes))
-	for _, hr := range merged {
+	for i, hr := range merged {
 		hop := api.ResolvedHop{
 			Confidence: hr.confidence,
 			Nodes:      make([]api.ResolvedNode, 0, len(hr.entries)),
+		}
+		if i < len(tracePayload.SNRValues) {
+			snr := tracePayload.SNRValues[i]
+			hop.SNR = &snr
 		}
 		for _, e := range hr.entries {
 			hop.Nodes = append(hop.Nodes, api.ResolvedNode{

@@ -1,3 +1,6 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 package ingest
 
 import (
@@ -8,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
 	"github.com/MeshCore-Beacon/beacon-server/internal/keystore"
 	"github.com/meshcore-go/meshcore-go"
@@ -43,19 +47,25 @@ type channelMessageEvent struct {
 
 // nodeUpdateEvent is the JSON payload for a nodeUpdate WS event.
 type nodeUpdateEvent struct {
-	NodeID   string   `json:"nodeId"` // UUID string
-	Name     string   `json:"name"`
-	NodeType uint8    `json:"nodeType"`
-	IATA     string   `json:"iata"`
-	Lat      *float64 `json:"lat,omitempty"`
-	Lng      *float64 `json:"lng,omitempty"`
+	NodeID       string         `json:"nodeId"`
+	PublicKey    string         `json:"publicKey"`
+	Name         string         `json:"name"`
+	NodeType     uint8          `json:"nodeType"`
+	NodeTypeName string         `json:"nodeTypeName"`
+	IATA         string         `json:"iata"`
+	Lat          *float64       `json:"lat,omitempty"`
+	Lng          *float64       `json:"lng,omitempty"`
+	IsObserver   bool           `json:"isObserver"`
+	IATAs        []api.NodeIATA `json:"iatas"`
+	DefaultScope *string        `json:"defaultScope,omitempty"`
+	Radio        *string        `json:"radio,omitempty"`
 }
 
 // handlePayloadTypeSideEffects runs payload-type-specific processing after a
 // new observation is confirmed inserted. Currently handles:
 //   - PayloadTypeAdvert (0x04): upsert node and node_iatas
 //   - PayloadTypeGrpTxt (0x05): decrypt and store channel message if key is known
-func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshcore.Packet, iata string, packetHash []byte, radio RadioSettings, scopeID *int32) {
+func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshcore.Packet, iata string, packetHash []byte, radio RadioSettings, scopeID *int32, matchedScope *string) {
 	if packet.PayloadType() == meshcore.PayloadTypeAdvert {
 		advert, err := meshcore.AdvertFromBytes(packet.Payload)
 		if err != nil {
@@ -76,10 +86,29 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 			Latitude:  lat,
 			Longitude: lon,
 		}
-		nodeID, err := w.db.UpsertNode(ctx, params, radio)
+		var nodeRadio RadioSettings
+		if packet.PathHashCount() == 0 {
+			nodeRadio = radio
+		}
+		nodeID, err := w.db.UpsertNode(ctx, params, nodeRadio)
 		if err != nil {
 			log.Printf("ingest[%s]: db: upsert node failed: %v", w.cfg.BrokerName, err)
 			return
+		}
+		// if the advert was forwarded, the first hop is a neighbor
+		if packet.PathHashCount() > 0 && (advert.Type() == meshcore.AdvertTypeRepeater || advert.Type() == meshcore.AdvertTypeRoom) {
+			firstHop := packet.PathHashes()
+			if len(firstHop) > 0 {
+				resolved, err := w.db.ResolvePathHashes(ctx, iata, firstHop[:1])
+				if err == nil {
+					key := hex.EncodeToString(firstHop[0])
+					if entries := resolved[key]; len(entries) == 1 {
+						if err := w.db.UpsertNodeNeighbor(ctx, nodeID, entries[0].NodeID, iata); err != nil {
+							log.Printf("ingest[%s]: failed to upsert node neighbor: %v", w.cfg.BrokerName, err)
+						}
+					}
+				}
+			}
 		}
 		if err := w.db.UpsertNodeIATA(ctx, nodeID, iata); err != nil {
 			log.Printf("ingest[%s]: db: upsert node IATA failed: %v", w.cfg.BrokerName, err)
@@ -93,13 +122,30 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 		if err := w.db.UpsertNodeShortID(ctx, nodeID, iata, prefix4); err != nil {
 			log.Printf("ingest[%s]: failed to upsert node short ID for %s: %v", w.cfg.BrokerName, hex.EncodeToString(prefix4), err)
 		}
+		pubkeyHex := hex.EncodeToString(advert.PublicKey.PublicKeyBytes())
+		isObserver := w.db.IsObserverByPubkey(ctx, advert.PublicKey.PublicKeyBytes())
+		var defaultScope *string
+		if matchedScope != nil {
+			defaultScope = matchedScope
+		}
+		var radioStr *string
+		if radio.FreqMHz != 0 {
+			s := fmt.Sprintf("%.1f,%g,%d", radio.FreqMHz, radio.BWKHz, radio.SF)
+			radioStr = &s
+		}
 		evt := nodeUpdateEvent{
-			NodeID:   nodeID.String(),
-			Name:     advert.AppData().Name,
-			NodeType: advert.Type(),
-			IATA:     iata,
-			Lat:      lat,
-			Lng:      lon,
+			NodeID:       nodeID.String(),
+			PublicKey:    pubkeyHex,
+			Name:         advert.AppData().Name,
+			NodeType:     advert.Type(),
+			NodeTypeName: api.NodeTypeName(int16(advert.Type())),
+			IATA:         iata,
+			Lat:          lat,
+			Lng:          lon,
+			IsObserver:   isObserver,
+			IATAs:        []api.NodeIATA{{IATA: iata, LastHeard: time.Now().UnixMilli()}},
+			DefaultScope: defaultScope,
+			Radio:        radioStr,
 		}
 		w.broadcast(hub.EventNodeUpdate, iata, meshcore.PayloadTypeAdvert, "", evt)
 		return

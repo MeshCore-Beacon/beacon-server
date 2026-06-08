@@ -1,3 +1,6 @@
+-- Copyright 2026 Beacon Contributors
+-- SPDX-License-Identifier: agpl
+
 -- ============================================================
 -- IATA CODES
 -- ============================================================
@@ -209,6 +212,24 @@ WHERE observer_id = $1
   AND ($3::timestamptz IS NULL OR reported_at <= $3)
   AND ($4 = 0 OR id > $4)
 ORDER BY reported_at ASC;
+
+-- name: GetObserverTelemetryBucketed :many
+SELECT
+  (date_trunc('hour', reported_at) +
+    (EXTRACT(HOUR FROM reported_at)::int / $4::int) * ($4::int * interval '1 hour'))::timestamptz AS bucket,
+  AVG(battery_voltage_mv)::int   AS battery_voltage_mv,
+  AVG(airtime_tx_pct)::real      AS airtime_tx_pct,
+  AVG(airtime_rx_pct)::real      AS airtime_rx_pct,
+  AVG(noise_floor_db)::real      AS noise_floor_db,
+  MAX(uptime_seconds)::bigint    AS uptime_seconds,
+  AVG(queue_length)::int         AS queue_length,
+  AVG(receive_errors)::int       AS receive_errors
+FROM observer_telemetry
+WHERE observer_id = $1
+  AND ($2::timestamptz IS NULL OR reported_at >= $2)
+  AND ($3::timestamptz IS NULL OR reported_at <= $3)
+GROUP BY bucket
+ORDER BY bucket ASC;
 
 -- name: ListObserverAdverts :many
 -- Returns advert packets (payload_type=4) heard by a specific observer.
@@ -473,6 +494,10 @@ FROM nodes n
 LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id
 WHERE n.id = $1;
 
+-- name: GetNodesByIDs :many
+SELECT id, public_key, name, latitude, longitude
+FROM nodes
+WHERE id = ANY($1::uuid[]);
 
 -- name: ListNodes :many
 SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen,
@@ -832,10 +857,11 @@ LIMIT $6;
 INSERT INTO known_routes (node_ids, hash_prefix, iata, hop_count)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (node_ids, iata) DO UPDATE SET
-  last_seen = NOW();
+  last_seen = NOW(),
+  observation_count = known_routes.observation_count + 1;
 
 -- name: ListKnownRoutes :many
-SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
 FROM known_routes
 WHERE ($1 = '' OR iata = $1)
   AND ($2 = 0 OR hop_count = $2)
@@ -846,13 +872,54 @@ LIMIT $4;
 -- name: SearchKnownRoutes :many
 -- Returns known routes containing a subsequence from source to destination hash prefix.
 -- Verifies source appears before destination in the route.
-SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
 FROM known_routes
 WHERE iata = $1
   AND array_position(hash_prefix, $2::bytea) IS NOT NULL
   AND array_position(hash_prefix, $3::bytea) IS NOT NULL
   AND array_position(hash_prefix, $2::bytea) < array_position(hash_prefix, $3::bytea)
 ORDER BY hop_count ASC, last_seen DESC;
+
+-- name: GetKnownRoutesByNode :many
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
+FROM known_routes
+WHERE iata = $1
+  AND $2::uuid = ANY(node_ids)
+ORDER BY hop_count ASC, last_seen DESC;
+
+-- ============================================================
+-- NEIGHBORS
+-- ============================================================
+
+-- name: UpsertNodeNeighbor :exec
+-- Records or updates a neighbor relationship between two nodes observed in the same IATA.
+-- node_id is the advertising node, neighbor_id is the first-hop forwarder.
+INSERT INTO node_neighbors (node_id, neighbor_id, iata, observation_count)
+VALUES ($1, $2, $3, 1)
+ON CONFLICT (node_id, neighbor_id, iata) DO UPDATE SET
+  last_seen         = NOW(),
+  observation_count = node_neighbors.observation_count + 1;
+
+-- name: GetNodeNeighbors :many
+-- Returns the neighbors of a node with details, ordered by most recently seen.
+SELECT
+    n.id, n.name, n.node_type, n.latitude, n.longitude,
+    nn.iata, nn.observation_count, nn.first_seen, nn.last_seen
+FROM node_neighbors nn
+JOIN nodes n ON n.id = nn.neighbor_id
+WHERE nn.node_id = $1
+ORDER BY nn.last_seen DESC;
+
+-- name: GetCrossIATANeighbors :many
+-- Returns neighbors of a node that are in a different IATA.
+SELECT
+    n.id, n.name, n.node_type, n.latitude, n.longitude,
+    nn.iata AS neighbor_iata, nn.observation_count, nn.last_seen
+FROM node_neighbors nn
+JOIN nodes n ON n.id = nn.neighbor_id
+WHERE nn.node_id = $1
+  AND nn.iata != $2
+ORDER BY nn.last_seen DESC;
 
 -- ============================================================
 -- HELPERS

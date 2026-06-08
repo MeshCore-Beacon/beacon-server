@@ -1,9 +1,13 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 package ingest
 
 import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -34,13 +38,16 @@ type UpdateObserverStatusParams struct {
 // statusEvent is the JSON payload for an observerStatus WS event.
 // Shape matches the design doc § Server → Client events.
 type statusEvent struct {
-	ObserverID    string `json:"observerId"`
-	DisplayName   string `json:"displayName"`
-	IATA          string `json:"iata,omitempty"`
-	Online        bool   `json:"online"`
-	BatteryMV     int    `json:"batteryMv,omitempty"`
-	UptimeSeconds int64  `json:"uptimeSeconds"`
-	LastStatusAt  int64  `json:"lastStatusAt"` // epoch ms
+	ObserverID    string   `json:"observerId"`
+	DisplayName   string   `json:"displayName"`
+	ObserverType  *string  `json:"observerType,omitempty"`
+	IATA          string   `json:"iata,omitempty"`
+	Online        bool     `json:"online"`
+	Radio         *string  `json:"radio,omitempty"`
+	Scopes        []string `json:"scopes"`
+	BatteryMV     int      `json:"batteryMv,omitempty"`
+	UptimeSeconds int64    `json:"uptimeSeconds"`
+	LastStatusAt  int64    `json:"lastStatusAt"`
 }
 
 // handleStatus processes a /status message and fans out an observerStatus event.
@@ -172,11 +179,28 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 	if err != nil {
 		iata = "" // non-fatal, continue
 	}
+	scopes, err := w.db.GetObserverScopes(ctx, observerID)
+	if err != nil {
+		log.Printf("ingest[%s]: failed to get observer scopes for %s: %v", w.cfg.BrokerName, pubkeyHex, err)
+		scopes = []string{}
+	}
+	var radioStr *string
+	if params.RadioFreqMHz != 0 {
+		s := fmt.Sprintf("%.1f,%g,%d", params.RadioFreqMHz, params.RadioBWKHz, params.RadioSF)
+		radioStr = &s
+	}
+	var observerType *string
+	if envelope.ObserverType != "" {
+		observerType = &envelope.ObserverType
+	}
 	evt := statusEvent{
 		ObserverID:    observerID.String(),
 		DisplayName:   envelope.DisplayName,
+		ObserverType:  observerType,
 		IATA:          iata,
 		Online:        true,
+		Radio:         radioStr,
+		Scopes:        scopes,
 		BatteryMV:     envelope.Stats.BatteryMV,
 		UptimeSeconds: envelope.Stats.UptimeSeconds,
 		LastStatusAt:  time.Now().UnixMilli(),

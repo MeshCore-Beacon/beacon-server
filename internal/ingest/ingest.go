@@ -1,3 +1,6 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Package ingest subscribes to a single MeshCore MQTT broker and drives the
 // observation pipeline described in the design doc.
 //
@@ -119,6 +122,12 @@ type DB interface {
 	// GetObserverRadio returns the current radio settings for the given observer.
 	GetObserverRadio(ctx context.Context, observerID uuid.UUID) (RadioSettings, error)
 
+	// IsObserverByPubkey returns true if the given public key belongs to a known observer.
+	IsObserverByPubkey(ctx context.Context, pubkey []byte) bool
+
+	// GetObserverScopes returns the list of scope names associated with the given observer.
+	GetObserverScopes(ctx context.Context, observerID uuid.UUID) ([]string, error)
+
 	// ResolvePathHashes returns a list of node UUIDs for the given path hash prefixes and IATA.
 	ResolvePathHashes(ctx context.Context, iata string, hashes [][]byte) (map[string][]api.ResolvedPathEntry, error)
 
@@ -145,6 +154,10 @@ type DB interface {
 
 	// UpsertKnownRoute stores a fully resolved path where all hops have high confidence.
 	UpsertKnownRoute(ctx context.Context, nodeIDs []uuid.UUID, hashPrefix [][]byte, iata string, hopCount int32) error
+
+	// UpsertNodeNeighbor records or updates a neighbor relationship between two nodes.
+	// nodeID is the advertising node, neighborID is the first-hop forwarder.
+	UpsertNodeNeighbor(ctx context.Context, nodeID, neighborID uuid.UUID, iata string) error
 }
 
 // ChannelKeyStore is a read-only view of the channel keys loaded from config.
@@ -318,7 +331,7 @@ func normalizeObserverType(source string) string {
 		return ""
 	}
 	s := source
-	// strip org prefix e.g. "meshcore-dev/meshcore-ha" → "meshcore-ha"
+	// strip org/path prefix e.g. "meshcore-dev/meshcore-ha" → "meshcore-ha"
 	if i := strings.LastIndex(s, "/"); i >= 0 {
 		s = s[i+1:]
 	}

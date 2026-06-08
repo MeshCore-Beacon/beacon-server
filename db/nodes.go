@@ -1,3 +1,6 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 package db
 
 import (
@@ -47,6 +50,14 @@ func (s *Store) UpsertNodeShortID(ctx context.Context, nodeID uuid.UUID, iata st
 		NodeID:  nodeID,
 		Iata:    iata,
 		Prefix4: prefix4,
+	})
+}
+
+func (s *Store) UpsertNodeNeighbor(ctx context.Context, nodeID, neighborID uuid.UUID, iata string) error {
+	return s.q.UpsertNodeNeighbor(ctx, sqlc.UpsertNodeNeighborParams{
+		NodeID:     nodeID,
+		NeighborID: neighborID,
+		Iata:       iata,
 	})
 }
 
@@ -155,6 +166,12 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 		LastSeen:                row.LastSeen.Time.UnixMilli(),
 		Metadata:                row.Metadata,
 	}
+	neighbors, err := s.GetNodeNeighbors(ctx, nodeID)
+	if err != nil {
+		log.Printf("store: GetNodeNeighbors failed for %s: %v", nodeID, err)
+		neighbors = []api.NodeNeighbor{}
+	}
+	node.Neighbors = neighbors
 	if len(row.Iatas) > 0 {
 		if err := json.Unmarshal(row.Iatas, &node.IATAs); err != nil {
 			log.Printf("store: failed to unmarshal node iatas: %v", err)
@@ -170,4 +187,45 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 		node.LastAdvertAt = &ms
 	}
 	return node, nil
+}
+
+func (s *Store) GetNodesByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*api.ResolvedNode, error) {
+	rows, err := s.q.GetNodesByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[uuid.UUID]*api.ResolvedNode, len(rows))
+	for _, r := range rows {
+		result[r.ID] = &api.ResolvedNode{
+			ID:        r.ID,
+			Name:      r.Name,
+			PublicKey: hex.EncodeToString(r.PublicKey),
+			Latitude:  r.Latitude,
+			Longitude: r.Longitude,
+		}
+	}
+	return result, nil
+}
+
+func (s *Store) GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]api.NodeNeighbor, error) {
+	rows, err := s.q.GetNodeNeighbors(ctx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]api.NodeNeighbor, 0, len(rows))
+	for _, r := range rows {
+		items = append(items, api.NodeNeighbor{
+			ID:               r.ID,
+			Name:             r.Name,
+			NodeType:         r.NodeType,
+			NodeTypeName:     api.NodeTypeName(r.NodeType),
+			Latitude:         r.Latitude,
+			Longitude:        r.Longitude,
+			IATA:             r.Iata,
+			ObservationCount: r.ObservationCount,
+			FirstSeen:        r.FirstSeen.Time.UnixMilli(),
+			LastSeen:         r.LastSeen.Time.UnixMilli(),
+		})
+	}
+	return items, nil
 }

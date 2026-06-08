@@ -1,3 +1,6 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 package api
 
 import (
@@ -6,6 +9,20 @@ import (
 	"github.com/google/uuid"
 	"github.com/meshcore-go/meshcore-go"
 )
+
+// NodeNeighbor represents a neighboring node relationship observed in a given IATA.
+type NodeNeighbor struct {
+	ID               uuid.UUID `json:"id"`
+	Name             *string   `json:"name,omitempty"`
+	NodeType         int16     `json:"nodeType"`
+	NodeTypeName     string    `json:"nodeTypeName"`
+	Latitude         *float64  `json:"lat,omitempty"`
+	Longitude        *float64  `json:"lng,omitempty"`
+	IATA             string    `json:"iata"`
+	ObservationCount int64     `json:"observationCount"`
+	FirstSeen        int64     `json:"firstSeen"` // epoch ms
+	LastSeen         int64     `json:"lastSeen"`  // epoch ms
+}
 
 // NodeIATA represents a single IATA code and the last time the node was heard there.
 type NodeIATA struct {
@@ -33,14 +50,15 @@ type NodeSummary struct {
 // location source, and timing metadata.
 type Node struct {
 	NodeSummary
-	LocationSource          *string `json:"locationSource,omitempty"`     // "advert" or "manual"
-	LastAdvertAt            *int64  `json:"lastAdvertAt,omitempty"`       // epoch ms, nil if no advert received
-	SupportsMultibytePaths  bool    `json:"supportsMultibytePaths"`       // firmware >= 1.14.0; detected via path hash size
-	SupportsMultibyteTraces bool    `json:"supportsMultibyteTraces"`      // firmware >= 1.11.0; detected via trace hash size
-	MinFirmwareVersion      *string `json:"minFirmwareVersion,omitempty"` // derived from capability flags
-	FirstSeen               int64   `json:"firstSeen"`                    // epoch ms
-	LastSeen                int64   `json:"lastSeen"`                     // epoch ms
-	Metadata                any     `json:"metadata,omitempty"`           // raw JSONB metadata
+	LocationSource          *string        `json:"locationSource,omitempty"`     // "advert" or "manual"
+	LastAdvertAt            *int64         `json:"lastAdvertAt,omitempty"`       // epoch ms, nil if no advert received
+	SupportsMultibytePaths  bool           `json:"supportsMultibytePaths"`       // firmware >= 1.14.0; detected via path hash size
+	SupportsMultibyteTraces bool           `json:"supportsMultibyteTraces"`      // firmware >= 1.11.0; detected via trace hash size
+	MinFirmwareVersion      *string        `json:"minFirmwareVersion,omitempty"` // derived from capability flags
+	FirstSeen               int64          `json:"firstSeen"`                    // epoch ms
+	LastSeen                int64          `json:"lastSeen"`                     // epoch ms
+	Metadata                any            `json:"metadata,omitempty"`           // raw JSONB metadata
+	Neighbors               []NodeNeighbor `json:"neighbors"`
 }
 
 // NodeTypeName returns a human-readable name for a node type integer.

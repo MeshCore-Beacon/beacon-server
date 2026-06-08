@@ -4,12 +4,15 @@ MeshCore Beacon is a MeshCore network observation backend. It connects to one or
 more MeshCore MQTT brokers, ingests LoRa packet traffic in real time, stores it
 in PostgreSQL, and streams live events to WebSocket clients.
 
+[![CI](https://github.com/MeshCore-Beacon/beacon-server/actions/workflows/ci.yml/badge.svg)](https://github.com/MeshCore-Beacon/beacon-server/actions/workflows/ci.yml)
+[![Docker](https://github.com/MeshCore-Beacon/beacon-server/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/MeshCore-Beacon/beacon-server/actions/workflows/docker-publish.yml)
+
 ## What it does
 
 - Subscribes to MeshCore MQTT brokers and decodes incoming LoRa packets using
   [meshcore-go](https://github.com/meshcore-go/meshcore-go)
-- Stores packets, observations, nodes, observers, and channel messages in
-  PostgreSQL
+- Stores packets, observations, nodes, observers, traces, routes and channel
+  messages in PostgreSQL (more backends to come)
 - Deduplicates observations across multiple brokers (same packet heard by two
   brokers is one observation per observer)
 - Decrypts group text messages for known channel keys
@@ -40,40 +43,12 @@ For deployment instructions including the frontend app, see the deployment docs.
 
 ---
 
-## Project layout
-
-```
-beacon-server/
-├── cmd/beacon/             entry point
-├── db/                     store implementations and sqlc generated code
-│   ├── migrations/         SQL schema
-│   ├── queries/            sqlc query definitions
-│   └── sqlc/               generated Go DB code (do not edit)
-├── internal/
-│   ├── api/                REST API types, Reader interface, route handlers
-│   │   └── handlers/       HTTP route handlers
-│   ├── config/             config file loading and DB seeding
-│   ├── hub/                WebSocket fan-out broker
-│   ├── iatadb/             static IATA → country/continent map (generated)
-│   ├── ingest/             MQTT ingest pipeline
-│   ├── keystore/           channel key store
-│   ├── scopestore/         transport scope key store
-│   └── ws/                 WebSocket handler and IP limiter
-├── config.yaml.example
-├── env.example
-├── docker-compose.yml
-└── sqlc.yaml
-```
-
----
-
 ## Getting started
 
 ### Prerequisites
 
 - Go 1.26+
 - Docker and Docker Compose
-- [sqlc](https://sqlc.dev) (only needed if modifying queries)
 
 ### 1. Clone and configure
 
@@ -100,6 +75,12 @@ start via `docker-entrypoint-initdb.d`.
 
 ```bash
 go run ./cmd/beacon
+```
+
+Or pull and run the Docker image:
+
+```bash
+docker pull ghcr.io/meshcore-beacon/beacon-server:latest
 ```
 
 Beacon will:
@@ -207,6 +188,14 @@ not auto-created.
 
 ---
 
+## Authentication
+
+API authentication is not yet implemented. Beacon is intended for trusted
+internal network or reverse-proxy deployments. Do not expose it directly to the
+public internet without an authentication layer in front of it.
+
+---
+
 ## WebSocket API
 
 Connect to `ws://host:8080/ws`.
@@ -235,6 +224,7 @@ unsubscribing.
   "scope": {
     "iatas": ["YOW", "YYZ"],
     "regionIds": ["1"],
+    "regionSlugs": ["western-canada"],
     "payloadTypes": [4, 5],
     "channelHashes": ["11"],
     "events": ["packetObservation", "channelMessage"]
@@ -243,8 +233,8 @@ unsubscribing.
 ```
 
 All scope fields are optional. Omitted means no filter on that dimension (match
-everything). Empty array means match nothing on that dimension. `regionIds` are
-expanded to their member IATAs server-side.
+everything). Empty array means match nothing on that dimension. `regionIds` and
+`regionSlugs` are both expanded to their member IATAs server-side.
 
 **Unsubscribe** — remove a specific subscription by ID.
 
@@ -304,13 +294,15 @@ configurable via `websocket.max_connections_per_ip` in `config.yaml`.
 
 Base path: `/api/v1`
 
-All list endpoints support `afterId` for cursor-based pagination:
+All list endpoints support cursor-based pagination via `cursor` and `limit`
+query params. See the Swagger UI at `http://localhost:8080/swagger/index.html`
+for full parameter documentation.
 
-```
-GET /api/v1/packets?iata=YOW&afterId=12345&limit=100
-```
+### Authentication
 
-### Implemented
+Not yet implemented — see the Authentication section above.
+
+### Endpoints
 
 | Method | Path                                | Description                                                                                        |
 | ------ | ----------------------------------- | -------------------------------------------------------------------------------------------------- |
@@ -324,11 +316,12 @@ GET /api/v1/packets?iata=YOW&afterId=12345&limit=100
 | `GET`  | `/messages/backfill`                | Backfill messages after a given message ID                                                         |
 | `GET`  | `/nodes`                            | List nodes                                                                                         |
 | `GET`  | `/nodes/{nodeId}`                   | Get node detail                                                                                    |
+| `GET`  | `/nodes/{nodeId}/neighbors`         | List neighboring nodes observed in the mesh                                                        |
 | `GET`  | `/nodes/{nodeId}/observations`      | List observations for a node                                                                       |
 | `GET`  | `/observers`                        | List observers (optional: `?iata=<code>&type=<str>&broker=<name>&status=online\|offline`)          |
 | `GET`  | `/observers/{observerId}`           | Get observer detail including broker last-seen timestamps                                          |
 | `GET`  | `/observers/{observerId}/adverts`   | Adverts heard by observer                                                                          |
-| `GET`  | `/observers/{observerId}/telemetry` | Observer telemetry history                                                                         |
+| `GET`  | `/observers/{observerId}/telemetry` | Observer telemetry history (optional: `?range=24h&interval=1h\|6h\|24h`)                           |
 | `GET`  | `/packets`                          | List packets with filters                                                                          |
 | `GET`  | `/packets/backfill`                 | Backfill packets after a given observation ID                                                      |
 | `GET`  | `/packets/{packetHash}`             | Get packet with all observations                                                                   |
@@ -336,6 +329,7 @@ GET /api/v1/packets?iata=YOW&afterId=12345&limit=100
 | `GET`  | `/regions/{id}`                     | Get a single region with IATA list                                                                 |
 | `GET`  | `/routes`                           | List known routes (all hops high confidence)                                                       |
 | `GET`  | `/routes/search`                    | Search routes by source and destination hash                                                       |
+| `GET`  | `/routes/cross`                     | Search for routes crossing IATA boundaries                                                         |
 | `GET`  | `/scopes`                           | List transport scopes                                                                              |
 | `GET`  | `/scopes/{name}`                    | Get scope detail                                                                                   |
 | `GET`  | `/stats/observations`               | Hourly observation time series (last 7 days by default)                                            |
@@ -349,139 +343,20 @@ GET /api/v1/packets?iata=YOW&afterId=12345&limit=100
 
 ---
 
-## Development
-
-### Modifying DB queries
-
-Edit `db/queries/queries.sql`, then regenerate:
-
-```bash
-sqlc generate
-```
-
-### API documentation (Swagger)
-
-Beacon uses [swaggo/swag](https://github.com/swaggo/swag) to generate OpenAPI
-documentation from annotations in the handler comments.
-
-Start the server and open `http://localhost:8080/swagger/index.html`.
-
-After adding or modifying any handler, regenerate the docs and commit the
-updated `docs/` directory alongside your handler changes:
-
-```bash
-swag init -g cmd/beacon/main.go -o docs --parseDependecy
-```
-
-Install swag:
-
-```bash
-go install github.com/swaggo/swag/cmd/swag@latest
-```
-
-Each handler closure should have a godoc-style annotation block immediately
-above the `r.Get()`/`r.Post()` call:
-
-```go
-// listThings godoc
-//
-//	@Summary	Short description shown in the UI
-//	@Tags		TagName
-//	@Produce	json
-//	@Param		paramName	query		string	false	"Description"
-//	@Param		id			path		string	true	"Resource ID"
-//	@Success	200			{object}	api.MyResponseType
-//	@Failure	400			{object}	handlers.APIError
-//	@Failure	500			{object}	handlers.APIError
-//	@Router		/things [get]
-r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-```
-
-For paginated responses use the generic page wrapper:
-
-```go
-//	@Success	200	{object}	api.Page[api.MyType]
-```
-
-### Updating the IATA database
-
-Beacon includes a static IATA → country/continent mapping compiled into the
-binary, generated from the [OurAirports](https://ourairports.com/data/) public
-dataset.
-
-To refresh it with the latest airport data:
-
-```bash
-rm internal/iatadb/gen/airports.csv
-go generate ./internal/iatadb/
-```
-
-This fetches a fresh `airports.csv` from OurAirports, saves it locally, and
-regenerates `internal/iatadb/db.go`. Commit both files.
-
-To use a local CSV instead (e.g. in a restricted network environment):
-
-```bash
-AIRPORTS_CSV=/path/to/airports.csv go run ./internal/iatadb/gen
-```
-
----
-
 ## Road Map
-
-### Done
-
-- [x] MQTT ingest pipeline (two brokers, cross-broker dedup)
-- [x] Packet decode via meshcore-go
-- [x] Observer upsert and status processing
-- [x] Node upsert from advert payloads
-- [x] Channel message storage with key-based decryption
-- [x] Firmware capability detection scaffolding
-- [x] Hub-based WebSocket fan-out with subscription filtering
-- [x] WebSocket server (hello, subscribe, unsubscribe, ping/pong, lagged,
-      events)
-- [x] WebSocket regionId expansion via region_iatas DB lookup
-- [x] WebSocket per-IP connection limits
-- [x] Config file loading (regions, IATA overrides, channel keys)
-- [x] Observer radio settings on observations
-- [x] DB seeding on startup
-- [x] Observer telemetry storage with configurable resolution and retention
-- [x] Packet retention cleanup goroutine
-- [x] Hashtag channel PSK derivation (SHA256("#tag")[:16])
-- [x] Channel hash collision handling via key fingerprint
-- [x] REST API: IATAs, Regions
-- [x] REST API: Channels (list + detail + messages) with IATA filter
-- [x] REST API: Messages (cross-channel) with IATA filter
-- [x] REST API: Observers (heard adverts, telemetry, list + detail with broker
-      last-seen)
-- [x] REST API: Brokers (list with connection status)
-- [x] REST API: Pagination
-- [x] REST API: Nodes (list + detail + observations)
-- [x] REST API: Packets (list + detail)
-- [x] REST API: Stats
-- [x] Materialized view refresh (mv_hourly_iata_stats, mv_top_nodes_by_iata)
-- [x] Swagger/OpenAPI documentation via swaggo/swag
-- [x] Path resolution (node short ID lookup)
-- [x] Parse payloads (that we can decrypt) into DB and return with packet
-      details
-- [x] Propagation time calculation
-- [x] Trace route resolution via path hashes (resolvedRoute on packet detail)
-- [x] Trace packets: trace tag storage, list and detail endpoints with resolved
-      routes
-- [x] Known routes: fully resolved paths stored at ingest, list and search
-      endpoints
-
-### Future
 
 - [ ] Redis caching for stats endpoints
 - [ ] Caddy reverse proxy config for production
-
 - [ ] Admin authentication middleware
-  - [ ] Server management via API (currently config-file only)
-- [ ] Observer owner tracking (schema exists, API excluded by design)
+- [ ] Server management via API (currently config-file only)
 - [ ] Log levels, debug and info
 
+---
+
 ## Acknowledgements
+
+See [CONTRIBUTORS.md](CONTRIBUTORS.md) for the people who have helped build
+Beacon.
 
 Beacon stands on the shoulders of giants. See [SHOULDERS.md](SHOULDERS.md) for
 the full list of open source projects that make this possible.

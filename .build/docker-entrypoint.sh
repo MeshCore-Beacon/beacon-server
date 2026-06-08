@@ -1,4 +1,7 @@
 #!/bin/sh
+# Copyright 2026 Beacon Contributors
+# SPDX-License-Identifier: agpl
+
 set -e
 
 if [ -n "$POSTGRES_DSN" ]; then

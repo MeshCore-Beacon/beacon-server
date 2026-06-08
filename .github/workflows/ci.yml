@@ -1,8 +1,10 @@
+# Copyright 2026 Beacon Contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
 name: CI
 
 on:
   push:
-    branches: [main,dev]
+    branches: [main, dev]
   pull_request:
 
 jobs:
@@ -32,3 +34,16 @@ jobs:
 
       - name: Test
         run: go test ./...
+
+      - name: Install swag
+        run: go install github.com/swaggo/swag/cmd/swag@latest
+
+      - name: Swagger docs up to date
+        run: |
+          swag init -g cmd/beacon/main.go -o docs --parseInternal --parseDependency
+          if [ -n "$(git diff --name-only docs/)" ]; then
+            echo "Swagger docs are out of date. Run swag init and commit the result."
+            git diff --name-only docs/
+            exit 1
+          fi
+

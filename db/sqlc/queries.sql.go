@@ -149,6 +149,63 @@ func (q *Queries) GetChannelsByHash(ctx context.Context, arg GetChannelsByHashPa
 	return items, nil
 }
 
+const getCrossIATANeighbors = `-- name: GetCrossIATANeighbors :many
+SELECT
+    n.id, n.name, n.node_type, n.latitude, n.longitude,
+    nn.iata AS neighbor_iata, nn.observation_count, nn.last_seen
+FROM node_neighbors nn
+JOIN nodes n ON n.id = nn.neighbor_id
+WHERE nn.node_id = $1
+  AND nn.iata != $2
+ORDER BY nn.last_seen DESC
+`
+
+type GetCrossIATANeighborsParams struct {
+	NodeID uuid.UUID `json:"node_id"`
+	Iata   string    `json:"iata"`
+}
+
+type GetCrossIATANeighborsRow struct {
+	ID               uuid.UUID          `json:"id"`
+	Name             *string            `json:"name"`
+	NodeType         int16              `json:"node_type"`
+	Latitude         *float64           `json:"latitude"`
+	Longitude        *float64           `json:"longitude"`
+	NeighborIata     string             `json:"neighbor_iata"`
+	ObservationCount int64              `json:"observation_count"`
+	LastSeen         pgtype.Timestamptz `json:"last_seen"`
+}
+
+// Returns neighbors of a node that are in a different IATA.
+func (q *Queries) GetCrossIATANeighbors(ctx context.Context, arg GetCrossIATANeighborsParams) ([]GetCrossIATANeighborsRow, error) {
+	rows, err := q.db.Query(ctx, getCrossIATANeighbors, arg.NodeID, arg.Iata)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetCrossIATANeighborsRow{}
+	for rows.Next() {
+		var i GetCrossIATANeighborsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.NodeType,
+			&i.Latitude,
+			&i.Longitude,
+			&i.NeighborIata,
+			&i.ObservationCount,
+			&i.LastSeen,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getHourlyStats = `-- name: GetHourlyStats :many
 SELECT iata, hour, observation_count, unique_packets, active_observers
 FROM mv_hourly_iata_stats
@@ -203,6 +260,48 @@ func (q *Queries) GetIATA(ctx context.Context, iata string) (IataCode, error) {
 		&i.AddedAt,
 	)
 	return i, err
+}
+
+const getKnownRoutesByNode = `-- name: GetKnownRoutesByNode :many
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
+FROM known_routes
+WHERE iata = $1
+  AND $2::uuid = ANY(node_ids)
+ORDER BY hop_count ASC, last_seen DESC
+`
+
+type GetKnownRoutesByNodeParams struct {
+	Iata    string    `json:"iata"`
+	Column2 uuid.UUID `json:"column_2"`
+}
+
+func (q *Queries) GetKnownRoutesByNode(ctx context.Context, arg GetKnownRoutesByNodeParams) ([]KnownRoute, error) {
+	rows, err := q.db.Query(ctx, getKnownRoutesByNode, arg.Iata, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []KnownRoute{}
+	for rows.Next() {
+		var i KnownRoute
+		if err := rows.Scan(
+			&i.ID,
+			&i.NodeIds,
+			&i.HashPrefix,
+			&i.Iata,
+			&i.HopCount,
+			&i.FirstSeen,
+			&i.LastSeen,
+			&i.ObservationCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getNodeByID = `-- name: GetNodeByID :one
@@ -354,6 +453,99 @@ func (q *Queries) GetNodeIATAs(ctx context.Context, nodeID uuid.UUID) ([]string,
 			return nil, err
 		}
 		items = append(items, iata)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getNodeNeighbors = `-- name: GetNodeNeighbors :many
+SELECT
+    n.id, n.name, n.node_type, n.latitude, n.longitude,
+    nn.iata, nn.observation_count, nn.first_seen, nn.last_seen
+FROM node_neighbors nn
+JOIN nodes n ON n.id = nn.neighbor_id
+WHERE nn.node_id = $1
+ORDER BY nn.last_seen DESC
+`
+
+type GetNodeNeighborsRow struct {
+	ID               uuid.UUID          `json:"id"`
+	Name             *string            `json:"name"`
+	NodeType         int16              `json:"node_type"`
+	Latitude         *float64           `json:"latitude"`
+	Longitude        *float64           `json:"longitude"`
+	Iata             string             `json:"iata"`
+	ObservationCount int64              `json:"observation_count"`
+	FirstSeen        pgtype.Timestamptz `json:"first_seen"`
+	LastSeen         pgtype.Timestamptz `json:"last_seen"`
+}
+
+// Returns the neighbors of a node with details, ordered by most recently seen.
+func (q *Queries) GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]GetNodeNeighborsRow, error) {
+	rows, err := q.db.Query(ctx, getNodeNeighbors, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetNodeNeighborsRow{}
+	for rows.Next() {
+		var i GetNodeNeighborsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.NodeType,
+			&i.Latitude,
+			&i.Longitude,
+			&i.Iata,
+			&i.ObservationCount,
+			&i.FirstSeen,
+			&i.LastSeen,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getNodesByIDs = `-- name: GetNodesByIDs :many
+SELECT id, public_key, name, latitude, longitude
+FROM nodes
+WHERE id = ANY($1::uuid[])
+`
+
+type GetNodesByIDsRow struct {
+	ID        uuid.UUID `json:"id"`
+	PublicKey []byte    `json:"public_key"`
+	Name      *string   `json:"name"`
+	Latitude  *float64  `json:"latitude"`
+	Longitude *float64  `json:"longitude"`
+}
+
+func (q *Queries) GetNodesByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]GetNodesByIDsRow, error) {
+	rows, err := q.db.Query(ctx, getNodesByIDs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetNodesByIDsRow{}
+	for rows.Next() {
+		var i GetNodesByIDsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicKey,
+			&i.Name,
+			&i.Latitude,
+			&i.Longitude,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -579,6 +771,77 @@ func (q *Queries) GetObserverTelemetry(ctx context.Context, arg GetObserverTelem
 			&i.UptimeSeconds,
 			&i.QueueLength,
 			&i.DebugFlags,
+			&i.ReceiveErrors,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getObserverTelemetryBucketed = `-- name: GetObserverTelemetryBucketed :many
+SELECT
+  (date_trunc('hour', reported_at) +
+    (EXTRACT(HOUR FROM reported_at)::int / $4::int) * ($4::int * interval '1 hour'))::timestamptz AS bucket,
+  AVG(battery_voltage_mv)::int   AS battery_voltage_mv,
+  AVG(airtime_tx_pct)::real      AS airtime_tx_pct,
+  AVG(airtime_rx_pct)::real      AS airtime_rx_pct,
+  AVG(noise_floor_db)::real      AS noise_floor_db,
+  MAX(uptime_seconds)::bigint    AS uptime_seconds,
+  AVG(queue_length)::int         AS queue_length,
+  AVG(receive_errors)::int       AS receive_errors
+FROM observer_telemetry
+WHERE observer_id = $1
+  AND ($2::timestamptz IS NULL OR reported_at >= $2)
+  AND ($3::timestamptz IS NULL OR reported_at <= $3)
+GROUP BY bucket
+ORDER BY bucket ASC
+`
+
+type GetObserverTelemetryBucketedParams struct {
+	ObserverID uuid.UUID          `json:"observer_id"`
+	Column2    pgtype.Timestamptz `json:"column_2"`
+	Column3    pgtype.Timestamptz `json:"column_3"`
+	Column4    int32              `json:"column_4"`
+}
+
+type GetObserverTelemetryBucketedRow struct {
+	Bucket           pgtype.Timestamptz `json:"bucket"`
+	BatteryVoltageMv int32              `json:"battery_voltage_mv"`
+	AirtimeTxPct     float32            `json:"airtime_tx_pct"`
+	AirtimeRxPct     float32            `json:"airtime_rx_pct"`
+	NoiseFloorDb     float32            `json:"noise_floor_db"`
+	UptimeSeconds    int64              `json:"uptime_seconds"`
+	QueueLength      int32              `json:"queue_length"`
+	ReceiveErrors    int32              `json:"receive_errors"`
+}
+
+func (q *Queries) GetObserverTelemetryBucketed(ctx context.Context, arg GetObserverTelemetryBucketedParams) ([]GetObserverTelemetryBucketedRow, error) {
+	rows, err := q.db.Query(ctx, getObserverTelemetryBucketed,
+		arg.ObserverID,
+		arg.Column2,
+		arg.Column3,
+		arg.Column4,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetObserverTelemetryBucketedRow{}
+	for rows.Next() {
+		var i GetObserverTelemetryBucketedRow
+		if err := rows.Scan(
+			&i.Bucket,
+			&i.BatteryVoltageMv,
+			&i.AirtimeTxPct,
+			&i.AirtimeRxPct,
+			&i.NoiseFloorDb,
+			&i.UptimeSeconds,
+			&i.QueueLength,
 			&i.ReceiveErrors,
 		); err != nil {
 			return nil, err
@@ -1714,7 +1977,7 @@ func (q *Queries) ListIATAs(ctx context.Context) ([]IataCode, error) {
 }
 
 const listKnownRoutes = `-- name: ListKnownRoutes :many
-SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
 FROM known_routes
 WHERE ($1 = '' OR iata = $1)
   AND ($2 = 0 OR hop_count = $2)
@@ -1752,6 +2015,7 @@ func (q *Queries) ListKnownRoutes(ctx context.Context, arg ListKnownRoutesParams
 			&i.HopCount,
 			&i.FirstSeen,
 			&i.LastSeen,
+			&i.ObservationCount,
 		); err != nil {
 			return nil, err
 		}
@@ -2701,7 +2965,7 @@ func (q *Queries) ResolvePathHashes(ctx context.Context, arg ResolvePathHashesPa
 }
 
 const searchKnownRoutes = `-- name: SearchKnownRoutes :many
-SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
 FROM known_routes
 WHERE iata = $1
   AND array_position(hash_prefix, $2::bytea) IS NOT NULL
@@ -2735,6 +2999,7 @@ func (q *Queries) SearchKnownRoutes(ctx context.Context, arg SearchKnownRoutesPa
 			&i.HopCount,
 			&i.FirstSeen,
 			&i.LastSeen,
+			&i.ObservationCount,
 		); err != nil {
 			return nil, err
 		}
@@ -2975,7 +3240,8 @@ const upsertKnownRoute = `-- name: UpsertKnownRoute :exec
 INSERT INTO known_routes (node_ids, hash_prefix, iata, hop_count)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (node_ids, iata) DO UPDATE SET
-  last_seen = NOW()
+  last_seen = NOW(),
+  observation_count = known_routes.observation_count + 1
 `
 
 type UpsertKnownRouteParams struct {
@@ -3087,6 +3353,31 @@ type UpsertNodeIATAParams struct {
 // ============================================================
 func (q *Queries) UpsertNodeIATA(ctx context.Context, arg UpsertNodeIATAParams) error {
 	_, err := q.db.Exec(ctx, upsertNodeIATA, arg.NodeID, arg.Iata)
+	return err
+}
+
+const upsertNodeNeighbor = `-- name: UpsertNodeNeighbor :exec
+
+INSERT INTO node_neighbors (node_id, neighbor_id, iata, observation_count)
+VALUES ($1, $2, $3, 1)
+ON CONFLICT (node_id, neighbor_id, iata) DO UPDATE SET
+  last_seen         = NOW(),
+  observation_count = node_neighbors.observation_count + 1
+`
+
+type UpsertNodeNeighborParams struct {
+	NodeID     uuid.UUID `json:"node_id"`
+	NeighborID uuid.UUID `json:"neighbor_id"`
+	Iata       string    `json:"iata"`
+}
+
+// ============================================================
+// NEIGHBORS
+// ============================================================
+// Records or updates a neighbor relationship between two nodes observed in the same IATA.
+// node_id is the advertising node, neighbor_id is the first-hop forwarder.
+func (q *Queries) UpsertNodeNeighbor(ctx context.Context, arg UpsertNodeNeighborParams) error {
+	_, err := q.db.Exec(ctx, upsertNodeNeighbor, arg.NodeID, arg.NeighborID, arg.Iata)
 	return err
 }
 
