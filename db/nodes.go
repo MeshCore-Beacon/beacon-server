@@ -50,6 +50,14 @@ func (s *Store) UpsertNodeShortID(ctx context.Context, nodeID uuid.UUID, iata st
 	})
 }
 
+func (s *Store) UpsertNodeNeighbor(ctx context.Context, nodeID, neighborID uuid.UUID, iata string) error {
+	return s.q.UpsertNodeNeighbor(ctx, sqlc.UpsertNodeNeighborParams{
+		NodeID:     nodeID,
+		NeighborID: neighborID,
+		Iata:       iata,
+	})
+}
+
 func (s *Store) SetNodeCapability(ctx context.Context, nodeID uuid.UUID, paths, traces bool) error {
 	var errs []error
 	if paths {
@@ -155,6 +163,12 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 		LastSeen:                row.LastSeen.Time.UnixMilli(),
 		Metadata:                row.Metadata,
 	}
+	neighbors, err := s.GetNodeNeighbors(ctx, nodeID)
+	if err != nil {
+		log.Printf("store: GetNodeNeighbors failed for %s: %v", nodeID, err)
+		neighbors = []api.NodeNeighbor{}
+	}
+	node.Neighbors = neighbors
 	if len(row.Iatas) > 0 {
 		if err := json.Unmarshal(row.Iatas, &node.IATAs); err != nil {
 			log.Printf("store: failed to unmarshal node iatas: %v", err)
@@ -170,4 +184,27 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 		node.LastAdvertAt = &ms
 	}
 	return node, nil
+}
+
+func (s *Store) GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]api.NodeNeighbor, error) {
+	rows, err := s.q.GetNodeNeighbors(ctx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]api.NodeNeighbor, 0, len(rows))
+	for _, r := range rows {
+		items = append(items, api.NodeNeighbor{
+			ID:               r.ID,
+			Name:             r.Name,
+			NodeType:         r.NodeType,
+			NodeTypeName:     api.NodeTypeName(r.NodeType),
+			Latitude:         r.Latitude,
+			Longitude:        r.Longitude,
+			IATA:             r.Iata,
+			ObservationCount: r.ObservationCount,
+			FirstSeen:        r.FirstSeen.Time.UnixMilli(),
+			LastSeen:         r.LastSeen.Time.UnixMilli(),
+		})
+	}
+	return items, nil
 }

@@ -141,4 +141,6 @@ type Reader interface {
 	ListKnownRoutes(ctx context.Context, iata string, hopCount int32, cursor time.Time, limit int32) ([]KnownRoute, error)
 	// SearchKnownRoutes returns known routes containing a path from source to destination hash.
 	SearchKnownRoutes(ctx context.Context, iata, fromHash, toHash string) ([]KnownRoute, error)
+	// GetNodeNeighbors returns the neighbors of a node ordered by most recently seen.
+	GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]NodeNeighbor, error)
 }

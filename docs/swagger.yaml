@@ -112,6 +112,25 @@ definitions:
       lon:
         type: number
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.KnownRoute:
+    properties:
+      firstSeen:
+        description: epoch ms
+        type: integer
+      hopCount:
+        type: integer
+      hops:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.RouteHop'
+        type: array
+      iata:
+        type: string
+      id:
+        type: integer
+      lastSeen:
+        description: epoch ms
+        type: integer
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.Node:
     properties:
       defaultScope:
@@ -152,6 +171,10 @@ definitions:
         type: string
       name:
         type: string
+      neighbors:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeNeighbor'
+        type: array
       nodeType:
         description: 1=companion, 2=repeater, 3=room_server, 4=sensor
         type: integer
@@ -179,6 +202,31 @@ definitions:
         type: string
       lastHeard:
         description: epoch ms
+        type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.NodeNeighbor:
+    properties:
+      firstSeen:
+        description: epoch ms
+        type: integer
+      iata:
+        type: string
+      id:
+        type: string
+      lastSeen:
+        description: epoch ms
+        type: integer
+      lat:
+        type: number
+      lng:
+        type: number
+      name:
+        type: string
+      nodeType:
+        type: integer
+      nodeTypeName:
+        type: string
+      observationCount:
         type: integer
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.NodeSummary:
@@ -693,6 +741,8 @@ definitions:
         items:
           $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ResolvedNode'
         type: array
+      snr:
+        type: number
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.ResolvedNode:
     properties:
@@ -706,6 +756,18 @@ definitions:
         type: string
       publicKey:
         description: hex-encoded prefix used for resolution
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.RouteHop:
+    properties:
+      hashBytes:
+        description: hex-encoded hash prefix
+        type: string
+      node:
+        allOf:
+        - $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ResolvedNode'
+        description: populated when node details are available
+      nodeId:
         type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.ScopeDetail:
@@ -1240,6 +1302,34 @@ paths:
       summary: Get node detail
       tags:
       - Nodes
+  /nodes/{nodeId}/neighbors:
+    get:
+      parameters:
+      - description: Node UUID
+        in: path
+        name: nodeId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeNeighbor'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+      summary: List neighbors for a node
+      tags:
+      - Nodes
   /nodes/{nodeId}/observations:
     get:
       parameters:
@@ -1644,6 +1734,79 @@ paths:
       summary: Get a single region
       tags:
       - Regions
+  /routes:
+    get:
+      parameters:
+      - description: Filter by IATA code
+        in: query
+        name: iata
+        type: string
+      - description: Filter by exact hop count
+        in: query
+        name: hopCount
+        type: integer
+      - description: Route ID of last item for pagination
+        in: query
+        name: cursor
+        type: integer
+      - description: Max results (default 50)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.KnownRoute'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+      summary: List known routes
+      tags:
+      - Routes
+  /routes/search:
+    get:
+      parameters:
+      - description: IATA code to search within
+        in: query
+        name: iata
+        required: true
+        type: string
+      - description: Source node hash prefix (hex)
+        in: query
+        name: from
+        required: true
+        type: string
+      - description: Destination node hash prefix (hex)
+        in: query
+        name: to
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.KnownRoute'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+      summary: Search known routes by source and destination hash
+      tags:
+      - Routes
   /scopes:
     get:
       parameters:

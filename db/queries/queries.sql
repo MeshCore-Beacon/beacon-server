@@ -855,6 +855,29 @@ WHERE iata = $1
 ORDER BY hop_count ASC, last_seen DESC;
 
 -- ============================================================
+-- NEIGHBORS
+-- ============================================================
+
+-- name: UpsertNodeNeighbor :exec
+-- Records or updates a neighbor relationship between two nodes observed in the same IATA.
+-- node_id is the advertising node, neighbor_id is the first-hop forwarder.
+INSERT INTO node_neighbors (node_id, neighbor_id, iata, observation_count)
+VALUES ($1, $2, $3, 1)
+ON CONFLICT (node_id, neighbor_id, iata) DO UPDATE SET
+  last_seen         = NOW(),
+  observation_count = node_neighbors.observation_count + 1;
+
+-- name: GetNodeNeighbors :many
+-- Returns the neighbors of a node with details, ordered by most recently seen.
+SELECT
+    n.id, n.name, n.node_type, n.latitude, n.longitude,
+    nn.iata, nn.observation_count, nn.first_seen, nn.last_seen
+FROM node_neighbors nn
+JOIN nodes n ON n.id = nn.neighbor_id
+WHERE nn.node_id = $1
+ORDER BY nn.last_seen DESC;
+
+-- ============================================================
 -- HELPERS
 -- ============================================================
 

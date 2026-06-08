@@ -596,6 +596,49 @@ const docTemplate = `{
                 }
             }
         },
+        "/nodes/{nodeId}/neighbors": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Nodes"
+                ],
+                "summary": "List neighbors for a node",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Node UUID",
+                        "name": "nodeId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeNeighbor"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
         "/nodes/{nodeId}/observations": {
             "get": {
                 "produces": [
@@ -1200,6 +1243,117 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/routes": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Routes"
+                ],
+                "summary": "List known routes",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by IATA code",
+                        "name": "iata",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by exact hop count",
+                        "name": "hopCount",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Route ID of last item for pagination",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max results (default 50)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.KnownRoute"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/routes/search": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Routes"
+                ],
+                "summary": "Search known routes by source and destination hash",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "IATA code to search within",
+                        "name": "iata",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Source node hash prefix (hex)",
+                        "name": "from",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Destination node hash prefix (hex)",
+                        "name": "to",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.KnownRoute"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
@@ -1847,6 +2001,34 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.KnownRoute": {
+            "type": "object",
+            "properties": {
+                "firstSeen": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "hopCount": {
+                    "type": "integer"
+                },
+                "hops": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.RouteHop"
+                    }
+                },
+                "iata": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "lastSeen": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_MeshCore-Beacon_beacon-server_internal_api.Node": {
             "type": "object",
             "properties": {
@@ -1902,6 +2084,12 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "neighbors": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeNeighbor"
+                    }
+                },
                 "nodeType": {
                     "description": "1=companion, 2=repeater, 3=room_server, 4=sensor",
                     "type": "integer"
@@ -1939,6 +2127,43 @@ const docTemplate = `{
                 },
                 "lastHeard": {
                     "description": "epoch ms",
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.NodeNeighbor": {
+            "type": "object",
+            "properties": {
+                "firstSeen": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "iata": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "lastSeen": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "lat": {
+                    "type": "number"
+                },
+                "lng": {
+                    "type": "number"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "nodeType": {
+                    "type": "integer"
+                },
+                "nodeTypeName": {
+                    "type": "string"
+                },
+                "observationCount": {
                     "type": "integer"
                 }
             }
@@ -2684,6 +2909,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ResolvedNode"
                     }
+                },
+                "snr": {
+                    "type": "number"
                 }
             }
         },
@@ -2704,6 +2932,26 @@ const docTemplate = `{
                 },
                 "publicKey": {
                     "description": "hex-encoded prefix used for resolution",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.RouteHop": {
+            "type": "object",
+            "properties": {
+                "hashBytes": {
+                    "description": "hex-encoded hash prefix",
+                    "type": "string"
+                },
+                "node": {
+                    "description": "populated when node details are available",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ResolvedNode"
+                        }
+                    ]
+                },
+                "nodeId": {
                     "type": "string"
                 }
             }

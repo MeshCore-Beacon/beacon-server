@@ -361,6 +361,59 @@ func (q *Queries) GetNodeIATAs(ctx context.Context, nodeID uuid.UUID) ([]string,
 	return items, nil
 }
 
+const getNodeNeighbors = `-- name: GetNodeNeighbors :many
+SELECT
+    n.id, n.name, n.node_type, n.latitude, n.longitude,
+    nn.iata, nn.observation_count, nn.first_seen, nn.last_seen
+FROM node_neighbors nn
+JOIN nodes n ON n.id = nn.neighbor_id
+WHERE nn.node_id = $1
+ORDER BY nn.last_seen DESC
+`
+
+type GetNodeNeighborsRow struct {
+	ID               uuid.UUID          `json:"id"`
+	Name             *string            `json:"name"`
+	NodeType         int16              `json:"node_type"`
+	Latitude         *float64           `json:"latitude"`
+	Longitude        *float64           `json:"longitude"`
+	Iata             string             `json:"iata"`
+	ObservationCount int64              `json:"observation_count"`
+	FirstSeen        pgtype.Timestamptz `json:"first_seen"`
+	LastSeen         pgtype.Timestamptz `json:"last_seen"`
+}
+
+// Returns the neighbors of a node with details, ordered by most recently seen.
+func (q *Queries) GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]GetNodeNeighborsRow, error) {
+	rows, err := q.db.Query(ctx, getNodeNeighbors, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetNodeNeighborsRow{}
+	for rows.Next() {
+		var i GetNodeNeighborsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.NodeType,
+			&i.Latitude,
+			&i.Longitude,
+			&i.Iata,
+			&i.ObservationCount,
+			&i.FirstSeen,
+			&i.LastSeen,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getObserverBrokers = `-- name: GetObserverBrokers :many
 SELECT broker_name, last_seen, last_packet_at
 FROM observer_brokers
@@ -3087,6 +3140,31 @@ type UpsertNodeIATAParams struct {
 // ============================================================
 func (q *Queries) UpsertNodeIATA(ctx context.Context, arg UpsertNodeIATAParams) error {
 	_, err := q.db.Exec(ctx, upsertNodeIATA, arg.NodeID, arg.Iata)
+	return err
+}
+
+const upsertNodeNeighbor = `-- name: UpsertNodeNeighbor :exec
+
+INSERT INTO node_neighbors (node_id, neighbor_id, iata, observation_count)
+VALUES ($1, $2, $3, 1)
+ON CONFLICT (node_id, neighbor_id, iata) DO UPDATE SET
+  last_seen         = NOW(),
+  observation_count = node_neighbors.observation_count + 1
+`
+
+type UpsertNodeNeighborParams struct {
+	NodeID     uuid.UUID `json:"node_id"`
+	NeighborID uuid.UUID `json:"neighbor_id"`
+	Iata       string    `json:"iata"`
+}
+
+// ============================================================
+// NEIGHBORS
+// ============================================================
+// Records or updates a neighbor relationship between two nodes observed in the same IATA.
+// node_id is the advertising node, neighbor_id is the first-hop forwarder.
+func (q *Queries) UpsertNodeNeighbor(ctx context.Context, arg UpsertNodeNeighborParams) error {
+	_, err := q.db.Exec(ctx, upsertNodeNeighbor, arg.NodeID, arg.NeighborID, arg.Iata)
 	return err
 }
 

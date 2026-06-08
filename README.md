@@ -324,6 +324,7 @@ GET /api/v1/packets?iata=YOW&afterId=12345&limit=100
 | `GET`  | `/messages/backfill`                | Backfill messages after a given message ID                                                         |
 | `GET`  | `/nodes`                            | List nodes                                                                                         |
 | `GET`  | `/nodes/{nodeId}`                   | Get node detail                                                                                    |
+| `GET`  | `/nodes/{nodeId}/neighbors`         | List neighboring nodes observed in the mesh                                                        |
 | `GET`  | `/nodes/{nodeId}/observations`      | List observations for a node                                                                       |
 | `GET`  | `/observers`                        | List observers (optional: `?iata=<code>&type=<str>&broker=<name>&status=online\|offline`)          |
 | `GET`  | `/observers/{observerId}`           | Get observer detail including broker last-seen timestamps                                          |
@@ -466,10 +467,12 @@ AIRPORTS_CSV=/path/to/airports.csv go run ./internal/iatadb/gen
       details
 - [x] Propagation time calculation
 - [x] Trace route resolution via path hashes (resolvedRoute on packet detail)
-- [x] Trace packets: trace tag storage, list and detail endpoints with resolved
-      routes
-- [x] Known routes: fully resolved paths stored at ingest, list and search
-      endpoints
+- [x] REST API: Trace packets: trace tag storage, list and detail endpoints with
+      resolved routes
+- [x] REST API: Known routes: fully resolved paths stored at ingest, list and
+      search endpoints
+- [x] Node neighbor detection and storage from advert path resolution
+- [x] REST API: Node neighbors endpoint
 
 ### Future
 

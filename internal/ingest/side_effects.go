@@ -85,6 +85,21 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 			log.Printf("ingest[%s]: db: upsert node failed: %v", w.cfg.BrokerName, err)
 			return
 		}
+		// if the advert was forwarded, the first hop is a neighbor
+		if packet.PathHashCount() > 0 && (advert.Type() == meshcore.AdvertTypeRepeater || advert.Type() == meshcore.AdvertTypeRoom) {
+			firstHop := packet.PathHashes()
+			if len(firstHop) > 0 {
+				resolved, err := w.db.ResolvePathHashes(ctx, iata, firstHop[:1])
+				if err == nil {
+					key := hex.EncodeToString(firstHop[0])
+					if entries := resolved[key]; len(entries) == 1 {
+						if err := w.db.UpsertNodeNeighbor(ctx, nodeID, entries[0].NodeID, iata); err != nil {
+							log.Printf("ingest[%s]: failed to upsert node neighbor: %v", w.cfg.BrokerName, err)
+						}
+					}
+				}
+			}
+		}
 		if err := w.db.UpsertNodeIATA(ctx, nodeID, iata); err != nil {
 			log.Printf("ingest[%s]: db: upsert node IATA failed: %v", w.cfg.BrokerName, err)
 		}

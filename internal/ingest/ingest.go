@@ -145,6 +145,10 @@ type DB interface {
 
 	// UpsertKnownRoute stores a fully resolved path where all hops have high confidence.
 	UpsertKnownRoute(ctx context.Context, nodeIDs []uuid.UUID, hashPrefix [][]byte, iata string, hopCount int32) error
+
+	// UpsertNodeNeighbor records or updates a neighbor relationship between two nodes.
+	// nodeID is the advertising node, neighborID is the first-hop forwarder.
+	UpsertNodeNeighbor(ctx context.Context, nodeID, neighborID uuid.UUID, iata string) error
 }
 
 // ChannelKeyStore is a read-only view of the channel keys loaded from config.

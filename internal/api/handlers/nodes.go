@@ -21,6 +21,7 @@ func NodesRouter(reader api.Reader) http.Handler {
 	r.Route("/{nodeId}", func(r chi.Router) {
 		r.Get("/", getNode(reader))
 		r.Get("/observations", listNodeObservations(reader))
+		r.Get("/neighbors", listNodeNeighbors(reader))
 	})
 	return r
 }
@@ -194,5 +195,31 @@ func listNodeObservations(reader api.Reader) http.HandlerFunc {
 			return
 		}
 		respond(w, http.StatusOK, observations)
+	}
+}
+
+// listNodeNeighbors godoc
+//
+//	@Summary	List neighbors for a node
+//	@Tags		Nodes
+//	@Produce	json
+//	@Param		nodeId	path		string	true	"Node UUID"
+//	@Success	200		{object}	[]api.NodeNeighbor
+//	@Failure	400		{object}	handlers.APIError
+//	@Failure	500		{object}	handlers.APIError
+//	@Router		/nodes/{nodeId}/neighbors [get]
+func listNodeNeighbors(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		nodeID, err := uuid.Parse(chi.URLParam(r, "nodeId"))
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "invalid node ID")
+			return
+		}
+		neighbors, err := reader.GetNodeNeighbors(r.Context(), nodeID)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		respond(w, http.StatusOK, neighbors)
 	}
 }

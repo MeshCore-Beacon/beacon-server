@@ -354,6 +354,23 @@ CREATE INDEX idx_known_routes_iata ON known_routes(iata);
 CREATE INDEX idx_known_routes_hop_count ON known_routes(iata, hop_count);
 
 -- ============================================================
+-- NEIGHBORS
+-- ============================================================
+
+CREATE TABLE node_neighbors (
+  node_id           UUID NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+  neighbor_id       UUID NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+  iata              CHAR(3) NOT NULL REFERENCES iata_codes(iata) ON DELETE CASCADE,
+  first_seen        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  observation_count BIGINT NOT NULL DEFAULT 1,
+  PRIMARY KEY (node_id, neighbor_id, iata)
+);
+
+CREATE INDEX idx_node_neighbors_node ON node_neighbors(node_id, iata);
+CREATE INDEX idx_node_neighbors_neighbor ON node_neighbors(neighbor_id, iata);
+
+-- ============================================================
 -- MATERIALIZED VIEWS
 -- ============================================================
 

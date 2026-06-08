@@ -112,6 +112,15 @@ type NodeIata struct {
 	ObservationCount *int64             `json:"observation_count"`
 }
 
+type NodeNeighbor struct {
+	NodeID           uuid.UUID          `json:"node_id"`
+	NeighborID       uuid.UUID          `json:"neighbor_id"`
+	Iata             string             `json:"iata"`
+	FirstSeen        pgtype.Timestamptz `json:"first_seen"`
+	LastSeen         pgtype.Timestamptz `json:"last_seen"`
+	ObservationCount int64              `json:"observation_count"`
+}
+
 type NodeShortID struct {
 	NodeID  uuid.UUID `json:"node_id"`
 	Iata    string    `json:"iata"`
