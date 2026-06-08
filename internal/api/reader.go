@@ -86,6 +86,8 @@ type Reader interface {
 	// GetNode returns full detail for a single node by UUID.
 	// Returns nil, pgx.ErrNoRows if the node is not found.
 	GetNode(ctx context.Context, nodeID uuid.UUID) (*Node, error)
+	// GetNodesByIDs returns a map of node ID to resolved node details for the given IDs.
+	GetNodesByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*ResolvedNode, error)
 	// ListNodeObservations returns a paginated list of packet observations originating from a node.
 	// Pass cursor=0 to start from the beginning.
 	ListNodeObservations(ctx context.Context, nodeID uuid.UUID, cursor int64, limit int32) (Page[PacketObservationSummary], error)

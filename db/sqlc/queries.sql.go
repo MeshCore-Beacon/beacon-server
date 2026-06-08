@@ -513,6 +513,46 @@ func (q *Queries) GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]Get
 	return items, nil
 }
 
+const getNodesByIDs = `-- name: GetNodesByIDs :many
+SELECT id, public_key, name, latitude, longitude
+FROM nodes
+WHERE id = ANY($1::uuid[])
+`
+
+type GetNodesByIDsRow struct {
+	ID        uuid.UUID `json:"id"`
+	PublicKey []byte    `json:"public_key"`
+	Name      *string   `json:"name"`
+	Latitude  *float64  `json:"latitude"`
+	Longitude *float64  `json:"longitude"`
+}
+
+func (q *Queries) GetNodesByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]GetNodesByIDsRow, error) {
+	rows, err := q.db.Query(ctx, getNodesByIDs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetNodesByIDsRow{}
+	for rows.Next() {
+		var i GetNodesByIDsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicKey,
+			&i.Name,
+			&i.Latitude,
+			&i.Longitude,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getObserverBrokers = `-- name: GetObserverBrokers :many
 SELECT broker_name, last_seen, last_packet_at
 FROM observer_brokers

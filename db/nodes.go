@@ -186,6 +186,24 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 	return node, nil
 }
 
+func (s *Store) GetNodesByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*api.ResolvedNode, error) {
+	rows, err := s.q.GetNodesByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[uuid.UUID]*api.ResolvedNode, len(rows))
+	for _, r := range rows {
+		result[r.ID] = &api.ResolvedNode{
+			ID:        r.ID,
+			Name:      r.Name,
+			PublicKey: hex.EncodeToString(r.PublicKey),
+			Latitude:  r.Latitude,
+			Longitude: r.Longitude,
+		}
+	}
+	return result, nil
+}
+
 func (s *Store) GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]api.NodeNeighbor, error) {
 	rows, err := s.q.GetNodeNeighbors(ctx, nodeID)
 	if err != nil {

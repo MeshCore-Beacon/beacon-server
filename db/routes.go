@@ -34,7 +34,12 @@ func (s *Store) ListKnownRoutes(ctx context.Context, iata string, hopCount int32
 	if err != nil {
 		return nil, err
 	}
-	return toKnownRoutes(rows), nil
+	ids := collectNodeIDs(rows)
+	nodes, err := s.GetNodesByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	return toKnownRoutes(rows, nodes), nil
 }
 
 func (s *Store) SearchKnownRoutes(ctx context.Context, iata, fromHash, toHash string) ([]api.KnownRoute, error) {
@@ -54,9 +59,13 @@ func (s *Store) SearchKnownRoutes(ctx context.Context, iata, fromHash, toHash st
 	if err != nil {
 		return nil, err
 	}
+	ids := collectNodeIDs(rows)
+	nodes, err := s.GetNodesByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
 	items := make([]api.KnownRoute, 0, len(rows))
 	for _, r := range rows {
-		// find positions and slice to the subsequence
 		fromPos, toPos := -1, -1
 		for i, h := range r.HashPrefix {
 			if fromPos == -1 && hex.EncodeToString(h) == fromHash {
@@ -74,7 +83,10 @@ func (s *Store) SearchKnownRoutes(ctx context.Context, iata, fromHash, toHash st
 		hashPrefix := r.HashPrefix[fromPos : toPos+1]
 		hops := make([]api.RouteHop, 0, len(nodeIDs))
 		for i, nodeID := range nodeIDs {
-			hop := api.RouteHop{NodeID: nodeID}
+			hop := api.RouteHop{
+				NodeID: nodeID,
+				Node:   nodes[nodeID],
+			}
 			if i < len(hashPrefix) {
 				hop.HashBytes = hex.EncodeToString(hashPrefix[i])
 			}
@@ -101,7 +113,12 @@ func (s *Store) GetKnownRoutesByNode(ctx context.Context, iata string, nodeID uu
 	if err != nil {
 		return nil, err
 	}
-	return toKnownRoutes(rows), nil
+	ids := collectNodeIDs(rows)
+	nodes, err := s.GetNodesByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	return toKnownRoutes(rows, nodes), nil
 }
 
 func (s *Store) GetCrossIATANeighbors(ctx context.Context, nodeID uuid.UUID, iata string) ([]api.NodeNeighbor, error) {
@@ -249,13 +266,14 @@ func extractFromNode(hops []api.RouteHop, nodeID uuid.UUID) []api.RouteHop {
 	return hops
 }
 
-func toKnownRoutes(rows []sqlc.KnownRoute) []api.KnownRoute {
+func toKnownRoutes(rows []sqlc.KnownRoute, nodes map[uuid.UUID]*api.ResolvedNode) []api.KnownRoute {
 	items := make([]api.KnownRoute, 0, len(rows))
 	for _, r := range rows {
 		hops := make([]api.RouteHop, 0, len(r.NodeIds))
 		for i, nodeID := range r.NodeIds {
 			hop := api.RouteHop{
 				NodeID: nodeID,
+				Node:   nodes[nodeID],
 			}
 			if i < len(r.HashPrefix) {
 				hop.HashBytes = hex.EncodeToString(r.HashPrefix[i])
@@ -273,4 +291,18 @@ func toKnownRoutes(rows []sqlc.KnownRoute) []api.KnownRoute {
 		})
 	}
 	return items
+}
+
+func collectNodeIDs(rows []sqlc.KnownRoute) []uuid.UUID {
+	seen := make(map[uuid.UUID]struct{})
+	var ids []uuid.UUID
+	for _, r := range rows {
+		for _, id := range r.NodeIds {
+			if _, ok := seen[id]; !ok {
+				seen[id] = struct{}{}
+				ids = append(ids, id)
+			}
+		}
+	}
+	return ids
 }

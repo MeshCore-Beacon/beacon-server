@@ -473,6 +473,10 @@ FROM nodes n
 LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id
 WHERE n.id = $1;
 
+-- name: GetNodesByIDs :many
+SELECT id, public_key, name, latitude, longitude
+FROM nodes
+WHERE id = ANY($1::uuid[]);
 
 -- name: ListNodes :many
 SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen,
