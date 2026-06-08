@@ -1,3 +1,6 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: agpl
+
 // Package iatadb provides a static mapping from IATA airport codes to
 // geographic metadata (country and continent).
 //

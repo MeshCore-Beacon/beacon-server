@@ -1,3 +1,6 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: agpl
+
 // Package router wires all HTTP routes onto the Chi router and injects
 // dependencies (hub, reader, ingest workers) into the handler closures.
 // All routes are mounted under /api/v1 with public and private groups

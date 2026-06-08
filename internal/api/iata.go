@@ -1,3 +1,6 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: agpl
+
 package api
 
 // IATA represents a known airport/location code used to group observers and packets.

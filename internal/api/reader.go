@@ -1,3 +1,6 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: agpl
+
 // Package api defines the response types and read interface for the Beacon REST API.
 package api
 

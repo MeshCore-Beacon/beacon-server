@@ -1,3 +1,6 @@
+# Copyright 2026 Beacon Contributors
+# SPDX-License-Identifier: agpl
+
 basePath: /api/v1
 definitions:
   github_com_MeshCore-Beacon_beacon-server_internal_api.AdvertObservation:

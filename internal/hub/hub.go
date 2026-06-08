@@ -1,3 +1,6 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: agpl
+
 // Package hub provides the central fan-out broker between the MQTT ingest
 // goroutines and connected WebSocket clients.
 //

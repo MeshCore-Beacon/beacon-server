@@ -1,3 +1,6 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: agpl
+
 // Package ws handles the WebSocket endpoint at GET /ws.
 //
 // Protocol (from design doc):

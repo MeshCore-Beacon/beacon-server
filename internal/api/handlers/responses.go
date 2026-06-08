@@ -1,3 +1,6 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: agpl
+
 // Package handlers provides HTTP route handlers for the Beacon REST API.
 package handlers
 

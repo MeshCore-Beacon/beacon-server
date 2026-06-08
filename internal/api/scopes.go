@@ -1,3 +1,6 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: agpl
+
 package api
 
 // ScopeSummary is the minimal scope representation used in filtered list responses.

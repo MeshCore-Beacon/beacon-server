@@ -1,3 +1,6 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: agpl
+
 package api
 
 // TraceTagSummary is a single trace tag with aggregate metadata.

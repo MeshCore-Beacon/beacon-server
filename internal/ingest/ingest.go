@@ -1,3 +1,6 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: agpl
+
 // Package ingest subscribes to a single MeshCore MQTT broker and drives the
 // observation pipeline described in the design doc.
 //

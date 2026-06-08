@@ -1,3 +1,6 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: agpl
+
 package api
 
 // ChannelMessage represents a single decrypted channel message.

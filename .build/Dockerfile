@@ -1,3 +1,6 @@
+# Copyright 2026 Beacon Contributors
+# SPDX-License-Identifier: agpl
+
 FROM golang:1.26-alpine AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
