@@ -543,12 +543,24 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		log.Printf("ingest[%s]: db: upsert packet failed from %s/%s: %v", w.cfg.BrokerName, iata, pubkeyHex, err)
 		return
 	}
-	heardAt, err := time.Parse("2006-01-02T15:04:05.000000", envelope.Timestamp)
+	// Try parsing with timezone offset first
+	heardAt, err := time.Parse("2006-01-02T15:04:05.000000-07:00", envelope.Timestamp)
+	if err != nil {
+		heardAt, err = time.Parse("2006-01-02T15:04:05.000000", envelope.Timestamp)
+	}
 	if err != nil {
 		heardAt, err = time.Parse("2006-01-02T15:04:05", envelope.Timestamp)
-		if err != nil {
-			log.Printf("ingest[%s]: error parsing time from %s/%s: %v", w.cfg.BrokerName, iata, pubkeyHex, err)
-			return
+	}
+	if err != nil {
+		log.Printf("ingest[%s]: failed to parse timestamp %q: %v", w.cfg.BrokerName, envelope.Timestamp, err)
+		heardAt = time.Now().UTC()
+	} else {
+		// clamp to server time if offset is suspicious (> 30 min drift)
+		now := time.Now().UTC()
+		diff := heardAt.UTC().Sub(now)
+		if diff > 30*time.Minute || diff < -30*time.Minute {
+			log.Printf("ingest[%s]: clamping suspicious timestamp %s (diff %v) for pubkey %s", w.cfg.BrokerName, envelope.Timestamp, diff, pubkeyHex[:8])
+			heardAt = now
 		}
 	}
 
