@@ -35,6 +35,12 @@ jobs:
       - name: Test
         run: go test ./...
 
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Vulnerability check
+        run: govulncheck ./...
+
       - name: Install swag
         run: go install github.com/swaggo/swag/cmd/swag@latest
 
