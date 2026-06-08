@@ -4,6 +4,7 @@ MeshCore Beacon is a MeshCore network observation backend. It connects to one or
 more MeshCore MQTT brokers, ingests LoRa packet traffic in real time, stores it
 in PostgreSQL, and streams live events to WebSocket clients.
 
+[![CodeQL](https://github.com/MeshCore-Beacon/beacon-server/actions/workflows/codeql.yml/badge.svg)](https://github.com/MeshCore-Beacon/beacon-server/actions/workflows/codeql.yml)
 [![CI](https://github.com/MeshCore-Beacon/beacon-server/actions/workflows/ci.yml/badge.svg)](https://github.com/MeshCore-Beacon/beacon-server/actions/workflows/ci.yml)
 [![Docker](https://github.com/MeshCore-Beacon/beacon-server/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/MeshCore-Beacon/beacon-server/actions/workflows/docker-publish.yml)
 
