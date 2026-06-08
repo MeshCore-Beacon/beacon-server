@@ -11,6 +11,7 @@ on:
 
 jobs:
   analyze:
+    if: false # remove after public release and enabled on repo
     name: Analyze
     runs-on: ubuntu-latest
     permissions:
