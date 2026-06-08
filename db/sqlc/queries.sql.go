@@ -783,6 +783,77 @@ func (q *Queries) GetObserverTelemetry(ctx context.Context, arg GetObserverTelem
 	return items, nil
 }
 
+const getObserverTelemetryBucketed = `-- name: GetObserverTelemetryBucketed :many
+SELECT
+  (date_trunc('hour', reported_at) +
+    (EXTRACT(HOUR FROM reported_at)::int / $4::int) * ($4::int * interval '1 hour'))::timestamptz AS bucket,
+  AVG(battery_voltage_mv)::int   AS battery_voltage_mv,
+  AVG(airtime_tx_pct)::real      AS airtime_tx_pct,
+  AVG(airtime_rx_pct)::real      AS airtime_rx_pct,
+  AVG(noise_floor_db)::real      AS noise_floor_db,
+  MAX(uptime_seconds)::bigint    AS uptime_seconds,
+  AVG(queue_length)::int         AS queue_length,
+  AVG(receive_errors)::int       AS receive_errors
+FROM observer_telemetry
+WHERE observer_id = $1
+  AND ($2::timestamptz IS NULL OR reported_at >= $2)
+  AND ($3::timestamptz IS NULL OR reported_at <= $3)
+GROUP BY bucket
+ORDER BY bucket ASC
+`
+
+type GetObserverTelemetryBucketedParams struct {
+	ObserverID uuid.UUID          `json:"observer_id"`
+	Column2    pgtype.Timestamptz `json:"column_2"`
+	Column3    pgtype.Timestamptz `json:"column_3"`
+	Column4    int32              `json:"column_4"`
+}
+
+type GetObserverTelemetryBucketedRow struct {
+	Bucket           pgtype.Timestamptz `json:"bucket"`
+	BatteryVoltageMv int32              `json:"battery_voltage_mv"`
+	AirtimeTxPct     float32            `json:"airtime_tx_pct"`
+	AirtimeRxPct     float32            `json:"airtime_rx_pct"`
+	NoiseFloorDb     float32            `json:"noise_floor_db"`
+	UptimeSeconds    int64              `json:"uptime_seconds"`
+	QueueLength      int32              `json:"queue_length"`
+	ReceiveErrors    int32              `json:"receive_errors"`
+}
+
+func (q *Queries) GetObserverTelemetryBucketed(ctx context.Context, arg GetObserverTelemetryBucketedParams) ([]GetObserverTelemetryBucketedRow, error) {
+	rows, err := q.db.Query(ctx, getObserverTelemetryBucketed,
+		arg.ObserverID,
+		arg.Column2,
+		arg.Column3,
+		arg.Column4,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetObserverTelemetryBucketedRow{}
+	for rows.Next() {
+		var i GetObserverTelemetryBucketedRow
+		if err := rows.Scan(
+			&i.Bucket,
+			&i.BatteryVoltageMv,
+			&i.AirtimeTxPct,
+			&i.AirtimeRxPct,
+			&i.NoiseFloorDb,
+			&i.UptimeSeconds,
+			&i.QueueLength,
+			&i.ReceiveErrors,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getPacketByHash = `-- name: GetPacketByHash :one
 SELECT p.packet_hash, p.payload_type, p.payload_version, p.route_type, p.transport_codes_present, p.region_code, p.sub_region_code, p.scope_id, p.origin_pubkey, p.raw_payload, p.raw_header, p.parsed_payload, p.decrypted, p.channel_hash, p.trace_tag, p.first_heard_at, p.last_heard_at, ts.name AS scope_name,
     cm.sender_name AS cm_sender_name,

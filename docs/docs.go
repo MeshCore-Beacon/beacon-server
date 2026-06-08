@@ -913,7 +913,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Bucketing interval, echoed back in the response; not yet applied server-side",
+                        "description": "Bucketing interval: 1h (default), 6h, or 24h",
                         "name": "interval",
                         "in": "query"
                     }

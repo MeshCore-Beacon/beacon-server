@@ -1544,8 +1544,7 @@ paths:
         in: query
         name: afterId
         type: integer
-      - description: Bucketing interval, echoed back in the response; not yet applied
-          server-side
+      - description: 'Bucketing interval: 1h (default), 6h, or 24h'
         in: query
         name: interval
         type: string

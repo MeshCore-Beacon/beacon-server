@@ -171,7 +171,7 @@ func listObserverAdverts(reader api.Reader) http.HandlerFunc {
 //	@Param		observerId	path		string	true	"Observer UUID"
 //	@Param		range		query		string	false	"Duration window e.g. 24h, 48h, 168h (default 24h)"
 //	@Param		afterId		query		int		false	"Return points after this telemetry ID for WS reconnection backfill"
-//	@Param		interval	query		string	false	"Bucketing interval, echoed back in the response; not yet applied server-side"
+//	@Param		interval	query		string	false	"Bucketing interval: 1h (default), 6h, or 24h"
 //	@Success	200			{object}	api.ObserverTelemetry
 //	@Failure	400			{object}	handlers.APIError
 //	@Failure	500			{object}	handlers.APIError
@@ -201,15 +201,39 @@ func getObserverTelemetry(reader api.Reader) http.HandlerFunc {
 			}
 			afterID = id
 		}
+		intervalParam := r.URL.Query().Get("interval")
+		if intervalParam == "" {
+			intervalParam = "1h"
+		}
+		var bucketHours int32
+		switch intervalParam {
+		case "1h":
+			bucketHours = 0 // use raw query
+		case "6h":
+			bucketHours = 6
+		case "24h":
+			bucketHours = 24
+		default:
+			respondError(w, http.StatusBadRequest, "invalid interval, use 1h, 6h or 24h")
+			return
+		}
 		since := time.Now().Add(-duration)
 		until := time.Time{} // no upper bound
-		telemetry, err := reader.GetObserverTelemetry(r.Context(), observerID, since, until, afterID)
+		var telemetry *api.ObserverTelemetry
+		if bucketHours == 0 {
+			telemetry, err = reader.GetObserverTelemetry(r.Context(), observerID, since, until, afterID)
+		} else {
+			points, err := reader.GetObserverTelemetryBucketed(r.Context(), observerID, since, until, bucketHours)
+			if err == nil {
+				telemetry = &api.ObserverTelemetry{Points: points}
+			}
+		}
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
 		telemetry.Range = rangeParam
-		telemetry.Interval = r.URL.Query().Get("interval") // echoed back, not used server-side yet
+		telemetry.Interval = intervalParam
 		respond(w, http.StatusOK, telemetry)
 	}
 }

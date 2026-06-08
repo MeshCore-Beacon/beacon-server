@@ -166,8 +166,6 @@ func (s *Store) InsertObserverTelemetry(ctx context.Context, observerID uuid.UUI
 }
 
 func (s *Store) GetObserverTelemetry(ctx context.Context, observerID uuid.UUID, since, until time.Time, afterID int64) (*api.ObserverTelemetry, error) {
-	// TODO: implement server-side bucketing by interval when needed.
-	// Currently returns all points in the range at stored resolution.
 	rows, err := s.q.GetObserverTelemetry(ctx, sqlc.GetObserverTelemetryParams{
 		ObserverID: observerID,
 		Column2:    pgtype.Timestamptz{Time: since, Valid: !since.IsZero()},
@@ -191,6 +189,39 @@ func (s *Store) GetObserverTelemetry(ctx context.Context, observerID uuid.UUID, 
 		})
 	}
 	return &api.ObserverTelemetry{Points: points}, nil
+}
+
+func (s *Store) GetObserverTelemetryBucketed(ctx context.Context, observerID uuid.UUID, since, until time.Time, bucketHours int32) ([]api.ObserverTelemetryPoint, error) {
+	var sinceTS, untilTS pgtype.Timestamptz
+	if !since.IsZero() {
+		sinceTS = pgtype.Timestamptz{Time: since, Valid: true}
+	}
+	if !until.IsZero() {
+		untilTS = pgtype.Timestamptz{Time: until, Valid: true}
+	}
+	rows, err := s.q.GetObserverTelemetryBucketed(ctx, sqlc.GetObserverTelemetryBucketedParams{
+		ObserverID: observerID,
+		Column2:    sinceTS,
+		Column3:    untilTS,
+		Column4:    bucketHours,
+	})
+	if err != nil {
+		return nil, err
+	}
+	points := make([]api.ObserverTelemetryPoint, 0, len(rows))
+	for _, r := range rows {
+		points = append(points, api.ObserverTelemetryPoint{
+			T:             r.Bucket.Time.UnixMilli(),
+			BatteryMV:     &r.BatteryVoltageMv,
+			AirtimeTxPct:  &r.AirtimeTxPct,
+			AirtimeRxPct:  &r.AirtimeRxPct,
+			NoiseFloorDB:  &r.NoiseFloorDb,
+			UptimeSeconds: &r.UptimeSeconds,
+			QueueLength:   &r.QueueLength,
+			ReceiveErrors: &r.ReceiveErrors,
+		})
+	}
+	return points, nil
 }
 
 func (s *Store) ListObserverAdverts(ctx context.Context, observerID uuid.UUID, cursor int64, limit int32) (api.Page[api.AdvertObservation], error) {

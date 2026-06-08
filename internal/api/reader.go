@@ -81,7 +81,9 @@ type Reader interface {
 	// GetObserverTelemetry returns telemetry points for an observer within the given time range.
 	// since and until define the window; pass zero times to use defaults (last 24h).
 	GetObserverTelemetry(ctx context.Context, observerID uuid.UUID, since, until time.Time, afterID int64) (*ObserverTelemetry, error)
-	// TODO: add interval time.Duration param for server-side bucketing
+
+	// GetObserverTelemetryBucketed returns telemetry points for an observer bucketed into N-hour intervals.
+	GetObserverTelemetryBucketed(ctx context.Context, observerID uuid.UUID, since, until time.Time, bucketHours int32) ([]ObserverTelemetryPoint, error)
 
 	// GetObserverScopes returns the names of all transport scopes an observer has
 	// been seen forwarding packets for, ordered alphabetically.
