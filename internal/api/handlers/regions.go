@@ -101,7 +101,7 @@ func resolveRegionIATAs(ctx context.Context, regionID, regionSlug string, reader
 	var err error
 	switch {
 	case regionID != "":
-		rid, e := strconv.Atoi(regionID)
+		rid, e := strconv.ParseInt(regionID, 10, 32)
 		if e != nil {
 			return nil, fmt.Errorf("invalid regionId: %w", e)
 		}
