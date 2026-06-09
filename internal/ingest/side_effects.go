@@ -95,6 +95,10 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 			log.Printf("ingest[%s]: db: upsert node failed: %v", w.cfg.BrokerName, err)
 			return
 		}
+		// invalidate cache for this node
+		if w.onNodeUpsert != nil {
+			w.onNodeUpsert(ctx, nodeID)
+		}
 		// if the advert was forwarded, the first hop is a neighbor
 		if packet.PathHashCount() > 0 && (advert.Type() == meshcore.AdvertTypeRepeater || advert.Type() == meshcore.AdvertTypeRoom) {
 			firstHop := packet.PathHashes()

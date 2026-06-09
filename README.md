@@ -107,17 +107,20 @@ improves automatically as the mesh is observed over time.
 
 ### Environment variables (`.env`)
 
-| Variable                 | Default       | Description                                                 |
-| ------------------------ | ------------- | ----------------------------------------------------------- |
-| `LISTEN_ADDR`            | `:8080`       | HTTP listen address                                         |
-| `POSTGRES_DSN`           | —             | PostgreSQL connection string                                |
-| `CONFIG_PATH`            | `config.yaml` | Path to YAML config file                                    |
-| `MQTT_BROKER_1_URL`      | —             | Broker 1 WebSocket URL (e.g. `wss://mqtt1.example.com:443`) |
-| `MQTT_BROKER_1_USERNAME` | —             | Broker 1 username                                           |
-| `MQTT_BROKER_1_PASSWORD` | —             | Broker 1 password                                           |
-| `MQTT_BROKER_2_URL`      | —             | Broker 2 WebSocket URL                                      |
-| `MQTT_BROKER_2_USERNAME` | —             | Broker 2 username                                           |
-| `MQTT_BROKER_2_PASSWORD` | —             | Broker 2 password                                           |
+| Variable                 | Default       | Description                                                  |
+| ------------------------ | ------------- | ------------------------------------------------------------ |
+| `LISTEN_ADDR`            | `:8080`       | HTTP listen address                                          |
+| `POSTGRES_DSN`           | —             | PostgreSQL connection string                                 |
+| `REDIS_ADDR`             | —             | Redis address (`host:port`). Leave unset to disable caching. |
+| `REDIS_PASSWORD`         | —             | Redis password (optional)                                    |
+| `REDIS_DB`               | `0`           | Redis database index                                         |
+| `CONFIG_PATH`            | `config.yaml` | Path to YAML config file                                     |
+| `MQTT_BROKER_1_URL`      | —             | Broker 1 WebSocket URL (e.g. `wss://mqtt1.example.com:443`)  |
+| `MQTT_BROKER_1_USERNAME` | —             | Broker 1 username                                            |
+| `MQTT_BROKER_1_PASSWORD` | —             | Broker 1 password                                            |
+| `MQTT_BROKER_2_URL`      | —             | Broker 2 WebSocket URL                                       |
+| `MQTT_BROKER_2_USERNAME` | —             | Broker 2 username                                            |
+| `MQTT_BROKER_2_PASSWORD` | —             | Broker 2 password                                            |
 
 ### Config file (`config.yaml`)
 
@@ -173,6 +176,20 @@ packets:
 # WebSocket settings.
 websocket:
   max_connections_per_ip: 5 # default: 5
+
+# Redis caching layer (optional).
+# Caches read-heavy, slow-changing responses to reduce PostgreSQL load.
+# Connection details (address, password, database) are set via environment
+# variables. Leave REDIS_ADDR unset to disable caching entirely.
+# TTLs are duration strings e.g. "30m", "1h". Per-category TTLs override
+# the global ttl. Any unset category inherits ttl. Default: 1h.
+cache:
+  ttl: "1h"
+  ttls:
+    stats: "1h" # stats endpoints (backed by materialized views)
+    reference: "1h" # IATAs, regions, scopes
+    nodes: "1h" # node detail (also explicitly invalidated on upsert)
+    observers: "1h" # observer detail (also explicitly invalidated on upsert)
 
 # Geographic ingest filter (optional).
 # Drop packets from observers outside the specified area.

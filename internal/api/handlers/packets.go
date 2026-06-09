@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
@@ -212,7 +213,7 @@ func listPacketsBackfill(reader api.Reader) http.HandlerFunc {
 //	@Router		/packets/{packetHash} [get]
 func getPacket(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		hashHex := chi.URLParam(r, "packetHash")
+		hashHex := strings.ToLower(chi.URLParam(r, "packetHash"))
 		hash, err := hex.DecodeString(hashHex)
 		if err != nil {
 			respondError(w, http.StatusBadRequest, "invalid packet hash")
