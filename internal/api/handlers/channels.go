@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
@@ -63,7 +64,7 @@ func listChannels(reader api.Reader) http.HandlerFunc {
 			cursor = c
 		}
 		var hashHex []byte
-		if hash := r.URL.Query().Get("hash"); hash != "" {
+		if hash := strings.ToLower(r.URL.Query().Get("hash")); hash != "" {
 			h, decodeErr := hex.DecodeString(hash)
 			if decodeErr != nil {
 				respondError(w, http.StatusBadRequest, "invalid channel hash")

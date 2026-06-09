@@ -6,6 +6,7 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
@@ -80,9 +81,9 @@ func listKnownRoutes(reader api.Reader) http.HandlerFunc {
 //	@Router		/routes/search [get]
 func searchKnownRoutes(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		iata := r.URL.Query().Get("iata")
-		from := r.URL.Query().Get("from")
-		to := r.URL.Query().Get("to")
+		iata := strings.ToUpper(r.URL.Query().Get("iata"))
+		from := strings.ToLower(r.URL.Query().Get("from"))
+		to := strings.ToLower(r.URL.Query().Get("to"))
 		if iata == "" || from == "" || to == "" {
 			respondError(w, http.StatusBadRequest, "iata, from and to are required")
 			return
@@ -111,10 +112,10 @@ func searchKnownRoutes(reader api.Reader) http.HandlerFunc {
 //	@Router		/routes/cross [get]
 func searchCrossIATARoutes(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		fromHash := r.URL.Query().Get("fromHash")
-		fromIATA := r.URL.Query().Get("fromIata")
-		toHash := r.URL.Query().Get("toHash")
-		toIATA := r.URL.Query().Get("toIata")
+		fromHash := strings.ToLower(r.URL.Query().Get("fromHash"))
+		fromIATA := strings.ToUpper(r.URL.Query().Get("fromIata"))
+		toHash := strings.ToLower(r.URL.Query().Get("toHash"))
+		toIATA := strings.ToUpper(r.URL.Query().Get("toIata"))
 		if fromHash == "" || fromIATA == "" || toHash == "" || toIATA == "" {
 			respondError(w, http.StatusBadRequest, "fromHash, fromIata, toHash and toIata are required")
 			return

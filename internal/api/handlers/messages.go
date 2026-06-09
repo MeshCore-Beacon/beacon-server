@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
@@ -44,7 +45,7 @@ func MessagesRouter(reader api.Reader) http.Handler {
 func listMessages(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		channelIDParam := r.URL.Query().Get("channelID")
-		channelHashParam := r.URL.Query().Get("channelHash")
+		channelHashParam := strings.ToLower(r.URL.Query().Get("channelHash"))
 		if channelIDParam != "" && channelHashParam != "" {
 			respondError(w, http.StatusBadRequest, "filter by either channelId or channelHash, not both")
 			return

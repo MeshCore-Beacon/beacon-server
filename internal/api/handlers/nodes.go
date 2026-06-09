@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/go-chi/chi/v5"
@@ -83,7 +84,7 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 			cursor = c
 		}
 		var pubkey []byte
-		if pubkeyParam := r.URL.Query().Get("pubkey"); pubkeyParam != "" {
+		if pubkeyParam := strings.ToLower(r.URL.Query().Get("pubkey")); pubkeyParam != "" {
 			b, err := hex.DecodeString(pubkeyParam)
 			if err != nil {
 				respondError(w, http.StatusBadRequest, "pubkey must be a valid hex string")
