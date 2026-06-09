@@ -181,7 +181,7 @@ func handleClientMessage(ctx context.Context, client *hub.Client, reader api.Rea
 		}
 		iatas := msg.Scope.IATAs
 		for _, ridStr := range msg.Scope.RegionIDs {
-			rid, err := strconv.Atoi(ridStr)
+			rid, err := strconv.ParseInt(ridStr, 10, 32)
 			if err != nil {
 				log.Printf("ws[%s]: invalid regionId %q, skipping", connID, ridStr)
 				continue
