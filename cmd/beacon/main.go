@@ -267,7 +267,7 @@ func main() {
 	}()
 
 	// ── HTTP server ──────────────────────────────────────────────────────────
-	r := router.New(h, reader, []*ingest.Worker{broker1, broker2}, maxConnsPerIP)
+	r := router.New(h, reader, []*ingest.Worker{broker1, broker2}, maxConnsPerIP, cfg.CORS)
 
 	srv := &http.Server{
 		Addr:    addr,

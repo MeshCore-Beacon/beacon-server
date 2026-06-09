@@ -75,6 +75,18 @@ packets:
 websocket:
   max_connections_per_ip: 5 # default: 5
 
+# CORS configuration.
+# Controls which origins, methods and headers are allowed for cross-origin requests.
+# Defaults to allowing all origins with GET/HEAD/OPTIONS if omitted — appropriate
+# for a public read-only API. Restrict allowed_origins if you expose write endpoints.
+#cors:
+#  allowed_origins:
+#    - "https://app.example.com"
+#  allowed_methods: [GET, HEAD, OPTIONS, POST]
+#  allowed_headers: [Accept, Authorization, Content-Type]
+#  allow_credentials: false
+#  max_age: 300
+
 # Redis caching layer.
 # If REDIS_ADDR is not set, caching is disabled and all reads go directly to PostgreSQL.
 # TTLs are specified as duration strings e.g. "30m", "1h", "2h".
