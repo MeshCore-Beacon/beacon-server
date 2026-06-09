@@ -158,7 +158,7 @@ type clientMessage struct {
 type subscribeScope struct {
 	IATAs         []string        `json:"iatas"`
 	RegionIDs     []string        `json:"regionIds"`
-	RegionSlugs   []string        `json:"reagionSlugs"`
+	RegionSlugs   []string        `json:"regionSlugs"`
 	PayloadTypes  []uint8         `json:"payloadTypes"`
 	RouteTypes    []uint8         `json:"routeTypes"`
 	ChannelHashes []string        `json:"channelHashes"`

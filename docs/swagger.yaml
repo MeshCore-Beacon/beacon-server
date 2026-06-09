@@ -734,6 +734,14 @@ definitions:
         description: '"observer" or "node"'
         type: string
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.RawHop:
+    properties:
+      hash:
+        description: hex-encoded path hash
+        type: string
+      snr:
+        type: number
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.Region:
     properties:
       centerLat:
@@ -906,6 +914,10 @@ definitions:
         type: integer
       packetHash:
         type: string
+      rawPath:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.RawHop'
+        type: array
       resolvedRoute:
         items:
           $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ResolvedHop'

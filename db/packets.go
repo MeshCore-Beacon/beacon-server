@@ -335,7 +335,10 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 				iatas = append(iatas, v.Iata)
 			}
 		}
-		p.ResolvedRoute = s.resolveTraceRoute(ctx, row.ParsedPayload, iatas)
+		var parsed tracePayload
+		if err := json.Unmarshal(row.ParsedPayload, &parsed); err == nil {
+			p.ResolvedRoute = s.resolveTraceRoute(ctx, &parsed, iatas)
+		}
 	}
 	return p, nil
 }

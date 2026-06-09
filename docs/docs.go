@@ -2972,6 +2972,18 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.RawHop": {
+            "type": "object",
+            "properties": {
+                "hash": {
+                    "description": "hex-encoded path hash",
+                    "type": "string"
+                },
+                "snr": {
+                    "type": "number"
+                }
+            }
+        },
         "github_com_MeshCore-Beacon_beacon-server_internal_api.Region": {
             "type": "object",
             "properties": {
@@ -3227,6 +3239,12 @@ const docTemplate = `{
                 },
                 "packetHash": {
                     "type": "string"
+                },
+                "rawPath": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.RawHop"
+                    }
                 },
                 "resolvedRoute": {
                     "type": "array",

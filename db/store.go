@@ -9,7 +9,6 @@ package db
 import (
 	"context"
 	"encoding/hex"
-	"encoding/json"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
@@ -93,79 +92,4 @@ func toChannelMessage(id int64, packetHashHex string, channelHash []byte, sender
 		SentAt:           sentAt.Time.UnixMilli(),
 		ObservationCount: observationCount,
 	}
-}
-
-// resolveTraceRoute resolves the path hashes from a trace parsedPayload across
-// all provided IATAs, merging results per hop with best-confidence-wins semantics.
-// Returns nil if the payload cannot be parsed or contains no path hashes.
-func (s *Store) resolveTraceRoute(ctx context.Context, parsedPayload []byte, iatas []string) []api.ResolvedHop {
-	var tracePayload struct {
-		PathHashes []string  `json:"pathHashes"`
-		Flags      byte      `json:"flags"`
-		SNRValues  []float32 `json:"snrValues"`
-	}
-	if err := json.Unmarshal(parsedPayload, &tracePayload); err != nil || len(tracePayload.PathHashes) == 0 {
-		return nil
-	}
-	hashSize := int(1 << (tracePayload.Flags & 0x03))
-	hashes := make([][]byte, 0, len(tracePayload.PathHashes))
-	for _, h := range tracePayload.PathHashes {
-		b, err := hex.DecodeString(h)
-		if err == nil {
-			hashes = append(hashes, b)
-		}
-	}
-	confidenceRank := map[string]int{"none": 0, "ambiguous": 1, "high": 2}
-	type hopResult struct {
-		confidence string
-		entries    []api.ResolvedPathEntry
-	}
-	merged := make([]hopResult, len(hashes))
-	for i := range merged {
-		merged[i] = hopResult{confidence: "none"}
-	}
-	for _, iata := range iatas {
-		resolved, err := s.ResolvePathHashes(ctx, iata, hashes)
-		if err != nil {
-			continue
-		}
-		for i, hash := range hashes {
-			key := hex.EncodeToString(hash[:hashSize])
-			entries := resolved[key]
-			var confidence string
-			switch len(entries) {
-			case 0:
-				confidence = "none"
-			case 1:
-				confidence = "high"
-			default:
-				confidence = "ambiguous"
-			}
-			if confidenceRank[confidence] > confidenceRank[merged[i].confidence] {
-				merged[i] = hopResult{confidence: confidence, entries: entries}
-			}
-		}
-	}
-	route := make([]api.ResolvedHop, 0, len(hashes))
-	for i, hr := range merged {
-		hop := api.ResolvedHop{
-			Confidence: hr.confidence,
-			Nodes:      make([]api.ResolvedNode, 0, len(hr.entries)),
-		}
-		if i < len(tracePayload.SNRValues) {
-			snr := tracePayload.SNRValues[i]
-			hop.SNR = &snr
-		}
-		for _, e := range hr.entries {
-			hop.Nodes = append(hop.Nodes, api.ResolvedNode{
-				ID:        e.NodeID,
-				Name:      e.Name,
-				Latitude:  e.Latitude,
-				Longitude: e.Longitude,
-				PublicKey: hex.EncodeToString(e.PublicKey),
-			})
-		}
-		route = append(route, hop)
-	}
-	return route
 }

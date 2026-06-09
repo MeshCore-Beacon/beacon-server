@@ -21,7 +21,13 @@ type TracePacket struct {
 	Scope         *string       `json:"scope,omitempty"`
 	FirstHeardAt  int64         `json:"firstHeardAt"` // epoch ms
 	LastHeardAt   int64         `json:"lastHeardAt"`  // epoch ms
+	RawPath       []RawHop      `json:"rawPath"`
 	ResolvedRoute []ResolvedHop `json:"resolvedRoute"`
+}
+
+type RawHop struct {
+	Hash string   `json:"hash"` // hex-encoded path hash
+	SNR  *float32 `json:"snr,omitempty"`
 }
 
 // TraceDetail is the full trace series for a given trace tag.
