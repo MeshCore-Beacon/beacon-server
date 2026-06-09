@@ -78,8 +78,9 @@ swag init             # if you changed any handler or api type (see below)
 
 All schema changes must include a proper migration path:
 
-- Add SQL to `db/migrations/001_schema.sql` (we use a single migration file for
-  now — append to the appropriate section with a comment)
+- Add a new migration file to `db/migrations/` following the existing naming
+  convention (e.g. `002_add_observation_count.sql`). Do not modify existing
+  migration files — append only via new files.
 - Update `db/queries/queries.sql` with any new or modified queries
 - Re-run `sqlc generate` to regenerate `db/sqlc/`
 - Update the store layer in `db/` to expose the new functionality
