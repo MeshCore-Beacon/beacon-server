@@ -75,6 +75,25 @@ packets:
 websocket:
   max_connections_per_ip: 5 # default: 5
 
+# Redis caching layer.
+# If REDIS_ADDR is not set, caching is disabled and all reads go directly to PostgreSQL.
+# TTLs are specified as duration strings e.g. "30m", "1h", "2h".
+# Per-category TTLs override the global ttl. Any category left unset inherits ttl.
+cache:
+  # Global default TTL for all cached responses. Defaults to 1h if not set.
+  ttl: "1h"
+  ttls:
+    # Aggregated stats endpoints (overview, observations, breakdowns, top nodes/observers,
+    # radio presets, scope stats). Backed by materialized views refreshed hourly.
+    stats: "1h"
+    # Mostly-static reference data (IATAs, regions, scopes).
+    # Only changes when new observers arrive or config is reseeded.
+    reference: "1h"
+    # Individual node detail. Also explicitly invalidated on upsert.
+    nodes: "1h"
+    # Individual observer detail. Also explicitly invalidated on upsert.
+    observers: "1h"
+
 # Geographic ingest filter (optional).
 # Drop packets from observers outside the specified area at ingest time.
 # Country codes are ISO 3166-1 alpha-2 (e.g. CA, US, GB).

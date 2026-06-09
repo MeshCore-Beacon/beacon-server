@@ -145,6 +145,27 @@ For paginated responses use the generic page wrapper:
 
 ---
 
+## Caching
+
+Beacon uses a Redis-backed caching layer in `internal/cache`. If you add a new
+REST endpoint backed by a new `api.Reader` method, consider whether it should be
+cached:
+
+- Add the method to `CachedReader` in `internal/cache/reader.go`
+- Pass-through to `cr.inner` if the data is highly dynamic, paginated with many
+  filter combinations, or low traffic
+- Use `getOrSet` with an appropriate TTL category (`cr.ttl.Stats`,
+  `cr.ttl.Reference`, `cr.ttl.Nodes`, or `cr.ttl.Observers`) for read-heavy,
+  slow-changing responses
+- If the data is mutated by the ingest path, add an invalidation call in
+  `internal/ingest/side_effects.go` via the `onNodeUpsert` or `onObserverUpsert`
+  callbacks, or add a new callback following the same pattern
+
+Cache keys live as constants at the top of `reader.go`. Use the `beacon:`
+namespace prefix and include all parameters that affect the response in the key.
+
+---
+
 ## Updating the IATA database
 
 Beacon includes a static IATA → country/continent mapping compiled into the

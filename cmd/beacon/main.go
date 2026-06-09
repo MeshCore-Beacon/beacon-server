@@ -12,12 +12,15 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/db"
 	_ "github.com/MeshCore-Beacon/beacon-server/docs"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api/router"
+	"github.com/MeshCore-Beacon/beacon-server/internal/cache"
 	"github.com/MeshCore-Beacon/beacon-server/internal/config"
 	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
 	"github.com/MeshCore-Beacon/beacon-server/internal/iatadb"
@@ -112,6 +115,33 @@ func main() {
 	defer pool.Close()
 
 	store := db.New(pool)
+
+	// ── Redis cache layer ────────────────────────────────────────────────────
+	var reader api.Reader = store
+	if redisAddr := os.Getenv("REDIS_ADDR"); redisAddr != "" {
+		redisClient := cache.NewClient(
+			redisAddr,
+			os.Getenv("REDIS_PASSWORD"),
+			func() int {
+				if db := os.Getenv("REDIS_DB"); db != "" {
+					n, err := strconv.Atoi(db)
+					if err == nil {
+						return n
+					}
+				}
+				return 0
+			}(),
+		)
+		if err := redisClient.Ping(ctx); err != nil {
+			log.Printf("warning: redis unavailable at %s, caching disabled: %v", redisAddr, err)
+		} else {
+			ttls := cache.ResolveTTLs(cfg.Cache)
+			reader = cache.NewCachedReader(store, redisClient, ttls)
+			defer redisClient.Close()
+			log.Printf("cache: Redis connected at %s (stats=%s reference=%s nodes=%s observers=%s)",
+				redisAddr, ttls.Stats, ttls.Reference, ttls.Nodes, ttls.Observers)
+		}
+	}
 
 	// refresh meterialized views on boot or restart to stay fresh
 	refreshMaterializedViews(ctx, store)
@@ -208,6 +238,11 @@ func main() {
 		scopes,
 	)
 
+	if cr, ok := reader.(*cache.CachedReader); ok {
+		broker1.SetCacheInvalidators(cr.InvalidateNode, cr.InvalidateObserver)
+		broker2.SetCacheInvalidators(cr.InvalidateNode, cr.InvalidateObserver)
+	}
+
 	go broker1.Start(ctx)
 	go broker2.Start(ctx)
 
@@ -232,7 +267,7 @@ func main() {
 	}()
 
 	// ── HTTP server ──────────────────────────────────────────────────────────
-	r := router.New(h, store, []*ingest.Worker{broker1, broker2}, maxConnsPerIP)
+	r := router.New(h, reader, []*ingest.Worker{broker1, broker2}, maxConnsPerIP)
 
 	srv := &http.Server{
 		Addr:    addr,

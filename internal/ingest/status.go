@@ -84,6 +84,10 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 		log.Printf("ingest[%s]: db: upsert observer failed in status from %s: %v", w.cfg.BrokerName, pubkeyHex, err)
 		return
 	}
+	// invalidate cache for observer details
+	if w.onObserverUpsert != nil {
+		w.onObserverUpsert(ctx, id)
+	}
 	if err := w.db.UpsertObserverBroker(ctx, id, w.cfg.BrokerName); err != nil {
 		log.Printf("ingest[%s]: db: upsert observer broker failed in status from %s: %v", w.cfg.BrokerName, pubkeyHex, err)
 	}

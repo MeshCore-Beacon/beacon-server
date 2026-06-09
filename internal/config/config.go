@@ -22,6 +22,42 @@ type Config struct {
 	Packets     PacketsConfig         `yaml:"packets"`
 	Ingest      IngestFilterConfig    `yaml:"ingest"`
 	Scopes      []ScopeConfig         `yaml:"scopes"`
+	Cache       CacheConfig           `yaml:"cache"`
+}
+
+// CacheConfig controls Redis caching behaviour.
+// If Addr is not set (via REDIS_ADDR env var), caching is disabled entirely
+// and Beacon falls back to querying PostgreSQL directly for all reads.
+type CacheConfig struct {
+	// TTL is the default cache entry lifetime applied to all categories
+	// that do not have an explicit override in TTLs. Defaults to 1h if not set.
+	TTL duration `yaml:"ttl"`
+
+	// TTLs holds optional per-category TTL overrides. Any category left
+	// at zero will fall back to TTL.
+	TTLs CacheTTLsConfig `yaml:"ttls"`
+}
+
+// CacheTTLsConfig holds per-category TTL overrides for the cache layer.
+// Each field is optional — omit it in config to inherit the global TTL.
+type CacheTTLsConfig struct {
+	// Stats controls the TTL for aggregated network statistics endpoints
+	// (overview, observations, payload breakdown, top nodes/observers, radio presets, scope stats).
+	// These are backed by materialized views refreshed hourly, so values under 1m are rarely useful.
+	Stats duration `yaml:"stats"`
+
+	// Reference controls the TTL for mostly-static reference data
+	// (IATAs, regions, scopes). These change only when new observers
+	// arrive or config is reseeded.
+	Reference duration `yaml:"reference"`
+
+	// Nodes controls the TTL for individual node detail responses.
+	// Acts as a safety-net expiry alongside explicit invalidation on upsert.
+	Nodes duration `yaml:"nodes"`
+
+	// Observers controls the TTL for individual observer detail responses.
+	// Acts as a safety-net expiry alongside explicit invalidation on upsert.
+	Observers duration `yaml:"observers"`
 }
 
 // ScopeConfig defines a regional transport scope.

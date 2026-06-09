@@ -174,12 +174,14 @@ type ScopeStore interface {
 
 // Worker holds the dependencies for one broker's ingest loop.
 type Worker struct {
-	cfg    Config
-	db     DB
-	hub    *hub.Hub
-	keys   ChannelKeyStore
-	scopes ScopeStore
-	client mqtt.Client
+	cfg              Config
+	db               DB
+	hub              *hub.Hub
+	keys             ChannelKeyStore
+	scopes           ScopeStore
+	client           mqtt.Client
+	onNodeUpsert     func(ctx context.Context, nodeID uuid.UUID)
+	onObserverUpsert func(ctx context.Context, observerID uuid.UUID)
 }
 
 // New creates an ingest Worker. Call Start() to connect and begin processing.
@@ -234,6 +236,11 @@ func (w *Worker) IsConnected() bool {
 		return false
 	}
 	return w.client.IsConnected()
+}
+
+func (w *Worker) SetCacheInvalidators(onNode, onObserver func(ctx context.Context, id uuid.UUID)) {
+	w.onNodeUpsert = onNode
+	w.onObserverUpsert = onObserver
 }
 
 // subscribe registers the wildcard topic handler after (re)connect.
