@@ -31,3 +31,22 @@ jobs:
 
     - name: Display coverage
       run: go tool cover -func=coverage.out
+
+    - name: Extract coverage percentage
+      id: coverage
+      run: |
+        COVERAGE=$(go tool cover -func=coverage.out | grep ^total | awk '{print $3}' | tr -d '%')
+        echo "pct=$COVERAGE" >> $GITHUB_OUTPUT
+
+    - name: Update coverage badge
+      uses: schneegans/dynamic-badges-action@v1.7.0
+      with:
+        auth: ${{ secrets.GIST_SECRET }}
+        gistID: 3e707bdf3f06ecb4575166ce598051c3
+        filename: beacon-coverage.json
+        label: coverage
+        message: ${{ steps.coverage.outputs.pct }}%
+        valColorRange: ${{ steps.coverage.outputs.pct }}
+        maxColorRange: 100
+        minColorRange: 0
+      if: github.ref == 'refs/heads/main'
