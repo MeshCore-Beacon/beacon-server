@@ -1,0 +1,52 @@
+# Copyright 2026 Beacon Contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+name: Test Coverage
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 2  # Needed for PR diffs
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+        cache: true
+
+    - name: Install dependencies
+      run: go mod download
+
+    - name: Run tests with coverage
+      run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+    - name: Display coverage
+      run: go tool cover -func=coverage.out
+
+    - name: Extract coverage percentage
+      id: coverage
+      run: |
+        COVERAGE=$(go tool cover -func=coverage.out | grep ^total | awk '{print $3}' | tr -d '%')
+        echo "pct=$COVERAGE" >> $GITHUB_OUTPUT
+
+    - name: Update coverage badge
+      uses: schneegans/dynamic-badges-action@v1.7.0
+      with:
+        auth: ${{ secrets.GIST_SECRET }}
+        gistID: 3e707bdf3f06ecb4575166ce598051c3
+        filename: beacon-coverage.json
+        label: coverage
+        message: ${{ steps.coverage.outputs.pct }}%
+        valColorRange: ${{ steps.coverage.outputs.pct }}
+        maxColorRange: 100
+        minColorRange: 0
+      if: github.ref == 'refs/heads/main'
