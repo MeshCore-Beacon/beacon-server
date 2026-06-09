@@ -436,13 +436,6 @@ LEFT JOIN observers o ON o.id = po.observer_id
 WHERE po.packet_hash = $1
 ORDER BY po.heard_at ASC;
 
--- name: ListObservationsForObserver :many
-SELECT * FROM packet_observations
-WHERE observer_id = $1
-  AND ($2::timestamptz IS NULL OR heard_at >= $2)
-ORDER BY heard_at DESC
-LIMIT $3;
-
 -- ============================================================
 -- NODES
 -- ============================================================
@@ -473,16 +466,6 @@ WHERE id = $1 AND supports_multibyte_traces = FALSE;
 
 -- name: SetNodeDefaultScope :exec
 UPDATE nodes SET default_scope_id = $2 WHERE id = $1;
-
--- name: GetNodeByPubkey :one
-SELECT n.*, ts.name AS default_scope_name,
-  EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
-  (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
-  (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
-   FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas
-FROM nodes n
-LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id
-WHERE n.public_key = $1;
 
 -- name: GetNodeByID :one
 SELECT n.*, ts.name AS default_scope_name,
@@ -529,9 +512,6 @@ WHERE
 GROUP BY n.id, ts.name
 ORDER BY n.last_seen DESC
 LIMIT $8;
-
--- name: GetNodeIATAs :many
-SELECT iata FROM node_iatas WHERE node_id = $1 ORDER BY iata ASC;
 
 -- name: ListNodeObservations :many
 SELECT po.id, encode(po.packet_hash, 'hex') AS packet_hash_hex,
@@ -582,10 +562,6 @@ ON CONFLICT (channel_hash) WHERE key_fingerprint IS NULL DO UPDATE SET
   last_seen = NOW()
 RETURNING id;
 
--- name: SetChannelKeyKnown :exec
-UPDATE channels SET key_known = TRUE
-WHERE channel_hash = $1 AND key_fingerprint = $2;
-
 -- name: ListChannels :many
 -- Returns channels ordered by last seen, optionally filtered by hash and/or IATA.
 -- Pass NULL for hash to skip hash filtering. Pass empty string for iata to skip IATA filtering.
@@ -602,16 +578,6 @@ WHERE ($1::bytea IS NULL OR c.channel_hash = $1)
   AND ($3::timestamptz IS NULL OR c.last_seen < $3)
 ORDER BY c.last_seen DESC
 LIMIT $4;
-
--- name: GetChannelsByHash :many
--- Returns all channels for a given hash (may be multiple on hash collision).
-SELECT * FROM channels WHERE channel_hash = $1 ORDER BY last_seen DESC LIMIT $2;
-
--- name: GetChannelByHashAndFingerprint :one
-SELECT * FROM channels WHERE channel_hash = $1 AND key_fingerprint = $2;
-
--- name: GetChannelByHashtag :one
-SELECT * FROM channels WHERE hashtag = $1;
 
 -- name: GetChannelByID :one
 SELECT * FROM channels WHERE id = $1;
