@@ -706,6 +706,17 @@ WHERE po.heard_at > $1
 GROUP BY p.payload_type
 ORDER BY count DESC;
 
+-- name: GetStatsNodeTypes :many
+-- Returns node counts grouped by type, optionally filtered by IATA.
+SELECT
+  n.node_type,
+  COUNT(DISTINCT n.id)::bigint AS count
+FROM nodes n
+LEFT JOIN node_iatas ni ON ni.node_id = n.id
+WHERE ($1::text = '' OR ni.iata = ANY(string_to_array($1::text, ',')))
+GROUP BY n.node_type
+ORDER BY count DESC;
+
 -- name: GetStatsTopObservers :many
 -- Returns the top N observers by observation count for the given window and IATA.
 SELECT

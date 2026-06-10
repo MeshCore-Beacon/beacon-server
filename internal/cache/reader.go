@@ -29,6 +29,7 @@ const (
 	keyStatsBreakdownPrefix    = "beacon:stats:breakdown:"
 	keyStatsTopNodesPrefix     = "beacon:stats:top-nodes:"
 	keyStatsTopObsPrefix       = "beacon:stats:top-observers:"
+	keyStatsNodeTypes          = "beacon:stats:node-types:"
 	keyRadioPresetsPrefix      = "beacon:radio-presets:"
 	keyNodePrefix              = "beacon:node:"
 	keyNodeNeighborsPrefix     = "beacon:node:neighbors:"
@@ -201,6 +202,20 @@ func (cr *CachedReader) GetStatsTopNodes(ctx context.Context, iatas []string, li
 	key := fmt.Sprintf("%s%s:%d", keyStatsTopNodesPrefix, segment, limit)
 	return getOrSet(ctx, cr.c, key, cr.ttl.Stats, func() ([]api.TopNode, error) {
 		return cr.inner.GetStatsTopNodes(ctx, iatas, limit)
+	})
+}
+
+// GetStatsNodeTypes implements [api.Reader].
+func (cr *CachedReader) GetStatsNodeTypes(ctx context.Context, iatas []string) ([]api.NodeTypeCount, error) {
+	segment := "all"
+	if len(iatas) > 0 {
+		sorted := append([]string(nil), iatas...)
+		sort.Strings(sorted)
+		segment = strings.Join(sorted, ",")
+	}
+	key := fmt.Sprintf("%s%s", keyStatsNodeTypes, segment)
+	return getOrSet(ctx, cr.c, key, cr.ttl.Stats, func() ([]api.NodeTypeCount, error) {
+		return cr.inner.GetStatsNodeTypes(ctx, iatas)
 	})
 }
 

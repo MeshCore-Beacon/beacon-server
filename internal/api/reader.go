@@ -155,6 +155,9 @@ type Reader interface {
 	// GetScopeStats returns aggregate packet, observer and node counts per transport scope.
 	GetScopeStats(ctx context.Context) ([]ScopeStats, error)
 
+	// GetStatsNodeTypes returns node counts grouped by type, optionally filtered by IATA.
+	GetStatsNodeTypes(ctx context.Context, iatas []string) ([]NodeTypeCount, error)
+
 	// GetScopeNames returns the names of all configured transport scopes, ordered alphabetically.
 	// Use when no geographic filter is applied — returns names only for a lightweight response.
 	GetScopeNames(ctx context.Context) ([]string, error)

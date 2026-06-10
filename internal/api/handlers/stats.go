@@ -33,6 +33,7 @@ func StatsRouter(reader api.Reader) http.Handler {
 	r.Get("/top-observers", getStatsTopObservers(reader))
 	r.Get("/radio-presets", getStatsRadioPresets(reader))
 	r.Get("/scopes", getStatsScopes(reader))
+	r.Get("/node-types", getStatsNodeTypes(reader))
 	return r
 }
 
@@ -295,5 +296,36 @@ func getStatsScopes(reader api.Reader) http.HandlerFunc {
 			return
 		}
 		respond(w, http.StatusOK, stats)
+	}
+}
+
+// getStatsNodeTypes godoc
+//
+//	@Summary	Node type breakdown
+//	@Tags		Stats
+//	@Produce	json
+//	@Param		iatas		query		string	false	"Comma-separated IATA codes"
+//	@Param		regionId	query		int		false	"Filter by region ID, expands to member IATAs"
+//	@Param		region		query		string	false	"Filter by region slug, expands to member IATAs"
+//	@Success	200			{array}		api.NodeTypeCount
+//	@Failure	500			{object}	handlers.APIError
+//	@Router		/stats/node-types [get]
+func getStatsNodeTypes(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		iatas := parseIATAs(r)
+		if regionIDStr := r.URL.Query().Get("regionId"); regionIDStr != "" || r.URL.Query().Get("region") != "" {
+			regionIATAs, err := resolveRegionIATAs(r.Context(), regionIDStr, r.URL.Query().Get("region"), reader)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			iatas = append(iatas, regionIATAs...)
+		}
+		result, err := reader.GetStatsNodeTypes(r.Context(), iatas)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to get node type stats")
+			return
+		}
+		respond(w, http.StatusOK, result)
 	}
 }

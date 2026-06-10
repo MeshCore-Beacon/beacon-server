@@ -1084,6 +1084,43 @@ func (q *Queries) GetScopesByIATAs(ctx context.Context, dollar_1 string) ([]GetS
 	return items, nil
 }
 
+const getStatsNodeTypes = `-- name: GetStatsNodeTypes :many
+SELECT
+  n.node_type,
+  COUNT(DISTINCT n.id)::bigint AS count
+FROM nodes n
+LEFT JOIN node_iatas ni ON ni.node_id = n.id
+WHERE ($1::text = '' OR ni.iata = ANY(string_to_array($1::text, ',')))
+GROUP BY n.node_type
+ORDER BY count DESC
+`
+
+type GetStatsNodeTypesRow struct {
+	NodeType int16 `json:"node_type"`
+	Count    int64 `json:"count"`
+}
+
+// Returns node counts grouped by type, optionally filtered by IATA.
+func (q *Queries) GetStatsNodeTypes(ctx context.Context, dollar_1 string) ([]GetStatsNodeTypesRow, error) {
+	rows, err := q.db.Query(ctx, getStatsNodeTypes, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetStatsNodeTypesRow{}
+	for rows.Next() {
+		var i GetStatsNodeTypesRow
+		if err := rows.Scan(&i.NodeType, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getStatsOverview = `-- name: GetStatsOverview :one
 
 SELECT

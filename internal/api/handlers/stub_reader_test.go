@@ -132,6 +132,10 @@ func (stubReader) GetScopeStats(ctx context.Context) ([]api.ScopeStats, error) {
 	return nil, nil
 }
 
+func (stubReader) GetStatsNodeTypes(ctx context.Context, iatas []string) ([]api.NodeTypeCount, error) {
+	return nil, nil
+}
+
 func (stubReader) GetScopeNames(ctx context.Context) ([]string, error) {
 	return nil, nil
 }

@@ -164,6 +164,22 @@ func (s *Store) GetScopeStats(ctx context.Context) ([]api.ScopeStats, error) {
 	return items, nil
 }
 
+func (s *Store) GetStatsNodeTypes(ctx context.Context, iatas []string) ([]api.NodeTypeCount, error) {
+	rows, err := s.q.GetStatsNodeTypes(ctx, strings.Join(iatas, ","))
+	if err != nil {
+		return nil, err
+	}
+	result := make([]api.NodeTypeCount, 0, len(rows))
+	for _, r := range rows {
+		result = append(result, api.NodeTypeCount{
+			NodeType:     r.NodeType,
+			NodeTypeName: api.NodeTypeName(r.NodeType),
+			Count:        r.Count,
+		})
+	}
+	return result, nil
+}
+
 func (s *Store) RefreshHourlyStats(ctx context.Context) error {
 	return s.q.RefreshHourlyStats(ctx)
 }
