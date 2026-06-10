@@ -1958,9 +1958,17 @@ paths:
   /stats/observations:
     get:
       parameters:
-      - description: Filter by IATA code (case-insensitive)
+      - description: Comma-separated IATA codes
         in: query
-        name: iata
+        name: iatas
+        type: string
+      - description: Filter by region ID, expands to member IATAs
+        in: query
+        name: regionId
+        type: integer
+      - description: Filter by region slug, expands to member IATAs
+        in: query
+        name: region
         type: string
       - description: Start of window epoch ms (default 7 days ago)
         in: query
@@ -1985,9 +1993,17 @@ paths:
   /stats/overview:
     get:
       parameters:
-      - description: Filter by IATA code (case-insensitive)
+      - description: Comma-separated IATA codes
         in: query
-        name: iata
+        name: iatas
+        type: string
+      - description: Filter by region ID, expands to member IATAs
+        in: query
+        name: regionId
+        type: integer
+      - description: Filter by region slug, expands to member IATAs
+        in: query
+        name: region
         type: string
       produces:
       - application/json
@@ -2006,9 +2022,17 @@ paths:
   /stats/payload-breakdown:
     get:
       parameters:
-      - description: Filter by IATA code (case-insensitive)
+      - description: Comma-separated IATA codes
         in: query
-        name: iata
+        name: iatas
+        type: string
+      - description: Filter by region ID, expands to member IATAs
+        in: query
+        name: regionId
+        type: integer
+      - description: Filter by region slug, expands to member IATAs
+        in: query
+        name: region
         type: string
       - description: Start of window epoch ms (default last 24h)
         in: query
@@ -2037,9 +2061,17 @@ paths:
         in: query
         name: preset
         type: string
-      - description: Filter by IATA code
+      - description: Comma-separated IATA codes
         in: query
-        name: iata
+        name: iatas
+        type: string
+      - description: Filter by region ID, expands to member IATAs
+        in: query
+        name: regionId
+        type: integer
+      - description: Filter by region slug, expands to member IATAs
+        in: query
+        name: region
         type: string
       produces:
       - application/json
@@ -2078,9 +2110,17 @@ paths:
   /stats/top-nodes:
     get:
       parameters:
-      - description: Filter by exact IATA code (case-sensitive)
+      - description: Comma-separated IATA codes
         in: query
-        name: iata
+        name: iatas
+        type: string
+      - description: Filter by region ID, expands to member IATAs
+        in: query
+        name: regionId
+        type: integer
+      - description: Filter by region slug, expands to member IATAs
+        in: query
+        name: region
         type: string
       - description: Max results (default 10)
         in: query
@@ -2105,9 +2145,17 @@ paths:
   /stats/top-observers:
     get:
       parameters:
-      - description: Filter by IATA code (case-insensitive)
+      - description: Comma-separated IATA codes
         in: query
-        name: iata
+        name: iatas
+        type: string
+      - description: Filter by region ID, expands to member IATAs
+        in: query
+        name: regionId
+        type: integer
+      - description: Filter by region slug, expands to member IATAs
+        in: query
+        name: region
         type: string
       - description: Start of window epoch ms (default last 24h)
         in: query

@@ -1522,8 +1522,20 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Filter by IATA code (case-insensitive)",
-                        "name": "iata",
+                        "description": "Comma-separated IATA codes",
+                        "name": "iatas",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by region ID, expands to member IATAs",
+                        "name": "regionId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by region slug, expands to member IATAs",
+                        "name": "region",
                         "in": "query"
                     },
                     {
@@ -1564,8 +1576,20 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Filter by IATA code (case-insensitive)",
-                        "name": "iata",
+                        "description": "Comma-separated IATA codes",
+                        "name": "iatas",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by region ID, expands to member IATAs",
+                        "name": "regionId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by region slug, expands to member IATAs",
+                        "name": "region",
                         "in": "query"
                     }
                 ],
@@ -1597,8 +1621,20 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Filter by IATA code (case-insensitive)",
-                        "name": "iata",
+                        "description": "Comma-separated IATA codes",
+                        "name": "iatas",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by region ID, expands to member IATAs",
+                        "name": "regionId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by region slug, expands to member IATAs",
+                        "name": "region",
                         "in": "query"
                     },
                     {
@@ -1645,8 +1681,20 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Filter by IATA code",
-                        "name": "iata",
+                        "description": "Comma-separated IATA codes",
+                        "name": "iatas",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by region ID, expands to member IATAs",
+                        "name": "regionId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by region slug, expands to member IATAs",
+                        "name": "region",
                         "in": "query"
                     }
                 ],
@@ -1709,8 +1757,20 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Filter by exact IATA code (case-sensitive)",
-                        "name": "iata",
+                        "description": "Comma-separated IATA codes",
+                        "name": "iatas",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by region ID, expands to member IATAs",
+                        "name": "regionId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by region slug, expands to member IATAs",
+                        "name": "region",
                         "in": "query"
                     },
                     {
@@ -1751,8 +1811,20 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Filter by IATA code (case-insensitive)",
-                        "name": "iata",
+                        "description": "Comma-separated IATA codes",
+                        "name": "iatas",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by region ID, expands to member IATAs",
+                        "name": "regionId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by region slug, expands to member IATAs",
+                        "name": "region",
                         "in": "query"
                     },
                     {
