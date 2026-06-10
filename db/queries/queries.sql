@@ -741,7 +741,7 @@ LIMIT $3;
 SELECT preset, iata, source_type, count
 FROM mv_radio_presets
 WHERE ($1::text = '' OR preset = $1::text)
-  AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
+  AND ($2::text = '' OR iata = ANY(string_to_array($2::text, ',')))
 ORDER BY preset, iata, source_type;
 
 -- name: GetScopeStats :many
