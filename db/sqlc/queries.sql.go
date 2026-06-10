@@ -605,12 +605,12 @@ SELECT
   (date_trunc('hour', reported_at) +
     (EXTRACT(HOUR FROM reported_at)::int / $4::int) * ($4::int * interval '1 hour'))::timestamptz AS bucket,
   AVG(battery_voltage_mv)::int   AS battery_voltage_mv,
-  AVG(airtime_tx_pct)::real      AS airtime_tx_pct,
-  AVG(airtime_rx_pct)::real      AS airtime_rx_pct,
+  GREATEST(MAX(airtime_tx_pct) - MIN(airtime_tx_pct), 0)::real AS airtime_tx_pct,
+  GREATEST(MAX(airtime_rx_pct) - MIN(airtime_rx_pct), 0)::real AS airtime_rx_pct,
   AVG(noise_floor_db)::real      AS noise_floor_db,
   MAX(uptime_seconds)::bigint    AS uptime_seconds,
   AVG(queue_length)::int         AS queue_length,
-  AVG(receive_errors)::int       AS receive_errors
+  GREATEST(MAX(receive_errors) - MIN(receive_errors), 0)::int  AS receive_errors
 FROM observer_telemetry
 WHERE observer_id = $1
   AND ($2::timestamptz IS NULL OR reported_at >= $2)
