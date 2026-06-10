@@ -125,32 +125,32 @@ type Reader interface {
 	// GetPacket returns full packet detail including all observations with radio settings.
 	// Returns nil, pgx.ErrNoRows if not found.
 	GetPacket(ctx context.Context, packetHash []byte) (*Packet, error)
-	// GetRadioPresets returns radio preset usage grouped by preset and IATA.
-	// Pass empty string for preset or iata to skip those filters.
-	GetRadioPresets(ctx context.Context, preset, iata string) ([]RadioPreset, error)
+	// GetRadioPresets returns radio preset usage grouped by preset and IATA(s).
+	// Pass empty string for preset or nil iatas to skip those filters.
+	GetRadioPresets(ctx context.Context, preset string, iatas []string) ([]RadioPreset, error)
 
 	// GetStatsOverview returns top-line network figures for the last 24 hours.
-	// Pass empty string iata to return stats across all IATAs.
-	GetStatsOverview(ctx context.Context, iata string) (*StatsOverview, error)
+	// Pass nil iatas to return stats across all IATAs.
+	GetStatsOverview(ctx context.Context, iatas []string) (*StatsOverview, error)
 
 	// GetStatsObservations returns hourly observation counts for charting.
-	// Pass empty string iata to return stats across all IATAs.
+	// Pass nil for iatas to return stats across all IATAs.
 	// since defines the start of the window; pass zero time for default (last 7 days).
-	GetStatsObservations(ctx context.Context, iata string, since time.Time) ([]ObservationPoint, error)
+	GetStatsObservations(ctx context.Context, iatas []string, since time.Time) ([]ObservationPoint, error)
 
 	// GetStatsPayloadBreakdown returns observation counts grouped by payload type.
-	// Pass empty string iata to return stats across all IATAs.
+	// Pass nil for iatas to return stats across all IATAs.
 	// since defines the start of the window; pass zero time for default (last 24h).
-	GetStatsPayloadBreakdown(ctx context.Context, iata string, since time.Time) ([]PayloadBreakdownItem, error)
+	GetStatsPayloadBreakdown(ctx context.Context, iatas []string, since time.Time) ([]PayloadBreakdownItem, error)
 
 	// GetStatsTopNodes returns the top N nodes by observation count.
-	// Pass empty string iata to return stats across all IATAs.
-	GetStatsTopNodes(ctx context.Context, iata string, limit int32) ([]TopNode, error)
+	// Pass nil for iatas to return stats across all IATAs.
+	GetStatsTopNodes(ctx context.Context, iatas []string, limit int32) ([]TopNode, error)
 
 	// GetStatsTopObservers returns the top N observers by observation count.
-	// Pass empty string iata to return stats across all IATAs.
+	// Pass nil for iatas to return stats across all IATAs.
 	// since defines the start of the window; pass zero time for default (last 24h).
-	GetStatsTopObservers(ctx context.Context, iata string, since time.Time, limit int32) ([]TopObserver, error)
+	GetStatsTopObservers(ctx context.Context, iatas []string, since time.Time, limit int32) ([]TopObserver, error)
 
 	// GetScopeStats returns aggregate packet, observer and node counts per transport scope.
 	GetScopeStats(ctx context.Context) ([]ScopeStats, error)

@@ -679,18 +679,18 @@ SELECT
   COUNT(DISTINCT po.iata)         AS active_iatas
 FROM packet_observations po
 WHERE po.heard_at > NOW() - INTERVAL '24 hours'
-  AND ($1 = '' OR po.iata ILIKE $1);
+  AND ($1::text = '' OR po.iata = ANY(string_to_array($1::text, ',')));
 
 -- name: GetHourlyStats :many
 SELECT iata, hour, observation_count, unique_packets, active_observers
 FROM mv_hourly_iata_stats
-WHERE ($1 = '' OR iata ILIKE $1)
+WHERE ($1::text = '' OR iata = ANY(string_to_array($1::text, ',')))
   AND hour >= NOW() - $2::interval
 ORDER BY iata, hour;
 
 -- name: GetTopNodes :many
 SELECT * FROM mv_top_nodes_by_iata
-WHERE ($1::char(3) IS NULL OR iata = $1)
+WHERE ($1::text = '' OR iata = ANY(string_to_array($1::text, ',')))
 ORDER BY observation_count DESC
 LIMIT $2;
 
@@ -702,7 +702,7 @@ SELECT
 FROM packet_observations po
 JOIN packets p ON p.packet_hash = po.packet_hash
 WHERE po.heard_at > $1
-  AND ($2 = '' OR po.iata ILIKE $2)
+  AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
 GROUP BY p.payload_type
 ORDER BY count DESC;
 
@@ -721,7 +721,7 @@ SELECT
 FROM packet_observations po
 JOIN observers o ON o.id = po.observer_id
 WHERE po.heard_at > $1
-  AND ($2 = '' OR po.iata ILIKE $2)
+  AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
 GROUP BY o.id
 ORDER BY observation_count DESC
 LIMIT $3;
@@ -730,7 +730,7 @@ LIMIT $3;
 SELECT preset, iata, source_type, count
 FROM mv_radio_presets
 WHERE ($1::text = '' OR preset = $1::text)
-  AND ($2::text = '' OR iata = $2::text)
+  AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
 ORDER BY preset, iata, source_type;
 
 -- name: GetScopeStats :many

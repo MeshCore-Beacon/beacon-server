@@ -5,6 +5,7 @@ package db
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
@@ -12,8 +13,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-func (s *Store) GetStatsOverview(ctx context.Context, iata string) (*api.StatsOverview, error) {
-	row, err := s.q.GetStatsOverview(ctx, iata)
+func (s *Store) GetStatsOverview(ctx context.Context, iatas []string) (*api.StatsOverview, error) {
+	row, err := s.q.GetStatsOverview(ctx, strings.Join(iatas, ","))
 	if err != nil {
 		return nil, err
 	}
@@ -26,13 +27,13 @@ func (s *Store) GetStatsOverview(ctx context.Context, iata string) (*api.StatsOv
 	}, nil
 }
 
-func (s *Store) GetStatsObservations(ctx context.Context, iata string, since time.Time) ([]api.ObservationPoint, error) {
+func (s *Store) GetStatsObservations(ctx context.Context, iatas []string, since time.Time) ([]api.ObservationPoint, error) {
 	if since.IsZero() {
 		since = time.Now().Add(-7 * 24 * time.Hour)
 	}
 	interval := time.Since(since)
 	rows, err := s.q.GetHourlyStats(ctx, sqlc.GetHourlyStatsParams{
-		Column1: iata,
+		Column1: strings.Join(iatas, ","),
 		Column2: pgtype.Interval{Microseconds: int64(interval.Hours()) * 3600 * 1e6, Valid: true},
 	})
 	if err != nil {
@@ -51,13 +52,13 @@ func (s *Store) GetStatsObservations(ctx context.Context, iata string, since tim
 	return points, nil
 }
 
-func (s *Store) GetStatsPayloadBreakdown(ctx context.Context, iata string, since time.Time) ([]api.PayloadBreakdownItem, error) {
+func (s *Store) GetStatsPayloadBreakdown(ctx context.Context, iatas []string, since time.Time) ([]api.PayloadBreakdownItem, error) {
 	if since.IsZero() {
 		since = time.Now().Add(-24 * time.Hour)
 	}
 	rows, err := s.q.GetStatsPayloadBreakdown(ctx, sqlc.GetStatsPayloadBreakdownParams{
 		HeardAt: pgtype.Timestamptz{Time: since, Valid: true},
-		Column2: iata,
+		Column2: strings.Join(iatas, ","),
 	})
 	if err != nil {
 		return nil, err
@@ -73,9 +74,9 @@ func (s *Store) GetStatsPayloadBreakdown(ctx context.Context, iata string, since
 	return items, nil
 }
 
-func (s *Store) GetStatsTopNodes(ctx context.Context, iata string, limit int32) ([]api.TopNode, error) {
+func (s *Store) GetStatsTopNodes(ctx context.Context, iatas []string, limit int32) ([]api.TopNode, error) {
 	rows, err := s.q.GetTopNodes(ctx, sqlc.GetTopNodesParams{
-		Column1: iata,
+		Column1: strings.Join(iatas, ","),
 		Limit:   limit,
 	})
 	if err != nil {
@@ -100,13 +101,13 @@ func (s *Store) GetStatsTopNodes(ctx context.Context, iata string, limit int32) 
 	return items, nil
 }
 
-func (s *Store) GetStatsTopObservers(ctx context.Context, iata string, since time.Time, limit int32) ([]api.TopObserver, error) {
+func (s *Store) GetStatsTopObservers(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopObserver, error) {
 	if since.IsZero() {
 		since = time.Now().Add(-24 * time.Hour)
 	}
 	rows, err := s.q.GetStatsTopObservers(ctx, sqlc.GetStatsTopObserversParams{
 		HeardAt: pgtype.Timestamptz{Time: since, Valid: true},
-		Column2: iata,
+		Column2: strings.Join(iatas, ","),
 		Limit:   limit,
 	})
 	if err != nil {
@@ -126,10 +127,10 @@ func (s *Store) GetStatsTopObservers(ctx context.Context, iata string, since tim
 	return items, nil
 }
 
-func (s *Store) GetRadioPresets(ctx context.Context, preset, iata string) ([]api.RadioPreset, error) {
+func (s *Store) GetRadioPresets(ctx context.Context, preset string, iatas []string) ([]api.RadioPreset, error) {
 	rows, err := s.q.GetRadioPresets(ctx, sqlc.GetRadioPresetsParams{
 		Column1: preset,
-		Column2: iata,
+		Column2: strings.Join(iatas, ","),
 	})
 	if err != nil {
 		return nil, err

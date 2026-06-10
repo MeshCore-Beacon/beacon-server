@@ -116,13 +116,13 @@ func (q *Queries) GetCrossIATANeighbors(ctx context.Context, arg GetCrossIATANei
 const getHourlyStats = `-- name: GetHourlyStats :many
 SELECT iata, hour, observation_count, unique_packets, active_observers
 FROM mv_hourly_iata_stats
-WHERE ($1 = '' OR iata ILIKE $1)
+WHERE ($1::text = '' OR iata = ANY(string_to_array($1::text, ',')))
   AND hour >= NOW() - $2::interval
 ORDER BY iata, hour
 `
 
 type GetHourlyStatsParams struct {
-	Column1 interface{}     `json:"column_1"`
+	Column1 string          `json:"column_1"`
 	Column2 pgtype.Interval `json:"column_2"`
 }
 
@@ -803,7 +803,7 @@ const getRadioPresets = `-- name: GetRadioPresets :many
 SELECT preset, iata, source_type, count
 FROM mv_radio_presets
 WHERE ($1::text = '' OR preset = $1::text)
-  AND ($2::text = '' OR iata = $2::text)
+  AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
 ORDER BY preset, iata, source_type
 `
 
@@ -1093,7 +1093,7 @@ SELECT
   COUNT(DISTINCT po.iata)         AS active_iatas
 FROM packet_observations po
 WHERE po.heard_at > NOW() - INTERVAL '24 hours'
-  AND ($1 = '' OR po.iata ILIKE $1)
+  AND ($1::text = '' OR po.iata = ANY(string_to_array($1::text, ',')))
 `
 
 type GetStatsOverviewRow struct {
@@ -1106,7 +1106,7 @@ type GetStatsOverviewRow struct {
 // ============================================================
 // STATS
 // ============================================================
-func (q *Queries) GetStatsOverview(ctx context.Context, dollar_1 interface{}) (GetStatsOverviewRow, error) {
+func (q *Queries) GetStatsOverview(ctx context.Context, dollar_1 string) (GetStatsOverviewRow, error) {
 	row := q.db.QueryRow(ctx, getStatsOverview, dollar_1)
 	var i GetStatsOverviewRow
 	err := row.Scan(
@@ -1125,14 +1125,14 @@ SELECT
 FROM packet_observations po
 JOIN packets p ON p.packet_hash = po.packet_hash
 WHERE po.heard_at > $1
-  AND ($2 = '' OR po.iata ILIKE $2)
+  AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
 GROUP BY p.payload_type
 ORDER BY count DESC
 `
 
 type GetStatsPayloadBreakdownParams struct {
 	HeardAt pgtype.Timestamptz `json:"heard_at"`
-	Column2 interface{}        `json:"column_2"`
+	Column2 string             `json:"column_2"`
 }
 
 type GetStatsPayloadBreakdownRow struct {
@@ -1175,7 +1175,7 @@ SELECT
 FROM packet_observations po
 JOIN observers o ON o.id = po.observer_id
 WHERE po.heard_at > $1
-  AND ($2 = '' OR po.iata ILIKE $2)
+  AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
 GROUP BY o.id
 ORDER BY observation_count DESC
 LIMIT $3
@@ -1183,7 +1183,7 @@ LIMIT $3
 
 type GetStatsTopObserversParams struct {
 	HeardAt pgtype.Timestamptz `json:"heard_at"`
-	Column2 interface{}        `json:"column_2"`
+	Column2 string             `json:"column_2"`
 	Limit   int32              `json:"limit"`
 }
 
@@ -1224,7 +1224,7 @@ func (q *Queries) GetStatsTopObservers(ctx context.Context, arg GetStatsTopObser
 
 const getTopNodes = `-- name: GetTopNodes :many
 SELECT iata, node_id, name, node_type, observation_count, last_heard FROM mv_top_nodes_by_iata
-WHERE ($1::char(3) IS NULL OR iata = $1)
+WHERE ($1::text = '' OR iata = ANY(string_to_array($1::text, ',')))
 ORDER BY observation_count DESC
 LIMIT $2
 `
