@@ -306,6 +306,15 @@ definitions:
         description: 'shorthand: "freqMhz,bwKhz,sf" e.g. "910.5,62.5,7"'
         type: string
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.NodeTypeCount:
+    properties:
+      count:
+        type: integer
+      nodeType:
+        type: integer
+      nodeTypeName:
+        type: string
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.ObservationPoint:
     properties:
       activeObservers:
@@ -1955,12 +1964,51 @@ paths:
       summary: Get scope detail by name
       tags:
       - Scopes
+  /stats/node-types:
+    get:
+      parameters:
+      - description: Comma-separated IATA codes
+        in: query
+        name: iatas
+        type: string
+      - description: Filter by region ID, expands to member IATAs
+        in: query
+        name: regionId
+        type: integer
+      - description: Filter by region slug, expands to member IATAs
+        in: query
+        name: region
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeTypeCount'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+      summary: Node type breakdown
+      tags:
+      - Stats
   /stats/observations:
     get:
       parameters:
-      - description: Filter by IATA code (case-insensitive)
+      - description: Comma-separated IATA codes
         in: query
-        name: iata
+        name: iatas
+        type: string
+      - description: Filter by region ID, expands to member IATAs
+        in: query
+        name: regionId
+        type: integer
+      - description: Filter by region slug, expands to member IATAs
+        in: query
+        name: region
         type: string
       - description: Start of window epoch ms (default 7 days ago)
         in: query
@@ -1985,9 +2033,17 @@ paths:
   /stats/overview:
     get:
       parameters:
-      - description: Filter by IATA code (case-insensitive)
+      - description: Comma-separated IATA codes
         in: query
-        name: iata
+        name: iatas
+        type: string
+      - description: Filter by region ID, expands to member IATAs
+        in: query
+        name: regionId
+        type: integer
+      - description: Filter by region slug, expands to member IATAs
+        in: query
+        name: region
         type: string
       produces:
       - application/json
@@ -2006,9 +2062,17 @@ paths:
   /stats/payload-breakdown:
     get:
       parameters:
-      - description: Filter by IATA code (case-insensitive)
+      - description: Comma-separated IATA codes
         in: query
-        name: iata
+        name: iatas
+        type: string
+      - description: Filter by region ID, expands to member IATAs
+        in: query
+        name: regionId
+        type: integer
+      - description: Filter by region slug, expands to member IATAs
+        in: query
+        name: region
         type: string
       - description: Start of window epoch ms (default last 24h)
         in: query
@@ -2037,9 +2101,17 @@ paths:
         in: query
         name: preset
         type: string
-      - description: Filter by IATA code
+      - description: Comma-separated IATA codes
         in: query
-        name: iata
+        name: iatas
+        type: string
+      - description: Filter by region ID, expands to member IATAs
+        in: query
+        name: regionId
+        type: integer
+      - description: Filter by region slug, expands to member IATAs
+        in: query
+        name: region
         type: string
       produces:
       - application/json
@@ -2078,9 +2150,17 @@ paths:
   /stats/top-nodes:
     get:
       parameters:
-      - description: Filter by exact IATA code (case-sensitive)
+      - description: Comma-separated IATA codes
         in: query
-        name: iata
+        name: iatas
+        type: string
+      - description: Filter by region ID, expands to member IATAs
+        in: query
+        name: regionId
+        type: integer
+      - description: Filter by region slug, expands to member IATAs
+        in: query
+        name: region
         type: string
       - description: Max results (default 10)
         in: query
@@ -2105,9 +2185,17 @@ paths:
   /stats/top-observers:
     get:
       parameters:
-      - description: Filter by IATA code (case-insensitive)
+      - description: Comma-separated IATA codes
         in: query
-        name: iata
+        name: iatas
+        type: string
+      - description: Filter by region ID, expands to member IATAs
+        in: query
+        name: regionId
+        type: integer
+      - description: Filter by region slug, expands to member IATAs
+        in: query
+        name: region
         type: string
       - description: Start of window epoch ms (default last 24h)
         in: query

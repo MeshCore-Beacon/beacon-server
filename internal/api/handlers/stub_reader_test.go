@@ -104,31 +104,35 @@ func (stubReader) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet
 	return nil, nil
 }
 
-func (stubReader) GetRadioPresets(ctx context.Context, preset, iata string) ([]api.RadioPreset, error) {
+func (stubReader) GetRadioPresets(ctx context.Context, preset string, iatas []string) ([]api.RadioPreset, error) {
 	return nil, nil
 }
 
-func (stubReader) GetStatsOverview(ctx context.Context, iata string) (*api.StatsOverview, error) {
+func (stubReader) GetStatsOverview(ctx context.Context, iatas []string) (*api.StatsOverview, error) {
 	return nil, nil
 }
 
-func (stubReader) GetStatsObservations(ctx context.Context, iata string, since time.Time) ([]api.ObservationPoint, error) {
+func (stubReader) GetStatsObservations(ctx context.Context, iatas []string, since time.Time) ([]api.ObservationPoint, error) {
 	return nil, nil
 }
 
-func (stubReader) GetStatsPayloadBreakdown(ctx context.Context, iata string, since time.Time) ([]api.PayloadBreakdownItem, error) {
+func (stubReader) GetStatsPayloadBreakdown(ctx context.Context, iatas []string, since time.Time) ([]api.PayloadBreakdownItem, error) {
 	return nil, nil
 }
 
-func (stubReader) GetStatsTopNodes(ctx context.Context, iata string, limit int32) ([]api.TopNode, error) {
+func (stubReader) GetStatsTopNodes(ctx context.Context, iatas []string, limit int32) ([]api.TopNode, error) {
 	return nil, nil
 }
 
-func (stubReader) GetStatsTopObservers(ctx context.Context, iata string, since time.Time, limit int32) ([]api.TopObserver, error) {
+func (stubReader) GetStatsTopObservers(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopObserver, error) {
 	return nil, nil
 }
 
 func (stubReader) GetScopeStats(ctx context.Context) ([]api.ScopeStats, error) {
+	return nil, nil
+}
+
+func (stubReader) GetStatsNodeTypes(ctx context.Context, iatas []string) ([]api.NodeTypeCount, error) {
 	return nil, nil
 }
 

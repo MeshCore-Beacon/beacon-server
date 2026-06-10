@@ -15,26 +15,27 @@ import (
 )
 
 const (
-	keyIATAs                = "beacon:iatas"
-	keyIATAPrefix           = "beacon:iata:"
-	keyRegions              = "beacon:regions"
-	keyRegionPrefix         = "beacon:region:"
-	keyRegionSlugPrefix     = "beacon:region:slug:"
-	keyScopeNames           = "beacon:scope:names"
-	keyScopeStats           = "beacon:scope:stats"
-	keyScopesByIATAsPrefix  = "beacon:scopes:iatas:"
-	keyScopeByNamePrefix    = "beacon:scope:name:"
-	keyStatsOverviewPrefix  = "beacon:stats:overview:"
-	keyStatsObsPrefix       = "beacon:stats:observations:"
-	keyStatsBreakdownPrefix = "beacon:stats:breakdown:"
-	keyStatsTopNodesPrefix  = "beacon:stats:top-nodes:"
-	keyStatsTopObsPrefix    = "beacon:stats:top-observers:"
-	keyRadioPresetsPrefix   = "beacon:radio-presets:"
-	keyNodePrefix           = "beacon:node:"
-	keyNodeNeighborsPrefix  = "beacon:node:neighbors:"
-	keyNodesByIDsPrefix     = "beacon:nodes:ids:"
-	keyObserverPrefix       = "beacon:observer:"
-	keyObserverScopesPrefix = "beacon:observer:scopes:"
+	keyIATAs                   = "beacon:iatas"
+	keyIATAPrefix              = "beacon:iata:"
+	keyRegions                 = "beacon:regions"
+	keyRegionPrefix            = "beacon:region:"
+	keyRegionSlugPrefix        = "beacon:region:slug:"
+	keyScopeNames              = "beacon:scope:names"
+	keyScopeStats              = "beacon:scope:stats"
+	keyScopesByIATAsPrefix     = "beacon:scopes:iatas:"
+	keyScopeByNamePrefix       = "beacon:scope:name:"
+	keyStatsOverviewPrefix     = "beacon:stats:overview:"
+	keyStatsObservationsPrefix = "beacon:stats:observations:"
+	keyStatsBreakdownPrefix    = "beacon:stats:breakdown:"
+	keyStatsTopNodesPrefix     = "beacon:stats:top-nodes:"
+	keyStatsTopObsPrefix       = "beacon:stats:top-observers:"
+	keyStatsNodeTypes          = "beacon:stats:node-types:"
+	keyRadioPresetsPrefix      = "beacon:radio-presets:"
+	keyNodePrefix              = "beacon:node:"
+	keyNodeNeighborsPrefix     = "beacon:node:neighbors:"
+	keyNodesByIDsPrefix        = "beacon:nodes:ids:"
+	keyObserverPrefix          = "beacon:observer:"
+	keyObserverScopesPrefix    = "beacon:observer:scopes:"
 )
 
 // CachedReader wraps an api.Reader with a Redis caching layer.
@@ -149,49 +150,100 @@ func (cr *CachedReader) GetScopeByName(ctx context.Context, name string) (*api.S
 }
 
 // GetStatsOverview implements [api.Reader].
-func (cr *CachedReader) GetStatsOverview(ctx context.Context, iata string) (*api.StatsOverview, error) {
-	return getOrSet(ctx, cr.c, keyStatsOverviewPrefix+iata, cr.ttl.Stats, func() (*api.StatsOverview, error) {
-		return cr.inner.GetStatsOverview(ctx, iata)
+func (cr *CachedReader) GetStatsOverview(ctx context.Context, iatas []string) (*api.StatsOverview, error) {
+	segment := "all"
+	if len(iatas) > 0 {
+		sorted := append([]string(nil), iatas...)
+		sort.Strings(sorted)
+		segment = strings.Join(sorted, ",")
+	}
+	key := fmt.Sprintf("%s%s", keyStatsOverviewPrefix, segment)
+	return getOrSet(ctx, cr.c, key, cr.ttl.Stats, func() (*api.StatsOverview, error) {
+		return cr.inner.GetStatsOverview(ctx, iatas)
 	})
 }
 
 // GetStatsObservations implements [api.Reader].
-func (cr *CachedReader) GetStatsObservations(ctx context.Context, iata string, since time.Time) ([]api.ObservationPoint, error) {
-	key := fmt.Sprintf("%s%s:%d", keyStatsObsPrefix, iata, since.UnixMilli())
+func (cr *CachedReader) GetStatsObservations(ctx context.Context, iatas []string, since time.Time) ([]api.ObservationPoint, error) {
+	segment := "all"
+	if len(iatas) > 0 {
+		sorted := append([]string(nil), iatas...)
+		sort.Strings(sorted)
+		segment = strings.Join(sorted, ",")
+	}
+	key := fmt.Sprintf("%s%s:%d", keyStatsObservationsPrefix, segment, since.UnixMilli())
 	return getOrSet(ctx, cr.c, key, cr.ttl.Stats, func() ([]api.ObservationPoint, error) {
-		return cr.inner.GetStatsObservations(ctx, iata, since)
+		return cr.inner.GetStatsObservations(ctx, iatas, since)
 	})
 }
 
 // GetStatsPayloadBreakdown implements [api.Reader].
-func (cr *CachedReader) GetStatsPayloadBreakdown(ctx context.Context, iata string, since time.Time) ([]api.PayloadBreakdownItem, error) {
-	key := fmt.Sprintf("%s%s:%d", keyStatsBreakdownPrefix, iata, since.UnixMilli())
+func (cr *CachedReader) GetStatsPayloadBreakdown(ctx context.Context, iatas []string, since time.Time) ([]api.PayloadBreakdownItem, error) {
+	segment := "all"
+	if len(iatas) > 0 {
+		sorted := append([]string(nil), iatas...)
+		sort.Strings(sorted)
+		segment = strings.Join(sorted, ",")
+	}
+	key := fmt.Sprintf("%s%s:%d", keyStatsBreakdownPrefix, segment, since.UnixMilli())
 	return getOrSet(ctx, cr.c, key, cr.ttl.Stats, func() ([]api.PayloadBreakdownItem, error) {
-		return cr.inner.GetStatsPayloadBreakdown(ctx, iata, since)
+		return cr.inner.GetStatsPayloadBreakdown(ctx, iatas, since)
 	})
 }
 
 // GetStatsTopNodes implements [api.Reader].
-func (cr *CachedReader) GetStatsTopNodes(ctx context.Context, iata string, limit int32) ([]api.TopNode, error) {
-	key := fmt.Sprintf("%s%s:%d", keyStatsTopNodesPrefix, iata, limit)
+func (cr *CachedReader) GetStatsTopNodes(ctx context.Context, iatas []string, limit int32) ([]api.TopNode, error) {
+	segment := "all"
+	if len(iatas) > 0 {
+		sorted := append([]string(nil), iatas...)
+		sort.Strings(sorted)
+		segment = strings.Join(sorted, ",")
+	}
+	key := fmt.Sprintf("%s%s:%d", keyStatsTopNodesPrefix, segment, limit)
 	return getOrSet(ctx, cr.c, key, cr.ttl.Stats, func() ([]api.TopNode, error) {
-		return cr.inner.GetStatsTopNodes(ctx, iata, limit)
+		return cr.inner.GetStatsTopNodes(ctx, iatas, limit)
+	})
+}
+
+// GetStatsNodeTypes implements [api.Reader].
+func (cr *CachedReader) GetStatsNodeTypes(ctx context.Context, iatas []string) ([]api.NodeTypeCount, error) {
+	segment := "all"
+	if len(iatas) > 0 {
+		sorted := append([]string(nil), iatas...)
+		sort.Strings(sorted)
+		segment = strings.Join(sorted, ",")
+	}
+	key := fmt.Sprintf("%s%s", keyStatsNodeTypes, segment)
+	return getOrSet(ctx, cr.c, key, cr.ttl.Stats, func() ([]api.NodeTypeCount, error) {
+		return cr.inner.GetStatsNodeTypes(ctx, iatas)
 	})
 }
 
 // GetStatsTopObservers implements [api.Reader].
-func (cr *CachedReader) GetStatsTopObservers(ctx context.Context, iata string, since time.Time, limit int32) ([]api.TopObserver, error) {
-	key := fmt.Sprintf("%s%s:%d:%d", keyStatsTopObsPrefix, iata, since.UnixMilli(), limit)
+func (cr *CachedReader) GetStatsTopObservers(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopObserver, error) {
+	segment := "all"
+	if len(iatas) > 0 {
+		sorted := append([]string(nil), iatas...)
+		sort.Strings(sorted)
+		segment = strings.Join(sorted, ",")
+	}
+	key := fmt.Sprintf("%s%s:%d:%d", keyStatsTopObsPrefix, segment, since.UnixMilli(), limit)
 	return getOrSet(ctx, cr.c, key, cr.ttl.Stats, func() ([]api.TopObserver, error) {
-		return cr.inner.GetStatsTopObservers(ctx, iata, since, limit)
+		return cr.inner.GetStatsTopObservers(ctx, iatas, since, limit)
 	})
 }
 
 // GetRadioPresets implements [api.Reader].
-func (cr *CachedReader) GetRadioPresets(ctx context.Context, preset string, iata string) ([]api.RadioPreset, error) {
-	key := keyRadioPresetsPrefix + preset + ":" + iata
+func (cr *CachedReader) GetRadioPresets(ctx context.Context, preset string, iatas []string) ([]api.RadioPreset, error) {
+	segment := "all"
+	if len(iatas) > 0 {
+		sorted := append([]string(nil), iatas...)
+		sort.Strings(sorted)
+		segment = strings.Join(sorted, ",")
+	}
+	key := fmt.Sprintf("%s%s:%s", keyRadioPresetsPrefix, preset, segment)
 	return getOrSet(ctx, cr.c, key, cr.ttl.Stats, func() ([]api.RadioPreset, error) {
-		return cr.inner.GetRadioPresets(ctx, preset, iata)
+		return cr.inner.GetRadioPresets(ctx, preset, iatas)
 	})
 }
 

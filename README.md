@@ -36,6 +36,7 @@ For deployment instructions including the frontend app, see the deployment docs.
 | Language      | Go 1.26                                                         |
 | Router        | [Chi v5](https://github.com/go-chi/chi)                         |
 | Database      | PostgreSQL 16                                                   |
+| Caching       | Redis 7                                                         |
 | DB queries    | [sqlc](https://sqlc.dev) + pgx/v5                               |
 | MQTT          | [paho.mqtt.golang](https://github.com/eclipse/paho.mqtt.golang) |
 | WebSocket     | [coder/websocket](https://github.com/coder/websocket)           |
@@ -364,7 +365,6 @@ Not yet implemented — see the Authentication section above.
 
 ## Road Map
 
-- [ ] Redis caching for stats endpoints
 - [ ] Caddy reverse proxy config for production
 - [ ] Admin authentication middleware
 - [ ] Server management via API (currently config-file only)

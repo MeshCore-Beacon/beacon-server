@@ -12,10 +12,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api/handlers"
 	mw "github.com/MeshCore-Beacon/beacon-server/internal/api/middleware"
+	"github.com/MeshCore-Beacon/beacon-server/internal/config"
 	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ws"
@@ -39,8 +41,33 @@ import (
 //
 // The private group is stubbed and ready for the auth middleware drop-in
 // described in Future Features → Admin authentication.
-func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP int) http.Handler {
+func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP int, corsCfg config.CORSConfig) http.Handler {
 	r := chi.NewRouter()
+
+	// ── CORS ─────────────────────────────────────────────────────────────────
+	allowedOrigins := corsCfg.AllowedOrigins
+	if len(allowedOrigins) == 0 {
+		allowedOrigins = []string{"*"}
+	}
+	allowedMethods := corsCfg.AllowedMethods
+	if len(allowedMethods) == 0 {
+		allowedMethods = []string{"GET", "HEAD", "OPTIONS"}
+	}
+	allowedHeaders := corsCfg.AllowedHeaders
+	if len(allowedHeaders) == 0 {
+		allowedHeaders = []string{"Accept", "Authorization", "Content-Type"}
+	}
+	maxAge := corsCfg.MaxAge
+	if maxAge == 0 {
+		maxAge = 300
+	}
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   allowedOrigins,
+		AllowedMethods:   allowedMethods,
+		AllowedHeaders:   allowedHeaders,
+		AllowCredentials: corsCfg.AllowCredentials,
+		MaxAge:           maxAge,
+	}))
 
 	// ── Global middleware ────────────────────────────────────────────────────
 	r.Use(middleware.RequestID)

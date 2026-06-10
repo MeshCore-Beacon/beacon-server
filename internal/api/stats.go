@@ -66,3 +66,10 @@ type TopObserver struct {
 	IATA             string    `json:"iata"`
 	ObservationCount int64     `json:"observationCount"`
 }
+
+// NodeTypeCount shows the count of nodes of a given type with the type name
+type NodeTypeCount struct {
+	NodeType     int16  `json:"nodeType"`
+	NodeTypeName string `json:"nodeTypeName"`
+	Count        int64  `json:"count"`
+}

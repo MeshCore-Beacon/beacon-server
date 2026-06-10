@@ -33,57 +33,6 @@ func (q *Queries) DeleteOldTelemetry(ctx context.Context, reportedAt pgtype.Time
 	return err
 }
 
-const getChannelByHashAndFingerprint = `-- name: GetChannelByHashAndFingerprint :one
-SELECT id, channel_hash, key_fingerprint, name, hashtag, is_hashtag, is_public, key_known, first_seen, last_seen, message_count FROM channels WHERE channel_hash = $1 AND key_fingerprint = $2
-`
-
-type GetChannelByHashAndFingerprintParams struct {
-	ChannelHash    []byte `json:"channel_hash"`
-	KeyFingerprint []byte `json:"key_fingerprint"`
-}
-
-func (q *Queries) GetChannelByHashAndFingerprint(ctx context.Context, arg GetChannelByHashAndFingerprintParams) (Channel, error) {
-	row := q.db.QueryRow(ctx, getChannelByHashAndFingerprint, arg.ChannelHash, arg.KeyFingerprint)
-	var i Channel
-	err := row.Scan(
-		&i.ID,
-		&i.ChannelHash,
-		&i.KeyFingerprint,
-		&i.Name,
-		&i.Hashtag,
-		&i.IsHashtag,
-		&i.IsPublic,
-		&i.KeyKnown,
-		&i.FirstSeen,
-		&i.LastSeen,
-		&i.MessageCount,
-	)
-	return i, err
-}
-
-const getChannelByHashtag = `-- name: GetChannelByHashtag :one
-SELECT id, channel_hash, key_fingerprint, name, hashtag, is_hashtag, is_public, key_known, first_seen, last_seen, message_count FROM channels WHERE hashtag = $1
-`
-
-func (q *Queries) GetChannelByHashtag(ctx context.Context, hashtag *string) (Channel, error) {
-	row := q.db.QueryRow(ctx, getChannelByHashtag, hashtag)
-	var i Channel
-	err := row.Scan(
-		&i.ID,
-		&i.ChannelHash,
-		&i.KeyFingerprint,
-		&i.Name,
-		&i.Hashtag,
-		&i.IsHashtag,
-		&i.IsPublic,
-		&i.KeyKnown,
-		&i.FirstSeen,
-		&i.LastSeen,
-		&i.MessageCount,
-	)
-	return i, err
-}
-
 const getChannelByID = `-- name: GetChannelByID :one
 SELECT id, channel_hash, key_fingerprint, name, hashtag, is_hashtag, is_public, key_known, first_seen, last_seen, message_count FROM channels WHERE id = $1
 `
@@ -105,48 +54,6 @@ func (q *Queries) GetChannelByID(ctx context.Context, id int32) (Channel, error)
 		&i.MessageCount,
 	)
 	return i, err
-}
-
-const getChannelsByHash = `-- name: GetChannelsByHash :many
-SELECT id, channel_hash, key_fingerprint, name, hashtag, is_hashtag, is_public, key_known, first_seen, last_seen, message_count FROM channels WHERE channel_hash = $1 ORDER BY last_seen DESC LIMIT $2
-`
-
-type GetChannelsByHashParams struct {
-	ChannelHash []byte `json:"channel_hash"`
-	Limit       int32  `json:"limit"`
-}
-
-// Returns all channels for a given hash (may be multiple on hash collision).
-func (q *Queries) GetChannelsByHash(ctx context.Context, arg GetChannelsByHashParams) ([]Channel, error) {
-	rows, err := q.db.Query(ctx, getChannelsByHash, arg.ChannelHash, arg.Limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Channel{}
-	for rows.Next() {
-		var i Channel
-		if err := rows.Scan(
-			&i.ID,
-			&i.ChannelHash,
-			&i.KeyFingerprint,
-			&i.Name,
-			&i.Hashtag,
-			&i.IsHashtag,
-			&i.IsPublic,
-			&i.KeyKnown,
-			&i.FirstSeen,
-			&i.LastSeen,
-			&i.MessageCount,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const getCrossIATANeighbors = `-- name: GetCrossIATANeighbors :many
@@ -209,13 +116,13 @@ func (q *Queries) GetCrossIATANeighbors(ctx context.Context, arg GetCrossIATANei
 const getHourlyStats = `-- name: GetHourlyStats :many
 SELECT iata, hour, observation_count, unique_packets, active_observers
 FROM mv_hourly_iata_stats
-WHERE ($1 = '' OR iata ILIKE $1)
+WHERE ($1::text = '' OR iata = ANY(string_to_array($1::text, ',')))
   AND hour >= NOW() - $2::interval
 ORDER BY iata, hour
 `
 
 type GetHourlyStatsParams struct {
-	Column1 interface{}     `json:"column_1"`
+	Column1 string          `json:"column_1"`
 	Column2 pgtype.Interval `json:"column_2"`
 }
 
@@ -368,96 +275,6 @@ func (q *Queries) GetNodeByID(ctx context.Context, id uuid.UUID) (GetNodeByIDRow
 		&i.Iatas,
 	)
 	return i, err
-}
-
-const getNodeByPubkey = `-- name: GetNodeByPubkey :one
-SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.location_source, n.last_advert_at, n.supports_multibyte_paths, n.supports_multibyte_traces, n.default_scope_id, n.min_firmware_version, n.first_seen, n.last_seen, n.radio_freq_mhz, n.radio_sf, n.radio_bw_khz, n.metadata, ts.name AS default_scope_name,
-  EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
-  (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
-  (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
-   FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas
-FROM nodes n
-LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id
-WHERE n.public_key = $1
-`
-
-type GetNodeByPubkeyRow struct {
-	ID                      uuid.UUID          `json:"id"`
-	PublicKey               []byte             `json:"public_key"`
-	NodeType                int16              `json:"node_type"`
-	Name                    *string            `json:"name"`
-	Latitude                *float64           `json:"latitude"`
-	Longitude               *float64           `json:"longitude"`
-	LocationSource          *string            `json:"location_source"`
-	LastAdvertAt            pgtype.Timestamptz `json:"last_advert_at"`
-	SupportsMultibytePaths  bool               `json:"supports_multibyte_paths"`
-	SupportsMultibyteTraces bool               `json:"supports_multibyte_traces"`
-	DefaultScopeID          *int32             `json:"default_scope_id"`
-	MinFirmwareVersion      *string            `json:"min_firmware_version"`
-	FirstSeen               pgtype.Timestamptz `json:"first_seen"`
-	LastSeen                pgtype.Timestamptz `json:"last_seen"`
-	RadioFreqMhz            *float32           `json:"radio_freq_mhz"`
-	RadioSf                 *int16             `json:"radio_sf"`
-	RadioBwKhz              *float32           `json:"radio_bw_khz"`
-	Metadata                []byte             `json:"metadata"`
-	DefaultScopeName        *string            `json:"default_scope_name"`
-	IsObserver              bool               `json:"is_observer"`
-	ObserverID              uuid.UUID          `json:"observer_id"`
-	Iatas                   []byte             `json:"iatas"`
-}
-
-func (q *Queries) GetNodeByPubkey(ctx context.Context, publicKey []byte) (GetNodeByPubkeyRow, error) {
-	row := q.db.QueryRow(ctx, getNodeByPubkey, publicKey)
-	var i GetNodeByPubkeyRow
-	err := row.Scan(
-		&i.ID,
-		&i.PublicKey,
-		&i.NodeType,
-		&i.Name,
-		&i.Latitude,
-		&i.Longitude,
-		&i.LocationSource,
-		&i.LastAdvertAt,
-		&i.SupportsMultibytePaths,
-		&i.SupportsMultibyteTraces,
-		&i.DefaultScopeID,
-		&i.MinFirmwareVersion,
-		&i.FirstSeen,
-		&i.LastSeen,
-		&i.RadioFreqMhz,
-		&i.RadioSf,
-		&i.RadioBwKhz,
-		&i.Metadata,
-		&i.DefaultScopeName,
-		&i.IsObserver,
-		&i.ObserverID,
-		&i.Iatas,
-	)
-	return i, err
-}
-
-const getNodeIATAs = `-- name: GetNodeIATAs :many
-SELECT iata FROM node_iatas WHERE node_id = $1 ORDER BY iata ASC
-`
-
-func (q *Queries) GetNodeIATAs(ctx context.Context, nodeID uuid.UUID) ([]string, error) {
-	rows, err := q.db.Query(ctx, getNodeIATAs, nodeID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []string{}
-	for rows.Next() {
-		var iata string
-		if err := rows.Scan(&iata); err != nil {
-			return nil, err
-		}
-		items = append(items, iata)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const getNodeNeighbors = `-- name: GetNodeNeighbors :many
@@ -785,15 +602,15 @@ func (q *Queries) GetObserverTelemetry(ctx context.Context, arg GetObserverTelem
 
 const getObserverTelemetryBucketed = `-- name: GetObserverTelemetryBucketed :many
 SELECT
-  (date_trunc('hour', reported_at) +
+  (date_trunc('day', reported_at) +
     (EXTRACT(HOUR FROM reported_at)::int / $4::int) * ($4::int * interval '1 hour'))::timestamptz AS bucket,
   AVG(battery_voltage_mv)::int   AS battery_voltage_mv,
-  AVG(airtime_tx_pct)::real      AS airtime_tx_pct,
-  AVG(airtime_rx_pct)::real      AS airtime_rx_pct,
+  GREATEST(MAX(airtime_tx_pct) - MIN(airtime_tx_pct), 0)::real AS airtime_tx_pct,
+  GREATEST(MAX(airtime_rx_pct) - MIN(airtime_rx_pct), 0)::real AS airtime_rx_pct,
   AVG(noise_floor_db)::real      AS noise_floor_db,
   MAX(uptime_seconds)::bigint    AS uptime_seconds,
   AVG(queue_length)::int         AS queue_length,
-  AVG(receive_errors)::int       AS receive_errors
+  GREATEST(MAX(receive_errors) - MIN(receive_errors), 0)::int  AS receive_errors
 FROM observer_telemetry
 WHERE observer_id = $1
   AND ($2::timestamptz IS NULL OR reported_at >= $2)
@@ -986,7 +803,7 @@ const getRadioPresets = `-- name: GetRadioPresets :many
 SELECT preset, iata, source_type, count
 FROM mv_radio_presets
 WHERE ($1::text = '' OR preset = $1::text)
-  AND ($2::text = '' OR iata = $2::text)
+  AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
 ORDER BY preset, iata, source_type
 `
 
@@ -1267,6 +1084,43 @@ func (q *Queries) GetScopesByIATAs(ctx context.Context, dollar_1 string) ([]GetS
 	return items, nil
 }
 
+const getStatsNodeTypes = `-- name: GetStatsNodeTypes :many
+SELECT
+  n.node_type,
+  COUNT(DISTINCT n.id)::bigint AS count
+FROM nodes n
+LEFT JOIN node_iatas ni ON ni.node_id = n.id
+WHERE ($1::text = '' OR ni.iata = ANY(string_to_array($1::text, ',')))
+GROUP BY n.node_type
+ORDER BY count DESC
+`
+
+type GetStatsNodeTypesRow struct {
+	NodeType int16 `json:"node_type"`
+	Count    int64 `json:"count"`
+}
+
+// Returns node counts grouped by type, optionally filtered by IATA.
+func (q *Queries) GetStatsNodeTypes(ctx context.Context, dollar_1 string) ([]GetStatsNodeTypesRow, error) {
+	rows, err := q.db.Query(ctx, getStatsNodeTypes, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetStatsNodeTypesRow{}
+	for rows.Next() {
+		var i GetStatsNodeTypesRow
+		if err := rows.Scan(&i.NodeType, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getStatsOverview = `-- name: GetStatsOverview :one
 
 SELECT
@@ -1276,7 +1130,7 @@ SELECT
   COUNT(DISTINCT po.iata)         AS active_iatas
 FROM packet_observations po
 WHERE po.heard_at > NOW() - INTERVAL '24 hours'
-  AND ($1 = '' OR po.iata ILIKE $1)
+  AND ($1::text = '' OR po.iata = ANY(string_to_array($1::text, ',')))
 `
 
 type GetStatsOverviewRow struct {
@@ -1289,7 +1143,7 @@ type GetStatsOverviewRow struct {
 // ============================================================
 // STATS
 // ============================================================
-func (q *Queries) GetStatsOverview(ctx context.Context, dollar_1 interface{}) (GetStatsOverviewRow, error) {
+func (q *Queries) GetStatsOverview(ctx context.Context, dollar_1 string) (GetStatsOverviewRow, error) {
 	row := q.db.QueryRow(ctx, getStatsOverview, dollar_1)
 	var i GetStatsOverviewRow
 	err := row.Scan(
@@ -1308,14 +1162,14 @@ SELECT
 FROM packet_observations po
 JOIN packets p ON p.packet_hash = po.packet_hash
 WHERE po.heard_at > $1
-  AND ($2 = '' OR po.iata ILIKE $2)
+  AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
 GROUP BY p.payload_type
 ORDER BY count DESC
 `
 
 type GetStatsPayloadBreakdownParams struct {
 	HeardAt pgtype.Timestamptz `json:"heard_at"`
-	Column2 interface{}        `json:"column_2"`
+	Column2 string             `json:"column_2"`
 }
 
 type GetStatsPayloadBreakdownRow struct {
@@ -1358,7 +1212,7 @@ SELECT
 FROM packet_observations po
 JOIN observers o ON o.id = po.observer_id
 WHERE po.heard_at > $1
-  AND ($2 = '' OR po.iata ILIKE $2)
+  AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
 GROUP BY o.id
 ORDER BY observation_count DESC
 LIMIT $3
@@ -1366,7 +1220,7 @@ LIMIT $3
 
 type GetStatsTopObserversParams struct {
 	HeardAt pgtype.Timestamptz `json:"heard_at"`
-	Column2 interface{}        `json:"column_2"`
+	Column2 string             `json:"column_2"`
 	Limit   int32              `json:"limit"`
 }
 
@@ -1407,7 +1261,7 @@ func (q *Queries) GetStatsTopObservers(ctx context.Context, arg GetStatsTopObser
 
 const getTopNodes = `-- name: GetTopNodes :many
 SELECT iata, node_id, name, node_type, observation_count, last_heard FROM mv_top_nodes_by_iata
-WHERE ($1::char(3) IS NULL OR iata = $1)
+WHERE ($1::text = '' OR iata = ANY(string_to_array($1::text, ',')))
 ORDER BY observation_count DESC
 LIMIT $2
 `
@@ -2264,58 +2118,6 @@ func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNod
 	return items, nil
 }
 
-const listObservationsForObserver = `-- name: ListObservationsForObserver :many
-SELECT id, packet_hash, observer_id, iata, heard_at, path_length_byte, hash_size, hop_count, path_bytes, rssi, snr, propagation_time_ms, radio_freq_mhz, spread_factor, bandwidth_khz, coding_rate, source_broker FROM packet_observations
-WHERE observer_id = $1
-  AND ($2::timestamptz IS NULL OR heard_at >= $2)
-ORDER BY heard_at DESC
-LIMIT $3
-`
-
-type ListObservationsForObserverParams struct {
-	ObserverID uuid.UUID          `json:"observer_id"`
-	Column2    pgtype.Timestamptz `json:"column_2"`
-	Limit      int32              `json:"limit"`
-}
-
-func (q *Queries) ListObservationsForObserver(ctx context.Context, arg ListObservationsForObserverParams) ([]PacketObservation, error) {
-	rows, err := q.db.Query(ctx, listObservationsForObserver, arg.ObserverID, arg.Column2, arg.Limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []PacketObservation{}
-	for rows.Next() {
-		var i PacketObservation
-		if err := rows.Scan(
-			&i.ID,
-			&i.PacketHash,
-			&i.ObserverID,
-			&i.Iata,
-			&i.HeardAt,
-			&i.PathLengthByte,
-			&i.HashSize,
-			&i.HopCount,
-			&i.PathBytes,
-			&i.Rssi,
-			&i.Snr,
-			&i.PropagationTimeMs,
-			&i.RadioFreqMhz,
-			&i.SpreadFactor,
-			&i.BandwidthKhz,
-			&i.CodingRate,
-			&i.SourceBroker,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listObservationsForPacket = `-- name: ListObservationsForPacket :many
 SELECT po.id, po.packet_hash, po.observer_id, po.iata, po.heard_at, po.path_length_byte, po.hash_size, po.hop_count, po.path_bytes, po.rssi, po.snr, po.propagation_time_ms, po.radio_freq_mhz, po.spread_factor, po.bandwidth_khz, po.coding_rate, po.source_broker, o.display_name AS observer_name
 FROM packet_observations po
@@ -3011,21 +2813,6 @@ func (q *Queries) SearchKnownRoutes(ctx context.Context, arg SearchKnownRoutesPa
 	return items, nil
 }
 
-const setChannelKeyKnown = `-- name: SetChannelKeyKnown :exec
-UPDATE channels SET key_known = TRUE
-WHERE channel_hash = $1 AND key_fingerprint = $2
-`
-
-type SetChannelKeyKnownParams struct {
-	ChannelHash    []byte `json:"channel_hash"`
-	KeyFingerprint []byte `json:"key_fingerprint"`
-}
-
-func (q *Queries) SetChannelKeyKnown(ctx context.Context, arg SetChannelKeyKnownParams) error {
-	_, err := q.db.Exec(ctx, setChannelKeyKnown, arg.ChannelHash, arg.KeyFingerprint)
-	return err
-}
-
 const setNodeDefaultScope = `-- name: SetNodeDefaultScope :exec
 UPDATE nodes SET default_scope_id = $2 WHERE id = $1
 `
@@ -3197,11 +2984,14 @@ func (q *Queries) UpsertChannelHashOnly(ctx context.Context, channelHash []byte)
 
 const upsertIATA = `-- name: UpsertIATA :exec
 
+
 INSERT INTO iata_codes (iata)
 VALUES ($1)
 ON CONFLICT (iata) DO NOTHING
 `
 
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: agpl
 // ============================================================
 // IATA CODES
 // ============================================================

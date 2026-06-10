@@ -11,6 +11,8 @@ projects that make this possible:
 - [pgx](https://github.com/jackc/pgx) — PostgreSQL driver and connection pool
 - [sqlc](https://sqlc.dev) — Type-safe SQL code generation
 - [chi](https://github.com/go-chi/chi) — HTTP router
+- [go-chi/cors](https://github.com/go-chi/cors) — CORS middleware for chi
+- [go-redis](https://github.com/redis/go-redis) — Redis client
 - [coder/websocket](https://github.com/coder/websocket) — WebSocket
   implementation
 - [swaggo/swag](https://github.com/swaggo/swag) — OpenAPI documentation
@@ -27,7 +29,7 @@ projects that make this possible:
 ## Infrastructure
 
 - [PostgreSQL](https://www.postgresql.org) — Primary data store
-- [Redis](https://redis.io) — Reserved for future caching
+- [Redis](https://redis.io) — Optional caching layer
 - [Caddy](https://caddyserver.com) — Reverse proxy
 
 ## Language

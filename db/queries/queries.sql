@@ -215,15 +215,15 @@ ORDER BY reported_at ASC;
 
 -- name: GetObserverTelemetryBucketed :many
 SELECT
-  (date_trunc('hour', reported_at) +
+  (date_trunc('day', reported_at) +
     (EXTRACT(HOUR FROM reported_at)::int / $4::int) * ($4::int * interval '1 hour'))::timestamptz AS bucket,
   AVG(battery_voltage_mv)::int   AS battery_voltage_mv,
-  AVG(airtime_tx_pct)::real      AS airtime_tx_pct,
-  AVG(airtime_rx_pct)::real      AS airtime_rx_pct,
+  GREATEST(MAX(airtime_tx_pct) - MIN(airtime_tx_pct), 0)::real AS airtime_tx_pct,
+  GREATEST(MAX(airtime_rx_pct) - MIN(airtime_rx_pct), 0)::real AS airtime_rx_pct,
   AVG(noise_floor_db)::real      AS noise_floor_db,
   MAX(uptime_seconds)::bigint    AS uptime_seconds,
   AVG(queue_length)::int         AS queue_length,
-  AVG(receive_errors)::int       AS receive_errors
+  GREATEST(MAX(receive_errors) - MIN(receive_errors), 0)::int  AS receive_errors
 FROM observer_telemetry
 WHERE observer_id = $1
   AND ($2::timestamptz IS NULL OR reported_at >= $2)
@@ -436,13 +436,6 @@ LEFT JOIN observers o ON o.id = po.observer_id
 WHERE po.packet_hash = $1
 ORDER BY po.heard_at ASC;
 
--- name: ListObservationsForObserver :many
-SELECT * FROM packet_observations
-WHERE observer_id = $1
-  AND ($2::timestamptz IS NULL OR heard_at >= $2)
-ORDER BY heard_at DESC
-LIMIT $3;
-
 -- ============================================================
 -- NODES
 -- ============================================================
@@ -473,16 +466,6 @@ WHERE id = $1 AND supports_multibyte_traces = FALSE;
 
 -- name: SetNodeDefaultScope :exec
 UPDATE nodes SET default_scope_id = $2 WHERE id = $1;
-
--- name: GetNodeByPubkey :one
-SELECT n.*, ts.name AS default_scope_name,
-  EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
-  (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
-  (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
-   FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas
-FROM nodes n
-LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id
-WHERE n.public_key = $1;
 
 -- name: GetNodeByID :one
 SELECT n.*, ts.name AS default_scope_name,
@@ -529,9 +512,6 @@ WHERE
 GROUP BY n.id, ts.name
 ORDER BY n.last_seen DESC
 LIMIT $8;
-
--- name: GetNodeIATAs :many
-SELECT iata FROM node_iatas WHERE node_id = $1 ORDER BY iata ASC;
 
 -- name: ListNodeObservations :many
 SELECT po.id, encode(po.packet_hash, 'hex') AS packet_hash_hex,
@@ -582,10 +562,6 @@ ON CONFLICT (channel_hash) WHERE key_fingerprint IS NULL DO UPDATE SET
   last_seen = NOW()
 RETURNING id;
 
--- name: SetChannelKeyKnown :exec
-UPDATE channels SET key_known = TRUE
-WHERE channel_hash = $1 AND key_fingerprint = $2;
-
 -- name: ListChannels :many
 -- Returns channels ordered by last seen, optionally filtered by hash and/or IATA.
 -- Pass NULL for hash to skip hash filtering. Pass empty string for iata to skip IATA filtering.
@@ -602,16 +578,6 @@ WHERE ($1::bytea IS NULL OR c.channel_hash = $1)
   AND ($3::timestamptz IS NULL OR c.last_seen < $3)
 ORDER BY c.last_seen DESC
 LIMIT $4;
-
--- name: GetChannelsByHash :many
--- Returns all channels for a given hash (may be multiple on hash collision).
-SELECT * FROM channels WHERE channel_hash = $1 ORDER BY last_seen DESC LIMIT $2;
-
--- name: GetChannelByHashAndFingerprint :one
-SELECT * FROM channels WHERE channel_hash = $1 AND key_fingerprint = $2;
-
--- name: GetChannelByHashtag :one
-SELECT * FROM channels WHERE hashtag = $1;
 
 -- name: GetChannelByID :one
 SELECT * FROM channels WHERE id = $1;
@@ -713,18 +679,18 @@ SELECT
   COUNT(DISTINCT po.iata)         AS active_iatas
 FROM packet_observations po
 WHERE po.heard_at > NOW() - INTERVAL '24 hours'
-  AND ($1 = '' OR po.iata ILIKE $1);
+  AND ($1::text = '' OR po.iata = ANY(string_to_array($1::text, ',')));
 
 -- name: GetHourlyStats :many
 SELECT iata, hour, observation_count, unique_packets, active_observers
 FROM mv_hourly_iata_stats
-WHERE ($1 = '' OR iata ILIKE $1)
+WHERE ($1::text = '' OR iata = ANY(string_to_array($1::text, ',')))
   AND hour >= NOW() - $2::interval
 ORDER BY iata, hour;
 
 -- name: GetTopNodes :many
 SELECT * FROM mv_top_nodes_by_iata
-WHERE ($1::char(3) IS NULL OR iata = $1)
+WHERE ($1::text = '' OR iata = ANY(string_to_array($1::text, ',')))
 ORDER BY observation_count DESC
 LIMIT $2;
 
@@ -736,8 +702,19 @@ SELECT
 FROM packet_observations po
 JOIN packets p ON p.packet_hash = po.packet_hash
 WHERE po.heard_at > $1
-  AND ($2 = '' OR po.iata ILIKE $2)
+  AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
 GROUP BY p.payload_type
+ORDER BY count DESC;
+
+-- name: GetStatsNodeTypes :many
+-- Returns node counts grouped by type, optionally filtered by IATA.
+SELECT
+  n.node_type,
+  COUNT(DISTINCT n.id)::bigint AS count
+FROM nodes n
+LEFT JOIN node_iatas ni ON ni.node_id = n.id
+WHERE ($1::text = '' OR ni.iata = ANY(string_to_array($1::text, ',')))
+GROUP BY n.node_type
 ORDER BY count DESC;
 
 -- name: GetStatsTopObservers :many
@@ -755,7 +732,7 @@ SELECT
 FROM packet_observations po
 JOIN observers o ON o.id = po.observer_id
 WHERE po.heard_at > $1
-  AND ($2 = '' OR po.iata ILIKE $2)
+  AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
 GROUP BY o.id
 ORDER BY observation_count DESC
 LIMIT $3;
@@ -764,7 +741,7 @@ LIMIT $3;
 SELECT preset, iata, source_type, count
 FROM mv_radio_presets
 WHERE ($1::text = '' OR preset = $1::text)
-  AND ($2::text = '' OR iata = $2::text)
+  AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
 ORDER BY preset, iata, source_type;
 
 -- name: GetScopeStats :many

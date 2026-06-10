@@ -23,6 +23,33 @@ type Config struct {
 	Ingest      IngestFilterConfig    `yaml:"ingest"`
 	Scopes      []ScopeConfig         `yaml:"scopes"`
 	Cache       CacheConfig           `yaml:"cache"`
+	CORS        CORSConfig            `yaml:"cors"`
+}
+
+// CORSConfig controls Cross-Origin Resource Sharing behaviour.
+// If omitted, Beacon defaults to allowing all origins, which is appropriate
+// for a public read-only API. Operators exposing write endpoints should
+// restrict AllowedOrigins to known frontends.
+type CORSConfig struct {
+	// AllowedOrigins is the list of origins permitted to make cross-origin
+	// requests. Use ["*"] to allow all origins (default if omitted).
+	AllowedOrigins []string `yaml:"allowed_origins"`
+
+	// AllowedMethods is the list of HTTP methods allowed in CORS requests.
+	// Defaults to [GET, HEAD, OPTIONS] if omitted.
+	AllowedMethods []string `yaml:"allowed_methods"`
+
+	// AllowedHeaders is the list of request headers allowed in CORS requests.
+	// Defaults to [Accept, Authorization, Content-Type] if omitted.
+	AllowedHeaders []string `yaml:"allowed_headers"`
+
+	// AllowCredentials indicates whether the request can include user
+	// credentials (cookies, HTTP authentication). Defaults to false.
+	AllowCredentials bool `yaml:"allow_credentials"`
+
+	// MaxAge is the number of seconds the browser may cache a preflight
+	// response. Defaults to 300 if omitted.
+	MaxAge int `yaml:"max_age"`
 }
 
 // CacheConfig controls Redis caching behaviour.
