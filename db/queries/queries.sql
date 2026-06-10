@@ -215,7 +215,7 @@ ORDER BY reported_at ASC;
 
 -- name: GetObserverTelemetryBucketed :many
 SELECT
-  (date_trunc('hour', reported_at) +
+  (date_trunc('day', reported_at) +
     (EXTRACT(HOUR FROM reported_at)::int / $4::int) * ($4::int * interval '1 hour'))::timestamptz AS bucket,
   AVG(battery_voltage_mv)::int   AS battery_voltage_mv,
   GREATEST(MAX(airtime_tx_pct) - MIN(airtime_tx_pct), 0)::real AS airtime_tx_pct,
