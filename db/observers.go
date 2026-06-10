@@ -181,7 +181,7 @@ func (s *Store) GetObserverTelemetry(ctx context.Context, observerID uuid.UUID, 
 	points := make([]api.ObserverTelemetryPoint, 0, len(rows))
 	for _, v := range rows {
 		points = append(points, api.ObserverTelemetryPoint{
-			T:             v.ReportedAt.Time.Unix(),
+			T:             v.ReportedAt.Time.UnixMilli(),
 			BatteryMV:     v.BatteryVoltageMv,
 			AirtimeTxPct:  v.AirtimeTxPct,
 			AirtimeRxPct:  v.AirtimeRxPct,
