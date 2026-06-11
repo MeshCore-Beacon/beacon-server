@@ -626,7 +626,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 			nodeIDs = append(nodeIDs, entries[0].NodeID)
 			hashPrefixes = append(hashPrefixes, hash)
 		}
-		if allHigh && len(nodeIDs) > 0 {
+		if allHigh && len(nodeIDs) > 1 {
 			if err := w.db.UpsertKnownRoute(ctx, nodeIDs, hashPrefixes, iata, int32(len(nodeIDs))); err != nil {
 				log.Printf("ingest[%s]: failed to upsert known route: %v", w.cfg.BrokerName, err)
 			}
