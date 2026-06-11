@@ -472,7 +472,8 @@ SELECT n.*, ts.name AS default_scope_name,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
   (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
-   FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas
+   FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas,
+  (SELECT COUNT(*) FROM node_neighbors nn WHERE nn.node_id = n.id)::bigint AS known_neighbor_count
 FROM nodes n
 LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id
 WHERE n.id = $1;
@@ -488,7 +489,8 @@ SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_
   ts.name AS default_scope_name,
   json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC) FILTER (WHERE ni.iata IS NOT NULL) AS iatas,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
-  (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id
+  (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
+  (SELECT COUNT(*) FROM node_neighbors nn WHERE nn.node_id = n.id)::bigint AS known_neighbor_count
 FROM nodes n
 LEFT JOIN node_iatas ni ON ni.node_id = n.id
 LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id
@@ -810,16 +812,26 @@ SELECT
     MIN(p.first_heard_at)::timestamptz AS first_heard_at,
     MAX(p.last_heard_at)::timestamptz AS last_heard_at,
     COUNT(DISTINCT p.packet_hash) AS packet_count,
-    COUNT(DISTINCT po.iata) AS iata_count
+    COUNT(DISTINCT po.iata) AS iata_count,
+    MAX(p.parsed_payload->>'type')::text AS trace_type,
+    best.parsed_payload AS best_payload
 FROM packets p
 LEFT JOIN packet_observations po ON po.packet_hash = p.packet_hash
+LEFT JOIN LATERAL (
+    SELECT parsed_payload
+    FROM packets p2
+    WHERE p2.trace_tag = p.trace_tag
+    ORDER BY jsonb_array_length(p2.parsed_payload->'pathHashes') DESC
+    LIMIT 1
+) best ON true
 WHERE p.trace_tag IS NOT NULL
   AND ($1::text = '' OR po.iata = ANY(string_to_array($1::text, ',')))
   AND ($2::text = '' OR p.scope_id = (SELECT id FROM transport_scopes WHERE name = $2))
   AND ($3::timestamptz IS NULL OR p.first_heard_at >= $3)
   AND ($4::timestamptz IS NULL OR p.first_heard_at <= $4)
   AND ($5::timestamptz IS NULL OR p.last_heard_at < $5)
-GROUP BY p.trace_tag
+  AND ($7::text = '' OR p.parsed_payload->>'type' = $7)
+GROUP BY p.trace_tag, best.parsed_payload
 ORDER BY MAX(p.last_heard_at) DESC
 LIMIT $6;
 
@@ -880,7 +892,7 @@ ON CONFLICT (node_id, neighbor_id, iata) DO UPDATE SET
 -- name: GetNodeNeighbors :many
 -- Returns the neighbors of a node with details, ordered by most recently seen.
 SELECT
-    n.id, n.name, n.node_type, n.latitude, n.longitude,
+    n.id, n.public_key, n.name, n.node_type, n.latitude, n.longitude,
     nn.iata, nn.observation_count, nn.first_seen, nn.last_seen
 FROM node_neighbors nn
 JOIN nodes n ON n.id = nn.neighbor_id

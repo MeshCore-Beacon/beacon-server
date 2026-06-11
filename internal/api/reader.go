@@ -172,7 +172,7 @@ type Reader interface {
 	GetScopeByName(ctx context.Context, name string) (*ScopeDetail, error)
 
 	// ListTraceTags returns a paginated list of trace tags with aggregate metadata.
-	ListTraceTags(ctx context.Context, iatas []string, scope string, since, until time.Time, cursor time.Time, limit int32) ([]TraceTagSummary, error)
+	ListTraceTags(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, limit int32) ([]TraceTagSummary, error)
 
 	// GetTraceByTag returns all packets for a given trace tag with resolved routes.
 	GetTraceByTag(ctx context.Context, tag string) (*TraceDetail, error)

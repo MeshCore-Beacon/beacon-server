@@ -6,6 +6,7 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
@@ -32,6 +33,7 @@ func TracesRouter(reader api.Reader) http.Handler {
 //	@Param		region		query		string	false	"Filter by region slug"
 //	@Param		regionId	query		int		false	"Filter by region ID"
 //	@Param		scope		query		string	false	"Filter by transport scope name"
+//	@Param		type		query		string	false	"Filter by type: TRACE or PING (default: all)"
 //	@Param		since		query		int		false	"Filter by first_heard_at >= since (epoch ms)"
 //	@Param		until		query		int		false	"Filter by first_heard_at <= until (epoch ms)"
 //	@Param		cursor		query		int		false	"last_heard_at epoch ms of last item for pagination"
@@ -73,7 +75,8 @@ func listTraceTags(reader api.Reader) http.HandlerFunc {
 			iatas = append(iatas, regionIATAs...)
 		}
 		scope := r.URL.Query().Get("scope")
-		tags, err := reader.ListTraceTags(r.Context(), iatas, scope, since, until, cursor, limit)
+		traceType := strings.ToUpper(r.URL.Query().Get("type"))
+		tags, err := reader.ListTraceTags(r.Context(), iatas, scope, traceType, since, until, cursor, limit)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return

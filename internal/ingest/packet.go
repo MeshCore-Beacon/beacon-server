@@ -447,9 +447,13 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 			for _, b := range packet.Path {
 				snrValues = append(snrValues, float32(int8(b))/4.0)
 			}
+			traceType := "TRACE"
+			if len(hashes) == 1 {
+				traceType = "PING"
+			}
 			pt := parsedTrace{
 				Raw:        hex.EncodeToString(packet.Payload),
-				Type:       "TRACE",
+				Type:       traceType,
 				TraceTag:   hex.EncodeToString(uint32ToBytes(trace.Tag)),
 				AuthCode:   trace.AuthCode,
 				Flags:      trace.Flags,
@@ -626,7 +630,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 			nodeIDs = append(nodeIDs, entries[0].NodeID)
 			hashPrefixes = append(hashPrefixes, hash)
 		}
-		if allHigh && len(nodeIDs) > 0 {
+		if allHigh && len(nodeIDs) > 1 {
 			if err := w.db.UpsertKnownRoute(ctx, nodeIDs, hashPrefixes, iata, int32(len(nodeIDs))); err != nil {
 				log.Printf("ingest[%s]: failed to upsert known route: %v", w.cfg.BrokerName, err)
 			}

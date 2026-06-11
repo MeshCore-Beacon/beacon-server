@@ -21,7 +21,7 @@ type tracePayload struct {
 	SNRValues  []float32 `json:"snrValues"`
 }
 
-func (s *Store) ListTraceTags(ctx context.Context, iatas []string, scope string, since, until time.Time, cursor time.Time, limit int32) ([]api.TraceTagSummary, error) {
+func (s *Store) ListTraceTags(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, limit int32) ([]api.TraceTagSummary, error) {
 	iataFilter := strings.Join(iatas, ",")
 	var sinceTS, untilTS, cursorTS pgtype.Timestamptz
 	if !since.IsZero() {
@@ -40,18 +40,26 @@ func (s *Store) ListTraceTags(ctx context.Context, iatas []string, scope string,
 		Column4: untilTS,
 		Column5: cursorTS,
 		Limit:   limit,
+		Column7: traceType,
 	})
 	if err != nil {
 		return nil, err
 	}
 	items := make([]api.TraceTagSummary, 0, len(rows))
 	for _, r := range rows {
+		var best tracePayload
+		if len(r.BestPayload) > 0 {
+			_ = json.Unmarshal(r.BestPayload, &best)
+		}
 		items = append(items, api.TraceTagSummary{
 			TraceTag:     r.TraceTag,
 			FirstHeardAt: r.FirstHeardAt.Time.UnixMilli(),
 			LastHeardAt:  r.LastHeardAt.Time.UnixMilli(),
 			PacketCount:  r.PacketCount,
 			IATACount:    r.IataCount,
+			TraceType:    r.TraceType,
+			PathHashes:   best.PathHashes,
+			SNRValues:    best.SNRValues,
 		})
 	}
 	return items, nil

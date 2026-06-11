@@ -71,8 +71,7 @@ define your regions, IATA display names, channel keys, and retention settings.
 docker compose up postgres -d
 ```
 
-The schema in `db/migrations/001_schema.sql` is applied automatically on first
-start via `docker-entrypoint-initdb.d`.
+Database migrations are applied automatically on startup.
 
 ### 3. Run
 
@@ -325,7 +324,7 @@ Not yet implemented — see the Authentication section above.
 ### Endpoints
 
 | Method | Path                                | Description                                                                                        |
-| ------ | ----------------------------------- | -------------------------------------------------------------------------------------------------- |
+| ------ | ----------------------------------- | -------------------------------------------------------------------------------------------------- | ----- |
 | `GET`  | `/brokers`                          | List MQTT brokers and connection status                                                            |
 | `GET`  | `/channels`                         | List channels (optional: `?hash=<hex>&iata=<code>&limit=50`)                                       |
 | `GET`  | `/channels/{id}`                    | Get channel detail by integer ID                                                                   |
@@ -358,17 +357,8 @@ Not yet implemented — see the Authentication section above.
 | `GET`  | `/stats/scopes`                     | Configured region scopes and breakdown of packets, nodes, observers                                |
 | `GET`  | `/stats/top-nodes`                  | Top N nodes by observation count (from materialized view)                                          |
 | `GET`  | `/stats/top-observers`              | Top N observers by observation count (last 24h by default)                                         |
-| `GET`  | `/traces`                           | List trace tags with filters                                                                       |
+| `GET`  | `/traces`                           | List trace tags with filters (optional: ?type=TRACE                                                | PING) |
 | `GET`  | `/traces/{tag}`                     | Get full trace detail with resolved routes                                                         |
-
----
-
-## Road Map
-
-- [ ] Caddy reverse proxy config for production
-- [ ] Admin authentication middleware
-- [ ] Server management via API (currently config-file only)
-- [ ] Log levels, debug and info
 
 ---
 

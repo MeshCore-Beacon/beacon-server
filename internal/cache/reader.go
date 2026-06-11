@@ -389,6 +389,6 @@ func (cr *CachedReader) SearchCrossIATARoutes(ctx context.Context, fromHash, fro
 }
 
 // ListTraceTags implements [api.Reader].
-func (cr *CachedReader) ListTraceTags(ctx context.Context, iatas []string, scope string, since, until time.Time, cursor time.Time, limit int32) ([]api.TraceTagSummary, error) {
-	return cr.inner.ListTraceTags(ctx, iatas, scope, since, until, cursor, limit)
+func (cr *CachedReader) ListTraceTags(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, limit int32) ([]api.TraceTagSummary, error) {
+	return cr.inner.ListTraceTags(ctx, iatas, scope, traceType, since, until, cursor, limit)
 }
