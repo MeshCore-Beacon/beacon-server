@@ -812,7 +812,8 @@ SELECT
     MIN(p.first_heard_at)::timestamptz AS first_heard_at,
     MAX(p.last_heard_at)::timestamptz AS last_heard_at,
     COUNT(DISTINCT p.packet_hash) AS packet_count,
-    COUNT(DISTINCT po.iata) AS iata_count
+    COUNT(DISTINCT po.iata) AS iata_count,
+    MAX(p.parsed_payload->>'type')::text AS trace_type
 FROM packets p
 LEFT JOIN packet_observations po ON po.packet_hash = p.packet_hash
 WHERE p.trace_tag IS NOT NULL
@@ -821,6 +822,7 @@ WHERE p.trace_tag IS NOT NULL
   AND ($3::timestamptz IS NULL OR p.first_heard_at >= $3)
   AND ($4::timestamptz IS NULL OR p.first_heard_at <= $4)
   AND ($5::timestamptz IS NULL OR p.last_heard_at < $5)
+  AND ($7::text = '' OR p.parsed_payload->>'type' = $7)
 GROUP BY p.trace_tag
 ORDER BY MAX(p.last_heard_at) DESC
 LIMIT $6;

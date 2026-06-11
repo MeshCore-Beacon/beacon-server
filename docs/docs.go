@@ -1942,6 +1942,12 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "Filter by type: TRACE or PING (default: all)",
+                        "name": "type",
+                        "in": "query"
+                    },
+                    {
                         "type": "integer",
                         "description": "Filter by first_heard_at \u003e= since (epoch ms)",
                         "name": "since",
@@ -3123,6 +3129,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "snr": {
+                    "description": "signal-to-noise ratio in dB, if available",
                     "type": "number"
                 }
             }
@@ -3358,6 +3365,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "packets": {
+                    "description": "all packets observed for this trace",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TracePacket"
@@ -3381,27 +3389,33 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "packetHash": {
+                    "description": "hex-encoded packet hash",
                     "type": "string"
                 },
                 "rawPath": {
+                    "description": "hops as received in the packet",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.RawHop"
                     }
                 },
                 "resolvedRoute": {
+                    "description": "hops resolved to known nodes",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ResolvedHop"
                     }
                 },
                 "routeType": {
+                    "description": "numeric route type",
                     "type": "integer"
                 },
                 "routeTypeName": {
+                    "description": "human-readable route type",
                     "type": "string"
                 },
                 "scope": {
+                    "description": "transport scope name, if known",
                     "type": "string"
                 }
             }
@@ -3427,6 +3441,10 @@ const docTemplate = `{
                 },
                 "traceTag": {
                     "description": "hex-encoded 4-byte tag",
+                    "type": "string"
+                },
+                "traceType": {
+                    "description": "TRACE or PING",
                     "type": "string"
                 }
             }

@@ -148,7 +148,7 @@ func (stubReader) GetScopeByName(ctx context.Context, name string) (*api.ScopeDe
 	return nil, nil
 }
 
-func (stubReader) ListTraceTags(ctx context.Context, iatas []string, scope string, since, until time.Time, cursor time.Time, limit int32) ([]api.TraceTagSummary, error) {
+func (stubReader) ListTraceTags(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, limit int32) ([]api.TraceTagSummary, error) {
 	return nil, nil
 }
 

@@ -755,6 +755,7 @@ definitions:
         description: hex-encoded path hash
         type: string
       snr:
+        description: signal-to-noise ratio in dB, if available
         type: number
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.Region:
@@ -912,6 +913,7 @@ definitions:
   github_com_MeshCore-Beacon_beacon-server_internal_api.TraceDetail:
     properties:
       packets:
+        description: all packets observed for this trace
         items:
           $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TracePacket'
         type: array
@@ -928,20 +930,26 @@ definitions:
         description: epoch ms
         type: integer
       packetHash:
+        description: hex-encoded packet hash
         type: string
       rawPath:
+        description: hops as received in the packet
         items:
           $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.RawHop'
         type: array
       resolvedRoute:
+        description: hops resolved to known nodes
         items:
           $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ResolvedHop'
         type: array
       routeType:
+        description: numeric route type
         type: integer
       routeTypeName:
+        description: human-readable route type
         type: string
       scope:
+        description: transport scope name, if known
         type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.TraceTagSummary:
@@ -960,6 +968,9 @@ definitions:
         type: integer
       traceTag:
         description: hex-encoded 4-byte tag
+        type: string
+      traceType:
+        description: TRACE or PING
         type: string
     type: object
   internal_api_handlers.APIError:
@@ -2245,6 +2256,10 @@ paths:
       - description: Filter by transport scope name
         in: query
         name: scope
+        type: string
+      - description: 'Filter by type: TRACE or PING (default: all)'
+        in: query
+        name: type
         type: string
       - description: Filter by first_heard_at >= since (epoch ms)
         in: query

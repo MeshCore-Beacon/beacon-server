@@ -2620,7 +2620,8 @@ SELECT
     MIN(p.first_heard_at)::timestamptz AS first_heard_at,
     MAX(p.last_heard_at)::timestamptz AS last_heard_at,
     COUNT(DISTINCT p.packet_hash) AS packet_count,
-    COUNT(DISTINCT po.iata) AS iata_count
+    COUNT(DISTINCT po.iata) AS iata_count,
+    MAX(p.parsed_payload->>'type')::text AS trace_type
 FROM packets p
 LEFT JOIN packet_observations po ON po.packet_hash = p.packet_hash
 WHERE p.trace_tag IS NOT NULL
@@ -2629,6 +2630,7 @@ WHERE p.trace_tag IS NOT NULL
   AND ($3::timestamptz IS NULL OR p.first_heard_at >= $3)
   AND ($4::timestamptz IS NULL OR p.first_heard_at <= $4)
   AND ($5::timestamptz IS NULL OR p.last_heard_at < $5)
+  AND ($7::text = '' OR p.parsed_payload->>'type' = $7)
 GROUP BY p.trace_tag
 ORDER BY MAX(p.last_heard_at) DESC
 LIMIT $6
@@ -2641,6 +2643,7 @@ type ListTraceTagsParams struct {
 	Column4 pgtype.Timestamptz `json:"column_4"`
 	Column5 pgtype.Timestamptz `json:"column_5"`
 	Limit   int32              `json:"limit"`
+	Column7 string             `json:"column_7"`
 }
 
 type ListTraceTagsRow struct {
@@ -2649,6 +2652,7 @@ type ListTraceTagsRow struct {
 	LastHeardAt  pgtype.Timestamptz `json:"last_heard_at"`
 	PacketCount  int64              `json:"packet_count"`
 	IataCount    int64              `json:"iata_count"`
+	TraceType    string             `json:"trace_type"`
 }
 
 // ============================================================
@@ -2663,6 +2667,7 @@ func (q *Queries) ListTraceTags(ctx context.Context, arg ListTraceTagsParams) ([
 		arg.Column4,
 		arg.Column5,
 		arg.Limit,
+		arg.Column7,
 	)
 	if err != nil {
 		return nil, err
@@ -2677,6 +2682,7 @@ func (q *Queries) ListTraceTags(ctx context.Context, arg ListTraceTagsParams) ([
 			&i.LastHeardAt,
 			&i.PacketCount,
 			&i.IataCount,
+			&i.TraceType,
 		); err != nil {
 			return nil, err
 		}
