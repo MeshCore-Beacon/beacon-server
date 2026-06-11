@@ -114,6 +114,10 @@ func main() {
 	}
 	defer pool.Close()
 
+	if err := db.RunMigrations(ctx, pool); err != nil {
+		log.Fatalf("migrations failed: %v", err)
+	}
+
 	store := db.New(pool)
 
 	// ── Redis cache layer ────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 # Copyright 2026 Beacon Contributors
-# SPDX-License-Identifier: agpl
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 FROM golang:1.26-alpine AS builder
 WORKDIR /app
@@ -9,10 +9,7 @@ COPY . .
 RUN go build -o beacon ./cmd/beacon
 
 FROM alpine:3.19
-RUN apk add --no-cache ca-certificates tzdata postgresql-client
+RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 COPY --from=builder /app/beacon .
-COPY db/migrations/ ./migrations/
-COPY .build/docker-entrypoint.sh .
-RUN chmod +x docker-entrypoint.sh
-ENTRYPOINT ["./docker-entrypoint.sh"]
+CMD ["./beacon"]
