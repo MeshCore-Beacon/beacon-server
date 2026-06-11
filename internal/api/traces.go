@@ -5,12 +5,14 @@ package api
 
 // TraceTagSummary is a single trace tag with aggregate metadata.
 type TraceTagSummary struct {
-	TraceTag     string `json:"traceTag"`     // hex-encoded 4-byte tag
-	FirstHeardAt int64  `json:"firstHeardAt"` // epoch ms
-	LastHeardAt  int64  `json:"lastHeardAt"`  // epoch ms
-	PacketCount  int64  `json:"packetCount"`  // number of packets with this trace tag
-	IATACount    int64  `json:"iataCount"`    // number of distinct IATAs where heard
-	TraceType    string `json:"traceType"`    // TRACE or PING
+	TraceTag     string    `json:"traceTag"`     // hex-encoded 4-byte tag
+	FirstHeardAt int64     `json:"firstHeardAt"` // epoch ms
+	LastHeardAt  int64     `json:"lastHeardAt"`  // epoch ms
+	PacketCount  int64     `json:"packetCount"`  // number of packets with this trace tag
+	IATACount    int64     `json:"iataCount"`    // number of distinct IATAs where heard
+	TraceType    string    `json:"traceType"`    // TRACE or PING
+	PathHashes   []string  `json:"pathHashes"`   // hops from the most complete observation
+	SNRValues    []float32 `json:"snrValues"`    // SNR per hop from the most complete observation
 }
 
 // TracePacket is a single packet within a trace series, including its

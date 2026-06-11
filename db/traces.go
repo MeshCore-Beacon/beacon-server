@@ -47,6 +47,10 @@ func (s *Store) ListTraceTags(ctx context.Context, iatas []string, scope, traceT
 	}
 	items := make([]api.TraceTagSummary, 0, len(rows))
 	for _, r := range rows {
+		var best tracePayload
+		if len(r.BestPayload) > 0 {
+			_ = json.Unmarshal(r.BestPayload, &best)
+		}
 		items = append(items, api.TraceTagSummary{
 			TraceTag:     r.TraceTag,
 			FirstHeardAt: r.FirstHeardAt.Time.UnixMilli(),
@@ -54,6 +58,8 @@ func (s *Store) ListTraceTags(ctx context.Context, iatas []string, scope, traceT
 			PacketCount:  r.PacketCount,
 			IATACount:    r.IataCount,
 			TraceType:    r.TraceType,
+			PathHashes:   best.PathHashes,
+			SNRValues:    best.SNRValues,
 		})
 	}
 	return items, nil

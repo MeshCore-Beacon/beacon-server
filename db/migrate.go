@@ -28,6 +28,37 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("failed to create schema_migrations: %w", err)
 	}
 
+	// After creating schema_migrations table, check if we need to bootstrap
+	var count int
+	err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&count)
+	if err != nil {
+		return fmt.Errorf("failed to check migrations count: %w", err)
+	}
+	if count == 0 {
+		// Check if db is already initialized by looking for a known table
+		var exists bool
+		err = pool.QueryRow(ctx, `
+        SELECT EXISTS(
+            SELECT 1 FROM information_schema.tables 
+            WHERE table_name = 'packets'
+        )
+    `).Scan(&exists)
+		if err != nil {
+			return fmt.Errorf("failed to check existing schema: %w", err)
+		}
+		if exists {
+			// Mark 001 as already applied
+			if _, err := pool.Exec(
+				ctx,
+				"INSERT INTO schema_migrations (filename) VALUES ($1)",
+				"001_initial_schema.sql",
+			); err != nil {
+				return fmt.Errorf("failed to bootstrap migrations: %w", err)
+			}
+			fmt.Println("bootstrapped existing schema as 001_initial_schema.sql")
+		}
+	}
+
 	entries, err := fs.ReadDir(migrationFiles, "migrations")
 	if err != nil {
 		return fmt.Errorf("failed to read migrations: %w", err)

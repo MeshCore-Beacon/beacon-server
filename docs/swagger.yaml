@@ -966,6 +966,16 @@ definitions:
       packetCount:
         description: number of packets with this trace tag
         type: integer
+      pathHashes:
+        description: hops from the most complete observation
+        items:
+          type: string
+        type: array
+      snrValues:
+        description: SNR per hop from the most complete observation
+        items:
+          type: number
+        type: array
       traceTag:
         description: hex-encoded 4-byte tag
         type: string

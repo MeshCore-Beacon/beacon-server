@@ -3437,6 +3437,20 @@
                     "description": "number of packets with this trace tag",
                     "type": "integer"
                 },
+                "pathHashes": {
+                    "description": "hops from the most complete observation",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "snrValues": {
+                    "description": "SNR per hop from the most complete observation",
+                    "type": "array",
+                    "items": {
+                        "type": "number"
+                    }
+                },
                 "traceTag": {
                     "description": "hex-encoded 4-byte tag",
                     "type": "string"

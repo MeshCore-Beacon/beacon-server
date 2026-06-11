@@ -813,9 +813,17 @@ SELECT
     MAX(p.last_heard_at)::timestamptz AS last_heard_at,
     COUNT(DISTINCT p.packet_hash) AS packet_count,
     COUNT(DISTINCT po.iata) AS iata_count,
-    MAX(p.parsed_payload->>'type')::text AS trace_type
+    MAX(p.parsed_payload->>'type')::text AS trace_type,
+    best.parsed_payload AS best_payload
 FROM packets p
 LEFT JOIN packet_observations po ON po.packet_hash = p.packet_hash
+LEFT JOIN LATERAL (
+    SELECT parsed_payload
+    FROM packets p2
+    WHERE p2.trace_tag = p.trace_tag
+    ORDER BY jsonb_array_length(p2.parsed_payload->'pathHashes') DESC
+    LIMIT 1
+) best ON true
 WHERE p.trace_tag IS NOT NULL
   AND ($1::text = '' OR po.iata = ANY(string_to_array($1::text, ',')))
   AND ($2::text = '' OR p.scope_id = (SELECT id FROM transport_scopes WHERE name = $2))
@@ -823,7 +831,7 @@ WHERE p.trace_tag IS NOT NULL
   AND ($4::timestamptz IS NULL OR p.first_heard_at <= $4)
   AND ($5::timestamptz IS NULL OR p.last_heard_at < $5)
   AND ($7::text = '' OR p.parsed_payload->>'type' = $7)
-GROUP BY p.trace_tag
+GROUP BY p.trace_tag, best.parsed_payload
 ORDER BY MAX(p.last_heard_at) DESC
 LIMIT $6;
 
