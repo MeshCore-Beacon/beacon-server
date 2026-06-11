@@ -33,14 +33,14 @@ import (
 )
 
 //	@title			MeshCore Beacon API
-//	@version		1.0
+//	@version		1.2.2
 //	@description	MeshCore network observation backend. Ingests LoRa packets from MQTT brokers, stores in PostgreSQL, and streams live events via WebSocket.
 //	@termsOfService	https://github.com/MeshCore-Beacon/beacon-server
 
 //	@contact.name	MeshCore Beacon
 //	@contact.url	https://github.com/MeshCore-Beacon/beacon-server
 
-//	@license.name	MIT
+//	@license.name	AGPL-3-or-later
 
 //	@host		localhost:8080
 //	@BasePath	/api/v1
