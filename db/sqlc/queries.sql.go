@@ -216,7 +216,8 @@ SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.locat
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
   (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
-   FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas
+   FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas,
+  (SELECT COUNT(*) FROM node_neighbors nn WHERE nn.node_id = n.id)::bigint AS known_neighbor_count
 FROM nodes n
 LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id
 WHERE n.id = $1
@@ -245,6 +246,7 @@ type GetNodeByIDRow struct {
 	IsObserver              bool               `json:"is_observer"`
 	ObserverID              uuid.UUID          `json:"observer_id"`
 	Iatas                   []byte             `json:"iatas"`
+	KnownNeighborCount      int64              `json:"known_neighbor_count"`
 }
 
 func (q *Queries) GetNodeByID(ctx context.Context, id uuid.UUID) (GetNodeByIDRow, error) {
@@ -273,13 +275,14 @@ func (q *Queries) GetNodeByID(ctx context.Context, id uuid.UUID) (GetNodeByIDRow
 		&i.IsObserver,
 		&i.ObserverID,
 		&i.Iatas,
+		&i.KnownNeighborCount,
 	)
 	return i, err
 }
 
 const getNodeNeighbors = `-- name: GetNodeNeighbors :many
 SELECT
-    n.id, n.name, n.node_type, n.latitude, n.longitude,
+    n.id, n.public_key, n.name, n.node_type, n.latitude, n.longitude,
     nn.iata, nn.observation_count, nn.first_seen, nn.last_seen
 FROM node_neighbors nn
 JOIN nodes n ON n.id = nn.neighbor_id
@@ -289,6 +292,7 @@ ORDER BY nn.last_seen DESC
 
 type GetNodeNeighborsRow struct {
 	ID               uuid.UUID          `json:"id"`
+	PublicKey        []byte             `json:"public_key"`
 	Name             *string            `json:"name"`
 	NodeType         int16              `json:"node_type"`
 	Latitude         *float64           `json:"latitude"`
@@ -311,6 +315,7 @@ func (q *Queries) GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]Get
 		var i GetNodeNeighborsRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.PublicKey,
 			&i.Name,
 			&i.NodeType,
 			&i.Latitude,
@@ -2018,7 +2023,8 @@ SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_
   ts.name AS default_scope_name,
   json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC) FILTER (WHERE ni.iata IS NOT NULL) AS iatas,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
-  (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id
+  (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
+  (SELECT COUNT(*) FROM node_neighbors nn WHERE nn.node_id = n.id)::bigint AS known_neighbor_count
 FROM nodes n
 LEFT JOIN node_iatas ni ON ni.node_id = n.id
 LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id
@@ -2057,20 +2063,21 @@ type ListNodesParams struct {
 }
 
 type ListNodesRow struct {
-	ID               uuid.UUID          `json:"id"`
-	PublicKey        []byte             `json:"public_key"`
-	NodeType         int16              `json:"node_type"`
-	Name             *string            `json:"name"`
-	Latitude         *float64           `json:"latitude"`
-	Longitude        *float64           `json:"longitude"`
-	LastSeen         pgtype.Timestamptz `json:"last_seen"`
-	RadioFreqMhz     *float32           `json:"radio_freq_mhz"`
-	RadioSf          *int16             `json:"radio_sf"`
-	RadioBwKhz       *float32           `json:"radio_bw_khz"`
-	DefaultScopeName *string            `json:"default_scope_name"`
-	Iatas            []byte             `json:"iatas"`
-	IsObserver       bool               `json:"is_observer"`
-	ObserverID       uuid.UUID          `json:"observer_id"`
+	ID                 uuid.UUID          `json:"id"`
+	PublicKey          []byte             `json:"public_key"`
+	NodeType           int16              `json:"node_type"`
+	Name               *string            `json:"name"`
+	Latitude           *float64           `json:"latitude"`
+	Longitude          *float64           `json:"longitude"`
+	LastSeen           pgtype.Timestamptz `json:"last_seen"`
+	RadioFreqMhz       *float32           `json:"radio_freq_mhz"`
+	RadioSf            *int16             `json:"radio_sf"`
+	RadioBwKhz         *float32           `json:"radio_bw_khz"`
+	DefaultScopeName   *string            `json:"default_scope_name"`
+	Iatas              []byte             `json:"iatas"`
+	IsObserver         bool               `json:"is_observer"`
+	ObserverID         uuid.UUID          `json:"observer_id"`
+	KnownNeighborCount int64              `json:"known_neighbor_count"`
 }
 
 func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNodesRow, error) {
@@ -2107,6 +2114,7 @@ func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNod
 			&i.Iatas,
 			&i.IsObserver,
 			&i.ObserverID,
+			&i.KnownNeighborCount,
 		); err != nil {
 			return nil, err
 		}

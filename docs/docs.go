@@ -2302,6 +2302,9 @@ const docTemplate = `{
                     "description": "true if this node is also a known observer",
                     "type": "boolean"
                 },
+                "knownNeighborCount": {
+                    "type": "integer"
+                },
                 "lastAdvertAt": {
                     "description": "epoch ms, nil if no advert received",
                     "type": "integer"
@@ -2413,6 +2416,9 @@ const docTemplate = `{
                 },
                 "observationCount": {
                     "type": "integer"
+                },
+                "publicKey": {
+                    "type": "string"
                 }
             }
         },
@@ -2436,6 +2442,9 @@ const docTemplate = `{
                 "isObserver": {
                     "description": "true if this node is also a known observer",
                     "type": "boolean"
+                },
+                "knownNeighborCount": {
+                    "type": "integer"
                 },
                 "lat": {
                     "description": "decimal degrees, from advert AppData",

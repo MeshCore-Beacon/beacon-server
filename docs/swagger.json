@@ -2300,6 +2300,9 @@
                     "description": "true if this node is also a known observer",
                     "type": "boolean"
                 },
+                "knownNeighborCount": {
+                    "type": "integer"
+                },
                 "lastAdvertAt": {
                     "description": "epoch ms, nil if no advert received",
                     "type": "integer"
@@ -2411,6 +2414,9 @@
                 },
                 "observationCount": {
                     "type": "integer"
+                },
+                "publicKey": {
+                    "type": "string"
                 }
             }
         },
@@ -2434,6 +2440,9 @@
                 "isObserver": {
                     "description": "true if this node is also a known observer",
                     "type": "boolean"
+                },
+                "knownNeighborCount": {
+                    "type": "integer"
                 },
                 "lat": {
                     "description": "decimal degrees, from advert AppData",

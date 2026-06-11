@@ -106,15 +106,16 @@ func (s *Store) ListNodes(ctx context.Context, nodeType int16, iatas []string, s
 	items := make([]api.NodeSummary, 0, len(rows))
 	for _, v := range rows {
 		node := api.NodeSummary{
-			ID:           v.ID,
-			PublicKey:    hex.EncodeToString(v.PublicKey),
-			NodeType:     v.NodeType,
-			NodeTypeName: api.NodeTypeName(v.NodeType),
-			Name:         v.Name,
-			Latitude:     v.Latitude,
-			Longitude:    v.Longitude,
-			IsObserver:   v.IsObserver,
-			ObserverID:   nullableUUID(v.ObserverID),
+			ID:                 v.ID,
+			PublicKey:          hex.EncodeToString(v.PublicKey),
+			NodeType:           v.NodeType,
+			NodeTypeName:       api.NodeTypeName(v.NodeType),
+			Name:               v.Name,
+			Latitude:           v.Latitude,
+			Longitude:          v.Longitude,
+			IsObserver:         v.IsObserver,
+			ObserverID:         nullableUUID(v.ObserverID),
+			KnownNeighborCount: v.KnownNeighborCount,
 		}
 		if len(v.Iatas) > 0 {
 			if err := json.Unmarshal(v.Iatas, &node.IATAs); err != nil {
@@ -147,16 +148,17 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 	}
 	node := &api.Node{
 		NodeSummary: api.NodeSummary{
-			ID:           row.ID,
-			PublicKey:    hex.EncodeToString(row.PublicKey),
-			NodeType:     row.NodeType,
-			NodeTypeName: api.NodeTypeName(row.NodeType),
-			Name:         row.Name,
-			Latitude:     row.Latitude,
-			Longitude:    row.Longitude,
-			IsObserver:   row.IsObserver,
-			ObserverID:   nullableUUID(row.ObserverID),
-			DefaultScope: row.DefaultScopeName,
+			ID:                 row.ID,
+			PublicKey:          hex.EncodeToString(row.PublicKey),
+			NodeType:           row.NodeType,
+			NodeTypeName:       api.NodeTypeName(row.NodeType),
+			Name:               row.Name,
+			Latitude:           row.Latitude,
+			Longitude:          row.Longitude,
+			IsObserver:         row.IsObserver,
+			ObserverID:         nullableUUID(row.ObserverID),
+			DefaultScope:       row.DefaultScopeName,
+			KnownNeighborCount: row.KnownNeighborCount,
 		},
 		LocationSource:          row.LocationSource,
 		SupportsMultibytePaths:  row.SupportsMultibytePaths,
@@ -212,11 +214,25 @@ func (s *Store) GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]api.N
 	if err != nil {
 		return nil, err
 	}
+	seen := make(map[uuid.UUID]int)
 	items := make([]api.NodeNeighbor, 0, len(rows))
 	for _, r := range rows {
+		if idx, ok := seen[r.ID]; ok {
+			items[idx].ObservationCount += r.ObservationCount
+			if r.LastSeen.Time.After(time.UnixMilli(items[idx].LastSeen)) {
+				items[idx].LastSeen = r.LastSeen.Time.UnixMilli()
+				items[idx].IATA = r.Iata
+			}
+			if r.FirstSeen.Time.Before(time.UnixMilli(items[idx].FirstSeen)) {
+				items[idx].FirstSeen = r.FirstSeen.Time.UnixMilli()
+			}
+			continue
+		}
+		seen[r.ID] = len(items)
 		items = append(items, api.NodeNeighbor{
 			ID:               r.ID,
 			Name:             r.Name,
+			PublicKey:        hex.EncodeToString(r.PublicKey),
 			NodeType:         r.NodeType,
 			NodeTypeName:     api.NodeTypeName(r.NodeType),
 			Latitude:         r.Latitude,
