@@ -1274,7 +1274,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "Route ID of last item for pagination",
+                        "description": "Epoch ms timestamp of last item for pagination",
                         "name": "cursor",
                         "in": "query"
                     },
