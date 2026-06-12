@@ -147,7 +147,7 @@ func main() {
 		}
 	}
 
-	// refresh meterialized views on boot or restart to stay fresh
+	// refresh materialized views on boot or restart to stay fresh
 	refreshMaterializedViews(ctx, store)
 
 	// ── Seed config data ─────────────────────────────────────────────────────

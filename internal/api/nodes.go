@@ -64,6 +64,7 @@ type Node struct {
 }
 
 // NodeTypeName returns a human-readable name for a node type integer.
+// NOTE: truncation is fine here until there are at least over 200 types of node
 func NodeTypeName(t int16) string {
 	switch byte(t) {
 	case meshcore.AdvertTypeChat:
