@@ -20,6 +20,7 @@ import (
 	_ "github.com/MeshCore-Beacon/beacon-server/docs"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api/router"
+	"github.com/MeshCore-Beacon/beacon-server/internal/background"
 	"github.com/MeshCore-Beacon/beacon-server/internal/cache"
 	"github.com/MeshCore-Beacon/beacon-server/internal/config"
 	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
@@ -100,6 +101,18 @@ func main() {
 		maxConnsPerIP = 5
 	}
 
+	// resolve background intervals with defaults
+	viewRefreshInterval := cfg.Background.ViewRefresh.Duration
+	if viewRefreshInterval == 0 {
+		viewRefreshInterval = time.Hour
+	}
+	cleanupInterval := cfg.Background.Cleanup.Duration
+	if cleanupInterval == 0 {
+		cleanupInterval = time.Hour
+	}
+	log.Printf("config: loaded — telemetryResolution=%s telemetryRetention=%s packetRetention=%s maxConnsPerIP=%d viewRefresh=%s cleanup=%s",
+		telemetryResolution, telemetryRetention, packetRetention, maxConnsPerIP, viewRefreshInterval, cleanupInterval)
+
 	// ── Hub ──────────────────────────────────────────────────────────────────
 	h := hub.New()
 	go h.Run()
@@ -146,9 +159,6 @@ func main() {
 				redisAddr, ttls.Stats, ttls.Reference, ttls.Nodes, ttls.Observers)
 		}
 	}
-
-	// refresh materialized views on boot or restart to stay fresh
-	refreshMaterializedViews(ctx, store)
 
 	// ── Seed config data ─────────────────────────────────────────────────────
 	if err := config.Seed(ctx, cfg, store); err != nil {
@@ -250,25 +260,11 @@ func main() {
 	go broker1.Start(ctx)
 	go broker2.Start(ctx)
 
-	// ── cleanup and materialized view refresh goroutine ─────────────────────────────────────────
-	go func() {
-		ticker := time.NewTicker(time.Hour)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				if err := store.DeleteOldTelemetry(ctx, time.Now().Add(-telemetryRetention)); err != nil {
-					log.Printf("cleanup: delete old telemetry failed: %v", err)
-				}
-				if err := store.DeleteOldPackets(ctx, time.Now().Add(-packetRetention)); err != nil {
-					log.Printf("cleanup: delete old packets failed: %v", err)
-				}
-				refreshMaterializedViews(ctx, store)
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
+	scheduler := background.New([]background.Task{
+		background.ViewRefreshTask(store, viewRefreshInterval),
+		background.CleanupTask(store, telemetryRetention, packetRetention, cleanupInterval),
+	})
+	go scheduler.Start(ctx)
 
 	// ── HTTP server ──────────────────────────────────────────────────────────
 	r := router.New(h, reader, []*ingest.Worker{broker1, broker2}, maxConnsPerIP, cfg.CORS)
@@ -319,16 +315,4 @@ func getEnv(key string) string {
 		log.Printf("warning: %s is not set", key)
 	}
 	return v
-}
-
-func refreshMaterializedViews(ctx context.Context, store *db.Store) {
-	if err := store.RefreshHourlyStats(ctx); err != nil {
-		log.Printf("refresh: materialized view for hourly stats failed: %v", err)
-	}
-	if err := store.RefreshTopNodes(ctx); err != nil {
-		log.Printf("refresh: materialized view for top nodes failed: %v", err)
-	}
-	if err := store.RefreshRadioPresets(ctx); err != nil {
-		log.Printf("refresh: materialized view for radio presets failed: %v", err)
-	}
 }
