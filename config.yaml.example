@@ -122,4 +122,5 @@ cache:
 # flowing. Back off to 1h or more once stable.
 #background:
 #  view_refresh: 1h   # default: 1h
+#  reconfirm: 1h      # default: 1h
 #  cleanup: 1h        # default: 1h

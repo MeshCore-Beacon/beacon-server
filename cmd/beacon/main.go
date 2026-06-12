@@ -106,12 +106,17 @@ func main() {
 	if viewRefreshInterval == 0 {
 		viewRefreshInterval = time.Hour
 	}
+	reconfirmInterval := cfg.Background.Reconfirm.Duration
+	if reconfirmInterval == 0 {
+		reconfirmInterval = time.Hour
+	}
 	cleanupInterval := cfg.Background.Cleanup.Duration
 	if cleanupInterval == 0 {
 		cleanupInterval = time.Hour
 	}
-	log.Printf("config: loaded — telemetryResolution=%s telemetryRetention=%s packetRetention=%s maxConnsPerIP=%d viewRefresh=%s cleanup=%s",
-		telemetryResolution, telemetryRetention, packetRetention, maxConnsPerIP, viewRefreshInterval, cleanupInterval)
+
+	log.Printf("config: loaded — telemetryResolution=%s telemetryRetention=%s packetRetention=%s maxConnsPerIP=%d viewRefresh=%s reconfirm=%s cleanup=%s",
+		telemetryResolution, telemetryRetention, packetRetention, maxConnsPerIP, viewRefreshInterval, reconfirmInterval, cleanupInterval)
 
 	// ── Hub ──────────────────────────────────────────────────────────────────
 	h := hub.New()
@@ -263,6 +268,7 @@ func main() {
 	scheduler := background.New([]background.Task{
 		background.ViewRefreshTask(store, viewRefreshInterval),
 		background.CleanupTask(store, telemetryRetention, packetRetention, cleanupInterval),
+		background.ReconfirmTask(store, reconfirmInterval),
 	})
 	go scheduler.Start(ctx)
 

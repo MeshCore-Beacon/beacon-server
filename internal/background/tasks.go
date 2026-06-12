@@ -5,6 +5,7 @@ package background
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 
@@ -42,6 +43,25 @@ func CleanupTask(store *db.Store, telemetryRetention, packetRetention, interval 
 			}
 			if err := store.DeleteOldPackets(ctx, time.Now().Add(-packetRetention)); err != nil {
 				return err
+			}
+			return nil
+		},
+	}
+}
+
+// ReconfirmTask returns a Task that prunes stale and ambiguous resolved paths
+// and neighbors. Runs after routes to ensure neighbors are cleaned against
+// already-reconfirmed path data.
+func ReconfirmTask(store *db.Store, interval time.Duration) Task {
+	return Task{
+		Name:     "reconfirm",
+		Interval: interval,
+		Run: func(ctx context.Context) error {
+			if err := store.ReconfirmRoutes(ctx); err != nil {
+				return fmt.Errorf("routes: %w", err)
+			}
+			if err := store.ReconfirmNeighbors(ctx); err != nil {
+				return fmt.Errorf("neighbors: %w", err)
 			}
 			return nil
 		},

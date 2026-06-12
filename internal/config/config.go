@@ -33,6 +33,9 @@ type BackgroundConfig struct {
 	// Defaults to 1h if not set.
 	ViewRefresh duration `yaml:"view_refresh"`
 
+	// Reconfirm prunes stale and ambiguous resolved paths and neigbors.
+	Reconfirm duration `yaml:"reconfirm"`
+
 	// Cleanup is how often old telemetry and packet rows are pruned.
 	// Defaults to 1h if not set.
 	Cleanup duration `yaml:"cleanup"`

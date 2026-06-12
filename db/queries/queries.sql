@@ -937,3 +937,45 @@ REFRESH MATERIALIZED VIEW CONCURRENTLY mv_top_nodes_by_iata;
 
 -- name: RefreshRadioPresets :exec
 REFRESH MATERIALIZED VIEW CONCURRENTLY mv_radio_presets;
+
+-- name: ReconfirmRoutes :exec
+-- Delete known_routes where any hop node has departed from node_short_ids for
+-- that IATA, or where any hop's prefix_4 is now ambiguous (matches >1 node).
+DELETE FROM known_routes kr
+WHERE EXISTS (
+    SELECT 1
+    FROM unnest(kr.node_ids) AS hop_node_id
+    WHERE NOT EXISTS (
+        SELECT 1 FROM node_short_ids ns
+        WHERE ns.node_id = hop_node_id
+          AND ns.iata = kr.iata
+    )
+)
+OR EXISTS (
+    SELECT 1
+    FROM unnest(kr.hash_prefix) AS hop_prefix
+    WHERE (
+        SELECT COUNT(*) FROM node_short_ids ns
+        WHERE ns.iata = kr.iata
+          AND ns.prefix_4 = hop_prefix
+    ) > 1
+);
+
+-- name: ReconfirmNeighbors :exec
+-- Delete node_neighbors where the neighbor has departed from node_short_ids
+-- for that IATA, or where its prefix_4 is now ambiguous.
+DELETE FROM node_neighbors nn
+WHERE NOT EXISTS (
+    SELECT 1 FROM node_short_ids ns
+    WHERE ns.node_id = nn.neighbor_id
+      AND ns.iata = nn.iata
+)
+OR (
+    SELECT COUNT(*) FROM node_short_ids ns
+    WHERE ns.iata = nn.iata
+      AND ns.prefix_4 = (
+          SELECT prefix_4 FROM node_short_ids
+          WHERE node_id = nn.neighbor_id
+            AND iata = nn.iata
+      )
+) > 1;
