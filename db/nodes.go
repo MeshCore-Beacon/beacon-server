@@ -245,3 +245,7 @@ func (s *Store) GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]api.N
 	}
 	return items, nil
 }
+
+func (s *Store) ReconfirmNeighbors(ctx context.Context) error {
+	return s.q.ReconfirmNeighbors(ctx)
+}

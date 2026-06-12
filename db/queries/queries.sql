@@ -17,11 +17,12 @@ SELECT * FROM iata_codes WHERE iata = $1;
 SELECT * FROM iata_codes ORDER BY iata;
 
 -- name: UpsertIATADetails :exec
-UPDATE iata_codes SET
-    display_name = $2,
-    approx_lat   = $3,
-    approx_lng   = $4
-WHERE iata = $1;
+INSERT INTO iata_codes (iata, display_name, approx_lat, approx_lng)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (iata) DO UPDATE SET
+    display_name = EXCLUDED.display_name,
+    approx_lat   = EXCLUDED.approx_lat,
+    approx_lng   = EXCLUDED.approx_lng;
 
 -- ============================================================
 -- TRANSPORT CODES
@@ -919,6 +920,7 @@ SELECT ns.prefix_4 AS hash, n.id AS node_id, n.name, n.latitude, n.longitude, n.
 FROM node_short_ids ns
 JOIN nodes n ON n.id = ns.node_id
 WHERE ns.iata = $1
+  AND n.node_type IN (2, 3)
   AND CASE
     WHEN cardinality($2::bytea[]) > 0 AND length($2[1]) = 1 THEN ns.prefix_1 = ANY($2)
     WHEN cardinality($2::bytea[]) > 0 AND length($2[1]) = 2 THEN ns.prefix_2 = ANY($2)
@@ -935,3 +937,45 @@ REFRESH MATERIALIZED VIEW CONCURRENTLY mv_top_nodes_by_iata;
 
 -- name: RefreshRadioPresets :exec
 REFRESH MATERIALIZED VIEW CONCURRENTLY mv_radio_presets;
+
+-- name: ReconfirmRoutes :exec
+-- Delete known_routes where any hop node has departed from node_short_ids for
+-- that IATA, or where any hop's prefix_4 is now ambiguous (matches >1 node).
+DELETE FROM known_routes kr
+WHERE EXISTS (
+    SELECT 1
+    FROM unnest(kr.node_ids) AS hop_node_id
+    WHERE NOT EXISTS (
+        SELECT 1 FROM node_short_ids ns
+        WHERE ns.node_id = hop_node_id
+          AND ns.iata = kr.iata
+    )
+)
+OR EXISTS (
+    SELECT 1
+    FROM unnest(kr.hash_prefix) AS hop_prefix
+    WHERE (
+        SELECT COUNT(*) FROM node_short_ids ns
+        WHERE ns.iata = kr.iata
+          AND ns.prefix_4 = hop_prefix
+    ) > 1
+);
+
+-- name: ReconfirmNeighbors :exec
+-- Delete node_neighbors where the neighbor has departed from node_short_ids
+-- for that IATA, or where its prefix_4 is now ambiguous.
+DELETE FROM node_neighbors nn
+WHERE NOT EXISTS (
+    SELECT 1 FROM node_short_ids ns
+    WHERE ns.node_id = nn.neighbor_id
+      AND ns.iata = nn.iata
+)
+OR (
+    SELECT COUNT(*) FROM node_short_ids ns
+    WHERE ns.iata = nn.iata
+      AND ns.prefix_4 = (
+          SELECT prefix_4 FROM node_short_ids
+          WHERE node_id = nn.neighbor_id
+            AND iata = nn.iata
+      )
+) > 1;

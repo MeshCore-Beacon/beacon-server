@@ -2704,6 +2704,60 @@ func (q *Queries) ListTraceTags(ctx context.Context, arg ListTraceTagsParams) ([
 	return items, nil
 }
 
+const reconfirmNeighbors = `-- name: ReconfirmNeighbors :exec
+DELETE FROM node_neighbors nn
+WHERE NOT EXISTS (
+    SELECT 1 FROM node_short_ids ns
+    WHERE ns.node_id = nn.neighbor_id
+      AND ns.iata = nn.iata
+)
+OR (
+    SELECT COUNT(*) FROM node_short_ids ns
+    WHERE ns.iata = nn.iata
+      AND ns.prefix_4 = (
+          SELECT prefix_4 FROM node_short_ids
+          WHERE node_id = nn.neighbor_id
+            AND iata = nn.iata
+      )
+) > 1
+`
+
+// Delete node_neighbors where the neighbor has departed from node_short_ids
+// for that IATA, or where its prefix_4 is now ambiguous.
+func (q *Queries) ReconfirmNeighbors(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, reconfirmNeighbors)
+	return err
+}
+
+const reconfirmRoutes = `-- name: ReconfirmRoutes :exec
+DELETE FROM known_routes kr
+WHERE EXISTS (
+    SELECT 1
+    FROM unnest(kr.node_ids) AS hop_node_id
+    WHERE NOT EXISTS (
+        SELECT 1 FROM node_short_ids ns
+        WHERE ns.node_id = hop_node_id
+          AND ns.iata = kr.iata
+    )
+)
+OR EXISTS (
+    SELECT 1
+    FROM unnest(kr.hash_prefix) AS hop_prefix
+    WHERE (
+        SELECT COUNT(*) FROM node_short_ids ns
+        WHERE ns.iata = kr.iata
+          AND ns.prefix_4 = hop_prefix
+    ) > 1
+)
+`
+
+// Delete known_routes where any hop node has departed from node_short_ids for
+// that IATA, or where any hop's prefix_4 is now ambiguous (matches >1 node).
+func (q *Queries) ReconfirmRoutes(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, reconfirmRoutes)
+	return err
+}
+
 const refreshHourlyStats = `-- name: RefreshHourlyStats :exec
 REFRESH MATERIALIZED VIEW CONCURRENTLY mv_hourly_iata_stats
 `
@@ -2737,6 +2791,7 @@ SELECT ns.prefix_4 AS hash, n.id AS node_id, n.name, n.latitude, n.longitude, n.
 FROM node_short_ids ns
 JOIN nodes n ON n.id = ns.node_id
 WHERE ns.iata = $1
+  AND n.node_type IN (2, 3)
   AND CASE
     WHEN cardinality($2::bytea[]) > 0 AND length($2[1]) = 1 THEN ns.prefix_1 = ANY($2)
     WHEN cardinality($2::bytea[]) > 0 AND length($2[1]) = 2 THEN ns.prefix_2 = ANY($2)
@@ -3025,11 +3080,12 @@ func (q *Queries) UpsertIATA(ctx context.Context, iata string) error {
 }
 
 const upsertIATADetails = `-- name: UpsertIATADetails :exec
-UPDATE iata_codes SET
-    display_name = $2,
-    approx_lat   = $3,
-    approx_lng   = $4
-WHERE iata = $1
+INSERT INTO iata_codes (iata, display_name, approx_lat, approx_lng)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (iata) DO UPDATE SET
+    display_name = EXCLUDED.display_name,
+    approx_lat   = EXCLUDED.approx_lat,
+    approx_lng   = EXCLUDED.approx_lng
 `
 
 type UpsertIATADetailsParams struct {

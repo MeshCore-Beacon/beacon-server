@@ -20,6 +20,7 @@ import (
 	_ "github.com/MeshCore-Beacon/beacon-server/docs"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api/router"
+	"github.com/MeshCore-Beacon/beacon-server/internal/background"
 	"github.com/MeshCore-Beacon/beacon-server/internal/cache"
 	"github.com/MeshCore-Beacon/beacon-server/internal/config"
 	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
@@ -33,7 +34,7 @@ import (
 )
 
 //	@title			MeshCore Beacon API
-//	@version		1.3.0
+//	@version		1.4.0
 //	@description	MeshCore network observation backend. Ingests LoRa packets from MQTT brokers, stores in PostgreSQL, and streams live events via WebSocket.
 //	@termsOfService	https://github.com/MeshCore-Beacon/beacon-server
 
@@ -100,6 +101,23 @@ func main() {
 		maxConnsPerIP = 5
 	}
 
+	// resolve background intervals with defaults
+	viewRefreshInterval := cfg.Background.ViewRefresh.Duration
+	if viewRefreshInterval == 0 {
+		viewRefreshInterval = time.Hour
+	}
+	reconfirmInterval := cfg.Background.Reconfirm.Duration
+	if reconfirmInterval == 0 {
+		reconfirmInterval = time.Hour
+	}
+	cleanupInterval := cfg.Background.Cleanup.Duration
+	if cleanupInterval == 0 {
+		cleanupInterval = time.Hour
+	}
+
+	log.Printf("config: loaded — telemetryResolution=%s telemetryRetention=%s packetRetention=%s maxConnsPerIP=%d viewRefresh=%s reconfirm=%s cleanup=%s",
+		telemetryResolution, telemetryRetention, packetRetention, maxConnsPerIP, viewRefreshInterval, reconfirmInterval, cleanupInterval)
+
 	// ── Hub ──────────────────────────────────────────────────────────────────
 	h := hub.New()
 	go h.Run()
@@ -108,7 +126,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pool, err := pgxpool.New(ctx, mustEnv("POSTGRES_DSN"))
+	pool, err := pgxpool.New(ctx, getEnv("POSTGRES_DSN"))
 	if err != nil {
 		log.Fatalf("failed to connect to postgres at %s: %v", os.Getenv("POSTGRES_DSN_HOST"), err)
 	}
@@ -146,9 +164,6 @@ func main() {
 				redisAddr, ttls.Stats, ttls.Reference, ttls.Nodes, ttls.Observers)
 		}
 	}
-
-	// refresh meterialized views on boot or restart to stay fresh
-	refreshMaterializedViews(ctx, store)
 
 	// ── Seed config data ─────────────────────────────────────────────────────
 	if err := config.Seed(ctx, cfg, store); err != nil {
@@ -215,9 +230,9 @@ func main() {
 	broker1 := ingest.New(
 		ingest.Config{
 			BrokerName:          "mqtt1",
-			URL:                 mustEnv("MQTT_BROKER_1_URL"),
-			Username:            mustEnv("MQTT_BROKER_1_USERNAME"),
-			Password:            mustEnv("MQTT_BROKER_1_PASSWORD"),
+			URL:                 getEnv("MQTT_BROKER_1_URL"),
+			Username:            getEnv("MQTT_BROKER_1_USERNAME"),
+			Password:            getEnv("MQTT_BROKER_1_PASSWORD"),
 			TelemetryResolution: telemetryResolution,
 			AllowedIATAs:        allowedIATAs,
 		},
@@ -230,9 +245,9 @@ func main() {
 	broker2 := ingest.New(
 		ingest.Config{
 			BrokerName:          "mqtt2",
-			URL:                 mustEnv("MQTT_BROKER_2_URL"),
-			Username:            mustEnv("MQTT_BROKER_2_USERNAME"),
-			Password:            mustEnv("MQTT_BROKER_2_PASSWORD"),
+			URL:                 getEnv("MQTT_BROKER_2_URL"),
+			Username:            getEnv("MQTT_BROKER_2_USERNAME"),
+			Password:            getEnv("MQTT_BROKER_2_PASSWORD"),
 			TelemetryResolution: telemetryResolution,
 			AllowedIATAs:        allowedIATAs,
 		},
@@ -250,25 +265,12 @@ func main() {
 	go broker1.Start(ctx)
 	go broker2.Start(ctx)
 
-	// ── cleanup and materialized view refresh goroutine ─────────────────────────────────────────
-	go func() {
-		ticker := time.NewTicker(time.Hour)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				if err := store.DeleteOldTelemetry(ctx, time.Now().Add(-telemetryRetention)); err != nil {
-					log.Printf("cleanup: delete old telemetry failed: %v", err)
-				}
-				if err := store.DeleteOldPackets(ctx, time.Now().Add(-packetRetention)); err != nil {
-					log.Printf("cleanup: delete old packets failed: %v", err)
-				}
-				refreshMaterializedViews(ctx, store)
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
+	scheduler := background.New([]background.Task{
+		background.ViewRefreshTask(store, viewRefreshInterval),
+		background.CleanupTask(store, telemetryRetention, packetRetention, cleanupInterval),
+		background.ReconfirmTask(store, reconfirmInterval),
+	})
+	go scheduler.Start(ctx)
 
 	// ── HTTP server ──────────────────────────────────────────────────────────
 	r := router.New(h, reader, []*ingest.Worker{broker1, broker2}, maxConnsPerIP, cfg.CORS)
@@ -292,7 +294,9 @@ func main() {
 
 	log.Println("shutting down...")
 	cancel() // stops ingest workers
-	if err := srv.Shutdown(context.Background()); err != nil {
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("server shutdown error: %v", err)
 	}
 }
@@ -308,25 +312,13 @@ func entryExists(entries []keystore.Entry, e keystore.Entry) bool {
 	return false
 }
 
-// mustEnv returns the value of an env var and logs a warning if it is unset.
+// getEnv returns the value of an env var and logs a warning if it is unset.
 // Callers that require the value to be non-empty should fatal themselves;
 // ingest workers tolerate missing broker config and will fail on connect instead.
-func mustEnv(key string) string {
+func getEnv(key string) string {
 	v := os.Getenv(key)
 	if v == "" {
 		log.Printf("warning: %s is not set", key)
 	}
 	return v
-}
-
-func refreshMaterializedViews(ctx context.Context, store *db.Store) {
-	if err := store.RefreshHourlyStats(ctx); err != nil {
-		log.Printf("refresh: materialized view for hourly stats failed: %v", err)
-	}
-	if err := store.RefreshTopNodes(ctx); err != nil {
-		log.Printf("refresh: materialized view for top nodes failed: %v", err)
-	}
-	if err := store.RefreshRadioPresets(ctx); err != nil {
-		log.Printf("refresh: materialized view for radio presets failed: %v", err)
-	}
 }

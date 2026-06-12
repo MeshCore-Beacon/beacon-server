@@ -32,7 +32,7 @@ func RoutesRouter(reader api.Reader) http.Handler {
 //	@Produce	json
 //	@Param		iata		query		string	false	"Filter by IATA code"
 //	@Param		hopCount	query		int		false	"Filter by exact hop count"
-//	@Param		cursor		query		int		false	"Route ID of last item for pagination"
+//	@Param		cursor		query		int		false	"Epoch ms timestamp of last item for pagination"
 //	@Param		limit		query		int		false	"Max results (default 50)"
 //	@Success	200			{object}	[]api.KnownRoute
 //	@Failure	500			{object}	handlers.APIError

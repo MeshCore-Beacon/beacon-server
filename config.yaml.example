@@ -117,3 +117,10 @@ cache:
 #  allow_countries: [CA, US]
 #  allow_continents: [NA]
 
+# Background task intervals.
+# Shorter intervals are useful during initial deployment to confirm data is
+# flowing. Back off to 1h or more once stable.
+#background:
+#  view_refresh: 1h   # default: 1h
+#  reconfirm: 1h      # default: 1h
+#  cleanup: 1h        # default: 1h

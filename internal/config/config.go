@@ -24,6 +24,21 @@ type Config struct {
 	Scopes      []ScopeConfig         `yaml:"scopes"`
 	Cache       CacheConfig           `yaml:"cache"`
 	CORS        CORSConfig            `yaml:"cors"`
+	Background  BackgroundConfig      `yaml:"background"`
+}
+
+// BackgroundConfig controls the intervals for background maintenance tasks.
+type BackgroundConfig struct {
+	// ViewRefresh is how often materialized views are refreshed.
+	// Defaults to 1h if not set.
+	ViewRefresh duration `yaml:"view_refresh"`
+
+	// Reconfirm prunes stale and ambiguous resolved paths and neigbors.
+	Reconfirm duration `yaml:"reconfirm"`
+
+	// Cleanup is how often old telemetry and packet rows are pruned.
+	// Defaults to 1h if not set.
+	Cleanup duration `yaml:"cleanup"`
 }
 
 // CORSConfig controls Cross-Origin Resource Sharing behaviour.

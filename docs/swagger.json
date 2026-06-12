@@ -15,7 +15,7 @@
         "license": {
             "name": "AGPL-3-or-later"
         },
-        "version": "1.3.0"
+        "version": "1.4.0"
     },
     "host": "localhost:8080",
     "basePath": "/api/v1",
@@ -1272,7 +1272,7 @@
                     },
                     {
                         "type": "integer",
-                        "description": "Route ID of last item for pagination",
+                        "description": "Epoch ms timestamp of last item for pagination",
                         "name": "cursor",
                         "in": "query"
                     },

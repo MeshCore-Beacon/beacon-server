@@ -259,6 +259,10 @@ func (s *Store) SearchCrossIATARoutes(ctx context.Context, fromHash, fromIATA, t
 	return results, nil
 }
 
+func (s *Store) ReconfirmRoutes(ctx context.Context) error {
+	return s.q.ReconfirmRoutes(ctx)
+}
+
 // extractFromNode returns the portion of a route starting at the given node.
 func extractFromNode(hops []api.RouteHop, nodeID uuid.UUID) []api.RouteHop {
 	for i, hop := range hops {
