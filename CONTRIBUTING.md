@@ -258,6 +258,50 @@ Key patterns to understand before contributing:
 Merges from `dev` to `main` are done by maintainers and represent a versioned
 release. Do not open PRs directly against `main`.
 
+### Cutting a release
+
+> NOTE: release are done manually, not from GH. Commits for releases should be
+> signed.
+
+1. Ensure all changes are committed and CI is green on `dev`
+2. Bump the version string in the `@version` swagger annotation in
+   `cmd/beacon/main.go`
+3. Regenerate swagger docs:
+
+```bash
+swag init -g cmd/beacon/main.go -o docs --parseInternal --parseDependency
+```
+
+4. Commit the version bump and updated docs:
+
+```
+chore: bump version to vX.Y.Z
+```
+
+5. Rebase merge `dev` into `main` (no merge commit):
+
+```bash
+git checkout main
+git merge --ff-only dev
+```
+
+6. Tag the release:
+
+```bash
+git tag vX.Y.Z
+git push origin main --tags
+```
+
+7. Publish release notes on GitHub against the new tag
+8. Build release binaries and attach them to the GitHub release:
+
+```bash
+./build-release.sh
+```
+
+The script reads the version from the git tag automatically. Upload the
+resulting files from `binaries/` as release assets on GitHub.
+
 ## Recognition
 
 If you'd like to be listed as a contributor, add yourself to

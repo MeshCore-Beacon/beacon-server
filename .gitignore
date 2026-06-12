@@ -5,3 +5,5 @@ config.yaml
 docker-compose.yml
 notes.md
 roadmap.md
+
+binaries/

@@ -1010,7 +1010,7 @@ info:
     name: AGPL-3-or-later
   termsOfService: https://github.com/MeshCore-Beacon/beacon-server
   title: MeshCore Beacon API
-  version: 1.4.0
+  version: 1.4.1
 paths:
   /brokers:
     get:

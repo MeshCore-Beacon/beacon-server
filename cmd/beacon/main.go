@@ -33,8 +33,12 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// version is set at build time via -ldflags "-X main.version=vX.Y.Z".
+// Falls back to "dev" when built without the flag.
+var version = "dev"
+
 //	@title			MeshCore Beacon API
-//	@version		1.4.0
+//	@version		1.4.1
 //	@description	MeshCore network observation backend. Ingests LoRa packets from MQTT brokers, stores in PostgreSQL, and streams live events via WebSocket.
 //	@termsOfService	https://github.com/MeshCore-Beacon/beacon-server
 
@@ -67,6 +71,7 @@ import (
 // @tag.name			Stats
 // @tag.description	Network statistics and time series
 func main() {
+	log.Printf("beacon version %s", version)
 	_ = godotenv.Load()
 	addr := os.Getenv("LISTEN_ADDR")
 	if addr == "" {
