@@ -278,29 +278,31 @@ swag init -g cmd/beacon/main.go -o docs --parseInternal --parseDependency
 chore: bump version to vX.Y.Z
 ```
 
-5. Rebase merge `dev` into `main` (no merge commit):
+5. Merge `dev` into `main` (fast-forward only):
 
 ```bash
 git checkout main
 git merge --ff-only dev
 ```
 
-6. Tag the release:
+6. Tag the release and push:
 
 ```bash
 git tag vX.Y.Z
 git push origin main --tags
 ```
 
-7. Publish release notes on GitHub against the new tag
-8. Build release binaries and attach them to the GitHub release:
+Pushing the tag triggers the release CI workflow, which builds binaries for all
+supported platforms and attaches them to a draft GitHub release.
+
+7. Open the draft release on GitHub, paste the release notes, and publish.
+
+8. Rebase `dev` on `main` to keep histories in sync for future releases:
 
 ```bash
-./build-release.sh
+git checkout dev
+git rebase main
 ```
-
-The script reads the version from the git tag automatically. Upload the
-resulting files from `binaries/` as release assets on GitHub.
 
 ## Recognition
 
