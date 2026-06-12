@@ -108,7 +108,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pool, err := pgxpool.New(ctx, mustEnv("POSTGRES_DSN"))
+	pool, err := pgxpool.New(ctx, getEnv("POSTGRES_DSN"))
 	if err != nil {
 		log.Fatalf("failed to connect to postgres at %s: %v", os.Getenv("POSTGRES_DSN_HOST"), err)
 	}
@@ -215,9 +215,9 @@ func main() {
 	broker1 := ingest.New(
 		ingest.Config{
 			BrokerName:          "mqtt1",
-			URL:                 mustEnv("MQTT_BROKER_1_URL"),
-			Username:            mustEnv("MQTT_BROKER_1_USERNAME"),
-			Password:            mustEnv("MQTT_BROKER_1_PASSWORD"),
+			URL:                 getEnv("MQTT_BROKER_1_URL"),
+			Username:            getEnv("MQTT_BROKER_1_USERNAME"),
+			Password:            getEnv("MQTT_BROKER_1_PASSWORD"),
 			TelemetryResolution: telemetryResolution,
 			AllowedIATAs:        allowedIATAs,
 		},
@@ -230,9 +230,9 @@ func main() {
 	broker2 := ingest.New(
 		ingest.Config{
 			BrokerName:          "mqtt2",
-			URL:                 mustEnv("MQTT_BROKER_2_URL"),
-			Username:            mustEnv("MQTT_BROKER_2_USERNAME"),
-			Password:            mustEnv("MQTT_BROKER_2_PASSWORD"),
+			URL:                 getEnv("MQTT_BROKER_2_URL"),
+			Username:            getEnv("MQTT_BROKER_2_USERNAME"),
+			Password:            getEnv("MQTT_BROKER_2_PASSWORD"),
 			TelemetryResolution: telemetryResolution,
 			AllowedIATAs:        allowedIATAs,
 		},
@@ -308,10 +308,10 @@ func entryExists(entries []keystore.Entry, e keystore.Entry) bool {
 	return false
 }
 
-// mustEnv returns the value of an env var and logs a warning if it is unset.
+// getEnv returns the value of an env var and logs a warning if it is unset.
 // Callers that require the value to be non-empty should fatal themselves;
 // ingest workers tolerate missing broker config and will fail on connect instead.
-func mustEnv(key string) string {
+func getEnv(key string) string {
 	v := os.Getenv(key)
 	if v == "" {
 		log.Printf("warning: %s is not set", key)
