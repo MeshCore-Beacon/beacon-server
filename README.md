@@ -5,7 +5,7 @@ more MeshCore MQTT brokers, ingests LoRa packet traffic in real time, stores it
 in PostgreSQL, and streams live events to WebSocket clients.
 
 [![CI](https://github.com/MeshCore-Beacon/beacon-server/actions/workflows/ci.yml/badge.svg)](https://github.com/MeshCore-Beacon/beacon-server/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/MeshCore-Beacon/beacon-server/actions/workflows/codeql.yml/badge.svg)](https://github.com/MeshCore-Beacon/beacon-server/actions/workflows/codeql.yml)
+[![CodeQL](https://github.com/MeshCore-Beacon/beacon-server/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/MeshCore-Beacon/beacon-server/actions/workflows/codeql.yml)
 ![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/446564/3e707bdf3f06ecb4575166ce598051c3/raw/beacon-coverage.json)
 [![Docker](https://github.com/MeshCore-Beacon/beacon-server/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/MeshCore-Beacon/beacon-server/actions/workflows/docker-publish.yml)
 
