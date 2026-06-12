@@ -3025,11 +3025,12 @@ func (q *Queries) UpsertIATA(ctx context.Context, iata string) error {
 }
 
 const upsertIATADetails = `-- name: UpsertIATADetails :exec
-UPDATE iata_codes SET
-    display_name = $2,
-    approx_lat   = $3,
-    approx_lng   = $4
-WHERE iata = $1
+INSERT INTO iata_codes (iata, display_name, approx_lat, approx_lng)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (iata) DO UPDATE SET
+    display_name = EXCLUDED.display_name,
+    approx_lat   = EXCLUDED.approx_lat,
+    approx_lng   = EXCLUDED.approx_lng
 `
 
 type UpsertIATADetailsParams struct {
