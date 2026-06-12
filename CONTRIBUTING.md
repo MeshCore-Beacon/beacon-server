@@ -293,6 +293,14 @@ git push origin main --tags
 ```
 
 7. Publish release notes on GitHub against the new tag
+8. Build release binaries and attach them to the GitHub release:
+
+```bash
+./build-release.sh
+```
+
+The script reads the version from the git tag automatically. Upload the
+resulting files from `binaries/` as release assets on GitHub.
 
 ## Recognition
 
