@@ -920,6 +920,7 @@ SELECT ns.prefix_4 AS hash, n.id AS node_id, n.name, n.latitude, n.longitude, n.
 FROM node_short_ids ns
 JOIN nodes n ON n.id = ns.node_id
 WHERE ns.iata = $1
+  AND n.node_type IN (2, 3)
   AND CASE
     WHEN cardinality($2::bytea[]) > 0 AND length($2[1]) = 1 THEN ns.prefix_1 = ANY($2)
     WHEN cardinality($2::bytea[]) > 0 AND length($2[1]) = 2 THEN ns.prefix_2 = ANY($2)
