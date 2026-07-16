@@ -5,7 +5,6 @@ package db
 
 import (
 	"context"
-	"strings"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
@@ -52,8 +51,7 @@ func (s *Store) GetScopeNames(ctx context.Context) ([]string, error) {
 
 // GetScopesByIATAs returns scope summaries filtered by the given IATA codes.
 func (s *Store) GetScopesByIATAs(ctx context.Context, iatas []string) ([]api.ScopeSummary, error) {
-	iataFilter := strings.Join(iatas, ",")
-	rows, err := s.q.GetScopesByIATAs(ctx, iataFilter)
+	rows, err := s.q.GetScopesByIATAs(ctx, iatas)
 	if err != nil {
 		return nil, err
 	}

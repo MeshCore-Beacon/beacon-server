@@ -56,7 +56,7 @@ LEFT JOIN observer_scopes os ON os.scope_id = ts.id
 LEFT JOIN observers o ON o.id = os.observer_id
 LEFT JOIN packet_observations po ON po.observer_id = o.id
 LEFT JOIN nodes n ON n.default_scope_id = ts.id
-WHERE ($1::text = '' OR po.iata = ANY(string_to_array($1::text, ',')))
+WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR po.iata = ANY($1::bpchar[]))
 GROUP BY ts.name
 ORDER BY ts.name;
 
@@ -161,11 +161,11 @@ LEFT JOIN observer_brokers ob ON ob.observer_id = o.id
 LEFT JOIN observer_scopes os ON os.observer_id = o.id
 LEFT JOIN transport_scopes ts ON ts.id = os.scope_id
 WHERE
-  ($1::text = '' OR (
+  (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR (
       SELECT po.iata FROM packet_observations po
       WHERE po.observer_id = o.id
       ORDER BY po.heard_at DESC LIMIT 1
-  ) = ANY(string_to_array($1::text, ',')))
+  ) = ANY($1::bpchar[]))
   AND ($2 = '' OR o.observer_type = $2)
   AND ($3 = '' OR ob.broker_name = $3)
   AND ($4 = '' OR CASE
@@ -358,10 +358,10 @@ LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE
   ($1::smallint = -1 OR p.payload_type = $1::smallint)
   AND ($2::smallint = -1 OR p.route_type = $2::smallint)
-  AND ($3::text = '' OR EXISTS (
+  AND (COALESCE(cardinality($3::bpchar[]), 0) = 0 OR EXISTS (
       SELECT 1 FROM packet_observations po3
       WHERE po3.packet_hash = p.packet_hash
-      AND po3.iata = ANY(string_to_array($3::text, ','))
+      AND po3.iata = ANY($3::bpchar[])
   ))
   AND ($4::timestamptz IS NULL OR p.first_heard_at >= $4)
   AND ($5::timestamptz IS NULL OR p.first_heard_at <= $5)
@@ -391,7 +391,7 @@ LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE po.id > $1
   AND ($2::smallint = -1 OR p.payload_type = $2::smallint)
   AND ($3::smallint = -1 OR p.route_type = $3::smallint)
-  AND ($4::text = '' OR po.iata = ANY(string_to_array($4::text, ',')))
+  AND (COALESCE(cardinality($4::bpchar[]), 0) = 0 OR po.iata = ANY($4::bpchar[]))
   AND ($5::text = '' OR ts.name = $5::text)
 ORDER BY po.id ASC
 LIMIT $6;
@@ -505,7 +505,7 @@ LEFT JOIN node_iatas ni ON ni.node_id = n.id
 LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id
 WHERE
   ($1 = 0 OR n.node_type = $1)
-  AND ($2::text = '' OR n.id IN (SELECT node_id FROM node_iatas WHERE iata = ANY(string_to_array($2::text, ','))))
+  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR n.id IN (SELECT node_id FROM node_iatas WHERE iata = ANY($2::bpchar[])))
   AND (
     $3::text = 'any'
     OR ($3::text = 'true' AND n.supports_multibyte_paths = TRUE)
@@ -618,7 +618,7 @@ JOIN packets p ON p.packet_hash = cm.packet_hash
 LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE cm.channel_id = $1
   AND ($2::timestamptz IS NULL OR cm.sent_at >= $2)
-  AND ($3::text = '' OR po.iata = ANY(string_to_array($3::text, ',')))
+  AND (COALESCE(cardinality($3::bpchar[]), 0) = 0 OR po.iata = ANY($3::bpchar[]))
   AND ($4::text = '' OR ts.name = $4::text)
   AND ($5::bigint = 0 OR cm.id < $5::bigint)
 ORDER BY cm.id DESC
@@ -636,7 +636,7 @@ JOIN packet_observations po ON po.packet_hash = cm.packet_hash
 JOIN packets p ON p.packet_hash = cm.packet_hash
 LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE ($1::timestamptz IS NULL OR cm.sent_at >= $1)
-  AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
+  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR po.iata = ANY($2::bpchar[]))
   AND ($3::text = '' OR ts.name = $3::text)
   AND ($4 = 0 OR cm.id < $4)
 ORDER BY cm.id DESC
@@ -656,7 +656,7 @@ JOIN packets p ON p.packet_hash = cm.packet_hash
 LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE c.channel_hash = $1
   AND ($2::timestamptz IS NULL OR cm.sent_at >= $2)
-  AND ($3::text = '' OR po.iata = ANY(string_to_array($3::text, ',')))
+  AND (COALESCE(cardinality($3::bpchar[]), 0) = 0 OR po.iata = ANY($3::bpchar[]))
   AND ($4::text = '' OR ts.name = $4::text)
   AND ($5::bigint = 0 OR cm.id < $5::bigint)
 ORDER BY cm.id DESC
@@ -673,7 +673,7 @@ JOIN packet_observations po ON po.packet_hash = cm.packet_hash
 JOIN packets p ON p.packet_hash = cm.packet_hash
 LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE cm.id > $1
-  AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
+  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR po.iata = ANY($2::bpchar[]))
   AND ($3::text = '' OR ts.name = $3::text)
 ORDER BY cm.id ASC
 LIMIT $4;
@@ -690,18 +690,18 @@ SELECT
   COUNT(DISTINCT po.iata)         AS active_iatas
 FROM packet_observations po
 WHERE po.heard_at > NOW() - INTERVAL '24 hours'
-  AND ($1::text = '' OR po.iata = ANY(string_to_array($1::text, ',')));
+  AND (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR po.iata = ANY($1::bpchar[]));
 
 -- name: GetHourlyStats :many
 SELECT iata, hour, observation_count, unique_packets, active_observers
 FROM mv_hourly_iata_stats
-WHERE ($1::text = '' OR iata = ANY(string_to_array($1::text, ',')))
+WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR iata = ANY($1::bpchar[]))
   AND hour >= NOW() - $2::interval
 ORDER BY iata, hour;
 
 -- name: GetTopNodes :many
 SELECT * FROM mv_top_nodes_by_iata
-WHERE ($1::text = '' OR iata = ANY(string_to_array($1::text, ',')))
+WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR iata = ANY($1::bpchar[]))
 ORDER BY observation_count DESC
 LIMIT $2;
 
@@ -713,7 +713,7 @@ SELECT
 FROM packet_observations po
 JOIN packets p ON p.packet_hash = po.packet_hash
 WHERE po.heard_at > $1
-  AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
+  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR po.iata = ANY($2::bpchar[]))
 GROUP BY p.payload_type
 ORDER BY count DESC;
 
@@ -724,7 +724,7 @@ SELECT
   COUNT(DISTINCT n.id)::bigint AS count
 FROM nodes n
 LEFT JOIN node_iatas ni ON ni.node_id = n.id
-WHERE ($1::text = '' OR ni.iata = ANY(string_to_array($1::text, ',')))
+WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR ni.iata = ANY($1::bpchar[]))
 GROUP BY n.node_type
 ORDER BY count DESC;
 
@@ -743,7 +743,7 @@ SELECT
 FROM packet_observations po
 JOIN observers o ON o.id = po.observer_id
 WHERE po.heard_at > $1
-  AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
+  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR po.iata = ANY($2::bpchar[]))
 GROUP BY o.id
 ORDER BY observation_count DESC
 LIMIT $3;
@@ -752,7 +752,7 @@ LIMIT $3;
 SELECT preset, iata, source_type, count
 FROM mv_radio_presets
 WHERE ($1::text = '' OR preset = $1::text)
-  AND ($2::text = '' OR iata = ANY(string_to_array($2::text, ',')))
+  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR iata = ANY($2::bpchar[]))
 ORDER BY preset, iata, source_type;
 
 -- name: GetScopeStats :many
@@ -834,7 +834,7 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) best ON true
 WHERE p.trace_tag IS NOT NULL
-  AND ($1::text = '' OR po.iata = ANY(string_to_array($1::text, ',')))
+  AND (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR po.iata = ANY($1::bpchar[]))
   AND ($2::text = '' OR p.scope_id = (SELECT id FROM transport_scopes WHERE name = $2))
   AND ($3::timestamptz IS NULL OR p.first_heard_at >= $3)
   AND ($4::timestamptz IS NULL OR p.first_heard_at <= $4)

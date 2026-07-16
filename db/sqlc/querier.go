@@ -47,13 +47,13 @@ type Querier interface {
 	GetScopeByName(ctx context.Context, name string) (GetScopeByNameRow, error)
 	GetScopeNames(ctx context.Context) ([]string, error)
 	GetScopeStats(ctx context.Context) ([]GetScopeStatsRow, error)
-	GetScopesByIATAs(ctx context.Context, dollar_1 string) ([]GetScopesByIATAsRow, error)
+	GetScopesByIATAs(ctx context.Context, dollar_1 []string) ([]GetScopesByIATAsRow, error)
 	// Returns node counts grouped by type, optionally filtered by IATA.
-	GetStatsNodeTypes(ctx context.Context, dollar_1 string) ([]GetStatsNodeTypesRow, error)
+	GetStatsNodeTypes(ctx context.Context, dollar_1 []string) ([]GetStatsNodeTypesRow, error)
 	// ============================================================
 	// STATS
 	// ============================================================
-	GetStatsOverview(ctx context.Context, dollar_1 string) (GetStatsOverviewRow, error)
+	GetStatsOverview(ctx context.Context, dollar_1 []string) (GetStatsOverviewRow, error)
 	// Returns observation counts grouped by payload type for the given window and IATA.
 	GetStatsPayloadBreakdown(ctx context.Context, arg GetStatsPayloadBreakdownParams) ([]GetStatsPayloadBreakdownRow, error)
 	// Returns the top N observers by observation count for the given window and IATA.

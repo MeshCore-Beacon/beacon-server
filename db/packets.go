@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"strings"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
@@ -72,11 +71,10 @@ func (s *Store) ListPackets(ctx context.Context, payloadType, routeType int16, i
 	if !until.IsZero() {
 		untilTS = pgtype.Timestamptz{Time: until, Valid: true}
 	}
-	iataFilter := strings.Join(iatas, ",")
 	rows, err := s.q.ListPackets(ctx, sqlc.ListPacketsParams{
 		Column1: payloadType,
 		Column2: routeType,
-		Column3: iataFilter,
+		Column3: iatas,
 		Column4: sinceTS,
 		Column5: untilTS,
 		Column6: cursorTS,
@@ -125,12 +123,11 @@ func (s *Store) ListPackets(ctx context.Context, payloadType, routeType int16, i
 }
 
 func (s *Store) ListPacketsAfterID(ctx context.Context, afterObservationID int64, payloadType, routeType int16, iatas []string, scope string, limit int32) ([]api.PacketSummary, error) {
-	iataFilter := strings.Join(iatas, ",")
 	rows, err := s.q.ListPacketsAfterID(ctx, sqlc.ListPacketsAfterIDParams{
 		ID:      afterObservationID,
 		Column2: payloadType,
 		Column3: routeType,
-		Column4: iataFilter,
+		Column4: iatas,
 		Column5: scope,
 		Limit:   limit,
 	})

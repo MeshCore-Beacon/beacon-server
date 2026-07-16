@@ -330,6 +330,28 @@ func TestGetPacket_FirstToLastMs(t *testing.T) {
 	}
 }
 
+func TestListPacketsAfterID_PassesIATAsAsArray(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mock := mockdb.NewMockQuerier(ctrl)
+
+	mock.EXPECT().
+		ListPacketsAfterID(gomock.Any(), sqlc.ListPacketsAfterIDParams{
+			ID:      0,
+			Column2: int16(-1),
+			Column3: int16(-1),
+			Column4: []string{"ALF", "YYZ"},
+			Column5: "",
+			Limit:   50,
+		}).
+		Return([]sqlc.ListPacketsAfterIDRow{}, nil)
+
+	store := &Store{q: mock}
+	_, err := store.ListPacketsAfterID(context.Background(), 0, -1, -1, []string{"ALF", "YYZ"}, "", 50)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestListNodeObservations_Pagination(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mock := mockdb.NewMockQuerier(ctrl)

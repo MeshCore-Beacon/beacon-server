@@ -118,13 +118,13 @@ func (q *Queries) GetCrossIATANeighbors(ctx context.Context, arg GetCrossIATANei
 const getHourlyStats = `-- name: GetHourlyStats :many
 SELECT iata, hour, observation_count, unique_packets, active_observers
 FROM mv_hourly_iata_stats
-WHERE ($1::text = '' OR iata = ANY(string_to_array($1::text, ',')))
+WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR iata = ANY($1::bpchar[]))
   AND hour >= NOW() - $2::interval
 ORDER BY iata, hour
 `
 
 type GetHourlyStatsParams struct {
-	Column1 string          `json:"column_1"`
+	Column1 []string        `json:"column_1"`
 	Column2 pgtype.Interval `json:"column_2"`
 }
 
@@ -823,13 +823,13 @@ const getRadioPresets = `-- name: GetRadioPresets :many
 SELECT preset, iata, source_type, count
 FROM mv_radio_presets
 WHERE ($1::text = '' OR preset = $1::text)
-  AND ($2::text = '' OR iata = ANY(string_to_array($2::text, ',')))
+  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR iata = ANY($2::bpchar[]))
 ORDER BY preset, iata, source_type
 `
 
 type GetRadioPresetsParams struct {
-	Column1 string `json:"column_1"`
-	Column2 string `json:"column_2"`
+	Column1 string   `json:"column_1"`
+	Column2 []string `json:"column_2"`
 }
 
 func (q *Queries) GetRadioPresets(ctx context.Context, arg GetRadioPresetsParams) ([]MvRadioPreset, error) {
@@ -1067,7 +1067,7 @@ LEFT JOIN observer_scopes os ON os.scope_id = ts.id
 LEFT JOIN observers o ON o.id = os.observer_id
 LEFT JOIN packet_observations po ON po.observer_id = o.id
 LEFT JOIN nodes n ON n.default_scope_id = ts.id
-WHERE ($1::text = '' OR po.iata = ANY(string_to_array($1::text, ',')))
+WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR po.iata = ANY($1::bpchar[]))
 GROUP BY ts.name
 ORDER BY ts.name
 `
@@ -1079,7 +1079,7 @@ type GetScopesByIATAsRow struct {
 	IataCount     int64  `json:"iata_count"`
 }
 
-func (q *Queries) GetScopesByIATAs(ctx context.Context, dollar_1 string) ([]GetScopesByIATAsRow, error) {
+func (q *Queries) GetScopesByIATAs(ctx context.Context, dollar_1 []string) ([]GetScopesByIATAsRow, error) {
 	rows, err := q.db.Query(ctx, getScopesByIATAs, dollar_1)
 	if err != nil {
 		return nil, err
@@ -1110,7 +1110,7 @@ SELECT
   COUNT(DISTINCT n.id)::bigint AS count
 FROM nodes n
 LEFT JOIN node_iatas ni ON ni.node_id = n.id
-WHERE ($1::text = '' OR ni.iata = ANY(string_to_array($1::text, ',')))
+WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR ni.iata = ANY($1::bpchar[]))
 GROUP BY n.node_type
 ORDER BY count DESC
 `
@@ -1121,7 +1121,7 @@ type GetStatsNodeTypesRow struct {
 }
 
 // Returns node counts grouped by type, optionally filtered by IATA.
-func (q *Queries) GetStatsNodeTypes(ctx context.Context, dollar_1 string) ([]GetStatsNodeTypesRow, error) {
+func (q *Queries) GetStatsNodeTypes(ctx context.Context, dollar_1 []string) ([]GetStatsNodeTypesRow, error) {
 	rows, err := q.db.Query(ctx, getStatsNodeTypes, dollar_1)
 	if err != nil {
 		return nil, err
@@ -1150,7 +1150,7 @@ SELECT
   COUNT(DISTINCT po.iata)         AS active_iatas
 FROM packet_observations po
 WHERE po.heard_at > NOW() - INTERVAL '24 hours'
-  AND ($1::text = '' OR po.iata = ANY(string_to_array($1::text, ',')))
+  AND (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR po.iata = ANY($1::bpchar[]))
 `
 
 type GetStatsOverviewRow struct {
@@ -1163,7 +1163,7 @@ type GetStatsOverviewRow struct {
 // ============================================================
 // STATS
 // ============================================================
-func (q *Queries) GetStatsOverview(ctx context.Context, dollar_1 string) (GetStatsOverviewRow, error) {
+func (q *Queries) GetStatsOverview(ctx context.Context, dollar_1 []string) (GetStatsOverviewRow, error) {
 	row := q.db.QueryRow(ctx, getStatsOverview, dollar_1)
 	var i GetStatsOverviewRow
 	err := row.Scan(
@@ -1182,14 +1182,14 @@ SELECT
 FROM packet_observations po
 JOIN packets p ON p.packet_hash = po.packet_hash
 WHERE po.heard_at > $1
-  AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
+  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR po.iata = ANY($2::bpchar[]))
 GROUP BY p.payload_type
 ORDER BY count DESC
 `
 
 type GetStatsPayloadBreakdownParams struct {
 	HeardAt pgtype.Timestamptz `json:"heard_at"`
-	Column2 string             `json:"column_2"`
+	Column2 []string           `json:"column_2"`
 }
 
 type GetStatsPayloadBreakdownRow struct {
@@ -1232,7 +1232,7 @@ SELECT
 FROM packet_observations po
 JOIN observers o ON o.id = po.observer_id
 WHERE po.heard_at > $1
-  AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
+  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR po.iata = ANY($2::bpchar[]))
 GROUP BY o.id
 ORDER BY observation_count DESC
 LIMIT $3
@@ -1240,7 +1240,7 @@ LIMIT $3
 
 type GetStatsTopObserversParams struct {
 	HeardAt pgtype.Timestamptz `json:"heard_at"`
-	Column2 string             `json:"column_2"`
+	Column2 []string           `json:"column_2"`
 	Limit   int32              `json:"limit"`
 }
 
@@ -1281,14 +1281,14 @@ func (q *Queries) GetStatsTopObservers(ctx context.Context, arg GetStatsTopObser
 
 const getTopNodes = `-- name: GetTopNodes :many
 SELECT iata, node_id, name, node_type, observation_count, last_heard FROM mv_top_nodes_by_iata
-WHERE ($1::text = '' OR iata = ANY(string_to_array($1::text, ',')))
+WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR iata = ANY($1::bpchar[]))
 ORDER BY observation_count DESC
 LIMIT $2
 `
 
 type GetTopNodesParams struct {
-	Column1 string `json:"column_1"`
-	Limit   int32  `json:"limit"`
+	Column1 []string `json:"column_1"`
+	Limit   int32    `json:"limit"`
 }
 
 func (q *Queries) GetTopNodes(ctx context.Context, arg GetTopNodesParams) ([]MvTopNodesByIatum, error) {
@@ -1530,7 +1530,7 @@ JOIN packet_observations po ON po.packet_hash = cm.packet_hash
 JOIN packets p ON p.packet_hash = cm.packet_hash
 LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE ($1::timestamptz IS NULL OR cm.sent_at >= $1)
-  AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
+  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR po.iata = ANY($2::bpchar[]))
   AND ($3::text = '' OR ts.name = $3::text)
   AND ($4 = 0 OR cm.id < $4)
 ORDER BY cm.id DESC
@@ -1539,7 +1539,7 @@ LIMIT $5
 
 type ListAllChannelMessagesParams struct {
 	Column1 pgtype.Timestamptz `json:"column_1"`
-	Column2 string             `json:"column_2"`
+	Column2 []string           `json:"column_2"`
 	Column3 string             `json:"column_3"`
 	Column4 interface{}        `json:"column_4"`
 	Limit   int32              `json:"limit"`
@@ -1608,7 +1608,7 @@ JOIN packets p ON p.packet_hash = cm.packet_hash
 LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE cm.channel_id = $1
   AND ($2::timestamptz IS NULL OR cm.sent_at >= $2)
-  AND ($3::text = '' OR po.iata = ANY(string_to_array($3::text, ',')))
+  AND (COALESCE(cardinality($3::bpchar[]), 0) = 0 OR po.iata = ANY($3::bpchar[]))
   AND ($4::text = '' OR ts.name = $4::text)
   AND ($5::bigint = 0 OR cm.id < $5::bigint)
 ORDER BY cm.id DESC
@@ -1618,7 +1618,7 @@ LIMIT $6
 type ListChannelMessagesParams struct {
 	ChannelID int32              `json:"channel_id"`
 	Column2   pgtype.Timestamptz `json:"column_2"`
-	Column3   string             `json:"column_3"`
+	Column3   []string           `json:"column_3"`
 	Column4   string             `json:"column_4"`
 	Column5   int64              `json:"column_5"`
 	Limit     int32              `json:"limit"`
@@ -1689,7 +1689,7 @@ JOIN packets p ON p.packet_hash = cm.packet_hash
 LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE c.channel_hash = $1
   AND ($2::timestamptz IS NULL OR cm.sent_at >= $2)
-  AND ($3::text = '' OR po.iata = ANY(string_to_array($3::text, ',')))
+  AND (COALESCE(cardinality($3::bpchar[]), 0) = 0 OR po.iata = ANY($3::bpchar[]))
   AND ($4::text = '' OR ts.name = $4::text)
   AND ($5::bigint = 0 OR cm.id < $5::bigint)
 ORDER BY cm.id DESC
@@ -1699,7 +1699,7 @@ LIMIT $6
 type ListChannelMessagesByHashParams struct {
 	ChannelHash []byte             `json:"channel_hash"`
 	Column2     pgtype.Timestamptz `json:"column_2"`
-	Column3     string             `json:"column_3"`
+	Column3     []string           `json:"column_3"`
 	Column4     string             `json:"column_4"`
 	Column5     int64              `json:"column_5"`
 	Limit       int32              `json:"limit"`
@@ -1910,17 +1910,17 @@ JOIN packet_observations po ON po.packet_hash = cm.packet_hash
 JOIN packets p ON p.packet_hash = cm.packet_hash
 LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE cm.id > $1
-  AND ($2::text = '' OR po.iata = ANY(string_to_array($2::text, ',')))
+  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR po.iata = ANY($2::bpchar[]))
   AND ($3::text = '' OR ts.name = $3::text)
 ORDER BY cm.id ASC
 LIMIT $4
 `
 
 type ListMessagesAfterIDParams struct {
-	ID      int64  `json:"id"`
-	Column2 string `json:"column_2"`
-	Column3 string `json:"column_3"`
-	Limit   int32  `json:"limit"`
+	ID      int64    `json:"id"`
+	Column2 []string `json:"column_2"`
+	Column3 string   `json:"column_3"`
+	Limit   int32    `json:"limit"`
 }
 
 type ListMessagesAfterIDRow struct {
@@ -2050,7 +2050,7 @@ LEFT JOIN node_iatas ni ON ni.node_id = n.id
 LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id
 WHERE
   ($1 = 0 OR n.node_type = $1)
-  AND ($2::text = '' OR n.id IN (SELECT node_id FROM node_iatas WHERE iata = ANY(string_to_array($2::text, ','))))
+  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR n.id IN (SELECT node_id FROM node_iatas WHERE iata = ANY($2::bpchar[])))
   AND (
     $3::text = 'any'
     OR ($3::text = 'true' AND n.supports_multibyte_paths = TRUE)
@@ -2072,7 +2072,7 @@ LIMIT $8
 
 type ListNodesParams struct {
 	Column1  interface{}        `json:"column_1"`
-	Column2  string             `json:"column_2"`
+	Column2  []string           `json:"column_2"`
 	Column3  string             `json:"column_3"`
 	Column4  string             `json:"column_4"`
 	Column5  []byte             `json:"column_5"`
@@ -2318,11 +2318,11 @@ LEFT JOIN observer_brokers ob ON ob.observer_id = o.id
 LEFT JOIN observer_scopes os ON os.observer_id = o.id
 LEFT JOIN transport_scopes ts ON ts.id = os.scope_id
 WHERE
-  ($1::text = '' OR (
+  (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR (
       SELECT po.iata FROM packet_observations po
       WHERE po.observer_id = o.id
       ORDER BY po.heard_at DESC LIMIT 1
-  ) = ANY(string_to_array($1::text, ',')))
+  ) = ANY($1::bpchar[]))
   AND ($2 = '' OR o.observer_type = $2)
   AND ($3 = '' OR ob.broker_name = $3)
   AND ($4 = '' OR CASE
@@ -2342,7 +2342,7 @@ LIMIT $7
 `
 
 type ListObserversParams struct {
-	Column1 string             `json:"column_1"`
+	Column1 []string           `json:"column_1"`
 	Column2 interface{}        `json:"column_2"`
 	Column3 interface{}        `json:"column_3"`
 	Column4 interface{}        `json:"column_4"`
@@ -2433,10 +2433,10 @@ LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE
   ($1::smallint = -1 OR p.payload_type = $1::smallint)
   AND ($2::smallint = -1 OR p.route_type = $2::smallint)
-  AND ($3::text = '' OR EXISTS (
+  AND (COALESCE(cardinality($3::bpchar[]), 0) = 0 OR EXISTS (
       SELECT 1 FROM packet_observations po3
       WHERE po3.packet_hash = p.packet_hash
-      AND po3.iata = ANY(string_to_array($3::text, ','))
+      AND po3.iata = ANY($3::bpchar[])
   ))
   AND ($4::timestamptz IS NULL OR p.first_heard_at >= $4)
   AND ($5::timestamptz IS NULL OR p.first_heard_at <= $5)
@@ -2449,7 +2449,7 @@ LIMIT $7
 type ListPacketsParams struct {
 	Column1 int16              `json:"column_1"`
 	Column2 int16              `json:"column_2"`
-	Column3 string             `json:"column_3"`
+	Column3 []string           `json:"column_3"`
 	Column4 pgtype.Timestamptz `json:"column_4"`
 	Column5 pgtype.Timestamptz `json:"column_5"`
 	Column6 pgtype.Timestamptz `json:"column_6"`
@@ -2533,19 +2533,19 @@ LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE po.id > $1
   AND ($2::smallint = -1 OR p.payload_type = $2::smallint)
   AND ($3::smallint = -1 OR p.route_type = $3::smallint)
-  AND ($4::text = '' OR po.iata = ANY(string_to_array($4::text, ',')))
+  AND (COALESCE(cardinality($4::bpchar[]), 0) = 0 OR po.iata = ANY($4::bpchar[]))
   AND ($5::text = '' OR ts.name = $5::text)
 ORDER BY po.id ASC
 LIMIT $6
 `
 
 type ListPacketsAfterIDParams struct {
-	ID      int64  `json:"id"`
-	Column2 int16  `json:"column_2"`
-	Column3 int16  `json:"column_3"`
-	Column4 string `json:"column_4"`
-	Column5 string `json:"column_5"`
-	Limit   int32  `json:"limit"`
+	ID      int64    `json:"id"`
+	Column2 int16    `json:"column_2"`
+	Column3 int16    `json:"column_3"`
+	Column4 []string `json:"column_4"`
+	Column5 string   `json:"column_5"`
+	Limit   int32    `json:"limit"`
 }
 
 type ListPacketsAfterIDRow struct {
@@ -2657,7 +2657,7 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) best ON true
 WHERE p.trace_tag IS NOT NULL
-  AND ($1::text = '' OR po.iata = ANY(string_to_array($1::text, ',')))
+  AND (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR po.iata = ANY($1::bpchar[]))
   AND ($2::text = '' OR p.scope_id = (SELECT id FROM transport_scopes WHERE name = $2))
   AND ($3::timestamptz IS NULL OR p.first_heard_at >= $3)
   AND ($4::timestamptz IS NULL OR p.first_heard_at <= $4)
@@ -2669,7 +2669,7 @@ LIMIT $6
 `
 
 type ListTraceTagsParams struct {
-	Column1 string             `json:"column_1"`
+	Column1 []string           `json:"column_1"`
 	Column2 string             `json:"column_2"`
 	Column3 pgtype.Timestamptz `json:"column_3"`
 	Column4 pgtype.Timestamptz `json:"column_4"`

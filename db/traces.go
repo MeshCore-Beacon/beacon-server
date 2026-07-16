@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"strings"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
@@ -22,7 +21,6 @@ type tracePayload struct {
 }
 
 func (s *Store) ListTraceTags(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, limit int32) ([]api.TraceTagSummary, error) {
-	iataFilter := strings.Join(iatas, ",")
 	var sinceTS, untilTS, cursorTS pgtype.Timestamptz
 	if !since.IsZero() {
 		sinceTS = pgtype.Timestamptz{Time: since, Valid: true}
@@ -34,7 +32,7 @@ func (s *Store) ListTraceTags(ctx context.Context, iatas []string, scope, traceT
 		cursorTS = pgtype.Timestamptz{Time: cursor, Valid: true}
 	}
 	rows, err := s.q.ListTraceTags(ctx, sqlc.ListTraceTagsParams{
-		Column1: iataFilter,
+		Column1: iatas,
 		Column2: scope,
 		Column3: sinceTS,
 		Column4: untilTS,

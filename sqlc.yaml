@@ -20,3 +20,5 @@ sql:
             go_type: "github.com/google/uuid.UUID"
           - db_type: "jsonb"
             go_type: "encoding/json.RawMessage"
+          - db_type: "bpchar"
+            go_type: "string"

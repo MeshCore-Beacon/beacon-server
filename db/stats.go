@@ -5,7 +5,6 @@ package db
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
@@ -14,7 +13,7 @@ import (
 )
 
 func (s *Store) GetStatsOverview(ctx context.Context, iatas []string) (*api.StatsOverview, error) {
-	row, err := s.q.GetStatsOverview(ctx, strings.Join(iatas, ","))
+	row, err := s.q.GetStatsOverview(ctx, iatas)
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +32,7 @@ func (s *Store) GetStatsObservations(ctx context.Context, iatas []string, since 
 	}
 	interval := time.Since(since)
 	rows, err := s.q.GetHourlyStats(ctx, sqlc.GetHourlyStatsParams{
-		Column1: strings.Join(iatas, ","),
+		Column1: iatas,
 		Column2: pgtype.Interval{Microseconds: int64(interval.Hours()) * 3600 * 1e6, Valid: true},
 	})
 	if err != nil {
@@ -58,7 +57,7 @@ func (s *Store) GetStatsPayloadBreakdown(ctx context.Context, iatas []string, si
 	}
 	rows, err := s.q.GetStatsPayloadBreakdown(ctx, sqlc.GetStatsPayloadBreakdownParams{
 		HeardAt: pgtype.Timestamptz{Time: since, Valid: true},
-		Column2: strings.Join(iatas, ","),
+		Column2: iatas,
 	})
 	if err != nil {
 		return nil, err
@@ -76,7 +75,7 @@ func (s *Store) GetStatsPayloadBreakdown(ctx context.Context, iatas []string, si
 
 func (s *Store) GetStatsTopNodes(ctx context.Context, iatas []string, limit int32) ([]api.TopNode, error) {
 	rows, err := s.q.GetTopNodes(ctx, sqlc.GetTopNodesParams{
-		Column1: strings.Join(iatas, ","),
+		Column1: iatas,
 		Limit:   limit,
 	})
 	if err != nil {
@@ -107,7 +106,7 @@ func (s *Store) GetStatsTopObservers(ctx context.Context, iatas []string, since 
 	}
 	rows, err := s.q.GetStatsTopObservers(ctx, sqlc.GetStatsTopObserversParams{
 		HeardAt: pgtype.Timestamptz{Time: since, Valid: true},
-		Column2: strings.Join(iatas, ","),
+		Column2: iatas,
 		Limit:   limit,
 	})
 	if err != nil {
@@ -130,7 +129,7 @@ func (s *Store) GetStatsTopObservers(ctx context.Context, iatas []string, since 
 func (s *Store) GetRadioPresets(ctx context.Context, preset string, iatas []string) ([]api.RadioPreset, error) {
 	rows, err := s.q.GetRadioPresets(ctx, sqlc.GetRadioPresetsParams{
 		Column1: preset,
-		Column2: strings.Join(iatas, ","),
+		Column2: iatas,
 	})
 	if err != nil {
 		return nil, err
@@ -165,7 +164,7 @@ func (s *Store) GetScopeStats(ctx context.Context) ([]api.ScopeStats, error) {
 }
 
 func (s *Store) GetStatsNodeTypes(ctx context.Context, iatas []string) ([]api.NodeTypeCount, error) {
-	rows, err := s.q.GetStatsNodeTypes(ctx, strings.Join(iatas, ","))
+	rows, err := s.q.GetStatsNodeTypes(ctx, iatas)
 	if err != nil {
 		return nil, err
 	}

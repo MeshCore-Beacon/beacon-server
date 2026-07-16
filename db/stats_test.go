@@ -20,7 +20,7 @@ func TestGetStatsOverview(t *testing.T) {
 	mock := mockdb.NewMockQuerier(ctrl)
 
 	mock.EXPECT().
-		GetStatsOverview(gomock.Any(), "YVR").
+		GetStatsOverview(gomock.Any(), []string{"YVR"}).
 		Return(sqlc.GetStatsOverviewRow{
 			TotalPackets:      100,
 			TotalObservations: 500,
@@ -51,7 +51,7 @@ func TestGetStatsTopNodes_NilObservationCount(t *testing.T) {
 
 	mock.EXPECT().
 		GetTopNodes(gomock.Any(), sqlc.GetTopNodesParams{
-			Column1: "YVR",
+			Column1: []string{"YVR"},
 			Limit:   5,
 		}).
 		Return([]sqlc.MvTopNodesByIatum{
@@ -119,7 +119,7 @@ func TestGetStatsNodeTypes_Mapping(t *testing.T) {
 	mock := mockdb.NewMockQuerier(ctrl)
 
 	mock.EXPECT().
-		GetStatsNodeTypes(gomock.Any(), "YVR").
+		GetStatsNodeTypes(gomock.Any(), []string{"YVR"}).
 		Return([]sqlc.GetStatsNodeTypesRow{
 			{NodeType: 1, Count: 10},
 			{NodeType: 2, Count: 5},

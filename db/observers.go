@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
-	"strings"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
@@ -35,9 +34,8 @@ func (s *Store) ListObservers(ctx context.Context, iatas []string, observerType,
 	if cursor > 0 {
 		cursorTS = pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}
 	}
-	iataFilter := strings.Join(iatas, ",")
 	params := sqlc.ListObserversParams{
-		Column1: iataFilter,
+		Column1: iatas,
 		Column2: observerType,
 		Column3: broker,
 		Column4: status,

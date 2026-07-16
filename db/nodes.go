@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"strings"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
@@ -85,10 +84,9 @@ func (s *Store) ListNodes(ctx context.Context, nodeType int16, iatas []string, s
 	if cursor > 0 {
 		cursorTS = pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}
 	}
-	iataFilter := strings.Join(iatas, ",")
 	rows, err := s.q.ListNodes(ctx, sqlc.ListNodesParams{
 		Column1:  nodeType,
-		Column2:  iataFilter,
+		Column2:  iatas,
 		Column3:  tristate(supportsMultibytePaths),
 		Column4:  tristate(supportsMultibyteTraces),
 		Column5:  pubkey,

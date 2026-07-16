@@ -379,7 +379,7 @@ func TestListNodes_IncludeNeighbors_PassesFlagAndMapsIDs(t *testing.T) {
 
 	mock.EXPECT().
 		ListNodes(gomock.Any(), gomock.Eq(sqlc.ListNodesParams{
-			Column1: int16(0), Column2: "", Column3: "any", Column4: "any",
+			Column1: int16(0), Column2: nil, Column3: "any", Column4: "any",
 			Column5: nil, Column6: "", Column7: pgtype.Timestamptz{},
 			Limit: 11, Column9: "", Column10: true,
 		})).
@@ -409,7 +409,7 @@ func TestListNodes_ExcludeNeighbors_LeavesIDsNil(t *testing.T) {
 
 	mock.EXPECT().
 		ListNodes(gomock.Any(), gomock.Eq(sqlc.ListNodesParams{
-			Column1: int16(0), Column2: "", Column3: "any", Column4: "any",
+			Column1: int16(0), Column2: nil, Column3: "any", Column4: "any",
 			Column5: nil, Column6: "", Column7: pgtype.Timestamptz{},
 			Limit: 11, Column9: "", Column10: false,
 		})).

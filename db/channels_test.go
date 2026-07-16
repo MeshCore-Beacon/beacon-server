@@ -199,7 +199,7 @@ func TestListChannelMessages_AllChannels(t *testing.T) {
 	mock.EXPECT().
 		ListAllChannelMessages(gomock.Any(), sqlc.ListAllChannelMessagesParams{
 			Column1: pgtype.Timestamptz{},
-			Column2: "YVR",
+			Column2: []string{"YVR"},
 			Column3: "",
 			Column4: int64(0),
 			Limit:   3,
@@ -263,7 +263,7 @@ func TestListChannelMessages_ByChannelID(t *testing.T) {
 		ListChannelMessages(gomock.Any(), sqlc.ListChannelMessagesParams{
 			ChannelID: channelID,
 			Column2:   pgtype.Timestamptz{},
-			Column3:   "YVR",
+			Column3:   []string{"YVR"},
 			Column4:   "",
 			Column5:   int64(0),
 			Limit:     3,

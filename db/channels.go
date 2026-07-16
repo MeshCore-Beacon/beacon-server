@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
-	"strings"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
@@ -132,11 +131,10 @@ func (s *Store) ListChannelMessages(ctx context.Context, channelID *int32, since
 	ts := pgtype.Timestamptz{Time: since, Valid: !since.IsZero()}
 	var messages []api.ChannelMessage
 	var hasMore bool
-	iataFilter := strings.Join(iatas, ",")
 	if channelID == nil {
 		rows, err := s.q.ListAllChannelMessages(ctx, sqlc.ListAllChannelMessagesParams{
 			Column1: ts,
-			Column2: iataFilter,
+			Column2: iatas,
 			Column3: scope,
 			Column4: cursor,
 			Limit:   limit + 1,
@@ -156,7 +154,7 @@ func (s *Store) ListChannelMessages(ctx context.Context, channelID *int32, since
 		rows, err := s.q.ListChannelMessages(ctx, sqlc.ListChannelMessagesParams{
 			ChannelID: *channelID,
 			Column2:   ts,
-			Column3:   iataFilter,
+			Column3:   iatas,
 			Column4:   scope,
 			Column5:   cursor,
 			Limit:     limit + 1,
@@ -187,11 +185,10 @@ func (s *Store) ListChannelMessages(ctx context.Context, channelID *int32, since
 }
 
 func (s *Store) ListChannelMessagesByHash(ctx context.Context, hash []byte, since time.Time, limit int32, iatas []string, scope string, cursor int64) (api.Page[api.ChannelMessage], error) {
-	iataFilter := strings.Join(iatas, ",")
 	rows, err := s.q.ListChannelMessagesByHash(ctx, sqlc.ListChannelMessagesByHashParams{
 		ChannelHash: hash,
 		Column2:     pgtype.Timestamptz{Time: since, Valid: !since.IsZero()},
-		Column3:     iataFilter,
+		Column3:     iatas,
 		Column4:     scope,
 		Column5:     cursor,
 		Limit:       limit + 1,
@@ -220,10 +217,9 @@ func (s *Store) ListChannelMessagesByHash(ctx context.Context, hash []byte, sinc
 }
 
 func (s *Store) ListMessagesAfterID(ctx context.Context, afterID int64, iatas []string, scope string, limit int32) ([]api.ChannelMessage, error) {
-	iataFilter := strings.Join(iatas, ",")
 	rows, err := s.q.ListMessagesAfterID(ctx, sqlc.ListMessagesAfterIDParams{
 		ID:      afterID,
-		Column2: iataFilter,
+		Column2: iatas,
 		Column3: scope,
 		Limit:   limit,
 	})

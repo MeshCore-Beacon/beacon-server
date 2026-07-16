@@ -477,7 +477,7 @@ func (mr *MockQuerierMockRecorder) GetScopeStats(ctx any) *gomock.Call {
 }
 
 // GetScopesByIATAs mocks base method.
-func (m *MockQuerier) GetScopesByIATAs(ctx context.Context, dollar_1 string) ([]db.GetScopesByIATAsRow, error) {
+func (m *MockQuerier) GetScopesByIATAs(ctx context.Context, dollar_1 []string) ([]db.GetScopesByIATAsRow, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetScopesByIATAs", ctx, dollar_1)
 	ret0, _ := ret[0].([]db.GetScopesByIATAsRow)
@@ -492,7 +492,7 @@ func (mr *MockQuerierMockRecorder) GetScopesByIATAs(ctx, dollar_1 any) *gomock.C
 }
 
 // GetStatsNodeTypes mocks base method.
-func (m *MockQuerier) GetStatsNodeTypes(ctx context.Context, dollar_1 string) ([]db.GetStatsNodeTypesRow, error) {
+func (m *MockQuerier) GetStatsNodeTypes(ctx context.Context, dollar_1 []string) ([]db.GetStatsNodeTypesRow, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetStatsNodeTypes", ctx, dollar_1)
 	ret0, _ := ret[0].([]db.GetStatsNodeTypesRow)
@@ -507,7 +507,7 @@ func (mr *MockQuerierMockRecorder) GetStatsNodeTypes(ctx, dollar_1 any) *gomock.
 }
 
 // GetStatsOverview mocks base method.
-func (m *MockQuerier) GetStatsOverview(ctx context.Context, dollar_1 string) (db.GetStatsOverviewRow, error) {
+func (m *MockQuerier) GetStatsOverview(ctx context.Context, dollar_1 []string) (db.GetStatsOverviewRow, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetStatsOverview", ctx, dollar_1)
 	ret0, _ := ret[0].(db.GetStatsOverviewRow)

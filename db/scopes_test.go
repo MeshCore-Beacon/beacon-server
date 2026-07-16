@@ -48,7 +48,7 @@ func TestGetScopesByIATAs(t *testing.T) {
 	mock := mockdb.NewMockQuerier(ctrl)
 
 	mock.EXPECT().
-		GetScopesByIATAs(gomock.Any(), "YVR,YYJ").
+		GetScopesByIATAs(gomock.Any(), []string{"YVR", "YYJ"}).
 		Return([]sqlc.GetScopesByIATAsRow{
 			{Name: "default", ObserverCount: 3, NodeCount: 10, IataCount: 2},
 		}, nil)
