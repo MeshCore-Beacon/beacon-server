@@ -175,6 +175,14 @@ telemetry:
 packets:
   retention: 720h # how long to keep packets and observations (default: 30 days)
 
+# Presence write coalescing.
+# Observer last_seen and packet last_heard_at bumps are batched in memory and
+# flushed on an interval instead of writing one row per observation. An
+# unclean shutdown loses at most one interval of presence freshness.
+presence:
+  flush_interval: 30s # how often coalesced bumps are flushed (default: 30s)
+  packet_ttl: 30s # how long a quiet packet stays coalesced before writing through again (default: 30s)
+
 # WebSocket settings.
 websocket:
   max_connections_per_ip: 5 # default: 5

@@ -26,6 +26,7 @@ type Config struct {
 	Cache       CacheConfig           `yaml:"cache"`
 	CORS        CORSConfig            `yaml:"cors"`
 	Background  BackgroundConfig      `yaml:"background"`
+	Presence    PresenceConfig        `yaml:"presence"`
 }
 
 // ResolvedConfig holds all runtime configuration with defaults applied.
@@ -37,6 +38,22 @@ type ResolvedConfig struct {
 	ViewRefreshInterval time.Duration
 	ReconfirmInterval   time.Duration
 	CleanupInterval     time.Duration
+
+	PresenceFlushInterval time.Duration
+	PresencePacketTTL     time.Duration
+}
+
+// PresenceConfig controls coalescing of presence bookkeeping writes
+// (observer last_seen, observer_brokers, packet last_heard_at bumps).
+type PresenceConfig struct {
+	// FlushInterval is how often coalesced bumps are flushed to Postgres.
+	// Defaults to 30s if not set.
+	FlushInterval duration `yaml:"flush_interval"`
+
+	// PacketTTL is how long a packet hash with no re-observations stays
+	// coalesced before the next observation writes through again.
+	// Defaults to 30s if not set.
+	PacketTTL duration `yaml:"packet_ttl"`
 }
 
 // BackgroundConfig controls the intervals for background maintenance tasks.
@@ -250,6 +267,9 @@ func Resolve(cfg *Config) ResolvedConfig {
 		ViewRefreshInterval: cfg.Background.ViewRefresh.Duration,
 		ReconfirmInterval:   cfg.Background.Reconfirm.Duration,
 		CleanupInterval:     cfg.Background.Cleanup.Duration,
+
+		PresenceFlushInterval: cfg.Presence.FlushInterval.Duration,
+		PresencePacketTTL:     cfg.Presence.PacketTTL.Duration,
 	}
 	if r.TelemetryResolution == 0 {
 		r.TelemetryResolution = time.Hour
@@ -272,13 +292,20 @@ func Resolve(cfg *Config) ResolvedConfig {
 	if r.CleanupInterval == 0 {
 		r.CleanupInterval = time.Hour
 	}
+	if r.PresenceFlushInterval == 0 {
+		r.PresenceFlushInterval = 30 * time.Second
+	}
+	if r.PresencePacketTTL == 0 {
+		r.PresencePacketTTL = 30 * time.Second
+	}
 	return r
 }
 
 func (r ResolvedConfig) String() string {
 	return fmt.Sprintf(
-		"telemetryResolution=%s telemetryRetention=%s packetRetention=%s maxConnsPerIP=%d viewRefresh=%s reconfirm=%s cleanup=%s",
+		"telemetryResolution=%s telemetryRetention=%s packetRetention=%s maxConnsPerIP=%d viewRefresh=%s reconfirm=%s cleanup=%s presenceFlush=%s presencePacketTTL=%s",
 		r.TelemetryResolution, r.TelemetryRetention, r.PacketRetention,
 		r.MaxConnsPerIP, r.ViewRefreshInterval, r.ReconfirmInterval, r.CleanupInterval,
+		r.PresenceFlushInterval, r.PresencePacketTTL,
 	)
 }
