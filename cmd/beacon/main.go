@@ -26,6 +26,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/iatadb"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
 	"github.com/MeshCore-Beacon/beacon-server/internal/keystore"
+	"github.com/MeshCore-Beacon/beacon-server/internal/presence"
 	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -110,6 +111,11 @@ func main() {
 	}
 
 	store := db.New(pool)
+
+	// ── Presence write coalescing ────────────────────────────────────────────
+	// Ingest writes go through the coalescer; reads keep using the store.
+	coalescer := presence.New(store, resolved.PresenceFlushInterval, resolved.PresencePacketTTL)
+	go coalescer.Run(ctx)
 
 	// ── Redis cache layer ────────────────────────────────────────────────────
 	var reader api.Reader = store
@@ -209,7 +215,7 @@ func main() {
 			TelemetryResolution: resolved.TelemetryResolution,
 			AllowedIATAs:        allowedIATAs,
 		},
-		store,
+		coalescer,
 		h,
 		keys,
 		scopes,
@@ -224,7 +230,7 @@ func main() {
 			TelemetryResolution: resolved.TelemetryResolution,
 			AllowedIATAs:        allowedIATAs,
 		},
-		store,
+		coalescer,
 		h,
 		keys,
 		scopes,
@@ -272,6 +278,7 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("server shutdown error: %v", err)
 	}
+	coalescer.Flush(shutdownCtx)
 }
 
 // getEnv returns the value of an env var and logs a warning if it is unset.
