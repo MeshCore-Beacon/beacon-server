@@ -32,10 +32,33 @@ func (s *Store) ResolvePathHashes(ctx context.Context, iata string, hashes [][]b
 	if len(hashes) == 0 {
 		return nil, nil
 	}
-	rows, err := s.q.ResolvePathHashes(ctx, sqlc.ResolvePathHashesParams{
-		Iata:    iata,
-		Column2: hashes,
-	})
+	// One query per prefix width; the row shapes are identical.
+	var rows []sqlc.ResolvePathHashesP4Row
+	var err error
+	switch len(hashes[0]) {
+	case 1:
+		var rs []sqlc.ResolvePathHashesP1Row
+		rs, err = s.q.ResolvePathHashesP1(ctx, sqlc.ResolvePathHashesP1Params{Iata: iata, Column2: hashes})
+		for _, r := range rs {
+			rows = append(rows, sqlc.ResolvePathHashesP4Row(r))
+		}
+	case 2:
+		var rs []sqlc.ResolvePathHashesP2Row
+		rs, err = s.q.ResolvePathHashesP2(ctx, sqlc.ResolvePathHashesP2Params{Iata: iata, Column2: hashes})
+		for _, r := range rs {
+			rows = append(rows, sqlc.ResolvePathHashesP4Row(r))
+		}
+	case 3:
+		var rs []sqlc.ResolvePathHashesP3Row
+		rs, err = s.q.ResolvePathHashesP3(ctx, sqlc.ResolvePathHashesP3Params{Iata: iata, Column2: hashes})
+		for _, r := range rs {
+			rows = append(rows, sqlc.ResolvePathHashesP4Row(r))
+		}
+	case 4:
+		rows, err = s.q.ResolvePathHashesP4(ctx, sqlc.ResolvePathHashesP4Params{Iata: iata, Column2: hashes})
+	default:
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -116,7 +116,7 @@ func TestResolvePathHashes_DBError(t *testing.T) {
 
 	hashes := [][]byte{{0x01, 0x02}}
 	mock.EXPECT().
-		ResolvePathHashes(gomock.Any(), sqlc.ResolvePathHashesParams{
+		ResolvePathHashesP2(gomock.Any(), sqlc.ResolvePathHashesP2Params{
 			Iata:    "YVR",
 			Column2: hashes,
 		}).
@@ -144,11 +144,11 @@ func TestResolvePathHashes_Mapping(t *testing.T) {
 	hashes := [][]byte{{0xab, 0xcd}}
 
 	mock.EXPECT().
-		ResolvePathHashes(gomock.Any(), sqlc.ResolvePathHashesParams{
+		ResolvePathHashesP2(gomock.Any(), sqlc.ResolvePathHashesP2Params{
 			Iata:    "YVR",
 			Column2: hashes,
 		}).
-		Return([]sqlc.ResolvePathHashesRow{
+		Return([]sqlc.ResolvePathHashesP2Row{
 			{
 				Hash:      []byte{0xab, 0xcd},
 				NodeID:    nodeID,

@@ -928,19 +928,41 @@ ORDER BY nn.last_seen DESC;
 -- HELPERS
 -- ============================================================
 
--- name: ResolvePathHashes :many
+-- Path hash resolution is split per prefix width so each query gets a
+-- cacheable generic plan on its (iata, prefix_N) index; a single CASE
+-- predicate forced a fresh custom plan on every call.
+
+-- name: ResolvePathHashesP1 :many
 SELECT ns.prefix_4 AS hash, n.id AS node_id, n.name, n.latitude, n.longitude, n.public_key
 FROM node_short_ids ns
 JOIN nodes n ON n.id = ns.node_id
 WHERE ns.iata = $1
   AND n.node_type IN (2, 3)
-  AND CASE
-    WHEN cardinality($2::bytea[]) > 0 AND length($2[1]) = 1 THEN ns.prefix_1 = ANY($2)
-    WHEN cardinality($2::bytea[]) > 0 AND length($2[1]) = 2 THEN ns.prefix_2 = ANY($2)
-    WHEN cardinality($2::bytea[]) > 0 AND length($2[1]) = 3 THEN ns.prefix_3 = ANY($2)
-    WHEN cardinality($2::bytea[]) > 0 AND length($2[1]) = 4 THEN ns.prefix_4 = ANY($2)
-    ELSE FALSE
-  END;
+  AND ns.prefix_1 = ANY($2::bytea[]);
+
+-- name: ResolvePathHashesP2 :many
+SELECT ns.prefix_4 AS hash, n.id AS node_id, n.name, n.latitude, n.longitude, n.public_key
+FROM node_short_ids ns
+JOIN nodes n ON n.id = ns.node_id
+WHERE ns.iata = $1
+  AND n.node_type IN (2, 3)
+  AND ns.prefix_2 = ANY($2::bytea[]);
+
+-- name: ResolvePathHashesP3 :many
+SELECT ns.prefix_4 AS hash, n.id AS node_id, n.name, n.latitude, n.longitude, n.public_key
+FROM node_short_ids ns
+JOIN nodes n ON n.id = ns.node_id
+WHERE ns.iata = $1
+  AND n.node_type IN (2, 3)
+  AND ns.prefix_3 = ANY($2::bytea[]);
+
+-- name: ResolvePathHashesP4 :many
+SELECT ns.prefix_4 AS hash, n.id AS node_id, n.name, n.latitude, n.longitude, n.public_key
+FROM node_short_ids ns
+JOIN nodes n ON n.id = ns.node_id
+WHERE ns.iata = $1
+  AND n.node_type IN (2, 3)
+  AND ns.prefix_4 = ANY($2::bytea[]);
 
 -- name: RefreshHourlyStats :exec
 REFRESH MATERIALIZED VIEW CONCURRENTLY mv_hourly_iata_stats;

@@ -950,19 +950,64 @@ func (mr *MockQuerierMockRecorder) RefreshTopNodes(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RefreshTopNodes", reflect.TypeOf((*MockQuerier)(nil).RefreshTopNodes), ctx)
 }
 
-// ResolvePathHashes mocks base method.
-func (m *MockQuerier) ResolvePathHashes(ctx context.Context, arg db.ResolvePathHashesParams) ([]db.ResolvePathHashesRow, error) {
+// ResolvePathHashesP1 mocks base method.
+func (m *MockQuerier) ResolvePathHashesP1(ctx context.Context, arg db.ResolvePathHashesP1Params) ([]db.ResolvePathHashesP1Row, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ResolvePathHashes", ctx, arg)
-	ret0, _ := ret[0].([]db.ResolvePathHashesRow)
+	ret := m.ctrl.Call(m, "ResolvePathHashesP1", ctx, arg)
+	ret0, _ := ret[0].([]db.ResolvePathHashesP1Row)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// ResolvePathHashes indicates an expected call of ResolvePathHashes.
-func (mr *MockQuerierMockRecorder) ResolvePathHashes(ctx, arg any) *gomock.Call {
+// ResolvePathHashesP1 indicates an expected call of ResolvePathHashesP1.
+func (mr *MockQuerierMockRecorder) ResolvePathHashesP1(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolvePathHashes", reflect.TypeOf((*MockQuerier)(nil).ResolvePathHashes), ctx, arg)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolvePathHashesP1", reflect.TypeOf((*MockQuerier)(nil).ResolvePathHashesP1), ctx, arg)
+}
+
+// ResolvePathHashesP2 mocks base method.
+func (m *MockQuerier) ResolvePathHashesP2(ctx context.Context, arg db.ResolvePathHashesP2Params) ([]db.ResolvePathHashesP2Row, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ResolvePathHashesP2", ctx, arg)
+	ret0, _ := ret[0].([]db.ResolvePathHashesP2Row)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ResolvePathHashesP2 indicates an expected call of ResolvePathHashesP2.
+func (mr *MockQuerierMockRecorder) ResolvePathHashesP2(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolvePathHashesP2", reflect.TypeOf((*MockQuerier)(nil).ResolvePathHashesP2), ctx, arg)
+}
+
+// ResolvePathHashesP3 mocks base method.
+func (m *MockQuerier) ResolvePathHashesP3(ctx context.Context, arg db.ResolvePathHashesP3Params) ([]db.ResolvePathHashesP3Row, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ResolvePathHashesP3", ctx, arg)
+	ret0, _ := ret[0].([]db.ResolvePathHashesP3Row)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ResolvePathHashesP3 indicates an expected call of ResolvePathHashesP3.
+func (mr *MockQuerierMockRecorder) ResolvePathHashesP3(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolvePathHashesP3", reflect.TypeOf((*MockQuerier)(nil).ResolvePathHashesP3), ctx, arg)
+}
+
+// ResolvePathHashesP4 mocks base method.
+func (m *MockQuerier) ResolvePathHashesP4(ctx context.Context, arg db.ResolvePathHashesP4Params) ([]db.ResolvePathHashesP4Row, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ResolvePathHashesP4", ctx, arg)
+	ret0, _ := ret[0].([]db.ResolvePathHashesP4Row)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ResolvePathHashesP4 indicates an expected call of ResolvePathHashesP4.
+func (mr *MockQuerierMockRecorder) ResolvePathHashesP4(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolvePathHashesP4", reflect.TypeOf((*MockQuerier)(nil).ResolvePathHashesP4), ctx, arg)
 }
 
 // SearchKnownRoutes mocks base method.

@@ -132,7 +132,13 @@ type Querier interface {
 	// ============================================================
 	// HELPERS
 	// ============================================================
-	ResolvePathHashes(ctx context.Context, arg ResolvePathHashesParams) ([]ResolvePathHashesRow, error)
+	// Path hash resolution is split per prefix width so each query gets a
+	// cacheable generic plan on its (iata, prefix_N) index; a single CASE
+	// predicate forced a fresh custom plan on every call.
+	ResolvePathHashesP1(ctx context.Context, arg ResolvePathHashesP1Params) ([]ResolvePathHashesP1Row, error)
+	ResolvePathHashesP2(ctx context.Context, arg ResolvePathHashesP2Params) ([]ResolvePathHashesP2Row, error)
+	ResolvePathHashesP3(ctx context.Context, arg ResolvePathHashesP3Params) ([]ResolvePathHashesP3Row, error)
+	ResolvePathHashesP4(ctx context.Context, arg ResolvePathHashesP4Params) ([]ResolvePathHashesP4Row, error)
 	// Returns known routes containing a subsequence from source to destination hash prefix.
 	// Verifies source appears before destination in the route.
 	SearchKnownRoutes(ctx context.Context, arg SearchKnownRoutesParams) ([]KnownRoute, error)
