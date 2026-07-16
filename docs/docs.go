@@ -1018,7 +1018,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "last_heard_at epoch ms of last item for pagination",
+                        "description": "epoch ms of last item for pagination; last_heard_at, or site-local heard_at when iatas is set",
                         "name": "cursor",
                         "in": "query"
                     },

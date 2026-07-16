@@ -386,3 +386,66 @@ func TestListNodeObservations_Pagination(t *testing.T) {
 		t.Error("expected NextCursor to be set")
 	}
 }
+
+func TestListPackets_IATAFilterRoutesToObservationIndex(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mock := mockdb.NewMockQuerier(ctrl)
+
+	siteHeard := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	globalHeard := time.Date(2026, 7, 2, 8, 0, 0, 0, time.UTC)
+
+	// limit=1 with 2 rows returned exercises the +1 trick and the trim.
+	mock.EXPECT().
+		ListPacketsByIATAs(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, p sqlc.ListPacketsByIATAsParams) ([]sqlc.ListPacketsByIATAsRow, error) {
+			if len(p.Iatas) != 1 || p.Iatas[0] != "ALF" {
+				t.Errorf("iatas param = %v, want [ALF]", p.Iatas)
+			}
+			if p.PageLimit != 2 { // limit+1
+				t.Errorf("page limit = %d, want 2", p.PageLimit)
+			}
+			if p.ScanDepth != 16 { // (limit+1)*8
+				t.Errorf("scan depth = %d, want 16", p.ScanDepth)
+			}
+			return []sqlc.ListPacketsByIATAsRow{
+				{
+					PacketHash:  []byte{0x01},
+					LastHeardAt: pgtype.Timestamptz{Time: globalHeard, Valid: true},
+					SiteHeardAt: pgtype.Timestamptz{Time: siteHeard, Valid: true},
+				},
+				{
+					PacketHash:  []byte{0x02},
+					LastHeardAt: pgtype.Timestamptz{Time: globalHeard, Valid: true},
+					SiteHeardAt: pgtype.Timestamptz{Time: siteHeard.Add(-time.Hour), Valid: true},
+				},
+			}, nil
+		})
+
+	store := &Store{q: mock}
+	page, err := store.ListPackets(context.Background(), -1, -1, []string{"ALF"}, "", time.Time{}, time.Time{}, 0, 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(page.Items) != 1 || !page.HasMore {
+		t.Fatalf("got %d items hasMore=%v, want 1 item hasMore=true", len(page.Items), page.HasMore)
+	}
+	// Cursor must follow site-local recency, not the packet's global last_heard_at.
+	if page.NextCursor == nil || *page.NextCursor != siteHeard.UnixMilli() {
+		t.Errorf("next cursor = %v, want %d (site heard_at)", page.NextCursor, siteHeard.UnixMilli())
+	}
+}
+
+func TestListPackets_UnfilteredKeepsGlobalQuery(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mock := mockdb.NewMockQuerier(ctrl)
+
+	// gomock is strict: an unexpected ListPacketsByIATAs call fails the test.
+	mock.EXPECT().
+		ListPackets(gomock.Any(), gomock.Any()).
+		Return([]sqlc.ListPacketsRow{}, nil)
+
+	store := &Store{q: mock}
+	if _, err := store.ListPackets(context.Background(), -1, -1, nil, "", time.Time{}, time.Time{}, 0, 50); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

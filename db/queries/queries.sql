@@ -332,7 +332,8 @@ SELECT COUNT(*) FROM packet_observations WHERE packet_hash = $1;
 
 -- name: ListPackets :many
 -- Returns packets with the latest observation rolled in for display.
--- Pass cursor=0 to start from the beginning.
+-- Pass cursor=0 to start from the beginning. IATA-filtered requests are
+-- served by ListPacketsByIATAs instead.
 SELECT
   p.packet_hash,
   p.payload_type,
@@ -358,17 +359,75 @@ LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE
   ($1::smallint = -1 OR p.payload_type = $1::smallint)
   AND ($2::smallint = -1 OR p.route_type = $2::smallint)
-  AND (COALESCE(cardinality($3::bpchar[]), 0) = 0 OR EXISTS (
-      SELECT 1 FROM packet_observations po3
-      WHERE po3.packet_hash = p.packet_hash
-      AND po3.iata = ANY($3::bpchar[])
-  ))
-  AND ($4::timestamptz IS NULL OR p.first_heard_at >= $4)
-  AND ($5::timestamptz IS NULL OR p.first_heard_at <= $5)
-  AND ($6::timestamptz IS NULL OR p.last_heard_at < $6)
-  AND ($8::text = '' OR ts.name = $8::text)
+  AND ($3::timestamptz IS NULL OR p.first_heard_at >= $3)
+  AND ($4::timestamptz IS NULL OR p.first_heard_at <= $4)
+  AND ($5::timestamptz IS NULL OR p.last_heard_at < $5)
+  AND ($7::text = '' OR ts.name = $7::text)
 ORDER BY p.last_heard_at DESC
-LIMIT $7;
+LIMIT $6;
+
+-- name: ListPacketsByIATAs :many
+-- IATA-filtered packet list, driven from idx_observations_iata_heard.
+-- Walking packets newest-first and probing for the site probes ~589k packets
+-- to fill a page for a quiet site; walking the site's own observation log is
+-- proportional to the page size instead. Results are ordered by when the
+-- requested sites heard the packet (site-local recency) and the cursor
+-- follows that ordering. scan_depth is a multiple of the page size to
+-- absorb per-observer duplicates; if duplication exceeds it across a
+-- page, pagination ends early (hasMore=false) rather than returning a
+-- short page, even though deeper matches exist.
+SELECT
+  p.packet_hash,
+  p.payload_type,
+  p.route_type,
+  p.first_heard_at,
+  p.last_heard_at,
+  p.scope_id,
+  ts.name AS scope_name,
+  sh.site_heard_at,
+  (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = p.packet_hash) AS observation_count,
+  po.observer_id AS latest_observer_id,
+  o.display_name AS latest_observer_name,
+  po.iata AS latest_observer_iata
+FROM (
+  SELECT hits.packet_hash, MAX(hits.heard_at)::timestamptz AS site_heard_at
+  FROM unnest(@iatas::bpchar[]) AS req(iata)
+  CROSS JOIN LATERAL (
+    SELECT po3.packet_hash, po3.heard_at
+    FROM packet_observations po3
+    JOIN packets p2 ON p2.packet_hash = po3.packet_hash
+    WHERE po3.iata = req.iata
+      AND po3.heard_at < COALESCE(@cursor_ts::timestamptz, 'infinity'::timestamptz)
+      AND (@payload_type::smallint = -1 OR p2.payload_type = @payload_type::smallint)
+      AND (@route_type::smallint = -1 OR p2.route_type = @route_type::smallint)
+      AND (@since_ts::timestamptz IS NULL OR p2.first_heard_at >= @since_ts)
+      AND (@until_ts::timestamptz IS NULL OR p2.first_heard_at <= @until_ts)
+      AND (@scope_name::text = '' OR EXISTS (
+        SELECT 1 FROM transport_scopes ts2
+        WHERE ts2.id = p2.scope_id AND ts2.name = @scope_name::text))
+    ORDER BY po3.heard_at DESC
+    LIMIT @scan_depth
+  ) hits
+  GROUP BY hits.packet_hash
+  HAVING (@cursor_ts::timestamptz IS NULL OR NOT EXISTS (
+    SELECT 1 FROM packet_observations px
+    WHERE px.packet_hash = hits.packet_hash
+      AND px.iata = ANY(@iatas::bpchar[])
+      AND px.heard_at >= @cursor_ts))
+  ORDER BY site_heard_at DESC
+  LIMIT @page_limit
+) sh
+JOIN packets p ON p.packet_hash = sh.packet_hash
+LEFT JOIN LATERAL (
+  SELECT observer_id, iata
+  FROM packet_observations
+  WHERE packet_hash = p.packet_hash
+  ORDER BY heard_at DESC
+  LIMIT 1
+) po ON true
+LEFT JOIN observers o ON o.id = po.observer_id
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+ORDER BY sh.site_heard_at DESC;
 
 -- name: ListPacketsAfterID :many
 -- Returns packets with observations after the given observation ID, ordered oldest first.

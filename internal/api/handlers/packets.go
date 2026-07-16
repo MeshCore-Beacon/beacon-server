@@ -41,7 +41,7 @@ func PacketsRouter(reader api.Reader) http.Handler {
 //	@Param		region			query		string	false	"Filter by region slug, expands to member IATAs"
 //	@Param		since			query		int		false	"Filter by first_heard_at >= since (epoch ms)"
 //	@Param		until			query		int		false	"Filter by first_heard_at <= until (epoch ms)"
-//	@Param		cursor			query		int		false	"last_heard_at epoch ms of last item for pagination"
+//	@Param		cursor			query		int		false	"epoch ms of last item for pagination; last_heard_at, or site-local heard_at when iatas is set"
 //	@Param		limit			query		int		false	"Max results (default 50)"
 //	@Success	200				{object}	object
 //	@Failure	400				{object}	handlers.APIError

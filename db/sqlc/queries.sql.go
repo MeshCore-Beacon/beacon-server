@@ -2433,28 +2433,22 @@ LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE
   ($1::smallint = -1 OR p.payload_type = $1::smallint)
   AND ($2::smallint = -1 OR p.route_type = $2::smallint)
-  AND (COALESCE(cardinality($3::bpchar[]), 0) = 0 OR EXISTS (
-      SELECT 1 FROM packet_observations po3
-      WHERE po3.packet_hash = p.packet_hash
-      AND po3.iata = ANY($3::bpchar[])
-  ))
-  AND ($4::timestamptz IS NULL OR p.first_heard_at >= $4)
-  AND ($5::timestamptz IS NULL OR p.first_heard_at <= $5)
-  AND ($6::timestamptz IS NULL OR p.last_heard_at < $6)
-  AND ($8::text = '' OR ts.name = $8::text)
+  AND ($3::timestamptz IS NULL OR p.first_heard_at >= $3)
+  AND ($4::timestamptz IS NULL OR p.first_heard_at <= $4)
+  AND ($5::timestamptz IS NULL OR p.last_heard_at < $5)
+  AND ($7::text = '' OR ts.name = $7::text)
 ORDER BY p.last_heard_at DESC
-LIMIT $7
+LIMIT $6
 `
 
 type ListPacketsParams struct {
 	Column1 int16              `json:"column_1"`
 	Column2 int16              `json:"column_2"`
-	Column3 []string           `json:"column_3"`
+	Column3 pgtype.Timestamptz `json:"column_3"`
 	Column4 pgtype.Timestamptz `json:"column_4"`
 	Column5 pgtype.Timestamptz `json:"column_5"`
-	Column6 pgtype.Timestamptz `json:"column_6"`
 	Limit   int32              `json:"limit"`
-	Column8 string             `json:"column_8"`
+	Column7 string             `json:"column_7"`
 }
 
 type ListPacketsRow struct {
@@ -2472,7 +2466,8 @@ type ListPacketsRow struct {
 }
 
 // Returns packets with the latest observation rolled in for display.
-// Pass cursor=0 to start from the beginning.
+// Pass cursor=0 to start from the beginning. IATA-filtered requests are
+// served by ListPacketsByIATAs instead.
 func (q *Queries) ListPackets(ctx context.Context, arg ListPacketsParams) ([]ListPacketsRow, error) {
 	rows, err := q.db.Query(ctx, listPackets,
 		arg.Column1,
@@ -2480,9 +2475,8 @@ func (q *Queries) ListPackets(ctx context.Context, arg ListPacketsParams) ([]Lis
 		arg.Column3,
 		arg.Column4,
 		arg.Column5,
-		arg.Column6,
 		arg.Limit,
-		arg.Column8,
+		arg.Column7,
 	)
 	if err != nil {
 		return nil, err
@@ -2590,6 +2584,140 @@ func (q *Queries) ListPacketsAfterID(ctx context.Context, arg ListPacketsAfterID
 			&i.LatestObserverName,
 			&i.LatestObserverIata,
 			&i.ScopeName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPacketsByIATAs = `-- name: ListPacketsByIATAs :many
+SELECT
+  p.packet_hash,
+  p.payload_type,
+  p.route_type,
+  p.first_heard_at,
+  p.last_heard_at,
+  p.scope_id,
+  ts.name AS scope_name,
+  sh.site_heard_at,
+  (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = p.packet_hash) AS observation_count,
+  po.observer_id AS latest_observer_id,
+  o.display_name AS latest_observer_name,
+  po.iata AS latest_observer_iata
+FROM (
+  SELECT hits.packet_hash, MAX(hits.heard_at)::timestamptz AS site_heard_at
+  FROM unnest($1::bpchar[]) AS req(iata)
+  CROSS JOIN LATERAL (
+    SELECT po3.packet_hash, po3.heard_at
+    FROM packet_observations po3
+    JOIN packets p2 ON p2.packet_hash = po3.packet_hash
+    WHERE po3.iata = req.iata
+      AND po3.heard_at < COALESCE($2::timestamptz, 'infinity'::timestamptz)
+      AND ($3::smallint = -1 OR p2.payload_type = $3::smallint)
+      AND ($4::smallint = -1 OR p2.route_type = $4::smallint)
+      AND ($5::timestamptz IS NULL OR p2.first_heard_at >= $5)
+      AND ($6::timestamptz IS NULL OR p2.first_heard_at <= $6)
+      AND ($7::text = '' OR EXISTS (
+        SELECT 1 FROM transport_scopes ts2
+        WHERE ts2.id = p2.scope_id AND ts2.name = $7::text))
+    ORDER BY po3.heard_at DESC
+    LIMIT $8
+  ) hits
+  GROUP BY hits.packet_hash
+  HAVING ($2::timestamptz IS NULL OR NOT EXISTS (
+    SELECT 1 FROM packet_observations px
+    WHERE px.packet_hash = hits.packet_hash
+      AND px.iata = ANY($1::bpchar[])
+      AND px.heard_at >= $2))
+  ORDER BY site_heard_at DESC
+  LIMIT $9
+) sh
+JOIN packets p ON p.packet_hash = sh.packet_hash
+LEFT JOIN LATERAL (
+  SELECT observer_id, iata
+  FROM packet_observations
+  WHERE packet_hash = p.packet_hash
+  ORDER BY heard_at DESC
+  LIMIT 1
+) po ON true
+LEFT JOIN observers o ON o.id = po.observer_id
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+ORDER BY sh.site_heard_at DESC
+`
+
+type ListPacketsByIATAsParams struct {
+	Iatas       []string           `json:"iatas"`
+	CursorTs    pgtype.Timestamptz `json:"cursor_ts"`
+	PayloadType int16              `json:"payload_type"`
+	RouteType   int16              `json:"route_type"`
+	SinceTs     pgtype.Timestamptz `json:"since_ts"`
+	UntilTs     pgtype.Timestamptz `json:"until_ts"`
+	ScopeName   string             `json:"scope_name"`
+	ScanDepth   int32              `json:"scan_depth"`
+	PageLimit   int32              `json:"page_limit"`
+}
+
+type ListPacketsByIATAsRow struct {
+	PacketHash         []byte             `json:"packet_hash"`
+	PayloadType        int16              `json:"payload_type"`
+	RouteType          int16              `json:"route_type"`
+	FirstHeardAt       pgtype.Timestamptz `json:"first_heard_at"`
+	LastHeardAt        pgtype.Timestamptz `json:"last_heard_at"`
+	ScopeID            *int32             `json:"scope_id"`
+	ScopeName          *string            `json:"scope_name"`
+	SiteHeardAt        pgtype.Timestamptz `json:"site_heard_at"`
+	ObservationCount   int64              `json:"observation_count"`
+	LatestObserverID   uuid.UUID          `json:"latest_observer_id"`
+	LatestObserverName *string            `json:"latest_observer_name"`
+	LatestObserverIata string             `json:"latest_observer_iata"`
+}
+
+// IATA-filtered packet list, driven from idx_observations_iata_heard.
+// Walking packets newest-first and probing for the site probes ~589k packets
+// to fill a page for a quiet site; walking the site's own observation log is
+// proportional to the page size instead. Results are ordered by when the
+// requested sites heard the packet (site-local recency) and the cursor
+// follows that ordering. scan_depth is a multiple of the page size to
+// absorb per-observer duplicates; if duplication exceeds it across a
+// page, pagination ends early (hasMore=false) rather than returning a
+// short page, even though deeper matches exist.
+func (q *Queries) ListPacketsByIATAs(ctx context.Context, arg ListPacketsByIATAsParams) ([]ListPacketsByIATAsRow, error) {
+	rows, err := q.db.Query(ctx, listPacketsByIATAs,
+		arg.Iatas,
+		arg.CursorTs,
+		arg.PayloadType,
+		arg.RouteType,
+		arg.SinceTs,
+		arg.UntilTs,
+		arg.ScopeName,
+		arg.ScanDepth,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPacketsByIATAsRow{}
+	for rows.Next() {
+		var i ListPacketsByIATAsRow
+		if err := rows.Scan(
+			&i.PacketHash,
+			&i.PayloadType,
+			&i.RouteType,
+			&i.FirstHeardAt,
+			&i.LastHeardAt,
+			&i.ScopeID,
+			&i.ScopeName,
+			&i.SiteHeardAt,
+			&i.ObservationCount,
+			&i.LatestObserverID,
+			&i.LatestObserverName,
+			&i.LatestObserverIata,
 		); err != nil {
 			return nil, err
 		}

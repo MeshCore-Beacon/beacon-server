@@ -59,6 +59,9 @@ func (s *Store) SetPacketDecrypted(ctx context.Context, hash []byte) error {
 }
 
 func (s *Store) ListPackets(ctx context.Context, payloadType, routeType int16, iatas []string, scope string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
+	if len(iatas) > 0 {
+		return s.listPacketsByIATAs(ctx, payloadType, routeType, iatas, scope, since, until, cursor, limit)
+	}
 	var cursorTS pgtype.Timestamptz
 	if cursor > 0 {
 		cursorTS = pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}
@@ -74,12 +77,11 @@ func (s *Store) ListPackets(ctx context.Context, payloadType, routeType int16, i
 	rows, err := s.q.ListPackets(ctx, sqlc.ListPacketsParams{
 		Column1: payloadType,
 		Column2: routeType,
-		Column3: iatas,
-		Column4: sinceTS,
-		Column5: untilTS,
-		Column6: cursorTS,
+		Column3: sinceTS,
+		Column4: untilTS,
+		Column5: cursorTS,
 		Limit:   limit + 1,
-		Column8: scope,
+		Column7: scope,
 	})
 	if err != nil {
 		return api.Page[api.PacketSummary]{}, err
@@ -113,6 +115,75 @@ func (s *Store) ListPackets(ctx context.Context, payloadType, routeType int16, i
 	var nextCursor *int64
 	if hasMore && len(items) > 0 {
 		last := items[len(items)-1].LastHeardAt
+		nextCursor = &last
+	}
+	return api.Page[api.PacketSummary]{
+		Items:      items,
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
+	}, nil
+}
+
+func (s *Store) listPacketsByIATAs(ctx context.Context, payloadType, routeType int16, iatas []string, scope string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
+	var cursorTS pgtype.Timestamptz
+	if cursor > 0 {
+		cursorTS = pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}
+	}
+	var sinceTS pgtype.Timestamptz
+	if !since.IsZero() {
+		sinceTS = pgtype.Timestamptz{Time: since, Valid: true}
+	}
+	var untilTS pgtype.Timestamptz
+	if !until.IsZero() {
+		untilTS = pgtype.Timestamptz{Time: until, Valid: true}
+	}
+	// A packet appears once per observer that heard it at a site
+	// ((packet_hash, observer_id) is unique), so scan deep enough per site
+	// to still fill the page after collapsing those duplicates.
+	rows, err := s.q.ListPacketsByIATAs(ctx, sqlc.ListPacketsByIATAsParams{
+		Iatas:       iatas,
+		ScanDepth:   (limit + 1) * 8,
+		CursorTs:    cursorTS,
+		PayloadType: payloadType,
+		RouteType:   routeType,
+		SinceTs:     sinceTS,
+		UntilTs:     untilTS,
+		ScopeName:   scope,
+		PageLimit:   limit + 1,
+	})
+	if err != nil {
+		return api.Page[api.PacketSummary]{}, err
+	}
+	hasMore := len(rows) > int(limit)
+	if hasMore {
+		rows = rows[:limit]
+	}
+	items := make([]api.PacketSummary, 0, len(rows))
+	for _, v := range rows {
+		item := api.PacketSummary{
+			PacketHash:       hex.EncodeToString(v.PacketHash),
+			PayloadType:      v.PayloadType,
+			PayloadTypeName:  api.PayloadTypeName(v.PayloadType),
+			RouteType:        v.RouteType,
+			RouteTypeName:    api.RouteTypeName(v.RouteType),
+			Scope:            v.ScopeName,
+			FirstHeardAt:     v.FirstHeardAt.Time.UnixMilli(),
+			LastHeardAt:      v.LastHeardAt.Time.UnixMilli(),
+			ObservationCount: int32(v.ObservationCount),
+		}
+		if v.LatestObserverID != (uuid.UUID{}) {
+			item.LatestObserver = &api.PacketLatestObserver{
+				ID:          v.LatestObserverID,
+				DisplayName: v.LatestObserverName,
+				IATA:        v.LatestObserverIata,
+			}
+		}
+		items = append(items, item)
+	}
+	// Cursor follows site-local recency, not the packet's global last_heard_at.
+	var nextCursor *int64
+	if hasMore && len(rows) > 0 {
+		last := rows[len(rows)-1].SiteHeardAt.Time.UnixMilli()
 		nextCursor = &last
 	}
 	return api.Page[api.PacketSummary]{

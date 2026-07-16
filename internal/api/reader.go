@@ -116,7 +116,9 @@ type Reader interface {
 	// ListPackets returns a paginated list of packets with the latest observation rolled in.
 	// Pass 0 for payloadType/routeType to skip those filters.
 	// Pass nil for iatas, zero times for since/until to skip those filters.
-	// cursor is last_heard_at epoch ms; pass 0 to start from the beginning.
+	// Unfiltered lists order by global last_heard_at; when iatas are set, ordering
+	// and the cursor are site-local (heard_at at the requested sites) instead.
+	// cursor is epoch ms in either case; pass 0 to start from the beginning.
 	ListPackets(ctx context.Context, payloadType, routeType int16, iatas []string, scope string, since, until time.Time, cursor int64, limit int32) (Page[PacketSummary], error)
 
 	// ListPacketsAfterID returns packets with observations after the given observation ID,

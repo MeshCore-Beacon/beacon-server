@@ -850,6 +850,21 @@ func (mr *MockQuerierMockRecorder) ListPacketsAfterID(ctx, arg any) *gomock.Call
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPacketsAfterID", reflect.TypeOf((*MockQuerier)(nil).ListPacketsAfterID), ctx, arg)
 }
 
+// ListPacketsByIATAs mocks base method.
+func (m *MockQuerier) ListPacketsByIATAs(ctx context.Context, arg db.ListPacketsByIATAsParams) ([]db.ListPacketsByIATAsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListPacketsByIATAs", ctx, arg)
+	ret0, _ := ret[0].([]db.ListPacketsByIATAsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListPacketsByIATAs indicates an expected call of ListPacketsByIATAs.
+func (mr *MockQuerierMockRecorder) ListPacketsByIATAs(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPacketsByIATAs", reflect.TypeOf((*MockQuerier)(nil).ListPacketsByIATAs), ctx, arg)
+}
+
 // ListRegions mocks base method.
 func (m *MockQuerier) ListRegions(ctx context.Context) ([]db.ListRegionsRow, error) {
 	m.ctrl.T.Helper()

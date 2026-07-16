@@ -106,11 +106,22 @@ type Querier interface {
 	// Note: observers use UUID PKs so we order by last_seen and use a keyset on last_seen+id.
 	ListObservers(ctx context.Context, arg ListObserversParams) ([]ListObserversRow, error)
 	// Returns packets with the latest observation rolled in for display.
-	// Pass cursor=0 to start from the beginning.
+	// Pass cursor=0 to start from the beginning. IATA-filtered requests are
+	// served by ListPacketsByIATAs instead.
 	ListPackets(ctx context.Context, arg ListPacketsParams) ([]ListPacketsRow, error)
 	// Returns packets with observations after the given observation ID, ordered oldest first.
 	// Used for WS reconnect backfill. Pass afterObservationId=0 to start from the beginning.
 	ListPacketsAfterID(ctx context.Context, arg ListPacketsAfterIDParams) ([]ListPacketsAfterIDRow, error)
+	// IATA-filtered packet list, driven from idx_observations_iata_heard.
+	// Walking packets newest-first and probing for the site probes ~589k packets
+	// to fill a page for a quiet site; walking the site's own observation log is
+	// proportional to the page size instead. Results are ordered by when the
+	// requested sites heard the packet (site-local recency) and the cursor
+	// follows that ordering. scan_depth is a multiple of the page size to
+	// absorb per-observer duplicates; if duplication exceeds it across a
+	// page, pagination ends early (hasMore=false) rather than returning a
+	// short page, even though deeper matches exist.
+	ListPacketsByIATAs(ctx context.Context, arg ListPacketsByIATAsParams) ([]ListPacketsByIATAsRow, error)
 	// ============================================================
 	// REGIONS
 	// ============================================================
