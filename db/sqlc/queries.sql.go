@@ -2959,6 +2959,74 @@ func (q *Queries) SetPacketDecrypted(ctx context.Context, packetHash []byte) err
 	return err
 }
 
+const touchObserverBrokers = `-- name: TouchObserverBrokers :exec
+UPDATE observer_brokers ob SET
+  last_seen      = GREATEST(ob.last_seen, v.seen),
+  last_packet_at = GREATEST(ob.last_packet_at, v.seen)
+FROM (
+  SELECT unnest($1::uuid[]) AS observer_id,
+         unnest($2::text[]) AS broker_name,
+         unnest($3::timestamptz[]) AS seen
+) v
+WHERE ob.observer_id = v.observer_id AND ob.broker_name = v.broker_name
+`
+
+type TouchObserverBrokersParams struct {
+	Column1 []uuid.UUID          `json:"column_1"`
+	Column2 []string             `json:"column_2"`
+	Column3 []pgtype.Timestamptz `json:"column_3"`
+}
+
+func (q *Queries) TouchObserverBrokers(ctx context.Context, arg TouchObserverBrokersParams) error {
+	_, err := q.db.Exec(ctx, touchObserverBrokers, arg.Column1, arg.Column2, arg.Column3)
+	return err
+}
+
+const touchObservers = `-- name: TouchObservers :exec
+UPDATE observers o SET
+  last_seen         = GREATEST(o.last_seen, v.seen),
+  observation_count = COALESCE(o.observation_count, 0) + v.delta
+FROM (
+  SELECT unnest($1::uuid[]) AS id,
+         unnest($2::timestamptz[]) AS seen,
+         unnest($3::int[]) AS delta
+) v
+WHERE o.id = v.id
+`
+
+type TouchObserversParams struct {
+	Column1 []uuid.UUID          `json:"column_1"`
+	Column2 []pgtype.Timestamptz `json:"column_2"`
+	Column3 []int32              `json:"column_3"`
+}
+
+// Batched flush of coalesced presence bumps. GREATEST keeps a late flush
+// from regressing a newer write-through (e.g. a status update).
+func (q *Queries) TouchObservers(ctx context.Context, arg TouchObserversParams) error {
+	_, err := q.db.Exec(ctx, touchObservers, arg.Column1, arg.Column2, arg.Column3)
+	return err
+}
+
+const touchPackets = `-- name: TouchPackets :exec
+UPDATE packets p SET
+  last_heard_at = GREATEST(p.last_heard_at, v.heard)
+FROM (
+  SELECT unnest($1::bytea[]) AS packet_hash,
+         unnest($2::timestamptz[]) AS heard
+) v
+WHERE p.packet_hash = v.packet_hash
+`
+
+type TouchPacketsParams struct {
+	Column1 [][]byte             `json:"column_1"`
+	Column2 []pgtype.Timestamptz `json:"column_2"`
+}
+
+func (q *Queries) TouchPackets(ctx context.Context, arg TouchPacketsParams) error {
+	_, err := q.db.Exec(ctx, touchPackets, arg.Column1, arg.Column2)
+	return err
+}
+
 const updateObserverStatus = `-- name: UpdateObserverStatus :one
 UPDATE observers SET
   display_name     = COALESCE(NULLIF($2, ''), display_name),

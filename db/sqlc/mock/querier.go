@@ -1036,6 +1036,48 @@ func (mr *MockQuerierMockRecorder) SetPacketDecrypted(ctx, packetHash any) *gomo
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPacketDecrypted", reflect.TypeOf((*MockQuerier)(nil).SetPacketDecrypted), ctx, packetHash)
 }
 
+// TouchObserverBrokers mocks base method.
+func (m *MockQuerier) TouchObserverBrokers(ctx context.Context, arg db.TouchObserverBrokersParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TouchObserverBrokers", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// TouchObserverBrokers indicates an expected call of TouchObserverBrokers.
+func (mr *MockQuerierMockRecorder) TouchObserverBrokers(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TouchObserverBrokers", reflect.TypeOf((*MockQuerier)(nil).TouchObserverBrokers), ctx, arg)
+}
+
+// TouchObservers mocks base method.
+func (m *MockQuerier) TouchObservers(ctx context.Context, arg db.TouchObserversParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TouchObservers", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// TouchObservers indicates an expected call of TouchObservers.
+func (mr *MockQuerierMockRecorder) TouchObservers(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TouchObservers", reflect.TypeOf((*MockQuerier)(nil).TouchObservers), ctx, arg)
+}
+
+// TouchPackets mocks base method.
+func (m *MockQuerier) TouchPackets(ctx context.Context, arg db.TouchPacketsParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TouchPackets", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// TouchPackets indicates an expected call of TouchPackets.
+func (mr *MockQuerierMockRecorder) TouchPackets(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TouchPackets", reflect.TypeOf((*MockQuerier)(nil).TouchPackets), ctx, arg)
+}
+
 // UpdateObserverStatus mocks base method.
 func (m *MockQuerier) UpdateObserverStatus(ctx context.Context, arg db.UpdateObserverStatusParams) (uuid.UUID, error) {
 	m.ctrl.T.Helper()

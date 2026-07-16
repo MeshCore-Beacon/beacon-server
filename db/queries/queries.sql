@@ -109,6 +109,19 @@ UPDATE observers SET
 WHERE public_key = $1
 RETURNING id;
 
+-- name: TouchObservers :exec
+-- Batched flush of coalesced presence bumps. GREATEST keeps a late flush
+-- from regressing a newer write-through (e.g. a status update).
+UPDATE observers o SET
+  last_seen         = GREATEST(o.last_seen, v.seen),
+  observation_count = COALESCE(o.observation_count, 0) + v.delta
+FROM (
+  SELECT unnest($1::uuid[]) AS id,
+         unnest($2::timestamptz[]) AS seen,
+         unnest($3::int[]) AS delta
+) v
+WHERE o.id = v.id;
+
 -- name: UpsertObserverScope :exec
 INSERT INTO observer_scopes (observer_id, scope_id, last_seen)
 VALUES ($1, $2, NOW())
@@ -270,6 +283,17 @@ ON CONFLICT (observer_id, broker_name) DO UPDATE SET
   last_seen      = NOW(),
   last_packet_at = NOW();
 
+-- name: TouchObserverBrokers :exec
+UPDATE observer_brokers ob SET
+  last_seen      = GREATEST(ob.last_seen, v.seen),
+  last_packet_at = GREATEST(ob.last_packet_at, v.seen)
+FROM (
+  SELECT unnest($1::uuid[]) AS observer_id,
+         unnest($2::text[]) AS broker_name,
+         unnest($3::timestamptz[]) AS seen
+) v
+WHERE ob.observer_id = v.observer_id AND ob.broker_name = v.broker_name;
+
 -- ============================================================
 -- PACKETS
 -- ============================================================
@@ -302,6 +326,15 @@ AS inserted;
 
 -- name: SetPacketDecrypted :exec
 UPDATE packets SET decrypted = true WHERE packet_hash = $1;
+
+-- name: TouchPackets :exec
+UPDATE packets p SET
+  last_heard_at = GREATEST(p.last_heard_at, v.heard)
+FROM (
+  SELECT unnest($1::bytea[]) AS packet_hash,
+         unnest($2::timestamptz[]) AS heard
+) v
+WHERE p.packet_hash = v.packet_hash;
 
 -- name: GetPacketByHash :one
 SELECT p.*, ts.name AS scope_name,

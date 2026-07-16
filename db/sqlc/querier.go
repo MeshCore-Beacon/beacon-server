@@ -140,6 +140,11 @@ type Querier interface {
 	SetNodeMultibytePaths(ctx context.Context, id uuid.UUID) error
 	SetNodeMultibyteTraces(ctx context.Context, id uuid.UUID) error
 	SetPacketDecrypted(ctx context.Context, packetHash []byte) error
+	TouchObserverBrokers(ctx context.Context, arg TouchObserverBrokersParams) error
+	// Batched flush of coalesced presence bumps. GREATEST keeps a late flush
+	// from regressing a newer write-through (e.g. a status update).
+	TouchObservers(ctx context.Context, arg TouchObserversParams) error
+	TouchPackets(ctx context.Context, arg TouchPacketsParams) error
 	UpdateObserverStatus(ctx context.Context, arg UpdateObserverStatusParams) (uuid.UUID, error)
 	// ============================================================
 	// CHANNELS
