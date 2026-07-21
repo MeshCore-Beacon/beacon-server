@@ -44,6 +44,9 @@ func CleanupTask(store *db.Store, telemetryRetention, packetRetention, interval 
 			if err := store.DeleteOldPackets(ctx, time.Now().Add(-packetRetention)); err != nil {
 				return err
 			}
+			if err := store.DeleteOldChannelIATAs(ctx, time.Now().Add(-packetRetention)); err != nil {
+				return err
+			}
 			return nil
 		},
 	}

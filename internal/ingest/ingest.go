@@ -151,6 +151,9 @@ type DB interface {
 	// but can be safely ignored since unknown-key channels have no messages.
 	UpsertChannelHashOnly(ctx context.Context, channelHash []byte) (int, error)
 
+	// UpsertChannelIATA upserts a channel_iatas row.
+	UpsertChannelIATA(ctx context.Context, channelHash []byte, iata string, heardAt time.Time) error
+
 	// GetPacketObservationCount returns the number of rows for the packet observations
 	GetPacketObservationCount(ctx context.Context, packetHash []byte) (int64, error)
 

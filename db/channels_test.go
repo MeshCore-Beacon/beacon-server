@@ -21,15 +21,15 @@ func TestListChannels_Empty(t *testing.T) {
 
 	mock.EXPECT().
 		ListChannels(gomock.Any(), sqlc.ListChannelsParams{
-			Column1: nil,
-			Column2: "",
-			Column3: pgtype.Timestamptz{},
-			Limit:   11,
+			ChannelHash: nil,
+			Iatas:       nil,
+			CursorTs:    pgtype.Timestamptz{},
+			PageLimit:   11,
 		}).
 		Return([]sqlc.Channel{}, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListChannels(context.Background(), 10, nil, "", 0)
+	page, err := store.ListChannels(context.Background(), 10, nil, nil, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -63,15 +63,15 @@ func TestListChannels_Pagination(t *testing.T) {
 
 	mock.EXPECT().
 		ListChannels(gomock.Any(), sqlc.ListChannelsParams{
-			Column1: nil,
-			Column2: "",
-			Column3: pgtype.Timestamptz{},
-			Limit:   3, // limit+1
+			ChannelHash: nil,
+			Iatas:       nil,
+			CursorTs:    pgtype.Timestamptz{},
+			PageLimit:   3, // limit+1
 		}).
 		Return(rows, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListChannels(context.Background(), 2, nil, "", 0)
+	page, err := store.ListChannels(context.Background(), 2, nil, nil, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -95,9 +95,29 @@ func TestListChannels_DBError(t *testing.T) {
 		Return(nil, errors.New("db error"))
 
 	store := &Store{q: mock}
-	_, err := store.ListChannels(context.Background(), 10, nil, "", 0)
+	_, err := store.ListChannels(context.Background(), 10, nil, nil, 0)
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestListChannels_IATAFilter(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mock := mockdb.NewMockQuerier(ctrl)
+
+	mock.EXPECT().
+		ListChannels(gomock.Any(), sqlc.ListChannelsParams{
+			ChannelHash: nil,
+			Iatas:       []string{"YOW", "YYZ"},
+			CursorTs:    pgtype.Timestamptz{},
+			PageLimit:   11,
+		}).
+		Return([]sqlc.Channel{}, nil)
+
+	store := &Store{q: mock}
+	_, err := store.ListChannels(context.Background(), 10, nil, []string{"YOW", "YYZ"}, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

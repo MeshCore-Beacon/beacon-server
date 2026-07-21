@@ -6,7 +6,10 @@ package ingest
 import (
 	"context"
 	"crypto/ed25519"
+	"encoding/hex"
+	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/keystore"
 	"github.com/meshcore-go/meshcore-go"
@@ -131,5 +134,57 @@ func TestHandlePayloadTypeSideEffects_GrpTxt_UnknownKey_OnlyUpsertsHashOnlyChann
 	}
 	if db.upsertChannelCalls != 0 {
 		t.Errorf("expected UpsertChannel NOT to be called when the key is unknown, got %d calls", db.upsertChannelCalls)
+	}
+}
+
+// packetEnvelope wraps a packet in the minimal broker JSON that handlePacket expects.
+func packetEnvelope(t *testing.T, packet *meshcore.Packet) []byte {
+	t.Helper()
+	raw, err := packet.ToBytes()
+	if err != nil {
+		t.Fatalf("packet to bytes: %v", err)
+	}
+	env, err := json.Marshal(map[string]string{
+		"raw":       hex.EncodeToString(raw),
+		"timestamp": time.Now().UTC().Format("2006-01-02T15:04:05.000000"),
+	})
+	if err != nil {
+		t.Fatalf("marshal envelope: %v", err)
+	}
+	return env
+}
+
+func TestHandlePacket_GrpTxt_UpsertsChannelIATA(t *testing.T) {
+	w, db := newTestWorker()
+	db.observationInserted = true
+	envelope := packetEnvelope(t, buildGrpTxtPacket(t, 0x1a, make([]byte, 16)))
+
+	w.handlePacket(context.Background(), "YOW", "0102", envelope)
+
+	if db.upsertChannelIATACalls != 1 {
+		t.Errorf("expected UpsertChannelIATA to be called once for a stored group text, got %d", db.upsertChannelIATACalls)
+	}
+}
+
+func TestHandlePacket_GrpTxt_DedupObservation_SkipsChannelIATA(t *testing.T) {
+	w, db := newTestWorker() // stub reports the observation as a duplicate
+	envelope := packetEnvelope(t, buildGrpTxtPacket(t, 0x1a, make([]byte, 16)))
+
+	w.handlePacket(context.Background(), "YOW", "0102", envelope)
+
+	if db.upsertChannelIATACalls != 0 {
+		t.Errorf("expected UpsertChannelIATA NOT to be called for a duplicate observation, got %d calls", db.upsertChannelIATACalls)
+	}
+}
+
+func TestHandlePacket_Advert_SkipsChannelIATA(t *testing.T) {
+	w, db := newTestWorker()
+	db.observationInserted = true
+	envelope := packetEnvelope(t, buildAdvertPacket(t, false))
+
+	w.handlePacket(context.Background(), "YOW", "0102", envelope)
+
+	if db.upsertChannelIATACalls != 0 {
+		t.Errorf("expected UpsertChannelIATA NOT to be called for a non-channel packet, got %d calls", db.upsertChannelIATACalls)
 	}
 }

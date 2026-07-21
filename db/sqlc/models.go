@@ -23,6 +23,12 @@ type Channel struct {
 	MessageCount   *int64             `json:"message_count"`
 }
 
+type ChannelIata struct {
+	ChannelHash []byte             `json:"channel_hash"`
+	Iata        string             `json:"iata"`
+	LastHeard   pgtype.Timestamptz `json:"last_heard"`
+}
+
 type ChannelKey struct {
 	ChannelID      int32              `json:"channel_id"`
 	KeyBytes       []byte             `json:"key_bytes"`

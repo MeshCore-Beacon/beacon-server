@@ -65,6 +65,12 @@
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "Filter by IATA code(s), comma-separated e.g. YOW or YOW,YYZ",
+                        "name": "iatas",
+                        "in": "query"
+                    },
+                    {
                         "type": "integer",
                         "description": "last_seen epoch ms of last item for pagination",
                         "name": "cursor",

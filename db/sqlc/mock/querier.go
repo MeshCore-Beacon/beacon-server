@@ -43,6 +43,20 @@ func (m *MockQuerier) EXPECT() *MockQuerierMockRecorder {
 	return m.recorder
 }
 
+// DeleteOldChannelIATAs mocks base method.
+func (m *MockQuerier) DeleteOldChannelIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteOldChannelIATAs", ctx, lastHeard)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteOldChannelIATAs indicates an expected call of DeleteOldChannelIATAs.
+func (mr *MockQuerierMockRecorder) DeleteOldChannelIATAs(ctx, lastHeard any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldChannelIATAs", reflect.TypeOf((*MockQuerier)(nil).DeleteOldChannelIATAs), ctx, lastHeard)
+}
+
 // DeleteOldPackets mocks base method.
 func (m *MockQuerier) DeleteOldPackets(ctx context.Context, lastHeardAt pgtype.Timestamptz) error {
 	m.ctrl.T.Helper()
@@ -1211,6 +1225,20 @@ func (m *MockQuerier) UpsertChannelHashOnly(ctx context.Context, channelHash []b
 func (mr *MockQuerierMockRecorder) UpsertChannelHashOnly(ctx, channelHash any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertChannelHashOnly", reflect.TypeOf((*MockQuerier)(nil).UpsertChannelHashOnly), ctx, channelHash)
+}
+
+// UpsertChannelIATA mocks base method.
+func (m *MockQuerier) UpsertChannelIATA(ctx context.Context, arg db.UpsertChannelIATAParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpsertChannelIATA", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpsertChannelIATA indicates an expected call of UpsertChannelIATA.
+func (mr *MockQuerierMockRecorder) UpsertChannelIATA(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertChannelIATA", reflect.TypeOf((*MockQuerier)(nil).UpsertChannelIATA), ctx, arg)
 }
 
 // UpsertIATA mocks base method.

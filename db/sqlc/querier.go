@@ -12,6 +12,8 @@ import (
 )
 
 type Querier interface {
+	// Keeps the channel IATA filter in step with packet retention.
+	DeleteOldChannelIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error
 	// Deletes packets and their observations older than the given cutoff.
 	// packet_observations cascade-delete via FK.
 	DeleteOldPackets(ctx context.Context, lastHeardAt pgtype.Timestamptz) error
@@ -97,9 +99,8 @@ type Querier interface {
 	// Pass empty string for iata or scope to skip those filters.
 	// Pass cursor=0 to start from the beginning.
 	ListChannelMessagesByHash(ctx context.Context, arg ListChannelMessagesByHashParams) ([]ListChannelMessagesByHashRow, error)
-	// Returns channels ordered by last seen, optionally filtered by hash and/or IATA.
-	// Pass NULL for hash to skip hash filtering. Pass empty string for iata to skip IATA filtering.
-	// IATA filter returns channels that have active packets in that IATA (case-insensitive).
+	// Channels ordered by last seen, optionally filtered by hash and/or IATAs
+	// (membership via channel_iatas). NULL hash / empty array skip those filters.
 	// Pass cursor=0 to start from the beginning (cursor is last_seen epoch ms).
 	ListChannels(ctx context.Context, arg ListChannelsParams) ([]Channel, error)
 	ListIATAs(ctx context.Context) ([]IataCode, error)
@@ -181,6 +182,7 @@ type Querier interface {
 	// hash-only records (key unknown). Returns the channel row.
 	UpsertChannel(ctx context.Context, arg UpsertChannelParams) (Channel, error)
 	UpsertChannelHashOnly(ctx context.Context, channelHash []byte) (int32, error)
+	UpsertChannelIATA(ctx context.Context, arg UpsertChannelIATAParams) error
 	// Copyright 2026 Beacon Contributors
 	// SPDX-License-Identifier: agpl
 	// ============================================================

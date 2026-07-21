@@ -4,11 +4,11 @@ package docs
 import "github.com/swaggo/swag"
 
 const docTemplate = `{
-    "schemes": [[ marshal .Schemes ]],
+    "schemes": {{ marshal .Schemes }},
     "swagger": "2.0",
     "info": {
-        "description": "[[escape .Description]]",
-        "title": "[[.Title]]",
+        "description": "{{escape .Description}}",
+        "title": "{{.Title}}",
         "termsOfService": "https://github.com/MeshCore-Beacon/beacon-server",
         "contact": {
             "name": "MeshCore Beacon",
@@ -17,10 +17,10 @@ const docTemplate = `{
         "license": {
             "name": "AGPL-3-or-later"
         },
-        "version": "[[.Version]]"
+        "version": "{{.Version}}"
     },
-    "host": "[[.Host]]",
-    "basePath": "[[.BasePath]]",
+    "host": "{{.Host}}",
+    "basePath": "{{.BasePath}}",
     "paths": {
         "/brokers": {
             "get": {
@@ -64,6 +64,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Filter by IATA code (case-insensitive)",
                         "name": "iata",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by IATA code(s), comma-separated e.g. YOW or YOW,YYZ",
+                        "name": "iatas",
                         "in": "query"
                     },
                     {
@@ -3768,8 +3774,8 @@ var SwaggerInfo = &swag.Spec{
 	Description:      "MeshCore network observation backend. Ingests LoRa packets from MQTT brokers, stores in PostgreSQL, and streams live events via WebSocket.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
-	LeftDelim:        "[[",
-	RightDelim:       "]]",
+	LeftDelim:        "{{",
+	RightDelim:       "}}",
 }
 
 func init() {

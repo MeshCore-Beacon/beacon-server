@@ -7,6 +7,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
@@ -115,7 +116,7 @@ func TestListChannelMessages_InvalidCursor(t *testing.T) {
 func TestListChannels_OK(t *testing.T) {
 	r := chi.NewRouter()
 	r.Get("/channels", listChannels(stubReader{
-		listChannels: func(_ context.Context, _ int32, _ []byte, _ string, _ int64) (api.Page[api.ChannelSummary], error) {
+		listChannels: func(_ context.Context, _ int32, _ []byte, _ []string, _ int64) (api.Page[api.ChannelSummary], error) {
 			return api.Page[api.ChannelSummary]{Items: []api.ChannelSummary{{ID: 1, ChannelHash: "ab"}}}, nil
 		},
 	}))
@@ -124,6 +125,39 @@ func TestListChannels_OK(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestListChannels_IATAParsing(t *testing.T) {
+	cases := []struct {
+		name  string
+		query string
+		want  []string
+	}{
+		{"single lowercased", "?iata=yow", []string{"YOW"}},
+		{"multi csv", "?iatas=yow,%20yyz", []string{"YOW", "YYZ"}},
+		{"none", "", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []string
+			r := chi.NewRouter()
+			r.Get("/channels", listChannels(stubReader{
+				listChannels: func(_ context.Context, _ int32, _ []byte, iatas []string, _ int64) (api.Page[api.ChannelSummary], error) {
+					got = iatas
+					return api.Page[api.ChannelSummary]{}, nil
+				},
+			}))
+			req := httptest.NewRequest(http.MethodGet, "/channels"+tc.query, nil)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d", w.Code)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("expected iatas %v, got %v", tc.want, got)
+			}
+		})
 	}
 }
 

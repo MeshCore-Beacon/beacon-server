@@ -494,6 +494,10 @@ LIMIT $6;
 -- packet_observations cascade-delete via FK.
 DELETE FROM packets WHERE last_heard_at < $1;
 
+-- name: DeleteOldChannelIATAs :exec
+-- Keeps the channel IATA filter in step with packet retention.
+DELETE FROM channel_iatas WHERE last_heard < $1;
+
 -- ============================================================
 -- PACKET OBSERVATIONS
 -- ============================================================
@@ -667,22 +671,25 @@ ON CONFLICT (channel_hash) WHERE key_fingerprint IS NULL DO UPDATE SET
   last_seen = NOW()
 RETURNING id;
 
+-- name: UpsertChannelIATA :exec
+INSERT INTO channel_iatas (channel_hash, iata, last_heard)
+VALUES ($1, $2, $3)
+ON CONFLICT (channel_hash, iata) DO UPDATE SET
+  last_heard = GREATEST(channel_iatas.last_heard, EXCLUDED.last_heard);
+
 -- name: ListChannels :many
--- Returns channels ordered by last seen, optionally filtered by hash and/or IATA.
--- Pass NULL for hash to skip hash filtering. Pass empty string for iata to skip IATA filtering.
--- IATA filter returns channels that have active packets in that IATA (case-insensitive).
+-- Channels ordered by last seen, optionally filtered by hash and/or IATAs
+-- (membership via channel_iatas). NULL hash / empty array skip those filters.
 -- Pass cursor=0 to start from the beginning (cursor is last_seen epoch ms).
-SELECT DISTINCT c.* FROM channels c
-WHERE ($1::bytea IS NULL OR c.channel_hash = $1)
-  AND ($2 = '' OR EXISTS (
-    SELECT 1 FROM packets p
-    JOIN packet_observations po ON po.packet_hash = p.packet_hash
-    WHERE p.channel_hash = c.channel_hash
-      AND po.iata ILIKE $2
+SELECT c.* FROM channels c
+WHERE (@channel_hash::bytea IS NULL OR c.channel_hash = @channel_hash)
+  AND (COALESCE(cardinality(@iatas::bpchar[]), 0) = 0 OR c.channel_hash IN (
+    SELECT ci.channel_hash FROM channel_iatas ci
+    WHERE ci.iata = ANY(@iatas::bpchar[])
   ))
-  AND ($3::timestamptz IS NULL OR c.last_seen < $3)
+  AND (@cursor_ts::timestamptz IS NULL OR c.last_seen < @cursor_ts)
 ORDER BY c.last_seen DESC
-LIMIT $4;
+LIMIT @page_limit;
 
 -- name: GetChannelByID :one
 SELECT * FROM channels WHERE id = $1;

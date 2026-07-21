@@ -12,6 +12,16 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteOldChannelIATAs = `-- name: DeleteOldChannelIATAs :exec
+DELETE FROM channel_iatas WHERE last_heard < $1
+`
+
+// Keeps the channel IATA filter in step with packet retention.
+func (q *Queries) DeleteOldChannelIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error {
+	_, err := q.db.Exec(ctx, deleteOldChannelIATAs, lastHeard)
+	return err
+}
+
 const deleteOldPackets = `-- name: DeleteOldPackets :exec
 DELETE FROM packets WHERE last_heard_at < $1
 `
@@ -1883,13 +1893,11 @@ func (q *Queries) ListChannelMessagesByHash(ctx context.Context, arg ListChannel
 }
 
 const listChannels = `-- name: ListChannels :many
-SELECT DISTINCT c.id, c.channel_hash, c.key_fingerprint, c.name, c.hashtag, c.is_hashtag, c.is_public, c.key_known, c.first_seen, c.last_seen, c.message_count FROM channels c
+SELECT c.id, c.channel_hash, c.key_fingerprint, c.name, c.hashtag, c.is_hashtag, c.is_public, c.key_known, c.first_seen, c.last_seen, c.message_count FROM channels c
 WHERE ($1::bytea IS NULL OR c.channel_hash = $1)
-  AND ($2 = '' OR EXISTS (
-    SELECT 1 FROM packets p
-    JOIN packet_observations po ON po.packet_hash = p.packet_hash
-    WHERE p.channel_hash = c.channel_hash
-      AND po.iata ILIKE $2
+  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR c.channel_hash IN (
+    SELECT ci.channel_hash FROM channel_iatas ci
+    WHERE ci.iata = ANY($2::bpchar[])
   ))
   AND ($3::timestamptz IS NULL OR c.last_seen < $3)
 ORDER BY c.last_seen DESC
@@ -1897,22 +1905,21 @@ LIMIT $4
 `
 
 type ListChannelsParams struct {
-	Column1 []byte             `json:"column_1"`
-	Column2 interface{}        `json:"column_2"`
-	Column3 pgtype.Timestamptz `json:"column_3"`
-	Limit   int32              `json:"limit"`
+	ChannelHash []byte             `json:"channel_hash"`
+	Iatas       []string           `json:"iatas"`
+	CursorTs    pgtype.Timestamptz `json:"cursor_ts"`
+	PageLimit   int32              `json:"page_limit"`
 }
 
-// Returns channels ordered by last seen, optionally filtered by hash and/or IATA.
-// Pass NULL for hash to skip hash filtering. Pass empty string for iata to skip IATA filtering.
-// IATA filter returns channels that have active packets in that IATA (case-insensitive).
+// Channels ordered by last seen, optionally filtered by hash and/or IATAs
+// (membership via channel_iatas). NULL hash / empty array skip those filters.
 // Pass cursor=0 to start from the beginning (cursor is last_seen epoch ms).
 func (q *Queries) ListChannels(ctx context.Context, arg ListChannelsParams) ([]Channel, error) {
 	rows, err := q.db.Query(ctx, listChannels,
-		arg.Column1,
-		arg.Column2,
-		arg.Column3,
-		arg.Limit,
+		arg.ChannelHash,
+		arg.Iatas,
+		arg.CursorTs,
+		arg.PageLimit,
 	)
 	if err != nil {
 		return nil, err
@@ -3554,6 +3561,24 @@ func (q *Queries) UpsertChannelHashOnly(ctx context.Context, channelHash []byte)
 	var id int32
 	err := row.Scan(&id)
 	return id, err
+}
+
+const upsertChannelIATA = `-- name: UpsertChannelIATA :exec
+INSERT INTO channel_iatas (channel_hash, iata, last_heard)
+VALUES ($1, $2, $3)
+ON CONFLICT (channel_hash, iata) DO UPDATE SET
+  last_heard = GREATEST(channel_iatas.last_heard, EXCLUDED.last_heard)
+`
+
+type UpsertChannelIATAParams struct {
+	ChannelHash []byte             `json:"channel_hash"`
+	Iata        string             `json:"iata"`
+	LastHeard   pgtype.Timestamptz `json:"last_heard"`
+}
+
+func (q *Queries) UpsertChannelIATA(ctx context.Context, arg UpsertChannelIATAParams) error {
+	_, err := q.db.Exec(ctx, upsertChannelIATA, arg.ChannelHash, arg.Iata, arg.LastHeard)
+	return err
 }
 
 const upsertIATA = `-- name: UpsertIATA :exec

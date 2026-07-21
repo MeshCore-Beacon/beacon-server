@@ -47,16 +47,28 @@ func (s *Store) UpsertChannelHashOnly(ctx context.Context, channelHash []byte) (
 	return int(rowID), nil
 }
 
-func (s *Store) ListChannels(ctx context.Context, limit int32, hash []byte, iata string, cursor int64) (api.Page[api.ChannelSummary], error) {
+func (s *Store) UpsertChannelIATA(ctx context.Context, channelHash []byte, iata string, heardAt time.Time) error {
+	return s.q.UpsertChannelIATA(ctx, sqlc.UpsertChannelIATAParams{
+		ChannelHash: channelHash,
+		Iata:        iata,
+		LastHeard:   pgtype.Timestamptz{Time: heardAt, Valid: true},
+	})
+}
+
+func (s *Store) DeleteOldChannelIATAs(ctx context.Context, cutoff time.Time) error {
+	return s.q.DeleteOldChannelIATAs(ctx, pgtype.Timestamptz{Time: cutoff, Valid: true})
+}
+
+func (s *Store) ListChannels(ctx context.Context, limit int32, hash []byte, iatas []string, cursor int64) (api.Page[api.ChannelSummary], error) {
 	var cursorTS pgtype.Timestamptz
 	if cursor > 0 {
 		cursorTS = pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}
 	}
 	rows, err := s.q.ListChannels(ctx, sqlc.ListChannelsParams{
-		Column1: hash,
-		Column2: iata,
-		Column3: cursorTS,
-		Limit:   limit + 1,
+		ChannelHash: hash,
+		Iatas:       iatas,
+		CursorTs:    cursorTS,
+		PageLimit:   limit + 1,
 	})
 	if err != nil {
 		return api.Page[api.ChannelSummary]{}, err

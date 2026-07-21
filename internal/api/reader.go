@@ -44,9 +44,10 @@ type Reader interface {
 
 	// ListChannels returns a paginated list of channels ordered by last seen.
 	// Includes both hashtag-derived and explicit key channels.
-	// Pass nil hash to skip hash filtering. Pass empty string iata to return all channels.
+	// Pass nil hash to skip hash filtering. Pass empty iatas to return all channels;
+	// IATAs must be uppercase.
 	// cursor is last_seen epoch ms of the last item; pass 0 to start from the beginning.
-	ListChannels(ctx context.Context, limit int32, hash []byte, iata string, cursor int64) (Page[ChannelSummary], error)
+	ListChannels(ctx context.Context, limit int32, hash []byte, iatas []string, cursor int64) (Page[ChannelSummary], error)
 
 	// GetChannel returns full detail for a single channel by its integer ID.
 	// Returns nil, pgx.ErrNoRows if the channel is not found.
