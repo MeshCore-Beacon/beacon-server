@@ -35,7 +35,7 @@ func ChannelsRouter(reader api.Reader) http.Handler {
 //	@Tags		Channels
 //	@Produce	json
 //	@Param		hash	query		string	false	"Single-byte channel hash (hex)"
-//	@Param		iata	query		string	false	"Filter by IATA code (case-insensitive)"
+//	@Param		iata	query		string	false	"Filter by IATA code"
 //	@Param		iatas	query		string	false	"Filter by IATA code(s), comma-separated e.g. YOW or YOW,YYZ"
 //	@Param		cursor	query		int		false	"last_seen epoch ms of last item for pagination"
 //	@Param		limit	query		int		false	"Max results (default 50)"

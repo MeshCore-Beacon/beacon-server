@@ -8,12 +8,16 @@ CREATE TABLE channel_iatas (
   PRIMARY KEY (channel_hash, iata)
 );
 
-CREATE INDEX idx_channel_iatas_iata ON channel_iatas(iata, last_heard DESC);
+CREATE INDEX idx_channel_iatas_iata ON channel_iatas(iata);
 
--- Seed from retained packets so the filter works right away.
+-- Seed from retained packets; parallelism off so the join spills to disk, not /dev/shm.
+SET max_parallel_workers_per_gather = 0;
+
 INSERT INTO channel_iatas (channel_hash, iata, last_heard)
 SELECT p.channel_hash, po.iata, MAX(po.heard_at)
 FROM packets p
 JOIN packet_observations po ON po.packet_hash = p.packet_hash
 WHERE p.channel_hash IS NOT NULL
 GROUP BY p.channel_hash, po.iata;
+
+RESET max_parallel_workers_per_gather;

@@ -672,10 +672,12 @@ ON CONFLICT (channel_hash) WHERE key_fingerprint IS NULL DO UPDATE SET
 RETURNING id;
 
 -- name: UpsertChannelIATA :exec
+-- Refreshes at most hourly so repeat hears don't churn the row.
 INSERT INTO channel_iatas (channel_hash, iata, last_heard)
 VALUES ($1, $2, $3)
 ON CONFLICT (channel_hash, iata) DO UPDATE SET
-  last_heard = GREATEST(channel_iatas.last_heard, EXCLUDED.last_heard);
+  last_heard = EXCLUDED.last_heard
+WHERE EXCLUDED.last_heard > channel_iatas.last_heard + INTERVAL '1 hour';
 
 -- name: ListChannels :many
 -- Channels ordered by last seen, optionally filtered by hash and/or IATAs

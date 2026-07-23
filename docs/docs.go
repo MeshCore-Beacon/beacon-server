@@ -62,7 +62,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Filter by IATA code (case-insensitive)",
+                        "description": "Filter by IATA code",
                         "name": "iata",
                         "in": "query"
                     },

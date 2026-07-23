@@ -783,7 +783,8 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		}
 	}
 
-	if channelHash != nil && inserted {
+	// Runs on duplicate observations too; the upsert only writes when the row is >1h stale.
+	if channelHash != nil {
 		if err := w.db.UpsertChannelIATA(ctx, channelHash, iata, heardAt); err != nil {
 			log.Printf("ingest[%s]: db: upsert channel IATA failed from %s/%s: %v", w.cfg.BrokerName, iata, pubkeyHex, err)
 		}

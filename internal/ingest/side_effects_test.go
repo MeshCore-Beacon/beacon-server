@@ -166,14 +166,14 @@ func TestHandlePacket_GrpTxt_UpsertsChannelIATA(t *testing.T) {
 	}
 }
 
-func TestHandlePacket_GrpTxt_DedupObservation_SkipsChannelIATA(t *testing.T) {
+func TestHandlePacket_GrpTxt_DedupObservation_StillUpsertsChannelIATA(t *testing.T) {
 	w, db := newTestWorker() // stub reports the observation as a duplicate
 	envelope := packetEnvelope(t, buildGrpTxtPacket(t, 0x1a, make([]byte, 16)))
 
 	w.handlePacket(context.Background(), "YOW", "0102", envelope)
 
-	if db.upsertChannelIATACalls != 0 {
-		t.Errorf("expected UpsertChannelIATA NOT to be called for a duplicate observation, got %d calls", db.upsertChannelIATACalls)
+	if db.upsertChannelIATACalls != 1 {
+		t.Errorf("expected UpsertChannelIATA to run for a duplicate observation too, got %d calls", db.upsertChannelIATACalls)
 	}
 }
 

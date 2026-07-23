@@ -1098,7 +1098,7 @@ paths:
         in: query
         name: hash
         type: string
-      - description: Filter by IATA code (case-insensitive)
+      - description: Filter by IATA code
         in: query
         name: iata
         type: string

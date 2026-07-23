@@ -182,6 +182,7 @@ type Querier interface {
 	// hash-only records (key unknown). Returns the channel row.
 	UpsertChannel(ctx context.Context, arg UpsertChannelParams) (Channel, error)
 	UpsertChannelHashOnly(ctx context.Context, channelHash []byte) (int32, error)
+	// Refreshes at most hourly so repeat hears don't churn the row.
 	UpsertChannelIATA(ctx context.Context, arg UpsertChannelIATAParams) error
 	// Copyright 2026 Beacon Contributors
 	// SPDX-License-Identifier: agpl
