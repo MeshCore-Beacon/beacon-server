@@ -236,6 +236,7 @@ type Querier interface {
 	UpsertPacket(ctx context.Context, arg UpsertPacketParams) (UpsertPacketRow, error)
 	UpsertRegion(ctx context.Context, arg UpsertRegionParams) (int32, error)
 	UpsertRegionIATA(ctx context.Context, arg UpsertRegionIATAParams) error
+	// Refreshes at most hourly so repeat hears don't churn the row.
 	UpsertTraceIATA(ctx context.Context, arg UpsertTraceIATAParams) error
 	// ============================================================
 	// TRANSPORT CODES

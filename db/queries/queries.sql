@@ -684,10 +684,12 @@ ON CONFLICT (channel_hash, iata) DO UPDATE SET
 WHERE EXCLUDED.last_heard > channel_iatas.last_heard + INTERVAL '1 hour';
 
 -- name: UpsertTraceIATA :exec
+-- Refreshes at most hourly so repeat hears don't churn the row.
 INSERT INTO trace_iatas (trace_tag, iata, last_heard)
 VALUES ($1, $2, $3)
 ON CONFLICT (trace_tag, iata) DO UPDATE SET
-  last_heard = GREATEST(trace_iatas.last_heard, EXCLUDED.last_heard);
+  last_heard = EXCLUDED.last_heard
+WHERE EXCLUDED.last_heard > trace_iatas.last_heard + INTERVAL '1 hour';
 
 -- name: ListChannels :many
 -- Channels ordered by last seen, optionally filtered by hash and/or IATAs

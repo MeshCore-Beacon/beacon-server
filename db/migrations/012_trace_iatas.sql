@@ -8,7 +8,7 @@ CREATE TABLE trace_iatas (
   PRIMARY KEY (trace_tag, iata)
 );
 
-CREATE INDEX idx_trace_iatas_iata ON trace_iatas(iata, last_heard DESC);
+CREATE INDEX idx_trace_iatas_iata ON trace_iatas(iata);
 
 -- Seed from retained packets; parallelism off so the join spills to disk, not /dev/shm.
 SET max_parallel_workers_per_gather = 0;

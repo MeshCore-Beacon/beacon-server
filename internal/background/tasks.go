@@ -41,13 +41,16 @@ func CleanupTask(store *db.Store, telemetryRetention, packetRetention, interval 
 			if err := store.DeleteOldTelemetry(ctx, time.Now().Add(-telemetryRetention)); err != nil {
 				return err
 			}
-			if err := store.DeleteOldPackets(ctx, time.Now().Add(-packetRetention)); err != nil {
+			// One cutoff for all three so the IATA tables stay in step
+			// with the packets they mirror.
+			cutoff := time.Now().Add(-packetRetention)
+			if err := store.DeleteOldPackets(ctx, cutoff); err != nil {
 				return err
 			}
-			if err := store.DeleteOldChannelIATAs(ctx, time.Now().Add(-packetRetention)); err != nil {
+			if err := store.DeleteOldChannelIATAs(ctx, cutoff); err != nil {
 				return err
 			}
-			if err := store.DeleteOldTraceIATAs(ctx, time.Now().Add(-packetRetention)); err != nil {
+			if err := store.DeleteOldTraceIATAs(ctx, cutoff); err != nil {
 				return err
 			}
 			return nil

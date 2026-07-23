@@ -790,7 +790,8 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		}
 	}
 
-	if traceTag != nil && inserted {
+	// Runs on duplicate observations too; the upsert only writes when the row is >1h stale.
+	if traceTag != nil {
 		if err := w.db.UpsertTraceIATA(ctx, traceTag, iata, heardAt); err != nil {
 			log.Printf("ingest[%s]: db: upsert trace IATA failed from %s/%s: %v", w.cfg.BrokerName, iata, pubkeyHex, err)
 		}
