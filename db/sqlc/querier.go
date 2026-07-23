@@ -50,6 +50,8 @@ type Querier interface {
 	GetRegionIATAs(ctx context.Context, regionID int32) ([]string, error)
 	GetScopeByName(ctx context.Context, name string) (GetScopeByNameRow, error)
 	GetScopeNames(ctx context.Context) ([]string, error)
+	// Count each table on its own; the old cross-join blew up to millions of rows
+	// before COUNT(DISTINCT) (~10s).
 	GetScopeStats(ctx context.Context) ([]GetScopeStatsRow, error)
 	GetScopesByIATAs(ctx context.Context, dollar_1 []string) ([]GetScopesByIATAsRow, error)
 	// Returns node counts grouped by type, optionally filtered by IATA.

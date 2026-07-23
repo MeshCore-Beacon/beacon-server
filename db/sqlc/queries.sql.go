@@ -1035,14 +1035,10 @@ func (q *Queries) GetScopeNames(ctx context.Context) ([]string, error) {
 const getScopeStats = `-- name: GetScopeStats :many
 SELECT
     ts.name,
-    COUNT(DISTINCT p.packet_hash) AS packet_count,
-    COUNT(DISTINCT os.observer_id) AS observer_count,
-    COUNT(DISTINCT n.id) AS node_count
+    (SELECT COUNT(*) FROM packets p WHERE p.scope_id = ts.id) AS packet_count,
+    (SELECT COUNT(*) FROM observer_scopes os WHERE os.scope_id = ts.id) AS observer_count,
+    (SELECT COUNT(*) FROM nodes n WHERE n.default_scope_id = ts.id) AS node_count
 FROM transport_scopes ts
-LEFT JOIN packets p ON p.scope_id = ts.id
-LEFT JOIN observer_scopes os ON os.scope_id = ts.id
-LEFT JOIN nodes n ON n.default_scope_id = ts.id
-GROUP BY ts.name
 ORDER BY ts.name
 `
 
@@ -1053,6 +1049,8 @@ type GetScopeStatsRow struct {
 	NodeCount     int64  `json:"node_count"`
 }
 
+// Count each table on its own; the old cross-join blew up to millions of rows
+// before COUNT(DISTINCT) (~10s).
 func (q *Queries) GetScopeStats(ctx context.Context) ([]GetScopeStatsRow, error) {
 	rows, err := q.db.Query(ctx, getScopeStats)
 	if err != nil {
