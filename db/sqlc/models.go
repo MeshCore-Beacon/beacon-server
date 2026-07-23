@@ -271,6 +271,12 @@ type RegionIata struct {
 	AddedAt  pgtype.Timestamptz `json:"added_at"`
 }
 
+type TraceIata struct {
+	TraceTag  []byte             `json:"trace_tag"`
+	Iata      string             `json:"iata"`
+	LastHeard pgtype.Timestamptz `json:"last_heard"`
+}
+
 type TransportScope struct {
 	ID             int32              `json:"id"`
 	Name           string             `json:"name"`

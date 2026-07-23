@@ -85,6 +85,20 @@ func (mr *MockQuerierMockRecorder) DeleteOldTelemetry(ctx, reportedAt any) *gomo
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldTelemetry", reflect.TypeOf((*MockQuerier)(nil).DeleteOldTelemetry), ctx, reportedAt)
 }
 
+// DeleteOldTraceIATAs mocks base method.
+func (m *MockQuerier) DeleteOldTraceIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteOldTraceIATAs", ctx, lastHeard)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteOldTraceIATAs indicates an expected call of DeleteOldTraceIATAs.
+func (mr *MockQuerierMockRecorder) DeleteOldTraceIATAs(ctx, lastHeard any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldTraceIATAs", reflect.TypeOf((*MockQuerier)(nil).DeleteOldTraceIATAs), ctx, lastHeard)
+}
+
 // GetChannelByID mocks base method.
 func (m *MockQuerier) GetChannelByID(ctx context.Context, id int32) (db.Channel, error) {
 	m.ctrl.T.Helper()
@@ -1425,6 +1439,20 @@ func (m *MockQuerier) UpsertRegionIATA(ctx context.Context, arg db.UpsertRegionI
 func (mr *MockQuerierMockRecorder) UpsertRegionIATA(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertRegionIATA", reflect.TypeOf((*MockQuerier)(nil).UpsertRegionIATA), ctx, arg)
+}
+
+// UpsertTraceIATA mocks base method.
+func (m *MockQuerier) UpsertTraceIATA(ctx context.Context, arg db.UpsertTraceIATAParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpsertTraceIATA", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpsertTraceIATA indicates an expected call of UpsertTraceIATA.
+func (mr *MockQuerierMockRecorder) UpsertTraceIATA(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertTraceIATA", reflect.TypeOf((*MockQuerier)(nil).UpsertTraceIATA), ctx, arg)
 }
 
 // UpsertTransportScope mocks base method.

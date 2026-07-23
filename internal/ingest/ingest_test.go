@@ -178,6 +178,7 @@ type stubDB struct {
 	upsertChannelCalls         int
 	upsertChannelHashOnlyCalls int
 	upsertChannelIATACalls     int
+	upsertTraceIATACalls       int
 	observationInserted        bool
 }
 
@@ -261,6 +262,11 @@ func (s *stubDB) UpsertChannelHashOnly(_ context.Context, _ []byte) (int, error)
 
 func (s *stubDB) UpsertChannelIATA(_ context.Context, _ []byte, _ string, _ time.Time) error {
 	s.upsertChannelIATACalls++
+	return nil
+}
+
+func (s *stubDB) UpsertTraceIATA(_ context.Context, _ []byte, _ string, _ time.Time) error {
+	s.upsertTraceIATACalls++
 	return nil
 }
 

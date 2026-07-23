@@ -498,6 +498,10 @@ DELETE FROM packets WHERE last_heard_at < $1;
 -- Keeps the channel IATA filter in step with packet retention.
 DELETE FROM channel_iatas WHERE last_heard < $1;
 
+-- name: DeleteOldTraceIATAs :exec
+-- Keeps the trace IATA filter in step with packet retention.
+DELETE FROM trace_iatas WHERE last_heard < $1;
+
 -- ============================================================
 -- PACKET OBSERVATIONS
 -- ============================================================
@@ -678,6 +682,12 @@ VALUES ($1, $2, $3)
 ON CONFLICT (channel_hash, iata) DO UPDATE SET
   last_heard = EXCLUDED.last_heard
 WHERE EXCLUDED.last_heard > channel_iatas.last_heard + INTERVAL '1 hour';
+
+-- name: UpsertTraceIATA :exec
+INSERT INTO trace_iatas (trace_tag, iata, last_heard)
+VALUES ($1, $2, $3)
+ON CONFLICT (trace_tag, iata) DO UPDATE SET
+  last_heard = GREATEST(trace_iatas.last_heard, EXCLUDED.last_heard);
 
 -- name: ListChannels :many
 -- Channels ordered by last seen, optionally filtered by hash and/or IATAs
@@ -965,33 +975,45 @@ ON CONFLICT (region_id, iata) DO NOTHING;
 
 -- name: ListTraceTags :many
 -- Returns distinct trace tags with summary info, ordered by most recent first.
+-- IATA membership comes from trace_iatas (joining observations here spilled the
+-- hash join). Per-tag details filled in only for the returned page.
+WITH tags AS (
+    SELECT
+        p.trace_tag,
+        MIN(p.first_heard_at) AS first_heard_at,
+        MAX(p.last_heard_at) AS last_heard_at,
+        COUNT(*) AS packet_count,
+        MAX(p.parsed_payload->>'type') AS trace_type
+    FROM packets p
+    WHERE p.trace_tag IS NOT NULL
+      AND (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR p.trace_tag IN (
+          SELECT ti.trace_tag FROM trace_iatas ti WHERE ti.iata = ANY($1::bpchar[])))
+      AND ($2::text = '' OR p.scope_id = (SELECT id FROM transport_scopes WHERE name = $2))
+      AND ($3::timestamptz IS NULL OR p.first_heard_at >= $3)
+      AND ($4::timestamptz IS NULL OR p.first_heard_at <= $4)
+      AND ($5::timestamptz IS NULL OR p.last_heard_at < $5)
+      AND ($7::text = '' OR p.parsed_payload->>'type' = $7)
+    GROUP BY p.trace_tag
+    ORDER BY MAX(p.last_heard_at) DESC
+    LIMIT $6
+)
 SELECT
-    encode(p.trace_tag, 'hex') AS trace_tag,
-    MIN(p.first_heard_at)::timestamptz AS first_heard_at,
-    MAX(p.last_heard_at)::timestamptz AS last_heard_at,
-    COUNT(DISTINCT p.packet_hash) AS packet_count,
-    COUNT(DISTINCT po.iata) AS iata_count,
-    MAX(p.parsed_payload->>'type')::text AS trace_type,
-    best.parsed_payload AS best_payload
-FROM packets p
-LEFT JOIN packet_observations po ON po.packet_hash = p.packet_hash
-LEFT JOIN LATERAL (
-    SELECT parsed_payload
-    FROM packets p2
-    WHERE p2.trace_tag = p.trace_tag
-    ORDER BY jsonb_array_length(p2.parsed_payload->'pathHashes') DESC
-    LIMIT 1
-) best ON true
-WHERE p.trace_tag IS NOT NULL
-  AND (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR po.iata = ANY($1::bpchar[]))
-  AND ($2::text = '' OR p.scope_id = (SELECT id FROM transport_scopes WHERE name = $2))
-  AND ($3::timestamptz IS NULL OR p.first_heard_at >= $3)
-  AND ($4::timestamptz IS NULL OR p.first_heard_at <= $4)
-  AND ($5::timestamptz IS NULL OR p.last_heard_at < $5)
-  AND ($7::text = '' OR p.parsed_payload->>'type' = $7)
-GROUP BY p.trace_tag, best.parsed_payload
-ORDER BY MAX(p.last_heard_at) DESC
-LIMIT $6;
+    encode(t.trace_tag, 'hex') AS trace_tag,
+    t.first_heard_at::timestamptz AS first_heard_at,
+    t.last_heard_at::timestamptz AS last_heard_at,
+    t.packet_count,
+    (SELECT COUNT(*)
+     FROM trace_iatas ti
+     WHERE ti.trace_tag = t.trace_tag
+       AND (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR ti.iata = ANY($1::bpchar[]))) AS iata_count,
+    t.trace_type::text AS trace_type,
+    (SELECT p3.parsed_payload
+     FROM packets p3
+     WHERE p3.trace_tag = t.trace_tag
+     ORDER BY jsonb_array_length(p3.parsed_payload->'pathHashes') DESC
+     LIMIT 1) AS best_payload
+FROM tags t
+ORDER BY t.last_heard_at DESC;
 
 -- ============================================================
 -- ROUTES

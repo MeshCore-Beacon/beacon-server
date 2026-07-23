@@ -187,4 +187,31 @@ func TestHandlePacket_Advert_SkipsChannelIATA(t *testing.T) {
 	if db.upsertChannelIATACalls != 0 {
 		t.Errorf("expected UpsertChannelIATA NOT to be called for a non-channel packet, got %d calls", db.upsertChannelIATACalls)
 	}
+	if db.upsertTraceIATACalls != 0 {
+		t.Errorf("expected UpsertTraceIATA NOT to be called for a non-trace packet, got %d calls", db.upsertTraceIATACalls)
+	}
+}
+
+func buildTracePacket(t *testing.T) *meshcore.Packet {
+	t.Helper()
+	payload, err := (&meshcore.Trace{Tag: 0xdeadbeef, AuthCode: 1}).ToBytes()
+	if err != nil {
+		t.Fatalf("trace to bytes: %v", err)
+	}
+	return &meshcore.Packet{
+		Header:  meshcore.MakeHeader(meshcore.RouteTypeFlood, meshcore.PayloadTypeTrace, 0),
+		Payload: payload,
+	}
+}
+
+func TestHandlePacket_Trace_UpsertsTraceIATA(t *testing.T) {
+	w, db := newTestWorker()
+	db.observationInserted = true
+	envelope := packetEnvelope(t, buildTracePacket(t))
+
+	w.handlePacket(context.Background(), "YOW", "0102", envelope)
+
+	if db.upsertTraceIATACalls != 1 {
+		t.Errorf("expected UpsertTraceIATA to be called once for a stored trace, got %d", db.upsertTraceIATACalls)
+	}
 }

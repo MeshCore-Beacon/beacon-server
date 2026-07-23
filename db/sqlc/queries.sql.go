@@ -43,6 +43,16 @@ func (q *Queries) DeleteOldTelemetry(ctx context.Context, reportedAt pgtype.Time
 	return err
 }
 
+const deleteOldTraceIATAs = `-- name: DeleteOldTraceIATAs :exec
+DELETE FROM trace_iatas WHERE last_heard < $1
+`
+
+// Keeps the trace IATA filter in step with packet retention.
+func (q *Queries) DeleteOldTraceIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error {
+	_, err := q.db.Exec(ctx, deleteOldTraceIATAs, lastHeard)
+	return err
+}
+
 const getChannelByID = `-- name: GetChannelByID :one
 SELECT id, channel_hash, key_fingerprint, name, hashtag, is_hashtag, is_public, key_known, first_seen, last_seen, message_count FROM channels WHERE id = $1
 `
@@ -2901,33 +2911,43 @@ func (q *Queries) ListRegions(ctx context.Context) ([]ListRegionsRow, error) {
 
 const listTraceTags = `-- name: ListTraceTags :many
 
+WITH tags AS (
+    SELECT
+        p.trace_tag,
+        MIN(p.first_heard_at) AS first_heard_at,
+        MAX(p.last_heard_at) AS last_heard_at,
+        COUNT(*) AS packet_count,
+        MAX(p.parsed_payload->>'type') AS trace_type
+    FROM packets p
+    WHERE p.trace_tag IS NOT NULL
+      AND (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR p.trace_tag IN (
+          SELECT ti.trace_tag FROM trace_iatas ti WHERE ti.iata = ANY($1::bpchar[])))
+      AND ($2::text = '' OR p.scope_id = (SELECT id FROM transport_scopes WHERE name = $2))
+      AND ($3::timestamptz IS NULL OR p.first_heard_at >= $3)
+      AND ($4::timestamptz IS NULL OR p.first_heard_at <= $4)
+      AND ($5::timestamptz IS NULL OR p.last_heard_at < $5)
+      AND ($7::text = '' OR p.parsed_payload->>'type' = $7)
+    GROUP BY p.trace_tag
+    ORDER BY MAX(p.last_heard_at) DESC
+    LIMIT $6
+)
 SELECT
-    encode(p.trace_tag, 'hex') AS trace_tag,
-    MIN(p.first_heard_at)::timestamptz AS first_heard_at,
-    MAX(p.last_heard_at)::timestamptz AS last_heard_at,
-    COUNT(DISTINCT p.packet_hash) AS packet_count,
-    COUNT(DISTINCT po.iata) AS iata_count,
-    MAX(p.parsed_payload->>'type')::text AS trace_type,
-    best.parsed_payload AS best_payload
-FROM packets p
-LEFT JOIN packet_observations po ON po.packet_hash = p.packet_hash
-LEFT JOIN LATERAL (
-    SELECT parsed_payload
-    FROM packets p2
-    WHERE p2.trace_tag = p.trace_tag
-    ORDER BY jsonb_array_length(p2.parsed_payload->'pathHashes') DESC
-    LIMIT 1
-) best ON true
-WHERE p.trace_tag IS NOT NULL
-  AND (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR po.iata = ANY($1::bpchar[]))
-  AND ($2::text = '' OR p.scope_id = (SELECT id FROM transport_scopes WHERE name = $2))
-  AND ($3::timestamptz IS NULL OR p.first_heard_at >= $3)
-  AND ($4::timestamptz IS NULL OR p.first_heard_at <= $4)
-  AND ($5::timestamptz IS NULL OR p.last_heard_at < $5)
-  AND ($7::text = '' OR p.parsed_payload->>'type' = $7)
-GROUP BY p.trace_tag, best.parsed_payload
-ORDER BY MAX(p.last_heard_at) DESC
-LIMIT $6
+    encode(t.trace_tag, 'hex') AS trace_tag,
+    t.first_heard_at::timestamptz AS first_heard_at,
+    t.last_heard_at::timestamptz AS last_heard_at,
+    t.packet_count,
+    (SELECT COUNT(*)
+     FROM trace_iatas ti
+     WHERE ti.trace_tag = t.trace_tag
+       AND (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR ti.iata = ANY($1::bpchar[]))) AS iata_count,
+    t.trace_type::text AS trace_type,
+    (SELECT p3.parsed_payload
+     FROM packets p3
+     WHERE p3.trace_tag = t.trace_tag
+     ORDER BY jsonb_array_length(p3.parsed_payload->'pathHashes') DESC
+     LIMIT 1) AS best_payload
+FROM tags t
+ORDER BY t.last_heard_at DESC
 `
 
 type ListTraceTagsParams struct {
@@ -2954,6 +2974,8 @@ type ListTraceTagsRow struct {
 // TRACES
 // ============================================================
 // Returns distinct trace tags with summary info, ordered by most recent first.
+// IATA membership comes from trace_iatas (joining observations here spilled the
+// hash join). Per-tag details filled in only for the returned page.
 func (q *Queries) ListTraceTags(ctx context.Context, arg ListTraceTagsParams) ([]ListTraceTagsRow, error) {
 	rows, err := q.db.Query(ctx, listTraceTags,
 		arg.Column1,
@@ -4043,6 +4065,24 @@ type UpsertRegionIATAParams struct {
 
 func (q *Queries) UpsertRegionIATA(ctx context.Context, arg UpsertRegionIATAParams) error {
 	_, err := q.db.Exec(ctx, upsertRegionIATA, arg.RegionID, arg.Iata)
+	return err
+}
+
+const upsertTraceIATA = `-- name: UpsertTraceIATA :exec
+INSERT INTO trace_iatas (trace_tag, iata, last_heard)
+VALUES ($1, $2, $3)
+ON CONFLICT (trace_tag, iata) DO UPDATE SET
+  last_heard = GREATEST(trace_iatas.last_heard, EXCLUDED.last_heard)
+`
+
+type UpsertTraceIATAParams struct {
+	TraceTag  []byte             `json:"trace_tag"`
+	Iata      string             `json:"iata"`
+	LastHeard pgtype.Timestamptz `json:"last_heard"`
+}
+
+func (q *Queries) UpsertTraceIATA(ctx context.Context, arg UpsertTraceIATAParams) error {
+	_, err := q.db.Exec(ctx, upsertTraceIATA, arg.TraceTag, arg.Iata, arg.LastHeard)
 	return err
 }
 

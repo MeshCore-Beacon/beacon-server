@@ -19,6 +19,8 @@ type Querier interface {
 	DeleteOldPackets(ctx context.Context, lastHeardAt pgtype.Timestamptz) error
 	// Deletes telemetry rows older than the given cutoff. Called by the cleanup goroutine.
 	DeleteOldTelemetry(ctx context.Context, reportedAt pgtype.Timestamptz) error
+	// Keeps the trace IATA filter in step with packet retention.
+	DeleteOldTraceIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error
 	GetChannelByID(ctx context.Context, id int32) (Channel, error)
 	// Returns neighbors of a node that are in a different IATA.
 	GetCrossIATANeighbors(ctx context.Context, arg GetCrossIATANeighborsParams) ([]GetCrossIATANeighborsRow, error)
@@ -142,6 +144,8 @@ type Querier interface {
 	// TRACES
 	// ============================================================
 	// Returns distinct trace tags with summary info, ordered by most recent first.
+	// IATA membership comes from trace_iatas (joining observations here spilled the
+	// hash join). Per-tag details filled in only for the returned page.
 	ListTraceTags(ctx context.Context, arg ListTraceTagsParams) ([]ListTraceTagsRow, error)
 	// Delete node_neighbors where the neighbor has departed from node_short_ids
 	// for that IATA, or where its prefix_4 is now ambiguous.
@@ -232,6 +236,7 @@ type Querier interface {
 	UpsertPacket(ctx context.Context, arg UpsertPacketParams) (UpsertPacketRow, error)
 	UpsertRegion(ctx context.Context, arg UpsertRegionParams) (int32, error)
 	UpsertRegionIATA(ctx context.Context, arg UpsertRegionIATAParams) error
+	UpsertTraceIATA(ctx context.Context, arg UpsertTraceIATAParams) error
 	// ============================================================
 	// TRANSPORT CODES
 	// ============================================================

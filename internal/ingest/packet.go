@@ -790,6 +790,12 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		}
 	}
 
+	if traceTag != nil && inserted {
+		if err := w.db.UpsertTraceIATA(ctx, traceTag, iata, heardAt); err != nil {
+			log.Printf("ingest[%s]: db: upsert trace IATA failed from %s/%s: %v", w.cfg.BrokerName, iata, pubkeyHex, err)
+		}
+	}
+
 	// packet.PathHashes() reads packet.Path as hash-sized chunks, which is only true for
 	// ordinary flood/direct-routed packets. TRACE repurposes packet.Path to carry one SNR
 	// byte per hop instead, so for TRACE we resolve against the trace payload's own

@@ -154,6 +154,9 @@ type DB interface {
 	// UpsertChannelIATA upserts a channel_iatas row.
 	UpsertChannelIATA(ctx context.Context, channelHash []byte, iata string, heardAt time.Time) error
 
+	// UpsertTraceIATA upserts a trace_iatas row.
+	UpsertTraceIATA(ctx context.Context, traceTag []byte, iata string, heardAt time.Time) error
+
 	// GetPacketObservationCount returns the number of rows for the packet observations
 	GetPacketObservationCount(ctx context.Context, packetHash []byte) (int64, error)
 
