@@ -75,9 +75,10 @@ type MvHourlyIataStat struct {
 }
 
 type MvPayloadBreakdownByIatum struct {
-	Iata        string `json:"iata"`
-	PayloadType *int16 `json:"payload_type"`
-	Count       int64  `json:"count"`
+	Iata        string             `json:"iata"`
+	PayloadType *int16             `json:"payload_type"`
+	Bucket      pgtype.Timestamptz `json:"bucket"`
+	Count       int64              `json:"count"`
 }
 
 type MvRadioPreset struct {
@@ -97,12 +98,12 @@ type MvTopNodesByIatum struct {
 }
 
 type MvTopObserversByIatum struct {
-	Iata             string      `json:"iata"`
-	ObserverID       uuid.UUID   `json:"observer_id"`
-	DisplayName      *string     `json:"display_name"`
-	ObserverType     *string     `json:"observer_type"`
-	ObservationCount int64       `json:"observation_count"`
-	LastHeard        interface{} `json:"last_heard"`
+	Iata             string             `json:"iata"`
+	ObserverID       uuid.UUID          `json:"observer_id"`
+	DisplayName      *string            `json:"display_name"`
+	ObserverType     *string            `json:"observer_type"`
+	Bucket           pgtype.Timestamptz `json:"bucket"`
+	ObservationCount int64              `json:"observation_count"`
 }
 
 type Node struct {

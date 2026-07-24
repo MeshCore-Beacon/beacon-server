@@ -550,18 +550,18 @@ func (mr *MockQuerierMockRecorder) GetStatsOverview(ctx, dollar_1 any) *gomock.C
 }
 
 // GetStatsPayloadBreakdown mocks base method.
-func (m *MockQuerier) GetStatsPayloadBreakdown(ctx context.Context, dollar_1 []string) ([]db.GetStatsPayloadBreakdownRow, error) {
+func (m *MockQuerier) GetStatsPayloadBreakdown(ctx context.Context, arg db.GetStatsPayloadBreakdownParams) ([]db.GetStatsPayloadBreakdownRow, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetStatsPayloadBreakdown", ctx, dollar_1)
+	ret := m.ctrl.Call(m, "GetStatsPayloadBreakdown", ctx, arg)
 	ret0, _ := ret[0].([]db.GetStatsPayloadBreakdownRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetStatsPayloadBreakdown indicates an expected call of GetStatsPayloadBreakdown.
-func (mr *MockQuerierMockRecorder) GetStatsPayloadBreakdown(ctx, dollar_1 any) *gomock.Call {
+func (mr *MockQuerierMockRecorder) GetStatsPayloadBreakdown(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetStatsPayloadBreakdown", reflect.TypeOf((*MockQuerier)(nil).GetStatsPayloadBreakdown), ctx, dollar_1)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetStatsPayloadBreakdown", reflect.TypeOf((*MockQuerier)(nil).GetStatsPayloadBreakdown), ctx, arg)
 }
 
 // GetStatsTopAdvertisers mocks base method.

@@ -60,15 +60,16 @@ type Querier interface {
 	// STATS
 	// ============================================================
 	GetStatsOverview(ctx context.Context, dollar_1 []string) (GetStatsOverviewRow, error)
-	// Payload-type counts for the IATA, from the precomputed view.
-	GetStatsPayloadBreakdown(ctx context.Context, dollar_1 []string) ([]GetStatsPayloadBreakdownRow, error)
+	// Payload-type counts for the IATA within the window, summed from the
+	// precomputed hourly buckets.
+	GetStatsPayloadBreakdown(ctx context.Context, arg GetStatsPayloadBreakdownParams) ([]GetStatsPayloadBreakdownRow, error)
 	// Returns the top N nodes by distinct ADVERT packet count for the given window and IATA.
 	// COUNT(DISTINCT p.packet_hash) rather than COUNT(*): the same advert broadcast is commonly
 	// heard by more than one observer, and each hearing is its own packet_observations row --
 	// this counts adverts sent, not adverts heard.
 	GetStatsTopAdvertisers(ctx context.Context, arg GetStatsTopAdvertisersParams) ([]GetStatsTopAdvertisersRow, error)
-	// Top N observers for the IATA, from the precomputed view. Counts sum across
-	// matched IATAs; iata is a representative one for display.
+	// Top N observers for the IATA within the window, summed from the precomputed
+	// hourly buckets. Counts sum across matched IATAs; iata is a representative one.
 	GetStatsTopObservers(ctx context.Context, arg GetStatsTopObserversParams) ([]GetStatsTopObserversRow, error)
 	// Returns the top N companion names by decrypted channel message count for the given
 	// window and IATA. Grouped by sender_name as decrypted from the message itself, not by

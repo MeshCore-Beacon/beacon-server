@@ -1201,18 +1201,25 @@ SELECT
   SUM(count)::bigint AS count
 FROM mv_payload_breakdown_by_iata
 WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR iata = ANY($1::bpchar[]))
+  AND bucket >= NOW() - $2::interval
 GROUP BY payload_type
 ORDER BY count DESC
 `
+
+type GetStatsPayloadBreakdownParams struct {
+	Column1 []string        `json:"column_1"`
+	Column2 pgtype.Interval `json:"column_2"`
+}
 
 type GetStatsPayloadBreakdownRow struct {
 	PayloadType *int16 `json:"payload_type"`
 	Count       int64  `json:"count"`
 }
 
-// Payload-type counts for the IATA, from the precomputed view.
-func (q *Queries) GetStatsPayloadBreakdown(ctx context.Context, dollar_1 []string) ([]GetStatsPayloadBreakdownRow, error) {
-	rows, err := q.db.Query(ctx, getStatsPayloadBreakdown, dollar_1)
+// Payload-type counts for the IATA within the window, summed from the
+// precomputed hourly buckets.
+func (q *Queries) GetStatsPayloadBreakdown(ctx context.Context, arg GetStatsPayloadBreakdownParams) ([]GetStatsPayloadBreakdownRow, error) {
+	rows, err := q.db.Query(ctx, getStatsPayloadBreakdown, arg.Column1, arg.Column2)
 	if err != nil {
 		return nil, err
 	}
@@ -1309,7 +1316,7 @@ SELECT
   COALESCE(SUM(observation_count), 0)::bigint AS observation_count,
   COALESCE(MAX(iata), '')::bpchar AS iata
 FROM mv_top_observers_by_iata
-WHERE last_heard > $1
+WHERE bucket >= NOW() - $1::interval
   AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR iata = ANY($2::bpchar[]))
 GROUP BY observer_id, display_name, observer_type
 ORDER BY observation_count DESC
@@ -1317,9 +1324,9 @@ LIMIT $3
 `
 
 type GetStatsTopObserversParams struct {
-	LastHeard interface{} `json:"last_heard"`
-	Column2   []string    `json:"column_2"`
-	Limit     int32       `json:"limit"`
+	Column1 pgtype.Interval `json:"column_1"`
+	Column2 []string        `json:"column_2"`
+	Limit   int32           `json:"limit"`
 }
 
 type GetStatsTopObserversRow struct {
@@ -1330,10 +1337,10 @@ type GetStatsTopObserversRow struct {
 	Iata             string    `json:"iata"`
 }
 
-// Top N observers for the IATA, from the precomputed view. Counts sum across
-// matched IATAs; iata is a representative one for display.
+// Top N observers for the IATA within the window, summed from the precomputed
+// hourly buckets. Counts sum across matched IATAs; iata is a representative one.
 func (q *Queries) GetStatsTopObservers(ctx context.Context, arg GetStatsTopObserversParams) ([]GetStatsTopObserversRow, error) {
-	rows, err := q.db.Query(ctx, getStatsTopObservers, arg.LastHeard, arg.Column2, arg.Limit)
+	rows, err := q.db.Query(ctx, getStatsTopObservers, arg.Column1, arg.Column2, arg.Limit)
 	if err != nil {
 		return nil, err
 	}

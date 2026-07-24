@@ -822,12 +822,14 @@ ORDER BY observation_count DESC
 LIMIT $2;
 
 -- name: GetStatsPayloadBreakdown :many
--- Payload-type counts for the IATA, from the precomputed view.
+-- Payload-type counts for the IATA within the window, summed from the
+-- precomputed hourly buckets.
 SELECT
   payload_type,
   SUM(count)::bigint AS count
 FROM mv_payload_breakdown_by_iata
 WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR iata = ANY($1::bpchar[]))
+  AND bucket >= NOW() - $2::interval
 GROUP BY payload_type
 ORDER BY count DESC;
 
@@ -843,8 +845,8 @@ GROUP BY n.node_type
 ORDER BY count DESC;
 
 -- name: GetStatsTopObservers :many
--- Top N observers for the IATA, from the precomputed view. Counts sum across
--- matched IATAs; iata is a representative one for display.
+-- Top N observers for the IATA within the window, summed from the precomputed
+-- hourly buckets. Counts sum across matched IATAs; iata is a representative one.
 SELECT
   observer_id AS id,
   display_name,
@@ -852,7 +854,7 @@ SELECT
   COALESCE(SUM(observation_count), 0)::bigint AS observation_count,
   COALESCE(MAX(iata), '')::bpchar AS iata
 FROM mv_top_observers_by_iata
-WHERE last_heard > $1
+WHERE bucket >= NOW() - $1::interval
   AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR iata = ANY($2::bpchar[]))
 GROUP BY observer_id, display_name, observer_type
 ORDER BY observation_count DESC

@@ -51,9 +51,15 @@ func (s *Store) GetStatsObservations(ctx context.Context, iatas []string, since 
 	return points, nil
 }
 
-// since is unused: the view is a rolling 7-day window refreshed on a timer.
-func (s *Store) GetStatsPayloadBreakdown(ctx context.Context, iatas []string, _ time.Time) ([]api.PayloadBreakdownItem, error) {
-	rows, err := s.q.GetStatsPayloadBreakdown(ctx, iatas)
+func (s *Store) GetStatsPayloadBreakdown(ctx context.Context, iatas []string, since time.Time) ([]api.PayloadBreakdownItem, error) {
+	if since.IsZero() {
+		since = time.Now().Add(-24 * time.Hour)
+	}
+	interval := time.Since(since)
+	rows, err := s.q.GetStatsPayloadBreakdown(ctx, sqlc.GetStatsPayloadBreakdownParams{
+		Column1: iatas,
+		Column2: pgtype.Interval{Microseconds: int64(interval.Hours()) * 3600 * 1e6, Valid: true},
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -102,10 +108,11 @@ func (s *Store) GetStatsTopObservers(ctx context.Context, iatas []string, since 
 	if since.IsZero() {
 		since = time.Now().Add(-24 * time.Hour)
 	}
+	interval := time.Since(since)
 	rows, err := s.q.GetStatsTopObservers(ctx, sqlc.GetStatsTopObserversParams{
-		LastHeard: pgtype.Timestamptz{Time: since, Valid: true},
-		Column2:   iatas,
-		Limit:     limit,
+		Column1: pgtype.Interval{Microseconds: int64(interval.Hours()) * 3600 * 1e6, Valid: true},
+		Column2: iatas,
+		Limit:   limit,
 	})
 	if err != nil {
 		return nil, err
