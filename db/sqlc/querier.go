@@ -67,7 +67,8 @@ type Querier interface {
 	// heard by more than one observer, and each hearing is its own packet_observations row --
 	// this counts adverts sent, not adverts heard.
 	GetStatsTopAdvertisers(ctx context.Context, arg GetStatsTopAdvertisersParams) ([]GetStatsTopAdvertisersRow, error)
-	// Returns the top N observers by observation count for the given window and IATA.
+	// Top N observers for the IATA, from the precomputed view. Counts sum across
+	// matched IATAs; iata is a representative one for display.
 	GetStatsTopObservers(ctx context.Context, arg GetStatsTopObserversParams) ([]GetStatsTopObserversRow, error)
 	// Returns the top N companion names by decrypted channel message count for the given
 	// window and IATA. Grouped by sender_name as decrypted from the message itself, not by
@@ -159,6 +160,7 @@ type Querier interface {
 	RefreshPayloadBreakdown(ctx context.Context) error
 	RefreshRadioPresets(ctx context.Context) error
 	RefreshTopNodes(ctx context.Context) error
+	RefreshTopObservers(ctx context.Context) error
 	// ============================================================
 	// HELPERS
 	// ============================================================

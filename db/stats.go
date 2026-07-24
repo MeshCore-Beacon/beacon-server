@@ -103,21 +103,20 @@ func (s *Store) GetStatsTopObservers(ctx context.Context, iatas []string, since 
 		since = time.Now().Add(-24 * time.Hour)
 	}
 	rows, err := s.q.GetStatsTopObservers(ctx, sqlc.GetStatsTopObserversParams{
-		HeardAt: pgtype.Timestamptz{Time: since, Valid: true},
-		Column2: iatas,
-		Limit:   limit,
+		LastHeard: pgtype.Timestamptz{Time: since, Valid: true},
+		Column2:   iatas,
+		Limit:     limit,
 	})
 	if err != nil {
 		return nil, err
 	}
 	items := make([]api.TopObserver, 0, len(rows))
 	for _, v := range rows {
-		iata, _ := v.Iata.(string)
 		items = append(items, api.TopObserver{
 			ObserverID:       v.ID,
 			DisplayName:      v.DisplayName,
 			ObserverType:     v.ObserverType,
-			IATA:             iata,
+			IATA:             v.Iata,
 			ObservationCount: v.ObservationCount,
 		})
 	}
@@ -244,6 +243,10 @@ func (s *Store) RefreshTopNodes(ctx context.Context) error {
 
 func (s *Store) RefreshPayloadBreakdown(ctx context.Context) error {
 	return s.q.RefreshPayloadBreakdown(ctx)
+}
+
+func (s *Store) RefreshTopObservers(ctx context.Context) error {
+	return s.q.RefreshTopObservers(ctx)
 }
 
 func (s *Store) RefreshRadioPresets(ctx context.Context) error {

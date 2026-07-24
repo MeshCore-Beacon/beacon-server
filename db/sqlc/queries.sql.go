@@ -1303,41 +1303,37 @@ func (q *Queries) GetStatsTopAdvertisers(ctx context.Context, arg GetStatsTopAdv
 
 const getStatsTopObservers = `-- name: GetStatsTopObservers :many
 SELECT
-  o.id,
-  o.display_name,
-  o.observer_type,
-  COUNT(*) AS observation_count,
-  COALESCE((
-    SELECT po2.iata FROM packet_observations po2
-    WHERE po2.observer_id = o.id
-    ORDER BY po2.heard_at DESC LIMIT 1
-  ), '') AS iata
-FROM packet_observations po
-JOIN observers o ON o.id = po.observer_id
-WHERE po.heard_at > $1
-  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR po.iata = ANY($2::bpchar[]))
-GROUP BY o.id
+  observer_id AS id,
+  display_name,
+  observer_type,
+  COALESCE(SUM(observation_count), 0)::bigint AS observation_count,
+  COALESCE(MAX(iata), '')::bpchar AS iata
+FROM mv_top_observers_by_iata
+WHERE last_heard > $1
+  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR iata = ANY($2::bpchar[]))
+GROUP BY observer_id, display_name, observer_type
 ORDER BY observation_count DESC
 LIMIT $3
 `
 
 type GetStatsTopObserversParams struct {
-	HeardAt pgtype.Timestamptz `json:"heard_at"`
-	Column2 []string           `json:"column_2"`
-	Limit   int32              `json:"limit"`
+	LastHeard interface{} `json:"last_heard"`
+	Column2   []string    `json:"column_2"`
+	Limit     int32       `json:"limit"`
 }
 
 type GetStatsTopObserversRow struct {
-	ID               uuid.UUID   `json:"id"`
-	DisplayName      *string     `json:"display_name"`
-	ObserverType     *string     `json:"observer_type"`
-	ObservationCount int64       `json:"observation_count"`
-	Iata             interface{} `json:"iata"`
+	ID               uuid.UUID `json:"id"`
+	DisplayName      *string   `json:"display_name"`
+	ObserverType     *string   `json:"observer_type"`
+	ObservationCount int64     `json:"observation_count"`
+	Iata             string    `json:"iata"`
 }
 
-// Returns the top N observers by observation count for the given window and IATA.
+// Top N observers for the IATA, from the precomputed view. Counts sum across
+// matched IATAs; iata is a representative one for display.
 func (q *Queries) GetStatsTopObservers(ctx context.Context, arg GetStatsTopObserversParams) ([]GetStatsTopObserversRow, error) {
-	rows, err := q.db.Query(ctx, getStatsTopObservers, arg.HeardAt, arg.Column2, arg.Limit)
+	rows, err := q.db.Query(ctx, getStatsTopObservers, arg.LastHeard, arg.Column2, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -3096,6 +3092,15 @@ REFRESH MATERIALIZED VIEW CONCURRENTLY mv_top_nodes_by_iata
 
 func (q *Queries) RefreshTopNodes(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, refreshTopNodes)
+	return err
+}
+
+const refreshTopObservers = `-- name: RefreshTopObservers :exec
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_top_observers_by_iata
+`
+
+func (q *Queries) RefreshTopObservers(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, refreshTopObservers)
 	return err
 }
 

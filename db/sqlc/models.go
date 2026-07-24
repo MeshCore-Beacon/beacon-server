@@ -96,6 +96,15 @@ type MvTopNodesByIatum struct {
 	LastHeard        pgtype.Timestamptz `json:"last_heard"`
 }
 
+type MvTopObserversByIatum struct {
+	Iata             string      `json:"iata"`
+	ObserverID       uuid.UUID   `json:"observer_id"`
+	DisplayName      *string     `json:"display_name"`
+	ObserverType     *string     `json:"observer_type"`
+	ObservationCount int64       `json:"observation_count"`
+	LastHeard        interface{} `json:"last_heard"`
+}
+
 type Node struct {
 	ID                      uuid.UUID          `json:"id"`
 	PublicKey               []byte             `json:"public_key"`

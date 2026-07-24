@@ -843,22 +843,18 @@ GROUP BY n.node_type
 ORDER BY count DESC;
 
 -- name: GetStatsTopObservers :many
--- Returns the top N observers by observation count for the given window and IATA.
+-- Top N observers for the IATA, from the precomputed view. Counts sum across
+-- matched IATAs; iata is a representative one for display.
 SELECT
-  o.id,
-  o.display_name,
-  o.observer_type,
-  COUNT(*) AS observation_count,
-  COALESCE((
-    SELECT po2.iata FROM packet_observations po2
-    WHERE po2.observer_id = o.id
-    ORDER BY po2.heard_at DESC LIMIT 1
-  ), '') AS iata
-FROM packet_observations po
-JOIN observers o ON o.id = po.observer_id
-WHERE po.heard_at > $1
-  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR po.iata = ANY($2::bpchar[]))
-GROUP BY o.id
+  observer_id AS id,
+  display_name,
+  observer_type,
+  COALESCE(SUM(observation_count), 0)::bigint AS observation_count,
+  COALESCE(MAX(iata), '')::bpchar AS iata
+FROM mv_top_observers_by_iata
+WHERE last_heard > $1
+  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR iata = ANY($2::bpchar[]))
+GROUP BY observer_id, display_name, observer_type
 ORDER BY observation_count DESC
 LIMIT $3;
 
@@ -1139,6 +1135,9 @@ REFRESH MATERIALIZED VIEW CONCURRENTLY mv_hourly_iata_stats;
 
 -- name: RefreshTopNodes :exec
 REFRESH MATERIALIZED VIEW CONCURRENTLY mv_top_nodes_by_iata;
+
+-- name: RefreshTopObservers :exec
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_top_observers_by_iata;
 
 -- name: RefreshPayloadBreakdown :exec
 REFRESH MATERIALIZED VIEW CONCURRENTLY mv_payload_breakdown_by_iata;

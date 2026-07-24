@@ -1037,6 +1037,20 @@ func (mr *MockQuerierMockRecorder) RefreshTopNodes(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RefreshTopNodes", reflect.TypeOf((*MockQuerier)(nil).RefreshTopNodes), ctx)
 }
 
+// RefreshTopObservers mocks base method.
+func (m *MockQuerier) RefreshTopObservers(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RefreshTopObservers", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RefreshTopObservers indicates an expected call of RefreshTopObservers.
+func (mr *MockQuerierMockRecorder) RefreshTopObservers(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RefreshTopObservers", reflect.TypeOf((*MockQuerier)(nil).RefreshTopObservers), ctx)
+}
+
 // ResolvePathHashesP1 mocks base method.
 func (m *MockQuerier) ResolvePathHashesP1(ctx context.Context, arg db.ResolvePathHashesP1Params) ([]db.ResolvePathHashesP1Row, error) {
 	m.ctrl.T.Helper()
