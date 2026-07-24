@@ -63,19 +63,12 @@ type Querier interface {
 	// Payload-type counts for the IATA within the window, summed from the
 	// precomputed hourly buckets.
 	GetStatsPayloadBreakdown(ctx context.Context, arg GetStatsPayloadBreakdownParams) ([]GetStatsPayloadBreakdownRow, error)
-	// Returns the top N nodes by distinct ADVERT packet count for the given window and IATA.
-	// COUNT(DISTINCT p.packet_hash) rather than COUNT(*): the same advert broadcast is commonly
-	// heard by more than one observer, and each hearing is its own packet_observations row --
-	// this counts adverts sent, not adverts heard.
+	// Top N advertisers in the window, summed from the hourly buckets.
 	GetStatsTopAdvertisers(ctx context.Context, arg GetStatsTopAdvertisersParams) ([]GetStatsTopAdvertisersRow, error)
 	// Top N observers for the IATA within the window, summed from the precomputed
 	// hourly buckets. Counts sum across matched IATAs; iata is a representative one.
 	GetStatsTopObservers(ctx context.Context, arg GetStatsTopObserversParams) ([]GetStatsTopObserversRow, error)
-	// Returns the top N companion names by decrypted channel message count for the given
-	// window and IATA. Grouped by sender_name as decrypted from the message itself, not by
-	// node identity -- distinct pubkeys sharing a display name are counted together, and a
-	// pubkey that changes its display name is split across rows. COUNT(DISTINCT cm.id) guards
-	// against the same message being multiplied by the packet_observations join.
+	// Top N talkers (by decrypted sender_name) in the window, summed from the hourly buckets.
 	GetStatsTopTalkers(ctx context.Context, arg GetStatsTopTalkersParams) ([]GetStatsTopTalkersRow, error)
 	GetTopNodes(ctx context.Context, arg GetTopNodesParams) ([]MvTopNodesByIatum, error)
 	GetTransportScopeByName(ctx context.Context, name string) (int32, error)
@@ -160,8 +153,10 @@ type Querier interface {
 	RefreshHourlyStats(ctx context.Context) error
 	RefreshPayloadBreakdown(ctx context.Context) error
 	RefreshRadioPresets(ctx context.Context) error
+	RefreshTopAdvertisers(ctx context.Context) error
 	RefreshTopNodes(ctx context.Context) error
 	RefreshTopObservers(ctx context.Context) error
+	RefreshTopTalkers(ctx context.Context) error
 	// ============================================================
 	// HELPERS
 	// ============================================================

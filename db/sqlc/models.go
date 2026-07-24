@@ -88,6 +88,16 @@ type MvRadioPreset struct {
 	Count      int64  `json:"count"`
 }
 
+type MvTopAdvertisersByIatum struct {
+	Iata        string             `json:"iata"`
+	NodeID      uuid.UUID          `json:"node_id"`
+	Name        *string            `json:"name"`
+	NodeType    int16              `json:"node_type"`
+	Bucket      pgtype.Timestamptz `json:"bucket"`
+	AdvertCount int64              `json:"advert_count"`
+	LastHeard   interface{}        `json:"last_heard"`
+}
+
 type MvTopNodesByIatum struct {
 	Iata             string             `json:"iata"`
 	NodeID           uuid.UUID          `json:"node_id"`
@@ -104,6 +114,14 @@ type MvTopObserversByIatum struct {
 	ObserverType     *string            `json:"observer_type"`
 	Bucket           pgtype.Timestamptz `json:"bucket"`
 	ObservationCount int64              `json:"observation_count"`
+}
+
+type MvTopTalkersByIatum struct {
+	Iata         string             `json:"iata"`
+	SenderName   *string            `json:"sender_name"`
+	Bucket       pgtype.Timestamptz `json:"bucket"`
+	MessageCount int64              `json:"message_count"`
+	LastSent     interface{}        `json:"last_sent"`
 }
 
 type Node struct {

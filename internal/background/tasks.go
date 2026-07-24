@@ -30,6 +30,12 @@ func ViewRefreshTask(store *db.Store, interval time.Duration) Task {
 			if err := store.RefreshPayloadBreakdown(ctx); err != nil {
 				log.Printf("background[view_refresh]: payload breakdown: %v", err)
 			}
+			if err := store.RefreshTopTalkers(ctx); err != nil {
+				log.Printf("background[view_refresh]: top talkers: %v", err)
+			}
+			if err := store.RefreshTopAdvertisers(ctx); err != nil {
+				log.Printf("background[view_refresh]: top advertisers: %v", err)
+			}
 			if err := store.RefreshRadioPresets(ctx); err != nil {
 				log.Printf("background[view_refresh]: radio presets: %v", err)
 			}

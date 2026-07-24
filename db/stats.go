@@ -134,8 +134,9 @@ func (s *Store) GetStatsTopAdvertisers(ctx context.Context, iatas []string, sinc
 	if since.IsZero() {
 		since = time.Now().Add(-24 * time.Hour)
 	}
+	interval := time.Since(since)
 	rows, err := s.q.GetStatsTopAdvertisers(ctx, sqlc.GetStatsTopAdvertisersParams{
-		HeardAt: pgtype.Timestamptz{Time: since, Valid: true},
+		Column1: pgtype.Interval{Microseconds: int64(interval.Hours()) * 3600 * 1e6, Valid: true},
 		Column2: iatas,
 		Limit:   limit,
 	})
@@ -144,16 +145,14 @@ func (s *Store) GetStatsTopAdvertisers(ctx context.Context, iatas []string, sinc
 	}
 	items := make([]api.TopAdvertiser, 0, len(rows))
 	for _, v := range rows {
-		iata, _ := v.Iata.(string)
-		lastHeard, _ := v.LastHeard.(pgtype.Timestamptz)
 		items = append(items, api.TopAdvertiser{
 			NodeID:       v.ID,
 			NodeName:     v.Name,
 			NodeType:     v.NodeType,
 			NodeTypeName: api.NodeTypeName(v.NodeType),
-			IATA:         iata,
+			IATA:         v.Iata,
 			AdvertCount:  v.AdvertCount,
-			LastHeard:    lastHeard.Time.UnixMilli(),
+			LastHeard:    v.LastHeard.Time.UnixMilli(),
 		})
 	}
 	return items, nil
@@ -163,8 +162,9 @@ func (s *Store) GetStatsTopTalkers(ctx context.Context, iatas []string, since ti
 	if since.IsZero() {
 		since = time.Now().Add(-24 * time.Hour)
 	}
+	interval := time.Since(since)
 	rows, err := s.q.GetStatsTopTalkers(ctx, sqlc.GetStatsTopTalkersParams{
-		SentAt:  pgtype.Timestamptz{Time: since, Valid: true},
+		Column1: pgtype.Interval{Microseconds: int64(interval.Hours()) * 3600 * 1e6, Valid: true},
 		Column2: iatas,
 		Limit:   limit,
 	})
@@ -177,11 +177,10 @@ func (s *Store) GetStatsTopTalkers(ctx context.Context, iatas []string, since ti
 		if v.SenderName != nil {
 			senderName = *v.SenderName
 		}
-		lastSent, _ := v.LastSent.(pgtype.Timestamptz)
 		items = append(items, api.TopTalker{
 			SenderName:   senderName,
 			MessageCount: v.MessageCount,
-			LastSent:     lastSent.Time.UnixMilli(),
+			LastSent:     v.LastSent.Time.UnixMilli(),
 		})
 	}
 	return items, nil
@@ -250,6 +249,14 @@ func (s *Store) RefreshTopNodes(ctx context.Context) error {
 
 func (s *Store) RefreshPayloadBreakdown(ctx context.Context) error {
 	return s.q.RefreshPayloadBreakdown(ctx)
+}
+
+func (s *Store) RefreshTopTalkers(ctx context.Context) error {
+	return s.q.RefreshTopTalkers(ctx)
+}
+
+func (s *Store) RefreshTopAdvertisers(ctx context.Context) error {
+	return s.q.RefreshTopAdvertisers(ctx)
 }
 
 func (s *Store) RefreshTopObservers(ctx context.Context) error {

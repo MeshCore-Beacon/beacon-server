@@ -1023,6 +1023,20 @@ func (mr *MockQuerierMockRecorder) RefreshRadioPresets(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RefreshRadioPresets", reflect.TypeOf((*MockQuerier)(nil).RefreshRadioPresets), ctx)
 }
 
+// RefreshTopAdvertisers mocks base method.
+func (m *MockQuerier) RefreshTopAdvertisers(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RefreshTopAdvertisers", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RefreshTopAdvertisers indicates an expected call of RefreshTopAdvertisers.
+func (mr *MockQuerierMockRecorder) RefreshTopAdvertisers(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RefreshTopAdvertisers", reflect.TypeOf((*MockQuerier)(nil).RefreshTopAdvertisers), ctx)
+}
+
 // RefreshTopNodes mocks base method.
 func (m *MockQuerier) RefreshTopNodes(ctx context.Context) error {
 	m.ctrl.T.Helper()
@@ -1049,6 +1063,20 @@ func (m *MockQuerier) RefreshTopObservers(ctx context.Context) error {
 func (mr *MockQuerierMockRecorder) RefreshTopObservers(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RefreshTopObservers", reflect.TypeOf((*MockQuerier)(nil).RefreshTopObservers), ctx)
+}
+
+// RefreshTopTalkers mocks base method.
+func (m *MockQuerier) RefreshTopTalkers(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RefreshTopTalkers", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RefreshTopTalkers indicates an expected call of RefreshTopTalkers.
+func (mr *MockQuerierMockRecorder) RefreshTopTalkers(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RefreshTopTalkers", reflect.TypeOf((*MockQuerier)(nil).RefreshTopTalkers), ctx)
 }
 
 // ResolvePathHashesP1 mocks base method.

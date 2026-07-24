@@ -861,48 +861,31 @@ ORDER BY observation_count DESC
 LIMIT $3;
 
 -- name: GetStatsTopAdvertisers :many
--- Returns the top N nodes by distinct ADVERT packet count for the given window and IATA.
--- COUNT(DISTINCT p.packet_hash) rather than COUNT(*): the same advert broadcast is commonly
--- heard by more than one observer, and each hearing is its own packet_observations row --
--- this counts adverts sent, not adverts heard.
+-- Top N advertisers in the window, summed from the hourly buckets.
 SELECT
-  n.id,
-  n.name,
-  n.node_type,
-  COUNT(DISTINCT p.packet_hash) AS advert_count,
-  MAX(po.heard_at) AS last_heard,
-  COALESCE((
-    SELECT po2.iata FROM packet_observations po2
-    JOIN packets p2 ON p2.packet_hash = po2.packet_hash
-    WHERE p2.origin_pubkey = n.public_key AND p2.payload_type = 4
-    ORDER BY po2.heard_at DESC LIMIT 1
-  ), '') AS iata
-FROM packets p
-JOIN packet_observations po ON po.packet_hash = p.packet_hash
-JOIN nodes n ON n.public_key = p.origin_pubkey
-WHERE p.payload_type = 4 -- ADVERT
-  AND po.heard_at > $1
-  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR po.iata = ANY($2::bpchar[]))
-GROUP BY n.id
+  node_id AS id,
+  name,
+  node_type,
+  COALESCE(SUM(advert_count), 0)::bigint AS advert_count,
+  MAX(last_heard)::timestamptz AS last_heard,
+  COALESCE(MAX(iata), '')::bpchar AS iata
+FROM mv_top_advertisers_by_iata
+WHERE bucket >= NOW() - $1::interval
+  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR iata = ANY($2::bpchar[]))
+GROUP BY node_id, name, node_type
 ORDER BY advert_count DESC
 LIMIT $3;
 
 -- name: GetStatsTopTalkers :many
--- Returns the top N companion names by decrypted channel message count for the given
--- window and IATA. Grouped by sender_name as decrypted from the message itself, not by
--- node identity -- distinct pubkeys sharing a display name are counted together, and a
--- pubkey that changes its display name is split across rows. COUNT(DISTINCT cm.id) guards
--- against the same message being multiplied by the packet_observations join.
+-- Top N talkers (by decrypted sender_name) in the window, summed from the hourly buckets.
 SELECT
-  cm.sender_name,
-  COUNT(DISTINCT cm.id) AS message_count,
-  MAX(cm.sent_at) AS last_sent
-FROM channel_messages cm
-JOIN packet_observations po ON po.packet_hash = cm.packet_hash
-WHERE cm.sender_name IS NOT NULL
-  AND cm.sent_at > $1
-  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR po.iata = ANY($2::bpchar[]))
-GROUP BY cm.sender_name
+  sender_name,
+  COALESCE(SUM(message_count), 0)::bigint AS message_count,
+  MAX(last_sent)::timestamptz AS last_sent
+FROM mv_top_talkers_by_iata
+WHERE bucket >= NOW() - $1::interval
+  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR iata = ANY($2::bpchar[]))
+GROUP BY sender_name
 ORDER BY message_count DESC
 LIMIT $3;
 
@@ -1143,6 +1126,12 @@ REFRESH MATERIALIZED VIEW CONCURRENTLY mv_top_observers_by_iata;
 
 -- name: RefreshPayloadBreakdown :exec
 REFRESH MATERIALIZED VIEW CONCURRENTLY mv_payload_breakdown_by_iata;
+
+-- name: RefreshTopTalkers :exec
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_top_talkers_by_iata;
+
+-- name: RefreshTopAdvertisers :exec
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_top_advertisers_by_iata;
 
 -- name: RefreshRadioPresets :exec
 REFRESH MATERIALIZED VIEW CONCURRENTLY mv_radio_presets;
