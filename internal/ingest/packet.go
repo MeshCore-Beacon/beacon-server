@@ -54,6 +54,7 @@ type InsertObservationParams struct {
 	BandwidthKHz      float32
 	CodingRate        int16
 	SourceBroker      string
+	PayloadType       int16
 }
 
 // RadioSettings holds the radio configuration for an observer, populated from
@@ -770,6 +771,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		BandwidthKHz:      radio.BWKHz,
 		CodingRate:        radio.CR,
 		SourceBroker:      w.cfg.BrokerName,
+		PayloadType:       int16(packet.PayloadType()),
 	}
 	inserted, err := w.db.InsertObservation(ctx, oParams)
 	if err != nil {

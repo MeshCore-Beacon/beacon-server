@@ -60,8 +60,8 @@ type Querier interface {
 	// STATS
 	// ============================================================
 	GetStatsOverview(ctx context.Context, dollar_1 []string) (GetStatsOverviewRow, error)
-	// Returns observation counts grouped by payload type for the given window and IATA.
-	GetStatsPayloadBreakdown(ctx context.Context, arg GetStatsPayloadBreakdownParams) ([]GetStatsPayloadBreakdownRow, error)
+	// Payload-type counts for the IATA, from the precomputed view.
+	GetStatsPayloadBreakdown(ctx context.Context, dollar_1 []string) ([]GetStatsPayloadBreakdownRow, error)
 	// Returns the top N nodes by distinct ADVERT packet count for the given window and IATA.
 	// COUNT(DISTINCT p.packet_hash) rather than COUNT(*): the same advert broadcast is commonly
 	// heard by more than one observer, and each hearing is its own packet_observations row --
@@ -156,6 +156,7 @@ type Querier interface {
 	// that IATA, or where any hop's prefix_4 is now ambiguous (matches >1 node).
 	ReconfirmRoutes(ctx context.Context) error
 	RefreshHourlyStats(ctx context.Context) error
+	RefreshPayloadBreakdown(ctx context.Context) error
 	RefreshRadioPresets(ctx context.Context) error
 	RefreshTopNodes(ctx context.Context) error
 	// ============================================================

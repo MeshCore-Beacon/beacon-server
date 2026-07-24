@@ -74,6 +74,12 @@ type MvHourlyIataStat struct {
 	ActiveObservers  int64              `json:"active_observers"`
 }
 
+type MvPayloadBreakdownByIatum struct {
+	Iata        string `json:"iata"`
+	PayloadType *int16 `json:"payload_type"`
+	Count       int64  `json:"count"`
+}
+
 type MvRadioPreset struct {
 	Preset     string `json:"preset"`
 	Iata       string `json:"iata"`
@@ -250,6 +256,7 @@ type PacketObservation struct {
 	BandwidthKhz      *float32           `json:"bandwidth_khz"`
 	CodingRate        *int16             `json:"coding_rate"`
 	SourceBroker      *string            `json:"source_broker"`
+	PayloadType       *int16             `json:"payload_type"`
 }
 
 type Region struct {

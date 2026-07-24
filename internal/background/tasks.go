@@ -24,6 +24,9 @@ func ViewRefreshTask(store *db.Store, interval time.Duration) Task {
 			if err := store.RefreshTopNodes(ctx); err != nil {
 				log.Printf("background[view_refresh]: top nodes: %v", err)
 			}
+			if err := store.RefreshPayloadBreakdown(ctx); err != nil {
+				log.Printf("background[view_refresh]: payload breakdown: %v", err)
+			}
 			if err := store.RefreshRadioPresets(ctx); err != nil {
 				log.Printf("background[view_refresh]: radio presets: %v", err)
 			}

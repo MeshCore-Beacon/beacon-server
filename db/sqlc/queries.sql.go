@@ -1197,29 +1197,22 @@ func (q *Queries) GetStatsOverview(ctx context.Context, dollar_1 []string) (GetS
 
 const getStatsPayloadBreakdown = `-- name: GetStatsPayloadBreakdown :many
 SELECT
-  p.payload_type,
-  COUNT(*) AS count
-FROM packet_observations po
-JOIN packets p ON p.packet_hash = po.packet_hash
-WHERE po.heard_at > $1
-  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR po.iata = ANY($2::bpchar[]))
-GROUP BY p.payload_type
+  payload_type,
+  SUM(count)::bigint AS count
+FROM mv_payload_breakdown_by_iata
+WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR iata = ANY($1::bpchar[]))
+GROUP BY payload_type
 ORDER BY count DESC
 `
 
-type GetStatsPayloadBreakdownParams struct {
-	HeardAt pgtype.Timestamptz `json:"heard_at"`
-	Column2 []string           `json:"column_2"`
-}
-
 type GetStatsPayloadBreakdownRow struct {
-	PayloadType int16 `json:"payload_type"`
-	Count       int64 `json:"count"`
+	PayloadType *int16 `json:"payload_type"`
+	Count       int64  `json:"count"`
 }
 
-// Returns observation counts grouped by payload type for the given window and IATA.
-func (q *Queries) GetStatsPayloadBreakdown(ctx context.Context, arg GetStatsPayloadBreakdownParams) ([]GetStatsPayloadBreakdownRow, error) {
-	rows, err := q.db.Query(ctx, getStatsPayloadBreakdown, arg.HeardAt, arg.Column2)
+// Payload-type counts for the IATA, from the precomputed view.
+func (q *Queries) GetStatsPayloadBreakdown(ctx context.Context, dollar_1 []string) ([]GetStatsPayloadBreakdownRow, error) {
+	rows, err := q.db.Query(ctx, getStatsPayloadBreakdown, dollar_1)
 	if err != nil {
 		return nil, err
 	}
@@ -1551,12 +1544,13 @@ INSERT INTO packet_observations (
   spread_factor,
   bandwidth_khz,
   coding_rate,
-  source_broker
+  source_broker,
+  payload_type
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
 )
 ON CONFLICT (packet_hash, observer_id) DO NOTHING
-RETURNING id, packet_hash, observer_id, iata, heard_at, path_length_byte, hash_size, hop_count, path_bytes, rssi, snr, propagation_time_ms, radio_freq_mhz, spread_factor, bandwidth_khz, coding_rate, source_broker
+RETURNING id, packet_hash, observer_id, iata, heard_at, path_length_byte, hash_size, hop_count, path_bytes, rssi, snr, propagation_time_ms, radio_freq_mhz, spread_factor, bandwidth_khz, coding_rate, source_broker, payload_type
 `
 
 type InsertObservationParams struct {
@@ -1576,6 +1570,7 @@ type InsertObservationParams struct {
 	BandwidthKhz      *float32           `json:"bandwidth_khz"`
 	CodingRate        *int16             `json:"coding_rate"`
 	SourceBroker      *string            `json:"source_broker"`
+	PayloadType       *int16             `json:"payload_type"`
 }
 
 // ============================================================
@@ -1599,6 +1594,7 @@ func (q *Queries) InsertObservation(ctx context.Context, arg InsertObservationPa
 		arg.BandwidthKhz,
 		arg.CodingRate,
 		arg.SourceBroker,
+		arg.PayloadType,
 	)
 	var i PacketObservation
 	err := row.Scan(
@@ -1619,6 +1615,7 @@ func (q *Queries) InsertObservation(ctx context.Context, arg InsertObservationPa
 		&i.BandwidthKhz,
 		&i.CodingRate,
 		&i.SourceBroker,
+		&i.PayloadType,
 	)
 	return i, err
 }
@@ -2293,7 +2290,7 @@ func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNod
 }
 
 const listObservationsForPacket = `-- name: ListObservationsForPacket :many
-SELECT po.id, po.packet_hash, po.observer_id, po.iata, po.heard_at, po.path_length_byte, po.hash_size, po.hop_count, po.path_bytes, po.rssi, po.snr, po.propagation_time_ms, po.radio_freq_mhz, po.spread_factor, po.bandwidth_khz, po.coding_rate, po.source_broker, o.display_name AS observer_name
+SELECT po.id, po.packet_hash, po.observer_id, po.iata, po.heard_at, po.path_length_byte, po.hash_size, po.hop_count, po.path_bytes, po.rssi, po.snr, po.propagation_time_ms, po.radio_freq_mhz, po.spread_factor, po.bandwidth_khz, po.coding_rate, po.source_broker, po.payload_type, o.display_name AS observer_name
 FROM packet_observations po
 LEFT JOIN observers o ON o.id = po.observer_id
 WHERE po.packet_hash = $1
@@ -2318,6 +2315,7 @@ type ListObservationsForPacketRow struct {
 	BandwidthKhz      *float32           `json:"bandwidth_khz"`
 	CodingRate        *int16             `json:"coding_rate"`
 	SourceBroker      *string            `json:"source_broker"`
+	PayloadType       *int16             `json:"payload_type"`
 	ObserverName      *string            `json:"observer_name"`
 }
 
@@ -2348,6 +2346,7 @@ func (q *Queries) ListObservationsForPacket(ctx context.Context, packetHash []by
 			&i.BandwidthKhz,
 			&i.CodingRate,
 			&i.SourceBroker,
+			&i.PayloadType,
 			&i.ObserverName,
 		); err != nil {
 			return nil, err
@@ -3070,6 +3069,15 @@ REFRESH MATERIALIZED VIEW CONCURRENTLY mv_hourly_iata_stats
 
 func (q *Queries) RefreshHourlyStats(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, refreshHourlyStats)
+	return err
+}
+
+const refreshPayloadBreakdown = `-- name: RefreshPayloadBreakdown :exec
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_payload_breakdown_by_iata
+`
+
+func (q *Queries) RefreshPayloadBreakdown(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, refreshPayloadBreakdown)
 	return err
 }
 

@@ -505,6 +505,7 @@ func (s *Store) InsertObservation(ctx context.Context, o ingest.InsertObservatio
 		BandwidthKhz:      &o.BandwidthKHz,
 		CodingRate:        &o.CodingRate,
 		SourceBroker:      &o.SourceBroker,
+		PayloadType:       &o.PayloadType,
 	}
 	row, err := s.q.InsertObservation(ctx, params)
 	if errors.Is(err, pgx.ErrNoRows) {

@@ -51,22 +51,20 @@ func (s *Store) GetStatsObservations(ctx context.Context, iatas []string, since 
 	return points, nil
 }
 
-func (s *Store) GetStatsPayloadBreakdown(ctx context.Context, iatas []string, since time.Time) ([]api.PayloadBreakdownItem, error) {
-	if since.IsZero() {
-		since = time.Now().Add(-24 * time.Hour)
-	}
-	rows, err := s.q.GetStatsPayloadBreakdown(ctx, sqlc.GetStatsPayloadBreakdownParams{
-		HeardAt: pgtype.Timestamptz{Time: since, Valid: true},
-		Column2: iatas,
-	})
+// since is unused: the view is a rolling 7-day window refreshed on a timer.
+func (s *Store) GetStatsPayloadBreakdown(ctx context.Context, iatas []string, _ time.Time) ([]api.PayloadBreakdownItem, error) {
+	rows, err := s.q.GetStatsPayloadBreakdown(ctx, iatas)
 	if err != nil {
 		return nil, err
 	}
 	items := make([]api.PayloadBreakdownItem, 0, len(rows))
 	for _, v := range rows {
+		if v.PayloadType == nil {
+			continue
+		}
 		items = append(items, api.PayloadBreakdownItem{
-			PayloadType:     v.PayloadType,
-			PayloadTypeName: api.PayloadTypeName(v.PayloadType),
+			PayloadType:     *v.PayloadType,
+			PayloadTypeName: api.PayloadTypeName(*v.PayloadType),
 			Count:           v.Count,
 		})
 	}
@@ -242,6 +240,10 @@ func (s *Store) RefreshHourlyStats(ctx context.Context) error {
 
 func (s *Store) RefreshTopNodes(ctx context.Context) error {
 	return s.q.RefreshTopNodes(ctx)
+}
+
+func (s *Store) RefreshPayloadBreakdown(ctx context.Context) error {
+	return s.q.RefreshPayloadBreakdown(ctx)
 }
 
 func (s *Store) RefreshRadioPresets(ctx context.Context) error {

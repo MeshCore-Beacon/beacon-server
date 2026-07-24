@@ -523,9 +523,10 @@ INSERT INTO packet_observations (
   spread_factor,
   bandwidth_khz,
   coding_rate,
-  source_broker
+  source_broker,
+  payload_type
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
 )
 ON CONFLICT (packet_hash, observer_id) DO NOTHING
 RETURNING *;
@@ -821,15 +822,13 @@ ORDER BY observation_count DESC
 LIMIT $2;
 
 -- name: GetStatsPayloadBreakdown :many
--- Returns observation counts grouped by payload type for the given window and IATA.
+-- Payload-type counts for the IATA, from the precomputed view.
 SELECT
-  p.payload_type,
-  COUNT(*) AS count
-FROM packet_observations po
-JOIN packets p ON p.packet_hash = po.packet_hash
-WHERE po.heard_at > $1
-  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR po.iata = ANY($2::bpchar[]))
-GROUP BY p.payload_type
+  payload_type,
+  SUM(count)::bigint AS count
+FROM mv_payload_breakdown_by_iata
+WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR iata = ANY($1::bpchar[]))
+GROUP BY payload_type
 ORDER BY count DESC;
 
 -- name: GetStatsNodeTypes :many
@@ -1140,6 +1139,9 @@ REFRESH MATERIALIZED VIEW CONCURRENTLY mv_hourly_iata_stats;
 
 -- name: RefreshTopNodes :exec
 REFRESH MATERIALIZED VIEW CONCURRENTLY mv_top_nodes_by_iata;
+
+-- name: RefreshPayloadBreakdown :exec
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_payload_breakdown_by_iata;
 
 -- name: RefreshRadioPresets :exec
 REFRESH MATERIALIZED VIEW CONCURRENTLY mv_radio_presets;
