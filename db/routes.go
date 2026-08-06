@@ -5,7 +5,9 @@ package db
 
 import (
 	"context"
+	"crypto/md5"
 	"encoding/hex"
+	"strings"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
@@ -14,12 +16,24 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+// routePathKey is the route's identity digest: md5 over the comma-joined
+// node UUIDs, matching Postgres's decode(md5(array_to_string(node_ids, ',')), 'hex').
+func routePathKey(nodeIDs []uuid.UUID) []byte {
+	parts := make([]string, len(nodeIDs))
+	for i, id := range nodeIDs {
+		parts[i] = id.String()
+	}
+	sum := md5.Sum([]byte(strings.Join(parts, ",")))
+	return sum[:]
+}
+
 func (s *Store) UpsertKnownRoute(ctx context.Context, nodeIDs []uuid.UUID, hashPrefix [][]byte, iata string, hopCount int32) error {
 	return s.q.UpsertKnownRoute(ctx, sqlc.UpsertKnownRouteParams{
+		PathKey:    routePathKey(nodeIDs),
 		NodeIds:    nodeIDs,
 		HashPrefix: hashPrefix,
 		Iata:       iata,
-		HopCount:   int32(hopCount),
+		HopCount:   hopCount,
 	})
 }
 
@@ -28,7 +42,7 @@ func (s *Store) ListKnownRoutes(ctx context.Context, iata string, hopCount int32
 	if !cursor.IsZero() {
 		cursorTS = pgtype.Timestamptz{Time: cursor, Valid: true}
 	}
-	rows, err := s.q.ListKnownRoutes(ctx, sqlc.ListKnownRoutesParams{
+	sqlRows, err := s.q.ListKnownRoutes(ctx, sqlc.ListKnownRoutesParams{
 		Column1: iata,
 		Column2: hopCount,
 		Column3: cursorTS,
@@ -36,6 +50,10 @@ func (s *Store) ListKnownRoutes(ctx context.Context, iata string, hopCount int32
 	})
 	if err != nil {
 		return nil, err
+	}
+	rows := make([]knownRouteRow, len(sqlRows))
+	for i, r := range sqlRows {
+		rows[i] = knownRouteRow{ID: r.ID, NodeIds: r.NodeIds, HashPrefix: r.HashPrefix, Iata: r.Iata, HopCount: r.HopCount, FirstSeen: r.FirstSeen, LastSeen: r.LastSeen, ObservationCount: r.ObservationCount}
 	}
 	ids := collectNodeIDs(rows)
 	nodes, err := s.GetNodesByIDs(ctx, ids)
@@ -54,13 +72,17 @@ func (s *Store) SearchKnownRoutes(ctx context.Context, iata, fromHash, toHash st
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.q.SearchKnownRoutes(ctx, sqlc.SearchKnownRoutesParams{
+	sqlRows, err := s.q.SearchKnownRoutes(ctx, sqlc.SearchKnownRoutesParams{
 		Iata:    iata,
 		Column2: fromBytes,
 		Column3: toBytes,
 	})
 	if err != nil {
 		return nil, err
+	}
+	rows := make([]knownRouteRow, len(sqlRows))
+	for i, r := range sqlRows {
+		rows[i] = knownRouteRow{ID: r.ID, NodeIds: r.NodeIds, HashPrefix: r.HashPrefix, Iata: r.Iata, HopCount: r.HopCount, FirstSeen: r.FirstSeen, LastSeen: r.LastSeen, ObservationCount: r.ObservationCount}
 	}
 	ids := collectNodeIDs(rows)
 	nodes, err := s.GetNodesByIDs(ctx, ids)
@@ -109,12 +131,16 @@ func (s *Store) SearchKnownRoutes(ctx context.Context, iata, fromHash, toHash st
 }
 
 func (s *Store) GetKnownRoutesByNode(ctx context.Context, iata string, nodeID uuid.UUID) ([]api.KnownRoute, error) {
-	rows, err := s.q.GetKnownRoutesByNode(ctx, sqlc.GetKnownRoutesByNodeParams{
+	sqlRows, err := s.q.GetKnownRoutesByNode(ctx, sqlc.GetKnownRoutesByNodeParams{
 		Iata:    iata,
 		Column2: nodeID,
 	})
 	if err != nil {
 		return nil, err
+	}
+	rows := make([]knownRouteRow, len(sqlRows))
+	for i, r := range sqlRows {
+		rows[i] = knownRouteRow{ID: r.ID, NodeIds: r.NodeIds, HashPrefix: r.HashPrefix, Iata: r.Iata, HopCount: r.HopCount, FirstSeen: r.FirstSeen, LastSeen: r.LastSeen, ObservationCount: r.ObservationCount}
 	}
 	ids := collectNodeIDs(rows)
 	nodes, err := s.GetNodesByIDs(ctx, ids)
@@ -260,8 +286,20 @@ func (s *Store) SearchCrossIATARoutes(ctx context.Context, fromHash, fromIATA, t
 	return results, nil
 }
 
-func (s *Store) ReconfirmRoutes(ctx context.Context) error {
-	return s.q.ReconfirmRoutes(ctx)
+// ReconfirmRoutes checks the batchSize least-recently-reconfirmed routes,
+// deleting stale or ambiguous ones and stamping the survivors.
+func (s *Store) ReconfirmRoutes(ctx context.Context, batchSize int32) error {
+	return s.q.ReconfirmRoutes(ctx, batchSize)
+}
+
+// DeleteOldRoutes prunes routes per the retention rule: unconditionally past
+// retentionCutoff, and past graceCutoff when observed fewer than minObservations times.
+func (s *Store) DeleteOldRoutes(ctx context.Context, retentionCutoff time.Time, minObservations int64, graceCutoff time.Time) error {
+	return s.q.DeleteOldRoutes(ctx, sqlc.DeleteOldRoutesParams{
+		LastSeen:         pgtype.Timestamptz{Time: retentionCutoff, Valid: true},
+		ObservationCount: minObservations,
+		LastSeen_2:       pgtype.Timestamptz{Time: graceCutoff, Valid: true},
+	})
 }
 
 // extractFromNode returns the portion of a route starting at the given node.
@@ -274,7 +312,20 @@ func extractFromNode(hops []api.RouteHop, nodeID uuid.UUID) []api.RouteHop {
 	return hops
 }
 
-func toKnownRoutes(rows []sqlc.KnownRoute, nodes map[uuid.UUID]*api.ResolvedNode) []api.KnownRoute {
+// knownRouteRow normalizes the per-query sqlc row structs (identical
+// columns, distinct generated types) so the helpers below share one body.
+type knownRouteRow struct {
+	ID               int64
+	NodeIds          []uuid.UUID
+	HashPrefix       [][]byte
+	Iata             string
+	HopCount         int32
+	FirstSeen        pgtype.Timestamptz
+	LastSeen         pgtype.Timestamptz
+	ObservationCount int64
+}
+
+func toKnownRoutes(rows []knownRouteRow, nodes map[uuid.UUID]*api.ResolvedNode) []api.KnownRoute {
 	items := make([]api.KnownRoute, 0, len(rows))
 	for _, r := range rows {
 		hops := make([]api.RouteHop, 0, len(r.NodeIds))
@@ -301,7 +352,7 @@ func toKnownRoutes(rows []sqlc.KnownRoute, nodes map[uuid.UUID]*api.ResolvedNode
 	return items
 }
 
-func collectNodeIDs(rows []sqlc.KnownRoute) []uuid.UUID {
+func collectNodeIDs(rows []knownRouteRow) []uuid.UUID {
 	seen := make(map[uuid.UUID]struct{})
 	var ids []uuid.UUID
 	for _, r := range rows {
