@@ -141,3 +141,16 @@ func TestResolvedConfig_String(t *testing.T) {
 		t.Error("expected maxConnsPerIP in string")
 	}
 }
+
+func TestResolve_RouteDefaults(t *testing.T) {
+	r := Resolve(&Config{})
+	if r.RouteRetention != 336*time.Hour {
+		t.Errorf("RouteRetention = %s, want 336h", r.RouteRetention)
+	}
+	if r.RouteGrace != 168*time.Hour {
+		t.Errorf("RouteGrace = %s, want 168h", r.RouteGrace)
+	}
+	if r.RouteMinObservations != 3 {
+		t.Errorf("RouteMinObservations = %d, want 3", r.RouteMinObservations)
+	}
+}

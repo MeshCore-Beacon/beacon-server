@@ -22,6 +22,7 @@ type Config struct {
 	Telemetry   TelemetryConfig       `yaml:"telemetry"`
 	WebSocket   WebSocketConfig       `yaml:"websocket"`
 	Packets     PacketsConfig         `yaml:"packets"`
+	Routes      RoutesConfig          `yaml:"routes"`
 	Ingest      IngestFilterConfig    `yaml:"ingest"`
 	Scopes      []ScopeConfig         `yaml:"scopes"`
 	Cache       CacheConfig           `yaml:"cache"`
@@ -33,13 +34,16 @@ type Config struct {
 
 // ResolvedConfig holds all runtime configuration with defaults applied.
 type ResolvedConfig struct {
-	TelemetryResolution time.Duration
-	TelemetryRetention  time.Duration
-	PacketRetention     time.Duration
-	MaxConnsPerIP       int
-	ViewRefreshInterval time.Duration
-	ReconfirmInterval   time.Duration
-	CleanupInterval     time.Duration
+	TelemetryResolution  time.Duration
+	TelemetryRetention   time.Duration
+	PacketRetention      time.Duration
+	RouteRetention       time.Duration
+	RouteGrace           time.Duration
+	RouteMinObservations int
+	MaxConnsPerIP        int
+	ViewRefreshInterval  time.Duration
+	ReconfirmInterval    time.Duration
+	CleanupInterval      time.Duration
 
 	PresenceFlushInterval time.Duration
 	PresencePacketTTL     time.Duration
@@ -177,6 +181,19 @@ type PacketsConfig struct {
 	Retention duration `yaml:"retention"`
 }
 
+// RoutesConfig controls known-route retention behaviour.
+type RoutesConfig struct {
+	// Retention is how long a route is kept after it was last observed.
+	// Defaults to 336h (14 days) if not set.
+	Retention duration `yaml:"retention"`
+	// Grace is how long a route observed fewer than MinObservations times is
+	// kept. Defaults to 168h (7 days) if not set.
+	Grace duration `yaml:"grace"`
+	// MinObservations is the observation count below which Grace applies
+	// instead of Retention. Defaults to 3 if not set.
+	MinObservations int `yaml:"min_observations"`
+}
+
 // NodesConfig controls node-derived signal thresholds.
 type NodesConfig struct {
 	// ClockDriftThreshold is the |device clock - server clock| magnitude, measured from a
@@ -299,13 +316,16 @@ func Load(path string) (*Config, error) {
 // Resolve returns a ResolvedConfig with defaults applied for any zero values.
 func Resolve(cfg *Config) ResolvedConfig {
 	r := ResolvedConfig{
-		TelemetryResolution: cfg.Telemetry.Resolution.Duration,
-		TelemetryRetention:  cfg.Telemetry.Retention.Duration,
-		PacketRetention:     cfg.Packets.Retention.Duration,
-		MaxConnsPerIP:       cfg.WebSocket.MaxConnectionsPerIP,
-		ViewRefreshInterval: cfg.Background.ViewRefresh.Duration,
-		ReconfirmInterval:   cfg.Background.Reconfirm.Duration,
-		CleanupInterval:     cfg.Background.Cleanup.Duration,
+		TelemetryResolution:  cfg.Telemetry.Resolution.Duration,
+		TelemetryRetention:   cfg.Telemetry.Retention.Duration,
+		PacketRetention:      cfg.Packets.Retention.Duration,
+		RouteRetention:       cfg.Routes.Retention.Duration,
+		RouteGrace:           cfg.Routes.Grace.Duration,
+		RouteMinObservations: cfg.Routes.MinObservations,
+		MaxConnsPerIP:        cfg.WebSocket.MaxConnectionsPerIP,
+		ViewRefreshInterval:  cfg.Background.ViewRefresh.Duration,
+		ReconfirmInterval:    cfg.Background.Reconfirm.Duration,
+		CleanupInterval:      cfg.Background.Cleanup.Duration,
 
 		PresenceFlushInterval: cfg.Presence.FlushInterval.Duration,
 		PresencePacketTTL:     cfg.Presence.PacketTTL.Duration,
@@ -322,6 +342,15 @@ func Resolve(cfg *Config) ResolvedConfig {
 	}
 	if r.PacketRetention == 0 {
 		r.PacketRetention = 30 * 24 * time.Hour
+	}
+	if r.RouteRetention == 0 {
+		r.RouteRetention = 14 * 24 * time.Hour
+	}
+	if r.RouteGrace == 0 {
+		r.RouteGrace = 7 * 24 * time.Hour
+	}
+	if r.RouteMinObservations == 0 {
+		r.RouteMinObservations = 3
 	}
 	if r.MaxConnsPerIP == 0 {
 		r.MaxConnsPerIP = 5
@@ -357,8 +386,8 @@ func Resolve(cfg *Config) ResolvedConfig {
 
 func (r ResolvedConfig) String() string {
 	return fmt.Sprintf(
-		"telemetryResolution=%s telemetryRetention=%s packetRetention=%s maxConnsPerIP=%d viewRefresh=%s reconfirm=%s cleanup=%s presenceFlush=%s presencePacketTTL=%s clockDriftThreshold=%s nodeStaleThreshold=%s nodeDeleteAfter=%s",
-		r.TelemetryResolution, r.TelemetryRetention, r.PacketRetention,
+		"telemetryResolution=%s telemetryRetention=%s packetRetention=%s routeRetention=%s routeGrace=%s routeMinObs=%d maxConnsPerIP=%d viewRefresh=%s reconfirm=%s cleanup=%s presenceFlush=%s presencePacketTTL=%s clockDriftThreshold=%s nodeStaleThreshold=%s nodeDeleteAfter=%s",
+		r.TelemetryResolution, r.TelemetryRetention, r.PacketRetention, r.RouteRetention, r.RouteGrace, r.RouteMinObservations,
 		r.MaxConnsPerIP, r.ViewRefreshInterval, r.ReconfirmInterval, r.CleanupInterval,
 		r.PresenceFlushInterval, r.PresencePacketTTL, r.ClockDriftThreshold,
 		r.NodeStaleThreshold, r.NodeDeleteAfter,

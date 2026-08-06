@@ -75,6 +75,15 @@ telemetry:
 packets:
   retention: 720h   # 30 days
 
+# Routes are distilled packet history, so they normally outlive packets.retention
+# (e.g. packets 168h, routes 336h). grace must be shorter than retention, or the
+# min_observations early-cleanup never applies. No required relationship to
+# packets.retention -- set independently.
+routes:
+  retention: 336h   # 14 days
+  grace: 168h       # 7 days
+  min_observations: 3
+
 websocket:
   max_connections_per_ip: 5 # default: 5
 
