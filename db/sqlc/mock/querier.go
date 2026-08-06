@@ -85,6 +85,20 @@ func (mr *MockQuerierMockRecorder) DeleteOldPackets(ctx, lastHeardAt any) *gomoc
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldPackets", reflect.TypeOf((*MockQuerier)(nil).DeleteOldPackets), ctx, lastHeardAt)
 }
 
+// DeleteOldRoutes mocks base method.
+func (m *MockQuerier) DeleteOldRoutes(ctx context.Context, arg db.DeleteOldRoutesParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteOldRoutes", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteOldRoutes indicates an expected call of DeleteOldRoutes.
+func (mr *MockQuerierMockRecorder) DeleteOldRoutes(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldRoutes", reflect.TypeOf((*MockQuerier)(nil).DeleteOldRoutes), ctx, arg)
+}
+
 // DeleteOldTelemetry mocks base method.
 func (m *MockQuerier) DeleteOldTelemetry(ctx context.Context, reportedAt pgtype.Timestamptz) error {
 	m.ctrl.T.Helper()
@@ -189,10 +203,10 @@ func (mr *MockQuerierMockRecorder) GetIATABorder(ctx, iata any) *gomock.Call {
 }
 
 // GetKnownRoutesByNode mocks base method.
-func (m *MockQuerier) GetKnownRoutesByNode(ctx context.Context, arg db.GetKnownRoutesByNodeParams) ([]db.KnownRoute, error) {
+func (m *MockQuerier) GetKnownRoutesByNode(ctx context.Context, arg db.GetKnownRoutesByNodeParams) ([]db.GetKnownRoutesByNodeRow, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetKnownRoutesByNode", ctx, arg)
-	ret0, _ := ret[0].([]db.KnownRoute)
+	ret0, _ := ret[0].([]db.GetKnownRoutesByNodeRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -818,10 +832,10 @@ func (mr *MockQuerierMockRecorder) ListIATAs(ctx any) *gomock.Call {
 }
 
 // ListKnownRoutes mocks base method.
-func (m *MockQuerier) ListKnownRoutes(ctx context.Context, arg db.ListKnownRoutesParams) ([]db.KnownRoute, error) {
+func (m *MockQuerier) ListKnownRoutes(ctx context.Context, arg db.ListKnownRoutesParams) ([]db.ListKnownRoutesRow, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ListKnownRoutes", ctx, arg)
-	ret0, _ := ret[0].([]db.KnownRoute)
+	ret0, _ := ret[0].([]db.ListKnownRoutesRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -1027,17 +1041,17 @@ func (mr *MockQuerierMockRecorder) ReconfirmNeighbors(ctx any) *gomock.Call {
 }
 
 // ReconfirmRoutes mocks base method.
-func (m *MockQuerier) ReconfirmRoutes(ctx context.Context) error {
+func (m *MockQuerier) ReconfirmRoutes(ctx context.Context, limit int32) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ReconfirmRoutes", ctx)
+	ret := m.ctrl.Call(m, "ReconfirmRoutes", ctx, limit)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // ReconfirmRoutes indicates an expected call of ReconfirmRoutes.
-func (mr *MockQuerierMockRecorder) ReconfirmRoutes(ctx any) *gomock.Call {
+func (mr *MockQuerierMockRecorder) ReconfirmRoutes(ctx, limit any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReconfirmRoutes", reflect.TypeOf((*MockQuerier)(nil).ReconfirmRoutes), ctx)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReconfirmRoutes", reflect.TypeOf((*MockQuerier)(nil).ReconfirmRoutes), ctx, limit)
 }
 
 // RefreshHourlyStats mocks base method.
@@ -1199,10 +1213,10 @@ func (mr *MockQuerierMockRecorder) ResolvePathHashesP4(ctx, arg any) *gomock.Cal
 }
 
 // SearchKnownRoutes mocks base method.
-func (m *MockQuerier) SearchKnownRoutes(ctx context.Context, arg db.SearchKnownRoutesParams) ([]db.KnownRoute, error) {
+func (m *MockQuerier) SearchKnownRoutes(ctx context.Context, arg db.SearchKnownRoutesParams) ([]db.SearchKnownRoutesRow, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "SearchKnownRoutes", ctx, arg)
-	ret0, _ := ret[0].([]db.KnownRoute)
+	ret0, _ := ret[0].([]db.SearchKnownRoutesRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

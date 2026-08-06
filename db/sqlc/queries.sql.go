@@ -51,6 +51,25 @@ func (q *Queries) DeleteOldPackets(ctx context.Context, lastHeardAt pgtype.Times
 	return err
 }
 
+const deleteOldRoutes = `-- name: DeleteOldRoutes :exec
+DELETE FROM known_routes
+WHERE last_seen < $1
+   OR (observation_count < $2 AND last_seen < $3)
+`
+
+type DeleteOldRoutesParams struct {
+	LastSeen         pgtype.Timestamptz `json:"last_seen"`
+	ObservationCount int64              `json:"observation_count"`
+	LastSeen_2       pgtype.Timestamptz `json:"last_seen_2"`
+}
+
+// Deletes routes not observed since the retention cutoff ($1), and rarely-observed
+// routes (observation_count < $2) not observed since the grace cutoff ($3).
+func (q *Queries) DeleteOldRoutes(ctx context.Context, arg DeleteOldRoutesParams) error {
+	_, err := q.db.Exec(ctx, deleteOldRoutes, arg.LastSeen, arg.ObservationCount, arg.LastSeen_2)
+	return err
+}
+
 const deleteOldTelemetry = `-- name: DeleteOldTelemetry :exec
 DELETE FROM observer_telemetry WHERE reported_at < $1
 `
@@ -3219,31 +3238,59 @@ func (q *Queries) ReconfirmNeighbors(ctx context.Context) error {
 }
 
 const reconfirmRoutes = `-- name: ReconfirmRoutes :exec
-DELETE FROM known_routes kr
-WHERE EXISTS (
-    SELECT 1
-    FROM unnest(kr.node_ids) AS hop_node_id
-    WHERE NOT EXISTS (
-        SELECT 1 FROM node_short_ids ns
-        WHERE ns.node_id = hop_node_id
-          AND ns.iata = kr.iata
+WITH batch AS (
+    SELECT iata, path_key, node_ids, hash_prefix
+    FROM known_routes
+    ORDER BY last_reconfirmed_at
+    LIMIT $1
+),
+amb AS MATERIALIZED (
+    SELECT iata, 1 AS len, prefix_1 AS p FROM node_short_ids GROUP BY iata, prefix_1 HAVING COUNT(*) > 1
+    UNION ALL
+    SELECT iata, 2, prefix_2 FROM node_short_ids GROUP BY iata, prefix_2 HAVING COUNT(*) > 1
+    UNION ALL
+    SELECT iata, 3, prefix_3 FROM node_short_ids GROUP BY iata, prefix_3 HAVING COUNT(*) > 1
+    UNION ALL
+    SELECT iata, 4, prefix_4 FROM node_short_ids GROUP BY iata, prefix_4 HAVING COUNT(*) > 1
+),
+dead AS (
+    SELECT b.iata, b.path_key
+    FROM batch b
+    WHERE EXISTS (
+        SELECT 1
+        FROM unnest(b.node_ids) AS hop_node_id
+        WHERE NOT EXISTS (
+            SELECT 1 FROM node_short_ids ns
+            WHERE ns.node_id = hop_node_id
+              AND ns.iata = b.iata
+        )
     )
+    UNION
+    SELECT DISTINCT b.iata, b.path_key
+    FROM batch b
+    CROSS JOIN LATERAL unnest(b.hash_prefix) AS hp
+    JOIN amb a ON a.iata = b.iata AND a.len = length(hp) AND a.p = hp
+),
+deleted AS (
+    DELETE FROM known_routes kr
+    USING dead d
+    WHERE kr.iata = d.iata AND kr.path_key = d.path_key
 )
-OR EXISTS (
-    SELECT 1
-    FROM unnest(kr.hash_prefix) AS hop_prefix
-    WHERE (
-        SELECT COUNT(*) FROM node_short_ids ns
-        WHERE ns.iata = kr.iata
-          AND ns.prefix_4 = hop_prefix
-    ) > 1
-)
+UPDATE known_routes kr
+SET last_reconfirmed_at = NOW()
+FROM batch b
+WHERE kr.iata = b.iata AND kr.path_key = b.path_key
+  AND NOT EXISTS (
+      SELECT 1 FROM dead d
+      WHERE d.iata = b.iata AND d.path_key = b.path_key
+  )
 `
 
-// Delete known_routes where any hop node has departed from node_short_ids for
-// that IATA, or where any hop's prefix_4 is now ambiguous (matches >1 node).
-func (q *Queries) ReconfirmRoutes(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, reconfirmRoutes)
+// Checks the $1 least-recently-reconfirmed routes: deletes those with a departed
+// hop node or a hop prefix now matching >1 node in that IATA (length-aware:
+// 1/2/3/4-byte hop prefixes check prefix_1/2/3/4), and stamps the survivors.
+func (q *Queries) ReconfirmRoutes(ctx context.Context, limit int32) error {
+	_, err := q.db.Exec(ctx, reconfirmRoutes, limit)
 	return err
 }
 
@@ -3916,14 +3963,15 @@ func (q *Queries) UpsertIATADetails(ctx context.Context, arg UpsertIATADetailsPa
 
 const upsertKnownRoute = `-- name: UpsertKnownRoute :exec
 
-INSERT INTO known_routes (node_ids, hash_prefix, iata, hop_count)
-VALUES ($1, $2, $3, $4)
-ON CONFLICT (node_ids, iata) DO UPDATE SET
+INSERT INTO known_routes (path_key, node_ids, hash_prefix, iata, hop_count)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (iata, path_key) DO UPDATE SET
   last_seen = NOW(),
   observation_count = known_routes.observation_count + 1
 `
 
 type UpsertKnownRouteParams struct {
+	PathKey    []byte      `json:"path_key"`
 	NodeIds    []uuid.UUID `json:"node_ids"`
 	HashPrefix [][]byte    `json:"hash_prefix"`
 	Iata       string      `json:"iata"`
@@ -3933,11 +3981,11 @@ type UpsertKnownRouteParams struct {
 // ============================================================
 // ROUTES
 // ============================================================
-// Inserts or updates a known route (all hops resolved to high confidence).
-// node_ids and hash_prefix are ordered arrays of the resolved node UUIDs and
-// their hash bytes. last_seen is bumped on conflict.
+// Route identity is path_key, an md5 of node_ids computed by the caller.
+// On conflict, observation_count and last_seen are bumped.
 func (q *Queries) UpsertKnownRoute(ctx context.Context, arg UpsertKnownRouteParams) error {
 	_, err := q.db.Exec(ctx, upsertKnownRoute,
+		arg.PathKey,
 		arg.NodeIds,
 		arg.HashPrefix,
 		arg.Iata,
