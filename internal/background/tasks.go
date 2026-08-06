@@ -44,8 +44,8 @@ func ViewRefreshTask(store *db.Store, interval time.Duration) Task {
 	}
 }
 
-// CleanupTask returns a Task that prunes old telemetry, packet, and node rows.
-func CleanupTask(store *db.Store, telemetryRetention, packetRetention, nodeDeleteAfter, interval time.Duration) Task {
+// CleanupTask returns a Task that prunes old telemetry, packet, node, and route rows.
+func CleanupTask(store *db.Store, telemetryRetention, packetRetention, nodeDeleteAfter, routeRetention, routeGrace time.Duration, routeMinObservations int64, interval time.Duration) Task {
 	return Task{
 		Name:     "cleanup",
 		Interval: interval,
@@ -65,6 +65,10 @@ func CleanupTask(store *db.Store, telemetryRetention, packetRetention, nodeDelet
 			if err := store.DeleteOldTraceIATAs(ctx, cutoff); err != nil {
 				return err
 			}
+			now := time.Now()
+			if err := store.DeleteOldRoutes(ctx, now.Add(-routeRetention), routeMinObservations, now.Add(-routeGrace)); err != nil {
+				return err
+			}
 			if err := store.DeleteOldNodes(ctx, time.Now().Add(-nodeDeleteAfter)); err != nil {
 				return err
 			}
@@ -72,6 +76,10 @@ func CleanupTask(store *db.Store, telemetryRetention, packetRetention, nodeDelet
 		},
 	}
 }
+
+// reconfirmBatchSize bounds per-tick reconfirm work; at hourly ticks a 16M-row
+// table gets fully re-checked roughly daily.
+const reconfirmBatchSize = 750_000
 
 // ReconfirmTask returns a Task that prunes stale and ambiguous resolved paths
 // and neighbors. Runs after routes to ensure neighbors are cleaned against
@@ -81,7 +89,7 @@ func ReconfirmTask(store *db.Store, interval time.Duration) Task {
 		Name:     "reconfirm",
 		Interval: interval,
 		Run: func(ctx context.Context) error {
-			if err := store.ReconfirmRoutes(ctx); err != nil {
+			if err := store.ReconfirmRoutes(ctx, reconfirmBatchSize); err != nil {
 				return fmt.Errorf("routes: %w", err)
 			}
 			if err := store.ReconfirmNeighbors(ctx); err != nil {

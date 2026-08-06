@@ -257,7 +257,7 @@ func main() {
 
 	scheduler := background.New([]background.Task{
 		background.ViewRefreshTask(store, resolved.ViewRefreshInterval),
-		background.CleanupTask(store, resolved.TelemetryRetention, resolved.PacketRetention, resolved.NodeDeleteAfter, resolved.CleanupInterval),
+		background.CleanupTask(store, resolved.TelemetryRetention, resolved.PacketRetention, resolved.NodeDeleteAfter, resolved.RouteRetention, resolved.RouteGrace, int64(resolved.RouteMinObservations), resolved.CleanupInterval),
 		background.ReconfirmTask(store, resolved.ReconfirmInterval),
 	})
 	go scheduler.Start(ctx)
