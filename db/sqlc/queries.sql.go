@@ -237,15 +237,26 @@ type GetKnownRoutesByNodeParams struct {
 	Column2 uuid.UUID `json:"column_2"`
 }
 
-func (q *Queries) GetKnownRoutesByNode(ctx context.Context, arg GetKnownRoutesByNodeParams) ([]KnownRoute, error) {
+type GetKnownRoutesByNodeRow struct {
+	ID               int64              `json:"id"`
+	NodeIds          []uuid.UUID        `json:"node_ids"`
+	HashPrefix       [][]byte           `json:"hash_prefix"`
+	Iata             string             `json:"iata"`
+	HopCount         int32              `json:"hop_count"`
+	FirstSeen        pgtype.Timestamptz `json:"first_seen"`
+	LastSeen         pgtype.Timestamptz `json:"last_seen"`
+	ObservationCount int64              `json:"observation_count"`
+}
+
+func (q *Queries) GetKnownRoutesByNode(ctx context.Context, arg GetKnownRoutesByNodeParams) ([]GetKnownRoutesByNodeRow, error) {
 	rows, err := q.db.Query(ctx, getKnownRoutesByNode, arg.Iata, arg.Column2)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []KnownRoute{}
+	items := []GetKnownRoutesByNodeRow{}
 	for rows.Next() {
-		var i KnownRoute
+		var i GetKnownRoutesByNodeRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.NodeIds,
@@ -2095,7 +2106,18 @@ type ListKnownRoutesParams struct {
 	Limit   int32              `json:"limit"`
 }
 
-func (q *Queries) ListKnownRoutes(ctx context.Context, arg ListKnownRoutesParams) ([]KnownRoute, error) {
+type ListKnownRoutesRow struct {
+	ID               int64              `json:"id"`
+	NodeIds          []uuid.UUID        `json:"node_ids"`
+	HashPrefix       [][]byte           `json:"hash_prefix"`
+	Iata             string             `json:"iata"`
+	HopCount         int32              `json:"hop_count"`
+	FirstSeen        pgtype.Timestamptz `json:"first_seen"`
+	LastSeen         pgtype.Timestamptz `json:"last_seen"`
+	ObservationCount int64              `json:"observation_count"`
+}
+
+func (q *Queries) ListKnownRoutes(ctx context.Context, arg ListKnownRoutesParams) ([]ListKnownRoutesRow, error) {
 	rows, err := q.db.Query(ctx, listKnownRoutes,
 		arg.Column1,
 		arg.Column2,
@@ -2106,9 +2128,9 @@ func (q *Queries) ListKnownRoutes(ctx context.Context, arg ListKnownRoutesParams
 		return nil, err
 	}
 	defer rows.Close()
-	items := []KnownRoute{}
+	items := []ListKnownRoutesRow{}
 	for rows.Next() {
-		var i KnownRoute
+		var i ListKnownRoutesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.NodeIds,
@@ -3512,17 +3534,28 @@ type SearchKnownRoutesParams struct {
 	Column3 []byte `json:"column_3"`
 }
 
+type SearchKnownRoutesRow struct {
+	ID               int64              `json:"id"`
+	NodeIds          []uuid.UUID        `json:"node_ids"`
+	HashPrefix       [][]byte           `json:"hash_prefix"`
+	Iata             string             `json:"iata"`
+	HopCount         int32              `json:"hop_count"`
+	FirstSeen        pgtype.Timestamptz `json:"first_seen"`
+	LastSeen         pgtype.Timestamptz `json:"last_seen"`
+	ObservationCount int64              `json:"observation_count"`
+}
+
 // Returns known routes containing a subsequence from source to destination hash prefix.
 // Verifies source appears before destination in the route.
-func (q *Queries) SearchKnownRoutes(ctx context.Context, arg SearchKnownRoutesParams) ([]KnownRoute, error) {
+func (q *Queries) SearchKnownRoutes(ctx context.Context, arg SearchKnownRoutesParams) ([]SearchKnownRoutesRow, error) {
 	rows, err := q.db.Query(ctx, searchKnownRoutes, arg.Iata, arg.Column2, arg.Column3)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []KnownRoute{}
+	items := []SearchKnownRoutesRow{}
 	for rows.Next() {
-		var i KnownRoute
+		var i SearchKnownRoutesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.NodeIds,

@@ -38,7 +38,7 @@ type Querier interface {
 	// missing row (unknown IATA) is sql.ErrNoRows, same not-found distinction
 	// GetIATA already makes.
 	GetIATABorder(ctx context.Context, iata string) ([]byte, error)
-	GetKnownRoutesByNode(ctx context.Context, arg GetKnownRoutesByNodeParams) ([]KnownRoute, error)
+	GetKnownRoutesByNode(ctx context.Context, arg GetKnownRoutesByNodeParams) ([]GetKnownRoutesByNodeRow, error)
 	GetNodeByID(ctx context.Context, id uuid.UUID) (GetNodeByIDRow, error)
 	GetNodeByPubkey(ctx context.Context, publicKey []byte) (uuid.UUID, error)
 	// Returns the neighbors of a node with details, ordered by most recently seen.
@@ -119,7 +119,7 @@ type Querier interface {
 	// Pass cursor=0 to start from the beginning (cursor is last_seen epoch ms).
 	ListChannels(ctx context.Context, arg ListChannelsParams) ([]Channel, error)
 	ListIATAs(ctx context.Context) ([]IataCode, error)
-	ListKnownRoutes(ctx context.Context, arg ListKnownRoutesParams) ([]KnownRoute, error)
+	ListKnownRoutes(ctx context.Context, arg ListKnownRoutesParams) ([]ListKnownRoutesRow, error)
 	// Returns messages after the given message ID, ordered oldest first.
 	// Used for WS reconnect backfill.
 	ListMessagesAfterID(ctx context.Context, arg ListMessagesAfterIDParams) ([]ListMessagesAfterIDRow, error)
@@ -190,7 +190,7 @@ type Querier interface {
 	ResolvePathHashesP4(ctx context.Context, arg ResolvePathHashesP4Params) ([]ResolvePathHashesP4Row, error)
 	// Returns known routes containing a subsequence from source to destination hash prefix.
 	// Verifies source appears before destination in the route.
-	SearchKnownRoutes(ctx context.Context, arg SearchKnownRoutesParams) ([]KnownRoute, error)
+	SearchKnownRoutes(ctx context.Context, arg SearchKnownRoutesParams) ([]SearchKnownRoutesRow, error)
 	SetNodeDefaultScope(ctx context.Context, arg SetNodeDefaultScopeParams) error
 	SetNodeMultibytePaths(ctx context.Context, id uuid.UUID) error
 	SetNodeMultibyteTraces(ctx context.Context, id uuid.UUID) error

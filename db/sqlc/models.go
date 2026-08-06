@@ -57,14 +57,16 @@ type IataCode struct {
 }
 
 type KnownRoute struct {
-	ID               int64              `json:"id"`
-	NodeIds          []uuid.UUID        `json:"node_ids"`
-	HashPrefix       [][]byte           `json:"hash_prefix"`
-	Iata             string             `json:"iata"`
-	HopCount         int32              `json:"hop_count"`
-	FirstSeen        pgtype.Timestamptz `json:"first_seen"`
-	LastSeen         pgtype.Timestamptz `json:"last_seen"`
-	ObservationCount int64              `json:"observation_count"`
+	ID                int64              `json:"id"`
+	PathKey           []byte             `json:"path_key"`
+	NodeIds           []uuid.UUID        `json:"node_ids"`
+	HashPrefix        [][]byte           `json:"hash_prefix"`
+	Iata              string             `json:"iata"`
+	HopCount          int32              `json:"hop_count"`
+	FirstSeen         pgtype.Timestamptz `json:"first_seen"`
+	LastSeen          pgtype.Timestamptz `json:"last_seen"`
+	ObservationCount  int64              `json:"observation_count"`
+	LastReconfirmedAt pgtype.Timestamptz `json:"last_reconfirmed_at"`
 }
 
 type MvHourlyIataStat struct {
