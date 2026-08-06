@@ -75,10 +75,9 @@ telemetry:
 packets:
   retention: 720h   # 30 days
 
-# Routes are distilled packet history, so they normally outlive packets.retention
-# (e.g. packets 168h, routes 336h). grace must be shorter than retention, or the
-# min_observations early-cleanup never applies. No required relationship to
-# packets.retention -- set independently.
+# Routes are distilled packet history and may outlive packets.retention; there is
+# no required relationship between the two. grace must be shorter than retention,
+# or the min_observations early-cleanup never applies.
 routes:
   retention: 336h   # 14 days
   grace: 168h       # 7 days
