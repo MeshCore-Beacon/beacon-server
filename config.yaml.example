@@ -75,12 +75,23 @@ telemetry:
 packets:
   retention: 720h   # 30 days
 
-# Routes are distilled packet history and may outlive packets.retention; there is
-# no required relationship between the two. grace must be shorter than retention,
-# or the min_observations early-cleanup never applies.
+# Known-route retention. Routes are distilled packet history (the path a packet
+# took, hop by hop), so they may outlive packets.retention; there is no required
+# relationship between the two.
 routes:
+  # How long a route is kept after it was last observed. Every new observation
+  # of the same path resets this clock, so routes the mesh still uses never
+  # expire -- only paths nothing has traveled for this long age out.
   retention: 336h   # 14 days
+  # Shorter window for rarely-seen routes: one observed fewer than
+  # min_observations times in total is dropped once it goes unobserved for
+  # this long. Must be shorter than retention, or it never applies.
   grace: 168h       # 7 days
+  # Lifetime observation count a route must reach to earn the full retention
+  # window. Below it a route is treated as flood noise -- a path recorded once
+  # or twice and never confirmed -- and only kept for the grace window. The
+  # count never resets, so once a route crosses this bar it stays in the
+  # retention tier for good.
   min_observations: 3
 
 websocket:
