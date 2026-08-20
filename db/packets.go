@@ -187,14 +187,6 @@ func (s *Store) listPacketsByIATAs(ctx context.Context, payloadTypes, routeTypes
 	if hasMore {
 		rows = rows[:limit]
 	}
-	// Observers duplicate a packet across the scan, so the page can collapse
-	// short while the site still has history below scan_floor. Stopping here
-	// would strand every older packet behind a hasMore=false.
-	var scanFloor pgtype.Timestamptz
-	if len(rows) > 0 && rows[0].ScanSaturated {
-		hasMore = true
-		scanFloor = rows[0].ScanFloor
-	}
 	items := make([]api.PacketSummary, 0, len(rows))
 	for _, v := range rows {
 		item := api.PacketSummary{
@@ -223,14 +215,8 @@ func (s *Store) listPacketsByIATAs(ctx context.Context, payloadTypes, routeTypes
 	// Cursor follows site-local recency, not the packet's global last_heard_at.
 	var nextCursor *int64
 	if hasMore && len(rows) > 0 {
-		last := rows[len(rows)-1].SiteHeardAt.Time
-		// A saturated scan never read below its floor. Paging past it would
-		// skip that band; resuming at it only repeats packets already shown.
-		if scanFloor.Valid && scanFloor.Time.After(last) {
-			last = scanFloor.Time
-		}
-		ms := last.UnixMilli()
-		nextCursor = &ms
+		last := rows[len(rows)-1].SiteHeardAt.Time.UnixMilli()
+		nextCursor = &last
 	}
 	return api.Page[api.PacketSummary]{
 		Items:      items,

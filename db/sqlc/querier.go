@@ -147,14 +147,10 @@ type Querier interface {
 	// to fill a page for a quiet site; walking the site's own observation log is
 	// proportional to the page size instead. Results are ordered by when the
 	// requested sites heard the packet (site-local recency) and the cursor
-	// follows that ordering. scan_depth caps how deep each site's observation
-	// log is walked. A packet repeats once per observer that heard it, so a
-	// page can collapse to fewer distinct packets than were asked for without
-	// the site being exhausted. scan_saturated reports whether any site hit
-	// that cap and scan_floor the oldest heard_at they all cover, so a short
-	// page can keep paging instead of reading as the end of the data.
-	// A site that filled scan_depth still has unread history below its floor.
-	// The newest such floor is the point above which every site is covered.
+	// follows that ordering. scan_depth is a multiple of the page size to
+	// absorb per-observer duplicates; if duplication exceeds it across a
+	// page, pagination ends early (hasMore=false) rather than returning a
+	// short page, even though deeper matches exist.
 	ListPacketsByIATAs(ctx context.Context, arg ListPacketsByIATAsParams) ([]ListPacketsByIATAsRow, error)
 	// ============================================================
 	// REGIONS
