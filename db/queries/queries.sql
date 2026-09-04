@@ -424,29 +424,14 @@ LIMIT $6;
 -- to fill a page for a quiet site; walking the site's own observation log is
 -- proportional to the page size instead. Results are ordered by when the
 -- requested sites heard the packet (site-local recency) and the cursor
--- follows that ordering. scan_depth is a multiple of the page size to
--- absorb per-observer duplicates; if duplication exceeds it across a
--- page, pagination ends early (hasMore=false) rather than returning a
--- short page, even though deeper matches exist.
-SELECT
-  p.packet_hash,
-  p.payload_type,
-  p.route_type,
-  p.first_heard_at,
-  p.last_heard_at,
-  p.scope_id,
-  ts.name AS scope_name,
-  sh.site_heard_at,
-  (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = p.packet_hash) AS observation_count,
-  po.observer_id AS latest_observer_id,
-  o.display_name AS latest_observer_name,
-  po.iata AS latest_observer_iata,
-  po.path_length_byte AS latest_observer_path_length_byte,
-  po.hash_size AS latest_observer_hash_size,
-  po.hop_count AS latest_observer_hop_count,
-  po.path_bytes AS latest_observer_path_bytes
-FROM (
-  SELECT hits.packet_hash, MAX(hits.heard_at)::timestamptz AS site_heard_at
+-- follows that ordering. scan_depth caps how deep each site's observation
+-- log is walked. A packet repeats once per observer that heard it, so a
+-- page can collapse to fewer distinct packets than were asked for without
+-- the site being exhausted. scan_saturated reports whether any site hit
+-- that cap and scan_floor the oldest heard_at they all cover, so a short
+-- page can keep paging instead of reading as the end of the data.
+WITH scanned AS (
+  SELECT req.iata AS req_iata, hits.packet_hash, hits.heard_at
   FROM unnest(@iatas::bpchar[]) AS req(iata)
   CROSS JOIN LATERAL (
     SELECT po3.packet_hash, po3.heard_at
@@ -464,15 +449,53 @@ FROM (
     ORDER BY po3.heard_at DESC
     LIMIT @scan_depth
   ) hits
-  GROUP BY hits.packet_hash
+),
+-- A site that filled scan_depth still has unread history below its floor.
+-- The newest such floor is the point above which every site is covered.
+saturation AS (
+  SELECT
+    COUNT(*) > 0 AS scan_saturated,
+    MAX(floor_ts)::timestamptz AS scan_floor
+  FROM (
+    SELECT MIN(heard_at) AS floor_ts
+    FROM scanned
+    GROUP BY req_iata
+    HAVING COUNT(*) >= @scan_depth
+  ) filled
+),
+page AS (
+  SELECT scanned.packet_hash, MAX(scanned.heard_at)::timestamptz AS site_heard_at
+  FROM scanned
+  GROUP BY scanned.packet_hash
   HAVING (@cursor_ts::timestamptz IS NULL OR NOT EXISTS (
     SELECT 1 FROM packet_observations px
-    WHERE px.packet_hash = hits.packet_hash
+    WHERE px.packet_hash = scanned.packet_hash
       AND px.iata = ANY(@iatas::bpchar[])
       AND px.heard_at >= @cursor_ts))
   ORDER BY site_heard_at DESC
   LIMIT @page_limit
-) sh
+)
+SELECT
+  p.packet_hash,
+  p.payload_type,
+  p.route_type,
+  p.first_heard_at,
+  p.last_heard_at,
+  p.scope_id,
+  ts.name AS scope_name,
+  sh.site_heard_at,
+  sat.scan_saturated,
+  sat.scan_floor,
+  (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = p.packet_hash) AS observation_count,
+  po.observer_id AS latest_observer_id,
+  o.display_name AS latest_observer_name,
+  po.iata AS latest_observer_iata,
+  po.path_length_byte AS latest_observer_path_length_byte,
+  po.hash_size AS latest_observer_hash_size,
+  po.hop_count AS latest_observer_hop_count,
+  po.path_bytes AS latest_observer_path_bytes
+FROM page sh
+CROSS JOIN saturation sat
 JOIN packets p ON p.packet_hash = sh.packet_hash
 LEFT JOIN LATERAL (
   SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes
