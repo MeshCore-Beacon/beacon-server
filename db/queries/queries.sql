@@ -1114,11 +1114,29 @@ ON CONFLICT (iata, path_key) DO UPDATE SET
   observation_count = known_routes.observation_count + 1;
 
 -- name: ListKnownRoutes :many
+-- Only one branch runs. Keep the IATA range ordered by the composite index:
+-- generic plans can otherwise prefer scanning the global timestamp index.
+-- The text equality preserves exact input matching, including trailing spaces.
+(
 SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
 FROM known_routes
-WHERE ($1 = '' OR iata = $1)
+WHERE $1 = ''
   AND ($2 = 0 OR hop_count = $2)
   AND ($3::timestamptz IS NULL OR last_seen < $3)
+ORDER BY last_seen DESC
+LIMIT $4
+)
+UNION ALL
+(
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
+FROM known_routes
+WHERE $1 <> '' AND iata::text = $1
+  AND iata >= $1::bpchar AND iata <= $1::bpchar
+  AND ($2 = 0 OR hop_count = $2)
+  AND ($3::timestamptz IS NULL OR last_seen < $3)
+ORDER BY iata, last_seen DESC
+LIMIT $4
+)
 ORDER BY last_seen DESC
 LIMIT $4;
 
