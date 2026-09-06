@@ -204,6 +204,15 @@ nodes:
   delete_after: 720h # delete a node entirely after this long unseen (default: 30 days, same default as packets.retention)
   clock_drift_threshold: 5m # |device clock - server clock| above which clockOutOfSync=true for a repeater/room server (default: 5m)
 
+# Optional observer age-out (disabled by default; set e.g. 720h to opt in).
+# Enable only when one Beacon ingest process owns the database: presence-cache
+# preparation is local to that process, including both of its MQTT workers.
+# Deletes at most 1000 observers per background.cleanup interval, only when
+# last_seen/last_status_at are old and no observations, telemetry or ownership remain.
+# Broker/location/scope metadata cascades; a returning observer receives a new ID.
+observers:
+  delete_after: 0s # omitted or nonpositive disables deletion
+
 # Redis caching layer (optional).
 # Caches read-heavy, slow-changing responses to reduce PostgreSQL load.
 # Connection details (address, password, database) are set via environment

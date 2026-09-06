@@ -103,6 +103,13 @@ websocket:
 #  delete_after: 720h            # default: 30 days, same default as packets.retention
 #  clock_drift_threshold: 5m     # default: 5m
 
+# Optional observer age-out. Omitted or nonpositive leaves observers intact.
+# Enable only with one Beacon ingest process for this database.
+# At most 1000 old observers are deleted per background.cleanup interval;
+# retained observations, telemetry and ownership records prevent deletion.
+#observers:
+#  delete_after: 720h           # opt in to 30 days unseen
+
 # CORS configuration.
 # Controls which origins, methods and headers are allowed for cross-origin requests.
 # Defaults to allowing all origins with GET/HEAD/OPTIONS if omitted — appropriate
