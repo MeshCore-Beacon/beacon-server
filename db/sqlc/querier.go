@@ -187,6 +187,11 @@ type Querier interface {
 	RefreshTopNodes(ctx context.Context) error
 	RefreshTopObservers(ctx context.Context) error
 	RefreshTopTalkers(ctx context.Context) error
+	// Logical endpoints can be any advertised role, unlike intermediate relay hops.
+	// Endpoint hashes are always one byte; use the existing (iata, prefix_1) index.
+	// LIMIT 1 keeps generic plans on a node PK lookup per candidate instead of
+	// flattening the join into a scan of all nodes. The PK already guarantees one row.
+	ResolveEndpointHashes(ctx context.Context, arg ResolveEndpointHashesParams) ([]ResolveEndpointHashesRow, error)
 	// ============================================================
 	// HELPERS
 	// ============================================================

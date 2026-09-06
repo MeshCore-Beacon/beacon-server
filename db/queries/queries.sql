@@ -1204,6 +1204,21 @@ WHERE ns.iata = $1
   AND n.node_type IN (2, 3)
   AND ns.prefix_1 = ANY($2::bytea[]);
 
+-- name: ResolveEndpointHashes :many
+-- Logical endpoints can be any advertised role, unlike intermediate relay hops.
+-- Endpoint hashes are always one byte; use the existing (iata, prefix_1) index.
+-- LIMIT 1 keeps generic plans on a node PK lookup per candidate instead of
+-- flattening the join into a scan of all nodes. The PK already guarantees one row.
+SELECT ns.prefix_1 AS hash, n.id AS node_id, n.name, n.latitude, n.longitude, n.public_key
+FROM node_short_ids ns
+CROSS JOIN LATERAL (
+  SELECT id, name, latitude, longitude, public_key
+  FROM nodes WHERE id = ns.node_id
+  LIMIT 1
+) n
+WHERE ns.iata = $1
+  AND ns.prefix_1 = ANY($2::bytea[]);
+
 -- name: ResolvePathHashesP2 :many
 SELECT ns.prefix_4 AS hash, n.id AS node_id, n.name, n.latitude, n.longitude, n.public_key
 FROM node_short_ids ns

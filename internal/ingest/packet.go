@@ -850,13 +850,13 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 			}
 		}
 	} else if len(sourceHashByte) == 1 {
-		if r, err := w.db.ResolvePathHashes(ctx, iata, [][]byte{sourceHashByte}); err == nil {
+		if r, err := w.db.ResolveEndpointHashes(ctx, iata, [][]byte{sourceHashByte}); err == nil {
 			hop := api.BuildResolvedPath([][]byte{sourceHashByte}, r)[0]
 			resolvedSource = &hop
 		}
 	}
 	if len(destHashByte) == 1 {
-		if r, err := w.db.ResolvePathHashes(ctx, iata, [][]byte{destHashByte}); err == nil {
+		if r, err := w.db.ResolveEndpointHashes(ctx, iata, [][]byte{destHashByte}); err == nil {
 			hop := api.BuildResolvedPath([][]byte{destHashByte}, r)[0]
 			resolvedDestination = &hop
 		}
