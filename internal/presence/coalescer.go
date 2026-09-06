@@ -35,11 +35,14 @@ type Store interface {
 	// TouchPackets applies coalesced last_heard_at bumps for the given packet
 	// hashes in one statement.
 	TouchPackets(ctx context.Context, hashes [][]byte, heard []time.Time) error
+
+	DeleteOldObservers(ctx context.Context, cutoff time.Time) ([]uuid.UUID, error)
 }
 
 type identity struct {
 	id   uuid.UUID
 	name string
+	seen time.Time
 }
 
 type observerBump struct {
@@ -99,6 +102,8 @@ func (c *Coalescer) UpsertObserver(ctx context.Context, pubkey []byte) (uuid.UUI
 		bump.seen = c.now()
 		bump.count++
 		c.dirtyObservers[ident.id] = bump
+		ident.seen = bump.seen
+		c.identities[key] = ident
 		c.mu.Unlock()
 		return ident.id, ident.name, nil
 	}
@@ -109,7 +114,7 @@ func (c *Coalescer) UpsertObserver(ctx context.Context, pubkey []byte) (uuid.UUI
 		return id, name, err
 	}
 	c.mu.Lock()
-	c.identities[key] = identity{id: id, name: name}
+	c.identities[key] = identity{id: id, name: name, seen: c.now()}
 	c.mu.Unlock()
 	return id, name, nil
 }
@@ -191,6 +196,30 @@ func (c *Coalescer) UpdateObserverStatus(ctx context.Context, p ingest.UpdateObs
 	return id, err
 }
 
+// DeleteOldObservers persists cached activity before pruning and forgets IDs so
+// returning observers write through. Include identities even if an earlier
+// presence flush failed or is still in flight; GREATEST prevents older flushes
+// from overwriting this freshness. A failed preparation must not delete rows.
+func (c *Coalescer) DeleteOldObservers(ctx context.Context, cutoff time.Time) ([]uuid.UUID, error) {
+	c.mu.Lock()
+	observers := c.dirtyObservers
+	for _, ident := range c.identities {
+		bump := observers[ident.id]
+		if ident.seen.After(bump.seen) {
+			bump.seen = ident.seen
+		}
+		observers[ident.id] = bump
+	}
+	c.dirtyObservers = make(map[uuid.UUID]observerBump)
+	clear(c.identities)
+	clear(c.knownBrokers)
+	c.mu.Unlock()
+	if err := c.flushObservers(ctx, observers); err != nil {
+		return nil, err
+	}
+	return c.Store.DeleteOldObservers(ctx, cutoff)
+}
+
 // Run flushes on the configured interval until ctx is cancelled, then does a
 // final flush so a clean shutdown loses nothing.
 func (c *Coalescer) Run(ctx context.Context) {
@@ -228,18 +257,8 @@ func (c *Coalescer) Flush(ctx context.Context) {
 	}
 	c.mu.Unlock()
 
-	if len(observers) > 0 {
-		ids := make([]uuid.UUID, 0, len(observers))
-		seen := make([]time.Time, 0, len(observers))
-		counts := make([]int32, 0, len(observers))
-		for id, bump := range observers {
-			ids = append(ids, id)
-			seen = append(seen, bump.seen)
-			counts = append(counts, bump.count)
-		}
-		if err := c.Store.TouchObservers(ctx, ids, seen, counts); err != nil {
-			log.Printf("presence: flush observers failed (%d rows dropped): %v", len(ids), err)
-		}
+	if err := c.flushObservers(ctx, observers); err != nil {
+		log.Printf("presence: flush observers failed (%d rows dropped): %v", len(observers), err)
 	}
 
 	if len(brokers) > 0 {
@@ -267,4 +286,19 @@ func (c *Coalescer) Flush(ctx context.Context) {
 			log.Printf("presence: flush packets failed (%d rows dropped): %v", len(hashes), err)
 		}
 	}
+}
+
+func (c *Coalescer) flushObservers(ctx context.Context, observers map[uuid.UUID]observerBump) error {
+	if len(observers) == 0 {
+		return nil
+	}
+	ids := make([]uuid.UUID, 0, len(observers))
+	seen := make([]time.Time, 0, len(observers))
+	counts := make([]int32, 0, len(observers))
+	for id, bump := range observers {
+		ids = append(ids, id)
+		seen = append(seen, bump.seen)
+		counts = append(counts, bump.count)
+	}
+	return c.Store.TouchObservers(ctx, ids, seen, counts)
 }

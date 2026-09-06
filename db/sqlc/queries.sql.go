@@ -40,6 +40,46 @@ func (q *Queries) DeleteOldNodes(ctx context.Context, lastSeen pgtype.Timestampt
 	return err
 }
 
+const deleteOldObservers = `-- name: DeleteOldObservers :many
+WITH expired AS (
+    SELECT o.id
+    FROM observers o
+    WHERE o.last_seen < $1
+      AND (o.last_status_at IS NULL OR o.last_status_at < $1)
+      AND NOT EXISTS (SELECT 1 FROM packet_observations po WHERE po.observer_id = o.id)
+      AND NOT EXISTS (SELECT 1 FROM observer_telemetry ot WHERE ot.observer_id = o.id)
+      AND NOT EXISTS (SELECT 1 FROM observer_owners oo WHERE oo.observer_id = o.id)
+    ORDER BY o.last_seen, o.id
+    LIMIT 1000
+    FOR UPDATE OF o SKIP LOCKED
+)
+DELETE FROM observers o USING expired e
+WHERE o.id = e.id
+RETURNING o.id
+`
+
+// Opt-in age-out: preserve retained history and manually recorded ownership.
+// Bound deletions per cleanup tick and skip observers being updated by ingest.
+func (q *Queries) DeleteOldObservers(ctx context.Context, lastSeen pgtype.Timestamptz) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, deleteOldObservers, lastSeen)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteOldPackets = `-- name: DeleteOldPackets :exec
 DELETE FROM packets WHERE last_heard_at < $1
 `

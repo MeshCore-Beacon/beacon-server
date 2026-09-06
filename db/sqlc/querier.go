@@ -22,6 +22,9 @@ type Querier interface {
 	// dangling in old routes there, but ReconfirmTask already prunes stale/ambiguous routes
 	// periodically and will clean those up on its own schedule.
 	DeleteOldNodes(ctx context.Context, lastSeen pgtype.Timestamptz) error
+	// Opt-in age-out: preserve retained history and manually recorded ownership.
+	// Bound deletions per cleanup tick and skip observers being updated by ingest.
+	DeleteOldObservers(ctx context.Context, lastSeen pgtype.Timestamptz) ([]uuid.UUID, error)
 	// Deletes packets and their observations older than the given cutoff.
 	// packet_observations cascade-delete via FK.
 	DeleteOldPackets(ctx context.Context, lastHeardAt pgtype.Timestamptz) error
