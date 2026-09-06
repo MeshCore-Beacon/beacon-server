@@ -57,7 +57,8 @@ type Querier interface {
 	GetObserverTelemetryBucketed(ctx context.Context, arg GetObserverTelemetryBucketedParams) ([]GetObserverTelemetryBucketedRow, error)
 	GetPacketByHash(ctx context.Context, packetHash []byte) (GetPacketByHashRow, error)
 	GetPacketObservationCount(ctx context.Context, packetHash []byte) (int64, error)
-	// Returns all packets for a given trace tag with observations.
+	// Return distinct observation IATAs in first-heard order for path resolution,
+	// without fetching full observations separately for every trace packet.
 	GetPacketsByTraceTag(ctx context.Context, decode string) ([]GetPacketsByTraceTagRow, error)
 	GetRadioPresets(ctx context.Context, arg GetRadioPresetsParams) ([]MvRadioPreset, error)
 	GetRegion(ctx context.Context, id int32) (GetRegionRow, error)
