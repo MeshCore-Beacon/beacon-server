@@ -619,13 +619,9 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PacketPathLength'
         description: |-
-          PathLength/PathBytes are cheap -- already-stored columns on packet_observations -- and
-          populated everywhere PacketLatestObserver appears: the REST list/backfill endpoints and
-          the WS feed alike. ResolvedPath/ResolvedSource/ResolvedDestination require a per-hash DB
-          resolution lookup; they're populated on the WS feed (already computed once at ingest, so
-          effectively free there) but deliberately left nil on the REST endpoints, which are
-          paginated/high-volume and used only for scrollback and reconnect-gap backfill -- full
-          resolution stays a GET /packets/{packetHash}-only feature.
+          PathLength/PathBytes and captured endpoint resolutions are stored on the observation,
+          so list/backfill reads need no per-hash resolution queries. Legacy observations have
+          no endpoint snapshot. ResolvedPath remains a detail/opted-in WS feature.
       resolvedDestination:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ResolvedHop'
       resolvedPath:
@@ -670,7 +666,9 @@ definitions:
         - $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ResolvedHop'
         description: |-
           ResolvedSource/ResolvedDestination are the packet's endpoints, when the payload type
-          carries a resolvable one: an exact match for ADVERT's full pubkey, an ambiguous
+          carries one. Prefer the snapshot captured at ingest; legacy observations without a
+          snapshot use the current node registry. Endpoint matching itself is unchanged:
+          an exact match for ADVERT's full pubkey, an ambiguous
           hash-prefix match (like intermediate hops) for TEXT_MESSAGE/PATH/ANON_REQ's 1-byte
           source/destination hashes. Nil when the payload type doesn't carry one at all (e.g.
           GRP_TXT/GRP_DATA/TRACE aren't node-to-node addressed) -- see BuildResolvedPath and

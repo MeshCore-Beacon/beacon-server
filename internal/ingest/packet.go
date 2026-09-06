@@ -55,6 +55,7 @@ type InsertObservationParams struct {
 	CodingRate        int16
 	SourceBroker      string
 	PayloadType       int16
+	ResolvedEndpoints json.RawMessage
 }
 
 // RadioSettings holds the radio configuration for an observer, populated from
@@ -754,6 +755,34 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	if err != nil {
 		log.Printf("ingest[%s]: db: get observer radio failed for %s: %v", w.cfg.BrokerName, pubkeyHex, err)
 	}
+	// Save the same endpoint resolution used by the live event in the observation INSERT.
+	var resolvedSource, resolvedDestination *api.ResolvedHop
+	if packet.PayloadType() == meshcore.PayloadTypeAdvert && originPubkey != nil {
+		// Exact match: ADVERT carries the sender's real identity pubkey, not a
+		// short ambiguous hash prefix like the other resolvable payload types.
+		if nodeID, err := w.db.GetNodeByPubkey(ctx, originPubkey); err == nil {
+			if nodes, err := w.db.GetNodesByIDs(ctx, []uuid.UUID{nodeID}); err == nil {
+				hop := api.ResolveExactNode(nodes[nodeID])
+				resolvedSource = &hop
+			}
+		}
+	} else if len(sourceHashByte) == 1 {
+		if r, err := w.db.ResolvePathHashes(ctx, iata, [][]byte{sourceHashByte}); err == nil {
+			hop := api.BuildResolvedPath([][]byte{sourceHashByte}, r)[0]
+			resolvedSource = &hop
+		}
+	}
+	if len(destHashByte) == 1 {
+		if r, err := w.db.ResolvePathHashes(ctx, iata, [][]byte{destHashByte}); err == nil {
+			hop := api.BuildResolvedPath([][]byte{destHashByte}, r)[0]
+			resolvedDestination = &hop
+		}
+	}
+	resolvedEndpoints, err := json.Marshal(api.PacketEndpointSnapshot{Source: resolvedSource, Destination: resolvedDestination})
+	if err != nil {
+		log.Printf("ingest[%s]: endpoint snapshot encoding failed: %v", w.cfg.BrokerName, err)
+		resolvedEndpoints = nil // optional enrichment must not discard the observation
+	}
 	oParams := InsertObservationParams{
 		PacketHash:        packetHash[:],
 		ObserverID:        id,
@@ -772,6 +801,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		CodingRate:        radio.CR,
 		SourceBroker:      w.cfg.BrokerName,
 		PayloadType:       int16(packet.PayloadType()),
+		ResolvedEndpoints: resolvedEndpoints,
 	}
 	inserted, err := w.db.InsertObservation(ctx, oParams)
 	if err != nil {
@@ -838,29 +868,6 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		}
 	}
 	w.runCapabilityDetection(ctx, packet.PayloadType(), packet.PathHashSize(), resolvedIDs)
-
-	var resolvedSource, resolvedDestination *api.ResolvedHop
-	if packet.PayloadType() == meshcore.PayloadTypeAdvert && originPubkey != nil {
-		// Exact match: ADVERT carries the sender's real identity pubkey, not a
-		// short ambiguous hash prefix like the other resolvable payload types.
-		if nodeID, err := w.db.GetNodeByPubkey(ctx, originPubkey); err == nil {
-			if nodes, err := w.db.GetNodesByIDs(ctx, []uuid.UUID{nodeID}); err == nil {
-				hop := api.ResolveExactNode(nodes[nodeID])
-				resolvedSource = &hop
-			}
-		}
-	} else if len(sourceHashByte) == 1 {
-		if r, err := w.db.ResolvePathHashes(ctx, iata, [][]byte{sourceHashByte}); err == nil {
-			hop := api.BuildResolvedPath([][]byte{sourceHashByte}, r)[0]
-			resolvedSource = &hop
-		}
-	}
-	if len(destHashByte) == 1 {
-		if r, err := w.db.ResolvePathHashes(ctx, iata, [][]byte{destHashByte}); err == nil {
-			hop := api.BuildResolvedPath([][]byte{destHashByte}, r)[0]
-			resolvedDestination = &hop
-		}
-	}
 
 	if inserted {
 		w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio, scopeID, matchedScope, pubkeyBytes, float32(parseNumber(envelope.SNR)))

@@ -292,6 +292,7 @@ type PacketObservation struct {
 	CodingRate        *int16             `json:"coding_rate"`
 	SourceBroker      *string            `json:"source_broker"`
 	PayloadType       *int16             `json:"payload_type"`
+	ResolvedEndpoints []byte             `json:"resolved_endpoints"`
 }
 
 type Region struct {
