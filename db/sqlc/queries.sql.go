@@ -3123,9 +3123,9 @@ WITH tags AS (
       AND ($2::text = '' OR p.scope_id = (SELECT id FROM transport_scopes WHERE name = $2))
       AND ($3::timestamptz IS NULL OR p.first_heard_at >= $3)
       AND ($4::timestamptz IS NULL OR p.first_heard_at <= $4)
-      AND ($5::timestamptz IS NULL OR p.last_heard_at < $5)
       AND ($7::text = '' OR p.parsed_payload->>'type' = $7)
     GROUP BY p.trace_tag
+    HAVING ($5::timestamptz IS NULL OR MAX(p.last_heard_at) < $5)
     ORDER BY MAX(p.last_heard_at) DESC
     LIMIT $6
 )
