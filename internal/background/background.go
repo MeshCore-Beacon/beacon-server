@@ -38,9 +38,10 @@ func (s *Scheduler) Start(ctx context.Context) {
 				case <-ticker.C:
 					log.Printf("background[%s]: running", t.Name)
 					if err := t.Run(ctx); err != nil {
-						log.Printf("background[%s]: %v", t.Name, err)
+						log.Printf("background[%s]: failed: %v", t.Name, err)
+					} else {
+						log.Printf("background[%s]: complete", t.Name)
 					}
-					log.Printf("background[%s]: complete", t.Name)
 				case <-ctx.Done():
 					return
 				}

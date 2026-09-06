@@ -5,41 +5,47 @@ package background
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/db"
 )
 
+type viewRefresher interface {
+	RefreshHourlyStats(context.Context) error
+	RefreshTopNodes(context.Context) error
+	RefreshTopObservers(context.Context) error
+	RefreshPayloadBreakdown(context.Context) error
+	RefreshTopTalkers(context.Context) error
+	RefreshTopAdvertisers(context.Context) error
+	RefreshRadioPresets(context.Context) error
+}
+
 // ViewRefreshTask returns a Task that refreshes all materialized views.
-func ViewRefreshTask(store *db.Store, interval time.Duration) Task {
+func ViewRefreshTask(store viewRefresher, interval time.Duration) Task {
 	return Task{
 		Name:     "view_refresh",
 		Interval: interval,
 		Run: func(ctx context.Context) error {
-			if err := store.RefreshHourlyStats(ctx); err != nil {
-				log.Printf("background[view_refresh]: hourly stats: %v", err)
+			var errs []error
+			for _, view := range []struct {
+				name    string
+				refresh func(context.Context) error
+			}{
+				{"hourly stats", store.RefreshHourlyStats},
+				{"top nodes", store.RefreshTopNodes},
+				{"top observers", store.RefreshTopObservers},
+				{"payload breakdown", store.RefreshPayloadBreakdown},
+				{"top talkers", store.RefreshTopTalkers},
+				{"top advertisers", store.RefreshTopAdvertisers},
+				{"radio presets", store.RefreshRadioPresets},
+			} {
+				if err := view.refresh(ctx); err != nil {
+					errs = append(errs, fmt.Errorf("%s: %w", view.name, err))
+				}
 			}
-			if err := store.RefreshTopNodes(ctx); err != nil {
-				log.Printf("background[view_refresh]: top nodes: %v", err)
-			}
-			if err := store.RefreshTopObservers(ctx); err != nil {
-				log.Printf("background[view_refresh]: top observers: %v", err)
-			}
-			if err := store.RefreshPayloadBreakdown(ctx); err != nil {
-				log.Printf("background[view_refresh]: payload breakdown: %v", err)
-			}
-			if err := store.RefreshTopTalkers(ctx); err != nil {
-				log.Printf("background[view_refresh]: top talkers: %v", err)
-			}
-			if err := store.RefreshTopAdvertisers(ctx); err != nil {
-				log.Printf("background[view_refresh]: top advertisers: %v", err)
-			}
-			if err := store.RefreshRadioPresets(ctx); err != nil {
-				log.Printf("background[view_refresh]: radio presets: %v", err)
-			}
-			return nil
+			return errors.Join(errs...)
 		},
 	}
 }
