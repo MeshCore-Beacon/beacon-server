@@ -1177,8 +1177,11 @@ paths:
         in: query
         name: cursor
         type: integer
-      - description: Max results (default 50)
+      - description: Max results (default 50); must be positive, values above 200
+          are clamped
         in: query
+        maximum: 200
+        minimum: 1
         name: limit
         type: integer
       produces:
@@ -1258,8 +1261,11 @@ paths:
         in: query
         name: cursor
         type: integer
-      - description: Max results (default 50)
+      - description: Max results (default 50); must be positive, values above 200
+          are clamped
         in: query
+        maximum: 200
+        minimum: 1
         name: limit
         type: integer
       produces:
@@ -1380,8 +1386,11 @@ paths:
         in: query
         name: cursor
         type: integer
-      - description: Max results (default 50)
+      - description: Max results (default 50); must be positive, values above 200
+          are clamped
         in: query
+        maximum: 200
+        minimum: 1
         name: limit
         type: integer
       produces:
@@ -1426,8 +1435,11 @@ paths:
         in: query
         name: scope
         type: string
-      - description: Max results (default 100)
+      - description: Max results (default 100); must be positive, values above 200
+          are clamped
         in: query
+        maximum: 200
+        minimum: 1
         name: limit
         type: integer
       produces:
@@ -1510,8 +1522,11 @@ paths:
         in: query
         name: cursor
         type: integer
-      - description: Max results (default 50)
+      - description: Max results (default 50); must be positive, values above 200
+          are clamped
         in: query
+        maximum: 200
+        minimum: 1
         name: limit
         type: integer
       produces:
@@ -1598,8 +1613,11 @@ paths:
         in: query
         name: cursor
         type: integer
-      - description: Max results (default 50)
+      - description: Max results (default 50); must be positive, values above 200
+          are clamped
         in: query
+        maximum: 200
+        minimum: 1
         name: limit
         type: integer
       produces:
@@ -1663,8 +1681,11 @@ paths:
         in: query
         name: cursor
         type: integer
-      - description: Max results (default 50)
+      - description: Max results (default 50); must be positive, values above 200
+          are clamped
         in: query
+        maximum: 200
+        minimum: 1
         name: limit
         type: integer
       produces:
@@ -1723,8 +1744,11 @@ paths:
         in: query
         name: cursor
         type: integer
-      - description: Max results (default 50)
+      - description: Max results (default 50); must be positive, values above 200
+          are clamped
         in: query
+        maximum: 200
+        minimum: 1
         name: limit
         type: integer
       produces:
@@ -1845,8 +1869,11 @@ paths:
         in: query
         name: cursor
         type: integer
-      - description: Max results (default 50)
+      - description: Max results (default 50); must be positive, values above 200
+          are clamped
         in: query
+        maximum: 200
+        minimum: 1
         name: limit
         type: integer
       produces:
@@ -1935,8 +1962,11 @@ paths:
         in: query
         name: scope
         type: string
-      - description: Max results (default 100)
+      - description: Max results (default 100); must be positive, values above 200
+          are clamped
         in: query
+        maximum: 200
+        minimum: 1
         name: limit
         type: integer
       produces:
@@ -2018,8 +2048,11 @@ paths:
         in: query
         name: cursor
         type: integer
-      - description: Max results (default 50)
+      - description: Max results (default 50); must be positive, values above 200
+          are clamped
         in: query
+        maximum: 200
+        minimum: 1
         name: limit
         type: integer
       produces:
@@ -2031,6 +2064,10 @@ paths:
             items:
               $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.KnownRoute'
             type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
           schema:
@@ -2189,8 +2226,11 @@ paths:
         in: query
         name: region
         type: string
-      - description: Max results (default 10)
+      - description: Max results (default 10); must be positive, values above 200
+          are clamped
         in: query
+        maximum: 200
+        minimum: 1
         name: limit
         type: integer
       produces:
@@ -2412,8 +2452,11 @@ paths:
         in: query
         name: since
         type: integer
-      - description: Max results (default 10)
+      - description: Max results (default 10); must be positive, values above 200
+          are clamped
         in: query
+        maximum: 200
+        minimum: 1
         name: limit
         type: integer
       produces:
@@ -2447,8 +2490,11 @@ paths:
         in: query
         name: region
         type: string
-      - description: Max results (default 10)
+      - description: Max results (default 10); must be positive, values above 200
+          are clamped
         in: query
+        maximum: 200
+        minimum: 1
         name: limit
         type: integer
       produces:
@@ -2486,8 +2532,11 @@ paths:
         in: query
         name: since
         type: integer
-      - description: Max results (default 10)
+      - description: Max results (default 10); must be positive, values above 200
+          are clamped
         in: query
+        maximum: 200
+        minimum: 1
         name: limit
         type: integer
       produces:
@@ -2525,8 +2574,11 @@ paths:
         in: query
         name: since
         type: integer
-      - description: Max results (default 10)
+      - description: Max results (default 10); must be positive, values above 200
+          are clamped
         in: query
+        maximum: 200
+        minimum: 1
         name: limit
         type: integer
       produces:
@@ -2581,8 +2633,11 @@ paths:
         in: query
         name: cursor
         type: integer
-      - description: Max results (default 50)
+      - description: Max results (default 50); must be positive, values above 200
+          are clamped
         in: query
+        maximum: 200
+        minimum: 1
         name: limit
         type: integer
       produces:
@@ -2594,6 +2649,10 @@ paths:
             items:
               $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TraceTagSummary'
             type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
           schema:

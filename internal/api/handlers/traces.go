@@ -37,17 +37,17 @@ func TracesRouter(reader api.Reader) http.Handler {
 //	@Param		since		query		int		false	"Filter by first_heard_at >= since (epoch ms)"
 //	@Param		until		query		int		false	"Filter by first_heard_at <= until (epoch ms)"
 //	@Param		cursor		query		int		false	"last_heard_at epoch ms of last item for pagination"
-//	@Param		limit		query		int		false	"Max results (default 50)"
+//	@Param		limit		query		int		false	"Max results (default 50); must be positive, values above 200 are clamped" minimum(1) maximum(200)
+//	@Failure	400			{object}	handlers.APIError
 //	@Success	200			{object}	[]api.TraceTagSummary
 //	@Failure	500			{object}	handlers.APIError
 //	@Router		/traces [get]
 func listTraceTags(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var limit int32 = 50
-		if l := r.URL.Query().Get("limit"); l != "" {
-			if v, err := strconv.ParseInt(l, 10, 32); err == nil {
-				limit = int32(v)
-			}
+		limit, err := parseLimit(r, 50)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
 		}
 		var since, until, cursor time.Time
 		if v := r.URL.Query().Get("since"); v != "" {

@@ -37,7 +37,7 @@ func MessagesRouter(reader api.Reader) http.Handler {
 //	@Param		region		query		string	false	"Filter by region slug, expands to member IATAs"
 //	@Param		scope		query		string	false	"Filter by transport scope name e.g. %23bc (URL-encoded #bc)"
 //	@Param		cursor	query		int		false	"Message ID of last item for pagination (results ordered newest first)"
-//	@Param		limit		query		int		false	"Max results (default 50)"
+//	@Param		limit		query		int		false	"Max results (default 50); must be positive, values above 200 are clamped" minimum(1) maximum(200)
 //	@Success	200			{object}	object
 //	@Failure	400			{object}	handlers.APIError
 //	@Failure	500			{object}	handlers.APIError
@@ -60,14 +60,10 @@ func listMessages(reader api.Reader) http.HandlerFunc {
 			}
 			id = i
 		}
-		var limit int64 = 50
-		if limitParam := r.URL.Query().Get("limit"); limitParam != "" {
-			l, err := strconv.ParseInt(limitParam, 10, 32)
-			if err != nil {
-				respondError(w, http.StatusBadRequest, "limit must be an integer")
-				return
-			}
-			limit = l
+		limit, err := parseLimit(r, 50)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
 		}
 		var since time.Time
 		if sinceParam := r.URL.Query().Get("since"); sinceParam != "" {
@@ -90,7 +86,6 @@ func listMessages(reader api.Reader) http.HandlerFunc {
 		iatas := parseIATAs(r)
 		scope := r.URL.Query().Get("scope")
 		var messages api.Page[api.ChannelMessage]
-		var err error
 		if channelHashParam != "" {
 			hashHex, decodeErr := hex.DecodeString(channelHashParam)
 			if decodeErr != nil {
@@ -101,12 +96,12 @@ func listMessages(reader api.Reader) http.HandlerFunc {
 				respondError(w, http.StatusBadRequest, "channel hash must be a single hex byte")
 				return
 			}
-			messages, err = reader.ListChannelMessagesByHash(r.Context(), hashHex, since, int32(limit), iatas, scope, cursor)
+			messages, err = reader.ListChannelMessagesByHash(r.Context(), hashHex, since, limit, iatas, scope, cursor)
 		} else if channelIDParam != "" {
 			chanID := int32(id)
-			messages, err = reader.ListChannelMessages(r.Context(), &chanID, since, int32(limit), iatas, scope, cursor)
+			messages, err = reader.ListChannelMessages(r.Context(), &chanID, since, limit, iatas, scope, cursor)
 		} else {
-			messages, err = reader.ListChannelMessages(r.Context(), nil, since, int32(limit), iatas, scope, cursor)
+			messages, err = reader.ListChannelMessages(r.Context(), nil, since, limit, iatas, scope, cursor)
 		}
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "internal server error")
@@ -126,7 +121,7 @@ func listMessages(reader api.Reader) http.HandlerFunc {
 //	@Param		region		query		string	false	"Filter by region slug"
 //	@Param		regionId	query		int		false	"Filter by region ID"
 //	@Param		scope		query		string	false	"Filter by transport scope name"
-//	@Param		limit		query		int		false	"Max results (default 100)"
+//	@Param		limit		query		int		false	"Max results (default 100); must be positive, values above 200 are clamped" minimum(1) maximum(200)
 //	@Success	200			{object}	[]api.ChannelMessage
 //	@Failure	400			{object}	handlers.APIError
 //	@Failure	500			{object}	handlers.APIError
@@ -143,14 +138,10 @@ func listMessagesBackfill(reader api.Reader) http.HandlerFunc {
 			respondError(w, http.StatusBadRequest, "afterId must be an integer")
 			return
 		}
-		var limit int32 = 100
-		if limitParam := r.URL.Query().Get("limit"); limitParam != "" {
-			l, err := strconv.ParseInt(limitParam, 10, 32)
-			if err != nil {
-				respondError(w, http.StatusBadRequest, "limit must be an integer")
-				return
-			}
-			limit = int32(l)
+		limit, err := parseLimit(r, 100)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
 		}
 		iatas := parseIATAs(r)
 		if regionIDStr := r.URL.Query().Get("regionId"); regionIDStr != "" || r.URL.Query().Get("region") != "" {

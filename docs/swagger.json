@@ -77,8 +77,10 @@
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 50)",
+                        "description": "Max results (default 50); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -199,8 +201,10 @@
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 50)",
+                        "description": "Max results (default 50); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -385,8 +389,10 @@
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 50)",
+                        "description": "Max results (default 50); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -455,8 +461,10 @@
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 100)",
+                        "description": "Max results (default 100); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -581,8 +589,10 @@
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 50)",
+                        "description": "Max results (default 50); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -716,8 +726,10 @@
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 50)",
+                        "description": "Max results (default 50); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -815,8 +827,10 @@
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 50)",
+                        "description": "Max results (default 50); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -907,8 +921,10 @@
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 50)",
+                        "description": "Max results (default 50); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -1088,8 +1104,10 @@
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 50)",
+                        "description": "Max results (default 50); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -1176,8 +1194,10 @@
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 100)",
+                        "description": "Max results (default 100); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -1350,8 +1370,10 @@
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 50)",
+                        "description": "Max results (default 50); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -1364,6 +1386,12 @@
                             "items": {
                                 "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.KnownRoute"
                             }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
                     },
                     "500": {
@@ -1610,8 +1638,10 @@
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 10)",
+                        "description": "Max results (default 10); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -1953,8 +1983,10 @@
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 10)",
+                        "description": "Max results (default 10); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -2007,8 +2039,10 @@
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 10)",
+                        "description": "Max results (default 10); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -2067,8 +2101,10 @@
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 10)",
+                        "description": "Max results (default 10); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -2127,8 +2163,10 @@
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 10)",
+                        "description": "Max results (default 10); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -2211,8 +2249,10 @@
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 50)",
+                        "description": "Max results (default 50); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -2225,6 +2265,12 @@
                             "items": {
                                 "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TraceTagSummary"
                             }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
                     },
                     "500": {
