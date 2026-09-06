@@ -72,6 +72,7 @@ type Querier interface {
 	// Repeaters/room servers (node_type 2/3) whose current advert-derived clock drift exceeds
 	// the given threshold in magnitude, worst first. Not time-windowed -- reflects each node's
 	// latest measured drift, not an aggregate over a period.
+	// Select the filtered page before aggregating its IATA memberships.
 	GetStatsClockDrift(ctx context.Context, arg GetStatsClockDriftParams) ([]GetStatsClockDriftRow, error)
 	// Returns node counts grouped by type, optionally filtered by IATA.
 	GetStatsNodeTypes(ctx context.Context, dollar_1 []string) ([]GetStatsNodeTypesRow, error)
