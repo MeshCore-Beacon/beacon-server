@@ -45,7 +45,7 @@ func ObserversRouter(reader api.Reader) http.Handler {
 //	@Param		name	query		string	false	"Partial case-insensitive display name match"
 //	@Param		scope	query		string	false	"Filter by transport scope name e.g. %23bc (URL-encoded #bc)"
 //	@Param		cursor	query		int		false	"last_seen epoch ms of last item for pagination"
-//	@Param		limit	query		int		false	"Max results (default 50)"
+//	@Param		limit	query		int		false	"Max results (default 50); must be positive, values above 200 are clamped" minimum(1) maximum(200)
 //	@Success	200		{object}	api.Page[api.ObserverSummary]
 //	@Failure	400		{object}	handlers.APIError
 //	@Failure	500		{object}	handlers.APIError
@@ -66,14 +66,10 @@ func listObservers(reader api.Reader) http.HandlerFunc {
 			}
 			cursor = c
 		}
-		var limit int32 = 50
-		if limitParam := r.URL.Query().Get("limit"); limitParam != "" {
-			l, err := strconv.ParseInt(limitParam, 10, 32)
-			if err != nil {
-				respondError(w, http.StatusBadRequest, "limit must be an integer")
-				return
-			}
-			limit = int32(l)
+		limit, err := parseLimit(r, 50)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
 		}
 		iatas := parseIATAs(r)
 		if regionIDStr := r.URL.Query().Get("regionId"); regionIDStr != "" || r.URL.Query().Get("region") != "" {
@@ -127,7 +123,7 @@ func getObserver(reader api.Reader) http.HandlerFunc {
 //	@Produce	json
 //	@Param		observerId	path		string	true	"Observer UUID"
 //	@Param		cursor		query		int		false	"Observation ID of last item for pagination"
-//	@Param		limit		query		int		false	"Max results (default 50)"
+//	@Param		limit		query		int		false	"Max results (default 50); must be positive, values above 200 are clamped" minimum(1) maximum(200)
 //	@Success	200			{object}	api.Page[api.AdvertObservation]
 //	@Failure	400			{object}	handlers.APIError
 //	@Failure	500			{object}	handlers.APIError
@@ -148,14 +144,10 @@ func listObserverAdverts(reader api.Reader) http.HandlerFunc {
 			}
 			cursor = c
 		}
-		var limit int32 = 50
-		if limitParam := r.URL.Query().Get("limit"); limitParam != "" {
-			l, err := strconv.ParseInt(limitParam, 10, 32)
-			if err != nil {
-				respondError(w, http.StatusBadRequest, "limit must be an integer")
-				return
-			}
-			limit = int32(l)
+		limit, err := parseLimit(r, 50)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
 		}
 		adverts, err := reader.ListObserverAdverts(r.Context(), observerID, cursor, limit)
 		if err != nil {

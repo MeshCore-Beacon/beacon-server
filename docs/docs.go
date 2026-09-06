@@ -4,11 +4,11 @@ package docs
 import "github.com/swaggo/swag"
 
 const docTemplate = `{
-    "schemes": [[ marshal .Schemes ]],
+    "schemes": {{ marshal .Schemes }},
     "swagger": "2.0",
     "info": {
-        "description": "[[escape .Description]]",
-        "title": "[[.Title]]",
+        "description": "{{escape .Description}}",
+        "title": "{{.Title}}",
         "termsOfService": "https://github.com/MeshCore-Beacon/beacon-server",
         "contact": {
             "name": "MeshCore Beacon",
@@ -17,10 +17,10 @@ const docTemplate = `{
         "license": {
             "name": "AGPL-3-or-later"
         },
-        "version": "[[.Version]]"
+        "version": "{{.Version}}"
     },
-    "host": "[[.Host]]",
-    "basePath": "[[.BasePath]]",
+    "host": "{{.Host}}",
+    "basePath": "{{.BasePath}}",
     "paths": {
         "/brokers": {
             "get": {
@@ -79,8 +79,10 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 50)",
+                        "description": "Max results (default 50); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -201,8 +203,10 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 50)",
+                        "description": "Max results (default 50); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -387,8 +391,10 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 50)",
+                        "description": "Max results (default 50); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -457,8 +463,10 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 100)",
+                        "description": "Max results (default 100); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -583,8 +591,10 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 50)",
+                        "description": "Max results (default 50); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -718,8 +728,10 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 50)",
+                        "description": "Max results (default 50); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -817,8 +829,10 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 50)",
+                        "description": "Max results (default 50); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -909,8 +923,10 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 50)",
+                        "description": "Max results (default 50); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -1090,8 +1106,10 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 50)",
+                        "description": "Max results (default 50); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -1178,8 +1196,10 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 100)",
+                        "description": "Max results (default 100); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -1352,8 +1372,10 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 50)",
+                        "description": "Max results (default 50); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -1366,6 +1388,12 @@ const docTemplate = `{
                             "items": {
                                 "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.KnownRoute"
                             }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
                     },
                     "500": {
@@ -1612,8 +1640,10 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 10)",
+                        "description": "Max results (default 10); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -1955,8 +1985,10 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 10)",
+                        "description": "Max results (default 10); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -2009,8 +2041,10 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 10)",
+                        "description": "Max results (default 10); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -2069,8 +2103,10 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 10)",
+                        "description": "Max results (default 10); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -2129,8 +2165,10 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 10)",
+                        "description": "Max results (default 10); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -2213,8 +2251,10 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "maximum": 200,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 50)",
+                        "description": "Max results (default 50); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
                     }
@@ -2227,6 +2267,12 @@ const docTemplate = `{
                             "items": {
                                 "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TraceTagSummary"
                             }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
                     },
                     "500": {
@@ -3936,8 +3982,8 @@ var SwaggerInfo = &swag.Spec{
 	Description:      "MeshCore network observation backend. Ingests LoRa packets from MQTT brokers, stores in PostgreSQL, and streams live events via WebSocket.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
-	LeftDelim:        "[[",
-	RightDelim:       "]]",
+	LeftDelim:        "{{",
+	RightDelim:       "}}",
 }
 
 func init() {
