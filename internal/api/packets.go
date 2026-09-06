@@ -17,13 +17,9 @@ type PacketLatestObserver struct {
 	ID          uuid.UUID `json:"id"`
 	DisplayName *string   `json:"displayName,omitempty"`
 	IATA        string    `json:"iata"`
-	// PathLength/PathBytes are cheap -- already-stored columns on packet_observations -- and
-	// populated everywhere PacketLatestObserver appears: the REST list/backfill endpoints and
-	// the WS feed alike. ResolvedPath/ResolvedSource/ResolvedDestination require a per-hash DB
-	// resolution lookup; they're populated on the WS feed (already computed once at ingest, so
-	// effectively free there) but deliberately left nil on the REST endpoints, which are
-	// paginated/high-volume and used only for scrollback and reconnect-gap backfill -- full
-	// resolution stays a GET /packets/{packetHash}-only feature.
+	// PathLength/PathBytes and captured endpoint resolutions are stored on the observation,
+	// so list/backfill reads need no per-hash resolution queries. Legacy observations have
+	// no endpoint snapshot. ResolvedPath remains a detail/opted-in WS feature.
 	PathLength          *PacketPathLength `json:"pathLength,omitempty"`
 	PathBytes           *string           `json:"pathBytes,omitempty"` // hex-encoded accumulated path hashes
 	ResolvedPath        []ResolvedHop     `json:"resolvedPath,omitempty"`
@@ -71,7 +67,9 @@ type PacketObservationDetail struct {
 	SourceBroker      string           `json:"sourceBroker"`
 	ResolvedPath      []ResolvedHop    `json:"resolvedPath"` // per-observation resolved path hashes
 	// ResolvedSource/ResolvedDestination are the packet's endpoints, when the payload type
-	// carries a resolvable one: an exact match for ADVERT's full pubkey, an ambiguous
+	// carries one. Prefer the snapshot captured at ingest; legacy observations without a
+	// snapshot use the current node registry. Endpoint matching itself is unchanged:
+	// an exact match for ADVERT's full pubkey, an ambiguous
 	// hash-prefix match (like intermediate hops) for TEXT_MESSAGE/PATH/ANON_REQ's 1-byte
 	// source/destination hashes. Nil when the payload type doesn't carry one at all (e.g.
 	// GRP_TXT/GRP_DATA/TRACE aren't node-to-node addressed) -- see BuildResolvedPath and
@@ -94,6 +92,14 @@ type ResolvedHop struct {
 	Confidence string         `json:"confidence"` // "high", "ambiguous", or "none"
 	SNR        *float32       `json:"snr,omitempty"`
 	Nodes      []ResolvedNode `json:"nodes"` // empty for "none", one for "high", multiple for "ambiguous"
+}
+
+// PacketEndpointSnapshot is the internal storage shape for an observation's
+// endpoint resolution at ingest. Names and confidence are preserved even when
+// the current node registry changes. REST/WS expose the existing per-endpoint fields.
+type PacketEndpointSnapshot struct {
+	Source      *ResolvedHop `json:"source,omitempty"`
+	Destination *ResolvedHop `json:"destination,omitempty"`
 }
 
 // ResolvedNode is a node reference within a resolved path hop.
