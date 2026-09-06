@@ -2691,12 +2691,13 @@ SELECT
   p.scope_id,
   ts.name AS scope_name,
   (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = p.packet_hash) AS observation_count,
+  -- sqlc loses LATERAL nullability; these scalar defaults are ignored when observer_id is NULL.
   po.observer_id AS latest_observer_id,
   o.display_name AS latest_observer_name,
-  po.iata AS latest_observer_iata,
-  po.path_length_byte AS latest_observer_path_length_byte,
-  po.hash_size AS latest_observer_hash_size,
-  po.hop_count AS latest_observer_hop_count,
+  COALESCE(po.iata, ''::bpchar) AS latest_observer_iata,
+  COALESCE(po.path_length_byte, 0::smallint) AS latest_observer_path_length_byte,
+  COALESCE(po.hash_size, 0::smallint) AS latest_observer_hash_size,
+  COALESCE(po.hop_count, 0::smallint) AS latest_observer_hop_count,
   po.path_bytes AS latest_observer_path_bytes
 FROM packets p
 LEFT JOIN LATERAL (
@@ -2949,12 +2950,13 @@ SELECT
   sat.scan_saturated,
   sat.scan_floor,
   (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = p.packet_hash) AS observation_count,
+  -- sqlc loses LATERAL nullability; these scalar defaults are ignored when observer_id is NULL.
   po.observer_id AS latest_observer_id,
   o.display_name AS latest_observer_name,
-  po.iata AS latest_observer_iata,
-  po.path_length_byte AS latest_observer_path_length_byte,
-  po.hash_size AS latest_observer_hash_size,
-  po.hop_count AS latest_observer_hop_count,
+  COALESCE(po.iata, ''::bpchar) AS latest_observer_iata,
+  COALESCE(po.path_length_byte, 0::smallint) AS latest_observer_path_length_byte,
+  COALESCE(po.hash_size, 0::smallint) AS latest_observer_hash_size,
+  COALESCE(po.hop_count, 0::smallint) AS latest_observer_hop_count,
   po.path_bytes AS latest_observer_path_bytes
 FROM page sh
 CROSS JOIN saturation sat
