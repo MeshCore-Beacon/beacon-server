@@ -398,10 +398,11 @@ SELECT
   COALESCE(po.path_length_byte, 0::smallint) AS latest_observer_path_length_byte,
   COALESCE(po.hash_size, 0::smallint) AS latest_observer_hash_size,
   COALESCE(po.hop_count, 0::smallint) AS latest_observer_hop_count,
-  po.path_bytes AS latest_observer_path_bytes
+  po.path_bytes AS latest_observer_path_bytes,
+  po.resolved_endpoints AS latest_observer_resolved_endpoints
 FROM packets p
 LEFT JOIN LATERAL (
-  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes
+  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes, resolved_endpoints
   FROM packet_observations
   WHERE packet_hash = p.packet_hash
   ORDER BY heard_at DESC
@@ -495,12 +496,13 @@ SELECT
   COALESCE(po.path_length_byte, 0::smallint) AS latest_observer_path_length_byte,
   COALESCE(po.hash_size, 0::smallint) AS latest_observer_hash_size,
   COALESCE(po.hop_count, 0::smallint) AS latest_observer_hop_count,
-  po.path_bytes AS latest_observer_path_bytes
+  po.path_bytes AS latest_observer_path_bytes,
+  po.resolved_endpoints AS latest_observer_resolved_endpoints
 FROM page sh
 CROSS JOIN saturation sat
 JOIN packets p ON p.packet_hash = sh.packet_hash
 LEFT JOIN LATERAL (
-  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes
+  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes, resolved_endpoints
   FROM packet_observations
   WHERE packet_hash = p.packet_hash
   ORDER BY heard_at DESC
@@ -527,6 +529,7 @@ SELECT
   po.hash_size AS latest_observer_hash_size,
   po.hop_count AS latest_observer_hop_count,
   po.path_bytes AS latest_observer_path_bytes,
+  po.resolved_endpoints AS latest_observer_resolved_endpoints,
   ts.name AS scope_name
 FROM packets p
 JOIN packet_observations po ON po.packet_hash = p.packet_hash
@@ -595,9 +598,10 @@ INSERT INTO packet_observations (
   bandwidth_khz,
   coding_rate,
   source_broker,
-  payload_type
+  payload_type,
+  resolved_endpoints
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
 )
 ON CONFLICT (packet_hash, observer_id) DO NOTHING
 RETURNING *;

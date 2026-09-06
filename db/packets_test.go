@@ -204,7 +204,7 @@ func TestListPackets_LatestObserverPathFields(t *testing.T) {
 	if obs.PathBytes == nil || *obs.PathBytes != "a1b2" {
 		t.Errorf("expected pathBytes a1b2, got %v", obs.PathBytes)
 	}
-	// Resolution stays a detail-view-only feature on this list endpoint -- deliberately unset.
+	// Legacy rows without a captured snapshot still omit resolved endpoints on lists.
 	if obs.ResolvedPath != nil || obs.ResolvedSource != nil || obs.ResolvedDestination != nil {
 		t.Error("expected no resolved path/source/destination on the list endpoint")
 	}
