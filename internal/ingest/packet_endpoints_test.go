@@ -41,6 +41,12 @@ func (s *endpointCaptureDB) ResolvePathHashes(_ context.Context, iata string, ha
 		"aa": {{NodeID: s.node.ID, Name: s.node.Name, PublicKey: []byte{0xaa}}, {NodeID: uuid.Nil, PublicKey: []byte{0xab}}},
 	}, nil
 }
+
+// Share fixture results with the dedicated endpoint resolver when both PRs are combined.
+func (s *endpointCaptureDB) ResolveEndpointHashes(ctx context.Context, iata string, hashes [][]byte) (map[string][]api.ResolvedPathEntry, error) {
+	return s.ResolvePathHashes(ctx, iata, hashes)
+}
+
 func (s *endpointCaptureDB) InsertObservation(_ context.Context, observation InsertObservationParams) (bool, error) {
 	s.observed = append(s.observed, observation)
 	return true, nil
