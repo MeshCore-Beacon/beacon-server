@@ -110,21 +110,8 @@ func (s *Store) GetTraceByTag(ctx context.Context, tag string) (*api.TraceDetail
 			}
 			packet.RawPath = rawPath
 		}
-		// fetch observations to get IATAs for route resolution
-		packetHashBytes, err := hex.DecodeString(r.PacketHashHex)
-		if err == nil {
-			obsRows, err := s.q.ListObservationsForPacket(ctx, packetHashBytes)
-			if err == nil && len(obsRows) > 0 {
-				iatas := make([]string, 0, len(obsRows))
-				seen := make(map[string]struct{})
-				for _, v := range obsRows {
-					if _, ok := seen[v.Iata]; !ok {
-						seen[v.Iata] = struct{}{}
-						iatas = append(iatas, v.Iata)
-					}
-				}
-				packet.ResolvedRoute = s.resolveTraceRoute(ctx, &parsed, iatas)
-			}
+		if len(r.Iatas) > 0 {
+			packet.ResolvedRoute = s.resolveTraceRoute(ctx, &parsed, r.Iatas)
 		}
 		detail.Packets = append(detail.Packets, packet)
 	}

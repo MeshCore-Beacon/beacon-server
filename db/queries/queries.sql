@@ -362,14 +362,22 @@ LEFT JOIN channel_messages cm ON cm.packet_hash = p.packet_hash
 WHERE p.packet_hash = $1;
 
 -- name: GetPacketsByTraceTag :many
--- Returns all packets for a given trace tag with observations.
+-- Return distinct observation IATAs in first-heard order for path resolution,
+-- without fetching full observations separately for every trace packet.
 SELECT encode(p.packet_hash, 'hex') AS packet_hash_hex,
     p.route_type,
     p.first_heard_at,
     p.last_heard_at,
     p.parsed_payload,
     p.scope_id,
-    ts.name AS scope_name
+    ts.name AS scope_name,
+    ARRAY(
+        SELECT po.iata
+        FROM packet_observations po
+        WHERE po.packet_hash = p.packet_hash
+        GROUP BY po.iata
+        ORDER BY MIN(po.heard_at), po.iata
+    )::bpchar[] AS iatas
 FROM packets p
 LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE p.trace_tag = decode($1, 'hex')
