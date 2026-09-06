@@ -37,9 +37,9 @@ package ingest
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"encoding/json"
-	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -234,9 +234,11 @@ func New(cfg Config, db DB, h *hub.Hub, keys ChannelKeyStore, scopes ScopeStore)
 //
 // Intended usage: go worker.Start(ctx)
 func (w *Worker) Start(ctx context.Context) {
+	// Isolate workers across deployments; Paho reuses this ID on reconnect.
+	// Keep it alphanumeric and within MQTT 3.1's 23-character client ID limit.
 	opts := mqtt.NewClientOptions().
 		AddBroker(w.cfg.URL).
-		SetClientID(fmt.Sprintf("beacon-%s", w.cfg.BrokerName)).
+		SetClientID(rand.Text()[:23]).
 		SetUsername(w.cfg.Username).
 		SetPassword(w.cfg.Password).
 		SetAutoReconnect(true).
