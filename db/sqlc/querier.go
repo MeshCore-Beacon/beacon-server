@@ -127,6 +127,7 @@ type Querier interface {
 	// Used for WS reconnect backfill.
 	ListMessagesAfterID(ctx context.Context, arg ListMessagesAfterIDParams) ([]ListMessagesAfterIDRow, error)
 	ListNodeObservations(ctx context.Context, arg ListNodeObservationsParams) ([]ListNodeObservationsRow, error)
+	// Limit the filtered node page before enriching IATA membership and neighbours.
 	ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNodesRow, error)
 	ListObservationsForPacket(ctx context.Context, packetHash []byte) ([]ListObservationsForPacketRow, error)
 	// Returns advert packets (payload_type=4) heard by a specific observer.
