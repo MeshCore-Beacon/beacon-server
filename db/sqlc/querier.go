@@ -122,6 +122,9 @@ type Querier interface {
 	// Pass cursor=0 to start from the beginning (cursor is last_seen epoch ms).
 	ListChannels(ctx context.Context, arg ListChannelsParams) ([]Channel, error)
 	ListIATAs(ctx context.Context) ([]IataCode, error)
+	// Only one branch runs. Keep the IATA range ordered by the composite index:
+	// generic plans can otherwise prefer scanning the global timestamp index.
+	// The text equality preserves exact input matching, including trailing spaces.
 	ListKnownRoutes(ctx context.Context, arg ListKnownRoutesParams) ([]ListKnownRoutesRow, error)
 	// Returns messages after the given message ID, ordered oldest first.
 	// Used for WS reconnect backfill.
