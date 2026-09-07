@@ -153,6 +153,9 @@ type DB interface {
 	// ResolvePathHashes returns a list of node UUIDs for the given path hash prefixes and IATA.
 	ResolvePathHashes(ctx context.Context, iata string, hashes [][]byte) (map[string][]api.ResolvedPathEntry, error)
 
+	// ResolveEndpointHashes matches one-byte logical endpoints, including companions.
+	ResolveEndpointHashes(ctx context.Context, iata string, hashes [][]byte) (map[string][]api.ResolvedPathEntry, error)
+
 	// UpsertChannel upserts a channel row by (hash, keyFingerprint) and returns its integer ID.
 	// Pass nil keyFingerprint to record a hash-only row when the key is unknown.
 	UpsertChannel(ctx context.Context, channelHash []byte, keyFingerprint []byte, name string, hashtag string) (int, error)

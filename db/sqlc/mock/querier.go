@@ -1152,6 +1152,21 @@ func (mr *MockQuerierMockRecorder) RefreshTopTalkers(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RefreshTopTalkers", reflect.TypeOf((*MockQuerier)(nil).RefreshTopTalkers), ctx)
 }
 
+// ResolveEndpointHashes mocks base method.
+func (m *MockQuerier) ResolveEndpointHashes(ctx context.Context, arg db.ResolveEndpointHashesParams) ([]db.ResolveEndpointHashesRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ResolveEndpointHashes", ctx, arg)
+	ret0, _ := ret[0].([]db.ResolveEndpointHashesRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ResolveEndpointHashes indicates an expected call of ResolveEndpointHashes.
+func (mr *MockQuerierMockRecorder) ResolveEndpointHashes(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolveEndpointHashes", reflect.TypeOf((*MockQuerier)(nil).ResolveEndpointHashes), ctx, arg)
+}
+
 // ResolvePathHashesP1 mocks base method.
 func (m *MockQuerier) ResolvePathHashesP1(ctx context.Context, arg db.ResolvePathHashesP1Params) ([]db.ResolvePathHashesP1Row, error) {
 	m.ctrl.T.Helper()

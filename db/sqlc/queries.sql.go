@@ -3389,6 +3389,63 @@ func (q *Queries) RefreshTopTalkers(ctx context.Context) error {
 	return err
 }
 
+const resolveEndpointHashes = `-- name: ResolveEndpointHashes :many
+SELECT ns.prefix_1 AS hash, n.id AS node_id, n.name, n.latitude, n.longitude, n.public_key
+FROM node_short_ids ns
+CROSS JOIN LATERAL (
+  SELECT id, name, latitude, longitude, public_key
+  FROM nodes WHERE id = ns.node_id
+  LIMIT 1
+) n
+WHERE ns.iata = $1
+  AND ns.prefix_1 = ANY($2::bytea[])
+`
+
+type ResolveEndpointHashesParams struct {
+	Iata    string   `json:"iata"`
+	Column2 [][]byte `json:"column_2"`
+}
+
+type ResolveEndpointHashesRow struct {
+	Hash      []byte    `json:"hash"`
+	NodeID    uuid.UUID `json:"node_id"`
+	Name      *string   `json:"name"`
+	Latitude  *float64  `json:"latitude"`
+	Longitude *float64  `json:"longitude"`
+	PublicKey []byte    `json:"public_key"`
+}
+
+// Logical endpoints can be any advertised role, unlike intermediate relay hops.
+// Endpoint hashes are always one byte; use the existing (iata, prefix_1) index.
+// LIMIT 1 keeps generic plans on a node PK lookup per candidate instead of
+// flattening the join into a scan of all nodes. The PK already guarantees one row.
+func (q *Queries) ResolveEndpointHashes(ctx context.Context, arg ResolveEndpointHashesParams) ([]ResolveEndpointHashesRow, error) {
+	rows, err := q.db.Query(ctx, resolveEndpointHashes, arg.Iata, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ResolveEndpointHashesRow{}
+	for rows.Next() {
+		var i ResolveEndpointHashesRow
+		if err := rows.Scan(
+			&i.Hash,
+			&i.NodeID,
+			&i.Name,
+			&i.Latitude,
+			&i.Longitude,
+			&i.PublicKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const resolvePathHashesP1 = `-- name: ResolvePathHashesP1 :many
 
 

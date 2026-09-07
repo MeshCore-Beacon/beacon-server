@@ -476,7 +476,7 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 			hop := api.ResolveExactNode(resolvedAdvertSource)
 			obs.ResolvedSource = &hop
 		} else if len(sourceHashByte) == 1 {
-			if r, err := s.ResolvePathHashes(ctx, v.Iata, [][]byte{sourceHashByte}); err != nil {
+			if r, err := s.ResolveEndpointHashes(ctx, v.Iata, [][]byte{sourceHashByte}); err != nil {
 				log.Printf("store: source resolution failed for observation %d: %v", v.ID, err)
 			} else {
 				hop := api.BuildResolvedPath([][]byte{sourceHashByte}, r)[0]
@@ -484,7 +484,7 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 			}
 		}
 		if len(destHashByte) == 1 {
-			if r, err := s.ResolvePathHashes(ctx, v.Iata, [][]byte{destHashByte}); err != nil {
+			if r, err := s.ResolveEndpointHashes(ctx, v.Iata, [][]byte{destHashByte}); err != nil {
 				log.Printf("store: destination resolution failed for observation %d: %v", v.ID, err)
 			} else {
 				hop := api.BuildResolvedPath([][]byte{destHashByte}, r)[0]
