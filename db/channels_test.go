@@ -29,7 +29,7 @@ func TestListChannels_Empty(t *testing.T) {
 		Return([]sqlc.Channel{}, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListChannels(context.Background(), 10, nil, nil, 0)
+	page, err := store.ListChannels(context.Background(), 10, nil, nil, 0, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestListChannels_Pagination(t *testing.T) {
 		Return(rows, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListChannels(context.Background(), 2, nil, nil, 0)
+	page, err := store.ListChannels(context.Background(), 2, nil, nil, 0, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestListChannels_DBError(t *testing.T) {
 		Return(nil, errors.New("db error"))
 
 	store := &Store{q: mock}
-	_, err := store.ListChannels(context.Background(), 10, nil, nil, 0)
+	_, err := store.ListChannels(context.Background(), 10, nil, nil, 0, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -115,7 +115,7 @@ func TestListChannels_IATAFilter(t *testing.T) {
 		Return([]sqlc.Channel{}, nil)
 
 	store := &Store{q: mock}
-	_, err := store.ListChannels(context.Background(), 10, nil, []string{"YOW", "YYZ"}, 0)
+	_, err := store.ListChannels(context.Background(), 10, nil, []string{"YOW", "YYZ"}, 0, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

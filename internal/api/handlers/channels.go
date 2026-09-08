@@ -38,8 +38,9 @@ func ChannelsRouter(reader api.Reader) http.Handler {
 //	@Param		iata	query		string	false	"Filter by IATA code"
 //	@Param		iatas	query		string	false	"Filter by IATA code(s), comma-separated e.g. YOW or YOW,YYZ"
 //	@Param		cursor	query		int		false	"last_seen epoch ms of last item for pagination"
+//	@Param		pageCursor	query		string	false	"Opaque nextPageCursor from a previous response; preserves timestamp ties and precision. Cannot be combined with cursor."
 //	@Param		limit	query		int		false	"Max results (default 50); must be positive, values above 200 are clamped" minimum(1) maximum(200)
-//	@Success	200		{object}	api.Page[api.ChannelSummary]
+//	@Success	200		{object}	api.ChannelPage
 //	@Failure	400		{object}	handlers.APIError
 //	@Failure	500		{object}	handlers.APIError
 //	@Router		/channels [get]
@@ -51,6 +52,18 @@ func listChannels(reader api.Reader) http.HandlerFunc {
 			return
 		}
 		iatas := parseIATAs(r)
+		var pageCursor *api.ChannelCursor
+		if raw := r.URL.Query().Get("pageCursor"); raw != "" {
+			if r.URL.Query().Get("cursor") != "" {
+				respondError(w, http.StatusBadRequest, "pageCursor and cursor cannot be combined")
+				return
+			}
+			pageCursor, err = api.ParseChannelCursor(raw)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "invalid pageCursor")
+				return
+			}
+		}
 		var cursor int64
 		if cursorParam := r.URL.Query().Get("cursor"); cursorParam != "" {
 			c, err := strconv.ParseInt(cursorParam, 10, 64)
@@ -73,7 +86,7 @@ func listChannels(reader api.Reader) http.HandlerFunc {
 			}
 			hashHex = h
 		}
-		channels, err := reader.ListChannels(r.Context(), limit, hashHex, iatas, cursor)
+		channels, err := reader.ListChannels(r.Context(), limit, hashHex, iatas, cursor, pageCursor)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return

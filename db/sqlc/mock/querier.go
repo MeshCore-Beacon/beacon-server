@@ -816,6 +816,21 @@ func (mr *MockQuerierMockRecorder) ListChannels(ctx, arg any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChannels", reflect.TypeOf((*MockQuerier)(nil).ListChannels), ctx, arg)
 }
 
+// ListChannelsAfter mocks base method.
+func (m *MockQuerier) ListChannelsAfter(ctx context.Context, arg db.ListChannelsAfterParams) ([]db.Channel, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListChannelsAfter", ctx, arg)
+	ret0, _ := ret[0].([]db.Channel)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListChannelsAfter indicates an expected call of ListChannelsAfter.
+func (mr *MockQuerierMockRecorder) ListChannelsAfter(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChannelsAfter", reflect.TypeOf((*MockQuerier)(nil).ListChannelsAfter), ctx, arg)
+}
+
 // ListIATAs mocks base method.
 func (m *MockQuerier) ListIATAs(ctx context.Context) ([]db.IataCode, error) {
 	m.ctrl.T.Helper()

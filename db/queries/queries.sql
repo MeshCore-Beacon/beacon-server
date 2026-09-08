@@ -785,7 +785,19 @@ WHERE (@channel_hash::bytea IS NULL OR c.channel_hash = @channel_hash)
     WHERE ci.iata = ANY(@iatas::bpchar[])
   ))
   AND (@cursor_ts::timestamptz IS NULL OR c.last_seen < @cursor_ts)
-ORDER BY c.last_seen DESC
+ORDER BY c.last_seen DESC, c.id DESC
+LIMIT @page_limit;
+
+-- name: ListChannelsAfter :many
+-- Keep the non-null tuple boundary separate from the legacy optional cursor so
+-- generic prepared plans can seek directly into the composite ordered index.
+SELECT c.* FROM channels c
+WHERE (c.last_seen, c.id) < (@cursor_ts::timestamptz, @cursor_id::integer)
+  AND (@channel_hash::bytea IS NULL OR c.channel_hash = @channel_hash)
+  AND (COALESCE(cardinality(@iatas::bpchar[]), 0) = 0 OR c.channel_hash IN (
+    SELECT ci.channel_hash FROM channel_iatas ci WHERE ci.iata = ANY(@iatas::bpchar[])
+  ))
+ORDER BY c.last_seen DESC, c.id DESC
 LIMIT @page_limit;
 
 -- name: GetChannelByID :one

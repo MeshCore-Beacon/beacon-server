@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/go-chi/chi/v5"
@@ -33,6 +34,31 @@ func TestListChannels_InvalidCursor(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestListChannels_PageCursor(t *testing.T) {
+	called := false
+	r := ChannelsRouter(stubReader{listChannels: func(_ context.Context, limit int32, hash []byte, iatas []string, legacy int64, cursor *api.ChannelCursor) (api.ChannelPage, error) {
+		called = true
+		if limit != 2 || legacy != 0 || cursor == nil || cursor.ID != 9 || !cursor.LastSeen.Equal(time.UnixMicro(1700000000000123)) ||
+			!reflect.DeepEqual(hash, []byte{0xaa}) || !reflect.DeepEqual(iatas, []string{"YOW"}) {
+			t.Error("page cursor or filters did not reach the reader intact")
+		}
+		return api.ChannelPage{}, nil
+	}})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/?pageCursor=v1:1700000000000123:9&limit=2&hash=AA&iata=yow", nil))
+	if w.Code != http.StatusOK || !called {
+		t.Fatalf("HTTP %d, reader called=%v", w.Code, called)
+	}
+	for _, query := range []string{"pageCursor=bad", "cursor=0&pageCursor=v1:1700000000000123:9"} {
+		called = false
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/?"+query, nil))
+		if w.Code != http.StatusBadRequest || called {
+			t.Errorf("HTTP %d, invalid request reached reader=%v", w.Code, called)
+		}
 	}
 }
 
@@ -116,8 +142,8 @@ func TestListChannelMessages_InvalidCursor(t *testing.T) {
 func TestListChannels_OK(t *testing.T) {
 	r := chi.NewRouter()
 	r.Get("/channels", listChannels(stubReader{
-		listChannels: func(_ context.Context, _ int32, _ []byte, _ []string, _ int64) (api.Page[api.ChannelSummary], error) {
-			return api.Page[api.ChannelSummary]{Items: []api.ChannelSummary{{ID: 1, ChannelHash: "ab"}}}, nil
+		listChannels: func(_ context.Context, _ int32, _ []byte, _ []string, _ int64, _ *api.ChannelCursor) (api.ChannelPage, error) {
+			return api.ChannelPage{Page: api.Page[api.ChannelSummary]{Items: []api.ChannelSummary{{ID: 1, ChannelHash: "ab"}}}}, nil
 		},
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/channels", nil)
@@ -143,9 +169,9 @@ func TestListChannels_IATAParsing(t *testing.T) {
 			var got []string
 			r := chi.NewRouter()
 			r.Get("/channels", listChannels(stubReader{
-				listChannels: func(_ context.Context, _ int32, _ []byte, iatas []string, _ int64) (api.Page[api.ChannelSummary], error) {
+				listChannels: func(_ context.Context, _ int32, _ []byte, iatas []string, _ int64, _ *api.ChannelCursor) (api.ChannelPage, error) {
 					got = iatas
-					return api.Page[api.ChannelSummary]{}, nil
+					return api.ChannelPage{}, nil
 				},
 			}))
 			req := httptest.NewRequest(http.MethodGet, "/channels"+tc.query, nil)

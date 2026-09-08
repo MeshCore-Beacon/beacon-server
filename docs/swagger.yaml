@@ -81,6 +81,19 @@ definitions:
         description: epoch ms, from the sender's embedded timestamp
         type: integer
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.ChannelPage:
+    properties:
+      hasMore:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ChannelSummary'
+        type: array
+      nextCursor:
+        type: integer
+      nextPageCursor:
+        type: string
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.ChannelSummary:
     properties:
       channelHash:
@@ -777,17 +790,6 @@ definitions:
       nextCursor:
         type: integer
     type: object
-  github_com_MeshCore-Beacon_beacon-server_internal_api.Page-github_com_MeshCore-Beacon_beacon-server_internal_api_ChannelSummary:
-    properties:
-      hasMore:
-        type: boolean
-      items:
-        items:
-          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ChannelSummary'
-        type: array
-      nextCursor:
-        type: integer
-    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.Page-github_com_MeshCore-Beacon_beacon-server_internal_api_NodeSummary:
     properties:
       hasMore:
@@ -1177,6 +1179,11 @@ paths:
         in: query
         name: cursor
         type: integer
+      - description: Opaque nextPageCursor from a previous response; preserves timestamp
+          ties and precision. Cannot be combined with cursor.
+        in: query
+        name: pageCursor
+        type: string
       - description: Max results (default 50); must be positive, values above 200
           are clamped
         in: query
@@ -1190,7 +1197,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.Page-github_com_MeshCore-Beacon_beacon-server_internal_api_ChannelSummary'
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ChannelPage'
         "400":
           description: Bad Request
           schema:
