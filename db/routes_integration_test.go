@@ -51,7 +51,7 @@ ANALYZE known_routes;`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	migration, err := migrationFiles.ReadFile("migrations/025_known_routes_iata_last_seen.sql")
+	migration, err := migrationFiles.ReadFile("migrations/027_known_routes_iata_last_seen.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
