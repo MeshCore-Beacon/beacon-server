@@ -220,8 +220,8 @@ VALUES (decode($1,'hex'),4,0,1,'\x00','\x00',NOW(),NOW())`, fmt.Sprintf("%064x",
 			t.Fatal("empty capture suppressed the later advertised node")
 		}
 	}
-	exec(`INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,origin_pubkey)
-VALUES (decode($1,'hex'),4,0,1,'\x00','\x00',decode($2,'hex'))`, fmt.Sprintf("%064x", 57), key)
+	exec(`INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,origin_pubkey,first_heard_at,last_heard_at)
+VALUES (decode($1,'hex'),4,0,1,'\x00','\x00',decode($2,'hex'),$3,$3)`, fmt.Sprintf("%064x", 57), key, anchor)
 	observation.PacketHash, observation.ResolvedEndpoints = append(make([]byte, 31), 57), nil
 	inserted, err := store.InsertObservation(ctx, observation)
 	if err != nil || !inserted {
