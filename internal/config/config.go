@@ -7,6 +7,7 @@ package config
 
 import (
 	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"time"
@@ -16,6 +17,7 @@ import (
 
 // Config is the top-level structure of the Beacon config file.
 type Config struct {
+	Server      ServerConfig          `yaml:"server"`
 	IATAs       map[string]IATAConfig `yaml:"iatas"`
 	Regions     []RegionConfig        `yaml:"regions"`
 	ChannelKeys ChannelKeysConfig     `yaml:"channel_keys"`
@@ -31,6 +33,13 @@ type Config struct {
 	Presence    PresenceConfig        `yaml:"presence"`
 	Nodes       NodesConfig           `yaml:"nodes"`
 	Observers   ObserversConfig       `yaml:"observers"`
+}
+
+// ServerConfig controls which direct peers may supply the client address.
+type ServerConfig struct {
+	// TrustedProxies accepts IPv4/IPv6 CIDRs; an empty list trusts no proxy.
+	// netip.Prefix validates each CIDR while the configuration is loaded.
+	TrustedProxies []netip.Prefix `yaml:"trusted_proxies"`
 }
 
 // ResolvedConfig holds all runtime configuration with defaults applied.

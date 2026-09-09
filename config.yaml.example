@@ -1,6 +1,14 @@
 # Beacon configuration file
 # Copy to config.yaml and adjust as needed.
 
+server:
+  # Only these direct proxy peers may set the client IP through X-Real-IP.
+  # The proxy must overwrite that header, not pass through client input.
+  # Leave empty for direct access. Invalid CIDRs prevent startup.
+  # For Docker, list the actual proxy/compose network CIDR (e.g. 172.20.0.0/24).
+  # For a host proxy, use ["127.0.0.1/8", "::1/128"].
+  trusted_proxies: []
+
 iatas:
   YVR:
     name: Vancouver International
