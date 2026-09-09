@@ -860,7 +860,14 @@ SELECT encode(p.packet_hash, 'hex') AS packet_hash_hex,
     p.last_heard_at,
     p.parsed_payload,
     p.scope_id,
-    ts.name AS scope_name
+    ts.name AS scope_name,
+    ARRAY(
+        SELECT po.iata
+        FROM packet_observations po
+        WHERE po.packet_hash = p.packet_hash
+        GROUP BY po.iata
+        ORDER BY MIN(po.heard_at), po.iata
+    )::bpchar[] AS iatas
 FROM packets p
 LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE p.trace_tag = decode($1, 'hex')
@@ -875,9 +882,11 @@ type GetPacketsByTraceTagRow struct {
 	ParsedPayload []byte             `json:"parsed_payload"`
 	ScopeID       *int32             `json:"scope_id"`
 	ScopeName     *string            `json:"scope_name"`
+	Iatas         []string           `json:"iatas"`
 }
 
-// Returns all packets for a given trace tag with observations.
+// Return distinct observation IATAs in first-heard order for path resolution,
+// without fetching full observations separately for every trace packet.
 func (q *Queries) GetPacketsByTraceTag(ctx context.Context, decode string) ([]GetPacketsByTraceTagRow, error) {
 	rows, err := q.db.Query(ctx, getPacketsByTraceTag, decode)
 	if err != nil {
@@ -895,6 +904,7 @@ func (q *Queries) GetPacketsByTraceTag(ctx context.Context, decode string) ([]Ge
 			&i.ParsedPayload,
 			&i.ScopeID,
 			&i.ScopeName,
+			&i.Iatas,
 		); err != nil {
 			return nil, err
 		}

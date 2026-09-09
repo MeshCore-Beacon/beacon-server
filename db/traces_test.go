@@ -112,13 +112,8 @@ func TestGetTraceByTag_WithPacket(t *testing.T) {
 				FirstHeardAt:  firstHeard,
 				LastHeardAt:   lastHeard,
 				ParsedPayload: parsedPayload,
+				Iatas:         []string{"YVR"},
 			},
-		}, nil)
-
-	mock.EXPECT().
-		ListObservationsForPacket(gomock.Any(), []byte{0xaa, 0xbb, 0xcc, 0xdd}).
-		Return([]sqlc.ListObservationsForPacketRow{
-			{Iata: "YVR"},
 		}, nil)
 
 	mock.EXPECT().
