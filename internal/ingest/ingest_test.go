@@ -252,6 +252,10 @@ func (s *stubDB) ResolvePathHashes(_ context.Context, _ string, _ [][]byte) (map
 	return nil, nil
 }
 
+func (s *stubDB) ResolveEndpointHashes(_ context.Context, _ string, _ [][]byte) (map[string][]api.ResolvedPathEntry, error) {
+	return nil, nil
+}
+
 func (s *stubDB) UpsertChannel(_ context.Context, _ []byte, _ []byte, _, _ string) (int, error) {
 	s.upsertChannelCalls++
 	return 0, nil

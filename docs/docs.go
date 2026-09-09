@@ -3191,7 +3191,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "pathLength": {
-                    "description": "PathLength/PathBytes are cheap -- already-stored columns on packet_observations -- and\npopulated everywhere PacketLatestObserver appears: the REST list/backfill endpoints and\nthe WS feed alike. ResolvedPath/ResolvedSource/ResolvedDestination require a per-hash DB\nresolution lookup; they're populated on the WS feed (already computed once at ingest, so\neffectively free there) but deliberately left nil on the REST endpoints, which are\npaginated/high-volume and used only for scrollback and reconnect-gap backfill -- full\nresolution stays a GET /packets/{packetHash}-only feature.",
+                    "description": "PathLength/PathBytes and captured endpoint resolutions are stored on the observation,\nso list/backfill reads need no per-hash resolution queries. Legacy observations have\nno endpoint snapshot. ResolvedPath remains a detail/opted-in WS feature.",
                     "allOf": [
                         {
                             "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PacketPathLength"
@@ -3256,7 +3256,7 @@ const docTemplate = `{
                     }
                 },
                 "resolvedSource": {
-                    "description": "ResolvedSource/ResolvedDestination are the packet's endpoints, when the payload type\ncarries a resolvable one: an exact match for ADVERT's full pubkey, an ambiguous\nhash-prefix match (like intermediate hops) for TEXT_MESSAGE/PATH/ANON_REQ's 1-byte\nsource/destination hashes. Nil when the payload type doesn't carry one at all (e.g.\nGRP_TXT/GRP_DATA/TRACE aren't node-to-node addressed) -- see BuildResolvedPath and\nResolveExactNode for how each is built.",
+                    "description": "ResolvedSource/ResolvedDestination are the packet's endpoints, when the payload type\ncarries one. Prefer the snapshot captured at ingest; legacy observations without a\nsnapshot use the current node registry. Endpoint matching itself is unchanged:\nan exact match for ADVERT's full pubkey, an ambiguous\nhash-prefix match (like intermediate hops) for TEXT_MESSAGE/PATH/ANON_REQ's 1-byte\nsource/destination hashes. Nil when the payload type doesn't carry one at all (e.g.\nGRP_TXT/GRP_DATA/TRACE aren't node-to-node addressed) -- see BuildResolvedPath and\nResolveExactNode for how each is built.",
                     "allOf": [
                         {
                             "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ResolvedHop"

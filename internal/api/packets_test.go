@@ -10,6 +10,28 @@ import (
 	"github.com/meshcore-go/meshcore-go"
 )
 
+func TestPacketEndpointSnapshotHasResolvedNodes(t *testing.T) {
+	none := &api.ResolvedHop{Confidence: "none", Nodes: []api.ResolvedNode{}}
+	known := &api.ResolvedHop{Confidence: "high", Nodes: []api.ResolvedNode{{PublicKey: "aa"}}}
+	for _, tc := range []struct {
+		name     string
+		snapshot api.PacketEndpointSnapshot
+		want     bool
+	}{
+		{"absent", api.PacketEndpointSnapshot{}, false},
+		{"unresolved source", api.PacketEndpointSnapshot{Source: none}, false},
+		{"both unresolved", api.PacketEndpointSnapshot{Source: none, Destination: none}, false},
+		{"source only", api.PacketEndpointSnapshot{Source: known, Destination: none}, true},
+		{"destination only", api.PacketEndpointSnapshot{Destination: known}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.snapshot.HasResolvedNodes(); got != tc.want {
+				t.Fatalf("resolved nodes = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestPayloadTypeName(t *testing.T) {
 	tests := []struct {
 		input int16

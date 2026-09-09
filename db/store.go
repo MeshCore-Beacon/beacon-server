@@ -83,6 +83,32 @@ func (s *Store) ResolvePathHashes(ctx context.Context, iata string, hashes [][]b
 	return result, nil
 }
 
+// ResolveEndpointHashes matches one-byte packet endpoints across advertised roles.
+// Keep this separate from the infrastructure-only intermediate path resolver.
+func (s *Store) ResolveEndpointHashes(ctx context.Context, iata string, hashes [][]byte) (map[string][]api.ResolvedPathEntry, error) {
+	if len(hashes) == 0 {
+		return nil, nil
+	}
+	for _, hash := range hashes {
+		if len(hash) != 1 {
+			return nil, nil
+		}
+	}
+	rows, err := s.q.ResolveEndpointHashes(ctx, sqlc.ResolveEndpointHashesParams{Iata: iata, Column2: hashes})
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string][]api.ResolvedPathEntry)
+	for _, row := range rows {
+		key := hex.EncodeToString(row.Hash)
+		result[key] = append(result[key], api.ResolvedPathEntry{
+			NodeID: row.NodeID, Name: row.Name, Latitude: row.Latitude,
+			Longitude: row.Longitude, PublicKey: row.PublicKey,
+		})
+	}
+	return result, nil
+}
+
 // nullableUUID returns nil for a zero UUID, or a pointer to the UUID otherwise.
 func nullableUUID(id uuid.UUID) *uuid.UUID {
 	if id == (uuid.UUID{}) {
