@@ -29,6 +29,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/presence"
 	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 )
@@ -255,11 +256,19 @@ func main() {
 	go broker1.Start(ctx)
 	go broker2.Start(ctx)
 
-	scheduler := background.New([]background.Task{
+	tasks := []background.Task{
 		background.ViewRefreshTask(store, resolved.ViewRefreshInterval),
 		background.CleanupTask(store, resolved.TelemetryRetention, resolved.PacketRetention, resolved.NodeDeleteAfter, resolved.CleanupInterval),
 		background.ReconfirmTask(store, resolved.RouteRetention, resolved.RouteGrace, int64(resolved.RouteMinObservations), resolved.ReconfirmInterval),
-	})
+	}
+	if resolved.ObserverDeleteAfter > 0 {
+		var onDelete func(context.Context, uuid.UUID)
+		if cr, ok := reader.(*cache.CachedReader); ok {
+			onDelete = cr.InvalidateObserver
+		}
+		tasks = append(tasks, background.ObserverCleanupTask(coalescer, resolved.ObserverDeleteAfter, resolved.CleanupInterval, onDelete))
+	}
+	scheduler := background.New(tasks)
 	go scheduler.Start(ctx)
 
 	// ── HTTP server ──────────────────────────────────────────────────────────

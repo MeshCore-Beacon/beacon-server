@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/db"
+	"github.com/google/uuid"
 )
 
 type viewRefresher interface {
@@ -82,6 +83,33 @@ func CleanupTask(store *db.Store, telemetryRetention, packetRetention, nodeDelet
 // reconfirmBatchSize bounds per-tick reconfirm work; at hourly ticks a 16M-row
 // table gets fully re-checked roughly daily.
 const reconfirmBatchSize = 750_000
+
+type observerCleaner interface {
+	DeleteOldObservers(context.Context, time.Time) ([]uuid.UUID, error)
+}
+
+// ObserverCleanupTask ages out unreferenced observers through the presence
+// coalescer, then invalidates any cached details for the deleted IDs.
+func ObserverCleanupTask(store observerCleaner, deleteAfter, interval time.Duration, onDelete func(context.Context, uuid.UUID)) Task {
+	return Task{
+		Name: "observer_cleanup", Interval: interval,
+		Run: func(ctx context.Context) error {
+			if deleteAfter <= 0 {
+				return nil
+			}
+			ids, err := store.DeleteOldObservers(ctx, time.Now().Add(-deleteAfter))
+			if err != nil {
+				return err
+			}
+			if onDelete != nil {
+				for _, id := range ids {
+					onDelete(ctx, id)
+				}
+			}
+			return nil
+		},
+	}
+}
 
 // ReconfirmTask returns a Task that prunes aged routes first, then reconfirms
 // stale and ambiguous resolved paths and neighbors, so known_routes only ever

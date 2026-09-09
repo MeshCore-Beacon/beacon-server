@@ -38,6 +38,8 @@ regions:
     name: British Columbia
     display_order: 1
     iatas: [YVR]
+observers:
+  delete_after: 720h
 `)
 	f.Close()
 
@@ -53,6 +55,9 @@ regions:
 	}
 	if cfg.Regions[0].Slug != "bc" {
 		t.Errorf("expected slug bc, got %s", cfg.Regions[0].Slug)
+	}
+	if Resolve(cfg).ObserverDeleteAfter != 30*24*time.Hour {
+		t.Error("observers.delete_after was not loaded from YAML")
 	}
 }
 
@@ -104,6 +109,9 @@ func TestResolve_Defaults(t *testing.T) {
 	if r.NodeDeleteAfter != 30*24*time.Hour {
 		t.Errorf("expected NodeDeleteAfter 720h (same default as PacketRetention), got %v", r.NodeDeleteAfter)
 	}
+	if r.ObserverDeleteAfter != 0 {
+		t.Errorf("observer deletion must be disabled by default, got %v", r.ObserverDeleteAfter)
+	}
 }
 
 func TestResolve_ExplicitValues(t *testing.T) {
@@ -115,6 +123,7 @@ func TestResolve_ExplicitValues(t *testing.T) {
 	cfg.Background.ViewRefresh.Duration = 2 * time.Hour
 	cfg.Background.Reconfirm.Duration = 3 * time.Hour
 	cfg.Background.Cleanup.Duration = 4 * time.Hour
+	cfg.Observers.DeleteAfter.Duration = 45 * 24 * time.Hour
 
 	r := Resolve(cfg)
 	if r.TelemetryResolution != 30*time.Minute {
@@ -125,6 +134,9 @@ func TestResolve_ExplicitValues(t *testing.T) {
 	}
 	if r.ViewRefreshInterval != 2*time.Hour {
 		t.Errorf("expected 2h, got %v", r.ViewRefreshInterval)
+	}
+	if r.ObserverDeleteAfter != 45*24*time.Hour {
+		t.Errorf("expected observer delete_after 1080h, got %v", r.ObserverDeleteAfter)
 	}
 }
 

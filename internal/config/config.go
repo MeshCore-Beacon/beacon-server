@@ -30,6 +30,7 @@ type Config struct {
 	Background  BackgroundConfig      `yaml:"background"`
 	Presence    PresenceConfig        `yaml:"presence"`
 	Nodes       NodesConfig           `yaml:"nodes"`
+	Observers   ObserversConfig       `yaml:"observers"`
 }
 
 // ResolvedConfig holds all runtime configuration with defaults applied.
@@ -55,8 +56,9 @@ type ResolvedConfig struct {
 
 	// NodeStaleThreshold and NodeDeleteAfter mirror ClockDriftThreshold's "0 means unset,
 	// resolve to a default" pattern -- see NodesConfig.
-	NodeStaleThreshold time.Duration
-	NodeDeleteAfter    time.Duration
+	NodeStaleThreshold  time.Duration
+	NodeDeleteAfter     time.Duration
+	ObserverDeleteAfter time.Duration
 }
 
 // PresenceConfig controls coalescing of presence bookkeeping writes
@@ -209,6 +211,14 @@ type NodesConfig struct {
 	DeleteAfter duration `yaml:"delete_after"`
 }
 
+// ObserversConfig controls optional observer age-out.
+type ObserversConfig struct {
+	// DeleteAfter is how long an observer must be unseen before it can be deleted.
+	// Omitted or nonpositive disables age-out. Retained packet observations,
+	// telemetry and ownership records always protect the observer from deletion.
+	DeleteAfter duration `yaml:"delete_after"`
+}
+
 // duration is a wrapper around time.Duration that supports YAML unmarshalling
 // from human-readable strings like "24h", "7d", "30d".
 type duration struct {
@@ -333,6 +343,7 @@ func Resolve(cfg *Config) ResolvedConfig {
 		ClockDriftThreshold: cfg.Nodes.ClockDriftThreshold.Duration,
 		NodeStaleThreshold:  cfg.Nodes.StaleThreshold.Duration,
 		NodeDeleteAfter:     cfg.Nodes.DeleteAfter.Duration,
+		ObserverDeleteAfter: cfg.Observers.DeleteAfter.Duration,
 	}
 	if r.TelemetryResolution == 0 {
 		r.TelemetryResolution = time.Hour
@@ -386,10 +397,10 @@ func Resolve(cfg *Config) ResolvedConfig {
 
 func (r ResolvedConfig) String() string {
 	return fmt.Sprintf(
-		"telemetryResolution=%s telemetryRetention=%s packetRetention=%s routeRetention=%s routeGrace=%s routeMinObs=%d maxConnsPerIP=%d viewRefresh=%s reconfirm=%s cleanup=%s presenceFlush=%s presencePacketTTL=%s clockDriftThreshold=%s nodeStaleThreshold=%s nodeDeleteAfter=%s",
+		"telemetryResolution=%s telemetryRetention=%s packetRetention=%s routeRetention=%s routeGrace=%s routeMinObs=%d maxConnsPerIP=%d viewRefresh=%s reconfirm=%s cleanup=%s presenceFlush=%s presencePacketTTL=%s clockDriftThreshold=%s nodeStaleThreshold=%s nodeDeleteAfter=%s observerDeleteAfter=%s",
 		r.TelemetryResolution, r.TelemetryRetention, r.PacketRetention, r.RouteRetention, r.RouteGrace, r.RouteMinObservations,
 		r.MaxConnsPerIP, r.ViewRefreshInterval, r.ReconfirmInterval, r.CleanupInterval,
 		r.PresenceFlushInterval, r.PresencePacketTTL, r.ClockDriftThreshold,
-		r.NodeStaleThreshold, r.NodeDeleteAfter,
+		r.NodeStaleThreshold, r.NodeDeleteAfter, r.ObserverDeleteAfter,
 	)
 }
