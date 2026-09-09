@@ -778,10 +778,14 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 			resolvedDestination = &hop
 		}
 	}
-	resolvedEndpoints, err := json.Marshal(api.PacketEndpointSnapshot{Source: resolvedSource, Destination: resolvedDestination})
-	if err != nil {
-		log.Printf("ingest[%s]: endpoint snapshot encoding failed: %v", w.cfg.BrokerName, err)
-		resolvedEndpoints = nil // optional enrichment must not discard the observation
+	var resolvedEndpoints json.RawMessage
+	snapshot := api.PacketEndpointSnapshot{Source: resolvedSource, Destination: resolvedDestination}
+	if snapshot.HasResolvedNodes() {
+		resolvedEndpoints, err = json.Marshal(snapshot)
+		if err != nil {
+			log.Printf("ingest[%s]: endpoint snapshot encoding failed: %v", w.cfg.BrokerName, err)
+			resolvedEndpoints = nil // optional enrichment must not discard the observation
+		}
 	}
 	oParams := InsertObservationParams{
 		PacketHash:        packetHash[:],

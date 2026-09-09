@@ -102,6 +102,13 @@ type PacketEndpointSnapshot struct {
 	Destination *ResolvedHop `json:"destination,omitempty"`
 }
 
+// HasResolvedNodes distinguishes a historical capture from an unresolved lookup
+// that should be retried when a node becomes known (including a first advert).
+func (s PacketEndpointSnapshot) HasResolvedNodes() bool {
+	return (s.Source != nil && len(s.Source.Nodes) > 0) ||
+		(s.Destination != nil && len(s.Destination.Nodes) > 0)
+}
+
 // ResolvedNode is a node reference within a resolved path hop.
 type ResolvedNode struct {
 	ID        uuid.UUID `json:"id"`

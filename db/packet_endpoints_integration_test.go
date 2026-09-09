@@ -205,14 +205,32 @@ VALUES (decode($1,'hex'),4,0,1,'\x00','\x00',NOW(),NOW())`, fmt.Sprintf("%064x",
 		t.Fatalf("duplicate observation changed: %v", err)
 	}
 	check(stored.Observations[0].ResolvedSource, stored.Observations[0].ResolvedDestination, high, none)
-	// An empty capture must not turn into a later registry lookup.
-	exec("UPDATE packet_observations SET resolved_endpoints='{}',source_broker=NULL WHERE packet_hash=$1", observation.PacketHash)
-	q.calls = 0
-	stored, err = store.GetPacket(ctx, observation.PacketHash)
-	if err != nil || q.calls != 2 || stored.Observations[0].SourceBroker != "" {
-		t.Fatalf("empty snapshot or nullable legacy broker: queries=%d err=%v", q.calls, err)
+	// First adverts can be captured before their node exists. Empty old captures
+	// must allow detail-time lookup once that node has been advertised.
+	exec("INSERT INTO nodes(id,public_key,name,node_type) VALUES ($1,decode($2,'hex'),'Later discovered companion',1)", nodeID, key)
+	exec("UPDATE packets SET origin_pubkey=decode($2,'hex') WHERE packet_hash=$1", observation.PacketHash, key)
+	for _, raw := range []string{`{}`, `{"source":{"confidence":"none","nodes":[]}}`} {
+		exec("UPDATE packet_observations SET resolved_endpoints=$2::jsonb,source_broker=NULL WHERE packet_hash=$1", observation.PacketHash, raw)
+		q.calls = 0
+		stored, err = store.GetPacket(ctx, observation.PacketHash)
+		if err != nil || q.calls != 4 || stored.Observations[0].SourceBroker != "" {
+			t.Fatalf("empty snapshot fallback or nullable legacy broker: queries=%d err=%v", q.calls, err)
+		}
+		if source := stored.Observations[0].ResolvedSource; source == nil || len(source.Nodes) != 1 || source.Nodes[0].Name == nil || *source.Nodes[0].Name != "Later discovered companion" {
+			t.Fatal("empty capture suppressed the later advertised node")
+		}
 	}
-	check(stored.Observations[0].ResolvedSource, stored.Observations[0].ResolvedDestination, nil, nil)
+	exec(`INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,origin_pubkey)
+VALUES (decode($1,'hex'),4,0,1,'\x00','\x00',decode($2,'hex'))`, fmt.Sprintf("%064x", 57), key)
+	observation.PacketHash, observation.ResolvedEndpoints = append(make([]byte, 31), 57), nil
+	inserted, err := store.InsertObservation(ctx, observation)
+	if err != nil || !inserted {
+		t.Fatalf("uncaptured observation insert: %v", err)
+	}
+	var isNull bool
+	if err := tx.QueryRow(ctx, "SELECT resolved_endpoints IS NULL FROM packet_observations WHERE packet_hash=$1", observation.PacketHash).Scan(&isNull); err != nil || !isNull {
+		t.Fatalf("uncaptured resolution was not SQL NULL: %v", err)
+	}
 	empty, err := store.GetPacket(ctx, append(make([]byte, 31), 5))
 	if err != nil || len(empty.Observations) != 0 {
 		t.Fatalf("packet awaiting its first observation: %v", err)
@@ -224,8 +242,12 @@ func TestDecodePacketEndpointSnapshot(t *testing.T) {
 		raw      string
 		captured bool
 	}{
-		{"", false}, {"null", false}, {"[", false}, {"[]", false}, {"{}", true},
-		{`{"source":{"confidence":"none","nodes":[]}}`, true},
+		{"", false}, {"null", false}, {"[", false}, {"[]", false}, {"{}", false},
+		{`{"source":{"confidence":"none","nodes":[]}}`, false},
+		{`{"destination":{"confidence":"none","nodes":[]}}`, false},
+		{`{"source":{},"destination":null}`, false},
+		{`{"source":{"confidence":"high","nodes":[{"publicKey":"aa"}]}}`, true},
+		{`{"destination":{"confidence":"ambiguous","nodes":[{"publicKey":"aa"},{"publicKey":"ab"}]}}`, true},
 	} {
 		_, captured := decodePacketEndpointSnapshot(json.RawMessage(tc.raw))
 		if captured != tc.captured {

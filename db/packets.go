@@ -86,7 +86,7 @@ func buildLatestObserverPath(pathLengthByte, hashSize, hopCount *int16, pathByte
 
 func decodePacketEndpointSnapshot(raw json.RawMessage) (api.PacketEndpointSnapshot, bool) {
 	var snapshot *api.PacketEndpointSnapshot
-	if len(raw) == 0 || json.Unmarshal(raw, &snapshot) != nil || snapshot == nil {
+	if len(raw) == 0 || json.Unmarshal(raw, &snapshot) != nil || snapshot == nil || !snapshot.HasResolvedNodes() {
 		return api.PacketEndpointSnapshot{}, false
 	}
 	return *snapshot, true
