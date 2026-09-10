@@ -6,6 +6,7 @@ package ingest
 import (
 	"context"
 	"crypto/ed25519"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"testing"
@@ -31,6 +32,10 @@ func (k *mapKeys) GetKey(hash []byte) []keystore.Entry {
 // buildAdvertPacket signs (or, if tamper is true, signs then mutates) an
 // advert payload and wraps it in a minimal Packet with no path (zero-hop).
 func buildAdvertPacket(t *testing.T, tamper bool) *meshcore.Packet {
+	return buildAdvertPacketWithData(t, []byte{meshcore.AdvertTypeRepeater}, tamper)
+}
+
+func buildAdvertPacketWithData(t *testing.T, data []byte, tamper bool) *meshcore.Packet {
 	t.Helper()
 	pub, priv, err := ed25519.GenerateKey(nil)
 	if err != nil {
@@ -43,7 +48,7 @@ func buildAdvertPacket(t *testing.T, tamper bool) *meshcore.Packet {
 	advert := &meshcore.Advert{
 		PublicKey:  id,
 		Timestamp:  12345,
-		RawAppData: []byte{meshcore.AdvertTypeRepeater}, // flags byte only, no optional fields
+		RawAppData: data,
 	}
 	advert.Sign(priv)
 	if tamper {
@@ -58,6 +63,54 @@ func buildAdvertPacket(t *testing.T, tamper bool) *meshcore.Packet {
 	return &meshcore.Packet{
 		Header:  meshcore.MakeHeader(meshcore.RouteTypeFlood, meshcore.PayloadTypeAdvert, 0),
 		Payload: payload,
+	}
+}
+
+func TestAdvertLocationPresence(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		present, tamper bool
+		lat, lon        int32
+	}{
+		{"ordinary location", true, false, 45000000, -75000000},
+		{"explicit reset", true, false, 0, 0},
+		{"zero latitude", true, false, 0, -75000000},
+		{"zero longitude", true, false, 45000000, 0},
+		{"no location", false, false, 0, 0},
+		{"tampered reset", true, true, 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := []byte{meshcore.AdvertTypeRepeater}
+			if tc.present {
+				// Preserve the wire presence bit even for zero coordinates; the
+				// library's AppData encoder omits location when both values are zero.
+				data[0] |= meshcore.AdvertLatLonMask
+				data = binary.LittleEndian.AppendUint32(data, uint32(tc.lat))
+				data = binary.LittleEndian.AppendUint32(data, uint32(tc.lon))
+			}
+			worker, store := newTestWorker()
+			packet := buildAdvertPacketWithData(t, data, tc.tamper)
+			worker.handlePayloadTypeSideEffects(context.Background(), packet, "YOW", []byte{1}, RadioSettings{}, nil, nil, nil, 0)
+			if tc.tamper {
+				if store.upsertNodeCalls != 0 {
+					t.Fatal("invalid signature updated the node")
+				}
+				return
+			}
+			if store.upsertNodeCalls != 1 {
+				t.Fatal("signed advert did not update the node")
+			}
+			got := store.upsertNodeParams
+			if !tc.present {
+				if got.Latitude != nil || got.Longitude != nil {
+					t.Fatal("absent location became an update")
+				}
+				return
+			}
+			if got.Latitude == nil || got.Longitude == nil || *got.Latitude != float64(tc.lat)/1e6 || *got.Longitude != float64(tc.lon)/1e6 {
+				t.Fatal("advertised coordinates did not reach the node update")
+			}
+		})
 	}
 }
 
