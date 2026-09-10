@@ -1182,8 +1182,9 @@ info:
   contact:
     name: MeshCore Beacon
     url: https://github.com/MeshCore-Beacon/beacon-server
-  description: MeshCore network observation backend. Ingests LoRa packets from MQTT
-    brokers, stores in PostgreSQL, and streams live events via WebSocket.
+  description: |-
+    MeshCore network observation backend. Ingests LoRa packets from MQTT brokers, stores in PostgreSQL, and streams live events via WebSocket.
+    REST requests share a configurable per-client rate limit (default 300/minute and a 300-request one-second burst cap). Exceeded limits return HTTP 429 with error.code=rate_limited and a Retry-After header in seconds. CORS preflights and WebSocket upgrades do not consume this API budget.
   license:
     name: AGPL-3-or-later
   termsOfService: https://github.com/MeshCore-Beacon/beacon-server

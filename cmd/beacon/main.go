@@ -41,6 +41,7 @@ var version = "dev"
 //	@title			MeshCore Beacon API
 //	@version		1.6.0
 //	@description	MeshCore network observation backend. Ingests LoRa packets from MQTT brokers, stores in PostgreSQL, and streams live events via WebSocket.
+//	@description	REST requests share a configurable per-client rate limit (default 300/minute and a 300-request one-second burst cap). Exceeded limits return HTTP 429 with error.code=rate_limited and a Retry-After header in seconds. CORS preflights and WebSocket upgrades do not consume this API budget.
 //	@termsOfService	https://github.com/MeshCore-Beacon/beacon-server
 
 //	@contact.name	MeshCore Beacon
@@ -275,7 +276,7 @@ func main() {
 	go scheduler.Start(ctx)
 
 	// ── HTTP server ──────────────────────────────────────────────────────────
-	r := router.New(h, reader, []*ingest.Worker{broker1, broker2}, resolved.MaxConnsPerIP, cfg.CORS, cfg.Server)
+	r := router.New(h, reader, []*ingest.Worker{broker1, broker2}, resolved.MaxConnsPerIP, cfg.CORS, cfg.Server, resolved.RateLimit)
 
 	srv := &http.Server{
 		Addr:    addr,
