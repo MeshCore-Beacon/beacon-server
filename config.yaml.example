@@ -1,6 +1,25 @@
 # Beacon configuration file
 # Copy to config.yaml and adjust as needed.
 
+server:
+  # Only these direct proxy peers may set the client IP through X-Real-IP.
+  # The proxy must overwrite that header, not pass through client input.
+  # Leave empty for direct access (logs a startup warning). Invalid/empty CIDR
+  # entries prevent startup. A single host needs /32 for IPv4 or /128 for IPv6;
+  # bare IP addresses are not accepted.
+  # For Docker, list the actual proxy/compose network CIDR (e.g. 172.20.0.0/24).
+  # For a local host proxy, use ["127.0.0.1/32", "::1/128"].
+  # Direct-client proxy examples; X-Forwarded-For alone is not used:
+  # Apache 2.4.10+ (mod_headers, in the proxy virtual host):
+  #   RequestHeader set X-Real-IP "expr=%{REMOTE_ADDR}"
+  # nginx (in the proxy location):
+  #   proxy_set_header X-Real-IP $remote_addr;
+  # Caddy (inside the reverse_proxy block):
+  #   header_up X-Real-IP {http.request.remote.host}
+  # With additional proxy hops, first configure their trust at the edge proxy
+  # and pass its validated client address rather than a client-supplied header.
+  trusted_proxies: []
+
 iatas:
   YVR:
     name: Vancouver International

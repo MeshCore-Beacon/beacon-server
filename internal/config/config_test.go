@@ -5,10 +5,41 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestLoadTrustedProxies(t *testing.T) {
+	for _, tc := range []struct {
+		name, yaml string
+		count      int
+		wantError  bool
+	}{
+		{"omitted", "{}", 0, false},
+		{"empty", "server: {trusted_proxies: []}", 0, false},
+		{"CIDRs", "server: {trusted_proxies: ['192.0.2.0/24', '2001:db8::/32']}", 2, false},
+		{"bare IP", "server: {trusted_proxies: ['192.0.2.1']}", 0, true},
+		{"invalid CIDR", "server: {trusted_proxies: ['192.0.2.0/99']}", 0, true},
+		{"empty entry", "server: {trusted_proxies: ['', '192.0.2.0/24']}", 0, true},
+		{"null entry", "server: {trusted_proxies: [null, '192.0.2.0/24']}", 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tc.yaml), 0600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(path)
+			if (err != nil) != tc.wantError {
+				t.Fatalf("Load error = %v, want error = %v", err, tc.wantError)
+			}
+			if err == nil && len(cfg.Server.TrustedProxies) != tc.count {
+				t.Fatalf("got %d proxy prefixes, want %d", len(cfg.Server.TrustedProxies), tc.count)
+			}
+		})
+	}
+}
 
 func TestLoad_FileNotFound(t *testing.T) {
 	cfg, err := Load("/nonexistent/path/config.yaml")

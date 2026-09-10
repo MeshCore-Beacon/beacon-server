@@ -7,6 +7,7 @@ package config
 
 import (
 	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"time"
@@ -16,6 +17,7 @@ import (
 
 // Config is the top-level structure of the Beacon config file.
 type Config struct {
+	Server      ServerConfig          `yaml:"server"`
 	IATAs       map[string]IATAConfig `yaml:"iatas"`
 	Regions     []RegionConfig        `yaml:"regions"`
 	ChannelKeys ChannelKeysConfig     `yaml:"channel_keys"`
@@ -31,6 +33,31 @@ type Config struct {
 	Presence    PresenceConfig        `yaml:"presence"`
 	Nodes       NodesConfig           `yaml:"nodes"`
 	Observers   ObserversConfig       `yaml:"observers"`
+}
+
+// ServerConfig controls which direct peers may supply the client address.
+type ServerConfig struct {
+	// TrustedProxies accepts IPv4/IPv6 CIDRs; an empty list trusts no proxy.
+	// netip.Prefix validates each CIDR while the configuration is loaded.
+	TrustedProxies []netip.Prefix `yaml:"trusted_proxies"`
+}
+
+func (c *ServerConfig) UnmarshalYAML(node *yaml.Node) error {
+	// Pointers retain null list entries, which yaml would otherwise discard.
+	// Leave them as invalid prefixes for Load's validation below.
+	var raw struct {
+		TrustedProxies []*netip.Prefix `yaml:"trusted_proxies"`
+	}
+	if err := node.Decode(&raw); err != nil {
+		return err
+	}
+	c.TrustedProxies = make([]netip.Prefix, len(raw.TrustedProxies))
+	for i, prefix := range raw.TrustedProxies {
+		if prefix != nil {
+			c.TrustedProxies[i] = *prefix
+		}
+	}
+	return nil
 }
 
 // ResolvedConfig holds all runtime configuration with defaults applied.
@@ -312,6 +339,11 @@ func Load(path string) (*Config, error) {
 	}
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, err
+	}
+	for i, prefix := range cfg.Server.TrustedProxies {
+		if !prefix.IsValid() {
+			return nil, fmt.Errorf("server.trusted_proxies[%d] must be a valid CIDR", i)
+		}
 	}
 	configDir := filepath.Dir(path)
 	for iata, details := range cfg.IATAs {
