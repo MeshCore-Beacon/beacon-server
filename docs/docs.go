@@ -3204,10 +3204,10 @@ const docTemplate = `{
         "github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverTelemetryPoint": {
             "type": "object",
             "properties": {
-                "airtimeRxPct": {
+                "airtimeRxSecs": {
                     "type": "number"
                 },
-                "airtimeTxPct": {
+                "airtimeTxSecs": {
                     "type": "number"
                 },
                 "batteryMv": {

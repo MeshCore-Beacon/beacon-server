@@ -226,14 +226,14 @@ WHERE id = $1;
 -- Inserts a telemetry snapshot for an observer. The reported_at timestamp should
 -- be truncated to the configured resolution before calling to ensure deduplication.
 INSERT INTO observer_telemetry (
-    observer_id, reported_at, battery_voltage_mv, airtime_tx_pct,
-    airtime_rx_pct, noise_floor_db, uptime_seconds, queue_length,
+    observer_id, reported_at, battery_voltage_mv, airtime_tx_secs,
+    airtime_rx_secs, noise_floor_db, uptime_seconds, queue_length,
     debug_flags, receive_errors
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (observer_id, reported_at) DO NOTHING;
 
 -- name: GetObserverTelemetry :many
-SELECT id, reported_at, battery_voltage_mv, airtime_tx_pct, airtime_rx_pct,
+SELECT id, reported_at, battery_voltage_mv, airtime_tx_secs, airtime_rx_secs,
        noise_floor_db, uptime_seconds, queue_length, debug_flags, receive_errors
 FROM observer_telemetry
 WHERE observer_id = $1
@@ -247,8 +247,8 @@ SELECT
   (date_trunc('day', reported_at) +
     (EXTRACT(HOUR FROM reported_at)::int / $4::int) * ($4::int * interval '1 hour'))::timestamptz AS bucket,
   AVG(battery_voltage_mv)::int   AS battery_voltage_mv,
-  GREATEST(MAX(airtime_tx_pct) - MIN(airtime_tx_pct), 0)::real AS airtime_tx_pct,
-  GREATEST(MAX(airtime_rx_pct) - MIN(airtime_rx_pct), 0)::real AS airtime_rx_pct,
+  GREATEST(MAX(airtime_tx_secs) - MIN(airtime_tx_secs), 0)::real AS airtime_tx_secs,
+  GREATEST(MAX(airtime_rx_secs) - MIN(airtime_rx_secs), 0)::real AS airtime_rx_secs,
   AVG(noise_floor_db)::real      AS noise_floor_db,
   MAX(uptime_seconds)::bigint    AS uptime_seconds,
   AVG(queue_length)::int         AS queue_length,
