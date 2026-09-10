@@ -303,3 +303,7 @@ func (s *Store) RefreshTopObservers(ctx context.Context) error {
 func (s *Store) RefreshRadioPresets(ctx context.Context) error {
 	return s.q.RefreshRadioPresets(ctx)
 }
+
+func (s *Store) RefreshObserverActivity(ctx context.Context) error {
+	return s.q.RefreshObserverActivity(ctx)
+}

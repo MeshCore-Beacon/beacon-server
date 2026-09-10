@@ -905,6 +905,64 @@ const docTemplate = `{
                 }
             }
         },
+        "/observers/{observerId}/activity": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Observers"
+                ],
+                "summary": "Get observer heard-activity history",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Observer UUID",
+                        "name": "observerId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Trailing window as a Go duration, max 720h (default 24h); max 48h when interval is under 1h",
+                        "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bucket size: 5m, 15m, 1h, 6h or 24h (default 15m)",
+                        "name": "interval",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverActivity"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
         "/observers/{observerId}/adverts": {
             "get": {
                 "produces": [
@@ -3000,6 +3058,76 @@ const docTemplate = `{
                     "description": "raw /status JSON payload"
                 },
                 "uptimeSeconds": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverActivity": {
+            "type": "object",
+            "properties": {
+                "interval": {
+                    "type": "string"
+                },
+                "payloadTypes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PayloadBreakdownItem"
+                    }
+                },
+                "points": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverActivityPoint"
+                    }
+                },
+                "radio": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverActivityRadio"
+                },
+                "range": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverActivityPoint": {
+            "type": "object",
+            "properties": {
+                "airtimeMs": {
+                    "type": "number"
+                },
+                "observations": {
+                    "type": "integer"
+                },
+                "rssiAvg": {
+                    "type": "number"
+                },
+                "snrAvg": {
+                    "type": "number"
+                },
+                "snrMin": {
+                    "type": "number"
+                },
+                "t": {
+                    "description": "bucket start, epoch ms",
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverActivityRadio": {
+            "type": "object",
+            "properties": {
+                "bwKhz": {
+                    "type": "number"
+                },
+                "cr": {
+                    "type": "integer"
+                },
+                "freqMhz": {
+                    "type": "number"
+                },
+                "preambleSymbols": {
+                    "type": "integer"
+                },
+                "sf": {
                     "type": "integer"
                 }
             }

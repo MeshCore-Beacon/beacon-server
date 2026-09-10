@@ -97,6 +97,11 @@ type Reader interface {
 	// GetObserverTelemetryBucketed returns telemetry points for an observer bucketed into N-hour intervals.
 	GetObserverTelemetryBucketed(ctx context.Context, observerID uuid.UUID, since, until time.Time, bucketHours int32) ([]ObserverTelemetryPoint, error)
 
+	// GetObserverActivity returns bucketed heard-activity for an observer over the trailing window.
+	// interval >= 1h is served from the hourly rollup. Returns pgx.ErrNoRows for an unknown observer.
+	// Range and Interval on the result are left empty for the handler to fill.
+	GetObserverActivity(ctx context.Context, observerID uuid.UUID, window, interval time.Duration) (*ObserverActivity, error)
+
 	// GetObserverScopes returns the names of all transport scopes an observer has
 	// been seen forwarding packets for, ordered alphabetically.
 	GetObserverScopes(ctx context.Context, observerID uuid.UUID) ([]string, error)

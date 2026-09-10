@@ -586,6 +586,7 @@ func (s *Store) InsertObservation(ctx context.Context, o ingest.InsertObservatio
 		SourceBroker:      &o.SourceBroker,
 		PayloadType:       &o.PayloadType,
 		ResolvedEndpoints: o.ResolvedEndpoints,
+		AirtimeMs:         o.AirtimeMs,
 	}
 	row, err := s.q.InsertObservation(ctx, params)
 	if errors.Is(err, pgx.ErrNoRows) {

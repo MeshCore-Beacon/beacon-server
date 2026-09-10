@@ -260,6 +260,56 @@ WHERE observer_id = $1
 GROUP BY bucket
 ORDER BY bucket ASC;
 
+-- name: GetObserverActivityRaw :many
+-- Sub-hour activity buckets straight off idx_observations_observer; no join to packets.
+-- Aggregates are COALESCEd and paired with a count column: sqlc types a cast expression as
+-- NOT NULL, so the counts are what tell the store a bucket had no costed or no signal rows.
+SELECT
+  date_bin($3::interval, heard_at, TIMESTAMPTZ 'epoch')::timestamptz AS bucket,
+  COUNT(*)::bigint AS observations,
+  COALESCE(SUM(airtime_ms), 0)::real AS airtime_ms,
+  COUNT(airtime_ms)::bigint AS airtime_n,
+  COALESCE(AVG(snr)  FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)), 0)::real AS snr_avg,
+  COALESCE(MIN(snr)  FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)), 0)::real AS snr_min,
+  COUNT(snr)         FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0))::bigint AS snr_n,
+  COALESCE(AVG(rssi) FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)), 0)::real AS rssi_avg,
+  COUNT(rssi)        FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0))::bigint AS rssi_n
+FROM packet_observations
+WHERE observer_id = $1 AND heard_at >= $2::timestamptz
+GROUP BY bucket
+ORDER BY bucket;
+
+-- name: GetObserverActivityRawPayloadTypes :many
+SELECT payload_type, COUNT(*)::bigint AS count
+FROM packet_observations
+WHERE observer_id = $1 AND heard_at >= $2::timestamptz AND payload_type IS NOT NULL
+GROUP BY payload_type
+ORDER BY count DESC;
+
+-- name: GetObserverActivityHourly :many
+-- Hour-or-coarser buckets summed from the hourly rollup; same COALESCE-plus-count shape as the raw query.
+SELECT
+  date_bin($3::interval, bucket, TIMESTAMPTZ 'epoch')::timestamptz AS bucket,
+  SUM(observations)::bigint AS observations,
+  COALESCE(SUM(airtime_ms), 0)::real AS airtime_ms,
+  SUM(airtime_n)::bigint AS airtime_n,
+  COALESCE(SUM(snr_sum), 0)::real AS snr_sum,
+  SUM(snr_n)::bigint AS snr_n,
+  COALESCE(MIN(snr_min), 0)::real AS snr_min,
+  COALESCE(SUM(rssi_sum), 0)::bigint AS rssi_sum,
+  SUM(rssi_n)::bigint AS rssi_n
+FROM mv_observer_activity_hourly
+WHERE observer_id = $1 AND bucket >= $2::timestamptz
+GROUP BY 1
+ORDER BY 1;
+
+-- name: GetObserverActivityHourlyPayloadTypes :many
+SELECT payload_type, SUM(observations)::bigint AS count
+FROM mv_observer_activity_hourly
+WHERE observer_id = $1 AND bucket >= $2::timestamptz
+GROUP BY payload_type
+ORDER BY count DESC;
+
 -- name: ListObserverAdverts :many
 -- Returns advert packets (payload_type=4) heard by a specific observer.
 -- Pass cursor=0 to start from the beginning, or the last seen id for pagination.
@@ -626,9 +676,10 @@ INSERT INTO packet_observations (
   coding_rate,
   source_broker,
   payload_type,
-  resolved_endpoints
+  resolved_endpoints,
+  airtime_ms
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
 )
 ON CONFLICT (packet_hash, observer_id) DO NOTHING
 RETURNING *;
@@ -1329,6 +1380,9 @@ REFRESH MATERIALIZED VIEW CONCURRENTLY mv_top_advertisers_by_iata;
 
 -- name: RefreshRadioPresets :exec
 REFRESH MATERIALIZED VIEW CONCURRENTLY mv_radio_presets;
+
+-- name: RefreshObserverActivity :exec
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_observer_activity_hourly;
 
 -- name: ReconfirmRoutes :exec
 -- Checks the $1 least-recently-reconfirmed routes: deletes those with a departed

@@ -292,6 +292,66 @@ func (mr *MockQuerierMockRecorder) GetNodesByIDs(ctx, dollar_1 any) *gomock.Call
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNodesByIDs", reflect.TypeOf((*MockQuerier)(nil).GetNodesByIDs), ctx, dollar_1)
 }
 
+// GetObserverActivityHourly mocks base method.
+func (m *MockQuerier) GetObserverActivityHourly(ctx context.Context, arg db.GetObserverActivityHourlyParams) ([]db.GetObserverActivityHourlyRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetObserverActivityHourly", ctx, arg)
+	ret0, _ := ret[0].([]db.GetObserverActivityHourlyRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetObserverActivityHourly indicates an expected call of GetObserverActivityHourly.
+func (mr *MockQuerierMockRecorder) GetObserverActivityHourly(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetObserverActivityHourly", reflect.TypeOf((*MockQuerier)(nil).GetObserverActivityHourly), ctx, arg)
+}
+
+// GetObserverActivityHourlyPayloadTypes mocks base method.
+func (m *MockQuerier) GetObserverActivityHourlyPayloadTypes(ctx context.Context, arg db.GetObserverActivityHourlyPayloadTypesParams) ([]db.GetObserverActivityHourlyPayloadTypesRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetObserverActivityHourlyPayloadTypes", ctx, arg)
+	ret0, _ := ret[0].([]db.GetObserverActivityHourlyPayloadTypesRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetObserverActivityHourlyPayloadTypes indicates an expected call of GetObserverActivityHourlyPayloadTypes.
+func (mr *MockQuerierMockRecorder) GetObserverActivityHourlyPayloadTypes(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetObserverActivityHourlyPayloadTypes", reflect.TypeOf((*MockQuerier)(nil).GetObserverActivityHourlyPayloadTypes), ctx, arg)
+}
+
+// GetObserverActivityRaw mocks base method.
+func (m *MockQuerier) GetObserverActivityRaw(ctx context.Context, arg db.GetObserverActivityRawParams) ([]db.GetObserverActivityRawRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetObserverActivityRaw", ctx, arg)
+	ret0, _ := ret[0].([]db.GetObserverActivityRawRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetObserverActivityRaw indicates an expected call of GetObserverActivityRaw.
+func (mr *MockQuerierMockRecorder) GetObserverActivityRaw(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetObserverActivityRaw", reflect.TypeOf((*MockQuerier)(nil).GetObserverActivityRaw), ctx, arg)
+}
+
+// GetObserverActivityRawPayloadTypes mocks base method.
+func (m *MockQuerier) GetObserverActivityRawPayloadTypes(ctx context.Context, arg db.GetObserverActivityRawPayloadTypesParams) ([]db.GetObserverActivityRawPayloadTypesRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetObserverActivityRawPayloadTypes", ctx, arg)
+	ret0, _ := ret[0].([]db.GetObserverActivityRawPayloadTypesRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetObserverActivityRawPayloadTypes indicates an expected call of GetObserverActivityRawPayloadTypes.
+func (mr *MockQuerierMockRecorder) GetObserverActivityRawPayloadTypes(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetObserverActivityRawPayloadTypes", reflect.TypeOf((*MockQuerier)(nil).GetObserverActivityRawPayloadTypes), ctx, arg)
+}
+
 // GetObserverBrokers mocks base method.
 func (m *MockQuerier) GetObserverBrokers(ctx context.Context, observerID uuid.UUID) ([]db.GetObserverBrokersRow, error) {
 	m.ctrl.T.Helper()
@@ -1096,6 +1156,20 @@ func (m *MockQuerier) RefreshHourlyStats(ctx context.Context) error {
 func (mr *MockQuerierMockRecorder) RefreshHourlyStats(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RefreshHourlyStats", reflect.TypeOf((*MockQuerier)(nil).RefreshHourlyStats), ctx)
+}
+
+// RefreshObserverActivity mocks base method.
+func (m *MockQuerier) RefreshObserverActivity(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RefreshObserverActivity", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RefreshObserverActivity indicates an expected call of RefreshObserverActivity.
+func (mr *MockQuerierMockRecorder) RefreshObserverActivity(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RefreshObserverActivity", reflect.TypeOf((*MockQuerier)(nil).RefreshObserverActivity), ctx)
 }
 
 // RefreshPayloadBreakdown mocks base method.
