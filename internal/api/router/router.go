@@ -41,7 +41,7 @@ import (
 //
 // The private group is stubbed and ready for the auth middleware drop-in
 // described in Future Features → Admin authentication.
-func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP int, corsCfg config.CORSConfig, serverCfg config.ServerConfig) http.Handler {
+func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP int, corsCfg config.CORSConfig, serverCfg config.ServerConfig, rateLimitCfg config.ResolvedRateLimitConfig) http.Handler {
 	r := chi.NewRouter()
 
 	// ── CORS ─────────────────────────────────────────────────────────────────
@@ -65,6 +65,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP 
 		AllowedOrigins:   allowedOrigins,
 		AllowedMethods:   allowedMethods,
 		AllowedHeaders:   allowedHeaders,
+		ExposedHeaders:   []string{"Retry-After"},
 		AllowCredentials: corsCfg.AllowCredentials,
 		MaxAge:           maxAge,
 	}))
@@ -91,6 +92,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP 
 
 	// ── Public REST API (v1) ─────────────────────────────────────────────────
 	r.Route("/api/v1", func(r chi.Router) {
+		r.Use(mw.RateLimit(rateLimitCfg))
 		// Public group — no authentication required (all of v1 is public).
 		r.Group(func(r chi.Router) {
 			r.Mount("/packets", handlers.PacketsRouter(reader))

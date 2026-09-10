@@ -20,6 +20,17 @@ server:
   # and pass its validated client address rather than a client-supplied header.
   trusted_proxies: []
 
+# Applies to /api/v1/* only. Both counters are local to this Beacon instance.
+# Set trusted_proxies correctly before using a reverse proxy, or clients share
+# the proxy's budget. IPv6 clients share a /64 budget to prevent address rotation.
+ratelimit:
+  enabled: true
+  requests_per_minute: 300
+  # Maximum requests in a one-second sliding window, not token-bucket capacity.
+  # Omitted/zero defaults to requests_per_minute. Negative limits prevent startup.
+  # A 429 returns error.code=rate_limited and Retry-After (1 or 60 seconds).
+  burst: 300
+
 iatas:
   YVR:
     name: Vancouver International

@@ -29,6 +29,7 @@ type Config struct {
 	Scopes      []ScopeConfig         `yaml:"scopes"`
 	Cache       CacheConfig           `yaml:"cache"`
 	CORS        CORSConfig            `yaml:"cors"`
+	RateLimit   RateLimitConfig       `yaml:"ratelimit"`
 	Background  BackgroundConfig      `yaml:"background"`
 	Presence    PresenceConfig        `yaml:"presence"`
 	Nodes       NodesConfig           `yaml:"nodes"`
@@ -62,6 +63,7 @@ func (c *ServerConfig) UnmarshalYAML(node *yaml.Node) error {
 
 // ResolvedConfig holds all runtime configuration with defaults applied.
 type ResolvedConfig struct {
+	RateLimit            ResolvedRateLimitConfig
 	TelemetryResolution  time.Duration
 	TelemetryRetention   time.Duration
 	PacketRetention      time.Duration
@@ -86,6 +88,20 @@ type ResolvedConfig struct {
 	NodeStaleThreshold  time.Duration
 	NodeDeleteAfter     time.Duration
 	ObserverDeleteAfter time.Duration
+}
+
+// RateLimitConfig controls the per-client REST API request budget.
+type RateLimitConfig struct {
+	Enabled           *bool `yaml:"enabled"` // Defaults to true; false disables both windows.
+	RequestsPerMinute int   `yaml:"requests_per_minute"`
+	Burst             int   `yaml:"burst"` // One-second window cap, not token-bucket capacity.
+}
+
+// ResolvedRateLimitConfig has defaults applied and no optional values.
+type ResolvedRateLimitConfig struct {
+	Enabled           bool
+	RequestsPerMinute int
+	Burst             int
 }
 
 // PresenceConfig controls coalescing of presence bookkeeping writes
@@ -345,6 +361,9 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("server.trusted_proxies[%d] must be a valid CIDR", i)
 		}
 	}
+	if cfg.RateLimit.RequestsPerMinute < 0 || cfg.RateLimit.Burst < 0 {
+		return nil, fmt.Errorf("ratelimit.requests_per_minute and ratelimit.burst must be positive or zero for defaults")
+	}
 	configDir := filepath.Dir(path)
 	for iata, details := range cfg.IATAs {
 		if details.BorderFile != "" && !filepath.IsAbs(details.BorderFile) {
@@ -358,6 +377,11 @@ func Load(path string) (*Config, error) {
 // Resolve returns a ResolvedConfig with defaults applied for any zero values.
 func Resolve(cfg *Config) ResolvedConfig {
 	r := ResolvedConfig{
+		RateLimit: ResolvedRateLimitConfig{
+			Enabled:           cfg.RateLimit.Enabled == nil || *cfg.RateLimit.Enabled,
+			RequestsPerMinute: cfg.RateLimit.RequestsPerMinute,
+			Burst:             cfg.RateLimit.Burst,
+		},
 		TelemetryResolution:  cfg.Telemetry.Resolution.Duration,
 		TelemetryRetention:   cfg.Telemetry.Retention.Duration,
 		PacketRetention:      cfg.Packets.Retention.Duration,
@@ -376,6 +400,12 @@ func Resolve(cfg *Config) ResolvedConfig {
 		NodeStaleThreshold:  cfg.Nodes.StaleThreshold.Duration,
 		NodeDeleteAfter:     cfg.Nodes.DeleteAfter.Duration,
 		ObserverDeleteAfter: cfg.Observers.DeleteAfter.Duration,
+	}
+	if r.RateLimit.RequestsPerMinute == 0 {
+		r.RateLimit.RequestsPerMinute = 300
+	}
+	if r.RateLimit.Burst == 0 {
+		r.RateLimit.Burst = r.RateLimit.RequestsPerMinute
 	}
 	if r.TelemetryResolution == 0 {
 		r.TelemetryResolution = time.Hour
@@ -429,10 +459,11 @@ func Resolve(cfg *Config) ResolvedConfig {
 
 func (r ResolvedConfig) String() string {
 	return fmt.Sprintf(
-		"telemetryResolution=%s telemetryRetention=%s packetRetention=%s routeRetention=%s routeGrace=%s routeMinObs=%d maxConnsPerIP=%d viewRefresh=%s reconfirm=%s cleanup=%s presenceFlush=%s presencePacketTTL=%s clockDriftThreshold=%s nodeStaleThreshold=%s nodeDeleteAfter=%s observerDeleteAfter=%s",
+		"telemetryResolution=%s telemetryRetention=%s packetRetention=%s routeRetention=%s routeGrace=%s routeMinObs=%d maxConnsPerIP=%d viewRefresh=%s reconfirm=%s cleanup=%s presenceFlush=%s presencePacketTTL=%s clockDriftThreshold=%s nodeStaleThreshold=%s nodeDeleteAfter=%s observerDeleteAfter=%s rateLimitEnabled=%t requestsPerMinute=%d burst=%d",
 		r.TelemetryResolution, r.TelemetryRetention, r.PacketRetention, r.RouteRetention, r.RouteGrace, r.RouteMinObservations,
 		r.MaxConnsPerIP, r.ViewRefreshInterval, r.ReconfirmInterval, r.CleanupInterval,
 		r.PresenceFlushInterval, r.PresencePacketTTL, r.ClockDriftThreshold,
 		r.NodeStaleThreshold, r.NodeDeleteAfter, r.ObserverDeleteAfter,
+		r.RateLimit.Enabled, r.RateLimit.RequestsPerMinute, r.RateLimit.Burst,
 	)
 }

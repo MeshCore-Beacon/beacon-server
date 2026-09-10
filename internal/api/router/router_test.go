@@ -36,8 +36,24 @@ func TestWebSocketLimitUsesTrustedClientIP(t *testing.T) {
 
 func checkWebSocketLimit(t *testing.T, cfg config.ServerConfig, secondIP string, wantStatus int) {
 	t.Helper()
-	server := httptest.NewServer(New(hub.New(), nil, nil, 1, config.CORSConfig{}, cfg))
+	server := httptest.NewServer(New(hub.New(), nil, nil, 1, config.CORSConfig{}, cfg, config.ResolvedRateLimitConfig{Enabled: true, RequestsPerMinute: 1, Burst: 1}))
 	defer server.Close()
+	// Exhaust this client's REST budget before checking its independent WS cap.
+	for _, want := range []int{http.StatusOK, http.StatusTooManyRequests} {
+		request, err := http.NewRequest(http.MethodGet, server.URL+"/api/v1/brokers", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("X-Real-IP", "198.51.100.1")
+		response, err := server.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != want {
+			t.Fatalf("REST budget setup: %d, want %d", response.StatusCode, want)
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	url := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"
