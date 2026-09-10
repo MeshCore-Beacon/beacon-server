@@ -145,6 +145,29 @@ func TestGetObserverTelemetry_Bucketed_OK(t *testing.T) {
 	}
 }
 
+func TestGetObserverTelemetry_Bucketed_StoreError(t *testing.T) {
+	observerID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	r := chi.NewRouter()
+	r.Get("/observers/{observerId}/telemetry", getObserverTelemetry(stubReader{
+		getObserverTelemetryBucketed: func(_ context.Context, _ uuid.UUID, _, _ time.Time, _ int32) ([]api.ObserverTelemetryPoint, error) {
+			return nil, errors.New("boom")
+		},
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/observers/"+observerID.String()+"/telemetry?interval=6h", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", w.Code)
+	}
+	var body map[string]APIError
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("expected JSON error body, got %q: %v", w.Body.String(), err)
+	}
+	if body["error"].Code != "internal_server_error" {
+		t.Errorf("expected internal_server_error, got %q", body["error"].Code)
+	}
+}
+
 func TestListObserverAdverts_OK(t *testing.T) {
 	observerID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	r := chi.NewRouter()

@@ -222,7 +222,8 @@ func getObserverTelemetry(reader api.Reader) http.HandlerFunc {
 		if bucketHours == 0 {
 			telemetry, err = reader.GetObserverTelemetry(r.Context(), observerID, since, until, afterID)
 		} else {
-			points, err := reader.GetObserverTelemetryBucketed(r.Context(), observerID, since, until, bucketHours)
+			var points []api.ObserverTelemetryPoint
+			points, err = reader.GetObserverTelemetryBucketed(r.Context(), observerID, since, until, bucketHours)
 			if err == nil {
 				telemetry = &api.ObserverTelemetry{Points: points}
 			}
