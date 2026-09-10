@@ -21,6 +21,7 @@ type viewRefresher interface {
 	RefreshTopTalkers(context.Context) error
 	RefreshTopAdvertisers(context.Context) error
 	RefreshRadioPresets(context.Context) error
+	RefreshObserverActivity(context.Context) error
 }
 
 // ViewRefreshTask returns a Task that refreshes all materialized views.
@@ -41,6 +42,7 @@ func ViewRefreshTask(store viewRefresher, interval time.Duration) Task {
 				{"top talkers", store.RefreshTopTalkers},
 				{"top advertisers", store.RefreshTopAdvertisers},
 				{"radio presets", store.RefreshRadioPresets},
+				{"observer activity", store.RefreshObserverActivity},
 			} {
 				if err := view.refresh(ctx); err != nil {
 					errs = append(errs, fmt.Errorf("%s: %w", view.name, err))

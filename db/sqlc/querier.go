@@ -50,6 +50,14 @@ type Querier interface {
 	// Returns the neighbors of a node with details, ordered by most recently seen.
 	GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]GetNodeNeighborsRow, error)
 	GetNodesByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]GetNodesByIDsRow, error)
+	// Hour-or-coarser buckets summed from the hourly rollup; same COALESCE-plus-count shape as the raw query.
+	GetObserverActivityHourly(ctx context.Context, arg GetObserverActivityHourlyParams) ([]GetObserverActivityHourlyRow, error)
+	GetObserverActivityHourlyPayloadTypes(ctx context.Context, arg GetObserverActivityHourlyPayloadTypesParams) ([]GetObserverActivityHourlyPayloadTypesRow, error)
+	// Sub-hour activity buckets straight off idx_observations_observer; no join to packets.
+	// Aggregates are COALESCEd and paired with a count column: sqlc types a cast expression as
+	// NOT NULL, so the counts are what tell the store a bucket had no costed or no signal rows.
+	GetObserverActivityRaw(ctx context.Context, arg GetObserverActivityRawParams) ([]GetObserverActivityRawRow, error)
+	GetObserverActivityRawPayloadTypes(ctx context.Context, arg GetObserverActivityRawPayloadTypesParams) ([]GetObserverActivityRawPayloadTypesRow, error)
 	GetObserverBrokers(ctx context.Context, observerID uuid.UUID) ([]GetObserverBrokersRow, error)
 	GetObserverByID(ctx context.Context, id uuid.UUID) (Observer, error)
 	GetObserverByPubkey(ctx context.Context, publicKey []byte) (Observer, error)
@@ -192,6 +200,7 @@ type Querier interface {
 	// 1/2/3/4-byte hop prefixes check prefix_1/2/3/4), and stamps the survivors.
 	ReconfirmRoutes(ctx context.Context, limit int32) error
 	RefreshHourlyStats(ctx context.Context) error
+	RefreshObserverActivity(ctx context.Context) error
 	RefreshPayloadBreakdown(ctx context.Context) error
 	RefreshRadioPresets(ctx context.Context) error
 	RefreshTopAdvertisers(ctx context.Context) error

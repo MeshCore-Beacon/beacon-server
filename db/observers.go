@@ -13,6 +13,7 @@ import (
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
+	"github.com/MeshCore-Beacon/beacon-server/internal/lora"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -224,6 +225,129 @@ func (s *Store) GetObserverTelemetryBucketed(ctx context.Context, observerID uui
 		})
 	}
 	return points, nil
+}
+
+// GetObserverActivity returns bucketed heard-activity for an observer over the trailing window.
+// Buckets of an hour or coarser come from the hourly rollup; anything finer reads observations directly.
+// Range and Interval are left empty for the handler to fill.
+func (s *Store) GetObserverActivity(ctx context.Context, observerID uuid.UUID, window, interval time.Duration) (*api.ObserverActivity, error) {
+	obs, err := s.q.GetObserverByID(ctx, observerID)
+	if err != nil {
+		return nil, err
+	}
+	activity := &api.ObserverActivity{}
+	// radio is non-nil only when airtime is actually costable, so radio != null implies costed buckets
+	if obs.RadioSf != nil && obs.RadioBwKhz != nil && obs.RadioCr != nil &&
+		*obs.RadioSf >= 7 && *obs.RadioSf <= 12 && *obs.RadioBwKhz > 0 && *obs.RadioCr > 0 {
+		activity.Radio = &api.ObserverActivityRadio{
+			FreqMHz:         obs.RadioFreqMhz,
+			SF:              *obs.RadioSf,
+			BWKHz:           *obs.RadioBwKhz,
+			CR:              *obs.RadioCr,
+			PreambleSymbols: lora.PreambleSymbols(int(*obs.RadioSf)),
+		}
+	}
+	// round the window start up to a bucket boundary so the first bucket is never a partial one
+	start := time.Now().Add(-window).UTC()
+	since := start.Truncate(interval)
+	if since.Before(start) {
+		since = since.Add(interval)
+	}
+	sinceTS := pgtype.Timestamptz{Time: since, Valid: true}
+	binWidth := pgtype.Interval{Microseconds: interval.Microseconds(), Valid: true}
+
+	if interval >= time.Hour {
+		rows, err := s.q.GetObserverActivityHourly(ctx, sqlc.GetObserverActivityHourlyParams{
+			ObserverID: observerID,
+			Column2:    sinceTS,
+			Column3:    binWidth,
+		})
+		if err != nil {
+			return nil, err
+		}
+		activity.Points = make([]api.ObserverActivityPoint, 0, len(rows))
+		for _, r := range rows {
+			p := api.ObserverActivityPoint{T: r.Bucket.Time.UnixMilli(), Observations: r.Observations}
+			if r.AirtimeN > 0 {
+				airtime := r.AirtimeMs
+				p.AirtimeMs = &airtime
+			}
+			if r.SnrN > 0 {
+				avg := r.SnrSum / float32(r.SnrN)
+				min := r.SnrMin
+				p.SNRAvg, p.SNRMin = &avg, &min
+			}
+			if r.RssiN > 0 {
+				avg := float32(r.RssiSum) / float32(r.RssiN)
+				p.RSSIAvg = &avg
+			}
+			activity.Points = append(activity.Points, p)
+		}
+		typeRows, err := s.q.GetObserverActivityHourlyPayloadTypes(ctx, sqlc.GetObserverActivityHourlyPayloadTypesParams{
+			ObserverID: observerID,
+			Column2:    sinceTS,
+		})
+		if err != nil {
+			return nil, err
+		}
+		activity.PayloadTypes = make([]api.PayloadBreakdownItem, 0, len(typeRows))
+		for _, v := range typeRows {
+			if v.PayloadType == nil {
+				continue
+			}
+			activity.PayloadTypes = append(activity.PayloadTypes, api.PayloadBreakdownItem{
+				PayloadType:     *v.PayloadType,
+				PayloadTypeName: api.PayloadTypeName(*v.PayloadType),
+				Count:           v.Count,
+			})
+		}
+		return activity, nil
+	}
+
+	rows, err := s.q.GetObserverActivityRaw(ctx, sqlc.GetObserverActivityRawParams{
+		ObserverID: observerID,
+		Column2:    sinceTS,
+		Column3:    binWidth,
+	})
+	if err != nil {
+		return nil, err
+	}
+	activity.Points = make([]api.ObserverActivityPoint, 0, len(rows))
+	for _, r := range rows {
+		p := api.ObserverActivityPoint{T: r.Bucket.Time.UnixMilli(), Observations: r.Observations}
+		if r.AirtimeN > 0 {
+			airtime := r.AirtimeMs
+			p.AirtimeMs = &airtime
+		}
+		if r.SnrN > 0 {
+			avg, min := r.SnrAvg, r.SnrMin
+			p.SNRAvg, p.SNRMin = &avg, &min
+		}
+		if r.RssiN > 0 {
+			avg := r.RssiAvg
+			p.RSSIAvg = &avg
+		}
+		activity.Points = append(activity.Points, p)
+	}
+	typeRows, err := s.q.GetObserverActivityRawPayloadTypes(ctx, sqlc.GetObserverActivityRawPayloadTypesParams{
+		ObserverID: observerID,
+		Column2:    sinceTS,
+	})
+	if err != nil {
+		return nil, err
+	}
+	activity.PayloadTypes = make([]api.PayloadBreakdownItem, 0, len(typeRows))
+	for _, v := range typeRows {
+		if v.PayloadType == nil {
+			continue
+		}
+		activity.PayloadTypes = append(activity.PayloadTypes, api.PayloadBreakdownItem{
+			PayloadType:     *v.PayloadType,
+			PayloadTypeName: api.PayloadTypeName(*v.PayloadType),
+			Count:           v.Count,
+		})
+	}
+	return activity, nil
 }
 
 func (s *Store) ListObserverAdverts(ctx context.Context, observerID uuid.UUID, cursor int64, limit int32) (api.Page[api.AdvertObservation], error) {

@@ -41,7 +41,11 @@ const (
 	keyNodesByIDsPrefix        = "beacon:nodes:ids:"
 	keyObserverPrefix          = "beacon:observer:"
 	keyObserverScopesPrefix    = "beacon:observer:scopes:"
+	keyObserverActivityPrefix  = "beacon:observer:activity:"
 )
+
+// observerActivityTTL is deliberately short: activity is a live chart, not reference data.
+const observerActivityTTL = 60 * time.Second
 
 // CachedReader wraps an api.Reader with a Redis caching layer.
 // It implements api.Reader and is a drop-in replacement for db.Store
@@ -350,6 +354,14 @@ func (cr *CachedReader) GetObserverTelemetry(ctx context.Context, observerID uui
 // GetObserverTelemetryBucketed implements [api.Reader].
 func (cr *CachedReader) GetObserverTelemetryBucketed(ctx context.Context, observerID uuid.UUID, since, until time.Time, bucketHours int32) ([]api.ObserverTelemetryPoint, error) {
 	return cr.inner.GetObserverTelemetryBucketed(ctx, observerID, since, until, bucketHours)
+}
+
+// GetObserverActivity implements [api.Reader].
+func (cr *CachedReader) GetObserverActivity(ctx context.Context, observerID uuid.UUID, window, interval time.Duration) (*api.ObserverActivity, error) {
+	key := keyObserverActivityPrefix + observerID.String() + ":" + window.String() + ":" + interval.String()
+	return getOrSet(ctx, cr.c, key, observerActivityTTL, func() (*api.ObserverActivity, error) {
+		return cr.inner.GetObserverActivity(ctx, observerID, window, interval)
+	})
 }
 
 // GetPacket implements [api.Reader].

@@ -515,6 +515,216 @@ func (q *Queries) GetNodesByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]Ge
 	return items, nil
 }
 
+const getObserverActivityHourly = `-- name: GetObserverActivityHourly :many
+SELECT
+  date_bin($3::interval, bucket, TIMESTAMPTZ 'epoch')::timestamptz AS bucket,
+  SUM(observations)::bigint AS observations,
+  COALESCE(SUM(airtime_ms), 0)::real AS airtime_ms,
+  SUM(airtime_n)::bigint AS airtime_n,
+  COALESCE(SUM(snr_sum), 0)::real AS snr_sum,
+  SUM(snr_n)::bigint AS snr_n,
+  COALESCE(MIN(snr_min), 0)::real AS snr_min,
+  COALESCE(SUM(rssi_sum), 0)::bigint AS rssi_sum,
+  SUM(rssi_n)::bigint AS rssi_n
+FROM mv_observer_activity_hourly
+WHERE observer_id = $1 AND bucket >= $2::timestamptz
+GROUP BY 1
+ORDER BY 1
+`
+
+type GetObserverActivityHourlyParams struct {
+	ObserverID uuid.UUID          `json:"observer_id"`
+	Column2    pgtype.Timestamptz `json:"column_2"`
+	Column3    pgtype.Interval    `json:"column_3"`
+}
+
+type GetObserverActivityHourlyRow struct {
+	Bucket       pgtype.Timestamptz `json:"bucket"`
+	Observations int64              `json:"observations"`
+	AirtimeMs    float32            `json:"airtime_ms"`
+	AirtimeN     int64              `json:"airtime_n"`
+	SnrSum       float32            `json:"snr_sum"`
+	SnrN         int64              `json:"snr_n"`
+	SnrMin       float32            `json:"snr_min"`
+	RssiSum      int64              `json:"rssi_sum"`
+	RssiN        int64              `json:"rssi_n"`
+}
+
+// Hour-or-coarser buckets summed from the hourly rollup; same COALESCE-plus-count shape as the raw query.
+func (q *Queries) GetObserverActivityHourly(ctx context.Context, arg GetObserverActivityHourlyParams) ([]GetObserverActivityHourlyRow, error) {
+	rows, err := q.db.Query(ctx, getObserverActivityHourly, arg.ObserverID, arg.Column2, arg.Column3)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetObserverActivityHourlyRow{}
+	for rows.Next() {
+		var i GetObserverActivityHourlyRow
+		if err := rows.Scan(
+			&i.Bucket,
+			&i.Observations,
+			&i.AirtimeMs,
+			&i.AirtimeN,
+			&i.SnrSum,
+			&i.SnrN,
+			&i.SnrMin,
+			&i.RssiSum,
+			&i.RssiN,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getObserverActivityHourlyPayloadTypes = `-- name: GetObserverActivityHourlyPayloadTypes :many
+SELECT payload_type, SUM(observations)::bigint AS count
+FROM mv_observer_activity_hourly
+WHERE observer_id = $1 AND bucket >= $2::timestamptz
+GROUP BY payload_type
+ORDER BY count DESC
+`
+
+type GetObserverActivityHourlyPayloadTypesParams struct {
+	ObserverID uuid.UUID          `json:"observer_id"`
+	Column2    pgtype.Timestamptz `json:"column_2"`
+}
+
+type GetObserverActivityHourlyPayloadTypesRow struct {
+	PayloadType *int16 `json:"payload_type"`
+	Count       int64  `json:"count"`
+}
+
+func (q *Queries) GetObserverActivityHourlyPayloadTypes(ctx context.Context, arg GetObserverActivityHourlyPayloadTypesParams) ([]GetObserverActivityHourlyPayloadTypesRow, error) {
+	rows, err := q.db.Query(ctx, getObserverActivityHourlyPayloadTypes, arg.ObserverID, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetObserverActivityHourlyPayloadTypesRow{}
+	for rows.Next() {
+		var i GetObserverActivityHourlyPayloadTypesRow
+		if err := rows.Scan(&i.PayloadType, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getObserverActivityRaw = `-- name: GetObserverActivityRaw :many
+SELECT
+  date_bin($3::interval, heard_at, TIMESTAMPTZ 'epoch')::timestamptz AS bucket,
+  COUNT(*)::bigint AS observations,
+  COALESCE(SUM(airtime_ms), 0)::real AS airtime_ms,
+  COUNT(airtime_ms)::bigint AS airtime_n,
+  COALESCE(AVG(snr)  FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)), 0)::real AS snr_avg,
+  COALESCE(MIN(snr)  FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)), 0)::real AS snr_min,
+  COUNT(snr)         FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0))::bigint AS snr_n,
+  COALESCE(AVG(rssi) FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)), 0)::real AS rssi_avg,
+  COUNT(rssi)        FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0))::bigint AS rssi_n
+FROM packet_observations
+WHERE observer_id = $1 AND heard_at >= $2::timestamptz
+GROUP BY bucket
+ORDER BY bucket
+`
+
+type GetObserverActivityRawParams struct {
+	ObserverID uuid.UUID          `json:"observer_id"`
+	Column2    pgtype.Timestamptz `json:"column_2"`
+	Column3    pgtype.Interval    `json:"column_3"`
+}
+
+type GetObserverActivityRawRow struct {
+	Bucket       pgtype.Timestamptz `json:"bucket"`
+	Observations int64              `json:"observations"`
+	AirtimeMs    float32            `json:"airtime_ms"`
+	AirtimeN     int64              `json:"airtime_n"`
+	SnrAvg       float32            `json:"snr_avg"`
+	SnrMin       float32            `json:"snr_min"`
+	SnrN         int64              `json:"snr_n"`
+	RssiAvg      float32            `json:"rssi_avg"`
+	RssiN        int64              `json:"rssi_n"`
+}
+
+// Sub-hour activity buckets straight off idx_observations_observer; no join to packets.
+// Aggregates are COALESCEd and paired with a count column: sqlc types a cast expression as
+// NOT NULL, so the counts are what tell the store a bucket had no costed or no signal rows.
+func (q *Queries) GetObserverActivityRaw(ctx context.Context, arg GetObserverActivityRawParams) ([]GetObserverActivityRawRow, error) {
+	rows, err := q.db.Query(ctx, getObserverActivityRaw, arg.ObserverID, arg.Column2, arg.Column3)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetObserverActivityRawRow{}
+	for rows.Next() {
+		var i GetObserverActivityRawRow
+		if err := rows.Scan(
+			&i.Bucket,
+			&i.Observations,
+			&i.AirtimeMs,
+			&i.AirtimeN,
+			&i.SnrAvg,
+			&i.SnrMin,
+			&i.SnrN,
+			&i.RssiAvg,
+			&i.RssiN,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getObserverActivityRawPayloadTypes = `-- name: GetObserverActivityRawPayloadTypes :many
+SELECT payload_type, COUNT(*)::bigint AS count
+FROM packet_observations
+WHERE observer_id = $1 AND heard_at >= $2::timestamptz AND payload_type IS NOT NULL
+GROUP BY payload_type
+ORDER BY count DESC
+`
+
+type GetObserverActivityRawPayloadTypesParams struct {
+	ObserverID uuid.UUID          `json:"observer_id"`
+	Column2    pgtype.Timestamptz `json:"column_2"`
+}
+
+type GetObserverActivityRawPayloadTypesRow struct {
+	PayloadType *int16 `json:"payload_type"`
+	Count       int64  `json:"count"`
+}
+
+func (q *Queries) GetObserverActivityRawPayloadTypes(ctx context.Context, arg GetObserverActivityRawPayloadTypesParams) ([]GetObserverActivityRawPayloadTypesRow, error) {
+	rows, err := q.db.Query(ctx, getObserverActivityRawPayloadTypes, arg.ObserverID, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetObserverActivityRawPayloadTypesRow{}
+	for rows.Next() {
+		var i GetObserverActivityRawPayloadTypesRow
+		if err := rows.Scan(&i.PayloadType, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getObserverBrokers = `-- name: GetObserverBrokers :many
 SELECT broker_name, last_seen, last_packet_at
 FROM observer_brokers
@@ -1722,12 +1932,13 @@ INSERT INTO packet_observations (
   coding_rate,
   source_broker,
   payload_type,
-  resolved_endpoints
+  resolved_endpoints,
+  airtime_ms
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
 )
 ON CONFLICT (packet_hash, observer_id) DO NOTHING
-RETURNING id, packet_hash, observer_id, iata, heard_at, path_length_byte, hash_size, hop_count, path_bytes, rssi, snr, propagation_time_ms, radio_freq_mhz, spread_factor, bandwidth_khz, coding_rate, source_broker, payload_type, resolved_endpoints
+RETURNING id, packet_hash, observer_id, iata, heard_at, path_length_byte, hash_size, hop_count, path_bytes, rssi, snr, propagation_time_ms, radio_freq_mhz, spread_factor, bandwidth_khz, coding_rate, source_broker, payload_type, resolved_endpoints, airtime_ms
 `
 
 type InsertObservationParams struct {
@@ -1749,6 +1960,7 @@ type InsertObservationParams struct {
 	SourceBroker      *string            `json:"source_broker"`
 	PayloadType       *int16             `json:"payload_type"`
 	ResolvedEndpoints []byte             `json:"resolved_endpoints"`
+	AirtimeMs         *float32           `json:"airtime_ms"`
 }
 
 // ============================================================
@@ -1774,6 +1986,7 @@ func (q *Queries) InsertObservation(ctx context.Context, arg InsertObservationPa
 		arg.SourceBroker,
 		arg.PayloadType,
 		arg.ResolvedEndpoints,
+		arg.AirtimeMs,
 	)
 	var i PacketObservation
 	err := row.Scan(
@@ -1796,6 +2009,7 @@ func (q *Queries) InsertObservation(ctx context.Context, arg InsertObservationPa
 		&i.SourceBroker,
 		&i.PayloadType,
 		&i.ResolvedEndpoints,
+		&i.AirtimeMs,
 	)
 	return i, err
 }
@@ -2562,7 +2776,7 @@ func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNod
 }
 
 const listObservationsForPacket = `-- name: ListObservationsForPacket :many
-SELECT po.id, po.packet_hash, po.observer_id, po.iata, po.heard_at, po.path_length_byte, po.hash_size, po.hop_count, po.path_bytes, po.rssi, po.snr, po.propagation_time_ms, po.radio_freq_mhz, po.spread_factor, po.bandwidth_khz, po.coding_rate, po.source_broker, po.payload_type, po.resolved_endpoints, o.display_name AS observer_name
+SELECT po.id, po.packet_hash, po.observer_id, po.iata, po.heard_at, po.path_length_byte, po.hash_size, po.hop_count, po.path_bytes, po.rssi, po.snr, po.propagation_time_ms, po.radio_freq_mhz, po.spread_factor, po.bandwidth_khz, po.coding_rate, po.source_broker, po.payload_type, po.resolved_endpoints, po.airtime_ms, o.display_name AS observer_name
 FROM packet_observations po
 LEFT JOIN observers o ON o.id = po.observer_id
 WHERE po.packet_hash = $1
@@ -2589,6 +2803,7 @@ type ListObservationsForPacketRow struct {
 	SourceBroker      *string            `json:"source_broker"`
 	PayloadType       *int16             `json:"payload_type"`
 	ResolvedEndpoints []byte             `json:"resolved_endpoints"`
+	AirtimeMs         *float32           `json:"airtime_ms"`
 	ObserverName      *string            `json:"observer_name"`
 }
 
@@ -2621,6 +2836,7 @@ func (q *Queries) ListObservationsForPacket(ctx context.Context, packetHash []by
 			&i.SourceBroker,
 			&i.PayloadType,
 			&i.ResolvedEndpoints,
+			&i.AirtimeMs,
 			&i.ObserverName,
 		); err != nil {
 			return nil, err
@@ -3479,6 +3695,15 @@ REFRESH MATERIALIZED VIEW CONCURRENTLY mv_hourly_iata_stats
 
 func (q *Queries) RefreshHourlyStats(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, refreshHourlyStats)
+	return err
+}
+
+const refreshObserverActivity = `-- name: RefreshObserverActivity :exec
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_observer_activity_hourly
+`
+
+func (q *Queries) RefreshObserverActivity(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, refreshObserverActivity)
 	return err
 }
 

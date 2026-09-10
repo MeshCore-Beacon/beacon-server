@@ -77,6 +77,20 @@ type MvHourlyIataStat struct {
 	ActiveObservers  int64              `json:"active_observers"`
 }
 
+type MvObserverActivityHourly struct {
+	ObserverID   uuid.UUID          `json:"observer_id"`
+	PayloadType  *int16             `json:"payload_type"`
+	Bucket       pgtype.Timestamptz `json:"bucket"`
+	Observations int64              `json:"observations"`
+	AirtimeMs    float32            `json:"airtime_ms"`
+	AirtimeN     int64              `json:"airtime_n"`
+	SnrSum       float32            `json:"snr_sum"`
+	SnrN         int64              `json:"snr_n"`
+	SnrMin       float32            `json:"snr_min"`
+	RssiSum      int64              `json:"rssi_sum"`
+	RssiN        int64              `json:"rssi_n"`
+}
+
 type MvPayloadBreakdownByIatum struct {
 	Iata        string             `json:"iata"`
 	PayloadType *int16             `json:"payload_type"`
@@ -293,6 +307,7 @@ type PacketObservation struct {
 	SourceBroker      *string            `json:"source_broker"`
 	PayloadType       *int16             `json:"payload_type"`
 	ResolvedEndpoints []byte             `json:"resolved_endpoints"`
+	AirtimeMs         *float32           `json:"airtime_ms"`
 }
 
 type Region struct {

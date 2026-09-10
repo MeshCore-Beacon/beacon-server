@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/MeshCore-Beacon/beacon-server/internal/lora"
 	"github.com/google/uuid"
 	"github.com/meshcore-go/meshcore-go"
 )
@@ -56,6 +57,7 @@ type InsertObservationParams struct {
 	SourceBroker      string
 	PayloadType       int16
 	ResolvedEndpoints json.RawMessage
+	AirtimeMs         *float32 // nil when the observer never reported costable radio settings
 }
 
 // RadioSettings holds the radio configuration for an observer, populated from
@@ -787,6 +789,13 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 			resolvedEndpoints = nil // optional enrichment must not discard the observation
 		}
 	}
+	// Airtime is costed from the frame as received; zero radio columns mean the
+	// observer never reported its settings, so there is nothing to cost.
+	var airtimeMs *float32
+	if ms, ok := lora.TimeOnAirMs(len(hexBytes), int(radio.SF), float64(radio.BWKHz), int(radio.CR)); ok {
+		cost := float32(ms)
+		airtimeMs = &cost
+	}
 	oParams := InsertObservationParams{
 		PacketHash:        packetHash[:],
 		ObserverID:        id,
@@ -806,6 +815,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		SourceBroker:      w.cfg.BrokerName,
 		PayloadType:       int16(packet.PayloadType()),
 		ResolvedEndpoints: resolvedEndpoints,
+		AirtimeMs:         airtimeMs,
 	}
 	inserted, err := w.db.InsertObservation(ctx, oParams)
 	if err != nil {

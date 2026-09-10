@@ -111,6 +111,9 @@ func (s *refreshStub) RefreshTopAdvertisers(ctx context.Context) error {
 func (s *refreshStub) RefreshRadioPresets(ctx context.Context) error {
 	return s.refresh(ctx, "radio presets")
 }
+func (s *refreshStub) RefreshObserverActivity(ctx context.Context) error {
+	return s.refresh(ctx, "observer activity")
+}
 
 func TestViewRefreshTask(t *testing.T) {
 	first, second := errors.New("first failure"), errors.New("second failure")
@@ -125,8 +128,8 @@ func TestViewRefreshTask(t *testing.T) {
 			store := &refreshStub{errs: tc.errs}
 			task := ViewRefreshTask(store, time.Minute)
 			err := task.Run(context.Background())
-			if len(store.calls) != 7 {
-				t.Fatalf("refreshed %d views, want 7", len(store.calls))
+			if len(store.calls) != 8 {
+				t.Fatalf("refreshed %d views, want 8", len(store.calls))
 			}
 			if len(tc.errs) == 0 && err != nil {
 				t.Fatal(err)
