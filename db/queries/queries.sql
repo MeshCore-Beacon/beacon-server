@@ -313,6 +313,7 @@ ORDER BY count DESC;
 -- name: ListObserverAdverts :many
 -- Returns advert packets (payload_type=4) heard by a specific observer.
 -- Pass cursor=0 to start from the beginning, or the last seen id for pagination.
+-- Keep missing-origin adverts; the generated key field expects a string, not NULL.
 SELECT 
   po.id,
   encode(po.packet_hash, 'hex') AS packet_hash_hex,
@@ -323,7 +324,7 @@ SELECT
   po.snr,
   po.hop_count,
   n.name AS node_name,
-  encode(p.origin_pubkey, 'hex') AS node_public_key
+  COALESCE(encode(p.origin_pubkey, 'hex'), '')::text AS node_public_key
 FROM packet_observations po
 JOIN packets p ON p.packet_hash = po.packet_hash
 LEFT JOIN nodes n ON n.public_key = p.origin_pubkey

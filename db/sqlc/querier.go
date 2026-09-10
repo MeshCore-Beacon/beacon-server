@@ -151,6 +151,7 @@ type Querier interface {
 	ListObservationsForPacket(ctx context.Context, packetHash []byte) ([]ListObservationsForPacketRow, error)
 	// Returns advert packets (payload_type=4) heard by a specific observer.
 	// Pass cursor=0 to start from the beginning, or the last seen id for pagination.
+	// Keep missing-origin adverts; the generated key field expects a string, not NULL.
 	ListObserverAdverts(ctx context.Context, arg ListObserverAdvertsParams) ([]ListObserverAdvertsRow, error)
 	// Pass cursor=0 to start from the beginning, or the last seen observer's rownum for pagination.
 	// Note: observers use UUID PKs so we order by last_seen and use a keyset on last_seen+id.
