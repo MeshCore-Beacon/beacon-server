@@ -103,6 +103,7 @@ INSERT INTO channel_iatas(channel_hash,iata,last_heard) VALUES
 		t.Run(tc.name, func(t *testing.T) {
 			params, _ := url.ParseQuery(tc.query)
 			params.Set("limit", "2")
+			params.Set("cursor", "0") // Clients may retain the legacy first-page value.
 			var got []int
 			for n := 0; n < 10; n++ {
 				page := request(t, params)
@@ -119,7 +120,6 @@ INSERT INTO channel_iatas(channel_hash,iata,last_heard) VALUES
 					t.Fatal("legacy numeric cursor was removed")
 				}
 				if page.NextPageCursor != nil {
-					params.Del("cursor")
 					params.Set("pageCursor", *page.NextPageCursor)
 				} else {
 					params.Set("cursor", strconv.FormatInt(*page.NextCursor, 10))

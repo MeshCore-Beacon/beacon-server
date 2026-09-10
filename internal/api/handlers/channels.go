@@ -37,8 +37,8 @@ func ChannelsRouter(reader api.Reader) http.Handler {
 //	@Param		hash	query		string	false	"Single-byte channel hash (hex)"
 //	@Param		iata	query		string	false	"Filter by IATA code"
 //	@Param		iatas	query		string	false	"Filter by IATA code(s), comma-separated e.g. YOW or YOW,YYZ"
-//	@Param		cursor	query		int		false	"last_seen epoch ms of last item for pagination"
-//	@Param		pageCursor	query		string	false	"Opaque nextPageCursor from a previous response; preserves timestamp ties and precision. Cannot be combined with cursor."
+//	@Param		cursor	query		int		false	"last_seen epoch ms of last item for pagination; 0 starts from the beginning"
+//	@Param		pageCursor	query		string	false	"Opaque nextPageCursor from a previous response; preserves timestamp ties and precision. Cannot be combined with a positive cursor; cursor=0 is allowed."
 //	@Param		limit	query		int		false	"Max results (default 50); must be positive, values above 200 are clamped" minimum(1) maximum(200)
 //	@Success	200		{object}	api.ChannelPage
 //	@Failure	400		{object}	handlers.APIError
@@ -52,18 +52,6 @@ func listChannels(reader api.Reader) http.HandlerFunc {
 			return
 		}
 		iatas := parseIATAs(r)
-		var pageCursor *api.ChannelCursor
-		if raw := r.URL.Query().Get("pageCursor"); raw != "" {
-			if r.URL.Query().Get("cursor") != "" {
-				respondError(w, http.StatusBadRequest, "pageCursor and cursor cannot be combined")
-				return
-			}
-			pageCursor, err = api.ParseChannelCursor(raw)
-			if err != nil {
-				respondError(w, http.StatusBadRequest, "invalid pageCursor")
-				return
-			}
-		}
 		var cursor int64
 		if cursorParam := r.URL.Query().Get("cursor"); cursorParam != "" {
 			c, err := strconv.ParseInt(cursorParam, 10, 64)
@@ -72,6 +60,18 @@ func listChannels(reader api.Reader) http.HandlerFunc {
 				return
 			}
 			cursor = c
+		}
+		var pageCursor *api.ChannelCursor
+		if raw := r.URL.Query().Get("pageCursor"); raw != "" {
+			if cursor > 0 {
+				respondError(w, http.StatusBadRequest, "pageCursor and a positive cursor cannot be combined")
+				return
+			}
+			pageCursor, err = api.ParseChannelCursor(raw)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "invalid pageCursor")
+				return
+			}
 		}
 		var hashHex []byte
 		if hash := strings.ToLower(r.URL.Query().Get("hash")); hash != "" {

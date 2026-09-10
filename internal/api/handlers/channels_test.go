@@ -47,12 +47,15 @@ func TestListChannels_PageCursor(t *testing.T) {
 		}
 		return api.ChannelPage{}, nil
 	}})
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/?pageCursor=v1:1700000000000123:9&limit=2&hash=AA&iata=yow", nil))
-	if w.Code != http.StatusOK || !called {
-		t.Fatalf("HTTP %d, reader called=%v", w.Code, called)
+	for _, legacy := range []string{"", "&cursor=0"} {
+		called = false
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/?pageCursor=v1:1700000000000123:9&limit=2&hash=AA&iata=yow"+legacy, nil))
+		if w.Code != http.StatusOK || !called {
+			t.Fatalf("legacy %q: HTTP %d, reader called=%v", legacy, w.Code, called)
+		}
 	}
-	for _, query := range []string{"pageCursor=bad", "cursor=0&pageCursor=v1:1700000000000123:9"} {
+	for _, query := range []string{"pageCursor=bad", "cursor=1&pageCursor=v1:1700000000000123:9", "cursor=bad&pageCursor=v1:1700000000000123:9"} {
 		called = false
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/?"+query, nil))

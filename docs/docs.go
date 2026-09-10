@@ -74,13 +74,13 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "last_seen epoch ms of last item for pagination",
+                        "description": "last_seen epoch ms of last item for pagination; 0 starts from the beginning",
                         "name": "cursor",
                         "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "Opaque nextPageCursor from a previous response; preserves timestamp ties and precision. Cannot be combined with cursor.",
+                        "description": "Opaque nextPageCursor from a previous response; preserves timestamp ties and precision. Cannot be combined with a positive cursor; cursor=0 is allowed.",
                         "name": "pageCursor",
                         "in": "query"
                     },

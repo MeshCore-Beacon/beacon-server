@@ -1175,12 +1175,14 @@ paths:
         in: query
         name: iatas
         type: string
-      - description: last_seen epoch ms of last item for pagination
+      - description: last_seen epoch ms of last item for pagination; 0 starts from
+          the beginning
         in: query
         name: cursor
         type: integer
       - description: Opaque nextPageCursor from a previous response; preserves timestamp
-          ties and precision. Cannot be combined with cursor.
+          ties and precision. Cannot be combined with a positive cursor; cursor=0
+          is allowed.
         in: query
         name: pageCursor
         type: string
