@@ -80,7 +80,8 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 			return
 		}
 		var lat, lon *float64
-		if advert.AppData().Lat != 0 || advert.AppData().Lon != 0 {
+		// Presence, not value: an explicit 0/0 advert resets the stored location.
+		if advert.Flags()&meshcore.AdvertLatLonMask != 0 {
 			la := float64(advert.AppData().Lat) / 1e6
 			lo := float64(advert.AppData().Lon) / 1e6
 			lat = &la
