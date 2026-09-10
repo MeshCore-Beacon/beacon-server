@@ -258,8 +258,8 @@ type ObserverTelemetry struct {
 	ObserverID       uuid.UUID          `json:"observer_id"`
 	ReportedAt       pgtype.Timestamptz `json:"reported_at"`
 	BatteryVoltageMv *int32             `json:"battery_voltage_mv"`
-	AirtimeTxPct     *float32           `json:"airtime_tx_pct"`
-	AirtimeRxPct     *float32           `json:"airtime_rx_pct"`
+	AirtimeTxSecs    *float32           `json:"airtime_tx_secs"`
+	AirtimeRxSecs    *float32           `json:"airtime_rx_secs"`
 	NoiseFloorDb     *float32           `json:"noise_floor_db"`
 	UptimeSeconds    *int64             `json:"uptime_seconds"`
 	QueueLength      *int32             `json:"queue_length"`

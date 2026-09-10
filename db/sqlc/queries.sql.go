@@ -891,7 +891,7 @@ func (q *Queries) GetObserverScopes(ctx context.Context, observerID uuid.UUID) (
 }
 
 const getObserverTelemetry = `-- name: GetObserverTelemetry :many
-SELECT id, reported_at, battery_voltage_mv, airtime_tx_pct, airtime_rx_pct,
+SELECT id, reported_at, battery_voltage_mv, airtime_tx_secs, airtime_rx_secs,
        noise_floor_db, uptime_seconds, queue_length, debug_flags, receive_errors
 FROM observer_telemetry
 WHERE observer_id = $1
@@ -912,8 +912,8 @@ type GetObserverTelemetryRow struct {
 	ID               int64              `json:"id"`
 	ReportedAt       pgtype.Timestamptz `json:"reported_at"`
 	BatteryVoltageMv *int32             `json:"battery_voltage_mv"`
-	AirtimeTxPct     *float32           `json:"airtime_tx_pct"`
-	AirtimeRxPct     *float32           `json:"airtime_rx_pct"`
+	AirtimeTxSecs    *float32           `json:"airtime_tx_secs"`
+	AirtimeRxSecs    *float32           `json:"airtime_rx_secs"`
 	NoiseFloorDb     *float32           `json:"noise_floor_db"`
 	UptimeSeconds    *int64             `json:"uptime_seconds"`
 	QueueLength      *int32             `json:"queue_length"`
@@ -939,8 +939,8 @@ func (q *Queries) GetObserverTelemetry(ctx context.Context, arg GetObserverTelem
 			&i.ID,
 			&i.ReportedAt,
 			&i.BatteryVoltageMv,
-			&i.AirtimeTxPct,
-			&i.AirtimeRxPct,
+			&i.AirtimeTxSecs,
+			&i.AirtimeRxSecs,
 			&i.NoiseFloorDb,
 			&i.UptimeSeconds,
 			&i.QueueLength,
@@ -962,8 +962,8 @@ SELECT
   (date_trunc('day', reported_at) +
     (EXTRACT(HOUR FROM reported_at)::int / $4::int) * ($4::int * interval '1 hour'))::timestamptz AS bucket,
   AVG(battery_voltage_mv)::int   AS battery_voltage_mv,
-  GREATEST(MAX(airtime_tx_pct) - MIN(airtime_tx_pct), 0)::real AS airtime_tx_pct,
-  GREATEST(MAX(airtime_rx_pct) - MIN(airtime_rx_pct), 0)::real AS airtime_rx_pct,
+  GREATEST(MAX(airtime_tx_secs) - MIN(airtime_tx_secs), 0)::real AS airtime_tx_secs,
+  GREATEST(MAX(airtime_rx_secs) - MIN(airtime_rx_secs), 0)::real AS airtime_rx_secs,
   AVG(noise_floor_db)::real      AS noise_floor_db,
   MAX(uptime_seconds)::bigint    AS uptime_seconds,
   AVG(queue_length)::int         AS queue_length,
@@ -986,8 +986,8 @@ type GetObserverTelemetryBucketedParams struct {
 type GetObserverTelemetryBucketedRow struct {
 	Bucket           pgtype.Timestamptz `json:"bucket"`
 	BatteryVoltageMv int32              `json:"battery_voltage_mv"`
-	AirtimeTxPct     float32            `json:"airtime_tx_pct"`
-	AirtimeRxPct     float32            `json:"airtime_rx_pct"`
+	AirtimeTxSecs    float32            `json:"airtime_tx_secs"`
+	AirtimeRxSecs    float32            `json:"airtime_rx_secs"`
 	NoiseFloorDb     float32            `json:"noise_floor_db"`
 	UptimeSeconds    int64              `json:"uptime_seconds"`
 	QueueLength      int32              `json:"queue_length"`
@@ -1011,8 +1011,8 @@ func (q *Queries) GetObserverTelemetryBucketed(ctx context.Context, arg GetObser
 		if err := rows.Scan(
 			&i.Bucket,
 			&i.BatteryVoltageMv,
-			&i.AirtimeTxPct,
-			&i.AirtimeRxPct,
+			&i.AirtimeTxSecs,
+			&i.AirtimeRxSecs,
 			&i.NoiseFloorDb,
 			&i.UptimeSeconds,
 			&i.QueueLength,
@@ -2016,8 +2016,8 @@ func (q *Queries) InsertObservation(ctx context.Context, arg InsertObservationPa
 
 const insertObserverTelemetry = `-- name: InsertObserverTelemetry :exec
 INSERT INTO observer_telemetry (
-    observer_id, reported_at, battery_voltage_mv, airtime_tx_pct,
-    airtime_rx_pct, noise_floor_db, uptime_seconds, queue_length,
+    observer_id, reported_at, battery_voltage_mv, airtime_tx_secs,
+    airtime_rx_secs, noise_floor_db, uptime_seconds, queue_length,
     debug_flags, receive_errors
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (observer_id, reported_at) DO NOTHING
@@ -2027,8 +2027,8 @@ type InsertObserverTelemetryParams struct {
 	ObserverID       uuid.UUID          `json:"observer_id"`
 	ReportedAt       pgtype.Timestamptz `json:"reported_at"`
 	BatteryVoltageMv *int32             `json:"battery_voltage_mv"`
-	AirtimeTxPct     *float32           `json:"airtime_tx_pct"`
-	AirtimeRxPct     *float32           `json:"airtime_rx_pct"`
+	AirtimeTxSecs    *float32           `json:"airtime_tx_secs"`
+	AirtimeRxSecs    *float32           `json:"airtime_rx_secs"`
 	NoiseFloorDb     *float32           `json:"noise_floor_db"`
 	UptimeSeconds    *int64             `json:"uptime_seconds"`
 	QueueLength      *int32             `json:"queue_length"`
@@ -2043,8 +2043,8 @@ func (q *Queries) InsertObserverTelemetry(ctx context.Context, arg InsertObserve
 		arg.ObserverID,
 		arg.ReportedAt,
 		arg.BatteryVoltageMv,
-		arg.AirtimeTxPct,
-		arg.AirtimeRxPct,
+		arg.AirtimeTxSecs,
+		arg.AirtimeRxSecs,
 		arg.NoiseFloorDb,
 		arg.UptimeSeconds,
 		arg.QueueLength,

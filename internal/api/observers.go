@@ -49,11 +49,12 @@ type Observer struct {
 }
 
 // ObserverTelemetryPoint is a single telemetry snapshot for an observer.
+// Airtime is radio seconds: cumulative since boot on 1h points, per-bucket delta on 6h/24h.
 type ObserverTelemetryPoint struct {
 	T             int64    `json:"t"` // epoch ms
 	BatteryMV     *int32   `json:"batteryMv,omitempty"`
-	AirtimeTxPct  *float32 `json:"airtimeTxPct,omitempty"`
-	AirtimeRxPct  *float32 `json:"airtimeRxPct,omitempty"`
+	AirtimeTxSecs *float32 `json:"airtimeTxSecs,omitempty"`
+	AirtimeRxSecs *float32 `json:"airtimeRxSecs,omitempty"`
 	NoiseFloorDB  *float32 `json:"noiseFloorDb,omitempty"`
 	UptimeSeconds *int64   `json:"uptimeSeconds,omitempty"`
 	QueueLength   *int32   `json:"queueLength,omitempty"`
