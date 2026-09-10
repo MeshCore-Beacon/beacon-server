@@ -53,7 +53,9 @@ type Reader interface {
 	// Pass nil hash to skip hash filtering. Pass empty iatas to return all channels;
 	// IATAs must be uppercase.
 	// cursor is last_seen epoch ms of the last item; pass 0 to start from the beginning.
-	ListChannels(ctx context.Context, limit int32, hash []byte, iatas []string, cursor int64) (Page[ChannelSummary], error)
+	// pageCursor is the precise timestamp/ID boundary; nil preserves the legacy numeric cursor.
+	// When non-nil, pageCursor takes precedence over cursor.
+	ListChannels(ctx context.Context, limit int32, hash []byte, iatas []string, cursor int64, pageCursor *ChannelCursor) (ChannelPage, error)
 
 	// GetChannel returns full detail for a single channel by its integer ID.
 	// Returns nil, pgx.ErrNoRows if the channel is not found.

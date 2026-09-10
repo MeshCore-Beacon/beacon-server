@@ -126,6 +126,9 @@ type Querier interface {
 	// (membership via channel_iatas). NULL hash / empty array skip those filters.
 	// Pass cursor=0 to start from the beginning (cursor is last_seen epoch ms).
 	ListChannels(ctx context.Context, arg ListChannelsParams) ([]Channel, error)
+	// Keep the non-null tuple boundary separate from the legacy optional cursor so
+	// generic prepared plans can seek directly into the composite ordered index.
+	ListChannelsAfter(ctx context.Context, arg ListChannelsAfterParams) ([]Channel, error)
 	ListIATAs(ctx context.Context) ([]IataCode, error)
 	// Only one branch runs. Keep the IATA range ordered by the composite index:
 	// generic plans can otherwise prefer scanning the global timestamp index.

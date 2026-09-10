@@ -19,10 +19,10 @@ func TestListLimits(t *testing.T) {
 	var got int32
 	var calls int
 	reader := stubReader{
-		listChannels: func(ctx context.Context, limit int32, hash []byte, iatas []string, cursor int64) (api.Page[api.ChannelSummary], error) {
+		listChannels: func(ctx context.Context, limit int32, hash []byte, iatas []string, cursor int64, pageCursor *api.ChannelCursor) (api.ChannelPage, error) {
 			calls++
 			got = limit
-			return api.Page[api.ChannelSummary]{}, nil
+			return api.ChannelPage{}, nil
 		},
 		listChannelMessages: func(ctx context.Context, channelID *int32, since time.Time, limit int32, iatas []string, scope string, cursor int64) (api.Page[api.ChannelMessage], error) {
 			calls++

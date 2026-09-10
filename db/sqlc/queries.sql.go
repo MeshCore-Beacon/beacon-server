@@ -2085,7 +2085,7 @@ WHERE ($1::bytea IS NULL OR c.channel_hash = $1)
     WHERE ci.iata = ANY($2::bpchar[])
   ))
   AND ($3::timestamptz IS NULL OR c.last_seen < $3)
-ORDER BY c.last_seen DESC
+ORDER BY c.last_seen DESC, c.id DESC
 LIMIT $4
 `
 
@@ -2104,6 +2104,65 @@ func (q *Queries) ListChannels(ctx context.Context, arg ListChannelsParams) ([]C
 		arg.ChannelHash,
 		arg.Iatas,
 		arg.CursorTs,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Channel{}
+	for rows.Next() {
+		var i Channel
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChannelHash,
+			&i.KeyFingerprint,
+			&i.Name,
+			&i.Hashtag,
+			&i.IsHashtag,
+			&i.IsPublic,
+			&i.KeyKnown,
+			&i.FirstSeen,
+			&i.LastSeen,
+			&i.MessageCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChannelsAfter = `-- name: ListChannelsAfter :many
+SELECT c.id, c.channel_hash, c.key_fingerprint, c.name, c.hashtag, c.is_hashtag, c.is_public, c.key_known, c.first_seen, c.last_seen, c.message_count FROM channels c
+WHERE (c.last_seen, c.id) < ($1::timestamptz, $2::integer)
+  AND ($3::bytea IS NULL OR c.channel_hash = $3)
+  AND (COALESCE(cardinality($4::bpchar[]), 0) = 0 OR c.channel_hash IN (
+    SELECT ci.channel_hash FROM channel_iatas ci WHERE ci.iata = ANY($4::bpchar[])
+  ))
+ORDER BY c.last_seen DESC, c.id DESC
+LIMIT $5
+`
+
+type ListChannelsAfterParams struct {
+	CursorTs    pgtype.Timestamptz `json:"cursor_ts"`
+	CursorID    int32              `json:"cursor_id"`
+	ChannelHash []byte             `json:"channel_hash"`
+	Iatas       []string           `json:"iatas"`
+	PageLimit   int32              `json:"page_limit"`
+}
+
+// Keep the non-null tuple boundary separate from the legacy optional cursor so
+// generic prepared plans can seek directly into the composite ordered index.
+func (q *Queries) ListChannelsAfter(ctx context.Context, arg ListChannelsAfterParams) ([]Channel, error) {
+	rows, err := q.db.Query(ctx, listChannelsAfter,
+		arg.CursorTs,
+		arg.CursorID,
+		arg.ChannelHash,
+		arg.Iatas,
 		arg.PageLimit,
 	)
 	if err != nil {

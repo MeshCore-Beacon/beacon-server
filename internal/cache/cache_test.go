@@ -137,8 +137,8 @@ func (s *stubReader) GetCrossIATANeighbors(_ context.Context, _ uuid.UUID, _ str
 	return nil, nil
 }
 
-func (s *stubReader) ListChannels(_ context.Context, _ int32, _ []byte, _ []string, _ int64) (api.Page[api.ChannelSummary], error) {
-	return api.Page[api.ChannelSummary]{}, nil
+func (s *stubReader) ListChannels(_ context.Context, _ int32, _ []byte, _ []string, _ int64, _ *api.ChannelCursor) (api.ChannelPage, error) {
+	return api.ChannelPage{}, nil
 }
 
 func (s *stubReader) ListChannelMessages(_ context.Context, _ *int32, _ time.Time, _ int32, _ []string, _ string, _ int64) (api.Page[api.ChannelMessage], error) {
