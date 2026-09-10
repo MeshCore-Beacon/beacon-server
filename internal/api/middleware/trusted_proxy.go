@@ -28,6 +28,11 @@ func TrustedProxyIP(proxies []netip.Prefix) func(http.Handler) http.Handler {
 					break
 				}
 			}
+			// Downstream client-IP keys must use the resolved RemoteAddr, not
+			// reinterpret forwarding headers (including those from trusted peers).
+			r.Header.Del("True-Client-IP")
+			r.Header.Del("X-Forwarded-For")
+			r.Header.Del("X-Real-IP")
 			next.ServeHTTP(w, r)
 		})
 	}

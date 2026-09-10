@@ -22,6 +22,8 @@ func TestLoadTrustedProxies(t *testing.T) {
 		{"CIDRs", "server: {trusted_proxies: ['192.0.2.0/24', '2001:db8::/32']}", 2, false},
 		{"bare IP", "server: {trusted_proxies: ['192.0.2.1']}", 0, true},
 		{"invalid CIDR", "server: {trusted_proxies: ['192.0.2.0/99']}", 0, true},
+		{"empty entry", "server: {trusted_proxies: ['', '192.0.2.0/24']}", 0, true},
+		{"null entry", "server: {trusted_proxies: [null, '192.0.2.0/24']}", 0, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config.yaml")

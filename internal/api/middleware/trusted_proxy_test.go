@@ -42,9 +42,18 @@ func TestTrustedProxyIP(t *testing.T) {
 			// These must never override the selected address, even for trusted peers.
 			r.Header.Set("True-Client-IP", "203.0.113.1")
 			r.Header.Set("X-Forwarded-For", "203.0.113.2")
+			r.Header.Set("X-Request-ID", "keep-me")
 			TrustedProxyIP(tc.proxies)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.RemoteAddr != tc.want {
 					t.Errorf("RemoteAddr = %q, want %q", r.RemoteAddr, tc.want)
+				}
+				for _, header := range []string{"True-Client-IP", "X-Forwarded-For", "X-Real-IP"} {
+					if len(r.Header.Values(header)) != 0 {
+						t.Errorf("downstream middleware can still read %s", header)
+					}
+				}
+				if r.Header.Get("X-Request-ID") != "keep-me" {
+					t.Error("unrelated header was changed")
 				}
 			})).ServeHTTP(httptest.NewRecorder(), r)
 		})

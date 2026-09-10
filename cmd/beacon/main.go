@@ -88,6 +88,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
+	if len(cfg.Server.TrustedProxies) == 0 {
+		log.Print("warning: server.trusted_proxies is empty; client IP headers are ignored and proxied clients share a WebSocket connection limit")
+	}
 
 	resolved := config.Resolve(cfg)
 

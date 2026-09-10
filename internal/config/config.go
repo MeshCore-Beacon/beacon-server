@@ -42,6 +42,24 @@ type ServerConfig struct {
 	TrustedProxies []netip.Prefix `yaml:"trusted_proxies"`
 }
 
+func (c *ServerConfig) UnmarshalYAML(node *yaml.Node) error {
+	// Pointers retain null list entries, which yaml would otherwise discard.
+	// Leave them as invalid prefixes for Load's validation below.
+	var raw struct {
+		TrustedProxies []*netip.Prefix `yaml:"trusted_proxies"`
+	}
+	if err := node.Decode(&raw); err != nil {
+		return err
+	}
+	c.TrustedProxies = make([]netip.Prefix, len(raw.TrustedProxies))
+	for i, prefix := range raw.TrustedProxies {
+		if prefix != nil {
+			c.TrustedProxies[i] = *prefix
+		}
+	}
+	return nil
+}
+
 // ResolvedConfig holds all runtime configuration with defaults applied.
 type ResolvedConfig struct {
 	TelemetryResolution  time.Duration
@@ -321,6 +339,11 @@ func Load(path string) (*Config, error) {
 	}
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, err
+	}
+	for i, prefix := range cfg.Server.TrustedProxies {
+		if !prefix.IsValid() {
+			return nil, fmt.Errorf("server.trusted_proxies[%d] must be a valid CIDR", i)
+		}
 	}
 	configDir := filepath.Dir(path)
 	for iata, details := range cfg.IATAs {
