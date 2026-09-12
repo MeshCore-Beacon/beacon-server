@@ -13,7 +13,7 @@ import (
 
 func TestAdminAuthBoundary(t *testing.T) {
 	for _, key := range []string{"", "synthetic-test-key"} {
-		handler := New(nil, nil, nil, 5, config.CORSConfig{}, config.ServerConfig{}, config.AuthConfig{APIKey: key}, config.ResolvedRateLimitConfig{})
+		handler := New(nil, nil, nil, 5, 1000, config.CORSConfig{}, config.ServerConfig{}, config.AuthConfig{APIKey: key}, config.ResolvedRateLimitConfig{})
 		for _, path := range []string{"/api/v1/admin", "/api/v1/admin/", "/api/v1/admin/config", "/api/v1/admin//config"} {
 			for _, method := range []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"} {
 				for _, token := range []string{"", "wrong", "synthetic-test-key"} {

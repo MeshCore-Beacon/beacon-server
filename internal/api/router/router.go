@@ -39,7 +39,7 @@ import (
 //	  /stats           → stats subrouter
 //
 // Admin endpoints require a configured bearer key.
-func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP int, corsCfg config.CORSConfig, serverCfg config.ServerConfig, authCfg config.AuthConfig, rateLimitCfg config.ResolvedRateLimitConfig) http.Handler {
+func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP, maxConnectsPerMinute int, corsCfg config.CORSConfig, serverCfg config.ServerConfig, authCfg config.AuthConfig, rateLimitCfg config.ResolvedRateLimitConfig) http.Handler {
 	r := chi.NewRouter()
 
 	// ── CORS ─────────────────────────────────────────────────────────────────
@@ -99,7 +99,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP 
 	))
 
 	// ── WebSocket ────────────────────────────────────────────────────────────
-	r.Get("/ws", ws.Handler(h, reader, maxConnsPerIP))
+	r.Get("/ws", ws.Handler(h, reader, maxConnsPerIP, maxConnectsPerMinute))
 
 	// ── Public REST API (v1) ─────────────────────────────────────────────────
 	r.Route("/api/v1", func(r chi.Router) {
