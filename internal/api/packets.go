@@ -40,7 +40,7 @@ type PacketSummary struct {
 	LastHeardAt      int64                 `json:"lastHeardAt"`     // epoch ms
 	ObservationCount int32                 `json:"observationCount"`
 	LatestObserver   *PacketLatestObserver `json:"latestObserver,omitempty"`
-	Summary          *string               `json:"summary,omitempty"` // human-readable payload summary
+	Summary          *string               `json:"summary,omitempty"` // advert name from this packet; omitted when unavailable or unsupported
 }
 
 // PacketPathLength is the decoded path_length byte from a packet observation.

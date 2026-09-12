@@ -3535,7 +3535,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "summary": {
-                    "description": "human-readable payload summary",
+                    "description": "advert name from this packet; omitted when unavailable or unsupported",
                     "type": "string"
                 }
             }

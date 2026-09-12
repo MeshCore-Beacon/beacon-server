@@ -137,6 +137,9 @@ func (s *Store) ListPackets(ctx context.Context, payloadTypes, routeTypes []int1
 			LastHeardAt:      v.LastHeardAt.Time.UnixMilli(),
 			ObservationCount: int32(v.ObservationCount),
 		}
+		if v.Summary != "" {
+			item.Summary = &v.Summary
+		}
 		if v.LatestObserverID != (uuid.UUID{}) {
 			endpoints, _ := decodePacketEndpointSnapshot(v.LatestObserverResolvedEndpoints)
 			item.LatestObserver = &api.PacketLatestObserver{
@@ -219,6 +222,9 @@ func (s *Store) listPacketsByIATAs(ctx context.Context, payloadTypes, routeTypes
 			LastHeardAt:      v.LastHeardAt.Time.UnixMilli(),
 			ObservationCount: int32(v.ObservationCount),
 		}
+		if v.Summary != "" {
+			item.Summary = &v.Summary
+		}
 		if v.LatestObserverID != (uuid.UUID{}) {
 			endpoints, _ := decodePacketEndpointSnapshot(v.LatestObserverResolvedEndpoints)
 			item.LatestObserver = &api.PacketLatestObserver{
@@ -277,6 +283,9 @@ func (s *Store) ListPacketsAfterID(ctx context.Context, afterObservationID int64
 			FirstHeardAt:     v.FirstHeardAt.Time.UnixMilli(),
 			LastHeardAt:      v.LastHeardAt.Time.UnixMilli(),
 			ObservationCount: int32(v.ObservationCount),
+		}
+		if v.Summary != "" {
+			item.Summary = &v.Summary
 		}
 		if v.LatestObserverID != (uuid.UUID{}) {
 			endpoints, _ := decodePacketEndpointSnapshot(v.LatestObserverResolvedEndpoints)

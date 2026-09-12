@@ -813,7 +813,7 @@ definitions:
         description: matched transport scope name e.g. "#bc"
         type: string
       summary:
-        description: human-readable payload summary
+        description: advert name from this packet; omitted when unavailable or unsupported
         type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.PacketTransportCodes:
