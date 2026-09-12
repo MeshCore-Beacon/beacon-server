@@ -282,7 +282,7 @@ func TestGetStatsRadioPresets_OK(t *testing.T) {
 func TestGetStatsScopes_OK(t *testing.T) {
 	r := chi.NewRouter()
 	r.Get("/stats/scopes", getStatsScopes(stubReader{
-		getScopeStats: func(_ context.Context) ([]api.ScopeStats, error) {
+		getScopeStats: func(_ context.Context, _ []string) ([]api.ScopeStats, error) {
 			return []api.ScopeStats{{Name: "#bc", PacketCount: 100}}, nil
 		},
 	}))

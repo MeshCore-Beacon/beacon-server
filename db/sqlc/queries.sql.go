@@ -1360,9 +1360,23 @@ func (q *Queries) GetScopeNames(ctx context.Context) ([]string, error) {
 const getScopeStats = `-- name: GetScopeStats :many
 SELECT
     ts.name,
-    (SELECT COUNT(*) FROM packets p WHERE p.scope_id = ts.id) AS packet_count,
-    (SELECT COUNT(*) FROM observer_scopes os WHERE os.scope_id = ts.id) AS observer_count,
-    (SELECT COUNT(*) FROM nodes n WHERE n.default_scope_id = ts.id) AS node_count
+    (SELECT COUNT(*) FROM packets p WHERE p.scope_id = ts.id
+      AND (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR EXISTS (
+        SELECT 1 FROM packet_observations po
+        WHERE po.packet_hash = p.packet_hash AND po.iata = ANY($1::bpchar[])
+      ))) AS packet_count,
+    (SELECT COUNT(*) FROM observer_scopes os WHERE os.scope_id = ts.id
+      AND (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR EXISTS (
+        SELECT 1 FROM packet_observations po
+        JOIN packets p ON p.packet_hash = po.packet_hash
+        WHERE po.observer_id = os.observer_id AND p.scope_id = os.scope_id
+          AND po.iata = ANY($1::bpchar[])
+      ))) AS observer_count,
+    (SELECT COUNT(*) FROM nodes n WHERE n.default_scope_id = ts.id
+      AND (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR EXISTS (
+        SELECT 1 FROM node_iatas ni
+        WHERE ni.node_id = n.id AND ni.iata = ANY($1::bpchar[])
+      ))) AS node_count
 FROM transport_scopes ts
 ORDER BY ts.name
 `
@@ -1376,8 +1390,9 @@ type GetScopeStatsRow struct {
 
 // Count each table on its own; the old cross-join blew up to millions of rows
 // before COUNT(DISTINCT) (~10s).
-func (q *Queries) GetScopeStats(ctx context.Context) ([]GetScopeStatsRow, error) {
-	rows, err := q.db.Query(ctx, getScopeStats)
+// Membership tests avoid counting repeated observations or overlapping IATAs twice.
+func (q *Queries) GetScopeStats(ctx context.Context, iatas []string) ([]GetScopeStatsRow, error) {
+	rows, err := q.db.Query(ctx, getScopeStats, iatas)
 	if err != nil {
 		return nil, err
 	}

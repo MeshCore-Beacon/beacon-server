@@ -243,8 +243,8 @@ func (s *Store) GetRadioPresets(ctx context.Context, preset string, iatas []stri
 	return items, nil
 }
 
-func (s *Store) GetScopeStats(ctx context.Context) ([]api.ScopeStats, error) {
-	rows, err := s.q.GetScopeStats(ctx)
+func (s *Store) GetScopeStats(ctx context.Context, iatas []string) ([]api.ScopeStats, error) {
+	rows, err := s.q.GetScopeStats(ctx, iatas)
 	if err != nil {
 		return nil, err
 	}

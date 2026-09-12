@@ -47,8 +47,10 @@ func (s *stubReader) GetRegion(_ context.Context, _ int32) (*api.Region, error) 
 func (s *stubReader) GetRegionBySlug(_ context.Context, _ string) (*api.Region, error) {
 	return nil, nil
 }
-func (s *stubReader) GetScopeNames(_ context.Context) ([]string, error)         { return nil, nil }
-func (s *stubReader) GetScopeStats(_ context.Context) ([]api.ScopeStats, error) { return nil, nil }
+func (s *stubReader) GetScopeNames(_ context.Context) ([]string, error) { return nil, nil }
+func (s *stubReader) GetScopeStats(_ context.Context, _ []string) ([]api.ScopeStats, error) {
+	return nil, nil
+}
 func (s *stubReader) GetScopesByIATAs(_ context.Context, _ []string) ([]api.ScopeSummary, error) {
 	return nil, nil
 }

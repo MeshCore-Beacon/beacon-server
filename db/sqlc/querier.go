@@ -79,7 +79,8 @@ type Querier interface {
 	GetScopeNames(ctx context.Context) ([]string, error)
 	// Count each table on its own; the old cross-join blew up to millions of rows
 	// before COUNT(DISTINCT) (~10s).
-	GetScopeStats(ctx context.Context) ([]GetScopeStatsRow, error)
+	// Membership tests avoid counting repeated observations or overlapping IATAs twice.
+	GetScopeStats(ctx context.Context, iatas []string) ([]GetScopeStatsRow, error)
 	GetScopesByIATAs(ctx context.Context, dollar_1 []string) ([]GetScopesByIATAsRow, error)
 	// Repeaters/room servers (node_type 2/3) whose current advert-derived clock drift exceeds
 	// the given threshold in magnitude, worst first. Not time-windowed -- reflects each node's
