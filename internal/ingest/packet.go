@@ -81,6 +81,7 @@ type packetObservationEvent struct {
 		IsFirstObservation bool    `json:"isFirstObservation"`
 		ObservationCount   int64   `json:"observationCount"`
 		Scope              *string `json:"scope,omitempty"`
+		Summary            *string `json:"summary,omitempty"` // same advert name as REST list/backfill rows
 	} `json:"packet"`
 	Observation struct {
 		ObserverID   string  `json:"observerId"`
@@ -343,6 +344,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	var channelHash []byte
 	originPubkey := []byte(nil)
 	var parsedPayload json.RawMessage
+	var summary *string
 	var traceTag []byte
 	// For PayloadTypeTrace, packet.Path holds one SNR byte per hop (not hashes -- see
 	// below), so the "physical route" hashes for resolvedPath/known-route purposes come
@@ -415,6 +417,9 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 			if hasName {
 				n := strings.ToValidUTF8(appData.Name, "\uFFFD")
 				name = &n
+				if n != "" {
+					summary = name
+				}
 			}
 
 			deviceRole := int(flags & 0x0F)
@@ -892,6 +897,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		evt.Packet.RouteType = packet.RouteType()
 		evt.Packet.RouteTypeName = api.RouteTypeName(int16(packet.RouteType()))
 		evt.Packet.IsFirstObservation = isNew
+		evt.Packet.Summary = summary
 		evt.Observation.ObserverID = id.String()
 		evt.Observation.ObserverName = observerName
 		evt.Observation.IATA = iata
