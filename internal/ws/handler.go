@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/go-chi/httprate"
 	"github.com/google/uuid"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
@@ -51,24 +52,34 @@ const (
 
 // Handler returns an http.HandlerFunc that requires the hub to be injected.
 // Wire it via router.New(h) so the hub is available at startup.
-func Handler(h *hub.Hub, reader api.Reader, maxConnsPerIP int) http.HandlerFunc {
+func Handler(h *hub.Hub, reader api.Reader, maxConnsPerIP, maxConnectsPerMinute int) http.HandlerFunc {
 	limiter := newIPLimiter(maxConnsPerIP)
+	attempts := httprate.NewRateLimiter(maxConnectsPerMinute, time.Minute,
+		httprate.WithResponseHeaders(httprate.ResponseHeaders{RetryAfter: "Retry-After"}))
 	return func(w http.ResponseWriter, r *http.Request) {
 		ip := r.RemoteAddr
 		if host, _, err := net.SplitHostPort(ip); err == nil {
 			ip = host
 		}
-		if !limiter.acquire(ip) {
-			log.Printf("ws: connection limit reached for IP %s", ip)
-			http.Error(w, "too many connections from this IP", http.StatusTooManyRequests)
+		// Count attempts before Accept, including failed handshakes. RemoteAddr
+		// was already resolved by TrustedProxyIP; never read forwarding headers here.
+		if attempts.RespondOnLimit(w, r, httprate.CanonicalizeIP(ip)) {
 			return
 		}
-		defer limiter.release(ip)
 		conn, err := websocket.Accept(w, r, nil)
 		if err != nil {
 			log.Printf("ws: failed to accept connection: %v", err)
 			return
 		}
+		defer conn.CloseNow()
+		if !limiter.acquire(ip) {
+			// This attempt passed the rate budget. Give the accepted socket a
+			// browser-visible backoff signal before allocating a hub client.
+			log.Printf("ws: connection limit reached for IP %s", ip)
+			_ = conn.Close(websocket.StatusTryAgainLater, "connection limit reached")
+			return
+		}
+		defer limiter.release(ip)
 
 		connID := uuid.NewString()
 		client := h.NewClient()

@@ -41,6 +41,7 @@ var version = "dev"
 //	@title			MeshCore Beacon API
 //	@version		1.6.0
 //	@description	MeshCore network observation backend. Ingests LoRa packets from MQTT brokers, stores in PostgreSQL, and streams live events via WebSocket.
+//	@description	WebSocket upgrade attempts at /ws have a configurable per-client limit (default 10/minute, including failed handshakes). Rate exhaustion returns HTTP 429 with Retry-After before upgrade. An accepted socket exceeding the concurrent cap closes with code 1013 before hello; established connections remain open.
 //	@termsOfService	https://github.com/MeshCore-Beacon/beacon-server
 
 //	@contact.name	MeshCore Beacon
@@ -275,7 +276,7 @@ func main() {
 	go scheduler.Start(ctx)
 
 	// ── HTTP server ──────────────────────────────────────────────────────────
-	r := router.New(h, reader, []*ingest.Worker{broker1, broker2}, resolved.MaxConnsPerIP, cfg.CORS, cfg.Server)
+	r := router.New(h, reader, []*ingest.Worker{broker1, broker2}, resolved.MaxConnsPerIP, resolved.MaxConnectsPerMinute, cfg.CORS, cfg.Server)
 
 	srv := &http.Server{
 		Addr:    addr,

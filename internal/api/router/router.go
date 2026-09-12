@@ -41,7 +41,7 @@ import (
 //
 // The private group is stubbed and ready for the auth middleware drop-in
 // described in Future Features → Admin authentication.
-func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP int, corsCfg config.CORSConfig, serverCfg config.ServerConfig) http.Handler {
+func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP, maxConnectsPerMinute int, corsCfg config.CORSConfig, serverCfg config.ServerConfig) http.Handler {
 	r := chi.NewRouter()
 
 	// ── CORS ─────────────────────────────────────────────────────────────────
@@ -87,7 +87,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP 
 	))
 
 	// ── WebSocket ────────────────────────────────────────────────────────────
-	r.Get("/ws", ws.Handler(h, reader, maxConnsPerIP))
+	r.Get("/ws", ws.Handler(h, reader, maxConnsPerIP, maxConnectsPerMinute))
 
 	// ── Public REST API (v1) ─────────────────────────────────────────────────
 	r.Route("/api/v1", func(r chi.Router) {

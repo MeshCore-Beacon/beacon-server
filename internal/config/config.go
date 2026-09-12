@@ -69,6 +69,7 @@ type ResolvedConfig struct {
 	RouteGrace           time.Duration
 	RouteMinObservations int
 	MaxConnsPerIP        int
+	MaxConnectsPerMinute int
 	ViewRefreshInterval  time.Duration
 	ReconfirmInterval    time.Duration
 	CleanupInterval      time.Duration
@@ -201,6 +202,9 @@ type WebSocketConfig struct {
 	// MaxConnectionsPerIP is the maximum number of concurrent WebSocket
 	// connections allowed from a single IP address. Defaults to 5 if not set.
 	MaxConnectionsPerIP int `yaml:"max_connections_per_ip"`
+	// MaxConnectsPerMinute limits upgrade attempts, including failed handshakes.
+	// Zero/omitted defaults to 10; IPv6 addresses share a /64 attempt budget.
+	MaxConnectsPerMinute int `yaml:"max_connects_per_minute"`
 }
 
 // PacketsConfig controls packet retention behaviour.
@@ -345,6 +349,9 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("server.trusted_proxies[%d] must be a valid CIDR", i)
 		}
 	}
+	if cfg.WebSocket.MaxConnectsPerMinute < 0 {
+		return nil, fmt.Errorf("websocket.max_connects_per_minute must be positive or zero for the default")
+	}
 	configDir := filepath.Dir(path)
 	for iata, details := range cfg.IATAs {
 		if details.BorderFile != "" && !filepath.IsAbs(details.BorderFile) {
@@ -365,6 +372,7 @@ func Resolve(cfg *Config) ResolvedConfig {
 		RouteGrace:           cfg.Routes.Grace.Duration,
 		RouteMinObservations: cfg.Routes.MinObservations,
 		MaxConnsPerIP:        cfg.WebSocket.MaxConnectionsPerIP,
+		MaxConnectsPerMinute: cfg.WebSocket.MaxConnectsPerMinute,
 		ViewRefreshInterval:  cfg.Background.ViewRefresh.Duration,
 		ReconfirmInterval:    cfg.Background.Reconfirm.Duration,
 		CleanupInterval:      cfg.Background.Cleanup.Duration,
@@ -398,6 +406,9 @@ func Resolve(cfg *Config) ResolvedConfig {
 	if r.MaxConnsPerIP == 0 {
 		r.MaxConnsPerIP = 5
 	}
+	if r.MaxConnectsPerMinute == 0 {
+		r.MaxConnectsPerMinute = 10
+	}
 	if r.ViewRefreshInterval == 0 {
 		r.ViewRefreshInterval = time.Hour
 	}
@@ -429,9 +440,9 @@ func Resolve(cfg *Config) ResolvedConfig {
 
 func (r ResolvedConfig) String() string {
 	return fmt.Sprintf(
-		"telemetryResolution=%s telemetryRetention=%s packetRetention=%s routeRetention=%s routeGrace=%s routeMinObs=%d maxConnsPerIP=%d viewRefresh=%s reconfirm=%s cleanup=%s presenceFlush=%s presencePacketTTL=%s clockDriftThreshold=%s nodeStaleThreshold=%s nodeDeleteAfter=%s observerDeleteAfter=%s",
+		"telemetryResolution=%s telemetryRetention=%s packetRetention=%s routeRetention=%s routeGrace=%s routeMinObs=%d maxConnsPerIP=%d maxConnectsPerMinute=%d viewRefresh=%s reconfirm=%s cleanup=%s presenceFlush=%s presencePacketTTL=%s clockDriftThreshold=%s nodeStaleThreshold=%s nodeDeleteAfter=%s observerDeleteAfter=%s",
 		r.TelemetryResolution, r.TelemetryRetention, r.PacketRetention, r.RouteRetention, r.RouteGrace, r.RouteMinObservations,
-		r.MaxConnsPerIP, r.ViewRefreshInterval, r.ReconfirmInterval, r.CleanupInterval,
+		r.MaxConnsPerIP, r.MaxConnectsPerMinute, r.ViewRefreshInterval, r.ReconfirmInterval, r.CleanupInterval,
 		r.PresenceFlushInterval, r.PresencePacketTTL, r.ClockDriftThreshold,
 		r.NodeStaleThreshold, r.NodeDeleteAfter, r.ObserverDeleteAfter,
 	)

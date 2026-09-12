@@ -19,7 +19,7 @@ import (
 )
 
 func TestWebSocketLimitIgnoresUntrustedHeaders(t *testing.T) {
-	checkWebSocketLimit(t, config.ServerConfig{}, "198.51.100.2", http.StatusTooManyRequests)
+	checkWebSocketLimit(t, config.ServerConfig{}, "198.51.100.2", true)
 }
 
 func TestWebSocketLimitUsesTrustedClientIP(t *testing.T) {
@@ -27,16 +27,16 @@ func TestWebSocketLimitUsesTrustedClientIP(t *testing.T) {
 		netip.MustParsePrefix("127.0.0.1/8"), netip.MustParsePrefix("::1/128"),
 	}}
 	t.Run("different clients", func(t *testing.T) {
-		checkWebSocketLimit(t, cfg, "198.51.100.2", http.StatusSwitchingProtocols)
+		checkWebSocketLimit(t, cfg, "198.51.100.2", false)
 	})
 	t.Run("same client", func(t *testing.T) {
-		checkWebSocketLimit(t, cfg, "198.51.100.1", http.StatusTooManyRequests)
+		checkWebSocketLimit(t, cfg, "198.51.100.1", true)
 	})
 }
 
-func checkWebSocketLimit(t *testing.T, cfg config.ServerConfig, secondIP string, wantStatus int) {
+func checkWebSocketLimit(t *testing.T, cfg config.ServerConfig, secondIP string, wantShed bool) {
 	t.Helper()
-	server := httptest.NewServer(New(hub.New(), nil, nil, 1, config.CORSConfig{}, cfg))
+	server := httptest.NewServer(New(hub.New(), nil, nil, 1, 10, config.CORSConfig{}, cfg))
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -55,10 +55,22 @@ func checkWebSocketLimit(t *testing.T, cfg config.ServerConfig, secondIP string,
 		t.Fatalf("read hello: %v", err)
 	}
 	second, response, err := dial(secondIP)
-	if second != nil {
-		second.CloseNow()
+	if err != nil || response == nil || response.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("second handshake: response=%v err=%v", response, err)
 	}
-	if response == nil || response.StatusCode != wantStatus || (err == nil) != (wantStatus == http.StatusSwitchingProtocols) {
-		t.Fatalf("second connection: response=%v err=%v, want status %d", response, err, wantStatus)
+	defer second.CloseNow()
+	_, _, err = second.Read(ctx)
+	if wantShed && websocket.CloseStatus(err) != websocket.StatusTryAgainLater {
+		t.Fatalf("expected close 1013, got %v", err)
+	}
+	if !wantShed && err != nil {
+		t.Fatalf("independent client did not receive hello: %v", err)
+	}
+	if err := first.Write(ctx, websocket.MessageText, []byte(`{"v":1,"type":"ping","id":"still-active"}`)); err != nil {
+		t.Fatal(err)
+	}
+	_, pong, err := first.Read(ctx)
+	if err != nil || !strings.Contains(string(pong), `"type":"pong"`) {
+		t.Fatalf("established client stopped responding: %s %v", pong, err)
 	}
 }
