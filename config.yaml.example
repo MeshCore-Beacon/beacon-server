@@ -115,6 +115,12 @@ routes:
 
 websocket:
   max_connections_per_ip: 5 # default: 5
+  # Upgrade attempts, including failed handshakes; zero/omitted defaults to 10.
+  # IPv6 clients share a /64 attempt budget. Negative values prevent startup.
+  # Rate exhaustion rejects the handshake with 429 and Retry-After: 60.
+  # Within this rate budget, a full concurrent cap accepts then closes with 1013
+  # before hello, allowing browsers to back off without evicting existing clients.
+  max_connects_per_minute: 10
 
 # Node staleness, deletion, and clock-drift thresholds.
 #nodes:

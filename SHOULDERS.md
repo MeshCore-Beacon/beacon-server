@@ -12,6 +12,8 @@ projects that make this possible:
 - [sqlc](https://sqlc.dev) — Type-safe SQL code generation
 - [chi](https://github.com/go-chi/chi) — HTTP router
 - [go-chi/cors](https://github.com/go-chi/cors) — CORS middleware for chi
+- [go-chi/httprate](https://github.com/go-chi/httprate) — Per-client HTTP
+  sliding-window rate limits and retry headers
 - [go-redis](https://github.com/redis/go-redis) — Redis client
 - [coder/websocket](https://github.com/coder/websocket) — WebSocket
   implementation
