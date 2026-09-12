@@ -227,13 +227,13 @@ func TestGetScopeStats(t *testing.T) {
 	mock := mockdb.NewMockQuerier(ctrl)
 
 	mock.EXPECT().
-		GetScopeStats(gomock.Any()).
+		GetScopeStats(gomock.Any(), []string{"YVR"}).
 		Return([]sqlc.GetScopeStatsRow{
 			{Name: "default", PacketCount: 100, ObserverCount: 5, NodeCount: 20},
 		}, nil)
 
 	store := &Store{q: mock}
-	items, err := store.GetScopeStats(context.Background())
+	items, err := store.GetScopeStats(context.Background(), []string{"YVR"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -1988,6 +1988,7 @@ const docTemplate = `{
         },
         "/stats/scopes": {
             "get": {
+                "description": "Counts each packet, observer and node once per scope. IATA filters use retained observations for packets/observers and node IATA memberships for nodes. Without filters, returns global totals. Scopes with zero matching counts remain listed; an empty region returns an empty array.",
                 "produces": [
                     "application/json"
                 ],
@@ -1995,6 +1996,32 @@ const docTemplate = `{
                     "Stats"
                 ],
                 "summary": "Scope statistics",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Comma-separated IATA codes",
+                        "name": "iatas",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Single IATA code; used when iatas is absent",
+                        "name": "iata",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by region ID, expands to member IATAs",
+                        "name": "regionId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by region slug, expands to member IATAs; combined with explicit IATAs",
+                        "name": "region",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -2003,6 +2030,12 @@ const docTemplate = `{
                             "items": {
                                 "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ScopeStats"
                             }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
                     },
                     "500": {

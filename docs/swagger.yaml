@@ -2509,6 +2509,28 @@ paths:
       - Stats
   /stats/scopes:
     get:
+      description: Counts each packet, observer and node once per scope. IATA filters
+        use retained observations for packets/observers and node IATA memberships
+        for nodes. Without filters, returns global totals. Scopes with zero matching
+        counts remain listed; an empty region returns an empty array.
+      parameters:
+      - description: Comma-separated IATA codes
+        in: query
+        name: iatas
+        type: string
+      - description: Single IATA code; used when iatas is absent
+        in: query
+        name: iata
+        type: string
+      - description: Filter by region ID, expands to member IATAs
+        in: query
+        name: regionId
+        type: integer
+      - description: Filter by region slug, expands to member IATAs; combined with
+          explicit IATAs
+        in: query
+        name: region
+        type: string
       produces:
       - application/json
       responses:
@@ -2518,6 +2540,10 @@ paths:
             items:
               $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ScopeStats'
             type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
           schema:

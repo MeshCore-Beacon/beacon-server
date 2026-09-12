@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -141,9 +142,15 @@ func (cr *CachedReader) GetScopeNames(ctx context.Context) ([]string, error) {
 }
 
 // GetScopeStats implements [api.Reader].
-func (cr *CachedReader) GetScopeStats(ctx context.Context) ([]api.ScopeStats, error) {
-	return getOrSet(ctx, cr.c, keyScopeStats, cr.ttl.Reference, func() ([]api.ScopeStats, error) {
-		return cr.inner.GetScopeStats(ctx)
+func (cr *CachedReader) GetScopeStats(ctx context.Context, iatas []string) ([]api.ScopeStats, error) {
+	segment := "all"
+	if len(iatas) > 0 {
+		sorted := append([]string(nil), iatas...)
+		sort.Strings(sorted)
+		segment = strings.Join(slices.Compact(sorted), ",")
+	}
+	return getOrSet(ctx, cr.c, keyScopeStats+":"+segment, cr.ttl.Reference, func() ([]api.ScopeStats, error) {
+		return cr.inner.GetScopeStats(ctx, iatas)
 	})
 }
 

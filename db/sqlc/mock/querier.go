@@ -608,18 +608,18 @@ func (mr *MockQuerierMockRecorder) GetScopeNames(ctx any) *gomock.Call {
 }
 
 // GetScopeStats mocks base method.
-func (m *MockQuerier) GetScopeStats(ctx context.Context) ([]db.GetScopeStatsRow, error) {
+func (m *MockQuerier) GetScopeStats(ctx context.Context, iatas []string) ([]db.GetScopeStatsRow, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetScopeStats", ctx)
+	ret := m.ctrl.Call(m, "GetScopeStats", ctx, iatas)
 	ret0, _ := ret[0].([]db.GetScopeStatsRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetScopeStats indicates an expected call of GetScopeStats.
-func (mr *MockQuerierMockRecorder) GetScopeStats(ctx any) *gomock.Call {
+func (mr *MockQuerierMockRecorder) GetScopeStats(ctx, iatas any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetScopeStats", reflect.TypeOf((*MockQuerier)(nil).GetScopeStats), ctx)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetScopeStats", reflect.TypeOf((*MockQuerier)(nil).GetScopeStats), ctx, iatas)
 }
 
 // GetScopesByIATAs mocks base method.

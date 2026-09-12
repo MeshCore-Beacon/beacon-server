@@ -188,7 +188,8 @@ type Reader interface {
 	GetStatsTopTalkers(ctx context.Context, iatas []string, since time.Time, limit int32) ([]TopTalker, error)
 
 	// GetScopeStats returns aggregate packet, observer and node counts per transport scope.
-	GetScopeStats(ctx context.Context) ([]ScopeStats, error)
+	// Pass empty iatas for global totals. IATAs must be uppercase.
+	GetScopeStats(ctx context.Context, iatas []string) ([]ScopeStats, error)
 
 	// GetStatsNodeTypes returns node counts grouped by type, optionally filtered by IATA.
 	GetStatsNodeTypes(ctx context.Context, iatas []string) ([]NodeTypeCount, error)

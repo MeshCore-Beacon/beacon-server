@@ -50,7 +50,7 @@ type stubReader struct {
 	getStatsTopAdvertisers       func(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopAdvertiser, error)
 	getStatsClockDrift           func(ctx context.Context, iatas []string, limit int32) ([]api.ClockDriftEntry, error)
 	getStatsTopTalkers           func(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopTalker, error)
-	getScopeStats                func(ctx context.Context) ([]api.ScopeStats, error)
+	getScopeStats                func(ctx context.Context, iatas []string) ([]api.ScopeStats, error)
 	getStatsNodeTypes            func(ctx context.Context, iatas []string) ([]api.NodeTypeCount, error)
 	getScopeNames                func(ctx context.Context) ([]string, error)
 	getScopesByIATAs             func(ctx context.Context, iatas []string) ([]api.ScopeSummary, error)
@@ -303,9 +303,9 @@ func (s stubReader) GetStatsTopTalkers(ctx context.Context, iatas []string, sinc
 	return nil, nil
 }
 
-func (s stubReader) GetScopeStats(ctx context.Context) ([]api.ScopeStats, error) {
+func (s stubReader) GetScopeStats(ctx context.Context, iatas []string) ([]api.ScopeStats, error) {
 	if s.getScopeStats != nil {
-		return s.getScopeStats(ctx)
+		return s.getScopeStats(ctx, iatas)
 	}
 	return nil, nil
 }
