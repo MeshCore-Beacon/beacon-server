@@ -77,9 +77,9 @@ type Querier interface {
 	GetRegionIATAs(ctx context.Context, regionID int32) ([]string, error)
 	GetScopeByName(ctx context.Context, name string) (GetScopeByNameRow, error)
 	GetScopeNames(ctx context.Context) ([]string, error)
-	// Count each table on its own; the old cross-join blew up to millions of rows
-	// before COUNT(DISTINCT) (~10s).
-	// Membership tests avoid counting repeated observations or overlapping IATAs twice.
+	// Aggregate matching observations once, separately from node memberships to avoid
+	// a cross-join. Empty IATAs keep the original global counts, including associations
+	// whose observations have expired; the filtered aggregates are empty in that case.
 	GetScopeStats(ctx context.Context, iatas []string) ([]GetScopeStatsRow, error)
 	GetScopesByIATAs(ctx context.Context, dollar_1 []string) ([]GetScopesByIATAsRow, error)
 	// Repeaters/room servers (node_type 2/3) whose current advert-derived clock drift exceeds

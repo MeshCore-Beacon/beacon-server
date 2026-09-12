@@ -1358,26 +1358,35 @@ func (q *Queries) GetScopeNames(ctx context.Context) ([]string, error) {
 }
 
 const getScopeStats = `-- name: GetScopeStats :many
+WITH observation_counts AS (
+    SELECT p.scope_id,
+        COUNT(DISTINCT p.packet_hash) AS packet_count,
+        COUNT(DISTINCT os.observer_id) AS observer_count
+    FROM packet_observations po
+    JOIN packets p ON p.packet_hash = po.packet_hash
+    LEFT JOIN observer_scopes os ON os.scope_id = p.scope_id AND os.observer_id = po.observer_id
+    WHERE po.iata = ANY($1::bpchar[]) AND p.scope_id IS NOT NULL
+    GROUP BY p.scope_id
+), node_counts AS (
+    SELECT n.default_scope_id AS scope_id, COUNT(*) AS node_count
+    FROM nodes n
+    WHERE n.id IN (SELECT node_id FROM node_iatas WHERE iata = ANY($1::bpchar[]))
+    GROUP BY n.default_scope_id
+)
 SELECT
     ts.name,
-    (SELECT COUNT(*) FROM packets p WHERE p.scope_id = ts.id
-      AND (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR EXISTS (
-        SELECT 1 FROM packet_observations po
-        WHERE po.packet_hash = p.packet_hash AND po.iata = ANY($1::bpchar[])
-      ))) AS packet_count,
-    (SELECT COUNT(*) FROM observer_scopes os WHERE os.scope_id = ts.id
-      AND (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR EXISTS (
-        SELECT 1 FROM packet_observations po
-        JOIN packets p ON p.packet_hash = po.packet_hash
-        WHERE po.observer_id = os.observer_id AND p.scope_id = os.scope_id
-          AND po.iata = ANY($1::bpchar[])
-      ))) AS observer_count,
-    (SELECT COUNT(*) FROM nodes n WHERE n.default_scope_id = ts.id
-      AND (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR EXISTS (
-        SELECT 1 FROM node_iatas ni
-        WHERE ni.node_id = n.id AND ni.iata = ANY($1::bpchar[])
-      ))) AS node_count
+    CASE WHEN COALESCE(cardinality($1::bpchar[]), 0) = 0
+        THEN (SELECT COUNT(*) FROM packets p WHERE p.scope_id = ts.id)
+        ELSE COALESCE(oc.packet_count, 0) END::bigint AS packet_count,
+    CASE WHEN COALESCE(cardinality($1::bpchar[]), 0) = 0
+        THEN (SELECT COUNT(*) FROM observer_scopes os WHERE os.scope_id = ts.id)
+        ELSE COALESCE(oc.observer_count, 0) END::bigint AS observer_count,
+    CASE WHEN COALESCE(cardinality($1::bpchar[]), 0) = 0
+        THEN (SELECT COUNT(*) FROM nodes n WHERE n.default_scope_id = ts.id)
+        ELSE COALESCE(nc.node_count, 0) END::bigint AS node_count
 FROM transport_scopes ts
+LEFT JOIN observation_counts oc ON oc.scope_id = ts.id
+LEFT JOIN node_counts nc ON nc.scope_id = ts.id
 ORDER BY ts.name
 `
 
@@ -1388,9 +1397,9 @@ type GetScopeStatsRow struct {
 	NodeCount     int64  `json:"node_count"`
 }
 
-// Count each table on its own; the old cross-join blew up to millions of rows
-// before COUNT(DISTINCT) (~10s).
-// Membership tests avoid counting repeated observations or overlapping IATAs twice.
+// Aggregate matching observations once, separately from node memberships to avoid
+// a cross-join. Empty IATAs keep the original global counts, including associations
+// whose observations have expired; the filtered aggregates are empty in that case.
 func (q *Queries) GetScopeStats(ctx context.Context, iatas []string) ([]GetScopeStatsRow, error) {
 	rows, err := q.db.Query(ctx, getScopeStats, iatas)
 	if err != nil {
