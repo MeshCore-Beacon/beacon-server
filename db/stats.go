@@ -6,7 +6,7 @@ package db
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
@@ -186,7 +186,7 @@ func (s *Store) GetStatsClockDrift(ctx context.Context, iatas []string, limit in
 		}
 		if len(v.Iatas) > 0 {
 			if err := json.Unmarshal(v.Iatas, &entry.IATAs); err != nil {
-				log.Printf("store: failed to unmarshal clock drift node iatas: %v", err)
+				slog.Error("store: failed to unmarshal clock drift node iatas", "component", "db", "error", err)
 				entry.IATAs = []api.NodeIATA{}
 			}
 		}

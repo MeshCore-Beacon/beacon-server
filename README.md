@@ -433,3 +433,17 @@ Beacon.
 
 Beacon stands on the shoulders of giants. See [SHOULDERS.md](SHOULDERS.md) for
 the full list of open source projects that make this possible.
+
+## Application logging
+
+Beacon writes application logs to stderr. Configure the minimum level and output format in `config.yaml`:
+
+```yaml
+log:
+  level: info   # debug, info, warn, error
+  format: text  # text or json
+```
+
+`LOG_LEVEL` and `LOG_FORMAT` override file settings; empty settings use `info` and `text`. Invalid values prevent startup. Configuration-loading failures can use the bootstrap text logger before file settings are available; failures after initialization retain error severity at every supported level.
+
+Records include a component field. Ingest workers also include their broker name, and HTTP completion records include the validated client address, route, status and duration. Query strings and protocol hello payloads are excluded. Expected ingest skips and routine WebSocket lifecycle details are debug-level. Changing the application's format does not change Caddy/Apache access logs or their fail2ban configuration. Collect/rotate stderr through Docker or systemd.

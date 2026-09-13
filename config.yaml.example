@@ -1,6 +1,11 @@
 # Beacon configuration file
 # Copy to config.yaml and adjust as needed.
 
+log:
+  # Environment LOG_LEVEL / LOG_FORMAT override these values.
+  level: info  # debug, info, warn, error
+  format: text # text or json
+
 server:
   # Only these direct proxy peers may set the client IP through X-Real-IP.
   # The proxy must overwrite that header, not pass through client input.

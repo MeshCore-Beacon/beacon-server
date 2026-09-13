@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -301,6 +302,7 @@ func (s *stubDB) UpdateObserverRegionScope(_ context.Context, _ uuid.UUID, _ str
 func newTestWorker() (*Worker, *stubDB) {
 	db := &stubDB{}
 	w := &Worker{
+		log:    slog.Default().With("component", "ingest", "broker", "test"),
 		cfg:    Config{BrokerName: "test"},
 		db:     db,
 		hub:    hub.New(),

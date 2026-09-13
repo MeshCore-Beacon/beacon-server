@@ -7,7 +7,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
@@ -122,7 +122,7 @@ func (s *Store) GetObserver(ctx context.Context, observerID uuid.UUID) (*api.Obs
 	}
 	scopes, err := s.GetObserverScopes(ctx, observerID)
 	if err != nil {
-		log.Printf("store: GetObserverScopes failed for %s: %v", observerID, err)
+		slog.Error(fmt.Sprintf("store: GetObserverScopes failed for %s", observerID), "component", "db", "error", err)
 		scopes = []string{}
 	}
 	observer.Scopes = scopes
@@ -357,7 +357,7 @@ func (s *Store) ListObserverAdverts(ctx context.Context, observerID uuid.UUID, c
 		Limit:      limit + 1, // fetch one extra to detect hasMore
 	})
 	if err != nil {
-		log.Printf("api: ListObserverAdverts failed: %v", err)
+		slog.Error("api: ListObserverAdverts failed", "component", "db", "error", err)
 		return api.Page[api.AdvertObservation]{}, err
 	}
 	hasMore := len(rows) > int(limit)

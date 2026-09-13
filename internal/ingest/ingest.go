@@ -40,7 +40,8 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/json"
-	"log"
+	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -216,6 +217,7 @@ type ScopeStore interface {
 
 // Worker holds the dependencies for one broker's ingest loop.
 type Worker struct {
+	log              *slog.Logger
 	cfg              Config
 	db               DB
 	hub              *hub.Hub
@@ -228,7 +230,8 @@ type Worker struct {
 
 // New creates an ingest Worker. Call Start() to connect and begin processing.
 func New(cfg Config, db DB, h *hub.Hub, keys ChannelKeyStore, scopes ScopeStore) *Worker {
-	return &Worker{cfg: cfg, db: db, hub: h, keys: keys, scopes: scopes}
+	return &Worker{cfg: cfg, db: db, hub: h, keys: keys, scopes: scopes,
+		log: slog.Default().With("component", "ingest", "broker", cfg.BrokerName)}
 }
 
 // Start connects to the broker and blocks until ctx is cancelled. It
@@ -253,22 +256,22 @@ func (w *Worker) Start(ctx context.Context) {
 		SetConnectRetry(true).
 		SetConnectRetryInterval(5 * time.Second).
 		SetOnConnectHandler(func(c mqtt.Client) {
-			log.Printf("ingest[%s]: connected to %s", w.cfg.BrokerName, w.cfg.URL)
+			w.log.Info("connected")
 			w.subscribe(c)
 		}).
 		SetConnectionLostHandler(func(_ mqtt.Client, err error) {
-			log.Printf("ingest[%s]: connection lost, will reconnect: %v", w.cfg.BrokerName, err)
+			w.log.Warn("connection lost, will reconnect", "error", err)
 		})
 
 	w.client = mqtt.NewClient(opts)
 	if tok := w.client.Connect(); tok.Wait() && tok.Error() != nil {
-		log.Printf("ingest[%s]: initial connect failed: %v", w.cfg.BrokerName, tok.Error())
+		w.log.Error("initial connect failed", "error", tok.Error())
 		// paho will retry; we fall through and wait for ctx
 	}
 
 	<-ctx.Done()
 	w.client.Disconnect(500)
-	log.Printf("ingest[%s]: stopped", w.cfg.BrokerName)
+	w.log.Info("stopped")
 }
 
 func (w *Worker) BrokerName() string {
@@ -296,7 +299,7 @@ func (w *Worker) subscribe(client mqtt.Client) {
 		w.handleMessage(msg)
 	})
 	if tok.Wait() && tok.Error() != nil {
-		log.Printf("ingest[%s]: subscribe error: %v", w.cfg.BrokerName, tok.Error())
+		w.log.Error("subscribe error", "error", tok.Error())
 	}
 }
 
@@ -329,14 +332,16 @@ func (w *Worker) handleMessage(msg mqtt.Message) {
 	// iata_codes.iata is CHAR(3); anything else would fail the DB insert
 	// downstream, so reject malformed topic segments here instead.
 	if !isValidIATA(iata) {
-		log.Printf("ingest[%s]: dropped packet with malformed IATA %q on topic %s", w.cfg.BrokerName, iata, msg.Topic())
+		w.log.Warn("dropped packet with malformed IATA")
 		return
 	}
 
 	// Drop packets from IATAs outside the configured geographic filter.
 	if w.cfg.AllowedIATAs != nil {
 		if _, ok := w.cfg.AllowedIATAs[iata]; !ok {
-			log.Printf("ingest[%s]: dropped packet from %s (not in allowed IATAs)", w.cfg.BrokerName, iata)
+			if w.log.Enabled(context.Background(), slog.LevelDebug) {
+				w.log.Debug(fmt.Sprintf("dropped packet from %s (not in allowed IATAs)", iata))
+			}
 			return
 		}
 	}
@@ -358,7 +363,7 @@ func (w *Worker) handleMessage(msg mqtt.Message) {
 func (w *Worker) broadcast(eventType hub.EventType, iata string, payloadType uint8, channelHash string, payload any) {
 	b, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("ingest[%s]: failed to marshal %s event: %v", w.cfg.BrokerName, eventType, err)
+		w.log.Error(fmt.Sprintf("failed to marshal %s event", eventType), "error", err)
 		return
 	}
 	w.hub.Broadcast(hub.Event{
@@ -380,13 +385,13 @@ func (w *Worker) broadcast(eventType hub.EventType, iata string, payloadType uin
 func (w *Worker) broadcastPacketObservation(iata string, payloadType uint8, evt packetObservationEvent, resolvedPath []api.ResolvedHop) {
 	base, err := json.Marshal(evt)
 	if err != nil {
-		log.Printf("ingest[%s]: failed to marshal packetObservation event: %v", w.cfg.BrokerName, err)
+		w.log.Error("failed to marshal packetObservation event", "error", err)
 		return
 	}
 	evt.Observation.ResolvedPath = resolvedPath
 	resolved, err := json.Marshal(evt)
 	if err != nil {
-		log.Printf("ingest[%s]: failed to marshal packetObservation event (resolved variant): %v", w.cfg.BrokerName, err)
+		w.log.Error("failed to marshal packetObservation event (resolved variant)", "error", err)
 		resolved = nil // fall back to base-only; not fatal
 	}
 	w.hub.Broadcast(hub.Event{

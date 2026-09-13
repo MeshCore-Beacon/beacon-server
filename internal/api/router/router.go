@@ -72,7 +72,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP 
 	// ── Global middleware ────────────────────────────────────────────────────
 	r.Use(middleware.RequestID)
 	r.Use(mw.TrustedProxyIP(serverCfg.TrustedProxies))
-	r.Use(middleware.Logger)
+	r.Use(mw.RequestLogger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.CleanPath)
 	r.Use(middleware.StripSlashes)

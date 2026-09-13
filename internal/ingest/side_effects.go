@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -72,11 +71,11 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 	if packet.PayloadType() == meshcore.PayloadTypeAdvert {
 		advert, err := meshcore.AdvertFromBytes(packet.Payload)
 		if err != nil {
-			log.Printf("ingest[%s]: error decoding advert payload: %v", w.cfg.BrokerName, err)
+			w.log.Warn("error decoding advert payload", "error", err)
 			return
 		}
 		if !advert.Verify() {
-			log.Printf("ingest[%s]: dropped advert with invalid signature from pubkey %s", w.cfg.BrokerName, hex.EncodeToString(advert.PublicKey.PublicKeyBytes()))
+			w.log.Warn(fmt.Sprintf("dropped advert with invalid signature from pubkey %s", hex.EncodeToString(advert.PublicKey.PublicKeyBytes())))
 			return
 		}
 		var lat, lon *float64
@@ -100,7 +99,7 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 		}
 		nodeID, err := w.db.UpsertNode(ctx, params, nodeRadio)
 		if err != nil {
-			log.Printf("ingest[%s]: db: upsert node failed: %v", w.cfg.BrokerName, err)
+			w.log.Error("db: upsert node failed", "error", err)
 			return
 		}
 		// invalidate cache for this node
@@ -117,7 +116,7 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 					key := hex.EncodeToString(firstHop[0])
 					if entries := resolved[key]; len(entries) == 1 {
 						if err := w.db.UpsertNodeNeighbor(ctx, nodeID, entries[0].NodeID, iata, nil, nil); err != nil {
-							log.Printf("ingest[%s]: failed to upsert node neighbor: %v", w.cfg.BrokerName, err)
+							w.log.Error("failed to upsert node neighbor", "error", err)
 						}
 					}
 				}
@@ -132,21 +131,21 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 			if oErr == nil && observerNodeID != nodeID {
 				snr := rxSNR
 				if err := w.db.UpsertNodeNeighbor(ctx, observerNodeID, nodeID, iata, &snr, nil); err != nil {
-					log.Printf("ingest[%s]: failed to upsert observer-advert neighbor: %v", w.cfg.BrokerName, err)
+					w.log.Error("failed to upsert observer-advert neighbor", "error", err)
 				}
 			}
 		}
 		if err := w.db.UpsertNodeIATA(ctx, nodeID, iata); err != nil {
-			log.Printf("ingest[%s]: db: upsert node IATA failed: %v", w.cfg.BrokerName, err)
+			w.log.Error("db: upsert node IATA failed", "error", err)
 		}
 		if scopeID != nil && (packet.RouteType() == meshcore.RouteTypeTransportFlood || packet.RouteType() == meshcore.RouteTypeTransportDirect) {
 			if err := w.db.SetNodeDefaultScope(ctx, nodeID, *scopeID); err != nil {
-				log.Printf("ingest[%s]: failed to set default scope for node %s: %v", w.cfg.BrokerName, hex.EncodeToString(advert.PublicKey.PublicKeyBytes()), err)
+				w.log.Error(fmt.Sprintf("failed to set default scope for node %s", hex.EncodeToString(advert.PublicKey.PublicKeyBytes())), "error", err)
 			}
 		}
 		prefix4 := advert.PublicKey.PublicKeyBytes()[:4]
 		if err := w.db.UpsertNodeShortID(ctx, nodeID, iata, prefix4); err != nil {
-			log.Printf("ingest[%s]: failed to upsert node short ID for %s: %v", w.cfg.BrokerName, hex.EncodeToString(prefix4), err)
+			w.log.Error(fmt.Sprintf("failed to upsert node short ID for %s", hex.EncodeToString(prefix4)), "error", err)
 		}
 		pubkeyHex := hex.EncodeToString(advert.PublicKey.PublicKeyBytes())
 		isObserver := w.db.IsObserverByPubkey(ctx, advert.PublicKey.PublicKeyBytes())
@@ -179,14 +178,14 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 	if packet.PayloadType() == meshcore.PayloadTypeGrpTxt {
 		grpTxt, err := meshcore.GroupTextFromBytes(packet.Payload)
 		if err != nil {
-			log.Printf("ingest[%s]: error decoding group text payload: %v", w.cfg.BrokerName, err)
+			w.log.Warn("error decoding group text payload", "error", err)
 			return
 		}
 		channelHashBytes := []byte{grpTxt.ChannelHash}
 
 		result, err := DecryptGroupText(ctx, w.db, w.keys, packetHash, packet.Payload)
 		if err != nil {
-			log.Printf("ingest[%s]: decrypt group text failed: %v", w.cfg.BrokerName, err)
+			w.log.Error("decrypt group text failed", "error", err)
 			return
 		}
 		if result == nil {

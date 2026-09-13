@@ -10,7 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
@@ -468,7 +468,7 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 			if len(traceRawHashes) > 0 {
 				resolved, err := s.ResolvePathHashes(ctx, v.Iata, traceRawHashes)
 				if err != nil {
-					log.Printf("store: path resolution failed for observation %d: %v", v.ID, err)
+					slog.Error(fmt.Sprintf("store: path resolution failed for observation %d", v.ID), "component", "db", "error", err)
 				} else {
 					resolvedPath = api.BuildResolvedPath(traceRawHashes, resolved)
 				}
@@ -481,7 +481,7 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 			}
 			resolved, err := s.ResolvePathHashes(ctx, v.Iata, hashes)
 			if err != nil {
-				log.Printf("store: path resolution failed for observation %d: %v", v.ID, err)
+				slog.Error(fmt.Sprintf("store: path resolution failed for observation %d", v.ID), "component", "db", "error", err)
 			} else {
 				resolvedPath = api.BuildResolvedPath(hashes, resolved)
 			}
@@ -504,7 +504,7 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 				obs.ResolvedSource = &hop
 			} else if len(sourceHashByte) == 1 {
 				if r, err := s.ResolveEndpointHashes(ctx, v.Iata, [][]byte{sourceHashByte}); err != nil {
-					log.Printf("store: source resolution failed for observation %d: %v", v.ID, err)
+					slog.Error(fmt.Sprintf("store: source resolution failed for observation %d", v.ID), "component", "db", "error", err)
 				} else {
 					hop := api.BuildResolvedPath([][]byte{sourceHashByte}, r)[0]
 					obs.ResolvedSource = &hop
@@ -512,7 +512,7 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 			}
 			if len(destHashByte) == 1 {
 				if r, err := s.ResolveEndpointHashes(ctx, v.Iata, [][]byte{destHashByte}); err != nil {
-					log.Printf("store: destination resolution failed for observation %d: %v", v.ID, err)
+					slog.Error(fmt.Sprintf("store: destination resolution failed for observation %d", v.ID), "component", "db", "error", err)
 				} else {
 					hop := api.BuildResolvedPath([][]byte{destHashByte}, r)[0]
 					obs.ResolvedDestination = &hop
