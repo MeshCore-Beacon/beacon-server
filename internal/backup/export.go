@@ -68,7 +68,7 @@ func dumpCommand(ctx context.Context) *exec.Cmd {
 		"--no-acl", "--no-tablespaces", "--no-password", "--lock-wait-timeout=5000")
 }
 
-func export(ctx context.Context, opts Options, command func(context.Context) *exec.Cmd) error {
+func export(ctx context.Context, opts Options, command func(context.Context) *exec.Cmd) (exportErr error) {
 	if opts.ConfigPath == "" || opts.OutputPath == "" || opts.MaxBytes <= 0 || opts.MaxBytes > 1<<40 || opts.Timeout <= 0 {
 		return errors.New("config, output, positive timeout and max-bytes (at most 1 TiB) are required")
 	}
@@ -100,7 +100,7 @@ func export(ctx context.Context, opts Options, command func(context.Context) *ex
 	if err != nil {
 		return errors.New("cannot create private database dump")
 	}
-	defer dump.Close()
+	defer closeBackupFile(dump, &exportErr)
 	hash := sha256.New()
 	output := &limitedWriter{ctx: ctx, cancel: cancel, dst: io.MultiWriter(dump, hash), remaining: opts.MaxBytes}
 	cmd := command(ctx)
@@ -143,7 +143,7 @@ func export(ctx context.Context, opts Options, command func(context.Context) *ex
 	if err != nil {
 		return errors.New("cannot create private backup archive")
 	}
-	defer archive.Close()
+	defer closeBackupFile(archive, &exportErr)
 	// Input is bounded; reserve room for YAML, tar headers and compression overhead.
 	archiveOutput := &limitedWriter{ctx: ctx, cancel: cancel, dst: archive, remaining: opts.MaxBytes + opts.MaxBytes/100 + 2*maxConfigBytes}
 	gz := gzip.NewWriter(archiveOutput)
@@ -164,6 +164,9 @@ func export(ctx context.Context, opts Options, command func(context.Context) *ex
 			return errors.New("cannot write complete backup archive")
 		}
 	}
+	if err = dump.Close(); err != nil {
+		return errors.New("cannot close completed database dump")
+	}
 	if err = tw.Close(); err != nil {
 		return errors.New("cannot complete backup tar")
 	}
@@ -183,6 +186,14 @@ func export(ctx context.Context, opts Options, command func(context.Context) *ex
 		return errors.New("cannot publish backup without overwriting; check destination and hard-link support")
 	}
 	return nil
+}
+
+// Cleanup also checks close errors. Both writable files are explicitly closed
+// before publication; a deferred second close may therefore report ErrClosed.
+func closeBackupFile(file *os.File, exportErr *error) {
+	if err := file.Close(); err != nil && !errors.Is(err, os.ErrClosed) && *exportErr == nil {
+		*exportErr = errors.New("cannot close private backup file")
+	}
 }
 
 func readConfig(path string) ([]byte, error) {
