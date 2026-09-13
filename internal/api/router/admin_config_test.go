@@ -69,8 +69,8 @@ func TestAdminConfig(t *testing.T) {
 				t.Fatal("config escaped authentication")
 			}
 		}
-		if request("PUT", "/api/v1/admin/config", headers).Code != http.StatusMethodNotAllowed {
-			t.Fatal("config writes were accepted")
+		if request("PUT", "/api/v1/admin/config", headers).Code != http.StatusUnsupportedMediaType {
+			t.Fatal("untyped config write was accepted")
 		}
 		again := request("GET", "/api/v1/admin/config", headers)
 		if again.Body.String() != response.Body.String() {

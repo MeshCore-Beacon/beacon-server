@@ -127,20 +127,36 @@ With no key, admin requests return JSON 503 while public reads and WebSockets
 continue normally. With a key, missing, incorrect or duplicate Authorization
 headers return JSON 401 with `WWW-Authenticate: Bearer`.
 
-`GET /api/v1/admin/config` returns selected startup settings: CORS options with
+`GET /api/v1/admin/config` returns selected running settings: CORS options with
 Beacon defaults applied, `auth.configured`, and `ingest.broker_count` (configured
 broker workers, not connection status or a tunable processing-worker pool).
 The CORS lists are the options supplied to the middleware; its normal matching
-normalization still applies. The response is a startup snapshot and excludes
+normalization still applies. The response excludes
 credential fields, broker addresses, channel material, database settings and
-other configuration. Changes require a restart. Configuration writes and account
-operations are not implemented; unknown admin paths return 404 and unsupported
+other configuration. Account operations are not implemented; unknown admin paths
+return 404 and unsupported
 methods on the config endpoint return 405 after authentication.
 Global CORS preflights remain public. Use a long, randomly generated key, keep
 it out of source control and logs, and send it only in the Authorization header,
 never the URL or request body. Require HTTPS at the reverse proxy and restrict
 direct access to Beacon's HTTP listener to that proxy or a private connection.
 Changing the key requires a restart. No API key is issued automatically.
+
+`PUT /api/v1/admin/config` accepts only
+`{"cors":{"allowed_origins":["https://example.org"]}}`. It replaces the entire
+origin list immediately and updates the reported configuration with the same
+policy. Requests already in progress may use the previous policy. Concurrent
+valid updates are serialized; updates take effect one at a time. The response
+contains `config`, `persisted: false` and `requires_restart: false`.
+
+Updates are **runtime-only**: no file or database is written, and restarting
+reloads the saved configuration. Keep 1–32 ASCII HTTP(S) origins, at most 512 bytes
+each, with an optional single hostname wildcard; a sole `*` permits all origins.
+Empty/null lists, URL paths/queries/credentials, control characters and unknown
+fields are rejected. Requests must be JSON, at most 16 KiB. Other CORS options,
+auth/credential fields and broker count cannot be changed here; there is no
+configurable `ingest.worker_count`. Cross-origin admin clients need PUT allowed
+in the saved CORS methods. CORS controls browser access, not authentication.
 
 ### Environment variables (`.env`)
 

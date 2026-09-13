@@ -33,6 +33,9 @@ func TestAdminAuthBoundary(t *testing.T) {
 								if method == "GET" {
 									want = 200
 								}
+								if method == "PUT" {
+									want = 415
+								}
 							}
 						}
 					}

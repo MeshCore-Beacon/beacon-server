@@ -1223,6 +1223,31 @@ definitions:
         description: TRACE or PING
         type: string
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateAdminCORSRequest:
+    properties:
+      allowed_origins:
+        items:
+          type: string
+        type: array
+    required:
+    - allowed_origins
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateAdminConfigRequest:
+    properties:
+      cors:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateAdminCORSRequest'
+    required:
+    - cors
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateAdminConfigResponse:
+    properties:
+      config:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminConfig'
+      persisted:
+        type: boolean
+      requires_restart:
+        type: boolean
+    type: object
   internal_api_handlers.APIError:
     properties:
       code:
@@ -1256,9 +1281,9 @@ info:
 paths:
   /admin/config:
     get:
-      description: Returns CORS startup options with Beacon defaults, auth configuration
-        status and configured broker count. Credential fields and other configuration
-        are excluded. Changes require restart; this endpoint is read-only.
+      description: Returns current CORS options, auth configuration status and configured
+        broker count. Credential fields and other configuration are excluded. Runtime
+        origin updates are lost on restart.
       produces:
       - application/json
       responses:
@@ -1280,7 +1305,65 @@ paths:
             type: object
       security:
       - AdminKey: []
-      summary: Inspect selected startup configuration
+      summary: Inspect selected running configuration
+      tags:
+      - Admin
+    put:
+      consumes:
+      - application/json
+      description: Replaces only cors.allowed_origins immediately. Updates are serialized;
+        concurrent valid updates are applied one at a time. Already-running requests
+        may finish with the previous policy. Nothing is persisted; restart reloads
+        saved configuration.
+      parameters:
+      - description: 1-32 ASCII HTTP(S) origins, at most 512 bytes each; one hostname
+          wildcard is supported, or a sole *. Empty/null lists and unsupported fields
+          are rejected. Body at most 16 KiB.
+        in: body
+        name: config
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateAdminConfigRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateAdminConfigResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "413":
+          description: Request Entity Too Large
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "415":
+          description: Unsupported Media Type
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - AdminKey: []
+      summary: Update runtime CORS origins
       tags:
       - Admin
   /brokers:
