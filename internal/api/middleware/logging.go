@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -27,12 +28,18 @@ func (requestLogFormatter) NewLogEntry(r *http.Request) chimw.LogEntry {
 }
 
 func (e *requestLogEntry) logger() *slog.Logger {
-	path := e.request.URL.Path
+	path := "unmatched"
 	if ctx := chi.RouteContext(e.request.Context()); ctx != nil && ctx.RoutePattern() != "" {
 		path = ctx.RoutePattern()
 	}
-	return slog.Default().With("component", "http", "method", e.request.Method, "path", path,
-		"client_ip", e.request.RemoteAddr, "request_id", chimw.GetReqID(e.request.Context()))
+	return slog.Default().With("component", "http", "method", singleLineLogValue(e.request.Method), "path", path,
+		"client_ip", singleLineLogValue(e.request.RemoteAddr), "request_id", singleLineLogValue(chimw.GetReqID(e.request.Context())))
+}
+
+// Strip line breaks before request fields reach a handler or downstream log consumer.
+func singleLineLogValue(value string) string {
+	value = strings.ReplaceAll(value, "\r", "")
+	return strings.ReplaceAll(value, "\n", "")
 }
 
 func (e *requestLogEntry) Write(status, bytes int, _ http.Header, elapsed time.Duration, _ any) {
