@@ -12,6 +12,50 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createAccount = `-- name: CreateAccount :one
+INSERT INTO accounts (name) VALUES ($1)
+ON CONFLICT (name) WHERE deactivated_at IS NULL DO NOTHING
+RETURNING id, name, created_at, deactivated_at
+`
+
+func (q *Queries) CreateAccount(ctx context.Context, name string) (Account, error) {
+	row := q.db.QueryRow(ctx, createAccount, name)
+	var i Account
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.CreatedAt,
+		&i.DeactivatedAt,
+	)
+	return i, err
+}
+
+const deactivateAccount = `-- name: DeactivateAccount :one
+WITH target AS MATERIALIZED (
+    SELECT a.id, a.deactivated_at FROM accounts a WHERE a.id = $1 FOR UPDATE
+), changed AS (
+    UPDATE accounts a SET deactivated_at = NOW()
+    FROM target t WHERE a.id = t.id AND t.deactivated_at IS NULL
+    RETURNING a.id
+)
+SELECT EXISTS(SELECT 1 FROM target) AS found,
+       EXISTS(SELECT 1 FROM changed) AS deactivated
+`
+
+type DeactivateAccountRow struct {
+	Found       bool `json:"found"`
+	Deactivated bool `json:"deactivated"`
+}
+
+// Lock the current row before deciding the outcome, including when another
+// deactivation commits while this statement is waiting for its row lock.
+func (q *Queries) DeactivateAccount(ctx context.Context, id uuid.UUID) (DeactivateAccountRow, error) {
+	row := q.db.QueryRow(ctx, deactivateAccount, id)
+	var i DeactivateAccountRow
+	err := row.Scan(&i.Found, &i.Deactivated)
+	return i, err
+}
+
 const deleteOldChannelIATAs = `-- name: DeleteOldChannelIATAs :exec
 DELETE FROM channel_iatas WHERE last_heard < $1
 `
@@ -128,6 +172,22 @@ DELETE FROM trace_iatas WHERE last_heard < $1
 func (q *Queries) DeleteOldTraceIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error {
 	_, err := q.db.Exec(ctx, deleteOldTraceIATAs, lastHeard)
 	return err
+}
+
+const getAccount = `-- name: GetAccount :one
+SELECT id, name, created_at, deactivated_at FROM accounts WHERE id = $1
+`
+
+func (q *Queries) GetAccount(ctx context.Context, id uuid.UUID) (Account, error) {
+	row := q.db.QueryRow(ctx, getAccount, id)
+	var i Account
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.CreatedAt,
+		&i.DeactivatedAt,
+	)
+	return i, err
 }
 
 const getChannelByID = `-- name: GetChannelByID :one
@@ -2052,6 +2112,36 @@ func (q *Queries) InsertObserverTelemetry(ctx context.Context, arg InsertObserve
 		arg.ReceiveErrors,
 	)
 	return err
+}
+
+const listAccounts = `-- name: ListAccounts :many
+SELECT id, name, created_at, deactivated_at FROM accounts
+ORDER BY created_at DESC, id DESC
+`
+
+func (q *Queries) ListAccounts(ctx context.Context) ([]Account, error) {
+	rows, err := q.db.Query(ctx, listAccounts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Account{}
+	for rows.Next() {
+		var i Account
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.CreatedAt,
+			&i.DeactivatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAllChannelMessages = `-- name: ListAllChannelMessages :many

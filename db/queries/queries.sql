@@ -1453,3 +1453,28 @@ OR (
             AND iata = nn.iata
       )
 ) > 1;
+
+-- name: CreateAccount :one
+INSERT INTO accounts (name) VALUES (sqlc.arg(name))
+ON CONFLICT (name) WHERE deactivated_at IS NULL DO NOTHING
+RETURNING id, name, created_at, deactivated_at;
+
+-- name: ListAccounts :many
+SELECT id, name, created_at, deactivated_at FROM accounts
+ORDER BY created_at DESC, id DESC;
+
+-- name: GetAccount :one
+SELECT id, name, created_at, deactivated_at FROM accounts WHERE id = $1;
+
+-- name: DeactivateAccount :one
+-- Lock the current row before deciding the outcome, including when another
+-- deactivation commits while this statement is waiting for its row lock.
+WITH target AS MATERIALIZED (
+    SELECT a.id, a.deactivated_at FROM accounts a WHERE a.id = $1 FOR UPDATE
+), changed AS (
+    UPDATE accounts a SET deactivated_at = NOW()
+    FROM target t WHERE a.id = t.id AND t.deactivated_at IS NULL
+    RETURNING a.id
+)
+SELECT EXISTS(SELECT 1 FROM target) AS found,
+       EXISTS(SELECT 1 FROM changed) AS deactivated;

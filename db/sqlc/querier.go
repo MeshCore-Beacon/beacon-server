@@ -12,6 +12,10 @@ import (
 )
 
 type Querier interface {
+	CreateAccount(ctx context.Context, name string) (Account, error)
+	// Lock the current row before deciding the outcome, including when another
+	// deactivation commits while this statement is waiting for its row lock.
+	DeactivateAccount(ctx context.Context, id uuid.UUID) (DeactivateAccountRow, error)
 	// Keeps the channel IATA filter in step with packet retention.
 	DeleteOldChannelIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error
 	// Deletes nodes not seen since the given cutoff. node_iatas and node_neighbors cascade-
@@ -35,6 +39,7 @@ type Querier interface {
 	DeleteOldTelemetry(ctx context.Context, reportedAt pgtype.Timestamptz) error
 	// Keeps the trace IATA filter in step with packet retention.
 	DeleteOldTraceIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error
+	GetAccount(ctx context.Context, id uuid.UUID) (Account, error)
 	GetChannelByID(ctx context.Context, id int32) (Channel, error)
 	// Returns neighbors of a node that are in a different IATA.
 	GetCrossIATANeighbors(ctx context.Context, arg GetCrossIATANeighborsParams) ([]GetCrossIATANeighborsRow, error)
@@ -116,6 +121,7 @@ type Querier interface {
 	// Inserts a telemetry snapshot for an observer. The reported_at timestamp should
 	// be truncated to the configured resolution before calling to ensure deduplication.
 	InsertObserverTelemetry(ctx context.Context, arg InsertObserverTelemetryParams) error
+	ListAccounts(ctx context.Context) ([]Account, error)
 	// Returns all messages across all channels with optional time, IATA, scope and cursor filters.
 	// Pass empty string for iata or scope to skip those filters.
 	// Pass cursor=0 to start from the beginning.

@@ -43,6 +43,36 @@ func (m *MockQuerier) EXPECT() *MockQuerierMockRecorder {
 	return m.recorder
 }
 
+// CreateAccount mocks base method.
+func (m *MockQuerier) CreateAccount(ctx context.Context, name string) (db.Account, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateAccount", ctx, name)
+	ret0, _ := ret[0].(db.Account)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreateAccount indicates an expected call of CreateAccount.
+func (mr *MockQuerierMockRecorder) CreateAccount(ctx, name any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateAccount", reflect.TypeOf((*MockQuerier)(nil).CreateAccount), ctx, name)
+}
+
+// DeactivateAccount mocks base method.
+func (m *MockQuerier) DeactivateAccount(ctx context.Context, id uuid.UUID) (db.DeactivateAccountRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeactivateAccount", ctx, id)
+	ret0, _ := ret[0].(db.DeactivateAccountRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeactivateAccount indicates an expected call of DeactivateAccount.
+func (mr *MockQuerierMockRecorder) DeactivateAccount(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeactivateAccount", reflect.TypeOf((*MockQuerier)(nil).DeactivateAccount), ctx, id)
+}
+
 // DeleteOldChannelIATAs mocks base method.
 func (m *MockQuerier) DeleteOldChannelIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error {
 	m.ctrl.T.Helper()
@@ -140,6 +170,21 @@ func (m *MockQuerier) DeleteOldTraceIATAs(ctx context.Context, lastHeard pgtype.
 func (mr *MockQuerierMockRecorder) DeleteOldTraceIATAs(ctx, lastHeard any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldTraceIATAs", reflect.TypeOf((*MockQuerier)(nil).DeleteOldTraceIATAs), ctx, lastHeard)
+}
+
+// GetAccount mocks base method.
+func (m *MockQuerier) GetAccount(ctx context.Context, id uuid.UUID) (db.Account, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetAccount", ctx, id)
+	ret0, _ := ret[0].(db.Account)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetAccount indicates an expected call of GetAccount.
+func (mr *MockQuerierMockRecorder) GetAccount(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAccount", reflect.TypeOf((*MockQuerier)(nil).GetAccount), ctx, id)
 }
 
 // GetChannelByID mocks base method.
@@ -829,6 +874,21 @@ func (m *MockQuerier) InsertObserverTelemetry(ctx context.Context, arg db.Insert
 func (mr *MockQuerierMockRecorder) InsertObserverTelemetry(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertObserverTelemetry", reflect.TypeOf((*MockQuerier)(nil).InsertObserverTelemetry), ctx, arg)
+}
+
+// ListAccounts mocks base method.
+func (m *MockQuerier) ListAccounts(ctx context.Context) ([]db.Account, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListAccounts", ctx)
+	ret0, _ := ret[0].([]db.Account)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListAccounts indicates an expected call of ListAccounts.
+func (mr *MockQuerierMockRecorder) ListAccounts(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListAccounts", reflect.TypeOf((*MockQuerier)(nil).ListAccounts), ctx)
 }
 
 // ListAllChannelMessages mocks base method.

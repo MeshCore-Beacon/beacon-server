@@ -9,6 +9,13 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Account struct {
+	ID            uuid.UUID          `json:"id"`
+	Name          string             `json:"name"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	DeactivatedAt pgtype.Timestamptz `json:"deactivated_at"`
+}
+
 type Channel struct {
 	ID             int32              `json:"id"`
 	ChannelHash    []byte             `json:"channel_hash"`
