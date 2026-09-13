@@ -101,7 +101,7 @@ CREATE MATERIALIZED VIEW backup_materialized AS SELECT count(*) AS count FROM ba
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	config := []byte("# saved configuration, including synthetic key\nchannel_keys:\n  keys: {}\n")
+	config := []byte("# saved configuration, including a synthetic key\nchannel_keys:\n  keys:\n    '00': {key: '00000000000000000000000000000000', name: fixture}\n")
 	configPath, output := filepath.Join(dir, "config.yaml"), filepath.Join(dir, "backup.tar.gz")
 	if err := os.WriteFile(configPath, config, 0600); err != nil {
 		t.Fatal(err)

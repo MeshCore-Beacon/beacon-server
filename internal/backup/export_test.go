@@ -68,7 +68,7 @@ func setup(t *testing.T) Options {
 	dir := t.TempDir()
 	opts := Options{ConfigPath: filepath.Join(dir, "saved.yaml"), OutputPath: filepath.Join(dir, "backup.tar.gz"),
 		MaxBytes: int64(len(testSQL)), Timeout: 10 * time.Second, Version: "test-revision"}
-	if err := os.WriteFile(opts.ConfigPath, []byte("# preserve comments\nchannel_keys: {}\n"), 0600); err != nil {
+	if err := os.WriteFile(opts.ConfigPath, []byte("# preserve comments and this synthetic key\nchannel_keys:\n  keys:\n    '00': {key: '00000000000000000000000000000000', name: fixture}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
