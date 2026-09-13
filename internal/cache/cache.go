@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/config"
@@ -86,11 +87,13 @@ func getOrSet[T any](ctx context.Context, c *Client, key string, ttl time.Durati
 	raw, err := c.rdb.Get(ctx, key).Bytes()
 	if err != nil && !errors.Is(err, redis.Nil) {
 		// real Redis error, degrade gracefully
+		slog.DebugContext(ctx, "cache bypass", "component", "cache", "reason", "read_error")
 		return fetch()
 	}
 	var zero, out T
 	if errors.Is(err, redis.Nil) {
 		// cache miss — fetch, store, return
+		slog.DebugContext(ctx, "cache miss", "component", "cache")
 		val, err := fetch()
 		if err != nil {
 			return zero, err
@@ -104,6 +107,7 @@ func getOrSet[T any](ctx context.Context, c *Client, key string, ttl time.Durati
 	}
 	if err = json.Unmarshal(raw, &out); err != nil {
 		// corrupt cache entry — overwrite it
+		slog.DebugContext(ctx, "cache invalid entry", "component", "cache")
 		val, err := fetch()
 		if err != nil {
 			return zero, err
@@ -115,5 +119,6 @@ func getOrSet[T any](ctx context.Context, c *Client, key string, ttl time.Durati
 		_ = c.rdb.Set(ctx, key, data, ttl)
 		return val, nil
 	}
+	slog.DebugContext(ctx, "cache hit", "component", "cache")
 	return out, nil
 }
