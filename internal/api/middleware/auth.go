@@ -3,17 +3,36 @@
 
 package middleware
 
-import "net/http"
+import (
+	"crypto/subtle"
+	"io"
+	"net/http"
+	"strings"
+)
 
-// NoopAuth is a placeholder for the authentication middleware that will be
-// wired onto the private route group when auth is implemented (see Future
-// Features → Admin authentication in the design doc).
-//
-// Replace this with a real JWT/session validation middleware before shipping
-// any write endpoints or admin functionality.
-func NoopAuth(next http.Handler) http.Handler {
+// BearerAuth protects admin routes with one operator key. An empty key disables
+// access; public routes must be mounted outside this middleware.
+func BearerAuth(apiKey string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// TODO: validate bearer token, set user in context, return 401 on failure.
-		next.ServeHTTP(w, r)
+		w.Header().Set("Cache-Control", "no-store")
+		status := http.StatusServiceUnavailable
+		body := `{"error":{"code":"service_unavailable","message":"admin authentication is not configured"}}`
+		if apiKey != "" {
+			if values := r.Header.Values("Authorization"); len(values) == 1 {
+				scheme, token, found := strings.Cut(values[0], " ")
+				token = strings.TrimLeft(token, " ") // Bearer permits one or more spaces.
+				if found && strings.EqualFold(scheme, "Bearer") && token != "" && !strings.ContainsAny(token, " \t\r\n,") &&
+					subtle.ConstantTimeCompare([]byte(token), []byte(apiKey)) == 1 {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+			status = http.StatusUnauthorized
+			body = `{"error":{"code":"unauthorized","message":"valid bearer token required"}}`
+			w.Header().Set("WWW-Authenticate", "Bearer")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, body+"\n")
 	})
 }

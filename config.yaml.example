@@ -1,6 +1,11 @@
 # Beacon configuration file
 # Copy to config.yaml and adjust as needed.
 
+# Public reads stay available. No key means admin routes return 503.
+# Prefer BEACON_API_KEY in the service environment; never commit a real key.
+auth:
+  api_key: ""
+
 server:
   # Only these direct proxy peers may set the client IP through X-Real-IP.
   # The proxy must overwrite that header, not pass through client input.

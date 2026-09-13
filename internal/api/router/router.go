@@ -3,8 +3,7 @@
 
 // Package router wires all HTTP routes onto the Chi router and injects
 // dependencies (hub, reader, ingest workers) into the handler closures.
-// All routes are mounted under /api/v1 with public and private groups
-// stubbed for future auth middleware.
+// REST routes are mounted under /api/v1; its admin subtree requires a bearer key.
 package router
 
 import (
@@ -39,9 +38,8 @@ import (
 //	  /regions         → regions subrouter
 //	  /stats           → stats subrouter
 //
-// The private group is stubbed and ready for the auth middleware drop-in
-// described in Future Features → Admin authentication.
-func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP int, corsCfg config.CORSConfig, serverCfg config.ServerConfig) http.Handler {
+// Admin handlers are added separately; the reserved subtree is protected now.
+func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP int, corsCfg config.CORSConfig, serverCfg config.ServerConfig, authCfg config.AuthConfig) http.Handler {
 	r := chi.NewRouter()
 
 	// ── CORS ─────────────────────────────────────────────────────────────────
@@ -91,7 +89,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP 
 
 	// ── Public REST API (v1) ─────────────────────────────────────────────────
 	r.Route("/api/v1", func(r chi.Router) {
-		// Public group — no authentication required (all of v1 is public).
+		// Public group — no authentication required.
 		r.Group(func(r chi.Router) {
 			r.Mount("/packets", handlers.PacketsRouter(reader))
 			r.Mount("/nodes", handlers.NodesRouter(reader))
@@ -107,13 +105,9 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP 
 			r.Mount("/traces", handlers.TracesRouter(reader))
 		})
 
-		// Private group — auth middleware applied.
-		// Stubbed for the admin endpoints described in Future Features.
-		// Swap mw.NoopAuth for a real JWT/session middleware when ready.
-		r.Group(func(r chi.Router) {
-			r.Use(mw.NoopAuth)
-			// r.Mount("/admin", handlers.AdminRouter())
-		})
+		// Protect the entire subtree, including its root and unknown paths.
+		// Replace the empty router with the admin handlers when they are added.
+		r.Mount("/admin", mw.BearerAuth(authCfg.APIKey, chi.NewRouter()))
 	})
 
 	return r

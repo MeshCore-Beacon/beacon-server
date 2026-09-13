@@ -17,6 +17,7 @@ import (
 
 // Config is the top-level structure of the Beacon config file.
 type Config struct {
+	Auth        AuthConfig            `yaml:"auth"`
 	Server      ServerConfig          `yaml:"server"`
 	IATAs       map[string]IATAConfig `yaml:"iatas"`
 	Regions     []RegionConfig        `yaml:"regions"`
@@ -33,6 +34,12 @@ type Config struct {
 	Presence    PresenceConfig        `yaml:"presence"`
 	Nodes       NodesConfig           `yaml:"nodes"`
 	Observers   ObserversConfig       `yaml:"observers"`
+}
+
+// AuthConfig holds the operator key for the protected admin subtree.
+// The key is excluded from JSON; it must not be exposed by configuration APIs.
+type AuthConfig struct {
+	APIKey string `yaml:"api_key" json:"-"`
 }
 
 // ServerConfig controls which direct peers may supply the client address.
@@ -333,12 +340,16 @@ func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			cfg.Auth.APIKey = os.Getenv("BEACON_API_KEY")
 			return cfg, nil
 		}
 		return nil, err
 	}
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, err
+	}
+	if value, set := os.LookupEnv("BEACON_API_KEY"); set {
+		cfg.Auth.APIKey = value
 	}
 	for i, prefix := range cfg.Server.TrustedProxies {
 		if !prefix.IsValid() {
