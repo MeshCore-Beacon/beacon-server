@@ -10,6 +10,18 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    services:
+      backup-postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: backup-ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -35,6 +47,18 @@ jobs:
       - name: Test
         run: go test ./...
 
+      - name: Verify backup command against PostgreSQL 16
+        run: |
+          CGO_ENABLED=0 go build -o "$RUNNER_TEMP/beacon-backup" ./cmd/beacon-backup
+          CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/backup.test" ./internal/backup
+          docker run --rm --network host \
+            -e PGHOST=127.0.0.1 -e PGUSER=postgres -e PGDATABASE=postgres \
+            -e PGPASSWORD=backup-ci-only -e PGSSLMODE=disable \
+            -e BEACON_BACKUP_TEST_POSTGRES=1 -e BEACON_BACKUP_TEST_BINARY=/beacon-backup \
+            -v "$RUNNER_TEMP/beacon-backup:/beacon-backup:ro" \
+            -v "$RUNNER_TEMP/backup.test:/backup.test:ro" \
+            postgres:16-alpine /backup.test -test.run '^TestExportPostgres$' -test.v
+
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
 
@@ -54,4 +78,3 @@ jobs:
             exit 1
           fi
           rm docs/swagger.json.bak
-
