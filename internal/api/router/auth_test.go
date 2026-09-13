@@ -28,6 +28,12 @@ func TestAdminAuthBoundary(t *testing.T) {
 						want = 401
 						if token == key {
 							want = 404
+							if path == "/api/v1/admin/config" || path == "/api/v1/admin//config" {
+								want = 405
+								if method == "GET" {
+									want = 200
+								}
+							}
 						}
 					}
 					if w.Code != want {

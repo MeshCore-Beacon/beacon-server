@@ -54,6 +54,11 @@ var version = "dev"
 
 //	@schemes	http https
 
+// @securityDefinitions.apikey AdminKey
+// @in header
+// @name Authorization
+// @description Enter Bearer followed by the configured operator key. Use HTTPS.
+
 // @tag.name			IATAs
 // @tag.description	Airport/location codes that group observers and packets
 // @tag.name			Regions

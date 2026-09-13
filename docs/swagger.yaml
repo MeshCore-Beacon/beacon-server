@@ -1,5 +1,46 @@
 basePath: /api/v1
 definitions:
+  github_com_MeshCore-Beacon_beacon-server_internal_api.AdminAuthConfig:
+    properties:
+      configured:
+        type: boolean
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.AdminCORSConfig:
+    properties:
+      allow_credentials:
+        type: boolean
+      allowed_headers:
+        items:
+          type: string
+        type: array
+      allowed_methods:
+        items:
+          type: string
+        type: array
+      allowed_origins:
+        items:
+          type: string
+        type: array
+      max_age:
+        type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.AdminConfig:
+    properties:
+      auth:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminAuthConfig'
+      cors:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminCORSConfig'
+      ingest:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminIngestConfig'
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.AdminIngestConfig:
+    properties:
+      broker_count:
+        description: |-
+          BrokerCount counts configured broker workers, not active MQTT connections
+          or a configurable processing-worker pool.
+        type: integer
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.AdvertObservation:
     properties:
       heardAt:
@@ -1191,6 +1232,35 @@ info:
   title: MeshCore Beacon API
   version: 1.6.0
 paths:
+  /admin/config:
+    get:
+      description: Returns CORS startup options with Beacon defaults, auth configuration
+        status and configured broker count. Credential fields and other configuration
+        are excluded. Changes require restart; this endpoint is read-only.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminConfig'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - AdminKey: []
+      summary: Inspect selected startup configuration
+      tags:
+      - Admin
   /brokers:
     get:
       produces:
@@ -2808,6 +2878,12 @@ paths:
 schemes:
 - http
 - https
+securityDefinitions:
+  AdminKey:
+    description: Enter Bearer followed by the configured operator key. Use HTTPS.
+    in: header
+    name: Authorization
+    type: apiKey
 swagger: "2.0"
 tags:
 - description: Airport/location codes that group observers and packets

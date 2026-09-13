@@ -127,7 +127,15 @@ With no key, admin requests return JSON 503 while public reads and WebSockets
 continue normally. With a key, missing, incorrect or duplicate Authorization
 headers return JSON 401 with `WWW-Authenticate: Bearer`.
 
-Admin operations are not implemented yet: a valid key currently reaches a 404.
+`GET /api/v1/admin/config` returns selected startup settings: CORS options with
+Beacon defaults applied, `auth.configured`, and `ingest.broker_count` (configured
+broker workers, not connection status or a tunable processing-worker pool).
+The CORS lists are the options supplied to the middleware; its normal matching
+normalization still applies. The response is a startup snapshot and excludes
+credential fields, broker addresses, channel material, database settings and
+other configuration. Changes require a restart. Configuration writes and account
+operations are not implemented; unknown admin paths return 404 and unsupported
+methods on the config endpoint return 405 after authentication.
 Global CORS preflights remain public. Use a long, randomly generated key, keep
 it out of source control and logs, and send it only in the Authorization header,
 never the URL or request body. Require HTTPS at the reverse proxy and restrict

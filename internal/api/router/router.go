@@ -38,7 +38,7 @@ import (
 //	  /regions         → regions subrouter
 //	  /stats           → stats subrouter
 //
-// Admin handlers are added separately; the reserved subtree is protected now.
+// Admin endpoints require a configured bearer key.
 func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP int, corsCfg config.CORSConfig, serverCfg config.ServerConfig, authCfg config.AuthConfig, rateLimitCfg config.ResolvedRateLimitConfig) http.Handler {
 	r := chi.NewRouter()
 
@@ -67,6 +67,19 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP 
 		AllowCredentials: corsCfg.AllowCredentials,
 		MaxAge:           maxAge,
 	}))
+	// Capture only values used by this router. Do not retain Config, credentials
+	// or caller-owned slices in the admin response.
+	adminConfig := api.AdminConfig{
+		Auth: api.AdminAuthConfig{Configured: authCfg.APIKey != ""},
+		CORS: api.AdminCORSConfig{
+			AllowedOrigins:   append([]string{}, allowedOrigins...),
+			AllowedMethods:   append([]string{}, allowedMethods...),
+			AllowedHeaders:   append([]string{}, allowedHeaders...),
+			AllowCredentials: corsCfg.AllowCredentials,
+			MaxAge:           maxAge,
+		},
+		Ingest: api.AdminIngestConfig{BrokerCount: len(workers)},
+	}
 
 	// ── Global middleware ────────────────────────────────────────────────────
 	r.Use(middleware.RequestID)
@@ -108,8 +121,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP 
 		})
 
 		// Protect the entire subtree, including its root and unknown paths.
-		// Replace the empty router with the admin handlers when they are added.
-		r.Mount("/admin", mw.BearerAuth(authCfg.APIKey, chi.NewRouter()))
+		r.Mount("/admin", mw.BearerAuth(authCfg.APIKey, handlers.AdminRouter(adminConfig)))
 	})
 
 	return r
