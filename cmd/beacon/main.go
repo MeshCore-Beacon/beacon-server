@@ -18,6 +18,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/db"
 	_ "github.com/MeshCore-Beacon/beacon-server/docs"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api/handlers"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api/router"
 	"github.com/MeshCore-Beacon/beacon-server/internal/background"
 	"github.com/MeshCore-Beacon/beacon-server/internal/cache"
@@ -307,6 +308,7 @@ func main() {
 		MaxConnsPerIP:        resolved.MaxConnsPerIP,
 		MaxConnectsPerMinute: resolved.MaxConnectsPerMinute,
 		CORS:                 cfg.CORS, Server: cfg.Server, Auth: cfg.Auth, RateLimit: resolved.RateLimit,
+		AdminRoutes: map[string]http.Handler{"/accounts": handlers.AccountsRouter(store)},
 	})
 
 	srv := &http.Server{
