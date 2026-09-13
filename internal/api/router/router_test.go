@@ -36,7 +36,7 @@ func TestWebSocketLimitUsesTrustedClientIP(t *testing.T) {
 
 func checkWebSocketLimit(t *testing.T, cfg config.ServerConfig, secondIP string, wantStatus int) {
 	t.Helper()
-	server := httptest.NewServer(New(hub.New(), nil, nil, 1, config.CORSConfig{}, cfg))
+	server := httptest.NewServer(New(hub.New(), nil, nil, 1, config.CORSConfig{}, cfg, config.AuthConfig{}))
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

@@ -114,6 +114,22 @@ matching a now-known channel and decrypts them. Watch the startup log for
 
 ## Configuration
 
+### Admin authentication
+
+The `/api/v1/admin` subtree requires `Authorization: Bearer <key>`. Set the
+operator key with `BEACON_API_KEY` or `auth.api_key` in YAML. A set environment
+variable overrides YAML; an explicitly empty value disables admin access.
+With no key, admin requests return JSON 503 while public reads and WebSockets
+continue normally. With a key, missing, incorrect or duplicate Authorization
+headers return JSON 401 with `WWW-Authenticate: Bearer`.
+
+Admin operations are not implemented yet: a valid key currently reaches a 404.
+Global CORS preflights remain public. Use a long, randomly generated key, keep
+it out of source control and logs, and send it only in the Authorization header,
+never the URL or request body. Require HTTPS at the reverse proxy and restrict
+direct access to Beacon's HTTP listener to that proxy or a private connection.
+Changing the key requires a restart. No API key is issued automatically.
+
 ### Environment variables (`.env`)
 
 | Variable                 | Default       | Description                                                  |
