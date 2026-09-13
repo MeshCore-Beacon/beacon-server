@@ -6,7 +6,8 @@ package handlers
 
 import (
 	"encoding/json"
-	"log"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -25,7 +26,7 @@ func respond(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(data); err != nil {
-		log.Printf("api: failed to encode response: %v", err)
+		slog.Error("api: failed to encode response", "component", "api", "error", err)
 	}
 }
 
@@ -33,7 +34,7 @@ func respond(w http.ResponseWriter, status int, data any) {
 // The error code is derived automatically from the HTTP status text.
 func respondError(w http.ResponseWriter, status int, message string) {
 	if status >= 500 {
-		log.Printf("api: error %d: %s", status, message)
+		slog.Error(fmt.Sprintf("api: error %d: %s", status, message), "component", "api")
 	}
 	code := strings.ToLower(strings.ReplaceAll(http.StatusText(status), " ", "_"))
 	respond(w, status, map[string]APIError{"error": {Code: code, Message: message}})

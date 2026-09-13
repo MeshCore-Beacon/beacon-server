@@ -5,7 +5,8 @@ package handlers
 
 import (
 	"errors"
-	"log"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 )
@@ -26,7 +27,7 @@ func parseLimit(r *http.Request, defaultLimit int32) (int32, error) {
 		return 0, errors.New("limit must be positive")
 	}
 	if limit > int64(maxListLimit) {
-		log.Printf("api: clamped list limit from %d to %d for %s on %s", limit, maxListLimit, r.RemoteAddr, r.URL.Path)
+		slog.Info(fmt.Sprintf("api: clamped list limit from %d to %d for %s on %s", limit, maxListLimit, r.RemoteAddr, r.URL.Path), "component", "api")
 		return maxListLimit, nil
 	}
 	return int32(limit), nil

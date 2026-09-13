@@ -4,11 +4,15 @@
 package background
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
+	"log/slog"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/google/uuid"
@@ -155,33 +159,35 @@ func TestViewRefreshTaskCancelled(t *testing.T) {
 	}
 }
 
-type taskLog chan string
-
-func (w taskLog) Write(p []byte) (int, error) {
-	line := string(p)
-	if strings.Contains(line, "complete") || strings.Contains(line, "failed:") {
-		w <- line
-	}
-	return len(p), nil
-}
-
 func TestSchedulerFailureIsNotComplete(t *testing.T) {
-	lines := make(taskLog, 1)
-	previous := log.Writer()
-	log.SetOutput(lines)
-	defer log.SetOutput(previous)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	New([]Task{{Name: "fails", Interval: time.Millisecond, Run: func(context.Context) error {
-		cancel()
-		return errors.New("refresh unavailable")
-	}}}).Start(ctx)
-	select {
-	case line := <-lines:
-		if strings.Contains(line, "complete") || !strings.Contains(line, "refresh unavailable") {
-			t.Fatalf("incorrect failure status: %s", line)
+	synctest.Test(t, func(t *testing.T) {
+		var out bytes.Buffer
+		previous, writer, flags := slog.Default(), log.Writer(), log.Flags()
+		slog.SetDefault(slog.New(slog.NewJSONHandler(&out, &slog.HandlerOptions{Level: slog.LevelDebug})))
+		defer func() { slog.SetDefault(previous); log.SetOutput(writer); log.SetFlags(flags) }()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		New([]Task{{Name: "fails", Interval: time.Millisecond, Run: func(context.Context) error { cancel(); return errors.New("refresh unavailable") }}}).Start(ctx)
+		time.Sleep(2 * time.Millisecond) // advance the virtual clock to the first task tick
+		synctest.Wait()
+		failed := false
+		for _, line := range bytes.Split(bytes.TrimSpace(out.Bytes()), []byte("\n")) {
+			var record map[string]any
+			if err := json.Unmarshal(line, &record); err != nil {
+				t.Fatal(err)
+			}
+			if record["msg"] == "task complete" {
+				t.Fatal("failed task reported complete")
+			}
+			if record["msg"] == "task failed" {
+				failed = true
+				if record["level"] != "ERROR" || record["error"] != "refresh unavailable" || record["task"] != "fails" {
+					t.Fatalf("incorrect failure: %v", record)
+				}
+			}
 		}
-	case <-time.After(time.Second):
-		t.Fatal("scheduler did not report task outcome")
-	}
+		if !failed {
+			t.Fatal("scheduler did not report task failure")
+		}
+	})
 }
