@@ -7,7 +7,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -26,6 +26,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/iatadb"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
 	"github.com/MeshCore-Beacon/beacon-server/internal/keystore"
+	"github.com/MeshCore-Beacon/beacon-server/internal/logging"
 	"github.com/MeshCore-Beacon/beacon-server/internal/presence"
 	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
 
@@ -73,7 +74,6 @@ var version = "dev"
 // @tag.name			Stats
 // @tag.description	Network statistics and time series
 func main() {
-	log.Printf("beacon version %s", version)
 	_ = godotenv.Load()
 	addr := os.Getenv("LISTEN_ADDR")
 	if addr == "" {
@@ -87,15 +87,23 @@ func main() {
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		log.Fatalf("failed to load config: %v", err)
+		slog.Error("failed to load config", "component", "startup", "error", err)
+		os.Exit(1)
 	}
+	logger, err := logging.New(os.Stderr, cfg.Log)
+	if err != nil {
+		slog.Error("invalid logging configuration", "component", "startup", "error", err)
+		os.Exit(1)
+	}
+	slog.SetDefault(logger)
+	slog.Info("beacon starting", "component", "startup", "version", version)
 	if len(cfg.Server.TrustedProxies) == 0 {
-		log.Print("warning: server.trusted_proxies is empty; client IP headers are ignored and proxied clients share a WebSocket connection limit")
+		slog.Warn("warning: server.trusted_proxies is empty; client IP headers are ignored and proxied clients share a WebSocket connection limit", "component", "startup")
 	}
 
 	resolved := config.Resolve(cfg)
 
-	log.Printf("config: loaded — %s", resolved)
+	slog.Info(fmt.Sprintf("config: loaded — %s", resolved), "component", "startup")
 
 	// ── Hub ──────────────────────────────────────────────────────────────────
 	h := hub.New()
@@ -107,12 +115,15 @@ func main() {
 
 	pool, err := pgxpool.New(ctx, getEnv("POSTGRES_DSN"))
 	if err != nil {
-		log.Fatalf("failed to connect to postgres at %s: %v", os.Getenv("POSTGRES_DSN_HOST"), err)
+		// Parse errors can embed the complete DSN, including its password.
+		slog.Error("invalid PostgreSQL connection configuration; check POSTGRES_DSN", "component", "startup")
+		os.Exit(1)
 	}
 	defer pool.Close()
 
 	if err := db.RunMigrations(ctx, pool); err != nil {
-		log.Fatalf("migrations failed: %v", err)
+		slog.Error("migrations failed", "component", "startup", "error", err)
+		os.Exit(1)
 	}
 
 	store := db.New(pool, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold)
@@ -139,29 +150,30 @@ func main() {
 			}(),
 		)
 		if err := redisClient.Ping(ctx); err != nil {
-			log.Printf("warning: redis unavailable at %s, caching disabled: %v", redisAddr, err)
+			slog.Warn(fmt.Sprintf("warning: redis unavailable at %s, caching disabled", redisAddr), "component", "startup", "error", err)
 		} else {
 			ttls := cache.ResolveTTLs(cfg.Cache)
 			reader = cache.NewCachedReader(store, redisClient, ttls)
 			defer redisClient.Close()
-			log.Printf("cache: Redis connected at %s (stats=%s reference=%s nodes=%s observers=%s)",
-				redisAddr, ttls.Stats, ttls.Reference, ttls.Nodes, ttls.Observers)
+			slog.Info(fmt.Sprintf("cache: Redis connected at %s (stats=%s reference=%s nodes=%s observers=%s)", redisAddr, ttls.Stats, ttls.Reference, ttls.Nodes, ttls.Observers), "component", "startup")
 		}
 	}
 
 	// ── Seed config data ─────────────────────────────────────────────────────
 	if err := config.Seed(ctx, cfg, store); err != nil {
-		log.Fatalf("failed to seed config: %v", err)
+		slog.Error("failed to seed config", "component", "startup", "error", err)
+		os.Exit(1)
 	}
 
 	// ── Build transport scope keystore ───────────────────────────────────────
 	scopes := scopestore.New()
 	scopeEntries, err := store.GetTransportScopes(ctx)
 	if err != nil {
-		log.Fatalf("failed to load transport scopes: %v", err)
+		slog.Error("failed to load transport scopes", "component", "startup", "error", err)
+		os.Exit(1)
 	}
 	scopes.Load(scopeEntries)
-	log.Printf("loaded %d transport scopes", len(scopeEntries))
+	slog.Info(fmt.Sprintf("loaded %d transport scopes", len(scopeEntries)), "component", "startup")
 
 	// ── Build channel keystore ──────────────────────────────────────────────
 	entries := make(map[string][]keystore.Entry)
@@ -178,7 +190,7 @@ func main() {
 		}
 		if !keystore.EntryExists(entries[hashHex], entry) {
 			entries[hashHex] = append(entries[hashHex], entry)
-			log.Printf("config: loaded hashtag channel #%s (hash=%s)", tag, hashHex)
+			slog.Info(fmt.Sprintf("config: loaded hashtag channel #%s (hash=%s)", tag, hashHex), "component", "startup")
 		}
 	}
 
@@ -186,7 +198,7 @@ func main() {
 	for hashHex, keyCfg := range cfg.ChannelKeys.Keys {
 		key, err := hex.DecodeString(keyCfg.Key)
 		if err != nil {
-			log.Printf("warning: invalid channel key for hash %s, skipping: %v", hashHex, err)
+			slog.Warn(fmt.Sprintf("warning: invalid channel key for hash %s, skipping", hashHex), "component", "startup", "error", err)
 			continue
 		}
 		entry := keystore.Entry{
@@ -196,7 +208,7 @@ func main() {
 		}
 		if !keystore.EntryExists(entries[hashHex], entry) {
 			entries[hashHex] = append(entries[hashHex], entry)
-			log.Printf("config: loaded explicit channel key for hash %s name=%q", hashHex, keyCfg.Name)
+			slog.Info(fmt.Sprintf("config: loaded explicit channel key for hash %s name=%q", hashHex, keyCfg.Name), "component", "startup")
 		}
 	}
 
@@ -208,18 +220,17 @@ func main() {
 	// built, so adding a channel key to the config surfaces its history on the next boot
 	// instead of leaving it stranded in the DB indefinitely.
 	if n, err := ingest.BackfillChannelMessages(ctx, store, keys); err != nil {
-		log.Printf("config: channel message backfill failed: %v", err)
+		slog.Error("config: channel message backfill failed", "component", "startup", "error", err)
 	} else if n > 0 {
-		log.Printf("config: backfilled %d previously-undecrypted channel message(s)", n)
+		slog.Info(fmt.Sprintf("config: backfilled %d previously-undecrypted channel message(s)", n), "component", "startup")
 	}
 
 	// ── Build geographic ingest filter ───────────────────────────────────────────────────────────
 	allowedIATAs := iatadb.BuildAllowedSet(cfg.Ingest.AllowCountries, cfg.Ingest.AllowContinents)
 	if allowedIATAs != nil {
-		log.Printf("config: ingest filter active — %d allowed IATAs (countries=%v continents=%v)",
-			len(allowedIATAs), cfg.Ingest.AllowCountries, cfg.Ingest.AllowContinents)
+		slog.Info(fmt.Sprintf("config: ingest filter active — %d allowed IATAs (countries=%v continents=%v)", len(allowedIATAs), cfg.Ingest.AllowCountries, cfg.Ingest.AllowContinents), "component", "startup")
 	} else {
-		log.Printf("config: ingest filter inactive — accepting all IATAs")
+		slog.Info("config: ingest filter inactive — accepting all IATAs", "component", "startup")
 	}
 
 	broker1 := ingest.New(
@@ -279,14 +290,16 @@ func main() {
 	r := router.New(h, reader, []*ingest.Worker{broker1, broker2}, resolved.MaxConnsPerIP, cfg.CORS, cfg.Server, cfg.Auth, resolved.RateLimit)
 
 	srv := &http.Server{
-		Addr:    addr,
-		Handler: r,
+		Addr:     addr,
+		Handler:  r,
+		ErrorLog: slog.NewLogLogger(slog.Default().With("component", "http").Handler(), slog.LevelError),
 	}
 
 	go func() {
-		fmt.Printf("Beacon listening on %s\n", addr)
+		slog.Info(fmt.Sprintf("Beacon listening on %s", addr), "component", "startup")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("server error: %v", err)
+			slog.Error("server error", "component", "startup", "error", err)
+			os.Exit(1)
 		}
 	}()
 
@@ -295,12 +308,12 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("shutting down...")
+	slog.Info("shutting down...", "component", "startup")
 	cancel() // stops ingest workers
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("server shutdown error: %v", err)
+		slog.Error("server shutdown error", "component", "startup", "error", err)
 	}
 	coalescer.Flush(shutdownCtx)
 }
@@ -311,7 +324,7 @@ func main() {
 func getEnv(key string) string {
 	v := os.Getenv(key)
 	if v == "" {
-		log.Printf("warning: %s is not set", key)
+		slog.Warn(fmt.Sprintf("warning: %s is not set", key), "component", "startup")
 	}
 	return v
 }

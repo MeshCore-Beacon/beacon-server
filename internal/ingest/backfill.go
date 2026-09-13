@@ -7,7 +7,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -81,7 +81,7 @@ func DecryptGroupText(ctx context.Context, db DB, keys ChannelKeyStore, packetHa
 		// Non-fatal: the message is stored either way, so just log and continue -- matches
 		// the live ingest path's existing behavior of not treating this as a hard failure.
 		if err := db.SetPacketDecrypted(ctx, packetHash); err != nil {
-			log.Printf("ingest: failed to set packet decrypted for %s: %v", hex.EncodeToString(packetHash), err)
+			slog.Error(fmt.Sprintf("ingest: failed to set packet decrypted for %s", hex.EncodeToString(packetHash)), "component", "ingest", "error", err)
 		}
 	}
 	return &DecryptGroupTextResult{
@@ -112,7 +112,7 @@ func BackfillChannelMessages(ctx context.Context, db DB, keys ChannelKeyStore) (
 	for _, p := range packets {
 		result, err := DecryptGroupText(ctx, db, keys, p.PacketHash, p.RawPayload)
 		if err != nil {
-			log.Printf("ingest: backfill: decrypt failed for packet %s: %v", hex.EncodeToString(p.PacketHash), err)
+			slog.Error(fmt.Sprintf("ingest: backfill: decrypt failed for packet %s", hex.EncodeToString(p.PacketHash)), "component", "ingest", "error", err)
 			continue
 		}
 		if result != nil && result.NewMessage {

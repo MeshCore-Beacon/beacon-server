@@ -11,7 +11,8 @@ package presence
 
 import (
 	"context"
-	"log"
+	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -258,7 +259,7 @@ func (c *Coalescer) Flush(ctx context.Context) {
 	c.mu.Unlock()
 
 	if err := c.flushObservers(ctx, observers); err != nil {
-		log.Printf("presence: flush observers failed (%d rows dropped): %v", len(observers), err)
+		slog.Error(fmt.Sprintf("presence: flush observers failed (%d rows dropped)", len(observers)), "component", "presence", "error", err)
 	}
 
 	if len(brokers) > 0 {
@@ -271,7 +272,7 @@ func (c *Coalescer) Flush(ctx context.Context) {
 			seen = append(seen, ts)
 		}
 		if err := c.Store.TouchObserverBrokers(ctx, ids, names, seen); err != nil {
-			log.Printf("presence: flush observer brokers failed (%d rows dropped): %v", len(ids), err)
+			slog.Error(fmt.Sprintf("presence: flush observer brokers failed (%d rows dropped)", len(ids)), "component", "presence", "error", err)
 		}
 	}
 
@@ -283,7 +284,7 @@ func (c *Coalescer) Flush(ctx context.Context) {
 			heard = append(heard, ts)
 		}
 		if err := c.Store.TouchPackets(ctx, hashes, heard); err != nil {
-			log.Printf("presence: flush packets failed (%d rows dropped): %v", len(hashes), err)
+			slog.Error(fmt.Sprintf("presence: flush packets failed (%d rows dropped)", len(hashes)), "component", "presence", "error", err)
 		}
 	}
 }

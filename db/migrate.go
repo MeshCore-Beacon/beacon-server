@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"regexp"
 	"sort"
 	"strings"
@@ -70,13 +71,13 @@ func applyMigration(ctx context.Context, db execQuerier, sql string) error {
 		return fmt.Errorf("%w (checking index %s: %v)", err, name, scanErr)
 	}
 	if valid {
-		fmt.Printf("index %s already built, recording migration\n", name)
+		slog.Info(fmt.Sprintf("index %s already built, recording migration", name), "component", "db")
 		return nil
 	}
 	if _, dropErr := db.Exec(ctx, "DROP INDEX CONCURRENTLY IF EXISTS "+ident); dropErr != nil {
 		return fmt.Errorf("dropping invalid index %s: %w", name, dropErr)
 	}
-	fmt.Printf("dropped invalid index %s, rebuilding\n", name)
+	slog.Warn(fmt.Sprintf("dropped invalid index %s, rebuilding", name), "component", "db")
 	_, err = db.Exec(ctx, sql)
 	return err
 }
@@ -119,7 +120,7 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 			); err != nil {
 				return fmt.Errorf("failed to bootstrap migrations: %w", err)
 			}
-			fmt.Println("bootstrapped existing schema as 001_initial_schema.sql")
+			slog.Info("bootstrapped existing schema as 001_initial_schema.sql", "component", "db")
 		}
 	}
 
@@ -166,7 +167,7 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 			return fmt.Errorf("failed to record migration %s: %w", entry.Name(), err)
 		}
 
-		fmt.Printf("applied migration: %s\n", entry.Name())
+		slog.Info(fmt.Sprintf("applied migration: %s", entry.Name()), "component", "db")
 	}
 
 	return nil

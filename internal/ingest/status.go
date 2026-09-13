@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -71,17 +70,17 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 		} `json:"stats"`
 	}
 	if err := json.Unmarshal(raw, &envelope); err != nil {
-		log.Printf("ingest[%s]: malformed status envelope from %s: %v", w.cfg.BrokerName, pubkeyHex, err)
+		w.log.Warn(fmt.Sprintf("malformed status envelope from %s", pubkeyHex), "error", err)
 		return
 	}
 	pubkey, err := hex.DecodeString(pubkeyHex)
 	if err != nil {
-		log.Printf("ingest[%s]: invalid pubkey hex in status from %s: %v", w.cfg.BrokerName, pubkeyHex, err)
+		w.log.Warn(fmt.Sprintf("invalid pubkey hex in status from %s", pubkeyHex), "error", err)
 		return
 	}
 	id, _, err := w.db.UpsertObserver(ctx, pubkey)
 	if err != nil {
-		log.Printf("ingest[%s]: db: upsert observer failed in status from %s: %v", w.cfg.BrokerName, pubkeyHex, err)
+		w.log.Error(fmt.Sprintf("db: upsert observer failed in status from %s", pubkeyHex), "error", err)
 		return
 	}
 	// invalidate cache for observer details
@@ -89,7 +88,7 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 		w.onObserverUpsert(ctx, id)
 	}
 	if err := w.db.UpsertObserverBroker(ctx, id, w.cfg.BrokerName); err != nil {
-		log.Printf("ingest[%s]: db: upsert observer broker failed in status from %s: %v", w.cfg.BrokerName, pubkeyHex, err)
+		w.log.Error(fmt.Sprintf("db: upsert observer broker failed in status from %s", pubkeyHex), "error", err)
 	}
 	params := UpdateObserverStatusParams{
 		PublicKey:      pubkey,
@@ -122,29 +121,29 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 
 	radio := strings.Split(strings.TrimSpace(envelope.RadioString), ",")
 	if len(radio) != 4 {
-		log.Printf("ingest[%s]: missing or malformed radio params in status from %s, skipping radio fields", w.cfg.BrokerName, pubkeyHex)
+		w.log.Warn(fmt.Sprintf("missing or malformed radio params in status from %s, skipping radio fields", pubkeyHex))
 	} else {
 		freq, err := strconv.ParseFloat(radio[0], 32)
 		if err != nil {
-			log.Printf("ingest[%s]: error parsing radio freq in status from %s: %v", w.cfg.BrokerName, pubkeyHex, err)
+			w.log.Warn(fmt.Sprintf("error parsing radio freq in status from %s", pubkeyHex), "error", err)
 		} else {
 			params.RadioFreqMHz = float32(freq)
 		}
 		bw, err := strconv.ParseFloat(radio[1], 32)
 		if err != nil {
-			log.Printf("ingest[%s]: error parsing radio bw in status from %s: %v", w.cfg.BrokerName, pubkeyHex, err)
+			w.log.Warn(fmt.Sprintf("error parsing radio bw in status from %s", pubkeyHex), "error", err)
 		} else {
 			params.RadioBWKHz = float32(bw)
 		}
 		sf, err := strconv.ParseInt(radio[2], 10, 16)
 		if err != nil {
-			log.Printf("ingest[%s]: error parsing radio sf in status from %s: %v", w.cfg.BrokerName, pubkeyHex, err)
+			w.log.Warn(fmt.Sprintf("error parsing radio sf in status from %s", pubkeyHex), "error", err)
 		} else {
 			params.RadioSF = int16(sf)
 		}
 		cr, err := strconv.ParseInt(radio[3], 10, 16)
 		if err != nil {
-			log.Printf("ingest[%s]: error parsing radio cr in status from %s: %v", w.cfg.BrokerName, pubkeyHex, err)
+			w.log.Warn(fmt.Sprintf("error parsing radio cr in status from %s", pubkeyHex), "error", err)
 		} else {
 			params.RadioCR = int16(cr)
 		}
@@ -152,7 +151,7 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 
 	observerID, err := w.db.UpdateObserverStatus(ctx, params)
 	if err != nil {
-		log.Printf("ingest[%s]: db: update observer status failed for %s: %v", w.cfg.BrokerName, pubkeyHex, err)
+		w.log.Error(fmt.Sprintf("db: update observer status failed for %s", pubkeyHex), "error", err)
 		return
 	}
 	// Store a telemetry snapshot at the configured resolution.
@@ -161,7 +160,7 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 	// stats — skip the insert rather than writing an all-zero row that would win
 	// the hourly dedup and pollute the telemetry aggregates.
 	if envelope.Stats.UptimeSeconds == 0 {
-		log.Printf("ingest[%s]: status from %s has no usable stats (uptime_secs missing or zero), skipping telemetry insert", w.cfg.BrokerName, pubkeyHex)
+		w.log.Debug("status has no usable stats; skipping telemetry insert")
 	} else {
 		resolution := w.cfg.TelemetryResolution
 		if resolution == 0 {
@@ -180,7 +179,7 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 			envelope.Stats.NoiseFloor, envelope.Stats.UptimeSeconds,
 			&queueLen, &debugFlags, &recvErrors,
 		); err != nil {
-			log.Printf("ingest[%s]: db: insert telemetry failed for %s: %v", w.cfg.BrokerName, pubkeyHex, err)
+			w.log.Error(fmt.Sprintf("db: insert telemetry failed for %s", pubkeyHex), "error", err)
 		}
 	}
 
@@ -190,7 +189,7 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 	}
 	scopes, err := w.db.GetObserverScopes(ctx, observerID)
 	if err != nil {
-		log.Printf("ingest[%s]: failed to get observer scopes for %s: %v", w.cfg.BrokerName, pubkeyHex, err)
+		w.log.Error(fmt.Sprintf("failed to get observer scopes for %s", pubkeyHex), "error", err)
 		scopes = []string{}
 	}
 	var radioStr *string
@@ -216,7 +215,7 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 	}
 	payload, err := json.Marshal(evt)
 	if err != nil {
-		log.Printf("ingest[%s]: failed to marshal status event payload for %s: %v", w.cfg.BrokerName, pubkeyHex, err)
+		w.log.Error(fmt.Sprintf("failed to marshal status event payload for %s", pubkeyHex), "error", err)
 		return
 	}
 	w.hub.Broadcast(hub.Event{Type: hub.EventObserverStatus, Payload: payload, IATA: iata})

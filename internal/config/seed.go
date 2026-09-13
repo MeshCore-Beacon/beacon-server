@@ -8,7 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 )
@@ -26,7 +26,7 @@ type Seeder interface {
 // Seed applies config-defined regions, IATA overrides to the database.
 // It is safe to call on every startup — all operations are upserts.
 func Seed(ctx context.Context, cfg *Config, db Seeder) error {
-	log.Printf("config: seeding %d IATAs, %d regions, %d scopes", len(cfg.IATAs), len(cfg.Regions), len(cfg.Scopes))
+	slog.Info(fmt.Sprintf("config: seeding %d IATAs, %d regions, %d scopes", len(cfg.IATAs), len(cfg.Regions), len(cfg.Scopes)), "component", "config")
 	// IATA overrides
 	for iata, details := range cfg.IATAs {
 		if err := db.UpsertIATADetails(ctx, iata, details.Name, details.Lat, details.Lng); err != nil {

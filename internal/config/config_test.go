@@ -11,6 +11,20 @@ import (
 	"time"
 )
 
+func TestLoadLogConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("log:\n  level: warn\n  format: json\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Log.Level != "warn" || cfg.Log.Format != "json" {
+		t.Fatalf("log config ignored: %+v", cfg.Log)
+	}
+}
+
 func TestLoadTrustedProxies(t *testing.T) {
 	for _, tc := range []struct {
 		name, yaml string

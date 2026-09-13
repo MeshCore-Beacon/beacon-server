@@ -18,6 +18,7 @@ import (
 // Config is the top-level structure of the Beacon config file.
 type Config struct {
 	Auth        AuthConfig            `yaml:"auth"`
+	Log         LogConfig             `yaml:"log"`
 	Server      ServerConfig          `yaml:"server"`
 	IATAs       map[string]IATAConfig `yaml:"iatas"`
 	Regions     []RegionConfig        `yaml:"regions"`
@@ -41,6 +42,12 @@ type Config struct {
 // The key is excluded from JSON; it must not be exposed by configuration APIs.
 type AuthConfig struct {
 	APIKey string `yaml:"api_key" json:"-"`
+}
+
+// LogConfig controls application verbosity and stderr output format.
+type LogConfig struct {
+	Level  string `yaml:"level"`
+	Format string `yaml:"format"`
 }
 
 // ServerConfig controls which direct peers may supply the client address.

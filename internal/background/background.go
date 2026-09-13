@@ -6,7 +6,7 @@ package background
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"time"
 )
 
@@ -36,11 +36,11 @@ func (s *Scheduler) Start(ctx context.Context) {
 			for {
 				select {
 				case <-ticker.C:
-					log.Printf("background[%s]: running", t.Name)
+					slog.Debug("task running", "component", "background", "task", t.Name)
 					if err := t.Run(ctx); err != nil {
-						log.Printf("background[%s]: failed: %v", t.Name, err)
+						slog.Error("task failed", "component", "background", "task", t.Name, "error", err)
 					} else {
-						log.Printf("background[%s]: complete", t.Name)
+						slog.Debug("task complete", "component", "background", "task", t.Name)
 					}
 				case <-ctx.Done():
 					return

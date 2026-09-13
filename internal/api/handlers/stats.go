@@ -4,7 +4,7 @@
 package handlers
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -66,7 +66,7 @@ func getStatsOverview(reader api.Reader) http.HandlerFunc {
 		}
 		overview, err := reader.GetStatsOverview(r.Context(), iatas)
 		if err != nil {
-			log.Printf("api: GetStatsOverview failed: %v", err)
+			slog.Error("api: GetStatsOverview failed", "component", "api", "error", err)
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
@@ -108,7 +108,7 @@ func getStatsObservations(reader api.Reader) http.HandlerFunc {
 		}
 		points, err := reader.GetStatsObservations(r.Context(), iatas, since)
 		if err != nil {
-			log.Printf("api: GetStatsObservations failed: %v", err)
+			slog.Error("api: GetStatsObservations failed", "component", "api", "error", err)
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
@@ -150,7 +150,7 @@ func getStatsPayloadBreakdown(reader api.Reader) http.HandlerFunc {
 		}
 		breakdown, err := reader.GetStatsPayloadBreakdown(r.Context(), iatas, since)
 		if err != nil {
-			log.Printf("api: GetStatsPayloadBreakdown failed: %v", err)
+			slog.Error("api: GetStatsPayloadBreakdown failed", "component", "api", "error", err)
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
@@ -188,7 +188,7 @@ func getStatsTopNodes(reader api.Reader) http.HandlerFunc {
 		}
 		nodes, err := reader.GetStatsTopNodes(r.Context(), iatas, limit)
 		if err != nil {
-			log.Printf("api: GetStatsTopNodes failed: %v", err)
+			slog.Error("api: GetStatsTopNodes failed", "component", "api", "error", err)
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
@@ -236,7 +236,7 @@ func getStatsTopObservers(reader api.Reader) http.HandlerFunc {
 		}
 		observers, err := reader.GetStatsTopObservers(r.Context(), iatas, since, limit)
 		if err != nil {
-			log.Printf("api: GetStatsTopObservers failed: %v", err)
+			slog.Error("api: GetStatsTopObservers failed", "component", "api", "error", err)
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
@@ -284,7 +284,7 @@ func getStatsTopAdvertisers(reader api.Reader) http.HandlerFunc {
 		}
 		advertisers, err := reader.GetStatsTopAdvertisers(r.Context(), iatas, since, limit)
 		if err != nil {
-			log.Printf("api: GetStatsTopAdvertisers failed: %v", err)
+			slog.Error("api: GetStatsTopAdvertisers failed", "component", "api", "error", err)
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
@@ -322,7 +322,7 @@ func getStatsClockDrift(reader api.Reader) http.HandlerFunc {
 		}
 		entries, err := reader.GetStatsClockDrift(r.Context(), iatas, limit)
 		if err != nil {
-			log.Printf("api: GetStatsClockDrift failed: %v", err)
+			slog.Error("api: GetStatsClockDrift failed", "component", "api", "error", err)
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
@@ -370,7 +370,7 @@ func getStatsTopTalkers(reader api.Reader) http.HandlerFunc {
 		}
 		talkers, err := reader.GetStatsTopTalkers(r.Context(), iatas, since, limit)
 		if err != nil {
-			log.Printf("api: GetStatsTopTalkers failed: %v", err)
+			slog.Error("api: GetStatsTopTalkers failed", "component", "api", "error", err)
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
