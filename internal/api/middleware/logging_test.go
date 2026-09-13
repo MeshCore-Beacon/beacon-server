@@ -84,3 +84,60 @@ func TestRequestLogging(t *testing.T) {
 		})
 	}
 }
+
+func TestRequestLogInputBoundary(t *testing.T) {
+	for _, format := range []string{"text", "json"} {
+		for _, path := range []string{"/items/private-path", "/unmatched-private-path%0D%0Aforged"} {
+			t.Run(format+path, func(t *testing.T) {
+				var out bytes.Buffer
+				previous, writer, flags := slog.Default(), log.Writer(), log.Flags()
+				var handler slog.Handler = slog.NewTextHandler(&out, nil)
+				if format == "json" {
+					handler = slog.NewJSONHandler(&out, nil)
+				}
+				slog.SetDefault(slog.New(handler))
+				t.Cleanup(func() { slog.SetDefault(previous); log.SetOutput(writer); log.SetFlags(flags) })
+				r := chi.NewRouter()
+				r.Use(chimw.RequestID, RequestLogger)
+				r.Get("/items/{id}", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })
+				req := httptest.NewRequest(http.MethodGet, path+"?token=private-token", nil)
+				req.RemoteAddr = "192.0.2.1:1234"
+				req.Header.Set("X-Request-ID", "client\r\nforged")
+				w := httptest.NewRecorder()
+				r.ServeHTTP(w, req)
+				wantPath, wantStatus := "/items/{id}", 200
+				if strings.HasPrefix(path, "/unmatched") {
+					wantPath, wantStatus = "unmatched", 404
+				}
+				if w.Code != wantStatus || strings.Count(out.String(), "\n") != 1 || strings.ContainsAny(strings.TrimSuffix(out.String(), "\n"), "\r\n") {
+					t.Fatalf("status or log boundary changed: %d %q", w.Code, out.String())
+				}
+				if strings.Contains(out.String(), "private-path") || strings.Contains(out.String(), "private-token") {
+					t.Fatal("raw path or query was retained")
+				}
+				if format == "json" {
+					var record map[string]any
+					if err := json.Unmarshal(out.Bytes(), &record); err != nil {
+						t.Fatal(err)
+					}
+					if record["path"] != wantPath || record["request_id"] != "clientforged" || record["client_ip"] != "192.0.2.1:1234" {
+						t.Fatalf("unexpected request fields: %v", record)
+					}
+				} else if !strings.Contains(out.String(), "path="+wantPath) || !strings.Contains(out.String(), "request_id=clientforged") {
+					t.Fatalf("unexpected text fields: %s", out.String())
+				}
+			})
+		}
+	}
+}
+
+func TestSingleLineLogValue(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{"", ""}, {"GET", "GET"}, {"[2001:db8::1]:80", "[2001:db8::1]:80"},
+		{"client\r\nentry\n", "cliententry"}, {"café", "café"},
+	} {
+		if got := singleLineLogValue(tc.input); got != tc.want {
+			t.Errorf("got %q, want %q", got, tc.want)
+		}
+	}
+}
