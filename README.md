@@ -28,8 +28,8 @@ in PostgreSQL, and streams live events to WebSocket clients.
 For deployment instructions including the frontend app, see the deployment docs.
 
 For a bounded private database and saved-config bundle, see
-[backup export](docs/backup-export.md). This is a standalone export tool; the
-backup web interface and import workflow are separate follow-ups.
+[backup export](docs/backup-export.md). A standalone export tool is available; the
+protected download API is opt-in; browser login and import remain separate follow-ups.
 
 ---
 

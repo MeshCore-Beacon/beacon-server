@@ -1525,6 +1525,63 @@ paths:
       summary: Get an operator account
       tags:
       - Admin
+  /admin/backup:
+    get:
+      description: Opt-in operator export. Returns only a completed bundle; one export/transfer
+        at a time. Contains secrets. Login sessions, external deployment files and
+        import are outside this endpoint.
+      produces:
+      - application/gzip
+      responses:
+        "200":
+          description: OK
+          headers:
+            Content-Disposition:
+              description: attachment; filename=beacon-backup.tar.gz
+              type: string
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "504":
+          description: Gateway Timeout
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - AdminKey: []
+      summary: Download a private database and saved-config backup
+      tags:
+      - Admin
   /admin/config:
     get:
       description: Returns current CORS options, auth configuration status and configured

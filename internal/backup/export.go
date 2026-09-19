@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -36,6 +37,9 @@ type Options struct {
 	MaxBytes   int64 // Maximum uncompressed database dump size.
 	Timeout    time.Duration
 	Version    string
+	// ConnectionService overrides PG* using a private service file. Construct it
+	// with ConnectionService at startup; empty retains the standalone PG* mode.
+	ConnectionService string
 }
 
 // Manifest describes format 1; hashes cover the uncompressed archive members.
@@ -72,7 +76,7 @@ func export(ctx context.Context, opts Options, command func(context.Context) *ex
 	if opts.ConfigPath == "" || opts.OutputPath == "" || opts.MaxBytes <= 0 || opts.MaxBytes > 1<<40 || opts.Timeout <= 0 {
 		return errors.New("config, output, positive timeout and max-bytes (at most 1 TiB) are required")
 	}
-	if os.Getenv("PGDATABASE") == "" {
+	if opts.ConnectionService == "" && os.Getenv("PGDATABASE") == "" {
 		return errors.New("PGDATABASE must explicitly name the database; POSTGRES_DSN is not used")
 	}
 	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
@@ -104,6 +108,21 @@ func export(ctx context.Context, opts Options, command func(context.Context) *ex
 	hash := sha256.New()
 	output := &limitedWriter{ctx: ctx, cancel: cancel, dst: io.MultiWriter(dump, hash), remaining: opts.MaxBytes}
 	cmd := command(ctx)
+	if opts.ConnectionService != "" {
+		servicePath := filepath.Join(temp, "pg_service.conf")
+		if err := os.WriteFile(servicePath, []byte(opts.ConnectionService), 0600); err != nil {
+			return errors.New("cannot prepare private backup connection")
+		}
+		// Do not let unrelated PG* values redirect the client, and never mutate
+		// the Beacon process environment while another request is running.
+		cmd.Env = nil
+		for _, entry := range os.Environ() {
+			if !strings.HasPrefix(strings.ToUpper(entry), "PG") {
+				cmd.Env = append(cmd.Env, entry)
+			}
+		}
+		cmd.Env = append(cmd.Env, "PGSERVICEFILE="+servicePath, "PGSERVICE=beacon_backup")
+	}
 	cmd.Stdout, cmd.Stderr = output, io.Discard
 	cmd.WaitDelay = time.Second
 	err = cmd.Run()
