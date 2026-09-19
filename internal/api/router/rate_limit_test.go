@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -16,8 +17,6 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
-
-	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/config"
 )
@@ -53,9 +52,9 @@ func rateRequest(handler http.Handler, path, peer, headerIP string) *httptest.Re
 
 func TestAPIRateLimitContractAndLogging(t *testing.T) {
 	var logs bytes.Buffer
-	previous := middleware.DefaultLogger
-	middleware.DefaultLogger = middleware.RequestLogger(&middleware.DefaultLogFormatter{Logger: log.New(&logs, "", 0), NoColor: true})
-	t.Cleanup(func() { middleware.DefaultLogger = previous })
+	previous, writer, flags := slog.Default(), log.Writer(), log.Flags()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous); log.SetOutput(writer); log.SetFlags(flags) })
 	proxy := config.ServerConfig{TrustedProxies: []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}}
 	handler := New(nil, nil, nil, 5, config.CORSConfig{}, proxy, config.AuthConfig{}, config.ResolvedRateLimitConfig{Enabled: true, RequestsPerMinute: 2, Burst: 10})
 	for _, path := range []string{"/api/v1/brokers", "/api/v1/packets?limit=0"} {
@@ -77,8 +76,21 @@ func TestAPIRateLimitContractAndLogging(t *testing.T) {
 	if response.Header().Get("Content-Type") != "application/json" || response.Header().Get("Retry-After") != "60" || !strings.EqualFold(response.Header().Get("Access-Control-Expose-Headers"), "Retry-After") || response.Header().Get("Access-Control-Allow-Origin") == "" {
 		t.Fatalf("missing JSON/backoff/CORS headers: %v", response.Header())
 	}
-	if strings.Count(logs.String(), " - 429 ") != 1 || !strings.Contains(logs.String(), "from 198.51.100.25 - 429 ") || !strings.Contains(logs.String(), "/api/v1/brokers") {
-		t.Fatalf("expected one rejection log with resolved client and path: %s", logs.String())
+	rejections := 0
+	for _, line := range bytes.Split(bytes.TrimSpace(logs.Bytes()), []byte("\n")) {
+		var record map[string]any
+		if err := json.Unmarshal(line, &record); err != nil {
+			t.Fatal(err)
+		}
+		if record["status"] == float64(http.StatusTooManyRequests) {
+			rejections++
+			if record["level"] != "WARN" || record["client_ip"] != "198.51.100.25" || record["path"] != "/api/v1/*" {
+				t.Fatalf("wrong rejection log: %v", record)
+			}
+		}
+	}
+	if rejections != 1 {
+		t.Fatalf("got %d rejection logs, want 1", rejections)
 	}
 }
 
