@@ -40,7 +40,7 @@ func TestConnectionServiceRejectsAmbiguousSettings(t *testing.T) {
 			t.Fatal("unsupported connection must fail without echoing input")
 		}
 	}
-	for _, env := range []string{"PGSERVICE=other", "PGSERVICEFILE=/private", "PGSSLNEGOTIATION=direct", "PGMINPROTOCOLVERSION=3.0", "PGTZ=UTC"} {
+	for _, env := range []string{"PGSERVICE=other", "PGSERVICEFILE=/private", "PGSSLNEGOTIATION=direct", "PGMINPROTOCOLVERSION=3.0", "PGTZ=UTC", "PGPORT=5432,5433"} {
 		if _, err := connectionService("postgres://user@host/db", []string{env}); err == nil {
 			t.Fatal("unsupported ambient connection settings accepted")
 		}
