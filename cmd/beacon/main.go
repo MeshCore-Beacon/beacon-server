@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strconv"
 	"syscall"
@@ -18,8 +19,10 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/db"
 	_ "github.com/MeshCore-Beacon/beacon-server/docs"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api/handlers"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api/router"
 	"github.com/MeshCore-Beacon/beacon-server/internal/background"
+	"github.com/MeshCore-Beacon/beacon-server/internal/backup"
 	"github.com/MeshCore-Beacon/beacon-server/internal/cache"
 	"github.com/MeshCore-Beacon/beacon-server/internal/config"
 	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
@@ -124,7 +127,19 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pool, err := pgxpool.New(ctx, getEnv("POSTGRES_DSN"))
+	dsn := getEnv("POSTGRES_DSN")
+	var backupOpts backup.Options
+	if cfg.Backup.Enabled {
+		service, connectionErr := backup.ConnectionService(dsn)
+		_, clientErr := exec.LookPath("pg_dump")
+		if cfg.Auth.APIKey == "" || connectionErr != nil || clientErr != nil {
+			slog.Error("backup download requires an admin key, a supported PostgreSQL URL and pg_dump in this runtime", "component", "startup")
+			os.Exit(1)
+		}
+		backupOpts = backup.Options{ConfigPath: configPath, MaxBytes: backup.DefaultMaxBytes,
+			Timeout: backup.DefaultTimeout, Version: version, ConnectionService: service}
+	}
+	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		// Parse errors can embed the complete DSN, including its password.
 		slog.Error("invalid PostgreSQL connection configuration; check POSTGRES_DSN", "component", "startup")
@@ -303,7 +318,15 @@ func main() {
 	// Wrap after wiring cache invalidators and cleanup callbacks to the actual
 	// CachedReader. Only response projections receive the geographic annotation.
 	reader = api.WithLocalBorders(reader, localBorders)
-	r := router.New(h, reader, []*ingest.Worker{broker1, broker2}, resolved.MaxConnsPerIP, resolved.MaxConnectsPerMinute, cfg.CORS, cfg.Server, cfg.Auth, resolved.RateLimit)
+	r := router.New(h, reader, []*ingest.Worker{broker1, broker2}, router.Options{
+		MaxConnsPerIP:        resolved.MaxConnsPerIP,
+		MaxConnectsPerMinute: resolved.MaxConnectsPerMinute,
+		CORS:                 cfg.CORS, Server: cfg.Server, Auth: cfg.Auth, RateLimit: resolved.RateLimit,
+		AdminRoutes: map[string]http.Handler{
+			"/accounts": handlers.AccountsRouter(store),
+			"/backup":   handlers.BackupRouter(backupOpts),
+		},
+	})
 
 	srv := &http.Server{
 		Addr:     addr,

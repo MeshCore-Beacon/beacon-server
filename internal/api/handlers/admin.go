@@ -17,10 +17,13 @@ import (
 
 // AdminRouter mounts operator endpoints. Its caller must wrap the
 // entire subrouter with BearerAuth, including unknown paths and methods.
-func AdminRouter(runtime *mw.RuntimeConfig) http.Handler {
+func AdminRouter(runtime *mw.RuntimeConfig, routes map[string]http.Handler) http.Handler {
 	r := chi.NewRouter()
 	r.Get("/config", getAdminConfig(runtime))
 	r.Put("/config", updateAdminConfig(runtime))
+	for path, handler := range routes {
+		r.Mount(path, handler)
+	}
 	return r
 }
 

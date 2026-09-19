@@ -100,6 +100,24 @@ sqlc generate
 
 ## API changes
 
+### Router configuration and optional admin endpoints
+
+Keep `router.New`'s signature stable. Pass startup settings by name in
+`router.Options`; a new optional setting must not require unrelated callers and
+tests to supply another positional argument.
+
+An optional admin feature owns its subrouter, dependencies and HTTP methods.
+Register it once through `Options.AdminRoutes` in the startup wiring, using a
+literal path such as `/accounts`. The parent admin router applies bearer
+authentication to the entire subtree; the feature must not mount itself beside
+that boundary. `/config` remains owned by the shared admin router. No global
+registration or `init` side effects are needed.
+
+When concurrent PRs touch the same startup wiring, stack them in an explicit
+merge order and link each feature-only comparison. Rebase the stack together
+after prerequisite merges, regenerate Swagger rather than hand-merging it, and
+compile the combined result even when GitHub reports it as mergeable.
+
 Any new or modified REST endpoint must have swagger annotations and regenerated
 docs:
 

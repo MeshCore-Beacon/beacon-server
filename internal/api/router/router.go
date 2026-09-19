@@ -15,7 +15,6 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api/handlers"
 	mw "github.com/MeshCore-Beacon/beacon-server/internal/api/middleware"
-	"github.com/MeshCore-Beacon/beacon-server/internal/config"
 	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ws"
@@ -38,35 +37,35 @@ import (
 //	  /stats           → stats subrouter
 //
 // Admin endpoints require a configured bearer key.
-func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP, maxConnectsPerMinute int, corsCfg config.CORSConfig, serverCfg config.ServerConfig, authCfg config.AuthConfig, rateLimitCfg config.ResolvedRateLimitConfig) http.Handler {
+func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) http.Handler {
 	r := chi.NewRouter()
 
 	// ── CORS ─────────────────────────────────────────────────────────────────
-	allowedOrigins := corsCfg.AllowedOrigins
+	allowedOrigins := opts.CORS.AllowedOrigins
 	if len(allowedOrigins) == 0 {
 		allowedOrigins = []string{"*"}
 	}
-	allowedMethods := corsCfg.AllowedMethods
+	allowedMethods := opts.CORS.AllowedMethods
 	if len(allowedMethods) == 0 {
 		allowedMethods = []string{"GET", "HEAD", "OPTIONS"}
 	}
-	allowedHeaders := corsCfg.AllowedHeaders
+	allowedHeaders := opts.CORS.AllowedHeaders
 	if len(allowedHeaders) == 0 {
 		allowedHeaders = []string{"Accept", "Authorization", "Content-Type"}
 	}
-	maxAge := corsCfg.MaxAge
+	maxAge := opts.CORS.MaxAge
 	if maxAge == 0 {
 		maxAge = 300
 	}
 	// Capture only values used by this router. Do not retain Config, credentials
 	// or caller-owned slices in the admin response.
 	adminConfig := api.AdminConfig{
-		Auth: api.AdminAuthConfig{Configured: authCfg.APIKey != ""},
+		Auth: api.AdminAuthConfig{Configured: opts.Auth.APIKey != ""},
 		CORS: api.AdminCORSConfig{
 			AllowedOrigins:   append([]string{}, allowedOrigins...),
 			AllowedMethods:   append([]string{}, allowedMethods...),
 			AllowedHeaders:   append([]string{}, allowedHeaders...),
-			AllowCredentials: corsCfg.AllowCredentials,
+			AllowCredentials: opts.CORS.AllowCredentials,
 			MaxAge:           maxAge,
 		},
 		Ingest: api.AdminIngestConfig{BrokerCount: len(workers)},
@@ -76,7 +75,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP,
 
 	// ── Global middleware ────────────────────────────────────────────────────
 	r.Use(middleware.RequestID)
-	r.Use(mw.TrustedProxyIP(serverCfg.TrustedProxies))
+	r.Use(mw.TrustedProxyIP(opts.Server.TrustedProxies))
 	r.Use(mw.RequestLogger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.CleanPath)
@@ -92,11 +91,11 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP,
 	))
 
 	// ── WebSocket ────────────────────────────────────────────────────────────
-	r.Get("/ws", ws.Handler(h, reader, maxConnsPerIP, maxConnectsPerMinute))
+	r.Get("/ws", ws.Handler(h, reader, opts.MaxConnsPerIP, opts.MaxConnectsPerMinute))
 
 	// ── Public REST API (v1) ─────────────────────────────────────────────────
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(mw.RateLimit(rateLimitCfg))
+		r.Use(mw.RateLimit(opts.RateLimit))
 		// Public group — no authentication required.
 		r.Group(func(r chi.Router) {
 			r.Mount("/packets", handlers.PacketsRouter(reader))
@@ -114,7 +113,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, maxConnsPerIP,
 		})
 
 		// Protect the entire subtree, including its root and unknown paths.
-		r.Mount("/admin", mw.BearerAuth(authCfg.APIKey, handlers.AdminRouter(runtimeConfig)))
+		r.Mount("/admin", mw.BearerAuth(opts.Auth.APIKey, handlers.AdminRouter(runtimeConfig, opts.AdminRoutes)))
 	})
 
 	return r

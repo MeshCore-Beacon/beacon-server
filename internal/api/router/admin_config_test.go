@@ -32,7 +32,7 @@ func TestAdminConfig(t *testing.T) {
 			want = map[string]any{"allowed_origins": []any{"https://example.test"}, "allowed_methods": []any{"GET"},
 				"allowed_headers": []any{"Authorization", "X-Operator"}, "allow_credentials": true, "max_age": float64(600)}
 		}
-		handler := New(nil, nil, []*ingest.Worker{{}, {}}, 5, 1000, cfg, config.ServerConfig{}, config.AuthConfig{APIKey: key}, config.ResolvedRateLimitConfig{})
+		handler := New(nil, nil, []*ingest.Worker{{}, {}}, Options{MaxConnsPerIP: 5, MaxConnectsPerMinute: 1000, CORS: cfg, Auth: config.AuthConfig{APIKey: key}})
 		if custom {
 			cfg.AllowedOrigins[0] = "https://changed.test"
 			cfg.AllowedMethods[0] = "DELETE"

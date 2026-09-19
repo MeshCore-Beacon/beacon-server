@@ -9,7 +9,8 @@ COPY . .
 RUN go build -o beacon ./cmd/beacon
 
 FROM alpine:3.19
-RUN apk add --no-cache ca-certificates tzdata
+ARG POSTGRES_CLIENT_MAJOR=16
+RUN apk add --no-cache ca-certificates tzdata postgresql${POSTGRES_CLIENT_MAJOR}-client
 WORKDIR /app
 COPY --from=builder /app/beacon .
 CMD ["./beacon"]
