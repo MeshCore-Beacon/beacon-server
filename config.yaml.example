@@ -145,6 +145,9 @@ websocket:
 
 # Node staleness, deletion, and clock-drift thresholds.
 #nodes:
+#  mark_foreign: false           # opt in to possiblyForeign on repeater nodes
+#                                # uses the union of configured iatas.*.borderFile polygons;
+#                                # requires at least one valid border; no packet filtering
 #  stale_threshold: 24h          # default: 24h
 #  delete_after: 720h            # default: 30 days, same default as packets.retention
 #  clock_drift_threshold: 5m     # default: 5m

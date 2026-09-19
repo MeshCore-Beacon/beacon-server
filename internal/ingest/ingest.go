@@ -50,6 +50,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/MeshCore-Beacon/beacon-server/internal/borders"
 	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
 	"github.com/MeshCore-Beacon/beacon-server/internal/keystore"
 	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
@@ -57,6 +58,8 @@ import (
 
 // Config holds the connection parameters for one broker.
 type Config struct {
+	// LocalBorders is the same immutable classifier used by node API reads.
+	LocalBorders *borders.Local
 	// BrokerName is a short human-readable label ("mqtt1", "mqtt2") used in
 	// log messages and stored in packet_observations.source_broker.
 	BrokerName string

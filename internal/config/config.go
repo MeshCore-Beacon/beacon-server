@@ -259,6 +259,9 @@ type RoutesConfig struct {
 
 // NodesConfig controls node-derived signal thresholds.
 type NodesConfig struct {
+	// MarkForeign annotates repeaters outside the union of configured IATA border
+	// files. Disabled by default; enabling it requires at least one usable border.
+	MarkForeign bool `yaml:"mark_foreign"`
 	// ClockDriftThreshold is the |device clock - server clock| magnitude, measured from a
 	// repeater/room server's ADVERT timestamp, above which the node API reports
 	// clockOutOfSync=true for that node. Defaults to 5m if not set.

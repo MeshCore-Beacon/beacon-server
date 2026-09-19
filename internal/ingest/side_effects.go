@@ -61,6 +61,9 @@ type nodeUpdateEvent struct {
 	IATAs        []api.NodeIATA `json:"iatas"`
 	DefaultScope *string        `json:"defaultScope,omitempty"`
 	Radio        *string        `json:"radio,omitempty"`
+	// Omission retains the previous classification (no advertised position).
+	// The outer pointer allows explicit null to clear an unknown/reset position.
+	PossiblyForeign **bool `json:"possiblyForeign,omitempty"`
 }
 
 // handlePayloadTypeSideEffects runs payload-type-specific processing after a
@@ -172,6 +175,10 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 			IATAs:        []api.NodeIATA{{IATA: iata, LastHeard: time.Now().UnixMilli()}},
 			DefaultScope: defaultScope,
 			Radio:        radioStr,
+		}
+		if w.cfg.LocalBorders != nil && (lat != nil || advert.Type() != meshcore.AdvertTypeRepeater) {
+			foreign := w.cfg.LocalBorders.PossiblyForeign(int16(advert.Type()), lat, lon)
+			evt.PossiblyForeign = &foreign
 		}
 		w.broadcast(hub.EventNodeUpdate, iata, meshcore.PayloadTypeAdvert, "", evt)
 		return

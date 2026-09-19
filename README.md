@@ -228,6 +228,7 @@ websocket:
 
 # Node staleness, deletion, and clock-drift thresholds.
 nodes:
+  mark_foreign: false # optional indication for repeaters outside configured IATA borders
   stale_threshold: 24h # mark a node "stale" in the API after this long unseen (default: 24h)
   delete_after: 720h # delete a node entirely after this long unseen (default: 30 days, same default as packets.retention)
   clock_drift_threshold: 5m # |device clock - server clock| above which clockOutOfSync=true for a repeater/room server (default: 5m)
@@ -270,6 +271,33 @@ names, coordinates, and optional region borders. Regions and channel keys
 must be defined here — they are not auto-created.
 
 ---
+
+### Foreign repeater indication
+
+Set `nodes.mark_foreign: true` to expose `possiblyForeign` on repeater nodes.
+The local operating area is the union of **all configured**
+`iatas.<code>.borderFile` GeoJSON Polygon/MultiPolygon features. IATAs without
+border files do not add an area; airport coordinates and the current API region
+filter are not boundaries. Enabling this with no borders, missing files or
+invalid geometry fails startup. Border changes require a restart.
+
+Inside any polygon (including its edges) means `false`; outside the entire union
+means `true`. Hole interiors are outside; hole edges are local. Other node roles,
+missing/invalid positions and the 0/0 location reset have no classification.
+This is a hint based on reported position, not proof of a repeater's origin.
+Packet ingestion, heard-in IATAs and route matching remain unchanged.
+
+Node list/detail reads apply the current geometry after cache reads, so existing
+historical nodes need no backfill. A `nodeUpdate` includes `possiblyForeign`
+when its advert provides a position: a boolean for known positions, `null` to
+clear an unknown/reset position. Omission retains the previous value when a
+repeater's advert omits its position. A change to another role also sends `null`.
+The field is omitted everywhere when the feature is disabled (the default).
+
+Use longitude/latitude coordinate order and split antimeridian-crossing borders
+into MultiPolygons as described in [RFC 7946 section 3.1.9](https://www.rfc-editor.org/rfc/rfc7946#section-3.1.9).
+Classification rejects unsplit edges spanning more than 180 degrees rather than
+silently treating them as the complementary global area.
 
 ## Authentication
 

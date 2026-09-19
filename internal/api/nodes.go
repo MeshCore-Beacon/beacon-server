@@ -53,6 +53,9 @@ type NodeSummary struct {
 	// Applies to every node type, unlike ClockDriftSeconds/ClockOutOfSync on Node, which
 	// are repeater/room-server only.
 	Stale bool `json:"stale"`
+	// PossiblyForeign compares a repeater's stored position with this server's
+	// configured IATA border union. Omitted when disabled, unknown, or not repeater.
+	PossiblyForeign *bool `json:"possiblyForeign,omitempty"`
 }
 
 // Node is the full node representation including firmware capability flags,

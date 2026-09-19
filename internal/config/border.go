@@ -30,6 +30,9 @@ func ValidateBorder(raw []byte) (json.RawMessage, error) {
 	if feat.Type != "Feature" {
 		return nil, fmt.Errorf(`top-level "type" must be "Feature", got %q`, feat.Type)
 	}
+	if feat.Geometry == nil {
+		return nil, fmt.Errorf("Feature must have a Polygon or MultiPolygon geometry")
+	}
 	switch geom := feat.Geometry.(type) {
 	case orb.Polygon:
 		if err := validateBorderPolygon(geom); err != nil {

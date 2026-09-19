@@ -108,6 +108,11 @@ func main() {
 	}
 
 	resolved := config.Resolve(cfg)
+	localBorders, err := config.LoadLocalBorders(cfg)
+	if err != nil {
+		slog.Error("invalid local border configuration", "component", "startup", "error", err)
+		os.Exit(1)
+	}
 
 	slog.Info(fmt.Sprintf("config: loaded — %s", resolved), "component", "startup")
 
@@ -242,6 +247,7 @@ func main() {
 	broker1 := ingest.New(
 		ingest.Config{
 			BrokerName:          "mqtt1",
+			LocalBorders:        localBorders,
 			URL:                 getEnv("MQTT_BROKER_1_URL"),
 			Username:            getEnv("MQTT_BROKER_1_USERNAME"),
 			Password:            getEnv("MQTT_BROKER_1_PASSWORD"),
@@ -257,6 +263,7 @@ func main() {
 	broker2 := ingest.New(
 		ingest.Config{
 			BrokerName:          "mqtt2",
+			LocalBorders:        localBorders,
 			URL:                 getEnv("MQTT_BROKER_2_URL"),
 			Username:            getEnv("MQTT_BROKER_2_USERNAME"),
 			Password:            getEnv("MQTT_BROKER_2_PASSWORD"),
@@ -293,6 +300,9 @@ func main() {
 	go scheduler.Start(ctx)
 
 	// ── HTTP server ──────────────────────────────────────────────────────────
+	// Wrap after wiring cache invalidators and cleanup callbacks to the actual
+	// CachedReader. Only response projections receive the geographic annotation.
+	reader = api.WithLocalBorders(reader, localBorders)
 	r := router.New(h, reader, []*ingest.Worker{broker1, broker2}, resolved.MaxConnsPerIP, resolved.MaxConnectsPerMinute, cfg.CORS, cfg.Server, cfg.Auth, resolved.RateLimit)
 
 	srv := &http.Server{
