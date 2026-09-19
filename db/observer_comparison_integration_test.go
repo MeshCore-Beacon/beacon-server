@@ -56,7 +56,9 @@ FROM (VALUES
  (6,4,1,'YVR',-1,'a'),(7,4,2,'YVR',5,'a'),(8,5,1,'YVR',0,'a'),
  (9,6,2,'YVR',10,'a'),(10,7,1,'YVR',1,'a'),(11,7,2,'YVR',2,'a'),
  (12,8,2,'YVR',1,'a'),(13,9,3,'YVR',1,'a'),
- (14,10,1,'YVR',3,'a'),(15,10,2,'YVR',9,'a')) v(id,packet,observer,iata,second,broker);
+ (14,10,1,'YVR',3,'a'),(15,10,2,'YVR',9,'a')) v(id,packet,observer,iata,second,broker)
+ORDER BY id
+ON CONFLICT (packet_hash,observer_id) DO NOTHING;
 `)
 	if err != nil {
 		t.Fatal(err)
