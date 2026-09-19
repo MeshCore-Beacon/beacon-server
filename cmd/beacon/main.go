@@ -303,7 +303,11 @@ func main() {
 	// Wrap after wiring cache invalidators and cleanup callbacks to the actual
 	// CachedReader. Only response projections receive the geographic annotation.
 	reader = api.WithLocalBorders(reader, localBorders)
-	r := router.New(h, reader, []*ingest.Worker{broker1, broker2}, resolved.MaxConnsPerIP, resolved.MaxConnectsPerMinute, cfg.CORS, cfg.Server, cfg.Auth, resolved.RateLimit)
+	r := router.New(h, reader, []*ingest.Worker{broker1, broker2}, router.Options{
+		MaxConnsPerIP:        resolved.MaxConnsPerIP,
+		MaxConnectsPerMinute: resolved.MaxConnectsPerMinute,
+		CORS:                 cfg.CORS, Server: cfg.Server, Auth: cfg.Auth, RateLimit: resolved.RateLimit,
+	})
 
 	srv := &http.Server{
 		Addr:     addr,

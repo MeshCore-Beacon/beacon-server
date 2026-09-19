@@ -16,7 +16,7 @@ import (
 
 func TestRuntimeConfigUpdate(t *testing.T) {
 	newRouter := func() http.Handler {
-		return New(nil, nil, nil, 5, 1000, config.CORSConfig{AllowedOrigins: []string{"https://before.test"}}, config.ServerConfig{}, config.AuthConfig{APIKey: "test-key"}, config.ResolvedRateLimitConfig{})
+		return New(nil, nil, nil, Options{MaxConnsPerIP: 5, MaxConnectsPerMinute: 1000, CORS: config.CORSConfig{AllowedOrigins: []string{"https://before.test"}}, Auth: config.AuthConfig{APIKey: "test-key"}})
 	}
 	handler := newRouter()
 	request := func(method, path, body, token, media, origin string) *httptest.ResponseRecorder {
