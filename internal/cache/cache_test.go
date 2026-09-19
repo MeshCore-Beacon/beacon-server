@@ -37,6 +37,23 @@ func (s *stubReader) ListIATAs(_ context.Context) ([]api.IATA, error) {
 }
 
 // implement remaining api.Reader methods as no-ops
+func (s *stubReader) GetObserverComparison(_ context.Context, _, _ uuid.UUID, _, _ time.Time, _ []string) (*api.ObserverComparison, error) {
+	s.calls++
+	return &api.ObserverComparison{TotalPackets: int64(s.calls)}, s.err
+}
+
+func TestObserverComparisonPassThrough(t *testing.T) {
+	inner := &stubReader{}
+	reader := &CachedReader{inner: inner}
+	a, b, since, until := uuid.New(), uuid.New(), time.Now().Add(-time.Hour), time.Now()
+	for i := int64(1); i <= 2; i++ {
+		got, err := reader.GetObserverComparison(context.Background(), a, b, since, until, nil)
+		if err != nil || got.TotalPackets != i {
+			t.Fatalf("comparison unexpectedly cached: %+v, %v", got, err)
+		}
+	}
+}
+
 func (s *stubReader) GetIATA(_ context.Context, _ string) (*api.IATA, error) { return nil, nil }
 
 func (s *stubReader) GetIATABorder(_ context.Context, _ string) (json.RawMessage, error) {

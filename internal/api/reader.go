@@ -148,6 +148,10 @@ type Reader interface {
 	// Pass empty string for preset or nil iatas to skip those filters.
 	GetRadioPresets(ctx context.Context, preset string, iatas []string) ([]RadioPreset, error)
 
+	// GetObserverComparison compares distinct flood packets reported by two observers
+	// during [since, until), optionally restricted to reception IATAs.
+	GetObserverComparison(ctx context.Context, observerA, observerB uuid.UUID, since, until time.Time, iatas []string) (*ObserverComparison, error)
+
 	// GetStatsOverview returns top-line network figures for the last 24 hours.
 	// Pass nil iatas to return stats across all IATAs.
 	GetStatsOverview(ctx context.Context, iatas []string) (*StatsOverview, error)

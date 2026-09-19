@@ -141,6 +141,12 @@ func (cr *CachedReader) GetScopeNames(ctx context.Context) ([]string, error) {
 	})
 }
 
+// GetObserverComparison passes arbitrary observer/time combinations through;
+// these explicit queries should not fill the shared statistics cache.
+func (cr *CachedReader) GetObserverComparison(ctx context.Context, a, b uuid.UUID, since, until time.Time, iatas []string) (*api.ObserverComparison, error) {
+	return cr.inner.GetObserverComparison(ctx, a, b, since, until, iatas)
+}
+
 // GetScopeStats implements [api.Reader].
 func (cr *CachedReader) GetScopeStats(ctx context.Context, iatas []string) ([]api.ScopeStats, error) {
 	segment := "all"

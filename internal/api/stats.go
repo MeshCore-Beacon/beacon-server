@@ -5,6 +5,20 @@ package api
 
 import "github.com/google/uuid"
 
+// ObserverComparison counts distinct flood packet hashes in [Since, Until).
+// The three groups partition TotalPackets, the union heard by either observer.
+// Counts describe retained reported receptions, not radio packet loss.
+type ObserverComparison struct {
+	ObserverA    uuid.UUID `json:"observerA"`
+	ObserverB    uuid.UUID `json:"observerB"`
+	Since        int64     `json:"since"` // inclusive, epoch milliseconds
+	Until        int64     `json:"until"` // exclusive, epoch milliseconds
+	TotalPackets int64     `json:"totalPackets"`
+	OnlyA        int64     `json:"onlyA"`
+	OnlyB        int64     `json:"onlyB"`
+	Both         int64     `json:"both"`
+}
+
 // RadioPreset represents a unique radio configuration observed in a given IATA,
 // aggregated from both observer status messages and node adverts.
 type RadioPreset struct {

@@ -1831,6 +1831,98 @@
                 }
             }
         },
+        "/stats/observer-comparison": {
+            "get": {
+                "description": "Counts distinct retained packet hashes with route type 0 or 1, using reception time in [since, until). onlyA, onlyB and both partition totalPackets (the union). Repeated receptions count once. These are reported receptions, not a measure of radio packet loss or continuous observer coverage.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Stats"
+                ],
+                "summary": "Compare flood packets reported by two observers",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "First observer UUID",
+                        "name": "observerA",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Second, distinct observer UUID",
+                        "name": "observerB",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Inclusive start, epoch milliseconds (0 through 253402300799999)",
+                        "name": "since",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Exclusive end, epoch milliseconds; later than since",
+                        "name": "until",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated reception IATA codes",
+                        "name": "iatas",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Region ID, expands to member IATAs",
+                        "name": "regionId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Region slug, expands to member IATAs",
+                        "name": "region",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverComparison"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
         "/stats/overview": {
             "get": {
                 "produces": [
@@ -3177,6 +3269,37 @@
                 "name": {
                     "description": "broker name e.g. \"mqtt1\"",
                     "type": "string"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverComparison": {
+            "type": "object",
+            "properties": {
+                "both": {
+                    "type": "integer"
+                },
+                "observerA": {
+                    "type": "string"
+                },
+                "observerB": {
+                    "type": "string"
+                },
+                "onlyA": {
+                    "type": "integer"
+                },
+                "onlyB": {
+                    "type": "integer"
+                },
+                "since": {
+                    "description": "inclusive, epoch milliseconds",
+                    "type": "integer"
+                },
+                "totalPackets": {
+                    "type": "integer"
+                },
+                "until": {
+                    "description": "exclusive, epoch milliseconds",
+                    "type": "integer"
                 }
             }
         },

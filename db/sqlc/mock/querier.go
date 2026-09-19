@@ -442,6 +442,21 @@ func (mr *MockQuerierMockRecorder) GetObserverByPubkey(ctx, publicKey any) *gomo
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetObserverByPubkey", reflect.TypeOf((*MockQuerier)(nil).GetObserverByPubkey), ctx, publicKey)
 }
 
+// GetObserverComparison mocks base method.
+func (m *MockQuerier) GetObserverComparison(ctx context.Context, arg db.GetObserverComparisonParams) (db.GetObserverComparisonRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetObserverComparison", ctx, arg)
+	ret0, _ := ret[0].(db.GetObserverComparisonRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetObserverComparison indicates an expected call of GetObserverComparison.
+func (mr *MockQuerierMockRecorder) GetObserverComparison(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetObserverComparison", reflect.TypeOf((*MockQuerier)(nil).GetObserverComparison), ctx, arg)
+}
+
 // GetObserverLastIATA mocks base method.
 func (m *MockQuerier) GetObserverLastIATA(ctx context.Context, observerID uuid.UUID) (string, error) {
 	m.ctrl.T.Helper()

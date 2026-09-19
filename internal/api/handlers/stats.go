@@ -30,6 +30,7 @@ func StatsRouter(reader api.Reader) http.Handler {
 	r := chi.NewRouter()
 	r.Get("/overview", getStatsOverview(reader))
 	r.Get("/observations", getStatsObservations(reader))
+	r.Get("/observer-comparison", getObserverComparison(reader))
 	r.Get("/payload-breakdown", getStatsPayloadBreakdown(reader))
 	r.Get("/top-nodes", getStatsTopNodes(reader))
 	r.Get("/top-observers", getStatsTopObservers(reader))
