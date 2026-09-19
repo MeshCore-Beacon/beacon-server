@@ -31,6 +31,55 @@ without publishing an output. Normal failure, timeout and handled interruption
 remove temporary files; a power loss or SIGKILL can leave a private
 `.beacon-backup-*` staging directory for the operator to inspect.
 
+## Protected download API
+
+Set `backup.enabled: true` in saved YAML and configure the existing admin bearer
+key to enable `GET /api/v1/admin/backup`. Supply the key only in the `Authorization:
+Bearer ...` header over HTTPS. No query parameters or request body are accepted.
+This is an operator API, not account login or a browser admin panel. Keep it off
+on public previews that do not need private exports.
+
+The server requires `pg_dump` on its own PATH when this option is enabled. The
+Docker image includes PostgreSQL 16's client by default; build argument
+`POSTGRES_CLIENT_MAJOR` selects another available Alpine package. Match the source
+database major version. A client on the host or in a different container is not
+sufficient. No Docker socket or host-command bridge is used.
+
+The download uses the startup `POSTGRES_DSN`, not the standalone export's ambient
+`PGDATABASE`. This first adapter supports a single-host `postgres://` or
+`postgresql://` URL with an explicit user and database. Passwords, IPv6 and URL
+escaping are supported. It copies TLS settings, `passfile`, `connect_timeout`,
+`application_name`, `target_session_attrs` and `options`; known `pool_*` controls
+are omitted from libpq. Supported PG environment defaults are captured at startup
+and URL values override them. Prefer explicit `sslmode=verify-full` and a trusted
+`sslrootcert` for remote databases; password-file/TLS paths must be readable in
+the same runtime. Their contents are not included in the archive.
+
+Keyword DSNs, service indirection, multiple hosts, duplicate/unknown query options,
+newer protocol negotiation settings and service-file values with line breaks or
+edge whitespace are rejected rather than silently changing targets or TLS policy.
+Ambient `PGSERVICE`, `PGSERVICEFILE`, `PGSSLNEGOTIATION`, `PGMINPROTOCOLVERSION`,
+`PGMAXPROTOCOLVERSION` and `PGTZ` are also unsupported for this adapter. The
+standalone command retains native PG* support for those deployments. Errors do
+not echo the DSN. Native connection settings live only in a 0600 service file in
+private staging; process arguments contain no connection string or credential,
+and no request changes Beacon's environment.
+
+Only one export or transfer is allowed at a time; another request receives 409.
+The existing ten-minute/1 GiB SQL/1 MiB YAML limits apply, and disconnecting
+cancels an in-progress export. The completed transfer has a ten-minute write
+deadline. Temporary files are removed after completion/failure/cancellation;
+abrupt process termination can leave private staging. Responses use `no-store`
+and a fixed attachment filename. A failed export returns an error without any
+partial archive. Authentication missing/invalid is 401, unconfigured access is
+503, invalid input is 400, export failure is 500 and timeout is 504.
+
+Provision a private writable temporary directory (`TMPDIR` on Unix) with space
+for roughly twice the SQL limit plus overhead. A small read-only-container tmpfs
+is insufficient for a large backup. Exports include saved YAML verbatim and may
+include keys/message data; the exclusions below still apply. This API does not
+implement archive upload, import/overwrite, schedules or remote storage.
+
 ## Format 1
 
 The tar contains exactly three regular files with fixed names:

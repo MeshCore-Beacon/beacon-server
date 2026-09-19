@@ -18,6 +18,7 @@ import (
 // Config is the top-level structure of the Beacon config file.
 type Config struct {
 	Auth        AuthConfig            `yaml:"auth"`
+	Backup      BackupConfig          `yaml:"backup"`
 	Log         LogConfig             `yaml:"log"`
 	Server      ServerConfig          `yaml:"server"`
 	IATAs       map[string]IATAConfig `yaml:"iatas"`
@@ -36,6 +37,11 @@ type Config struct {
 	Presence    PresenceConfig        `yaml:"presence"`
 	Nodes       NodesConfig           `yaml:"nodes"`
 	Observers   ObserversConfig       `yaml:"observers"`
+}
+
+// BackupConfig enables protected downloads. Disabled by default.
+type BackupConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 // AuthConfig holds the operator key for the protected admin subtree.

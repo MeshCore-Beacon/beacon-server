@@ -51,6 +51,7 @@ jobs:
         run: |
           CGO_ENABLED=0 go build -o "$RUNNER_TEMP/beacon-backup" ./cmd/beacon-backup
           CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/backup.test" ./internal/backup
+          CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/backup-http.test" ./internal/api/router
           docker run --rm --network host \
             -e PGHOST=127.0.0.1 -e PGUSER=postgres -e PGDATABASE=postgres \
             -e PGPASSWORD=backup-ci-only -e PGSSLMODE=disable \
@@ -58,6 +59,11 @@ jobs:
             -v "$RUNNER_TEMP/beacon-backup:/beacon-backup:ro" \
             -v "$RUNNER_TEMP/backup.test:/backup.test:ro" \
             postgres:16-alpine /backup.test -test.run '^TestExportPostgres$' -test.v
+          docker run --rm --network host \
+            -e PGHOST=127.0.0.1 -e PGUSER=postgres -e PGDATABASE=postgres \
+            -e PGPASSWORD=backup-ci-only -e PGSSLMODE=disable -e BEACON_BACKUP_TEST_POSTGRES=1 \
+            -v "$RUNNER_TEMP/backup-http.test:/backup-http.test:ro" \
+            postgres:16-alpine /backup-http.test -test.run '^TestBackupDownloadPostgres$' -test.v
 
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
