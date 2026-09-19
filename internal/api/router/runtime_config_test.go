@@ -80,6 +80,9 @@ func TestRuntimeConfigUpdate(t *testing.T) {
 	if request("OPTIONS", "/api/v1/brokers", "", "", "", "https://after.test").Header().Get("Access-Control-Allow-Origin") == "" {
 		t.Fatal("new origin blocked")
 	}
+	if exposed := request("GET", "/api/v1/brokers", "", "", "", "https://after.test").Header().Get("Access-Control-Expose-Headers"); !strings.EqualFold(exposed, "Retry-After") {
+		t.Fatalf("runtime update lost rate-limit backoff header: %q", exposed)
+	}
 	if request("GET", "/api/v1/brokers", "", "", "", "").Code != 200 {
 		t.Fatal("public reads blocked")
 	}
