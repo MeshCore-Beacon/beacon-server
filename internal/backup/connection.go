@@ -53,10 +53,10 @@ func connectionService(dsn string, environ []string) (string, error) {
 		}
 	}
 	if port := u.Port(); port != "" {
-		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
-			return "", invalid
-		}
 		settings["port"] = port
+	}
+	if port, err := strconv.Atoi(settings["port"]); err != nil || port < 1 || port > 65535 {
+		return "", invalid
 	}
 	if password, ok := u.User.Password(); ok {
 		settings["password"] = password
