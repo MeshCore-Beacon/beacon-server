@@ -22,7 +22,7 @@ import (
 )
 
 func TestDefaultAPIRateLimit(t *testing.T) {
-	handler := New(nil, nil, nil, 5, 1000, config.CORSConfig{}, config.ServerConfig{}, config.AuthConfig{}, config.Resolve(&config.Config{}).RateLimit)
+	handler := New(nil, nil, nil, Options{MaxConnsPerIP: 5, MaxConnectsPerMinute: 1000, RateLimit: config.Resolve(&config.Config{}).RateLimit})
 	for i := 0; i <= 300; i++ {
 		request := httptest.NewRequest(http.MethodGet, "/api/v1/brokers", nil)
 		request.RemoteAddr = "198.51.100.1:1234"
@@ -56,7 +56,7 @@ func TestAPIRateLimitContractAndLogging(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
 	t.Cleanup(func() { slog.SetDefault(previous); log.SetOutput(writer); log.SetFlags(flags) })
 	proxy := config.ServerConfig{TrustedProxies: []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}}
-	handler := New(nil, nil, nil, 5, 1000, config.CORSConfig{}, proxy, config.AuthConfig{}, config.ResolvedRateLimitConfig{Enabled: true, RequestsPerMinute: 2, Burst: 10})
+	handler := New(nil, nil, nil, Options{MaxConnsPerIP: 5, MaxConnectsPerMinute: 1000, Server: proxy, RateLimit: config.ResolvedRateLimitConfig{Enabled: true, RequestsPerMinute: 2, Burst: 10}})
 	for _, path := range []string{"/api/v1/brokers", "/api/v1/packets?limit=0"} {
 		response := rateRequest(handler, path, "127.0.0.1:1234", "198.51.100.25")
 		if response.Code != http.StatusOK && response.Code != http.StatusBadRequest {
@@ -111,7 +111,7 @@ func TestAPIRateLimitClientIdentity(t *testing.T) {
 			if tc.trusted {
 				proxy.TrustedProxies = []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}
 			}
-			handler := New(nil, nil, nil, 5, 1000, config.CORSConfig{}, proxy, config.AuthConfig{}, config.ResolvedRateLimitConfig{Enabled: true, RequestsPerMinute: 1, Burst: 1})
+			handler := New(nil, nil, nil, Options{MaxConnsPerIP: 5, MaxConnectsPerMinute: 1000, Server: proxy, RateLimit: config.ResolvedRateLimitConfig{Enabled: true, RequestsPerMinute: 1, Burst: 1}})
 			if response := rateRequest(handler, "/api/v1/brokers", tc.firstPeer, tc.firstHeader); response.Code != http.StatusOK {
 				t.Fatalf("first client: %d", response.Code)
 			}
@@ -128,7 +128,7 @@ func TestAPIRateLimitClientIdentity(t *testing.T) {
 
 func TestAPIRateLimitWindowsAndExclusions(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		handler := New(nil, nil, nil, 5, 1000, config.CORSConfig{}, config.ServerConfig{}, config.AuthConfig{}, config.ResolvedRateLimitConfig{Enabled: true, RequestsPerMinute: 4, Burst: 2})
+		handler := New(nil, nil, nil, Options{MaxConnsPerIP: 5, MaxConnectsPerMinute: 1000, RateLimit: config.ResolvedRateLimitConfig{Enabled: true, RequestsPerMinute: 4, Burst: 2}})
 		request := func() *httptest.ResponseRecorder {
 			return rateRequest(handler, "/api/v1/brokers", "198.51.100.1:1", "")
 		}
@@ -164,7 +164,7 @@ func TestAPIRateLimitWindowsAndExclusions(t *testing.T) {
 			t.Fatal("minute budget did not recover")
 		}
 	})
-	handler := New(nil, nil, nil, 5, 1000, config.CORSConfig{}, config.ServerConfig{}, config.AuthConfig{}, config.ResolvedRateLimitConfig{Enabled: false, RequestsPerMinute: 1, Burst: 1})
+	handler := New(nil, nil, nil, Options{MaxConnsPerIP: 5, MaxConnectsPerMinute: 1000, RateLimit: config.ResolvedRateLimitConfig{Enabled: false, RequestsPerMinute: 1, Burst: 1}})
 	for range 5 {
 		if response := rateRequest(handler, "/api/v1/brokers", "198.51.100.1:1", ""); response.Code != http.StatusOK || response.Header().Get("Retry-After") != "" {
 			t.Fatal("disabled limiter still applied")
@@ -173,7 +173,7 @@ func TestAPIRateLimitWindowsAndExclusions(t *testing.T) {
 }
 
 func TestAPIRateLimitConcurrentRequests(t *testing.T) {
-	handler := New(nil, nil, nil, 5, 1000, config.CORSConfig{}, config.ServerConfig{}, config.AuthConfig{}, config.ResolvedRateLimitConfig{Enabled: true, RequestsPerMinute: 5, Burst: 5})
+	handler := New(nil, nil, nil, Options{MaxConnsPerIP: 5, MaxConnectsPerMinute: 1000, RateLimit: config.ResolvedRateLimitConfig{Enabled: true, RequestsPerMinute: 5, Burst: 5}})
 	var accepted, rejected atomic.Int32
 	var group sync.WaitGroup
 	for range 20 {

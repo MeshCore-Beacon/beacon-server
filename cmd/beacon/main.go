@@ -18,6 +18,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/db"
 	_ "github.com/MeshCore-Beacon/beacon-server/docs"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api/handlers"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api/router"
 	"github.com/MeshCore-Beacon/beacon-server/internal/background"
 	"github.com/MeshCore-Beacon/beacon-server/internal/cache"
@@ -303,7 +304,12 @@ func main() {
 	// Wrap after wiring cache invalidators and cleanup callbacks to the actual
 	// CachedReader. Only response projections receive the geographic annotation.
 	reader = api.WithLocalBorders(reader, localBorders)
-	r := router.New(h, reader, []*ingest.Worker{broker1, broker2}, resolved.MaxConnsPerIP, resolved.MaxConnectsPerMinute, cfg.CORS, cfg.Server, cfg.Auth, resolved.RateLimit)
+	r := router.New(h, reader, []*ingest.Worker{broker1, broker2}, router.Options{
+		MaxConnsPerIP:        resolved.MaxConnsPerIP,
+		MaxConnectsPerMinute: resolved.MaxConnectsPerMinute,
+		CORS:                 cfg.CORS, Server: cfg.Server, Auth: cfg.Auth, RateLimit: resolved.RateLimit,
+		AdminRoutes: map[string]http.Handler{"/accounts": handlers.AccountsRouter(store)},
+	})
 
 	srv := &http.Server{
 		Addr:     addr,
