@@ -31,6 +31,10 @@ type stubReader struct {
 	calls int
 }
 
+func (s *stubReader) GetSignalStats(context.Context, time.Time, time.Time, []string) (*api.SignalStats, error) {
+	return nil, s.err
+}
+
 func (s *stubReader) ListIATAs(_ context.Context) ([]api.IATA, error) {
 	s.calls++
 	return s.iatas, s.err

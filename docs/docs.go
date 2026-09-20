@@ -2674,6 +2674,78 @@ const docTemplate = `{
                 }
             }
         },
+        "/stats/signal": {
+            "get": {
+                "description": "Aggregates stored observer receptions in [since, until), at most 30 days. SNR is dB; RSSI is dBm. Null/non-finite readings and the zero/zero unavailable sentinel are excluded per metric; actual zero SNR with nonzero RSSI remains valid. Averages are null without samples. Histogram bounds are lower-inclusive/upper-exclusive, with null for unbounded ends. UTC hourly buckets are clipped to the requested window; absent hours are omitted. These last-hop readings do not measure end-to-end quality or packet loss.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Stats"
+                ],
+                "summary": "Reception signal distributions and hourly trends",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Inclusive start, epoch milliseconds (0 through 253402300799999)",
+                        "name": "since",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Exclusive end, epoch milliseconds; at most 30 days after since",
+                        "name": "until",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated reception IATA codes",
+                        "name": "iatas",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Region ID, expands to member IATAs",
+                        "name": "regionId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Region slug, expands to member IATAs",
+                        "name": "region",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.SignalStats"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
         "/stats/top-advertisers": {
             "get": {
                 "produces": [
@@ -4622,6 +4694,86 @@ const docTemplate = `{
                 },
                 "packetCount": {
                     "description": "distinct packets matched to this scope",
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.SignalBin": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "lower": {
+                    "type": "number"
+                },
+                "upper": {
+                    "type": "number"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.SignalHour": {
+            "type": "object",
+            "properties": {
+                "hour": {
+                    "type": "integer"
+                },
+                "receptions": {
+                    "type": "integer"
+                },
+                "rssiAverage": {
+                    "type": "number"
+                },
+                "rssiSamples": {
+                    "type": "integer"
+                },
+                "snrAverage": {
+                    "type": "number"
+                },
+                "snrSamples": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.SignalMetric": {
+            "type": "object",
+            "properties": {
+                "average": {
+                    "type": "number"
+                },
+                "histogram": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.SignalBin"
+                    }
+                },
+                "samples": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.SignalStats": {
+            "type": "object",
+            "properties": {
+                "hourly": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.SignalHour"
+                    }
+                },
+                "receptions": {
+                    "type": "integer"
+                },
+                "rssi": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.SignalMetric"
+                },
+                "since": {
+                    "type": "integer"
+                },
+                "snr": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.SignalMetric"
+                },
+                "until": {
                     "type": "integer"
                 }
             }

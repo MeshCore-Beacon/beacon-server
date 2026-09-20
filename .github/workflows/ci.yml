@@ -52,6 +52,11 @@ jobs:
           BEACON_TEST_POSTGRES_DSN: postgres://postgres:backup-ci-only@127.0.0.1:5432/postgres?sslmode=disable
         run: go test ./cmd/beacon -run '^TestBackupConfigurationPostgres$' -count=1 -v
 
+      - name: Verify signal aggregates against PostgreSQL 16
+        env:
+          BEACON_TEST_POSTGRES_DSN: postgres://postgres:backup-ci-only@127.0.0.1:5432/postgres?sslmode=disable
+        run: go test ./db -run '^TestSignalPostgres$' -count=1 -v
+
       - name: Verify backup command against PostgreSQL 16
         run: |
           CGO_ENABLED=0 go build -o "$RUNNER_TEMP/beacon-backup" ./cmd/beacon-backup

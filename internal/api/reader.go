@@ -161,6 +161,9 @@ type Reader interface {
 	// since defines the start of the window; pass zero time for default (last 7 days).
 	GetStatsObservations(ctx context.Context, iatas []string, since time.Time) ([]ObservationPoint, error)
 
+	// GetSignalStats aggregates retained reception readings in [since, until).
+	GetSignalStats(ctx context.Context, since, until time.Time, iatas []string) (*SignalStats, error)
+
 	// GetStatsPayloadBreakdown returns observation counts grouped by payload type.
 	// Pass nil for iatas to return stats across all IATAs.
 	// since defines the start of the window; pass zero time for default (last 24h).

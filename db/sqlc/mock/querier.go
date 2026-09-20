@@ -697,6 +697,21 @@ func (mr *MockQuerierMockRecorder) GetScopesByIATAs(ctx, dollar_1 any) *gomock.C
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetScopesByIATAs", reflect.TypeOf((*MockQuerier)(nil).GetScopesByIATAs), ctx, dollar_1)
 }
 
+// GetSignalStats mocks base method.
+func (m *MockQuerier) GetSignalStats(ctx context.Context, arg db.GetSignalStatsParams) ([]db.GetSignalStatsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetSignalStats", ctx, arg)
+	ret0, _ := ret[0].([]db.GetSignalStatsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetSignalStats indicates an expected call of GetSignalStats.
+func (mr *MockQuerierMockRecorder) GetSignalStats(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSignalStats", reflect.TypeOf((*MockQuerier)(nil).GetSignalStats), ctx, arg)
+}
+
 // GetStatsClockDrift mocks base method.
 func (m *MockQuerier) GetStatsClockDrift(ctx context.Context, arg db.GetStatsClockDriftParams) ([]db.GetStatsClockDriftRow, error) {
 	m.ctrl.T.Helper()

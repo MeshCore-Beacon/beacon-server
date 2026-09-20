@@ -66,6 +66,10 @@ type stubReader struct {
 	getNodesByIDs                func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*api.ResolvedNode, error)
 }
 
+func (s stubReader) GetSignalStats(context.Context, time.Time, time.Time, []string) (*api.SignalStats, error) {
+	return nil, nil
+}
+
 func (s stubReader) GetObserverComparison(ctx context.Context, a, b uuid.UUID, since, until time.Time, iatas []string) (*api.ObserverComparison, error) {
 	if s.getObserverComparison != nil {
 		return s.getObserverComparison(ctx, a, b, since, until, iatas)

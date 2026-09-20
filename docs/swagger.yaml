@@ -1105,6 +1105,58 @@ definitions:
         description: distinct packets matched to this scope
         type: integer
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.SignalBin:
+    properties:
+      count:
+        type: integer
+      lower:
+        type: number
+      upper:
+        type: number
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.SignalHour:
+    properties:
+      hour:
+        type: integer
+      receptions:
+        type: integer
+      rssiAverage:
+        type: number
+      rssiSamples:
+        type: integer
+      snrAverage:
+        type: number
+      snrSamples:
+        type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.SignalMetric:
+    properties:
+      average:
+        type: number
+      histogram:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.SignalBin'
+        type: array
+      samples:
+        type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.SignalStats:
+    properties:
+      hourly:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.SignalHour'
+        type: array
+      receptions:
+        type: integer
+      rssi:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.SignalMetric'
+      since:
+        type: integer
+      snr:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.SignalMetric'
+      until:
+        type: integer
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.StatsOverview:
     properties:
       activeIatas:
@@ -3099,6 +3151,60 @@ paths:
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Scope statistics
+      tags:
+      - Stats
+  /stats/signal:
+    get:
+      description: Aggregates stored observer receptions in [since, until), at most
+        30 days. SNR is dB; RSSI is dBm. Null/non-finite readings and the zero/zero
+        unavailable sentinel are excluded per metric; actual zero SNR with nonzero
+        RSSI remains valid. Averages are null without samples. Histogram bounds are
+        lower-inclusive/upper-exclusive, with null for unbounded ends. UTC hourly
+        buckets are clipped to the requested window; absent hours are omitted. These
+        last-hop readings do not measure end-to-end quality or packet loss.
+      parameters:
+      - description: Inclusive start, epoch milliseconds (0 through 253402300799999)
+        in: query
+        name: since
+        required: true
+        type: integer
+      - description: Exclusive end, epoch milliseconds; at most 30 days after since
+        in: query
+        name: until
+        required: true
+        type: integer
+      - description: Comma-separated reception IATA codes
+        in: query
+        name: iatas
+        type: string
+      - description: Region ID, expands to member IATAs
+        in: query
+        name: regionId
+        type: integer
+      - description: Region slug, expands to member IATAs
+        in: query
+        name: region
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.SignalStats'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+      summary: Reception signal distributions and hourly trends
       tags:
       - Stats
   /stats/top-advertisers:

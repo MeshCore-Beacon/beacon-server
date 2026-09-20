@@ -29,6 +29,7 @@ const (
 	keyScopeByNamePrefix       = "beacon:scope:name:"
 	keyStatsOverviewPrefix     = "beacon:stats:overview:"
 	keyStatsObservationsPrefix = "beacon:stats:observations:"
+	keySignalStatsPrefix       = "beacon:stats:signal:"
 	keyStatsBreakdownPrefix    = "beacon:stats:breakdown:"
 	keyStatsTopNodesPrefix     = "beacon:stats:top-nodes:"
 	keyStatsTopObsPrefix       = "beacon:stats:top-observers:"
