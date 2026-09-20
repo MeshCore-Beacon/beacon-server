@@ -16,7 +16,8 @@ WITH classified AS (
                 WHEN hop_count = 0 THEN 1
                 ELSE 0 END::integer AS category
     FROM packet_observations
-    WHERE heard_at >= date_trunc('hour', NOW(), 'UTC') - INTERVAL '30 days'
+    WHERE heard_at >= date_trunc('hour', NOW(), 'UTC') - INTERVAL '720 hours'
+      AND heard_at < date_trunc('hour', NOW(), 'UTC')
 ), buckets AS (
     SELECT iata, date_trunc('hour', heard_at, 'UTC') AS hour, category,
            CASE WHEN category = 0 THEN hash_size ELSE 0 END::integer AS hash_bytes,
