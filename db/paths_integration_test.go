@@ -57,7 +57,7 @@ FROM (VALUES
 		t.Fatal(err)
 	}
 	since := time.Now().UTC().Truncate(24 * time.Hour).Add(-48 * time.Hour)
-	if _, err := tx.Exec(ctx, "UPDATE packet_observations SET heard_at=heard_at+($1::timestamptz-'2026-01-01 00:00+00'::timestamptz)", since); err != nil {
+	if _, err := tx.Exec(ctx, "UPDATE packet_observations SET heard_at=to_timestamp(extract(epoch FROM $1::timestamptz)+extract(epoch FROM heard_at)-extract(epoch FROM '2026-01-01 00:00+00'::timestamptz))", since); err != nil {
 		t.Fatal(err)
 	}
 	applyStatsMigration(t, ctx, tx, "036_mv_path_stats.sql")
