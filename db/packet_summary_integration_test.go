@@ -59,7 +59,26 @@ FROM (VALUES
  (6,4,'{"type":"ADVERT","appData":{"name":null}}'),
  (7,4,'{"type":"ADVERT","appData":{"name":42}}'),
  (8,2,'{"appData":{"name":"not an advert"}}'),
- (9,4,'{"type":"ADVERT","appData":[]}')
+ (9,4,'{"type":"ADVERT","appData":[]}'),
+ (10,3,'{"type":"ACK","checksum":"01020304"}'),
+ (11,3,'{"type":"ACK","checksum":"AABBCCDD"}'),
+ (12,3,'{"type":"ACK","checksum":"00000000"}'),
+ (13,3,'{"type":"ACK"}'),
+ (14,3,'{"type":"ACK","checksum":12345678}'),
+ (15,3,'{"type":"ACK","checksum":"gg112233"}'),
+ (16,3,'{"type":"ACK","checksum":"1234"}'),
+ (17,3,'{"type":"ACK","checksum":"123456789"}'),
+ (18,3,'{"type":"TRACE","checksum":"01020304"}'),
+ (19,9,'{"type":"TRACE","traceTag":"efbeadde","authCode":4277009102}'),
+ (20,9,'{"type":"PING","traceTag":"deadBEEF"}'),
+ (21,9,'{"type":"OTHER","traceTag":"01020304"}'),
+ (22,9,'{"traceTag":"01020304"}'),
+ (23,9,'{"type":"TRACE","traceTag":12345678}'),
+ (24,9,'{"type":"TRACE","traceTag":"01020304\n"}'),
+ (25,9,'{"type":"TRACE","traceTag":"gg112233"}'),
+ (26,9,'{"type":"TRACE","traceTag":null}'),
+ (27,2,'{"type":"ACK","checksum":"01020304"}'),
+ (28,9,'{"type":"TRACE","traceTag":"00000000"}')
 ) v(id,kind,parsed);
 `)
 	if err != nil {
@@ -69,11 +88,15 @@ FROM (VALUES
 	store := &Store{q: sqlc.New(counter)}
 	check := func(items []api.PacketSummary) {
 		t.Helper()
-		if len(items) != 9 {
-			t.Fatalf("got %d packets, want 9", len(items))
+		if len(items) != 28 {
+			t.Fatalf("got %d packets, want 28", len(items))
 		}
 		for _, item := range items {
-			want := map[string]string{"01": "MD00-Repeater", "02": "Relay 📡"}[item.PacketHash]
+			want := map[string]string{
+				"01": "MD00-Repeater", "02": "Relay 📡",
+				"0a": "ACK 01020304", "0b": "ACK aabbccdd", "0c": "ACK 00000000",
+				"13": "TRACE efbeadde", "14": "PING deadbeef", "1c": "TRACE 00000000",
+			}[item.PacketHash]
 			if want == "" {
 				if item.Summary != nil {
 					t.Fatalf("unexpected summary for %s: %q", item.PacketHash, *item.Summary)
@@ -87,7 +110,7 @@ FROM (VALUES
 		}
 		counter.calls = 0
 	}
-	page, err := store.ListPackets(ctx, nil, nil, nil, nil, time.Time{}, time.Time{}, 0, 20)
+	page, err := store.ListPackets(ctx, nil, nil, nil, nil, time.Time{}, time.Time{}, 0, 50)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,18 +119,18 @@ FROM (VALUES
 INSERT INTO observers(id,public_key) VALUES ('00000000-0000-0000-0000-000000000001','\x01');
 INSERT INTO packet_observations(id,packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count)
 SELECT id,decode(lpad(to_hex(id),2,'0'),'hex'),'00000000-0000-0000-0000-000000000001','YVR',
- '2026-01-01'::timestamptz+id*interval '1 second',0,1,0 FROM generate_series(1,9) id;
+ '2026-01-01'::timestamptz+id*interval '1 second',0,1,0 FROM generate_series(1,28) id;
 `)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, iatas := range [][]string{nil, {"YVR"}} {
-		page, err := store.ListPackets(ctx, nil, nil, iatas, nil, time.Time{}, time.Time{}, 0, 20)
+		page, err := store.ListPackets(ctx, nil, nil, iatas, nil, time.Time{}, time.Time{}, 0, 50)
 		if err != nil {
 			t.Fatal(err)
 		}
 		check(page.Items)
-		rows, err := store.ListPacketsAfterID(ctx, 0, -1, -1, iatas, "", 20)
+		rows, err := store.ListPacketsAfterID(ctx, 0, -1, -1, iatas, "", 50)
 		if err != nil {
 			t.Fatal(err)
 		}

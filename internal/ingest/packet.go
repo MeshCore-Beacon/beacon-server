@@ -564,6 +564,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 				SNRValues:  snrValues,
 			}
 			parsedPayload, _ = json.Marshal(pt)
+			summary = new(traceType + " " + pt.TraceTag)
 
 			// Each consecutive hop pair becomes a node_neighbors edge:
 			// hop[i]'s measured SNR of receiving from hop[i-1]. hop[0]'s
@@ -600,6 +601,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 				Checksum: hex.EncodeToString(uint32ToBytes(ack.CRC())),
 			}
 			parsedPayload, _ = json.Marshal(pa)
+			summary = new("ACK " + pa.Checksum)
 		}
 
 	case meshcore.PayloadTypeMultiPart:
