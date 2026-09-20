@@ -165,7 +165,12 @@ deactivates the record (204); missing IDs return 404 and an already inactive
 record returns 409. A deactivated name may be reused by a new account.
 Lists include active and inactive records, newest first, without pagination.
 These are operator-defined records; no login, session or API token is created.
-Cross-origin clients must have their methods allowed in the existing CORS config.
+Cross-origin account clients need both `POST` and `DELETE` in the saved
+`cors.allowed_methods`; the default `GET, HEAD, OPTIONS` is read-only. For an
+admin UI that also updates configuration, use `[GET, HEAD, OPTIONS, POST, PUT,
+DELETE]`, restrict `cors.allowed_origins` to that UI, and allow `Authorization`
+and `Content-Type` headers. Otherwise browser preflight blocks these requests
+even when the same bearer-authenticated request works with curl.
 
 ### Environment variables (`.env`)
 

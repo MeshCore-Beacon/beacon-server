@@ -166,7 +166,7 @@ websocket:
 #cors:
 #  allowed_origins:
 #    - "https://app.example.com"
-#  allowed_methods: [GET, HEAD, OPTIONS, POST]
+#  allowed_methods: [GET, HEAD, OPTIONS, POST, PUT, DELETE] # admin UI writes
 #  allowed_headers: [Accept, Authorization, Content-Type]
 #  allow_credentials: false
 #  max_age: 300
