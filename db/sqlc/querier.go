@@ -90,11 +90,8 @@ type Querier interface {
 	// whose observations have expired; the filtered aggregates are empty in that case.
 	GetScopeStats(ctx context.Context, iatas []string) ([]GetScopeStatsRow, error)
 	GetScopesByIATAs(ctx context.Context, dollar_1 []string) ([]GetScopesByIATAsRow, error)
-	// One reception scan supplies totals, hourly means, and two independent histograms.
-	// The zero/zero pair is Beacon's existing unavailable-reading sentinel. A real
-	// zero SNR with nonzero RSSI remains valid. Non-finite SNR never reaches JSON.
-	// Separate global/filtered branches retain index use after pgx adopts a generic
-	// prepared plan. Match the indexed bpchar column without casting each stored IATA.
+	// Read compact hourly snapshots, never observations on an HTTP request.
+	// Weight averages by sample counts instead of averaging regional/hourly means.
 	GetSignalStats(ctx context.Context, arg GetSignalStatsParams) ([]GetSignalStatsRow, error)
 	// Repeaters/room servers (node_type 2/3) whose current advert-derived clock drift exceeds
 	// the given threshold in magnitude, worst first. Not time-windowed -- reflects each node's
@@ -220,6 +217,7 @@ type Querier interface {
 	RefreshObserverActivity(ctx context.Context) error
 	RefreshPayloadBreakdown(ctx context.Context) error
 	RefreshRadioPresets(ctx context.Context) error
+	RefreshSignalStats(ctx context.Context) error
 	RefreshTopAdvertisers(ctx context.Context) error
 	RefreshTopNodes(ctx context.Context) error
 	RefreshTopObservers(ctx context.Context) error

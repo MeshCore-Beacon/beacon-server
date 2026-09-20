@@ -6,6 +6,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http/httptest"
 	"os"
@@ -18,7 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Only temporary tables are written; no migrated schema or production rows are needed.
+// Real view DDL and fixture rows are isolated in a rolled-back private schema.
 func TestSignalPostgres(t *testing.T) {
 	dsn := os.Getenv("BEACON_TEST_POSTGRES_DSN")
 	if dsn == "" {
@@ -36,9 +37,10 @@ func TestSignalPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(context.Background())
+	isolateStatsSchema(t, ctx, tx)
 	_, err = tx.Exec(ctx, `
 SET LOCAL TIME ZONE 'America/Vancouver';
-CREATE TEMP TABLE packet_observations (heard_at timestamptz NOT NULL, iata char(3) NOT NULL, snr real, rssi smallint) ON COMMIT DROP;
+CREATE TABLE packet_observations (heard_at timestamptz NOT NULL, iata char(3) NOT NULL, snr real, rssi smallint);
 INSERT INTO packet_observations
 SELECT ('2026-01-01 '||at||'+00')::timestamptz,iata,snr::real,rssi::smallint FROM (VALUES
  ('00:30:00','YVR','0',-100), ('00:45:00','YVR','0',0), ('00:59:00','YVR',NULL,NULL),
@@ -46,14 +48,19 @@ SELECT ('2026-01-01 '||at||'+00')::timestamptz,iata,snr::real,rssi::smallint FRO
  ('01:30:00','YVR','5',NULL), ('01:40:00','YVR',NULL,-90), ('01:50:00','YVR','NaN',-80),
  ('02:00:00','YVR','Infinity',-70), ('02:10:00','YVR','-Infinity',-60),
  ('02:20:00','YYJ','10',-50), ('03:00:00','YYZ','-5',-110),
- ('00:29:59','YVR','20',-40), ('04:30:00','YVR','20',-40),
+ ('04:00:00','YVR','20',-40), ('04:30:00','YVR','20',-40),
  ('03:10:00','YVR','0',NULL), ('03:20:00','YVR',NULL,0)
 ) v(at,iata,snr,rssi);`)
 	if err != nil {
 		t.Fatal(err)
 	}
+	since := time.Now().UTC().Truncate(24 * time.Hour).Add(-48 * time.Hour)
+	if _, err := tx.Exec(ctx, "UPDATE packet_observations SET heard_at=heard_at+($1::timestamptz-'2026-01-01 00:00+00'::timestamptz)", since); err != nil {
+		t.Fatal(err)
+	}
+	applyStatsMigration(t, ctx, tx, "035_mv_signal_stats.sql")
+	applyStatsMigration(t, ctx, tx, "035_mv_signal_stats.sql") // interrupted journal retry
 	store := &Store{q: sqlc.New(tx)}
-	since := time.Date(2026, 1, 1, 0, 30, 0, 0, time.UTC)
 	until := since.Add(4 * time.Hour)
 	for _, tc := range []struct {
 		name                  string
@@ -123,13 +130,20 @@ SELECT ('2026-01-01 '||at||'+00')::timestamptz,iata,snr::real,rssi::smallint FRO
 		}
 	}
 	w := httptest.NewRecorder()
-	request := httptest.NewRequest("GET", "/signal?since=1767227400000&until=1767241800000&iatas=YVR", nil).WithContext(ctx)
+	request := httptest.NewRequest("GET", fmt.Sprintf("/signal?since=%d&until=%d&iatas=YVR", since.UnixMilli()+123, until.UnixMilli()+123), nil).WithContext(ctx)
 	handlers.StatsRouter(store).ServeHTTP(w, request)
 	var response api.SignalStats
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || w.Code != 200 || response.Receptions != 13 || response.SNR.Samples != 5 {
 		t.Fatalf("PostgreSQL HTTP response: status=%d body=%s error=%v", w.Code, w.Body.String(), err)
 	}
 	if _, err = tx.Exec(ctx, "TRUNCATE packet_observations"); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := store.GetSignalStats(ctx, since, until, nil)
+	if err != nil || stale.Receptions != 15 {
+		t.Fatalf("snapshot lost: %+v %v", stale, err)
+	}
+	if err := store.RefreshSignalStats(ctx); err != nil {
 		t.Fatal(err)
 	}
 	got, err := store.GetSignalStats(ctx, since, until, nil)

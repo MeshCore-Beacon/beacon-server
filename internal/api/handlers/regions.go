@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/go-chi/chi/v5"
@@ -72,6 +73,24 @@ func getRegion(reader api.Reader) http.HandlerFunc {
 		}
 		respond(w, http.StatusOK, region)
 	}
+}
+
+// parseStatsWindow rounds both endpoints down to UTC hours. Polls within an
+// hour share a cache key; the response reports the effective window. A valid
+// sub-hour request can contain no complete buckets and return an empty result.
+func parseStatsWindow(r *http.Request) (time.Time, time.Time, error) {
+	q := r.URL.Query()
+	for _, key := range []string{"since", "until"} {
+		if len(q[key]) != 1 || q.Get(key) == "" {
+			return time.Time{}, time.Time{}, fmt.Errorf("%s must be supplied exactly once", key)
+		}
+	}
+	since, errSince := strconv.ParseInt(q.Get("since"), 10, 64)
+	until, errUntil := strconv.ParseInt(q.Get("until"), 10, 64)
+	if errSince != nil || errUntil != nil || since < 0 || until <= since || until > 253402300799999 || until-since > int64((30*24*time.Hour)/time.Millisecond) {
+		return time.Time{}, time.Time{}, fmt.Errorf("since and until must be epoch milliseconds between 0 and 253402300799999, with a positive window of at most 30 days")
+	}
+	return time.UnixMilli(since).UTC().Truncate(time.Hour), time.UnixMilli(until).UTC().Truncate(time.Hour), nil
 }
 
 // parseIATAs splits a comma-separated iatas query param and uppercases each value.

@@ -112,6 +112,19 @@ type MvRadioPreset struct {
 	Count      int64  `json:"count"`
 }
 
+type MvSignalStatsHourly struct {
+	Iata        string      `json:"iata"`
+	Hour        interface{} `json:"hour"`
+	Kind        int32       `json:"kind"`
+	SnrBin      int32       `json:"snr_bin"`
+	RssiBin     int32       `json:"rssi_bin"`
+	Receptions  int64       `json:"receptions"`
+	SnrSamples  int64       `json:"snr_samples"`
+	SnrSum      float64     `json:"snr_sum"`
+	RssiSamples int64       `json:"rssi_samples"`
+	RssiSum     float64     `json:"rssi_sum"`
+}
+
 type MvTopAdvertisersByIatum struct {
 	Iata              string             `json:"iata"`
 	NodeID            uuid.UUID          `json:"node_id"`

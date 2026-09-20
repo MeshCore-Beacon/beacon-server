@@ -3159,9 +3159,11 @@ paths:
         30 days. SNR is dB; RSSI is dBm. Null/non-finite readings and the zero/zero
         unavailable sentinel are excluded per metric; actual zero SNR with nonzero
         RSSI remains valid. Averages are null without samples. Histogram bounds are
-        lower-inclusive/upper-exclusive, with null for unbounded ends. UTC hourly
-        buckets are clipped to the requested window; absent hours are omitted. These
-        last-hop readings do not measure end-to-end quality or packet loss.
+        lower-inclusive/upper-exclusive, with null for unbounded ends. Both boundaries
+        round down to UTC hours and the response reports that effective window. Reads
+        use hourly materialized snapshots refreshed by background.view_refresh; the
+        current partial hour is excluded and absent hours are omitted. These last-hop
+        readings do not measure end-to-end quality or packet loss.
       parameters:
       - description: Inclusive start, epoch milliseconds (0 through 253402300799999)
         in: query

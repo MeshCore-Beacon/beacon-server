@@ -98,3 +98,16 @@ func TestSignalCancellationReachesReader(t *testing.T) {
 		t.Fatalf("cancellation: called=%v body=%s", called, w.Body.String())
 	}
 }
+
+func TestStatsWindowSnapsPollingTimes(t *testing.T) {
+	for _, query := range []string{"since=123&until=86400123", "since=3599999&until=89999999"} {
+		since, until, err := parseStatsWindow(httptest.NewRequest("GET", "/?"+query, nil))
+		if err != nil || since.UnixMilli() != 0 || until.UnixMilli() != 86400000 {
+			t.Fatalf("%v %v %v", since, until, err)
+		}
+	}
+	since, until, err := parseStatsWindow(httptest.NewRequest("GET", "/?since=1&until=2", nil))
+	if err != nil || !since.Equal(until) {
+		t.Fatal("sub-hour normalization")
+	}
+}

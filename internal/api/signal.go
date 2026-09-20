@@ -3,7 +3,8 @@
 
 package api
 
-// SignalStats describes retained reception readings in [Since, Until).
+// SignalStats describes a materialized reception snapshot in [Since, Until).
+// Since and Until are the effective UTC-hour boundaries, rounded down from input.
 // A reception is a stored observation, not a unique packet or a lost-packet estimate.
 type SignalStats struct {
 	Since      int64        `json:"since"`
@@ -30,7 +31,7 @@ type SignalBin struct {
 	Count int64    `json:"count"`
 }
 
-// SignalHour is a UTC hour clipped to the requested window. Missing hours are omitted.
+// SignalHour is a complete UTC bucket in the effective window. Missing hours are omitted.
 type SignalHour struct {
 	Hour        int64    `json:"hour"`
 	Receptions  int64    `json:"receptions"`

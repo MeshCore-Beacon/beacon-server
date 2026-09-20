@@ -8,7 +8,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
@@ -17,7 +16,7 @@ import (
 // getSignalStats godoc
 //
 // @Summary Reception signal distributions and hourly trends
-// @Description Aggregates stored observer receptions in [since, until), at most 30 days. SNR is dB; RSSI is dBm. Null/non-finite readings and the zero/zero unavailable sentinel are excluded per metric; actual zero SNR with nonzero RSSI remains valid. Averages are null without samples. Histogram bounds are lower-inclusive/upper-exclusive, with null for unbounded ends. UTC hourly buckets are clipped to the requested window; absent hours are omitted. These last-hop readings do not measure end-to-end quality or packet loss.
+// @Description Aggregates stored observer receptions in [since, until), at most 30 days. SNR is dB; RSSI is dBm. Null/non-finite readings and the zero/zero unavailable sentinel are excluded per metric; actual zero SNR with nonzero RSSI remains valid. Averages are null without samples. Histogram bounds are lower-inclusive/upper-exclusive, with null for unbounded ends. Both boundaries round down to UTC hours and the response reports that effective window. Reads use hourly materialized snapshots refreshed by background.view_refresh; the current partial hour is excluded and absent hours are omitted. These last-hop readings do not measure end-to-end quality or packet loss.
 // @Tags Stats
 // @Produce json
 // @Param since query int true "Inclusive start, epoch milliseconds (0 through 253402300799999)"
@@ -33,16 +32,9 @@ import (
 func getSignalStats(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		for _, key := range []string{"since", "until"} {
-			if len(q[key]) != 1 || q.Get(key) == "" {
-				respondError(w, http.StatusBadRequest, key+" must be supplied exactly once")
-				return
-			}
-		}
-		since, errSince := strconv.ParseInt(q.Get("since"), 10, 64)
-		until, errUntil := strconv.ParseInt(q.Get("until"), 10, 64)
-		if errSince != nil || errUntil != nil || since < 0 || until <= since || until > 253402300799999 || until-since > int64((30*24*time.Hour)/time.Millisecond) {
-			respondError(w, http.StatusBadRequest, "since and until must be epoch milliseconds between 0 and 253402300799999, with a positive window of at most 30 days")
+		since, until, err := parseStatsWindow(r)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
@@ -59,7 +51,7 @@ func getSignalStats(reader api.Reader) http.HandlerFunc {
 				iatas = []string{""}
 			}
 		}
-		stats, err := reader.GetSignalStats(ctx, time.UnixMilli(since), time.UnixMilli(until), iatas)
+		stats, err := reader.GetSignalStats(ctx, since, until, iatas)
 		switch {
 		case errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded):
 			respondError(w, http.StatusServiceUnavailable, "signal query timed out; try a shorter time period")

@@ -1290,6 +1290,20 @@ func (mr *MockQuerierMockRecorder) RefreshRadioPresets(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RefreshRadioPresets", reflect.TypeOf((*MockQuerier)(nil).RefreshRadioPresets), ctx)
 }
 
+// RefreshSignalStats mocks base method.
+func (m *MockQuerier) RefreshSignalStats(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RefreshSignalStats", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RefreshSignalStats indicates an expected call of RefreshSignalStats.
+func (mr *MockQuerierMockRecorder) RefreshSignalStats(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RefreshSignalStats", reflect.TypeOf((*MockQuerier)(nil).RefreshSignalStats), ctx)
+}
+
 // RefreshTopAdvertisers mocks base method.
 func (m *MockQuerier) RefreshTopAdvertisers(ctx context.Context) error {
 	m.ctrl.T.Helper()

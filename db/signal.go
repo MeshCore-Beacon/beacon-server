@@ -33,16 +33,20 @@ func (s *Store) GetSignalStats(ctx context.Context, since, until time.Time, iata
 				SNRSamples: row.SnrSamples, SNRAverage: signalAverage(row.SnrAverage, row.SnrSamples),
 				RSSISamples: row.RssiSamples, RSSIAverage: signalAverage(row.RssiAverage, row.RssiSamples)})
 		case 5:
-			if row.SnrBin >= 0 {
+			if row.SnrBin >= 0 && int(row.SnrBin) < len(stats.SNR.Histogram) {
 				stats.SNR.Histogram[row.SnrBin].Count = row.Receptions
 			}
 		case 6:
-			if row.RssiBin >= 0 {
+			if row.RssiBin >= 0 && int(row.RssiBin) < len(stats.RSSI.Histogram) {
 				stats.RSSI.Histogram[row.RssiBin].Count = row.Receptions
 			}
 		}
 	}
 	return stats, nil
+}
+
+func (s *Store) RefreshSignalStats(ctx context.Context) error {
+	return s.q.RefreshSignalStats(ctx)
 }
 
 func signalAverage(value float64, count int64) *float64 {

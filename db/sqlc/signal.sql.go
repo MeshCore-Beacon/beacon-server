@@ -13,38 +13,29 @@ import (
 
 const getSignalStats = `-- name: GetSignalStats :many
 WITH readings AS (
-    SELECT heard_at, snr, rssi FROM packet_observations
-    WHERE heard_at >= $1::timestamptz AND heard_at < $2::timestamptz
+    SELECT iata, hour, kind, snr_bin, rssi_bin, receptions, snr_samples, snr_sum, rssi_samples, rssi_sum FROM mv_signal_stats_hourly
+    WHERE hour >= $1::timestamptz AND hour < $2::timestamptz
       AND COALESCE(cardinality($3::bpchar[]), 0) = 0
     UNION ALL
-    SELECT heard_at, snr, rssi FROM packet_observations
-    WHERE heard_at >= $1::timestamptz AND heard_at < $2::timestamptz
+    SELECT iata, hour, kind, snr_bin, rssi_bin, receptions, snr_samples, snr_sum, rssi_samples, rssi_sum FROM mv_signal_stats_hourly
+    WHERE hour >= $1::timestamptz AND hour < $2::timestamptz
       AND cardinality($3::bpchar[]) > 0 AND iata = ANY($3::bpchar[])
-), samples AS (
-    SELECT heard_at,
-           CASE WHEN NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)
-                      AND snr > '-Infinity'::real AND snr < 'Infinity'::real
-                THEN snr::double precision END AS snr,
-           CASE WHEN NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)
-                THEN rssi::double precision END AS rssi
-    FROM readings
-), binned AS (
-    SELECT date_trunc('hour', heard_at, 'UTC') AS hour, snr, rssi,
-           width_bucket(snr, -30, 30, 12) AS snr_bin,
-           width_bucket(rssi, -140, 0, 14) AS rssi_bin
-    FROM samples
 )
-SELECT grouping(hour, snr_bin, rssi_bin)::integer AS kind,
+SELECT (3 + 4 * grouping(hour))::integer AS kind,
        COALESCE(hour, 'epoch'::timestamptz)::timestamptz AS hour,
-       COALESCE(snr_bin, -1)::integer AS snr_bin,
-       COALESCE(rssi_bin, -1)::integer AS rssi_bin,
-       count(*)::bigint AS receptions,
-       count(snr)::bigint AS snr_samples,
-       COALESCE(avg(snr), 0)::double precision AS snr_average,
-       count(rssi)::bigint AS rssi_samples,
-       COALESCE(avg(rssi), 0)::double precision AS rssi_average
-FROM binned
-GROUP BY GROUPING SETS ((), (hour), (snr_bin), (rssi_bin))
+       -1::integer AS snr_bin, -1::integer AS rssi_bin,
+       COALESCE(sum(receptions), 0)::bigint AS receptions,
+       COALESCE(sum(snr_samples), 0)::bigint AS snr_samples,
+       COALESCE(sum(snr_sum) / NULLIF(sum(snr_samples), 0), 0)::double precision AS snr_average,
+       COALESCE(sum(rssi_samples), 0)::bigint AS rssi_samples,
+       COALESCE(sum(rssi_sum) / NULLIF(sum(rssi_samples), 0), 0)::double precision AS rssi_average
+FROM readings WHERE kind = 3
+GROUP BY GROUPING SETS ((), (hour))
+UNION ALL
+SELECT (kind + 4)::integer, 'epoch'::timestamptz, snr_bin, rssi_bin,
+       sum(receptions)::bigint, 0::bigint, 0::double precision, 0::bigint, 0::double precision
+FROM readings WHERE kind IN (1, 2)
+GROUP BY kind, snr_bin, rssi_bin
 ORDER BY kind, hour, snr_bin, rssi_bin
 `
 
@@ -66,11 +57,8 @@ type GetSignalStatsRow struct {
 	RssiAverage float64            `json:"rssi_average"`
 }
 
-// One reception scan supplies totals, hourly means, and two independent histograms.
-// The zero/zero pair is Beacon's existing unavailable-reading sentinel. A real
-// zero SNR with nonzero RSSI remains valid. Non-finite SNR never reaches JSON.
-// Separate global/filtered branches retain index use after pgx adopts a generic
-// prepared plan. Match the indexed bpchar column without casting each stored IATA.
+// Read compact hourly snapshots, never observations on an HTTP request.
+// Weight averages by sample counts instead of averaging regional/hourly means.
 func (q *Queries) GetSignalStats(ctx context.Context, arg GetSignalStatsParams) ([]GetSignalStatsRow, error) {
 	rows, err := q.db.Query(ctx, getSignalStats, arg.Since, arg.Until, arg.Iatas)
 	if err != nil {
@@ -99,4 +87,13 @@ func (q *Queries) GetSignalStats(ctx context.Context, arg GetSignalStatsParams) 
 		return nil, err
 	}
 	return items, nil
+}
+
+const refreshSignalStats = `-- name: RefreshSignalStats :exec
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_signal_stats_hourly
+`
+
+func (q *Queries) RefreshSignalStats(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, refreshSignalStats)
+	return err
 }

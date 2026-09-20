@@ -119,6 +119,10 @@ func (s *refreshStub) RefreshObserverActivity(ctx context.Context) error {
 	return s.refresh(ctx, "observer activity")
 }
 
+func (s *refreshStub) RefreshSignalStats(ctx context.Context) error {
+	return s.refresh(ctx, "signal stats")
+}
+
 func TestViewRefreshTask(t *testing.T) {
 	first, second := errors.New("first failure"), errors.New("second failure")
 	for _, tc := range []struct {
@@ -127,13 +131,14 @@ func TestViewRefreshTask(t *testing.T) {
 	}{
 		{"success", nil},
 		{"partial failure", map[string]error{"hourly stats": first, "top talkers": second}},
+		{"signal failure", map[string]error{"signal stats": first}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &refreshStub{errs: tc.errs}
 			task := ViewRefreshTask(store, time.Minute)
 			err := task.Run(context.Background())
-			if len(store.calls) != 8 {
-				t.Fatalf("refreshed %d views, want 8", len(store.calls))
+			if len(store.calls) != 9 {
+				t.Fatalf("refreshed %d views, want 9", len(store.calls))
 			}
 			if len(tc.errs) == 0 && err != nil {
 				t.Fatal(err)
