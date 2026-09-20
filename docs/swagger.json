@@ -2505,7 +2505,7 @@
         },
         "/stats/paths": {
             "get": {
-                "description": "Counts stored receptions in [since, until), at most 30 days. Hash widths count only validated nonempty ordinary header paths (1/2/3 bytes). Empty paths do not vote for a width. TRACE header paths contain signal readings and are separate. Missing payload type or inconsistent/unsupported path metadata is unclassified. The four categories partition total receptions. Flood paths accumulate entries; direct paths contain remaining entries, so counts do not measure distance or a complete traversed route. UTC hourly buckets are clipped to the window; missing hours are omitted.",
+                "description": "Counts stored receptions in [since, until), at most 30 days. Hash widths count only validated nonempty ordinary header paths (1/2/3 bytes). Empty paths do not vote for a width. TRACE header paths contain signal readings and are separate. Missing payload type or inconsistent/unsupported path metadata is unclassified. The four categories partition total receptions. Flood paths accumulate entries; direct paths contain remaining entries, so counts do not measure distance or a complete traversed route. Both boundaries round down to UTC hours and the response reports that effective window. Reads use materialized snapshots refreshed by background.view_refresh; the current partial hour is excluded and missing hours are omitted.",
                 "produces": [
                     "application/json"
                 ],

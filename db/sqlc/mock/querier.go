@@ -1277,6 +1277,20 @@ func (mr *MockQuerierMockRecorder) RefreshObserverActivity(ctx any) *gomock.Call
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RefreshObserverActivity", reflect.TypeOf((*MockQuerier)(nil).RefreshObserverActivity), ctx)
 }
 
+// RefreshPathStats mocks base method.
+func (m *MockQuerier) RefreshPathStats(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RefreshPathStats", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RefreshPathStats indicates an expected call of RefreshPathStats.
+func (mr *MockQuerierMockRecorder) RefreshPathStats(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RefreshPathStats", reflect.TypeOf((*MockQuerier)(nil).RefreshPathStats), ctx)
+}
+
 // RefreshPayloadBreakdown mocks base method.
 func (m *MockQuerier) RefreshPayloadBreakdown(ctx context.Context) error {
 	m.ctrl.T.Helper()

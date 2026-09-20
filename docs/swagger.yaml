@@ -3109,8 +3109,10 @@ paths:
         and are separate. Missing payload type or inconsistent/unsupported path metadata
         is unclassified. The four categories partition total receptions. Flood paths
         accumulate entries; direct paths contain remaining entries, so counts do not
-        measure distance or a complete traversed route. UTC hourly buckets are clipped
-        to the window; missing hours are omitted.
+        measure distance or a complete traversed route. Both boundaries round down
+        to UTC hours and the response reports that effective window. Reads use materialized
+        snapshots refreshed by background.view_refresh; the current partial hour is
+        excluded and missing hours are omitted.
       parameters:
       - description: Inclusive start, epoch milliseconds (0 through 253402300799999)
         in: query

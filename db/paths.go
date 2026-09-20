@@ -5,6 +5,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
@@ -20,6 +21,9 @@ func (s *Store) GetPathStats(ctx context.Context, since, until time.Time, iatas 
 	stats := &api.PathStats{Since: since.UnixMilli(), Until: until.UnixMilli(), HashWidths: []api.PathHashWidth{{Bytes: 1}, {Bytes: 2}, {Bytes: 3}}, PathLengths: []api.PathLengthBin{}, Hourly: []api.PathHour{}}
 	var lengths [64]int64
 	for _, row := range rows {
+		if row.Category == 0 && (row.HashBytes < 1 || int(row.HashBytes) > len(stats.HashWidths) || row.Entries < 0 || int(row.Entries) >= len(lengths)) {
+			return nil, fmt.Errorf("invalid path statistics bucket")
+		}
 		if row.IsHourly {
 			hour := row.Hour.Time.UnixMilli()
 			if len(stats.Hourly) == 0 || stats.Hourly[len(stats.Hourly)-1].Hour != hour {
@@ -68,3 +72,5 @@ func (s *Store) GetPathStats(ctx context.Context, since, until time.Time, iatas 
 	}
 	return stats, nil
 }
+
+func (s *Store) RefreshPathStats(ctx context.Context) error { return s.q.RefreshPathStats(ctx) }

@@ -23,6 +23,7 @@ type viewRefresher interface {
 	RefreshRadioPresets(context.Context) error
 	RefreshObserverActivity(context.Context) error
 	RefreshSignalStats(context.Context) error
+	RefreshPathStats(context.Context) error
 }
 
 // ViewRefreshTask returns a Task that refreshes all materialized views.
@@ -45,6 +46,7 @@ func ViewRefreshTask(store viewRefresher, interval time.Duration) Task {
 				{"radio presets", store.RefreshRadioPresets},
 				{"observer activity", store.RefreshObserverActivity},
 				{"signal stats", store.RefreshSignalStats},
+				{"path stats", store.RefreshPathStats},
 			} {
 				if err := view.refresh(ctx); err != nil {
 					errs = append(errs, fmt.Errorf("%s: %w", view.name, err))

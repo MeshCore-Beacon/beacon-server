@@ -6,6 +6,7 @@ package api
 // PathStats counts stored receptions in [Since, Until), not unique packets or nodes.
 // Hashed + Empty + Trace + Unclassified partitions Receptions. Empty paths never
 // vote for a hash width. TRACE header paths contain signal readings, not hashes.
+// Since and Until are the effective UTC-hour boundaries of the materialized snapshot.
 type PathStats struct {
 	Since        int64           `json:"since"`
 	Until        int64           `json:"until"`

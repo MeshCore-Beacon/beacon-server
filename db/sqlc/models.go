@@ -98,6 +98,15 @@ type MvObserverActivityHourly struct {
 	RssiN        int64              `json:"rssi_n"`
 }
 
+type MvPathStatsHourly struct {
+	Iata       string      `json:"iata"`
+	Hour       interface{} `json:"hour"`
+	Category   int32       `json:"category"`
+	HashBytes  int32       `json:"hash_bytes"`
+	Entries    int32       `json:"entries"`
+	Receptions int64       `json:"receptions"`
+}
+
 type MvPayloadBreakdownByIatum struct {
 	Iata        string             `json:"iata"`
 	PayloadType *int16             `json:"payload_type"`
