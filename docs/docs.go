@@ -419,6 +419,15 @@ const docTemplate = `{
                                 "$ref": "#/definitions/internal_api_handlers.APIError"
                             }
                         }
+                    },
+                    "507": {
+                        "description": "Insufficient Storage",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
                     }
                 }
             }

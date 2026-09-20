@@ -40,9 +40,12 @@ This is an operator API, not account login or a browser admin panel. Keep it off
 on public previews that do not need private exports.
 
 The server requires `pg_dump` on its own PATH when this option is enabled. The
-Docker image includes PostgreSQL 16's client by default; build argument
-`POSTGRES_CLIENT_MAJOR` selects another available Alpine package. Match the source
-database major version. A client on the host or in a different container is not
+Docker image includes PostgreSQL 16's client by default. Its Alpine 3.19 base does
+not provide PostgreSQL 17/18 packages: changing `POSTGRES_CLIENT_MAJOR` alone is
+not an upgrade path. For a newer database, supply a runtime with a compatible
+client. Startup compares `pg_dump --version` with `server_version_num` and leaves
+backup unavailable if the client is missing, unrecognized or older than the server.
+Match the source database major version. A client on the host or in a different container is not
 sufficient. No Docker socket or host-command bridge is used.
 
 The download uses the startup `POSTGRES_DSN`, not the standalone export's ambient
@@ -61,7 +64,9 @@ edge whitespace are rejected rather than silently changing targets or TLS policy
 Ambient `PGSERVICE`, `PGSERVICEFILE`, `PGSSLNEGOTIATION`, `PGMINPROTOCOLVERSION`,
 `PGMAXPROTOCOLVERSION` and `PGTZ` are also unsupported for this adapter. The
 standalone command retains native PG* support for those deployments. Errors do
-not echo the DSN. Native connection settings live only in a 0600 service file in
+not echo the DSN. Any failed backup prerequisite logs its reason and leaves only
+this feature unavailable; Beacon still starts ingest, WebSocket and other APIs.
+Fix the prerequisite and restart to enable downloads. Native connection settings live only in a 0600 service file in
 private staging; process arguments contain no connection string or credential,
 and no request changes Beacon's environment.
 
@@ -72,7 +77,9 @@ deadline. Temporary files are removed after completion/failure/cancellation;
 abrupt process termination can leave private staging. Responses use `no-store`
 and a fixed attachment filename. A failed export returns an error without any
 partial archive. Authentication missing/invalid is 401, unconfigured access is
-503, invalid input is 400, export failure is 500 and timeout is 504.
+503, invalid input is 400, export failure is 500, timeout is 504 and exceeding the
+configured export size limit is 507. Other export failures retain sanitized
+operator diagnostics in the server log; raw pg_dump stderr remains discarded.
 
 Provision a private writable temporary directory (`TMPDIR` on Unix) with space
 for roughly twice the SQL limit plus overhead. A small read-only-container tmpfs

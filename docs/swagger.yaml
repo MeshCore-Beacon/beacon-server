@@ -1577,6 +1577,12 @@ paths:
             additionalProperties:
               $ref: '#/definitions/internal_api_handlers.APIError'
             type: object
+        "507":
+          description: Insufficient Storage
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
       security:
       - AdminKey: []
       summary: Download a private database and saved-config backup

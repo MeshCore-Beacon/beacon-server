@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -42,6 +43,7 @@ func BackupRouter(opts backup.Options) http.Handler {
 // @Failure 500 {object} map[string]APIError
 // @Failure 503 {object} map[string]APIError
 // @Failure 504 {object} map[string]APIError
+// @Failure 507 {object} map[string]APIError
 // @Router /admin/backup [get]
 func backupDownload(opts backup.Options, export func(context.Context, backup.Options) error) http.HandlerFunc {
 	var busy atomic.Bool
@@ -69,9 +71,13 @@ func backupDownload(opts backup.Options, export func(context.Context, backup.Opt
 		requestOpts := opts
 		requestOpts.OutputPath = filepath.Join(dir, "backup.tar.gz")
 		if err := export(r.Context(), requestOpts); err != nil {
-			if errors.Is(err, context.DeadlineExceeded) {
+			if errors.Is(err, backup.ErrTooLarge) {
+				respondError(w, http.StatusInsufficientStorage, "backup exceeds the configured export size limit")
+			} else if errors.Is(err, context.DeadlineExceeded) {
 				respondError(w, 504, "backup export timed out")
 			} else if r.Context().Err() == nil {
+				// Export discards pg_dump stderr and never returns connection settings.
+				slog.Error("backup export failed", "component", "backup", "error", err)
 				respondError(w, 500, "backup export failed; check private client configuration and capacity")
 			}
 			return

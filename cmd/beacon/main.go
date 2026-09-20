@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"strconv"
 	"syscall"
@@ -22,7 +21,6 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/api/handlers"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api/router"
 	"github.com/MeshCore-Beacon/beacon-server/internal/background"
-	"github.com/MeshCore-Beacon/beacon-server/internal/backup"
 	"github.com/MeshCore-Beacon/beacon-server/internal/cache"
 	"github.com/MeshCore-Beacon/beacon-server/internal/config"
 	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
@@ -128,17 +126,6 @@ func main() {
 	defer cancel()
 
 	dsn := getEnv("POSTGRES_DSN")
-	var backupOpts backup.Options
-	if cfg.Backup.Enabled {
-		service, connectionErr := backup.ConnectionService(dsn)
-		_, clientErr := exec.LookPath("pg_dump")
-		if cfg.Auth.APIKey == "" || connectionErr != nil || clientErr != nil {
-			slog.Error("backup download requires an admin key, a supported PostgreSQL URL and pg_dump in this runtime", "component", "startup")
-			os.Exit(1)
-		}
-		backupOpts = backup.Options{ConfigPath: configPath, MaxBytes: backup.DefaultMaxBytes,
-			Timeout: backup.DefaultTimeout, Version: version, ConnectionService: service}
-	}
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		// Parse errors can embed the complete DSN, including its password.
@@ -146,6 +133,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer pool.Close()
+	backupOpts := configureBackup(ctx, cfg, pool, dsn, configPath)
 
 	if err := db.RunMigrations(ctx, pool); err != nil {
 		slog.Error("migrations failed", "component", "startup", "error", err)

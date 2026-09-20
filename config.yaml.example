@@ -112,6 +112,12 @@ telemetry:
   retention: 672h   # 4 weeks
   resolution: 1h    # store one snapshot per observer per hour
 
+# Optional authenticated database/config downloads. Disabled unless explicitly enabled.
+# Requires auth.api_key, a supported PostgreSQL URL and a compatible pg_dump client.
+# A failed prerequisite leaves this feature unavailable; ingest and other APIs continue.
+#backup:
+#  enabled: false
+
 packets:
   retention: 720h   # 30 days
 

@@ -49,7 +49,7 @@ func TestBackupDownload(t *testing.T) {
 	if _, err := os.Stat(filepath.Dir(output)); !os.IsNotExist(err) {
 		t.Fatal("download staging retained")
 	}
-	for _, failure := range []error{errors.New("PRIVATE_CANARY"), context.DeadlineExceeded} {
+	for _, failure := range []error{errors.New("PRIVATE_CANARY"), context.DeadlineExceeded, backup.ErrTooLarge} {
 		handler = backupDownload(opts, func(_ context.Context, got backup.Options) error {
 			output = got.OutputPath
 			return failure
@@ -59,6 +59,9 @@ func TestBackupDownload(t *testing.T) {
 		want := 500
 		if errors.Is(failure, context.DeadlineExceeded) {
 			want = 504
+		}
+		if errors.Is(failure, backup.ErrTooLarge) {
+			want = 507
 		}
 		if w.Code != want || strings.Contains(w.Body.String(), "PRIVATE_CANARY") || w.Header().Get("Content-Disposition") != "" {
 			t.Fatal("failure leaked diagnostics or published a download")
