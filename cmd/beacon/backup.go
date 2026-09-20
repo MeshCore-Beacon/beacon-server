@@ -31,7 +31,7 @@ func configureBackup(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	var serverVersion int
-	if err := pool.QueryRow(ctx, "SHOW server_version_num").Scan(&serverVersion); err != nil {
+	if err := pool.QueryRow(ctx, "SELECT current_setting('server_version_num')::integer").Scan(&serverVersion); err != nil {
 		slog.Error("backup unavailable: could not determine PostgreSQL server version", "component", "backup")
 		return backup.Options{}
 	}
