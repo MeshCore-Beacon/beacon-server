@@ -111,6 +111,15 @@ SELECT ('2026-01-01 '||at||'+00')::timestamptz,iata,snr::real,rssi::smallint FRO
 			}
 		})
 	}
+	for _, mode := range []string{"force_custom_plan", "force_generic_plan"} {
+		if _, err = tx.Exec(ctx, "SET LOCAL plan_cache_mode="+mode); err != nil {
+			t.Fatal(err)
+		}
+		got, err := store.GetSignalStats(ctx, since, until, []string{"YVR"})
+		if err != nil || got.Receptions != 13 || got.SNR.Samples != 5 || got.RSSI.Samples != 8 {
+			t.Fatalf("%s: %+v %v", mode, got, err)
+		}
+	}
 	if _, err = tx.Exec(ctx, "TRUNCATE packet_observations"); err != nil {
 		t.Fatal(err)
 	}

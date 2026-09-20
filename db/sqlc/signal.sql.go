@@ -12,16 +12,22 @@ import (
 )
 
 const getSignalStats = `-- name: GetSignalStats :many
-WITH samples AS (
+WITH readings AS (
+    SELECT heard_at, snr, rssi FROM packet_observations
+    WHERE heard_at >= $1::timestamptz AND heard_at < $2::timestamptz
+      AND COALESCE(cardinality($3::bpchar[]), 0) = 0
+    UNION ALL
+    SELECT heard_at, snr, rssi FROM packet_observations
+    WHERE heard_at >= $1::timestamptz AND heard_at < $2::timestamptz
+      AND cardinality($3::bpchar[]) > 0 AND iata = ANY($3::bpchar[])
+), samples AS (
     SELECT heard_at,
            CASE WHEN NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)
                       AND snr > '-Infinity'::real AND snr < 'Infinity'::real
                 THEN snr::double precision END AS snr,
            CASE WHEN NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)
                 THEN rssi::double precision END AS rssi
-    FROM packet_observations
-    WHERE heard_at >= $1::timestamptz AND heard_at < $2::timestamptz
-      AND (COALESCE(cardinality($3::text[]), 0) = 0 OR iata = ANY($3::text[]))
+    FROM readings
 ), binned AS (
     SELECT date_trunc('hour', heard_at, 'UTC') AS hour, snr, rssi,
            width_bucket(snr, -30, 30, 12) AS snr_bin,
@@ -63,6 +69,8 @@ type GetSignalStatsRow struct {
 // One reception scan supplies totals, hourly means, and two independent histograms.
 // The zero/zero pair is Beacon's existing unavailable-reading sentinel. A real
 // zero SNR with nonzero RSSI remains valid. Non-finite SNR never reaches JSON.
+// Separate global/filtered branches retain index use after pgx adopts a generic
+// prepared plan. Match the indexed bpchar column without casting each stored IATA.
 func (q *Queries) GetSignalStats(ctx context.Context, arg GetSignalStatsParams) ([]GetSignalStatsRow, error) {
 	rows, err := q.db.Query(ctx, getSignalStats, arg.Since, arg.Until, arg.Iatas)
 	if err != nil {
