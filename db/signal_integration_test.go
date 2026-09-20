@@ -7,12 +7,14 @@ import (
 	"context"
 	"encoding/json"
 	"math"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api/handlers"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -119,6 +121,13 @@ SELECT ('2026-01-01 '||at||'+00')::timestamptz,iata,snr::real,rssi::smallint FRO
 		if err != nil || got.Receptions != 13 || got.SNR.Samples != 5 || got.RSSI.Samples != 8 {
 			t.Fatalf("%s: %+v %v", mode, got, err)
 		}
+	}
+	w := httptest.NewRecorder()
+	request := httptest.NewRequest("GET", "/signal?since=1767227400000&until=1767241800000&iatas=YVR", nil).WithContext(ctx)
+	handlers.StatsRouter(store).ServeHTTP(w, request)
+	var response api.SignalStats
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || w.Code != 200 || response.Receptions != 13 || response.SNR.Samples != 5 {
+		t.Fatalf("PostgreSQL HTTP response: status=%d body=%s error=%v", w.Code, w.Body.String(), err)
 	}
 	if _, err = tx.Exec(ctx, "TRUNCATE packet_observations"); err != nil {
 		t.Fatal(err)
