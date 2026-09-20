@@ -10,7 +10,8 @@ WITH samples AS (
            CASE WHEN NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)
                 THEN rssi::double precision END AS rssi
     FROM packet_observations
-    WHERE heard_at >= date_trunc('hour', NOW(), 'UTC') - INTERVAL '30 days'
+    WHERE heard_at >= date_trunc('hour', NOW(), 'UTC') - INTERVAL '720 hours'
+      AND heard_at < date_trunc('hour', NOW(), 'UTC')
 ), binned AS (
     SELECT *, width_bucket(snr, -30, 30, 12) AS snr_bin,
               width_bucket(rssi, -140, 0, 14) AS rssi_bin
