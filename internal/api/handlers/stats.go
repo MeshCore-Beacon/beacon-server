@@ -31,6 +31,7 @@ func StatsRouter(reader api.Reader) http.Handler {
 	r.Get("/overview", getStatsOverview(reader))
 	r.Get("/observations", getStatsObservations(reader))
 	r.Get("/signal", getSignalStats(reader))
+	r.Get("/paths", getPathStats(reader))
 	r.Get("/observer-comparison", getObserverComparison(reader))
 	r.Get("/payload-breakdown", getStatsPayloadBreakdown(reader))
 	r.Get("/top-nodes", getStatsTopNodes(reader))

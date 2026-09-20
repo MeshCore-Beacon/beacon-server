@@ -2503,6 +2503,78 @@
                 }
             }
         },
+        "/stats/paths": {
+            "get": {
+                "description": "Counts stored receptions in [since, until), at most 30 days. Hash widths count only validated nonempty ordinary header paths (1/2/3 bytes). Empty paths do not vote for a width. TRACE header paths contain signal readings and are separate. Missing payload type or inconsistent/unsupported path metadata is unclassified. The four categories partition total receptions. Flood paths accumulate entries; direct paths contain remaining entries, so counts do not measure distance or a complete traversed route. UTC hourly buckets are clipped to the window; missing hours are omitted.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Stats"
+                ],
+                "summary": "Received path-entry and hash-width distributions",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Inclusive start, epoch milliseconds (0 through 253402300799999)",
+                        "name": "since",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Exclusive end, epoch milliseconds; at most 30 days after since",
+                        "name": "until",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated reception IATA codes",
+                        "name": "iatas",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Region ID, expands to member IATAs",
+                        "name": "regionId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Region slug, expands to member IATAs",
+                        "name": "region",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PathStats"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
         "/stats/payload-breakdown": {
             "get": {
                 "produces": [
@@ -4486,6 +4558,101 @@
                     }
                 },
                 "nextCursor": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.PathHashWidth": {
+            "type": "object",
+            "properties": {
+                "bytes": {
+                    "type": "integer"
+                },
+                "receptions": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.PathHour": {
+            "type": "object",
+            "properties": {
+                "empty": {
+                    "type": "integer"
+                },
+                "hour": {
+                    "type": "integer"
+                },
+                "oneByte": {
+                    "type": "integer"
+                },
+                "receptions": {
+                    "type": "integer"
+                },
+                "threeByte": {
+                    "type": "integer"
+                },
+                "trace": {
+                    "type": "integer"
+                },
+                "twoByte": {
+                    "type": "integer"
+                },
+                "unclassified": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.PathLengthBin": {
+            "type": "object",
+            "properties": {
+                "entries": {
+                    "type": "integer"
+                },
+                "receptions": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.PathStats": {
+            "type": "object",
+            "properties": {
+                "empty": {
+                    "type": "integer"
+                },
+                "hashWidths": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PathHashWidth"
+                    }
+                },
+                "hashed": {
+                    "type": "integer"
+                },
+                "hourly": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PathHour"
+                    }
+                },
+                "pathLengths": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PathLengthBin"
+                    }
+                },
+                "receptions": {
+                    "type": "integer"
+                },
+                "since": {
+                    "type": "integer"
+                },
+                "trace": {
+                    "type": "integer"
+                },
+                "unclassified": {
+                    "type": "integer"
+                },
+                "until": {
                     "type": "integer"
                 }
             }

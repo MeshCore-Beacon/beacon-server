@@ -164,6 +164,9 @@ type Reader interface {
 	// GetSignalStats aggregates retained reception readings in [since, until).
 	GetSignalStats(ctx context.Context, since, until time.Time, iatas []string) (*SignalStats, error)
 
+	// GetPathStats counts received path entries and validated ordinary hash widths.
+	GetPathStats(ctx context.Context, since, until time.Time, iatas []string) (*PathStats, error)
+
 	// GetStatsPayloadBreakdown returns observation counts grouped by payload type.
 	// Pass nil for iatas to return stats across all IATAs.
 	// since defines the start of the window; pass zero time for default (last 24h).

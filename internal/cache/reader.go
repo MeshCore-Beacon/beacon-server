@@ -30,6 +30,7 @@ const (
 	keyStatsOverviewPrefix     = "beacon:stats:overview:"
 	keyStatsObservationsPrefix = "beacon:stats:observations:"
 	keySignalStatsPrefix       = "beacon:stats:signal:"
+	keyPathStatsPrefix         = "beacon:stats:paths:"
 	keyStatsBreakdownPrefix    = "beacon:stats:breakdown:"
 	keyStatsTopNodesPrefix     = "beacon:stats:top-nodes:"
 	keyStatsTopObsPrefix       = "beacon:stats:top-observers:"

@@ -70,6 +70,10 @@ func (s stubReader) GetSignalStats(context.Context, time.Time, time.Time, []stri
 	return nil, nil
 }
 
+func (s stubReader) GetPathStats(context.Context, time.Time, time.Time, []string) (*api.PathStats, error) {
+	return nil, nil
+}
+
 func (s stubReader) GetObserverComparison(ctx context.Context, a, b uuid.UUID, since, until time.Time, iatas []string) (*api.ObserverComparison, error) {
 	if s.getObserverComparison != nil {
 		return s.getObserverComparison(ctx, a, b, since, until, iatas)

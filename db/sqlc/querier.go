@@ -79,6 +79,10 @@ type Querier interface {
 	// Return distinct observation IATAs in first-heard order for path resolution,
 	// without fetching full observations separately for every trace packet.
 	GetPacketsByTraceTag(ctx context.Context, decode string) ([]GetPacketsByTraceTagRow, error)
+	// Header contents per reception, not a complete traversed route. TRACE paths
+	// contain SNR bytes. Missing legacy payload types cannot safely vote for widths.
+	// Keep bpchar index access in both custom and generic prepared plans.
+	GetPathStats(ctx context.Context, arg GetPathStatsParams) ([]GetPathStatsRow, error)
 	GetRadioPresets(ctx context.Context, arg GetRadioPresetsParams) ([]MvRadioPreset, error)
 	GetRegion(ctx context.Context, id int32) (GetRegionRow, error)
 	GetRegionBySlug(ctx context.Context, slug string) (GetRegionBySlugRow, error)
