@@ -115,6 +115,19 @@ CREATE MATERIALIZED VIEW backup_materialized AS SELECT count(*) AS count FROM ba
 	if err != nil {
 		t.Fatal(err)
 	}
+	verify := exec.CommandContext(ctx, binary, "-verify", output, "-max-bytes", "16777216", "-timeout", "30s")
+	verify.Env = []string{"PATH=" + dir} // verification needs no PostgreSQL client or connection
+	message, err := verify.CombinedOutput()
+	if err != nil || !bytes.Contains(message, []byte("structure and checksums verified")) || bytes.Contains(message, []byte("café")) {
+		t.Fatal("exact command could not verify its export offline")
+	}
+	corrupt := filepath.Join(dir, "corrupt.tar.gz")
+	if err := os.WriteFile(corrupt, original[:len(original)-1], 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.CommandContext(ctx, binary, "-verify", corrupt).Run(); err == nil {
+		t.Fatal("exact command accepted a truncated export")
+	}
 	for _, failure := range []string{"existing", "size", "connection", "timeout"} {
 		t.Run(failure, func(t *testing.T) {
 			failedOutput := filepath.Join(dir, failure+".tar.gz")
@@ -212,5 +225,5 @@ CREATE MATERIALIZED VIEW backup_materialized AS SELECT count(*) AS count FROM ba
 	if err := target.QueryRow(ctx, "INSERT INTO backup_fixture (message) VALUES ('next') RETURNING id").Scan(&nextID); err != nil || nextID != 3 {
 		t.Fatal("identity sequence did not survive restore")
 	}
-	t.Log("exact command restored all migrations, columns, Unicode/bytea/JSON data, relationships, views and identity sequence")
+	t.Log("exact command verified its export offline and restored all migrations, columns, Unicode/bytea/JSON data, relationships, views and identity sequence")
 }

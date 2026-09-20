@@ -1,13 +1,14 @@
-# Database and saved-config export
+# Database and saved-config export and verification
 
-`beacon-backup` is the export foundation for issue #72. It produces a private,
-versioned `.tar.gz` using PostgreSQL's `pg_dump`. It does not yet provide a web
-interface, account login, scheduled/remote storage or automatic import.
+`beacon-backup` is the export and archive-validation foundation for issue #72. It
+produces a private, versioned `.tar.gz` using PostgreSQL's `pg_dump` and can verify
+an existing bundle offline. It does not yet provide a web interface, account
+login, scheduled/remote storage or automatic import.
 
-Build it with `go build ./cmd/beacon-backup`. Install `pg_dump` in the same runtime
-as this command; an installation on the Docker host does not install it inside an
-app container. Use a client of the same major version as the source PostgreSQL
-server; an older client cannot dump a newer server.
+Build it with `go build ./cmd/beacon-backup`. For exports, install `pg_dump` in the
+same runtime as this command; an installation on the Docker host does not install
+it inside an app container. Use a client of the same major version as the source
+PostgreSQL server; an older client cannot dump a newer server.
 
 Set libpq's standard `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER` and TLS settings.
 `PGDATABASE` is required and must be a plain database name. Prefer a private
@@ -59,12 +60,43 @@ waiting indefinitely behind schema changes. Export failure publishes no backup;
 check the client version, privileges, connection settings and available capacity
 privately. The command deliberately does not expose raw client diagnostics.
 
+## Verify an existing archive
+
+```sh
+beacon-backup -verify /private/beacon-20260913.tar.gz
+```
+
+Verification reads a regular file without extracting members, writing files,
+executing SQL or connecting to PostgreSQL, Redis or MQTT. It needs neither a
+configuration file nor `pg_dump` or connection credentials. Do not combine
+`-verify` with the export-only `-config` or `-output` flags.
+
+The verifier accepts the native format-1 bundle: exactly the three fixed regular
+members with 0600 modes and USTAR headers (or the size-only PAX header needed for
+SQL over 8 GiB). It rejects duplicates, unexpected paths, links, devices, other
+extended metadata, incomplete tar/gzip endings and trailing or concatenated
+streams. Manifest fields must be known, with no duplicate keys or case aliases;
+the payload sizes and SHA-256 hashes must match the bytes actually read.
+
+The same `-max-bytes` SQL limit applies, with a separate 1 MiB config limit and
+64 KiB manifest limit. Compressed input is capped at the SQL limit plus 1% and
+2 MiB, matching the exporter. Headers and decompressed data are bounded too;
+SQL and config are hashed as streams, without keeping their contents in memory.
+The ten-minute default `-timeout` and interrupt handling check cancellation
+between reads; they cannot interrupt a blocked filesystem read.
+
+Exit status 0 means the archive structure and checksums passed. Failure returns
+a nonzero status with no payload, manifest values or input path in its diagnostic.
+The manifest is not signed: verification does **not** establish authenticity,
+safe SQL, configuration validity or restorability. It does not make an untrusted
+dump safe to restore, and does not provide import/overwrite or deployment recovery.
+
 ## Restore verification
 
-Use trusted bundles only: PostgreSQL dumps can contain executable SQL. Inspect
-the fixed members, verify the gzip stream and the manifest's payload sizes and
-hashes, and extract into private staging. For a **new, empty disposable database**,
-with its own explicit `PGDATABASE` and target-role connection settings:
+Use trusted bundles only: PostgreSQL dumps can contain executable SQL. Run the
+archive verification above, then extract into private staging. For a
+**new, empty disposable database**, with its own explicit `PGDATABASE` and
+target-role connection settings:
 
 ```sh
 psql -X --set ON_ERROR_STOP=on --single-transaction --file database.sql
@@ -81,8 +113,9 @@ PostgreSQL references: [pg_dump](https://www.postgresql.org/docs/16/app-pgdump.h
 [password files](https://www.postgresql.org/docs/16/libpq-pgpass.html).
 
 CI runs the compiled command and its PostgreSQL round-trip test with a dedicated
-PostgreSQL 16 service. To repeat it privately, build the command, set the `PG*`
-connection variables for an isolated test server and set
+PostgreSQL 16 service. The test also verifies the export offline with no client on
+PATH or connection settings, and rejects a truncated copy. To repeat it privately,
+build the command, set the `PG*` connection variables for an isolated test server and set
 `BEACON_BACKUP_TEST_POSTGRES=1` plus `BEACON_BACKUP_TEST_BINARY` to the command's
 absolute path. Run `go test ./internal/backup -run '^TestExportPostgres$' -v`.
 The test role needs permission to create/drop its two randomly named databases;
