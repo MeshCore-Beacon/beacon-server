@@ -94,21 +94,6 @@ type ResolvedHop struct {
 	Nodes      []ResolvedNode `json:"nodes"` // empty for "none", one for "high", multiple for "ambiguous"
 }
 
-// PacketEndpointSnapshot is the internal storage shape for an observation's
-// endpoint resolution at ingest. Names and confidence are preserved even when
-// the current node registry changes. REST/WS expose the existing per-endpoint fields.
-type PacketEndpointSnapshot struct {
-	Source      *ResolvedHop `json:"source,omitempty"`
-	Destination *ResolvedHop `json:"destination,omitempty"`
-}
-
-// HasResolvedNodes distinguishes a historical capture from an unresolved lookup
-// that should be retried when a node becomes known (including a first advert).
-func (s PacketEndpointSnapshot) HasResolvedNodes() bool {
-	return (s.Source != nil && len(s.Source.Nodes) > 0) ||
-		(s.Destination != nil && len(s.Destination.Nodes) > 0)
-}
-
 // ResolvedNode is a node reference within a resolved path hop.
 type ResolvedNode struct {
 	ID        uuid.UUID `json:"id"`

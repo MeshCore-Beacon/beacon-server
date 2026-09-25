@@ -489,10 +489,11 @@ SELECT
   COALESCE(po.hash_size, 0::smallint) AS latest_observer_hash_size,
   COALESCE(po.hop_count, 0::smallint) AS latest_observer_hop_count,
   po.path_bytes AS latest_observer_path_bytes,
-  po.resolved_endpoints AS latest_observer_resolved_endpoints
+  p.raw_payload,
+  p.origin_pubkey
 FROM packets p
 LEFT JOIN LATERAL (
-  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes, resolved_endpoints
+  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes
   FROM packet_observations
   WHERE packet_hash = p.packet_hash
   ORDER BY heard_at DESC
@@ -599,12 +600,13 @@ SELECT
   COALESCE(po.hash_size, 0::smallint) AS latest_observer_hash_size,
   COALESCE(po.hop_count, 0::smallint) AS latest_observer_hop_count,
   po.path_bytes AS latest_observer_path_bytes,
-  po.resolved_endpoints AS latest_observer_resolved_endpoints
+  p.raw_payload,
+  p.origin_pubkey
 FROM page sh
 CROSS JOIN saturation sat
 JOIN packets p ON p.packet_hash = sh.packet_hash
 LEFT JOIN LATERAL (
-  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes, resolved_endpoints
+  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes
   FROM packet_observations
   WHERE packet_hash = p.packet_hash
   ORDER BY heard_at DESC
@@ -643,7 +645,8 @@ SELECT
   po.hash_size AS latest_observer_hash_size,
   po.hop_count AS latest_observer_hop_count,
   po.path_bytes AS latest_observer_path_bytes,
-  po.resolved_endpoints AS latest_observer_resolved_endpoints,
+  p.raw_payload,
+  p.origin_pubkey,
   ts.name AS scope_name
 FROM packets p
 JOIN packet_observations po ON po.packet_hash = p.packet_hash
@@ -729,10 +732,9 @@ INSERT INTO packet_observations (
   coding_rate,
   source_broker,
   payload_type,
-  resolved_endpoints,
   airtime_ms
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
 )
 ON CONFLICT (packet_hash, observer_id) DO NOTHING
 RETURNING *;
@@ -794,6 +796,11 @@ WHERE id = ANY($1::uuid[]);
 
 -- name: GetNodeByPubkey :one
 SELECT id FROM nodes WHERE public_key = $1;
+
+-- name: GetNodesByPubkeys :many
+SELECT id, public_key, name, latitude, longitude
+FROM nodes
+WHERE public_key = ANY(@pubkeys::bytea[]);
 
 -- name: ListNodes :many
 -- Limit the filtered node page before enriching IATA membership and neighbours.
@@ -1412,6 +1419,19 @@ CROSS JOIN LATERAL (
 ) n
 WHERE ns.iata = $1
   AND ns.prefix_1 = ANY($2::bytea[]);
+
+-- name: ResolveEndpointHashPairs :many
+-- Batch form of ResolveEndpointHashes for a page of packets. Matches the cross
+-- product of IATAs and hashes; callers pick out the pairs they asked for.
+SELECT ns.iata, ns.prefix_1 AS hash, n.id AS node_id, n.name, n.latitude, n.longitude, n.public_key
+FROM node_short_ids ns
+CROSS JOIN LATERAL (
+  SELECT id, name, latitude, longitude, public_key
+  FROM nodes WHERE id = ns.node_id
+  LIMIT 1
+) n
+WHERE ns.iata = ANY(@iatas::bpchar[])
+  AND ns.prefix_1 = ANY(@hashes::bytea[]);
 
 -- name: ResolvePathHashesP2 :many
 SELECT ns.prefix_4 AS hash, n.id AS node_id, n.name, n.latitude, n.longitude, n.public_key
