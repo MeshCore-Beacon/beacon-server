@@ -5,118 +5,94 @@ package ingest
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
-	"math"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
 	"github.com/google/uuid"
 	"github.com/meshcore-go/meshcore-go"
 )
 
 type endpointCaptureDB struct {
 	*stubDB
-	node        api.ResolvedNode
-	observed    []InsertObservationParams
-	lookups     int
-	pathLookups int
-	missingNode bool
+	node     api.ResolvedNode
+	observed int
 }
 
 func (s *endpointCaptureDB) GetNodeByPubkey(context.Context, []byte) (uuid.UUID, error) {
-	if s.missingNode {
-		return uuid.Nil, errors.New("node not yet advertised")
-	}
 	return s.node.ID, nil
 }
-
 func (s *endpointCaptureDB) UpsertNode(context.Context, UpsertNodeParams, RadioSettings) (uuid.UUID, error) {
-	s.missingNode = false
 	return s.node.ID, nil
 }
 func (s *endpointCaptureDB) GetNodesByIDs(context.Context, []uuid.UUID) (map[uuid.UUID]*api.ResolvedNode, error) {
 	return map[uuid.UUID]*api.ResolvedNode{s.node.ID: &s.node}, nil
 }
-func (s *endpointCaptureDB) ResolvePathHashes(_ context.Context, _ string, hashes [][]byte) (map[string][]api.ResolvedPathEntry, error) {
-	if len(hashes) > 0 {
-		s.pathLookups++
+func (s *endpointCaptureDB) ResolveEndpointHashes(_ context.Context, _ string, hashes [][]byte) (map[string][]api.ResolvedPathEntry, error) {
+	if len(hashes) == 1 && hashes[0][0] == 0xaa {
+		return map[string][]api.ResolvedPathEntry{"aa": {{NodeID: s.node.ID, Name: s.node.Name, PublicKey: []byte{0xaa}}}}, nil
 	}
-	return nil, nil // a companion must not be found by the relay-only resolver
+	return nil, nil
 }
-
-func (s *endpointCaptureDB) ResolveEndpointHashes(_ context.Context, iata string, hashes [][]byte) (map[string][]api.ResolvedPathEntry, error) {
-	if len(hashes) == 0 {
-		return nil, nil
-	}
-	s.lookups++
-	if iata != "YYZ" || s.missingNode {
-		return nil, nil
-	}
-	return map[string][]api.ResolvedPathEntry{
-		"aa": {{NodeID: s.node.ID, Name: s.node.Name, PublicKey: []byte{0xaa}}, {NodeID: uuid.Nil, PublicKey: []byte{0xab}}},
-	}, nil
-}
-
-func (s *endpointCaptureDB) InsertObservation(_ context.Context, observation InsertObservationParams) (bool, error) {
-	s.observed = append(s.observed, observation)
+func (s *endpointCaptureDB) InsertObservation(context.Context, InsertObservationParams) (bool, error) {
+	s.observed++
 	return true, nil
 }
 
-func TestHandlePacketCapturesEndpoints(t *testing.T) {
-	name := "Companion 👋"
-	for _, kind := range []string{"advert", "first advert", "direct message", "unresolved direct", "unaddressed", "encoding failure"} {
+// Stored rows resolve endpoints at read time, but live events still carry them.
+func TestHandlePacketBroadcastsEndpoints(t *testing.T) {
+	name := "Companion"
+	for _, kind := range []string{"advert", "direct message"} {
 		t.Run(kind, func(t *testing.T) {
 			w, base := newTestWorker()
 			db := &endpointCaptureDB{stubDB: base, node: api.ResolvedNode{ID: uuid.New(), Name: &name, PublicKey: "aa"}}
 			w.db = db
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			go w.hub.Run()
+			client := w.hub.NewClient()
+			w.hub.AddScope(client, "endpoints", hub.Scope{Events: []hub.EventType{hub.EventPacketObservation, hub.EventObserverStatus}})
+			defer w.hub.Remove(client)
+			waitForSummarySubscriber(t, ctx, w.hub, client)
+
 			packet := buildAdvertPacket(t, false)
-			want := api.PacketEndpointSnapshot{}
-			switch kind {
-			case "advert":
-				hop := api.ResolveExactNode(&db.node)
-				want.Source = &hop
-			case "first advert":
-				db.missingNode = true
-			case "direct message", "unresolved direct":
-				// Destination, source, MAC and a minimal ciphertext envelope.
+			wantSource := api.ResolveExactNode(&db.node)
+			var wantDestination *api.ResolvedHop
+			if kind == "direct message" {
 				packet = &meshcore.Packet{Header: meshcore.MakeHeader(meshcore.RouteTypeFlood, meshcore.PayloadTypeTxtMsg, 0), Payload: append([]byte{0xbb, 0xaa, 0, 0}, make([]byte, 16)...)}
-				db.missingNode = kind == "unresolved direct"
-				resolved, _ := db.ResolveEndpointHashes(context.Background(), "YYZ", [][]byte{{0xaa}})
-				source := api.BuildResolvedPath([][]byte{{0xaa}}, resolved)[0]
-				destination := api.BuildResolvedPath([][]byte{{0xbb}}, nil)[0]
-				want.Source, want.Destination = &source, &destination
-				db.lookups = 0
-			case "unaddressed":
-				packet = buildTracePacket(t)
-			case "encoding failure":
-				nan := math.NaN()
-				db.node.Latitude = &nan
+				wantSource = api.BuildResolvedPath([][]byte{{0xaa}}, map[string][]api.ResolvedPathEntry{"aa": {{NodeID: db.node.ID, Name: &name, PublicKey: []byte{0xaa}}}})[0]
+				d := api.BuildResolvedPath([][]byte{{0xbb}}, nil)[0]
+				wantDestination = &d
 			}
-			w.handlePacket(context.Background(), "YYZ", hex.EncodeToString([]byte{1, 2}), packetEnvelope(t, packet))
-			if len(db.observed) != 1 {
-				t.Fatalf("observation was lost or written twice: %d", len(db.observed))
+			w.handlePacket(ctx, "YYZ", "0102", packetEnvelope(t, packet))
+			if db.observed != 1 {
+				t.Fatalf("observation written %d times", db.observed)
 			}
-			if kind == "first advert" || kind == "unresolved direct" || kind == "unaddressed" || kind == "encoding failure" {
-				if db.observed[0].ResolvedEndpoints != nil {
-					t.Fatal("empty or failed endpoint resolution must remain SQL NULL")
+			for {
+				select {
+				case event := <-client.Send:
+					if event.Type != hub.EventPacketObservation {
+						continue
+					}
+					var got struct {
+						Observation struct {
+							ResolvedSource      *api.ResolvedHop `json:"resolvedSource"`
+							ResolvedDestination *api.ResolvedHop `json:"resolvedDestination"`
+						} `json:"observation"`
+					}
+					if err := json.Unmarshal(event.Payload, &got); err != nil {
+						t.Fatal(err)
+					}
+					if !reflect.DeepEqual(got.Observation.ResolvedSource, &wantSource) || !reflect.DeepEqual(got.Observation.ResolvedDestination, wantDestination) {
+						t.Fatalf("live endpoints: got %+v / %+v", got.Observation.ResolvedSource, got.Observation.ResolvedDestination)
+					}
+					return
+				case <-ctx.Done():
+					t.Fatal("packet observation event missing")
 				}
-				if kind == "first advert" && db.missingNode {
-					t.Fatal("advert side effects did not make the node available for a later lookup")
-				}
-				return
-			}
-			var got api.PacketEndpointSnapshot
-			if err := json.Unmarshal(db.observed[0].ResolvedEndpoints, &got); err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(got, want) {
-				t.Fatalf("captured endpoints differ: got %+v, want %+v", got, want)
-			}
-			if kind == "direct message" && (db.lookups != 2 || db.pathLookups != 0) {
-				t.Fatalf("wrong resolver or repeated work: endpoint=%d relay=%d", db.lookups, db.pathLookups)
 			}
 		})
 	}

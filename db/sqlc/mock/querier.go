@@ -339,6 +339,21 @@ func (mr *MockQuerierMockRecorder) GetNodesByIDs(ctx, dollar_1 any) *gomock.Call
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNodesByIDs", reflect.TypeOf((*MockQuerier)(nil).GetNodesByIDs), ctx, dollar_1)
 }
 
+// GetNodesByPubkeys mocks base method.
+func (m *MockQuerier) GetNodesByPubkeys(ctx context.Context, pubkeys [][]byte) ([]db.GetNodesByPubkeysRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetNodesByPubkeys", ctx, pubkeys)
+	ret0, _ := ret[0].([]db.GetNodesByPubkeysRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetNodesByPubkeys indicates an expected call of GetNodesByPubkeys.
+func (mr *MockQuerierMockRecorder) GetNodesByPubkeys(ctx, pubkeys any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNodesByPubkeys", reflect.TypeOf((*MockQuerier)(nil).GetNodesByPubkeys), ctx, pubkeys)
+}
+
 // GetObserverActivityHourly mocks base method.
 func (m *MockQuerier) GetObserverActivityHourly(ctx context.Context, arg db.GetObserverActivityHourlyParams) ([]db.GetObserverActivityHourlyRow, error) {
 	m.ctrl.T.Helper()
@@ -1389,6 +1404,21 @@ func (m *MockQuerier) RefreshTopTalkers(ctx context.Context) error {
 func (mr *MockQuerierMockRecorder) RefreshTopTalkers(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RefreshTopTalkers", reflect.TypeOf((*MockQuerier)(nil).RefreshTopTalkers), ctx)
+}
+
+// ResolveEndpointHashPairs mocks base method.
+func (m *MockQuerier) ResolveEndpointHashPairs(ctx context.Context, arg db.ResolveEndpointHashPairsParams) ([]db.ResolveEndpointHashPairsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ResolveEndpointHashPairs", ctx, arg)
+	ret0, _ := ret[0].([]db.ResolveEndpointHashPairsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ResolveEndpointHashPairs indicates an expected call of ResolveEndpointHashPairs.
+func (mr *MockQuerierMockRecorder) ResolveEndpointHashPairs(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolveEndpointHashPairs", reflect.TypeOf((*MockQuerier)(nil).ResolveEndpointHashPairs), ctx, arg)
 }
 
 // ResolveEndpointHashes mocks base method.

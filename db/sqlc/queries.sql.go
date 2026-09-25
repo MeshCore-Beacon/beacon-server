@@ -608,6 +608,46 @@ func (q *Queries) GetNodesByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]Ge
 	return items, nil
 }
 
+const getNodesByPubkeys = `-- name: GetNodesByPubkeys :many
+SELECT id, public_key, name, latitude, longitude
+FROM nodes
+WHERE public_key = ANY($1::bytea[])
+`
+
+type GetNodesByPubkeysRow struct {
+	ID        uuid.UUID `json:"id"`
+	PublicKey []byte    `json:"public_key"`
+	Name      *string   `json:"name"`
+	Latitude  *float64  `json:"latitude"`
+	Longitude *float64  `json:"longitude"`
+}
+
+func (q *Queries) GetNodesByPubkeys(ctx context.Context, pubkeys [][]byte) ([]GetNodesByPubkeysRow, error) {
+	rows, err := q.db.Query(ctx, getNodesByPubkeys, pubkeys)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetNodesByPubkeysRow{}
+	for rows.Next() {
+		var i GetNodesByPubkeysRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicKey,
+			&i.Name,
+			&i.Latitude,
+			&i.Longitude,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getObserverActivityHourly = `-- name: GetObserverActivityHourly :many
 SELECT
   date_bin($3::interval, bucket, TIMESTAMPTZ 'epoch')::timestamptz AS bucket,
@@ -2049,13 +2089,12 @@ INSERT INTO packet_observations (
   coding_rate,
   source_broker,
   payload_type,
-  resolved_endpoints,
   airtime_ms
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
 )
 ON CONFLICT (packet_hash, observer_id) DO NOTHING
-RETURNING id, packet_hash, observer_id, iata, heard_at, path_length_byte, hash_size, hop_count, path_bytes, rssi, snr, propagation_time_ms, radio_freq_mhz, spread_factor, bandwidth_khz, coding_rate, source_broker, payload_type, resolved_endpoints, airtime_ms
+RETURNING id, packet_hash, observer_id, iata, heard_at, path_length_byte, hash_size, hop_count, path_bytes, rssi, snr, propagation_time_ms, radio_freq_mhz, spread_factor, bandwidth_khz, coding_rate, source_broker, payload_type, airtime_ms
 `
 
 type InsertObservationParams struct {
@@ -2076,7 +2115,6 @@ type InsertObservationParams struct {
 	CodingRate        *int16             `json:"coding_rate"`
 	SourceBroker      *string            `json:"source_broker"`
 	PayloadType       *int16             `json:"payload_type"`
-	ResolvedEndpoints []byte             `json:"resolved_endpoints"`
 	AirtimeMs         *float32           `json:"airtime_ms"`
 }
 
@@ -2102,7 +2140,6 @@ func (q *Queries) InsertObservation(ctx context.Context, arg InsertObservationPa
 		arg.CodingRate,
 		arg.SourceBroker,
 		arg.PayloadType,
-		arg.ResolvedEndpoints,
 		arg.AirtimeMs,
 	)
 	var i PacketObservation
@@ -2125,7 +2162,6 @@ func (q *Queries) InsertObservation(ctx context.Context, arg InsertObservationPa
 		&i.CodingRate,
 		&i.SourceBroker,
 		&i.PayloadType,
-		&i.ResolvedEndpoints,
 		&i.AirtimeMs,
 	)
 	return i, err
@@ -2923,7 +2959,7 @@ func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNod
 }
 
 const listObservationsForPacket = `-- name: ListObservationsForPacket :many
-SELECT po.id, po.packet_hash, po.observer_id, po.iata, po.heard_at, po.path_length_byte, po.hash_size, po.hop_count, po.path_bytes, po.rssi, po.snr, po.propagation_time_ms, po.radio_freq_mhz, po.spread_factor, po.bandwidth_khz, po.coding_rate, po.source_broker, po.payload_type, po.resolved_endpoints, po.airtime_ms, o.display_name AS observer_name
+SELECT po.id, po.packet_hash, po.observer_id, po.iata, po.heard_at, po.path_length_byte, po.hash_size, po.hop_count, po.path_bytes, po.rssi, po.snr, po.propagation_time_ms, po.radio_freq_mhz, po.spread_factor, po.bandwidth_khz, po.coding_rate, po.source_broker, po.payload_type, po.airtime_ms, o.display_name AS observer_name
 FROM packet_observations po
 LEFT JOIN observers o ON o.id = po.observer_id
 WHERE po.packet_hash = $1
@@ -2949,7 +2985,6 @@ type ListObservationsForPacketRow struct {
 	CodingRate        *int16             `json:"coding_rate"`
 	SourceBroker      *string            `json:"source_broker"`
 	PayloadType       *int16             `json:"payload_type"`
-	ResolvedEndpoints []byte             `json:"resolved_endpoints"`
 	AirtimeMs         *float32           `json:"airtime_ms"`
 	ObserverName      *string            `json:"observer_name"`
 }
@@ -2982,7 +3017,6 @@ func (q *Queries) ListObservationsForPacket(ctx context.Context, packetHash []by
 			&i.CodingRate,
 			&i.SourceBroker,
 			&i.PayloadType,
-			&i.ResolvedEndpoints,
 			&i.AirtimeMs,
 			&i.ObserverName,
 		); err != nil {
@@ -3216,10 +3250,11 @@ SELECT
   COALESCE(po.hash_size, 0::smallint) AS latest_observer_hash_size,
   COALESCE(po.hop_count, 0::smallint) AS latest_observer_hop_count,
   po.path_bytes AS latest_observer_path_bytes,
-  po.resolved_endpoints AS latest_observer_resolved_endpoints
+  p.raw_payload,
+  p.origin_pubkey
 FROM packets p
 LEFT JOIN LATERAL (
-  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes, resolved_endpoints
+  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes
   FROM packet_observations
   WHERE packet_hash = p.packet_hash
   ORDER BY heard_at DESC
@@ -3249,23 +3284,24 @@ type ListPacketsParams struct {
 }
 
 type ListPacketsRow struct {
-	PacketHash                      []byte             `json:"packet_hash"`
-	PayloadType                     int16              `json:"payload_type"`
-	Summary                         string             `json:"summary"`
-	RouteType                       int16              `json:"route_type"`
-	FirstHeardAt                    pgtype.Timestamptz `json:"first_heard_at"`
-	LastHeardAt                     pgtype.Timestamptz `json:"last_heard_at"`
-	ScopeID                         *int32             `json:"scope_id"`
-	ScopeName                       *string            `json:"scope_name"`
-	ObservationCount                int64              `json:"observation_count"`
-	LatestObserverID                uuid.UUID          `json:"latest_observer_id"`
-	LatestObserverName              *string            `json:"latest_observer_name"`
-	LatestObserverIata              string             `json:"latest_observer_iata"`
-	LatestObserverPathLengthByte    int16              `json:"latest_observer_path_length_byte"`
-	LatestObserverHashSize          int16              `json:"latest_observer_hash_size"`
-	LatestObserverHopCount          int16              `json:"latest_observer_hop_count"`
-	LatestObserverPathBytes         []byte             `json:"latest_observer_path_bytes"`
-	LatestObserverResolvedEndpoints []byte             `json:"latest_observer_resolved_endpoints"`
+	PacketHash                   []byte             `json:"packet_hash"`
+	PayloadType                  int16              `json:"payload_type"`
+	Summary                      string             `json:"summary"`
+	RouteType                    int16              `json:"route_type"`
+	FirstHeardAt                 pgtype.Timestamptz `json:"first_heard_at"`
+	LastHeardAt                  pgtype.Timestamptz `json:"last_heard_at"`
+	ScopeID                      *int32             `json:"scope_id"`
+	ScopeName                    *string            `json:"scope_name"`
+	ObservationCount             int64              `json:"observation_count"`
+	LatestObserverID             uuid.UUID          `json:"latest_observer_id"`
+	LatestObserverName           *string            `json:"latest_observer_name"`
+	LatestObserverIata           string             `json:"latest_observer_iata"`
+	LatestObserverPathLengthByte int16              `json:"latest_observer_path_length_byte"`
+	LatestObserverHashSize       int16              `json:"latest_observer_hash_size"`
+	LatestObserverHopCount       int16              `json:"latest_observer_hop_count"`
+	LatestObserverPathBytes      []byte             `json:"latest_observer_path_bytes"`
+	RawPayload                   []byte             `json:"raw_payload"`
+	OriginPubkey                 []byte             `json:"origin_pubkey"`
 }
 
 // Returns packets with the latest observation rolled in for display.
@@ -3305,7 +3341,8 @@ func (q *Queries) ListPackets(ctx context.Context, arg ListPacketsParams) ([]Lis
 			&i.LatestObserverHashSize,
 			&i.LatestObserverHopCount,
 			&i.LatestObserverPathBytes,
-			&i.LatestObserverResolvedEndpoints,
+			&i.RawPayload,
+			&i.OriginPubkey,
 		); err != nil {
 			return nil, err
 		}
@@ -3344,7 +3381,8 @@ SELECT
   po.hash_size AS latest_observer_hash_size,
   po.hop_count AS latest_observer_hop_count,
   po.path_bytes AS latest_observer_path_bytes,
-  po.resolved_endpoints AS latest_observer_resolved_endpoints,
+  p.raw_payload,
+  p.origin_pubkey,
   ts.name AS scope_name
 FROM packets p
 JOIN packet_observations po ON po.packet_hash = p.packet_hash
@@ -3369,22 +3407,23 @@ type ListPacketsAfterIDParams struct {
 }
 
 type ListPacketsAfterIDRow struct {
-	PacketHash                      []byte             `json:"packet_hash"`
-	PayloadType                     int16              `json:"payload_type"`
-	Summary                         string             `json:"summary"`
-	RouteType                       int16              `json:"route_type"`
-	FirstHeardAt                    pgtype.Timestamptz `json:"first_heard_at"`
-	LastHeardAt                     pgtype.Timestamptz `json:"last_heard_at"`
-	ObservationCount                int64              `json:"observation_count"`
-	LatestObserverID                uuid.UUID          `json:"latest_observer_id"`
-	LatestObserverName              *string            `json:"latest_observer_name"`
-	LatestObserverIata              string             `json:"latest_observer_iata"`
-	LatestObserverPathLengthByte    int16              `json:"latest_observer_path_length_byte"`
-	LatestObserverHashSize          int16              `json:"latest_observer_hash_size"`
-	LatestObserverHopCount          int16              `json:"latest_observer_hop_count"`
-	LatestObserverPathBytes         []byte             `json:"latest_observer_path_bytes"`
-	LatestObserverResolvedEndpoints []byte             `json:"latest_observer_resolved_endpoints"`
-	ScopeName                       *string            `json:"scope_name"`
+	PacketHash                   []byte             `json:"packet_hash"`
+	PayloadType                  int16              `json:"payload_type"`
+	Summary                      string             `json:"summary"`
+	RouteType                    int16              `json:"route_type"`
+	FirstHeardAt                 pgtype.Timestamptz `json:"first_heard_at"`
+	LastHeardAt                  pgtype.Timestamptz `json:"last_heard_at"`
+	ObservationCount             int64              `json:"observation_count"`
+	LatestObserverID             uuid.UUID          `json:"latest_observer_id"`
+	LatestObserverName           *string            `json:"latest_observer_name"`
+	LatestObserverIata           string             `json:"latest_observer_iata"`
+	LatestObserverPathLengthByte int16              `json:"latest_observer_path_length_byte"`
+	LatestObserverHashSize       int16              `json:"latest_observer_hash_size"`
+	LatestObserverHopCount       int16              `json:"latest_observer_hop_count"`
+	LatestObserverPathBytes      []byte             `json:"latest_observer_path_bytes"`
+	RawPayload                   []byte             `json:"raw_payload"`
+	OriginPubkey                 []byte             `json:"origin_pubkey"`
+	ScopeName                    *string            `json:"scope_name"`
 }
 
 // Returns packets with observations after the given observation ID, ordered oldest first.
@@ -3420,7 +3459,8 @@ func (q *Queries) ListPacketsAfterID(ctx context.Context, arg ListPacketsAfterID
 			&i.LatestObserverHashSize,
 			&i.LatestObserverHopCount,
 			&i.LatestObserverPathBytes,
-			&i.LatestObserverResolvedEndpoints,
+			&i.RawPayload,
+			&i.OriginPubkey,
 			&i.ScopeName,
 		); err != nil {
 			return nil, err
@@ -3509,12 +3549,13 @@ SELECT
   COALESCE(po.hash_size, 0::smallint) AS latest_observer_hash_size,
   COALESCE(po.hop_count, 0::smallint) AS latest_observer_hop_count,
   po.path_bytes AS latest_observer_path_bytes,
-  po.resolved_endpoints AS latest_observer_resolved_endpoints
+  p.raw_payload,
+  p.origin_pubkey
 FROM page sh
 CROSS JOIN saturation sat
 JOIN packets p ON p.packet_hash = sh.packet_hash
 LEFT JOIN LATERAL (
-  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes, resolved_endpoints
+  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes
   FROM packet_observations
   WHERE packet_hash = p.packet_hash
   ORDER BY heard_at DESC
@@ -3538,26 +3579,27 @@ type ListPacketsByIATAsParams struct {
 }
 
 type ListPacketsByIATAsRow struct {
-	PacketHash                      []byte             `json:"packet_hash"`
-	PayloadType                     int16              `json:"payload_type"`
-	Summary                         string             `json:"summary"`
-	RouteType                       int16              `json:"route_type"`
-	FirstHeardAt                    pgtype.Timestamptz `json:"first_heard_at"`
-	LastHeardAt                     pgtype.Timestamptz `json:"last_heard_at"`
-	ScopeID                         *int32             `json:"scope_id"`
-	ScopeName                       *string            `json:"scope_name"`
-	SiteHeardAt                     pgtype.Timestamptz `json:"site_heard_at"`
-	ScanSaturated                   bool               `json:"scan_saturated"`
-	ScanFloor                       pgtype.Timestamptz `json:"scan_floor"`
-	ObservationCount                int64              `json:"observation_count"`
-	LatestObserverID                uuid.UUID          `json:"latest_observer_id"`
-	LatestObserverName              *string            `json:"latest_observer_name"`
-	LatestObserverIata              string             `json:"latest_observer_iata"`
-	LatestObserverPathLengthByte    int16              `json:"latest_observer_path_length_byte"`
-	LatestObserverHashSize          int16              `json:"latest_observer_hash_size"`
-	LatestObserverHopCount          int16              `json:"latest_observer_hop_count"`
-	LatestObserverPathBytes         []byte             `json:"latest_observer_path_bytes"`
-	LatestObserverResolvedEndpoints []byte             `json:"latest_observer_resolved_endpoints"`
+	PacketHash                   []byte             `json:"packet_hash"`
+	PayloadType                  int16              `json:"payload_type"`
+	Summary                      string             `json:"summary"`
+	RouteType                    int16              `json:"route_type"`
+	FirstHeardAt                 pgtype.Timestamptz `json:"first_heard_at"`
+	LastHeardAt                  pgtype.Timestamptz `json:"last_heard_at"`
+	ScopeID                      *int32             `json:"scope_id"`
+	ScopeName                    *string            `json:"scope_name"`
+	SiteHeardAt                  pgtype.Timestamptz `json:"site_heard_at"`
+	ScanSaturated                bool               `json:"scan_saturated"`
+	ScanFloor                    pgtype.Timestamptz `json:"scan_floor"`
+	ObservationCount             int64              `json:"observation_count"`
+	LatestObserverID             uuid.UUID          `json:"latest_observer_id"`
+	LatestObserverName           *string            `json:"latest_observer_name"`
+	LatestObserverIata           string             `json:"latest_observer_iata"`
+	LatestObserverPathLengthByte int16              `json:"latest_observer_path_length_byte"`
+	LatestObserverHashSize       int16              `json:"latest_observer_hash_size"`
+	LatestObserverHopCount       int16              `json:"latest_observer_hop_count"`
+	LatestObserverPathBytes      []byte             `json:"latest_observer_path_bytes"`
+	RawPayload                   []byte             `json:"raw_payload"`
+	OriginPubkey                 []byte             `json:"origin_pubkey"`
 }
 
 // IATA-filtered packet list, driven from idx_observations_iata_heard.
@@ -3612,7 +3654,8 @@ func (q *Queries) ListPacketsByIATAs(ctx context.Context, arg ListPacketsByIATAs
 			&i.LatestObserverHashSize,
 			&i.LatestObserverHopCount,
 			&i.LatestObserverPathBytes,
-			&i.LatestObserverResolvedEndpoints,
+			&i.RawPayload,
+			&i.OriginPubkey,
 		); err != nil {
 			return nil, err
 		}
@@ -3949,6 +3992,63 @@ REFRESH MATERIALIZED VIEW CONCURRENTLY mv_top_talkers_by_iata
 func (q *Queries) RefreshTopTalkers(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, refreshTopTalkers)
 	return err
+}
+
+const resolveEndpointHashPairs = `-- name: ResolveEndpointHashPairs :many
+SELECT ns.iata, ns.prefix_1 AS hash, n.id AS node_id, n.name, n.latitude, n.longitude, n.public_key
+FROM node_short_ids ns
+CROSS JOIN LATERAL (
+  SELECT id, name, latitude, longitude, public_key
+  FROM nodes WHERE id = ns.node_id
+  LIMIT 1
+) n
+WHERE ns.iata = ANY($1::bpchar[])
+  AND ns.prefix_1 = ANY($2::bytea[])
+`
+
+type ResolveEndpointHashPairsParams struct {
+	Iatas  []string `json:"iatas"`
+	Hashes [][]byte `json:"hashes"`
+}
+
+type ResolveEndpointHashPairsRow struct {
+	Iata      string    `json:"iata"`
+	Hash      []byte    `json:"hash"`
+	NodeID    uuid.UUID `json:"node_id"`
+	Name      *string   `json:"name"`
+	Latitude  *float64  `json:"latitude"`
+	Longitude *float64  `json:"longitude"`
+	PublicKey []byte    `json:"public_key"`
+}
+
+// Batch form of ResolveEndpointHashes for a page of packets. Matches the cross
+// product of IATAs and hashes; callers pick out the pairs they asked for.
+func (q *Queries) ResolveEndpointHashPairs(ctx context.Context, arg ResolveEndpointHashPairsParams) ([]ResolveEndpointHashPairsRow, error) {
+	rows, err := q.db.Query(ctx, resolveEndpointHashPairs, arg.Iatas, arg.Hashes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ResolveEndpointHashPairsRow{}
+	for rows.Next() {
+		var i ResolveEndpointHashPairsRow
+		if err := rows.Scan(
+			&i.Iata,
+			&i.Hash,
+			&i.NodeID,
+			&i.Name,
+			&i.Latitude,
+			&i.Longitude,
+			&i.PublicKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const resolveEndpointHashes = `-- name: ResolveEndpointHashes :many

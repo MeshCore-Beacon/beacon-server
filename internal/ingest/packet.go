@@ -55,7 +55,6 @@ type InsertObservationParams struct {
 	CodingRate        int16
 	SourceBroker      string
 	PayloadType       int16
-	ResolvedEndpoints json.RawMessage
 	AirtimeMs         *float32 // nil when the observer never reported costable radio settings
 }
 
@@ -763,7 +762,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	if err != nil {
 		w.log.Error(fmt.Sprintf("db: get observer radio failed for %s", pubkeyHex), "error", err)
 	}
-	// Save the same endpoint resolution used by the live event in the observation INSERT.
+	// Endpoints for the live event only; stored rows resolve them at read time.
 	var resolvedSource, resolvedDestination *api.ResolvedHop
 	if packet.PayloadType() == meshcore.PayloadTypeAdvert && originPubkey != nil {
 		// Exact match: ADVERT carries the sender's real identity pubkey, not a
@@ -784,15 +783,6 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		if r, err := w.db.ResolveEndpointHashes(ctx, iata, [][]byte{destHashByte}); err == nil {
 			hop := api.BuildResolvedPath([][]byte{destHashByte}, r)[0]
 			resolvedDestination = &hop
-		}
-	}
-	var resolvedEndpoints json.RawMessage
-	snapshot := api.PacketEndpointSnapshot{Source: resolvedSource, Destination: resolvedDestination}
-	if snapshot.HasResolvedNodes() {
-		resolvedEndpoints, err = json.Marshal(snapshot)
-		if err != nil {
-			w.log.Error("endpoint snapshot encoding failed", "error", err)
-			resolvedEndpoints = nil // optional enrichment must not discard the observation
 		}
 	}
 	// Airtime is costed from the frame as received; zero radio columns mean the
@@ -820,7 +810,6 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		CodingRate:        radio.CR,
 		SourceBroker:      w.cfg.BrokerName,
 		PayloadType:       int16(packet.PayloadType()),
-		ResolvedEndpoints: resolvedEndpoints,
 		AirtimeMs:         airtimeMs,
 	}
 	inserted, err := w.db.InsertObservation(ctx, oParams)

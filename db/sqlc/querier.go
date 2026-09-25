@@ -54,6 +54,7 @@ type Querier interface {
 	// Returns the neighbors of a node with details, ordered by most recently seen.
 	GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]GetNodeNeighborsRow, error)
 	GetNodesByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]GetNodesByIDsRow, error)
+	GetNodesByPubkeys(ctx context.Context, pubkeys [][]byte) ([]GetNodesByPubkeysRow, error)
 	// Hour-or-coarser buckets summed from the hourly rollup; same COALESCE-plus-count shape as the raw query.
 	GetObserverActivityHourly(ctx context.Context, arg GetObserverActivityHourlyParams) ([]GetObserverActivityHourlyRow, error)
 	GetObserverActivityHourlyPayloadTypes(ctx context.Context, arg GetObserverActivityHourlyPayloadTypesParams) ([]GetObserverActivityHourlyPayloadTypesRow, error)
@@ -224,6 +225,9 @@ type Querier interface {
 	RefreshTopNodes(ctx context.Context) error
 	RefreshTopObservers(ctx context.Context) error
 	RefreshTopTalkers(ctx context.Context) error
+	// Batch form of ResolveEndpointHashes for a page of packets. Matches the cross
+	// product of IATAs and hashes; callers pick out the pairs they asked for.
+	ResolveEndpointHashPairs(ctx context.Context, arg ResolveEndpointHashPairsParams) ([]ResolveEndpointHashPairsRow, error)
 	// Logical endpoints can be any advertised role, unlike intermediate relay hops.
 	// Endpoint hashes are always one byte; use the existing (iata, prefix_1) index.
 	// LIMIT 1 keeps generic plans on a node PK lookup per candidate instead of
