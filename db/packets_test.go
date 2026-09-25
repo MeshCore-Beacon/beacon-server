@@ -642,3 +642,23 @@ func TestListPackets_UnfilteredKeepsGlobalQuery(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestDeleteOldPackets_LoopsUntilShortBatch(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mock := mockdb.NewMockQuerier(ctrl)
+	store := &Store{q: mock}
+	cutoff := time.Date(2026, 9, 18, 0, 0, 0, 0, time.UTC)
+
+	byCutoff := gomock.Cond(func(p sqlc.DeleteOldPacketsParams) bool {
+		return p.Cutoff.Time.Equal(cutoff) && p.BatchSize == packetDeleteBatch
+	})
+	gomock.InOrder(
+		mock.EXPECT().DeleteOldPackets(gomock.Any(), byCutoff).Return(int64(packetDeleteBatch), nil),
+		mock.EXPECT().DeleteOldPackets(gomock.Any(), byCutoff).Return(int64(packetDeleteBatch), nil),
+		mock.EXPECT().DeleteOldPackets(gomock.Any(), byCutoff).Return(int64(7), nil),
+	)
+
+	if err := store.DeleteOldPackets(context.Background(), cutoff); err != nil {
+		t.Fatal(err)
+	}
+}

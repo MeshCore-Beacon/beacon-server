@@ -124,34 +124,67 @@ func (q *Queries) DeleteOldObservers(ctx context.Context, lastSeen pgtype.Timest
 	return items, nil
 }
 
-const deleteOldPackets = `-- name: DeleteOldPackets :exec
-DELETE FROM packets WHERE last_heard_at < $1
+const deleteOldPackets = `-- name: DeleteOldPackets :execrows
+WITH expired AS (
+    SELECT ep.packet_hash
+    FROM packets ep
+    WHERE ep.last_heard_at < $1
+    ORDER BY ep.last_heard_at
+    LIMIT $2
+    FOR UPDATE OF ep SKIP LOCKED
+)
+DELETE FROM packets p USING expired e
+WHERE p.packet_hash = e.packet_hash
 `
 
-// Deletes packets and their observations older than the given cutoff.
-// packet_observations cascade-delete via FK.
-func (q *Queries) DeleteOldPackets(ctx context.Context, lastHeardAt pgtype.Timestamptz) error {
-	_, err := q.db.Exec(ctx, deleteOldPackets, lastHeardAt)
-	return err
+type DeleteOldPacketsParams struct {
+	Cutoff    pgtype.Timestamptz `json:"cutoff"`
+	BatchSize int32              `json:"batch_size"`
 }
 
-const deleteOldRoutes = `-- name: DeleteOldRoutes :exec
-DELETE FROM known_routes
-WHERE last_seen < $1
-   OR (observation_count < $2 AND last_seen < $3)
+// One batch of expired packets; observations and channel messages cascade.
+func (q *Queries) DeleteOldPackets(ctx context.Context, arg DeleteOldPacketsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteOldPackets, arg.Cutoff, arg.BatchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteOldRoutes = `-- name: DeleteOldRoutes :execrows
+WITH expired AS (
+    SELECT r.iata, r.path_key
+    FROM known_routes r
+    WHERE r.last_seen < GREATEST($1::timestamptz, $2::timestamptz)
+      AND (r.last_seen < $1 OR
+           (r.observation_count < $3 AND r.last_seen < $2))
+    LIMIT $4
+    FOR UPDATE OF r SKIP LOCKED
+)
+DELETE FROM known_routes kr USING expired e
+WHERE kr.iata = e.iata AND kr.path_key = e.path_key
 `
 
 type DeleteOldRoutesParams struct {
-	LastSeen         pgtype.Timestamptz `json:"last_seen"`
-	ObservationCount int64              `json:"observation_count"`
-	LastSeen_2       pgtype.Timestamptz `json:"last_seen_2"`
+	RetentionCutoff pgtype.Timestamptz `json:"retention_cutoff"`
+	GraceCutoff     pgtype.Timestamptz `json:"grace_cutoff"`
+	MinObservations int64              `json:"min_observations"`
+	BatchSize       int32              `json:"batch_size"`
 }
 
-// Deletes routes not observed since the retention cutoff ($1), and rarely-observed
-// routes (observation_count < $2) not observed since the grace cutoff ($3).
-func (q *Queries) DeleteOldRoutes(ctx context.Context, arg DeleteOldRoutesParams) error {
-	_, err := q.db.Exec(ctx, deleteOldRoutes, arg.LastSeen, arg.ObservationCount, arg.LastSeen_2)
-	return err
+// One batch of routes past retention, or past grace with too few observations.
+// GREATEST keeps the scan on idx_known_routes_last_seen.
+func (q *Queries) DeleteOldRoutes(ctx context.Context, arg DeleteOldRoutesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteOldRoutes,
+		arg.RetentionCutoff,
+		arg.GraceCutoff,
+		arg.MinObservations,
+		arg.BatchSize,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteOldTelemetry = `-- name: DeleteOldTelemetry :exec

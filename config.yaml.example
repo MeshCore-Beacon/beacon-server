@@ -118,8 +118,9 @@ telemetry:
 #backup:
 #  enabled: false
 
+# Also covers observations and channel messages.
 packets:
-  retention: 720h   # 30 days
+  retention: 168h   # 7 days
 
 # Known-route retention. Routes are distilled packet history (the path a packet
 # took, hop by hop), so they may outlive packets.retention; there is no required
@@ -155,7 +156,7 @@ websocket:
 #                                # uses the union of configured iatas.*.borderFile polygons;
 #                                # requires at least one valid border; no packet filtering
 #  stale_threshold: 24h          # default: 24h
-#  delete_after: 720h            # default: 30 days, same default as packets.retention
+#  delete_after: 720h            # default: 30 days
 #  clock_drift_threshold: 5m     # default: 5m
 
 # Optional observer age-out. Omitted or nonpositive leaves observers intact.

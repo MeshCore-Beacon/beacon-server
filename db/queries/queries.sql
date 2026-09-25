@@ -658,10 +658,18 @@ ORDER BY po.id ASC
 LIMIT $6;
 
 
--- name: DeleteOldPackets :exec
--- Deletes packets and their observations older than the given cutoff.
--- packet_observations cascade-delete via FK.
-DELETE FROM packets WHERE last_heard_at < $1;
+-- name: DeleteOldPackets :execrows
+-- One batch of expired packets; observations and channel messages cascade.
+WITH expired AS (
+    SELECT ep.packet_hash
+    FROM packets ep
+    WHERE ep.last_heard_at < @cutoff
+    ORDER BY ep.last_heard_at
+    LIMIT @batch_size
+    FOR UPDATE OF ep SKIP LOCKED
+)
+DELETE FROM packets p USING expired e
+WHERE p.packet_hash = e.packet_hash;
 
 -- name: DeleteOldNodes :exec
 -- Deletes nodes not seen since the given cutoff. node_iatas and node_neighbors cascade-
@@ -675,12 +683,20 @@ DELETE FROM nodes
 WHERE last_seen < $1
   AND id NOT IN (SELECT owner_node_id FROM observer_owners WHERE owner_node_id IS NOT NULL);
 
--- name: DeleteOldRoutes :exec
--- Deletes routes not observed since the retention cutoff ($1), and rarely-observed
--- routes (observation_count < $2) not observed since the grace cutoff ($3).
-DELETE FROM known_routes
-WHERE last_seen < $1
-   OR (observation_count < $2 AND last_seen < $3);
+-- name: DeleteOldRoutes :execrows
+-- One batch of routes past retention, or past grace with too few observations.
+-- GREATEST keeps the scan on idx_known_routes_last_seen.
+WITH expired AS (
+    SELECT r.iata, r.path_key
+    FROM known_routes r
+    WHERE r.last_seen < GREATEST(@retention_cutoff::timestamptz, @grace_cutoff::timestamptz)
+      AND (r.last_seen < @retention_cutoff OR
+           (r.observation_count < @min_observations AND r.last_seen < @grace_cutoff))
+    LIMIT @batch_size
+    FOR UPDATE OF r SKIP LOCKED
+)
+DELETE FROM known_routes kr USING expired e
+WHERE kr.iata = e.iata AND kr.path_key = e.path_key;
 
 -- name: DeleteOldChannelIATAs :exec
 -- Keeps the channel IATA filter in step with packet retention.

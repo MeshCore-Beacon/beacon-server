@@ -29,12 +29,11 @@ type Querier interface {
 	// Opt-in age-out: preserve retained history and manually recorded ownership.
 	// Bound deletions per cleanup tick and skip observers being updated by ingest.
 	DeleteOldObservers(ctx context.Context, lastSeen pgtype.Timestamptz) ([]uuid.UUID, error)
-	// Deletes packets and their observations older than the given cutoff.
-	// packet_observations cascade-delete via FK.
-	DeleteOldPackets(ctx context.Context, lastHeardAt pgtype.Timestamptz) error
-	// Deletes routes not observed since the retention cutoff ($1), and rarely-observed
-	// routes (observation_count < $2) not observed since the grace cutoff ($3).
-	DeleteOldRoutes(ctx context.Context, arg DeleteOldRoutesParams) error
+	// One batch of expired packets; observations and channel messages cascade.
+	DeleteOldPackets(ctx context.Context, arg DeleteOldPacketsParams) (int64, error)
+	// One batch of routes past retention, or past grace with too few observations.
+	// GREATEST keeps the scan on idx_known_routes_last_seen.
+	DeleteOldRoutes(ctx context.Context, arg DeleteOldRoutesParams) (int64, error)
 	// Deletes telemetry rows older than the given cutoff. Called by the cleanup goroutine.
 	DeleteOldTelemetry(ctx context.Context, reportedAt pgtype.Timestamptz) error
 	// Keeps the trace IATA filter in step with packet retention.
