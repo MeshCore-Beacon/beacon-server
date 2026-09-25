@@ -179,3 +179,31 @@ func TestResolvePathHashes_Mapping(t *testing.T) {
 		t.Errorf("expected Name %s, got %v", name, entries[0].Name)
 	}
 }
+
+func TestDeleteInBatches_StopsOnError(t *testing.T) {
+	boom := errors.New("boom")
+	calls := 0
+	err := deleteInBatches(context.Background(), 10, func(context.Context, int32) (int64, error) {
+		calls++
+		if calls == 2 {
+			return 0, boom
+		}
+		return 10, nil
+	})
+	if !errors.Is(err, boom) || calls != 2 {
+		t.Fatalf("err=%v calls=%d, want boom after 2 calls", err, calls)
+	}
+}
+
+func TestDeleteInBatches_StopsWhenCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	calls := 0
+	err := deleteInBatches(ctx, 10, func(context.Context, int32) (int64, error) {
+		calls++
+		cancel()
+		return 10, nil
+	})
+	if !errors.Is(err, context.Canceled) || calls != 1 {
+		t.Fatalf("err=%v calls=%d, want context.Canceled after 1 call", err, calls)
+	}
+}

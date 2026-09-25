@@ -60,8 +60,9 @@ func TestDeleteOldRoutes_PassesCutoffs(t *testing.T) {
 	grace := time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC)
 
 	mock.EXPECT().DeleteOldRoutes(gomock.Any(), gomock.Cond(func(p sqlc.DeleteOldRoutesParams) bool {
-		return p.LastSeen.Time.Equal(retention) && p.ObservationCount == 3 && p.LastSeen_2.Time.Equal(grace)
-	})).Return(nil)
+		return p.RetentionCutoff.Time.Equal(retention) && p.MinObservations == 3 && p.GraceCutoff.Time.Equal(grace) &&
+			p.BatchSize == routeDeleteBatch
+	})).Return(int64(0), nil)
 
 	if err := store.DeleteOldRoutes(context.Background(), retention, 3, grace); err != nil {
 		t.Fatal(err)

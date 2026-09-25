@@ -245,8 +245,7 @@ type WebSocketConfig struct {
 
 // PacketsConfig controls packet retention behaviour.
 type PacketsConfig struct {
-	// Retention is how long packet and observation rows are kept.
-	// Defaults to 720h (30 days) if not set.
+	// Retention covers packets, observations and channel messages. Defaults to 168h.
 	Retention duration `yaml:"retention"`
 }
 
@@ -276,8 +275,7 @@ type NodesConfig struct {
 	// stale=true for it. Defaults to 24h if not set.
 	StaleThreshold duration `yaml:"stale_threshold"`
 	// DeleteAfter is how long since a node's last_seen before the cleanup job deletes the
-	// node entirely. Defaults to the same 30-day default as packets.retention if not set --
-	// independently configurable from it, just the same starting point.
+	// node entirely. Defaults to 720h (30 days) if not set.
 	DeleteAfter duration `yaml:"delete_after"`
 }
 
@@ -449,7 +447,7 @@ func Resolve(cfg *Config) ResolvedConfig {
 		r.TelemetryRetention = 28 * 24 * time.Hour
 	}
 	if r.PacketRetention == 0 {
-		r.PacketRetention = 30 * 24 * time.Hour
+		r.PacketRetention = 7 * 24 * time.Hour
 	}
 	if r.RouteRetention == 0 {
 		r.RouteRetention = 14 * 24 * time.Hour
@@ -488,8 +486,6 @@ func Resolve(cfg *Config) ResolvedConfig {
 		r.NodeStaleThreshold = 24 * time.Hour
 	}
 	if r.NodeDeleteAfter == 0 {
-		// Same default as packets.retention (30 days) -- independently configurable, just
-		// the same starting point, not tied to whatever PacketRetention resolves to.
 		r.NodeDeleteAfter = 30 * 24 * time.Hour
 	}
 	return r

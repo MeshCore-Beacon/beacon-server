@@ -130,8 +130,8 @@ func TestResolve_Defaults(t *testing.T) {
 	if r.TelemetryRetention != 28*24*time.Hour {
 		t.Errorf("expected TelemetryRetention 672h, got %v", r.TelemetryRetention)
 	}
-	if r.PacketRetention != 30*24*time.Hour {
-		t.Errorf("expected PacketRetention 720h, got %v", r.PacketRetention)
+	if r.PacketRetention != 7*24*time.Hour {
+		t.Errorf("expected PacketRetention 168h, got %v", r.PacketRetention)
 	}
 	if r.MaxConnsPerIP != 5 {
 		t.Errorf("expected MaxConnsPerIP 5, got %d", r.MaxConnsPerIP)
@@ -152,7 +152,7 @@ func TestResolve_Defaults(t *testing.T) {
 		t.Errorf("expected NodeStaleThreshold 24h, got %v", r.NodeStaleThreshold)
 	}
 	if r.NodeDeleteAfter != 30*24*time.Hour {
-		t.Errorf("expected NodeDeleteAfter 720h (same default as PacketRetention), got %v", r.NodeDeleteAfter)
+		t.Errorf("expected NodeDeleteAfter 720h, got %v", r.NodeDeleteAfter)
 	}
 	if r.ObserverDeleteAfter != 0 {
 		t.Errorf("observer deletion must be disabled by default, got %v", r.ObserverDeleteAfter)

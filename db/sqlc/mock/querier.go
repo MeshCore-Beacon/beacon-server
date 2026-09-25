@@ -117,25 +117,27 @@ func (mr *MockQuerierMockRecorder) DeleteOldObservers(ctx, lastSeen any) *gomock
 }
 
 // DeleteOldPackets mocks base method.
-func (m *MockQuerier) DeleteOldPackets(ctx context.Context, lastHeardAt pgtype.Timestamptz) error {
+func (m *MockQuerier) DeleteOldPackets(ctx context.Context, arg db.DeleteOldPacketsParams) (int64, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteOldPackets", ctx, lastHeardAt)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret := m.ctrl.Call(m, "DeleteOldPackets", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // DeleteOldPackets indicates an expected call of DeleteOldPackets.
-func (mr *MockQuerierMockRecorder) DeleteOldPackets(ctx, lastHeardAt any) *gomock.Call {
+func (mr *MockQuerierMockRecorder) DeleteOldPackets(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldPackets", reflect.TypeOf((*MockQuerier)(nil).DeleteOldPackets), ctx, lastHeardAt)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldPackets", reflect.TypeOf((*MockQuerier)(nil).DeleteOldPackets), ctx, arg)
 }
 
 // DeleteOldRoutes mocks base method.
-func (m *MockQuerier) DeleteOldRoutes(ctx context.Context, arg db.DeleteOldRoutesParams) error {
+func (m *MockQuerier) DeleteOldRoutes(ctx context.Context, arg db.DeleteOldRoutesParams) (int64, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "DeleteOldRoutes", ctx, arg)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // DeleteOldRoutes indicates an expected call of DeleteOldRoutes.

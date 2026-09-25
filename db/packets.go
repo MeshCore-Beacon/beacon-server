@@ -650,6 +650,14 @@ func (s *Store) GetPacketObservationCount(ctx context.Context, packetHash []byte
 	return s.q.GetPacketObservationCount(ctx, packetHash)
 }
 
+// Small because each packet cascades to its observations.
+const packetDeleteBatch = 1000
+
 func (s *Store) DeleteOldPackets(ctx context.Context, cutoff time.Time) error {
-	return s.q.DeleteOldPackets(ctx, pgtype.Timestamptz{Time: cutoff, Valid: true})
+	return deleteInBatches(ctx, packetDeleteBatch, func(ctx context.Context, n int32) (int64, error) {
+		return s.q.DeleteOldPackets(ctx, sqlc.DeleteOldPacketsParams{
+			Cutoff:    pgtype.Timestamptz{Time: cutoff, Valid: true},
+			BatchSize: n,
+		})
+	})
 }

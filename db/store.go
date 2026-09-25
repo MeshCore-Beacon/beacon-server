@@ -149,3 +149,19 @@ func toChannelMessage(id int64, packetHashHex string, channelHash []byte, sender
 		ObservationCount: observationCount,
 	}
 }
+
+// deleteInBatches repeats a delete until a batch comes back short.
+func deleteInBatches(ctx context.Context, batchSize int32, del func(context.Context, int32) (int64, error)) error {
+	for {
+		n, err := del(ctx, batchSize)
+		if err != nil {
+			return err
+		}
+		if n < int64(batchSize) {
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
+}

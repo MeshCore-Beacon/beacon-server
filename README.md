@@ -242,7 +242,7 @@ telemetry:
 
 # Packet and observation retention.
 packets:
-  retention: 720h # how long to keep packets and observations (default: 30 days)
+  retention: 168h # packets, observations, channel messages (default: 7 days)
 
 # Presence write coalescing.
 # Observer last_seen and packet last_heard_at bumps are batched in memory and
@@ -260,7 +260,7 @@ websocket:
 nodes:
   mark_foreign: false # optional indication for repeaters outside configured IATA borders
   stale_threshold: 24h # mark a node "stale" in the API after this long unseen (default: 24h)
-  delete_after: 720h # delete a node entirely after this long unseen (default: 30 days, same default as packets.retention)
+  delete_after: 720h # delete a node entirely after this long unseen (default: 30 days)
   clock_drift_threshold: 5m # |device clock - server clock| above which clockOutOfSync=true for a repeater/room server (default: 5m)
 
 # Optional observer age-out (disabled by default; set e.g. 720h to opt in).

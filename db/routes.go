@@ -292,13 +292,18 @@ func (s *Store) ReconfirmRoutes(ctx context.Context, batchSize int32) error {
 	return s.q.ReconfirmRoutes(ctx, batchSize)
 }
 
+const routeDeleteBatch = 10000
+
 // DeleteOldRoutes prunes routes per the retention rule: unconditionally past
 // retentionCutoff, and past graceCutoff when observed fewer than minObservations times.
 func (s *Store) DeleteOldRoutes(ctx context.Context, retentionCutoff time.Time, minObservations int64, graceCutoff time.Time) error {
-	return s.q.DeleteOldRoutes(ctx, sqlc.DeleteOldRoutesParams{
-		LastSeen:         pgtype.Timestamptz{Time: retentionCutoff, Valid: true},
-		ObservationCount: minObservations,
-		LastSeen_2:       pgtype.Timestamptz{Time: graceCutoff, Valid: true},
+	return deleteInBatches(ctx, routeDeleteBatch, func(ctx context.Context, n int32) (int64, error) {
+		return s.q.DeleteOldRoutes(ctx, sqlc.DeleteOldRoutesParams{
+			RetentionCutoff: pgtype.Timestamptz{Time: retentionCutoff, Valid: true},
+			GraceCutoff:     pgtype.Timestamptz{Time: graceCutoff, Valid: true},
+			MinObservations: minObservations,
+			BatchSize:       n,
+		})
 	})
 }
 
