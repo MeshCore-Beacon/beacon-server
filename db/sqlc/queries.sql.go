@@ -124,17 +124,8 @@ func (q *Queries) DeleteOldObservers(ctx context.Context, lastSeen pgtype.Timest
 	return items, nil
 }
 
-const deleteOldPackets = `-- name: DeleteOldPackets :execrows
-WITH expired AS (
-    SELECT ep.packet_hash
-    FROM packets ep
-    WHERE ep.last_heard_at < $1
-    ORDER BY ep.last_heard_at
-    LIMIT $2
-    FOR UPDATE OF ep SKIP LOCKED
-)
-DELETE FROM packets p USING expired e
-WHERE p.packet_hash = e.packet_hash
+const deleteOldPackets = `-- name: DeleteOldPackets :one
+SELECT archive_delete_packets($1::timestamptz, $2::integer)::bigint
 `
 
 type DeleteOldPacketsParams struct {
@@ -142,13 +133,12 @@ type DeleteOldPacketsParams struct {
 	BatchSize int32              `json:"batch_size"`
 }
 
-// One batch of expired packets; observations and channel messages cascade.
+// Locks, archives and cascades one bounded packet cohort in a single transaction.
 func (q *Queries) DeleteOldPackets(ctx context.Context, arg DeleteOldPacketsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteOldPackets, arg.Cutoff, arg.BatchSize)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+	row := q.db.QueryRow(ctx, deleteOldPackets, arg.Cutoff, arg.BatchSize)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const deleteOldRoutes = `-- name: DeleteOldRoutes :execrows

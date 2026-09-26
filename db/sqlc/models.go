@@ -16,6 +16,164 @@ type Account struct {
 	DeactivatedAt pgtype.Timestamptz `json:"deactivated_at"`
 }
 
+type AnalyticsHourlyIataStat struct {
+	Iata             string             `json:"iata"`
+	Hour             pgtype.Timestamptz `json:"hour"`
+	ObservationCount *int64             `json:"observation_count"`
+	UniquePackets    *int64             `json:"unique_packets"`
+}
+
+type AnalyticsLiveHourlyIataStat struct {
+	Iata             string             `json:"iata"`
+	Hour             pgtype.Timestamptz `json:"hour"`
+	ObservationCount int64              `json:"observation_count"`
+	UniquePackets    int64              `json:"unique_packets"`
+}
+
+type AnalyticsLiveObserverActivityHourly struct {
+	ObserverID   uuid.UUID          `json:"observer_id"`
+	PayloadType  *int16             `json:"payload_type"`
+	Bucket       pgtype.Timestamptz `json:"bucket"`
+	Observations int64              `json:"observations"`
+	AirtimeMs    float32            `json:"airtime_ms"`
+	AirtimeN     int64              `json:"airtime_n"`
+	SnrSum       float32            `json:"snr_sum"`
+	SnrN         int64              `json:"snr_n"`
+	SnrMin       float32            `json:"snr_min"`
+	RssiSum      int64              `json:"rssi_sum"`
+	RssiN        int64              `json:"rssi_n"`
+}
+
+type AnalyticsLivePathStatsHourly struct {
+	Iata       string      `json:"iata"`
+	Hour       interface{} `json:"hour"`
+	Category   int32       `json:"category"`
+	HashBytes  int32       `json:"hash_bytes"`
+	Entries    int32       `json:"entries"`
+	Receptions int64       `json:"receptions"`
+}
+
+type AnalyticsLivePayloadBreakdownByIatum struct {
+	Iata        string             `json:"iata"`
+	PayloadType *int16             `json:"payload_type"`
+	Bucket      pgtype.Timestamptz `json:"bucket"`
+	Count       int64              `json:"count"`
+}
+
+type AnalyticsLiveSignalStatsHourly struct {
+	Iata        string      `json:"iata"`
+	Hour        interface{} `json:"hour"`
+	Kind        int32       `json:"kind"`
+	SnrBin      int32       `json:"snr_bin"`
+	RssiBin     int32       `json:"rssi_bin"`
+	Receptions  int64       `json:"receptions"`
+	SnrSamples  int64       `json:"snr_samples"`
+	SnrSum      float64     `json:"snr_sum"`
+	RssiSamples int64       `json:"rssi_samples"`
+	RssiSum     float64     `json:"rssi_sum"`
+}
+
+type AnalyticsLiveTopAdvertisersByIatum struct {
+	Iata              string             `json:"iata"`
+	NodeID            uuid.UUID          `json:"node_id"`
+	Name              *string            `json:"name"`
+	NodeType          int16              `json:"node_type"`
+	Bucket            pgtype.Timestamptz `json:"bucket"`
+	AdvertCount       int64              `json:"advert_count"`
+	FloodAdvertCount  int64              `json:"flood_advert_count"`
+	DirectAdvertCount int64              `json:"direct_advert_count"`
+	LastHeard         interface{}        `json:"last_heard"`
+}
+
+type AnalyticsLiveTopObserversByIatum struct {
+	Iata             string             `json:"iata"`
+	ObserverID       uuid.UUID          `json:"observer_id"`
+	DisplayName      *string            `json:"display_name"`
+	ObserverType     *string            `json:"observer_type"`
+	Bucket           pgtype.Timestamptz `json:"bucket"`
+	ObservationCount int64              `json:"observation_count"`
+}
+
+type AnalyticsLiveTopTalkersByIatum struct {
+	Iata         string             `json:"iata"`
+	SenderName   *string            `json:"sender_name"`
+	Bucket       pgtype.Timestamptz `json:"bucket"`
+	MessageCount int64              `json:"message_count"`
+	LastSent     interface{}        `json:"last_sent"`
+}
+
+type AnalyticsObserverActivityHourly struct {
+	ObserverID   uuid.UUID          `json:"observer_id"`
+	PayloadType  int16              `json:"payload_type"`
+	Bucket       pgtype.Timestamptz `json:"bucket"`
+	Observations *int64             `json:"observations"`
+	AirtimeMs    *float32           `json:"airtime_ms"`
+	AirtimeN     *int64             `json:"airtime_n"`
+	SnrSum       *float32           `json:"snr_sum"`
+	SnrN         *int64             `json:"snr_n"`
+	SnrMin       *float32           `json:"snr_min"`
+	RssiSum      *int64             `json:"rssi_sum"`
+	RssiN        *int64             `json:"rssi_n"`
+}
+
+type AnalyticsPathStatsHourly struct {
+	Iata       string             `json:"iata"`
+	Hour       pgtype.Timestamptz `json:"hour"`
+	Category   int32              `json:"category"`
+	HashBytes  int32              `json:"hash_bytes"`
+	Entries    int32              `json:"entries"`
+	Receptions *int64             `json:"receptions"`
+}
+
+type AnalyticsPayloadBreakdownByIatum struct {
+	Iata        string             `json:"iata"`
+	PayloadType int16              `json:"payload_type"`
+	Bucket      pgtype.Timestamptz `json:"bucket"`
+	Count       *int64             `json:"count"`
+}
+
+type AnalyticsSignalStatsHourly struct {
+	Iata        string             `json:"iata"`
+	Hour        pgtype.Timestamptz `json:"hour"`
+	Kind        int32              `json:"kind"`
+	SnrBin      int32              `json:"snr_bin"`
+	RssiBin     int32              `json:"rssi_bin"`
+	Receptions  *int64             `json:"receptions"`
+	SnrSamples  *int64             `json:"snr_samples"`
+	SnrSum      *float64           `json:"snr_sum"`
+	RssiSamples *int64             `json:"rssi_samples"`
+	RssiSum     *float64           `json:"rssi_sum"`
+}
+
+type AnalyticsTopAdvertisersByIatum struct {
+	Iata              string             `json:"iata"`
+	NodeID            uuid.UUID          `json:"node_id"`
+	Bucket            pgtype.Timestamptz `json:"bucket"`
+	AdvertCount       *int64             `json:"advert_count"`
+	FloodAdvertCount  *int64             `json:"flood_advert_count"`
+	DirectAdvertCount *int64             `json:"direct_advert_count"`
+	LastHeard         pgtype.Timestamptz `json:"last_heard"`
+	Name              *string            `json:"name"`
+	NodeType          *int16             `json:"node_type"`
+}
+
+type AnalyticsTopObserversByIatum struct {
+	Iata             string             `json:"iata"`
+	ObserverID       uuid.UUID          `json:"observer_id"`
+	Bucket           pgtype.Timestamptz `json:"bucket"`
+	ObservationCount *int64             `json:"observation_count"`
+	DisplayName      *string            `json:"display_name"`
+	ObserverType     *string            `json:"observer_type"`
+}
+
+type AnalyticsTopTalkersByIatum struct {
+	Iata         string             `json:"iata"`
+	SenderName   string             `json:"sender_name"`
+	Bucket       pgtype.Timestamptz `json:"bucket"`
+	MessageCount *int64             `json:"message_count"`
+	LastSent     pgtype.Timestamptz `json:"last_sent"`
+}
+
 type Channel struct {
 	ID             int32              `json:"id"`
 	ChannelHash    []byte             `json:"channel_hash"`

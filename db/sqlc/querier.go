@@ -29,7 +29,7 @@ type Querier interface {
 	// Opt-in age-out: preserve retained history and manually recorded ownership.
 	// Bound deletions per cleanup tick and skip observers being updated by ingest.
 	DeleteOldObservers(ctx context.Context, lastSeen pgtype.Timestamptz) ([]uuid.UUID, error)
-	// One batch of expired packets; observations and channel messages cascade.
+	// Locks, archives and cascades one bounded packet cohort in a single transaction.
 	DeleteOldPackets(ctx context.Context, arg DeleteOldPacketsParams) (int64, error)
 	// One batch of routes past retention, or past grace with too few observations.
 	// GREATEST keeps the scan on idx_known_routes_last_seen.

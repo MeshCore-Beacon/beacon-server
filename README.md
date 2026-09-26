@@ -533,3 +533,18 @@ log:
 `LOG_LEVEL` and `LOG_FORMAT` override file settings; empty settings use `info` and `text`. Invalid values prevent startup. Configuration-loading failures can use the bootstrap text logger before file settings are available; failures after initialization retain error severity at every supported level.
 
 Records include a component field. Ingest workers also include their broker name, and HTTP completion records include the validated client address, route, status and duration. Query strings and protocol hello payloads are excluded. Expected ingest skips and routine WebSocket lifecycle details are debug-level. Changing the application's format does not change Caddy/Apache access logs or their fail2ban configuration. Collect/rotate stderr through Docker or systemd.
+
+### Analytics retention
+
+Hourly traffic, payload, observer activity, talker, advertiser, Signal and Paths
+summaries retain 30 days independently of `packets.retention`. Cleanup saves only
+aggregates before deleting each packet batch, in the same transaction. Raw
+packets, observations and message bodies still expire under packet retention.
+The summaries use UTC hourly buckets and appear on the normal view-refresh cycle.
+
+Migration 039 starts from data still present; previously deleted history cannot
+be reconstructed. Telemetry has its own retention setting. Packet drill-down,
+sub-hour observer activity, exact observer comparison and current entity/scope
+counts continue to describe retained raw data or current entities, rather than
+claiming archived packet detail. Archived summaries expire without waiting for
+new packet deletions. A failed archive leaves its entire raw batch intact.

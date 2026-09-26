@@ -22,3 +22,11 @@ sql:
             go_type: "encoding/json.RawMessage"
           - db_type: "bpchar"
             go_type: "string"
+
+          # Coalesced archive labels can still be NULL; preserve the API pointers.
+          - column: "mv_top_observers_by_iata.display_name"
+            go_type: {type: "string", pointer: true}
+          - column: "mv_top_observers_by_iata.observer_type"
+            go_type: {type: "string", pointer: true}
+          - column: "mv_top_advertisers_by_iata.name"
+            go_type: {type: "string", pointer: true}
