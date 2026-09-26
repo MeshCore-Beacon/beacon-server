@@ -19,6 +19,10 @@ type endpointRoutingDB struct {
 	paths     []string
 }
 
+func (s *endpointRoutingDB) InsertObservation(context.Context, InsertObservationParams) (bool, error) {
+	return true, nil
+}
+
 func (s *endpointRoutingDB) ResolveEndpointHashes(_ context.Context, iata string, hashes [][]byte) (map[string][]api.ResolvedPathEntry, error) {
 	for _, hash := range hashes {
 		s.endpoints = append(s.endpoints, iata+":"+hex.EncodeToString(hash))

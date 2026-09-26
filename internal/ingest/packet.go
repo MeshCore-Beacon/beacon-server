@@ -862,7 +862,13 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	// A duplicate is streamed, never stored, to includeRepeats clients when its path is new.
 	repeat := !inserted && w.hub.RepeatsWanted() && w.hub.MarkSent(packetHash[:], id[:], packet.Path)
 	if inserted || repeat {
-		// Endpoints for the live event only; stored rows resolve them at read time.
+		if inserted {
+			w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio, scopeID, matchedScope, pubkeyBytes, float32(parseNumber(envelope.SNR)))
+			if w.hub.RepeatsWanted() {
+				w.hub.MarkSent(packetHash[:], id[:], packet.Path) // so broker copies of it aren't repeats
+			}
+		}
+		// Resolve after advert updates; suppressed copies need no endpoint lookup.
 		var resolvedSource, resolvedDestination *api.ResolvedHop
 		if packet.PayloadType() == meshcore.PayloadTypeAdvert && originPubkey != nil {
 			// Exact match: ADVERT carries the sender's real identity pubkey, not a
@@ -883,12 +889,6 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 			if r, err := w.db.ResolveEndpointHashes(ctx, iata, [][]byte{destHashByte}); err == nil {
 				hop := api.BuildResolvedPath([][]byte{destHashByte}, r)[0]
 				resolvedDestination = &hop
-			}
-		}
-		if inserted {
-			w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio, scopeID, matchedScope, pubkeyBytes, float32(parseNumber(envelope.SNR)))
-			if w.hub.RepeatsWanted() {
-				w.hub.MarkSent(packetHash[:], id[:], packet.Path) // so broker copies of it aren't repeats
 			}
 		}
 		evt := packetObservationEvent{}
