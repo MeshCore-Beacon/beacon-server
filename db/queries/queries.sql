@@ -661,18 +661,9 @@ ORDER BY po.id ASC
 LIMIT $6;
 
 
--- name: DeleteOldPackets :execrows
--- One batch of expired packets; observations and channel messages cascade.
-WITH expired AS (
-    SELECT ep.packet_hash
-    FROM packets ep
-    WHERE ep.last_heard_at < @cutoff
-    ORDER BY ep.last_heard_at
-    LIMIT @batch_size
-    FOR UPDATE OF ep SKIP LOCKED
-)
-DELETE FROM packets p USING expired e
-WHERE p.packet_hash = e.packet_hash;
+-- name: DeleteOldPackets :one
+-- Locks, archives and cascades one bounded packet cohort in a single transaction.
+SELECT archive_delete_packets(@cutoff::timestamptz, @batch_size::integer)::bigint;
 
 -- name: DeleteOldNodes :exec
 -- Deletes nodes not seen since the given cutoff. node_iatas and node_neighbors cascade-

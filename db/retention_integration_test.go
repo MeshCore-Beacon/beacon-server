@@ -46,10 +46,9 @@ func countRows(t *testing.T, ctx context.Context, tx pgx.Tx, sql string) int {
 // More than one batch of old packets; observations go with them.
 func TestDeleteOldPacketsBatchesPostgres(t *testing.T) {
 	ctx, tx := retentionTx(t)
+	analyticsTables(t, ctx, tx)
+	applyStatsMigration(t, ctx, tx, "039_analytics_retention.sql")
 	_, err := tx.Exec(ctx, `
-CREATE TEMP TABLE packets (LIKE public.packets INCLUDING ALL) ON COMMIT DROP;
-CREATE TEMP TABLE packet_observations (LIKE public.packet_observations INCLUDING ALL) ON COMMIT DROP;
-ALTER TABLE packet_observations ADD FOREIGN KEY (packet_hash) REFERENCES packets(packet_hash) ON DELETE CASCADE;
 INSERT INTO packets (packet_hash, payload_type, payload_version, route_type, raw_payload, raw_header, first_heard_at, last_heard_at)
 SELECT int4send(i), 4, 0, 1, '\x00', '\x00',
        CASE WHEN i <= 2500 THEN '2026-01-01'::timestamptz ELSE '2026-02-01'::timestamptz END,
