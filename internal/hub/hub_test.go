@@ -269,7 +269,7 @@ func TestHub_ResolvePath_OptedIn_GetsResolvedPayload(t *testing.T) {
 	h := runHub(t)
 	c := h.NewClient()
 	h.AddScope(c, "sub1", Scope{Events: []EventType{EventPacketObservation}})
-	h.SetResolvePath(c, true)
+	h.Configure(c, ClientOptions{ResolvePath: true})
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -294,7 +294,7 @@ func TestHub_ResolvePath_DefaultOff_GetsBasePayload(t *testing.T) {
 	h := runHub(t)
 	c := h.NewClient()
 	h.AddScope(c, "sub1", Scope{Events: []EventType{EventPacketObservation}})
-	// no SetResolvePath call — default is off
+	// no Configure call — default is off
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -320,7 +320,7 @@ func TestHub_ResolvePath_OptedIn_NoResolvedVariant_FallsBackToBase(t *testing.T)
 	c := h.NewClient()
 	// e.g. nodeUpdate events never carry a PayloadResolved variant
 	h.AddScope(c, "sub1", Scope{Events: []EventType{EventNodeUpdate}})
-	h.SetResolvePath(c, true)
+	h.Configure(c, ClientOptions{ResolvePath: true})
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -367,15 +367,70 @@ func TestHub_ResolvePath_ToggleableLive(t *testing.T) {
 		t.Errorf("expected base payload before opting in, got %s", got)
 	}
 
-	h.SetResolvePath(c, true)
+	h.Configure(c, ClientOptions{ResolvePath: true})
 	time.Sleep(10 * time.Millisecond)
 	if got := broadcastAndRead(); got != `{"resolvedPath":[{"confidence":"high"}]}` {
 		t.Errorf("expected resolved payload after opting in, got %s", got)
 	}
 
-	h.SetResolvePath(c, false)
+	h.Configure(c, ClientOptions{})
 	time.Sleep(10 * time.Millisecond)
 	if got := broadcastAndRead(); got != `{"resolvedPath":null}` {
 		t.Errorf("expected base payload after opting back out, got %s", got)
 	}
+}
+
+func TestEvent_PayloadFor(t *testing.T) {
+	full := Event{
+		Payload:                json.RawMessage(`base`),
+		PayloadResolved:        json.RawMessage(`resolved`),
+		PayloadWithKey:         json.RawMessage(`key`),
+		PayloadResolvedWithKey: json.RawMessage(`resolved+key`),
+	}
+	baseOnly := Event{Payload: json.RawMessage(`base`), PayloadResolved: json.RawMessage(`resolved`)}
+	for _, tc := range []struct {
+		name string
+		evt  Event
+		opts ClientOptions
+		want string
+	}{
+		{"default", full, ClientOptions{}, "base"},
+		{"resolve", full, ClientOptions{ResolvePath: true}, "resolved"},
+		{"key", full, ClientOptions{IncludeObserverKey: true}, "key"},
+		{"both", full, ClientOptions{ResolvePath: true, IncludeObserverKey: true}, "resolved+key"},
+		{"key missing", baseOnly, ClientOptions{IncludeObserverKey: true}, "base"},
+		{"both, key missing", baseOnly, ClientOptions{ResolvePath: true, IncludeObserverKey: true}, "resolved"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &Client{ResolvePath: tc.opts.ResolvePath, IncludeObserverKey: tc.opts.IncludeObserverKey}
+			if got := string(tc.evt.payloadFor(c)); got != tc.want {
+				t.Fatalf("payloadFor = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHub_ObserverKeyWanted_TracksOptIns(t *testing.T) {
+	h := runHub(t)
+	waitFor := func(want bool) {
+		t.Helper()
+		deadline := time.Now().Add(time.Second)
+		for h.ObserverKeyWanted() != want {
+			if time.Now().After(deadline) {
+				t.Fatalf("ObserverKeyWanted = %t, want %t", !want, want)
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	a, b := h.NewClient(), h.NewClient()
+	if h.ObserverKeyWanted() {
+		t.Fatal("no client opted in yet")
+	}
+	h.Configure(a, ClientOptions{IncludeObserverKey: true})
+	h.Configure(a, ClientOptions{IncludeObserverKey: true}) // repeat must not double count
+	h.Configure(b, ClientOptions{IncludeObserverKey: true})
+	waitFor(true)
+	h.Configure(a, ClientOptions{ResolvePath: true})
+	h.Remove(b)
+	waitFor(false)
 }

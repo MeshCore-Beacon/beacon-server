@@ -20,7 +20,7 @@ import (
 
 func connectTestServer(t *testing.T, maxConns, maxConnects int) (*httptest.Server, <-chan struct{}) {
 	t.Helper()
-	handler := Handler(hub.New(), nil, maxConns, maxConnects)
+	handler := Handler(hub.New(), nil, maxConns, maxConnects, nil)
 	done := make(chan struct{}, 64)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handler(w, r)
@@ -57,7 +57,7 @@ func TestFailedHandshakeDoesNotUseConnectionSlot(t *testing.T) {
 
 func TestConnectAttemptBudgetAndRecovery(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		handler := Handler(nil, nil, 1, 2)
+		handler := Handler(nil, nil, 1, 2, nil)
 		attempt := func() *httptest.ResponseRecorder {
 			request := httptest.NewRequest(http.MethodGet, "/ws", nil)
 			request.RemoteAddr = "198.51.100.1:1234"

@@ -378,32 +378,43 @@ func (w *Worker) broadcast(eventType hub.EventType, iata string, payloadType uin
 	})
 }
 
-// broadcastPacketObservation marshals evt twice: once as-is (the default
+// broadcastPacketObservation marshals evt once as-is (the default
 // payload every packetObservation subscriber gets) and once with
 // resolvedPath populated (delivered only to connections that opted in via
 // the "configure" WS message; see hub.Client.ResolvePath). resolvedPath is
 // passed in rather than computed here because the caller already has the
 // path-hash resolution results in hand from other per-packet work (known
 // route detection, capability detection) — this adds no extra DB calls.
-func (w *Worker) broadcastPacketObservation(iata string, payloadType uint8, evt packetObservationEvent, resolvedPath []api.ResolvedHop) {
+func (w *Worker) broadcastPacketObservation(iata string, payloadType uint8, evt packetObservationEvent, resolvedPath []api.ResolvedHop, observerKey string) {
 	base, err := json.Marshal(evt)
 	if err != nil {
 		w.log.Error("failed to marshal packetObservation event", "error", err)
 		return
 	}
-	evt.Observation.ResolvedPath = resolvedPath
-	resolved, err := json.Marshal(evt)
-	if err != nil {
-		w.log.Error("failed to marshal packetObservation event (resolved variant)", "error", err)
-		resolved = nil // fall back to base-only; not fatal
+	out := hub.Event{
+		Type:        hub.EventPacketObservation,
+		Payload:     base,
+		IATA:        iata,
+		PayloadType: payloadType,
 	}
-	w.hub.Broadcast(hub.Event{
-		Type:            hub.EventPacketObservation,
-		Payload:         base,
-		PayloadResolved: resolved,
-		IATA:            iata,
-		PayloadType:     payloadType,
-	})
+	evt.Observation.ResolvedPath = resolvedPath
+	if out.PayloadResolved, err = json.Marshal(evt); err != nil {
+		w.log.Error("failed to marshal packetObservation event (resolved variant)", "error", err)
+		out.PayloadResolved = nil
+	}
+	if w.hub.ObserverKeyWanted() {
+		evt.Observation.ObserverPublicKey = observerKey
+		if out.PayloadResolvedWithKey, err = json.Marshal(evt); err != nil {
+			w.log.Error("failed to marshal packetObservation event (resolved key variant)", "error", err)
+			out.PayloadResolvedWithKey = nil
+		}
+		evt.Observation.ResolvedPath = nil
+		if out.PayloadWithKey, err = json.Marshal(evt); err != nil {
+			w.log.Error("failed to marshal packetObservation event (key variant)", "error", err)
+			out.PayloadWithKey = nil
+		}
+	}
+	w.hub.Broadcast(out)
 }
 
 // parseNumber handles RSSI and SNR fields that different observer types send as

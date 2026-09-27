@@ -8,8 +8,10 @@ package config
 import (
 	"fmt"
 	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -241,6 +243,8 @@ type WebSocketConfig struct {
 	// MaxConnectsPerMinute limits upgrade attempts, including failed handshakes.
 	// Zero/omitted defaults to 10; IPv6 addresses share a /64 attempt budget.
 	MaxConnectsPerMinute int `yaml:"max_connects_per_minute"`
+	// AllowedOrigins are extra exact origins allowed to open /ws. Defaults to same-host only.
+	AllowedOrigins []string `yaml:"allowed_origins"`
 }
 
 // PacketsConfig controls packet retention behaviour.
@@ -396,6 +400,11 @@ func Load(path string) (*Config, error) {
 	if cfg.WebSocket.MaxConnectsPerMinute < 0 {
 		return nil, fmt.Errorf("websocket.max_connects_per_minute must be positive or zero for the default")
 	}
+	for i, origin := range cfg.WebSocket.AllowedOrigins {
+		if err := validateOrigin(origin); err != nil {
+			return nil, fmt.Errorf("websocket.allowed_origins[%d]: %w", i, err)
+		}
+	}
 	configDir := filepath.Dir(path)
 	for iata, details := range cfg.IATAs {
 		if details.BorderFile != "" && !filepath.IsAbs(details.BorderFile) {
@@ -404,6 +413,20 @@ func Load(path string) (*Config, error) {
 		}
 	}
 	return cfg, nil
+}
+
+// validateOrigin rejects wildcards, which the WebSocket library would treat as patterns.
+func validateOrigin(origin string) error {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return fmt.Errorf("invalid origin %q: %w", origin, err)
+	}
+	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil ||
+		u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" ||
+		strings.ContainsAny(origin, `*?[]\`) {
+		return fmt.Errorf("origin %q must be exactly scheme://host[:port] with an http or https scheme", origin)
+	}
+	return nil
 }
 
 // Resolve returns a ResolvedConfig with defaults applied for any zero values.

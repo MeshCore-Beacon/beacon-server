@@ -82,15 +82,17 @@ type packetObservationEvent struct {
 		Summary            *string `json:"summary,omitempty"` // same advert name as REST list/backfill rows
 	} `json:"packet"`
 	Observation struct {
-		ObserverID   string  `json:"observerId"`
-		ObserverName string  `json:"observerName"`
-		IATA         string  `json:"iata"`
-		HeardAt      int64   `json:"heardAt"`
-		RSSI         int16   `json:"rssi"`
-		SNR          float32 `json:"snr"`
-		SourceBroker string  `json:"sourceBroker"`
-		PathBytes    string  `json:"pathBytes"`
-		PathLength   struct {
+		ObserverID   string `json:"observerId"`
+		ObserverName string `json:"observerName"`
+		// Only set for clients that sent includeObserverKey.
+		ObserverPublicKey string  `json:"observerPublicKey,omitempty"`
+		IATA              string  `json:"iata"`
+		HeardAt           int64   `json:"heardAt"`
+		RSSI              int16   `json:"rssi"`
+		SNR               float32 `json:"snr"`
+		SourceBroker      string  `json:"sourceBroker"`
+		PathBytes         string  `json:"pathBytes"`
+		PathLength        struct {
 			Raw      string `json:"raw"`
 			HashSize uint8  `json:"hashSize"`
 			HopCount uint8  `json:"hopCount"`
@@ -912,7 +914,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		resolvedPath := api.BuildResolvedPath(hashes, resolved)
 		evt.Observation.ResolvedSource = resolvedSource
 		evt.Observation.ResolvedDestination = resolvedDestination
-		w.broadcastPacketObservation(iata, packet.PayloadType(), evt, resolvedPath)
+		w.broadcastPacketObservation(iata, packet.PayloadType(), evt, resolvedPath, hex.EncodeToString(pubkeyBytes))
 	}
 }
 

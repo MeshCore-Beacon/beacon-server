@@ -10,14 +10,15 @@
 //	Client → Server:
 //	  subscribe   { v, type, id, scope }         → server replies subscribed { v, type, id, subscriptionId }
 //	  unsubscribe { v, type, id, subscriptionId }
-//	  configure   { v, type, id, resolvePath }   → server replies configured { v, type, id, resolvePath }
+//	  configure   { v, type, id, resolvePath, includeObserverKey }
+//	              → server replies configured { v, type, id, resolvePath, includeObserverKey }
 //	  ping        { v, type, id }                → server replies pong { v, type, id }
 //
-//	configure's resolvePath (bool) is a connection-wide setting, not
-//	per-subscription: enables/disables per-hop resolvedPath data on
-//	packetObservation events. Freely toggleable at any point during the
-//	connection; each configure call sets it to exactly the value sent
-//	(not additive across calls, unlike subscribe scopes). Default false.
+//	configure's flags are connection-wide settings, not per-subscription.
+//	resolvePath adds per-hop resolvedPath data to packetObservation events,
+//	includeObserverKey adds observation.observerPublicKey. Each configure
+//	sets both to exactly the values sent, so an omitted flag turns off.
+//	Both default false.
 //
 //	Server → Client events (unsolicited):
 //	  packetObservation, observerStatus, nodeUpdate, channelMessage
@@ -53,7 +54,11 @@ const (
 
 // Handler returns an http.HandlerFunc that requires the hub to be injected.
 // Wire it via router.New(h) so the hub is available at startup.
-func Handler(h *hub.Hub, reader api.Reader, maxConnsPerIP, maxConnectsPerMinute int) http.HandlerFunc {
+func Handler(h *hub.Hub, reader api.Reader, maxConnsPerIP, maxConnectsPerMinute int, allowedOrigins []string) http.HandlerFunc {
+	var acceptOpts *websocket.AcceptOptions
+	if len(allowedOrigins) > 0 {
+		acceptOpts = &websocket.AcceptOptions{OriginPatterns: allowedOrigins}
+	}
 	limiter := newIPLimiter(maxConnsPerIP)
 	attempts := httprate.NewRateLimiter(maxConnectsPerMinute, time.Minute,
 		httprate.WithResponseHeaders(httprate.ResponseHeaders{RetryAfter: "Retry-After"}))
@@ -67,7 +72,7 @@ func Handler(h *hub.Hub, reader api.Reader, maxConnsPerIP, maxConnectsPerMinute 
 		if attempts.RespondOnLimit(w, r, httprate.CanonicalizeIP(ip)) {
 			return
 		}
-		conn, err := websocket.Accept(w, r, nil)
+		conn, err := websocket.Accept(w, r, acceptOpts)
 		if err != nil {
 			slog.Warn("ws: failed to accept connection", "component", "ws", "error", err)
 			return
@@ -172,10 +177,9 @@ type clientMessage struct {
 	SubscriptionID string          `json:"subscriptionId,omitempty"`
 	Scope          *subscribeScope `json:"scope,omitempty"`
 
-	// ResolvePath is only read for "configure" messages: enables/disables
-	// the resolvedPath variant of packetObservation events for the whole
-	// connection. See package doc.
-	ResolvePath bool `json:"resolvePath,omitempty"`
+	// Only read for "configure" messages. See package doc.
+	ResolvePath        bool `json:"resolvePath,omitempty"`
+	IncludeObserverKey bool `json:"includeObserverKey,omitempty"`
 }
 
 // subscribeScope mirrors the scope object in the subscribe message.
@@ -260,12 +264,13 @@ func handleClientMessage(ctx context.Context, client *hub.Client, reader api.Rea
 		}
 
 	case "configure":
-		h.SetResolvePath(client, msg.ResolvePath)
+		h.Configure(client, hub.ClientOptions{ResolvePath: msg.ResolvePath, IncludeObserverKey: msg.IncludeObserverKey})
 		reply, _ := json.Marshal(map[string]any{
-			"v": 1, "type": "configured", "id": msg.ID, "resolvePath": msg.ResolvePath,
+			"v": 1, "type": "configured", "id": msg.ID,
+			"resolvePath": msg.ResolvePath, "includeObserverKey": msg.IncludeObserverKey,
 		})
 		if slog.Default().Enabled(context.Background(), slog.LevelDebug) {
-			slog.Debug(fmt.Sprintf("ws[%s]: configured resolvePath=%t", connID, msg.ResolvePath), "component", "ws")
+			slog.Debug(fmt.Sprintf("ws[%s]: configured resolvePath=%t includeObserverKey=%t", connID, msg.ResolvePath, msg.IncludeObserverKey), "component", "ws")
 		}
 		if err := conn.Write(ctx, websocket.MessageText, reply); err != nil {
 			slog.Warn(fmt.Sprintf("ws[%s]: failed to send configured reply", connID), "component", "ws", "error", err)

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"sync/atomic"
 )
 
 // EventType identifies the kind of server-push event. These match the
@@ -40,10 +41,13 @@ const (
 // fields for clients that opted into them via configure (currently just
 // resolvedPath on packetObservation events). Left nil for event types that
 // don't have an opt-in variant; the hub falls back to Payload in that case.
+// The WithKey variants also carry observerPublicKey.
 type Event struct {
-	Type            EventType
-	Payload         json.RawMessage
-	PayloadResolved json.RawMessage
+	Type                   EventType
+	Payload                json.RawMessage
+	PayloadResolved        json.RawMessage
+	PayloadWithKey         json.RawMessage
+	PayloadResolvedWithKey json.RawMessage
 
 	// Routing metadata used by the hub to match subscriptions.
 	// Populated by the ingest layer before calling Broadcast.
@@ -73,11 +77,35 @@ type Client struct {
 	subscriptions map[string]Scope // OR semantics: event matches if it matches any scope entry
 
 	// ResolvePath is a connection-wide opt-in (not per-subscription), set via
-	// SetResolvePath ("configure" WS messages). Freely toggleable at any
+	// Configure ("configure" WS messages). Freely toggleable at any
 	// point during the connection's lifetime. Only ever read/written inside
 	// Run(), so it needs no locking despite Client being shared with the WS
 	// goroutines.
 	ResolvePath bool
+	// IncludeObserverKey works like ResolvePath, for observerPublicKey.
+	IncludeObserverKey bool
+}
+
+// ClientOptions are the connection-wide settings a "configure" message sets.
+type ClientOptions struct {
+	ResolvePath        bool
+	IncludeObserverKey bool
+}
+
+// payloadFor falls back to a narrower variant if the event lacks one.
+func (e Event) payloadFor(c *Client) json.RawMessage {
+	if c.IncludeObserverKey {
+		if c.ResolvePath && e.PayloadResolvedWithKey != nil {
+			return e.PayloadResolvedWithKey
+		}
+		if !c.ResolvePath && e.PayloadWithKey != nil {
+			return e.PayloadWithKey
+		}
+	}
+	if c.ResolvePath && e.PayloadResolved != nil {
+		return e.PayloadResolved
+	}
+	return e.Payload
 }
 
 // matches returns true if the event satisfies at least one of the client's
@@ -122,10 +150,13 @@ type Hub struct {
 	unsubscribe chan unsubscribeMsg
 	remove      chan *Client
 	broadcast   chan Event
+
+	// observerKeyClients counts registered clients with IncludeObserverKey set.
+	observerKeyClients atomic.Int64
 }
 
 // subscribeMsg carries a client registration, a scope subscription, or a
-// configure (resolvePath toggle) request — all three go through this single
+// configure request — all three go through this single
 // channel, not separate ones, specifically so that Go's same-channel FIFO
 // guarantee orders them relative to NewClient's registration message. A
 // separate "configure" channel raced against registration: select() has no
@@ -139,20 +170,12 @@ type subscribeMsg struct {
 	subscriptionID string
 
 	isConfigure bool
-	resolvePath bool
+	options     ClientOptions
 }
 
 type unsubscribeMsg struct {
 	client         *Client
 	subscriptionID string
-}
-
-// configureMsg carries a connection-wide setting change, decoupled from the
-// subscribe/unsubscribe scope mechanics so it can be toggled independently
-// and repeatedly over the life of a connection.
-type configureMsg struct {
-	client      *Client
-	resolvePath bool
 }
 
 // New creates a Hub. Call Run() in a goroutine before using it.
@@ -192,13 +215,15 @@ func (h *Hub) RemoveScope(c *Client, id string) {
 	h.unsubscribe <- unsubscribeMsg{client: c, subscriptionID: id}
 }
 
-// SetResolvePath toggles a client's opt-in to the resolvedPath variant of
-// packetObservation events. Unlike scopes, this is a single connection-wide
-// flag (not additive/OR'd) and can be flipped on or off at any point during
-// the connection's lifetime — takes effect on the next broadcast after the
-// hub processes it.
-func (h *Hub) SetResolvePath(c *Client, enabled bool) {
-	h.subscribe <- subscribeMsg{client: c, isConfigure: true, resolvePath: enabled}
+// Configure replaces a client's connection-wide options. Unlike scopes, it is
+// not additive.
+func (h *Hub) Configure(c *Client, opts ClientOptions) {
+	h.subscribe <- subscribeMsg{client: c, isConfigure: true, options: opts}
+}
+
+// ObserverKeyWanted lets ingest skip the key variants when nobody wants them.
+func (h *Hub) ObserverKeyWanted() bool {
+	return h.observerKeyClients.Load() > 0
 }
 
 // Remove deregisters a client and closes its Send channel.
@@ -236,9 +261,17 @@ func (h *Hub) Run() {
 				// Registration with no scope yet (NewClient path).
 				clients[msg.client] = struct{}{}
 			case msg.isConfigure:
-				// SetResolvePath path — client must already be registered.
+				// Configure path — client must already be registered.
 				if _, ok := clients[msg.client]; ok {
-					msg.client.ResolvePath = msg.resolvePath
+					if msg.client.IncludeObserverKey != msg.options.IncludeObserverKey {
+						if msg.options.IncludeObserverKey {
+							h.observerKeyClients.Add(1)
+						} else {
+							h.observerKeyClients.Add(-1)
+						}
+					}
+					msg.client.ResolvePath = msg.options.ResolvePath
+					msg.client.IncludeObserverKey = msg.options.IncludeObserverKey
 				}
 			default:
 				// AddScope path — client must already be registered.
@@ -255,6 +288,9 @@ func (h *Hub) Run() {
 		case c := <-h.remove:
 			if _, ok := clients[c]; ok {
 				delete(clients, c)
+				if c.IncludeObserverKey {
+					h.observerKeyClients.Add(-1)
+				}
 				close(c.Send)
 				close(c.laggedCH)
 			}
@@ -265,9 +301,7 @@ func (h *Hub) Run() {
 					continue
 				}
 				outEvt := evt
-				if c.ResolvePath && evt.PayloadResolved != nil {
-					outEvt.Payload = evt.PayloadResolved
-				}
+				outEvt.Payload = evt.payloadFor(c)
 				select {
 				case c.Send <- outEvt:
 				default:

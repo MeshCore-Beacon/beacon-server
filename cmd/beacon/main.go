@@ -309,6 +309,7 @@ func main() {
 	r := router.New(h, reader, []*ingest.Worker{broker1, broker2}, router.Options{
 		MaxConnsPerIP:        resolved.MaxConnsPerIP,
 		MaxConnectsPerMinute: resolved.MaxConnectsPerMinute,
+		WSAllowedOrigins:     cfg.WebSocket.AllowedOrigins,
 		CORS:                 cfg.CORS, Server: cfg.Server, Auth: cfg.Auth, RateLimit: resolved.RateLimit,
 		AdminRoutes: map[string]http.Handler{
 			"/accounts": handlers.AccountsRouter(store),
