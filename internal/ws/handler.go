@@ -10,15 +10,17 @@
 //	Client → Server:
 //	  subscribe   { v, type, id, scope }         → server replies subscribed { v, type, id, subscriptionId }
 //	  unsubscribe { v, type, id, subscriptionId }
-//	  configure   { v, type, id, resolvePath, includeObserverKey }
-//	              → server replies configured { v, type, id, resolvePath, includeObserverKey }
+//	  configure   { v, type, id, resolvePath, includeObserverKey, includeRepeats }
+//	              → server replies configured { v, type, id, resolvePath, includeObserverKey, includeRepeats }
 //	  ping        { v, type, id }                → server replies pong { v, type, id }
 //
 //	configure's flags are connection-wide settings, not per-subscription.
 //	resolvePath adds per-hop resolvedPath data to packetObservation events,
-//	includeObserverKey adds observation.observerPublicKey. Each configure
-//	sets both to exactly the values sent, so an omitted flag turns off.
-//	Both default false.
+//	includeObserverKey adds observation.observerPublicKey, and includeRepeats
+//	also streams later hearings of an already-stored observation over a new
+//	path, as packetObservation events with packet.isRepeat true and
+//	observationCount 0. Each configure sets all three to exactly the values
+//	sent, so an omitted flag turns off. All default false.
 //
 //	Server → Client events (unsolicited):
 //	  packetObservation, observerStatus, nodeUpdate, channelMessage
@@ -180,6 +182,7 @@ type clientMessage struct {
 	// Only read for "configure" messages. See package doc.
 	ResolvePath        bool `json:"resolvePath,omitempty"`
 	IncludeObserverKey bool `json:"includeObserverKey,omitempty"`
+	IncludeRepeats     bool `json:"includeRepeats,omitempty"`
 }
 
 // subscribeScope mirrors the scope object in the subscribe message.
@@ -264,13 +267,13 @@ func handleClientMessage(ctx context.Context, client *hub.Client, reader api.Rea
 		}
 
 	case "configure":
-		h.Configure(client, hub.ClientOptions{ResolvePath: msg.ResolvePath, IncludeObserverKey: msg.IncludeObserverKey})
+		h.Configure(client, hub.ClientOptions{ResolvePath: msg.ResolvePath, IncludeObserverKey: msg.IncludeObserverKey, IncludeRepeats: msg.IncludeRepeats})
 		reply, _ := json.Marshal(map[string]any{
 			"v": 1, "type": "configured", "id": msg.ID,
-			"resolvePath": msg.ResolvePath, "includeObserverKey": msg.IncludeObserverKey,
+			"resolvePath": msg.ResolvePath, "includeObserverKey": msg.IncludeObserverKey, "includeRepeats": msg.IncludeRepeats,
 		})
 		if slog.Default().Enabled(context.Background(), slog.LevelDebug) {
-			slog.Debug(fmt.Sprintf("ws[%s]: configured resolvePath=%t includeObserverKey=%t", connID, msg.ResolvePath, msg.IncludeObserverKey), "component", "ws")
+			slog.Debug(fmt.Sprintf("ws[%s]: configured resolvePath=%t includeObserverKey=%t includeRepeats=%t", connID, msg.ResolvePath, msg.IncludeObserverKey, msg.IncludeRepeats), "component", "ws")
 		}
 		if err := conn.Write(ctx, websocket.MessageText, reply); err != nil {
 			slog.Warn(fmt.Sprintf("ws[%s]: failed to send configured reply", connID), "component", "ws", "error", err)

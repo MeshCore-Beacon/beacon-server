@@ -385,7 +385,8 @@ func (w *Worker) broadcast(eventType hub.EventType, iata string, payloadType uin
 // passed in rather than computed here because the caller already has the
 // path-hash resolution results in hand from other per-packet work (known
 // route detection, capability detection) — this adds no extra DB calls.
-func (w *Worker) broadcastPacketObservation(iata string, payloadType uint8, evt packetObservationEvent, resolvedPath []api.ResolvedHop, observerKey string) {
+// Repeats go through the hub's drop-first path.
+func (w *Worker) broadcastPacketObservation(iata string, payloadType uint8, evt packetObservationEvent, resolvedPath []api.ResolvedHop, observerKey string, repeat bool) {
 	base, err := json.Marshal(evt)
 	if err != nil {
 		w.log.Error("failed to marshal packetObservation event", "error", err)
@@ -413,6 +414,10 @@ func (w *Worker) broadcastPacketObservation(iata string, payloadType uint8, evt 
 			w.log.Error("failed to marshal packetObservation event (key variant)", "error", err)
 			out.PayloadWithKey = nil
 		}
+	}
+	if repeat {
+		w.hub.BroadcastRepeat(out)
+		return
 	}
 	w.hub.Broadcast(out)
 }

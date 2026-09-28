@@ -27,7 +27,7 @@ func TestBroadcastPacketObservation_ObserverKeyOptIn(t *testing.T) {
 
 	broadcast := func() hub.Event {
 		t.Helper()
-		w.broadcastPacketObservation("YVR", 4, packetObservationEvent{}, []api.ResolvedHop{{}}, key)
+		w.broadcastPacketObservation("YVR", 4, packetObservationEvent{}, []api.ResolvedHop{{}}, key, false)
 		for {
 			select {
 			case evt := <-client.Send:

@@ -132,3 +132,68 @@ func TestConfigureIncludeObserverKey(t *testing.T) {
 		t.Errorf("opted-in client got %s", got)
 	}
 }
+
+func TestConfigureIncludeRepeats(t *testing.T) {
+	h := hub.New()
+	go h.Run()
+	server := httptest.NewServer(Handler(h, nil, 5, 100, nil))
+	t.Cleanup(server.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.CloseNow() })
+	read := func() map[string]json.RawMessage {
+		t.Helper()
+		_, data, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var msg map[string]json.RawMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			t.Fatal(err)
+		}
+		return msg
+	}
+	send := func(msg string) {
+		t.Helper()
+		if err := conn.Write(ctx, websocket.MessageText, []byte(msg)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	configure := func(msg, want string) {
+		t.Helper()
+		send(msg)
+		if reply := read(); string(reply["type"]) != `"configured"` || string(reply["includeRepeats"]) != want {
+			t.Fatalf("configured reply: %v", reply)
+		}
+		time.Sleep(20 * time.Millisecond) // let the hub apply it
+	}
+	// Each repeat is followed by a normal marker, so a skipped repeat shows up as the marker.
+	next := func() string {
+		t.Helper()
+		h.BroadcastRepeat(hub.Event{Type: hub.EventPacketObservation, Payload: json.RawMessage(`"repeat"`)})
+		h.Broadcast(hub.Event{Type: hub.EventPacketObservation, Payload: json.RawMessage(`"marker"`)})
+		got := string(read()["data"])
+		if got == `"repeat"` {
+			read() // marker
+		}
+		return got
+	}
+
+	read() // hello
+	configure(`{"v":1,"type":"configure","id":"c","includeRepeats":true}`, "true")
+	send(`{"v":1,"type":"subscribe","id":"s","scope":{}}`)
+	read() // subscribed
+	time.Sleep(20 * time.Millisecond)
+	if got := next(); got != `"repeat"` {
+		t.Fatalf("opted-in client got %s", got)
+	}
+	configure(`{"v":1,"type":"configure","id":"c","resolvePath":true}`, "false")
+	if got := next(); got != `"marker"` {
+		t.Fatalf("client still received a repeat after opting out: %s", got)
+	}
+}

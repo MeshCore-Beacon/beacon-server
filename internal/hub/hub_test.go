@@ -434,3 +434,112 @@ func TestHub_ObserverKeyWanted_TracksOptIns(t *testing.T) {
 	h.Remove(b)
 	waitFor(false)
 }
+
+func TestHub_Repeat_OnlyReachesOptedInClients(t *testing.T) {
+	h := runHub(t)
+	plain, opted := h.NewClient(), h.NewClient()
+	h.AddScope(plain, "all", Scope{})
+	h.AddScope(opted, "all", Scope{})
+	h.Configure(opted, ClientOptions{IncludeRepeats: true})
+	time.Sleep(10 * time.Millisecond)
+
+	read := func(c *Client) (Event, bool) {
+		select {
+		case evt := <-c.Send:
+			return evt, true
+		case <-time.After(50 * time.Millisecond):
+			return Event{}, false
+		}
+	}
+	h.BroadcastRepeat(Event{Type: EventPacketObservation})
+	if evt, ok := read(opted); !ok || !evt.Repeat {
+		t.Fatalf("opted-in client: got %+v, %t", evt, ok)
+	}
+	if evt, ok := read(plain); ok {
+		t.Fatalf("plain client got repeat %+v", evt)
+	}
+	h.Broadcast(Event{Type: EventPacketObservation})
+	for _, c := range []*Client{plain, opted} {
+		if evt, ok := read(c); !ok || evt.Repeat {
+			t.Fatalf("normal event: got %+v, %t", evt, ok)
+		}
+	}
+}
+
+func TestHub_RepeatsWanted_TracksOptIns(t *testing.T) {
+	h := runHub(t)
+	waitFor := func(want bool) {
+		t.Helper()
+		deadline := time.Now().Add(time.Second)
+		for h.RepeatsWanted() != want {
+			if time.Now().After(deadline) {
+				t.Fatalf("RepeatsWanted = %t, want %t", !want, want)
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	a, b := h.NewClient(), h.NewClient()
+	if h.RepeatsWanted() {
+		t.Fatal("no client opted in yet")
+	}
+	h.Configure(a, ClientOptions{IncludeRepeats: true})
+	h.Configure(a, ClientOptions{IncludeRepeats: true}) // repeat must not double count
+	h.Configure(b, ClientOptions{IncludeRepeats: true})
+	waitFor(true)
+	h.Configure(a, ClientOptions{ResolvePath: true})
+	h.Remove(b)
+	waitFor(false)
+}
+
+func TestHub_BroadcastRepeat_DropsFirstWhenBusy(t *testing.T) {
+	h := New() // not running, so the broadcast channel only fills
+	h.BroadcastRepeat(Event{Type: EventPacketObservation})
+	if len(h.broadcast) != 1 || h.repeatDrops.Load() != 0 {
+		t.Fatalf("repeat on an idle hub: queued %d, dropped %d", len(h.broadcast), h.repeatDrops.Load())
+	}
+	for len(h.broadcast) < cap(h.broadcast)/2 {
+		h.Broadcast(Event{Type: EventPacketObservation})
+	}
+	queued := len(h.broadcast)
+	h.BroadcastRepeat(Event{Type: EventPacketObservation})
+	h.BroadcastRepeat(Event{Type: EventPacketObservation})
+	if len(h.broadcast) != queued || h.repeatDrops.Load() != 2 {
+		t.Fatalf("repeats past half full: queued %d (want %d), dropped %d", len(h.broadcast), queued, h.repeatDrops.Load())
+	}
+	h.Broadcast(Event{Type: EventPacketObservation})
+	if len(h.broadcast) != queued+1 {
+		t.Fatal("normal event not enqueued past half full")
+	}
+}
+
+func TestSentPaths(t *testing.T) {
+	start := time.Now()
+	s := newSentPaths(time.Minute, 3)
+	hash, observer := []byte{1, 2}, []byte{3}
+	if !s.mark(hash, observer, []byte{0xaa}, start) {
+		t.Fatal("first hearing refused")
+	}
+	if s.mark(hash, observer, []byte{0xaa}, start.Add(time.Second)) {
+		t.Fatal("exact copy within the window allowed")
+	}
+	if !s.mark(hash, observer, []byte{0xaa, 0xbb}, start.Add(time.Second)) {
+		t.Fatal("new path refused")
+	}
+	if !s.mark(hash, []byte{4}, []byte{0xaa}, start.Add(time.Second)) {
+		t.Fatal("other observer refused")
+	}
+	if !s.mark(hash, observer, []byte{0xaa}, start.Add(time.Minute)) {
+		t.Fatal("copy after the window refused")
+	}
+
+	s = newSentPaths(time.Hour, 3)
+	for i := range 4 {
+		s.mark(hash, observer, []byte{byte(i)}, start)
+	}
+	if len(s.at) != 3 || len(s.order) != 3 {
+		t.Fatalf("size bound: %d keys, %d queued", len(s.at), len(s.order))
+	}
+	if !s.mark(hash, observer, []byte{0}, start) {
+		t.Fatal("oldest key not evicted at the size bound")
+	}
+}

@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"slices"
 	"sync/atomic"
+	"time"
 )
 
 // EventType identifies the kind of server-push event. These match the
@@ -54,6 +55,8 @@ type Event struct {
 	IATA        string
 	PayloadType uint8
 	ChannelHash string // hex string, non-empty only for channelMessage events
+	// Repeat marks a later hearing of a stored observation; only IncludeRepeats clients get it.
+	Repeat bool
 }
 
 // Scope mirrors the client-side subscribe message. All fields are optional:
@@ -84,12 +87,15 @@ type Client struct {
 	ResolvePath bool
 	// IncludeObserverKey works like ResolvePath, for observerPublicKey.
 	IncludeObserverKey bool
+	// IncludeRepeats works like ResolvePath, for Repeat events.
+	IncludeRepeats bool
 }
 
 // ClientOptions are the connection-wide settings a "configure" message sets.
 type ClientOptions struct {
 	ResolvePath        bool
 	IncludeObserverKey bool
+	IncludeRepeats     bool
 }
 
 // payloadFor falls back to a narrower variant if the event lacks one.
@@ -153,6 +159,12 @@ type Hub struct {
 
 	// observerKeyClients counts registered clients with IncludeObserverKey set.
 	observerKeyClients atomic.Int64
+	// repeatClients counts registered clients with IncludeRepeats set.
+	repeatClients atomic.Int64
+	// repeatDrops counts repeats refused because the broadcast channel was busy.
+	repeatDrops     atomic.Int64
+	repeatDropLogAt atomic.Int64 // unix nanos of the last drop log line
+	sent            *sentPaths
 }
 
 // subscribeMsg carries a client registration, a scope subscription, or a
@@ -185,6 +197,7 @@ func New() *Hub {
 		unsubscribe: make(chan unsubscribeMsg, 64),
 		remove:      make(chan *Client, 64),
 		broadcast:   make(chan Event, 512),
+		sent:        newSentPaths(sentPathsTTL, sentPathsMax),
 	}
 }
 
@@ -226,6 +239,17 @@ func (h *Hub) ObserverKeyWanted() bool {
 	return h.observerKeyClients.Load() > 0
 }
 
+// RepeatsWanted lets ingest skip repeat work when nobody wants it.
+func (h *Hub) RepeatsWanted() bool {
+	return h.repeatClients.Load() > 0
+}
+
+// MarkSent records a hearing's path and reports whether it was not already sent recently,
+// so broker copies and same-path duplicates go out once.
+func (h *Hub) MarkSent(packetHash, observerID, path []byte) bool {
+	return h.sent.mark(packetHash, observerID, path, time.Now())
+}
+
 // Remove deregisters a client and closes its Send channel.
 // Safe to call from any goroutine (e.g. the WS handler's defer).
 func (h *Hub) Remove(c *Client) {
@@ -238,6 +262,31 @@ func (h *Hub) Broadcast(e Event) {
 	case h.broadcast <- e:
 	default:
 		slog.Warn("hub: broadcast channel full, dropping event", "component", "hub")
+	}
+}
+
+// BroadcastRepeat enqueues a repeat event, dropping it once the broadcast channel is half
+// full so repeats never crowd out first hearings.
+func (h *Hub) BroadcastRepeat(e Event) {
+	e.Repeat = true
+	if len(h.broadcast) >= cap(h.broadcast)/2 {
+		h.dropRepeat()
+		return
+	}
+	select {
+	case h.broadcast <- e:
+	default:
+		h.dropRepeat()
+	}
+}
+
+// dropRepeat counts a dropped repeat and logs the running total at most once a minute.
+func (h *Hub) dropRepeat() {
+	total := h.repeatDrops.Add(1)
+	now := time.Now().UnixNano()
+	last := h.repeatDropLogAt.Load()
+	if now-last >= int64(time.Minute) && h.repeatDropLogAt.CompareAndSwap(last, now) {
+		slog.Warn("hub: broadcast channel busy, dropping repeat events", "component", "hub", "dropped_total", total)
 	}
 }
 
@@ -270,8 +319,16 @@ func (h *Hub) Run() {
 							h.observerKeyClients.Add(-1)
 						}
 					}
+					if msg.client.IncludeRepeats != msg.options.IncludeRepeats {
+						if msg.options.IncludeRepeats {
+							h.repeatClients.Add(1)
+						} else {
+							h.repeatClients.Add(-1)
+						}
+					}
 					msg.client.ResolvePath = msg.options.ResolvePath
 					msg.client.IncludeObserverKey = msg.options.IncludeObserverKey
+					msg.client.IncludeRepeats = msg.options.IncludeRepeats
 				}
 			default:
 				// AddScope path — client must already be registered.
@@ -291,13 +348,16 @@ func (h *Hub) Run() {
 				if c.IncludeObserverKey {
 					h.observerKeyClients.Add(-1)
 				}
+				if c.IncludeRepeats {
+					h.repeatClients.Add(-1)
+				}
 				close(c.Send)
 				close(c.laggedCH)
 			}
 
 		case evt := <-h.broadcast:
 			for c := range clients {
-				if !c.matches(evt) {
+				if (evt.Repeat && !c.IncludeRepeats) || !c.matches(evt) {
 					continue
 				}
 				outEvt := evt

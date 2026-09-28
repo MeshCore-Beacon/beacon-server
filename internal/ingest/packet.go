@@ -80,6 +80,8 @@ type packetObservationEvent struct {
 		ObservationCount   int64   `json:"observationCount"`
 		Scope              *string `json:"scope,omitempty"`
 		Summary            *string `json:"summary,omitempty"` // same advert name as REST list/backfill rows
+		// Only set on later hearings sent to includeRepeats clients; those carry observationCount 0.
+		IsRepeat bool `json:"isRepeat,omitempty"`
 	} `json:"packet"`
 	Observation struct {
 		ObserverID   string `json:"observerId"`
@@ -880,15 +882,23 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	}
 	w.runCapabilityDetection(ctx, packet.PayloadType(), packet.PathHashSize(), resolvedIDs)
 
-	if inserted {
-		w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio, scopeID, matchedScope, pubkeyBytes, float32(parseNumber(envelope.SNR)))
+	// A duplicate is streamed, never stored, to includeRepeats clients when its path is new.
+	repeat := !inserted && w.hub.RepeatsWanted() && w.hub.MarkSent(packetHash[:], id[:], packet.Path)
+	if inserted || repeat {
+		if inserted {
+			w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio, scopeID, matchedScope, pubkeyBytes, float32(parseNumber(envelope.SNR)))
+			if w.hub.RepeatsWanted() {
+				w.hub.MarkSent(packetHash[:], id[:], packet.Path) // so broker copies of it aren't repeats
+			}
+		}
 		evt := packetObservationEvent{}
 		evt.PacketHash = hex.EncodeToString(packetHash[:])
 		evt.Packet.PayloadType = packet.PayloadType()
 		evt.Packet.PayloadTypeName = packet.PayloadTypeString()
 		evt.Packet.RouteType = packet.RouteType()
 		evt.Packet.RouteTypeName = api.RouteTypeName(int16(packet.RouteType()))
-		evt.Packet.IsFirstObservation = isNew
+		evt.Packet.IsFirstObservation = isNew && !repeat
+		evt.Packet.IsRepeat = repeat
 		evt.Packet.Summary = summary
 		evt.Observation.ObserverID = id.String()
 		evt.Observation.ObserverName = observerName
@@ -902,19 +912,21 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		evt.Observation.PathLength.HashSize = packet.PathHashSize()
 		evt.Observation.PathLength.HopCount = packet.PathHashCount()
 		evt.Observation.PropagationTimeMs = 0 // not yet calculated
-		count, err := w.db.GetPacketObservationCount(ctx, packetHash[:])
-		if err != nil {
-			w.log.Error("failed to get observation count", "error", err)
-			count = 0
+		if !repeat {
+			count, err := w.db.GetPacketObservationCount(ctx, packetHash[:])
+			if err != nil {
+				w.log.Error("failed to get observation count", "error", err)
+				count = 0
+			}
+			evt.Packet.ObservationCount = count
 		}
-		evt.Packet.ObservationCount = count
 		if matchedScope != nil {
 			evt.Packet.Scope = matchedScope
 		}
 		resolvedPath := api.BuildResolvedPath(hashes, resolved)
 		evt.Observation.ResolvedSource = resolvedSource
 		evt.Observation.ResolvedDestination = resolvedDestination
-		w.broadcastPacketObservation(iata, packet.PayloadType(), evt, resolvedPath, hex.EncodeToString(pubkeyBytes))
+		w.broadcastPacketObservation(iata, packet.PayloadType(), evt, resolvedPath, hex.EncodeToString(pubkeyBytes), repeat)
 	}
 }
 
