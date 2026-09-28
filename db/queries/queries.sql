@@ -1481,15 +1481,17 @@ REFRESH MATERIALIZED VIEW CONCURRENTLY mv_radio_presets;
 -- name: RefreshObserverActivity :exec
 REFRESH MATERIALIZED VIEW CONCURRENTLY mv_observer_activity_hourly;
 
--- name: ReconfirmRoutes :exec
--- Checks the $1 least-recently-reconfirmed routes: deletes those with a departed
+-- name: ReconfirmRoutes :one
+-- Checks one batch of least-recently-reconfirmed routes: deletes those with a departed
 -- hop node or a hop prefix now matching >1 node in that IATA (length-aware:
 -- 1/2/3/4-byte hop prefixes check prefix_1/2/3/4), and stamps the survivors.
-WITH batch AS (
-    SELECT iata, path_key, node_ids, hash_prefix
-    FROM known_routes
-    ORDER BY last_reconfirmed_at
-    LIMIT $1
+WITH batch AS MATERIALIZED (
+    SELECT r.iata, r.path_key, r.node_ids, r.hash_prefix
+    FROM known_routes r
+    WHERE r.last_reconfirmed_at < @before
+    ORDER BY r.last_reconfirmed_at
+    LIMIT @batch_size
+    FOR UPDATE OF r SKIP LOCKED
 ),
 amb AS MATERIALIZED (
     SELECT iata, 1 AS len, prefix_1 AS p FROM node_short_ids GROUP BY iata, prefix_1 HAVING COUNT(*) > 1
@@ -1522,15 +1524,18 @@ deleted AS (
     DELETE FROM known_routes kr
     USING dead d
     WHERE kr.iata = d.iata AND kr.path_key = d.path_key
+),
+updated AS (
+    UPDATE known_routes kr
+    SET last_reconfirmed_at = GREATEST(NOW(), @before::timestamptz)
+    FROM batch b
+    WHERE kr.iata = b.iata AND kr.path_key = b.path_key
+      AND NOT EXISTS (
+          SELECT 1 FROM dead d
+          WHERE d.iata = b.iata AND d.path_key = b.path_key
+      )
 )
-UPDATE known_routes kr
-SET last_reconfirmed_at = NOW()
-FROM batch b
-WHERE kr.iata = b.iata AND kr.path_key = b.path_key
-  AND NOT EXISTS (
-      SELECT 1 FROM dead d
-      WHERE d.iata = b.iata AND d.path_key = b.path_key
-  );
+SELECT count(*) FROM batch;
 
 -- name: ReconfirmNeighbors :exec
 -- Delete node_neighbors where the neighbor has departed from node_short_ids

@@ -211,10 +211,10 @@ type Querier interface {
 	// Delete node_neighbors where the neighbor has departed from node_short_ids
 	// for that IATA, or where its prefix_4 is now ambiguous.
 	ReconfirmNeighbors(ctx context.Context) error
-	// Checks the $1 least-recently-reconfirmed routes: deletes those with a departed
+	// Checks one batch of least-recently-reconfirmed routes: deletes those with a departed
 	// hop node or a hop prefix now matching >1 node in that IATA (length-aware:
 	// 1/2/3/4-byte hop prefixes check prefix_1/2/3/4), and stamps the survivors.
-	ReconfirmRoutes(ctx context.Context, limit int32) error
+	ReconfirmRoutes(ctx context.Context, arg ReconfirmRoutesParams) (int64, error)
 	RefreshHourlyStats(ctx context.Context) error
 	RefreshObserverActivity(ctx context.Context) error
 	RefreshPathStats(ctx context.Context) error

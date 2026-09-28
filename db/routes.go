@@ -288,8 +288,11 @@ func (s *Store) SearchCrossIATARoutes(ctx context.Context, fromHash, fromIATA, t
 
 // ReconfirmRoutes checks the batchSize least-recently-reconfirmed routes,
 // deleting stale or ambiguous ones and stamping the survivors.
-func (s *Store) ReconfirmRoutes(ctx context.Context, batchSize int32) error {
-	return s.q.ReconfirmRoutes(ctx, batchSize)
+func (s *Store) ReconfirmRoutes(ctx context.Context, batchSize int32, before time.Time) (int64, error) {
+	return s.q.ReconfirmRoutes(ctx, sqlc.ReconfirmRoutesParams{
+		BatchSize: batchSize,
+		Before:    pgtype.Timestamptz{Time: before, Valid: true},
+	})
 }
 
 const routeDeleteBatch = 10000

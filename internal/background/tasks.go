@@ -86,9 +86,18 @@ func CleanupTask(store *db.Store, telemetryRetention, packetRetention, nodeDelet
 	}
 }
 
-// reconfirmBatchSize bounds per-tick reconfirm work; at hourly ticks a 16M-row
-// table gets fully re-checked roughly daily.
-const reconfirmBatchSize = 750_000
+// Limit lock lifetime while retaining the per-run work budget.
+const (
+	reconfirmRunLimit     = 750_000
+	reconfirmBatchSize    = 1_000
+	reconfirmBatchTimeout = 5 * time.Second
+)
+
+type routeMaintainer interface {
+	DeleteOldRoutes(context.Context, time.Time, int64, time.Time) error
+	ReconfirmRoutes(context.Context, int32, time.Time) (int64, error)
+	ReconfirmNeighbors(context.Context) error
+}
 
 type observerCleaner interface {
 	DeleteOldObservers(context.Context, time.Time) ([]uuid.UUID, error)
@@ -118,9 +127,8 @@ func ObserverCleanupTask(store observerCleaner, deleteAfter, interval time.Durat
 }
 
 // ReconfirmTask returns a Task that prunes aged routes first, then reconfirms
-// stale and ambiguous resolved paths and neighbors, so known_routes only ever
-// has one writer at a time.
-func ReconfirmTask(store *db.Store, routeRetention, routeGrace time.Duration, routeMinObservations int64, interval time.Duration) Task {
+// stale and ambiguous resolved paths and neighbors in order.
+func ReconfirmTask(store routeMaintainer, routeRetention, routeGrace time.Duration, routeMinObservations int64, interval time.Duration) Task {
 	return Task{
 		Name:     "reconfirm",
 		Interval: interval,
@@ -129,8 +137,18 @@ func ReconfirmTask(store *db.Store, routeRetention, routeGrace time.Duration, ro
 			if err := store.DeleteOldRoutes(ctx, now.Add(-routeRetention), routeMinObservations, now.Add(-routeGrace)); err != nil {
 				return fmt.Errorf("route retention: %w", err)
 			}
-			if err := store.ReconfirmRoutes(ctx, reconfirmBatchSize); err != nil {
-				return fmt.Errorf("routes: %w", err)
+			for remaining := int64(reconfirmRunLimit); remaining > 0; {
+				limit := min(int64(reconfirmBatchSize), remaining)
+				batchCtx, cancel := context.WithTimeout(ctx, reconfirmBatchTimeout)
+				n, err := store.ReconfirmRoutes(batchCtx, int32(limit), now)
+				cancel()
+				if err != nil {
+					return fmt.Errorf("routes: %w", err)
+				}
+				remaining -= n
+				if n < limit {
+					break
+				}
 			}
 			if err := store.ReconfirmNeighbors(ctx); err != nil {
 				return fmt.Errorf("neighbors: %w", err)

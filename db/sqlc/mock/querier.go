@@ -1253,17 +1253,18 @@ func (mr *MockQuerierMockRecorder) ReconfirmNeighbors(ctx any) *gomock.Call {
 }
 
 // ReconfirmRoutes mocks base method.
-func (m *MockQuerier) ReconfirmRoutes(ctx context.Context, limit int32) error {
+func (m *MockQuerier) ReconfirmRoutes(ctx context.Context, arg db.ReconfirmRoutesParams) (int64, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ReconfirmRoutes", ctx, limit)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret := m.ctrl.Call(m, "ReconfirmRoutes", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // ReconfirmRoutes indicates an expected call of ReconfirmRoutes.
-func (mr *MockQuerierMockRecorder) ReconfirmRoutes(ctx, limit any) *gomock.Call {
+func (mr *MockQuerierMockRecorder) ReconfirmRoutes(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReconfirmRoutes", reflect.TypeOf((*MockQuerier)(nil).ReconfirmRoutes), ctx, limit)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReconfirmRoutes", reflect.TypeOf((*MockQuerier)(nil).ReconfirmRoutes), ctx, arg)
 }
 
 // RefreshHourlyStats mocks base method.

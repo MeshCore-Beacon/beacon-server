@@ -3865,12 +3865,14 @@ func (q *Queries) ReconfirmNeighbors(ctx context.Context) error {
 	return err
 }
 
-const reconfirmRoutes = `-- name: ReconfirmRoutes :exec
-WITH batch AS (
-    SELECT iata, path_key, node_ids, hash_prefix
-    FROM known_routes
-    ORDER BY last_reconfirmed_at
-    LIMIT $1
+const reconfirmRoutes = `-- name: ReconfirmRoutes :one
+WITH batch AS MATERIALIZED (
+    SELECT r.iata, r.path_key, r.node_ids, r.hash_prefix
+    FROM known_routes r
+    WHERE r.last_reconfirmed_at < $1
+    ORDER BY r.last_reconfirmed_at
+    LIMIT $2
+    FOR UPDATE OF r SKIP LOCKED
 ),
 amb AS MATERIALIZED (
     SELECT iata, 1 AS len, prefix_1 AS p FROM node_short_ids GROUP BY iata, prefix_1 HAVING COUNT(*) > 1
@@ -3903,23 +3905,33 @@ deleted AS (
     DELETE FROM known_routes kr
     USING dead d
     WHERE kr.iata = d.iata AND kr.path_key = d.path_key
+),
+updated AS (
+    UPDATE known_routes kr
+    SET last_reconfirmed_at = GREATEST(NOW(), $1::timestamptz)
+    FROM batch b
+    WHERE kr.iata = b.iata AND kr.path_key = b.path_key
+      AND NOT EXISTS (
+          SELECT 1 FROM dead d
+          WHERE d.iata = b.iata AND d.path_key = b.path_key
+      )
 )
-UPDATE known_routes kr
-SET last_reconfirmed_at = NOW()
-FROM batch b
-WHERE kr.iata = b.iata AND kr.path_key = b.path_key
-  AND NOT EXISTS (
-      SELECT 1 FROM dead d
-      WHERE d.iata = b.iata AND d.path_key = b.path_key
-  )
+SELECT count(*) FROM batch
 `
 
-// Checks the $1 least-recently-reconfirmed routes: deletes those with a departed
+type ReconfirmRoutesParams struct {
+	Before    pgtype.Timestamptz `json:"before"`
+	BatchSize int32              `json:"batch_size"`
+}
+
+// Checks one batch of least-recently-reconfirmed routes: deletes those with a departed
 // hop node or a hop prefix now matching >1 node in that IATA (length-aware:
 // 1/2/3/4-byte hop prefixes check prefix_1/2/3/4), and stamps the survivors.
-func (q *Queries) ReconfirmRoutes(ctx context.Context, limit int32) error {
-	_, err := q.db.Exec(ctx, reconfirmRoutes, limit)
-	return err
+func (q *Queries) ReconfirmRoutes(ctx context.Context, arg ReconfirmRoutesParams) (int64, error) {
+	row := q.db.QueryRow(ctx, reconfirmRoutes, arg.Before, arg.BatchSize)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const refreshHourlyStats = `-- name: RefreshHourlyStats :exec
