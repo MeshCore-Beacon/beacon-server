@@ -17,6 +17,8 @@ import (
 )
 
 func TestAllowedOrigins(t *testing.T) {
+	wildcard := []string{"https://*.example.com"}
+	apexAndWildcard := []string{"https://example.com", "https://*.example.com"}
 	for _, tc := range []struct {
 		name    string
 		allowed []string
@@ -30,6 +32,16 @@ func TestAllowedOrigins(t *testing.T) {
 		{"scheme mismatch", []string{"https://example.com"}, "http://example.com", false},
 		{"port mismatch", []string{"https://example.com"}, "https://example.com:8443", false},
 		{"unlisted origin", []string{"https://example.com"}, "https://other.example", false},
+		{"wildcard subdomain", wildcard, "https://sub.example.com", true},
+		{"wildcard deeper subdomain", wildcard, "https://a.b.example.com", true},
+		{"wildcard other case", wildcard, "https://SUB.Example.com", true},
+		{"wildcard apex", wildcard, "https://example.com", false},
+		{"wildcard lookalike", wildcard, "https://evilexample.com", false},
+		{"wildcard suffix host", wildcard, "https://example.com.evil.net", false},
+		{"wildcard scheme mismatch", wildcard, "http://sub.example.com", false},
+		{"wildcard port mismatch", wildcard, "https://sub.example.com:8443", false},
+		{"apex and wildcard, apex", apexAndWildcard, "https://example.com", true},
+		{"apex and wildcard, subdomain", apexAndWildcard, "https://sub.example.com", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(Handler(hub.New(), nil, 5, 100, tc.allowed))

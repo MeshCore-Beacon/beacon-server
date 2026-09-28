@@ -149,9 +149,12 @@ websocket:
   # Within this rate budget, a full concurrent cap accepts then closes with 1013
   # before hello, allowing browsers to back off without evicting existing clients.
   max_connects_per_minute: 10
-  # Other sites allowed to open /ws. Exact scheme://host[:port], no wildcards.
+  # Other sites allowed to open /ws. Exact scheme://host[:port], or
+  # scheme://*.domain[:port] for every subdomain of domain at any depth. The
+  # wildcard never matches the apex itself, and scheme and port stay exact.
   #allowed_origins:
   #  - https://example.com
+  #  - https://*.example.com
 
 # Node staleness, deletion, and clock-drift thresholds.
 #nodes:

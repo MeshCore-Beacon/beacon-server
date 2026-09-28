@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -243,7 +244,8 @@ type WebSocketConfig struct {
 	// MaxConnectsPerMinute limits upgrade attempts, including failed handshakes.
 	// Zero/omitted defaults to 10; IPv6 addresses share a /64 attempt budget.
 	MaxConnectsPerMinute int `yaml:"max_connects_per_minute"`
-	// AllowedOrigins are extra exact origins allowed to open /ws. Defaults to same-host only.
+	// AllowedOrigins are extra origins allowed to open /ws: exact, or scheme://*.domain[:port]
+	// for every subdomain of domain (never the apex). Defaults to same-host only.
 	AllowedOrigins []string `yaml:"allowed_origins"`
 }
 
@@ -415,16 +417,24 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// validateOrigin rejects wildcards, which the WebSocket library would treat as patterns.
+// validateOrigin allows exact origins or a leading "*." subdomain wildcard; the WebSocket
+// library treats entries as path.Match patterns, so every other pattern character is rejected.
 func validateOrigin(origin string) error {
 	u, err := url.Parse(origin)
 	if err != nil {
 		return fmt.Errorf("invalid origin %q: %w", origin, err)
 	}
+	host := u.Hostname()
+	// At least two labels after the wildcard, so it never spans a whole TLD.
+	if rest, ok := strings.CutPrefix(host, "*."); ok {
+		if labels := strings.Split(rest, "."); len(labels) >= 2 && !slices.Contains(labels, "") {
+			host = rest
+		}
+	}
 	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil ||
 		u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" ||
-		strings.ContainsAny(origin, `*?[]\`) {
-		return fmt.Errorf("origin %q must be exactly scheme://host[:port] with an http or https scheme", origin)
+		strings.Contains(host, "*") || strings.ContainsAny(origin, `?[]\`) {
+		return fmt.Errorf("origin %q must be scheme://host[:port] or scheme://*.domain[:port] with an http or https scheme", origin)
 	}
 	return nil
 }
