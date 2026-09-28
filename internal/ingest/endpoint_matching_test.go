@@ -35,6 +35,7 @@ func (s *endpointRoutingDB) ResolvePathHashes(_ context.Context, iata string, ha
 func TestHandlePacketSeparatesEndpointAndRelayMatching(t *testing.T) {
 	for _, kind := range []uint8{meshcore.PayloadTypeReq, meshcore.PayloadTypeResponse, meshcore.PayloadTypeTxtMsg, meshcore.PayloadTypePath} {
 		w, base := newTestWorker()
+		base.observationInserted = true
 		db := &endpointRoutingDB{stubDB: base}
 		w.db = db
 		packet := &meshcore.Packet{Header: meshcore.MakeHeader(meshcore.RouteTypeFlood, kind, 0),

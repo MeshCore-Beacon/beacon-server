@@ -5,28 +5,47 @@ package ingest
 
 import (
 	"context"
+	"sync"
 
 	"github.com/google/uuid"
 )
 
-// runCapabilityDetection checks hash sizes and flips firmware capability flags.
-// Called only when the observation INSERT succeeded (no dedup conflict).
-//
-// Rules (from design doc):
-//   - hash_size == 1: do nothing (proves nothing about firmware)
-//   - duplicate hash prefixes within the path: skip entirely
-//   - non-trace + hash_size 2 or 3 → supports_multibyte_paths = TRUE
-//   - trace (0x09)  + hash_size 2 or 4 → supports_multibyte_traces = TRUE
+const capabilityCacheLimit = 4096
+
+type capabilityCache struct {
+	mu    sync.Mutex
+	nodes map[uuid.UUID]uint8
+}
+
 func (w *Worker) runCapabilityDetection(ctx context.Context, payloadType uint8, hashSize uint8, resolvedNodeIDs []uuid.UUID) {
-	if hashSize < 2 {
+	var flag uint8
+	switch {
+	case payloadType != 0x09 && (hashSize == 2 || hashSize == 3):
+		flag = 1
+	case payloadType == 0x09 && (hashSize == 2 || hashSize == 4):
+		flag = 2
+	default:
 		return
 	}
 	for _, nodeID := range resolvedNodeIDs {
-		switch {
-		case payloadType != 0x09 && (hashSize == 2 || hashSize == 3):
-			_ = w.db.SetNodeCapability(ctx, nodeID, true, false)
-		case payloadType == 0x09 && (hashSize == 2 || hashSize == 4):
-			_ = w.db.SetNodeCapability(ctx, nodeID, false, true)
+		w.capabilities.mu.Lock()
+		recorded := w.capabilities.nodes[nodeID]&flag != 0
+		w.capabilities.mu.Unlock()
+		if recorded {
+			continue
 		}
+		if err := w.db.SetNodeCapability(ctx, nodeID, flag == 1, flag == 2); err != nil {
+			continue
+		}
+		w.capabilities.mu.Lock()
+		if w.capabilities.nodes == nil {
+			w.capabilities.nodes = make(map[uuid.UUID]uint8)
+		}
+		// Eviction only costs another write; capabilities never downgrade.
+		if len(w.capabilities.nodes) >= capabilityCacheLimit {
+			clear(w.capabilities.nodes)
+		}
+		w.capabilities.nodes[nodeID] |= flag
+		w.capabilities.mu.Unlock()
 	}
 }

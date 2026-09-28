@@ -766,29 +766,6 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	if err != nil {
 		w.log.Error(fmt.Sprintf("db: get observer radio failed for %s", pubkeyHex), "error", err)
 	}
-	// Endpoints for the live event only; stored rows resolve them at read time.
-	var resolvedSource, resolvedDestination *api.ResolvedHop
-	if packet.PayloadType() == meshcore.PayloadTypeAdvert && originPubkey != nil {
-		// Exact match: ADVERT carries the sender's real identity pubkey, not a
-		// short ambiguous hash prefix like the other resolvable payload types.
-		if nodeID, err := w.db.GetNodeByPubkey(ctx, originPubkey); err == nil {
-			if nodes, err := w.db.GetNodesByIDs(ctx, []uuid.UUID{nodeID}); err == nil {
-				hop := api.ResolveExactNode(nodes[nodeID])
-				resolvedSource = &hop
-			}
-		}
-	} else if len(sourceHashByte) == 1 {
-		if r, err := w.db.ResolveEndpointHashes(ctx, iata, [][]byte{sourceHashByte}); err == nil {
-			hop := api.BuildResolvedPath([][]byte{sourceHashByte}, r)[0]
-			resolvedSource = &hop
-		}
-	}
-	if len(destHashByte) == 1 {
-		if r, err := w.db.ResolveEndpointHashes(ctx, iata, [][]byte{destHashByte}); err == nil {
-			hop := api.BuildResolvedPath([][]byte{destHashByte}, r)[0]
-			resolvedDestination = &hop
-		}
-	}
 	// Airtime is costed from the frame as received; zero radio columns mean the
 	// observer never reported its settings, so there is nothing to cost.
 	var airtimeMs *float32
@@ -885,6 +862,29 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	// A duplicate is streamed, never stored, to includeRepeats clients when its path is new.
 	repeat := !inserted && w.hub.RepeatsWanted() && w.hub.MarkSent(packetHash[:], id[:], packet.Path)
 	if inserted || repeat {
+		// Endpoints for the live event only; stored rows resolve them at read time.
+		var resolvedSource, resolvedDestination *api.ResolvedHop
+		if packet.PayloadType() == meshcore.PayloadTypeAdvert && originPubkey != nil {
+			// Exact match: ADVERT carries the sender's real identity pubkey, not a
+			// short ambiguous hash prefix like the other resolvable payload types.
+			if nodeID, err := w.db.GetNodeByPubkey(ctx, originPubkey); err == nil {
+				if nodes, err := w.db.GetNodesByIDs(ctx, []uuid.UUID{nodeID}); err == nil {
+					hop := api.ResolveExactNode(nodes[nodeID])
+					resolvedSource = &hop
+				}
+			}
+		} else if len(sourceHashByte) == 1 {
+			if r, err := w.db.ResolveEndpointHashes(ctx, iata, [][]byte{sourceHashByte}); err == nil {
+				hop := api.BuildResolvedPath([][]byte{sourceHashByte}, r)[0]
+				resolvedSource = &hop
+			}
+		}
+		if len(destHashByte) == 1 {
+			if r, err := w.db.ResolveEndpointHashes(ctx, iata, [][]byte{destHashByte}); err == nil {
+				hop := api.BuildResolvedPath([][]byte{destHashByte}, r)[0]
+				resolvedDestination = &hop
+			}
+		}
 		if inserted {
 			w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio, scopeID, matchedScope, pubkeyBytes, float32(parseNumber(envelope.SNR)))
 			if w.hub.RepeatsWanted() {

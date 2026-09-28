@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -284,8 +285,9 @@ func main() {
 		broker2.SetCacheInvalidators(cr.InvalidateNode, cr.InvalidateObserver)
 	}
 
-	go broker1.Start(ctx)
-	go broker2.Start(ctx)
+	var ingestWorkers sync.WaitGroup
+	ingestWorkers.Go(func() { broker1.Start(ctx) })
+	ingestWorkers.Go(func() { broker2.Start(ctx) })
 
 	tasks := []background.Task{
 		background.ViewRefreshTask(store, resolved.ViewRefreshInterval),
@@ -343,6 +345,7 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("server shutdown error", "component", "startup", "error", err)
 	}
+	ingestWorkers.Wait()
 	coalescer.Flush(shutdownCtx)
 }
 

@@ -227,6 +227,7 @@ type Worker struct {
 	keys             ChannelKeyStore
 	scopes           ScopeStore
 	client           mqtt.Client
+	capabilities     capabilityCache
 	onNodeUpsert     func(ctx context.Context, nodeID uuid.UUID)
 	onObserverUpsert func(ctx context.Context, observerID uuid.UUID)
 }
@@ -243,6 +244,28 @@ func New(cfg Config, db DB, h *hub.Hub, keys ChannelKeyStore, scopes ScopeStore)
 //
 // Intended usage: go worker.Start(ctx)
 func (w *Worker) Start(ctx context.Context) {
+	if w.cfg.URL == "" {
+		return
+	}
+	queue := newMessageQueue(8, 2048, 32<<20, func(ctx context.Context, msg mqtt.Message) {
+		w.handleMessageContext(ctx, msg)
+		msg.Ack()
+	})
+	reportDrops := func() {
+		if n := queue.takeDropped(); n > 0 {
+			w.log.Error("ingest queue full, messages dropped", "count", n)
+		}
+	}
+	defer func() {
+		drainCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		if err := queue.close(drainCtx); err != nil {
+			w.log.Warn("ingest shutdown timed out", "error", err)
+		}
+		reportDrops()
+		w.log.Info("stopped")
+	}()
+
 	// Isolate workers across deployments; Paho reuses this ID on reconnect.
 	// Keep it alphanumeric and within MQTT 3.1's 23-character client ID limit.
 	opts := mqtt.NewClientOptions().
@@ -251,6 +274,7 @@ func (w *Worker) Start(ctx context.Context) {
 		SetUsername(w.cfg.Username).
 		SetPassword(w.cfg.Password).
 		SetAutoReconnect(true).
+		SetAutoAckDisabled(true).
 		SetMaxReconnectInterval(30 * time.Second).
 		SetKeepAlive(30 * time.Second).
 		SetPingTimeout(10 * time.Second).
@@ -260,21 +284,33 @@ func (w *Worker) Start(ctx context.Context) {
 		SetConnectRetryInterval(5 * time.Second).
 		SetOnConnectHandler(func(c mqtt.Client) {
 			w.log.Info("connected")
-			w.subscribe(c)
+			w.subscribe(c, queue)
 		}).
 		SetConnectionLostHandler(func(_ mqtt.Client, err error) {
 			w.log.Warn("connection lost, will reconnect", "error", err)
 		})
 
 	w.client = mqtt.NewClient(opts)
-	if tok := w.client.Connect(); tok.Wait() && tok.Error() != nil {
-		w.log.Error("initial connect failed", "error", tok.Error())
-		// paho will retry; we fall through and wait for ctx
+
+	token := w.client.Connect()
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	connected := token.Done()
+	for {
+		select {
+		case <-connected:
+			if err := token.Error(); err != nil {
+				w.log.Error("initial connect failed", "error", err)
+			}
+			connected = nil
+		case <-ticker.C:
+			reportDrops()
+		case <-ctx.Done():
+			w.client.Disconnect(500)
+			return
+		}
 	}
 
-	<-ctx.Done()
-	w.client.Disconnect(500)
-	w.log.Info("stopped")
 }
 
 func (w *Worker) BrokerName() string {
@@ -294,12 +330,15 @@ func (w *Worker) SetCacheInvalidators(onNode, onObserver func(ctx context.Contex
 }
 
 // subscribe registers the wildcard topic handler after (re)connect.
-func (w *Worker) subscribe(client mqtt.Client) {
+func (w *Worker) subscribe(client mqtt.Client, queue *messageQueue) {
 	// meshcore/{IATA}/{pubkey}/packets
 	// meshcore/{IATA}/{pubkey}/status
 	// We do NOT subscribe to /internal (Role 2 access).
 	tok := client.Subscribe("meshcore/#", 1, func(_ mqtt.Client, msg mqtt.Message) {
-		w.handleMessage(msg)
+		if !queue.enqueue(msg) {
+			// Counted drops must release the broker's inflight slot.
+			msg.Ack()
+		}
 	})
 	if tok.Wait() && tok.Error() != nil {
 		w.log.Error("subscribe error", "error", tok.Error())
@@ -323,8 +362,12 @@ func isValidIATA(s string) bool {
 
 // handleMessage dispatches incoming MQTT messages by subtopic.
 // Each message is processed with a 30s timeout to prevent slow DB calls
-// from blocking the MQTT receive goroutine indefinitely.
+// from holding a processing worker indefinitely.
 func (w *Worker) handleMessage(msg mqtt.Message) {
+	w.handleMessageContext(context.Background(), msg)
+}
+
+func (w *Worker) handleMessageContext(parent context.Context, msg mqtt.Message) {
 	// Topic shape: meshcore/{IATA}/{pubkey}/{subtopic}
 	parts := strings.SplitN(msg.Topic(), "/", 4)
 	if len(parts) != 4 || parts[0] != "meshcore" {
@@ -349,7 +392,7 @@ func (w *Worker) handleMessage(msg mqtt.Message) {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
 
 	switch subtopic {
