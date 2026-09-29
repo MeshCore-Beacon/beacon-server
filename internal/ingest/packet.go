@@ -735,19 +735,10 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		w.log.Error(fmt.Sprintf("db: upsert packet failed from %s/%s", iata, pubkeyHex), "error", err)
 		return
 	}
-	// Try parsing with timezone offset first
-	heardAt, err := time.Parse("2006-01-02T15:04:05.000000-07:00", envelope.Timestamp)
-	if err != nil {
-		heardAt, err = time.Parse("2006-01-02T15:04:05.000000", envelope.Timestamp)
-	}
-	if err != nil {
-		heardAt, err = time.Parse("2006-01-02T15:04:05.000000Z", envelope.Timestamp)
-	}
+	// Prefer an explicit RFC3339 offset; legacy timezone-less observers use UTC.
+	heardAt, err := time.Parse(time.RFC3339Nano, envelope.Timestamp)
 	if err != nil {
 		heardAt, err = time.Parse("2006-01-02T15:04:05", envelope.Timestamp)
-	}
-	if err != nil {
-		heardAt, err = time.Parse("2006-01-02T15:04:05Z", envelope.Timestamp)
 	}
 	if err != nil {
 		w.log.Warn(fmt.Sprintf("failed to parse timestamp %q", envelope.Timestamp), "error", err)
