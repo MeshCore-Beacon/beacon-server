@@ -301,6 +301,11 @@ func main() {
 		}
 		tasks = append(tasks, background.ObserverCleanupTask(coalescer, resolved.ObserverDeleteAfter, resolved.CleanupInterval, onDelete))
 	}
+	profiles := configureProfiling(ctx, pool)
+	defer profiles.Stop()
+	for i := range tasks {
+		tasks[i].Run = profiles.WrapTask(tasks[i].Name, tasks[i].Run)
+	}
 	scheduler := background.New(tasks)
 	go scheduler.Start(ctx)
 
