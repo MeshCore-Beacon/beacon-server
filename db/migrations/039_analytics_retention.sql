@@ -9,8 +9,8 @@
 CREATE TABLE IF NOT EXISTS analytics_hourly_iata_stats (
     iata char(3),
     hour timestamptz,
-    observation_count bigint,
-    unique_packets bigint,
+    observation_count bigint NOT NULL DEFAULT 0,
+    unique_packets bigint NOT NULL DEFAULT 0,
     PRIMARY KEY (iata,hour)
 );
 
@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS analytics_payload_breakdown_by_iata (
     iata char(3),
     payload_type smallint,
     bucket timestamptz,
-    count bigint,
+    count bigint NOT NULL DEFAULT 0,
     PRIMARY KEY (iata,payload_type,bucket)
 );
 
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS analytics_top_observers_by_iata (
     iata char(3),
     observer_id uuid,
     bucket timestamptz,
-    observation_count bigint,
+    observation_count bigint NOT NULL DEFAULT 0,
     display_name text,
     observer_type text,
     PRIMARY KEY (iata,observer_id,bucket)
@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS analytics_top_talkers_by_iata (
     iata char(3),
     sender_name text,
     bucket timestamptz,
-    message_count bigint,
+    message_count bigint NOT NULL DEFAULT 0,
     last_sent timestamptz,
     PRIMARY KEY (iata,sender_name,bucket)
 );
@@ -53,9 +53,9 @@ CREATE TABLE IF NOT EXISTS analytics_top_advertisers_by_iata (
     iata char(3),
     node_id uuid,
     bucket timestamptz,
-    advert_count bigint,
-    flood_advert_count bigint,
-    direct_advert_count bigint,
+    advert_count bigint NOT NULL DEFAULT 0,
+    flood_advert_count bigint NOT NULL DEFAULT 0,
+    direct_advert_count bigint NOT NULL DEFAULT 0,
     last_heard timestamptz,
     name text,
     node_type smallint,
@@ -68,14 +68,14 @@ CREATE TABLE IF NOT EXISTS analytics_observer_activity_hourly (
     observer_id uuid,
     payload_type smallint,
     bucket timestamptz,
-    observations bigint,
+    observations bigint NOT NULL DEFAULT 0,
     airtime_ms real,
-    airtime_n bigint,
+    airtime_n bigint NOT NULL DEFAULT 0,
     snr_sum real,
-    snr_n bigint,
+    snr_n bigint NOT NULL DEFAULT 0,
     snr_min real,
     rssi_sum bigint,
-    rssi_n bigint,
+    rssi_n bigint NOT NULL DEFAULT 0,
     PRIMARY KEY (observer_id,payload_type,bucket)
 );
 
@@ -87,10 +87,10 @@ CREATE TABLE IF NOT EXISTS analytics_signal_stats_hourly (
     kind integer,
     snr_bin integer,
     rssi_bin integer,
-    receptions bigint,
-    snr_samples bigint,
+    receptions bigint NOT NULL DEFAULT 0,
+    snr_samples bigint NOT NULL DEFAULT 0,
     snr_sum double precision,
-    rssi_samples bigint,
+    rssi_samples bigint NOT NULL DEFAULT 0,
     rssi_sum double precision,
     PRIMARY KEY (iata,hour,kind,snr_bin,rssi_bin)
 );
@@ -103,7 +103,7 @@ CREATE TABLE IF NOT EXISTS analytics_path_stats_hourly (
     category integer,
     hash_bytes integer,
     entries integer,
-    receptions bigint,
+    receptions bigint NOT NULL DEFAULT 0,
     PRIMARY KEY (iata,hour,category,hash_bytes,entries)
 );
 
@@ -260,11 +260,10 @@ CREATE UNIQUE INDEX idx_analytics_top_advertisers_by_iata_view ON mv_top_adverti
 
 
 DROP MATERIALIZED VIEW IF EXISTS mv_observer_activity_hourly;
-
 CREATE OR REPLACE VIEW analytics_live_observer_activity_hourly AS
 SELECT
   observer_id,
-  payload_type,
+  COALESCE(payload_type, -1)::smallint AS payload_type,
   date_trunc('hour', heard_at, 'UTC')::timestamptz AS bucket,
   COUNT(*)::bigint AS observations,
   SUM(airtime_ms)::real AS airtime_ms,
@@ -276,8 +275,7 @@ SELECT
   COUNT(rssi) FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0))::bigint AS rssi_n
 FROM packet_observations
 WHERE heard_at > NOW() - INTERVAL '30 days'
-  AND payload_type IS NOT NULL
-GROUP BY observer_id, payload_type, date_trunc('hour', heard_at, 'UTC');
+GROUP BY observer_id, COALESCE(payload_type, -1), date_trunc('hour', heard_at, 'UTC');
 
 CREATE MATERIALIZED VIEW mv_observer_activity_hourly AS
 WITH combined AS (
@@ -290,6 +288,7 @@ SELECT observer_id, payload_type, bucket, SUM(observations)::bigint AS observati
 FROM combined GROUP BY observer_id,payload_type,bucket;
 
 CREATE UNIQUE INDEX idx_analytics_observer_activity_hourly_view ON mv_observer_activity_hourly (observer_id,payload_type,bucket);
+
 
 
 DROP MATERIALIZED VIEW IF EXISTS mv_signal_stats_hourly;
@@ -333,6 +332,7 @@ SELECT iata, hour, kind, snr_bin, rssi_bin, SUM(receptions)::bigint AS reception
 FROM combined GROUP BY iata,hour,kind,snr_bin,rssi_bin;
 
 CREATE UNIQUE INDEX idx_analytics_signal_stats_hourly_view ON mv_signal_stats_hourly (iata,hour,kind,snr_bin,rssi_bin);
+CREATE INDEX idx_mv_signal_stats_hourly_hour ON mv_signal_stats_hourly (hour);
 
 
 DROP MATERIALIZED VIEW IF EXISTS mv_path_stats_hourly;
@@ -376,6 +376,7 @@ SELECT iata, hour, category, hash_bytes, entries, SUM(receptions)::bigint AS rec
 FROM combined GROUP BY iata,hour,category,hash_bytes,entries;
 
 CREATE UNIQUE INDEX idx_analytics_path_stats_hourly_view ON mv_path_stats_hourly (iata,hour,category,hash_bytes,entries);
+CREATE INDEX idx_mv_path_stats_hourly_hour ON mv_path_stats_hourly (hour);
 
 
 -- VOLATILE gives the archive statement a new READ COMMITTED snapshot after
@@ -385,6 +386,8 @@ CREATE OR REPLACE FUNCTION archive_delete_packets(cutoff timestamptz, batch_size
 RETURNS bigint LANGUAGE plpgsql VOLATILE AS $$
 DECLARE hashes bytea[]; deleted bigint;
 BEGIN
+    -- Serialize cleanup runners before overlapping aggregate upserts.
+    PERFORM pg_advisory_xact_lock(hashtext('beacon.archive_delete_packets'));
     IF batch_size < 1 THEN RAISE EXCEPTION 'batch_size must be positive'; END IF;
     SELECT array_agg(p.packet_hash) INTO hashes FROM (
         SELECT ep.packet_hash FROM packets ep
@@ -500,7 +503,7 @@ archived_observer_activity_hourly AS (
     SELECT observer_id, payload_type, bucket, observations, airtime_ms, airtime_n, snr_sum, snr_n, snr_min, rssi_sum, rssi_n FROM (
 SELECT
   observer_id,
-  payload_type,
+  COALESCE(payload_type, -1)::smallint AS payload_type,
   date_trunc('hour', heard_at, 'UTC')::timestamptz AS bucket,
   COUNT(*)::bigint AS observations,
   SUM(airtime_ms)::real AS airtime_ms,
@@ -512,8 +515,7 @@ SELECT
   COUNT(rssi) FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0))::bigint AS rssi_n
 FROM expired_observations
 WHERE heard_at >= date_trunc('hour', NOW(), 'UTC') - INTERVAL '30 days'
-  AND payload_type IS NOT NULL
-GROUP BY observer_id, payload_type, date_trunc('hour', heard_at, 'UTC')
+GROUP BY observer_id, COALESCE(payload_type, -1), date_trunc('hour', heard_at, 'UTC')
     ) batch
     ON CONFLICT (observer_id,payload_type,bucket) DO UPDATE SET
         observations = analytics_observer_activity_hourly.observations + EXCLUDED.observations,

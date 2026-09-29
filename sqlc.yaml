@@ -30,3 +30,6 @@ sql:
             go_type: {type: "string", pointer: true}
           - column: "mv_top_advertisers_by_iata.name"
             go_type: {type: "string", pointer: true}
+
+          - column: "mv_observer_activity_hourly.payload_type"
+            go_type: {type: "int16", pointer: true}

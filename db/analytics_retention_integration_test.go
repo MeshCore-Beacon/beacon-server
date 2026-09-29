@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -87,6 +88,30 @@ func TestAnalyticsRetentionConcurrentPostgres(t *testing.T) {
 	if err := conn.QueryRow(ctx, "SELECT observation_count FROM analytics_hourly_iata_stats").Scan(&count); err != nil || count != 1 {
 		t.Fatalf("committed reception not archived: %d %v", count, err)
 	}
+	// A second cleanup runner must wait before touching shared aggregate keys.
+	first, err := writer.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Rollback(context.Background())
+	if _, err := sqlc.New(first).DeleteOldPackets(ctx, params); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, "SET statement_timeout='300ms'"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.DeleteOldPackets(ctx, params); err == nil {
+		t.Fatalf("overlapping cleanup did not wait for the first transaction: %v", err)
+	}
+	if _, err := conn.Exec(ctx, "SET statement_timeout=0"); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := q.DeleteOldPackets(ctx, params); err != nil || n != 0 {
+		t.Fatalf("cleanup lock was not released: %d %v", n, err)
+	}
 }
 
 // Minimal real tables keep this regression runnable against an empty CI database.
@@ -136,6 +161,12 @@ func TestAnalyticsRetentionPostgres(t *testing.T) {
 		applyStatsMigration(t, ctx, tx, migration)
 	}
 	applyStatsMigration(t, ctx, tx, "039_analytics_retention.sql")
+	for _, name := range []string{"idx_mv_signal_stats_hourly_hour", "idx_mv_path_stats_hourly_hour"} {
+		var definition string
+		if err := tx.QueryRow(ctx, "SELECT pg_get_indexdef(to_regclass($1))", name).Scan(&definition); err != nil || !strings.Contains(definition, "(hour)") {
+			t.Fatalf("missing unfiltered time index %s: %s %v", name, definition, err)
+		}
+	}
 	before := analyticsSnapshot(t, ctx, tx)
 	q := sqlc.New(tx)
 	cutoff := time.Now().Add(-72 * time.Hour)
@@ -184,6 +215,9 @@ func TestAnalyticsRetentionPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	late := analyticsSnapshot(t, ctx, tx)
+	if countRows(t, ctx, tx, "SELECT COALESCE(SUM(observations),0) FROM mv_observer_activity_hourly WHERE payload_type=-1") != 1 {
+		t.Fatal("unknown-payload observation was omitted")
+	}
 	if err := (&Store{q: q}).DeleteOldPackets(ctx, cutoff); err != nil {
 		t.Fatal(err)
 	}
