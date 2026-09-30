@@ -10,6 +10,8 @@ import (
 	"errors"
 	"os"
 	"testing"
+
+	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
 )
 
 type stubSeeder struct {
@@ -198,39 +200,39 @@ func TestSeed_DBError(t *testing.T) {
 }
 
 func TestNormalizeScopeName_WithHash(t *testing.T) {
-	if normalizeScopeName("#bc") != "#bc" {
+	if scopestore.FromName("#bc").Name != "#bc" {
 		t.Error("expected #bc unchanged")
 	}
 }
 
 func TestNormalizeScopeName_WithDollar(t *testing.T) {
-	if normalizeScopeName("$bc") != "$bc" {
+	if scopestore.FromName("$bc").Name != "$bc" {
 		t.Error("expected $bc unchanged")
 	}
 }
 
 func TestNormalizeScopeName_WithoutPrefix(t *testing.T) {
-	if normalizeScopeName("bc") != "#bc" {
+	if scopestore.FromName("bc").Name != "#bc" {
 		t.Error("expected bc to become #bc")
 	}
 }
 
 func TestNormalizeScopeName_Empty(t *testing.T) {
-	if normalizeScopeName("") != "#" {
+	if scopestore.FromName("").Name != "#" {
 		t.Error("expected empty string to become #")
 	}
 }
 
 func TestDeriveScopeKey_Length(t *testing.T) {
-	key := deriveScopeKey("#bc")
+	key := scopestore.FromName("#bc").TransportKey
 	if len(key) != 16 {
 		t.Errorf("expected 16 bytes, got %d", len(key))
 	}
 }
 
 func TestDeriveScopeKey_Deterministic(t *testing.T) {
-	a := deriveScopeKey("#bc")
-	b := deriveScopeKey("#bc")
+	a := scopestore.FromName("#bc").TransportKey
+	b := scopestore.FromName("#bc").TransportKey
 	if hex.EncodeToString(a) != hex.EncodeToString(b) {
 		t.Error("expected same key for same input")
 	}
@@ -238,7 +240,7 @@ func TestDeriveScopeKey_Deterministic(t *testing.T) {
 
 func TestDeriveScopeKey_KnownValue(t *testing.T) {
 	// SHA256("#bc")[:16] — pin the exact derivation so changes are caught
-	key := deriveScopeKey("#bc")
+	key := scopestore.FromName("#bc").TransportKey
 	got := hex.EncodeToString(key)
 	// generate this once: echo -n "#bc" | sha256sum | cut -c1-32
 	const want = "84509cfe73d94f7f6a8299e6bcdb8a3c"
@@ -248,8 +250,8 @@ func TestDeriveScopeKey_KnownValue(t *testing.T) {
 }
 
 func TestDeriveScopeKey_DifferentInputs(t *testing.T) {
-	a := deriveScopeKey("#bc")
-	b := deriveScopeKey("#other")
+	a := scopestore.FromName("#bc").TransportKey
+	b := scopestore.FromName("#other").TransportKey
 	if hex.EncodeToString(a) == hex.EncodeToString(b) {
 		t.Error("expected different keys for different inputs")
 	}

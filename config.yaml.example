@@ -214,6 +214,21 @@ cache:
 #  allow_countries: [CA, US]
 #  allow_continents: [NA]
 
+# Optional public MeshMapper scope-name discovery. Manual scopes remain authoritative.
+# No API key is needed. Sources must belong to a configured region's IATAs.
+# Group endpoints are not supported: their names cannot be attributed to each IATA.
+# At most 16 sources, 64 names per source, 64 KiB per response; no page scraping.
+# Catalogues and ETags persist in PostgreSQL. Failed refreshes retain known names.
+# Refresh success/failure/freshness is logged under component=meshmapper.scopes.
+# Removing/turning off a source deactivates its imported matching keys on restart;
+# historical scope identities and recorded evidence are retained.
+#meshmapper:
+#  scopes:
+#    enabled: false
+#    refresh_interval: 1h  # 5m-24h; one source checked per 15s tick
+#    sources:
+#      YOW: https://yow.meshmapper.net/get_scopes.php
+
 # Background task intervals.
 # Shorter intervals are useful during initial deployment to confirm data is
 # flowing. Back off to 1h or more once stable.

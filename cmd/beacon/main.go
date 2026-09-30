@@ -29,6 +29,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
 	"github.com/MeshCore-Beacon/beacon-server/internal/keystore"
 	"github.com/MeshCore-Beacon/beacon-server/internal/logging"
+	"github.com/MeshCore-Beacon/beacon-server/internal/meshmapper"
 	"github.com/MeshCore-Beacon/beacon-server/internal/presence"
 	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
 
@@ -189,6 +190,16 @@ func main() {
 	}
 	scopes.Load(scopeEntries)
 	slog.Info(fmt.Sprintf("loaded %d transport scopes", len(scopeEntries)), "component", "startup")
+	var scopeImporter *meshmapper.Importer
+	if cfg.MeshMapper.Scopes.Enabled {
+		restoreCtx, cancelRestore := context.WithTimeout(ctx, 10*time.Second)
+		scopeImporter, err = meshmapper.New(restoreCtx, cfg.MeshMapper.Scopes, store, scopes, scopeEntries)
+		cancelRestore()
+		if err != nil {
+			slog.Error("failed to restore MeshMapper scope catalogues", "component", "startup", "error", err)
+			os.Exit(1)
+		}
+	}
 
 	// ── Build channel keystore ──────────────────────────────────────────────
 	entries := make(map[string][]keystore.Entry)
@@ -281,6 +292,9 @@ func main() {
 	)
 
 	if cr, ok := reader.(*cache.CachedReader); ok {
+		if scopeImporter != nil {
+			scopeImporter.SetCacheInvalidator(cr.InvalidateScopeNames)
+		}
 		broker1.SetCacheInvalidators(cr.InvalidateNode, cr.InvalidateObserver)
 		broker2.SetCacheInvalidators(cr.InvalidateNode, cr.InvalidateObserver)
 	}
@@ -300,6 +314,9 @@ func main() {
 			onDelete = cr.InvalidateObserver
 		}
 		tasks = append(tasks, background.ObserverCleanupTask(coalescer, resolved.ObserverDeleteAfter, resolved.CleanupInterval, onDelete))
+	}
+	if scopeImporter != nil {
+		tasks = append(tasks, background.Task{Name: "meshmapper.scopes", Interval: meshmapper.PollInterval, Run: scopeImporter.Refresh})
 	}
 	profiles := configureProfiling(ctx, pool)
 	defer profiles.Stop()

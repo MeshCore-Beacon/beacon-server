@@ -80,6 +80,11 @@ func NewCachedReader(inner api.Reader, c *Client, ttl CacheTTLs) api.Reader {
 	}
 }
 
+// InvalidateScopeNames makes newly committed catalogue names available to filters.
+func (cr *CachedReader) InvalidateScopeNames(ctx context.Context) {
+	cr.c.del(ctx, keyScopeNames)
+}
+
 // InvalidateNode removes the cached entries for a node by UUID.
 // Should be called from the ingest path after a node upsert.
 func (cr *CachedReader) InvalidateNode(ctx context.Context, nodeID uuid.UUID) {
@@ -372,10 +377,13 @@ func (cr *CachedReader) GetObserverTelemetryBucketed(ctx context.Context, observ
 }
 
 // GetObserverActivity implements [api.Reader].
-func (cr *CachedReader) GetObserverActivity(ctx context.Context, observerID uuid.UUID, window, interval time.Duration) (*api.ObserverActivity, error) {
-	key := keyObserverActivityPrefix + observerID.String() + ":" + window.String() + ":" + interval.String()
+func (cr *CachedReader) GetObserverActivity(ctx context.Context, observerID uuid.UUID, window, interval time.Duration, until time.Time) (*api.ObserverActivity, error) {
+	if !until.IsZero() {
+		until = until.UTC().Truncate(interval)
+	}
+	key := keyObserverActivityPrefix + observerID.String() + ":" + window.String() + ":" + interval.String() + ":" + until.UTC().Format(time.RFC3339Nano)
 	return getOrSet(ctx, cr.c, key, observerActivityTTL, func() (*api.ObserverActivity, error) {
-		return cr.inner.GetObserverActivity(ctx, observerID, window, interval)
+		return cr.inner.GetObserverActivity(ctx, observerID, window, interval, until)
 	})
 }
 
@@ -462,6 +470,11 @@ func (cr *CachedReader) ListKnownRoutes(ctx context.Context, iata string, hopCou
 // SearchKnownRoutes implements [api.Reader].
 func (cr *CachedReader) SearchKnownRoutes(ctx context.Context, iata, fromHash, toHash string) ([]api.KnownRoute, error) {
 	return cr.inner.SearchKnownRoutes(ctx, iata, fromHash, toHash)
+}
+
+// Precise cursor/window combinations are intentionally passed through, like route lists.
+func (cr *CachedReader) GetRouteEvidence(ctx context.Context, iata, key string, query api.RouteEvidenceQuery) (*api.RouteEvidence, error) {
+	return cr.inner.GetRouteEvidence(ctx, iata, key, query)
 }
 
 // SearchCrossIATARoutes implements [api.Reader].

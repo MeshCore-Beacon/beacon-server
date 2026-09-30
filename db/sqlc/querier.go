@@ -29,7 +29,7 @@ type Querier interface {
 	// Opt-in age-out: preserve retained history and manually recorded ownership.
 	// Bound deletions per cleanup tick and skip observers being updated by ingest.
 	DeleteOldObservers(ctx context.Context, lastSeen pgtype.Timestamptz) ([]uuid.UUID, error)
-	// One batch of expired packets; observations and channel messages cascade.
+	// Locks, archives and cascades one bounded packet cohort in a single transaction.
 	DeleteOldPackets(ctx context.Context, arg DeleteOldPacketsParams) (int64, error)
 	// One batch of routes past retention, or past grace with too few observations.
 	// GREATEST keeps the scan on idx_known_routes_last_seen.
@@ -58,6 +58,8 @@ type Querier interface {
 	// Hour-or-coarser buckets summed from the hourly rollup; same COALESCE-plus-count shape as the raw query.
 	GetObserverActivityHourly(ctx context.Context, arg GetObserverActivityHourlyParams) ([]GetObserverActivityHourlyRow, error)
 	GetObserverActivityHourlyPayloadTypes(ctx context.Context, arg GetObserverActivityHourlyPayloadTypesParams) ([]GetObserverActivityHourlyPayloadTypesRow, error)
+	// Two indexed ranges, bounded to one observer; no legacy presence counters.
+	GetObserverActivityLiveSummary(ctx context.Context, arg GetObserverActivityLiveSummaryParams) (GetObserverActivityLiveSummaryRow, error)
 	// Sub-hour activity buckets straight off idx_observations_observer; no join to packets.
 	// Aggregates are COALESCEd and paired with a count column: sqlc types a cast expression as
 	// NOT NULL, so the counts are what tell the store a bucket had no costed or no signal rows.
@@ -85,7 +87,11 @@ type Querier interface {
 	GetRegion(ctx context.Context, id int32) (GetRegionRow, error)
 	GetRegionBySlug(ctx context.Context, slug string) (GetRegionBySlugRow, error)
 	GetRegionIATAs(ctx context.Context, regionID int32) ([]string, error)
+	GetRouteEvidenceRoute(ctx context.Context, arg GetRouteEvidenceRouteParams) (KnownRoute, error)
 	GetScopeByName(ctx context.Context, name string) (GetScopeByNameRow, error)
+	// Copyright 2026 Beacon Contributors
+	// SPDX-License-Identifier: AGPL-3.0-or-later
+	GetScopeCatalogue(ctx context.Context, arg GetScopeCatalogueParams) (MeshmapperScopeCatalogue, error)
 	GetScopeNames(ctx context.Context) ([]string, error)
 	// Aggregate matching observations once, separately from node memberships to avoid
 	// a cross-join. Empty IATAs keep the original global counts, including associations
@@ -122,7 +128,9 @@ type Querier interface {
 	// ============================================================
 	// CHANNEL MESSAGES
 	// ============================================================
-	InsertChannelMessage(ctx context.Context, arg InsertChannelMessageParams) (int64, error)
+	// Read the immutable first-packet scope in the same statement as insertion.
+	// A later reception's transport code must not give live and historical messages different tags.
+	InsertChannelMessage(ctx context.Context, arg InsertChannelMessageParams) (InsertChannelMessageRow, error)
 	// ============================================================
 	// PACKET OBSERVATIONS
 	// ============================================================
@@ -196,6 +204,10 @@ type Querier interface {
 	// REGIONS
 	// ============================================================
 	ListRegions(ctx context.Context) ([]ListRegionsRow, error)
+	// Leading index equalities and the time/ID boundary bound both custom and generic plans.
+	// Full-byte equality is required even when the compact digest matches. TRACE path bytes
+	// carry readings; unclassified legacy observations cannot be safely called ordinary paths.
+	ListRouteEvidence(ctx context.Context, arg ListRouteEvidenceParams) ([]ListRouteEvidenceRow, error)
 	// ============================================================
 	// TRACES
 	// ============================================================
@@ -243,6 +255,10 @@ type Querier interface {
 	ResolvePathHashesP2(ctx context.Context, arg ResolvePathHashesP2Params) ([]ResolvePathHashesP2Row, error)
 	ResolvePathHashesP3(ctx context.Context, arg ResolvePathHashesP3Params) ([]ResolvePathHashesP3Row, error)
 	ResolvePathHashesP4(ctx context.Context, arg ResolvePathHashesP4Params) ([]ResolvePathHashesP4Row, error)
+	// One statement commits the validated snapshot and its lookup identities together.
+	// Empty arrays insert nothing. NULL payload/checked_at retain last-known-good data
+	// after an error or 304. Imported names never replace existing manual metadata.
+	SaveScopeCatalogue(ctx context.Context, arg SaveScopeCatalogueParams) error
 	// Returns known routes containing a subsequence from source to destination hash prefix.
 	// Verifies source appears before destination in the route.
 	SearchKnownRoutes(ctx context.Context, arg SearchKnownRoutesParams) ([]SearchKnownRoutesRow, error)

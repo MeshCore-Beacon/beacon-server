@@ -89,7 +89,7 @@ type DB interface {
 	UpsertObserver(ctx context.Context, pubkey []byte) (uuid.UUID, string, error)
 
 	// UpsertObserverBroker records that this observer was seen on brokerName.
-	UpsertObserverBroker(ctx context.Context, observerID uuid.UUID, brokerName string) error
+	UpsertObserverBroker(ctx context.Context, observerID uuid.UUID, brokerName string, isPacket bool) error
 
 	// UpsertIATA auto-creates an iata_codes row if it doesn't exist yet.
 	UpsertIATA(ctx context.Context, iata string) error
@@ -131,8 +131,8 @@ type DB interface {
 	// UpsertNodeShortID upserts a node_short_ids row for path resolution.
 	UpsertNodeShortID(ctx context.Context, nodeID uuid.UUID, iata string, prefix4 []byte) error
 
-	// InsertChannelMessage stores a decrypted group text message. Returns insert success and an error.
-	InsertChannelMessage(ctx context.Context, m InsertChannelMessageParams) (bool, error)
+	// InsertChannelMessage stores a decrypted group text message. Returns the inserted message, nil for a duplicate, and an error.
+	InsertChannelMessage(ctx context.Context, m InsertChannelMessageParams) (*InsertedChannelMessage, error)
 
 	// UpdateObserverStatus updates the observer row from a /status message. Returns the OberserID
 	// and any error.

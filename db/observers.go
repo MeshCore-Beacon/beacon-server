@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"math"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
@@ -230,12 +231,38 @@ func (s *Store) GetObserverTelemetryBucketed(ctx context.Context, observerID uui
 // GetObserverActivity returns bucketed heard-activity for an observer over the trailing window.
 // Buckets of an hour or coarser come from the hourly rollup; anything finer reads observations directly.
 // Range and Interval are left empty for the handler to fill.
-func (s *Store) GetObserverActivity(ctx context.Context, observerID uuid.UUID, window, interval time.Duration) (*api.ObserverActivity, error) {
+func (s *Store) GetObserverActivity(ctx context.Context, observerID uuid.UUID, window, interval time.Duration, until time.Time) (*api.ObserverActivity, error) {
 	obs, err := s.q.GetObserverByID(ctx, observerID)
 	if err != nil {
 		return nil, err
 	}
-	activity := &api.ObserverActivity{}
+	now := time.Now().UTC()
+	if until.IsZero() {
+		until = now
+	} else {
+		until = until.UTC().Truncate(interval)
+	}
+	since := until.Add(-window)
+	if !since.Equal(since.Truncate(interval)) {
+		since = since.Truncate(interval).Add(interval)
+	}
+	activity := &api.ObserverActivity{WindowStart: since.UnixMilli(), WindowEnd: until.UnixMilli(), GeneratedAt: now.UnixMilli(), Source: "raw", Summary: &api.ObserverActivitySummary{}}
+	if interval >= time.Hour {
+		activity.Source = "hourly"
+	}
+	live, err := s.q.GetObserverActivityLiveSummary(ctx, sqlc.GetObserverActivityLiveSummaryParams{
+		ObserverID: observerID, GeneratedAt: pgtype.Timestamptz{Time: now, Valid: true},
+		HourStart: pgtype.Timestamptz{Time: now.Truncate(time.Hour).Add(-time.Hour), Valid: true}, HourEnd: pgtype.Timestamptz{Time: now.Truncate(time.Hour), Valid: true}})
+	if err != nil {
+		return nil, err
+	}
+	activity.Summary.LastCompleteHour = live.LastCompleteHour
+	if live.LatestRecordedAt.Valid {
+		v := live.LatestRecordedAt.Time.UnixMilli()
+		activity.Summary.LatestRecordedAt = &v
+	}
+	activity.Summary.LastCompleteHourStart = now.Truncate(time.Hour).Add(-time.Hour).UnixMilli()
+	activity.Summary.LastCompleteHourEnd = now.Truncate(time.Hour).UnixMilli()
 	// radio is non-nil only when airtime is actually costable, so radio != null implies costed buckets
 	if obs.RadioSf != nil && obs.RadioBwKhz != nil && obs.RadioCr != nil &&
 		*obs.RadioSf >= 7 && *obs.RadioSf <= 12 && *obs.RadioBwKhz > 0 && *obs.RadioCr > 0 {
@@ -247,12 +274,6 @@ func (s *Store) GetObserverActivity(ctx context.Context, observerID uuid.UUID, w
 			PreambleSymbols: lora.PreambleSymbols(int(*obs.RadioSf)),
 		}
 	}
-	// round the window start up to a bucket boundary so the first bucket is never a partial one
-	start := time.Now().Add(-window).UTC()
-	since := start.Truncate(interval)
-	if since.Before(start) {
-		since = since.Add(interval)
-	}
 	sinceTS := pgtype.Timestamptz{Time: since, Valid: true}
 	binWidth := pgtype.Interval{Microseconds: interval.Microseconds(), Valid: true}
 
@@ -261,6 +282,7 @@ func (s *Store) GetObserverActivity(ctx context.Context, observerID uuid.UUID, w
 			ObserverID: observerID,
 			Column2:    sinceTS,
 			Column3:    binWidth,
+			Until:      pgtype.Timestamptz{Time: until, Valid: true},
 		})
 		if err != nil {
 			return nil, err
@@ -268,6 +290,7 @@ func (s *Store) GetObserverActivity(ctx context.Context, observerID uuid.UUID, w
 		activity.Points = make([]api.ObserverActivityPoint, 0, len(rows))
 		for _, r := range rows {
 			p := api.ObserverActivityPoint{T: r.Bucket.Time.UnixMilli(), Observations: r.Observations}
+			activity.Summary.RecordedPackets += r.Observations
 			if r.AirtimeN > 0 {
 				airtime := r.AirtimeMs
 				p.AirtimeMs = &airtime
@@ -275,7 +298,12 @@ func (s *Store) GetObserverActivity(ctx context.Context, observerID uuid.UUID, w
 			if r.SnrN > 0 {
 				avg := r.SnrSum / float32(r.SnrN)
 				min := r.SnrMin
-				p.SNRAvg, p.SNRMin = &avg, &min
+				if !math.IsNaN(float64(avg)) && !math.IsInf(float64(avg), 0) {
+					p.SNRAvg = &avg
+				}
+				if !math.IsNaN(float64(min)) && !math.IsInf(float64(min), 0) {
+					p.SNRMin = &min
+				}
 			}
 			if r.RssiN > 0 {
 				avg := float32(r.RssiSum) / float32(r.RssiN)
@@ -286,18 +314,17 @@ func (s *Store) GetObserverActivity(ctx context.Context, observerID uuid.UUID, w
 		typeRows, err := s.q.GetObserverActivityHourlyPayloadTypes(ctx, sqlc.GetObserverActivityHourlyPayloadTypesParams{
 			ObserverID: observerID,
 			Column2:    sinceTS,
+			Until:      pgtype.Timestamptz{Time: until, Valid: true},
 		})
 		if err != nil {
 			return nil, err
 		}
 		activity.PayloadTypes = make([]api.PayloadBreakdownItem, 0, len(typeRows))
 		for _, v := range typeRows {
-			if v.PayloadType == nil {
-				continue
-			}
+			payloadType := v.PayloadType
 			activity.PayloadTypes = append(activity.PayloadTypes, api.PayloadBreakdownItem{
-				PayloadType:     *v.PayloadType,
-				PayloadTypeName: api.PayloadTypeName(*v.PayloadType),
+				PayloadType:     payloadType,
+				PayloadTypeName: api.PayloadTypeName(payloadType),
 				Count:           v.Count,
 			})
 		}
@@ -308,6 +335,7 @@ func (s *Store) GetObserverActivity(ctx context.Context, observerID uuid.UUID, w
 		ObserverID: observerID,
 		Column2:    sinceTS,
 		Column3:    binWidth,
+		Until:      pgtype.Timestamptz{Time: until, Valid: true},
 	})
 	if err != nil {
 		return nil, err
@@ -315,13 +343,19 @@ func (s *Store) GetObserverActivity(ctx context.Context, observerID uuid.UUID, w
 	activity.Points = make([]api.ObserverActivityPoint, 0, len(rows))
 	for _, r := range rows {
 		p := api.ObserverActivityPoint{T: r.Bucket.Time.UnixMilli(), Observations: r.Observations}
+		activity.Summary.RecordedPackets += r.Observations
 		if r.AirtimeN > 0 {
 			airtime := r.AirtimeMs
 			p.AirtimeMs = &airtime
 		}
 		if r.SnrN > 0 {
 			avg, min := r.SnrAvg, r.SnrMin
-			p.SNRAvg, p.SNRMin = &avg, &min
+			if !math.IsNaN(float64(avg)) && !math.IsInf(float64(avg), 0) {
+				p.SNRAvg = &avg
+			}
+			if !math.IsNaN(float64(min)) && !math.IsInf(float64(min), 0) {
+				p.SNRMin = &min
+			}
 		}
 		if r.RssiN > 0 {
 			avg := r.RssiAvg
@@ -332,18 +366,20 @@ func (s *Store) GetObserverActivity(ctx context.Context, observerID uuid.UUID, w
 	typeRows, err := s.q.GetObserverActivityRawPayloadTypes(ctx, sqlc.GetObserverActivityRawPayloadTypesParams{
 		ObserverID: observerID,
 		Column2:    sinceTS,
+		Until:      pgtype.Timestamptz{Time: until, Valid: true},
 	})
 	if err != nil {
 		return nil, err
 	}
 	activity.PayloadTypes = make([]api.PayloadBreakdownItem, 0, len(typeRows))
 	for _, v := range typeRows {
-		if v.PayloadType == nil {
-			continue
+		payloadType := int16(-1)
+		if v.PayloadType != nil {
+			payloadType = *v.PayloadType
 		}
 		activity.PayloadTypes = append(activity.PayloadTypes, api.PayloadBreakdownItem{
-			PayloadType:     *v.PayloadType,
-			PayloadTypeName: api.PayloadTypeName(*v.PayloadType),
+			PayloadType:     payloadType,
+			PayloadTypeName: api.PayloadTypeName(payloadType),
 			Count:           v.Count,
 		})
 	}
@@ -424,10 +460,11 @@ func (s *Store) GetObserverRadio(ctx context.Context, observerID uuid.UUID) (ing
 	return settings, nil
 }
 
-func (s *Store) UpsertObserverBroker(ctx context.Context, observerID uuid.UUID, brokerName string) error {
+func (s *Store) UpsertObserverBroker(ctx context.Context, observerID uuid.UUID, brokerName string, isPacket bool) error {
 	params := sqlc.UpsertObserverBrokerParams{
 		ObserverID: observerID,
 		BrokerName: brokerName,
+		IsPacket:   isPacket,
 	}
 	return s.q.UpsertObserverBroker(ctx, params)
 }

@@ -56,13 +56,32 @@ func ParseChannelCursor(raw string) (*ChannelCursor, error) {
 // ChannelMessage represents a single decrypted channel message.
 // Only messages for channels with a known key are stored and returned.
 type ChannelMessage struct {
-	ID               int64  `json:"id"`
-	PacketHash       string `json:"packetHash"`       // hex-encoded packet hash for correlation with packet events
-	ChannelHash      string `json:"channelHash"`      // hex-encoded single-byte channel hash
-	SenderName       string `json:"senderName"`       // display name from the decrypted payload
-	Content          string `json:"content"`          // decrypted message text
-	SentAt           int64  `json:"sentAt"`           // epoch ms, from the sender's embedded timestamp
-	ObservationCount int64  `json:"observationCount"` // number of packet_observations rows for this message's packet hash
+	ID               int64              `json:"id"`
+	PacketHash       string             `json:"packetHash"`       // hex-encoded packet hash for correlation with packet events
+	ChannelHash      string             `json:"channelHash"`      // hex-encoded single-byte channel hash
+	SenderName       string             `json:"senderName"`       // display name from the decrypted payload
+	Content          string             `json:"content"`          // decrypted message text
+	SentAt           int64              `json:"sentAt"`           // epoch ms, from the sender's embedded timestamp
+	ObservationCount int64              `json:"observationCount"` // number of packet_observations rows for this message's packet hash
+	Scope            *string            `json:"scope"`            // matched scope on the first stored packet; null when none was recorded
+	ScopeStatus      ChannelScopeStatus `json:"scopeStatus" enums:"matched,unscoped,unknown,unavailable"`
+}
+
+// ChannelScopeStatus describes stored packet evidence, not a channel key or all reception paths.
+type ChannelScopeStatus string
+
+// RecordedChannelScopeStatus preserves missing capture metadata as unavailable.
+func RecordedChannelScopeStatus(name *string, transport *bool) ChannelScopeStatus {
+	if name != nil {
+		return "matched"
+	}
+	if transport == nil {
+		return "unavailable"
+	}
+	if *transport {
+		return "unknown"
+	}
+	return "unscoped"
 }
 
 // ChannelSummary is the minimal channel representation used in list responses.

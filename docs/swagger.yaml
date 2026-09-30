@@ -135,6 +135,17 @@ definitions:
       packetHash:
         description: hex-encoded packet hash for correlation with packet events
         type: string
+      scope:
+        description: matched scope on the first stored packet; null when none was
+          recorded
+        type: string
+      scopeStatus:
+        enum:
+        - matched
+        - unscoped
+        - unknown
+        - unavailable
+        type: string
       senderName:
         description: display name from the decrypted payload
         type: string
@@ -272,6 +283,9 @@ definitions:
         type: integer
       observationCount:
         type: integer
+      pathKey:
+        description: stable identity within this IATA; use for route evidence links
+        type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.Node:
     properties:
@@ -521,6 +535,7 @@ definitions:
         description: epoch ms
         type: integer
       observationCount:
+        description: legacy cumulative presence counter; includes non-packet events
         type: integer
       observerType:
         description: e.g. "meshcoretomqtt", "meshcoreha"
@@ -560,6 +575,9 @@ definitions:
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverActivity:
     properties:
+      generatedAt:
+        description: response computation time, not proof of continuous coverage
+        type: integer
       interval:
         type: string
       payloadTypes:
@@ -574,6 +592,18 @@ definitions:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverActivityRadio'
       range:
         type: string
+      source:
+        description: raw or hourly; missing records do not prove an outage
+        type: string
+      summary:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverActivitySummary'
+      windowEnd:
+        description: exclusive end, epoch ms; live requests include the current partial
+          bucket
+        type: integer
+      windowStart:
+        description: inclusive complete-bucket start, epoch ms
+        type: integer
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverActivityPoint:
     properties:
@@ -602,6 +632,20 @@ definitions:
       preambleSymbols:
         type: integer
       sf:
+        type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverActivitySummary:
+    properties:
+      lastCompleteHour:
+        type: integer
+      lastCompleteHourEnd:
+        type: integer
+      lastCompleteHourStart:
+        type: integer
+      latestRecordedAt:
+        type: integer
+      recordedPackets:
+        description: stored observations within windowStart/windowEnd
         type: integer
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverBroker:
@@ -1123,6 +1167,35 @@ definitions:
         description: hex-encoded prefix used for resolution
         type: string
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.RouteEvidence:
+    properties:
+      generatedAt:
+        type: integer
+      hasMore:
+        type: boolean
+      hashSize:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.RouteObservation'
+        type: array
+      matchAvailable:
+        type: boolean
+      matchType:
+        type: string
+      nextCursor:
+        type: integer
+      nextPageCursor:
+        type: string
+      pathBytes:
+        type: string
+      route:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.KnownRoute'
+      windowEnd:
+        type: integer
+      windowStart:
+        type: integer
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.RouteHop:
     properties:
       hashBytes:
@@ -1134,6 +1207,27 @@ definitions:
         description: populated when node details are available
       nodeId:
         type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.RouteObservation:
+    properties:
+      heardAt:
+        type: integer
+      id:
+        type: integer
+      observerId:
+        type: string
+      observerName:
+        type: string
+      packetHash:
+        type: string
+      payloadType:
+        type: integer
+      payloadTypeName:
+        type: string
+      rssi:
+        type: integer
+      snr:
+        type: number
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.ScopeDetail:
     properties:
@@ -2401,6 +2495,13 @@ paths:
         in: query
         name: interval
         type: string
+      - description: Optional exclusive end in epoch milliseconds; aligned down to
+          a complete bucket, at most 30 days old. Activity uses this window; summary
+          freshness/latestRecordedAt and the last complete hour are measured at response
+          generation time, independently of until.
+        in: query
+        name: until
+        type: integer
       produces:
       - application/json
       responses:
@@ -2766,6 +2867,69 @@ paths:
       summary: List known routes
       tags:
       - Routes
+  /routes/{iata}/{pathKey}/observations:
+    get:
+      description: Matches the saved IATA, complete path bytes and hash width. Excludes
+        TRACE and unclassified reports; other widths and search-result subsegments
+        are not included. Byte matches do not prove hop identities or delivery. The
+        route and its historical counter can outlive raw evidence. Cursors retain
+        full timestamp precision and pin route/window scope.
+      parameters:
+      - description: Three-character IATA code
+        in: path
+        name: iata
+        required: true
+        type: string
+      - description: Stable 32-hex pathKey from a known-route response
+        in: path
+        name: pathKey
+        required: true
+        type: string
+      - description: Server-anchored duration (default 24h, max 720h); exclusive with
+          since/until/pageCursor
+        in: query
+        name: range
+        type: string
+      - description: Window start epoch ms; provide with until (default last 24h)
+        in: query
+        name: since
+        type: integer
+      - description: Exclusive window end epoch ms; maximum span 30d, no future end
+        in: query
+        name: until
+        type: integer
+      - description: Opaque precise cursor from nextPageCursor; window is pinned
+        in: query
+        name: pageCursor
+        type: string
+      - description: Default 50; positive, capped at 200
+        in: query
+        maximum: 200
+        minimum: 1
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.RouteEvidence'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+      summary: Get retained reports matching a full saved route prefix sequence
+      tags:
+      - Routes
   /routes/cross:
     get:
       parameters:
@@ -2849,6 +3013,10 @@ paths:
       - Routes
   /scopes:
     get:
+      description: The unfiltered list includes stored imported names after an importer
+        is disabled or a source is removed. Those historical identities are retained
+        indefinitely; listing them does not establish observed traffic or current
+        source membership.
       parameters:
       - description: Filter by IATA code(s), comma-separated
         in: query

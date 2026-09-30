@@ -47,6 +47,9 @@ jobs:
       - name: Test
         run: go test ./...
 
+      - name: Verify scope refresh concurrency
+        run: go test -race ./internal/meshmapper ./internal/scopestore
+
       - name: Verify backup startup against PostgreSQL 16
         env:
           BEACON_TEST_POSTGRES_DSN: postgres://postgres:backup-ci-only@127.0.0.1:5432/postgres?sslmode=disable
@@ -55,7 +58,7 @@ jobs:
       - name: Verify stats and endpoint queries against PostgreSQL 16
         env:
           BEACON_TEST_POSTGRES_DSN: postgres://postgres:backup-ci-only@127.0.0.1:5432/postgres?sslmode=disable
-        run: go test ./db -run '^Test(Signal|Paths|PacketEndpointsResolveLive)Postgres$' -count=1 -v
+        run: go test ./db -run '^Test(Signal|Paths|PacketEndpointsResolveLive|ObserverMetrics|RouteEvidence|RouteEvidenceIndex|AnalyticsRetention|AnalyticsRetentionConcurrent|DeleteOldPacketsBatches|MeshMapperCatalogue|ChannelMessageScopes)Postgres$' -count=1 -v
 
       - name: Verify backup command against PostgreSQL 16
         run: |

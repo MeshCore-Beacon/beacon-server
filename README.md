@@ -533,3 +533,41 @@ log:
 `LOG_LEVEL` and `LOG_FORMAT` override file settings; empty settings use `info` and `text`. Invalid values prevent startup. Configuration-loading failures can use the bootstrap text logger before file settings are available; failures after initialization retain error severity at every supported level.
 
 Records include a component field. Ingest workers also include their broker name, and HTTP completion records include the validated client address, route, status and duration. Query strings and protocol hello payloads are excluded. Expected ingest skips and routine WebSocket lifecycle details are debug-level. Changing the application's format does not change Caddy/Apache access logs or their fail2ban configuration. Collect/rotate stderr through Docker or systemd.
+
+### Analytics retention
+
+Hourly traffic, payload, observer activity, talker, advertiser, Signal and Paths
+summaries retain 30 days independently of `packets.retention`. Cleanup saves only
+aggregates before deleting each packet batch, in the same transaction. Raw
+packets, observations and message bodies still expire under packet retention.
+The summaries use UTC hourly buckets and appear on the normal view-refresh cycle.
+`mv_hourly_iata_stats` now covers 30 days instead of migration 001's seven days;
+`/stats/observations?since=` can therefore return retained summaries older than a week.
+
+Migration 039 starts from data still present; previously deleted history cannot
+be reconstructed. Telemetry has its own retention setting. Packet drill-down,
+sub-hour observer activity, exact observer comparison and current entity/scope
+counts continue to describe retained raw data or current entities, rather than
+claiming archived packet detail. Archived summaries expire without waiting for
+new packet deletions. A failed archive leaves its entire raw batch intact.
+
+### Observer monitoring metrics
+
+Observer activity returns buckets in `[windowStart, windowEnd)`, including the current partial bucket for live requests, plus
+`generatedAt`, `source` (`raw` or `hourly`) and `summary`. `recordedPackets` is the
+sum of stored observations in those buckets; repeated broker delivery of the
+same retained packet/observer pair counts once. Unknown payload types appear as
+`-1` rather than disappearing. Freshness fields are measured at `generatedAt` even for historical `until` requests; `recordedPackets` alone follows the selected window. `lastCompleteHour` uses the previous complete UTC
+hour and includes its own start/end; `latestRecordedAt` is the latest retained
+reception timestamp. Missing records do not prove downtime. The optional `until`
+(epoch milliseconds, within the last 30 days) aligns two observers' charts.
+
+The existing observer `observationCount` remains a legacy cumulative presence
+counter for compatibility, including status/neighbour events. It is not a
+period packet total. Broker presence and packet-arrival timestamps are now
+updated separately; this cannot reconstruct previously overwritten timestamps.
+The initial analytics archive migration includes unknown-type activity. Existing
+development previews that used the earlier draft require a separate operator repair;
+radio samples already discarded for those legacy rows cannot be recovered.
+
+Saved-route evidence: see [the operator guide](https://github.com/MeshCore-Beacon/beacon-docs/blob/main/app_documentation/saved-route-evidence.md).

@@ -33,6 +33,7 @@ type Config struct {
 	Routes      RoutesConfig          `yaml:"routes"`
 	Ingest      IngestFilterConfig    `yaml:"ingest"`
 	Scopes      []ScopeConfig         `yaml:"scopes"`
+	MeshMapper  MeshMapperConfig      `yaml:"meshmapper"`
 	Cache       CacheConfig           `yaml:"cache"`
 	CORS        CORSConfig            `yaml:"cors"`
 	RateLimit   RateLimitConfig       `yaml:"ratelimit"`
@@ -408,6 +409,9 @@ func Load(path string) (*Config, error) {
 		}
 	}
 	configDir := filepath.Dir(path)
+	if err := cfg.validateMeshMapper(); err != nil {
+		return nil, err
+	}
 	for iata, details := range cfg.IATAs {
 		if details.BorderFile != "" && !filepath.IsAbs(details.BorderFile) {
 			details.BorderFile = filepath.Join(configDir, details.BorderFile)

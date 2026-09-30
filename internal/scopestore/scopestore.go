@@ -5,13 +5,29 @@
 // loaded from the database at startup.
 package scopestore
 
-import "sync"
+import (
+	"crypto/sha256"
+	"strings"
+	"sync"
+)
 
 // Entry holds a single transport scope key and its metadata.
 type Entry struct {
 	Name           string
-	TransportKey   []byte // 16 bytes
-	KeyFingerprint []byte // 8 bytes
+	TransportKey   []byte   // 16 bytes
+	KeyFingerprint []byte   // 8 bytes
+	IATAs          []string // nil for manual keys; imported candidates are regional
+}
+
+// FromName uses the same case-sensitive derivation for manual and imported scopes.
+func FromName(name string) Entry {
+	if !strings.HasPrefix(name, "#") && !strings.HasPrefix(name, "$") {
+		name = "#" + name
+	}
+	h := sha256.Sum256([]byte(name))
+	key := h[:16]
+	fingerprint := sha256.Sum256(key)
+	return Entry{Name: name, TransportKey: key, KeyFingerprint: fingerprint[:8]}
 }
 
 // ScopeStore holds all known transport scope keys in memory.
@@ -25,18 +41,16 @@ func New() *ScopeStore {
 	return &ScopeStore{}
 }
 
-// Load replaces all entries — call on startup after DB seeding.
+// Load publishes a new immutable snapshot. The caller must not mutate it after publication.
 func (s *ScopeStore) Load(entries []Entry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.entries = entries
 }
 
-// Entries returns a copy of all loaded entries.
+// Entries returns the current immutable snapshot. Callers must not modify it.
 func (s *ScopeStore) Entries() []Entry {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	result := make([]Entry, len(s.entries))
-	copy(result, s.entries)
-	return result
+	return s.entries
 }

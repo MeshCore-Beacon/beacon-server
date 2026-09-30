@@ -16,6 +16,7 @@ type RouteHop struct {
 // have been confirmed as high confidence.
 type KnownRoute struct {
 	ID               int64      `json:"id"`
+	PathKey          string     `json:"pathKey,omitempty"` // stable identity within this IATA; use for route evidence links
 	IATA             string     `json:"iata"`
 	HopCount         int32      `json:"hopCount"`
 	Hops             []RouteHop `json:"hops"`

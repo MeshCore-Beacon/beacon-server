@@ -87,7 +87,7 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 	if w.onObserverUpsert != nil {
 		w.onObserverUpsert(ctx, id)
 	}
-	if err := w.db.UpsertObserverBroker(ctx, id, w.cfg.BrokerName); err != nil {
+	if err := w.db.UpsertObserverBroker(ctx, id, w.cfg.BrokerName, false); err != nil {
 		w.log.Error(fmt.Sprintf("db: upsert observer broker failed in status from %s", pubkeyHex), "error", err)
 	}
 	params := UpdateObserverStatusParams{

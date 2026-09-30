@@ -1,0 +1,95 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+package db
+
+import (
+	"encoding/json"
+	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestObserverMetricsPostgres(t *testing.T) {
+	ctx, tx := retentionTx(t)
+	analyticsTables(t, ctx, tx)
+	// Use the real observer DDL without depending on a preinstalled public schema.
+	initial, err := migrationFiles.ReadFile("migrations/001_initial_schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ddl := string(initial)
+	start := strings.Index(ddl, "CREATE TABLE observers (")
+	end := strings.Index(ddl[start:], "\n);") + start + 3
+	if _, err := tx.Exec(ctx, "DROP TABLE observers; "+ddl[start:end]+" ALTER TABLE observers ADD COLUMN region_scope TEXT;"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `
+ CREATE TABLE observer_brokers (observer_id uuid,broker_name text,last_seen timestamptz,last_packet_at timestamptz,PRIMARY KEY(observer_id,broker_name));
+ INSERT INTO observers (id,public_key) VALUES ('00000000-0000-0000-0000-000000000001','\x01');
+ INSERT INTO packets(packet_hash,payload_type,last_heard_at,first_heard_at) SELECT int4send(i),4,NOW()-interval '5 days',NOW()-interval '5 days' FROM generate_series(1,3) i;
+ INSERT INTO packet_observations(packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count,payload_type,snr,rssi)
+ SELECT packet_hash,'00000000-0000-0000-0000-000000000001','YOW',date_trunc('hour',NOW())-interval '5 days',0,1,0,CASE WHEN packet_hash=int4send(1) THEN 4 END,CASE WHEN packet_hash IN (int4send(1),int4send(2)) THEN 'NaN'::real ELSE 0 END,-100 FROM packets;
+ `); err != nil {
+		t.Fatal(err)
+	}
+	applyStatsMigration(t, ctx, tx, "039_analytics_retention.sql")
+	store := &Store{q: sqlc.New(tx)}
+	id := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	if err := store.DeleteOldPackets(ctx, time.Now().Add(-72*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	// The initial archive migration retains unknown payloads without a second rebuild.
+	if err := store.RefreshObserverActivity(ctx); err != nil {
+		t.Fatal(err)
+	}
+	until := time.Now().UTC().Truncate(time.Hour)
+	activity, err := store.GetObserverActivity(ctx, id, 7*24*time.Hour, time.Hour, until)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := json.Marshal(activity); err != nil {
+		t.Fatalf("non-finite sample leaked into JSON: %v", err)
+	}
+	if activity.Summary.RecordedPackets != 3 || len(activity.PayloadTypes) != 2 || activity.Summary.LatestRecordedAt != nil || activity.Summary.LastCompleteHour != 0 {
+		t.Fatalf("archive summary: %+v types=%+v", activity.Summary, activity.PayloadTypes)
+	}
+	if activity.WindowEnd != until.UnixMilli() || activity.WindowStart != until.Add(-7*24*time.Hour).UnixMilli() || activity.Source != "hourly" {
+		t.Fatalf("window: %+v", activity)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO packets(packet_hash,last_heard_at) VALUES ('\xaa',NOW());
+ INSERT INTO packet_observations(packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count,snr,rssi) VALUES ('\xaa','00000000-0000-0000-0000-000000000001','YOW',date_trunc('hour',NOW())-interval '30 minutes',0,1,0,'NaN'::real,-100);
+ INSERT INTO packet_observations(packet_hash,observer_id,iata,heard_at) VALUES ('\xaa','00000000-0000-0000-0000-000000000001','YOW',NOW()) ON CONFLICT DO NOTHING;`); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := store.GetObserverActivity(ctx, id, time.Hour, 15*time.Minute, until)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := json.Marshal(raw); err != nil {
+		t.Fatalf("raw non-finite sample leaked into JSON: %v", err)
+	}
+	if raw.Summary.RecordedPackets != 1 || raw.Summary.LastCompleteHour != 1 || raw.Summary.LatestRecordedAt == nil || raw.PayloadTypes[0].PayloadType != -1 {
+		t.Fatalf("raw/duplicate: %+v", raw)
+	}
+	if err := store.UpsertObserverBroker(ctx, id, "one", false); err != nil {
+		t.Fatal(err)
+	}
+	var packet pgtype.Timestamptz
+	tx.QueryRow(ctx, "SELECT last_packet_at FROM observer_brokers").Scan(&packet)
+	if packet.Valid {
+		t.Fatal("status created a packet timestamp")
+	}
+	if err := store.UpsertObserverBroker(ctx, id, "one", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.TouchObserverBrokers(ctx, []uuid.UUID{id}, []string{"one"}, []time.Time{until.Add(time.Hour)}, []time.Time{{}}); err != nil {
+		t.Fatal(err)
+	}
+	tx.QueryRow(ctx, "SELECT last_packet_at FROM observer_brokers").Scan(&packet)
+	if !packet.Valid {
+		t.Fatal("status erased packet timestamp")
+	}
+}

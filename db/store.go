@@ -130,7 +130,7 @@ func tristate(b *bool) string {
 }
 
 // toChannelMessage maps raw sqlc row fields to an api.ChannelMessage.
-func toChannelMessage(id int64, packetHashHex string, channelHash []byte, senderName *string, content *string, sentAt pgtype.Timestamptz, observationCount int64) api.ChannelMessage {
+func toChannelMessage(id int64, packetHashHex string, channelHash []byte, senderName *string, content *string, sentAt pgtype.Timestamptz, observationCount int64, scope *string, transport *bool) api.ChannelMessage {
 	sn := ""
 	if senderName != nil {
 		sn = *senderName
@@ -147,6 +147,8 @@ func toChannelMessage(id int64, packetHashHex string, channelHash []byte, sender
 		Content:          ct,
 		SentAt:           sentAt.Time.UnixMilli(),
 		ObservationCount: observationCount,
+		Scope:            scope,
+		ScopeStatus:      api.RecordedChannelScopeStatus(scope, transport),
 	}
 }
 

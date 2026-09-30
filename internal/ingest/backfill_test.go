@@ -49,8 +49,8 @@ func TestDecryptGroupText_Success(t *testing.T) {
 	if result.Payload.Sender != "ded" || result.Payload.Text != "hello" {
 		t.Errorf("expected decrypted sender=ded text=hello, got sender=%s text=%s", result.Payload.Sender, result.Payload.Text)
 	}
-	if !result.NewMessage {
-		t.Error("expected NewMessage true when InsertChannelMessage reports a new insert")
+	if result.Message == nil {
+		t.Error("expected a message when InsertChannelMessage reports a new insert")
 	}
 	if db.upsertChannelCalls != 1 {
 		t.Errorf("expected UpsertChannel to be called once, got %d", db.upsertChannelCalls)

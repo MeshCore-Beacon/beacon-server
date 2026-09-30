@@ -118,6 +118,7 @@ func (s *Store) SearchKnownRoutes(ctx context.Context, iata, fromHash, toHash st
 			hops = append(hops, hop)
 		}
 		items = append(items, api.KnownRoute{
+			PathKey:          hex.EncodeToString(routePathKey(r.NodeIds)),
 			ID:               r.ID,
 			IATA:             r.Iata,
 			HopCount:         int32(len(hops)),
@@ -348,6 +349,7 @@ func toKnownRoutes(rows []knownRouteRow, nodes map[uuid.UUID]*api.ResolvedNode) 
 			hops = append(hops, hop)
 		}
 		items = append(items, api.KnownRoute{
+			PathKey:          hex.EncodeToString(routePathKey(r.NodeIds)),
 			ID:               r.ID,
 			IATA:             r.Iata,
 			HopCount:         r.HopCount,

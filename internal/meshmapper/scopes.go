@@ -1,0 +1,302 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+// Package meshmapper imports the published regional scope catalogue, off the ingest path.
+package meshmapper
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+	"unicode"
+	"unicode/utf8"
+
+	"github.com/MeshCore-Beacon/beacon-server/internal/config"
+	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
+)
+
+const (
+	MaxScopes    = 64 // per source; at most 16 configured sources (1024 imported identities)
+	MaxBody      = 64 << 10
+	PollInterval = 15 * time.Second // one source per tick, at most four requests/minute
+)
+
+// Cache stores source provenance and freshness separately from packet evidence.
+type Cache struct {
+	Payload                             json.RawMessage
+	ETag                                string
+	CheckedAt, AttemptedAt, NextAttempt time.Time
+	LastError                           string
+}
+
+type Store interface {
+	GetScopeCatalogue(context.Context, string, string) (*Cache, error)
+	SaveScopeCatalogue(context.Context, string, string, Cache, []scopestore.Entry) error
+}
+
+type source struct {
+	iata, url string
+	cache     Cache
+	entries   []scopestore.Entry
+	generated time.Time
+}
+
+// Importer is owned by one background task; ScopeStore synchronizes its consumers.
+type Importer struct {
+	store      Store
+	scopes     *scopestore.ScopeStore
+	manual     []scopestore.Entry
+	sources    []source
+	interval   time.Duration
+	client     *http.Client
+	retryAfter time.Time
+	onChange   func(context.Context)
+}
+
+// SetCacheInvalidator is wired once at startup, before the background task starts.
+func (i *Importer) SetCacheInvalidator(fn func(context.Context)) { i.onChange = fn }
+
+// New restores validated snapshots before ingestion, without making HTTP requests.
+func New(ctx context.Context, cfg config.MeshMapperScopesConfig, store Store, scopes *scopestore.ScopeStore, manual []scopestore.Entry) (*Importer, error) {
+	i := &Importer{store: store, scopes: scopes, manual: manual, interval: cfg.Interval(), client: &http.Client{
+		Timeout:       10 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}}
+	if !cfg.Enabled {
+		return i, nil
+	}
+	keys := make([]string, 0, len(cfg.Sources))
+	for key := range cfg.Sources {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	for _, key := range keys {
+		s := source{iata: key, url: cfg.Sources[key]}
+		cached, err := store.GetScopeCatalogue(ctx, s.iata, s.url)
+		if err != nil {
+			return nil, fmt.Errorf("restore scope catalogue %s: %w", key, err)
+		}
+		if cached != nil {
+			s.cache = *cached
+			if len(cached.Payload) > 0 {
+				s.entries, s.generated, err = decode(cached.Payload, key)
+				if err != nil {
+					s.entries = nil
+					s.cache.Payload, s.cache.ETag = nil, ""
+					s.cache.LastError = "invalid saved catalogue; awaiting refresh"
+				}
+			}
+			if cached.LastError == "HTTP 429" && cached.NextAttempt.After(i.retryAfter) {
+				i.retryAfter = cached.NextAttempt
+			}
+		}
+		i.sources = append(i.sources, s)
+		i.log(s, "restored")
+	}
+	i.publish()
+	return i, nil
+}
+
+// Refresh checks only one due source. The scheduler serializes calls every 15s.
+func (i *Importer) Refresh(ctx context.Context) (err error) {
+	parent := ctx
+	defer func() {
+		if parent.Err() != nil {
+			err = nil
+		}
+	}()
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	now := time.Now().UTC()
+	if now.Before(i.retryAfter) {
+		return nil
+	}
+	for n := range i.sources {
+		s := &i.sources[n]
+		if now.Before(s.cache.NextAttempt) {
+			continue
+		}
+		return i.refresh(ctx, s, now)
+	}
+	return nil
+}
+
+func (i *Importer) refresh(ctx context.Context, s *source, now time.Time) error {
+	update := Cache{AttemptedAt: now, NextAttempt: now.Add(i.interval)}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, s.url, nil)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("User-Agent", "Beacon-MeshMapper-Scopes/1")
+	if len(s.cache.Payload) > 0 && s.cache.ETag != "" {
+		request.Header.Set("If-None-Match", s.cache.ETag)
+	}
+	response, err := i.client.Do(request)
+	var entries []scopestore.Entry
+	var generated time.Time
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		update.LastError = "request failed" // do not persist untrusted response bodies or URLs from errors
+	} else {
+		defer response.Body.Close()
+		switch response.StatusCode {
+		case http.StatusOK:
+			body, readErr := io.ReadAll(io.LimitReader(response.Body, MaxBody+1))
+			if readErr == nil {
+				entries, generated, readErr = decode(body, s.iata)
+			}
+			if readErr != nil {
+				update.LastError = "invalid response"
+			} else {
+				update.Payload = body
+			}
+		case http.StatusNotModified:
+			if len(s.cache.Payload) == 0 || s.cache.ETag == "" {
+				update.LastError = "304 without cached catalogue"
+			}
+		default:
+			update.LastError = fmt.Sprintf("HTTP %d", response.StatusCode)
+			if response.StatusCode == http.StatusTooManyRequests || response.StatusCode == http.StatusServiceUnavailable {
+				// The published contract uses seconds. Ignore invalid/overflowing headers.
+				if seconds, parseErr := strconv.ParseInt(response.Header.Get("Retry-After"), 10, 64); parseErr == nil && seconds > 0 && seconds <= int64((1<<63-1)/time.Second) {
+					until := now.Add(time.Duration(seconds) * time.Second)
+					if until.After(update.NextAttempt) {
+						update.NextAttempt = until
+					}
+				}
+			}
+		}
+		if update.LastError == "" {
+			etag := response.Header.Get("ETag")
+			if len(etag) > 256 || strings.ContainsAny(etag, "\r\n") {
+				update.LastError = "invalid ETag"
+				update.Payload = nil
+				entries = nil
+			} else {
+				update.ETag = etag
+				if response.StatusCode == http.StatusNotModified && etag == "" {
+					update.ETag = s.cache.ETag
+				}
+				update.CheckedAt = now
+			}
+		}
+	}
+	if update.LastError == "HTTP 429" {
+		i.retryAfter = update.NextAttempt
+	}
+	if err := i.store.SaveScopeCatalogue(ctx, s.iata, s.url, update, entries); err != nil {
+		// Avoid a retry every scheduler tick during a DB outage; never publish uncommitted keys.
+		s.cache.NextAttempt = update.NextAttempt
+		return fmt.Errorf("persist scope catalogue %s: %w", s.iata, err)
+	}
+	if len(update.Payload) > 0 {
+		s.cache.Payload = update.Payload
+		s.entries = entries
+		s.generated = generated
+	}
+	if !update.CheckedAt.IsZero() {
+		s.cache.CheckedAt = update.CheckedAt
+		s.cache.ETag = update.ETag
+	}
+	s.cache.AttemptedAt = now
+	s.cache.NextAttempt = update.NextAttempt
+	s.cache.LastError = update.LastError
+	if len(update.Payload) > 0 {
+		i.publish()
+		if i.onChange != nil {
+			i.onChange(ctx)
+		}
+	}
+	i.log(*s, "checked")
+	return nil
+}
+
+func (i *Importer) publish() {
+	byName := make(map[string]scopestore.Entry, len(i.manual))
+	for _, e := range i.manual {
+		byName[e.Name] = e
+	}
+	for _, s := range i.sources {
+		for _, candidate := range s.entries {
+			entry, exists := byName[candidate.Name]
+			if exists && entry.IATAs == nil {
+				continue
+			} // manual metadata/keys win
+			if !exists {
+				entry = candidate
+			}
+			entry.IATAs = append(entry.IATAs, s.iata)
+			byName[entry.Name] = entry
+		}
+	}
+	names := make([]string, 0, len(byName))
+	for name := range byName {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	entries := make([]scopestore.Entry, 0, len(names))
+	for _, name := range names {
+		entries = append(entries, byName[name])
+	}
+	i.scopes.Load(entries)
+}
+
+func (i *Importer) log(s source, action string) {
+	level := slog.LevelInfo
+	if s.cache.LastError != "" {
+		level = slog.LevelWarn
+	}
+	slog.Log(context.Background(), level, "MeshMapper scopes "+action, "component", "meshmapper.scopes", "iata", s.iata, "source", s.url,
+		"names", len(s.entries), "generated_at", s.generated, "checked_at", s.cache.CheckedAt, "next_attempt", s.cache.NextAttempt, "last_error", s.cache.LastError)
+}
+
+func decode(body []byte, iata string) ([]scopestore.Entry, time.Time, error) {
+	var document struct {
+		GeneratedAt       time.Time `json:"generated_at"`
+		Region            string    `json:"region"`
+		Zones             []string  `json:"zones"`
+		Repeaters, Scoped *int
+		Scopes            *[]struct {
+			Name                  string
+			Repeaters, Default    *int
+			Monitored, Wardriving *bool
+		}
+	}
+	if len(body) > MaxBody || !utf8.Valid(body) {
+		return nil, time.Time{}, fmt.Errorf("invalid catalogue size/encoding")
+	}
+	if err := json.Unmarshal(body, &document); err != nil {
+		return nil, time.Time{}, err
+	}
+	if document.GeneratedAt.IsZero() || document.Region != iata || len(document.Zones) != 1 || document.Zones[0] != iata ||
+		document.Repeaters == nil || document.Scoped == nil || *document.Scoped < 0 || *document.Repeaters < *document.Scoped ||
+		document.Scopes == nil || len(*document.Scopes) > MaxScopes {
+		return nil, time.Time{}, fmt.Errorf("invalid regional catalogue")
+	}
+	entries := make([]scopestore.Entry, 0, len(*document.Scopes))
+	seen := map[string]bool{}
+	for _, s := range *document.Scopes {
+		if s.Name == "" || len(s.Name) > 128 || strings.TrimSpace(s.Name) != s.Name || strings.ContainsFunc(s.Name, unicode.IsControl) ||
+			s.Repeaters == nil || s.Default == nil || s.Monitored == nil || s.Wardriving == nil ||
+			*s.Default < 0 || *s.Repeaters < *s.Default || *s.Repeaters > *document.Scoped {
+			return nil, time.Time{}, fmt.Errorf("invalid scope entry")
+		}
+		entry := scopestore.FromName(s.Name)
+		if len(entry.Name) < 2 || seen[entry.Name] {
+			return nil, time.Time{}, fmt.Errorf("empty or duplicate scope name")
+		}
+		seen[entry.Name] = true
+		entries = append(entries, entry)
+	}
+	return entries, document.GeneratedAt, nil
+}

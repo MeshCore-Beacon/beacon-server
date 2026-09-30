@@ -201,8 +201,10 @@ func (s *stubDB) SetNodeCapability(_ context.Context, nodeID uuid.UUID, paths, t
 func (s *stubDB) UpsertObserver(_ context.Context, _ []byte) (uuid.UUID, string, error) {
 	return uuid.Nil, "", nil
 }
-func (s *stubDB) UpsertObserverBroker(_ context.Context, _ uuid.UUID, _ string) error { return nil }
-func (s *stubDB) UpsertIATA(_ context.Context, _ string) error                        { return nil }
+func (s *stubDB) UpsertObserverBroker(_ context.Context, _ uuid.UUID, _ string, _ bool) error {
+	return nil
+}
+func (s *stubDB) UpsertIATA(_ context.Context, _ string) error { return nil }
 func (s *stubDB) UpsertPacket(_ context.Context, _ UpsertPacketParams) (bool, error) {
 	return false, nil
 }
@@ -229,8 +231,11 @@ func (s *stubDB) GetNodesByIDs(_ context.Context, _ []uuid.UUID) (map[uuid.UUID]
 	return nil, nil
 }
 
-func (s *stubDB) InsertChannelMessage(_ context.Context, _ InsertChannelMessageParams) (bool, error) {
-	return s.insertChannelMessageResult, nil
+func (s *stubDB) InsertChannelMessage(_ context.Context, _ InsertChannelMessageParams) (*InsertedChannelMessage, error) {
+	if !s.insertChannelMessageResult {
+		return nil, nil
+	}
+	return &InsertedChannelMessage{ID: 1, ScopeStatus: "unavailable"}, nil
 }
 
 func (s *stubDB) UpdateObserverStatus(_ context.Context, _ UpdateObserverStatusParams) (uuid.UUID, error) {

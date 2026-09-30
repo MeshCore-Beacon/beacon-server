@@ -5,12 +5,12 @@ package config
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
+
+	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
 )
 
 // Seeder is the database interface required to seed config data on startup.
@@ -63,29 +63,10 @@ func Seed(ctx context.Context, cfg *Config, db Seeder) error {
 	}
 	// Transport Codes
 	for _, s := range cfg.Scopes {
-		name := normalizeScopeName(s.Name)
-		key := deriveScopeKey(name)
-		h := sha256.Sum256(key)
-		fingerprint := h[:8]
-		if err := db.UpsertTransportScope(ctx, name, "", key, fingerprint); err != nil {
+		entry := scopestore.FromName(s.Name)
+		if err := db.UpsertTransportScope(ctx, entry.Name, "", entry.TransportKey, entry.KeyFingerprint); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// normalizeScopeName ensures the scope name has a # or $ prefix.
-// Plain names get # prepended: "bc" → "#bc".
-func normalizeScopeName(name string) string {
-	if strings.HasPrefix(name, "#") || strings.HasPrefix(name, "$") {
-		return name
-	}
-	return "#" + name
-}
-
-// deriveScopeKey derives the 16-byte transport key from a normalized scope name.
-// key = SHA256(name)[:16]
-func deriveScopeKey(name string) []byte {
-	h := sha256.Sum256([]byte(name))
-	return h[:16]
 }

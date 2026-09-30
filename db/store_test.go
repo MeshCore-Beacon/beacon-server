@@ -59,7 +59,7 @@ func TestToChannelMessage(t *testing.T) {
 	channelHash := []byte{0xab}
 	sentAt := pgtype.Timestamptz{Time: time.UnixMilli(1700000000000), Valid: true}
 
-	msg := toChannelMessage(42, "deadbeef", channelHash, &senderName, &content, sentAt, 7)
+	msg := toChannelMessage(42, "deadbeef", channelHash, &senderName, &content, sentAt, 7, nil, nil)
 
 	if msg.ID != 42 {
 		t.Errorf("expected ID 42, got %d", msg.ID)
@@ -86,7 +86,7 @@ func TestToChannelMessage(t *testing.T) {
 
 func TestToChannelMessage_NilFields(t *testing.T) {
 	sentAt := pgtype.Timestamptz{Time: time.UnixMilli(0), Valid: true}
-	msg := toChannelMessage(1, "abc", []byte{0x01}, nil, nil, sentAt, 0)
+	msg := toChannelMessage(1, "abc", []byte{0x01}, nil, nil, sentAt, 0, nil, nil)
 	if msg.SenderName != "" {
 		t.Errorf("expected empty SenderName, got %s", msg.SenderName)
 	}

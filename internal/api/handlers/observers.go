@@ -256,6 +256,7 @@ var activityIntervals = map[string]time.Duration{
 //	@Param		observerId	path		string	true	"Observer UUID"
 //	@Param		range		query		string	false	"Trailing window as a Go duration, max 720h (default 24h); max 48h when interval is under 1h"
 //	@Param		interval	query		string	false	"Bucket size: 5m, 15m, 1h, 6h or 24h (default 15m)"
+//	@Param		until	query		int	false	"Optional exclusive end in epoch milliseconds; aligned down to a complete bucket, at most 30 days old. Activity uses this window; summary freshness/latestRecordedAt and the last complete hour are measured at response generation time, independently of until."
 //	@Success	200			{object}	api.ObserverActivity
 //	@Failure	400			{object}	handlers.APIError
 //	@Failure	404			{object}	handlers.APIError
@@ -295,7 +296,17 @@ func getObserverActivity(reader api.Reader) http.HandlerFunc {
 			respondError(w, http.StatusBadRequest, "range/interval exceeds 1000 buckets")
 			return
 		}
-		activity, err := reader.GetObserverActivity(r.Context(), observerID, window, interval)
+		until := time.Time{}
+		if values, ok := r.URL.Query()["until"]; ok {
+			n, err := strconv.ParseInt(values[0], 10, 64)
+			now := time.Now()
+			if len(values) != 1 || err != nil || n < 0 || n > now.UnixMilli() || n < now.Add(-720*time.Hour).UnixMilli() {
+				respondError(w, http.StatusBadRequest, "until must be one past epoch-millisecond timestamp within 30 days")
+				return
+			}
+			until = time.UnixMilli(n)
+		}
+		activity, err := reader.GetObserverActivity(r.Context(), observerID, window, interval, until)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				respondError(w, http.StatusNotFound, "observer not found")

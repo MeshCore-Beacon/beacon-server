@@ -49,10 +49,11 @@ VALUES ($1, $2, $3, $4)
 ON CONFLICT (name) DO UPDATE SET
   display_name    = EXCLUDED.display_name,
   transport_key   = EXCLUDED.transport_key,
-  key_fingerprint = EXCLUDED.key_fingerprint;
+  key_fingerprint = EXCLUDED.key_fingerprint,
+  imported_only   = FALSE;
 
 -- name: GetTransportScopes :many
-SELECT name, transport_key, key_fingerprint FROM transport_scopes ORDER BY name;
+SELECT name, transport_key, key_fingerprint FROM transport_scopes WHERE NOT imported_only ORDER BY name;
 
 -- name: GetTransportScopeByName :one
 SELECT id FROM transport_scopes WHERE name = $1;
@@ -275,14 +276,14 @@ SELECT
   COALESCE(AVG(rssi) FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)), 0)::real AS rssi_avg,
   COUNT(rssi)        FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0))::bigint AS rssi_n
 FROM packet_observations
-WHERE observer_id = $1 AND heard_at >= $2::timestamptz
+WHERE observer_id = $1 AND heard_at >= $2::timestamptz AND heard_at < @until::timestamptz
 GROUP BY bucket
 ORDER BY bucket;
 
 -- name: GetObserverActivityRawPayloadTypes :many
 SELECT payload_type, COUNT(*)::bigint AS count
 FROM packet_observations
-WHERE observer_id = $1 AND heard_at >= $2::timestamptz AND payload_type IS NOT NULL
+WHERE observer_id = $1 AND heard_at >= $2::timestamptz AND heard_at < @until::timestamptz
 GROUP BY payload_type
 ORDER BY count DESC;
 
@@ -299,14 +300,14 @@ SELECT
   COALESCE(SUM(rssi_sum), 0)::bigint AS rssi_sum,
   SUM(rssi_n)::bigint AS rssi_n
 FROM mv_observer_activity_hourly
-WHERE observer_id = $1 AND bucket >= $2::timestamptz
+WHERE observer_id = $1 AND bucket >= $2::timestamptz AND bucket < @until::timestamptz
 GROUP BY 1
 ORDER BY 1;
 
 -- name: GetObserverActivityHourlyPayloadTypes :many
 SELECT payload_type, SUM(observations)::bigint AS count
 FROM mv_observer_activity_hourly
-WHERE observer_id = $1 AND bucket >= $2::timestamptz
+WHERE observer_id = $1 AND bucket >= $2::timestamptz AND bucket < @until::timestamptz
 GROUP BY payload_type
 ORDER BY count DESC;
 
@@ -363,19 +364,20 @@ RETURNING o.id;
 
 -- name: UpsertObserverBroker :exec
 INSERT INTO observer_brokers (observer_id, broker_name, last_seen, last_packet_at)
-VALUES ($1, $2, NOW(), NOW())
+VALUES ($1, $2, NOW(), CASE WHEN @is_packet::boolean THEN NOW() END)
 ON CONFLICT (observer_id, broker_name) DO UPDATE SET
-  last_seen      = NOW(),
-  last_packet_at = NOW();
+  last_seen = NOW(),
+  last_packet_at = COALESCE(EXCLUDED.last_packet_at, observer_brokers.last_packet_at);
 
 -- name: TouchObserverBrokers :exec
 UPDATE observer_brokers ob SET
   last_seen      = GREATEST(ob.last_seen, v.seen),
-  last_packet_at = GREATEST(ob.last_packet_at, v.seen)
+  last_packet_at = GREATEST(ob.last_packet_at, v.packet)
 FROM (
   SELECT unnest($1::uuid[]) AS observer_id,
          unnest($2::text[]) AS broker_name,
-         unnest($3::timestamptz[]) AS seen
+         unnest($3::timestamptz[]) AS seen,
+         unnest($4::timestamptz[]) AS packet
 ) v
 WHERE ob.observer_id = v.observer_id AND ob.broker_name = v.broker_name;
 
@@ -661,18 +663,9 @@ ORDER BY po.id ASC
 LIMIT $6;
 
 
--- name: DeleteOldPackets :execrows
--- One batch of expired packets; observations and channel messages cascade.
-WITH expired AS (
-    SELECT ep.packet_hash
-    FROM packets ep
-    WHERE ep.last_heard_at < @cutoff
-    ORDER BY ep.last_heard_at
-    LIMIT @batch_size
-    FOR UPDATE OF ep SKIP LOCKED
-)
-DELETE FROM packets p USING expired e
-WHERE p.packet_hash = e.packet_hash;
+-- name: DeleteOldPackets :one
+-- Locks, archives and cascades one bounded packet cohort in a single transaction.
+SELECT archive_delete_packets(@cutoff::timestamptz, @batch_size::integer)::bigint;
 
 -- name: DeleteOldNodes :exec
 -- Deletes nodes not seen since the given cutoff. node_iatas and node_neighbors cascade-
@@ -951,17 +944,25 @@ SELECT * FROM channels WHERE id = $1;
 -- ============================================================
 
 -- name: InsertChannelMessage :one
-INSERT INTO channel_messages (channel_id, packet_hash, sender_name, content, sent_at)
-VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (packet_hash) DO NOTHING
-RETURNING id;
+-- Read the immutable first-packet scope in the same statement as insertion.
+-- A later reception's transport code must not give live and historical messages different tags.
+WITH inserted AS (
+  INSERT INTO channel_messages (channel_id, packet_hash, sender_name, content, sent_at)
+  VALUES ($1, $2, $3, $4, $5)
+  ON CONFLICT (packet_hash) DO NOTHING
+  RETURNING id, packet_hash
+)
+SELECT inserted.id, ts.name AS scope_name, p.transport_codes_present
+FROM inserted
+JOIN packets p ON p.packet_hash = inserted.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id;
 
 -- name: ListChannelMessages :many
 -- Returns messages for a channel identified by integer ID.
 -- Pass a zero/null timestamp for since to return all messages up to limit.
 -- Pass empty string for iata to skip IATA filtering.
 -- Pass cursor=0 to start from the beginning.
-SELECT DISTINCT ON (cm.id) cm.*, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash,
+SELECT DISTINCT ON (cm.id) cm.*, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash, ts.name AS scope_name, p.transport_codes_present,
 (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = cm.packet_hash) AS observation_count
 FROM channel_messages cm
 JOIN channels c ON c.id = cm.channel_id
@@ -980,7 +981,7 @@ LIMIT $6;
 -- Returns all messages across all channels with optional time, IATA, scope and cursor filters.
 -- Pass empty string for iata or scope to skip those filters.
 -- Pass cursor=0 to start from the beginning.
-SELECT DISTINCT ON (cm.id) cm.*, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash,
+SELECT DISTINCT ON (cm.id) cm.*, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash, ts.name AS scope_name, p.transport_codes_present,
 (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = cm.packet_hash) AS observation_count
 FROM channel_messages cm
 JOIN channels c ON c.id = cm.channel_id
@@ -999,7 +1000,7 @@ LIMIT $5;
 -- May return messages from multiple channels if the hash collides across different keys.
 -- Pass empty string for iata or scope to skip those filters.
 -- Pass cursor=0 to start from the beginning.
-SELECT DISTINCT ON (cm.id) cm.*, c.channel_hash,
+SELECT DISTINCT ON (cm.id) cm.*, c.channel_hash, ts.name AS scope_name, p.transport_codes_present,
   (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = cm.packet_hash) AS observation_count
 FROM channel_messages cm
 JOIN channels c ON c.id = cm.channel_id
@@ -1017,7 +1018,7 @@ LIMIT $6;
 -- name: ListMessagesAfterID :many
 -- Returns messages after the given message ID, ordered oldest first.
 -- Used for WS reconnect backfill.
-SELECT DISTINCT ON (cm.id) cm.*, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash,
+SELECT DISTINCT ON (cm.id) cm.*, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash, ts.name AS scope_name, p.transport_codes_present,
 (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = cm.packet_hash) AS observation_count
 FROM channel_messages cm
 JOIN channels c ON c.id = cm.channel_id
@@ -1580,3 +1581,43 @@ WITH target AS MATERIALIZED (
 )
 SELECT EXISTS(SELECT 1 FROM target) AS found,
        EXISTS(SELECT 1 FROM changed) AS deactivated;
+
+-- name: GetObserverActivityLiveSummary :one
+-- Two indexed ranges, bounded to one observer; no legacy presence counters.
+WITH latest AS (
+ SELECT heard_at FROM packet_observations
+ WHERE observer_id = @observer_id::uuid AND heard_at <= @generated_at::timestamptz
+ ORDER BY heard_at DESC LIMIT 1
+), hourly AS (
+ SELECT COUNT(*)::bigint AS n FROM packet_observations
+ WHERE observer_id = @observer_id::uuid
+ AND heard_at >= @hour_start::timestamptz AND heard_at < @hour_end::timestamptz
+)
+SELECT (SELECT heard_at FROM latest)::timestamptz AS latest_recorded_at,
+ hourly.n AS last_complete_hour FROM hourly;
+
+
+-- name: GetScopeCatalogue :one
+SELECT * FROM meshmapper_scope_catalogues WHERE iata = $1 AND url = $2;
+
+-- name: SaveScopeCatalogue :exec
+-- One statement commits the validated snapshot and its lookup identities together.
+-- Empty arrays insert nothing. NULL payload/checked_at retain last-known-good data
+-- after an error or 304. Imported names never replace existing manual metadata.
+WITH inserted AS (
+    INSERT INTO transport_scopes (name, transport_key, key_fingerprint, imported_only)
+    SELECT entry.name, entry.key, entry.fingerprint, TRUE
+    FROM (SELECT unnest(@names::text[]) AS name, unnest(@keys::bytea[]) AS key,
+                 unnest(@fingerprints::bytea[]) AS fingerprint) AS entry
+    ON CONFLICT (name) DO NOTHING
+)
+INSERT INTO meshmapper_scope_catalogues (iata, url, payload, etag, checked_at, attempted_at, next_attempt, last_error)
+VALUES (@iata, @url, sqlc.narg(payload)::jsonb, sqlc.narg(etag)::text,
+    sqlc.narg(checked_at)::timestamptz, @attempted_at, @next_attempt, @last_error)
+ON CONFLICT (iata, url) DO UPDATE SET
+    payload = COALESCE(EXCLUDED.payload, meshmapper_scope_catalogues.payload),
+    etag = COALESCE(EXCLUDED.etag, meshmapper_scope_catalogues.etag),
+    checked_at = COALESCE(EXCLUDED.checked_at, meshmapper_scope_catalogues.checked_at),
+    attempted_at = EXCLUDED.attempted_at,
+    next_attempt = EXCLUDED.next_attempt,
+    last_error = EXCLUDED.last_error;

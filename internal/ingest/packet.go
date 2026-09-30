@@ -11,11 +11,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/lora"
+	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
 	"github.com/google/uuid"
 	"github.com/meshcore-go/meshcore-go"
 )
@@ -324,7 +326,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		w.log.Error(fmt.Sprintf("db: upsert observer failed with packet from %s/%s", iata, pubkeyHex), "error", err)
 		return
 	}
-	err = w.db.UpsertObserverBroker(ctx, id, w.cfg.BrokerName)
+	err = w.db.UpsertObserverBroker(ctx, id, w.cfg.BrokerName, true)
 	if err != nil {
 		w.log.Error(fmt.Sprintf("db: update observer broker failed with packet from %s/%s", iata, pubkeyHex), "error", err)
 		return
@@ -694,14 +696,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 
 	var matchedScope *string
 	if packet.RouteType() == meshcore.RouteTypeTransportFlood || packet.RouteType() == meshcore.RouteTypeTransportDirect {
-		for _, entry := range w.scopes.Entries() {
-			code := computeTransportCode(entry.TransportKey, packet.PayloadType(), packet.Payload)
-			if code == packet.TransportCode1 {
-				s := entry.Name
-				matchedScope = &s
-				break
-			}
-		}
+		matchedScope = matchTransportScope(w.scopes.Entries(), iata, packet.PayloadType(), packet.Payload, packet.TransportCode1)
 	}
 	var scopeID *int32
 	if matchedScope != nil {
@@ -735,19 +730,10 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		w.log.Error(fmt.Sprintf("db: upsert packet failed from %s/%s", iata, pubkeyHex), "error", err)
 		return
 	}
-	// Try parsing with timezone offset first
-	heardAt, err := time.Parse("2006-01-02T15:04:05.000000-07:00", envelope.Timestamp)
-	if err != nil {
-		heardAt, err = time.Parse("2006-01-02T15:04:05.000000", envelope.Timestamp)
-	}
-	if err != nil {
-		heardAt, err = time.Parse("2006-01-02T15:04:05.000000Z", envelope.Timestamp)
-	}
+	// Prefer an explicit RFC3339 offset; legacy timezone-less observers use UTC.
+	heardAt, err := time.Parse(time.RFC3339Nano, envelope.Timestamp)
 	if err != nil {
 		heardAt, err = time.Parse("2006-01-02T15:04:05", envelope.Timestamp)
-	}
-	if err != nil {
-		heardAt, err = time.Parse("2006-01-02T15:04:05Z", envelope.Timestamp)
 	}
 	if err != nil {
 		w.log.Warn(fmt.Sprintf("failed to parse timestamp %q", envelope.Timestamp), "error", err)
@@ -862,7 +848,13 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	// A duplicate is streamed, never stored, to includeRepeats clients when its path is new.
 	repeat := !inserted && w.hub.RepeatsWanted() && w.hub.MarkSent(packetHash[:], id[:], packet.Path)
 	if inserted || repeat {
-		// Endpoints for the live event only; stored rows resolve them at read time.
+		if inserted {
+			w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio, scopeID, matchedScope, pubkeyBytes, float32(parseNumber(envelope.SNR)))
+			if w.hub.RepeatsWanted() {
+				w.hub.MarkSent(packetHash[:], id[:], packet.Path) // so broker copies of it aren't repeats
+			}
+		}
+		// Resolve after advert updates; suppressed copies need no endpoint lookup.
 		var resolvedSource, resolvedDestination *api.ResolvedHop
 		if packet.PayloadType() == meshcore.PayloadTypeAdvert && originPubkey != nil {
 			// Exact match: ADVERT carries the sender's real identity pubkey, not a
@@ -883,12 +875,6 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 			if r, err := w.db.ResolveEndpointHashes(ctx, iata, [][]byte{destHashByte}); err == nil {
 				hop := api.BuildResolvedPath([][]byte{destHashByte}, r)[0]
 				resolvedDestination = &hop
-			}
-		}
-		if inserted {
-			w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio, scopeID, matchedScope, pubkeyBytes, float32(parseNumber(envelope.SNR)))
-			if w.hub.RepeatsWanted() {
-				w.hub.MarkSent(packetHash[:], id[:], packet.Path) // so broker copies of it aren't repeats
 			}
 		}
 		evt := packetObservationEvent{}
@@ -928,6 +914,32 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		evt.Observation.ResolvedDestination = resolvedDestination
 		w.broadcastPacketObservation(iata, packet.PayloadType(), evt, resolvedPath, hex.EncodeToString(pubkeyBytes), repeat)
 	}
+}
+
+// matchTransportScope preserves manual precedence; imported collisions remain unresolved.
+func matchTransportScope(entries []scopestore.Entry, iata string, payloadType uint8, payload []byte, code uint16) *string {
+	var matched *string
+	ambiguous := false
+	for _, entry := range entries {
+		if entry.IATAs != nil && !slices.Contains(entry.IATAs, iata) {
+			continue
+		}
+		if computeTransportCode(entry.TransportKey, payloadType, payload) != code {
+			continue
+		}
+		name := entry.Name
+		if entry.IATAs == nil {
+			return &name
+		}
+		if matched != nil && *matched != name {
+			ambiguous = true
+		}
+		matched = &name
+	}
+	if ambiguous {
+		return nil
+	}
+	return matched
 }
 
 // computeTransportCode derives transport_code_1 from a transport key and packet payload.

@@ -22,6 +22,7 @@ func RoutesRouter(reader api.Reader) http.Handler {
 	r.Get("/", listKnownRoutes(reader))
 	r.Get("/cross", searchCrossIATARoutes(reader))
 	r.Get("/search", searchKnownRoutes(reader))
+	r.Get("/{iata}/{pathKey}/observations", getRouteEvidence(reader))
 	return r
 }
 

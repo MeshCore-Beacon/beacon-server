@@ -569,6 +569,7 @@ func f32(v float32) *float32 { return &v }
 func TestGetObserverActivity_HourlyFoldNoSignal(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mock := mockdb.NewMockQuerier(ctrl)
+	mock.EXPECT().GetObserverActivityLiveSummary(gomock.Any(), gomock.Any()).Return(sqlc.GetObserverActivityLiveSummaryRow{}, nil).AnyTimes()
 	observerID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
 	mock.EXPECT().GetObserverByID(gomock.Any(), observerID).
@@ -587,12 +588,12 @@ func TestGetObserverActivity_HourlyFoldNoSignal(t *testing.T) {
 		}}, nil)
 	mock.EXPECT().GetObserverActivityHourlyPayloadTypes(gomock.Any(), gomock.Any()).
 		Return([]sqlc.GetObserverActivityHourlyPayloadTypesRow{
-			{PayloadType: i16(4), Count: 9},
-			{PayloadType: nil, Count: 3},
+			{PayloadType: 4, Count: 9},
+			{PayloadType: -1, Count: 3},
 		}, nil)
 
 	store := &Store{q: mock}
-	got, err := store.GetObserverActivity(context.Background(), observerID, 24*time.Hour, time.Hour)
+	got, err := store.GetObserverActivity(context.Background(), observerID, 24*time.Hour, time.Hour, time.Time{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -615,8 +616,8 @@ func TestGetObserverActivity_HourlyFoldNoSignal(t *testing.T) {
 	if p.RSSIAvg != nil {
 		t.Errorf("expected nil RSSIAvg, got %v", *p.RSSIAvg)
 	}
-	if len(got.PayloadTypes) != 1 || got.PayloadTypes[0].PayloadType != 4 || got.PayloadTypes[0].Count != 9 {
-		t.Fatalf("expected one payload type 4 with count 9, got %+v", got.PayloadTypes)
+	if len(got.PayloadTypes) != 2 || got.PayloadTypes[0].PayloadType != 4 || got.PayloadTypes[0].Count != 9 || got.PayloadTypes[1].PayloadType != -1 || got.PayloadTypes[1].Count != 3 {
+		t.Fatalf("expected known and unknown payloads to reconcile, got %+v", got.PayloadTypes)
 	}
 	if got.PayloadTypes[0].PayloadTypeName != api.PayloadTypeName(4) {
 		t.Errorf("expected payload type name %q, got %q", api.PayloadTypeName(4), got.PayloadTypes[0].PayloadTypeName)
@@ -638,6 +639,7 @@ func TestGetObserverActivity_HourlyFoldNoSignal(t *testing.T) {
 func TestGetObserverActivity_HourlyFoldWeightedAverages(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mock := mockdb.NewMockQuerier(ctrl)
+	mock.EXPECT().GetObserverActivityLiveSummary(gomock.Any(), gomock.Any()).Return(sqlc.GetObserverActivityLiveSummaryRow{}, nil).AnyTimes()
 	observerID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
 	mock.EXPECT().GetObserverByID(gomock.Any(), observerID).
@@ -658,7 +660,7 @@ func TestGetObserverActivity_HourlyFoldWeightedAverages(t *testing.T) {
 		Return([]sqlc.GetObserverActivityHourlyPayloadTypesRow{}, nil)
 
 	store := &Store{q: mock}
-	got, err := store.GetObserverActivity(context.Background(), observerID, 7*24*time.Hour, 6*time.Hour)
+	got, err := store.GetObserverActivity(context.Background(), observerID, 7*24*time.Hour, 6*time.Hour, time.Time{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -689,6 +691,7 @@ func TestGetObserverActivity_HourlyFoldWeightedAverages(t *testing.T) {
 func TestGetObserverActivity_RawPath(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mock := mockdb.NewMockQuerier(ctrl)
+	mock.EXPECT().GetObserverActivityLiveSummary(gomock.Any(), gomock.Any()).Return(sqlc.GetObserverActivityLiveSummaryRow{}, nil).AnyTimes()
 	observerID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
 	mock.EXPECT().GetObserverByID(gomock.Any(), observerID).
@@ -709,7 +712,7 @@ func TestGetObserverActivity_RawPath(t *testing.T) {
 		Return([]sqlc.GetObserverActivityRawPayloadTypesRow{{PayloadType: i16(1), Count: 5}}, nil)
 
 	store := &Store{q: mock}
-	got, err := store.GetObserverActivity(context.Background(), observerID, 6*time.Hour, 15*time.Minute)
+	got, err := store.GetObserverActivity(context.Background(), observerID, 6*time.Hour, 15*time.Minute, time.Time{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -737,6 +740,7 @@ func TestGetObserverActivity_RawPath(t *testing.T) {
 func TestGetObserverActivity_RawFoldNoSignal(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mock := mockdb.NewMockQuerier(ctrl)
+	mock.EXPECT().GetObserverActivityLiveSummary(gomock.Any(), gomock.Any()).Return(sqlc.GetObserverActivityLiveSummaryRow{}, nil).AnyTimes()
 	observerID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
 	mock.EXPECT().GetObserverByID(gomock.Any(), observerID).
@@ -757,7 +761,7 @@ func TestGetObserverActivity_RawFoldNoSignal(t *testing.T) {
 		Return([]sqlc.GetObserverActivityRawPayloadTypesRow{}, nil)
 
 	store := &Store{q: mock}
-	got, err := store.GetObserverActivity(context.Background(), observerID, 6*time.Hour, 15*time.Minute)
+	got, err := store.GetObserverActivity(context.Background(), observerID, 6*time.Hour, 15*time.Minute, time.Time{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -779,6 +783,7 @@ func TestGetObserverActivity_RawFoldNoSignal(t *testing.T) {
 func TestGetObserverActivity_RawPathEmpty(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mock := mockdb.NewMockQuerier(ctrl)
+	mock.EXPECT().GetObserverActivityLiveSummary(gomock.Any(), gomock.Any()).Return(sqlc.GetObserverActivityLiveSummaryRow{}, nil).AnyTimes()
 	observerID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
 	mock.EXPECT().GetObserverByID(gomock.Any(), observerID).
@@ -789,7 +794,7 @@ func TestGetObserverActivity_RawPathEmpty(t *testing.T) {
 		Return([]sqlc.GetObserverActivityRawPayloadTypesRow{}, nil)
 
 	store := &Store{q: mock}
-	got, err := store.GetObserverActivity(context.Background(), observerID, 6*time.Hour, 15*time.Minute)
+	got, err := store.GetObserverActivity(context.Background(), observerID, 6*time.Hour, 15*time.Minute, time.Time{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -804,6 +809,7 @@ func TestGetObserverActivity_RawPathEmpty(t *testing.T) {
 func TestGetObserverActivity_HourlyPathAtOneHour(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mock := mockdb.NewMockQuerier(ctrl)
+	mock.EXPECT().GetObserverActivityLiveSummary(gomock.Any(), gomock.Any()).Return(sqlc.GetObserverActivityLiveSummaryRow{}, nil).AnyTimes()
 	observerID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
 	mock.EXPECT().GetObserverByID(gomock.Any(), observerID).
@@ -814,7 +820,7 @@ func TestGetObserverActivity_HourlyPathAtOneHour(t *testing.T) {
 		Return([]sqlc.GetObserverActivityHourlyPayloadTypesRow{}, nil)
 
 	store := &Store{q: mock}
-	got, err := store.GetObserverActivity(context.Background(), observerID, 24*time.Hour, time.Hour)
+	got, err := store.GetObserverActivity(context.Background(), observerID, 24*time.Hour, time.Hour, time.Time{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -826,13 +832,14 @@ func TestGetObserverActivity_HourlyPathAtOneHour(t *testing.T) {
 func TestGetObserverActivity_UnknownObserver(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mock := mockdb.NewMockQuerier(ctrl)
+	mock.EXPECT().GetObserverActivityLiveSummary(gomock.Any(), gomock.Any()).Return(sqlc.GetObserverActivityLiveSummaryRow{}, nil).AnyTimes()
 	observerID := uuid.MustParse("00000000-0000-0000-0000-000000000002")
 
 	mock.EXPECT().GetObserverByID(gomock.Any(), observerID).
 		Return(sqlc.Observer{}, pgx.ErrNoRows)
 
 	store := &Store{q: mock}
-	got, err := store.GetObserverActivity(context.Background(), observerID, time.Hour, time.Hour)
+	got, err := store.GetObserverActivity(context.Background(), observerID, time.Hour, time.Hour, time.Time{})
 	if !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("expected pgx.ErrNoRows, got %v", err)
 	}
@@ -858,6 +865,7 @@ func TestGetObserverActivity_RadioNilWhenIncomplete(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			mock := mockdb.NewMockQuerier(ctrl)
+			mock.EXPECT().GetObserverActivityLiveSummary(gomock.Any(), gomock.Any()).Return(sqlc.GetObserverActivityLiveSummaryRow{}, nil).AnyTimes()
 			observerID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
 			mock.EXPECT().GetObserverByID(gomock.Any(), observerID).
@@ -868,7 +876,7 @@ func TestGetObserverActivity_RadioNilWhenIncomplete(t *testing.T) {
 				Return([]sqlc.GetObserverActivityHourlyPayloadTypesRow{}, nil)
 
 			store := &Store{q: mock}
-			got, err := store.GetObserverActivity(context.Background(), observerID, 24*time.Hour, time.Hour)
+			got, err := store.GetObserverActivity(context.Background(), observerID, 24*time.Hour, time.Hour, time.Time{})
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -882,6 +890,7 @@ func TestGetObserverActivity_RadioNilWhenIncomplete(t *testing.T) {
 func TestGetObserverActivity_SinceAlignedToInterval(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mock := mockdb.NewMockQuerier(ctrl)
+	mock.EXPECT().GetObserverActivityLiveSummary(gomock.Any(), gomock.Any()).Return(sqlc.GetObserverActivityLiveSummaryRow{}, nil).AnyTimes()
 	observerID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	window, interval := 24*time.Hour, 6*time.Hour
 
@@ -897,12 +906,12 @@ func TestGetObserverActivity_SinceAlignedToInterval(t *testing.T) {
 	mock.EXPECT().GetObserverActivityHourlyPayloadTypes(gomock.Any(), gomock.Any()).
 		Return([]sqlc.GetObserverActivityHourlyPayloadTypesRow{}, nil)
 
-	before := time.Now().Add(-window)
+	before := time.Now().UTC().Truncate(interval).Add(-window)
 	store := &Store{q: mock}
-	if _, err := store.GetObserverActivity(context.Background(), observerID, window, interval); err != nil {
+	if _, err := store.GetObserverActivity(context.Background(), observerID, window, interval, time.Time{}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	after := time.Now().Add(-window)
+	after := time.Now().UTC().Truncate(interval).Add(-window)
 
 	if gotSince.UnixNano()%int64(interval) != 0 {
 		t.Errorf("since %s is not aligned to %s", gotSince, interval)
@@ -910,7 +919,7 @@ func TestGetObserverActivity_SinceAlignedToInterval(t *testing.T) {
 	if gotSince.Before(before) {
 		t.Errorf("since %s is before the window start %s", gotSince, before)
 	}
-	if !gotSince.Before(after.Add(interval)) {
+	if gotSince.After(after.Add(interval)) {
 		t.Errorf("since %s is more than one interval past the window start %s", gotSince, after)
 	}
 	if !gotInterval.Valid || gotInterval.Microseconds != interval.Microseconds() {

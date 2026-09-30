@@ -44,8 +44,8 @@ type Observer struct {
 	LastStatusAt     *int64           `json:"lastStatusAt,omitempty"`   // epoch ms
 	FirstSeen        int64            `json:"firstSeen"`                // epoch ms
 	LastSeen         int64            `json:"lastSeen"`                 // epoch ms
-	ObservationCount int64            `json:"observationCount"`
-	Brokers          []ObserverBroker `json:"brokers"` // broker names this observer has been seen on
+	ObservationCount int64            `json:"observationCount"`         // legacy cumulative presence counter; includes non-packet events
+	Brokers          []ObserverBroker `json:"brokers"`                  // broker names this observer has been seen on
 }
 
 // ObserverTelemetryPoint is a single telemetry snapshot for an observer.
@@ -88,8 +88,25 @@ type ObserverActivityPoint struct {
 	RSSIAvg      *float32 `json:"rssiAvg"`
 }
 
+// ObserverActivitySummary describes stored packet records, never MQTT presence events.
+// Freshness and lastCompleteHour are measured at generatedAt, even with an explicit until;
+// only recordedPackets follows the selected activity window.
+type ObserverActivitySummary struct {
+	RecordedPackets       int64  `json:"recordedPackets"` // stored observations within windowStart/windowEnd
+	LastCompleteHour      int64  `json:"lastCompleteHour"`
+	LastCompleteHourStart int64  `json:"lastCompleteHourStart"`
+	LastCompleteHourEnd   int64  `json:"lastCompleteHourEnd"`
+	LatestRecordedAt      *int64 `json:"latestRecordedAt"`
+}
+
 // ObserverActivity is the per-observer heard-activity response.
 type ObserverActivity struct {
+	WindowStart int64                    `json:"windowStart"` // inclusive complete-bucket start, epoch ms
+	WindowEnd   int64                    `json:"windowEnd"`   // exclusive end, epoch ms; live requests include the current partial bucket
+	GeneratedAt int64                    `json:"generatedAt"` // response computation time, not proof of continuous coverage
+	Source      string                   `json:"source"`      // raw or hourly; missing records do not prove an outage
+	Summary     *ObserverActivitySummary `json:"summary,omitempty"`
+
 	Range        string                  `json:"range"`
 	Interval     string                  `json:"interval"`
 	Radio        *ObserverActivityRadio  `json:"radio"`

@@ -24,6 +24,7 @@ func ScopesRouter(reader api.Reader) http.Handler {
 // listScopes godoc
 //
 //	@Summary	List transport scopes
+//	@Description	The unfiltered list includes stored imported names after an importer is disabled or a source is removed. Those historical identities are retained indefinitely; listing them does not establish observed traffic or current source membership.
 //	@Tags		Scopes
 //	@Produce	json
 //	@Param		iatas		query		string	false	"Filter by IATA code(s), comma-separated"

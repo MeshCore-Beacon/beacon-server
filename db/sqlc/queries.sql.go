@@ -124,17 +124,8 @@ func (q *Queries) DeleteOldObservers(ctx context.Context, lastSeen pgtype.Timest
 	return items, nil
 }
 
-const deleteOldPackets = `-- name: DeleteOldPackets :execrows
-WITH expired AS (
-    SELECT ep.packet_hash
-    FROM packets ep
-    WHERE ep.last_heard_at < $1
-    ORDER BY ep.last_heard_at
-    LIMIT $2
-    FOR UPDATE OF ep SKIP LOCKED
-)
-DELETE FROM packets p USING expired e
-WHERE p.packet_hash = e.packet_hash
+const deleteOldPackets = `-- name: DeleteOldPackets :one
+SELECT archive_delete_packets($1::timestamptz, $2::integer)::bigint
 `
 
 type DeleteOldPacketsParams struct {
@@ -142,13 +133,12 @@ type DeleteOldPacketsParams struct {
 	BatchSize int32              `json:"batch_size"`
 }
 
-// One batch of expired packets; observations and channel messages cascade.
+// Locks, archives and cascades one bounded packet cohort in a single transaction.
 func (q *Queries) DeleteOldPackets(ctx context.Context, arg DeleteOldPacketsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteOldPackets, arg.Cutoff, arg.BatchSize)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+	row := q.db.QueryRow(ctx, deleteOldPackets, arg.Cutoff, arg.BatchSize)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const deleteOldRoutes = `-- name: DeleteOldRoutes :execrows
@@ -660,7 +650,7 @@ SELECT
   COALESCE(SUM(rssi_sum), 0)::bigint AS rssi_sum,
   SUM(rssi_n)::bigint AS rssi_n
 FROM mv_observer_activity_hourly
-WHERE observer_id = $1 AND bucket >= $2::timestamptz
+WHERE observer_id = $1 AND bucket >= $2::timestamptz AND bucket < $4::timestamptz
 GROUP BY 1
 ORDER BY 1
 `
@@ -669,6 +659,7 @@ type GetObserverActivityHourlyParams struct {
 	ObserverID uuid.UUID          `json:"observer_id"`
 	Column2    pgtype.Timestamptz `json:"column_2"`
 	Column3    pgtype.Interval    `json:"column_3"`
+	Until      pgtype.Timestamptz `json:"until"`
 }
 
 type GetObserverActivityHourlyRow struct {
@@ -685,7 +676,12 @@ type GetObserverActivityHourlyRow struct {
 
 // Hour-or-coarser buckets summed from the hourly rollup; same COALESCE-plus-count shape as the raw query.
 func (q *Queries) GetObserverActivityHourly(ctx context.Context, arg GetObserverActivityHourlyParams) ([]GetObserverActivityHourlyRow, error) {
-	rows, err := q.db.Query(ctx, getObserverActivityHourly, arg.ObserverID, arg.Column2, arg.Column3)
+	rows, err := q.db.Query(ctx, getObserverActivityHourly,
+		arg.ObserverID,
+		arg.Column2,
+		arg.Column3,
+		arg.Until,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -717,7 +713,7 @@ func (q *Queries) GetObserverActivityHourly(ctx context.Context, arg GetObserver
 const getObserverActivityHourlyPayloadTypes = `-- name: GetObserverActivityHourlyPayloadTypes :many
 SELECT payload_type, SUM(observations)::bigint AS count
 FROM mv_observer_activity_hourly
-WHERE observer_id = $1 AND bucket >= $2::timestamptz
+WHERE observer_id = $1 AND bucket >= $2::timestamptz AND bucket < $3::timestamptz
 GROUP BY payload_type
 ORDER BY count DESC
 `
@@ -725,15 +721,16 @@ ORDER BY count DESC
 type GetObserverActivityHourlyPayloadTypesParams struct {
 	ObserverID uuid.UUID          `json:"observer_id"`
 	Column2    pgtype.Timestamptz `json:"column_2"`
+	Until      pgtype.Timestamptz `json:"until"`
 }
 
 type GetObserverActivityHourlyPayloadTypesRow struct {
-	PayloadType *int16 `json:"payload_type"`
-	Count       int64  `json:"count"`
+	PayloadType int16 `json:"payload_type"`
+	Count       int64 `json:"count"`
 }
 
 func (q *Queries) GetObserverActivityHourlyPayloadTypes(ctx context.Context, arg GetObserverActivityHourlyPayloadTypesParams) ([]GetObserverActivityHourlyPayloadTypesRow, error) {
-	rows, err := q.db.Query(ctx, getObserverActivityHourlyPayloadTypes, arg.ObserverID, arg.Column2)
+	rows, err := q.db.Query(ctx, getObserverActivityHourlyPayloadTypes, arg.ObserverID, arg.Column2, arg.Until)
 	if err != nil {
 		return nil, err
 	}
@@ -752,6 +749,45 @@ func (q *Queries) GetObserverActivityHourlyPayloadTypes(ctx context.Context, arg
 	return items, nil
 }
 
+const getObserverActivityLiveSummary = `-- name: GetObserverActivityLiveSummary :one
+WITH latest AS (
+ SELECT heard_at FROM packet_observations
+ WHERE observer_id = $1::uuid AND heard_at <= $2::timestamptz
+ ORDER BY heard_at DESC LIMIT 1
+), hourly AS (
+ SELECT COUNT(*)::bigint AS n FROM packet_observations
+ WHERE observer_id = $1::uuid
+ AND heard_at >= $3::timestamptz AND heard_at < $4::timestamptz
+)
+SELECT (SELECT heard_at FROM latest)::timestamptz AS latest_recorded_at,
+ hourly.n AS last_complete_hour FROM hourly
+`
+
+type GetObserverActivityLiveSummaryParams struct {
+	ObserverID  uuid.UUID          `json:"observer_id"`
+	GeneratedAt pgtype.Timestamptz `json:"generated_at"`
+	HourStart   pgtype.Timestamptz `json:"hour_start"`
+	HourEnd     pgtype.Timestamptz `json:"hour_end"`
+}
+
+type GetObserverActivityLiveSummaryRow struct {
+	LatestRecordedAt pgtype.Timestamptz `json:"latest_recorded_at"`
+	LastCompleteHour int64              `json:"last_complete_hour"`
+}
+
+// Two indexed ranges, bounded to one observer; no legacy presence counters.
+func (q *Queries) GetObserverActivityLiveSummary(ctx context.Context, arg GetObserverActivityLiveSummaryParams) (GetObserverActivityLiveSummaryRow, error) {
+	row := q.db.QueryRow(ctx, getObserverActivityLiveSummary,
+		arg.ObserverID,
+		arg.GeneratedAt,
+		arg.HourStart,
+		arg.HourEnd,
+	)
+	var i GetObserverActivityLiveSummaryRow
+	err := row.Scan(&i.LatestRecordedAt, &i.LastCompleteHour)
+	return i, err
+}
+
 const getObserverActivityRaw = `-- name: GetObserverActivityRaw :many
 SELECT
   date_bin($3::interval, heard_at, TIMESTAMPTZ 'epoch')::timestamptz AS bucket,
@@ -764,7 +800,7 @@ SELECT
   COALESCE(AVG(rssi) FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)), 0)::real AS rssi_avg,
   COUNT(rssi)        FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0))::bigint AS rssi_n
 FROM packet_observations
-WHERE observer_id = $1 AND heard_at >= $2::timestamptz
+WHERE observer_id = $1 AND heard_at >= $2::timestamptz AND heard_at < $4::timestamptz
 GROUP BY bucket
 ORDER BY bucket
 `
@@ -773,6 +809,7 @@ type GetObserverActivityRawParams struct {
 	ObserverID uuid.UUID          `json:"observer_id"`
 	Column2    pgtype.Timestamptz `json:"column_2"`
 	Column3    pgtype.Interval    `json:"column_3"`
+	Until      pgtype.Timestamptz `json:"until"`
 }
 
 type GetObserverActivityRawRow struct {
@@ -791,7 +828,12 @@ type GetObserverActivityRawRow struct {
 // Aggregates are COALESCEd and paired with a count column: sqlc types a cast expression as
 // NOT NULL, so the counts are what tell the store a bucket had no costed or no signal rows.
 func (q *Queries) GetObserverActivityRaw(ctx context.Context, arg GetObserverActivityRawParams) ([]GetObserverActivityRawRow, error) {
-	rows, err := q.db.Query(ctx, getObserverActivityRaw, arg.ObserverID, arg.Column2, arg.Column3)
+	rows, err := q.db.Query(ctx, getObserverActivityRaw,
+		arg.ObserverID,
+		arg.Column2,
+		arg.Column3,
+		arg.Until,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -823,7 +865,7 @@ func (q *Queries) GetObserverActivityRaw(ctx context.Context, arg GetObserverAct
 const getObserverActivityRawPayloadTypes = `-- name: GetObserverActivityRawPayloadTypes :many
 SELECT payload_type, COUNT(*)::bigint AS count
 FROM packet_observations
-WHERE observer_id = $1 AND heard_at >= $2::timestamptz AND payload_type IS NOT NULL
+WHERE observer_id = $1 AND heard_at >= $2::timestamptz AND heard_at < $3::timestamptz
 GROUP BY payload_type
 ORDER BY count DESC
 `
@@ -831,6 +873,7 @@ ORDER BY count DESC
 type GetObserverActivityRawPayloadTypesParams struct {
 	ObserverID uuid.UUID          `json:"observer_id"`
 	Column2    pgtype.Timestamptz `json:"column_2"`
+	Until      pgtype.Timestamptz `json:"until"`
 }
 
 type GetObserverActivityRawPayloadTypesRow struct {
@@ -839,7 +882,7 @@ type GetObserverActivityRawPayloadTypesRow struct {
 }
 
 func (q *Queries) GetObserverActivityRawPayloadTypes(ctx context.Context, arg GetObserverActivityRawPayloadTypesParams) ([]GetObserverActivityRawPayloadTypesRow, error) {
-	rows, err := q.db.Query(ctx, getObserverActivityRawPayloadTypes, arg.ObserverID, arg.Column2)
+	rows, err := q.db.Query(ctx, getObserverActivityRawPayloadTypes, arg.ObserverID, arg.Column2, arg.Until)
 	if err != nil {
 		return nil, err
 	}
@@ -1466,6 +1509,34 @@ func (q *Queries) GetScopeByName(ctx context.Context, name string) (GetScopeByNa
 	return i, err
 }
 
+const getScopeCatalogue = `-- name: GetScopeCatalogue :one
+
+SELECT iata, url, payload, etag, checked_at, attempted_at, next_attempt, last_error FROM meshmapper_scope_catalogues WHERE iata = $1 AND url = $2
+`
+
+type GetScopeCatalogueParams struct {
+	Iata string `json:"iata"`
+	Url  string `json:"url"`
+}
+
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+func (q *Queries) GetScopeCatalogue(ctx context.Context, arg GetScopeCatalogueParams) (MeshmapperScopeCatalogue, error) {
+	row := q.db.QueryRow(ctx, getScopeCatalogue, arg.Iata, arg.Url)
+	var i MeshmapperScopeCatalogue
+	err := row.Scan(
+		&i.Iata,
+		&i.Url,
+		&i.Payload,
+		&i.Etag,
+		&i.CheckedAt,
+		&i.AttemptedAt,
+		&i.NextAttempt,
+		&i.LastError,
+	)
+	return i, err
+}
+
 const getScopeNames = `-- name: GetScopeNames :many
 SELECT name FROM transport_scopes ORDER BY name
 `
@@ -2008,7 +2079,7 @@ func (q *Queries) GetTransportScopeByName(ctx context.Context, name string) (int
 }
 
 const getTransportScopes = `-- name: GetTransportScopes :many
-SELECT name, transport_key, key_fingerprint FROM transport_scopes ORDER BY name
+SELECT name, transport_key, key_fingerprint FROM transport_scopes WHERE NOT imported_only ORDER BY name
 `
 
 type GetTransportScopesRow struct {
@@ -2039,10 +2110,16 @@ func (q *Queries) GetTransportScopes(ctx context.Context) ([]GetTransportScopesR
 
 const insertChannelMessage = `-- name: InsertChannelMessage :one
 
-INSERT INTO channel_messages (channel_id, packet_hash, sender_name, content, sent_at)
-VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (packet_hash) DO NOTHING
-RETURNING id
+WITH inserted AS (
+  INSERT INTO channel_messages (channel_id, packet_hash, sender_name, content, sent_at)
+  VALUES ($1, $2, $3, $4, $5)
+  ON CONFLICT (packet_hash) DO NOTHING
+  RETURNING id, packet_hash
+)
+SELECT inserted.id, ts.name AS scope_name, p.transport_codes_present
+FROM inserted
+JOIN packets p ON p.packet_hash = inserted.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 `
 
 type InsertChannelMessageParams struct {
@@ -2053,10 +2130,18 @@ type InsertChannelMessageParams struct {
 	SentAt     pgtype.Timestamptz `json:"sent_at"`
 }
 
+type InsertChannelMessageRow struct {
+	ID                    int64   `json:"id"`
+	ScopeName             *string `json:"scope_name"`
+	TransportCodesPresent *bool   `json:"transport_codes_present"`
+}
+
 // ============================================================
 // CHANNEL MESSAGES
 // ============================================================
-func (q *Queries) InsertChannelMessage(ctx context.Context, arg InsertChannelMessageParams) (int64, error) {
+// Read the immutable first-packet scope in the same statement as insertion.
+// A later reception's transport code must not give live and historical messages different tags.
+func (q *Queries) InsertChannelMessage(ctx context.Context, arg InsertChannelMessageParams) (InsertChannelMessageRow, error) {
 	row := q.db.QueryRow(ctx, insertChannelMessage,
 		arg.ChannelID,
 		arg.PacketHash,
@@ -2064,9 +2149,9 @@ func (q *Queries) InsertChannelMessage(ctx context.Context, arg InsertChannelMes
 		arg.Content,
 		arg.SentAt,
 	)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
+	var i InsertChannelMessageRow
+	err := row.Scan(&i.ID, &i.ScopeName, &i.TransportCodesPresent)
+	return i, err
 }
 
 const insertObservation = `-- name: InsertObservation :one
@@ -2238,7 +2323,7 @@ func (q *Queries) ListAccounts(ctx context.Context) ([]Account, error) {
 }
 
 const listAllChannelMessages = `-- name: ListAllChannelMessages :many
-SELECT DISTINCT ON (cm.id) cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash,
+SELECT DISTINCT ON (cm.id) cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash, ts.name AS scope_name, p.transport_codes_present,
 (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = cm.packet_hash) AS observation_count
 FROM channel_messages cm
 JOIN channels c ON c.id = cm.channel_id
@@ -2262,16 +2347,18 @@ type ListAllChannelMessagesParams struct {
 }
 
 type ListAllChannelMessagesRow struct {
-	ID               int64              `json:"id"`
-	ChannelID        int32              `json:"channel_id"`
-	PacketHash       []byte             `json:"packet_hash"`
-	SenderName       *string            `json:"sender_name"`
-	SenderPubkey     []byte             `json:"sender_pubkey"`
-	Content          *string            `json:"content"`
-	SentAt           pgtype.Timestamptz `json:"sent_at"`
-	PacketHashHex    string             `json:"packet_hash_hex"`
-	ChannelHash      []byte             `json:"channel_hash"`
-	ObservationCount int64              `json:"observation_count"`
+	ID                    int64              `json:"id"`
+	ChannelID             int32              `json:"channel_id"`
+	PacketHash            []byte             `json:"packet_hash"`
+	SenderName            *string            `json:"sender_name"`
+	SenderPubkey          []byte             `json:"sender_pubkey"`
+	Content               *string            `json:"content"`
+	SentAt                pgtype.Timestamptz `json:"sent_at"`
+	PacketHashHex         string             `json:"packet_hash_hex"`
+	ChannelHash           []byte             `json:"channel_hash"`
+	ScopeName             *string            `json:"scope_name"`
+	TransportCodesPresent *bool              `json:"transport_codes_present"`
+	ObservationCount      int64              `json:"observation_count"`
 }
 
 // Returns all messages across all channels with optional time, IATA, scope and cursor filters.
@@ -2302,6 +2389,8 @@ func (q *Queries) ListAllChannelMessages(ctx context.Context, arg ListAllChannel
 			&i.SentAt,
 			&i.PacketHashHex,
 			&i.ChannelHash,
+			&i.ScopeName,
+			&i.TransportCodesPresent,
 			&i.ObservationCount,
 		); err != nil {
 			return nil, err
@@ -2315,7 +2404,7 @@ func (q *Queries) ListAllChannelMessages(ctx context.Context, arg ListAllChannel
 }
 
 const listChannelMessages = `-- name: ListChannelMessages :many
-SELECT DISTINCT ON (cm.id) cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash,
+SELECT DISTINCT ON (cm.id) cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash, ts.name AS scope_name, p.transport_codes_present,
 (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = cm.packet_hash) AS observation_count
 FROM channel_messages cm
 JOIN channels c ON c.id = cm.channel_id
@@ -2341,16 +2430,18 @@ type ListChannelMessagesParams struct {
 }
 
 type ListChannelMessagesRow struct {
-	ID               int64              `json:"id"`
-	ChannelID        int32              `json:"channel_id"`
-	PacketHash       []byte             `json:"packet_hash"`
-	SenderName       *string            `json:"sender_name"`
-	SenderPubkey     []byte             `json:"sender_pubkey"`
-	Content          *string            `json:"content"`
-	SentAt           pgtype.Timestamptz `json:"sent_at"`
-	PacketHashHex    string             `json:"packet_hash_hex"`
-	ChannelHash      []byte             `json:"channel_hash"`
-	ObservationCount int64              `json:"observation_count"`
+	ID                    int64              `json:"id"`
+	ChannelID             int32              `json:"channel_id"`
+	PacketHash            []byte             `json:"packet_hash"`
+	SenderName            *string            `json:"sender_name"`
+	SenderPubkey          []byte             `json:"sender_pubkey"`
+	Content               *string            `json:"content"`
+	SentAt                pgtype.Timestamptz `json:"sent_at"`
+	PacketHashHex         string             `json:"packet_hash_hex"`
+	ChannelHash           []byte             `json:"channel_hash"`
+	ScopeName             *string            `json:"scope_name"`
+	TransportCodesPresent *bool              `json:"transport_codes_present"`
+	ObservationCount      int64              `json:"observation_count"`
 }
 
 // Returns messages for a channel identified by integer ID.
@@ -2383,6 +2474,8 @@ func (q *Queries) ListChannelMessages(ctx context.Context, arg ListChannelMessag
 			&i.SentAt,
 			&i.PacketHashHex,
 			&i.ChannelHash,
+			&i.ScopeName,
+			&i.TransportCodesPresent,
 			&i.ObservationCount,
 		); err != nil {
 			return nil, err
@@ -2396,7 +2489,7 @@ func (q *Queries) ListChannelMessages(ctx context.Context, arg ListChannelMessag
 }
 
 const listChannelMessagesByHash = `-- name: ListChannelMessagesByHash :many
-SELECT DISTINCT ON (cm.id) cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at, c.channel_hash,
+SELECT DISTINCT ON (cm.id) cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at, c.channel_hash, ts.name AS scope_name, p.transport_codes_present,
   (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = cm.packet_hash) AS observation_count
 FROM channel_messages cm
 JOIN channels c ON c.id = cm.channel_id
@@ -2422,15 +2515,17 @@ type ListChannelMessagesByHashParams struct {
 }
 
 type ListChannelMessagesByHashRow struct {
-	ID               int64              `json:"id"`
-	ChannelID        int32              `json:"channel_id"`
-	PacketHash       []byte             `json:"packet_hash"`
-	SenderName       *string            `json:"sender_name"`
-	SenderPubkey     []byte             `json:"sender_pubkey"`
-	Content          *string            `json:"content"`
-	SentAt           pgtype.Timestamptz `json:"sent_at"`
-	ChannelHash      []byte             `json:"channel_hash"`
-	ObservationCount int64              `json:"observation_count"`
+	ID                    int64              `json:"id"`
+	ChannelID             int32              `json:"channel_id"`
+	PacketHash            []byte             `json:"packet_hash"`
+	SenderName            *string            `json:"sender_name"`
+	SenderPubkey          []byte             `json:"sender_pubkey"`
+	Content               *string            `json:"content"`
+	SentAt                pgtype.Timestamptz `json:"sent_at"`
+	ChannelHash           []byte             `json:"channel_hash"`
+	ScopeName             *string            `json:"scope_name"`
+	TransportCodesPresent *bool              `json:"transport_codes_present"`
+	ObservationCount      int64              `json:"observation_count"`
 }
 
 // Returns messages for all channels matching a hash byte.
@@ -2462,6 +2557,8 @@ func (q *Queries) ListChannelMessagesByHash(ctx context.Context, arg ListChannel
 			&i.Content,
 			&i.SentAt,
 			&i.ChannelHash,
+			&i.ScopeName,
+			&i.TransportCodesPresent,
 			&i.ObservationCount,
 		); err != nil {
 			return nil, err
@@ -2704,7 +2801,7 @@ func (q *Queries) ListKnownRoutes(ctx context.Context, arg ListKnownRoutesParams
 }
 
 const listMessagesAfterID = `-- name: ListMessagesAfterID :many
-SELECT DISTINCT ON (cm.id) cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash,
+SELECT DISTINCT ON (cm.id) cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash, ts.name AS scope_name, p.transport_codes_present,
 (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = cm.packet_hash) AS observation_count
 FROM channel_messages cm
 JOIN channels c ON c.id = cm.channel_id
@@ -2726,16 +2823,18 @@ type ListMessagesAfterIDParams struct {
 }
 
 type ListMessagesAfterIDRow struct {
-	ID               int64              `json:"id"`
-	ChannelID        int32              `json:"channel_id"`
-	PacketHash       []byte             `json:"packet_hash"`
-	SenderName       *string            `json:"sender_name"`
-	SenderPubkey     []byte             `json:"sender_pubkey"`
-	Content          *string            `json:"content"`
-	SentAt           pgtype.Timestamptz `json:"sent_at"`
-	PacketHashHex    string             `json:"packet_hash_hex"`
-	ChannelHash      []byte             `json:"channel_hash"`
-	ObservationCount int64              `json:"observation_count"`
+	ID                    int64              `json:"id"`
+	ChannelID             int32              `json:"channel_id"`
+	PacketHash            []byte             `json:"packet_hash"`
+	SenderName            *string            `json:"sender_name"`
+	SenderPubkey          []byte             `json:"sender_pubkey"`
+	Content               *string            `json:"content"`
+	SentAt                pgtype.Timestamptz `json:"sent_at"`
+	PacketHashHex         string             `json:"packet_hash_hex"`
+	ChannelHash           []byte             `json:"channel_hash"`
+	ScopeName             *string            `json:"scope_name"`
+	TransportCodesPresent *bool              `json:"transport_codes_present"`
+	ObservationCount      int64              `json:"observation_count"`
 }
 
 // Returns messages after the given message ID, ordered oldest first.
@@ -2764,6 +2863,8 @@ func (q *Queries) ListMessagesAfterID(ctx context.Context, arg ListMessagesAfter
 			&i.SentAt,
 			&i.PacketHashHex,
 			&i.ChannelHash,
+			&i.ScopeName,
+			&i.TransportCodesPresent,
 			&i.ObservationCount,
 		); err != nil {
 			return nil, err
@@ -4328,6 +4429,60 @@ func (q *Queries) ResolvePathHashesP4(ctx context.Context, arg ResolvePathHashes
 	return items, nil
 }
 
+const saveScopeCatalogue = `-- name: SaveScopeCatalogue :exec
+WITH inserted AS (
+    INSERT INTO transport_scopes (name, transport_key, key_fingerprint, imported_only)
+    SELECT entry.name, entry.key, entry.fingerprint, TRUE
+    FROM (SELECT unnest($9::text[]) AS name, unnest($10::bytea[]) AS key,
+                 unnest($11::bytea[]) AS fingerprint) AS entry
+    ON CONFLICT (name) DO NOTHING
+)
+INSERT INTO meshmapper_scope_catalogues (iata, url, payload, etag, checked_at, attempted_at, next_attempt, last_error)
+VALUES ($1, $2, $3::jsonb, $4::text,
+    $5::timestamptz, $6, $7, $8)
+ON CONFLICT (iata, url) DO UPDATE SET
+    payload = COALESCE(EXCLUDED.payload, meshmapper_scope_catalogues.payload),
+    etag = COALESCE(EXCLUDED.etag, meshmapper_scope_catalogues.etag),
+    checked_at = COALESCE(EXCLUDED.checked_at, meshmapper_scope_catalogues.checked_at),
+    attempted_at = EXCLUDED.attempted_at,
+    next_attempt = EXCLUDED.next_attempt,
+    last_error = EXCLUDED.last_error
+`
+
+type SaveScopeCatalogueParams struct {
+	Iata         string             `json:"iata"`
+	Url          string             `json:"url"`
+	Payload      []byte             `json:"payload"`
+	Etag         *string            `json:"etag"`
+	CheckedAt    pgtype.Timestamptz `json:"checked_at"`
+	AttemptedAt  pgtype.Timestamptz `json:"attempted_at"`
+	NextAttempt  pgtype.Timestamptz `json:"next_attempt"`
+	LastError    string             `json:"last_error"`
+	Names        []string           `json:"names"`
+	Keys         [][]byte           `json:"keys"`
+	Fingerprints [][]byte           `json:"fingerprints"`
+}
+
+// One statement commits the validated snapshot and its lookup identities together.
+// Empty arrays insert nothing. NULL payload/checked_at retain last-known-good data
+// after an error or 304. Imported names never replace existing manual metadata.
+func (q *Queries) SaveScopeCatalogue(ctx context.Context, arg SaveScopeCatalogueParams) error {
+	_, err := q.db.Exec(ctx, saveScopeCatalogue,
+		arg.Iata,
+		arg.Url,
+		arg.Payload,
+		arg.Etag,
+		arg.CheckedAt,
+		arg.AttemptedAt,
+		arg.NextAttempt,
+		arg.LastError,
+		arg.Names,
+		arg.Keys,
+		arg.Fingerprints,
+	)
+	return err
+}
+
 const searchKnownRoutes = `-- name: SearchKnownRoutes :many
 SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
 FROM known_routes
@@ -4432,11 +4587,12 @@ func (q *Queries) SetPacketDecrypted(ctx context.Context, packetHash []byte) err
 const touchObserverBrokers = `-- name: TouchObserverBrokers :exec
 UPDATE observer_brokers ob SET
   last_seen      = GREATEST(ob.last_seen, v.seen),
-  last_packet_at = GREATEST(ob.last_packet_at, v.seen)
+  last_packet_at = GREATEST(ob.last_packet_at, v.packet)
 FROM (
   SELECT unnest($1::uuid[]) AS observer_id,
          unnest($2::text[]) AS broker_name,
-         unnest($3::timestamptz[]) AS seen
+         unnest($3::timestamptz[]) AS seen,
+         unnest($4::timestamptz[]) AS packet
 ) v
 WHERE ob.observer_id = v.observer_id AND ob.broker_name = v.broker_name
 `
@@ -4445,10 +4601,16 @@ type TouchObserverBrokersParams struct {
 	Column1 []uuid.UUID          `json:"column_1"`
 	Column2 []string             `json:"column_2"`
 	Column3 []pgtype.Timestamptz `json:"column_3"`
+	Column4 []pgtype.Timestamptz `json:"column_4"`
 }
 
 func (q *Queries) TouchObserverBrokers(ctx context.Context, arg TouchObserverBrokersParams) error {
-	_, err := q.db.Exec(ctx, touchObserverBrokers, arg.Column1, arg.Column2, arg.Column3)
+	_, err := q.db.Exec(ctx, touchObserverBrokers,
+		arg.Column1,
+		arg.Column2,
+		arg.Column3,
+		arg.Column4,
+	)
 	return err
 }
 
@@ -4953,22 +5115,23 @@ func (q *Queries) UpsertObserver(ctx context.Context, publicKey []byte) (Observe
 const upsertObserverBroker = `-- name: UpsertObserverBroker :exec
 
 INSERT INTO observer_brokers (observer_id, broker_name, last_seen, last_packet_at)
-VALUES ($1, $2, NOW(), NOW())
+VALUES ($1, $2, NOW(), CASE WHEN $3::boolean THEN NOW() END)
 ON CONFLICT (observer_id, broker_name) DO UPDATE SET
-  last_seen      = NOW(),
-  last_packet_at = NOW()
+  last_seen = NOW(),
+  last_packet_at = COALESCE(EXCLUDED.last_packet_at, observer_brokers.last_packet_at)
 `
 
 type UpsertObserverBrokerParams struct {
 	ObserverID uuid.UUID `json:"observer_id"`
 	BrokerName string    `json:"broker_name"`
+	IsPacket   bool      `json:"is_packet"`
 }
 
 // ============================================================
 // OBSERVER BROKERS
 // ============================================================
 func (q *Queries) UpsertObserverBroker(ctx context.Context, arg UpsertObserverBrokerParams) error {
-	_, err := q.db.Exec(ctx, upsertObserverBroker, arg.ObserverID, arg.BrokerName)
+	_, err := q.db.Exec(ctx, upsertObserverBroker, arg.ObserverID, arg.BrokerName, arg.IsPacket)
 	return err
 }
 
@@ -5177,7 +5340,8 @@ VALUES ($1, $2, $3, $4)
 ON CONFLICT (name) DO UPDATE SET
   display_name    = EXCLUDED.display_name,
   transport_key   = EXCLUDED.transport_key,
-  key_fingerprint = EXCLUDED.key_fingerprint
+  key_fingerprint = EXCLUDED.key_fingerprint,
+  imported_only   = FALSE
 `
 
 type UpsertTransportScopeParams struct {

@@ -16,6 +16,7 @@ import (
 // Unset fields return zero values. Use it for both validation tests
 // (leave all fields nil) and happy path tests (set only what you need).
 type stubReader struct {
+	getRouteEvidence             func(context.Context, string, string, api.RouteEvidenceQuery) (*api.RouteEvidence, error)
 	getObserverComparison        func(context.Context, uuid.UUID, uuid.UUID, time.Time, time.Time, []string) (*api.ObserverComparison, error)
 	listIATAs                    func(ctx context.Context) ([]api.IATA, error)
 	getIATA                      func(ctx context.Context, iata string) (*api.IATA, error)
@@ -32,7 +33,7 @@ type stubReader struct {
 	getObserver                  func(ctx context.Context, observerID uuid.UUID) (*api.Observer, error)
 	getObserverTelemetry         func(ctx context.Context, observerID uuid.UUID, since, until time.Time, afterID int64) (*api.ObserverTelemetry, error)
 	getObserverTelemetryBucketed func(ctx context.Context, observerID uuid.UUID, since, until time.Time, bucketHours int32) ([]api.ObserverTelemetryPoint, error)
-	getObserverActivity          func(ctx context.Context, observerID uuid.UUID, window, interval time.Duration) (*api.ObserverActivity, error)
+	getObserverActivity          func(ctx context.Context, observerID uuid.UUID, window, interval time.Duration, until time.Time) (*api.ObserverActivity, error)
 	getObserverScopes            func(ctx context.Context, observerID uuid.UUID) ([]string, error)
 	listObserverAdverts          func(ctx context.Context, observerID uuid.UUID, cursor int64, limit int32) (api.Page[api.AdvertObservation], error)
 	listNodes                    func(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, limit int32, includeNeighbors bool) (api.Page[api.NodeSummary], error)
@@ -186,9 +187,9 @@ func (s stubReader) GetObserverTelemetryBucketed(ctx context.Context, observerID
 	return nil, nil
 }
 
-func (s stubReader) GetObserverActivity(ctx context.Context, observerID uuid.UUID, window, interval time.Duration) (*api.ObserverActivity, error) {
+func (s stubReader) GetObserverActivity(ctx context.Context, observerID uuid.UUID, window, interval time.Duration, until time.Time) (*api.ObserverActivity, error) {
 	if s.getObserverActivity != nil {
-		return s.getObserverActivity(ctx, observerID, window, interval)
+		return s.getObserverActivity(ctx, observerID, window, interval, until)
 	}
 	return nil, nil
 }
@@ -406,6 +407,13 @@ func (s stubReader) SearchCrossIATARoutes(ctx context.Context, fromHash, fromIAT
 func (s stubReader) GetNodesByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*api.ResolvedNode, error) {
 	if s.getNodesByIDs != nil {
 		return s.getNodesByIDs(ctx, ids)
+	}
+	return nil, nil
+}
+
+func (s stubReader) GetRouteEvidence(ctx context.Context, iata, key string, q api.RouteEvidenceQuery) (*api.RouteEvidence, error) {
+	if s.getRouteEvidence != nil {
+		return s.getRouteEvidence(ctx, iata, key, q)
 	}
 	return nil, nil
 }

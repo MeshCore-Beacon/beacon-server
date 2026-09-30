@@ -148,7 +148,7 @@ func (s *stubReader) GetObserverTelemetryBucketed(_ context.Context, _ uuid.UUID
 	return nil, nil
 }
 
-func (s *stubReader) GetObserverActivity(_ context.Context, _ uuid.UUID, _, _ time.Duration) (*api.ObserverActivity, error) {
+func (s *stubReader) GetObserverActivity(_ context.Context, _ uuid.UUID, _, _ time.Duration, _ time.Time) (*api.ObserverActivity, error) {
 	return nil, nil
 }
 
@@ -417,4 +417,8 @@ func TestCachedReader_InvalidateObserver(t *testing.T) {
 	if mr.Exists(keyObserverScopesPrefix + observerID.String()) {
 		t.Error("expected observer scopes key to be deleted")
 	}
+}
+
+func (s *stubReader) GetRouteEvidence(_ context.Context, _, _ string, _ api.RouteEvidenceQuery) (*api.RouteEvidence, error) {
+	return nil, nil
 }

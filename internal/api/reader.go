@@ -23,6 +23,8 @@ type Page[T any] struct {
 }
 
 type Reader interface {
+	// GetRouteEvidence returns the full saved route and exact-prefix retained ordinary reports.
+	GetRouteEvidence(ctx context.Context, iata, pathKey string, query RouteEvidenceQuery) (*RouteEvidence, error)
 	// ListIATAs returns all known IATA codes with display name and coordinates.
 	// IATAs are auto-created on first packet arrival from that location.
 	ListIATAs(ctx context.Context) ([]IATA, error)
@@ -100,7 +102,7 @@ type Reader interface {
 	// GetObserverActivity returns bucketed heard-activity for an observer over the trailing window.
 	// interval >= 1h is served from the hourly rollup. Returns pgx.ErrNoRows for an unknown observer.
 	// Range and Interval on the result are left empty for the handler to fill.
-	GetObserverActivity(ctx context.Context, observerID uuid.UUID, window, interval time.Duration) (*ObserverActivity, error)
+	GetObserverActivity(ctx context.Context, observerID uuid.UUID, window, interval time.Duration, until time.Time) (*ObserverActivity, error)
 
 	// GetObserverScopes returns the names of all transport scopes an observer has
 	// been seen forwarding packets for, ordered alphabetically.

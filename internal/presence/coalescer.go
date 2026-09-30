@@ -31,7 +31,7 @@ type Store interface {
 
 	// TouchObserverBrokers applies coalesced last_seen/last_packet_at bumps
 	// for the given (observer, broker) pairs in one statement.
-	TouchObserverBrokers(ctx context.Context, ids []uuid.UUID, brokers []string, seen []time.Time) error
+	TouchObserverBrokers(ctx context.Context, ids []uuid.UUID, brokers []string, seen, packets []time.Time) error
 
 	// TouchPackets applies coalesced last_heard_at bumps for the given packet
 	// hashes in one statement.
@@ -51,6 +51,8 @@ type observerBump struct {
 	count int32
 }
 
+type brokerBump struct{ seen, packet time.Time }
+
 type brokerKey struct {
 	id     uuid.UUID
 	broker string
@@ -68,7 +70,7 @@ type Coalescer struct {
 	identities     map[string]identity // pubkey -> observer row
 	dirtyObservers map[uuid.UUID]observerBump
 	knownBrokers   map[brokerKey]struct{}
-	dirtyBrokers   map[brokerKey]time.Time
+	dirtyBrokers   map[brokerKey]brokerBump
 	knownIATAs     map[string]struct{}
 	packetsSeen    map[string]time.Time // hash -> last observation
 	dirtyPackets   map[string]time.Time
@@ -86,7 +88,7 @@ func New(store Store, flushInterval, packetTTL time.Duration) *Coalescer {
 		identities:     make(map[string]identity),
 		dirtyObservers: make(map[uuid.UUID]observerBump),
 		knownBrokers:   make(map[brokerKey]struct{}),
-		dirtyBrokers:   make(map[brokerKey]time.Time),
+		dirtyBrokers:   make(map[brokerKey]brokerBump),
 		knownIATAs:     make(map[string]struct{}),
 		packetsSeen:    make(map[string]time.Time),
 		dirtyPackets:   make(map[string]time.Time),
@@ -122,17 +124,22 @@ func (c *Coalescer) UpsertObserver(ctx context.Context, pubkey []byte) (uuid.UUI
 
 // UpsertObserverBroker writes through the first time a pair is seen and
 // records a bump afterwards.
-func (c *Coalescer) UpsertObserverBroker(ctx context.Context, observerID uuid.UUID, brokerName string) error {
+func (c *Coalescer) UpsertObserverBroker(ctx context.Context, observerID uuid.UUID, brokerName string, isPacket bool) error {
 	key := brokerKey{id: observerID, broker: brokerName}
 	c.mu.Lock()
 	if _, ok := c.knownBrokers[key]; ok {
-		c.dirtyBrokers[key] = c.now()
+		bump := c.dirtyBrokers[key]
+		bump.seen = c.now()
+		if isPacket {
+			bump.packet = bump.seen
+		}
+		c.dirtyBrokers[key] = bump
 		c.mu.Unlock()
 		return nil
 	}
 	c.mu.Unlock()
 
-	if err := c.Store.UpsertObserverBroker(ctx, observerID, brokerName); err != nil {
+	if err := c.Store.UpsertObserverBroker(ctx, observerID, brokerName, isPacket); err != nil {
 		return err
 	}
 	c.mu.Lock()
@@ -248,7 +255,7 @@ func (c *Coalescer) Flush(ctx context.Context) {
 	brokers := c.dirtyBrokers
 	packets := c.dirtyPackets
 	c.dirtyObservers = make(map[uuid.UUID]observerBump)
-	c.dirtyBrokers = make(map[brokerKey]time.Time)
+	c.dirtyBrokers = make(map[brokerKey]brokerBump)
 	c.dirtyPackets = make(map[string]time.Time)
 	cutoff := c.now().Add(-c.packetTTL)
 	for key, seen := range c.packetsSeen {
@@ -266,12 +273,14 @@ func (c *Coalescer) Flush(ctx context.Context) {
 		ids := make([]uuid.UUID, 0, len(brokers))
 		names := make([]string, 0, len(brokers))
 		seen := make([]time.Time, 0, len(brokers))
+		packetTimes := make([]time.Time, 0, len(brokers))
 		for key, ts := range brokers {
 			ids = append(ids, key.id)
 			names = append(names, key.broker)
-			seen = append(seen, ts)
+			seen = append(seen, ts.seen)
+			packetTimes = append(packetTimes, ts.packet)
 		}
-		if err := c.Store.TouchObserverBrokers(ctx, ids, names, seen); err != nil {
+		if err := c.Store.TouchObserverBrokers(ctx, ids, names, seen, packetTimes); err != nil {
 			slog.Error(fmt.Sprintf("presence: flush observer brokers failed (%d rows dropped)", len(ids)), "component", "presence", "error", err)
 		}
 	}

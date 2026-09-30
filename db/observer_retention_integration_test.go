@@ -100,7 +100,7 @@ SELECT id,1 FROM observers WHERE display_name='expired';`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := coalescer.UpsertObserverBroker(ctx, oldID, "fixture"); err != nil {
+	if err := coalescer.UpsertObserverBroker(ctx, oldID, "fixture", true); err != nil {
 		t.Fatal(err)
 	}
 	// A future cutoff simulates this cached observer having aged past retention.
@@ -112,7 +112,7 @@ SELECT id,1 FROM observers WHERE display_name='expired';`)
 	if err != nil || newID == oldID {
 		t.Fatalf("returning observer reused a deleted ID: %v", err)
 	}
-	if err := coalescer.UpsertObserverBroker(ctx, newID, "fixture"); err != nil {
+	if err := coalescer.UpsertObserverBroker(ctx, newID, "fixture", true); err != nil {
 		t.Fatal(err)
 	}
 	var brokers int

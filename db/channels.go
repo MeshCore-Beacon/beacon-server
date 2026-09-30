@@ -154,16 +154,16 @@ func (s *Store) GetChannel(ctx context.Context, channelID int32) (*api.Channel, 
 	return &channel, nil
 }
 
-func (s *Store) InsertChannelMessage(ctx context.Context, m ingest.InsertChannelMessageParams) (bool, error) {
+func (s *Store) InsertChannelMessage(ctx context.Context, m ingest.InsertChannelMessageParams) (*ingest.InsertedChannelMessage, error) {
 	params := sqlc.InsertChannelMessageParams{ChannelID: int32(m.ChannelID), PacketHash: m.PacketHash, SenderName: &m.SenderName, Content: &m.Content, SentAt: pgtype.Timestamptz{Time: m.SentAt, Valid: true}}
-	_, err := s.q.InsertChannelMessage(ctx, params)
+	row, err := s.q.InsertChannelMessage(ctx, params)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil // duplicate
+		return nil, nil // duplicate
 	}
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	return true, nil
+	return &ingest.InsertedChannelMessage{ID: row.ID, Scope: row.ScopeName, ScopeStatus: api.RecordedChannelScopeStatus(row.ScopeName, row.TransportCodesPresent)}, nil
 }
 
 func (s *Store) ListChannelMessages(ctx context.Context, channelID *int32, since time.Time, limit int32, iatas []string, scope string, cursor int64) (api.Page[api.ChannelMessage], error) {
@@ -187,7 +187,7 @@ func (s *Store) ListChannelMessages(ctx context.Context, channelID *int32, since
 		}
 		messages = make([]api.ChannelMessage, 0, len(rows))
 		for _, v := range rows {
-			messages = append(messages, toChannelMessage(v.ID, v.PacketHashHex, v.ChannelHash, v.SenderName, v.Content, v.SentAt, v.ObservationCount))
+			messages = append(messages, toChannelMessage(v.ID, v.PacketHashHex, v.ChannelHash, v.SenderName, v.Content, v.SentAt, v.ObservationCount, v.ScopeName, v.TransportCodesPresent))
 		}
 	} else {
 		rows, err := s.q.ListChannelMessages(ctx, sqlc.ListChannelMessagesParams{
@@ -207,7 +207,7 @@ func (s *Store) ListChannelMessages(ctx context.Context, channelID *int32, since
 		}
 		messages = make([]api.ChannelMessage, 0, len(rows))
 		for _, v := range rows {
-			messages = append(messages, toChannelMessage(v.ID, v.PacketHashHex, v.ChannelHash, v.SenderName, v.Content, v.SentAt, v.ObservationCount))
+			messages = append(messages, toChannelMessage(v.ID, v.PacketHashHex, v.ChannelHash, v.SenderName, v.Content, v.SentAt, v.ObservationCount, v.ScopeName, v.TransportCodesPresent))
 		}
 	}
 
@@ -241,7 +241,7 @@ func (s *Store) ListChannelMessagesByHash(ctx context.Context, hash []byte, sinc
 	}
 	messages := make([]api.ChannelMessage, 0, len(rows))
 	for _, v := range rows {
-		messages = append(messages, toChannelMessage(v.ID, hex.EncodeToString(v.PacketHash), v.ChannelHash, v.SenderName, v.Content, v.SentAt, v.ObservationCount))
+		messages = append(messages, toChannelMessage(v.ID, hex.EncodeToString(v.PacketHash), v.ChannelHash, v.SenderName, v.Content, v.SentAt, v.ObservationCount, v.ScopeName, v.TransportCodesPresent))
 	}
 	var nextCursor *int64
 	if hasMore && len(messages) > 0 {
@@ -275,6 +275,8 @@ func (s *Store) ListMessagesAfterID(ctx context.Context, afterID int64, iatas []
 			v.Content,
 			v.SentAt,
 			v.ObservationCount,
+			v.ScopeName,
+			v.TransportCodesPresent,
 		))
 	}
 	return items, nil

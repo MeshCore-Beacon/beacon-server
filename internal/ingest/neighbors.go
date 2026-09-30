@@ -48,7 +48,7 @@ func (w *Worker) handleNeighbors(ctx context.Context, iata, pubkeyHex string, ra
 		w.log.Error(fmt.Sprintf("db: upsert observer failed in neighbors from %s", pubkeyHex), "error", err)
 		return
 	}
-	if err := w.db.UpsertObserverBroker(ctx, observerID, w.cfg.BrokerName); err != nil {
+	if err := w.db.UpsertObserverBroker(ctx, observerID, w.cfg.BrokerName, false); err != nil {
 		w.log.Error(fmt.Sprintf("db: upsert observer broker failed in neighbors from %s", pubkeyHex), "error", err)
 	}
 
