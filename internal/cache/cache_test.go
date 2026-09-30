@@ -383,6 +383,19 @@ func TestCachedReader_IATASortingForStableKey(t *testing.T) {
 	}
 }
 
+func TestInvalidateScopeNamesClearsDerivedKeys(t *testing.T) {
+	c, mr := newTestClient(t)
+	cr := &CachedReader{inner: &stubReader{}, c: c, ttl: CacheTTLs{}}
+	for _, k := range []string{keyScopeNames, keyScopesByIATAsPrefix + "YOW", keyScopesByIATAsPrefix + "YOW,YVR", keyScopeByNamePrefix + "#yow"} {
+		mr.Set(k, "x")
+	}
+	mr.Set("beacon:iatas", "keep")
+	cr.InvalidateScopeNames(context.Background())
+	if got := mr.Keys(); len(got) != 1 || got[0] != "beacon:iatas" {
+		t.Fatalf("keys left: %v", got)
+	}
+}
+
 func TestCachedReader_InvalidateNode(t *testing.T) {
 	c, mr := newTestClient(t)
 	nodeID := uuid.MustParse("00000000-0000-0000-0000-000000000001")

@@ -80,9 +80,11 @@ func NewCachedReader(inner api.Reader, c *Client, ttl CacheTTLs) api.Reader {
 	}
 }
 
-// InvalidateScopeNames makes newly committed catalogue names available to filters.
+// InvalidateScopeNames makes newly committed catalogue names visible to every scope read.
 func (cr *CachedReader) InvalidateScopeNames(ctx context.Context) {
 	cr.c.del(ctx, keyScopeNames)
+	cr.c.delPrefix(ctx, keyScopesByIATAsPrefix)
+	cr.c.delPrefix(ctx, keyScopeByNamePrefix)
 }
 
 // InvalidateNode removes the cached entries for a node by UUID.
