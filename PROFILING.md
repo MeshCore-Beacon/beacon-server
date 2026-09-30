@@ -34,7 +34,8 @@ can enable a longer session. Profiling adds overhead while a capture is active.
 - One 30-second sample immediately, then every 30 minutes.
 - Route reconfirmation requests an additional sample when the maintenance task starts.
   This includes the retention step before route validation. A five-minute cooldown
-  between capture starts prevents overlap and repeated triggers from increasing load.
+  between capture starts prevents overlap and repeated triggers from increasing load;
+  a periodic sample due during the cooldown runs when it ends.
 - Background task stacks carry a `task` label while profiling is enabled.
 - Shutdown or expiry stops the active sample and saves the shorter profile.
 - Each profile is limited to 8 MiB. The dedicated directory is limited to 256 MiB

@@ -13,7 +13,7 @@ import (
 )
 
 func configureProfiling(ctx context.Context, pool *pgxpool.Pool) *profiling.Recorder {
-	r, err := profiling.Start(ctx, os.Getenv("BEACON_CPU_PROFILE_DIR"), os.Getenv("BEACON_CPU_PROFILE_UNTIL"), func() any {
+	r, err := profiling.Start(ctx, os.Getenv("BEACON_CPU_PROFILE_DIR"), os.Getenv("BEACON_CPU_PROFILE_UNTIL"), []string{"reconfirm"}, func() any {
 		s := pool.Stat()
 		return struct {
 			Acquired, Idle, Total, Max                int32

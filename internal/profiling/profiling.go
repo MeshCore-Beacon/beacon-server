@@ -31,6 +31,7 @@ const (
 type Recorder struct {
 	root     *os.Root
 	snapshot func() any
+	triggers map[string]bool
 	requests chan string
 	cancel   context.CancelFunc
 	done     chan struct{}
@@ -52,7 +53,8 @@ type metadata struct {
 }
 
 // Start leaves expired settings inactive so restarts cannot extend a capture window.
-func Start(parent context.Context, dir, until string, poolSnapshot func() any) (*Recorder, error) {
+// Tasks named in triggers request an extra capture when they start.
+func Start(parent context.Context, dir, until string, triggers []string, poolSnapshot func() any) (*Recorder, error) {
 	if dir == "" && until == "" {
 		return nil, nil
 	}
@@ -64,6 +66,7 @@ func Start(parent context.Context, dir, until string, poolSnapshot func() any) (
 		return nil, fmt.Errorf("invalid profiling deadline: %w", err)
 	}
 	if !deadline.After(time.Now()) {
+		slog.Info("CPU profiling deadline has passed; profiling stays off", "component", "profiling", "until", deadline.UTC())
 		return nil, nil
 	}
 	if time.Until(deadline) > 72*time.Hour {
@@ -90,7 +93,10 @@ func Start(parent context.Context, dir, until string, poolSnapshot func() any) (
 		return nil, err
 	}
 	ctx, cancel := context.WithDeadline(parent, deadline)
-	r := &Recorder{root: root, snapshot: poolSnapshot, requests: make(chan string, 1), cancel: cancel, done: make(chan struct{})}
+	r := &Recorder{root: root, snapshot: poolSnapshot, triggers: make(map[string]bool, len(triggers)), requests: make(chan string, 1), cancel: cancel, done: make(chan struct{})}
+	for _, name := range triggers {
+		r.triggers[name] = true
+	}
 	slog.Info("CPU profiling enabled", "component", "profiling", "until", deadline.UTC())
 	go r.run(ctx)
 	return r, nil
@@ -104,9 +110,9 @@ func (r *Recorder) Stop() {
 	<-r.done
 }
 
-// Request never holds up maintenance or queues a backlog of captures.
-func (r *Recorder) Request(reason string) {
-	if r == nil || reason != "reconfirm" {
+// request never holds up maintenance or queues a backlog of captures.
+func (r *Recorder) request(reason string) {
+	if r == nil {
 		return
 	}
 	select {
@@ -130,8 +136,8 @@ func (r *Recorder) WrapTask(name string, run func(context.Context) error) func(c
 			return run(ctx)
 		default:
 		}
-		if name == "reconfirm" {
-			r.Request(name)
+		if r.triggers[name] {
+			r.request(name)
 		}
 		pprof.Do(ctx, pprof.Labels("task", name), func(ctx context.Context) { err = run(ctx) })
 		return err
@@ -153,20 +159,27 @@ func schedule(ctx context.Context, requests <-chan string, capture func(context.
 	defer ticker.Stop()
 	reason := "periodic"
 	var last time.Time
+	var deferred <-chan time.Time
 	for {
 		if ctx.Err() != nil {
 			return nil
 		}
-		if last.IsZero() || time.Since(last) >= captureCooldown {
+		if wait := captureCooldown - time.Since(last); last.IsZero() || wait <= 0 {
 			last = time.Now()
 			if err := capture(ctx, reason); err != nil {
 				return err
 			}
+		} else if reason == "periodic" && deferred == nil {
+			// Run a periodic sample after the cooldown rather than skipping a whole interval.
+			deferred = time.After(wait)
 		}
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
+			reason = "periodic"
+		case <-deferred:
+			deferred = nil
 			reason = "periodic"
 		case reason = <-requests:
 		}

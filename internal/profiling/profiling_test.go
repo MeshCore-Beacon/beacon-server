@@ -25,7 +25,7 @@ func TestDisabledAndExpired(t *testing.T) {
 	for _, tc := range []struct{ dir, until string }{
 		{}, {filepath.Join(t.TempDir(), "unused"), time.Now().Add(-time.Hour).Format(time.RFC3339)},
 	} {
-		r, err := Start(context.Background(), tc.dir, tc.until, nil)
+		r, err := Start(context.Background(), tc.dir, tc.until, nil, nil)
 		if err != nil || r != nil {
 			t.Fatalf("got %v, %v", r, err)
 		}
@@ -46,7 +46,7 @@ func TestRejectUnsafeConfiguration(t *testing.T) {
 		{"relative directory", "profiles", time.Now().Add(time.Hour).Format(time.RFC3339)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r, err := Start(context.Background(), tc.dir, tc.until, nil)
+			r, err := Start(context.Background(), tc.dir, tc.until, nil, nil)
 			if r != nil {
 				r.Stop()
 			}
@@ -59,7 +59,7 @@ func TestRejectUnsafeConfiguration(t *testing.T) {
 	if err := os.Chmod(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	r, err := Start(context.Background(), dir, time.Now().Add(time.Hour).Format(time.RFC3339), nil)
+	r, err := Start(context.Background(), dir, time.Now().Add(time.Hour).Format(time.RFC3339), nil, nil)
 	if r != nil {
 		r.Stop()
 	}
@@ -72,7 +72,7 @@ func TestDeadlineProducesPrivateProfileAndMetadata(t *testing.T) {
 	requireSupportedPlatform(t)
 	dir := filepath.Join(t.TempDir(), "profiles")
 	until := time.Now().Add(500 * time.Millisecond)
-	r, err := Start(context.Background(), dir, until.Format(time.RFC3339Nano), func() any { return map[string]int{"acquired": 2} })
+	r, err := Start(context.Background(), dir, until.Format(time.RFC3339Nano), nil, func() any { return map[string]int{"acquired": 2} })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestDeadlineProducesPrivateProfileAndMetadata(t *testing.T) {
 	if m.Reason != "periodic" || !m.FinishedAt.After(m.StartedAt) || m.Before.Pool["acquired"] != 2 || m.After.Pool["acquired"] != 2 {
 		t.Fatalf("bad metadata %+v", m)
 	}
-	r.Request("reconfirm")
+	r.request("reconfirm")
 	r.Stop()
 	files, _ = filepath.Glob(filepath.Join(dir, "*.pprof"))
 	if len(files) != 1 {
@@ -138,7 +138,7 @@ func TestStopReleasesProfiler(t *testing.T) {
 	slog.SetDefault(slog.New(captureObserver{Handler: slog.NewTextHandler(io.Discard, nil), active: active}))
 	defer slog.SetDefault(old)
 	dir := filepath.Join(t.TempDir(), "profiles")
-	r, err := Start(context.Background(), dir, time.Now().Add(time.Hour).Format(time.RFC3339), nil)
+	r, err := Start(context.Background(), dir, time.Now().Add(time.Hour).Format(time.RFC3339), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestStopReleasesProfiler(t *testing.T) {
 	}
 	z.Close()
 	dir2 := filepath.Join(t.TempDir(), "profiles")
-	r2, err := Start(context.Background(), dir2, time.Now().Add(400*time.Millisecond).Format(time.RFC3339Nano), nil)
+	r2, err := Start(context.Background(), dir2, time.Now().Add(400*time.Millisecond).Format(time.RFC3339Nano), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestDirectoryBudgetSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.Close()
-	r, err := Start(context.Background(), dir, time.Now().Add(time.Hour).Format(time.RFC3339), nil)
+	r, err := Start(context.Background(), dir, time.Now().Add(time.Hour).Format(time.RFC3339), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,11 +264,61 @@ func TestScheduleBoundsExtraCaptures(t *testing.T) {
 	})
 }
 
+func TestScheduleDefersPeriodicCaptureInCooldown(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		requests := make(chan string, 1)
+		var at []time.Duration
+		var reasons []string
+		start := time.Now()
+		done := make(chan error, 1)
+		go func() {
+			done <- schedule(ctx, requests, func(ctx context.Context, reason string) error {
+				at = append(at, time.Since(start))
+				reasons = append(reasons, reason)
+				time.Sleep(30 * time.Second)
+				return nil
+			})
+		}()
+		synctest.Wait()
+		time.Sleep(28 * time.Minute)
+		requests <- "reconfirm"
+		synctest.Wait()
+		time.Sleep(33 * time.Minute)
+		cancel()
+		synctest.Wait()
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		wantAt := []time.Duration{0, 28 * time.Minute, 33 * time.Minute, 60 * time.Minute}
+		wantReasons := []string{"periodic", "reconfirm", "periodic", "periodic"}
+		if !reflect.DeepEqual(at, wantAt) || !reflect.DeepEqual(reasons, wantReasons) {
+			t.Fatalf("captures %v %v, want %v %v", at, reasons, wantAt, wantReasons)
+		}
+	})
+}
+
+func TestTriggersAreConfigurable(t *testing.T) {
+	r := &Recorder{triggers: map[string]bool{"custom": true}, requests: make(chan string, 1), done: make(chan struct{})}
+	noop := func(context.Context) error { return nil }
+	_ = r.WrapTask("reconfirm", noop)(context.Background())
+	select {
+	case got := <-r.requests:
+		t.Fatalf("untriggered task requested %q", got)
+	default:
+	}
+	_ = r.WrapTask("custom", noop)(context.Background())
+	if got := <-r.requests; got != "custom" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestWrappedTaskPreservesContextAndError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	want := errors.New("task failed")
-	r := &Recorder{requests: make(chan string, 1), done: make(chan struct{})}
+	r := &Recorder{triggers: map[string]bool{"reconfirm": true}, requests: make(chan string, 1), done: make(chan struct{})}
 	run := r.WrapTask("reconfirm", func(got context.Context) error {
 		if got.Err() != context.Canceled {
 			t.Fatal("lost cancellation")
