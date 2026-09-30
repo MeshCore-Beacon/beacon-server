@@ -6,6 +6,7 @@ package ingest
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"testing"
 	"time"
@@ -24,7 +25,20 @@ func waitForSummarySubscriber(t *testing.T, ctx context.Context, h *hub.Hub, cli
 		h.Broadcast(hub.Event{Type: hub.EventObserverStatus})
 		select {
 		case <-client.Send:
-			return
+			// A slow hub can leave more probes queued. Drain through a final
+			// marker so the next test read receives its packet, not a probe.
+			marker := json.RawMessage(`"` + rand.Text() + `"`)
+			h.Broadcast(hub.Event{Type: hub.EventObserverStatus, Payload: marker})
+			for {
+				select {
+				case event := <-client.Send:
+					if string(event.Payload) == string(marker) {
+						return
+					}
+				case <-ctx.Done():
+					t.Fatal("hub readiness probes did not drain")
+				}
+			}
 		case <-ticker.C:
 		case <-ctx.Done():
 			t.Fatal("hub subscription did not become ready")
