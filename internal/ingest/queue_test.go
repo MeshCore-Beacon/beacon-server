@@ -141,24 +141,13 @@ type completedSubscribe struct{ mqtt.Token }
 func (completedSubscribe) Wait() bool   { return true }
 func (completedSubscribe) Error() error { return nil }
 
-type ackMessage struct {
-	mqtt.Message
-	acked bool
-}
-
-func (m *ackMessage) Ack() { m.acked = true }
-
-func TestSubscribeReleasesRejectedMessage(t *testing.T) {
+func TestSubscribeCountsRejectedMessage(t *testing.T) {
 	w, _ := newTestWorker()
 	q := newMessageQueue(1, 1, 1, func(context.Context, mqtt.Message) { t.Error("rejected message processed") })
 	defer q.close(context.Background())
 	client := &subscribeCapture{}
 	w.subscribe(client, q)
-	m := &ackMessage{Message: queueMessage("aa", "packets", 0)}
-	client.callback(client, m)
-	if !m.acked {
-		t.Fatal("rejected message still occupies the broker inflight window")
-	}
+	client.callback(client, queueMessage("aa", "packets", 0))
 	if q.takeDropped() != 1 {
 		t.Fatal("rejected message was not counted")
 	}

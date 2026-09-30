@@ -249,7 +249,6 @@ func (w *Worker) Start(ctx context.Context) {
 	}
 	queue := newMessageQueue(8, 2048, 32<<20, func(ctx context.Context, msg mqtt.Message) {
 		w.handleMessageContext(ctx, msg)
-		msg.Ack()
 	})
 	reportDrops := func() {
 		if n := queue.takeDropped(); n > 0 {
@@ -268,13 +267,13 @@ func (w *Worker) Start(ctx context.Context) {
 
 	// Isolate workers across deployments; Paho reuses this ID on reconnect.
 	// Keep it alphanumeric and within MQTT 3.1's 23-character client ID limit.
+	// Auto-ack: sessions are clean, so deferring acks only throttled the broker's inflight window.
 	opts := mqtt.NewClientOptions().
 		AddBroker(w.cfg.URL).
 		SetClientID(rand.Text()[:23]).
 		SetUsername(w.cfg.Username).
 		SetPassword(w.cfg.Password).
 		SetAutoReconnect(true).
-		SetAutoAckDisabled(true).
 		SetMaxReconnectInterval(30 * time.Second).
 		SetKeepAlive(30 * time.Second).
 		SetPingTimeout(10 * time.Second).
@@ -335,10 +334,7 @@ func (w *Worker) subscribe(client mqtt.Client, queue *messageQueue) {
 	// meshcore/{IATA}/{pubkey}/status
 	// We do NOT subscribe to /internal (Role 2 access).
 	tok := client.Subscribe("meshcore/#", 1, func(_ mqtt.Client, msg mqtt.Message) {
-		if !queue.enqueue(msg) {
-			// Counted drops must release the broker's inflight slot.
-			msg.Ack()
-		}
+		queue.enqueue(msg)
 	})
 	if tok.Wait() && tok.Error() != nil {
 		w.log.Error("subscribe error", "error", tok.Error())
