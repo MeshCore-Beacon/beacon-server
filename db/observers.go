@@ -196,37 +196,17 @@ func (s *Store) GetObserverTelemetry(ctx context.Context, observerID uuid.UUID, 
 	return &api.ObserverTelemetry{Points: points}, nil
 }
 
+// GetObserverTelemetryBucketed reads a day before since so the first bucket's counter increments have a baseline.
 func (s *Store) GetObserverTelemetryBucketed(ctx context.Context, observerID uuid.UUID, since, until time.Time, bucketHours int32) ([]api.ObserverTelemetryPoint, error) {
-	var sinceTS, untilTS pgtype.Timestamptz
-	if !since.IsZero() {
-		sinceTS = pgtype.Timestamptz{Time: since, Valid: true}
+	from := since
+	if !from.IsZero() {
+		from = from.Add(-24 * time.Hour)
 	}
-	if !until.IsZero() {
-		untilTS = pgtype.Timestamptz{Time: until, Valid: true}
-	}
-	rows, err := s.q.GetObserverTelemetryBucketed(ctx, sqlc.GetObserverTelemetryBucketedParams{
-		ObserverID: observerID,
-		Column2:    sinceTS,
-		Column3:    untilTS,
-		Column4:    bucketHours,
-	})
+	raw, err := s.GetObserverTelemetry(ctx, observerID, from, until, 0)
 	if err != nil {
 		return nil, err
 	}
-	points := make([]api.ObserverTelemetryPoint, 0, len(rows))
-	for _, r := range rows {
-		points = append(points, api.ObserverTelemetryPoint{
-			T:             r.Bucket.Time.UnixMilli(),
-			BatteryMV:     &r.BatteryVoltageMv,
-			AirtimeTxSecs: &r.AirtimeTxSecs,
-			AirtimeRxSecs: &r.AirtimeRxSecs,
-			NoiseFloorDB:  &r.NoiseFloorDb,
-			UptimeSeconds: &r.UptimeSeconds,
-			QueueLength:   &r.QueueLength,
-			ReceiveErrors: &r.ReceiveErrors,
-		})
-	}
-	return points, nil
+	return api.BucketTelemetry(raw.Points, since, time.Duration(bucketHours)*time.Hour), nil
 }
 
 // GetObserverActivity returns bucketed heard-activity for an observer over the trailing window.

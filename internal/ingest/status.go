@@ -49,25 +49,37 @@ type statusEvent struct {
 	LastStatusAt  int64    `json:"lastStatusAt"`
 }
 
+type statusStats struct {
+	UptimeSeconds int64   `json:"uptime_secs"`
+	BatteryMV     int     `json:"battery_mv"`
+	NoiseFloor    float32 `json:"noise_floor"`
+	QueueLen      int     `json:"queue_len"`
+	DebugFlags    int     `json:"debug_flags"`
+	TxAirSecs     float64 `json:"tx_air_secs"`
+	RxAirSecs     float64 `json:"rx_air_secs"`
+	RecvErrors    int     `json:"recv_errors"`
+}
+
+// usable reports whether the stats carry real radio readings. A running observer
+// never reports zero uptime, and a live radio never reads a 0 dB noise floor, so
+// that with zero airtime marks a status sent before the radio stats were filled in.
+func (s statusStats) usable() bool {
+	if s.UptimeSeconds == 0 {
+		return false
+	}
+	return s.NoiseFloor != 0 || s.TxAirSecs != 0 || s.RxAirSecs != 0
+}
+
 // handleStatus processes a /status message and fans out an observerStatus event.
 func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte) {
 	var envelope struct {
-		ObserverType    string `json:"source"`
-		SoftwareVersion string `json:"client_version"`
-		HardwareModel   string `json:"model"`
-		FirmwareVersion string `json:"firmware_version"`
-		DisplayName     string `json:"origin"`
-		RadioString     string `json:"radio"`
-		Stats           struct {
-			UptimeSeconds int64   `json:"uptime_secs"`
-			BatteryMV     int     `json:"battery_mv"`
-			NoiseFloor    float32 `json:"noise_floor"`
-			QueueLen      int     `json:"queue_len"`
-			DebugFlags    int     `json:"debug_flags"`
-			TxAirSecs     float64 `json:"tx_air_secs"`
-			RxAirSecs     float64 `json:"rx_air_secs"`
-			RecvErrors    int     `json:"recv_errors"`
-		} `json:"stats"`
+		ObserverType    string      `json:"source"`
+		SoftwareVersion string      `json:"client_version"`
+		HardwareModel   string      `json:"model"`
+		FirmwareVersion string      `json:"firmware_version"`
+		DisplayName     string      `json:"origin"`
+		RadioString     string      `json:"radio"`
+		Stats           statusStats `json:"stats"`
 	}
 	if err := json.Unmarshal(raw, &envelope); err != nil {
 		w.log.Warn(fmt.Sprintf("malformed status envelope from %s", pubkeyHex), "error", err)
@@ -154,12 +166,10 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 		w.log.Error(fmt.Sprintf("db: update observer status failed for %s", pubkeyHex), "error", err)
 		return
 	}
-	// Store a telemetry snapshot at the configured resolution.
-	// A running observer never reports uptime_secs == 0, so its absence (or a
-	// missing/renamed "stats" object entirely) means this payload has no usable
-	// stats — skip the insert rather than writing an all-zero row that would win
-	// the hourly dedup and pollute the telemetry aggregates.
-	if envelope.Stats.UptimeSeconds == 0 {
+	// Store a telemetry snapshot at the configured resolution. Partial stats are
+	// skipped rather than written as zeros that would win the hourly dedup and
+	// pollute the telemetry aggregates.
+	if !envelope.Stats.usable() {
 		w.log.Debug("status has no usable stats; skipping telemetry insert")
 	} else {
 		resolution := w.cfg.TelemetryResolution

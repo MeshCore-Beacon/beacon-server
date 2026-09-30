@@ -246,24 +246,6 @@ WHERE observer_id = $1
   AND ($4 = 0 OR id > $4)
 ORDER BY reported_at ASC;
 
--- name: GetObserverTelemetryBucketed :many
-SELECT
-  (date_trunc('day', reported_at) +
-    (EXTRACT(HOUR FROM reported_at)::int / $4::int) * ($4::int * interval '1 hour'))::timestamptz AS bucket,
-  AVG(battery_voltage_mv)::int   AS battery_voltage_mv,
-  GREATEST(MAX(airtime_tx_secs) - MIN(airtime_tx_secs), 0)::real AS airtime_tx_secs,
-  GREATEST(MAX(airtime_rx_secs) - MIN(airtime_rx_secs), 0)::real AS airtime_rx_secs,
-  AVG(noise_floor_db)::real      AS noise_floor_db,
-  MAX(uptime_seconds)::bigint    AS uptime_seconds,
-  AVG(queue_length)::int         AS queue_length,
-  GREATEST(MAX(receive_errors) - MIN(receive_errors), 0)::int  AS receive_errors
-FROM observer_telemetry
-WHERE observer_id = $1
-  AND ($2::timestamptz IS NULL OR reported_at >= $2)
-  AND ($3::timestamptz IS NULL OR reported_at <= $3)
-GROUP BY bucket
-ORDER BY bucket ASC;
-
 -- name: GetObserverActivityRaw :many
 -- Sub-hour activity buckets straight off idx_observations_observer; no join to packets.
 -- Aggregates are COALESCEd and paired with a count column: sqlc types a cast expression as

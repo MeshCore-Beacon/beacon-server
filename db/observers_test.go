@@ -394,32 +394,39 @@ func TestGetObserverTelemetryBucketed_Mapping(t *testing.T) {
 	mock := mockdb.NewMockQuerier(ctrl)
 
 	observerID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
-	bucket := pgtype.Timestamptz{Time: time.UnixMilli(1700000000000), Valid: true}
+	since := time.Date(2026, 9, 30, 6, 0, 0, 0, time.UTC)
+	at := func(h int) pgtype.Timestamptz {
+		return pgtype.Timestamptz{Time: since.Add(time.Duration(h) * time.Hour), Valid: true}
+	}
+	f := func(v float32) *float32 { return &v }
+	up := func(v int64) *int64 { return &v }
+	bat := int32(3700)
 
 	mock.EXPECT().
-		GetObserverTelemetryBucketed(gomock.Any(), gomock.Any()).
-		Return([]sqlc.GetObserverTelemetryBucketedRow{
-			{
-				Bucket:           bucket,
-				BatteryVoltageMv: 3700,
-				NoiseFloorDb:     -90.0,
-				UptimeSeconds:    3600,
-			},
-		}, nil)
+		GetObserverTelemetry(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, p sqlc.GetObserverTelemetryParams) ([]sqlc.GetObserverTelemetryRow, error) {
+			if want := since.Add(-24 * time.Hour); !p.Column2.Time.Equal(want) {
+				t.Errorf("since = %v, want lookback to %v", p.Column2.Time, want)
+			}
+			return []sqlc.GetObserverTelemetryRow{
+				{ReportedAt: at(-1), AirtimeTxSecs: f(100), UptimeSeconds: up(10000)},
+				{ReportedAt: at(0), AirtimeTxSecs: f(110), UptimeSeconds: up(13600), BatteryVoltageMv: &bat},
+			}, nil
+		})
 
 	store := &Store{q: mock}
-	points, err := store.GetObserverTelemetryBucketed(context.Background(), observerID, time.Time{}, time.Time{}, 1)
+	points, err := store.GetObserverTelemetryBucketed(context.Background(), observerID, since, time.Time{}, 6)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(points) != 1 {
 		t.Fatalf("expected 1 point, got %d", len(points))
 	}
-	if points[0].T != 1700000000000 {
-		t.Errorf("expected T 1700000000000, got %d", points[0].T)
+	if points[0].T != since.UnixMilli() {
+		t.Errorf("expected T %d, got %d", since.UnixMilli(), points[0].T)
 	}
-	if *points[0].BatteryMV != 3700 {
-		t.Errorf("expected BatteryMV 3700, got %d", *points[0].BatteryMV)
+	if *points[0].AirtimeTxSecs != 10 || *points[0].BatteryMV != 3700 {
+		t.Errorf("tx %v battery %v, want 10 3700", *points[0].AirtimeTxSecs, *points[0].BatteryMV)
 	}
 }
 

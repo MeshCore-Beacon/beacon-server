@@ -565,21 +565,6 @@ func (mr *MockQuerierMockRecorder) GetObserverTelemetry(ctx, arg any) *gomock.Ca
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetObserverTelemetry", reflect.TypeOf((*MockQuerier)(nil).GetObserverTelemetry), ctx, arg)
 }
 
-// GetObserverTelemetryBucketed mocks base method.
-func (m *MockQuerier) GetObserverTelemetryBucketed(ctx context.Context, arg db.GetObserverTelemetryBucketedParams) ([]db.GetObserverTelemetryBucketedRow, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetObserverTelemetryBucketed", ctx, arg)
-	ret0, _ := ret[0].([]db.GetObserverTelemetryBucketedRow)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// GetObserverTelemetryBucketed indicates an expected call of GetObserverTelemetryBucketed.
-func (mr *MockQuerierMockRecorder) GetObserverTelemetryBucketed(ctx, arg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetObserverTelemetryBucketed", reflect.TypeOf((*MockQuerier)(nil).GetObserverTelemetryBucketed), ctx, arg)
-}
-
 // GetPacketByHash mocks base method.
 func (m *MockQuerier) GetPacketByHash(ctx context.Context, packetHash []byte) (db.GetPacketByHashRow, error) {
 	m.ctrl.T.Helper()

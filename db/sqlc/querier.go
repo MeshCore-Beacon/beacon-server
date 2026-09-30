@@ -78,7 +78,6 @@ type Querier interface {
 	GetObserverRadio(ctx context.Context, id uuid.UUID) (GetObserverRadioRow, error)
 	GetObserverScopes(ctx context.Context, observerID uuid.UUID) ([]string, error)
 	GetObserverTelemetry(ctx context.Context, arg GetObserverTelemetryParams) ([]GetObserverTelemetryRow, error)
-	GetObserverTelemetryBucketed(ctx context.Context, arg GetObserverTelemetryBucketedParams) ([]GetObserverTelemetryBucketedRow, error)
 	GetPacketByHash(ctx context.Context, packetHash []byte) (GetPacketByHashRow, error)
 	GetPacketObservationCount(ctx context.Context, packetHash []byte) (int64, error)
 	// Return distinct observation IATAs in first-heard order for path resolution,
