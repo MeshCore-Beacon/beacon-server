@@ -81,7 +81,7 @@ type packetObservationEvent struct {
 		IsFirstObservation bool    `json:"isFirstObservation"`
 		ObservationCount   int64   `json:"observationCount"`
 		Scope              *string `json:"scope,omitempty"`
-		Summary            *string `json:"summary,omitempty"` // same advert name as REST list/backfill rows
+		Summary            *string `json:"summary,omitempty"` // advert name, or "ACK …"/"TRACE …"/"PING …" for those types
 		// Only set on later hearings sent to includeRepeats clients; those carry observationCount 0.
 		IsRepeat bool `json:"isRepeat,omitempty"`
 	} `json:"packet"`
@@ -780,6 +780,11 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		w.log.Error(fmt.Sprintf("db: insert observation failed from %s/%s", iata, pubkeyHex), "error", err)
 		return
 	}
+	// Record the path before any more DB work so a broker copy racing through it can't be
+	// streamed as a repeat of this hearing; TRACE reuses Path for per-hop SNR.
+	pathNew := packet.PayloadType() != meshcore.PayloadTypeTrace && w.hub.MarkSent(packetHash[:], id[:], packet.Path)
+	// A duplicate is streamed, never stored, to includeRepeats clients when its path is new.
+	repeat := !inserted && pathNew && w.hub.RepeatsWanted()
 
 	if scopeID != nil && inserted {
 		if err := w.db.UpsertObserverScope(ctx, id, *scopeID); err != nil {
@@ -841,14 +846,9 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	}
 	w.runCapabilityDetection(ctx, packet.PayloadType(), packet.PathHashSize(), resolvedIDs)
 
-	// A duplicate is streamed, never stored, to includeRepeats clients when its path is new.
-	repeat := !inserted && w.hub.RepeatsWanted() && w.hub.MarkSent(packetHash[:], id[:], packet.Path)
 	if inserted || repeat {
 		if inserted {
 			w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio, scopeID, matchedScope, pubkeyBytes, float32(parseNumber(envelope.SNR)))
-			if w.hub.RepeatsWanted() {
-				w.hub.MarkSent(packetHash[:], id[:], packet.Path) // so broker copies of it aren't repeats
-			}
 		}
 		// Resolve after advert updates; suppressed copies need no endpoint lookup.
 		var resolvedSource, resolvedDestination *api.ResolvedHop

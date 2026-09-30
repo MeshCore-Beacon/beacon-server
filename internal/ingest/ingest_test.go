@@ -184,6 +184,7 @@ type stubDB struct {
 	observationInserted        bool
 	insertChannelMessageResult bool // configurable return for InsertChannelMessage; default false
 	undecryptedPackets         []UndecryptedPacket
+	dbHook                     func() // runs in UpsertChannelIATA, the first DB call after InsertObservation
 }
 
 type setCapabilityCall struct {
@@ -279,6 +280,9 @@ func (s *stubDB) ListUndecryptedGroupTextPackets(_ context.Context) ([]Undecrypt
 }
 
 func (s *stubDB) UpsertChannelIATA(_ context.Context, _ []byte, _ string, _ time.Time) error {
+	if s.dbHook != nil {
+		s.dbHook()
+	}
 	s.upsertChannelIATACalls++
 	return nil
 }

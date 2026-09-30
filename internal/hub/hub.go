@@ -38,11 +38,10 @@ const (
 // Event is a single fan-out unit. Payload is pre-serialised JSON so the
 // broadcast loop never touches encoding — it's done once by the ingest path.
 //
-// PayloadResolved is an optional second serialization carrying additional
-// fields for clients that opted into them via configure (currently just
-// resolvedPath on packetObservation events). Left nil for event types that
-// don't have an opt-in variant; the hub falls back to Payload in that case.
-// The WithKey variants also carry observerPublicKey.
+// PayloadResolved/PayloadWithKey/PayloadResolvedWithKey are optional variants
+// for clients that opted in via configure (resolvedPath, observerPublicKey);
+// nil falls back to Payload. Repeat marks later hearings that only
+// includeRepeats clients receive.
 type Event struct {
 	Type                   EventType
 	Payload                json.RawMessage
@@ -239,13 +238,13 @@ func (h *Hub) ObserverKeyWanted() bool {
 	return h.observerKeyClients.Load() > 0
 }
 
-// RepeatsWanted lets ingest skip repeat work when nobody wants it.
+// RepeatsWanted lets ingest skip broadcasting repeats when nobody wants them.
 func (h *Hub) RepeatsWanted() bool {
 	return h.repeatClients.Load() > 0
 }
 
-// MarkSent records a hearing's path and reports whether it was not already sent recently,
-// so broker copies and same-path duplicates go out once.
+// MarkSent records every hearing's path and reports whether it is new within the TTL,
+// so broker copies and same-path duplicates are never streamed as repeats.
 func (h *Hub) MarkSent(packetHash, observerID, path []byte) bool {
 	return h.sent.mark(packetHash, observerID, path, time.Now())
 }

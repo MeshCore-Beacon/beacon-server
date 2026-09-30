@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
+	"github.com/google/uuid"
 )
 
 type countQueryDB struct {
@@ -128,5 +129,73 @@ func TestHandlePacket_RepeatsOffByDefault(t *testing.T) {
 	}
 	if r.db.countQueries != 1 {
 		t.Fatalf("duplicate ran a count query (%d total)", r.db.countQueries)
+	}
+}
+
+// A broker copy racing through the inserted hearing's DB work must find its path already
+// recorded, otherwise it would be streamed as a repeat of the first hearing.
+func TestHandlePacket_PathMarkedRightAfterInsert(t *testing.T) {
+	r := newRepeatHarness(t, true)
+	packet := buildGrpTxtPacket(t, 0x1a, make([]byte, 16))
+	packet.Path = []byte{0x11}
+	packet.PathLength = 1
+	hash := packet.PacketHash()
+	var fresh bool
+	r.db.dbHook = func() {
+		// stubDB.UpsertObserver returns uuid.Nil, so that is the observer id ingest marks with
+		fresh = r.w.hub.MarkSent(hash[:], uuid.Nil[:], packet.Path)
+	}
+	r.db.observationInserted = true
+	r.w.handlePacket(r.ctx, "YOW", "0102", packetEnvelope(r.t, packet))
+	if fresh {
+		t.Fatal("path was not marked right after the insert")
+	}
+}
+
+func TestHandlePacket_PathsRecordedWithoutSubscribers(t *testing.T) {
+	r := newRepeatHarness(t, false)
+	if got := r.hear(true, 0x11); len(got) != 1 {
+		t.Fatalf("first hearing: %s", got)
+	}
+	r.w.hub.Configure(r.client, hub.ClientOptions{IncludeRepeats: true})
+	for !r.w.hub.RepeatsWanted() {
+		if r.ctx.Err() != nil {
+			t.Fatal("repeats opt-in never registered")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if got := r.hear(false, 0x11); len(got) != 0 {
+		t.Fatalf("same path streamed as repeat after late opt-in: %s", got)
+	}
+}
+
+func TestHandlePacket_TraceNeverRepeats(t *testing.T) {
+	r := newRepeatHarness(t, true)
+	packet := buildTracePacket(t)
+	packet.Path = []byte{0x05, 0x06}
+	packet.PathLength = 2
+	r.db.observationInserted = true
+	r.w.handlePacket(r.ctx, "YOW", "0102", packetEnvelope(r.t, packet))
+	r.db.observationInserted = false
+	packet.Path = append([]byte{}, packet.Path...)
+	packet.Path[0] ^= 0xff // a different per-hop SNR byte, same route
+	r.w.handlePacket(r.ctx, "YOW", "0102", packetEnvelope(r.t, packet))
+	r.w.hub.Broadcast(hub.Event{Type: hub.EventObserverStatus})
+	repeats := 0
+	for {
+		select {
+		case evt := <-r.client.Send:
+			if evt.Type == hub.EventObserverStatus {
+				if repeats != 0 {
+					t.Fatalf("TRACE copy streamed as %d repeat(s)", repeats)
+				}
+				return
+			}
+			if strings.Contains(string(evt.Payload), "isRepeat") {
+				repeats++
+			}
+		case <-r.ctx.Done():
+			t.Fatal("marker event not delivered")
+		}
 	}
 }

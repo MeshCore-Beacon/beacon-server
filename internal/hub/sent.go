@@ -14,7 +14,7 @@ const (
 	sentPathsMax = 200_000
 )
 
-// sentPaths remembers recently sent (packet, observer, path) hearings. It is shared by all
+// sentPaths remembers recently heard (packet, observer, path) hearings. It is shared by all
 // broker workers; keys are hashed so memory stays small at the size bound.
 type sentPaths struct {
 	mu    sync.Mutex
