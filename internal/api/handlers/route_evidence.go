@@ -67,7 +67,7 @@ func routeEvidenceQuery(r *http.Request, iata, key string, now time.Time) (api.R
 			return q, api.ErrRouteEvidenceInput
 		}
 	}
-	if !api.ValidRouteEvidenceWindow(q.Since, q.Until) || q.Until.After(now) {
+	if !api.ValidRouteEvidenceWindow(q.Since, q.Until) || q.Until.After(now.Add(clockSkewTolerance)) {
 		return q, api.ErrRouteEvidenceInput
 	}
 	return q, nil
@@ -83,7 +83,7 @@ func routeEvidenceQuery(r *http.Request, iata, key string, now time.Time) (api.R
 // @Param pathKey path string true "Stable 32-hex pathKey from a known-route response"
 // @Param range query string false "Server-anchored duration (default 24h, max 720h); exclusive with since/until/pageCursor"
 // @Param since query int false "Window start epoch ms; provide with until (default last 24h)"
-// @Param until query int false "Exclusive window end epoch ms; maximum span 30d, no future end"
+// @Param until query int false "Exclusive window end epoch ms; maximum span 30d, end may be up to 5 minutes ahead of server time (clock skew tolerance)"
 // @Param pageCursor query string false "Opaque precise cursor from nextPageCursor; window is pinned"
 // @Param limit query int false "Default 50; positive, capped at 200" minimum(1) maximum(200)
 // @Success 200 {object} api.RouteEvidence

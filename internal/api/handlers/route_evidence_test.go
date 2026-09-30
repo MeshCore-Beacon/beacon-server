@@ -5,6 +5,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"net/url"
 	"testing"
@@ -44,6 +45,14 @@ func TestRouteEvidenceQuery(t *testing.T) {
 			t.Errorf("accepted %s", query)
 		}
 	}
+	ahead := now.Add(time.Minute)
+	if _, err := routeEvidenceQuery(httptest.NewRequest("GET", fmt.Sprintf("/?since=%d&until=%d", ahead.Add(-time.Hour).UnixMilli(), ahead.UnixMilli()), nil), "YOW", evidenceKey, now); err != nil {
+		t.Fatalf("rejected until within clock skew: %v", err)
+	}
+	far := now.Add(10 * time.Minute)
+	if _, err := routeEvidenceQuery(httptest.NewRequest("GET", fmt.Sprintf("/?since=%d&until=%d", far.Add(-time.Hour).UnixMilli(), far.UnixMilli()), nil), "YOW", evidenceKey, now); err == nil {
+		t.Fatal("accepted until far in the future")
+	}
 }
 
 func TestRouteEvidenceHandler(t *testing.T) {
@@ -64,7 +73,7 @@ func TestRouteEvidenceHandler(t *testing.T) {
 			if iata != "YOW" || key != evidenceKey || q.Limit != 50 {
 				t.Fatal("wrong reader scope")
 			}
-			return &api.RouteEvidence{Page: api.Page[api.RouteObservation]{Items: []api.RouteObservation{}}}, tc.err
+			return &api.RouteEvidence{Items: []api.RouteObservation{}}, tc.err
 		}})
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, httptest.NewRequest("GET", tc.path, nil))

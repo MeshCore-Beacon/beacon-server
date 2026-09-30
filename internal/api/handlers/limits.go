@@ -8,9 +8,12 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 )
 
 const maxListLimit int32 = 200
+
+const clockSkewTolerance = 5 * time.Minute // client clocks run ahead; accept a small future 'until'
 
 // parseLimit caps the requested result size while retaining each endpoint's default.
 func parseLimit(r *http.Request, defaultLimit int32) (int32, error) {

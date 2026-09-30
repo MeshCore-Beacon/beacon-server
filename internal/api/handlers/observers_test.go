@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -224,6 +225,14 @@ func TestGetObserverActivity_Defaults(t *testing.T) {
 	}
 	if body.Range != "24h" || body.Interval != "15m" {
 		t.Errorf("expected range 24h interval 15m, got %q/%q", body.Range, body.Interval)
+	}
+
+	skewed := time.Now().Add(time.Minute).UnixMilli()
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/observers/%s/activity?until=%d", observerID.String(), skewed), nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for until within clock skew, got %d (%s)", w.Code, w.Body.String())
 	}
 }
 

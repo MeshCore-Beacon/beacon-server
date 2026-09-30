@@ -51,7 +51,7 @@ func (s *Store) GetRouteEvidence(ctx context.Context, iata, key string, query ap
 	}
 	route := toKnownRoutes([]knownRouteRow{{ID: row.ID, NodeIds: row.NodeIds, HashPrefix: row.HashPrefix, Iata: row.Iata, HopCount: row.HopCount, FirstSeen: row.FirstSeen, LastSeen: row.LastSeen, ObservationCount: row.ObservationCount}}, nodes)[0]
 	route.PathKey = hex.EncodeToString(row.PathKey)
-	out := &api.RouteEvidence{Page: api.Page[api.RouteObservation]{Items: []api.RouteObservation{}}, Route: route, WindowStart: query.Since.UnixMilli(), WindowEnd: query.Until.UnixMilli(), GeneratedAt: time.Now().UnixMilli(), MatchType: "saved_path_prefixes"}
+	out := &api.RouteEvidence{Items: []api.RouteObservation{}, Route: route, WindowStart: query.Since.UnixMilli(), WindowEnd: query.Until.UnixMilli(), GeneratedAt: time.Now().UnixMilli(), MatchType: "saved_path_prefixes"}
 	width, path, valid := savedRoutePath(row.HashPrefix, row.HopCount)
 	if !valid {
 		return out, nil

@@ -300,7 +300,7 @@ func getObserverActivity(reader api.Reader) http.HandlerFunc {
 		if values, ok := r.URL.Query()["until"]; ok {
 			n, err := strconv.ParseInt(values[0], 10, 64)
 			now := time.Now()
-			if len(values) != 1 || err != nil || n < 0 || n > now.UnixMilli() || n < now.Add(-720*time.Hour).UnixMilli() {
+			if len(values) != 1 || err != nil || n < 0 || n > now.Add(clockSkewTolerance).UnixMilli() || n < now.Add(-720*time.Hour).UnixMilli() {
 				respondError(w, http.StatusBadRequest, "until must be one past epoch-millisecond timestamp within 30 days")
 				return
 			}

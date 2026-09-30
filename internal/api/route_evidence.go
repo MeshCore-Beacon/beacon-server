@@ -30,18 +30,19 @@ type RouteObservation struct {
 	SNR             *float32  `json:"snr,omitempty"`
 }
 
-// RouteEvidence uses nextPageCursor rather than the lossy legacy numeric cursor.
+// RouteEvidence pages by nextPageCursor, which keeps full timestamp precision.
 type RouteEvidence struct {
-	Page[RouteObservation]
-	Route          KnownRoute `json:"route"`
-	WindowStart    int64      `json:"windowStart"`
-	WindowEnd      int64      `json:"windowEnd"`
-	GeneratedAt    int64      `json:"generatedAt"`
-	MatchType      string     `json:"matchType"`
-	MatchAvailable bool       `json:"matchAvailable"`
-	HashSize       int16      `json:"hashSize"`
-	PathBytes      string     `json:"pathBytes"`
-	NextPageCursor *string    `json:"nextPageCursor,omitempty"`
+	Items          []RouteObservation `json:"items"`
+	HasMore        bool               `json:"hasMore"`
+	Route          KnownRoute         `json:"route"`
+	WindowStart    int64              `json:"windowStart"`
+	WindowEnd      int64              `json:"windowEnd"`
+	GeneratedAt    int64              `json:"generatedAt"`
+	MatchType      string             `json:"matchType"`
+	MatchAvailable bool               `json:"matchAvailable"`
+	HashSize       int16              `json:"hashSize"`
+	PathBytes      string             `json:"pathBytes"`
+	NextPageCursor *string            `json:"nextPageCursor,omitempty"`
 }
 
 type RouteEvidenceQuery struct {
