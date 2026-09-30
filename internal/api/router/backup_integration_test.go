@@ -91,7 +91,7 @@ func TestBackupDownloadPostgres(t *testing.T) {
 		Auth: config.AuthConfig{APIKey: "fixture-key"},
 		AdminRoutes: map[string]http.Handler{"/backup": handlers.BackupRouter(backup.Options{
 			ConnectionService: service, ConfigPath: configPath, MaxBytes: 16 << 20, Timeout: 30 * time.Second, Version: "http-fixture",
-		})},
+		}, context.Background())},
 	}))
 	defer server.Close()
 	request, _ := http.NewRequestWithContext(ctx, "GET", server.URL+"/api/v1/admin/backup", nil)

@@ -27,7 +27,7 @@ func TestBackupDownload(t *testing.T) {
 		output = got.OutputPath
 		return os.WriteFile(output, []byte("completed fixture"), 0600)
 	}
-	handler := backupDownload(opts, export)
+	handler := backupDownload(opts, export, context.Background())
 	for _, query := range []string{"?database=other", "?path=/private", "?command=anything"} {
 		w := httptest.NewRecorder()
 		handler(w, httptest.NewRequest("GET", "/backup"+query, nil))
@@ -53,7 +53,7 @@ func TestBackupDownload(t *testing.T) {
 		handler = backupDownload(opts, func(_ context.Context, got backup.Options) error {
 			output = got.OutputPath
 			return failure
-		})
+		}, context.Background())
 		w = httptest.NewRecorder()
 		handler(w, httptest.NewRequest("GET", "/backup", nil))
 		want := 500
@@ -71,7 +71,7 @@ func TestBackupDownload(t *testing.T) {
 		}
 	}
 	w = httptest.NewRecorder()
-	BackupRouter(backup.Options{}).ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+	BackupRouter(backup.Options{}, context.Background()).ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
 	if w.Code != 503 {
 		t.Fatal("unconfigured download enabled")
 	}
@@ -85,7 +85,7 @@ func TestBackupDownloadConcurrencyAndCancellation(t *testing.T) {
 		close(started)
 		<-ctx.Done()
 		return ctx.Err()
-	})
+	}, context.Background())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() {
@@ -102,5 +102,57 @@ func TestBackupDownloadConcurrencyAndCancellation(t *testing.T) {
 	<-finished
 	if _, err := os.Stat(filepath.Dir(output)); !os.IsNotExist(err) {
 		t.Fatal("cancelled staging retained")
+	}
+}
+
+func TestBackupDownloadAbortsOnShutdown(t *testing.T) {
+	shutdown, stop := context.WithCancel(context.Background())
+	stagedCh := make(chan string, 1)
+	handler := backupDownload(backup.Options{ConnectionService: "fixture"}, func(ctx context.Context, opts backup.Options) error {
+		stagedCh <- filepath.Dir(opts.OutputPath)
+		<-ctx.Done()
+		return ctx.Err()
+	}, shutdown)
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+		close(done)
+	}()
+	staged := <-stagedCh
+	stop()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("export did not stop on shutdown")
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status %d, want 503", rec.Code)
+	}
+	if _, err := os.Stat(staged); !os.IsNotExist(err) {
+		t.Fatalf("staging dir survived shutdown: %v", err)
+	}
+}
+
+func TestBackupRouterSweepsStaleStaging(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	stale, err := os.MkdirTemp("", "beacon-download-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-3 * backup.DefaultTimeout)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := os.MkdirTemp("", "beacon-download-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	BackupRouter(backup.Options{}, context.Background())
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatal("stale staging dir not swept")
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Fatal("fresh staging dir swept")
 	}
 }

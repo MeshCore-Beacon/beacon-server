@@ -4,6 +4,7 @@
 package router
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,7 +16,7 @@ import (
 
 func TestBackupAuthenticationBeforeExport(t *testing.T) {
 	for _, key := range []string{"", "fixture-key"} {
-		handler := New(nil, nil, nil, Options{Auth: config.AuthConfig{APIKey: key}, AdminRoutes: map[string]http.Handler{"/backup": handlers.BackupRouter(backup.Options{ConnectionService: "fixture"})}})
+		handler := New(nil, nil, nil, Options{Auth: config.AuthConfig{APIKey: key}, AdminRoutes: map[string]http.Handler{"/backup": handlers.BackupRouter(backup.Options{ConnectionService: "fixture"}, context.Background())}})
 		for _, token := range []string{"", "wrong", "fixture-key"} {
 			r := httptest.NewRequest("GET", "/api/v1/admin/backup?database=other", nil)
 			if token != "" {

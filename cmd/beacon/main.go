@@ -337,7 +337,7 @@ func main() {
 		CORS:                 cfg.CORS, Server: cfg.Server, Auth: cfg.Auth, RateLimit: resolved.RateLimit,
 		AdminRoutes: map[string]http.Handler{
 			"/accounts": handlers.AccountsRouter(store),
-			"/backup":   handlers.BackupRouter(backupOpts),
+			"/backup":   handlers.BackupRouter(backupOpts, ctx),
 		},
 	})
 
