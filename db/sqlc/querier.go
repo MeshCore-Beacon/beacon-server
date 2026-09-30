@@ -12,6 +12,8 @@ import (
 )
 
 type Querier interface {
+	// Hop prefixes that match >1 node in an IATA, per width. Computed once per reconfirm run.
+	AmbiguousPrefixes(ctx context.Context) ([]AmbiguousPrefixesRow, error)
 	CreateAccount(ctx context.Context, name string) (Account, error)
 	// Lock the current row before deciding the outcome, including when another
 	// deactivation commits while this statement is waiting for its row lock.
@@ -223,7 +225,8 @@ type Querier interface {
 	ReconfirmNeighbors(ctx context.Context) error
 	// Checks one batch of least-recently-reconfirmed routes: deletes those with a departed
 	// hop node or a hop prefix now matching >1 node in that IATA (length-aware:
-	// 1/2/3/4-byte hop prefixes check prefix_1/2/3/4), and stamps the survivors.
+	// 1/2/3/4-byte hop prefixes check prefix_1/2/3/4; ambiguity set supplied by AmbiguousPrefixes),
+	// and stamps the survivors.
 	ReconfirmRoutes(ctx context.Context, arg ReconfirmRoutesParams) (int64, error)
 	RefreshHourlyStats(ctx context.Context) error
 	RefreshObserverActivity(ctx context.Context) error

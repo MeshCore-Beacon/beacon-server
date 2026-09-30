@@ -95,7 +95,8 @@ const (
 
 type routeMaintainer interface {
 	DeleteOldRoutes(context.Context, time.Time, int64, time.Time) error
-	ReconfirmRoutes(context.Context, int32, time.Time) (int64, error)
+	AmbiguousPrefixes(context.Context) (db.AmbiguousPrefixes, error)
+	ReconfirmRoutes(context.Context, int32, time.Time, db.AmbiguousPrefixes) (int64, error)
 	ReconfirmNeighbors(context.Context) error
 }
 
@@ -137,10 +138,14 @@ func ReconfirmTask(store routeMaintainer, routeRetention, routeGrace time.Durati
 			if err := store.DeleteOldRoutes(ctx, now.Add(-routeRetention), routeMinObservations, now.Add(-routeGrace)); err != nil {
 				return fmt.Errorf("route retention: %w", err)
 			}
+			amb, err := store.AmbiguousPrefixes(ctx)
+			if err != nil {
+				return fmt.Errorf("ambiguous prefixes: %w", err)
+			}
 			for remaining := int64(reconfirmRunLimit); remaining > 0; {
 				limit := min(int64(reconfirmBatchSize), remaining)
 				batchCtx, cancel := context.WithTimeout(ctx, reconfirmBatchTimeout)
-				n, err := store.ReconfirmRoutes(batchCtx, int32(limit), now)
+				n, err := store.ReconfirmRoutes(batchCtx, int32(limit), now, amb)
 				cancel()
 				if err != nil {
 					return fmt.Errorf("routes: %w", err)

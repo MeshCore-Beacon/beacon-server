@@ -1482,10 +1482,21 @@ REFRESH MATERIALIZED VIEW CONCURRENTLY mv_radio_presets;
 -- name: RefreshObserverActivity :exec
 REFRESH MATERIALIZED VIEW CONCURRENTLY mv_observer_activity_hourly;
 
+-- name: AmbiguousPrefixes :many
+-- Hop prefixes that match >1 node in an IATA, per width. Computed once per reconfirm run.
+SELECT iata::text AS iata, 1::int AS len, prefix_1 AS prefix FROM node_short_ids GROUP BY iata, prefix_1 HAVING COUNT(*) > 1
+UNION ALL
+SELECT iata::text, 2::int, prefix_2 FROM node_short_ids GROUP BY iata, prefix_2 HAVING COUNT(*) > 1
+UNION ALL
+SELECT iata::text, 3::int, prefix_3 FROM node_short_ids GROUP BY iata, prefix_3 HAVING COUNT(*) > 1
+UNION ALL
+SELECT iata::text, 4::int, prefix_4 FROM node_short_ids GROUP BY iata, prefix_4 HAVING COUNT(*) > 1;
+
 -- name: ReconfirmRoutes :one
 -- Checks one batch of least-recently-reconfirmed routes: deletes those with a departed
 -- hop node or a hop prefix now matching >1 node in that IATA (length-aware:
--- 1/2/3/4-byte hop prefixes check prefix_1/2/3/4), and stamps the survivors.
+-- 1/2/3/4-byte hop prefixes check prefix_1/2/3/4; ambiguity set supplied by AmbiguousPrefixes),
+-- and stamps the survivors.
 WITH batch AS MATERIALIZED (
     SELECT r.iata, r.path_key, r.node_ids, r.hash_prefix
     FROM known_routes r
@@ -1494,14 +1505,9 @@ WITH batch AS MATERIALIZED (
     LIMIT @batch_size
     FOR UPDATE OF r SKIP LOCKED
 ),
-amb AS MATERIALIZED (
-    SELECT iata, 1 AS len, prefix_1 AS p FROM node_short_ids GROUP BY iata, prefix_1 HAVING COUNT(*) > 1
-    UNION ALL
-    SELECT iata, 2, prefix_2 FROM node_short_ids GROUP BY iata, prefix_2 HAVING COUNT(*) > 1
-    UNION ALL
-    SELECT iata, 3, prefix_3 FROM node_short_ids GROUP BY iata, prefix_3 HAVING COUNT(*) > 1
-    UNION ALL
-    SELECT iata, 4, prefix_4 FROM node_short_ids GROUP BY iata, prefix_4 HAVING COUNT(*) > 1
+amb AS (
+    SELECT a.iata::char(3) AS iata, a.len, a.p
+    FROM ROWS FROM (unnest(@amb_iata::text[]), unnest(@amb_len::int[]), unnest(@amb_prefix::bytea[])) AS a(iata, len, p)
 ),
 dead AS (
     SELECT b.iata, b.path_key

@@ -287,12 +287,36 @@ func (s *Store) SearchCrossIATARoutes(ctx context.Context, fromHash, fromIATA, t
 	return results, nil
 }
 
+// AmbiguousPrefixes is the per-IATA set of hop prefixes that resolve to more than one node.
+type AmbiguousPrefixes struct {
+	IATAs    []string
+	Lens     []int32
+	Prefixes [][]byte
+}
+
+func (s *Store) AmbiguousPrefixes(ctx context.Context) (AmbiguousPrefixes, error) {
+	rows, err := s.q.AmbiguousPrefixes(ctx)
+	if err != nil {
+		return AmbiguousPrefixes{}, err
+	}
+	amb := AmbiguousPrefixes{IATAs: make([]string, 0, len(rows)), Lens: make([]int32, 0, len(rows)), Prefixes: make([][]byte, 0, len(rows))}
+	for _, r := range rows {
+		amb.IATAs = append(amb.IATAs, r.Iata)
+		amb.Lens = append(amb.Lens, r.Len)
+		amb.Prefixes = append(amb.Prefixes, r.Prefix)
+	}
+	return amb, nil
+}
+
 // ReconfirmRoutes checks the batchSize least-recently-reconfirmed routes,
 // deleting stale or ambiguous ones and stamping the survivors.
-func (s *Store) ReconfirmRoutes(ctx context.Context, batchSize int32, before time.Time) (int64, error) {
+func (s *Store) ReconfirmRoutes(ctx context.Context, batchSize int32, before time.Time, amb AmbiguousPrefixes) (int64, error) {
 	return s.q.ReconfirmRoutes(ctx, sqlc.ReconfirmRoutesParams{
 		BatchSize: batchSize,
 		Before:    pgtype.Timestamptz{Time: before, Valid: true},
+		AmbIata:   amb.IATAs,
+		AmbLen:    amb.Lens,
+		AmbPrefix: amb.Prefixes,
 	})
 }
 

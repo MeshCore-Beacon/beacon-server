@@ -17,10 +17,19 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+func ambiguity(t *testing.T, ctx context.Context, store *Store) AmbiguousPrefixes {
+	t.Helper()
+	amb, err := store.AmbiguousPrefixes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return amb
+}
+
 func TestReconfirmReleasesEarlierBatchPostgres(t *testing.T) {
 	ctx, pool, store := reconfirmPool(t)
 	before := time.Now()
-	if n, err := store.ReconfirmRoutes(ctx, 1, before); err != nil || n != 1 {
+	if n, err := store.ReconfirmRoutes(ctx, 1, before, ambiguity(t, ctx, store)); err != nil || n != 1 {
 		t.Fatalf("first batch: %d, %v", n, err)
 	}
 	gate, err := pool.Begin(ctx)
@@ -40,8 +49,9 @@ CREATE TRIGGER pause_second_route BEFORE UPDATE ON known_routes FOR EACH ROW EXE
 		t.Fatal(err)
 	}
 	finished := make(chan error, 1)
+	amb := ambiguity(t, ctx, store)
 	go func() {
-		_, err := store.ReconfirmRoutes(ctx, 1, before)
+		_, err := store.ReconfirmRoutes(ctx, 1, before, amb)
 		finished <- err
 	}()
 	deadline := time.Now().Add(3 * time.Second)
@@ -131,7 +141,7 @@ UPDATE known_routes SET node_ids=node_ids || md5('missing')::uuid, hash_prefix=h
 	original := snapshot()
 	var checked int64
 	for range 10 {
-		n, err := store.ReconfirmRoutes(ctx, 3, before)
+		n, err := store.ReconfirmRoutes(ctx, 3, before, ambiguity(t, ctx, store))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -165,7 +175,7 @@ UPDATE known_routes SET node_ids=node_ids || md5('missing')::uuid, hash_prefix=h
 func TestReconfirmCancelledBatchRollsBackPostgres(t *testing.T) {
 	ctx, pool, store := reconfirmPool(t)
 	before := time.Now()
-	if _, err := store.ReconfirmRoutes(ctx, 1, before); err != nil {
+	if _, err := store.ReconfirmRoutes(ctx, 1, before, ambiguity(t, ctx, store)); err != nil {
 		t.Fatal(err)
 	}
 	_, err := pool.Exec(ctx, `
@@ -177,7 +187,7 @@ CREATE TRIGGER pause_reconfirm BEFORE UPDATE ON known_routes FOR EACH ROW EXECUT
 	}
 	batchCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer cancel()
-	if _, err := store.ReconfirmRoutes(batchCtx, 1, before); err == nil {
+	if _, err := store.ReconfirmRoutes(batchCtx, 1, before, ambiguity(t, ctx, store)); err == nil {
 		t.Fatal("expected batch cancellation")
 	}
 	// Waiting for this DDL also waits for cancellation to release the row lock.
@@ -191,7 +201,7 @@ CREATE TRIGGER pause_reconfirm BEFORE UPDATE ON known_routes FOR EACH ROW EXECUT
 	if total != 2 || stamped != 1 {
 		t.Fatalf("cancellation changed committed work: total %d, checked %d", total, stamped)
 	}
-	if n, err := store.ReconfirmRoutes(ctx, 1, before); err != nil || n != 1 {
+	if n, err := store.ReconfirmRoutes(ctx, 1, before, ambiguity(t, ctx, store)); err != nil || n != 1 {
 		t.Fatalf("cancelled route was not available to retry: %d, %v", n, err)
 	}
 }
@@ -199,10 +209,10 @@ CREATE TRIGGER pause_reconfirm BEFORE UPDATE ON known_routes FOR EACH ROW EXECUT
 func TestReconfirmFutureCutoffDoesNotRepeatPostgres(t *testing.T) {
 	ctx, _, store := reconfirmPool(t)
 	before := time.Now().Add(time.Hour)
-	if n, err := store.ReconfirmRoutes(ctx, 2, before); err != nil || n != 2 {
+	if n, err := store.ReconfirmRoutes(ctx, 2, before, ambiguity(t, ctx, store)); err != nil || n != 2 {
 		t.Fatalf("first batch: %d, %v", n, err)
 	}
-	if n, err := store.ReconfirmRoutes(ctx, 2, before); err != nil || n != 0 {
+	if n, err := store.ReconfirmRoutes(ctx, 2, before, ambiguity(t, ctx, store)); err != nil || n != 0 {
 		t.Fatalf("completed routes consumed the run budget twice: %d, %v", n, err)
 	}
 }
@@ -220,7 +230,7 @@ CREATE TRIGGER pause_valid_route BEFORE UPDATE ON known_routes FOR EACH ROW EXEC
 	before := time.Now()
 	batchCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer cancel()
-	if _, err := store.ReconfirmRoutes(batchCtx, 2, before); err == nil {
+	if _, err := store.ReconfirmRoutes(batchCtx, 2, before, ambiguity(t, ctx, store)); err == nil {
 		t.Fatal("expected batch cancellation")
 	}
 	if _, err := pool.Exec(ctx, `DROP TRIGGER pause_valid_route ON known_routes`); err != nil {
@@ -230,7 +240,7 @@ CREATE TRIGGER pause_valid_route BEFORE UPDATE ON known_routes FOR EACH ROW EXEC
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM known_routes`).Scan(&count); err != nil || count != 2 {
 		t.Fatalf("cancelled batch partially deleted routes: %d, %v", count, err)
 	}
-	if n, err := store.ReconfirmRoutes(ctx, 2, before); err != nil || n != 2 {
+	if n, err := store.ReconfirmRoutes(ctx, 2, before, ambiguity(t, ctx, store)); err != nil || n != 2 {
 		t.Fatalf("retry did not process both routes: %d, %v", n, err)
 	}
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM known_routes WHERE path_key=int4send(2)`).Scan(&count); err != nil || count != 1 {
@@ -299,7 +309,7 @@ func TestReconfirmSkipsBusyRoutePostgres(t *testing.T) {
 	}
 	batchCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
-	if _, err := store.ReconfirmRoutes(batchCtx, 1, time.Now()); err != nil {
+	if _, err := store.ReconfirmRoutes(batchCtx, 1, time.Now(), ambiguity(t, ctx, store)); err != nil {
 		t.Fatalf("maintenance should skip the busy route and validate the next one: %v", err)
 	}
 	var checked, preserved int
@@ -312,7 +322,7 @@ func TestReconfirmSkipsBusyRoutePostgres(t *testing.T) {
 	if err := busy.Rollback(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.ReconfirmRoutes(ctx, 1, time.Now()); err != nil {
+	if _, err := store.ReconfirmRoutes(ctx, 1, time.Now(), ambiguity(t, ctx, store)); err != nil {
 		t.Fatal(err)
 	}
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM known_routes WHERE last_reconfirmed_at > '2026-02-01'`).Scan(&checked); err != nil {

@@ -43,6 +43,21 @@ func (m *MockQuerier) EXPECT() *MockQuerierMockRecorder {
 	return m.recorder
 }
 
+// AmbiguousPrefixes mocks base method.
+func (m *MockQuerier) AmbiguousPrefixes(ctx context.Context) ([]db.AmbiguousPrefixesRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AmbiguousPrefixes", ctx)
+	ret0, _ := ret[0].([]db.AmbiguousPrefixesRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// AmbiguousPrefixes indicates an expected call of AmbiguousPrefixes.
+func (mr *MockQuerierMockRecorder) AmbiguousPrefixes(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AmbiguousPrefixes", reflect.TypeOf((*MockQuerier)(nil).AmbiguousPrefixes), ctx)
+}
+
 // CreateAccount mocks base method.
 func (m *MockQuerier) CreateAccount(ctx context.Context, name string) (db.Account, error) {
 	m.ctrl.T.Helper()

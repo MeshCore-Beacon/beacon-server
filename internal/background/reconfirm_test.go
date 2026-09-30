@@ -9,10 +9,13 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/MeshCore-Beacon/beacon-server/db"
 )
 
 type reconfirmStore struct {
 	run       func(context.Context, int32, time.Time) (int64, error)
+	ambCalls  int
 	neighbors bool
 }
 
@@ -20,7 +23,12 @@ func (*reconfirmStore) DeleteOldRoutes(context.Context, time.Time, int64, time.T
 	return nil
 }
 
-func (s *reconfirmStore) ReconfirmRoutes(ctx context.Context, n int32, before time.Time) (int64, error) {
+func (s *reconfirmStore) AmbiguousPrefixes(context.Context) (db.AmbiguousPrefixes, error) {
+	s.ambCalls++
+	return db.AmbiguousPrefixes{}, nil
+}
+
+func (s *reconfirmStore) ReconfirmRoutes(ctx context.Context, n int32, before time.Time, _ db.AmbiguousPrefixes) (int64, error) {
 	return s.run(ctx, n, before)
 }
 
@@ -59,6 +67,9 @@ func TestReconfirmCoverage(t *testing.T) {
 			}
 			if left != tc.wantLeft || !s.neighbors {
 				t.Fatalf("remaining %d, neighbor cleanup %t", left, s.neighbors)
+			}
+			if s.ambCalls != 1 {
+				t.Fatalf("ambiguity computed %d times, want once per run", s.ambCalls)
 			}
 		})
 	}
