@@ -170,8 +170,13 @@ func TestVerifyRejectsInvalidMembersAndManifest(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			data := verifyGzip(t, verifyTar(t, tc.change(verifyFixture(t))))
-			if _, err := Verify(context.Background(), bytes.NewReader(data), int64(len(testSQL))); err == nil || strings.Contains(err.Error(), "PRIVATE_CANARY") {
+			_, err := Verify(context.Background(), bytes.NewReader(data), int64(len(testSQL)))
+			if err == nil || strings.Contains(err.Error(), "PRIVATE_CANARY") {
 				t.Fatalf("expected a sanitized rejection, got %v", err)
+			}
+			// PAX header size errors should be corruption, not size limit.
+			if tc.name == "hidden oversized metadata" && errors.Is(err, ErrTooLarge) {
+				t.Fatalf("oversized header reported as size limit: %v", err)
 			}
 		})
 	}
@@ -190,8 +195,12 @@ func TestVerifyFraming(t *testing.T) {
 	}
 	for name, data := range cases {
 		t.Run(name, func(t *testing.T) {
-			if _, err := Verify(context.Background(), bytes.NewReader(data), DefaultMaxBytes); err == nil || strings.Contains(err.Error(), "PRIVATE_CANARY") {
+			_, err := Verify(context.Background(), bytes.NewReader(data), DefaultMaxBytes)
+			if err == nil || strings.Contains(err.Error(), "PRIVATE_CANARY") {
 				t.Fatalf("expected sanitized framing error, got %v", err)
+			}
+			if errors.Is(err, ErrTooLarge) {
+				t.Fatalf("framing corruption reported as size limit: %v", err)
 			}
 		})
 	}

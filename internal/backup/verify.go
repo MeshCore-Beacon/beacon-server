@@ -53,6 +53,10 @@ func Verify(ctx context.Context, input io.Reader, maxBytes int64) (*Manifest, er
 		// Bound Next itself: it otherwise hides and allocates extension records.
 		decoded.limit = before + padding + 3*512
 		h, err := tr.Next()
+		if errors.Is(err, ErrTooLarge) {
+			// The 3-block header budget is a structure check, not the size limit.
+			return nil, verificationError(ctx, nil, "tar header")
+		}
 		if err == io.EOF {
 			// tar.Reader also accepts EOF without both closing zero blocks.
 			if decoded.n-before != padding+2*512 {
@@ -106,6 +110,9 @@ func Verify(ctx context.Context, input io.Reader, maxBytes int64) (*Manifest, er
 	decoded.limit = decoded.n
 	var tail [1]byte
 	if _, err := decoded.Read(tail[:]); err != io.EOF {
+		if errors.Is(err, ErrTooLarge) {
+			err = nil // bytes after the tar terminator are corruption, not oversize
+		}
 		return nil, verificationError(ctx, err, "gzip completion or trailing tar data")
 	}
 	if _, err := buffered.ReadByte(); err != io.EOF {
