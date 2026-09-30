@@ -6,6 +6,7 @@ package db
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math"
@@ -116,7 +117,7 @@ func (s *Store) GetObserver(ctx context.Context, observerID uuid.UUID) (*api.Obs
 		RadioCR:          obs.RadioCr,
 		BatteryLevel:     obs.BatteryLevel,
 		UptimeSeconds:    obs.UptimeSeconds,
-		StatusMetadata:   obs.StatusMetadata,
+		StatusMetadata:   json.RawMessage(obs.StatusMetadata),
 		FirstSeen:        obs.FirstSeen.Time.UnixMilli(),
 		LastSeen:         obs.LastSeen.Time.UnixMilli(),
 		ObservationCount: *obs.ObservationCount,

@@ -5,7 +5,9 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -178,6 +180,7 @@ func TestGetObserver_OnlineStatus(t *testing.T) {
 
 	observerID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	obsCount := int64(10)
+	statusMetadata := []byte(`{"stats":{"noise_floor":-97}}`)
 
 	mock.EXPECT().
 		GetObserverByID(gomock.Any(), observerID).
@@ -188,6 +191,7 @@ func TestGetObserver_OnlineStatus(t *testing.T) {
 			FirstSeen:        pgtype.Timestamptz{Time: time.Now().Add(-time.Hour), Valid: true},
 			LastSeen:         pgtype.Timestamptz{Time: time.Now().Add(-time.Minute), Valid: true},
 			LastStatusAt:     pgtype.Timestamptz{Time: time.Now().Add(-time.Minute), Valid: true},
+			StatusMetadata:   statusMetadata,
 		}, nil)
 
 	mock.EXPECT().
@@ -212,6 +216,14 @@ func TestGetObserver_OnlineStatus(t *testing.T) {
 	}
 	if observer.IATA != "YVR" {
 		t.Errorf("expected IATA YVR, got %s", observer.IATA)
+	}
+
+	out, err := json.Marshal(observer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"statusMetadata":{"stats":{"noise_floor":-97}}`) {
+		t.Fatalf("statusMetadata not an object: %s", out)
 	}
 }
 

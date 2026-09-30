@@ -3,7 +3,11 @@
 
 package api
 
-import "github.com/google/uuid"
+import (
+	"encoding/json"
+
+	"github.com/google/uuid"
+)
 
 // ObserverSummary is the minimal observer representation used in list responses.
 type ObserverSummary struct {
@@ -40,12 +44,12 @@ type Observer struct {
 	RadioCR          *int16           `json:"radioCr,omitempty"`      // coding rate denominator
 	BatteryLevel     *float32         `json:"batteryLevel,omitempty"` // volts, nil if mains powered
 	UptimeSeconds    *int64           `json:"uptimeSeconds,omitempty"`
-	StatusMetadata   any              `json:"statusMetadata,omitempty"` // raw /status JSON payload
-	LastStatusAt     *int64           `json:"lastStatusAt,omitempty"`   // epoch ms
-	FirstSeen        int64            `json:"firstSeen"`                // epoch ms
-	LastSeen         int64            `json:"lastSeen"`                 // epoch ms
-	ObservationCount int64            `json:"observationCount"`         // legacy cumulative presence counter; includes non-packet events
-	Brokers          []ObserverBroker `json:"brokers"`                  // broker names this observer has been seen on
+	StatusMetadata   json.RawMessage  `json:"statusMetadata,omitempty" swaggertype:"object"` // raw /status JSON payload
+	LastStatusAt     *int64           `json:"lastStatusAt,omitempty"`                        // epoch ms
+	FirstSeen        int64            `json:"firstSeen"`                                     // epoch ms
+	LastSeen         int64            `json:"lastSeen"`                                      // epoch ms
+	ObservationCount int64            `json:"observationCount"`                              // legacy cumulative presence counter; includes non-packet events
+	Brokers          []ObserverBroker `json:"brokers"`                                       // broker names this observer has been seen on
 }
 
 // ObserverTelemetryPoint is a single telemetry snapshot for an observer.
