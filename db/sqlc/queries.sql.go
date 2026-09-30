@@ -1510,7 +1510,6 @@ func (q *Queries) GetScopeByName(ctx context.Context, name string) (GetScopeByNa
 }
 
 const getScopeCatalogue = `-- name: GetScopeCatalogue :one
-
 SELECT iata, url, payload, etag, checked_at, attempted_at, next_attempt, last_error FROM meshmapper_scope_catalogues WHERE iata = $1 AND url = $2
 `
 
@@ -1519,8 +1518,6 @@ type GetScopeCatalogueParams struct {
 	Url  string `json:"url"`
 }
 
-// Copyright 2026 Beacon Contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
 func (q *Queries) GetScopeCatalogue(ctx context.Context, arg GetScopeCatalogueParams) (MeshmapperScopeCatalogue, error) {
 	row := q.db.QueryRow(ctx, getScopeCatalogue, arg.Iata, arg.Url)
 	var i MeshmapperScopeCatalogue

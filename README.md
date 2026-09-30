@@ -570,4 +570,8 @@ The initial analytics archive migration includes unknown-type activity. Existing
 development previews that used the earlier draft require a separate operator repair;
 radio samples already discarded for those legacy rows cannot be recovered.
 
-Saved-route evidence: see [the operator guide](https://github.com/MeshCore-Beacon/beacon-docs/blob/main/app_documentation/saved-route-evidence.md).
+### Saved-route evidence
+
+`GET /api/v1/routes/{iata}/{pathKey}/observations` returns retained observations that match a saved
+route's full path bytes, hash size and hop count within its IATA. `range` defaults to `24h` (max `720h`),
+`limit` to 50 (max 200); page with `nextPageCursor` → `pageCursor`. Evidence expires with raw packets.

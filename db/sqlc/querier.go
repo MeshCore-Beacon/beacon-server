@@ -89,8 +89,6 @@ type Querier interface {
 	GetRegionIATAs(ctx context.Context, regionID int32) ([]string, error)
 	GetRouteEvidenceRoute(ctx context.Context, arg GetRouteEvidenceRouteParams) (KnownRoute, error)
 	GetScopeByName(ctx context.Context, name string) (GetScopeByNameRow, error)
-	// Copyright 2026 Beacon Contributors
-	// SPDX-License-Identifier: AGPL-3.0-or-later
 	GetScopeCatalogue(ctx context.Context, arg GetScopeCatalogueParams) (MeshmapperScopeCatalogue, error)
 	GetScopeNames(ctx context.Context) ([]string, error)
 	// Aggregate matching observations once, separately from node memberships to avoid
