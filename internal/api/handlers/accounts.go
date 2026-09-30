@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 
@@ -168,6 +169,7 @@ func accountError(w http.ResponseWriter, err error) {
 	case errors.Is(err, api.ErrAccountInactive):
 		respondError(w, 409, api.ErrAccountInactive.Error())
 	default:
+		slog.Error("account request failed", "component", "api", "error", err)
 		respondError(w, 500, "internal server error")
 	}
 }

@@ -4,10 +4,12 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -143,5 +145,20 @@ func TestAccountListAndAuthorization(t *testing.T) {
 				t.Fatal("unauthorized store access")
 			}
 		}
+	}
+}
+
+func TestAccountErrorLogsCause(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	rec := httptest.NewRecorder()
+	accountError(rec, errors.New("private-error"))
+	if rec.Code != 500 || strings.Contains(rec.Body.String(), "private-error") {
+		t.Fatalf("response leaked or wrong status: %d %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(buf.String(), "private-error") {
+		t.Fatalf("cause not logged: %s", buf.String())
 	}
 }
