@@ -167,6 +167,24 @@ func TestAnalyticsRetentionPostgres(t *testing.T) {
 			t.Fatalf("missing unfiltered time index %s: %s %v", name, definition, err)
 		}
 	}
+	// The signal/path stores must read the 039 view definitions, not just 035/036.
+	store := &Store{q: sqlc.New(tx)}
+	hour := time.Now().UTC().Truncate(time.Hour)
+	signal, err := store.GetSignalStats(ctx, hour.Add(-6*24*time.Hour), hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 12 observations; only the n=1 rows carry a signal (snr 0, rssi -100).
+	if signal.Receptions != 12 || signal.SNR.Samples != 4 || signal.RSSI.Samples != 4 {
+		t.Fatalf("signal stats on 039 views: %+v", signal)
+	}
+	paths, err := store.GetPathStats(ctx, hour.Add(-6*24*time.Hour), hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paths.Receptions != 12 {
+		t.Fatalf("path stats on 039 views: %+v", paths)
+	}
 	before := analyticsSnapshot(t, ctx, tx)
 	q := sqlc.New(tx)
 	cutoff := time.Now().Add(-72 * time.Hour)
