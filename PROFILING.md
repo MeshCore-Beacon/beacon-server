@@ -31,17 +31,20 @@ can enable a longer session. Profiling adds overhead while a capture is active.
 
 ## Capture behavior
 
-- One 30-second sample immediately, then every 30 minutes.
+- One 30-second sample immediately, then every 30 minutes, offset five minutes past
+  the half hour so a maintenance trigger due on the hour is not lost to the cooldown.
 - Route reconfirmation requests an additional sample when the maintenance task starts.
   This includes the retention step before route validation. A five-minute cooldown
   between capture starts prevents overlap and repeated triggers from increasing load;
-  a periodic sample due during the cooldown runs when it ends.
+  a periodic sample due during the cooldown runs when it ends. A triggered sample
+  during the cooldown is skipped, and any sample cancels a periodic one waiting on
+  the cooldown.
 - Background task stacks carry a `task` label while profiling is enabled.
 - Shutdown or expiry stops the active sample and saves the shorter profile.
 - Each profile is limited to 8 MiB. The dedicated directory is limited to 256 MiB
   and 512 files, including metadata and files left by interrupted runs. The recorder
   reserves space for a full capture before starting and stops when a limit is reached.
-  Files are never automatically deleted. Existing unrelated files consume the budget.
+  Files are never automatically deleted. Existing unrelated regular files consume the budget; subdirectories are ignored.
 - Profiles and metadata are written with mode `0600`. A `.partial` file indicates
   an interrupted capture and is not a completed profile.
 

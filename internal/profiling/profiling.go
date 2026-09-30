@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -155,8 +156,12 @@ func (r *Recorder) run(ctx context.Context) {
 }
 
 func schedule(ctx context.Context, requests <-chan string, capture func(context.Context, string) error) error {
-	ticker := time.NewTicker(captureInterval)
-	defer ticker.Stop()
+	// Offset periodic ticks from the task tickers started alongside the recorder, so a
+	// task's trigger isn't swallowed by a periodic capture that began seconds earlier.
+	first := time.NewTimer(captureInterval + captureCooldown)
+	defer first.Stop()
+	var ticker *time.Ticker
+	tick := first.C
 	reason := "periodic"
 	var last time.Time
 	var deferred <-chan time.Time
@@ -164,8 +169,9 @@ func schedule(ctx context.Context, requests <-chan string, capture func(context.
 		if ctx.Err() != nil {
 			return nil
 		}
-		if wait := captureCooldown - time.Since(last); last.IsZero() || wait <= 0 {
+		if wait := captureCooldown - time.Since(last); wait <= 0 {
 			last = time.Now()
+			deferred = nil // this sample covers any periodic one waiting on the cooldown
 			if err := capture(ctx, reason); err != nil {
 				return err
 			}
@@ -175,8 +181,15 @@ func schedule(ctx context.Context, requests <-chan string, capture func(context.
 		}
 		select {
 		case <-ctx.Done():
+			if ticker != nil {
+				ticker.Stop()
+			}
 			return nil
-		case <-ticker.C:
+		case <-tick:
+			if ticker == nil {
+				ticker = time.NewTicker(captureInterval)
+				tick = ticker.C
+			}
 			reason = "periodic"
 		case <-deferred:
 			deferred = nil
@@ -211,11 +224,14 @@ func (r *Recorder) checkBudget() error {
 	var total int64
 	for _, entry := range entries {
 		info, err := entry.Info()
+		if errors.Is(err, fs.ErrNotExist) {
+			continue // removed between ReadDir and Info
+		}
 		if err != nil {
 			return err
 		}
 		if !info.Mode().IsRegular() {
-			return errors.New("profiling directory contains a non-regular file")
+			continue // subdirectories and specials don't hold profiles
 		}
 		total += info.Size()
 	}
@@ -260,9 +276,6 @@ func (r *Recorder) capture(ctx context.Context, reason string) error {
 	if closeErr != nil {
 		return closeErr
 	}
-	if err := r.root.Rename(partial, name); err != nil {
-		return err
-	}
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
@@ -270,10 +283,12 @@ func (r *Recorder) capture(ctx context.Context, reason string) error {
 	if len(data) > maxMetadataBytes {
 		return errors.New("profiling metadata budget exhausted")
 	}
-	meta, err := r.root.OpenFile(name+".json", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	metaPartial := name + ".json.partial"
+	meta, err := r.root.OpenFile(metaPartial, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		return err
 	}
+	defer r.root.Remove(metaPartial)
 	_, err = meta.Write(data)
 	closeErr = meta.Close()
 	if err != nil {
@@ -281,6 +296,14 @@ func (r *Recorder) capture(ctx context.Context, reason string) error {
 	}
 	if closeErr != nil {
 		return closeErr
+	}
+	// Sidecar first: a .pprof without .json would look complete but be unexplained.
+	if err := r.root.Rename(metaPartial, name+".json"); err != nil {
+		return err
+	}
+	if err := r.root.Rename(partial, name); err != nil {
+		r.root.Remove(name + ".json")
+		return err
 	}
 	slog.Info("CPU profile saved", "component", "profiling", "file", name, "reason", reason, "duration", m.FinishedAt.Sub(started))
 	return nil

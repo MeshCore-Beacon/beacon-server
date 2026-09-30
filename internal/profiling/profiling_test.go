@@ -251,13 +251,13 @@ func TestScheduleBoundsExtraCaptures(t *testing.T) {
 		time.Sleep(4 * time.Minute)
 		requests <- "reconfirm"
 		synctest.Wait()
-		time.Sleep(56 * time.Minute)
+		time.Sleep(61 * time.Minute)
 		cancel()
 		synctest.Wait()
 		if err := <-done; err != nil {
 			t.Fatal(err)
 		}
-		want := []event{{0, "periodic"}, {5 * time.Minute, "reconfirm"}, {30 * time.Minute, "periodic"}, {60 * time.Minute, "periodic"}}
+		want := []event{{0, "periodic"}, {5 * time.Minute, "reconfirm"}, {35 * time.Minute, "periodic"}, {65 * time.Minute, "periodic"}}
 		if !reflect.DeepEqual(events, want) {
 			t.Fatalf("captures %+v, want %+v", events, want)
 		}
@@ -282,7 +282,7 @@ func TestScheduleDefersPeriodicCaptureInCooldown(t *testing.T) {
 			})
 		}()
 		synctest.Wait()
-		time.Sleep(28 * time.Minute)
+		time.Sleep(33 * time.Minute)
 		requests <- "reconfirm"
 		synctest.Wait()
 		time.Sleep(33 * time.Minute)
@@ -291,12 +291,69 @@ func TestScheduleDefersPeriodicCaptureInCooldown(t *testing.T) {
 		if err := <-done; err != nil {
 			t.Fatal(err)
 		}
-		wantAt := []time.Duration{0, 28 * time.Minute, 33 * time.Minute, 60 * time.Minute}
+		wantAt := []time.Duration{0, 33 * time.Minute, 38 * time.Minute, 65 * time.Minute}
 		wantReasons := []string{"periodic", "reconfirm", "periodic", "periodic"}
 		if !reflect.DeepEqual(at, wantAt) || !reflect.DeepEqual(reasons, wantReasons) {
 			t.Fatalf("captures %v %v, want %v %v", at, reasons, wantAt, wantReasons)
 		}
 	})
+}
+
+func TestScheduleOneCaptureCoversDeferredAndTrigger(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		requests := make(chan string, 1)
+		var at []time.Duration
+		start := time.Now()
+		done := make(chan error, 1)
+		go func() {
+			done <- schedule(ctx, requests, func(ctx context.Context, reason string) error {
+				at = append(at, time.Since(start))
+				time.Sleep(30 * time.Second)
+				return nil
+			})
+		}()
+		synctest.Wait()
+		time.Sleep(33 * time.Minute)
+		requests <- "reconfirm" // 33m: captured; the 35m tick is deferred to 38m
+		synctest.Wait()
+		time.Sleep(5 * time.Minute) // 38m: the deferred periodic and a fresh trigger are both due
+		requests <- "reconfirm"
+		synctest.Wait()
+		time.Sleep(28 * time.Minute) // past the 65m tick so cancel can't race it
+		cancel()
+		synctest.Wait()
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		want := []time.Duration{0, 33 * time.Minute, 38 * time.Minute, 65 * time.Minute}
+		if !reflect.DeepEqual(at, want) {
+			t.Fatalf("captures %v, want %v", at, want)
+		}
+	})
+}
+
+func TestBudgetIgnoresNonRegularEntries(t *testing.T) {
+	requireSupportedPlatform(t)
+	dir := filepath.Join(t.TempDir(), "profiles")
+	if err := os.MkdirAll(filepath.Join(dir, "lost+found"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Start(context.Background(), dir, time.Now().Add(500*time.Millisecond).Format(time.RFC3339Nano), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-r.done:
+	case <-time.After(3 * time.Second):
+		r.Stop()
+		t.Fatal("did not stop at deadline")
+	}
+	profiles, _ := filepath.Glob(filepath.Join(dir, "*.pprof"))
+	if len(profiles) != 1 {
+		t.Fatalf("subdirectory stopped the recorder: %v", profiles)
+	}
 }
 
 func TestTriggersAreConfigurable(t *testing.T) {
