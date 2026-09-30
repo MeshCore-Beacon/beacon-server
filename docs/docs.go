@@ -2170,7 +2170,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "Exclusive window end epoch ms; maximum span 30d, no future end",
+                        "description": "Exclusive window end epoch ms; maximum span 30d, end may be up to 5 minutes ahead of server time (clock skew tolerance)",
                         "name": "until",
                         "in": "query"
                     },
@@ -4080,7 +4080,8 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "statusMetadata": {
-                    "description": "raw /status JSON payload"
+                    "description": "raw /status JSON payload",
+                    "type": "object"
                 },
                 "uptimeSeconds": {
                     "type": "integer"
@@ -4631,7 +4632,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "summary": {
-                    "description": "advert name from this packet; omitted when unavailable or unsupported",
+                    "description": "advert name, or the ACK/TRACE/PING summary; omitted when unavailable",
                     "type": "string"
                 }
             }
@@ -4972,9 +4973,6 @@ const docTemplate = `{
                 },
                 "matchType": {
                     "type": "string"
-                },
-                "nextCursor": {
-                    "type": "integer"
                 },
                 "nextPageCursor": {
                     "type": "string"
