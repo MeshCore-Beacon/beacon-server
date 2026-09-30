@@ -732,14 +732,14 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	}
 	heardAt, err := parseHeardAt(envelope.Timestamp)
 	if err != nil {
-		w.log.Warn(fmt.Sprintf("failed to parse timestamp %q", envelope.Timestamp), "error", err)
+		w.log.Debug(fmt.Sprintf("failed to parse timestamp %q", envelope.Timestamp), "error", err)
 		heardAt = time.Now().UTC()
 	} else {
 		// clamp to server time if offset is suspicious (> 30 min drift)
 		now := time.Now().UTC()
 		diff := heardAt.UTC().Sub(now)
 		if diff > 30*time.Minute || diff < -30*time.Minute {
-			w.log.Warn(fmt.Sprintf("clamping suspicious timestamp %s (diff %v) for pubkey %s", envelope.Timestamp, diff, pubkeyHex[:8]))
+			w.log.Debug(fmt.Sprintf("clamping suspicious timestamp %s (diff %v) for pubkey %s", envelope.Timestamp, diff, pubkeyHex[:8]))
 			heardAt = now
 		}
 	}

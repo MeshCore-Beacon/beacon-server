@@ -4,10 +4,12 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -70,6 +72,57 @@ func (s statusStats) usable() bool {
 	return s.NoiseFloor != 0 || s.TxAirSecs != 0 || s.RxAirSecs != 0
 }
 
+// stripNULs removes NUL bytes, which Postgres text columns reject, and returns the
+// names of the fields that had any.
+func stripNULs(fields map[string]*string) []string {
+	var dirty []string
+	for name, s := range fields {
+		if strings.Contains(*s, "\x00") {
+			*s = strings.ReplaceAll(*s, "\x00", "")
+			dirty = append(dirty, name)
+		}
+	}
+	slices.Sort(dirty)
+	return dirty
+}
+
+// stripJSONNULs drops \u0000 from a JSON document's strings, which jsonb rejects.
+// Payloads without one are returned untouched.
+func stripJSONNULs(raw []byte) ([]byte, bool) {
+	if !bytes.Contains(raw, []byte(`\u0000`)) {
+		return raw, false
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return raw, false
+	}
+	out, err := json.Marshal(dropNULs(v))
+	if err != nil {
+		return raw, false
+	}
+	return out, true
+}
+
+func dropNULs(v any) any {
+	switch v := v.(type) {
+	case string:
+		return strings.ReplaceAll(v, "\x00", "")
+	case []any:
+		for i := range v {
+			v[i] = dropNULs(v[i])
+		}
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for k, e := range v {
+			out[strings.ReplaceAll(k, "\x00", "")] = dropNULs(e)
+		}
+		return out
+	}
+	return v
+}
+
 // handleStatus processes a /status message and fans out an observerStatus event.
 func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte) {
 	var envelope struct {
@@ -89,6 +142,15 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 	if err != nil {
 		w.log.Warn(fmt.Sprintf("invalid pubkey hex in status from %s", pubkeyHex), "error", err)
 		return
+	}
+	dirty := stripNULs(map[string]*string{
+		"source": &envelope.ObserverType, "client_version": &envelope.SoftwareVersion,
+		"model": &envelope.HardwareModel, "firmware_version": &envelope.FirmwareVersion,
+		"origin": &envelope.DisplayName, "radio": &envelope.RadioString,
+	})
+	raw, rawDirty := stripJSONNULs(raw)
+	if len(dirty) > 0 || rawDirty {
+		w.log.Warn(fmt.Sprintf("stripped NUL bytes from status from %s", pubkeyHex), "fields", dirty, "metadata", rawDirty)
 	}
 	id, _, err := w.db.UpsertObserver(ctx, pubkey)
 	if err != nil {

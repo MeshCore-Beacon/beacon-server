@@ -374,7 +374,7 @@ func (w *Worker) handleMessageContext(parent context.Context, msg mqtt.Message) 
 	// iata_codes.iata is CHAR(3); anything else would fail the DB insert
 	// downstream, so reject malformed topic segments here instead.
 	if !isValidIATA(iata) {
-		w.log.Warn("dropped packet with malformed IATA", "iata", iata, "topic", msg.Topic())
+		w.log.Debug("dropped packet with malformed IATA", "iata", iata, "topic", msg.Topic())
 		return
 	}
 
