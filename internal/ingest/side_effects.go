@@ -22,6 +22,8 @@ type UpsertNodeParams struct {
 	NodeType  uint8 // 1=companion, 2=repeater, 3=room server
 	Latitude  *float64
 	Longitude *float64
+	// ClearLocation drops the stored position; set by an explicit 0/0 advert.
+	ClearLocation bool
 	// AdvertTimestamp is the device's self-reported wall-clock time (epoch seconds) from the
 	// signed advert body. Used to derive clock drift for repeaters/room servers; see
 	// api.Node.ClockDriftSeconds.
@@ -65,8 +67,8 @@ type nodeUpdateEvent struct {
 	NodeType     uint8          `json:"nodeType"`
 	NodeTypeName string         `json:"nodeTypeName"`
 	IATA         string         `json:"iata"`
-	Lat          *float64       `json:"lat,omitempty"`
-	Lng          *float64       `json:"lng,omitempty"`
+	Lat          **float64      `json:"lat,omitempty"` // Omitted keeps the client's position; explicit null clears it.
+	Lng          **float64      `json:"lng,omitempty"`
 	IsObserver   bool           `json:"isObserver"`
 	IATAs        []api.NodeIATA `json:"iatas"`
 	DefaultScope *string        `json:"defaultScope,omitempty"`
@@ -92,8 +94,10 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 			return
 		}
 		var lat, lon *float64
-		// Presence, not value: an explicit 0/0 advert resets the stored location.
-		if advert.Flags()&meshcore.AdvertLatLonMask != 0 {
+		present := advert.Flags()&meshcore.AdvertLatLonMask != 0
+		// Presence decides: omitted keeps the stored position, an explicit 0/0 clears it.
+		cleared := present && advert.AppData().Lat == 0 && advert.AppData().Lon == 0
+		if present && !cleared {
 			la := float64(advert.AppData().Lat) / 1e6
 			lo := float64(advert.AppData().Lon) / 1e6
 			lat = &la
@@ -105,6 +109,7 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 			NodeType:        advert.Type(),
 			Latitude:        lat,
 			Longitude:       lon,
+			ClearLocation:   cleared,
 			AdvertTimestamp: advert.Timestamp,
 		}
 		var nodeRadio RadioSettings
@@ -179,14 +184,15 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 			NodeType:     advert.Type(),
 			NodeTypeName: api.NodeTypeName(int16(advert.Type())),
 			IATA:         iata,
-			Lat:          lat,
-			Lng:          lon,
 			IsObserver:   isObserver,
 			IATAs:        []api.NodeIATA{{IATA: iata, LastHeard: time.Now().UnixMilli()}},
 			DefaultScope: defaultScope,
 			Radio:        radioStr,
 		}
-		if w.cfg.LocalBorders != nil && (lat != nil || advert.Type() != meshcore.AdvertTypeRepeater) {
+		if present {
+			evt.Lat, evt.Lng = &lat, &lon
+		}
+		if w.cfg.LocalBorders != nil && (present || advert.Type() != meshcore.AdvertTypeRepeater) {
 			foreign := w.cfg.LocalBorders.PossiblyForeign(int16(advert.Type()), lat, lon)
 			evt.PossiblyForeign = &foreign
 		}

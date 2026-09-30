@@ -41,31 +41,58 @@ func TestNodeLocationResetPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	f := func(v float64) *float64 { return &v }
+	advert := "advert"
 	for _, tc := range []struct {
-		name     string
-		present  bool
-		lat, lon float64
+		name       string
+		lat, lon   *float64
+		clear      bool
+		wantLat    *float64
+		wantLon    *float64
+		wantSource *string
 	}{
-		{"omission preserves location", false, 45, -75},
-		{"explicit reset replaces location", true, 0, 0},
-		{"omission preserves reset", false, 0, 0},
+		{"omission preserves location", nil, nil, false, f(45), f(-75), &advert},
+		{"explicit reset clears location", nil, nil, true, nil, nil, nil},
+		{"omission preserves cleared location", nil, nil, false, nil, nil, nil},
+		{"new coordinates restore location", f(46), f(-76), false, f(46), f(-76), &advert},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			params.Latitude, params.Longitude = nil, nil
-			if tc.present {
-				params.Latitude, params.Longitude = &tc.lat, &tc.lon
-			}
+			params.Latitude, params.Longitude, params.ClearLocation = tc.lat, tc.lon, tc.clear
 			updatedID, err := store.UpsertNode(ctx, params, ingest.RadioSettings{})
 			if err != nil || updatedID != id {
 				t.Fatalf("node identity changed: %v", err)
 			}
-			var gotLat, gotLon float64
-			if err := tx.QueryRow(ctx, "SELECT latitude,longitude FROM nodes WHERE id=$1", id).Scan(&gotLat, &gotLon); err != nil {
-				t.Fatal(err)
-			}
-			if gotLat != tc.lat || gotLon != tc.lon {
-				t.Fatalf("location = (%g,%g), want (%g,%g)", gotLat, gotLon, tc.lat, tc.lon)
-			}
+			assertNodeLocation(t, ctx, tx, []byte{0x97}, tc.wantLat, tc.wantLon, tc.wantSource)
 		})
 	}
+	t.Run("new node with cleared location has no source", func(t *testing.T) {
+		fresh := ingest.UpsertNodeParams{PublicKey: []byte{0x98}, NodeType: 2, Name: "cleared fixture", ClearLocation: true}
+		if _, err := store.UpsertNode(ctx, fresh, ingest.RadioSettings{}); err != nil {
+			t.Fatal(err)
+		}
+		assertNodeLocation(t, ctx, tx, []byte{0x98}, nil, nil, nil)
+	})
+}
+
+func assertNodeLocation(t *testing.T, ctx context.Context, tx pgx.Tx, pubkey []byte, wantLat, wantLon *float64, wantSource *string) {
+	t.Helper()
+	var gotLat, gotLon *float64
+	var gotSource *string
+	if err := tx.QueryRow(ctx, "SELECT latitude, longitude, location_source FROM nodes WHERE public_key=$1", pubkey).Scan(&gotLat, &gotLon, &gotSource); err != nil {
+		t.Fatal(err)
+	}
+	if !equalPtr(gotLat, wantLat) || !equalPtr(gotLon, wantLon) || !equalPtr(gotSource, wantSource) {
+		t.Fatalf("location = (%v,%v,%v), want (%v,%v,%v)", deref(gotLat), deref(gotLon), deref(gotSource), deref(wantLat), deref(wantLon), deref(wantSource))
+	}
+}
+
+func equalPtr[T comparable](a, b *T) bool {
+	return a == nil && b == nil || a != nil && b != nil && *a == *b
+}
+
+func deref[T any](p *T) any {
+	if p == nil {
+		return nil
+	}
+	return *p
 }

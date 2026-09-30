@@ -61,11 +61,11 @@ func validPosition(lat, lng float64) bool {
 }
 
 // PossiblyForeign is nil when disabled, the role is not repeater, or position
-// is unknown/invalid (including the protocol's 0/0 location reset).
+// is unknown/invalid.
 // All polygon boundaries, including hole edges, count as local; hole interiors
 // remain outside. Location is self-reported, so this is an indication only.
 func (local *Local) PossiblyForeign(role int16, lat, lng *float64) *bool {
-	if local == nil || role != int16(meshcore.AdvertTypeRepeater) || lat == nil || lng == nil || !validPosition(*lat, *lng) || *lat == 0 && *lng == 0 {
+	if local == nil || role != int16(meshcore.AdvertTypeRepeater) || lat == nil || lng == nil || !validPosition(*lat, *lng) {
 		return nil
 	}
 	point := orb.Point{*lng, *lat}

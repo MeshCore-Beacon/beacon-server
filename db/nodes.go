@@ -34,6 +34,7 @@ func (s *Store) UpsertNode(ctx context.Context, n ingest.UpsertNodeParams, radio
 		Name:                    &n.Name,
 		Latitude:                n.Latitude,
 		Longitude:               n.Longitude,
+		ClearLocation:           n.ClearLocation,
 		DeviceClockDriftSeconds: driftSeconds,
 	}
 	if radio.FreqMHz != 0 {

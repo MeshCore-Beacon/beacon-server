@@ -313,15 +313,18 @@ invalid geometry fails startup. Border changes require a restart.
 
 Inside any polygon (including its edges) means `false`; outside the entire union
 means `true`. Hole interiors are outside; hole edges are local. Other node roles,
-missing/invalid positions and the 0/0 location reset have no classification.
+missing or invalid positions have no classification (an explicit 0/0 advert
+clears the stored position).
 This is a hint based on reported position, not proof of a repeater's origin.
 Packet ingestion, heard-in IATAs and route matching remain unchanged.
 
 Node list/detail reads apply the current geometry after cache reads, so existing
 historical nodes need no backfill. A `nodeUpdate` includes `possiblyForeign`
 when its advert provides a position: a boolean for known positions, `null` to
-clear an unknown/reset position. Omission retains the previous value when a
-repeater's advert omits its position. A change to another role also sends `null`.
+clear it when the advert reports 0/0 or an invalid position. Omission retains the
+previous value when a repeater's advert omits its position. A change to another
+role also sends `null`. `lat`/`lng` follow the same rule: omitted keeps the
+client's position, explicit `null` clears it.
 The field is omitted everywhere when the feature is disabled (the default).
 
 Use longitude/latitude coordinate order and split antimeridian-crossing borders

@@ -4961,13 +4961,13 @@ func (q *Queries) UpsertKnownRoute(ctx context.Context, arg UpsertKnownRoutePara
 const upsertNode = `-- name: UpsertNode :one
 
 INSERT INTO nodes (public_key, node_type, name, latitude, longitude, location_source, last_advert_at, last_seen, radio_freq_mhz, radio_sf, radio_bw_khz, device_clock_drift_seconds)
-VALUES ($1, $2, $3, $4, $5, 'advert', NOW(), NOW(), $6, $7, $8, $9)
+VALUES ($1, $2, $3, $4, $5, CASE WHEN $4::double precision IS NOT NULL THEN 'advert' END, NOW(), NOW(), $6, $7, $8, $9)
 ON CONFLICT (public_key) DO UPDATE SET
   node_type       = EXCLUDED.node_type,
   name            = COALESCE(EXCLUDED.name, nodes.name),
-  latitude        = COALESCE(EXCLUDED.latitude, nodes.latitude),
-  longitude       = COALESCE(EXCLUDED.longitude, nodes.longitude),
-  location_source = CASE WHEN EXCLUDED.latitude IS NOT NULL THEN 'advert' ELSE nodes.location_source END,
+  latitude        = CASE WHEN $10::bool THEN NULL ELSE COALESCE(EXCLUDED.latitude, nodes.latitude) END,
+  longitude       = CASE WHEN $10::bool THEN NULL ELSE COALESCE(EXCLUDED.longitude, nodes.longitude) END,
+  location_source = CASE WHEN $10::bool THEN NULL WHEN EXCLUDED.latitude IS NOT NULL THEN 'advert' ELSE nodes.location_source END,
   last_advert_at  = NOW(),
   last_seen       = NOW(),
   radio_freq_mhz  = EXCLUDED.radio_freq_mhz,
@@ -4987,6 +4987,7 @@ type UpsertNodeParams struct {
 	RadioSf                 *int16   `json:"radio_sf"`
 	RadioBwKhz              *float32 `json:"radio_bw_khz"`
 	DeviceClockDriftSeconds *int32   `json:"device_clock_drift_seconds"`
+	ClearLocation           bool     `json:"clear_location"`
 }
 
 // ============================================================
@@ -5003,6 +5004,7 @@ func (q *Queries) UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, e
 		arg.RadioSf,
 		arg.RadioBwKhz,
 		arg.DeviceClockDriftSeconds,
+		arg.ClearLocation,
 	)
 	var i Node
 	err := row.Scan(

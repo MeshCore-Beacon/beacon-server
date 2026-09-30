@@ -34,7 +34,7 @@ func TestPossiblyForeign(t *testing.T) {
 		{"companion", 1, 25, 25, nil},
 		{"room", 3, 25, 25, nil},
 		{"sensor", 4, 25, 25, nil},
-		{"zero reset", 2, 0, 0, nil},
+		{"null island is a position", 2, 0, 0, new(true)},
 		{"equator is valid", 2, 0, 25, new(true)},
 		{"prime meridian is valid", 2, 25, 0, new(true)},
 		{"invalid latitude", 2, 91, 25, nil},

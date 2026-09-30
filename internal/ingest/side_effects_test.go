@@ -9,9 +9,11 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
 	"github.com/MeshCore-Beacon/beacon-server/internal/keystore"
 	"github.com/meshcore-go/meshcore-go"
 )
@@ -68,16 +70,16 @@ func buildAdvertPacketWithData(t *testing.T, data []byte, tamper bool) *meshcore
 
 func TestAdvertLocationPresence(t *testing.T) {
 	for _, tc := range []struct {
-		name            string
-		present, tamper bool
-		lat, lon        int32
+		name                   string
+		present, tamper, clear bool
+		lat, lon               int32
 	}{
-		{"ordinary location", true, false, 45000000, -75000000},
-		{"explicit reset", true, false, 0, 0},
-		{"zero latitude", true, false, 0, -75000000},
-		{"zero longitude", true, false, 45000000, 0},
-		{"no location", false, false, 0, 0},
-		{"tampered reset", true, true, 0, 0},
+		{"ordinary location", true, false, false, 45000000, -75000000},
+		{"explicit reset", true, false, true, 0, 0},
+		{"zero latitude", true, false, false, 0, -75000000},
+		{"zero longitude", true, false, false, 45000000, 0},
+		{"no location", false, false, false, 0, 0},
+		{"tampered reset", true, true, false, 0, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			data := []byte{meshcore.AdvertTypeRepeater}
@@ -101,7 +103,10 @@ func TestAdvertLocationPresence(t *testing.T) {
 				t.Fatal("signed advert did not update the node")
 			}
 			got := store.upsertNodeParams
-			if !tc.present {
+			if got.ClearLocation != tc.clear {
+				t.Fatalf("ClearLocation = %v, want %v", got.ClearLocation, tc.clear)
+			}
+			if !tc.present || tc.clear {
 				if got.Latitude != nil || got.Longitude != nil {
 					t.Fatal("absent location became an update")
 				}
@@ -109,6 +114,58 @@ func TestAdvertLocationPresence(t *testing.T) {
 			}
 			if got.Latitude == nil || got.Longitude == nil || *got.Latitude != float64(tc.lat)/1e6 || *got.Longitude != float64(tc.lon)/1e6 {
 				t.Fatal("advertised coordinates did not reach the node update")
+			}
+		})
+	}
+}
+
+func TestAdvertClearEmitsNullLocation(t *testing.T) {
+	w, _ := newTestWorker()
+	go w.hub.Run()
+	client := w.hub.NewClient()
+	defer w.hub.Remove(client)
+	w.hub.AddScope(client, "clear", hub.Scope{Events: []hub.EventType{hub.EventNodeUpdate, hub.EventObserverStatus}})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	waitForSummarySubscriber(t, ctx, w.hub, client)
+	for _, tc := range []struct {
+		name          string
+		present, want bool
+		lat, lon      int32
+		wantLat       string
+		wantLng       string
+	}{
+		{"explicit reset sends null", true, true, 0, 0, "null", "null"},
+		{"omission sends nothing", false, false, 0, 0, "", ""},
+		{"real location sends coordinates", true, true, 45000000, -75000000, "45", "-75"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := []byte{meshcore.AdvertTypeRepeater}
+			if tc.present {
+				data[0] |= meshcore.AdvertLatLonMask
+				data = binary.LittleEndian.AppendUint32(data, uint32(tc.lat))
+				data = binary.LittleEndian.AppendUint32(data, uint32(tc.lon))
+			}
+			w.handlePayloadTypeSideEffects(ctx, buildAdvertPacketWithData(t, data, false), "AAA", []byte{1}, RadioSettings{}, nil, nil, nil, 0)
+			for {
+				select {
+				case event := <-client.Send:
+					if event.Type != hub.EventNodeUpdate {
+						continue
+					}
+					payload := string(event.Payload)
+					for field, want := range map[string]string{`"lat"`: tc.wantLat, `"lng"`: tc.wantLng} {
+						if tc.want && !strings.Contains(payload, field+":"+want+",") {
+							t.Fatalf("%s != %s: %s", field, want, payload)
+						}
+						if !tc.want && strings.Contains(payload, field) {
+							t.Fatalf("%s present on omission: %s", field, payload)
+						}
+					}
+					return
+				case <-ctx.Done():
+					t.Fatal("node update not received")
+				}
 			}
 		})
 	}

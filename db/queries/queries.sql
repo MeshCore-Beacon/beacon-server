@@ -745,13 +745,13 @@ ORDER BY po.heard_at ASC;
 
 -- name: UpsertNode :one
 INSERT INTO nodes (public_key, node_type, name, latitude, longitude, location_source, last_advert_at, last_seen, radio_freq_mhz, radio_sf, radio_bw_khz, device_clock_drift_seconds)
-VALUES ($1, $2, $3, $4, $5, 'advert', NOW(), NOW(), $6, $7, $8, $9)
+VALUES (@public_key, @node_type, @name, @latitude, @longitude, CASE WHEN @latitude::double precision IS NOT NULL THEN 'advert' END, NOW(), NOW(), @radio_freq_mhz, @radio_sf, @radio_bw_khz, @device_clock_drift_seconds)
 ON CONFLICT (public_key) DO UPDATE SET
   node_type       = EXCLUDED.node_type,
   name            = COALESCE(EXCLUDED.name, nodes.name),
-  latitude        = COALESCE(EXCLUDED.latitude, nodes.latitude),
-  longitude       = COALESCE(EXCLUDED.longitude, nodes.longitude),
-  location_source = CASE WHEN EXCLUDED.latitude IS NOT NULL THEN 'advert' ELSE nodes.location_source END,
+  latitude        = CASE WHEN @clear_location::bool THEN NULL ELSE COALESCE(EXCLUDED.latitude, nodes.latitude) END,
+  longitude       = CASE WHEN @clear_location::bool THEN NULL ELSE COALESCE(EXCLUDED.longitude, nodes.longitude) END,
+  location_source = CASE WHEN @clear_location::bool THEN NULL WHEN EXCLUDED.latitude IS NOT NULL THEN 'advert' ELSE nodes.location_source END,
   last_advert_at  = NOW(),
   last_seen       = NOW(),
   radio_freq_mhz  = EXCLUDED.radio_freq_mhz,
