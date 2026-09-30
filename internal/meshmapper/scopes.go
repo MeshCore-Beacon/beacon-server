@@ -26,6 +26,8 @@ const (
 	MaxScopes    = 64 // per source; at most 16 configured sources (1024 imported identities)
 	MaxBody      = 64 << 10
 	PollInterval = 15 * time.Second // one source per tick, at most four requests/minute
+
+	failureRetry = 5 * time.Minute // transient failures shouldn't cost a whole refresh interval
 )
 
 // Cache stores source provenance and freshness separately from packet evidence.
@@ -142,6 +144,7 @@ func (i *Importer) refresh(ctx context.Context, s *source, now time.Time) error 
 	response, err := i.client.Do(request)
 	var entries []scopestore.Entry
 	var generated time.Time
+	var retryAfter time.Time
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -169,10 +172,7 @@ func (i *Importer) refresh(ctx context.Context, s *source, now time.Time) error 
 			if response.StatusCode == http.StatusTooManyRequests || response.StatusCode == http.StatusServiceUnavailable {
 				// The published contract uses seconds. Ignore invalid/overflowing headers.
 				if seconds, parseErr := strconv.ParseInt(response.Header.Get("Retry-After"), 10, 64); parseErr == nil && seconds > 0 && seconds <= int64((1<<63-1)/time.Second) {
-					until := now.Add(time.Duration(seconds) * time.Second)
-					if until.After(update.NextAttempt) {
-						update.NextAttempt = until
-					}
+					retryAfter = now.Add(time.Duration(seconds) * time.Second)
 				}
 			}
 		}
@@ -189,6 +189,13 @@ func (i *Importer) refresh(ctx context.Context, s *source, now time.Time) error 
 				}
 				update.CheckedAt = now
 			}
+		}
+	}
+	if update.LastError != "" {
+		// Transient failures shouldn't cost a whole refresh interval, but never beat a Retry-After.
+		update.NextAttempt = now.Add(min(i.interval, failureRetry))
+		if retryAfter.After(update.NextAttempt) {
+			update.NextAttempt = retryAfter
 		}
 	}
 	if update.LastError == "HTTP 429" {

@@ -278,3 +278,42 @@ func TestInvalidSavedCatalogueDoesNotBlockStartupOrRefresh(t *testing.T) {
 		t.Fatalf("normal shutdown is a task failure: %v", err)
 	}
 }
+
+func TestRetryAfterShorterThanIntervalIsHonoured(t *testing.T) {
+	ctx := context.Background()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "1800")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+	cfg := config.MeshMapperScopesConfig{Enabled: true, Sources: map[string]string{"YOW": server.URL}}
+	imp, err := New(ctx, cfg, &memoryStore{rows: map[string]Cache{}}, scopestore.New(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := imp.refresh(ctx, &imp.sources[0], now); err != nil {
+		t.Fatal(err)
+	}
+	if got := imp.sources[0].cache.NextAttempt.Sub(now); got != 30*time.Minute {
+		t.Fatalf("next attempt after 429 in %v, want %v (server Retry-After must not be overridden by the 1h interval)", got, 30*time.Minute)
+	}
+}
+
+func TestFailedRefreshRetriesSoon(t *testing.T) {
+	ctx := context.Background()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(500) }))
+	defer server.Close()
+	cfg := config.MeshMapperScopesConfig{Enabled: true, Sources: map[string]string{"YOW": server.URL}}
+	imp, err := New(ctx, cfg, &memoryStore{rows: map[string]Cache{}}, scopestore.New(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := imp.refresh(ctx, &imp.sources[0], now); err != nil {
+		t.Fatal(err)
+	}
+	if got := imp.sources[0].cache.NextAttempt.Sub(now); got != failureRetry {
+		t.Fatalf("next attempt after failure in %v, want %v", got, failureRetry)
+	}
+}
