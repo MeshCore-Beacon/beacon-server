@@ -25,10 +25,13 @@ ON CONFLICT (iata) DO UPDATE SET
     approx_lng   = EXCLUDED.approx_lng;
 
 -- name: GetIATABorder :one
--- border is NULL when the IATA exists but has no border configured; a
--- missing row (unknown IATA) is sql.ErrNoRows, same not-found distinction
--- GetIATA already makes.
-SELECT border FROM iata_codes WHERE iata = $1;
+-- An imported MeshMapper boundary overrides the configured one. border is NULL
+-- when neither exists; a missing row (unknown IATA) is sql.ErrNoRows, same
+-- not-found distinction GetIATA already makes.
+SELECT COALESCE(z.feature, i.border)::jsonb AS border
+FROM iata_codes i
+LEFT JOIN meshmapper_zone_boundaries z ON z.iata = i.iata
+WHERE i.iata = $1;
 
 -- name: UpsertIATABorder :exec
 -- Written by the config-file-driven seeder (internal/config/seed.go), not a
@@ -1627,3 +1630,24 @@ ON CONFLICT (iata, url) DO UPDATE SET
     attempted_at = EXCLUDED.attempted_at,
     next_attempt = EXCLUDED.next_attempt,
     last_error = EXCLUDED.last_error;
+
+-- name: ListZoneBoundaries :many
+SELECT * FROM meshmapper_zone_boundaries ORDER BY iata;
+
+-- name: SaveZoneBoundary :exec
+-- NULL feature/etag/checked_at retain the last good boundary after an error or 304.
+INSERT INTO meshmapper_zone_boundaries (iata, url, feature, etag, checked_at, attempted_at, next_attempt, last_error)
+VALUES (@iata, @url, sqlc.narg(feature)::jsonb, sqlc.narg(etag)::text,
+    sqlc.narg(checked_at)::timestamptz, @attempted_at, @next_attempt, @last_error)
+ON CONFLICT (iata) DO UPDATE SET
+    url = EXCLUDED.url,
+    feature = COALESCE(EXCLUDED.feature, meshmapper_zone_boundaries.feature),
+    etag = COALESCE(EXCLUDED.etag, meshmapper_zone_boundaries.etag),
+    checked_at = COALESCE(EXCLUDED.checked_at, meshmapper_zone_boundaries.checked_at),
+    attempted_at = EXCLUDED.attempted_at,
+    next_attempt = EXCLUDED.next_attempt,
+    last_error = EXCLUDED.last_error;
+
+-- name: PruneZoneBoundaries :many
+-- Drops imports for IATAs no longer configured, so their manual border returns.
+DELETE FROM meshmapper_zone_boundaries WHERE NOT (iata = ANY(@keep::text[])) RETURNING iata;

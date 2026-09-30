@@ -6,6 +6,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -46,10 +47,10 @@ type Querier interface {
 	GetCrossIATANeighbors(ctx context.Context, arg GetCrossIATANeighborsParams) ([]GetCrossIATANeighborsRow, error)
 	GetHourlyStats(ctx context.Context, arg GetHourlyStatsParams) ([]MvHourlyIataStat, error)
 	GetIATA(ctx context.Context, iata string) (IataCode, error)
-	// border is NULL when the IATA exists but has no border configured; a
-	// missing row (unknown IATA) is sql.ErrNoRows, same not-found distinction
-	// GetIATA already makes.
-	GetIATABorder(ctx context.Context, iata string) ([]byte, error)
+	// An imported MeshMapper boundary overrides the configured one. border is NULL
+	// when neither exists; a missing row (unknown IATA) is sql.ErrNoRows, same
+	// not-found distinction GetIATA already makes.
+	GetIATABorder(ctx context.Context, iata string) (json.RawMessage, error)
 	GetKnownRoutesByNode(ctx context.Context, arg GetKnownRoutesByNodeParams) ([]GetKnownRoutesByNodeRow, error)
 	GetNodeByID(ctx context.Context, id uuid.UUID) (GetNodeByIDRow, error)
 	GetNodeByPubkey(ctx context.Context, publicKey []byte) (uuid.UUID, error)
@@ -220,6 +221,9 @@ type Querier interface {
 	// to the config after they'd already been ingested -- see
 	// internal/ingest.BackfillChannelMessages.
 	ListUndecryptedGroupTextPackets(ctx context.Context) ([]ListUndecryptedGroupTextPacketsRow, error)
+	ListZoneBoundaries(ctx context.Context) ([]MeshmapperZoneBoundary, error)
+	// Drops imports for IATAs no longer configured, so their manual border returns.
+	PruneZoneBoundaries(ctx context.Context, keep []string) ([]string, error)
 	// Delete node_neighbors where the neighbor has departed from node_short_ids
 	// for that IATA, or where its prefix_4 is now ambiguous.
 	ReconfirmNeighbors(ctx context.Context) error
@@ -260,6 +264,8 @@ type Querier interface {
 	// Empty arrays insert nothing. NULL payload/checked_at retain last-known-good data
 	// after an error or 304. Imported names never replace existing manual metadata.
 	SaveScopeCatalogue(ctx context.Context, arg SaveScopeCatalogueParams) error
+	// NULL feature/etag/checked_at retain the last good boundary after an error or 304.
+	SaveZoneBoundary(ctx context.Context, arg SaveZoneBoundaryParams) error
 	// Returns known routes containing a subsequence from source to destination hash prefix.
 	// Verifies source appears before destination in the route.
 	SearchKnownRoutes(ctx context.Context, arg SearchKnownRoutesParams) ([]SearchKnownRoutesRow, error)

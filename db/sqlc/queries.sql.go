@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -390,15 +391,18 @@ func (q *Queries) GetIATA(ctx context.Context, iata string) (IataCode, error) {
 }
 
 const getIATABorder = `-- name: GetIATABorder :one
-SELECT border FROM iata_codes WHERE iata = $1
+SELECT COALESCE(z.feature, i.border)::jsonb AS border
+FROM iata_codes i
+LEFT JOIN meshmapper_zone_boundaries z ON z.iata = i.iata
+WHERE i.iata = $1
 `
 
-// border is NULL when the IATA exists but has no border configured; a
-// missing row (unknown IATA) is sql.ErrNoRows, same not-found distinction
-// GetIATA already makes.
-func (q *Queries) GetIATABorder(ctx context.Context, iata string) ([]byte, error) {
+// An imported MeshMapper boundary overrides the configured one. border is NULL
+// when neither exists; a missing row (unknown IATA) is sql.ErrNoRows, same
+// not-found distinction GetIATA already makes.
+func (q *Queries) GetIATABorder(ctx context.Context, iata string) (json.RawMessage, error) {
 	row := q.db.QueryRow(ctx, getIATABorder, iata)
-	var border []byte
+	var border json.RawMessage
 	err := row.Scan(&border)
 	return border, err
 }
@@ -3975,6 +3979,64 @@ func (q *Queries) ListUndecryptedGroupTextPackets(ctx context.Context) ([]ListUn
 	return items, nil
 }
 
+const listZoneBoundaries = `-- name: ListZoneBoundaries :many
+SELECT iata, url, feature, etag, checked_at, attempted_at, next_attempt, last_error FROM meshmapper_zone_boundaries ORDER BY iata
+`
+
+func (q *Queries) ListZoneBoundaries(ctx context.Context) ([]MeshmapperZoneBoundary, error) {
+	rows, err := q.db.Query(ctx, listZoneBoundaries)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MeshmapperZoneBoundary{}
+	for rows.Next() {
+		var i MeshmapperZoneBoundary
+		if err := rows.Scan(
+			&i.Iata,
+			&i.Url,
+			&i.Feature,
+			&i.Etag,
+			&i.CheckedAt,
+			&i.AttemptedAt,
+			&i.NextAttempt,
+			&i.LastError,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const pruneZoneBoundaries = `-- name: PruneZoneBoundaries :many
+DELETE FROM meshmapper_zone_boundaries WHERE NOT (iata = ANY($1::text[])) RETURNING iata
+`
+
+// Drops imports for IATAs no longer configured, so their manual border returns.
+func (q *Queries) PruneZoneBoundaries(ctx context.Context, keep []string) ([]string, error) {
+	rows, err := q.db.Query(ctx, pruneZoneBoundaries, keep)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var iata string
+		if err := rows.Scan(&iata); err != nil {
+			return nil, err
+		}
+		items = append(items, iata)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const reconfirmNeighbors = `-- name: ReconfirmNeighbors :exec
 DELETE FROM node_neighbors nn
 WHERE NOT EXISTS (
@@ -4518,6 +4580,46 @@ func (q *Queries) SaveScopeCatalogue(ctx context.Context, arg SaveScopeCatalogue
 		arg.Names,
 		arg.Keys,
 		arg.Fingerprints,
+	)
+	return err
+}
+
+const saveZoneBoundary = `-- name: SaveZoneBoundary :exec
+INSERT INTO meshmapper_zone_boundaries (iata, url, feature, etag, checked_at, attempted_at, next_attempt, last_error)
+VALUES ($1, $2, $3::jsonb, $4::text,
+    $5::timestamptz, $6, $7, $8)
+ON CONFLICT (iata) DO UPDATE SET
+    url = EXCLUDED.url,
+    feature = COALESCE(EXCLUDED.feature, meshmapper_zone_boundaries.feature),
+    etag = COALESCE(EXCLUDED.etag, meshmapper_zone_boundaries.etag),
+    checked_at = COALESCE(EXCLUDED.checked_at, meshmapper_zone_boundaries.checked_at),
+    attempted_at = EXCLUDED.attempted_at,
+    next_attempt = EXCLUDED.next_attempt,
+    last_error = EXCLUDED.last_error
+`
+
+type SaveZoneBoundaryParams struct {
+	Iata        string             `json:"iata"`
+	Url         string             `json:"url"`
+	Feature     []byte             `json:"feature"`
+	Etag        *string            `json:"etag"`
+	CheckedAt   pgtype.Timestamptz `json:"checked_at"`
+	AttemptedAt pgtype.Timestamptz `json:"attempted_at"`
+	NextAttempt pgtype.Timestamptz `json:"next_attempt"`
+	LastError   string             `json:"last_error"`
+}
+
+// NULL feature/etag/checked_at retain the last good boundary after an error or 304.
+func (q *Queries) SaveZoneBoundary(ctx context.Context, arg SaveZoneBoundaryParams) error {
+	_, err := q.db.Exec(ctx, saveZoneBoundary,
+		arg.Iata,
+		arg.Url,
+		arg.Feature,
+		arg.Etag,
+		arg.CheckedAt,
+		arg.AttemptedAt,
+		arg.NextAttempt,
+		arg.LastError,
 	)
 	return err
 }

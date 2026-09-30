@@ -48,7 +48,7 @@ func TestForeignNodeUpdates(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			w.cfg.LocalBorders = nil
 			if tc.enabled {
-				w.cfg.LocalBorders = local
+				w.cfg.LocalBorders = borders.NewLive(local)
 			}
 			data := []byte{tc.role}
 			if tc.position {

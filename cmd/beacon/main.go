@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/api/handlers"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api/router"
 	"github.com/MeshCore-Beacon/beacon-server/internal/background"
+	"github.com/MeshCore-Beacon/beacon-server/internal/borders"
 	"github.com/MeshCore-Beacon/beacon-server/internal/cache"
 	"github.com/MeshCore-Beacon/beacon-server/internal/config"
 	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
@@ -111,10 +113,15 @@ func main() {
 	}
 
 	resolved := config.Resolve(cfg)
-	localBorders, err := config.LoadLocalBorders(cfg)
+	borderFiles, err := config.LoadLocalBorders(cfg)
 	if err != nil {
 		slog.Error("invalid local border configuration", "component", "startup", "error", err)
 		os.Exit(1)
+	}
+	var localBorders *borders.Live
+	if cfg.Nodes.MarkForeign {
+		local, _ := config.BuildLocalBorders(borderFiles, nil) // checked by LoadLocalBorders
+		localBorders = borders.NewLive(local)
 	}
 
 	slog.Info(fmt.Sprintf("config: loaded — %s", resolved), "component", "startup")
@@ -199,6 +206,32 @@ func main() {
 			slog.Error("failed to restore MeshMapper scope catalogues", "component", "startup", "error", err)
 			os.Exit(1)
 		}
+	}
+
+	// Always restored, so disabling the import prunes it and file borders return.
+	zones := meshmapper.NewZones(cfg.MeshMapper.Zones, cfg.RegionIATAs(), store)
+	if cr, ok := reader.(*cache.CachedReader); ok {
+		zones.OnChange(cr.InvalidateIATABorder)
+	}
+	if localBorders != nil {
+		zones.OnUpdate(func(imported map[string]json.RawMessage) {
+			local, err := config.BuildLocalBorders(borderFiles, imported)
+			if err != nil {
+				slog.Error("MeshMapper boundaries rejected for foreign marking", "component", "meshmapper.zones", "error", err)
+				return
+			}
+			localBorders.Store(local)
+		})
+	}
+	restoreCtx, cancelRestore := context.WithTimeout(ctx, 10*time.Second)
+	err = zones.Restore(restoreCtx)
+	cancelRestore()
+	if err != nil {
+		slog.Error("failed to restore MeshMapper boundaries", "component", "startup", "error", err)
+		os.Exit(1)
+	}
+	if localBorders != nil && !localBorders.Ready() {
+		slog.Warn("nodes.mark_foreign has no boundaries yet; waiting for MeshMapper", "component", "startup")
 	}
 
 	// ── Build channel keystore ──────────────────────────────────────────────
@@ -317,6 +350,9 @@ func main() {
 	}
 	if scopeImporter != nil {
 		tasks = append(tasks, background.Task{Name: "meshmapper.scopes", Interval: meshmapper.PollInterval, Run: scopeImporter.Refresh})
+	}
+	if cfg.MeshMapper.Zones.Enabled {
+		tasks = append(tasks, background.Task{Name: "meshmapper.zones", Interval: meshmapper.PollInterval, Run: zones.Refresh})
 	}
 	profiles := configureProfiling(ctx, pool)
 	defer profiles.Stop()

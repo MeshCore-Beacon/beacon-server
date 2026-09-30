@@ -47,3 +47,37 @@ func TestMeshMapperConfig(t *testing.T) {
 		t.Fatal("empty sources accepted")
 	}
 }
+
+func TestMeshMapperZonesConfig(t *testing.T) {
+	valid := "regions:\n  - slug: ottawa\n    iatas: [YOW, YOW]\n  - slug: toronto\n    iatas: [YYZ]\nmeshmapper:\n  zones:\n    enabled: true\n"
+	for _, tc := range []struct {
+		name, text string
+		bad        bool
+		interval   time.Duration
+	}{
+		{"default", valid, false, 24 * time.Hour},
+		{"hourly", valid + "    refresh_interval: 1h\n", false, time.Hour},
+		{"too often", valid + "    refresh_interval: 59m\n", true, 0},
+		{"too rare", valid + "    refresh_interval: 169h\n", true, 0},
+		{"no regions", "meshmapper:\n  zones:\n    enabled: true\n", true, 0},
+		{"disabled", "meshmapper:\n  zones:\n    enabled: false\n", false, 24 * time.Hour},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(p, []byte(tc.text), 0600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(p)
+			if (err != nil) != tc.bad {
+				t.Fatalf("error=%v", err)
+			}
+			if err == nil && cfg.MeshMapper.Zones.Interval() != tc.interval {
+				t.Fatal(cfg.MeshMapper.Zones.Interval())
+			}
+		})
+	}
+	cfg := &Config{Regions: []RegionConfig{{IATAs: []string{"YYZ", "YOW"}}, {IATAs: []string{"YOW"}}}}
+	if got := strings.Join(cfg.RegionIATAs(), ","); got != "YOW,YYZ" {
+		t.Fatal(got)
+	}
+}

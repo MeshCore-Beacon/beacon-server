@@ -11,6 +11,7 @@ package mockdb
 
 import (
 	context "context"
+	json "encoding/json"
 	reflect "reflect"
 
 	db "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
@@ -265,10 +266,10 @@ func (mr *MockQuerierMockRecorder) GetIATA(ctx, iata any) *gomock.Call {
 }
 
 // GetIATABorder mocks base method.
-func (m *MockQuerier) GetIATABorder(ctx context.Context, iata string) ([]byte, error) {
+func (m *MockQuerier) GetIATABorder(ctx context.Context, iata string) (json.RawMessage, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetIATABorder", ctx, iata)
-	ret0, _ := ret[0].([]byte)
+	ret0, _ := ret[0].(json.RawMessage)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -1313,6 +1314,36 @@ func (mr *MockQuerierMockRecorder) ListUndecryptedGroupTextPackets(ctx any) *gom
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListUndecryptedGroupTextPackets", reflect.TypeOf((*MockQuerier)(nil).ListUndecryptedGroupTextPackets), ctx)
 }
 
+// ListZoneBoundaries mocks base method.
+func (m *MockQuerier) ListZoneBoundaries(ctx context.Context) ([]db.MeshmapperZoneBoundary, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListZoneBoundaries", ctx)
+	ret0, _ := ret[0].([]db.MeshmapperZoneBoundary)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListZoneBoundaries indicates an expected call of ListZoneBoundaries.
+func (mr *MockQuerierMockRecorder) ListZoneBoundaries(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListZoneBoundaries", reflect.TypeOf((*MockQuerier)(nil).ListZoneBoundaries), ctx)
+}
+
+// PruneZoneBoundaries mocks base method.
+func (m *MockQuerier) PruneZoneBoundaries(ctx context.Context, keep []string) ([]string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PruneZoneBoundaries", ctx, keep)
+	ret0, _ := ret[0].([]string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PruneZoneBoundaries indicates an expected call of PruneZoneBoundaries.
+func (mr *MockQuerierMockRecorder) PruneZoneBoundaries(ctx, keep any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PruneZoneBoundaries", reflect.TypeOf((*MockQuerier)(nil).PruneZoneBoundaries), ctx, keep)
+}
+
 // ReconfirmNeighbors mocks base method.
 func (m *MockQuerier) ReconfirmNeighbors(ctx context.Context) error {
 	m.ctrl.T.Helper()
@@ -1584,6 +1615,20 @@ func (m *MockQuerier) SaveScopeCatalogue(ctx context.Context, arg db.SaveScopeCa
 func (mr *MockQuerierMockRecorder) SaveScopeCatalogue(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveScopeCatalogue", reflect.TypeOf((*MockQuerier)(nil).SaveScopeCatalogue), ctx, arg)
+}
+
+// SaveZoneBoundary mocks base method.
+func (m *MockQuerier) SaveZoneBoundary(ctx context.Context, arg db.SaveZoneBoundaryParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SaveZoneBoundary", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SaveZoneBoundary indicates an expected call of SaveZoneBoundary.
+func (mr *MockQuerierMockRecorder) SaveZoneBoundary(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveZoneBoundary", reflect.TypeOf((*MockQuerier)(nil).SaveZoneBoundary), ctx, arg)
 }
 
 // SearchKnownRoutes mocks base method.

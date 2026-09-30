@@ -87,6 +87,11 @@ func (cr *CachedReader) InvalidateScopeNames(ctx context.Context) {
 	cr.c.delPrefix(ctx, keyScopeByNamePrefix)
 }
 
+// InvalidateIATABorder makes an imported or removed MeshMapper boundary visible.
+func (cr *CachedReader) InvalidateIATABorder(ctx context.Context, iata string) {
+	cr.c.del(ctx, keyIATABorderPrefix+iata)
+}
+
 // InvalidateNode removes the cached entries for a node by UUID.
 // Should be called from the ingest path after a node upsert.
 func (cr *CachedReader) InvalidateNode(ctx context.Context, nodeID uuid.UUID) {

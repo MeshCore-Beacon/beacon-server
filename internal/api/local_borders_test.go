@@ -52,8 +52,8 @@ func TestLocalBordersAfterCache(t *testing.T) {
 	client := cache.NewClient(mr.Addr(), "", 0)
 	t.Cleanup(func() { client.Close() })
 	cached := cache.NewCachedReader(base, client, cache.CacheTTLs{Nodes: time.Hour})
-	first := api.WithLocalBorders(cached, local)
-	second := api.WithLocalBorders(cached, other)
+	first := api.WithLocalBorders(cached, borders.NewLive(local))
+	second := api.WithLocalBorders(cached, borders.NewLive(other))
 	if api.WithLocalBorders(cached, nil) != cached {
 		t.Fatal("disabled decorator changed reader")
 	}
@@ -110,7 +110,7 @@ func TestLocalBordersPreserveReaderErrors(t *testing.T) {
 	}
 	want := errors.New("reader unavailable")
 	base := &borderReader{err: want}
-	reader := api.WithLocalBorders(base, local)
+	reader := api.WithLocalBorders(base, borders.NewLive(local))
 	if _, err := reader.GetNode(context.Background(), uuid.New()); !errors.Is(err, want) {
 		t.Fatal(err)
 	}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"time"
 )
 
@@ -15,6 +16,30 @@ const MaxScopeSources = 16
 
 type MeshMapperConfig struct {
 	Scopes MeshMapperScopesConfig `yaml:"scopes"`
+	Zones  MeshMapperZonesConfig  `yaml:"zones"`
+}
+
+// MeshMapperZonesConfig imports each region IATA's published boundary, overriding borderFile.
+type MeshMapperZonesConfig struct {
+	Enabled         bool     `yaml:"enabled"`
+	RefreshInterval duration `yaml:"refresh_interval"`
+}
+
+func (c MeshMapperZonesConfig) Interval() time.Duration {
+	if c.RefreshInterval.Duration == 0 {
+		return 24 * time.Hour
+	}
+	return c.RefreshInterval.Duration
+}
+
+// RegionIATAs returns the sorted, unique IATAs of every configured region.
+func (c *Config) RegionIATAs() []string {
+	var iatas []string
+	for _, region := range c.Regions {
+		iatas = append(iatas, region.IATAs...)
+	}
+	slices.Sort(iatas)
+	return slices.Compact(iatas)
 }
 
 // MeshMapperScopesConfig augments, but never replaces, the manual scopes list.
@@ -34,6 +59,15 @@ func (c MeshMapperScopesConfig) Interval() time.Duration {
 var meshMapperHost = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*\.meshmapper\.net$`)
 
 func (c *Config) validateMeshMapper() error {
+	if z := c.MeshMapper.Zones; z.Enabled {
+		// The Zones API asks clients not to poll more than once an hour.
+		if z.Interval() < time.Hour || z.Interval() > 7*24*time.Hour {
+			return fmt.Errorf("meshmapper.zones.refresh_interval must be between 1h and 168h")
+		}
+		if len(c.RegionIATAs()) == 0 {
+			return fmt.Errorf("meshmapper.zones needs at least one configured region IATA")
+		}
+	}
 	s := c.MeshMapper.Scopes
 	if !s.Enabled {
 		return nil

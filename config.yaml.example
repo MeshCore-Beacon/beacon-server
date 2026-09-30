@@ -47,6 +47,7 @@ iatas:
     lat: 49.1967
     lng: -123.1815
     # borderFile: borders/yvr.geojson   # optional GeoJSON Feature (Polygon/MultiPolygon)
+    #                                    # (meshmapper.zones overrides it when enabled)
     #                                    # for the region border map; path is relative to
     #                                    # this file's directory; validated at boot.
   YYJ:
@@ -159,8 +160,9 @@ websocket:
 # Node staleness, deletion, and clock-drift thresholds.
 #nodes:
 #  mark_foreign: false           # opt in to possiblyForeign on repeater nodes
-#                                # uses the union of configured iatas.*.borderFile polygons;
-#                                # requires at least one valid border; no packet filtering
+#                                # uses the union of configured iatas.*.borderFile polygons,
+#                                # with meshmapper.zones boundaries replacing them; requires
+#                                # a valid border file or meshmapper.zones; no packet filtering
 #  stale_threshold: 24h          # default: 24h
 #  delete_after: 720h            # default: 30 days
 #  clock_drift_threshold: 5m     # default: 5m
@@ -228,6 +230,16 @@ cache:
 #    refresh_interval: 1h  # 5m-24h; one source checked per 15s tick
 #    sources:
 #      YOW: https://yow.meshmapper.net/get_scopes.php
+#
+# Optional MeshMapper region boundaries (Zones API). Every IATA in a configured
+# region is looked up in its country's zone list, then its get_geojson.php outline
+# is imported. An imported boundary overrides that IATA's borderFile on the border
+# map and for nodes.mark_foreign. A missing or failed boundary keeps the last good
+# import, or the borderFile when there is none. Disabling, or removing an IATA from
+# every region, drops its import on restart. Logged under component=meshmapper.zones.
+#  zones:
+#    enabled: false
+#    refresh_interval: 24h # 1h-168h; one request per 15s tick, ETag-conditional
 
 # Background task intervals.
 # Shorter intervals are useful during initial deployment to confirm data is

@@ -396,6 +396,17 @@ func TestInvalidateScopeNamesClearsDerivedKeys(t *testing.T) {
 	}
 }
 
+func TestInvalidateIATABorder(t *testing.T) {
+	c, mr := newTestClient(t)
+	cr := &CachedReader{inner: &stubReader{}, c: c, ttl: CacheTTLs{}}
+	mr.Set(keyIATABorderPrefix+"YOW", "x")
+	mr.Set(keyIATABorderPrefix+"YYZ", "keep")
+	cr.InvalidateIATABorder(context.Background(), "YOW")
+	if got := mr.Keys(); len(got) != 1 || got[0] != keyIATABorderPrefix+"YYZ" {
+		t.Fatalf("keys left: %v", got)
+	}
+}
+
 func TestCachedReader_InvalidateNode(t *testing.T) {
 	c, mr := newTestClient(t)
 	nodeID := uuid.MustParse("00000000-0000-0000-0000-000000000001")

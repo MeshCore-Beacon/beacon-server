@@ -245,6 +245,17 @@ type MeshmapperScopeCatalogue struct {
 	LastError   string             `json:"last_error"`
 }
 
+type MeshmapperZoneBoundary struct {
+	Iata        string             `json:"iata"`
+	Url         string             `json:"url"`
+	Feature     []byte             `json:"feature"`
+	Etag        *string            `json:"etag"`
+	CheckedAt   pgtype.Timestamptz `json:"checked_at"`
+	AttemptedAt pgtype.Timestamptz `json:"attempted_at"`
+	NextAttempt pgtype.Timestamptz `json:"next_attempt"`
+	LastError   string             `json:"last_error"`
+}
+
 type MvHourlyIataStat struct {
 	Iata             string             `json:"iata"`
 	Hour             pgtype.Timestamptz `json:"hour"`

@@ -114,3 +114,28 @@ func BenchmarkPossiblyForeign(b *testing.B) {
 		})
 	}
 }
+
+func TestLiveSwap(t *testing.T) {
+	var disabled *Live
+	if disabled.PossiblyForeign(2, new(15.0), new(15.0)) != nil {
+		t.Fatal("nil live classified")
+	}
+	live := NewLive(nil)
+	if disabled.Ready() || live.Ready() {
+		t.Fatal("ready without boundaries")
+	}
+	if live.PossiblyForeign(2, new(15.0), new(15.0)) != nil {
+		t.Fatal("empty live classified")
+	}
+	local, err := New([]orb.Polygon{{{{10, 10}, {20, 10}, {20, 20}, {10, 20}, {10, 10}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	live.Store(local)
+	if !live.Ready() {
+		t.Fatal("not ready after store")
+	}
+	if got := live.PossiblyForeign(2, new(15.0), new(15.0)); got == nil || *got {
+		t.Fatal("stored classifier not used", got)
+	}
+}

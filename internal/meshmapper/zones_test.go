@@ -1,0 +1,331 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+package meshmapper
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/MeshCore-Beacon/beacon-server/internal/config"
+)
+
+const square = `{"type":"Polygon","coordinates":[[[-76,45],[-75,45],[-75,46],[-76,46],[-76,45]]]}`
+
+func boundaryBody(code, geometry string) string {
+	return `{"type":"FeatureCollection","generated_at":"2026-09-25T15:00:00Z","features":[{"type":"Feature","geometry":` + geometry +
+		`,"properties":{"code":"` + code + `","name":"Ottawa, CA","center":[-75.7,45.4],"radius_km":42,"has_boundary":true}}]}`
+}
+
+type zoneMemoryStore struct {
+	rows   map[string]Boundary
+	pruned []string
+	fail   bool
+}
+
+func (s *zoneMemoryStore) PruneZoneBoundaries(_ context.Context, keep []string) ([]string, error) {
+	var removed []string
+	for iata := range s.rows {
+		if !slices.Contains(keep, iata) {
+			delete(s.rows, iata)
+			removed = append(removed, iata)
+		}
+	}
+	s.pruned = removed
+	return removed, nil
+}
+
+func (s *zoneMemoryStore) ListZoneBoundaries(context.Context) ([]Boundary, error) {
+	var out []Boundary
+	for _, b := range s.rows {
+		out = append(out, b)
+	}
+	return out, nil
+}
+
+func (s *zoneMemoryStore) SaveZoneBoundary(_ context.Context, b Boundary) error {
+	if s.fail {
+		return errors.New("offline")
+	}
+	old := s.rows[b.IATA]
+	if b.Feature == nil {
+		b.Feature = old.Feature
+	}
+	if b.CheckedAt.IsZero() {
+		b.CheckedAt, b.ETag = old.CheckedAt, old.ETag
+	}
+	s.rows[b.IATA] = b
+	return nil
+}
+
+type fakeMeshMapper struct {
+	*httptest.Server
+	list, boundary     string
+	listStatus, status int
+	etag, retryAfter   string
+	listCalls, calls   int
+	ifNoneMatch        []string
+}
+
+func newFakeMeshMapper(t *testing.T) *fakeMeshMapper {
+	f := &fakeMeshMapper{listStatus: 200, status: 200, etag: `"v1"`, boundary: boundaryBody("YOW", square)}
+	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/get_zones.php":
+			f.listCalls++
+			if r.URL.Query().Get("country") != "CA" {
+				t.Errorf("country query: %s", r.URL.RawQuery)
+			}
+			w.WriteHeader(f.listStatus)
+			_, _ = w.Write([]byte(f.list))
+		case "/get_geojson.php":
+			f.calls++
+			f.ifNoneMatch = append(f.ifNoneMatch, r.Header.Get("If-None-Match"))
+			w.Header().Set("ETag", f.etag)
+			w.Header().Set("Retry-After", f.retryAfter)
+			w.WriteHeader(f.status)
+			if f.status == 200 {
+				_, _ = w.Write([]byte(f.boundary))
+			}
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	f.list = `{"country":"CA","count":1,"zones":[{"code":"YOW","url":"` + f.URL + `/","has_boundary":true,"group":null}],"groups":[]}`
+	t.Cleanup(f.Close)
+	return f
+}
+
+type zoneHarness struct {
+	z        *Zones
+	store    *zoneMemoryStore
+	changed  []string
+	imported map[string]json.RawMessage
+}
+
+func newZoneHarness(t *testing.T, f *fakeMeshMapper, store *zoneMemoryStore, enabled bool) *zoneHarness {
+	t.Helper()
+	h := &zoneHarness{store: store}
+	h.z = NewZones(config.MeshMapperZonesConfig{Enabled: enabled}, []string{"YOW"}, store)
+	h.z.listURL = f.URL + "/get_zones.php"
+	h.z.boundsURL = func(site string) (string, bool) { return site + "get_geojson.php", strings.HasPrefix(site, f.URL) }
+	h.z.OnChange(func(_ context.Context, iata string) { h.changed = append(h.changed, iata) })
+	h.z.OnUpdate(func(imported map[string]json.RawMessage) { h.imported = imported })
+	if err := h.z.Restore(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
+// tick forces the region due and runs refreshes until the boundary request is made.
+func (h *zoneHarness) tick(t *testing.T) Boundary {
+	t.Helper()
+	h.z.regions[0].b.NextAttempt = time.Time{}
+	for range 2 {
+		if err := h.z.Refresh(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return h.store.rows["YOW"]
+}
+
+func TestZonesImportAndConditionalRefresh(t *testing.T) {
+	f := newFakeMeshMapper(t)
+	h := newZoneHarness(t, f, &zoneMemoryStore{rows: map[string]Boundary{}}, true)
+	b := h.tick(t)
+	if f.listCalls != 1 || f.calls != 1 || b.Feature == nil || b.ETag != `"v1"` || b.LastError != "" || b.URL != f.URL+"/" {
+		t.Fatalf("import failed: %+v list=%d calls=%d", b, f.listCalls, f.calls)
+	}
+	if !slices.Equal(h.changed, []string{"YOW"}) || h.imported["YOW"] == nil {
+		t.Fatal("listeners not told", h.changed, h.imported)
+	}
+	if !strings.Contains(string(b.Feature), `"bbox"`) || !strings.Contains(string(b.Feature), `"code":"YOW"`) {
+		t.Fatal("feature not validated with bbox and properties", string(b.Feature))
+	}
+	if got := b.NextAttempt.Sub(b.AttemptedAt); got != 24*time.Hour {
+		t.Fatal("refresh interval", got)
+	}
+
+	f.status = 304
+	b = h.tick(t)
+	if f.listCalls != 1 || f.ifNoneMatch[1] != `"v1"` || b.Feature == nil || b.LastError != "" || len(h.changed) != 1 {
+		t.Fatalf("304 mishandled: %+v list=%d changed=%v", b, f.listCalls, h.changed)
+	}
+
+	f.status, f.etag = 200, `"v2"`
+	f.boundary = boundaryBody("YOW", `{"type":"Polygon","coordinates":[[[-77,45],[-75,45],[-75,46],[-77,46],[-77,45]]]}`)
+	b = h.tick(t)
+	if b.ETag != `"v2"` || len(h.changed) != 2 || !strings.Contains(string(h.imported["YOW"]), "-77") {
+		t.Fatal("changed boundary not published", b.ETag, h.changed)
+	}
+}
+
+func TestZonesKeepLastGoodBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name, boundary string
+		status         int
+		wantErr        string
+		wantRetry      time.Duration
+	}{
+		{"null geometry", boundaryBody("YOW", "null"), 200, "no boundary", 24 * time.Hour},
+		{"not found", "", 404, "HTTP 404", time.Hour},
+		{"unavailable", "", 503, "HTTP 503", time.Hour},
+		{"truncated", boundaryBody("YOW", square)[:80], 200, "invalid response", time.Hour},
+		{"other region", boundaryBody("YVR", square), 200, "invalid response", time.Hour},
+		{"oversized", `{"type":"FeatureCollection","features":[],"pad":"` + strings.Repeat("x", MaxBoundaryBody) + `"}`, 200, "invalid response", time.Hour},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeMeshMapper(t)
+			h := newZoneHarness(t, f, &zoneMemoryStore{rows: map[string]Boundary{}}, true)
+			good := h.tick(t).Feature
+			f.status, f.boundary = tc.status, tc.boundary
+			b := h.tick(t)
+			if b.LastError != tc.wantErr || string(b.Feature) != string(good) || string(h.imported["YOW"]) != string(good) || len(h.changed) != 1 {
+				t.Fatalf("got %q, feature kept=%v", b.LastError, string(b.Feature) == string(good))
+			}
+			if got := b.NextAttempt.Sub(b.AttemptedAt); got != tc.wantRetry {
+				t.Fatal("retry", got)
+			}
+		})
+	}
+}
+
+func TestZonesSkipRegionsWithoutBoundary(t *testing.T) {
+	for _, tc := range []struct{ name, zones, want string }{
+		{"not listed", `[]`, "not listed"},
+		{"no boundary", `[{"code":"YOW","url":"URL/","has_boundary":false}]`, "no boundary"},
+		{"foreign site", `[{"code":"yow","url":"https://example.com/","has_boundary":true}]`, "invalid site URL"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeMeshMapper(t)
+			f.list = `{"country":"CA","count":1,"zones":` + strings.ReplaceAll(tc.zones, "URL", f.URL) + `,"groups":[]}`
+			h := newZoneHarness(t, f, &zoneMemoryStore{rows: map[string]Boundary{}}, true)
+			b := h.tick(t)
+			if f.calls != 0 || b.LastError != tc.want || b.Feature != nil || len(h.changed) != 0 {
+				t.Fatalf("got %+v calls=%d", b, f.calls)
+			}
+			if got := b.NextAttempt.Sub(b.AttemptedAt); got != 24*time.Hour {
+				t.Fatal("authoritative answer retried early", got)
+			}
+		})
+	}
+}
+
+func TestZonesListFailureBacksOff(t *testing.T) {
+	f := newFakeMeshMapper(t)
+	f.listStatus = 500
+	h := newZoneHarness(t, f, &zoneMemoryStore{rows: map[string]Boundary{}}, true)
+	for range 3 {
+		if err := h.z.Refresh(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if f.listCalls != 1 || f.calls != 0 || len(h.store.rows) != 0 {
+		t.Fatal("failed list retried early", f.listCalls, f.calls)
+	}
+	f.listStatus, f.list = 200, `{"country":"US","zones":[]}`
+	h.z.lists["CA"].nextAttempt, h.z.lists["CA"].fetchedAt = time.Time{}, time.Time{}
+	_ = h.z.Refresh(context.Background())
+	if h.z.lists["CA"].zones != nil {
+		t.Fatal("list for another country accepted")
+	}
+}
+
+func TestZonesRateLimitPausesEveryRequest(t *testing.T) {
+	f := newFakeMeshMapper(t)
+	h := newZoneHarness(t, f, &zoneMemoryStore{rows: map[string]Boundary{}}, true)
+	f.status, f.retryAfter = 429, "120"
+	b := h.tick(t)
+	if b.LastError != "HTTP 429" || b.NextAttempt.Sub(b.AttemptedAt) != time.Hour || h.z.retryAfter.Sub(b.AttemptedAt) != 2*time.Minute {
+		t.Fatalf("429 not honoured: %+v retryAfter=%v", b, h.z.retryAfter)
+	}
+	h.z.regions[0].b.NextAttempt = time.Time{}
+	_ = h.z.Refresh(context.Background())
+	if f.calls != 1 {
+		t.Fatal("requested during Retry-After")
+	}
+	restarted := newZoneHarness(t, f, h.store, true)
+	if !restarted.z.retryAfter.Equal(b.NextAttempt) {
+		t.Fatal("persisted 429 not restored")
+	}
+}
+
+func TestZonesRestoreAndPrune(t *testing.T) {
+	f := newFakeMeshMapper(t)
+	store := &zoneMemoryStore{rows: map[string]Boundary{}}
+	first := newZoneHarness(t, f, store, true)
+	first.tick(t)
+	store.rows["OLD"] = Boundary{IATA: "OLD", Feature: json.RawMessage(`{}`)}
+
+	restarted := newZoneHarness(t, f, store, true)
+	if !slices.Equal(store.pruned, []string{"OLD"}) || !slices.Equal(restarted.changed, []string{"OLD"}) {
+		t.Fatal("unconfigured IATA not pruned", store.pruned, restarted.changed)
+	}
+	if restarted.imported["YOW"] == nil || f.calls != 1 {
+		t.Fatal("saved boundary not restored without a request")
+	}
+	if err := restarted.z.Refresh(context.Background()); err != nil || f.calls != 1 || f.listCalls != 1 {
+		t.Fatal("refreshed before due", err, f.calls)
+	}
+
+	disabled := newZoneHarness(t, f, store, false)
+	if len(store.rows) != 0 || !slices.Equal(disabled.changed, []string{"YOW"}) || len(disabled.z.regions) != 0 {
+		t.Fatal("disabling did not remove imports")
+	}
+}
+
+func TestZonesPersistFailureWaitsForNextAttempt(t *testing.T) {
+	f := newFakeMeshMapper(t)
+	h := newZoneHarness(t, f, &zoneMemoryStore{rows: map[string]Boundary{}, fail: true}, true)
+	h.z.regions[0].b.NextAttempt = time.Time{}
+	_ = h.z.Refresh(context.Background())
+	if err := h.z.Refresh(context.Background()); err == nil {
+		t.Fatal("persist error hidden")
+	}
+	if h.z.regions[0].b.NextAttempt.IsZero() || h.imported["YOW"] != nil || len(h.changed) != 0 {
+		t.Fatal("uncommitted boundary published")
+	}
+}
+
+func TestBoundaryEndpoint(t *testing.T) {
+	for site, want := range map[string]string{
+		"https://yow.meshmapper.net/":          "https://yow.meshmapper.net/get_geojson.php",
+		"https://yow.meshmapper.net":           "https://yow.meshmapper.net/get_geojson.php",
+		"http://yow.meshmapper.net/":           "",
+		"https://meshmapper.net.evil.com/":     "",
+		"https://user@yow.meshmapper.net/":     "",
+		"https://yow.meshmapper.net/x/":        "",
+		"https://yow.meshmapper.net/?a=b":      "",
+		"https://yow.meshmapper.net:8443/":     "",
+		"https://yow.meshmapper.net/#fragment": "",
+	} {
+		got, ok := boundaryEndpoint(site)
+		if got != want || ok != (want != "") {
+			t.Errorf("%s: %q %v", site, got, ok)
+		}
+	}
+}
+
+func TestDecodeBoundaryRejectsUnusableOutlines(t *testing.T) {
+	for name, body := range map[string]string{
+		"two features":  `{"type":"FeatureCollection","features":[{"type":"Feature","geometry":null,"properties":{"code":"YOW"}},{"type":"Feature","geometry":null,"properties":{"code":"YOW"}}]}`,
+		"not a polygon": boundaryBody("YOW", `{"type":"Point","coordinates":[-75,45]}`),
+		"open ring":     boundaryBody("YOW", `{"type":"Polygon","coordinates":[[[-76,45],[-75,45],[-75,46],[-76,46]]]}`),
+		"antimeridian":  boundaryBody("YOW", `{"type":"Polygon","coordinates":[[[179,10],[-179,10],[-179,20],[179,20],[179,10]]]}`),
+		"zero area":     boundaryBody("YOW", `{"type":"Polygon","coordinates":[[[-76,45],[-75,45],[-74,45],[-76,45]]]}`),
+	} {
+		if _, err := decodeBoundary([]byte(body), "YOW"); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	if feature, err := decodeBoundary([]byte(boundaryBody("yow", square)), "YOW"); err != nil || feature == nil {
+		t.Fatal("case-insensitive code rejected", err)
+	}
+}

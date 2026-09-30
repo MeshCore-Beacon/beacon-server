@@ -6,6 +6,7 @@ package db
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -135,5 +136,90 @@ func TestMeshMapperCataloguePostgres(t *testing.T) {
 	var count int
 	if err := tx.QueryRow(ctx, "SELECT count(*) FROM transport_scopes WHERE name='#uncommitted'").Scan(&count); err != nil || count != 0 {
 		t.Fatal("partially committed catalogue", count, err)
+	}
+}
+
+func TestMeshMapperZoneBoundariesPostgres(t *testing.T) {
+	dsn := os.Getenv("BEACON_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set BEACON_TEST_POSTGRES_DSN")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunMigrations(ctx, pool); err != nil {
+		pool.Close()
+		t.Fatal(err)
+	}
+	pool.Close()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	for _, table := range []string{"iata_codes", "meshmapper_zone_boundaries"} {
+		if _, err := tx.Exec(ctx, "CREATE TEMP TABLE "+table+" (LIKE public."+table+" INCLUDING ALL) ON COMMIT DROP"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := &Store{q: sqlc.New(tx)}
+	manual := []byte(`{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]},"properties":{"source":"file"}}`)
+	imported := []byte(`{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[0,0],[2,0],[2,2],[0,2],[0,0]]]},"properties":{"code":"YOW"}}`)
+	if err := store.UpsertIATABorder(ctx, "YOW", manual); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertIATA(ctx, "YYZ"); err != nil {
+		t.Fatal(err)
+	}
+	border := func(iata string) string {
+		t.Helper()
+		got, err := store.GetIATABorder(ctx, iata)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(got)
+	}
+	if !strings.Contains(border("YOW"), `"file"`) || border("YYZ") != "" {
+		t.Fatal("manual border not served without an import")
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	good := meshmapper.Boundary{IATA: "YOW", URL: "https://yow.meshmapper.net/", Feature: imported, ETag: `"v1"`, CheckedAt: now, AttemptedAt: now, NextAttempt: now.Add(24 * time.Hour)}
+	if err := store.SaveZoneBoundary(ctx, good); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(border("YOW"), `"YOW"`) {
+		t.Fatal("imported boundary did not override the manual border")
+	}
+	if err := store.UpsertIATABorder(ctx, "YOW", manual); err != nil {
+		t.Fatal(err)
+	}
+	failed := meshmapper.Boundary{IATA: "YOW", URL: good.URL, AttemptedAt: now.Add(time.Hour), NextAttempt: now.Add(2 * time.Hour), LastError: "HTTP 503"}
+	if err := store.SaveZoneBoundary(ctx, failed); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := store.ListZoneBoundaries(ctx)
+	if err != nil || len(rows) != 1 || !strings.Contains(string(rows[0].Feature), `"YOW"`) || rows[0].ETag != `"v1"` ||
+		!rows[0].CheckedAt.Equal(now) || rows[0].LastError != "HTTP 503" || !rows[0].NextAttempt.Equal(failed.NextAttempt) {
+		t.Fatal("failure or reseed lost the last good boundary", rows, err)
+	}
+	if !strings.Contains(border("YOW"), `"YOW"`) {
+		t.Fatal("reseeding the manual border undid the override")
+	}
+	if pruned, err := store.PruneZoneBoundaries(ctx, []string{"YOW"}); err != nil || len(pruned) != 0 {
+		t.Fatal("configured import pruned", pruned, err)
+	}
+	if pruned, err := store.PruneZoneBoundaries(ctx, nil); err != nil || len(pruned) != 1 || pruned[0] != "YOW" {
+		t.Fatal(pruned, err)
+	}
+	if !strings.Contains(border("YOW"), `"file"`) {
+		t.Fatal("manual border did not return after pruning")
 	}
 }

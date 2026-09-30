@@ -271,8 +271,9 @@ type RoutesConfig struct {
 
 // NodesConfig controls node-derived signal thresholds.
 type NodesConfig struct {
-	// MarkForeign annotates repeaters outside the union of configured IATA border
-	// files. Disabled by default; enabling it requires at least one usable border.
+	// MarkForeign annotates repeaters outside the union of IATA borders, with
+	// imported MeshMapper boundaries replacing border files. Disabled by default;
+	// enabling it requires a border file or meshmapper.zones.
 	MarkForeign bool `yaml:"mark_foreign"`
 	// ClockDriftThreshold is the |device clock - server clock| magnitude, measured from a
 	// repeater/room server's ADVERT timestamp, above which the node API reports
@@ -411,6 +412,9 @@ func Load(path string) (*Config, error) {
 	configDir := filepath.Dir(path)
 	if err := cfg.validateMeshMapper(); err != nil {
 		return nil, err
+	}
+	if cfg.Nodes.MarkForeign && !cfg.MeshMapper.Zones.Enabled && !cfg.hasBorderFile() {
+		return nil, fmt.Errorf("nodes.mark_foreign requires an iatas.*.borderFile or meshmapper.zones")
 	}
 	for iata, details := range cfg.IATAs {
 		if details.BorderFile != "" && !filepath.IsAbs(details.BorderFile) {
