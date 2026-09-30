@@ -49,16 +49,36 @@ func TestPacketTimestampFormatsAndSkew(t *testing.T) {
 	}
 	for _, precision := range []time.Duration{time.Second, time.Microsecond, time.Nanosecond} {
 		expected := want.Truncate(precision)
-		stamp := expected.Format("2006-01-02T15:04:05.999999999")
-		if got := capture(t, stamp); !got.Equal(expected) {
-			t.Fatalf("timezone-less UTC changed: got %s want %s", got, expected)
+		for _, layout := range []string{"2006-01-02T15:04:05.999999999", "2006-01-02 15:04:05.999999999"} {
+			stamp := expected.Format(layout)
+			t.Run("naive "+stamp, func(t *testing.T) {
+				if got := capture(t, stamp); !got.Equal(expected) {
+					t.Fatalf("timezone-less UTC changed: got %s want %s", got, expected)
+				}
+			})
 		}
 	}
+	west := time.FixedZone("west", -4*60*60)
+	for _, layout := range []string{
+		"2006-01-02 15:04:05.999999-07:00", // Python str(datetime)
+		"2006-01-02T15:04:05.999-0700",
+		"2006-01-02 15:04:05-0700",
+	} {
+		stamp := want.Truncate(time.Microsecond).In(west).Format(layout)
+		expected, _ := time.Parse(layout, stamp)
+		t.Run(stamp, func(t *testing.T) {
+			if got := capture(t, stamp); !got.Equal(expected) {
+				t.Fatalf("reported time changed: got %s want %s", got, expected)
+			}
+		})
+	}
 	for _, stamp := range []string{"", "invalid", "2026-09-29T25:00:00+00:00", time.Now().Add(31 * time.Minute).Format(time.RFC3339), time.Now().Add(-31 * time.Minute).Format(time.RFC3339)} {
-		before := time.Now().UTC()
-		got := capture(t, stamp)
-		if got.Before(before) || got.After(time.Now().UTC()) {
-			t.Fatalf("invalid/skewed time escaped server-time guard: %s => %s", stamp, got)
-		}
+		t.Run("guard "+stamp, func(t *testing.T) {
+			before := time.Now().UTC()
+			got := capture(t, stamp)
+			if got.Before(before) || got.After(time.Now().UTC()) {
+				t.Fatalf("invalid/skewed time escaped server-time guard: %s => %s", stamp, got)
+			}
+		})
 	}
 }

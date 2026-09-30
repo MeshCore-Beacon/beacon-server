@@ -730,11 +730,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		w.log.Error(fmt.Sprintf("db: upsert packet failed from %s/%s", iata, pubkeyHex), "error", err)
 		return
 	}
-	// Prefer an explicit RFC3339 offset; legacy timezone-less observers use UTC.
-	heardAt, err := time.Parse(time.RFC3339Nano, envelope.Timestamp)
-	if err != nil {
-		heardAt, err = time.Parse("2006-01-02T15:04:05", envelope.Timestamp)
-	}
+	heardAt, err := parseHeardAt(envelope.Timestamp)
 	if err != nil {
 		w.log.Warn(fmt.Sprintf("failed to parse timestamp %q", envelope.Timestamp), "error", err)
 		heardAt = time.Now().UTC()
@@ -958,4 +954,26 @@ func computeTransportCode(key []byte, payloadType uint8, payload []byte) uint16 
 		code = 0xFFFE
 	}
 	return code
+}
+
+// heardAtLayouts lists offset forms first; timezone-less observers are read as UTC.
+// Fractional seconds are optional in every layout.
+var heardAtLayouts = []string{
+	time.RFC3339Nano,
+	"2006-01-02 15:04:05.999999999Z07:00",
+	"2006-01-02T15:04:05.999999999Z0700",
+	"2006-01-02 15:04:05.999999999Z0700",
+	"2006-01-02T15:04:05",
+	"2006-01-02 15:04:05",
+}
+
+func parseHeardAt(s string) (time.Time, error) {
+	var err error
+	for _, layout := range heardAtLayouts {
+		var t time.Time
+		if t, err = time.Parse(layout, s); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, err
 }
