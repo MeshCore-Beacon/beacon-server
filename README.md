@@ -27,6 +27,23 @@ in PostgreSQL, and streams live events to WebSocket clients.
 
 For deployment instructions including the frontend app, see the deployment docs.
 
+### MeshCore Canada: Beacon 1.4.0 rollout
+
+Beacon/web 1.4.0 is planned to replace CoreScope at **https://live.meshcore.ca**.
+**https://dev.meshcore.ca** remains online for development testing, with its own
+Beacon database, cache, configuration and application deployment. Production must
+not depend on the development API or WebSocket endpoint.
+
+The server retains its independent version history (v1.6.0 is already released).
+Record the matched server revision and approved image digest alongside web 1.4.0;
+do not retag or downgrade the server to 1.4.0. Follow the
+[1.4.0 release and cutover plan](https://github.com/MeshCore-Beacon/beacon-docs/blob/main/app_documentation/release-140-preparation.md)
+for migration checks, data continuity and the owner-controlled CoreScope switch.
+
+Development builds publish `dev` and revision tags. Only stable semantic-version
+tags publish `latest`; pushes to `dev` or `main`, and prerelease tags, do not move
+that production alias. Production deployments should pin the approved image digest.
+
 For a bounded private database and saved-config bundle, see
 [backup export](docs/backup-export.md). A standalone export tool is available; the
 protected download API is opt-in; browser login and import remain separate follow-ups.
