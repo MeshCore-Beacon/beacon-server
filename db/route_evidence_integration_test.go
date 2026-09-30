@@ -99,8 +99,10 @@ func TestRouteEvidencePostgres(t *testing.T) {
 	}
 	// A new representation arrives while page one is open. New reads follow it,
 	// but pagination and copied links retain the exact original representation.
-	_, err = tx.Exec(ctx, `INSERT INTO packets(packet_hash) VALUES (int4send(12)),(int4send(13)),(int4send(14));
- INSERT INTO packet_observations(id,packet_hash,observer_id,iata,heard_at,hash_size,hop_count,path_bytes,payload_type)
+	if _, err = tx.Exec(ctx, `INSERT INTO packets(packet_hash) VALUES (int4send(12)),(int4send(13)),(int4send(14))`); err != nil {
+		t.Fatal(err)
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO packet_observations(id,packet_hash,observer_id,iata,heard_at,hash_size,hop_count,path_bytes,payload_type)
  SELECT i,int4send(i),'00000000-0000-0000-0000-000000000001','YOW',$1,2,2,'\xaa01bb03',4 FROM generate_series(12,14) i`, at)
 	if err != nil {
 		t.Fatal(err)
