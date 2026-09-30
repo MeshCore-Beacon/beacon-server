@@ -4961,6 +4961,7 @@ const upsertKnownRoute = `-- name: UpsertKnownRoute :exec
 INSERT INTO known_routes (path_key, node_ids, hash_prefix, iata, hop_count)
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (iata, path_key) DO UPDATE SET
+  hash_prefix = EXCLUDED.hash_prefix,
   last_seen = NOW(),
   observation_count = known_routes.observation_count + 1
 `
@@ -4977,7 +4978,7 @@ type UpsertKnownRouteParams struct {
 // ROUTES
 // ============================================================
 // Route identity is path_key, an md5 of node_ids computed by the caller.
-// On conflict, observation_count and last_seen are bumped.
+// Keep the latest processed representation without changing the node-chain identity.
 func (q *Queries) UpsertKnownRoute(ctx context.Context, arg UpsertKnownRouteParams) error {
 	_, err := q.db.Exec(ctx, upsertKnownRoute,
 		arg.PathKey,

@@ -2131,7 +2131,7 @@
         },
         "/routes/{iata}/{pathKey}/observations": {
             "get": {
-                "description": "Matches the saved IATA, complete path bytes and hash width. Excludes TRACE and unclassified reports; other widths and search-result subsegments are not included. Byte matches do not prove hop identities or delivery. The route and its historical counter can outlive raw evidence. Cursors retain full timestamp precision and pin route/window scope.",
+                "description": "Matches one complete path representation in the saved IATA. Defaults to the latest processed prefixes; hashSize/pathBytes pin a prior response. Excludes TRACE and unclassified reports; widths are never combined. Pinned prefixes must match the saved node chain or its current metadata. Byte matches do not prove hop identities or delivery. The route counter can outlive raw evidence. New cursors pin path, route, window and full timestamp precision; legacy unpinned cursors remain supported.",
                 "produces": [
                     "application/json"
                 ],
@@ -2173,8 +2173,22 @@
                         "in": "query"
                     },
                     {
+                        "maximum": 3,
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Exact hash width (1–3); provide with pathBytes to pin a response's representation",
+                        "name": "hashSize",
+                        "in": "query"
+                    },
+                    {
                         "type": "string",
-                        "description": "Opaque precise cursor from nextPageCursor; window is pinned",
+                        "description": "Complete lower-case hex path from the response; provide with hashSize",
+                        "name": "pathBytes",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Opaque precise cursor from nextPageCursor; route, window and path are pinned",
                         "name": "pageCursor",
                         "in": "query"
                     },

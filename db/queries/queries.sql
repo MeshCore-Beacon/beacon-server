@@ -1275,10 +1275,11 @@ ORDER BY t.last_heard_at DESC;
 
 -- name: UpsertKnownRoute :exec
 -- Route identity is path_key, an md5 of node_ids computed by the caller.
--- On conflict, observation_count and last_seen are bumped.
+-- Keep the latest processed representation without changing the node-chain identity.
 INSERT INTO known_routes (path_key, node_ids, hash_prefix, iata, hop_count)
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (iata, path_key) DO UPDATE SET
+  hash_prefix = EXCLUDED.hash_prefix,
   last_seen = NOW(),
   observation_count = known_routes.observation_count + 1;
 
