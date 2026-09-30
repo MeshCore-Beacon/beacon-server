@@ -541,6 +541,8 @@ summaries retain 30 days independently of `packets.retention`. Cleanup saves onl
 aggregates before deleting each packet batch, in the same transaction. Raw
 packets, observations and message bodies still expire under packet retention.
 The summaries use UTC hourly buckets and appear on the normal view-refresh cycle.
+`mv_hourly_iata_stats` now covers 30 days instead of migration 001's seven days;
+`/stats/observations?since=` can therefore return retained summaries older than a week.
 
 Migration 039 starts from data still present; previously deleted history cannot
 be reconstructed. Telemetry has its own retention setting. Packet drill-down,
