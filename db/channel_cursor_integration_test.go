@@ -56,10 +56,8 @@ func TestChannelCursorPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	exec(`CREATE TEMP TABLE channels (LIKE public.channels INCLUDING ALL) ON COMMIT DROP;
-CREATE TEMP TABLE channel_iatas (LIKE public.channel_iatas INCLUDING ALL) ON COMMIT DROP;
-CREATE INDEX ON channels(last_seen DESC,id DESC);
-INSERT INTO channels(id,channel_hash,key_fingerprint,last_seen) VALUES
+	applyBaseline(t, ctx, tx)
+	exec(`INSERT INTO channels(id,channel_hash,key_fingerprint,last_seen) VALUES
  (1,'\xaa','\x01','2026-09-08 12:00:00+00'),(2,'\xaa','\x02','2026-09-08 12:00:00+00'),
  (3,'\xaa','\x03','2026-09-08 12:00:00+00'),(4,'\xbb','\x04','2026-09-08 11:59:59+00'),
  (5,'\xcc','\x05','2026-09-08 12:00:00.000321+00'),

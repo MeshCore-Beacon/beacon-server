@@ -82,6 +82,28 @@ func applyMigration(ctx context.Context, db execQuerier, sql string) error {
 	return err
 }
 
+const baselineMigration = "001_baseline.sql"
+
+var errPreBaseline = errors.New("database schema predates Beacon 2.0.0; 2.0.0 needs a fresh database")
+
+// checkBaseline refuses databases built by the 1.x migration chain, which the
+// 2.0.0 baseline replaced; applying it on top would collide with existing tables.
+func checkBaseline(ctx context.Context, db execQuerier) error {
+	var ledger, hasBaseline, hasPackets bool
+	err := db.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM schema_migrations),
+		       EXISTS(SELECT 1 FROM schema_migrations WHERE filename = $1),
+		       to_regclass('packets') IS NOT NULL`, baselineMigration,
+	).Scan(&ledger, &hasBaseline, &hasPackets)
+	if err != nil {
+		return fmt.Errorf("failed to check migration baseline: %w", err)
+	}
+	if (ledger && !hasBaseline) || (!ledger && hasPackets) {
+		return errPreBaseline
+	}
+	return nil
+}
+
 func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	_, err := pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -93,35 +115,8 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("failed to create schema_migrations: %w", err)
 	}
 
-	// After creating schema_migrations table, check if we need to bootstrap
-	var count int
-	err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&count)
-	if err != nil {
-		return fmt.Errorf("failed to check migrations count: %w", err)
-	}
-	if count == 0 {
-		// Check if db is already initialized by looking for a known table
-		var exists bool
-		err = pool.QueryRow(ctx, `
-        SELECT EXISTS(
-            SELECT 1 FROM information_schema.tables 
-            WHERE table_name = 'packets'
-        )
-    `).Scan(&exists)
-		if err != nil {
-			return fmt.Errorf("failed to check existing schema: %w", err)
-		}
-		if exists {
-			// Mark 001 as already applied
-			if _, err := pool.Exec(
-				ctx,
-				"INSERT INTO schema_migrations (filename) VALUES ($1)",
-				"001_initial_schema.sql",
-			); err != nil {
-				return fmt.Errorf("failed to bootstrap migrations: %w", err)
-			}
-			slog.Info("bootstrapped existing schema as 001_initial_schema.sql", "component", "db")
-		}
+	if err := checkBaseline(ctx, pool); err != nil {
+		return err
 	}
 
 	entries, err := fs.ReadDir(migrationFiles, "migrations")
