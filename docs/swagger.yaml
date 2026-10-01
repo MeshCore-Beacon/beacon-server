@@ -1492,6 +1492,42 @@ definitions:
       requires_restart:
         type: boolean
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.Catalogue:
+    properties:
+      checkedAt:
+        type: integer
+      freshUntil:
+        type: integer
+      generatedAt:
+        type: integer
+      iata:
+        type: string
+      lastError:
+        type: string
+      repeaters:
+        type: integer
+      scoped:
+        type: integer
+      scopes:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.CatalogueScope'
+        type: array
+      url:
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.CatalogueScope:
+    properties:
+      default:
+        type: integer
+      monitored:
+        type: boolean
+      name:
+        type: string
+      repeaters:
+        type: integer
+      wardriving:
+        type: boolean
+    type: object
   internal_api_handlers.APIError:
     properties:
       code:
@@ -3026,6 +3062,25 @@ paths:
       summary: Search known routes by source and destination hash
       tags:
       - Routes
+  /scope-catalogues:
+    get:
+      description: Configured sources only. Counts describe the source region, not
+        individual nodes or links. No upstream request is made. An empty list means
+        no configured importer; checkedAt=0 means no successful check. lastError or
+        a past freshUntil marks stale metadata. Manual Beacon scopes and packet evidence
+        are separate.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.Catalogue'
+            type: array
+      summary: Cached MeshMapper regional scope catalogues
+      tags:
+      - Scopes
   /scopes:
     get:
       description: The unfiltered list includes stored imported names after an importer

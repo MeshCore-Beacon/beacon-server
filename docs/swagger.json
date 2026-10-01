@@ -2229,6 +2229,29 @@
                 }
             }
         },
+        "/scope-catalogues": {
+            "get": {
+                "description": "Configured sources only. Counts describe the source region, not individual nodes or links. No upstream request is made. An empty list means no configured importer; checkedAt=0 means no successful check. lastError or a past freshUntil marks stale metadata. Manual Beacon scopes and packet evidence are separate.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Scopes"
+                ],
+                "summary": "Cached MeshMapper regional scope catalogues",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.Catalogue"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/scopes": {
             "get": {
                 "description": "The unfiltered list includes stored imported names after an importer is disabled or a source is removed. Those historical identities are retained indefinitely; listing them does not establish observed traffic or current source membership.",
@@ -5436,6 +5459,61 @@
                     "type": "boolean"
                 },
                 "requires_restart": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.Catalogue": {
+            "type": "object",
+            "properties": {
+                "checkedAt": {
+                    "type": "integer"
+                },
+                "freshUntil": {
+                    "type": "integer"
+                },
+                "generatedAt": {
+                    "type": "integer"
+                },
+                "iata": {
+                    "type": "string"
+                },
+                "lastError": {
+                    "type": "string"
+                },
+                "repeaters": {
+                    "type": "integer"
+                },
+                "scoped": {
+                    "type": "integer"
+                },
+                "scopes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.CatalogueScope"
+                    }
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.CatalogueScope": {
+            "type": "object",
+            "properties": {
+                "default": {
+                    "type": "integer"
+                },
+                "monitored": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "repeaters": {
+                    "type": "integer"
+                },
+                "wardriving": {
                     "type": "boolean"
                 }
             }

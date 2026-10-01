@@ -6,12 +6,15 @@ package router
 import (
 	"net/http"
 
+	"github.com/MeshCore-Beacon/beacon-server/internal/api/handlers"
+
 	"github.com/MeshCore-Beacon/beacon-server/internal/config"
 )
 
 // Options names the startup settings used by the router. Adding an optional
 // route does not change New's signature or require unrelated callers to change.
 type Options struct {
+	ScopeCatalogues      handlers.ScopeCatalogueSource
 	MaxConnsPerIP        int
 	MaxConnectsPerMinute int
 	WSAllowedOrigins     []string

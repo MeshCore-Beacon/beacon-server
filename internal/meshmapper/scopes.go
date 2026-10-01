@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -52,6 +53,7 @@ type source struct {
 
 // Importer is owned by one background task; ScopeStore synchronizes its consumers.
 type Importer struct {
+	catalogues atomic.Value // immutable []Catalogue, refreshed off the ingest path
 	store      Store
 	scopes     *scopestore.ScopeStore
 	manual     []scopestore.Entry
@@ -103,6 +105,7 @@ func New(ctx context.Context, cfg config.MeshMapperScopesConfig, store Store, sc
 		i.log(s, "restored")
 	}
 	i.publish()
+	i.publishCatalogues()
 	return i, nil
 }
 
@@ -224,6 +227,7 @@ func (i *Importer) refresh(ctx context.Context, s *source, now time.Time) error 
 			i.onChange(ctx)
 		}
 	}
+	i.publishCatalogues()
 	i.log(*s, "checked")
 	return nil
 }
