@@ -417,6 +417,7 @@ func main() {
 		WSAllowedOrigins:     cfg.WebSocket.AllowedOrigins,
 		CORS:                 cfg.CORS, Server: cfg.Server, Auth: cfg.Auth, RateLimit: resolved.RateLimit,
 		Scopes: scopes,
+		Meta:   api.NewMeta(resolved.PacketRetention, resolved.RouteRetention),
 		AdminRoutes: map[string]http.Handler{
 			"/accounts": handlers.AccountsRouter(store),
 			"/backup":   handlers.BackupRouter(backupOpts, ctx),

@@ -35,6 +35,7 @@ import (
 //	  /iatas           → iatas subrouter
 //	  /regions         → regions subrouter
 //	  /stats           → stats subrouter
+//	  /meta            → deployment metadata (retention windows)
 //
 // Admin endpoints require a configured bearer key.
 func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) http.Handler {
@@ -104,6 +105,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 			r.Mount("/observers", handlers.ObserversRouter(reader))
 			r.Mount("/channels", handlers.ChannelsRouter(reader))
 			r.Mount("/messages", handlers.MessagesRouter(reader))
+			r.Mount("/meta", handlers.MetaRouter(opts.Meta))
 			r.Mount("/iatas", handlers.IATAsRouter(reader))
 			r.Mount("/regions", handlers.RegionsRouter(reader))
 			r.Mount("/routes", handlers.RoutesRouter(reader))

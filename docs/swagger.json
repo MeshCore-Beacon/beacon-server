@@ -1041,6 +1041,26 @@
                 }
             }
         },
+        "/meta": {
+            "get": {
+                "description": "Retention windows in seconds, so clients can bound time-range pickers.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Meta"
+                ],
+                "summary": "Get deployment metadata",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.Meta"
+                        }
+                    }
+                }
+            }
+        },
         "/nodes": {
             "get": {
                 "produces": [
@@ -3718,6 +3738,17 @@
                 "pathKey": {
                     "description": "stable identity within this IATA; use for route evidence links",
                     "type": "string"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.Meta": {
+            "type": "object",
+            "properties": {
+                "packetRetentionSeconds": {
+                    "type": "integer"
+                },
+                "routeRetentionSeconds": {
+                    "type": "integer"
                 }
             }
         },
