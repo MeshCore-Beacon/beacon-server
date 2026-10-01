@@ -7,8 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -35,28 +33,13 @@ func (c *evidenceCapture) Query(ctx context.Context, sql string, args ...any) (p
 
 func TestRouteEvidencePostgres(t *testing.T) {
 	ctx, tx := retentionTx(t)
-	analyticsTables(t, ctx, tx)
-	ddl, err := migrationFiles.ReadFile("migrations/024_known_routes_pathkey.sql")
+	applyBaseline(t, ctx, tx)
+	_, err := tx.Exec(ctx, `
+ INSERT INTO observers(id,public_key,display_name) VALUES ('00000000-0000-0000-0000-000000000001','\x01','One'),('00000000-0000-0000-0000-000000000002','\x02','Two');
+ INSERT INTO nodes(id,public_key,node_type,name) VALUES ('00000000-0000-0000-0000-000000000001','\xaa',2,'A'),('00000000-0000-0000-0000-000000000002','\xbb',2,'B');
+ INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,first_heard_at,last_heard_at)
+ SELECT int4send(i),4,0,1,'\x00','\x00',NOW(),NOW() FROM generate_series(1,10) i;`)
 	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(ddl)
-	start := strings.Index(text, "CREATE TABLE known_routes_new (")
-	end := start + strings.Index(text[start:], "\n);") + 3
-	table := strings.ReplaceAll(text[start:end], "known_routes_new", "known_routes")
-	_, err = tx.Exec(ctx, `CREATE TABLE iata_codes (iata char(3) PRIMARY KEY); INSERT INTO iata_codes VALUES ('YOW'),('YVR');
- ALTER TABLE nodes ADD COLUMN latitude double precision, ADD COLUMN longitude double precision;`+table+`
- INSERT INTO observers(id,display_name) VALUES ('00000000-0000-0000-0000-000000000001','One'),('00000000-0000-0000-0000-000000000002','Two');
- INSERT INTO nodes(id,public_key,name) VALUES ('00000000-0000-0000-0000-000000000001','\xaa','A'),('00000000-0000-0000-0000-000000000002','\xbb','B');
- INSERT INTO packets(packet_hash) SELECT int4send(i) FROM generate_series(1,10) i;`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	index, err := migrationFiles.ReadFile("migrations/041_route_evidence_index.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tx.Exec(ctx, strings.Replace(string(index), "CREATE INDEX CONCURRENTLY", "CREATE INDEX", 1)); err != nil {
 		t.Fatal(err)
 	}
 	capture := &evidenceCapture{Tx: tx}
@@ -69,17 +52,20 @@ func TestRouteEvidencePostgres(t *testing.T) {
 	since := time.Now().UTC().Truncate(time.Millisecond).Add(-time.Hour)
 	until := since.Add(time.Hour)
 	at := since.Add(time.Minute + 123456*time.Microsecond)
-	_, err = tx.Exec(ctx, `INSERT INTO packet_observations(id,packet_hash,observer_id,iata,heard_at,hash_size,hop_count,path_bytes,payload_type,snr)
+	_, err = tx.Exec(ctx, `INSERT INTO packet_observations(id,packet_hash,observer_id,iata,heard_at,hash_size,hop_count,path_bytes,payload_type,snr,path_length_byte)
  SELECT i,int4send(i), '00000000-0000-0000-0000-000000000001',CASE WHEN i=5 THEN 'YVR' ELSE 'YOW' END,
  CASE WHEN i=9 THEN $2::timestamptz WHEN i=1 THEN $1::timestamptz-interval '2 microseconds' ELSE $1::timestamptz END,
  CASE WHEN i=4 THEN 2 ELSE 1 END,CASE WHEN i=4 THEN 1 WHEN i=10 THEN 3 ELSE 2 END,
  CASE WHEN i=6 THEN '\xabbb'::bytea WHEN i=10 THEN '\xaabbcc'::bytea ELSE '\xaabb'::bytea END,
- CASE WHEN i=7 THEN 9 WHEN i=8 THEN NULL ELSE 4 END,CASE WHEN i=1 THEN 'NaN'::real ELSE 0 END FROM generate_series(1,10) i;
+ CASE WHEN i=7 THEN 9 WHEN i=8 THEN NULL ELSE 4 END,CASE WHEN i=1 THEN 'NaN'::real ELSE 0 END,0 FROM generate_series(1,10) i;
  `, at, until)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO packet_observations(id,packet_hash,observer_id,iata,heard_at,hash_size,hop_count,path_bytes,payload_type) VALUES (11,int4send(1),'00000000-0000-0000-0000-000000000002','YOW',$1,1,2,'\xaabb',4)`, at.Add(-time.Microsecond)); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO packet_observations(id,packet_hash,observer_id,iata,heard_at,hash_size,hop_count,path_bytes,payload_type,path_length_byte) VALUES (11,int4send(1),'00000000-0000-0000-0000-000000000002','YOW',$1,1,2,'\xaabb',4,0)`, at.Add(-time.Microsecond)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(ctx, `UPDATE packet_observations SET path_length_byte=((hash_size-1)<<6)|hop_count`); err != nil {
 		t.Fatal(err)
 	}
 	query := api.RouteEvidenceQuery{Since: since, Until: until, Limit: 2}
@@ -122,12 +108,13 @@ func TestRouteEvidencePostgres(t *testing.T) {
 
 	// Many unrelated paths must not turn this into a raw-table or route-ID scan.
 	started := time.Now()
-	_, err = tx.Exec(ctx, `INSERT INTO packets(packet_hash) SELECT int4send(i) FROM generate_series(100,200099) i;`)
+	_, err = tx.Exec(ctx, `INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,first_heard_at,last_heard_at)
+ SELECT int4send(i),4,0,1,'\x00','\x00',NOW(),NOW() FROM generate_series(100,200099) i;`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO packet_observations(packet_hash,observer_id,iata,heard_at,hash_size,hop_count,path_bytes,payload_type)
- SELECT packet_hash,'00000000-0000-0000-0000-000000000001','YOW',$1,1,2,
+	_, err = tx.Exec(ctx, `INSERT INTO packet_observations(packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count,path_bytes,payload_type)
+ SELECT packet_hash,'00000000-0000-0000-0000-000000000001','YOW',$1,2,1,2,
  CASE WHEN get_byte(packet_hash,3)=0 THEN '\xaabb'::bytea ELSE packet_hash END,4 FROM packets;`, at)
 	if err != nil {
 		t.Fatal(err)
@@ -163,52 +150,18 @@ func TestRouteEvidencePostgres(t *testing.T) {
 }
 
 func TestRouteEvidenceIndexPostgres(t *testing.T) {
-	dsn := os.Getenv("BEACON_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set BEACON_TEST_POSTGRES_DSN")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	conn, err := pgx.Connect(ctx, dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close(context.Background())
-	schema := fmt.Sprintf("route_evidence_%d", time.Now().UnixNano())
-	ident := pgx.Identifier{schema}.Sanitize()
-	if _, err = conn.Exec(ctx, "CREATE SCHEMA "+ident+"; SET search_path TO "+ident); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _, _ = conn.Exec(context.Background(), "DROP SCHEMA "+ident+" CASCADE") }()
-	if _, err = conn.Exec(ctx, `CREATE TABLE packet_observations (id bigint,iata char(3),hash_size smallint,path_bytes bytea,heard_at timestamptz,payload_type smallint,hop_count smallint)`); err != nil {
-		t.Fatal(err)
-	}
-	migration, err := migrationFiles.ReadFile("migrations/041_route_evidence_index.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i := 0; i < 2; i++ {
-		if err = applyMigration(ctx, conn, string(migration)); err != nil {
-			t.Fatalf("migration/retry: %v", err)
-		}
-	}
-	if _, err = conn.Exec(ctx, `UPDATE pg_index SET indisvalid=false WHERE indexrelid='idx_observations_route_evidence'::regclass`); err != nil {
-		t.Fatal(err)
-	}
-	if err = applyMigration(ctx, conn, string(migration)); err != nil {
-		t.Fatal(err)
-	}
-	var valid bool
-	if err = conn.QueryRow(ctx, `SELECT indisvalid FROM pg_index WHERE indexrelid='idx_observations_route_evidence'::regclass`).Scan(&valid); err != nil || !valid {
-		t.Fatalf("invalid index after recovery: %v", err)
-	}
-	if _, err = conn.Exec(ctx, `INSERT INTO packet_observations(id,iata,hash_size,path_bytes,heard_at,payload_type,hop_count)
-SELECT n,'YOW',1,'\xaabb',NOW(),4,n FROM generate_series(0,2) n;
+	ctx, tx := retentionTx(t)
+	applyBaseline(t, ctx, tx)
+	if _, err := tx.Exec(ctx, `INSERT INTO observers(id,public_key) VALUES ('00000000-0000-0000-0000-000000000001','\x01');
+INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,first_heard_at,last_heard_at)
+SELECT int4send(n),4,0,1,'\x00','\x00',NOW(),NOW() FROM generate_series(0,2) n;
+INSERT INTO packet_observations(packet_hash,observer_id,iata,path_length_byte,hash_size,path_bytes,heard_at,payload_type,hop_count)
+SELECT int4send(n),'00000000-0000-0000-0000-000000000001','YOW',n,1,'\xaabb',NOW(),4,n FROM generate_series(0,2) n;
 ANALYZE packet_observations`); err != nil {
 		t.Fatal(err)
 	}
 	var indexed float32
-	if err = conn.QueryRow(ctx, `SELECT reltuples FROM pg_class WHERE oid='idx_observations_route_evidence'::regclass`).Scan(&indexed); err != nil || indexed != 1 {
+	if err := tx.QueryRow(ctx, `SELECT reltuples FROM pg_class WHERE oid='idx_observations_route_evidence'::regclass`).Scan(&indexed); err != nil || indexed != 1 {
 		t.Fatalf("0/1-hop rows entered the route index: %v %v", indexed, err)
 	}
 }

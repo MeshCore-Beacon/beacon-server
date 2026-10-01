@@ -20,7 +20,7 @@ import (
 //go:embed queries/queries.sql
 var routeTestQueries string
 
-// All synthetic rows and indexes are temporary and rolled back. The sparse
+// All synthetic rows are rolled back. The sparse
 // region sits behind 100,000 newer routes to expose global timestamp scans.
 func TestListKnownRoutesPostgres(t *testing.T) {
 	dsn := os.Getenv("BEACON_TEST_POSTGRES_DSN")
@@ -39,8 +39,9 @@ func TestListKnownRoutesPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(context.Background())
+	applyBaseline(t, ctx, tx)
 	_, err = tx.Exec(ctx, `
-CREATE TEMP TABLE known_routes (LIKE public.known_routes INCLUDING ALL) ON COMMIT DROP;
+INSERT INTO iata_codes (iata) VALUES ('GPT');
 INSERT INTO known_routes (id,path_key,node_ids,hash_prefix,iata,hop_count,first_seen,last_seen)
 SELECT i, decode(md5(i::text),'hex'), ARRAY[md5(i::text)::uuid], ARRAY['\x01'::bytea],
        CASE WHEN i > 100000 THEN 'GPT' ELSE 'YYZ' END, i % 4 + 2,
@@ -49,15 +50,6 @@ SELECT i, decode(md5(i::text),'hex'), ARRAY[md5(i::text)::uuid], ARRAY['\x01'::b
 FROM generate_series(1,100100) i;
 ANALYZE known_routes;`)
 	if err != nil {
-		t.Fatal(err)
-	}
-	migration, err := migrationFiles.ReadFile("migrations/027_known_routes_iata_last_seen.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// A temporary table inside this rollback-only fixture cannot be indexed
-	// concurrently. Use the migration's exact definition with that option off.
-	if _, err := tx.Exec(ctx, strings.Replace(string(migration), "CREATE INDEX CONCURRENTLY", "CREATE INDEX", 1)); err != nil {
 		t.Fatal(err)
 	}
 	queries := strings.ReplaceAll(routeTestQueries, "\r\n", "\n")

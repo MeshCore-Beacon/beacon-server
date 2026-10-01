@@ -7,35 +7,21 @@ import (
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
-	"strings"
 	"testing"
 	"time"
 )
 
 func TestObserverMetricsPostgres(t *testing.T) {
 	ctx, tx := retentionTx(t)
-	analyticsTables(t, ctx, tx)
-	// Use the real observer DDL without depending on a preinstalled public schema.
-	initial, err := migrationFiles.ReadFile("migrations/001_initial_schema.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ddl := string(initial)
-	start := strings.Index(ddl, "CREATE TABLE observers (")
-	end := strings.Index(ddl[start:], "\n);") + start + 3
-	if _, err := tx.Exec(ctx, "DROP TABLE observers; "+ddl[start:end]+" ALTER TABLE observers ADD COLUMN region_scope TEXT;"); err != nil {
-		t.Fatal(err)
-	}
+	applyBaseline(t, ctx, tx)
 	if _, err := tx.Exec(ctx, `
- CREATE TABLE observer_brokers (observer_id uuid,broker_name text,last_seen timestamptz,last_packet_at timestamptz,PRIMARY KEY(observer_id,broker_name));
  INSERT INTO observers (id,public_key) VALUES ('00000000-0000-0000-0000-000000000001','\x01');
- INSERT INTO packets(packet_hash,payload_type,last_heard_at,first_heard_at) SELECT int4send(i),4,NOW()-interval '5 days',NOW()-interval '5 days' FROM generate_series(1,3) i;
+ INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,last_heard_at,first_heard_at) SELECT int4send(i),4,0,1,'\x00','\x00',NOW()-interval '5 days',NOW()-interval '5 days' FROM generate_series(1,3) i;
  INSERT INTO packet_observations(packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count,payload_type,snr,rssi)
  SELECT packet_hash,'00000000-0000-0000-0000-000000000001','YOW',date_trunc('hour',NOW())-interval '5 days',0,1,0,CASE WHEN packet_hash=int4send(1) THEN 4 END,CASE WHEN packet_hash IN (int4send(1),int4send(2)) THEN 'NaN'::real ELSE 0 END,-100 FROM packets;
  `); err != nil {
 		t.Fatal(err)
 	}
-	applyStatsMigration(t, ctx, tx, "039_analytics_retention.sql")
 	store := &Store{q: sqlc.New(tx)}
 	id := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	if err := store.DeleteOldPackets(ctx, time.Now().Add(-72*time.Hour)); err != nil {
@@ -59,9 +45,9 @@ func TestObserverMetricsPostgres(t *testing.T) {
 	if activity.WindowEnd != until.UnixMilli() || activity.WindowStart != until.Add(-7*24*time.Hour).UnixMilli() || activity.Source != "hourly" {
 		t.Fatalf("window: %+v", activity)
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO packets(packet_hash,last_heard_at) VALUES ('\xaa',NOW());
+	if _, err := tx.Exec(ctx, `INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,first_heard_at,last_heard_at) VALUES ('\xaa',4,0,1,'\x00','\x00',NOW(),NOW());
  INSERT INTO packet_observations(packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count,snr,rssi) VALUES ('\xaa','00000000-0000-0000-0000-000000000001','YOW',date_trunc('hour',NOW())-interval '30 minutes',0,1,0,'NaN'::real,-100);
- INSERT INTO packet_observations(packet_hash,observer_id,iata,heard_at) VALUES ('\xaa','00000000-0000-0000-0000-000000000001','YOW',NOW()) ON CONFLICT DO NOTHING;`); err != nil {
+ INSERT INTO packet_observations(packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count) VALUES ('\xaa','00000000-0000-0000-0000-000000000001','YOW',NOW(),0,1,0) ON CONFLICT DO NOTHING;`); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := store.GetObserverActivity(ctx, id, time.Hour, 15*time.Minute, until)

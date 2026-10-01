@@ -36,11 +36,11 @@ func TestPathsPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(context.Background())
-	isolateStatsSchema(t, ctx, tx)
+	applyBaseline(t, ctx, tx)
 	_, err = tx.Exec(ctx, `
 SET LOCAL TIME ZONE 'America/Vancouver';
-CREATE TABLE packet_observations(heard_at timestamptz NOT NULL,iata char(3) NOT NULL,payload_type smallint,path_length_byte smallint NOT NULL,hash_size smallint NOT NULL,hop_count smallint NOT NULL,path_bytes bytea);
-INSERT INTO packet_observations
+CREATE TEMP TABLE fixture(heard_at timestamptz NOT NULL,iata char(3) NOT NULL,payload_type smallint,path_length_byte smallint NOT NULL,hash_size smallint NOT NULL,hop_count smallint NOT NULL,path_bytes bytea);
+INSERT INTO fixture
 SELECT CASE id WHEN 1 THEN '2026-01-01 00:30+00'::timestamptz WHEN 17 THEN '2026-01-01 04:00+00'::timestamptz WHEN 18 THEN '2026-01-01 04:30+00'::timestamptz WHEN 20 THEN '2026-01-01 03:00+00'::timestamptz
  ELSE '2026-01-01 00:30+00'::timestamptz+(id/10)*interval '2 hour'+(id%10)*interval '1 minute' END,
  iata,payload,raw,width,hops,CASE WHEN size IS NULL THEN NULL ELSE decode(repeat('ab',size),'hex') END
@@ -52,7 +52,13 @@ FROM (VALUES
  (13,'YYZ',5,0,1,0,0),(14,'YVR',16,1,1,1,1),(15,'YVR',4,63,1,63,63),
  (16,'YVR',4,149,3,21,63),(17,'YVR',4,1,1,1,1),(18,'YVR',4,1,1,1,1),
  (19,'YYJ',9,3,1,3,3),(20,'YVR',4,64,2,0,0)
-) v(id,iata,payload,raw,width,hops,size);`)
+) v(id,iata,payload,raw,width,hops,size);
+ALTER TABLE fixture ADD COLUMN n serial;
+INSERT INTO observers (id,public_key) VALUES ('00000000-0000-0000-0000-000000000001','\x01');
+INSERT INTO packets (packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,first_heard_at,last_heard_at)
+SELECT int4send(n),4,0,1,'\x00','\x00',heard_at,heard_at FROM fixture;
+INSERT INTO packet_observations (packet_hash,observer_id,heard_at,iata,payload_type,path_length_byte,hash_size,hop_count,path_bytes)
+SELECT int4send(n),'00000000-0000-0000-0000-000000000001',heard_at,iata,payload_type,path_length_byte,hash_size,hop_count,path_bytes FROM fixture;`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,8 +66,9 @@ FROM (VALUES
 	if _, err := tx.Exec(ctx, "UPDATE packet_observations SET heard_at=to_timestamp(extract(epoch FROM $1::timestamptz)+extract(epoch FROM heard_at)-extract(epoch FROM '2026-01-01 00:00+00'::timestamptz))", since); err != nil {
 		t.Fatal(err)
 	}
-	applyStatsMigration(t, ctx, tx, "036_mv_path_stats.sql")
-	applyStatsMigration(t, ctx, tx, "036_mv_path_stats.sql") // interrupted journal retry
+	if _, err := tx.Exec(ctx, "REFRESH MATERIALIZED VIEW mv_path_stats_hourly"); err != nil {
+		t.Fatal(err)
+	}
 	store := &Store{q: sqlc.New(tx)}
 	until := since.Add(4 * time.Hour)
 	for _, mode := range []string{"force_custom_plan", "force_generic_plan"} {
@@ -116,7 +123,12 @@ FROM (VALUES
 	if _, err = tx.Exec(ctx, "TRUNCATE packet_observations"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO packet_observations SELECT $1::timestamptz+interval '1 hour','YVR',4,i,(i>>6)+1,i&63,decode(repeat('ab',((i>>6)+1)*(i&63)),'hex') FROM generate_series(0,255)i;`, since); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO packets (packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,first_heard_at,last_heard_at)
+SELECT int4send(1000+i),4,0,1,'\x00','\x00',$1,$1 FROM generate_series(0,255)i`, since); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO packet_observations (packet_hash,observer_id,heard_at,iata,payload_type,path_length_byte,hash_size,hop_count,path_bytes)
+SELECT int4send(1000+i),'00000000-0000-0000-0000-000000000001',$1::timestamptz+interval '1 hour','YVR',4,i,(i>>6)+1,i&63,decode(repeat('ab',((i>>6)+1)*(i&63)),'hex') FROM generate_series(0,255)i;`, since); err != nil {
 		t.Fatal(err)
 	}
 	stale, err := store.GetPathStats(ctx, since, until, nil)

@@ -79,8 +79,8 @@ swag init             # if you changed any handler or api type (see below)
 All schema changes must include a proper migration path:
 
 - Add a new migration file to `db/migrations/` following the existing naming
-  convention (e.g. `002_add_observation_count.sql`). Do not modify existing
-  migration files — append only via new files.
+  convention (e.g. `002_add_observation_count.sql`). `001_baseline.sql` is the
+  2.0.0 schema; do not modify existing migration files — append only via new files.
 - Update `db/queries/queries.sql` with any new or modified queries
 - Re-run `sqlc generate` to regenerate `db/sqlc/`
 - Update the store layer in `db/` to expose the new functionality
@@ -239,7 +239,7 @@ Scopes are optional but helpful for larger codebases. Common scopes: `api`,
 ```
 cmd/beacon/          — main entry point, wiring, startup
 db/                  — store layer: sqlc-generated code + thin mapping layer
-  migrations/        — SQL schema (single file, append only)
+  migrations/        — SQL schema (2.0.0 baseline + numbered files, append only)
   queries/           — SQL queries (input to sqlc)
   sqlc/              — generated Go code (do not edit by hand)
 internal/

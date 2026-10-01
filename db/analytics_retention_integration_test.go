@@ -16,13 +16,20 @@ import (
 
 var retainedViews = []string{"mv_hourly_iata_stats", "mv_payload_breakdown_by_iata", "mv_top_observers_by_iata", "mv_top_talkers_by_iata", "mv_top_advertisers_by_iata", "mv_observer_activity_hourly", "mv_signal_stats_hourly", "mv_path_stats_hourly"}
 
-func analyticsSnapshot(t *testing.T, ctx context.Context, tx pgx.Tx) map[string]string {
+func refreshRetainedViews(t *testing.T, ctx context.Context, tx pgx.Tx) {
 	t.Helper()
-	result := map[string]string{}
 	for _, view := range retainedViews {
 		if _, err := tx.Exec(ctx, "REFRESH MATERIALIZED VIEW "+view); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func analyticsSnapshot(t *testing.T, ctx context.Context, tx pgx.Tx) map[string]string {
+	t.Helper()
+	refreshRetainedViews(t, ctx, tx)
+	result := map[string]string{}
+	for _, view := range retainedViews {
 		var rows string
 		if err := tx.QueryRow(ctx, "SELECT COALESCE(jsonb_agg(r ORDER BY r::text),'[]')::text FROM (SELECT to_jsonb(v) r FROM "+view+" v) s").Scan(&rows); err != nil {
 			t.Fatal(err)
@@ -34,9 +41,8 @@ func analyticsSnapshot(t *testing.T, ctx context.Context, tx pgx.Tx) map[string]
 
 func TestAnalyticsRetentionConcurrentPostgres(t *testing.T) {
 	ctx, tx := retentionTx(t)
-	analyticsTables(t, ctx, tx)
-	applyStatsMigration(t, ctx, tx, "039_analytics_retention.sql")
-	if _, err := tx.Exec(ctx, `INSERT INTO packets (packet_hash,last_heard_at) VALUES ('\x01',NOW()-interval '5 days'); INSERT INTO observers(id) VALUES ('00000000-0000-0000-0000-000000000001')`); err != nil {
+	applyBaseline(t, ctx, tx)
+	if _, err := tx.Exec(ctx, `INSERT INTO packets (packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,first_heard_at,last_heard_at) VALUES ('\x01',4,0,1,'\x00','\x00',NOW()-interval '5 days',NOW()-interval '5 days'); INSERT INTO observers(id,public_key) VALUES ('00000000-0000-0000-0000-000000000001','\x01')`); err != nil {
 		t.Fatal(err)
 	}
 	var schema string
@@ -70,7 +76,7 @@ func TestAnalyticsRetentionConcurrentPostgres(t *testing.T) {
 	}
 	defer ingest.Rollback(context.Background())
 	// An in-flight FK insert holds KEY SHARE on the packet until it commits.
-	if _, err = ingest.Exec(ctx, `INSERT INTO packet_observations(packet_hash,observer_id,iata,heard_at) VALUES ('\x01','00000000-0000-0000-0000-000000000001','YVR',NOW()-interval '5 days')`); err != nil {
+	if _, err = ingest.Exec(ctx, `INSERT INTO packet_observations(packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count) VALUES ('\x01','00000000-0000-0000-0000-000000000001','YVR',NOW()-interval '5 days',0,1,0)`); err != nil {
 		t.Fatal(err)
 	}
 	q := sqlc.New(conn)
@@ -114,33 +120,11 @@ func TestAnalyticsRetentionConcurrentPostgres(t *testing.T) {
 	}
 }
 
-// Minimal real tables keep this regression runnable against an empty CI database.
-func analyticsTables(t *testing.T, ctx context.Context, tx pgx.Tx) {
-	t.Helper()
-	isolateStatsSchema(t, ctx, tx)
-	_, err := tx.Exec(ctx, `
-CREATE TABLE packets (packet_hash bytea PRIMARY KEY, payload_type smallint, payload_version smallint,
- route_type smallint, raw_payload bytea, raw_header bytea, origin_pubkey bytea,
- first_heard_at timestamptz, last_heard_at timestamptz);
-CREATE INDEX ON packets(last_heard_at);
-CREATE TABLE packet_observations (id bigserial PRIMARY KEY, packet_hash bytea REFERENCES packets ON DELETE CASCADE,
- observer_id uuid NOT NULL, iata char(3) NOT NULL, heard_at timestamptz NOT NULL,
- path_length_byte smallint, hash_size smallint, hop_count smallint, path_bytes bytea,
- snr real, rssi smallint, airtime_ms real, payload_type smallint, UNIQUE(packet_hash,observer_id));
-CREATE TABLE observers (id uuid PRIMARY KEY, public_key bytea, display_name text, observer_type text);
-CREATE TABLE nodes (id uuid PRIMARY KEY, public_key bytea UNIQUE, node_type smallint, name text);
-CREATE TABLE channel_messages (id bigserial PRIMARY KEY, channel_id integer, packet_hash bytea UNIQUE REFERENCES packets ON DELETE CASCADE,
- sender_name text, content text, sent_at timestamptz);
-`)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestAnalyticsRetentionPostgres(t *testing.T) {
 	ctx, tx := retentionTx(t)
-	analyticsTables(t, ctx, tx)
+	applyBaseline(t, ctx, tx)
 	_, err := tx.Exec(ctx, `
+ INSERT INTO channels (id,channel_hash) VALUES (1,'\x01');
  INSERT INTO observers (id,public_key,display_name,observer_type) SELECT ('00000000-0000-0000-0000-00000000000'||i)::uuid,int4send(i),CASE WHEN i=1 THEN NULL ELSE 'Observer '||i END,CASE WHEN i=1 THEN NULL ELSE 'test' END FROM generate_series(1,3) i;
  INSERT INTO nodes (id,public_key,node_type,name) VALUES ('00000000-0000-0000-0000-000000000002','\x02',2,'Repeater');
  INSERT INTO packets (packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,origin_pubkey,first_heard_at,last_heard_at)
@@ -152,22 +136,17 @@ func TestAnalyticsRetentionPostgres(t *testing.T) {
  FROM packets CROSS JOIN (VALUES ('YVR',1),('YVR',2),('YYZ',3)) v(iata,n);
  INSERT INTO channel_messages (channel_id,packet_hash,sender_name,content,sent_at)
  SELECT 1,packet_hash,'Sender','body that must expire',first_heard_at FROM packets;
- CREATE MATERIALIZED VIEW mv_hourly_iata_stats AS SELECT iata,date_trunc('hour',heard_at) AS hour,count(*) AS observation_count,count(DISTINCT packet_hash) AS unique_packets,count(DISTINCT observer_id) AS active_observers FROM packet_observations GROUP BY 1,2;
  `)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, migration := range []string{"016_mv_payload_breakdown.sql", "017_mv_top_observers.sql", "018_mv_top_talkers.sql", "019_mv_top_advertisers.sql", "021_mv_top_advertisers_route_type.sql", "032_mv_observer_activity.sql", "035_mv_signal_stats.sql", "036_mv_path_stats.sql"} {
-		applyStatsMigration(t, ctx, tx, migration)
-	}
-	applyStatsMigration(t, ctx, tx, "039_analytics_retention.sql")
 	for _, name := range []string{"idx_mv_signal_stats_hourly_hour", "idx_mv_path_stats_hourly_hour"} {
 		var definition string
 		if err := tx.QueryRow(ctx, "SELECT pg_get_indexdef(to_regclass($1))", name).Scan(&definition); err != nil || !strings.Contains(definition, "(hour)") {
 			t.Fatalf("missing unfiltered time index %s: %s %v", name, definition, err)
 		}
 	}
-	// The signal/path stores must read the 039 view definitions, not just 035/036.
+	refreshRetainedViews(t, ctx, tx)
 	store := &Store{q: sqlc.New(tx)}
 	hour := time.Now().UTC().Truncate(time.Hour)
 	signal, err := store.GetSignalStats(ctx, hour.Add(-6*24*time.Hour), hour, nil)
@@ -176,14 +155,14 @@ func TestAnalyticsRetentionPostgres(t *testing.T) {
 	}
 	// 12 observations; only the n=1 rows carry a signal (snr 0, rssi -100).
 	if signal.Receptions != 12 || signal.SNR.Samples != 4 || signal.RSSI.Samples != 4 {
-		t.Fatalf("signal stats on 039 views: %+v", signal)
+		t.Fatalf("signal stats: %+v", signal)
 	}
 	paths, err := store.GetPathStats(ctx, hour.Add(-6*24*time.Hour), hour, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if paths.Receptions != 12 {
-		t.Fatalf("path stats on 039 views: %+v", paths)
+		t.Fatalf("path stats: %+v", paths)
 	}
 	before := analyticsSnapshot(t, ctx, tx)
 	q := sqlc.New(tx)
@@ -216,18 +195,17 @@ func TestAnalyticsRetentionPostgres(t *testing.T) {
 			t.Errorf("%s lost or double-counted history after raw expiry: before=%s after=%s", view, before[view], after[view])
 		}
 	}
-	// Retry and migration journal retry preserve the exact summaries.
+	// A retry preserves the exact summaries.
 	if n, err := q.DeleteOldPackets(ctx, sqlc.DeleteOldPacketsParams{Cutoff: pgtype.Timestamptz{Time: cutoff, Valid: true}, BatchSize: 1000}); err != nil || n != 0 {
 		t.Fatalf("retry: %d %v", n, err)
 	}
-	applyStatsMigration(t, ctx, tx, "039_analytics_retention.sql")
 	for view, rows := range analyticsSnapshot(t, ctx, tx) {
 		if rows != before[view] {
 			t.Errorf("retry changed %s", view)
 		}
 	}
 	// Later receptions on a still-live packet must join its old bucket before expiry.
-	if _, err := tx.Exec(ctx, `INSERT INTO observers (id) VALUES ('00000000-0000-0000-0000-000000000004'); INSERT INTO packet_observations (packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count,snr,rssi,payload_type)
+	if _, err := tx.Exec(ctx, `INSERT INTO observers (id,public_key) VALUES ('00000000-0000-0000-0000-000000000004','\x04'); INSERT INTO packet_observations (packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count,snr,rssi,payload_type)
  SELECT packet_hash,'00000000-0000-0000-0000-000000000004','YVR',first_heard_at,0,1,0,'NaN',-80,NULL FROM packets;
  UPDATE packets SET last_heard_at=first_heard_at`); err != nil {
 		t.Fatal(err)
@@ -282,13 +260,13 @@ func TestAnalyticsRetentionPostgres(t *testing.T) {
 	}
 	// More than one populated cohort, with shared hourly keys across the boundary.
 	if _, err := tx.Exec(ctx, `
-INSERT INTO observers (id) VALUES ('00000000-0000-0000-0000-000000000001');
+INSERT INTO observers (id,public_key) VALUES ('00000000-0000-0000-0000-000000000001','\x01');
 INSERT INTO nodes (id,public_key,node_type) VALUES ('00000000-0000-0000-0000-000000000002','\x02',2);
-INSERT INTO packets (packet_hash,payload_type,route_type,origin_pubkey,first_heard_at,last_heard_at,raw_payload)
-SELECT int4send(i),4,1,'\x02',date_trunc('hour',NOW())-interval '5 days',date_trunc('hour',NOW())-interval '5 days',decode(repeat('ab',1024),'hex') FROM generate_series(10000,11000) i;
+INSERT INTO packets (packet_hash,payload_type,payload_version,route_type,origin_pubkey,first_heard_at,last_heard_at,raw_payload,raw_header)
+SELECT int4send(i),4,0,1,'\x02',date_trunc('hour',NOW())-interval '5 days',date_trunc('hour',NOW())-interval '5 days',decode(repeat('ab',1024),'hex'),'\x00' FROM generate_series(10000,11000) i;
 INSERT INTO packet_observations (packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count,payload_type,snr,rssi)
 SELECT packet_hash,'00000000-0000-0000-0000-000000000001','YVR',first_heard_at,0,1,0,4,0,-100 FROM packets;
-INSERT INTO channel_messages (packet_hash,sender_name,sent_at) SELECT packet_hash,'Sender',first_heard_at FROM packets;
+INSERT INTO channel_messages (channel_id,packet_hash,sender_name,sent_at) SELECT 1,packet_hash,'Sender',first_heard_at FROM packets;
 `); err != nil {
 		t.Fatal(err)
 	}
