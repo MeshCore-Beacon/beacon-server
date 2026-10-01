@@ -141,7 +141,7 @@ func TestRouteEvidencePostgres(t *testing.T) {
 	if _, err := store.GetRouteEvidence(ctx, "YOW", key, wrong); !errors.Is(err, api.ErrRouteEvidenceInput) {
 		t.Fatalf("wrong hop count accepted: %v", err)
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO nodes(id,public_key,name) VALUES ('00000000-0000-0000-0000-000000000003','\xaa9988','Collision');
+	_, err = tx.Exec(ctx, `INSERT INTO nodes(id,public_key,node_type,name) VALUES ('00000000-0000-0000-0000-000000000003','\xaa9988',2,'Collision');
  DELETE FROM nodes WHERE id='00000000-0000-0000-0000-000000000001'`)
 	if err != nil {
 		t.Fatal(err)
@@ -149,7 +149,7 @@ func TestRouteEvidencePostgres(t *testing.T) {
 	if _, err := store.GetRouteEvidence(ctx, "YOW", key, shared); !errors.Is(err, api.ErrRouteEvidenceInput) {
 		t.Fatalf("missing node substituted by colliding node: %v", err)
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO nodes(id,public_key,name) VALUES ('00000000-0000-0000-0000-000000000001','\xaa0102','A')`); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO nodes(id,public_key,node_type,name) VALUES ('00000000-0000-0000-0000-000000000001','\xaa0102',2,'A')`); err != nil {
 		t.Fatal(err)
 	}
 	copyPage, err = store.GetRouteEvidence(ctx, "YOW", key, shared)
