@@ -35,7 +35,6 @@ func TestRouteEvidencePostgres(t *testing.T) {
 	ctx, tx := retentionTx(t)
 	applyBaseline(t, ctx, tx)
 	_, err := tx.Exec(ctx, `
- INSERT INTO iata_codes(iata) VALUES ('YOW'),('YVR') ON CONFLICT DO NOTHING;
  INSERT INTO observers(id,public_key,display_name) VALUES ('00000000-0000-0000-0000-000000000001','\x01','One'),('00000000-0000-0000-0000-000000000002','\x02','Two');
  INSERT INTO nodes(id,public_key,node_type,name) VALUES ('00000000-0000-0000-0000-000000000001','\xaa0102',2,'A'),('00000000-0000-0000-0000-000000000002','\xbb0304',2,'B');
  INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,first_heard_at,last_heard_at)
@@ -87,11 +86,11 @@ func TestRouteEvidencePostgres(t *testing.T) {
 	}
 	// A new representation arrives while page one is open. New reads follow it,
 	// but pagination and copied links retain the exact original representation.
-	if _, err = tx.Exec(ctx, `INSERT INTO packets(packet_hash) VALUES (int4send(12)),(int4send(13)),(int4send(14))`); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,first_heard_at,last_heard_at) SELECT int4send(i),4,0,1,'\x00','\x00',NOW(),NOW() FROM generate_series(12,14) i`); err != nil {
 		t.Fatal(err)
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO packet_observations(id,packet_hash,observer_id,iata,heard_at,hash_size,hop_count,path_bytes,payload_type)
- SELECT i,int4send(i),'00000000-0000-0000-0000-000000000001','YOW',$1,2,2,'\xaa01bb03',4 FROM generate_series(12,14) i`, at)
+	_, err = tx.Exec(ctx, `INSERT INTO packet_observations(id,packet_hash,observer_id,iata,heard_at,hash_size,hop_count,path_bytes,payload_type,path_length_byte)
+ SELECT i,int4send(i),'00000000-0000-0000-0000-000000000001','YOW',$1,2,2,'\xaa01bb03',4,66 FROM generate_series(12,14) i`, at)
 	if err != nil {
 		t.Fatal(err)
 	}
