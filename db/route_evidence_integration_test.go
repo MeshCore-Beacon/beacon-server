@@ -165,3 +165,31 @@ ANALYZE packet_observations`); err != nil {
 		t.Fatalf("0/1-hop rows entered the route index: %v %v", indexed, err)
 	}
 }
+
+func TestRouteEvidenceFollowsPrefixWidthPostgres(t *testing.T) {
+	ctx, tx := retentionTx(t)
+	applyBaseline(t, ctx, tx)
+	if _, err := tx.Exec(ctx, `INSERT INTO observers(id,public_key) VALUES ('00000000-0000-0000-0000-000000000001','\x01');
+INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,first_heard_at,last_heard_at)
+VALUES (int4send(1),4,0,1,'\x00','\x00',NOW(),NOW());
+INSERT INTO packet_observations(id,packet_hash,observer_id,iata,heard_at,hash_size,hop_count,path_bytes,payload_type,path_length_byte)
+VALUES (1,int4send(1),'00000000-0000-0000-0000-000000000001','YOW',NOW(),2,2,'\xaa11bb22',4,(1<<6)|2)`); err != nil {
+		t.Fatal(err)
+	}
+	store := &Store{q: sqlc.New(tx)}
+	ids := []uuid.UUID{uuid.New(), uuid.New()}
+	if err := store.UpsertKnownRoute(ctx, ids, [][]byte{{0xaa}, {0xbb}}, "YOW", 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertKnownRoute(ctx, ids, [][]byte{{0xaa, 0x11}, {0xbb, 0x22}}, "YOW", 2); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	got, err := store.GetRouteEvidence(ctx, "YOW", hex.EncodeToString(routePathKey(ids)), api.RouteEvidenceQuery{Since: now.Add(-time.Hour), Until: now.Add(time.Minute), Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.HashSize != 2 || got.PathBytes != "aa11bb22" || len(got.Items) != 1 || got.Route.ObservationCount != 2 {
+		t.Fatalf("evidence kept the first prefix width: %+v", got)
+	}
+}

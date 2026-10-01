@@ -329,7 +329,8 @@ type Querier interface {
 	// ROUTES
 	// ============================================================
 	// Route identity is path_key, an md5 of node_ids computed by the caller.
-	// On conflict, observation_count and last_seen are bumped.
+	// On conflict, observation_count and last_seen are bumped and hash_prefix follows the
+	// latest hearing, so evidence matches the hash width the route uses now.
 	UpsertKnownRoute(ctx context.Context, arg UpsertKnownRouteParams) error
 	// ============================================================
 	// NODES
