@@ -37,6 +37,7 @@ func ChannelsRouter(reader api.Reader) http.Handler {
 //	@Param		hash	query		string	false	"Single-byte channel hash (hex)"
 //	@Param		iata	query		string	false	"Filter by IATA code: channels MeshMapper lists there, config channels scoped to a region containing it, and Beacon-wide config channels"
 //	@Param		iatas	query		string	false	"Filter by IATA code(s), comma-separated e.g. YOW or YOW,YYZ; same membership rule as iata"
+//	@Param		keyKnown	query		bool	false	"Only channels Beacon can (true) or cannot (false) decrypt; omit for all"
 //	@Param		cursor	query		int		false	"last_seen epoch ms of last item for pagination; 0 starts from the beginning"
 //	@Param		pageCursor	query		string	false	"Opaque nextPageCursor from a previous response; preserves timestamp ties and precision. Cannot be combined with a positive cursor; cursor=0 is allowed."
 //	@Param		limit	query		int		false	"Max results (default 50); must be positive, values above 200 are clamped" minimum(1) maximum(200)
@@ -86,7 +87,19 @@ func listChannels(reader api.Reader) http.HandlerFunc {
 			}
 			hashHex = h
 		}
-		channels, err := reader.ListChannels(r.Context(), limit, hashHex, iatas, cursor, pageCursor)
+		var keyKnown *bool
+		if q := r.URL.Query(); q.Has("keyKnown") {
+			switch q.Get("keyKnown") {
+			case "true":
+				keyKnown = new(true)
+			case "false":
+				keyKnown = new(false)
+			default:
+				respondError(w, http.StatusBadRequest, "keyKnown must be true or false")
+				return
+			}
+		}
+		channels, err := reader.ListChannels(r.Context(), limit, hashHex, iatas, keyKnown, cursor, pageCursor)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return

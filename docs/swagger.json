@@ -606,6 +606,12 @@
                         "in": "query"
                     },
                     {
+                        "type": "boolean",
+                        "description": "Only channels Beacon can (true) or cannot (false) decrypt; omit for all",
+                        "name": "keyKnown",
+                        "in": "query"
+                    },
+                    {
                         "type": "integer",
                         "description": "last_seen epoch ms of last item for pagination; 0 starts from the beginning",
                         "name": "cursor",

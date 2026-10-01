@@ -419,8 +419,8 @@ func (cr *CachedReader) GetCrossIATANeighbors(ctx context.Context, nodeID uuid.U
 }
 
 // ListChannels implements [api.Reader].
-func (cr *CachedReader) ListChannels(ctx context.Context, limit int32, hash []byte, iatas []string, cursor int64, pageCursor *api.ChannelCursor) (api.ChannelPage, error) {
-	return cr.inner.ListChannels(ctx, limit, hash, iatas, cursor, pageCursor)
+func (cr *CachedReader) ListChannels(ctx context.Context, limit int32, hash []byte, iatas []string, keyKnown *bool, cursor int64, pageCursor *api.ChannelCursor) (api.ChannelPage, error) {
+	return cr.inner.ListChannels(ctx, limit, hash, iatas, keyKnown, cursor, pageCursor)
 }
 
 // ListChannelMessages implements [api.Reader].

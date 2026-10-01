@@ -102,7 +102,7 @@ func (s *Store) DeleteOldChannelIATAs(ctx context.Context, cutoff time.Time) err
 	return s.q.DeleteOldChannelIATAs(ctx, pgtype.Timestamptz{Time: cutoff, Valid: true})
 }
 
-func (s *Store) ListChannels(ctx context.Context, limit int32, hash []byte, iatas []string, cursor int64, pageCursor *api.ChannelCursor) (api.ChannelPage, error) {
+func (s *Store) ListChannels(ctx context.Context, limit int32, hash []byte, iatas []string, keyKnown *bool, cursor int64, pageCursor *api.ChannelCursor) (api.ChannelPage, error) {
 	var cursorTS pgtype.Timestamptz
 	if cursor > 0 {
 		cursorTS = pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}
@@ -111,12 +111,12 @@ func (s *Store) ListChannels(ctx context.Context, limit int32, hash []byte, iata
 	var err error
 	if pageCursor != nil {
 		rows, err = s.q.ListChannelsAfter(ctx, sqlc.ListChannelsAfterParams{
-			ChannelHash: hash, Iatas: iatas, PageLimit: limit + 1,
+			ChannelHash: hash, Iatas: iatas, KeyKnown: keyKnown, PageLimit: limit + 1,
 			CursorTs: pgtype.Timestamptz{Time: pageCursor.LastSeen, Valid: true}, CursorID: pageCursor.ID,
 		})
 	} else {
 		rows, err = s.q.ListChannels(ctx, sqlc.ListChannelsParams{
-			ChannelHash: hash, Iatas: iatas, CursorTs: cursorTS, PageLimit: limit + 1,
+			ChannelHash: hash, Iatas: iatas, KeyKnown: keyKnown, CursorTs: cursorTS, PageLimit: limit + 1,
 		})
 	}
 	if err != nil {

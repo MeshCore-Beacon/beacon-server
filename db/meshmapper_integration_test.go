@@ -410,7 +410,7 @@ func TestChannelRegionScopingPostgres(t *testing.T) {
 	}
 	names := func(iatas ...string) string {
 		t.Helper()
-		page, err := store.ListChannels(ctx, 50, nil, iatas, 0, nil)
+		page, err := store.ListChannels(ctx, 50, nil, iatas, nil, 0, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

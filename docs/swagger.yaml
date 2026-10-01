@@ -1913,6 +1913,11 @@ paths:
         in: query
         name: iatas
         type: string
+      - description: Only channels Beacon can (true) or cannot (false) decrypt; omit
+          for all
+        in: query
+        name: keyKnown
+        type: boolean
       - description: last_seen epoch ms of last item for pagination; 0 starts from
           the beginning
         in: query

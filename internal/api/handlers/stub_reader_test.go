@@ -24,7 +24,7 @@ type stubReader struct {
 	listRegions                  func(ctx context.Context) ([]api.RegionSummary, error)
 	getRegion                    func(ctx context.Context, regionID int32) (*api.Region, error)
 	getRegionBySlug              func(ctx context.Context, slug string) (*api.Region, error)
-	listChannels                 func(ctx context.Context, limit int32, hash []byte, iatas []string, cursor int64, pageCursor *api.ChannelCursor) (api.ChannelPage, error)
+	listChannels                 func(ctx context.Context, limit int32, hash []byte, iatas []string, keyKnown *bool, cursor int64, pageCursor *api.ChannelCursor) (api.ChannelPage, error)
 	getChannel                   func(ctx context.Context, channelID int32) (*api.Channel, error)
 	listChannelMessages          func(ctx context.Context, channelID *int32, since time.Time, limit int32, iatas []string, scope string, cursor int64) (api.Page[api.ChannelMessage], error)
 	listChannelMessagesByHash    func(ctx context.Context, hash []byte, since time.Time, limit int32, iatas []string, scope string, cursor int64) (api.Page[api.ChannelMessage], error)
@@ -123,9 +123,9 @@ func (s stubReader) GetRegionBySlug(ctx context.Context, slug string) (*api.Regi
 	return nil, nil
 }
 
-func (s stubReader) ListChannels(ctx context.Context, limit int32, hash []byte, iatas []string, cursor int64, pageCursor *api.ChannelCursor) (api.ChannelPage, error) {
+func (s stubReader) ListChannels(ctx context.Context, limit int32, hash []byte, iatas []string, keyKnown *bool, cursor int64, pageCursor *api.ChannelCursor) (api.ChannelPage, error) {
 	if s.listChannels != nil {
-		return s.listChannels(ctx, limit, hash, iatas, cursor, pageCursor)
+		return s.listChannels(ctx, limit, hash, iatas, keyKnown, cursor, pageCursor)
 	}
 	return api.ChannelPage{}, nil
 }

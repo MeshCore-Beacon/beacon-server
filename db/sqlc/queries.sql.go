@@ -2638,26 +2638,29 @@ WHERE ($1::bytea IS NULL OR c.channel_hash = $1)
       WHERE s.key_fingerprint = c.key_fingerprint AND (s.region_slug IS NULL OR s.region_slug IN (
         SELECT r.slug FROM regions r JOIN region_iatas ri ON ri.region_id = r.id
         WHERE ri.iata = ANY($2::bpchar[])))))
-  AND ($3::timestamptz IS NULL OR c.last_seen < $3)
+  AND ($3::boolean IS NULL OR COALESCE(c.key_known, false) = $3)
+  AND ($4::timestamptz IS NULL OR c.last_seen < $4)
 ORDER BY c.last_seen DESC, c.id DESC
-LIMIT $4
+LIMIT $5
 `
 
 type ListChannelsParams struct {
 	ChannelHash []byte             `json:"channel_hash"`
 	Iatas       []string           `json:"iatas"`
+	KeyKnown    *bool              `json:"key_known"`
 	CursorTs    pgtype.Timestamptz `json:"cursor_ts"`
 	PageLimit   int32              `json:"page_limit"`
 }
 
 // Channels ordered by last seen, optionally filtered by hash and/or IATAs.
 // A channel belongs to an IATA when MeshMapper lists it there or config scopes it
-// to a region containing it (or Beacon-wide). NULL hash / empty array skip those filters.
+// to a region containing it (or Beacon-wide). NULL hash / empty array / NULL key_known skip those filters.
 // Pass cursor=0 to start from the beginning (cursor is last_seen epoch ms).
 func (q *Queries) ListChannels(ctx context.Context, arg ListChannelsParams) ([]Channel, error) {
 	rows, err := q.db.Query(ctx, listChannels,
 		arg.ChannelHash,
 		arg.Iatas,
+		arg.KeyKnown,
 		arg.CursorTs,
 		arg.PageLimit,
 	)
@@ -2702,8 +2705,9 @@ WHERE (c.last_seen, c.id) < ($1::timestamptz, $2::integer)
       WHERE s.key_fingerprint = c.key_fingerprint AND (s.region_slug IS NULL OR s.region_slug IN (
         SELECT r.slug FROM regions r JOIN region_iatas ri ON ri.region_id = r.id
         WHERE ri.iata = ANY($4::bpchar[])))))
+  AND ($5::boolean IS NULL OR COALESCE(c.key_known, false) = $5)
 ORDER BY c.last_seen DESC, c.id DESC
-LIMIT $5
+LIMIT $6
 `
 
 type ListChannelsAfterParams struct {
@@ -2711,6 +2715,7 @@ type ListChannelsAfterParams struct {
 	CursorID    int32              `json:"cursor_id"`
 	ChannelHash []byte             `json:"channel_hash"`
 	Iatas       []string           `json:"iatas"`
+	KeyKnown    *bool              `json:"key_known"`
 	PageLimit   int32              `json:"page_limit"`
 }
 
@@ -2722,6 +2727,7 @@ func (q *Queries) ListChannelsAfter(ctx context.Context, arg ListChannelsAfterPa
 		arg.CursorID,
 		arg.ChannelHash,
 		arg.Iatas,
+		arg.KeyKnown,
 		arg.PageLimit,
 	)
 	if err != nil {

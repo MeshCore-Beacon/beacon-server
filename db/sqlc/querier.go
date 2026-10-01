@@ -164,7 +164,7 @@ type Querier interface {
 	ListChannelMessagesByHash(ctx context.Context, arg ListChannelMessagesByHashParams) ([]ListChannelMessagesByHashRow, error)
 	// Channels ordered by last seen, optionally filtered by hash and/or IATAs.
 	// A channel belongs to an IATA when MeshMapper lists it there or config scopes it
-	// to a region containing it (or Beacon-wide). NULL hash / empty array skip those filters.
+	// to a region containing it (or Beacon-wide). NULL hash / empty array / NULL key_known skip those filters.
 	// Pass cursor=0 to start from the beginning (cursor is last_seen epoch ms).
 	ListChannels(ctx context.Context, arg ListChannelsParams) ([]Channel, error)
 	// Keep the non-null tuple boundary separate from the legacy optional cursor so

@@ -900,7 +900,7 @@ WHERE EXCLUDED.last_heard > trace_iatas.last_heard + INTERVAL '1 hour';
 -- name: ListChannels :many
 -- Channels ordered by last seen, optionally filtered by hash and/or IATAs.
 -- A channel belongs to an IATA when MeshMapper lists it there or config scopes it
--- to a region containing it (or Beacon-wide). NULL hash / empty array skip those filters.
+-- to a region containing it (or Beacon-wide). NULL hash / empty array / NULL key_known skip those filters.
 -- Pass cursor=0 to start from the beginning (cursor is last_seen epoch ms).
 SELECT c.* FROM channels c
 WHERE (@channel_hash::bytea IS NULL OR c.channel_hash = @channel_hash)
@@ -911,6 +911,7 @@ WHERE (@channel_hash::bytea IS NULL OR c.channel_hash = @channel_hash)
       WHERE s.key_fingerprint = c.key_fingerprint AND (s.region_slug IS NULL OR s.region_slug IN (
         SELECT r.slug FROM regions r JOIN region_iatas ri ON ri.region_id = r.id
         WHERE ri.iata = ANY(@iatas::bpchar[])))))
+  AND (sqlc.narg(key_known)::boolean IS NULL OR COALESCE(c.key_known, false) = sqlc.narg(key_known))
   AND (@cursor_ts::timestamptz IS NULL OR c.last_seen < @cursor_ts)
 ORDER BY c.last_seen DESC, c.id DESC
 LIMIT @page_limit;
@@ -928,6 +929,7 @@ WHERE (c.last_seen, c.id) < (@cursor_ts::timestamptz, @cursor_id::integer)
       WHERE s.key_fingerprint = c.key_fingerprint AND (s.region_slug IS NULL OR s.region_slug IN (
         SELECT r.slug FROM regions r JOIN region_iatas ri ON ri.region_id = r.id
         WHERE ri.iata = ANY(@iatas::bpchar[])))))
+  AND (sqlc.narg(key_known)::boolean IS NULL OR COALESCE(c.key_known, false) = sqlc.narg(key_known))
 ORDER BY c.last_seen DESC, c.id DESC
 LIMIT @page_limit;
 
