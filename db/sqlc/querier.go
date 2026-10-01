@@ -97,7 +97,6 @@ type Querier interface {
 	// a cross-join. Empty IATAs keep the original global counts, including associations
 	// whose observations have expired; the filtered aggregates are empty in that case.
 	GetScopeStats(ctx context.Context, iatas []string) ([]GetScopeStatsRow, error)
-	GetScopesByIATAs(ctx context.Context, dollar_1 []string) ([]GetScopesByIATAsRow, error)
 	// Read compact hourly snapshots, never observations on an HTTP request.
 	// Weight averages by sample counts instead of averaging regional/hourly means.
 	GetSignalStats(ctx context.Context, arg GetSignalStatsParams) ([]GetSignalStatsRow, error)

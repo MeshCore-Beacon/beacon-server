@@ -1596,54 +1596,6 @@ func (q *Queries) GetScopeStats(ctx context.Context, iatas []string) ([]GetScope
 	return items, nil
 }
 
-const getScopesByIATAs = `-- name: GetScopesByIATAs :many
-SELECT
-    ts.name,
-    COUNT(DISTINCT os.observer_id) AS observer_count,
-    COUNT(DISTINCT n.id) AS node_count,
-    COUNT(DISTINCT po.iata) AS iata_count
-FROM transport_scopes ts
-LEFT JOIN observer_scopes os ON os.scope_id = ts.id
-LEFT JOIN observers o ON o.id = os.observer_id
-LEFT JOIN packet_observations po ON po.observer_id = o.id
-LEFT JOIN nodes n ON n.default_scope_id = ts.id
-WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR po.iata = ANY($1::bpchar[]))
-GROUP BY ts.name
-ORDER BY ts.name
-`
-
-type GetScopesByIATAsRow struct {
-	Name          string `json:"name"`
-	ObserverCount int64  `json:"observer_count"`
-	NodeCount     int64  `json:"node_count"`
-	IataCount     int64  `json:"iata_count"`
-}
-
-func (q *Queries) GetScopesByIATAs(ctx context.Context, dollar_1 []string) ([]GetScopesByIATAsRow, error) {
-	rows, err := q.db.Query(ctx, getScopesByIATAs, dollar_1)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []GetScopesByIATAsRow{}
-	for rows.Next() {
-		var i GetScopesByIATAsRow
-		if err := rows.Scan(
-			&i.Name,
-			&i.ObserverCount,
-			&i.NodeCount,
-			&i.IataCount,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const getStatsClockDrift = `-- name: GetStatsClockDrift :many
 WITH page AS (
 SELECT

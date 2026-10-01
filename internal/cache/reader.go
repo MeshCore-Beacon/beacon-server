@@ -25,7 +25,6 @@ const (
 	keyRegionSlugPrefix        = "beacon:region:slug:"
 	keyScopeNames              = "beacon:scope:names"
 	keyScopeStats              = "beacon:scope:stats"
-	keyScopesByIATAsPrefix     = "beacon:scopes:iatas:"
 	keyScopeByNamePrefix       = "beacon:scope:name:"
 	keyStatsOverviewPrefix     = "beacon:stats:overview:"
 	keyStatsObservationsPrefix = "beacon:stats:observations:"
@@ -83,7 +82,6 @@ func NewCachedReader(inner api.Reader, c *Client, ttl CacheTTLs) api.Reader {
 // InvalidateScopeNames makes newly committed catalogue names visible to every scope read.
 func (cr *CachedReader) InvalidateScopeNames(ctx context.Context) {
 	cr.c.del(ctx, keyScopeNames)
-	cr.c.delPrefix(ctx, keyScopesByIATAsPrefix)
 	cr.c.delPrefix(ctx, keyScopeByNamePrefix)
 }
 
@@ -171,17 +169,6 @@ func (cr *CachedReader) GetScopeStats(ctx context.Context, iatas []string) ([]ap
 	}
 	return getOrSet(ctx, cr.c, keyScopeStats+":"+segment, cr.ttl.Reference, func() ([]api.ScopeStats, error) {
 		return cr.inner.GetScopeStats(ctx, iatas)
-	})
-}
-
-// GetScopesByIATAs implements [api.Reader].
-func (cr *CachedReader) GetScopesByIATAs(ctx context.Context, iatas []string) ([]api.ScopeSummary, error) {
-	sorted := make([]string, len(iatas))
-	copy(sorted, iatas)
-	sort.Strings(sorted)
-	key := keyScopesByIATAsPrefix + strings.Join(sorted, ",")
-	return getOrSet(ctx, cr.c, key, cr.ttl.Reference, func() ([]api.ScopeSummary, error) {
-		return cr.inner.GetScopesByIATAs(ctx, iatas)
 	})
 }
 

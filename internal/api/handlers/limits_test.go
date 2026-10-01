@@ -113,7 +113,7 @@ func TestListLimits(t *testing.T) {
 	router.Mount("/messages", MessagesRouter(reader))
 	router.Mount("/routes", RoutesRouter(reader))
 	router.Mount("/traces", TracesRouter(reader))
-	router.Mount("/stats", StatsRouter(reader))
+	router.Mount("/stats", StatsRouter(reader, nil))
 	for _, endpoint := range []struct {
 		path         string
 		defaultLimit int32

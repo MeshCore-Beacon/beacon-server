@@ -28,7 +28,7 @@ func TestObserverComparisonRejectsInvalidQuery(t *testing.T) {
 	} {
 		t.Run(query, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			StatsRouter(nil).ServeHTTP(w, httptest.NewRequest("GET", "/observer-comparison?"+query, nil))
+			StatsRouter(nil, nil).ServeHTTP(w, httptest.NewRequest("GET", "/observer-comparison?"+query, nil))
 			if w.Code != 400 {
 				t.Fatalf("status %d; wanted validation error", w.Code)
 			}
@@ -42,7 +42,7 @@ func TestObserverComparisonHTTP(t *testing.T) {
 	query := "observerA=" + a.String() + "&observerB=" + b.String() + "&since=0&until=1000"
 	for _, suffix := range []string{"&since=2", "&observerA=" + b.String(), "&until=253402300800000", "&observerB=00000000-0000-0000-0000-000000000000"} {
 		w := httptest.NewRecorder()
-		StatsRouter(nil).ServeHTTP(w, httptest.NewRequest("GET", "/observer-comparison?"+query+suffix, nil))
+		StatsRouter(nil, nil).ServeHTTP(w, httptest.NewRequest("GET", "/observer-comparison?"+query+suffix, nil))
 		if w.Code != 400 {
 			t.Fatalf("invalid query returned %d", w.Code)
 		}
@@ -80,7 +80,7 @@ func TestObserverComparisonHTTP(t *testing.T) {
 				},
 			}
 			w := httptest.NewRecorder()
-			StatsRouter(reader).ServeHTTP(w, httptest.NewRequest("GET", "/observer-comparison?"+query+tc.suffix, nil))
+			StatsRouter(reader, nil).ServeHTTP(w, httptest.NewRequest("GET", "/observer-comparison?"+query+tc.suffix, nil))
 			if w.Code != tc.status {
 				t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
 			}

@@ -196,6 +196,7 @@ func main() {
 		os.Exit(1)
 	}
 	scopes.Load(scopeEntries)
+	scopes.SetManualMembers(cfg.ManualScopeMembers())
 	slog.Info(fmt.Sprintf("loaded %d transport scopes", len(scopeEntries)), "component", "startup")
 	var scopeImporter *meshmapper.Importer
 	if cfg.MeshMapper.Scopes.Enabled {
@@ -371,6 +372,7 @@ func main() {
 		MaxConnectsPerMinute: resolved.MaxConnectsPerMinute,
 		WSAllowedOrigins:     cfg.WebSocket.AllowedOrigins,
 		CORS:                 cfg.CORS, Server: cfg.Server, Auth: cfg.Auth, RateLimit: resolved.RateLimit,
+		Scopes: scopes,
 		AdminRoutes: map[string]http.Handler{
 			"/accounts": handlers.AccountsRouter(store),
 			"/backup":   handlers.BackupRouter(backupOpts, ctx),

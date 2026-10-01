@@ -111,6 +111,9 @@ func TestCatalogueRefreshFallbackAndRestart(t *testing.T) {
 	if !reflect.DeepEqual(scopes.Entries()[1].IATAs, []string{"YOW"}) {
 		t.Fatal("import not bound to region")
 	}
+	if got := scopes.NamesForIATAs([]string{"YOW"}); !reflect.DeepEqual(got, []string{"#manual", "#yow"}) {
+		t.Fatal("catalogue membership must include manually overridden names", got)
+	}
 	generated := imp.sources[0].generated
 	status = 304
 	check()
@@ -243,8 +246,11 @@ func TestImportedSourcesOverlapWithoutGlobalMembership(t *testing.T) {
 	if err != nil || len(scopes.Entries()) != 1 || !reflect.DeepEqual(scopes.Entries()[0].IATAs, []string{"YOW", "YVR"}) {
 		t.Fatal(scopes.Entries(), err)
 	}
+	if got := scopes.NamesForIATAs([]string{"YVR"}); !reflect.DeepEqual(got, []string{"#can"}) {
+		t.Fatal(got)
+	}
 	_, err = New(ctx, config.MeshMapperScopesConfig{Enabled: true, Sources: map[string]string{"YOW": "changed-source"}}, store, scopes, nil)
-	if err != nil || len(scopes.Entries()) != 0 {
+	if err != nil || len(scopes.Entries()) != 0 || len(scopes.NamesForIATAs([]string{"YOW", "YVR"})) != 0 {
 		t.Fatal("removed/changed source remained active", err)
 	}
 	// Disabled mode never calls the store, even if URLs remain configured.

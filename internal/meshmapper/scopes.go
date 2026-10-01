@@ -233,8 +233,10 @@ func (i *Importer) publish() {
 	for _, e := range i.manual {
 		byName[e.Name] = e
 	}
+	members := make(map[string][]string, len(i.sources))
 	for _, s := range i.sources {
 		for _, candidate := range s.entries {
+			members[s.iata] = append(members[s.iata], candidate.Name)
 			entry, exists := byName[candidate.Name]
 			if exists && entry.IATAs == nil {
 				continue
@@ -256,6 +258,7 @@ func (i *Importer) publish() {
 		entries = append(entries, byName[name])
 	}
 	i.scopes.Load(entries)
+	i.scopes.SetCatalogueMembers(members)
 }
 
 func (i *Importer) log(s source, action string) {

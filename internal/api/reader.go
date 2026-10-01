@@ -210,10 +210,6 @@ type Reader interface {
 	// Use when no geographic filter is applied — returns names only for a lightweight response.
 	GetScopeNames(ctx context.Context) ([]string, error)
 
-	// GetScopesByIATAs returns scope summaries filtered by the given IATA codes,
-	// including observer, node and IATA counts. Expands region/regionId to IATAs automatically.
-	GetScopesByIATAs(ctx context.Context, iatas []string) ([]ScopeSummary, error)
-
 	// GetScopeByName returns full detail for a single scope by its normalized name (e.g. "#bc"),
 	// including packet count, observer count, node count, and the list of IATAs it is active in.
 	// Returns nil if the scope is not found.

@@ -221,7 +221,8 @@ type CacheTTLsConfig struct {
 // Name can be provided with or without the # or $ prefix.
 // Beacon normalizes plain names by prepending #.
 type ScopeConfig struct {
-	Name string `yaml:"name"` // e.g. "bc", "#west", "$private"
+	Name   string `yaml:"name"`   // e.g. "bc", "#west", "$private"
+	Region string `yaml:"region"` // configured region slug; lists the scope under that region's IATAs
 }
 
 // TelemetryConfig controls observer telemetry storage behaviour.
@@ -411,6 +412,9 @@ func Load(path string) (*Config, error) {
 	}
 	configDir := filepath.Dir(path)
 	if err := cfg.validateMeshMapper(); err != nil {
+		return nil, err
+	}
+	if err := cfg.validateScopes(); err != nil {
 		return nil, err
 	}
 	if cfg.Nodes.MarkForeign && !cfg.MeshMapper.Zones.Enabled && !cfg.hasBorderFile() {

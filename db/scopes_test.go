@@ -43,29 +43,6 @@ func TestGetTransportScopes(t *testing.T) {
 	}
 }
 
-func TestGetScopesByIATAs(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	mock := mockdb.NewMockQuerier(ctrl)
-
-	mock.EXPECT().
-		GetScopesByIATAs(gomock.Any(), []string{"YVR", "YYJ"}).
-		Return([]sqlc.GetScopesByIATAsRow{
-			{Name: "default", ObserverCount: 3, NodeCount: 10, IataCount: 2},
-		}, nil)
-
-	store := &Store{q: mock}
-	items, err := store.GetScopesByIATAs(context.Background(), []string{"YVR", "YYJ"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(items) != 1 {
-		t.Fatalf("expected 1 item, got %d", len(items))
-	}
-	if items[0].IATACount != 2 {
-		t.Errorf("expected IATACount 2, got %d", items[0].IATACount)
-	}
-}
-
 func TestGetScopeByName(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mock := mockdb.NewMockQuerier(ctrl)

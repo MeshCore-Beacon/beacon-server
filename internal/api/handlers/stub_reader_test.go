@@ -55,7 +55,6 @@ type stubReader struct {
 	getScopeStats                func(ctx context.Context, iatas []string) ([]api.ScopeStats, error)
 	getStatsNodeTypes            func(ctx context.Context, iatas []string) ([]api.NodeTypeCount, error)
 	getScopeNames                func(ctx context.Context) ([]string, error)
-	getScopesByIATAs             func(ctx context.Context, iatas []string) ([]api.ScopeSummary, error)
 	getScopeByName               func(ctx context.Context, name string) (*api.ScopeDetail, error)
 	listTraceTags                func(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, limit int32) ([]api.TraceTagSummary, error)
 	getTraceByTag                func(ctx context.Context, tag string) (*api.TraceDetail, error)
@@ -337,13 +336,6 @@ func (s stubReader) GetStatsNodeTypes(ctx context.Context, iatas []string) ([]ap
 func (s stubReader) GetScopeNames(ctx context.Context) ([]string, error) {
 	if s.getScopeNames != nil {
 		return s.getScopeNames(ctx)
-	}
-	return nil, nil
-}
-
-func (s stubReader) GetScopesByIATAs(ctx context.Context, iatas []string) ([]api.ScopeSummary, error) {
-	if s.getScopesByIATAs != nil {
-		return s.getScopesByIATAs(ctx, iatas)
 	}
 	return nil, nil
 }

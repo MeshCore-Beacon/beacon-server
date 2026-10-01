@@ -76,10 +76,6 @@ func (s *stubReader) GetScopeNames(_ context.Context) ([]string, error) { return
 func (s *stubReader) GetScopeStats(_ context.Context, _ []string) ([]api.ScopeStats, error) {
 	return nil, nil
 }
-func (s *stubReader) GetScopesByIATAs(_ context.Context, _ []string) ([]api.ScopeSummary, error) {
-	return nil, nil
-}
-
 func (s *stubReader) GetScopeByName(_ context.Context, _ string) (*api.ScopeDetail, error) {
 	return nil, nil
 }
@@ -386,7 +382,7 @@ func TestCachedReader_IATASortingForStableKey(t *testing.T) {
 func TestInvalidateScopeNamesClearsDerivedKeys(t *testing.T) {
 	c, mr := newTestClient(t)
 	cr := &CachedReader{inner: &stubReader{}, c: c, ttl: CacheTTLs{}}
-	for _, k := range []string{keyScopeNames, keyScopesByIATAsPrefix + "YOW", keyScopesByIATAsPrefix + "YOW,YVR", keyScopeByNamePrefix + "#yow"} {
+	for _, k := range []string{keyScopeNames, keyScopeByNamePrefix + "#yow"} {
 		mr.Set(k, "x")
 	}
 	mr.Set("beacon:iatas", "keep")

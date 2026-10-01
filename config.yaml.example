@@ -105,9 +105,13 @@ channel_keys:
 
 # Regional transport scopes for matching TRANSPORT_FLOOD packets.
 # Plain names have # prepended automatically (e.g. "bc" → "#bc").
+# region (required) is a configured region slug; region-filtered scope lists
+# and scope stats show the scope under that region's IATAs. Matching stays global.
 scopes:
   - name: bc
+    region: western-canada
   - name: "#west"
+    region: western-canada
 
 telemetry:
   retention: 672h   # 4 weeks
@@ -224,6 +228,8 @@ cache:
 # Refresh success/failure/freshness is logged under component=meshmapper.scopes.
 # Removing/turning off a source deactivates its imported matching keys on restart;
 # historical scope identities and recorded evidence are retained.
+# Region-filtered scope lists and scope stats show imported names only under the
+# IATAs whose catalogue lists them; regions without a source show manual scopes only.
 #meshmapper:
 #  scopes:
 #    enabled: false

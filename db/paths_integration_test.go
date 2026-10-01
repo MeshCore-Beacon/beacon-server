@@ -115,7 +115,7 @@ SELECT int4send(n),'00000000-0000-0000-0000-000000000001',heard_at,iata,payload_
 		}
 	}
 	w := httptest.NewRecorder()
-	handlers.StatsRouter(store).ServeHTTP(w, httptest.NewRequest("GET", fmt.Sprintf("/paths?since=%d&until=%d&iatas=YVR", since.UnixMilli()+123, until.UnixMilli()+123), nil).WithContext(ctx))
+	handlers.StatsRouter(store, nil).ServeHTTP(w, httptest.NewRequest("GET", fmt.Sprintf("/paths?since=%d&until=%d&iatas=YVR", since.UnixMilli()+123, until.UnixMilli()+123), nil).WithContext(ctx))
 	var response api.PathStats
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || w.Code != 200 || response.Receptions != 14 || response.Hashed != 5 {
 		t.Fatalf("HTTP %d: %s (%v)", w.Code, w.Body.String(), err)

@@ -2219,7 +2219,7 @@ const docTemplate = `{
         },
         "/scopes": {
             "get": {
-                "description": "The unfiltered list includes stored imported names after an importer is disabled or a source is removed. Those historical identities are retained indefinitely; listing them does not establish observed traffic or current source membership.",
+                "description": "Without filters, lists every stored scope name, including imported names retained after an importer is disabled or a source is removed. With IATA or region filters, lists only manual scopes configured for a matching region and imported scopes whose current MeshMapper catalogue includes a matching IATA; observed traffic does not add scopes.",
                 "produces": [
                     "application/json"
                 ],
@@ -2251,7 +2251,16 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object"
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
                     },
                     "500": {
@@ -2780,7 +2789,7 @@ const docTemplate = `{
         },
         "/stats/scopes": {
             "get": {
-                "description": "Counts each packet, observer and node once per scope. IATA filters use retained observations for packets/observers and node IATA memberships for nodes. Without filters, returns global totals. Scopes with zero matching counts remain listed; an empty region returns an empty array.",
+                "description": "Counts each packet, observer and node once per scope. IATA filters use retained observations for packets/observers and node IATA memberships for nodes. Without filters, returns global totals for every stored scope. With filters, lists only manual scopes configured for a matching region and imported scopes whose current MeshMapper catalogue includes a matching IATA; those remain listed with zero counts. An empty region returns an empty array.",
                 "produces": [
                     "application/json"
                 ],

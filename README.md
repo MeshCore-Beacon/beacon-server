@@ -231,9 +231,13 @@ channel_keys:
 
 # Regional transport scopes for matching TRANSPORT_FLOOD packets.
 # Plain names have # prepended automatically (e.g. "bc" → "#bc").
+# region (required) is a configured region slug; region-filtered scope lists
+# and scope stats show the scope under that region's IATAs. Matching stays global.
 scopes:
   - name: bc
+    region: western-canada
   - name: "#west"
+    region: western-canada
 
 # Observer telemetry storage settings.
 telemetry:
@@ -500,7 +504,7 @@ Not yet implemented — see the Authentication section above.
 | `GET`  | `/routes`                           | List known routes (all hops high confidence)                                                       |
 | `GET`  | `/routes/search`                    | Search routes by source and destination hash                                                       |
 | `GET`  | `/routes/cross`                     | Search for routes crossing IATA boundaries                                                         |
-| `GET`  | `/scopes`                           | List transport scopes                                                                              |
+| `GET`  | `/scopes`                           | List transport scope names; IATA/region filters use configured regions and MeshMapper catalogues   |
 | `GET`  | `/scopes/{name}`                    | Get scope detail                                                                                   |
 | `GET`  | `/stats/observations`               | Hourly observation time series (last 7 days by default)                                            |
 | `GET`  | `/stats/overview`                   | Network overview stats                                                                             |
