@@ -192,6 +192,18 @@ even when the same bearer-authenticated request works with curl.
 ### Config file (`config.yaml`)
 
 ```yaml
+# MeshMapper integrations (optional, no API key). Import transport scopes and
+# IATA border outlines from MeshMapper instead of maintaining scopes: and
+# iatas.*.borderFile by hand. Both need the IATAs to be in a configured region.
+# See config.yaml.example for limits and behaviour.
+#meshmapper:
+#  scopes:
+#    enabled: true
+#    sources:
+#      YVR: https://yvr.meshmapper.net/get_scopes.php
+#  zones:
+#    enabled: true
+
 # Optional IATA overrides — auto-created on first packet arrival,
 # only needed if you want to customise display name or coordinates.
 # borderFile points to a GeoJSON Feature (Polygon or MultiPolygon) for the
@@ -202,7 +214,7 @@ iatas:
     name: Vancouver International
     lat: 49.1967
     lng: -123.1815
-    borderFile: borders/yvr.geojson # optional
+    borderFile: borders/yvr.geojson # optional; or use meshmapper.zones
 
 # Super-regions grouping multiple IATAs.
 regions:
@@ -233,6 +245,7 @@ channel_keys:
 # Plain names have # prepended automatically (e.g. "bc" → "#bc").
 # region (required) is a configured region slug; region-filtered scope lists
 # and scope stats show the scope under that region's IATAs. Matching stays global.
+# Optional when meshmapper.scopes covers your regions.
 scopes:
   - name: bc
     region: western-canada

@@ -41,13 +41,44 @@ ratelimit:
   # A 429 returns error.code=rate_limited and Retry-After (1 or 60 seconds).
   burst: 300
 
+# MeshMapper integrations (optional, no API key). Import transport scopes and
+# IATA border outlines from MeshMapper instead of maintaining scopes: and
+# iatas.*.borderFile by hand. Both need the IATAs to be in a configured region below.
+#
+# Scope-name discovery. Manual scopes remain authoritative.
+# Sources must belong to a configured region's IATAs.
+# Group endpoints are not supported: their names cannot be attributed to each IATA.
+# At most 16 sources, 64 names per source, 64 KiB per response; no page scraping.
+# Catalogues and ETags persist in PostgreSQL. Failed refreshes retain known names.
+# Refresh success/failure/freshness is logged under component=meshmapper.scopes.
+# Removing/turning off a source deactivates its imported matching keys on restart;
+# historical scope identities and recorded evidence are retained.
+# Region-filtered scope lists and scope stats show imported names only under the
+# IATAs whose catalogue lists them; regions without a source show manual scopes only.
+#meshmapper:
+#  scopes:
+#    enabled: false
+#    refresh_interval: 1h  # 5m-24h; one source checked per 15s tick
+#    sources:
+#      YOW: https://yow.meshmapper.net/get_scopes.php
+#
+# Region boundaries (Zones API). Every IATA in a configured
+# region is looked up in its country's zone list, then its get_geojson.php outline
+# is imported. An imported boundary overrides that IATA's borderFile on the border
+# map and for nodes.mark_foreign. A missing or failed boundary keeps the last good
+# import, or the borderFile when there is none. Disabling, or removing an IATA from
+# every region, drops its import on restart. Logged under component=meshmapper.zones.
+#  zones:
+#    enabled: false
+#    refresh_interval: 24h # 1h-168h; one request per 15s tick, ETag-conditional
+
 iatas:
   YVR:
     name: Vancouver International
     lat: 49.1967
     lng: -123.1815
     # borderFile: borders/yvr.geojson   # optional GeoJSON Feature (Polygon/MultiPolygon)
-    #                                    # (meshmapper.zones overrides it when enabled)
+    #                                    # (or use meshmapper.zones above)
     #                                    # for the region border map; path is relative to
     #                                    # this file's directory; validated at boot.
   YYJ:
@@ -107,6 +138,7 @@ channel_keys:
 # Plain names have # prepended automatically (e.g. "bc" → "#bc").
 # region (required) is a configured region slug; region-filtered scope lists
 # and scope stats show the scope under that region's IATAs. Matching stays global.
+# Optional when meshmapper.scopes covers your regions.
 scopes:
   - name: bc
     region: western-canada
@@ -219,33 +251,6 @@ cache:
 #ingest:
 #  allow_countries: [CA, US]
 #  allow_continents: [NA]
-
-# Optional public MeshMapper scope-name discovery. Manual scopes remain authoritative.
-# No API key is needed. Sources must belong to a configured region's IATAs.
-# Group endpoints are not supported: their names cannot be attributed to each IATA.
-# At most 16 sources, 64 names per source, 64 KiB per response; no page scraping.
-# Catalogues and ETags persist in PostgreSQL. Failed refreshes retain known names.
-# Refresh success/failure/freshness is logged under component=meshmapper.scopes.
-# Removing/turning off a source deactivates its imported matching keys on restart;
-# historical scope identities and recorded evidence are retained.
-# Region-filtered scope lists and scope stats show imported names only under the
-# IATAs whose catalogue lists them; regions without a source show manual scopes only.
-#meshmapper:
-#  scopes:
-#    enabled: false
-#    refresh_interval: 1h  # 5m-24h; one source checked per 15s tick
-#    sources:
-#      YOW: https://yow.meshmapper.net/get_scopes.php
-#
-# Optional MeshMapper region boundaries (Zones API). Every IATA in a configured
-# region is looked up in its country's zone list, then its get_geojson.php outline
-# is imported. An imported boundary overrides that IATA's borderFile on the border
-# map and for nodes.mark_foreign. A missing or failed boundary keeps the last good
-# import, or the borderFile when there is none. Disabling, or removing an IATA from
-# every region, drops its import on restart. Logged under component=meshmapper.zones.
-#  zones:
-#    enabled: false
-#    refresh_interval: 24h # 1h-168h; one request per 15s tick, ETag-conditional
 
 # Background task intervals.
 # Shorter intervals are useful during initial deployment to confirm data is
