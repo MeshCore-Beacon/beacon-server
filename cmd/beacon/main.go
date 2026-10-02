@@ -378,9 +378,22 @@ func main() {
 	ingestWorkers.Go(func() { broker1.Start(ctx) })
 	ingestWorkers.Go(func() { broker2.Start(ctx) })
 
+	rollup := background.NewRollup(store, resolved.PacketRetention, resolved.RollupRetention)
+	go func() {
+		if err := rollup.CatchUp(ctx); err != nil {
+			slog.Error("analytics rollup catch-up failed", "component", "background", "error", err)
+		}
+	}()
 	tasks := []background.Task{
+		rollup.Task(),
 		background.ViewRefreshTask(store, resolved.ViewRefreshInterval),
-		background.CleanupTask(store, resolved.TelemetryRetention, resolved.PacketRetention, resolved.NodeDeleteAfter, resolved.CleanupInterval),
+		background.CleanupTask(store, background.CleanupConfig{
+			TelemetryRetention: resolved.TelemetryRetention,
+			PacketRetention:    resolved.PacketRetention,
+			RollupRetention:    resolved.RollupRetention,
+			NodeDeleteAfter:    resolved.NodeDeleteAfter,
+			Interval:           resolved.CleanupInterval,
+		}),
 		background.ReconfirmTask(store, resolved.RouteRetention, resolved.RouteGrace, int64(resolved.RouteMinObservations), resolved.ReconfirmInterval),
 	}
 	if resolved.ObserverDeleteAfter > 0 {
@@ -416,7 +429,7 @@ func main() {
 		MaxConnectsPerMinute: resolved.MaxConnectsPerMinute,
 		WSAllowedOrigins:     cfg.WebSocket.AllowedOrigins,
 		CORS:                 cfg.CORS, Server: cfg.Server, Auth: cfg.Auth, RateLimit: resolved.RateLimit,
-		Scopes: scopes,
+		Scopes: scopes, RollupRetention: resolved.RollupRetention,
 		AdminRoutes: map[string]http.Handler{
 			"/accounts": handlers.AccountsRouter(store),
 			"/backup":   handlers.BackupRouter(backupOpts, ctx),

@@ -13,11 +13,11 @@ import (
 
 const getSignalStats = `-- name: GetSignalStats :many
 WITH readings AS (
-    SELECT iata, hour, kind, snr_bin, rssi_bin, receptions, snr_samples, snr_sum, rssi_samples, rssi_sum FROM mv_signal_stats_hourly
+    SELECT iata, hour, kind, snr_bin, rssi_bin, receptions, snr_samples, snr_sum, rssi_samples, rssi_sum FROM analytics_hourly_signal
     WHERE hour >= $1::timestamptz AND hour < $2::timestamptz
       AND COALESCE(cardinality($3::bpchar[]), 0) = 0
     UNION ALL
-    SELECT iata, hour, kind, snr_bin, rssi_bin, receptions, snr_samples, snr_sum, rssi_samples, rssi_sum FROM mv_signal_stats_hourly
+    SELECT iata, hour, kind, snr_bin, rssi_bin, receptions, snr_samples, snr_sum, rssi_samples, rssi_sum FROM analytics_hourly_signal
     WHERE hour >= $1::timestamptz AND hour < $2::timestamptz
       AND cardinality($3::bpchar[]) > 0 AND iata = ANY($3::bpchar[])
 )
@@ -57,7 +57,7 @@ type GetSignalStatsRow struct {
 	RssiAverage float64            `json:"rssi_average"`
 }
 
-// Read compact hourly snapshots, never observations on an HTTP request.
+// Read the hourly rollup, never observations on an HTTP request.
 // Weight averages by sample counts instead of averaging regional/hourly means.
 func (q *Queries) GetSignalStats(ctx context.Context, arg GetSignalStatsParams) ([]GetSignalStatsRow, error) {
 	rows, err := q.db.Query(ctx, getSignalStats, arg.Since, arg.Until, arg.Iatas)
@@ -87,13 +87,4 @@ func (q *Queries) GetSignalStats(ctx context.Context, arg GetSignalStatsParams) 
 		return nil, err
 	}
 	return items, nil
-}
-
-const refreshSignalStats = `-- name: RefreshSignalStats :exec
-REFRESH MATERIALIZED VIEW CONCURRENTLY mv_signal_stats_hourly
-`
-
-func (q *Queries) RefreshSignalStats(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, refreshSignalStats)
-	return err
 }

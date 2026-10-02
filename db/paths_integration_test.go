@@ -66,9 +66,7 @@ SELECT int4send(n),'00000000-0000-0000-0000-000000000001',heard_at,iata,payload_
 	if _, err := tx.Exec(ctx, "UPDATE packet_observations SET heard_at=to_timestamp(extract(epoch FROM $1::timestamptz)+extract(epoch FROM heard_at)-extract(epoch FROM '2026-01-01 00:00+00'::timestamptz))", since); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tx.Exec(ctx, "REFRESH MATERIALIZED VIEW mv_path_stats_hourly"); err != nil {
-		t.Fatal(err)
-	}
+	rollTxHours(t, ctx, tx)
 	store := &Store{q: sqlc.New(tx)}
 	until := since.Add(4 * time.Hour)
 	for _, mode := range []string{"force_custom_plan", "force_generic_plan"} {
@@ -115,7 +113,7 @@ SELECT int4send(n),'00000000-0000-0000-0000-000000000001',heard_at,iata,payload_
 		}
 	}
 	w := httptest.NewRecorder()
-	handlers.StatsRouter(store, nil).ServeHTTP(w, httptest.NewRequest("GET", fmt.Sprintf("/paths?since=%d&until=%d&iatas=YVR", since.UnixMilli()+123, until.UnixMilli()+123), nil).WithContext(ctx))
+	handlers.StatsRouter(store, handlers.StatsOptions{}).ServeHTTP(w, httptest.NewRequest("GET", fmt.Sprintf("/paths?since=%d&until=%d&iatas=YVR", since.UnixMilli()+123, until.UnixMilli()+123), nil).WithContext(ctx))
 	var response api.PathStats
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || w.Code != 200 || response.Receptions != 14 || response.Hashed != 5 {
 		t.Fatalf("HTTP %d: %s (%v)", w.Code, w.Body.String(), err)
@@ -135,9 +133,7 @@ SELECT int4send(1000+i),'00000000-0000-0000-0000-000000000001',$1::timestamptz+i
 	if err != nil || stale.Receptions != 18 {
 		t.Fatalf("snapshot lost: %+v %v", stale, err)
 	}
-	if err := store.RefreshPathStats(ctx); err != nil {
-		t.Fatal(err)
-	}
+	rollTxHours(t, ctx, tx)
 	got, err := store.GetPathStats(ctx, since, until, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -165,9 +161,7 @@ SELECT int4send(1000+i),'00000000-0000-0000-0000-000000000001',$1::timestamptz+i
 	if _, err = tx.Exec(ctx, "TRUNCATE packet_observations"); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.RefreshPathStats(ctx); err != nil {
-		t.Fatal(err)
-	}
+	rollTxHours(t, ctx, tx)
 	got, err = store.GetPathStats(ctx, since, until, nil)
 	if err != nil || got.Receptions != 0 || got.Hourly == nil || got.PathLengths == nil || len(got.HashWidths) != 3 {
 		t.Fatalf("empty: %+v %v", got, err)

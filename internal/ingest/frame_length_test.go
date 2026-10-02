@@ -26,9 +26,9 @@ func (s *frameCaptureDB) UpsertPacket(_ context.Context, p UpsertPacketParams) (
 	return true, nil
 }
 
-func (s *frameCaptureDB) InsertObservation(_ context.Context, o InsertObservationParams) (bool, error) {
+func (s *frameCaptureDB) InsertObservation(_ context.Context, o InsertObservationParams) (bool, int64, error) {
 	s.observed = append(s.observed, o)
-	return true, nil
+	return true, 1, nil
 }
 
 func (s *frameCaptureDB) GetObserverRadio(context.Context, uuid.UUID) (RadioSettings, error) {

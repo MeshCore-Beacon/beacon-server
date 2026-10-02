@@ -96,7 +96,7 @@ func TestRunMigrationsBaselinePostgres(t *testing.T) {
 		t.Fatalf("ledger %v, %v", ledger, err)
 	}
 	// Stats refresh uses CONCURRENTLY, which needs populated views.
-	if _, err := pool.Exec(ctx, "REFRESH MATERIALIZED VIEW CONCURRENTLY mv_hourly_iata_stats"); err != nil {
+	if _, err := pool.Exec(ctx, "REFRESH MATERIALIZED VIEW CONCURRENTLY mv_radio_presets"); err != nil {
 		t.Fatal(err)
 	}
 }

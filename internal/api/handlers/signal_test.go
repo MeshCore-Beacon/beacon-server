@@ -28,7 +28,7 @@ func (s signalReader) GetSignalStats(ctx context.Context, since, until time.Time
 func TestSignalRejectsInvalidWindow(t *testing.T) {
 	for _, query := range []string{"", "since=0", "until=1", "since=x&until=1", "since=-1&until=1", "since=0&until=0", "since=2&until=1", "since=0&until=2592000001", "since=0&since=0&until=1", "since=0&until=1&until=2", "since=253402300799998&until=253402300800000"} {
 		w := httptest.NewRecorder()
-		StatsRouter(nil, nil).ServeHTTP(w, httptest.NewRequest("GET", "/signal?"+query, nil))
+		StatsRouter(nil, StatsOptions{}).ServeHTTP(w, httptest.NewRequest("GET", "/signal?"+query, nil))
 		if w.Code != 400 {
 			t.Fatalf("query %q: %d %s", query, w.Code, w.Body.String())
 		}
@@ -70,7 +70,7 @@ func TestSignalFiltersAndErrors(t *testing.T) {
 				return &api.SignalStats{Until: until.UnixMilli(), Receptions: 5, Hourly: []api.SignalHour{}}, tc.err
 			}}
 			w := httptest.NewRecorder()
-			StatsRouter(reader, nil).ServeHTTP(w, httptest.NewRequest("GET", "/signal?since=0&until=2592000000"+tc.query, nil))
+			StatsRouter(reader, StatsOptions{}).ServeHTTP(w, httptest.NewRequest("GET", "/signal?since=0&until=2592000000"+tc.query, nil))
 			if w.Code != tc.status || strings.Contains(w.Body.String(), "private detail") {
 				t.Fatalf("%d %s", w.Code, w.Body.String())
 			}
@@ -93,7 +93,7 @@ func TestSignalCancellationReachesReader(t *testing.T) {
 		return nil, ctx.Err()
 	}}
 	w := httptest.NewRecorder()
-	StatsRouter(reader, nil).ServeHTTP(w, httptest.NewRequest("GET", "/signal?since=0&until=1", nil).WithContext(ctx))
+	StatsRouter(reader, StatsOptions{}).ServeHTTP(w, httptest.NewRequest("GET", "/signal?since=0&until=1", nil).WithContext(ctx))
 	if !called || w.Body.Len() != 0 {
 		t.Fatalf("cancellation: called=%v body=%s", called, w.Body.String())
 	}
@@ -101,12 +101,12 @@ func TestSignalCancellationReachesReader(t *testing.T) {
 
 func TestStatsWindowSnapsPollingTimes(t *testing.T) {
 	for _, query := range []string{"since=123&until=86400123", "since=3599999&until=89999999"} {
-		since, until, err := parseStatsWindow(httptest.NewRequest("GET", "/?"+query, nil))
+		since, until, err := parseStatsWindow(httptest.NewRequest("GET", "/?"+query, nil), rawStatsWindow)
 		if err != nil || since.UnixMilli() != 0 || until.UnixMilli() != 86400000 {
 			t.Fatalf("%v %v %v", since, until, err)
 		}
 	}
-	since, until, err := parseStatsWindow(httptest.NewRequest("GET", "/?since=1&until=2", nil))
+	since, until, err := parseStatsWindow(httptest.NewRequest("GET", "/?since=1&until=2", nil), rawStatsWindow)
 	if err != nil || !since.Equal(until) {
 		t.Fatal("sub-hour normalization")
 	}

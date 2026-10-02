@@ -41,8 +41,8 @@ func (s *advertEndpointDB) UpsertNode(_ context.Context, n UpsertNodeParams, _ R
 	return s.node.ID, nil
 }
 
-func (s *advertEndpointDB) InsertObservation(context.Context, InsertObservationParams) (bool, error) {
-	return !s.duplicate, nil
+func (s *advertEndpointDB) InsertObservation(context.Context, InsertObservationParams) (bool, int64, error) {
+	return !s.duplicate, 1, nil
 }
 
 func TestAdvertEndpointUsesUpdatedName(t *testing.T) {
@@ -99,7 +99,7 @@ func TestDuplicateAdvertSkipsLiveEndpointLookup(t *testing.T) {
 
 func TestRepeatAdvertUsesCurrentIdentityWithoutReapplyingAdvert(t *testing.T) {
 	r := newRepeatHarness(t, true)
-	store := &advertEndpointDB{endpointCaptureDB: &endpointCaptureDB{stubDB: r.db.stubDB, node: api.ResolvedNode{ID: uuid.New(), PublicKey: "aa"}}}
+	store := &advertEndpointDB{endpointCaptureDB: &endpointCaptureDB{stubDB: r.db, node: api.ResolvedNode{ID: uuid.New(), PublicKey: "aa"}}}
 	r.w.db = store
 	packet := buildAdvertPacketWithData(t, append([]byte{meshcore.AdvertTypeRepeater | meshcore.AdvertNameMask}, []byte("Advert name")...), false)
 	hear := func(path byte) []packetObservationEvent {

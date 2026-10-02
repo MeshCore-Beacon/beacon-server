@@ -12,7 +12,6 @@ import (
 	mockdb "github.com/MeshCore-Beacon/beacon-server/db/sqlc/mock"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"go.uber.org/mock/gomock"
 )
@@ -218,10 +217,10 @@ func TestInsertObservation_Success(t *testing.T) {
 
 	mock.EXPECT().
 		InsertObservation(gomock.Any(), gomock.Any()).
-		Return(sqlc.PacketObservation{ID: 1}, nil)
+		Return(sqlc.InsertObservationRow{Inserted: true, ObservationCount: 4}, nil)
 
 	store := &Store{q: mock}
-	inserted, err := store.InsertObservation(context.Background(), ingest.InsertObservationParams{
+	inserted, count, err := store.InsertObservation(context.Background(), ingest.InsertObservationParams{
 		PacketHash: []byte{0xde, 0xad},
 		ObserverID: observerID,
 		IATA:       "YVR",
@@ -230,8 +229,8 @@ func TestInsertObservation_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !inserted {
-		t.Error("expected inserted true")
+	if !inserted || count != 4 {
+		t.Errorf("got inserted=%v count=%d, want true, 4", inserted, count)
 	}
 }
 
@@ -241,18 +240,18 @@ func TestInsertObservation_Conflict(t *testing.T) {
 
 	mock.EXPECT().
 		InsertObservation(gomock.Any(), gomock.Any()).
-		Return(sqlc.PacketObservation{}, pgx.ErrNoRows)
+		Return(sqlc.InsertObservationRow{Inserted: false, ObservationCount: 2}, nil)
 
 	store := &Store{q: mock}
-	inserted, err := store.InsertObservation(context.Background(), ingest.InsertObservationParams{
+	inserted, count, err := store.InsertObservation(context.Background(), ingest.InsertObservationParams{
 		PacketHash: []byte{0xde, 0xad},
 		HeardAt:    time.Now(),
 	})
 	if err != nil {
 		t.Fatalf("expected nil error on conflict, got %v", err)
 	}
-	if inserted {
-		t.Error("expected inserted false on conflict")
+	if inserted || count != 2 {
+		t.Errorf("got inserted=%v count=%d, want false, 2", inserted, count)
 	}
 }
 

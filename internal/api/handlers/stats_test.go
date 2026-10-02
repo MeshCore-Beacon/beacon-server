@@ -117,7 +117,7 @@ func TestGetStatsPayloadBreakdown_OK(t *testing.T) {
 func TestGetStatsTopNodes_OK(t *testing.T) {
 	r := chi.NewRouter()
 	r.Get("/stats/top-nodes", getStatsTopNodes(stubReader{
-		getStatsTopNodes: func(_ context.Context, _ []string, _ int32) ([]api.TopNode, error) {
+		getStatsTopNodes: func(_ context.Context, _ []string, _ time.Time, _ int32) ([]api.TopNode, error) {
 			return []api.TopNode{{IATA: "YVR", ObservationCount: 50}}, nil
 		},
 	}))
@@ -282,7 +282,7 @@ func TestGetStatsRadioPresets_OK(t *testing.T) {
 func TestGetStatsScopes_OK(t *testing.T) {
 	r := chi.NewRouter()
 	r.Get("/stats/scopes", getStatsScopes(stubReader{
-		getScopeStats: func(_ context.Context, _ []string) ([]api.ScopeStats, error) {
+		getScopeStats: func(_ context.Context, _ []string, _ time.Time) ([]api.ScopeStats, error) {
 			return []api.ScopeStats{{Name: "#bc", PacketCount: 100}}, nil
 		},
 	}, nil))

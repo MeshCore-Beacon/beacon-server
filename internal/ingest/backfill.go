@@ -41,7 +41,7 @@ type DecryptGroupTextResult struct {
 // decides what to do with that. The live path falls back to UpsertChannelHashOnly itself;
 // BackfillChannelMessages, which only scans packets already recorded that way, just leaves
 // them as they are and tries again next boot.
-func DecryptGroupText(ctx context.Context, db DB, keys ChannelKeyStore, packetHash, rawPayload []byte) (*DecryptGroupTextResult, error) {
+func DecryptGroupText(ctx context.Context, db DB, keys ChannelKeyStore, packetHash, rawPayload []byte, historical bool) (*DecryptGroupTextResult, error) {
 	grpTxt, err := meshcore.GroupTextFromBytes(rawPayload)
 	if err != nil {
 		return nil, err
@@ -70,6 +70,7 @@ func DecryptGroupText(ctx context.Context, db DB, keys ChannelKeyStore, packetHa
 		PacketHash: packetHash,
 		SenderName: strings.ReplaceAll(strings.ToValidUTF8(payload.Sender, "\uFFFD"), "\x00", ""),
 		SentAt:     time.Unix(int64(payload.Timestamp), 0),
+		Historical: historical,
 		Content:    strings.ReplaceAll(strings.ToValidUTF8(payload.Text, "\uFFFD"), "\x00", ""),
 	}
 	newMsg, err := db.InsertChannelMessage(ctx, params)
@@ -122,7 +123,7 @@ func BackfillChannelHashes(ctx context.Context, db DB, keys ChannelKeyStore, has
 func backfill(ctx context.Context, db DB, keys ChannelKeyStore, packets []UndecryptedPacket) int {
 	decrypted := 0
 	for _, p := range packets {
-		result, err := DecryptGroupText(ctx, db, keys, p.PacketHash, p.RawPayload)
+		result, err := DecryptGroupText(ctx, db, keys, p.PacketHash, p.RawPayload, true)
 		if err != nil {
 			slog.Error(fmt.Sprintf("ingest: backfill: decrypt failed for packet %s", hex.EncodeToString(p.PacketHash)), "component", "ingest", "error", err)
 			continue

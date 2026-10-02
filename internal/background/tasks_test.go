@@ -10,6 +10,7 @@ import (
 	"errors"
 	"log"
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -96,65 +97,30 @@ func (s *refreshStub) refresh(ctx context.Context, name string) error {
 	}
 	return s.errs[name]
 }
-func (s *refreshStub) RefreshHourlyStats(ctx context.Context) error {
-	return s.refresh(ctx, "hourly stats")
-}
-func (s *refreshStub) RefreshTopNodes(ctx context.Context) error { return s.refresh(ctx, "top nodes") }
-func (s *refreshStub) RefreshTopObservers(ctx context.Context) error {
-	return s.refresh(ctx, "top observers")
-}
-func (s *refreshStub) RefreshPayloadBreakdown(ctx context.Context) error {
-	return s.refresh(ctx, "payload breakdown")
-}
-func (s *refreshStub) RefreshTopTalkers(ctx context.Context) error {
-	return s.refresh(ctx, "top talkers")
-}
-func (s *refreshStub) RefreshTopAdvertisers(ctx context.Context) error {
-	return s.refresh(ctx, "top advertisers")
-}
 func (s *refreshStub) RefreshRadioPresets(ctx context.Context) error {
 	return s.refresh(ctx, "radio presets")
 }
-func (s *refreshStub) RefreshObserverActivity(ctx context.Context) error {
-	return s.refresh(ctx, "observer activity")
-}
-
-func (s *refreshStub) RefreshSignalStats(ctx context.Context) error {
-	return s.refresh(ctx, "signal stats")
-}
-
-func (s *refreshStub) RefreshPathStats(ctx context.Context) error {
-	return s.refresh(ctx, "path stats")
-}
 
 func TestViewRefreshTask(t *testing.T) {
-	first, second := errors.New("first failure"), errors.New("second failure")
+	failure := errors.New("refresh failed")
 	for _, tc := range []struct {
 		name string
 		errs map[string]error
 	}{
 		{"success", nil},
-		{"partial failure", map[string]error{"hourly stats": first, "top talkers": second}},
-		{"signal failure", map[string]error{"signal stats": first}},
-		{"path failure", map[string]error{"path stats": second}},
+		{"failure", map[string]error{"radio presets": failure}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &refreshStub{errs: tc.errs}
-			task := ViewRefreshTask(store, time.Minute)
-			err := task.Run(context.Background())
-			if len(store.calls) != 10 {
-				t.Fatalf("refreshed %d views, want 10", len(store.calls))
+			err := ViewRefreshTask(store, time.Minute).Run(context.Background())
+			if len(store.calls) != 1 {
+				t.Fatalf("refreshed %d views, want 1", len(store.calls))
 			}
 			if len(tc.errs) == 0 && err != nil {
 				t.Fatal(err)
 			}
-			for name, cause := range tc.errs {
-				if !errors.Is(err, cause) {
-					t.Errorf("missing cause %v in %v", cause, err)
-				}
-				if err == nil || !strings.Contains(err.Error(), name) {
-					t.Errorf("missing view name %q in %v", name, err)
-				}
+			if len(tc.errs) > 0 && (!errors.Is(err, failure) || !strings.Contains(err.Error(), "radio presets")) {
+				t.Errorf("err = %v", err)
 			}
 		})
 	}
@@ -200,4 +166,83 @@ func TestSchedulerFailureIsNotComplete(t *testing.T) {
 			t.Fatal("scheduler did not report task failure")
 		}
 	})
+}
+
+type cleanupStub struct {
+	calls   []string
+	cutoffs map[string]time.Time
+	oldest  time.Time // zero = no missing hour
+}
+
+func (s *cleanupStub) record(name string, cutoff time.Time) error {
+	s.calls = append(s.calls, name)
+	if s.cutoffs == nil {
+		s.cutoffs = map[string]time.Time{}
+	}
+	s.cutoffs[name] = cutoff
+	return nil
+}
+func (s *cleanupStub) DeleteOldTelemetry(_ context.Context, c time.Time) error {
+	return s.record("telemetry", c)
+}
+func (s *cleanupStub) OldestMissingRollupHour(context.Context) (time.Time, bool, error) {
+	s.calls = append(s.calls, "oldest")
+	return s.oldest, !s.oldest.IsZero(), nil
+}
+func (s *cleanupStub) DeleteOldPackets(_ context.Context, c time.Time) error {
+	return s.record("packets", c)
+}
+func (s *cleanupStub) DeleteOldChannelIATAs(_ context.Context, c time.Time) error {
+	return s.record("channel iatas", c)
+}
+func (s *cleanupStub) DeleteOldTraceIATAs(_ context.Context, c time.Time) error {
+	return s.record("trace iatas", c)
+}
+func (s *cleanupStub) DeleteOldTraceTags(_ context.Context, c time.Time) error {
+	return s.record("trace tags", c)
+}
+func (s *cleanupStub) DeleteOldRollups(_ context.Context, c time.Time) error {
+	return s.record("rollups", c)
+}
+func (s *cleanupStub) DeleteOldNodes(_ context.Context, c time.Time) error {
+	return s.record("nodes", c)
+}
+
+func TestCleanupTask(t *testing.T) {
+	now := time.Date(2026, 1, 10, 12, 0, 0, 0, time.UTC)
+	cfg := CleanupConfig{TelemetryRetention: 31 * 24 * time.Hour, PacketRetention: 7 * 24 * time.Hour,
+		RollupRetention: 90 * 24 * time.Hour, NodeDeleteAfter: 30 * 24 * time.Hour, Interval: time.Hour}
+	retention := now.Add(-cfg.PacketRetention)
+	for _, tc := range []struct {
+		name   string
+		oldest time.Time
+		want   time.Time
+	}{
+		{"no unrolled hours", time.Time{}, retention},
+		{"unrolled hour after the cutoff", retention.Add(time.Hour), retention},
+		{"held behind an unrolled hour", retention.Add(-2 * time.Hour), retention.Add(-2*time.Hour - 35*time.Minute)},
+		{"holdback capped", retention.Add(-72 * time.Hour), retention.Add(-24 * time.Hour)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &cleanupStub{oldest: tc.oldest}
+			if err := cleanupTask(s, cfg, func() time.Time { return now }).Run(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			want := []string{"telemetry", "oldest", "packets", "channel iatas", "trace iatas", "trace tags", "rollups", "nodes"}
+			if !reflect.DeepEqual(s.calls, want) {
+				t.Errorf("calls %v, want %v", s.calls, want)
+			}
+			for _, name := range []string{"packets", "channel iatas", "trace iatas"} {
+				if !s.cutoffs[name].Equal(tc.want) {
+					t.Errorf("%s cutoff %s, want %s", name, s.cutoffs[name], tc.want)
+				}
+			}
+			if !s.cutoffs["trace tags"].Equal(tc.want.Add(-30 * time.Minute)) {
+				t.Errorf("trace tags cutoff %s, want 30 min behind packets", s.cutoffs["trace tags"])
+			}
+			if !s.cutoffs["rollups"].Equal(now.Add(-cfg.RollupRetention)) || !s.cutoffs["telemetry"].Equal(now.Add(-cfg.TelemetryRetention)) {
+				t.Errorf("rollup/telemetry cutoffs %v", s.cutoffs)
+			}
+		})
+	}
 }

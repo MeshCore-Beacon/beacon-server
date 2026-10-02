@@ -25,9 +25,10 @@ import (
 type Store interface {
 	ingest.DB
 
-	// TouchObservers applies coalesced last_seen bumps and observation_count
-	// deltas for the given observer IDs in one statement.
-	TouchObservers(ctx context.Context, ids []uuid.UUID, seen []time.Time, counts []int32) error
+	// TouchObservers applies coalesced last_seen bumps, observation_count
+	// deltas and last_iata for the given observer IDs in one statement. An
+	// IATA only replaces one heard earlier (iataAts), so a late flush can't regress it.
+	TouchObservers(ctx context.Context, ids []uuid.UUID, seen []time.Time, counts []int32, iatas []string, iataAts []time.Time) error
 
 	// TouchObserverBrokers applies coalesced last_seen/last_packet_at bumps
 	// for the given (observer, broker) pairs in one statement.
@@ -47,8 +48,10 @@ type identity struct {
 }
 
 type observerBump struct {
-	seen  time.Time
-	count int32
+	seen   time.Time
+	count  int32
+	iata   string
+	iataAt time.Time
 }
 
 type brokerBump struct{ seen, packet time.Time }
@@ -97,13 +100,16 @@ func New(store Store, flushInterval, packetTTL time.Duration) *Coalescer {
 
 // UpsertObserver serves repeat lookups from the identity cache and records a
 // last_seen/observation_count bump instead of writing through.
-func (c *Coalescer) UpsertObserver(ctx context.Context, pubkey []byte) (uuid.UUID, string, error) {
+func (c *Coalescer) UpsertObserver(ctx context.Context, pubkey []byte, iata string) (uuid.UUID, string, error) {
 	key := string(pubkey)
 	c.mu.Lock()
 	if ident, ok := c.identities[key]; ok {
 		bump := c.dirtyObservers[ident.id]
 		bump.seen = c.now()
 		bump.count++
+		if iata != "" {
+			bump.iata, bump.iataAt = iata, bump.seen
+		}
 		c.dirtyObservers[ident.id] = bump
 		ident.seen = bump.seen
 		c.identities[key] = ident
@@ -112,7 +118,7 @@ func (c *Coalescer) UpsertObserver(ctx context.Context, pubkey []byte) (uuid.UUI
 	}
 	c.mu.Unlock()
 
-	id, name, err := c.Store.UpsertObserver(ctx, pubkey)
+	id, name, err := c.Store.UpsertObserver(ctx, pubkey, iata)
 	if err != nil {
 		return id, name, err
 	}
@@ -305,10 +311,14 @@ func (c *Coalescer) flushObservers(ctx context.Context, observers map[uuid.UUID]
 	ids := make([]uuid.UUID, 0, len(observers))
 	seen := make([]time.Time, 0, len(observers))
 	counts := make([]int32, 0, len(observers))
+	iatas := make([]string, 0, len(observers))
+	iataAts := make([]time.Time, 0, len(observers))
 	for id, bump := range observers {
 		ids = append(ids, id)
 		seen = append(seen, bump.seen)
 		counts = append(counts, bump.count)
+		iatas = append(iatas, bump.iata)
+		iataAts = append(iataAts, bump.iataAt)
 	}
-	return c.Store.TouchObservers(ctx, ids, seen, counts)
+	return c.Store.TouchObservers(ctx, ids, seen, counts, iatas, iataAts)
 }

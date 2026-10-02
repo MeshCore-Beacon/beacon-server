@@ -37,6 +37,7 @@ type InsertChannelMessageParams struct {
 	SenderName string
 	Content    string
 	SentAt     time.Time
+	Historical bool // backfilled: its hours may already be rolled, so queue them for a re-roll
 }
 
 // InsertedChannelMessage is returned only for a new message, using its stored packet evidence.
@@ -207,7 +208,7 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 		}
 		channelHashBytes := []byte{grpTxt.ChannelHash}
 
-		result, err := DecryptGroupText(ctx, w.db, w.keys, packetHash, packet.Payload)
+		result, err := DecryptGroupText(ctx, w.db, w.keys, packetHash, packet.Payload, false)
 		if err != nil {
 			w.log.Error("decrypt group text failed", "error", err)
 			return

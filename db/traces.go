@@ -11,6 +11,7 @@ import (
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -20,12 +21,16 @@ type tracePayload struct {
 	SNRValues  []float32 `json:"snrValues"`
 }
 
-func (s *Store) UpsertTraceIATA(ctx context.Context, traceTag []byte, iata string, heardAt time.Time) error {
-	return s.q.UpsertTraceIATA(ctx, sqlc.UpsertTraceIATAParams{
-		TraceTag:  traceTag,
-		Iata:      iata,
-		LastHeard: pgtype.Timestamptz{Time: heardAt, Valid: true},
+func (s *Store) RecordTrace(ctx context.Context, h ingest.TraceHearing) error {
+	return s.q.RecordTrace(ctx, sqlc.RecordTraceParams{
+		TraceTag: h.TraceTag,
+		Iata:     h.IATA,
+		HeardAt:  pgtype.Timestamptz{Time: h.HeardAt, Valid: true},
 	})
+}
+
+func (s *Store) DeleteOldTraceTags(ctx context.Context, cutoff time.Time) error {
+	return s.q.DeleteOldTraceTags(ctx, pgtype.Timestamptz{Time: cutoff, Valid: true})
 }
 
 func (s *Store) DeleteOldTraceIATAs(ctx context.Context, cutoff time.Time) error {

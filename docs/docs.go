@@ -2280,6 +2280,7 @@ const docTemplate = `{
         },
         "/scopes/{name}": {
             "get": {
+                "description": "packetCount sums packets per hour across every retained rollup hour; iatas are the IATAs that heard the scope's packets. Observer and node counts are current memberships.",
                 "produces": [
                     "application/json"
                 ],
@@ -2424,13 +2425,14 @@ const docTemplate = `{
         },
         "/stats/observations": {
             "get": {
+                "description": "Observation counts only; distinct packet and observer counts don't sum across IATAs, so read them from /stats/series.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "Stats"
                 ],
-                "summary": "Hourly observation time series",
+                "summary": "Hourly observation counts per IATA",
                 "parameters": [
                     {
                         "type": "string",
@@ -2570,13 +2572,14 @@ const docTemplate = `{
         },
         "/stats/overview": {
             "get": {
+                "description": "Summarises the 24 most recent hours that can have been rolled (an hour rolls about 95 minutes after it closes); since/until report that window. Packets count once per hour heard. Use /stats/series for sparklines.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "Stats"
                 ],
-                "summary": "Network overview stats (last 24h)",
+                "summary": "Network overview stats (last 24 rolled hours)",
                 "parameters": [
                     {
                         "type": "string",
@@ -2795,7 +2798,7 @@ const docTemplate = `{
         },
         "/stats/scopes": {
             "get": {
-                "description": "Counts each packet, observer and node once per scope. IATA filters use retained observations for packets/observers and node IATA memberships for nodes. Without filters, returns global totals for every stored scope. With filters, lists only manual scopes configured for a matching region and imported scopes whose current MeshMapper catalogue includes a matching IATA; those remain listed with zero counts. An empty region returns an empty array.",
+                "description": "Packets are those heard since the window start, each counted once per hour however many of the requested IATAs heard it. Observers and nodes are current memberships: observers filter by the IATA they last reported from, nodes by their IATA memberships. With filters, lists only manual scopes configured for a matching region and imported scopes whose current MeshMapper catalogue includes a matching IATA; those remain listed with zero counts. An empty region returns an empty array.",
                 "produces": [
                     "application/json"
                 ],
@@ -2827,6 +2830,12 @@ const docTemplate = `{
                         "description": "Filter by region slug, expands to member IATAs; combined with explicit IATAs",
                         "name": "region",
                         "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Start of packet window epoch ms, rounded down to the hour (default 7 days ago)",
+                        "name": "since",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -2847,6 +2856,78 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/stats/series": {
+            "get": {
+                "description": "One entry per UTC hour in [since, until) plus a summary over the complete hours. Both bounds round down to UTC hours and since is clamped to the rollup retention; the response reports the effective window. An hour is rolled about 95 minutes after it closes, so recent hours are \"missing\" until then; \"partial\" hours lost raw rows before they could be rolled and never get values. Counts (observations, packets) sum across hours, with a packet counted once in each hour it was heard; observers, IATAs and scopes are distinct across the whole window; averages are sum / samples. revision changes whenever any rolled hour changes.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Stats"
+                ],
+                "summary": "Hourly network activity from the analytics rollups",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Inclusive start, epoch milliseconds",
+                        "name": "since",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Exclusive end, epoch milliseconds; the window is at most the rollup retention (default 90 days)",
+                        "name": "until",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated reception IATA codes",
+                        "name": "iatas",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Region ID, expands to member IATAs",
+                        "name": "regionId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Region slug, expands to member IATAs",
+                        "name": "region",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.StatsSeries"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
@@ -2928,6 +3009,7 @@ const docTemplate = `{
         },
         "/stats/top-advertisers": {
             "get": {
+                "description": "Each advert counts once per hour heard, however many requested IATAs heard it. nodeId is null when the node row has been deleted.",
                 "produces": [
                     "application/json"
                 ],
@@ -2990,13 +3072,14 @@ const docTemplate = `{
         },
         "/stats/top-nodes": {
             "get": {
+                "description": "nodeId is null when the node row has been deleted; publicKey always identifies it.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "Stats"
                 ],
-                "summary": "Top N nodes by observation count (from materialized view)",
+                "summary": "Top N nodes by advert hearings (last 7 days by default)",
                 "parameters": [
                     {
                         "type": "string",
@@ -3014,6 +3097,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Filter by region slug, expands to member IATAs",
                         "name": "region",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Start of window epoch ms, rounded down to the hour (default 7 days ago)",
+                        "name": "since",
                         "in": "query"
                     },
                     {
@@ -3198,13 +3287,13 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Filter by transport scope name",
+                        "description": "Filter by the tag's first transport scope name",
                         "name": "scope",
                         "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "Filter by type: TRACE or PING (default: all)",
+                        "description": "Filter by type: TRACE (any multi-hop packet) or PING (default: all)",
                         "name": "type",
                         "in": "query"
                     },
@@ -3466,6 +3555,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "messageCount": {
+                    "description": "lifetime count; not reduced by retention",
                     "type": "integer"
                 },
                 "name": {
@@ -3984,9 +4074,6 @@ const docTemplate = `{
         "github_com_MeshCore-Beacon_beacon-server_internal_api.ObservationPoint": {
             "type": "object",
             "properties": {
-                "activeObservers": {
-                    "type": "integer"
-                },
                 "hour": {
                     "description": "epoch ms, start of the 1-hour bucket",
                     "type": "integer"
@@ -3995,9 +4082,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "observationCount": {
-                    "type": "integer"
-                },
-                "uniquePackets": {
                     "type": "integer"
                 }
             }
@@ -5194,14 +5278,126 @@ const docTemplate = `{
                 "activeObservers": {
                     "type": "integer"
                 },
+                "since": {
+                    "description": "epoch ms, start of the window",
+                    "type": "integer"
+                },
                 "totalObservations": {
                     "type": "integer"
                 },
                 "totalPackets": {
+                    "description": "distinct per hour (see StatsSeriesValues)",
+                    "type": "integer"
+                },
+                "until": {
+                    "description": "epoch ms, exclusive end of the window",
                     "type": "integer"
                 },
                 "windowHours": {
                     "description": "always 24 for now",
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.StatsSeries": {
+            "type": "object",
+            "properties": {
+                "completeHours": {
+                    "description": "hours contributing to summary",
+                    "type": "integer"
+                },
+                "earliestComplete": {
+                    "description": "first complete hour held, epoch ms; null if none",
+                    "type": "integer"
+                },
+                "hours": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.StatsSeriesHour"
+                    }
+                },
+                "revision": {
+                    "description": "changes whenever rolled hours, their status or coverage change",
+                    "type": "integer"
+                },
+                "since": {
+                    "description": "effective start, epoch ms on a UTC hour",
+                    "type": "integer"
+                },
+                "summary": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.StatsSeriesValues"
+                },
+                "until": {
+                    "description": "effective exclusive end, epoch ms on a UTC hour",
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.StatsSeriesHour": {
+            "type": "object",
+            "properties": {
+                "hour": {
+                    "description": "epoch ms, start of the hour",
+                    "type": "integer"
+                },
+                "status": {
+                    "description": "partial: raw rows deleted before it was rolled",
+                    "type": "string",
+                    "enum": [
+                        "complete",
+                        "partial",
+                        "missing"
+                    ]
+                },
+                "values": {
+                    "description": "null unless complete",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.StatsSeriesValues"
+                        }
+                    ]
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.StatsSeriesValues": {
+            "type": "object",
+            "properties": {
+                "activeIatas": {
+                    "description": "distinct across the hour or window",
+                    "type": "integer"
+                },
+                "activeObservers": {
+                    "description": "distinct across the hour or window",
+                    "type": "integer"
+                },
+                "activeScopes": {
+                    "description": "distinct across the hour or window",
+                    "type": "integer"
+                },
+                "maxPathEntries": {
+                    "type": "integer"
+                },
+                "observations": {
+                    "type": "integer"
+                },
+                "rssiSamples": {
+                    "type": "integer"
+                },
+                "rssiSum": {
+                    "description": "average = rssiSum / rssiSamples",
+                    "type": "number"
+                },
+                "scopedPackets": {
+                    "type": "integer"
+                },
+                "snrSamples": {
+                    "type": "integer"
+                },
+                "snrSum": {
+                    "description": "average = snrSum / snrSamples",
+                    "type": "number"
+                },
+                "uniquePackets": {
                     "type": "integer"
                 }
             }
@@ -5227,6 +5423,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "nodeId": {
+                    "description": "null once the node row has been deleted",
                     "type": "string"
                 },
                 "nodeName": {
@@ -5236,6 +5433,10 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "nodeTypeName": {
+                    "type": "string"
+                },
+                "publicKey": {
+                    "description": "hex",
                     "type": "string"
                 }
             }
@@ -5251,6 +5452,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "nodeId": {
+                    "description": "null once the node row has been deleted",
                     "type": "string"
                 },
                 "nodeName": {
@@ -5264,6 +5466,10 @@ const docTemplate = `{
                 },
                 "observationCount": {
                     "type": "integer"
+                },
+                "publicKey": {
+                    "description": "hex",
+                    "type": "string"
                 }
             }
         },

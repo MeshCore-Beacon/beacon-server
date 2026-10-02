@@ -45,10 +45,6 @@ func (s *Store) GetSignalStats(ctx context.Context, since, until time.Time, iata
 	return stats, nil
 }
 
-func (s *Store) RefreshSignalStats(ctx context.Context) error {
-	return s.q.RefreshSignalStats(ctx)
-}
-
 func signalAverage(value float64, count int64) *float64 {
 	if count == 0 {
 		return nil

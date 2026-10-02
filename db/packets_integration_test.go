@@ -56,7 +56,8 @@ VALUES ('\x01', 4, 0, 1, '\x00', '\x00', NOW(), NOW())`)
 	_, err = tx.Exec(ctx, `
 INSERT INTO observers (id, public_key) VALUES ('00000000-0000-0000-0000-000000000001', '\x02');
 INSERT INTO packet_observations (id, packet_hash, observer_id, iata, heard_at, path_length_byte, hash_size, hop_count, path_bytes)
-VALUES (1, '\x01', '00000000-0000-0000-0000-000000000001', 'YVR', NOW(), 2, 1, 2, '\x1122');`)
+VALUES (1, '\x01', '00000000-0000-0000-0000-000000000001', 'YVR', NOW(), 2, 1, 2, '\x1122');
+UPDATE packets SET observation_count = 1 WHERE packet_hash = '\x01';`)
 	if err != nil {
 		t.Fatal(err)
 	}

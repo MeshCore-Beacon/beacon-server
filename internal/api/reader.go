@@ -163,6 +163,9 @@ type Reader interface {
 	// since defines the start of the window; pass zero time for default (last 7 days).
 	GetStatsObservations(ctx context.Context, iatas []string, since time.Time) ([]ObservationPoint, error)
 
+	// GetStatsSeries returns hourly rollup metrics for [since, until), both on UTC hours.
+	GetStatsSeries(ctx context.Context, since, until time.Time, iatas []string) (*StatsSeries, error)
+
 	// GetSignalStats aggregates retained reception readings in [since, until).
 	GetSignalStats(ctx context.Context, since, until time.Time, iatas []string) (*SignalStats, error)
 
@@ -176,7 +179,7 @@ type Reader interface {
 
 	// GetStatsTopNodes returns the top N nodes by observation count.
 	// Pass nil for iatas to return stats across all IATAs.
-	GetStatsTopNodes(ctx context.Context, iatas []string, limit int32) ([]TopNode, error)
+	GetStatsTopNodes(ctx context.Context, iatas []string, since time.Time, limit int32) ([]TopNode, error)
 
 	// GetStatsTopObservers returns the top N observers by observation count.
 	// Pass nil for iatas to return stats across all IATAs.
@@ -201,7 +204,7 @@ type Reader interface {
 
 	// GetScopeStats returns aggregate packet, observer and node counts per transport scope.
 	// Pass empty iatas for global totals. IATAs must be uppercase.
-	GetScopeStats(ctx context.Context, iatas []string) ([]ScopeStats, error)
+	GetScopeStats(ctx context.Context, iatas []string, since time.Time) ([]ScopeStats, error)
 
 	// GetStatsNodeTypes returns node counts grouped by type, optionally filtered by IATA.
 	GetStatsNodeTypes(ctx context.Context, iatas []string) ([]NodeTypeCount, error)

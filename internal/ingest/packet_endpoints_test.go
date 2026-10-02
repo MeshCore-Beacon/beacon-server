@@ -37,9 +37,9 @@ func (s *endpointCaptureDB) ResolveEndpointHashes(_ context.Context, _ string, h
 	}
 	return nil, nil
 }
-func (s *endpointCaptureDB) InsertObservation(context.Context, InsertObservationParams) (bool, error) {
+func (s *endpointCaptureDB) InsertObservation(context.Context, InsertObservationParams) (bool, int64, error) {
 	s.observed++
-	return true, nil
+	return true, 1, nil
 }
 
 // Stored rows resolve endpoints at read time, but live events still carry them.

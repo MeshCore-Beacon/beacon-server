@@ -86,7 +86,7 @@ type Config struct {
 type DB interface {
 	// UpsertObserver upserts the observers row keyed on pubkey, and returns
 	// the Observer ID, Display Name and an error if any.
-	UpsertObserver(ctx context.Context, pubkey []byte) (uuid.UUID, string, error)
+	UpsertObserver(ctx context.Context, pubkey []byte, iata string) (uuid.UUID, string, error)
 
 	// UpsertObserverBroker records that this observer was seen on brokerName.
 	UpsertObserverBroker(ctx context.Context, observerID uuid.UUID, brokerName string, isPacket bool) error
@@ -100,9 +100,9 @@ type DB interface {
 	// SetPacketDecrypted marks a packet as decrypted in the DB
 	SetPacketDecrypted(ctx context.Context, hash []byte) error
 
-	// InsertObservation inserts a packet_observations row.
-	// Returns (inserted, error); inserted=false means ON CONFLICT DO NOTHING fired.
-	InsertObservation(ctx context.Context, o InsertObservationParams) (bool, error)
+	// InsertObservation inserts a packet_observations row and returns the packet's
+	// observation count; inserted=false means ON CONFLICT DO NOTHING fired.
+	InsertObservation(ctx context.Context, o InsertObservationParams) (inserted bool, observationCount int64, err error)
 
 	// SetNodeCapability flips supports_multibyte_paths or supports_multibyte_traces
 	// for a node, never downgrading an existing TRUE.
@@ -138,7 +138,7 @@ type DB interface {
 	// and any error.
 	UpdateObserverStatus(ctx context.Context, p UpdateObserverStatusParams) (uuid.UUID, error)
 
-	// GetObserverLastIATA returns the IATA from the most recent observation for the given observer.
+	// GetObserverLastIATA returns the IATA of the observer's most recent packet, or "" if none.
 	GetObserverLastIATA(ctx context.Context, observerID uuid.UUID) (string, error)
 
 	// InsertObserverTelemetry stores a telemetry snapshot for an observer.
@@ -180,11 +180,8 @@ type DB interface {
 	// UpsertChannelIATA upserts a channel_iatas row.
 	UpsertChannelIATA(ctx context.Context, channelHash []byte, iata string, heardAt time.Time) error
 
-	// UpsertTraceIATA upserts a trace_iatas row.
-	UpsertTraceIATA(ctx context.Context, traceTag []byte, iata string, heardAt time.Time) error
-
-	// GetPacketObservationCount returns the number of rows for the packet observations
-	GetPacketObservationCount(ctx context.Context, packetHash []byte) (int64, error)
+	// RecordTrace records one hearing of a TRACE packet in trace_iatas and trace_tags.
+	RecordTrace(ctx context.Context, h TraceHearing) error
 
 	// GetTransportScopeByName returns the ID of a transport scope by its normalized name.
 	GetTransportScopeByName(ctx context.Context, name string) (int32, error)

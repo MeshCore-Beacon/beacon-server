@@ -181,7 +181,7 @@ scopes:
     region: western-canada
 
 telemetry:
-  retention: 672h   # 4 weeks
+  retention: 744h   # 31 days
   resolution: 1h    # store one snapshot per observer per hour
 
 # Optional authenticated database/config downloads. Disabled unless explicitly enabled.
@@ -193,6 +193,11 @@ telemetry:
 # Also covers observations and channel messages.
 packets:
   retention: 168h   # 7 days
+
+# Hourly analytics rollups (stats endpoints). Rollups outlive raw packets; this is also the
+# longest window /stats/series and the other historical stats endpoints accept.
+analytics:
+  rollup_retention: 2160h   # 90 days
 
 # Known-route retention. Routes are distilled packet history (the path a packet
 # took, hop by hop), so they may outlive packets.retention; there is no required
@@ -266,7 +271,7 @@ cache:
   ttl: "1h"
   ttls:
     # Aggregated stats endpoints (overview, observations, breakdowns, top nodes/observers,
-    # radio presets, scope stats). Backed by materialized views refreshed hourly.
+    # radio presets, scope stats). Backed by hourly rollups; keys change when a new hour rolls.
     stats: "1h"
     # Mostly-static reference data (IATAs, regions, scopes).
     # Only changes when new observers arrive or config is reseeded.
@@ -291,6 +296,6 @@ cache:
 # Shorter intervals are useful during initial deployment to confirm data is
 # flowing. Back off to 1h or more once stable.
 #background:
-#  view_refresh: 1h   # default: 1h
+#  view_refresh: 1h   # rebuilds radio presets; default: 1h
 #  reconfirm: 1h      # default: 1h
 #  cleanup: 1h        # default: 1h

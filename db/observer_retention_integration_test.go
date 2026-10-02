@@ -96,7 +96,7 @@ SELECT id,1 FROM observers WHERE display_name='expired';`)
 	exec("TRUNCATE pg_temp.observers CASCADE")
 	coalescer := presence.New(store, time.Second, time.Second)
 	pubkey := bytes.Repeat([]byte{42}, 32)
-	oldID, _, err := coalescer.UpsertObserver(ctx, pubkey)
+	oldID, _, err := coalescer.UpsertObserver(ctx, pubkey, "YVR")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ SELECT id,1 FROM observers WHERE display_name='expired';`)
 	if err != nil || len(ids) != 1 || ids[0] != oldID {
 		t.Fatalf("cached expired observer was not deleted: %v, %v", ids, err)
 	}
-	newID, _, err := coalescer.UpsertObserver(ctx, pubkey)
+	newID, _, err := coalescer.UpsertObserver(ctx, pubkey, "YVR")
 	if err != nil || newID == oldID {
 		t.Fatalf("returning observer reused a deleted ID: %v", err)
 	}
@@ -122,7 +122,7 @@ SELECT id,1 FROM observers WHERE display_name='expired';`)
 	// The persisted row looks stale while fresh activity is still coalesced.
 	cutoff = time.Now().Add(-24 * time.Hour)
 	exec("UPDATE observers SET last_seen=$1 WHERE id=$2", cutoff.Add(-time.Hour), newID)
-	if _, _, err := coalescer.UpsertObserver(ctx, pubkey); err != nil {
+	if _, _, err := coalescer.UpsertObserver(ctx, pubkey, "YVR"); err != nil {
 		t.Fatal(err)
 	}
 	if ids, err := coalescer.DeleteOldObservers(ctx, cutoff); err != nil || len(ids) != 0 {

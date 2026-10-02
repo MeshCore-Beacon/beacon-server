@@ -17,6 +17,8 @@ type signalStatsReader struct {
 	calls int64
 }
 
+func (r *signalStatsReader) AnalyticsRevision(context.Context) (int64, error) { return 0, nil }
+
 func (r *signalStatsReader) GetSignalStats(context.Context, time.Time, time.Time, []string) (*api.SignalStats, error) {
 	r.calls++
 	return &api.SignalStats{Receptions: r.calls}, nil

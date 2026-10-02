@@ -14,28 +14,17 @@ import (
 	"github.com/google/uuid"
 )
 
-type countQueryDB struct {
-	*stubDB
-	countQueries int
-}
-
-func (s *countQueryDB) GetPacketObservationCount(context.Context, []byte) (int64, error) {
-	s.countQueries++
-	return 1, nil
-}
-
 type repeatHarness struct {
 	t      *testing.T
 	ctx    context.Context
 	w      *Worker
-	db     *countQueryDB
+	db     *stubDB
 	client *hub.Client
 }
 
 func newRepeatHarness(t *testing.T, includeRepeats bool) *repeatHarness {
-	w, base := newTestWorker()
-	db := &countQueryDB{stubDB: base}
-	w.db = db
+	w, db := newTestWorker()
+	db.observationCount = 3
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	t.Cleanup(cancel)
 	go w.hub.Run()
@@ -96,8 +85,8 @@ func TestHandlePacket_Repeats(t *testing.T) {
 	if len(first) != 1 || strings.Contains(string(first[0]), "isRepeat") {
 		t.Fatalf("first hearing: %s", first)
 	}
-	if r.db.countQueries != 1 {
-		t.Fatalf("first hearing ran %d count queries", r.db.countQueries)
+	if got := string(packetFields(t, first[0])["observationCount"]); got != "3" {
+		t.Fatalf("first hearing observationCount = %s, want the count InsertObservation returned", got)
 	}
 	if got := r.hear(false, 0x11); len(got) != 0 {
 		t.Fatalf("broker copy of the first hearing sent: %s", got)
@@ -111,9 +100,6 @@ func TestHandlePacket_Repeats(t *testing.T) {
 	if string(fields["isRepeat"]) != "true" || string(fields["isFirstObservation"]) != "false" || string(fields["observationCount"]) != "0" {
 		t.Fatalf("repeat packet fields: %v", fields)
 	}
-	if r.db.countQueries != 1 {
-		t.Fatalf("repeat ran a count query (%d total)", r.db.countQueries)
-	}
 	if got := r.hear(false, 0x22, 0x11); len(got) != 0 {
 		t.Fatalf("same path sent twice: %s", got)
 	}
@@ -126,9 +112,6 @@ func TestHandlePacket_RepeatsOffByDefault(t *testing.T) {
 	}
 	if got := r.hear(false, 0x22, 0x11); len(got) != 0 {
 		t.Fatalf("repeat sent with nobody opted in: %s", got)
-	}
-	if r.db.countQueries != 1 {
-		t.Fatalf("duplicate ran a count query (%d total)", r.db.countQueries)
 	}
 }
 

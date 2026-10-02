@@ -152,7 +152,7 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 	if len(dirty) > 0 || rawDirty {
 		w.log.Warn(fmt.Sprintf("stripped NUL bytes from status from %s", pubkeyHex), "fields", dirty, "metadata", rawDirty)
 	}
-	id, _, err := w.db.UpsertObserver(ctx, pubkey)
+	id, _, err := w.db.UpsertObserver(ctx, pubkey, "")
 	if err != nil {
 		w.log.Error(fmt.Sprintf("db: upsert observer failed in status from %s", pubkeyHex), "error", err)
 		return

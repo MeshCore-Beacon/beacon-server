@@ -75,10 +75,13 @@ func getRegion(reader api.Reader) http.HandlerFunc {
 	}
 }
 
+// rawStatsWindow is the longest window for endpoints that still aggregate raw-era snapshots.
+const rawStatsWindow = 30 * 24 * time.Hour
+
 // parseStatsWindow rounds both endpoints down to UTC hours. Polls within an
 // hour share a cache key; the response reports the effective window. A valid
 // sub-hour request can contain no complete buckets and return an empty result.
-func parseStatsWindow(r *http.Request) (time.Time, time.Time, error) {
+func parseStatsWindow(r *http.Request, maxWindow time.Duration) (time.Time, time.Time, error) {
 	q := r.URL.Query()
 	for _, key := range []string{"since", "until"} {
 		if len(q[key]) != 1 || q.Get(key) == "" {
@@ -87,8 +90,8 @@ func parseStatsWindow(r *http.Request) (time.Time, time.Time, error) {
 	}
 	since, errSince := strconv.ParseInt(q.Get("since"), 10, 64)
 	until, errUntil := strconv.ParseInt(q.Get("until"), 10, 64)
-	if errSince != nil || errUntil != nil || since < 0 || until <= since || until > 253402300799999 || until-since > int64((30*24*time.Hour)/time.Millisecond) {
-		return time.Time{}, time.Time{}, fmt.Errorf("since and until must be epoch milliseconds between 0 and 253402300799999, with a positive window of at most 30 days")
+	if errSince != nil || errUntil != nil || since < 0 || until <= since || until > 253402300799999 || until-since > maxWindow.Milliseconds() {
+		return time.Time{}, time.Time{}, fmt.Errorf("since and until must be epoch milliseconds between 0 and 253402300799999, with a positive window of at most %d days", int(maxWindow/(24*time.Hour)))
 	}
 	return time.UnixMilli(since).UTC().Truncate(time.Hour), time.UnixMilli(until).UTC().Truncate(time.Hour), nil
 }

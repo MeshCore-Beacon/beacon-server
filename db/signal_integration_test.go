@@ -64,9 +64,7 @@ SELECT int4send(n),'00000000-0000-0000-0000-000000000001',heard_at,iata,snr,rssi
 	if _, err := tx.Exec(ctx, "UPDATE packet_observations SET heard_at=to_timestamp(extract(epoch FROM $1::timestamptz)+extract(epoch FROM heard_at)-extract(epoch FROM '2026-01-01 00:00+00'::timestamptz))", since); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tx.Exec(ctx, "REFRESH MATERIALIZED VIEW mv_signal_stats_hourly"); err != nil {
-		t.Fatal(err)
-	}
+	rollTxHours(t, ctx, tx)
 	store := &Store{q: sqlc.New(tx)}
 	until := since.Add(4 * time.Hour)
 	for _, tc := range []struct {
@@ -138,7 +136,7 @@ SELECT int4send(n),'00000000-0000-0000-0000-000000000001',heard_at,iata,snr,rssi
 	}
 	w := httptest.NewRecorder()
 	request := httptest.NewRequest("GET", fmt.Sprintf("/signal?since=%d&until=%d&iatas=YVR", since.UnixMilli()+123, until.UnixMilli()+123), nil).WithContext(ctx)
-	handlers.StatsRouter(store, nil).ServeHTTP(w, request)
+	handlers.StatsRouter(store, handlers.StatsOptions{}).ServeHTTP(w, request)
 	var response api.SignalStats
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || w.Code != 200 || response.Receptions != 13 || response.SNR.Samples != 5 {
 		t.Fatalf("PostgreSQL HTTP response: status=%d body=%s error=%v", w.Code, w.Body.String(), err)
@@ -150,9 +148,7 @@ SELECT int4send(n),'00000000-0000-0000-0000-000000000001',heard_at,iata,snr,rssi
 	if err != nil || stale.Receptions != 15 {
 		t.Fatalf("snapshot lost: %+v %v", stale, err)
 	}
-	if err := store.RefreshSignalStats(ctx); err != nil {
-		t.Fatal(err)
-	}
+	rollTxHours(t, ctx, tx)
 	got, err := store.GetSignalStats(ctx, since, until, nil)
 	if err != nil || got.Receptions != 0 || got.Hourly == nil || len(got.Hourly) != 0 || got.SNR.Average != nil {
 		t.Fatalf("empty: %+v %v", got, err)

@@ -38,6 +38,14 @@ type UpsertPacketParams struct {
 	TraceTag       []byte
 }
 
+// TraceHearing is one hearing of a TRACE packet. The packet's own contribution to its tag
+// (count, type, best path) is recorded when the packet is stored.
+type TraceHearing struct {
+	TraceTag []byte
+	IATA     string
+	HeardAt  time.Time
+}
+
 // InsertObservationParams mirrors the columns written on packet_observations insert.
 type InsertObservationParams struct {
 	PacketHash        []byte
@@ -321,7 +329,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		return
 	}
 
-	id, observerName, err := w.db.UpsertObserver(ctx, pubkeyBytes)
+	id, observerName, err := w.db.UpsertObserver(ctx, pubkeyBytes, iata)
 	if err != nil {
 		w.log.Error(fmt.Sprintf("db: upsert observer failed with packet from %s/%s", iata, pubkeyHex), "error", err)
 		return
@@ -775,7 +783,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		PayloadType:       int16(packet.PayloadType()),
 		AirtimeMs:         airtimeMs,
 	}
-	inserted, err := w.db.InsertObservation(ctx, oParams)
+	inserted, observationCount, err := w.db.InsertObservation(ctx, oParams)
 	if err != nil {
 		w.log.Error(fmt.Sprintf("db: insert observation failed from %s/%s", iata, pubkeyHex), "error", err)
 		return
@@ -799,10 +807,10 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		}
 	}
 
-	// Runs on duplicate observations too; the upsert only writes when the row is >1h stale.
+	// Runs on duplicate observations too, so last_heard_at tracks every hearing.
 	if traceTag != nil {
-		if err := w.db.UpsertTraceIATA(ctx, traceTag, iata, heardAt); err != nil {
-			w.log.Error(fmt.Sprintf("db: upsert trace IATA failed from %s/%s", iata, pubkeyHex), "error", err)
+		if err := w.db.RecordTrace(ctx, TraceHearing{TraceTag: traceTag, IATA: iata, HeardAt: heardAt}); err != nil {
+			w.log.Error(fmt.Sprintf("db: record trace failed from %s/%s", iata, pubkeyHex), "error", err)
 		}
 	}
 
@@ -895,12 +903,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		evt.Observation.PathLength.HopCount = packet.PathHashCount()
 		evt.Observation.PropagationTimeMs = 0 // not yet calculated
 		if !repeat {
-			count, err := w.db.GetPacketObservationCount(ctx, packetHash[:])
-			if err != nil {
-				w.log.Error("failed to get observation count", "error", err)
-				count = 0
-			}
-			evt.Packet.ObservationCount = count
+			evt.Packet.ObservationCount = observationCount
 		}
 		if matchedScope != nil {
 			evt.Packet.Scope = matchedScope

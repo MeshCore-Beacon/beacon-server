@@ -1,11 +1,11 @@
 -- name: GetPathStats :many
--- All HTTP aggregates read the compact classification snapshot.
+-- All HTTP aggregates read the hourly rollup, never observations.
 WITH readings AS (
-    SELECT * FROM mv_path_stats_hourly
+    SELECT iata, hour, category, hash_bytes, entries, receptions FROM analytics_hourly_paths
     WHERE hour >= @since::timestamptz AND hour < @until::timestamptz
       AND COALESCE(cardinality(@iatas::bpchar[]), 0) = 0
     UNION ALL
-    SELECT * FROM mv_path_stats_hourly
+    SELECT iata, hour, category, hash_bytes, entries, receptions FROM analytics_hourly_paths
     WHERE hour >= @since::timestamptz AND hour < @until::timestamptz
       AND cardinality(@iatas::bpchar[]) > 0 AND iata = ANY(@iatas::bpchar[])
 )
@@ -17,5 +17,3 @@ FROM readings
 GROUP BY GROUPING SETS ((category, hash_bytes, entries), (hour, category, hash_bytes))
 ORDER BY is_hourly, hour, category, hash_bytes, entries;
 
--- name: RefreshPathStats :exec
-REFRESH MATERIALIZED VIEW CONCURRENTLY mv_path_stats_hourly;

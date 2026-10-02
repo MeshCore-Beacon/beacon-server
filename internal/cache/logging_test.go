@@ -22,7 +22,7 @@ func TestCacheDiagnostics(t *testing.T) {
 	c, mr := newTestClient(t)
 	key, value := "private-cache-key", "private-cache-value"
 	calls := 0
-	fetch := func() (string, error) { calls++; return value, nil }
+	fetch := func(context.Context) (string, error) { calls++; return value, nil }
 	for i := 0; i < 2; i++ {
 		got, err := getOrSet(context.Background(), c, key, time.Minute, fetch)
 		if err != nil || got != value {

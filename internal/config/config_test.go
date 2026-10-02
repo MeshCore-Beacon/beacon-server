@@ -127,8 +127,8 @@ func TestResolve_Defaults(t *testing.T) {
 	if r.TelemetryResolution != time.Hour {
 		t.Errorf("expected TelemetryResolution 1h, got %v", r.TelemetryResolution)
 	}
-	if r.TelemetryRetention != 28*24*time.Hour {
-		t.Errorf("expected TelemetryRetention 672h, got %v", r.TelemetryRetention)
+	if r.TelemetryRetention != 31*24*time.Hour {
+		t.Errorf("expected TelemetryRetention 744h, got %v", r.TelemetryRetention)
 	}
 	if r.PacketRetention != 7*24*time.Hour {
 		t.Errorf("expected PacketRetention 168h, got %v", r.PacketRetention)
@@ -209,5 +209,66 @@ func TestResolve_RouteDefaults(t *testing.T) {
 	}
 	if r.RouteMinObservations != 3 {
 		t.Errorf("RouteMinObservations = %d, want 3", r.RouteMinObservations)
+	}
+}
+
+func TestResolve_RollupRetentionDefaults(t *testing.T) {
+	r := Resolve(&Config{})
+	if r.RollupRetention != 90*24*time.Hour {
+		t.Errorf("expected RollupRetention 2160h (90 days), got %v", r.RollupRetention)
+	}
+}
+
+func TestResolve_TelemetryRetentionDefault(t *testing.T) {
+	r := Resolve(&Config{})
+	if r.TelemetryRetention != 31*24*time.Hour {
+		t.Errorf("expected TelemetryRetention 744h (31 days), got %v", r.TelemetryRetention)
+	}
+}
+
+func TestResolve_RollupRetentionExplicitOverride(t *testing.T) {
+	cfg := &Config{}
+	cfg.Analytics.RollupRetention.Duration = 60 * 24 * time.Hour
+	r := Resolve(cfg)
+	if r.RollupRetention != 60*24*time.Hour {
+		t.Errorf("expected RollupRetention 1440h (60 days), got %v", r.RollupRetention)
+	}
+}
+
+func TestLoad_PacketsRetentionTooShort(t *testing.T) {
+	f, err := os.CreateTemp("", "beacon-config-*.yaml")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(f.Name())
+
+	_, _ = f.WriteString("packets:\n  retention: 1h\n")
+	f.Close()
+
+	_, err = Load(f.Name())
+	if err == nil {
+		t.Fatal("expected error for packets.retention < 24h, got nil")
+	}
+	if !strings.Contains(err.Error(), "packets.retention must be at least 24h") {
+		t.Errorf("expected error about packets.retention, got: %v", err)
+	}
+}
+
+func TestLoad_AnalyticsRollupRetentionTooShort(t *testing.T) {
+	f, err := os.CreateTemp("", "beacon-config-*.yaml")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(f.Name())
+
+	_, _ = f.WriteString("analytics:\n  rollup_retention: 1h\n")
+	f.Close()
+
+	_, err = Load(f.Name())
+	if err == nil {
+		t.Fatal("expected error for analytics.rollup_retention < 24h, got nil")
+	}
+	if !strings.Contains(err.Error(), "analytics.rollup_retention must be at least 24h") {
+		t.Errorf("expected error about analytics.rollup_retention, got: %v", err)
 	}
 }

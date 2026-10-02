@@ -297,14 +297,14 @@ func TestHandlePacket_Advert_SkipsChannelIATA(t *testing.T) {
 	if db.upsertChannelIATACalls != 0 {
 		t.Errorf("expected UpsertChannelIATA NOT to be called for a non-channel packet, got %d calls", db.upsertChannelIATACalls)
 	}
-	if db.upsertTraceIATACalls != 0 {
-		t.Errorf("expected UpsertTraceIATA NOT to be called for a non-trace packet, got %d calls", db.upsertTraceIATACalls)
+	if len(db.traceHearings) != 0 {
+		t.Errorf("expected RecordTrace NOT to be called for a non-trace packet, got %d calls", len(db.traceHearings))
 	}
 }
 
 func buildTracePacket(t *testing.T) *meshcore.Packet {
 	t.Helper()
-	payload, err := (&meshcore.Trace{Tag: 0xdeadbeef, AuthCode: 1}).ToBytes()
+	payload, err := (&meshcore.Trace{Tag: 0xdeadbeef, AuthCode: 1, PathHashes: []byte{0xaa, 0xbb}}).ToBytes()
 	if err != nil {
 		t.Fatalf("trace to bytes: %v", err)
 	}
@@ -314,14 +314,22 @@ func buildTracePacket(t *testing.T) *meshcore.Packet {
 	}
 }
 
-func TestHandlePacket_Trace_UpsertsTraceIATA(t *testing.T) {
+func TestHandlePacket_Trace_RecordsTrace(t *testing.T) {
 	w, db := newTestWorker()
 	db.observationInserted = true
+	db.packetIsNew = true
 	envelope := packetEnvelope(t, buildTracePacket(t))
 
 	w.handlePacket(context.Background(), "YOW", "0102", envelope)
+	db.packetIsNew, db.observationInserted = false, false
+	w.handlePacket(context.Background(), "YOW", "0102", envelope)
 
-	if db.upsertTraceIATACalls != 1 {
-		t.Errorf("expected UpsertTraceIATA to be called once for a stored trace, got %d", db.upsertTraceIATACalls)
+	if len(db.traceHearings) != 2 {
+		t.Fatalf("expected RecordTrace for every hearing, got %d", len(db.traceHearings))
+	}
+	for _, h := range db.traceHearings {
+		if h.IATA != "YOW" || h.HeardAt.IsZero() || hex.EncodeToString(h.TraceTag) != "efbeadde" {
+			t.Errorf("unexpected hearing %+v", h)
+		}
 	}
 }

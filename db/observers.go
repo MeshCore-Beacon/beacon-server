@@ -20,8 +20,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-func (s *Store) UpsertObserver(ctx context.Context, pubkey []byte) (uuid.UUID, string, error) {
-	row, err := s.q.UpsertObserver(ctx, pubkey)
+func (s *Store) UpsertObserver(ctx context.Context, pubkey []byte, iata string) (uuid.UUID, string, error) {
+	row, err := s.q.UpsertObserver(ctx, sqlc.UpsertObserverParams{PublicKey: pubkey, Iata: iata, IataAt: ts(time.Now())})
 	if err != nil {
 		return uuid.Nil, "", err
 	}

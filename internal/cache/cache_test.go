@@ -31,6 +31,10 @@ type stubReader struct {
 	calls int
 }
 
+func (s *stubReader) AnalyticsRevision(context.Context) (int64, error) { return 0, nil }
+func (s *stubReader) GetStatsSeries(context.Context, time.Time, time.Time, []string) (*api.StatsSeries, error) {
+	return &api.StatsSeries{}, nil
+}
 func (s *stubReader) GetSignalStats(context.Context, time.Time, time.Time, []string) (*api.SignalStats, error) {
 	return nil, s.err
 }
@@ -73,7 +77,7 @@ func (s *stubReader) GetRegionBySlug(_ context.Context, _ string) (*api.Region, 
 	return nil, nil
 }
 func (s *stubReader) GetScopeNames(_ context.Context) ([]string, error) { return nil, nil }
-func (s *stubReader) GetScopeStats(_ context.Context, _ []string) ([]api.ScopeStats, error) {
+func (s *stubReader) GetScopeStats(_ context.Context, _ []string, _ time.Time) ([]api.ScopeStats, error) {
 	return nil, nil
 }
 func (s *stubReader) GetScopeByName(_ context.Context, _ string) (*api.ScopeDetail, error) {
@@ -92,7 +96,7 @@ func (s *stubReader) GetStatsPayloadBreakdown(_ context.Context, _ []string, _ t
 	return nil, nil
 }
 
-func (s *stubReader) GetStatsTopNodes(_ context.Context, _ []string, _ int32) ([]api.TopNode, error) {
+func (s *stubReader) GetStatsTopNodes(_ context.Context, _ []string, _ time.Time, _ int32) ([]api.TopNode, error) {
 	return nil, nil
 }
 
@@ -258,7 +262,7 @@ func TestGetOrSet_CacheMiss_FetchesAndStores(t *testing.T) {
 	c, _ := newTestClient(t)
 	stub := &stubReader{iatas: []api.IATA{{IATA: "YVR"}}}
 
-	result, err := getOrSet(context.Background(), c, "test:key", time.Minute, func() ([]api.IATA, error) {
+	result, err := getOrSet(context.Background(), c, "test:key", time.Minute, func(ctx context.Context) ([]api.IATA, error) {
 		return stub.ListIATAs(context.Background())
 	})
 	if err != nil {
@@ -277,11 +281,11 @@ func TestGetOrSet_CacheHit_DoesNotFetch(t *testing.T) {
 	stub := &stubReader{iatas: []api.IATA{{IATA: "YVR"}}}
 
 	// prime the cache
-	_, _ = getOrSet(context.Background(), c, "test:key", time.Minute, func() ([]api.IATA, error) {
+	_, _ = getOrSet(context.Background(), c, "test:key", time.Minute, func(ctx context.Context) ([]api.IATA, error) {
 		return stub.ListIATAs(context.Background())
 	})
 	// second call should hit cache
-	result, err := getOrSet(context.Background(), c, "test:key", time.Minute, func() ([]api.IATA, error) {
+	result, err := getOrSet(context.Background(), c, "test:key", time.Minute, func(ctx context.Context) ([]api.IATA, error) {
 		return stub.ListIATAs(context.Background())
 	})
 	if err != nil {
@@ -300,7 +304,7 @@ func TestGetOrSet_RedisError_DegradeGracefully(t *testing.T) {
 	mr.Close() // kill Redis
 
 	stub := &stubReader{iatas: []api.IATA{{IATA: "YVR"}}}
-	result, err := getOrSet(context.Background(), c, "test:key", time.Minute, func() ([]api.IATA, error) {
+	result, err := getOrSet(context.Background(), c, "test:key", time.Minute, func(ctx context.Context) ([]api.IATA, error) {
 		return stub.ListIATAs(context.Background())
 	})
 	if err != nil {
@@ -316,7 +320,7 @@ func TestGetOrSet_CorruptEntry_Overwrites(t *testing.T) {
 	mr.Set("test:key", "not-valid-json")
 
 	stub := &stubReader{iatas: []api.IATA{{IATA: "YVR"}}}
-	result, err := getOrSet(context.Background(), c, "test:key", time.Minute, func() ([]api.IATA, error) {
+	result, err := getOrSet(context.Background(), c, "test:key", time.Minute, func(ctx context.Context) ([]api.IATA, error) {
 		return stub.ListIATAs(context.Background())
 	})
 	if err != nil {
@@ -334,7 +338,7 @@ func TestGetOrSet_FetchError_Propagates(t *testing.T) {
 	c, _ := newTestClient(t)
 	stub := &stubReader{err: errors.New("db error")}
 
-	_, err := getOrSet(context.Background(), c, "test:key", time.Minute, func() ([]api.IATA, error) {
+	_, err := getOrSet(context.Background(), c, "test:key", time.Minute, func(ctx context.Context) ([]api.IATA, error) {
 		return stub.ListIATAs(context.Background())
 	})
 	if err == nil {
@@ -357,14 +361,14 @@ func TestCachedReader_IATASortingForStableKey(t *testing.T) {
 	}
 
 	// call with unsorted IATAs
-	getOrSet(context.Background(), c, "beacon:stats:overview:YVR,YYJ", time.Minute, func() (*api.StatsOverview, error) {
+	getOrSet(context.Background(), c, "beacon:stats:overview:YVR,YYJ", time.Minute, func(ctx context.Context) (*api.StatsOverview, error) {
 		calls++
 		return &api.StatsOverview{TotalPackets: 42}, nil
 	})
 
 	// call CachedReader with reversed order — should hit same key
 	_ = cr
-	result, err := getOrSet(context.Background(), c, "beacon:stats:overview:YVR,YYJ", time.Minute, func() (*api.StatsOverview, error) {
+	result, err := getOrSet(context.Background(), c, "beacon:stats:overview:YVR,YYJ", time.Minute, func(ctx context.Context) (*api.StatsOverview, error) {
 		calls++
 		return &api.StatsOverview{TotalPackets: 42}, nil
 	})

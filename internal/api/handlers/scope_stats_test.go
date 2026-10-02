@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
@@ -71,7 +72,7 @@ func TestGetStatsScopes_Filters(t *testing.T) {
 					}
 					return &api.Region{IATAs: []string{"YVR", "YYJ"}}, nil
 				},
-				getScopeStats: func(_ context.Context, iatas []string) ([]api.ScopeStats, error) {
+				getScopeStats: func(_ context.Context, iatas []string, _ time.Time) ([]api.ScopeStats, error) {
 					called = true
 					if !slices.Equal(iatas, tc.want) {
 						t.Fatalf("IATAs = %v, want %v", iatas, tc.want)
@@ -104,7 +105,7 @@ func TestGetStatsScopes_Filters(t *testing.T) {
 
 func TestGetStatsScopes_ReaderError(t *testing.T) {
 	w := httptest.NewRecorder()
-	getStatsScopes(stubReader{getScopeStats: func(context.Context, []string) ([]api.ScopeStats, error) {
+	getStatsScopes(stubReader{getScopeStats: func(context.Context, []string, time.Time) ([]api.ScopeStats, error) {
 		return nil, errors.New("database unavailable")
 	}}, nil)(w, httptest.NewRequest(http.MethodGet, "/stats/scopes?iata=YVR", nil))
 	if w.Code != http.StatusInternalServerError {
@@ -119,7 +120,7 @@ func testScopes(byIATA map[string][]string) *scopestore.ScopeStore {
 }
 
 func TestGetStatsScopes_FiltersToRegionMembers(t *testing.T) {
-	reader := stubReader{getScopeStats: func(context.Context, []string) ([]api.ScopeStats, error) {
+	reader := stubReader{getScopeStats: func(context.Context, []string, time.Time) ([]api.ScopeStats, error) {
 		return []api.ScopeStats{{Name: "#elsewhere", PacketCount: 9}, {Name: "#on"}, {Name: "#yow", PacketCount: 4}}, nil
 	}}
 	members := testScopes(map[string][]string{"YOW": {"#yow", "#on"}})

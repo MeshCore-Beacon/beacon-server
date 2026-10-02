@@ -32,7 +32,7 @@ import (
 func getPathStats(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		since, until, err := parseStatsWindow(r)
+		since, until, err := parseStatsWindow(r, rawStatsWindow)
 		if err != nil {
 			respondError(w, http.StatusBadRequest, err.Error())
 			return

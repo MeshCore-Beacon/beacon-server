@@ -8,7 +8,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -17,7 +16,6 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/meshcore-go/meshcore-go"
 )
@@ -514,7 +512,7 @@ func (s *Store) UpsertIATA(ctx context.Context, iata string) error {
 	return s.q.UpsertIATA(ctx, iata)
 }
 
-func (s *Store) InsertObservation(ctx context.Context, o ingest.InsertObservationParams) (bool, error) {
+func (s *Store) InsertObservation(ctx context.Context, o ingest.InsertObservationParams) (bool, int64, error) {
 	params := sqlc.InsertObservationParams{
 		PacketHash:        o.PacketHash,
 		ObserverID:        o.ObserverID,
@@ -536,13 +534,10 @@ func (s *Store) InsertObservation(ctx context.Context, o ingest.InsertObservatio
 		AirtimeMs:         o.AirtimeMs,
 	}
 	row, err := s.q.InsertObservation(ctx, params)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil // conflict, not an error
-	}
 	if err != nil {
-		return false, err
+		return false, 0, err
 	}
-	return row.ID != 0, nil
+	return row.Inserted, row.ObservationCount, nil
 }
 
 func (s *Store) ListNodeObservations(ctx context.Context, nodeID uuid.UUID, cursor int64, limit int32) (api.Page[api.PacketObservationSummary], error) {
@@ -582,10 +577,6 @@ func (s *Store) ListNodeObservations(ctx context.Context, nodeID uuid.UUID, curs
 		NextCursor: nextCursor,
 		HasMore:    hasMore,
 	}, nil
-}
-
-func (s *Store) GetPacketObservationCount(ctx context.Context, packetHash []byte) (int64, error) {
-	return s.q.GetPacketObservationCount(ctx, packetHash)
 }
 
 // Small because each packet cascades to its observations.

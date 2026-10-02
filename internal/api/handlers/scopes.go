@@ -73,6 +73,7 @@ func listScopes(reader api.Reader, scopes ScopeMembership) http.HandlerFunc {
 // getScope godoc
 //
 //	@Summary	Get scope detail by name
+//	@Description	packetCount sums packets per hour across every retained rollup hour; iatas are the IATAs that heard the scope's packets. Observer and node counts are current memberships.
 //	@Tags		Scopes
 //	@Produce	json
 //	@Param		name	path		string	true	"Scope name e.g. %23bc (URL-encoded #bc)"

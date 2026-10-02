@@ -19,62 +19,63 @@ func TestGetStatsOverview(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mock := mockdb.NewMockQuerier(ctrl)
 
+	mock.EXPECT().GetAnalyticsRevision(gomock.Any()).Return(int64(7), nil)
+	mock.EXPECT().GetEarliestCompleteRollupHour(gomock.Any()).Return(pgtype.Timestamptz{}, nil)
+	var params sqlc.GetStatsSeriesParams
 	mock.EXPECT().
-		GetStatsOverview(gomock.Any(), []string{"YVR"}).
-		Return(sqlc.GetStatsOverviewRow{
-			TotalPackets:      100,
-			TotalObservations: 500,
-			ActiveObservers:   10,
-			ActiveIatas:       3,
-		}, nil)
+		GetStatsSeries(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, p sqlc.GetStatsSeriesParams) ([]sqlc.GetStatsSeriesRow, error) {
+			params = p
+			return []sqlc.GetStatsSeriesRow{{Status: "summary", Observations: 500, UniquePackets: 100, ActiveObservers: 10, ActiveIatas: 3}}, nil
+		})
 
 	store := &Store{q: mock}
 	result, err := store.GetStatsOverview(context.Background(), []string{"YVR"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.TotalPackets != 100 {
-		t.Errorf("expected TotalPackets 100, got %d", result.TotalPackets)
+	if result.TotalPackets != 100 || result.TotalObservations != 500 || result.ActiveObservers != 10 || result.ActiveIATAs != 3 {
+		t.Errorf("unexpected summary mapping: %+v", result)
 	}
-	if result.WindowHours != 24 {
-		t.Errorf("expected WindowHours 24, got %d", result.WindowHours)
+	if result.WindowHours != 24 || result.Until-result.Since != (24*time.Hour).Milliseconds() {
+		t.Errorf("window %d..%d (%d hours)", result.Since, result.Until, result.WindowHours)
+	}
+	// The window ends at the last hour that can have been rolled.
+	wantUntil := time.Now().UTC().Add(-rollupDelay).Truncate(time.Hour).Add(time.Hour)
+	if !params.Until.Time.Equal(wantUntil) || len(params.Iatas) != 1 {
+		t.Errorf("series params %+v, want until %s", params, wantUntil)
 	}
 }
 
-func TestGetStatsTopNodes_NilObservationCount(t *testing.T) {
+func TestGetStatsTopNodes_MissingNodeRow(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mock := mockdb.NewMockQuerier(ctrl)
 
 	nodeID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	lastHeard := pgtype.Timestamptz{Time: time.UnixMilli(1700000000000), Valid: true}
-	name := "test-node"
+	since := time.Date(2026, 1, 1, 12, 34, 0, 0, time.UTC)
 
 	mock.EXPECT().
 		GetTopNodes(gomock.Any(), sqlc.GetTopNodesParams{
-			Column1: []string{"YVR"},
-			Limit:   5,
+			Since:    pgtype.Timestamptz{Time: since.Truncate(time.Hour), Valid: true},
+			Iatas:    []string{"YVR"},
+			RowLimit: 5,
 		}).
-		Return([]sqlc.MvTopNodesByIatum{
-			{
-				NodeID:           nodeID,
-				Name:             &name,
-				NodeType:         1,
-				Iata:             "YVR",
-				ObservationCount: nil,
-				LastHeard:        lastHeard,
-			},
+		Return([]sqlc.GetTopNodesRow{
+			{NodeID: pgtype.UUID{Bytes: nodeID, Valid: true}, PublicKey: "aa", Name: "test-node", NodeType: 1, Iata: "YVR", ObservationCount: 9, LastHeard: lastHeard},
+			{PublicKey: "bb", Iata: "YVR", ObservationCount: 3, LastHeard: lastHeard},
 		}, nil)
 
 	store := &Store{q: mock}
-	items, err := store.GetStatsTopNodes(context.Background(), []string{"YVR"}, 5)
+	items, err := store.GetStatsTopNodes(context.Background(), []string{"YVR"}, since, 5)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(items) != 1 {
-		t.Fatalf("expected 1 item, got %d", len(items))
+	if len(items) != 2 || items[0].NodeID == nil || *items[0].NodeID != nodeID || *items[0].NodeName != "test-node" {
+		t.Fatalf("unexpected first node: %+v", items)
 	}
-	if items[0].ObservationCount != 0 {
-		t.Errorf("expected ObservationCount 0 for nil, got %d", items[0].ObservationCount)
+	if items[1].NodeID != nil || items[1].NodeName != nil || items[1].PublicKey != "bb" {
+		t.Errorf("deleted node should keep its key and drop id/name: %+v", items[1])
 	}
 }
 
@@ -91,8 +92,8 @@ func TestGetStatsTopObservers_IATATypeAssertion(t *testing.T) {
 		Return([]sqlc.GetStatsTopObserversRow{
 			{
 				ID:               observerID,
-				DisplayName:      &displayName,
-				ObserverType:     &obsType,
+				DisplayName:      displayName,
+				ObserverType:     obsType,
 				Iata:             "YVR",
 				ObservationCount: 42,
 			},
@@ -126,8 +127,9 @@ func TestGetStatsTopAdvertisers_FloodDirectSplit(t *testing.T) {
 		GetStatsTopAdvertisers(gomock.Any(), gomock.Any()).
 		Return([]sqlc.GetStatsTopAdvertisersRow{
 			{
-				ID:                nodeID,
-				Name:              &name,
+				NodeID:            pgtype.UUID{Bytes: nodeID, Valid: true},
+				PublicKey:         "cc",
+				Name:              name,
 				NodeType:          2, // repeater
 				AdvertCount:       10,
 				FloodAdvertCount:  7,
@@ -227,13 +229,13 @@ func TestGetScopeStats(t *testing.T) {
 	mock := mockdb.NewMockQuerier(ctrl)
 
 	mock.EXPECT().
-		GetScopeStats(gomock.Any(), []string{"YVR"}).
+		GetScopeStats(gomock.Any(), gomock.Any()).
 		Return([]sqlc.GetScopeStatsRow{
 			{Name: "default", PacketCount: 100, ObserverCount: 5, NodeCount: 20},
 		}, nil)
 
 	store := &Store{q: mock}
-	items, err := store.GetScopeStats(context.Background(), []string{"YVR"})
+	items, err := store.GetScopeStats(context.Background(), []string{"YVR"}, time.Time{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
