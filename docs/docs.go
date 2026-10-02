@@ -2798,7 +2798,7 @@ const docTemplate = `{
         },
         "/stats/scopes": {
             "get": {
-                "description": "Packets are those heard since the window start, each counted once per hour however many of the requested IATAs heard it. Observers and nodes are current memberships: observers filter by the IATA they last reported from, nodes by their IATA memberships. hourly splits packetCount by UTC hour (zero hours omitted; outage gaps come from /stats/series hour status). With filters, lists only manual scopes configured for a matching region and imported scopes whose current MeshMapper catalogue includes a matching IATA; those remain listed with zero counts. An empty region returns an empty array.",
+                "description": "Packets are those heard since the window start, each counted once per hour however many of the requested IATAs heard it. Observers and nodes are current memberships: observers filter by the IATA they last reported from, nodes by their IATA memberships. hourly splits packetCount by UTC hour and adds the distinct observers and advertising nodes active in the scope each hour (empty hours omitted; outage gaps come from /stats/series hour status). With filters, lists only manual scopes configured for a matching region and imported scopes whose current MeshMapper catalogue includes a matching IATA; those remain listed with zero counts. An empty region returns an empty array.",
                 "produces": [
                     "application/json"
                 ],
@@ -5177,6 +5177,14 @@ const docTemplate = `{
             "properties": {
                 "hour": {
                     "description": "epoch ms, start of the UTC hour",
+                    "type": "integer"
+                },
+                "nodes": {
+                    "description": "distinct nodes whose adverts were heard in the scope that hour",
+                    "type": "integer"
+                },
+                "observers": {
+                    "description": "distinct observers that heard the scope's packets that hour",
                     "type": "integer"
                 },
                 "packets": {

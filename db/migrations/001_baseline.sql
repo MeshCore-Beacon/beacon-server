@@ -547,6 +547,24 @@ CREATE TABLE analytics_hourly_scope_sets (
     PRIMARY KEY (hour, iatas, scope_id)
 );
 
+-- Observers that heard a scoped packet, per IATA; distinct counts span any IATA filter.
+CREATE TABLE analytics_hourly_scope_observers (
+    hour timestamp with time zone NOT NULL,
+    iata character(3) NOT NULL,
+    scope_id integer NOT NULL,
+    observer_id uuid NOT NULL,
+    PRIMARY KEY (hour, scope_id, iata, observer_id)
+);
+
+-- Nodes whose ADVERTs were heard in a scope, per IATA.
+CREATE TABLE analytics_hourly_scope_nodes (
+    hour timestamp with time zone NOT NULL,
+    iata character(3) NOT NULL,
+    scope_id integer NOT NULL,
+    origin_pubkey bytea NOT NULL,
+    PRIMARY KEY (hour, scope_id, iata, origin_pubkey)
+);
+
 CREATE TABLE analytics_rollup_hours (
     hour timestamp with time zone PRIMARY KEY,
     status text NOT NULL CHECK (status IN ('complete', 'partial', 'missing')),

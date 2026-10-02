@@ -153,6 +153,8 @@ func rollHour(ctx context.Context, tx pgx.Tx, hour time.Time) (RollOutcome, bool
 		"talker sets":       q.RollTalkerSets,
 		"packet sets":       q.RollPacketSets,
 		"scope sets":        q.RollScopeSets,
+		"scope observers":   q.RollScopeObservers,
+		"scope nodes":       q.RollScopeNodes,
 	} {
 		if err := roll(ctx, h); err != nil {
 			return RollSkipped, false, fmt.Errorf("roll %s: %w", name, err)

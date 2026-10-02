@@ -99,10 +99,12 @@ type ScopeStats struct {
 	Hourly        []ScopeHour `json:"hourly"`        // packetCount by hour, oldest first; hours with none omitted
 }
 
-// ScopeHour is one UTC hour of a scope's packets; a scope's hours sum to its packetCount.
+// ScopeHour is one UTC hour of a scope's activity; a scope's hours' packets sum to its packetCount.
 type ScopeHour struct {
-	Hour    int64 `json:"hour"` // epoch ms, start of the UTC hour
-	Packets int64 `json:"packets"`
+	Hour      int64 `json:"hour"` // epoch ms, start of the UTC hour
+	Packets   int64 `json:"packets"`
+	Observers int64 `json:"observers"` // distinct observers that heard the scope's packets that hour
+	Nodes     int64 `json:"nodes"`     // distinct nodes whose adverts were heard in the scope that hour
 }
 
 // TopNode is a node ranked by how often its adverts were heard in the window.

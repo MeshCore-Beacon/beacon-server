@@ -236,7 +236,7 @@ func (s *Store) GetScopeStats(ctx context.Context, iatas []string, since time.Ti
 	}
 	byScope := make(map[string][]api.ScopeHour)
 	for _, h := range hours {
-		byScope[h.Name] = append(byScope[h.Name], api.ScopeHour{Hour: h.Hour.Time.UnixMilli(), Packets: h.Packets})
+		byScope[h.Name] = append(byScope[h.Name], api.ScopeHour{Hour: h.Hour.Time.UnixMilli(), Packets: h.Packets, Observers: h.Observers, Nodes: h.Nodes})
 	}
 	items := make([]api.ScopeStats, 0, len(rows))
 	for _, r := range rows {

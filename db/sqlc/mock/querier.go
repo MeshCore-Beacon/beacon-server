@@ -1978,6 +1978,34 @@ func (mr *MockQuerierMockRecorder) RollPayloadBreakdown(ctx, hour any) *gomock.C
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RollPayloadBreakdown", reflect.TypeOf((*MockQuerier)(nil).RollPayloadBreakdown), ctx, hour)
 }
 
+// RollScopeNodes mocks base method.
+func (m *MockQuerier) RollScopeNodes(ctx context.Context, hour pgtype.Timestamptz) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RollScopeNodes", ctx, hour)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RollScopeNodes indicates an expected call of RollScopeNodes.
+func (mr *MockQuerierMockRecorder) RollScopeNodes(ctx, hour any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RollScopeNodes", reflect.TypeOf((*MockQuerier)(nil).RollScopeNodes), ctx, hour)
+}
+
+// RollScopeObservers mocks base method.
+func (m *MockQuerier) RollScopeObservers(ctx context.Context, hour pgtype.Timestamptz) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RollScopeObservers", ctx, hour)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RollScopeObservers indicates an expected call of RollScopeObservers.
+func (mr *MockQuerierMockRecorder) RollScopeObservers(ctx, hour any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RollScopeObservers", reflect.TypeOf((*MockQuerier)(nil).RollScopeObservers), ctx, hour)
+}
+
 // RollScopeSets mocks base method.
 func (m *MockQuerier) RollScopeSets(ctx context.Context, hour pgtype.Timestamptz) error {
 	m.ctrl.T.Helper()

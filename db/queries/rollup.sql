@@ -94,8 +94,10 @@ WITH a AS (DELETE FROM analytics_hourly_iata_observations ta WHERE ta.hour = @ho
      g AS (DELETE FROM analytics_hourly_advert_hearings tg WHERE tg.hour = @hour::timestamptz),
      h AS (DELETE FROM analytics_hourly_advert_sets th WHERE th.hour = @hour::timestamptz),
      i AS (DELETE FROM analytics_hourly_talker_sets ti WHERE ti.hour = @hour::timestamptz),
-     j AS (DELETE FROM analytics_hourly_packet_sets tj WHERE tj.hour = @hour::timestamptz)
-DELETE FROM analytics_hourly_scope_sets tk WHERE tk.hour = @hour::timestamptz;
+     j AS (DELETE FROM analytics_hourly_packet_sets tj WHERE tj.hour = @hour::timestamptz),
+     k AS (DELETE FROM analytics_hourly_scope_sets tk WHERE tk.hour = @hour::timestamptz),
+     l AS (DELETE FROM analytics_hourly_scope_observers tl WHERE tl.hour = @hour::timestamptz)
+DELETE FROM analytics_hourly_scope_nodes tm WHERE tm.hour = @hour::timestamptz;
 
 -- name: RollIATAObservations :exec
 INSERT INTO analytics_hourly_iata_observations (hour, iata, observation_count)
@@ -221,6 +223,16 @@ FROM (SELECT scope_id, array_agg(DISTINCT iata ORDER BY iata) AS iatas
       GROUP BY packet_hash, scope_id) p
 GROUP BY iatas, scope_id;
 
+-- name: RollScopeObservers :exec
+INSERT INTO analytics_hourly_scope_observers (hour, iata, scope_id, observer_id)
+SELECT DISTINCT @hour::timestamptz, iata, scope_id, observer_id
+FROM rollup_obs WHERE scope_id IS NOT NULL;
+
+-- name: RollScopeNodes :exec
+INSERT INTO analytics_hourly_scope_nodes (hour, iata, scope_id, origin_pubkey)
+SELECT DISTINCT @hour::timestamptz, iata, scope_id, origin_pubkey
+FROM rollup_obs WHERE payload_type = 4 AND origin_pubkey IS NOT NULL AND scope_id IS NOT NULL;
+
 -- name: RollupContentHash :one
 -- Order-independent fingerprint of every family row for the hour.
 SELECT md5(concat_ws('|',
@@ -234,7 +246,9 @@ SELECT md5(concat_ws('|',
   (SELECT string_agg(t::text, ',' ORDER BY t::text) FROM analytics_hourly_advert_sets t WHERE t.hour = @hour::timestamptz),
   (SELECT string_agg(t::text, ',' ORDER BY t::text) FROM analytics_hourly_talker_sets t WHERE t.hour = @hour::timestamptz),
   (SELECT string_agg(t::text, ',' ORDER BY t::text) FROM analytics_hourly_packet_sets t WHERE t.hour = @hour::timestamptz),
-  (SELECT string_agg(t::text, ',' ORDER BY t::text) FROM analytics_hourly_scope_sets t WHERE t.hour = @hour::timestamptz)
+  (SELECT string_agg(t::text, ',' ORDER BY t::text) FROM analytics_hourly_scope_sets t WHERE t.hour = @hour::timestamptz),
+  (SELECT string_agg(t::text, ',' ORDER BY t::text) FROM analytics_hourly_scope_observers t WHERE t.hour = @hour::timestamptz),
+  (SELECT string_agg(t::text, ',' ORDER BY t::text) FROM analytics_hourly_scope_nodes t WHERE t.hour = @hour::timestamptz)
 ))::text AS content_hash;
 
 -- name: FinishRollupHour :one
@@ -275,5 +289,7 @@ WITH a AS (DELETE FROM analytics_hourly_iata_observations ta WHERE ta.hour < @cu
      j AS (DELETE FROM analytics_hourly_packet_sets tj WHERE tj.hour < @cutoff::timestamptz),
      k AS (DELETE FROM analytics_hourly_scope_sets tk WHERE tk.hour < @cutoff::timestamptz),
      l AS (DELETE FROM analytics_dirty_hours tl WHERE tl.hour < @cutoff::timestamptz),
+     n AS (DELETE FROM analytics_hourly_scope_observers tn WHERE tn.hour < @cutoff::timestamptz),
+     o AS (DELETE FROM analytics_hourly_scope_nodes tob WHERE tob.hour < @cutoff::timestamptz),
      m AS (DELETE FROM analytics_rollup_hours tm WHERE tm.hour < @cutoff::timestamptz RETURNING 1)
 UPDATE analytics_raw_state SET coverage = coverage + 1 WHERE EXISTS (SELECT 1 FROM m);

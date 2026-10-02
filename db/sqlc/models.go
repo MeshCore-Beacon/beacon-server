@@ -91,6 +91,20 @@ type AnalyticsHourlyPayloadBreakdown struct {
 	Count       int64              `json:"count"`
 }
 
+type AnalyticsHourlyScopeNode struct {
+	Hour         pgtype.Timestamptz `json:"hour"`
+	Iata         string             `json:"iata"`
+	ScopeID      int32              `json:"scope_id"`
+	OriginPubkey []byte             `json:"origin_pubkey"`
+}
+
+type AnalyticsHourlyScopeObserver struct {
+	Hour       pgtype.Timestamptz `json:"hour"`
+	Iata       string             `json:"iata"`
+	ScopeID    int32              `json:"scope_id"`
+	ObserverID uuid.UUID          `json:"observer_id"`
+}
+
 type AnalyticsHourlyScopeSet struct {
 	Hour    pgtype.Timestamptz `json:"hour"`
 	Iatas   []string           `json:"iatas"`

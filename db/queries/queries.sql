@@ -1243,15 +1243,40 @@ WHERE ($1::text = '' OR preset = $1::text)
 ORDER BY preset, iata, source_type;
 
 -- name: GetScopeStatsHourly :many
--- GetScopeStats packet counts split by hour (same window and IATA-set filter); zero hours omitted.
-SELECT ts.name, s.hour, SUM(s.packets)::bigint AS packets
-FROM analytics_hourly_scope_sets s
-JOIN transport_scopes ts ON ts.id = s.scope_id
-WHERE s.hour >= @since::timestamptz
-  AND (COALESCE(cardinality(@iatas::bpchar[]), 0) = 0 OR s.iatas && @iatas::bpchar[])
-GROUP BY ts.name, s.hour
-HAVING SUM(s.packets) > 0
-ORDER BY ts.name, s.hour;
+-- GetScopeStats packet counts split by hour (same window and IATA-set filter), with the
+-- distinct observers and advertising nodes active in each scope that hour. Empty hours omitted.
+WITH pk AS (
+    SELECT s.scope_id, s.hour, SUM(s.packets)::bigint AS n
+    FROM analytics_hourly_scope_sets s
+    WHERE s.hour >= @since::timestamptz
+      AND (COALESCE(cardinality(@iatas::bpchar[]), 0) = 0 OR s.iatas && @iatas::bpchar[])
+    GROUP BY s.scope_id, s.hour
+), ob AS (
+    SELECT o.scope_id, o.hour, COUNT(DISTINCT o.observer_id)::bigint AS n
+    FROM analytics_hourly_scope_observers o
+    WHERE o.hour >= @since::timestamptz
+      AND (COALESCE(cardinality(@iatas::bpchar[]), 0) = 0 OR o.iata = ANY(@iatas::bpchar[]))
+    GROUP BY o.scope_id, o.hour
+), nd AS (
+    SELECT d.scope_id, d.hour, COUNT(DISTINCT d.origin_pubkey)::bigint AS n
+    FROM analytics_hourly_scope_nodes d
+    WHERE d.hour >= @since::timestamptz
+      AND (COALESCE(cardinality(@iatas::bpchar[]), 0) = 0 OR d.iata = ANY(@iatas::bpchar[]))
+    GROUP BY d.scope_id, d.hour
+), k AS (
+    SELECT scope_id, hour FROM pk UNION SELECT scope_id, hour FROM ob UNION SELECT scope_id, hour FROM nd
+)
+SELECT ts.name, k.hour,
+       COALESCE(pk.n, 0)::bigint AS packets,
+       COALESCE(ob.n, 0)::bigint AS observers,
+       COALESCE(nd.n, 0)::bigint AS nodes
+FROM k
+JOIN transport_scopes ts ON ts.id = k.scope_id
+LEFT JOIN pk ON pk.scope_id = k.scope_id AND pk.hour = k.hour
+LEFT JOIN ob ON ob.scope_id = k.scope_id AND ob.hour = k.hour
+LEFT JOIN nd ON nd.scope_id = k.scope_id AND nd.hour = k.hour
+WHERE COALESCE(pk.n, 0) > 0 OR COALESCE(ob.n, 0) > 0 OR COALESCE(nd.n, 0) > 0
+ORDER BY ts.name, k.hour;
 
 -- name: GetScopeStats :many
 -- Packets since the given hour come from the IATA-set rollup (counted once per hour heard).

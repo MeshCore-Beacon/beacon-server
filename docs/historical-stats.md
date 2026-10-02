@@ -48,6 +48,7 @@ sub-hour observer activity.
 | Observations, receptions, payload counts | Sum |
 | Unique packets, adverts, messages, scoped packets | Sum of hourly IATA-set counts: each is counted once per hour it was heard, so one heard across an hour boundary counts twice (measured +1.1%) |
 | Active observers, IATAs, scopes | Distinct across the window |
+| Active scope observers and nodes (per scope, per hour) | Distinct within the hour, across the requested IATAs |
 | Max path entries | Max |
 | SNR / RSSI averages | Σ sum / Σ samples, never an average of averages |
 
