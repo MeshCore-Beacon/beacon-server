@@ -457,7 +457,7 @@ func getStatsRadioPresets(reader api.Reader) http.HandlerFunc {
 // getStatsScopes godoc
 //
 //	@Summary	Scope statistics
-//	@Description	Packets are those heard since the window start, each counted once per hour however many of the requested IATAs heard it. Observers and nodes are current memberships: observers filter by the IATA they last reported from, nodes by their IATA memberships. With filters, lists only manual scopes configured for a matching region and imported scopes whose current MeshMapper catalogue includes a matching IATA; those remain listed with zero counts. An empty region returns an empty array.
+//	@Description	Packets are those heard since the window start, each counted once per hour however many of the requested IATAs heard it. Observers and nodes are current memberships: observers filter by the IATA they last reported from, nodes by their IATA memberships. hourly splits packetCount by UTC hour and adds the distinct observers and advertising nodes active in the scope each hour (empty hours omitted; outage gaps come from /stats/series hour status). With filters, lists only manual scopes configured for a matching region and imported scopes whose current MeshMapper catalogue includes a matching IATA; those remain listed with zero counts. An empty region returns an empty array.
 //	@Tags		Stats
 //	@Produce	json
 //	@Param		iatas		query	string	false	"Comma-separated IATA codes"

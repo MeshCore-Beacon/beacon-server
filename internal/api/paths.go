@@ -43,4 +43,5 @@ type PathHour struct {
 	Empty        int64 `json:"empty"`
 	Trace        int64 `json:"trace"`
 	Unclassified int64 `json:"unclassified"`
+	MaxEntries   int32 `json:"maxEntries"` // longest path received that hour across the requested IATAs; 0 if only empty paths
 }

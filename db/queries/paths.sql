@@ -12,7 +12,9 @@ WITH readings AS (
 SELECT (grouping(hour) = 0)::boolean AS is_hourly,
        COALESCE(hour, 'epoch'::timestamptz)::timestamptz AS hour,
        category, hash_bytes, COALESCE(entries, 0)::integer AS entries,
-       sum(receptions)::bigint AS receptions
+       sum(receptions)::bigint AS receptions,
+       -- Non-routed categories store entries = 0, so an hour of only empty paths gives 0.
+       COALESCE(max(entries) FILTER (WHERE receptions > 0), 0)::integer AS max_entries
 FROM readings
 GROUP BY GROUPING SETS ((category, hash_bytes, entries), (hour, category, hash_bytes))
 ORDER BY is_hourly, hour, category, hash_bytes, entries;

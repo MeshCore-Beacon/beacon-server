@@ -24,6 +24,8 @@ WITH a AS (DELETE FROM analytics_hourly_iata_observations ta WHERE ta.hour < $1:
      j AS (DELETE FROM analytics_hourly_packet_sets tj WHERE tj.hour < $1::timestamptz),
      k AS (DELETE FROM analytics_hourly_scope_sets tk WHERE tk.hour < $1::timestamptz),
      l AS (DELETE FROM analytics_dirty_hours tl WHERE tl.hour < $1::timestamptz),
+     n AS (DELETE FROM analytics_hourly_scope_observers tn WHERE tn.hour < $1::timestamptz),
+     o AS (DELETE FROM analytics_hourly_scope_nodes tob WHERE tob.hour < $1::timestamptz),
      m AS (DELETE FROM analytics_rollup_hours tm WHERE tm.hour < $1::timestamptz RETURNING 1)
 UPDATE analytics_raw_state SET coverage = coverage + 1 WHERE EXISTS (SELECT 1 FROM m)
 `
@@ -44,8 +46,10 @@ WITH a AS (DELETE FROM analytics_hourly_iata_observations ta WHERE ta.hour = $1:
      g AS (DELETE FROM analytics_hourly_advert_hearings tg WHERE tg.hour = $1::timestamptz),
      h AS (DELETE FROM analytics_hourly_advert_sets th WHERE th.hour = $1::timestamptz),
      i AS (DELETE FROM analytics_hourly_talker_sets ti WHERE ti.hour = $1::timestamptz),
-     j AS (DELETE FROM analytics_hourly_packet_sets tj WHERE tj.hour = $1::timestamptz)
-DELETE FROM analytics_hourly_scope_sets tk WHERE tk.hour = $1::timestamptz
+     j AS (DELETE FROM analytics_hourly_packet_sets tj WHERE tj.hour = $1::timestamptz),
+     k AS (DELETE FROM analytics_hourly_scope_sets tk WHERE tk.hour = $1::timestamptz),
+     l AS (DELETE FROM analytics_hourly_scope_observers tl WHERE tl.hour = $1::timestamptz)
+DELETE FROM analytics_hourly_scope_nodes tm WHERE tm.hour = $1::timestamptz
 `
 
 func (q *Queries) DeleteRollupHour(ctx context.Context, hour pgtype.Timestamptz) error {
@@ -379,6 +383,28 @@ func (q *Queries) RollPayloadBreakdown(ctx context.Context, hour pgtype.Timestam
 	return err
 }
 
+const rollScopeNodes = `-- name: RollScopeNodes :exec
+INSERT INTO analytics_hourly_scope_nodes (hour, iata, scope_id, origin_pubkey)
+SELECT DISTINCT $1::timestamptz, iata, scope_id, origin_pubkey
+FROM rollup_obs WHERE payload_type = 4 AND origin_pubkey IS NOT NULL AND scope_id IS NOT NULL
+`
+
+func (q *Queries) RollScopeNodes(ctx context.Context, hour pgtype.Timestamptz) error {
+	_, err := q.db.Exec(ctx, rollScopeNodes, hour)
+	return err
+}
+
+const rollScopeObservers = `-- name: RollScopeObservers :exec
+INSERT INTO analytics_hourly_scope_observers (hour, iata, scope_id, observer_id)
+SELECT DISTINCT $1::timestamptz, iata, scope_id, observer_id
+FROM rollup_obs WHERE scope_id IS NOT NULL
+`
+
+func (q *Queries) RollScopeObservers(ctx context.Context, hour pgtype.Timestamptz) error {
+	_, err := q.db.Exec(ctx, rollScopeObservers, hour)
+	return err
+}
+
 const rollScopeSets = `-- name: RollScopeSets :exec
 INSERT INTO analytics_hourly_scope_sets (hour, iatas, scope_id, packets)
 SELECT $1::timestamptz, iatas, scope_id, count(*)
@@ -451,7 +477,9 @@ SELECT md5(concat_ws('|',
   (SELECT string_agg(t::text, ',' ORDER BY t::text) FROM analytics_hourly_advert_sets t WHERE t.hour = $1::timestamptz),
   (SELECT string_agg(t::text, ',' ORDER BY t::text) FROM analytics_hourly_talker_sets t WHERE t.hour = $1::timestamptz),
   (SELECT string_agg(t::text, ',' ORDER BY t::text) FROM analytics_hourly_packet_sets t WHERE t.hour = $1::timestamptz),
-  (SELECT string_agg(t::text, ',' ORDER BY t::text) FROM analytics_hourly_scope_sets t WHERE t.hour = $1::timestamptz)
+  (SELECT string_agg(t::text, ',' ORDER BY t::text) FROM analytics_hourly_scope_sets t WHERE t.hour = $1::timestamptz),
+  (SELECT string_agg(t::text, ',' ORDER BY t::text) FROM analytics_hourly_scope_observers t WHERE t.hour = $1::timestamptz),
+  (SELECT string_agg(t::text, ',' ORDER BY t::text) FROM analytics_hourly_scope_nodes t WHERE t.hour = $1::timestamptz)
 ))::text AS content_hash
 `
 

@@ -31,15 +31,16 @@ FROM (VALUES (1,'#a'),(2,'#b'),(3,'#unused')) v(i,name);
 INSERT INTO observers (id,public_key,last_iata)
 SELECT md5(i::text)::uuid,decode(lpad(to_hex(i),2,'0'),'hex'),iata
 FROM (VALUES (1,'YVR'),(2,'YYJ'),(3,'YVR'),(4,'YVR'),(5,'YYZ')) v(i,iata);
-INSERT INTO packets (packet_hash,scope_id,payload_type,payload_version,route_type,raw_payload,raw_header,first_heard_at,last_heard_at)
-SELECT decode(lpad(to_hex(i),2,'0'),'hex'),scope_id,4,0,1,'\x00','\x00',$1::timestamptz,$1::timestamptz
+-- every packet is an advert from its own node, so per-scope nodes equal per-scope packets
+INSERT INTO packets (packet_hash,scope_id,payload_type,payload_version,route_type,origin_pubkey,raw_payload,raw_header,first_heard_at,last_heard_at)
+SELECT decode(lpad(to_hex(i),2,'0'),'hex'),scope_id,4,0,1,decode(lpad(to_hex(100+i),64,'0'),'hex'),'\x00','\x00',$1::timestamptz,$1::timestamptz
 FROM (VALUES (1,1),(2,1),(3,1),(4,1),(5,2),(6,2),(7,2),(8,NULL)) v(i,scope_id);
 INSERT INTO observer_scopes (observer_id,scope_id)
 SELECT md5(i::text)::uuid,scope_id FROM (VALUES (1,1),(2,1),(4,1),(5,1),(1,2),(2,2),(3,2)) v(i,scope_id);
 -- packet 4 is never heard, so it never reaches the rollup
-INSERT INTO packet_observations (id,packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count)
+INSERT INTO packet_observations (id,packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count,payload_type)
 SELECT id,decode(lpad(to_hex(packet),2,'0'),'hex'),md5(observer::text)::uuid,iata,
- $1::timestamptz+id*interval '1 second',0,1,0
+ $1::timestamptz+id*interval '1 second',0,1,0,4
 FROM (VALUES (1,1,1,'YVR'),(2,1,4,'YVR'),(3,1,2,'YYJ'),(4,2,2,'YVR'),
  (5,3,1,'YYZ'),(6,5,3,'YVR'),(7,6,1,'YYJ'),(8,7,2,'YYZ'),(9,8,1,'YVR')) v(id,packet,observer,iata);
 INSERT INTO nodes (id,public_key,node_type,default_scope_id)
@@ -62,30 +63,39 @@ SELECT md5(i::text)::uuid,iata FROM (VALUES (1,'YVR'),(1,'YYJ'),(2,'YVR'),(3,'YY
 	r.Close(ctx)
 
 	for _, tc := range []struct {
-		name  string
-		iatas []string
-		since time.Time
-		a, b  [3]int64 // packets, observers, nodes
+		name   string
+		iatas  []string
+		since  time.Time
+		a, b   [3]int64 // packets, observers, nodes
+		ah, bh int64    // distinct observers heard carrying the scope in hour h
 	}{
-		{"global", nil, time.Time{}, [3]int64{3, 4, 4}, [3]int64{3, 3, 2}},
-		{"empty filter", []string{}, time.Time{}, [3]int64{3, 4, 4}, [3]int64{3, 3, 2}},
-		{"YVR", []string{"YVR"}, time.Time{}, [3]int64{2, 2, 2}, [3]int64{1, 2, 1}},
-		{"YYJ", []string{"YYJ"}, time.Time{}, [3]int64{1, 1, 1}, [3]int64{1, 1, 2}},
-		{"YYZ", []string{"YYZ"}, time.Time{}, [3]int64{1, 1, 1}, [3]int64{1, 0, 0}},
-		{"overlapping IATAs", []string{"YVR", "YYJ"}, time.Time{}, [3]int64{2, 3, 2}, [3]int64{2, 3, 2}},
-		{"duplicate IATAs", []string{"YYJ", "YVR", "YYJ"}, time.Time{}, [3]int64{2, 3, 2}, [3]int64{2, 3, 2}},
-		{"unknown IATA", []string{"ZZZ"}, time.Time{}, [3]int64{}, [3]int64{}},
-		{"window after the traffic", nil, h.Add(time.Hour), [3]int64{0, 4, 4}, [3]int64{0, 3, 2}},
+		{"global", nil, time.Time{}, [3]int64{3, 4, 4}, [3]int64{3, 3, 2}, 3, 3},
+		{"empty filter", []string{}, time.Time{}, [3]int64{3, 4, 4}, [3]int64{3, 3, 2}, 3, 3},
+		{"YVR", []string{"YVR"}, time.Time{}, [3]int64{2, 2, 2}, [3]int64{1, 2, 1}, 3, 1},
+		{"YYJ", []string{"YYJ"}, time.Time{}, [3]int64{1, 1, 1}, [3]int64{1, 1, 2}, 1, 1},
+		{"YYZ", []string{"YYZ"}, time.Time{}, [3]int64{1, 1, 1}, [3]int64{1, 0, 0}, 1, 1},
+		{"overlapping IATAs", []string{"YVR", "YYJ"}, time.Time{}, [3]int64{2, 3, 2}, [3]int64{2, 3, 2}, 3, 2},
+		{"duplicate IATAs", []string{"YYJ", "YVR", "YYJ"}, time.Time{}, [3]int64{2, 3, 2}, [3]int64{2, 3, 2}, 3, 2},
+		{"unknown IATA", []string{"ZZZ"}, time.Time{}, [3]int64{}, [3]int64{}, 0, 0},
+		{"window after the traffic", nil, h.Add(time.Hour), [3]int64{0, 4, 4}, [3]int64{0, 3, 2}, 0, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rows, err := store.GetScopeStats(ctx, tc.iatas, tc.since)
 			if err != nil {
 				t.Fatal(err)
 			}
+			// All fixture traffic is in hour h; hours with no packets are omitted.
+			// Each packet has its own origin, so active nodes per hour equal packets per hour.
+			hourly := func(packets, observers int64) []api.ScopeHour {
+				if packets == 0 && observers == 0 {
+					return []api.ScopeHour{}
+				}
+				return []api.ScopeHour{{Hour: h.UnixMilli(), Packets: packets, Observers: observers, Nodes: packets}}
+			}
 			want := []api.ScopeStats{
-				{Name: "#a", PacketCount: tc.a[0], ObserverCount: tc.a[1], NodeCount: tc.a[2]},
-				{Name: "#b", PacketCount: tc.b[0], ObserverCount: tc.b[1], NodeCount: tc.b[2]},
-				{Name: "#unused"},
+				{Name: "#a", PacketCount: tc.a[0], ObserverCount: tc.a[1], NodeCount: tc.a[2], Hourly: hourly(tc.a[0], tc.ah)},
+				{Name: "#b", PacketCount: tc.b[0], ObserverCount: tc.b[1], NodeCount: tc.b[2], Hourly: hourly(tc.b[0], tc.bh)},
+				{Name: "#unused", Hourly: []api.ScopeHour{}},
 			}
 			if !reflect.DeepEqual(rows, want) {
 				t.Fatalf("counts = %+v, want %+v", rows, want)

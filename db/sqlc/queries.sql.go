@@ -1725,6 +1725,82 @@ func (q *Queries) GetScopeStats(ctx context.Context, arg GetScopeStatsParams) ([
 	return items, nil
 }
 
+const getScopeStatsHourly = `-- name: GetScopeStatsHourly :many
+WITH pk AS (
+    SELECT s.scope_id, s.hour, SUM(s.packets)::bigint AS n
+    FROM analytics_hourly_scope_sets s
+    WHERE s.hour >= $1::timestamptz
+      AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR s.iatas && $2::bpchar[])
+    GROUP BY s.scope_id, s.hour
+), ob AS (
+    SELECT o.scope_id, o.hour, COUNT(DISTINCT o.observer_id)::bigint AS n
+    FROM analytics_hourly_scope_observers o
+    WHERE o.hour >= $1::timestamptz
+      AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR o.iata = ANY($2::bpchar[]))
+    GROUP BY o.scope_id, o.hour
+), nd AS (
+    SELECT d.scope_id, d.hour, COUNT(DISTINCT d.origin_pubkey)::bigint AS n
+    FROM analytics_hourly_scope_nodes d
+    WHERE d.hour >= $1::timestamptz
+      AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR d.iata = ANY($2::bpchar[]))
+    GROUP BY d.scope_id, d.hour
+), k AS (
+    SELECT scope_id, hour FROM pk UNION SELECT scope_id, hour FROM ob UNION SELECT scope_id, hour FROM nd
+)
+SELECT ts.name, k.hour,
+       COALESCE(pk.n, 0)::bigint AS packets,
+       COALESCE(ob.n, 0)::bigint AS observers,
+       COALESCE(nd.n, 0)::bigint AS nodes
+FROM k
+JOIN transport_scopes ts ON ts.id = k.scope_id
+LEFT JOIN pk ON pk.scope_id = k.scope_id AND pk.hour = k.hour
+LEFT JOIN ob ON ob.scope_id = k.scope_id AND ob.hour = k.hour
+LEFT JOIN nd ON nd.scope_id = k.scope_id AND nd.hour = k.hour
+WHERE COALESCE(pk.n, 0) > 0 OR COALESCE(ob.n, 0) > 0 OR COALESCE(nd.n, 0) > 0
+ORDER BY ts.name, k.hour
+`
+
+type GetScopeStatsHourlyParams struct {
+	Since pgtype.Timestamptz `json:"since"`
+	Iatas []string           `json:"iatas"`
+}
+
+type GetScopeStatsHourlyRow struct {
+	Name      string             `json:"name"`
+	Hour      pgtype.Timestamptz `json:"hour"`
+	Packets   int64              `json:"packets"`
+	Observers int64              `json:"observers"`
+	Nodes     int64              `json:"nodes"`
+}
+
+// GetScopeStats packet counts split by hour (same window and IATA-set filter), with the
+// distinct observers and advertising nodes active in each scope that hour. Empty hours omitted.
+func (q *Queries) GetScopeStatsHourly(ctx context.Context, arg GetScopeStatsHourlyParams) ([]GetScopeStatsHourlyRow, error) {
+	rows, err := q.db.Query(ctx, getScopeStatsHourly, arg.Since, arg.Iatas)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetScopeStatsHourlyRow{}
+	for rows.Next() {
+		var i GetScopeStatsHourlyRow
+		if err := rows.Scan(
+			&i.Name,
+			&i.Hour,
+			&i.Packets,
+			&i.Observers,
+			&i.Nodes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getStatsClockDrift = `-- name: GetStatsClockDrift :many
 WITH page AS (
 SELECT

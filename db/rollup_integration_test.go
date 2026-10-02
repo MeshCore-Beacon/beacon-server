@@ -37,7 +37,7 @@ INSERT INTO channels (id, channel_hash) VALUES (1, '\x11');
 INSERT INTO packets (packet_hash, payload_type, payload_version, route_type, origin_pubkey, scope_id, raw_payload, raw_header, first_heard_at, last_heard_at)
 SELECT hash, pt, rt, 0, origin, scope, '\x00', '\x00', $1::timestamptz, $1::timestamptz FROM (VALUES
  ('\x01'::bytea, 4, 1, '\xee'::bytea, NULL::int),  -- flood advert, two IATAs
- ('\x02', 4, 2, '\xee', NULL),                       -- direct advert, one IATA
+ ('\x02', 4, 2, '\xee', 1),                          -- direct advert, scoped, one IATA
  ('\x03', 5, 1, NULL, 1),                            -- scoped channel message, two IATAs
  ('\x04', 5, 1, NULL, 1),                            -- scoped channel message, one IATA
  ('\x05', 2, 1, NULL, NULL),                         -- straddles h0 and h0+1h
@@ -129,6 +129,15 @@ var rollupOracles = map[string][2]string{
 		`SELECT hour, iata, observer_id, observation_count, display_name, observer_type FROM analytics_hourly_observer_identity`,
 		`SELECT date_trunc('hour', po.heard_at, 'UTC'), po.iata, po.observer_id, count(*), o.display_name, o.observer_type
 		 FROM packet_observations po JOIN observers o ON o.id = po.observer_id GROUP BY 1, 2, 3, 5, 6`},
+	"scope observers": {
+		`SELECT hour, iata, scope_id, observer_id FROM analytics_hourly_scope_observers`,
+		`SELECT DISTINCT date_trunc('hour', po.heard_at, 'UTC'), po.iata, p.scope_id, po.observer_id
+		 FROM packet_observations po JOIN packets p ON p.packet_hash = po.packet_hash WHERE p.scope_id IS NOT NULL`},
+	"scope nodes": {
+		`SELECT hour, iata, scope_id, origin_pubkey FROM analytics_hourly_scope_nodes`,
+		`SELECT DISTINCT date_trunc('hour', po.heard_at, 'UTC'), po.iata, p.scope_id, p.origin_pubkey
+		 FROM packet_observations po JOIN packets p ON p.packet_hash = po.packet_hash
+		 WHERE po.payload_type = 4 AND p.origin_pubkey IS NOT NULL AND p.scope_id IS NOT NULL`},
 	"advert hearings": {
 		`SELECT hour, iata, origin_pubkey, observations, last_heard, name, node_type FROM analytics_hourly_advert_hearings`,
 		`SELECT date_trunc('hour', po.heard_at, 'UTC'), po.iata, p.origin_pubkey, count(*), max(po.heard_at), n.name, n.node_type

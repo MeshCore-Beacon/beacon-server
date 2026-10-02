@@ -232,6 +232,14 @@ func TestGetScopeStats(t *testing.T) {
 		GetScopeStats(gomock.Any(), gomock.Any()).
 		Return([]sqlc.GetScopeStatsRow{
 			{Name: "default", PacketCount: 100, ObserverCount: 5, NodeCount: 20},
+			{Name: "quiet"},
+		}, nil)
+	hour := time.Date(2026, 1, 1, 3, 0, 0, 0, time.UTC)
+	mock.EXPECT().
+		GetScopeStatsHourly(gomock.Any(), gomock.Any()).
+		Return([]sqlc.GetScopeStatsHourlyRow{
+			{Name: "default", Hour: pgtype.Timestamptz{Time: hour, Valid: true}, Packets: 60},
+			{Name: "default", Hour: pgtype.Timestamptz{Time: hour.Add(time.Hour), Valid: true}, Packets: 40},
 		}, nil)
 
 	store := &Store{q: mock}
@@ -239,8 +247,14 @@ func TestGetScopeStats(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(items) != 1 {
-		t.Fatalf("expected 1 item, got %d", len(items))
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+	if h := items[0].Hourly; len(h) != 2 || h[0].Hour != hour.UnixMilli() || h[0].Packets+h[1].Packets != items[0].PacketCount {
+		t.Errorf("hourly %+v doesn't split packetCount %d", h, items[0].PacketCount)
+	}
+	if items[1].Hourly == nil || len(items[1].Hourly) != 0 {
+		t.Errorf("a scope without packets must have hourly [], got %#v", items[1].Hourly)
 	}
 	if items[0].Name != "default" {
 		t.Errorf("expected Name default, got %s", items[0].Name)

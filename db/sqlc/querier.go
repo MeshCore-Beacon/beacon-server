@@ -122,6 +122,9 @@ type Querier interface {
 	// Packets since the given hour come from the IATA-set rollup (counted once per hour heard).
 	// Observer and node counts are current memberships; observers filter by their latest IATA.
 	GetScopeStats(ctx context.Context, arg GetScopeStatsParams) ([]GetScopeStatsRow, error)
+	// GetScopeStats packet counts split by hour (same window and IATA-set filter), with the
+	// distinct observers and advertising nodes active in each scope that hour. Empty hours omitted.
+	GetScopeStatsHourly(ctx context.Context, arg GetScopeStatsHourlyParams) ([]GetScopeStatsHourlyRow, error)
 	// Read the hourly rollup, never observations on an HTTP request.
 	// Weight averages by sample counts instead of averaging regional/hourly means.
 	GetSignalStats(ctx context.Context, arg GetSignalStatsParams) ([]GetSignalStatsRow, error)
@@ -315,6 +318,8 @@ type Querier interface {
 	// category: 0 = routed, 1 = zero-hop, 2 = TRACE, 3 = invalid (meshcore-go IsValidPathLen).
 	RollPaths(ctx context.Context, hour pgtype.Timestamptz) error
 	RollPayloadBreakdown(ctx context.Context, hour pgtype.Timestamptz) error
+	RollScopeNodes(ctx context.Context, hour pgtype.Timestamptz) error
+	RollScopeObservers(ctx context.Context, hour pgtype.Timestamptz) error
 	RollScopeSets(ctx context.Context, hour pgtype.Timestamptz) error
 	// kind = grouping(snr_bin, rssi_bin): 3 = per IATA totals, 1 = per SNR bin, 2 = per RSSI bin.
 	// rssi=0 AND snr=0 means "not reported".
