@@ -46,7 +46,9 @@ go build ./...        # must compile
 gofmt -l .            # must be empty (no unformatted files)
 go vet ./...          # no warnings
 go test ./...         # all tests pass
-swag init             # if you changed any handler or api type (see below)
+govulncheck ./...     # no reachable vulnerabilities
+swag init -g cmd/beacon/main.go -o docs --parseInternal --parseDependency
+                      # if you changed any handler or api type (see below)
 ```
 
 ---

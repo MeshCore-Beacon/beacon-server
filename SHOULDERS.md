@@ -24,6 +24,17 @@ projects that make this possible:
 - [google/uuid](https://github.com/google/uuid) — UUID generation
 - [golang.org/x/sync](https://pkg.go.dev/golang.org/x/sync) — singleflight for
   collapsing concurrent cache misses
+- [paulmach/orb](https://github.com/paulmach/orb) — GeoJSON border geometry and
+  point-in-polygon checks
+- [swaggo/http-swagger](https://github.com/swaggo/http-swagger) — Swagger UI
+  handler
+
+## Testing
+
+- [go.uber.org/mock](https://github.com/uber-go/mock) — gomock mocks for the
+  generated queries
+- [miniredis](https://github.com/alicebob/miniredis) — In-memory Redis for cache
+  tests
 
 ## Data
 

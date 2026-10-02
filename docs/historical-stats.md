@@ -76,7 +76,7 @@ region or all IATAs.
 
 ## Adding a metric
 
-1. Add a family table to `db/migrations/001_baseline.sql` (on 2.x, a new migration): `hour`
+1. Add a family table in a new numbered migration (`001_baseline.sql` is frozen from 2.0.0): `hour`
    first in the primary key, no foreign keys, and a set table with
    `CHECK (iata_set_is_canonical(iatas))` plus a GIN index if it needs distinct counts.
 2. Add a delete in `DeleteRollupHour`, a `Roll*` insert over `rollup_obs` in

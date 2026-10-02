@@ -25,7 +25,8 @@ in PostgreSQL, and streams live events to WebSocket clients.
 - Seeds regions, IATA display names, and channel keys from a YAML config file on
   startup
 
-For deployment instructions including the frontend app, see the deployment docs.
+For deployment instructions including the frontend app and reverse proxy
+examples, see [beacon-docs](https://github.com/MeshCore-Beacon/beacon-docs).
 
 For a bounded private database and saved-config bundle, see
 [backup export](docs/backup-export.md). A standalone export tool is available; the
@@ -71,11 +72,32 @@ define your regions, IATA display names, channel keys, and retention settings.
 
 ### 2. Start PostgreSQL
 
+Any PostgreSQL 16 database works. For a local throwaway one:
+
 ```bash
-docker compose up postgres -d
+docker run -d --name beacon-postgres -p 5432:5432 \
+  -e POSTGRES_USER=beacon -e POSTGRES_PASSWORD=beacon -e POSTGRES_DB=beacon \
+  postgres:16-alpine
 ```
 
 Database migrations are applied automatically on startup.
+
+### Upgrading from 1.x
+
+2.0.0 starts from a new schema baseline and **needs a fresh database**. Pointed
+at a 1.x database it refuses to start with `database schema predates Beacon
+2.0.0; 2.0.0 needs a fresh database`. 1.x history does not carry over: create a
+new, empty database (Docker: stop the stack and move or remove the Postgres
+data directory) before starting 2.0.0.
+
+Config changes to review when upgrading:
+
+- Every manually configured `scopes:` entry needs a `region`.
+- `meshmapper.scopes.sources` is ignored; MeshMapper refresh intervals must be
+  within 1h–24h for scopes and 24h–168h for zones, or startup fails.
+- REST rate limiting is on by default. Behind a reverse proxy, set
+  `server.trusted_proxies` (see [Reverse proxies and rate limits](#reverse-proxies-and-rate-limits)).
+- `packets.retention` now defaults to 7 days.
 
 ### 3. Run
 
@@ -90,6 +112,8 @@ docker pull ghcr.io/meshcore-beacon/beacon-server:latest
 ```
 
 The image is public on GitHub Container Registry — no `docker login` required.
+`latest` tracks stable releases; pin a version tag (e.g. `2.0.0`) for
+predictable upgrades, and `dev` follows the development branch.
 
 Beacon will:
 
@@ -139,7 +163,9 @@ Global CORS preflights remain public. Use a long, randomly generated key, keep
 it out of source control and logs, and send it only in the Authorization header,
 never the URL or request body. Require HTTPS at the reverse proxy and restrict
 direct access to Beacon's HTTP listener to that proxy or a private connection.
-Changing the key requires a restart. No API key is issued automatically.
+Changing the key requires a restart. No API key is issued automatically. The
+key must be at least 16 characters with no inner whitespace (surrounding
+whitespace is trimmed); an unusable key prevents startup.
 
 `PUT /api/v1/admin/config` accepts only
 `{"cors":{"allowed_origins":["https://example.org"]}}`. It replaces the entire
@@ -188,6 +214,11 @@ even when the same bearer-authenticated request works with curl.
 | `MQTT_BROKER_2_URL`      | —             | Broker 2 WebSocket URL                                       |
 | `MQTT_BROKER_2_USERNAME` | —             | Broker 2 username                                            |
 | `MQTT_BROKER_2_PASSWORD` | —             | Broker 2 password                                            |
+| `BEACON_API_KEY`         | —             | Admin bearer key; overrides `auth.api_key` when set           |
+| `LOG_LEVEL`              | `info`        | `debug`, `info`, `warn` or `error`; overrides `log.level`     |
+| `LOG_FORMAT`             | `text`        | `text` or `json`; overrides `log.format`                      |
+| `BEACON_CPU_PROFILE_DIR` | —             | Private CPU capture directory (see [PROFILING.md](PROFILING.md)) |
+| `BEACON_CPU_PROFILE_UNTIL` | —           | RFC 3339 deadline for CPU captures, at most 72h ahead         |
 
 ### Config file (`config.yaml`)
 
@@ -277,9 +308,20 @@ presence:
   flush_interval: 30s # how often coalesced bumps are flushed (default: 30s)
   packet_ttl: 30s # how long a quiet packet stays coalesced before writing through again (default: 30s)
 
+# Direct proxy peers allowed to set the client IP through X-Real-IP.
+server:
+  trusted_proxies: [172.30.0.0/24] # default: [] (direct access)
+
+# Per-client REST limits for /api/v1/*.
+ratelimit:
+  enabled: true # default: true
+  requests_per_minute: 300 # default: 300
+
 # WebSocket settings.
 websocket:
   max_connections_per_ip: 5 # default: 5
+  max_connects_per_minute: 10 # upgrade attempts per IP (default: 10)
+  allowed_origins: [https://beacon.example.com] # other sites allowed to open /ws (default: same host only)
 
 # Node staleness, deletion, and clock-drift thresholds.
 nodes:
@@ -323,7 +365,38 @@ ingest:
 
 IATAs are auto-created on first packet arrival. The config file adds display
 names, coordinates, and optional region borders. Regions and channel keys
-must be defined here — they are not auto-created.
+must be defined here unless MeshMapper imports them (`meshmapper.zones.import_groups`,
+`meshmapper.channels`).
+
+---
+
+### Reverse proxies and rate limits
+
+REST requests under `/api/v1` are rate limited per client IP (300/min by
+default; IPv6 clients share a /64). Exhausted clients get `429` with
+`rate_limited` and `Retry-After`. WebSocket upgrades are limited separately by
+`websocket.max_connects_per_minute`.
+
+Beacon never trusts `X-Forwarded-For` or `True-Client-IP`. Behind a reverse
+proxy, list the proxy's address in `server.trusted_proxies` (CIDR, e.g.
+`127.0.0.1/32` or the Docker network subnet) and have the proxy overwrite
+`X-Real-IP` with the connecting client's address:
+
+```nginx
+proxy_set_header X-Real-IP $remote_addr;
+```
+
+```caddy
+reverse_proxy app:8080 {
+	header_up X-Real-IP {remote_host}
+}
+```
+
+Without this every visitor shares the proxy's budget and the site gets 429s
+under normal load. Beacon logs a warning at startup when limits are on and no
+proxy is trusted, and once at runtime when a request carries forwarding headers
+it is ignoring. Full nginx and Caddy examples are in
+[beacon-docs](https://github.com/MeshCore-Beacon/beacon-docs).
 
 ---
 
@@ -331,10 +404,11 @@ must be defined here — they are not auto-created.
 
 Set `nodes.mark_foreign: true` to expose `possiblyForeign` on repeater nodes.
 The local operating area is the union of **all configured**
-`iatas.<code>.borderFile` GeoJSON Polygon/MultiPolygon features. IATAs without
-border files do not add an area; airport coordinates and the current API region
-filter are not boundaries. Enabling this with no borders, missing files or
-invalid geometry fails startup. Border changes require a restart.
+`iatas.<code>.borderFile` GeoJSON Polygon/MultiPolygon features, with
+`meshmapper.zones` boundaries replacing them where MeshMapper has one. IATAs
+without a border do not add an area; airport coordinates and the current API
+region filter are not boundaries. Enabling this with no border source, missing
+files or invalid geometry fails startup. Border file changes require a restart.
 
 Inside any polygon (including its edges) means `false`; outside the entire union
 means `true`. Hole interiors are outside; hole edges are local. Other node roles,
@@ -359,9 +433,9 @@ silently treating them as the complementary global area.
 
 ## Authentication
 
-API authentication is not yet implemented. Beacon is intended for trusted
-internal network or reverse-proxy deployments. Do not expose it directly to the
-public internet without an authentication layer in front of it.
+Public reads and the WebSocket need no credentials. Only the `/api/v1/admin`
+subtree is protected, by a bearer key (see [Admin authentication](#admin-authentication)).
+Serve Beacon behind an HTTPS reverse proxy.
 
 ---
 
@@ -395,14 +469,17 @@ unsubscribing.
     "regionIds": ["1"],
     "regionSlugs": ["western-canada"],
     "payloadTypes": [4, 5],
+    "routeTypes": [1, 2],
     "channelHashes": ["11"],
+    "observerIds": ["<observer uuid>"],
     "events": ["packetObservation", "channelMessage"]
   }
 }
 ```
 
-All scope fields are optional. Omitted means no filter on that dimension (match
-everything). Empty array means match nothing on that dimension. `regionIds` and
+All scope fields are optional; omitted or empty means no filter on that
+dimension. `routeTypes` and `observerIds` filter `packetObservation` events
+(`observerIds` also `observerStatus`), and `channelHashes` only `channelMessage`. `regionIds` and
 `regionSlugs` are both expanded to their member IATAs server-side.
 
 **Unsubscribe** — remove a specific subscription by ID.
@@ -416,21 +493,27 @@ everything). Empty array means match nothing on that dimension. `regionIds` and
 }
 ```
 
-**Configure** — toggle connection-wide settings. Currently just `resolvePath`,
-which enables per-hop node resolution on `packetObservation` events (see
-below). Unlike `subscribe`, this is a single flag for the whole connection,
-not additive across calls — each `configure` sets it to exactly the value
-sent, and it can be flipped on or off as many times as you like for the life
-of the connection. Default is `false`.
+The server replies `{ "v": 1, "type": "unsubscribed", "id": "unsub-1", "subscriptionId": "..." }`.
+
+**Configure** — connection-wide flags, all default `false`:
+
+- `resolvePath` adds per-hop node resolution to `packetObservation` events (see below).
+- `includeObserverKey` adds `observation.observerPublicKey`.
+- `includeRepeats` also streams later hearings of an already-stored observation
+  over a new path, as `packetObservation` events with `packet.isRepeat: true`
+  and `observationCount: 0`.
+
+Unlike `subscribe`, this is not additive: each `configure` sets all three flags
+to exactly the values sent, so an omitted flag turns off.
 
 ```json
-{ "v": 1, "type": "configure", "id": "cfg-1", "resolvePath": true }
+{ "v": 1, "type": "configure", "id": "cfg-1", "resolvePath": true, "includeRepeats": true }
 ```
 
 The server replies:
 
 ```json
-{ "v": 1, "type": "configured", "id": "cfg-1", "resolvePath": true }
+{ "v": 1, "type": "configured", "id": "cfg-1", "resolvePath": true, "includeObserverKey": false, "includeRepeats": true }
 ```
 
 **Ping**
@@ -466,21 +549,28 @@ notice:
 { "v": 1, "type": "lagged", "droppedCount": 12, "since": 1234567890000 }
 ```
 
-Clients should respond by re-fetching the relevant REST endpoint using `afterId`
-to backfill missed events, then resume streaming.
+Clients should respond by backfilling over REST, then resume streaming:
+`/api/v1/packets/backfill?afterObservationId=<last observation id>` and
+`/api/v1/messages/backfill?afterId=<last message id>`.
 
 ### Reconnection
 
 Subscriptions are not persisted — they exist only for the lifetime of the
 connection. On any disconnect the client should reconnect with backoff, re-issue
-all subscriptions, and backfill via REST using
-`afterId=<last seen observation id>`.
+all subscriptions, and backfill via the same REST endpoints.
 
 ### Connection limits
 
-By default a maximum of 5 concurrent WebSocket connections are allowed per IP
-address. Connections beyond this limit receive `HTTP 429`. The limit is
-configurable via `websocket.max_connections_per_ip` in `config.yaml`.
+- At most `websocket.max_connections_per_ip` (default 5) concurrent connections
+  per IP. A connection over the cap is accepted and then closed with code
+  `1013` (try again later) before `hello`.
+- At most `websocket.max_connects_per_minute` (default 10) upgrade attempts per
+  IP; beyond that the handshake gets `429` with `Retry-After: 60`.
+- Browsers may only connect from the same host unless their origin is listed in
+  `websocket.allowed_origins` (`https://*.example.com` covers every subdomain).
+
+Behind a reverse proxy both limits need `server.trusted_proxies`, or every
+visitor counts as the proxy's IP.
 
 ---
 
@@ -492,52 +582,69 @@ All list endpoints support cursor-based pagination via `cursor` and `limit`
 query params. See the Swagger UI at `http://localhost:8080/swagger/index.html`
 for full parameter documentation.
 
-### Authentication
+### Authentication and limits
 
-Not yet implemented — see the Authentication section above.
+Only `/admin/*` needs `Authorization: Bearer <key>`. All `/api/v1` routes are
+rate limited per client IP; see [Reverse proxies and rate limits](#reverse-proxies-and-rate-limits).
+List `limit` values are clamped to 1–200.
 
 ### Endpoints
 
-| Method | Path                                | Description                                                                                        |
-| ------ | ----------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `GET`  | `/brokers`                          | List MQTT brokers and connection status                                                            |
-| `GET`  | `/channels`                         | List channels (optional: `?hash=<hex>&iata=<code>&limit=50`)                                       |
-| `GET`  | `/channels/{id}`                    | Get channel detail by integer ID                                                                   |
-| `GET`  | `/channels/{id}/messages`           | List messages for a channel (optional: `?since=<ms>&iata=<code>&limit=50`)                         |
-| `GET`  | `/iatas`                            | List all known IATA codes                                                                          |
-| `GET`  | `/iatas/{iata}`                     | Get a single IATA code                                                                             |
-| `GET`  | `/iatas/{iata}/border`              | Get an IATA's GeoJSON region border, if configured (204 if not)                                    |
-| `GET`  | `/messages`                         | List all messages (optional: `?channelId=<int>&channelHash=<hex>&iata=<code>&since=<ms>&limit=50`) |
-| `GET`  | `/messages/backfill`                | Backfill messages after a given message ID                                                         |
-| `GET`  | `/nodes`                            | List nodes (optional: `?pubkeyPrefix=<hex>&neighbors&iatas=<codes>&pubkey=<hex>`)                  |
-| `GET`  | `/nodes/{nodeId}`                   | Get node detail                                                                                    |
-| `GET`  | `/nodes/{nodeId}/neighbors`         | List neighboring nodes observed in the mesh                                                        |
-| `GET`  | `/nodes/{nodeId}/observations`      | List observations for a node                                                                       |
-| `GET`  | `/observers`                        | List observers (optional: `?iata=<code>&type=<str>&broker=<name>&status=online\|offline`)          |
-| `GET`  | `/observers/{observerId}`           | Get observer detail including broker last-seen timestamps                                          |
-| `GET`  | `/observers/{observerId}/adverts`   | Adverts heard by observer                                                                          |
-| `GET`  | `/observers/{observerId}/telemetry` | Observer telemetry history (optional: `?range=24h&interval=1h\|6h\|24h`)                           |
-| `GET`  | `/packets`                          | List packets (optional: `?payloadTypes=<csv>&routeTypes=<csv>&scopes=<csv>` accept plural, comma-separated values alongside the singular params) |
-| `GET`  | `/packets/backfill`                 | Backfill packets after a given observation ID                                                      |
-| `GET`  | `/packets/{packetHash}`             | Get packet with all observations                                                                   |
-| `GET`  | `/regions`                          | List all regions (summary)                                                                         |
-| `GET`  | `/regions/{id}`                     | Get a single region with IATA list                                                                 |
-| `GET`  | `/routes`                           | List known routes (all hops high confidence)                                                       |
-| `GET`  | `/routes/search`                    | Search routes by source and destination hash                                                       |
-| `GET`  | `/routes/cross`                     | Search for routes crossing IATA boundaries                                                         |
-| `GET`  | `/scopes`                           | List transport scope names; IATA/region filters use configured regions and MeshMapper catalogues   |
-| `GET`  | `/scopes/{name}`                    | Get scope detail                                                                                   |
-| `GET`  | `/stats/observations`               | Hourly observation counts per IATA (last 7 days by default)                                        |
-| `GET`  | `/stats/overview`                   | Network overview over the last 24 rolled hours                                                     |
-| `GET`  | `/stats/payload-breakdown`          | Observation counts by payload type (last 24h by default)                                           |
-| `GET`  | `/stats/scopes`                     | Configured region scopes and breakdown of packets, nodes, observers (last 7 days by default)       |
-| `GET`  | `/stats/series`                     | Hourly card metrics and window summary from the rollups (`since`/`until` required)                 |
-| `GET`  | `/stats/top-advertisers`            | Top N nodes by distinct ADVERT packet count (last 24h by default)                                  |
-| `GET`  | `/stats/top-nodes`                  | Top N nodes by advert hearings (last 7 days by default)                                            |
-| `GET`  | `/stats/top-observers`              | Top N observers by observation count (last 24h by default)                                         |
-| `GET`  | `/stats/top-talkers`                | Top N companion names by decrypted channel message count (last 24h by default)                     |
-| `GET`  | `/traces`                           | List trace tags with filters (optional: ?type=TRACE\|PING)                                         |
-| `GET`  | `/traces/{tag}`                     | Get full trace detail with resolved routes                                                         |
+| Method   | Path                                    | Description                                                                                                           |
+| -------- | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/admin/accounts`                       | List operator accounts (bearer key)                                                                                   |
+| `POST`   | `/admin/accounts`                       | Create an operator account (bearer key)                                                                               |
+| `GET`    | `/admin/accounts/{id}`                  | Get an operator account (bearer key)                                                                                  |
+| `DELETE` | `/admin/accounts/{id}`                  | Deactivate an operator account (bearer key)                                                                           |
+| `GET`    | `/admin/backup`                         | Download a private database and saved-config backup (bearer key, opt-in)                                              |
+| `GET`    | `/admin/config`                         | Inspect selected running configuration (bearer key)                                                                   |
+| `PUT`    | `/admin/config`                         | Replace runtime CORS origins (bearer key)                                                                             |
+| `GET`    | `/brokers`                              | List MQTT brokers and connection status                                                                               |
+| `GET`    | `/channels`                             | List channels (`hash`, `iata`/`iatas`, `keyKnown`, `pageCursor`, `limit`)                                             |
+| `GET`    | `/channels/{channelID}`                 | Get channel detail by integer ID                                                                                      |
+| `GET`    | `/channels/{channelID}/messages`        | List messages for a channel (`since`, `iatas`, `region`/`regionId`, `scope`, `cursor`, `limit`)                       |
+| `GET`    | `/iatas`                                | List all known IATA codes                                                                                             |
+| `GET`    | `/iatas/{iata}`                         | Get a single IATA code                                                                                                |
+| `GET`    | `/iatas/{iata}/border`                  | Get an IATA's GeoJSON border, if any (204 if not)                                                                     |
+| `GET`    | `/messages`                             | List channel messages (`channelID`, `channelHash`, `since`, `iatas`, `region`/`regionId`, `scope`, `cursor`, `limit`) |
+| `GET`    | `/messages/backfill`                    | Messages after `afterId`                                                                                              |
+| `GET`    | `/nodes`                                | List nodes (type, IATA/region, name, scope, `pubkey`/`pubkeyPrefix`, capability flags, `neighbors`)                   |
+| `GET`    | `/nodes/{nodeId}`                       | Get node detail                                                                                                       |
+| `GET`    | `/nodes/{nodeId}/neighbors`             | List neighboring nodes observed in the mesh                                                                           |
+| `GET`    | `/nodes/{nodeId}/observations`          | List observations of packets from a node                                                                              |
+| `GET`    | `/observers`                            | List observers (IATA/region, `type`, `broker`, `status=online\|offline`, `name`, `scope`)                             |
+| `GET`    | `/observers/{observerId}`               | Get observer detail including broker last-seen timestamps                                                             |
+| `GET`    | `/observers/{observerId}/activity`      | Heard-activity history (`range`, `interval`, `until`)                                                                 |
+| `GET`    | `/observers/{observerId}/adverts`       | Adverts heard by observer                                                                                             |
+| `GET`    | `/observers/{observerId}/telemetry`     | Telemetry history (`range`, `interval=1h\|6h\|24h`, `afterId`)                                                        |
+| `GET`    | `/packets`                              | List packets (payload/route type, IATA/region, scope, `since`/`until`; plural params take CSV)                        |
+| `GET`    | `/packets/backfill`                     | Packets after `afterObservationId`                                                                                    |
+| `GET`    | `/packets/{packetHash}`                 | Get packet with all observations                                                                                      |
+| `GET`    | `/regions`                              | List all regions (summary)                                                                                            |
+| `GET`    | `/regions/{regionId}`                   | Get a single region with IATA list                                                                                    |
+| `GET`    | `/routes`                               | List known routes (`iata`, `hopCount`)                                                                                |
+| `GET`    | `/routes/search`                        | Search routes by source and destination hash                                                                          |
+| `GET`    | `/routes/cross`                         | Search for routes crossing IATA boundaries                                                                            |
+| `GET`    | `/routes/{iata}/{pathKey}/observations` | Retained observations matching a saved route (see below)                                                              |
+| `GET`    | `/scopes`                               | List transport scope names; IATA/region filters use configured regions and MeshMapper catalogues                      |
+| `GET`    | `/scopes/{name}`                        | Get scope detail                                                                                                      |
+| `GET`    | `/stats/clock-drift`                    | Repeaters and room servers whose clock drifted past the threshold, worst first                                        |
+| `GET`    | `/stats/node-types`                     | Node type breakdown                                                                                                   |
+| `GET`    | `/stats/observations`                   | Hourly observation counts per IATA (last 7 days by default)                                                           |
+| `GET`    | `/stats/observer-comparison`            | Compare flood packets reported by two observers                                                                       |
+| `GET`    | `/stats/overview`                       | Network overview over the last 24 rolled hours                                                                        |
+| `GET`    | `/stats/paths`                          | Path-entry and hash-width distributions                                                                               |
+| `GET`    | `/stats/payload-breakdown`              | Observation counts by payload type (last 24h by default)                                                              |
+| `GET`    | `/stats/radio-presets`                  | Radio preset usage by IATA                                                                                            |
+| `GET`    | `/stats/scopes`                         | Region scopes with hourly packet, node and observer counts (last 7 days by default)                                   |
+| `GET`    | `/stats/series`                         | Hourly card metrics and window summary (`since`/`until` required)                                                     |
+| `GET`    | `/stats/signal`                         | Reception signal distributions and hourly trends                                                                      |
+| `GET`    | `/stats/top-advertisers`                | Top N nodes by distinct ADVERT packets, split flood/direct (last 24h by default)                                      |
+| `GET`    | `/stats/top-nodes`                      | Top N nodes by advert hearings (last 7 days by default)                                                               |
+| `GET`    | `/stats/top-observers`                  | Top N observers by observation count (last 24h by default)                                                            |
+| `GET`    | `/stats/top-talkers`                    | Top N companion names by decrypted channel message count (last 24h by default)                                        |
+| `GET`    | `/traces`                               | List trace tags (`type=TRACE\|PING`, IATA/region, scope, `since`/`until`, `cursor`+`cursorTag`)                       |
+| `GET`    | `/traces/{tag}`                         | Get full trace detail with resolved routes                                                                            |
 
 ---
 
