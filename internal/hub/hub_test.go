@@ -516,20 +516,23 @@ func TestSentPaths(t *testing.T) {
 	start := time.Now()
 	s := newSentPaths(time.Minute, 3)
 	hash, observer := []byte{1, 2}, []byte{3}
-	if !s.mark(hash, observer, []byte{0xaa}, start) {
-		t.Fatal("first hearing refused")
+	if s.mark(hash, observer, []byte{0xaa}, start) {
+		t.Fatal("first hearing counted as a repeat")
 	}
 	if s.mark(hash, observer, []byte{0xaa}, start.Add(time.Second)) {
-		t.Fatal("exact copy within the window allowed")
+		t.Fatal("broker copy of the first hearing counted as a repeat")
 	}
 	if !s.mark(hash, observer, []byte{0xaa, 0xbb}, start.Add(time.Second)) {
 		t.Fatal("new path refused")
 	}
-	if !s.mark(hash, []byte{4}, []byte{0xaa}, start.Add(time.Second)) {
-		t.Fatal("other observer refused")
+	if s.mark(hash, observer, []byte{0xaa, 0xbb}, start.Add(time.Second)) {
+		t.Fatal("exact copy within the window allowed")
 	}
-	if !s.mark(hash, observer, []byte{0xaa}, start.Add(time.Minute)) {
-		t.Fatal("copy after the window refused")
+	if s.mark(hash, []byte{4}, []byte{0xaa}, start.Add(time.Second)) {
+		t.Fatal("other observer's first hearing counted as a repeat")
+	}
+	if s.mark(hash, observer, []byte{0xcc}, start.Add(time.Minute)) {
+		t.Fatal("hearing after the window not treated as a first hearing")
 	}
 
 	s = newSentPaths(time.Hour, 3)
@@ -539,7 +542,7 @@ func TestSentPaths(t *testing.T) {
 	if len(s.at) != 3 || len(s.order) != 3 {
 		t.Fatalf("size bound: %d keys, %d queued", len(s.at), len(s.order))
 	}
-	if !s.mark(hash, observer, []byte{0}, start) {
+	if _, ok := s.at[s.key(hash, observer, []byte{0})]; ok {
 		t.Fatal("oldest key not evicted at the size bound")
 	}
 }

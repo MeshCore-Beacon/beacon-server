@@ -55,7 +55,7 @@ func (w *Worker) handleNeighbors(ctx context.Context, iata, pubkeyHex string, ra
 	// self.scopes is always known (it's the observer's own config, not an OTA
 	// query), so this is an unconditional write -- unlike the per-neighbor
 	// scopes below, there's no "query failed" case to protect against here.
-	if err := w.db.UpdateObserverRegionScope(ctx, observerID, report.Self.Scopes); err != nil {
+	if err := w.db.UpdateObserverRegionScope(ctx, observerID, cleanText(report.Self.Scopes)); err != nil {
 		w.log.Error(fmt.Sprintf("db: update observer region scope failed for %s", pubkeyHex), "error", err)
 	}
 
@@ -94,7 +94,8 @@ func (w *Worker) handleNeighbors(ctx context.Context, iata, pubkeyHex string, ra
 		// was last known.
 		var regionScope *string
 		if n.Status == "responded" {
-			regionScope = &n.Scopes
+			scope := cleanText(n.Scopes)
+			regionScope = &scope
 		}
 
 		if err := w.db.UpsertNodeNeighbor(ctx, observerNodeID, neighborNodeID, iata, &snr, regionScope); err != nil {

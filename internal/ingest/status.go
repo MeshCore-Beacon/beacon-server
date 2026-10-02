@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
+	"github.com/MeshCore-Beacon/beacon-server/internal/lora"
 )
 
 // UpdateObserverStatusParams carries the fields parsed from a /status message.
@@ -72,6 +73,25 @@ func (s statusStats) usable() bool {
 	return s.NoiseFloor != 0 || s.TxAirSecs != 0 || s.RxAirSecs != 0
 }
 
+// LoRa radios span 137 MHz sub-GHz to 2.5 GHz SX128x.
+const (
+	minRadioFreqMHz = 100
+	maxRadioFreqMHz = 3000
+)
+
+// parseRadioFloat rejects NaN, Inf and anything outside [lo, hi]; observers send free text and
+// one bad value would poison every airtime the observer is later costed with.
+func parseRadioFloat(s string, lo, hi float64) (float64, error) {
+	f, err := strconv.ParseFloat(s, 32)
+	if err != nil {
+		return 0, err
+	}
+	if !(f >= lo && f <= hi) {
+		return 0, fmt.Errorf("radio value %q outside %g..%g", s, lo, hi)
+	}
+	return f, nil
+}
+
 // stripNULs removes NUL bytes, which Postgres text columns reject, and returns the
 // names of the fields that had any.
 func stripNULs(fields map[string]*string) []string {
@@ -84,6 +104,11 @@ func stripNULs(fields map[string]*string) []string {
 	}
 	slices.Sort(dirty)
 	return dirty
+}
+
+// cleanText makes over-the-air text storable: invalid UTF-8 replaced, NULs dropped.
+func cleanText(s string) string {
+	return strings.ReplaceAll(strings.ToValidUTF8(s, "�"), "\x00", "")
 }
 
 // stripJSONNULs drops \u0000 from a JSON document's strings, which jsonb rejects.
@@ -197,13 +222,13 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 	if len(radio) != 4 {
 		w.log.Warn(fmt.Sprintf("missing or malformed radio params in status from %s, skipping radio fields", pubkeyHex))
 	} else {
-		freq, err := strconv.ParseFloat(radio[0], 32)
+		freq, err := parseRadioFloat(radio[0], minRadioFreqMHz, maxRadioFreqMHz)
 		if err != nil {
 			w.log.Warn(fmt.Sprintf("error parsing radio freq in status from %s", pubkeyHex), "error", err)
 		} else {
 			params.RadioFreqMHz = float32(freq)
 		}
-		bw, err := strconv.ParseFloat(radio[1], 32)
+		bw, err := parseRadioFloat(radio[1], lora.MinBWKHz, lora.MaxBWKHz)
 		if err != nil {
 			w.log.Warn(fmt.Sprintf("error parsing radio bw in status from %s", pubkeyHex), "error", err)
 		} else {

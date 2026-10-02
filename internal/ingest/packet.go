@@ -427,7 +427,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 
 			var name *string
 			if hasName {
-				n := strings.ToValidUTF8(appData.Name, "\uFFFD")
+				n := cleanText(appData.Name)
 				name = &n
 				if n != "" {
 					summary = name
@@ -747,7 +747,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		now := time.Now().UTC()
 		diff := heardAt.UTC().Sub(now)
 		if diff > 30*time.Minute || diff < -30*time.Minute {
-			w.log.Debug(fmt.Sprintf("clamping suspicious timestamp %s (diff %v) for pubkey %s", envelope.Timestamp, diff, pubkeyHex[:8]))
+			w.log.Debug(fmt.Sprintf("clamping suspicious timestamp %s (diff %v) for pubkey %s", envelope.Timestamp, diff, pubkeyHex))
 			heardAt = now
 		}
 	}

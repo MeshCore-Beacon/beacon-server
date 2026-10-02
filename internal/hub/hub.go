@@ -243,8 +243,8 @@ func (h *Hub) RepeatsWanted() bool {
 	return h.repeatClients.Load() > 0
 }
 
-// MarkSent records every hearing's path and reports whether it is new within the TTL,
-// so broker copies and same-path duplicates are never streamed as repeats.
+// MarkSent records every hearing's path and reports whether it is a later, new path for a
+// packet the observer already heard, so broker copies and same-path duplicates never stream.
 func (h *Hub) MarkSent(packetHash, observerID, path []byte) bool {
 	return h.sent.mark(packetHash, observerID, path, time.Now())
 }

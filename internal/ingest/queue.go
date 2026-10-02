@@ -5,6 +5,8 @@ package ingest
 
 import (
 	"context"
+	"log/slog"
+	"runtime/debug"
 	"strings"
 	"sync"
 
@@ -33,7 +35,7 @@ func newMessageQueue(workers, capacity, maxBytes int, handle func(context.Contex
 				if ctx.Err() != nil {
 					return
 				}
-				handle(ctx, m)
+				handleSafely(ctx, m, handle)
 				q.mu.Lock()
 				q.bytes -= len(m.Topic()) + len(m.Payload())
 				q.mu.Unlock()
@@ -42,6 +44,16 @@ func newMessageQueue(workers, capacity, maxBytes int, handle func(context.Contex
 	}
 	go func() { wg.Wait(); close(q.done) }()
 	return q
+}
+
+// handleSafely keeps one bad message from killing the lane, and with it the process.
+func handleSafely(ctx context.Context, m mqtt.Message, handle func(context.Context, mqtt.Message)) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("ingest handler panicked", "component", "ingest", "topic", m.Topic(), "panic", r, "stack", string(debug.Stack()))
+		}
+	}()
+	handle(ctx, m)
 }
 
 func (q *messageQueue) enqueue(m mqtt.Message) bool {

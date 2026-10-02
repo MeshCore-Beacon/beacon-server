@@ -123,15 +123,29 @@ func TestHandlePacket_PathMarkedRightAfterInsert(t *testing.T) {
 	packet.Path = []byte{0x11}
 	packet.PathLength = 1
 	hash := packet.PacketHash()
-	var fresh bool
+	var repeat bool
 	r.db.dbHook = func() {
 		// stubDB.UpsertObserver returns uuid.Nil, so that is the observer id ingest marks with
-		fresh = r.w.hub.MarkSent(hash[:], uuid.Nil[:], packet.Path)
+		repeat = r.w.hub.MarkSent(hash[:], uuid.Nil[:], []byte{0x22})
 	}
 	r.db.observationInserted = true
 	r.w.handlePacket(r.ctx, "YOW", "0102", packetEnvelope(r.t, packet))
-	if fresh {
+	if !repeat {
 		t.Fatal("path was not marked right after the insert")
+	}
+}
+
+// A broker copy can lose the insert race yet mark its path first; it is still the first hearing.
+func TestHandlePacket_BrokerCopyMarkedFirstIsNotARepeat(t *testing.T) {
+	r := newRepeatHarness(t, true)
+	if got := r.hear(false, 0x11); len(got) != 0 {
+		t.Fatalf("broker copy streamed as a repeat: %s", got)
+	}
+	if got := r.hear(true, 0x11); len(got) != 1 || strings.Contains(string(got[0]), "isRepeat") {
+		t.Fatalf("inserted hearing: %s", got)
+	}
+	if got := r.hear(false, 0x22, 0x11); len(got) != 1 {
+		t.Fatalf("later path sent %d events", len(got))
 	}
 }
 

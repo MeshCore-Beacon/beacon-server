@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
@@ -106,7 +105,7 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 		}
 		params := UpsertNodeParams{
 			PublicKey:       advert.PublicKey.PublicKeyBytes(),
-			Name:            strings.ToValidUTF8(advert.AppData().Name, "\uFFFD"),
+			Name:            cleanText(advert.AppData().Name),
 			NodeType:        advert.Type(),
 			Latitude:        lat,
 			Longitude:       lon,
@@ -181,7 +180,7 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 		evt := nodeUpdateEvent{
 			NodeID:       nodeID.String(),
 			PublicKey:    pubkeyHex,
-			Name:         advert.AppData().Name,
+			Name:         cleanText(advert.AppData().Name),
 			NodeType:     advert.Type(),
 			NodeTypeName: api.NodeTypeName(int16(advert.Type())),
 			IATA:         iata,
@@ -230,8 +229,8 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 				ChannelID:   result.ChannelID,
 				ChannelHash: hex.EncodeToString(channelHashBytes),
 				PacketHash:  hex.EncodeToString(packetHash),
-				SenderName:  strings.ReplaceAll(strings.ToValidUTF8(result.Payload.Sender, "\uFFFD"), "\x00", ""),
-				Content:     strings.ReplaceAll(strings.ToValidUTF8(result.Payload.Text, "\uFFFD"), "\x00", ""),
+				SenderName:  cleanText(result.Payload.Sender),
+				Content:     cleanText(result.Payload.Text),
 				SentAt:      time.Unix(int64(result.Payload.Timestamp), 0).UnixMilli(),
 			}
 			w.broadcast(hub.EventChannelMessage, iata, 0, fmt.Sprintf("%02x", grpTxt.ChannelHash), evt)
