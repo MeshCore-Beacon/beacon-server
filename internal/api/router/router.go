@@ -109,6 +109,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 			r.Mount("/routes", handlers.RoutesRouter(reader))
 			r.Mount("/scopes", handlers.ScopesRouter(reader, opts.Scopes))
 			r.Mount("/stats", handlers.StatsRouter(reader, handlers.StatsOptions{Scopes: opts.Scopes, SeriesWindow: opts.RollupRetention}))
+			r.Get("/scope-catalogues", handlers.ScopeCatalogues(opts.ScopeCatalogues))
 			r.Mount("/traces", handlers.TracesRouter(reader))
 		})
 
