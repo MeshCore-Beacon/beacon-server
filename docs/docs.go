@@ -4835,6 +4835,10 @@ const docTemplate = `{
                 "hour": {
                     "type": "integer"
                 },
+                "maxEntries": {
+                    "description": "longest path received that hour across the requested IATAs; 0 if only empty paths",
+                    "type": "integer"
+                },
                 "oneByte": {
                     "type": "integer"
                 },

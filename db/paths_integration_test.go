@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -110,6 +111,28 @@ SELECT int4send(n),'00000000-0000-0000-0000-000000000001',heard_at,iata,payload_
 					t.Fatalf("empty/trace widths or missing hour: %+v", got)
 				}
 			})
+		}
+	}
+	// The longest routed path per hour; hours with only empty, TRACE or invalid paths report 0.
+	for _, tc := range []struct {
+		iatas []string
+		want  []int32
+	}{
+		{nil, []int32{32, 63, 0}},
+		{[]string{"YVR", "YYJ"}, []int32{32, 63, 0}},
+		{[]string{"YYJ"}, []int32{2, 0}},
+		{[]string{"YYZ"}, []int32{0}},
+	} {
+		got, err := store.GetPathStats(ctx, since, until, tc.iatas)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var max []int32
+		for _, h := range got.Hourly {
+			max = append(max, h.MaxEntries)
+		}
+		if !slices.Equal(max, tc.want) {
+			t.Errorf("maxEntries for %v = %v, want %v", tc.iatas, max, tc.want)
 		}
 	}
 	w := httptest.NewRecorder()
