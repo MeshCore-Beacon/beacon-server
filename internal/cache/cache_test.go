@@ -208,7 +208,7 @@ func (s *stubReader) ListPacketsAfterID(_ context.Context, _ int64, _, _ int16, 
 	return nil, nil
 }
 
-func (s *stubReader) ListKnownRoutes(_ context.Context, _ string, _ int32, _ time.Time, _ int32) ([]api.KnownRoute, error) {
+func (s *stubReader) ListKnownRoutes(_ context.Context, _ string, _ int32, _ time.Time, _ int64, _ int32) ([]api.KnownRoute, error) {
 	return nil, nil
 }
 

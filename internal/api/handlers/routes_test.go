@@ -60,10 +60,44 @@ func TestSearchCrossIATARoutes_MissingParams(t *testing.T) {
 	}
 }
 
+func TestListKnownRoutes_CursorID(t *testing.T) {
+	var gotCursor time.Time
+	var gotID int64
+	r := chi.NewRouter()
+	r.Get("/routes", listKnownRoutes(stubReader{
+		listKnownRoutes: func(_ context.Context, _ string, _ int32, cursor time.Time, cursorID int64, _ int32) ([]api.KnownRoute, error) {
+			gotCursor, gotID = cursor, cursorID
+			return nil, nil
+		},
+	}))
+	for _, tc := range []struct {
+		query string
+		code  int
+		id    int64
+	}{
+		{"cursor=1700000000000&cursorId=42", http.StatusOK, 42},
+		{"cursor=1700000000000", http.StatusOK, 0},
+		{"cursor=1700000000000&cursorId=0", http.StatusBadRequest, 0},
+		{"cursor=1700000000000&cursorId=x", http.StatusBadRequest, 0},
+		{"cursorId=42", http.StatusBadRequest, 0},
+	} {
+		gotID = 0
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/routes?"+tc.query, nil))
+		if w.Code != tc.code {
+			t.Errorf("%s: code %d, want %d", tc.query, w.Code, tc.code)
+			continue
+		}
+		if tc.code == http.StatusOK && (gotID != tc.id || gotCursor.UnixMilli() != 1700000000000) {
+			t.Errorf("%s: cursor %v id %d", tc.query, gotCursor, gotID)
+		}
+	}
+}
+
 func TestListKnownRoutes_OK(t *testing.T) {
 	r := chi.NewRouter()
 	r.Get("/routes", listKnownRoutes(stubReader{
-		listKnownRoutes: func(_ context.Context, _ string, _ int32, _ time.Time, _ int32) ([]api.KnownRoute, error) {
+		listKnownRoutes: func(_ context.Context, _ string, _ int32, _ time.Time, _ int64, _ int32) ([]api.KnownRoute, error) {
 			return []api.KnownRoute{{IATA: "YVR"}}, nil
 		},
 	}))

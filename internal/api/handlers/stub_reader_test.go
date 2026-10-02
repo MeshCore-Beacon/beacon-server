@@ -59,7 +59,7 @@ type stubReader struct {
 	getScopeByName               func(ctx context.Context, name string) (*api.ScopeDetail, error)
 	listTraceTags                func(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, cursorTag string, limit int32) ([]api.TraceTagSummary, error)
 	getTraceByTag                func(ctx context.Context, tag string) (*api.TraceDetail, error)
-	listKnownRoutes              func(ctx context.Context, iata string, hopCount int32, cursor time.Time, limit int32) ([]api.KnownRoute, error)
+	listKnownRoutes              func(ctx context.Context, iata string, hopCount int32, cursor time.Time, cursorID int64, limit int32) ([]api.KnownRoute, error)
 	searchKnownRoutes            func(ctx context.Context, iata, fromHash, toHash string) ([]api.KnownRoute, error)
 	getKnownRoutesByNode         func(ctx context.Context, iata string, nodeID uuid.UUID) ([]api.KnownRoute, error)
 	getCrossIATANeighbors        func(ctx context.Context, nodeID uuid.UUID, iata string) ([]api.NodeNeighbor, error)
@@ -369,9 +369,9 @@ func (s stubReader) GetTraceByTag(ctx context.Context, tag string) (*api.TraceDe
 	return nil, nil
 }
 
-func (s stubReader) ListKnownRoutes(ctx context.Context, iata string, hopCount int32, cursor time.Time, limit int32) ([]api.KnownRoute, error) {
+func (s stubReader) ListKnownRoutes(ctx context.Context, iata string, hopCount int32, cursor time.Time, cursorID int64, limit int32) ([]api.KnownRoute, error) {
 	if s.listKnownRoutes != nil {
-		return s.listKnownRoutes(ctx, iata, hopCount, cursor, limit)
+		return s.listKnownRoutes(ctx, iata, hopCount, cursor, cursorID, limit)
 	}
 	return nil, nil
 }

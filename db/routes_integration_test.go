@@ -111,7 +111,7 @@ ANALYZE known_routes;`)
 			}
 			for _, iata := range []string{"GPT", "YYZ", ""} {
 				var planJSON []byte
-				if err := tx.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) EXECUTE route_page('"+iata+"',0,NULL,50)").Scan(&planJSON); err != nil {
+				if err := tx.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) EXECUTE route_page('"+iata+"',0,NULL,50,0)").Scan(&planJSON); err != nil {
 					t.Fatal(err)
 				}
 				var plans []struct {

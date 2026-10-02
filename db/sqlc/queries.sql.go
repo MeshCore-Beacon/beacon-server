@@ -2968,13 +2968,16 @@ func (q *Queries) ListIATAs(ctx context.Context) ([]IataCode, error) {
 }
 
 const listKnownRoutes = `-- name: ListKnownRoutes :many
-(
+SELECT r.id, r.node_ids, r.hash_prefix, r.iata, r.hop_count, r.first_seen, r.last_seen, r.observation_count
+FROM ((
 SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
 FROM known_routes
 WHERE $1 = ''
   AND ($2 = 0 OR hop_count = $2)
-  AND ($3::timestamptz IS NULL OR last_seen < $3)
-ORDER BY last_seen DESC
+  AND ($3::timestamptz IS NULL
+       OR date_trunc('milliseconds', last_seen, 'UTC') < $3
+       OR ($5::bigint > 0 AND date_trunc('milliseconds', last_seen, 'UTC') = $3 AND id < $5))
+ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC
 LIMIT $4
 )
 UNION ALL
@@ -2984,11 +2987,13 @@ FROM known_routes
 WHERE $1 <> '' AND iata::text = $1
   AND iata >= $1::bpchar AND iata <= $1::bpchar
   AND ($2 = 0 OR hop_count = $2)
-  AND ($3::timestamptz IS NULL OR last_seen < $3)
-ORDER BY iata, last_seen DESC
+  AND ($3::timestamptz IS NULL
+       OR date_trunc('milliseconds', last_seen, 'UTC') < $3
+       OR ($5::bigint > 0 AND date_trunc('milliseconds', last_seen, 'UTC') = $3 AND id < $5))
+ORDER BY iata, date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC
 LIMIT $4
-)
-ORDER BY last_seen DESC
+)) r
+ORDER BY date_trunc('milliseconds', r.last_seen, 'UTC') DESC, r.id DESC
 LIMIT $4
 `
 
@@ -2997,6 +3002,7 @@ type ListKnownRoutesParams struct {
 	Column2 interface{}        `json:"column_2"`
 	Column3 pgtype.Timestamptz `json:"column_3"`
 	Limit   int32              `json:"limit"`
+	Column5 int64              `json:"column_5"`
 }
 
 type ListKnownRoutesRow struct {
@@ -3013,12 +3019,15 @@ type ListKnownRoutesRow struct {
 // Only one branch runs. Keep the IATA range ordered by the composite index:
 // generic plans can otherwise prefer scanning the global timestamp index.
 // The text equality preserves exact input matching, including trailing spaces.
+// Pages by (last_seen to the ms, id) so routes sharing the cursor's millisecond
+// aren't skipped; cursor id 0 keeps the plain timestamp cursor.
 func (q *Queries) ListKnownRoutes(ctx context.Context, arg ListKnownRoutesParams) ([]ListKnownRoutesRow, error) {
 	rows, err := q.db.Query(ctx, listKnownRoutes,
 		arg.Column1,
 		arg.Column2,
 		arg.Column3,
 		arg.Limit,
+		arg.Column5,
 	)
 	if err != nil {
 		return nil, err

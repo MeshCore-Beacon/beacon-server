@@ -355,8 +355,8 @@ func (cr *CachedReader) ListPacketsAfterID(ctx context.Context, afterObservation
 }
 
 // ListKnownRoutes implements [api.Reader].
-func (cr *CachedReader) ListKnownRoutes(ctx context.Context, iata string, hopCount int32, cursor time.Time, limit int32) ([]api.KnownRoute, error) {
-	return cr.inner.ListKnownRoutes(ctx, iata, hopCount, cursor, limit)
+func (cr *CachedReader) ListKnownRoutes(ctx context.Context, iata string, hopCount int32, cursor time.Time, cursorID int64, limit int32) ([]api.KnownRoute, error) {
+	return cr.inner.ListKnownRoutes(ctx, iata, hopCount, cursor, cursorID, limit)
 }
 
 // SearchKnownRoutes implements [api.Reader].
