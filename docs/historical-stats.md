@@ -53,6 +53,8 @@ sub-hour observer activity.
 | SNR / RSSI averages | Σ sum / Σ samples, never an average of averages |
 
 Windows snap to UTC hours on the server, and responses report the effective window.
+`/stats/overview` spans the 24 newest eligible hours; its `windowHours` counts the complete
+ones its totals cover.
 
 ## IATA sets
 
@@ -66,7 +68,8 @@ region or all IATAs.
 ## Raw or current, by design
 
 - Packet, trace and route detail, the packet list, observer comparison, and observer
-  activity below one hour.
+  activity below one hour. Hourly observer activity reads raw rows for the hours after the
+  newest complete one (at most the last 3 hours), so the unrolled tail isn't shown as zero.
 - Current memberships: scope observer and node counts, node types, clock drift, radio presets.
 - `/traces` reads `trace_tags`, a per-tag summary kept at ingest, not a rollup. A new packet
   adds its count, type and payload in the statement that stores it; hearings set the times.

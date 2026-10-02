@@ -209,8 +209,13 @@ func (s *Store) GetObserverTelemetryBucketed(ctx context.Context, observerID uui
 	return api.BucketTelemetry(raw.Points, since, time.Duration(bucketHours)*time.Hour), nil
 }
 
+// activityRawTail caps how far back hourly activity reads raw rows for hours not yet rolled
+// (normally under rollupDelay + 1h).
+const activityRawTail = 3 * time.Hour
+
 // GetObserverActivity returns bucketed heard-activity for an observer over the trailing window.
-// Buckets of an hour or coarser come from the hourly rollup; anything finer reads observations directly.
+// Buckets of an hour or coarser come from the hourly rollup plus raw rows for the unrolled tail;
+// anything finer reads observations directly.
 // Range and Interval are left empty for the handler to fill.
 func (s *Store) GetObserverActivity(ctx context.Context, observerID uuid.UUID, window, interval time.Duration, until time.Time) (*api.ObserverActivity, error) {
 	obs, err := s.q.GetObserverByID(ctx, observerID)
@@ -259,10 +264,13 @@ func (s *Store) GetObserverActivity(ctx context.Context, observerID uuid.UUID, w
 	binWidth := pgtype.Interval{Microseconds: interval.Microseconds(), Valid: true}
 
 	if interval >= time.Hour {
+		// Unrolled hours read raw rows, bounded to the normal rollup lag.
+		tailFloor := pgtype.Timestamptz{Time: until.Add(-activityRawTail), Valid: true}
 		rows, err := s.q.GetObserverActivityHourly(ctx, sqlc.GetObserverActivityHourlyParams{
 			ObserverID: observerID,
 			Column2:    sinceTS,
 			Column3:    binWidth,
+			TailFloor:  tailFloor,
 			Until:      pgtype.Timestamptz{Time: until, Valid: true},
 		})
 		if err != nil {
@@ -295,6 +303,7 @@ func (s *Store) GetObserverActivity(ctx context.Context, observerID uuid.UUID, w
 		typeRows, err := s.q.GetObserverActivityHourlyPayloadTypes(ctx, sqlc.GetObserverActivityHourlyPayloadTypesParams{
 			ObserverID: observerID,
 			Column2:    sinceTS,
+			TailFloor:  tailFloor,
 			Until:      pgtype.Timestamptz{Time: until, Valid: true},
 		})
 		if err != nil {

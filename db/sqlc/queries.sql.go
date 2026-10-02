@@ -813,8 +813,23 @@ func (q *Queries) GetNodesByPubkeys(ctx context.Context, pubkeys [][]byte) ([]Ge
 }
 
 const getObserverActivityHourly = `-- name: GetObserverActivityHourly :many
+WITH tail AS (
+  SELECT GREATEST(max(hour) + INTERVAL '1 hour', $4::timestamptz) AS tail_start
+  FROM analytics_rollup_hours WHERE status = 'complete'
+), src AS (
+  SELECT a.hour AS t, a.observations, a.airtime_ms, a.airtime_n, a.snr_sum, a.snr_n, a.snr_min, a.rssi_sum, a.rssi_n
+  FROM analytics_hourly_observer_activity a
+  WHERE a.observer_id = $1 AND a.hour >= $2::timestamptz AND a.hour < LEAST($5::timestamptz, (SELECT tail_start FROM tail))
+  UNION ALL
+  SELECT o.heard_at, 1::bigint, o.airtime_ms, (o.airtime_ms IS NOT NULL)::int::bigint,
+         s.snr, (s.snr IS NOT NULL)::int::bigint, s.snr, s.rssi::bigint, (s.rssi IS NOT NULL)::int::bigint
+  FROM packet_observations o CROSS JOIN
+       LATERAL (SELECT CASE WHEN NOT (COALESCE(o.rssi, 0) = 0 AND COALESCE(o.snr, 0) = 0) THEN o.snr END AS snr,
+                       CASE WHEN NOT (COALESCE(o.rssi, 0) = 0 AND COALESCE(o.snr, 0) = 0) THEN o.rssi END AS rssi) s
+  WHERE o.observer_id = $1 AND o.heard_at >= GREATEST($2::timestamptz, (SELECT tail_start FROM tail)) AND o.heard_at < $5::timestamptz
+)
 SELECT
-  date_bin($3::interval, hour, TIMESTAMPTZ 'epoch')::timestamptz AS bucket,
+  date_bin($3::interval, t, TIMESTAMPTZ 'epoch')::timestamptz AS bucket,
   SUM(observations)::bigint AS observations,
   COALESCE(SUM(airtime_ms), 0)::real AS airtime_ms,
   SUM(airtime_n)::bigint AS airtime_n,
@@ -823,8 +838,7 @@ SELECT
   COALESCE(MIN(snr_min), 0)::real AS snr_min,
   COALESCE(SUM(rssi_sum), 0)::bigint AS rssi_sum,
   SUM(rssi_n)::bigint AS rssi_n
-FROM analytics_hourly_observer_activity
-WHERE observer_id = $1 AND hour >= $2::timestamptz AND hour < $4::timestamptz
+FROM src
 GROUP BY 1
 ORDER BY 1
 `
@@ -833,6 +847,7 @@ type GetObserverActivityHourlyParams struct {
 	ObserverID uuid.UUID          `json:"observer_id"`
 	Column2    pgtype.Timestamptz `json:"column_2"`
 	Column3    pgtype.Interval    `json:"column_3"`
+	TailFloor  pgtype.Timestamptz `json:"tail_floor"`
 	Until      pgtype.Timestamptz `json:"until"`
 }
 
@@ -849,11 +864,13 @@ type GetObserverActivityHourlyRow struct {
 }
 
 // Hour-or-coarser buckets summed from the hourly rollup; same COALESCE-plus-count shape as the raw query.
+// Hours after the newest complete one aren't rolled yet; that tail, from no earlier than @tail_floor, reads raw rows.
 func (q *Queries) GetObserverActivityHourly(ctx context.Context, arg GetObserverActivityHourlyParams) ([]GetObserverActivityHourlyRow, error) {
 	rows, err := q.db.Query(ctx, getObserverActivityHourly,
 		arg.ObserverID,
 		arg.Column2,
 		arg.Column3,
+		arg.TailFloor,
 		arg.Until,
 	)
 	if err != nil {
@@ -885,9 +902,20 @@ func (q *Queries) GetObserverActivityHourly(ctx context.Context, arg GetObserver
 }
 
 const getObserverActivityHourlyPayloadTypes = `-- name: GetObserverActivityHourlyPayloadTypes :many
-SELECT payload_type, SUM(observations)::bigint AS count
-FROM analytics_hourly_observer_activity
-WHERE observer_id = $1 AND hour >= $2::timestamptz AND hour < $3::timestamptz
+WITH tail AS (
+  SELECT GREATEST(max(hour) + INTERVAL '1 hour', $3::timestamptz) AS tail_start
+  FROM analytics_rollup_hours WHERE status = 'complete'
+), src AS (
+  SELECT a.payload_type, a.observations AS n
+  FROM analytics_hourly_observer_activity a
+  WHERE a.observer_id = $1 AND a.hour >= $2::timestamptz AND a.hour < LEAST($4::timestamptz, (SELECT tail_start FROM tail))
+  UNION ALL
+  SELECT COALESCE(o.payload_type, -1)::smallint, 1::bigint
+  FROM packet_observations o
+  WHERE o.observer_id = $1 AND o.heard_at >= GREATEST($2::timestamptz, (SELECT tail_start FROM tail)) AND o.heard_at < $4::timestamptz
+)
+SELECT payload_type, SUM(n)::bigint AS count
+FROM src
 GROUP BY payload_type
 ORDER BY count DESC
 `
@@ -895,6 +923,7 @@ ORDER BY count DESC
 type GetObserverActivityHourlyPayloadTypesParams struct {
 	ObserverID uuid.UUID          `json:"observer_id"`
 	Column2    pgtype.Timestamptz `json:"column_2"`
+	TailFloor  pgtype.Timestamptz `json:"tail_floor"`
 	Until      pgtype.Timestamptz `json:"until"`
 }
 
@@ -903,8 +932,14 @@ type GetObserverActivityHourlyPayloadTypesRow struct {
 	Count       int64 `json:"count"`
 }
 
+// Same rollup/raw-tail split as GetObserverActivityHourly.
 func (q *Queries) GetObserverActivityHourlyPayloadTypes(ctx context.Context, arg GetObserverActivityHourlyPayloadTypesParams) ([]GetObserverActivityHourlyPayloadTypesRow, error) {
-	rows, err := q.db.Query(ctx, getObserverActivityHourlyPayloadTypes, arg.ObserverID, arg.Column2, arg.Until)
+	rows, err := q.db.Query(ctx, getObserverActivityHourlyPayloadTypes,
+		arg.ObserverID,
+		arg.Column2,
+		arg.TailFloor,
+		arg.Until,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -4082,9 +4117,12 @@ WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR EXISTS (
   AND ($2::text = '' OR t.scope_id = (SELECT id FROM transport_scopes WHERE name = $2))
   AND ($3::timestamptz IS NULL OR t.first_heard_at >= $3)
   AND ($4::timestamptz IS NULL OR t.first_heard_at <= $4)
-  AND ($5::timestamptz IS NULL OR t.last_heard_at < $5)
+  -- Keyset on the millisecond clients see, tie-broken by tag; matches idx_trace_tags_keyset.
+  AND ($5::timestamptz IS NULL
+       OR date_trunc('milliseconds', t.last_heard_at, 'UTC') < $5
+       OR ($8::bytea IS NOT NULL AND date_trunc('milliseconds', t.last_heard_at, 'UTC') = $5 AND t.trace_tag < $8))
   AND ($7::text = '' OR t.trace_type = $7)
-ORDER BY t.last_heard_at DESC
+ORDER BY date_trunc('milliseconds', t.last_heard_at, 'UTC') DESC, t.trace_tag DESC
 LIMIT $6
 `
 
@@ -4096,6 +4134,7 @@ type ListTraceTagsParams struct {
 	Column5 pgtype.Timestamptz `json:"column_5"`
 	Limit   int32              `json:"limit"`
 	Column7 string             `json:"column_7"`
+	Column8 []byte             `json:"column_8"`
 }
 
 type ListTraceTagsRow struct {
@@ -4121,6 +4160,7 @@ func (q *Queries) ListTraceTags(ctx context.Context, arg ListTraceTagsParams) ([
 		arg.Column5,
 		arg.Limit,
 		arg.Column7,
+		arg.Column8,
 	)
 	if err != nil {
 		return nil, err

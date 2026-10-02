@@ -843,6 +843,8 @@ CREATE INDEX idx_trace_iatas_iata ON trace_iatas USING btree (iata);
 
 CREATE INDEX idx_trace_tags_last_heard ON trace_tags USING btree (last_heard_at DESC);
 
+CREATE INDEX idx_trace_tags_keyset ON trace_tags USING btree (date_trunc('milliseconds', last_heard_at, 'UTC') DESC, trace_tag DESC);
+
 CREATE INDEX idx_trace_tags_first_heard ON trace_tags USING btree (first_heard_at);
 
 CREATE INDEX idx_analytics_observer_activity_observer ON analytics_hourly_observer_activity USING btree (observer_id, hour);

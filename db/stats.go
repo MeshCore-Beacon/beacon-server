@@ -39,7 +39,8 @@ func pgUUID(id pgtype.UUID) *uuid.UUID {
 	return &u
 }
 
-// GetStatsOverview summarises the 24 most recent hours that can have been rolled.
+// GetStatsOverview summarises the 24 most recent hours that can have been rolled;
+// WindowHours counts the complete ones the totals actually cover.
 func (s *Store) GetStatsOverview(ctx context.Context, iatas []string) (*api.StatsOverview, error) {
 	until := time.Now().UTC().Add(-rollupDelay).Truncate(time.Hour).Add(time.Hour)
 	since := until.Add(-24 * time.Hour)
@@ -52,7 +53,7 @@ func (s *Store) GetStatsOverview(ctx context.Context, iatas []string) (*api.Stat
 		TotalObservations: series.Summary.Observations,
 		ActiveObservers:   series.Summary.ActiveObservers,
 		ActiveIATAs:       series.Summary.ActiveIATAs,
-		WindowHours:       24,
+		WindowHours:       series.CompleteHours,
 		Since:             since.UnixMilli(),
 		Until:             until.UnixMilli(),
 	}, nil

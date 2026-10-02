@@ -94,7 +94,7 @@ func TestListLimits(t *testing.T) {
 			got = limit
 			return nil, nil
 		},
-		listTraceTags: func(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, limit int32) ([]api.TraceTagSummary, error) {
+		listTraceTags: func(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, cursorTag string, limit int32) ([]api.TraceTagSummary, error) {
 			calls++
 			got = limit
 			return nil, nil

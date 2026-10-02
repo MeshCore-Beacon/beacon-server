@@ -50,14 +50,14 @@ func TestListNodesPostgres(t *testing.T) {
 INSERT INTO transport_scopes (id, name, transport_key, key_fingerprint) VALUES (1, '#test', decode(repeat('00', 16), 'hex'), decode(repeat('00', 8), 'hex'));
 INSERT INTO nodes (id, public_key, node_type, name, last_seen, default_scope_id, supports_multibyte_paths, supports_multibyte_traces)
 SELECT md5(i::text)::uuid, decode(lpad(to_hex(i), 64, '0'), 'hex'), (i % 4 + 1)::smallint,
-       'node-' || i, '2026-01-01'::timestamptz - i * interval '1 second',
+       'node-' || i, '2026-01-01 00:00:00+00'::timestamptz - i * interval '1 second',
        CASE WHEN i % 2 = 0 THEN 1 END, i % 2 = 0, i % 3 = 0
 FROM generate_series(1, 20000) i;
 INSERT INTO node_iatas (node_id, iata, last_heard)
-SELECT md5(i::text)::uuid, 'YVR', '2026-01-01'::timestamptz - i * interval '1 second'
+SELECT md5(i::text)::uuid, 'YVR', '2026-01-01 00:00:00+00'::timestamptz - i * interval '1 second'
 FROM generate_series(1, 19999) i;
 INSERT INTO node_iatas (node_id, iata, last_heard)
-SELECT md5(i::text)::uuid, 'YYJ', '2026-01-01'::timestamptz - i * interval '1 second' - interval '1 hour'
+SELECT md5(i::text)::uuid, 'YYJ', '2026-01-01 00:00:00+00'::timestamptz - i * interval '1 second' - interval '1 hour'
 FROM generate_series(2, 19998, 2) i;
 INSERT INTO node_neighbors (node_id, neighbor_id, iata)
 SELECT md5(i::text)::uuid, md5((i+1)::text)::uuid, iata

@@ -11,6 +11,62 @@ import (
 	"time"
 )
 
+// Hourly activity reads the rollup, but the last ~2h aren't rolled yet; they come from raw rows.
+func TestObserverActivityUnrolledTailPostgres(t *testing.T) {
+	ctx, tx := retentionTx(t)
+	applyBaseline(t, ctx, tx)
+	now := time.Now().UTC()
+	rolled := now.Truncate(time.Hour).Add(-5 * time.Hour)
+	if _, err := tx.Exec(ctx, `
+ INSERT INTO observers (id,public_key) VALUES ('00000000-0000-0000-0000-000000000001','\x01');
+ INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,last_heard_at,first_heard_at) SELECT int4send(i),4,0,1,'\x00','\x00',NOW(),NOW() FROM generate_series(1,4) i;`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `
+ INSERT INTO packet_observations(packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count,payload_type,snr,rssi) VALUES
+  (int4send(1),'00000000-0000-0000-0000-000000000001','YOW',$1::timestamptz+interval '10 minutes',0,1,0,4,5,-90),
+  (int4send(2),'00000000-0000-0000-0000-000000000001','YOW',$1::timestamptz+interval '20 minutes',0,1,0,4,7,-80);`, rolled); err != nil {
+		t.Fatal(err)
+	}
+	rollTxHours(t, ctx, tx)
+	// Heard since the newest rolled hour; the rollup hasn't reached them.
+	if _, err := tx.Exec(ctx, `
+ INSERT INTO packet_observations(packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count,payload_type,snr,rssi) VALUES
+  (int4send(3),'00000000-0000-0000-0000-000000000001','YOW',$1::timestamptz-interval '100 minutes',0,1,0,4,9,-70),
+  (int4send(4),'00000000-0000-0000-0000-000000000001','YOW',$1::timestamptz-interval '5 minutes',0,1,0,NULL,0,0);`, now); err != nil {
+		t.Fatal(err)
+	}
+	store := &Store{q: sqlc.New(tx)}
+	id := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	activity, err := store.GetObserverActivity(ctx, id, 24*time.Hour, time.Hour, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if activity.Summary.RecordedPackets != 4 {
+		t.Errorf("recorded packets = %d, want 4 (2 rolled + 2 unrolled)", activity.Summary.RecordedPackets)
+	}
+	byHour := map[int64]int64{}
+	for _, p := range activity.Points {
+		byHour[p.T] = p.Observations
+	}
+	recent := now.Add(-100 * time.Minute).Truncate(time.Hour).UnixMilli()
+	if byHour[rolled.UnixMilli()] != 2 || byHour[recent] != 1 || byHour[now.Add(-5*time.Minute).Truncate(time.Hour).UnixMilli()] != 1 {
+		t.Errorf("points %+v", activity.Points)
+	}
+	for _, p := range activity.Points {
+		if p.T == recent && (p.SNRAvg == nil || *p.SNRAvg != 9 || p.RSSIAvg == nil || *p.RSSIAvg != -70) {
+			t.Errorf("tail signal: %+v", p)
+		}
+	}
+	types := map[int16]int64{}
+	for _, v := range activity.PayloadTypes {
+		types[v.PayloadType] = v.Count
+	}
+	if types[4] != 3 || types[-1] != 1 {
+		t.Errorf("payload types %+v", activity.PayloadTypes)
+	}
+}
+
 func TestObserverMetricsPostgres(t *testing.T) {
 	ctx, tx := retentionTx(t)
 	applyBaseline(t, ctx, tx)

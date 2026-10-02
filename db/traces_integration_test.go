@@ -61,16 +61,16 @@ INSERT INTO node_short_ids (node_id,iata,prefix_4) VALUES
 INSERT INTO packets (packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,trace_tag,parsed_payload,first_heard_at,last_heard_at)
 SELECT decode(lpad(to_hex(i),64,'0'),'hex'),9,0,1,'\x00','\x00','\x01020304',
  CASE WHEN i=100 THEN '{}'::jsonb ELSE '{"flags":0,"pathHashes":["aa"],"snrValues":[12.5]}'::jsonb END,
- '2026-01-01'::timestamptz+i*interval '1 second', '2026-01-01'::timestamptz+i*interval '1 second'+interval '1 second'
+ '2026-01-01 00:00:00+00'::timestamptz+i*interval '1 second', '2026-01-01 00:00:00+00'::timestamptz+i*interval '1 second'+interval '1 second'
 FROM generate_series(1,100) i;
 INSERT INTO packet_observations (id,packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count)
-SELECT i,decode(lpad(to_hex(i),64,'0'),'hex'),md5(i::text)::uuid,'YVR','2026-01-01'::timestamptz+interval '2 seconds',1,1,1
+SELECT i,decode(lpad(to_hex(i),64,'0'),'hex'),md5(i::text)::uuid,'YVR','2026-01-01 00:00:00+00'::timestamptz+interval '2 seconds',1,1,1
 FROM generate_series(1,100) i WHERE i<>99;
 -- The first packet was heard in YYJ before YVR. A repeat YYJ observation must
 -- not trigger another region lookup or change equal-confidence precedence.
 INSERT INTO packet_observations (id,packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count) VALUES
- (101,decode(lpad('1',64,'0'),'hex'),md5('101')::uuid,'YYJ','2026-01-01'::timestamptz,1,1,1),
- (102,decode(lpad('1',64,'0'),'hex'),md5('102')::uuid,'YYJ','2026-01-01'::timestamptz+interval '3 seconds',1,1,1);
+ (101,decode(lpad('1',64,'0'),'hex'),md5('101')::uuid,'YYJ','2026-01-01 00:00:00+00'::timestamptz,1,1,1),
+ (102,decode(lpad('1',64,'0'),'hex'),md5('102')::uuid,'YYJ','2026-01-01 00:00:00+00'::timestamptz+interval '3 seconds',1,1,1);
 ANALYZE packets; ANALYZE packet_observations; ANALYZE nodes; ANALYZE node_short_ids;`)
 	if err != nil {
 		t.Fatal(err)

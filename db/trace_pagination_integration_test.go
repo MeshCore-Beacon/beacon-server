@@ -114,7 +114,7 @@ func TestTraceTagPaginationPostgres(t *testing.T) {
 		{"time window on first heard", nil, "", "", 3, 6, 26, []api.TraceTagSummary{c}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := store.ListTraceTags(ctx, tc.iatas, tc.scope, tc.kind, at(tc.since), at(tc.until), at(tc.cursor), 20)
+			got, err := store.ListTraceTags(ctx, tc.iatas, tc.scope, tc.kind, at(tc.since), at(tc.until), at(tc.cursor), "", 20)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -129,7 +129,7 @@ func TestTraceTagPaginationPostgres(t *testing.T) {
 	var cursor time.Time
 	total := 0
 	for page := 0; page < 10; page++ {
-		rows, err := store.ListTraceTags(ctx, nil, "", "", time.Time{}, time.Time{}, cursor, 2)
+		rows, err := store.ListTraceTags(ctx, nil, "", "", time.Time{}, time.Time{}, cursor, "", 2)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -156,7 +156,7 @@ func TestTraceTagPaginationPostgres(t *testing.T) {
 	if err := store.DeleteOldTraceTags(ctx, at(20)); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := store.ListTraceTags(ctx, nil, "", "", time.Time{}, time.Time{}, time.Time{}, 20); err != nil || !reflect.DeepEqual(got, []api.TraceTagSummary{a, b, c}) {
+	if got, err := store.ListTraceTags(ctx, nil, "", "", time.Time{}, time.Time{}, time.Time{}, "", 20); err != nil || !reflect.DeepEqual(got, []api.TraceTagSummary{a, b, c}) {
 		t.Errorf("after cleanup got %+v, %v; want a, b, c", got, err)
 	}
 }
@@ -183,7 +183,7 @@ func TestTraceSummarySurvivesMissedHearingPostgres(t *testing.T) {
 	}
 	upsert(1) // the RecordTrace that would follow never runs
 	upsert(1) // a broker duplicate must not count twice
-	rows, err := store.ListTraceTags(ctx, nil, "", "", time.Time{}, time.Time{}, time.Time{}, 10)
+	rows, err := store.ListTraceTags(ctx, nil, "", "", time.Time{}, time.Time{}, time.Time{}, "", 10)
 	if err != nil || len(rows) != 1 || rows[0].PacketCount != 1 || len(rows[0].PathHashes) != 2 || rows[0].TraceType != "TRACE" {
 		t.Fatalf("summary after a missed hearing: %+v %v", rows, err)
 	}
@@ -191,8 +191,68 @@ func TestTraceSummarySurvivesMissedHearingPostgres(t *testing.T) {
 	if err := store.RecordTrace(ctx, ingest.TraceHearing{TraceTag: tag, IATA: "YVR", HeardAt: heard}); err != nil {
 		t.Fatal(err)
 	}
-	rows, err = store.ListTraceTags(ctx, nil, "", "", time.Time{}, time.Time{}, time.Time{}, 10)
+	rows, err = store.ListTraceTags(ctx, nil, "", "", time.Time{}, time.Time{}, time.Time{}, "", 10)
 	if err != nil || len(rows) != 1 || rows[0].FirstHeardAt != heard.UnixMilli() || rows[0].LastHeardAt != heard.UnixMilli() || rows[0].IATACount != 1 {
 		t.Errorf("first hearing should replace provisional times: %+v %v", rows, err)
+	}
+}
+
+// Tags sharing a millisecond (second-resolution observer clocks, sub-ms times) must
+// all survive paging with the (cursor, cursorTag) keyset.
+func TestTraceTagPaginationTiesPostgres(t *testing.T) {
+	dsn := os.Getenv("BEACON_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set BEACON_TEST_POSTGRES_DSN for the PostgreSQL regression test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	applyBaseline(t, ctx, tx)
+	if _, err := tx.Exec(ctx, `INSERT INTO trace_tags (trace_tag, first_heard_at, last_heard_at, heard) VALUES
+ ('\x00000001', '2026-01-01 00:00:00+00', '2026-01-01 00:00:10+00', true),
+ ('\x00000002', '2026-01-01 00:00:00+00', '2026-01-01 00:00:10+00', true),
+ ('\x00000003', '2026-01-01 00:00:00+00', '2026-01-01 00:00:10+00', true),
+ ('\x00000004', '2026-01-01 00:00:00+00', '2026-01-01 00:00:10+00', true),
+ ('\x00000005', '2026-01-01 00:00:00+00', '2026-01-01 00:00:05.000300+00', true),
+ ('\x00000006', '2026-01-01 00:00:00+00', '2026-01-01 00:00:05.000700+00', true),
+ ('\x00000007', '2026-01-01 00:00:00+00', '2026-01-01 00:00:04+00', true)`); err != nil {
+		t.Fatal(err)
+	}
+	store := &Store{q: sqlc.New(tx)}
+	want := []string{"00000004", "00000003", "00000002", "00000001", "00000006", "00000005", "00000007"}
+	var got []string
+	var cursor time.Time
+	var cursorTag string
+	for page := 0; page < 10; page++ {
+		rows, err := store.ListTraceTags(ctx, nil, "", "", time.Time{}, time.Time{}, cursor, cursorTag, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) == 0 {
+			break
+		}
+		for _, r := range rows {
+			got = append(got, r.TraceTag)
+		}
+		last := rows[len(rows)-1]
+		cursor, cursorTag = time.UnixMilli(last.LastHeardAt), last.TraceTag
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("keyset pages = %v, want %v", got, want)
+	}
+
+	// Without cursorTag the cursor stays exclusive on the millisecond.
+	rows, err := store.ListTraceTags(ctx, nil, "", "", time.Time{}, time.Time{}, time.Date(2026, 1, 1, 0, 0, 5, 0, time.UTC), "", 10)
+	if err != nil || len(rows) != 1 || rows[0].TraceTag != "00000007" {
+		t.Errorf("ms-only cursor: %+v %v", rows, err)
 	}
 }

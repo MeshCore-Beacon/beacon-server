@@ -218,8 +218,8 @@ type Reader interface {
 	// Returns nil, pgx.ErrNoRows if the scope is not found.
 	GetScopeByName(ctx context.Context, name string) (*ScopeDetail, error)
 
-	// ListTraceTags returns a paginated list of trace tags with aggregate metadata.
-	ListTraceTags(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, limit int32) ([]TraceTagSummary, error)
+	// ListTraceTags returns trace tags newest first, keyset-paged on (cursor ms, cursorTag hex).
+	ListTraceTags(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, cursorTag string, limit int32) ([]TraceTagSummary, error)
 
 	// GetTraceByTag returns all packets for a given trace tag with resolved routes.
 	GetTraceByTag(ctx context.Context, tag string) (*TraceDetail, error)

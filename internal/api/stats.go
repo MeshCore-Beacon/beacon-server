@@ -35,7 +35,7 @@ type StatsOverview struct {
 	TotalObservations int64 `json:"totalObservations"`
 	ActiveObservers   int64 `json:"activeObservers"`
 	ActiveIATAs       int64 `json:"activeIatas"`
-	WindowHours       int   `json:"windowHours"` // always 24 for now
+	WindowHours       int   `json:"windowHours"` // complete rolled hours the totals cover, at most 24
 	Since             int64 `json:"since"`       // epoch ms, start of the window
 	Until             int64 `json:"until"`       // epoch ms, exclusive end of the window
 }

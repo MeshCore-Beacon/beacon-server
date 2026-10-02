@@ -45,8 +45,8 @@ INSERT INTO iata_codes (iata) VALUES ('GPT');
 INSERT INTO known_routes (id,path_key,node_ids,hash_prefix,iata,hop_count,first_seen,last_seen)
 SELECT i, decode(md5(i::text),'hex'), ARRAY[md5(i::text)::uuid], ARRAY['\x01'::bytea],
        CASE WHEN i > 100000 THEN 'GPT' ELSE 'YYZ' END, i % 4 + 2,
-       '2026-01-01'::timestamptz - i * interval '1 second',
-       '2026-01-01'::timestamptz - i * interval '1 second'
+       '2026-01-01 00:00:00+00'::timestamptz - i * interval '1 second',
+       '2026-01-01 00:00:00+00'::timestamptz - i * interval '1 second'
 FROM generate_series(1,100100) i;
 ANALYZE known_routes;`)
 	if err != nil {
