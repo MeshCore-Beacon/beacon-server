@@ -32,6 +32,9 @@ func newGroupHarness(t *testing.T, f *fakeMeshMapper, store *zoneMemoryStore, im
 	if store.iatas == nil {
 		store.iatas = []string{"YOW"}
 	}
+	if store.heard == nil {
+		store.heard = slices.Clone(store.iatas)
+	}
 	if store.rows == nil {
 		store.rows = map[string]Boundary{}
 	}
@@ -180,5 +183,54 @@ func TestZoneListNamesAndLocatesIATAs(t *testing.T) {
 	h.refetch(t)
 	if h.store.writes != 2 || changed != 1 {
 		t.Fatal("unchanged details rewritten", h.store.writes, changed)
+	}
+}
+
+func TestGroupStopsQualifyingOnImportedMembers(t *testing.T) {
+	h := newGroupHarness(t, groupedFake(t), &zoneMemoryStore{}, true)
+	h.refetch(t)
+	if _, ok := h.store.regions["onqc"]; !ok {
+		t.Fatal("group not imported")
+	}
+	without := strings.Replace(groupedList, `"members":["YUL","YOW","YQB"]`, `"members":["YUL","YQB"]`, 1)
+	h.f.list = strings.ReplaceAll(without, "URL", h.f.URL)
+	h.refetch(t)
+	if _, ok := h.store.regions["onqc"]; ok {
+		t.Fatal("group kept only by members its own import created")
+	}
+}
+
+func TestGroupQualifiesThroughConfiguredRegion(t *testing.T) {
+	hand := RegionState{Slug: "east", Name: "East", IATAs: []string{"YYZ"}}
+	h := newGroupHarness(t, groupedFake(t), &zoneMemoryStore{regions: map[string]RegionState{"east": hand}}, true)
+	h.refetch(t)
+	if _, ok := h.store.regions["golm"]; !ok {
+		t.Fatal("group with a configured member not imported")
+	}
+}
+
+func TestGroupImportsFromListsItHas(t *testing.T) {
+	old := RegionState{Slug: "old", Name: "Old", Imported: true, IATAs: []string{"YOW"}}
+	store := &zoneMemoryStore{iatas: []string{"YOW", "SEA"}, regions: map[string]RegionState{"old": old}}
+	f := groupedFake(t)
+	f.otherStatus = 500
+	h := newGroupHarness(t, f, store, true)
+	h.refetch(t)
+	for range 2 {
+		if err := h.z.Refresh(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if f.otherStatus != 500 || h.z.dir.lists["US"] == nil || h.z.dir.lists["US"].zones != nil {
+		t.Fatal("US list should have failed")
+	}
+	if _, ok := store.regions["onqc"]; !ok {
+		t.Fatal("one failed country blocked group import")
+	}
+	if store.details["YOW"].Name != "Ottawa" {
+		t.Fatal("one failed country blocked IATA details", store.details)
+	}
+	if _, ok := store.regions["old"]; !ok {
+		t.Fatal("pruned with a country list missing")
 	}
 }

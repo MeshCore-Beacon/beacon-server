@@ -408,3 +408,20 @@ func TestScopesSkipUnlistedIATAs(t *testing.T) {
 		t.Fatalf("unlisted IATA requested or retried early: hits=%d %+v", f.scopeHits, s.cache)
 	}
 }
+
+func TestScopesRequestCutShortStillCounts(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	defer server.Close()
+	store := newMemoryStore("YOW")
+	imp := newImporter(t, config.MeshMapperScopesConfig{Enabled: true}, store, server.URL, scopestore.New())
+	now := time.Now().UTC()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_ = imp.refresh(ctx, &imp.sources[0], now)
+	if got := imp.sources[0].cache.NextAttempt.Sub(now); got != failureRetry {
+		t.Fatal("abandoned request retried inside the rate limit", got)
+	}
+	if row := store.rows[sourceKey{"YOW", server.URL}]; row.NextAttempt.Sub(now) != failureRetry {
+		t.Fatal("abandoned request not persisted", row)
+	}
+}

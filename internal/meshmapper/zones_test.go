@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -28,6 +29,7 @@ func boundaryBody(code, geometry string) string {
 
 type zoneMemoryStore struct {
 	iatas   []string
+	heard   []string
 	rows    map[string]Boundary
 	pruned  []string
 	fail    bool
@@ -96,6 +98,10 @@ func (s *zoneMemoryStore) ListKnownIATAs(context.Context) ([]string, error) {
 	return slices.Clone(s.iatas), nil
 }
 
+func (s *zoneMemoryStore) ListHeardIATAs(context.Context) ([]string, error) {
+	return slices.Clone(s.heard), nil
+}
+
 func (s *zoneMemoryStore) PruneZoneBoundaries(_ context.Context, keep []string) ([]string, error) {
 	var removed []string
 	for iata := range s.rows {
@@ -162,16 +168,28 @@ type fakeMeshMapper struct {
 	etag, retryAfter   string
 	listCalls, calls   int
 	ifNoneMatch        []string
+	otherStatus        int         // get_zones.php status for countries other than CA; 0 is unexpected
+	hang               atomic.Bool // requests wait until the client gives up
+	hung               atomic.Int32
 }
 
 func newFakeMeshMapper(t *testing.T) *fakeMeshMapper {
 	f := &fakeMeshMapper{listStatus: 200, status: 200, etag: `"v1"`, boundary: boundaryBody("YOW", square)}
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if f.hang.Load() {
+			f.hung.Add(1)
+			<-r.Context().Done()
+			return
+		}
 		switch r.URL.Path {
 		case "/get_zones.php":
 			f.listCalls++
 			if r.URL.Query().Get("country") != "CA" {
-				t.Errorf("country query: %s", r.URL.RawQuery)
+				if f.otherStatus == 0 {
+					t.Errorf("country query: %s", r.URL.RawQuery)
+				}
+				w.WriteHeader(f.otherStatus)
+				return
 			}
 			w.WriteHeader(f.listStatus)
 			_, _ = w.Write([]byte(f.list))
@@ -490,5 +508,80 @@ func TestClientsAllowMeshMapperTimeout(t *testing.T) {
 	}
 	if refreshTimeout <= requestTimeout {
 		t.Fatal("a refresh must outlast its request")
+	}
+}
+
+func TestZoneListCutShortStillCounts(t *testing.T) {
+	f := newFakeMeshMapper(t)
+	f.hang.Store(true)
+	lists := newZoneListMemory()
+	dir := NewDirectory(lists)
+	dir.listURL = f.URL + "/get_zones.php"
+	now := time.Now().UTC()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, fetched, _ := dir.List(ctx, "CA", now); !fetched {
+		t.Fatal("first call should spend the request")
+	}
+	f.hang.Store(false)
+	if zones, fetched, err := dir.List(context.Background(), "CA", now.Add(15*time.Second)); zones != nil || fetched || err != nil || f.listCalls != 0 || f.hung.Load() != 1 {
+		t.Fatal("abandoned request retried inside the rate limit", f.listCalls, fetched, err)
+	}
+	if got := lists.rows["CA"].NextAttempt.Sub(now); got != zoneListFresh {
+		t.Fatal("abandoned request not persisted", lists.rows["CA"])
+	}
+}
+
+func TestZoneListFetchDoesNotBlockOtherCallers(t *testing.T) {
+	release := make(chan struct{})
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		<-release
+		_, _ = w.Write([]byte(`{"country":"CA","zones":[]}`))
+	}))
+	defer server.Close()
+	defer close(release)
+	dir := NewDirectory(newZoneListMemory())
+	dir.listURL = server.URL
+	now := time.Now().UTC()
+	go func() { _, _, _ = dir.List(context.Background(), "CA", now) }()
+	for calls.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if zones, fetched, err := dir.List(context.Background(), "CA", now); zones != nil || fetched || err != nil {
+			t.Error("second caller should back off while the list is in flight", fetched, err)
+		}
+		_, _, _, _ = dir.snapshot([]string{"CA"})
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("caller waited on another task's request")
+	}
+	if calls.Load() != 1 {
+		t.Fatal("duplicate list request", calls.Load())
+	}
+}
+
+func TestBoundaryCutShortStillCounts(t *testing.T) {
+	f := newFakeMeshMapper(t)
+	h := newZoneHarness(t, f, &zoneMemoryStore{rows: map[string]Boundary{}}, true)
+	if err := h.z.Refresh(context.Background()); err != nil || f.listCalls != 1 {
+		t.Fatal("list not fetched", err)
+	}
+	f.hang.Store(true)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_ = h.z.Refresh(ctx)
+	f.hang.Store(false)
+	if err := h.z.Refresh(context.Background()); err != nil || f.calls != 0 || f.hung.Load() != 1 {
+		t.Fatal("abandoned boundary request retried inside the rate limit", err, f.calls)
+	}
+	if b := h.store.rows["YOW"]; b.NextAttempt.Sub(b.AttemptedAt) != 24*time.Hour {
+		t.Fatal("abandoned boundary request not persisted", b)
 	}
 }
