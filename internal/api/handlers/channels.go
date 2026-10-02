@@ -5,6 +5,7 @@ package handlers
 
 import (
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 // ChannelsRouter mounts all /channels routes onto a subrouter.
@@ -117,6 +119,7 @@ func listChannels(reader api.Reader) http.HandlerFunc {
 //	@Success	200			{object}	api.Channel
 //	@Failure	400			{object}	handlers.APIError
 //	@Failure	404			{object}	handlers.APIError
+//	@Failure	500			{object}	handlers.APIError
 //	@Router		/channels/{channelID} [get]
 func getChannel(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -130,8 +133,12 @@ func getChannel(reader api.Reader) http.HandlerFunc {
 			id = i
 		}
 		channel, err := reader.GetChannel(r.Context(), int32(id))
-		if err != nil {
+		switch {
+		case errors.Is(err, pgx.ErrNoRows), err == nil && channel == nil:
 			respondError(w, http.StatusNotFound, "channel not found")
+			return
+		case err != nil:
+			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, channel)

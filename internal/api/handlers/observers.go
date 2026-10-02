@@ -79,7 +79,7 @@ func listObservers(reader api.Reader) http.HandlerFunc {
 		if regionIDStr := r.URL.Query().Get("regionId"); regionIDStr != "" || r.URL.Query().Get("region") != "" {
 			regionIATAs, err := resolveRegionIATAs(r.Context(), regionIDStr, r.URL.Query().Get("region"), reader)
 			if err != nil {
-				respondError(w, http.StatusBadRequest, err.Error())
+				respondRegionError(w, err)
 				return
 			}
 			iatas = append(iatas, regionIATAs...)
@@ -102,6 +102,7 @@ func listObservers(reader api.Reader) http.HandlerFunc {
 //	@Success	200			{object}	api.Observer
 //	@Failure	400			{object}	handlers.APIError
 //	@Failure	404			{object}	handlers.APIError
+//	@Failure	500			{object}	handlers.APIError
 //	@Router		/observers/{observerId} [get]
 func getObserver(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -112,8 +113,12 @@ func getObserver(reader api.Reader) http.HandlerFunc {
 			return
 		}
 		obs, err := reader.GetObserver(r.Context(), id)
-		if err != nil {
+		switch {
+		case errors.Is(err, pgx.ErrNoRows), err == nil && obs == nil:
 			respondError(w, http.StatusNotFound, "observer not found")
+			return
+		case err != nil:
+			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, obs)

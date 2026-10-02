@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/jackc/pgx/v5"
 )
 
 type signalReader struct {
@@ -56,7 +57,7 @@ func TestSignalFiltersAndErrors(t *testing.T) {
 				case "empty":
 					return &api.Region{}, nil
 				case "missing":
-					return nil, errors.New("not found")
+					return nil, pgx.ErrNoRows
 				default:
 					return &api.Region{IATAs: []string{"YVR"}}, nil
 				}

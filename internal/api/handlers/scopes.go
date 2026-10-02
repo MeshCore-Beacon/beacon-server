@@ -55,7 +55,7 @@ func listScopes(reader api.Reader, scopes ScopeMembership) http.HandlerFunc {
 		if regionID != "" || region != "" {
 			regionIATAs, err := resolveRegionIATAs(r.Context(), regionID, region, reader)
 			if err != nil {
-				respondError(w, http.StatusBadRequest, err.Error())
+				respondRegionError(w, err)
 				return
 			}
 			iatas = append(iatas, regionIATAs...)
