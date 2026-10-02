@@ -590,6 +590,14 @@ definitions:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverActivityRadio'
       range:
         type: string
+      rawFrom:
+        description: start of the raw tail, epoch ms
+        type: integer
+      rolledUntil:
+        description: |-
+          Hourly only. Buckets before rolledUntil come from rollups and from rawFrom on from raw rows;
+          when rawFrom is later, the hours between are uncovered, not quiet.
+        type: integer
       source:
         description: raw or hourly; missing records do not prove an outage
         type: string
@@ -2083,6 +2091,10 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get channel detail
       tags:
       - Channels
@@ -2155,8 +2167,8 @@ paths:
             items:
               $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.IATA'
             type: array
-        "404":
-          description: Not Found
+        "500":
+          description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List all IATA codes
@@ -2181,6 +2193,10 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get a single IATA code
       tags:
       - IATAs
@@ -2203,6 +2219,10 @@ paths:
           description: IATA exists but has no border configured
         "404":
           description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "500":
+          description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get an IATA's GeoJSON border, if configured
@@ -2428,6 +2448,10 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get node detail
       tags:
       - Nodes
@@ -2585,6 +2609,10 @@ paths:
             $ref: '#/definitions/internal_api_handlers.APIError'
         "404":
           description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "500":
+          description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get observer detail
@@ -2904,8 +2932,8 @@ paths:
             items:
               $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.RegionSummary'
             type: array
-        "404":
-          description: Not Found
+        "500":
+          description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List all regions
@@ -2934,6 +2962,10 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get a single region
       tags:
       - Regions
@@ -2951,6 +2983,11 @@ paths:
       - description: Epoch ms timestamp of last item for pagination
         in: query
         name: cursor
+        type: integer
+      - description: id of the last item; with cursor, also returns later routes sharing
+          that millisecond
+        in: query
+        name: cursorId
         type: integer
       - description: Max results (default 50); must be positive, values above 200
           are clamped

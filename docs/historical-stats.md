@@ -69,7 +69,8 @@ region or all IATAs.
 
 - Packet, trace and route detail, the packet list, observer comparison, and observer
   activity below one hour. Hourly observer activity reads raw rows for the hours after the
-  newest complete one (at most the last 3 hours), so the unrolled tail isn't shown as zero.
+  newest complete one (at most the last 24 hours, the raw holdback), so the unrolled tail isn't
+  shown as zero. `rolledUntil` and `rawFrom` in the response mark any hours still uncovered.
 - Current memberships: scope observer and node counts, node types, clock drift, radio presets.
 - `/traces` reads `trace_tags`, a per-tag summary kept at ingest, not a rollup. A new packet
   adds its count, type and payload in the statement that stores it; hearings set the times.

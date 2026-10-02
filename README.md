@@ -622,7 +622,7 @@ List `limit` values are clamped to 1–200.
 | `GET`    | `/packets/{packetHash}`                 | Get packet with all observations                                                                                      |
 | `GET`    | `/regions`                              | List all regions (summary)                                                                                            |
 | `GET`    | `/regions/{regionId}`                   | Get a single region with IATA list                                                                                    |
-| `GET`    | `/routes`                               | List known routes (`iata`, `hopCount`)                                                                                |
+| `GET`    | `/routes`                               | List known routes (`iata`, `hopCount`, `cursor`+`cursorId`)                                                           |
 | `GET`    | `/routes/search`                        | Search routes by source and destination hash                                                                          |
 | `GET`    | `/routes/cross`                         | Search for routes crossing IATA boundaries                                                                            |
 | `GET`    | `/routes/{iata}/{pathKey}/observations` | Retained observations matching a saved route (see below)                                                              |
@@ -696,7 +696,9 @@ The existing observer `observationCount` remains a legacy cumulative presence
 counter for compatibility, including status/neighbour events. It is not a
 period packet total. Broker presence and packet-arrival timestamps are now
 updated separately; this cannot reconstruct previously overwritten timestamps.
-Hourly activity comes from the analytics rollups and includes unknown-type activity.
+Hourly activity comes from the analytics rollups, plus raw rows for hours not yet rolled
+(at most 24h back), and includes unknown-type activity. `rolledUntil` is the end of the newest
+complete rollup hour and `rawFrom` the start of the raw tail; hours between them are uncovered.
 
 ### Saved-route evidence
 
