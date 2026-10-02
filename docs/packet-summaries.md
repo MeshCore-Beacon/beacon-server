@@ -1,28 +1,22 @@
 # Packet summaries
 
-Packet lists, regional lists, reconnect backfill and live `packetObservation`
-events share an optional `summary` string. It describes metadata carried by that
-packet, rather than looking up a node's current name or decoding history again.
+Packet lists, regional lists, reconnect backfill and live `packetObservation` events carry
+an optional `summary` string. It comes from the packet's own stored metadata, never from a
+node's current name or a fresh decode.
 
 | Payload | Summary | Source |
 |---|---|---|
 | ADVERT | Advertised name | Saved `appData.name` / verified decoded advert |
 | ACK | `ACK 01020304` | Four-byte acknowledgement checksum |
 | TRACE | `TRACE efbeadde` | Trace tag |
-| TRACE classified as PING | `PING efbeadde` | Trace tag, with the existing single-destination classification |
+| TRACE classified as PING | `PING efbeadde` | Trace tag |
 
-References use eight lowercase hexadecimal characters in the same byte order
-as packet detail's `checksum` / `traceTag`. Extended ACK retry bytes do not change
-the displayed checksum. Zero is a valid reference. These short references are
-not globally unique packet identifiers or proof of delivery/authentication; no
-message body, trace auth code or inferred sender/recipient is added to the summary.
-
-Historical reads require the expected stored type and a string containing
-exactly eight hex characters. Missing, malformed or unsupported references omit
-the field. Advert behavior is unchanged. List/backfill queries project the text
-from saved JSON in their existing query, without a schema change, backfill job
-or per-packet database lookup. The existing web summary display needs no new API
-field or client release to render these values.
-
-Other packet types remain separate follow-ups under issue #99. A missing summary
-does not mean the packet is invalid or unreadable in packet detail.
+- References are eight lowercase hex characters in the same byte order as packet detail's
+  `checksum` / `traceTag`. Zero is valid. Extended ACK retry bytes don't change the checksum.
+- They are short references, not unique packet IDs or proof of delivery. No message body,
+  trace auth code or inferred sender/recipient is included.
+- The text is projected from saved JSON in the existing list queries: no extra column,
+  backfill or per-packet lookup. A stored value of the wrong type or not exactly eight hex
+  characters omits the field.
+- Other payload types have no summary yet. A missing summary doesn't mean the packet is
+  invalid.

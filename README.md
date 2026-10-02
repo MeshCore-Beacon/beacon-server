@@ -25,12 +25,14 @@ in PostgreSQL, and streams live events to WebSocket clients.
 - Seeds regions, IATA display names, and channel keys from a YAML config file on
   startup
 
-For deployment instructions including the frontend app and reverse proxy
-examples, see [beacon-docs](https://github.com/MeshCore-Beacon/beacon-docs).
+More documentation:
 
-For a bounded private database and saved-config bundle, see
-[backup export](docs/backup-export.md). A standalone export tool is available; the
-protected download API is opt-in; browser login and import remain separate follow-ups.
+- [beacon-docs](https://github.com/MeshCore-Beacon/beacon-docs): deployment with the
+  frontend and reverse proxy examples
+- [Backup and export](docs/backup-export.md): private database and config bundles
+- [Historical stats](docs/historical-stats.md): how the hourly rollups work
+- [Packet summaries](docs/packet-summaries.md): the `summary` field on packet lists
+- [CPU profiling](PROFILING.md): bounded production captures
 
 ---
 
@@ -82,23 +84,6 @@ docker run -d --name beacon-postgres -p 5432:5432 \
 
 Database migrations are applied automatically on startup.
 
-### Upgrading from 1.x
-
-2.0.0 starts from a new schema baseline and **needs a fresh database**. Pointed
-at a 1.x database it refuses to start with `database schema predates Beacon
-2.0.0; 2.0.0 needs a fresh database`. 1.x history does not carry over: create a
-new, empty database (Docker: stop the stack and move or remove the Postgres
-data directory) before starting 2.0.0.
-
-Config changes to review when upgrading:
-
-- Every manually configured `scopes:` entry needs a `region`.
-- `meshmapper.scopes.sources` is ignored; MeshMapper refresh intervals must be
-  within 1h–24h for scopes and 24h–168h for zones, or startup fails.
-- REST rate limiting is on by default. Behind a reverse proxy, set
-  `server.trusted_proxies` (see [Reverse proxies and rate limits](#reverse-proxies-and-rate-limits)).
-- `packets.retention` now defaults to 7 days.
-
 ### 3. Run
 
 ```bash
@@ -122,81 +107,36 @@ Beacon will:
 - Connect to the configured MQTT brokers
 - Start the HTTP server on `LISTEN_ADDR` (default `:8080`)
 
-### Cold start and path resolution
+### Upgrading from 1.x
 
-Path resolution, firmware capability detection, and known route storage all
-depend on nodes having advertised at least once to a local observer. On a fresh
-deployment `resolvedPath` will show `"confidence": "none"` for all hops and
-`supportsMultibytePaths` will be `false` for all nodes until advert traffic
-arrives and populates `node_short_ids`. This is expected behaviour — resolution
-improves automatically as the mesh is observed over time.
+2.0.0 starts from a new schema baseline and **needs a fresh, empty database**; 1.x history
+does not carry over. Pointed at a 1.x database it refuses to start with `database schema
+predates Beacon 2.0.0; 2.0.0 needs a fresh database` (Docker: stop the stack and move or
+remove the Postgres data directory).
 
-Similarly, GRP_TXT packets whose channel key isn't yet known at ingest time are
-stored as hash-only, undecrypted rows. Adding the channel's key to `config.yaml`
-doesn't retroactively decrypt that history immediately — it's picked up
-automatically on the next restart, when Beacon scans for undecrypted packets
-matching a now-known channel and decrypts them. Watch the startup log for
-`backfilled N previously-undecrypted channel message(s)`.
+Config changes to review:
+
+- Every manually configured `scopes:` entry needs a `region`.
+- `meshmapper.scopes.sources` is ignored; MeshMapper refresh intervals must be within
+  1h–24h for scopes and 24h–168h for zones, or startup fails.
+- REST rate limiting is on by default. Behind a reverse proxy, set
+  `server.trusted_proxies` (see [Reverse proxies and rate limits](#reverse-proxies-and-rate-limits)).
+- `packets.retention` now defaults to 7 days.
+
+### Cold start
+
+Path resolution, capability detection and known routes depend on nodes having advertised
+to a local observer. On a fresh database every hop shows `"confidence": "none"` and
+`supportsMultibytePaths` is `false` until adverts populate `node_short_ids`. That's
+expected and fills in as the mesh is observed.
+
+GRP_TXT packets whose channel key isn't known yet are stored hash-only. After adding the
+key to `config.yaml`, the next restart decrypts the matching history; look for
+`backfilled N previously-undecrypted channel message(s)` in the log.
 
 ---
 
 ## Configuration
-
-### Admin authentication
-
-The `/api/v1/admin` subtree requires `Authorization: Bearer <key>`. Set the
-operator key with `BEACON_API_KEY` or `auth.api_key` in YAML. A set environment
-variable overrides YAML; an explicitly empty value disables admin access.
-With no key, admin requests return JSON 503 while public reads and WebSockets
-continue normally. With a key, missing, incorrect or duplicate Authorization
-headers return JSON 401 with `WWW-Authenticate: Bearer`.
-
-`GET /api/v1/admin/config` returns selected running settings: CORS options with
-Beacon defaults applied, `auth.configured`, and `ingest.broker_count` (configured
-broker workers, not connection status or a tunable processing-worker pool).
-The CORS lists are the options supplied to the middleware; its normal matching
-normalization still applies. The response excludes
-credential fields, broker addresses, channel material, database settings and
-other configuration. Unknown admin paths return 404 and unsupported
-methods on the config endpoint return 405 after authentication.
-Global CORS preflights remain public. Use a long, randomly generated key, keep
-it out of source control and logs, and send it only in the Authorization header,
-never the URL or request body. Require HTTPS at the reverse proxy and restrict
-direct access to Beacon's HTTP listener to that proxy or a private connection.
-Changing the key requires a restart. No API key is issued automatically. The
-key must be at least 16 characters with no inner whitespace (surrounding
-whitespace is trimmed); an unusable key prevents startup.
-
-`PUT /api/v1/admin/config` accepts only
-`{"cors":{"allowed_origins":["https://example.org"]}}`. It replaces the entire
-origin list immediately and updates the reported configuration with the same
-policy. Requests already in progress may use the previous policy. Concurrent
-valid updates are serialized; updates take effect one at a time. The response
-contains `config`, `persisted: false` and `requires_restart: false`.
-
-Updates are **runtime-only**: no file or database is written, and restarting
-reloads the saved configuration. Keep 1–32 ASCII HTTP(S) origins, at most 512 bytes
-each, with an optional single hostname wildcard; a sole `*` permits all origins.
-Empty/null lists, URL paths/queries/credentials, control characters and unknown
-fields are rejected. Requests must be JSON, at most 16 KiB. Other CORS options,
-auth/credential fields and broker count cannot be changed here; there is no
-configurable `ingest.worker_count`. Cross-origin admin clients need PUT allowed
-in the saved CORS methods. CORS controls browser access, not authentication.
-
-Operator accounts are available at `GET/POST /api/v1/admin/accounts` and
-`GET/DELETE /api/v1/admin/accounts/{id}`. POST accepts a JSON `name` field in a
-body up to 4 KiB; names are trimmed, case-sensitive and limited to 128 Unicode
-characters without control characters. Active names are unique. DELETE soft
-deactivates the record (204); missing IDs return 404 and an already inactive
-record returns 409. A deactivated name may be reused by a new account.
-Lists include active and inactive records, newest first, without pagination.
-These are operator-defined records; no login, session or API token is created.
-Cross-origin account clients need both `POST` and `DELETE` in the saved
-`cors.allowed_methods`; the default `GET, HEAD, OPTIONS` is read-only. For an
-admin UI that also updates configuration, use `[GET, HEAD, OPTIONS, POST, PUT,
-DELETE]`, restrict `cors.allowed_origins` to that UI, and allow `Authorization`
-and `Content-Type` headers. Otherwise browser preflight blocks these requests
-even when the same bearer-authenticated request works with curl.
 
 ### Environment variables (`.env`)
 
@@ -368,7 +308,47 @@ names, coordinates, and optional region borders. Regions and channel keys
 must be defined here unless MeshMapper imports them (`meshmapper.zones.import_groups`,
 `meshmapper.channels`).
 
----
+### Admin API
+
+The `/api/v1/admin` subtree requires `Authorization: Bearer <key>`. Everything else,
+including the WebSocket and CORS preflights, is public.
+
+- Set the key with `BEACON_API_KEY` or `auth.api_key`. A set environment variable wins; an
+  explicitly empty one disables admin access. No key is generated for you.
+- The key must be at least 16 characters with no inner whitespace (surrounding whitespace is
+  trimmed). An unusable key fails startup. Changing it needs a restart.
+- With no key, admin requests return 503. A missing, wrong or duplicated header returns 401
+  with `WWW-Authenticate: Bearer`. After auth, unknown paths are 404 and unsupported methods
+  405.
+- Use a long random key, send it only in the header (never the URL or body), and keep it out
+  of source control and logs. Terminate HTTPS at the proxy and keep Beacon's listener
+  private to it.
+
+Endpoints:
+
+- **`GET /admin/config`** returns the CORS options with defaults applied, `auth.configured`
+  and `ingest.broker_count` (configured broker workers, not connection status). No
+  credentials, broker addresses, channel material or database settings.
+- **`PUT /admin/config`** accepts only `{"cors":{"allowed_origins":[...]}}` and replaces the
+  origin list immediately. It is **runtime-only**: nothing is written, and a restart reloads
+  the file. The response carries `config`, `persisted: false` and `requires_restart: false`.
+  Send 1–32 ASCII http(s) origins of at most 512 bytes each, with an optional single
+  hostname wildcard; a lone `*` allows all. Empty or null lists, paths, queries, credentials,
+  control characters, unknown fields and bodies over 16 KiB are rejected. Concurrent updates
+  apply one at a time; requests already in flight may see the old list.
+- **`GET/POST /admin/accounts`, `GET/DELETE /admin/accounts/{id}`** manage operator account
+  records (no login, session or token). POST takes `{"name": "..."}` (body ≤ 4 KiB; name
+  trimmed, case-sensitive, ≤ 128 characters, no control characters, unique among active
+  accounts). DELETE deactivates: 204, or 404 if missing, 409 if already inactive. The name
+  can then be reused. The list returns active and inactive accounts, newest first,
+  unpaginated.
+- **`GET /admin/backup`** is opt-in; see [Backup and export](docs/backup-export.md).
+
+Browser admin clients need the matching methods in the saved `cors.allowed_methods`. The
+default `GET, HEAD, OPTIONS` is read-only. For an admin UI, use
+`[GET, HEAD, OPTIONS, POST, PUT, DELETE]`, restrict `cors.allowed_origins` to that UI and
+allow the `Authorization` and `Content-Type` headers, or preflight blocks requests that work
+from curl. CORS controls browser access, not authentication.
 
 ### Reverse proxies and rate limits
 
@@ -398,44 +378,50 @@ proxy is trusted, and once at runtime when a request carries forwarding headers
 it is ignoring. Full nginx and Caddy examples are in
 [beacon-docs](https://github.com/MeshCore-Beacon/beacon-docs).
 
----
+### Analytics retention
+
+Historical stats read hourly rollups kept for `analytics.rollup_retention` (default 90
+days), independently of `packets.retention`. Each UTC hour is rolled about 95 minutes after
+it closes, and packet cleanup holds back up to 24h of raw rows until their hours are rolled.
+An hour that lost raw rows first is reported as partial, without values. Drill-downs,
+sub-hour observer activity and observer comparison still read raw data. Details:
+[docs/historical-stats.md](docs/historical-stats.md).
+
+### Logging
+
+Logs go to stderr; collect and rotate them with Docker or systemd. Set `log.level`
+(`debug`, `info`, `warn`, `error`; default `info`) and `log.format` (`text` or `json`) in
+`config.yaml`, or override with `LOG_LEVEL` / `LOG_FORMAT`. Invalid values fail startup.
+
+Every record has a `component`. Ingest records add the broker name; HTTP completion records
+add the validated client address, route, status and duration. Query strings and WebSocket
+hello payloads are never logged. Expected ingest skips and routine WebSocket lifecycle
+events are debug-level. Reverse-proxy access logs (and fail2ban rules on them) are
+unaffected.
 
 ### Foreign repeater indication
 
-Set `nodes.mark_foreign: true` to expose `possiblyForeign` on repeater nodes.
-The local operating area is the union of **all configured**
-`iatas.<code>.borderFile` GeoJSON Polygon/MultiPolygon features, with
-`meshmapper.zones` boundaries replacing them where MeshMapper has one. IATAs
-without a border do not add an area; airport coordinates and the current API
-region filter are not boundaries. Enabling this with no border source, missing
-files or invalid geometry fails startup. Border file changes require a restart.
+Set `nodes.mark_foreign: true` to add `possiblyForeign` to repeater nodes. It is `true` when
+the repeater's reported position is outside the union of all configured
+`iatas.<code>.borderFile` polygons, with `meshmapper.zones` borders replacing them where
+MeshMapper has one. IATAs without a border add no area, and airport coordinates aren't used.
+Enabling it with no border source, a missing file or invalid geometry fails startup. Border
+changes need a restart.
 
-Inside any polygon (including its edges) means `false`; outside the entire union
-means `true`. Hole interiors are outside; hole edges are local. Other node roles,
-missing or invalid positions have no classification (an explicit 0/0 advert
-clears the stored position).
-This is a hint based on reported position, not proof of a repeater's origin.
-Packet ingestion, heard-in IATAs and route matching remain unchanged.
+- Points on an edge (including hole edges) are inside; hole interiors are outside.
+- Other roles and missing or invalid positions get no value. A 0/0 advert clears the stored
+  position.
+- It's a hint from the reported position, not proof of origin. Ingest, heard-in IATAs and
+  route matching are unaffected.
+- Computed at read time, so existing nodes need no backfill. The field is omitted when the
+  feature is off (the default).
+- In `nodeUpdate`, it's a boolean when the advert carries a position, `null` when the
+  position is 0/0 or invalid or the node stops being a repeater, and omitted to keep the
+  previous value. `lat`/`lng` follow the same rule.
 
-Node list/detail reads apply the current geometry after cache reads, so existing
-historical nodes need no backfill. A `nodeUpdate` includes `possiblyForeign`
-when its advert provides a position: a boolean for known positions, `null` to
-clear it when the advert reports 0/0 or an invalid position. Omission retains the
-previous value when a repeater's advert omits its position. A change to another
-role also sends `null`. `lat`/`lng` follow the same rule: omitted keeps the
-client's position, explicit `null` clears it.
-The field is omitted everywhere when the feature is disabled (the default).
-
-Use longitude/latitude coordinate order and split antimeridian-crossing borders
-into MultiPolygons as described in [RFC 7946 section 3.1.9](https://www.rfc-editor.org/rfc/rfc7946#section-3.1.9).
-Classification rejects unsplit edges spanning more than 180 degrees rather than
-silently treating them as the complementary global area.
-
-## Authentication
-
-Public reads and the WebSocket need no credentials. Only the `/api/v1/admin`
-subtree is protected, by a bearer key (see [Admin authentication](#admin-authentication)).
-Serve Beacon behind an HTTPS reverse proxy.
+GeoJSON uses longitude/latitude order. Split antimeridian-crossing borders into
+MultiPolygons per [RFC 7946 §3.1.9](https://www.rfc-editor.org/rfc/rfc7946#section-3.1.9);
+edges spanning more than 180° are rejected.
 
 ---
 
@@ -646,62 +632,33 @@ List `limit` values are clamped to 1–200.
 | `GET`    | `/traces`                               | List trace tags (`type=TRACE\|PING`, IATA/region, scope, `since`/`until`, `cursor`+`cursorTag`)                       |
 | `GET`    | `/traces/{tag}`                         | Get full trace detail with resolved routes                                                                            |
 
+### Observer activity
+
+`GET /observers/{observerId}/activity` returns buckets over `[windowStart, windowEnd)` (live
+requests include the current partial bucket), plus `generatedAt`, `source` (`raw` or
+`hourly`) and `summary`.
+
+- `recordedPackets` counts stored observations in the window; repeated broker deliveries of
+  the same packet count once. Unknown payload types show as `-1`.
+- Freshness fields (`lastCompleteHour` with its start and end, `latestRecordedAt`) are
+  measured at `generatedAt`, even for historical `until` requests.
+- `until` (epoch ms, within the last 30 days) lines up two observers' charts.
+- Hourly mode reads the rollups plus raw rows for hours not rolled yet (at most 24h).
+  `rolledUntil` ends the rolled range and `rawFrom` starts the raw tail; hours between them
+  are uncovered.
+- Missing records don't prove downtime. The observer's `observationCount` is a legacy
+  cumulative presence counter (including status and neighbour events), not a packet total.
+
+### Saved-route evidence
+
+`GET /routes/{iata}/{pathKey}/observations` returns retained observations matching a saved
+route's full path bytes, hash size and hop count within its IATA. `range` defaults to `24h`
+(max `720h`) and `limit` to 50 (max 200); page with `nextPageCursor` → `pageCursor`.
+Evidence expires with raw packets.
+
 ---
 
 ## Acknowledgements
 
-See [CONTRIBUTORS.md](CONTRIBUTORS.md) for the people who have helped build
-Beacon.
-
-Beacon stands on the shoulders of giants. See [SHOULDERS.md](SHOULDERS.md) for
-the full list of open source projects that make this possible.
-
-## Application logging
-
-Beacon writes application logs to stderr. Configure the minimum level and output format in `config.yaml`:
-
-```yaml
-log:
-  level: info   # debug, info, warn, error
-  format: text  # text or json
-```
-
-`LOG_LEVEL` and `LOG_FORMAT` override file settings; empty settings use `info` and `text`. Invalid values prevent startup. Configuration-loading failures can use the bootstrap text logger before file settings are available; failures after initialization retain error severity at every supported level.
-
-Records include a component field. Ingest workers also include their broker name, and HTTP completion records include the validated client address, route, status and duration. Query strings and protocol hello payloads are excluded. Expected ingest skips and routine WebSocket lifecycle details are debug-level. Changing the application's format does not change Caddy/Apache access logs or their fail2ban configuration. Collect/rotate stderr through Docker or systemd.
-
-### Analytics retention
-
-Historical stats (traffic, payload, observer activity, talker, advertiser, node,
-scope, Signal and Paths) are read from hourly rollup tables kept for
-`analytics.rollup_retention` (default 90 days), independently of `packets.retention`.
-One background task rolls each UTC hour about 95 minutes after it closes;
-packet cleanup waits for unrolled hours (up to 24h) so they can be rolled in full.
-An hour whose raw rows were deleted first is marked partial and reported without values.
-Packet drill-down, sub-hour observer activity and observer comparison still read
-retained raw data. See [docs/historical-stats.md](docs/historical-stats.md).
-
-### Observer monitoring metrics
-
-Observer activity returns buckets in `[windowStart, windowEnd)`, including the current partial bucket for live requests, plus
-`generatedAt`, `source` (`raw` or `hourly`) and `summary`. `recordedPackets` is the
-sum of stored observations in those buckets; repeated broker delivery of the
-same retained packet/observer pair counts once. Unknown payload types appear as
-`-1` rather than disappearing. Freshness fields are measured at `generatedAt` even for historical `until` requests; `recordedPackets` alone follows the selected window. `lastCompleteHour` uses the previous complete UTC
-hour and includes its own start/end; `latestRecordedAt` is the latest retained
-reception timestamp. Missing records do not prove downtime. The optional `until`
-(epoch milliseconds, within the last 30 days) aligns two observers' charts.
-
-The existing observer `observationCount` remains a legacy cumulative presence
-counter for compatibility, including status/neighbour events. It is not a
-period packet total. Broker presence and packet-arrival timestamps are now
-updated separately; this cannot reconstruct previously overwritten timestamps.
-Hourly activity comes from the analytics rollups, plus raw rows for hours not yet rolled
-(at most 24h back), and includes unknown-type activity. `rolledUntil` is the end of the newest
-complete rollup hour and `rawFrom` the start of the raw tail; hours between them are uncovered.
-
-### Saved-route evidence
-
-`GET /api/v1/routes/{iata}/{pathKey}/observations` returns retained observations that match a saved
-route's full path bytes, hash size and hop count within its IATA. `range` defaults to `24h` (max `720h`),
-`limit` to 50 (max 200); page with `nextPageCursor` → `pageCursor`. Evidence expires with raw packets.
+See [CONTRIBUTORS.md](CONTRIBUTORS.md) for the people who have helped build Beacon, and
+[SHOULDERS.md](SHOULDERS.md) for the open source projects it stands on.

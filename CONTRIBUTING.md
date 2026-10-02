@@ -55,8 +55,6 @@ swag init -g cmd/beacon/main.go -o docs --parseInternal --parseDependency
 
 ## Code style
 
-- Run `gofmt -w .` before committing — CI will fail on unformatted files
-- Run `go vet ./...` — no warnings
 - Follow the existing patterns in each package before introducing new ones
 - Keep functions small and single-purpose
 - Prefer explicit error handling over panic
@@ -69,9 +67,10 @@ swag init -g cmd/beacon/main.go -o docs --parseInternal --parseDependency
   no side effects) should have unit tests. See `internal/hub/hub_test.go`,
   `internal/api/nodes_test.go`, and `internal/keystore/keystore_test.go` for
   examples of the style we use.
-- Integration tests (requiring a real DB) are not yet required but are welcome.
-  They will be gated before release.
-- Run `go test ./...` before opening a PR. All tests must pass.
+- Integration tests (`*_integration_test.go`) need a real PostgreSQL 16 and skip
+  unless `BEACON_TEST_POSTGRES_DSN` is set. CI runs a selected set; run the ones
+  touching your change locally:
+  `BEACON_TEST_POSTGRES_DSN=postgres://... go test ./db/ -run Postgres`
 - If you are fixing a bug, add a test that would have caught it.
 
 ---
@@ -118,9 +117,8 @@ that boundary. `/config` remains owned by the shared admin router. No global
 registration or `init` side effects are needed.
 
 When concurrent PRs touch the same startup wiring, stack them in an explicit
-merge order and link each feature-only comparison. Rebase the stack together
-after prerequisite merges, regenerate Swagger rather than hand-merging it, and
-compile the combined result even when GitHub reports it as mergeable.
+merge order, regenerate Swagger rather than hand-merging it, and build the
+combined result even when GitHub says it merges cleanly.
 
 Any new or modified REST endpoint must have swagger annotations and regenerated
 docs:
@@ -129,12 +127,8 @@ docs:
   `// @Router` comments on the handler function
 - Response types are defined in `internal/api/` — add new types there, not
   inline in handlers
-- After changing any handler or API type, regenerate the swagger docs and commit
-  the updated `docs/` directory alongside your changes:
-
-```bash
-swag init -g cmd/beacon/main.go -o docs --parseInternal --parseDependency
-```
+- After changing any handler or API type, rerun the `swag init` command from the
+  checklist and commit the updated `docs/` directory
 
 Install swag if you don't have it:
 
@@ -242,6 +236,7 @@ Scopes are optional but helpful for larger codebases. Common scopes: `api`,
 
 ```
 cmd/beacon/          — main entry point, wiring, startup
+cmd/beacon-backup/   — standalone backup export/verify command
 db/                  — store layer: sqlc-generated code + thin mapping layer
   migrations/        — SQL schema (2.0.0 baseline + numbered files, append only)
   queries/           — SQL queries (input to sqlc)
@@ -249,15 +244,25 @@ db/                  — store layer: sqlc-generated code + thin mapping layer
 internal/
   api/               — response types and Reader interface
     handlers/        — HTTP handlers (validation, routing, response)
+    middleware/      — auth, rate limiting, logging
     router/          — chi router wiring
+  background/        — periodic maintenance (retention, rollups, age-out)
+  backup/            — database + config bundle export and verification
+  borders/           — foreign-repeater classification against IATA borders
+  cache/             — Redis caching layer over the Reader
   config/            — config loading and scope key derivation
   hub/               — WebSocket fan-out broker
-  ingest/            — MQTT packet ingestion and side effects
   iatadb/            — in-memory IATA airport lookup
+  ingest/            — MQTT packet ingestion and side effects
   keystore/          — channel key lookup
+  logging/           — slog setup
+  lora/              — LoRa airtime calculation
+  meshmapper/        — MeshMapper scope and zone imports
+  presence/          — coalesced last-seen writes
+  profiling/         — opt-in CPU profiling
   scopestore/        — transport scope key lookup
   ws/                — WebSocket connection handling
-docs/                — generated swagger docs (do not edit by hand)
+docs/                — generated swagger and design notes (swagger: do not edit by hand)
 ```
 
 Key patterns to understand before contributing:
@@ -282,7 +287,7 @@ release. Do not open PRs directly against `main`.
 
 ### Cutting a release
 
-> NOTE: release are done manually, not from GH. Commits for releases should be
+> NOTE: releases are done manually, not from GH. Commits for releases should be
 > signed.
 
 1. Ensure all changes are committed and CI is green on `dev`
