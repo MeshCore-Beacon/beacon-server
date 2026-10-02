@@ -19,7 +19,7 @@ type CatalogueScope struct {
 	Wardriving bool   `json:"wardriving"`
 }
 
-type Catalogue struct {
+type PublicScopeCatalogue struct {
 	IATA        string           `json:"iata"`
 	URL         string           `json:"url"`
 	GeneratedAt int64            `json:"generatedAt"`
@@ -31,21 +31,21 @@ type Catalogue struct {
 	Scopes      []CatalogueScope `json:"scopes"`
 }
 
-// Catalogues returns an immutable snapshot of configured sources. No request
+// Catalogues returns an immutable snapshot of discovered sources. No request
 // triggers an upstream fetch or reads ingestion tables. Callers must not mutate it.
-func (i *Importer) Catalogues() []Catalogue {
+func (i *Importer) Catalogues() []PublicScopeCatalogue {
 	if i != nil {
 		if snapshot := i.catalogues.Load(); snapshot != nil {
-			return snapshot.([]Catalogue)
+			return snapshot.([]PublicScopeCatalogue)
 		}
 	}
-	return []Catalogue{}
+	return []PublicScopeCatalogue{}
 }
 
 func (i *Importer) publishCatalogues() {
-	result := make([]Catalogue, 0, len(i.sources))
+	result := make([]PublicScopeCatalogue, 0, len(i.sources))
 	for _, s := range i.sources {
-		c := Catalogue{IATA: s.iata, URL: s.url, LastError: s.cache.LastError, Scopes: []CatalogueScope{}}
+		c := PublicScopeCatalogue{IATA: s.iata, URL: s.url, LastError: s.cache.LastError, Scopes: []CatalogueScope{}}
 		if !s.cache.CheckedAt.IsZero() {
 			c.CheckedAt = s.cache.CheckedAt.UnixMilli()
 			c.FreshUntil = s.cache.CheckedAt.Add(i.interval + 5*time.Minute).UnixMilli()

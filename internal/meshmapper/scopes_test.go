@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -29,24 +30,36 @@ func catalogue(names ...string) []byte {
 	return b
 }
 
+type sourceKey struct{ iata, url string }
+
 type memoryStore struct {
-	rows  map[string]Cache
+	iatas []string
+	rows  map[sourceKey]Cache
 	fail  bool
 	saved []scopestore.Entry
 }
 
-func (s *memoryStore) GetScopeCatalogue(_ context.Context, iata, url string) (*Cache, error) {
-	row, ok := s.rows[iata+url]
-	if !ok {
-		return nil, nil
-	}
-	return &row, nil
+func newMemoryStore(iatas ...string) *memoryStore {
+	return &memoryStore{iatas: iatas, rows: map[sourceKey]Cache{}}
 }
+
+func (s *memoryStore) ListKnownIATAs(context.Context) ([]string, error) {
+	return slices.Clone(s.iatas), nil
+}
+
+func (s *memoryStore) ListScopeCatalogues(context.Context) ([]Catalogue, error) {
+	var out []Catalogue
+	for key, c := range s.rows {
+		out = append(out, Catalogue{IATA: key.iata, URL: key.url, Cache: c})
+	}
+	return out, nil
+}
+
 func (s *memoryStore) SaveScopeCatalogue(_ context.Context, iata, url string, next Cache, entries []scopestore.Entry) error {
 	if s.fail {
 		return errors.New("offline")
 	}
-	old := s.rows[iata+url]
+	old := s.rows[sourceKey{iata, url}]
 	if next.Payload == nil {
 		next.Payload = old.Payload
 	}
@@ -54,9 +67,23 @@ func (s *memoryStore) SaveScopeCatalogue(_ context.Context, iata, url string, ne
 		next.CheckedAt = old.CheckedAt
 		next.ETag = old.ETag
 	}
-	s.rows[iata+url] = next
+	s.rows[sourceKey{iata, url}] = next
 	s.saved = append(s.saved, entries...)
 	return nil
+}
+
+// newImporter restores an importer for YOW whose source points at url.
+func newImporter(t *testing.T, cfg config.MeshMapperScopesConfig, store *memoryStore, url string, scopes *scopestore.ScopeStore, manual ...scopestore.Entry) *Importer {
+	t.Helper()
+	imp, err := New(context.Background(), cfg, store, NewDirectory(newZoneListMemory()), scopes, manual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imp.sources) != 1 {
+		t.Fatal("expected one source", imp.sources)
+	}
+	imp.sources[0].url = url
+	return imp
 }
 
 func names(store *scopestore.ScopeStore) []string {
@@ -84,15 +111,12 @@ func TestCatalogueRefreshFallbackAndRestart(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	cfg := config.MeshMapperScopesConfig{Enabled: true, Sources: map[string]string{"YOW": server.URL}}
-	store := &memoryStore{rows: map[string]Cache{}}
+	cfg := config.MeshMapperScopesConfig{Enabled: true}
+	store := newMemoryStore("YOW")
 	scopes := scopestore.New()
 	manual := scopestore.FromName("manual")
 	manual.TransportKey = []byte("manual wins")
-	imp, err := New(ctx, cfg, store, scopes, []scopestore.Entry{manual})
-	if err != nil {
-		t.Fatal(err)
-	}
+	imp := newImporter(t, cfg, store, server.URL, scopes, manual)
 	now := time.Now().UTC()
 	check := func() {
 		t.Helper()
@@ -111,6 +135,9 @@ func TestCatalogueRefreshFallbackAndRestart(t *testing.T) {
 	if !reflect.DeepEqual(scopes.Entries()[1].IATAs, []string{"YOW"}) {
 		t.Fatal("import not bound to region")
 	}
+	if got := scopes.NamesForIATAs([]string{"YOW"}); !reflect.DeepEqual(got, []string{"#manual", "#yow"}) {
+		t.Fatal("catalogue membership must include manually overridden names", got)
+	}
 	generated := imp.sources[0].generated
 	status = 304
 	check()
@@ -127,14 +154,11 @@ func TestCatalogueRefreshFallbackAndRestart(t *testing.T) {
 	}
 	status, after = 429, "7200"
 	check()
-	if !imp.retryAfter.Equal(now.Add(2 * time.Hour)) {
+	if !imp.sources[0].cache.NextAttempt.Equal(now.Add(2 * time.Hour)) {
 		t.Fatal("Retry-After ignored")
 	}
 	restored := scopestore.New()
-	restart, err := New(ctx, cfg, store, restored, []scopestore.Entry{manual})
-	if err != nil {
-		t.Fatal(err)
-	}
+	restart := newImporter(t, cfg, store, server.URL, restored, manual)
 	if !reflect.DeepEqual(names(restored), names(scopes)) {
 		t.Fatal("outage restart lost cached names")
 	}
@@ -143,7 +167,7 @@ func TestCatalogueRefreshFallbackAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	if calls != before {
-		t.Fatal("restart ignored shared rate-limit cooldown")
+		t.Fatal("restart retried before Retry-After")
 	}
 	status, after, body = 200, "", catalogue()
 	check()
@@ -212,11 +236,7 @@ func TestNoRedirectAndResponseBounds(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	store := &memoryStore{rows: map[string]Cache{}}
-	imp, err := New(context.Background(), config.MeshMapperScopesConfig{Enabled: true, Sources: map[string]string{"YOW": server.URL}}, store, scopestore.New(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	imp := newImporter(t, config.MeshMapperScopesConfig{Enabled: true}, newMemoryStore("YOW"), server.URL, scopestore.New())
 	imp.client.Timeout = 20 * time.Millisecond
 	for _, value := range []string{"redirect", "oversize", "timeout", "304"} {
 		mode.Store(value)
@@ -234,22 +254,22 @@ func TestNoRedirectAndResponseBounds(t *testing.T) {
 
 func TestImportedSourcesOverlapWithoutGlobalMembership(t *testing.T) {
 	ctx := context.Background()
-	store := &memoryStore{rows: map[string]Cache{}}
+	store := newMemoryStore("YOW", "YVR")
 	for _, iata := range []string{"YOW", "YVR"} {
-		store.rows[iata+iata] = Cache{Payload: []byte(strings.ReplaceAll(string(catalogue("can")), "YOW", iata))}
+		store.rows[sourceKey{iata, "old-" + iata}] = Cache{Payload: []byte(`{}`)}
+		store.rows[sourceKey{iata, iata}] = Cache{Payload: []byte(strings.ReplaceAll(string(catalogue("can")), "YOW", iata)), AttemptedAt: time.Now()}
 	}
 	scopes := scopestore.New()
-	_, err := New(ctx, config.MeshMapperScopesConfig{Enabled: true, Sources: map[string]string{"YOW": "YOW", "YVR": "YVR"}}, store, scopes, nil)
+	_, err := New(ctx, config.MeshMapperScopesConfig{Enabled: true}, store, NewDirectory(newZoneListMemory()), scopes, nil)
 	if err != nil || len(scopes.Entries()) != 1 || !reflect.DeepEqual(scopes.Entries()[0].IATAs, []string{"YOW", "YVR"}) {
-		t.Fatal(scopes.Entries(), err)
+		t.Fatal("latest saved catalogue per IATA not restored", scopes.Entries(), err)
 	}
-	_, err = New(ctx, config.MeshMapperScopesConfig{Enabled: true, Sources: map[string]string{"YOW": "changed-source"}}, store, scopes, nil)
-	if err != nil || len(scopes.Entries()) != 0 {
-		t.Fatal("removed/changed source remained active", err)
+	if got := scopes.NamesForIATAs([]string{"YVR"}); !reflect.DeepEqual(got, []string{"#can"}) {
+		t.Fatal(got)
 	}
-	// Disabled mode never calls the store, even if URLs remain configured.
-	_, err = New(ctx, config.MeshMapperScopesConfig{Sources: map[string]string{"YOW": "YOW"}}, nil, scopes, nil)
-	if err != nil {
+	// Disabled mode never calls the store.
+	disabled := scopestore.New()
+	if _, err = New(ctx, config.MeshMapperScopesConfig{}, nil, NewDirectory(newZoneListMemory()), disabled, nil); err != nil || len(disabled.Entries()) != 0 {
 		t.Fatal(err)
 	}
 }
@@ -262,41 +282,39 @@ func TestInvalidSavedCatalogueDoesNotBlockStartupOrRefresh(t *testing.T) {
 		_, _ = w.Write(catalogue("yow"))
 	}))
 	defer server.Close()
-	store := &memoryStore{rows: map[string]Cache{"YOW" + server.URL: {Payload: []byte(`{"invalid":true}`), ETag: `"old"`}}}
+	store := newMemoryStore("YOW")
+	store.rows[sourceKey{"YOW", server.URL}] = Cache{Payload: []byte(`{"invalid":true}`), ETag: `"old"`}
 	scopes := scopestore.New()
-	imp, err := New(context.Background(), config.MeshMapperScopesConfig{Enabled: true, Sources: map[string]string{"YOW": server.URL}}, store, scopes, []scopestore.Entry{scopestore.FromName("manual")})
-	if err != nil || !reflect.DeepEqual(names(scopes), []string{"#manual"}) {
-		t.Fatal("invalid optional source blocked manual startup", err)
+	imp := newImporter(t, config.MeshMapperScopesConfig{Enabled: true}, store, server.URL, scopes, scopestore.FromName("manual"))
+	if !reflect.DeepEqual(names(scopes), []string{"#manual"}) {
+		t.Fatal("invalid optional source blocked manual startup")
 	}
-	if err = imp.Refresh(context.Background()); err != nil || !reflect.DeepEqual(names(scopes), []string{"#manual", "#yow"}) {
+	if err := imp.refresh(context.Background(), &imp.sources[0], time.Now()); err != nil || !reflect.DeepEqual(names(scopes), []string{"#manual", "#yow"}) {
 		t.Fatal("source did not recover on refresh", err, names(scopes))
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	imp.sources[0].cache.NextAttempt = time.Time{}
-	if err = imp.Refresh(ctx); err != nil {
+	if err := imp.Refresh(ctx); err != nil {
 		t.Fatalf("normal shutdown is a task failure: %v", err)
 	}
 }
 
-func TestRetryAfterShorterThanIntervalIsHonoured(t *testing.T) {
-	ctx := context.Background()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Retry-After", "1800")
-		w.WriteHeader(http.StatusTooManyRequests)
-	}))
-	defer server.Close()
-	cfg := config.MeshMapperScopesConfig{Enabled: true, Sources: map[string]string{"YOW": server.URL}}
-	imp, err := New(ctx, cfg, &memoryStore{rows: map[string]Cache{}}, scopestore.New(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now().UTC()
-	if err := imp.refresh(ctx, &imp.sources[0], now); err != nil {
-		t.Fatal(err)
-	}
-	if got := imp.sources[0].cache.NextAttempt.Sub(now); got != 30*time.Minute {
-		t.Fatalf("next attempt after 429 in %v, want %v (server Retry-After must not be overridden by the 1h interval)", got, 30*time.Minute)
+func TestRetryAfterNeverBeatsTheRateLimit(t *testing.T) {
+	for retryAfter, want := range map[string]time.Duration{"1800": time.Hour, "7200": 2 * time.Hour} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Retry-After", retryAfter)
+			w.WriteHeader(http.StatusTooManyRequests)
+		}))
+		imp := newImporter(t, config.MeshMapperScopesConfig{Enabled: true}, newMemoryStore("YOW"), server.URL, scopestore.New())
+		now := time.Now().UTC()
+		if err := imp.refresh(context.Background(), &imp.sources[0], now); err != nil {
+			t.Fatal(err)
+		}
+		server.Close()
+		if got := imp.sources[0].cache.NextAttempt.Sub(now); got != want {
+			t.Fatalf("Retry-After %ss: next attempt in %v, want %v", retryAfter, got, want)
+		}
 	}
 }
 
@@ -304,16 +322,89 @@ func TestFailedRefreshRetriesSoon(t *testing.T) {
 	ctx := context.Background()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(500) }))
 	defer server.Close()
-	cfg := config.MeshMapperScopesConfig{Enabled: true, Sources: map[string]string{"YOW": server.URL}}
-	imp, err := New(ctx, cfg, &memoryStore{rows: map[string]Cache{}}, scopestore.New(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	imp := newImporter(t, config.MeshMapperScopesConfig{Enabled: true}, newMemoryStore("YOW"), server.URL, scopestore.New())
 	now := time.Now().UTC()
 	if err := imp.refresh(ctx, &imp.sources[0], now); err != nil {
 		t.Fatal(err)
 	}
-	if got := imp.sources[0].cache.NextAttempt.Sub(now); got != failureRetry {
-		t.Fatalf("next attempt after failure in %v, want %v", got, failureRetry)
+	if got := imp.sources[0].cache.NextAttempt.Sub(now); got != time.Hour {
+		t.Fatalf("next attempt after failure in %v, want 1h", got)
+	}
+}
+
+// fakeSites serves a CA zone list and YOW's scope catalogue.
+type fakeSites struct {
+	*httptest.Server
+	list                 string
+	listCalls, scopeHits int
+}
+
+func newFakeSites(t *testing.T) *fakeSites {
+	f := &fakeSites{}
+	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/get_zones.php":
+			f.listCalls++
+			_, _ = w.Write([]byte(f.list))
+		case "/get_scopes.php":
+			f.scopeHits++
+			_, _ = w.Write(catalogue("yow"))
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	f.list = `{"country":"CA","zones":[{"code":"YOW","url":"` + f.URL + `/","has_boundary":true,"group":null}]}`
+	t.Cleanup(f.Close)
+	return f
+}
+
+func newDiscoveringImporter(t *testing.T, f *fakeSites, store *memoryStore, scopes *scopestore.ScopeStore) *Importer {
+	t.Helper()
+	dir := NewDirectory(newZoneListMemory())
+	dir.listURL = f.URL + "/get_zones.php"
+	imp, err := New(context.Background(), config.MeshMapperScopesConfig{Enabled: true}, store, dir, scopes, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	imp.scopesURL = func(site string) (string, bool) { return site + "get_scopes.php", strings.HasPrefix(site, f.URL) }
+	return imp
+}
+
+func refreshN(t *testing.T, imp *Importer, n int) {
+	t.Helper()
+	for range n {
+		if err := imp.Refresh(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestScopesDiscoverSourcesFromZoneList(t *testing.T) {
+	f := newFakeSites(t)
+	store := newMemoryStore()
+	scopes := scopestore.New()
+	imp := newDiscoveringImporter(t, f, store, scopes)
+	refreshN(t, imp, 2)
+	if f.listCalls != 0 || f.scopeHits != 0 {
+		t.Fatal("requested with no IATAs", f.listCalls, f.scopeHits)
+	}
+	store.iatas = []string{"YOW", "ZZZ"}
+	refreshN(t, imp, 3)
+	if f.listCalls != 1 || f.scopeHits != 1 || !reflect.DeepEqual(names(scopes), []string{"#yow"}) {
+		t.Fatal("source not discovered", f.listCalls, f.scopeHits, names(scopes))
+	}
+	if _, ok := store.rows[sourceKey{"YOW", f.URL + "/get_scopes.php"}]; !ok {
+		t.Fatal("catalogue not saved under the discovered URL", store.rows)
+	}
+}
+
+func TestScopesSkipUnlistedIATAs(t *testing.T) {
+	f := newFakeSites(t)
+	f.list = `{"country":"CA","zones":[]}`
+	imp := newDiscoveringImporter(t, f, newMemoryStore("YOW"), scopestore.New())
+	refreshN(t, imp, 3)
+	s := imp.sources[0]
+	if f.scopeHits != 0 || s.cache.LastError != "not listed" || s.cache.NextAttempt.Sub(time.Now()) < 59*time.Minute {
+		t.Fatalf("unlisted IATA requested or retried early: hits=%d %+v", f.scopeHits, s.cache)
 	}
 }

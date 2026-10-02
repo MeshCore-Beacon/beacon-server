@@ -11,6 +11,7 @@ import (
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	mockdb "github.com/MeshCore-Beacon/beacon-server/db/sqlc/mock"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/jackc/pgx/v5/pgtype"
 	"go.uber.org/mock/gomock"
 )
@@ -29,7 +30,7 @@ func TestListChannels_Empty(t *testing.T) {
 		Return([]sqlc.Channel{}, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListChannels(context.Background(), 10, nil, nil, 0, nil)
+	page, err := store.ListChannels(context.Background(), 10, nil, nil, nil, 0, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -71,7 +72,7 @@ func TestListChannels_Pagination(t *testing.T) {
 		Return(rows, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListChannels(context.Background(), 2, nil, nil, 0, nil)
+	page, err := store.ListChannels(context.Background(), 2, nil, nil, nil, 0, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -95,7 +96,7 @@ func TestListChannels_DBError(t *testing.T) {
 		Return(nil, errors.New("db error"))
 
 	store := &Store{q: mock}
-	_, err := store.ListChannels(context.Background(), 10, nil, nil, 0, nil)
+	_, err := store.ListChannels(context.Background(), 10, nil, nil, nil, 0, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -115,8 +116,33 @@ func TestListChannels_IATAFilter(t *testing.T) {
 		Return([]sqlc.Channel{}, nil)
 
 	store := &Store{q: mock}
-	_, err := store.ListChannels(context.Background(), 10, nil, []string{"YOW", "YYZ"}, 0, nil)
+	_, err := store.ListChannels(context.Background(), 10, nil, []string{"YOW", "YYZ"}, nil, 0, nil)
 	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestListChannels_KeyKnownFilter(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mock := mockdb.NewMockQuerier(ctrl)
+	keyKnown := false
+	at := time.UnixMilli(1700000000000)
+
+	mock.EXPECT().
+		ListChannels(gomock.Any(), sqlc.ListChannelsParams{KeyKnown: &keyKnown, PageLimit: 11}).
+		Return([]sqlc.Channel{}, nil)
+	mock.EXPECT().
+		ListChannelsAfter(gomock.Any(), sqlc.ListChannelsAfterParams{
+			KeyKnown: &keyKnown, PageLimit: 11,
+			CursorTs: pgtype.Timestamptz{Time: at, Valid: true}, CursorID: 7,
+		}).
+		Return([]sqlc.Channel{}, nil)
+
+	store := &Store{q: mock}
+	if _, err := store.ListChannels(context.Background(), 10, nil, nil, &keyKnown, 0, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := store.ListChannels(context.Background(), 10, nil, nil, &keyKnown, 0, &api.ChannelCursor{LastSeen: at, ID: 7}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

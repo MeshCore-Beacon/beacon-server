@@ -53,11 +53,11 @@ type Reader interface {
 	// ListChannels returns a paginated list of channels ordered by last seen.
 	// Includes both hashtag-derived and explicit key channels.
 	// Pass nil hash to skip hash filtering. Pass empty iatas to return all channels;
-	// IATAs must be uppercase.
+	// IATAs must be uppercase. Nil keyKnown skips the decryption-key filter.
 	// cursor is last_seen epoch ms of the last item; pass 0 to start from the beginning.
 	// pageCursor is the precise timestamp/ID boundary; nil preserves the legacy numeric cursor.
 	// When non-nil, pageCursor takes precedence over cursor.
-	ListChannels(ctx context.Context, limit int32, hash []byte, iatas []string, cursor int64, pageCursor *ChannelCursor) (ChannelPage, error)
+	ListChannels(ctx context.Context, limit int32, hash []byte, iatas []string, keyKnown *bool, cursor int64, pageCursor *ChannelCursor) (ChannelPage, error)
 
 	// GetChannel returns full detail for a single channel by its integer ID.
 	// Returns nil, pgx.ErrNoRows if the channel is not found.
@@ -209,10 +209,6 @@ type Reader interface {
 	// GetScopeNames returns the names of all configured transport scopes, ordered alphabetically.
 	// Use when no geographic filter is applied — returns names only for a lightweight response.
 	GetScopeNames(ctx context.Context) ([]string, error)
-
-	// GetScopesByIATAs returns scope summaries filtered by the given IATA codes,
-	// including observer, node and IATA counts. Expands region/regionId to IATAs automatically.
-	GetScopesByIATAs(ctx context.Context, iatas []string) ([]ScopeSummary, error)
 
 	// GetScopeByName returns full detail for a single scope by its normalized name (e.g. "#bc"),
 	// including packet count, observer count, node count, and the list of IATAs it is active in.

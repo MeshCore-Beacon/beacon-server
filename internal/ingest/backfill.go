@@ -107,6 +107,19 @@ func BackfillChannelMessages(ctx context.Context, db DB, keys ChannelKeyStore) (
 	if err != nil {
 		return 0, err
 	}
+	return backfill(ctx, db, keys, packets), nil
+}
+
+// BackfillChannelHashes retries only the channels whose keys were just imported at runtime.
+func BackfillChannelHashes(ctx context.Context, db DB, keys ChannelKeyStore, hashes [][]byte) (int, error) {
+	packets, err := db.ListUndecryptedGroupTextPacketsByHash(ctx, hashes)
+	if err != nil {
+		return 0, err
+	}
+	return backfill(ctx, db, keys, packets), nil
+}
+
+func backfill(ctx context.Context, db DB, keys ChannelKeyStore, packets []UndecryptedPacket) int {
 	decrypted := 0
 	for _, p := range packets {
 		result, err := DecryptGroupText(ctx, db, keys, p.PacketHash, p.RawPayload)
@@ -118,5 +131,5 @@ func BackfillChannelMessages(ctx context.Context, db DB, keys ChannelKeyStore) (
 			decrypted++
 		}
 	}
-	return decrypted, nil
+	return decrypted
 }

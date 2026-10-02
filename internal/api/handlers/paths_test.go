@@ -28,7 +28,7 @@ func (s pathReader) GetPathStats(ctx context.Context, since, until time.Time, ia
 func TestPathsRejectInvalidWindow(t *testing.T) {
 	for _, query := range []string{"", "since=0", "since=x&until=1", "since=-1&until=1", "since=1&until=1", "since=2&until=1", "since=0&until=2592000001", "since=0&since=0&until=1", "since=0&until=1&until=2", "since=253402300799998&until=253402300800000"} {
 		w := httptest.NewRecorder()
-		StatsRouter(nil).ServeHTTP(w, httptest.NewRequest("GET", "/paths?"+query, nil))
+		StatsRouter(nil, nil).ServeHTTP(w, httptest.NewRequest("GET", "/paths?"+query, nil))
 		if w.Code != 400 {
 			t.Fatalf("query %q: %d %s", query, w.Code, w.Body.String())
 		}
@@ -66,7 +66,7 @@ func TestPathsFiltersErrorsAndCancellation(t *testing.T) {
 				return &api.PathStats{Until: until.UnixMilli(), Receptions: 4, Hashed: 1, Empty: 1, Trace: 1, Unclassified: 1}, tc.err
 			}}
 			w := httptest.NewRecorder()
-			StatsRouter(reader).ServeHTTP(w, httptest.NewRequest("GET", "/paths?since=0&until=2592000000"+tc.query, nil))
+			StatsRouter(reader, nil).ServeHTTP(w, httptest.NewRequest("GET", "/paths?since=0&until=2592000000"+tc.query, nil))
 			if w.Code != tc.status || strings.Contains(w.Body.String(), "private detail") {
 				t.Fatalf("%d %s", w.Code, w.Body.String())
 			}
@@ -86,7 +86,7 @@ func TestPathsFiltersErrorsAndCancellation(t *testing.T) {
 		return nil, ctx.Err()
 	}}
 	w := httptest.NewRecorder()
-	StatsRouter(r).ServeHTTP(w, httptest.NewRequest("GET", "/paths?since=0&until=1", nil).WithContext(ctx))
+	StatsRouter(r, nil).ServeHTTP(w, httptest.NewRequest("GET", "/paths?since=0&until=1", nil).WithContext(ctx))
 	if !called || w.Body.Len() != 0 {
 		t.Fatal("cancellation did not reach reader")
 	}

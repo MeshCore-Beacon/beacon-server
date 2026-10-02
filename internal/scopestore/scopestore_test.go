@@ -4,6 +4,7 @@
 package scopestore
 
 import (
+	"slices"
 	"testing"
 )
 
@@ -52,5 +53,23 @@ func TestEntriesRetainsImmutableSnapshotWithoutAllocation(t *testing.T) {
 	s.Load([]Entry{{Name: "#on"}})
 	if previous[0].Name != "#bc" || s.Entries()[0].Name != "#on" {
 		t.Fatal("replacement mutated the previous reader snapshot")
+	}
+}
+
+func TestNamesForIATAs(t *testing.T) {
+	s := New()
+	if got := s.NamesForIATAs([]string{"YOW"}); got == nil || len(got) != 0 {
+		t.Fatalf("empty store = %#v, want empty non-nil slice", got)
+	}
+	s.SetManualMembers(map[string][]string{"YOW": {"#ottawa", "#on"}, "YVR": {"#bc"}})
+	s.SetCatalogueMembers(map[string][]string{"YOW": {"#on", "#gatineau"}, "YUL": {"#qc"}})
+	got := s.NamesForIATAs([]string{"YOW", "YUL", "YYZ"})
+	want := []string{"#gatineau", "#on", "#ottawa", "#qc"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("NamesForIATAs = %v, want %v", got, want)
+	}
+	s.SetCatalogueMembers(nil)
+	if got := s.NamesForIATAs([]string{"YUL"}); len(got) != 0 {
+		t.Fatalf("cleared catalogue still lists %v", got)
 	}
 }

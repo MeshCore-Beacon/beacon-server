@@ -45,7 +45,7 @@ import (
 var version = "dev"
 
 //	@title			MeshCore Beacon API
-//	@version		1.6.0
+//	@version		2.0.0
 //	@description	MeshCore network observation backend. Ingests LoRa packets from MQTT brokers, stores in PostgreSQL, and streams live events via WebSocket.
 //	@description	REST requests share a configurable per-client rate limit (default 300/minute and a 300-request one-second burst cap). Exceeded limits return HTTP 429 with error.code=rate_limited and a Retry-After header in seconds. CORS preflights and WebSocket upgrades do not consume this API budget.
 //	@description	WebSocket upgrade attempts at /ws have a configurable per-client limit (default 10/minute, including failed handshakes). Rate exhaustion returns HTTP 429 with Retry-After before upgrade. An accepted socket exceeding the concurrent cap closes with code 1013 before hello; established connections remain open.
@@ -196,11 +196,22 @@ func main() {
 		os.Exit(1)
 	}
 	scopes.Load(scopeEntries)
+	scopes.SetManualMembers(cfg.ManualScopeMembers())
 	slog.Info(fmt.Sprintf("loaded %d transport scopes", len(scopeEntries)), "component", "startup")
+	directory := meshmapper.NewDirectory(store)
+	if cfg.MeshMapper.Scopes.Enabled || cfg.MeshMapper.Zones.Enabled || cfg.MeshMapper.Channels.Enabled {
+		restoreCtx, cancelRestore := context.WithTimeout(ctx, 10*time.Second)
+		err = directory.Restore(restoreCtx)
+		cancelRestore()
+		if err != nil {
+			slog.Error("failed to restore MeshMapper zone lists", "component", "startup", "error", err)
+			os.Exit(1)
+		}
+	}
 	var scopeImporter *meshmapper.Importer
 	if cfg.MeshMapper.Scopes.Enabled {
 		restoreCtx, cancelRestore := context.WithTimeout(ctx, 10*time.Second)
-		scopeImporter, err = meshmapper.New(restoreCtx, cfg.MeshMapper.Scopes, store, scopes, scopeEntries)
+		scopeImporter, err = meshmapper.New(restoreCtx, cfg.MeshMapper.Scopes, store, directory, scopes, scopeEntries)
 		cancelRestore()
 		if err != nil {
 			slog.Error("failed to restore MeshMapper scope catalogues", "component", "startup", "error", err)
@@ -209,9 +220,18 @@ func main() {
 	}
 
 	// Always restored, so disabling the import prunes it and file borders return.
-	zones := meshmapper.NewZones(cfg.MeshMapper.Zones, cfg.RegionIATAs(), store)
+	zones := meshmapper.NewZones(cfg.MeshMapper.Zones, store, directory)
+	var detailed []string
+	for iata, d := range cfg.IATAs {
+		if d.Name != "" || d.Lat != nil || d.Lng != nil {
+			detailed = append(detailed, iata)
+		}
+	}
+	zones.SetConfiguredIATAs(detailed)
 	if cr, ok := reader.(*cache.CachedReader); ok {
 		zones.OnChange(cr.InvalidateIATABorder)
+		zones.OnRegionsChange(cr.InvalidateRegions)
+		zones.OnIATAsChange(cr.InvalidateIATAs)
 	}
 	if localBorders != nil {
 		zones.OnUpdate(func(imported map[string]json.RawMessage) {
@@ -238,7 +258,8 @@ func main() {
 	entries := make(map[string][]keystore.Entry)
 
 	// Hashtag-derived channels: secret = SHA256("#tag")[:16], hash = SHA256(secret)[0]
-	for _, tag := range cfg.ChannelKeys.Hashtags {
+	for _, hashtag := range cfg.ChannelKeys.Hashtags {
+		tag := hashtag.Name
 		secret, channelHash, fingerprint := keystore.DeriveHashtagKey(tag)
 		hashHex := fmt.Sprintf("%02x", channelHash)
 		entry := keystore.Entry{
@@ -272,6 +293,27 @@ func main() {
 	}
 
 	keys := keystore.NewMapKeyStore(entries)
+
+	// Restored before the boot backfill so saved MeshMapper keys decrypt history too.
+	restoreCtx, cancelRestore = context.WithTimeout(ctx, 10*time.Second)
+	channelImporter, err := meshmapper.NewChannels(restoreCtx, cfg.MeshMapper.Channels, store, directory, keys)
+	cancelRestore()
+	if err != nil {
+		slog.Error("failed to restore MeshMapper channels", "component", "startup", "error", err)
+		os.Exit(1)
+	}
+	channelImporter.OnNewKeys(func(hashes [][]byte) {
+		// Off the refresh tick: a backfill can outlast it, and history isn't urgent.
+		go func() {
+			backfillCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+			defer cancel()
+			if n, err := ingest.BackfillChannelHashes(backfillCtx, store, keys, hashes); err != nil {
+				slog.Error("MeshMapper channel backfill failed", "component", "meshmapper.channels", "error", err)
+			} else if n > 0 {
+				slog.Info(fmt.Sprintf("backfilled %d channel message(s) for imported keys", n), "component", "meshmapper.channels")
+			}
+		}()
+	})
 
 	// ── Backfill channel messages ────────────────────────────────────────────
 	// Packets whose channel key wasn't yet configured at ingest time were stored as
@@ -354,6 +396,9 @@ func main() {
 	if cfg.MeshMapper.Zones.Enabled {
 		tasks = append(tasks, background.Task{Name: "meshmapper.zones", Interval: meshmapper.PollInterval, Run: zones.Refresh})
 	}
+	if cfg.MeshMapper.Channels.Enabled {
+		tasks = append(tasks, background.Task{Name: "meshmapper.channels", Interval: meshmapper.PollInterval, Run: channelImporter.Refresh})
+	}
 	profiles := configureProfiling(ctx, pool)
 	defer profiles.Stop()
 	for i := range tasks {
@@ -372,6 +417,7 @@ func main() {
 		MaxConnectsPerMinute: resolved.MaxConnectsPerMinute,
 		WSAllowedOrigins:     cfg.WebSocket.AllowedOrigins,
 		CORS:                 cfg.CORS, Server: cfg.Server, Auth: cfg.Auth, RateLimit: resolved.RateLimit,
+		Scopes: scopes,
 		AdminRoutes: map[string]http.Handler{
 			"/accounts": handlers.AccountsRouter(store),
 			"/backup":   handlers.BackupRouter(backupOpts, ctx),

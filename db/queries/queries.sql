@@ -10,6 +10,11 @@ INSERT INTO iata_codes (iata)
 VALUES ($1)
 ON CONFLICT (iata) DO NOTHING;
 
+-- name: AddIATAs :exec
+INSERT INTO iata_codes (iata)
+SELECT unnest(@iatas::bpchar[])
+ON CONFLICT (iata) DO NOTHING;
+
 -- name: GetIATA :one
 SELECT * FROM iata_codes WHERE iata = $1;
 
@@ -63,21 +68,6 @@ SELECT id FROM transport_scopes WHERE name = $1;
 
 -- name: GetScopeNames :many
 SELECT name FROM transport_scopes ORDER BY name;
-
--- name: GetScopesByIATAs :many
-SELECT
-    ts.name,
-    COUNT(DISTINCT os.observer_id) AS observer_count,
-    COUNT(DISTINCT n.id) AS node_count,
-    COUNT(DISTINCT po.iata) AS iata_count
-FROM transport_scopes ts
-LEFT JOIN observer_scopes os ON os.scope_id = ts.id
-LEFT JOIN observers o ON o.id = os.observer_id
-LEFT JOIN packet_observations po ON po.observer_id = o.id
-LEFT JOIN nodes n ON n.default_scope_id = ts.id
-WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR po.iata = ANY($1::bpchar[]))
-GROUP BY ts.name
-ORDER BY ts.name;
 
 -- name: GetScopeByName :one
 SELECT
@@ -878,6 +868,19 @@ RETURNING id;
 SELECT packet_hash, raw_payload FROM packets
 WHERE payload_type = 5 AND decrypted IS NOT TRUE;
 
+-- name: ListUndecryptedGroupTextPacketsByHash :many
+-- Like ListUndecryptedGroupTextPackets, limited to channels that just gained a key.
+SELECT packet_hash, raw_payload FROM packets
+WHERE payload_type = 5 AND decrypted IS NOT TRUE AND channel_hash = ANY(@hashes::bytea[]);
+
+-- name: DeleteChannelConfigScopes :exec
+DELETE FROM channel_config_scopes;
+
+-- name: AddChannelConfigScopes :exec
+-- An empty region places the channel Beacon-wide.
+INSERT INTO channel_config_scopes (key_fingerprint, region_slug)
+SELECT unnest(@fingerprints::bytea[]), NULLIF(unnest(@regions::text[]), '');
+
 -- name: UpsertChannelIATA :exec
 -- Refreshes at most hourly so repeat hears don't churn the row.
 INSERT INTO channel_iatas (channel_hash, iata, last_heard)
@@ -895,15 +898,20 @@ ON CONFLICT (trace_tag, iata) DO UPDATE SET
 WHERE EXCLUDED.last_heard > trace_iatas.last_heard + INTERVAL '1 hour';
 
 -- name: ListChannels :many
--- Channels ordered by last seen, optionally filtered by hash and/or IATAs
--- (membership via channel_iatas). NULL hash / empty array skip those filters.
+-- Channels ordered by last seen, optionally filtered by hash and/or IATAs.
+-- A channel belongs to an IATA when MeshMapper lists it there or config scopes it
+-- to a region containing it (or Beacon-wide). NULL hash / empty array / NULL key_known skip those filters.
 -- Pass cursor=0 to start from the beginning (cursor is last_seen epoch ms).
 SELECT c.* FROM channels c
 WHERE (@channel_hash::bytea IS NULL OR c.channel_hash = @channel_hash)
-  AND (COALESCE(cardinality(@iatas::bpchar[]), 0) = 0 OR c.channel_hash IN (
-    SELECT ci.channel_hash FROM channel_iatas ci
-    WHERE ci.iata = ANY(@iatas::bpchar[])
-  ))
+  AND (COALESCE(cardinality(@iatas::bpchar[]), 0) = 0
+    OR EXISTS (SELECT 1 FROM meshmapper_channel_members m
+      WHERE m.key_fingerprint = c.key_fingerprint AND m.iata::bpchar = ANY(@iatas::bpchar[]))
+    OR EXISTS (SELECT 1 FROM channel_config_scopes s
+      WHERE s.key_fingerprint = c.key_fingerprint AND (s.region_slug IS NULL OR s.region_slug IN (
+        SELECT r.slug FROM regions r JOIN region_iatas ri ON ri.region_id = r.id
+        WHERE ri.iata = ANY(@iatas::bpchar[])))))
+  AND (sqlc.narg(key_known)::boolean IS NULL OR COALESCE(c.key_known, false) = sqlc.narg(key_known))
   AND (@cursor_ts::timestamptz IS NULL OR c.last_seen < @cursor_ts)
 ORDER BY c.last_seen DESC, c.id DESC
 LIMIT @page_limit;
@@ -914,9 +922,14 @@ LIMIT @page_limit;
 SELECT c.* FROM channels c
 WHERE (c.last_seen, c.id) < (@cursor_ts::timestamptz, @cursor_id::integer)
   AND (@channel_hash::bytea IS NULL OR c.channel_hash = @channel_hash)
-  AND (COALESCE(cardinality(@iatas::bpchar[]), 0) = 0 OR c.channel_hash IN (
-    SELECT ci.channel_hash FROM channel_iatas ci WHERE ci.iata = ANY(@iatas::bpchar[])
-  ))
+  AND (COALESCE(cardinality(@iatas::bpchar[]), 0) = 0
+    OR EXISTS (SELECT 1 FROM meshmapper_channel_members m
+      WHERE m.key_fingerprint = c.key_fingerprint AND m.iata::bpchar = ANY(@iatas::bpchar[]))
+    OR EXISTS (SELECT 1 FROM channel_config_scopes s
+      WHERE s.key_fingerprint = c.key_fingerprint AND (s.region_slug IS NULL OR s.region_slug IN (
+        SELECT r.slug FROM regions r JOIN region_iatas ri ON ri.region_id = r.id
+        WHERE ri.iata = ANY(@iatas::bpchar[])))))
+  AND (sqlc.narg(key_known)::boolean IS NULL OR COALESCE(c.key_known, false) = sqlc.narg(key_known))
 ORDER BY c.last_seen DESC, c.id DESC
 LIMIT @page_limit;
 
@@ -1215,13 +1228,42 @@ ON CONFLICT (slug) DO UPDATE SET
     center_lat    = EXCLUDED.center_lat,
     center_lng    = EXCLUDED.center_lng,
     zoom_level    = EXCLUDED.zoom_level,
+    imported      = FALSE, -- config owns the slug from now on
     updated_at    = NOW()
 RETURNING id;
 
--- name: UpsertRegionIATA :exec
+-- name: DeleteRegionIATAsNotIn :exec
+DELETE FROM region_iatas WHERE region_id = @region_id AND NOT (iata = ANY(@keep::bpchar[]));
+
+-- name: AddRegionIATAs :exec
 INSERT INTO region_iatas (region_id, iata)
-VALUES ($1, $2)
+SELECT @region_id, unnest(@iatas::bpchar[])
 ON CONFLICT (region_id, iata) DO NOTHING;
+
+-- name: ListRegionState :many
+-- Every region with its members, for reconciling imported MeshMapper groups.
+SELECT r.slug, r.name, COALESCE(r.display_order, 0)::int AS display_order, r.imported, r.center_lat, r.center_lng,
+    COALESCE(array_agg(ri.iata::text ORDER BY ri.iata) FILTER (WHERE ri.iata IS NOT NULL), '{}')::text[] AS iatas
+FROM regions r
+LEFT JOIN region_iatas ri ON ri.region_id = r.id
+GROUP BY r.id
+ORDER BY r.slug;
+
+-- name: UpsertImportedRegion :one
+-- A hand-written region owns its slug: the WHERE turns a clash into no row.
+INSERT INTO regions (slug, name, display_order, center_lat, center_lng, zoom_level, imported, updated_at)
+VALUES (@slug, @name, @display_order, sqlc.narg(center_lat), sqlc.narg(center_lng), NULL, TRUE, NOW())
+ON CONFLICT (slug) DO UPDATE SET
+    name          = EXCLUDED.name,
+    display_order = EXCLUDED.display_order,
+    center_lat    = EXCLUDED.center_lat,
+    center_lng    = EXCLUDED.center_lng,
+    updated_at    = NOW()
+WHERE regions.imported
+RETURNING id;
+
+-- name: PruneImportedRegions :many
+DELETE FROM regions WHERE imported AND NOT (slug = ANY(@keep::text[])) RETURNING slug;
 
 -- ============================================================
 -- TRACES
@@ -1275,7 +1317,8 @@ ORDER BY t.last_heard_at DESC;
 
 -- name: UpsertKnownRoute :exec
 -- Route identity is path_key, an md5 of node_ids computed by the caller.
--- Keep the latest processed representation without changing the node-chain identity.
+-- On conflict, observation_count and last_seen are bumped and hash_prefix follows the
+-- latest hearing, so evidence matches the hash width the route uses now.
 INSERT INTO known_routes (path_key, node_ids, hash_prefix, iata, hop_count)
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (iata, path_key) DO UPDATE SET
@@ -1592,6 +1635,9 @@ SELECT (SELECT heard_at FROM latest)::timestamptz AS latest_recorded_at,
 -- name: GetScopeCatalogue :one
 SELECT * FROM meshmapper_scope_catalogues WHERE iata = $1 AND url = $2;
 
+-- name: ListScopeCatalogues :many
+SELECT * FROM meshmapper_scope_catalogues ORDER BY iata, attempted_at;
+
 -- name: SaveScopeCatalogue :exec
 -- One statement commits the validated snapshot and its lookup identities together.
 -- Empty arrays insert nothing. NULL payload/checked_at retain last-known-good data
@@ -1614,6 +1660,33 @@ ON CONFLICT (iata, url) DO UPDATE SET
     next_attempt = EXCLUDED.next_attempt,
     last_error = EXCLUDED.last_error;
 
+-- name: ListChannelCatalogues :many
+SELECT * FROM meshmapper_channel_catalogues ORDER BY iata, attempted_at;
+
+-- name: SaveChannelCatalogue :exec
+-- NULL payload/etag/checked_at retain the last good list after an error or 304.
+INSERT INTO meshmapper_channel_catalogues (iata, url, payload, etag, checked_at, attempted_at, next_attempt, last_error)
+VALUES (@iata, @url, sqlc.narg(payload)::jsonb, sqlc.narg(etag)::text,
+    sqlc.narg(checked_at)::timestamptz, @attempted_at, @next_attempt, @last_error)
+ON CONFLICT (iata, url) DO UPDATE SET
+    payload = COALESCE(EXCLUDED.payload, meshmapper_channel_catalogues.payload),
+    etag = COALESCE(EXCLUDED.etag, meshmapper_channel_catalogues.etag),
+    checked_at = COALESCE(EXCLUDED.checked_at, meshmapper_channel_catalogues.checked_at),
+    attempted_at = EXCLUDED.attempted_at,
+    next_attempt = EXCLUDED.next_attempt,
+    last_error = EXCLUDED.last_error;
+
+-- name: DeleteChannelMembersNotIn :exec
+DELETE FROM meshmapper_channel_members WHERE iata = @iata AND NOT (key_fingerprint = ANY(@keep::bytea[]));
+
+-- name: AddChannelMembers :exec
+INSERT INTO meshmapper_channel_members (iata, key_fingerprint)
+SELECT @iata, unnest(@fingerprints::bytea[])
+ON CONFLICT (iata, key_fingerprint) DO NOTHING;
+
+-- name: DeleteAllChannelMembers :exec
+DELETE FROM meshmapper_channel_members;
+
 -- name: ListZoneBoundaries :many
 SELECT * FROM meshmapper_zone_boundaries ORDER BY iata;
 
@@ -1627,6 +1700,22 @@ ON CONFLICT (iata) DO UPDATE SET
     feature = COALESCE(EXCLUDED.feature, meshmapper_zone_boundaries.feature),
     etag = COALESCE(EXCLUDED.etag, meshmapper_zone_boundaries.etag),
     checked_at = COALESCE(EXCLUDED.checked_at, meshmapper_zone_boundaries.checked_at),
+    attempted_at = EXCLUDED.attempted_at,
+    next_attempt = EXCLUDED.next_attempt,
+    last_error = EXCLUDED.last_error;
+
+-- name: ListZoneLists :many
+SELECT * FROM meshmapper_zone_lists ORDER BY country;
+
+-- name: SaveZoneList :exec
+-- NULL payload/etag/fetched_at retain the last good list after an error or 304.
+INSERT INTO meshmapper_zone_lists (country, payload, etag, fetched_at, attempted_at, next_attempt, last_error)
+VALUES (@country, sqlc.narg(payload)::jsonb, sqlc.narg(etag)::text,
+    sqlc.narg(fetched_at)::timestamptz, @attempted_at, @next_attempt, @last_error)
+ON CONFLICT (country) DO UPDATE SET
+    payload = COALESCE(EXCLUDED.payload, meshmapper_zone_lists.payload),
+    etag = COALESCE(EXCLUDED.etag, meshmapper_zone_lists.etag),
+    fetched_at = COALESCE(EXCLUDED.fetched_at, meshmapper_zone_lists.fetched_at),
     attempted_at = EXCLUDED.attempted_at,
     next_attempt = EXCLUDED.next_attempt,
     last_error = EXCLUDED.last_error;

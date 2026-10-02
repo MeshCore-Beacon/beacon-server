@@ -597,14 +597,20 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Filter by IATA code",
+                        "description": "Filter by IATA code: channels MeshMapper lists there, config channels scoped to a region containing it, and Beacon-wide config channels",
                         "name": "iata",
                         "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "Filter by IATA code(s), comma-separated e.g. YOW or YOW,YYZ",
+                        "description": "Filter by IATA code(s), comma-separated e.g. YOW or YOW,YYZ; same membership rule as iata",
                         "name": "iatas",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Only channels Beacon can (true) or cannot (false) decrypt; omit for all",
+                        "name": "keyKnown",
                         "in": "query"
                     },
                     {
@@ -2233,7 +2239,7 @@ const docTemplate = `{
         },
         "/scope-catalogues": {
             "get": {
-                "description": "Configured sources only. Counts describe the source region, not individual nodes or links. No upstream request is made. An empty list means no configured importer; checkedAt=0 means no successful check. lastError or a past freshUntil marks stale metadata. Manual Beacon scopes and packet evidence are separate.",
+                "description": "Discovered sources only. Counts describe the source region, not individual nodes or links. No upstream request is made. An empty list means no configured importer; checkedAt=0 means no successful check. lastError or a past freshUntil marks stale metadata. Manual Beacon scopes and packet evidence are separate.",
                 "produces": [
                     "application/json"
                 ],
@@ -2247,7 +2253,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.Catalogue"
+                                "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.PublicScopeCatalogue"
                             }
                         }
                     }
@@ -2256,7 +2262,7 @@ const docTemplate = `{
         },
         "/scopes": {
             "get": {
-                "description": "The unfiltered list includes stored imported names after an importer is disabled or a source is removed. Those historical identities are retained indefinitely; listing them does not establish observed traffic or current source membership.",
+                "description": "Without filters, lists every stored scope name, including imported names retained after an importer is disabled or a source is removed. With IATA or region filters, lists only manual scopes configured for a matching region and imported scopes whose current MeshMapper catalogue includes a matching IATA; observed traffic does not add scopes.",
                 "produces": [
                     "application/json"
                 ],
@@ -2288,7 +2294,16 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object"
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
                     },
                     "500": {
@@ -2817,7 +2832,7 @@ const docTemplate = `{
         },
         "/stats/scopes": {
             "get": {
-                "description": "Counts each packet, observer and node once per scope. IATA filters use retained observations for packets/observers and node IATA memberships for nodes. Without filters, returns global totals. Scopes with zero matching counts remain listed; an empty region returns an empty array.",
+                "description": "Counts each packet, observer and node once per scope. IATA filters use retained observations for packets/observers and node IATA memberships for nodes. Without filters, returns global totals for every stored scope. With filters, lists only manual scopes configured for a matching region and imported scopes whose current MeshMapper catalogue includes a matching IATA; those remain listed with zero counts. An empty region returns an empty array.",
                 "produces": [
                     "application/json"
                 ],
@@ -5465,7 +5480,27 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.Catalogue": {
+        "github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.CatalogueScope": {
+            "type": "object",
+            "properties": {
+                "default": {
+                    "type": "integer"
+                },
+                "monitored": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "repeaters": {
+                    "type": "integer"
+                },
+                "wardriving": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.PublicScopeCatalogue": {
             "type": "object",
             "properties": {
                 "checkedAt": {
@@ -5497,26 +5532,6 @@ const docTemplate = `{
                 },
                 "url": {
                     "type": "string"
-                }
-            }
-        },
-        "github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.CatalogueScope": {
-            "type": "object",
-            "properties": {
-                "default": {
-                    "type": "integer"
-                },
-                "monitored": {
-                    "type": "boolean"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "repeaters": {
-                    "type": "integer"
-                },
-                "wardriving": {
-                    "type": "boolean"
                 }
             }
         },
@@ -5595,7 +5610,7 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "1.6.0",
+	Version:          "2.0.0",
 	Host:             "localhost:8080",
 	BasePath:         "/api/v1",
 	Schemes:          []string{"http", "https"},

@@ -285,7 +285,7 @@ func TestGetStatsScopes_OK(t *testing.T) {
 		getScopeStats: func(_ context.Context, _ []string) ([]api.ScopeStats, error) {
 			return []api.ScopeStats{{Name: "#bc", PacketCount: 100}}, nil
 		},
-	}))
+	}, nil))
 	req := httptest.NewRequest(http.MethodGet, "/stats/scopes", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)

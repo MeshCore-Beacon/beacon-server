@@ -192,6 +192,19 @@ even when the same bearer-authenticated request works with curl.
 ### Config file (`config.yaml`)
 
 ```yaml
+# MeshMapper integrations (optional, no API key). Import transport scopes and
+# IATA border outlines from MeshMapper instead of maintaining scopes: and
+# iatas.*.borderFile by hand. Both cover every known IATA that MeshMapper lists;
+# no sources to configure. See config.yaml.example for limits and behaviour.
+#meshmapper:
+#  scopes:
+#    enabled: true
+#  zones:
+#    enabled: true
+#    import_groups: true # MeshMapper zone groups become regions
+#  channels:
+#    enabled: true       # import each region's public hashtag channels
+
 # Optional IATA overrides — auto-created on first packet arrival,
 # only needed if you want to customise display name or coordinates.
 # borderFile points to a GeoJSON Feature (Polygon or MultiPolygon) for the
@@ -202,7 +215,7 @@ iatas:
     name: Vancouver International
     lat: 49.1967
     lng: -123.1815
-    borderFile: borders/yvr.geojson # optional
+    borderFile: borders/yvr.geojson # optional; or use meshmapper.zones
 
 # Super-regions grouping multiple IATAs.
 regions:
@@ -218,9 +231,12 @@ regions:
 channel_keys:
   # Hashtag channels: Beacon derives the PSK from the tag name automatically.
   # secret = SHA256("#tag")[:16], channel_hash = SHA256(secret)[0]
-  # Tag names should be provided without the # prefix.
+  # Tag names should be provided without the # prefix. Plain names show under
+  # every region; {name, region: <slug>} limits a channel to one region.
   hashtags:
     - meshcore
+    - name: vancouver-mesh
+      region: western-canada
 
   # Explicit keys: channel hash (hex) and key (hex), with optional display name.
   # The public MeshCore channel key is included in config.yaml.example.
@@ -231,9 +247,14 @@ channel_keys:
 
 # Regional transport scopes for matching TRANSPORT_FLOOD packets.
 # Plain names have # prepended automatically (e.g. "bc" → "#bc").
+# region (required) is a configured region slug; region-filtered scope lists
+# and scope stats show the scope under that region's IATAs. Matching stays global.
+# Optional when meshmapper.scopes covers your regions.
 scopes:
   - name: bc
+    region: western-canada
   - name: "#west"
+    region: western-canada
 
 # Observer telemetry storage settings.
 telemetry:
@@ -500,7 +521,7 @@ Not yet implemented — see the Authentication section above.
 | `GET`  | `/routes`                           | List known routes (all hops high confidence)                                                       |
 | `GET`  | `/routes/search`                    | Search routes by source and destination hash                                                       |
 | `GET`  | `/routes/cross`                     | Search for routes crossing IATA boundaries                                                         |
-| `GET`  | `/scopes`                           | List transport scopes                                                                              |
+| `GET`  | `/scopes`                           | List transport scope names; IATA/region filters use configured regions and MeshMapper catalogues   |
 | `GET`  | `/scopes/{name}`                    | Get scope detail                                                                                   |
 | `GET`  | `/stats/observations`               | Hourly observation time series (last 7 days by default)                                            |
 | `GET`  | `/stats/overview`                   | Network overview stats                                                                             |

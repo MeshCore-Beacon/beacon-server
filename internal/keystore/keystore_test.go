@@ -153,3 +153,33 @@ func TestEntryExists_Empty(t *testing.T) {
 		t.Error("expected false for empty slice")
 	}
 }
+
+func TestSetImported_ConfigWinsAndNewHashesReported(t *testing.T) {
+	secret, hash, fp := DeriveHashtagKey("meshcore")
+	hashHex := hex.EncodeToString([]byte{hash})
+	configured := Entry{Key: secret, Fingerprint: fp, Hashtag: "meshcore", Name: "Configured"}
+	store := NewMapKeyStore(map[string][]Entry{hashHex: {configured}})
+
+	dupSecret, _, dupFP := DeriveHashtagKey("meshcore")
+	newSecret, newHash, newFP := DeriveHashtagKey("ottawa-mesh")
+	added := store.SetImported([]Entry{
+		{Key: dupSecret, Fingerprint: dupFP, Hashtag: "meshcore", Name: "#meshcore"},
+		{Key: newSecret, Fingerprint: newFP, Hashtag: "ottawa-mesh", Name: "#ottawa-mesh"},
+	})
+	if len(added) != 1 || added[0][0] != newHash {
+		t.Fatalf("new hashes = %x", added)
+	}
+	if got := store.GetKey([]byte{hash}); len(got) != 1 || got[0].Name != "Configured" {
+		t.Fatalf("config entry replaced: %+v", got)
+	}
+	if got := store.GetKey([]byte{newHash}); len(got) != 1 || got[0].Hashtag != "ottawa-mesh" {
+		t.Fatalf("imported entry missing: %+v", got)
+	}
+	if added = store.SetImported([]Entry{{Key: newSecret, Fingerprint: newFP, Hashtag: "ottawa-mesh"}}); len(added) != 0 {
+		t.Fatal("unchanged import reported new hashes", added)
+	}
+	store.SetImported(nil)
+	if store.GetKey([]byte{newHash}) != nil || len(store.GetKey([]byte{hash})) != 1 {
+		t.Fatal("clearing imports touched config keys or kept the import")
+	}
+}

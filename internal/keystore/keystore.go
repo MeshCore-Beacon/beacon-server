@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package keystore provides channel key lookup for the ingest pipeline.
-// Keys are loaded from config at startup and never written at runtime.
-// Future: add a DB-backed fallback that checks the channel_keys table.
+// Config keys are fixed at startup; MeshMapper imports are swapped in at runtime.
 package keystore
 
 import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"slices"
+	"sync/atomic"
 )
 
 // Entry holds a resolved channel key along with its metadata.
@@ -23,23 +24,51 @@ type Entry struct {
 // MapKeyStore maps channel hash hex → list of known key entries.
 // Multiple entries per hash are supported to handle 1-byte hash collisions.
 type MapKeyStore struct {
-	entries map[string][]Entry // channel hash hex → entries
+	config   map[string][]Entry
+	imported map[string][]Entry
+	entries  atomic.Pointer[map[string][]Entry] // config + imported, read lock-free by ingest
 }
 
-// NewMapKeyStore creates a keystore from a pre-built map of entries.
-// Use BuildFromConfig to construct entries from a config.ChannelKeysConfig.
+// NewMapKeyStore creates a keystore from the configured entries.
 func NewMapKeyStore(entries map[string][]Entry) *MapKeyStore {
-	store := &MapKeyStore{entries: make(map[string][]Entry)}
+	store := &MapKeyStore{config: make(map[string][]Entry), imported: map[string][]Entry{}}
 	for hash, list := range entries {
-		store.entries[hash] = append(store.entries[hash], list...)
+		store.config[hash] = append(store.config[hash], list...)
 	}
+	store.entries.Store(&store.config)
 	return store
 }
 
 // GetKey returns all known key entries for the given channel hash byte.
 // Returns nil if no keys are known for this hash.
 func (s *MapKeyStore) GetKey(channelHash []byte) []Entry {
-	return s.entries[hex.EncodeToString(channelHash)]
+	return (*s.entries.Load())[hex.EncodeToString(channelHash)]
+}
+
+// SetImported replaces the imported keys and returns the channel hashes of keys
+// that weren't known before. Config keys win; one writer at a time.
+func (s *MapKeyStore) SetImported(entries []Entry) [][]byte {
+	merged := make(map[string][]Entry, len(s.config))
+	for hash, list := range s.config {
+		merged[hash] = list
+	}
+	imported := map[string][]Entry{}
+	var added [][]byte
+	for _, e := range entries {
+		hash := sha256.Sum256(e.Key)
+		hashHex := hex.EncodeToString(hash[:1])
+		if EntryExists(merged[hashHex], e) {
+			continue
+		}
+		merged[hashHex] = append(slices.Clone(merged[hashHex]), e)
+		imported[hashHex] = append(imported[hashHex], e)
+		if !EntryExists(s.imported[hashHex], e) {
+			added = append(added, hash[:1])
+		}
+	}
+	s.imported = imported
+	s.entries.Store(&merged)
+	return added
 }
 
 // DeriveHashtagKey derives the channel secret and hash for a hashtag name.

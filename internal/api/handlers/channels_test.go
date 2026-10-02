@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,7 +40,7 @@ func TestListChannels_InvalidCursor(t *testing.T) {
 
 func TestListChannels_PageCursor(t *testing.T) {
 	called := false
-	r := ChannelsRouter(stubReader{listChannels: func(_ context.Context, limit int32, hash []byte, iatas []string, legacy int64, cursor *api.ChannelCursor) (api.ChannelPage, error) {
+	r := ChannelsRouter(stubReader{listChannels: func(_ context.Context, limit int32, hash []byte, iatas []string, _ *bool, legacy int64, cursor *api.ChannelCursor) (api.ChannelPage, error) {
 		called = true
 		if limit != 2 || legacy != 0 || cursor == nil || cursor.ID != 9 || !cursor.LastSeen.Equal(time.UnixMicro(1700000000000123)) ||
 			!reflect.DeepEqual(hash, []byte{0xaa}) || !reflect.DeepEqual(iatas, []string{"YOW"}) {
@@ -145,7 +146,7 @@ func TestListChannelMessages_InvalidCursor(t *testing.T) {
 func TestListChannels_OK(t *testing.T) {
 	r := chi.NewRouter()
 	r.Get("/channels", listChannels(stubReader{
-		listChannels: func(_ context.Context, _ int32, _ []byte, _ []string, _ int64, _ *api.ChannelCursor) (api.ChannelPage, error) {
+		listChannels: func(_ context.Context, _ int32, _ []byte, _ []string, _ *bool, _ int64, _ *api.ChannelCursor) (api.ChannelPage, error) {
 			return api.ChannelPage{Page: api.Page[api.ChannelSummary]{Items: []api.ChannelSummary{{ID: 1, ChannelHash: "ab"}}}}, nil
 		},
 	}))
@@ -172,7 +173,7 @@ func TestListChannels_IATAParsing(t *testing.T) {
 			var got []string
 			r := chi.NewRouter()
 			r.Get("/channels", listChannels(stubReader{
-				listChannels: func(_ context.Context, _ int32, _ []byte, iatas []string, _ int64, _ *api.ChannelCursor) (api.ChannelPage, error) {
+				listChannels: func(_ context.Context, _ int32, _ []byte, iatas []string, _ *bool, _ int64, _ *api.ChannelCursor) (api.ChannelPage, error) {
 					got = iatas
 					return api.ChannelPage{}, nil
 				},
@@ -185,6 +186,54 @@ func TestListChannels_IATAParsing(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("expected iatas %v, got %v", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestListChannels_KeyKnownParsing(t *testing.T) {
+	yes, no := true, false
+	cases := []struct {
+		name  string
+		query string
+		code  int
+		want  *bool
+	}{
+		{"true", "?keyKnown=true", http.StatusOK, &yes},
+		{"false", "?keyKnown=false", http.StatusOK, &no},
+		{"absent", "", http.StatusOK, nil},
+		{"uppercase", "?keyKnown=TRUE", http.StatusBadRequest, nil},
+		{"numeric", "?keyKnown=1", http.StatusBadRequest, nil},
+		{"empty", "?keyKnown=", http.StatusBadRequest, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got *bool
+			called := false
+			r := chi.NewRouter()
+			r.Get("/channels", listChannels(stubReader{
+				listChannels: func(_ context.Context, _ int32, _ []byte, _ []string, keyKnown *bool, _ int64, _ *api.ChannelCursor) (api.ChannelPage, error) {
+					called = true
+					got = keyKnown
+					return api.ChannelPage{}, nil
+				},
+			}))
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/channels"+tc.query, nil))
+			if w.Code != tc.code {
+				t.Fatalf("expected %d, got %d", tc.code, w.Code)
+			}
+			if tc.code != http.StatusOK {
+				if called {
+					t.Error("reader called for invalid keyKnown")
+				}
+				if !strings.Contains(w.Body.String(), "keyKnown must be true or false") {
+					t.Errorf("unexpected error body %s", w.Body.String())
+				}
+				return
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("expected keyKnown %v, got %v", tc.want, got)
 			}
 		})
 	}

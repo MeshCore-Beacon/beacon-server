@@ -174,6 +174,9 @@ type DB interface {
 	// used by BackfillChannelMessages to retry them against the current keystore at boot.
 	ListUndecryptedGroupTextPackets(ctx context.Context) ([]UndecryptedPacket, error)
 
+	// ListUndecryptedGroupTextPacketsByHash limits that scan to channels that just gained a key.
+	ListUndecryptedGroupTextPacketsByHash(ctx context.Context, hashes [][]byte) ([]UndecryptedPacket, error)
+
 	// UpsertChannelIATA upserts a channel_iatas row.
 	UpsertChannelIATA(ctx context.Context, channelHash []byte, iata string, heardAt time.Time) error
 

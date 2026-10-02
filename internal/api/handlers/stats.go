@@ -6,6 +6,7 @@ package handlers
 import (
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -26,7 +27,7 @@ import (
 // GET  /stats/scopes            → GetStatsScopes
 //
 // All endpoints accept an optional iata= filter (case-insensitive).
-func StatsRouter(reader api.Reader) http.Handler {
+func StatsRouter(reader api.Reader, scopes ScopeMembership) http.Handler {
 	r := chi.NewRouter()
 	r.Get("/overview", getStatsOverview(reader))
 	r.Get("/observations", getStatsObservations(reader))
@@ -40,7 +41,7 @@ func StatsRouter(reader api.Reader) http.Handler {
 	r.Get("/clock-drift", getStatsClockDrift(reader))
 	r.Get("/top-talkers", getStatsTopTalkers(reader))
 	r.Get("/radio-presets", getStatsRadioPresets(reader))
-	r.Get("/scopes", getStatsScopes(reader))
+	r.Get("/scopes", getStatsScopes(reader, scopes))
 	r.Get("/node-types", getStatsNodeTypes(reader))
 	return r
 }
@@ -417,7 +418,7 @@ func getStatsRadioPresets(reader api.Reader) http.HandlerFunc {
 // getStatsScopes godoc
 //
 //	@Summary	Scope statistics
-//	@Description	Counts each packet, observer and node once per scope. IATA filters use retained observations for packets/observers and node IATA memberships for nodes. Without filters, returns global totals. Scopes with zero matching counts remain listed; an empty region returns an empty array.
+//	@Description	Counts each packet, observer and node once per scope. IATA filters use retained observations for packets/observers and node IATA memberships for nodes. Without filters, returns global totals for every stored scope. With filters, lists only manual scopes configured for a matching region and imported scopes whose current MeshMapper catalogue includes a matching IATA; those remain listed with zero counts. An empty region returns an empty array.
 //	@Tags		Stats
 //	@Produce	json
 //	@Param		iatas		query	string	false	"Comma-separated IATA codes"
@@ -428,7 +429,7 @@ func getStatsRadioPresets(reader api.Reader) http.HandlerFunc {
 //	@Failure	400	{object}	handlers.APIError
 //	@Failure	500	{object}	handlers.APIError
 //	@Router		/stats/scopes [get]
-func getStatsScopes(reader api.Reader) http.HandlerFunc {
+func getStatsScopes(reader api.Reader, scopes ScopeMembership) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		iatas := parseIATAs(r)
 		if regionID := r.URL.Query().Get("regionId"); regionID != "" || r.URL.Query().Get("region") != "" {
@@ -447,6 +448,13 @@ func getStatsScopes(reader api.Reader) http.HandlerFunc {
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
+		}
+		if len(iatas) > 0 {
+			members := scopeNamesFor(scopes, iatas)
+			stats = slices.DeleteFunc(slices.Clone(stats), func(s api.ScopeStats) bool {
+				_, found := slices.BinarySearch(members, s.Name)
+				return !found
+			})
 		}
 		respond(w, http.StatusOK, stats)
 	}

@@ -7,6 +7,7 @@ package scopestore
 
 import (
 	"crypto/sha256"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -34,6 +35,8 @@ func FromName(name string) Entry {
 type ScopeStore struct {
 	mu      sync.RWMutex
 	entries []Entry
+	// IATA -> scope names, for region-filtered listings only; matching uses entries.
+	manual, catalogue map[string][]string
 }
 
 // New creates an empty ScopeStore.
@@ -53,4 +56,31 @@ func (s *ScopeStore) Entries() []Entry {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.entries
+}
+
+// SetManualMembers publishes configured region membership of manual scopes.
+func (s *ScopeStore) SetManualMembers(byIATA map[string][]string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.manual = byIATA
+}
+
+// SetCatalogueMembers publishes imported catalogue membership, including names a manual scope overrides.
+func (s *ScopeStore) SetCatalogueMembers(byIATA map[string][]string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.catalogue = byIATA
+}
+
+// NamesForIATAs returns the sorted names of scopes that belong to any of the given IATAs.
+func (s *ScopeStore) NamesForIATAs(iatas []string) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	names := []string{}
+	for _, iata := range iatas {
+		names = append(names, s.manual[iata]...)
+		names = append(names, s.catalogue[iata]...)
+	}
+	slices.Sort(names)
+	return slices.Compact(names)
 }

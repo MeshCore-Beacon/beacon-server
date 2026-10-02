@@ -13,12 +13,20 @@ import (
 )
 
 type Querier interface {
+	// An empty region places the channel Beacon-wide.
+	AddChannelConfigScopes(ctx context.Context, arg AddChannelConfigScopesParams) error
+	AddChannelMembers(ctx context.Context, arg AddChannelMembersParams) error
+	AddIATAs(ctx context.Context, iatas []string) error
+	AddRegionIATAs(ctx context.Context, arg AddRegionIATAsParams) error
 	// Hop prefixes that match >1 node in an IATA, per width. Computed once per reconfirm run.
 	AmbiguousPrefixes(ctx context.Context) ([]AmbiguousPrefixesRow, error)
 	CreateAccount(ctx context.Context, name string) (Account, error)
 	// Lock the current row before deciding the outcome, including when another
 	// deactivation commits while this statement is waiting for its row lock.
 	DeactivateAccount(ctx context.Context, id uuid.UUID) (DeactivateAccountRow, error)
+	DeleteAllChannelMembers(ctx context.Context) error
+	DeleteChannelConfigScopes(ctx context.Context) error
+	DeleteChannelMembersNotIn(ctx context.Context, arg DeleteChannelMembersNotInParams) error
 	// Keeps the channel IATA filter in step with packet retention.
 	DeleteOldChannelIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error
 	// Deletes nodes not seen since the given cutoff. node_iatas and node_neighbors cascade-
@@ -41,6 +49,7 @@ type Querier interface {
 	DeleteOldTelemetry(ctx context.Context, reportedAt pgtype.Timestamptz) error
 	// Keeps the trace IATA filter in step with packet retention.
 	DeleteOldTraceIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error
+	DeleteRegionIATAsNotIn(ctx context.Context, arg DeleteRegionIATAsNotInParams) error
 	GetAccount(ctx context.Context, id uuid.UUID) (Account, error)
 	GetChannelByID(ctx context.Context, id int32) (Channel, error)
 	// Returns neighbors of a node that are in a different IATA.
@@ -97,7 +106,6 @@ type Querier interface {
 	// a cross-join. Empty IATAs keep the original global counts, including associations
 	// whose observations have expired; the filtered aggregates are empty in that case.
 	GetScopeStats(ctx context.Context, iatas []string) ([]GetScopeStatsRow, error)
-	GetScopesByIATAs(ctx context.Context, dollar_1 []string) ([]GetScopesByIATAsRow, error)
 	// Read compact hourly snapshots, never observations on an HTTP request.
 	// Weight averages by sample counts instead of averaging regional/hourly means.
 	GetSignalStats(ctx context.Context, arg GetSignalStatsParams) ([]GetSignalStatsRow, error)
@@ -143,6 +151,7 @@ type Querier interface {
 	// Pass empty string for iata or scope to skip those filters.
 	// Pass cursor=0 to start from the beginning.
 	ListAllChannelMessages(ctx context.Context, arg ListAllChannelMessagesParams) ([]ListAllChannelMessagesRow, error)
+	ListChannelCatalogues(ctx context.Context) ([]MeshmapperChannelCatalogue, error)
 	// Returns messages for a channel identified by integer ID.
 	// Pass a zero/null timestamp for since to return all messages up to limit.
 	// Pass empty string for iata to skip IATA filtering.
@@ -153,8 +162,9 @@ type Querier interface {
 	// Pass empty string for iata or scope to skip those filters.
 	// Pass cursor=0 to start from the beginning.
 	ListChannelMessagesByHash(ctx context.Context, arg ListChannelMessagesByHashParams) ([]ListChannelMessagesByHashRow, error)
-	// Channels ordered by last seen, optionally filtered by hash and/or IATAs
-	// (membership via channel_iatas). NULL hash / empty array skip those filters.
+	// Channels ordered by last seen, optionally filtered by hash and/or IATAs.
+	// A channel belongs to an IATA when MeshMapper lists it there or config scopes it
+	// to a region containing it (or Beacon-wide). NULL hash / empty array / NULL key_known skip those filters.
 	// Pass cursor=0 to start from the beginning (cursor is last_seen epoch ms).
 	ListChannels(ctx context.Context, arg ListChannelsParams) ([]Channel, error)
 	// Keep the non-null tuple boundary separate from the legacy optional cursor so
@@ -200,6 +210,8 @@ type Querier interface {
 	// A site that filled scan_depth still has unread history below its floor.
 	// The newest such floor is the point above which every site is covered.
 	ListPacketsByIATAs(ctx context.Context, arg ListPacketsByIATAsParams) ([]ListPacketsByIATAsRow, error)
+	// Every region with its members, for reconciling imported MeshMapper groups.
+	ListRegionState(ctx context.Context) ([]ListRegionStateRow, error)
 	// ============================================================
 	// REGIONS
 	// ============================================================
@@ -208,6 +220,7 @@ type Querier interface {
 	// Full-byte equality is required even when the compact digest matches. TRACE path bytes
 	// carry readings; unclassified legacy observations cannot be safely called ordinary paths.
 	ListRouteEvidence(ctx context.Context, arg ListRouteEvidenceParams) ([]ListRouteEvidenceRow, error)
+	ListScopeCatalogues(ctx context.Context) ([]MeshmapperScopeCatalogue, error)
 	// ============================================================
 	// TRACES
 	// ============================================================
@@ -220,7 +233,11 @@ type Querier interface {
 	// to the config after they'd already been ingested -- see
 	// internal/ingest.BackfillChannelMessages.
 	ListUndecryptedGroupTextPackets(ctx context.Context) ([]ListUndecryptedGroupTextPacketsRow, error)
+	// Like ListUndecryptedGroupTextPackets, limited to channels that just gained a key.
+	ListUndecryptedGroupTextPacketsByHash(ctx context.Context, hashes [][]byte) ([]ListUndecryptedGroupTextPacketsByHashRow, error)
 	ListZoneBoundaries(ctx context.Context) ([]MeshmapperZoneBoundary, error)
+	ListZoneLists(ctx context.Context) ([]MeshmapperZoneList, error)
+	PruneImportedRegions(ctx context.Context, keep []string) ([]string, error)
 	// Drops imports for IATAs no longer configured, so their manual border returns.
 	PruneZoneBoundaries(ctx context.Context, keep []string) ([]string, error)
 	// Delete node_neighbors where the neighbor has departed from node_short_ids
@@ -259,12 +276,16 @@ type Querier interface {
 	ResolvePathHashesP2(ctx context.Context, arg ResolvePathHashesP2Params) ([]ResolvePathHashesP2Row, error)
 	ResolvePathHashesP3(ctx context.Context, arg ResolvePathHashesP3Params) ([]ResolvePathHashesP3Row, error)
 	ResolvePathHashesP4(ctx context.Context, arg ResolvePathHashesP4Params) ([]ResolvePathHashesP4Row, error)
+	// NULL payload/etag/checked_at retain the last good list after an error or 304.
+	SaveChannelCatalogue(ctx context.Context, arg SaveChannelCatalogueParams) error
 	// One statement commits the validated snapshot and its lookup identities together.
 	// Empty arrays insert nothing. NULL payload/checked_at retain last-known-good data
 	// after an error or 304. Imported names never replace existing manual metadata.
 	SaveScopeCatalogue(ctx context.Context, arg SaveScopeCatalogueParams) error
 	// NULL feature/etag/checked_at retain the last good boundary after an error or 304.
 	SaveZoneBoundary(ctx context.Context, arg SaveZoneBoundaryParams) error
+	// NULL payload/etag/fetched_at retain the last good list after an error or 304.
+	SaveZoneList(ctx context.Context, arg SaveZoneListParams) error
 	// Returns known routes containing a subsequence from source to destination hash prefix.
 	// Verifies source appears before destination in the route.
 	SearchKnownRoutes(ctx context.Context, arg SearchKnownRoutesParams) ([]SearchKnownRoutesRow, error)
@@ -302,11 +323,14 @@ type Querier interface {
 	// bbox already computed -- see internal/config/border.go.
 	UpsertIATABorder(ctx context.Context, arg UpsertIATABorderParams) error
 	UpsertIATADetails(ctx context.Context, arg UpsertIATADetailsParams) error
+	// A hand-written region owns its slug: the WHERE turns a clash into no row.
+	UpsertImportedRegion(ctx context.Context, arg UpsertImportedRegionParams) (int32, error)
 	// ============================================================
 	// ROUTES
 	// ============================================================
 	// Route identity is path_key, an md5 of node_ids computed by the caller.
-	// Keep the latest processed representation without changing the node-chain identity.
+	// On conflict, observation_count and last_seen are bumped and hash_prefix follows the
+	// latest hearing, so evidence matches the hash width the route uses now.
 	UpsertKnownRoute(ctx context.Context, arg UpsertKnownRouteParams) error
 	// ============================================================
 	// NODES
@@ -343,7 +367,6 @@ type Querier interface {
 	// ============================================================
 	UpsertPacket(ctx context.Context, arg UpsertPacketParams) (UpsertPacketRow, error)
 	UpsertRegion(ctx context.Context, arg UpsertRegionParams) (int32, error)
-	UpsertRegionIATA(ctx context.Context, arg UpsertRegionIATAParams) error
 	// Refreshes at most hourly so repeat hears don't churn the row.
 	UpsertTraceIATA(ctx context.Context, arg UpsertTraceIATAParams) error
 	// ============================================================

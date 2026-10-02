@@ -166,9 +166,13 @@ func (s *Store) GetRegionBySlug(ctx context.Context, slug string) (*api.Region, 
 	return &result, nil
 }
 
-func (s *Store) UpsertRegionIATA(ctx context.Context, regionID int32, iata string) error {
-	return s.q.UpsertRegionIATA(ctx, sqlc.UpsertRegionIATAParams{
-		RegionID: regionID,
-		Iata:     iata,
-	})
+// SetRegionIATAs makes iatas the region's exact member list.
+func (s *Store) SetRegionIATAs(ctx context.Context, regionID int32, iatas []string) error {
+	if iatas == nil {
+		iatas = []string{}
+	}
+	if err := s.q.DeleteRegionIATAsNotIn(ctx, sqlc.DeleteRegionIATAsNotInParams{RegionID: regionID, Keep: iatas}); err != nil {
+		return err
+	}
+	return s.q.AddRegionIATAs(ctx, sqlc.AddRegionIATAsParams{RegionID: regionID, Iatas: iatas})
 }

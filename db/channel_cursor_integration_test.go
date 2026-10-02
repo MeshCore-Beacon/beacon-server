@@ -57,13 +57,14 @@ func TestChannelCursorPostgres(t *testing.T) {
 		}
 	}
 	applyBaseline(t, ctx, tx)
-	exec(`INSERT INTO channels(id,channel_hash,key_fingerprint,last_seen) VALUES
- (1,'\xaa','\x01','2026-09-08 12:00:00+00'),(2,'\xaa','\x02','2026-09-08 12:00:00+00'),
- (3,'\xaa','\x03','2026-09-08 12:00:00+00'),(4,'\xbb','\x04','2026-09-08 11:59:59+00'),
- (5,'\xcc','\x05','2026-09-08 12:00:00.000321+00'),
- (6,'\xcc','\x06','2026-09-08 12:00:00.000111+00'),(7,'\xcc','\x07','2026-09-08 12:00:00.000111+00');
-INSERT INTO channel_iatas(channel_hash,iata,last_heard) VALUES
- ('\xaa','YOW',now()),('\xbb','YOW',now()),('\xcc','YYZ',now());`)
+	// NULL key_known is reported as false, so keyKnown=false must include it.
+	exec(`INSERT INTO channels(id,channel_hash,key_fingerprint,last_seen,key_known) VALUES
+ (1,'\xaa','\x01','2026-09-08 12:00:00+00',true),(2,'\xaa','\x02','2026-09-08 12:00:00+00',false),
+ (3,'\xaa','\x03','2026-09-08 12:00:00+00',NULL),(4,'\xbb','\x04','2026-09-08 11:59:59+00',true),
+ (5,'\xcc','\x05','2026-09-08 12:00:00.000321+00',true),
+ (6,'\xcc','\x06','2026-09-08 12:00:00.000111+00',false),(7,'\xcc','\x07','2026-09-08 12:00:00.000111+00',true);
+INSERT INTO meshmapper_channel_members(iata,key_fingerprint) VALUES
+ ('YOW','\x01'),('YOW','\x02'),('YOW','\x03'),('YOW','\x04'),('YYZ','\x05'),('YYZ','\x06'),('YYZ','\x07');`)
 	queries := &channelCursorQueries{DBTX: tx}
 	router := handlers.ChannelsRouter(&Store{q: sqlc.New(queries)})
 	// Decode the wire contract so the same regression runs against the old server.
@@ -97,6 +98,11 @@ INSERT INTO channel_iatas(channel_hash,iata,last_heard) VALUES
 		{"hash and region", "hash=cc&iata=yyz", []int{5, 7, 6}},
 		{"no regional match", "hash=aa&iata=yyz", nil},
 		{"missing region", "iata=ZZZ", nil},
+		{"key known", "keyKnown=true", []int{5, 7, 1, 4}},
+		{"key unknown", "keyKnown=false", []int{6, 3, 2}},
+		{"key known in region", "keyKnown=true&iata=yow", []int{1, 4}},
+		{"key unknown in region", "keyKnown=false&iata=yow", []int{3, 2}},
+		{"key unknown hash", "keyKnown=false&hash=cc", []int{6}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			params, _ := url.ParseQuery(tc.query)

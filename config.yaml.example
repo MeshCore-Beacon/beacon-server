@@ -41,13 +41,72 @@ ratelimit:
   # A 429 returns error.code=rate_limited and Retry-After (1 or 60 seconds).
   burst: 300
 
+# MeshMapper integrations (optional, no API key). Import transport scopes and
+# IATA border outlines from MeshMapper instead of maintaining scopes: and
+# iatas.*.borderFile by hand.
+#
+# Scope-name discovery. Manual scopes remain authoritative.
+# Every known IATA, including ones auto-created from traffic, is looked up in its
+# country's zone list (shared with zones below) and its site's get_scopes.php
+# catalogue is imported; IATAs MeshMapper doesn't list are skipped. No sources
+# to configure; a legacy sources: list is ignored with a warning.
+# Catalogues covering more than one IATA are rejected.
+# 64 names per catalogue, 64 KiB per response; no page scraping.
+# Catalogues and ETags persist in PostgreSQL. Failed refreshes retain known names.
+# Refresh success/failure/freshness is logged under component=meshmapper.scopes.
+# Turning scopes off deactivates imported matching keys on restart;
+# historical scope identities and recorded evidence are retained.
+# Region-filtered scope lists and scope stats show imported names only under the
+# IATAs whose catalogue lists them; IATAs without a catalogue show manual scopes only.
+#meshmapper:
+#  scopes:
+#    enabled: false
+#    refresh_interval: 1h  # 1h-24h (MeshMapper allows one get_scopes.php per region per 55m); one source per 15s tick
+#
+# Region boundaries (Zones API). Every known IATA, including ones auto-created
+# from traffic, is looked up in its country's zone list, then its get_geojson.php
+# outline is imported; new IATAs are picked up while running. An imported boundary
+# overrides that IATA's borderFile on the border map and for nodes.mark_foreign.
+# A missing or failed boundary keeps the last good import, or the borderFile when
+# there is none. Disabling drops every import on restart. Logged under
+# component=meshmapper.zones.
+# Each country's zone list is fetched at most once a day (MeshMapper allows one
+# get_zones.php per country per 23.5h) and saved, so restarts don't refetch it.
+# Failed or rate-limited requests also wait out the limit, or Retry-After if longer.
+# Listed IATAs also take their display name and approximate location from the
+# zone list, unless iatas: below sets a name or lat/lng for them.
+# import_groups turns MeshMapper zone groups (e.g. ONQC: YOW, YQB, YUL) into
+# regions, from the zone lists already fetched. A group is imported when at least
+# one member is a known IATA, with its full member list (members Beacon hasn't
+# heard yet are added as IATAs); slug = lowercased group code, centered on the
+# members' average location, listed after the regions below. A region below with
+# the same slug wins.
+# Imported regions are removed when the group disappears or stops qualifying,
+# and all of them when import_groups is turned off. Requires zones.enabled.
+#  zones:
+#    enabled: false
+#    import_groups: false
+#    refresh_interval: 24h # 24h-168h (one get_geojson.php per region per 23.5h); one request per 15s tick, ETag-conditional
+#
+# Public hashtag channels (get_channels.php). Every known IATA that MeshMapper
+# lists is looked up on its site, the same way as scopes. Each key and hash is
+# checked against the name before use; a list with any mismatch is rejected and
+# the last good one kept. Imported channels decrypt like configured ones (history
+# is backfilled when a key first appears) and are listed under that IATA when
+# /channels is filtered by region. Saved in PostgreSQL across restarts; failures
+# wait out the 23.5h limit. Turning it off removes the region listing on restart.
+# Logged under component=meshmapper.channels.
+#  channels:
+#    enabled: false
+#    refresh_interval: 24h # 24h-168h (one get_channels.php per region per 23.5h)
+
 iatas:
   YVR:
     name: Vancouver International
     lat: 49.1967
     lng: -123.1815
     # borderFile: borders/yvr.geojson   # optional GeoJSON Feature (Polygon/MultiPolygon)
-    #                                    # (meshmapper.zones overrides it when enabled)
+    #                                    # (or use meshmapper.zones above)
     #                                    # for the region border map; path is relative to
     #                                    # this file's directory; validated at boot.
   YYJ:
@@ -71,6 +130,8 @@ iatas:
     lat: 43.6777
     lng: -79.6248
 
+# Hand-written regions; optional with meshmapper.zones.import_groups. Seeding
+# sets each region's members to exactly this list.
 regions:
   - slug: western-canada
     name: Western Canada
@@ -93,8 +154,12 @@ channel_keys:
   # secret = SHA256("#tag")[:16], channel_hash = SHA256(secret)[0]
   # Hashtag names should be provided without the # prefix.
   # Beacon prepends # automatically before deriving the key.
+  # A plain name is listed under every region; add region: <slug> (a configured
+  # region) to list it only there when /channels is filtered by region.
   hashtags:
     - meshcore
+    # - name: ottawa-mesh
+    #   region: eastern-canada
 
   # Explicit keys: provide the channel hash (hex) and key (hex) directly.
   # An optional name can be set for display purposes.
@@ -102,12 +167,18 @@ channel_keys:
     "11":
       key: "8b3387e9c5cdea6ac9e5edbaa115cd72"
       name: "Public"
+      # region: eastern-canada   # optional, as for hashtags
 
 # Regional transport scopes for matching TRANSPORT_FLOOD packets.
 # Plain names have # prepended automatically (e.g. "bc" → "#bc").
+# region (required) is a configured region slug; region-filtered scope lists
+# and scope stats show the scope under that region's IATAs. Matching stays global.
+# Optional when meshmapper.scopes covers your regions.
 scopes:
   - name: bc
+    region: western-canada
   - name: "#west"
+    region: western-canada
 
 telemetry:
   retention: 672h   # 4 weeks
@@ -215,31 +286,6 @@ cache:
 #ingest:
 #  allow_countries: [CA, US]
 #  allow_continents: [NA]
-
-# Optional public MeshMapper scope-name discovery. Manual scopes remain authoritative.
-# No API key is needed. Sources must belong to a configured region's IATAs.
-# Group endpoints are not supported: their names cannot be attributed to each IATA.
-# At most 16 sources, 64 names per source, 64 KiB per response; no page scraping.
-# Catalogues and ETags persist in PostgreSQL. Failed refreshes retain known names.
-# Refresh success/failure/freshness is logged under component=meshmapper.scopes.
-# Removing/turning off a source deactivates its imported matching keys on restart;
-# historical scope identities and recorded evidence are retained.
-#meshmapper:
-#  scopes:
-#    enabled: false
-#    refresh_interval: 1h  # 5m-24h; one source checked per 15s tick
-#    sources:
-#      YOW: https://yow.meshmapper.net/get_scopes.php
-#
-# Optional MeshMapper region boundaries (Zones API). Every IATA in a configured
-# region is looked up in its country's zone list, then its get_geojson.php outline
-# is imported. An imported boundary overrides that IATA's borderFile on the border
-# map and for nodes.mark_foreign. A missing or failed boundary keeps the last good
-# import, or the borderFile when there is none. Disabling, or removing an IATA from
-# every region, drops its import on restart. Logged under component=meshmapper.zones.
-#  zones:
-#    enabled: false
-#    refresh_interval: 24h # 1h-168h; one request per 15s tick, ETag-conditional
 
 # Background task intervals.
 # Shorter intervals are useful during initial deployment to confirm data is

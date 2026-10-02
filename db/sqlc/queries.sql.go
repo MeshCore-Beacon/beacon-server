@@ -13,6 +13,65 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addChannelConfigScopes = `-- name: AddChannelConfigScopes :exec
+INSERT INTO channel_config_scopes (key_fingerprint, region_slug)
+SELECT unnest($1::bytea[]), NULLIF(unnest($2::text[]), '')
+`
+
+type AddChannelConfigScopesParams struct {
+	Fingerprints [][]byte `json:"fingerprints"`
+	Regions      []string `json:"regions"`
+}
+
+// An empty region places the channel Beacon-wide.
+func (q *Queries) AddChannelConfigScopes(ctx context.Context, arg AddChannelConfigScopesParams) error {
+	_, err := q.db.Exec(ctx, addChannelConfigScopes, arg.Fingerprints, arg.Regions)
+	return err
+}
+
+const addChannelMembers = `-- name: AddChannelMembers :exec
+INSERT INTO meshmapper_channel_members (iata, key_fingerprint)
+SELECT $1, unnest($2::bytea[])
+ON CONFLICT (iata, key_fingerprint) DO NOTHING
+`
+
+type AddChannelMembersParams struct {
+	Iata         string   `json:"iata"`
+	Fingerprints [][]byte `json:"fingerprints"`
+}
+
+func (q *Queries) AddChannelMembers(ctx context.Context, arg AddChannelMembersParams) error {
+	_, err := q.db.Exec(ctx, addChannelMembers, arg.Iata, arg.Fingerprints)
+	return err
+}
+
+const addIATAs = `-- name: AddIATAs :exec
+INSERT INTO iata_codes (iata)
+SELECT unnest($1::bpchar[])
+ON CONFLICT (iata) DO NOTHING
+`
+
+func (q *Queries) AddIATAs(ctx context.Context, iatas []string) error {
+	_, err := q.db.Exec(ctx, addIATAs, iatas)
+	return err
+}
+
+const addRegionIATAs = `-- name: AddRegionIATAs :exec
+INSERT INTO region_iatas (region_id, iata)
+SELECT $1, unnest($2::bpchar[])
+ON CONFLICT (region_id, iata) DO NOTHING
+`
+
+type AddRegionIATAsParams struct {
+	RegionID int32    `json:"region_id"`
+	Iatas    []string `json:"iatas"`
+}
+
+func (q *Queries) AddRegionIATAs(ctx context.Context, arg AddRegionIATAsParams) error {
+	_, err := q.db.Exec(ctx, addRegionIATAs, arg.RegionID, arg.Iatas)
+	return err
+}
+
 const ambiguousPrefixes = `-- name: AmbiguousPrefixes :many
 SELECT iata::text AS iata, 1::int AS len, prefix_1 AS prefix FROM node_short_ids GROUP BY iata, prefix_1 HAVING COUNT(*) > 1
 UNION ALL
@@ -92,6 +151,38 @@ func (q *Queries) DeactivateAccount(ctx context.Context, id uuid.UUID) (Deactiva
 	var i DeactivateAccountRow
 	err := row.Scan(&i.Found, &i.Deactivated)
 	return i, err
+}
+
+const deleteAllChannelMembers = `-- name: DeleteAllChannelMembers :exec
+DELETE FROM meshmapper_channel_members
+`
+
+func (q *Queries) DeleteAllChannelMembers(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, deleteAllChannelMembers)
+	return err
+}
+
+const deleteChannelConfigScopes = `-- name: DeleteChannelConfigScopes :exec
+DELETE FROM channel_config_scopes
+`
+
+func (q *Queries) DeleteChannelConfigScopes(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, deleteChannelConfigScopes)
+	return err
+}
+
+const deleteChannelMembersNotIn = `-- name: DeleteChannelMembersNotIn :exec
+DELETE FROM meshmapper_channel_members WHERE iata = $1 AND NOT (key_fingerprint = ANY($2::bytea[]))
+`
+
+type DeleteChannelMembersNotInParams struct {
+	Iata string   `json:"iata"`
+	Keep [][]byte `json:"keep"`
+}
+
+func (q *Queries) DeleteChannelMembersNotIn(ctx context.Context, arg DeleteChannelMembersNotInParams) error {
+	_, err := q.db.Exec(ctx, deleteChannelMembersNotIn, arg.Iata, arg.Keep)
+	return err
 }
 
 const deleteOldChannelIATAs = `-- name: DeleteOldChannelIATAs :exec
@@ -232,6 +323,20 @@ DELETE FROM trace_iatas WHERE last_heard < $1
 // Keeps the trace IATA filter in step with packet retention.
 func (q *Queries) DeleteOldTraceIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error {
 	_, err := q.db.Exec(ctx, deleteOldTraceIATAs, lastHeard)
+	return err
+}
+
+const deleteRegionIATAsNotIn = `-- name: DeleteRegionIATAsNotIn :exec
+DELETE FROM region_iatas WHERE region_id = $1 AND NOT (iata = ANY($2::bpchar[]))
+`
+
+type DeleteRegionIATAsNotInParams struct {
+	RegionID int32    `json:"region_id"`
+	Keep     []string `json:"keep"`
+}
+
+func (q *Queries) DeleteRegionIATAsNotIn(ctx context.Context, arg DeleteRegionIATAsNotInParams) error {
+	_, err := q.db.Exec(ctx, deleteRegionIATAsNotIn, arg.RegionID, arg.Keep)
 	return err
 }
 
@@ -1596,54 +1701,6 @@ func (q *Queries) GetScopeStats(ctx context.Context, iatas []string) ([]GetScope
 	return items, nil
 }
 
-const getScopesByIATAs = `-- name: GetScopesByIATAs :many
-SELECT
-    ts.name,
-    COUNT(DISTINCT os.observer_id) AS observer_count,
-    COUNT(DISTINCT n.id) AS node_count,
-    COUNT(DISTINCT po.iata) AS iata_count
-FROM transport_scopes ts
-LEFT JOIN observer_scopes os ON os.scope_id = ts.id
-LEFT JOIN observers o ON o.id = os.observer_id
-LEFT JOIN packet_observations po ON po.observer_id = o.id
-LEFT JOIN nodes n ON n.default_scope_id = ts.id
-WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR po.iata = ANY($1::bpchar[]))
-GROUP BY ts.name
-ORDER BY ts.name
-`
-
-type GetScopesByIATAsRow struct {
-	Name          string `json:"name"`
-	ObserverCount int64  `json:"observer_count"`
-	NodeCount     int64  `json:"node_count"`
-	IataCount     int64  `json:"iata_count"`
-}
-
-func (q *Queries) GetScopesByIATAs(ctx context.Context, dollar_1 []string) ([]GetScopesByIATAsRow, error) {
-	rows, err := q.db.Query(ctx, getScopesByIATAs, dollar_1)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []GetScopesByIATAsRow{}
-	for rows.Next() {
-		var i GetScopesByIATAsRow
-		if err := rows.Scan(
-			&i.Name,
-			&i.ObserverCount,
-			&i.NodeCount,
-			&i.IataCount,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const getStatsClockDrift = `-- name: GetStatsClockDrift :many
 WITH page AS (
 SELECT
@@ -2370,6 +2427,39 @@ func (q *Queries) ListAllChannelMessages(ctx context.Context, arg ListAllChannel
 	return items, nil
 }
 
+const listChannelCatalogues = `-- name: ListChannelCatalogues :many
+SELECT iata, url, payload, etag, checked_at, attempted_at, next_attempt, last_error FROM meshmapper_channel_catalogues ORDER BY iata, attempted_at
+`
+
+func (q *Queries) ListChannelCatalogues(ctx context.Context) ([]MeshmapperChannelCatalogue, error) {
+	rows, err := q.db.Query(ctx, listChannelCatalogues)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MeshmapperChannelCatalogue{}
+	for rows.Next() {
+		var i MeshmapperChannelCatalogue
+		if err := rows.Scan(
+			&i.Iata,
+			&i.Url,
+			&i.Payload,
+			&i.Etag,
+			&i.CheckedAt,
+			&i.AttemptedAt,
+			&i.NextAttempt,
+			&i.LastError,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChannelMessages = `-- name: ListChannelMessages :many
 SELECT DISTINCT ON (cm.id) cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash, ts.name AS scope_name, p.transport_codes_present,
 (SELECT COUNT(*) FROM packet_observations po2 WHERE po2.packet_hash = cm.packet_hash) AS observation_count
@@ -2541,29 +2631,36 @@ func (q *Queries) ListChannelMessagesByHash(ctx context.Context, arg ListChannel
 const listChannels = `-- name: ListChannels :many
 SELECT c.id, c.channel_hash, c.key_fingerprint, c.name, c.hashtag, c.is_hashtag, c.is_public, c.key_known, c.first_seen, c.last_seen, c.message_count FROM channels c
 WHERE ($1::bytea IS NULL OR c.channel_hash = $1)
-  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR c.channel_hash IN (
-    SELECT ci.channel_hash FROM channel_iatas ci
-    WHERE ci.iata = ANY($2::bpchar[])
-  ))
-  AND ($3::timestamptz IS NULL OR c.last_seen < $3)
+  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0
+    OR EXISTS (SELECT 1 FROM meshmapper_channel_members m
+      WHERE m.key_fingerprint = c.key_fingerprint AND m.iata::bpchar = ANY($2::bpchar[]))
+    OR EXISTS (SELECT 1 FROM channel_config_scopes s
+      WHERE s.key_fingerprint = c.key_fingerprint AND (s.region_slug IS NULL OR s.region_slug IN (
+        SELECT r.slug FROM regions r JOIN region_iatas ri ON ri.region_id = r.id
+        WHERE ri.iata = ANY($2::bpchar[])))))
+  AND ($3::boolean IS NULL OR COALESCE(c.key_known, false) = $3)
+  AND ($4::timestamptz IS NULL OR c.last_seen < $4)
 ORDER BY c.last_seen DESC, c.id DESC
-LIMIT $4
+LIMIT $5
 `
 
 type ListChannelsParams struct {
 	ChannelHash []byte             `json:"channel_hash"`
 	Iatas       []string           `json:"iatas"`
+	KeyKnown    *bool              `json:"key_known"`
 	CursorTs    pgtype.Timestamptz `json:"cursor_ts"`
 	PageLimit   int32              `json:"page_limit"`
 }
 
-// Channels ordered by last seen, optionally filtered by hash and/or IATAs
-// (membership via channel_iatas). NULL hash / empty array skip those filters.
+// Channels ordered by last seen, optionally filtered by hash and/or IATAs.
+// A channel belongs to an IATA when MeshMapper lists it there or config scopes it
+// to a region containing it (or Beacon-wide). NULL hash / empty array / NULL key_known skip those filters.
 // Pass cursor=0 to start from the beginning (cursor is last_seen epoch ms).
 func (q *Queries) ListChannels(ctx context.Context, arg ListChannelsParams) ([]Channel, error) {
 	rows, err := q.db.Query(ctx, listChannels,
 		arg.ChannelHash,
 		arg.Iatas,
+		arg.KeyKnown,
 		arg.CursorTs,
 		arg.PageLimit,
 	)
@@ -2601,11 +2698,16 @@ const listChannelsAfter = `-- name: ListChannelsAfter :many
 SELECT c.id, c.channel_hash, c.key_fingerprint, c.name, c.hashtag, c.is_hashtag, c.is_public, c.key_known, c.first_seen, c.last_seen, c.message_count FROM channels c
 WHERE (c.last_seen, c.id) < ($1::timestamptz, $2::integer)
   AND ($3::bytea IS NULL OR c.channel_hash = $3)
-  AND (COALESCE(cardinality($4::bpchar[]), 0) = 0 OR c.channel_hash IN (
-    SELECT ci.channel_hash FROM channel_iatas ci WHERE ci.iata = ANY($4::bpchar[])
-  ))
+  AND (COALESCE(cardinality($4::bpchar[]), 0) = 0
+    OR EXISTS (SELECT 1 FROM meshmapper_channel_members m
+      WHERE m.key_fingerprint = c.key_fingerprint AND m.iata::bpchar = ANY($4::bpchar[]))
+    OR EXISTS (SELECT 1 FROM channel_config_scopes s
+      WHERE s.key_fingerprint = c.key_fingerprint AND (s.region_slug IS NULL OR s.region_slug IN (
+        SELECT r.slug FROM regions r JOIN region_iatas ri ON ri.region_id = r.id
+        WHERE ri.iata = ANY($4::bpchar[])))))
+  AND ($5::boolean IS NULL OR COALESCE(c.key_known, false) = $5)
 ORDER BY c.last_seen DESC, c.id DESC
-LIMIT $5
+LIMIT $6
 `
 
 type ListChannelsAfterParams struct {
@@ -2613,6 +2715,7 @@ type ListChannelsAfterParams struct {
 	CursorID    int32              `json:"cursor_id"`
 	ChannelHash []byte             `json:"channel_hash"`
 	Iatas       []string           `json:"iatas"`
+	KeyKnown    *bool              `json:"key_known"`
 	PageLimit   int32              `json:"page_limit"`
 }
 
@@ -2624,6 +2727,7 @@ func (q *Queries) ListChannelsAfter(ctx context.Context, arg ListChannelsAfterPa
 		arg.CursorID,
 		arg.ChannelHash,
 		arg.Iatas,
+		arg.KeyKnown,
 		arg.PageLimit,
 	)
 	if err != nil {
@@ -3735,6 +3839,54 @@ func (q *Queries) ListPacketsByIATAs(ctx context.Context, arg ListPacketsByIATAs
 	return items, nil
 }
 
+const listRegionState = `-- name: ListRegionState :many
+SELECT r.slug, r.name, COALESCE(r.display_order, 0)::int AS display_order, r.imported, r.center_lat, r.center_lng,
+    COALESCE(array_agg(ri.iata::text ORDER BY ri.iata) FILTER (WHERE ri.iata IS NOT NULL), '{}')::text[] AS iatas
+FROM regions r
+LEFT JOIN region_iatas ri ON ri.region_id = r.id
+GROUP BY r.id
+ORDER BY r.slug
+`
+
+type ListRegionStateRow struct {
+	Slug         string   `json:"slug"`
+	Name         string   `json:"name"`
+	DisplayOrder int32    `json:"display_order"`
+	Imported     bool     `json:"imported"`
+	CenterLat    *float64 `json:"center_lat"`
+	CenterLng    *float64 `json:"center_lng"`
+	Iatas        []string `json:"iatas"`
+}
+
+// Every region with its members, for reconciling imported MeshMapper groups.
+func (q *Queries) ListRegionState(ctx context.Context) ([]ListRegionStateRow, error) {
+	rows, err := q.db.Query(ctx, listRegionState)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRegionStateRow{}
+	for rows.Next() {
+		var i ListRegionStateRow
+		if err := rows.Scan(
+			&i.Slug,
+			&i.Name,
+			&i.DisplayOrder,
+			&i.Imported,
+			&i.CenterLat,
+			&i.CenterLng,
+			&i.Iatas,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRegions = `-- name: ListRegions :many
 
 SELECT id, slug, name
@@ -3761,6 +3913,39 @@ func (q *Queries) ListRegions(ctx context.Context) ([]ListRegionsRow, error) {
 	for rows.Next() {
 		var i ListRegionsRow
 		if err := rows.Scan(&i.ID, &i.Slug, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listScopeCatalogues = `-- name: ListScopeCatalogues :many
+SELECT iata, url, payload, etag, checked_at, attempted_at, next_attempt, last_error FROM meshmapper_scope_catalogues ORDER BY iata, attempted_at
+`
+
+func (q *Queries) ListScopeCatalogues(ctx context.Context) ([]MeshmapperScopeCatalogue, error) {
+	rows, err := q.db.Query(ctx, listScopeCatalogues)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MeshmapperScopeCatalogue{}
+	for rows.Next() {
+		var i MeshmapperScopeCatalogue
+		if err := rows.Scan(
+			&i.Iata,
+			&i.Url,
+			&i.Payload,
+			&i.Etag,
+			&i.CheckedAt,
+			&i.AttemptedAt,
+			&i.NextAttempt,
+			&i.LastError,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -3908,6 +4093,37 @@ func (q *Queries) ListUndecryptedGroupTextPackets(ctx context.Context) ([]ListUn
 	return items, nil
 }
 
+const listUndecryptedGroupTextPacketsByHash = `-- name: ListUndecryptedGroupTextPacketsByHash :many
+SELECT packet_hash, raw_payload FROM packets
+WHERE payload_type = 5 AND decrypted IS NOT TRUE AND channel_hash = ANY($1::bytea[])
+`
+
+type ListUndecryptedGroupTextPacketsByHashRow struct {
+	PacketHash []byte `json:"packet_hash"`
+	RawPayload []byte `json:"raw_payload"`
+}
+
+// Like ListUndecryptedGroupTextPackets, limited to channels that just gained a key.
+func (q *Queries) ListUndecryptedGroupTextPacketsByHash(ctx context.Context, hashes [][]byte) ([]ListUndecryptedGroupTextPacketsByHashRow, error) {
+	rows, err := q.db.Query(ctx, listUndecryptedGroupTextPacketsByHash, hashes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUndecryptedGroupTextPacketsByHashRow{}
+	for rows.Next() {
+		var i ListUndecryptedGroupTextPacketsByHashRow
+		if err := rows.Scan(&i.PacketHash, &i.RawPayload); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listZoneBoundaries = `-- name: ListZoneBoundaries :many
 SELECT iata, url, feature, etag, checked_at, attempted_at, next_attempt, last_error FROM meshmapper_zone_boundaries ORDER BY iata
 `
@@ -3934,6 +4150,62 @@ func (q *Queries) ListZoneBoundaries(ctx context.Context) ([]MeshmapperZoneBound
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listZoneLists = `-- name: ListZoneLists :many
+SELECT country, payload, etag, fetched_at, attempted_at, next_attempt, last_error FROM meshmapper_zone_lists ORDER BY country
+`
+
+func (q *Queries) ListZoneLists(ctx context.Context) ([]MeshmapperZoneList, error) {
+	rows, err := q.db.Query(ctx, listZoneLists)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MeshmapperZoneList{}
+	for rows.Next() {
+		var i MeshmapperZoneList
+		if err := rows.Scan(
+			&i.Country,
+			&i.Payload,
+			&i.Etag,
+			&i.FetchedAt,
+			&i.AttemptedAt,
+			&i.NextAttempt,
+			&i.LastError,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const pruneImportedRegions = `-- name: PruneImportedRegions :many
+DELETE FROM regions WHERE imported AND NOT (slug = ANY($1::text[])) RETURNING slug
+`
+
+func (q *Queries) PruneImportedRegions(ctx context.Context, keep []string) ([]string, error) {
+	rows, err := q.db.Query(ctx, pruneImportedRegions, keep)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var slug string
+		if err := rows.Scan(&slug); err != nil {
+			return nil, err
+		}
+		items = append(items, slug)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -4459,6 +4731,45 @@ func (q *Queries) ResolvePathHashesP4(ctx context.Context, arg ResolvePathHashes
 	return items, nil
 }
 
+const saveChannelCatalogue = `-- name: SaveChannelCatalogue :exec
+INSERT INTO meshmapper_channel_catalogues (iata, url, payload, etag, checked_at, attempted_at, next_attempt, last_error)
+VALUES ($1, $2, $3::jsonb, $4::text,
+    $5::timestamptz, $6, $7, $8)
+ON CONFLICT (iata, url) DO UPDATE SET
+    payload = COALESCE(EXCLUDED.payload, meshmapper_channel_catalogues.payload),
+    etag = COALESCE(EXCLUDED.etag, meshmapper_channel_catalogues.etag),
+    checked_at = COALESCE(EXCLUDED.checked_at, meshmapper_channel_catalogues.checked_at),
+    attempted_at = EXCLUDED.attempted_at,
+    next_attempt = EXCLUDED.next_attempt,
+    last_error = EXCLUDED.last_error
+`
+
+type SaveChannelCatalogueParams struct {
+	Iata        string             `json:"iata"`
+	Url         string             `json:"url"`
+	Payload     []byte             `json:"payload"`
+	Etag        *string            `json:"etag"`
+	CheckedAt   pgtype.Timestamptz `json:"checked_at"`
+	AttemptedAt pgtype.Timestamptz `json:"attempted_at"`
+	NextAttempt pgtype.Timestamptz `json:"next_attempt"`
+	LastError   string             `json:"last_error"`
+}
+
+// NULL payload/etag/checked_at retain the last good list after an error or 304.
+func (q *Queries) SaveChannelCatalogue(ctx context.Context, arg SaveChannelCatalogueParams) error {
+	_, err := q.db.Exec(ctx, saveChannelCatalogue,
+		arg.Iata,
+		arg.Url,
+		arg.Payload,
+		arg.Etag,
+		arg.CheckedAt,
+		arg.AttemptedAt,
+		arg.NextAttempt,
+		arg.LastError,
+	)
+	return err
+}
+
 const saveScopeCatalogue = `-- name: SaveScopeCatalogue :exec
 WITH inserted AS (
     INSERT INTO transport_scopes (name, transport_key, key_fingerprint, imported_only)
@@ -4546,6 +4857,43 @@ func (q *Queries) SaveZoneBoundary(ctx context.Context, arg SaveZoneBoundaryPara
 		arg.Feature,
 		arg.Etag,
 		arg.CheckedAt,
+		arg.AttemptedAt,
+		arg.NextAttempt,
+		arg.LastError,
+	)
+	return err
+}
+
+const saveZoneList = `-- name: SaveZoneList :exec
+INSERT INTO meshmapper_zone_lists (country, payload, etag, fetched_at, attempted_at, next_attempt, last_error)
+VALUES ($1, $2::jsonb, $3::text,
+    $4::timestamptz, $5, $6, $7)
+ON CONFLICT (country) DO UPDATE SET
+    payload = COALESCE(EXCLUDED.payload, meshmapper_zone_lists.payload),
+    etag = COALESCE(EXCLUDED.etag, meshmapper_zone_lists.etag),
+    fetched_at = COALESCE(EXCLUDED.fetched_at, meshmapper_zone_lists.fetched_at),
+    attempted_at = EXCLUDED.attempted_at,
+    next_attempt = EXCLUDED.next_attempt,
+    last_error = EXCLUDED.last_error
+`
+
+type SaveZoneListParams struct {
+	Country     string             `json:"country"`
+	Payload     []byte             `json:"payload"`
+	Etag        *string            `json:"etag"`
+	FetchedAt   pgtype.Timestamptz `json:"fetched_at"`
+	AttemptedAt pgtype.Timestamptz `json:"attempted_at"`
+	NextAttempt pgtype.Timestamptz `json:"next_attempt"`
+	LastError   string             `json:"last_error"`
+}
+
+// NULL payload/etag/fetched_at retain the last good list after an error or 304.
+func (q *Queries) SaveZoneList(ctx context.Context, arg SaveZoneListParams) error {
+	_, err := q.db.Exec(ctx, saveZoneList,
+		arg.Country,
+		arg.Payload,
+		arg.Etag,
+		arg.FetchedAt,
 		arg.AttemptedAt,
 		arg.NextAttempt,
 		arg.LastError,
@@ -4956,6 +5304,41 @@ func (q *Queries) UpsertIATADetails(ctx context.Context, arg UpsertIATADetailsPa
 	return err
 }
 
+const upsertImportedRegion = `-- name: UpsertImportedRegion :one
+INSERT INTO regions (slug, name, display_order, center_lat, center_lng, zoom_level, imported, updated_at)
+VALUES ($1, $2, $3, $4, $5, NULL, TRUE, NOW())
+ON CONFLICT (slug) DO UPDATE SET
+    name          = EXCLUDED.name,
+    display_order = EXCLUDED.display_order,
+    center_lat    = EXCLUDED.center_lat,
+    center_lng    = EXCLUDED.center_lng,
+    updated_at    = NOW()
+WHERE regions.imported
+RETURNING id
+`
+
+type UpsertImportedRegionParams struct {
+	Slug         string   `json:"slug"`
+	Name         string   `json:"name"`
+	DisplayOrder *int32   `json:"display_order"`
+	CenterLat    *float64 `json:"center_lat"`
+	CenterLng    *float64 `json:"center_lng"`
+}
+
+// A hand-written region owns its slug: the WHERE turns a clash into no row.
+func (q *Queries) UpsertImportedRegion(ctx context.Context, arg UpsertImportedRegionParams) (int32, error) {
+	row := q.db.QueryRow(ctx, upsertImportedRegion,
+		arg.Slug,
+		arg.Name,
+		arg.DisplayOrder,
+		arg.CenterLat,
+		arg.CenterLng,
+	)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
+}
+
 const upsertKnownRoute = `-- name: UpsertKnownRoute :exec
 
 INSERT INTO known_routes (path_key, node_ids, hash_prefix, iata, hop_count)
@@ -4978,7 +5361,8 @@ type UpsertKnownRouteParams struct {
 // ROUTES
 // ============================================================
 // Route identity is path_key, an md5 of node_ids computed by the caller.
-// Keep the latest processed representation without changing the node-chain identity.
+// On conflict, observation_count and last_seen are bumped and hash_prefix follows the
+// latest hearing, so evidence matches the hash width the route uses now.
 func (q *Queries) UpsertKnownRoute(ctx context.Context, arg UpsertKnownRouteParams) error {
 	_, err := q.db.Exec(ctx, upsertKnownRoute,
 		arg.PathKey,
@@ -5341,6 +5725,7 @@ ON CONFLICT (slug) DO UPDATE SET
     center_lat    = EXCLUDED.center_lat,
     center_lng    = EXCLUDED.center_lng,
     zoom_level    = EXCLUDED.zoom_level,
+    imported      = FALSE, -- config owns the slug from now on
     updated_at    = NOW()
 RETURNING id
 `
@@ -5368,22 +5753,6 @@ func (q *Queries) UpsertRegion(ctx context.Context, arg UpsertRegionParams) (int
 	var id int32
 	err := row.Scan(&id)
 	return id, err
-}
-
-const upsertRegionIATA = `-- name: UpsertRegionIATA :exec
-INSERT INTO region_iatas (region_id, iata)
-VALUES ($1, $2)
-ON CONFLICT (region_id, iata) DO NOTHING
-`
-
-type UpsertRegionIATAParams struct {
-	RegionID int32  `json:"region_id"`
-	Iata     string `json:"iata"`
-}
-
-func (q *Queries) UpsertRegionIATA(ctx context.Context, arg UpsertRegionIATAParams) error {
-	_, err := q.db.Exec(ctx, upsertRegionIATA, arg.RegionID, arg.Iata)
-	return err
 }
 
 const upsertTraceIATA = `-- name: UpsertTraceIATA :exec

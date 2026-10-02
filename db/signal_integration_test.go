@@ -138,7 +138,7 @@ SELECT int4send(n),'00000000-0000-0000-0000-000000000001',heard_at,iata,snr,rssi
 	}
 	w := httptest.NewRecorder()
 	request := httptest.NewRequest("GET", fmt.Sprintf("/signal?since=%d&until=%d&iatas=YVR", since.UnixMilli()+123, until.UnixMilli()+123), nil).WithContext(ctx)
-	handlers.StatsRouter(store).ServeHTTP(w, request)
+	handlers.StatsRouter(store, nil).ServeHTTP(w, request)
 	var response api.SignalStats
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || w.Code != 200 || response.Receptions != 13 || response.SNR.Samples != 5 {
 		t.Fatalf("PostgreSQL HTTP response: status=%d body=%s error=%v", w.Code, w.Body.String(), err)

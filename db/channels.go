@@ -65,6 +65,31 @@ func (s *Store) ListUndecryptedGroupTextPackets(ctx context.Context) ([]ingest.U
 	return packets, nil
 }
 
+// ListUndecryptedGroupTextPacketsByHash limits the boot backfill to channels that just gained a key.
+func (s *Store) ListUndecryptedGroupTextPacketsByHash(ctx context.Context, hashes [][]byte) ([]ingest.UndecryptedPacket, error) {
+	rows, err := s.q.ListUndecryptedGroupTextPacketsByHash(ctx, hashes)
+	if err != nil {
+		return nil, err
+	}
+	packets := make([]ingest.UndecryptedPacket, 0, len(rows))
+	for _, v := range rows {
+		packets = append(packets, ingest.UndecryptedPacket{PacketHash: v.PacketHash, RawPayload: v.RawPayload})
+	}
+	return packets, nil
+}
+
+// SetChannelConfigScopes replaces every configured channel's region placement;
+// an empty region means Beacon-wide.
+func (s *Store) SetChannelConfigScopes(ctx context.Context, fingerprints [][]byte, regions []string) error {
+	if err := s.q.DeleteChannelConfigScopes(ctx); err != nil {
+		return err
+	}
+	if len(fingerprints) == 0 {
+		return nil
+	}
+	return s.q.AddChannelConfigScopes(ctx, sqlc.AddChannelConfigScopesParams{Fingerprints: fingerprints, Regions: regions})
+}
+
 func (s *Store) UpsertChannelIATA(ctx context.Context, channelHash []byte, iata string, heardAt time.Time) error {
 	return s.q.UpsertChannelIATA(ctx, sqlc.UpsertChannelIATAParams{
 		ChannelHash: channelHash,
@@ -77,7 +102,7 @@ func (s *Store) DeleteOldChannelIATAs(ctx context.Context, cutoff time.Time) err
 	return s.q.DeleteOldChannelIATAs(ctx, pgtype.Timestamptz{Time: cutoff, Valid: true})
 }
 
-func (s *Store) ListChannels(ctx context.Context, limit int32, hash []byte, iatas []string, cursor int64, pageCursor *api.ChannelCursor) (api.ChannelPage, error) {
+func (s *Store) ListChannels(ctx context.Context, limit int32, hash []byte, iatas []string, keyKnown *bool, cursor int64, pageCursor *api.ChannelCursor) (api.ChannelPage, error) {
 	var cursorTS pgtype.Timestamptz
 	if cursor > 0 {
 		cursorTS = pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}
@@ -86,12 +111,12 @@ func (s *Store) ListChannels(ctx context.Context, limit int32, hash []byte, iata
 	var err error
 	if pageCursor != nil {
 		rows, err = s.q.ListChannelsAfter(ctx, sqlc.ListChannelsAfterParams{
-			ChannelHash: hash, Iatas: iatas, PageLimit: limit + 1,
+			ChannelHash: hash, Iatas: iatas, KeyKnown: keyKnown, PageLimit: limit + 1,
 			CursorTs: pgtype.Timestamptz{Time: pageCursor.LastSeen, Valid: true}, CursorID: pageCursor.ID,
 		})
 	} else {
 		rows, err = s.q.ListChannels(ctx, sqlc.ListChannelsParams{
-			ChannelHash: hash, Iatas: iatas, CursorTs: cursorTS, PageLimit: limit + 1,
+			ChannelHash: hash, Iatas: iatas, KeyKnown: keyKnown, CursorTs: cursorTS, PageLimit: limit + 1,
 		})
 	}
 	if err != nil {

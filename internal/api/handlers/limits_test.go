@@ -19,7 +19,7 @@ func TestListLimits(t *testing.T) {
 	var got int32
 	var calls int
 	reader := stubReader{
-		listChannels: func(ctx context.Context, limit int32, hash []byte, iatas []string, cursor int64, pageCursor *api.ChannelCursor) (api.ChannelPage, error) {
+		listChannels: func(ctx context.Context, limit int32, hash []byte, iatas []string, keyKnown *bool, cursor int64, pageCursor *api.ChannelCursor) (api.ChannelPage, error) {
 			calls++
 			got = limit
 			return api.ChannelPage{}, nil
@@ -113,7 +113,7 @@ func TestListLimits(t *testing.T) {
 	router.Mount("/messages", MessagesRouter(reader))
 	router.Mount("/routes", RoutesRouter(reader))
 	router.Mount("/traces", TracesRouter(reader))
-	router.Mount("/stats", StatsRouter(reader))
+	router.Mount("/stats", StatsRouter(reader, nil))
 	for _, endpoint := range []struct {
 		path         string
 		defaultLimit int32

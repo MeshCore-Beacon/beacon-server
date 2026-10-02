@@ -5,23 +5,41 @@ package config
 
 import (
 	"fmt"
-	"net/url"
-	"regexp"
-	"slices"
+	"log/slog"
 	"time"
 )
 
-// MaxScopeSources bounds both network refresh work and imported matching keys.
-const MaxScopeSources = 16
+// MeshMapper rate-limits get_zones/get_geojson to one request per target per
+// 23.5h and get_scopes to one per region per 55m; minimums round up.
+const (
+	MinZonesRefresh    = 24 * time.Hour
+	MinScopesRefresh   = time.Hour
+	MinChannelsRefresh = 24 * time.Hour // get_channels.php: one per region per 23.5h
+)
 
 type MeshMapperConfig struct {
-	Scopes MeshMapperScopesConfig `yaml:"scopes"`
-	Zones  MeshMapperZonesConfig  `yaml:"zones"`
+	Scopes   MeshMapperScopesConfig   `yaml:"scopes"`
+	Zones    MeshMapperZonesConfig    `yaml:"zones"`
+	Channels MeshMapperChannelsConfig `yaml:"channels"`
 }
 
-// MeshMapperZonesConfig imports each region IATA's published boundary, overriding borderFile.
+// MeshMapperChannelsConfig imports each known IATA's public hashtag channels.
+type MeshMapperChannelsConfig struct {
+	Enabled         bool     `yaml:"enabled"`
+	RefreshInterval duration `yaml:"refresh_interval"`
+}
+
+func (c MeshMapperChannelsConfig) Interval() time.Duration {
+	if c.RefreshInterval.Duration == 0 {
+		return MinChannelsRefresh
+	}
+	return c.RefreshInterval.Duration
+}
+
+// MeshMapperZonesConfig imports each known IATA's published boundary, overriding borderFile.
 type MeshMapperZonesConfig struct {
 	Enabled         bool     `yaml:"enabled"`
+	ImportGroups    bool     `yaml:"import_groups"` // zone groups become regions
 	RefreshInterval duration `yaml:"refresh_interval"`
 }
 
@@ -32,20 +50,11 @@ func (c MeshMapperZonesConfig) Interval() time.Duration {
 	return c.RefreshInterval.Duration
 }
 
-// RegionIATAs returns the sorted, unique IATAs of every configured region.
-func (c *Config) RegionIATAs() []string {
-	var iatas []string
-	for _, region := range c.Regions {
-		iatas = append(iatas, region.IATAs...)
-	}
-	slices.Sort(iatas)
-	return slices.Compact(iatas)
-}
-
 // MeshMapperScopesConfig augments, but never replaces, the manual scopes list.
+// Sources are discovered per known IATA from the zone list.
 type MeshMapperScopesConfig struct {
 	Enabled         bool              `yaml:"enabled"`
-	Sources         map[string]string `yaml:"sources"` // configured IATA -> published regional endpoint
+	Sources         map[string]string `yaml:"sources"` // deprecated: ignored, kept to warn
 	RefreshInterval duration          `yaml:"refresh_interval"`
 }
 
@@ -56,43 +65,27 @@ func (c MeshMapperScopesConfig) Interval() time.Duration {
 	return c.RefreshInterval.Duration
 }
 
-var meshMapperHost = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*\.meshmapper\.net$`)
-
 func (c *Config) validateMeshMapper() error {
+	if z := c.MeshMapper.Zones; z.ImportGroups && !z.Enabled {
+		return fmt.Errorf("meshmapper.zones.import_groups requires meshmapper.zones.enabled")
+	}
 	if z := c.MeshMapper.Zones; z.Enabled {
-		// The Zones API asks clients not to poll more than once an hour.
-		if z.Interval() < time.Hour || z.Interval() > 7*24*time.Hour {
-			return fmt.Errorf("meshmapper.zones.refresh_interval must be between 1h and 168h")
+		if z.Interval() < MinZonesRefresh || z.Interval() > 7*24*time.Hour {
+			return fmt.Errorf("meshmapper.zones.refresh_interval must be between 24h and 168h")
 		}
-		if len(c.RegionIATAs()) == 0 {
-			return fmt.Errorf("meshmapper.zones needs at least one configured region IATA")
-		}
+	}
+	if ch := c.MeshMapper.Channels; ch.Enabled && (ch.Interval() < MinChannelsRefresh || ch.Interval() > 7*24*time.Hour) {
+		return fmt.Errorf("meshmapper.channels.refresh_interval must be between 24h and 168h")
 	}
 	s := c.MeshMapper.Scopes
 	if !s.Enabled {
 		return nil
 	}
-	if len(s.Sources) == 0 || len(s.Sources) > MaxScopeSources {
-		return fmt.Errorf("meshmapper.scopes.sources must contain 1-%d regional endpoints", MaxScopeSources)
+	if s.Interval() < MinScopesRefresh || s.Interval() > 24*time.Hour {
+		return fmt.Errorf("meshmapper.scopes.refresh_interval must be between 1h and 24h")
 	}
-	if s.Interval() < 5*time.Minute || s.Interval() > 24*time.Hour {
-		return fmt.Errorf("meshmapper.scopes.refresh_interval must be between 5m and 24h")
-	}
-	configured := map[string]bool{}
-	for _, region := range c.Regions {
-		for _, iata := range region.IATAs {
-			configured[iata] = true
-		}
-	}
-	for iata, endpoint := range s.Sources {
-		if !configured[iata] {
-			return fmt.Errorf("meshmapper.scopes source %q must belong to a configured region", iata)
-		}
-		u, err := url.Parse(endpoint)
-		if err != nil || u.Scheme != "https" || u.User != nil || !meshMapperHost.MatchString(u.Host) ||
-			u.Path != "/get_scopes.php" || u.RawPath != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
-			return fmt.Errorf("meshmapper.scopes source %q must be a published https://<region>.meshmapper.net/get_scopes.php endpoint without credentials or parameters", iata)
-		}
+	if len(s.Sources) > 0 {
+		slog.Warn("meshmapper.scopes.sources is ignored; sources are discovered from the MeshMapper zone list", "component", "config")
 	}
 	return nil
 }

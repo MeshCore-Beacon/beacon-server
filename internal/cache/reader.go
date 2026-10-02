@@ -25,7 +25,6 @@ const (
 	keyRegionSlugPrefix        = "beacon:region:slug:"
 	keyScopeNames              = "beacon:scope:names"
 	keyScopeStats              = "beacon:scope:stats"
-	keyScopesByIATAsPrefix     = "beacon:scopes:iatas:"
 	keyScopeByNamePrefix       = "beacon:scope:name:"
 	keyStatsOverviewPrefix     = "beacon:stats:overview:"
 	keyStatsObservationsPrefix = "beacon:stats:observations:"
@@ -83,13 +82,24 @@ func NewCachedReader(inner api.Reader, c *Client, ttl CacheTTLs) api.Reader {
 // InvalidateScopeNames makes newly committed catalogue names visible to every scope read.
 func (cr *CachedReader) InvalidateScopeNames(ctx context.Context) {
 	cr.c.del(ctx, keyScopeNames)
-	cr.c.delPrefix(ctx, keyScopesByIATAsPrefix)
 	cr.c.delPrefix(ctx, keyScopeByNamePrefix)
 }
 
 // InvalidateIATABorder makes an imported or removed MeshMapper boundary visible.
 func (cr *CachedReader) InvalidateIATABorder(ctx context.Context, iata string) {
 	cr.c.del(ctx, keyIATABorderPrefix+iata)
+}
+
+// InvalidateIATAs makes imported MeshMapper names and locations visible to every IATA read.
+func (cr *CachedReader) InvalidateIATAs(ctx context.Context) {
+	cr.c.del(ctx, keyIATAs)
+	cr.c.delPrefix(ctx, keyIATAPrefix)
+}
+
+// InvalidateRegions makes imported MeshMapper regions visible to every region read.
+func (cr *CachedReader) InvalidateRegions(ctx context.Context) {
+	cr.c.del(ctx, keyRegions)
+	cr.c.delPrefix(ctx, keyRegionPrefix)
 }
 
 // InvalidateNode removes the cached entries for a node by UUID.
@@ -171,17 +181,6 @@ func (cr *CachedReader) GetScopeStats(ctx context.Context, iatas []string) ([]ap
 	}
 	return getOrSet(ctx, cr.c, keyScopeStats+":"+segment, cr.ttl.Reference, func() ([]api.ScopeStats, error) {
 		return cr.inner.GetScopeStats(ctx, iatas)
-	})
-}
-
-// GetScopesByIATAs implements [api.Reader].
-func (cr *CachedReader) GetScopesByIATAs(ctx context.Context, iatas []string) ([]api.ScopeSummary, error) {
-	sorted := make([]string, len(iatas))
-	copy(sorted, iatas)
-	sort.Strings(sorted)
-	key := keyScopesByIATAsPrefix + strings.Join(sorted, ",")
-	return getOrSet(ctx, cr.c, key, cr.ttl.Reference, func() ([]api.ScopeSummary, error) {
-		return cr.inner.GetScopesByIATAs(ctx, iatas)
 	})
 }
 
@@ -420,8 +419,8 @@ func (cr *CachedReader) GetCrossIATANeighbors(ctx context.Context, nodeID uuid.U
 }
 
 // ListChannels implements [api.Reader].
-func (cr *CachedReader) ListChannels(ctx context.Context, limit int32, hash []byte, iatas []string, cursor int64, pageCursor *api.ChannelCursor) (api.ChannelPage, error) {
-	return cr.inner.ListChannels(ctx, limit, hash, iatas, cursor, pageCursor)
+func (cr *CachedReader) ListChannels(ctx context.Context, limit int32, hash []byte, iatas []string, keyKnown *bool, cursor int64, pageCursor *api.ChannelCursor) (api.ChannelPage, error) {
+	return cr.inner.ListChannels(ctx, limit, hash, iatas, keyKnown, cursor, pageCursor)
 }
 
 // ListChannelMessages implements [api.Reader].

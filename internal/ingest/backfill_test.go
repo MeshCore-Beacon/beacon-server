@@ -135,6 +135,23 @@ func TestBackfillChannelMessages_DecryptsAndCounts(t *testing.T) {
 	}
 }
 
+func TestBackfillChannelHashes_OnlyScansNewHashes(t *testing.T) {
+	psk := make([]byte, 16)
+	db := &stubDB{
+		insertChannelMessageResult: true,
+		undecryptedByHash:          []UndecryptedPacket{{PacketHash: []byte{0x01}, RawPayload: encryptedGroupText(t, 0x44, psk, "ded", "hi")}},
+		undecryptedPackets:         []UndecryptedPacket{{PacketHash: []byte{0x02}, RawPayload: encryptedGroupText(t, 0x44, psk, "x", "y")}},
+	}
+	keys := &mapKeys{entries: map[byte][]keystore.Entry{0x44: {{Key: psk, Fingerprint: []byte{0xAA}}}}}
+	n, err := BackfillChannelHashes(context.Background(), db, keys, [][]byte{{0x44}})
+	if err != nil || n != 1 {
+		t.Fatalf("n=%d err=%v", n, err)
+	}
+	if len(db.backfillHashes) != 1 || db.backfillHashes[0][0] != 0x44 {
+		t.Fatalf("scanned hashes %x", db.backfillHashes)
+	}
+}
+
 func TestBackfillChannelMessages_NoUndecryptedPackets(t *testing.T) {
 	db := &stubDB{}
 	keys := &mapKeys{}

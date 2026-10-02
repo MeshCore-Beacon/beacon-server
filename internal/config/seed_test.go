@@ -15,12 +15,13 @@ import (
 )
 
 type stubSeeder struct {
-	regions     map[string]int32
-	iatas       []string
-	regionIATAs map[int32][]string
-	scopes      []string
-	borders     map[string]json.RawMessage
-	upsertErr   error
+	regions        map[string]int32
+	iatas          []string
+	regionIATAs    map[int32][]string
+	channelRegions []string
+	scopes         []string
+	borders        map[string]json.RawMessage
+	upsertErr      error
 }
 
 func newStubSeeder() *stubSeeder {
@@ -52,8 +53,13 @@ func (s *stubSeeder) UpsertRegion(_ context.Context, slug, _, _ string, _ int, _
 	return id, s.upsertErr
 }
 
-func (s *stubSeeder) UpsertRegionIATA(_ context.Context, regionID int32, iata string) error {
-	s.regionIATAs[regionID] = append(s.regionIATAs[regionID], iata)
+func (s *stubSeeder) SetRegionIATAs(_ context.Context, regionID int32, iatas []string) error {
+	s.regionIATAs[regionID] = iatas
+	return s.upsertErr
+}
+
+func (s *stubSeeder) SetChannelConfigScopes(_ context.Context, fingerprints [][]byte, regions []string) error {
+	s.channelRegions = regions
 	return s.upsertErr
 }
 
@@ -254,5 +260,19 @@ func TestDeriveScopeKey_DifferentInputs(t *testing.T) {
 	b := scopestore.FromName("#other").TransportKey
 	if hex.EncodeToString(a) == hex.EncodeToString(b) {
 		t.Error("expected different keys for different inputs")
+	}
+}
+
+func TestSeed_ChannelScopes(t *testing.T) {
+	cfg := &Config{
+		Regions:     []RegionConfig{{Slug: "bc", IATAs: []string{"YVR"}}},
+		ChannelKeys: ChannelKeysConfig{Hashtags: []HashtagConfig{{Name: "meshcore"}, {Name: "vancouver", Region: "bc"}}},
+	}
+	db := newStubSeeder()
+	if err := Seed(context.Background(), cfg, db); err != nil {
+		t.Fatal(err)
+	}
+	if len(db.channelRegions) != 2 || db.channelRegions[0] != "" || db.channelRegions[1] != "bc" {
+		t.Fatalf("channel regions = %q", db.channelRegions)
 	}
 }

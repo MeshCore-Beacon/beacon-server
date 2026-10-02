@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/config"
+	"github.com/MeshCore-Beacon/beacon-server/internal/keystore"
+	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
 )
 
 const square = `{"type":"Polygon","coordinates":[[[-76,45],[-75,45],[-75,46],[-76,46],[-76,45]]]}`
@@ -25,9 +27,73 @@ func boundaryBody(code, geometry string) string {
 }
 
 type zoneMemoryStore struct {
-	rows   map[string]Boundary
-	pruned []string
-	fail   bool
+	iatas   []string
+	rows    map[string]Boundary
+	pruned  []string
+	fail    bool
+	regions map[string]RegionState
+	lists   *zoneListMemory
+	details map[string]IATADetails
+	writes  int
+}
+
+func (s *zoneMemoryStore) ListIATADetails(context.Context) ([]IATADetails, error) {
+	var out []IATADetails
+	for _, iata := range s.iatas {
+		d := s.details[iata]
+		d.IATA = iata
+		out = append(out, d)
+	}
+	return out, nil
+}
+
+func (s *zoneMemoryStore) UpsertIATADetails(_ context.Context, iata, name string, lat, lng *float64) error {
+	if s.details == nil {
+		s.details = map[string]IATADetails{}
+	}
+	s.details[iata] = IATADetails{IATA: iata, Name: name, Lat: lat, Lng: lng}
+	s.writes++
+	return nil
+}
+
+func (s *zoneMemoryStore) ListRegionState(context.Context) ([]RegionState, error) {
+	var out []RegionState
+	for _, r := range s.regions {
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+func (s *zoneMemoryStore) SaveImportedRegion(_ context.Context, r RegionState) (bool, error) {
+	if s.regions == nil {
+		s.regions = map[string]RegionState{}
+	}
+	if cur, ok := s.regions[r.Slug]; ok && !cur.Imported {
+		return false, nil
+	}
+	r.Imported = true
+	s.regions[r.Slug] = r
+	for _, m := range r.IATAs { // members become known IATAs, as AddIATAs does
+		if !slices.Contains(s.iatas, m) {
+			s.iatas = append(s.iatas, m)
+		}
+	}
+	return true, nil
+}
+
+func (s *zoneMemoryStore) PruneImportedRegions(_ context.Context, keep []string) ([]string, error) {
+	var removed []string
+	for slug, r := range s.regions {
+		if r.Imported && !slices.Contains(keep, slug) {
+			delete(s.regions, slug)
+			removed = append(removed, slug)
+		}
+	}
+	return removed, nil
+}
+
+func (s *zoneMemoryStore) ListKnownIATAs(context.Context) ([]string, error) {
+	return slices.Clone(s.iatas), nil
 }
 
 func (s *zoneMemoryStore) PruneZoneBoundaries(_ context.Context, keep []string) ([]string, error) {
@@ -62,6 +128,30 @@ func (s *zoneMemoryStore) SaveZoneBoundary(_ context.Context, b Boundary) error 
 		b.CheckedAt, b.ETag = old.CheckedAt, old.ETag
 	}
 	s.rows[b.IATA] = b
+	return nil
+}
+
+type zoneListMemory struct{ rows map[string]ZoneList }
+
+func newZoneListMemory() *zoneListMemory { return &zoneListMemory{rows: map[string]ZoneList{}} }
+
+func (s *zoneListMemory) ListZoneLists(context.Context) ([]ZoneList, error) {
+	var out []ZoneList
+	for _, l := range s.rows {
+		out = append(out, l)
+	}
+	return out, nil
+}
+
+func (s *zoneListMemory) SaveZoneList(_ context.Context, l ZoneList) error {
+	old := s.rows[l.Country]
+	if l.Payload == nil {
+		l.Payload = old.Payload
+	}
+	if l.FetchedAt.IsZero() {
+		l.FetchedAt, l.ETag = old.FetchedAt, old.ETag
+	}
+	s.rows[l.Country] = l
 	return nil
 }
 
@@ -113,8 +203,18 @@ type zoneHarness struct {
 func newZoneHarness(t *testing.T, f *fakeMeshMapper, store *zoneMemoryStore, enabled bool) *zoneHarness {
 	t.Helper()
 	h := &zoneHarness{store: store}
-	h.z = NewZones(config.MeshMapperZonesConfig{Enabled: enabled}, []string{"YOW"}, store)
-	h.z.listURL = f.URL + "/get_zones.php"
+	if store.iatas == nil {
+		store.iatas = []string{"YOW"}
+	}
+	if store.lists == nil {
+		store.lists = newZoneListMemory()
+	}
+	dir := NewDirectory(store.lists)
+	dir.listURL = f.URL + "/get_zones.php"
+	if err := dir.Restore(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.z = NewZones(config.MeshMapperZonesConfig{Enabled: enabled}, store, dir)
 	h.z.boundsURL = func(site string) (string, bool) { return site + "get_geojson.php", strings.HasPrefix(site, f.URL) }
 	h.z.OnChange(func(_ context.Context, iata string) { h.changed = append(h.changed, iata) })
 	h.z.OnUpdate(func(imported map[string]json.RawMessage) { h.imported = imported })
@@ -175,11 +275,11 @@ func TestZonesKeepLastGoodBoundary(t *testing.T) {
 		wantRetry      time.Duration
 	}{
 		{"null geometry", boundaryBody("YOW", "null"), 200, "no boundary", 24 * time.Hour},
-		{"not found", "", 404, "HTTP 404", time.Hour},
-		{"unavailable", "", 503, "HTTP 503", time.Hour},
-		{"truncated", boundaryBody("YOW", square)[:80], 200, "invalid response", time.Hour},
-		{"other region", boundaryBody("YVR", square), 200, "invalid response", time.Hour},
-		{"oversized", `{"type":"FeatureCollection","features":[],"pad":"` + strings.Repeat("x", MaxBoundaryBody) + `"}`, 200, "invalid response", time.Hour},
+		{"not found", "", 404, "HTTP 404", 24 * time.Hour},
+		{"unavailable", "", 503, "HTTP 503", 24 * time.Hour},
+		{"truncated", boundaryBody("YOW", square)[:80], 200, "invalid response", 24 * time.Hour},
+		{"other region", boundaryBody("YVR", square), 200, "invalid response", 24 * time.Hour},
+		{"oversized", `{"type":"FeatureCollection","features":[],"pad":"` + strings.Repeat("x", MaxBoundaryBody) + `"}`, 200, "invalid response", 24 * time.Hour},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFakeMeshMapper(t)
@@ -231,29 +331,44 @@ func TestZonesListFailureBacksOff(t *testing.T) {
 		t.Fatal("failed list retried early", f.listCalls, f.calls)
 	}
 	f.listStatus, f.list = 200, `{"country":"US","zones":[]}`
-	h.z.lists["CA"].nextAttempt, h.z.lists["CA"].fetchedAt = time.Time{}, time.Time{}
+	h.z.dir.lists["CA"].nextAttempt, h.z.dir.lists["CA"].fetchedAt = time.Time{}, time.Time{}
 	_ = h.z.Refresh(context.Background())
-	if h.z.lists["CA"].zones != nil {
+	if h.z.dir.lists["CA"].zones != nil {
 		t.Fatal("list for another country accepted")
 	}
 }
 
-func TestZonesRateLimitPausesEveryRequest(t *testing.T) {
+func TestZonesRateLimitWaitsOnlyForThatRegion(t *testing.T) {
+	for retryAfter, want := range map[string]time.Duration{"120": 24 * time.Hour, "172800": 48 * time.Hour} {
+		f := newFakeMeshMapper(t)
+		h := newZoneHarness(t, f, &zoneMemoryStore{rows: map[string]Boundary{}}, true)
+		f.status, f.retryAfter = 429, retryAfter
+		b := h.tick(t)
+		if b.LastError != "HTTP 429" || b.NextAttempt.Sub(b.AttemptedAt) != want {
+			t.Fatalf("Retry-After %ss: next attempt in %v, want %v", retryAfter, b.NextAttempt.Sub(b.AttemptedAt), want)
+		}
+		restarted := newZoneHarness(t, f, h.store, true)
+		if err := restarted.z.Refresh(context.Background()); err != nil || f.calls != 1 {
+			t.Fatal("requested again before the rate limit allows", err, f.calls)
+		}
+	}
+}
+
+func TestZoneListSurvivesRestart(t *testing.T) {
 	f := newFakeMeshMapper(t)
-	h := newZoneHarness(t, f, &zoneMemoryStore{rows: map[string]Boundary{}}, true)
-	f.status, f.retryAfter = 429, "120"
-	b := h.tick(t)
-	if b.LastError != "HTTP 429" || b.NextAttempt.Sub(b.AttemptedAt) != time.Hour || h.z.retryAfter.Sub(b.AttemptedAt) != 2*time.Minute {
-		t.Fatalf("429 not honoured: %+v retryAfter=%v", b, h.z.retryAfter)
+	store := &zoneMemoryStore{rows: map[string]Boundary{}}
+	h := newZoneHarness(t, f, store, true)
+	h.tick(t)
+	if f.listCalls != 1 {
+		t.Fatal("list not fetched", f.listCalls)
 	}
-	h.z.regions[0].b.NextAttempt = time.Time{}
-	_ = h.z.Refresh(context.Background())
-	if f.calls != 1 {
-		t.Fatal("requested during Retry-After")
+	if got := h.z.dir.lists["CA"].nextAttempt.Sub(h.z.dir.lists["CA"].fetchedAt); got != 24*time.Hour {
+		t.Fatal("zone list refetched sooner than the rate limit allows", got)
 	}
-	restarted := newZoneHarness(t, f, h.store, true)
-	if !restarted.z.retryAfter.Equal(b.NextAttempt) {
-		t.Fatal("persisted 429 not restored")
+	restarted := newZoneHarness(t, f, store, true)
+	restarted.tick(t)
+	if f.listCalls != 1 || f.calls != 2 {
+		t.Fatal("restart refetched the zone list", f.listCalls, f.calls)
 	}
 }
 
@@ -266,7 +381,7 @@ func TestZonesRestoreAndPrune(t *testing.T) {
 
 	restarted := newZoneHarness(t, f, store, true)
 	if !slices.Equal(store.pruned, []string{"OLD"}) || !slices.Equal(restarted.changed, []string{"OLD"}) {
-		t.Fatal("unconfigured IATA not pruned", store.pruned, restarted.changed)
+		t.Fatal("unknown IATA not pruned", store.pruned, restarted.changed)
 	}
 	if restarted.imported["YOW"] == nil || f.calls != 1 {
 		t.Fatal("saved boundary not restored without a request")
@@ -278,6 +393,29 @@ func TestZonesRestoreAndPrune(t *testing.T) {
 	disabled := newZoneHarness(t, f, store, false)
 	if len(store.rows) != 0 || !slices.Equal(disabled.changed, []string{"YOW"}) || len(disabled.z.regions) != 0 {
 		t.Fatal("disabling did not remove imports")
+	}
+}
+
+func TestZonesPickUpNewIATAs(t *testing.T) {
+	f := newFakeMeshMapper(t)
+	store := &zoneMemoryStore{iatas: []string{}, rows: map[string]Boundary{}}
+	h := newZoneHarness(t, f, store, true)
+	for range 2 {
+		if err := h.z.Refresh(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if f.listCalls != 0 || f.calls != 0 {
+		t.Fatal("requested with no IATAs", f.listCalls, f.calls)
+	}
+	store.iatas = []string{"YOW", "ZZZ"}
+	for range 2 {
+		if err := h.z.Refresh(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(h.z.regions) != 1 || h.imported["YOW"] == nil || !slices.Equal(h.changed, []string{"YOW"}) {
+		t.Fatal("new IATA not imported", len(h.z.regions), h.changed)
 	}
 }
 
@@ -327,5 +465,30 @@ func TestDecodeBoundaryRejectsUnusableOutlines(t *testing.T) {
 	}
 	if feature, err := decodeBoundary([]byte(boundaryBody("yow", square)), "YOW"); err != nil || feature == nil {
 		t.Fatal("case-insensitive code rejected", err)
+	}
+}
+
+func TestClientsAllowMeshMapperTimeout(t *testing.T) {
+	ctx := context.Background()
+	scopes, err := New(ctx, config.MeshMapperScopesConfig{}, nil, NewDirectory(nil), scopestore.New(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	channels, err := NewChannels(ctx, config.MeshMapperChannelsConfig{}, newChannelMemoryStore(), NewDirectory(nil), keystore.NewMapKeyStore(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]*http.Client{
+		"directory": NewDirectory(nil).client,
+		"zones":     NewZones(config.MeshMapperZonesConfig{}, nil, nil).client,
+		"scopes":    scopes.client,
+		"channels":  channels.client,
+	} {
+		if c.Timeout < 60*time.Second {
+			t.Errorf("%s client gives up after %v; MeshMapper asks for 60-120s", name, c.Timeout)
+		}
+	}
+	if refreshTimeout <= requestTimeout {
+		t.Fatal("a refresh must outlast its request")
 	}
 }

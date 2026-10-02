@@ -27,19 +27,21 @@ func TestPublicCataloguesFreshnessAndIsolation(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	cfg := config.MeshMapperScopesConfig{Enabled: true, Sources: map[string]string{"YOW": server.URL}}
-	store := &memoryStore{rows: map[string]Cache{}}
-	imp, err := New(context.Background(), cfg, store, scopestore.New(), nil)
+	cfg := config.MeshMapperScopesConfig{Enabled: true}
+	store := newMemoryStore("YOW")
+	imp, err := New(context.Background(), cfg, store, NewDirectory(newZoneListMemory()), scopestore.New(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := imp.Catalogues(); len(got) != 1 || got[0].CheckedAt != 0 || len(got[0].Scopes) != 0 {
 		t.Fatal(got)
 	}
+	imp.sources[0].url = server.URL
 	now := time.Now()
 	if err := imp.refresh(context.Background(), &imp.sources[0], now); err != nil {
 		t.Fatal(err)
 	}
+	imp.publishCatalogues()
 	old := imp.Catalogues()
 	if old[0].Scopes[0].Name != "#yow" || old[0].Scopes[1].Name != "#YOW" || len(old[0].Scopes) != 3 || old[0].Repeaters != 5 || old[0].Scoped != 3 || old[0].FreshUntil <= old[0].CheckedAt {
 		t.Fatal(old)
@@ -48,6 +50,7 @@ func TestPublicCataloguesFreshnessAndIsolation(t *testing.T) {
 	if err := imp.refresh(context.Background(), &imp.sources[0], now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
+	imp.publishCatalogues()
 	current := imp.Catalogues()[0]
 	if current.LastError != "HTTP 503" || current.CheckedAt != old[0].CheckedAt || current.GeneratedAt != old[0].GeneratedAt || len(current.Scopes) != 3 || old[0].LastError != "" {
 		t.Fatal(current, old)
@@ -68,13 +71,33 @@ func TestPublicCataloguesFreshnessAndIsolation(t *testing.T) {
 	if calls != 2 {
 		t.Fatal("reading public metadata performed upstream requests", calls)
 	}
-	disabled, err := New(context.Background(), config.MeshMapperScopesConfig{}, store, scopestore.New(), nil)
+	disabled, err := New(context.Background(), config.MeshMapperScopesConfig{}, store, NewDirectory(newZoneListMemory()), scopestore.New(), nil)
 	if err != nil || len(disabled.Catalogues()) != 0 {
 		t.Fatal("disabled importer exposed old membership")
 	}
-	store.rows["YOW"+server.URL] = Cache{Payload: []byte(`{"scopes":"invalid"}`)}
-	restored, err := New(context.Background(), cfg, store, scopestore.New(), nil)
+	store.rows[sourceKey{"YOW", server.URL}] = Cache{Payload: []byte(`{"scopes":"invalid"}`)}
+	restored, err := New(context.Background(), cfg, store, NewDirectory(newZoneListMemory()), scopestore.New(), nil)
 	if err != nil || len(restored.Catalogues()[0].Scopes) != 0 || restored.Catalogues()[0].LastError == "" {
 		t.Fatal("invalid saved metadata leaked")
+	}
+}
+
+func TestPublicCataloguesIncludeDiscoveredAndUnlistedRegions(t *testing.T) {
+	ctx := context.Background()
+	store := newMemoryStore("YOW")
+	dir := NewDirectory(newZoneListMemory())
+	dir.lists["CA"] = &zoneList{zones: map[string]zoneEntry{}, fetchedAt: time.Now()}
+	imp, err := New(ctx, config.MeshMapperScopesConfig{Enabled: true}, store, dir, scopestore.New(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := imp.Catalogues()
+	store.iatas = append(store.iatas, "YKF")
+	if err := imp.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	after := imp.Catalogues()
+	if len(before) != 1 || before[0].LastError != "" || len(after) != 2 || after[1].IATA != "YKF" || after[1].LastError != "not listed" {
+		t.Fatal(before, after)
 	}
 }

@@ -6,6 +6,7 @@ package db
 import (
 	"context"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -44,7 +45,7 @@ func TestMeshMapperCataloguePostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(context.Background())
-	for _, table := range []string{"transport_scopes", "meshmapper_scope_catalogues"} {
+	for _, table := range []string{"iata_codes", "transport_scopes", "meshmapper_scope_catalogues"} {
 		if _, err := tx.Exec(ctx, "CREATE TEMP TABLE "+table+" (LIKE public."+table+" INCLUDING ALL) ON COMMIT DROP"); err != nil {
 			t.Fatal(err)
 		}
@@ -53,6 +54,9 @@ func TestMeshMapperCataloguePostgres(t *testing.T) {
 	manual := scopestore.FromName("manual")
 	manual.TransportKey[0] ^= 1
 	if err := store.UpsertTransportScope(ctx, manual.Name, "Operator label", manual.TransportKey, manual.KeyFingerprint); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertIATA(ctx, "YOW"); err != nil {
 		t.Fatal(err)
 	}
 	url := "https://yow.meshmapper.net/get_scopes.php"
@@ -79,7 +83,7 @@ func TestMeshMapperCataloguePostgres(t *testing.T) {
 		t.Fatal(row, err)
 	}
 	scopes := scopestore.New()
-	_, err = meshmapper.New(ctx, config.MeshMapperScopesConfig{Enabled: true, Sources: map[string]string{"YOW": url}}, store, scopes, manualRows)
+	_, err = meshmapper.New(ctx, config.MeshMapperScopesConfig{Enabled: true}, store, meshmapper.NewDirectory(store), scopes, manualRows)
 	if err != nil || len(scopes.Entries()) != 2 {
 		t.Fatal("restart did not restore imported membership", err)
 	}
@@ -102,7 +106,7 @@ func TestMeshMapperCataloguePostgres(t *testing.T) {
 	if err := store.SaveScopeCatalogue(ctx, "YOW", url, update, nil); err != nil {
 		t.Fatal(err)
 	}
-	_, err = meshmapper.New(ctx, config.MeshMapperScopesConfig{Enabled: true, Sources: map[string]string{"YOW": url}}, store, scopes, manualRows)
+	_, err = meshmapper.New(ctx, config.MeshMapperScopesConfig{Enabled: true}, store, meshmapper.NewDirectory(store), scopes, manualRows)
 	if err != nil || len(scopes.Entries()) != 1 {
 		t.Fatal("removed imported membership remained active", err)
 	}
@@ -165,7 +169,7 @@ func TestMeshMapperZoneBoundariesPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(context.Background())
-	for _, table := range []string{"iata_codes", "meshmapper_zone_boundaries"} {
+	for _, table := range []string{"iata_codes", "meshmapper_zone_boundaries", "meshmapper_zone_lists"} {
 		if _, err := tx.Exec(ctx, "CREATE TEMP TABLE "+table+" (LIKE public."+table+" INCLUDING ALL) ON COMMIT DROP"); err != nil {
 			t.Fatal(err)
 		}
@@ -221,5 +225,229 @@ func TestMeshMapperZoneBoundariesPostgres(t *testing.T) {
 	}
 	if !strings.Contains(border("YOW"), `"file"`) {
 		t.Fatal("manual border did not return after pruning")
+	}
+	list := meshmapper.ZoneList{Country: "CA", Payload: []byte(`{"country":"CA","zones":[]}`), ETag: `"z1"`,
+		FetchedAt: now, AttemptedAt: now, NextAttempt: now.Add(24 * time.Hour)}
+	if err := store.SaveZoneList(ctx, list); err != nil {
+		t.Fatal(err)
+	}
+	later := now.Add(25 * time.Hour)
+	if err := store.SaveZoneList(ctx, meshmapper.ZoneList{Country: "CA", AttemptedAt: later, NextAttempt: later.Add(48 * time.Hour), LastError: "HTTP 429"}); err != nil {
+		t.Fatal(err)
+	}
+	lists, err := store.ListZoneLists(ctx)
+	if err != nil || len(lists) != 1 || len(lists[0].Payload) == 0 || lists[0].ETag != `"z1"` || !lists[0].FetchedAt.Equal(now) ||
+		lists[0].LastError != "HTTP 429" || !lists[0].NextAttempt.Equal(later.Add(48*time.Hour)) {
+		t.Fatal("failed fetch lost the last good zone list", lists, err)
+	}
+}
+
+func TestMeshMapperRegionsPostgres(t *testing.T) {
+	dsn := os.Getenv("BEACON_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set BEACON_TEST_POSTGRES_DSN")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunMigrations(ctx, pool); err != nil {
+		pool.Close()
+		t.Fatal(err)
+	}
+	pool.Close()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	// Real tables inside the rolled-back tx: TEMP copies drop region_iatas' foreign key to iata_codes.
+	store := &Store{q: sqlc.New(tx)}
+	state := func() map[string]meshmapper.RegionState {
+		t.Helper()
+		rows, err := store.ListRegionState(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]meshmapper.RegionState{}
+		for _, r := range rows {
+			out[r.Slug] = r
+		}
+		return out
+	}
+	for _, iata := range []string{"YOW", "YUL"} { // Seed creates config region IATAs first
+		if err := store.UpsertIATA(ctx, iata); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hand, err := store.UpsertRegion(ctx, "east", "East", "", 3, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetRegionIATAs(ctx, hand, []string{"YOW", "YUL"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetRegionIATAs(ctx, hand, []string{"YOW"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := state()["east"]; got.Imported || got.DisplayOrder != 3 || strings.Join(got.IATAs, ",") != "YOW" {
+		t.Fatal("configured members not replaced", got)
+	}
+	lat, lng := 45.5, -75.0
+	group := meshmapper.RegionState{Slug: "onqc", Name: "Corridor", DisplayOrder: 4, IATAs: []string{"YOW", "YQB"}, CenterLat: &lat, CenterLng: &lng}
+	if saved, err := store.SaveImportedRegion(ctx, group); err != nil || !saved {
+		t.Fatal("members Beacon hasn't heard must be created first", saved, err)
+	}
+	if got := state()["onqc"]; got.CenterLat == nil || *got.CenterLat != lat || *got.CenterLng != lng {
+		t.Fatal("center not saved", got)
+	}
+	details, err := store.ListIATADetails(ctx)
+	if err != nil || !slices.ContainsFunc(details, func(d meshmapper.IATADetails) bool { return d.IATA == "YQB" }) {
+		t.Fatal("member IATA not created", err)
+	}
+	group.IATAs = []string{"YQB", "YUL"}
+	if saved, err := store.SaveImportedRegion(ctx, group); err != nil || !saved {
+		t.Fatal(saved, err)
+	}
+	if got := state()["onqc"]; !got.Imported || strings.Join(got.IATAs, ",") != "YQB,YUL" {
+		t.Fatal("imported region not updated", got)
+	}
+	if saved, err := store.SaveImportedRegion(ctx, meshmapper.RegionState{Slug: "east", Name: "Group", IATAs: []string{"YYZ"}}); err != nil || saved {
+		t.Fatal("imported group replaced a configured region", saved, err)
+	}
+	if got := state()["east"]; got.Name != "East" || strings.Join(got.IATAs, ",") != "YOW" {
+		t.Fatal("configured region changed by a clash", got)
+	}
+	if _, err := store.UpsertRegion(ctx, "onqc", "Mine", "", 1, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if state()["onqc"].Imported {
+		t.Fatal("config did not take over an imported slug")
+	}
+	if _, err := store.SaveImportedRegion(ctx, meshmapper.RegionState{Slug: "golm", Name: "Lakes", IATAs: []string{"YYZ"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertIATADetails(ctx, "YQB", "Quebec City", &lat, &lng); err != nil {
+		t.Fatal(err)
+	}
+	if details, _ := store.ListIATADetails(ctx); !slices.ContainsFunc(details, func(d meshmapper.IATADetails) bool {
+		return d.IATA == "YQB" && d.Name == "Quebec City" && d.Lat != nil && *d.Lat == lat
+	}) {
+		t.Fatal("IATA details not saved")
+	}
+	if pruned, err := store.PruneImportedRegions(ctx, nil); err != nil || strings.Join(pruned, ",") != "golm" {
+		t.Fatal("prune touched configured regions", pruned, err)
+	}
+}
+
+func TestChannelRegionScopingPostgres(t *testing.T) {
+	dsn := os.Getenv("BEACON_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set BEACON_TEST_POSTGRES_DSN")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunMigrations(ctx, pool); err != nil {
+		pool.Close()
+		t.Fatal(err)
+	}
+	pool.Close()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	for _, table := range []string{"regions", "region_iatas", "channels", "channel_iatas", "channel_config_scopes",
+		"meshmapper_channel_members", "meshmapper_channel_catalogues"} {
+		if _, err := tx.Exec(ctx, "CREATE TEMP TABLE "+table+" (LIKE public."+table+" INCLUDING ALL) ON COMMIT DROP"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := &Store{q: sqlc.New(tx)}
+	for slug, iata := range map[string]string{"east": "YOW", "west": "YYZ"} {
+		id, err := store.UpsertRegion(ctx, slug, slug, "", 0, nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SetRegionIATAs(ctx, id, []string{iata}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fp := func(b byte) []byte { return []byte{b, b, b, b, b, b, b, b} }
+	for name, b := range map[string]byte{"#mm-yow": 1, "#config-east": 2, "#global": 3, "#toronto": 4} {
+		if _, err := store.UpsertChannel(ctx, []byte{b}, fp(b), name, name[1:]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.UpsertChannelIATA(ctx, []byte{4}, "YOW", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetChannelConfigScopes(ctx, [][]byte{fp(2), fp(3)}, []string{"east", ""}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	for iata, b := range map[string]byte{"YOW": 1, "YYZ": 4} {
+		update := meshmapper.Cache{Payload: []byte(`{}`), CheckedAt: now, AttemptedAt: now, NextAttempt: now.Add(24 * time.Hour)}
+		if err := store.SaveChannelCatalogue(ctx, iata, "https://x.meshmapper.net/get_channels.php", update, [][]byte{fp(b)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	names := func(iatas ...string) string {
+		t.Helper()
+		page, err := store.ListChannels(ctx, 50, nil, iatas, nil, 0, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, c := range page.Items {
+			out = append(out, *c.Name)
+		}
+		slices.Sort(out)
+		return strings.Join(out, ",")
+	}
+	if got := names("YOW"); got != "#config-east,#global,#mm-yow" {
+		t.Fatal("YOW channels:", got)
+	}
+	if got := names("YYZ"); got != "#global,#toronto" {
+		t.Fatal("YYZ channels:", got)
+	}
+	if got := names(); got != "#config-east,#global,#mm-yow,#toronto" {
+		t.Fatal("unfiltered channels:", got)
+	}
+	// A 304 keeps membership; a new payload replaces it.
+	if err := store.SaveChannelCatalogue(ctx, "YOW", "https://x.meshmapper.net/get_channels.php", meshmapper.Cache{AttemptedAt: now, NextAttempt: now}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := names("YOW"); got != "#config-east,#global,#mm-yow" {
+		t.Fatal("304 dropped membership:", got)
+	}
+	if err := store.SaveChannelCatalogue(ctx, "YOW", "https://x.meshmapper.net/get_channels.php", meshmapper.Cache{Payload: []byte(`{}`), AttemptedAt: now, NextAttempt: now}, [][]byte{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := names("YOW"); got != "#config-east,#global" {
+		t.Fatal("empty list kept membership:", got)
+	}
+	cats, err := store.ListChannelCatalogues(ctx)
+	if err != nil || len(cats) != 2 {
+		t.Fatal(cats, err)
+	}
+	if err := store.ClearChannelMembers(ctx); err != nil || names("YYZ") != "#global" {
+		t.Fatal("members not cleared", err)
 	}
 }

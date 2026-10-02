@@ -188,6 +188,11 @@ type Channel struct {
 	MessageCount   *int64             `json:"message_count"`
 }
 
+type ChannelConfigScope struct {
+	KeyFingerprint []byte  `json:"key_fingerprint"`
+	RegionSlug     *string `json:"region_slug"`
+}
+
 type ChannelIata struct {
 	ChannelHash []byte             `json:"channel_hash"`
 	Iata        string             `json:"iata"`
@@ -234,6 +239,22 @@ type KnownRoute struct {
 	LastReconfirmedAt pgtype.Timestamptz `json:"last_reconfirmed_at"`
 }
 
+type MeshmapperChannelCatalogue struct {
+	Iata        string             `json:"iata"`
+	Url         string             `json:"url"`
+	Payload     []byte             `json:"payload"`
+	Etag        *string            `json:"etag"`
+	CheckedAt   pgtype.Timestamptz `json:"checked_at"`
+	AttemptedAt pgtype.Timestamptz `json:"attempted_at"`
+	NextAttempt pgtype.Timestamptz `json:"next_attempt"`
+	LastError   string             `json:"last_error"`
+}
+
+type MeshmapperChannelMember struct {
+	Iata           string `json:"iata"`
+	KeyFingerprint []byte `json:"key_fingerprint"`
+}
+
 type MeshmapperScopeCatalogue struct {
 	Iata        string             `json:"iata"`
 	Url         string             `json:"url"`
@@ -251,6 +272,16 @@ type MeshmapperZoneBoundary struct {
 	Feature     []byte             `json:"feature"`
 	Etag        *string            `json:"etag"`
 	CheckedAt   pgtype.Timestamptz `json:"checked_at"`
+	AttemptedAt pgtype.Timestamptz `json:"attempted_at"`
+	NextAttempt pgtype.Timestamptz `json:"next_attempt"`
+	LastError   string             `json:"last_error"`
+}
+
+type MeshmapperZoneList struct {
+	Country     string             `json:"country"`
+	Payload     []byte             `json:"payload"`
+	Etag        *string            `json:"etag"`
+	FetchedAt   pgtype.Timestamptz `json:"fetched_at"`
 	AttemptedAt pgtype.Timestamptz `json:"attempted_at"`
 	NextAttempt pgtype.Timestamptz `json:"next_attempt"`
 	LastError   string             `json:"last_error"`
@@ -529,6 +560,7 @@ type Region struct {
 	ZoomLevel    *int32             `json:"zoom_level"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	Imported     bool               `json:"imported"`
 }
 
 type RegionIata struct {

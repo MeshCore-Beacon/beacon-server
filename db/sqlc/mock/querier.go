@@ -44,6 +44,62 @@ func (m *MockQuerier) EXPECT() *MockQuerierMockRecorder {
 	return m.recorder
 }
 
+// AddChannelConfigScopes mocks base method.
+func (m *MockQuerier) AddChannelConfigScopes(ctx context.Context, arg db.AddChannelConfigScopesParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AddChannelConfigScopes", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// AddChannelConfigScopes indicates an expected call of AddChannelConfigScopes.
+func (mr *MockQuerierMockRecorder) AddChannelConfigScopes(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddChannelConfigScopes", reflect.TypeOf((*MockQuerier)(nil).AddChannelConfigScopes), ctx, arg)
+}
+
+// AddChannelMembers mocks base method.
+func (m *MockQuerier) AddChannelMembers(ctx context.Context, arg db.AddChannelMembersParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AddChannelMembers", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// AddChannelMembers indicates an expected call of AddChannelMembers.
+func (mr *MockQuerierMockRecorder) AddChannelMembers(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddChannelMembers", reflect.TypeOf((*MockQuerier)(nil).AddChannelMembers), ctx, arg)
+}
+
+// AddIATAs mocks base method.
+func (m *MockQuerier) AddIATAs(ctx context.Context, iatas []string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AddIATAs", ctx, iatas)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// AddIATAs indicates an expected call of AddIATAs.
+func (mr *MockQuerierMockRecorder) AddIATAs(ctx, iatas any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddIATAs", reflect.TypeOf((*MockQuerier)(nil).AddIATAs), ctx, iatas)
+}
+
+// AddRegionIATAs mocks base method.
+func (m *MockQuerier) AddRegionIATAs(ctx context.Context, arg db.AddRegionIATAsParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AddRegionIATAs", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// AddRegionIATAs indicates an expected call of AddRegionIATAs.
+func (mr *MockQuerierMockRecorder) AddRegionIATAs(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddRegionIATAs", reflect.TypeOf((*MockQuerier)(nil).AddRegionIATAs), ctx, arg)
+}
+
 // AmbiguousPrefixes mocks base method.
 func (m *MockQuerier) AmbiguousPrefixes(ctx context.Context) ([]db.AmbiguousPrefixesRow, error) {
 	m.ctrl.T.Helper()
@@ -87,6 +143,48 @@ func (m *MockQuerier) DeactivateAccount(ctx context.Context, id uuid.UUID) (db.D
 func (mr *MockQuerierMockRecorder) DeactivateAccount(ctx, id any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeactivateAccount", reflect.TypeOf((*MockQuerier)(nil).DeactivateAccount), ctx, id)
+}
+
+// DeleteAllChannelMembers mocks base method.
+func (m *MockQuerier) DeleteAllChannelMembers(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteAllChannelMembers", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteAllChannelMembers indicates an expected call of DeleteAllChannelMembers.
+func (mr *MockQuerierMockRecorder) DeleteAllChannelMembers(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteAllChannelMembers", reflect.TypeOf((*MockQuerier)(nil).DeleteAllChannelMembers), ctx)
+}
+
+// DeleteChannelConfigScopes mocks base method.
+func (m *MockQuerier) DeleteChannelConfigScopes(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteChannelConfigScopes", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteChannelConfigScopes indicates an expected call of DeleteChannelConfigScopes.
+func (mr *MockQuerierMockRecorder) DeleteChannelConfigScopes(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteChannelConfigScopes", reflect.TypeOf((*MockQuerier)(nil).DeleteChannelConfigScopes), ctx)
+}
+
+// DeleteChannelMembersNotIn mocks base method.
+func (m *MockQuerier) DeleteChannelMembersNotIn(ctx context.Context, arg db.DeleteChannelMembersNotInParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteChannelMembersNotIn", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteChannelMembersNotIn indicates an expected call of DeleteChannelMembersNotIn.
+func (mr *MockQuerierMockRecorder) DeleteChannelMembersNotIn(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteChannelMembersNotIn", reflect.TypeOf((*MockQuerier)(nil).DeleteChannelMembersNotIn), ctx, arg)
 }
 
 // DeleteOldChannelIATAs mocks base method.
@@ -188,6 +286,20 @@ func (m *MockQuerier) DeleteOldTraceIATAs(ctx context.Context, lastHeard pgtype.
 func (mr *MockQuerierMockRecorder) DeleteOldTraceIATAs(ctx, lastHeard any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldTraceIATAs", reflect.TypeOf((*MockQuerier)(nil).DeleteOldTraceIATAs), ctx, lastHeard)
+}
+
+// DeleteRegionIATAsNotIn mocks base method.
+func (m *MockQuerier) DeleteRegionIATAsNotIn(ctx context.Context, arg db.DeleteRegionIATAsNotInParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteRegionIATAsNotIn", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteRegionIATAsNotIn indicates an expected call of DeleteRegionIATAsNotIn.
+func (mr *MockQuerierMockRecorder) DeleteRegionIATAsNotIn(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteRegionIATAsNotIn", reflect.TypeOf((*MockQuerier)(nil).DeleteRegionIATAsNotIn), ctx, arg)
 }
 
 // GetAccount mocks base method.
@@ -760,21 +872,6 @@ func (mr *MockQuerierMockRecorder) GetScopeStats(ctx, iatas any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetScopeStats", reflect.TypeOf((*MockQuerier)(nil).GetScopeStats), ctx, iatas)
 }
 
-// GetScopesByIATAs mocks base method.
-func (m *MockQuerier) GetScopesByIATAs(ctx context.Context, dollar_1 []string) ([]db.GetScopesByIATAsRow, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetScopesByIATAs", ctx, dollar_1)
-	ret0, _ := ret[0].([]db.GetScopesByIATAsRow)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// GetScopesByIATAs indicates an expected call of GetScopesByIATAs.
-func (mr *MockQuerierMockRecorder) GetScopesByIATAs(ctx, dollar_1 any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetScopesByIATAs", reflect.TypeOf((*MockQuerier)(nil).GetScopesByIATAs), ctx, dollar_1)
-}
-
 // GetSignalStats mocks base method.
 func (m *MockQuerier) GetSignalStats(ctx context.Context, arg db.GetSignalStatsParams) ([]db.GetSignalStatsRow, error) {
 	m.ctrl.T.Helper()
@@ -1014,6 +1111,21 @@ func (mr *MockQuerierMockRecorder) ListAllChannelMessages(ctx, arg any) *gomock.
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListAllChannelMessages", reflect.TypeOf((*MockQuerier)(nil).ListAllChannelMessages), ctx, arg)
 }
 
+// ListChannelCatalogues mocks base method.
+func (m *MockQuerier) ListChannelCatalogues(ctx context.Context) ([]db.MeshmapperChannelCatalogue, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListChannelCatalogues", ctx)
+	ret0, _ := ret[0].([]db.MeshmapperChannelCatalogue)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListChannelCatalogues indicates an expected call of ListChannelCatalogues.
+func (mr *MockQuerierMockRecorder) ListChannelCatalogues(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChannelCatalogues", reflect.TypeOf((*MockQuerier)(nil).ListChannelCatalogues), ctx)
+}
+
 // ListChannelMessages mocks base method.
 func (m *MockQuerier) ListChannelMessages(ctx context.Context, arg db.ListChannelMessagesParams) ([]db.ListChannelMessagesRow, error) {
 	m.ctrl.T.Helper()
@@ -1239,6 +1351,21 @@ func (mr *MockQuerierMockRecorder) ListPacketsByIATAs(ctx, arg any) *gomock.Call
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPacketsByIATAs", reflect.TypeOf((*MockQuerier)(nil).ListPacketsByIATAs), ctx, arg)
 }
 
+// ListRegionState mocks base method.
+func (m *MockQuerier) ListRegionState(ctx context.Context) ([]db.ListRegionStateRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListRegionState", ctx)
+	ret0, _ := ret[0].([]db.ListRegionStateRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListRegionState indicates an expected call of ListRegionState.
+func (mr *MockQuerierMockRecorder) ListRegionState(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListRegionState", reflect.TypeOf((*MockQuerier)(nil).ListRegionState), ctx)
+}
+
 // ListRegions mocks base method.
 func (m *MockQuerier) ListRegions(ctx context.Context) ([]db.ListRegionsRow, error) {
 	m.ctrl.T.Helper()
@@ -1267,6 +1394,21 @@ func (m *MockQuerier) ListRouteEvidence(ctx context.Context, arg db.ListRouteEvi
 func (mr *MockQuerierMockRecorder) ListRouteEvidence(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListRouteEvidence", reflect.TypeOf((*MockQuerier)(nil).ListRouteEvidence), ctx, arg)
+}
+
+// ListScopeCatalogues mocks base method.
+func (m *MockQuerier) ListScopeCatalogues(ctx context.Context) ([]db.MeshmapperScopeCatalogue, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListScopeCatalogues", ctx)
+	ret0, _ := ret[0].([]db.MeshmapperScopeCatalogue)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListScopeCatalogues indicates an expected call of ListScopeCatalogues.
+func (mr *MockQuerierMockRecorder) ListScopeCatalogues(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListScopeCatalogues", reflect.TypeOf((*MockQuerier)(nil).ListScopeCatalogues), ctx)
 }
 
 // ListTraceTags mocks base method.
@@ -1299,6 +1441,21 @@ func (mr *MockQuerierMockRecorder) ListUndecryptedGroupTextPackets(ctx any) *gom
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListUndecryptedGroupTextPackets", reflect.TypeOf((*MockQuerier)(nil).ListUndecryptedGroupTextPackets), ctx)
 }
 
+// ListUndecryptedGroupTextPacketsByHash mocks base method.
+func (m *MockQuerier) ListUndecryptedGroupTextPacketsByHash(ctx context.Context, hashes [][]byte) ([]db.ListUndecryptedGroupTextPacketsByHashRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListUndecryptedGroupTextPacketsByHash", ctx, hashes)
+	ret0, _ := ret[0].([]db.ListUndecryptedGroupTextPacketsByHashRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListUndecryptedGroupTextPacketsByHash indicates an expected call of ListUndecryptedGroupTextPacketsByHash.
+func (mr *MockQuerierMockRecorder) ListUndecryptedGroupTextPacketsByHash(ctx, hashes any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListUndecryptedGroupTextPacketsByHash", reflect.TypeOf((*MockQuerier)(nil).ListUndecryptedGroupTextPacketsByHash), ctx, hashes)
+}
+
 // ListZoneBoundaries mocks base method.
 func (m *MockQuerier) ListZoneBoundaries(ctx context.Context) ([]db.MeshmapperZoneBoundary, error) {
 	m.ctrl.T.Helper()
@@ -1312,6 +1469,36 @@ func (m *MockQuerier) ListZoneBoundaries(ctx context.Context) ([]db.MeshmapperZo
 func (mr *MockQuerierMockRecorder) ListZoneBoundaries(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListZoneBoundaries", reflect.TypeOf((*MockQuerier)(nil).ListZoneBoundaries), ctx)
+}
+
+// ListZoneLists mocks base method.
+func (m *MockQuerier) ListZoneLists(ctx context.Context) ([]db.MeshmapperZoneList, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListZoneLists", ctx)
+	ret0, _ := ret[0].([]db.MeshmapperZoneList)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListZoneLists indicates an expected call of ListZoneLists.
+func (mr *MockQuerierMockRecorder) ListZoneLists(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListZoneLists", reflect.TypeOf((*MockQuerier)(nil).ListZoneLists), ctx)
+}
+
+// PruneImportedRegions mocks base method.
+func (m *MockQuerier) PruneImportedRegions(ctx context.Context, keep []string) ([]string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PruneImportedRegions", ctx, keep)
+	ret0, _ := ret[0].([]string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PruneImportedRegions indicates an expected call of PruneImportedRegions.
+func (mr *MockQuerierMockRecorder) PruneImportedRegions(ctx, keep any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PruneImportedRegions", reflect.TypeOf((*MockQuerier)(nil).PruneImportedRegions), ctx, keep)
 }
 
 // PruneZoneBoundaries mocks base method.
@@ -1588,6 +1775,20 @@ func (mr *MockQuerierMockRecorder) ResolvePathHashesP4(ctx, arg any) *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolvePathHashesP4", reflect.TypeOf((*MockQuerier)(nil).ResolvePathHashesP4), ctx, arg)
 }
 
+// SaveChannelCatalogue mocks base method.
+func (m *MockQuerier) SaveChannelCatalogue(ctx context.Context, arg db.SaveChannelCatalogueParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SaveChannelCatalogue", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SaveChannelCatalogue indicates an expected call of SaveChannelCatalogue.
+func (mr *MockQuerierMockRecorder) SaveChannelCatalogue(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveChannelCatalogue", reflect.TypeOf((*MockQuerier)(nil).SaveChannelCatalogue), ctx, arg)
+}
+
 // SaveScopeCatalogue mocks base method.
 func (m *MockQuerier) SaveScopeCatalogue(ctx context.Context, arg db.SaveScopeCatalogueParams) error {
 	m.ctrl.T.Helper()
@@ -1614,6 +1815,20 @@ func (m *MockQuerier) SaveZoneBoundary(ctx context.Context, arg db.SaveZoneBound
 func (mr *MockQuerierMockRecorder) SaveZoneBoundary(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveZoneBoundary", reflect.TypeOf((*MockQuerier)(nil).SaveZoneBoundary), ctx, arg)
+}
+
+// SaveZoneList mocks base method.
+func (m *MockQuerier) SaveZoneList(ctx context.Context, arg db.SaveZoneListParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SaveZoneList", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SaveZoneList indicates an expected call of SaveZoneList.
+func (mr *MockQuerierMockRecorder) SaveZoneList(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveZoneList", reflect.TypeOf((*MockQuerier)(nil).SaveZoneList), ctx, arg)
 }
 
 // SearchKnownRoutes mocks base method.
@@ -1844,6 +2059,21 @@ func (mr *MockQuerierMockRecorder) UpsertIATADetails(ctx, arg any) *gomock.Call 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertIATADetails", reflect.TypeOf((*MockQuerier)(nil).UpsertIATADetails), ctx, arg)
 }
 
+// UpsertImportedRegion mocks base method.
+func (m *MockQuerier) UpsertImportedRegion(ctx context.Context, arg db.UpsertImportedRegionParams) (int32, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpsertImportedRegion", ctx, arg)
+	ret0, _ := ret[0].(int32)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpsertImportedRegion indicates an expected call of UpsertImportedRegion.
+func (mr *MockQuerierMockRecorder) UpsertImportedRegion(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertImportedRegion", reflect.TypeOf((*MockQuerier)(nil).UpsertImportedRegion), ctx, arg)
+}
+
 // UpsertKnownRoute mocks base method.
 func (m *MockQuerier) UpsertKnownRoute(ctx context.Context, arg db.UpsertKnownRouteParams) error {
 	m.ctrl.T.Helper()
@@ -1986,20 +2216,6 @@ func (m *MockQuerier) UpsertRegion(ctx context.Context, arg db.UpsertRegionParam
 func (mr *MockQuerierMockRecorder) UpsertRegion(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertRegion", reflect.TypeOf((*MockQuerier)(nil).UpsertRegion), ctx, arg)
-}
-
-// UpsertRegionIATA mocks base method.
-func (m *MockQuerier) UpsertRegionIATA(ctx context.Context, arg db.UpsertRegionIATAParams) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "UpsertRegionIATA", ctx, arg)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// UpsertRegionIATA indicates an expected call of UpsertRegionIATA.
-func (mr *MockQuerierMockRecorder) UpsertRegionIATA(ctx, arg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertRegionIATA", reflect.TypeOf((*MockQuerier)(nil).UpsertRegionIATA), ctx, arg)
 }
 
 // UpsertTraceIATA mocks base method.
