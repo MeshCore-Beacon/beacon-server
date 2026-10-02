@@ -315,5 +315,5 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 		w.log.Error(fmt.Sprintf("failed to marshal status event payload for %s", pubkeyHex), "error", err)
 		return
 	}
-	w.hub.Broadcast(hub.Event{Type: hub.EventObserverStatus, Payload: payload, IATA: iata})
+	w.hub.Broadcast(hub.Event{Type: hub.EventObserverStatus, Payload: payload, IATA: iata, ObserverID: evt.ObserverID})
 }

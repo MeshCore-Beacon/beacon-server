@@ -240,6 +240,62 @@ func TestHub_Broadcast_FullBuffer_SendsLaggedNotification(t *testing.T) {
 	}
 }
 
+func TestScopeMatches_RouteTypeFilter(t *testing.T) {
+	s := Scope{RouteTypes: []uint8{1}}
+	if !scopeMatches(s, Event{Type: EventPacketObservation, RouteType: 1}) {
+		t.Error("expected flood observation to match")
+	}
+	if scopeMatches(s, Event{Type: EventPacketObservation, RouteType: 2}) {
+		t.Error("expected direct observation not to match")
+	}
+	if !scopeMatches(s, Event{Type: EventNodeUpdate}) {
+		t.Error("routeTypes should only filter packetObservation")
+	}
+}
+
+func TestScopeMatches_ObserverFilter(t *testing.T) {
+	s := Scope{ObserverIDs: []string{"obs-a"}}
+	for _, typ := range []EventType{EventPacketObservation, EventObserverStatus} {
+		if !scopeMatches(s, Event{Type: typ, ObserverID: "obs-a"}) {
+			t.Errorf("%s from obs-a should match", typ)
+		}
+		if scopeMatches(s, Event{Type: typ, ObserverID: "obs-b"}) {
+			t.Errorf("%s from obs-b should not match", typ)
+		}
+	}
+	if !scopeMatches(s, Event{Type: EventChannelMessage}) {
+		t.Error("observerIds should not filter channelMessage")
+	}
+}
+
+func TestHub_Broadcast_FullBuffer_KeepsNewestEvent(t *testing.T) {
+	h := runHub(t)
+	c := h.NewClient()
+	h.AddScope(c, "sub1", Scope{Events: []EventType{EventPacketObservation}})
+	time.Sleep(10 * time.Millisecond)
+
+	for i := 0; i < cap(c.Send); i++ {
+		h.Broadcast(Event{Type: EventPacketObservation, IATA: "YVR", Payload: json.RawMessage(`"old"`)})
+	}
+	h.Broadcast(Event{Type: EventPacketObservation, IATA: "YVR", Payload: json.RawMessage(`"new"`)})
+
+	select {
+	case notif := <-c.LaggedCH():
+		if notif.DroppedCount != 1 {
+			t.Errorf("DroppedCount = %d, want 1", notif.DroppedCount)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("expected lagged notification, timed out")
+	}
+	var last Event
+	for len(c.Send) > 0 {
+		last = <-c.Send
+	}
+	if string(last.Payload) != `"new"` {
+		t.Errorf("newest queued event = %s, want the event that overflowed the buffer", last.Payload)
+	}
+}
+
 func TestClientMatches_NoSubscriptions(t *testing.T) {
 	c := &Client{subscriptions: make(map[string]Scope)}
 	if c.matches(Event{Type: EventPacketObservation}) {

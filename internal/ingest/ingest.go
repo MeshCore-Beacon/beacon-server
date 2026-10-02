@@ -453,6 +453,8 @@ func (w *Worker) broadcastPacketObservation(iata string, payloadType uint8, evt 
 		Payload:     base,
 		IATA:        iata,
 		PayloadType: payloadType,
+		RouteType:   evt.Packet.RouteType,
+		ObserverID:  evt.Observation.ObserverID,
 	}
 	evt.Observation.ResolvedPath = resolvedPath
 	if out.PayloadResolved, err = json.Marshal(evt); err != nil {

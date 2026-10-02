@@ -9,7 +9,7 @@
 //
 //	Client → Server:
 //	  subscribe   { v, type, id, scope }         → server replies subscribed { v, type, id, subscriptionId }
-//	  unsubscribe { v, type, id, subscriptionId }
+//	  unsubscribe { v, type, id, subscriptionId } → server replies unsubscribed { v, type, id, subscriptionId }
 //	  configure   { v, type, id, resolvePath, includeObserverKey, includeRepeats }
 //	              → server replies configured { v, type, id, resolvePath, includeObserverKey, includeRepeats }
 //	  ping        { v, type, id }                → server replies pong { v, type, id }
@@ -25,7 +25,6 @@
 //	Server → Client events (unsolicited):
 //	  packetObservation, observerStatus, nodeUpdate, channelMessage
 //	  lagged { v, type, droppedCount, since }
-//	  error  { v, type, code, message }
 //
 //	Idle connections (no ping) closed after 90s.
 //	Client should ping every 30s.
@@ -235,7 +234,9 @@ func handleClientMessage(ctx context.Context, client *hub.Client, reader api.Rea
 		scope := hub.Scope{
 			IATAs:         iatas,
 			PayloadTypes:  msg.Scope.PayloadTypes,
+			RouteTypes:    msg.Scope.RouteTypes,
 			ChannelHashes: msg.Scope.ChannelHashes,
+			ObserverIDs:   msg.Scope.ObserverIDs,
 			Events:        msg.Scope.Events,
 		}
 		subID := uuid.NewString()
