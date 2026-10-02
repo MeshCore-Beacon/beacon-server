@@ -21,6 +21,9 @@ SELECT * FROM iata_codes WHERE iata = $1;
 -- name: ListIATAs :many
 SELECT * FROM iata_codes ORDER BY iata;
 
+-- name: ListHeardIATAs :many
+SELECT DISTINCT last_iata::text AS iata FROM observers WHERE last_iata IS NOT NULL ORDER BY 1;
+
 -- name: UpsertIATADetails :exec
 INSERT INTO iata_codes (iata, display_name, approx_lat, approx_lng)
 VALUES ($1, $2, $3, $4)

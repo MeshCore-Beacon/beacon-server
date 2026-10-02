@@ -2912,6 +2912,30 @@ func (q *Queries) ListChannelsAfter(ctx context.Context, arg ListChannelsAfterPa
 	return items, nil
 }
 
+const listHeardIATAs = `-- name: ListHeardIATAs :many
+SELECT DISTINCT last_iata::text AS iata FROM observers WHERE last_iata IS NOT NULL ORDER BY 1
+`
+
+func (q *Queries) ListHeardIATAs(ctx context.Context) ([]string, error) {
+	rows, err := q.db.Query(ctx, listHeardIATAs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var iata string
+		if err := rows.Scan(&iata); err != nil {
+			return nil, err
+		}
+		items = append(items, iata)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listIATAs = `-- name: ListIATAs :many
 SELECT iata, display_name, approx_lat, approx_lng, added_at, border FROM iata_codes ORDER BY iata
 `

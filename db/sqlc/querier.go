@@ -200,6 +200,7 @@ type Querier interface {
 	// Only complete hours whose raw rows are still intact can be re-rolled. Queued missing hours
 	// wait: their first roll consumes the entry only if the entry predates its snapshot.
 	ListDirtyRollupHours(ctx context.Context, limit int32) ([]pgtype.Timestamptz, error)
+	ListHeardIATAs(ctx context.Context) ([]string, error)
 	ListIATAs(ctx context.Context) ([]IataCode, error)
 	// Only one branch runs. Keep the IATA range ordered by the composite index:
 	// generic plans can otherwise prefer scanning the global timestamp index.
