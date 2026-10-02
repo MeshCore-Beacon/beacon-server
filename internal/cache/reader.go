@@ -57,6 +57,7 @@ type CachedReader struct {
 	c     *Client
 	ttl   CacheTTLs
 	rev   revisionMemo
+	now   func() time.Time
 }
 
 // CacheTTLs holds the resolved per-category TTLs for the cache layer.
@@ -77,6 +78,7 @@ func NewCachedReader(inner api.Reader, c *Client, ttl CacheTTLs) api.Reader {
 		inner: inner,
 		c:     c,
 		ttl:   ttl,
+		now:   time.Now,
 	}
 }
 

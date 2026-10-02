@@ -75,8 +75,8 @@ func getRegion(reader api.Reader) http.HandlerFunc {
 	}
 }
 
-// rawStatsWindow is the longest window for endpoints that still aggregate raw-era snapshots.
-const rawStatsWindow = 30 * 24 * time.Hour
+// distributionWindow caps /stats/signal and /stats/paths, which sum every rolled hour per request.
+const distributionWindow = 30 * 24 * time.Hour
 
 // parseStatsWindow rounds both endpoints down to UTC hours. Polls within an
 // hour share a cache key; the response reports the effective window. A valid

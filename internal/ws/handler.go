@@ -24,7 +24,7 @@
 //
 //	Server → Client events (unsolicited):
 //	  packetObservation, observerStatus, nodeUpdate, channelMessage
-//	  lagged { v, type, droppedCount, since, lastObservationId }
+//	  lagged { v, type, droppedCount, since }
 //	  error  { v, type, code, message }
 //
 //	Idle connections (no ping) closed after 90s.

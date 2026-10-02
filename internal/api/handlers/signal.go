@@ -16,7 +16,7 @@ import (
 // getSignalStats godoc
 //
 // @Summary Reception signal distributions and hourly trends
-// @Description Aggregates stored observer receptions in [since, until), at most 30 days. SNR is dB; RSSI is dBm. Null/non-finite readings and the zero/zero unavailable sentinel are excluded per metric; actual zero SNR with nonzero RSSI remains valid. Averages are null without samples. Histogram bounds are lower-inclusive/upper-exclusive, with null for unbounded ends. Both boundaries round down to UTC hours and the response reports that effective window. Reads use hourly materialized snapshots refreshed by background.view_refresh; the current partial hour is excluded and absent hours are omitted. These last-hop readings do not measure end-to-end quality or packet loss.
+// @Description Aggregates stored observer receptions in [since, until), at most 30 days. SNR is dB; RSSI is dBm. Null/non-finite readings and the zero/zero unavailable sentinel are excluded per metric; actual zero SNR with nonzero RSSI remains valid. Averages are null without samples. Histogram bounds are lower-inclusive/upper-exclusive, with null for unbounded ends. Both boundaries round down to UTC hours and the response reports that effective window. Reads the hourly signal rollup; an hour appears only after it is rolled, about 95 minutes after it ends, and hours without data are omitted. These last-hop readings do not measure end-to-end quality or packet loss.
 // @Tags Stats
 // @Produce json
 // @Param since query int true "Inclusive start, epoch milliseconds (0 through 253402300799999)"
@@ -32,7 +32,7 @@ import (
 func getSignalStats(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		since, until, err := parseStatsWindow(r, rawStatsWindow)
+		since, until, err := parseStatsWindow(r, distributionWindow)
 		if err != nil {
 			respondError(w, http.StatusBadRequest, err.Error())
 			return

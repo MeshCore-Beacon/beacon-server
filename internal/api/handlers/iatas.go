@@ -5,6 +5,7 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/go-chi/chi/v5"
@@ -21,6 +22,21 @@ func IATAsRouter(reader api.Reader) http.Handler {
 	r.Get("/{iata}", getIATA(reader))
 	r.Get("/{iata}/border", getIATABorder(reader))
 	return r
+}
+
+// pathIATA uppercases the {iata} param and accepts only 3 ASCII letters, which also keeps it
+// from reaching into other cache keys.
+func pathIATA(r *http.Request) (string, bool) {
+	iata := strings.ToUpper(chi.URLParam(r, "iata"))
+	if len(iata) != 3 {
+		return "", false
+	}
+	for i := range len(iata) {
+		if iata[i] < 'A' || iata[i] > 'Z' {
+			return "", false
+		}
+	}
+	return iata, true
 }
 
 // listIATAs godoc
@@ -53,7 +69,11 @@ func listIATAs(reader api.Reader) http.HandlerFunc {
 //	@Router		/iatas/{iata} [get]
 func getIATA(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		iata := chi.URLParam(r, "iata")
+		iata, ok := pathIATA(r)
+		if !ok {
+			respondError(w, http.StatusNotFound, "IATA not found")
+			return
+		}
 		result, err := reader.GetIATA(r.Context(), iata)
 		if err != nil {
 			respondError(w, http.StatusNotFound, "IATA not found")
@@ -75,7 +95,11 @@ func getIATA(reader api.Reader) http.HandlerFunc {
 //	@Router		/iatas/{iata}/border [get]
 func getIATABorder(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		iata := chi.URLParam(r, "iata")
+		iata, ok := pathIATA(r)
+		if !ok {
+			respondError(w, http.StatusNotFound, "IATA not found")
+			return
+		}
 		border, err := reader.GetIATABorder(r.Context(), iata)
 		if err != nil {
 			respondError(w, http.StatusNotFound, "IATA not found")

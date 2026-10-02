@@ -106,6 +106,44 @@ func TestGetIATABorder_NoContentOnCacheRoundTrippedNull(t *testing.T) {
 	}
 }
 
+func TestIATAPathValidation(t *testing.T) {
+	var got []string
+	reader := stubReader{
+		getIATA: func(_ context.Context, iata string) (*api.IATA, error) {
+			got = append(got, iata)
+			return &api.IATA{IATA: iata}, nil
+		},
+		getIATABorder: func(_ context.Context, iata string) (json.RawMessage, error) {
+			got = append(got, iata)
+			return json.RawMessage(`{"type":"Feature"}`), nil
+		},
+	}
+	r := chi.NewRouter()
+	r.Mount("/iatas", IATAsRouter(reader))
+	for _, tc := range []struct {
+		path string
+		want int
+	}{
+		{"/iatas/border:YOW", http.StatusNotFound},
+		{"/iatas/border:YOW/border", http.StatusNotFound},
+		{"/iatas/YO", http.StatusNotFound},
+		{"/iatas/YOWW", http.StatusNotFound},
+		{"/iatas/Y%C3%96W", http.StatusNotFound},
+		{"/iatas/Y1W/border", http.StatusNotFound},
+		{"/iatas/yow", http.StatusOK},
+		{"/iatas/yow/border", http.StatusOK},
+	} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, tc.path, nil))
+		if w.Code != tc.want {
+			t.Errorf("%s: status = %d, want %d", tc.path, w.Code, tc.want)
+		}
+	}
+	if len(got) != 2 || got[0] != "YOW" || got[1] != "YOW" {
+		t.Errorf("reader saw %q, want only uppercased valid codes", got)
+	}
+}
+
 func TestGetIATABorder_NotFound(t *testing.T) {
 	r := chi.NewRouter()
 	r.Get("/iatas/{iata}/border", getIATABorder(stubReader{

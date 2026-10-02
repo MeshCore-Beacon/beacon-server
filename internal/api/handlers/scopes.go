@@ -4,10 +4,12 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 // ScopeMembership lists scopes by configured region and imported catalogue membership.
@@ -85,8 +87,12 @@ func getScope(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		name := chi.URLParam(r, "name")
 		scope, err := reader.GetScopeByName(r.Context(), name)
-		if err != nil {
+		switch {
+		case errors.Is(err, pgx.ErrNoRows), err == nil && scope == nil:
 			respondError(w, http.StatusNotFound, "scope not found")
+			return
+		case err != nil:
+			respondError(w, http.StatusInternalServerError, "failed to load scope")
 			return
 		}
 		respond(w, http.StatusOK, scope)

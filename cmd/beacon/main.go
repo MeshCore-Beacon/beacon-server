@@ -108,11 +108,10 @@ func main() {
 	}
 	slog.SetDefault(logger)
 	slog.Info("beacon starting", "component", "startup", "version", version)
-	if len(cfg.Server.TrustedProxies) == 0 {
-		slog.Warn("warning: server.trusted_proxies is empty; client IP headers are ignored and proxied clients share a WebSocket connection limit", "component", "startup")
-	}
-
 	resolved := config.Resolve(cfg)
+	if msg := proxyLimitWarning(resolved, len(cfg.Server.TrustedProxies)); msg != "" {
+		slog.Warn(msg, "component", "startup")
+	}
 	borderFiles, err := config.LoadLocalBorders(cfg)
 	if err != nil {
 		slog.Error("invalid local border configuration", "component", "startup", "error", err)
@@ -464,6 +463,18 @@ func main() {
 	}
 	ingestWorkers.Wait()
 	coalescer.Flush(shutdownCtx)
+}
+
+// proxyLimitWarning explains why per-IP limits go site-wide behind an unlisted reverse proxy.
+func proxyLimitWarning(r config.ResolvedConfig, trustedProxies int) string {
+	if trustedProxies > 0 {
+		return ""
+	}
+	limits := "the WebSocket connect limit"
+	if r.RateLimit.Enabled {
+		limits = "the REST rate limit and the WebSocket connect limit"
+	}
+	return fmt.Sprintf("warning: server.trusted_proxies is empty, so %s key on the direct peer; behind a reverse proxy every visitor shares one budget. List the proxy in server.trusted_proxies and have it set X-Real-IP", limits)
 }
 
 // getEnv returns the value of an env var and logs a warning if it is unset.

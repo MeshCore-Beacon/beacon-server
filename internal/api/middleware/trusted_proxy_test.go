@@ -4,9 +4,12 @@
 package middleware
 
 import (
+	"bytes"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"strings"
 	"testing"
 )
 
@@ -56,6 +59,52 @@ func TestTrustedProxyIP(t *testing.T) {
 					t.Error("unrelated header was changed")
 				}
 			})).ServeHTTP(httptest.NewRecorder(), r)
+		})
+	}
+}
+
+func TestTrustedProxyIPWarnsOnce(t *testing.T) {
+	trusted := []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")}
+	for _, tc := range []struct {
+		name, peer, header string
+		proxies            []netip.Prefix
+		want               string // in the single warning; "" means none
+	}{
+		{"untrusted XFF", "198.51.100.7:1234", "X-Forwarded-For", nil, "198.51.100.7"},
+		{"untrusted X-Real-IP", "198.51.100.7:1234", "X-Real-IP", trusted, "198.51.100.7"},
+		{"untrusted True-Client-IP", "198.51.100.7:1234", "True-Client-IP", nil, "198.51.100.7"},
+		{"trusted XFF only", "192.0.2.10:1234", "X-Forwarded-For", trusted, "X-Real-IP"},
+		{"trusted with X-Real-IP", "192.0.2.10:1234", "X-Real-IP", trusted, ""},
+		{"direct client", "198.51.100.7:1234", "", nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&out, nil)))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+			handler := TrustedProxyIP(tc.proxies)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+			for range 3 {
+				r := httptest.NewRequest(http.MethodGet, "/", nil)
+				r.RemoteAddr = tc.peer
+				if tc.header != "" {
+					r.Header.Set(tc.header, "203.0.113.9")
+				}
+				handler.ServeHTTP(httptest.NewRecorder(), r)
+			}
+			logs := out.String()
+			warnings := strings.Count(logs, `"level":"WARN"`)
+			if tc.want == "" {
+				if warnings != 0 {
+					t.Fatalf("unexpected warning: %s", logs)
+				}
+				return
+			}
+			if warnings != 1 || !strings.Contains(logs, tc.want) || !strings.Contains(logs, "trusted_proxies") {
+				t.Fatalf("want one warning mentioning %q and trusted_proxies, got: %s", tc.want, logs)
+			}
+			if strings.Contains(logs, "203.0.113.9") {
+				t.Fatal("warning echoes a client-supplied header value")
+			}
 		})
 	}
 }

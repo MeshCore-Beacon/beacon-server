@@ -16,7 +16,7 @@ import (
 // getPathStats godoc
 //
 // @Summary Received path-entry and hash-width distributions
-// @Description Counts stored receptions in [since, until), at most 30 days. Hash widths count only validated nonempty ordinary header paths (1/2/3 bytes). Empty paths do not vote for a width. TRACE header paths contain signal readings and are separate. Missing payload type or inconsistent/unsupported path metadata is unclassified. The four categories partition total receptions. Flood paths accumulate entries; direct paths contain remaining entries, so counts do not measure distance or a complete traversed route. Both boundaries round down to UTC hours and the response reports that effective window. Reads use materialized snapshots refreshed by background.view_refresh; the current partial hour is excluded and missing hours are omitted.
+// @Description Counts stored receptions in [since, until), at most 30 days. Hash widths count only validated nonempty ordinary header paths (1/2/3 bytes). Empty paths do not vote for a width. TRACE header paths contain signal readings and are separate. Missing payload type or inconsistent/unsupported path metadata is unclassified. The four categories partition total receptions. Flood paths accumulate entries; direct paths contain remaining entries, so counts do not measure distance or a complete traversed route. Both boundaries round down to UTC hours and the response reports that effective window. Reads the hourly path rollup; an hour appears only after it is rolled, about 95 minutes after it ends, and hours without data are omitted.
 // @Tags Stats
 // @Produce json
 // @Param since query int true "Inclusive start, epoch milliseconds (0 through 253402300799999)"
@@ -32,7 +32,7 @@ import (
 func getPathStats(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		since, until, err := parseStatsWindow(r, rawStatsWindow)
+		since, until, err := parseStatsWindow(r, distributionWindow)
 		if err != nil {
 			respondError(w, http.StatusBadRequest, err.Error())
 			return

@@ -215,7 +215,7 @@ type Reader interface {
 
 	// GetScopeByName returns full detail for a single scope by its normalized name (e.g. "#bc"),
 	// including packet count, observer count, node count, and the list of IATAs it is active in.
-	// Returns nil if the scope is not found.
+	// Returns nil, pgx.ErrNoRows if the scope is not found.
 	GetScopeByName(ctx context.Context, name string) (*ScopeDetail, error)
 
 	// ListTraceTags returns a paginated list of trace tags with aggregate metadata.
