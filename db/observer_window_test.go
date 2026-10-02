@@ -11,6 +11,7 @@ import (
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	mockdb "github.com/MeshCore-Beacon/beacon-server/db/sqlc/mock"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"go.uber.org/mock/gomock"
 )
 
@@ -26,6 +27,7 @@ func TestObserverActivityLiveAndFixedWindow(t *testing.T) {
 					mock.EXPECT().GetObserverActivityRaw(gomock.Any(), gomock.Any()).Return(nil, nil)
 					mock.EXPECT().GetObserverActivityRawPayloadTypes(gomock.Any(), gomock.Any()).Return(nil, nil)
 				} else {
+					mock.EXPECT().GetLatestCompleteRollupHour(gomock.Any()).Return(pgtype.Timestamptz{}, nil)
 					mock.EXPECT().GetObserverActivityHourly(gomock.Any(), gomock.Any()).Return(nil, nil)
 					mock.EXPECT().GetObserverActivityHourlyPayloadTypes(gomock.Any(), gomock.Any()).Return(nil, nil)
 				}

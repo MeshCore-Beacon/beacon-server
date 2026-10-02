@@ -266,21 +266,18 @@ ORDER BY count DESC;
 
 -- name: GetObserverActivityHourly :many
 -- Hour-or-coarser buckets summed from the hourly rollup; same COALESCE-plus-count shape as the raw query.
--- Hours after the newest complete one aren't rolled yet; that tail, from no earlier than @tail_floor, reads raw rows.
-WITH tail AS (
-  SELECT GREATEST(max(hour) + INTERVAL '1 hour', @tail_floor::timestamptz) AS tail_start
-  FROM analytics_rollup_hours WHERE status = 'complete'
-), src AS (
+-- Hours from @tail_start on aren't rolled yet and read raw rows.
+WITH src AS (
   SELECT a.hour AS t, a.observations, a.airtime_ms, a.airtime_n, a.snr_sum, a.snr_n, a.snr_min, a.rssi_sum, a.rssi_n
   FROM analytics_hourly_observer_activity a
-  WHERE a.observer_id = $1 AND a.hour >= $2::timestamptz AND a.hour < LEAST(@until::timestamptz, (SELECT tail_start FROM tail))
+  WHERE a.observer_id = $1 AND a.hour >= $2::timestamptz AND a.hour < LEAST(@until::timestamptz, @tail_start::timestamptz)
   UNION ALL
   SELECT o.heard_at, 1::bigint, o.airtime_ms, (o.airtime_ms IS NOT NULL)::int::bigint,
          s.snr, (s.snr IS NOT NULL)::int::bigint, s.snr, s.rssi::bigint, (s.rssi IS NOT NULL)::int::bigint
   FROM packet_observations o CROSS JOIN
        LATERAL (SELECT CASE WHEN NOT (COALESCE(o.rssi, 0) = 0 AND COALESCE(o.snr, 0) = 0) THEN o.snr END AS snr,
                        CASE WHEN NOT (COALESCE(o.rssi, 0) = 0 AND COALESCE(o.snr, 0) = 0) THEN o.rssi END AS rssi) s
-  WHERE o.observer_id = $1 AND o.heard_at >= GREATEST($2::timestamptz, (SELECT tail_start FROM tail)) AND o.heard_at < @until::timestamptz
+  WHERE o.observer_id = $1 AND o.heard_at >= GREATEST($2::timestamptz, @tail_start::timestamptz) AND o.heard_at < @until::timestamptz
 )
 SELECT
   date_bin($3::interval, t, TIMESTAMPTZ 'epoch')::timestamptz AS bucket,
@@ -298,17 +295,14 @@ ORDER BY 1;
 
 -- name: GetObserverActivityHourlyPayloadTypes :many
 -- Same rollup/raw-tail split as GetObserverActivityHourly.
-WITH tail AS (
-  SELECT GREATEST(max(hour) + INTERVAL '1 hour', @tail_floor::timestamptz) AS tail_start
-  FROM analytics_rollup_hours WHERE status = 'complete'
-), src AS (
+WITH src AS (
   SELECT a.payload_type, a.observations AS n
   FROM analytics_hourly_observer_activity a
-  WHERE a.observer_id = $1 AND a.hour >= $2::timestamptz AND a.hour < LEAST(@until::timestamptz, (SELECT tail_start FROM tail))
+  WHERE a.observer_id = $1 AND a.hour >= $2::timestamptz AND a.hour < LEAST(@until::timestamptz, @tail_start::timestamptz)
   UNION ALL
   SELECT COALESCE(o.payload_type, -1)::smallint, 1::bigint
   FROM packet_observations o
-  WHERE o.observer_id = $1 AND o.heard_at >= GREATEST($2::timestamptz, (SELECT tail_start FROM tail)) AND o.heard_at < @until::timestamptz
+  WHERE o.observer_id = $1 AND o.heard_at >= GREATEST($2::timestamptz, @tail_start::timestamptz) AND o.heard_at < @until::timestamptz
 )
 SELECT payload_type, SUM(n)::bigint AS count
 FROM src

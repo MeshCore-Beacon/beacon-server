@@ -110,6 +110,10 @@ type ObserverActivity struct {
 	GeneratedAt int64                    `json:"generatedAt"` // response computation time, not proof of continuous coverage
 	Source      string                   `json:"source"`      // raw or hourly; missing records do not prove an outage
 	Summary     *ObserverActivitySummary `json:"summary,omitempty"`
+	// Hourly only. Buckets before rolledUntil come from rollups and from rawFrom on from raw rows;
+	// when rawFrom is later, the hours between are uncovered, not quiet.
+	RolledUntil *int64 `json:"rolledUntil,omitempty"` // end of the newest complete rollup hour, epoch ms
+	RawFrom     *int64 `json:"rawFrom,omitempty"`     // start of the raw tail, epoch ms
 
 	Range        string                  `json:"range"`
 	Interval     string                  `json:"interval"`

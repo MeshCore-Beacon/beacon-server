@@ -597,6 +597,7 @@ func TestGetObserverActivity_HourlyFoldNoSignal(t *testing.T) {
 
 	mock.EXPECT().GetObserverByID(gomock.Any(), observerID).
 		Return(activityObserver(i16(10), i16(5), f32(62.5), f32(910.525)), nil)
+	mock.EXPECT().GetLatestCompleteRollupHour(gomock.Any()).Return(pgtype.Timestamptz{}, nil)
 	mock.EXPECT().GetObserverActivityHourly(gomock.Any(), gomock.Any()).
 		Return([]sqlc.GetObserverActivityHourlyRow{{
 			Bucket:       pgtype.Timestamptz{Time: time.UnixMilli(1700000000000), Valid: true},
@@ -667,6 +668,7 @@ func TestGetObserverActivity_HourlyFoldWeightedAverages(t *testing.T) {
 
 	mock.EXPECT().GetObserverByID(gomock.Any(), observerID).
 		Return(activityObserver(i16(7), i16(5), f32(250), nil), nil)
+	mock.EXPECT().GetLatestCompleteRollupHour(gomock.Any()).Return(pgtype.Timestamptz{}, nil)
 	mock.EXPECT().GetObserverActivityHourly(gomock.Any(), gomock.Any()).
 		Return([]sqlc.GetObserverActivityHourlyRow{{
 			Bucket:       pgtype.Timestamptz{Time: time.UnixMilli(1700000000000), Valid: true},
@@ -837,6 +839,7 @@ func TestGetObserverActivity_HourlyPathAtOneHour(t *testing.T) {
 
 	mock.EXPECT().GetObserverByID(gomock.Any(), observerID).
 		Return(activityObserver(i16(10), i16(5), f32(62.5), nil), nil)
+	mock.EXPECT().GetLatestCompleteRollupHour(gomock.Any()).Return(pgtype.Timestamptz{}, nil)
 	mock.EXPECT().GetObserverActivityHourly(gomock.Any(), gomock.Any()).
 		Return([]sqlc.GetObserverActivityHourlyRow{}, nil)
 	mock.EXPECT().GetObserverActivityHourlyPayloadTypes(gomock.Any(), gomock.Any()).
@@ -893,6 +896,7 @@ func TestGetObserverActivity_RadioNilWhenIncomplete(t *testing.T) {
 
 			mock.EXPECT().GetObserverByID(gomock.Any(), observerID).
 				Return(activityObserver(tc.sf, tc.cr, tc.bw, nil), nil)
+			mock.EXPECT().GetLatestCompleteRollupHour(gomock.Any()).Return(pgtype.Timestamptz{}, nil)
 			mock.EXPECT().GetObserverActivityHourly(gomock.Any(), gomock.Any()).
 				Return([]sqlc.GetObserverActivityHourlyRow{}, nil)
 			mock.EXPECT().GetObserverActivityHourlyPayloadTypes(gomock.Any(), gomock.Any()).
@@ -921,6 +925,7 @@ func TestGetObserverActivity_SinceAlignedToInterval(t *testing.T) {
 	var gotInterval pgtype.Interval
 	mock.EXPECT().GetObserverByID(gomock.Any(), observerID).
 		Return(activityObserver(i16(10), i16(5), f32(62.5), nil), nil)
+	mock.EXPECT().GetLatestCompleteRollupHour(gomock.Any()).Return(pgtype.Timestamptz{}, nil)
 	mock.EXPECT().GetObserverActivityHourly(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, arg sqlc.GetObserverActivityHourlyParams) ([]sqlc.GetObserverActivityHourlyRow, error) {
 			gotSince, gotInterval = arg.Column2.Time, arg.Column3
