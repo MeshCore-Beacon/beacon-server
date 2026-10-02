@@ -61,6 +61,7 @@ SELECT decode(lpad(to_hex(i),2,'0'),'hex'),5,0,1,transport,scope_id,'\x00','\x15
 FROM (VALUES(1,true,1),(2,true,NULL),(3,false,NULL),(4,NULL,NULL),(5,true,2),(6,false,NULL)) v(i,transport,scope_id);
 INSERT INTO packet_observations(packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count)
 SELECT packet_hash,md5(n::text)::uuid,'YOW',NOW(),0,1,0 FROM packets CROSS JOIN generate_series(1,2) n;
+UPDATE packets SET observation_count=2;
 `)
 	if err != nil {
 		t.Fatal(err)

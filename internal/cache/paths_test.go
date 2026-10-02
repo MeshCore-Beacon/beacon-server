@@ -17,6 +17,8 @@ type pathStatsReader struct {
 	calls int64
 }
 
+func (r *pathStatsReader) AnalyticsRevision(context.Context) (int64, error) { return 0, nil }
+
 func (r *pathStatsReader) GetPathStats(context.Context, time.Time, time.Time, []string) (*api.PathStats, error) {
 	r.calls++
 	return &api.PathStats{Receptions: r.calls}, nil

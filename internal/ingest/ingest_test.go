@@ -180,8 +180,11 @@ type stubDB struct {
 	upsertChannelCalls         int
 	upsertChannelHashOnlyCalls int
 	upsertChannelIATACalls     int
-	upsertTraceIATACalls       int
+	traceHearings              []TraceHearing
+	packetIsNew                bool
 	observationInserted        bool
+	channelMessages            []InsertChannelMessageParams
+	observationCount           int64
 	insertChannelMessageResult bool // configurable return for InsertChannelMessage; default false
 	undecryptedPackets         []UndecryptedPacket
 	undecryptedByHash          []UndecryptedPacket
@@ -201,7 +204,7 @@ func (s *stubDB) SetNodeCapability(_ context.Context, nodeID uuid.UUID, paths, t
 }
 
 // no-op implementations for remaining DB interface methods
-func (s *stubDB) UpsertObserver(_ context.Context, _ []byte) (uuid.UUID, string, error) {
+func (s *stubDB) UpsertObserver(_ context.Context, _ []byte, _ string) (uuid.UUID, string, error) {
 	return uuid.Nil, "", nil
 }
 func (s *stubDB) UpsertObserverBroker(_ context.Context, _ uuid.UUID, _ string, _ bool) error {
@@ -209,11 +212,11 @@ func (s *stubDB) UpsertObserverBroker(_ context.Context, _ uuid.UUID, _ string, 
 }
 func (s *stubDB) UpsertIATA(_ context.Context, _ string) error { return nil }
 func (s *stubDB) UpsertPacket(_ context.Context, _ UpsertPacketParams) (bool, error) {
-	return false, nil
+	return s.packetIsNew, nil
 }
 func (s *stubDB) SetPacketDecrypted(_ context.Context, _ []byte) error { return nil }
-func (s *stubDB) InsertObservation(_ context.Context, _ InsertObservationParams) (bool, error) {
-	return s.observationInserted, nil
+func (s *stubDB) InsertObservation(_ context.Context, _ InsertObservationParams) (bool, int64, error) {
+	return s.observationInserted, s.observationCount, nil
 }
 func (s *stubDB) SetNodeDefaultScope(_ context.Context, _ uuid.UUID, _ int32) error { return nil }
 func (s *stubDB) UpsertNode(_ context.Context, params UpsertNodeParams, _ RadioSettings) (uuid.UUID, error) {
@@ -234,7 +237,8 @@ func (s *stubDB) GetNodesByIDs(_ context.Context, _ []uuid.UUID) (map[uuid.UUID]
 	return nil, nil
 }
 
-func (s *stubDB) InsertChannelMessage(_ context.Context, _ InsertChannelMessageParams) (*InsertedChannelMessage, error) {
+func (s *stubDB) InsertChannelMessage(_ context.Context, m InsertChannelMessageParams) (*InsertedChannelMessage, error) {
+	s.channelMessages = append(s.channelMessages, m)
 	if !s.insertChannelMessageResult {
 		return nil, nil
 	}
@@ -294,13 +298,9 @@ func (s *stubDB) UpsertChannelIATA(_ context.Context, _ []byte, _ string, _ time
 	return nil
 }
 
-func (s *stubDB) UpsertTraceIATA(_ context.Context, _ []byte, _ string, _ time.Time) error {
-	s.upsertTraceIATACalls++
+func (s *stubDB) RecordTrace(_ context.Context, h TraceHearing) error {
+	s.traceHearings = append(s.traceHearings, h)
 	return nil
-}
-
-func (s *stubDB) GetPacketObservationCount(_ context.Context, _ []byte) (int64, error) {
-	return 0, nil
 }
 
 func (s *stubDB) GetTransportScopeByName(_ context.Context, _ string) (int32, error) { return 0, nil }

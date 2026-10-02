@@ -5,8 +5,8 @@ package background
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/db"
@@ -14,76 +14,109 @@ import (
 )
 
 type viewRefresher interface {
-	RefreshHourlyStats(context.Context) error
-	RefreshTopNodes(context.Context) error
-	RefreshTopObservers(context.Context) error
-	RefreshPayloadBreakdown(context.Context) error
-	RefreshTopTalkers(context.Context) error
-	RefreshTopAdvertisers(context.Context) error
 	RefreshRadioPresets(context.Context) error
-	RefreshObserverActivity(context.Context) error
-	RefreshSignalStats(context.Context) error
-	RefreshPathStats(context.Context) error
 }
 
-// ViewRefreshTask returns a Task that refreshes all materialized views.
+// ViewRefreshTask rebuilds the radio preset view; historical stats come from hourly rollups.
 func ViewRefreshTask(store viewRefresher, interval time.Duration) Task {
 	return Task{
 		Name:     "view_refresh",
 		Interval: interval,
 		Run: func(ctx context.Context) error {
-			var errs []error
-			for _, view := range []struct {
-				name    string
-				refresh func(context.Context) error
-			}{
-				{"hourly stats", store.RefreshHourlyStats},
-				{"top nodes", store.RefreshTopNodes},
-				{"top observers", store.RefreshTopObservers},
-				{"payload breakdown", store.RefreshPayloadBreakdown},
-				{"top talkers", store.RefreshTopTalkers},
-				{"top advertisers", store.RefreshTopAdvertisers},
-				{"radio presets", store.RefreshRadioPresets},
-				{"observer activity", store.RefreshObserverActivity},
-				{"signal stats", store.RefreshSignalStats},
-				{"path stats", store.RefreshPathStats},
-			} {
-				if err := view.refresh(ctx); err != nil {
-					errs = append(errs, fmt.Errorf("%s: %w", view.name, err))
-				}
-			}
-			return errors.Join(errs...)
-		},
-	}
-}
-
-// CleanupTask returns a Task that prunes old telemetry, packet, and node rows.
-func CleanupTask(store *db.Store, telemetryRetention, packetRetention, nodeDeleteAfter, interval time.Duration) Task {
-	return Task{
-		Name:     "cleanup",
-		Interval: interval,
-		Run: func(ctx context.Context) error {
-			if err := store.DeleteOldTelemetry(ctx, time.Now().Add(-telemetryRetention)); err != nil {
-				return err
-			}
-			// One cutoff for all three so the IATA tables stay in step
-			// with the packets they mirror.
-			cutoff := time.Now().Add(-packetRetention)
-			if err := store.DeleteOldPackets(ctx, cutoff); err != nil {
-				return err
-			}
-			if err := store.DeleteOldChannelIATAs(ctx, cutoff); err != nil {
-				return err
-			}
-			if err := store.DeleteOldTraceIATAs(ctx, cutoff); err != nil {
-				return err
-			}
-			if err := store.DeleteOldNodes(ctx, time.Now().Add(-nodeDeleteAfter)); err != nil {
-				return err
+			if err := store.RefreshRadioPresets(ctx); err != nil {
+				return fmt.Errorf("radio presets: %w", err)
 			}
 			return nil
 		},
 	}
+}
+
+type cleanupStore interface {
+	DeleteOldTelemetry(ctx context.Context, cutoff time.Time) error
+	OldestMissingRollupHour(ctx context.Context) (time.Time, bool, error)
+	DeleteOldPackets(ctx context.Context, cutoff time.Time) error
+	DeleteOldChannelIATAs(ctx context.Context, cutoff time.Time) error
+	DeleteOldTraceIATAs(ctx context.Context, cutoff time.Time) error
+	DeleteOldTraceTags(ctx context.Context, cutoff time.Time) error
+	DeleteOldRollups(ctx context.Context, cutoff time.Time) error
+	DeleteOldNodes(ctx context.Context, cutoff time.Time) error
+}
+
+// CleanupConfig holds the retention windows CleanupTask enforces.
+type CleanupConfig struct {
+	TelemetryRetention time.Duration
+	PacketRetention    time.Duration
+	RollupRetention    time.Duration
+	NodeDeleteAfter    time.Duration
+	Interval           time.Duration
+}
+
+// Raw rows wait for unrolled hours, but not forever: past the cap those hours become partial.
+const (
+	rawHoldbackMargin = 35 * time.Minute // ingest clamps heard_at to ±30 min of last_heard_at
+	rawHoldbackWarn   = 6 * time.Hour
+	rawHoldbackCap    = 24 * time.Hour
+	traceTagLag       = 30 * time.Minute
+)
+
+// CleanupTask returns a Task that prunes old telemetry, packets, rollups and nodes.
+func CleanupTask(store cleanupStore, cfg CleanupConfig) Task {
+	return cleanupTask(store, cfg, time.Now)
+}
+
+func cleanupTask(store cleanupStore, cfg CleanupConfig, now func() time.Time) Task {
+	return Task{
+		Name:     "cleanup",
+		Interval: cfg.Interval,
+		Run: func(ctx context.Context) error {
+			t := now()
+			if err := store.DeleteOldTelemetry(ctx, t.Add(-cfg.TelemetryRetention)); err != nil {
+				return err
+			}
+			cutoff, err := rawCutoff(ctx, store, t.Add(-cfg.PacketRetention))
+			if err != nil {
+				return err
+			}
+			// One cutoff so the IATA and trace tables stay in step with the packets they mirror.
+			for _, del := range []func(context.Context, time.Time) error{
+				store.DeleteOldPackets, store.DeleteOldChannelIATAs, store.DeleteOldTraceIATAs,
+			} {
+				if err := del(ctx, cutoff); err != nil {
+					return err
+				}
+			}
+			// Tag times are hearing times, up to the clamp behind their packets' last_heard_at;
+			// trailing by it keeps a re-heard packet's tag from being deleted out from under it.
+			if err := store.DeleteOldTraceTags(ctx, cutoff.Add(-traceTagLag)); err != nil {
+				return err
+			}
+			if err := store.DeleteOldRollups(ctx, t.Add(-cfg.RollupRetention)); err != nil {
+				return err
+			}
+			return store.DeleteOldNodes(ctx, t.Add(-cfg.NodeDeleteAfter))
+		},
+	}
+}
+
+// rawCutoff holds packet deletion behind the oldest unrolled hour, up to rawHoldbackCap.
+func rawCutoff(ctx context.Context, store cleanupStore, retentionCutoff time.Time) (time.Time, error) {
+	oldest, ok, err := store.OldestMissingRollupHour(ctx)
+	if err != nil || !ok {
+		return retentionCutoff, err
+	}
+	held := oldest.Add(-rawHoldbackMargin)
+	if !held.Before(retentionCutoff) {
+		return retentionCutoff, nil
+	}
+	holdback := retentionCutoff.Sub(held)
+	if holdback > rawHoldbackCap {
+		held, holdback = retentionCutoff.Add(-rawHoldbackCap), rawHoldbackCap
+	}
+	if holdback > rawHoldbackWarn {
+		slog.Warn("packet cleanup held back by unrolled analytics hours", "component", "background",
+			"holdback", holdback.Round(time.Minute), "oldest_missing_hour", oldest.UTC())
+	}
+	return held, nil
 }
 
 // Limit lock lifetime while retaining the per-run work budget.

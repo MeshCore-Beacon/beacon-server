@@ -28,11 +28,13 @@ func TestUpsertObserver_NilDisplayName(t *testing.T) {
 	pubkey := []byte{0x01, 0x02}
 
 	mock.EXPECT().
-		UpsertObserver(gomock.Any(), pubkey).
+		UpsertObserver(gomock.Any(), gomock.Cond(func(p sqlc.UpsertObserverParams) bool {
+			return string(p.PublicKey) == string(pubkey) && p.Iata == "YVR" && p.IataAt.Valid
+		})).
 		Return(sqlc.Observer{ID: observerID, DisplayName: nil}, nil)
 
 	store := &Store{q: mock}
-	id, displayName, err := store.UpsertObserver(context.Background(), pubkey)
+	id, displayName, err := store.UpsertObserver(context.Background(), pubkey, "YVR")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -53,11 +55,13 @@ func TestUpsertObserver_WithDisplayName(t *testing.T) {
 	name := "test-observer"
 
 	mock.EXPECT().
-		UpsertObserver(gomock.Any(), pubkey).
+		UpsertObserver(gomock.Any(), gomock.Cond(func(p sqlc.UpsertObserverParams) bool {
+			return string(p.PublicKey) == string(pubkey) && p.Iata == "YVR" && p.IataAt.Valid
+		})).
 		Return(sqlc.Observer{ID: observerID, DisplayName: &name}, nil)
 
 	store := &Store{q: mock}
-	_, displayName, err := store.UpsertObserver(context.Background(), pubkey)
+	_, displayName, err := store.UpsertObserver(context.Background(), pubkey, "YVR")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

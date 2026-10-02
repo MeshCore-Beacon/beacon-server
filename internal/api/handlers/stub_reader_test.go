@@ -16,6 +16,7 @@ import (
 // Unset fields return zero values. Use it for both validation tests
 // (leave all fields nil) and happy path tests (set only what you need).
 type stubReader struct {
+	getStatsSeries               func(context.Context, time.Time, time.Time, []string) (*api.StatsSeries, error)
 	getRouteEvidence             func(context.Context, string, string, api.RouteEvidenceQuery) (*api.RouteEvidence, error)
 	getObserverComparison        func(context.Context, uuid.UUID, uuid.UUID, time.Time, time.Time, []string) (*api.ObserverComparison, error)
 	listIATAs                    func(ctx context.Context) ([]api.IATA, error)
@@ -47,12 +48,12 @@ type stubReader struct {
 	getStatsOverview             func(ctx context.Context, iatas []string) (*api.StatsOverview, error)
 	getStatsObservations         func(ctx context.Context, iatas []string, since time.Time) ([]api.ObservationPoint, error)
 	getStatsPayloadBreakdown     func(ctx context.Context, iatas []string, since time.Time) ([]api.PayloadBreakdownItem, error)
-	getStatsTopNodes             func(ctx context.Context, iatas []string, limit int32) ([]api.TopNode, error)
+	getStatsTopNodes             func(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopNode, error)
 	getStatsTopObservers         func(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopObserver, error)
 	getStatsTopAdvertisers       func(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopAdvertiser, error)
 	getStatsClockDrift           func(ctx context.Context, iatas []string, limit int32) ([]api.ClockDriftEntry, error)
 	getStatsTopTalkers           func(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopTalker, error)
-	getScopeStats                func(ctx context.Context, iatas []string) ([]api.ScopeStats, error)
+	getScopeStats                func(ctx context.Context, iatas []string, since time.Time) ([]api.ScopeStats, error)
 	getStatsNodeTypes            func(ctx context.Context, iatas []string) ([]api.NodeTypeCount, error)
 	getScopeNames                func(ctx context.Context) ([]string, error)
 	getScopeByName               func(ctx context.Context, name string) (*api.ScopeDetail, error)
@@ -68,6 +69,13 @@ type stubReader struct {
 
 func (s stubReader) GetSignalStats(context.Context, time.Time, time.Time, []string) (*api.SignalStats, error) {
 	return nil, nil
+}
+
+func (s stubReader) GetStatsSeries(ctx context.Context, since, until time.Time, iatas []string) (*api.StatsSeries, error) {
+	if s.getStatsSeries != nil {
+		return s.getStatsSeries(ctx, since, until, iatas)
+	}
+	return &api.StatsSeries{}, nil
 }
 
 func (s stubReader) GetPathStats(context.Context, time.Time, time.Time, []string) (*api.PathStats, error) {
@@ -284,9 +292,9 @@ func (s stubReader) GetStatsPayloadBreakdown(ctx context.Context, iatas []string
 	return nil, nil
 }
 
-func (s stubReader) GetStatsTopNodes(ctx context.Context, iatas []string, limit int32) ([]api.TopNode, error) {
+func (s stubReader) GetStatsTopNodes(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopNode, error) {
 	if s.getStatsTopNodes != nil {
-		return s.getStatsTopNodes(ctx, iatas, limit)
+		return s.getStatsTopNodes(ctx, iatas, since, limit)
 	}
 	return nil, nil
 }
@@ -319,9 +327,9 @@ func (s stubReader) GetStatsTopTalkers(ctx context.Context, iatas []string, sinc
 	return nil, nil
 }
 
-func (s stubReader) GetScopeStats(ctx context.Context, iatas []string) ([]api.ScopeStats, error) {
+func (s stubReader) GetScopeStats(ctx context.Context, iatas []string, since time.Time) ([]api.ScopeStats, error) {
 	if s.getScopeStats != nil {
-		return s.getScopeStats(ctx, iatas)
+		return s.getScopeStats(ctx, iatas, since)
 	}
 	return nil, nil
 }

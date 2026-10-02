@@ -258,12 +258,16 @@ scopes:
 
 # Observer telemetry storage settings.
 telemetry:
-  retention: 672h # how long to keep telemetry snapshots (default: 4 weeks)
+  retention: 744h # how long to keep telemetry snapshots (default: 31 days)
   resolution: 1h # snapshot frequency per observer; duplicates within window are dropped (default: 1h)
 
 # Packet and observation retention.
 packets:
-  retention: 168h # packets, observations, channel messages (default: 7 days)
+  retention: 168h # packets, observations, channel messages (default: 7 days, minimum 24h)
+
+# Hourly analytics rollups behind the stats endpoints; they outlive raw packets.
+analytics:
+  rollup_retention: 2160h # also the longest /stats/series window (default: 90 days, minimum 24h)
 
 # Presence write coalescing.
 # Observer last_seen and packet last_heard_at bumps are batched in memory and
@@ -302,7 +306,7 @@ observers:
 cache:
   ttl: "1h"
   ttls:
-    stats: "1h" # stats endpoints (backed by materialized views)
+    stats: "1h" # stats endpoints (hourly rollups; keys change when a new hour is rolled)
     reference: "1h" # IATAs, regions, scopes
     nodes: "1h" # node detail (also explicitly invalidated on upsert)
     observers: "1h" # observer detail (also explicitly invalidated on upsert)
@@ -523,14 +527,15 @@ Not yet implemented — see the Authentication section above.
 | `GET`  | `/routes/cross`                     | Search for routes crossing IATA boundaries                                                         |
 | `GET`  | `/scopes`                           | List transport scope names; IATA/region filters use configured regions and MeshMapper catalogues   |
 | `GET`  | `/scopes/{name}`                    | Get scope detail                                                                                   |
-| `GET`  | `/stats/observations`               | Hourly observation time series (last 7 days by default)                                            |
-| `GET`  | `/stats/overview`                   | Network overview stats                                                                             |
+| `GET`  | `/stats/observations`               | Hourly observation counts per IATA (last 7 days by default)                                        |
+| `GET`  | `/stats/overview`                   | Network overview over the last 24 rolled hours                                                     |
 | `GET`  | `/stats/payload-breakdown`          | Observation counts by payload type (last 24h by default)                                           |
-| `GET`  | `/stats/scopes`                     | Configured region scopes and breakdown of packets, nodes, observers                                |
-| `GET`  | `/stats/top-advertisers`            | Top N nodes by distinct ADVERT packet count (last 24h by default, from materialized view)          |
-| `GET`  | `/stats/top-nodes`                  | Top N nodes by observation count (from materialized view)                                          |
+| `GET`  | `/stats/scopes`                     | Configured region scopes and breakdown of packets, nodes, observers (last 7 days by default)       |
+| `GET`  | `/stats/series`                     | Hourly card metrics and window summary from the rollups (`since`/`until` required)                 |
+| `GET`  | `/stats/top-advertisers`            | Top N nodes by distinct ADVERT packet count (last 24h by default)                                  |
+| `GET`  | `/stats/top-nodes`                  | Top N nodes by advert hearings (last 7 days by default)                                            |
 | `GET`  | `/stats/top-observers`              | Top N observers by observation count (last 24h by default)                                         |
-| `GET`  | `/stats/top-talkers`                | Top N companion names by decrypted channel message count (last 24h by default, from materialized view) |
+| `GET`  | `/stats/top-talkers`                | Top N companion names by decrypted channel message count (last 24h by default)                     |
 | `GET`  | `/traces`                           | List trace tags with filters (optional: ?type=TRACE\|PING)                                         |
 | `GET`  | `/traces/{tag}`                     | Get full trace detail with resolved routes                                                         |
 
@@ -560,20 +565,14 @@ Records include a component field. Ingest workers also include their broker name
 
 ### Analytics retention
 
-Hourly traffic, payload, observer activity, talker, advertiser, Signal and Paths
-summaries retain 30 days independently of `packets.retention`. Cleanup saves only
-aggregates before deleting each packet batch, in the same transaction. Raw
-packets, observations and message bodies still expire under packet retention.
-The summaries use UTC hourly buckets and appear on the normal view-refresh cycle.
-`mv_hourly_iata_stats` now covers 30 days instead of migration 001's seven days;
-`/stats/observations?since=` can therefore return retained summaries older than a week.
-
-Migration 039 starts from data still present; previously deleted history cannot
-be reconstructed. Telemetry has its own retention setting. Packet drill-down,
-sub-hour observer activity, exact observer comparison and current entity/scope
-counts continue to describe retained raw data or current entities, rather than
-claiming archived packet detail. Archived summaries expire without waiting for
-new packet deletions. A failed archive leaves its entire raw batch intact.
+Historical stats (traffic, payload, observer activity, talker, advertiser, node,
+scope, Signal and Paths) are read from hourly rollup tables kept for
+`analytics.rollup_retention` (default 90 days), independently of `packets.retention`.
+One background task rolls each UTC hour about 95 minutes after it closes;
+packet cleanup waits for unrolled hours (up to 24h) so they can be rolled in full.
+An hour whose raw rows were deleted first is marked partial and reported without values.
+Packet drill-down, sub-hour observer activity and observer comparison still read
+retained raw data. See [docs/historical-stats.md](docs/historical-stats.md).
 
 ### Observer monitoring metrics
 
@@ -590,9 +589,7 @@ The existing observer `observationCount` remains a legacy cumulative presence
 counter for compatibility, including status/neighbour events. It is not a
 period packet total. Broker presence and packet-arrival timestamps are now
 updated separately; this cannot reconstruct previously overwritten timestamps.
-The initial analytics archive migration includes unknown-type activity. Existing
-development previews that used the earlier draft require a separate operator repair;
-radio samples already discarded for those legacy rows cannot be recovered.
+Hourly activity comes from the analytics rollups and includes unknown-type activity.
 
 ### Saved-route evidence
 

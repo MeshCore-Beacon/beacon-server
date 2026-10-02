@@ -40,8 +40,11 @@ type Querier interface {
 	// Opt-in age-out: preserve retained history and manually recorded ownership.
 	// Bound deletions per cleanup tick and skip observers being updated by ingest.
 	DeleteOldObservers(ctx context.Context, lastSeen pgtype.Timestamptz) ([]uuid.UUID, error)
-	// Locks, archives and cascades one bounded packet cohort in a single transaction.
+	// Deletes one bounded cohort (observations cascade). SKIP LOCKED leaves packets an in-flight
+	// observation insert holds. raw_deleted_before tells the rollup which hours lost raw rows.
 	DeleteOldPackets(ctx context.Context, arg DeleteOldPacketsParams) (int64, error)
+	// Bumps coverage when hours go, so cached responses that included them are not reused.
+	DeleteOldRollups(ctx context.Context, cutoff pgtype.Timestamptz) error
 	// One batch of routes past retention, or past grace with too few observations.
 	// GREATEST keeps the scan on idx_known_routes_last_seen.
 	DeleteOldRoutes(ctx context.Context, arg DeleteOldRoutesParams) (int64, error)
@@ -49,12 +52,25 @@ type Querier interface {
 	DeleteOldTelemetry(ctx context.Context, reportedAt pgtype.Timestamptz) error
 	// Keeps the trace IATA filter in step with packet retention.
 	DeleteOldTraceIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error
+	DeleteOldTraceTags(ctx context.Context, lastHeardAt pgtype.Timestamptz) error
 	DeleteRegionIATAsNotIn(ctx context.Context, arg DeleteRegionIATAsNotInParams) error
+	DeleteRollupHour(ctx context.Context, hour pgtype.Timestamptz) error
+	// Dirty hours that can no longer be re-rolled.
+	DeleteStaleDirtyHours(ctx context.Context) error
+	FillRollupObs(ctx context.Context, dollar_1 pgtype.Timestamptz) error
+	// Marks the hour complete and bumps the revision only when its content changed.
+	FinishRollupHour(ctx context.Context, arg FinishRollupHourParams) (bool, error)
 	GetAccount(ctx context.Context, id uuid.UUID) (Account, error)
+	// Both counters only grow, so their sum changes whenever rolled content or coverage does.
+	GetAnalyticsRevision(ctx context.Context) (int64, error)
 	GetChannelByID(ctx context.Context, id int32) (Channel, error)
 	// Returns neighbors of a node that are in a different IATA.
 	GetCrossIATANeighbors(ctx context.Context, arg GetCrossIATANeighborsParams) ([]GetCrossIATANeighborsRow, error)
-	GetHourlyStats(ctx context.Context, arg GetHourlyStatsParams) ([]MvHourlyIataStat, error)
+	GetEarliestCompleteRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
+	// ============================================================
+	// STATS
+	// ============================================================
+	GetHourlyStats(ctx context.Context, arg GetHourlyStatsParams) ([]GetHourlyStatsRow, error)
 	GetIATA(ctx context.Context, iata string) (IataCode, error)
 	// An imported MeshMapper boundary overrides the configured one. border is NULL
 	// when neither exists; a missing row (unknown IATA) is sql.ErrNoRows, same
@@ -83,30 +99,30 @@ type Querier interface {
 	// Count packet identities, not reception rows: a broker repeat or another
 	// reception by the same observer must not inflate the comparison.
 	GetObserverComparison(ctx context.Context, arg GetObserverComparisonParams) (GetObserverComparisonRow, error)
-	GetObserverLastIATA(ctx context.Context, observerID uuid.UUID) (string, error)
+	GetObserverLastIATA(ctx context.Context, id uuid.UUID) (string, error)
 	GetObserverRadio(ctx context.Context, id uuid.UUID) (GetObserverRadioRow, error)
 	GetObserverScopes(ctx context.Context, observerID uuid.UUID) ([]string, error)
 	GetObserverTelemetry(ctx context.Context, arg GetObserverTelemetryParams) ([]GetObserverTelemetryRow, error)
 	GetPacketByHash(ctx context.Context, packetHash []byte) (GetPacketByHashRow, error)
-	GetPacketObservationCount(ctx context.Context, packetHash []byte) (int64, error)
 	// Return distinct observation IATAs in first-heard order for path resolution,
 	// without fetching full observations separately for every trace packet.
 	GetPacketsByTraceTag(ctx context.Context, decode string) ([]GetPacketsByTraceTagRow, error)
-	// All HTTP aggregates read the compact classification snapshot.
+	// All HTTP aggregates read the hourly rollup, never observations.
 	GetPathStats(ctx context.Context, arg GetPathStatsParams) ([]GetPathStatsRow, error)
 	GetRadioPresets(ctx context.Context, arg GetRadioPresetsParams) ([]MvRadioPreset, error)
 	GetRegion(ctx context.Context, id int32) (GetRegionRow, error)
 	GetRegionBySlug(ctx context.Context, slug string) (GetRegionBySlugRow, error)
 	GetRegionIATAs(ctx context.Context, regionID int32) ([]string, error)
 	GetRouteEvidenceRoute(ctx context.Context, arg GetRouteEvidenceRouteParams) (KnownRoute, error)
+	// Packets and IATAs cover every retained rollup hour; IATAs are those that heard the
+	// scope's own packets. Observer and node counts are current memberships.
 	GetScopeByName(ctx context.Context, name string) (GetScopeByNameRow, error)
 	GetScopeCatalogue(ctx context.Context, arg GetScopeCatalogueParams) (MeshmapperScopeCatalogue, error)
 	GetScopeNames(ctx context.Context) ([]string, error)
-	// Aggregate matching observations once, separately from node memberships to avoid
-	// a cross-join. Empty IATAs keep the original global counts, including associations
-	// whose observations have expired; the filtered aggregates are empty in that case.
-	GetScopeStats(ctx context.Context, iatas []string) ([]GetScopeStatsRow, error)
-	// Read compact hourly snapshots, never observations on an HTTP request.
+	// Packets since the given hour come from the IATA-set rollup (counted once per hour heard).
+	// Observer and node counts are current memberships; observers filter by their latest IATA.
+	GetScopeStats(ctx context.Context, arg GetScopeStatsParams) ([]GetScopeStatsRow, error)
+	// Read the hourly rollup, never observations on an HTTP request.
 	// Weight averages by sample counts instead of averaging regional/hourly means.
 	GetSignalStats(ctx context.Context, arg GetSignalStatsParams) ([]GetSignalStatsRow, error)
 	// Repeaters/room servers (node_type 2/3) whose current advert-derived clock drift exceeds
@@ -116,21 +132,24 @@ type Querier interface {
 	GetStatsClockDrift(ctx context.Context, arg GetStatsClockDriftParams) ([]GetStatsClockDriftRow, error)
 	// Returns node counts grouped by type, optionally filtered by IATA.
 	GetStatsNodeTypes(ctx context.Context, dollar_1 []string) ([]GetStatsNodeTypesRow, error)
-	// ============================================================
-	// STATS
-	// ============================================================
-	GetStatsOverview(ctx context.Context, dollar_1 []string) (GetStatsOverviewRow, error)
-	// Payload-type counts for the IATA within the window, summed from the
-	// precomputed hourly buckets.
+	// Payload-type observation counts since the given hour, from the hourly rollup.
 	GetStatsPayloadBreakdown(ctx context.Context, arg GetStatsPayloadBreakdownParams) ([]GetStatsPayloadBreakdownRow, error)
-	// Top N advertisers in the window, summed from the hourly buckets.
+	// One row per hour in [since, until) plus a summary row (hour NULL) over its complete hours.
+	// Counts sum; observers, IATAs and scopes are distinct across the window; packets count
+	// once per hour heard. Each branch pair keeps "all IATAs" and "these IATAs" plans separate.
+	GetStatsSeries(ctx context.Context, arg GetStatsSeriesParams) ([]GetStatsSeriesRow, error)
+	// Top N advertisers since the given hour. Each ADVERT packet counts once per hour heard,
+	// however many of the requested IATAs heard it (IATA-set rollup). Live names win.
 	GetStatsTopAdvertisers(ctx context.Context, arg GetStatsTopAdvertisersParams) ([]GetStatsTopAdvertisersRow, error)
-	// Top N observers for the IATA within the window, summed from the precomputed
-	// hourly buckets. Counts sum across matched IATAs; iata is a representative one.
+	// Top N observers since the given hour. Counts sum across matched IATAs; iata is a
+	// representative one. Live names win over the rolled snapshot.
 	GetStatsTopObservers(ctx context.Context, arg GetStatsTopObserversParams) ([]GetStatsTopObserversRow, error)
-	// Top N talkers (by decrypted sender_name) in the window, summed from the hourly buckets.
+	// Top N senders since the given hour. Each message counts once per hour heard, however many
+	// of the requested IATAs heard it (IATA-set rollup).
 	GetStatsTopTalkers(ctx context.Context, arg GetStatsTopTalkersParams) ([]GetStatsTopTalkersRow, error)
-	GetTopNodes(ctx context.Context, arg GetTopNodesParams) ([]MvTopNodesByIatum, error)
+	// Nodes by ADVERT hearings since the given hour. Live names win over the rolled snapshot;
+	// node_id is NULL once the node row is gone. iata is a representative one.
+	GetTopNodes(ctx context.Context, arg GetTopNodesParams) ([]GetTopNodesRow, error)
 	GetTransportScopeByName(ctx context.Context, name string) (int32, error)
 	GetTransportScopes(ctx context.Context) ([]GetTransportScopesRow, error)
 	// ============================================================
@@ -138,11 +157,14 @@ type Querier interface {
 	// ============================================================
 	// Read the immutable first-packet scope in the same statement as insertion.
 	// A later reception's transport code must not give live and historical messages different tags.
+	// message_count is a lifetime count, bumped only for a new message. A historical (backfilled)
+	// message queues its observation hours for a re-roll in the same statement, so the two can't diverge.
 	InsertChannelMessage(ctx context.Context, arg InsertChannelMessageParams) (InsertChannelMessageRow, error)
 	// ============================================================
 	// PACKET OBSERVATIONS
 	// ============================================================
-	InsertObservation(ctx context.Context, arg InsertObservationParams) (PacketObservation, error)
+	// Bumps packets.observation_count only for a new row; a duplicate returns the current count.
+	InsertObservation(ctx context.Context, arg InsertObservationParams) (InsertObservationRow, error)
 	// Inserts a telemetry snapshot for an observer. The reported_at timestamp should
 	// be truncated to the configured resolution before calling to ensure deduplication.
 	InsertObserverTelemetry(ctx context.Context, arg InsertObserverTelemetryParams) error
@@ -170,6 +192,9 @@ type Querier interface {
 	// Keep the non-null tuple boundary separate from the legacy optional cursor so
 	// generic prepared plans can seek directly into the composite ordered index.
 	ListChannelsAfter(ctx context.Context, arg ListChannelsAfterParams) ([]Channel, error)
+	// Only complete hours whose raw rows are still intact can be re-rolled. Queued missing hours
+	// wait: their first roll consumes the entry only if the entry predates its snapshot.
+	ListDirtyRollupHours(ctx context.Context, limit int32) ([]pgtype.Timestamptz, error)
 	ListIATAs(ctx context.Context) ([]IataCode, error)
 	// Only one branch runs. Keep the IATA range ordered by the composite index:
 	// generic plans can otherwise prefer scanning the global timestamp index.
@@ -178,6 +203,7 @@ type Querier interface {
 	// Returns messages after the given message ID, ordered oldest first.
 	// Used for WS reconnect backfill.
 	ListMessagesAfterID(ctx context.Context, arg ListMessagesAfterIDParams) ([]ListMessagesAfterIDRow, error)
+	ListMissingRollupHours(ctx context.Context, limit int32) ([]pgtype.Timestamptz, error)
 	ListNodeObservations(ctx context.Context, arg ListNodeObservationsParams) ([]ListNodeObservationsRow, error)
 	// Limit the filtered node page before enriching IATA membership and neighbours.
 	ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNodesRow, error)
@@ -224,9 +250,7 @@ type Querier interface {
 	// ============================================================
 	// TRACES
 	// ============================================================
-	// Returns distinct trace tags with summary info, ordered by most recent first.
-	// IATA membership comes from trace_iatas (joining observations here spilled the
-	// hash join). Per-tag details filled in only for the returned page.
+	// Tags, most recent first. Filters match the tag summary (see RecordTrace).
 	ListTraceTags(ctx context.Context, arg ListTraceTagsParams) ([]ListTraceTagsRow, error)
 	// Returns GRP_TXT packets (payload_type=5) never successfully decrypted. Used at boot to
 	// retry decryption against the current keystore for packets whose channel key was only added
@@ -237,6 +261,12 @@ type Querier interface {
 	ListUndecryptedGroupTextPacketsByHash(ctx context.Context, hashes [][]byte) ([]ListUndecryptedGroupTextPacketsByHashRow, error)
 	ListZoneBoundaries(ctx context.Context) ([]MeshmapperZoneBoundary, error)
 	ListZoneLists(ctx context.Context) ([]MeshmapperZoneList, error)
+	// Returns the hour's status, or 'partial' if raw deletion has reached it since registration.
+	LockRollupHour(ctx context.Context, hour pgtype.Timestamptz) (string, error)
+	// Hours whose raw rows cleanup already started deleting can never be rolled completely.
+	// Readers report the new status, so the revision moves too.
+	MarkPartialRollupHours(ctx context.Context) error
+	OldestMissingRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
 	PruneImportedRegions(ctx context.Context, keep []string) ([]string, error)
 	// Drops imports for IATAs no longer configured, so their manual border returns.
 	PruneZoneBoundaries(ctx context.Context, keep []string) ([]string, error)
@@ -248,16 +278,15 @@ type Querier interface {
 	// 1/2/3/4-byte hop prefixes check prefix_1/2/3/4; ambiguity set supplied by AmbiguousPrefixes),
 	// and stamps the survivors.
 	ReconfirmRoutes(ctx context.Context, arg ReconfirmRoutesParams) (int64, error)
-	RefreshHourlyStats(ctx context.Context) error
-	RefreshObserverActivity(ctx context.Context) error
-	RefreshPathStats(ctx context.Context) error
-	RefreshPayloadBreakdown(ctx context.Context) error
+	// One hearing of a TRACE packet: trace_iatas refreshes at most hourly and the tag's heard
+	// window widens (the first hearing replaces the packet's provisional times). Packet counts
+	// and payloads come from UpsertPacket.
+	RecordTrace(ctx context.Context, arg RecordTraceParams) error
 	RefreshRadioPresets(ctx context.Context) error
-	RefreshSignalStats(ctx context.Context) error
-	RefreshTopAdvertisers(ctx context.Context) error
-	RefreshTopNodes(ctx context.Context) error
-	RefreshTopObservers(ctx context.Context) error
-	RefreshTopTalkers(ctx context.Context) error
+	// Adds a 'missing' row for every eligible hour since the earliest retained observation
+	// (and not before @since), zero-observation hours included.
+	// No observations yet means nothing to register (GREATEST would ignore the NULL MIN).
+	RegisterRollupHours(ctx context.Context, since pgtype.Timestamptz) error
 	// Batch form of ResolveEndpointHashes for a page of packets. Matches the cross
 	// product of IATAs and hashes; callers pick out the pairs they asked for.
 	ResolveEndpointHashPairs(ctx context.Context, arg ResolveEndpointHashPairsParams) ([]ResolveEndpointHashPairsRow, error)
@@ -276,6 +305,24 @@ type Querier interface {
 	ResolvePathHashesP2(ctx context.Context, arg ResolvePathHashesP2Params) ([]ResolvePathHashesP2Row, error)
 	ResolvePathHashesP3(ctx context.Context, arg ResolvePathHashesP3Params) ([]ResolvePathHashesP3Row, error)
 	ResolvePathHashesP4(ctx context.Context, arg ResolvePathHashesP4Params) ([]ResolvePathHashesP4Row, error)
+	RollAdvertHearings(ctx context.Context, hour pgtype.Timestamptz) error
+	// Each distinct ADVERT packet counts once, under the exact set of IATAs that heard it this hour.
+	RollAdvertSets(ctx context.Context, hour pgtype.Timestamptz) error
+	RollIATAObservations(ctx context.Context, hour pgtype.Timestamptz) error
+	RollObserverActivity(ctx context.Context, hour pgtype.Timestamptz) error
+	RollObserverIdentity(ctx context.Context, hour pgtype.Timestamptz) error
+	RollPacketSets(ctx context.Context, hour pgtype.Timestamptz) error
+	// category: 0 = routed, 1 = zero-hop, 2 = TRACE, 3 = invalid (meshcore-go IsValidPathLen).
+	RollPaths(ctx context.Context, hour pgtype.Timestamptz) error
+	RollPayloadBreakdown(ctx context.Context, hour pgtype.Timestamptz) error
+	RollScopeSets(ctx context.Context, hour pgtype.Timestamptz) error
+	// kind = grouping(snr_bin, rssi_bin): 3 = per IATA totals, 1 = per SNR bin, 2 = per RSSI bin.
+	// rssi=0 AND snr=0 means "not reported".
+	RollSignal(ctx context.Context, hour pgtype.Timestamptz) error
+	RollTalkerSets(ctx context.Context, hour pgtype.Timestamptz) error
+	// Order-independent fingerprint of every family row for the hour.
+	RollupContentHash(ctx context.Context, hour pgtype.Timestamptz) (string, error)
+	RollupUnlock(ctx context.Context) error
 	// NULL payload/etag/checked_at retain the last good list after an error or 304.
 	SaveChannelCatalogue(ctx context.Context, arg SaveChannelCatalogueParams) error
 	// One statement commits the validated snapshot and its lookup identities together.
@@ -293,11 +340,17 @@ type Querier interface {
 	SetNodeMultibytePaths(ctx context.Context, id uuid.UUID) error
 	SetNodeMultibyteTraces(ctx context.Context, id uuid.UUID) error
 	SetPacketDecrypted(ctx context.Context, packetHash []byte) error
+	SetRollupHourPartial(ctx context.Context, hour pgtype.Timestamptz) error
 	TouchObserverBrokers(ctx context.Context, arg TouchObserverBrokersParams) error
 	// Batched flush of coalesced presence bumps. GREATEST keeps a late flush
 	// from regressing a newer write-through (e.g. a status update).
 	TouchObservers(ctx context.Context, arg TouchObserversParams) error
 	TouchPackets(ctx context.Context, arg TouchPacketsParams) error
+	// ============================================================
+	// HOURLY ANALYTICS ROLLUPS
+	// An hour [H, H+1h) is eligible once now() >= H + 95 min (ingest clamps heard_at to ±30 min).
+	// ============================================================
+	TryRollupLock(ctx context.Context) (bool, error)
 	// Records the observer's own OTA-reported region scope, from the "self"
 	// field of a /neighbors report. Always known (not queried OTA), so this
 	// unconditionally overwrites, unlike the neighbor-side region_scope.
@@ -356,7 +409,8 @@ type Querier interface {
 	// ============================================================
 	// OBSERVERS
 	// ============================================================
-	UpsertObserver(ctx context.Context, publicKey []byte) (Observer, error)
+	// Empty iata (status/neighbors) leaves last_iata alone; otherwise the newest iata_at wins.
+	UpsertObserver(ctx context.Context, arg UpsertObserverParams) (Observer, error)
 	// ============================================================
 	// OBSERVER BROKERS
 	// ============================================================
@@ -365,10 +419,10 @@ type Querier interface {
 	// ============================================================
 	// PACKETS
 	// ============================================================
+	// A new TRACE packet adds itself to its tag summary in the same statement, so the summary
+	// can't miss a stored packet. 'TRACE' > 'PING'; the longest path keeps the best payload.
 	UpsertPacket(ctx context.Context, arg UpsertPacketParams) (UpsertPacketRow, error)
 	UpsertRegion(ctx context.Context, arg UpsertRegionParams) (int32, error)
-	// Refreshes at most hourly so repeat hears don't churn the row.
-	UpsertTraceIATA(ctx context.Context, arg UpsertTraceIATAParams) error
 	// ============================================================
 	// TRANSPORT CODES
 	// ============================================================

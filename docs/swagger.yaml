@@ -113,6 +113,7 @@ definitions:
         description: epoch ms, time of most recent message
         type: integer
       messageCount:
+        description: lifetime count; not reduced by retention
         type: integer
       name:
         description: display name from config or nil
@@ -489,16 +490,12 @@ definitions:
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.ObservationPoint:
     properties:
-      activeObservers:
-        type: integer
       hour:
         description: epoch ms, start of the 1-hour bucket
         type: integer
       iata:
         type: string
       observationCount:
-        type: integer
-      uniquePackets:
         type: integer
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.Observer:
@@ -1318,12 +1315,90 @@ definitions:
         type: integer
       activeObservers:
         type: integer
+      since:
+        description: epoch ms, start of the window
+        type: integer
       totalObservations:
         type: integer
       totalPackets:
+        description: distinct per hour (see StatsSeriesValues)
+        type: integer
+      until:
+        description: epoch ms, exclusive end of the window
         type: integer
       windowHours:
         description: always 24 for now
+        type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.StatsSeries:
+    properties:
+      completeHours:
+        description: hours contributing to summary
+        type: integer
+      earliestComplete:
+        description: first complete hour held, epoch ms; null if none
+        type: integer
+      hours:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.StatsSeriesHour'
+        type: array
+      revision:
+        description: changes whenever rolled hours, their status or coverage change
+        type: integer
+      since:
+        description: effective start, epoch ms on a UTC hour
+        type: integer
+      summary:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.StatsSeriesValues'
+      until:
+        description: effective exclusive end, epoch ms on a UTC hour
+        type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.StatsSeriesHour:
+    properties:
+      hour:
+        description: epoch ms, start of the hour
+        type: integer
+      status:
+        description: 'partial: raw rows deleted before it was rolled'
+        enum:
+        - complete
+        - partial
+        - missing
+        type: string
+      values:
+        allOf:
+        - $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.StatsSeriesValues'
+        description: null unless complete
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.StatsSeriesValues:
+    properties:
+      activeIatas:
+        description: distinct across the hour or window
+        type: integer
+      activeObservers:
+        description: distinct across the hour or window
+        type: integer
+      activeScopes:
+        description: distinct across the hour or window
+        type: integer
+      maxPathEntries:
+        type: integer
+      observations:
+        type: integer
+      rssiSamples:
+        type: integer
+      rssiSum:
+        description: average = rssiSum / rssiSamples
+        type: number
+      scopedPackets:
+        type: integer
+      snrSamples:
+        type: integer
+      snrSum:
+        description: average = snrSum / snrSamples
+        type: number
+      uniquePackets:
         type: integer
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.TopAdvertiser:
@@ -1345,12 +1420,16 @@ definitions:
         description: epoch ms
         type: integer
       nodeId:
+        description: null once the node row has been deleted
         type: string
       nodeName:
         type: string
       nodeType:
         type: integer
       nodeTypeName:
+        type: string
+      publicKey:
+        description: hex
         type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.TopNode:
@@ -1361,6 +1440,7 @@ definitions:
         description: epoch ms
         type: integer
       nodeId:
+        description: null once the node row has been deleted
         type: string
       nodeName:
         type: string
@@ -1370,6 +1450,9 @@ definitions:
         type: string
       observationCount:
         type: integer
+      publicKey:
+        description: hex
+        type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.TopObserver:
     properties:
@@ -3130,6 +3213,9 @@ paths:
       - Scopes
   /scopes/{name}:
     get:
+      description: packetCount sums packets per hour across every retained rollup
+        hour; iatas are the IATAs that heard the scope's packets. Observer and node
+        counts are current memberships.
       parameters:
       - description: 'Scope name e.g. %23bc (URL-encoded #bc)'
         in: path
@@ -3226,6 +3312,8 @@ paths:
       - Stats
   /stats/observations:
     get:
+      description: Observation counts only; distinct packet and observer counts don't
+        sum across IATAs, so read them from /stats/series.
       parameters:
       - description: Comma-separated IATA codes
         in: query
@@ -3256,7 +3344,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
-      summary: Hourly observation time series
+      summary: Hourly observation counts per IATA
       tags:
       - Stats
   /stats/observer-comparison:
@@ -3326,6 +3414,9 @@ paths:
       - Stats
   /stats/overview:
     get:
+      description: Summarises the 24 most recent hours that can have been rolled (an
+        hour rolls about 95 minutes after it closes); since/until report that window.
+        Packets count once per hour heard. Use /stats/series for sparklines.
       parameters:
       - description: Comma-separated IATA codes
         in: query
@@ -3350,7 +3441,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
-      summary: Network overview stats (last 24h)
+      summary: Network overview stats (last 24 rolled hours)
       tags:
       - Stats
   /stats/paths:
@@ -3482,12 +3573,13 @@ paths:
       - Stats
   /stats/scopes:
     get:
-      description: Counts each packet, observer and node once per scope. IATA filters
-        use retained observations for packets/observers and node IATA memberships
-        for nodes. Without filters, returns global totals for every stored scope.
-        With filters, lists only manual scopes configured for a matching region and
-        imported scopes whose current MeshMapper catalogue includes a matching IATA;
-        those remain listed with zero counts. An empty region returns an empty array.
+      description: 'Packets are those heard since the window start, each counted once
+        per hour however many of the requested IATAs heard it. Observers and nodes
+        are current memberships: observers filter by the IATA they last reported from,
+        nodes by their IATA memberships. With filters, lists only manual scopes configured
+        for a matching region and imported scopes whose current MeshMapper catalogue
+        includes a matching IATA; those remain listed with zero counts. An empty region
+        returns an empty array.'
       parameters:
       - description: Comma-separated IATA codes
         in: query
@@ -3506,6 +3598,11 @@ paths:
         in: query
         name: region
         type: string
+      - description: Start of packet window epoch ms, rounded down to the hour (default
+          7 days ago)
+        in: query
+        name: since
+        type: integer
       produces:
       - application/json
       responses:
@@ -3524,6 +3621,63 @@ paths:
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Scope statistics
+      tags:
+      - Stats
+  /stats/series:
+    get:
+      description: One entry per UTC hour in [since, until) plus a summary over the
+        complete hours. Both bounds round down to UTC hours and since is clamped to
+        the rollup retention; the response reports the effective window. An hour is
+        rolled about 95 minutes after it closes, so recent hours are "missing" until
+        then; "partial" hours lost raw rows before they could be rolled and never
+        get values. Counts (observations, packets) sum across hours, with a packet
+        counted once in each hour it was heard; observers, IATAs and scopes are distinct
+        across the whole window; averages are sum / samples. revision changes whenever
+        any rolled hour changes.
+      parameters:
+      - description: Inclusive start, epoch milliseconds
+        in: query
+        name: since
+        required: true
+        type: integer
+      - description: Exclusive end, epoch milliseconds; the window is at most the
+          rollup retention (default 90 days)
+        in: query
+        name: until
+        required: true
+        type: integer
+      - description: Comma-separated reception IATA codes
+        in: query
+        name: iatas
+        type: string
+      - description: Region ID, expands to member IATAs
+        in: query
+        name: regionId
+        type: integer
+      - description: Region slug, expands to member IATAs
+        in: query
+        name: region
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.StatsSeries'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+      summary: Hourly network activity from the analytics rollups
       tags:
       - Stats
   /stats/signal:
@@ -3584,6 +3738,8 @@ paths:
       - Stats
   /stats/top-advertisers:
     get:
+      description: Each advert counts once per hour heard, however many requested
+        IATAs heard it. nodeId is null when the node row has been deleted.
       parameters:
       - description: Comma-separated IATA codes
         in: query
@@ -3626,6 +3782,8 @@ paths:
       - Stats
   /stats/top-nodes:
     get:
+      description: nodeId is null when the node row has been deleted; publicKey always
+        identifies it.
       parameters:
       - description: Comma-separated IATA codes
         in: query
@@ -3639,6 +3797,11 @@ paths:
         in: query
         name: region
         type: string
+      - description: Start of window epoch ms, rounded down to the hour (default 7
+          days ago)
+        in: query
+        name: since
+        type: integer
       - description: Max results (default 10); must be positive, values above 200
           are clamped
         in: query
@@ -3659,7 +3822,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
-      summary: Top N nodes by observation count (from materialized view)
+      summary: Top N nodes by advert hearings (last 7 days by default)
       tags:
       - Stats
   /stats/top-observers:
@@ -3762,11 +3925,12 @@ paths:
         in: query
         name: regionId
         type: integer
-      - description: Filter by transport scope name
+      - description: Filter by the tag's first transport scope name
         in: query
         name: scope
         type: string
-      - description: 'Filter by type: TRACE or PING (default: all)'
+      - description: 'Filter by type: TRACE (any multi-hop packet) or PING (default:
+          all)'
         in: query
         name: type
         type: string

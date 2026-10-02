@@ -13,11 +13,11 @@ import (
 
 const getPathStats = `-- name: GetPathStats :many
 WITH readings AS (
-    SELECT iata, hour, category, hash_bytes, entries, receptions FROM mv_path_stats_hourly
+    SELECT iata, hour, category, hash_bytes, entries, receptions FROM analytics_hourly_paths
     WHERE hour >= $1::timestamptz AND hour < $2::timestamptz
       AND COALESCE(cardinality($3::bpchar[]), 0) = 0
     UNION ALL
-    SELECT iata, hour, category, hash_bytes, entries, receptions FROM mv_path_stats_hourly
+    SELECT iata, hour, category, hash_bytes, entries, receptions FROM analytics_hourly_paths
     WHERE hour >= $1::timestamptz AND hour < $2::timestamptz
       AND cardinality($3::bpchar[]) > 0 AND iata = ANY($3::bpchar[])
 )
@@ -45,7 +45,7 @@ type GetPathStatsRow struct {
 	Receptions int64              `json:"receptions"`
 }
 
-// All HTTP aggregates read the compact classification snapshot.
+// All HTTP aggregates read the hourly rollup, never observations.
 func (q *Queries) GetPathStats(ctx context.Context, arg GetPathStatsParams) ([]GetPathStatsRow, error) {
 	rows, err := q.db.Query(ctx, getPathStats, arg.Since, arg.Until, arg.Iatas)
 	if err != nil {
@@ -71,13 +71,4 @@ func (q *Queries) GetPathStats(ctx context.Context, arg GetPathStatsParams) ([]G
 		return nil, err
 	}
 	return items, nil
-}
-
-const refreshPathStats = `-- name: RefreshPathStats :exec
-REFRESH MATERIALIZED VIEW CONCURRENTLY mv_path_stats_hourly
-`
-
-func (q *Queries) RefreshPathStats(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, refreshPathStats)
-	return err
 }

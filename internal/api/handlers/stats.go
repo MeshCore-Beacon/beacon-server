@@ -4,6 +4,7 @@
 package handlers
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -27,8 +28,29 @@ import (
 // GET  /stats/scopes            → GetStatsScopes
 //
 // All endpoints accept an optional iata= filter (case-insensitive).
-func StatsRouter(reader api.Reader, scopes ScopeMembership) http.Handler {
+// StatsOptions configures StatsRouter.
+type StatsOptions struct {
+	Scopes       ScopeMembership // region-filtered scope lists; nil lists none
+	SeriesWindow time.Duration   // longest /stats/series window, the rollup retention; 0 means 90 days
+}
+
+// parseSince reads an optional epoch-ms since; zero means the endpoint's default window.
+func parseSince(r *http.Request) (time.Time, error) {
+	p := r.URL.Query().Get("since")
+	if p == "" {
+		return time.Time{}, nil
+	}
+	ms, err := strconv.ParseInt(p, 10, 64)
+	if err != nil {
+		return time.Time{}, errors.New("since must be epoch milliseconds")
+	}
+	return time.UnixMilli(ms), nil
+}
+
+func StatsRouter(reader api.Reader, opts StatsOptions) http.Handler {
+	scopes := opts.Scopes
 	r := chi.NewRouter()
+	r.Get("/series", getStatsSeries(reader, opts.SeriesWindow))
 	r.Get("/overview", getStatsOverview(reader))
 	r.Get("/observations", getStatsObservations(reader))
 	r.Get("/signal", getSignalStats(reader))
@@ -48,7 +70,8 @@ func StatsRouter(reader api.Reader, scopes ScopeMembership) http.Handler {
 
 // getStatsOverview godoc
 //
-//	@Summary	Network overview stats (last 24h)
+//	@Summary	Network overview stats (last 24 rolled hours)
+//	@Description	Summarises the 24 most recent hours that can have been rolled (an hour rolls about 95 minutes after it closes); since/until report that window. Packets count once per hour heard. Use /stats/series for sparklines.
 //	@Tags		Stats
 //	@Produce	json
 //	@Param		iatas		query	string	false	"Comma-separated IATA codes"
@@ -67,6 +90,9 @@ func getStatsOverview(reader api.Reader) http.HandlerFunc {
 				return
 			}
 			iatas = append(iatas, regionIATAs...)
+			if len(iatas) == 0 {
+				iatas = []string{""} // an empty region matches nothing, not everything
+			}
 		}
 		overview, err := reader.GetStatsOverview(r.Context(), iatas)
 		if err != nil {
@@ -80,7 +106,8 @@ func getStatsOverview(reader api.Reader) http.HandlerFunc {
 
 // getStatsObservations godoc
 //
-//	@Summary	Hourly observation time series
+//	@Summary	Hourly observation counts per IATA
+//	@Description	Observation counts only; distinct packet and observer counts don't sum across IATAs, so read them from /stats/series.
 //	@Tags		Stats
 //	@Produce	json
 //	@Param		iatas		query	string	false	"Comma-separated IATA codes"
@@ -100,15 +127,14 @@ func getStatsObservations(reader api.Reader) http.HandlerFunc {
 				return
 			}
 			iatas = append(iatas, regionIATAs...)
-		}
-		var since time.Time
-		if p := r.URL.Query().Get("since"); p != "" {
-			ms, err := strconv.ParseInt(p, 10, 64)
-			if err != nil {
-				respondError(w, http.StatusBadRequest, "since must be epoch milliseconds")
-				return
+			if len(iatas) == 0 {
+				iatas = []string{""} // an empty region matches nothing, not everything
 			}
-			since = time.UnixMilli(ms)
+		}
+		since, err := parseSince(r)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
 		}
 		points, err := reader.GetStatsObservations(r.Context(), iatas, since)
 		if err != nil {
@@ -142,15 +168,14 @@ func getStatsPayloadBreakdown(reader api.Reader) http.HandlerFunc {
 				return
 			}
 			iatas = append(iatas, regionIATAs...)
-		}
-		var since time.Time
-		if p := r.URL.Query().Get("since"); p != "" {
-			ms, err := strconv.ParseInt(p, 10, 64)
-			if err != nil {
-				respondError(w, http.StatusBadRequest, "since must be epoch milliseconds")
-				return
+			if len(iatas) == 0 {
+				iatas = []string{""} // an empty region matches nothing, not everything
 			}
-			since = time.UnixMilli(ms)
+		}
+		since, err := parseSince(r)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
 		}
 		breakdown, err := reader.GetStatsPayloadBreakdown(r.Context(), iatas, since)
 		if err != nil {
@@ -164,12 +189,14 @@ func getStatsPayloadBreakdown(reader api.Reader) http.HandlerFunc {
 
 // getStatsTopNodes godoc
 //
-//	@Summary	Top N nodes by observation count (from materialized view)
+//	@Summary	Top N nodes by advert hearings (last 7 days by default)
+//	@Description	nodeId is null when the node row has been deleted; publicKey always identifies it.
 //	@Tags		Stats
 //	@Produce	json
 //	@Param		iatas		query	string	false	"Comma-separated IATA codes"
 //	@Param		regionId	query	int		false	"Filter by region ID, expands to member IATAs"
 //	@Param		region		query	string	false	"Filter by region slug, expands to member IATAs"
+//	@Param		since	query		int		false	"Start of window epoch ms, rounded down to the hour (default 7 days ago)"
 //	@Param		limit	query		int		false	"Max results (default 10); must be positive, values above 200 are clamped" minimum(1) maximum(200)
 //	@Success	200		{array}		api.TopNode
 //	@Failure	500		{object}	handlers.APIError
@@ -184,13 +211,21 @@ func getStatsTopNodes(reader api.Reader) http.HandlerFunc {
 				return
 			}
 			iatas = append(iatas, regionIATAs...)
+			if len(iatas) == 0 {
+				iatas = []string{""} // an empty region matches nothing, not everything
+			}
 		}
 		limit, err := parseLimit(r, 10)
 		if err != nil {
 			respondError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		nodes, err := reader.GetStatsTopNodes(r.Context(), iatas, limit)
+		since, err := parseSince(r)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		nodes, err := reader.GetStatsTopNodes(r.Context(), iatas, since, limit)
 		if err != nil {
 			slog.Error("api: GetStatsTopNodes failed", "component", "api", "error", err)
 			respondError(w, http.StatusInternalServerError, "internal server error")
@@ -223,15 +258,14 @@ func getStatsTopObservers(reader api.Reader) http.HandlerFunc {
 				return
 			}
 			iatas = append(iatas, regionIATAs...)
-		}
-		var since time.Time
-		if p := r.URL.Query().Get("since"); p != "" {
-			ms, err := strconv.ParseInt(p, 10, 64)
-			if err != nil {
-				respondError(w, http.StatusBadRequest, "since must be epoch milliseconds")
-				return
+			if len(iatas) == 0 {
+				iatas = []string{""} // an empty region matches nothing, not everything
 			}
-			since = time.UnixMilli(ms)
+		}
+		since, err := parseSince(r)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
 		}
 		limit, err := parseLimit(r, 10)
 		if err != nil {
@@ -251,6 +285,7 @@ func getStatsTopObservers(reader api.Reader) http.HandlerFunc {
 // getStatsTopAdvertisers godoc
 //
 //	@Summary	Top N nodes by distinct ADVERT packet count (last 24h by default)
+//	@Description	Each advert counts once per hour heard, however many requested IATAs heard it. nodeId is null when the node row has been deleted.
 //	@Tags		Stats
 //	@Produce	json
 //	@Param		iatas		query	string	false	"Comma-separated IATA codes"
@@ -271,15 +306,14 @@ func getStatsTopAdvertisers(reader api.Reader) http.HandlerFunc {
 				return
 			}
 			iatas = append(iatas, regionIATAs...)
-		}
-		var since time.Time
-		if p := r.URL.Query().Get("since"); p != "" {
-			ms, err := strconv.ParseInt(p, 10, 64)
-			if err != nil {
-				respondError(w, http.StatusBadRequest, "since must be epoch milliseconds")
-				return
+			if len(iatas) == 0 {
+				iatas = []string{""} // an empty region matches nothing, not everything
 			}
-			since = time.UnixMilli(ms)
+		}
+		since, err := parseSince(r)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
 		}
 		limit, err := parseLimit(r, 10)
 		if err != nil {
@@ -318,6 +352,9 @@ func getStatsClockDrift(reader api.Reader) http.HandlerFunc {
 				return
 			}
 			iatas = append(iatas, regionIATAs...)
+			if len(iatas) == 0 {
+				iatas = []string{""} // an empty region matches nothing, not everything
+			}
 		}
 		limit, err := parseLimit(r, 10)
 		if err != nil {
@@ -357,15 +394,14 @@ func getStatsTopTalkers(reader api.Reader) http.HandlerFunc {
 				return
 			}
 			iatas = append(iatas, regionIATAs...)
-		}
-		var since time.Time
-		if p := r.URL.Query().Get("since"); p != "" {
-			ms, err := strconv.ParseInt(p, 10, 64)
-			if err != nil {
-				respondError(w, http.StatusBadRequest, "since must be epoch milliseconds")
-				return
+			if len(iatas) == 0 {
+				iatas = []string{""} // an empty region matches nothing, not everything
 			}
-			since = time.UnixMilli(ms)
+		}
+		since, err := parseSince(r)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
 		}
 		limit, err := parseLimit(r, 10)
 		if err != nil {
@@ -405,6 +441,9 @@ func getStatsRadioPresets(reader api.Reader) http.HandlerFunc {
 				return
 			}
 			iatas = append(iatas, regionIATAs...)
+			if len(iatas) == 0 {
+				iatas = []string{""} // an empty region matches nothing, not everything
+			}
 		}
 		presets, err := reader.GetRadioPresets(r.Context(), preset, iatas)
 		if err != nil {
@@ -418,13 +457,14 @@ func getStatsRadioPresets(reader api.Reader) http.HandlerFunc {
 // getStatsScopes godoc
 //
 //	@Summary	Scope statistics
-//	@Description	Counts each packet, observer and node once per scope. IATA filters use retained observations for packets/observers and node IATA memberships for nodes. Without filters, returns global totals for every stored scope. With filters, lists only manual scopes configured for a matching region and imported scopes whose current MeshMapper catalogue includes a matching IATA; those remain listed with zero counts. An empty region returns an empty array.
+//	@Description	Packets are those heard since the window start, each counted once per hour however many of the requested IATAs heard it. Observers and nodes are current memberships: observers filter by the IATA they last reported from, nodes by their IATA memberships. With filters, lists only manual scopes configured for a matching region and imported scopes whose current MeshMapper catalogue includes a matching IATA; those remain listed with zero counts. An empty region returns an empty array.
 //	@Tags		Stats
 //	@Produce	json
 //	@Param		iatas		query	string	false	"Comma-separated IATA codes"
 //	@Param		iata		query	string	false	"Single IATA code; used when iatas is absent"
 //	@Param		regionId	query	int		false	"Filter by region ID, expands to member IATAs"
 //	@Param		region		query	string	false	"Filter by region slug, expands to member IATAs; combined with explicit IATAs"
+//	@Param		since	query		int		false	"Start of packet window epoch ms, rounded down to the hour (default 7 days ago)"
 //	@Success	200	{object}	[]api.ScopeStats
 //	@Failure	400	{object}	handlers.APIError
 //	@Failure	500	{object}	handlers.APIError
@@ -444,7 +484,12 @@ func getStatsScopes(reader api.Reader, scopes ScopeMembership) http.HandlerFunc 
 				return
 			}
 		}
-		stats, err := reader.GetScopeStats(r.Context(), iatas)
+		since, err := parseSince(r)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		stats, err := reader.GetScopeStats(r.Context(), iatas, since)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
@@ -481,6 +526,9 @@ func getStatsNodeTypes(reader api.Reader) http.HandlerFunc {
 				return
 			}
 			iatas = append(iatas, regionIATAs...)
+			if len(iatas) == 0 {
+				iatas = []string{""} // an empty region matches nothing, not everything
+			}
 		}
 		result, err := reader.GetStatsNodeTypes(r.Context(), iatas)
 		if err != nil {

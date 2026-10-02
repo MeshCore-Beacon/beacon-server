@@ -24,11 +24,9 @@ func TestObserverMetricsPostgres(t *testing.T) {
 	}
 	store := &Store{q: sqlc.New(tx)}
 	id := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	// Hourly activity is rolled before cleanup and survives the raw rows.
+	rollTxHours(t, ctx, tx)
 	if err := store.DeleteOldPackets(ctx, time.Now().Add(-72*time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	// The initial archive migration retains unknown payloads without a second rebuild.
-	if err := store.RefreshObserverActivity(ctx); err != nil {
 		t.Fatal(err)
 	}
 	until := time.Now().UTC().Truncate(time.Hour)

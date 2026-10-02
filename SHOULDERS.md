@@ -22,6 +22,8 @@ projects that make this possible:
 - [godotenv](https://github.com/joho/godotenv) — .env file loading
 - [yaml.v3](https://github.com/go-yaml/yaml) — YAML config parsing
 - [google/uuid](https://github.com/google/uuid) — UUID generation
+- [golang.org/x/sync](https://pkg.go.dev/golang.org/x/sync) — singleflight for
+  collapsing concurrent cache misses
 
 ## Data
 

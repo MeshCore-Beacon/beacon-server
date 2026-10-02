@@ -17,10 +17,12 @@ type scopeStatsReader struct {
 	calls int64
 }
 
-func (r *scopeStatsReader) GetScopeStats(context.Context, []string) ([]api.ScopeStats, error) {
+func (r *scopeStatsReader) GetScopeStats(context.Context, []string, time.Time) ([]api.ScopeStats, error) {
 	r.calls++
 	return []api.ScopeStats{{Name: "#test", PacketCount: r.calls}}, nil
 }
+
+func (r *scopeStatsReader) AnalyticsRevision(context.Context) (int64, error) { return 0, nil }
 
 func TestScopeStatsCacheSeparatesIATAs(t *testing.T) {
 	c, _ := newTestClient(t)
@@ -42,7 +44,7 @@ func TestScopeStatsCacheSeparatesIATAs(t *testing.T) {
 		{nil, 1},
 	} {
 		before := slices.Clone(tc.iatas)
-		rows, err := reader.GetScopeStats(context.Background(), tc.iatas)
+		rows, err := reader.GetScopeStats(context.Background(), tc.iatas, time.Time{})
 		if err != nil {
 			t.Fatal(err)
 		}

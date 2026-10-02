@@ -164,7 +164,7 @@ func TestGetChannel_Basic(t *testing.T) {
 			LastSeen:     lastSeen,
 			IsHashtag:    &isHashtag,
 			KeyKnown:     &keyKnown,
-			MessageCount: &msgCount,
+			MessageCount: msgCount,
 		}, nil)
 
 	store := &Store{q: mock}

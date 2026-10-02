@@ -41,6 +41,7 @@ type Config struct {
 	Presence    PresenceConfig        `yaml:"presence"`
 	Nodes       NodesConfig           `yaml:"nodes"`
 	Observers   ObserversConfig       `yaml:"observers"`
+	Analytics   AnalyticsConfig       `yaml:"analytics"`
 }
 
 // BackupConfig enables protected downloads. Disabled by default.
@@ -90,6 +91,7 @@ type ResolvedConfig struct {
 	RateLimit            ResolvedRateLimitConfig
 	TelemetryResolution  time.Duration
 	TelemetryRetention   time.Duration
+	RollupRetention      time.Duration
 	PacketRetention      time.Duration
 	RouteRetention       time.Duration
 	RouteGrace           time.Duration
@@ -257,6 +259,12 @@ type PacketsConfig struct {
 	Retention duration `yaml:"retention"`
 }
 
+// AnalyticsConfig controls hourly rollup retention behaviour.
+type AnalyticsConfig struct {
+	// RollupRetention is how long hourly rollups are kept and the longest window /stats/series accepts. Defaults to 2160h (90 days).
+	RollupRetention duration `yaml:"rollup_retention"`
+}
+
 // RoutesConfig controls known-route retention behaviour.
 type RoutesConfig struct {
 	// Retention is how long a route is kept after it was last observed.
@@ -411,6 +419,12 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("websocket.allowed_origins[%d]: %w", i, err)
 		}
 	}
+	if d := cfg.Packets.Retention.Duration; d != 0 && d < 24*time.Hour {
+		return nil, fmt.Errorf("packets.retention must be at least 24h")
+	}
+	if d := cfg.Analytics.RollupRetention.Duration; d != 0 && d < 24*time.Hour {
+		return nil, fmt.Errorf("analytics.rollup_retention must be at least 24h")
+	}
 	configDir := filepath.Dir(path)
 	if err := cfg.validateMeshMapper(); err != nil {
 		return nil, err
@@ -465,6 +479,7 @@ func Resolve(cfg *Config) ResolvedConfig {
 		},
 		TelemetryResolution:  cfg.Telemetry.Resolution.Duration,
 		TelemetryRetention:   cfg.Telemetry.Retention.Duration,
+		RollupRetention:      cfg.Analytics.RollupRetention.Duration,
 		PacketRetention:      cfg.Packets.Retention.Duration,
 		RouteRetention:       cfg.Routes.Retention.Duration,
 		RouteGrace:           cfg.Routes.Grace.Duration,
@@ -493,7 +508,10 @@ func Resolve(cfg *Config) ResolvedConfig {
 		r.TelemetryResolution = time.Hour
 	}
 	if r.TelemetryRetention == 0 {
-		r.TelemetryRetention = 28 * 24 * time.Hour
+		r.TelemetryRetention = 31 * 24 * time.Hour
+	}
+	if r.RollupRetention == 0 {
+		r.RollupRetention = 90 * 24 * time.Hour
 	}
 	if r.PacketRetention == 0 {
 		r.PacketRetention = 7 * 24 * time.Hour
@@ -542,8 +560,8 @@ func Resolve(cfg *Config) ResolvedConfig {
 
 func (r ResolvedConfig) String() string {
 	return fmt.Sprintf(
-		"telemetryResolution=%s telemetryRetention=%s packetRetention=%s routeRetention=%s routeGrace=%s routeMinObs=%d maxConnsPerIP=%d maxConnectsPerMinute=%d viewRefresh=%s reconfirm=%s cleanup=%s presenceFlush=%s presencePacketTTL=%s clockDriftThreshold=%s nodeStaleThreshold=%s nodeDeleteAfter=%s observerDeleteAfter=%s rateLimitEnabled=%t requestsPerMinute=%d burst=%d",
-		r.TelemetryResolution, r.TelemetryRetention, r.PacketRetention, r.RouteRetention, r.RouteGrace, r.RouteMinObservations,
+		"telemetryResolution=%s telemetryRetention=%s rollupRetention=%s packetRetention=%s routeRetention=%s routeGrace=%s routeMinObs=%d maxConnsPerIP=%d maxConnectsPerMinute=%d viewRefresh=%s reconfirm=%s cleanup=%s presenceFlush=%s presencePacketTTL=%s clockDriftThreshold=%s nodeStaleThreshold=%s nodeDeleteAfter=%s observerDeleteAfter=%s rateLimitEnabled=%t requestsPerMinute=%d burst=%d",
+		r.TelemetryResolution, r.TelemetryRetention, r.RollupRetention, r.PacketRetention, r.RouteRetention, r.RouteGrace, r.RouteMinObservations,
 		r.MaxConnsPerIP, r.MaxConnectsPerMinute, r.ViewRefreshInterval, r.ReconfirmInterval, r.CleanupInterval,
 		r.PresenceFlushInterval, r.PresencePacketTTL, r.ClockDriftThreshold,
 		r.NodeStaleThreshold, r.NodeDeleteAfter, r.ObserverDeleteAfter,

@@ -72,5 +72,3 @@ func (s *Store) GetPathStats(ctx context.Context, since, until time.Time, iatas 
 	}
 	return stats, nil
 }
-
-func (s *Store) RefreshPathStats(ctx context.Context) error { return s.q.RefreshPathStats(ctx) }

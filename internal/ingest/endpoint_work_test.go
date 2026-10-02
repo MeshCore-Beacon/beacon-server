@@ -25,7 +25,7 @@ func endpointTestPacket() *meshcore.Packet {
 }
 func TestEndpointLookupsOnlyForLiveHearings(t *testing.T) {
 	r := newRepeatHarness(t, true)
-	d := &endpointLookupDB{stubDB: r.db.stubDB}
+	d := &endpointLookupDB{stubDB: r.db}
 	r.w.db = d
 	packet := endpointTestPacket()
 	hear := func(inserted bool, path byte) {

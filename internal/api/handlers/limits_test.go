@@ -69,7 +69,7 @@ func TestListLimits(t *testing.T) {
 			got = limit
 			return nil, nil
 		},
-		getStatsTopNodes: func(ctx context.Context, iatas []string, limit int32) ([]api.TopNode, error) {
+		getStatsTopNodes: func(ctx context.Context, iatas []string, _ time.Time, limit int32) ([]api.TopNode, error) {
 			calls++
 			got = limit
 			return nil, nil
@@ -113,7 +113,7 @@ func TestListLimits(t *testing.T) {
 	router.Mount("/messages", MessagesRouter(reader))
 	router.Mount("/routes", RoutesRouter(reader))
 	router.Mount("/traces", TracesRouter(reader))
-	router.Mount("/stats", StatsRouter(reader, nil))
+	router.Mount("/stats", StatsRouter(reader, StatsOptions{}))
 	for _, endpoint := range []struct {
 		path         string
 		defaultLimit int32

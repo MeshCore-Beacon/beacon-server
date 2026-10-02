@@ -5,7 +5,7 @@ version: "2"
 sql:
   - engine: "postgresql"
     queries: "db/queries"
-    schema: "db/migrations"
+    schema: ["db/migrations", "db/sqlc_scratch"]
     gen:
       go:
         package: "db"
@@ -22,11 +22,3 @@ sql:
             go_type: "encoding/json.RawMessage"
           - db_type: "bpchar"
             go_type: "string"
-
-          # Coalesced archive labels can still be NULL; preserve the API pointers.
-          - column: "mv_top_observers_by_iata.display_name"
-            go_type: {type: "string", pointer: true}
-          - column: "mv_top_observers_by_iata.observer_type"
-            go_type: {type: "string", pointer: true}
-          - column: "mv_top_advertisers_by_iata.name"
-            go_type: {type: "string", pointer: true}

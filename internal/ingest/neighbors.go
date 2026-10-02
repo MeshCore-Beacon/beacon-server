@@ -43,7 +43,7 @@ func (w *Worker) handleNeighbors(ctx context.Context, iata, pubkeyHex string, ra
 		return
 	}
 
-	observerID, _, err := w.db.UpsertObserver(ctx, pubkey)
+	observerID, _, err := w.db.UpsertObserver(ctx, pubkey, "")
 	if err != nil {
 		w.log.Error(fmt.Sprintf("db: upsert observer failed in neighbors from %s", pubkeyHex), "error", err)
 		return

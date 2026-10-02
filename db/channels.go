@@ -26,12 +26,11 @@ func (s *Store) UpsertChannel(ctx context.Context, channelHash []byte, keyFinger
 	}
 	isHashtag := hashtag != ""
 	row, err := s.q.UpsertChannel(ctx, sqlc.UpsertChannelParams{
-		ChannelHash:  channelHash,
-		Column2:      keyFingerprint, // key_fingerprint
-		Name:         namePtr,
-		Hashtag:      hashtagPtr,
-		IsHashtag:    &isHashtag,
-		MessageCount: nil, // message count bumped separately by InsertChannelMessage
+		ChannelHash: channelHash,
+		Column2:     keyFingerprint, // key_fingerprint
+		Name:        namePtr,
+		Hashtag:     hashtagPtr,
+		IsHashtag:   &isHashtag,
 	})
 	if err != nil {
 		return 0, err
@@ -167,10 +166,7 @@ func (s *Store) GetChannel(ctx context.Context, channelID int32) (*api.Channel, 
 			KeyKnown:    row.KeyKnown != nil && *row.KeyKnown,
 		},
 		Hashtag:      row.Hashtag,
-		MessageCount: 0,
-	}
-	if row.MessageCount != nil {
-		channel.MessageCount = *row.MessageCount
+		MessageCount: row.MessageCount,
 	}
 	if row.IsHashtag != nil && *row.IsHashtag && row.KeyFingerprint != nil {
 		fp := hex.EncodeToString(row.KeyFingerprint)
@@ -180,7 +176,7 @@ func (s *Store) GetChannel(ctx context.Context, channelID int32) (*api.Channel, 
 }
 
 func (s *Store) InsertChannelMessage(ctx context.Context, m ingest.InsertChannelMessageParams) (*ingest.InsertedChannelMessage, error) {
-	params := sqlc.InsertChannelMessageParams{ChannelID: int32(m.ChannelID), PacketHash: m.PacketHash, SenderName: &m.SenderName, Content: &m.Content, SentAt: pgtype.Timestamptz{Time: m.SentAt, Valid: true}}
+	params := sqlc.InsertChannelMessageParams{ChannelID: int32(m.ChannelID), PacketHash: m.PacketHash, SenderName: &m.SenderName, Content: &m.Content, SentAt: pgtype.Timestamptz{Time: m.SentAt, Valid: true}, Column6: m.Historical}
 	row, err := s.q.InsertChannelMessage(ctx, params)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil // duplicate

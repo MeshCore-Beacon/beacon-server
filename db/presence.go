@@ -12,11 +12,13 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-func (s *Store) TouchObservers(ctx context.Context, ids []uuid.UUID, seen []time.Time, counts []int32) error {
+func (s *Store) TouchObservers(ctx context.Context, ids []uuid.UUID, seen []time.Time, counts []int32, iatas []string, iataAts []time.Time) error {
 	return s.q.TouchObservers(ctx, sqlc.TouchObserversParams{
 		Column1: ids,
 		Column2: toTimestamptzs(seen),
 		Column3: counts,
+		Column4: iatas,
+		Column5: nullableTimes(iataAts),
 	})
 }
 

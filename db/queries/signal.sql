@@ -1,12 +1,12 @@
 -- name: GetSignalStats :many
--- Read compact hourly snapshots, never observations on an HTTP request.
+-- Read the hourly rollup, never observations on an HTTP request.
 -- Weight averages by sample counts instead of averaging regional/hourly means.
 WITH readings AS (
-    SELECT * FROM mv_signal_stats_hourly
+    SELECT iata, hour, kind, snr_bin, rssi_bin, receptions, snr_samples, snr_sum, rssi_samples, rssi_sum FROM analytics_hourly_signal
     WHERE hour >= @since::timestamptz AND hour < @until::timestamptz
       AND COALESCE(cardinality(@iatas::bpchar[]), 0) = 0
     UNION ALL
-    SELECT * FROM mv_signal_stats_hourly
+    SELECT iata, hour, kind, snr_bin, rssi_bin, receptions, snr_samples, snr_sum, rssi_samples, rssi_sum FROM analytics_hourly_signal
     WHERE hour >= @since::timestamptz AND hour < @until::timestamptz
       AND cardinality(@iatas::bpchar[]) > 0 AND iata = ANY(@iatas::bpchar[])
 )
@@ -27,5 +27,3 @@ FROM readings WHERE kind IN (1, 2)
 GROUP BY kind, snr_bin, rssi_bin
 ORDER BY kind, hour, snr_bin, rssi_bin;
 
--- name: RefreshSignalStats :exec
-REFRESH MATERIALIZED VIEW CONCURRENTLY mv_signal_stats_hourly;

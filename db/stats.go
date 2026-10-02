@@ -11,32 +11,55 @@ import (
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+// rollupSince snaps a window start to its UTC hour; zero means def before now.
+func rollupSince(since time.Time, def time.Duration) pgtype.Timestamptz {
+	if since.IsZero() {
+		since = time.Now().Add(-def)
+	}
+	return ts(since.UTC().Truncate(time.Hour))
+}
+
+// optional maps the ” the rollup queries use for a missing name back to nil.
+func optional(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func pgUUID(id pgtype.UUID) *uuid.UUID {
+	if !id.Valid {
+		return nil
+	}
+	u := uuid.UUID(id.Bytes)
+	return &u
+}
+
+// GetStatsOverview summarises the 24 most recent hours that can have been rolled.
 func (s *Store) GetStatsOverview(ctx context.Context, iatas []string) (*api.StatsOverview, error) {
-	row, err := s.q.GetStatsOverview(ctx, iatas)
+	until := time.Now().UTC().Add(-rollupDelay).Truncate(time.Hour).Add(time.Hour)
+	since := until.Add(-24 * time.Hour)
+	series, err := s.GetStatsSeries(ctx, since, until, iatas)
 	if err != nil {
 		return nil, err
 	}
 	return &api.StatsOverview{
-		TotalPackets:      row.TotalPackets,
-		TotalObservations: row.TotalObservations,
-		ActiveObservers:   row.ActiveObservers,
-		ActiveIATAs:       row.ActiveIatas,
+		TotalPackets:      series.Summary.UniquePackets,
+		TotalObservations: series.Summary.Observations,
+		ActiveObservers:   series.Summary.ActiveObservers,
+		ActiveIATAs:       series.Summary.ActiveIATAs,
 		WindowHours:       24,
+		Since:             since.UnixMilli(),
+		Until:             until.UnixMilli(),
 	}, nil
 }
 
 func (s *Store) GetStatsObservations(ctx context.Context, iatas []string, since time.Time) ([]api.ObservationPoint, error) {
-	if since.IsZero() {
-		since = time.Now().Add(-7 * 24 * time.Hour)
-	}
-	interval := time.Since(since)
-	rows, err := s.q.GetHourlyStats(ctx, sqlc.GetHourlyStatsParams{
-		Column1: iatas,
-		Column2: pgtype.Interval{Microseconds: int64(interval.Hours()) * 3600 * 1e6, Valid: true},
-	})
+	rows, err := s.q.GetHourlyStats(ctx, sqlc.GetHourlyStatsParams{Iatas: iatas, Since: rollupSince(since, 7*24*time.Hour)})
 	if err != nil {
 		return nil, err
 	}
@@ -46,60 +69,42 @@ func (s *Store) GetStatsObservations(ctx context.Context, iatas []string, since 
 			Hour:             v.Hour.Time.UnixMilli(),
 			IATA:             v.Iata,
 			ObservationCount: v.ObservationCount,
-			UniquePackets:    v.UniquePackets,
-			ActiveObservers:  v.ActiveObservers,
 		})
 	}
 	return points, nil
 }
 
 func (s *Store) GetStatsPayloadBreakdown(ctx context.Context, iatas []string, since time.Time) ([]api.PayloadBreakdownItem, error) {
-	if since.IsZero() {
-		since = time.Now().Add(-24 * time.Hour)
-	}
-	interval := time.Since(since)
-	rows, err := s.q.GetStatsPayloadBreakdown(ctx, sqlc.GetStatsPayloadBreakdownParams{
-		Column1: iatas,
-		Column2: pgtype.Interval{Microseconds: int64(interval.Hours()) * 3600 * 1e6, Valid: true},
-	})
+	rows, err := s.q.GetStatsPayloadBreakdown(ctx, sqlc.GetStatsPayloadBreakdownParams{Iatas: iatas, Since: rollupSince(since, 24*time.Hour)})
 	if err != nil {
 		return nil, err
 	}
 	items := make([]api.PayloadBreakdownItem, 0, len(rows))
 	for _, v := range rows {
-		if v.PayloadType == nil {
-			continue
-		}
 		items = append(items, api.PayloadBreakdownItem{
-			PayloadType:     *v.PayloadType,
-			PayloadTypeName: api.PayloadTypeName(*v.PayloadType),
+			PayloadType:     v.PayloadType,
+			PayloadTypeName: api.PayloadTypeName(v.PayloadType),
 			Count:           v.Count,
 		})
 	}
 	return items, nil
 }
 
-func (s *Store) GetStatsTopNodes(ctx context.Context, iatas []string, limit int32) ([]api.TopNode, error) {
-	rows, err := s.q.GetTopNodes(ctx, sqlc.GetTopNodesParams{
-		Column1: iatas,
-		Limit:   limit,
-	})
+func (s *Store) GetStatsTopNodes(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopNode, error) {
+	rows, err := s.q.GetTopNodes(ctx, sqlc.GetTopNodesParams{Since: rollupSince(since, 7*24*time.Hour), Iatas: iatas, RowLimit: limit})
 	if err != nil {
 		return nil, err
 	}
 	items := make([]api.TopNode, 0, len(rows))
 	for _, v := range rows {
-		var count int64
-		if v.ObservationCount != nil {
-			count = *v.ObservationCount
-		}
 		items = append(items, api.TopNode{
-			NodeID:           v.NodeID,
-			NodeName:         v.Name,
+			NodeID:           pgUUID(v.NodeID),
+			PublicKey:        v.PublicKey,
+			NodeName:         optional(v.Name),
 			NodeType:         v.NodeType,
 			NodeTypeName:     api.NodeTypeName(v.NodeType),
 			IATA:             v.Iata,
-			ObservationCount: count,
+			ObservationCount: v.ObservationCount,
 			LastHeard:        v.LastHeard.Time.UnixMilli(),
 		})
 	}
@@ -107,15 +112,7 @@ func (s *Store) GetStatsTopNodes(ctx context.Context, iatas []string, limit int3
 }
 
 func (s *Store) GetStatsTopObservers(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopObserver, error) {
-	if since.IsZero() {
-		since = time.Now().Add(-24 * time.Hour)
-	}
-	interval := time.Since(since)
-	rows, err := s.q.GetStatsTopObservers(ctx, sqlc.GetStatsTopObserversParams{
-		Column1: pgtype.Interval{Microseconds: int64(interval.Hours()) * 3600 * 1e6, Valid: true},
-		Column2: iatas,
-		Limit:   limit,
-	})
+	rows, err := s.q.GetStatsTopObservers(ctx, sqlc.GetStatsTopObserversParams{Since: rollupSince(since, 24*time.Hour), Iatas: iatas, RowLimit: limit})
 	if err != nil {
 		return nil, err
 	}
@@ -123,8 +120,8 @@ func (s *Store) GetStatsTopObservers(ctx context.Context, iatas []string, since 
 	for _, v := range rows {
 		items = append(items, api.TopObserver{
 			ObserverID:       v.ID,
-			DisplayName:      v.DisplayName,
-			ObserverType:     v.ObserverType,
+			DisplayName:      optional(v.DisplayName),
+			ObserverType:     optional(v.ObserverType),
 			IATA:             v.Iata,
 			ObservationCount: v.ObservationCount,
 		})
@@ -133,23 +130,16 @@ func (s *Store) GetStatsTopObservers(ctx context.Context, iatas []string, since 
 }
 
 func (s *Store) GetStatsTopAdvertisers(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopAdvertiser, error) {
-	if since.IsZero() {
-		since = time.Now().Add(-24 * time.Hour)
-	}
-	interval := time.Since(since)
-	rows, err := s.q.GetStatsTopAdvertisers(ctx, sqlc.GetStatsTopAdvertisersParams{
-		Column1: pgtype.Interval{Microseconds: int64(interval.Hours()) * 3600 * 1e6, Valid: true},
-		Column2: iatas,
-		Limit:   limit,
-	})
+	rows, err := s.q.GetStatsTopAdvertisers(ctx, sqlc.GetStatsTopAdvertisersParams{Since: rollupSince(since, 24*time.Hour), Iatas: iatas, RowLimit: limit})
 	if err != nil {
 		return nil, err
 	}
 	items := make([]api.TopAdvertiser, 0, len(rows))
 	for _, v := range rows {
 		items = append(items, api.TopAdvertiser{
-			NodeID:            v.ID,
-			NodeName:          v.Name,
+			NodeID:            pgUUID(v.NodeID),
+			PublicKey:         v.PublicKey,
+			NodeName:          optional(v.Name),
 			NodeType:          v.NodeType,
 			NodeTypeName:      api.NodeTypeName(v.NodeType),
 			IATA:              v.Iata,
@@ -196,26 +186,14 @@ func (s *Store) GetStatsClockDrift(ctx context.Context, iatas []string, limit in
 }
 
 func (s *Store) GetStatsTopTalkers(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopTalker, error) {
-	if since.IsZero() {
-		since = time.Now().Add(-24 * time.Hour)
-	}
-	interval := time.Since(since)
-	rows, err := s.q.GetStatsTopTalkers(ctx, sqlc.GetStatsTopTalkersParams{
-		Column1: pgtype.Interval{Microseconds: int64(interval.Hours()) * 3600 * 1e6, Valid: true},
-		Column2: iatas,
-		Limit:   limit,
-	})
+	rows, err := s.q.GetStatsTopTalkers(ctx, sqlc.GetStatsTopTalkersParams{Since: rollupSince(since, 24*time.Hour), Iatas: iatas, RowLimit: limit})
 	if err != nil {
 		return nil, err
 	}
 	items := make([]api.TopTalker, 0, len(rows))
 	for _, v := range rows {
-		var senderName string
-		if v.SenderName != nil {
-			senderName = *v.SenderName
-		}
 		items = append(items, api.TopTalker{
-			SenderName:   senderName,
+			SenderName:   v.SenderName,
 			MessageCount: v.MessageCount,
 			LastSent:     v.LastSent.Time.UnixMilli(),
 		})
@@ -233,9 +211,12 @@ func (s *Store) GetRadioPresets(ctx context.Context, preset string, iatas []stri
 	}
 	items := make([]api.RadioPreset, 0, len(rows))
 	for _, v := range rows {
+		if v.Iata == nil {
+			continue
+		}
 		items = append(items, api.RadioPreset{
 			Preset:     v.Preset,
-			IATA:       v.Iata,
+			IATA:       *v.Iata,
 			SourceType: v.SourceType,
 			Count:      v.Count,
 		})
@@ -243,8 +224,8 @@ func (s *Store) GetRadioPresets(ctx context.Context, preset string, iatas []stri
 	return items, nil
 }
 
-func (s *Store) GetScopeStats(ctx context.Context, iatas []string) ([]api.ScopeStats, error) {
-	rows, err := s.q.GetScopeStats(ctx, iatas)
+func (s *Store) GetScopeStats(ctx context.Context, iatas []string, since time.Time) ([]api.ScopeStats, error) {
+	rows, err := s.q.GetScopeStats(ctx, sqlc.GetScopeStatsParams{Since: rollupSince(since, 7*24*time.Hour), Iatas: iatas})
 	if err != nil {
 		return nil, err
 	}
@@ -276,34 +257,6 @@ func (s *Store) GetStatsNodeTypes(ctx context.Context, iatas []string) ([]api.No
 	return result, nil
 }
 
-func (s *Store) RefreshHourlyStats(ctx context.Context) error {
-	return s.q.RefreshHourlyStats(ctx)
-}
-
-func (s *Store) RefreshTopNodes(ctx context.Context) error {
-	return s.q.RefreshTopNodes(ctx)
-}
-
-func (s *Store) RefreshPayloadBreakdown(ctx context.Context) error {
-	return s.q.RefreshPayloadBreakdown(ctx)
-}
-
-func (s *Store) RefreshTopTalkers(ctx context.Context) error {
-	return s.q.RefreshTopTalkers(ctx)
-}
-
-func (s *Store) RefreshTopAdvertisers(ctx context.Context) error {
-	return s.q.RefreshTopAdvertisers(ctx)
-}
-
-func (s *Store) RefreshTopObservers(ctx context.Context) error {
-	return s.q.RefreshTopObservers(ctx)
-}
-
 func (s *Store) RefreshRadioPresets(ctx context.Context) error {
 	return s.q.RefreshRadioPresets(ctx)
-}
-
-func (s *Store) RefreshObserverActivity(ctx context.Context) error {
-	return s.q.RefreshObserverActivity(ctx)
 }

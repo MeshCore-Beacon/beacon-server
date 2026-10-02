@@ -101,5 +101,5 @@ type Channel struct {
 	ChannelSummary
 	Hashtag        *string `json:"hashtag,omitempty"`        // tag name without # prefix; non-nil only for hashtag channels
 	KeyFingerprint *string `json:"keyFingerprint,omitempty"` // first 8 bytes of SHA256(key), hex-encoded
-	MessageCount   int64   `json:"messageCount"`
+	MessageCount   int64   `json:"messageCount"`             // lifetime count; not reduced by retention
 }
