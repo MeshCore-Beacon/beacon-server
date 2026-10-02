@@ -92,10 +92,17 @@ type PayloadBreakdownItem struct {
 
 // ScopeStats represents aggregate statistics for a single transport scope.
 type ScopeStats struct {
-	Name          string `json:"name"`          // normalized scope name e.g. "#bc"
-	PacketCount   int64  `json:"packetCount"`   // distinct packets matched to this scope
-	ObserverCount int64  `json:"observerCount"` // distinct observers that forwarded packets in this scope
-	NodeCount     int64  `json:"nodeCount"`     // distinct nodes with this as their default scope
+	Name          string      `json:"name"`          // normalized scope name e.g. "#bc"
+	PacketCount   int64       `json:"packetCount"`   // distinct packets matched to this scope
+	ObserverCount int64       `json:"observerCount"` // distinct observers that forwarded packets in this scope
+	NodeCount     int64       `json:"nodeCount"`     // distinct nodes with this as their default scope
+	Hourly        []ScopeHour `json:"hourly"`        // packetCount by hour, oldest first; hours with none omitted
+}
+
+// ScopeHour is one UTC hour of a scope's packets; a scope's hours sum to its packetCount.
+type ScopeHour struct {
+	Hour    int64 `json:"hour"` // epoch ms, start of the UTC hour
+	Packets int64 `json:"packets"`
 }
 
 // TopNode is a node ranked by how often its adverts were heard in the window.

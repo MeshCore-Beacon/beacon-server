@@ -122,6 +122,8 @@ type Querier interface {
 	// Packets since the given hour come from the IATA-set rollup (counted once per hour heard).
 	// Observer and node counts are current memberships; observers filter by their latest IATA.
 	GetScopeStats(ctx context.Context, arg GetScopeStatsParams) ([]GetScopeStatsRow, error)
+	// GetScopeStats packet counts split by hour (same window and IATA-set filter); zero hours omitted.
+	GetScopeStatsHourly(ctx context.Context, arg GetScopeStatsHourlyParams) ([]GetScopeStatsHourlyRow, error)
 	// Read the hourly rollup, never observations on an HTTP request.
 	// Weight averages by sample counts instead of averaging regional/hourly means.
 	GetSignalStats(ctx context.Context, arg GetSignalStatsParams) ([]GetSignalStatsRow, error)

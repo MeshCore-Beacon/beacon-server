@@ -2798,7 +2798,7 @@ const docTemplate = `{
         },
         "/stats/scopes": {
             "get": {
-                "description": "Packets are those heard since the window start, each counted once per hour however many of the requested IATAs heard it. Observers and nodes are current memberships: observers filter by the IATA they last reported from, nodes by their IATA memberships. With filters, lists only manual scopes configured for a matching region and imported scopes whose current MeshMapper catalogue includes a matching IATA; those remain listed with zero counts. An empty region returns an empty array.",
+                "description": "Packets are those heard since the window start, each counted once per hour however many of the requested IATAs heard it. Observers and nodes are current memberships: observers filter by the IATA they last reported from, nodes by their IATA memberships. hourly splits packetCount by UTC hour (zero hours omitted; outage gaps come from /stats/series hour status). With filters, lists only manual scopes configured for a matching region and imported scopes whose current MeshMapper catalogue includes a matching IATA; those remain listed with zero counts. An empty region returns an empty array.",
                 "produces": [
                     "application/json"
                 ],
@@ -5172,9 +5172,28 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.ScopeHour": {
+            "type": "object",
+            "properties": {
+                "hour": {
+                    "description": "epoch ms, start of the UTC hour",
+                    "type": "integer"
+                },
+                "packets": {
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_MeshCore-Beacon_beacon-server_internal_api.ScopeStats": {
             "type": "object",
             "properties": {
+                "hourly": {
+                    "description": "packetCount by hour, oldest first; hours with none omitted",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ScopeHour"
+                    }
+                },
                 "name": {
                     "description": "normalized scope name e.g. \"#bc\"",
                     "type": "string"

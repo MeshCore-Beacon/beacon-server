@@ -1242,6 +1242,17 @@ WHERE ($1::text = '' OR preset = $1::text)
   AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR iata = ANY($2::bpchar[]))
 ORDER BY preset, iata, source_type;
 
+-- name: GetScopeStatsHourly :many
+-- GetScopeStats packet counts split by hour (same window and IATA-set filter); zero hours omitted.
+SELECT ts.name, s.hour, SUM(s.packets)::bigint AS packets
+FROM analytics_hourly_scope_sets s
+JOIN transport_scopes ts ON ts.id = s.scope_id
+WHERE s.hour >= @since::timestamptz
+  AND (COALESCE(cardinality(@iatas::bpchar[]), 0) = 0 OR s.iatas && @iatas::bpchar[])
+GROUP BY ts.name, s.hour
+HAVING SUM(s.packets) > 0
+ORDER BY ts.name, s.hour;
+
 -- name: GetScopeStats :many
 -- Packets since the given hour come from the IATA-set rollup (counted once per hour heard).
 -- Observer and node counts are current memberships; observers filter by their latest IATA.

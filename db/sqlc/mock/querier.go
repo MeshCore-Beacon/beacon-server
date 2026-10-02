@@ -972,6 +972,21 @@ func (mr *MockQuerierMockRecorder) GetScopeStats(ctx, arg any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetScopeStats", reflect.TypeOf((*MockQuerier)(nil).GetScopeStats), ctx, arg)
 }
 
+// GetScopeStatsHourly mocks base method.
+func (m *MockQuerier) GetScopeStatsHourly(ctx context.Context, arg db.GetScopeStatsHourlyParams) ([]db.GetScopeStatsHourlyRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetScopeStatsHourly", ctx, arg)
+	ret0, _ := ret[0].([]db.GetScopeStatsHourlyRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetScopeStatsHourly indicates an expected call of GetScopeStatsHourly.
+func (mr *MockQuerierMockRecorder) GetScopeStatsHourly(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetScopeStatsHourly", reflect.TypeOf((*MockQuerier)(nil).GetScopeStatsHourly), ctx, arg)
+}
+
 // GetSignalStats mocks base method.
 func (m *MockQuerier) GetSignalStats(ctx context.Context, arg db.GetSignalStatsParams) ([]db.GetSignalStatsRow, error) {
 	m.ctrl.T.Helper()

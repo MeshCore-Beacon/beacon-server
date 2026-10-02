@@ -225,17 +225,31 @@ func (s *Store) GetRadioPresets(ctx context.Context, preset string, iatas []stri
 }
 
 func (s *Store) GetScopeStats(ctx context.Context, iatas []string, since time.Time) ([]api.ScopeStats, error) {
-	rows, err := s.q.GetScopeStats(ctx, sqlc.GetScopeStatsParams{Since: rollupSince(since, 7*24*time.Hour), Iatas: iatas})
+	start := rollupSince(since, 7*24*time.Hour)
+	rows, err := s.q.GetScopeStats(ctx, sqlc.GetScopeStatsParams{Since: start, Iatas: iatas})
 	if err != nil {
 		return nil, err
 	}
+	hours, err := s.q.GetScopeStatsHourly(ctx, sqlc.GetScopeStatsHourlyParams{Since: start, Iatas: iatas})
+	if err != nil {
+		return nil, err
+	}
+	byScope := make(map[string][]api.ScopeHour)
+	for _, h := range hours {
+		byScope[h.Name] = append(byScope[h.Name], api.ScopeHour{Hour: h.Hour.Time.UnixMilli(), Packets: h.Packets})
+	}
 	items := make([]api.ScopeStats, 0, len(rows))
 	for _, r := range rows {
+		hourly := byScope[r.Name]
+		if hourly == nil {
+			hourly = []api.ScopeHour{}
+		}
 		items = append(items, api.ScopeStats{
 			Name:          r.Name,
 			PacketCount:   r.PacketCount,
 			ObserverCount: r.ObserverCount,
 			NodeCount:     r.NodeCount,
+			Hourly:        hourly,
 		})
 	}
 	return items, nil

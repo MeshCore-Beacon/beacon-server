@@ -1725,6 +1725,49 @@ func (q *Queries) GetScopeStats(ctx context.Context, arg GetScopeStatsParams) ([
 	return items, nil
 }
 
+const getScopeStatsHourly = `-- name: GetScopeStatsHourly :many
+SELECT ts.name, s.hour, SUM(s.packets)::bigint AS packets
+FROM analytics_hourly_scope_sets s
+JOIN transport_scopes ts ON ts.id = s.scope_id
+WHERE s.hour >= $1::timestamptz
+  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR s.iatas && $2::bpchar[])
+GROUP BY ts.name, s.hour
+HAVING SUM(s.packets) > 0
+ORDER BY ts.name, s.hour
+`
+
+type GetScopeStatsHourlyParams struct {
+	Since pgtype.Timestamptz `json:"since"`
+	Iatas []string           `json:"iatas"`
+}
+
+type GetScopeStatsHourlyRow struct {
+	Name    string             `json:"name"`
+	Hour    pgtype.Timestamptz `json:"hour"`
+	Packets int64              `json:"packets"`
+}
+
+// GetScopeStats packet counts split by hour (same window and IATA-set filter); zero hours omitted.
+func (q *Queries) GetScopeStatsHourly(ctx context.Context, arg GetScopeStatsHourlyParams) ([]GetScopeStatsHourlyRow, error) {
+	rows, err := q.db.Query(ctx, getScopeStatsHourly, arg.Since, arg.Iatas)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetScopeStatsHourlyRow{}
+	for rows.Next() {
+		var i GetScopeStatsHourlyRow
+		if err := rows.Scan(&i.Name, &i.Hour, &i.Packets); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getStatsClockDrift = `-- name: GetStatsClockDrift :many
 WITH page AS (
 SELECT

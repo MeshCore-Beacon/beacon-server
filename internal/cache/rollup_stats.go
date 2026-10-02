@@ -158,7 +158,8 @@ func (cr *CachedReader) GetStatsTopTalkers(ctx context.Context, iatas []string, 
 
 // GetScopeStats implements [api.Reader].
 func (cr *CachedReader) GetScopeStats(ctx context.Context, iatas []string, since time.Time) ([]api.ScopeStats, error) {
-	return cachedRollup(ctx, cr, keyScopeStats+":", iatas, func(ctx context.Context) ([]api.ScopeStats, error) {
+	// ":h" keeps entries cached before hourly existed from being served without it.
+	return cachedRollup(ctx, cr, keyScopeStats+":h:", iatas, func(ctx context.Context) ([]api.ScopeStats, error) {
 		return cr.inner.GetScopeStats(ctx, iatas, since)
 	}, hourKey(since))
 }

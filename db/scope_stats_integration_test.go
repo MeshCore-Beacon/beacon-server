@@ -82,10 +82,17 @@ SELECT md5(i::text)::uuid,iata FROM (VALUES (1,'YVR'),(1,'YYJ'),(2,'YVR'),(3,'YY
 			if err != nil {
 				t.Fatal(err)
 			}
+			// All fixture traffic is in hour h; hours with no packets are omitted.
+			hourly := func(packets int64) []api.ScopeHour {
+				if packets == 0 {
+					return []api.ScopeHour{}
+				}
+				return []api.ScopeHour{{Hour: h.UnixMilli(), Packets: packets}}
+			}
 			want := []api.ScopeStats{
-				{Name: "#a", PacketCount: tc.a[0], ObserverCount: tc.a[1], NodeCount: tc.a[2]},
-				{Name: "#b", PacketCount: tc.b[0], ObserverCount: tc.b[1], NodeCount: tc.b[2]},
-				{Name: "#unused"},
+				{Name: "#a", PacketCount: tc.a[0], ObserverCount: tc.a[1], NodeCount: tc.a[2], Hourly: hourly(tc.a[0])},
+				{Name: "#b", PacketCount: tc.b[0], ObserverCount: tc.b[1], NodeCount: tc.b[2], Hourly: hourly(tc.b[0])},
+				{Name: "#unused", Hourly: []api.ScopeHour{}},
 			}
 			if !reflect.DeepEqual(rows, want) {
 				t.Fatalf("counts = %+v, want %+v", rows, want)
