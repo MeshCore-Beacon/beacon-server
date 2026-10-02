@@ -57,7 +57,7 @@ type stubReader struct {
 	getStatsNodeTypes            func(ctx context.Context, iatas []string) ([]api.NodeTypeCount, error)
 	getScopeNames                func(ctx context.Context) ([]string, error)
 	getScopeByName               func(ctx context.Context, name string) (*api.ScopeDetail, error)
-	listTraceTags                func(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, limit int32) ([]api.TraceTagSummary, error)
+	listTraceTags                func(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, cursorTag string, limit int32) ([]api.TraceTagSummary, error)
 	getTraceByTag                func(ctx context.Context, tag string) (*api.TraceDetail, error)
 	listKnownRoutes              func(ctx context.Context, iata string, hopCount int32, cursor time.Time, limit int32) ([]api.KnownRoute, error)
 	searchKnownRoutes            func(ctx context.Context, iata, fromHash, toHash string) ([]api.KnownRoute, error)
@@ -355,9 +355,9 @@ func (s stubReader) GetScopeByName(ctx context.Context, name string) (*api.Scope
 	return nil, nil
 }
 
-func (s stubReader) ListTraceTags(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, limit int32) ([]api.TraceTagSummary, error) {
+func (s stubReader) ListTraceTags(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, cursorTag string, limit int32) ([]api.TraceTagSummary, error) {
 	if s.listTraceTags != nil {
-		return s.listTraceTags(ctx, iatas, scope, traceType, since, until, cursor, limit)
+		return s.listTraceTags(ctx, iatas, scope, traceType, since, until, cursor, cursorTag, limit)
 	}
 	return nil, nil
 }

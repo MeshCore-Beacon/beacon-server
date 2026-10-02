@@ -43,6 +43,17 @@ ON known_routes (iata, last_seen DESC);`, "idx_known_routes_iata_last_seen", tru
 	}
 }
 
+// The baseline must apply in the same transaction as its ledger row.
+func TestBaselineIsTransactional(t *testing.T) {
+	sql, err := migrationFiles.ReadFile("migrations/" + baselineMigration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nonTransactionalRe.MatchString(lineCommentRe.ReplaceAllString(string(sql), "")) {
+		t.Fatal("baseline contains a statement that can't run in a transaction")
+	}
+}
+
 func TestIsDuplicateRelation(t *testing.T) {
 	dup := &pgconn.PgError{Code: "42P07"}
 	cases := []struct {

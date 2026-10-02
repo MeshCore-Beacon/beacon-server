@@ -28,7 +28,7 @@ const (
 
 	// MeshMapper asks clients to allow 60-120s; a request given up on may still use the day's call.
 	requestTimeout = 60 * time.Second
-	refreshTimeout = requestTimeout + 30*time.Second // room for the DB write after a slow request
+	refreshTimeout = requestTimeout + 30*time.Second // room for the DB writes around a slow request
 
 	zoneListFresh    = config.MinZonesRefresh // get_zones.php allows one request per country per 23.5h
 	zoneFailureRetry = config.MinZonesRefresh // failed requests count too
@@ -47,6 +47,8 @@ type Boundary struct {
 
 type ZoneStore interface {
 	ListKnownIATAs(ctx context.Context) ([]string, error)
+	// ListHeardIATAs returns IATAs observers report from; group imports create IATAs too.
+	ListHeardIATAs(ctx context.Context) ([]string, error)
 	PruneZoneBoundaries(ctx context.Context, keep []string) ([]string, error)
 	ListZoneBoundaries(ctx context.Context) ([]Boundary, error)
 	SaveZoneBoundary(ctx context.Context, b Boundary) error
@@ -75,12 +77,12 @@ type Zones struct {
 	onChange  func(ctx context.Context, iata string)
 	onUpdate  func(imported map[string]json.RawMessage)
 
-	importGroups               bool
-	groupsSynced               bool
-	groupsVersion, groupsKnown int
-	onRegions                  func(ctx context.Context)
-	configured                 map[string]bool
-	onIATAs                    func(ctx context.Context)
+	importGroups bool
+	groupsSynced bool
+	synced       syncInputs
+	onRegions    func(ctx context.Context)
+	configured   map[string]bool
+	onIATAs      func(ctx context.Context)
 }
 
 func NewZones(cfg config.MeshMapperZonesConfig, store ZoneStore, dir *Directory) *Zones {
@@ -218,6 +220,13 @@ func (z *Zones) refresh(ctx context.Context, r *zoneRegion, zones map[string]zon
 		if r.b.Feature != nil {
 			etag = r.b.ETag
 		}
+		// Recorded first: an abandoned request may still have used the region's call.
+		attempt := Boundary{IATA: r.b.IATA, URL: update.URL, AttemptedAt: now, NextAttempt: now.Add(min(z.interval, zoneFailureRetry)), LastError: "no response"}
+		r.b.NextAttempt = attempt.NextAttempt
+		if err := z.store.SaveZoneBoundary(ctx, attempt); err != nil {
+			return fmt.Errorf("persist MeshMapper boundary %s: %w", r.b.IATA, err)
+		}
+		r.b.URL, r.b.AttemptedAt, r.b.LastError = attempt.URL, now, attempt.LastError
 		status, body, header, err := get(ctx, z.client, "Beacon-MeshMapper-Zones/1", endpoint, etag, MaxBoundaryBody)
 		if err != nil {
 			return err

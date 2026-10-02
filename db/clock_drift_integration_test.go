@@ -48,12 +48,12 @@ func TestClockDriftPagePostgres(t *testing.T) {
 	_, err = tx.Exec(ctx, `
 INSERT INTO nodes (id,public_key,node_type,name,device_clock_drift_seconds,last_advert_at)
 SELECT ('00000000-0000-0000-0000-'||lpad(i::text,12,'0'))::uuid,decode(lpad(to_hex(i),64,'0'),'hex'),kind,
- CASE WHEN i=2 THEN NULL ELSE 'node-'||i END,drift,CASE WHEN i=2 THEN NULL ELSE '2026-01-01'::timestamptz END
+ CASE WHEN i=2 THEN NULL ELSE 'node-'||i END,drift,CASE WHEN i=2 THEN NULL ELSE '2026-01-01 00:00:00+00'::timestamptz END
 FROM (VALUES (1,2,120),(2,3,-240),(3,1,99999),(4,4,-99999),(5,2,NULL),(6,2,60),(7,3,-60),(8,2,180)) v(i,kind,drift);
 INSERT INTO node_iatas (node_id,iata,last_heard) VALUES
- ('00000000-0000-0000-0000-000000000001','YVR','2026-01-01'),
+ ('00000000-0000-0000-0000-000000000001','YVR','2026-01-01 00:00:00+00'),
  ('00000000-0000-0000-0000-000000000001','YYJ','2026-01-01 01:00:00+00'),
- ('00000000-0000-0000-0000-000000000002','YYJ','2026-01-01');`)
+ ('00000000-0000-0000-0000-000000000002','YYJ','2026-01-01 00:00:00+00');`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,10 +141,10 @@ INSERT INTO node_iatas (node_id,iata,last_heard) VALUES
 	_, err = tx.Exec(ctx, `
 TRUNCATE pg_temp.node_iatas,pg_temp.nodes;
 INSERT INTO nodes (id,public_key,node_type,name,device_clock_drift_seconds,last_advert_at)
-SELECT md5(i::text)::uuid,decode(lpad(to_hex(i),64,'0'),'hex'),2,'clock-'||i,3600+i,'2026-01-01'
+SELECT md5(i::text)::uuid,decode(lpad(to_hex(i),64,'0'),'hex'),2,'clock-'||i,3600+i,'2026-01-01 00:00:00+00'
 FROM generate_series(1,20000) i;
 INSERT INTO node_iatas (node_id,iata,last_heard)
-SELECT md5(i::text)::uuid,iata,'2026-01-01'::timestamptz-i*interval '1 second'
+SELECT md5(i::text)::uuid,iata,'2026-01-01 00:00:00+00'::timestamptz-i*interval '1 second'
 FROM generate_series(1,20000) i CROSS JOIN (VALUES ('YVR'),('YYJ')) regions(iata);
 ANALYZE nodes; ANALYZE node_iatas;`)
 	if err != nil {

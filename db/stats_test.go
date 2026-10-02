@@ -26,7 +26,16 @@ func TestGetStatsOverview(t *testing.T) {
 		GetStatsSeries(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, p sqlc.GetStatsSeriesParams) ([]sqlc.GetStatsSeriesRow, error) {
 			params = p
-			return []sqlc.GetStatsSeriesRow{{Status: "summary", Observations: 500, UniquePackets: 100, ActiveObservers: 10, ActiveIatas: 3}}, nil
+			rows := []sqlc.GetStatsSeriesRow{{Status: "summary", Observations: 500, UniquePackets: 100, ActiveObservers: 10, ActiveIatas: 3}}
+			// The newest hour isn't rolled yet; the summary covers the other 23.
+			for h := p.Since.Time; h.Before(p.Until.Time); h = h.Add(time.Hour) {
+				status := "complete"
+				if h.Add(time.Hour).Equal(p.Until.Time) {
+					status = "missing"
+				}
+				rows = append(rows, sqlc.GetStatsSeriesRow{Hour: pgtype.Timestamptz{Time: h, Valid: true}, Status: status})
+			}
+			return rows, nil
 		})
 
 	store := &Store{q: mock}
@@ -37,7 +46,7 @@ func TestGetStatsOverview(t *testing.T) {
 	if result.TotalPackets != 100 || result.TotalObservations != 500 || result.ActiveObservers != 10 || result.ActiveIATAs != 3 {
 		t.Errorf("unexpected summary mapping: %+v", result)
 	}
-	if result.WindowHours != 24 || result.Until-result.Since != (24*time.Hour).Milliseconds() {
+	if result.WindowHours != 23 || result.Until-result.Since != (24*time.Hour).Milliseconds() {
 		t.Errorf("window %d..%d (%d hours)", result.Since, result.Until, result.WindowHours)
 	}
 	// The window ends at the last hour that can have been rolled.

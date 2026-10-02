@@ -13,6 +13,7 @@ import (
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestListScopes_NoIATAs_OK(t *testing.T) {
@@ -42,6 +43,35 @@ func TestGetScope_OK(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestGetScope_Errors(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		scope *api.ScopeDetail
+		err   error
+		want  int
+	}{
+		{"no rows", nil, pgx.ErrNoRows, http.StatusNotFound},
+		{"nil scope", nil, nil, http.StatusNotFound},
+		{"database failure", nil, context.DeadlineExceeded, http.StatusInternalServerError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := chi.NewRouter()
+			r.Get("/scopes/{name}", getScope(stubReader{
+				getScopeByName: func(context.Context, string) (*api.ScopeDetail, error) { return tc.scope, tc.err },
+			}))
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/scopes/%23bc", nil))
+			if w.Code != tc.want {
+				t.Fatalf("status = %d, want %d", w.Code, tc.want)
+			}
+			var body map[string]APIError
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || body["error"].Message == "" {
+				t.Fatalf("not a JSON error: %s", w.Body.String())
+			}
+		})
 	}
 }
 

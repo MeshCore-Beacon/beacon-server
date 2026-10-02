@@ -1316,6 +1316,21 @@ func (mr *MockQuerierMockRecorder) ListDirtyRollupHours(ctx, limit any) *gomock.
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListDirtyRollupHours", reflect.TypeOf((*MockQuerier)(nil).ListDirtyRollupHours), ctx, limit)
 }
 
+// ListHeardIATAs mocks base method.
+func (m *MockQuerier) ListHeardIATAs(ctx context.Context) ([]string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListHeardIATAs", ctx)
+	ret0, _ := ret[0].([]string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListHeardIATAs indicates an expected call of ListHeardIATAs.
+func (mr *MockQuerierMockRecorder) ListHeardIATAs(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListHeardIATAs", reflect.TypeOf((*MockQuerier)(nil).ListHeardIATAs), ctx)
+}
+
 // ListIATAs mocks base method.
 func (m *MockQuerier) ListIATAs(ctx context.Context) ([]db.IataCode, error) {
 	m.ctrl.T.Helper()

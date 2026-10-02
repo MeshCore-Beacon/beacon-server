@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
@@ -202,7 +203,7 @@ type CacheConfig struct {
 type CacheTTLsConfig struct {
 	// Stats controls the TTL for aggregated network statistics endpoints
 	// (overview, observations, payload breakdown, top nodes/observers, radio presets, scope stats).
-	// These are backed by materialized views refreshed hourly, so values under 1m are rarely useful.
+	// Rollup-backed keys also change with the rollup revision.
 	Stats duration `yaml:"stats"`
 
 	// Reference controls the TTL for mostly-static reference data
@@ -230,7 +231,7 @@ type ScopeConfig struct {
 // TelemetryConfig controls observer telemetry storage behaviour.
 type TelemetryConfig struct {
 	// Retention is how long telemetry rows are kept before the cleanup job removes them.
-	// Defaults to 672h (4 weeks) if not set.
+	// Defaults to 744h (31 days) if not set.
 	Retention duration `yaml:"retention"`
 
 	// Resolution is how frequently a telemetry snapshot is stored per observer.
@@ -393,6 +394,9 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			cfg.Auth.APIKey = os.Getenv("BEACON_API_KEY")
+			if err := cfg.validateAPIKey(); err != nil {
+				return nil, err
+			}
 			return cfg, nil
 		}
 		return nil, err
@@ -402,6 +406,12 @@ func Load(path string) (*Config, error) {
 	}
 	if value, set := os.LookupEnv("BEACON_API_KEY"); set {
 		cfg.Auth.APIKey = value
+	}
+	if err := cfg.validateAPIKey(); err != nil {
+		return nil, err
+	}
+	if err := cfg.validateDurations(); err != nil {
+		return nil, err
 	}
 	for i, prefix := range cfg.Server.TrustedProxies {
 		if !prefix.IsValid() {
@@ -445,6 +455,58 @@ func Load(path string) (*Config, error) {
 		}
 	}
 	return cfg, nil
+}
+
+// minAPIKeyLength keeps the admin key out of guessing range.
+const minAPIKeyLength = 16
+
+// validateAPIKey trims the key, since Bearer tokens can't carry whitespace; errors never echo it.
+func (c *Config) validateAPIKey() error {
+	c.Auth.APIKey = strings.TrimSpace(c.Auth.APIKey)
+	switch key := c.Auth.APIKey; {
+	case key == "":
+		return nil
+	case strings.IndexFunc(key, unicode.IsSpace) >= 0:
+		return fmt.Errorf("auth.api_key / BEACON_API_KEY must not contain whitespace")
+	case len(key) < minAPIKeyLength:
+		return fmt.Errorf("auth.api_key / BEACON_API_KEY must be at least %d characters", minAPIKeyLength)
+	}
+	return nil
+}
+
+// validateDurations rejects negative intervals, which would otherwise panic tickers or invert cutoffs.
+// observers.delete_after is exempt: nonpositive disables it.
+func (c *Config) validateDurations() error {
+	for _, d := range []struct {
+		key   string
+		value duration
+	}{
+		{"presence.flush_interval", c.Presence.FlushInterval},
+		{"presence.packet_ttl", c.Presence.PacketTTL},
+		{"background.view_refresh", c.Background.ViewRefresh},
+		{"background.reconfirm", c.Background.Reconfirm},
+		{"background.cleanup", c.Background.Cleanup},
+		{"cache.ttl", c.Cache.TTL},
+		{"cache.ttls.stats", c.Cache.TTLs.Stats},
+		{"cache.ttls.reference", c.Cache.TTLs.Reference},
+		{"cache.ttls.nodes", c.Cache.TTLs.Nodes},
+		{"cache.ttls.observers", c.Cache.TTLs.Observers},
+		{"telemetry.retention", c.Telemetry.Retention},
+		{"telemetry.resolution", c.Telemetry.Resolution},
+		{"routes.retention", c.Routes.Retention},
+		{"routes.grace", c.Routes.Grace},
+		{"nodes.clock_drift_threshold", c.Nodes.ClockDriftThreshold},
+		{"nodes.stale_threshold", c.Nodes.StaleThreshold},
+		{"nodes.delete_after", c.Nodes.DeleteAfter},
+		{"meshmapper.scopes.refresh_interval", c.MeshMapper.Scopes.RefreshInterval},
+		{"meshmapper.zones.refresh_interval", c.MeshMapper.Zones.RefreshInterval},
+		{"meshmapper.channels.refresh_interval", c.MeshMapper.Channels.RefreshInterval},
+	} {
+		if d.value.Duration < 0 {
+			return fmt.Errorf("%s must not be negative (omit it or use 0 for the default)", d.key)
+		}
+	}
+	return nil
 }
 
 // validateOrigin allows exact origins or a leading "*." subdomain wildcard; the WebSocket

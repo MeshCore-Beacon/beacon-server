@@ -11,7 +11,23 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/MeshCore-Beacon/beacon-server/internal/config"
 )
+
+func TestProxyLimitWarning(t *testing.T) {
+	limited := config.ResolvedConfig{RateLimit: config.ResolvedRateLimitConfig{Enabled: true}, MaxConnectsPerMinute: 10}
+	if got := proxyLimitWarning(limited, 0); !strings.Contains(got, "server.trusted_proxies") || !strings.Contains(got, "X-Real-IP") {
+		t.Errorf("rate limited without proxies: %q", got)
+	}
+	wsOnly := config.ResolvedConfig{MaxConnectsPerMinute: 10}
+	if got := proxyLimitWarning(wsOnly, 0); !strings.Contains(got, "WebSocket") || strings.Contains(got, "REST") {
+		t.Errorf("WebSocket limit only: %q", got)
+	}
+	if got := proxyLimitWarning(limited, 1); got != "" {
+		t.Errorf("proxies configured: %q", got)
+	}
+}
 
 func TestStartupLogging(t *testing.T) {
 	if os.Getenv("BEACON_TEST_LOG_STARTUP") == "1" {

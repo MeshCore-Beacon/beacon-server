@@ -12,6 +12,10 @@ const (
 	maxSF = 12
 	minCR = 5
 	maxCR = 8
+
+	// MinBWKHz and MaxBWKHz bracket every LoRa bandwidth (7.8 kHz sub-GHz to 1625 kHz SX128x).
+	MinBWKHz = 7
+	MaxBWKHz = 1625
 )
 
 // PreambleSymbols mirrors MeshCore's preambleLengthForSF: 32 symbols at SF<=8, 16 above.
@@ -34,7 +38,7 @@ func FrameLength(transportCodes bool, pathLen, payloadLen int) int {
 // TimeOnAirMs is the Semtech LoRa time-on-air (RadioLib getTimeOnAir: CRC on, explicit header,
 // LDRO auto at t_sym >= 16 ms). ok is false when any parameter is outside the costable range.
 func TimeOnAirMs(frameLen, sf int, bwKHz float64, cr int) (ms float64, ok bool) {
-	if frameLen <= 0 || sf < minSF || sf > maxSF || bwKHz <= 0 || cr < minCR || cr > maxCR {
+	if frameLen <= 0 || sf < minSF || sf > maxSF || !(bwKHz >= MinBWKHz && bwKHz <= MaxBWKHz) || cr < minCR || cr > maxCR {
 		return 0, false
 	}
 	tSym := math.Exp2(float64(sf)) / bwKHz

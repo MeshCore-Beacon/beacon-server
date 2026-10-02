@@ -232,3 +232,25 @@ func TestChannelsDisabledClearsMembers(t *testing.T) {
 		t.Fatal("disabled import kept membership or sources")
 	}
 }
+
+func TestChannelsRequestCutShortStillCounts(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	defer server.Close()
+	store := newChannelMemoryStore("YOW")
+	c, err := NewChannels(context.Background(), config.MeshMapperChannelsConfig{Enabled: true}, store, NewDirectory(newZoneListMemory()), keystore.NewMapKeyStore(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &c.sources[0]
+	s.url = server.URL
+	now := time.Now().UTC()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_ = c.refresh(ctx, s, now)
+	if got := s.cache.NextAttempt.Sub(now); got != channelRetry {
+		t.Fatal("abandoned request retried inside the rate limit", got)
+	}
+	if row := store.rows[sourceKey{"YOW", server.URL}]; row.NextAttempt.Sub(now) != channelRetry {
+		t.Fatal("abandoned request not persisted", row)
+	}
+}

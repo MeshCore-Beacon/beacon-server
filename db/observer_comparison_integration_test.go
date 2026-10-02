@@ -49,7 +49,7 @@ FROM (VALUES (1,1),(2,0),(3,1),(4,1),(5,0),(6,1),(7,2),(8,3),(9,1),(10,1)) v(i,r
 INSERT INTO packet_observations (id,packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count,source_broker)
 SELECT id,decode(lpad(to_hex(packet),2,'0'),'hex'),
        ('00000000-0000-0000-0000-' || lpad(observer::text,12,'0'))::uuid,
-       iata,'2026-01-01'::timestamptz+second*interval '1 second',0,1,0,broker
+       iata,'2026-01-01 00:00:00+00'::timestamptz+second*interval '1 second',0,1,0,broker
 FROM (VALUES
  (1,1,1,'YVR',1,'a'),(2,1,1,'YVR',2,'b'),
  (3,2,2,'YVR',2,'a'),(4,3,1,'YVR',3,'a'),(5,3,2,'YYJ',4,'a'),

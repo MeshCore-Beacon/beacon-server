@@ -39,11 +39,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -226,7 +228,7 @@ type Worker struct {
 	hub              *hub.Hub
 	keys             ChannelKeyStore
 	scopes           ScopeStore
-	client           mqtt.Client
+	client           atomic.Pointer[mqtt.Client] // read by /brokers while Start sets it
 	capabilities     capabilityCache
 	onNodeUpsert     func(ctx context.Context, nodeID uuid.UUID)
 	onObserverUpsert func(ctx context.Context, observerID uuid.UUID)
@@ -289,9 +291,10 @@ func (w *Worker) Start(ctx context.Context) {
 			w.log.Warn("connection lost, will reconnect", "error", err)
 		})
 
-	w.client = mqtt.NewClient(opts)
+	client := mqtt.NewClient(opts)
+	w.client.Store(&client)
 
-	token := w.client.Connect()
+	token := client.Connect()
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	connected := token.Done()
@@ -305,7 +308,7 @@ func (w *Worker) Start(ctx context.Context) {
 		case <-ticker.C:
 			reportDrops()
 		case <-ctx.Done():
-			w.client.Disconnect(500)
+			client.Disconnect(500)
 			return
 		}
 	}
@@ -317,10 +320,11 @@ func (w *Worker) BrokerName() string {
 }
 
 func (w *Worker) IsConnected() bool {
-	if w.client == nil {
+	c := w.client.Load()
+	if c == nil {
 		return false
 	}
-	return w.client.IsConnected()
+	return (*c).IsConnected()
 }
 
 func (w *Worker) SetCacheInvalidators(onNode, onObserver func(ctx context.Context, id uuid.UUID)) {
@@ -356,6 +360,15 @@ func isValidIATA(s string) bool {
 	return true
 }
 
+// isValidPubkeyHex reports whether s is a 32-byte public key in hex.
+func isValidPubkeyHex(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(s)
+	return err == nil
+}
+
 // handleMessage dispatches incoming MQTT messages by subtopic.
 // Each message is processed with a 30s timeout to prevent slow DB calls
 // from holding a processing worker indefinitely.
@@ -375,6 +388,10 @@ func (w *Worker) handleMessageContext(parent context.Context, msg mqtt.Message) 
 	// downstream, so reject malformed topic segments here instead.
 	if !isValidIATA(iata) {
 		w.log.Debug("dropped packet with malformed IATA", "iata", iata, "topic", msg.Topic())
+		return
+	}
+	if !isValidPubkeyHex(pubkeyHex) {
+		w.log.Debug("dropped message with malformed observer pubkey", "pubkey", pubkeyHex, "topic", msg.Topic())
 		return
 	}
 
@@ -436,6 +453,8 @@ func (w *Worker) broadcastPacketObservation(iata string, payloadType uint8, evt 
 		Payload:     base,
 		IATA:        iata,
 		PayloadType: payloadType,
+		RouteType:   evt.Packet.RouteType,
+		ObserverID:  evt.Observation.ObserverID,
 	}
 	evt.Observation.ResolvedPath = resolvedPath
 	if out.PayloadResolved, err = json.Marshal(evt); err != nil {

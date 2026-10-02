@@ -220,7 +220,7 @@ func (s *stubReader) SearchCrossIATARoutes(_ context.Context, _, _, _, _ string)
 	return nil, nil
 }
 
-func (s *stubReader) ListTraceTags(_ context.Context, _ []string, _, _ string, _, _ time.Time, _ time.Time, _ int32) ([]api.TraceTagSummary, error) {
+func (s *stubReader) ListTraceTags(_ context.Context, _ []string, _, _ string, _, _ time.Time, _ time.Time, _ string, _ int32) ([]api.TraceTagSummary, error) {
 	return nil, nil
 }
 

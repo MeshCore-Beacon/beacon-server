@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"sync"
 	"time"
 
@@ -78,12 +79,24 @@ func cachedRollup[T any](ctx context.Context, cr *CachedReader, prefix string, i
 	return getOrSet(ctx, cr.c, key, cr.ttl.Stats, fetch)
 }
 
-// hourKey matches the store's hour snapping so polls within an hour share a key; 0 = default window.
+// hourKey matches the store's hour snapping so polls within an hour share a key.
 func hourKey(t time.Time) int64 {
-	if t.IsZero() {
-		return 0
-	}
 	return t.UTC().Truncate(time.Hour).UnixMilli()
+}
+
+// sinceKey keys a zero since on the current hour, since the store's default window slides with it.
+func (cr *CachedReader) sinceKey(since time.Time) string {
+	if since.IsZero() {
+		return fmt.Sprintf("d%d", hourKey(cr.clock()))
+	}
+	return strconv.FormatInt(hourKey(since), 10)
+}
+
+func (cr *CachedReader) clock() time.Time {
+	if cr.now == nil {
+		return time.Now()
+	}
+	return cr.now()
 }
 
 // GetStatsSeries implements [api.Reader].
@@ -111,49 +124,49 @@ func (cr *CachedReader) GetPathStats(ctx context.Context, since, until time.Time
 func (cr *CachedReader) GetStatsOverview(ctx context.Context, iatas []string) (*api.StatsOverview, error) {
 	return cachedRollup(ctx, cr, keyStatsOverviewPrefix, iatas, func(ctx context.Context) (*api.StatsOverview, error) {
 		return cr.inner.GetStatsOverview(ctx, iatas)
-	}, hourKey(time.Now()))
+	}, hourKey(cr.clock()))
 }
 
 // GetStatsObservations implements [api.Reader].
 func (cr *CachedReader) GetStatsObservations(ctx context.Context, iatas []string, since time.Time) ([]api.ObservationPoint, error) {
 	return cachedRollup(ctx, cr, keyStatsObservationsPrefix, iatas, func(ctx context.Context) ([]api.ObservationPoint, error) {
 		return cr.inner.GetStatsObservations(ctx, iatas, since)
-	}, hourKey(since))
+	}, cr.sinceKey(since))
 }
 
 // GetStatsPayloadBreakdown implements [api.Reader].
 func (cr *CachedReader) GetStatsPayloadBreakdown(ctx context.Context, iatas []string, since time.Time) ([]api.PayloadBreakdownItem, error) {
 	return cachedRollup(ctx, cr, keyStatsBreakdownPrefix, iatas, func(ctx context.Context) ([]api.PayloadBreakdownItem, error) {
 		return cr.inner.GetStatsPayloadBreakdown(ctx, iatas, since)
-	}, hourKey(since))
+	}, cr.sinceKey(since))
 }
 
 // GetStatsTopNodes implements [api.Reader].
 func (cr *CachedReader) GetStatsTopNodes(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopNode, error) {
 	return cachedRollup(ctx, cr, keyStatsTopNodesPrefix, iatas, func(ctx context.Context) ([]api.TopNode, error) {
 		return cr.inner.GetStatsTopNodes(ctx, iatas, since, limit)
-	}, hourKey(since), limit)
+	}, cr.sinceKey(since), limit)
 }
 
 // GetStatsTopObservers implements [api.Reader].
 func (cr *CachedReader) GetStatsTopObservers(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopObserver, error) {
 	return cachedRollup(ctx, cr, keyStatsTopObsPrefix, iatas, func(ctx context.Context) ([]api.TopObserver, error) {
 		return cr.inner.GetStatsTopObservers(ctx, iatas, since, limit)
-	}, hourKey(since), limit)
+	}, cr.sinceKey(since), limit)
 }
 
 // GetStatsTopAdvertisers implements [api.Reader].
 func (cr *CachedReader) GetStatsTopAdvertisers(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopAdvertiser, error) {
 	return cachedRollup(ctx, cr, keyStatsTopAdvPrefix, iatas, func(ctx context.Context) ([]api.TopAdvertiser, error) {
 		return cr.inner.GetStatsTopAdvertisers(ctx, iatas, since, limit)
-	}, hourKey(since), limit)
+	}, cr.sinceKey(since), limit)
 }
 
 // GetStatsTopTalkers implements [api.Reader].
 func (cr *CachedReader) GetStatsTopTalkers(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopTalker, error) {
 	return cachedRollup(ctx, cr, keyStatsTopTalkersPrefix, iatas, func(ctx context.Context) ([]api.TopTalker, error) {
 		return cr.inner.GetStatsTopTalkers(ctx, iatas, since, limit)
-	}, hourKey(since), limit)
+	}, cr.sinceKey(since), limit)
 }
 
 // GetScopeStats implements [api.Reader].
@@ -161,7 +174,7 @@ func (cr *CachedReader) GetScopeStats(ctx context.Context, iatas []string, since
 	// The suffix changes with the hourly shape so older cached entries aren't served.
 	return cachedRollup(ctx, cr, keyScopeStats+":h2:", iatas, func(ctx context.Context) ([]api.ScopeStats, error) {
 		return cr.inner.GetScopeStats(ctx, iatas, since)
-	}, hourKey(since))
+	}, cr.sinceKey(since))
 }
 
 // GetScopeByName implements [api.Reader].

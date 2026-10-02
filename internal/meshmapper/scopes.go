@@ -199,6 +199,13 @@ func (i *Importer) refresh(ctx context.Context, s *source, now time.Time) error 
 	if len(s.cache.Payload) > 0 && s.cache.ETag != "" {
 		request.Header.Set("If-None-Match", s.cache.ETag)
 	}
+	// Recorded first: an abandoned request may still have used the region's call.
+	attempt := Cache{AttemptedAt: now, NextAttempt: now.Add(min(i.interval, failureRetry)), LastError: "no response"}
+	s.cache.NextAttempt = attempt.NextAttempt
+	if err := i.store.SaveScopeCatalogue(ctx, s.iata, s.url, attempt, nil); err != nil {
+		return fmt.Errorf("persist scope catalogue %s: %w", s.iata, err)
+	}
+	s.cache.AttemptedAt, s.cache.LastError = now, attempt.LastError
 	response, err := i.client.Do(request)
 	var entries []scopestore.Entry
 	var generated time.Time

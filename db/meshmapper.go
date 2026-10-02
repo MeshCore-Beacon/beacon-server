@@ -77,6 +77,11 @@ func (s *Store) ListKnownIATAs(ctx context.Context) ([]string, error) {
 	return iatas, nil
 }
 
+// ListHeardIATAs returns the IATAs observers last reported from.
+func (s *Store) ListHeardIATAs(ctx context.Context) ([]string, error) {
+	return s.q.ListHeardIATAs(ctx)
+}
+
 func (s *Store) PruneZoneBoundaries(ctx context.Context, keep []string) ([]string, error) {
 	if keep == nil {
 		keep = []string{}

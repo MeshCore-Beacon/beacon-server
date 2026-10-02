@@ -84,7 +84,9 @@ type Querier interface {
 	GetNodesByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]GetNodesByIDsRow, error)
 	GetNodesByPubkeys(ctx context.Context, pubkeys [][]byte) ([]GetNodesByPubkeysRow, error)
 	// Hour-or-coarser buckets summed from the hourly rollup; same COALESCE-plus-count shape as the raw query.
+	// Hours after the newest complete one aren't rolled yet; that tail, from no earlier than @tail_floor, reads raw rows.
 	GetObserverActivityHourly(ctx context.Context, arg GetObserverActivityHourlyParams) ([]GetObserverActivityHourlyRow, error)
+	// Same rollup/raw-tail split as GetObserverActivityHourly.
 	GetObserverActivityHourlyPayloadTypes(ctx context.Context, arg GetObserverActivityHourlyPayloadTypesParams) ([]GetObserverActivityHourlyPayloadTypesRow, error)
 	// Two indexed ranges, bounded to one observer; no legacy presence counters.
 	GetObserverActivityLiveSummary(ctx context.Context, arg GetObserverActivityLiveSummaryParams) (GetObserverActivityLiveSummaryRow, error)
@@ -198,6 +200,7 @@ type Querier interface {
 	// Only complete hours whose raw rows are still intact can be re-rolled. Queued missing hours
 	// wait: their first roll consumes the entry only if the entry predates its snapshot.
 	ListDirtyRollupHours(ctx context.Context, limit int32) ([]pgtype.Timestamptz, error)
+	ListHeardIATAs(ctx context.Context) ([]string, error)
 	ListIATAs(ctx context.Context) ([]IataCode, error)
 	// Only one branch runs. Keep the IATA range ordered by the composite index:
 	// generic plans can otherwise prefer scanning the global timestamp index.

@@ -1,8 +1,12 @@
 # Beacon configuration file
 # Copy to config.yaml and adjust as needed.
+# Durations are Go strings (30s, 1h, 168h); negative values prevent startup
+# (observers.delete_after excepted, where nonpositive disables it).
 
 # Public reads stay available. No key means admin routes return 503.
 # Prefer BEACON_API_KEY in the service environment; never commit a real key.
+# At least 16 characters with no inner whitespace (surrounding whitespace is
+# trimmed); a shorter key prevents startup.
 auth:
   api_key: ""
 
@@ -77,7 +81,7 @@ ratelimit:
 # zone list, unless iatas: below sets a name or lat/lng for them.
 # import_groups turns MeshMapper zone groups (e.g. ONQC: YOW, YQB, YUL) into
 # regions, from the zone lists already fetched. A group is imported when at least
-# one member is a known IATA, with its full member list (members Beacon hasn't
+# one member is heard by an observer or configured here, with its full member list (members Beacon hasn't
 # heard yet are added as IATAs); slug = lowercased group code, centered on the
 # members' average location, listed after the regions below. A region below with
 # the same slug wins.
@@ -198,6 +202,13 @@ packets:
 # longest window /stats/series and the other historical stats endpoints accept.
 analytics:
   rollup_retention: 2160h   # 90 days
+
+# Presence write coalescing: observer last_seen and packet last_heard_at bumps are
+# batched in memory and flushed on an interval. An unclean shutdown loses at most
+# one interval of presence freshness.
+#presence:
+#  flush_interval: 30s   # default: 30s
+#  packet_ttl: 30s       # how long a quiet packet stays coalesced (default: 30s)
 
 # Known-route retention. Routes are distilled packet history (the path a packet
 # took, hop by hop), so they may outlive packets.retention; there is no required

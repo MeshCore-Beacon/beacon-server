@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"strings"
 )
@@ -55,9 +56,15 @@ func (z *Zones) pruneGroups(ctx context.Context) error {
 	return nil
 }
 
+// syncInputs is what syncDirectory last applied; it reruns when any of them changes.
+type syncInputs struct {
+	version, known int
+	complete       bool
+	heard          string
+}
+
 // syncDirectory applies the loaded zone lists to IATA details and, when enabled,
-// imported regions. It only runs once every tracked country has a list, and again
-// when a list or the IATA set changes.
+// imported regions. Groups are only pruned once every tracked country has a list.
 func (z *Zones) syncDirectory(ctx context.Context, iatas []string) error {
 	var countries []string
 	for _, r := range z.regions {
@@ -65,18 +72,27 @@ func (z *Zones) syncDirectory(ctx context.Context, iatas []string) error {
 	}
 	slices.Sort(countries)
 	groups, zones, version, complete := z.dir.snapshot(slices.Compact(countries))
-	if !complete || (z.groupsSynced && version == z.groupsVersion && len(iatas) == z.groupsKnown) {
+	var heard []string
+	if z.importGroups {
+		var err error
+		if heard, err = z.store.ListHeardIATAs(ctx); err != nil {
+			return fmt.Errorf("list heard IATAs for MeshMapper groups: %w", err)
+		}
+		slices.Sort(heard)
+	}
+	inputs := syncInputs{version: version, known: len(iatas), complete: complete, heard: strings.Join(heard, ",")}
+	if z.groupsSynced && inputs == z.synced {
 		return nil
 	}
 	if err := z.syncIATADetails(ctx, zones); err != nil {
 		return err
 	}
 	if z.importGroups {
-		if err := z.syncGroups(ctx, iatas, groups, zones); err != nil {
+		if err := z.syncGroups(ctx, heard, groups, zones, complete); err != nil {
 			return err
 		}
 	}
-	z.groupsSynced, z.groupsVersion, z.groupsKnown = true, version, len(iatas)
+	z.groupsSynced, z.synced = true, inputs
 	return nil
 }
 
@@ -111,10 +127,15 @@ func (z *Zones) syncIATADetails(ctx context.Context, zones map[string]zoneEntry)
 	return nil
 }
 
-func (z *Zones) syncGroups(ctx context.Context, iatas []string, groups map[string]zoneGroup, zones map[string]zoneEntry) error {
-	known := make(map[string]bool, len(iatas))
-	for _, iata := range iatas {
-		known[iata] = true
+// syncGroups imports groups with a member that is heard or configured, never one only
+// its own import created. Without every country's list it adds and updates but never prunes.
+func (z *Zones) syncGroups(ctx context.Context, heard []string, groups map[string]zoneGroup, zones map[string]zoneEntry, complete bool) error {
+	inUse := maps.Clone(z.configured)
+	if inUse == nil {
+		inUse = map[string]bool{}
+	}
+	for _, iata := range heard {
+		inUse[iata] = true
 	}
 	state, err := z.store.ListRegionState(ctx)
 	if err != nil {
@@ -125,11 +146,14 @@ func (z *Zones) syncGroups(ctx context.Context, iatas []string, groups map[strin
 		stored[r.Slug] = r
 		if !r.Imported {
 			handOrder = max(handOrder, r.DisplayOrder)
+			for _, iata := range r.IATAs {
+				inUse[iata] = true
+			}
 		}
 	}
 	var want []RegionState
 	for code, g := range groups {
-		if slices.ContainsFunc(g.members, func(m string) bool { return known[m] }) {
+		if slices.ContainsFunc(g.members, func(m string) bool { return inUse[m] }) {
 			lat, lng := center(g.members, zones)
 			want = append(want, RegionState{Slug: strings.ToLower(code), Name: g.name, Imported: true, IATAs: g.members, CenterLat: lat, CenterLng: lng})
 		}
@@ -157,11 +181,13 @@ func (z *Zones) syncGroups(ctx context.Context, iatas []string, groups map[strin
 		keep, changed = append(keep, r.Slug), true
 		slog.Info("MeshMapper region imported", "component", "meshmapper.zones", "slug", r.Slug, "name", r.Name, "iatas", r.IATAs)
 	}
-	pruned, err := z.store.PruneImportedRegions(ctx, keep)
-	if err != nil {
-		return fmt.Errorf("prune MeshMapper regions: %w", err)
+	var pruned []string
+	if complete {
+		if pruned, err = z.store.PruneImportedRegions(ctx, keep); err != nil {
+			return fmt.Errorf("prune MeshMapper regions: %w", err)
+		}
+		z.regionsRemoved(pruned)
 	}
-	z.regionsRemoved(pruned)
 	if changed || len(pruned) > 0 {
 		z.regionsChanged(ctx)
 	}

@@ -36,6 +36,7 @@ type zoneList struct {
 	groups                 map[string]zoneGroup
 	etag                   string
 	fetchedAt, nextAttempt time.Time
+	fetching               bool
 }
 
 // ZoneList is one country's saved get_zones.php response and fetch state.
@@ -89,31 +90,45 @@ func (d *Directory) Restore(ctx context.Context) error {
 }
 
 // List returns the country's fresh zone list. fetched reports that this call
-// spent the caller's one request; nil zones without fetched means back off.
+// spent the caller's one request; nil zones without fetched means back off,
+// including while another task's request for the country is in flight.
 func (d *Directory) List(ctx context.Context, country string, now time.Time) (zones map[string]zoneEntry, fetched bool, err error) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	list := d.lists[country]
 	if list != nil && list.zones != nil && now.Sub(list.fetchedAt) < zoneListFresh {
+		d.mu.Unlock()
 		return list.zones, false, nil
 	}
-	if list != nil && now.Before(list.nextAttempt) {
+	if list != nil && (list.fetching || now.Before(list.nextAttempt)) {
+		d.mu.Unlock()
 		return nil, false, nil
 	}
-	return nil, true, d.fetch(ctx, country, now)
-}
-
-func (d *Directory) fetch(ctx context.Context, country string, now time.Time) error {
-	list := d.lists[country]
 	if list == nil {
 		list = &zoneList{}
 		d.lists[country] = list
 	}
-	endpoint := d.listURL + "?country=" + url.QueryEscape(country)
-	etag := ""
-	if list.zones != nil {
+	// Every request counts against the country's 23.5h allowance, failed, abandoned or not.
+	list.fetching, list.nextAttempt = true, now.Add(zoneListFresh)
+	cached, etag := list.zones != nil, ""
+	if cached {
 		etag = list.etag
 	}
+	d.mu.Unlock()
+	defer func() {
+		d.mu.Lock()
+		list.fetching = false
+		d.mu.Unlock()
+	}()
+	return nil, true, d.fetch(ctx, list, country, cached, etag, now)
+}
+
+// fetch runs without d.mu so other tasks never wait out this request.
+func (d *Directory) fetch(ctx context.Context, list *zoneList, country string, cached bool, etag string, now time.Time) error {
+	attempt := ZoneList{Country: country, AttemptedAt: now, NextAttempt: now.Add(zoneListFresh), LastError: "no response"}
+	if err := d.store.SaveZoneList(ctx, attempt); err != nil {
+		return fmt.Errorf("persist MeshMapper zone list %s: %w", country, err)
+	}
+	endpoint := d.listURL + "?country=" + url.QueryEscape(country)
 	status, body, header, err := get(ctx, d.client, "Beacon-MeshMapper-Zones/1", endpoint, etag, MaxZoneList)
 	if err != nil {
 		return err
@@ -121,25 +136,28 @@ func (d *Directory) fetch(ctx context.Context, country string, now time.Time) er
 	problem := ""
 	var payload json.RawMessage
 	var retryAt time.Time
+	var zones map[string]zoneEntry
+	var groups map[string]zoneGroup
 	switch status {
 	case http.StatusOK:
-		zones, groups, decodeErr := decodeZones(body, country)
-		if decodeErr != nil {
+		var decodeErr error
+		if zones, groups, decodeErr = decodeZones(body, country); decodeErr != nil {
 			problem = "invalid response"
 		} else {
-			list.zones, list.groups, list.etag = zones, groups, header.Get("ETag")
 			payload = body
-			d.version++
 		}
 	case http.StatusNotModified:
-		if list.zones == nil {
+		if !cached {
 			problem = "304 without cached list"
 		}
 	default:
 		problem = statusProblem(status, header, now, &retryAt)
 	}
-	// Every request counts against the country's 23.5h allowance, failed or not.
-	list.nextAttempt = now.Add(zoneListFresh)
+	d.mu.Lock()
+	if payload != nil {
+		list.zones, list.groups, list.etag = zones, groups, header.Get("ETag")
+		d.version++
+	}
 	if retryAt.After(list.nextAttempt) {
 		list.nextAttempt = retryAt
 	}
@@ -148,28 +166,31 @@ func (d *Directory) fetch(ctx context.Context, country string, now time.Time) er
 		list.fetchedAt = now
 		saved.FetchedAt, saved.ETag = now, list.etag
 	}
+	nZones, nGroups := len(list.zones), len(list.groups)
+	d.mu.Unlock()
 	level := slog.LevelInfo
 	if problem != "" {
 		level = slog.LevelWarn
 	}
 	slog.Log(ctx, level, "MeshMapper zone list checked", "component", "meshmapper.zones", "country", country,
-		"zones", len(list.zones), "groups", len(list.groups), "next_attempt", list.nextAttempt, "last_error", problem)
+		"zones", nZones, "groups", nGroups, "next_attempt", saved.NextAttempt, "last_error", problem)
 	if err := d.store.SaveZoneList(ctx, saved); err != nil {
 		return fmt.Errorf("persist MeshMapper zone list %s: %w", country, err)
 	}
 	return nil
 }
 
-// snapshot merges every loaded list's zones and groups by code. complete is false until
-// each country has a list, so a cold start can't look like every group disappearing.
+// snapshot merges every loaded list's zones and groups by code. complete is false while
+// a country has no list, so a cold start or failed list can't look like groups disappearing.
 func (d *Directory) snapshot(countries []string) (merged map[string]zoneGroup, zones map[string]zoneEntry, version int, complete bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	merged, zones = map[string]zoneGroup{}, map[string]zoneEntry{}
+	merged, zones, complete = map[string]zoneGroup{}, map[string]zoneEntry{}, true
 	for _, country := range countries {
 		list := d.lists[country]
 		if list == nil || list.zones == nil {
-			return nil, nil, d.version, false
+			complete = false
+			continue
 		}
 		for code, z := range list.zones {
 			zones[code] = z
@@ -184,7 +205,7 @@ func (d *Directory) snapshot(countries []string) (merged map[string]zoneGroup, z
 			merged[code] = g
 		}
 	}
-	return merged, zones, d.version, true
+	return merged, zones, d.version, complete
 }
 
 var (

@@ -54,17 +54,20 @@ type Event struct {
 	IATA        string
 	PayloadType uint8
 	ChannelHash string // hex string, non-empty only for channelMessage events
+	RouteType   uint8  // packetObservation only
+	ObserverID  string // packetObservation and observerStatus only
 	// Repeat marks a later hearing of a stored observation; only IncludeRepeats clients get it.
 	Repeat bool
 }
 
 // Scope mirrors the client-side subscribe message. All fields are optional:
 // nil/empty means "no filter on this dimension" (match everything).
-// An empty non-nil slice means "match nothing on this dimension".
 type Scope struct {
 	IATAs         []string
 	PayloadTypes  []uint8
+	RouteTypes    []uint8
 	ChannelHashes []string
+	ObserverIDs   []string
 	Events        []EventType
 }
 
@@ -144,6 +147,12 @@ func scopeMatches(s Scope, e Event) bool {
 		return false
 	}
 	if e.Type == EventChannelMessage && len(s.ChannelHashes) > 0 && !slices.Contains(s.ChannelHashes, e.ChannelHash) {
+		return false
+	}
+	if e.Type == EventPacketObservation && len(s.RouteTypes) > 0 && !slices.Contains(s.RouteTypes, e.RouteType) {
+		return false
+	}
+	if (e.Type == EventPacketObservation || e.Type == EventObserverStatus) && len(s.ObserverIDs) > 0 && !slices.Contains(s.ObserverIDs, e.ObserverID) {
 		return false
 	}
 	return true
@@ -243,8 +252,8 @@ func (h *Hub) RepeatsWanted() bool {
 	return h.repeatClients.Load() > 0
 }
 
-// MarkSent records every hearing's path and reports whether it is new within the TTL,
-// so broker copies and same-path duplicates are never streamed as repeats.
+// MarkSent records every hearing's path and reports whether it is a later, new path for a
+// packet the observer already heard, so broker copies and same-path duplicates never stream.
 func (h *Hub) MarkSent(packetHash, observerID, path []byte) bool {
 	return h.sent.mark(packetHash, observerID, path, time.Now())
 }
@@ -364,10 +373,16 @@ func (h *Hub) Run() {
 				select {
 				case c.Send <- outEvt:
 				default:
+					// Evict the oldest so the newest still goes out.
 					dropped := 1
 					select {
 					case <-c.Send:
 					default:
+					}
+					select {
+					case c.Send <- outEvt:
+					default:
+						dropped++
 					}
 					select {
 					case c.laggedCH <- LaggedNotification{DroppedCount: dropped}:

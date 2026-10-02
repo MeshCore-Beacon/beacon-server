@@ -178,6 +178,13 @@ func (c *Channels) refresh(ctx context.Context, s *channelSource, now time.Time)
 	if len(s.cache.Payload) > 0 {
 		etag = s.cache.ETag
 	}
+	// Recorded first: an abandoned request may still have used the region's call.
+	attempt := Cache{AttemptedAt: now, NextAttempt: now.Add(min(c.interval, channelRetry)), LastError: "no response"}
+	s.cache.NextAttempt = attempt.NextAttempt
+	if err := c.store.SaveChannelCatalogue(ctx, s.iata, s.url, attempt, nil); err != nil {
+		return fmt.Errorf("persist channel catalogue %s: %w", s.iata, err)
+	}
+	s.cache.AttemptedAt, s.cache.LastError = now, attempt.LastError
 	status, body, header, err := get(ctx, c.client, "Beacon-MeshMapper-Channels/1", s.url, etag, MaxChannelBody)
 	if err != nil {
 		return err

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
@@ -37,7 +38,7 @@ func (s *Store) DeleteOldTraceIATAs(ctx context.Context, cutoff time.Time) error
 	return s.q.DeleteOldTraceIATAs(ctx, pgtype.Timestamptz{Time: cutoff, Valid: true})
 }
 
-func (s *Store) ListTraceTags(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, limit int32) ([]api.TraceTagSummary, error) {
+func (s *Store) ListTraceTags(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, cursorTag string, limit int32) ([]api.TraceTagSummary, error) {
 	var sinceTS, untilTS, cursorTS pgtype.Timestamptz
 	if !since.IsZero() {
 		sinceTS = pgtype.Timestamptz{Time: since, Valid: true}
@@ -48,6 +49,14 @@ func (s *Store) ListTraceTags(ctx context.Context, iatas []string, scope, traceT
 	if !cursor.IsZero() {
 		cursorTS = pgtype.Timestamptz{Time: cursor, Valid: true}
 	}
+	var tag []byte
+	if cursorTag != "" {
+		b, err := hex.DecodeString(cursorTag)
+		if err != nil {
+			return nil, fmt.Errorf("cursor tag: %w", err)
+		}
+		tag = b
+	}
 	rows, err := s.q.ListTraceTags(ctx, sqlc.ListTraceTagsParams{
 		Column1: iatas,
 		Column2: scope,
@@ -56,6 +65,7 @@ func (s *Store) ListTraceTags(ctx context.Context, iatas []string, scope, traceT
 		Column5: cursorTS,
 		Limit:   limit,
 		Column7: traceType,
+		Column8: tag,
 	})
 	if err != nil {
 		return nil, err

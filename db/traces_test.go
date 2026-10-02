@@ -24,7 +24,7 @@ func TestListTraceTags_Empty(t *testing.T) {
 		Return([]sqlc.ListTraceTagsRow{}, nil)
 
 	store := &Store{q: mock}
-	items, err := store.ListTraceTags(context.Background(), []string{"YVR"}, "", "", time.Time{}, time.Time{}, time.Time{}, 10)
+	items, err := store.ListTraceTags(context.Background(), []string{"YVR"}, "", "", time.Time{}, time.Time{}, time.Time{}, "", 10)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestListTraceTags_WithPayload(t *testing.T) {
 		}, nil)
 
 	store := &Store{q: mock}
-	items, err := store.ListTraceTags(context.Background(), []string{"YVR"}, "", "", time.Time{}, time.Time{}, time.Time{}, 10)
+	items, err := store.ListTraceTags(context.Background(), []string{"YVR"}, "", "", time.Time{}, time.Time{}, time.Time{}, "", 10)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

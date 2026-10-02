@@ -272,3 +272,32 @@ func TestLoad_AnalyticsRollupRetentionTooShort(t *testing.T) {
 		t.Errorf("expected error about analytics.rollup_retention, got: %v", err)
 	}
 }
+
+func TestLoad_NegativeDurationsRejected(t *testing.T) {
+	for _, key := range []string{
+		"background:\n  cleanup: -1h", "background:\n  view_refresh: -1h", "background:\n  reconfirm: -1m",
+		"presence:\n  flush_interval: -1s", "presence:\n  packet_ttl: -1s",
+		"telemetry:\n  resolution: -1h", "telemetry:\n  retention: -1h",
+		"routes:\n  retention: -1h", "routes:\n  grace: -1h",
+		"nodes:\n  clock_drift_threshold: -1m", "nodes:\n  stale_threshold: -1h", "nodes:\n  delete_after: -1h",
+		"cache:\n  ttl: -1m", "cache:\n  ttls:\n    stats: -1m",
+		"meshmapper:\n  scopes:\n    refresh_interval: -1h",
+	} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte(key+"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load(path)
+		if err == nil || !strings.Contains(err.Error(), "must not be negative") {
+			t.Errorf("%q: err = %v, want a negative-duration error", key, err)
+		}
+	}
+	// Nonpositive still means "disabled" here.
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("observers:\n  delete_after: -1h\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err != nil {
+		t.Errorf("observers.delete_after: %v", err)
+	}
+}

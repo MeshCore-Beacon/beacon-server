@@ -32,7 +32,12 @@ type execQuerier interface {
 var (
 	lineCommentRe     = regexp.MustCompile(`(?m)--[^\n]*`)
 	concurrentIndexRe = regexp.MustCompile(`(?is)\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\s+(?:IF\s+NOT\s+EXISTS\s+)?("?[\w.]+"?)`)
+	// Statements that refuse to run inside a transaction block.
+	nonTransactionalRe = regexp.MustCompile(`(?i)\b(?:CONCURRENTLY|VACUUM)\b`)
 )
+
+// migrationLockKey serialises RunMigrations across instances sharing a database.
+const migrationLockKey int64 = 0x6265_6163_6f6e // "beacon"
 
 // concurrentIndexName returns the index a CREATE INDEX CONCURRENTLY migration builds.
 func concurrentIndexName(sql string) (string, bool) {
@@ -82,6 +87,21 @@ func applyMigration(ctx context.Context, db execQuerier, sql string) error {
 	return err
 }
 
+// applyAndRecord applies a migration and its ledger row. Without CONCURRENTLY both go in
+// one simple-protocol Exec, an implicit transaction, so a crash can't apply one without the other.
+func applyAndRecord(ctx context.Context, db execQuerier, name, sql string) error {
+	record := "INSERT INTO schema_migrations (filename) VALUES ('" + strings.ReplaceAll(name, "'", "''") + "')"
+	if !nonTransactionalRe.MatchString(lineCommentRe.ReplaceAllString(sql, "")) {
+		_, err := db.Exec(ctx, sql+"\n;\n"+record)
+		return err
+	}
+	if err := applyMigration(ctx, db, sql); err != nil {
+		return err
+	}
+	_, err := db.Exec(ctx, record)
+	return err
+}
+
 const baselineMigration = "001_baseline.sql"
 
 var errPreBaseline = errors.New("database schema predates Beacon 2.0.0; 2.0.0 needs a fresh database")
@@ -105,6 +125,24 @@ func checkBaseline(ctx context.Context, db execQuerier) error {
 }
 
 func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to acquire migration connection: %w", err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock($1)", migrationLockKey); err != nil {
+		return fmt.Errorf("failed to take migration lock: %w", err)
+	}
+	defer func() {
+		// A session lock outlives Release; drop the connection if unlock fails.
+		if _, err := conn.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", migrationLockKey); err != nil {
+			_ = conn.Conn().Close(context.Background())
+		}
+	}()
+	return runMigrations(ctx, conn)
+}
+
+func runMigrations(ctx context.Context, pool execQuerier) error {
 	_, err := pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			filename TEXT PRIMARY KEY,
@@ -150,16 +188,8 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 			return fmt.Errorf("failed to read migration %s: %w", entry.Name(), err)
 		}
 
-		if err := applyMigration(ctx, pool, string(sql)); err != nil {
+		if err := applyAndRecord(ctx, pool, entry.Name(), string(sql)); err != nil {
 			return fmt.Errorf("failed to apply migration %s: %w", entry.Name(), err)
-		}
-
-		if _, err := pool.Exec(
-			ctx,
-			"INSERT INTO schema_migrations (filename) VALUES ($1)",
-			entry.Name(),
-		); err != nil {
-			return fmt.Errorf("failed to record migration %s: %w", entry.Name(), err)
 		}
 
 		slog.Info(fmt.Sprintf("applied migration: %s", entry.Name()), "component", "db")

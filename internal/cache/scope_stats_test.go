@@ -59,3 +59,31 @@ func TestScopeStatsCacheSeparatesIATAs(t *testing.T) {
 		t.Fatalf("underlying calls = %d, want 6", inner.calls)
 	}
 }
+
+func TestDefaultWindowKeyFollowsTheHour(t *testing.T) {
+	c, _ := newTestClient(t)
+	inner := &scopeStatsReader{}
+	cr := NewCachedReader(inner, c, CacheTTLs{Stats: time.Hour}).(*CachedReader)
+	clock := time.Date(2026, 10, 2, 10, 30, 0, 0, time.UTC)
+	cr.now = func() time.Time { return clock }
+	get := func(since time.Time) int64 {
+		t.Helper()
+		rows, err := cr.GetScopeStats(context.Background(), nil, since)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rows[0].PacketCount
+	}
+	if get(time.Time{}) != 1 || get(time.Time{}) != 1 {
+		t.Fatal("default window not cached within the hour")
+	}
+	clock = clock.Add(35 * time.Minute)
+	if get(time.Time{}) != 2 {
+		t.Fatal("default window served from the previous hour")
+	}
+	// An explicit since at the current hour is a different window.
+	if get(clock.Truncate(time.Hour)) != 3 {
+		t.Fatal("explicit since collided with the default window")
+	}
+
+}

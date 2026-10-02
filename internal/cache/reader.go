@@ -57,6 +57,7 @@ type CachedReader struct {
 	c     *Client
 	ttl   CacheTTLs
 	rev   revisionMemo
+	now   func() time.Time
 }
 
 // CacheTTLs holds the resolved per-category TTLs for the cache layer.
@@ -77,6 +78,7 @@ func NewCachedReader(inner api.Reader, c *Client, ttl CacheTTLs) api.Reader {
 		inner: inner,
 		c:     c,
 		ttl:   ttl,
+		now:   time.Now,
 	}
 }
 
@@ -373,6 +375,6 @@ func (cr *CachedReader) SearchCrossIATARoutes(ctx context.Context, fromHash, fro
 }
 
 // ListTraceTags implements [api.Reader].
-func (cr *CachedReader) ListTraceTags(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, limit int32) ([]api.TraceTagSummary, error) {
-	return cr.inner.ListTraceTags(ctx, iatas, scope, traceType, since, until, cursor, limit)
+func (cr *CachedReader) ListTraceTags(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, cursorTag string, limit int32) ([]api.TraceTagSummary, error) {
+	return cr.inner.ListTraceTags(ctx, iatas, scope, traceType, since, until, cursor, cursorTag, limit)
 }
