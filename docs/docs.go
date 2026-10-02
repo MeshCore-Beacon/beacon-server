@@ -2618,7 +2618,7 @@ const docTemplate = `{
         },
         "/stats/paths": {
             "get": {
-                "description": "Counts stored receptions in [since, until), at most 30 days. Hash widths count only validated nonempty ordinary header paths (1/2/3 bytes). Empty paths do not vote for a width. TRACE header paths contain signal readings and are separate. Missing payload type or inconsistent/unsupported path metadata is unclassified. The four categories partition total receptions. Flood paths accumulate entries; direct paths contain remaining entries, so counts do not measure distance or a complete traversed route. Both boundaries round down to UTC hours and the response reports that effective window. Reads use materialized snapshots refreshed by background.view_refresh; the current partial hour is excluded and missing hours are omitted.",
+                "description": "Counts stored receptions in [since, until), at most 30 days. Hash widths count only validated nonempty ordinary header paths (1/2/3 bytes). Empty paths do not vote for a width. TRACE header paths contain signal readings and are separate. Missing payload type or inconsistent/unsupported path metadata is unclassified. The four categories partition total receptions. Flood paths accumulate entries; direct paths contain remaining entries, so counts do not measure distance or a complete traversed route. Both boundaries round down to UTC hours and the response reports that effective window. Reads the hourly path rollup; an hour appears only after it is rolled, about 95 minutes after it ends, and hours without data are omitted.",
                 "produces": [
                     "application/json"
                 ],
@@ -2937,7 +2937,7 @@ const docTemplate = `{
         },
         "/stats/signal": {
             "get": {
-                "description": "Aggregates stored observer receptions in [since, until), at most 30 days. SNR is dB; RSSI is dBm. Null/non-finite readings and the zero/zero unavailable sentinel are excluded per metric; actual zero SNR with nonzero RSSI remains valid. Averages are null without samples. Histogram bounds are lower-inclusive/upper-exclusive, with null for unbounded ends. Both boundaries round down to UTC hours and the response reports that effective window. Reads use hourly materialized snapshots refreshed by background.view_refresh; the current partial hour is excluded and absent hours are omitted. These last-hop readings do not measure end-to-end quality or packet loss.",
+                "description": "Aggregates stored observer receptions in [since, until), at most 30 days. SNR is dB; RSSI is dBm. Null/non-finite readings and the zero/zero unavailable sentinel are excluded per metric; actual zero SNR with nonzero RSSI remains valid. Averages are null without samples. Histogram bounds are lower-inclusive/upper-exclusive, with null for unbounded ends. Both boundaries round down to UTC hours and the response reports that effective window. Reads the hourly signal rollup; an hour appears only after it is rolled, about 95 minutes after it ends, and hours without data are omitted. These last-hop readings do not measure end-to-end quality or packet loss.",
                 "produces": [
                     "application/json"
                 ],
@@ -3311,8 +3311,14 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "last_heard_at epoch ms of last item for pagination",
+                        "description": "lastHeardAt (epoch ms) of the last item; returns older tags",
                         "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "traceTag (hex) of the last item; with cursor, also returns later tags sharing that millisecond",
+                        "name": "cursorTag",
                         "in": "query"
                     },
                     {
@@ -5325,7 +5331,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "windowHours": {
-                    "description": "always 24 for now",
+                    "description": "complete rolled hours the totals cover, at most 24",
                     "type": "integer"
                 }
             }

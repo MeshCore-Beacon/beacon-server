@@ -1350,7 +1350,7 @@ definitions:
         description: epoch ms, exclusive end of the window
         type: integer
       windowHours:
-        description: always 24 for now
+        description: complete rolled hours the totals cover, at most 24
         type: integer
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.StatsSeries:
@@ -3406,9 +3406,9 @@ paths:
         is unclassified. The four categories partition total receptions. Flood paths
         accumulate entries; direct paths contain remaining entries, so counts do not
         measure distance or a complete traversed route. Both boundaries round down
-        to UTC hours and the response reports that effective window. Reads use materialized
-        snapshots refreshed by background.view_refresh; the current partial hour is
-        excluded and missing hours are omitted.
+        to UTC hours and the response reports that effective window. Reads the hourly
+        path rollup; an hour appears only after it is rolled, about 95 minutes after
+        it ends, and hours without data are omitted.
       parameters:
       - description: Inclusive start, epoch milliseconds (0 through 253402300799999)
         in: query
@@ -3643,8 +3643,8 @@ paths:
         RSSI remains valid. Averages are null without samples. Histogram bounds are
         lower-inclusive/upper-exclusive, with null for unbounded ends. Both boundaries
         round down to UTC hours and the response reports that effective window. Reads
-        use hourly materialized snapshots refreshed by background.view_refresh; the
-        current partial hour is excluded and absent hours are omitted. These last-hop
+        the hourly signal rollup; an hour appears only after it is rolled, about 95
+        minutes after it ends, and hours without data are omitted. These last-hop
         readings do not measure end-to-end quality or packet loss.
       parameters:
       - description: Inclusive start, epoch milliseconds (0 through 253402300799999)
@@ -3897,10 +3897,15 @@ paths:
         in: query
         name: until
         type: integer
-      - description: last_heard_at epoch ms of last item for pagination
+      - description: lastHeardAt (epoch ms) of the last item; returns older tags
         in: query
         name: cursor
         type: integer
+      - description: traceTag (hex) of the last item; with cursor, also returns later
+          tags sharing that millisecond
+        in: query
+        name: cursorTag
+        type: string
       - description: Max results (default 50); must be positive, values above 200
           are clamped
         in: query
