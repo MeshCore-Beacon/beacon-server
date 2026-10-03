@@ -60,7 +60,7 @@ type MeshMapperScopesConfig struct {
 
 func (c MeshMapperScopesConfig) Interval() time.Duration {
 	if c.RefreshInterval.Duration == 0 {
-		return time.Hour
+		return 24 * time.Hour
 	}
 	return c.RefreshInterval.Duration
 }

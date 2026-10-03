@@ -38,7 +38,7 @@ func TestMeshMapperConfig(t *testing.T) {
 			}
 		})
 	}
-	if (MeshMapperScopesConfig{}).Interval() != time.Hour {
+	if (MeshMapperScopesConfig{}).Interval() != 24*time.Hour {
 		t.Fatal("wrong default")
 	}
 }
