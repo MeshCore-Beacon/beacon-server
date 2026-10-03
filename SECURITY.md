@@ -5,7 +5,7 @@
 Please do not report security vulnerabilities through public GitHub issues.
 
 Instead, contact the maintainers directly via the MeshCore Canada Discord
-server: [MeshCore Canada Discord](https://discord.gg/Gz3KvJx2hf) — reach out to
+server: [MeshCore Canada Discord](https://discord.gg/Gz3KvJx2hf); reach out to
 **dedskelly** directly. Include as much detail as possible: the nature of the
 issue, steps to reproduce, and any potential impact.
 

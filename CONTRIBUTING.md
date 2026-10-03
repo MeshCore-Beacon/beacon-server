@@ -51,6 +51,24 @@ swag init -g cmd/beacon/main.go -o docs --parseInternal --parseDependency
 
 ---
 
+## Backup export tests
+
+CI runs export, restore round-trip, offline verify and truncated-archive rejection against
+PostgreSQL 16. Locally, with `PG*` pointing at a throwaway server whose role can create
+databases:
+
+```sh
+go build -o "$PWD/beacon-backup" ./cmd/beacon-backup
+BEACON_BACKUP_TEST_POSTGRES=1 BEACON_BACKUP_TEST_BINARY="$PWD/beacon-backup" \
+  go test ./internal/backup -run '^TestExportPostgres$' -v
+```
+
+The test creates, migrates, restores and drops two randomly named databases. The export
+format and operator usage are documented in
+[Backup and export](https://github.com/MeshCore-Beacon/beacon-docs/blob/main/docs/backup-export.md).
+
+---
+
 ## Database changes
 
 All schema changes must include a proper migration path:

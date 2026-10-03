@@ -15,7 +15,7 @@ related to an existing issue or limitation, link it here.
 
 ## Proposed solution
 
-How you'd like it to work. API shape, config options, WS event format — as much
+How you'd like it to work. API shape, config options, WS event format, as much
 detail as you have.
 
 ## Alternatives considered
