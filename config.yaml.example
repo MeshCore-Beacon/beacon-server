@@ -1,5 +1,6 @@
-# Beacon configuration file
-# Copy to config.yaml and adjust as needed.
+# Beacon configuration file: local development starter. Copy to config.yaml and adjust.
+# The fully annotated reference, with every key and its default, is
+# https://github.com/MeshCore-Beacon/beacon-docs/blob/main/app_config/config.yaml.example
 # Durations are Go strings (30s, 1h, 168h); negative values prevent startup
 # (observers.delete_after excepted, where nonpositive disables it).
 
@@ -263,7 +264,7 @@ websocket:
 
 # CORS configuration.
 # Controls which origins, methods and headers are allowed for cross-origin requests.
-# Defaults to allowing all origins with GET/HEAD/OPTIONS if omitted — appropriate
+# Defaults to allowing all origins with GET/HEAD/OPTIONS if omitted, appropriate
 # for a public read-only API. Restrict allowed_origins if you expose write endpoints.
 #cors:
 #  allowed_origins:

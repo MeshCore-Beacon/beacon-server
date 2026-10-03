@@ -38,7 +38,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           labels: |
             org.opencontainers.image.title=beacon-server
-            org.opencontainers.image.description=Beacon — MeshCore LoRa mesh observation server
+            org.opencontainers.image.description=Beacon: MeshCore LoRa mesh observation server
             org.opencontainers.image.licenses=AGPL-3.0-or-later
           flavor: |
             latest=false

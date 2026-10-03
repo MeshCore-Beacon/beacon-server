@@ -25,7 +25,7 @@ Examples of behaviour that contributes to a positive environment:
 
 Examples of unacceptable behaviour:
 
-- Hate speech or discriminatory language or jokes of any kind — including but
+- Hate speech or discriminatory language or jokes of any kind, including but
   not limited to those targeting race, ethnicity, nationality, gender identity
   or expression, sexual orientation, disability, religion, age, or socioeconomic
   background
@@ -34,7 +34,7 @@ Examples of unacceptable behaviour:
 - Trolling, insulting or derogatory comments, and personal or political attacks
 - Public or private harassment of any kind
 - Deliberate misgendering or use of rejected names
-- Publishing others' private information — such as a physical or email address —
+- Publishing others' private information, such as a physical or email address,
   without their explicit permission
 - Threats of violence or incitement of violence toward any individual or group
 - Dismissing or minimising reports of harassment or discrimination
@@ -55,15 +55,15 @@ when appropriate.
 
 ## Scope
 
-This Code of Conduct applies within all project spaces — GitHub issues, pull
-requests, discussions, and the MeshCore Canada Discord server — and also when an
+This Code of Conduct applies within all project spaces (GitHub issues, pull
+requests, discussions, and the MeshCore Canada Discord server) and also when an
 individual is representing the project in public spaces.
 
 ## Reporting
 
 Instances of abusive, harassing, or otherwise unacceptable behaviour may be
 reported by contacting the maintainers directly on the MeshCore Canada Discord
-server at https://discord.gg/Gz3KvJx2hf — reach out to **dedskelly** privately.
+server at https://discord.gg/Gz3KvJx2hf; reach out to **dedskelly** privately.
 
 All reports will be handled with discretion and confidentiality. Maintainers are
 obligated to respect the privacy and safety of the reporter.

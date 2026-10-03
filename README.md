@@ -14,8 +14,8 @@ in PostgreSQL, and streams live events to WebSocket clients.
 - Subscribes to MeshCore MQTT brokers and decodes incoming LoRa packets using
   [meshcore-go](https://github.com/meshcore-go/meshcore-go)
 - Stores packets, observations, nodes, observers, traces, routes and channel
-  messages in PostgreSQL (more backends to come)
-- Deduplicates observations across multiple brokers (same packet heard by two
+  messages in PostgreSQL
+- Deduplicates observations across multiple brokers (the same packet heard by two
   brokers is one observation per observer)
 - Decrypts group text messages for known channel keys
 - Detects firmware capability flags from path hash sizes
@@ -25,14 +25,9 @@ in PostgreSQL, and streams live events to WebSocket clients.
 - Seeds regions, IATA display names, and channel keys from a YAML config file on
   startup
 
-For deployment instructions including the frontend app and reverse proxy
-examples, see [beacon-docs](https://github.com/MeshCore-Beacon/beacon-docs).
-
-For a bounded private database and saved-config bundle, see
-[backup export](docs/backup-export.md). A standalone export tool is available; the
-protected download API is opt-in; browser login and import remain separate follow-ups.
-
----
+This repo is the code. Deploying, configuring and operating Beacon is documented in
+[beacon-docs](https://github.com/MeshCore-Beacon/beacon-docs); see
+[Documentation](#documentation) below.
 
 ## Stack
 
@@ -49,659 +44,70 @@ protected download API is opt-in; browser login and import remain separate follo
 | Config        | YAML via gopkg.in/yaml.v3                                       |
 | Env           | godotenv                                                        |
 
----
+## Running it locally
 
-## Getting started
-
-### Prerequisites
-
-- Go 1.26+
-- Docker and Docker Compose
-
-### 1. Clone and configure
+You need Go 1.26+ and a PostgreSQL 16 database. Docker is the easy way to get the database.
 
 ```bash
-git clone https://github.com/MeshCore-Beacon/beacon-server.git
-cd beacon-server
+git clone https://github.com/MeshCore-Beacon/beacon-server.git && cd beacon-server
 cp env.example .env
 cp config.yaml.example config.yaml
-```
-
-Edit `.env` with your broker credentials and database DSN. Edit `config.yaml` to
-define your regions, IATA display names, channel keys, and retention settings.
-
-### 2. Start PostgreSQL
-
-Any PostgreSQL 16 database works. For a local throwaway one:
-
-```bash
 docker run -d --name beacon-postgres -p 5432:5432 \
-  -e POSTGRES_USER=beacon -e POSTGRES_PASSWORD=beacon -e POSTGRES_DB=beacon \
-  postgres:16-alpine
-```
-
-Database migrations are applied automatically on startup.
-
-### Upgrading from 1.x
-
-2.0.0 starts from a new schema baseline and **needs a fresh database**. Pointed
-at a 1.x database it refuses to start with `database schema predates Beacon
-2.0.0; 2.0.0 needs a fresh database`. 1.x history does not carry over: create a
-new, empty database (Docker: stop the stack and move or remove the Postgres
-data directory) before starting 2.0.0.
-
-Config changes to review when upgrading:
-
-- Every manually configured `scopes:` entry needs a `region`.
-- `meshmapper.scopes.sources` is ignored; MeshMapper refresh intervals must be
-  within 1h–24h for scopes and 24h–168h for zones, or startup fails.
-- REST rate limiting is on by default. Behind a reverse proxy, set
-  `server.trusted_proxies` (see [Reverse proxies and rate limits](#reverse-proxies-and-rate-limits)).
-- `packets.retention` now defaults to 7 days.
-
-### 3. Run
-
-```bash
+  -e POSTGRES_USER=beacon -e POSTGRES_PASSWORD=beacon -e POSTGRES_DB=beacon postgres:16-alpine
 go run ./cmd/beacon
 ```
 
-Or pull and run the Docker image:
-
-```bash
-docker pull ghcr.io/meshcore-beacon/beacon-server:latest
-```
-
-The image is public on GitHub Container Registry — no `docker login` required.
-`latest` tracks stable releases; pin a version tag (e.g. `2.0.0`) for
-predictable upgrades, and `dev` follows the development branch.
-
-Beacon will:
-
-- Load `.env` and `config.yaml`
-- Connect to PostgreSQL and seed config data
-- Connect to the configured MQTT brokers
-- Start the HTTP server on `LISTEN_ADDR` (default `:8080`)
-
-### Cold start and path resolution
-
-Path resolution, firmware capability detection, and known route storage all
-depend on nodes having advertised at least once to a local observer. On a fresh
-deployment `resolvedPath` will show `"confidence": "none"` for all hops and
-`supportsMultibytePaths` will be `false` for all nodes until advert traffic
-arrives and populates `node_short_ids`. This is expected behaviour — resolution
-improves automatically as the mesh is observed over time.
-
-Similarly, GRP_TXT packets whose channel key isn't yet known at ingest time are
-stored as hash-only, undecrypted rows. Adding the channel's key to `config.yaml`
-doesn't retroactively decrypt that history immediately — it's picked up
-automatically on the next restart, when Beacon scans for undecrypted packets
-matching a now-known channel and decrypts them. Watch the startup log for
-`backfilled N previously-undecrypted channel message(s)`.
-
----
-
-## Configuration
-
-### Admin authentication
-
-The `/api/v1/admin` subtree requires `Authorization: Bearer <key>`. Set the
-operator key with `BEACON_API_KEY` or `auth.api_key` in YAML. A set environment
-variable overrides YAML; an explicitly empty value disables admin access.
-With no key, admin requests return JSON 503 while public reads and WebSockets
-continue normally. With a key, missing, incorrect or duplicate Authorization
-headers return JSON 401 with `WWW-Authenticate: Bearer`.
-
-`GET /api/v1/admin/config` returns selected running settings: CORS options with
-Beacon defaults applied, `auth.configured`, and `ingest.broker_count` (configured
-broker workers, not connection status or a tunable processing-worker pool).
-The CORS lists are the options supplied to the middleware; its normal matching
-normalization still applies. The response excludes
-credential fields, broker addresses, channel material, database settings and
-other configuration. Unknown admin paths return 404 and unsupported
-methods on the config endpoint return 405 after authentication.
-Global CORS preflights remain public. Use a long, randomly generated key, keep
-it out of source control and logs, and send it only in the Authorization header,
-never the URL or request body. Require HTTPS at the reverse proxy and restrict
-direct access to Beacon's HTTP listener to that proxy or a private connection.
-Changing the key requires a restart. No API key is issued automatically. The
-key must be at least 16 characters with no inner whitespace (surrounding
-whitespace is trimmed); an unusable key prevents startup.
-
-`PUT /api/v1/admin/config` accepts only
-`{"cors":{"allowed_origins":["https://example.org"]}}`. It replaces the entire
-origin list immediately and updates the reported configuration with the same
-policy. Requests already in progress may use the previous policy. Concurrent
-valid updates are serialized; updates take effect one at a time. The response
-contains `config`, `persisted: false` and `requires_restart: false`.
-
-Updates are **runtime-only**: no file or database is written, and restarting
-reloads the saved configuration. Keep 1–32 ASCII HTTP(S) origins, at most 512 bytes
-each, with an optional single hostname wildcard; a sole `*` permits all origins.
-Empty/null lists, URL paths/queries/credentials, control characters and unknown
-fields are rejected. Requests must be JSON, at most 16 KiB. Other CORS options,
-auth/credential fields and broker count cannot be changed here; there is no
-configurable `ingest.worker_count`. Cross-origin admin clients need PUT allowed
-in the saved CORS methods. CORS controls browser access, not authentication.
-
-Operator accounts are available at `GET/POST /api/v1/admin/accounts` and
-`GET/DELETE /api/v1/admin/accounts/{id}`. POST accepts a JSON `name` field in a
-body up to 4 KiB; names are trimmed, case-sensitive and limited to 128 Unicode
-characters without control characters. Active names are unique. DELETE soft
-deactivates the record (204); missing IDs return 404 and an already inactive
-record returns 409. A deactivated name may be reused by a new account.
-Lists include active and inactive records, newest first, without pagination.
-These are operator-defined records; no login, session or API token is created.
-Cross-origin account clients need both `POST` and `DELETE` in the saved
-`cors.allowed_methods`; the default `GET, HEAD, OPTIONS` is read-only. For an
-admin UI that also updates configuration, use `[GET, HEAD, OPTIONS, POST, PUT,
-DELETE]`, restrict `cors.allowed_origins` to that UI, and allow `Authorization`
-and `Content-Type` headers. Otherwise browser preflight blocks these requests
-even when the same bearer-authenticated request works with curl.
-
-### Environment variables (`.env`)
-
-| Variable                 | Default       | Description                                                  |
-| ------------------------ | ------------- | ------------------------------------------------------------ |
-| `LISTEN_ADDR`            | `:8080`       | HTTP listen address                                          |
-| `POSTGRES_DSN`           | —             | PostgreSQL connection string                                 |
-| `REDIS_ADDR`             | —             | Redis address (`host:port`). Leave unset to disable caching. |
-| `REDIS_PASSWORD`         | —             | Redis password (optional)                                    |
-| `REDIS_DB`               | `0`           | Redis database index                                         |
-| `CONFIG_PATH`            | `config.yaml` | Path to YAML config file                                     |
-| `MQTT_BROKER_1_URL`      | —             | Broker 1 WebSocket URL (e.g. `wss://mqtt1.example.com:443`)  |
-| `MQTT_BROKER_1_USERNAME` | —             | Broker 1 username                                            |
-| `MQTT_BROKER_1_PASSWORD` | —             | Broker 1 password                                            |
-| `MQTT_BROKER_2_URL`      | —             | Broker 2 WebSocket URL                                       |
-| `MQTT_BROKER_2_USERNAME` | —             | Broker 2 username                                            |
-| `MQTT_BROKER_2_PASSWORD` | —             | Broker 2 password                                            |
-| `BEACON_API_KEY`         | —             | Admin bearer key; overrides `auth.api_key` when set           |
-| `LOG_LEVEL`              | `info`        | `debug`, `info`, `warn` or `error`; overrides `log.level`     |
-| `LOG_FORMAT`             | `text`        | `text` or `json`; overrides `log.format`                      |
-| `BEACON_CPU_PROFILE_DIR` | —             | Private CPU capture directory (see [PROFILING.md](PROFILING.md)) |
-| `BEACON_CPU_PROFILE_UNTIL` | —           | RFC 3339 deadline for CPU captures, at most 72h ahead         |
-
-### Config file (`config.yaml`)
-
-```yaml
-# MeshMapper integrations (optional, no API key). Import transport scopes and
-# IATA border outlines from MeshMapper instead of maintaining scopes: and
-# iatas.*.borderFile by hand. Both cover every known IATA that MeshMapper lists;
-# no sources to configure. See config.yaml.example for limits and behaviour.
-#meshmapper:
-#  scopes:
-#    enabled: true
-#  zones:
-#    enabled: true
-#    import_groups: true # MeshMapper zone groups become regions
-#  channels:
-#    enabled: true       # import each region's public hashtag channels
-
-# Optional IATA overrides — auto-created on first packet arrival,
-# only needed if you want to customise display name or coordinates.
-# borderFile points to a GeoJSON Feature (Polygon or MultiPolygon) for the
-# region border map feature; relative paths resolve against this config
-# file's own directory. Validated at boot — invalid geometry fails startup.
-iatas:
-  YVR:
-    name: Vancouver International
-    lat: 49.1967
-    lng: -123.1815
-    borderFile: borders/yvr.geojson # optional; or use meshmapper.zones
-
-# Super-regions grouping multiple IATAs.
-regions:
-  - slug: western-canada
-    name: Western Canada
-    display_order: 1
-    center_lat: 51.0
-    center_lng: -114.0
-    zoom_level: 5
-    iatas: [YVR, YYJ, YYC, YEG]
-
-# Channel keys for decrypting group messages.
-channel_keys:
-  # Hashtag channels: Beacon derives the PSK from the tag name automatically.
-  # secret = SHA256("#tag")[:16], channel_hash = SHA256(secret)[0]
-  # Tag names should be provided without the # prefix. Plain names show under
-  # every region; {name, region: <slug>} limits a channel to one region.
-  hashtags:
-    - meshcore
-    - name: vancouver-mesh
-      region: western-canada
-
-  # Explicit keys: channel hash (hex) and key (hex), with optional display name.
-  # The public MeshCore channel key is included in config.yaml.example.
-  keys:
-    "11":
-      key: "8b3387e9c5cdea6ac9e5edbaa115cd72"
-      name: "Public"
-
-# Regional transport scopes for matching TRANSPORT_FLOOD packets.
-# Plain names have # prepended automatically (e.g. "bc" → "#bc").
-# region (required) is a configured region slug; region-filtered scope lists
-# and scope stats show the scope under that region's IATAs. Matching stays global.
-# Optional when meshmapper.scopes covers your regions.
-scopes:
-  - name: bc
-    region: western-canada
-  - name: "#west"
-    region: western-canada
-
-# Observer telemetry storage settings.
-telemetry:
-  retention: 744h # how long to keep telemetry snapshots (default: 31 days)
-  resolution: 1h # snapshot frequency per observer; duplicates within window are dropped (default: 1h)
-
-# Packet and observation retention.
-packets:
-  retention: 168h # packets, observations, channel messages (default: 7 days, minimum 24h)
-
-# Hourly analytics rollups behind the stats endpoints; they outlive raw packets.
-analytics:
-  rollup_retention: 2160h # also the longest /stats/series window (default: 90 days, minimum 24h)
-
-# Presence write coalescing.
-# Observer last_seen and packet last_heard_at bumps are batched in memory and
-# flushed on an interval instead of writing one row per observation. An
-# unclean shutdown loses at most one interval of presence freshness.
-presence:
-  flush_interval: 30s # how often coalesced bumps are flushed (default: 30s)
-  packet_ttl: 30s # how long a quiet packet stays coalesced before writing through again (default: 30s)
-
-# Direct proxy peers allowed to set the client IP through X-Real-IP.
-server:
-  trusted_proxies: [172.30.0.0/24] # default: [] (direct access)
-
-# Per-client REST limits for /api/v1/*.
-ratelimit:
-  enabled: true # default: true
-  requests_per_minute: 300 # default: 300
-
-# WebSocket settings.
-websocket:
-  max_connections_per_ip: 5 # default: 5
-  max_connects_per_minute: 10 # upgrade attempts per IP (default: 10)
-  allowed_origins: [https://beacon.example.com] # other sites allowed to open /ws (default: same host only)
-
-# Node staleness, deletion, and clock-drift thresholds.
-nodes:
-  mark_foreign: false # optional indication for repeaters outside configured IATA borders
-  stale_threshold: 24h # mark a node "stale" in the API after this long unseen (default: 24h)
-  delete_after: 720h # delete a node entirely after this long unseen (default: 30 days)
-  clock_drift_threshold: 5m # |device clock - server clock| above which clockOutOfSync=true for a repeater/room server (default: 5m)
-
-# Optional observer age-out (disabled by default; set e.g. 720h to opt in).
-# Enable only when one Beacon ingest process owns the database: presence-cache
-# preparation is local to that process, including both of its MQTT workers.
-# Deletes at most 1000 observers per background.cleanup interval, only when
-# last_seen/last_status_at are old and no observations, telemetry or ownership remain.
-# Broker/location/scope metadata cascades; a returning observer receives a new ID.
-observers:
-  delete_after: 0s # omitted or nonpositive disables deletion
-
-# Redis caching layer (optional).
-# Caches read-heavy, slow-changing responses to reduce PostgreSQL load.
-# Connection details (address, password, database) are set via environment
-# variables. Leave REDIS_ADDR unset to disable caching entirely.
-# TTLs are duration strings e.g. "30m", "1h". Per-category TTLs override
-# the global ttl. Any unset category inherits ttl. Default: 1h.
-cache:
-  ttl: "1h"
-  ttls:
-    stats: "1h" # stats endpoints (hourly rollups; keys change when a new hour is rolled)
-    reference: "1h" # IATAs, regions, scopes
-    nodes: "1h" # node detail (also explicitly invalidated on upsert)
-    observers: "1h" # observer detail (also explicitly invalidated on upsert)
-
-# Geographic ingest filter (optional).
-# Drop packets from observers outside the specified area.
-# Country codes are ISO 3166-1 alpha-2. Continent codes: AF AN AS EU NA OC SA.
-# If both are set an IATA passes if it matches either (OR semantics).
-# Omit entirely to accept all IATAs (default).
-ingest:
-  allow_countries: [CA, US] # only store packets from these countries
-  allow_continents: [NA] # or: accept all of North America
-```
-
-IATAs are auto-created on first packet arrival. The config file adds display
-names, coordinates, and optional region borders. Regions and channel keys
-must be defined here unless MeshMapper imports them (`meshmapper.zones.import_groups`,
-`meshmapper.channels`).
-
----
-
-### Reverse proxies and rate limits
-
-REST requests under `/api/v1` are rate limited per client IP (300/min by
-default; IPv6 clients share a /64). Exhausted clients get `429` with
-`rate_limited` and `Retry-After`. WebSocket upgrades are limited separately by
-`websocket.max_connects_per_minute`.
-
-Beacon never trusts `X-Forwarded-For` or `True-Client-IP`. Behind a reverse
-proxy, list the proxy's address in `server.trusted_proxies` (CIDR, e.g.
-`127.0.0.1/32` or the Docker network subnet) and have the proxy overwrite
-`X-Real-IP` with the connecting client's address:
-
-```nginx
-proxy_set_header X-Real-IP $remote_addr;
-```
-
-```caddy
-reverse_proxy app:8080 {
-	header_up X-Real-IP {remote_host}
-}
-```
-
-Without this every visitor shares the proxy's budget and the site gets 429s
-under normal load. Beacon logs a warning at startup when limits are on and no
-proxy is trusted, and once at runtime when a request carries forwarding headers
-it is ignoring. Full nginx and Caddy examples are in
-[beacon-docs](https://github.com/MeshCore-Beacon/beacon-docs).
-
----
-
-### Foreign repeater indication
-
-Set `nodes.mark_foreign: true` to expose `possiblyForeign` on repeater nodes.
-The local operating area is the union of **all configured**
-`iatas.<code>.borderFile` GeoJSON Polygon/MultiPolygon features, with
-`meshmapper.zones` boundaries replacing them where MeshMapper has one. IATAs
-without a border do not add an area; airport coordinates and the current API
-region filter are not boundaries. Enabling this with no border source, missing
-files or invalid geometry fails startup. Border file changes require a restart.
-
-Inside any polygon (including its edges) means `false`; outside the entire union
-means `true`. Hole interiors are outside; hole edges are local. Other node roles,
-missing or invalid positions have no classification (an explicit 0/0 advert
-clears the stored position).
-This is a hint based on reported position, not proof of a repeater's origin.
-Packet ingestion, heard-in IATAs and route matching remain unchanged.
-
-Node list/detail reads apply the current geometry after cache reads, so existing
-historical nodes need no backfill. A `nodeUpdate` includes `possiblyForeign`
-when its advert provides a position: a boolean for known positions, `null` to
-clear it when the advert reports 0/0 or an invalid position. Omission retains the
-previous value when a repeater's advert omits its position. A change to another
-role also sends `null`. `lat`/`lng` follow the same rule: omitted keeps the
-client's position, explicit `null` clears it.
-The field is omitted everywhere when the feature is disabled (the default).
-
-Use longitude/latitude coordinate order and split antimeridian-crossing borders
-into MultiPolygons as described in [RFC 7946 section 3.1.9](https://www.rfc-editor.org/rfc/rfc7946#section-3.1.9).
-Classification rejects unsplit edges spanning more than 180 degrees rather than
-silently treating them as the complementary global area.
-
-## Authentication
-
-Public reads and the WebSocket need no credentials. Only the `/api/v1/admin`
-subtree is protected, by a bearer key (see [Admin authentication](#admin-authentication)).
-Serve Beacon behind an HTTPS reverse proxy.
-
----
-
-## WebSocket API
-
-Connect to `ws://host:8080/ws`.
-
-On connect the server sends a `hello`:
-
-```json
-{ "v": 1, "type": "hello", "serverTime": 1234567890000, "connectionId": "uuid" }
-```
-
-The connection closes after 90 seconds of inactivity. Clients should send a
-`ping` every 30 seconds.
-
-### Client → Server messages
-
-**Subscribe** — add a filter to this connection. Multiple subscriptions are
-unioned (OR semantics): an event matches if it satisfies any active
-subscription. The server replies with a `subscriptionId` to use for
-unsubscribing.
-
-```json
-{
-  "v": 1,
-  "type": "subscribe",
-  "id": "sub-1",
-  "scope": {
-    "iatas": ["YOW", "YYZ"],
-    "regionIds": ["1"],
-    "regionSlugs": ["western-canada"],
-    "payloadTypes": [4, 5],
-    "routeTypes": [1, 2],
-    "channelHashes": ["11"],
-    "observerIds": ["<observer uuid>"],
-    "events": ["packetObservation", "channelMessage"]
-  }
-}
-```
-
-All scope fields are optional; omitted or empty means no filter on that
-dimension. `routeTypes` and `observerIds` filter `packetObservation` events
-(`observerIds` also `observerStatus`), and `channelHashes` only `channelMessage`. `regionIds` and
-`regionSlugs` are both expanded to their member IATAs server-side.
-
-**Unsubscribe** — remove a specific subscription by ID.
-
-```json
-{
-  "v": 1,
-  "type": "unsubscribe",
-  "id": "unsub-1",
-  "subscriptionId": "<uuid from subscribed reply>"
-}
-```
-
-The server replies `{ "v": 1, "type": "unsubscribed", "id": "unsub-1", "subscriptionId": "..." }`.
-
-**Configure** — connection-wide flags, all default `false`:
-
-- `resolvePath` adds per-hop node resolution to `packetObservation` events (see below).
-- `includeObserverKey` adds `observation.observerPublicKey`.
-- `includeRepeats` also streams later hearings of an already-stored observation
-  over a new path, as `packetObservation` events with `packet.isRepeat: true`
-  and `observationCount: 0`.
-
-Unlike `subscribe`, this is not additive: each `configure` sets all three flags
-to exactly the values sent, so an omitted flag turns off.
-
-```json
-{ "v": 1, "type": "configure", "id": "cfg-1", "resolvePath": true, "includeRepeats": true }
-```
-
-The server replies:
-
-```json
-{ "v": 1, "type": "configured", "id": "cfg-1", "resolvePath": true, "includeObserverKey": false, "includeRepeats": true }
-```
-
-**Ping**
-
-```json
-{ "v": 1, "type": "ping", "id": "ping-1" }
-```
-
-### Server → Client events
-
-| Type                | Description                                         |
-| ------------------- | --------------------------------------------------- |
-| `packetObservation` | New observation written to DB                       |
-| `observerStatus`    | Observer status update                              |
-| `nodeUpdate`        | Node upserted from advert                           |
-| `channelMessage`    | Decrypted channel message (scope must include hash) |
-
-When `resolvePath` is enabled via `configure`, `packetObservation` events
-include a `resolvedPath` array: one entry per hop in the packet's path, each
-with a `confidence` (`"high"` for exactly one candidate node, `"ambiguous"`
-for multiple, `"none"` for zero) and the matching node(s)' id, name,
-lat/lng, and public key. Without `resolvePath` enabled, `resolvedPath` is
-`null` — this keeps the default event payload small; only opt in if you're
-actually rendering path connections (e.g. drawing hops on a map).
-
-### Backpressure
-
-The server write buffer per connection is bounded at 256 events. If a client
-falls behind, the server drops the oldest queued events and sends a `lagged`
-notice:
-
-```json
-{ "v": 1, "type": "lagged", "droppedCount": 12, "since": 1234567890000 }
-```
-
-Clients should respond by backfilling over REST, then resume streaming:
-`/api/v1/packets/backfill?afterObservationId=<last observation id>` and
-`/api/v1/messages/backfill?afterId=<last message id>`.
-
-### Reconnection
-
-Subscriptions are not persisted — they exist only for the lifetime of the
-connection. On any disconnect the client should reconnect with backoff, re-issue
-all subscriptions, and backfill via the same REST endpoints.
-
-### Connection limits
-
-- At most `websocket.max_connections_per_ip` (default 5) concurrent connections
-  per IP. A connection over the cap is accepted and then closed with code
-  `1013` (try again later) before `hello`.
-- At most `websocket.max_connects_per_minute` (default 10) upgrade attempts per
-  IP; beyond that the handshake gets `429` with `Retry-After: 60`.
-- Browsers may only connect from the same host unless their origin is listed in
-  `websocket.allowed_origins` (`https://*.example.com` covers every subdomain).
-
-Behind a reverse proxy both limits need `server.trusted_proxies`, or every
-visitor counts as the proxy's IP.
-
----
-
-## REST API
-
-Base path: `/api/v1`
-
-All list endpoints support cursor-based pagination via `cursor` and `limit`
-query params. See the Swagger UI at `http://localhost:8080/swagger/index.html`
-for full parameter documentation.
-
-### Authentication and limits
-
-Only `/admin/*` needs `Authorization: Bearer <key>`. All `/api/v1` routes are
-rate limited per client IP; see [Reverse proxies and rate limits](#reverse-proxies-and-rate-limits).
-List `limit` values are clamped to 1–200.
-
-### Endpoints
-
-| Method   | Path                                    | Description                                                                                                           |
-| -------- | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `GET`    | `/admin/accounts`                       | List operator accounts (bearer key)                                                                                   |
-| `POST`   | `/admin/accounts`                       | Create an operator account (bearer key)                                                                               |
-| `GET`    | `/admin/accounts/{id}`                  | Get an operator account (bearer key)                                                                                  |
-| `DELETE` | `/admin/accounts/{id}`                  | Deactivate an operator account (bearer key)                                                                           |
-| `GET`    | `/admin/backup`                         | Download a private database and saved-config backup (bearer key, opt-in)                                              |
-| `GET`    | `/admin/config`                         | Inspect selected running configuration (bearer key)                                                                   |
-| `PUT`    | `/admin/config`                         | Replace runtime CORS origins (bearer key)                                                                             |
-| `GET`    | `/brokers`                              | List MQTT brokers and connection status                                                                               |
-| `GET`    | `/channels`                             | List channels (`hash`, `iata`/`iatas`, `keyKnown`, `pageCursor`, `limit`)                                             |
-| `GET`    | `/channels/{channelID}`                 | Get channel detail by integer ID                                                                                      |
-| `GET`    | `/channels/{channelID}/messages`        | List messages for a channel (`since`, `iatas`, `region`/`regionId`, `scope`, `cursor`, `limit`)                       |
-| `GET`    | `/iatas`                                | List all known IATA codes                                                                                             |
-| `GET`    | `/iatas/{iata}`                         | Get a single IATA code                                                                                                |
-| `GET`    | `/iatas/{iata}/border`                  | Get an IATA's GeoJSON border, if any (204 if not)                                                                     |
-| `GET`    | `/messages`                             | List channel messages (`channelID`, `channelHash`, `since`, `iatas`, `region`/`regionId`, `scope`, `cursor`, `limit`) |
-| `GET`    | `/messages/backfill`                    | Messages after `afterId`                                                                                              |
-| `GET`    | `/nodes`                                | List nodes (type, IATA/region, name, scope, `pubkey`/`pubkeyPrefix`, capability flags, `neighbors`)                   |
-| `GET`    | `/nodes/{nodeId}`                       | Get node detail                                                                                                       |
-| `GET`    | `/nodes/{nodeId}/neighbors`             | List neighboring nodes observed in the mesh                                                                           |
-| `GET`    | `/nodes/{nodeId}/observations`          | List observations of packets from a node                                                                              |
-| `GET`    | `/observers`                            | List observers (IATA/region, `type`, `broker`, `status=online\|offline`, `name`, `scope`)                             |
-| `GET`    | `/observers/{observerId}`               | Get observer detail including broker last-seen timestamps                                                             |
-| `GET`    | `/observers/{observerId}/activity`      | Heard-activity history (`range`, `interval`, `until`)                                                                 |
-| `GET`    | `/observers/{observerId}/adverts`       | Adverts heard by observer                                                                                             |
-| `GET`    | `/observers/{observerId}/telemetry`     | Telemetry history (`range`, `interval=1h\|6h\|24h`, `afterId`)                                                        |
-| `GET`    | `/packets`                              | List packets (payload/route type, IATA/region, scope, `since`/`until`; plural params take CSV)                        |
-| `GET`    | `/packets/backfill`                     | Packets after `afterObservationId`                                                                                    |
-| `GET`    | `/packets/{packetHash}`                 | Get packet with all observations                                                                                      |
-| `GET`    | `/regions`                              | List all regions (summary)                                                                                            |
-| `GET`    | `/regions/{regionId}`                   | Get a single region with IATA list                                                                                    |
-| `GET`    | `/routes`                               | List known routes (`iata`, `hopCount`, `cursor`+`cursorId`)                                                           |
-| `GET`    | `/routes/search`                        | Search routes by source and destination hash                                                                          |
-| `GET`    | `/routes/cross`                         | Search for routes crossing IATA boundaries                                                                            |
-| `GET`    | `/routes/{iata}/{pathKey}/observations` | Retained observations matching a saved route (see below)                                                              |
-| `GET`    | `/scopes`                               | List transport scope names; IATA/region filters use configured regions and MeshMapper catalogues                      |
-| `GET`    | `/scopes/{name}`                        | Get scope detail                                                                                                      |
-| `GET`    | `/stats/clock-drift`                    | Repeaters and room servers whose clock drifted past the threshold, worst first                                        |
-| `GET`    | `/stats/node-types`                     | Node type breakdown                                                                                                   |
-| `GET`    | `/stats/observations`                   | Hourly observation counts per IATA (last 7 days by default)                                                           |
-| `GET`    | `/stats/observer-comparison`            | Compare flood packets reported by two observers                                                                       |
-| `GET`    | `/stats/overview`                       | Network overview over the last 24 rolled hours                                                                        |
-| `GET`    | `/stats/paths`                          | Path-entry and hash-width distributions                                                                               |
-| `GET`    | `/stats/payload-breakdown`              | Observation counts by payload type (last 24h by default)                                                              |
-| `GET`    | `/stats/radio-presets`                  | Radio preset usage by IATA                                                                                            |
-| `GET`    | `/stats/scopes`                         | Region scopes with hourly packet, node and observer counts (last 7 days by default)                                   |
-| `GET`    | `/stats/series`                         | Hourly card metrics and window summary (`since`/`until` required)                                                     |
-| `GET`    | `/stats/signal`                         | Reception signal distributions and hourly trends                                                                      |
-| `GET`    | `/stats/top-advertisers`                | Top N nodes by distinct ADVERT packets, split flood/direct (last 24h by default)                                      |
-| `GET`    | `/stats/top-nodes`                      | Top N nodes by advert hearings (last 7 days by default)                                                               |
-| `GET`    | `/stats/top-observers`                  | Top N observers by observation count (last 24h by default)                                                            |
-| `GET`    | `/stats/top-talkers`                    | Top N companion names by decrypted channel message count (last 24h by default)                                        |
-| `GET`    | `/traces`                               | List trace tags (`type=TRACE\|PING`, IATA/region, scope, `since`/`until`, `cursor`+`cursorTag`)                       |
-| `GET`    | `/traces/{tag}`                         | Get full trace detail with resolved routes                                                                            |
-
----
+Fill in `POSTGRES_DSN` and your MQTT broker credentials in `.env`. Every variable is described
+in [Configuration](https://github.com/MeshCore-Beacon/beacon-docs/blob/main/docs/configuration.md),
+and the fully annotated `config.yaml` lives in beacon-docs as well; the copy here is a working
+starter. Migrations run on startup. The API listens on `LISTEN_ADDR` (default `:8080`) and
+Swagger is at `http://localhost:8080/swagger/index.html`.
+
+To run the web frontend against it, see
+[Running the full stack locally](https://github.com/MeshCore-Beacon/beacon-docs/blob/main/CONTRIBUTING.md#running-the-full-stack-locally).
+
+The published image is `ghcr.io/meshcore-beacon/beacon-server`. `latest` tracks stable
+releases, `dev` follows the development branch, and each release is also tagged `X.Y.Z` and
+`X.Y`.
+
+### What you see on an empty database
+
+Path resolution, capability detection and known routes depend on nodes having advertised to a
+local observer. On a fresh database every hop shows `"confidence": "none"` and
+`supportsMultibytePaths` is `false` until adverts populate `node_short_ids`. That is expected
+and fills in as the mesh is observed.
+
+GRP_TXT packets whose channel key is not known yet are stored hash-only. After adding the key to
+`config.yaml`, the next restart decrypts the matching history; look for
+`config: backfilled N previously-undecrypted channel message(s)` in the log.
+
+## Documentation
+
+In [beacon-docs](https://github.com/MeshCore-Beacon/beacon-docs):
+
+- [Deploy with Docker](https://github.com/MeshCore-Beacon/beacon-docs#deploy-the-all-in-one-stack)
+- [Getting packets in](https://github.com/MeshCore-Beacon/beacon-docs/blob/main/docs/getting-packets-in.md): brokers, the subscriber account, topics
+- [Configuration](https://github.com/MeshCore-Beacon/beacon-docs/blob/main/docs/configuration.md): environment variables and `config.yaml`
+- [API contract](https://github.com/MeshCore-Beacon/beacon-docs/blob/main/docs/api-contract.md): REST, WebSocket, admin endpoints
+- [Reverse proxy and rate limits](https://github.com/MeshCore-Beacon/beacon-docs/blob/main/docs/reverse-proxy.md)
+- [Upgrading](https://github.com/MeshCore-Beacon/beacon-docs/blob/main/docs/upgrading.md)
+- [Operations](https://github.com/MeshCore-Beacon/beacon-docs/blob/main/docs/operations.md), [backup and export](https://github.com/MeshCore-Beacon/beacon-docs/blob/main/docs/backup-export.md) and [CPU profiling](https://github.com/MeshCore-Beacon/beacon-docs/blob/main/docs/profiling.md)
+- [High level design](https://github.com/MeshCore-Beacon/beacon-docs/blob/main/docs/high-level-design.md)
+- [Releases and versioning](https://github.com/MeshCore-Beacon/beacon-docs/blob/main/docs/releases.md)
+
+In this repo: [Historical stats](docs/historical-stats.md) explains the hourly rollups behind
+the stats endpoints, for anyone changing them. `docs/swagger.yaml` is the generated OpenAPI
+description.
+
+## Contributing
+
+[CONTRIBUTING.md](CONTRIBUTING.md) covers code style, tests, and database and API changes.
+Branches, commits and the release flow are shared across the Beacon repos and live in
+[beacon-docs/CONTRIBUTING.md](https://github.com/MeshCore-Beacon/beacon-docs/blob/main/CONTRIBUTING.md).
+Please read the [Code of Conduct](CODE_OF_CONDUCT.md). Security reports go through
+[SECURITY.md](SECURITY.md).
 
 ## Acknowledgements
 
-See [CONTRIBUTORS.md](CONTRIBUTORS.md) for the people who have helped build
-Beacon.
-
-Beacon stands on the shoulders of giants. See [SHOULDERS.md](SHOULDERS.md) for
-the full list of open source projects that make this possible.
-
-## Application logging
-
-Beacon writes application logs to stderr. Configure the minimum level and output format in `config.yaml`:
-
-```yaml
-log:
-  level: info   # debug, info, warn, error
-  format: text  # text or json
-```
-
-`LOG_LEVEL` and `LOG_FORMAT` override file settings; empty settings use `info` and `text`. Invalid values prevent startup. Configuration-loading failures can use the bootstrap text logger before file settings are available; failures after initialization retain error severity at every supported level.
-
-Records include a component field. Ingest workers also include their broker name, and HTTP completion records include the validated client address, route, status and duration. Query strings and protocol hello payloads are excluded. Expected ingest skips and routine WebSocket lifecycle details are debug-level. Changing the application's format does not change Caddy/Apache access logs or their fail2ban configuration. Collect/rotate stderr through Docker or systemd.
-
-### Analytics retention
-
-Historical stats (traffic, payload, observer activity, talker, advertiser, node,
-scope, Signal and Paths) are read from hourly rollup tables kept for
-`analytics.rollup_retention` (default 90 days), independently of `packets.retention`.
-One background task rolls each UTC hour about 95 minutes after it closes;
-packet cleanup waits for unrolled hours (up to 24h) so they can be rolled in full.
-An hour whose raw rows were deleted first is marked partial and reported without values.
-Packet drill-down, sub-hour observer activity and observer comparison still read
-retained raw data. See [docs/historical-stats.md](docs/historical-stats.md).
-
-### Observer monitoring metrics
-
-Observer activity returns buckets in `[windowStart, windowEnd)`, including the current partial bucket for live requests, plus
-`generatedAt`, `source` (`raw` or `hourly`) and `summary`. `recordedPackets` is the
-sum of stored observations in those buckets; repeated broker delivery of the
-same retained packet/observer pair counts once. Unknown payload types appear as
-`-1` rather than disappearing. Freshness fields are measured at `generatedAt` even for historical `until` requests; `recordedPackets` alone follows the selected window. `lastCompleteHour` uses the previous complete UTC
-hour and includes its own start/end; `latestRecordedAt` is the latest retained
-reception timestamp. Missing records do not prove downtime. The optional `until`
-(epoch milliseconds, within the last 30 days) aligns two observers' charts.
-
-The existing observer `observationCount` remains a legacy cumulative presence
-counter for compatibility, including status/neighbour events. It is not a
-period packet total. Broker presence and packet-arrival timestamps are now
-updated separately; this cannot reconstruct previously overwritten timestamps.
-Hourly activity comes from the analytics rollups, plus raw rows for hours not yet rolled
-(at most 24h back), and includes unknown-type activity. `rolledUntil` is the end of the newest
-complete rollup hour and `rawFrom` the start of the raw tail; hours between them are uncovered.
-
-### Saved-route evidence
-
-`GET /api/v1/routes/{iata}/{pathKey}/observations` returns retained observations that match a saved
-route's full path bytes, hash size and hop count within its IATA. `range` defaults to `24h` (max `720h`),
-`limit` to 50 (max 200); page with `nextPageCursor` → `pageCursor`. Evidence expires with raw packets.
+See [CONTRIBUTORS.md](CONTRIBUTORS.md) for the people who have helped build Beacon, and
+[SHOULDERS.md](SHOULDERS.md) for the open source projects it stands on.

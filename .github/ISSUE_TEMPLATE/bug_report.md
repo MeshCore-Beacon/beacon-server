@@ -34,5 +34,5 @@ paste logs here
 
 ## Additional context
 
-Any other context — config snippets (redact credentials), MQTT broker details,
+Any other context: config snippets (redact credentials), MQTT broker details,
 mesh topology, etc.
