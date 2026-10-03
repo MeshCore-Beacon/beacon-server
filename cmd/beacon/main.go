@@ -424,6 +424,7 @@ func main() {
 	// CachedReader. Only response projections receive the geographic annotation.
 	reader = api.WithLocalBorders(reader, localBorders)
 	r := router.New(h, reader, []*ingest.Worker{broker1, broker2}, router.Options{
+		ScopeCatalogues:      scopeImporter,
 		MaxConnsPerIP:        resolved.MaxConnsPerIP,
 		MaxConnectsPerMinute: resolved.MaxConnectsPerMinute,
 		WSAllowedOrigins:     cfg.WebSocket.AllowedOrigins,
