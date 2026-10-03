@@ -5,6 +5,7 @@ package handlers
 
 import (
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // NodesRouter mounts all /nodes routes onto a subrouter.
@@ -99,7 +101,7 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 		if regionIDStr := r.URL.Query().Get("regionId"); regionIDStr != "" || r.URL.Query().Get("region") != "" {
 			regionIATAs, err := resolveRegionIATAs(r.Context(), regionIDStr, r.URL.Query().Get("region"), reader)
 			if err != nil {
-				respondError(w, http.StatusBadRequest, err.Error())
+				respondRegionError(w, err)
 				return
 			}
 			iatas = append(iatas, regionIATAs...)
@@ -156,6 +158,7 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 //	@Success	200		{object}	api.Node
 //	@Failure	400		{object}	handlers.APIError
 //	@Failure	404		{object}	handlers.APIError
+//	@Failure	500		{object}	handlers.APIError
 //	@Router		/nodes/{nodeId} [get]
 func getNode(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -165,8 +168,12 @@ func getNode(reader api.Reader) http.HandlerFunc {
 			return
 		}
 		node, err := reader.GetNode(r.Context(), nodeID)
-		if err != nil {
+		switch {
+		case errors.Is(err, pgx.ErrNoRows), err == nil && node == nil:
 			respondError(w, http.StatusNotFound, "node not found")
+			return
+		case err != nil:
+			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, node)

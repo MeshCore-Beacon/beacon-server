@@ -209,9 +209,9 @@ func (s *Store) GetObserverTelemetryBucketed(ctx context.Context, observerID uui
 	return api.BucketTelemetry(raw.Points, since, time.Duration(bucketHours)*time.Hour), nil
 }
 
-// activityRawTail caps how far back hourly activity reads raw rows for hours not yet rolled
-// (normally under rollupDelay + 1h).
-const activityRawTail = 3 * time.Hour
+// activityRawTail caps how far back hourly activity reads raw rows for hours not yet rolled.
+// Cleanup holds raw rows for unrolled hours up to the same 24h (background rawHoldbackCap).
+const activityRawTail = 24 * time.Hour
 
 // GetObserverActivity returns bucketed heard-activity for an observer over the trailing window.
 // Buckets of an hour or coarser come from the hourly rollup plus raw rows for the unrolled tail;
@@ -264,13 +264,26 @@ func (s *Store) GetObserverActivity(ctx context.Context, observerID uuid.UUID, w
 	binWidth := pgtype.Interval{Microseconds: interval.Microseconds(), Valid: true}
 
 	if interval >= time.Hour {
-		// Unrolled hours read raw rows, bounded to the normal rollup lag.
-		tailFloor := pgtype.Timestamptz{Time: until.Add(-activityRawTail), Valid: true}
+		// Unrolled hours read raw rows from the rollup watermark, at most activityRawTail back.
+		watermark, err := s.q.GetLatestCompleteRollupHour(ctx)
+		if err != nil {
+			return nil, err
+		}
+		tailStart := until.Add(-activityRawTail)
+		if watermark.Valid {
+			rolledUntil := watermark.Time.Add(time.Hour)
+			activity.RolledUntil = new(rolledUntil.UnixMilli())
+			if rolledUntil.After(tailStart) {
+				tailStart = rolledUntil
+			}
+		}
+		activity.RawFrom = new(tailStart.UnixMilli())
+		tailStartTS := pgtype.Timestamptz{Time: tailStart, Valid: true}
 		rows, err := s.q.GetObserverActivityHourly(ctx, sqlc.GetObserverActivityHourlyParams{
 			ObserverID: observerID,
 			Column2:    sinceTS,
 			Column3:    binWidth,
-			TailFloor:  tailFloor,
+			TailStart:  tailStartTS,
 			Until:      pgtype.Timestamptz{Time: until, Valid: true},
 		})
 		if err != nil {
@@ -303,7 +316,7 @@ func (s *Store) GetObserverActivity(ctx context.Context, observerID uuid.UUID, w
 		typeRows, err := s.q.GetObserverActivityHourlyPayloadTypes(ctx, sqlc.GetObserverActivityHourlyPayloadTypesParams{
 			ObserverID: observerID,
 			Column2:    sinceTS,
-			TailFloor:  tailFloor,
+			TailStart:  tailStartTS,
 			Until:      pgtype.Timestamptz{Time: until, Valid: true},
 		})
 		if err != nil {

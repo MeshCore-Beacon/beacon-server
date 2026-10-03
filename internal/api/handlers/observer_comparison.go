@@ -64,7 +64,7 @@ func getObserverComparison(reader api.Reader) http.HandlerFunc {
 		if q.Get("regionId") != "" || q.Get("region") != "" {
 			regionIATAs, err := resolveRegionIATAs(ctx, q.Get("regionId"), q.Get("region"), reader)
 			if err != nil {
-				respondError(w, http.StatusBadRequest, "region not found")
+				respondRegionError(w, err)
 				return
 			}
 			iatas = append(iatas, regionIATAs...)

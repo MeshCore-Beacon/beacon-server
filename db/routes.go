@@ -37,7 +37,7 @@ func (s *Store) UpsertKnownRoute(ctx context.Context, nodeIDs []uuid.UUID, hashP
 	})
 }
 
-func (s *Store) ListKnownRoutes(ctx context.Context, iata string, hopCount int32, cursor time.Time, limit int32) ([]api.KnownRoute, error) {
+func (s *Store) ListKnownRoutes(ctx context.Context, iata string, hopCount int32, cursor time.Time, cursorID int64, limit int32) ([]api.KnownRoute, error) {
 	var cursorTS pgtype.Timestamptz
 	if !cursor.IsZero() {
 		cursorTS = pgtype.Timestamptz{Time: cursor, Valid: true}
@@ -47,6 +47,7 @@ func (s *Store) ListKnownRoutes(ctx context.Context, iata string, hopCount int32
 		Column2: hopCount,
 		Column3: cursorTS,
 		Limit:   limit,
+		Column5: cursorID,
 	})
 	if err != nil {
 		return nil, err

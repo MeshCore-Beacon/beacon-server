@@ -5,6 +5,7 @@ package handlers
 
 import (
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 // PacketsRouter mounts all /packets routes onto a subrouter.
@@ -102,7 +104,7 @@ func listPackets(reader api.Reader) http.HandlerFunc {
 		if regionIDStr := r.URL.Query().Get("regionId"); regionIDStr != "" || r.URL.Query().Get("region") != "" {
 			regionIATAs, err := resolveRegionIATAs(r.Context(), regionIDStr, r.URL.Query().Get("region"), reader)
 			if err != nil {
-				respondError(w, http.StatusBadRequest, err.Error())
+				respondRegionError(w, err)
 				return
 			}
 			iatas = append(iatas, regionIATAs...)
@@ -172,7 +174,7 @@ func listPacketsBackfill(reader api.Reader) http.HandlerFunc {
 		if regionIDStr := r.URL.Query().Get("regionId"); regionIDStr != "" || r.URL.Query().Get("region") != "" {
 			regionIATAs, err := resolveRegionIATAs(r.Context(), r.URL.Query().Get("regionId"), r.URL.Query().Get("region"), reader)
 			if err != nil {
-				respondError(w, http.StatusBadRequest, err.Error())
+				respondRegionError(w, err)
 				return
 			}
 			iatas = append(iatas, regionIATAs...)
@@ -207,8 +209,12 @@ func getPacket(reader api.Reader) http.HandlerFunc {
 			return
 		}
 		packet, err := reader.GetPacket(r.Context(), hash)
-		if err != nil {
+		switch {
+		case errors.Is(err, pgx.ErrNoRows), err == nil && packet == nil:
 			respondError(w, http.StatusNotFound, "packet not found")
+			return
+		case err != nil:
+			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, packet)

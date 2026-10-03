@@ -77,6 +77,7 @@ type Querier interface {
 	// not-found distinction GetIATA already makes.
 	GetIATABorder(ctx context.Context, iata string) (json.RawMessage, error)
 	GetKnownRoutesByNode(ctx context.Context, arg GetKnownRoutesByNodeParams) ([]GetKnownRoutesByNodeRow, error)
+	GetLatestCompleteRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
 	GetNodeByID(ctx context.Context, id uuid.UUID) (GetNodeByIDRow, error)
 	GetNodeByPubkey(ctx context.Context, publicKey []byte) (uuid.UUID, error)
 	// Returns the neighbors of a node with details, ordered by most recently seen.
@@ -84,7 +85,7 @@ type Querier interface {
 	GetNodesByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]GetNodesByIDsRow, error)
 	GetNodesByPubkeys(ctx context.Context, pubkeys [][]byte) ([]GetNodesByPubkeysRow, error)
 	// Hour-or-coarser buckets summed from the hourly rollup; same COALESCE-plus-count shape as the raw query.
-	// Hours after the newest complete one aren't rolled yet; that tail, from no earlier than @tail_floor, reads raw rows.
+	// Hours from @tail_start on aren't rolled yet and read raw rows.
 	GetObserverActivityHourly(ctx context.Context, arg GetObserverActivityHourlyParams) ([]GetObserverActivityHourlyRow, error)
 	// Same rollup/raw-tail split as GetObserverActivityHourly.
 	GetObserverActivityHourlyPayloadTypes(ctx context.Context, arg GetObserverActivityHourlyPayloadTypesParams) ([]GetObserverActivityHourlyPayloadTypesRow, error)
@@ -205,6 +206,8 @@ type Querier interface {
 	// Only one branch runs. Keep the IATA range ordered by the composite index:
 	// generic plans can otherwise prefer scanning the global timestamp index.
 	// The text equality preserves exact input matching, including trailing spaces.
+	// Pages by (last_seen to the ms, id) so routes sharing the cursor's millisecond
+	// aren't skipped; cursor id 0 keeps the plain timestamp cursor.
 	ListKnownRoutes(ctx context.Context, arg ListKnownRoutesParams) ([]ListKnownRoutesRow, error)
 	// Returns messages after the given message ID, ordered oldest first.
 	// Used for WS reconnect backfill.

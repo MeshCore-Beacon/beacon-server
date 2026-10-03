@@ -692,6 +692,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
                     }
                 }
             }
@@ -799,8 +805,8 @@ const docTemplate = `{
                             }
                         }
                     },
-                    "404": {
-                        "description": "Not Found",
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
@@ -838,6 +844,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
                     }
                 }
             }
@@ -872,6 +884,12 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
@@ -1204,6 +1222,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
                     }
                 }
             }
@@ -1439,6 +1463,12 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
@@ -1905,8 +1935,8 @@ const docTemplate = `{
                             }
                         }
                     },
-                    "404": {
-                        "description": "Not Found",
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
@@ -1950,6 +1980,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
                     }
                 }
             }
@@ -1980,6 +2016,12 @@ const docTemplate = `{
                         "type": "integer",
                         "description": "Epoch ms timestamp of last item for pagination",
                         "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "id of the last item; with cursor, also returns later routes sharing that millisecond",
+                        "name": "cursorId",
                         "in": "query"
                     },
                     {
@@ -4257,6 +4299,14 @@ const docTemplate = `{
                 },
                 "range": {
                     "type": "string"
+                },
+                "rawFrom": {
+                    "description": "start of the raw tail, epoch ms",
+                    "type": "integer"
+                },
+                "rolledUntil": {
+                    "description": "Hourly only. Buckets before rolledUntil come from rollups and from rawFrom on from raw rows;\nwhen rawFrom is later, the hours between are uncovered, not quiet.",
+                    "type": "integer"
                 },
                 "source": {
                     "description": "raw or hourly; missing records do not prove an outage",

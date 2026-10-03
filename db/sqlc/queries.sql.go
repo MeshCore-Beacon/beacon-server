@@ -813,20 +813,17 @@ func (q *Queries) GetNodesByPubkeys(ctx context.Context, pubkeys [][]byte) ([]Ge
 }
 
 const getObserverActivityHourly = `-- name: GetObserverActivityHourly :many
-WITH tail AS (
-  SELECT GREATEST(max(hour) + INTERVAL '1 hour', $4::timestamptz) AS tail_start
-  FROM analytics_rollup_hours WHERE status = 'complete'
-), src AS (
+WITH src AS (
   SELECT a.hour AS t, a.observations, a.airtime_ms, a.airtime_n, a.snr_sum, a.snr_n, a.snr_min, a.rssi_sum, a.rssi_n
   FROM analytics_hourly_observer_activity a
-  WHERE a.observer_id = $1 AND a.hour >= $2::timestamptz AND a.hour < LEAST($5::timestamptz, (SELECT tail_start FROM tail))
+  WHERE a.observer_id = $1 AND a.hour >= $2::timestamptz AND a.hour < LEAST($4::timestamptz, $5::timestamptz)
   UNION ALL
   SELECT o.heard_at, 1::bigint, o.airtime_ms, (o.airtime_ms IS NOT NULL)::int::bigint,
          s.snr, (s.snr IS NOT NULL)::int::bigint, s.snr, s.rssi::bigint, (s.rssi IS NOT NULL)::int::bigint
   FROM packet_observations o CROSS JOIN
        LATERAL (SELECT CASE WHEN NOT (COALESCE(o.rssi, 0) = 0 AND COALESCE(o.snr, 0) = 0) THEN o.snr END AS snr,
                        CASE WHEN NOT (COALESCE(o.rssi, 0) = 0 AND COALESCE(o.snr, 0) = 0) THEN o.rssi END AS rssi) s
-  WHERE o.observer_id = $1 AND o.heard_at >= GREATEST($2::timestamptz, (SELECT tail_start FROM tail)) AND o.heard_at < $5::timestamptz
+  WHERE o.observer_id = $1 AND o.heard_at >= GREATEST($2::timestamptz, $5::timestamptz) AND o.heard_at < $4::timestamptz
 )
 SELECT
   date_bin($3::interval, t, TIMESTAMPTZ 'epoch')::timestamptz AS bucket,
@@ -847,8 +844,8 @@ type GetObserverActivityHourlyParams struct {
 	ObserverID uuid.UUID          `json:"observer_id"`
 	Column2    pgtype.Timestamptz `json:"column_2"`
 	Column3    pgtype.Interval    `json:"column_3"`
-	TailFloor  pgtype.Timestamptz `json:"tail_floor"`
 	Until      pgtype.Timestamptz `json:"until"`
+	TailStart  pgtype.Timestamptz `json:"tail_start"`
 }
 
 type GetObserverActivityHourlyRow struct {
@@ -864,14 +861,14 @@ type GetObserverActivityHourlyRow struct {
 }
 
 // Hour-or-coarser buckets summed from the hourly rollup; same COALESCE-plus-count shape as the raw query.
-// Hours after the newest complete one aren't rolled yet; that tail, from no earlier than @tail_floor, reads raw rows.
+// Hours from @tail_start on aren't rolled yet and read raw rows.
 func (q *Queries) GetObserverActivityHourly(ctx context.Context, arg GetObserverActivityHourlyParams) ([]GetObserverActivityHourlyRow, error) {
 	rows, err := q.db.Query(ctx, getObserverActivityHourly,
 		arg.ObserverID,
 		arg.Column2,
 		arg.Column3,
-		arg.TailFloor,
 		arg.Until,
+		arg.TailStart,
 	)
 	if err != nil {
 		return nil, err
@@ -902,17 +899,14 @@ func (q *Queries) GetObserverActivityHourly(ctx context.Context, arg GetObserver
 }
 
 const getObserverActivityHourlyPayloadTypes = `-- name: GetObserverActivityHourlyPayloadTypes :many
-WITH tail AS (
-  SELECT GREATEST(max(hour) + INTERVAL '1 hour', $3::timestamptz) AS tail_start
-  FROM analytics_rollup_hours WHERE status = 'complete'
-), src AS (
+WITH src AS (
   SELECT a.payload_type, a.observations AS n
   FROM analytics_hourly_observer_activity a
-  WHERE a.observer_id = $1 AND a.hour >= $2::timestamptz AND a.hour < LEAST($4::timestamptz, (SELECT tail_start FROM tail))
+  WHERE a.observer_id = $1 AND a.hour >= $2::timestamptz AND a.hour < LEAST($3::timestamptz, $4::timestamptz)
   UNION ALL
   SELECT COALESCE(o.payload_type, -1)::smallint, 1::bigint
   FROM packet_observations o
-  WHERE o.observer_id = $1 AND o.heard_at >= GREATEST($2::timestamptz, (SELECT tail_start FROM tail)) AND o.heard_at < $4::timestamptz
+  WHERE o.observer_id = $1 AND o.heard_at >= GREATEST($2::timestamptz, $4::timestamptz) AND o.heard_at < $3::timestamptz
 )
 SELECT payload_type, SUM(n)::bigint AS count
 FROM src
@@ -923,8 +917,8 @@ ORDER BY count DESC
 type GetObserverActivityHourlyPayloadTypesParams struct {
 	ObserverID uuid.UUID          `json:"observer_id"`
 	Column2    pgtype.Timestamptz `json:"column_2"`
-	TailFloor  pgtype.Timestamptz `json:"tail_floor"`
 	Until      pgtype.Timestamptz `json:"until"`
+	TailStart  pgtype.Timestamptz `json:"tail_start"`
 }
 
 type GetObserverActivityHourlyPayloadTypesRow struct {
@@ -937,8 +931,8 @@ func (q *Queries) GetObserverActivityHourlyPayloadTypes(ctx context.Context, arg
 	rows, err := q.db.Query(ctx, getObserverActivityHourlyPayloadTypes,
 		arg.ObserverID,
 		arg.Column2,
-		arg.TailFloor,
 		arg.Until,
+		arg.TailStart,
 	)
 	if err != nil {
 		return nil, err
@@ -2968,13 +2962,16 @@ func (q *Queries) ListIATAs(ctx context.Context) ([]IataCode, error) {
 }
 
 const listKnownRoutes = `-- name: ListKnownRoutes :many
-(
+SELECT r.id, r.node_ids, r.hash_prefix, r.iata, r.hop_count, r.first_seen, r.last_seen, r.observation_count
+FROM ((
 SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
 FROM known_routes
 WHERE $1 = ''
   AND ($2 = 0 OR hop_count = $2)
-  AND ($3::timestamptz IS NULL OR last_seen < $3)
-ORDER BY last_seen DESC
+  AND ($3::timestamptz IS NULL
+       OR date_trunc('milliseconds', last_seen, 'UTC') < $3
+       OR ($5::bigint > 0 AND date_trunc('milliseconds', last_seen, 'UTC') = $3 AND id < $5))
+ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC
 LIMIT $4
 )
 UNION ALL
@@ -2984,11 +2981,13 @@ FROM known_routes
 WHERE $1 <> '' AND iata::text = $1
   AND iata >= $1::bpchar AND iata <= $1::bpchar
   AND ($2 = 0 OR hop_count = $2)
-  AND ($3::timestamptz IS NULL OR last_seen < $3)
-ORDER BY iata, last_seen DESC
+  AND ($3::timestamptz IS NULL
+       OR date_trunc('milliseconds', last_seen, 'UTC') < $3
+       OR ($5::bigint > 0 AND date_trunc('milliseconds', last_seen, 'UTC') = $3 AND id < $5))
+ORDER BY iata, date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC
 LIMIT $4
-)
-ORDER BY last_seen DESC
+)) r
+ORDER BY date_trunc('milliseconds', r.last_seen, 'UTC') DESC, r.id DESC
 LIMIT $4
 `
 
@@ -2997,6 +2996,7 @@ type ListKnownRoutesParams struct {
 	Column2 interface{}        `json:"column_2"`
 	Column3 pgtype.Timestamptz `json:"column_3"`
 	Limit   int32              `json:"limit"`
+	Column5 int64              `json:"column_5"`
 }
 
 type ListKnownRoutesRow struct {
@@ -3013,12 +3013,15 @@ type ListKnownRoutesRow struct {
 // Only one branch runs. Keep the IATA range ordered by the composite index:
 // generic plans can otherwise prefer scanning the global timestamp index.
 // The text equality preserves exact input matching, including trailing spaces.
+// Pages by (last_seen to the ms, id) so routes sharing the cursor's millisecond
+// aren't skipped; cursor id 0 keeps the plain timestamp cursor.
 func (q *Queries) ListKnownRoutes(ctx context.Context, arg ListKnownRoutesParams) ([]ListKnownRoutesRow, error) {
 	rows, err := q.db.Query(ctx, listKnownRoutes,
 		arg.Column1,
 		arg.Column2,
 		arg.Column3,
 		arg.Limit,
+		arg.Column5,
 	)
 	if err != nil {
 		return nil, err

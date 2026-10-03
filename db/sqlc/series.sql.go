@@ -22,6 +22,17 @@ func (q *Queries) GetEarliestCompleteRollupHour(ctx context.Context) (pgtype.Tim
 	return column_1, err
 }
 
+const getLatestCompleteRollupHour = `-- name: GetLatestCompleteRollupHour :one
+SELECT max(hour)::timestamptz FROM analytics_rollup_hours WHERE status = 'complete'
+`
+
+func (q *Queries) GetLatestCompleteRollupHour(ctx context.Context) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getLatestCompleteRollupHour)
+	var column_1 pgtype.Timestamptz
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const getStatsSeries = `-- name: GetStatsSeries :many
 WITH hours AS (
     SELECT g.h::timestamptz AS hour, COALESCE(r.status, 'missing')::text AS status

@@ -761,6 +761,10 @@ CREATE INDEX idx_known_routes_hop_count ON known_routes USING btree (iata, hop_c
 
 CREATE INDEX idx_known_routes_iata_last_seen ON known_routes USING btree (iata, last_seen DESC);
 
+CREATE INDEX idx_known_routes_iata_keyset ON known_routes USING btree (iata, date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC);
+
+CREATE INDEX idx_known_routes_keyset ON known_routes USING btree (date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC);
+
 CREATE INDEX idx_known_routes_last_seen ON known_routes USING btree (last_seen DESC);
 
 CREATE INDEX idx_known_routes_reconfirm ON known_routes USING btree (last_reconfirmed_at);

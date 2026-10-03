@@ -147,7 +147,7 @@ func listMessagesBackfill(reader api.Reader) http.HandlerFunc {
 		if regionIDStr := r.URL.Query().Get("regionId"); regionIDStr != "" || r.URL.Query().Get("region") != "" {
 			regionIATAs, err := resolveRegionIATAs(r.Context(), r.URL.Query().Get("regionId"), r.URL.Query().Get("region"), reader)
 			if err != nil {
-				respondError(w, http.StatusBadRequest, err.Error())
+				respondRegionError(w, err)
 				return
 			}
 			iatas = append(iatas, regionIATAs...)

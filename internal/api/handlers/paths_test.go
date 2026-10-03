@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/jackc/pgx/v5"
 )
 
 type pathReader struct {
@@ -53,7 +54,7 @@ func TestPathsFiltersErrorsAndCancellation(t *testing.T) {
 					return &api.Region{}, nil
 				}
 				if slug == "missing" {
-					return nil, errors.New("not found")
+					return nil, pgx.ErrNoRows
 				}
 				return &api.Region{IATAs: []string{"YVR"}}, nil
 			}}, read: func(ctx context.Context, since, until time.Time, iatas []string) (*api.PathStats, error) {

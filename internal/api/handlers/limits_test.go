@@ -99,7 +99,7 @@ func TestListLimits(t *testing.T) {
 			got = limit
 			return nil, nil
 		},
-		listKnownRoutes: func(ctx context.Context, iata string, hopCount int32, cursor time.Time, limit int32) ([]api.KnownRoute, error) {
+		listKnownRoutes: func(ctx context.Context, iata string, hopCount int32, cursor time.Time, _ int64, limit int32) ([]api.KnownRoute, error) {
 			calls++
 			got = limit
 			return nil, nil

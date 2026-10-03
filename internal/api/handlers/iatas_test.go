@@ -6,13 +6,13 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestListIATAs_OK(t *testing.T) {
@@ -148,7 +148,7 @@ func TestGetIATABorder_NotFound(t *testing.T) {
 	r := chi.NewRouter()
 	r.Get("/iatas/{iata}/border", getIATABorder(stubReader{
 		getIATABorder: func(_ context.Context, _ string) (json.RawMessage, error) {
-			return nil, errors.New("not found")
+			return nil, pgx.ErrNoRows
 		},
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/iatas/ZZZ/border", nil)

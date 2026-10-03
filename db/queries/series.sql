@@ -89,3 +89,6 @@ ORDER BY k.hour NULLS LAST;
 
 -- name: GetEarliestCompleteRollupHour :one
 SELECT min(hour)::timestamptz FROM analytics_rollup_hours WHERE status = 'complete';
+
+-- name: GetLatestCompleteRollupHour :one
+SELECT max(hour)::timestamptz FROM analytics_rollup_hours WHERE status = 'complete';

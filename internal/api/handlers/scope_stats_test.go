@@ -15,6 +15,7 @@ import (
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestGetStatsScopes_RegionErrors(t *testing.T) {
@@ -22,10 +23,10 @@ func TestGetStatsScopes_RegionErrors(t *testing.T) {
 		t.Run(query, func(t *testing.T) {
 			reader := stubReader{
 				getRegion: func(context.Context, int32) (*api.Region, error) {
-					return nil, errors.New("not found")
+					return nil, pgx.ErrNoRows
 				},
 				getRegionBySlug: func(context.Context, string) (*api.Region, error) {
-					return nil, errors.New("not found")
+					return nil, pgx.ErrNoRows
 				},
 			}
 			w := httptest.NewRecorder()

@@ -225,7 +225,8 @@ type Reader interface {
 	GetTraceByTag(ctx context.Context, tag string) (*TraceDetail, error)
 
 	// ListKnownRoutes returns known routes filtered by IATA and optional hop count.
-	ListKnownRoutes(ctx context.Context, iata string, hopCount int32, cursor time.Time, limit int32) ([]KnownRoute, error)
+	// A nonzero cursorID breaks ties within the cursor's millisecond.
+	ListKnownRoutes(ctx context.Context, iata string, hopCount int32, cursor time.Time, cursorID int64, limit int32) ([]KnownRoute, error)
 
 	// SearchKnownRoutes returns known routes containing a path from source to destination hash.
 	SearchKnownRoutes(ctx context.Context, iata, fromHash, toHash string) ([]KnownRoute, error)

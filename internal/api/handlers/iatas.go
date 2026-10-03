@@ -4,11 +4,13 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 // IATAsRouter mounts all /iatas routes onto a subrouter.
@@ -45,14 +47,17 @@ func pathIATA(r *http.Request) (string, bool) {
 //	@Tags		IATAs
 //	@Produce	json
 //	@Success	200	{array}		api.IATA
-//	@Failure	404	{object}	handlers.APIError
+//	@Failure	500	{object}	handlers.APIError
 //	@Router		/iatas [get]
 func listIATAs(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		iatas, err := reader.ListIATAs(r.Context())
 		if err != nil {
-			respondError(w, http.StatusNotFound, "no IATAs found")
+			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
+		}
+		if iatas == nil {
+			iatas = []api.IATA{}
 		}
 		respond(w, http.StatusOK, iatas)
 	}
@@ -66,6 +71,7 @@ func listIATAs(reader api.Reader) http.HandlerFunc {
 //	@Param		iata	path		string	true	"3-letter IATA code"
 //	@Success	200		{object}	api.IATA
 //	@Failure	404		{object}	handlers.APIError
+//	@Failure	500		{object}	handlers.APIError
 //	@Router		/iatas/{iata} [get]
 func getIATA(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -75,8 +81,12 @@ func getIATA(reader api.Reader) http.HandlerFunc {
 			return
 		}
 		result, err := reader.GetIATA(r.Context(), iata)
-		if err != nil {
+		switch {
+		case errors.Is(err, pgx.ErrNoRows), err == nil && result == nil:
 			respondError(w, http.StatusNotFound, "IATA not found")
+			return
+		case err != nil:
+			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, result)
@@ -92,6 +102,7 @@ func getIATA(reader api.Reader) http.HandlerFunc {
 //	@Success	200		{object}	object	"GeoJSON Feature (Polygon or MultiPolygon geometry, with bbox)"
 //	@Success	204		"IATA exists but has no border configured"
 //	@Failure	404		{object}	handlers.APIError
+//	@Failure	500		{object}	handlers.APIError
 //	@Router		/iatas/{iata}/border [get]
 func getIATABorder(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -101,8 +112,12 @@ func getIATABorder(reader api.Reader) http.HandlerFunc {
 			return
 		}
 		border, err := reader.GetIATABorder(r.Context(), iata)
-		if err != nil {
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
 			respondError(w, http.StatusNotFound, "IATA not found")
+			return
+		case err != nil:
+			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
 		// A cache round-trip re-encodes a nil json.RawMessage as the literal 4-byte JSON

@@ -67,6 +67,47 @@ func TestObserverActivityUnrolledTailPostgres(t *testing.T) {
 	}
 }
 
+// A rollup backlog longer than the usual lag must still be read from raw rows.
+func TestObserverActivityRollupBacklogPostgres(t *testing.T) {
+	ctx, tx := retentionTx(t)
+	applyBaseline(t, ctx, tx)
+	now := time.Now().UTC()
+	rolled := now.Truncate(time.Hour).Add(-10 * time.Hour)
+	if _, err := tx.Exec(ctx, `
+ INSERT INTO observers (id,public_key) VALUES ('00000000-0000-0000-0000-000000000001','\x01');
+ INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,last_heard_at,first_heard_at) SELECT int4send(i),4,0,1,'\x00','\x00',NOW(),NOW() FROM generate_series(1,3) i;`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `
+ INSERT INTO packet_observations(packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count,payload_type) VALUES
+  (int4send(1),'00000000-0000-0000-0000-000000000001','YOW',$1::timestamptz+interval '10 minutes',0,1,0,4);`, rolled); err != nil {
+		t.Fatal(err)
+	}
+	rollTxHours(t, ctx, tx)
+	if _, err := tx.Exec(ctx, `
+ INSERT INTO packet_observations(packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count,payload_type) VALUES
+  (int4send(2),'00000000-0000-0000-0000-000000000001','YOW',$1::timestamptz-interval '8 hours',0,1,0,4),
+  (int4send(3),'00000000-0000-0000-0000-000000000001','YOW',$1::timestamptz-interval '6 hours',0,1,0,4);`, now); err != nil {
+		t.Fatal(err)
+	}
+	store := &Store{q: sqlc.New(tx)}
+	id := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	activity, err := store.GetObserverActivity(ctx, id, 24*time.Hour, time.Hour, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if activity.Summary.RecordedPackets != 3 {
+		t.Errorf("recorded packets = %d, want 3 (1 rolled + 2 in the backlog)", activity.Summary.RecordedPackets)
+	}
+	wantRolled := rolled.Add(time.Hour).UnixMilli()
+	if activity.RolledUntil == nil || *activity.RolledUntil != wantRolled {
+		t.Errorf("rolledUntil = %v, want %d", activity.RolledUntil, wantRolled)
+	}
+	if activity.RawFrom == nil || *activity.RawFrom != wantRolled {
+		t.Errorf("rawFrom = %v, want %d (no gap)", activity.RawFrom, wantRolled)
+	}
+}
+
 func TestObserverMetricsPostgres(t *testing.T) {
 	ctx, tx := retentionTx(t)
 	applyBaseline(t, ctx, tx)
