@@ -150,7 +150,15 @@ func (i *Importer) Refresh(ctx context.Context) (err error) {
 		return fmt.Errorf("list IATAs for MeshMapper scopes: %w", err)
 	}
 	i.track(iatas, nil)
-	for n := range i.sources {
+	// Longest-waiting first, so a pass longer than the interval can't starve the tail.
+	order := make([]int, len(i.sources))
+	for n := range order {
+		order[n] = n
+	}
+	slices.SortStableFunc(order, func(a, b int) int {
+		return i.sources[a].cache.NextAttempt.Compare(i.sources[b].cache.NextAttempt)
+	})
+	for _, n := range order {
 		s := &i.sources[n]
 		if now.Before(s.cache.NextAttempt) {
 			continue
