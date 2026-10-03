@@ -23,7 +23,7 @@ issues: `Closes #123` or `Related to #456`.
 - [ ] API changes include swagger annotations and `swag init` has been run
 - [ ] `docs/` is committed if swagger was regenerated
 - [ ] New dependencies are added to `SHOULDERS.md`
-- [ ] I have read [CONTRIBUTING.md](CONTRIBUTING.md)
+- [ ] I have read [CONTRIBUTING.md](../CONTRIBUTING.md)
 
 ## Testing notes
 
