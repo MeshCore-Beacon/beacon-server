@@ -425,3 +425,62 @@ func TestScopesRequestCutShortStillCounts(t *testing.T) {
 		t.Fatal("abandoned request not persisted", row)
 	}
 }
+
+// newSweep serves a CA zone list whose IATAs each have a catalogue; fail lists IATAs answering 500.
+func newSweep(t *testing.T, store *memoryStore, fail ...string) (*Importer, *[]string) {
+	t.Helper()
+	var hits []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/get_zones.php" {
+			var zones []string
+			for _, iata := range store.iatas {
+				zones = append(zones, fmt.Sprintf(`{"code":%q,"url":"%s/%s/","has_boundary":true,"group":null}`, iata, "http://"+r.Host, iata))
+			}
+			_, _ = fmt.Fprintf(w, `{"country":"CA","zones":[%s]}`, strings.Join(zones, ","))
+			return
+		}
+		iata := strings.Split(r.URL.Path, "/")[1]
+		hits = append(hits, iata)
+		if slices.Contains(fail, iata) {
+			w.WriteHeader(500)
+			return
+		}
+		_, _ = w.Write([]byte(strings.ReplaceAll(string(catalogue("x")), "YOW", iata)))
+	}))
+	t.Cleanup(server.Close)
+	dir := NewDirectory(newZoneListMemory())
+	dir.listURL = server.URL + "/get_zones.php"
+	imp, err := New(context.Background(), config.MeshMapperScopesConfig{Enabled: true}, store, dir, scopestore.New(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	imp.scopesURL = func(site string) (string, bool) { return site + "get_scopes.php", true }
+	refreshN(t, imp, 1) // zone list fetch
+	return imp, &hits
+}
+
+func TestScopesLongestWaitingGoesFirst(t *testing.T) {
+	store := newMemoryStore("YOW", "YUL", "YVR", "YYZ")
+	now := time.Now()
+	// Restored mid-pass: YOW/YUL done, YVR never reached; YOW is already due again.
+	store.rows[sourceKey{"YOW", "old"}] = Cache{AttemptedAt: now.Add(-time.Hour), NextAttempt: now.Add(-time.Minute)}
+	store.rows[sourceKey{"YUL", "old"}] = Cache{AttemptedAt: now, NextAttempt: now.Add(time.Hour)}
+	store.rows[sourceKey{"YVR", "old"}] = Cache{AttemptedAt: now.Add(-48 * time.Hour), NextAttempt: now.Add(-47 * time.Hour)}
+	imp, hits := newSweep(t, store)
+	refreshN(t, imp, 3)
+	if want := []string{"YYZ", "YVR", "YOW"}; !reflect.DeepEqual(*hits, want) {
+		t.Fatalf("refresh order %v, want %v", *hits, want)
+	}
+}
+
+func TestScopesFailureDoesNotStallThePass(t *testing.T) {
+	store := newMemoryStore("YOW", "YUL", "YVR")
+	imp, hits := newSweep(t, store, "YOW")
+	refreshN(t, imp, 4)
+	if want := []string{"YOW", "YUL", "YVR"}; !reflect.DeepEqual(*hits, want) {
+		t.Fatalf("refresh order %v, want %v", *hits, want)
+	}
+	if s := imp.sources[0]; s.iata != "YOW" || time.Until(s.cache.NextAttempt) > failureRetry {
+		t.Fatalf("failed source not retried early: %+v", s.cache)
+	}
+}
