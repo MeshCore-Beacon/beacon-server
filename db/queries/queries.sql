@@ -455,6 +455,8 @@ WHERE p.packet_hash = $1;
 -- Return distinct observation IATAs in first-heard order for path resolution,
 -- without fetching full observations separately for every trace packet.
 SELECT encode(p.packet_hash, 'hex') AS packet_hash_hex,
+    p.raw_payload, p.payload_version,
+    EXISTS(SELECT 1 FROM packet_observations po WHERE po.packet_hash=p.packet_hash AND po.path_length_byte>=64) AS invalid_snr_path,
     p.route_type,
     p.first_heard_at,
     p.last_heard_at,
@@ -1422,7 +1424,11 @@ SELECT
      WHERE ti.trace_tag = t.trace_tag
        AND (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR ti.iata = ANY($1::bpchar[]))) AS iata_count,
     COALESCE(t.trace_type, '')::text AS trace_type,
-    t.best_payload
+    t.best_payload,
+    ARRAY(SELECT ti.iata FROM trace_iatas ti WHERE ti.trace_tag=t.trace_tag)::bpchar[] AS iatas,
+    EXISTS(SELECT 1 FROM packets p WHERE p.trace_tag=t.trace_tag AND p.payload_version<>0) AS unsupported_version,
+    EXISTS(SELECT 1 FROM packets p WHERE p.trace_tag=t.trace_tag AND p.route_type NOT IN (2,3)) AS non_direct,
+    EXISTS(SELECT 1 FROM packets p JOIN packet_observations po ON po.packet_hash=p.packet_hash WHERE p.trace_tag=t.trace_tag AND po.path_length_byte>=64) AS invalid_snr_path
 FROM trace_tags t
 WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR EXISTS (
         SELECT 1 FROM trace_iatas ti WHERE ti.trace_tag = t.trace_tag AND ti.iata = ANY($1::bpchar[])))
@@ -1834,3 +1840,31 @@ ON CONFLICT (country) DO UPDATE SET
 -- name: PruneZoneBoundaries :many
 -- Drops imports for IATAs no longer configured, so their manual border returns.
 DELETE FROM meshmapper_zone_boundaries WHERE NOT (iata = ANY(@keep::text[])) RETURNING iata;
+
+-- name: ResolveTraceHashes :many
+-- TRACE can terminate at companions. Preserve the full prefix (including eight
+-- bytes), and return every candidate across heard regions instead of picking one.
+SELECT h.hash::bytea AS hash, si.iata, n.id AS node_id, n.name, n.latitude, n.longitude, n.public_key
+FROM unnest(@hashes::bytea[]) AS h(hash)
+JOIN node_short_ids si ON si.iata = ANY(@iatas::bpchar[]) AND
+ ((octet_length(h.hash)=1 AND si.prefix_1=h.hash) OR
+  (octet_length(h.hash)=2 AND si.prefix_2=h.hash) OR
+  (octet_length(h.hash) IN (4,8) AND si.prefix_4=substring(h.hash FROM 1 FOR 4)))
+JOIN nodes n ON n.id=si.node_id
+WHERE substring(n.public_key FROM 1 FOR octet_length(h.hash))=h.hash
+ORDER BY si.iata, h.hash, n.id;
+
+-- name: GetTopologyLinks :many
+-- Reduce route history to unique adjacent pairs before transferring it to a browser.
+WITH pairs AS (
+ SELECT h.node_id AS a, r.node_ids[(h.ord+1)::int] AS b
+ FROM known_routes r CROSS JOIN LATERAL unnest(r.node_ids) WITH ORDINALITY h(node_id,ord)
+ WHERE r.last_seen >= @since::timestamptz AND r.last_seen < @until::timestamptz
+   AND (COALESCE(cardinality(@iatas::bpchar[]),0)=0 OR r.iata=ANY(@iatas::bpchar[]))
+   AND h.ord < cardinality(r.node_ids)
+)
+SELECT LEAST(a,b)::uuid AS from_id, GREATEST(a,b)::uuid AS to_id
+FROM pairs WHERE a IS NOT NULL AND b IS NOT NULL AND a<>b
+GROUP BY LEAST(a,b), GREATEST(a,b)
+ORDER BY LEAST(a,b), GREATEST(a,b)
+LIMIT @link_limit::int;

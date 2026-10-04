@@ -446,3 +446,7 @@ func TestCachedReader_InvalidateObserver(t *testing.T) {
 func (s *stubReader) GetRouteEvidence(_ context.Context, _, _ string, _ api.RouteEvidenceQuery) (*api.RouteEvidence, error) {
 	return nil, nil
 }
+
+func (s *stubReader) GetTopologyLinks(_ context.Context, _ []string, _ time.Time, _ time.Time) (*api.TopologyLinks, error) {
+	return &api.TopologyLinks{}, nil
+}

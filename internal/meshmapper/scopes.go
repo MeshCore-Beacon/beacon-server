@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -60,16 +61,17 @@ type source struct {
 
 // Importer is owned by one background task; ScopeStore synchronizes its consumers.
 type Importer struct {
-	store     Store
-	scopes    *scopestore.ScopeStore
-	manual    []scopestore.Entry
-	dir       *Directory
-	scopesURL func(site string) (string, bool)
-	seen      map[string]bool
-	sources   []source
-	interval  time.Duration
-	client    *http.Client
-	onChange  func(context.Context)
+	catalogues atomic.Value // immutable []PublicScopeCatalogue, off the ingest path
+	store      Store
+	scopes     *scopestore.ScopeStore
+	manual     []scopestore.Entry
+	dir        *Directory
+	scopesURL  func(site string) (string, bool)
+	seen       map[string]bool
+	sources    []source
+	interval   time.Duration
+	client     *http.Client
+	onChange   func(context.Context)
 }
 
 // SetCacheInvalidator is wired once at startup, before the background task starts.
@@ -102,6 +104,7 @@ func New(ctx context.Context, cfg config.MeshMapperScopesConfig, store Store, di
 	}
 	i.track(iatas, latest)
 	i.publish()
+	i.publishCatalogues()
 	return i, nil
 }
 
@@ -136,6 +139,7 @@ func (i *Importer) track(iatas []string, saved map[string]Catalogue) {
 
 // Refresh checks only one due source. The scheduler serializes calls every 15s.
 func (i *Importer) Refresh(ctx context.Context) (err error) {
+	defer i.publishCatalogues()
 	parent := ctx
 	defer func() {
 		if parent.Err() != nil {

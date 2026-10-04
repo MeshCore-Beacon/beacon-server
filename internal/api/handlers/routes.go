@@ -20,6 +20,7 @@ import (
 func RoutesRouter(reader api.Reader) http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", listKnownRoutes(reader))
+	r.Get("/topology", getTopologyLinks(reader))
 	r.Get("/cross", searchCrossIATARoutes(reader))
 	r.Get("/search", searchKnownRoutes(reader))
 	r.Get("/{iata}/{pathKey}/observations", getRouteEvidence(reader))
