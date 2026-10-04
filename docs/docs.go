@@ -2179,6 +2179,52 @@ const docTemplate = `{
                 }
             }
         },
+        "/routes/topology": {
+            "get": {
+                "description": "Returns up to 100000 undirected node-ID pairs, deduplicated across known routes. Minute-aligned window includes the current minute. Existing rate limits apply; no per-node lookup or route pagination is needed. Capped is true when more links exist.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Routes"
+                ],
+                "summary": "Unique adjacent route links for a topology snapshot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "History window: 15m (default), 1h, or 24h",
+                        "name": "window",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated reception IATA codes",
+                        "name": "iatas",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TopologyLinks"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
         "/routes/{iata}/{pathKey}/observations": {
             "get": {
                 "description": "Matches one complete path representation in the saved IATA. Defaults to the latest processed prefixes; hashSize/pathBytes pin a prior response. Excludes TRACE and unclassified reports; widths are never combined. Pinned prefixes must match the saved node chain or its current metadata. Byte matches do not prove hop identities or delivery. The route counter can outlive raw evidence. New cursors pin path, route, window and full timestamp precision; legacy unpinned cursors remain supported.",
@@ -5639,6 +5685,29 @@ const docTemplate = `{
                 },
                 "senderName": {
                     "type": "string"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.TopologyLinks": {
+            "type": "object",
+            "properties": {
+                "capped": {
+                    "type": "boolean"
+                },
+                "links": {
+                    "type": "array",
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "since": {
+                    "type": "integer"
+                },
+                "until": {
+                    "type": "integer"
                 }
             }
         },

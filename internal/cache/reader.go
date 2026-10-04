@@ -378,3 +378,12 @@ func (cr *CachedReader) SearchCrossIATARoutes(ctx context.Context, fromHash, fro
 func (cr *CachedReader) ListTraceTags(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, cursorTag string, limit int32) ([]api.TraceTagSummary, error) {
 	return cr.inner.ListTraceTags(ctx, iatas, scope, traceType, since, until, cursor, cursorTag, limit)
 }
+
+func (cr *CachedReader) GetTopologyLinks(ctx context.Context, iatas []string, since, until time.Time) (*api.TopologyLinks, error) {
+	regions := append([]string{}, iatas...)
+	sort.Strings(regions)
+	key := fmt.Sprintf("beacon:topology:%s:%d:%d", strings.Join(regions, ","), since.Unix(), until.Unix())
+	return getOrSet(ctx, cr.c, key, 30*time.Second, func(ctx context.Context) (*api.TopologyLinks, error) {
+		return cr.inner.GetTopologyLinks(ctx, iatas, since, until)
+	})
+}

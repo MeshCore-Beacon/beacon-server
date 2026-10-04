@@ -156,6 +156,8 @@ type Querier interface {
 	// Nodes by ADVERT hearings since the given hour. Live names win over the rolled snapshot;
 	// node_id is NULL once the node row is gone. iata is a representative one.
 	GetTopNodes(ctx context.Context, arg GetTopNodesParams) ([]GetTopNodesRow, error)
+	// Reduce route history to unique adjacent pairs before transferring it to a browser.
+	GetTopologyLinks(ctx context.Context, arg GetTopologyLinksParams) ([]GetTopologyLinksRow, error)
 	GetTransportScopeByName(ctx context.Context, name string) (int32, error)
 	GetTransportScopes(ctx context.Context) ([]GetTransportScopesRow, error)
 	// ============================================================

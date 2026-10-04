@@ -2237,6 +2237,59 @@ func (q *Queries) GetTopNodes(ctx context.Context, arg GetTopNodesParams) ([]Get
 	return items, nil
 }
 
+const getTopologyLinks = `-- name: GetTopologyLinks :many
+WITH pairs AS (
+ SELECT h.node_id AS a, r.node_ids[(h.ord+1)::int] AS b
+ FROM known_routes r CROSS JOIN LATERAL unnest(r.node_ids) WITH ORDINALITY h(node_id,ord)
+ WHERE r.last_seen >= $2::timestamptz AND r.last_seen < $3::timestamptz
+   AND (COALESCE(cardinality($4::bpchar[]),0)=0 OR r.iata=ANY($4::bpchar[]))
+   AND h.ord < cardinality(r.node_ids)
+)
+SELECT LEAST(a,b)::uuid AS from_id, GREATEST(a,b)::uuid AS to_id
+FROM pairs WHERE a IS NOT NULL AND b IS NOT NULL AND a<>b
+GROUP BY LEAST(a,b), GREATEST(a,b)
+ORDER BY LEAST(a,b), GREATEST(a,b)
+LIMIT $1::int
+`
+
+type GetTopologyLinksParams struct {
+	LinkLimit int32              `json:"link_limit"`
+	Since     pgtype.Timestamptz `json:"since"`
+	Until     pgtype.Timestamptz `json:"until"`
+	Iatas     []string           `json:"iatas"`
+}
+
+type GetTopologyLinksRow struct {
+	FromID uuid.UUID `json:"from_id"`
+	ToID   uuid.UUID `json:"to_id"`
+}
+
+// Reduce route history to unique adjacent pairs before transferring it to a browser.
+func (q *Queries) GetTopologyLinks(ctx context.Context, arg GetTopologyLinksParams) ([]GetTopologyLinksRow, error) {
+	rows, err := q.db.Query(ctx, getTopologyLinks,
+		arg.LinkLimit,
+		arg.Since,
+		arg.Until,
+		arg.Iatas,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetTopologyLinksRow{}
+	for rows.Next() {
+		var i GetTopologyLinksRow
+		if err := rows.Scan(&i.FromID, &i.ToID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getTransportScopeByName = `-- name: GetTransportScopeByName :one
 SELECT id FROM transport_scopes WHERE name = $1
 `

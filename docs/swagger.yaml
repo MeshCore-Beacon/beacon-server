@@ -1515,6 +1515,21 @@ definitions:
       senderName:
         type: string
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.TopologyLinks:
+    properties:
+      capped:
+        type: boolean
+      links:
+        items:
+          items:
+            type: string
+          type: array
+        type: array
+      since:
+        type: integer
+      until:
+        type: integer
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.TraceDetail:
     properties:
       packets:
@@ -3231,6 +3246,39 @@ paths:
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Search known routes by source and destination hash
+      tags:
+      - Routes
+  /routes/topology:
+    get:
+      description: Returns up to 100000 undirected node-ID pairs, deduplicated across
+        known routes. Minute-aligned window includes the current minute. Existing
+        rate limits apply; no per-node lookup or route pagination is needed. Capped
+        is true when more links exist.
+      parameters:
+      - description: 'History window: 15m (default), 1h, or 24h'
+        in: query
+        name: window
+        type: string
+      - description: Comma-separated reception IATA codes
+        in: query
+        name: iatas
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TopologyLinks'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+      summary: Unique adjacent route links for a topology snapshot
       tags:
       - Routes
   /scope-catalogues:

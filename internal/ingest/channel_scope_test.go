@@ -5,6 +5,7 @@ package ingest
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"testing"
 	"time"
@@ -71,5 +72,38 @@ func TestChannelMessageScopeLive(t *testing.T) {
 				t.Fatal("no barrier")
 			}
 		})
+	}
+}
+
+func TestChannelPublicMarkerUsesDecryptionKey(t *testing.T) {
+	for _, public := range []bool{false, true} {
+		w, base := newTestWorker()
+		w.db = &scopeMessageDB{stubDB: base, next: &InsertedChannelMessage{ID: 1}}
+		key := make([]byte, 16)
+		if public {
+			key, _ = hex.DecodeString("8b3387e9c5cdea6ac9e5edbaa115cd72")
+		}
+		w.keys = &mapKeys{entries: map[byte][]keystore.Entry{0x11: {{Key: key, Name: "Public"}}}}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		go w.hub.Run()
+		client := w.hub.NewClient()
+		defer w.hub.Remove(client)
+		w.hub.AddScope(client, "public-marker", hub.Scope{Events: []hub.EventType{hub.EventChannelMessage, hub.EventObserverStatus}})
+		waitForSummarySubscriber(t, ctx, w.hub, client)
+		packet := &meshcore.Packet{Header: meshcore.MakeHeader(meshcore.RouteTypeFlood, meshcore.PayloadTypeGrpTxt, 0), Payload: encryptedGroupText(t, 0x11, key, "Fixture", "test")}
+		w.handlePayloadTypeSideEffects(ctx, packet, "YKF", []byte{1}, RadioSettings{}, nil, nil, nil, 0)
+		select {
+		case event := <-client.Send:
+			var got channelMessageEvent
+			if err := json.Unmarshal(event.Payload, &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.IsPublic != public {
+				t.Fatal("channel name/hash used instead of actual decryption key")
+			}
+		case <-ctx.Done():
+			t.Fatal("no channel event")
+		}
 	}
 }

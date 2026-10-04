@@ -1137,6 +1137,21 @@ func (mr *MockQuerierMockRecorder) GetTopNodes(ctx, arg any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTopNodes", reflect.TypeOf((*MockQuerier)(nil).GetTopNodes), ctx, arg)
 }
 
+// GetTopologyLinks mocks base method.
+func (m *MockQuerier) GetTopologyLinks(ctx context.Context, arg db.GetTopologyLinksParams) ([]db.GetTopologyLinksRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetTopologyLinks", ctx, arg)
+	ret0, _ := ret[0].([]db.GetTopologyLinksRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetTopologyLinks indicates an expected call of GetTopologyLinks.
+func (mr *MockQuerierMockRecorder) GetTopologyLinks(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTopologyLinks", reflect.TypeOf((*MockQuerier)(nil).GetTopologyLinks), ctx, arg)
+}
+
 // GetTransportScopeByName mocks base method.
 func (m *MockQuerier) GetTransportScopeByName(ctx context.Context, name string) (int32, error) {
 	m.ctrl.T.Helper()

@@ -1853,3 +1853,18 @@ JOIN node_short_ids si ON si.iata = ANY(@iatas::bpchar[]) AND
 JOIN nodes n ON n.id=si.node_id
 WHERE substring(n.public_key FROM 1 FOR octet_length(h.hash))=h.hash
 ORDER BY si.iata, h.hash, n.id;
+
+-- name: GetTopologyLinks :many
+-- Reduce route history to unique adjacent pairs before transferring it to a browser.
+WITH pairs AS (
+ SELECT h.node_id AS a, r.node_ids[(h.ord+1)::int] AS b
+ FROM known_routes r CROSS JOIN LATERAL unnest(r.node_ids) WITH ORDINALITY h(node_id,ord)
+ WHERE r.last_seen >= @since::timestamptz AND r.last_seen < @until::timestamptz
+   AND (COALESCE(cardinality(@iatas::bpchar[]),0)=0 OR r.iata=ANY(@iatas::bpchar[]))
+   AND h.ord < cardinality(r.node_ids)
+)
+SELECT LEAST(a,b)::uuid AS from_id, GREATEST(a,b)::uuid AS to_id
+FROM pairs WHERE a IS NOT NULL AND b IS NOT NULL AND a<>b
+GROUP BY LEAST(a,b), GREATEST(a,b)
+ORDER BY LEAST(a,b), GREATEST(a,b)
+LIMIT @link_limit::int;
