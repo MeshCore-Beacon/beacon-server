@@ -1405,6 +1405,8 @@ func (q *Queries) GetPacketByHash(ctx context.Context, packetHash []byte) (GetPa
 
 const getPacketsByTraceTag = `-- name: GetPacketsByTraceTag :many
 SELECT encode(p.packet_hash, 'hex') AS packet_hash_hex,
+    p.raw_payload, p.payload_version,
+    EXISTS(SELECT 1 FROM packet_observations po WHERE po.packet_hash=p.packet_hash AND po.path_length_byte>=64) AS invalid_snr_path,
     p.route_type,
     p.first_heard_at,
     p.last_heard_at,
@@ -1425,14 +1427,17 @@ ORDER BY p.first_heard_at ASC
 `
 
 type GetPacketsByTraceTagRow struct {
-	PacketHashHex string             `json:"packet_hash_hex"`
-	RouteType     int16              `json:"route_type"`
-	FirstHeardAt  pgtype.Timestamptz `json:"first_heard_at"`
-	LastHeardAt   pgtype.Timestamptz `json:"last_heard_at"`
-	ParsedPayload []byte             `json:"parsed_payload"`
-	ScopeID       *int32             `json:"scope_id"`
-	ScopeName     *string            `json:"scope_name"`
-	Iatas         []string           `json:"iatas"`
+	PacketHashHex  string             `json:"packet_hash_hex"`
+	RawPayload     []byte             `json:"raw_payload"`
+	PayloadVersion int16              `json:"payload_version"`
+	InvalidSnrPath bool               `json:"invalid_snr_path"`
+	RouteType      int16              `json:"route_type"`
+	FirstHeardAt   pgtype.Timestamptz `json:"first_heard_at"`
+	LastHeardAt    pgtype.Timestamptz `json:"last_heard_at"`
+	ParsedPayload  []byte             `json:"parsed_payload"`
+	ScopeID        *int32             `json:"scope_id"`
+	ScopeName      *string            `json:"scope_name"`
+	Iatas          []string           `json:"iatas"`
 }
 
 // Return distinct observation IATAs in first-heard order for path resolution,
@@ -1448,6 +1453,9 @@ func (q *Queries) GetPacketsByTraceTag(ctx context.Context, decode string) ([]Ge
 		var i GetPacketsByTraceTagRow
 		if err := rows.Scan(
 			&i.PacketHashHex,
+			&i.RawPayload,
+			&i.PayloadVersion,
+			&i.InvalidSnrPath,
 			&i.RouteType,
 			&i.FirstHeardAt,
 			&i.LastHeardAt,
@@ -4137,7 +4145,11 @@ SELECT
      WHERE ti.trace_tag = t.trace_tag
        AND (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR ti.iata = ANY($1::bpchar[]))) AS iata_count,
     COALESCE(t.trace_type, '')::text AS trace_type,
-    t.best_payload
+    t.best_payload,
+    ARRAY(SELECT ti.iata FROM trace_iatas ti WHERE ti.trace_tag=t.trace_tag)::bpchar[] AS iatas,
+    EXISTS(SELECT 1 FROM packets p WHERE p.trace_tag=t.trace_tag AND p.payload_version<>0) AS unsupported_version,
+    EXISTS(SELECT 1 FROM packets p WHERE p.trace_tag=t.trace_tag AND p.route_type NOT IN (2,3)) AS non_direct,
+    EXISTS(SELECT 1 FROM packets p JOIN packet_observations po ON po.packet_hash=p.packet_hash WHERE p.trace_tag=t.trace_tag AND po.path_length_byte>=64) AS invalid_snr_path
 FROM trace_tags t
 WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR EXISTS (
         SELECT 1 FROM trace_iatas ti WHERE ti.trace_tag = t.trace_tag AND ti.iata = ANY($1::bpchar[])))
@@ -4165,13 +4177,17 @@ type ListTraceTagsParams struct {
 }
 
 type ListTraceTagsRow struct {
-	TraceTag     string             `json:"trace_tag"`
-	FirstHeardAt pgtype.Timestamptz `json:"first_heard_at"`
-	LastHeardAt  pgtype.Timestamptz `json:"last_heard_at"`
-	PacketCount  int64              `json:"packet_count"`
-	IataCount    int64              `json:"iata_count"`
-	TraceType    string             `json:"trace_type"`
-	BestPayload  []byte             `json:"best_payload"`
+	TraceTag           string             `json:"trace_tag"`
+	FirstHeardAt       pgtype.Timestamptz `json:"first_heard_at"`
+	LastHeardAt        pgtype.Timestamptz `json:"last_heard_at"`
+	PacketCount        int64              `json:"packet_count"`
+	IataCount          int64              `json:"iata_count"`
+	TraceType          string             `json:"trace_type"`
+	BestPayload        []byte             `json:"best_payload"`
+	Iatas              []string           `json:"iatas"`
+	UnsupportedVersion bool               `json:"unsupported_version"`
+	NonDirect          bool               `json:"non_direct"`
+	InvalidSnrPath     bool               `json:"invalid_snr_path"`
 }
 
 // ============================================================
@@ -4204,6 +4220,10 @@ func (q *Queries) ListTraceTags(ctx context.Context, arg ListTraceTagsParams) ([
 			&i.IataCount,
 			&i.TraceType,
 			&i.BestPayload,
+			&i.Iatas,
+			&i.UnsupportedVersion,
+			&i.NonDirect,
+			&i.InvalidSnrPath,
 		); err != nil {
 			return nil, err
 		}
@@ -4840,6 +4860,63 @@ func (q *Queries) ResolvePathHashesP4(ctx context.Context, arg ResolvePathHashes
 		var i ResolvePathHashesP4Row
 		if err := rows.Scan(
 			&i.Hash,
+			&i.NodeID,
+			&i.Name,
+			&i.Latitude,
+			&i.Longitude,
+			&i.PublicKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const resolveTraceHashes = `-- name: ResolveTraceHashes :many
+SELECT h.hash::bytea AS hash, si.iata, n.id AS node_id, n.name, n.latitude, n.longitude, n.public_key
+FROM unnest($1::bytea[]) AS h(hash)
+JOIN node_short_ids si ON si.iata = ANY($2::bpchar[]) AND
+ ((octet_length(h.hash)=1 AND si.prefix_1=h.hash) OR
+  (octet_length(h.hash)=2 AND si.prefix_2=h.hash) OR
+  (octet_length(h.hash) IN (4,8) AND si.prefix_4=substring(h.hash FROM 1 FOR 4)))
+JOIN nodes n ON n.id=si.node_id
+WHERE substring(n.public_key FROM 1 FOR octet_length(h.hash))=h.hash
+ORDER BY si.iata, h.hash, n.id
+`
+
+type ResolveTraceHashesParams struct {
+	Hashes [][]byte `json:"hashes"`
+	Iatas  []string `json:"iatas"`
+}
+
+type ResolveTraceHashesRow struct {
+	Hash      []byte    `json:"hash"`
+	Iata      string    `json:"iata"`
+	NodeID    uuid.UUID `json:"node_id"`
+	Name      *string   `json:"name"`
+	Latitude  *float64  `json:"latitude"`
+	Longitude *float64  `json:"longitude"`
+	PublicKey []byte    `json:"public_key"`
+}
+
+// TRACE can terminate at companions. Preserve the full prefix (including eight
+// bytes), and return every candidate across heard regions instead of picking one.
+func (q *Queries) ResolveTraceHashes(ctx context.Context, arg ResolveTraceHashesParams) ([]ResolveTraceHashesRow, error) {
+	rows, err := q.db.Query(ctx, resolveTraceHashes, arg.Hashes, arg.Iatas)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ResolveTraceHashesRow{}
+	for rows.Next() {
+		var i ResolveTraceHashesRow
+		if err := rows.Scan(
+			&i.Hash,
+			&i.Iata,
 			&i.NodeID,
 			&i.Name,
 			&i.Latitude,

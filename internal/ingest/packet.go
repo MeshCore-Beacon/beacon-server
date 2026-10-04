@@ -18,6 +18,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/lora"
 	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
+	"github.com/MeshCore-Beacon/beacon-server/internal/tracequality"
 	"github.com/google/uuid"
 	"github.com/meshcore-go/meshcore-go"
 )
@@ -202,13 +203,14 @@ type parsedGroupEnvelope struct {
 // is the accumulated per-hop SNR sequence carried in the packet header's
 // path field (a protocol-level repurposing distinct from the payload).
 type parsedTrace struct {
-	Raw        string    `json:"raw"`
-	Type       string    `json:"type"`
-	TraceTag   string    `json:"traceTag"`
-	AuthCode   uint32    `json:"authCode"`
-	Flags      byte      `json:"flags"`
-	PathHashes []string  `json:"pathHashes"`
-	SNRValues  []float32 `json:"snrValues"`
+	Quality    tracequality.Quality `json:"quality"`
+	Raw        string               `json:"raw"`
+	Type       string               `json:"type"`
+	TraceTag   string               `json:"traceTag"`
+	AuthCode   uint32               `json:"authCode"`
+	Flags      byte                 `json:"flags"`
+	PathHashes []string             `json:"pathHashes"`
+	SNRValues  []float32            `json:"snrValues"`
 }
 
 // parsedAck is the parsed form of an ACK payload (§2.12). Checksum is the
@@ -557,7 +559,10 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 				hashes = append(hashes, hex.EncodeToString(h))
 				rawHashes = append(rawHashes, h)
 			}
-			traceRawHashes = rawHashes
+			quality := tracequality.Assess(packet.Payload, int(packet.PayloadVer()), int(packet.RouteType()), int(packet.PathLength))
+			if quality.Status == "supported" {
+				traceRawHashes = rawHashes
+			}
 			// SNR values are in packet.Path, one signed int8 per consumed hop
 			snrValues := make([]float32, 0, len(packet.Path))
 			for _, b := range packet.Path {
@@ -568,6 +573,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 				traceType = "PING"
 			}
 			pt := parsedTrace{
+				Quality:    quality,
 				Raw:        hex.EncodeToString(packet.Payload),
 				Type:       traceType,
 				TraceTag:   hex.EncodeToString(uint32ToBytes(trace.Tag)),
@@ -585,8 +591,8 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 			// originator isn't in PathHashes) and is skipped. Either side
 			// resolving ambiguously (>1 candidate) or not at all (0
 			// candidates) skips that specific pair.
-			if len(rawHashes) >= 2 {
-				resolved, rErr := w.db.ResolvePathHashes(ctx, iata, rawHashes)
+			if quality.Status == "supported" && len(rawHashes) >= 2 {
+				resolved, rErr := w.db.ResolveTracePathHashes(ctx, iata, rawHashes)
 				if rErr == nil {
 					for i := 1; i < len(rawHashes); i++ {
 						if i >= len(snrValues) {
@@ -822,12 +828,20 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	if packet.PayloadType() == meshcore.PayloadTypeTrace {
 		hashes = traceRawHashes
 	}
-	resolved, err := w.db.ResolvePathHashes(ctx, iata, hashes)
+	var resolved map[string][]api.ResolvedPathEntry
+	if packet.PayloadType() == meshcore.PayloadTypeTrace {
+		resolved, err = w.db.ResolveTracePathHashes(ctx, iata, hashes)
+	} else {
+		resolved, err = w.db.ResolvePathHashes(ctx, iata, hashes)
+	}
 	if err != nil {
 		w.log.Error("path resolution failed", "error", err)
 	}
 	var resolvedIDs []uuid.UUID
 	for _, entries := range resolved {
+		if len(entries) != 1 {
+			continue
+		}
 		for _, e := range entries {
 			resolvedIDs = append(resolvedIDs, e.NodeID)
 		}
@@ -846,13 +860,31 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 			nodeIDs = append(nodeIDs, entries[0].NodeID)
 			hashPrefixes = append(hashPrefixes, hash)
 		}
-		if allHigh && len(nodeIDs) > 1 {
+		if allHigh && len(nodeIDs) > 1 && packet.PayloadType() != meshcore.PayloadTypeTrace {
 			if err := w.db.UpsertKnownRoute(ctx, nodeIDs, hashPrefixes, iata, int32(len(nodeIDs))); err != nil {
 				w.log.Error("failed to upsert known route", "error", err)
 			}
 		}
 	}
-	w.runCapabilityDetection(ctx, packet.PayloadType(), packet.PathHashSize(), resolvedIDs)
+	hashSize := packet.PathHashSize()
+	if packet.PayloadType() == meshcore.PayloadTypeTrace {
+		hashSize = 1
+		if len(traceRawHashes) > 0 {
+			hashSize = uint8(len(traceRawHashes[0]))
+		}
+		// Only consumed, uniquely resolved hops demonstrate trace capability.
+		resolvedIDs = nil
+		for i, hash := range traceRawHashes {
+			if i >= len(packet.Path) {
+				break
+			}
+			entries := resolved[hex.EncodeToString(hash)]
+			if len(entries) == 1 {
+				resolvedIDs = append(resolvedIDs, entries[0].NodeID)
+			}
+		}
+	}
+	w.runCapabilityDetection(ctx, packet.PayloadType(), hashSize, resolvedIDs)
 
 	if inserted || repeat {
 		if inserted {

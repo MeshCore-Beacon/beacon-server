@@ -314,6 +314,9 @@ type Querier interface {
 	ResolvePathHashesP2(ctx context.Context, arg ResolvePathHashesP2Params) ([]ResolvePathHashesP2Row, error)
 	ResolvePathHashesP3(ctx context.Context, arg ResolvePathHashesP3Params) ([]ResolvePathHashesP3Row, error)
 	ResolvePathHashesP4(ctx context.Context, arg ResolvePathHashesP4Params) ([]ResolvePathHashesP4Row, error)
+	// TRACE can terminate at companions. Preserve the full prefix (including eight
+	// bytes), and return every candidate across heard regions instead of picking one.
+	ResolveTraceHashes(ctx context.Context, arg ResolveTraceHashesParams) ([]ResolveTraceHashesRow, error)
 	RollAdvertHearings(ctx context.Context, hour pgtype.Timestamptz) error
 	// Each distinct ADVERT packet counts once, under the exact set of IATAs that heard it this hour.
 	RollAdvertSets(ctx context.Context, hour pgtype.Timestamptz) error

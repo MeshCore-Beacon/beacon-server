@@ -4581,6 +4581,9 @@
                     "description": "matched transport scope name e.g. \"#bc\"",
                     "type": "string"
                 },
+                "traceQuality": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality"
+                },
                 "transportCodes": {
                     "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PacketTransportCodes"
                 }
@@ -4711,6 +4714,13 @@
                     "type": "number"
                 },
                 "sourceBroker": {
+                    "type": "string"
+                },
+                "traceQuality": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality"
+                },
+                "wirePathBytes": {
+                    "description": "Exact on-air TRACE SNR bytes, before the display path substitution.",
                     "type": "string"
                 }
             }
@@ -5661,6 +5671,9 @@
                     "description": "hex-encoded packet hash",
                     "type": "string"
                 },
+                "quality": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality"
+                },
                 "rawPath": {
                     "description": "hops as received in the packet",
                     "type": "array",
@@ -5714,6 +5727,9 @@
                     "items": {
                         "type": "string"
                     }
+                },
+                "quality": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality"
                 },
                 "snrValues": {
                     "description": "SNR per hop from the most complete observation",
@@ -5822,6 +5838,21 @@
                     }
                 },
                 "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality": {
+            "type": "object",
+            "properties": {
+                "reasons": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "status": {
+                    "description": "supported, suspect, or ambiguous; supported is not authenticated",
                     "type": "string"
                 }
             }
