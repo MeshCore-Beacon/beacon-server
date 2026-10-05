@@ -1,23 +1,7 @@
 -- Copyright 2026 Beacon Contributors
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
--- name: LockObserverDirectoryCreation :one
-SELECT pg_try_advisory_xact_lock(7261930284521)::boolean;
-
--- name: PruneObserverDirectorySnapshots :exec
-DELETE FROM observer_directory_snapshots WHERE expires_at <= now();
-
--- name: ObserverDirectoryHasCapacity :one
-SELECT count(*) < 1024 AS available FROM observer_directory_snapshots;
-
--- name: ObserverDirectoryWithinBudget :one
-SELECT coalesce(sum(pg_column_size(items)::bigint + pg_column_size(metadata)), 0) <= 134217728 AS available
-FROM observer_directory_snapshots;
-
--- name: FindObserverDirectorySnapshot :one
-SELECT id FROM observer_directory_snapshots WHERE query_key = $1 AND expires_at > now();
-
--- name: CreateObserverDirectorySnapshot :one
+-- name: ListObserverDirectory :one
 WITH hours AS MATERIALIZED (
  SELECT g.h, coalesce(r.status, 'missing') AS status
  FROM generate_series($1::timestamptz, $2::timestamptz - interval '1 hour', interval '1 hour') g(h)
@@ -53,38 +37,33 @@ WITH hours AS MATERIALIZED (
  SELECT c.*, CASE WHEN v.complete = v.expected THEN coalesce(t.observations, 0) END AS observations
  FROM candidates c CROSS JOIN coverage v LEFT JOIN traffic t ON t.observer_id = c.id
  WHERE $8::text = '' OR c.observer_type = $8
+), paged AS (
+ SELECT * FROM listed
+ ORDER BY CASE WHEN $9::text = 'traffic' THEN observations END DESC NULLS LAST,
+          lower(coalesce(display_name, '')) COLLATE "C", id
+ LIMIT $11::integer OFFSET $10::bigint
 ), packed AS (
  SELECT coalesce(jsonb_agg(
    jsonb_strip_nulls(jsonb_build_object('id', id, 'displayName', display_name, 'observerType', observer_type, 'iata', iata, 'status', status, 'radio', radio, 'scopes', scopes))
    || jsonb_build_object('observationCount', observations)
    ORDER BY CASE WHEN $9::text = 'traffic' THEN observations END DESC NULLS LAST,
             lower(coalesce(display_name, '')) COLLATE "C", id
- ), '[]'::jsonb) AS items, max(observations) AS maximum
- FROM listed
+ ), '[]'::jsonb) AS items
+ FROM paged
+), totals AS (
+ SELECT count(*) AS n, max(observations) AS maximum FROM listed
 )
-INSERT INTO observer_directory_snapshots (id, query_key, metadata, items)
-SELECT $10, $11,
- jsonb_build_object(
+SELECT jsonb_build_object(
+   'items', p.items,
+   'generatedAt', (extract(epoch FROM now())*1000)::bigint,
+   'hasMore', t.n > $10::bigint + $11::integer,
+   'nextCursor', CASE WHEN t.n > $10::bigint + $11::integer THEN $10::bigint + $11::integer END,
    'windowStart', (extract(epoch FROM $1::timestamptz)*1000)::bigint,
    'windowEnd', (extract(epoch FROM $2::timestamptz)*1000)::bigint,
    'sort', $9::text, 'effectiveSort', CASE WHEN v.complete = v.expected THEN $9::text ELSE 'name' END,
-   'maxObservationCount', CASE WHEN v.complete = v.expected THEN coalesce(p.maximum, 0) END,
+   'maxObservationCount', CASE WHEN v.complete = v.expected THEN coalesce(t.maximum, 0) END,
    'observerTypes', (SELECT coalesce(jsonb_agg(t.observer_type ORDER BY t.observer_type), '[]'::jsonb) FROM (SELECT DISTINCT observer_type FROM candidates WHERE observer_type IS NOT NULL AND observer_type <> '') t),
    'coverage', jsonb_build_object('status', CASE WHEN v.complete = v.expected THEN 'complete' WHEN v.complete > 0 OR v.partial > 0 THEN 'partial' ELSE 'unavailable' END,
       'expectedHours', v.expected, 'completeHours', v.complete, 'partialHours', v.partial, 'missingHours', v.missing)
- ), p.items
-FROM packed p CROSS JOIN coverage v
-RETURNING id;
-
--- name: GetObserverDirectoryPage :one
-SELECT (metadata || jsonb_build_object(
- 'snapshot', id,
- 'generatedAt', (extract(epoch FROM created_at)*1000)::bigint,
- 'expiresAt', (extract(epoch FROM expires_at)*1000)::bigint,
- 'hasMore', jsonb_array_length(items)::bigint > $1::bigint + $2::integer,
- 'nextCursor', CASE WHEN jsonb_array_length(items)::bigint > $1::bigint + $2::integer THEN $1::bigint + $2::integer END,
- 'items', (SELECT coalesce(jsonb_agg(e.item ORDER BY e.ordinality), '[]'::jsonb)
-           FROM jsonb_array_elements(s.items) WITH ORDINALITY e(item, ordinality)
-           WHERE e.ordinality > $1::bigint AND e.ordinality <= $1::bigint + $2::integer)
-))::text AS page
-FROM observer_directory_snapshots s WHERE id = $3 AND expires_at > now();
+)::text AS page
+FROM packed p CROSS JOIN coverage v CROSS JOIN totals t;

@@ -8,11 +8,11 @@ package db
 import (
 	"context"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const createObserverDirectorySnapshot = `-- name: CreateObserverDirectorySnapshot :one
+const listObserverDirectory = `-- name: ListObserverDirectory :one
+
 WITH hours AS MATERIALIZED (
  SELECT g.h, coalesce(r.status, 'missing') AS status
  FROM generate_series($1::timestamptz, $2::timestamptz - interval '1 hour', interval '1 hour') g(h)
@@ -48,31 +48,39 @@ WITH hours AS MATERIALIZED (
  SELECT c.id, c.display_name, c.observer_type, c.iata, c.status, c.radio, c.scopes, CASE WHEN v.complete = v.expected THEN coalesce(t.observations, 0) END AS observations
  FROM candidates c CROSS JOIN coverage v LEFT JOIN traffic t ON t.observer_id = c.id
  WHERE $8::text = '' OR c.observer_type = $8
+), paged AS (
+ SELECT id, display_name, observer_type, iata, status, radio, scopes, observations FROM listed
+ ORDER BY CASE WHEN $9::text = 'traffic' THEN observations END DESC NULLS LAST,
+          lower(coalesce(display_name, '')) COLLATE "C", id
+ LIMIT $11::integer OFFSET $10::bigint
 ), packed AS (
  SELECT coalesce(jsonb_agg(
    jsonb_strip_nulls(jsonb_build_object('id', id, 'displayName', display_name, 'observerType', observer_type, 'iata', iata, 'status', status, 'radio', radio, 'scopes', scopes))
    || jsonb_build_object('observationCount', observations)
    ORDER BY CASE WHEN $9::text = 'traffic' THEN observations END DESC NULLS LAST,
             lower(coalesce(display_name, '')) COLLATE "C", id
- ), '[]'::jsonb) AS items, max(observations) AS maximum
- FROM listed
+ ), '[]'::jsonb) AS items
+ FROM paged
+), totals AS (
+ SELECT count(*) AS n, max(observations) AS maximum FROM listed
 )
-INSERT INTO observer_directory_snapshots (id, query_key, metadata, items)
-SELECT $10, $11,
- jsonb_build_object(
+SELECT jsonb_build_object(
+   'items', p.items,
+   'generatedAt', (extract(epoch FROM now())*1000)::bigint,
+   'hasMore', t.n > $10::bigint + $11::integer,
+   'nextCursor', CASE WHEN t.n > $10::bigint + $11::integer THEN $10::bigint + $11::integer END,
    'windowStart', (extract(epoch FROM $1::timestamptz)*1000)::bigint,
    'windowEnd', (extract(epoch FROM $2::timestamptz)*1000)::bigint,
    'sort', $9::text, 'effectiveSort', CASE WHEN v.complete = v.expected THEN $9::text ELSE 'name' END,
-   'maxObservationCount', CASE WHEN v.complete = v.expected THEN coalesce(p.maximum, 0) END,
+   'maxObservationCount', CASE WHEN v.complete = v.expected THEN coalesce(t.maximum, 0) END,
    'observerTypes', (SELECT coalesce(jsonb_agg(t.observer_type ORDER BY t.observer_type), '[]'::jsonb) FROM (SELECT DISTINCT observer_type FROM candidates WHERE observer_type IS NOT NULL AND observer_type <> '') t),
    'coverage', jsonb_build_object('status', CASE WHEN v.complete = v.expected THEN 'complete' WHEN v.complete > 0 OR v.partial > 0 THEN 'partial' ELSE 'unavailable' END,
       'expectedHours', v.expected, 'completeHours', v.complete, 'partialHours', v.partial, 'missingHours', v.missing)
- ), p.items
-FROM packed p CROSS JOIN coverage v
-RETURNING id
+)::text AS page
+FROM packed p CROSS JOIN coverage v CROSS JOIN totals t
 `
 
-type CreateObserverDirectorySnapshotParams struct {
+type ListObserverDirectoryParams struct {
 	Column1  pgtype.Timestamptz `json:"column_1"`
 	Column2  pgtype.Timestamptz `json:"column_2"`
 	Column3  []string           `json:"column_3"`
@@ -82,13 +90,15 @@ type CreateObserverDirectorySnapshotParams struct {
 	Column7  string             `json:"column_7"`
 	Column8  string             `json:"column_8"`
 	Column9  string             `json:"column_9"`
-	ID       uuid.UUID          `json:"id"`
-	QueryKey []byte             `json:"query_key"`
+	Column10 int64              `json:"column_10"`
+	Column11 int32              `json:"column_11"`
 	Column12 bool               `json:"column_12"`
 }
 
-func (q *Queries) CreateObserverDirectorySnapshot(ctx context.Context, arg CreateObserverDirectorySnapshotParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, createObserverDirectorySnapshot,
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+func (q *Queries) ListObserverDirectory(ctx context.Context, arg ListObserverDirectoryParams) (string, error) {
+	row := q.db.QueryRow(ctx, listObserverDirectory,
 		arg.Column1,
 		arg.Column2,
 		arg.Column3,
@@ -98,92 +108,11 @@ func (q *Queries) CreateObserverDirectorySnapshot(ctx context.Context, arg Creat
 		arg.Column7,
 		arg.Column8,
 		arg.Column9,
-		arg.ID,
-		arg.QueryKey,
+		arg.Column10,
+		arg.Column11,
 		arg.Column12,
 	)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
-}
-
-const findObserverDirectorySnapshot = `-- name: FindObserverDirectorySnapshot :one
-SELECT id FROM observer_directory_snapshots WHERE query_key = $1 AND expires_at > now()
-`
-
-func (q *Queries) FindObserverDirectorySnapshot(ctx context.Context, queryKey []byte) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, findObserverDirectorySnapshot, queryKey)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
-}
-
-const getObserverDirectoryPage = `-- name: GetObserverDirectoryPage :one
-SELECT (metadata || jsonb_build_object(
- 'snapshot', id,
- 'generatedAt', (extract(epoch FROM created_at)*1000)::bigint,
- 'expiresAt', (extract(epoch FROM expires_at)*1000)::bigint,
- 'hasMore', jsonb_array_length(items)::bigint > $1::bigint + $2::integer,
- 'nextCursor', CASE WHEN jsonb_array_length(items)::bigint > $1::bigint + $2::integer THEN $1::bigint + $2::integer END,
- 'items', (SELECT coalesce(jsonb_agg(e.item ORDER BY e.ordinality), '[]'::jsonb)
-           FROM jsonb_array_elements(s.items) WITH ORDINALITY e(item, ordinality)
-           WHERE e.ordinality > $1::bigint AND e.ordinality <= $1::bigint + $2::integer)
-))::text AS page
-FROM observer_directory_snapshots s WHERE id = $3 AND expires_at > now()
-`
-
-type GetObserverDirectoryPageParams struct {
-	Column1 int64     `json:"column_1"`
-	Column2 int32     `json:"column_2"`
-	ID      uuid.UUID `json:"id"`
-}
-
-func (q *Queries) GetObserverDirectoryPage(ctx context.Context, arg GetObserverDirectoryPageParams) (string, error) {
-	row := q.db.QueryRow(ctx, getObserverDirectoryPage, arg.Column1, arg.Column2, arg.ID)
 	var page string
 	err := row.Scan(&page)
 	return page, err
-}
-
-const lockObserverDirectoryCreation = `-- name: LockObserverDirectoryCreation :one
-SELECT pg_try_advisory_xact_lock(7261930284521)::boolean
-`
-
-func (q *Queries) LockObserverDirectoryCreation(ctx context.Context) (bool, error) {
-	row := q.db.QueryRow(ctx, lockObserverDirectoryCreation)
-	var column_1 bool
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
-const observerDirectoryHasCapacity = `-- name: ObserverDirectoryHasCapacity :one
-SELECT count(*) < 1024 AS available FROM observer_directory_snapshots
-`
-
-func (q *Queries) ObserverDirectoryHasCapacity(ctx context.Context) (bool, error) {
-	row := q.db.QueryRow(ctx, observerDirectoryHasCapacity)
-	var available bool
-	err := row.Scan(&available)
-	return available, err
-}
-
-const observerDirectoryWithinBudget = `-- name: ObserverDirectoryWithinBudget :one
-SELECT coalesce(sum(pg_column_size(items)::bigint + pg_column_size(metadata)), 0) <= 134217728 AS available
-FROM observer_directory_snapshots
-`
-
-func (q *Queries) ObserverDirectoryWithinBudget(ctx context.Context) (bool, error) {
-	row := q.db.QueryRow(ctx, observerDirectoryWithinBudget)
-	var available bool
-	err := row.Scan(&available)
-	return available, err
-}
-
-const pruneObserverDirectorySnapshots = `-- name: PruneObserverDirectorySnapshots :exec
-DELETE FROM observer_directory_snapshots WHERE expires_at <= now()
-`
-
-func (q *Queries) PruneObserverDirectorySnapshots(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, pruneObserverDirectorySnapshots)
-	return err
 }

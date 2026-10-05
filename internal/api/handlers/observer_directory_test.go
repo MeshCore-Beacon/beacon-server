@@ -5,6 +5,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
 	"testing"
 
@@ -31,15 +32,15 @@ func TestDirectoryContinuationAndErrors(t *testing.T) {
 	for _, tc := range []struct {
 		err  error
 		code int
-	}{{nil, 200}, {api.ErrDirectoryExpired, 410}, {api.ErrDirectoryBusy, 503}} {
+	}{{nil, 200}, {errors.New("database unavailable"), 500}} {
 		r := stubReader{listObserverDirectory: func(_ context.Context, q api.ObserverDirectoryQuery) (*api.ObserverDirectory, error) {
-			if q.Snapshot != "00000000-0000-0000-0000-000000000001" || q.Cursor != 50 || q.Limit != 25 {
+			if q.Sort != "name" || q.Name != "alpha" || q.Since != 1767225600000 || q.Until != 1767229200000 || q.Cursor != 50 || q.Limit != 25 {
 				t.Fatalf("query %+v", q)
 			}
 			return &api.ObserverDirectory{}, tc.err
 		}}
 		w := httptest.NewRecorder()
-		ObserversRouter(r).ServeHTTP(w, httptest.NewRequest("GET", "/directory?snapshot=00000000-0000-0000-0000-000000000001&cursor=50&limit=25", nil))
+		ObserversRouter(r).ServeHTTP(w, httptest.NewRequest("GET", "/directory?sort=name&name=alpha&since=1767225600000&until=1767229200000&cursor=50&limit=25", nil))
 		if w.Code != tc.code {
 			t.Fatalf("status %d: %s", w.Code, w.Body.String())
 		}

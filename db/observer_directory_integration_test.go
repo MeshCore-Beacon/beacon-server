@@ -4,15 +4,16 @@
 package db
 
 import (
-	"errors"
 	"slices"
 	"testing"
 	"time"
 
+	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/jackc/pgx/v5"
 )
 
-func TestObserverDirectoryStablePagesPostgres(t *testing.T) {
+func TestObserverDirectoryPagesPostgres(t *testing.T) {
 	ctx, pool := schemaPool(t)
 	if err := RunMigrations(ctx, pool); err != nil {
 		t.Fatal(err)
@@ -24,7 +25,12 @@ func TestObserverDirectoryStablePagesPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := New(pool, 0, 0)
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	store := &Store{q: sqlc.New(tx)}
 	q := api.ObserverDirectoryQuery{IATAs: []string{"YVR"}, Sort: "traffic", Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).UnixMilli(), Until: time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC).UnixMilli(), Limit: 2}
 	first, err := store.ListObserverDirectory(ctx, q)
 	if err != nil {
@@ -35,10 +41,6 @@ func TestObserverDirectoryStablePagesPostgres(t *testing.T) {
 	}
 	if len(first.ObserverTypes) != 2 {
 		t.Fatalf("facets %+v", first.ObserverTypes)
-	}
-	_, err = pool.Exec(ctx, `UPDATE analytics_hourly_observer_identity SET observation_count=900; UPDATE observers SET display_name='Changed',last_iata='YYJ'; DELETE FROM observers WHERE public_key=int4send(4);`)
-	if err != nil {
-		t.Fatal(err)
 	}
 	seen := map[string]bool{}
 	page := first
@@ -55,12 +57,14 @@ func TestObserverDirectoryStablePagesPostgres(t *testing.T) {
 		if !page.HasMore {
 			break
 		}
-		page, err = store.ListObserverDirectory(ctx, api.ObserverDirectoryQuery{Snapshot: first.Snapshot, Cursor: *page.NextCursor, Limit: 37})
+		q.Cursor = *page.NextCursor
+		q.Limit = 37
+		page, err = store.ListObserverDirectory(ctx, q)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if *page.MaxObservationCount != 100 || page.WindowEnd != first.WindowEnd {
-			t.Fatal("snapshot metrics changed")
+			t.Fatal("unchanged data produced different metrics")
 		}
 	}
 	if len(seen) != 205 {
@@ -69,13 +73,23 @@ func TestObserverDirectoryStablePagesPostgres(t *testing.T) {
 	if *page.Items[len(page.Items)-1].ObservationCount != 0 {
 		t.Fatal("missing explicit zero")
 	}
-	if _, err := pool.Exec(ctx, `UPDATE observer_directory_snapshots SET expires_at=now()-interval '1 second'`); err != nil {
+	q.Cursor = 0
+	if _, err := pool.Exec(ctx, `UPDATE analytics_hourly_observer_identity SET observation_count=900; UPDATE observers SET display_name='Changed'`); err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.ListObserverDirectory(ctx, api.ObserverDirectoryQuery{Snapshot: first.Snapshot, Limit: 10})
-	if !errors.Is(err, api.ErrDirectoryExpired) {
-		t.Fatalf("expiry: %v", err)
+	refreshed, err := store.ListObserverDirectory(ctx, q)
+	if err != nil {
+		t.Fatal(err)
 	}
+	if *refreshed.MaxObservationCount != 900 || *refreshed.Items[0].DisplayName != "Changed" {
+		t.Fatal("directory did not reflect current data")
+	}
+	q.Cursor = 1000
+	empty, err := store.ListObserverDirectory(ctx, q)
+	if err != nil || len(empty.Items) != 0 || empty.HasMore || empty.NextCursor != nil {
+		t.Fatalf("terminal page %+v, %v", empty, err)
+	}
+
 }
 
 func TestObserverDirectoryFiltersAndCoveragePostgres(t *testing.T) {
@@ -139,7 +153,8 @@ func TestObserverDirectoryFiltersAndCoveragePostgres(t *testing.T) {
 				if !page.HasMore {
 					break
 				}
-				page, err = New(pool, 0, 0).ListObserverDirectory(ctx, api.ObserverDirectoryQuery{Snapshot: page.Snapshot, Cursor: *page.NextCursor, Limit: 1})
+				q.Cursor = *page.NextCursor
+				page, err = New(pool, 0, 0).ListObserverDirectory(ctx, q)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -151,14 +166,11 @@ func TestObserverDirectoryFiltersAndCoveragePostgres(t *testing.T) {
 				t.Fatal("type filter hid alternatives")
 			}
 			if tc.name == "name ties" && *page.MaxObservationCount != 8 {
-				t.Fatal("bar maximum followed page instead of snapshot")
+				t.Fatal("bar maximum followed page instead of full result")
 			}
 		})
 	}
 	for _, status := range []string{"partial", "missing"} {
-		if _, err := pool.Exec(ctx, `DELETE FROM observer_directory_snapshots`); err != nil {
-			t.Fatal(err)
-		}
 		if _, err := pool.Exec(ctx, `UPDATE analytics_rollup_hours SET status=$1`, status); err != nil {
 			t.Fatal(err)
 		}
@@ -173,79 +185,5 @@ func TestObserverDirectoryFiltersAndCoveragePostgres(t *testing.T) {
 		if page.Coverage.Status != want || page.EffectiveSort != "name" || page.MaxObservationCount != nil || page.Items[0].ObservationCount != nil {
 			t.Fatalf("unknown analytics represented as zero: %+v", page)
 		}
-	}
-}
-
-func TestObserverDirectoryBoundsPostgres(t *testing.T) {
-	ctx, pool := schemaPool(t)
-	if err := RunMigrations(ctx, pool); err != nil {
-		t.Fatal(err)
-	}
-	store := New(pool, 0, 0)
-	q := api.ObserverDirectoryQuery{Sort: "traffic", Since: 1767225600000, Until: 1767229200000, Limit: 1}
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(7261930284521)`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.ListObserverDirectory(ctx, q); !errors.Is(err, api.ErrDirectoryBusy) {
-		t.Fatalf("creation lock: %v", err)
-	}
-	if err := tx.Rollback(ctx); err != nil {
-		t.Fatal(err)
-	}
-	first, err := store.ListObserverDirectory(ctx, q)
-	if err != nil {
-		t.Fatal(err)
-	}
-	q.Limit = 50
-	reused, err := store.ListObserverDirectory(ctx, q)
-	if err != nil || reused.Snapshot != first.Snapshot {
-		t.Fatalf("reuse %+v: %v", reused, err)
-	}
-	if _, err := pool.Exec(ctx, `INSERT INTO observer_directory_snapshots(id,query_key,metadata,items) SELECT lpad(to_hex(i),32,'0')::uuid,int4send(i),'{}','[]' FROM generate_series(1,63)i`); err != nil {
-		t.Fatal(err)
-	}
-	q.Name = "beyond old capacity"
-	if _, err := store.ListObserverDirectory(ctx, q); err != nil {
-		t.Fatalf("65th snapshot: %v", err)
-	}
-	if _, err := pool.Exec(ctx, `INSERT INTO observer_directory_snapshots(id,query_key,metadata,items) SELECT lpad(to_hex(i),32,'0')::uuid,int4send(i),'{}','[]' FROM generate_series(64,1022)i`); err != nil {
-		t.Fatal(err)
-	}
-	q.Name = "new criteria"
-	if _, err := store.ListObserverDirectory(ctx, q); !errors.Is(err, api.ErrDirectoryBusy) {
-		t.Fatalf("capacity: %v", err)
-	}
-	if _, err := pool.Exec(ctx, `UPDATE observer_directory_snapshots SET expires_at=now()-interval '1 second'`); err != nil {
-		t.Fatal(err)
-	}
-	fresh, err := store.ListObserverDirectory(ctx, q)
-	if err != nil || fresh.Snapshot == first.Snapshot {
-		t.Fatalf("prune %+v: %v", fresh, err)
-	}
-}
-
-func TestObserverDirectoryStorageBudgetPostgres(t *testing.T) {
-	ctx, pool := schemaPool(t)
-	if err := RunMigrations(ctx, pool); err != nil {
-		t.Fatal(err)
-	}
-	// Keep fixture compression from hiding the storage boundary.
-	if _, err := pool.Exec(ctx, `ALTER TABLE observer_directory_snapshots ALTER COLUMN items SET STORAGE EXTERNAL;
- INSERT INTO observer_directory_snapshots(id,query_key,metadata,items)
- SELECT lpad(to_hex(i),32,'0')::uuid,int4send(i),'{}',jsonb_build_array(repeat('x',15*1024*1024)) FROM generate_series(1,9)i`); err != nil {
-		t.Fatal(err)
-	}
-	q := api.ObserverDirectoryQuery{Sort: "traffic", Since: 1767225600000, Until: 1767229200000, Limit: 1}
-	if _, err := New(pool, 0, 0).ListObserverDirectory(ctx, q); !errors.Is(err, api.ErrDirectoryBusy) {
-		t.Fatalf("storage budget: %v", err)
-	}
-	var n int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM observer_directory_snapshots`).Scan(&n); err != nil || n != 9 {
-		t.Fatalf("rejected snapshot persisted: count=%d err=%v", n, err)
 	}
 }

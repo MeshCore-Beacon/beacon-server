@@ -130,21 +130,6 @@ func (mr *MockQuerierMockRecorder) CreateAccount(ctx, name any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateAccount", reflect.TypeOf((*MockQuerier)(nil).CreateAccount), ctx, name)
 }
 
-// CreateObserverDirectorySnapshot mocks base method.
-func (m *MockQuerier) CreateObserverDirectorySnapshot(ctx context.Context, arg db.CreateObserverDirectorySnapshotParams) (uuid.UUID, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CreateObserverDirectorySnapshot", ctx, arg)
-	ret0, _ := ret[0].(uuid.UUID)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// CreateObserverDirectorySnapshot indicates an expected call of CreateObserverDirectorySnapshot.
-func (mr *MockQuerierMockRecorder) CreateObserverDirectorySnapshot(ctx, arg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateObserverDirectorySnapshot", reflect.TypeOf((*MockQuerier)(nil).CreateObserverDirectorySnapshot), ctx, arg)
-}
-
 // DeactivateAccount mocks base method.
 func (m *MockQuerier) DeactivateAccount(ctx context.Context, id uuid.UUID) (db.DeactivateAccountRow, error) {
 	m.ctrl.T.Helper()
@@ -385,21 +370,6 @@ func (m *MockQuerier) FillRollupObs(ctx context.Context, dollar_1 pgtype.Timesta
 func (mr *MockQuerierMockRecorder) FillRollupObs(ctx, dollar_1 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FillRollupObs", reflect.TypeOf((*MockQuerier)(nil).FillRollupObs), ctx, dollar_1)
-}
-
-// FindObserverDirectorySnapshot mocks base method.
-func (m *MockQuerier) FindObserverDirectorySnapshot(ctx context.Context, queryKey []byte) (uuid.UUID, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FindObserverDirectorySnapshot", ctx, queryKey)
-	ret0, _ := ret[0].(uuid.UUID)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// FindObserverDirectorySnapshot indicates an expected call of FindObserverDirectorySnapshot.
-func (mr *MockQuerierMockRecorder) FindObserverDirectorySnapshot(ctx, queryKey any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FindObserverDirectorySnapshot", reflect.TypeOf((*MockQuerier)(nil).FindObserverDirectorySnapshot), ctx, queryKey)
 }
 
 // FinishRollupHour mocks base method.
@@ -775,21 +745,6 @@ func (m *MockQuerier) GetObserverComparison(ctx context.Context, arg db.GetObser
 func (mr *MockQuerierMockRecorder) GetObserverComparison(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetObserverComparison", reflect.TypeOf((*MockQuerier)(nil).GetObserverComparison), ctx, arg)
-}
-
-// GetObserverDirectoryPage mocks base method.
-func (m *MockQuerier) GetObserverDirectoryPage(ctx context.Context, arg db.GetObserverDirectoryPageParams) (string, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetObserverDirectoryPage", ctx, arg)
-	ret0, _ := ret[0].(string)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// GetObserverDirectoryPage indicates an expected call of GetObserverDirectoryPage.
-func (mr *MockQuerierMockRecorder) GetObserverDirectoryPage(ctx, arg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetObserverDirectoryPage", reflect.TypeOf((*MockQuerier)(nil).GetObserverDirectoryPage), ctx, arg)
 }
 
 // GetObserverLastIATA mocks base method.
@@ -1511,6 +1466,21 @@ func (mr *MockQuerierMockRecorder) ListObserverAdverts(ctx, arg any) *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListObserverAdverts", reflect.TypeOf((*MockQuerier)(nil).ListObserverAdverts), ctx, arg)
 }
 
+// ListObserverDirectory mocks base method.
+func (m *MockQuerier) ListObserverDirectory(ctx context.Context, arg db.ListObserverDirectoryParams) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListObserverDirectory", ctx, arg)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListObserverDirectory indicates an expected call of ListObserverDirectory.
+func (mr *MockQuerierMockRecorder) ListObserverDirectory(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListObserverDirectory", reflect.TypeOf((*MockQuerier)(nil).ListObserverDirectory), ctx, arg)
+}
+
 // ListObservers mocks base method.
 func (m *MockQuerier) ListObservers(ctx context.Context, arg db.ListObserversParams) ([]db.ListObserversRow, error) {
 	m.ctrl.T.Helper()
@@ -1706,21 +1676,6 @@ func (mr *MockQuerierMockRecorder) ListZoneLists(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListZoneLists", reflect.TypeOf((*MockQuerier)(nil).ListZoneLists), ctx)
 }
 
-// LockObserverDirectoryCreation mocks base method.
-func (m *MockQuerier) LockObserverDirectoryCreation(ctx context.Context) (bool, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "LockObserverDirectoryCreation", ctx)
-	ret0, _ := ret[0].(bool)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// LockObserverDirectoryCreation indicates an expected call of LockObserverDirectoryCreation.
-func (mr *MockQuerierMockRecorder) LockObserverDirectoryCreation(ctx any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockObserverDirectoryCreation", reflect.TypeOf((*MockQuerier)(nil).LockObserverDirectoryCreation), ctx)
-}
-
 // LockRollupHour mocks base method.
 func (m *MockQuerier) LockRollupHour(ctx context.Context, hour pgtype.Timestamptz) (string, error) {
 	m.ctrl.T.Helper()
@@ -1748,36 +1703,6 @@ func (m *MockQuerier) MarkPartialRollupHours(ctx context.Context) error {
 func (mr *MockQuerierMockRecorder) MarkPartialRollupHours(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkPartialRollupHours", reflect.TypeOf((*MockQuerier)(nil).MarkPartialRollupHours), ctx)
-}
-
-// ObserverDirectoryHasCapacity mocks base method.
-func (m *MockQuerier) ObserverDirectoryHasCapacity(ctx context.Context) (bool, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ObserverDirectoryHasCapacity", ctx)
-	ret0, _ := ret[0].(bool)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// ObserverDirectoryHasCapacity indicates an expected call of ObserverDirectoryHasCapacity.
-func (mr *MockQuerierMockRecorder) ObserverDirectoryHasCapacity(ctx any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ObserverDirectoryHasCapacity", reflect.TypeOf((*MockQuerier)(nil).ObserverDirectoryHasCapacity), ctx)
-}
-
-// ObserverDirectoryWithinBudget mocks base method.
-func (m *MockQuerier) ObserverDirectoryWithinBudget(ctx context.Context) (bool, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ObserverDirectoryWithinBudget", ctx)
-	ret0, _ := ret[0].(bool)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// ObserverDirectoryWithinBudget indicates an expected call of ObserverDirectoryWithinBudget.
-func (mr *MockQuerierMockRecorder) ObserverDirectoryWithinBudget(ctx any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ObserverDirectoryWithinBudget", reflect.TypeOf((*MockQuerier)(nil).ObserverDirectoryWithinBudget), ctx)
 }
 
 // OldestMissingRollupHour mocks base method.
@@ -1808,20 +1733,6 @@ func (m *MockQuerier) PruneImportedRegions(ctx context.Context, keep []string) (
 func (mr *MockQuerierMockRecorder) PruneImportedRegions(ctx, keep any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PruneImportedRegions", reflect.TypeOf((*MockQuerier)(nil).PruneImportedRegions), ctx, keep)
-}
-
-// PruneObserverDirectorySnapshots mocks base method.
-func (m *MockQuerier) PruneObserverDirectorySnapshots(ctx context.Context) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PruneObserverDirectorySnapshots", ctx)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// PruneObserverDirectorySnapshots indicates an expected call of PruneObserverDirectorySnapshots.
-func (mr *MockQuerierMockRecorder) PruneObserverDirectorySnapshots(ctx any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PruneObserverDirectorySnapshots", reflect.TypeOf((*MockQuerier)(nil).PruneObserverDirectorySnapshots), ctx)
 }
 
 // PruneZoneBoundaries mocks base method.

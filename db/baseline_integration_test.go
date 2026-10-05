@@ -92,7 +92,7 @@ func TestRunMigrationsBaselinePostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	ledger, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil || len(ledger) != 2 || ledger[0] != baselineMigration || ledger[1] != "002_observer_directory.sql" {
+	if err != nil || len(ledger) != 1 || ledger[0] != baselineMigration {
 		t.Fatalf("ledger %v, %v", ledger, err)
 	}
 	// Stats refresh uses CONCURRENTLY, which needs populated views.

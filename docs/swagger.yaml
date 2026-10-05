@@ -693,8 +693,6 @@ definitions:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverDirectoryCoverage'
       effectiveSort:
         type: string
-      expiresAt:
-        type: integer
       generatedAt:
         type: integer
       hasMore:
@@ -711,8 +709,6 @@ definitions:
         items:
           type: string
         type: array
-      snapshot:
-        type: string
       sort:
         type: string
       windowEnd:
@@ -2815,8 +2811,8 @@ paths:
   /observers/directory:
     get:
       description: Counts cover completed UTC hourly analytics. Incomplete windows
-        return null counts and name ordering. Continue with snapshot, cursor and limit
-        only. Snapshots expire after 15 minutes.
+        return null counts and name ordering. Repeat filters and explicit since/until
+        on later pages. Results may move as data changes.
       parameters:
       - description: Single IATA
         in: query
@@ -2870,10 +2866,6 @@ paths:
         in: query
         name: until
         type: integer
-      - description: Snapshot returned by first page
-        in: query
-        name: snapshot
-        type: string
       - description: nextCursor returned by preceding page
         format: int64
         in: query
@@ -2894,19 +2886,11 @@ paths:
           description: Bad Request
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
-        "410":
-          description: Gone
-          schema:
-            $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
-        "503":
-          description: Service Unavailable
-          schema:
-            $ref: '#/definitions/internal_api_handlers.APIError'
-      summary: List observers with snapshot-stable traffic counts
+      summary: List observers with windowed traffic counts
       tags:
       - Observers
   /packets:

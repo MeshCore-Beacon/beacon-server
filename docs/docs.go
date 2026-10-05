@@ -1432,14 +1432,14 @@ const docTemplate = `{
         },
         "/observers/directory": {
             "get": {
-                "description": "Counts cover completed UTC hourly analytics. Incomplete windows return null counts and name ordering. Continue with snapshot, cursor and limit only. Snapshots expire after 15 minutes.",
+                "description": "Counts cover completed UTC hourly analytics. Incomplete windows return null counts and name ordering. Repeat filters and explicit since/until on later pages. Results may move as data changes.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "Observers"
                 ],
-                "summary": "List observers with snapshot-stable traffic counts",
+                "summary": "List observers with windowed traffic counts",
                 "parameters": [
                     {
                         "type": "string",
@@ -1516,12 +1516,6 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Snapshot returned by first page",
-                        "name": "snapshot",
-                        "in": "query"
-                    },
-                    {
                         "type": "integer",
                         "format": "int64",
                         "description": "nextCursor returned by preceding page",
@@ -1548,20 +1542,8 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
                     },
-                    "410": {
-                        "description": "Gone",
-                        "schema": {
-                            "$ref": "#/definitions/internal_api_handlers.APIError"
-                        }
-                    },
                     "500": {
                         "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/internal_api_handlers.APIError"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
@@ -4549,9 +4531,6 @@ const docTemplate = `{
                 "effectiveSort": {
                     "type": "string"
                 },
-                "expiresAt": {
-                    "type": "integer"
-                },
                 "generatedAt": {
                     "type": "integer"
                 },
@@ -4575,9 +4554,6 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
-                },
-                "snapshot": {
-                    "type": "string"
                 },
                 "sort": {
                     "type": "string"
