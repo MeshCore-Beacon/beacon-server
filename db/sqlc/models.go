@@ -5,6 +5,8 @@
 package db
 
 import (
+	"encoding/json"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -354,6 +356,15 @@ type ObserverBroker struct {
 	LastSeen     pgtype.Timestamptz `json:"last_seen"`
 	LastPacketAt pgtype.Timestamptz `json:"last_packet_at"`
 	AuthOk       *bool              `json:"auth_ok"`
+}
+
+type ObserverDirectorySnapshot struct {
+	ID        uuid.UUID          `json:"id"`
+	QueryKey  []byte             `json:"query_key"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	Metadata  json.RawMessage    `json:"metadata"`
+	Items     json.RawMessage    `json:"items"`
 }
 
 type ObserverLocation struct {

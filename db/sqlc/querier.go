@@ -21,6 +21,7 @@ type Querier interface {
 	// Hop prefixes that match >1 node in an IATA, per width. Computed once per reconfirm run.
 	AmbiguousPrefixes(ctx context.Context) ([]AmbiguousPrefixesRow, error)
 	CreateAccount(ctx context.Context, name string) (Account, error)
+	CreateObserverDirectorySnapshot(ctx context.Context, arg CreateObserverDirectorySnapshotParams) (uuid.UUID, error)
 	// Lock the current row before deciding the outcome, including when another
 	// deactivation commits while this statement is waiting for its row lock.
 	DeactivateAccount(ctx context.Context, id uuid.UUID) (DeactivateAccountRow, error)
@@ -58,6 +59,7 @@ type Querier interface {
 	// Dirty hours that can no longer be re-rolled.
 	DeleteStaleDirtyHours(ctx context.Context) error
 	FillRollupObs(ctx context.Context, dollar_1 pgtype.Timestamptz) error
+	FindObserverDirectorySnapshot(ctx context.Context, queryKey []byte) (uuid.UUID, error)
 	// Marks the hour complete and bumps the revision only when its content changed.
 	FinishRollupHour(ctx context.Context, arg FinishRollupHourParams) (bool, error)
 	GetAccount(ctx context.Context, id uuid.UUID) (Account, error)
@@ -102,6 +104,7 @@ type Querier interface {
 	// Count packet identities, not reception rows: a broker repeat or another
 	// reception by the same observer must not inflate the comparison.
 	GetObserverComparison(ctx context.Context, arg GetObserverComparisonParams) (GetObserverComparisonRow, error)
+	GetObserverDirectoryPage(ctx context.Context, arg GetObserverDirectoryPageParams) (string, error)
 	GetObserverLastIATA(ctx context.Context, id uuid.UUID) (string, error)
 	GetObserverRadio(ctx context.Context, id uuid.UUID) (GetObserverRadioRow, error)
 	GetObserverScopes(ctx context.Context, observerID uuid.UUID) ([]string, error)
@@ -270,13 +273,17 @@ type Querier interface {
 	ListUndecryptedGroupTextPacketsByHash(ctx context.Context, hashes [][]byte) ([]ListUndecryptedGroupTextPacketsByHashRow, error)
 	ListZoneBoundaries(ctx context.Context) ([]MeshmapperZoneBoundary, error)
 	ListZoneLists(ctx context.Context) ([]MeshmapperZoneList, error)
+	LockObserverDirectoryCreation(ctx context.Context) (bool, error)
 	// Returns the hour's status, or 'partial' if raw deletion has reached it since registration.
 	LockRollupHour(ctx context.Context, hour pgtype.Timestamptz) (string, error)
 	// Hours whose raw rows cleanup already started deleting can never be rolled completely.
 	// Readers report the new status, so the revision moves too.
 	MarkPartialRollupHours(ctx context.Context) error
+	ObserverDirectoryHasCapacity(ctx context.Context) (bool, error)
+	ObserverDirectoryWithinBudget(ctx context.Context) (bool, error)
 	OldestMissingRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
 	PruneImportedRegions(ctx context.Context, keep []string) ([]string, error)
+	PruneObserverDirectorySnapshots(ctx context.Context) error
 	// Drops imports for IATAs no longer configured, so their manual border returns.
 	PruneZoneBoundaries(ctx context.Context, keep []string) ([]string, error)
 	// Delete node_neighbors where the neighbor has departed from node_short_ids

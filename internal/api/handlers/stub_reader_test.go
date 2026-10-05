@@ -16,6 +16,7 @@ import (
 // Unset fields return zero values. Use it for both validation tests
 // (leave all fields nil) and happy path tests (set only what you need).
 type stubReader struct {
+	listObserverDirectory        func(context.Context, api.ObserverDirectoryQuery) (*api.ObserverDirectory, error)
 	getStatsSeries               func(context.Context, time.Time, time.Time, []string) (*api.StatsSeries, error)
 	getRouteEvidence             func(context.Context, string, string, api.RouteEvidenceQuery) (*api.RouteEvidence, error)
 	getObserverComparison        func(context.Context, uuid.UUID, uuid.UUID, time.Time, time.Time, []string) (*api.ObserverComparison, error)
@@ -414,6 +415,13 @@ func (s stubReader) GetNodesByIDs(ctx context.Context, ids []uuid.UUID) (map[uui
 func (s stubReader) GetRouteEvidence(ctx context.Context, iata, key string, q api.RouteEvidenceQuery) (*api.RouteEvidence, error) {
 	if s.getRouteEvidence != nil {
 		return s.getRouteEvidence(ctx, iata, key, q)
+	}
+	return nil, nil
+}
+
+func (s stubReader) ListObserverDirectory(ctx context.Context, q api.ObserverDirectoryQuery) (*api.ObserverDirectory, error) {
+	if s.listObserverDirectory != nil {
+		return s.listObserverDirectory(ctx, q)
 	}
 	return nil, nil
 }

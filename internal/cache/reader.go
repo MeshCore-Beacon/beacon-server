@@ -378,3 +378,7 @@ func (cr *CachedReader) SearchCrossIATARoutes(ctx context.Context, fromHash, fro
 func (cr *CachedReader) ListTraceTags(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, cursorTag string, limit int32) ([]api.TraceTagSummary, error) {
 	return cr.inner.ListTraceTags(ctx, iatas, scope, traceType, since, until, cursor, cursorTag, limit)
 }
+
+func (cr *CachedReader) ListObserverDirectory(ctx context.Context, query api.ObserverDirectoryQuery) (*api.ObserverDirectory, error) {
+	return cr.inner.ListObserverDirectory(ctx, query)
+}

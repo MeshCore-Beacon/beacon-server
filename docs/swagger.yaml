@@ -687,6 +687,79 @@ definitions:
         description: exclusive, epoch milliseconds
         type: integer
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverDirectory:
+    properties:
+      coverage:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverDirectoryCoverage'
+      effectiveSort:
+        type: string
+      expiresAt:
+        type: integer
+      generatedAt:
+        type: integer
+      hasMore:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverDirectoryItem'
+        type: array
+      maxObservationCount:
+        type: integer
+      nextCursor:
+        type: integer
+      observerTypes:
+        items:
+          type: string
+        type: array
+      snapshot:
+        type: string
+      sort:
+        type: string
+      windowEnd:
+        type: integer
+      windowStart:
+        type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverDirectoryCoverage:
+    properties:
+      completeHours:
+        type: integer
+      expectedHours:
+        type: integer
+      missingHours:
+        type: integer
+      partialHours:
+        type: integer
+      status:
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverDirectoryItem:
+    properties:
+      displayName:
+        description: friendly name from /status messages
+        type: string
+      iata:
+        description: most recently heard IATA
+        type: string
+      id:
+        type: string
+      observationCount:
+        type: integer
+      observerType:
+        description: e.g. "meshcoretomqtt", "meshcoreha"
+        type: string
+      radio:
+        description: 'friendly radio param string: freqMhz,BwKhz,SF e.g. "910.525,62.5,7"'
+        type: string
+      scopes:
+        description: list of observer forwarded scopes matched to config
+        items:
+          type: string
+        type: array
+      status:
+        description: '"online" or "offline" derived from last_status_at'
+        type: string
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverSummary:
     properties:
       displayName:
@@ -2737,6 +2810,103 @@ paths:
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get observer telemetry history
+      tags:
+      - Observers
+  /observers/directory:
+    get:
+      description: Counts cover completed UTC hourly analytics. Incomplete windows
+        return null counts and name ordering. Continue with snapshot, cursor and limit
+        only. Snapshots expire after 15 minutes.
+      parameters:
+      - description: Single IATA
+        in: query
+        name: iata
+        type: string
+      - description: Comma-separated IATAs
+        in: query
+        name: iatas
+        type: string
+      - description: Region ID
+        in: query
+        name: regionId
+        type: integer
+      - description: Region slug
+        in: query
+        name: region
+        type: string
+      - description: Observer type
+        in: query
+        name: type
+        type: string
+      - description: Broker membership
+        in: query
+        name: broker
+        type: string
+      - description: online or offline
+        in: query
+        name: status
+        type: string
+      - description: Case-insensitive partial name
+        in: query
+        name: name
+        type: string
+      - description: Transport scope membership
+        in: query
+        name: scope
+        type: string
+      - description: traffic (default) or name
+        in: query
+        name: sort
+        type: string
+      - description: Inclusive epoch ms, rounded down to UTC hour; default 24 hours
+          before until
+        format: int64
+        in: query
+        name: since
+        type: integer
+      - description: Exclusive epoch ms, rounded down to UTC hour; default end of
+          latest rollable hour
+        format: int64
+        in: query
+        name: until
+        type: integer
+      - description: Snapshot returned by first page
+        in: query
+        name: snapshot
+        type: string
+      - description: nextCursor returned by preceding page
+        format: int64
+        in: query
+        name: cursor
+        type: integer
+      - description: Page size, default 50, maximum 200
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverDirectory'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "410":
+          description: Gone
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+      summary: List observers with snapshot-stable traffic counts
       tags:
       - Observers
   /packets:
