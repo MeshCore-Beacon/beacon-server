@@ -115,7 +115,7 @@ type channelHarness struct {
 
 func newChannelHarness(t *testing.T, f *channelSite, store *channelMemoryStore, lists *zoneListMemory, enabled bool) *channelHarness {
 	t.Helper()
-	dir := NewDirectory(lists)
+	dir := newTestDirectory(lists)
 	dir.listURL = f.URL + "/get_zones.php"
 	if err := dir.Restore(context.Background()); err != nil {
 		t.Fatal(err)
@@ -237,7 +237,7 @@ func TestChannelsRequestCutShortStillCounts(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
 	defer server.Close()
 	store := newChannelMemoryStore("YOW")
-	c, err := NewChannels(context.Background(), config.MeshMapperChannelsConfig{Enabled: true}, store, NewDirectory(newZoneListMemory()), keystore.NewMapKeyStore(nil))
+	c, err := NewChannels(context.Background(), config.MeshMapperChannelsConfig{Enabled: true}, store, newTestDirectory(newZoneListMemory()), keystore.NewMapKeyStore(nil))
 	if err != nil {
 		t.Fatal(err)
 	}

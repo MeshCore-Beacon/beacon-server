@@ -4,12 +4,56 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestLoadMeshMapperAPIKey(t *testing.T) {
+	for _, tc := range []struct {
+		name, env, want string
+		file, set       bool
+	}{
+		{"missing", "", "", false, false},
+		{"YAML", "", "yaml-integration-test-key", true, false},
+		{"environment overrides", "env-integration-test-key", "env-integration-test-key", true, true},
+		{"empty environment overrides", "", "", true, true},
+		{"environment without file", "env-integration-test-key", "env-integration-test-key", false, true},
+		{"trim whitespace", " env-integration-test-key\n", "env-integration-test-key", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("MESHMAPPER_API_KEY", tc.env)
+			if !tc.set {
+				if err := os.Unsetenv("MESHMAPPER_API_KEY"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if tc.file {
+				if err := os.WriteFile(path, []byte("meshmapper:\n  api_key: yaml-integration-test-key\n  scopes:\n    enabled: true\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.MeshMapper.APIKey != tc.want {
+				t.Fatal("MeshMapper key not loaded with expected precedence")
+			}
+			encoded, err := json.Marshal(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(encoded), "integration-test-key") || strings.Contains(Resolve(cfg).String(), "integration-test-key") {
+				t.Fatal("MeshMapper key exposed in JSON or startup summary")
+			}
+		})
+	}
+}
 
 func TestMeshMapperConfig(t *testing.T) {
 	valid := "meshmapper:\n  scopes:\n    enabled: true\n"

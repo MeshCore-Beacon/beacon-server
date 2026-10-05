@@ -64,10 +64,7 @@ type Channels struct {
 // Disabled, it clears MeshMapper's region membership so config scoping alone applies.
 func NewChannels(ctx context.Context, cfg config.MeshMapperChannelsConfig, store ChannelStore, dir *Directory, keys ChannelKeys) (*Channels, error) {
 	c := &Channels{store: store, keys: keys, dir: dir, channelsURL: channelsEndpoint, interval: cfg.Interval(), seen: map[string]bool{},
-		client: &http.Client{
-			Timeout:       requestTimeout,
-			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		}}
+		client: dir.client}
 	if !cfg.Enabled {
 		if err := store.ClearChannelMembers(ctx); err != nil {
 			return nil, fmt.Errorf("clear MeshMapper channel members: %w", err)
@@ -186,19 +183,21 @@ func (c *Channels) refresh(ctx context.Context, s *channelSource, now time.Time)
 	}
 	s.cache.AttemptedAt, s.cache.LastError = now, attempt.LastError
 	status, body, header, err := get(ctx, c.client, "Beacon-MeshMapper-Channels/1", s.url, etag, MaxChannelBody)
-	if err != nil {
-		return err
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 	var entries []keystore.Entry
 	var retryAt time.Time
-	switch status {
-	case http.StatusOK:
+	switch {
+	case err != nil:
+		update.LastError = requestProblem(err)
+	case status == http.StatusOK:
 		if entries, err = decodeChannels(body, s.iata); err != nil {
 			update.LastError = "invalid response"
 		} else {
 			update.Payload = body
 		}
-	case http.StatusNotModified:
+	case status == http.StatusNotModified:
 		if len(s.cache.Payload) == 0 {
 			update.LastError = "304 without cached catalogue"
 		}

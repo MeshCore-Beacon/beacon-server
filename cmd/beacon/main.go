@@ -197,8 +197,11 @@ func main() {
 	scopes.Load(scopeEntries)
 	scopes.SetManualMembers(cfg.ManualScopeMembers())
 	slog.Info(fmt.Sprintf("loaded %d transport scopes", len(scopeEntries)), "component", "startup")
-	directory := meshmapper.NewDirectory(store)
+	directory := meshmapper.NewDirectory(store, cfg.MeshMapper.APIKey)
 	if cfg.MeshMapper.Scopes.Enabled || cfg.MeshMapper.Zones.Enabled || cfg.MeshMapper.Channels.Enabled {
+		if cfg.MeshMapper.APIKey == "" {
+			slog.Warn("MeshMapper integration unconfigured: set MESHMAPPER_API_KEY or meshmapper.api_key; retaining cached data", "component", "meshmapper")
+		}
 		restoreCtx, cancelRestore := context.WithTimeout(ctx, 10*time.Second)
 		err = directory.Restore(restoreCtx)
 		cancelRestore()

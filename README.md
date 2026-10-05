@@ -63,6 +63,51 @@ and the fully annotated `config.yaml` lives in beacon-docs as well; the copy her
 starter. Migrations run on startup. The API listens on `LISTEN_ADDR` (default `:8080`) and
 Swagger is at `http://localhost:8080/swagger/index.html`.
 
+### MeshMapper authentication
+
+MeshMapper APIs require either a regional API key or a grouped-region API key
+covering multiple regions. Your local MeshMapper regional or grouped-region admin
+can generate these keys.
+
+Set `MESHMAPPER_API_KEY` in each deployment's private environment or
+gitignored `.env`; it overrides `meshmapper.api_key` in `config.yaml`, including
+when empty. The examples leave the key empty. Never put it in browser settings
+or use the mobile app's App key. Restart Beacon after changing the key.
+
+A regional deployment needs access to its IATA; a group deployment needs access
+to every member IATA, including members added by `import_groups`. API keys do not
+remove rate limits or change the `get_zones.php?country=...` request shape.
+IP exemptions are not authentication.
+
+Beacon sends `X-API-Key` to `get_zones.php`, `get_geojson.php`, `get_scopes.php`,
+and `get_channels.php`. The shared client also supports that header for
+`get_repeaters.php`; this repository does not currently fetch repeaters.
+Requests are restricted to those HTTPS MeshMapper endpoints and never follow
+redirects. Coverage consumers keep their separate keys, scopes, quotas, and
+supported `?key=` authentication; this client does not call `coverage.php`.
+
+Missing keys are reported as unconfigured without stopping Beacon or deleting
+cached imports. Failed refreshes record `last_error`, retain the last successful
+data and freshness timestamp, and report 401 as an authentication failure or
+403 as a permission failure. Inspect the `meshmapper.zones`, `meshmapper.scopes`,
+and `meshmapper.channels` logs for freshness and the next attempt. No anonymous
+fallback occurs. Existing refresh limits still apply, including longer
+`Retry-After` delays on 429/503.
+
+Use the environment setting when backups are enabled. Backup exports preserve
+saved YAML verbatim and refuse a nonempty `meshmapper.api_key` in that file so
+the credential cannot enter a backup download. Clear that YAML value after
+moving the key to the environment; environment secrets are excluded from backups.
+
+Deployment coordination is required with MeshMapper Server before enforcement:
+confirm `X-API-Key` support, obtain and verify the integration key's API and IATA
+permissions, and confirm these requests do not consume Coverage quota. Header
+support must not be assumed deployed. The first four endpoints can enforce
+authentication before the app rollout; repeater enforcement waits for app 1.4.1
+and its forced update. Key issuance, permissions, quotas, and enforcement switches
+remain MeshMapper Server work, tracked in
+[MeshMapper_Server#431](https://github.com/MeshMapper/MeshMapper_Server/issues/431).
+
 To run the web frontend against it, see
 [Running the full stack locally](https://github.com/MeshCore-Beacon/beacon-docs/blob/main/CONTRIBUTING.md#running-the-full-stack-locally).
 

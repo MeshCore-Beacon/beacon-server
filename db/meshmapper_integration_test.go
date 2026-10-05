@@ -83,7 +83,7 @@ func TestMeshMapperCataloguePostgres(t *testing.T) {
 		t.Fatal(row, err)
 	}
 	scopes := scopestore.New()
-	_, err = meshmapper.New(ctx, config.MeshMapperScopesConfig{Enabled: true}, store, meshmapper.NewDirectory(store), scopes, manualRows)
+	_, err = meshmapper.New(ctx, config.MeshMapperScopesConfig{Enabled: true}, store, meshmapper.NewDirectory(store, ""), scopes, manualRows)
 	if err != nil || len(scopes.Entries()) != 2 {
 		t.Fatal("restart did not restore imported membership", err)
 	}
@@ -106,7 +106,7 @@ func TestMeshMapperCataloguePostgres(t *testing.T) {
 	if err := store.SaveScopeCatalogue(ctx, "YOW", url, update, nil); err != nil {
 		t.Fatal(err)
 	}
-	_, err = meshmapper.New(ctx, config.MeshMapperScopesConfig{Enabled: true}, store, meshmapper.NewDirectory(store), scopes, manualRows)
+	_, err = meshmapper.New(ctx, config.MeshMapperScopesConfig{Enabled: true}, store, meshmapper.NewDirectory(store, ""), scopes, manualRows)
 	if err != nil || len(scopes.Entries()) != 1 {
 		t.Fatal("removed imported membership remained active", err)
 	}

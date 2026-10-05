@@ -393,6 +393,7 @@ func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			cfg.MeshMapper.APIKey = strings.TrimSpace(os.Getenv("MESHMAPPER_API_KEY"))
 			cfg.Auth.APIKey = os.Getenv("BEACON_API_KEY")
 			if err := cfg.validateAPIKey(); err != nil {
 				return nil, err
@@ -407,6 +408,10 @@ func Load(path string) (*Config, error) {
 	if value, set := os.LookupEnv("BEACON_API_KEY"); set {
 		cfg.Auth.APIKey = value
 	}
+	if value, set := os.LookupEnv("MESHMAPPER_API_KEY"); set {
+		cfg.MeshMapper.APIKey = value
+	}
+	cfg.MeshMapper.APIKey = strings.TrimSpace(cfg.MeshMapper.APIKey)
 	if err := cfg.validateAPIKey(); err != nil {
 		return nil, err
 	}

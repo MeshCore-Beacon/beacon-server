@@ -18,6 +18,7 @@ const (
 )
 
 type MeshMapperConfig struct {
+	APIKey   string                   `yaml:"api_key" json:"-"`
 	Scopes   MeshMapperScopesConfig   `yaml:"scopes"`
 	Zones    MeshMapperZonesConfig    `yaml:"zones"`
 	Channels MeshMapperChannelsConfig `yaml:"channels"`
