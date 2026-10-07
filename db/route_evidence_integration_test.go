@@ -36,12 +36,13 @@ func TestRouteEvidencePostgres(t *testing.T) {
 	applyBaseline(t, ctx, tx)
 	_, err := tx.Exec(ctx, `
  INSERT INTO observers(id,public_key,display_name) VALUES ('00000000-0000-0000-0000-000000000001','\x01','One'),('00000000-0000-0000-0000-000000000002','\x02','Two');
- INSERT INTO nodes(id,public_key,node_type,name) VALUES ('00000000-0000-0000-0000-000000000001','\xaa',2,'A'),('00000000-0000-0000-0000-000000000002','\xbb',2,'B');
+ INSERT INTO nodes(id,public_key,node_type,name) VALUES ('00000000-0000-0000-0000-000000000001','\xaa0102',2,'A'),('00000000-0000-0000-0000-000000000002','\xbb0304',2,'B');
  INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,first_heard_at,last_heard_at)
  SELECT int4send(i),4,0,1,'\x00','\x00',NOW(),NOW() FROM generate_series(1,10) i;`)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	capture := &evidenceCapture{Tx: tx}
 	store := &Store{q: sqlc.New(capture)}
 	ids := []uuid.UUID{uuid.MustParse("00000000-0000-0000-0000-000000000001"), uuid.MustParse("00000000-0000-0000-0000-000000000002")}
@@ -80,6 +81,36 @@ func TestRouteEvidencePostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if query.Cursor.HashSize != 1 || query.Cursor.PathBytes != "aabb" {
+		t.Fatalf("cursor did not pin the original bytes: %+v", query.Cursor)
+	}
+	// A new representation arrives while page one is open. New reads follow it,
+	// but pagination and copied links retain the exact original representation.
+	if _, err = tx.Exec(ctx, `INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,first_heard_at,last_heard_at) SELECT int4send(i),4,0,1,'\x00','\x00',NOW(),NOW() FROM generate_series(12,14) i`); err != nil {
+		t.Fatal(err)
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO packet_observations(id,packet_hash,observer_id,iata,heard_at,hash_size,hop_count,path_bytes,payload_type,path_length_byte)
+ SELECT i,int4send(i),'00000000-0000-0000-0000-000000000001','YOW',$1,2,2,'\xaa01bb03',4,66 FROM generate_series(12,14) i`, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertKnownRoute(ctx, ids, [][]byte{{0xaa, 1}, {0xbb, 3}}, "YOW", 2); err != nil {
+		t.Fatal(err)
+	}
+	freshQuery := api.RouteEvidenceQuery{Since: since, Until: until, Limit: 2}
+	fresh, err := store.GetRouteEvidence(ctx, "YOW", key, freshQuery)
+	if err != nil || fresh.HashSize != 2 || fresh.PathBytes != "aa01bb03" || len(fresh.Items) != 2 || fresh.Items[0].ID != 14 || fresh.Route.Hops[0].HashBytes != "aa01" {
+		t.Fatalf("new representation lost: %+v %v", fresh, err)
+	}
+	if fresh.Route.ID != first.Route.ID || fresh.Route.PathKey != first.Route.PathKey || fresh.Route.FirstSeen != first.Route.FirstSeen || fresh.Route.ObservationCount != first.Route.ObservationCount+1 {
+		t.Fatalf("route identity/counters changed: %+v", fresh.Route)
+	}
+	shared := freshQuery
+	shared.HashSize, shared.PathBytes = first.HashSize, first.PathBytes
+	copyPage, err := store.GetRouteEvidence(ctx, "YOW", key, shared)
+	if err != nil || len(copyPage.Items) != 2 || copyPage.Items[0].ID != 3 || copyPage.Route.Hops[0].HashBytes != "aa" {
+		t.Fatalf("shared representation changed: %+v %v", copyPage, err)
+	}
 	second, err := store.GetRouteEvidence(ctx, "YOW", key, query)
 	if err != nil {
 		t.Fatal(err)
@@ -89,6 +120,44 @@ func TestRouteEvidencePostgres(t *testing.T) {
 	}
 	if _, err = json.Marshal(second); err != nil {
 		t.Fatalf("non-finite JSON: %v", err)
+	}
+	for _, prefixes := range [][][]byte{{{0xaa, 1, 2}, {0xbb, 3, 4}}, {{0xaa, 1, 2}, {0xbb, 3, 4}}} {
+		if err := store.UpsertKnownRoute(ctx, ids, prefixes, "YOW", 2); err != nil {
+			t.Fatal(err)
+		}
+	}
+	thirdWidth, err := store.GetRouteEvidence(ctx, "YOW", key, freshQuery)
+	if err != nil || thirdWidth.HashSize != 3 || thirdWidth.PathBytes != "aa0102bb0304" || len(thirdWidth.Items) != 0 || thirdWidth.Route.ID != first.Route.ID || thirdWidth.Route.ObservationCount != first.Route.ObservationCount+3 {
+		t.Fatalf("third width or repeated upsert: %+v %v", thirdWidth, err)
+	}
+	// Missing identities or mismatched bytes cannot make a pinned query search
+	// a different chain. Prefix collisions likewise never widen the SQL match.
+	wrong := shared
+	wrong.PathBytes = "aacc"
+	if _, err := store.GetRouteEvidence(ctx, "YOW", key, wrong); !errors.Is(err, api.ErrRouteEvidenceInput) {
+		t.Fatalf("unrelated path accepted: %v", err)
+	}
+	wrong.PathBytes = "aabbcc"
+	if _, err := store.GetRouteEvidence(ctx, "YOW", key, wrong); !errors.Is(err, api.ErrRouteEvidenceInput) {
+		t.Fatalf("wrong hop count accepted: %v", err)
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO nodes(id,public_key,node_type,name) VALUES ('00000000-0000-0000-0000-000000000003','\xaa9988',2,'Collision');
+ DELETE FROM nodes WHERE id='00000000-0000-0000-0000-000000000001'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetRouteEvidence(ctx, "YOW", key, shared); !errors.Is(err, api.ErrRouteEvidenceInput) {
+		t.Fatalf("missing node substituted by colliding node: %v", err)
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO nodes(id,public_key,node_type,name) VALUES ('00000000-0000-0000-0000-000000000001','\xaa0102',2,'A')`); err != nil {
+		t.Fatal(err)
+	}
+	copyPage, err = store.GetRouteEvidence(ctx, "YOW", key, shared)
+	if err != nil || len(copyPage.Items) != 2 || copyPage.Items[0].ID != 3 {
+		t.Fatalf("collision broadened evidence: %+v %v", copyPage, err)
+	}
+	if err := store.UpsertKnownRoute(ctx, ids, [][]byte{{0xaa}, {0xbb}}, "YOW", 2); err != nil {
+		t.Fatal(err)
 	}
 	query.Cursor.IATA = "YVR"
 	if _, err = store.GetRouteEvidence(ctx, "YOW", key, query); !errors.Is(err, api.ErrRouteEvidenceInput) {
