@@ -24,6 +24,8 @@ type Options struct {
 	RateLimit            config.ResolvedRateLimitConfig
 	Scopes               handlers.ScopeMembership // region-filtered scope lists; nil lists none
 	RollupRetention      time.Duration            // longest historical stats window
+	MinAppVersion        string                   // empty means no mobile app requirement
+	ServerVersion        string
 	// AdminRoutes mounts operator-only subrouters at literal paths such as
 	// "/accounts". Each feature owns its dependencies, methods and handlers.
 	// The router applies authentication to every path and method in this group.

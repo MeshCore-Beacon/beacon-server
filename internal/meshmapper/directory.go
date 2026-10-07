@@ -63,11 +63,8 @@ type Directory struct {
 	version int // bumped whenever a list is replaced
 }
 
-func NewDirectory(store DirectoryStore) *Directory {
-	return &Directory{store: store, listURL: ZonesURL, lists: map[string]*zoneList{}, client: &http.Client{
-		Timeout:       requestTimeout,
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}}
+func NewDirectory(store DirectoryStore, apiKey string) *Directory {
+	return &Directory{store: store, listURL: ZonesURL, lists: map[string]*zoneList{}, client: newClient(apiKey)}
 }
 
 // Restore loads saved lists so a restart doesn't spend each country's daily request.
@@ -130,23 +127,25 @@ func (d *Directory) fetch(ctx context.Context, list *zoneList, country string, c
 	}
 	endpoint := d.listURL + "?country=" + url.QueryEscape(country)
 	status, body, header, err := get(ctx, d.client, "Beacon-MeshMapper-Zones/1", endpoint, etag, MaxZoneList)
-	if err != nil {
-		return err
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 	problem := ""
 	var payload json.RawMessage
 	var retryAt time.Time
 	var zones map[string]zoneEntry
 	var groups map[string]zoneGroup
-	switch status {
-	case http.StatusOK:
+	switch {
+	case err != nil:
+		problem = requestProblem(err)
+	case status == http.StatusOK:
 		var decodeErr error
 		if zones, groups, decodeErr = decodeZones(body, country); decodeErr != nil {
 			problem = "invalid response"
 		} else {
 			payload = body
 		}
-	case http.StatusNotModified:
+	case status == http.StatusNotModified:
 		if !cached {
 			problem = "304 without cached list"
 		}

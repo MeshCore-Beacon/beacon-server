@@ -1,0 +1,24 @@
+name: Main PR source guard
+
+# Runs from main's copy of this file, so a PR can't edit the check away.
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, reopened, synchronize, edited]
+
+permissions: {}
+
+jobs:
+  main-source-is-dev:
+    name: main-source-is-dev
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require PR from this repo's dev branch
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          if [ "$HEAD_REF" != "dev" ] || [ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
+            echo "::error::PRs into main must come from $GITHUB_REPOSITORY:dev (got $HEAD_REPO:$HEAD_REF)"
+            exit 1
+          fi

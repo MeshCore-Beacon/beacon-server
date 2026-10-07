@@ -450,3 +450,7 @@ func (s *stubReader) GetRouteEvidence(_ context.Context, _, _ string, _ api.Rout
 func (s *stubReader) GetTopologyLinks(_ context.Context, _ []string, _ time.Time, _ time.Time) (*api.TopologyLinks, error) {
 	return &api.TopologyLinks{}, nil
 }
+
+func (s *stubReader) ListObserverDirectory(context.Context, api.ObserverDirectoryQuery) (*api.ObserverDirectory, error) {
+	return nil, nil
+}

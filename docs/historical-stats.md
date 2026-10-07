@@ -2,10 +2,10 @@
 
 ## The rule
 
-Historical stats never scan `packet_observations` per request or per refresh. They read
-hourly rollup tables filled once per closed hour by one background task. Raw rows are read
-only for per-entity drill-downs (a packet, a trace, a route), observer comparison and
-sub-hour observer activity.
+Historical stats read hourly rollup tables filled once per closed hour by one background
+task. Raw rows are read for per-entity drill-downs (a packet, a trace, a route), observer
+comparison, sub-hour observer activity, and bounded observer-directory slices that cannot
+use a completed whole-hour rollup.
 
 ## Rollup contract
 
@@ -32,7 +32,8 @@ sub-hour observer activity.
   newest deleted `last_heard_at`. Cleanup and the rollup never write the same row.
 - **Partial hours.** A not-yet-complete hour starting at or before `raw_deleted_before + 30 min`
   lost raw rows before it was rolled. It is marked `partial` and never rolled; readers
-  report it without values.
+  report it without values, except the observer directory, which counts any retained raw
+  observations in the requested slice.
 - **Re-rolls.** Hours are not re-rolled periodically. A message stored by channel backfill (at
   startup, and when keys are imported at runtime) queues every hour its packet was heard in
   `analytics_dirty_hours`, in the same statement as the message insert. Each pass re-rolls a
@@ -52,9 +53,42 @@ sub-hour observer activity.
 | Max path entries | Max |
 | SNR / RSSI averages | Σ sum / Σ samples, never an average of averages |
 
-Windows snap to UTC hours on the server, and responses report the effective window.
+Historical stats windows snap to UTC hours on the server, and responses report the
+effective window. The observer directory preserves exact millisecond bounds instead.
 `/stats/overview` spans the 24 newest eligible hours; its `windowHours` counts the complete
 ones its totals cover.
+
+## Observer directory
+
+`GET /api/v1/observers/directory` defaults to `[request time - 7 days, request time)`.
+Explicit `since` and `until` are epoch milliseconds and remain exact; windows must be
+positive and at most 31 days. If only `until` is supplied, `since` defaults to seven days
+before it. If only `since` is supplied, `until` defaults to request time.
+
+Counts combine complete rollups for whole UTC hours fully inside the window with retained
+raw observations for every other hour and the exact boundary slices. These sources never
+overlap. Completed whole-hour history survives raw retention; a sliced boundary whose raw
+rows have expired cannot be reconstructed from its whole-hour total.
+
+Every observer receives a numeric `observationCount`, including zero. `maxObservationCount`
+is the maximum across all matching observers, independent of pagination, and is zero when
+none match. Incomplete history never suppresses these counts or changes `effectiveSort`:
+traffic sorting uses available counts, while explicit name sorting remains supported.
+Both sorts break name ties by observer ID.
+
+`coverage` is conservative and informational. `expectedHours` counts intersecting UTC
+hours, including boundary slices. `completeHours` counts the whole hours read from complete
+rollups. Other hours are `partialHours` when there is a partial/boundary rollup or matching
+retained raw traffic; otherwise they are `missingHours`. Raw-only traffic does not establish
+complete history. Status is `complete` only when all intersecting hours are complete,
+`partial` when any complete or partial hour exists, and `unavailable` otherwise. Zero counts
+with incomplete coverage mean no available observations, not proof that no traffic occurred.
+
+The response uses `Cache-Control: no-store`. For continuation requests, send `nextCursor`,
+the same filters and sort, and the exact returned `windowStart`/`windowEnd` as `since`/`until`.
+These bounds fix the time window, not a database snapshot; late arrivals and metadata changes
+can still move results. Refresh without bounds to obtain a new rolling window and include
+new traffic.
 
 ## IATA sets
 

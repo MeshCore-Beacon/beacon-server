@@ -223,6 +223,9 @@ type Querier interface {
 	// Pass cursor=0 to start from the beginning, or the last seen id for pagination.
 	// Keep missing-origin adverts; the generated key field expects a string, not NULL.
 	ListObserverAdverts(ctx context.Context, arg ListObserverAdvertsParams) ([]ListObserverAdvertsRow, error)
+	// Copyright 2026 Beacon Contributors
+	// SPDX-License-Identifier: AGPL-3.0-or-later
+	ListObserverDirectory(ctx context.Context, arg ListObserverDirectoryParams) (string, error)
 	// Pass cursor=0 to start from the beginning, or the last seen observer's rownum for pagination.
 	// Note: observers use UUID PKs so we order by last_seen and use a keyset on last_seen+id.
 	ListObservers(ctx context.Context, arg ListObserversParams) ([]ListObserversRow, error)

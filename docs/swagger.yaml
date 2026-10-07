@@ -52,6 +52,8 @@ definitions:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminCORSConfig'
       ingest:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminIngestConfig'
+      mobile:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminMobileConfig'
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.AdminIngestConfig:
     properties:
@@ -60,6 +62,12 @@ definitions:
           BrokerCount counts configured broker workers, not active MQTT connections
           or a configurable processing-worker pool.
         type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.AdminMobileConfig:
+    properties:
+      min_app_version:
+        description: empty means no requirement
+        type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.AdvertObservation:
     properties:
@@ -263,6 +271,17 @@ definitions:
         type: number
       lon:
         type: number
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.Info:
+    properties:
+      minAppVersion:
+        description: MinAppVersion is the oldest allowed app version (X.Y.Z); null
+          means no requirement.
+        example: 0.1.1
+        type: string
+      serverVersion:
+        example: 2.0.2
+        type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.KnownRoute:
     properties:
@@ -686,6 +705,79 @@ definitions:
       until:
         description: exclusive, epoch milliseconds
         type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverDirectory:
+    properties:
+      coverage:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverDirectoryCoverage'
+      effectiveSort:
+        type: string
+      generatedAt:
+        type: integer
+      hasMore:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverDirectoryItem'
+        type: array
+      maxObservationCount:
+        description: Maximum over all matching observers, not only this page; zero
+          when none match.
+        type: integer
+      nextCursor:
+        type: integer
+      observerTypes:
+        items:
+          type: string
+        type: array
+      sort:
+        type: string
+      windowEnd:
+        type: integer
+      windowStart:
+        type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverDirectoryCoverage:
+    properties:
+      completeHours:
+        type: integer
+      expectedHours:
+        type: integer
+      missingHours:
+        type: integer
+      partialHours:
+        type: integer
+      status:
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverDirectoryItem:
+    properties:
+      displayName:
+        description: friendly name from /status messages
+        type: string
+      iata:
+        description: most recently heard IATA
+        type: string
+      id:
+        type: string
+      observationCount:
+        description: Available observations in [windowStart, windowEnd), including
+          zero with missing history.
+        type: integer
+      observerType:
+        description: e.g. "meshcoretomqtt", "meshcoreha"
+        type: string
+      radio:
+        description: 'friendly radio param string: freqMhz,BwKhz,SF e.g. "910.525,62.5,7"'
+        type: string
+      scopes:
+        description: list of observer forwarded scopes matched to config
+        items:
+          type: string
+        type: array
+      status:
+        description: '"online" or "offline" derived from last_status_at'
+        type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverSummary:
     properties:
@@ -1707,7 +1799,7 @@ info:
     name: AGPL-3-or-later
   termsOfService: https://github.com/MeshCore-Beacon/beacon-server
   title: MeshCore Beacon API
-  version: 2.0.0
+  version: 2.0.3
 paths:
   /admin/accounts:
     get:
@@ -2300,6 +2392,19 @@ paths:
       summary: Get an IATA's GeoJSON border, if configured
       tags:
       - IATAs
+  /info:
+    get:
+      description: minAppVersion is null when the server sets no requirement.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.Info'
+      summary: Server info and minimum mobile app version
+      tags:
+      - Info
   /messages:
     get:
       parameters:
@@ -2809,6 +2914,94 @@ paths:
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get observer telemetry history
+      tags:
+      - Observers
+  /observers/directory:
+    get:
+      description: Defaults to the trailing seven days through request time. Counts
+        combine completed whole-hour analytics with retained observations for other
+        hours and exact boundary slices. Incomplete history still returns numeric
+        counts and the requested sort; coverage describes available history. Repeat
+        filters and the returned windowStart/windowEnd as since/until with the cursor
+        on later pages. Results may move as data changes; refresh without bounds for
+        a new rolling window.
+      parameters:
+      - description: Single IATA
+        in: query
+        name: iata
+        type: string
+      - description: Comma-separated IATAs
+        in: query
+        name: iatas
+        type: string
+      - description: Region ID
+        in: query
+        name: regionId
+        type: integer
+      - description: Region slug
+        in: query
+        name: region
+        type: string
+      - description: Observer type
+        in: query
+        name: type
+        type: string
+      - description: Broker membership
+        in: query
+        name: broker
+        type: string
+      - description: online or offline
+        in: query
+        name: status
+        type: string
+      - description: Case-insensitive partial name
+        in: query
+        name: name
+        type: string
+      - description: Transport scope membership
+        in: query
+        name: scope
+        type: string
+      - description: traffic (default) or name
+        in: query
+        name: sort
+        type: string
+      - description: Inclusive epoch ms, preserved exactly; default seven days before
+          until; maximum window 31 days
+        format: int64
+        in: query
+        name: since
+        type: integer
+      - description: Exclusive epoch ms, preserved exactly; default request time
+        format: int64
+        in: query
+        name: until
+        type: integer
+      - description: nextCursor returned by preceding page
+        format: int64
+        in: query
+        name: cursor
+        type: integer
+      - description: Page size, default 50, maximum 200
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverDirectory'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+      summary: List observers with windowed traffic counts
       tags:
       - Observers
   /packets:
@@ -4164,3 +4357,5 @@ tags:
   name: Brokers
 - description: Network statistics and time series
   name: Stats
+- description: Server info for the BEACON Mobile app
+  name: Info
