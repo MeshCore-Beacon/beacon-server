@@ -8,11 +8,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -80,10 +78,7 @@ func (i *Importer) SetCacheInvalidator(fn func(context.Context)) { i.onChange = 
 // New restores validated snapshots before ingestion, without making HTTP requests.
 func New(ctx context.Context, cfg config.MeshMapperScopesConfig, store Store, dir *Directory, scopes *scopestore.ScopeStore, manual []scopestore.Entry) (*Importer, error) {
 	i := &Importer{store: store, scopes: scopes, manual: manual, dir: dir, scopesURL: scopesEndpoint, seen: map[string]bool{},
-		interval: cfg.Interval(), client: &http.Client{
-			Timeout:       requestTimeout,
-			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		}}
+		interval: cfg.Interval(), client: dir.client}
 	if !cfg.Enabled {
 		return i, nil
 	}
@@ -198,14 +193,9 @@ func (i *Importer) Refresh(ctx context.Context) (err error) {
 
 func (i *Importer) refresh(ctx context.Context, s *source, now time.Time) error {
 	update := Cache{AttemptedAt: now, NextAttempt: now.Add(i.interval)}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, s.url, nil)
-	if err != nil {
-		return err
-	}
-	request.Header.Set("Accept", "application/json")
-	request.Header.Set("User-Agent", "Beacon-MeshMapper-Scopes/1")
-	if len(s.cache.Payload) > 0 && s.cache.ETag != "" {
-		request.Header.Set("If-None-Match", s.cache.ETag)
+	etag := ""
+	if len(s.cache.Payload) > 0 {
+		etag = s.cache.ETag
 	}
 	// Recorded first: an abandoned request may still have used the region's call.
 	attempt := Cache{AttemptedAt: now, NextAttempt: now.Add(min(i.interval, failureRetry)), LastError: "no response"}
@@ -214,54 +204,41 @@ func (i *Importer) refresh(ctx context.Context, s *source, now time.Time) error 
 		return fmt.Errorf("persist scope catalogue %s: %w", s.iata, err)
 	}
 	s.cache.AttemptedAt, s.cache.LastError = now, attempt.LastError
-	response, err := i.client.Do(request)
+	status, body, header, err := get(ctx, i.client, "Beacon-MeshMapper-Scopes/1", s.url, etag, MaxBody)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	var entries []scopestore.Entry
 	var generated time.Time
 	var retryAfter time.Time
-	if err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
+	switch {
+	case err != nil:
+		update.LastError = requestProblem(err)
+	case status == http.StatusOK:
+		if entries, generated, err = decode(body, s.iata); err != nil {
+			update.LastError = "invalid response"
+		} else {
+			update.Payload = body
 		}
-		update.LastError = "request failed" // do not persist untrusted response bodies or URLs from errors
-	} else {
-		defer response.Body.Close()
-		switch response.StatusCode {
-		case http.StatusOK:
-			body, readErr := io.ReadAll(io.LimitReader(response.Body, MaxBody+1))
-			if readErr == nil {
-				entries, generated, readErr = decode(body, s.iata)
-			}
-			if readErr != nil {
-				update.LastError = "invalid response"
-			} else {
-				update.Payload = body
-			}
-		case http.StatusNotModified:
-			if len(s.cache.Payload) == 0 || s.cache.ETag == "" {
-				update.LastError = "304 without cached catalogue"
-			}
-		default:
-			update.LastError = fmt.Sprintf("HTTP %d", response.StatusCode)
-			if response.StatusCode == http.StatusTooManyRequests || response.StatusCode == http.StatusServiceUnavailable {
-				// The published contract uses seconds. Ignore invalid/overflowing headers.
-				if seconds, parseErr := strconv.ParseInt(response.Header.Get("Retry-After"), 10, 64); parseErr == nil && seconds > 0 && seconds <= int64((1<<63-1)/time.Second) {
-					retryAfter = now.Add(time.Duration(seconds) * time.Second)
-				}
-			}
+	case status == http.StatusNotModified:
+		if len(s.cache.Payload) == 0 || s.cache.ETag == "" {
+			update.LastError = "304 without cached catalogue"
 		}
-		if update.LastError == "" {
-			etag := response.Header.Get("ETag")
-			if len(etag) > 256 || strings.ContainsAny(etag, "\r\n") {
-				update.LastError = "invalid ETag"
-				update.Payload = nil
-				entries = nil
-			} else {
-				update.ETag = etag
-				if response.StatusCode == http.StatusNotModified && etag == "" {
-					update.ETag = s.cache.ETag
-				}
-				update.CheckedAt = now
+	default:
+		update.LastError = statusProblem(status, header, now, &retryAfter)
+	}
+	if update.LastError == "" {
+		etag := header.Get("ETag")
+		if len(etag) > 256 || strings.ContainsAny(etag, "\r\n") {
+			update.LastError = "invalid ETag"
+			update.Payload = nil
+			entries = nil
+		} else {
+			update.ETag = etag
+			if status == http.StatusNotModified && etag == "" {
+				update.ETag = s.cache.ETag
 			}
+			update.CheckedAt = now
 		}
 	}
 	if update.LastError != "" {

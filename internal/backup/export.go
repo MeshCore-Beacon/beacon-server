@@ -19,6 +19,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -228,6 +230,18 @@ func readConfig(path string) ([]byte, error) {
 	data, err := io.ReadAll(io.LimitReader(f, maxConfigBytes+1))
 	if err != nil || len(data) > maxConfigBytes {
 		return nil, errors.New("cannot read saved config within the 1 MiB limit")
+	}
+	var credentials struct {
+		MeshMapper struct {
+			APIKey string `yaml:"api_key"`
+		} `yaml:"meshmapper"`
+	}
+	if err := yaml.Unmarshal(data, &credentials); err != nil {
+		return nil, errors.New("cannot inspect saved config for MeshMapper credentials")
+	}
+	// Backups preserve YAML verbatim, so require the deployment secret outside it.
+	if credentials.MeshMapper.APIKey != "" {
+		return nil, errors.New("backup unavailable: move meshmapper.api_key to MESHMAPPER_API_KEY and clear the saved YAML value")
 	}
 	return data, nil
 }

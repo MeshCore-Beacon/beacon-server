@@ -17,7 +17,7 @@ import (
 
 func TestAdminConfig(t *testing.T) {
 	const key = "admin-key-sentinel"
-	for _, variable := range []string{"POSTGRES_DSN", "MQTT_BROKER_1_URL", "MQTT_BROKER_1_USERNAME", "MQTT_BROKER_1_PASSWORD", "REDIS_PASSWORD"} {
+	for _, variable := range []string{"POSTGRES_DSN", "MQTT_BROKER_1_URL", "MQTT_BROKER_1_USERNAME", "MQTT_BROKER_1_PASSWORD", "REDIS_PASSWORD", "MESHMAPPER_API_KEY"} {
 		t.Setenv(variable, "environment-secret-sentinel")
 	}
 	for _, custom := range []bool{false, true} {
@@ -56,7 +56,7 @@ func TestAdminConfig(t *testing.T) {
 		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 			t.Fatal(err)
 		}
-		expected := map[string]any{"cors": want, "auth": map[string]any{"configured": true}, "ingest": map[string]any{"broker_count": float64(2)}}
+		expected := map[string]any{"cors": want, "auth": map[string]any{"configured": true}, "ingest": map[string]any{"broker_count": float64(2)}, "mobile": map[string]any{"min_app_version": ""}}
 		if !reflect.DeepEqual(body, expected) {
 			t.Fatalf("unexpected config shape or values: %v", body)
 		}

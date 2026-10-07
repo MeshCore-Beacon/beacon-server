@@ -227,7 +227,7 @@ func newZoneHarness(t *testing.T, f *fakeMeshMapper, store *zoneMemoryStore, ena
 	if store.lists == nil {
 		store.lists = newZoneListMemory()
 	}
-	dir := NewDirectory(store.lists)
+	dir := newTestDirectory(store.lists)
 	dir.listURL = f.URL + "/get_zones.php"
 	if err := dir.Restore(context.Background()); err != nil {
 		t.Fatal(err)
@@ -488,17 +488,17 @@ func TestDecodeBoundaryRejectsUnusableOutlines(t *testing.T) {
 
 func TestClientsAllowMeshMapperTimeout(t *testing.T) {
 	ctx := context.Background()
-	scopes, err := New(ctx, config.MeshMapperScopesConfig{}, nil, NewDirectory(nil), scopestore.New(), nil)
+	scopes, err := New(ctx, config.MeshMapperScopesConfig{}, nil, newTestDirectory(nil), scopestore.New(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	channels, err := NewChannels(ctx, config.MeshMapperChannelsConfig{}, newChannelMemoryStore(), NewDirectory(nil), keystore.NewMapKeyStore(nil))
+	channels, err := NewChannels(ctx, config.MeshMapperChannelsConfig{}, newChannelMemoryStore(), newTestDirectory(nil), keystore.NewMapKeyStore(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for name, c := range map[string]*http.Client{
-		"directory": NewDirectory(nil).client,
-		"zones":     NewZones(config.MeshMapperZonesConfig{}, nil, nil).client,
+		"directory": newTestDirectory(nil).client,
+		"zones":     NewZones(config.MeshMapperZonesConfig{}, nil, newTestDirectory(nil)).client,
 		"scopes":    scopes.client,
 		"channels":  channels.client,
 	} {
@@ -515,7 +515,7 @@ func TestZoneListCutShortStillCounts(t *testing.T) {
 	f := newFakeMeshMapper(t)
 	f.hang.Store(true)
 	lists := newZoneListMemory()
-	dir := NewDirectory(lists)
+	dir := newTestDirectory(lists)
 	dir.listURL = f.URL + "/get_zones.php"
 	now := time.Now().UTC()
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -542,7 +542,7 @@ func TestZoneListFetchDoesNotBlockOtherCallers(t *testing.T) {
 	}))
 	defer server.Close()
 	defer close(release)
-	dir := NewDirectory(newZoneListMemory())
+	dir := newTestDirectory(newZoneListMemory())
 	dir.listURL = server.URL
 	now := time.Now().UTC()
 	go func() { _, _, _ = dir.List(context.Background(), "CA", now) }()

@@ -25,6 +25,7 @@ import (
 func ObserversRouter(reader api.Reader) http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", listObservers(reader))
+	r.Get("/directory", listObserverDirectory(reader))
 	r.Route("/{observerId}", func(r chi.Router) {
 		r.Get("/", getObserver(reader))
 		r.Get("/adverts", listObserverAdverts(reader))

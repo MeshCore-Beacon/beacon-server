@@ -24,6 +24,37 @@ import (
 
 const testSQL = "CREATE TABLE fixture (id bigint PRIMARY KEY, name text);\nINSERT INTO fixture VALUES (1, 'café');\n"
 
+func TestBackupDoesNotExportMeshMapperAPIKey(t *testing.T) {
+	for _, saved := range []string{
+		"meshmapper:\n  api_key: backup-secret-canary\n",
+		"shared: &integration {api_key: backup-secret-canary}\nmeshmapper: *integration\n",
+		"meshmapper:\n  <<: {api_key: backup-secret-canary}\n",
+		"meshmapper:\n  api_key: [backup-secret-canary]\n",
+	} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte(saved), 0600); err != nil {
+			t.Fatal(err)
+		}
+		data, err := readConfig(path)
+		if err == nil || data != nil {
+			t.Fatal("saved MeshMapper key could enter a backup response")
+		}
+		if strings.Contains(err.Error(), "backup-secret-canary") {
+			t.Fatal("backup error exposed the key")
+		}
+	}
+	t.Setenv("MESHMAPPER_API_KEY", "environment-secret-canary")
+	saved := []byte("# Saved config remains verbatim.\nmeshmapper:\n  api_key: ''\n")
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, saved, 0600); err != nil {
+		t.Fatal(err)
+	}
+	data, err := readConfig(path)
+	if err != nil || !bytes.Equal(data, saved) {
+		t.Fatal("environment key changed the saved-config export")
+	}
+}
+
 // TestDumpProcess supplies an actual subprocess, including failure and cancellation.
 func TestDumpProcess(t *testing.T) {
 	mode := os.Getenv("BEACON_BACKUP_TEST_PROCESS")

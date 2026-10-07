@@ -39,7 +39,7 @@ func newGroupHarness(t *testing.T, f *fakeMeshMapper, store *zoneMemoryStore, im
 		store.rows = map[string]Boundary{}
 	}
 	h := &groupHarness{f: f, store: store}
-	dir := NewDirectory(newZoneListMemory())
+	dir := newTestDirectory(newZoneListMemory())
 	dir.listURL = f.URL + "/get_zones.php"
 	h.z = NewZones(config.MeshMapperZonesConfig{Enabled: true, ImportGroups: importGroups}, store, dir)
 	h.z.boundsURL = func(site string) (string, bool) { return site + "get_geojson.php", true }

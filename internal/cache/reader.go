@@ -387,3 +387,7 @@ func (cr *CachedReader) GetTopologyLinks(ctx context.Context, iatas []string, si
 		return cr.inner.GetTopologyLinks(ctx, iatas, since, until)
 	})
 }
+
+func (cr *CachedReader) ListObserverDirectory(ctx context.Context, query api.ObserverDirectoryQuery) (*api.ObserverDirectory, error) {
+	return cr.inner.ListObserverDirectory(ctx, query)
+}

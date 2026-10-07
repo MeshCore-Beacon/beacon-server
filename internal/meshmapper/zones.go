@@ -87,10 +87,7 @@ type Zones struct {
 
 func NewZones(cfg config.MeshMapperZonesConfig, store ZoneStore, dir *Directory) *Zones {
 	return &Zones{store: store, enabled: cfg.Enabled, importGroups: cfg.Enabled && cfg.ImportGroups, seen: map[string]bool{}, interval: cfg.Interval(), dir: dir,
-		boundsURL: boundaryEndpoint, client: &http.Client{
-			Timeout:       requestTimeout,
-			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		}}
+		boundsURL: boundaryEndpoint, client: dir.client}
 }
 
 // OnChange receives each IATA whose served border changed, for cache invalidation.
@@ -228,11 +225,13 @@ func (z *Zones) refresh(ctx context.Context, r *zoneRegion, zones map[string]zon
 		}
 		r.b.URL, r.b.AttemptedAt, r.b.LastError = attempt.URL, now, attempt.LastError
 		status, body, header, err := get(ctx, z.client, "Beacon-MeshMapper-Zones/1", endpoint, etag, MaxBoundaryBody)
-		if err != nil {
-			return err
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
-		switch status {
-		case http.StatusOK:
+		switch {
+		case err != nil:
+			update.LastError = requestProblem(err)
+		case status == http.StatusOK:
 			feature, decodeErr := decodeBoundary(body, r.b.IATA)
 			switch {
 			case decodeErr != nil:
@@ -242,7 +241,7 @@ func (z *Zones) refresh(ctx context.Context, r *zoneRegion, zones map[string]zon
 			default:
 				update.Feature = feature
 			}
-		case http.StatusNotModified:
+		case status == http.StatusNotModified:
 			if r.b.Feature == nil {
 				update.LastError = "304 without cached boundary"
 			}
@@ -287,7 +286,7 @@ func (z *Zones) refresh(ctx context.Context, r *zoneRegion, zones map[string]zon
 	return nil
 }
 
-// get returns transport errors only when ctx ended; other failures become status 0.
+// get never returns response bodies for failed requests.
 func get(ctx context.Context, client *http.Client, agent, endpoint, etag string, limit int64) (int, []byte, http.Header, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -300,10 +299,7 @@ func get(ctx context.Context, client *http.Client, agent, endpoint, etag string,
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		if ctx.Err() != nil {
-			return 0, nil, nil, ctx.Err()
-		}
-		return 0, nil, http.Header{}, nil
+		return 0, nil, nil, err
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
@@ -321,9 +317,17 @@ func statusProblem(status int, header http.Header, now time.Time, retryAt *time.
 	if status == 0 {
 		return "request failed" // don't persist untrusted error text
 	}
+	if status == http.StatusUnauthorized {
+		return "authentication failed (HTTP 401)"
+	}
+	if status == http.StatusForbidden {
+		return "permission denied (HTTP 403)"
+	}
 	if status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable {
 		if seconds, err := strconv.ParseInt(header.Get("Retry-After"), 10, 64); err == nil && seconds > 0 && seconds <= int64((1<<63-1)/time.Second) {
 			*retryAt = now.Add(time.Duration(seconds) * time.Second)
+		} else if deadline, err := http.ParseTime(header.Get("Retry-After")); err == nil && deadline.After(now) {
+			*retryAt = deadline
 		}
 	}
 	return fmt.Sprintf("HTTP %d", status)

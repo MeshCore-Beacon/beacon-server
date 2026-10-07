@@ -27,6 +27,7 @@ import (
 //
 //	/ws                → WebSocket (public in v1)
 //	/api/v1/           → public group
+//	  /info            → server info for the mobile app
 //	  /packets         → packets subrouter
 //	  /nodes           → nodes subrouter
 //	  /brokers         → brokers subrouter
@@ -69,6 +70,11 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 			MaxAge:           maxAge,
 		},
 		Ingest: api.AdminIngestConfig{BrokerCount: len(workers)},
+		Mobile: api.AdminMobileConfig{MinAppVersion: opts.MinAppVersion},
+	}
+	info := api.Info{ServerVersion: opts.ServerVersion}
+	if opts.MinAppVersion != "" {
+		info.MinAppVersion = &opts.MinAppVersion
 	}
 	runtimeConfig := mw.NewRuntimeConfig(adminConfig, []string{"Retry-After"})
 	r.Use(runtimeConfig.CORS)
@@ -111,6 +117,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 			r.Mount("/stats", handlers.StatsRouter(reader, handlers.StatsOptions{Scopes: opts.Scopes, SeriesWindow: opts.RollupRetention}))
 			r.Get("/scope-catalogues", handlers.ScopeCatalogues(opts.ScopeCatalogues))
 			r.Mount("/traces", handlers.TracesRouter(reader))
+			r.Mount("/info", handlers.InfoRouter(info))
 		})
 
 		// Protect the entire subtree, including its root and unknown paths.

@@ -75,7 +75,7 @@ func (s *memoryStore) SaveScopeCatalogue(_ context.Context, iata, url string, ne
 // newImporter restores an importer for YOW whose source points at url.
 func newImporter(t *testing.T, cfg config.MeshMapperScopesConfig, store *memoryStore, url string, scopes *scopestore.ScopeStore, manual ...scopestore.Entry) *Importer {
 	t.Helper()
-	imp, err := New(context.Background(), cfg, store, NewDirectory(newZoneListMemory()), scopes, manual)
+	imp, err := New(context.Background(), cfg, store, newTestDirectory(newZoneListMemory()), scopes, manual)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +260,7 @@ func TestImportedSourcesOverlapWithoutGlobalMembership(t *testing.T) {
 		store.rows[sourceKey{iata, iata}] = Cache{Payload: []byte(strings.ReplaceAll(string(catalogue("can")), "YOW", iata)), AttemptedAt: time.Now()}
 	}
 	scopes := scopestore.New()
-	_, err := New(ctx, config.MeshMapperScopesConfig{Enabled: true}, store, NewDirectory(newZoneListMemory()), scopes, nil)
+	_, err := New(ctx, config.MeshMapperScopesConfig{Enabled: true}, store, newTestDirectory(newZoneListMemory()), scopes, nil)
 	if err != nil || len(scopes.Entries()) != 1 || !reflect.DeepEqual(scopes.Entries()[0].IATAs, []string{"YOW", "YVR"}) {
 		t.Fatal("latest saved catalogue per IATA not restored", scopes.Entries(), err)
 	}
@@ -269,7 +269,7 @@ func TestImportedSourcesOverlapWithoutGlobalMembership(t *testing.T) {
 	}
 	// Disabled mode never calls the store.
 	disabled := scopestore.New()
-	if _, err = New(ctx, config.MeshMapperScopesConfig{}, nil, NewDirectory(newZoneListMemory()), disabled, nil); err != nil || len(disabled.Entries()) != 0 {
+	if _, err = New(ctx, config.MeshMapperScopesConfig{}, nil, newTestDirectory(newZoneListMemory()), disabled, nil); err != nil || len(disabled.Entries()) != 0 {
 		t.Fatal(err)
 	}
 }
@@ -360,7 +360,7 @@ func newFakeSites(t *testing.T) *fakeSites {
 
 func newDiscoveringImporter(t *testing.T, f *fakeSites, store *memoryStore, scopes *scopestore.ScopeStore) *Importer {
 	t.Helper()
-	dir := NewDirectory(newZoneListMemory())
+	dir := newTestDirectory(newZoneListMemory())
 	dir.listURL = f.URL + "/get_zones.php"
 	imp, err := New(context.Background(), config.MeshMapperScopesConfig{Enabled: true}, store, dir, scopes, nil)
 	if err != nil {
@@ -448,7 +448,7 @@ func newSweep(t *testing.T, store *memoryStore, fail ...string) (*Importer, *[]s
 		_, _ = w.Write([]byte(strings.ReplaceAll(string(catalogue("x")), "YOW", iata)))
 	}))
 	t.Cleanup(server.Close)
-	dir := NewDirectory(newZoneListMemory())
+	dir := newTestDirectory(newZoneListMemory())
 	dir.listURL = server.URL + "/get_zones.php"
 	imp, err := New(context.Background(), config.MeshMapperScopesConfig{Enabled: true}, store, dir, scopestore.New(), nil)
 	if err != nil {
