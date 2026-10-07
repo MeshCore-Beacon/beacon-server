@@ -301,3 +301,34 @@ func TestLoad_NegativeDurationsRejected(t *testing.T) {
 		t.Errorf("observers.delete_after: %v", err)
 	}
 }
+
+func TestLoadMinAppVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name, yaml, want string
+		wantError        bool
+	}{
+		{"omitted", "{}", "", false},
+		{"empty", "mobile: {min_app_version: ''}", "", false},
+		{"valid", "mobile: {min_app_version: '0.1.1'}", "0.1.1", false},
+		{"multi-digit", "mobile: {min_app_version: ' 10.20.30 '}", "10.20.30", false},
+		{"v prefix", "mobile: {min_app_version: 'v0.1.1'}", "", true},
+		{"two parts", "mobile: {min_app_version: '0.1'}", "", true},
+		{"pre-release", "mobile: {min_app_version: '0.1.1-beta'}", "", true},
+		{"four parts", "mobile: {min_app_version: '0.1.1.2'}", "", true},
+		{"letters", "mobile: {min_app_version: 'a.b.c'}", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tc.yaml), 0600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(path)
+			if (err != nil) != tc.wantError {
+				t.Fatalf("Load error = %v, want error = %v", err, tc.wantError)
+			}
+			if err == nil && cfg.Mobile.MinAppVersion != tc.want {
+				t.Fatalf("min_app_version = %q, want %q", cfg.Mobile.MinAppVersion, tc.want)
+			}
+		})
+	}
+}

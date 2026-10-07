@@ -897,6 +897,26 @@ const docTemplate = `{
                 }
             }
         },
+        "/info": {
+            "get": {
+                "description": "minAppVersion is null when the server sets no requirement.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Info"
+                ],
+                "summary": "Server info and minimum mobile app version",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.Info"
+                        }
+                    }
+                }
+            }
+        },
         "/messages": {
             "get": {
                 "produces": [
@@ -3639,6 +3659,9 @@ const docTemplate = `{
                 },
                 "ingest": {
                     "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminIngestConfig"
+                },
+                "mobile": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminMobileConfig"
                 }
             }
         },
@@ -3648,6 +3671,15 @@ const docTemplate = `{
                 "broker_count": {
                     "description": "BrokerCount counts configured broker workers, not active MQTT connections\nor a configurable processing-worker pool.",
                     "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.AdminMobileConfig": {
+            "type": "object",
+            "properties": {
+                "min_app_version": {
+                    "description": "empty means no requirement",
+                    "type": "string"
                 }
             }
         },
@@ -3944,6 +3976,20 @@ const docTemplate = `{
                 },
                 "lon": {
                     "type": "number"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.Info": {
+            "type": "object",
+            "properties": {
+                "minAppVersion": {
+                    "description": "MinAppVersion is the oldest allowed app version (X.Y.Z); null means no requirement.",
+                    "type": "string",
+                    "example": "0.1.1"
+                },
+                "serverVersion": {
+                    "type": "string",
+                    "example": "2.0.2"
                 }
             }
         },
@@ -6030,13 +6076,17 @@ const docTemplate = `{
         {
             "description": "Network statistics and time series",
             "name": "Stats"
+        },
+        {
+            "description": "Server info for the BEACON Mobile app",
+            "name": "Info"
         }
     ]
 }`
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "2.0.2",
+	Version:          "2.0.3",
 	Host:             "localhost:8080",
 	BasePath:         "/api/v1",
 	Schemes:          []string{"http", "https"},

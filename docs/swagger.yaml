@@ -52,6 +52,8 @@ definitions:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminCORSConfig'
       ingest:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminIngestConfig'
+      mobile:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminMobileConfig'
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.AdminIngestConfig:
     properties:
@@ -60,6 +62,12 @@ definitions:
           BrokerCount counts configured broker workers, not active MQTT connections
           or a configurable processing-worker pool.
         type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.AdminMobileConfig:
+    properties:
+      min_app_version:
+        description: empty means no requirement
+        type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.AdvertObservation:
     properties:
@@ -263,6 +271,17 @@ definitions:
         type: number
       lon:
         type: number
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.Info:
+    properties:
+      minAppVersion:
+        description: MinAppVersion is the oldest allowed app version (X.Y.Z); null
+          means no requirement.
+        example: 0.1.1
+        type: string
+      serverVersion:
+        example: 2.0.2
+        type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.KnownRoute:
     properties:
@@ -1708,7 +1727,7 @@ info:
     name: AGPL-3-or-later
   termsOfService: https://github.com/MeshCore-Beacon/beacon-server
   title: MeshCore Beacon API
-  version: 2.0.2
+  version: 2.0.3
 paths:
   /admin/accounts:
     get:
@@ -2301,6 +2320,19 @@ paths:
       summary: Get an IATA's GeoJSON border, if configured
       tags:
       - IATAs
+  /info:
+    get:
+      description: minAppVersion is null when the server sets no requirement.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.Info'
+      summary: Server info and minimum mobile app version
+      tags:
+      - Info
   /messages:
     get:
       parameters:
@@ -4186,3 +4218,5 @@ tags:
   name: Brokers
 - description: Network statistics and time series
   name: Stats
+- description: Server info for the BEACON Mobile app
+  name: Info
