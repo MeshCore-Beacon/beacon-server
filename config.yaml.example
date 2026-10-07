@@ -319,3 +319,9 @@ cache:
 #  view_refresh: 1h   # rebuilds radio presets; default: 1h
 #  reconfirm: 1h      # default: 1h
 #  cleanup: 1h        # default: 1h
+
+# Minimum BEACON Mobile version, served at GET /api/v1/info. Older apps show
+# "update required" for this server. Strict X.Y.Z (no v, no suffix); anything
+# else prevents startup. Default: empty, no requirement.
+#mobile:
+#  min_app_version: "0.1.1"

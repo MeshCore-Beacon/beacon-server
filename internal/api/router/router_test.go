@@ -90,3 +90,13 @@ func checkWebSocketLimit(t *testing.T, cfg config.ServerConfig, secondIP string,
 		t.Fatalf("established client stopped responding: %s %v", pong, err)
 	}
 }
+
+// Old servers 404 here and the app reads that as "no requirement", so the route must stay public.
+func TestInfoRoute(t *testing.T) {
+	handler := New(nil, nil, nil, Options{MinAppVersion: "0.1.1", ServerVersion: "2.0.2"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/info", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"minAppVersion":"0.1.1"`) {
+		t.Fatalf("info: %d %s", response.Code, response.Body.String())
+	}
+}
