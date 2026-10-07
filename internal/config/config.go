@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -43,6 +44,13 @@ type Config struct {
 	Nodes       NodesConfig           `yaml:"nodes"`
 	Observers   ObserversConfig       `yaml:"observers"`
 	Analytics   AnalyticsConfig       `yaml:"analytics"`
+	Mobile      MobileConfig          `yaml:"mobile"`
+}
+
+// MobileConfig holds settings the BEACON Mobile app reads from /info.
+type MobileConfig struct {
+	// MinAppVersion is the oldest app version (X.Y.Z) allowed to use this server; empty means any.
+	MinAppVersion string `yaml:"min_app_version"`
 }
 
 // BackupConfig enables protected downloads. Disabled by default.
@@ -450,6 +458,9 @@ func Load(path string) (*Config, error) {
 	if err := cfg.validateScopes(); err != nil {
 		return nil, err
 	}
+	if err := cfg.validateMobile(); err != nil {
+		return nil, err
+	}
 	if cfg.Nodes.MarkForeign && !cfg.MeshMapper.Zones.Enabled && !cfg.hasBorderFile() {
 		return nil, fmt.Errorf("nodes.mark_foreign requires an iatas.*.borderFile or meshmapper.zones")
 	}
@@ -475,6 +486,17 @@ func (c *Config) validateAPIKey() error {
 		return fmt.Errorf("auth.api_key / BEACON_API_KEY must not contain whitespace")
 	case len(key) < minAPIKeyLength:
 		return fmt.Errorf("auth.api_key / BEACON_API_KEY must be at least %d characters", minAPIKeyLength)
+	}
+	return nil
+}
+
+var appVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
+
+// validateMobile keeps min_app_version to plain X.Y.Z so every app can compare it.
+func (c *Config) validateMobile() error {
+	c.Mobile.MinAppVersion = strings.TrimSpace(c.Mobile.MinAppVersion)
+	if v := c.Mobile.MinAppVersion; v != "" && !appVersionPattern.MatchString(v) {
+		return fmt.Errorf("mobile.min_app_version must be X.Y.Z (digits only), got %q", v)
 	}
 	return nil
 }

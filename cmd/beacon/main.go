@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/db"
-	_ "github.com/MeshCore-Beacon/beacon-server/docs"
+	"github.com/MeshCore-Beacon/beacon-server/docs"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api/handlers"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api/router"
@@ -84,6 +84,8 @@ var version = "dev"
 // @tag.description	MQTT broker connection status
 // @tag.name			Stats
 // @tag.description	Network statistics and time series
+// @tag.name			Info
+// @tag.description	Server info for the BEACON Mobile app
 func main() {
 	_ = godotenv.Load()
 	addr := os.Getenv("LISTEN_ADDR")
@@ -432,6 +434,7 @@ func main() {
 		WSAllowedOrigins:     cfg.WebSocket.AllowedOrigins,
 		CORS:                 cfg.CORS, Server: cfg.Server, Auth: cfg.Auth, RateLimit: resolved.RateLimit,
 		Scopes: scopes, RollupRetention: resolved.RollupRetention,
+		MinAppVersion: cfg.Mobile.MinAppVersion, ServerVersion: docs.SwaggerInfo.Version,
 		AdminRoutes: map[string]http.Handler{
 			"/accounts": handlers.AccountsRouter(store),
 			"/backup":   handlers.BackupRouter(backupOpts, ctx),

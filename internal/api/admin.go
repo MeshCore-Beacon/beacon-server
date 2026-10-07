@@ -9,6 +9,11 @@ type AdminConfig struct {
 	Auth   AdminAuthConfig   `json:"auth"`
 	CORS   AdminCORSConfig   `json:"cors"`
 	Ingest AdminIngestConfig `json:"ingest"`
+	Mobile AdminMobileConfig `json:"mobile"`
+}
+
+type AdminMobileConfig struct {
+	MinAppVersion string `json:"min_app_version"` // empty means no requirement
 }
 
 type AdminAuthConfig struct {
