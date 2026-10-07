@@ -29,7 +29,7 @@ func TestPublicCataloguesFreshnessAndIsolation(t *testing.T) {
 	defer server.Close()
 	cfg := config.MeshMapperScopesConfig{Enabled: true}
 	store := newMemoryStore("YOW")
-	imp, err := New(context.Background(), cfg, store, NewDirectory(newZoneListMemory()), scopestore.New(), nil)
+	imp, err := New(context.Background(), cfg, store, NewDirectory(newZoneListMemory(), ""), scopestore.New(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,6 +37,7 @@ func TestPublicCataloguesFreshnessAndIsolation(t *testing.T) {
 		t.Fatal(got)
 	}
 	imp.sources[0].url = server.URL
+	imp.client = server.Client()
 	now := time.Now()
 	if err := imp.refresh(context.Background(), &imp.sources[0], now); err != nil {
 		t.Fatal(err)
@@ -71,12 +72,12 @@ func TestPublicCataloguesFreshnessAndIsolation(t *testing.T) {
 	if calls != 2 {
 		t.Fatal("reading public metadata performed upstream requests", calls)
 	}
-	disabled, err := New(context.Background(), config.MeshMapperScopesConfig{}, store, NewDirectory(newZoneListMemory()), scopestore.New(), nil)
+	disabled, err := New(context.Background(), config.MeshMapperScopesConfig{}, store, NewDirectory(newZoneListMemory(), ""), scopestore.New(), nil)
 	if err != nil || len(disabled.Catalogues()) != 0 {
 		t.Fatal("disabled importer exposed old membership")
 	}
 	store.rows[sourceKey{"YOW", server.URL}] = Cache{Payload: []byte(`{"scopes":"invalid"}`)}
-	restored, err := New(context.Background(), cfg, store, NewDirectory(newZoneListMemory()), scopestore.New(), nil)
+	restored, err := New(context.Background(), cfg, store, NewDirectory(newZoneListMemory(), ""), scopestore.New(), nil)
 	if err != nil || len(restored.Catalogues()[0].Scopes) != 0 || restored.Catalogues()[0].LastError == "" {
 		t.Fatal("invalid saved metadata leaked")
 	}
@@ -85,7 +86,7 @@ func TestPublicCataloguesFreshnessAndIsolation(t *testing.T) {
 func TestPublicCataloguesIncludeDiscoveredAndUnlistedRegions(t *testing.T) {
 	ctx := context.Background()
 	store := newMemoryStore("YOW")
-	dir := NewDirectory(newZoneListMemory())
+	dir := NewDirectory(newZoneListMemory(), "")
 	dir.lists["CA"] = &zoneList{zones: map[string]zoneEntry{}, fetchedAt: time.Now()}
 	imp, err := New(ctx, config.MeshMapperScopesConfig{Enabled: true}, store, dir, scopestore.New(), nil)
 	if err != nil {
