@@ -17,7 +17,7 @@ import (
 func routeEvidenceQuery(r *http.Request, iata, key string, now time.Time) (api.RouteEvidenceQuery, error) {
 	q := api.RouteEvidenceQuery{}
 	values := r.URL.Query()
-	for _, name := range []string{"pageCursor", "since", "until", "range", "limit"} {
+	for _, name := range []string{"pageCursor", "since", "until", "range", "limit", "hashSize", "pathBytes"} {
 		if len(values[name]) > 1 {
 			return q, api.ErrRouteEvidenceInput
 		}
@@ -38,6 +38,7 @@ func routeEvidenceQuery(r *http.Request, iata, key string, now time.Time) (api.R
 		q.Cursor = c
 		q.Since = c.Since
 		q.Until = c.Until
+		q.HashSize, q.PathBytes = c.HashSize, c.PathBytes
 	} else {
 		q.Until = now.UTC().Truncate(time.Millisecond)
 		q.Since = q.Until.Add(-24 * time.Hour)
@@ -67,6 +68,17 @@ func routeEvidenceQuery(r *http.Request, iata, key string, now time.Time) (api.R
 			return q, api.ErrRouteEvidenceInput
 		}
 	}
+	if values.Has("hashSize") || values.Has("pathBytes") {
+		width, err := strconv.ParseInt(values.Get("hashSize"), 10, 16)
+		path := values.Get("pathBytes")
+		if err != nil || !api.ValidRouteEvidencePath(int16(width), path) || strconv.FormatInt(width, 10) != values.Get("hashSize") {
+			return q, api.ErrRouteEvidenceInput
+		}
+		if q.Cursor != nil && q.Cursor.HashSize != 0 && (q.Cursor.HashSize != int16(width) || q.Cursor.PathBytes != path) {
+			return q, api.ErrRouteEvidenceInput
+		}
+		q.HashSize, q.PathBytes = int16(width), path
+	}
 	if !api.ValidRouteEvidenceWindow(q.Since, q.Until) || q.Until.After(now.Add(clockSkewTolerance)) {
 		return q, api.ErrRouteEvidenceInput
 	}
@@ -76,7 +88,7 @@ func routeEvidenceQuery(r *http.Request, iata, key string, now time.Time) (api.R
 // getRouteEvidence godoc
 //
 // @Summary Get retained reports matching a full saved route prefix sequence
-// @Description Matches the saved IATA, complete path bytes and hash width. Excludes TRACE and unclassified reports; other widths and search-result subsegments are not included. Byte matches do not prove hop identities or delivery. The route and its historical counter can outlive raw evidence. Cursors retain full timestamp precision and pin route/window scope.
+// @Description Matches one complete path representation in the saved IATA. Defaults to the latest processed prefixes; hashSize/pathBytes pin a prior response. Excludes TRACE and unclassified reports; widths are never combined. Pinned prefixes must match the saved node chain or its current metadata. Byte matches do not prove hop identities or delivery. The route counter can outlive raw evidence. New cursors pin path, route, window and full timestamp precision; legacy unpinned cursors remain supported.
 // @Tags Routes
 // @Produce json
 // @Param iata path string true "Three-character IATA code"
@@ -84,7 +96,9 @@ func routeEvidenceQuery(r *http.Request, iata, key string, now time.Time) (api.R
 // @Param range query string false "Server-anchored duration (default 24h, max 720h); exclusive with since/until/pageCursor"
 // @Param since query int false "Window start epoch ms; provide with until (default last 24h)"
 // @Param until query int false "Exclusive window end epoch ms; maximum span 30d, end may be up to 5 minutes ahead of server time (clock skew tolerance)"
-// @Param pageCursor query string false "Opaque precise cursor from nextPageCursor; window is pinned"
+// @Param hashSize query int false "Exact hash width (1–3); provide with pathBytes to pin a response's representation" minimum(1) maximum(3)
+// @Param pathBytes query string false "Complete lower-case hex path from the response; provide with hashSize"
+// @Param pageCursor query string false "Opaque precise cursor from nextPageCursor; route, window and path are pinned"
 // @Param limit query int false "Default 50; positive, capped at 200" minimum(1) maximum(200)
 // @Success 200 {object} api.RouteEvidence
 // @Failure 400 {object} handlers.APIError
@@ -100,7 +114,7 @@ func getRouteEvidence(reader api.Reader) http.HandlerFunc {
 		}
 		query, err := routeEvidenceQuery(r, iata, key, time.Now())
 		if err != nil {
-			respondError(w, 400, "invalid route evidence window, limit or page cursor")
+			respondError(w, 400, "invalid route evidence window, path, limit or page cursor")
 			return
 		}
 		result, err := reader.GetRouteEvidence(r.Context(), iata, key, query)
