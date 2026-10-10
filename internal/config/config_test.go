@@ -332,3 +332,29 @@ func TestLoadMinAppVersion(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadMinWebVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name, yaml, want string
+		wantError        bool
+	}{
+		{"omitted", "{}", "", false},
+		{"valid", "web: {min_web_version: ' 2.0.4 '}", "2.0.4", false},
+		{"v prefix", "web: {min_web_version: 'v2.0.4'}", "", true},
+		{"two parts", "web: {min_web_version: '2.0'}", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tc.yaml), 0600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(path)
+			if (err != nil) != tc.wantError {
+				t.Fatalf("Load error = %v, want error = %v", err, tc.wantError)
+			}
+			if err == nil && cfg.Web.MinWebVersion != tc.want {
+				t.Fatalf("min_web_version = %q, want %q", cfg.Web.MinWebVersion, tc.want)
+			}
+		})
+	}
+}

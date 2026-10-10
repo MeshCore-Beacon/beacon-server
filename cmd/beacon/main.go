@@ -434,7 +434,9 @@ func main() {
 		WSAllowedOrigins:     cfg.WebSocket.AllowedOrigins,
 		CORS:                 cfg.CORS, Server: cfg.Server, Auth: cfg.Auth, RateLimit: resolved.RateLimit,
 		Scopes: scopes, RollupRetention: resolved.RollupRetention,
-		MinAppVersion: cfg.Mobile.MinAppVersion, ServerVersion: docs.SwaggerInfo.Version,
+		MinAppVersion: api.HigherVersion(api.MinAppVersion, cfg.Mobile.MinAppVersion),
+		MinWebVersion: api.HigherVersion(api.MinWebVersion, cfg.Web.MinWebVersion),
+		ServerVersion: docs.SwaggerInfo.Version,
 		AdminRoutes: map[string]http.Handler{
 			"/accounts": handlers.AccountsRouter(store),
 			"/backup":   handlers.BackupRouter(backupOpts, ctx),

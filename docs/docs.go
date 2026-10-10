@@ -899,14 +899,14 @@ const docTemplate = `{
         },
         "/info": {
             "get": {
-                "description": "minAppVersion is null when the server sets no requirement.",
+                "description": "minAppVersion (BEACON Mobile) and minWebVersion (Beacon Web) are null when the\nserver sets no requirement. Each is the higher of the built-in floor and config.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "Info"
                 ],
-                "summary": "Server info and minimum mobile app version",
+                "summary": "Server info and minimum client versions",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -2201,6 +2201,7 @@ const docTemplate = `{
         },
         "/routes/cross": {
             "get": {
+                "description": "Pass iatas (comma-separated, optional; omitted searches every IATA) or the\nsingle directed pair fromIata/toIata, not both.",
                 "produces": [
                     "application/json"
                 ],
@@ -2211,31 +2212,35 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Source node hash prefix (hex)",
+                        "description": "Source node hash prefix (hex, 1-4 bytes)",
                         "name": "fromHash",
                         "in": "query",
                         "required": true
                     },
                     {
                         "type": "string",
-                        "description": "Source IATA code",
-                        "name": "fromIata",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Destination node hash prefix (hex)",
+                        "description": "Destination node hash prefix (hex, 1-4 bytes)",
                         "name": "toHash",
                         "in": "query",
                         "required": true
                     },
                     {
                         "type": "string",
-                        "description": "Destination IATA code",
+                        "description": "Comma-separated IATA codes to search (2-100)",
+                        "name": "iatas",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Source IATA code (with toIata)",
+                        "name": "fromIata",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Destination IATA code (with fromIata)",
                         "name": "toIata",
-                        "in": "query",
-                        "required": true
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -2259,12 +2264,19 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
                     }
                 }
             }
         },
         "/routes/search": {
             "get": {
+                "description": "Routes within one IATA that run from the source hash to the destination hash,\ntrimmed to that span. iatas is optional (omitted searches every IATA); the single\niata is still accepted. At most 500, shortest first.",
                 "produces": [
                     "application/json"
                 ],
@@ -2275,21 +2287,26 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "IATA code to search within",
-                        "name": "iata",
-                        "in": "query",
-                        "required": true
+                        "description": "Comma-separated IATA codes to search (max 100)",
+                        "name": "iatas",
+                        "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "Source node hash prefix (hex)",
+                        "description": "Single IATA code (when iatas is omitted)",
+                        "name": "iata",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Source node hash prefix (hex, 1-4 bytes)",
                         "name": "from",
                         "in": "query",
                         "required": true
                     },
                     {
                         "type": "string",
-                        "description": "Destination node hash prefix (hex)",
+                        "description": "Destination node hash prefix (hex, 1-4 bytes)",
                         "name": "to",
                         "in": "query",
                         "required": true
@@ -2313,6 +2330,12 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
@@ -3662,6 +3685,9 @@ const docTemplate = `{
                 },
                 "mobile": {
                     "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminMobileConfig"
+                },
+                "web": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminWebConfig"
                 }
             }
         },
@@ -3678,7 +3704,16 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "min_app_version": {
-                    "description": "empty means no requirement",
+                    "description": "effective floor; empty means no requirement",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.AdminWebConfig": {
+            "type": "object",
+            "properties": {
+                "min_web_version": {
+                    "description": "effective floor; empty means no requirement",
                     "type": "string"
                 }
             }
@@ -3986,6 +4021,11 @@ const docTemplate = `{
                     "description": "MinAppVersion is the oldest allowed app version (X.Y.Z); null means no requirement.",
                     "type": "string",
                     "example": "0.1.1"
+                },
+                "minWebVersion": {
+                    "description": "MinWebVersion is the oldest allowed Beacon Web version (X.Y.Z); null means no requirement.",
+                    "type": "string",
+                    "example": "2.0.3"
                 },
                 "serverVersion": {
                     "type": "string",
