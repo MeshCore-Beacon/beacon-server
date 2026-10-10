@@ -11,7 +11,7 @@ import (
 // Client floors this server code needs. Bump the matching one when a release breaks older
 // clients; config can raise them, never lower them. Empty means no requirement.
 const (
-	MinAppVersion = "1.0.0" // BEACON Mobile: top advertisers sort
+	MinAppVersion = "2.0.0" // BEACON Mobile: top advertisers sort
 	MinWebVersion = "2.0.4" // Beacon Web: top advertisers sort
 )
 
