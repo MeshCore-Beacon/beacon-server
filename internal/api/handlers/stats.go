@@ -284,8 +284,8 @@ func getStatsTopObservers(reader api.Reader) http.HandlerFunc {
 
 // getStatsTopAdvertisers godoc
 //
-//	@Summary	Top N nodes by distinct ADVERT packet count (last 24h by default)
-//	@Description	Each advert counts once per hour heard, however many requested IATAs heard it. nodeId is null when the node row has been deleted.
+//	@Summary	Top N nodes by distinct flood or direct ADVERT packet count (last 24h by default)
+//	@Description	Ranks by the sort count, ties broken by total adverts then public key. Each advert counts once per hour heard, however many requested IATAs heard it. nodeId is null when the node row has been deleted.
 //	@Tags		Stats
 //	@Produce	json
 //	@Param		iatas		query	string	false	"Comma-separated IATA codes"
@@ -293,7 +293,9 @@ func getStatsTopObservers(reader api.Reader) http.HandlerFunc {
 //	@Param		region		query	string	false	"Filter by region slug, expands to member IATAs"
 //	@Param		since	query		int		false	"Start of window epoch ms (default last 24h)"
 //	@Param		limit	query		int		false	"Max results (default 10); must be positive, values above 200 are clamped" minimum(1) maximum(200)
+//	@Param		sort	query		string	true	"Rank by flood or direct advert count" Enums(flood,direct)
 //	@Success	200		{array}		api.TopAdvertiser
+//	@Failure	400		{object}	handlers.APIError
 //	@Failure	500		{object}	handlers.APIError
 //	@Router		/stats/top-advertisers [get]
 func getStatsTopAdvertisers(reader api.Reader) http.HandlerFunc {
@@ -320,7 +322,12 @@ func getStatsTopAdvertisers(reader api.Reader) http.HandlerFunc {
 			respondError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		advertisers, err := reader.GetStatsTopAdvertisers(r.Context(), iatas, since, limit)
+		sort := api.AdvertiserSort(r.URL.Query().Get("sort"))
+		if sort != api.AdvertiserSortFlood && sort != api.AdvertiserSortDirect {
+			respondError(w, http.StatusBadRequest, "sort must be flood or direct")
+			return
+		}
+		advertisers, err := reader.GetStatsTopAdvertisers(r.Context(), iatas, since, limit, sort)
 		if err != nil {
 			slog.Error("api: GetStatsTopAdvertisers failed", "component", "api", "error", err)
 			respondError(w, http.StatusInternalServerError, "internal server error")

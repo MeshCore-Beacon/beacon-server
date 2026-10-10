@@ -51,7 +51,7 @@ type stubReader struct {
 	getStatsPayloadBreakdown     func(ctx context.Context, iatas []string, since time.Time) ([]api.PayloadBreakdownItem, error)
 	getStatsTopNodes             func(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopNode, error)
 	getStatsTopObservers         func(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopObserver, error)
-	getStatsTopAdvertisers       func(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopAdvertiser, error)
+	getStatsTopAdvertisers       func(ctx context.Context, iatas []string, since time.Time, limit int32, sort api.AdvertiserSort) ([]api.TopAdvertiser, error)
 	getStatsClockDrift           func(ctx context.Context, iatas []string, limit int32) ([]api.ClockDriftEntry, error)
 	getStatsTopTalkers           func(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopTalker, error)
 	getScopeStats                func(ctx context.Context, iatas []string, since time.Time) ([]api.ScopeStats, error)
@@ -305,9 +305,9 @@ func (s stubReader) GetStatsTopObservers(ctx context.Context, iatas []string, si
 	return nil, nil
 }
 
-func (s stubReader) GetStatsTopAdvertisers(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopAdvertiser, error) {
+func (s stubReader) GetStatsTopAdvertisers(ctx context.Context, iatas []string, since time.Time, limit int32, sort api.AdvertiserSort) ([]api.TopAdvertiser, error) {
 	if s.getStatsTopAdvertisers != nil {
-		return s.getStatsTopAdvertisers(ctx, iatas, since, limit)
+		return s.getStatsTopAdvertisers(ctx, iatas, since, limit, sort)
 	}
 	return nil, nil
 }

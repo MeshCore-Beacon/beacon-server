@@ -104,7 +104,7 @@ func (s *stubReader) GetStatsTopObservers(_ context.Context, _ []string, _ time.
 	return nil, nil
 }
 
-func (s *stubReader) GetStatsTopAdvertisers(_ context.Context, _ []string, _ time.Time, _ int32) ([]api.TopAdvertiser, error) {
+func (s *stubReader) GetStatsTopAdvertisers(_ context.Context, _ []string, _ time.Time, _ int32, _ api.AdvertiserSort) ([]api.TopAdvertiser, error) {
 	return nil, nil
 }
 

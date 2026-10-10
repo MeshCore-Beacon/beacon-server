@@ -147,8 +147,8 @@ type Querier interface {
 	// Counts sum; observers, IATAs and scopes are distinct across the window; packets count
 	// once per hour heard. Each branch pair keeps "all IATAs" and "these IATAs" plans separate.
 	GetStatsSeries(ctx context.Context, arg GetStatsSeriesParams) ([]GetStatsSeriesRow, error)
-	// Top N advertisers since the given hour. Each ADVERT packet counts once per hour heard,
-	// however many of the requested IATAs heard it (IATA-set rollup). Live names win.
+	// Top N advertisers since the given hour, ranked by flood or direct adverts (@sort). Each ADVERT
+	// packet counts once per hour heard, however many of the requested IATAs heard it. Live names win.
 	GetStatsTopAdvertisers(ctx context.Context, arg GetStatsTopAdvertisersParams) ([]GetStatsTopAdvertisersRow, error)
 	// Top N observers since the given hour. Counts sum across matched IATAs; iata is a
 	// representative one. Live names win over the rolled snapshot.

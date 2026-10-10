@@ -187,10 +187,11 @@ type Reader interface {
 	// since defines the start of the window; pass zero time for default (last 24h).
 	GetStatsTopObservers(ctx context.Context, iatas []string, since time.Time, limit int32) ([]TopObserver, error)
 
-	// GetStatsTopAdvertisers returns the top N nodes by distinct ADVERT packet count.
+	// GetStatsTopAdvertisers returns the top N nodes by distinct flood or direct ADVERT count,
+	// ties broken by total adverts then public key.
 	// Pass nil for iatas to return stats across all IATAs.
 	// since defines the start of the window; pass zero time for default (last 24h).
-	GetStatsTopAdvertisers(ctx context.Context, iatas []string, since time.Time, limit int32) ([]TopAdvertiser, error)
+	GetStatsTopAdvertisers(ctx context.Context, iatas []string, since time.Time, limit int32, sort AdvertiserSort) ([]TopAdvertiser, error)
 
 	// GetStatsClockDrift returns repeaters/room servers whose most recent advert-derived
 	// clock drift exceeds the configured threshold (nodes.clock_drift_threshold), worst
