@@ -156,10 +156,10 @@ func (cr *CachedReader) GetStatsTopObservers(ctx context.Context, iatas []string
 }
 
 // GetStatsTopAdvertisers implements [api.Reader].
-func (cr *CachedReader) GetStatsTopAdvertisers(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopAdvertiser, error) {
+func (cr *CachedReader) GetStatsTopAdvertisers(ctx context.Context, iatas []string, since time.Time, limit int32, sort api.AdvertiserSort) ([]api.TopAdvertiser, error) {
 	return cachedRollup(ctx, cr, keyStatsTopAdvPrefix, iatas, func(ctx context.Context) ([]api.TopAdvertiser, error) {
-		return cr.inner.GetStatsTopAdvertisers(ctx, iatas, since, limit)
-	}, cr.sinceKey(since), limit)
+		return cr.inner.GetStatsTopAdvertisers(ctx, iatas, since, limit, sort)
+	}, cr.sinceKey(since), limit, sort)
 }
 
 // GetStatsTopTalkers implements [api.Reader].

@@ -41,7 +41,7 @@ func (r iataRecorder) GetStatsTopObservers(_ context.Context, iatas []string, _ 
 	r.rec(iatas)
 	return nil, nil
 }
-func (r iataRecorder) GetStatsTopAdvertisers(_ context.Context, iatas []string, _ time.Time, _ int32) ([]api.TopAdvertiser, error) {
+func (r iataRecorder) GetStatsTopAdvertisers(_ context.Context, iatas []string, _ time.Time, _ int32, _ api.AdvertiserSort) ([]api.TopAdvertiser, error) {
 	r.rec(iatas)
 	return nil, nil
 }
@@ -81,7 +81,11 @@ func TestStatsEmptyRegionMatchesNothing(t *testing.T) {
 				return &api.Region{IATAs: []string{"YVR"}}, nil
 			}}}
 			w := httptest.NewRecorder()
-			StatsRouter(reader, StatsOptions{}).ServeHTTP(w, httptest.NewRequest("GET", "/"+path+"?region="+tc.region, nil))
+			query := "?region=" + tc.region
+			if path == "top-advertisers" {
+				query += "&sort=flood"
+			}
+			StatsRouter(reader, StatsOptions{}).ServeHTTP(w, httptest.NewRequest("GET", "/"+path+query, nil))
 			if w.Code != 200 || !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("/stats/%s?region=%s: status %d, iatas %q; want 200, %q", path, tc.region, w.Code, got, tc.want)
 			}

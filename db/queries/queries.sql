@@ -1191,8 +1191,8 @@ LEFT JOIN observers o ON o.id = r.observer_id
 ORDER BY r.observation_count DESC, r.observer_id;
 
 -- name: GetStatsTopAdvertisers :many
--- Top N advertisers since the given hour. Each ADVERT packet counts once per hour heard,
--- however many of the requested IATAs heard it (IATA-set rollup). Live names win.
+-- Top N advertisers since the given hour, ranked by flood or direct adverts (@sort). Each ADVERT
+-- packet counts once per hour heard, however many of the requested IATAs heard it. Live names win.
 WITH ranked AS (
   SELECT origin_pubkey, SUM(advert_packets)::bigint AS advert_count,
          SUM(flood_packets)::bigint AS flood_advert_count, SUM(direct_packets)::bigint AS direct_advert_count
@@ -1200,7 +1200,8 @@ WITH ranked AS (
   WHERE hour >= @since::timestamptz
     AND (COALESCE(cardinality(@iatas::bpchar[]), 0) = 0 OR iatas && @iatas::bpchar[])
   GROUP BY origin_pubkey
-  ORDER BY advert_count DESC, origin_pubkey
+  ORDER BY CASE WHEN @sort::text = 'flood' THEN SUM(flood_packets) ELSE SUM(direct_packets) END DESC,
+           advert_count DESC, origin_pubkey
   LIMIT @row_limit
 ), heard AS (
   SELECT h.origin_pubkey, MAX(h.last_heard) AS last_heard, MAX(h.iata) AS iata,
@@ -1217,7 +1218,8 @@ SELECT n.id AS node_id, encode(r.origin_pubkey, 'hex') AS public_key,
 FROM ranked r
 LEFT JOIN heard h ON h.origin_pubkey = r.origin_pubkey
 LEFT JOIN nodes n ON n.public_key = r.origin_pubkey
-ORDER BY r.advert_count DESC, r.origin_pubkey;
+ORDER BY CASE WHEN @sort::text = 'flood' THEN r.flood_advert_count ELSE r.direct_advert_count END DESC,
+         r.advert_count DESC, r.origin_pubkey;
 
 -- name: GetStatsClockDrift :many
 -- Repeaters/room servers (node_type 2/3) whose current advert-derived clock drift exceeds
