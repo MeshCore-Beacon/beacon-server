@@ -27,7 +27,7 @@ import (
 //
 //	/ws                → WebSocket (public in v1)
 //	/api/v1/           → public group
-//	  /info            → server info for the mobile app
+//	  /info            → server info and minimum client versions
 //	  /packets         → packets subrouter
 //	  /nodes           → nodes subrouter
 //	  /brokers         → brokers subrouter
@@ -71,10 +71,14 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 		},
 		Ingest: api.AdminIngestConfig{BrokerCount: len(workers)},
 		Mobile: api.AdminMobileConfig{MinAppVersion: opts.MinAppVersion},
+		Web:    api.AdminWebConfig{MinWebVersion: opts.MinWebVersion},
 	}
 	info := api.Info{ServerVersion: opts.ServerVersion}
 	if opts.MinAppVersion != "" {
 		info.MinAppVersion = &opts.MinAppVersion
+	}
+	if opts.MinWebVersion != "" {
+		info.MinWebVersion = &opts.MinWebVersion
 	}
 	runtimeConfig := mw.NewRuntimeConfig(adminConfig, []string{"Retry-After"})
 	r.Use(runtimeConfig.CORS)

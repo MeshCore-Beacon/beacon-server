@@ -160,14 +160,6 @@ func (s *stubReader) GetTraceByTag(_ context.Context, _ string) (*api.TraceDetai
 	return nil, nil
 }
 
-func (s *stubReader) GetKnownRoutesByNode(_ context.Context, _ string, _ uuid.UUID) ([]api.KnownRoute, error) {
-	return nil, nil
-}
-
-func (s *stubReader) GetCrossIATANeighbors(_ context.Context, _ uuid.UUID, _ string) ([]api.NodeNeighbor, error) {
-	return nil, nil
-}
-
 func (s *stubReader) ListChannels(_ context.Context, _ int32, _ []byte, _ []string, _ *bool, _ int64, _ *api.ChannelCursor) (api.ChannelPage, error) {
 	return api.ChannelPage{}, nil
 }
@@ -212,11 +204,11 @@ func (s *stubReader) ListKnownRoutes(_ context.Context, _ string, _ int32, _ tim
 	return nil, nil
 }
 
-func (s *stubReader) SearchKnownRoutes(_ context.Context, _, _, _ string) ([]api.KnownRoute, error) {
+func (s *stubReader) SearchKnownRoutes(_ context.Context, _ []string, _, _ string) ([]api.KnownRoute, error) {
 	return nil, nil
 }
 
-func (s *stubReader) SearchCrossIATARoutes(_ context.Context, _, _, _, _ string) ([]api.CrossIATARoute, error) {
+func (s *stubReader) SearchCrossIATARoutes(_ context.Context, _ api.CrossRouteSearch) ([]api.CrossIATARoute, error) {
 	return nil, nil
 }
 

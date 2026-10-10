@@ -432,21 +432,6 @@ func (mr *MockQuerierMockRecorder) GetChannelByID(ctx, id any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChannelByID", reflect.TypeOf((*MockQuerier)(nil).GetChannelByID), ctx, id)
 }
 
-// GetCrossIATANeighbors mocks base method.
-func (m *MockQuerier) GetCrossIATANeighbors(ctx context.Context, arg db.GetCrossIATANeighborsParams) ([]db.GetCrossIATANeighborsRow, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetCrossIATANeighbors", ctx, arg)
-	ret0, _ := ret[0].([]db.GetCrossIATANeighborsRow)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// GetCrossIATANeighbors indicates an expected call of GetCrossIATANeighbors.
-func (mr *MockQuerierMockRecorder) GetCrossIATANeighbors(ctx, arg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCrossIATANeighbors", reflect.TypeOf((*MockQuerier)(nil).GetCrossIATANeighbors), ctx, arg)
-}
-
 // GetEarliestCompleteRollupHour mocks base method.
 func (m *MockQuerier) GetEarliestCompleteRollupHour(ctx context.Context) (pgtype.Timestamptz, error) {
 	m.ctrl.T.Helper()
@@ -507,19 +492,19 @@ func (mr *MockQuerierMockRecorder) GetIATABorder(ctx, iata any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetIATABorder", reflect.TypeOf((*MockQuerier)(nil).GetIATABorder), ctx, iata)
 }
 
-// GetKnownRoutesByNode mocks base method.
-func (m *MockQuerier) GetKnownRoutesByNode(ctx context.Context, arg db.GetKnownRoutesByNodeParams) ([]db.GetKnownRoutesByNodeRow, error) {
+// GetKnownRoutesByNodes mocks base method.
+func (m *MockQuerier) GetKnownRoutesByNodes(ctx context.Context, arg db.GetKnownRoutesByNodesParams) ([]db.GetKnownRoutesByNodesRow, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetKnownRoutesByNode", ctx, arg)
-	ret0, _ := ret[0].([]db.GetKnownRoutesByNodeRow)
+	ret := m.ctrl.Call(m, "GetKnownRoutesByNodes", ctx, arg)
+	ret0, _ := ret[0].([]db.GetKnownRoutesByNodesRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// GetKnownRoutesByNode indicates an expected call of GetKnownRoutesByNode.
-func (mr *MockQuerierMockRecorder) GetKnownRoutesByNode(ctx, arg any) *gomock.Call {
+// GetKnownRoutesByNodes indicates an expected call of GetKnownRoutesByNodes.
+func (mr *MockQuerierMockRecorder) GetKnownRoutesByNodes(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetKnownRoutesByNode", reflect.TypeOf((*MockQuerier)(nil).GetKnownRoutesByNode), ctx, arg)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetKnownRoutesByNodes", reflect.TypeOf((*MockQuerier)(nil).GetKnownRoutesByNodes), ctx, arg)
 }
 
 // GetLatestCompleteRollupHour mocks base method.
@@ -535,6 +520,21 @@ func (m *MockQuerier) GetLatestCompleteRollupHour(ctx context.Context) (pgtype.T
 func (mr *MockQuerierMockRecorder) GetLatestCompleteRollupHour(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLatestCompleteRollupHour", reflect.TypeOf((*MockQuerier)(nil).GetLatestCompleteRollupHour), ctx)
+}
+
+// GetNeighborLinks mocks base method.
+func (m *MockQuerier) GetNeighborLinks(ctx context.Context, arg db.GetNeighborLinksParams) ([]db.GetNeighborLinksRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetNeighborLinks", ctx, arg)
+	ret0, _ := ret[0].([]db.GetNeighborLinksRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetNeighborLinks indicates an expected call of GetNeighborLinks.
+func (mr *MockQuerierMockRecorder) GetNeighborLinks(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNeighborLinks", reflect.TypeOf((*MockQuerier)(nil).GetNeighborLinks), ctx, arg)
 }
 
 // GetNodeByID mocks base method.
@@ -1911,6 +1911,66 @@ func (mr *MockQuerierMockRecorder) ResolvePathHashesP4(ctx, arg any) *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolvePathHashesP4", reflect.TypeOf((*MockQuerier)(nil).ResolvePathHashesP4), ctx, arg)
 }
 
+// ResolveRelayHashPairsP1 mocks base method.
+func (m *MockQuerier) ResolveRelayHashPairsP1(ctx context.Context, arg db.ResolveRelayHashPairsP1Params) ([]db.ResolveRelayHashPairsP1Row, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ResolveRelayHashPairsP1", ctx, arg)
+	ret0, _ := ret[0].([]db.ResolveRelayHashPairsP1Row)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ResolveRelayHashPairsP1 indicates an expected call of ResolveRelayHashPairsP1.
+func (mr *MockQuerierMockRecorder) ResolveRelayHashPairsP1(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolveRelayHashPairsP1", reflect.TypeOf((*MockQuerier)(nil).ResolveRelayHashPairsP1), ctx, arg)
+}
+
+// ResolveRelayHashPairsP2 mocks base method.
+func (m *MockQuerier) ResolveRelayHashPairsP2(ctx context.Context, arg db.ResolveRelayHashPairsP2Params) ([]db.ResolveRelayHashPairsP2Row, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ResolveRelayHashPairsP2", ctx, arg)
+	ret0, _ := ret[0].([]db.ResolveRelayHashPairsP2Row)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ResolveRelayHashPairsP2 indicates an expected call of ResolveRelayHashPairsP2.
+func (mr *MockQuerierMockRecorder) ResolveRelayHashPairsP2(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolveRelayHashPairsP2", reflect.TypeOf((*MockQuerier)(nil).ResolveRelayHashPairsP2), ctx, arg)
+}
+
+// ResolveRelayHashPairsP3 mocks base method.
+func (m *MockQuerier) ResolveRelayHashPairsP3(ctx context.Context, arg db.ResolveRelayHashPairsP3Params) ([]db.ResolveRelayHashPairsP3Row, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ResolveRelayHashPairsP3", ctx, arg)
+	ret0, _ := ret[0].([]db.ResolveRelayHashPairsP3Row)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ResolveRelayHashPairsP3 indicates an expected call of ResolveRelayHashPairsP3.
+func (mr *MockQuerierMockRecorder) ResolveRelayHashPairsP3(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolveRelayHashPairsP3", reflect.TypeOf((*MockQuerier)(nil).ResolveRelayHashPairsP3), ctx, arg)
+}
+
+// ResolveRelayHashPairsP4 mocks base method.
+func (m *MockQuerier) ResolveRelayHashPairsP4(ctx context.Context, arg db.ResolveRelayHashPairsP4Params) ([]db.ResolveRelayHashPairsP4Row, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ResolveRelayHashPairsP4", ctx, arg)
+	ret0, _ := ret[0].([]db.ResolveRelayHashPairsP4Row)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ResolveRelayHashPairsP4 indicates an expected call of ResolveRelayHashPairsP4.
+func (mr *MockQuerierMockRecorder) ResolveRelayHashPairsP4(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResolveRelayHashPairsP4", reflect.TypeOf((*MockQuerier)(nil).ResolveRelayHashPairsP4), ctx, arg)
+}
+
 // RollAdvertHearings mocks base method.
 func (m *MockQuerier) RollAdvertHearings(ctx context.Context, hour pgtype.Timestamptz) error {
 	m.ctrl.T.Helper()
@@ -2178,19 +2238,19 @@ func (mr *MockQuerierMockRecorder) SaveZoneList(ctx, arg any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveZoneList", reflect.TypeOf((*MockQuerier)(nil).SaveZoneList), ctx, arg)
 }
 
-// SearchKnownRoutes mocks base method.
-func (m *MockQuerier) SearchKnownRoutes(ctx context.Context, arg db.SearchKnownRoutesParams) ([]db.SearchKnownRoutesRow, error) {
+// SearchKnownRoutesByNodes mocks base method.
+func (m *MockQuerier) SearchKnownRoutesByNodes(ctx context.Context, arg db.SearchKnownRoutesByNodesParams) ([]db.SearchKnownRoutesByNodesRow, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "SearchKnownRoutes", ctx, arg)
-	ret0, _ := ret[0].([]db.SearchKnownRoutesRow)
+	ret := m.ctrl.Call(m, "SearchKnownRoutesByNodes", ctx, arg)
+	ret0, _ := ret[0].([]db.SearchKnownRoutesByNodesRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// SearchKnownRoutes indicates an expected call of SearchKnownRoutes.
-func (mr *MockQuerierMockRecorder) SearchKnownRoutes(ctx, arg any) *gomock.Call {
+// SearchKnownRoutesByNodes indicates an expected call of SearchKnownRoutesByNodes.
+func (mr *MockQuerierMockRecorder) SearchKnownRoutesByNodes(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SearchKnownRoutes", reflect.TypeOf((*MockQuerier)(nil).SearchKnownRoutes), ctx, arg)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SearchKnownRoutesByNodes", reflect.TypeOf((*MockQuerier)(nil).SearchKnownRoutesByNodes), ctx, arg)
 }
 
 // SetNodeDefaultScope mocks base method.

@@ -54,6 +54,8 @@ definitions:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminIngestConfig'
       mobile:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminMobileConfig'
+      web:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminWebConfig'
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.AdminIngestConfig:
     properties:
@@ -66,7 +68,13 @@ definitions:
   github_com_MeshCore-Beacon_beacon-server_internal_api.AdminMobileConfig:
     properties:
       min_app_version:
-        description: empty means no requirement
+        description: effective floor; empty means no requirement
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.AdminWebConfig:
+    properties:
+      min_web_version:
+        description: effective floor; empty means no requirement
         type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.AdvertObservation:
@@ -278,6 +286,11 @@ definitions:
         description: MinAppVersion is the oldest allowed app version (X.Y.Z); null
           means no requirement.
         example: 0.1.1
+        type: string
+      minWebVersion:
+        description: MinWebVersion is the oldest allowed Beacon Web version (X.Y.Z);
+          null means no requirement.
+        example: 2.0.3
         type: string
       serverVersion:
         example: 2.0.2
@@ -1727,7 +1740,7 @@ info:
     name: AGPL-3-or-later
   termsOfService: https://github.com/MeshCore-Beacon/beacon-server
   title: MeshCore Beacon API
-  version: 2.0.3
+  version: 2.0.4
 paths:
   /admin/accounts:
     get:
@@ -2322,7 +2335,9 @@ paths:
       - IATAs
   /info:
     get:
-      description: minAppVersion is null when the server sets no requirement.
+      description: |-
+        minAppVersion (BEACON Mobile) and minWebVersion (Beacon Web) are null when the
+        server sets no requirement. Each is the higher of the built-in floor and config.
       produces:
       - application/json
       responses:
@@ -2330,7 +2345,7 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.Info'
-      summary: Server info and minimum mobile app version
+      summary: Server info and minimum client versions
       tags:
       - Info
   /messages:
@@ -3275,26 +3290,31 @@ paths:
       - Routes
   /routes/cross:
     get:
+      description: |-
+        Pass iatas (comma-separated, optional; omitted searches every IATA) or the
+        single directed pair fromIata/toIata, not both.
       parameters:
-      - description: Source node hash prefix (hex)
+      - description: Source node hash prefix (hex, 1-4 bytes)
         in: query
         name: fromHash
         required: true
         type: string
-      - description: Source IATA code
-        in: query
-        name: fromIata
-        required: true
-        type: string
-      - description: Destination node hash prefix (hex)
+      - description: Destination node hash prefix (hex, 1-4 bytes)
         in: query
         name: toHash
         required: true
         type: string
-      - description: Destination IATA code
+      - description: Comma-separated IATA codes to search (2-100)
+        in: query
+        name: iatas
+        type: string
+      - description: Source IATA code (with toIata)
+        in: query
+        name: fromIata
+        type: string
+      - description: Destination IATA code (with fromIata)
         in: query
         name: toIata
-        required: true
         type: string
       produces:
       - application/json
@@ -3313,23 +3333,34 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Search for routes that cross IATA boundaries
       tags:
       - Routes
   /routes/search:
     get:
+      description: |-
+        Routes within one IATA that run from the source hash to the destination hash,
+        trimmed to that span. iatas is optional (omitted searches every IATA); the single
+        iata is still accepted. At most 500, shortest first.
       parameters:
-      - description: IATA code to search within
+      - description: Comma-separated IATA codes to search (max 100)
+        in: query
+        name: iatas
+        type: string
+      - description: Single IATA code (when iatas is omitted)
         in: query
         name: iata
-        required: true
         type: string
-      - description: Source node hash prefix (hex)
+      - description: Source node hash prefix (hex, 1-4 bytes)
         in: query
         name: from
         required: true
         type: string
-      - description: Destination node hash prefix (hex)
+      - description: Destination node hash prefix (hex, 1-4 bytes)
         in: query
         name: to
         required: true
@@ -3349,6 +3380,10 @@ paths:
             $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: Service Unavailable
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Search known routes by source and destination hash

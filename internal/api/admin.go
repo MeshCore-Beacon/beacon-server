@@ -10,10 +10,15 @@ type AdminConfig struct {
 	CORS   AdminCORSConfig   `json:"cors"`
 	Ingest AdminIngestConfig `json:"ingest"`
 	Mobile AdminMobileConfig `json:"mobile"`
+	Web    AdminWebConfig    `json:"web"`
 }
 
 type AdminMobileConfig struct {
-	MinAppVersion string `json:"min_app_version"` // empty means no requirement
+	MinAppVersion string `json:"min_app_version"` // effective floor; empty means no requirement
+}
+
+type AdminWebConfig struct {
+	MinWebVersion string `json:"min_web_version"` // effective floor; empty means no requirement
 }
 
 type AdminAuthConfig struct {

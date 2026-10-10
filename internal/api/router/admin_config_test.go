@@ -56,7 +56,7 @@ func TestAdminConfig(t *testing.T) {
 		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 			t.Fatal(err)
 		}
-		expected := map[string]any{"cors": want, "auth": map[string]any{"configured": true}, "ingest": map[string]any{"broker_count": float64(2)}, "mobile": map[string]any{"min_app_version": ""}}
+		expected := map[string]any{"cors": want, "auth": map[string]any{"configured": true}, "ingest": map[string]any{"broker_count": float64(2)}, "mobile": map[string]any{"min_app_version": ""}, "web": map[string]any{"min_web_version": ""}}
 		if !reflect.DeepEqual(body, expected) {
 			t.Fatalf("unexpected config shape or values: %v", body)
 		}
