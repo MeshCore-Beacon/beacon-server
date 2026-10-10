@@ -1969,17 +1969,18 @@ WITH ranked AS (
   SELECT origin_pubkey, SUM(advert_packets)::bigint AS advert_count,
          SUM(flood_packets)::bigint AS flood_advert_count, SUM(direct_packets)::bigint AS direct_advert_count
   FROM analytics_hourly_advert_sets
-  WHERE hour >= $1::timestamptz
-    AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR iatas && $2::bpchar[])
+  WHERE hour >= $2::timestamptz
+    AND (COALESCE(cardinality($3::bpchar[]), 0) = 0 OR iatas && $3::bpchar[])
   GROUP BY origin_pubkey
-  ORDER BY advert_count DESC, origin_pubkey
-  LIMIT $3
+  ORDER BY CASE WHEN $1::text = 'flood' THEN SUM(flood_packets) ELSE SUM(direct_packets) END DESC,
+           advert_count DESC, origin_pubkey
+  LIMIT $4
 ), heard AS (
   SELECT h.origin_pubkey, MAX(h.last_heard) AS last_heard, MAX(h.iata) AS iata,
          MAX(h.name) AS name, MAX(h.node_type) AS node_type
   FROM analytics_hourly_advert_hearings h
-  WHERE h.hour >= $1::timestamptz AND h.origin_pubkey IN (SELECT origin_pubkey FROM ranked)
-    AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR h.iata = ANY($2::bpchar[]))
+  WHERE h.hour >= $2::timestamptz AND h.origin_pubkey IN (SELECT origin_pubkey FROM ranked)
+    AND (COALESCE(cardinality($3::bpchar[]), 0) = 0 OR h.iata = ANY($3::bpchar[]))
   GROUP BY h.origin_pubkey
 )
 SELECT n.id AS node_id, encode(r.origin_pubkey, 'hex') AS public_key,
@@ -1989,10 +1990,12 @@ SELECT n.id AS node_id, encode(r.origin_pubkey, 'hex') AS public_key,
 FROM ranked r
 LEFT JOIN heard h ON h.origin_pubkey = r.origin_pubkey
 LEFT JOIN nodes n ON n.public_key = r.origin_pubkey
-ORDER BY r.advert_count DESC, r.origin_pubkey
+ORDER BY CASE WHEN $1::text = 'flood' THEN r.flood_advert_count ELSE r.direct_advert_count END DESC,
+         r.advert_count DESC, r.origin_pubkey
 `
 
 type GetStatsTopAdvertisersParams struct {
+	Sort     string             `json:"sort"`
 	Since    pgtype.Timestamptz `json:"since"`
 	Iatas    []string           `json:"iatas"`
 	RowLimit int32              `json:"row_limit"`
@@ -2010,10 +2013,15 @@ type GetStatsTopAdvertisersRow struct {
 	Iata              string             `json:"iata"`
 }
 
-// Top N advertisers since the given hour. Each ADVERT packet counts once per hour heard,
-// however many of the requested IATAs heard it (IATA-set rollup). Live names win.
+// Top N advertisers since the given hour, ranked by flood or direct adverts (@sort). Each ADVERT
+// packet counts once per hour heard, however many of the requested IATAs heard it. Live names win.
 func (q *Queries) GetStatsTopAdvertisers(ctx context.Context, arg GetStatsTopAdvertisersParams) ([]GetStatsTopAdvertisersRow, error) {
-	rows, err := q.db.Query(ctx, getStatsTopAdvertisers, arg.Since, arg.Iatas, arg.RowLimit)
+	rows, err := q.db.Query(ctx, getStatsTopAdvertisers,
+		arg.Sort,
+		arg.Since,
+		arg.Iatas,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

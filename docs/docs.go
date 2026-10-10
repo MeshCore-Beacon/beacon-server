@@ -3215,14 +3215,14 @@ const docTemplate = `{
         },
         "/stats/top-advertisers": {
             "get": {
-                "description": "Each advert counts once per hour heard, however many requested IATAs heard it. nodeId is null when the node row has been deleted.",
+                "description": "Ranks by the sort count, ties broken by total adverts then public key. Each advert counts once per hour heard, however many requested IATAs heard it. nodeId is null when the node row has been deleted.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "Stats"
                 ],
-                "summary": "Top N nodes by distinct ADVERT packet count (last 24h by default)",
+                "summary": "Top N nodes by distinct flood or direct ADVERT packet count (last 24h by default)",
                 "parameters": [
                     {
                         "type": "string",
@@ -3255,6 +3255,17 @@ const docTemplate = `{
                         "description": "Max results (default 10); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "flood",
+                            "direct"
+                        ],
+                        "type": "string",
+                        "description": "Rank by flood or direct advert count",
+                        "name": "sort",
+                        "in": "query",
+                        "required": true
                     }
                 ],
                 "responses": {
@@ -3265,6 +3276,12 @@ const docTemplate = `{
                             "items": {
                                 "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TopAdvertiser"
                             }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
                     },
                     "500": {
@@ -6126,7 +6143,7 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "2.0.4",
+	Version:          "2.0.5",
 	Host:             "localhost:8080",
 	BasePath:         "/api/v1",
 	Schemes:          []string{"http", "https"},
