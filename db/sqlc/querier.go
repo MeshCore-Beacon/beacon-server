@@ -64,8 +64,6 @@ type Querier interface {
 	// Both counters only grow, so their sum changes whenever rolled content or coverage does.
 	GetAnalyticsRevision(ctx context.Context) (int64, error)
 	GetChannelByID(ctx context.Context, id int32) (Channel, error)
-	// Returns neighbors of a node that are in a different IATA.
-	GetCrossIATANeighbors(ctx context.Context, arg GetCrossIATANeighborsParams) ([]GetCrossIATANeighborsRow, error)
 	GetEarliestCompleteRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
 	// ============================================================
 	// STATS
@@ -76,8 +74,13 @@ type Querier interface {
 	// when neither exists; a missing row (unknown IATA) is sql.ErrNoRows, same
 	// not-found distinction GetIATA already makes.
 	GetIATABorder(ctx context.Context, iata string) (json.RawMessage, error)
-	GetKnownRoutesByNode(ctx context.Context, arg GetKnownRoutesByNodeParams) ([]GetKnownRoutesByNodeRow, error)
+	// Routes containing @nodes[i] in IATA @iatas[i] (aligned, one node per IATA). The &&
+	// drives the node_ids GIN index; the indexed check keeps LIMIT counting real matches.
+	GetKnownRoutesByNodes(ctx context.Context, arg GetKnownRoutesByNodesParams) ([]GetKnownRoutesByNodesRow, error)
 	GetLatestCompleteRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
+	// Neighbor rows between @a_nodes and @b_nodes in either orientation: ingest writes
+	// adverts as (sender, forwarder) but traces as (receiver, sender). Callers normalise.
+	GetNeighborLinks(ctx context.Context, arg GetNeighborLinksParams) ([]GetNeighborLinksRow, error)
 	GetNodeByID(ctx context.Context, id uuid.UUID) (GetNodeByIDRow, error)
 	GetNodeByPubkey(ctx context.Context, publicKey []byte) (uuid.UUID, error)
 	// Returns the neighbors of a node with details, ordered by most recently seen.
@@ -317,6 +320,14 @@ type Querier interface {
 	ResolvePathHashesP2(ctx context.Context, arg ResolvePathHashesP2Params) ([]ResolvePathHashesP2Row, error)
 	ResolvePathHashesP3(ctx context.Context, arg ResolvePathHashesP3Params) ([]ResolvePathHashesP3Row, error)
 	ResolvePathHashesP4(ctx context.Context, arg ResolvePathHashesP4Params) ([]ResolvePathHashesP4Row, error)
+	// Batch form of ResolvePathHashesP1 across IATAs; callers check uniqueness per IATA.
+	ResolveRelayHashPairsP1(ctx context.Context, arg ResolveRelayHashPairsP1Params) ([]ResolveRelayHashPairsP1Row, error)
+	// Batch form of ResolvePathHashesP2 across IATAs; callers check uniqueness per IATA.
+	ResolveRelayHashPairsP2(ctx context.Context, arg ResolveRelayHashPairsP2Params) ([]ResolveRelayHashPairsP2Row, error)
+	// Batch form of ResolvePathHashesP3 across IATAs; callers check uniqueness per IATA.
+	ResolveRelayHashPairsP3(ctx context.Context, arg ResolveRelayHashPairsP3Params) ([]ResolveRelayHashPairsP3Row, error)
+	// Batch form of ResolvePathHashesP4 across IATAs; callers check uniqueness per IATA.
+	ResolveRelayHashPairsP4(ctx context.Context, arg ResolveRelayHashPairsP4Params) ([]ResolveRelayHashPairsP4Row, error)
 	RollAdvertHearings(ctx context.Context, hour pgtype.Timestamptz) error
 	// Each distinct ADVERT packet counts once, under the exact set of IATAs that heard it this hour.
 	RollAdvertSets(ctx context.Context, hour pgtype.Timestamptz) error
@@ -347,9 +358,10 @@ type Querier interface {
 	SaveZoneBoundary(ctx context.Context, arg SaveZoneBoundaryParams) error
 	// NULL payload/etag/fetched_at retain the last good list after an error or 304.
 	SaveZoneList(ctx context.Context, arg SaveZoneListParams) error
-	// Returns known routes containing a subsequence from source to destination hash prefix.
-	// Verifies source appears before destination in the route.
-	SearchKnownRoutes(ctx context.Context, arg SearchKnownRoutesParams) ([]SearchKnownRoutesRow, error)
+	// Routes holding a source and a destination candidate; callers check order and IATA.
+	// A route's hops resolve in its own IATA, so candidates from other IATAs can't match.
+	// Both && predicates use the node_ids GIN index.
+	SearchKnownRoutesByNodes(ctx context.Context, arg SearchKnownRoutesByNodesParams) ([]SearchKnownRoutesByNodesRow, error)
 	SetNodeDefaultScope(ctx context.Context, arg SetNodeDefaultScopeParams) error
 	SetNodeMultibytePaths(ctx context.Context, id uuid.UUID) error
 	SetNodeMultibyteTraces(ctx context.Context, id uuid.UUID) error

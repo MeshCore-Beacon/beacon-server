@@ -403,65 +403,6 @@ func (q *Queries) GetChannelByID(ctx context.Context, id int32) (Channel, error)
 	return i, err
 }
 
-const getCrossIATANeighbors = `-- name: GetCrossIATANeighbors :many
-SELECT
-    n.id, n.name, n.node_type, n.latitude, n.longitude,
-    nn.iata AS neighbor_iata, nn.observation_count, nn.last_seen, nn.snr
-FROM node_neighbors nn
-JOIN nodes n ON n.id = nn.neighbor_id
-WHERE nn.node_id = $1
-  AND nn.iata != $2
-ORDER BY nn.last_seen DESC
-`
-
-type GetCrossIATANeighborsParams struct {
-	NodeID uuid.UUID `json:"node_id"`
-	Iata   string    `json:"iata"`
-}
-
-type GetCrossIATANeighborsRow struct {
-	ID               uuid.UUID          `json:"id"`
-	Name             *string            `json:"name"`
-	NodeType         int16              `json:"node_type"`
-	Latitude         *float64           `json:"latitude"`
-	Longitude        *float64           `json:"longitude"`
-	NeighborIata     string             `json:"neighbor_iata"`
-	ObservationCount int64              `json:"observation_count"`
-	LastSeen         pgtype.Timestamptz `json:"last_seen"`
-	Snr              *float32           `json:"snr"`
-}
-
-// Returns neighbors of a node that are in a different IATA.
-func (q *Queries) GetCrossIATANeighbors(ctx context.Context, arg GetCrossIATANeighborsParams) ([]GetCrossIATANeighborsRow, error) {
-	rows, err := q.db.Query(ctx, getCrossIATANeighbors, arg.NodeID, arg.Iata)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []GetCrossIATANeighborsRow{}
-	for rows.Next() {
-		var i GetCrossIATANeighborsRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.Name,
-			&i.NodeType,
-			&i.Latitude,
-			&i.Longitude,
-			&i.NeighborIata,
-			&i.ObservationCount,
-			&i.LastSeen,
-			&i.Snr,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const getHourlyStats = `-- name: GetHourlyStats :many
 
 SELECT iata, hour, observation_count
@@ -540,20 +481,23 @@ func (q *Queries) GetIATABorder(ctx context.Context, iata string) (json.RawMessa
 	return border, err
 }
 
-const getKnownRoutesByNode = `-- name: GetKnownRoutesByNode :many
+const getKnownRoutesByNodes = `-- name: GetKnownRoutesByNodes :many
 SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
-FROM known_routes
-WHERE iata = $1
-  AND $2::uuid = ANY(node_ids)
+FROM known_routes kr
+WHERE kr.node_ids && $1::uuid[]
+  AND kr.iata = ANY($2::bpchar[])
+  AND ($1::uuid[])[array_position($2::bpchar[], kr.iata)] = ANY(kr.node_ids)
 ORDER BY hop_count ASC, last_seen DESC
+LIMIT $3
 `
 
-type GetKnownRoutesByNodeParams struct {
-	Iata    string    `json:"iata"`
-	Column2 uuid.UUID `json:"column_2"`
+type GetKnownRoutesByNodesParams struct {
+	Nodes    []uuid.UUID `json:"nodes"`
+	Iatas    []string    `json:"iatas"`
+	RowLimit int32       `json:"row_limit"`
 }
 
-type GetKnownRoutesByNodeRow struct {
+type GetKnownRoutesByNodesRow struct {
 	ID               int64              `json:"id"`
 	NodeIds          []uuid.UUID        `json:"node_ids"`
 	HashPrefix       [][]byte           `json:"hash_prefix"`
@@ -564,15 +508,17 @@ type GetKnownRoutesByNodeRow struct {
 	ObservationCount int64              `json:"observation_count"`
 }
 
-func (q *Queries) GetKnownRoutesByNode(ctx context.Context, arg GetKnownRoutesByNodeParams) ([]GetKnownRoutesByNodeRow, error) {
-	rows, err := q.db.Query(ctx, getKnownRoutesByNode, arg.Iata, arg.Column2)
+// Routes containing @nodes[i] in IATA @iatas[i] (aligned, one node per IATA). The &&
+// drives the node_ids GIN index; the indexed check keeps LIMIT counting real matches.
+func (q *Queries) GetKnownRoutesByNodes(ctx context.Context, arg GetKnownRoutesByNodesParams) ([]GetKnownRoutesByNodesRow, error) {
+	rows, err := q.db.Query(ctx, getKnownRoutesByNodes, arg.Nodes, arg.Iatas, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []GetKnownRoutesByNodeRow{}
+	items := []GetKnownRoutesByNodesRow{}
 	for rows.Next() {
-		var i GetKnownRoutesByNodeRow
+		var i GetKnownRoutesByNodesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.NodeIds,
@@ -583,6 +529,46 @@ func (q *Queries) GetKnownRoutesByNode(ctx context.Context, arg GetKnownRoutesBy
 			&i.LastSeen,
 			&i.ObservationCount,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getNeighborLinks = `-- name: GetNeighborLinks :many
+SELECT node_id, neighbor_id, last_seen
+FROM node_neighbors
+WHERE (node_id = ANY($1::uuid[]) AND neighbor_id = ANY($2::uuid[]))
+   OR (node_id = ANY($2::uuid[]) AND neighbor_id = ANY($1::uuid[]))
+`
+
+type GetNeighborLinksParams struct {
+	ANodes []uuid.UUID `json:"a_nodes"`
+	BNodes []uuid.UUID `json:"b_nodes"`
+}
+
+type GetNeighborLinksRow struct {
+	NodeID     uuid.UUID          `json:"node_id"`
+	NeighborID uuid.UUID          `json:"neighbor_id"`
+	LastSeen   pgtype.Timestamptz `json:"last_seen"`
+}
+
+// Neighbor rows between @a_nodes and @b_nodes in either orientation: ingest writes
+// adverts as (sender, forwarder) but traces as (receiver, sender). Callers normalise.
+func (q *Queries) GetNeighborLinks(ctx context.Context, arg GetNeighborLinksParams) ([]GetNeighborLinksRow, error) {
+	rows, err := q.db.Query(ctx, getNeighborLinks, arg.ANodes, arg.BNodes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetNeighborLinksRow{}
+	for rows.Next() {
+		var i GetNeighborLinksRow
+		if err := rows.Scan(&i.NodeID, &i.NeighborID, &i.LastSeen); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -4856,6 +4842,170 @@ func (q *Queries) ResolvePathHashesP4(ctx context.Context, arg ResolvePathHashes
 	return items, nil
 }
 
+const resolveRelayHashPairsP1 = `-- name: ResolveRelayHashPairsP1 :many
+SELECT ns.iata, ns.prefix_4 AS hash, ns.node_id
+FROM node_short_ids ns
+JOIN nodes n ON n.id = ns.node_id
+WHERE ns.iata = ANY($1::bpchar[])
+  AND n.node_type IN (2, 3)
+  AND ns.prefix_1 = ANY($2::bytea[])
+`
+
+type ResolveRelayHashPairsP1Params struct {
+	Iatas  []string `json:"iatas"`
+	Hashes [][]byte `json:"hashes"`
+}
+
+type ResolveRelayHashPairsP1Row struct {
+	Iata   string    `json:"iata"`
+	Hash   []byte    `json:"hash"`
+	NodeID uuid.UUID `json:"node_id"`
+}
+
+// Batch form of ResolvePathHashesP1 across IATAs; callers check uniqueness per IATA.
+func (q *Queries) ResolveRelayHashPairsP1(ctx context.Context, arg ResolveRelayHashPairsP1Params) ([]ResolveRelayHashPairsP1Row, error) {
+	rows, err := q.db.Query(ctx, resolveRelayHashPairsP1, arg.Iatas, arg.Hashes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ResolveRelayHashPairsP1Row{}
+	for rows.Next() {
+		var i ResolveRelayHashPairsP1Row
+		if err := rows.Scan(&i.Iata, &i.Hash, &i.NodeID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const resolveRelayHashPairsP2 = `-- name: ResolveRelayHashPairsP2 :many
+SELECT ns.iata, ns.prefix_4 AS hash, ns.node_id
+FROM node_short_ids ns
+JOIN nodes n ON n.id = ns.node_id
+WHERE ns.iata = ANY($1::bpchar[])
+  AND n.node_type IN (2, 3)
+  AND ns.prefix_2 = ANY($2::bytea[])
+`
+
+type ResolveRelayHashPairsP2Params struct {
+	Iatas  []string `json:"iatas"`
+	Hashes [][]byte `json:"hashes"`
+}
+
+type ResolveRelayHashPairsP2Row struct {
+	Iata   string    `json:"iata"`
+	Hash   []byte    `json:"hash"`
+	NodeID uuid.UUID `json:"node_id"`
+}
+
+// Batch form of ResolvePathHashesP2 across IATAs; callers check uniqueness per IATA.
+func (q *Queries) ResolveRelayHashPairsP2(ctx context.Context, arg ResolveRelayHashPairsP2Params) ([]ResolveRelayHashPairsP2Row, error) {
+	rows, err := q.db.Query(ctx, resolveRelayHashPairsP2, arg.Iatas, arg.Hashes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ResolveRelayHashPairsP2Row{}
+	for rows.Next() {
+		var i ResolveRelayHashPairsP2Row
+		if err := rows.Scan(&i.Iata, &i.Hash, &i.NodeID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const resolveRelayHashPairsP3 = `-- name: ResolveRelayHashPairsP3 :many
+SELECT ns.iata, ns.prefix_4 AS hash, ns.node_id
+FROM node_short_ids ns
+JOIN nodes n ON n.id = ns.node_id
+WHERE ns.iata = ANY($1::bpchar[])
+  AND n.node_type IN (2, 3)
+  AND ns.prefix_3 = ANY($2::bytea[])
+`
+
+type ResolveRelayHashPairsP3Params struct {
+	Iatas  []string `json:"iatas"`
+	Hashes [][]byte `json:"hashes"`
+}
+
+type ResolveRelayHashPairsP3Row struct {
+	Iata   string    `json:"iata"`
+	Hash   []byte    `json:"hash"`
+	NodeID uuid.UUID `json:"node_id"`
+}
+
+// Batch form of ResolvePathHashesP3 across IATAs; callers check uniqueness per IATA.
+func (q *Queries) ResolveRelayHashPairsP3(ctx context.Context, arg ResolveRelayHashPairsP3Params) ([]ResolveRelayHashPairsP3Row, error) {
+	rows, err := q.db.Query(ctx, resolveRelayHashPairsP3, arg.Iatas, arg.Hashes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ResolveRelayHashPairsP3Row{}
+	for rows.Next() {
+		var i ResolveRelayHashPairsP3Row
+		if err := rows.Scan(&i.Iata, &i.Hash, &i.NodeID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const resolveRelayHashPairsP4 = `-- name: ResolveRelayHashPairsP4 :many
+SELECT ns.iata, ns.prefix_4 AS hash, ns.node_id
+FROM node_short_ids ns
+JOIN nodes n ON n.id = ns.node_id
+WHERE ns.iata = ANY($1::bpchar[])
+  AND n.node_type IN (2, 3)
+  AND ns.prefix_4 = ANY($2::bytea[])
+`
+
+type ResolveRelayHashPairsP4Params struct {
+	Iatas  []string `json:"iatas"`
+	Hashes [][]byte `json:"hashes"`
+}
+
+type ResolveRelayHashPairsP4Row struct {
+	Iata   string    `json:"iata"`
+	Hash   []byte    `json:"hash"`
+	NodeID uuid.UUID `json:"node_id"`
+}
+
+// Batch form of ResolvePathHashesP4 across IATAs; callers check uniqueness per IATA.
+func (q *Queries) ResolveRelayHashPairsP4(ctx context.Context, arg ResolveRelayHashPairsP4Params) ([]ResolveRelayHashPairsP4Row, error) {
+	rows, err := q.db.Query(ctx, resolveRelayHashPairsP4, arg.Iatas, arg.Hashes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ResolveRelayHashPairsP4Row{}
+	for rows.Next() {
+		var i ResolveRelayHashPairsP4Row
+		if err := rows.Scan(&i.Iata, &i.Hash, &i.NodeID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const saveChannelCatalogue = `-- name: SaveChannelCatalogue :exec
 INSERT INTO meshmapper_channel_catalogues (iata, url, payload, etag, checked_at, attempted_at, next_attempt, last_error)
 VALUES ($1, $2, $3::jsonb, $4::text,
@@ -5026,23 +5176,24 @@ func (q *Queries) SaveZoneList(ctx context.Context, arg SaveZoneListParams) erro
 	return err
 }
 
-const searchKnownRoutes = `-- name: SearchKnownRoutes :many
+const searchKnownRoutesByNodes = `-- name: SearchKnownRoutesByNodes :many
 SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
-FROM known_routes
-WHERE iata = $1
-  AND array_position(hash_prefix, $2::bytea) IS NOT NULL
-  AND array_position(hash_prefix, $3::bytea) IS NOT NULL
-  AND array_position(hash_prefix, $2::bytea) < array_position(hash_prefix, $3::bytea)
+FROM known_routes kr
+WHERE kr.node_ids && $1::uuid[]
+  AND kr.node_ids && $2::uuid[]
+  AND kr.iata = ANY($3::bpchar[])
 ORDER BY hop_count ASC, last_seen DESC
+LIMIT $4
 `
 
-type SearchKnownRoutesParams struct {
-	Iata    string `json:"iata"`
-	Column2 []byte `json:"column_2"`
-	Column3 []byte `json:"column_3"`
+type SearchKnownRoutesByNodesParams struct {
+	FromNodes []uuid.UUID `json:"from_nodes"`
+	ToNodes   []uuid.UUID `json:"to_nodes"`
+	Iatas     []string    `json:"iatas"`
+	RowLimit  int32       `json:"row_limit"`
 }
 
-type SearchKnownRoutesRow struct {
+type SearchKnownRoutesByNodesRow struct {
 	ID               int64              `json:"id"`
 	NodeIds          []uuid.UUID        `json:"node_ids"`
 	HashPrefix       [][]byte           `json:"hash_prefix"`
@@ -5053,17 +5204,23 @@ type SearchKnownRoutesRow struct {
 	ObservationCount int64              `json:"observation_count"`
 }
 
-// Returns known routes containing a subsequence from source to destination hash prefix.
-// Verifies source appears before destination in the route.
-func (q *Queries) SearchKnownRoutes(ctx context.Context, arg SearchKnownRoutesParams) ([]SearchKnownRoutesRow, error) {
-	rows, err := q.db.Query(ctx, searchKnownRoutes, arg.Iata, arg.Column2, arg.Column3)
+// Routes holding a source and a destination candidate; callers check order and IATA.
+// A route's hops resolve in its own IATA, so candidates from other IATAs can't match.
+// Both && predicates use the node_ids GIN index.
+func (q *Queries) SearchKnownRoutesByNodes(ctx context.Context, arg SearchKnownRoutesByNodesParams) ([]SearchKnownRoutesByNodesRow, error) {
+	rows, err := q.db.Query(ctx, searchKnownRoutesByNodes,
+		arg.FromNodes,
+		arg.ToNodes,
+		arg.Iatas,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []SearchKnownRoutesRow{}
+	items := []SearchKnownRoutesByNodesRow{}
 	for rows.Next() {
-		var i SearchKnownRoutesRow
+		var i SearchKnownRoutesByNodesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.NodeIds,

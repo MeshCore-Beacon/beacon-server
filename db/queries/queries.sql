@@ -1486,23 +1486,28 @@ LIMIT $4
 ORDER BY date_trunc('milliseconds', r.last_seen, 'UTC') DESC, r.id DESC
 LIMIT $4;
 
--- name: SearchKnownRoutes :many
--- Returns known routes containing a subsequence from source to destination hash prefix.
--- Verifies source appears before destination in the route.
+-- name: GetKnownRoutesByNodes :many
+-- Routes containing @nodes[i] in IATA @iatas[i] (aligned, one node per IATA). The &&
+-- drives the node_ids GIN index; the indexed check keeps LIMIT counting real matches.
 SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
-FROM known_routes
-WHERE iata = $1
-  AND array_position(hash_prefix, $2::bytea) IS NOT NULL
-  AND array_position(hash_prefix, $3::bytea) IS NOT NULL
-  AND array_position(hash_prefix, $2::bytea) < array_position(hash_prefix, $3::bytea)
-ORDER BY hop_count ASC, last_seen DESC;
+FROM known_routes kr
+WHERE kr.node_ids && @nodes::uuid[]
+  AND kr.iata = ANY(@iatas::bpchar[])
+  AND (@nodes::uuid[])[array_position(@iatas::bpchar[], kr.iata)] = ANY(kr.node_ids)
+ORDER BY hop_count ASC, last_seen DESC
+LIMIT @row_limit;
 
--- name: GetKnownRoutesByNode :many
+-- name: SearchKnownRoutesByNodes :many
+-- Routes holding a source and a destination candidate; callers check order and IATA.
+-- A route's hops resolve in its own IATA, so candidates from other IATAs can't match.
+-- Both && predicates use the node_ids GIN index.
 SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
-FROM known_routes
-WHERE iata = $1
-  AND $2::uuid = ANY(node_ids)
-ORDER BY hop_count ASC, last_seen DESC;
+FROM known_routes kr
+WHERE kr.node_ids && @from_nodes::uuid[]
+  AND kr.node_ids && @to_nodes::uuid[]
+  AND kr.iata = ANY(@iatas::bpchar[])
+ORDER BY hop_count ASC, last_seen DESC
+LIMIT @row_limit;
 
 -- ============================================================
 -- NEIGHBORS
@@ -1541,16 +1546,13 @@ JOIN nodes n ON n.id = nn.neighbor_id
 WHERE nn.node_id = $1
 ORDER BY nn.last_seen DESC;
 
--- name: GetCrossIATANeighbors :many
--- Returns neighbors of a node that are in a different IATA.
-SELECT
-    n.id, n.name, n.node_type, n.latitude, n.longitude,
-    nn.iata AS neighbor_iata, nn.observation_count, nn.last_seen, nn.snr
-FROM node_neighbors nn
-JOIN nodes n ON n.id = nn.neighbor_id
-WHERE nn.node_id = $1
-  AND nn.iata != $2
-ORDER BY nn.last_seen DESC;
+-- name: GetNeighborLinks :many
+-- Neighbor rows between @a_nodes and @b_nodes in either orientation: ingest writes
+-- adverts as (sender, forwarder) but traces as (receiver, sender). Callers normalise.
+SELECT node_id, neighbor_id, last_seen
+FROM node_neighbors
+WHERE (node_id = ANY(@a_nodes::uuid[]) AND neighbor_id = ANY(@b_nodes::uuid[]))
+   OR (node_id = ANY(@b_nodes::uuid[]) AND neighbor_id = ANY(@a_nodes::uuid[]));
 
 -- ============================================================
 -- HELPERS
@@ -1619,6 +1621,42 @@ JOIN nodes n ON n.id = ns.node_id
 WHERE ns.iata = $1
   AND n.node_type IN (2, 3)
   AND ns.prefix_4 = ANY($2::bytea[]);
+
+-- name: ResolveRelayHashPairsP1 :many
+-- Batch form of ResolvePathHashesP1 across IATAs; callers check uniqueness per IATA.
+SELECT ns.iata, ns.prefix_4 AS hash, ns.node_id
+FROM node_short_ids ns
+JOIN nodes n ON n.id = ns.node_id
+WHERE ns.iata = ANY(@iatas::bpchar[])
+  AND n.node_type IN (2, 3)
+  AND ns.prefix_1 = ANY(@hashes::bytea[]);
+
+-- name: ResolveRelayHashPairsP2 :many
+-- Batch form of ResolvePathHashesP2 across IATAs; callers check uniqueness per IATA.
+SELECT ns.iata, ns.prefix_4 AS hash, ns.node_id
+FROM node_short_ids ns
+JOIN nodes n ON n.id = ns.node_id
+WHERE ns.iata = ANY(@iatas::bpchar[])
+  AND n.node_type IN (2, 3)
+  AND ns.prefix_2 = ANY(@hashes::bytea[]);
+
+-- name: ResolveRelayHashPairsP3 :many
+-- Batch form of ResolvePathHashesP3 across IATAs; callers check uniqueness per IATA.
+SELECT ns.iata, ns.prefix_4 AS hash, ns.node_id
+FROM node_short_ids ns
+JOIN nodes n ON n.id = ns.node_id
+WHERE ns.iata = ANY(@iatas::bpchar[])
+  AND n.node_type IN (2, 3)
+  AND ns.prefix_3 = ANY(@hashes::bytea[]);
+
+-- name: ResolveRelayHashPairsP4 :many
+-- Batch form of ResolvePathHashesP4 across IATAs; callers check uniqueness per IATA.
+SELECT ns.iata, ns.prefix_4 AS hash, ns.node_id
+FROM node_short_ids ns
+JOIN nodes n ON n.id = ns.node_id
+WHERE ns.iata = ANY(@iatas::bpchar[])
+  AND n.node_type IN (2, 3)
+  AND ns.prefix_4 = ANY(@hashes::bytea[]);
 
 -- name: RefreshRadioPresets :exec
 REFRESH MATERIALIZED VIEW CONCURRENTLY mv_radio_presets;

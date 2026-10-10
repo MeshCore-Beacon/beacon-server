@@ -10,7 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// InfoRouter mounts GET /info. The mobile app treats a 404 as "no requirement",
+// InfoRouter mounts GET /info. Clients treat a 404 as "no requirement",
 // so this route must stay mounted once shipped.
 func InfoRouter(info api.Info) http.Handler {
 	r := chi.NewRouter()
@@ -20,8 +20,9 @@ func InfoRouter(info api.Info) http.Handler {
 
 // getInfo godoc
 //
-//	@Summary		Server info and minimum mobile app version
-//	@Description	minAppVersion is null when the server sets no requirement.
+//	@Summary		Server info and minimum client versions
+//	@Description	minAppVersion (BEACON Mobile) and minWebVersion (Beacon Web) are null when the
+//	@Description	server sets no requirement. Each is the higher of the built-in floor and config.
 //	@Tags			Info
 //	@Produce		json
 //	@Success		200	{object}	api.Info

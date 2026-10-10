@@ -320,8 +320,11 @@ cache:
 #  reconfirm: 1h      # default: 1h
 #  cleanup: 1h        # default: 1h
 
-# Minimum BEACON Mobile version, served at GET /api/v1/info. Older apps show
-# "update required" for this server. Strict X.Y.Z (no v, no suffix); anything
-# else prevents startup. Default: empty, no requirement.
+# Minimum client versions, served at GET /api/v1/info. Older clients show
+# "update required" for this server. Each release has a built-in floor; these
+# can raise it, never lower it. Strict X.Y.Z (no v, no suffix); anything else
+# prevents startup. Default: empty, the built-in floor only.
 #mobile:
-#  min_app_version: "0.1.1"
+#  min_app_version: "0.1.1"   # BEACON Mobile
+#web:
+#  min_web_version: "2.0.3"   # Beacon Web
