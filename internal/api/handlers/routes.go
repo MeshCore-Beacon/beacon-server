@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -110,7 +109,7 @@ const maxRouteSearchIATAs = 100
 //	@Router			/routes/search [get]
 func searchKnownRoutes(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		iatas := uniqueIATAs(parseIATAs(r))
+		iatas, iataErr := routeIATAs(r)
 		from := strings.ToLower(r.URL.Query().Get("from"))
 		to := strings.ToLower(r.URL.Query().Get("to"))
 		if from == "" || to == "" {
@@ -121,8 +120,8 @@ func searchKnownRoutes(reader api.Reader) http.HandlerFunc {
 			respondError(w, http.StatusBadRequest, "from and to must be 1-4 bytes of hex")
 			return
 		}
-		if len(iatas) > maxRouteSearchIATAs {
-			respondError(w, http.StatusBadRequest, fmt.Sprintf("iatas must list at most %d codes", maxRouteSearchIATAs))
+		if iataErr != nil {
+			respondError(w, http.StatusBadRequest, iataErr.Error())
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
@@ -198,8 +197,11 @@ func parseCrossRouteSearch(r *http.Request) (api.CrossRouteSearch, error) {
 	if !v.Has("iatas") {
 		return q, nil
 	}
-	iatas := uniqueIATAs(parseIATAs(r))
-	if len(iatas) < 2 || len(iatas) > maxRouteSearchIATAs {
+	iatas, err := routeIATAs(r)
+	if err != nil {
+		return q, err
+	}
+	if len(iatas) < 2 {
 		return q, fmt.Errorf("iatas must list 2-%d distinct codes", maxRouteSearchIATAs)
 	}
 	q.FromIATAs, q.ToIATAs = iatas, iatas
@@ -223,14 +225,25 @@ func respondRouteSearchError(w http.ResponseWriter, ctx context.Context, err err
 	return true
 }
 
-func uniqueIATAs(iatas []string) []string {
-	out := iatas[:0]
-	for _, c := range iatas {
-		if !slices.Contains(out, c) {
-			out = append(out, c)
+// routeIATAs dedupes the iatas (or iata) list, failing as soon as it passes the cap so a
+// huge list costs no more than parsing it.
+func routeIATAs(r *http.Request) ([]string, error) {
+	var out []string
+	seen := make(map[string]struct{})
+	for _, c := range parseIATAs(r) {
+		if len(c) != 3 {
+			return nil, errors.New("iatas must be 3-letter codes")
 		}
+		if _, dup := seen[c]; dup {
+			continue
+		}
+		if len(out) == maxRouteSearchIATAs {
+			return nil, fmt.Errorf("iatas must list at most %d codes", maxRouteSearchIATAs)
+		}
+		seen[c] = struct{}{}
+		out = append(out, c)
 	}
-	return out
+	return out, nil
 }
 
 func validHopHash(h string) bool {

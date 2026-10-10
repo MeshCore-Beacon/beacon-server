@@ -30,6 +30,8 @@ func TestSearchKnownRoutes_MissingParams(t *testing.T) {
 		{"missing to", "?iata=YVR&from=aa"},
 		{"bad hex", "?iata=YVR&from=zz&to=bb"},
 		{"too many iatas", "?from=aa&to=bb&iatas=" + manyIATAs(maxRouteSearchIATAs+1)},
+		{"long code", "?from=aa&to=bb&iatas=YVRX"},
+		{"huge list", "?from=aa&to=bb&iatas=" + manyIATAs(200000)},
 	}
 	for _, tt := range tests {
 		req := httptest.NewRequest(http.MethodGet, "/routes/search"+tt.query, nil)
@@ -191,7 +193,7 @@ func TestSearchCrossIATARoutes_TooBroad(t *testing.T) {
 func manyIATAs(n int) string {
 	codes := make([]string, n)
 	for i := range codes {
-		codes[i] = fmt.Sprintf("Q%02d", i)
+		codes[i] = fmt.Sprintf("%c%c%c", 'A'+i/676%26, 'A'+i/26%26, 'A'+i%26)
 	}
 	return strings.Join(codes, ",")
 }
