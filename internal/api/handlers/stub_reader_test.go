@@ -61,10 +61,8 @@ type stubReader struct {
 	listTraceTags                func(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, cursorTag string, limit int32) ([]api.TraceTagSummary, error)
 	getTraceByTag                func(ctx context.Context, tag string) (*api.TraceDetail, error)
 	listKnownRoutes              func(ctx context.Context, iata string, hopCount int32, cursor time.Time, cursorID int64, limit int32) ([]api.KnownRoute, error)
-	searchKnownRoutes            func(ctx context.Context, iata, fromHash, toHash string) ([]api.KnownRoute, error)
-	getKnownRoutesByNode         func(ctx context.Context, iata string, nodeID uuid.UUID) ([]api.KnownRoute, error)
-	getCrossIATANeighbors        func(ctx context.Context, nodeID uuid.UUID, iata string) ([]api.NodeNeighbor, error)
-	searchCrossIATARoutes        func(ctx context.Context, fromHash, fromIATA, toHash, toIATA string) ([]api.CrossIATARoute, error)
+	searchKnownRoutes            func(ctx context.Context, iatas []string, fromHash, toHash string) ([]api.KnownRoute, error)
+	searchCrossIATARoutes        func(ctx context.Context, q api.CrossRouteSearch) ([]api.CrossIATARoute, error)
 	getNodesByIDs                func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*api.ResolvedNode, error)
 }
 
@@ -377,30 +375,16 @@ func (s stubReader) ListKnownRoutes(ctx context.Context, iata string, hopCount i
 	return nil, nil
 }
 
-func (s stubReader) SearchKnownRoutes(ctx context.Context, iata, fromHash, toHash string) ([]api.KnownRoute, error) {
+func (s stubReader) SearchKnownRoutes(ctx context.Context, iatas []string, fromHash, toHash string) ([]api.KnownRoute, error) {
 	if s.searchKnownRoutes != nil {
-		return s.searchKnownRoutes(ctx, iata, fromHash, toHash)
+		return s.searchKnownRoutes(ctx, iatas, fromHash, toHash)
 	}
 	return nil, nil
 }
 
-func (s stubReader) GetKnownRoutesByNode(ctx context.Context, iata string, nodeID uuid.UUID) ([]api.KnownRoute, error) {
-	if s.getKnownRoutesByNode != nil {
-		return s.getKnownRoutesByNode(ctx, iata, nodeID)
-	}
-	return nil, nil
-}
-
-func (s stubReader) GetCrossIATANeighbors(ctx context.Context, nodeID uuid.UUID, iata string) ([]api.NodeNeighbor, error) {
-	if s.getCrossIATANeighbors != nil {
-		return s.getCrossIATANeighbors(ctx, nodeID, iata)
-	}
-	return nil, nil
-}
-
-func (s stubReader) SearchCrossIATARoutes(ctx context.Context, fromHash, fromIATA, toHash, toIATA string) ([]api.CrossIATARoute, error) {
+func (s stubReader) SearchCrossIATARoutes(ctx context.Context, q api.CrossRouteSearch) ([]api.CrossIATARoute, error) {
 	if s.searchCrossIATARoutes != nil {
-		return s.searchCrossIATARoutes(ctx, fromHash, fromIATA, toHash, toIATA)
+		return s.searchCrossIATARoutes(ctx, q)
 	}
 	return nil, nil
 }

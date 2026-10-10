@@ -6,6 +6,7 @@ package db
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -73,5 +74,25 @@ func TestIsDuplicateRelation(t *testing.T) {
 				t.Fatalf("got %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+var ifNotExistsRe = regexp.MustCompile(`(?i)\bIF\s+NOT\s+EXISTS\b`)
+
+// IF NOT EXISTS turns a retry over an interrupted build's invalid index into a silent
+// success, skipping applyMigration's drop-and-rebuild.
+func TestConcurrentMigrationsAvoidIfNotExists(t *testing.T) {
+	entries, err := migrationFiles.ReadDir("migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		sql, err := migrationFiles.ReadFile("migrations/" + e.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := concurrentIndexName(string(sql)); ok && ifNotExistsRe.MatchString(lineCommentRe.ReplaceAllString(string(sql), "")) {
+			t.Errorf("%s: CREATE INDEX CONCURRENTLY must not use IF NOT EXISTS", e.Name())
+		}
 	}
 }

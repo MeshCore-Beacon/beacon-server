@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -130,8 +131,21 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("failed to acquire migration connection: %w", err)
 	}
 	defer conn.Release()
-	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock($1)", migrationLockKey); err != nil {
-		return fmt.Errorf("failed to take migration lock: %w", err)
+	// Poll, don't block: a waiter in pg_advisory_lock holds a snapshot that the
+	// holder's CREATE INDEX CONCURRENTLY waits on, which deadlocks.
+	for {
+		var locked bool
+		if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", migrationLockKey).Scan(&locked); err != nil {
+			return fmt.Errorf("failed to take migration lock: %w", err)
+		}
+		if locked {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("failed to take migration lock: %w", ctx.Err())
+		case <-time.After(250 * time.Millisecond):
+		}
 	}
 	defer func() {
 		// A session lock outlives Release; drop the connection if unlock fails.

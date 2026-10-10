@@ -5,8 +5,11 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,7 +28,8 @@ func TestSearchKnownRoutes_MissingParams(t *testing.T) {
 		{"missing all", ""},
 		{"missing from and to", "?iata=YVR"},
 		{"missing to", "?iata=YVR&from=aa"},
-		{"missing iata", "?from=aa&to=bb"},
+		{"bad hex", "?iata=YVR&from=zz&to=bb"},
+		{"too many iatas", "?from=aa&to=bb&iatas=" + manyIATAs(maxRouteSearchIATAs+1)},
 	}
 	for _, tt := range tests {
 		req := httptest.NewRequest(http.MethodGet, "/routes/search"+tt.query, nil)
@@ -37,18 +41,25 @@ func TestSearchKnownRoutes_MissingParams(t *testing.T) {
 	}
 }
 
-func TestSearchCrossIATARoutes_MissingParams(t *testing.T) {
+func TestSearchCrossIATARoutes_BadParams(t *testing.T) {
 	r := chi.NewRouter()
 	r.Get("/routes/cross", searchCrossIATARoutes(stubReader{}))
 
+	many := manyIATAs(maxRouteSearchIATAs + 1)
 	tests := []struct {
 		name  string
 		query string
 	}{
 		{"missing all", ""},
-		{"missing toHash and toIata", "?fromHash=aa&fromIata=YVR"},
+		{"missing toHash", "?fromHash=aa&fromIata=YVR&toIata=YYJ"},
 		{"missing fromIata", "?fromHash=aa&toHash=bb&toIata=YYJ"},
 		{"missing fromHash", "?fromIata=YVR&toHash=bb&toIata=YYJ"},
+		{"bad hex", "?fromHash=zz&toHash=bb"},
+		{"odd hex", "?fromHash=aab&toHash=bb"},
+		{"hash too long", "?fromHash=aabbccddee&toHash=bb"},
+		{"iatas and pair", "?fromHash=aa&toHash=bb&fromIata=YVR&toIata=YYJ&iatas=YVR,YYJ"},
+		{"one iata", "?fromHash=aa&toHash=bb&iatas=YVR,yvr"},
+		{"too many iatas", "?fromHash=aa&toHash=bb&iatas=" + many},
 	}
 	for _, tt := range tests {
 		req := httptest.NewRequest(http.MethodGet, "/routes/cross"+tt.query, nil)
@@ -110,31 +121,91 @@ func TestListKnownRoutes_OK(t *testing.T) {
 }
 
 func TestSearchKnownRoutes_OK(t *testing.T) {
+	var got []string
 	r := chi.NewRouter()
 	r.Get("/routes/search", searchKnownRoutes(stubReader{
-		searchKnownRoutes: func(_ context.Context, _, _, _ string) ([]api.KnownRoute, error) {
+		searchKnownRoutes: func(_ context.Context, iatas []string, _, _ string) ([]api.KnownRoute, error) {
+			got = iatas
 			return []api.KnownRoute{{IATA: "YVR"}}, nil
 		},
 	}))
-	req := httptest.NewRequest(http.MethodGet, "/routes/search?iata=YVR&from=aa&to=bb", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
+	for _, tt := range []struct {
+		query string
+		want  []string
+	}{
+		{"?iata=yvr&from=aa&to=bb", []string{"YVR"}},
+		{"?iatas=yvr,YYJ,YVR&from=aa&to=bbcc", []string{"YVR", "YYJ"}},
+		{"?from=aa&to=bb", nil},
+	} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/routes/search"+tt.query, nil))
+		if w.Code != http.StatusOK || !slices.Equal(got, tt.want) {
+			t.Errorf("%s: got %d, iatas %v", tt.query, w.Code, got)
+		}
 	}
 }
 
-func TestSearchCrossIATARoutes_OK(t *testing.T) {
+func TestSearchCrossIATARoutes_Query(t *testing.T) {
+	var got api.CrossRouteSearch
 	r := chi.NewRouter()
 	r.Get("/routes/cross", searchCrossIATARoutes(stubReader{
-		searchCrossIATARoutes: func(_ context.Context, _, _, _, _ string) ([]api.CrossIATARoute, error) {
-			return []api.CrossIATARoute{}, nil
+		searchCrossIATARoutes: func(_ context.Context, q api.CrossRouteSearch) ([]api.CrossIATARoute, error) {
+			got = q
+			return nil, nil
 		},
 	}))
-	req := httptest.NewRequest(http.MethodGet, "/routes/cross?fromHash=aa&fromIata=YVR&toHash=bb&toIata=YYJ", nil)
+	for _, tt := range []struct {
+		query    string
+		from, to []string
+	}{
+		{"?fromHash=AA&fromIata=yvr&toHash=bb&toIata=YYJ", []string{"YVR"}, []string{"YYJ"}},
+		{"?fromHash=aa&toHash=bb&iatas=yvr,YYJ,YVR", []string{"YVR", "YYJ"}, []string{"YVR", "YYJ"}},
+		{"?fromHash=aa&toHash=bbcc", nil, nil},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/routes/cross"+tt.query, nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != "[]" {
+			t.Errorf("%s: got %d %q", tt.query, w.Code, w.Body.String())
+		}
+		if got.FromHash != "aa" || !slices.Equal(got.FromIATAs, tt.from) || !slices.Equal(got.ToIATAs, tt.to) {
+			t.Errorf("%s: reader got %+v", tt.query, got)
+		}
+	}
+}
+
+func TestSearchCrossIATARoutes_TooBroad(t *testing.T) {
+	r := chi.NewRouter()
+	r.Get("/routes/cross", searchCrossIATARoutes(stubReader{
+		searchCrossIATARoutes: func(context.Context, api.CrossRouteSearch) ([]api.CrossIATARoute, error) {
+			return nil, api.ErrRouteSearchTooBroad
+		},
+	}))
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/routes/cross?fromHash=aa&toHash=bb", nil))
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func manyIATAs(n int) string {
+	codes := make([]string, n)
+	for i := range codes {
+		codes[i] = fmt.Sprintf("Q%02d", i)
+	}
+	return strings.Join(codes, ",")
+}
+
+func TestRouteSearch_ClientGoneWritesNothing(t *testing.T) {
+	r := chi.NewRouter()
+	r.Get("/routes/search", searchKnownRoutes(stubReader{
+		searchKnownRoutes: func(context.Context, []string, string, string) ([]api.KnownRoute, error) {
+			return nil, context.Canceled
+		},
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/routes/search?from=aa&to=bb", nil))
+	if w.Body.Len() != 0 {
+		t.Errorf("expected no body, got %d %q", w.Code, w.Body.String())
 	}
 }
