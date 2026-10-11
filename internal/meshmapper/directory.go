@@ -22,6 +22,7 @@ import (
 type zoneEntry struct {
 	url         string
 	hasBoundary bool
+	group       string   // first group listing it, "" when none
 	name        string   // short display name, e.g. "Nanaimo"
 	lat, lon    *float64 // nil when missing or out of range
 }
@@ -223,6 +224,7 @@ func decodeZones(body []byte, country string) (map[string]zoneEntry, map[string]
 			Lon         *float64 `json:"lon"`
 			URL         string   `json:"url"`
 			HasBoundary bool     `json:"has_boundary"`
+			Group       *string  `json:"group"`
 		} `json:"zones"`
 		Groups []struct {
 			Code    string   `json:"code"`
@@ -241,6 +243,9 @@ func decodeZones(body []byte, country string) (map[string]zoneEntry, map[string]
 		entry := zoneEntry{url: zone.URL, hasBoundary: zone.HasBoundary, name: cmp.Or(zone.ShortName, zone.Name)}
 		if entry.name = strings.TrimSpace(entry.name); len(entry.name) > 128 || strings.ContainsFunc(entry.name, unicode.IsControl) {
 			entry.name = ""
+		}
+		if zone.Group != nil && groupCode.MatchString(strings.ToUpper(*zone.Group)) {
+			entry.group = strings.ToUpper(*zone.Group)
 		}
 		if zone.Lat != nil && zone.Lon != nil && *zone.Lat >= -90 && *zone.Lat <= 90 && *zone.Lon >= -180 && *zone.Lon <= 180 {
 			entry.lat, entry.lon = zone.Lat, zone.Lon

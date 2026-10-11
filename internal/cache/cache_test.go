@@ -417,6 +417,18 @@ func TestCachedReader_InvalidateNode(t *testing.T) {
 	}
 }
 
+func TestInvalidateNodeDetails(t *testing.T) {
+	c, mr := newTestClient(t)
+	cr := &CachedReader{inner: &stubReader{}, c: c, ttl: CacheTTLs{}}
+	mr.Set(keyNodePrefix+"a", "x")
+	mr.Set(keyNodePrefix+"b", "x")
+	mr.Set(keyNodesByIDsPrefix+"a", "keep")
+	cr.InvalidateNodeDetails(context.Background())
+	if got := mr.Keys(); len(got) != 1 || got[0] != keyNodesByIDsPrefix+"a" {
+		t.Fatalf("keys left: %v", got)
+	}
+}
+
 func TestCachedReader_InvalidateObserver(t *testing.T) {
 	c, mr := newTestClient(t)
 	observerID := uuid.MustParse("00000000-0000-0000-0000-000000000002")

@@ -80,6 +80,51 @@ type Node struct {
 	ClockDriftSeconds *int   `json:"clockDriftSeconds,omitempty"`
 	ClockOutOfSync    *bool  `json:"clockOutOfSync,omitempty"`
 	ClockCheckedAt    *int64 `json:"clockCheckedAt,omitempty"`
+	// MeshMapper is what MeshMapper's repeater list says about this key; omitted when
+	// the import is off or MeshMapper doesn't list it.
+	MeshMapper *MeshMapperRepeater `json:"meshmapper,omitempty"`
+}
+
+// MeshMapperRepeater is imported from MeshMapper's get_repeaters.php. Times are epoch ms.
+// Text fields are admin-entered free text: escape before rendering.
+type MeshMapperRepeater struct {
+	IATA            string                  `json:"iata,omitempty"` // region of its latest advert, per MeshMapper
+	FetchedAt       int64                   `json:"fetchedAt"`      // when Beacon last fetched this list
+	Site            MeshMapperSite          `json:"site"`
+	Carpeater       bool                    `json:"carpeater"` // mobile repeater: its position moves
+	Admins          []string                `json:"admins"`
+	Scopes          []MeshMapperScope       `json:"scopes"`
+	ScopesCheckedAt *int64                  `json:"scopesCheckedAt,omitempty"` // set (with empty scopes) when it answered with none
+	DefaultScope    *MeshMapperDefaultScope `json:"defaultScope,omitempty"`
+}
+
+// MeshMapperSite holds admin-entered site details; each field is omitted when unset.
+type MeshMapperSite struct {
+	Power       *string  `json:"power,omitempty"`
+	Hardware    *string  `json:"hardware,omitempty"`
+	Antenna     *string  `json:"antenna,omitempty"`
+	HeightM     *float64 `json:"heightM,omitempty"`     // antenna above ground
+	HeightASLM  *float64 `json:"heightAslM,omitempty"`  // antenna above mean sea level
+	PowerSource *string  `json:"powerSource,omitempty"` // mains, solar, battery or poe
+	Notes       *string  `json:"notes,omitempty"`
+}
+
+// MeshMapperScope is one scope the repeater was confirmed carrying, and how.
+type MeshMapperScope struct {
+	Scope           string  `json:"scope"`
+	ObservedAt      *int64  `json:"observedAt,omitempty"` // seen forwarding scoped traffic
+	ObservedPackets *int64  `json:"observedPackets,omitempty"`
+	Proof           *string `json:"proof,omitempty"`      // multibyte or floor
+	ReportedAt      *int64  `json:"reportedAt,omitempty"` // an observer asked it
+	UploadedAt      *int64  `json:"uploadedAt,omitempty"` // a wardriver's app asked it
+}
+
+// MeshMapperDefaultScope is the scope the repeater puts on its own adverts.
+type MeshMapperDefaultScope struct {
+	Name      *string `json:"name,omitempty"`
+	State     string  `json:"state"` // named, unknown (set but not nameable yet) or none
+	UpdatedAt *int64  `json:"updatedAt,omitempty"`
+	Source    *string `json:"source,omitempty"` // advert or reported
 }
 
 // NodeTypeName returns a human-readable name for a node type integer.

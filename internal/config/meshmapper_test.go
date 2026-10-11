@@ -120,3 +120,21 @@ func TestMeshMapperZonesConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestMeshMapperRepeatersConfig(t *testing.T) {
+	valid := "meshmapper:\n  repeaters:\n    enabled: true\n"
+	for text, bad := range map[string]bool{
+		valid:                                 false,
+		valid + "    refresh_interval: 1h\n":  false,
+		valid + "    refresh_interval: 24h\n": false,
+		valid + "    refresh_interval: 59m\n": true,
+		valid + "    refresh_interval: 25h\n": true,
+	} {
+		if _, err := loadText(t, text); (err != nil) != bad {
+			t.Errorf("%q: error=%v", text, err)
+		}
+	}
+	if (MeshMapperRepeatersConfig{}).Interval() != 6*time.Hour {
+		t.Fatal("wrong default")
+	}
+}

@@ -80,8 +80,7 @@ remove rate limits or change the `get_zones.php?country=...` request shape.
 IP exemptions are not authentication.
 
 Beacon sends `X-API-Key` to `get_zones.php`, `get_geojson.php`, `get_scopes.php`,
-and `get_channels.php`. The shared client also supports that header for
-`get_repeaters.php`; this repository does not currently fetch repeaters.
+`get_channels.php`, and `get_repeaters.php`.
 Requests are restricted to those HTTPS MeshMapper endpoints and never follow
 redirects. Coverage consumers keep their separate keys, scopes, quotas, and
 supported `?key=` authentication; this client does not call `coverage.php`.
@@ -90,7 +89,7 @@ Missing keys are reported as unconfigured without stopping Beacon or deleting
 cached imports. Failed refreshes record `last_error`, retain the last successful
 data and freshness timestamp, and report 401 as an authentication failure or
 403 as a permission failure. Inspect the `meshmapper.zones`, `meshmapper.scopes`,
-and `meshmapper.channels` logs for freshness and the next attempt. No anonymous
+`meshmapper.channels`, and `meshmapper.repeaters` logs for freshness and the next attempt. No anonymous
 fallback occurs. Existing refresh limits still apply, including longer
 `Retry-After` delays on 429/503.
 
