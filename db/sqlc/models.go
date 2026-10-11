@@ -5,6 +5,8 @@
 package db
 
 import (
+	"encoding/json"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -230,6 +232,22 @@ type MeshmapperChannelCatalogue struct {
 type MeshmapperChannelMember struct {
 	Iata           string `json:"iata"`
 	KeyFingerprint []byte `json:"key_fingerprint"`
+}
+
+type MeshmapperRepeater struct {
+	Source    string          `json:"source"`
+	PublicKey []byte          `json:"public_key"`
+	Data      json.RawMessage `json:"data"`
+}
+
+type MeshmapperRepeaterSource struct {
+	Source      string             `json:"source"`
+	Url         string             `json:"url"`
+	Etag        *string            `json:"etag"`
+	CheckedAt   pgtype.Timestamptz `json:"checked_at"`
+	AttemptedAt pgtype.Timestamptz `json:"attempted_at"`
+	NextAttempt pgtype.Timestamptz `json:"next_attempt"`
+	LastError   string             `json:"last_error"`
 }
 
 type MeshmapperScopeCatalogue struct {

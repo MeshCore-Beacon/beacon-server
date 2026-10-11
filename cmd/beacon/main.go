@@ -200,7 +200,7 @@ func main() {
 	scopes.SetManualMembers(cfg.ManualScopeMembers())
 	slog.Info(fmt.Sprintf("loaded %d transport scopes", len(scopeEntries)), "component", "startup")
 	directory := meshmapper.NewDirectory(store, cfg.MeshMapper.APIKey)
-	if cfg.MeshMapper.Scopes.Enabled || cfg.MeshMapper.Zones.Enabled || cfg.MeshMapper.Channels.Enabled {
+	if mm := cfg.MeshMapper; mm.Scopes.Enabled || mm.Zones.Enabled || mm.Channels.Enabled || mm.Repeaters.Enabled {
 		if cfg.MeshMapper.APIKey == "" {
 			slog.Warn("MeshMapper integration unconfigured: set MESHMAPPER_API_KEY or meshmapper.api_key; retaining cached data", "component", "meshmapper")
 		}
@@ -304,6 +304,17 @@ func main() {
 	cancelRestore()
 	if err != nil {
 		slog.Error("failed to restore MeshMapper channels", "component", "startup", "error", err)
+		os.Exit(1)
+	}
+	var onRepeatersChange func(context.Context)
+	if cr, ok := reader.(*cache.CachedReader); ok {
+		onRepeatersChange = cr.InvalidateNodeDetails
+	}
+	restoreCtx, cancelRestore = context.WithTimeout(ctx, 10*time.Second)
+	repeaterImporter, err := meshmapper.NewRepeaters(restoreCtx, cfg.MeshMapper.Repeaters, store, directory, onRepeatersChange)
+	cancelRestore()
+	if err != nil {
+		slog.Error("failed to restore MeshMapper repeaters", "component", "startup", "error", err)
 		os.Exit(1)
 	}
 	channelImporter.OnNewKeys(func(hashes [][]byte) {
@@ -415,6 +426,9 @@ func main() {
 	}
 	if cfg.MeshMapper.Channels.Enabled {
 		tasks = append(tasks, background.Task{Name: "meshmapper.channels", Interval: meshmapper.PollInterval, Run: channelImporter.Refresh})
+	}
+	if cfg.MeshMapper.Repeaters.Enabled {
+		tasks = append(tasks, background.Task{Name: "meshmapper.repeaters", Interval: meshmapper.PollInterval, Run: repeaterImporter.Refresh})
 	}
 	profiles := configureProfiling(ctx, pool)
 	defer profiles.Stop()

@@ -112,6 +112,22 @@ ratelimit:
 #  channels:
 #    enabled: false
 #    refresh_interval: 24h # 24h-168h (one get_channels.php per region per 23.5h)
+#
+# Repeater site details (get_repeaters.php). Every known IATA that MeshMapper
+# lists is fetched from its site, the same way as channels; a MeshMapper group is
+# fetched once, since any member's site lists the whole group. Each repeater's
+# admin-entered site details (power, hardware, antenna, heights, power source,
+# notes), CARpeater flag, admin names, confirmed scopes and default scope are
+# shown on node detail as `meshmapper`, matched by full public key. Positions,
+# status and radio data are not imported. A failed refresh keeps the last good
+# list and retries after 1h (or Retry-After); a 429 pauses every region, since
+# the key's budget (1,000/day, 30/min) is shared. An empty list clears the region.
+# 6h costs 4 requests per group or ungrouped IATA per day. Each import refreshes
+# cached node detail. Turning it off deletes the import on restart but keeps the
+# backoff. Logged under component=meshmapper.repeaters.
+#  repeaters:
+#    enabled: false
+#    refresh_interval: 6h # 1h-24h
 
 iatas:
   YVR:
