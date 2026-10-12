@@ -816,7 +816,12 @@ SELECT n.*, ts.name AS default_scope_name,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
   (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
    FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas,
-  (SELECT COUNT(DISTINCT nn.neighbor_id) FROM node_neighbors nn WHERE nn.node_id = n.id)::bigint AS known_neighbor_count
+  (SELECT COUNT(DISTINCT nn.neighbor_id) FROM node_neighbors nn WHERE nn.node_id = n.id)::bigint AS known_neighbor_count,
+  -- The most recently checked source wins when group sites list the same repeater.
+  (SELECT m.data || jsonb_build_object('fetchedAt', (extract(epoch from s.checked_at) * 1000)::bigint)
+   FROM meshmapper_repeaters m JOIN meshmapper_repeater_sources s ON s.source = m.source
+   WHERE m.public_key = n.public_key AND s.checked_at IS NOT NULL
+   ORDER BY s.checked_at DESC LIMIT 1)::jsonb AS meshmapper
 FROM nodes n
 LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id
 WHERE n.id = $1;
@@ -1837,6 +1842,47 @@ ON CONFLICT (iata, key_fingerprint) DO NOTHING;
 
 -- name: DeleteAllChannelMembers :exec
 DELETE FROM meshmapper_channel_members;
+
+-- name: ListRepeaterSources :many
+SELECT * FROM meshmapper_repeater_sources ORDER BY source;
+
+-- name: SaveRepeaterSource :exec
+-- NULL etag/checked_at retain the last good list's state after an error or 304;
+-- a new URL drops the old site's ETag.
+INSERT INTO meshmapper_repeater_sources (source, url, etag, checked_at, attempted_at, next_attempt, last_error)
+VALUES (@source, @url, sqlc.narg(etag)::text, sqlc.narg(checked_at)::timestamptz, @attempted_at, @next_attempt, @last_error)
+ON CONFLICT (source) DO UPDATE SET
+    url = EXCLUDED.url,
+    etag = CASE WHEN meshmapper_repeater_sources.url = EXCLUDED.url
+        THEN COALESCE(EXCLUDED.etag, meshmapper_repeater_sources.etag) ELSE EXCLUDED.etag END,
+    checked_at = COALESCE(EXCLUDED.checked_at, meshmapper_repeater_sources.checked_at),
+    attempted_at = EXCLUDED.attempted_at,
+    next_attempt = EXCLUDED.next_attempt,
+    last_error = EXCLUDED.last_error;
+
+-- name: ReplaceRepeaters :exec
+-- rows is a JSON array of {"key": hex, "data": {...}}; unchanged rows are not rewritten.
+-- fetchedAt comes from the source's checked_at when read.
+WITH incoming AS (
+    SELECT decode(r->>'key', 'hex') AS public_key, (r->'data') - 'fetchedAt' AS data
+    FROM jsonb_array_elements(@rows::jsonb) r
+), removed AS (
+    DELETE FROM meshmapper_repeaters m
+    WHERE m.source = @source AND m.public_key NOT IN (SELECT public_key FROM incoming)
+)
+INSERT INTO meshmapper_repeaters (source, public_key, data)
+SELECT @source, public_key, data FROM incoming
+ON CONFLICT (source, public_key) DO UPDATE SET data = EXCLUDED.data
+WHERE meshmapper_repeaters.data IS DISTINCT FROM EXCLUDED.data;
+
+-- name: DeleteRepeaterSource :exec
+WITH removed AS (DELETE FROM meshmapper_repeaters r WHERE r.source = @source)
+DELETE FROM meshmapper_repeater_sources s WHERE s.source = @source;
+
+-- name: ClearRepeaters :execrows
+-- Keeps fetch timing so re-enabling still respects backoff; the ETag goes with the rows.
+WITH reset AS (UPDATE meshmapper_repeater_sources SET etag = NULL, checked_at = NULL)
+DELETE FROM meshmapper_repeaters;
 
 -- name: ListZoneBoundaries :many
 SELECT * FROM meshmapper_zone_boundaries ORDER BY iata;

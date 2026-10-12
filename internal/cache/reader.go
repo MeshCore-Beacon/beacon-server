@@ -113,6 +113,11 @@ func (cr *CachedReader) InvalidateNode(ctx context.Context, nodeID uuid.UUID) {
 	cr.c.del(ctx, keyNodePrefix+id, keyNodeNeighborsPrefix+id)
 }
 
+// InvalidateNodeDetails drops every cached node detail, after a MeshMapper repeater import.
+func (cr *CachedReader) InvalidateNodeDetails(ctx context.Context) {
+	cr.c.delPrefix(ctx, keyNodePrefix)
+}
+
 // InvalidateObserver removes the cached entries for an observer by UUID.
 // Should be called from the ingest path after an observer upsert.
 func (cr *CachedReader) InvalidateObserver(ctx context.Context, observerID uuid.UUID) {

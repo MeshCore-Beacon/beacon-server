@@ -115,6 +115,21 @@ func (mr *MockQuerierMockRecorder) AmbiguousPrefixes(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AmbiguousPrefixes", reflect.TypeOf((*MockQuerier)(nil).AmbiguousPrefixes), ctx)
 }
 
+// ClearRepeaters mocks base method.
+func (m *MockQuerier) ClearRepeaters(ctx context.Context) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ClearRepeaters", ctx)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ClearRepeaters indicates an expected call of ClearRepeaters.
+func (mr *MockQuerierMockRecorder) ClearRepeaters(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ClearRepeaters", reflect.TypeOf((*MockQuerier)(nil).ClearRepeaters), ctx)
+}
+
 // CreateAccount mocks base method.
 func (m *MockQuerier) CreateAccount(ctx context.Context, name string) (db.Account, error) {
 	m.ctrl.T.Helper()
@@ -328,6 +343,20 @@ func (m *MockQuerier) DeleteRegionIATAsNotIn(ctx context.Context, arg db.DeleteR
 func (mr *MockQuerierMockRecorder) DeleteRegionIATAsNotIn(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteRegionIATAsNotIn", reflect.TypeOf((*MockQuerier)(nil).DeleteRegionIATAsNotIn), ctx, arg)
+}
+
+// DeleteRepeaterSource mocks base method.
+func (m *MockQuerier) DeleteRepeaterSource(ctx context.Context, source string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteRepeaterSource", ctx, source)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteRepeaterSource indicates an expected call of DeleteRepeaterSource.
+func (mr *MockQuerierMockRecorder) DeleteRepeaterSource(ctx, source any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteRepeaterSource", reflect.TypeOf((*MockQuerier)(nil).DeleteRepeaterSource), ctx, source)
 }
 
 // DeleteRollupHour mocks base method.
@@ -1571,6 +1600,21 @@ func (mr *MockQuerierMockRecorder) ListRegions(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListRegions", reflect.TypeOf((*MockQuerier)(nil).ListRegions), ctx)
 }
 
+// ListRepeaterSources mocks base method.
+func (m *MockQuerier) ListRepeaterSources(ctx context.Context) ([]db.MeshmapperRepeaterSource, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListRepeaterSources", ctx)
+	ret0, _ := ret[0].([]db.MeshmapperRepeaterSource)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListRepeaterSources indicates an expected call of ListRepeaterSources.
+func (mr *MockQuerierMockRecorder) ListRepeaterSources(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListRepeaterSources", reflect.TypeOf((*MockQuerier)(nil).ListRepeaterSources), ctx)
+}
+
 // ListRouteEvidence mocks base method.
 func (m *MockQuerier) ListRouteEvidence(ctx context.Context, arg db.ListRouteEvidenceParams) ([]db.ListRouteEvidenceRow, error) {
 	m.ctrl.T.Helper()
@@ -1819,6 +1863,20 @@ func (m *MockQuerier) RegisterRollupHours(ctx context.Context, since pgtype.Time
 func (mr *MockQuerierMockRecorder) RegisterRollupHours(ctx, since any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RegisterRollupHours", reflect.TypeOf((*MockQuerier)(nil).RegisterRollupHours), ctx, since)
+}
+
+// ReplaceRepeaters mocks base method.
+func (m *MockQuerier) ReplaceRepeaters(ctx context.Context, arg db.ReplaceRepeatersParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReplaceRepeaters", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ReplaceRepeaters indicates an expected call of ReplaceRepeaters.
+func (mr *MockQuerierMockRecorder) ReplaceRepeaters(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReplaceRepeaters", reflect.TypeOf((*MockQuerier)(nil).ReplaceRepeaters), ctx, arg)
 }
 
 // ResolveEndpointHashPairs mocks base method.
@@ -2194,6 +2252,20 @@ func (m *MockQuerier) SaveChannelCatalogue(ctx context.Context, arg db.SaveChann
 func (mr *MockQuerierMockRecorder) SaveChannelCatalogue(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveChannelCatalogue", reflect.TypeOf((*MockQuerier)(nil).SaveChannelCatalogue), ctx, arg)
+}
+
+// SaveRepeaterSource mocks base method.
+func (m *MockQuerier) SaveRepeaterSource(ctx context.Context, arg db.SaveRepeaterSourceParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SaveRepeaterSource", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SaveRepeaterSource indicates an expected call of SaveRepeaterSource.
+func (mr *MockQuerierMockRecorder) SaveRepeaterSource(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveRepeaterSource", reflect.TypeOf((*MockQuerier)(nil).SaveRepeaterSource), ctx, arg)
 }
 
 // SaveScopeCatalogue mocks base method.

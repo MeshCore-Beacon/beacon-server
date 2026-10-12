@@ -320,6 +320,85 @@ definitions:
         description: stable identity within this IATA; use for route evidence links
         type: string
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperDefaultScope:
+    properties:
+      name:
+        type: string
+      source:
+        description: advert or reported
+        type: string
+      state:
+        description: named, unknown (set but not nameable yet) or none
+        type: string
+      updatedAt:
+        type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperRepeater:
+    properties:
+      admins:
+        items:
+          type: string
+        type: array
+      carpeater:
+        description: 'mobile repeater: its position moves'
+        type: boolean
+      defaultScope:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperDefaultScope'
+      fetchedAt:
+        description: when Beacon last fetched this list
+        type: integer
+      iata:
+        description: region of its latest advert, per MeshMapper
+        type: string
+      scopes:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperScope'
+        type: array
+      scopesCheckedAt:
+        description: set (with empty scopes) when it answered with none
+        type: integer
+      site:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperSite'
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperScope:
+    properties:
+      observedAt:
+        description: seen forwarding scoped traffic
+        type: integer
+      observedPackets:
+        type: integer
+      proof:
+        description: multibyte or floor
+        type: string
+      reportedAt:
+        description: an observer asked it
+        type: integer
+      scope:
+        type: string
+      uploadedAt:
+        description: a wardriver's app asked it
+        type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperSite:
+    properties:
+      antenna:
+        type: string
+      hardware:
+        type: string
+      heightAslM:
+        description: antenna above mean sea level
+        type: number
+      heightM:
+        description: antenna above ground
+        type: number
+      notes:
+        type: string
+      power:
+        type: string
+      powerSource:
+        description: mains, solar, battery or poe
+        type: string
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.Node:
     properties:
       clockCheckedAt:
@@ -368,6 +447,12 @@ definitions:
       locationSource:
         description: '"advert" or "manual"'
         type: string
+      meshmapper:
+        allOf:
+        - $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperRepeater'
+        description: |-
+          MeshMapper is what MeshMapper's repeater list says about this key; omitted when
+          the import is off or MeshMapper doesn't list it.
       metadata:
         description: raw JSONB metadata
       minFirmwareVersion:
@@ -1740,7 +1825,7 @@ info:
     name: AGPL-3-or-later
   termsOfService: https://github.com/MeshCore-Beacon/beacon-server
   title: MeshCore Beacon API
-  version: 2.0.5
+  version: 2.0.6
 paths:
   /admin/accounts:
     get:

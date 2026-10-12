@@ -109,6 +109,20 @@ func (q *Queries) AmbiguousPrefixes(ctx context.Context) ([]AmbiguousPrefixesRow
 	return items, nil
 }
 
+const clearRepeaters = `-- name: ClearRepeaters :execrows
+WITH reset AS (UPDATE meshmapper_repeater_sources SET etag = NULL, checked_at = NULL)
+DELETE FROM meshmapper_repeaters
+`
+
+// Keeps fetch timing so re-enabling still respects backoff; the ETag goes with the rows.
+func (q *Queries) ClearRepeaters(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, clearRepeaters)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const createAccount = `-- name: CreateAccount :one
 INSERT INTO accounts (name) VALUES ($1)
 ON CONFLICT (name) WHERE deactivated_at IS NULL DO NOTHING
@@ -364,6 +378,16 @@ func (q *Queries) DeleteRegionIATAsNotIn(ctx context.Context, arg DeleteRegionIA
 	return err
 }
 
+const deleteRepeaterSource = `-- name: DeleteRepeaterSource :exec
+WITH removed AS (DELETE FROM meshmapper_repeaters r WHERE r.source = $1)
+DELETE FROM meshmapper_repeater_sources s WHERE s.source = $1
+`
+
+func (q *Queries) DeleteRepeaterSource(ctx context.Context, source string) error {
+	_, err := q.db.Exec(ctx, deleteRepeaterSource, source)
+	return err
+}
+
 const getAccount = `-- name: GetAccount :one
 SELECT id, name, created_at, deactivated_at FROM accounts WHERE id = $1
 `
@@ -585,7 +609,12 @@ SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.locat
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
   (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
    FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas,
-  (SELECT COUNT(DISTINCT nn.neighbor_id) FROM node_neighbors nn WHERE nn.node_id = n.id)::bigint AS known_neighbor_count
+  (SELECT COUNT(DISTINCT nn.neighbor_id) FROM node_neighbors nn WHERE nn.node_id = n.id)::bigint AS known_neighbor_count,
+  -- The most recently checked source wins when group sites list the same repeater.
+  (SELECT m.data || jsonb_build_object('fetchedAt', (extract(epoch from s.checked_at) * 1000)::bigint)
+   FROM meshmapper_repeaters m JOIN meshmapper_repeater_sources s ON s.source = m.source
+   WHERE m.public_key = n.public_key AND s.checked_at IS NOT NULL
+   ORDER BY s.checked_at DESC LIMIT 1)::jsonb AS meshmapper
 FROM nodes n
 LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id
 WHERE n.id = $1
@@ -616,6 +645,7 @@ type GetNodeByIDRow struct {
 	ObserverID              uuid.UUID          `json:"observer_id"`
 	Iatas                   []byte             `json:"iatas"`
 	KnownNeighborCount      int64              `json:"known_neighbor_count"`
+	Meshmapper              json.RawMessage    `json:"meshmapper"`
 }
 
 func (q *Queries) GetNodeByID(ctx context.Context, id uuid.UUID) (GetNodeByIDRow, error) {
@@ -646,6 +676,7 @@ func (q *Queries) GetNodeByID(ctx context.Context, id uuid.UUID) (GetNodeByIDRow
 		&i.ObserverID,
 		&i.Iatas,
 		&i.KnownNeighborCount,
+		&i.Meshmapper,
 	)
 	return i, err
 }
@@ -4086,6 +4117,38 @@ func (q *Queries) ListRegions(ctx context.Context) ([]ListRegionsRow, error) {
 	return items, nil
 }
 
+const listRepeaterSources = `-- name: ListRepeaterSources :many
+SELECT source, url, etag, checked_at, attempted_at, next_attempt, last_error FROM meshmapper_repeater_sources ORDER BY source
+`
+
+func (q *Queries) ListRepeaterSources(ctx context.Context) ([]MeshmapperRepeaterSource, error) {
+	rows, err := q.db.Query(ctx, listRepeaterSources)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MeshmapperRepeaterSource{}
+	for rows.Next() {
+		var i MeshmapperRepeaterSource
+		if err := rows.Scan(
+			&i.Source,
+			&i.Url,
+			&i.Etag,
+			&i.CheckedAt,
+			&i.AttemptedAt,
+			&i.NextAttempt,
+			&i.LastError,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listScopeCatalogues = `-- name: ListScopeCatalogues :many
 SELECT iata, url, payload, etag, checked_at, attempted_at, next_attempt, last_error FROM meshmapper_scope_catalogues ORDER BY iata, attempted_at
 `
@@ -4525,6 +4588,32 @@ REFRESH MATERIALIZED VIEW CONCURRENTLY mv_radio_presets
 
 func (q *Queries) RefreshRadioPresets(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, refreshRadioPresets)
+	return err
+}
+
+const replaceRepeaters = `-- name: ReplaceRepeaters :exec
+WITH incoming AS (
+    SELECT decode(r->>'key', 'hex') AS public_key, (r->'data') - 'fetchedAt' AS data
+    FROM jsonb_array_elements($2::jsonb) r
+), removed AS (
+    DELETE FROM meshmapper_repeaters m
+    WHERE m.source = $1 AND m.public_key NOT IN (SELECT public_key FROM incoming)
+)
+INSERT INTO meshmapper_repeaters (source, public_key, data)
+SELECT $1, public_key, data FROM incoming
+ON CONFLICT (source, public_key) DO UPDATE SET data = EXCLUDED.data
+WHERE meshmapper_repeaters.data IS DISTINCT FROM EXCLUDED.data
+`
+
+type ReplaceRepeatersParams struct {
+	Source string          `json:"source"`
+	Rows   json.RawMessage `json:"rows"`
+}
+
+// rows is a JSON array of {"key": hex, "data": {...}}; unchanged rows are not rewritten.
+// fetchedAt comes from the source's checked_at when read.
+func (q *Queries) ReplaceRepeaters(ctx context.Context, arg ReplaceRepeatersParams) error {
+	_, err := q.db.Exec(ctx, replaceRepeaters, arg.Source, arg.Rows)
 	return err
 }
 
@@ -5044,6 +5133,44 @@ func (q *Queries) SaveChannelCatalogue(ctx context.Context, arg SaveChannelCatal
 		arg.Iata,
 		arg.Url,
 		arg.Payload,
+		arg.Etag,
+		arg.CheckedAt,
+		arg.AttemptedAt,
+		arg.NextAttempt,
+		arg.LastError,
+	)
+	return err
+}
+
+const saveRepeaterSource = `-- name: SaveRepeaterSource :exec
+INSERT INTO meshmapper_repeater_sources (source, url, etag, checked_at, attempted_at, next_attempt, last_error)
+VALUES ($1, $2, $3::text, $4::timestamptz, $5, $6, $7)
+ON CONFLICT (source) DO UPDATE SET
+    url = EXCLUDED.url,
+    etag = CASE WHEN meshmapper_repeater_sources.url = EXCLUDED.url
+        THEN COALESCE(EXCLUDED.etag, meshmapper_repeater_sources.etag) ELSE EXCLUDED.etag END,
+    checked_at = COALESCE(EXCLUDED.checked_at, meshmapper_repeater_sources.checked_at),
+    attempted_at = EXCLUDED.attempted_at,
+    next_attempt = EXCLUDED.next_attempt,
+    last_error = EXCLUDED.last_error
+`
+
+type SaveRepeaterSourceParams struct {
+	Source      string             `json:"source"`
+	Url         string             `json:"url"`
+	Etag        *string            `json:"etag"`
+	CheckedAt   pgtype.Timestamptz `json:"checked_at"`
+	AttemptedAt pgtype.Timestamptz `json:"attempted_at"`
+	NextAttempt pgtype.Timestamptz `json:"next_attempt"`
+	LastError   string             `json:"last_error"`
+}
+
+// NULL etag/checked_at retain the last good list's state after an error or 304;
+// a new URL drops the old site's ETag.
+func (q *Queries) SaveRepeaterSource(ctx context.Context, arg SaveRepeaterSourceParams) error {
+	_, err := q.db.Exec(ctx, saveRepeaterSource,
+		arg.Source,
+		arg.Url,
 		arg.Etag,
 		arg.CheckedAt,
 		arg.AttemptedAt,

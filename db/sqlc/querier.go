@@ -20,6 +20,8 @@ type Querier interface {
 	AddRegionIATAs(ctx context.Context, arg AddRegionIATAsParams) error
 	// Hop prefixes that match >1 node in an IATA, per width. Computed once per reconfirm run.
 	AmbiguousPrefixes(ctx context.Context) ([]AmbiguousPrefixesRow, error)
+	// Keeps fetch timing so re-enabling still respects backoff; the ETag goes with the rows.
+	ClearRepeaters(ctx context.Context) (int64, error)
 	CreateAccount(ctx context.Context, name string) (Account, error)
 	// Lock the current row before deciding the outcome, including when another
 	// deactivation commits while this statement is waiting for its row lock.
@@ -54,6 +56,7 @@ type Querier interface {
 	DeleteOldTraceIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error
 	DeleteOldTraceTags(ctx context.Context, lastHeardAt pgtype.Timestamptz) error
 	DeleteRegionIATAsNotIn(ctx context.Context, arg DeleteRegionIATAsNotInParams) error
+	DeleteRepeaterSource(ctx context.Context, source string) error
 	DeleteRollupHour(ctx context.Context, hour pgtype.Timestamptz) error
 	// Dirty hours that can no longer be re-rolled.
 	DeleteStaleDirtyHours(ctx context.Context) error
@@ -257,6 +260,7 @@ type Querier interface {
 	// REGIONS
 	// ============================================================
 	ListRegions(ctx context.Context) ([]ListRegionsRow, error)
+	ListRepeaterSources(ctx context.Context) ([]MeshmapperRepeaterSource, error)
 	// Leading index equalities and the time/ID boundary bound both custom and generic plans.
 	// Full-byte equality is required even when the compact digest matches. TRACE path bytes
 	// carry readings; unclassified legacy observations cannot be safely called ordinary paths.
@@ -302,6 +306,9 @@ type Querier interface {
 	// (and not before @since), zero-observation hours included.
 	// No observations yet means nothing to register (GREATEST would ignore the NULL MIN).
 	RegisterRollupHours(ctx context.Context, since pgtype.Timestamptz) error
+	// rows is a JSON array of {"key": hex, "data": {...}}; unchanged rows are not rewritten.
+	// fetchedAt comes from the source's checked_at when read.
+	ReplaceRepeaters(ctx context.Context, arg ReplaceRepeatersParams) error
 	// Batch form of ResolveEndpointHashes for a page of packets. Matches the cross
 	// product of IATAs and hashes; callers pick out the pairs they asked for.
 	ResolveEndpointHashPairs(ctx context.Context, arg ResolveEndpointHashPairsParams) ([]ResolveEndpointHashPairsRow, error)
@@ -350,6 +357,9 @@ type Querier interface {
 	RollupUnlock(ctx context.Context) error
 	// NULL payload/etag/checked_at retain the last good list after an error or 304.
 	SaveChannelCatalogue(ctx context.Context, arg SaveChannelCatalogueParams) error
+	// NULL etag/checked_at retain the last good list's state after an error or 304;
+	// a new URL drops the old site's ETag.
+	SaveRepeaterSource(ctx context.Context, arg SaveRepeaterSourceParams) error
 	// One statement commits the validated snapshot and its lookup identities together.
 	// Empty arrays insert nothing. NULL payload/checked_at retain last-known-good data
 	// after an error or 304. Imported names never replace existing manual metadata.

@@ -256,6 +256,31 @@ func TestGetNode_OK(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
+	if strings.Contains(w.Body.String(), `"meshmapper"`) {
+		t.Error("meshmapper should be omitted when MeshMapper doesn't list the node")
+	}
+}
+
+func TestGetNode_MeshMapper(t *testing.T) {
+	nodeID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	hw, checked := "RAK4631", int64(1791100000000)
+	r := chi.NewRouter()
+	r.Get("/nodes/{nodeId}", getNode(stubReader{
+		getNode: func(_ context.Context, id uuid.UUID) (*api.Node, error) {
+			return &api.Node{NodeSummary: api.NodeSummary{ID: id}, MeshMapper: &api.MeshMapperRepeater{
+				IATA: "YOW", FetchedAt: 1791234600000, Site: api.MeshMapperSite{Hardware: &hw}, Carpeater: true,
+				Admins: []string{}, Scopes: []api.MeshMapperScope{}, ScopesCheckedAt: &checked,
+				DefaultScope: &api.MeshMapperDefaultScope{State: "none"},
+			}}, nil
+		},
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/nodes/"+nodeID.String(), nil))
+	want := `"meshmapper":{"iata":"YOW","fetchedAt":1791234600000,"site":{"hardware":"RAK4631"},"carpeater":true,` +
+		`"admins":[],"scopes":[],"scopesCheckedAt":1791100000000,"defaultScope":{"state":"none"}}`
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), want) {
+		t.Fatalf("status %d, body %s", w.Code, w.Body.String())
+	}
 }
 
 func TestListNodeNeighbors_OK(t *testing.T) {

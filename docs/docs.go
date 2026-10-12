@@ -4085,6 +4085,120 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperDefaultScope": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "source": {
+                    "description": "advert or reported",
+                    "type": "string"
+                },
+                "state": {
+                    "description": "named, unknown (set but not nameable yet) or none",
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperRepeater": {
+            "type": "object",
+            "properties": {
+                "admins": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "carpeater": {
+                    "description": "mobile repeater: its position moves",
+                    "type": "boolean"
+                },
+                "defaultScope": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperDefaultScope"
+                },
+                "fetchedAt": {
+                    "description": "when Beacon last fetched this list",
+                    "type": "integer"
+                },
+                "iata": {
+                    "description": "region of its latest advert, per MeshMapper",
+                    "type": "string"
+                },
+                "scopes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperScope"
+                    }
+                },
+                "scopesCheckedAt": {
+                    "description": "set (with empty scopes) when it answered with none",
+                    "type": "integer"
+                },
+                "site": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperSite"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperScope": {
+            "type": "object",
+            "properties": {
+                "observedAt": {
+                    "description": "seen forwarding scoped traffic",
+                    "type": "integer"
+                },
+                "observedPackets": {
+                    "type": "integer"
+                },
+                "proof": {
+                    "description": "multibyte or floor",
+                    "type": "string"
+                },
+                "reportedAt": {
+                    "description": "an observer asked it",
+                    "type": "integer"
+                },
+                "scope": {
+                    "type": "string"
+                },
+                "uploadedAt": {
+                    "description": "a wardriver's app asked it",
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperSite": {
+            "type": "object",
+            "properties": {
+                "antenna": {
+                    "type": "string"
+                },
+                "hardware": {
+                    "type": "string"
+                },
+                "heightAslM": {
+                    "description": "antenna above mean sea level",
+                    "type": "number"
+                },
+                "heightM": {
+                    "description": "antenna above ground",
+                    "type": "number"
+                },
+                "notes": {
+                    "type": "string"
+                },
+                "power": {
+                    "type": "string"
+                },
+                "powerSource": {
+                    "description": "mains, solar, battery or poe",
+                    "type": "string"
+                }
+            }
+        },
         "github_com_MeshCore-Beacon_beacon-server_internal_api.Node": {
             "type": "object",
             "properties": {
@@ -4142,6 +4256,14 @@ const docTemplate = `{
                 "locationSource": {
                     "description": "\"advert\" or \"manual\"",
                     "type": "string"
+                },
+                "meshmapper": {
+                    "description": "MeshMapper is what MeshMapper's repeater list says about this key; omitted when\nthe import is off or MeshMapper doesn't list it.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperRepeater"
+                        }
+                    ]
                 },
                 "metadata": {
                     "description": "raw JSONB metadata"
@@ -6143,7 +6265,7 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "2.0.5",
+	Version:          "2.0.6",
 	Host:             "localhost:8080",
 	BasePath:         "/api/v1",
 	Schemes:          []string{"http", "https"},
