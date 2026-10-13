@@ -15,6 +15,7 @@ import (
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
+	"github.com/MeshCore-Beacon/beacon-server/internal/tracequality"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/meshcore-go/meshcore-go"
@@ -406,7 +407,15 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 	// compute it once rather than per observation.
 	var traceRawHashes [][]byte
 	if row.PayloadType == int16(meshcore.PayloadTypeTrace) {
-		if trace, err := meshcore.TraceFromBytes(row.RawPayload); err == nil {
+		quality := tracequality.Assess(row.RawPayload, int(row.PayloadVersion), int(row.RouteType), -1)
+		for _, obs := range obsRows {
+			q := tracequality.Assess(row.RawPayload, int(row.PayloadVersion), int(row.RouteType), int(obs.PathLengthByte))
+			for _, reason := range q.Reasons {
+				quality.Add(reason)
+			}
+		}
+		p.TraceQuality = &quality
+		if trace, err := meshcore.TraceFromBytes(row.RawPayload); err == nil && quality.Status == "supported" {
 			hashSize := int(trace.PathHashSize())
 			for i := 0; i+hashSize <= len(trace.PathHashes); i += hashSize {
 				traceRawHashes = append(traceRawHashes, trace.PathHashes[i:i+hashSize])
@@ -442,8 +451,11 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 		obs.PropagationTimeMs = &prop
 		resolvedPath := []api.ResolvedHop{}
 		if row.PayloadType == int16(meshcore.PayloadTypeTrace) {
+			rawPath := hex.EncodeToString(v.PathBytes)
+			obs.WirePathBytes = &rawPath
+			obs.TraceQuality = p.TraceQuality
 			if len(traceRawHashes) > 0 {
-				resolved, err := s.ResolvePathHashes(ctx, v.Iata, traceRawHashes)
+				resolved, err := s.ResolveTracePathHashes(ctx, v.Iata, traceRawHashes)
 				if err != nil {
 					slog.Error(fmt.Sprintf("store: path resolution failed for observation %d", v.ID), "component", "db", "error", err)
 				} else {
@@ -491,7 +503,7 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 		}
 		p.Observations = append(p.Observations, obs)
 	}
-	if row.PayloadType == 9 && len(obsRows) > 0 {
+	if row.PayloadType == 9 && len(obsRows) > 0 && p.TraceQuality.Status == "supported" {
 		iatas := make([]string, 0, len(obsRows))
 		seen := make(map[string]struct{})
 		for _, v := range obsRows {
@@ -503,6 +515,11 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 		var parsed tracePayload
 		if err := json.Unmarshal(row.ParsedPayload, &parsed); err == nil {
 			p.ResolvedRoute = s.resolveTraceRoute(ctx, &parsed, iatas)
+			for _, hop := range p.ResolvedRoute {
+				if hop.Confidence == "ambiguous" {
+					p.TraceQuality.Add("ambiguous_prefix")
+				}
+			}
 		}
 	}
 	return p, nil

@@ -48,6 +48,7 @@ type InsertedChannelMessage struct {
 
 // channelMessageEvent is the JSON payload for a channelMessage WS event.
 type channelMessageEvent struct {
+	IsPublic    bool                   `json:"isPublic"` // True only when decryption used the documented default Public key, never inferred from a one-byte channel hash.
 	ID          int64                  `json:"id"`
 	ChannelID   int                    `json:"channelId"`
 	ChannelHash string                 `json:"channelHash"` // hex-encoded single byte
@@ -223,6 +224,7 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 
 		if result.Message != nil {
 			evt := channelMessageEvent{
+				IsPublic:    hex.EncodeToString(result.Entry.Key) == "8b3387e9c5cdea6ac9e5edbaa115cd72",
 				ID:          result.Message.ID,
 				Scope:       result.Message.Scope,
 				ScopeStatus: result.Message.ScopeStatus,
