@@ -339,6 +339,11 @@ func (cr *CachedReader) ListObserverAdverts(ctx context.Context, observerID uuid
 	return cr.inner.ListObserverAdverts(ctx, observerID, cursor, limit)
 }
 
+// SearchPacketsByHashPrefix implements [api.Reader].
+func (cr *CachedReader) SearchPacketsByHashPrefix(ctx context.Context, lo, hi []byte, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
+	return cr.inner.SearchPacketsByHashPrefix(ctx, lo, hi, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
+}
+
 // ListPackets implements [api.Reader].
 func (cr *CachedReader) ListPackets(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
 	return cr.inner.ListPackets(ctx, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)

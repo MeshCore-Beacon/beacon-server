@@ -372,6 +372,11 @@ type Querier interface {
 	// A route's hops resolve in its own IATA, so candidates from other IATAs can't match.
 	// Both && predicates use the node_ids GIN index.
 	SearchKnownRoutesByNodes(ctx context.Context, arg SearchKnownRoutesByNodesParams) ([]SearchKnownRoutesByNodesRow, error)
+	// Packets whose hash falls in [lo, hi). The materialized CTE pins the primary key
+	// range scan; otherwise generic plans walk idx_packets_last_heard across the table.
+	// IATA filtering is a membership probe, so ordering and the cursor stay on global
+	// last_heard_at.
+	SearchPacketsByHashPrefix(ctx context.Context, arg SearchPacketsByHashPrefixParams) ([]SearchPacketsByHashPrefixRow, error)
 	SetNodeDefaultScope(ctx context.Context, arg SetNodeDefaultScopeParams) error
 	SetNodeMultibytePaths(ctx context.Context, id uuid.UUID) error
 	SetNodeMultibyteTraces(ctx context.Context, id uuid.UUID) error

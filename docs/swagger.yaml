@@ -3101,6 +3101,11 @@ paths:
         minimum: 1
         name: limit
         type: integer
+      - description: Match packets whose hash starts with this hex prefix (4-16 chars).
+          Ordering and cursor use global last_heard_at even when iatas is set
+        in: query
+        name: hashPrefix
+        type: string
       produces:
       - application/json
       responses:
