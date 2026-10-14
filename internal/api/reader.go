@@ -140,6 +140,11 @@ type Reader interface {
 	// nil/empty to skip a filter.
 	ListPackets(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (Page[PacketSummary], error)
 
+	// SearchPacketsByHashPrefix lists packets whose hash is in [lo, hi) (nil hi is unbounded),
+	// newest last_heard_at first. Other filters behave as in ListPackets; iatas only
+	// restricts membership, the cursor stays on global last_heard_at.
+	SearchPacketsByHashPrefix(ctx context.Context, lo, hi []byte, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (Page[PacketSummary], error)
+
 	// ListPacketsAfterID returns packets with observations after the given observation ID,
 	// ordered oldest first. Used for WS reconnect backfill.
 	ListPacketsAfterID(ctx context.Context, afterObservationID int64, payloadType, routeType int16, iatas []string, scope string, limit int32) ([]PacketSummary, error)

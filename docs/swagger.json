@@ -15,7 +15,7 @@
         "license": {
             "name": "AGPL-3-or-later"
         },
-        "version": "2.0.6"
+        "version": "2.0.7"
     },
     "host": "localhost:8080",
     "basePath": "/api/v1",
@@ -1891,6 +1891,12 @@
                         "type": "integer",
                         "description": "Max results (default 50); must be positive, values above 200 are clamped",
                         "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Match packets whose hash starts with this hex prefix (4-16 chars). Ordering and cursor use global last_heard_at even when iatas is set",
+                        "name": "hashPrefix",
                         "in": "query"
                     }
                 ],
