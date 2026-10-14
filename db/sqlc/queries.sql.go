@@ -5376,6 +5376,155 @@ func (q *Queries) SearchKnownRoutesByNodes(ctx context.Context, arg SearchKnownR
 	return items, nil
 }
 
+const searchPacketsByHashPrefix = `-- name: SearchPacketsByHashPrefix :many
+WITH hits AS MATERIALIZED (
+  SELECT packet_hash FROM packets
+  WHERE packet_hash >= $9::bytea AND packet_hash < $10::bytea
+)
+SELECT
+  p.packet_hash,
+  p.payload_type,
+  COALESCE(CASE
+    WHEN p.payload_type = 4 AND jsonb_typeof(p.parsed_payload #> '{appData,name}') = 'string'
+      THEN p.parsed_payload #>> '{appData,name}'
+    WHEN p.payload_type = 3 AND p.parsed_payload ->> 'type' = 'ACK'
+      AND jsonb_typeof(p.parsed_payload -> 'checksum') = 'string'
+      AND p.parsed_payload ->> 'checksum' ~ '^[0-9a-fA-F]{8}$'
+      THEN 'ACK ' || lower(p.parsed_payload ->> 'checksum')
+    WHEN p.payload_type = 9 AND p.parsed_payload ->> 'type' IN ('TRACE', 'PING')
+      AND jsonb_typeof(p.parsed_payload -> 'traceTag') = 'string'
+      AND p.parsed_payload ->> 'traceTag' ~ '^[0-9a-fA-F]{8}$'
+      THEN (p.parsed_payload ->> 'type') || ' ' || lower(p.parsed_payload ->> 'traceTag')
+    END, '')::text AS summary,
+  p.route_type,
+  p.first_heard_at,
+  p.last_heard_at,
+  p.scope_id,
+  ts.name AS scope_name,
+  p.observation_count AS observation_count,
+  -- sqlc loses LATERAL nullability; these scalar defaults are ignored when observer_id is NULL.
+  po.observer_id AS latest_observer_id,
+  o.display_name AS latest_observer_name,
+  COALESCE(po.iata, ''::bpchar) AS latest_observer_iata,
+  COALESCE(po.path_length_byte, 0::smallint) AS latest_observer_path_length_byte,
+  COALESCE(po.hash_size, 0::smallint) AS latest_observer_hash_size,
+  COALESCE(po.hop_count, 0::smallint) AS latest_observer_hop_count,
+  po.path_bytes AS latest_observer_path_bytes,
+  p.raw_payload,
+  p.origin_pubkey
+FROM hits h
+JOIN packets p ON p.packet_hash = h.packet_hash
+LEFT JOIN LATERAL (
+  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes
+  FROM packet_observations
+  WHERE packet_hash = p.packet_hash
+  ORDER BY heard_at DESC
+  LIMIT 1
+) po ON true
+LEFT JOIN observers o ON o.id = po.observer_id
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+WHERE
+  (COALESCE(cardinality($1::smallint[]), 0) = 0 OR p.payload_type = ANY($1::smallint[]))
+  AND (COALESCE(cardinality($2::smallint[]), 0) = 0 OR p.route_type = ANY($2::smallint[]))
+  AND ($3::timestamptz IS NULL OR p.first_heard_at >= $3)
+  AND ($4::timestamptz IS NULL OR p.first_heard_at <= $4)
+  AND ($5::timestamptz IS NULL OR p.last_heard_at < $5)
+  AND (COALESCE(cardinality($6::text[]), 0) = 0 OR ts.name = ANY($6::text[]))
+  AND (COALESCE(cardinality($7::bpchar[]), 0) = 0 OR EXISTS (
+    SELECT 1 FROM packet_observations pi
+    WHERE pi.packet_hash = p.packet_hash AND pi.iata = ANY($7::bpchar[])))
+ORDER BY p.last_heard_at DESC
+LIMIT $8
+`
+
+type SearchPacketsByHashPrefixParams struct {
+	PayloadTypes []int16            `json:"payload_types"`
+	RouteTypes   []int16            `json:"route_types"`
+	SinceTs      pgtype.Timestamptz `json:"since_ts"`
+	UntilTs      pgtype.Timestamptz `json:"until_ts"`
+	CursorTs     pgtype.Timestamptz `json:"cursor_ts"`
+	ScopeNames   []string           `json:"scope_names"`
+	Iatas        []string           `json:"iatas"`
+	PageLimit    int32              `json:"page_limit"`
+	HashLo       []byte             `json:"hash_lo"`
+	HashHi       []byte             `json:"hash_hi"`
+}
+
+type SearchPacketsByHashPrefixRow struct {
+	PacketHash                   []byte             `json:"packet_hash"`
+	PayloadType                  int16              `json:"payload_type"`
+	Summary                      string             `json:"summary"`
+	RouteType                    int16              `json:"route_type"`
+	FirstHeardAt                 pgtype.Timestamptz `json:"first_heard_at"`
+	LastHeardAt                  pgtype.Timestamptz `json:"last_heard_at"`
+	ScopeID                      *int32             `json:"scope_id"`
+	ScopeName                    *string            `json:"scope_name"`
+	ObservationCount             int64              `json:"observation_count"`
+	LatestObserverID             uuid.UUID          `json:"latest_observer_id"`
+	LatestObserverName           *string            `json:"latest_observer_name"`
+	LatestObserverIata           string             `json:"latest_observer_iata"`
+	LatestObserverPathLengthByte int16              `json:"latest_observer_path_length_byte"`
+	LatestObserverHashSize       int16              `json:"latest_observer_hash_size"`
+	LatestObserverHopCount       int16              `json:"latest_observer_hop_count"`
+	LatestObserverPathBytes      []byte             `json:"latest_observer_path_bytes"`
+	RawPayload                   []byte             `json:"raw_payload"`
+	OriginPubkey                 []byte             `json:"origin_pubkey"`
+}
+
+// Packets whose hash falls in [lo, hi). The materialized CTE pins the primary key
+// range scan; otherwise generic plans walk idx_packets_last_heard across the table.
+// IATA filtering is a membership probe, so ordering and the cursor stay on global
+// last_heard_at.
+func (q *Queries) SearchPacketsByHashPrefix(ctx context.Context, arg SearchPacketsByHashPrefixParams) ([]SearchPacketsByHashPrefixRow, error) {
+	rows, err := q.db.Query(ctx, searchPacketsByHashPrefix,
+		arg.PayloadTypes,
+		arg.RouteTypes,
+		arg.SinceTs,
+		arg.UntilTs,
+		arg.CursorTs,
+		arg.ScopeNames,
+		arg.Iatas,
+		arg.PageLimit,
+		arg.HashLo,
+		arg.HashHi,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SearchPacketsByHashPrefixRow{}
+	for rows.Next() {
+		var i SearchPacketsByHashPrefixRow
+		if err := rows.Scan(
+			&i.PacketHash,
+			&i.PayloadType,
+			&i.Summary,
+			&i.RouteType,
+			&i.FirstHeardAt,
+			&i.LastHeardAt,
+			&i.ScopeID,
+			&i.ScopeName,
+			&i.ObservationCount,
+			&i.LatestObserverID,
+			&i.LatestObserverName,
+			&i.LatestObserverIata,
+			&i.LatestObserverPathLengthByte,
+			&i.LatestObserverHashSize,
+			&i.LatestObserverHopCount,
+			&i.LatestObserverPathBytes,
+			&i.RawPayload,
+			&i.OriginPubkey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setNodeDefaultScope = `-- name: SetNodeDefaultScope :exec
 UPDATE nodes SET default_scope_id = $2 WHERE id = $1
 `

@@ -2325,6 +2325,21 @@ func (mr *MockQuerierMockRecorder) SearchKnownRoutesByNodes(ctx, arg any) *gomoc
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SearchKnownRoutesByNodes", reflect.TypeOf((*MockQuerier)(nil).SearchKnownRoutesByNodes), ctx, arg)
 }
 
+// SearchPacketsByHashPrefix mocks base method.
+func (m *MockQuerier) SearchPacketsByHashPrefix(ctx context.Context, arg db.SearchPacketsByHashPrefixParams) ([]db.SearchPacketsByHashPrefixRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SearchPacketsByHashPrefix", ctx, arg)
+	ret0, _ := ret[0].([]db.SearchPacketsByHashPrefixRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SearchPacketsByHashPrefix indicates an expected call of SearchPacketsByHashPrefix.
+func (mr *MockQuerierMockRecorder) SearchPacketsByHashPrefix(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SearchPacketsByHashPrefix", reflect.TypeOf((*MockQuerier)(nil).SearchPacketsByHashPrefix), ctx, arg)
+}
+
 // SetNodeDefaultScope mocks base method.
 func (m *MockQuerier) SetNodeDefaultScope(ctx context.Context, arg db.SetNodeDefaultScopeParams) error {
 	m.ctrl.T.Helper()
