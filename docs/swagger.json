@@ -1892,6 +1892,12 @@
                         "description": "Max results (default 50); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Match packets whose hash starts with this hex prefix (4-16 chars). Ordering and cursor use global last_heard_at even when iatas is set",
+                        "name": "hashPrefix",
+                        "in": "query"
                     }
                 ],
                 "responses": {

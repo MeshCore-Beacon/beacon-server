@@ -4,6 +4,7 @@
 package db
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -246,6 +247,88 @@ func (s *Store) listPacketsByIATAs(ctx context.Context, payloadTypes, routeTypes
 		}
 		ms := last.UnixMilli()
 		nextCursor = &ms
+	}
+	return api.Page[api.PacketSummary]{
+		Items:      items,
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
+	}, nil
+}
+
+// SearchPacketsByHashPrefix lists packets whose hash is in [lo, hi); nil hi is unbounded.
+func (s *Store) SearchPacketsByHashPrefix(ctx context.Context, lo, hi []byte, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
+	var cursorTS pgtype.Timestamptz
+	if cursor > 0 {
+		cursorTS = pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}
+	}
+	var sinceTS pgtype.Timestamptz
+	if !since.IsZero() {
+		sinceTS = pgtype.Timestamptz{Time: since, Valid: true}
+	}
+	var untilTS pgtype.Timestamptz
+	if !until.IsZero() {
+		untilTS = pgtype.Timestamptz{Time: until, Valid: true}
+	}
+	if hi == nil {
+		// Sorts above any stored hash, keeping the range closed for the planner.
+		hi = bytes.Repeat([]byte{0xff}, 64)
+	}
+	rows, err := s.q.SearchPacketsByHashPrefix(ctx, sqlc.SearchPacketsByHashPrefixParams{
+		HashLo:       lo,
+		HashHi:       hi,
+		PayloadTypes: payloadTypes,
+		RouteTypes:   routeTypes,
+		SinceTs:      sinceTS,
+		UntilTs:      untilTS,
+		CursorTs:     cursorTS,
+		ScopeNames:   scopes,
+		Iatas:        iatas,
+		PageLimit:    limit + 1,
+	})
+	if err != nil {
+		return api.Page[api.PacketSummary]{}, err
+	}
+	hasMore := len(rows) > int(limit)
+	if hasMore {
+		rows = rows[:limit]
+	}
+	items := make([]api.PacketSummary, 0, len(rows))
+	lookups := make([]endpointLookup, 0, len(rows))
+	for _, v := range rows {
+		var lookup endpointLookup
+		item := api.PacketSummary{
+			PacketHash:       hex.EncodeToString(v.PacketHash),
+			PayloadType:      v.PayloadType,
+			PayloadTypeName:  api.PayloadTypeName(v.PayloadType),
+			RouteType:        v.RouteType,
+			RouteTypeName:    api.RouteTypeName(v.RouteType),
+			Scope:            v.ScopeName,
+			FirstHeardAt:     v.FirstHeardAt.Time.UnixMilli(),
+			LastHeardAt:      v.LastHeardAt.Time.UnixMilli(),
+			ObservationCount: int32(v.ObservationCount),
+		}
+		if v.Summary != "" {
+			item.Summary = &v.Summary
+		}
+		if v.LatestObserverID != (uuid.UUID{}) {
+			item.LatestObserver = &api.PacketLatestObserver{
+				ID:          v.LatestObserverID,
+				DisplayName: v.LatestObserverName,
+				IATA:        v.LatestObserverIata,
+			}
+			lookup = endpointLookup{iata: v.LatestObserverIata, ep: parsePacketEndpoints(v.PayloadType, v.RawPayload, v.OriginPubkey)}
+			item.LatestObserver.PathLength, item.LatestObserver.PathBytes = buildLatestObserverPath(
+				&v.LatestObserverPathLengthByte, &v.LatestObserverHashSize, &v.LatestObserverHopCount, v.LatestObserverPathBytes,
+			)
+		}
+		items = append(items, item)
+		lookups = append(lookups, lookup)
+	}
+	s.fillLatestEndpoints(ctx, items, lookups)
+	var nextCursor *int64
+	if hasMore && len(items) > 0 {
+		last := items[len(items)-1].LastHeardAt
+		nextCursor = &last
 	}
 	return api.Page[api.PacketSummary]{
 		Items:      items,

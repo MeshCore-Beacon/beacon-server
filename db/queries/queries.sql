@@ -635,6 +635,70 @@ LEFT JOIN observers o ON o.id = po.observer_id
 LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 ORDER BY sh.site_heard_at DESC;
 
+-- name: SearchPacketsByHashPrefix :many
+-- Packets whose hash falls in [lo, hi). The materialized CTE pins the primary key
+-- range scan; otherwise generic plans walk idx_packets_last_heard across the table.
+-- IATA filtering is a membership probe, so ordering and the cursor stay on global
+-- last_heard_at.
+WITH hits AS MATERIALIZED (
+  SELECT packet_hash FROM packets
+  WHERE packet_hash >= @hash_lo::bytea AND packet_hash < @hash_hi::bytea
+)
+SELECT
+  p.packet_hash,
+  p.payload_type,
+  COALESCE(CASE
+    WHEN p.payload_type = 4 AND jsonb_typeof(p.parsed_payload #> '{appData,name}') = 'string'
+      THEN p.parsed_payload #>> '{appData,name}'
+    WHEN p.payload_type = 3 AND p.parsed_payload ->> 'type' = 'ACK'
+      AND jsonb_typeof(p.parsed_payload -> 'checksum') = 'string'
+      AND p.parsed_payload ->> 'checksum' ~ '^[0-9a-fA-F]{8}$'
+      THEN 'ACK ' || lower(p.parsed_payload ->> 'checksum')
+    WHEN p.payload_type = 9 AND p.parsed_payload ->> 'type' IN ('TRACE', 'PING')
+      AND jsonb_typeof(p.parsed_payload -> 'traceTag') = 'string'
+      AND p.parsed_payload ->> 'traceTag' ~ '^[0-9a-fA-F]{8}$'
+      THEN (p.parsed_payload ->> 'type') || ' ' || lower(p.parsed_payload ->> 'traceTag')
+    END, '')::text AS summary,
+  p.route_type,
+  p.first_heard_at,
+  p.last_heard_at,
+  p.scope_id,
+  ts.name AS scope_name,
+  p.observation_count AS observation_count,
+  -- sqlc loses LATERAL nullability; these scalar defaults are ignored when observer_id is NULL.
+  po.observer_id AS latest_observer_id,
+  o.display_name AS latest_observer_name,
+  COALESCE(po.iata, ''::bpchar) AS latest_observer_iata,
+  COALESCE(po.path_length_byte, 0::smallint) AS latest_observer_path_length_byte,
+  COALESCE(po.hash_size, 0::smallint) AS latest_observer_hash_size,
+  COALESCE(po.hop_count, 0::smallint) AS latest_observer_hop_count,
+  po.path_bytes AS latest_observer_path_bytes,
+  p.raw_payload,
+  p.origin_pubkey
+FROM hits h
+JOIN packets p ON p.packet_hash = h.packet_hash
+LEFT JOIN LATERAL (
+  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes
+  FROM packet_observations
+  WHERE packet_hash = p.packet_hash
+  ORDER BY heard_at DESC
+  LIMIT 1
+) po ON true
+LEFT JOIN observers o ON o.id = po.observer_id
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+WHERE
+  (COALESCE(cardinality(@payload_types::smallint[]), 0) = 0 OR p.payload_type = ANY(@payload_types::smallint[]))
+  AND (COALESCE(cardinality(@route_types::smallint[]), 0) = 0 OR p.route_type = ANY(@route_types::smallint[]))
+  AND (@since_ts::timestamptz IS NULL OR p.first_heard_at >= @since_ts)
+  AND (@until_ts::timestamptz IS NULL OR p.first_heard_at <= @until_ts)
+  AND (@cursor_ts::timestamptz IS NULL OR p.last_heard_at < @cursor_ts)
+  AND (COALESCE(cardinality(@scope_names::text[]), 0) = 0 OR ts.name = ANY(@scope_names::text[]))
+  AND (COALESCE(cardinality(@iatas::bpchar[]), 0) = 0 OR EXISTS (
+    SELECT 1 FROM packet_observations pi
+    WHERE pi.packet_hash = p.packet_hash AND pi.iata = ANY(@iatas::bpchar[])))
+ORDER BY p.last_heard_at DESC
+LIMIT @page_limit;
+
 -- name: ListPacketsAfterID :many
 -- Returns packets with observations after the given observation ID, ordered oldest first.
 -- Used for WS reconnect backfill. Pass afterObservationId=0 to start from the beginning.

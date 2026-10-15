@@ -42,6 +42,7 @@ type stubReader struct {
 	getNode                      func(ctx context.Context, nodeID uuid.UUID) (*api.Node, error)
 	getNodeNeighbors             func(ctx context.Context, nodeID uuid.UUID) ([]api.NodeNeighbor, error)
 	listNodeObservations         func(ctx context.Context, nodeID uuid.UUID, cursor int64, limit int32) (api.Page[api.PacketObservationSummary], error)
+	searchPacketsByHashPrefix    func(ctx context.Context, lo, hi []byte, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error)
 	listPackets                  func(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error)
 	listPacketsAfterID           func(ctx context.Context, afterObservationID int64, payloadType, routeType int16, iatas []string, scope string, limit int32) ([]api.PacketSummary, error)
 	getPacket                    func(ctx context.Context, packetHash []byte) (*api.Packet, error)
@@ -245,6 +246,13 @@ func (s stubReader) ListNodeObservations(ctx context.Context, nodeID uuid.UUID, 
 func (s stubReader) ListPackets(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
 	if s.listPackets != nil {
 		return s.listPackets(ctx, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
+	}
+	return api.Page[api.PacketSummary]{}, nil
+}
+
+func (s stubReader) SearchPacketsByHashPrefix(ctx context.Context, lo, hi []byte, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
+	if s.searchPacketsByHashPrefix != nil {
+		return s.searchPacketsByHashPrefix(ctx, lo, hi, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
 	}
 	return api.Page[api.PacketSummary]{}, nil
 }
