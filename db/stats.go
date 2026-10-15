@@ -130,8 +130,8 @@ func (s *Store) GetStatsTopObservers(ctx context.Context, iatas []string, since 
 	return items, nil
 }
 
-func (s *Store) GetStatsTopAdvertisers(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopAdvertiser, error) {
-	rows, err := s.q.GetStatsTopAdvertisers(ctx, sqlc.GetStatsTopAdvertisersParams{Since: rollupSince(since, 24*time.Hour), Iatas: iatas, RowLimit: limit})
+func (s *Store) GetStatsTopAdvertisers(ctx context.Context, iatas []string, since time.Time, limit int32, sort api.AdvertiserSort) ([]api.TopAdvertiser, error) {
+	rows, err := s.q.GetStatsTopAdvertisers(ctx, sqlc.GetStatsTopAdvertisersParams{Sort: string(sort), Since: rollupSince(since, 24*time.Hour), Iatas: iatas, RowLimit: limit})
 	if err != nil {
 		return nil, err
 	}

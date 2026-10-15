@@ -113,6 +113,11 @@ func (cr *CachedReader) InvalidateNode(ctx context.Context, nodeID uuid.UUID) {
 	cr.c.del(ctx, keyNodePrefix+id, keyNodeNeighborsPrefix+id)
 }
 
+// InvalidateNodeDetails drops every cached node detail, after a MeshMapper repeater import.
+func (cr *CachedReader) InvalidateNodeDetails(ctx context.Context) {
+	cr.c.delPrefix(ctx, keyNodePrefix)
+}
+
 // InvalidateObserver removes the cached entries for an observer by UUID.
 // Should be called from the ingest path after an observer upsert.
 func (cr *CachedReader) InvalidateObserver(ctx context.Context, observerID uuid.UUID) {
@@ -294,16 +299,6 @@ func (cr *CachedReader) GetTraceByTag(ctx context.Context, tag string) (*api.Tra
 	return cr.inner.GetTraceByTag(ctx, tag)
 }
 
-// GetKnownRoutesByNode implements [api.Reader].
-func (cr *CachedReader) GetKnownRoutesByNode(ctx context.Context, iata string, nodeID uuid.UUID) ([]api.KnownRoute, error) {
-	return cr.inner.GetKnownRoutesByNode(ctx, iata, nodeID)
-}
-
-// GetCrossIATANeighbors implements [api.Reader].
-func (cr *CachedReader) GetCrossIATANeighbors(ctx context.Context, nodeID uuid.UUID, iata string) ([]api.NodeNeighbor, error) {
-	return cr.inner.GetCrossIATANeighbors(ctx, nodeID, iata)
-}
-
 // ListChannels implements [api.Reader].
 func (cr *CachedReader) ListChannels(ctx context.Context, limit int32, hash []byte, iatas []string, keyKnown *bool, cursor int64, pageCursor *api.ChannelCursor) (api.ChannelPage, error) {
 	return cr.inner.ListChannels(ctx, limit, hash, iatas, keyKnown, cursor, pageCursor)
@@ -344,6 +339,11 @@ func (cr *CachedReader) ListObserverAdverts(ctx context.Context, observerID uuid
 	return cr.inner.ListObserverAdverts(ctx, observerID, cursor, limit)
 }
 
+// SearchPacketsByHashPrefix implements [api.Reader].
+func (cr *CachedReader) SearchPacketsByHashPrefix(ctx context.Context, lo, hi []byte, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
+	return cr.inner.SearchPacketsByHashPrefix(ctx, lo, hi, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
+}
+
 // ListPackets implements [api.Reader].
 func (cr *CachedReader) ListPackets(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
 	return cr.inner.ListPackets(ctx, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
@@ -360,8 +360,8 @@ func (cr *CachedReader) ListKnownRoutes(ctx context.Context, iata string, hopCou
 }
 
 // SearchKnownRoutes implements [api.Reader].
-func (cr *CachedReader) SearchKnownRoutes(ctx context.Context, iata, fromHash, toHash string) ([]api.KnownRoute, error) {
-	return cr.inner.SearchKnownRoutes(ctx, iata, fromHash, toHash)
+func (cr *CachedReader) SearchKnownRoutes(ctx context.Context, iatas []string, fromHash, toHash string) ([]api.KnownRoute, error) {
+	return cr.inner.SearchKnownRoutes(ctx, iatas, fromHash, toHash)
 }
 
 // Precise cursor/window combinations are intentionally passed through, like route lists.
@@ -370,8 +370,8 @@ func (cr *CachedReader) GetRouteEvidence(ctx context.Context, iata, key string, 
 }
 
 // SearchCrossIATARoutes implements [api.Reader].
-func (cr *CachedReader) SearchCrossIATARoutes(ctx context.Context, fromHash, fromIATA, toHash, toIATA string) ([]api.CrossIATARoute, error) {
-	return cr.inner.SearchCrossIATARoutes(ctx, fromHash, fromIATA, toHash, toIATA)
+func (cr *CachedReader) SearchCrossIATARoutes(ctx context.Context, q api.CrossRouteSearch) ([]api.CrossIATARoute, error) {
+	return cr.inner.SearchCrossIATARoutes(ctx, q)
 }
 
 // ListTraceTags implements [api.Reader].

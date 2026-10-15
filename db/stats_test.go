@@ -10,6 +10,7 @@ import (
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	mockdb "github.com/MeshCore-Beacon/beacon-server/db/sqlc/mock"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"go.uber.org/mock/gomock"
@@ -133,7 +134,7 @@ func TestGetStatsTopAdvertisers_FloodDirectSplit(t *testing.T) {
 	heardAt := pgtype.Timestamptz{Time: time.Now(), Valid: true}
 
 	mock.EXPECT().
-		GetStatsTopAdvertisers(gomock.Any(), gomock.Any()).
+		GetStatsTopAdvertisers(gomock.Any(), gomock.Cond(func(p sqlc.GetStatsTopAdvertisersParams) bool { return p.Sort == "direct" })).
 		Return([]sqlc.GetStatsTopAdvertisersRow{
 			{
 				NodeID:            pgtype.UUID{Bytes: nodeID, Valid: true},
@@ -149,7 +150,7 @@ func TestGetStatsTopAdvertisers_FloodDirectSplit(t *testing.T) {
 		}, nil)
 
 	store := &Store{q: mock}
-	items, err := store.GetStatsTopAdvertisers(context.Background(), []string{"YVR"}, time.Now().Add(-time.Hour), 5)
+	items, err := store.GetStatsTopAdvertisers(context.Background(), []string{"YVR"}, time.Now().Add(-time.Hour), 5, api.AdvertiserSortDirect)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

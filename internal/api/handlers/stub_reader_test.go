@@ -42,6 +42,7 @@ type stubReader struct {
 	getNode                      func(ctx context.Context, nodeID uuid.UUID) (*api.Node, error)
 	getNodeNeighbors             func(ctx context.Context, nodeID uuid.UUID) ([]api.NodeNeighbor, error)
 	listNodeObservations         func(ctx context.Context, nodeID uuid.UUID, cursor int64, limit int32) (api.Page[api.PacketObservationSummary], error)
+	searchPacketsByHashPrefix    func(ctx context.Context, lo, hi []byte, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error)
 	listPackets                  func(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error)
 	listPacketsAfterID           func(ctx context.Context, afterObservationID int64, payloadType, routeType int16, iatas []string, scope string, limit int32) ([]api.PacketSummary, error)
 	getPacket                    func(ctx context.Context, packetHash []byte) (*api.Packet, error)
@@ -51,7 +52,7 @@ type stubReader struct {
 	getStatsPayloadBreakdown     func(ctx context.Context, iatas []string, since time.Time) ([]api.PayloadBreakdownItem, error)
 	getStatsTopNodes             func(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopNode, error)
 	getStatsTopObservers         func(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopObserver, error)
-	getStatsTopAdvertisers       func(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopAdvertiser, error)
+	getStatsTopAdvertisers       func(ctx context.Context, iatas []string, since time.Time, limit int32, sort api.AdvertiserSort) ([]api.TopAdvertiser, error)
 	getStatsClockDrift           func(ctx context.Context, iatas []string, limit int32) ([]api.ClockDriftEntry, error)
 	getStatsTopTalkers           func(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopTalker, error)
 	getScopeStats                func(ctx context.Context, iatas []string, since time.Time) ([]api.ScopeStats, error)
@@ -61,10 +62,8 @@ type stubReader struct {
 	listTraceTags                func(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, cursorTag string, limit int32) ([]api.TraceTagSummary, error)
 	getTraceByTag                func(ctx context.Context, tag string) (*api.TraceDetail, error)
 	listKnownRoutes              func(ctx context.Context, iata string, hopCount int32, cursor time.Time, cursorID int64, limit int32) ([]api.KnownRoute, error)
-	searchKnownRoutes            func(ctx context.Context, iata, fromHash, toHash string) ([]api.KnownRoute, error)
-	getKnownRoutesByNode         func(ctx context.Context, iata string, nodeID uuid.UUID) ([]api.KnownRoute, error)
-	getCrossIATANeighbors        func(ctx context.Context, nodeID uuid.UUID, iata string) ([]api.NodeNeighbor, error)
-	searchCrossIATARoutes        func(ctx context.Context, fromHash, fromIATA, toHash, toIATA string) ([]api.CrossIATARoute, error)
+	searchKnownRoutes            func(ctx context.Context, iatas []string, fromHash, toHash string) ([]api.KnownRoute, error)
+	searchCrossIATARoutes        func(ctx context.Context, q api.CrossRouteSearch) ([]api.CrossIATARoute, error)
 	getNodesByIDs                func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*api.ResolvedNode, error)
 }
 
@@ -251,6 +250,13 @@ func (s stubReader) ListPackets(ctx context.Context, payloadTypes, routeTypes []
 	return api.Page[api.PacketSummary]{}, nil
 }
 
+func (s stubReader) SearchPacketsByHashPrefix(ctx context.Context, lo, hi []byte, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
+	if s.searchPacketsByHashPrefix != nil {
+		return s.searchPacketsByHashPrefix(ctx, lo, hi, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
+	}
+	return api.Page[api.PacketSummary]{}, nil
+}
+
 func (s stubReader) ListPacketsAfterID(ctx context.Context, afterObservationID int64, payloadType, routeType int16, iatas []string, scope string, limit int32) ([]api.PacketSummary, error) {
 	if s.listPacketsAfterID != nil {
 		return s.listPacketsAfterID(ctx, afterObservationID, payloadType, routeType, iatas, scope, limit)
@@ -307,9 +313,9 @@ func (s stubReader) GetStatsTopObservers(ctx context.Context, iatas []string, si
 	return nil, nil
 }
 
-func (s stubReader) GetStatsTopAdvertisers(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopAdvertiser, error) {
+func (s stubReader) GetStatsTopAdvertisers(ctx context.Context, iatas []string, since time.Time, limit int32, sort api.AdvertiserSort) ([]api.TopAdvertiser, error) {
 	if s.getStatsTopAdvertisers != nil {
-		return s.getStatsTopAdvertisers(ctx, iatas, since, limit)
+		return s.getStatsTopAdvertisers(ctx, iatas, since, limit, sort)
 	}
 	return nil, nil
 }
@@ -377,30 +383,16 @@ func (s stubReader) ListKnownRoutes(ctx context.Context, iata string, hopCount i
 	return nil, nil
 }
 
-func (s stubReader) SearchKnownRoutes(ctx context.Context, iata, fromHash, toHash string) ([]api.KnownRoute, error) {
+func (s stubReader) SearchKnownRoutes(ctx context.Context, iatas []string, fromHash, toHash string) ([]api.KnownRoute, error) {
 	if s.searchKnownRoutes != nil {
-		return s.searchKnownRoutes(ctx, iata, fromHash, toHash)
+		return s.searchKnownRoutes(ctx, iatas, fromHash, toHash)
 	}
 	return nil, nil
 }
 
-func (s stubReader) GetKnownRoutesByNode(ctx context.Context, iata string, nodeID uuid.UUID) ([]api.KnownRoute, error) {
-	if s.getKnownRoutesByNode != nil {
-		return s.getKnownRoutesByNode(ctx, iata, nodeID)
-	}
-	return nil, nil
-}
-
-func (s stubReader) GetCrossIATANeighbors(ctx context.Context, nodeID uuid.UUID, iata string) ([]api.NodeNeighbor, error) {
-	if s.getCrossIATANeighbors != nil {
-		return s.getCrossIATANeighbors(ctx, nodeID, iata)
-	}
-	return nil, nil
-}
-
-func (s stubReader) SearchCrossIATARoutes(ctx context.Context, fromHash, fromIATA, toHash, toIATA string) ([]api.CrossIATARoute, error) {
+func (s stubReader) SearchCrossIATARoutes(ctx context.Context, q api.CrossRouteSearch) ([]api.CrossIATARoute, error) {
 	if s.searchCrossIATARoutes != nil {
-		return s.searchCrossIATARoutes(ctx, fromHash, fromIATA, toHash, toIATA)
+		return s.searchCrossIATARoutes(ctx, q)
 	}
 	return nil, nil
 }

@@ -635,6 +635,70 @@ LEFT JOIN observers o ON o.id = po.observer_id
 LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 ORDER BY sh.site_heard_at DESC;
 
+-- name: SearchPacketsByHashPrefix :many
+-- Packets whose hash falls in [lo, hi). The materialized CTE pins the primary key
+-- range scan; otherwise generic plans walk idx_packets_last_heard across the table.
+-- IATA filtering is a membership probe, so ordering and the cursor stay on global
+-- last_heard_at.
+WITH hits AS MATERIALIZED (
+  SELECT packet_hash FROM packets
+  WHERE packet_hash >= @hash_lo::bytea AND packet_hash < @hash_hi::bytea
+)
+SELECT
+  p.packet_hash,
+  p.payload_type,
+  COALESCE(CASE
+    WHEN p.payload_type = 4 AND jsonb_typeof(p.parsed_payload #> '{appData,name}') = 'string'
+      THEN p.parsed_payload #>> '{appData,name}'
+    WHEN p.payload_type = 3 AND p.parsed_payload ->> 'type' = 'ACK'
+      AND jsonb_typeof(p.parsed_payload -> 'checksum') = 'string'
+      AND p.parsed_payload ->> 'checksum' ~ '^[0-9a-fA-F]{8}$'
+      THEN 'ACK ' || lower(p.parsed_payload ->> 'checksum')
+    WHEN p.payload_type = 9 AND p.parsed_payload ->> 'type' IN ('TRACE', 'PING')
+      AND jsonb_typeof(p.parsed_payload -> 'traceTag') = 'string'
+      AND p.parsed_payload ->> 'traceTag' ~ '^[0-9a-fA-F]{8}$'
+      THEN (p.parsed_payload ->> 'type') || ' ' || lower(p.parsed_payload ->> 'traceTag')
+    END, '')::text AS summary,
+  p.route_type,
+  p.first_heard_at,
+  p.last_heard_at,
+  p.scope_id,
+  ts.name AS scope_name,
+  p.observation_count AS observation_count,
+  -- sqlc loses LATERAL nullability; these scalar defaults are ignored when observer_id is NULL.
+  po.observer_id AS latest_observer_id,
+  o.display_name AS latest_observer_name,
+  COALESCE(po.iata, ''::bpchar) AS latest_observer_iata,
+  COALESCE(po.path_length_byte, 0::smallint) AS latest_observer_path_length_byte,
+  COALESCE(po.hash_size, 0::smallint) AS latest_observer_hash_size,
+  COALESCE(po.hop_count, 0::smallint) AS latest_observer_hop_count,
+  po.path_bytes AS latest_observer_path_bytes,
+  p.raw_payload,
+  p.origin_pubkey
+FROM hits h
+JOIN packets p ON p.packet_hash = h.packet_hash
+LEFT JOIN LATERAL (
+  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes
+  FROM packet_observations
+  WHERE packet_hash = p.packet_hash
+  ORDER BY heard_at DESC
+  LIMIT 1
+) po ON true
+LEFT JOIN observers o ON o.id = po.observer_id
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+WHERE
+  (COALESCE(cardinality(@payload_types::smallint[]), 0) = 0 OR p.payload_type = ANY(@payload_types::smallint[]))
+  AND (COALESCE(cardinality(@route_types::smallint[]), 0) = 0 OR p.route_type = ANY(@route_types::smallint[]))
+  AND (@since_ts::timestamptz IS NULL OR p.first_heard_at >= @since_ts)
+  AND (@until_ts::timestamptz IS NULL OR p.first_heard_at <= @until_ts)
+  AND (@cursor_ts::timestamptz IS NULL OR p.last_heard_at < @cursor_ts)
+  AND (COALESCE(cardinality(@scope_names::text[]), 0) = 0 OR ts.name = ANY(@scope_names::text[]))
+  AND (COALESCE(cardinality(@iatas::bpchar[]), 0) = 0 OR EXISTS (
+    SELECT 1 FROM packet_observations pi
+    WHERE pi.packet_hash = p.packet_hash AND pi.iata = ANY(@iatas::bpchar[])))
+ORDER BY p.last_heard_at DESC
+LIMIT @page_limit;
+
 -- name: ListPacketsAfterID :many
 -- Returns packets with observations after the given observation ID, ordered oldest first.
 -- Used for WS reconnect backfill. Pass afterObservationId=0 to start from the beginning.
@@ -818,7 +882,12 @@ SELECT n.*, ts.name AS default_scope_name,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
   (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
    FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas,
-  (SELECT COUNT(DISTINCT nn.neighbor_id) FROM node_neighbors nn WHERE nn.node_id = n.id)::bigint AS known_neighbor_count
+  (SELECT COUNT(DISTINCT nn.neighbor_id) FROM node_neighbors nn WHERE nn.node_id = n.id)::bigint AS known_neighbor_count,
+  -- The most recently checked source wins when group sites list the same repeater.
+  (SELECT m.data || jsonb_build_object('fetchedAt', (extract(epoch from s.checked_at) * 1000)::bigint)
+   FROM meshmapper_repeaters m JOIN meshmapper_repeater_sources s ON s.source = m.source
+   WHERE m.public_key = n.public_key AND s.checked_at IS NOT NULL
+   ORDER BY s.checked_at DESC LIMIT 1)::jsonb AS meshmapper
 FROM nodes n
 LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id
 WHERE n.id = $1;
@@ -1193,8 +1262,8 @@ LEFT JOIN observers o ON o.id = r.observer_id
 ORDER BY r.observation_count DESC, r.observer_id;
 
 -- name: GetStatsTopAdvertisers :many
--- Top N advertisers since the given hour. Each ADVERT packet counts once per hour heard,
--- however many of the requested IATAs heard it (IATA-set rollup). Live names win.
+-- Top N advertisers since the given hour, ranked by flood or direct adverts (@sort). Each ADVERT
+-- packet counts once per hour heard, however many of the requested IATAs heard it. Live names win.
 WITH ranked AS (
   SELECT origin_pubkey, SUM(advert_packets)::bigint AS advert_count,
          SUM(flood_packets)::bigint AS flood_advert_count, SUM(direct_packets)::bigint AS direct_advert_count
@@ -1202,7 +1271,8 @@ WITH ranked AS (
   WHERE hour >= @since::timestamptz
     AND (COALESCE(cardinality(@iatas::bpchar[]), 0) = 0 OR iatas && @iatas::bpchar[])
   GROUP BY origin_pubkey
-  ORDER BY advert_count DESC, origin_pubkey
+  ORDER BY CASE WHEN @sort::text = 'flood' THEN SUM(flood_packets) ELSE SUM(direct_packets) END DESC,
+           advert_count DESC, origin_pubkey
   LIMIT @row_limit
 ), heard AS (
   SELECT h.origin_pubkey, MAX(h.last_heard) AS last_heard, MAX(h.iata) AS iata,
@@ -1219,7 +1289,8 @@ SELECT n.id AS node_id, encode(r.origin_pubkey, 'hex') AS public_key,
 FROM ranked r
 LEFT JOIN heard h ON h.origin_pubkey = r.origin_pubkey
 LEFT JOIN nodes n ON n.public_key = r.origin_pubkey
-ORDER BY r.advert_count DESC, r.origin_pubkey;
+ORDER BY CASE WHEN @sort::text = 'flood' THEN r.flood_advert_count ELSE r.direct_advert_count END DESC,
+         r.advert_count DESC, r.origin_pubkey;
 
 -- name: GetStatsClockDrift :many
 -- Repeaters/room servers (node_type 2/3) whose current advert-derived clock drift exceeds
@@ -1492,23 +1563,28 @@ LIMIT $4
 ORDER BY date_trunc('milliseconds', r.last_seen, 'UTC') DESC, r.id DESC
 LIMIT $4;
 
--- name: SearchKnownRoutes :many
--- Returns known routes containing a subsequence from source to destination hash prefix.
--- Verifies source appears before destination in the route.
+-- name: GetKnownRoutesByNodes :many
+-- Routes containing @nodes[i] in IATA @iatas[i] (aligned, one node per IATA). The &&
+-- drives the node_ids GIN index; the indexed check keeps LIMIT counting real matches.
 SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
-FROM known_routes
-WHERE iata = $1
-  AND array_position(hash_prefix, $2::bytea) IS NOT NULL
-  AND array_position(hash_prefix, $3::bytea) IS NOT NULL
-  AND array_position(hash_prefix, $2::bytea) < array_position(hash_prefix, $3::bytea)
-ORDER BY hop_count ASC, last_seen DESC;
+FROM known_routes kr
+WHERE kr.node_ids && @nodes::uuid[]
+  AND kr.iata = ANY(@iatas::bpchar[])
+  AND (@nodes::uuid[])[array_position(@iatas::bpchar[], kr.iata)] = ANY(kr.node_ids)
+ORDER BY hop_count ASC, last_seen DESC
+LIMIT @row_limit;
 
--- name: GetKnownRoutesByNode :many
+-- name: SearchKnownRoutesByNodes :many
+-- Routes holding a source and a destination candidate; callers check order and IATA.
+-- A route's hops resolve in its own IATA, so candidates from other IATAs can't match.
+-- Both && predicates use the node_ids GIN index.
 SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
-FROM known_routes
-WHERE iata = $1
-  AND $2::uuid = ANY(node_ids)
-ORDER BY hop_count ASC, last_seen DESC;
+FROM known_routes kr
+WHERE kr.node_ids && @from_nodes::uuid[]
+  AND kr.node_ids && @to_nodes::uuid[]
+  AND kr.iata = ANY(@iatas::bpchar[])
+ORDER BY hop_count ASC, last_seen DESC
+LIMIT @row_limit;
 
 -- ============================================================
 -- NEIGHBORS
@@ -1547,16 +1623,13 @@ JOIN nodes n ON n.id = nn.neighbor_id
 WHERE nn.node_id = $1
 ORDER BY nn.last_seen DESC;
 
--- name: GetCrossIATANeighbors :many
--- Returns neighbors of a node that are in a different IATA.
-SELECT
-    n.id, n.name, n.node_type, n.latitude, n.longitude,
-    nn.iata AS neighbor_iata, nn.observation_count, nn.last_seen, nn.snr
-FROM node_neighbors nn
-JOIN nodes n ON n.id = nn.neighbor_id
-WHERE nn.node_id = $1
-  AND nn.iata != $2
-ORDER BY nn.last_seen DESC;
+-- name: GetNeighborLinks :many
+-- Neighbor rows between @a_nodes and @b_nodes in either orientation: ingest writes
+-- adverts as (sender, forwarder) but traces as (receiver, sender). Callers normalise.
+SELECT node_id, neighbor_id, last_seen
+FROM node_neighbors
+WHERE (node_id = ANY(@a_nodes::uuid[]) AND neighbor_id = ANY(@b_nodes::uuid[]))
+   OR (node_id = ANY(@b_nodes::uuid[]) AND neighbor_id = ANY(@a_nodes::uuid[]));
 
 -- ============================================================
 -- HELPERS
@@ -1625,6 +1698,42 @@ JOIN nodes n ON n.id = ns.node_id
 WHERE ns.iata = $1
   AND n.node_type IN (2, 3)
   AND ns.prefix_4 = ANY($2::bytea[]);
+
+-- name: ResolveRelayHashPairsP1 :many
+-- Batch form of ResolvePathHashesP1 across IATAs; callers check uniqueness per IATA.
+SELECT ns.iata, ns.prefix_4 AS hash, ns.node_id
+FROM node_short_ids ns
+JOIN nodes n ON n.id = ns.node_id
+WHERE ns.iata = ANY(@iatas::bpchar[])
+  AND n.node_type IN (2, 3)
+  AND ns.prefix_1 = ANY(@hashes::bytea[]);
+
+-- name: ResolveRelayHashPairsP2 :many
+-- Batch form of ResolvePathHashesP2 across IATAs; callers check uniqueness per IATA.
+SELECT ns.iata, ns.prefix_4 AS hash, ns.node_id
+FROM node_short_ids ns
+JOIN nodes n ON n.id = ns.node_id
+WHERE ns.iata = ANY(@iatas::bpchar[])
+  AND n.node_type IN (2, 3)
+  AND ns.prefix_2 = ANY(@hashes::bytea[]);
+
+-- name: ResolveRelayHashPairsP3 :many
+-- Batch form of ResolvePathHashesP3 across IATAs; callers check uniqueness per IATA.
+SELECT ns.iata, ns.prefix_4 AS hash, ns.node_id
+FROM node_short_ids ns
+JOIN nodes n ON n.id = ns.node_id
+WHERE ns.iata = ANY(@iatas::bpchar[])
+  AND n.node_type IN (2, 3)
+  AND ns.prefix_3 = ANY(@hashes::bytea[]);
+
+-- name: ResolveRelayHashPairsP4 :many
+-- Batch form of ResolvePathHashesP4 across IATAs; callers check uniqueness per IATA.
+SELECT ns.iata, ns.prefix_4 AS hash, ns.node_id
+FROM node_short_ids ns
+JOIN nodes n ON n.id = ns.node_id
+WHERE ns.iata = ANY(@iatas::bpchar[])
+  AND n.node_type IN (2, 3)
+  AND ns.prefix_4 = ANY(@hashes::bytea[]);
 
 -- name: RefreshRadioPresets :exec
 REFRESH MATERIALIZED VIEW CONCURRENTLY mv_radio_presets;
@@ -1803,6 +1912,47 @@ ON CONFLICT (iata, key_fingerprint) DO NOTHING;
 
 -- name: DeleteAllChannelMembers :exec
 DELETE FROM meshmapper_channel_members;
+
+-- name: ListRepeaterSources :many
+SELECT * FROM meshmapper_repeater_sources ORDER BY source;
+
+-- name: SaveRepeaterSource :exec
+-- NULL etag/checked_at retain the last good list's state after an error or 304;
+-- a new URL drops the old site's ETag.
+INSERT INTO meshmapper_repeater_sources (source, url, etag, checked_at, attempted_at, next_attempt, last_error)
+VALUES (@source, @url, sqlc.narg(etag)::text, sqlc.narg(checked_at)::timestamptz, @attempted_at, @next_attempt, @last_error)
+ON CONFLICT (source) DO UPDATE SET
+    url = EXCLUDED.url,
+    etag = CASE WHEN meshmapper_repeater_sources.url = EXCLUDED.url
+        THEN COALESCE(EXCLUDED.etag, meshmapper_repeater_sources.etag) ELSE EXCLUDED.etag END,
+    checked_at = COALESCE(EXCLUDED.checked_at, meshmapper_repeater_sources.checked_at),
+    attempted_at = EXCLUDED.attempted_at,
+    next_attempt = EXCLUDED.next_attempt,
+    last_error = EXCLUDED.last_error;
+
+-- name: ReplaceRepeaters :exec
+-- rows is a JSON array of {"key": hex, "data": {...}}; unchanged rows are not rewritten.
+-- fetchedAt comes from the source's checked_at when read.
+WITH incoming AS (
+    SELECT decode(r->>'key', 'hex') AS public_key, (r->'data') - 'fetchedAt' AS data
+    FROM jsonb_array_elements(@rows::jsonb) r
+), removed AS (
+    DELETE FROM meshmapper_repeaters m
+    WHERE m.source = @source AND m.public_key NOT IN (SELECT public_key FROM incoming)
+)
+INSERT INTO meshmapper_repeaters (source, public_key, data)
+SELECT @source, public_key, data FROM incoming
+ON CONFLICT (source, public_key) DO UPDATE SET data = EXCLUDED.data
+WHERE meshmapper_repeaters.data IS DISTINCT FROM EXCLUDED.data;
+
+-- name: DeleteRepeaterSource :exec
+WITH removed AS (DELETE FROM meshmapper_repeaters r WHERE r.source = @source)
+DELETE FROM meshmapper_repeater_sources s WHERE s.source = @source;
+
+-- name: ClearRepeaters :execrows
+-- Keeps fetch timing so re-enabling still respects backoff; the ETag goes with the rows.
+WITH reset AS (UPDATE meshmapper_repeater_sources SET etag = NULL, checked_at = NULL)
+DELETE FROM meshmapper_repeaters;
 
 -- name: ListZoneBoundaries :many
 SELECT * FROM meshmapper_zone_boundaries ORDER BY iata;

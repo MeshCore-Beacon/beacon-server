@@ -45,7 +45,7 @@ import (
 var version = "dev"
 
 //	@title			MeshCore Beacon API
-//	@version		2.0.3
+//	@version		2.0.7
 //	@description	MeshCore network observation backend. Ingests LoRa packets from MQTT brokers, stores in PostgreSQL, and streams live events via WebSocket.
 //	@description	REST requests share a configurable per-client rate limit (default 300/minute and a 300-request one-second burst cap). Exceeded limits return HTTP 429 with error.code=rate_limited and a Retry-After header in seconds. CORS preflights and WebSocket upgrades do not consume this API budget.
 //	@description	WebSocket upgrade attempts at /ws have a configurable per-client limit (default 10/minute, including failed handshakes). Rate exhaustion returns HTTP 429 with Retry-After before upgrade. An accepted socket exceeding the concurrent cap closes with code 1013 before hello; established connections remain open.
@@ -200,7 +200,7 @@ func main() {
 	scopes.SetManualMembers(cfg.ManualScopeMembers())
 	slog.Info(fmt.Sprintf("loaded %d transport scopes", len(scopeEntries)), "component", "startup")
 	directory := meshmapper.NewDirectory(store, cfg.MeshMapper.APIKey)
-	if cfg.MeshMapper.Scopes.Enabled || cfg.MeshMapper.Zones.Enabled || cfg.MeshMapper.Channels.Enabled {
+	if mm := cfg.MeshMapper; mm.Scopes.Enabled || mm.Zones.Enabled || mm.Channels.Enabled || mm.Repeaters.Enabled {
 		if cfg.MeshMapper.APIKey == "" {
 			slog.Warn("MeshMapper integration unconfigured: set MESHMAPPER_API_KEY or meshmapper.api_key; retaining cached data", "component", "meshmapper")
 		}
@@ -304,6 +304,17 @@ func main() {
 	cancelRestore()
 	if err != nil {
 		slog.Error("failed to restore MeshMapper channels", "component", "startup", "error", err)
+		os.Exit(1)
+	}
+	var onRepeatersChange func(context.Context)
+	if cr, ok := reader.(*cache.CachedReader); ok {
+		onRepeatersChange = cr.InvalidateNodeDetails
+	}
+	restoreCtx, cancelRestore = context.WithTimeout(ctx, 10*time.Second)
+	repeaterImporter, err := meshmapper.NewRepeaters(restoreCtx, cfg.MeshMapper.Repeaters, store, directory, onRepeatersChange)
+	cancelRestore()
+	if err != nil {
+		slog.Error("failed to restore MeshMapper repeaters", "component", "startup", "error", err)
 		os.Exit(1)
 	}
 	channelImporter.OnNewKeys(func(hashes [][]byte) {
@@ -416,6 +427,9 @@ func main() {
 	if cfg.MeshMapper.Channels.Enabled {
 		tasks = append(tasks, background.Task{Name: "meshmapper.channels", Interval: meshmapper.PollInterval, Run: channelImporter.Refresh})
 	}
+	if cfg.MeshMapper.Repeaters.Enabled {
+		tasks = append(tasks, background.Task{Name: "meshmapper.repeaters", Interval: meshmapper.PollInterval, Run: repeaterImporter.Refresh})
+	}
 	profiles := configureProfiling(ctx, pool)
 	defer profiles.Stop()
 	for i := range tasks {
@@ -435,7 +449,9 @@ func main() {
 		WSAllowedOrigins:     cfg.WebSocket.AllowedOrigins,
 		CORS:                 cfg.CORS, Server: cfg.Server, Auth: cfg.Auth, RateLimit: resolved.RateLimit,
 		Scopes: scopes, RollupRetention: resolved.RollupRetention,
-		MinAppVersion: cfg.Mobile.MinAppVersion, ServerVersion: docs.SwaggerInfo.Version,
+		MinAppVersion: api.HigherVersion(api.MinAppVersion, cfg.Mobile.MinAppVersion),
+		MinWebVersion: api.HigherVersion(api.MinWebVersion, cfg.Web.MinWebVersion),
+		ServerVersion: docs.SwaggerInfo.Version,
 		AdminRoutes: map[string]http.Handler{
 			"/accounts": handlers.AccountsRouter(store),
 			"/backup":   handlers.BackupRouter(backupOpts, ctx),

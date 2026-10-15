@@ -45,12 +45,19 @@ type Config struct {
 	Observers   ObserversConfig       `yaml:"observers"`
 	Analytics   AnalyticsConfig       `yaml:"analytics"`
 	Mobile      MobileConfig          `yaml:"mobile"`
+	Web         WebConfig             `yaml:"web"`
 }
 
 // MobileConfig holds settings the BEACON Mobile app reads from /info.
 type MobileConfig struct {
 	// MinAppVersion is the oldest app version (X.Y.Z) allowed to use this server; empty means any.
 	MinAppVersion string `yaml:"min_app_version"`
+}
+
+// WebConfig holds settings Beacon Web reads from /info.
+type WebConfig struct {
+	// MinWebVersion raises the built-in Beacon Web floor (X.Y.Z); it can't lower it.
+	MinWebVersion string `yaml:"min_web_version"`
 }
 
 // BackupConfig enables protected downloads. Disabled by default.
@@ -458,7 +465,7 @@ func Load(path string) (*Config, error) {
 	if err := cfg.validateScopes(); err != nil {
 		return nil, err
 	}
-	if err := cfg.validateMobile(); err != nil {
+	if err := cfg.validateClientVersions(); err != nil {
 		return nil, err
 	}
 	if cfg.Nodes.MarkForeign && !cfg.MeshMapper.Zones.Enabled && !cfg.hasBorderFile() {
@@ -492,11 +499,16 @@ func (c *Config) validateAPIKey() error {
 
 var appVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 
-// validateMobile keeps min_app_version to plain X.Y.Z so every app can compare it.
-func (c *Config) validateMobile() error {
-	c.Mobile.MinAppVersion = strings.TrimSpace(c.Mobile.MinAppVersion)
-	if v := c.Mobile.MinAppVersion; v != "" && !appVersionPattern.MatchString(v) {
-		return fmt.Errorf("mobile.min_app_version must be X.Y.Z (digits only), got %q", v)
+// validateClientVersions keeps minimum client versions to plain X.Y.Z so every client can compare them.
+func (c *Config) validateClientVersions() error {
+	for _, f := range []struct {
+		key string
+		v   *string
+	}{{"mobile.min_app_version", &c.Mobile.MinAppVersion}, {"web.min_web_version", &c.Web.MinWebVersion}} {
+		*f.v = strings.TrimSpace(*f.v)
+		if *f.v != "" && !appVersionPattern.MatchString(*f.v) {
+			return fmt.Errorf("%s must be X.Y.Z (digits only), got %q", f.key, *f.v)
+		}
 	}
 	return nil
 }

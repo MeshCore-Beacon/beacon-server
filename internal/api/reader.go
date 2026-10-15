@@ -140,6 +140,11 @@ type Reader interface {
 	// nil/empty to skip a filter.
 	ListPackets(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (Page[PacketSummary], error)
 
+	// SearchPacketsByHashPrefix lists packets whose hash is in [lo, hi) (nil hi is unbounded),
+	// newest last_heard_at first. Other filters behave as in ListPackets; iatas only
+	// restricts membership, the cursor stays on global last_heard_at.
+	SearchPacketsByHashPrefix(ctx context.Context, lo, hi []byte, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (Page[PacketSummary], error)
+
 	// ListPacketsAfterID returns packets with observations after the given observation ID,
 	// ordered oldest first. Used for WS reconnect backfill.
 	ListPacketsAfterID(ctx context.Context, afterObservationID int64, payloadType, routeType int16, iatas []string, scope string, limit int32) ([]PacketSummary, error)
@@ -187,10 +192,11 @@ type Reader interface {
 	// since defines the start of the window; pass zero time for default (last 24h).
 	GetStatsTopObservers(ctx context.Context, iatas []string, since time.Time, limit int32) ([]TopObserver, error)
 
-	// GetStatsTopAdvertisers returns the top N nodes by distinct ADVERT packet count.
+	// GetStatsTopAdvertisers returns the top N nodes by distinct flood or direct ADVERT count,
+	// ties broken by total adverts then public key.
 	// Pass nil for iatas to return stats across all IATAs.
 	// since defines the start of the window; pass zero time for default (last 24h).
-	GetStatsTopAdvertisers(ctx context.Context, iatas []string, since time.Time, limit int32) ([]TopAdvertiser, error)
+	GetStatsTopAdvertisers(ctx context.Context, iatas []string, since time.Time, limit int32, sort AdvertiserSort) ([]TopAdvertiser, error)
 
 	// GetStatsClockDrift returns repeaters/room servers whose most recent advert-derived
 	// clock drift exceeds the configured threshold (nodes.clock_drift_threshold), worst
@@ -231,21 +237,14 @@ type Reader interface {
 	// A nonzero cursorID breaks ties within the cursor's millisecond.
 	ListKnownRoutes(ctx context.Context, iata string, hopCount int32, cursor time.Time, cursorID int64, limit int32) ([]KnownRoute, error)
 
-	// SearchKnownRoutes returns known routes containing a path from source to destination hash.
-	SearchKnownRoutes(ctx context.Context, iata, fromHash, toHash string) ([]KnownRoute, error)
+	// SearchKnownRoutes returns known routes in any of iatas (empty means all) running from a
+	// source to a destination hash prefix, trimmed to that span.
+	SearchKnownRoutes(ctx context.Context, iatas []string, fromHash, toHash string) ([]KnownRoute, error)
 
 	// GetNodeNeighbors returns the neighbors of a node ordered by most recently seen.
 	GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]NodeNeighbor, error)
 
-	// GetKnownRoutesByNode returns all known routes in a given IATA that contain
-	// the specified node UUID anywhere in their hop sequence.
-	GetKnownRoutesByNode(ctx context.Context, iata string, nodeID uuid.UUID) ([]KnownRoute, error)
-
-	// GetCrossIATANeighbors returns neighbors of a node that were observed in a
-	// different IATA — indicating a potential cross-IATA radio link.
-	GetCrossIATANeighbors(ctx context.Context, nodeID uuid.UUID, iata string) ([]NodeNeighbor, error)
-
 	// SearchCrossIATARoutes finds routes that cross IATA boundaries between
-	// a source node/IATA and a destination node/IATA.
-	SearchCrossIATARoutes(ctx context.Context, fromHash, fromIATA, toHash, toIATA string) ([]CrossIATARoute, error)
+	// a source and destination hash; see CrossRouteSearch.
+	SearchCrossIATARoutes(ctx context.Context, q CrossRouteSearch) ([]CrossIATARoute, error)
 }

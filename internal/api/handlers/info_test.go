@@ -13,14 +13,14 @@ import (
 )
 
 func TestGetInfo(t *testing.T) {
-	version := "0.1.1"
+	version, web := "0.1.1", "2.0.3"
 	for _, tc := range []struct {
 		name string
 		info api.Info
 		want string
 	}{
-		{"unset", api.Info{ServerVersion: "2.0.2"}, `{"minAppVersion":null,"serverVersion":"2.0.2"}`},
-		{"set", api.Info{MinAppVersion: &version, ServerVersion: "2.0.2"}, `{"minAppVersion":"0.1.1","serverVersion":"2.0.2"}`},
+		{"unset", api.Info{ServerVersion: "2.0.2"}, `{"minAppVersion":null,"minWebVersion":null,"serverVersion":"2.0.2"}`},
+		{"set", api.Info{MinAppVersion: &version, MinWebVersion: &web, ServerVersion: "2.0.2"}, `{"minAppVersion":"0.1.1","minWebVersion":"2.0.3","serverVersion":"2.0.2"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := httptest.NewRecorder()

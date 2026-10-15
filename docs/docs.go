@@ -899,14 +899,14 @@ const docTemplate = `{
         },
         "/info": {
             "get": {
-                "description": "minAppVersion is null when the server sets no requirement.",
+                "description": "minAppVersion (BEACON Mobile) and minWebVersion (Beacon Web) are null when the\nserver sets no requirement. Each is the higher of the built-in floor and config.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "Info"
                 ],
-                "summary": "Server info and minimum mobile app version",
+                "summary": "Server info and minimum client versions",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -1894,6 +1894,12 @@ const docTemplate = `{
                         "description": "Max results (default 50); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Match packets whose hash starts with this hex prefix (4-16 chars). Ordering and cursor use global last_heard_at even when iatas is set",
+                        "name": "hashPrefix",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -2201,6 +2207,7 @@ const docTemplate = `{
         },
         "/routes/cross": {
             "get": {
+                "description": "Pass iatas (comma-separated, optional; omitted searches every IATA) or the\nsingle directed pair fromIata/toIata, not both.",
                 "produces": [
                     "application/json"
                 ],
@@ -2211,31 +2218,35 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Source node hash prefix (hex)",
+                        "description": "Source node hash prefix (hex, 1-4 bytes)",
                         "name": "fromHash",
                         "in": "query",
                         "required": true
                     },
                     {
                         "type": "string",
-                        "description": "Source IATA code",
-                        "name": "fromIata",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Destination node hash prefix (hex)",
+                        "description": "Destination node hash prefix (hex, 1-4 bytes)",
                         "name": "toHash",
                         "in": "query",
                         "required": true
                     },
                     {
                         "type": "string",
-                        "description": "Destination IATA code",
+                        "description": "Comma-separated IATA codes to search (2-100)",
+                        "name": "iatas",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Source IATA code (with toIata)",
+                        "name": "fromIata",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Destination IATA code (with fromIata)",
                         "name": "toIata",
-                        "in": "query",
-                        "required": true
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -2259,12 +2270,19 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
                     }
                 }
             }
         },
         "/routes/search": {
             "get": {
+                "description": "Routes within one IATA that run from the source hash to the destination hash,\ntrimmed to that span. iatas is optional (omitted searches every IATA); the single\niata is still accepted. At most 500, shortest first.",
                 "produces": [
                     "application/json"
                 ],
@@ -2275,21 +2293,26 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "IATA code to search within",
-                        "name": "iata",
-                        "in": "query",
-                        "required": true
+                        "description": "Comma-separated IATA codes to search (max 100)",
+                        "name": "iatas",
+                        "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "Source node hash prefix (hex)",
+                        "description": "Single IATA code (when iatas is omitted)",
+                        "name": "iata",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Source node hash prefix (hex, 1-4 bytes)",
                         "name": "from",
                         "in": "query",
                         "required": true
                     },
                     {
                         "type": "string",
-                        "description": "Destination node hash prefix (hex)",
+                        "description": "Destination node hash prefix (hex, 1-4 bytes)",
                         "name": "to",
                         "in": "query",
                         "required": true
@@ -2313,6 +2336,12 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
@@ -3275,14 +3304,14 @@ const docTemplate = `{
         },
         "/stats/top-advertisers": {
             "get": {
-                "description": "Each advert counts once per hour heard, however many requested IATAs heard it. nodeId is null when the node row has been deleted.",
+                "description": "Ranks by the sort count, ties broken by total adverts then public key. Each advert counts once per hour heard, however many requested IATAs heard it. nodeId is null when the node row has been deleted.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "Stats"
                 ],
-                "summary": "Top N nodes by distinct ADVERT packet count (last 24h by default)",
+                "summary": "Top N nodes by distinct flood or direct ADVERT packet count (last 24h by default)",
                 "parameters": [
                     {
                         "type": "string",
@@ -3315,6 +3344,17 @@ const docTemplate = `{
                         "description": "Max results (default 10); must be positive, values above 200 are clamped",
                         "name": "limit",
                         "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "flood",
+                            "direct"
+                        ],
+                        "type": "string",
+                        "description": "Rank by flood or direct advert count",
+                        "name": "sort",
+                        "in": "query",
+                        "required": true
                     }
                 ],
                 "responses": {
@@ -3325,6 +3365,12 @@ const docTemplate = `{
                             "items": {
                                 "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TopAdvertiser"
                             }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
                     },
                     "500": {
@@ -3745,6 +3791,9 @@ const docTemplate = `{
                 },
                 "mobile": {
                     "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminMobileConfig"
+                },
+                "web": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminWebConfig"
                 }
             }
         },
@@ -3761,7 +3810,16 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "min_app_version": {
-                    "description": "empty means no requirement",
+                    "description": "effective floor; empty means no requirement",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.AdminWebConfig": {
+            "type": "object",
+            "properties": {
+                "min_web_version": {
+                    "description": "effective floor; empty means no requirement",
                     "type": "string"
                 }
             }
@@ -4070,6 +4128,11 @@ const docTemplate = `{
                     "type": "string",
                     "example": "0.1.1"
                 },
+                "minWebVersion": {
+                    "description": "MinWebVersion is the oldest allowed Beacon Web version (X.Y.Z); null means no requirement.",
+                    "type": "string",
+                    "example": "2.0.3"
+                },
                 "serverVersion": {
                     "type": "string",
                     "example": "2.0.2"
@@ -4107,6 +4170,120 @@ const docTemplate = `{
                 },
                 "pathKey": {
                     "description": "stable identity within this IATA; use for route evidence links",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperDefaultScope": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "source": {
+                    "description": "advert or reported",
+                    "type": "string"
+                },
+                "state": {
+                    "description": "named, unknown (set but not nameable yet) or none",
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperRepeater": {
+            "type": "object",
+            "properties": {
+                "admins": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "carpeater": {
+                    "description": "mobile repeater: its position moves",
+                    "type": "boolean"
+                },
+                "defaultScope": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperDefaultScope"
+                },
+                "fetchedAt": {
+                    "description": "when Beacon last fetched this list",
+                    "type": "integer"
+                },
+                "iata": {
+                    "description": "region of its latest advert, per MeshMapper",
+                    "type": "string"
+                },
+                "scopes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperScope"
+                    }
+                },
+                "scopesCheckedAt": {
+                    "description": "set (with empty scopes) when it answered with none",
+                    "type": "integer"
+                },
+                "site": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperSite"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperScope": {
+            "type": "object",
+            "properties": {
+                "observedAt": {
+                    "description": "seen forwarding scoped traffic",
+                    "type": "integer"
+                },
+                "observedPackets": {
+                    "type": "integer"
+                },
+                "proof": {
+                    "description": "multibyte or floor",
+                    "type": "string"
+                },
+                "reportedAt": {
+                    "description": "an observer asked it",
+                    "type": "integer"
+                },
+                "scope": {
+                    "type": "string"
+                },
+                "uploadedAt": {
+                    "description": "a wardriver's app asked it",
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperSite": {
+            "type": "object",
+            "properties": {
+                "antenna": {
+                    "type": "string"
+                },
+                "hardware": {
+                    "type": "string"
+                },
+                "heightAslM": {
+                    "description": "antenna above mean sea level",
+                    "type": "number"
+                },
+                "heightM": {
+                    "description": "antenna above ground",
+                    "type": "number"
+                },
+                "notes": {
+                    "type": "string"
+                },
+                "power": {
+                    "type": "string"
+                },
+                "powerSource": {
+                    "description": "mains, solar, battery or poe",
                     "type": "string"
                 }
             }
@@ -4168,6 +4345,14 @@ const docTemplate = `{
                 "locationSource": {
                     "description": "\"advert\" or \"manual\"",
                     "type": "string"
+                },
+                "meshmapper": {
+                    "description": "MeshMapper is what MeshMapper's repeater list says about this key; omitted when\nthe import is off or MeshMapper doesn't list it.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperRepeater"
+                        }
+                    ]
                 },
                 "metadata": {
                     "description": "raw JSONB metadata"
@@ -6278,7 +6463,7 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "2.0.3",
+	Version:          "2.0.7",
 	Host:             "localhost:8080",
 	BasePath:         "/api/v1",
 	Schemes:          []string{"http", "https"},

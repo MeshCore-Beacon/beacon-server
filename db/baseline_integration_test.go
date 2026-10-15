@@ -6,7 +6,9 @@ package db
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +42,20 @@ func applyBaseline(t *testing.T, ctx context.Context, tx pgx.Tx) {
 	if _, err := tx.Exec(ctx, "INSERT INTO iata_codes (iata) VALUES ('YVR'),('YYJ'),('YYZ'),('YOW')"); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// embeddedMigrations lists the migration files RunMigrations applies, in order.
+func embeddedMigrations(t *testing.T) []string {
+	t.Helper()
+	entries, err := fs.ReadDir(migrationFiles, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
 }
 
 // schemaPool returns a pool whose connections all use a fresh, dropped-on-cleanup schema.
@@ -92,7 +108,7 @@ func TestRunMigrationsBaselinePostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	ledger, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil || len(ledger) != 1 || ledger[0] != baselineMigration {
+	if err != nil || !slices.Equal(ledger, embeddedMigrations(t)) {
 		t.Fatalf("ledger %v, %v", ledger, err)
 	}
 	// Stats refresh uses CONCURRENTLY, which needs populated views.

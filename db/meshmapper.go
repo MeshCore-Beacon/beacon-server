@@ -5,9 +5,12 @@ package db
 
 import (
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/meshmapper"
 	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
 	"github.com/jackc/pgx/v5"
@@ -253,4 +256,63 @@ func (s *Store) ListIATADetails(ctx context.Context) ([]meshmapper.IATADetails, 
 		out = append(out, d)
 	}
 	return out, nil
+}
+
+func (s *Store) ListRepeaterSources(ctx context.Context) ([]meshmapper.Catalogue, error) {
+	rows, err := s.q.ListRepeaterSources(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]meshmapper.Catalogue, 0, len(rows))
+	for _, row := range rows {
+		c := meshmapper.Catalogue{IATA: row.Source, URL: row.Url, Cache: meshmapper.Cache{CheckedAt: row.CheckedAt.Time,
+			AttemptedAt: row.AttemptedAt.Time, NextAttempt: row.NextAttempt.Time, LastError: row.LastError}}
+		if row.Etag != nil {
+			c.ETag = *row.Etag
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+// SaveRepeaterSource records a fetch; non-nil repeaters replace the source's list first,
+// so a failure never records a check without its list.
+func (s *Store) SaveRepeaterSource(ctx context.Context, source, url string, cache meshmapper.Cache, repeaters []meshmapper.Repeater) error {
+	if repeaters != nil {
+		type row struct {
+			Key  string                 `json:"key"`
+			Data api.MeshMapperRepeater `json:"data"`
+		}
+		rows := make([]row, 0, len(repeaters))
+		for _, r := range repeaters {
+			rows = append(rows, row{Key: hex.EncodeToString(r.Key), Data: r.Data})
+		}
+		payload, err := json.Marshal(rows)
+		if err != nil {
+			return err
+		}
+		if err := s.q.ReplaceRepeaters(ctx, sqlc.ReplaceRepeatersParams{Source: source, Rows: payload}); err != nil {
+			return err
+		}
+	}
+	params := sqlc.SaveRepeaterSourceParams{
+		Source: source, Url: url, LastError: cache.LastError,
+		CheckedAt:   pgtype.Timestamptz{Time: cache.CheckedAt, Valid: !cache.CheckedAt.IsZero()},
+		AttemptedAt: pgtype.Timestamptz{Time: cache.AttemptedAt, Valid: true},
+		NextAttempt: pgtype.Timestamptz{Time: cache.NextAttempt, Valid: true},
+	}
+	if !cache.CheckedAt.IsZero() {
+		params.Etag = &cache.ETag
+	}
+	return s.q.SaveRepeaterSource(ctx, params)
+}
+
+func (s *Store) DeleteRepeaterSource(ctx context.Context, source string) error {
+	return s.q.DeleteRepeaterSource(ctx, source)
+}
+
+// ClearRepeaters reports whether any imported repeater was removed.
+func (s *Store) ClearRepeaters(ctx context.Context) (bool, error) {
+	n, err := s.q.ClearRepeaters(ctx)
+	return n > 0, err
 }

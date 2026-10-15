@@ -79,7 +79,7 @@ func TestListLimits(t *testing.T) {
 			got = limit
 			return nil, nil
 		},
-		getStatsTopAdvertisers: func(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopAdvertiser, error) {
+		getStatsTopAdvertisers: func(ctx context.Context, iatas []string, since time.Time, limit int32, sort api.AdvertiserSort) ([]api.TopAdvertiser, error) {
 			calls++
 			got = limit
 			return nil, nil
@@ -133,7 +133,7 @@ func TestListLimits(t *testing.T) {
 		{"/traces", 50},
 		{"/stats/top-nodes", 10},
 		{"/stats/top-observers", 10},
-		{"/stats/top-advertisers", 10},
+		{"/stats/top-advertisers?sort=flood", 10},
 		{"/stats/clock-drift", 10},
 		{"/stats/top-talkers", 10},
 	} {

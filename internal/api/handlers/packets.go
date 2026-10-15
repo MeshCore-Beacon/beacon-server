@@ -4,6 +4,7 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"net/http"
@@ -48,6 +49,7 @@ func PacketsRouter(reader api.Reader) http.Handler {
 //	@Param		until			query		int		false	"Filter by first_heard_at <= until (epoch ms)"
 //	@Param		cursor			query		int		false	"epoch ms of last item for pagination; last_heard_at, or site-local heard_at when iatas is set"
 //	@Param		limit			query		int		false	"Max results (default 50); must be positive, values above 200 are clamped" minimum(1) maximum(200)
+//	@Param		hashPrefix		query		string	false	"Match packets whose hash starts with this hex prefix (4-16 chars). Ordering and cursor use global last_heard_at even when iatas is set"
 //	@Success	200				{object}	object
 //	@Failure	400				{object}	handlers.APIError
 //	@Failure	500				{object}	handlers.APIError
@@ -110,7 +112,17 @@ func listPackets(reader api.Reader) http.HandlerFunc {
 			iatas = append(iatas, regionIATAs...)
 		}
 		scopes := parseCSVOrSingle(r, "scopes", "scope")
-		packets, err := reader.ListPackets(r.Context(), payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
+		var packets api.Page[api.PacketSummary]
+		if p := r.URL.Query().Get("hashPrefix"); p != "" {
+			lo, hi, err := hashPrefixRange(p)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			packets, err = reader.SearchPacketsByHashPrefix(r.Context(), lo, hi, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
+		} else {
+			packets, err = reader.ListPackets(r.Context(), payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
+		}
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return
@@ -219,4 +231,31 @@ func getPacket(reader api.Reader) http.HandlerFunc {
 		}
 		respond(w, http.StatusOK, packet)
 	}
+}
+
+// hashPrefixRange turns a hex prefix into the byte range [lo, hi) of hashes that start
+// with it. An odd length pins the high nibble only; hi is nil when the prefix is all f.
+func hashPrefixRange(prefix string) (lo, hi []byte, err error) {
+	if len(prefix) < 4 || len(prefix) > 16 {
+		return nil, nil, errors.New("hashPrefix must be 4-16 hex characters")
+	}
+	step := 1
+	if len(prefix)%2 == 1 {
+		prefix += "0"
+		step = 0x10
+	}
+	lo, err = hex.DecodeString(prefix)
+	if err != nil {
+		return nil, nil, errors.New("hashPrefix must be hex")
+	}
+	hi = bytes.Clone(lo)
+	for i := len(hi) - 1; i >= 0; i-- {
+		v := int(hi[i]) + step
+		hi[i] = byte(v)
+		if v <= 0xff {
+			return lo, hi, nil
+		}
+		step = 1
+	}
+	return lo, nil, nil
 }

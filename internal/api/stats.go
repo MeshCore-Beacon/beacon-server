@@ -128,8 +128,16 @@ type TopObserver struct {
 	ObservationCount int64     `json:"observationCount"`
 }
 
-// TopAdvertiser is a node ranked by distinct ADVERT packet count within the requested
-// window. Count is per-advert, not per-hearing -- see GetStatsTopAdvertisers.
+// AdvertiserSort picks which advert count ranks top advertisers.
+type AdvertiserSort string
+
+const (
+	AdvertiserSortFlood  AdvertiserSort = "flood"
+	AdvertiserSortDirect AdvertiserSort = "direct"
+)
+
+// TopAdvertiser is a node ranked by distinct flood or direct ADVERT packet count within the
+// requested window. Counts are per-advert, not per-hearing -- see GetStatsTopAdvertisers.
 type TopAdvertiser struct {
 	NodeID       *uuid.UUID `json:"nodeId"`    // null once the node row has been deleted
 	PublicKey    string     `json:"publicKey"` // hex

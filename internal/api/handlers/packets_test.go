@@ -5,6 +5,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -268,5 +269,79 @@ func TestListPacketsBackfill_OK(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestHashPrefixRange(t *testing.T) {
+	tests := []struct {
+		in     string
+		lo, hi string
+	}{
+		{"6ddf62fb", "6ddf62fb", "6ddf62fc"},
+		{"6DDF62FB", "6ddf62fb", "6ddf62fc"},
+		{"6ddf6", "6ddf60", "6ddf70"},
+		{"12ff", "12ff", "1300"},
+		{"0012f", "0012f0", "001300"},
+		{"ffff", "ffff", ""},
+		{"fffff", "fffff0", ""},
+		{"6ddf62fb5b9a969e", "6ddf62fb5b9a969e", "6ddf62fb5b9a969f"},
+	}
+	for _, tt := range tests {
+		lo, hi, err := hashPrefixRange(tt.in)
+		if err != nil {
+			t.Fatalf("%s: %v", tt.in, err)
+		}
+		if hex.EncodeToString(lo) != tt.lo || hex.EncodeToString(hi) != tt.hi {
+			t.Errorf("%s: got [%x, %x), want [%s, %s)", tt.in, lo, hi, tt.lo, tt.hi)
+		}
+		if tt.hi == "" && hi != nil {
+			t.Errorf("%s: want nil hi", tt.in)
+		}
+	}
+	for _, bad := range []string{"", "abc", "6ddg", "6ddf62fb5b9a969e0"} {
+		if _, _, err := hashPrefixRange(bad); err == nil {
+			t.Errorf("%q: expected error", bad)
+		}
+	}
+}
+
+func TestListPackets_HashPrefix(t *testing.T) {
+	var gotLo, gotHi []byte
+	var gotIATAs []string
+	r := chi.NewRouter()
+	r.Get("/packets", listPackets(stubReader{
+		listPackets: func(_ context.Context, _, _ []int16, _ []string, _ []string, _, _ time.Time, _ int64, _ int32) (api.Page[api.PacketSummary], error) {
+			t.Error("ListPackets called for a hashPrefix search")
+			return api.Page[api.PacketSummary]{}, nil
+		},
+		searchPacketsByHashPrefix: func(_ context.Context, lo, hi []byte, _, _ []int16, iatas []string, _ []string, _, _ time.Time, _ int64, _ int32) (api.Page[api.PacketSummary], error) {
+			gotLo, gotHi, gotIATAs = lo, hi, iatas
+			return api.Page[api.PacketSummary]{Items: []api.PacketSummary{{PacketHash: "6ddf62fb5b9a969e"}}}, nil
+		},
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/packets?hashPrefix=6DDF62FB&iatas=yow", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if hex.EncodeToString(gotLo) != "6ddf62fb" || hex.EncodeToString(gotHi) != "6ddf62fc" {
+		t.Errorf("range = [%x, %x)", gotLo, gotHi)
+	}
+	if len(gotIATAs) != 1 || gotIATAs[0] != "YOW" {
+		t.Errorf("iatas = %v", gotIATAs)
+	}
+}
+
+func TestListPackets_HashPrefixInvalid(t *testing.T) {
+	r := chi.NewRouter()
+	r.Get("/packets", listPackets(stubReader{}))
+	for _, q := range []string{"zz12", "abc", "00112233445566778"} {
+		req := httptest.NewRequest(http.MethodGet, "/packets?hashPrefix="+q, nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("%s: expected 400, got %d", q, w.Code)
+		}
 	}
 }

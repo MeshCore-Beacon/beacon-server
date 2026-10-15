@@ -147,7 +147,7 @@ func TestGetStatsTopObservers_OK(t *testing.T) {
 func TestGetStatsTopAdvertisers_InvalidSince(t *testing.T) {
 	r := chi.NewRouter()
 	r.Get("/stats/top-advertisers", getStatsTopAdvertisers(stubReader{}))
-	req := httptest.NewRequest(http.MethodGet, "/stats/top-advertisers?since=notanint", nil)
+	req := httptest.NewRequest(http.MethodGet, "/stats/top-advertisers?sort=flood&since=notanint", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
@@ -158,7 +158,7 @@ func TestGetStatsTopAdvertisers_InvalidSince(t *testing.T) {
 func TestGetStatsTopAdvertisers_InvalidLimit(t *testing.T) {
 	r := chi.NewRouter()
 	r.Get("/stats/top-advertisers", getStatsTopAdvertisers(stubReader{}))
-	req := httptest.NewRequest(http.MethodGet, "/stats/top-advertisers?limit=notanint", nil)
+	req := httptest.NewRequest(http.MethodGet, "/stats/top-advertisers?sort=flood&limit=notanint", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
@@ -167,17 +167,42 @@ func TestGetStatsTopAdvertisers_InvalidLimit(t *testing.T) {
 }
 
 func TestGetStatsTopAdvertisers_OK(t *testing.T) {
-	r := chi.NewRouter()
-	r.Get("/stats/top-advertisers", getStatsTopAdvertisers(stubReader{
-		getStatsTopAdvertisers: func(_ context.Context, _ []string, _ time.Time, _ int32) ([]api.TopAdvertiser, error) {
-			return []api.TopAdvertiser{{IATA: "YVR", AdvertCount: 5}}, nil
-		},
-	}))
-	req := httptest.NewRequest(http.MethodGet, "/stats/top-advertisers", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
+	for _, want := range []api.AdvertiserSort{api.AdvertiserSortFlood, api.AdvertiserSortDirect} {
+		var got api.AdvertiserSort
+		r := chi.NewRouter()
+		r.Get("/stats/top-advertisers", getStatsTopAdvertisers(stubReader{
+			getStatsTopAdvertisers: func(_ context.Context, _ []string, _ time.Time, _ int32, sort api.AdvertiserSort) ([]api.TopAdvertiser, error) {
+				got = sort
+				return []api.TopAdvertiser{{IATA: "YVR", AdvertCount: 5}}, nil
+			},
+		}))
+		req := httptest.NewRequest(http.MethodGet, "/stats/top-advertisers?sort="+string(want), nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("sort=%s: expected 200, got %d", want, w.Code)
+		}
+		if got != want {
+			t.Errorf("reader got sort %q, want %q", got, want)
+		}
+	}
+}
+
+func TestGetStatsTopAdvertisers_InvalidSort(t *testing.T) {
+	for _, query := range []string{"", "?sort=", "?sort=total", "?sort=FLOOD", "?sort=bogus"} {
+		called := false
+		r := chi.NewRouter()
+		r.Get("/stats/top-advertisers", getStatsTopAdvertisers(stubReader{
+			getStatsTopAdvertisers: func(_ context.Context, _ []string, _ time.Time, _ int32, _ api.AdvertiserSort) ([]api.TopAdvertiser, error) {
+				called = true
+				return nil, nil
+			},
+		}))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/stats/top-advertisers"+query, nil))
+		if w.Code != http.StatusBadRequest || called {
+			t.Errorf("%q: got %d (reader called=%v), want 400 without a reader call", query, w.Code, called)
+		}
 	}
 }
 

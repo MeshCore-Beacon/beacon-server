@@ -104,7 +104,7 @@ func (s *stubReader) GetStatsTopObservers(_ context.Context, _ []string, _ time.
 	return nil, nil
 }
 
-func (s *stubReader) GetStatsTopAdvertisers(_ context.Context, _ []string, _ time.Time, _ int32) ([]api.TopAdvertiser, error) {
+func (s *stubReader) GetStatsTopAdvertisers(_ context.Context, _ []string, _ time.Time, _ int32, _ api.AdvertiserSort) ([]api.TopAdvertiser, error) {
 	return nil, nil
 }
 
@@ -160,14 +160,6 @@ func (s *stubReader) GetTraceByTag(_ context.Context, _ string) (*api.TraceDetai
 	return nil, nil
 }
 
-func (s *stubReader) GetKnownRoutesByNode(_ context.Context, _ string, _ uuid.UUID) ([]api.KnownRoute, error) {
-	return nil, nil
-}
-
-func (s *stubReader) GetCrossIATANeighbors(_ context.Context, _ uuid.UUID, _ string) ([]api.NodeNeighbor, error) {
-	return nil, nil
-}
-
 func (s *stubReader) ListChannels(_ context.Context, _ int32, _ []byte, _ []string, _ *bool, _ int64, _ *api.ChannelCursor) (api.ChannelPage, error) {
 	return api.ChannelPage{}, nil
 }
@@ -200,6 +192,10 @@ func (s *stubReader) ListObserverAdverts(_ context.Context, _ uuid.UUID, _ int64
 	return api.Page[api.AdvertObservation]{}, nil
 }
 
+func (s *stubReader) SearchPacketsByHashPrefix(_ context.Context, _, _ []byte, _, _ []int16, _ []string, _ []string, _, _ time.Time, _ int64, _ int32) (api.Page[api.PacketSummary], error) {
+	return api.Page[api.PacketSummary]{}, nil
+}
+
 func (s *stubReader) ListPackets(_ context.Context, _, _ []int16, _ []string, _ []string, _, _ time.Time, _ int64, _ int32) (api.Page[api.PacketSummary], error) {
 	return api.Page[api.PacketSummary]{}, nil
 }
@@ -212,11 +208,11 @@ func (s *stubReader) ListKnownRoutes(_ context.Context, _ string, _ int32, _ tim
 	return nil, nil
 }
 
-func (s *stubReader) SearchKnownRoutes(_ context.Context, _, _, _ string) ([]api.KnownRoute, error) {
+func (s *stubReader) SearchKnownRoutes(_ context.Context, _ []string, _, _ string) ([]api.KnownRoute, error) {
 	return nil, nil
 }
 
-func (s *stubReader) SearchCrossIATARoutes(_ context.Context, _, _, _, _ string) ([]api.CrossIATARoute, error) {
+func (s *stubReader) SearchCrossIATARoutes(_ context.Context, _ api.CrossRouteSearch) ([]api.CrossIATARoute, error) {
 	return nil, nil
 }
 
@@ -422,6 +418,18 @@ func TestCachedReader_InvalidateNode(t *testing.T) {
 	}
 	if mr.Exists(keyNodeNeighborsPrefix + nodeID.String()) {
 		t.Error("expected node neighbors key to be deleted")
+	}
+}
+
+func TestInvalidateNodeDetails(t *testing.T) {
+	c, mr := newTestClient(t)
+	cr := &CachedReader{inner: &stubReader{}, c: c, ttl: CacheTTLs{}}
+	mr.Set(keyNodePrefix+"a", "x")
+	mr.Set(keyNodePrefix+"b", "x")
+	mr.Set(keyNodesByIDsPrefix+"a", "keep")
+	cr.InvalidateNodeDetails(context.Background())
+	if got := mr.Keys(); len(got) != 1 || got[0] != keyNodesByIDsPrefix+"a" {
+		t.Fatalf("keys left: %v", got)
 	}
 }
 

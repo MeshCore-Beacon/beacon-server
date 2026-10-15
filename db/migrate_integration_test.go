@@ -26,8 +26,8 @@ func TestRunMigrationsConcurrentStartPostgres(t *testing.T) {
 		}
 	}
 	var n int
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM schema_migrations").Scan(&n); err != nil || n != 1 {
-		t.Errorf("ledger rows = %d, %v; want 1", n, err)
+	if want := len(embeddedMigrations(t)); pool.QueryRow(ctx, "SELECT count(*) FROM schema_migrations").Scan(&n) != nil || n != want {
+		t.Errorf("ledger rows = %d; want %d", n, want)
 	}
 }
 

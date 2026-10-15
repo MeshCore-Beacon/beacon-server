@@ -196,6 +196,14 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 			node.IATAs = []api.NodeIATA{}
 		}
 	}
+	if len(row.Meshmapper) > 0 {
+		var mm api.MeshMapperRepeater
+		if err := json.Unmarshal(row.Meshmapper, &mm); err != nil {
+			slog.Error("store: failed to unmarshal MeshMapper repeater", "component", "db", "error", err)
+		} else {
+			node.MeshMapper = &mm
+		}
+	}
 	if row.RadioFreqMhz != nil && row.RadioSf != nil && row.RadioBwKhz != nil {
 		s := fmt.Sprintf("%g,%g,%d", *row.RadioFreqMhz, *row.RadioBwKhz, *row.RadioSf)
 		node.Radio = &s
