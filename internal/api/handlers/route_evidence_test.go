@@ -85,3 +85,28 @@ func TestRouteEvidenceHandler(t *testing.T) {
 		}
 	}
 }
+
+func TestRouteEvidencePinnedQuery(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	q, err := routeEvidenceQuery(httptest.NewRequest("GET", "/?hashSize=2&pathBytes=aa01bb02", nil), "YOW", evidenceKey, now)
+	if err != nil || q.HashSize != 2 || q.PathBytes != "aa01bb02" {
+		t.Fatalf("selected path: %+v %v", q, err)
+	}
+	c := api.RouteEvidenceCursor{IATA: "YOW", PathKey: evidenceKey, Since: q.Since, Until: q.Until, HeardAt: q.Since.Add(time.Hour), ID: 5, HashSize: q.HashSize, PathBytes: q.PathBytes}
+	encoded := url.QueryEscape(c.String())
+	next, err := routeEvidenceQuery(httptest.NewRequest("GET", "/?pageCursor="+encoded, nil), "YOW", evidenceKey, now)
+	if err != nil || next.HashSize != 2 || next.PathBytes != q.PathBytes {
+		t.Fatalf("cursor path lost: %+v %v", next, err)
+	}
+	for _, query := range []string{
+		"hashSize=1", "pathBytes=aabb", "hashSize=0&pathBytes=aabb", "hashSize=4&pathBytes=aa01bb02",
+		"hashSize=01&pathBytes=aabb", "hashSize=1&hashSize=2&pathBytes=aabb",
+		"hashSize=1&pathBytes=aabb&pathBytes=aabb", "hashSize=1&pathBytes=aa", "hashSize=1&pathBytes=AABB",
+		"pageCursor=" + encoded + "&hashSize=1&pathBytes=aabb",
+		"pageCursor=" + encoded + "&hashSize=2&pathBytes=aa02bb01",
+	} {
+		if _, err := routeEvidenceQuery(httptest.NewRequest("GET", "/?"+query, nil), "YOW", evidenceKey, now); err == nil {
+			t.Errorf("accepted %s", query)
+		}
+	}
+}

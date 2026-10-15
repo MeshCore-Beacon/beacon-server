@@ -706,3 +706,15 @@ func TestDeleteOldNodes(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestListNodes_DefaultScopePreservesCaseAndMissingValue(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mock := mockdb.NewMockQuerier(ctrl)
+	scope := "#YOW"
+	mock.EXPECT().ListNodes(gomock.Any(), gomock.Any()).Return([]sqlc.ListNodesRow{{DefaultScopeName: &scope}, {}}, nil)
+	store := &Store{q: mock}
+	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, 10, false)
+	if err != nil || len(page.Items) != 2 || page.Items[0].DefaultScope == nil || *page.Items[0].DefaultScope != scope || page.Items[1].DefaultScope != nil {
+		t.Fatalf("scope metadata lost or invented: %+v %v", page, err)
+	}
+}

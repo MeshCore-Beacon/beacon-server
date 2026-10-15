@@ -127,6 +127,7 @@ func (s *Store) ListNodes(ctx context.Context, nodeType int16, iatas []string, s
 			Longitude:          v.Longitude,
 			IsObserver:         v.IsObserver,
 			ObserverID:         nullableUUID(v.ObserverID),
+			DefaultScope:       v.DefaultScopeName,
 			KnownNeighborCount: v.KnownNeighborCount,
 			NeighborIDs:        v.NeighborIds,
 			Stale:              v.LastSeen.Valid && v.LastSeen.Time.Before(time.Now().Add(-s.staleThreshold)),
