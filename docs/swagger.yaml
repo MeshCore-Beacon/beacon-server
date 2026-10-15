@@ -978,6 +978,8 @@ definitions:
       scope:
         description: matched transport scope name e.g. "#bc"
         type: string
+      traceQuality:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality'
       transportCodes:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PacketTransportCodes'
     type: object
@@ -1076,6 +1078,11 @@ definitions:
       snr:
         type: number
       sourceBroker:
+        type: string
+      traceQuality:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality'
+      wirePathBytes:
+        description: Exact on-air TRACE SNR bytes, before the display path substitution.
         type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.PacketObservationSummary:
@@ -1698,6 +1705,21 @@ definitions:
       senderName:
         type: string
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.TopologyLinks:
+    properties:
+      capped:
+        type: boolean
+      links:
+        items:
+          items:
+            type: string
+          type: array
+        type: array
+      since:
+        type: integer
+      until:
+        type: integer
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.TraceDetail:
     properties:
       packets:
@@ -1720,6 +1742,8 @@ definitions:
       packetHash:
         description: hex-encoded packet hash
         type: string
+      quality:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality'
       rawPath:
         description: hops as received in the packet
         items:
@@ -1759,6 +1783,8 @@ definitions:
         items:
           type: string
         type: array
+      quality:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality'
       snrValues:
         description: SNR per hop from the most complete observation
         items:
@@ -1796,6 +1822,52 @@ definitions:
       requires_restart:
         type: boolean
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.CatalogueScope:
+    properties:
+      default:
+        type: integer
+      monitored:
+        type: boolean
+      name:
+        type: string
+      repeaters:
+        type: integer
+      wardriving:
+        type: boolean
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.PublicScopeCatalogue:
+    properties:
+      checkedAt:
+        type: integer
+      freshUntil:
+        type: integer
+      generatedAt:
+        type: integer
+      iata:
+        type: string
+      lastError:
+        type: string
+      repeaters:
+        type: integer
+      scoped:
+        type: integer
+      scopes:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.CatalogueScope'
+        type: array
+      url:
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality:
+    properties:
+      reasons:
+        items:
+          type: string
+        type: array
+      status:
+        description: supported, suspect, or ambiguous; supported is not authenticated
+        type: string
+    type: object
   internal_api_handlers.APIError:
     properties:
       code:
@@ -1825,7 +1897,7 @@ info:
     name: AGPL-3-or-later
   termsOfService: https://github.com/MeshCore-Beacon/beacon-server
   title: MeshCore Beacon API
-  version: 2.0.7
+  version: 2.1.0
 paths:
   /admin/accounts:
     get:
@@ -3479,6 +3551,58 @@ paths:
       summary: Search known routes by source and destination hash
       tags:
       - Routes
+  /routes/topology:
+    get:
+      description: Returns up to 100000 undirected node-ID pairs, deduplicated across
+        known routes. Minute-aligned window includes the current minute. Existing
+        rate limits apply; no per-node lookup or route pagination is needed. Capped
+        is true when more links exist.
+      parameters:
+      - description: 'History window: 15m (default), 1h, or 24h'
+        in: query
+        name: window
+        type: string
+      - description: Comma-separated reception IATA codes
+        in: query
+        name: iatas
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TopologyLinks'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+      summary: Unique adjacent route links for a topology snapshot
+      tags:
+      - Routes
+  /scope-catalogues:
+    get:
+      description: Discovered sources only. Counts describe the source region, not
+        individual nodes or links. No upstream request is made. An empty list means
+        no configured importer; checkedAt=0 means no successful check. lastError or
+        a past freshUntil marks stale metadata. Manual Beacon scopes and packet evidence
+        are separate.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.PublicScopeCatalogue'
+            type: array
+      summary: Cached MeshMapper regional scope catalogues
+      tags:
+      - Scopes
   /scopes:
     get:
       description: Without filters, lists every stored scope name, including imported

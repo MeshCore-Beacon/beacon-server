@@ -266,6 +266,9 @@ func (s *stubDB) GetObserverScopes(_ context.Context, _ uuid.UUID) ([]string, er
 func (s *stubDB) ResolvePathHashes(_ context.Context, _ string, _ [][]byte) (map[string][]api.ResolvedPathEntry, error) {
 	return nil, nil
 }
+func (s *stubDB) ResolveTracePathHashes(_ context.Context, _ string, _ [][]byte) (map[string][]api.ResolvedPathEntry, error) {
+	return nil, nil
+}
 
 func (s *stubDB) ResolveEndpointHashes(_ context.Context, _ string, _ [][]byte) (map[string][]api.ResolvedPathEntry, error) {
 	return nil, nil

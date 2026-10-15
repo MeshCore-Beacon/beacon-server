@@ -162,6 +162,8 @@ type Querier interface {
 	// Nodes by ADVERT hearings since the given hour. Live names win over the rolled snapshot;
 	// node_id is NULL once the node row is gone. iata is a representative one.
 	GetTopNodes(ctx context.Context, arg GetTopNodesParams) ([]GetTopNodesRow, error)
+	// Reduce route history to unique adjacent pairs before transferring it to a browser.
+	GetTopologyLinks(ctx context.Context, arg GetTopologyLinksParams) ([]GetTopologyLinksRow, error)
 	GetTransportScopeByName(ctx context.Context, name string) (int32, error)
 	GetTransportScopes(ctx context.Context) ([]GetTransportScopesRow, error)
 	// ============================================================
@@ -335,6 +337,9 @@ type Querier interface {
 	ResolveRelayHashPairsP3(ctx context.Context, arg ResolveRelayHashPairsP3Params) ([]ResolveRelayHashPairsP3Row, error)
 	// Batch form of ResolvePathHashesP4 across IATAs; callers check uniqueness per IATA.
 	ResolveRelayHashPairsP4(ctx context.Context, arg ResolveRelayHashPairsP4Params) ([]ResolveRelayHashPairsP4Row, error)
+	// TRACE can terminate at companions. Preserve the full prefix (including eight
+	// bytes), and return every candidate across heard regions instead of picking one.
+	ResolveTraceHashes(ctx context.Context, arg ResolveTraceHashesParams) ([]ResolveTraceHashesRow, error)
 	RollAdvertHearings(ctx context.Context, hour pgtype.Timestamptz) error
 	// Each distinct ADVERT packet counts once, under the exact set of IATAs that heard it this hour.
 	RollAdvertSets(ctx context.Context, hour pgtype.Timestamptz) error
