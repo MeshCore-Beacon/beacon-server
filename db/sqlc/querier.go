@@ -29,7 +29,8 @@ type Querier interface {
 	DeleteChannelMembersNotIn(ctx context.Context, arg DeleteChannelMembersNotInParams) error
 	// One batch past retention, keyset after the per-run cursor (the first call passes -infinity, 0).
 	// The truncated bound (ms ceiling of the cutoff) drives idx_known_routes_keyset; the exact
-	// residual decides membership. + interval 0 keeps it off idx_known_routes_last_seen.
+	// residual decides membership. + interval 0 keeps the exact cutoff a Filter, so the planner
+	// cannot switch to a last_seen index on deployments that still have one.
 	DeleteExpiredRoutes(ctx context.Context, arg DeleteExpiredRoutesParams) (DeleteExpiredRoutesRow, error)
 	// One batch of rarely-seen routes after the cursor, inside a window of at most 6 h below the grace
 	// cutoff: candidates without locks, then lock SKIP LOCKED through the pkey (re-checked on the newest
