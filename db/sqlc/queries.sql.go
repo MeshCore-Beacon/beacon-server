@@ -470,6 +470,23 @@ func (q *Queries) DeleteRepeaterSource(ctx context.Context, source string) error
 	return err
 }
 
+const fillReconfirmAmb = `-- name: FillReconfirmAmb :exec
+INSERT INTO reconfirm_amb (iata, len, prefix)
+SELECT iata::text AS iata, 1::int AS len, prefix_1 AS prefix FROM node_short_ids GROUP BY iata, prefix_1 HAVING COUNT(*) > 1
+UNION ALL
+SELECT iata::text, 2::int, prefix_2 FROM node_short_ids GROUP BY iata, prefix_2 HAVING COUNT(*) > 1
+UNION ALL
+SELECT iata::text, 3::int, prefix_3 FROM node_short_ids GROUP BY iata, prefix_3 HAVING COUNT(*) > 1
+UNION ALL
+SELECT iata::text, 4::int, prefix_4 FROM node_short_ids GROUP BY iata, prefix_4 HAVING COUNT(*) > 1
+`
+
+// Hop prefixes that match >1 node in an IATA, per width, into the sweep's temp table.
+func (q *Queries) FillReconfirmAmb(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, fillReconfirmAmb)
+	return err
+}
+
 const getAccount = `-- name: GetAccount :one
 SELECT id, name, created_at, deactivated_at FROM accounts WHERE id = $1
 `
@@ -4832,6 +4849,86 @@ func (q *Queries) ReconfirmRoutes(ctx context.Context, arg ReconfirmRoutesParams
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const reconfirmRoutesBatch = `-- name: ReconfirmRoutesBatch :one
+WITH batch AS MATERIALIZED (
+  SELECT r.iata, r.path_key, r.node_ids, r.hash_prefix FROM known_routes r
+  WHERE (r.iata, r.path_key) > ($1::bpchar, $2::bytea)
+  ORDER BY r.iata, r.path_key
+  LIMIT $3),
+dead AS (
+  SELECT b.iata, b.path_key FROM batch b
+  WHERE EXISTS (SELECT 1 FROM unnest(b.node_ids) AS hop(node_id)
+                WHERE NOT EXISTS (SELECT 1 FROM node_short_ids ns WHERE ns.node_id = hop.node_id AND ns.iata = b.iata))
+     OR EXISTS (SELECT 1 FROM unnest(b.hash_prefix) AS hp
+                JOIN reconfirm_amb a ON a.iata = b.iata::text AND a.len = length(hp) AND a.prefix = hp)),
+deleted AS (
+  DELETE FROM known_routes kr USING dead d
+  WHERE kr.iata = d.iata AND kr.path_key = d.path_key
+    AND (EXISTS (SELECT 1 FROM unnest(kr.node_ids) AS hop(node_id)
+                 WHERE NOT EXISTS (SELECT 1 FROM node_short_ids ns WHERE ns.node_id = hop.node_id AND ns.iata = kr.iata))
+      OR EXISTS (SELECT 1 FROM unnest(kr.hash_prefix) AS hp
+                 JOIN reconfirm_amb a ON a.iata = kr.iata::text AND a.len = length(hp) AND a.prefix = hp))
+  RETURNING 1)
+SELECT (SELECT count(*) FROM batch) AS scanned,
+       (SELECT count(*) FROM deleted) AS deleted,
+       coalesce((SELECT iata FROM batch ORDER BY iata DESC, path_key DESC LIMIT 1)::text, '')::text AS last_iata,
+       coalesce((SELECT path_key FROM batch ORDER BY iata DESC, path_key DESC LIMIT 1), ''::bytea)::bytea AS last_key
+`
+
+type ReconfirmRoutesBatchParams struct {
+	AfterIata string `json:"after_iata"`
+	AfterKey  []byte `json:"after_key"`
+	BatchSize int32  `json:"batch_size"`
+}
+
+type ReconfirmRoutesBatchRow struct {
+	Scanned  int64  `json:"scanned"`
+	Deleted  int64  `json:"deleted"`
+	LastIata string `json:"last_iata"`
+	LastKey  []byte `json:"last_key"`
+}
+
+// The next batch_size routes after the cursor in pkey order: deletes those with a departed hop
+// node or a hop prefix matching >1 node in that IATA (length-aware, reconfirm_amb). Writes no stamp.
+// The DELETE re-checks the newest row version. An empty last_iata means the walk passed the end.
+func (q *Queries) ReconfirmRoutesBatch(ctx context.Context, arg ReconfirmRoutesBatchParams) (ReconfirmRoutesBatchRow, error) {
+	row := q.db.QueryRow(ctx, reconfirmRoutesBatch, arg.AfterIata, arg.AfterKey, arg.BatchSize)
+	var i ReconfirmRoutesBatchRow
+	err := row.Scan(
+		&i.Scanned,
+		&i.Deleted,
+		&i.LastIata,
+		&i.LastKey,
+	)
+	return i, err
+}
+
+const reconfirmSliceEnd = `-- name: ReconfirmSliceEnd :one
+SELECT r.iata, r.path_key FROM known_routes r
+WHERE (r.iata, r.path_key) > ($1::bpchar, $2::bytea)
+ORDER BY r.iata, r.path_key
+OFFSET $3 LIMIT 1
+`
+
+type ReconfirmSliceEndParams struct {
+	AfterIata  string `json:"after_iata"`
+	AfterKey   []byte `json:"after_key"`
+	OffsetRows int32  `json:"offset_rows"`
+}
+
+type ReconfirmSliceEndRow struct {
+	Iata    string `json:"iata"`
+	PathKey []byte `json:"path_key"`
+}
+
+// Key of the last route in a slice that timed out: the caller passes the slice's row count - 1.
+func (q *Queries) ReconfirmSliceEnd(ctx context.Context, arg ReconfirmSliceEndParams) (ReconfirmSliceEndRow, error) {
+	row := q.db.QueryRow(ctx, reconfirmSliceEnd, arg.AfterIata, arg.AfterKey, arg.OffsetRows)
+	var i ReconfirmSliceEndRow
+	err := row.Scan(&i.Iata, &i.PathKey)
+	return i, err
 }
 
 const recordTrace = `-- name: RecordTrace :exec

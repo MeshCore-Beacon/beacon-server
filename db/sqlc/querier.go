@@ -65,6 +65,8 @@ type Querier interface {
 	DeleteRollupHour(ctx context.Context, hour pgtype.Timestamptz) error
 	// Dirty hours that can no longer be re-rolled.
 	DeleteStaleDirtyHours(ctx context.Context) error
+	// Hop prefixes that match >1 node in an IATA, per width, into the sweep's temp table.
+	FillReconfirmAmb(ctx context.Context) error
 	FillRollupObs(ctx context.Context, dollar_1 pgtype.Timestamptz) error
 	// Marks the hour complete and bumps the revision only when its content changed.
 	FinishRollupHour(ctx context.Context, arg FinishRollupHourParams) (bool, error)
@@ -309,6 +311,12 @@ type Querier interface {
 	// 1/2/3/4-byte hop prefixes check prefix_1/2/3/4; ambiguity set supplied by AmbiguousPrefixes),
 	// and stamps the survivors.
 	ReconfirmRoutes(ctx context.Context, arg ReconfirmRoutesParams) (int64, error)
+	// The next batch_size routes after the cursor in pkey order: deletes those with a departed hop
+	// node or a hop prefix matching >1 node in that IATA (length-aware, reconfirm_amb). Writes no stamp.
+	// The DELETE re-checks the newest row version. An empty last_iata means the walk passed the end.
+	ReconfirmRoutesBatch(ctx context.Context, arg ReconfirmRoutesBatchParams) (ReconfirmRoutesBatchRow, error)
+	// Key of the last route in a slice that timed out: the caller passes the slice's row count - 1.
+	ReconfirmSliceEnd(ctx context.Context, arg ReconfirmSliceEndParams) (ReconfirmSliceEndRow, error)
 	// One hearing of a TRACE packet: trace_iatas refreshes at most hourly and the tag's heard
 	// window widens (the first hearing replaces the packet's provisional times). Packet counts
 	// and payloads come from UpsertPacket.

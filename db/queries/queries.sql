@@ -1849,6 +1849,52 @@ updated AS (
 )
 SELECT count(*) FROM batch;
 
+-- name: FillReconfirmAmb :exec
+-- Hop prefixes that match >1 node in an IATA, per width, into the sweep's temp table.
+INSERT INTO reconfirm_amb (iata, len, prefix)
+SELECT iata::text AS iata, 1::int AS len, prefix_1 AS prefix FROM node_short_ids GROUP BY iata, prefix_1 HAVING COUNT(*) > 1
+UNION ALL
+SELECT iata::text, 2::int, prefix_2 FROM node_short_ids GROUP BY iata, prefix_2 HAVING COUNT(*) > 1
+UNION ALL
+SELECT iata::text, 3::int, prefix_3 FROM node_short_ids GROUP BY iata, prefix_3 HAVING COUNT(*) > 1
+UNION ALL
+SELECT iata::text, 4::int, prefix_4 FROM node_short_ids GROUP BY iata, prefix_4 HAVING COUNT(*) > 1;
+
+-- name: ReconfirmRoutesBatch :one
+-- The next batch_size routes after the cursor in pkey order: deletes those with a departed hop
+-- node or a hop prefix matching >1 node in that IATA (length-aware, reconfirm_amb). Writes no stamp.
+-- The DELETE re-checks the newest row version. An empty last_iata means the walk passed the end.
+WITH batch AS MATERIALIZED (
+  SELECT r.iata, r.path_key, r.node_ids, r.hash_prefix FROM known_routes r
+  WHERE (r.iata, r.path_key) > (@after_iata::bpchar, @after_key::bytea)
+  ORDER BY r.iata, r.path_key
+  LIMIT @batch_size),
+dead AS (
+  SELECT b.iata, b.path_key FROM batch b
+  WHERE EXISTS (SELECT 1 FROM unnest(b.node_ids) AS hop(node_id)
+                WHERE NOT EXISTS (SELECT 1 FROM node_short_ids ns WHERE ns.node_id = hop.node_id AND ns.iata = b.iata))
+     OR EXISTS (SELECT 1 FROM unnest(b.hash_prefix) AS hp
+                JOIN reconfirm_amb a ON a.iata = b.iata::text AND a.len = length(hp) AND a.prefix = hp)),
+deleted AS (
+  DELETE FROM known_routes kr USING dead d
+  WHERE kr.iata = d.iata AND kr.path_key = d.path_key
+    AND (EXISTS (SELECT 1 FROM unnest(kr.node_ids) AS hop(node_id)
+                 WHERE NOT EXISTS (SELECT 1 FROM node_short_ids ns WHERE ns.node_id = hop.node_id AND ns.iata = kr.iata))
+      OR EXISTS (SELECT 1 FROM unnest(kr.hash_prefix) AS hp
+                 JOIN reconfirm_amb a ON a.iata = kr.iata::text AND a.len = length(hp) AND a.prefix = hp))
+  RETURNING 1)
+SELECT (SELECT count(*) FROM batch) AS scanned,
+       (SELECT count(*) FROM deleted) AS deleted,
+       coalesce((SELECT iata FROM batch ORDER BY iata DESC, path_key DESC LIMIT 1)::text, '')::text AS last_iata,
+       coalesce((SELECT path_key FROM batch ORDER BY iata DESC, path_key DESC LIMIT 1), ''::bytea)::bytea AS last_key;
+
+-- name: ReconfirmSliceEnd :one
+-- Key of the last route in a slice that timed out: the caller passes the slice's row count - 1.
+SELECT r.iata, r.path_key FROM known_routes r
+WHERE (r.iata, r.path_key) > (@after_iata::bpchar, @after_key::bytea)
+ORDER BY r.iata, r.path_key
+OFFSET @offset_rows LIMIT 1;
+
 -- name: ReconfirmNeighbors :exec
 -- Delete node_neighbors where the neighbor has departed from node_short_ids
 -- for that IATA, or where its prefix_4 is now ambiguous.

@@ -192,3 +192,32 @@ func TestStateRoundTrip(t *testing.T) {
 		t.Errorf("missing key: %v, %v; want false, nil", ok, err)
 	}
 }
+
+func TestReconfirmCursorDecode(t *testing.T) {
+	cases := []struct {
+		raw      string
+		wantIATA string
+		wantKey  []byte
+	}{
+		{`{}`, "", []byte{}},
+		{`{"iata":"LRU"}`, "", []byte{}},
+		{`{"iata":"LRU","path_key_hex":null}`, "", []byte{}},
+		{`{"iata":"LRU","path_key_hex":"zz"}`, "", []byte{}},
+		{`{"iata":"LRU","path_key_hex":"0a0b"}`, "LRU", []byte{0x0a, 0x0b}},
+		{`{"iata":"LRU","path_key_hex":""}`, "LRU", []byte{}},
+		{`{"iata":"","path_key_hex":"0a"}`, "", []byte{}},
+	}
+	for _, c := range cases {
+		var cur reconfirmCursor
+		if err := json.Unmarshal([]byte(c.raw), &cur); err != nil {
+			t.Fatalf("%s: %v", c.raw, err)
+		}
+		iata, key := cur.position()
+		if key == nil {
+			t.Errorf("%s: nil key", c.raw)
+		}
+		if iata != c.wantIATA || !bytes.Equal(key, c.wantKey) {
+			t.Errorf("%s: position = (%q, %x), want (%q, %x)", c.raw, iata, key, c.wantIATA, c.wantKey)
+		}
+	}
+}

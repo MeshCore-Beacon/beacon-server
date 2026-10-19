@@ -402,6 +402,20 @@ func (mr *MockQuerierMockRecorder) DeleteStaleDirtyHours(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteStaleDirtyHours", reflect.TypeOf((*MockQuerier)(nil).DeleteStaleDirtyHours), ctx)
 }
 
+// FillReconfirmAmb mocks base method.
+func (m *MockQuerier) FillReconfirmAmb(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FillReconfirmAmb", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// FillReconfirmAmb indicates an expected call of FillReconfirmAmb.
+func (mr *MockQuerierMockRecorder) FillReconfirmAmb(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FillReconfirmAmb", reflect.TypeOf((*MockQuerier)(nil).FillReconfirmAmb), ctx)
+}
+
 // FillRollupObs mocks base method.
 func (m *MockQuerier) FillRollupObs(ctx context.Context, dollar_1 pgtype.Timestamptz) error {
 	m.ctrl.T.Helper()
@@ -1911,6 +1925,36 @@ func (m *MockQuerier) ReconfirmRoutes(ctx context.Context, arg db.ReconfirmRoute
 func (mr *MockQuerierMockRecorder) ReconfirmRoutes(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReconfirmRoutes", reflect.TypeOf((*MockQuerier)(nil).ReconfirmRoutes), ctx, arg)
+}
+
+// ReconfirmRoutesBatch mocks base method.
+func (m *MockQuerier) ReconfirmRoutesBatch(ctx context.Context, arg db.ReconfirmRoutesBatchParams) (db.ReconfirmRoutesBatchRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReconfirmRoutesBatch", ctx, arg)
+	ret0, _ := ret[0].(db.ReconfirmRoutesBatchRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ReconfirmRoutesBatch indicates an expected call of ReconfirmRoutesBatch.
+func (mr *MockQuerierMockRecorder) ReconfirmRoutesBatch(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReconfirmRoutesBatch", reflect.TypeOf((*MockQuerier)(nil).ReconfirmRoutesBatch), ctx, arg)
+}
+
+// ReconfirmSliceEnd mocks base method.
+func (m *MockQuerier) ReconfirmSliceEnd(ctx context.Context, arg db.ReconfirmSliceEndParams) (db.ReconfirmSliceEndRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReconfirmSliceEnd", ctx, arg)
+	ret0, _ := ret[0].(db.ReconfirmSliceEndRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ReconfirmSliceEnd indicates an expected call of ReconfirmSliceEnd.
+func (mr *MockQuerierMockRecorder) ReconfirmSliceEnd(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReconfirmSliceEnd", reflect.TypeOf((*MockQuerier)(nil).ReconfirmSliceEnd), ctx, arg)
 }
 
 // RecordTrace mocks base method.
