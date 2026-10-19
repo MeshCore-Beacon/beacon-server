@@ -31,8 +31,9 @@ var (
 )
 
 // Packets of types 2, 4, 5 and 9; every 11th has no origin, and half the origins have a node.
-// A hears every packet below 5301 (ids 3i, about 150 adverts among 5,000 others), B only the
-// adverts (3i+1), C a few non-adverts (3i+2). The sequence then crosses 2^31 for 30 more.
+// Below 2^31, A hears every packet below 5301 (ids 3i, about 150 adverts among 5,000 others), B only
+// the adverts (3i+1), C a few non-adverts (3i+2). The sequence then crosses 2^31 for 30 more, split
+// between A and B, adverts and others alike.
 // Observations carry their packet's payload type.
 const advertsFixture = `
 INSERT INTO iata_codes(iata) VALUES ('YOW');
@@ -218,6 +219,11 @@ func TestObserverAdvertsPartialIndexPostgres(t *testing.T) {
 	})
 
 	t.Run("plan", func(t *testing.T) {
+		// The unfiltered index on the same key must exist, or choosing the partial one proves nothing.
+		var other *string
+		if err := pool.QueryRow(ctx, "SELECT to_regclass('idx_observations_observer_id')::text").Scan(&other); err != nil || other == nil {
+			t.Fatalf("idx_observations_observer_id missing: %v", err)
+		}
 		for _, c := range []struct {
 			cursor int64
 			want   []string

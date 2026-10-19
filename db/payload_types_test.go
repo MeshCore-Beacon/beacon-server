@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"reflect"
 	"testing"
 	"time"
@@ -50,6 +51,12 @@ func TestListObserverAdverts_Dispatch(t *testing.T) {
 		"read fails": {err: errors.New("boom")},
 	} {
 		t.Run(name, func(t *testing.T) {
+			if state.err != nil && !errors.Is(state.err, pgx.ErrNoRows) {
+				// The read error is logged by design; keep it out of the test output.
+				prev := slog.Default()
+				slog.SetDefault(slog.New(slog.DiscardHandler))
+				t.Cleanup(func() { slog.SetDefault(prev) })
+			}
 			m := mockdb.NewMockQuerier(gomock.NewController(t))
 			m.EXPECT().GetBackgroundState(gomock.Any(), "observation_payload_type").Return(state.raw, state.err).Times(2)
 			m.EXPECT().ListObserverAdvertsJoinFilter(gomock.Any(), joinParams).Return(nil, nil).Times(2)
