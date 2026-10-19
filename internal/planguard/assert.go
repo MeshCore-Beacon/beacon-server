@@ -304,9 +304,12 @@ func (v Verdict) Failing() bool {
 // retiredKinds are the failures a retired index can explain. Budget and error failures never are.
 var retiredKinds = []FailureKind{FailDriver, FailIndexCond, FailForbidden, FailRequired, FailSortAboveLimit, FailPlanChange}
 
-// Decide returns the verdict for one run. A run that errored has failures == [{Kind: error}].
+// Decide returns the verdict for one run. A run that errored has failures == [{Kind: error}] and is always
+// ERROR, whatever its expect_fail or known_issue.
 func Decide(expectFail bool, knownIssue string, failures []Failure, retired []string) Verdict {
 	switch {
+	case slices.ContainsFunc(failures, func(f Failure) bool { return f.Kind == FailError }):
+		return VerdictError // an errored run always fails, expect_fail and known_issue included
 	case expectFail && len(failures) > 0:
 		return VerdictDetected
 	case expectFail:
@@ -317,8 +320,6 @@ func Decide(expectFail bool, knownIssue string, failures []Failure, retired []st
 		return VerdictRetiredIndex
 	case knownIssue != "":
 		return VerdictKnownIssue
-	case slices.ContainsFunc(failures, func(f Failure) bool { return f.Kind == FailError }):
-		return VerdictError
 	}
 	return VerdictFalsePositive
 }

@@ -281,7 +281,10 @@ func TestDecide(t *testing.T) {
 		want       planguard.Verdict
 	}{
 		{"expect-fail detected", true, "", []planguard.Failure{f(planguard.FailBudget)}, planguard.VerdictDetected},
-		{"expect-fail errored", true, "", []planguard.Failure{f(planguard.FailError)}, planguard.VerdictDetected},
+		{"expect-fail errored", true, "", []planguard.Failure{f(planguard.FailError)}, planguard.VerdictError},
+		{"expect-fail errored, known issue", true, "x", []planguard.Failure{f(planguard.FailError)}, planguard.VerdictError},
+		{"error, known issue", false, "x", []planguard.Failure{f(planguard.FailError)}, planguard.VerdictError},
+		{"retired + error, known issue", false, "x", []planguard.Failure{f(planguard.FailDriver, "idx_old"), f(planguard.FailError)}, planguard.VerdictError},
 		{"expect-fail missed", true, "", nil, planguard.VerdictMissed},
 		{"clean", false, "", nil, planguard.VerdictOK},
 		{"clean known issue", false, "x", nil, planguard.VerdictOK},
