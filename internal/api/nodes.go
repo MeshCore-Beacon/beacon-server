@@ -32,6 +32,12 @@ type NodeIATA struct {
 	LastHeard int64  `json:"lastHeard"` // epoch ms
 }
 
+// NodePage adds the exact cursor while keeping the numeric one for older clients.
+type NodePage struct {
+	Page[NodeSummary]
+	NextPageCursor *string `json:"nextPageCursor,omitempty"`
+}
+
 // NodeSummary is the minimal node representation used in list responses.
 type NodeSummary struct {
 	ID                 uuid.UUID   `json:"id"`
