@@ -437,10 +437,13 @@ entries:
       driver: [{relation: known_routes, index: idx_known_routes_iata_keyset, index_cond: ["iata =", "id) < ROW("]}]
       budget: {buffers: 2229, planning_ms: 10}
     note: "measured: 1486 custom, plan iata_keyset + Filter"
+  # Not on the fixture: at 1/50 the (region, hop) group is small enough that sorting it is cheaper than walking
+  # the region's keyset; at full size the walk wins. The same holds for H09.
   - id: routes.byiatahop.H02_SEA_hop15_mid_l200
     stmt: ListKnownRoutesByIATAHop
     shape: "region + mid hop (SEA hop 15, 39k)"
     params: [SEA, 15, null, 0, 200]
+    tiers: [local, prod]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_iata_keyset, index_cond: ["iata =", "id) < ROW("]}]
       budget: {buffers: 12005, planning_ms: 10}
@@ -501,6 +504,7 @@ entries:
     stmt: ListKnownRoutesByIATAHop
     shape: "sparse region + dense hop (MAD hop 4)"
     params: [MAD, 4, null, 0, 50]
+    tiers: [local, prod]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_iata_keyset, index_cond: ["iata =", "id) < ROW("]}]
       budget: {buffers: 225, planning_ms: 10}
@@ -514,10 +518,13 @@ entries:
       sort_exempt: [hop_group]
       budget: {buffers: 10, planning_ms: 10}
     note: "measured: 4 custom, plan Sort > hop_iata"
+  # H11-H14 are not on the fixture: the region is estimated at one row, so the hop index (and a sort) and the
+  # region's keyset (and a filter) cost the same to within the index geometry, which at 1/50 tips to the keyset.
   - id: routes.byiatahop.H11_NEW_hop4_dense_l200
     stmt: ListKnownRoutesByIATAHop
     shape: "stale region + dense hop (NEW hop 4, 29k)"
     params: [NEW, 4, null, 0, 200]
+    tiers: [local, prod]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_hop_iata, index_cond: ["hop_count =", "iata ="]}]
       sort_exempt: [hop_group]
@@ -527,6 +534,7 @@ entries:
     stmt: ListKnownRoutesByIATAHop
     shape: "stale region + rare hop (NEW hop 14, 53 rows)"
     params: [NEW, 14, null, 0, 50]
+    tiers: [local, prod]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_hop_iata, index_cond: ["hop_count =", "iata ="]}]
       sort_exempt: [hop_group]
@@ -536,6 +544,7 @@ entries:
     stmt: ListKnownRoutesByIATAHop
     shape: "stale region + absent hop (NEW hop 1)"
     params: [NEW, 1, null, 0, 50]
+    tiers: [local, prod]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_hop_iata, index_cond: ["hop_count =", "iata ="]}]
       sort_exempt: [hop_group]
@@ -545,6 +554,7 @@ entries:
     stmt: ListKnownRoutesByIATAHop
     shape: "empty region + hop (ZZZ hop 6)"
     params: [ZZZ, 6, null, 0, 50]
+    tiers: [local, prod]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_hop_iata, index_cond: ["hop_count =", "iata ="]}]
       sort_exempt: [hop_group]
@@ -2341,10 +2351,13 @@ entries:
     params: [null, 5, "\\x01", "\\x0102030405060708"]
     expect:
       driver: [{relation: channels, index: channels_pkey, index_cond: ["id ="]}]
+  # Not on the fixture: on freshly built indexes the one-page unique partial index on channel_hash costs a hair
+  # less than the primary key, so the planner probes it instead; both are single-row unique lookups.
   - id: sm.write.touch_channel_hash_only
     stmt: TouchChannelHashOnly
     shape: "TouchChannelHashOnly write-through (plain EXPLAIN)"
     params: [5, "\\x01"]
+    tiers: [local, prod]
     expect:
       driver: [{relation: channels, index: channels_pkey, index_cond: ["id ="]}]
   - id: sm.write.upsert_channel

@@ -7,7 +7,8 @@ package planguard
 
 import "embed"
 
-// Files holds corpus.yaml and the sql/ texts it names.
+// Files holds corpus.yaml, the sql/ texts it names, the fixture generator (fixture/: its SQL steps and the
+// aggregate CSVs they read) and the committed plan signatures (baseline/<tier>/).
 //
-//go:embed corpus.yaml sql
+//go:embed corpus.yaml sql fixture baseline
 var Files embed.FS

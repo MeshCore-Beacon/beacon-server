@@ -109,11 +109,15 @@ func TestRepoCorpusLoads(t *testing.T) {
 		}
 	}
 
-	// No plan IDs or deployment identifiers in the corpus or the frozen SQL.
+	// No plan IDs or deployment identifiers in the corpus, the frozen SQL, the fixture generator and its testdata,
+	// or the baselines.
+	scanned := map[string]int{}
 	err = fs.WalkDir(pgdata.Files, ".", func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !(p == "corpus.yaml" || strings.HasPrefix(p, "sql/")) {
+		if err != nil || d.IsDir() {
 			return err
 		}
+		top, _, _ := strings.Cut(p, "/")
+		scanned[top]++
 		body, err := fs.ReadFile(pgdata.Files, p)
 		if err != nil {
 			return err
@@ -130,6 +134,11 @@ func TestRepoCorpusLoads(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, top := range []string{"corpus.yaml", "sql", "fixture", "baseline"} {
+		if scanned[top] == 0 {
+			t.Errorf("no embedded file under %s was scanned", top)
+		}
 	}
 }
 

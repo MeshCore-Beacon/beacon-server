@@ -22,6 +22,15 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      planguard-postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: planguard-ci-only
+          POSTGRES_DB: planguard
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -68,7 +77,13 @@ jobs:
       - name: Verify planguard against PostgreSQL 16
         env:
           BEACON_TEST_POSTGRES_DSN: postgres://postgres:backup-ci-only@127.0.0.1:5432/postgres?sslmode=disable
-        run: go test ./internal/planguard -run '^Test(RunnerReadOnly|RunnerRecoversAfterError|UnresolvedParamsSkip|GenericModeShowsParams|CorpusStatementsPrepareClean)Postgres$' -count=1 -v
+        run: go test ./internal/planguard -timeout 20m -run '^Test(RunnerReadOnly|RunnerRecoversAfterError|UnresolvedParamsSkip|GenericModeShowsParams|CorpusStatementsPrepareClean|BuildFixtureThroughMigrations|BuildFixtureRefusesRealDatabase)Postgres$' -count=1 -v
+
+      - name: Planguard fixture tier (plain EXPLAIN on a migrated, skewed fixture)
+        run: go run ./cmd/planguard run --tier fixture --dsn 'postgres://postgres:planguard-ci-only@127.0.0.1:5433/planguard?sslmode=disable' --out "$RUNNER_TEMP/planguard"
+
+      - name: Plan policy up to date
+        run: go run ./cmd/planguard gen-policy && git diff --exit-code db/planpolicy
 
       - name: Verify backup command against PostgreSQL 16
         run: |

@@ -9,6 +9,9 @@
 //	              [--fidelity-against results.jsonl]
 //	planguard gen-policy [--corpus FILE] [--out FILE]   (defaults and db/sqlc are under the module root)
 //
+// --tier fixture first builds the synthetic fixture on --dsn through the migrations (or finds it built from the same
+// files); it refuses a database that holds data and was not built that way.
+//
 // Exit status: 0 when no run fails, 1 when one does (or the run cannot be made), 2 on usage errors.
 package main
 
@@ -24,10 +27,12 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/db/planpolicy"
 	"github.com/MeshCore-Beacon/beacon-server/internal/planguard"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const usage = "usage: planguard run --tier fixture|local|prod [flags] (planguard run -h for the flags)\n" +
@@ -217,6 +222,12 @@ func runCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if f.tier == "fixture" {
+		if err := buildFixture(ctx, f, stderr); err != nil {
+			fmt.Fprintln(stderr, "planguard:", err)
+			return 1
+		}
+	}
 	pc, err := pgconn.Connect(ctx, f.dsn)
 	if err != nil {
 		fmt.Fprintln(stderr, "planguard: connect:", err)
@@ -230,6 +241,22 @@ func runCmd(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return finish(rep, err, f, stderr)
+}
+
+// buildFixture builds the fixture tier's database on --dsn from the fixture/ directory beside the corpus, or finds
+// it built from the same files.
+func buildFixture(ctx context.Context, f runFlags, stderr io.Writer) error {
+	pool, err := pgxpool.New(ctx, f.dsn)
+	if err != nil {
+		return fmt.Errorf("connect: %w", err)
+	}
+	defer pool.Close()
+	t0 := time.Now()
+	if err := planguard.BuildFixture(ctx, pool, os.DirFS(filepath.Dir(f.corpus))); err != nil {
+		return err
+	}
+	fmt.Fprintf(stderr, "fixture ready in %.1f s\n", time.Since(t0).Seconds())
+	return nil
 }
 
 // options checks the flags and builds the run options; code is 2 on a usage error.
