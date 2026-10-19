@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -133,8 +134,35 @@ type Entry struct {
 	Mode            map[string]*ModeOverride `yaml:"mode"`
 	ExpectFail      bool                     `yaml:"expect_fail"`
 	KnownIssue      string                   `yaml:"known_issue"`
-	Baseline        string                   `yaml:"baseline"` // "" or "unstable: <reason>"
+	RequiresIndexes []string                 `yaml:"requires_indexes"` // indexes on big tables the case needs; SKIP when absent
+	Baseline        string                   `yaml:"baseline"`         // "" or "unstable: <reason>"
 	Note            string                   `yaml:"note"`
+}
+
+// MissingIndex returns the first of e's required indexes absent from indexes, the run's index list on the big
+// tables, or "" when all are present. A nil list is unknown and misses nothing.
+func (e *Entry) MissingIndex(indexes []string) string {
+	if indexes == nil {
+		return ""
+	}
+	for _, ix := range e.RequiresIndexes {
+		if !slices.Contains(indexes, ix) {
+			return ix
+		}
+	}
+	return ""
+}
+
+func plainIdent(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if !isIdent(s[i]) {
+			return false
+		}
+	}
+	return s[0] < '0' || s[0] > '9'
 }
 
 // KnownIssueIn returns the known issue that covers e's failures in mode: the mode override's, else the entry's.
@@ -590,6 +618,14 @@ func (c *Corpus) checkEntry(e *Entry) error {
 	for i, p := range e.Params {
 		if err := c.checkParam(p); err != nil {
 			return fmt.Errorf("param %d: %w", i+1, err)
+		}
+	}
+	for _, ix := range e.RequiresIndexes {
+		if len(c.Defaults.BigTables) == 0 {
+			return errors.New("requires_indexes needs defaults.big_tables (the index list is read from them)")
+		}
+		if !plainIdent(ix) {
+			return fmt.Errorf("requires_indexes: %q is not an index name", ix)
 		}
 	}
 	if e.Baseline != "" && !strings.HasPrefix(e.Baseline, "unstable: ") {

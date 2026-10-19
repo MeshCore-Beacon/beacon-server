@@ -314,11 +314,13 @@ func CheckPlans(c *Corpus, o RunOptions, plans map[string][]byte) (*Report, erro
 	for _, e := range c.selection(o) {
 		for _, mode := range o.modesOf(c, e) {
 			sp := c.spec(o, e, mode, params, nil, true)
+			c.skipMissingIndex(&sp, rep.Indexes)
 			r := sp.r
 			key := e.ID + "|" + mode
 			switch plan, ok := plans[key]; {
 			case sp.skip != "":
 				r.Verdict, r.Skip = VerdictSkip, sp.skip
+				used[key] = true // a plan emitted before the index list was known
 			case sp.err != "":
 				c.errored(&r, e, sp.err)
 			case !ok:

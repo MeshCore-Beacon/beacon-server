@@ -320,3 +320,51 @@ entries:
 		t.Errorf("skip with known_issue: err = %v", err)
 	}
 }
+
+// On the psql path the index list comes with the plans: an entry whose required index is absent reads SKIP, and
+// its emitted plan is accepted unread. Without an index list nothing is skipped.
+func TestRequiresIndexCheckPlans(t *testing.T) {
+	const body = `
+defaults: {big_tables: [nodes]}
+tiers: {prod: {}}
+statements:
+  Q: {sqlc: Q, plan: custom}
+entries:
+  - {id: q.needs, stmt: Q, params: [x], requires_indexes: [idx_nodes_special]}
+`
+	c, err := planguard.LoadCorpus(mapFS(map[string]string{"c.yaml": body}), "c.yaml", testSQLC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := []byte(`[{"Plan": {"Node Type": "Index Scan", "Relation Name": "nodes", "Index Name": "nodes_pkey"}}]`)
+	o := planguard.RunOptions{Tier: "prod", Params: map[string]*string{}}
+	for _, tc := range []struct {
+		indexes string // JSON, or "" for no index block
+		verdict planguard.Verdict
+		skip    string
+	}{
+		{`["nodes_pkey"]`, planguard.VerdictSkip, "requires index idx_nodes_special"},
+		{`["nodes_pkey", "idx_nodes_special"]`, planguard.VerdictOK, ""},
+		{"", planguard.VerdictOK, ""},
+	} {
+		plans := map[string][]byte{"q.needs|custom": plan}
+		if tc.indexes != "" {
+			plans[planguard.IndexesKey] = []byte(tc.indexes)
+		}
+		rep, err := planguard.CheckPlans(c, o, plans)
+		if err != nil {
+			t.Fatalf("indexes %s: %v", tc.indexes, err)
+		}
+		if len(rep.Results) != 1 || rep.Results[0].Verdict != tc.verdict || rep.Results[0].Skip != tc.skip {
+			t.Errorf("indexes %s: results %+v, want %s %q", tc.indexes, rep.Results, tc.verdict, tc.skip)
+		}
+	}
+
+	for _, bad := range []string{"defaults: {big_tables: [nodes]}\n", ""} {
+		y := bad + "statements:\n  Q: {sqlc: Q, plan: custom}\nentries:\n  - {id: q, stmt: Q, requires_indexes: [\"idx; DROP\"]}\n"
+		if _, err := planguard.LoadCorpus(mapFS(map[string]string{"c.yaml": y}), "c.yaml", testSQLC); err == nil ||
+			!strings.Contains(err.Error(), "requires_indexes") {
+			t.Errorf("bad requires_indexes loaded: %v", err)
+		}
+	}
+}

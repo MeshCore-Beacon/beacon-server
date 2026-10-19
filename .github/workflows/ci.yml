@@ -85,7 +85,7 @@ jobs:
         env:
           BEACON_TEST_POSTGRES_DSN: postgres://postgres:backup-ci-only@127.0.0.1:5432/postgres?sslmode=disable
           PLANGUARD_FIXTURE_DSN: postgres://postgres:planguard-ci-only@127.0.0.1:5433/planguard?sslmode=disable
-        run: go test ./internal/planguard -timeout 20m -run '^Test(RunnerReadOnly|RunnerRecoversAfterError|UnresolvedParamsSkip|GenericModeShowsParams|CorpusStatementsPrepareClean|BuildFixtureThroughMigrations|BuildFixtureRefusesRealDatabase|BuildFixtureRebuildsStaleInputs|RunDiffSnapshot|RunDiffFindsReadmodelsSkip|StatementScannerMatches|PlanguardProdTier|PlanguardProdCancel)Postgres$' -count=1 -v
+        run: go test ./internal/planguard -timeout 20m -run '^Test(RunnerReadOnly|RunnerRecoversAfterError|UnresolvedParamsSkip|GenericModeShowsParams|CorpusStatementsPrepareClean|BuildFixtureThroughMigrations|BuildFixtureRefusesRealDatabase|BuildFixtureRebuildsStaleInputs|RunDiffSnapshot|RunDiffFindsReadmodelsSkip|StatementScannerMatches|PlanguardProdTier|PlanguardProdCancel|RequiresIndexSkips)Postgres$' -count=1 -v
 
       - name: Plan policy up to date
         run: go run ./cmd/planguard gen-policy && git diff --exit-code db/planpolicy

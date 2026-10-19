@@ -295,3 +295,20 @@ func contains(xs []string, x string) bool {
 	}
 	return false
 }
+
+// An entry whose required index is missing from the database is SKIP with the index named, never judged against
+// a plan of another index set; an entry whose required index exists runs.
+func TestRequiresIndexSkipsPostgres(t *testing.T) {
+	e := newRunnerEnv(t)
+	e.corpus.Entry("routes.byiata").RequiresIndexes = []string{"idx_known_routes_iata_keyset", "idx_not_in_this_database"}
+	e.corpus.Entry("routes.globalhop").RequiresIndexes = []string{"idx_known_routes_hop_iata"}
+	got := byKey(e.run(t, `^routes\.(byiata|globalhop)$`))
+	for _, k := range []string{"routes.byiata|custom", "routes.byiata|generic"} {
+		if r := got[k]; r.Verdict != planguard.VerdictSkip || r.Skip != "requires index idx_not_in_this_database" || len(r.Plan) != 0 {
+			t.Errorf("%s: verdict %s skip %q, want SKIP requires index idx_not_in_this_database, unplanned", k, r.Verdict, r.Skip)
+		}
+	}
+	if r := got["routes.globalhop|custom"]; r.Verdict == planguard.VerdictSkip || r.Verdict.Failing() || len(r.Plan) == 0 {
+		t.Errorf("routes.globalhop: verdict %s skip %q failures %v, want a judged run", r.Verdict, r.Skip, r.Failures)
+	}
+}

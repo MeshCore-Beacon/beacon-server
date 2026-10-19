@@ -277,8 +277,8 @@ entries:
     params: [SEA, null, 0, 50]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_iata_keyset, index_cond: ["iata >=", "id) < ROW("]}]
-      budget: {buffers: 300, planning_ms: 10}
-    note: "measured: 55 / 55 (custom / generic)"
+      budget: {buffers: 80, planning_ms: 10}
+    note: "measured: 53 B on the full local copy (max over modes)"
   - id: routes.byiata.R02_SEA_first_l200
     stmt: ListKnownRoutesByIATA
     shape: "dense region, page 1, limit 200"
@@ -286,8 +286,8 @@ entries:
     params: [SEA, null, 0, 200]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_iata_keyset, index_cond: ["iata >=", "id) < ROW("]}]
-      budget: {buffers: 300, planning_ms: 10}
-    note: "measured: 207 / 207 (custom / generic)"
+      budget: {buffers: 288, planning_ms: 10}
+    note: "measured: 192 B on the full local copy (max over modes)"
   - id: routes.byiata.R03_SEA_page2_l50
     stmt: ListKnownRoutesByIATA
     shape: "dense region, page 2 (cursor + cursorId)"
@@ -295,8 +295,8 @@ entries:
     params: [SEA, {r: sea50_ts}, {r: sea50_id}, 50]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_iata_keyset, index_cond: ["iata >=", "id) < ROW("]}]
-      budget: {buffers: 300, planning_ms: 10}
-    note: "measured: 55 / 55 (custom / generic)"
+      budget: {buffers: 69, planning_ms: 10}
+    note: "measured: 46 B on the full local copy (max over modes)"
   - id: routes.byiata.R04_SEA_deep_l200
     stmt: ListKnownRoutesByIATA
     shape: "dense region, deep cursor-only (legacy, 2026-10-05)"
@@ -304,8 +304,8 @@ entries:
     params: [SEA, "2026-10-05 19:00:00+00", 0, 200]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_iata_keyset, index_cond: ["iata >=", "id) < ROW("]}]
-      budget: {buffers: 300, planning_ms: 10}
-    note: "measured: 207 / 207 (custom / generic)"
+      budget: {buffers: 305, planning_ms: 10}
+    note: "measured: 203 B on the full local copy (max over modes)"
   - id: routes.byiata.R05_BWE_first_l200
     stmt: ListKnownRoutesByIATA
     shape: "BWE (prod 55 s plan today), page 1"
@@ -313,8 +313,8 @@ entries:
     params: [BWE, null, 0, 200]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_iata_keyset, index_cond: ["iata >=", "id) < ROW("]}]
-      budget: {buffers: 300, planning_ms: 10}
-    note: "measured: 207 / 207 (custom / generic)"
+      budget: {buffers: 306, planning_ms: 10}
+    note: "measured: 204 B on the full local copy (max over modes)"
   - id: routes.byiata.R06_MAD_first_l50
     stmt: ListKnownRoutesByIATA
     shape: "sparse region (MAD), page 1"
@@ -322,8 +322,8 @@ entries:
     params: [MAD, null, 0, 50]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_iata_keyset, index_cond: ["iata >=", "id) < ROW("]}]
-      budget: {buffers: 300, planning_ms: 10}
-    note: "measured: 54 / 54 (custom / generic)"
+      budget: {buffers: 78, planning_ms: 10}
+    note: "measured: 52 B on the full local copy (max over modes)"
   - id: routes.byiata.R07_CLE_first_l200
     stmt: ListKnownRoutesByIATA
     shape: "small region (CLE), page 1, limit 200"
@@ -331,8 +331,8 @@ entries:
     params: [CLE, null, 0, 200]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_iata_keyset, index_cond: ["iata >=", "id) < ROW("]}]
-      budget: {buffers: 300, planning_ms: 10}
-    note: "measured: 207 / 207 (custom / generic)"
+      budget: {buffers: 288, planning_ms: 10}
+    note: "measured: 192 B on the full local copy (max over modes)"
   - id: routes.byiata.R08_NEW_first_l50
     stmt: ListKnownRoutesByIATA
     shape: "stale-statistics region (NEW, 104,886 routes, est. 1 row), page 1"
@@ -340,8 +340,8 @@ entries:
     params: [NEW, null, 0, 50]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_iata_keyset, index_cond: ["iata >=", "id) < ROW("]}]
-      budget: {buffers: 300, planning_ms: 10}
-    note: "measured: 55 / 55 (custom / generic)"
+      budget: {buffers: 10, planning_ms: 10}
+    note: "measured: 4 B on the full local copy (max over modes)"
   - id: routes.byiata.R09_NEW_page2_l50
     stmt: ListKnownRoutesByIATA
     shape: "stale region, page 2"
@@ -358,8 +358,8 @@ entries:
     params: [NEW, "2026-10-05 19:00:00+00", 0, 200]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_iata_keyset, index_cond: ["iata >=", "id) < ROW("]}]
-      budget: {buffers: 300, planning_ms: 10}
-    note: "measured: 207 / 207 (custom / generic)"
+      budget: {buffers: 10, planning_ms: 10}
+    note: "measured: 4 B on the full local copy (max over modes)"
   - id: routes.byiata.R11_ZZZ_l50
     stmt: ListKnownRoutesByIATA
     shape: "not an IATA code (ZZZ): empty region"
@@ -368,7 +368,7 @@ entries:
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_iata_keyset, index_cond: ["iata >=", "id) < ROW("]}]
       budget: {buffers: 10, planning_ms: 10}
-    note: "measured: 4 / 4 (custom / generic)"
+    note: "measured: 4 B on the full local copy (max over modes)"
   - id: routes.byiata.R12_WRE_l50
     stmt: ListKnownRoutesByIATA
     shape: "region with no routes (WRE): empty region"
@@ -377,7 +377,7 @@ entries:
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_iata_keyset, index_cond: ["iata >=", "id) < ROW("]}]
       budget: {buffers: 10, planning_ms: 10}
-    note: "measured: 4 / 4 (custom / generic)"
+    note: "measured: 4 B on the full local copy (max over modes)"
   - id: routes.byiata.R13_SEA_tie_l200
     stmt: ListKnownRoutesByIATA
     shape: "dense region, cursor inside a tied millisecond (cursorId = top id of the tie)"
@@ -385,7 +385,8 @@ entries:
     params: [SEA, {r: sea_tie_ts}, {r: sea_tie_id}, 200]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_iata_keyset, index_cond: ["iata >=", "id) < ROW("]}]
-      budget: {buffers: 300, planning_ms: 10}
+      budget: {buffers: 299, planning_ms: 10}
+    note: "measured: 199 B on the full local copy (max over modes)"
   - id: routes.byiata.R14_BWE_deep_l200
     stmt: ListKnownRoutesByIATA
     shape: "BWE cursor + cursorId 5,000 deep"
@@ -393,7 +394,8 @@ entries:
     params: [BWE, {r: bwe_deep_ts}, {r: bwe_deep_id}, 200]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_iata_keyset, index_cond: ["iata >=", "id) < ROW("]}]
-      budget: {buffers: 300, planning_ms: 60}
+      budget: {buffers: 308, planning_ms: 60}
+    note: "measured: 205 B on the full local copy (max over modes)"
   - id: routes.global.G01_first_l50
     stmt: ListKnownRoutesGlobal
     shape: "no region, page 1, limit 50"
@@ -401,8 +403,8 @@ entries:
     params: [null, 0, 50]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_keyset, index_cond: ["id) < ROW("]}]
-      budget: {buffers: 300, planning_ms: 10}
-    note: "measured: 53 / 53 (custom / generic)"
+      budget: {buffers: 80, planning_ms: 10}
+    note: "measured: 53 B on the full local copy (max over modes)"
   - id: routes.global.G02_page2_l50
     stmt: ListKnownRoutesGlobal
     shape: "no region, page 2 (cursor + cursorId)"
@@ -410,8 +412,8 @@ entries:
     params: [{r: g50_ts}, {r: g50_id}, 50]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_keyset, index_cond: ["id) < ROW("]}]
-      budget: {buffers: 300, planning_ms: 10}
-    note: "measured: 53 / 53 (custom / generic)"
+      budget: {buffers: 80, planning_ms: 10}
+    note: "measured: 53 B on the full local copy (max over modes)"
   - id: routes.global.G03_deep_curonly_l200
     stmt: ListKnownRoutesGlobal
     shape: "no region, deep cursor-only"
@@ -419,8 +421,8 @@ entries:
     params: ["2026-10-05 19:00:00+00", 0, 200]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_keyset, index_cond: ["id) < ROW("]}]
-      budget: {buffers: 300, planning_ms: 10}
-    note: "measured: 204 / 204 (custom / generic)"
+      budget: {buffers: 303, planning_ms: 10}
+    note: "measured: 202 B on the full local copy (max over modes)"
   - id: routes.global.G04_tie_l50
     stmt: ListKnownRoutesGlobal
     shape: "no region, cursor inside a tied millisecond"
@@ -428,15 +430,16 @@ entries:
     params: [{r: global_tie_ts}, {r: global_tie_id}, 50]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_keyset, index_cond: ["id) < ROW("]}]
-      budget: {buffers: 300, planning_ms: 10}
+      budget: {buffers: 80, planning_ms: 10}
+    note: "measured: 53 B on the full local copy (max over modes)"
   - id: routes.byiatahop.H01_SEA_hop6_dense_l200
     stmt: ListKnownRoutesByIATAHop
     shape: "region + dense hop (SEA hop 6, 263k)"
     params: [SEA, 6, null, 0, 200]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_iata_keyset, index_cond: ["iata =", "id) < ROW("]}]
-      budget: {buffers: 2229, planning_ms: 10}
-    note: "measured: 1486 custom, plan iata_keyset + Filter"
+      budget: {buffers: 2136, planning_ms: 10}
+    note: "measured: 1424 B on the full local copy (max over modes)"
   # Not on the fixture: at 1/50 the (region, hop) group is small enough that sorting it is cheaper than walking
   # the region's keyset; at full size the walk wins. The same holds for H09.
   - id: routes.byiatahop.H02_SEA_hop15_mid_l200
@@ -446,8 +449,8 @@ entries:
     tiers: [local, prod]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_iata_keyset, index_cond: ["iata =", "id) < ROW("]}]
-      budget: {buffers: 12005, planning_ms: 10}
-    note: "measured: 8003 custom, plan iata_keyset + Filter"
+      budget: {buffers: 11499, planning_ms: 10}
+    note: "measured: 7666 B on the full local copy (max over modes)"
   - id: routes.byiatahop.H03_SEA_hop25_rare_l200
     stmt: ListKnownRoutesByIATAHop
     shape: "region + rare hop (SEA hop 25, 393 rows)"
@@ -455,8 +458,8 @@ entries:
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_hop_iata, index_cond: ["hop_count =", "iata ="]}]
       sort_exempt: [hop_group]
-      budget: {buffers: 594, planning_ms: 10}
-    note: "measured: 396 custom, plan Sort > hop_iata"
+      budget: {buffers: 543, planning_ms: 10}
+    note: "measured: 362 B on the full local copy (max over modes)"
   - id: routes.byiatahop.H04_SEA_hop32_vrare_l50
     stmt: ListKnownRoutesByIATAHop
     shape: "region + very rare hop (SEA hop 32, 18 rows)"
@@ -465,7 +468,7 @@ entries:
       driver: [{relation: known_routes, index: idx_known_routes_hop_iata, index_cond: ["hop_count =", "iata ="]}]
       sort_exempt: [hop_group]
       budget: {buffers: 32, planning_ms: 10}
-    note: "measured: 21 custom, plan Sort > hop_iata"
+    note: "measured: 21 B on the full local copy (max over modes)"
   - id: routes.byiatahop.H05_SEA_hop1_absent_l200
     stmt: ListKnownRoutesByIATAHop
     shape: "region + absent hop (SEA hop 1)"
@@ -474,23 +477,23 @@ entries:
       driver: [{relation: known_routes, index: idx_known_routes_hop_iata, index_cond: ["hop_count =", "iata ="]}]
       sort_exempt: [hop_group]
       budget: {buffers: 10, planning_ms: 10}
-    note: "measured: 3 custom, plan Sort > hop_iata"
+    note: "measured: 3 B on the full local copy (max over modes)"
   - id: routes.byiatahop.H06_SEA_hop6_page2_l200
     stmt: ListKnownRoutesByIATAHop
     shape: "region + dense hop, page 2"
     params: [SEA, 6, {r: seah6_ts}, {r: seah6_id}, 200]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_iata_keyset, index_cond: ["iata =", "id) < ROW("]}]
-      budget: {buffers: 1584, planning_ms: 10}
-    note: "measured: 1056 custom, plan iata_keyset + Filter"
+      budget: {buffers: 1520, planning_ms: 10}
+    note: "measured: 1013 B on the full local copy (max over modes)"
   - id: routes.byiatahop.H07_BWE_hop5_dense_l200
     stmt: ListKnownRoutesByIATAHop
     shape: "BWE + dense hop 5"
     params: [BWE, 5, null, 0, 200]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_iata_keyset, index_cond: ["iata =", "id) < ROW("]}]
-      budget: {buffers: 1637, planning_ms: 10}
-    note: "measured: 1091 custom, plan iata_keyset + Filter"
+      budget: {buffers: 1620, planning_ms: 10}
+    note: "measured: 1080 B on the full local copy (max over modes)"
   - id: routes.byiatahop.H08_BWE_hop22_rare_l50
     stmt: ListKnownRoutesByIATAHop
     shape: "BWE + rare hop 22 (6 rows)"
@@ -499,7 +502,7 @@ entries:
       driver: [{relation: known_routes, index: idx_known_routes_hop_iata, index_cond: ["hop_count =", "iata ="]}]
       sort_exempt: [hop_group]
       budget: {buffers: 14, planning_ms: 10}
-    note: "measured: 9 custom, plan Sort > hop_iata"
+    note: "measured: 9 B on the full local copy (max over modes)"
   - id: routes.byiatahop.H09_MAD_hop4_dense_l50
     stmt: ListKnownRoutesByIATAHop
     shape: "sparse region + dense hop (MAD hop 4)"
@@ -507,8 +510,8 @@ entries:
     tiers: [local, prod]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_iata_keyset, index_cond: ["iata =", "id) < ROW("]}]
-      budget: {buffers: 225, planning_ms: 10}
-    note: "measured: 150 custom, plan iata_keyset + Filter"
+      budget: {buffers: 207, planning_ms: 10}
+    note: "measured: 138 B on the full local copy (max over modes)"
   - id: routes.byiatahop.H10_MAD_hop16_rare_l50
     stmt: ListKnownRoutesByIATAHop
     shape: "sparse region + rare hop (MAD hop 16, 1 row)"
@@ -517,7 +520,7 @@ entries:
       driver: [{relation: known_routes, index: idx_known_routes_hop_iata, index_cond: ["hop_count =", "iata ="]}]
       sort_exempt: [hop_group]
       budget: {buffers: 10, planning_ms: 10}
-    note: "measured: 4 custom, plan Sort > hop_iata"
+    note: "measured: 4 B on the full local copy (max over modes)"
   # H11-H14 are not on the fixture: the region is estimated at one row, so the hop index (and a sort) and the
   # region's keyset (and a filter) cost the same to within the index geometry, which at 1/50 tips to the keyset.
   - id: routes.byiatahop.H11_NEW_hop4_dense_l200
@@ -528,8 +531,8 @@ entries:
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_hop_iata, index_cond: ["hop_count =", "iata ="]}]
       sort_exempt: [hop_group]
-      budget: {buffers: 38780, planning_ms: 10}
-    note: "measured: 25853 custom, plan Sort > hop_iata"
+      budget: {buffers: 10, planning_ms: 10}
+    note: "measured: 3 B on the full local copy (max over modes)"
   - id: routes.byiatahop.H12_NEW_hop14_rare_l50
     stmt: ListKnownRoutesByIATAHop
     shape: "stale region + rare hop (NEW hop 14, 53 rows)"
@@ -538,8 +541,8 @@ entries:
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_hop_iata, index_cond: ["hop_count =", "iata ="]}]
       sort_exempt: [hop_group]
-      budget: {buffers: 84, planning_ms: 10}
-    note: "measured: 56 custom, plan Sort > hop_iata"
+      budget: {buffers: 10, planning_ms: 10}
+    note: "measured: 3 B on the full local copy (max over modes)"
   - id: routes.byiatahop.H13_NEW_hop1_absent_l50
     stmt: ListKnownRoutesByIATAHop
     shape: "stale region + absent hop (NEW hop 1)"
@@ -549,7 +552,7 @@ entries:
       driver: [{relation: known_routes, index: idx_known_routes_hop_iata, index_cond: ["hop_count =", "iata ="]}]
       sort_exempt: [hop_group]
       budget: {buffers: 10, planning_ms: 10}
-    note: "measured: 3 custom, plan Sort > hop_iata"
+    note: "measured: 3 B on the full local copy (max over modes)"
   - id: routes.byiatahop.H14_ZZZ_hop6_l50
     stmt: ListKnownRoutesByIATAHop
     shape: "empty region + hop (ZZZ hop 6)"
@@ -559,92 +562,97 @@ entries:
       driver: [{relation: known_routes, index: idx_known_routes_hop_iata, index_cond: ["hop_count =", "iata ="]}]
       sort_exempt: [hop_group]
       budget: {buffers: 10, planning_ms: 10}
-    note: "measured: 3 custom, plan Sort > hop_iata"
+    note: "measured: 3 B on the full local copy (max over modes)"
   - id: routes.globalhop.GH01_hop6_dense_l50
     stmt: ListKnownRoutesGlobalHop
     shape: "no region + dense hop 6, limit 50"
     params: [6, null, 0, 50]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_keyset, index_cond: ["id) < ROW("]}]
-      budget: {buffers: 666, planning_ms: 10}
-    note: "measured: 444 custom, plan keyset + Filter"
+      budget: {buffers: 588, planning_ms: 10}
+    note: "measured: 392 B on the full local copy (max over modes)"
   - id: routes.globalhop.GH02_hop6_dense_l200
     stmt: ListKnownRoutesGlobalHop
     shape: "no region + dense hop 6, limit 200"
     params: [6, null, 0, 200]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_keyset, index_cond: ["id) < ROW("]}]
-      budget: {buffers: 2412, planning_ms: 10}
-    note: "measured: 1608 custom, plan keyset + Filter"
+      budget: {buffers: 2316, planning_ms: 10}
+    note: "measured: 1544 B on the full local copy (max over modes)"
   - id: routes.globalhop.GH03_hop15_l200
     stmt: ListKnownRoutesGlobalHop
     shape: "no region + mid hop 15"
     params: [15, null, 0, 200]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_keyset, index_cond: ["id) < ROW("]}]
-      budget: {buffers: 34773, planning_ms: 10}
-    note: "measured: 23182 custom, plan keyset + Filter"
+      budget: {buffers: 26771, planning_ms: 10}
+    note: "measured: 17847 B on the full local copy (max over modes)"
   - id: routes.globalhop.GH04_hop20_l200
     stmt: ListKnownRoutesGlobalHop
     shape: "no region + hop 20 (keyset + Filter, same as today)"
     params: [20, null, 0, 200]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_keyset, index_cond: ["id) < ROW("]}]
-      budget: {buffers: 88488, planning_ms: 10}
-    note: "measured: 58992 custom, plan keyset + Filter"
+      budget: {buffers: 60861, planning_ms: 10}
+    note: "measured: 40574 B on the full local copy (max over modes)"
   - id: routes.globalhop.GH05_hop25_l200
     stmt: ListKnownRoutesGlobalHop
     shape: "no region + rare hop 25"
     params: [25, null, 0, 200]
+    requires_indexes: [idx_known_routes_hop_iata]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_hop_iata, index_cond: ["hop_count ="]}]
       sort_exempt: [hop_group]
-      budget: {buffers: 1649, planning_ms: 10}
-    note: "measured: 1099 custom, plan Sort > hop_iata"
+      budget: {buffers: 15002, planning_ms: 10}
+    note: "measured: 10001 B on the full local copy with the end-state hop index (this copy lacks it)"
   - id: routes.globalhop.GH06_hop32_l50
     stmt: ListKnownRoutesGlobalHop
     shape: "no region + very rare hop 32"
     params: [32, null, 0, 50]
+    requires_indexes: [idx_known_routes_hop_iata]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_hop_iata, index_cond: ["hop_count ="]}]
       sort_exempt: [hop_group]
-      budget: {buffers: 266, planning_ms: 10}
-    note: "measured: 177 custom, plan Sort > hop_iata"
+      budget: {buffers: 3633, planning_ms: 10}
+    note: "measured: 2422 B on the full local copy with the end-state hop index (this copy lacks it)"
   - id: routes.globalhop.GH07_hop42_single_l50
     stmt: ListKnownRoutesGlobalHop
     shape: "no region + single-row hop 42"
     params: [42, null, 0, 50]
+    requires_indexes: [idx_known_routes_hop_iata]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_hop_iata, index_cond: ["hop_count ="]}]
       sort_exempt: [hop_group]
       budget: {buffers: 10, planning_ms: 10}
-    note: "measured: 3 custom, plan Sort > hop_iata"
+    note: "passes within 10 B on the full local copy with the end-state hop index (this copy lacks it)"
   - id: routes.globalhop.GH08_hop1_absent_l50
     stmt: ListKnownRoutesGlobalHop
     shape: "no region + absent hop 1"
     params: [1, null, 0, 50]
+    requires_indexes: [idx_known_routes_hop_iata]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_hop_iata, index_cond: ["hop_count ="]}]
       sort_exempt: [hop_group]
       budget: {buffers: 10, planning_ms: 10}
-    note: "measured: 3 custom, plan Sort > hop_iata"
+    note: "passes within 10 B on the full local copy with the end-state hop index (this copy lacks it)"
   - id: routes.globalhop.GH09_hop1_absent_cur_l50
     stmt: ListKnownRoutesGlobalHop
     shape: "no region + absent hop 1, with cursor + cursorId"
     params: [1, {r: g50_ts}, {r: g50_id}, 50]
+    requires_indexes: [idx_known_routes_hop_iata]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_hop_iata, index_cond: ["hop_count ="]}]
       sort_exempt: [hop_group]
       budget: {buffers: 10, planning_ms: 10}
-    note: "measured: 3 custom, plan Sort > hop_iata"
+    note: "passes within 10 B on the full local copy with the end-state hop index (this copy lacks it)"
   - id: routes.globalhop.GH10_hop6_deep_l200
     stmt: ListKnownRoutesGlobalHop
     shape: "no region + dense hop 6, deep cursor-only"
     params: [6, "2026-10-05 19:00:00+00", 0, 200]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_keyset, index_cond: ["id) < ROW("]}]
-      budget: {buffers: 1545, planning_ms: 10}
-    note: "measured: 1030 custom, plan keyset + Filter"
+      budget: {buffers: 1605, planning_ms: 10}
+    note: "measured: 1070 B on the full local copy (max over modes)"
   - id: routes.search.s_14_3d_all
     stmt: SearchKnownRoutesByNodes
     shape: "route search s_14_3d_all"
@@ -653,8 +661,8 @@ entries:
       driver: [{relation: known_routes, alias: kr, nodes: ["Bitmap Heap Scan", "Index Scan"]}]
       forbid: [{node: "Incremental Sort", reason: "hop-ordered walk of a hop index: hop_count + 0 must keep it out"}]
       sort_exempt: [route_search_top_n]
-      budget: {buffers: 20031, planning_ms: 10}
-    note: "measured: 13354 custom with hop_count + 0"
+      budget: {buffers: 24276, planning_ms: 10}
+    note: "measured: 16184 B on the full local copy (max over modes)"
   - id: routes.search.s_1410_3d67_all
     stmt: SearchKnownRoutesByNodes
     shape: "route search s_1410_3d67_all"
@@ -663,8 +671,8 @@ entries:
       driver: [{relation: known_routes, alias: kr, nodes: ["Bitmap Heap Scan", "Index Scan"]}]
       forbid: [{node: "Incremental Sort", reason: "hop-ordered walk of a hop index: hop_count + 0 must keep it out"}]
       sort_exempt: [route_search_top_n]
-      budget: {buffers: 36, planning_ms: 10}
-    note: "measured: 24 custom with hop_count + 0"
+      budget: {buffers: 221, planning_ms: 10}
+    note: "measured: 147 B on the full local copy (max over modes)"
   - id: routes.search.s_1410_3d67_RTM
     stmt: SearchKnownRoutesByNodes
     shape: "route search s_1410_3d67_RTM"
@@ -673,8 +681,8 @@ entries:
       driver: [{relation: known_routes, alias: kr, nodes: ["Bitmap Heap Scan", "Index Scan"]}]
       forbid: [{node: "Incremental Sort", reason: "hop-ordered walk of a hop index: hop_count + 0 must keep it out"}]
       sort_exempt: [route_search_top_n]
-      budget: {buffers: 10, planning_ms: 10}
-    note: "measured: 4 custom with hop_count + 0"
+      budget: {buffers: 221, planning_ms: 10}
+    note: "measured: 147 B on the full local copy (max over modes)"
   - id: routes.search.s_14_3d_RTM_AMS_EIN
     stmt: SearchKnownRoutesByNodes
     shape: "route search s_14_3d_RTM_AMS_EIN"
@@ -683,8 +691,8 @@ entries:
       driver: [{relation: known_routes, alias: kr, nodes: ["Bitmap Heap Scan", "Index Scan"]}]
       forbid: [{node: "Incremental Sort", reason: "hop-ordered walk of a hop index: hop_count + 0 must keep it out"}]
       sort_exempt: [route_search_top_n]
-      budget: {buffers: 18, planning_ms: 10}
-    note: "measured: 12 custom with hop_count + 0"
+      budget: {buffers: 677, planning_ms: 10}
+    note: "measured: 451 B on the full local copy (max over modes)"
   - id: routes.search.s_5731_0355_all
     stmt: SearchKnownRoutesByNodes
     shape: "route search s_5731_0355_all"
@@ -693,8 +701,8 @@ entries:
       driver: [{relation: known_routes, alias: kr, nodes: ["Bitmap Heap Scan", "Index Scan"]}]
       forbid: [{node: "Incremental Sort", reason: "hop-ordered walk of a hop index: hop_count + 0 must keep it out"}]
       sort_exempt: [route_search_top_n]
-      budget: {buffers: 36, planning_ms: 10}
-    note: "measured: 24 custom with hop_count + 0"
+      budget: {buffers: 7227, planning_ms: 10}
+    note: "measured: 4818 B on the full local copy (max over modes)"
   - id: routes.search.s_f877_0867_all
     stmt: SearchKnownRoutesByNodes
     shape: "route search s_f877_0867_all"
@@ -703,8 +711,8 @@ entries:
       driver: [{relation: known_routes, alias: kr, nodes: ["Bitmap Heap Scan", "Index Scan"]}]
       forbid: [{node: "Incremental Sort", reason: "hop-ordered walk of a hop index: hop_count + 0 must keep it out"}]
       sort_exempt: [route_search_top_n]
-      budget: {buffers: 447, planning_ms: 10}
-    note: "measured: 298 custom with hop_count + 0"
+      budget: {buffers: 986, planning_ms: 10}
+    note: "measured: 657 B on the full local copy (max over modes)"
   - id: routes.search.s_sea_lowco_rare
     stmt: SearchKnownRoutesByNodes
     shape: "route search, SEA: prefix fade to prefix 2525 (few routes)"
@@ -713,8 +721,8 @@ entries:
       driver: [{relation: known_routes, alias: kr, nodes: ["Bitmap Heap Scan", "Index Scan"]}]
       forbid: [{node: "Incremental Sort", reason: "hop-ordered walk of a hop index: hop_count + 0 must keep it out"}]
       sort_exempt: [route_search_top_n]
-      budget: {buffers: 20430, planning_ms: 10}
-    note: "measured: 13620 custom with hop_count + 0"
+      budget: {buffers: 14519, planning_ms: 10}
+    note: "measured: 9679 B on the full local copy (max over modes)"
   - id: routes.search.s_sea_pop_top2
     stmt: SearchKnownRoutesByNodes
     shape: "route search, SEA: the relay on the most of the newest 50,000 SEA routes to the second"
@@ -724,7 +732,7 @@ entries:
       forbid: [{node: "Incremental Sort", reason: "hop-ordered walk of a hop index: hop_count + 0 must keep it out"}]
       sort_exempt: [route_search_top_n]
       budget: {buffers: 75092, planning_ms: 10}
-    note: "measured: 50061 custom"
+    note: "measured: 50061 B on the full local copy (max over modes)"
   - id: routes.search.s_sea_pop_rare
     stmt: SearchKnownRoutesByNodes
     shape: "route search, SEA: the most-routed relay to a rare relay (fewest of the newest 50,000 SEA routes)"
@@ -734,7 +742,7 @@ entries:
       forbid: [{node: "Incremental Sort", reason: "hop-ordered walk of a hop index: hop_count + 0 must keep it out"}]
       sort_exempt: [route_search_top_n]
       budget: {buffers: 110, planning_ms: 10}
-    note: "measured: 73 custom"
+    note: "measured: 73 B on the full local copy (max over modes)"
   - id: routes.cross.x_0355
     stmt: GetKnownRoutesByNodes
     shape: "route cross x_0355"
@@ -743,8 +751,8 @@ entries:
       driver: [{relation: known_routes, alias: kr, nodes: ["Bitmap Heap Scan", "Index Scan"]}]
       forbid: [{node: "Incremental Sort", reason: "hop-ordered walk of a hop index: hop_count + 0 must keep it out"}]
       sort_exempt: [route_search_top_n]
-      budget: {buffers: 36, planning_ms: 10}
-    note: "measured: 24 custom with hop_count + 0"
+      budget: {buffers: 57584, planning_ms: 10}
+    note: "measured: 38389 B on the full local copy (max over modes)"
   - id: routes.cross.x_0867
     stmt: GetKnownRoutesByNodes
     shape: "route cross x_0867"
@@ -753,8 +761,8 @@ entries:
       driver: [{relation: known_routes, alias: kr, nodes: ["Bitmap Heap Scan", "Index Scan"]}]
       forbid: [{node: "Incremental Sort", reason: "hop-ordered walk of a hop index: hop_count + 0 must keep it out"}]
       sort_exempt: [route_search_top_n]
-      budget: {buffers: 1749, planning_ms: 10}
-    note: "measured: 1166 custom with hop_count + 0"
+      budget: {buffers: 21257, planning_ms: 10}
+    note: "measured: 14171 B on the full local copy (max over modes)"
   - id: routes.cross.x_1410
     stmt: GetKnownRoutesByNodes
     shape: "route cross x_1410"
@@ -763,8 +771,8 @@ entries:
       driver: [{relation: known_routes, alias: kr, nodes: ["Bitmap Heap Scan", "Index Scan"]}]
       forbid: [{node: "Incremental Sort", reason: "hop-ordered walk of a hop index: hop_count + 0 must keep it out"}]
       sort_exempt: [route_search_top_n]
-      budget: {buffers: 42, planning_ms: 10}
-    note: "measured: 28 custom with hop_count + 0"
+      budget: {buffers: 4511, planning_ms: 10}
+    note: "measured: 3007 B on the full local copy (max over modes)"
   - id: routes.cross.x_3d67
     stmt: GetKnownRoutesByNodes
     shape: "route cross x_3d67"
@@ -773,8 +781,8 @@ entries:
       driver: [{relation: known_routes, alias: kr, nodes: ["Bitmap Heap Scan", "Index Scan"]}]
       forbid: [{node: "Incremental Sort", reason: "hop-ordered walk of a hop index: hop_count + 0 must keep it out"}]
       sort_exempt: [route_search_top_n]
-      budget: {buffers: 435, planning_ms: 10}
-    note: "measured: 290 custom with hop_count + 0"
+      budget: {buffers: 182, planning_ms: 10}
+    note: "measured: 121 B on the full local copy (max over modes)"
   - id: routes.cross.x_5731
     stmt: GetKnownRoutesByNodes
     shape: "route cross x_5731"
@@ -783,8 +791,8 @@ entries:
       driver: [{relation: known_routes, alias: kr, nodes: ["Bitmap Heap Scan", "Index Scan"]}]
       forbid: [{node: "Incremental Sort", reason: "hop-ordered walk of a hop index: hop_count + 0 must keep it out"}]
       sort_exempt: [route_search_top_n]
-      budget: {buffers: 2081, planning_ms: 10}
-    note: "measured: 1387 custom with hop_count + 0"
+      budget: {buffers: 11622, planning_ms: 10}
+    note: "measured: 7748 B on the full local copy (max over modes)"
   - id: routes.cross.x_f877
     stmt: GetKnownRoutesByNodes
     shape: "route cross x_f877"
@@ -793,8 +801,8 @@ entries:
       driver: [{relation: known_routes, alias: kr, nodes: ["Bitmap Heap Scan", "Index Scan"]}]
       forbid: [{node: "Incremental Sort", reason: "hop-ordered walk of a hop index: hop_count + 0 must keep it out"}]
       sort_exempt: [route_search_top_n]
-      budget: {buffers: 4836, planning_ms: 10}
-    note: "measured: 3224 custom with hop_count + 0"
+      budget: {buffers: 41414, planning_ms: 10}
+    note: "measured: 27609 B on the full local copy (max over modes)"
   - id: routes.cross.x_sea_rare
     stmt: GetKnownRoutesByNodes
     shape: "route cross, SEA: a rare relay (fewest of the newest 50,000 SEA routes)"
@@ -804,7 +812,7 @@ entries:
       forbid: [{node: "Incremental Sort", reason: "hop-ordered walk of a hop index: hop_count + 0 must keep it out"}]
       sort_exempt: [route_search_top_n]
       budget: {buffers: 221, planning_ms: 10}
-    note: "measured: 147 custom"
+    note: "measured: 147 B on the full local copy (max over modes)"
   - id: routes.cross.x_sea_top1
     stmt: GetKnownRoutesByNodes
     shape: "route cross, SEA: the relay on the most of the newest 50,000 SEA routes"
@@ -814,7 +822,7 @@ entries:
       forbid: [{node: "Incremental Sort", reason: "hop-ordered walk of a hop index: hop_count + 0 must keep it out"}]
       sort_exempt: [route_search_top_n]
       budget: {buffers: 122249, planning_ms: 10}
-    note: "measured: 81499 custom"
+    note: "measured: 81499 B on the full local copy (max over modes)"
 
   # ---- route retention: keyset walk with a cursor, grace slices in bounded 6 h windows (maint) ----
   - id: retention.expired.select
@@ -823,7 +831,8 @@ entries:
     params: ["-infinity", 0, "2026-10-04 19:00:00+00", "2026-10-04 19:00:00+00", 10000]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_keyset, index_cond: ["id) > ROW(", "::text) <"]}]
-      budget: {buffers: 30000, planning_ms: 10}
+      budget: {buffers: 12536, planning_ms: 10}
+    note: "measured: 8357 B on the full local copy (max over modes)"
   - id: retention.expired.dml
     stmt: DeleteExpiredRoutes
     shape: "the full DELETE statement (plain EXPLAIN: shape only)"
@@ -836,7 +845,8 @@ entries:
     params: ["2026-10-11 19:00:00+00", "2026-10-11 18:00:00+00", 0, "2026-10-11 19:00:00+00", 3, 10000]
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_keyset, index_cond: ["id) > ROW(", "::text) < LEAST("]}]
-      budget: {buffers: 150000, planning_ms: 10}
+      budget: {buffers: 31608, planning_ms: 10}
+    note: "measured: 21072 B on the full local copy (max over modes)"
   - id: retention.grace.dml
     stmt: DeleteGraceRoutesSlice
     shape: "the full grace statement (plain EXPLAIN)"
@@ -850,8 +860,8 @@ entries:
     executions: 1
     expect:
       driver: [{relation: known_routes, index: idx_known_routes_keyset, index_cond: ["ROW(date_trunc", "LEAST("]}]
-      budget: {buffers: 150000, planning_ms: 10}
-    note: "bounded walk: one statement covers at most 6 h of the dead zone; budget = the slice budget"
+      budget: {buffers: 70488, planning_ms: 10}
+    note: "measured: 46992 B on the full local copy (max over modes)"
   - id: retention.expired.select.final
     stmt: DeleteExpiredRoutesSelect
     shape: "retention half, last batch of a run (nothing left past R)"
@@ -861,6 +871,7 @@ entries:
       budget: {buffers: 10, planning_ms: 10}
 
   # ---- channel messages through channel_message_iatas (pending) ----
+    note: "measured: 3 B on the full local copy (max over modes)"
   - id: cmi2.P01
     stmt: ListChannelMessagesByIATAs
     shape: "ch27 YUL p1 lim50"
@@ -2292,8 +2303,8 @@ entries:
     shape: "50-IATA list"
     params: [{r: small_list50}]
     expect:
-      budget: {buffers: 25000, planning_ms: 10}
-    note: "measured: - / - B (custom / generic); budget: class budget"
+      budget: {buffers: 191898, planning_ms: 10}
+    note: "measured: 127932 B on the full local copy. The API pools run with parallel workers off by design, so the planner takes an Index Scan of the region rows (127,932 B, 46 ms) instead of a parallel bitmap scan (5,908 B, 23 ms); accepted"
   - id: sm.nodes.bogus5000
     stmt: ListNodes_end
     shape: "ListNodes, 5,000 bogus IATAs"
@@ -2350,16 +2361,19 @@ entries:
     shape: "TouchChannel write-through (plain EXPLAIN)"
     params: [null, 5, "\\x01", "\\x0102030405060708"]
     expect:
-      driver: [{relation: channels, index: channels_pkey, index_cond: ["id ="]}]
-  # Not on the fixture: on freshly built indexes the one-page unique partial index on channel_hash costs a hair
-  # less than the primary key, so the planner probes it instead; both are single-row unique lookups.
+      # Either single-row unique probe: on freshly built indexes the (channel_hash, key_fingerprint) unique index
+      # can cost less than the primary key.
+      driver: [{relation: channels, any_index: [channels_pkey, channels_channel_hash_key_fingerprint_key]}]
+  # Not on the fixture: which of its two unique probes the planner takes flips with how fresh the indexes are, so
+  # its plan signature is not stable there. On freshly built indexes the one-page unique partial index on
+  # channel_hash costs a hair less than the primary key; both are single-row unique lookups.
   - id: sm.write.touch_channel_hash_only
     stmt: TouchChannelHashOnly
     shape: "TouchChannelHashOnly write-through (plain EXPLAIN)"
     params: [5, "\\x01"]
     tiers: [local, prod]
     expect:
-      driver: [{relation: channels, index: channels_pkey, index_cond: ["id ="]}]
+      driver: [{relation: channels, any_index: [channels_pkey, idx_channels_hash_no_key]}]
   - id: sm.write.upsert_channel
     stmt: UpsertChannel
     shape: "UpsertChannel fallback for an unknown key (plain EXPLAIN; ingest)"
@@ -4397,8 +4411,7 @@ entries:
       budget: {buffers: 600, planning_ms: 10}
     expect_fail: true
 
-  # Today's series and adverts readers against the end-state budgets, and GlobalHop left on automatic
-  # plan caching (its sixth execution flips to the generic plan).
+  # Today's series and adverts readers against the end-state budgets.
   - id: planted.extra.series.today.lis7d
     stmt: GetStatsSeries
     shape: "today's GetStatsSeries, LIS 7 d"
@@ -4423,19 +4436,6 @@ entries:
     tiers: [local]
     executions: 1
     inherit: s7.adv.zeroadv_big
-    expect_fail: true
-  - id: planted.extra.globalhop.auto.rare
-    stmt: ListKnownRoutesGlobalHop
-    shape: "end-state GlobalHop left on cached statements (auto): 6th execution flips to the generic plan"
-    params: [1, null, 0, 50]
-    tiers: [local]
-    modes: [auto]
-    executions: 6
-    timeout_s: 120
-    expect:
-      driver: [{relation: known_routes, index: idx_known_routes_hop_iata}]
-      sort_exempt: [hop_group]
-      budget: {buffers: 10, planning_ms: 10}
     expect_fail: true
 
   # The hop statements must stay class custom: each forced generic plan below must break its entry's budget

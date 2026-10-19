@@ -99,6 +99,7 @@ func Run(ctx context.Context, c *Corpus, s Session, o RunOptions) (*Report, erro
 	for _, e := range entries {
 		for _, mode := range o.modesOf(c, e) {
 			sp := c.spec(o, e, mode, res, resErrs, false)
+			c.skipMissingIndex(&sp, rep.Indexes)
 			r, err := c.runOne(ctx, s, o, sp)
 			rep.Results = append(rep.Results, r)
 			if o.Progress != nil {
@@ -556,6 +557,14 @@ func (c *Corpus) spec(o RunOptions, e *Entry, mode string, res map[string]*strin
 		sp.err = bad
 	}
 	return sp
+}
+
+// skipMissingIndex turns a run into SKIP when its entry requires an index the database lacks: its plan and
+// budget would describe another index set, so it is never judged there.
+func (c *Corpus) skipMissingIndex(sp *runSpec, indexes []string) {
+	if ix := sp.e.MissingIndex(indexes); ix != "" && sp.skip == "" {
+		sp.skip, sp.err = "requires index "+ix, ""
+	}
 }
 
 // runOne makes one run. The error is for a session that cannot go on (the rollback or deallocate failed, or ctx
