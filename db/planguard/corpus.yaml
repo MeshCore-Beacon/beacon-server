@@ -170,14 +170,16 @@ admission_profiles:
   observer_page: [hit, miss, page1, deep, past_end]
 
 resolvers:
-  # The adverts and telemetry roles are picked among the newest 5,000,000 observation ids (200,000 telemetry rows), a
-  # pkey range, so they stay far below the prod tier's 20 s cap; adv_zero then probes each candidate for any advert.
-  adv_busiest: "SELECT observer_id FROM packet_observations WHERE payload_type = 4 AND id > (SELECT max(id) FROM packet_observations) - 5000000 GROUP BY 1 ORDER BY count(*) DESC, observer_id LIMIT 1"
-  adv_busiest_mid: "SELECT (min(id) + max(id)) / 2 FROM packet_observations WHERE payload_type = 4 AND observer_id = (SELECT observer_id FROM packet_observations WHERE payload_type = 4 AND id > (SELECT max(id) FROM packet_observations) - 5000000 GROUP BY 1 ORDER BY count(*) DESC, observer_id LIMIT 1)"
+  # The adverts and telemetry roles are picked among the newest 5,000,000 observation ids (200,000 telemetry ids, about
+  # 10K rows), a pkey range: advert counts are aggregate filters, never a WHERE on payload_type, so the partial adverts
+  # index cannot replace the window. They stay far below the prod tier's 20 s cap; adv_zero and adv_quiet then probe
+  # each candidate's adverts through the partial index.
+  adv_busiest: "SELECT observer_id FROM packet_observations WHERE id > (SELECT max(id) FROM packet_observations) - 5000000 GROUP BY 1 HAVING count(*) FILTER (WHERE payload_type = 4) > 0 ORDER BY count(*) FILTER (WHERE payload_type = 4) DESC, observer_id LIMIT 1"
+  adv_busiest_mid: "SELECT (min(id) + max(id)) / 2 FROM packet_observations WHERE payload_type = 4 AND observer_id = (SELECT observer_id FROM packet_observations WHERE id > (SELECT max(id) FROM packet_observations) - 5000000 GROUP BY 1 HAVING count(*) FILTER (WHERE payload_type = 4) > 0 ORDER BY count(*) FILTER (WHERE payload_type = 4) DESC, observer_id LIMIT 1)"
   adv_dense1: "SELECT observer_id FROM packet_observations WHERE id > (SELECT max(id) FROM packet_observations) - 5000000 GROUP BY 1 HAVING count(*) >= 500 ORDER BY count(*) FILTER (WHERE payload_type = 4)::float8 / count(*) DESC, observer_id LIMIT 1"
   adv_dense2: "SELECT observer_id FROM packet_observations WHERE id > (SELECT max(id) FROM packet_observations) - 5000000 GROUP BY 1 HAVING count(*) >= 500 ORDER BY count(*) FILTER (WHERE payload_type = 4)::float8 / count(*) DESC, observer_id OFFSET 1 LIMIT 1"
-  adv_mid: "SELECT observer_id FROM (SELECT observer_id, row_number() OVER (ORDER BY count(*), observer_id) rn, count(*) OVER () n FROM packet_observations WHERE payload_type = 4 AND id > (SELECT max(id) FROM packet_observations) - 5000000 GROUP BY observer_id) s WHERE rn = (n + 1) / 2"
-  adv_quiet: "SELECT observer_id FROM packet_observations WHERE id > (SELECT max(id) FROM packet_observations) - 5000000 GROUP BY 1 HAVING count(*) FILTER (WHERE payload_type = 4) > 0 ORDER BY count(*) FILTER (WHERE payload_type = 4), count(*) DESC, observer_id LIMIT 1"
+  adv_mid: "SELECT observer_id FROM (SELECT observer_id, row_number() OVER (ORDER BY count(*) FILTER (WHERE payload_type = 4), observer_id) rn, count(*) OVER () n FROM packet_observations WHERE id > (SELECT max(id) FROM packet_observations) - 5000000 GROUP BY observer_id HAVING count(*) FILTER (WHERE payload_type = 4) > 0) s WHERE rn = (n + 1) / 2"
+  adv_quiet: "SELECT w.observer_id FROM (SELECT observer_id, count(*) FILTER (WHERE payload_type = 4) n FROM packet_observations WHERE id > (SELECT max(id) FROM packet_observations) - 5000000 GROUP BY 1 HAVING count(*) FILTER (WHERE payload_type = 4) > 0) w WHERE NOT EXISTS (SELECT 1 FROM packet_observations x WHERE x.observer_id = w.observer_id AND x.payload_type = 4 OFFSET 50) ORDER BY w.n, w.observer_id LIMIT 1"
   adv_sparse: "SELECT observer_id FROM packet_observations WHERE id > (SELECT max(id) FROM packet_observations) - 5000000 GROUP BY 1 HAVING count(*) >= 500 AND count(*) FILTER (WHERE payload_type = 4) > 0 ORDER BY count(*) FILTER (WHERE payload_type = 4)::float8 / count(*), observer_id LIMIT 1"
   adv_topobs: "SELECT observer_id FROM packet_observations WHERE id > (SELECT max(id) FROM packet_observations) - 5000000 GROUP BY 1 ORDER BY count(*) DESC, observer_id LIMIT 1"
   adv_topobs_mid: "SELECT (min(id) + max(id)) / 2 FROM packet_observations WHERE payload_type = 4 AND observer_id = (SELECT observer_id FROM packet_observations WHERE id > (SELECT max(id) FROM packet_observations) - 5000000 GROUP BY 1 ORDER BY count(*) DESC, observer_id LIMIT 1)"
@@ -218,7 +220,7 @@ resolvers:
   ps_pnw_tie_ts: "SELECT site_heard_at FROM packet_sites WHERE iata = ANY('{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}') AND site_heard_at > timestamptz '2026-10-18 06:00+00' GROUP BY 1 HAVING count(DISTINCT packet_hash) > 1 ORDER BY 1 DESC LIMIT 1"
   ps_sea_tie_hash: "SELECT packet_hash FROM packet_sites WHERE iata = 'SEA' AND site_heard_at = (SELECT site_heard_at FROM packet_sites WHERE iata = 'SEA' AND site_heard_at > timestamptz '2026-10-18 12:00+00' GROUP BY 1 HAVING count(*) > 1 ORDER BY 1 DESC LIMIT 1) ORDER BY packet_hash DESC LIMIT 1"
   ps_sea_tie_ts: "SELECT site_heard_at FROM packet_sites WHERE iata = 'SEA' AND site_heard_at > timestamptz '2026-10-18 12:00+00' GROUP BY 1 HAVING count(*) > 1 ORDER BY 1 DESC LIMIT 1"
-  routes_deep_ts: "SELECT o.ts + (n.ts - o.ts) / 10 FROM (SELECT date_trunc('milliseconds', last_seen, 'UTC') ts FROM known_routes ORDER BY date_trunc('milliseconds', last_seen, 'UTC'), id LIMIT 1) o, (SELECT date_trunc('milliseconds', last_seen, 'UTC') ts FROM known_routes ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC LIMIT 1) n"
+  routes_deep_ts: "SELECT date_trunc('milliseconds', o.ts + (n.ts - o.ts) / 10, 'UTC') FROM (SELECT date_trunc('milliseconds', last_seen, 'UTC') ts FROM known_routes ORDER BY date_trunc('milliseconds', last_seen, 'UTC'), id LIMIT 1) o, (SELECT date_trunc('milliseconds', last_seen, 'UTC') ts FROM known_routes ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC LIMIT 1) n"
   s_1410_3d67_RTM_f: "WITH cand AS (SELECT h.hx, ns.iata, ns.node_id FROM (VALUES ('1410'), ('3d67')) h(hx) JOIN node_short_ids ns ON (length(h.hx) = 2 AND ns.prefix_1 = decode(h.hx, 'hex')) OR (length(h.hx) = 4 AND ns.prefix_2 = decode(h.hx, 'hex')) JOIN nodes n ON n.id = ns.node_id AND n.node_type IN (2, 3) WHERE ns.iata IN (SELECT iata FROM iata_codes)) SELECT array_agg(c.node_id ORDER BY c.iata, c.node_id) FROM cand c WHERE c.hx = '1410' AND c.iata = ANY('{RTM}'::bpchar[])"
   s_1410_3d67_RTM_i: "WITH cand AS (SELECT h.hx, ns.iata, ns.node_id FROM (VALUES ('1410'), ('3d67')) h(hx) JOIN node_short_ids ns ON (length(h.hx) = 2 AND ns.prefix_1 = decode(h.hx, 'hex')) OR (length(h.hx) = 4 AND ns.prefix_2 = decode(h.hx, 'hex')) JOIN nodes n ON n.id = ns.node_id AND n.node_type IN (2, 3) WHERE ns.iata IN (SELECT iata FROM iata_codes)) SELECT array_agg(DISTINCT a.iata ORDER BY a.iata) FROM cand a JOIN cand b ON b.iata = a.iata AND b.hx = '3d67' WHERE a.hx = '1410' AND a.iata = ANY('{RTM}'::bpchar[])"
   s_1410_3d67_RTM_t: "WITH cand AS (SELECT h.hx, ns.iata, ns.node_id FROM (VALUES ('1410'), ('3d67')) h(hx) JOIN node_short_ids ns ON (length(h.hx) = 2 AND ns.prefix_1 = decode(h.hx, 'hex')) OR (length(h.hx) = 4 AND ns.prefix_2 = decode(h.hx, 'hex')) JOIN nodes n ON n.id = ns.node_id AND n.node_type IN (2, 3) WHERE ns.iata IN (SELECT iata FROM iata_codes)) SELECT array_agg(c.node_id ORDER BY c.iata, c.node_id) FROM cand c WHERE c.hx = '3d67' AND c.iata = ANY('{RTM}'::bpchar[])"
@@ -250,7 +252,7 @@ resolvers:
   sea50_ts: "SELECT date_trunc('milliseconds', last_seen, 'UTC') FROM known_routes WHERE iata = 'SEA' ORDER BY iata, date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC OFFSET 49 LIMIT 1"
   # Deep cursors a tenth of the way from the oldest route to the newest (SEA's here, all routes' in routes_deep_ts),
   # so they stay inside the data as retention moves its oldest end.
-  sea_deep_ts: "SELECT o.ts + (n.ts - o.ts) / 10 FROM (SELECT date_trunc('milliseconds', last_seen, 'UTC') ts FROM known_routes WHERE iata >= 'SEA' AND iata <= 'SEA' ORDER BY iata DESC, date_trunc('milliseconds', last_seen, 'UTC'), id LIMIT 1) o, (SELECT date_trunc('milliseconds', last_seen, 'UTC') ts FROM known_routes WHERE iata >= 'SEA' AND iata <= 'SEA' ORDER BY iata, date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC LIMIT 1) n"
+  sea_deep_ts: "SELECT date_trunc('milliseconds', o.ts + (n.ts - o.ts) / 10, 'UTC') FROM (SELECT date_trunc('milliseconds', last_seen, 'UTC') ts FROM known_routes WHERE iata >= 'SEA' AND iata <= 'SEA' ORDER BY iata DESC, date_trunc('milliseconds', last_seen, 'UTC'), id LIMIT 1) o, (SELECT date_trunc('milliseconds', last_seen, 'UTC') ts FROM known_routes WHERE iata >= 'SEA' AND iata <= 'SEA' ORDER BY iata, date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC LIMIT 1) n"
   sea_i: "SELECT '{SEA}'::bpchar[]"
   sea_tie_id: "SELECT max(id) FROM known_routes WHERE iata >= 'SEA' AND iata <= 'SEA' AND date_trunc('milliseconds', last_seen, 'UTC') = (SELECT ts FROM (SELECT date_trunc('milliseconds', last_seen, 'UTC') ts FROM known_routes WHERE iata >= 'SEA' AND iata <= 'SEA' ORDER BY iata, date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC LIMIT 20000) s GROUP BY ts HAVING count(*) > 1 ORDER BY ts DESC LIMIT 1)"
   sea_tie_ts: "SELECT ts FROM (SELECT date_trunc('milliseconds', last_seen, 'UTC') ts FROM known_routes WHERE iata >= 'SEA' AND iata <= 'SEA' ORDER BY iata, date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC LIMIT 20000) s GROUP BY ts HAVING count(*) > 1 ORDER BY ts DESC LIMIT 1"
@@ -1989,7 +1991,7 @@ entries:
     expect:
       driver: [{relation: observer_telemetry, index: idx_telemetry_observer_recent, nodes: ["Index Scan", "Index Only Scan", "Bitmap Heap Scan"]}]
       budget: {buffers: 600, planning_ms: 10}
-    note: "measured: - / - B (custom / generic); budget: runtime-guards 2.6 (29-394 B) -> 600"
+    note: "measured: 144 / 144 B (custom / generic); budget: the class budget"
   - id: s7.tel.top_168h_a5921868
     stmt: GetObserverTelemetrySince
     shape: "telemetry since-form, the observer with the most telemetry, 7 d, cursor at its median row"
@@ -1999,7 +2001,7 @@ entries:
     expect:
       driver: [{relation: observer_telemetry, index: idx_telemetry_observer_recent, nodes: ["Index Scan", "Index Only Scan", "Bitmap Heap Scan"]}]
       budget: {buffers: 600, planning_ms: 10}
-    note: "measured: - / - B (custom / generic); budget: runtime-guards 2.6 (29-394 B) -> 600"
+    note: "measured: 144 / 144 B (custom / generic); budget: the class budget"
   - id: s7.tel.unknown
     stmt: GetObserverTelemetrySince
     shape: "telemetry since-form, an unknown observer id, 7 d"
@@ -2009,7 +2011,7 @@ entries:
     expect:
       driver: [{relation: observer_telemetry, index: idx_telemetry_observer_recent, nodes: ["Index Scan", "Index Only Scan", "Bitmap Heap Scan"]}]
       budget: {buffers: 600, planning_ms: 10}
-    note: "measured: - / - B (custom / generic); budget: runtime-guards 2.6 (29-394 B) -> 600"
+    note: "measured: 3 / 3 B (custom / generic); budget: the class budget"
   - id: s7.tel.after_3e9
     stmt: GetObserverTelemetrySince
     shape: "telemetry since-form, the observer with the most telemetry, 7 d, afterId 3e9 (>= 2^31): empty page"
@@ -2019,7 +2021,7 @@ entries:
     expect:
       driver: [{relation: observer_telemetry, any_index: [idx_telemetry_observer_recent, observer_telemetry_pkey], nodes: ["Index Scan", "Index Only Scan", "Bitmap Heap Scan"]}]
       budget: {buffers: 600, planning_ms: 10}
-    note: "measured: 3 / 144 B (custom / generic): the custom plan reads the empty pkey range, the generic one the observer's window; budget: as the other telemetry pages"
+    note: "measured: 3 / 144 B (custom / generic): the custom plan reads the empty pkey range, the generic one the observer's window; budget: the class budget"
   - id: s7.adv.busy1_c0_d16
     stmt: ListObserverAdverts
     shape: "adverts, the observer with the most adverts, page 1"
@@ -2072,7 +2074,7 @@ entries:
     note: "measured: 462 / 462 B (custom / generic); budget: gate <= 10 B/row + 10"
   - id: s7.adv.d51_c0
     stmt: ListObserverAdverts
-    shape: "adverts, the observer with the highest advert share (>= 500 observations), page 1"
+    shape: "adverts, the observer with the highest advert share among the newest ids (>= 500 observations there), page 1"
     shapes: [hit, page1]
     requires_indexes: [idx_observations_adverts]
     params: [{r: adv_dense1}, {raw: "0"}, {raw: "51"}]
@@ -2082,7 +2084,7 @@ entries:
     note: "measured: 463 / 463 B (custom / generic); budget: gate <= 10 B/row + 10"
   - id: s7.adv.d48_c0
     stmt: ListObserverAdverts
-    shape: "adverts, the observer with the second highest advert share, page 1"
+    shape: "adverts, the observer with the second highest advert share among the newest ids, page 1"
     shapes: [hit, page1]
     requires_indexes: [idx_observations_adverts]
     params: [{r: adv_dense2}, {raw: "0"}, {raw: "51"}]
@@ -2092,7 +2094,7 @@ entries:
     note: "measured: 462 / 462 B (custom / generic); budget: gate <= 10 B/row + 10"
   - id: s7.adv.d3_c0
     stmt: ListObserverAdverts
-    shape: "adverts, the observer with the lowest non-zero advert share, page 1"
+    shape: "adverts, the observer with the lowest non-zero advert share among the newest ids, page 1 (a full page)"
     shapes: [hit, page1]
     requires_indexes: [idx_observations_adverts]
     params: [{r: adv_sparse}, {raw: "0"}, {raw: "51"}]
@@ -2112,14 +2114,14 @@ entries:
     note: "measured: 454 / 454 B (custom / generic); budget: gate <= 10 B/row + 10"
   - id: s7.adv.quiet1_c0
     stmt: ListObserverAdverts
-    shape: "adverts, the observer with the fewest adverts, page 1"
+    shape: "adverts, an observer with adverts among the newest ids and fewer than 51 in all: a short first page"
     shapes: [hit, page1]
     requires_indexes: [idx_observations_adverts]
     params: [{r: adv_quiet}, {raw: "0"}, {raw: "51"}]
     expect:
       driver: [{relation: packet_observations, alias: po, index: idx_observations_adverts, index_cond: ["observer_id =", "id >"]}]
       budget: {buffers: 520, planning_ms: 10}
-    note: "measured: 444 / 444 B (custom / generic); budget: gate <= 10 B/row + 10"
+    note: "measured: 246 / 246 B (27 rows) (custom / generic); budget: gate <= 10 B/row + 10"
   - id: s7.adv.zeroadv_big
     stmt: ListObserverAdverts
     shape: "adverts, the busiest observer with no adverts"
