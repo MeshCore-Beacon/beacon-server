@@ -64,7 +64,7 @@ var plannerSettings = []string{
 
 var (
 	plainIdentRe  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-	quotedIdentRe = regexp.MustCompile(`^"[^"$]+"$`)
+	quotedIdentRe = regexp.MustCompile(`^"[^"$\\;\x00-\x1f\x7f]+"$`)
 	gucNameRe     = regexp.MustCompile(`^[a-z_][a-z0-9_.]*$`)
 )
 
@@ -148,10 +148,8 @@ func (o *RunOptions) validate(c *Corpus) error {
 		if err := checkSearchPath(ts.SearchPath); err != nil {
 			return fmt.Errorf("tier %s: %w", name, err)
 		}
-		for k := range ts.Settings {
-			if !gucNameRe.MatchString(k) {
-				return fmt.Errorf("tier %s: setting name %q is not a GUC name", name, k)
-			}
+		if err := checkSettings(ts.Settings); err != nil {
+			return fmt.Errorf("tier %s: %w", name, err)
 		}
 	}
 	for name, g := range c.Groups {
@@ -497,28 +495,39 @@ func (c *Corpus) spec(o RunOptions, e *Entry, mode string, res map[string]*strin
 		timeout = prodTimeoutS
 	}
 
-	l2 := "SET LOCAL jit = off; SET LOCAL timezone = 'UTC'; SET LOCAL standard_conforming_strings = on"
+	// Every statement sent (and emitted into a psql script) is checked once rendered, settings, search_path and
+	// params included; a run whose rendered text fails is an ERROR and nothing is sent.
+	var bad string
+	line := func(stmts ...string) string {
+		for _, x := range stmts {
+			if p := statementProblem(x); p != "" && bad == "" {
+				bad = fmt.Sprintf("rendered statement %q: %s", firstLine(x), p)
+			}
+		}
+		return strings.Join(stmts, "; ")
+	}
+	l2 := []string{"SET LOCAL jit = off", "SET LOCAL timezone = 'UTC'", "SET LOCAL standard_conforming_strings = on"}
 	if path := c.searchPath(o, st); path != "" {
-		l2 += "; SET LOCAL search_path = " + path
+		l2 = append(l2, "SET LOCAL search_path = "+path)
 	}
 	sp.setup = []string{
-		"BEGIN ISOLATION LEVEL READ COMMITTED READ ONLY",
-		l2,
-		fmt.Sprintf("SET LOCAL statement_timeout = '%ds'; SET LOCAL lock_timeout = '1s'", timeout),
-		"SET LOCAL plan_cache_mode = " + modeGUC(mode),
+		line("BEGIN ISOLATION LEVEL READ COMMITTED READ ONLY"),
+		line(l2...),
+		line(fmt.Sprintf("SET LOCAL statement_timeout = '%ds'", timeout), "SET LOCAL lock_timeout = '1s'"),
+		line("SET LOCAL plan_cache_mode = " + modeGUC(mode)),
 	}
 	switch st.Plan {
 	case "cached", "custom", "maint":
-		sp.setup = append(sp.setup, "SET LOCAL max_parallel_workers_per_gather = 0")
+		sp.setup = append(sp.setup, line("SET LOCAL max_parallel_workers_per_gather = 0"))
 	}
 	if ts := c.Tiers[o.Tier].Settings; len(ts) > 0 {
 		var sets []string
 		for _, k := range sortedKeys(ts) {
 			sets = append(sets, "SET LOCAL "+k+" = "+quoteLit(ts[k]))
 		}
-		sp.setup = append(sp.setup, strings.Join(sets, "; "))
+		sp.setup = append(sp.setup, line(sets...))
 	}
-	sp.setup = append(sp.setup, "PREPARE "+stmtName+" AS\n"+text)
+	sp.setup = append(sp.setup, line("PREPARE "+stmtName+" AS\n"+text))
 	sp.call = "EXECUTE " + stmtName
 	if len(params) > 0 {
 		sp.call += "(" + strings.Join(params, ", ") + ")"
@@ -527,7 +536,10 @@ func (c *Corpus) spec(o RunOptions, e *Entry, mode string, res map[string]*strin
 	if sp.analyzed {
 		opts = "ANALYZE, BUFFERS, FORMAT JSON"
 	}
-	sp.explain = "EXPLAIN (" + opts + ") " + sp.call
+	sp.explain = line("EXPLAIN (" + opts + ") " + sp.call)
+	if bad != "" {
+		sp.err = bad
+	}
 	return sp
 }
 

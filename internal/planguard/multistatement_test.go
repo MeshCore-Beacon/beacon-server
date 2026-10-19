@@ -6,6 +6,7 @@ package planguard_test
 import (
 	"bytes"
 	"context"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -53,6 +54,11 @@ entries:
 		{"file psql meta-command", load(base, "SELECT 1\n\\! id", testSQLC), meta},
 		{"sqlc escape string", load(base, "SELECT 1", map[string]string{"Q": "-- name: Q :one\nSELECT e'\\';' FROM nodes"}), esc},
 		{"resolver meta-command", load(strings.Replace(base, "LIMIT 1", "LIMIT 1 \\! id", 1), "SELECT 1", testSQLC), meta},
+		{"raw statement", load(strings.Replace(base, `{sql: "SELECT 1"}`, `{raw: "1; DROP TABLE nodes"}`, 1), "SELECT 1", testSQLC), "raw"},
+		{"raw meta-command", load(strings.Replace(base, `{sql: "SELECT 1"}`, `{raw: "'x'\n\\! id"}`, 1), "SELECT 1", testSQLC), "raw"},
+		{"raw literal meta-command", load(strings.Replace(base, `{sql: "SELECT 1"}`, `{raw: "'x\n\\! id'"}`, 1), "SELECT 1", testSQLC), "raw"},
+		{"settings value", load("tiers: {local: {settings: {work_mem: \"1; COMMIT\"}}}\n"+base, "SELECT 1", testSQLC), "work_mem"},
+		{"dollar quote backslash", load(base, "SELECT $q$ \\! id $q$", testSQLC), "dollar quote"},
 		{"inline sql escape string", load(strings.Replace(base, `{sql: "SELECT 1"}`, `{sql: "SELECT E'x'"}`, 1), "SELECT 1", testSQLC), esc},
 	}
 	for _, b := range bad {
@@ -99,6 +105,54 @@ func TestRunnerRefusesMultiStatement(t *testing.T) {
 	}
 	if n == 0 {
 		t.Fatal("no run of Q")
+	}
+}
+
+// A settings value is checked again when a script is emitted, so a corpus changed after load cannot carry a ';'.
+func TestEmitRefusesSettingsValue(t *testing.T) {
+	c := loadEmitCorpus(t)
+	c.Tiers["prod"] = planguard.TierSettings{Settings: map[string]string{"work_mem": "16MB; COMMIT"}}
+	var b bytes.Buffer
+	v := "\\x01"
+	err := planguard.EmitPlans(&b, c, planguard.RunOptions{Tier: "prod"}, map[string]*string{"top": &v}, "0123456789abcdef")
+	if err == nil || !strings.Contains(err.Error(), "work_mem") {
+		t.Errorf("EmitPlans with a settings value holding ';': err %v", err)
+	}
+	if err := planguard.EmitResolvers(&b, c, planguard.RunOptions{Tier: "prod"}, "0123456789abcdef"); err == nil {
+		t.Error("EmitResolvers with a settings value holding ';': no error")
+	}
+}
+
+// The scanner agrees with PostgreSQL on high-bit bytes in identifiers and dollar-quote tags: what it passes runs as
+// one statement, and what it refuses for ';' really is two.
+func TestStatementScannerMatchesPostgres(t *testing.T) {
+	dsn := os.Getenv("BEACON_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set BEACON_TEST_POSTGRES_DSN for PostgreSQL tests")
+	}
+	ctx := context.Background()
+	pc, err := pgconn.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pc.Close(ctx)
+	for sql, statements := range map[string]int{
+		"SELECT $é$ ; $é$ AS v":               1,
+		"SELECT 1 AS aé$x$":                   1,
+		"SELECT 1 AS aé$x$; SELECT 2 AS b$x$": 2,
+		"SELECT ';' AS a, $q$;$q$ AS b":       1,
+	} {
+		res, err := pc.Exec(ctx, sql).ReadAll()
+		if err != nil {
+			t.Fatalf("%q: %v", sql, err)
+		}
+		if len(res) != statements {
+			t.Errorf("%q: PostgreSQL ran %d statements, want %d", sql, len(res), statements)
+		}
+		_, loadErr := planguard.LoadCorpus(mapFS(map[string]string{"c.yaml": "statements:\n  F: {file: f.sql, plan: harness}\nentries:\n  - {id: f, stmt: F}\n", "f.sql": sql}), "c.yaml", testSQLC)
+		if refused := loadErr != nil; refused != (statements > 1) {
+			t.Errorf("%q: %d statements in PostgreSQL, but the guard refused=%v (%v)", sql, statements, refused, loadErr)
+		}
 	}
 }
 
@@ -166,5 +220,34 @@ func TestEmitRefusesMultiStatement(t *testing.T) {
 	}
 	if strings.Contains(b.String(), "PREPARE") {
 		t.Errorf("EmitPlans prepared a refused statement:\n%s", b.String())
+	}
+}
+
+// Every statement is checked again once rendered: a raw param changed after load cannot carry a second statement
+// into the runner's session or an emitted script.
+func TestRenderedStatementsAreChecked(t *testing.T) {
+	c := loadEmitCorpus(t)
+	c.Entry("q.lit").Params = []any{map[string]any{"raw": "1); COMMIT; SELECT (1"}}
+	s := &recordSession{}
+	rep, err := planguard.Run(context.Background(), c, s, planguard.RunOptions{
+		Tier: "local", Baseline: planguard.BaselineOff, Only: regexp.MustCompile(`^q\.lit$`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sql := range s.sent {
+		if commitRe.MatchString(sql) || strings.Contains(sql, "PREPARE") {
+			t.Errorf("sent %q", sql)
+		}
+	}
+	if len(rep.Results) == 0 || rep.Results[0].Verdict != planguard.VerdictError ||
+		!strings.Contains(rep.Results[0].Failures[0].Msg, "rendered statement") {
+		t.Errorf("results %+v, want ERROR (rendered statement)", rep.Results)
+	}
+	var b bytes.Buffer
+	if err := planguard.EmitPlans(&b, c, planguard.RunOptions{Tier: "prod", Only: regexp.MustCompile(`^q\.lit$`)}, map[string]*string{}, "0123456789abcdef"); err != nil {
+		t.Fatal(err)
+	}
+	if commitRe.MatchString(b.String()) {
+		t.Errorf("EmitPlans wrote the second statement:\n%s", b.String())
 	}
 }

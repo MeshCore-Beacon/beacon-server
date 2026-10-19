@@ -214,9 +214,12 @@ var lockClause = regexp.MustCompile(`(?i)\s*\bFOR\s+UPDATE(\s+OF\s+\w+(\s*,\s*\w
 //   - a ';' outside literals, quoted identifiers, dollar quotes and comments: a second statement (a COMMIT, say)
 //     would run outside the READ ONLY transaction;
 //   - an escape string (E'...'): a backslash there escapes a quote, so the scan could not tell where it ends;
-//   - a backslash anywhere but inside a standard single-quoted literal or a dollar quote: psql reads it as a
-//     meta-command (\! runs a shell, \o writes a file);
+//   - a backslash anywhere but inside a standard single-quoted literal (fail closed: not in dollar quotes, comments
+//     or quoted identifiers either): psql reads it as a meta-command (\! runs a shell, \o writes a file);
 //   - a literal, quoted identifier, dollar quote or comment that does not end.
+//
+// Identifiers and dollar-quote tags follow PostgreSQL's lexer: bytes ≥ 0x80 are identifier characters
+// (ident_start, ident_cont, dolq_start, dolq_cont), so "aé$x$" is one identifier and "$é$" opens a dollar quote.
 func statementProblem(sql string) string {
 	s := trimStmt(sql)
 	for i := 0; i < len(s); {
@@ -250,7 +253,9 @@ func statementProblem(sql string) string {
 			}
 			i = j
 		case c == '\'':
-			if i > 0 && (s[i-1] == 'E' || s[i-1] == 'e') && (i == 1 || !isIdent(s[i-2])) {
+			// E' opens an escape string unless the E ends an identifier. Fail closed: only a letter, '_' or a byte
+			// ≥ 0x80 before the E makes it an identifier; after a digit or '$' the lexers can disagree, so refuse.
+			if i > 0 && (s[i-1] == 'E' || s[i-1] == 'e') && (i == 1 || !identStart(s[i-2])) {
 				return "an E'' escape string (a backslash there escapes a quote)"
 			}
 			j := i + 1
@@ -287,7 +292,7 @@ func statementProblem(sql string) string {
 			i = j + 1
 		case c == '$':
 			j := i + 1
-			for j < len(s) && isIdent(s[j]) && !(j == i+1 && s[j] >= '0' && s[j] <= '9') {
+			for j < len(s) && lexIdent(s[j]) && !(j == i+1 && s[j] >= '0' && s[j] <= '9') {
 				j++
 			}
 			if j < len(s) && s[j] == '$' {
@@ -296,12 +301,15 @@ func statementProblem(sql string) string {
 				if k < 0 {
 					return "a dollar quote that does not end"
 				}
+				if strings.IndexByte(s[j+1:j+1+k], '\\') >= 0 {
+					return "a backslash in a dollar quote (psql could read it as a meta-command)"
+				}
 				i = j + 1 + k + len(tag)
 			} else {
 				i = j
 			}
-		case isIdent(c):
-			for i < len(s) && (isIdent(s[i]) || s[i] == '$') {
+		case lexIdent(c):
+			for i < len(s) && (lexIdent(s[i]) || s[i] == '$') {
 				i++
 			}
 		case c == '\\':
@@ -314,6 +322,13 @@ func statementProblem(sql string) string {
 	}
 	return ""
 }
+
+// lexIdent reports a byte PostgreSQL's lexer takes as part of an identifier or dollar-quote tag: a letter, a digit,
+// '_' or any byte ≥ 0x80.
+func lexIdent(b byte) bool { return isIdent(b) || b >= 0x80 }
+
+// identStart reports a byte that can start an identifier: a letter, '_' or a byte ≥ 0x80 (no digit, no '$').
+func identStart(b byte) bool { return lexIdent(b) && !(b >= '0' && b <= '9') }
 
 // checkStatementText refuses statement, resolver and inline {sql} text that statementProblem objects to.
 func checkStatementText(sql string) error {
@@ -375,4 +390,121 @@ func boundaryAfter(s string, i int) bool {
 		i++
 	}
 	return i == len(s) || s[i] == ')' || s[i] == ';'
+}
+
+var (
+	gucValueRe = regexp.MustCompile(`^[A-Za-z0-9_.+-]+$`)
+	rawWordRe  = regexp.MustCompile(`^(-?[0-9]+(\.[0-9]+)?|(?i:null|true|false))`)
+	rawTypeRe  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?(\[\])?`)
+)
+
+// checkSettings refuses a tier setting whose name is not a GUC name or whose value is anything but letters, digits
+// and "_.+-" (1.1, 5GB, off). Settings are rendered into SET statements and psql scripts.
+func checkSettings(settings map[string]string) error {
+	for _, k := range sortedKeys(settings) {
+		if !gucNameRe.MatchString(k) {
+			return fmt.Errorf("setting name %q is not a GUC name", k)
+		}
+		if !gucValueRe.MatchString(settings[k]) {
+			return fmt.Errorf("setting %s: value %q must match %s", k, settings[k], gucValueRe)
+		}
+	}
+	return nil
+}
+
+// checkRawParam accepts only a {raw: …} param of this grammar, so a raw param cannot carry a statement or a psql
+// meta-command:
+//
+//	value = (number | NULL | true | false | literal | ARRAY[value {, value}]) [::type]
+//
+// where number is an integer or decimal with an optional '-', literal a standard '...' literal (” for a quote, no
+// control characters), and type an identifier, optionally schema-qualified, optionally followed by []. Tokens may be
+// separated by spaces only.
+func checkRawParam(s string) error {
+	p := rawParser{s: s}
+	if err := p.value(); err != nil {
+		return err
+	}
+	p.space()
+	if p.i != len(s) {
+		return fmt.Errorf("unexpected %q", s[p.i:])
+	}
+	return nil
+}
+
+type rawParser struct {
+	s string
+	i int
+}
+
+func (p *rawParser) space() {
+	for p.i < len(p.s) && p.s[p.i] == ' ' {
+		p.i++
+	}
+}
+
+func (p *rawParser) value() error {
+	p.space()
+	rest := p.s[p.i:]
+	switch {
+	case len(rest) >= 6 && strings.EqualFold(rest[:6], "ARRAY["):
+		p.i += 6
+		for {
+			if err := p.value(); err != nil {
+				return err
+			}
+			p.space()
+			if p.i < len(p.s) && p.s[p.i] == ',' {
+				p.i++
+				continue
+			}
+			if p.i < len(p.s) && p.s[p.i] == ']' {
+				p.i++
+				break
+			}
+			return errors.New("ARRAY[…] needs ',' or ']'")
+		}
+	case strings.HasPrefix(rest, "'"):
+		j := p.i + 1
+		for ; ; j++ {
+			if j >= len(p.s) {
+				return errors.New("a literal that does not end")
+			}
+			c := p.s[j]
+			if c < 0x20 || c == 0x7f {
+				return errors.New("a control character in a literal")
+			}
+			if c == '\'' {
+				if j+1 < len(p.s) && p.s[j+1] == '\'' {
+					j++
+					continue
+				}
+				break
+			}
+		}
+		p.i = j + 1
+	default:
+		m := rawWordRe.FindString(rest)
+		if m == "" {
+			return fmt.Errorf("unexpected %q (want a number, NULL, true, false, a '...' literal or ARRAY[…])", rest)
+		}
+		p.i += len(m)
+		if p.i < len(p.s) && lexIdent(p.s[p.i]) {
+			return fmt.Errorf("unexpected %q", p.s[p.i-len(m):])
+		}
+	}
+	p.space()
+	if strings.HasPrefix(p.s[p.i:], "::") {
+		p.i += 2
+		p.space()
+		m := rawTypeRe.FindString(p.s[p.i:])
+		if m == "" {
+			return fmt.Errorf("a cast needs a type name, not %q", p.s[p.i:])
+		}
+		p.i += len(m)
+		if p.i < len(p.s) && (lexIdent(p.s[p.i]) || p.s[p.i] == '$') {
+			return fmt.Errorf("unexpected %q", p.s[p.i:])
+		}
+	}
+	return nil
 }

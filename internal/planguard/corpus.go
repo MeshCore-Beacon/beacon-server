@@ -270,6 +270,11 @@ func (c *Corpus) checkTopLevel() error {
 			return fmt.Errorf("defaults: sort_exempt %q is not in sort_exempt_sets", name)
 		}
 	}
+	for _, tier := range sortedKeys(c.Tiers) {
+		if err := checkSettings(c.Tiers[tier].Settings); err != nil {
+			return fmt.Errorf("tiers: %s: %w", tier, err)
+		}
+	}
 	for _, name := range sortedKeys(c.Resolvers) {
 		if err := CheckName(name); err != nil {
 			return fmt.Errorf("resolver name: %w", err)
@@ -645,6 +650,9 @@ func (c *Corpus) checkParam(v any) error {
 					return fmt.Errorf("inline resolver: %w", err)
 				}
 			case "raw":
+				if err := checkRawParam(s); err != nil {
+					return fmt.Errorf("raw %q: %w", s, err)
+				}
 			default:
 				return fmt.Errorf("unknown param key %q (want r, sql or raw)", k)
 			}

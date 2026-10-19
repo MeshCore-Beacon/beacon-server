@@ -72,12 +72,17 @@ func checkNonce(nonce string) error {
 	return nil
 }
 
-func scriptStart(w *strings.Builder, nonce, searchPath string) {
+func scriptStart(w *strings.Builder, nonce, searchPath string) error {
 	w.WriteString(scriptHead)
 	if searchPath != "" {
-		w.WriteString("SET search_path = " + searchPath + ";\n")
+		set := "SET search_path = " + searchPath
+		if err := checkStatementText(set); err != nil {
+			return fmt.Errorf("search_path: %w", err)
+		}
+		w.WriteString(set + ";\n")
 	}
 	fmt.Fprintf(w, "\\echo @@%s planguard\n", nonce)
+	return nil
 }
 
 // EmitResolvers writes the psql script that resolves the params of o's selection.
@@ -90,7 +95,9 @@ func EmitResolvers(w io.Writer, c *Corpus, o RunOptions, nonce string) error {
 	}
 	need := neededResolvers(c, c.selection(o), o.IncludePending)
 	var b strings.Builder
-	scriptStart(&b, nonce, c.baseSearchPath(o))
+	if err := scriptStart(&b, nonce, c.baseSearchPath(o)); err != nil {
+		return err
+	}
 	for _, name := range sortedKeys(need) {
 		if need[name] == "" {
 			return fmt.Errorf("resolver %s is not in the corpus", name)
@@ -99,6 +106,9 @@ func EmitResolvers(w io.Writer, c *Corpus, o RunOptions, nonce string) error {
 			return fmt.Errorf("resolver %s: %w", name, err)
 		}
 		body := fmt.Sprintf("SELECT coalesce('V' || ((%s)::text), 'N');", trimStmt(need[name]))
+		if err := checkStatementText(body); err != nil {
+			return fmt.Errorf("resolver %s: %w", name, err)
+		}
 		if err := checkScriptLines(body); err != nil {
 			return fmt.Errorf("resolver %s: %w", name, err)
 		}
@@ -122,7 +132,9 @@ func EmitPlans(w io.Writer, c *Corpus, o RunOptions, params map[string]*string, 
 		params = map[string]*string{}
 	}
 	var b strings.Builder
-	scriptStart(&b, nonce, c.baseSearchPath(o))
+	if err := scriptStart(&b, nonce, c.baseSearchPath(o)); err != nil {
+		return err
+	}
 	var tables []string
 	for _, t := range c.Defaults.BigTables {
 		tables = append(tables, quoteLit(t))

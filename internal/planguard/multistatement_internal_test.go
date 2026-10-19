@@ -14,7 +14,13 @@ func TestStatementProblem(t *testing.T) {
 		"SELECT 1;":                                  "",
 		"SELECT 1;\n  ":                              "",
 		"SELECT ';' AS a, \"x;y\" AS b":              "",
-		"SELECT $$;$$, $q$ ; \\! id $q$":             "",
+		"SELECT $$;$$, $q$ ; $q$":                    "",
+		"SELECT $q$ \\! id $q$":                      "backslash in a dollar quote",
+		"SELECT $é$ ; $é$":                           "",                        // a dollar quote: tags take bytes ≥ 0x80, as in PostgreSQL
+		"SELECT 1 AS aé$x$; COMMIT; SELECT $x$":      "more than one statement", // aé$x$ is one identifier
+		"SELECT xE'a', é'b'":                         "",
+		"SELECT 1E'\\';'":                            "escape string",
+		"SELECT $E'x'":                               "escape string",
 		"SELECT 1 -- ; trailing\n":                   "",
 		"SELECT 1 /* ; /* nested */ */":              "",
 		"SELECT a$b FROM t WHERE x = $1":             "",
@@ -39,6 +45,27 @@ func TestStatementProblem(t *testing.T) {
 		got := statementProblem(sql)
 		if (want == "") != (got == "") || !strings.Contains(got, want) {
 			t.Errorf("statementProblem(%q) = %q, want %q", sql, got, want)
+		}
+	}
+}
+
+func TestCheckRawParam(t *testing.T) {
+	for _, ok := range []string{
+		"10", "-3", "1.5", "NULL", "null", "true", "FALSE", "'flood'", "'it''s'", "'\\x01'::bytea",
+		"'2026-10-17 17:00+00'::timestamptz", "ARRAY['LIS']::bpchar[]", "ARRAY['FAO', 'LIS','OPO']::bpchar[]",
+		"ARRAY[1, 2]", "NULL::pg_catalog.int4", "'a' :: text",
+	} {
+		if err := checkRawParam(ok); err != nil {
+			t.Errorf("checkRawParam(%q) = %v, want nil", ok, err)
+		}
+	}
+	for _, bad := range []string{
+		"1; DROP TABLE nodes", "'x'\n\\! id", "'x\n\\! id'", "now()", "1 + 1", "(SELECT 1)", "'a'::text; COMMIT",
+		"ARRAY['a'", "ARRAY[]", "'a'::", "'a'::double precision", "E'x'", "'a' 'b'", "trueish", "10abc", "$1", "",
+		"'a'::text[][]", "'x'\t",
+	} {
+		if err := checkRawParam(bad); err == nil {
+			t.Errorf("checkRawParam(%q) = nil, want an error", bad)
 		}
 	}
 }

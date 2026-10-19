@@ -369,8 +369,8 @@ func checkDiffParam(v any) error {
 		}
 		return nil
 	case map[string]any:
-		if _, ok := x["raw"].(string); ok && len(x) == 1 {
-			return nil
+		if raw, ok := x["raw"].(string); ok && len(x) == 1 {
+			return checkRawParam(raw)
 		}
 		if q, ok := x["sql"].(string); ok && len(x) == 1 {
 			return checkSingleSelect(q)
