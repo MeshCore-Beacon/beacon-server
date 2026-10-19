@@ -212,12 +212,15 @@ type Querier interface {
 	ListDirtyRollupHours(ctx context.Context, limit int32) ([]pgtype.Timestamptz, error)
 	ListHeardIATAs(ctx context.Context) ([]string, error)
 	ListIATAs(ctx context.Context) ([]IataCode, error)
-	// Only one branch runs. Keep the IATA range ordered by the composite index:
-	// generic plans can otherwise prefer scanning the global timestamp index.
-	// The text equality preserves exact input matching, including trailing spaces.
-	// Pages by (last_seen to the ms, id) so routes sharing the cursor's millisecond
-	// aren't skipped; cursor id 0 keeps the plain timestamp cursor.
-	ListKnownRoutes(ctx context.Context, arg ListKnownRoutesParams) ([]ListKnownRoutesRow, error)
+	// iata as a range keeps it in the pathkeys, so only idx_known_routes_iata_keyset returns rows in
+	// order; with = a generic plan may walk the global keyset. No cursor: NULL ts and id 0.
+	ListKnownRoutesByIATA(ctx context.Context, arg ListKnownRoutesByIATAParams) ([]ListKnownRoutesByIATARow, error)
+	// Custom plans only (Store.qc): a generic plan walks the whole region for a rare hop.
+	// The = form prices the Sort correctly; the range form under-costs it when a hop index exists.
+	ListKnownRoutesByIATAHop(ctx context.Context, arg ListKnownRoutesByIATAHopParams) ([]ListKnownRoutesByIATAHopRow, error)
+	ListKnownRoutesGlobal(ctx context.Context, arg ListKnownRoutesGlobalParams) ([]ListKnownRoutesGlobalRow, error)
+	// Custom plans only (Store.qc): the generic plan walks the whole keyset index for an absent hop.
+	ListKnownRoutesGlobalHop(ctx context.Context, arg ListKnownRoutesGlobalHopParams) ([]ListKnownRoutesGlobalHopRow, error)
 	// Returns messages after the given message ID, ordered oldest first.
 	// Used for WS reconnect backfill.
 	ListMessagesAfterID(ctx context.Context, arg ListMessagesAfterIDParams) ([]ListMessagesAfterIDRow, error)

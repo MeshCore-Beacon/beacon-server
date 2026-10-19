@@ -7,12 +7,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"testing"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	mockdb "github.com/MeshCore-Beacon/beacon-server/db/sqlc/mock"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"go.uber.org/mock/gomock"
 )
 
@@ -65,5 +67,43 @@ func TestDeleteOldRoutes_PassesCutoffs(t *testing.T) {
 
 	if err := store.DeleteOldRoutes(context.Background(), retention, 3, grace); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// RF3: a value ending in a blank matches no character(3) code; no statement runs, and it encodes as [].
+func TestListKnownRoutesTrailingBlankIATA(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mock := mockdb.NewMockQuerier(ctrl) // no EXPECT: any call fails the test
+	store := &Store{q: mock, qc: mock}
+	for _, iata := range []string{"SEA ", "SEA  ", "   ", " ", "SE\x00 "} {
+		routes, err := store.ListKnownRoutes(context.Background(), iata, 0, time.Time{}, 0, 50)
+		b, _ := json.Marshal(routes)
+		if err != nil || routes == nil || string(b) != "[]" {
+			t.Fatalf("%q: %v %s", iata, err, b)
+		}
+	}
+}
+
+// Each shape runs its own statement; the hop pair goes through qc.
+func TestListKnownRoutes_Dispatch(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	q, qc := mockdb.NewMockQuerier(ctrl), mockdb.NewMockQuerier(ctrl)
+	store := &Store{q: q, qc: qc}
+	cursor := time.UnixMilli(1_760_000_000_000)
+	q.EXPECT().ListKnownRoutesGlobal(gomock.Any(), sqlc.ListKnownRoutesGlobalParams{CursorTs: pgtype.Timestamptz{Time: cursor, Valid: true}, CursorID: 7, PageLimit: 50}).Return(nil, nil)
+	qc.EXPECT().ListKnownRoutesGlobalHop(gomock.Any(), sqlc.ListKnownRoutesGlobalHopParams{HopCount: 3, PageLimit: 50}).Return(nil, nil)
+	q.EXPECT().ListKnownRoutesByIATA(gomock.Any(), sqlc.ListKnownRoutesByIATAParams{Iata: "SEA", PageLimit: 50}).Return(nil, nil)
+	qc.EXPECT().ListKnownRoutesByIATAHop(gomock.Any(), sqlc.ListKnownRoutesByIATAHopParams{Iata: "SEA", HopCount: 3, PageLimit: 50}).Return(nil, nil)
+	q.EXPECT().GetNodesByIDs(gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
+	for _, c := range []struct {
+		iata   string
+		hop    int32
+		cursor time.Time
+		id     int64
+	}{{"", 0, cursor, 7}, {"", 3, time.Time{}, 0}, {"SEA", 0, time.Time{}, 0}, {"SEA", 3, time.Time{}, 0}} {
+		routes, err := store.ListKnownRoutes(context.Background(), c.iata, c.hop, c.cursor, c.id, 50)
+		if err != nil || routes == nil || len(routes) != 0 {
+			t.Fatalf("%+v: %v %v", c, routes, err)
+		}
 	}
 }

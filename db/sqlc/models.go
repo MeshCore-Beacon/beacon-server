@@ -153,6 +153,12 @@ type AnalyticsState struct {
 	Revision  int64 `json:"revision"`
 }
 
+type BackgroundState struct {
+	Key       string             `json:"key"`
+	Value     json.RawMessage    `json:"value"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Channel struct {
 	ID             int32              `json:"id"`
 	ChannelHash    []byte             `json:"channel_hash"`

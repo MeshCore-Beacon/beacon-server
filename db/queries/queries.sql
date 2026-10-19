@@ -1527,39 +1527,46 @@ ON CONFLICT (iata, path_key) DO UPDATE SET
   last_seen = NOW(),
   observation_count = known_routes.observation_count + 1;
 
--- name: ListKnownRoutes :many
--- Only one branch runs. Keep the IATA range ordered by the composite index:
--- generic plans can otherwise prefer scanning the global timestamp index.
--- The text equality preserves exact input matching, including trailing spaces.
--- Pages by (last_seen to the ms, id) so routes sharing the cursor's millisecond
--- aren't skipped; cursor id 0 keeps the plain timestamp cursor.
-SELECT r.id, r.node_ids, r.hash_prefix, r.iata, r.hop_count, r.first_seen, r.last_seen, r.observation_count
-FROM ((
+-- name: ListKnownRoutesByIATA :many
+-- iata as a range keeps it in the pathkeys, so only idx_known_routes_iata_keyset returns rows in
+-- order; with = a generic plan may walk the global keyset. No cursor: NULL ts and id 0.
 SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
 FROM known_routes
-WHERE $1 = ''
-  AND ($2 = 0 OR hop_count = $2)
-  AND ($3::timestamptz IS NULL
-       OR date_trunc('milliseconds', last_seen, 'UTC') < $3
-       OR ($5::bigint > 0 AND date_trunc('milliseconds', last_seen, 'UTC') = $3 AND id < $5))
-ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC
-LIMIT $4
-)
-UNION ALL
-(
-SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
-FROM known_routes
-WHERE $1 <> '' AND iata::text = $1
-  AND iata >= $1::bpchar AND iata <= $1::bpchar
-  AND ($2 = 0 OR hop_count = $2)
-  AND ($3::timestamptz IS NULL
-       OR date_trunc('milliseconds', last_seen, 'UTC') < $3
-       OR ($5::bigint > 0 AND date_trunc('milliseconds', last_seen, 'UTC') = $3 AND id < $5))
+WHERE iata >= @iata::bpchar AND iata <= @iata::bpchar
+  AND (date_trunc('milliseconds', last_seen, 'UTC'), id)
+        < (COALESCE(sqlc.narg('cursor_ts')::timestamptz, 'infinity'::timestamptz), @cursor_id::bigint)
 ORDER BY iata, date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC
-LIMIT $4
-)) r
-ORDER BY date_trunc('milliseconds', r.last_seen, 'UTC') DESC, r.id DESC
-LIMIT $4;
+LIMIT @page_limit;
+
+-- name: ListKnownRoutesByIATAHop :many
+-- Custom plans only (Store.qc): a generic plan walks the whole region for a rare hop.
+-- The = form prices the Sort correctly; the range form under-costs it when a hop index exists.
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
+FROM known_routes
+WHERE iata = @iata::bpchar
+  AND hop_count = @hop_count
+  AND (date_trunc('milliseconds', last_seen, 'UTC'), id)
+        < (COALESCE(sqlc.narg('cursor_ts')::timestamptz, 'infinity'::timestamptz), @cursor_id::bigint)
+ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC
+LIMIT @page_limit;
+
+-- name: ListKnownRoutesGlobal :many
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
+FROM known_routes
+WHERE (date_trunc('milliseconds', last_seen, 'UTC'), id)
+        < (COALESCE(sqlc.narg('cursor_ts')::timestamptz, 'infinity'::timestamptz), @cursor_id::bigint)
+ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC
+LIMIT @page_limit;
+
+-- name: ListKnownRoutesGlobalHop :many
+-- Custom plans only (Store.qc): the generic plan walks the whole keyset index for an absent hop.
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
+FROM known_routes
+WHERE hop_count = @hop_count
+  AND (date_trunc('milliseconds', last_seen, 'UTC'), id)
+        < (COALESCE(sqlc.narg('cursor_ts')::timestamptz, 'infinity'::timestamptz), @cursor_id::bigint)
+ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC
+LIMIT @page_limit;
 
 -- name: GetKnownRoutesByNodes :many
 -- Routes containing @nodes[i] in IATA @iatas[i] (aligned, one node per IATA). The &&

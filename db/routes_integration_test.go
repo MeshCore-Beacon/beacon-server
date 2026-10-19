@@ -5,20 +5,14 @@ package db
 
 import (
 	"context"
-	_ "embed"
 	"encoding/json"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 )
-
-//go:embed queries/queries.sql
-var routeTestQueries string
 
 // All synthetic rows are rolled back. The sparse
 // region sits behind 100,000 newer routes to expose global timestamp scans.
@@ -52,12 +46,7 @@ ANALYZE known_routes;`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	queries := strings.ReplaceAll(routeTestQueries, "\r\n", "\n")
-	querySQL := strings.Split(strings.Split(queries, "-- name: ListKnownRoutes :many\n")[1], "\n-- name:")[0]
-	if _, err := tx.Exec(ctx, "PREPARE route_page AS "+querySQL); err != nil {
-		t.Fatal(err)
-	}
-	q := sqlc.New(tx)
+	s := routeStore(tx)
 	anchor := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	for _, mode := range []string{"force_custom_plan", "force_generic_plan"} {
 		t.Run(mode, func(t *testing.T) {
@@ -84,11 +73,11 @@ ANALYZE known_routes;`)
 				{"overlong", "GPTX", 0, 0, 50, 0, 1, 0},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
-					cursor := pgtype.Timestamptz{}
+					var cursor time.Time
 					if tc.cursor != 0 {
-						cursor = pgtype.Timestamptz{Time: anchor.Add(-time.Duration(tc.cursor) * time.Second), Valid: true}
+						cursor = anchor.Add(-time.Duration(tc.cursor) * time.Second)
 					}
-					rows, err := q.ListKnownRoutes(ctx, sqlc.ListKnownRoutesParams{Column1: tc.iata, Column2: int32(tc.hop), Column3: cursor, Limit: int32(tc.limit)})
+					rows, err := s.listKnownRouteRows(ctx, tc.iata, int32(tc.hop), cursor, 0, int32(tc.limit))
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -110,10 +99,15 @@ ANALYZE known_routes;`)
 				})
 			}
 			for _, iata := range []string{"GPT", "YYZ", ""} {
-				var planJSON []byte
-				if err := tx.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) EXECUTE route_page('"+iata+"',0,NULL,50,0)").Scan(&planJSON); err != nil {
+				// A fresh capture per page: names match by prefix, so ...Global would also take ...GlobalHop.
+				capture := &statementCapture{Tx: tx, name: "ListKnownRoutesByIATA"}
+				if iata == "" {
+					capture.name = "ListKnownRoutesGlobal"
+				}
+				if _, err := (&Store{q: sqlc.New(capture), qc: sqlc.New(unnamedDBTX{capture})}).listKnownRouteRows(ctx, iata, 0, time.Time{}, 0, 50); err != nil {
 					t.Fatal(err)
 				}
+				planJSON := []byte(explainJSON(t, ctx, tx, capture.statement, capture.args...))
 				var plans []struct {
 					Plan          map[string]any
 					ExecutionTime float64 `json:"Execution Time"`

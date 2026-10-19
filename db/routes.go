@@ -40,30 +40,58 @@ func (s *Store) UpsertKnownRoute(ctx context.Context, nodeIDs []uuid.UUID, hashP
 }
 
 func (s *Store) ListKnownRoutes(ctx context.Context, iata string, hopCount int32, cursor time.Time, cursorID int64, limit int32) ([]api.KnownRoute, error) {
-	var cursorTS pgtype.Timestamptz
-	if !cursor.IsZero() {
-		cursorTS = pgtype.Timestamptz{Time: cursor, Valid: true}
+	// No character(3) code ends in a blank, but bpchar comparison ignores trailing blanks.
+	if iata != strings.TrimRight(iata, " ") {
+		return []api.KnownRoute{}, nil
 	}
-	sqlRows, err := s.q.ListKnownRoutes(ctx, sqlc.ListKnownRoutesParams{
-		Column1: iata,
-		Column2: hopCount,
-		Column3: cursorTS,
-		Limit:   limit,
-		Column5: cursorID,
-	})
+	rows, err := s.listKnownRouteRows(ctx, iata, hopCount, cursor, cursorID, limit)
 	if err != nil {
 		return nil, err
 	}
-	rows := make([]knownRouteRow, len(sqlRows))
-	for i, r := range sqlRows {
-		rows[i] = knownRouteRow{ID: r.ID, NodeIds: r.NodeIds, HashPrefix: r.HashPrefix, Iata: r.Iata, HopCount: r.HopCount, FirstSeen: r.FirstSeen, LastSeen: r.LastSeen, ObservationCount: r.ObservationCount}
-	}
-	ids := collectNodeIDs(rows)
-	nodes, err := s.GetNodesByIDs(ctx, ids)
+	nodes, err := s.GetNodesByIDs(ctx, collectNodeIDs(rows))
 	if err != nil {
 		return nil, err
 	}
 	return toKnownRoutes(rows, nodes), nil
+}
+
+// listKnownRouteRows runs the statement for the filter shape. The hop pair goes through qc, so
+// a rare or absent hop is never planned generically. A zero cursor is NULL; cursorID 0 is a
+// plain timestamp cursor.
+func (s *Store) listKnownRouteRows(ctx context.Context, iata string, hopCount int32, cursor time.Time, cursorID int64, limit int32) ([]knownRouteRow, error) {
+	if iata != strings.TrimRight(iata, " ") {
+		return []knownRouteRow{}, nil
+	}
+	var cursorTS pgtype.Timestamptz
+	if !cursor.IsZero() {
+		cursorTS = pgtype.Timestamptz{Time: cursor, Valid: true}
+	}
+	qc := s.qc
+	if qc == nil {
+		qc = s.q
+	}
+	switch {
+	case iata == "" && hopCount == 0:
+		return routeRows(s.q.ListKnownRoutesGlobal(ctx, sqlc.ListKnownRoutesGlobalParams{CursorTs: cursorTS, CursorID: cursorID, PageLimit: limit}))
+	case iata == "":
+		return routeRows(qc.ListKnownRoutesGlobalHop(ctx, sqlc.ListKnownRoutesGlobalHopParams{HopCount: hopCount, CursorTs: cursorTS, CursorID: cursorID, PageLimit: limit}))
+	case hopCount == 0:
+		return routeRows(s.q.ListKnownRoutesByIATA(ctx, sqlc.ListKnownRoutesByIATAParams{Iata: iata, CursorTs: cursorTS, CursorID: cursorID, PageLimit: limit}))
+	default:
+		return routeRows(qc.ListKnownRoutesByIATAHop(ctx, sqlc.ListKnownRoutesByIATAHopParams{Iata: iata, HopCount: hopCount, CursorTs: cursorTS, CursorID: cursorID, PageLimit: limit}))
+	}
+}
+
+// routeRows converts any /routes statement's rows; all four share knownRouteRow's fields.
+func routeRows[T sqlc.ListKnownRoutesGlobalRow | sqlc.ListKnownRoutesGlobalHopRow | sqlc.ListKnownRoutesByIATARow | sqlc.ListKnownRoutesByIATAHopRow](in []T, err error) ([]knownRouteRow, error) {
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]knownRouteRow, len(in))
+	for i, r := range in {
+		rows[i] = knownRouteRow(r)
+	}
+	return rows, nil
 }
 
 // Work bounds for one route search; the query count is fixed, these cap row volume.

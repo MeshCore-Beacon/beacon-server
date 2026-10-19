@@ -1405,19 +1405,64 @@ func (mr *MockQuerierMockRecorder) ListIATAs(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListIATAs", reflect.TypeOf((*MockQuerier)(nil).ListIATAs), ctx)
 }
 
-// ListKnownRoutes mocks base method.
-func (m *MockQuerier) ListKnownRoutes(ctx context.Context, arg db.ListKnownRoutesParams) ([]db.ListKnownRoutesRow, error) {
+// ListKnownRoutesByIATA mocks base method.
+func (m *MockQuerier) ListKnownRoutesByIATA(ctx context.Context, arg db.ListKnownRoutesByIATAParams) ([]db.ListKnownRoutesByIATARow, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListKnownRoutes", ctx, arg)
-	ret0, _ := ret[0].([]db.ListKnownRoutesRow)
+	ret := m.ctrl.Call(m, "ListKnownRoutesByIATA", ctx, arg)
+	ret0, _ := ret[0].([]db.ListKnownRoutesByIATARow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// ListKnownRoutes indicates an expected call of ListKnownRoutes.
-func (mr *MockQuerierMockRecorder) ListKnownRoutes(ctx, arg any) *gomock.Call {
+// ListKnownRoutesByIATA indicates an expected call of ListKnownRoutesByIATA.
+func (mr *MockQuerierMockRecorder) ListKnownRoutesByIATA(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListKnownRoutes", reflect.TypeOf((*MockQuerier)(nil).ListKnownRoutes), ctx, arg)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListKnownRoutesByIATA", reflect.TypeOf((*MockQuerier)(nil).ListKnownRoutesByIATA), ctx, arg)
+}
+
+// ListKnownRoutesByIATAHop mocks base method.
+func (m *MockQuerier) ListKnownRoutesByIATAHop(ctx context.Context, arg db.ListKnownRoutesByIATAHopParams) ([]db.ListKnownRoutesByIATAHopRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListKnownRoutesByIATAHop", ctx, arg)
+	ret0, _ := ret[0].([]db.ListKnownRoutesByIATAHopRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListKnownRoutesByIATAHop indicates an expected call of ListKnownRoutesByIATAHop.
+func (mr *MockQuerierMockRecorder) ListKnownRoutesByIATAHop(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListKnownRoutesByIATAHop", reflect.TypeOf((*MockQuerier)(nil).ListKnownRoutesByIATAHop), ctx, arg)
+}
+
+// ListKnownRoutesGlobal mocks base method.
+func (m *MockQuerier) ListKnownRoutesGlobal(ctx context.Context, arg db.ListKnownRoutesGlobalParams) ([]db.ListKnownRoutesGlobalRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListKnownRoutesGlobal", ctx, arg)
+	ret0, _ := ret[0].([]db.ListKnownRoutesGlobalRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListKnownRoutesGlobal indicates an expected call of ListKnownRoutesGlobal.
+func (mr *MockQuerierMockRecorder) ListKnownRoutesGlobal(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListKnownRoutesGlobal", reflect.TypeOf((*MockQuerier)(nil).ListKnownRoutesGlobal), ctx, arg)
+}
+
+// ListKnownRoutesGlobalHop mocks base method.
+func (m *MockQuerier) ListKnownRoutesGlobalHop(ctx context.Context, arg db.ListKnownRoutesGlobalHopParams) ([]db.ListKnownRoutesGlobalHopRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListKnownRoutesGlobalHop", ctx, arg)
+	ret0, _ := ret[0].([]db.ListKnownRoutesGlobalHopRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListKnownRoutesGlobalHop indicates an expected call of ListKnownRoutesGlobalHop.
+func (mr *MockQuerierMockRecorder) ListKnownRoutesGlobalHop(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListKnownRoutesGlobalHop", reflect.TypeOf((*MockQuerier)(nil).ListKnownRoutesGlobalHop), ctx, arg)
 }
 
 // ListMessagesAfterID mocks base method.
