@@ -28,7 +28,7 @@ WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR ni.iata = ANY($1::bpchar[])
 GROUP BY n.node_type
 ORDER BY count DESC`
 
-// The unfiltered page must not read node_iatas (plan cliff at ~3,911 pages); every input returns today's rows.
+// The unfiltered page must not read node_iatas (plan cliff); every input returns today's rows.
 func TestStatsNodeTypesSplitPostgres(t *testing.T) {
 	ctx, tx := retentionTx(t)
 	applyBaseline(t, ctx, tx)

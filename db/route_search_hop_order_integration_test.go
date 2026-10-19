@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// S3a adds (hop_count, iata); a hop-ordered LIMIT walk over it reads most of known_routes when matches are rare.
+// With a later (hop_count, iata) index, a hop-ordered LIMIT walk over it reads most of known_routes when matches are rare.
 func TestRouteSearchHopOrderPostgres(t *testing.T) {
 	ctx, tx := retentionTx(t)
 	applyBaseline(t, ctx, tx)

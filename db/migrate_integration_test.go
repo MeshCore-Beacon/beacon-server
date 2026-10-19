@@ -117,7 +117,7 @@ func TestApplyMigrationRecoversInvalidIndexPostgres(t *testing.T) {
 
 const drop004 = "004_drop_known_routes_iata_last_seen.sql"
 
-// Every index the migrations leave must be usable, and 004 must also apply where P1 already dropped it by hand.
+// Every index the migrations leave must be usable, and 004 must also apply where an operator already dropped it by hand.
 func TestRunMigrationsIndexesValidPostgres(t *testing.T) {
 	ctx, pool := schemaPool(t)
 	if err := RunMigrations(ctx, pool); err != nil {

@@ -147,8 +147,12 @@ func TestRunMigrationsLockRetryRebuildsIndexPostgres(t *testing.T) {
 	if err := conn.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&pid); err != nil {
 		t.Fatal(err)
 	}
+	start := time.Now()
 	if err := applyWithLockRetry(ctx, conn, pool, pid, "905_probe.sql", "CREATE INDEX CONCURRENTLY probe_idx ON probe (v)"); err != nil {
 		t.Fatal(err)
+	}
+	if waited := time.Since(start); waited < 1500*time.Millisecond {
+		t.Fatalf("applied after %s without a retry", waited)
 	}
 	var valid bool
 	if err := pool.QueryRow(ctx, "SELECT indisvalid AND indisready FROM pg_index WHERE indexrelid = to_regclass('probe_idx')").Scan(&valid); err != nil || !valid {
