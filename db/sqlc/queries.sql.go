@@ -1491,6 +1491,67 @@ func (q *Queries) GetObserverTelemetry(ctx context.Context, arg GetObserverTelem
 	return items, nil
 }
 
+const getObserverTelemetrySince = `-- name: GetObserverTelemetrySince :many
+SELECT id, reported_at, battery_voltage_mv, airtime_tx_secs, airtime_rx_secs,
+       noise_floor_db, uptime_seconds, queue_length, debug_flags, receive_errors
+FROM observer_telemetry
+WHERE observer_id = $1
+  AND reported_at >= $2::timestamptz
+  AND id > $3::bigint
+ORDER BY reported_at ASC
+`
+
+type GetObserverTelemetrySinceParams struct {
+	ObserverID uuid.UUID          `json:"observer_id"`
+	Since      pgtype.Timestamptz `json:"since"`
+	AfterID    int64              `json:"after_id"`
+}
+
+type GetObserverTelemetrySinceRow struct {
+	ID               int64              `json:"id"`
+	ReportedAt       pgtype.Timestamptz `json:"reported_at"`
+	BatteryVoltageMv *int32             `json:"battery_voltage_mv"`
+	AirtimeTxSecs    *float32           `json:"airtime_tx_secs"`
+	AirtimeRxSecs    *float32           `json:"airtime_rx_secs"`
+	NoiseFloorDb     *float32           `json:"noise_floor_db"`
+	UptimeSeconds    *int64             `json:"uptime_seconds"`
+	QueueLength      *int32             `json:"queue_length"`
+	DebugFlags       *int32             `json:"debug_flags"`
+	ReceiveErrors    *int32             `json:"receive_errors"`
+}
+
+// The API's only telemetry shape (a start, no end): reported_at >= @since without the NULL branch.
+func (q *Queries) GetObserverTelemetrySince(ctx context.Context, arg GetObserverTelemetrySinceParams) ([]GetObserverTelemetrySinceRow, error) {
+	rows, err := q.db.Query(ctx, getObserverTelemetrySince, arg.ObserverID, arg.Since, arg.AfterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetObserverTelemetrySinceRow{}
+	for rows.Next() {
+		var i GetObserverTelemetrySinceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ReportedAt,
+			&i.BatteryVoltageMv,
+			&i.AirtimeTxSecs,
+			&i.AirtimeRxSecs,
+			&i.NoiseFloorDb,
+			&i.UptimeSeconds,
+			&i.QueueLength,
+			&i.DebugFlags,
+			&i.ReceiveErrors,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getPacketByHash = `-- name: GetPacketByHash :one
 SELECT p.packet_hash, p.payload_type, p.payload_version, p.route_type, p.transport_codes_present, p.region_code, p.sub_region_code, p.scope_id, p.origin_pubkey, p.raw_payload, p.raw_header, p.parsed_payload, p.decrypted, p.channel_hash, p.trace_tag, p.first_heard_at, p.last_heard_at, p.observation_count, ts.name AS scope_name,
     cm.sender_name AS cm_sender_name,
@@ -5503,9 +5564,8 @@ WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR EXISTS (
   AND ($3::timestamptz IS NULL OR t.first_heard_at >= $3)
   AND ($4::timestamptz IS NULL OR t.first_heard_at <= $4)
   -- Keyset on the millisecond clients see, tie-broken by tag; matches idx_trace_tags_keyset.
-  AND ($5::timestamptz IS NULL
-       OR date_trunc('milliseconds', t.last_heard_at, 'UTC') < $5
-       OR ($8::bytea IS NOT NULL AND date_trunc('milliseconds', t.last_heard_at, 'UTC') = $5 AND t.trace_tag < $8))
+  AND (date_trunc('milliseconds', t.last_heard_at, 'UTC'), t.trace_tag)
+      < (COALESCE($5::timestamptz, 'infinity'::timestamptz), COALESCE($8::bytea, ''::bytea))
   AND ($7::text = '' OR t.trace_type = $7)
 ORDER BY date_trunc('milliseconds', t.last_heard_at, 'UTC') DESC, t.trace_tag DESC
 LIMIT $6

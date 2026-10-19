@@ -125,6 +125,8 @@ type Querier interface {
 	GetObserverRadio(ctx context.Context, id uuid.UUID) (GetObserverRadioRow, error)
 	GetObserverScopes(ctx context.Context, observerID uuid.UUID) ([]string, error)
 	GetObserverTelemetry(ctx context.Context, arg GetObserverTelemetryParams) ([]GetObserverTelemetryRow, error)
+	// The API's only telemetry shape (a start, no end): reported_at >= @since without the NULL branch.
+	GetObserverTelemetrySince(ctx context.Context, arg GetObserverTelemetrySinceParams) ([]GetObserverTelemetrySinceRow, error)
 	GetPacketByHash(ctx context.Context, packetHash []byte) (GetPacketByHashRow, error)
 	// Return distinct observation IATAs in first-heard order for path resolution,
 	// without fetching full observations separately for every trace packet.

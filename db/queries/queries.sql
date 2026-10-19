@@ -238,6 +238,16 @@ WHERE observer_id = $1
   AND ($4::bigint = 0 OR id > $4::bigint)
 ORDER BY reported_at ASC;
 
+-- name: GetObserverTelemetrySince :many
+-- The API's only telemetry shape (a start, no end): reported_at >= @since without the NULL branch.
+SELECT id, reported_at, battery_voltage_mv, airtime_tx_secs, airtime_rx_secs,
+       noise_floor_db, uptime_seconds, queue_length, debug_flags, receive_errors
+FROM observer_telemetry
+WHERE observer_id = @observer_id
+  AND reported_at >= @since::timestamptz
+  AND id > @after_id::bigint
+ORDER BY reported_at ASC;
+
 -- name: GetObserverActivityRaw :many
 -- Sub-hour activity buckets straight off idx_observations_observer; no join to packets.
 -- Aggregates are COALESCEd and paired with a count column: sqlc types a cast expression as
@@ -2009,9 +2019,8 @@ WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR EXISTS (
   AND ($3::timestamptz IS NULL OR t.first_heard_at >= $3)
   AND ($4::timestamptz IS NULL OR t.first_heard_at <= $4)
   -- Keyset on the millisecond clients see, tie-broken by tag; matches idx_trace_tags_keyset.
-  AND ($5::timestamptz IS NULL
-       OR date_trunc('milliseconds', t.last_heard_at, 'UTC') < $5
-       OR ($8::bytea IS NOT NULL AND date_trunc('milliseconds', t.last_heard_at, 'UTC') = $5 AND t.trace_tag < $8))
+  AND (date_trunc('milliseconds', t.last_heard_at, 'UTC'), t.trace_tag)
+      < (COALESCE($5::timestamptz, 'infinity'::timestamptz), COALESCE($8::bytea, ''::bytea))
   AND ($7::text = '' OR t.trace_type = $7)
 ORDER BY date_trunc('milliseconds', t.last_heard_at, 'UTC') DESC, t.trace_tag DESC
 LIMIT $6;

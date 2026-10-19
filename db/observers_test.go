@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -394,6 +395,70 @@ func TestGetObserverTelemetry_Empty(t *testing.T) {
 	}
 }
 
+// A start with no end, the only shape the API sends, reads the since-only statement; any other shape keeps the
+// catch-all. Both map the same rows to the same points.
+func TestGetObserverTelemetry_Dispatch(t *testing.T) {
+	observerID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	since := time.Date(2026, 9, 30, 6, 0, 0, 0, time.UTC)
+	until := since.Add(48 * time.Hour)
+	bat, tx, rx, noise, q, dbg, rerr := int32(3700), float32(110), float32(12), float32(-91), int32(2), int32(5), int32(1)
+	up := int64(13600)
+	row := sqlc.GetObserverTelemetryRow{
+		ID: 7, ReportedAt: pgtype.Timestamptz{Time: since.Add(time.Hour), Valid: true},
+		BatteryVoltageMv: &bat, AirtimeTxSecs: &tx, AirtimeRxSecs: &rx, NoiseFloorDb: &noise,
+		UptimeSeconds: &up, QueueLength: &q, DebugFlags: &dbg, ReceiveErrors: &rerr,
+	}
+	want := &api.ObserverTelemetry{Points: []api.ObserverTelemetryPoint{{
+		T: since.Add(time.Hour).UnixMilli(), BatteryMV: &bat, AirtimeTxSecs: &tx, AirtimeRxSecs: &rx,
+		NoiseFloorDB: &noise, UptimeSeconds: &up, QueueLength: &q, ReceiveErrors: &rerr,
+	}}}
+
+	cases := []struct {
+		name         string
+		since, until time.Time
+		expect       func(m *mockdb.MockQuerier)
+	}{
+		{"since only", since, time.Time{}, func(m *mockdb.MockQuerier) {
+			m.EXPECT().GetObserverTelemetrySince(gomock.Any(), sqlc.GetObserverTelemetrySinceParams{
+				ObserverID: observerID, Since: pgtype.Timestamptz{Time: since, Valid: true}, AfterID: 7,
+			}).Return([]sqlc.GetObserverTelemetrySinceRow{sqlc.GetObserverTelemetrySinceRow(row)}, nil)
+		}},
+		{"since and until", since, until, func(m *mockdb.MockQuerier) {
+			m.EXPECT().GetObserverTelemetry(gomock.Any(), sqlc.GetObserverTelemetryParams{
+				ObserverID: observerID,
+				Column2:    pgtype.Timestamptz{Time: since, Valid: true},
+				Column3:    pgtype.Timestamptz{Time: until, Valid: true},
+				Column4:    7,
+			}).Return([]sqlc.GetObserverTelemetryRow{row}, nil)
+		}},
+		{"until only", time.Time{}, until, func(m *mockdb.MockQuerier) {
+			m.EXPECT().GetObserverTelemetry(gomock.Any(), sqlc.GetObserverTelemetryParams{
+				ObserverID: observerID,
+				Column3:    pgtype.Timestamptz{Time: until, Valid: true},
+				Column4:    7,
+			}).Return([]sqlc.GetObserverTelemetryRow{row}, nil)
+		}},
+		{"neither", time.Time{}, time.Time{}, func(m *mockdb.MockQuerier) {
+			m.EXPECT().GetObserverTelemetry(gomock.Any(), sqlc.GetObserverTelemetryParams{
+				ObserverID: observerID, Column4: 7,
+			}).Return([]sqlc.GetObserverTelemetryRow{row}, nil)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := mockdb.NewMockQuerier(gomock.NewController(t))
+			tc.expect(mock)
+			got, err := (&Store{q: mock}).GetObserverTelemetry(context.Background(), observerID, tc.since, tc.until, 7)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("telemetry = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
 func TestGetObserverTelemetryBucketed_Mapping(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mock := mockdb.NewMockQuerier(ctrl)
@@ -408,12 +473,15 @@ func TestGetObserverTelemetryBucketed_Mapping(t *testing.T) {
 	bat := int32(3700)
 
 	mock.EXPECT().
-		GetObserverTelemetry(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, p sqlc.GetObserverTelemetryParams) ([]sqlc.GetObserverTelemetryRow, error) {
-			if want := since.Add(-24 * time.Hour); !p.Column2.Time.Equal(want) {
-				t.Errorf("since = %v, want lookback to %v", p.Column2.Time, want)
+		GetObserverTelemetrySince(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, p sqlc.GetObserverTelemetrySinceParams) ([]sqlc.GetObserverTelemetrySinceRow, error) {
+			if want := since.Add(-24 * time.Hour); !p.Since.Valid || !p.Since.Time.Equal(want) {
+				t.Errorf("since = %+v, want lookback to %v", p.Since, want)
 			}
-			return []sqlc.GetObserverTelemetryRow{
+			if p.ObserverID != observerID || p.AfterID != 0 {
+				t.Errorf("params = %+v", p)
+			}
+			return []sqlc.GetObserverTelemetrySinceRow{
 				{ReportedAt: at(-1), AirtimeTxSecs: f(100), UptimeSeconds: up(10000)},
 				{ReportedAt: at(0), AirtimeTxSecs: f(110), UptimeSeconds: up(13600), BatteryVoltageMv: &bat},
 			}, nil
