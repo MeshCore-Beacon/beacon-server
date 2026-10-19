@@ -210,6 +210,37 @@ func TestResolve_RouteDefaults(t *testing.T) {
 	if r.RouteMinObservations != 3 {
 		t.Errorf("RouteMinObservations = %d, want 3", r.RouteMinObservations)
 	}
+	if r.RouteReconfirmRowsPerHour != 81000 {
+		t.Errorf("RouteReconfirmRowsPerHour = %d, want 81000", r.RouteReconfirmRowsPerHour)
+	}
+	if !strings.Contains(r.String(), "routeReconfirmRowsPerHour=81000") {
+		t.Errorf("String() = %q, want routeReconfirmRowsPerHour=81000", r.String())
+	}
+}
+
+func TestLoad_ReconfirmRowsPerHour(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("routes:\n  reconfirm_rows_per_hour: 12000\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := Resolve(cfg).RouteReconfirmRowsPerHour; got != 12000 {
+		t.Errorf("RouteReconfirmRowsPerHour = %d, want 12000", got)
+	}
+}
+
+func TestLoad_NegativeReconfirmRowsRejected(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("routes:\n  reconfirm_rows_per_hour: -1\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "routes.reconfirm_rows_per_hour must be positive or zero for the default") {
+		t.Errorf("err = %v, want the reconfirm_rows_per_hour error", err)
+	}
 }
 
 func TestResolve_RollupRetentionDefaults(t *testing.T) {

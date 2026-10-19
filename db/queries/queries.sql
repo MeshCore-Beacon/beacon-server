@@ -772,20 +772,62 @@ DELETE FROM nodes
 WHERE last_seen < $1
   AND id NOT IN (SELECT owner_node_id FROM observer_owners WHERE owner_node_id IS NOT NULL);
 
--- name: DeleteOldRoutes :execrows
--- One batch of routes past retention, or past grace with too few observations.
--- GREATEST keeps the scan on idx_known_routes_last_seen.
+-- name: DeleteExpiredRoutes :one
+-- One batch past retention, keyset after the per-run cursor (the first call passes -infinity, 0).
+-- The truncated bound (ms ceiling of the cutoff) drives idx_known_routes_keyset; the exact
+-- residual decides membership. + interval 0 keeps it off idx_known_routes_last_seen.
 WITH expired AS (
-    SELECT r.iata, r.path_key
-    FROM known_routes r
-    WHERE r.last_seen < GREATEST(@retention_cutoff::timestamptz, @grace_cutoff::timestamptz)
-      AND (r.last_seen < @retention_cutoff OR
-           (r.observation_count < @min_observations AND r.last_seen < @grace_cutoff))
-    LIMIT @batch_size
-    FOR UPDATE OF r SKIP LOCKED
-)
-DELETE FROM known_routes kr USING expired e
-WHERE kr.iata = e.iata AND kr.path_key = e.path_key;
+  SELECT r.iata, r.path_key, date_trunc('milliseconds', r.last_seen, 'UTC') AS ts, r.id
+  FROM known_routes r
+  WHERE (date_trunc('milliseconds', r.last_seen, 'UTC'), r.id) > (@after_ts::timestamptz, @after_id::bigint)
+    AND date_trunc('milliseconds', r.last_seen, 'UTC') < @retention_ceil::timestamptz
+    AND r.last_seen + interval '0' < @retention_cutoff::timestamptz
+  ORDER BY date_trunc('milliseconds', r.last_seen, 'UTC'), r.id
+  LIMIT @batch_size
+  FOR UPDATE OF r SKIP LOCKED),
+deleted AS (DELETE FROM known_routes kr USING expired e
+            WHERE kr.iata = e.iata AND kr.path_key = e.path_key RETURNING 1)
+SELECT (SELECT count(*) FROM expired) AS selected,
+       (SELECT ts FROM expired ORDER BY ts DESC, id DESC LIMIT 1)::timestamptz AS last_ts,
+       coalesce((SELECT id FROM expired ORDER BY ts DESC, id DESC LIMIT 1), 0)::bigint AS last_id;
+
+-- name: DeleteGraceRoutesSlice :one
+-- One batch of rarely-seen routes after the cursor, inside a window of at most 6 h below the grace
+-- cutoff: candidates without locks, then lock SKIP LOCKED through the pkey (re-checked on the newest
+-- version) and delete. unresolved_ts is the earliest candidate left behind; window_end is the bound used.
+WITH cand AS MATERIALIZED (
+  SELECT r.iata, r.path_key, date_trunc('milliseconds', r.last_seen, 'UTC') AS ts, r.id
+  FROM known_routes r
+  WHERE (date_trunc('milliseconds', r.last_seen, 'UTC'), r.id) > (@after_ts::timestamptz, @after_id::bigint)
+    AND date_trunc('milliseconds', r.last_seen, 'UTC')
+          < LEAST(@grace_ceil::timestamptz, sqlc.arg('after_ts')::timestamptz + interval '6 hours')
+    AND r.last_seen + interval '0' < @grace_cutoff::timestamptz
+    AND r.observation_count < @min_observations::bigint
+  ORDER BY date_trunc('milliseconds', r.last_seen, 'UTC'), r.id
+  LIMIT @batch_size),
+locked AS (
+  SELECT r.iata, r.path_key FROM known_routes r
+  JOIN cand c ON c.iata = r.iata AND c.path_key = r.path_key
+  WHERE r.last_seen < @grace_cutoff::timestamptz
+    AND r.observation_count < @min_observations::bigint
+  FOR UPDATE OF r SKIP LOCKED),
+deleted AS (DELETE FROM known_routes kr USING locked l
+            WHERE kr.iata = l.iata AND kr.path_key = l.path_key RETURNING kr.iata, kr.path_key)
+SELECT (SELECT count(*) FROM cand) AS candidates,
+       (SELECT count(*) FROM deleted) AS deleted,
+       (SELECT ts FROM cand ORDER BY ts DESC, id DESC LIMIT 1)::timestamptz AS last_ts,
+       coalesce((SELECT id FROM cand ORDER BY ts DESC, id DESC LIMIT 1), 0)::bigint AS last_id,
+       (SELECT min(c.ts) FROM cand c
+         WHERE NOT EXISTS (SELECT 1 FROM deleted d WHERE d.iata = c.iata AND d.path_key = c.path_key))::timestamptz
+         AS unresolved_ts,
+       LEAST(@grace_ceil::timestamptz, sqlc.arg('after_ts')::timestamptz + interval '6 hours')::timestamptz AS window_end;
+
+-- name: GetBackgroundState :one
+SELECT value FROM background_state WHERE key = @key;
+
+-- name: UpsertBackgroundState :exec
+INSERT INTO background_state (key, value, updated_at) VALUES (@key, @value, now())
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 
 -- name: DeleteOldChannelIATAs :exec
 -- Keeps the channel IATA filter in step with packet retention.
@@ -1527,39 +1569,46 @@ ON CONFLICT (iata, path_key) DO UPDATE SET
   last_seen = NOW(),
   observation_count = known_routes.observation_count + 1;
 
--- name: ListKnownRoutes :many
--- Only one branch runs. Keep the IATA range ordered by the composite index:
--- generic plans can otherwise prefer scanning the global timestamp index.
--- The text equality preserves exact input matching, including trailing spaces.
--- Pages by (last_seen to the ms, id) so routes sharing the cursor's millisecond
--- aren't skipped; cursor id 0 keeps the plain timestamp cursor.
-SELECT r.id, r.node_ids, r.hash_prefix, r.iata, r.hop_count, r.first_seen, r.last_seen, r.observation_count
-FROM ((
+-- name: ListKnownRoutesByIATA :many
+-- iata as a range keeps it in the pathkeys, so only idx_known_routes_iata_keyset returns rows in
+-- order; with = a generic plan may walk the global keyset. No cursor: NULL ts and id 0.
 SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
 FROM known_routes
-WHERE $1 = ''
-  AND ($2 = 0 OR hop_count = $2)
-  AND ($3::timestamptz IS NULL
-       OR date_trunc('milliseconds', last_seen, 'UTC') < $3
-       OR ($5::bigint > 0 AND date_trunc('milliseconds', last_seen, 'UTC') = $3 AND id < $5))
-ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC
-LIMIT $4
-)
-UNION ALL
-(
-SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
-FROM known_routes
-WHERE $1 <> '' AND iata::text = $1
-  AND iata >= $1::bpchar AND iata <= $1::bpchar
-  AND ($2 = 0 OR hop_count = $2)
-  AND ($3::timestamptz IS NULL
-       OR date_trunc('milliseconds', last_seen, 'UTC') < $3
-       OR ($5::bigint > 0 AND date_trunc('milliseconds', last_seen, 'UTC') = $3 AND id < $5))
+WHERE iata >= @iata::bpchar AND iata <= @iata::bpchar
+  AND (date_trunc('milliseconds', last_seen, 'UTC'), id)
+        < (COALESCE(sqlc.narg('cursor_ts')::timestamptz, 'infinity'::timestamptz), @cursor_id::bigint)
 ORDER BY iata, date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC
-LIMIT $4
-)) r
-ORDER BY date_trunc('milliseconds', r.last_seen, 'UTC') DESC, r.id DESC
-LIMIT $4;
+LIMIT @page_limit;
+
+-- name: ListKnownRoutesByIATAHop :many
+-- Custom plans only (Store.qc): a generic plan walks the whole region for a rare hop.
+-- The = form prices the Sort correctly; the range form under-costs it when a hop index exists.
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
+FROM known_routes
+WHERE iata = @iata::bpchar
+  AND hop_count = @hop_count
+  AND (date_trunc('milliseconds', last_seen, 'UTC'), id)
+        < (COALESCE(sqlc.narg('cursor_ts')::timestamptz, 'infinity'::timestamptz), @cursor_id::bigint)
+ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC
+LIMIT @page_limit;
+
+-- name: ListKnownRoutesGlobal :many
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
+FROM known_routes
+WHERE (date_trunc('milliseconds', last_seen, 'UTC'), id)
+        < (COALESCE(sqlc.narg('cursor_ts')::timestamptz, 'infinity'::timestamptz), @cursor_id::bigint)
+ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC
+LIMIT @page_limit;
+
+-- name: ListKnownRoutesGlobalHop :many
+-- Custom plans only (Store.qc): the generic plan walks the whole keyset index for an absent hop.
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
+FROM known_routes
+WHERE hop_count = @hop_count
+  AND (date_trunc('milliseconds', last_seen, 'UTC'), id)
+        < (COALESCE(sqlc.narg('cursor_ts')::timestamptz, 'infinity'::timestamptz), @cursor_id::bigint)
+ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC
+LIMIT @page_limit;
 
 -- name: GetKnownRoutesByNodes :many
 -- Routes containing @nodes[i] in IATA @iatas[i] (aligned, one node per IATA). The &&
@@ -1738,8 +1787,9 @@ WHERE ns.iata = ANY(@iatas::bpchar[])
 -- name: RefreshRadioPresets :exec
 REFRESH MATERIALIZED VIEW CONCURRENTLY mv_radio_presets;
 
--- name: AmbiguousPrefixes :many
--- Hop prefixes that match >1 node in an IATA, per width. Computed once per reconfirm run.
+-- name: FillReconfirmAmb :exec
+-- Hop prefixes that match >1 node in an IATA, per width, into the sweep's temp table.
+INSERT INTO reconfirm_amb (iata, len, prefix)
 SELECT iata::text AS iata, 1::int AS len, prefix_1 AS prefix FROM node_short_ids GROUP BY iata, prefix_1 HAVING COUNT(*) > 1
 UNION ALL
 SELECT iata::text, 2::int, prefix_2 FROM node_short_ids GROUP BY iata, prefix_2 HAVING COUNT(*) > 1
@@ -1748,57 +1798,40 @@ SELECT iata::text, 3::int, prefix_3 FROM node_short_ids GROUP BY iata, prefix_3 
 UNION ALL
 SELECT iata::text, 4::int, prefix_4 FROM node_short_ids GROUP BY iata, prefix_4 HAVING COUNT(*) > 1;
 
--- name: ReconfirmRoutes :one
--- Checks one batch of least-recently-reconfirmed routes: deletes those with a departed
--- hop node or a hop prefix now matching >1 node in that IATA (length-aware:
--- 1/2/3/4-byte hop prefixes check prefix_1/2/3/4; ambiguity set supplied by AmbiguousPrefixes),
--- and stamps the survivors.
+-- name: ReconfirmRoutesBatch :one
+-- The next batch_size routes after the cursor in pkey order: deletes those with a departed hop
+-- node or a hop prefix matching >1 node in that IATA (length-aware, reconfirm_amb). Writes no stamp.
+-- The DELETE re-checks the newest row version. An empty last_iata means the walk passed the end.
 WITH batch AS MATERIALIZED (
-    SELECT r.iata, r.path_key, r.node_ids, r.hash_prefix
-    FROM known_routes r
-    WHERE r.last_reconfirmed_at < @before
-    ORDER BY r.last_reconfirmed_at
-    LIMIT @batch_size
-    FOR UPDATE OF r SKIP LOCKED
-),
-amb AS (
-    SELECT a.iata::char(3) AS iata, a.len, a.p
-    FROM ROWS FROM (unnest(@amb_iata::text[]), unnest(@amb_len::int[]), unnest(@amb_prefix::bytea[])) AS a(iata, len, p)
-),
+  SELECT r.iata, r.path_key, r.node_ids, r.hash_prefix FROM known_routes r
+  WHERE (r.iata, r.path_key) > (@after_iata::bpchar, @after_key::bytea)
+  ORDER BY r.iata, r.path_key
+  LIMIT @batch_size),
 dead AS (
-    SELECT b.iata, b.path_key
-    FROM batch b
-    WHERE EXISTS (
-        SELECT 1
-        FROM unnest(b.node_ids) AS hop_node_id
-        WHERE NOT EXISTS (
-            SELECT 1 FROM node_short_ids ns
-            WHERE ns.node_id = hop_node_id
-              AND ns.iata = b.iata
-        )
-    )
-    UNION
-    SELECT DISTINCT b.iata, b.path_key
-    FROM batch b
-    CROSS JOIN LATERAL unnest(b.hash_prefix) AS hp
-    JOIN amb a ON a.iata = b.iata AND a.len = length(hp) AND a.p = hp
-),
+  SELECT b.iata, b.path_key FROM batch b
+  WHERE EXISTS (SELECT 1 FROM unnest(b.node_ids) AS hop(node_id)
+                WHERE NOT EXISTS (SELECT 1 FROM node_short_ids ns WHERE ns.node_id = hop.node_id AND ns.iata = b.iata))
+     OR EXISTS (SELECT 1 FROM unnest(b.hash_prefix) AS hp
+                JOIN reconfirm_amb a ON a.iata = b.iata::text AND a.len = length(hp) AND a.prefix = hp)),
 deleted AS (
-    DELETE FROM known_routes kr
-    USING dead d
-    WHERE kr.iata = d.iata AND kr.path_key = d.path_key
-),
-updated AS (
-    UPDATE known_routes kr
-    SET last_reconfirmed_at = GREATEST(NOW(), @before::timestamptz)
-    FROM batch b
-    WHERE kr.iata = b.iata AND kr.path_key = b.path_key
-      AND NOT EXISTS (
-          SELECT 1 FROM dead d
-          WHERE d.iata = b.iata AND d.path_key = b.path_key
-      )
-)
-SELECT count(*) FROM batch;
+  DELETE FROM known_routes kr USING dead d
+  WHERE kr.iata = d.iata AND kr.path_key = d.path_key
+    AND (EXISTS (SELECT 1 FROM unnest(kr.node_ids) AS hop(node_id)
+                 WHERE NOT EXISTS (SELECT 1 FROM node_short_ids ns WHERE ns.node_id = hop.node_id AND ns.iata = kr.iata))
+      OR EXISTS (SELECT 1 FROM unnest(kr.hash_prefix) AS hp
+                 JOIN reconfirm_amb a ON a.iata = kr.iata::text AND a.len = length(hp) AND a.prefix = hp))
+  RETURNING 1)
+SELECT (SELECT count(*) FROM batch) AS scanned,
+       (SELECT count(*) FROM deleted) AS deleted,
+       coalesce((SELECT iata FROM batch ORDER BY iata DESC, path_key DESC LIMIT 1)::text, '')::text AS last_iata,
+       coalesce((SELECT path_key FROM batch ORDER BY iata DESC, path_key DESC LIMIT 1), ''::bytea)::bytea AS last_key;
+
+-- name: ReconfirmSliceEnd :one
+-- Key of the last route in a slice that timed out: the caller passes the slice's row count - 1.
+SELECT r.iata, r.path_key FROM known_routes r
+WHERE (r.iata, r.path_key) > (@after_iata::bpchar, @after_key::bytea)
+ORDER BY r.iata, r.path_key
+OFFSET @offset_rows LIMIT 1;
 
 -- name: ReconfirmNeighbors :exec
 -- Delete node_neighbors where the neighbor has departed from node_short_ids

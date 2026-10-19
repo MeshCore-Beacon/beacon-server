@@ -18,8 +18,6 @@ type Querier interface {
 	AddChannelMembers(ctx context.Context, arg AddChannelMembersParams) error
 	AddIATAs(ctx context.Context, iatas []string) error
 	AddRegionIATAs(ctx context.Context, arg AddRegionIATAsParams) error
-	// Hop prefixes that match >1 node in an IATA, per width. Computed once per reconfirm run.
-	AmbiguousPrefixes(ctx context.Context) ([]AmbiguousPrefixesRow, error)
 	// Keeps fetch timing so re-enabling still respects backoff; the ETag goes with the rows.
 	ClearRepeaters(ctx context.Context) (int64, error)
 	CreateAccount(ctx context.Context, name string) (Account, error)
@@ -29,6 +27,14 @@ type Querier interface {
 	DeleteAllChannelMembers(ctx context.Context) error
 	DeleteChannelConfigScopes(ctx context.Context) error
 	DeleteChannelMembersNotIn(ctx context.Context, arg DeleteChannelMembersNotInParams) error
+	// One batch past retention, keyset after the per-run cursor (the first call passes -infinity, 0).
+	// The truncated bound (ms ceiling of the cutoff) drives idx_known_routes_keyset; the exact
+	// residual decides membership. + interval 0 keeps it off idx_known_routes_last_seen.
+	DeleteExpiredRoutes(ctx context.Context, arg DeleteExpiredRoutesParams) (DeleteExpiredRoutesRow, error)
+	// One batch of rarely-seen routes after the cursor, inside a window of at most 6 h below the grace
+	// cutoff: candidates without locks, then lock SKIP LOCKED through the pkey (re-checked on the newest
+	// version) and delete. unresolved_ts is the earliest candidate left behind; window_end is the bound used.
+	DeleteGraceRoutesSlice(ctx context.Context, arg DeleteGraceRoutesSliceParams) (DeleteGraceRoutesSliceRow, error)
 	// Keeps the channel IATA filter in step with packet retention.
 	DeleteOldChannelIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error
 	// Deletes nodes not seen since the given cutoff. node_iatas and node_neighbors cascade-
@@ -47,9 +53,6 @@ type Querier interface {
 	DeleteOldPackets(ctx context.Context, arg DeleteOldPacketsParams) (int64, error)
 	// Bumps coverage when hours go, so cached responses that included them are not reused.
 	DeleteOldRollups(ctx context.Context, cutoff pgtype.Timestamptz) error
-	// One batch of routes past retention, or past grace with too few observations.
-	// GREATEST keeps the scan on idx_known_routes_last_seen.
-	DeleteOldRoutes(ctx context.Context, arg DeleteOldRoutesParams) (int64, error)
 	// Deletes telemetry rows older than the given cutoff. Called by the cleanup goroutine.
 	DeleteOldTelemetry(ctx context.Context, reportedAt pgtype.Timestamptz) error
 	// Keeps the trace IATA filter in step with packet retention.
@@ -60,12 +63,15 @@ type Querier interface {
 	DeleteRollupHour(ctx context.Context, hour pgtype.Timestamptz) error
 	// Dirty hours that can no longer be re-rolled.
 	DeleteStaleDirtyHours(ctx context.Context) error
+	// Hop prefixes that match >1 node in an IATA, per width, into the sweep's temp table.
+	FillReconfirmAmb(ctx context.Context) error
 	FillRollupObs(ctx context.Context, dollar_1 pgtype.Timestamptz) error
 	// Marks the hour complete and bumps the revision only when its content changed.
 	FinishRollupHour(ctx context.Context, arg FinishRollupHourParams) (bool, error)
 	GetAccount(ctx context.Context, id uuid.UUID) (Account, error)
 	// Both counters only grow, so their sum changes whenever rolled content or coverage does.
 	GetAnalyticsRevision(ctx context.Context) (int64, error)
+	GetBackgroundState(ctx context.Context, key string) (json.RawMessage, error)
 	GetChannelByID(ctx context.Context, id int32) (Channel, error)
 	GetEarliestCompleteRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
 	// ============================================================
@@ -212,12 +218,15 @@ type Querier interface {
 	ListDirtyRollupHours(ctx context.Context, limit int32) ([]pgtype.Timestamptz, error)
 	ListHeardIATAs(ctx context.Context) ([]string, error)
 	ListIATAs(ctx context.Context) ([]IataCode, error)
-	// Only one branch runs. Keep the IATA range ordered by the composite index:
-	// generic plans can otherwise prefer scanning the global timestamp index.
-	// The text equality preserves exact input matching, including trailing spaces.
-	// Pages by (last_seen to the ms, id) so routes sharing the cursor's millisecond
-	// aren't skipped; cursor id 0 keeps the plain timestamp cursor.
-	ListKnownRoutes(ctx context.Context, arg ListKnownRoutesParams) ([]ListKnownRoutesRow, error)
+	// iata as a range keeps it in the pathkeys, so only idx_known_routes_iata_keyset returns rows in
+	// order; with = a generic plan may walk the global keyset. No cursor: NULL ts and id 0.
+	ListKnownRoutesByIATA(ctx context.Context, arg ListKnownRoutesByIATAParams) ([]ListKnownRoutesByIATARow, error)
+	// Custom plans only (Store.qc): a generic plan walks the whole region for a rare hop.
+	// The = form prices the Sort correctly; the range form under-costs it when a hop index exists.
+	ListKnownRoutesByIATAHop(ctx context.Context, arg ListKnownRoutesByIATAHopParams) ([]ListKnownRoutesByIATAHopRow, error)
+	ListKnownRoutesGlobal(ctx context.Context, arg ListKnownRoutesGlobalParams) ([]ListKnownRoutesGlobalRow, error)
+	// Custom plans only (Store.qc): the generic plan walks the whole keyset index for an absent hop.
+	ListKnownRoutesGlobalHop(ctx context.Context, arg ListKnownRoutesGlobalHopParams) ([]ListKnownRoutesGlobalHopRow, error)
 	// Returns messages after the given message ID, ordered oldest first.
 	// Used for WS reconnect backfill.
 	ListMessagesAfterID(ctx context.Context, arg ListMessagesAfterIDParams) ([]ListMessagesAfterIDRow, error)
@@ -295,11 +304,12 @@ type Querier interface {
 	// Delete node_neighbors where the neighbor has departed from node_short_ids
 	// for that IATA, or where its prefix_4 is now ambiguous.
 	ReconfirmNeighbors(ctx context.Context) error
-	// Checks one batch of least-recently-reconfirmed routes: deletes those with a departed
-	// hop node or a hop prefix now matching >1 node in that IATA (length-aware:
-	// 1/2/3/4-byte hop prefixes check prefix_1/2/3/4; ambiguity set supplied by AmbiguousPrefixes),
-	// and stamps the survivors.
-	ReconfirmRoutes(ctx context.Context, arg ReconfirmRoutesParams) (int64, error)
+	// The next batch_size routes after the cursor in pkey order: deletes those with a departed hop
+	// node or a hop prefix matching >1 node in that IATA (length-aware, reconfirm_amb). Writes no stamp.
+	// The DELETE re-checks the newest row version. An empty last_iata means the walk passed the end.
+	ReconfirmRoutesBatch(ctx context.Context, arg ReconfirmRoutesBatchParams) (ReconfirmRoutesBatchRow, error)
+	// Key of the last route in a slice that timed out: the caller passes the slice's row count - 1.
+	ReconfirmSliceEnd(ctx context.Context, arg ReconfirmSliceEndParams) (ReconfirmSliceEndRow, error)
 	// One hearing of a TRACE packet: trace_iatas refreshes at most hourly and the tag's heard
 	// window widens (the first hearing replaces the packet's provisional times). Packet counts
 	// and payloads come from UpsertPacket.
@@ -401,6 +411,7 @@ type Querier interface {
 	// unconditionally overwrites, unlike the neighbor-side region_scope.
 	UpdateObserverRegionScope(ctx context.Context, arg UpdateObserverRegionScopeParams) error
 	UpdateObserverStatus(ctx context.Context, arg UpdateObserverStatusParams) (uuid.UUID, error)
+	UpsertBackgroundState(ctx context.Context, arg UpsertBackgroundStateParams) error
 	// ============================================================
 	// CHANNELS
 	// ============================================================

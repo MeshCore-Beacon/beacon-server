@@ -6,101 +6,66 @@ package background
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/db"
 )
 
 type reconfirmStore struct {
-	run       func(context.Context, int32, time.Time) (int64, error)
-	ambCalls  int
-	neighbors bool
+	budgets []int
+	err     error
 }
 
-func (*reconfirmStore) DeleteOldRoutes(context.Context, time.Time, int64, time.Time) error {
-	return nil
+func (s *reconfirmStore) ReconfirmSweep(ctx context.Context, budget int) (db.ReconfirmResult, error) {
+	if _, ok := ctx.Deadline(); ok {
+		return db.ReconfirmResult{}, errors.New("sweep given a per-call deadline")
+	}
+	s.budgets = append(s.budgets, budget)
+	return db.ReconfirmResult{Scanned: int64(budget)}, s.err
 }
 
-func (s *reconfirmStore) AmbiguousPrefixes(context.Context) (db.AmbiguousPrefixes, error) {
-	s.ambCalls++
-	return db.AmbiguousPrefixes{}, nil
-}
-
-func (s *reconfirmStore) ReconfirmRoutes(ctx context.Context, n int32, before time.Time, _ db.AmbiguousPrefixes) (int64, error) {
-	return s.run(ctx, n, before)
-}
-
-func (s *reconfirmStore) ReconfirmNeighbors(context.Context) error {
-	s.neighbors = true
-	return nil
-}
-
-func TestReconfirmCoverage(t *testing.T) {
+func TestReconfirmTaskPacing(t *testing.T) {
 	for _, tc := range []struct {
-		name                string
-		available, wantLeft int64
+		rowsPerHour int
+		tick        time.Duration
+		budget      int
 	}{
-		{"empty", 0, 0},
-		{"partial last batch", 1501, 0},
-		{"full run budget", 750010, 10},
+		{81000, 5 * time.Minute, 6750},
+		{12000, 5 * time.Minute, 1000},
+		{100, 5 * time.Minute, 8},
+		{1, 5 * time.Minute, 1},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			left := tc.available
-			var cutoff time.Time
-			s := &reconfirmStore{run: func(ctx context.Context, n int32, before time.Time) (int64, error) {
-				if n <= 0 || n > 1000 {
-					t.Fatalf("transaction requested %d routes", n)
-				}
-				if cutoff.IsZero() {
-					cutoff = before
-				} else if !cutoff.Equal(before) {
-					t.Fatal("cutoff advanced, allowing completed routes to be revisited")
-				}
-				checked := min(int64(n), left)
-				left -= checked
-				return checked, ctx.Err()
-			}}
-			if err := ReconfirmTask(s, time.Hour, time.Minute, 3, time.Hour).Run(context.Background()); err != nil {
-				t.Fatal(err)
+		t.Run(fmt.Sprintf("%d per hour", tc.rowsPerHour), func(t *testing.T) {
+			s := &reconfirmStore{}
+			task := ReconfirmTask(s, tc.rowsPerHour, tc.tick)
+			if task.Name != "reconfirm" || task.Interval != tc.tick {
+				t.Fatalf("task %q every %s, want reconfirm every %s", task.Name, task.Interval, tc.tick)
 			}
-			if left != tc.wantLeft || !s.neighbors {
-				t.Fatalf("remaining %d, neighbor cleanup %t", left, s.neighbors)
+			for range 2 {
+				if err := task.Run(context.Background()); err != nil {
+					t.Fatal(err)
+				}
 			}
-			if s.ambCalls != 1 {
-				t.Fatalf("ambiguity computed %d times, want once per run", s.ambCalls)
+			if len(s.budgets) != 2 || s.budgets[0] != tc.budget || s.budgets[1] != tc.budget {
+				t.Fatalf("sweep budgets %v, want one call of %d per run", s.budgets, tc.budget)
 			}
 		})
 	}
-}
-
-func TestReconfirmStopsOnFailure(t *testing.T) {
-	want := errors.New("database unavailable")
-	calls := 0
-	s := &reconfirmStore{run: func(context.Context, int32, time.Time) (int64, error) {
-		calls++
-		if calls == 1 {
-			return 1000, nil
-		}
-		return 0, want
-	}}
-	err := ReconfirmTask(s, time.Hour, time.Minute, 3, time.Hour).Run(context.Background())
-	if !errors.Is(err, want) || calls != 2 || s.neighbors {
-		t.Fatalf("failure was not propagated: error %v, calls %d, neighbors %t", err, calls, s.neighbors)
+	if ReconfirmTick != 5*time.Minute {
+		t.Fatalf("ReconfirmTick = %s, want 5m", ReconfirmTick)
 	}
 }
 
-func TestReconfirmBatchDeadline(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		s := &reconfirmStore{run: func(ctx context.Context, _ int32, _ time.Time) (int64, error) {
-			<-ctx.Done()
-			return 0, ctx.Err()
-		}}
-		start := time.Now()
-		err := ReconfirmTask(s, time.Hour, time.Minute, 3, time.Hour).Run(context.Background())
-		if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 5*time.Second || s.neighbors {
-			t.Fatalf("batch exceeded its deadline: error %v, duration %s, neighbors %t", err, time.Since(start), s.neighbors)
-		}
-	})
+func TestReconfirmTaskReturnsSweepError(t *testing.T) {
+	want := errors.New("database unavailable")
+	s := &reconfirmStore{err: want}
+	err := ReconfirmTask(s, 81000, ReconfirmTick).Run(context.Background())
+	if !errors.Is(err, want) || err.Error() != "routes: database unavailable" {
+		t.Fatalf("err = %v, want routes: %v", err, want)
+	}
+	if len(s.budgets) != 1 {
+		t.Fatalf("sweep called %d times, want 1", len(s.budgets))
+	}
 }

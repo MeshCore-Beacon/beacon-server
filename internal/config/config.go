@@ -112,11 +112,13 @@ type ResolvedConfig struct {
 	RouteRetention       time.Duration
 	RouteGrace           time.Duration
 	RouteMinObservations int
-	MaxConnsPerIP        int
-	MaxConnectsPerMinute int
-	ViewRefreshInterval  time.Duration
-	ReconfirmInterval    time.Duration
-	CleanupInterval      time.Duration
+	// RouteReconfirmRowsPerHour is the reconfirm sweep's pace; defaults to 81000.
+	RouteReconfirmRowsPerHour int
+	MaxConnsPerIP             int
+	MaxConnectsPerMinute      int
+	ViewRefreshInterval       time.Duration
+	ReconfirmInterval         time.Duration
+	CleanupInterval           time.Duration
 
 	PresenceFlushInterval time.Duration
 	PresencePacketTTL     time.Duration
@@ -166,7 +168,7 @@ type BackgroundConfig struct {
 	// Defaults to 1h if not set.
 	ViewRefresh duration `yaml:"view_refresh"`
 
-	// Reconfirm prunes stale and ambiguous resolved paths and neigbors.
+	// Reconfirm is the interval of route retention and neighbor cleanup.
 	Reconfirm duration `yaml:"reconfirm"`
 
 	// Cleanup is how often old telemetry and packet rows are pruned.
@@ -292,6 +294,10 @@ type RoutesConfig struct {
 	// MinObservations is the observation count below which Grace applies
 	// instead of Retention. Defaults to 3 if not set.
 	MinObservations int `yaml:"min_observations"`
+	// ReconfirmRowsPerHour is how many routes the reconfirm sweep checks per
+	// hour for departed or now-ambiguous hops, in 5-minute slices. Defaults to
+	// 81000 if not set.
+	ReconfirmRowsPerHour int `yaml:"reconfirm_rows_per_hour"`
 }
 
 // NodesConfig controls node-derived signal thresholds.
@@ -441,6 +447,9 @@ func Load(path string) (*Config, error) {
 	if cfg.RateLimit.RequestsPerMinute < 0 || cfg.RateLimit.Burst < 0 {
 		return nil, fmt.Errorf("ratelimit.requests_per_minute and ratelimit.burst must be positive or zero for defaults")
 	}
+	if cfg.Routes.ReconfirmRowsPerHour < 0 {
+		return nil, fmt.Errorf("routes.reconfirm_rows_per_hour must be positive or zero for the default")
+	}
 	if cfg.WebSocket.MaxConnectsPerMinute < 0 {
 		return nil, fmt.Errorf("websocket.max_connects_per_minute must be positive or zero for the default")
 	}
@@ -578,18 +587,19 @@ func Resolve(cfg *Config) ResolvedConfig {
 			RequestsPerMinute: cfg.RateLimit.RequestsPerMinute,
 			Burst:             cfg.RateLimit.Burst,
 		},
-		TelemetryResolution:  cfg.Telemetry.Resolution.Duration,
-		TelemetryRetention:   cfg.Telemetry.Retention.Duration,
-		RollupRetention:      cfg.Analytics.RollupRetention.Duration,
-		PacketRetention:      cfg.Packets.Retention.Duration,
-		RouteRetention:       cfg.Routes.Retention.Duration,
-		RouteGrace:           cfg.Routes.Grace.Duration,
-		RouteMinObservations: cfg.Routes.MinObservations,
-		MaxConnsPerIP:        cfg.WebSocket.MaxConnectionsPerIP,
-		MaxConnectsPerMinute: cfg.WebSocket.MaxConnectsPerMinute,
-		ViewRefreshInterval:  cfg.Background.ViewRefresh.Duration,
-		ReconfirmInterval:    cfg.Background.Reconfirm.Duration,
-		CleanupInterval:      cfg.Background.Cleanup.Duration,
+		TelemetryResolution:       cfg.Telemetry.Resolution.Duration,
+		TelemetryRetention:        cfg.Telemetry.Retention.Duration,
+		RollupRetention:           cfg.Analytics.RollupRetention.Duration,
+		PacketRetention:           cfg.Packets.Retention.Duration,
+		RouteRetention:            cfg.Routes.Retention.Duration,
+		RouteGrace:                cfg.Routes.Grace.Duration,
+		RouteMinObservations:      cfg.Routes.MinObservations,
+		RouteReconfirmRowsPerHour: cfg.Routes.ReconfirmRowsPerHour,
+		MaxConnsPerIP:             cfg.WebSocket.MaxConnectionsPerIP,
+		MaxConnectsPerMinute:      cfg.WebSocket.MaxConnectsPerMinute,
+		ViewRefreshInterval:       cfg.Background.ViewRefresh.Duration,
+		ReconfirmInterval:         cfg.Background.Reconfirm.Duration,
+		CleanupInterval:           cfg.Background.Cleanup.Duration,
 
 		PresenceFlushInterval: cfg.Presence.FlushInterval.Duration,
 		PresencePacketTTL:     cfg.Presence.PacketTTL.Duration,
@@ -626,6 +636,9 @@ func Resolve(cfg *Config) ResolvedConfig {
 	if r.RouteMinObservations == 0 {
 		r.RouteMinObservations = 3
 	}
+	if r.RouteReconfirmRowsPerHour == 0 {
+		r.RouteReconfirmRowsPerHour = 81000
+	}
 	if r.MaxConnsPerIP == 0 {
 		r.MaxConnsPerIP = 5
 	}
@@ -661,8 +674,8 @@ func Resolve(cfg *Config) ResolvedConfig {
 
 func (r ResolvedConfig) String() string {
 	return fmt.Sprintf(
-		"telemetryResolution=%s telemetryRetention=%s rollupRetention=%s packetRetention=%s routeRetention=%s routeGrace=%s routeMinObs=%d maxConnsPerIP=%d maxConnectsPerMinute=%d viewRefresh=%s reconfirm=%s cleanup=%s presenceFlush=%s presencePacketTTL=%s clockDriftThreshold=%s nodeStaleThreshold=%s nodeDeleteAfter=%s observerDeleteAfter=%s rateLimitEnabled=%t requestsPerMinute=%d burst=%d",
-		r.TelemetryResolution, r.TelemetryRetention, r.RollupRetention, r.PacketRetention, r.RouteRetention, r.RouteGrace, r.RouteMinObservations,
+		"telemetryResolution=%s telemetryRetention=%s rollupRetention=%s packetRetention=%s routeRetention=%s routeGrace=%s routeMinObs=%d routeReconfirmRowsPerHour=%d maxConnsPerIP=%d maxConnectsPerMinute=%d viewRefresh=%s reconfirm=%s cleanup=%s presenceFlush=%s presencePacketTTL=%s clockDriftThreshold=%s nodeStaleThreshold=%s nodeDeleteAfter=%s observerDeleteAfter=%s rateLimitEnabled=%t requestsPerMinute=%d burst=%d",
+		r.TelemetryResolution, r.TelemetryRetention, r.RollupRetention, r.PacketRetention, r.RouteRetention, r.RouteGrace, r.RouteMinObservations, r.RouteReconfirmRowsPerHour,
 		r.MaxConnsPerIP, r.MaxConnectsPerMinute, r.ViewRefreshInterval, r.ReconfirmInterval, r.CleanupInterval,
 		r.PresenceFlushInterval, r.PresencePacketTTL, r.ClockDriftThreshold,
 		r.NodeStaleThreshold, r.NodeDeleteAfter, r.ObserverDeleteAfter,

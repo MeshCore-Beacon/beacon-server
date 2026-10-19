@@ -72,43 +72,6 @@ func (q *Queries) AddRegionIATAs(ctx context.Context, arg AddRegionIATAsParams) 
 	return err
 }
 
-const ambiguousPrefixes = `-- name: AmbiguousPrefixes :many
-SELECT iata::text AS iata, 1::int AS len, prefix_1 AS prefix FROM node_short_ids GROUP BY iata, prefix_1 HAVING COUNT(*) > 1
-UNION ALL
-SELECT iata::text, 2::int, prefix_2 FROM node_short_ids GROUP BY iata, prefix_2 HAVING COUNT(*) > 1
-UNION ALL
-SELECT iata::text, 3::int, prefix_3 FROM node_short_ids GROUP BY iata, prefix_3 HAVING COUNT(*) > 1
-UNION ALL
-SELECT iata::text, 4::int, prefix_4 FROM node_short_ids GROUP BY iata, prefix_4 HAVING COUNT(*) > 1
-`
-
-type AmbiguousPrefixesRow struct {
-	Iata   string `json:"iata"`
-	Len    int32  `json:"len"`
-	Prefix []byte `json:"prefix"`
-}
-
-// Hop prefixes that match >1 node in an IATA, per width. Computed once per reconfirm run.
-func (q *Queries) AmbiguousPrefixes(ctx context.Context) ([]AmbiguousPrefixesRow, error) {
-	rows, err := q.db.Query(ctx, ambiguousPrefixes)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []AmbiguousPrefixesRow{}
-	for rows.Next() {
-		var i AmbiguousPrefixesRow
-		if err := rows.Scan(&i.Iata, &i.Len, &i.Prefix); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const clearRepeaters = `-- name: ClearRepeaters :execrows
 WITH reset AS (UPDATE meshmapper_repeater_sources SET etag = NULL, checked_at = NULL)
 DELETE FROM meshmapper_repeaters
@@ -197,6 +160,124 @@ type DeleteChannelMembersNotInParams struct {
 func (q *Queries) DeleteChannelMembersNotIn(ctx context.Context, arg DeleteChannelMembersNotInParams) error {
 	_, err := q.db.Exec(ctx, deleteChannelMembersNotIn, arg.Iata, arg.Keep)
 	return err
+}
+
+const deleteExpiredRoutes = `-- name: DeleteExpiredRoutes :one
+WITH expired AS (
+  SELECT r.iata, r.path_key, date_trunc('milliseconds', r.last_seen, 'UTC') AS ts, r.id
+  FROM known_routes r
+  WHERE (date_trunc('milliseconds', r.last_seen, 'UTC'), r.id) > ($1::timestamptz, $2::bigint)
+    AND date_trunc('milliseconds', r.last_seen, 'UTC') < $3::timestamptz
+    AND r.last_seen + interval '0' < $4::timestamptz
+  ORDER BY date_trunc('milliseconds', r.last_seen, 'UTC'), r.id
+  LIMIT $5
+  FOR UPDATE OF r SKIP LOCKED),
+deleted AS (DELETE FROM known_routes kr USING expired e
+            WHERE kr.iata = e.iata AND kr.path_key = e.path_key RETURNING 1)
+SELECT (SELECT count(*) FROM expired) AS selected,
+       (SELECT ts FROM expired ORDER BY ts DESC, id DESC LIMIT 1)::timestamptz AS last_ts,
+       coalesce((SELECT id FROM expired ORDER BY ts DESC, id DESC LIMIT 1), 0)::bigint AS last_id
+`
+
+type DeleteExpiredRoutesParams struct {
+	AfterTs         pgtype.Timestamptz `json:"after_ts"`
+	AfterID         int64              `json:"after_id"`
+	RetentionCeil   pgtype.Timestamptz `json:"retention_ceil"`
+	RetentionCutoff pgtype.Timestamptz `json:"retention_cutoff"`
+	BatchSize       int32              `json:"batch_size"`
+}
+
+type DeleteExpiredRoutesRow struct {
+	Selected int64              `json:"selected"`
+	LastTs   pgtype.Timestamptz `json:"last_ts"`
+	LastID   int64              `json:"last_id"`
+}
+
+// One batch past retention, keyset after the per-run cursor (the first call passes -infinity, 0).
+// The truncated bound (ms ceiling of the cutoff) drives idx_known_routes_keyset; the exact
+// residual decides membership. + interval 0 keeps it off idx_known_routes_last_seen.
+func (q *Queries) DeleteExpiredRoutes(ctx context.Context, arg DeleteExpiredRoutesParams) (DeleteExpiredRoutesRow, error) {
+	row := q.db.QueryRow(ctx, deleteExpiredRoutes,
+		arg.AfterTs,
+		arg.AfterID,
+		arg.RetentionCeil,
+		arg.RetentionCutoff,
+		arg.BatchSize,
+	)
+	var i DeleteExpiredRoutesRow
+	err := row.Scan(&i.Selected, &i.LastTs, &i.LastID)
+	return i, err
+}
+
+const deleteGraceRoutesSlice = `-- name: DeleteGraceRoutesSlice :one
+WITH cand AS MATERIALIZED (
+  SELECT r.iata, r.path_key, date_trunc('milliseconds', r.last_seen, 'UTC') AS ts, r.id
+  FROM known_routes r
+  WHERE (date_trunc('milliseconds', r.last_seen, 'UTC'), r.id) > ($2::timestamptz, $3::bigint)
+    AND date_trunc('milliseconds', r.last_seen, 'UTC')
+          < LEAST($1::timestamptz, $2::timestamptz + interval '6 hours')
+    AND r.last_seen + interval '0' < $4::timestamptz
+    AND r.observation_count < $5::bigint
+  ORDER BY date_trunc('milliseconds', r.last_seen, 'UTC'), r.id
+  LIMIT $6),
+locked AS (
+  SELECT r.iata, r.path_key FROM known_routes r
+  JOIN cand c ON c.iata = r.iata AND c.path_key = r.path_key
+  WHERE r.last_seen < $4::timestamptz
+    AND r.observation_count < $5::bigint
+  FOR UPDATE OF r SKIP LOCKED),
+deleted AS (DELETE FROM known_routes kr USING locked l
+            WHERE kr.iata = l.iata AND kr.path_key = l.path_key RETURNING kr.iata, kr.path_key)
+SELECT (SELECT count(*) FROM cand) AS candidates,
+       (SELECT count(*) FROM deleted) AS deleted,
+       (SELECT ts FROM cand ORDER BY ts DESC, id DESC LIMIT 1)::timestamptz AS last_ts,
+       coalesce((SELECT id FROM cand ORDER BY ts DESC, id DESC LIMIT 1), 0)::bigint AS last_id,
+       (SELECT min(c.ts) FROM cand c
+         WHERE NOT EXISTS (SELECT 1 FROM deleted d WHERE d.iata = c.iata AND d.path_key = c.path_key))::timestamptz
+         AS unresolved_ts,
+       LEAST($1::timestamptz, $2::timestamptz + interval '6 hours')::timestamptz AS window_end
+`
+
+type DeleteGraceRoutesSliceParams struct {
+	GraceCeil       pgtype.Timestamptz `json:"grace_ceil"`
+	AfterTs         pgtype.Timestamptz `json:"after_ts"`
+	AfterID         int64              `json:"after_id"`
+	GraceCutoff     pgtype.Timestamptz `json:"grace_cutoff"`
+	MinObservations int64              `json:"min_observations"`
+	BatchSize       int32              `json:"batch_size"`
+}
+
+type DeleteGraceRoutesSliceRow struct {
+	Candidates   int64              `json:"candidates"`
+	Deleted      int64              `json:"deleted"`
+	LastTs       pgtype.Timestamptz `json:"last_ts"`
+	LastID       int64              `json:"last_id"`
+	UnresolvedTs pgtype.Timestamptz `json:"unresolved_ts"`
+	WindowEnd    pgtype.Timestamptz `json:"window_end"`
+}
+
+// One batch of rarely-seen routes after the cursor, inside a window of at most 6 h below the grace
+// cutoff: candidates without locks, then lock SKIP LOCKED through the pkey (re-checked on the newest
+// version) and delete. unresolved_ts is the earliest candidate left behind; window_end is the bound used.
+func (q *Queries) DeleteGraceRoutesSlice(ctx context.Context, arg DeleteGraceRoutesSliceParams) (DeleteGraceRoutesSliceRow, error) {
+	row := q.db.QueryRow(ctx, deleteGraceRoutesSlice,
+		arg.GraceCeil,
+		arg.AfterTs,
+		arg.AfterID,
+		arg.GraceCutoff,
+		arg.MinObservations,
+		arg.BatchSize,
+	)
+	var i DeleteGraceRoutesSliceRow
+	err := row.Scan(
+		&i.Candidates,
+		&i.Deleted,
+		&i.LastTs,
+		&i.LastID,
+		&i.UnresolvedTs,
+		&i.WindowEnd,
+	)
+	return i, err
 }
 
 const deleteOldChannelIATAs = `-- name: DeleteOldChannelIATAs :exec
@@ -299,42 +380,6 @@ func (q *Queries) DeleteOldPackets(ctx context.Context, arg DeleteOldPacketsPara
 	return count, err
 }
 
-const deleteOldRoutes = `-- name: DeleteOldRoutes :execrows
-WITH expired AS (
-    SELECT r.iata, r.path_key
-    FROM known_routes r
-    WHERE r.last_seen < GREATEST($1::timestamptz, $2::timestamptz)
-      AND (r.last_seen < $1 OR
-           (r.observation_count < $3 AND r.last_seen < $2))
-    LIMIT $4
-    FOR UPDATE OF r SKIP LOCKED
-)
-DELETE FROM known_routes kr USING expired e
-WHERE kr.iata = e.iata AND kr.path_key = e.path_key
-`
-
-type DeleteOldRoutesParams struct {
-	RetentionCutoff pgtype.Timestamptz `json:"retention_cutoff"`
-	GraceCutoff     pgtype.Timestamptz `json:"grace_cutoff"`
-	MinObservations int64              `json:"min_observations"`
-	BatchSize       int32              `json:"batch_size"`
-}
-
-// One batch of routes past retention, or past grace with too few observations.
-// GREATEST keeps the scan on idx_known_routes_last_seen.
-func (q *Queries) DeleteOldRoutes(ctx context.Context, arg DeleteOldRoutesParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteOldRoutes,
-		arg.RetentionCutoff,
-		arg.GraceCutoff,
-		arg.MinObservations,
-		arg.BatchSize,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const deleteOldTelemetry = `-- name: DeleteOldTelemetry :exec
 DELETE FROM observer_telemetry WHERE reported_at < $1
 `
@@ -388,6 +433,23 @@ func (q *Queries) DeleteRepeaterSource(ctx context.Context, source string) error
 	return err
 }
 
+const fillReconfirmAmb = `-- name: FillReconfirmAmb :exec
+INSERT INTO reconfirm_amb (iata, len, prefix)
+SELECT iata::text AS iata, 1::int AS len, prefix_1 AS prefix FROM node_short_ids GROUP BY iata, prefix_1 HAVING COUNT(*) > 1
+UNION ALL
+SELECT iata::text, 2::int, prefix_2 FROM node_short_ids GROUP BY iata, prefix_2 HAVING COUNT(*) > 1
+UNION ALL
+SELECT iata::text, 3::int, prefix_3 FROM node_short_ids GROUP BY iata, prefix_3 HAVING COUNT(*) > 1
+UNION ALL
+SELECT iata::text, 4::int, prefix_4 FROM node_short_ids GROUP BY iata, prefix_4 HAVING COUNT(*) > 1
+`
+
+// Hop prefixes that match >1 node in an IATA, per width, into the sweep's temp table.
+func (q *Queries) FillReconfirmAmb(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, fillReconfirmAmb)
+	return err
+}
+
 const getAccount = `-- name: GetAccount :one
 SELECT id, name, created_at, deactivated_at FROM accounts WHERE id = $1
 `
@@ -402,6 +464,17 @@ func (q *Queries) GetAccount(ctx context.Context, id uuid.UUID) (Account, error)
 		&i.DeactivatedAt,
 	)
 	return i, err
+}
+
+const getBackgroundState = `-- name: GetBackgroundState :one
+SELECT value FROM background_state WHERE key = $1
+`
+
+func (q *Queries) GetBackgroundState(ctx context.Context, key string) (json.RawMessage, error) {
+	row := q.db.QueryRow(ctx, getBackgroundState, key)
+	var value json.RawMessage
+	err := row.Scan(&value)
+	return value, err
 }
 
 const getChannelByID = `-- name: GetChannelByID :one
@@ -3017,45 +3090,24 @@ func (q *Queries) ListIATAs(ctx context.Context) ([]IataCode, error) {
 	return items, nil
 }
 
-const listKnownRoutes = `-- name: ListKnownRoutes :many
-SELECT r.id, r.node_ids, r.hash_prefix, r.iata, r.hop_count, r.first_seen, r.last_seen, r.observation_count
-FROM ((
+const listKnownRoutesByIATA = `-- name: ListKnownRoutesByIATA :many
 SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
 FROM known_routes
-WHERE $1 = ''
-  AND ($2 = 0 OR hop_count = $2)
-  AND ($3::timestamptz IS NULL
-       OR date_trunc('milliseconds', last_seen, 'UTC') < $3
-       OR ($5::bigint > 0 AND date_trunc('milliseconds', last_seen, 'UTC') = $3 AND id < $5))
-ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC
-LIMIT $4
-)
-UNION ALL
-(
-SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
-FROM known_routes
-WHERE $1 <> '' AND iata::text = $1
-  AND iata >= $1::bpchar AND iata <= $1::bpchar
-  AND ($2 = 0 OR hop_count = $2)
-  AND ($3::timestamptz IS NULL
-       OR date_trunc('milliseconds', last_seen, 'UTC') < $3
-       OR ($5::bigint > 0 AND date_trunc('milliseconds', last_seen, 'UTC') = $3 AND id < $5))
+WHERE iata >= $1::bpchar AND iata <= $1::bpchar
+  AND (date_trunc('milliseconds', last_seen, 'UTC'), id)
+        < (COALESCE($2::timestamptz, 'infinity'::timestamptz), $3::bigint)
 ORDER BY iata, date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC
-LIMIT $4
-)) r
-ORDER BY date_trunc('milliseconds', r.last_seen, 'UTC') DESC, r.id DESC
 LIMIT $4
 `
 
-type ListKnownRoutesParams struct {
-	Column1 interface{}        `json:"column_1"`
-	Column2 interface{}        `json:"column_2"`
-	Column3 pgtype.Timestamptz `json:"column_3"`
-	Limit   int32              `json:"limit"`
-	Column5 int64              `json:"column_5"`
+type ListKnownRoutesByIATAParams struct {
+	Iata      string             `json:"iata"`
+	CursorTs  pgtype.Timestamptz `json:"cursor_ts"`
+	CursorID  int64              `json:"cursor_id"`
+	PageLimit int32              `json:"page_limit"`
 }
 
-type ListKnownRoutesRow struct {
+type ListKnownRoutesByIATARow struct {
 	ID               int64              `json:"id"`
 	NodeIds          []uuid.UUID        `json:"node_ids"`
 	HashPrefix       [][]byte           `json:"hash_prefix"`
@@ -3066,26 +3118,207 @@ type ListKnownRoutesRow struct {
 	ObservationCount int64              `json:"observation_count"`
 }
 
-// Only one branch runs. Keep the IATA range ordered by the composite index:
-// generic plans can otherwise prefer scanning the global timestamp index.
-// The text equality preserves exact input matching, including trailing spaces.
-// Pages by (last_seen to the ms, id) so routes sharing the cursor's millisecond
-// aren't skipped; cursor id 0 keeps the plain timestamp cursor.
-func (q *Queries) ListKnownRoutes(ctx context.Context, arg ListKnownRoutesParams) ([]ListKnownRoutesRow, error) {
-	rows, err := q.db.Query(ctx, listKnownRoutes,
-		arg.Column1,
-		arg.Column2,
-		arg.Column3,
-		arg.Limit,
-		arg.Column5,
+// iata as a range keeps it in the pathkeys, so only idx_known_routes_iata_keyset returns rows in
+// order; with = a generic plan may walk the global keyset. No cursor: NULL ts and id 0.
+func (q *Queries) ListKnownRoutesByIATA(ctx context.Context, arg ListKnownRoutesByIATAParams) ([]ListKnownRoutesByIATARow, error) {
+	rows, err := q.db.Query(ctx, listKnownRoutesByIATA,
+		arg.Iata,
+		arg.CursorTs,
+		arg.CursorID,
+		arg.PageLimit,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListKnownRoutesRow{}
+	items := []ListKnownRoutesByIATARow{}
 	for rows.Next() {
-		var i ListKnownRoutesRow
+		var i ListKnownRoutesByIATARow
+		if err := rows.Scan(
+			&i.ID,
+			&i.NodeIds,
+			&i.HashPrefix,
+			&i.Iata,
+			&i.HopCount,
+			&i.FirstSeen,
+			&i.LastSeen,
+			&i.ObservationCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listKnownRoutesByIATAHop = `-- name: ListKnownRoutesByIATAHop :many
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
+FROM known_routes
+WHERE iata = $1::bpchar
+  AND hop_count = $2
+  AND (date_trunc('milliseconds', last_seen, 'UTC'), id)
+        < (COALESCE($3::timestamptz, 'infinity'::timestamptz), $4::bigint)
+ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC
+LIMIT $5
+`
+
+type ListKnownRoutesByIATAHopParams struct {
+	Iata      string             `json:"iata"`
+	HopCount  int32              `json:"hop_count"`
+	CursorTs  pgtype.Timestamptz `json:"cursor_ts"`
+	CursorID  int64              `json:"cursor_id"`
+	PageLimit int32              `json:"page_limit"`
+}
+
+type ListKnownRoutesByIATAHopRow struct {
+	ID               int64              `json:"id"`
+	NodeIds          []uuid.UUID        `json:"node_ids"`
+	HashPrefix       [][]byte           `json:"hash_prefix"`
+	Iata             string             `json:"iata"`
+	HopCount         int32              `json:"hop_count"`
+	FirstSeen        pgtype.Timestamptz `json:"first_seen"`
+	LastSeen         pgtype.Timestamptz `json:"last_seen"`
+	ObservationCount int64              `json:"observation_count"`
+}
+
+// Custom plans only (Store.qc): a generic plan walks the whole region for a rare hop.
+// The = form prices the Sort correctly; the range form under-costs it when a hop index exists.
+func (q *Queries) ListKnownRoutesByIATAHop(ctx context.Context, arg ListKnownRoutesByIATAHopParams) ([]ListKnownRoutesByIATAHopRow, error) {
+	rows, err := q.db.Query(ctx, listKnownRoutesByIATAHop,
+		arg.Iata,
+		arg.HopCount,
+		arg.CursorTs,
+		arg.CursorID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListKnownRoutesByIATAHopRow{}
+	for rows.Next() {
+		var i ListKnownRoutesByIATAHopRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.NodeIds,
+			&i.HashPrefix,
+			&i.Iata,
+			&i.HopCount,
+			&i.FirstSeen,
+			&i.LastSeen,
+			&i.ObservationCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listKnownRoutesGlobal = `-- name: ListKnownRoutesGlobal :many
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
+FROM known_routes
+WHERE (date_trunc('milliseconds', last_seen, 'UTC'), id)
+        < (COALESCE($1::timestamptz, 'infinity'::timestamptz), $2::bigint)
+ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC
+LIMIT $3
+`
+
+type ListKnownRoutesGlobalParams struct {
+	CursorTs  pgtype.Timestamptz `json:"cursor_ts"`
+	CursorID  int64              `json:"cursor_id"`
+	PageLimit int32              `json:"page_limit"`
+}
+
+type ListKnownRoutesGlobalRow struct {
+	ID               int64              `json:"id"`
+	NodeIds          []uuid.UUID        `json:"node_ids"`
+	HashPrefix       [][]byte           `json:"hash_prefix"`
+	Iata             string             `json:"iata"`
+	HopCount         int32              `json:"hop_count"`
+	FirstSeen        pgtype.Timestamptz `json:"first_seen"`
+	LastSeen         pgtype.Timestamptz `json:"last_seen"`
+	ObservationCount int64              `json:"observation_count"`
+}
+
+func (q *Queries) ListKnownRoutesGlobal(ctx context.Context, arg ListKnownRoutesGlobalParams) ([]ListKnownRoutesGlobalRow, error) {
+	rows, err := q.db.Query(ctx, listKnownRoutesGlobal, arg.CursorTs, arg.CursorID, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListKnownRoutesGlobalRow{}
+	for rows.Next() {
+		var i ListKnownRoutesGlobalRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.NodeIds,
+			&i.HashPrefix,
+			&i.Iata,
+			&i.HopCount,
+			&i.FirstSeen,
+			&i.LastSeen,
+			&i.ObservationCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listKnownRoutesGlobalHop = `-- name: ListKnownRoutesGlobalHop :many
+SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
+FROM known_routes
+WHERE hop_count = $1
+  AND (date_trunc('milliseconds', last_seen, 'UTC'), id)
+        < (COALESCE($2::timestamptz, 'infinity'::timestamptz), $3::bigint)
+ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC
+LIMIT $4
+`
+
+type ListKnownRoutesGlobalHopParams struct {
+	HopCount  int32              `json:"hop_count"`
+	CursorTs  pgtype.Timestamptz `json:"cursor_ts"`
+	CursorID  int64              `json:"cursor_id"`
+	PageLimit int32              `json:"page_limit"`
+}
+
+type ListKnownRoutesGlobalHopRow struct {
+	ID               int64              `json:"id"`
+	NodeIds          []uuid.UUID        `json:"node_ids"`
+	HashPrefix       [][]byte           `json:"hash_prefix"`
+	Iata             string             `json:"iata"`
+	HopCount         int32              `json:"hop_count"`
+	FirstSeen        pgtype.Timestamptz `json:"first_seen"`
+	LastSeen         pgtype.Timestamptz `json:"last_seen"`
+	ObservationCount int64              `json:"observation_count"`
+}
+
+// Custom plans only (Store.qc): the generic plan walks the whole keyset index for an absent hop.
+func (q *Queries) ListKnownRoutesGlobalHop(ctx context.Context, arg ListKnownRoutesGlobalHopParams) ([]ListKnownRoutesGlobalHopRow, error) {
+	rows, err := q.db.Query(ctx, listKnownRoutesGlobalHop,
+		arg.HopCount,
+		arg.CursorTs,
+		arg.CursorID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListKnownRoutesGlobalHopRow{}
+	for rows.Next() {
+		var i ListKnownRoutesGlobalHopRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.NodeIds,
@@ -4507,78 +4740,84 @@ func (q *Queries) ReconfirmNeighbors(ctx context.Context) error {
 	return err
 }
 
-const reconfirmRoutes = `-- name: ReconfirmRoutes :one
+const reconfirmRoutesBatch = `-- name: ReconfirmRoutesBatch :one
 WITH batch AS MATERIALIZED (
-    SELECT r.iata, r.path_key, r.node_ids, r.hash_prefix
-    FROM known_routes r
-    WHERE r.last_reconfirmed_at < $1
-    ORDER BY r.last_reconfirmed_at
-    LIMIT $2
-    FOR UPDATE OF r SKIP LOCKED
-),
-amb AS (
-    SELECT a.iata::char(3) AS iata, a.len, a.p
-    FROM ROWS FROM (unnest($3::text[]), unnest($4::int[]), unnest($5::bytea[])) AS a(iata, len, p)
-),
+  SELECT r.iata, r.path_key, r.node_ids, r.hash_prefix FROM known_routes r
+  WHERE (r.iata, r.path_key) > ($1::bpchar, $2::bytea)
+  ORDER BY r.iata, r.path_key
+  LIMIT $3),
 dead AS (
-    SELECT b.iata, b.path_key
-    FROM batch b
-    WHERE EXISTS (
-        SELECT 1
-        FROM unnest(b.node_ids) AS hop_node_id
-        WHERE NOT EXISTS (
-            SELECT 1 FROM node_short_ids ns
-            WHERE ns.node_id = hop_node_id
-              AND ns.iata = b.iata
-        )
-    )
-    UNION
-    SELECT DISTINCT b.iata, b.path_key
-    FROM batch b
-    CROSS JOIN LATERAL unnest(b.hash_prefix) AS hp
-    JOIN amb a ON a.iata = b.iata AND a.len = length(hp) AND a.p = hp
-),
+  SELECT b.iata, b.path_key FROM batch b
+  WHERE EXISTS (SELECT 1 FROM unnest(b.node_ids) AS hop(node_id)
+                WHERE NOT EXISTS (SELECT 1 FROM node_short_ids ns WHERE ns.node_id = hop.node_id AND ns.iata = b.iata))
+     OR EXISTS (SELECT 1 FROM unnest(b.hash_prefix) AS hp
+                JOIN reconfirm_amb a ON a.iata = b.iata::text AND a.len = length(hp) AND a.prefix = hp)),
 deleted AS (
-    DELETE FROM known_routes kr
-    USING dead d
-    WHERE kr.iata = d.iata AND kr.path_key = d.path_key
-),
-updated AS (
-    UPDATE known_routes kr
-    SET last_reconfirmed_at = GREATEST(NOW(), $1::timestamptz)
-    FROM batch b
-    WHERE kr.iata = b.iata AND kr.path_key = b.path_key
-      AND NOT EXISTS (
-          SELECT 1 FROM dead d
-          WHERE d.iata = b.iata AND d.path_key = b.path_key
-      )
-)
-SELECT count(*) FROM batch
+  DELETE FROM known_routes kr USING dead d
+  WHERE kr.iata = d.iata AND kr.path_key = d.path_key
+    AND (EXISTS (SELECT 1 FROM unnest(kr.node_ids) AS hop(node_id)
+                 WHERE NOT EXISTS (SELECT 1 FROM node_short_ids ns WHERE ns.node_id = hop.node_id AND ns.iata = kr.iata))
+      OR EXISTS (SELECT 1 FROM unnest(kr.hash_prefix) AS hp
+                 JOIN reconfirm_amb a ON a.iata = kr.iata::text AND a.len = length(hp) AND a.prefix = hp))
+  RETURNING 1)
+SELECT (SELECT count(*) FROM batch) AS scanned,
+       (SELECT count(*) FROM deleted) AS deleted,
+       coalesce((SELECT iata FROM batch ORDER BY iata DESC, path_key DESC LIMIT 1)::text, '')::text AS last_iata,
+       coalesce((SELECT path_key FROM batch ORDER BY iata DESC, path_key DESC LIMIT 1), ''::bytea)::bytea AS last_key
 `
 
-type ReconfirmRoutesParams struct {
-	Before    pgtype.Timestamptz `json:"before"`
-	BatchSize int32              `json:"batch_size"`
-	AmbIata   []string           `json:"amb_iata"`
-	AmbLen    []int32            `json:"amb_len"`
-	AmbPrefix [][]byte           `json:"amb_prefix"`
+type ReconfirmRoutesBatchParams struct {
+	AfterIata string `json:"after_iata"`
+	AfterKey  []byte `json:"after_key"`
+	BatchSize int32  `json:"batch_size"`
 }
 
-// Checks one batch of least-recently-reconfirmed routes: deletes those with a departed
-// hop node or a hop prefix now matching >1 node in that IATA (length-aware:
-// 1/2/3/4-byte hop prefixes check prefix_1/2/3/4; ambiguity set supplied by AmbiguousPrefixes),
-// and stamps the survivors.
-func (q *Queries) ReconfirmRoutes(ctx context.Context, arg ReconfirmRoutesParams) (int64, error) {
-	row := q.db.QueryRow(ctx, reconfirmRoutes,
-		arg.Before,
-		arg.BatchSize,
-		arg.AmbIata,
-		arg.AmbLen,
-		arg.AmbPrefix,
+type ReconfirmRoutesBatchRow struct {
+	Scanned  int64  `json:"scanned"`
+	Deleted  int64  `json:"deleted"`
+	LastIata string `json:"last_iata"`
+	LastKey  []byte `json:"last_key"`
+}
+
+// The next batch_size routes after the cursor in pkey order: deletes those with a departed hop
+// node or a hop prefix matching >1 node in that IATA (length-aware, reconfirm_amb). Writes no stamp.
+// The DELETE re-checks the newest row version. An empty last_iata means the walk passed the end.
+func (q *Queries) ReconfirmRoutesBatch(ctx context.Context, arg ReconfirmRoutesBatchParams) (ReconfirmRoutesBatchRow, error) {
+	row := q.db.QueryRow(ctx, reconfirmRoutesBatch, arg.AfterIata, arg.AfterKey, arg.BatchSize)
+	var i ReconfirmRoutesBatchRow
+	err := row.Scan(
+		&i.Scanned,
+		&i.Deleted,
+		&i.LastIata,
+		&i.LastKey,
 	)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
+	return i, err
+}
+
+const reconfirmSliceEnd = `-- name: ReconfirmSliceEnd :one
+SELECT r.iata, r.path_key FROM known_routes r
+WHERE (r.iata, r.path_key) > ($1::bpchar, $2::bytea)
+ORDER BY r.iata, r.path_key
+OFFSET $3 LIMIT 1
+`
+
+type ReconfirmSliceEndParams struct {
+	AfterIata  string `json:"after_iata"`
+	AfterKey   []byte `json:"after_key"`
+	OffsetRows int32  `json:"offset_rows"`
+}
+
+type ReconfirmSliceEndRow struct {
+	Iata    string `json:"iata"`
+	PathKey []byte `json:"path_key"`
+}
+
+// Key of the last route in a slice that timed out: the caller passes the slice's row count - 1.
+func (q *Queries) ReconfirmSliceEnd(ctx context.Context, arg ReconfirmSliceEndParams) (ReconfirmSliceEndRow, error) {
+	row := q.db.QueryRow(ctx, reconfirmSliceEnd, arg.AfterIata, arg.AfterKey, arg.OffsetRows)
+	var i ReconfirmSliceEndRow
+	err := row.Scan(&i.Iata, &i.PathKey)
+	return i, err
 }
 
 const recordTrace = `-- name: RecordTrace :exec
@@ -5763,6 +6002,21 @@ func (q *Queries) UpdateObserverStatus(ctx context.Context, arg UpdateObserverSt
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const upsertBackgroundState = `-- name: UpsertBackgroundState :exec
+INSERT INTO background_state (key, value, updated_at) VALUES ($1, $2, now())
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+`
+
+type UpsertBackgroundStateParams struct {
+	Key   string          `json:"key"`
+	Value json.RawMessage `json:"value"`
+}
+
+func (q *Queries) UpsertBackgroundState(ctx context.Context, arg UpsertBackgroundStateParams) error {
+	_, err := q.db.Exec(ctx, upsertBackgroundState, arg.Key, arg.Value)
+	return err
 }
 
 const upsertChannel = `-- name: UpsertChannel :one

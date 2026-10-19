@@ -153,6 +153,12 @@ type AnalyticsState struct {
 	Revision  int64 `json:"revision"`
 }
 
+type BackgroundState struct {
+	Key       string             `json:"key"`
+	Value     json.RawMessage    `json:"value"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Channel struct {
 	ID             int32              `json:"id"`
 	ChannelHash    []byte             `json:"channel_hash"`
@@ -456,6 +462,12 @@ type PacketObservation struct {
 	SourceBroker      *string            `json:"source_broker"`
 	PayloadType       *int16             `json:"payload_type"`
 	AirtimeMs         *float32           `json:"airtime_ms"`
+}
+
+type ReconfirmAmb struct {
+	Iata   string `json:"iata"`
+	Len    int32  `json:"len"`
+	Prefix []byte `json:"prefix"`
 }
 
 type Region struct {

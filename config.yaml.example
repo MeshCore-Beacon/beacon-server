@@ -253,6 +253,9 @@ routes:
   # count never resets, so once a route crosses this bar it stays in the
   # retention tier for good.
   min_observations: 3
+  # Routes the reconfirm sweep checks per hour for departed or now-ambiguous hops,
+  # run in 5-minute slices. 0 or omitted means 81000.
+  reconfirm_rows_per_hour: 81000
 
 websocket:
   max_connections_per_ip: 5 # default: 5
@@ -333,7 +336,7 @@ cache:
 # flowing. Back off to 1h or more once stable.
 #background:
 #  view_refresh: 1h   # rebuilds radio presets; default: 1h
-#  reconfirm: 1h      # default: 1h
+#  reconfirm: 1h      # route retention and neighbor cleanup; default: 1h
 #  cleanup: 1h        # default: 1h
 
 # Minimum client versions, served at GET /api/v1/info. Older clients show
