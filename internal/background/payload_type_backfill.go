@@ -21,6 +21,7 @@ const (
 
 type payloadTypeBackfiller interface {
 	ObservationIDRange(context.Context) (int64, int64, error)
+	HasUntypedObservations(context.Context, int64) (bool, error)
 	BackfillObservationPayloadTypes(context.Context, int64, int64, int32) (int64, int64, error)
 	LoadState(context.Context, string, any) (bool, error)
 	SaveState(context.Context, string, any) error
@@ -36,7 +37,16 @@ func PayloadTypeBackfillTask(store payloadTypeBackfiller, interval time.Duration
 // maxRows of them; when it hits maxRows it continues after the last row it picked. It saves the
 // next id after every batch, so a failed or interrupted run resumes where it stopped, and it saves done when a batch
 // slot finds the walk past the max (at once for an empty table). Once done, a run only reads the state.
+//
+// Before its first batch, a task value asks once whether any observation up to the max lacks a
+// payload type. When none does it saves done at once instead of walking the whole id range. That
+// answer stays true: ingest writes payload_type on every observation it stores, so no untyped row
+// can appear later, and the walk would have typed nothing. Done only switches the adverts reader to
+// the statement that filters on the observation's own type, which returns the same rows once every
+// observation carries one; it just switches sooner. When the probe finds an untyped row, or fails
+// (logged once), the task walks as before and never probes again.
 func payloadTypeBackfillTask(store payloadTypeBackfiller, interval time.Duration, span int64, maxRows int32, batches int) Task {
+	probed := false
 	return Task{
 		Name:     "payload_type_backfill",
 		Interval: interval,
@@ -51,6 +61,21 @@ func payloadTypeBackfillTask(store payloadTypeBackfiller, interval time.Duration
 			minID, maxID, err := store.ObservationIDRange(ctx)
 			if err != nil {
 				return fmt.Errorf("payload type backfill: %w", err)
+			}
+			if maxID > 0 && !probed {
+				probed = true
+				untyped, err := store.HasUntypedObservations(ctx, maxID)
+				switch {
+				case err != nil:
+					slog.Warn("observation payload type probe failed; walking the id range", "component", "background", "error", err)
+				case !untyped:
+					next := maxID + 1
+					if err := store.SaveState(ctx, db.ObservationPayloadTypeKey, db.ObservationPayloadTypeState{NextID: next, Done: true}); err != nil {
+						return fmt.Errorf("payload type backfill: %w", err)
+					}
+					slog.Info("observation payload types complete", "component", "background", "next_id", next, "probe", true)
+					return nil
+				}
 			}
 			next := max(st.NextID, minID)
 			var rows int64
