@@ -50,12 +50,34 @@ definitions:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminAuthConfig'
       cors:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminCORSConfig'
+      guards:
+        allOf:
+        - $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminGuardsConfig'
+        description: absent when database guards are not configured
       ingest:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminIngestConfig'
       mobile:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminMobileConfig'
       web:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminWebConfig'
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.AdminGuardsConfig:
+    properties:
+      api_plan_layout:
+        description: custom_all, split or single
+        type: string
+      budget:
+        description: always "shadow"
+        type: string
+      enforce:
+        description: families currently enforced; the configuration file is the boot
+          default
+        items:
+          type: string
+        type: array
+      observe_only:
+        description: the single plan layout makes every family observe
+        type: boolean
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.AdminIngestConfig:
     properties:
@@ -1812,8 +1834,8 @@ definitions:
     properties:
       cors:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateAdminCORSRequest'
-    required:
-    - cors
+      guards:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateAdminGuardsRequest'
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateAdminConfigResponse:
     properties:
@@ -1823,6 +1845,15 @@ definitions:
         type: boolean
       requires_restart:
         type: boolean
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateAdminGuardsRequest:
+    properties:
+      enforce:
+        items:
+          type: string
+        type: array
+    required:
+    - enforce
     type: object
   internal_api_handlers.APIError:
     properties:
@@ -1849,6 +1880,7 @@ info:
     MeshCore network observation backend. Ingests LoRa packets from MQTT brokers, stores in PostgreSQL, and streams live events via WebSocket.
     REST requests share a configurable per-client rate limit (default 600/minute and a 600-request one-second burst cap). Exceeded limits return HTTP 429 with error.code=rate_limited and a Retry-After header in seconds. CORS preflights and WebSocket upgrades do not consume this API budget.
     WebSocket upgrade attempts at /ws have a configurable per-client limit (default 10/minute, including failed handshakes). Rate exhaustion returns HTTP 429 with Retry-After before upgrade. An accepted socket exceeding the concurrent cap closes with code 1013 before hello; established connections remain open.
+    Database cost guards: a guarded family returns 429 (rate_limited, Retry-After 1) above 4 concurrent database requests per client, or 503 with Retry-After (deadline_exceeded, 5 s; service_unavailable, 2 s). Families observe by default and refuse nothing until an operator enforces them.
   license:
     name: AGPL-3-or-later
   termsOfService: https://github.com/MeshCore-Beacon/beacon-server
@@ -2129,9 +2161,11 @@ paths:
       - Admin
   /admin/config:
     get:
-      description: Returns current CORS options, auth configuration status and configured
-        broker count. Credential fields and other configuration are excluded. Runtime
-        origin updates are lost on restart.
+      description: Returns current CORS options, auth configuration status, configured
+        broker count and, when database guards are configured, their state. Credential
+        fields and other configuration are excluded. Runtime origin updates are lost
+        on restart. PUT also replaces guards.enforce at runtime; the configuration
+        file is the boot default.
       produces:
       - application/json
       responses:
@@ -2159,14 +2193,18 @@ paths:
     put:
       consumes:
       - application/json
-      description: Replaces only cors.allowed_origins immediately. Updates are serialized;
+      description: Replaces cors.allowed_origins, guards.enforce or both immediately;
+        at least one is required. Both are validated before either is applied. An
+        empty guards.enforce list makes every family observe. Updates are serialized;
         concurrent valid updates are applied one at a time. Already-running requests
         may finish with the previous policy. Nothing is persisted; restart reloads
-        saved configuration.
+        saved configuration. PUT also replaces guards.enforce at runtime; the configuration
+        file is the boot default.
       parameters:
-      - description: 1-32 ASCII HTTP(S) origins, at most 512 bytes each; one hostname
-          wildcard is supported, or a sole *. Empty/null lists and unsupported fields
-          are rejected. Body at most 16 KiB.
+      - description: 'cors.allowed_origins: 1-32 ASCII HTTP(S) origins, at most 512
+          bytes each; one hostname wildcard is supported, or a sole *. Empty/null
+          lists and unsupported fields are rejected. guards.enforce: guard family
+          names, possibly empty. Body at most 16 KiB.'
         in: body
         name: config
         required: true
@@ -2211,7 +2249,7 @@ paths:
             type: object
       security:
       - AdminKey: []
-      summary: Update runtime CORS origins
+      summary: Update runtime CORS origins and enforced guard families
       tags:
       - Admin
   /admin/db/statements:

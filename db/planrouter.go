@@ -6,6 +6,7 @@ package db
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/db/planpolicy"
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
@@ -191,13 +192,37 @@ func (r *PlanRouter) QueryRow(ctx context.Context, sql string, args ...any) pgx.
 	return routerRow{rows: rows, err: err}
 }
 
-// routerRows gives the connection back when the rows close.
+// routerRows gives the connection back when the rows close, when Next reports the end, or when a
+// Scan fails, as pgxpool's own rows do. Close stays safe to call again.
 type routerRows struct {
 	pgx.Rows
 	s *stmt
 }
 
 func (r *routerRows) Close() { r.s.end(r.Rows) }
+
+func (r *routerRows) Next() bool {
+	if r.Rows.Next() {
+		return true
+	}
+	r.s.end(r.Rows)
+	return false
+}
+
+func (r *routerRows) Scan(dest ...any) error {
+	err := r.Rows.Scan(dest...)
+	if err != nil {
+		r.s.end(r.Rows)
+	}
+	return err
+}
+
+// NewAPIStore builds the store the API reads through: every statement goes through a PlanRouter
+// over p's API pools, gated by gate. It has no dedicated pool, so rollups, sweeps and statement
+// statistics refuse to run on it; they belong on the maintenance store.
+func NewAPIStore(p *Pools, layout planpolicy.Layout, gate guards.Gate, clockDriftThreshold, staleThreshold time.Duration) *Store {
+	return New(NewPlanRouter(p, layout, gate), nil, clockDriftThreshold, staleThreshold)
+}
 
 // routerRow scans the first row like pgx's own Row: no row is pgx.ErrNoRows, and the rows
 // are closed on every path.

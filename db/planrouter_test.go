@@ -324,19 +324,38 @@ func TestPlanRouterRoutesByClass(t *testing.T) {
 	// A class C statement never reaches api_cached, and nothing does outside split.
 	for _, layout := range []planpolicy.Layout{planpolicy.CustomAll, planpolicy.Split, planpolicy.Single} {
 		f := newRouterFixture(layout, nil) // the real policy: Cached is empty, so every non-Legacy name is C
-		for _, stmt := range []string{"ListPackets", "GetNodeByID", "ListKnownRoutesByIATAHop", ""} {
+		for _, stmt := range []string{"ListPackets", "GetNodeByID", "ListKnownRoutesByIATAHop", "ListKnownRoutesGlobalHop", ""} {
 			sql := "SELECT 1"
 			if stmt != "" {
 				sql = "-- name: " + stmt + " :one\nSELECT 1"
 			}
 			for _, method := range routerMethods {
-				if err := runVia(context.Background(), f.r, method, sql); err != nil {
+				if err := runVia(context.Background(), f.r, method, sql, 7); err != nil {
 					t.Fatal(err)
 				}
 			}
 		}
 		if calls, _, _ := f.cached.snapshot(); len(calls) != 0 {
 			t.Errorf("%s: api_cached ran %d statements, want 0", layout, len(calls))
+		}
+		// The hop pair always runs unnamed, with its own args after the mode.
+		hopPool := f.custom
+		if layout == planpolicy.Single {
+			hopPool = f.legacy
+		}
+		calls, _, _ := hopPool.snapshot()
+		hops := 0
+		for _, c := range calls {
+			if !strings.Contains(c.sql, "Hop :one") {
+				continue
+			}
+			hops++
+			if want := []any{pgx.QueryExecModeCacheDescribe, 7}; !reflect.DeepEqual(c.args, want) {
+				t.Errorf("%s: %q args = %v, want %v", layout, c.sql, c.args, want)
+			}
+		}
+		if hops != 2*len(routerMethods) {
+			t.Errorf("%s: %d hop statements on %s, want %d", layout, hops, hopPool.n, 2*len(routerMethods))
 		}
 	}
 
@@ -415,6 +434,35 @@ func TestPlanRouterReleasesConnections(t *testing.T) {
 		{"exec error", func(p *fakePool, _ *countingGate) { p.execErr = errExec }, func(r *PlanRouter) error {
 			return runVia(context.Background(), r, "Exec", sql)
 		}, errExec, 1, 1},
+		{"query read to the end without Close", func(p *fakePool, _ *countingGate) { p.rowCount = 3 }, func(r *PlanRouter) error {
+			rows, err := r.Query(context.Background(), sql)
+			if err != nil {
+				return err
+			}
+			for rows.Next() {
+			}
+			return rows.Err()
+		}, nil, 1, 1},
+		{"query scan error without Close", func(p *fakePool, _ *countingGate) { p.rowCount = 3; p.scanErr = errScan }, func(r *PlanRouter) error {
+			rows, err := r.Query(context.Background(), sql)
+			if err != nil {
+				return err
+			}
+			rows.Next()
+			var n int
+			return rows.Scan(&n)
+		}, errScan, 1, 1},
+		{"close after the end", func(p *fakePool, _ *countingGate) { p.rowCount = 2 }, func(r *PlanRouter) error {
+			rows, err := r.Query(context.Background(), sql)
+			if err != nil {
+				return err
+			}
+			for rows.Next() {
+			}
+			rows.Close()
+			rows.Close()
+			return rows.Err()
+		}, nil, 1, 1},
 		{"close twice", func(*fakePool, *countingGate) {}, func(r *PlanRouter) error {
 			rows, err := r.Query(context.Background(), sql)
 			if err != nil {

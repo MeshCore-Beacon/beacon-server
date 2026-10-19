@@ -6,6 +6,8 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -68,17 +70,20 @@ ANALYZE probe;`); err != nil {
 }
 
 // planPart returns the plan of an auto_explain JSON notice, without its "Query Text" and
-// "Query Parameters", which always show $1.
-func planPart(msg string) string {
+// "Query Parameters", which always show $1. A notice that is not an auto_explain JSON plan is an error.
+func planPart(msg string) (string, error) {
 	_, body, ok := strings.Cut(msg, "\n")
 	if !ok {
-		return msg
+		return "", fmt.Errorf("notice is not an auto_explain plan: %q", msg)
 	}
 	var v struct{ Plan json.RawMessage }
-	if err := json.Unmarshal([]byte(body), &v); err != nil || v.Plan == nil {
-		return msg
+	if err := json.Unmarshal([]byte(body), &v); err != nil {
+		return "", fmt.Errorf("auto_explain notice is not JSON: %w: %q", err, msg)
 	}
-	return string(v.Plan)
+	if v.Plan == nil {
+		return "", fmt.Errorf("auto_explain notice has no Plan: %q", msg)
+	}
+	return string(v.Plan), nil
 }
 
 // newPlanRouterFromPools routes over p with the given classes; names absent from classes take
@@ -109,9 +114,14 @@ func TestPlanRouterClassCUnnamedPostgres(t *testing.T) {
 		t.Run(string(layout), func(t *testing.T) {
 			var mu sync.Mutex
 			var plans []string
+			var badNotices []error
 			takePlans := func() []string {
+				t.Helper()
 				mu.Lock()
 				defer mu.Unlock()
+				if len(badNotices) > 0 {
+					t.Fatal(errors.Join(badNotices...))
+				}
 				out := plans
 				plans = nil
 				return out
@@ -119,8 +129,13 @@ func TestPlanRouterClassCUnnamedPostgres(t *testing.T) {
 			p, err := OpenPools(ctx, dsn, layout, func(_ string, cfg *pgxpool.Config) {
 				cfg.MaxConns = 1
 				cfg.ConnConfig.OnNotice = func(_ *pgconn.PgConn, n *pgconn.Notice) {
+					plan, err := planPart(n.Message)
 					mu.Lock()
-					plans = append(plans, planPart(n.Message))
+					if err != nil {
+						badNotices = append(badNotices, err)
+					} else {
+						plans = append(plans, plan)
+					}
 					mu.Unlock()
 				}
 				cfg.AfterConnect = func(ctx context.Context, c *pgx.Conn) error {

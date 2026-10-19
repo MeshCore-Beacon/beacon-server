@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -527,6 +528,17 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
+// canonicalFamilies returns the known families in names once each, in guardFamilies order; never nil.
+func canonicalFamilies(names []string) []string {
+	out := []string{}
+	for _, f := range guardFamilies {
+		if slices.Contains(names, f) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 // validateDatabaseGuards checks the plan layout, guard families, budget mode and admin listener address.
 func (c *Config) validateDatabaseGuards() error {
 	if _, err := planpolicy.ParseLayout(c.Database.APIPlanLayout); err != nil {
@@ -541,7 +553,8 @@ func (c *Config) validateDatabaseGuards() error {
 		return fmt.Errorf("guards.budget must be shadow (budget enforcement is not available)")
 	}
 	if c.Server.AdminListen != "" {
-		if _, _, err := net.SplitHostPort(c.Server.AdminListen); err != nil {
+		_, port, err := net.SplitHostPort(c.Server.AdminListen)
+		if n, perr := strconv.Atoi(port); err != nil || perr != nil || n < 1 || n > 65535 {
 			return fmt.Errorf("server.admin_listen must be host:port, e.g. 127.0.0.1:9090")
 		}
 	}
@@ -668,7 +681,7 @@ func Resolve(cfg *Config) ResolvedConfig {
 		NodeDeleteAfter:     cfg.Nodes.DeleteAfter.Duration,
 		ObserverDeleteAfter: cfg.Observers.DeleteAfter.Duration,
 
-		GuardsEnforce: append([]string{}, cfg.Guards.Enforce...),
+		GuardsEnforce: canonicalFamilies(cfg.Guards.Enforce),
 		GuardsBudget:  cfg.Guards.Budget,
 		AdminListen:   cfg.Server.AdminListen,
 	}

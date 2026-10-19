@@ -8,11 +8,20 @@ import "errors"
 // AdminConfig is a whitelist of selected nonsecret running settings.
 // It is not a serialization of the full file or environment configuration.
 type AdminConfig struct {
-	Auth   AdminAuthConfig   `json:"auth"`
-	CORS   AdminCORSConfig   `json:"cors"`
-	Ingest AdminIngestConfig `json:"ingest"`
-	Mobile AdminMobileConfig `json:"mobile"`
-	Web    AdminWebConfig    `json:"web"`
+	Auth   AdminAuthConfig    `json:"auth"`
+	CORS   AdminCORSConfig    `json:"cors"`
+	Ingest AdminIngestConfig  `json:"ingest"`
+	Mobile AdminMobileConfig  `json:"mobile"`
+	Web    AdminWebConfig     `json:"web"`
+	Guards *AdminGuardsConfig `json:"guards,omitempty"` // absent when database guards are not configured
+}
+
+// AdminGuardsConfig reports the database cost guards.
+type AdminGuardsConfig struct {
+	Enforce       []string `json:"enforce"`         // families currently enforced; the configuration file is the boot default
+	ObserveOnly   bool     `json:"observe_only"`    // the single plan layout makes every family observe
+	Budget        string   `json:"budget"`          // always "shadow"
+	APIPlanLayout string   `json:"api_plan_layout"` // custom_all, split or single
 }
 
 type AdminMobileConfig struct {
@@ -43,12 +52,19 @@ type AdminIngestConfig struct {
 	BrokerCount int `json:"broker_count"`
 }
 
+// UpdateAdminConfigRequest carries cors, guards or both; at least one is required.
 type UpdateAdminConfigRequest struct {
-	CORS *UpdateAdminCORSRequest `json:"cors" validate:"required"`
+	CORS   *UpdateAdminCORSRequest   `json:"cors"`
+	Guards *UpdateAdminGuardsRequest `json:"guards"`
 }
 
 type UpdateAdminCORSRequest struct {
 	AllowedOrigins *[]string `json:"allowed_origins" validate:"required"`
+}
+
+// UpdateAdminGuardsRequest replaces the enforced guard families; an empty list makes every family observe.
+type UpdateAdminGuardsRequest struct {
+	Enforce *[]string `json:"enforce" validate:"required"`
 }
 
 type UpdateAdminConfigResponse struct {

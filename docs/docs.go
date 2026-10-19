@@ -439,7 +439,7 @@ const docTemplate = `{
                         "AdminKey": []
                     }
                 ],
-                "description": "Returns current CORS options, auth configuration status and configured broker count. Credential fields and other configuration are excluded. Runtime origin updates are lost on restart.",
+                "description": "Returns current CORS options, auth configuration status, configured broker count and, when database guards are configured, their state. Credential fields and other configuration are excluded. Runtime origin updates are lost on restart. PUT also replaces guards.enforce at runtime; the configuration file is the boot default.",
                 "produces": [
                     "application/json"
                 ],
@@ -480,7 +480,7 @@ const docTemplate = `{
                         "AdminKey": []
                     }
                 ],
-                "description": "Replaces only cors.allowed_origins immediately. Updates are serialized; concurrent valid updates are applied one at a time. Already-running requests may finish with the previous policy. Nothing is persisted; restart reloads saved configuration.",
+                "description": "Replaces cors.allowed_origins, guards.enforce or both immediately; at least one is required. Both are validated before either is applied. An empty guards.enforce list makes every family observe. Updates are serialized; concurrent valid updates are applied one at a time. Already-running requests may finish with the previous policy. Nothing is persisted; restart reloads saved configuration. PUT also replaces guards.enforce at runtime; the configuration file is the boot default.",
                 "consumes": [
                     "application/json"
                 ],
@@ -490,10 +490,10 @@ const docTemplate = `{
                 "tags": [
                     "Admin"
                 ],
-                "summary": "Update runtime CORS origins",
+                "summary": "Update runtime CORS origins and enforced guard families",
                 "parameters": [
                     {
-                        "description": "1-32 ASCII HTTP(S) origins, at most 512 bytes each; one hostname wildcard is supported, or a sole *. Empty/null lists and unsupported fields are rejected. Body at most 16 KiB.",
+                        "description": "cors.allowed_origins: 1-32 ASCII HTTP(S) origins, at most 512 bytes each; one hostname wildcard is supported, or a sole *. Empty/null lists and unsupported fields are rejected. guards.enforce: guard family names, possibly empty. Body at most 16 KiB.",
                         "name": "config",
                         "in": "body",
                         "required": true,
@@ -3755,6 +3755,14 @@ const docTemplate = `{
                 "cors": {
                     "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminCORSConfig"
                 },
+                "guards": {
+                    "description": "absent when database guards are not configured",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminGuardsConfig"
+                        }
+                    ]
+                },
                 "ingest": {
                     "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminIngestConfig"
                 },
@@ -3763,6 +3771,30 @@ const docTemplate = `{
                 },
                 "web": {
                     "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminWebConfig"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.AdminGuardsConfig": {
+            "type": "object",
+            "properties": {
+                "api_plan_layout": {
+                    "description": "custom_all, split or single",
+                    "type": "string"
+                },
+                "budget": {
+                    "description": "always \"shadow\"",
+                    "type": "string"
+                },
+                "enforce": {
+                    "description": "families currently enforced; the configuration file is the boot default",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "observe_only": {
+                    "description": "the single plan layout makes every family observe",
+                    "type": "boolean"
                 }
             }
         },
@@ -6263,12 +6295,12 @@ const docTemplate = `{
         },
         "github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateAdminConfigRequest": {
             "type": "object",
-            "required": [
-                "cors"
-            ],
             "properties": {
                 "cors": {
                     "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateAdminCORSRequest"
+                },
+                "guards": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateAdminGuardsRequest"
                 }
             }
         },
@@ -6283,6 +6315,20 @@ const docTemplate = `{
                 },
                 "requires_restart": {
                     "type": "boolean"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateAdminGuardsRequest": {
+            "type": "object",
+            "required": [
+                "enforce"
+            ],
+            "properties": {
+                "enforce": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
@@ -6370,7 +6416,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "/api/v1",
 	Schemes:          []string{"http", "https"},
 	Title:            "MeshCore Beacon API",
-	Description:      "MeshCore network observation backend. Ingests LoRa packets from MQTT brokers, stores in PostgreSQL, and streams live events via WebSocket.\nREST requests share a configurable per-client rate limit (default 600/minute and a 600-request one-second burst cap). Exceeded limits return HTTP 429 with error.code=rate_limited and a Retry-After header in seconds. CORS preflights and WebSocket upgrades do not consume this API budget.\nWebSocket upgrade attempts at /ws have a configurable per-client limit (default 10/minute, including failed handshakes). Rate exhaustion returns HTTP 429 with Retry-After before upgrade. An accepted socket exceeding the concurrent cap closes with code 1013 before hello; established connections remain open.",
+	Description:      "MeshCore network observation backend. Ingests LoRa packets from MQTT brokers, stores in PostgreSQL, and streams live events via WebSocket.\nREST requests share a configurable per-client rate limit (default 600/minute and a 600-request one-second burst cap). Exceeded limits return HTTP 429 with error.code=rate_limited and a Retry-After header in seconds. CORS preflights and WebSocket upgrades do not consume this API budget.\nWebSocket upgrade attempts at /ws have a configurable per-client limit (default 10/minute, including failed handshakes). Rate exhaustion returns HTTP 429 with Retry-After before upgrade. An accepted socket exceeding the concurrent cap closes with code 1013 before hello; established connections remain open.\nDatabase cost guards: a guarded family returns 429 (rate_limited, Retry-After 1) above 4 concurrent database requests per client, or 503 with Retry-After (deadline_exceeded, 5 s; service_unavailable, 2 s). Families observe by default and refuse nothing until an operator enforces them.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

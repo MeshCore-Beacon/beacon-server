@@ -15,10 +15,14 @@ import (
 	"unicode"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/MeshCore-Beacon/beacon-server/internal/guards"
 	"github.com/go-chi/cors"
 )
 
 var ErrInvalidOrigins = errors.New("allowed_origins must contain 1-32 ASCII HTTP(S) origins (at most 512 bytes each), or a sole *; paths, credentials, queries and control characters are not allowed")
+
+// ErrGuardsNotConfigured is returned for a guards update on a router without a guard.
+var ErrGuardsNotConfigured = errors.New("guards are not configured")
 
 type runtimePolicy struct {
 	config  api.AdminConfig
@@ -32,6 +36,7 @@ type RuntimeConfig struct {
 	current        atomic.Pointer[runtimePolicy]
 	next           http.Handler
 	exposedHeaders []string
+	guard          *guards.Guard // set once by BindGuards; its enforce list changes only under mu
 }
 
 func NewRuntimeConfig(config api.AdminConfig, exposedHeaders []string) *RuntimeConfig {
@@ -58,17 +63,72 @@ func (s *RuntimeConfig) Snapshot() api.AdminConfig {
 	return cloneAdminConfig(s.current.Load().config)
 }
 
+// BindGuards attaches the guard whose enforced families the admin config reports and updates.
+// Call it once, before serving.
+func (s *RuntimeConfig) BindGuards(g *guards.Guard, view api.AdminGuardsConfig) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.guard != nil {
+		panic("runtime guards already bound")
+	}
+	s.guard = g
+	config := cloneAdminConfig(s.current.Load().config)
+	view.Enforce = familyNames(g.Enforce())
+	config.Guards = &view
+	s.current.Store(s.policy(config))
+}
+
 func (s *RuntimeConfig) UpdateOrigins(origins []string) (api.AdminConfig, error) {
-	validated, err := validateOrigins(origins)
-	if err != nil {
-		return api.AdminConfig{}, err
+	return s.Update(&origins, nil)
+}
+
+// UpdateGuards replaces the enforced guard families; an empty list makes every family observe.
+func (s *RuntimeConfig) UpdateGuards(enforce []string) (api.AdminConfig, error) {
+	return s.Update(nil, &enforce)
+}
+
+// Update replaces the CORS origins and/or the enforced guard families; a nil argument leaves
+// that setting alone. Both are validated before either is applied, and both are published
+// together, so a rejected update changes nothing.
+func (s *RuntimeConfig) Update(origins, enforce *[]string) (api.AdminConfig, error) {
+	var validated []string
+	if origins != nil {
+		var err error
+		if validated, err = validateOrigins(*origins); err != nil {
+			return api.AdminConfig{}, err
+		}
+	}
+	var families []guards.Family
+	if enforce != nil {
+		var err error
+		if families, err = guards.ParseFamilies(*enforce); err != nil {
+			return api.AdminConfig{}, err
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if enforce != nil && s.guard == nil {
+		return api.AdminConfig{}, ErrGuardsNotConfigured
+	}
 	config := cloneAdminConfig(s.current.Load().config)
-	config.CORS.AllowedOrigins = validated
+	if origins != nil {
+		config.CORS.AllowedOrigins = validated
+	}
+	if enforce != nil {
+		s.guard.SetEnforce(families)
+		config.Guards.Enforce = familyNames(families)
+	}
 	s.current.Store(s.policy(config))
 	return cloneAdminConfig(config), nil
+}
+
+// familyNames returns the families as strings; never nil, so an empty list encodes as [].
+func familyNames(fs []guards.Family) []string {
+	out := make([]string, 0, len(fs))
+	for _, f := range fs {
+		out = append(out, string(f))
+	}
+	return out
 }
 
 func (s *RuntimeConfig) policy(config api.AdminConfig) *runtimePolicy {
@@ -89,6 +149,11 @@ func cloneAdminConfig(config api.AdminConfig) api.AdminConfig {
 	config.CORS.AllowedOrigins = slices.Clone(config.CORS.AllowedOrigins)
 	config.CORS.AllowedMethods = slices.Clone(config.CORS.AllowedMethods)
 	config.CORS.AllowedHeaders = slices.Clone(config.CORS.AllowedHeaders)
+	if config.Guards != nil {
+		g := *config.Guards
+		g.Enforce = append([]string{}, g.Enforce...)
+		config.Guards = &g
+	}
 	return config
 }
 

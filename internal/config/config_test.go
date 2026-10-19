@@ -417,6 +417,11 @@ func TestLoad_DatabaseGuardsValidation(t *testing.T) {
 		{"guards:\n  enforce: [routes, bogus]\n", `guards.enforce[1]: unknown family "bogus" (routes, channel_messages, packets_global, packets_region, packets_window, packet_detail, stats, other)`},
 		{"guards:\n  budget: enforce\n", "guards.budget must be shadow (budget enforcement is not available)"},
 		{"server:\n  admin_listen: \"9090\"\n", "server.admin_listen must be host:port, e.g. 127.0.0.1:9090"},
+		{"server:\n  admin_listen: \"127.0.0.1:\"\n", "server.admin_listen must be host:port, e.g. 127.0.0.1:9090"},
+		{"server:\n  admin_listen: \":\"\n", "server.admin_listen must be host:port, e.g. 127.0.0.1:9090"},
+		{"server:\n  admin_listen: \"127.0.0.1:metrics\"\n", "server.admin_listen must be host:port, e.g. 127.0.0.1:9090"},
+		{"server:\n  admin_listen: \"127.0.0.1:70000\"\n", "server.admin_listen must be host:port, e.g. 127.0.0.1:9090"},
+		{"server:\n  admin_listen: \"127.0.0.1:0\"\n", "server.admin_listen must be host:port, e.g. 127.0.0.1:9090"},
 	} {
 		path := filepath.Join(t.TempDir(), "config.yaml")
 		if err := os.WriteFile(path, []byte(tc.yaml), 0600); err != nil {
@@ -429,7 +434,7 @@ func TestLoad_DatabaseGuardsValidation(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	yml := "server:\n  trusted_proxies: [10.0.0.0/8]\n  admin_listen: \":9090\"\n" +
-		"database:\n  api_plan_layout: split\nguards:\n  enforce: [routes, stats]\n  budget: shadow\n"
+		"database:\n  api_plan_layout: split\nguards:\n  enforce: [stats, routes, stats]\n  budget: shadow\n"
 	if err := os.WriteFile(path, []byte(yml), 0600); err != nil {
 		t.Fatal(err)
 	}
