@@ -6,6 +6,7 @@ package planguard_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,8 +23,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// throwawayDB creates database name on the test cluster, drops it on cleanup, and returns a pool on it.
+// throwawayDB creates database name on the test cluster as a fixture database must be created (C collation),
+// drops it on cleanup, and returns a pool on it.
 func throwawayDB(t *testing.T, ctx context.Context, name string) *pgxpool.Pool {
+	return throwawayDBAs(t, ctx, name, planguard.FixtureCreateDatabase)
+}
+
+// throwawayDBAs is throwawayDB with its own CREATE DATABASE format (one %s, the name).
+func throwawayDBAs(t *testing.T, ctx context.Context, name, create string) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("BEACON_TEST_POSTGRES_DSN")
 	if dsn == "" {
@@ -40,7 +47,7 @@ func throwawayDB(t *testing.T, ctx context.Context, name string) *pgxpool.Pool {
 	if err := drop(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := admin.Exec(ctx, "CREATE DATABASE "+name); err != nil {
+	if _, err := admin.Exec(ctx, fmt.Sprintf(create, name)); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := pgxpool.ParseConfig(dsn)
@@ -108,12 +115,13 @@ func fixtureDB(t *testing.T, ctx context.Context) *pgxpool.Pool {
 	var got string
 	var sameServer bool
 	if err := pool.QueryRow(ctx, `SELECT coalesce(max(hash) FILTER (WHERE built_at IS NOT NULL), ''),
-  coalesce(bool_and(server_version_num = current_setting('server_version_num')::int), false)
+  coalesce(bool_and(server_version_num = current_setting('server_version_num')::int
+    AND datcollate = (SELECT datcollate FROM pg_database WHERE datname = current_database()) AND datcollate = 'C'), false)
 FROM planguard_src.fixture_marker`).Scan(&got, &sameServer); err != nil {
 		t.Fatalf("PLANGUARD_FIXTURE_DSN: no fixture marker: %v", err)
 	}
 	if got != want || !sameServer {
-		t.Fatalf("PLANGUARD_FIXTURE_DSN holds a fixture of hash %q (same server version: %v), want a finished build of these inputs (%s) on this server", got, sameServer, want)
+		t.Fatalf("PLANGUARD_FIXTURE_DSN holds a fixture of hash %q (same server version and C collation: %v), want a finished build of these inputs (%s) on this server, under C collation", got, sameServer, want)
 	}
 	t.Logf("reusing the fixture built from these files (%s)", want)
 	return pool
@@ -236,22 +244,37 @@ func TestBuildFixtureThroughMigrationsPostgres(t *testing.T) {
 
 // Without a fixture marker BuildFixture writes nothing to a database that holds data or a schema it did not make:
 // a row in packets, a freshly migrated Beacon database (its singleton rows), or public tables without a migration
-// ledger.
+// ledger. Nor to one whose collation is not C.
 func TestBuildFixtureRefusesRealDatabasePostgres(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	for _, tc := range []struct {
-		name, setup, want string
-		migrate           bool
+		name, setup, want, create string
+		migrate                   bool
 	}{
 		{name: "packets", migrate: true, want: "public.packets holds data", setup: `INSERT INTO packets (packet_hash, payload_type,
   payload_version, route_type, raw_payload, raw_header, first_heard_at, last_heard_at)
 VALUES ('\x0102030405060708', 4, 0, 1, '\x00', '\x00', now(), now())`},
 		{name: "migrated", migrate: true, want: "holds data"},
 		{name: "no_ledger", setup: "CREATE TABLE public.notes (body text)", want: "no schema_migrations"},
+		// The server's default locale; skipped where that is C.
+		{name: "collation", create: "CREATE DATABASE %s TEMPLATE template0", want: "a fixture needs C"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			pool := throwawayDB(t, ctx, "planguard_refuse_"+tc.name)
+			create := tc.create
+			if create == "" {
+				create = planguard.FixtureCreateDatabase
+			}
+			pool := throwawayDBAs(t, ctx, "planguard_refuse_"+tc.name, create)
+			if tc.create != "" {
+				var collate string
+				if err := pool.QueryRow(ctx, "SELECT datcollate FROM pg_database WHERE datname = current_database()").Scan(&collate); err != nil {
+					t.Fatal(err)
+				}
+				if collate == "C" {
+					t.Skip("the server's default collation is C")
+				}
+			}
 			if tc.migrate {
 				if err := db.RunMigrations(ctx, pool); err != nil {
 					t.Fatal(err)
@@ -279,8 +302,8 @@ WHERE n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')`).Scan(&
 			}
 			before := snapshot()
 			err := planguard.BuildFixture(ctx, pool, pgdata.Files)
-			if err == nil || !strings.Contains(err.Error(), "not a planguard fixture database") || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("BuildFixture = %v, want %q naming %q", err, "not a planguard fixture database", tc.want)
+			if err == nil || !strings.Contains(err.Error(), tc.want) || (tc.create == "" && !errors.Is(err, planguard.ErrNotFixture)) {
+				t.Fatalf("BuildFixture = %v, want an error naming %q (ErrNotFixture unless it is the collation)", err, tc.want)
 			}
 			if after := snapshot(); after != before {
 				t.Errorf("BuildFixture wrote after refusing:\nbefore %s\nafter  %s", before, after)

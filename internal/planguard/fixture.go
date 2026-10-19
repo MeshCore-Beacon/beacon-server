@@ -21,6 +21,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// FixtureCreateDatabase is how a fixture database must be created: with C collation, so text order (and with it the
+// generated data, the statistics and the plans) is the same on every platform and libc.
+const FixtureCreateDatabase = "CREATE DATABASE %s TEMPLATE template0 LC_COLLATE 'C' LC_CTYPE 'C' ENCODING 'UTF8'"
+
 // ErrNotFixture is returned by BuildFixture for a database that holds data and was not built by it.
 var ErrNotFixture = errors.New("not a planguard fixture database")
 
@@ -34,7 +38,7 @@ const (
 	fixtureAfterAnalyze = 90
 	// fixtureFormat versions the Go side of the generator (the build sequence and the marker); bump it when a change
 	// here alters what a build produces.
-	fixtureFormat = 2
+	fixtureFormat = 3
 )
 
 var (
@@ -138,10 +142,10 @@ func readFixtureFilesWith(fsys fs.FS, in generatorInputs) (fixtureFiles, error) 
 	return ff, nil
 }
 
-// FixtureHash is the hash BuildFixture records for the generator in fsys and this build of the code: a database
+// fixtureHash is the hash BuildFixture records for the generator in fsys and this build of the code: a database
 // whose finished marker holds it, on a server of the marker's server_version_num, was built from exactly these
 // inputs.
-func FixtureHash(fsys fs.FS) (string, error) {
+func fixtureHash(fsys fs.FS) (string, error) {
 	ff, err := readFixtureFiles(fsys)
 	return ff.hash, err
 }
@@ -151,6 +155,7 @@ type fixtureState struct {
 	marker   bool   // planguard_src.fixture_marker exists
 	hash     string // the hash of a finished build; "" when the build did not finish
 	version  int    // server_version_num the finished build ran on
+	collate  string // datcollate the finished build ran under
 	dataIn   string // a public table that holds a row (schema_migrations aside), or ""
 	noLedger bool   // public holds tables but no schema_migrations
 	migrated int    // rows in schema_migrations
@@ -164,8 +169,9 @@ func readFixtureState(ctx context.Context, conn *pgx.Conn) (fixtureState, error)
 	if st.marker {
 		// to_jsonb reads a marker of an older format too, which has no server_version_num.
 		err := conn.QueryRow(ctx, "SELECT coalesce(max(m.hash) FILTER (WHERE m.built_at IS NOT NULL), ''), "+
-			"coalesce(max((to_jsonb(m) ->> 'server_version_num')::int) FILTER (WHERE m.built_at IS NOT NULL), 0) FROM "+
-			fixtureSchema+".fixture_marker m").Scan(&st.hash, &st.version)
+			"coalesce(max((to_jsonb(m) ->> 'server_version_num')::int) FILTER (WHERE m.built_at IS NOT NULL), 0), "+
+			"coalesce(max(to_jsonb(m) ->> 'datcollate') FILTER (WHERE m.built_at IS NOT NULL), '') FROM "+
+			fixtureSchema+".fixture_marker m").Scan(&st.hash, &st.version, &st.collate)
 		if err != nil {
 			return st, err
 		}
@@ -213,7 +219,9 @@ func readFixtureState(ctx context.Context, conn *pgx.Conn) (fixtureState, error)
 // The guard is wider than packets: without a marker, it refuses a database where any public table other than
 // schema_migrations holds a row (a migrated Beacon database already does), or where public holds tables but no
 // schema_migrations. The hash covers the generator's Go-side inputs too (format, build settings, statistics
-// target, the after-ANALYZE step number), and a build is reused only on the server version it ran on.
+// target, the after-ANALYZE step number), and a build is reused only on the server version and collation it ran
+// on. The database must have C collation and ctype (FixtureCreateDatabase); any other is refused before anything is
+// written.
 //
 // fixture/source.sql creates the planguard_src tables the CSVs load into. Steps numbered 90 and up run after
 // ANALYZE. Autovacuum is switched off on every public table the build fills, so the statistics stay the ones
@@ -231,13 +239,19 @@ func BuildFixture(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) error {
 	}
 	defer pc.Release()
 	conn := pc.Conn()
-	var sp string
+	var sp, dbname, collate, ctype string
 	var version int
-	if err := conn.QueryRow(ctx, "SELECT current_schemas(false)::text, current_setting('server_version_num')::int").Scan(&sp, &version); err != nil {
+	if err := conn.QueryRow(ctx, "SELECT current_schemas(false)::text, current_setting('server_version_num')::int, "+
+		"d.datname, d.datcollate, d.datctype FROM pg_database d WHERE d.datname = current_database()").Scan(
+		&sp, &version, &dbname, &collate, &ctype); err != nil {
 		return err
 	}
 	if !strings.HasPrefix(sp, "{public") {
 		return fmt.Errorf("fixture: the connection's search_path resolves to %s; it must start with public", sp)
+	}
+	if collate != "C" || ctype != "C" {
+		return fmt.Errorf("fixture: database %s has LC_COLLATE %q and LC_CTYPE %q; a fixture needs C, so its text order "+
+			"does not depend on the platform: "+FixtureCreateDatabase, dbname, collate, ctype, pgx.Identifier{dbname}.Sanitize())
 	}
 
 	st, err := readFixtureState(ctx, conn)
@@ -252,7 +266,7 @@ func BuildFixture(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) error {
 			return fmt.Errorf("%w: public holds tables but no schema_migrations", ErrNotFixture)
 		}
 	}
-	if st.marker && st.hash == ff.hash && st.version == version {
+	if st.marker && st.hash == ff.hash && st.version == version && st.collate == collate {
 		if err := db.RunMigrations(ctx, pool); err != nil {
 			return err
 		}
@@ -270,8 +284,9 @@ func BuildFixture(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) error {
 		}
 	}
 	if _, err := conn.Exec(ctx, "CREATE SCHEMA "+fixtureSchema+"; CREATE TABLE "+fixtureSchema+
-		".fixture_marker (hash text NOT NULL, server_version_num int NOT NULL, built_at timestamptz); INSERT INTO "+
-		fixtureSchema+".fixture_marker (hash, server_version_num) VALUES ('"+ff.hash+"', "+fmt.Sprint(version)+")"); err != nil {
+		".fixture_marker (hash text NOT NULL, server_version_num int NOT NULL, datcollate text NOT NULL, built_at timestamptz); "+
+		"INSERT INTO "+fixtureSchema+".fixture_marker (hash, server_version_num, datcollate) VALUES ('"+ff.hash+"', "+
+		fmt.Sprint(version)+", "+quoteLit(collate)+")"); err != nil {
 		return fmt.Errorf("fixture: marker: %w", err)
 	}
 	if err := db.RunMigrations(ctx, pool); err != nil {

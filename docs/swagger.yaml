@@ -2314,8 +2314,9 @@ paths:
         first run this returns 404. fresh=true runs it now, shared with any run in
         progress and cancelled at server shutdown; within 5 minutes of the last run's
         end it starts nothing and returns the last successful report (started_at gives
-        its age), or 500 when no run has succeeded yet. Not served when the server
-        is read-only.
+        its age), or 500 when no run has succeeded yet. A read-only server cannot
+        enable the check (configuration refuses planguard.daily_check with server.read_only),
+        so there this returns 404 "planguard daily check is disabled".
       parameters:
       - description: Run the check now instead of returning the last report
         in: query

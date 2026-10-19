@@ -20,7 +20,8 @@
 // database) and compares the whole JSON of every page.
 //
 // --tier fixture first builds the synthetic fixture on --dsn through the migrations (or finds it built from the same
-// files); it refuses a database that holds data and was not built that way.
+// files); it refuses a database that holds data and was not built that way, and one whose collation is not C
+// (create it with CREATE DATABASE <name> TEMPLATE template0 LC_COLLATE 'C' LC_CTYPE 'C' ENCODING 'UTF8').
 //
 // Exit status: 0 when no run fails, 1 when one does (or the run cannot be made), 2 on usage errors.
 package main

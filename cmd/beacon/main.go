@@ -598,6 +598,8 @@ func planguardWiring(ctx context.Context, enabled, jobs bool, maint *pgxpool.Poo
 	// On, the last-run timestamp is exported from boot (0 until a run succeeds), so a check that never succeeds,
 	// even one whose corpus does not load, still trips the staleness alert.
 	metrics.EnablePlanguard()
+	// Defensive: configuration refuses planguard.daily_check together with server.read_only, the only mode
+	// without jobs, so this branch is not reached today. It keeps a jobless server from ever running the check.
 	if !jobs {
 		return nil, nil
 	}

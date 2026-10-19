@@ -114,9 +114,9 @@ var (
 	defaultExpect = "same"
 )
 
-// LoadDiffSpec reads the diff case file p of fsys and parses it with ParseDiffSpec; file: paths are relative to
+// loadDiffSpec reads the diff case file p of fsys and parses it with ParseDiffSpec; file: paths are relative to
 // fsys's root.
-func LoadDiffSpec(fsys fs.FS, p string) (*DiffSpec, error) {
+func loadDiffSpec(fsys fs.FS, p string) (*DiffSpec, error) {
 	raw, err := fs.ReadFile(fsys, p)
 	if err != nil {
 		return nil, err

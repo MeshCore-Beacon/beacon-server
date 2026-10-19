@@ -5,6 +5,7 @@ package planguard
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"testing/fstest"
@@ -95,7 +96,7 @@ func TestBuildFixtureRebuildsStaleInputsPostgres(t *testing.T) {
 	if err := drop(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := admin.Exec(ctx, "CREATE DATABASE "+name); err != nil {
+	if _, err := admin.Exec(ctx, fmt.Sprintf(FixtureCreateDatabase, name)); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := pgxpool.ParseConfig(dsn)

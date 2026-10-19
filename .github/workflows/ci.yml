@@ -22,11 +22,13 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      # The fixture tier's baselines were written on PostgreSQL 16.15 under C collation: keep both fixed here.
       planguard-postgres:
-        image: postgres:16-alpine
+        image: postgres:16.15-alpine
         env:
           POSTGRES_PASSWORD: planguard-ci-only
           POSTGRES_DB: planguard
+          POSTGRES_INITDB_ARGS: --locale=C --encoding=UTF8
         ports:
           - 5433:5432
         options: >-
