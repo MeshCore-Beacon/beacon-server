@@ -23,10 +23,11 @@ import (
 // Store wraps the sqlc-generated Queries and implements both ingest.DB and api.Reader.
 type Store struct {
 	q                   sqlc.Querier
-	pool                *pgxpool.Pool // dedicated connections (rollups, reconfirm, catalog reads); nil for the API store and mocks
-	clockDriftThreshold time.Duration // see api.Node.ClockOutOfSync
-	staleThreshold      time.Duration // see api.NodeSummary.Stale
-	pgVersion           atomic.Int32  // server_version_num, read by the first PgActivity call
+	pool                *pgxpool.Pool   // dedicated connections (rollups, reconfirm, catalog reads); nil for the API store and mocks
+	clockDriftThreshold time.Duration   // see api.Node.ClockOutOfSync
+	staleThreshold      time.Duration   // see api.NodeSummary.Stale
+	pgVersion           atomic.Int32    // server_version_num, read by the first PgActivity call
+	channelIDs          *ChannelIDCache // shared by the stores that write channels; nil for the API store and mocks
 }
 
 // New creates a Store whose statements run on dbtx (a pool, or a PlanRouter for the API).
@@ -35,8 +36,12 @@ type Store struct {
 // server's clockOutOfSync is reported true; see internal/config.ResolvedConfig.ClockDriftThreshold.
 // staleThreshold is how long since last_seen before a node's Stale is reported true; see
 // internal/config.ResolvedConfig.NodeStaleThreshold.
-func New(dbtx sqlc.DBTX, pool *pgxpool.Pool, clockDriftThreshold, staleThreshold time.Duration) *Store {
-	return &Store{q: sqlc.New(dbtx), pool: pool, clockDriftThreshold: clockDriftThreshold, staleThreshold: staleThreshold}
+func New(dbtx sqlc.DBTX, pool *pgxpool.Pool, clockDriftThreshold, staleThreshold time.Duration, opts ...Option) *Store {
+	s := &Store{q: sqlc.New(dbtx), pool: pool, clockDriftThreshold: clockDriftThreshold, staleThreshold: staleThreshold}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
 }
 
 func (s *Store) ResolvePathHashes(ctx context.Context, iata string, hashes [][]byte) (map[string][]api.ResolvedPathEntry, error) {

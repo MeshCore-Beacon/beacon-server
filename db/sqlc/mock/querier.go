@@ -1329,6 +1329,21 @@ func (mr *MockQuerierMockRecorder) ListChannelCatalogues(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChannelCatalogues", reflect.TypeOf((*MockQuerier)(nil).ListChannelCatalogues), ctx)
 }
 
+// ListChannelIDs mocks base method.
+func (m *MockQuerier) ListChannelIDs(ctx context.Context) ([]db.ListChannelIDsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListChannelIDs", ctx)
+	ret0, _ := ret[0].([]db.ListChannelIDsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListChannelIDs indicates an expected call of ListChannelIDs.
+func (mr *MockQuerierMockRecorder) ListChannelIDs(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChannelIDs", reflect.TypeOf((*MockQuerier)(nil).ListChannelIDs), ctx)
+}
+
 // ListChannelMessages mocks base method.
 func (m *MockQuerier) ListChannelMessages(ctx context.Context, arg db.ListChannelMessagesParams) ([]db.ListChannelMessagesRow, error) {
 	m.ctrl.T.Helper()
@@ -2512,6 +2527,36 @@ func (m *MockQuerier) SetRollupHourPartial(ctx context.Context, hour pgtype.Time
 func (mr *MockQuerierMockRecorder) SetRollupHourPartial(ctx, hour any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetRollupHourPartial", reflect.TypeOf((*MockQuerier)(nil).SetRollupHourPartial), ctx, hour)
+}
+
+// TouchChannel mocks base method.
+func (m *MockQuerier) TouchChannel(ctx context.Context, arg db.TouchChannelParams) (int32, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TouchChannel", ctx, arg)
+	ret0, _ := ret[0].(int32)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// TouchChannel indicates an expected call of TouchChannel.
+func (mr *MockQuerierMockRecorder) TouchChannel(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TouchChannel", reflect.TypeOf((*MockQuerier)(nil).TouchChannel), ctx, arg)
+}
+
+// TouchChannelHashOnly mocks base method.
+func (m *MockQuerier) TouchChannelHashOnly(ctx context.Context, arg db.TouchChannelHashOnlyParams) (int32, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TouchChannelHashOnly", ctx, arg)
+	ret0, _ := ret[0].(int32)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// TouchChannelHashOnly indicates an expected call of TouchChannelHashOnly.
+func (mr *MockQuerierMockRecorder) TouchChannelHashOnly(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TouchChannelHashOnly", reflect.TypeOf((*MockQuerier)(nil).TouchChannelHashOnly), ctx, arg)
 }
 
 // TouchObserverBrokers mocks base method.

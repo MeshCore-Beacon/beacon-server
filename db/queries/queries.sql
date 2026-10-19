@@ -1035,6 +1035,25 @@ ON CONFLICT (channel_hash) WHERE key_fingerprint IS NULL DO UPDATE SET
   last_seen = NOW()
 RETURNING id;
 
+-- name: ListChannelIDs :many
+-- Every channel key and its id, preloaded at boot for the ingest write-through.
+SELECT id, channel_hash, key_fingerprint FROM channels;
+
+-- name: TouchChannel :one
+-- Write-through for a cached keyed channel: the UpsertChannel conflict update, by id.
+-- No row (deleted or re-keyed since cached) sends the caller back to UpsertChannel.
+UPDATE channels SET
+  last_seen = NOW(),
+  name      = COALESCE(sqlc.narg(name), name)
+WHERE id = sqlc.arg(id) AND channel_hash = sqlc.arg(channel_hash) AND key_fingerprint = sqlc.arg(key_fingerprint)
+RETURNING id;
+
+-- name: TouchChannelHashOnly :one
+-- Write-through for a cached hash-only channel: the UpsertChannelHashOnly conflict update, by id.
+UPDATE channels SET last_seen = NOW()
+WHERE id = sqlc.arg(id) AND channel_hash = sqlc.arg(channel_hash) AND key_fingerprint IS NULL
+RETURNING id;
+
 -- name: ListUndecryptedGroupTextPackets :many
 -- Returns GRP_TXT packets (payload_type=5) never successfully decrypted. Used at boot to
 -- retry decryption against the current keystore for packets whose channel key was only added
@@ -1108,7 +1127,7 @@ LIMIT @page_limit;
 
 -- name: ListChannelsAfter :many
 -- Keep the non-null tuple boundary separate from the legacy optional cursor so
--- generic prepared plans can seek directly into the composite ordered index.
+-- generic prepared plans see a plain row comparison on (last_seen, id).
 SELECT c.* FROM channels c
 WHERE (c.last_seen, c.id) < (@cursor_ts::timestamptz, @cursor_id::integer)
   AND (@channel_hash::bytea IS NULL OR c.channel_hash = @channel_hash)

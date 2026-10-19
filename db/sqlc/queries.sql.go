@@ -2736,6 +2736,37 @@ func (q *Queries) ListChannelCatalogues(ctx context.Context) ([]MeshmapperChanne
 	return items, nil
 }
 
+const listChannelIDs = `-- name: ListChannelIDs :many
+SELECT id, channel_hash, key_fingerprint FROM channels
+`
+
+type ListChannelIDsRow struct {
+	ID             int32  `json:"id"`
+	ChannelHash    []byte `json:"channel_hash"`
+	KeyFingerprint []byte `json:"key_fingerprint"`
+}
+
+// Every channel key and its id, preloaded at boot for the ingest write-through.
+func (q *Queries) ListChannelIDs(ctx context.Context) ([]ListChannelIDsRow, error) {
+	rows, err := q.db.Query(ctx, listChannelIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChannelIDsRow{}
+	for rows.Next() {
+		var i ListChannelIDsRow
+		if err := rows.Scan(&i.ID, &i.ChannelHash, &i.KeyFingerprint); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChannelMessages = `-- name: ListChannelMessages :many
 SELECT DISTINCT ON (cm.id) cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at, encode(cm.packet_hash, 'hex') as packet_hash_hex, c.channel_hash, ts.name AS scope_name, p.transport_codes_present,
 p.observation_count AS observation_count
@@ -2996,7 +3027,7 @@ type ListChannelsAfterParams struct {
 }
 
 // Keep the non-null tuple boundary separate from the legacy optional cursor so
-// generic prepared plans can seek directly into the composite ordered index.
+// generic prepared plans see a plain row comparison on (last_seen, id).
 func (q *Queries) ListChannelsAfter(ctx context.Context, arg ListChannelsAfterParams) ([]Channel, error) {
 	rows, err := q.db.Query(ctx, listChannelsAfter,
 		arg.CursorTs,
@@ -5838,6 +5869,54 @@ UPDATE packets SET decrypted = true WHERE packet_hash = $1
 func (q *Queries) SetPacketDecrypted(ctx context.Context, packetHash []byte) error {
 	_, err := q.db.Exec(ctx, setPacketDecrypted, packetHash)
 	return err
+}
+
+const touchChannel = `-- name: TouchChannel :one
+UPDATE channels SET
+  last_seen = NOW(),
+  name      = COALESCE($1, name)
+WHERE id = $2 AND channel_hash = $3 AND key_fingerprint = $4
+RETURNING id
+`
+
+type TouchChannelParams struct {
+	Name           *string `json:"name"`
+	ID             int32   `json:"id"`
+	ChannelHash    []byte  `json:"channel_hash"`
+	KeyFingerprint []byte  `json:"key_fingerprint"`
+}
+
+// Write-through for a cached keyed channel: the UpsertChannel conflict update, by id.
+// No row (deleted or re-keyed since cached) sends the caller back to UpsertChannel.
+func (q *Queries) TouchChannel(ctx context.Context, arg TouchChannelParams) (int32, error) {
+	row := q.db.QueryRow(ctx, touchChannel,
+		arg.Name,
+		arg.ID,
+		arg.ChannelHash,
+		arg.KeyFingerprint,
+	)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
+}
+
+const touchChannelHashOnly = `-- name: TouchChannelHashOnly :one
+UPDATE channels SET last_seen = NOW()
+WHERE id = $1 AND channel_hash = $2 AND key_fingerprint IS NULL
+RETURNING id
+`
+
+type TouchChannelHashOnlyParams struct {
+	ID          int32  `json:"id"`
+	ChannelHash []byte `json:"channel_hash"`
+}
+
+// Write-through for a cached hash-only channel: the UpsertChannelHashOnly conflict update, by id.
+func (q *Queries) TouchChannelHashOnly(ctx context.Context, arg TouchChannelHashOnlyParams) (int32, error) {
+	row := q.db.QueryRow(ctx, touchChannelHashOnly, arg.ID, arg.ChannelHash)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
 }
 
 const touchObserverBrokers = `-- name: TouchObserverBrokers :exec
