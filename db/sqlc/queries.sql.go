@@ -72,6 +72,30 @@ func (q *Queries) AddRegionIATAs(ctx context.Context, arg AddRegionIATAsParams) 
 	return err
 }
 
+const backfillObservationPayloadTypes = `-- name: BackfillObservationPayloadTypes :execrows
+UPDATE packet_observations po
+SET payload_type = p.payload_type
+FROM packets p
+WHERE po.id >= $1::bigint AND po.id < $2::bigint
+  AND po.payload_type IS NULL
+  AND p.packet_hash = po.packet_hash
+`
+
+type BackfillObservationPayloadTypesParams struct {
+	FromID int64 `json:"from_id"`
+	ToID   int64 `json:"to_id"`
+}
+
+// Copies the packet's payload type onto observations in [@from_id, @to_id) that lack one.
+// Rows that already carry a type are never touched.
+func (q *Queries) BackfillObservationPayloadTypes(ctx context.Context, arg BackfillObservationPayloadTypesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, backfillObservationPayloadTypes, arg.FromID, arg.ToID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const clearRepeaters = `-- name: ClearRepeaters :execrows
 WITH reset AS (UPDATE meshmapper_repeater_sources SET etag = NULL, checked_at = NULL)
 DELETE FROM meshmapper_repeaters
@@ -902,6 +926,23 @@ func (q *Queries) GetNodesByPubkeys(ctx context.Context, pubkeys [][]byte) ([]Ge
 		return nil, err
 	}
 	return items, nil
+}
+
+const getObservationIDRange = `-- name: GetObservationIDRange :one
+SELECT COALESCE(min(id), 0)::bigint AS min_id, COALESCE(max(id), 0)::bigint AS max_id
+FROM packet_observations
+`
+
+type GetObservationIDRangeRow struct {
+	MinID int64 `json:"min_id"`
+	MaxID int64 `json:"max_id"`
+}
+
+func (q *Queries) GetObservationIDRange(ctx context.Context) (GetObservationIDRangeRow, error) {
+	row := q.db.QueryRow(ctx, getObservationIDRange)
+	var i GetObservationIDRangeRow
+	err := row.Scan(&i.MinID, &i.MaxID)
+	return i, err
 }
 
 const getObserverActivityHourly = `-- name: GetObserverActivityHourly :many

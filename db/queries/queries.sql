@@ -358,6 +358,20 @@ WHERE po.observer_id = $1
 ORDER BY po.id ASC
 LIMIT $3;
 
+-- name: BackfillObservationPayloadTypes :execrows
+-- Copies the packet's payload type onto observations in [@from_id, @to_id) that lack one.
+-- Rows that already carry a type are never touched.
+UPDATE packet_observations po
+SET payload_type = p.payload_type
+FROM packets p
+WHERE po.id >= @from_id::bigint AND po.id < @to_id::bigint
+  AND po.payload_type IS NULL
+  AND p.packet_hash = po.packet_hash;
+
+-- name: GetObservationIDRange :one
+SELECT COALESCE(min(id), 0)::bigint AS min_id, COALESCE(max(id), 0)::bigint AS max_id
+FROM packet_observations;
+
 -- name: DeleteOldTelemetry :exec
 -- Deletes telemetry rows older than the given cutoff. Called by the cleanup goroutine.
 DELETE FROM observer_telemetry WHERE reported_at < $1;

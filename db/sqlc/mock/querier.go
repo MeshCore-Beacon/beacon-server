@@ -100,6 +100,21 @@ func (mr *MockQuerierMockRecorder) AddRegionIATAs(ctx, arg any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddRegionIATAs", reflect.TypeOf((*MockQuerier)(nil).AddRegionIATAs), ctx, arg)
 }
 
+// BackfillObservationPayloadTypes mocks base method.
+func (m *MockQuerier) BackfillObservationPayloadTypes(ctx context.Context, arg db.BackfillObservationPayloadTypesParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "BackfillObservationPayloadTypes", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// BackfillObservationPayloadTypes indicates an expected call of BackfillObservationPayloadTypes.
+func (mr *MockQuerierMockRecorder) BackfillObservationPayloadTypes(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BackfillObservationPayloadTypes", reflect.TypeOf((*MockQuerier)(nil).BackfillObservationPayloadTypes), ctx, arg)
+}
+
 // ClearRepeaters mocks base method.
 func (m *MockQuerier) ClearRepeaters(ctx context.Context) (int64, error) {
 	m.ctrl.T.Helper()
@@ -668,6 +683,21 @@ func (m *MockQuerier) GetNodesByPubkeys(ctx context.Context, pubkeys [][]byte) (
 func (mr *MockQuerierMockRecorder) GetNodesByPubkeys(ctx, pubkeys any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNodesByPubkeys", reflect.TypeOf((*MockQuerier)(nil).GetNodesByPubkeys), ctx, pubkeys)
+}
+
+// GetObservationIDRange mocks base method.
+func (m *MockQuerier) GetObservationIDRange(ctx context.Context) (db.GetObservationIDRangeRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetObservationIDRange", ctx)
+	ret0, _ := ret[0].(db.GetObservationIDRangeRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetObservationIDRange indicates an expected call of GetObservationIDRange.
+func (mr *MockQuerierMockRecorder) GetObservationIDRange(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetObservationIDRange", reflect.TypeOf((*MockQuerier)(nil).GetObservationIDRange), ctx)
 }
 
 // GetObserverActivityHourly mocks base method.

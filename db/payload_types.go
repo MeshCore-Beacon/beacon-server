@@ -7,6 +7,8 @@ import (
 	"context"
 	"log/slog"
 	"time"
+
+	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 )
 
 // ObservationPayloadTypeKey is the background_state key of the observation payload-type backfill.
@@ -53,4 +55,18 @@ func (s *Store) payloadTypesReady(ctx context.Context) bool {
 		return true
 	}
 	return false
+}
+
+// ObservationIDRange returns min(id) and max(id) of packet_observations, both 0 when it is empty.
+func (s *Store) ObservationIDRange(ctx context.Context) (minID, maxID int64, err error) {
+	r, err := s.q.GetObservationIDRange(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	return r.MinID, r.MaxID, nil
+}
+
+// BackfillObservationPayloadTypes types the NULL observations with ids in [fromID, toID) from their packet.
+func (s *Store) BackfillObservationPayloadTypes(ctx context.Context, fromID, toID int64) (int64, error) {
+	return s.q.BackfillObservationPayloadTypes(ctx, sqlc.BackfillObservationPayloadTypesParams{FromID: fromID, ToID: toID})
 }

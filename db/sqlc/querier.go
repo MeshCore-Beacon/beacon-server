@@ -18,6 +18,9 @@ type Querier interface {
 	AddChannelMembers(ctx context.Context, arg AddChannelMembersParams) error
 	AddIATAs(ctx context.Context, iatas []string) error
 	AddRegionIATAs(ctx context.Context, arg AddRegionIATAsParams) error
+	// Copies the packet's payload type onto observations in [@from_id, @to_id) that lack one.
+	// Rows that already carry a type are never touched.
+	BackfillObservationPayloadTypes(ctx context.Context, arg BackfillObservationPayloadTypesParams) (int64, error)
 	// Keeps fetch timing so re-enabling still respects backoff; the ETag goes with the rows.
 	ClearRepeaters(ctx context.Context) (int64, error)
 	CreateAccount(ctx context.Context, name string) (Account, error)
@@ -98,6 +101,7 @@ type Querier interface {
 	GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]GetNodeNeighborsRow, error)
 	GetNodesByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]GetNodesByIDsRow, error)
 	GetNodesByPubkeys(ctx context.Context, pubkeys [][]byte) ([]GetNodesByPubkeysRow, error)
+	GetObservationIDRange(ctx context.Context) (GetObservationIDRangeRow, error)
 	// Hour-or-coarser buckets summed from the hourly rollup; same COALESCE-plus-count shape as the raw query.
 	// Hours from @tail_start on aren't rolled yet and read raw rows.
 	GetObserverActivityHourly(ctx context.Context, arg GetObserverActivityHourlyParams) ([]GetObserverActivityHourlyRow, error)

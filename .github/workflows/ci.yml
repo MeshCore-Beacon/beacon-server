@@ -74,7 +74,7 @@ jobs:
       - name: Verify route retention task against PostgreSQL 16
         env:
           BEACON_TEST_POSTGRES_DSN: postgres://postgres:backup-ci-only@127.0.0.1:5432/postgres?sslmode=disable
-        run: go test ./internal/background -run '^TestRouteRetentionTaskPostgres$' -count=1 -v
+        run: go test ./internal/background -run '^Test(RouteRetentionTask|PayloadTypeBackfill)Postgres$' -count=1 -v
 
       # Builds the fixture once; the planguard tests below reuse it (PLANGUARD_FIXTURE_DSN) after checking that its
       # marker records a build of the same files.
