@@ -481,21 +481,9 @@ func main() {
 	if repeaterImporter != nil && cfg.MeshMapper.Repeaters.Enabled {
 		tasks = append(tasks, background.Task{Name: "meshmapper.repeaters", Interval: meshmapper.PollInterval, Run: repeaterImporter.Refresh})
 	}
-	// The daily read-only plan check on the maintenance pool. It runs with the other jobs, so never when the
-	// server is read-only; a corpus that does not load disables it but never stops the server.
-	var pg *background.Planguard
-	if mode.Jobs {
-		checker, err := planguard.NewProdChecker(pools.Maint, db.SQLCSources, pgdata.Files)
-		if err != nil {
-			slog.Error("plan check disabled", "component", "startup", "error", err)
-		} else {
-			pg = background.NewPlanguard(checker.Run)
-			tasks = append(tasks, pg.Task(24*time.Hour))
-		}
-	}
-	var pgSource handlers.PlanguardSource // stays a nil interface without a checker, so /planguard is 404
-	if pg != nil {
-		pgSource = planguardSource{pg}
+	pgSource, pgTask := planguardWiring(resolved.PlanguardDailyCheck, mode.Jobs, pools.Maint)
+	if pgTask != nil {
+		tasks = append(tasks, *pgTask)
 	}
 	profiles := configureProfiling(ctx, pools.Maint)
 	defer profiles.Stop()
@@ -597,6 +585,27 @@ func getEnv(key string) string {
 	return v
 }
 
+// planguardWiring builds the daily read-only plan check on the maintenance pool, behind planguard.daily_check.
+// Off, /planguard answers that the check is disabled. On, the check runs with the other jobs (config validation
+// refuses it on a read-only server); a corpus that does not load disables it but never stops the server, and the
+// source stays a nil interface, so /planguard is 404.
+func planguardWiring(enabled, jobs bool, maint *pgxpool.Pool) (handlers.PlanguardSource, *background.Task) {
+	if !enabled {
+		return disabledPlanguard{}, nil
+	}
+	if !jobs {
+		return nil, nil
+	}
+	checker, err := planguard.NewProdChecker(maint, db.SQLCSources, pgdata.Files)
+	if err != nil {
+		slog.Error("plan check disabled", "component", "startup", "error", err)
+		return nil, nil
+	}
+	pg := background.NewPlanguard(checker.Run)
+	task := pg.Task(24 * time.Hour)
+	return planguardSource{pg}, &task
+}
+
 // planguardSource serves the plan check's reports in their API shape.
 type planguardSource struct{ pg *background.Planguard }
 
@@ -614,4 +623,15 @@ func (s planguardSource) RunNow(ctx context.Context) (api.PlanguardReport, error
 		return api.PlanguardReport{}, err
 	}
 	return rep.API(), nil
+}
+
+// disabledPlanguard answers /planguard when planguard.daily_check is off.
+type disabledPlanguard struct{}
+
+func (disabledPlanguard) Last() (api.PlanguardReport, error) {
+	return api.PlanguardReport{}, api.ErrPlanguardDisabled
+}
+
+func (disabledPlanguard) RunNow(context.Context) (api.PlanguardReport, error) {
+	return api.PlanguardReport{}, api.ErrPlanguardDisabled
 }

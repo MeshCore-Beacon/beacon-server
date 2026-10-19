@@ -491,3 +491,35 @@ func TestLoad_ServerReadOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestLoad_PlanguardDailyCheck(t *testing.T) {
+	for _, tc := range []struct {
+		yaml    string
+		want    bool
+		wantErr string
+	}{
+		{"", false, ""},
+		{"planguard: {}\n", false, ""},
+		{"planguard:\n  daily_check: true\n", true, ""},
+		{"planguard:\n  daily_check: false\n", false, ""},
+		{"planguard:\n  daily_check: true\nserver:\n  read_only: true\n", false, "planguard.daily_check cannot be enabled with server.read_only"},
+	} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte(tc.yaml), 0600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if tc.wantErr != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("Load(%q): err %v, want %q", tc.yaml, err, tc.wantErr)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("Load(%q): %v", tc.yaml, err)
+		}
+		if r := Resolve(cfg); r.PlanguardDailyCheck != tc.want || !strings.Contains(r.String(), "planguardDailyCheck="+strconv.FormatBool(tc.want)) {
+			t.Errorf("Resolve(%q): PlanguardDailyCheck = %v (%s), want %v", tc.yaml, r.PlanguardDailyCheck, r, tc.want)
+		}
+	}
+}

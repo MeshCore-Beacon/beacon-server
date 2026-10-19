@@ -99,6 +99,9 @@ type DBStatementsResponse struct {
 // ErrPlanguardNotRun means the daily plan check has not finished a run since the server started.
 var ErrPlanguardNotRun = errors.New("planguard has not run yet")
 
+// ErrPlanguardDisabled means planguard.daily_check is off.
+var ErrPlanguardDisabled = errors.New("planguard daily check is disabled")
+
 // PlanguardRun is one corpus entry planned in one plan mode.
 type PlanguardRun struct {
 	Entry    string   `json:"entry"`

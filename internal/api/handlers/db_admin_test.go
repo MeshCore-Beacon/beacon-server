@@ -215,6 +215,16 @@ func TestDBAdminPlanguard(t *testing.T) {
 		}
 	})
 
+	t.Run("disabled", func(t *testing.T) {
+		for _, target := range []string{"/planguard", "/planguard?fresh=true"} {
+			pg := &stubPlanguard{lastErr: api.ErrPlanguardDisabled, runErr: api.ErrPlanguardDisabled}
+			w := servePlanguard(t, pg, target)
+			if e := errorBody(t, w); w.Code != 404 || e.Code != "not_found" || e.Message != "planguard daily check is disabled" {
+				t.Fatalf("%s: got %d %s", target, w.Code, w.Body)
+			}
+		}
+	})
+
 	t.Run("no source", func(t *testing.T) {
 		w := servePlanguard(t, nil, "/planguard?fresh=true")
 		if w.Code != 404 {

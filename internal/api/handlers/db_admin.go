@@ -21,7 +21,7 @@ type DBStatementsReader interface {
 
 // PlanguardSource holds the daily plan regression check.
 type PlanguardSource interface {
-	Last() (api.PlanguardReport, error) // api.ErrPlanguardNotRun before the first run
+	Last() (api.PlanguardReport, error) // api.ErrPlanguardNotRun before the first run; api.ErrPlanguardDisabled when off
 	RunNow(ctx context.Context) (api.PlanguardReport, error)
 }
 
@@ -38,7 +38,7 @@ func DBAdminRouter(reader DBStatementsReader, pg PlanguardSource) http.Handler {
 // getPlanguard godoc
 //
 // @Summary Last daily plan regression check
-// @Description Plans every corpus statement in custom and generic mode against this database, read-only and without executing it (plain EXPLAIN, 5 s per plan, 1 s lock timeout), and checks each plan against the corpus. The check runs about an hour after boot and then daily; until its first run this returns 404. fresh=true runs it now, shared with any run in progress; within 5 minutes of the last run it returns that run's outcome. Not served when the server is read-only.
+// @Description Plans every corpus statement in custom and generic mode against this database, read-only and without executing it (plain EXPLAIN, 5 s per plan, 1 s lock timeout), and checks each plan against the corpus. Off unless planguard.daily_check is set (404 "planguard daily check is disabled"); when on, the check runs about an hour after boot and then daily, and until its first run this returns 404. fresh=true runs it now, shared with any run in progress; within 5 minutes of the last run it returns that run's outcome. Not served when the server is read-only.
 // @Tags Admin
 // @Produce json
 // @Security AdminKey
@@ -59,6 +59,10 @@ func getPlanguard(pg PlanguardSource) http.HandlerFunc {
 		}
 		if fresh {
 			rep, err := pg.RunNow(r.Context())
+			if errors.Is(err, api.ErrPlanguardDisabled) {
+				respondError(w, http.StatusNotFound, err.Error())
+				return
+			}
 			if err != nil {
 				slog.Error("api: plan check", "component", "api", "error", err)
 				respondError(w, http.StatusInternalServerError, "cannot run the plan check")
@@ -68,7 +72,7 @@ func getPlanguard(pg PlanguardSource) http.HandlerFunc {
 			return
 		}
 		rep, err := pg.Last()
-		if errors.Is(err, api.ErrPlanguardNotRun) {
+		if errors.Is(err, api.ErrPlanguardNotRun) || errors.Is(err, api.ErrPlanguardDisabled) {
 			respondError(w, http.StatusNotFound, err.Error())
 			return
 		}

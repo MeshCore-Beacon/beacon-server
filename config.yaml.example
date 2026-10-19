@@ -72,6 +72,11 @@ ratelimit:
 #  enforce: []
 #  budget: shadow   # the per-client DB-time budget only records; enforcement is not available
 
+# Daily read-only plan regression check (GET /api/v1/admin/db/planguard, beacon_planguard_* metrics).
+# Enable on large deployments; plan expectations assume production-sized tables.
+#planguard:
+#  daily_check: false
+
 # MeshMapper integrations (optional, require a regional or grouped-region API key).
 # Your local MeshMapper regional or grouped-region admin can generate the key.
 # A grouped-region key covers multiple regions.

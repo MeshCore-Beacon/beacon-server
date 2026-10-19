@@ -54,3 +54,13 @@ func TestRegistryGathersPlanguard(t *testing.T) {
 		}
 	}
 }
+
+// Until the plan check runs (or when it is off) neither metric carries a series, so a staleness alert on the
+// timestamp cannot fire on a server that never runs the check.
+func TestPlanguardMetricsEmptyUntilRun(t *testing.T) {
+	PlanguardFailures.Reset()
+	PlanguardLastRun.Set(0)
+	if body := scrape(t); strings.Contains(body, "\nbeacon_planguard_failures{") || strings.Contains(body, "\nbeacon_planguard_last_run_timestamp_seconds ") {
+		t.Errorf("planguard series before any run:\n%s", body)
+	}
+}
