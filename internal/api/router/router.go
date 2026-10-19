@@ -112,6 +112,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 	// ── Public REST API (v1) ─────────────────────────────────────────────────
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(mw.RateLimit(opts.RateLimit))
+		r.Use(mw.LimitListParams)
 		// Public group — no authentication required. Guards run here only, after TrustedProxyIP,
 		// so /ws and the admin subtree never carry guard state.
 		r.Group(func(r chi.Router) {
