@@ -587,5 +587,5 @@ FROM generate_series(1,2) i;`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ctx, pool, New(pool, 0, 0)
+	return ctx, pool, New(pool, pool, 0, 0)
 }

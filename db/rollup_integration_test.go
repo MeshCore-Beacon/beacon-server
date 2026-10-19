@@ -246,7 +246,7 @@ func revision(t *testing.T, ctx context.Context, s *Store) int64 {
 func TestRollupHourPostgres(t *testing.T) {
 	ctx, pool := schemaPool(t)
 	h0 := rollupFixture(t, ctx, pool)
-	store := New(pool, 0, 0)
+	store := New(pool, pool, 0, 0)
 
 	r, ok, err := store.BeginRollup(ctx)
 	if err != nil || !ok {
@@ -345,7 +345,7 @@ func TestRollupHourPostgres(t *testing.T) {
 func TestRollupPartialHoursPostgres(t *testing.T) {
 	ctx, pool := schemaPool(t)
 	h0 := rollupFixture(t, ctx, pool)
-	store := New(pool, 0, 0)
+	store := New(pool, pool, 0, 0)
 	r, ok, err := store.BeginRollup(ctx)
 	if err != nil || !ok {
 		t.Fatalf("BeginRollup: ok=%v err=%v", ok, err)
@@ -392,7 +392,7 @@ func TestRollupPartialHoursPostgres(t *testing.T) {
 func TestRollupInterruptedHourPostgres(t *testing.T) {
 	ctx, pool := schemaPool(t)
 	h0 := rollupFixture(t, ctx, pool)
-	store := New(pool, 0, 0)
+	store := New(pool, pool, 0, 0)
 	r, ok, err := store.BeginRollup(ctx)
 	if err != nil || !ok {
 		t.Fatalf("BeginRollup: ok=%v err=%v", ok, err)
@@ -430,7 +430,7 @@ func TestRollupInterruptedHourPostgres(t *testing.T) {
 func TestRollupBackfillDuringFirstRollPostgres(t *testing.T) {
 	ctx, pool := schemaPool(t)
 	h0 := rollupFixture(t, ctx, pool)
-	store := New(pool, 0, 0)
+	store := New(pool, pool, 0, 0)
 	r, ok, err := store.BeginRollup(ctx)
 	if err != nil || !ok {
 		t.Fatalf("BeginRollup: ok=%v err=%v", ok, err)
@@ -484,7 +484,7 @@ func TestRollupRegisterEmptyDatabasePostgres(t *testing.T) {
 	if err := RunMigrations(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
-	r, ok, err := New(pool, 0, 0).BeginRollup(ctx)
+	r, ok, err := New(pool, pool, 0, 0).BeginRollup(ctx)
 	if err != nil || !ok {
 		t.Fatalf("BeginRollup: ok=%v err=%v", ok, err)
 	}
@@ -503,7 +503,7 @@ func TestRollupRegisterEmptyDatabasePostgres(t *testing.T) {
 func TestRollupPartialBoundaryPostgres(t *testing.T) {
 	ctx, pool := schemaPool(t)
 	h0 := rollupFixture(t, ctx, pool)
-	r, ok, err := New(pool, 0, 0).BeginRollup(ctx)
+	r, ok, err := New(pool, pool, 0, 0).BeginRollup(ctx)
 	if err != nil || !ok {
 		t.Fatalf("BeginRollup: ok=%v err=%v", ok, err)
 	}

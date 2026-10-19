@@ -13,12 +13,12 @@ import (
 
 // unnamedDBTX runs every statement as an unnamed prepared statement (pgx.QueryExecModeCacheDescribe):
 // pgx caches only the description, never a named server-side statement, so Postgres cannot switch it
-// to a generic plan after five executions. Class C statements, whose best plan depends on the values,
-// go through it (Store.qc).
+// to a generic plan after five executions. Test-only: test fixtures use it to mirror PlanRouter's
+// class C path.
 //
 // Unnamed statements are planned with their values on every call under plan_cache_mode auto or
-// force_custom_plan. force_generic_plan still makes them generic, so a future generic-plan pool
-// must never take these statements.
+// force_custom_plan. force_generic_plan still makes them generic, so api_cached must never take
+// these statements.
 type unnamedDBTX struct{ sqlc.DBTX }
 
 func (u unnamedDBTX) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {

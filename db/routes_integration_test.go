@@ -104,7 +104,7 @@ ANALYZE known_routes;`)
 				if iata == "" {
 					capture.name = "ListKnownRoutesGlobal"
 				}
-				if _, err := (&Store{q: sqlc.New(capture), qc: sqlc.New(unnamedDBTX{capture})}).listKnownRouteRows(ctx, iata, 0, time.Time{}, 0, 50); err != nil {
+				if _, err := (&Store{q: sqlc.New(unnamedDBTX{capture})}).listKnownRouteRows(ctx, iata, 0, time.Time{}, 0, 50); err != nil {
 					t.Fatal(err)
 				}
 				planJSON := []byte(explainJSON(t, ctx, tx, capture.statement, capture.args...))

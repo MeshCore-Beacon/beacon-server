@@ -56,7 +56,7 @@ func TestUpsertKnownRoute_ComputesPathKey(t *testing.T) {
 func TestListKnownRoutesTrailingBlankIATA(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mock := mockdb.NewMockQuerier(ctrl) // no EXPECT: any call fails the test
-	store := &Store{q: mock, qc: mock}
+	store := &Store{q: mock}
 	for _, iata := range []string{"SEA ", "SEA  ", "   ", " ", "SE\x00 "} {
 		routes, err := store.ListKnownRoutes(context.Background(), iata, 0, time.Time{}, 0, 50)
 		b, _ := json.Marshal(routes)
@@ -66,16 +66,16 @@ func TestListKnownRoutesTrailingBlankIATA(t *testing.T) {
 	}
 }
 
-// Each shape runs its own statement; the hop pair goes through qc.
+// Each shape runs its own statement; the router decides how the hop pair is planned.
 func TestListKnownRoutes_Dispatch(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	q, qc := mockdb.NewMockQuerier(ctrl), mockdb.NewMockQuerier(ctrl)
-	store := &Store{q: q, qc: qc}
+	q := mockdb.NewMockQuerier(ctrl)
+	store := &Store{q: q}
 	cursor := time.UnixMilli(1_760_000_000_000)
 	q.EXPECT().ListKnownRoutesGlobal(gomock.Any(), sqlc.ListKnownRoutesGlobalParams{CursorTs: pgtype.Timestamptz{Time: cursor, Valid: true}, CursorID: 7, PageLimit: 50}).Return(nil, nil)
-	qc.EXPECT().ListKnownRoutesGlobalHop(gomock.Any(), sqlc.ListKnownRoutesGlobalHopParams{HopCount: 3, PageLimit: 50}).Return(nil, nil)
+	q.EXPECT().ListKnownRoutesGlobalHop(gomock.Any(), sqlc.ListKnownRoutesGlobalHopParams{HopCount: 3, PageLimit: 50}).Return(nil, nil)
 	q.EXPECT().ListKnownRoutesByIATA(gomock.Any(), sqlc.ListKnownRoutesByIATAParams{Iata: "SEA", PageLimit: 50}).Return(nil, nil)
-	qc.EXPECT().ListKnownRoutesByIATAHop(gomock.Any(), sqlc.ListKnownRoutesByIATAHopParams{Iata: "SEA", HopCount: 3, PageLimit: 50}).Return(nil, nil)
+	q.EXPECT().ListKnownRoutesByIATAHop(gomock.Any(), sqlc.ListKnownRoutesByIATAHopParams{Iata: "SEA", HopCount: 3, PageLimit: 50}).Return(nil, nil)
 	q.EXPECT().GetNodesByIDs(gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
 	for _, c := range []struct {
 		iata   string
@@ -111,7 +111,7 @@ func TestRouteCutoffCeil(t *testing.T) {
 	} {
 		ctrl := gomock.NewController(t)
 		mock := mockdb.NewMockQuerier(ctrl)
-		store := &Store{q: mock, qc: mock}
+		store := &Store{q: mock}
 		windowEnd := base.Add(time.Millisecond)
 		start := base.Add(-time.Hour)
 		mock.EXPECT().DeleteGraceRoutesSlice(gomock.Any(), gomock.Cond(func(p sqlc.DeleteGraceRoutesSliceParams) bool {
@@ -144,7 +144,7 @@ func TestRouteCutoffCeil(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 	mock := mockdb.NewMockQuerier(ctrl)
-	store := &Store{q: mock, qc: mock}
+	store := &Store{q: mock}
 	cutoff := base.Add(586 * time.Microsecond)
 	after := RouteKey{TS: base, ID: 9}
 	mock.EXPECT().DeleteExpiredRoutes(gomock.Any(), gomock.Cond(func(p sqlc.DeleteExpiredRoutesParams) bool {

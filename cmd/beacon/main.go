@@ -150,7 +150,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	store := db.New(pool, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold)
+	store := db.New(pool, pool, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold)
 
 	// ── Presence write coalescing ────────────────────────────────────────────
 	// Ingest writes go through the coalescer; reads keep using the store.

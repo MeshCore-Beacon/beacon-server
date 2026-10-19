@@ -1582,7 +1582,7 @@ ORDER BY iata, date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC
 LIMIT @page_limit;
 
 -- name: ListKnownRoutesByIATAHop :many
--- Custom plans only (Store.qc): a generic plan walks the whole region for a rare hop.
+-- Custom plans only (class C: PlanRouter runs it unnamed): a generic plan walks the whole region for a rare hop.
 -- The = form prices the Sort correctly; the range form under-costs it when a hop index exists.
 SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
 FROM known_routes
@@ -1602,7 +1602,7 @@ ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC
 LIMIT @page_limit;
 
 -- name: ListKnownRoutesGlobalHop :many
--- Custom plans only (Store.qc): the generic plan walks the whole keyset index for an absent hop.
+-- Custom plans only (class C: PlanRouter runs it unnamed): the generic plan walks the whole keyset index for an absent hop.
 SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
 FROM known_routes
 WHERE hop_count = @hop_count

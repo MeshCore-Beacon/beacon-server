@@ -55,9 +55,9 @@ func (s *Store) ListKnownRoutes(ctx context.Context, iata string, hopCount int32
 	return toKnownRoutes(rows, nodes), nil
 }
 
-// listKnownRouteRows runs the statement for the filter shape. The hop pair goes through qc, so
-// a rare or absent hop is never planned generically. A zero cursor is NULL; cursorID 0 is a
-// plain timestamp cursor.
+// listKnownRouteRows runs the statement for the filter shape. The hop pair is class C, so the
+// PlanRouter sends it unnamed and a rare or absent hop is never planned generically. A zero
+// cursor is NULL; cursorID 0 is a plain timestamp cursor.
 func (s *Store) listKnownRouteRows(ctx context.Context, iata string, hopCount int32, cursor time.Time, cursorID int64, limit int32) ([]knownRouteRow, error) {
 	if iata != strings.TrimRight(iata, " ") {
 		return []knownRouteRow{}, nil
@@ -66,19 +66,15 @@ func (s *Store) listKnownRouteRows(ctx context.Context, iata string, hopCount in
 	if !cursor.IsZero() {
 		cursorTS = pgtype.Timestamptz{Time: cursor, Valid: true}
 	}
-	qc := s.qc
-	if qc == nil {
-		qc = s.q
-	}
 	switch {
 	case iata == "" && hopCount == 0:
 		return routeRows(s.q.ListKnownRoutesGlobal(ctx, sqlc.ListKnownRoutesGlobalParams{CursorTs: cursorTS, CursorID: cursorID, PageLimit: limit}))
 	case iata == "":
-		return routeRows(qc.ListKnownRoutesGlobalHop(ctx, sqlc.ListKnownRoutesGlobalHopParams{HopCount: hopCount, CursorTs: cursorTS, CursorID: cursorID, PageLimit: limit}))
+		return routeRows(s.q.ListKnownRoutesGlobalHop(ctx, sqlc.ListKnownRoutesGlobalHopParams{HopCount: hopCount, CursorTs: cursorTS, CursorID: cursorID, PageLimit: limit}))
 	case hopCount == 0:
 		return routeRows(s.q.ListKnownRoutesByIATA(ctx, sqlc.ListKnownRoutesByIATAParams{Iata: iata, CursorTs: cursorTS, CursorID: cursorID, PageLimit: limit}))
 	default:
-		return routeRows(qc.ListKnownRoutesByIATAHop(ctx, sqlc.ListKnownRoutesByIATAHopParams{Iata: iata, HopCount: hopCount, CursorTs: cursorTS, CursorID: cursorID, PageLimit: limit}))
+		return routeRows(s.q.ListKnownRoutesByIATAHop(ctx, sqlc.ListKnownRoutesByIATAHopParams{Iata: iata, HopCount: hopCount, CursorTs: cursorTS, CursorID: cursorID, PageLimit: limit}))
 	}
 }
 
