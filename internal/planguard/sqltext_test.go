@@ -19,6 +19,7 @@ func TestLoadStatementsParsesSqlc(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadStatements: %v", err)
 	}
+	t.Logf("%d statements", len(m))
 	if len(m) < 190 {
 		t.Fatalf("got %d statements, want at least 190", len(m))
 	}
@@ -62,6 +63,24 @@ func TestLoadStatementsRejectsDuplicatesAndEmpty(t *testing.T) {
 	broken := map[string]string{"a.sql.go": "package db\n\nconst a = `-- name: A :one\n"}
 	if _, err := planguard.LoadStatementsFS(mapFS(broken), "*.sql.go"); err == nil || !strings.Contains(err.Error(), "a.sql.go") {
 		t.Fatalf("parse error: err = %v, want one naming a.sql.go", err)
+	}
+}
+
+func TestLoadStatementsFoldsConcatenation(t *testing.T) {
+	// sqlc writes a backtick inside a statement as `...` + "`" + `...`.
+	src := "package db\n\nconst a = `-- name: Quoted :one\nSELECT 1 AS ` + \"`\" + `x` + \"`\" + `\n`\n"
+	m, err := planguard.LoadStatementsFS(mapFS(map[string]string{"a.sql.go": src}), "*.sql.go")
+	if err != nil {
+		t.Fatalf("LoadStatementsFS: %v", err)
+	}
+	if want := "-- name: Quoted :one\nSELECT 1 AS `x`\n"; m["Quoted"] != want {
+		t.Fatalf("Quoted = %q, want %q", m["Quoted"], want)
+	}
+
+	unfoldable := "package db\n\nconst prefix = \"\"\nconst ok = `-- name: Ok :one\nSELECT 1`\nconst b = prefix + `-- name: Hidden :one\nSELECT 2`\n"
+	_, err = planguard.LoadStatementsFS(mapFS(map[string]string{"b.sql.go": unfoldable}), "*.sql.go")
+	if err == nil || !strings.Contains(err.Error(), "b.sql.go") || !strings.Contains(err.Error(), "2 statement headers") {
+		t.Fatalf("unfoldable constant: err = %v, want a header-count error naming b.sql.go", err)
 	}
 }
 

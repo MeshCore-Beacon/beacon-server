@@ -47,6 +47,7 @@ func TestCorpusValidation(t *testing.T) {
 		{"bad_default_sort_exempt.yaml", []string{"defaults", `"no_default_set"`}},
 		{"bad_index_cond_quote.yaml", []string{`entry "a"`, "literal", "iata = 'SEA'"}},
 		{"bad_index_cond_digit.yaml", []string{`entry "a"`, "literal", "hop_count = 3"}},
+		{"bad_index_cond_param.yaml", []string{`entry "a"`, "parameter", "public_key = $1"}},
 		{"bad_scan_pattern_literal.yaml", []string{`sort_exempt_sets "pinned"`, "literal"}},
 		{"bad_resolver_schema.yaml", []string{`resolver "hop_case"`, "t_fix_routes_hop."}},
 		{"bad_cached_no_admission.yaml", []string{`statement "G"`, "admission"}},
@@ -183,6 +184,22 @@ func TestStripLockClause(t *testing.T) {
 		if got := planguard.StripLockClause(in); got != want {
 			t.Errorf("StripLockClause(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestDerivedBodyNeedsTokenBoundaries(t *testing.T) {
+	src := "-- name: X :one\nWITH c AS (SELECT id FROM t ORDER BY id LIMIT $5 OFFSET $6 FOR UPDATE SKIP LOCKED) SELECT count(*) FROM c"
+	if planguard.DerivedBodyMatches(src, "SELECT id FROM t ORDER BY id LIMIT $1") {
+		t.Error("a body that stops before OFFSET matched")
+	}
+	if !planguard.DerivedBodyMatches(src, "SELECT id FROM t ORDER BY id LIMIT $1 OFFSET $2") {
+		t.Error("the whole CTE body did not match")
+	}
+	if planguard.DerivedBodyMatches(src, "ELECT id FROM t ORDER BY id LIMIT $1 OFFSET $2") {
+		t.Error("a body starting mid-token matched")
+	}
+	if !planguard.DerivedBodyMatches("SELECT a FROM t;", "SELECT a FROM t") {
+		t.Error("a whole statement did not match itself")
 	}
 }
 

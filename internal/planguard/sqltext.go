@@ -21,7 +21,42 @@ import (
 	"testing/fstest"
 )
 
-var sqlcHeader = regexp.MustCompile(`^-- name: (\w+) :(\w+)`)
+var (
+	sqlcHeader = regexp.MustCompile(`^-- name: (\w+) :(\w+)`)
+	rawHeader  = regexp.MustCompile(`-- name: \w+ :\w+`)
+)
+
+// foldString returns the value of a string literal or a + chain of string literals (sqlc writes a backtick
+// inside a statement as `...` + "`" + `...`). ok is false for any other expression.
+func foldString(e ast.Expr) (string, bool, error) {
+	switch x := e.(type) {
+	case *ast.BasicLit:
+		if x.Kind != token.STRING {
+			return "", false, nil
+		}
+		s, err := strconv.Unquote(x.Value)
+		if err != nil {
+			return "", false, fmt.Errorf("unquote: %w", err)
+		}
+		return s, true, nil
+	case *ast.ParenExpr:
+		return foldString(x.X)
+	case *ast.BinaryExpr:
+		if x.Op != token.ADD {
+			return "", false, nil
+		}
+		l, ok, err := foldString(x.X)
+		if err != nil || !ok {
+			return "", false, err
+		}
+		r, ok, err := foldString(x.Y)
+		if err != nil || !ok {
+			return "", false, err
+		}
+		return l + r, true, nil
+	}
+	return "", false, nil
+}
 
 // LoadStatements parses every *.sql.go file in dir (db/sqlc) and returns sqlc name → the constant's text,
 // "-- name: X :kind" header included. Errors: a parse error, a duplicate name, or no statement at all.
@@ -48,6 +83,7 @@ func LoadStatementsFS(fsys fs.FS, pattern string) (map[string]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("parse %s: %w", name, err)
 		}
+		extracted := 0
 		for _, decl := range f.Decls {
 			gd, ok := decl.(*ast.GenDecl)
 			if !ok || gd.Tok != token.CONST {
@@ -59,18 +95,18 @@ func LoadStatementsFS(fsys fs.FS, pattern string) (map[string]string, error) {
 					continue
 				}
 				for _, v := range vs.Values {
-					lit, ok := v.(*ast.BasicLit)
-					if !ok || lit.Kind != token.STRING {
-						continue
-					}
-					text, err := strconv.Unquote(lit.Value)
+					text, ok, err := foldString(v)
 					if err != nil {
-						return nil, fmt.Errorf("%s: unquote %s: %w", name, fset.Position(lit.Pos()), err)
+						return nil, fmt.Errorf("%s: %s: %w", name, fset.Position(v.Pos()), err)
+					}
+					if !ok {
+						continue
 					}
 					m := sqlcHeader.FindStringSubmatch(text)
 					if m == nil {
 						continue
 					}
+					extracted++
 					if prev, dup := from[m[1]]; dup {
 						return nil, fmt.Errorf("duplicate sqlc statement %q in %s and %s", m[1], prev, name)
 					}
@@ -78,6 +114,9 @@ func LoadStatementsFS(fsys fs.FS, pattern string) (map[string]string, error) {
 					out[m[1]] = text
 				}
 			}
+		}
+		if headers := len(rawHeader.FindAll(src, -1)); headers != extracted {
+			return nil, fmt.Errorf("%s: %d statement headers in the file but %d extracted; a statement constant is not a foldable string", name, headers, extracted)
 		}
 	}
 	if len(out) == 0 {
@@ -177,7 +216,37 @@ func StripLockClause(sql string) string {
 // DerivedBodyMatches reports whether body, the frozen read-only part of a DML statement, is still part of that
 // statement's source text once its lock clause is removed. Both sides are normalized, so parameter numbers,
 // comments and whitespace do not matter, and one edited token does.
+//
+// The match must sit on token boundaries: it starts the source or follows whitespace or "(", and it ends the
+// source or is followed by ")" or ";", directly or after whitespace. A body that stops short of a clause
+// ("LIMIT $1" inside "LIMIT $5 OFFSET $6") does not match.
 func DerivedBodyMatches(source, body string) bool {
 	b := Normalize(body)
-	return b != "" && strings.Contains(Normalize(StripLockClause(source)), b)
+	if b == "" {
+		return false
+	}
+	src := Normalize(StripLockClause(source))
+	for from := 0; ; {
+		i := strings.Index(src[from:], b)
+		if i < 0 {
+			return false
+		}
+		start := from + i
+		end := start + len(b)
+		if boundaryBefore(src, start) && boundaryAfter(src, end) {
+			return true
+		}
+		from = start + 1
+	}
+}
+
+func boundaryBefore(s string, i int) bool {
+	return i == 0 || s[i-1] == ' ' || s[i-1] == '('
+}
+
+func boundaryAfter(s string, i int) bool {
+	if i < len(s) && s[i] == ' ' {
+		i++
+	}
+	return i == len(s) || s[i] == ')' || s[i] == ';'
 }

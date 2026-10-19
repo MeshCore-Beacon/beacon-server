@@ -508,9 +508,9 @@ func (c *Corpus) expandBig(rules []NodeRule) ([]NodeRule, error) {
 	return rules, nil
 }
 
-// checkModeNeutral rejects an Index Cond fragment holding a literal: a quote, or a number outside a $n
-// parameter. Custom plans inline the parameter values and generic plans show $n, so only a fragment without
-// literals matches both. Digits inside identifiers (idx_v2, t1.col) are names, not literals.
+// checkModeNeutral rejects an Index Cond fragment holding a literal: a quote, a number or a $n parameter.
+// Custom plans inline the parameter values and generic plans show $n, so a fragment holds only the column and
+// the operator, e.g. "public_key =". Digits inside identifiers (idx_v2, t1.col) are names, not literals.
 func checkModeNeutral(fragment string) error {
 	if strings.ContainsAny(fragment, `'"`) {
 		return fmt.Errorf("index_cond %q holds a literal (a quote); fragments must be mode-neutral", fragment)
@@ -520,7 +520,10 @@ func checkModeNeutral(fragment string) error {
 		if ch < '0' || ch > '9' {
 			continue
 		}
-		if i > 0 && isIdentOrParam(fragment[i-1]) {
+		if i > 0 && fragment[i-1] == '$' {
+			return fmt.Errorf("index_cond %q holds a parameter ($n); custom plans inline it, so fragments end at the operator", fragment)
+		}
+		if i > 0 && isIdent(fragment[i-1]) {
 			continue
 		}
 		return fmt.Errorf("index_cond %q holds a literal (a number); fragments must be mode-neutral", fragment)
@@ -528,8 +531,8 @@ func checkModeNeutral(fragment string) error {
 	return nil
 }
 
-func isIdentOrParam(b byte) bool {
-	return b == '$' || b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+func isIdent(b byte) bool {
+	return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
 }
 
 func sortedKeys[V any](m map[string]V) []string {

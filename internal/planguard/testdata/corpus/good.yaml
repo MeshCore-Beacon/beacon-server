@@ -40,7 +40,7 @@ sort_exempt_sets:
   hop_group:
     - relation: known_routes
       index: idx_known_routes_hop_iata
-      index_cond: "hop_count = $1"
+      index_cond: "hop_count ="
       reason: a hop group sorts its own rows
 admission_profiles:
   by_id: [hit, miss]
@@ -58,7 +58,7 @@ entries:
         - relation: nodes
           index: nodes_pkey
           nodes: [Index Scan]
-          index_cond: ["public_key = $1"]
+          index_cond: ["public_key ="]
       forbid:
         - node: Seq Scan
           relations: [big, nodes]
