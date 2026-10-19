@@ -2248,6 +2248,99 @@ func (q *Queries) GetStatsTopAdvertisers(ctx context.Context, arg GetStatsTopAdv
 	return items, nil
 }
 
+const getStatsTopAdvertisersProbe = `-- name: GetStatsTopAdvertisersProbe :many
+WITH ranked AS (
+  SELECT origin_pubkey, SUM(advert_packets)::bigint AS advert_count,
+         SUM(flood_packets)::bigint AS flood_advert_count, SUM(direct_packets)::bigint AS direct_advert_count
+  FROM analytics_hourly_advert_sets
+  WHERE hour >= $2::timestamptz
+    AND (COALESCE(cardinality($3::bpchar[]), 0) = 0 OR iatas && $3::bpchar[])
+  GROUP BY origin_pubkey
+  ORDER BY CASE WHEN $1::text = 'flood' THEN SUM(flood_packets) ELSE SUM(direct_packets) END DESC,
+           advert_count DESC, origin_pubkey
+  LIMIT $4
+), heard_rows AS (
+  SELECT h.origin_pubkey, h.last_heard, h.iata, h.name, h.node_type
+  FROM analytics_hourly_advert_hearings h
+  WHERE h.hour >= $2::timestamptz AND COALESCE(cardinality($3::bpchar[]), 0) = 0
+    AND h.origin_pubkey IN (SELECT origin_pubkey FROM ranked)
+  UNION ALL
+  SELECT h.origin_pubkey, h.last_heard, h.iata, h.name, h.node_type
+  FROM generate_series(GREATEST($2::timestamptz, (SELECT min(hour) FROM analytics_hourly_advert_hearings)), date_trunc('hour', now(), 'UTC'), interval '1 hour') g(h)
+  CROSS JOIN (SELECT DISTINCT unnest($3::bpchar[]) AS iata) i
+  CROSS JOIN LATERAL (SELECT x.origin_pubkey, x.last_heard, x.iata, x.name, x.node_type
+                      FROM analytics_hourly_advert_hearings x WHERE x.hour = g.h AND x.iata = i.iata OFFSET 0) h
+  WHERE cardinality($3::bpchar[]) > 0 AND h.origin_pubkey IN (SELECT origin_pubkey FROM ranked)
+), heard AS (
+  SELECT origin_pubkey, MAX(last_heard) AS last_heard, MAX(iata) AS iata, MAX(name) AS name, MAX(node_type) AS node_type
+  FROM heard_rows GROUP BY origin_pubkey
+)
+SELECT n.id AS node_id, encode(r.origin_pubkey, 'hex') AS public_key,
+       COALESCE(n.name, h.name, '')::text AS name, COALESCE(n.node_type, h.node_type, 0)::smallint AS node_type,
+       r.advert_count, r.flood_advert_count, r.direct_advert_count,
+       h.last_heard::timestamptz AS last_heard, COALESCE(h.iata, '')::bpchar AS iata
+FROM ranked r
+LEFT JOIN heard h ON h.origin_pubkey = r.origin_pubkey
+LEFT JOIN nodes n ON n.public_key = r.origin_pubkey
+ORDER BY CASE WHEN $1::text = 'flood' THEN r.flood_advert_count ELSE r.direct_advert_count END DESC,
+         r.advert_count DESC, r.origin_pubkey
+`
+
+type GetStatsTopAdvertisersProbeParams struct {
+	Sort     string             `json:"sort"`
+	Since    pgtype.Timestamptz `json:"since"`
+	Iatas    []string           `json:"iatas"`
+	RowLimit int32              `json:"row_limit"`
+}
+
+type GetStatsTopAdvertisersProbeRow struct {
+	NodeID            pgtype.UUID        `json:"node_id"`
+	PublicKey         string             `json:"public_key"`
+	Name              string             `json:"name"`
+	NodeType          int16              `json:"node_type"`
+	AdvertCount       int64              `json:"advert_count"`
+	FloodAdvertCount  int64              `json:"flood_advert_count"`
+	DirectAdvertCount int64              `json:"direct_advert_count"`
+	LastHeard         pgtype.Timestamptz `json:"last_heard"`
+	Iata              string             `json:"iata"`
+}
+
+// GetStatsTopAdvertisers for at most 32 distinct IATAs: the hearings part probes per (hour, IATA).
+func (q *Queries) GetStatsTopAdvertisersProbe(ctx context.Context, arg GetStatsTopAdvertisersProbeParams) ([]GetStatsTopAdvertisersProbeRow, error) {
+	rows, err := q.db.Query(ctx, getStatsTopAdvertisersProbe,
+		arg.Sort,
+		arg.Since,
+		arg.Iatas,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetStatsTopAdvertisersProbeRow{}
+	for rows.Next() {
+		var i GetStatsTopAdvertisersProbeRow
+		if err := rows.Scan(
+			&i.NodeID,
+			&i.PublicKey,
+			&i.Name,
+			&i.NodeType,
+			&i.AdvertCount,
+			&i.FloodAdvertCount,
+			&i.DirectAdvertCount,
+			&i.LastHeard,
+			&i.Iata,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getStatsTopObservers = `-- name: GetStatsTopObservers :many
 WITH ranked AS (
   SELECT observer_id, SUM(observation_count)::bigint AS observation_count, MAX(iata) AS iata,
@@ -2402,6 +2495,79 @@ func (q *Queries) GetTopNodes(ctx context.Context, arg GetTopNodesParams) ([]Get
 	items := []GetTopNodesRow{}
 	for rows.Next() {
 		var i GetTopNodesRow
+		if err := rows.Scan(
+			&i.NodeID,
+			&i.PublicKey,
+			&i.Name,
+			&i.NodeType,
+			&i.Iata,
+			&i.ObservationCount,
+			&i.LastHeard,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getTopNodesProbe = `-- name: GetTopNodesProbe :many
+WITH src AS (
+  SELECT origin_pubkey, observations, last_heard, iata, name, node_type
+  FROM analytics_hourly_advert_hearings
+  WHERE hour >= $1::timestamptz AND COALESCE(cardinality($2::bpchar[]), 0) = 0
+  UNION ALL
+  SELECT a.origin_pubkey, a.observations, a.last_heard, a.iata, a.name, a.node_type
+  FROM generate_series(GREATEST($1::timestamptz, (SELECT min(hour) FROM analytics_hourly_advert_hearings)), date_trunc('hour', now(), 'UTC'), interval '1 hour') g(h)
+  CROSS JOIN (SELECT DISTINCT unnest($2::bpchar[]) AS iata) i
+  CROSS JOIN LATERAL (SELECT x.origin_pubkey, x.observations, x.last_heard, x.iata, x.name, x.node_type
+                      FROM analytics_hourly_advert_hearings x WHERE x.hour = g.h AND x.iata = i.iata OFFSET 0) a
+  WHERE cardinality($2::bpchar[]) > 0
+), ranked AS (
+  SELECT origin_pubkey, SUM(observations)::bigint AS observation_count, MAX(last_heard) AS last_heard,
+         MAX(iata) AS iata, MAX(name) AS name, MAX(node_type) AS node_type
+  FROM src
+  GROUP BY origin_pubkey
+  ORDER BY observation_count DESC, origin_pubkey
+  LIMIT $3
+)
+SELECT n.id AS node_id, encode(r.origin_pubkey, 'hex') AS public_key,
+       COALESCE(n.name, r.name, '')::text AS name, COALESCE(n.node_type, r.node_type, 0)::smallint AS node_type,
+       r.iata::bpchar AS iata, r.observation_count, r.last_heard::timestamptz AS last_heard
+FROM ranked r
+LEFT JOIN nodes n ON n.public_key = r.origin_pubkey
+ORDER BY r.observation_count DESC, r.origin_pubkey
+`
+
+type GetTopNodesProbeParams struct {
+	Since    pgtype.Timestamptz `json:"since"`
+	Iatas    []string           `json:"iatas"`
+	RowLimit int32              `json:"row_limit"`
+}
+
+type GetTopNodesProbeRow struct {
+	NodeID           pgtype.UUID        `json:"node_id"`
+	PublicKey        string             `json:"public_key"`
+	Name             string             `json:"name"`
+	NodeType         int16              `json:"node_type"`
+	Iata             string             `json:"iata"`
+	ObservationCount int64              `json:"observation_count"`
+	LastHeard        pgtype.Timestamptz `json:"last_heard"`
+}
+
+// GetTopNodes for at most 32 distinct IATAs: one rollup probe per (hour, IATA). @since is a UTC hour.
+func (q *Queries) GetTopNodesProbe(ctx context.Context, arg GetTopNodesProbeParams) ([]GetTopNodesProbeRow, error) {
+	rows, err := q.db.Query(ctx, getTopNodesProbe, arg.Since, arg.Iatas, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetTopNodesProbeRow{}
+	for rows.Next() {
+		var i GetTopNodesProbeRow
 		if err := rows.Scan(
 			&i.NodeID,
 			&i.PublicKey,

@@ -66,12 +66,12 @@ func TestGetStatsTopNodes_MissingNodeRow(t *testing.T) {
 	since := time.Date(2026, 1, 1, 12, 34, 0, 0, time.UTC)
 
 	mock.EXPECT().
-		GetTopNodes(gomock.Any(), sqlc.GetTopNodesParams{
+		GetTopNodesProbe(gomock.Any(), sqlc.GetTopNodesProbeParams{
 			Since:    pgtype.Timestamptz{Time: since.Truncate(time.Hour), Valid: true},
 			Iatas:    []string{"YVR"},
 			RowLimit: 5,
 		}).
-		Return([]sqlc.GetTopNodesRow{
+		Return([]sqlc.GetTopNodesProbeRow{
 			{NodeID: pgtype.UUID{Bytes: nodeID, Valid: true}, PublicKey: "aa", Name: "test-node", NodeType: 1, Iata: "YVR", ObservationCount: 9, LastHeard: lastHeard},
 			{PublicKey: "bb", Iata: "YVR", ObservationCount: 3, LastHeard: lastHeard},
 		}, nil)
@@ -134,8 +134,8 @@ func TestGetStatsTopAdvertisers_FloodDirectSplit(t *testing.T) {
 	heardAt := pgtype.Timestamptz{Time: time.Now(), Valid: true}
 
 	mock.EXPECT().
-		GetStatsTopAdvertisers(gomock.Any(), gomock.Cond(func(p sqlc.GetStatsTopAdvertisersParams) bool { return p.Sort == "direct" })).
-		Return([]sqlc.GetStatsTopAdvertisersRow{
+		GetStatsTopAdvertisersProbe(gomock.Any(), gomock.Cond(func(p sqlc.GetStatsTopAdvertisersProbeParams) bool { return p.Sort == "direct" })).
+		Return([]sqlc.GetStatsTopAdvertisersProbeRow{
 			{
 				NodeID:            pgtype.UUID{Bytes: nodeID, Valid: true},
 				PublicKey:         "cc",

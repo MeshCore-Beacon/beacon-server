@@ -131,6 +131,8 @@ type Querier interface {
 	GetPacketsByTraceTag(ctx context.Context, decode string) ([]GetPacketsByTraceTagRow, error)
 	// All HTTP aggregates read the hourly rollup, never observations.
 	GetPathStats(ctx context.Context, arg GetPathStatsParams) ([]GetPathStatsRow, error)
+	// GetPathStats for at most 32 distinct IATAs: one rollup probe per (hour, IATA). @since and @until are UTC hours.
+	GetPathStatsProbe(ctx context.Context, arg GetPathStatsProbeParams) ([]GetPathStatsProbeRow, error)
 	GetRadioPresets(ctx context.Context, arg GetRadioPresetsParams) ([]MvRadioPreset, error)
 	GetRegion(ctx context.Context, id int32) (GetRegionRow, error)
 	GetRegionBySlug(ctx context.Context, slug string) (GetRegionBySlugRow, error)
@@ -168,6 +170,8 @@ type Querier interface {
 	// Top N advertisers since the given hour, ranked by flood or direct adverts (@sort). Each ADVERT
 	// packet counts once per hour heard, however many of the requested IATAs heard it. Live names win.
 	GetStatsTopAdvertisers(ctx context.Context, arg GetStatsTopAdvertisersParams) ([]GetStatsTopAdvertisersRow, error)
+	// GetStatsTopAdvertisers for at most 32 distinct IATAs: the hearings part probes per (hour, IATA).
+	GetStatsTopAdvertisersProbe(ctx context.Context, arg GetStatsTopAdvertisersProbeParams) ([]GetStatsTopAdvertisersProbeRow, error)
 	// Top N observers since the given hour. Counts sum across matched IATAs; iata is a
 	// representative one. Live names win over the rolled snapshot.
 	GetStatsTopObservers(ctx context.Context, arg GetStatsTopObserversParams) ([]GetStatsTopObserversRow, error)
@@ -177,6 +181,8 @@ type Querier interface {
 	// Nodes by ADVERT hearings since the given hour. Live names win over the rolled snapshot;
 	// node_id is NULL once the node row is gone. iata is a representative one.
 	GetTopNodes(ctx context.Context, arg GetTopNodesParams) ([]GetTopNodesRow, error)
+	// GetTopNodes for at most 32 distinct IATAs: one rollup probe per (hour, IATA). @since is a UTC hour.
+	GetTopNodesProbe(ctx context.Context, arg GetTopNodesProbeParams) ([]GetTopNodesProbeRow, error)
 	GetTransportScopeByName(ctx context.Context, name string) (int32, error)
 	GetTransportScopes(ctx context.Context) ([]GetTransportScopesRow, error)
 	// ============================================================
