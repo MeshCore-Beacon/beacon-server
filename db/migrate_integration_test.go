@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -145,5 +146,37 @@ FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relnamespace = c
 	var recorded bool
 	if err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE filename = $1)", drop004).Scan(&recorded); err != nil || !recorded {
 		t.Fatalf("004 not recorded after a manual drop: %v", err)
+	}
+}
+
+const hopIndex006 = "006_known_routes_hop_iata.sql"
+
+// P4a pre-builds the hop index on prod; the migration must record it, not fail or rebuild it.
+func TestRunMigrationsHopIndexPrebuiltPostgres(t *testing.T) {
+	ctx, pool := schemaPool(t)
+	if err := RunMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	var def string
+	if err := pool.QueryRow(ctx, "SELECT pg_get_indexdef('idx_known_routes_hop_iata'::regclass)").Scan(&def); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(def, "USING btree (hop_count, iata)") {
+		t.Fatalf("hop index = %q", def)
+	}
+	var stateTable bool
+	if err := pool.QueryRow(ctx, "SELECT to_regclass('background_state') IS NOT NULL").Scan(&stateTable); err != nil || !stateTable {
+		t.Fatalf("background_state missing: %v", err)
+	}
+	// Pre-built by hand under the migration's exact name (P4a), then the binary boots.
+	if _, err := pool.Exec(ctx, "DELETE FROM schema_migrations WHERE filename = '"+hopIndex006+"'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := RunMigrations(ctx, pool); err != nil {
+		t.Fatalf("006 over a pre-built index: %v", err)
+	}
+	var recorded bool
+	if err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE filename = $1)", hopIndex006).Scan(&recorded); err != nil || !recorded {
+		t.Fatalf("006 not recorded: %v", err)
 	}
 }
