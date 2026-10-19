@@ -78,6 +78,32 @@ func sharedBlocks(n Node) int64 {
 	return int64(n.num("Shared Hit Blocks") + n.num("Shared Read Blocks"))
 }
 
+// isSubplan reports whether n hangs under its parent as a SubPlan or InitPlan: a separate query the parent
+// runs, not part of the parent's own scan.
+func isSubplan(n Node) bool {
+	pr := n.str("Parent Relationship")
+	return pr == "SubPlan" || pr == "InitPlan"
+}
+
+// bitmapIndexScans returns the Bitmap Index Scans that feed a Bitmap Heap Scan (through BitmapAnd/BitmapOr),
+// leaving out any inside a SubPlan or InitPlan of the scan.
+func bitmapIndexScans(n Node) []Node {
+	var out []Node
+	var rec func(m Node)
+	rec = func(m Node) {
+		if m.str("Node Type") == "Bitmap Index Scan" {
+			out = append(out, m)
+		}
+		for _, k := range m.kids() {
+			if !isSubplan(k) {
+				rec(k)
+			}
+		}
+	}
+	rec(n)
+	return out
+}
+
 // walk visits n and its descendants depth first; path holds n's ancestors, root first.
 func walk(n Node, fn func(n Node, path []Node)) {
 	var rec func(n Node, path []Node)
@@ -100,23 +126,22 @@ func isScan(t string) bool {
 }
 
 // indexesOf returns the indexes a scan node uses: its Index Name, or for a Bitmap Heap Scan those of the Bitmap
-// Index Scans below it.
+// Index Scans feeding it (not those of its SubPlans).
 func indexesOf(n Node) []string {
 	if ix := n.str("Index Name"); ix != "" {
 		return []string{ix}
 	}
 	var out []string
 	if n.str("Node Type") == "Bitmap Heap Scan" {
-		walk(n, func(m Node, _ []Node) {
-			if m.str("Node Type") == "Bitmap Index Scan" {
-				out = append(out, m.str("Index Name"))
-			}
-		})
+		for _, m := range bitmapIndexScans(n) {
+			out = append(out, m.str("Index Name"))
+		}
 	}
 	return out
 }
 
-// condsOf joins a scan's Index Cond and Recheck Cond and, for a Bitmap Heap Scan, its Bitmap Index Scans' conds.
+// condsOf joins a scan's Index Cond and Recheck Cond and, for a Bitmap Heap Scan, the conds of the Bitmap Index
+// Scans feeding it (not those of its SubPlans).
 func condsOf(n Node) string {
 	var parts []string
 	for _, k := range []string{"Index Cond", "Recheck Cond"} {
@@ -125,11 +150,9 @@ func condsOf(n Node) string {
 		}
 	}
 	if n.str("Node Type") == "Bitmap Heap Scan" {
-		walk(n, func(m Node, _ []Node) {
-			if m.str("Node Type") == "Bitmap Index Scan" {
-				parts = append(parts, m.str("Index Cond"))
-			}
-		})
+		for _, m := range bitmapIndexScans(n) {
+			parts = append(parts, m.str("Index Cond"))
+		}
 	}
 	return strings.Join(parts, " && ")
 }
@@ -143,8 +166,8 @@ func condHas(n Node, fragment string) bool {
 	return strings.Contains(normWS(condsOf(n)), normWS(fragment))
 }
 
-// Signature is a plan's shape, one line per node: node type, relation and alias, index, parent relationship,
-// join type, strategy and "Parallel". It holds no costs, row counts or values, so it is the baseline diff key.
+// Signature is a plan's shape, one line per node: node type, relation and alias, index, scan direction, partial
+// mode, parent relationship, join type, strategy and "Parallel". It holds no costs, row counts or values, so it is the baseline diff key.
 func Signature(root Node) []string {
 	var out []string
 	walk(root, func(n Node, path []Node) {
@@ -162,6 +185,12 @@ func Signature(root Node) []string {
 		}
 		if ix := n.str("Index Name"); ix != "" {
 			b.WriteString(" using " + ix)
+		}
+		if sd := n.str("Scan Direction"); sd != "" {
+			b.WriteString(" scan=" + sd)
+		}
+		if pm := n.str("Partial Mode"); pm != "" {
+			b.WriteString(" partial=" + pm)
 		}
 		if pr := n.str("Parent Relationship"); pr != "" && pr != "Outer" && pr != "Inner" && pr != "Member" {
 			b.WriteString(" [" + pr + "]")

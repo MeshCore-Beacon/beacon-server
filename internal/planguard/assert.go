@@ -265,7 +265,19 @@ func limitAbove(path []Node) bool {
 	return false
 }
 
+// assessBudget checks b against an analyzed run. A plan without the numbers a budget needs is an error, never a
+// silent zero: an EXPLAIN without ANALYZE, or a non-zero buffers budget on a plan without BUFFERS.
 func assessBudget(ch *Check, ex *Explain, b Budget) {
+	if !ex.Analyzed {
+		ch.Failures = append(ch.Failures, Failure{Kind: FailError,
+			Msg: "error: run is analyzed but the plan has no Execution Time (EXPLAIN without ANALYZE)"})
+		return
+	}
+	if _, ok := ex.Root["Shared Hit Blocks"].(float64); b.Buffers > 0 && !ok {
+		ch.Failures = append(ch.Failures, Failure{Kind: FailError,
+			Msg: "error: buffers budget set but the plan has no Shared Hit Blocks (EXPLAIN without BUFFERS)"})
+		b.Buffers = 0
+	}
 	add := func(msg string) { ch.Failures = append(ch.Failures, Failure{Kind: FailBudget, Msg: msg}) }
 	if b.Buffers > 0 && ch.Buffers > b.Buffers {
 		add(fmt.Sprintf("budget: buffers %d > %d", ch.Buffers, b.Buffers))

@@ -29,6 +29,7 @@
        "Node Type": "Index Scan",
        "Parent Relationship": "Outer",
        "Parallel Aware": false,
+       "Scan Direction": "Forward",
        "Index Name": "idx_known_routes_hop_count",
        "Relation Name": "known_routes",
        "Alias": "known_routes",

@@ -62,7 +62,7 @@ func TestSignatureIgnoresCostsAndValues(t *testing.T) {
 	if !reflect.DeepEqual(sa, sb) {
 		t.Fatalf("signatures differ:\n%s\n---\n%s", strings.Join(sa, "\n"), strings.Join(sb, "\n"))
 	}
-	want := []string{"Limit", "  Index Scan on known_routes using idx_known_routes_iata_keyset"}
+	want := []string{"Limit", "  Index Scan on known_routes using idx_known_routes_iata_keyset scan=Forward"}
 	if !reflect.DeepEqual(sa, want) {
 		t.Errorf("Signature = %q, want %q", sa, want)
 	}
@@ -73,15 +73,21 @@ func TestSignatureIgnoresCostsAndValues(t *testing.T) {
 	if reflect.DeepEqual(planguard.Signature(c.Root), sa) {
 		t.Error("a changed index left the signature unchanged")
 	}
+
+	d := loadPlan(t, "routes_byiata_mid.json")
+	d.Root["Plans"].([]any)[0].(map[string]any)["Scan Direction"] = "Backward"
+	if reflect.DeepEqual(planguard.Signature(d.Root), sa) {
+		t.Error("a forward/backward flip left the signature unchanged")
+	}
 }
 
 func TestSignatureKeepsAliasJoinAndSubplanShape(t *testing.T) {
 	sig := strings.Join(planguard.Signature(loadPlan(t, "bysites_ok.json").Root), "\n")
 	for _, want := range []string{
 		"  Limit [InitPlan]",
-		"Index Only Scan on packet_sites ps using idx_packet_sites_site",
-		"Index Only Scan on packet_sites x using packet_sites_pkey [SubPlan]",
-		"Aggregate {Sorted}",
+		"Index Only Scan on packet_sites ps using idx_packet_sites_site scan=Forward",
+		"Index Only Scan on packet_sites x using packet_sites_pkey scan=Forward [SubPlan]",
+		"Aggregate partial=Simple {Sorted}",
 	} {
 		if !strings.Contains(sig, want) {
 			t.Errorf("signature lacks %q:\n%s", want, sig)

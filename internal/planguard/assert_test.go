@@ -4,6 +4,9 @@
 package planguard_test
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -324,4 +327,89 @@ func TestVerdictFailing(t *testing.T) {
 			t.Errorf("%s.Failing() = %v, want %v", v, v.Failing(), failing[v])
 		}
 	}
+}
+
+func TestSubplanCondsStayOffParentScan(t *testing.T) {
+	c := &planguard.Corpus{}
+	ex := loadPlan(t, "cmi_seqscan.json")
+	heap := findNode(ex.Root, "Bitmap Heap Scan")
+	if heap == nil {
+		t.Fatal("cmi_seqscan.json has no Bitmap Heap Scan")
+	}
+	// A per-row bitmap probe run by the scan's filter: a SubPlan child with its own Bitmap Index Scan.
+	probe := map[string]any{
+		"Node Type": "Bitmap Heap Scan", "Parent Relationship": "SubPlan", "Subplan Name": "SubPlan 1",
+		"Relation Name": "packet_observations", "Alias": "po",
+		"Recheck Cond": "(observer_id = p.observer_id)",
+		"Plans": []any{map[string]any{
+			"Node Type": "Bitmap Index Scan", "Parent Relationship": "Outer",
+			"Index Name": "idx_observations_observer", "Index Cond": "(observer_id = p.observer_id)",
+		}},
+	}
+	heap["Plans"] = append(heap["Plans"].([]any), probe)
+
+	d := planguard.DriverSpec{
+		Relation: "packets", Alias: "p", Nodes: []string{"Bitmap Heap Scan"},
+		Index: "idx_packets_scope_last_heard", IndexCond: []string{"scope_id ="},
+	}
+	ch := c.Assess(ex, &planguard.Expect{Driver: []planguard.DriverSpec{d}}, true)
+	wantKinds(t, ch)
+	if want := []string{"packets(p):Bitmap Heap Scan:idx_packets_scope_last_heard"}; !reflect.DeepEqual(ch.Drivers, want) {
+		t.Errorf("Drivers = %v, want %v (the probe's index is not the outer scan's)", ch.Drivers, want)
+	}
+
+	d.IndexCond = []string{"observer_id ="} // only in the probe
+	ch = c.Assess(ex, &planguard.Expect{Driver: []planguard.DriverSpec{d}}, true)
+	wantKinds(t, ch, planguard.FailIndexCond)
+	if !reflect.DeepEqual(ch.Failures[0].Indexes, []string{"idx_packets_scope_last_heard"}) {
+		t.Errorf("indexes = %v, want only the outer scan's", ch.Failures[0].Indexes)
+	}
+
+	// A retired index used only by the probe is attributed to the probe, not the outer scan.
+	c.Defaults.RetiredIndexes = []string{"idx_observations_observer"}
+	d.IndexCond = nil
+	d.Index = "idx_packets_other"
+	ch = c.Assess(ex, &planguard.Expect{Driver: []planguard.DriverSpec{d}}, true)
+	wantKinds(t, ch, planguard.FailDriver)
+	if v := planguard.Decide(false, "", ch.Failures, ch.Retired); v != planguard.VerdictFalsePositive {
+		t.Errorf("outer driver failure with a retired probe index: verdict %s, want FALSE_POSITIVE", v)
+	}
+}
+
+func TestBudgetNeedsAnalyzeAndBuffers(t *testing.T) {
+	c := &planguard.Corpus{}
+	raw, err := os.ReadFile(filepath.Join("testdata", "plans", "packets_page.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var arr []map[string]any
+	if err := json.Unmarshal(raw, &arr); err != nil {
+		t.Fatal(err)
+	}
+	delete(arr[0], "Execution Time")
+	plain, _ := json.Marshal(arr)
+	ex, err := planguard.ParseExplain(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch := c.Assess(ex, &planguard.Expect{}, true)
+	wantKinds(t, ch, planguard.FailError)
+	if !strings.Contains(ch.Failures[0].Msg, "ANALYZE") {
+		t.Errorf("msg = %q", ch.Failures[0].Msg)
+	}
+	wantKinds(t, c.Assess(ex, &planguard.Expect{Budget: planguard.Budget{Buffers: 1}}, false))
+
+	ex = loadPlan(t, "packets_page.json")
+	delete(ex.Root, "Shared Hit Blocks")
+	delete(ex.Root, "Shared Read Blocks")
+	ch = c.Assess(ex, &planguard.Expect{Budget: planguard.Budget{Buffers: 1, Rows: 50}}, true)
+	wantKinds(t, ch, planguard.FailError, planguard.FailBudget)
+	if !strings.Contains(ch.Failures[0].Msg, "BUFFERS") || !strings.Contains(ch.Failures[1].Msg, "rows") {
+		t.Errorf("failures = %+v", ch.Failures)
+	}
+	if v := planguard.Decide(false, "x", ch.Failures, nil); v != planguard.VerdictError {
+		t.Errorf("verdict %s, want ERROR", v)
+	}
+	// No buffers budget: a plan without BUFFERS is fine.
+	wantKinds(t, c.Assess(ex, &planguard.Expect{}, true))
 }
