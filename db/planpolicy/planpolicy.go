@@ -49,14 +49,8 @@ var Legacy = map[string]bool{
 	"ListPacketsByIATAs":     true,
 	"ListChannelMessages":    true,
 	"ListAllChannelMessages": true,
-	"GetStatsSeries":         true,
-	"GetPathStats":           true,
-	"GetTopNodes":            true,
-	"GetStatsTopAdvertisers": true,
-	"ListObserverAdverts":    true,
 	// Today's adverts text, served until every observation carries its payload type.
 	"ListObserverAdvertsJoinFilter": true,
-	"ListTraceTags":                 true,
 }
 
 // Undecided, needs the maintainer's approval before the legacy pool is removed: a Fallback map for the

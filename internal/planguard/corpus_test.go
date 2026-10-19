@@ -148,19 +148,19 @@ func TestCorpusValidation(t *testing.T) {
 
 // A sqlc statement in planpolicy.Legacy runs on api_legacy, so the corpus must label it plan legacy.
 func TestCorpusLegacyStatementsArePlanLegacy(t *testing.T) {
-	sqlcText := map[string]string{"GetTopNodes": "-- name: GetTopNodes :many\nSELECT 1"}
+	sqlcText := map[string]string{"ListPacketsByIATAs": "-- name: ListPacketsByIATAs :many\nSELECT 1"}
 	for _, plan := range []string{"custom", "cached"} {
-		body := "admission_profiles: {by_id: [hit, miss]}\nstatements:\n  GetTopNodes: {sqlc: GetTopNodes, plan: " + plan
+		body := "admission_profiles: {by_id: [hit, miss]}\nstatements:\n  ListPacketsByIATAs: {sqlc: ListPacketsByIATAs, plan: " + plan
 		if plan == "cached" {
 			body += ", admission: by_id"
 		}
 		body += "}\n"
 		_, err := planguard.LoadCorpus(mapFS(map[string]string{"c.yaml": body}), "c.yaml", sqlcText)
-		if err == nil || !strings.Contains(err.Error(), `statement "GetTopNodes"`) || !strings.Contains(err.Error(), "planpolicy.Legacy") {
+		if err == nil || !strings.Contains(err.Error(), `statement "ListPacketsByIATAs"`) || !strings.Contains(err.Error(), "planpolicy.Legacy") {
 			t.Errorf("plan %s: err = %v, want one naming the statement and planpolicy.Legacy", plan, err)
 		}
 	}
-	body := "statements:\n  GetTopNodes: {sqlc: GetTopNodes, plan: legacy}\n"
+	body := "statements:\n  ListPacketsByIATAs: {sqlc: ListPacketsByIATAs, plan: legacy}\n"
 	if _, err := planguard.LoadCorpus(mapFS(map[string]string{"c.yaml": body}), "c.yaml", sqlcText); err != nil {
 		t.Errorf("plan legacy: %v", err)
 	}

@@ -24,7 +24,17 @@ func TestPlanPolicyNamesExist(t *testing.T) {
 			}
 		}
 	}
-	if len(planpolicy.Legacy) != 10 || planpolicy.ClassOf("ListPacketsByIATAs") != planpolicy.ClassLegacy ||
+	// The rewritten stats, adverts and traces readers left Legacy; today's adverts text stays there as the
+	// fallback served until every observation carries its payload type.
+	for _, name := range []string{"GetStatsSeries", "GetPathStats", "GetTopNodes", "GetStatsTopAdvertisers", "ListObserverAdverts", "ListTraceTags"} {
+		if c := planpolicy.ClassOf(name); c != planpolicy.ClassC && c != planpolicy.ClassG {
+			t.Errorf("%s is class %d, want C or G", name, c)
+		}
+	}
+	if planpolicy.ClassOf("ListObserverAdvertsJoinFilter") != planpolicy.ClassLegacy || planpolicy.ClassOf("GetTopNodesProbe") != planpolicy.ClassC {
+		t.Error("ListObserverAdvertsJoinFilter must stay Legacy and GetTopNodesProbe class C")
+	}
+	if len(planpolicy.Legacy) != 4 || planpolicy.ClassOf("ListPacketsByIATAs") != planpolicy.ClassLegacy ||
 		planpolicy.ClassOf("ListKnownRoutesGlobalHop") != planpolicy.ClassC || planpolicy.ClassOf("GetNodeByID") != planpolicy.ClassG ||
 		planpolicy.ClassOf("") != planpolicy.ClassC {
 		t.Fatal("ClassOf")

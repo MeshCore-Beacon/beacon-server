@@ -1,0 +1,8 @@
+[
+ "Limit",
+ "  Nested Loop (Left)",
+ "    Nested Loop",
+ "      Index Scan on packet_observations po using idx_observations_adverts scan=Forward",
+ "      Index Scan on packets p using packets_pkey scan=Forward",
+ "    Index Scan on nodes n using idx_nodes_pubkey scan=Forward"
+]
