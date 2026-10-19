@@ -144,7 +144,7 @@ func TestTraceTagsKeysetMatchesTodayPostgres(t *testing.T) {
 	for _, ms := range tiedMillis {
 		cursors = append(cursors, ts(time.UnixMilli(ms)))
 	}
-	cursorTags := [][]byte{nil, {0x00}, {0xff, 0xff, 0xff, 0xff, 0xff}}
+	cursorTags := [][]byte{nil, {}, {0x00}, {0xff, 0xff, 0xff, 0xff, 0xff}} // {} is an empty, non-NULL bytea
 	for _, tag := range tiedTags {
 		b, err := hex.DecodeString(tag)
 		if err != nil {

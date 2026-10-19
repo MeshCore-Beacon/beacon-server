@@ -5564,6 +5564,8 @@ WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR EXISTS (
   AND ($3::timestamptz IS NULL OR t.first_heard_at >= $3)
   AND ($4::timestamptz IS NULL OR t.first_heard_at <= $4)
   -- Keyset on the millisecond clients see, tie-broken by tag; matches idx_trace_tags_keyset.
+  -- A NULL cursor starts at ('infinity', ''), which is above every row only while last_heard_at is finite: UpsertPacket
+  -- writes NOW() and RecordTrace a finite heard time.
   AND (date_trunc('milliseconds', t.last_heard_at, 'UTC'), t.trace_tag)
       < (COALESCE($5::timestamptz, 'infinity'::timestamptz), COALESCE($8::bytea, ''::bytea))
   AND ($7::text = '' OR t.trace_type = $7)
