@@ -195,7 +195,8 @@ type DeleteExpiredRoutesRow struct {
 
 // One batch past retention, keyset after the per-run cursor (the first call passes -infinity, 0).
 // The truncated bound (ms ceiling of the cutoff) drives idx_known_routes_keyset; the exact
-// residual decides membership. + interval 0 keeps it off idx_known_routes_last_seen.
+// residual decides membership. + interval 0 keeps the exact cutoff a Filter, so the planner
+// cannot switch to a last_seen index on deployments that still have one.
 func (q *Queries) DeleteExpiredRoutes(ctx context.Context, arg DeleteExpiredRoutesParams) (DeleteExpiredRoutesRow, error) {
 	row := q.db.QueryRow(ctx, deleteExpiredRoutes,
 		arg.AfterTs,

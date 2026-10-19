@@ -775,7 +775,8 @@ WHERE last_seen < $1
 -- name: DeleteExpiredRoutes :one
 -- One batch past retention, keyset after the per-run cursor (the first call passes -infinity, 0).
 -- The truncated bound (ms ceiling of the cutoff) drives idx_known_routes_keyset; the exact
--- residual decides membership. + interval 0 keeps it off idx_known_routes_last_seen.
+-- residual decides membership. + interval 0 keeps the exact cutoff a Filter, so the planner
+-- cannot switch to a last_seen index on deployments that still have one.
 WITH expired AS (
   SELECT r.iata, r.path_key, date_trunc('milliseconds', r.last_seen, 'UTC') AS ts, r.id
   FROM known_routes r
