@@ -526,13 +526,23 @@ func (sd *storeDiff) walk(c StoreCase, path string, limit int, res *StoreCaseRes
 				res.Verdict, res.Detail = DiffDifferent, fmt.Sprintf("page %d: %s", page, d)
 				return nil
 			}
+			if page > 1 {
+				// The walk reached this page through a cursor, so an error here is not an end both builds share.
+				res.Verdict, res.Detail = DiffDifferent, fmt.Sprintf("page %d: both answered %d after a cursor", page, o.status)
+				return nil
+			}
 			notes = append(notes, fmt.Sprintf("page %d: both answered %d", page, o.status))
 			break
 		}
 		nb := n.body
 		if allowed[ClassTieOrder] {
 			var moved int
-			nb, moved = alignTies(o.body, nb, c.Key, allowed[ClassAdditiveKeys])
+			var bad string
+			nb, moved, bad = alignTies(o.body, nb, c.Key, allowed[ClassAdditiveKeys])
+			if bad != "" {
+				res.Verdict, res.Detail = DiffDifferent, fmt.Sprintf("page %d: tie_order: %s", page, bad)
+				return nil
+			}
 			if moved > 0 {
 				counts[ClassTieOrder] += moved
 				notes = append(notes, fmt.Sprintf("page %d: tie_order: %d items hold another position within their run of equal %s", page, moved, strings.Join(c.Key, ", ")))
@@ -573,6 +583,15 @@ func (sd *storeDiff) walk(c StoreCase, path string, limit int, res *StoreCaseRes
 				res.Verdict, res.Detail = DiffDifferent, fmt.Sprintf("page %d: follow %s ← %s: %v", page, f.Param, f.From, err)
 				return nil
 			}
+			// The walk follows one cursor for both builds, so each build's own page must give the same one. A
+			// relaxed page (tie_order) can end on another row; following old's cursor would then never show the
+			// rows new skips or repeats.
+			nv, nok, nerr := pickValue(n.body, f.From)
+			if nerr != nil || nok != ok || nv != v {
+				res.Verdict, res.Detail = DiffDifferent, fmt.Sprintf("page %d: cursor differs after tie_order: %s ← %s old %s, new %s",
+					page, f.Param, f.From, cursorText(v, ok, nil), cursorText(nv, nok, nerr))
+				return nil
+			}
 			if !ok && missing == "" {
 				missing = fmt.Sprintf("%s ← %s", f.Param, f.From)
 			}
@@ -604,32 +623,55 @@ func (sd *storeDiff) walk(c StoreCase, path string, limit int, res *StoreCaseRes
 	return nil
 }
 
+func cursorText(v string, ok bool, err error) string {
+	switch {
+	case err != nil:
+		return err.Error()
+	case !ok:
+		return absent
+	}
+	return v
+}
+
 // alignTies returns newBody with its items reordered to old's order within runs of equal key, when the items
-// differ only that way, and the number of items that moved. Otherwise it returns newBody unchanged.
-func alignTies(oldBody, newBody any, key []string, additive bool) (any, int) {
+// differ only that way, and the number of items that moved. Otherwise it returns newBody unchanged. bad names an
+// item that lacks a key field: without it every such item would share one run and any order would pass.
+func alignTies(oldBody, newBody any, key []string, additive bool) (out any, moved int, bad string) {
 	oi, ok1 := pageItems(oldBody)
 	ni, ok2 := pageItems(newBody)
-	if !ok1 || !ok2 || len(oi) != len(ni) {
-		return newBody, 0
+	if !ok1 || !ok2 {
+		return newBody, 0, ""
 	}
-	keyOf := func(item any) string {
-		m, _ := item.(map[string]any)
+	keyOf := func(item any) (string, string) {
 		parts := make([]string, len(key))
 		for i, k := range key {
-			v := any(m)
+			v := item
 			for _, p := range strings.Split(k, ".") {
-				mm, _ := v.(map[string]any)
-				v = mm[p]
+				m, ok := v.(map[string]any)
+				if !ok {
+					return "", k
+				}
+				if v, ok = m[p]; !ok {
+					return "", k
+				}
 			}
 			b, _ := json.Marshal(v)
 			parts[i] = string(b)
 		}
-		return strings.Join(parts, "\x00")
+		return strings.Join(parts, "\x00"), ""
 	}
-	for i := range oi {
-		if keyOf(oi[i]) != keyOf(ni[i]) {
-			return newBody, 0
+	oldKeys, newKeys := make([]string, len(oi)), make([]string, len(ni))
+	for side, items := range [][]any{oi, ni} {
+		for i, item := range items {
+			k, missing := keyOf(item)
+			if missing != "" {
+				return newBody, 0, fmt.Sprintf("key %s is absent from the %s page's $.items[%d]", missing, [2]string{"old", "new"}[side], i)
+			}
+			[2][]string{oldKeys, newKeys}[side][i] = k
 		}
+	}
+	if len(oi) != len(ni) || !slices.Equal(oldKeys, newKeys) {
+		return newBody, 0, ""
 	}
 	equal := func(a, b any) bool {
 		var added []string
@@ -639,12 +681,10 @@ func alignTies(oldBody, newBody any, key []string, additive bool) (any, int) {
 		}
 		return jsonDiff(a, b, "$", p) == nil
 	}
-	out := make([]any, len(ni))
-	moved := 0
+	items := make([]any, len(ni))
 	for start := 0; start < len(oi); {
 		end := start + 1
-		k := keyOf(oi[start])
-		for end < len(oi) && keyOf(oi[end]) == k {
+		for end < len(oi) && oldKeys[end] == oldKeys[start] {
 			end++
 		}
 		used := make([]bool, end-start)
@@ -661,28 +701,28 @@ func alignTies(oldBody, newBody any, key []string, additive bool) (any, int) {
 				}
 			}
 			if pick < 0 {
-				return newBody, 0
+				return newBody, 0, ""
 			}
 			if pick != i {
 				moved++
 			}
 			used[pick-start] = true
-			out[i] = ni[pick]
+			items[i] = ni[pick]
 		}
 		start = end
 	}
 	if moved == 0 {
-		return newBody, 0
+		return newBody, 0, ""
 	}
 	if _, isArray := newBody.([]any); isArray {
-		return out, moved
+		return items, moved, ""
 	}
 	m := map[string]any{}
 	for k, v := range newBody.(map[string]any) {
 		m[k] = v
 	}
-	m["items"] = out
-	return m, moved
+	m["items"] = items
+	return m, moved, ""
 }
 
 // jsonPathDiff is the first difference between two JSON values.

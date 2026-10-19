@@ -148,7 +148,7 @@ func TestStoreDiffComparesPageJSON(t *testing.T) {
 		})
 	}
 
-	t.Run("equal non-200 answers end the walk", func(t *testing.T) {
+	t.Run("equal non-200 answers after a cursor are a difference", func(t *testing.T) {
 		status := func(page int) int {
 			if page == 2 {
 				return http.StatusServiceUnavailable
@@ -156,8 +156,21 @@ func TestStoreDiffComparesPageJSON(t *testing.T) {
 			return http.StatusOK
 		}
 		rep := runStoreDiff(t, pageServer(t, nil, status), pageServer(t, nil, status), thingsSpec(nil, nil), "1")
-		if c := rep.Cases[0]; c.Verdict != planguard.DiffIdentical || c.Pages != 2 {
-			t.Errorf("got %+v, want identical over 2 pages", c)
+		if c := rep.Cases[0]; c.Verdict != planguard.DiffDifferent || c.Pages != 2 || c.Detail != "page 2: both answered 503 after a cursor" {
+			t.Errorf("got %+v, want different at page 2", c)
+		}
+		// On page 1 equal errors are an end both builds share.
+		first := func(int) int { return http.StatusServiceUnavailable }
+		rep = runStoreDiff(t, pageServer(t, nil, first), pageServer(t, nil, first), thingsSpec(nil, nil), "1")
+		if c := rep.Cases[0]; c.Verdict != planguard.DiffIdentical || c.Pages != 1 {
+			t.Errorf("page 1: got %+v, want identical over 1 page", c)
+		}
+	})
+
+	t.Run("tie_order needs every key field", func(t *testing.T) {
+		rep := runStoreDiff(t, old, pageServer(t, nil, nil), thingsSpec([]string{planguard.ClassTieOrder}, []string{"rank"}), "3")
+		if c := rep.Cases[0]; c.Verdict != planguard.DiffDifferent || c.Detail != "page 1: tie_order: key rank is absent from the old page's $.items[0]" {
+			t.Errorf("got %+v, want different naming the absent key", c)
 		}
 	})
 
@@ -362,5 +375,57 @@ func TestStoreDiffStopsWithoutCursor(t *testing.T) {
 	if c := rep.Cases[0]; c.Verdict != planguard.DiffIdentical || c.Pages != 2 ||
 		c.Detail != "page 2: hasMore, but cursor ← nextCursor is absent on both; the walk stops" {
 		t.Errorf("got %+v", c)
+	}
+}
+
+// descServer serves ids 7..1 newest first as a bare array: cursor ← last.id returns the ids below it. With
+// swapAt, page 1 swaps the two items it names (a tie when they share a group); at the page end, that build's own
+// cursor then names another row than the old build's.
+func descServer(t *testing.T, swapAt func(items []any) (int, int)) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		cursor, err := strconv.Atoi(r.URL.Query().Get("cursor"))
+		if err != nil {
+			cursor = 8
+		}
+		items := []any{}
+		for id := cursor - 1; id >= 1 && len(items) < limit; id-- {
+			items = append(items, map[string]any{"id": id, "group": (id + 1) / 2})
+		}
+		if swapAt != nil && cursor == 8 {
+			if i, j := swapAt(items); i >= 0 {
+				items[i], items[j] = items[j], items[i]
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(items)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// tie_order relaxes the order inside a page, but each build's own page must still give the walk's cursor. A
+// build whose tie order moves another row to the end of the page would repeat (or skip) rows on its own next page,
+// which following the old cursor would never show.
+func TestStoreDiffTieOrderChecksEachBuildsCursor(t *testing.T) {
+	spec := &planguard.StoreDiffSpec{Cases: []planguard.StoreCase{{
+		ID: "desc", Path: "/api/v1/things",
+		Follow:  []planguard.Follow{{Param: "cursor", From: "last.id"}},
+		Allowed: []string{planguard.ClassTieOrder}, Key: []string{"group"},
+	}}}
+	old := descServer(t, nil)
+	// limit 3: page 1 is 7, 6, 5; 6 and 5 share group 3. new ends the page on 6, so its own cursor repeats 5.
+	atEnd := func(items []any) (int, int) { return len(items) - 2, len(items) - 1 }
+	rep := runStoreDiff(t, old, descServer(t, atEnd), spec, "3")
+	if c := rep.Cases[0]; c.Verdict != planguard.DiffDifferent ||
+		c.Detail != "page 1: cursor differs after tie_order: cursor ← last.id old 5, new 6" {
+		t.Errorf("tie at the page end: got %+v", c)
+	}
+	// limit 4: page 1 is 7, 6, 5, 4; the 6/5 tie swaps inside the page, so both builds end on 4.
+	inside := func(items []any) (int, int) { return 1, 2 }
+	rep = runStoreDiff(t, old, descServer(t, inside), spec, "4")
+	if c := rep.Cases[0]; c.Verdict != planguard.DiffAllowed || c.Pages != 2 {
+		t.Errorf("tie inside the page: got %+v, want allowed over 2 pages", c)
 	}
 }

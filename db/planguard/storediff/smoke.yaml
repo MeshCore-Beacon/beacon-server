@@ -1,3 +1,6 @@
+# Copyright 2026 Beacon Contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # Smoke cases: two read-only servers on one database, walked page by page and compared as whole JSON.
 #
 #   planguard storediff --old http://127.0.0.1:8481 --new http://127.0.0.1:8482 \

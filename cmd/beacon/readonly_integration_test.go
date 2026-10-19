@@ -1,6 +1,8 @@
 // Copyright 2026 Beacon Contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+//go:build unix
+
 package main
 
 import (
@@ -87,6 +89,11 @@ type tableStat struct{ rows, ins, upd, del int64 }
 // The same boot without read_only does move them, so the check can see a write.
 func TestReadOnlyBootWritesNothingPostgres(t *testing.T) {
 	if os.Getenv("BEACON_TEST_BOOT_MAIN") == "1" {
+		// The parent holds stdin open; when it dies, even by SIGKILL, stdin closes and the server goes with it.
+		go func() {
+			_, _ = io.Copy(io.Discard, os.Stdin)
+			os.Exit(3)
+		}()
 		main()
 		return
 	}
@@ -101,13 +108,21 @@ func TestReadOnlyBootWritesNothingPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer admin.Close(context.Background())
 	name := "beacon_read_only_" + strings.ToLower(rand.Text())
 	ident := pgx.Identifier{name}.Sanitize()
-	if _, err := admin.Exec(ctx, "CREATE DATABASE "+ident); err != nil {
+	_, err = admin.Exec(ctx, "CREATE DATABASE "+ident)
+	admin.Close(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
-	defer admin.Exec(context.Background(), "DROP DATABASE "+ident+" WITH (FORCE)")
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if admin, err := pgx.Connect(ctx, dsn); err == nil {
+			_, _ = admin.Exec(ctx, "DROP DATABASE "+ident+" WITH (FORCE)")
+			admin.Close(ctx)
+		}
+	})
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		t.Fatal(err)
@@ -160,8 +175,21 @@ func TestReadOnlyBootWritesNothingPostgres(t *testing.T) {
 	if !strings.Contains(log, readOnlyWarning) {
 		t.Errorf("boot log lacks the read-only warning:\n%s", log)
 	}
-	if strings.Contains(strings.ReplaceAll(log, readOnlyWarning, ""), "migration") {
-		t.Errorf("read-only boot logged a migration:\n%s", log)
+	// A gated step that still ran would have hit a read-only session and logged it. The only refused write is
+	// the request mix's admin POST.
+	refused := 0
+	for _, line := range strings.Split(log, "\n") {
+		if !strings.Contains(line, "25006") && !strings.Contains(line, "read-only transaction") {
+			continue
+		}
+		if strings.Contains(line, `msg="account request failed"`) {
+			refused++
+			continue
+		}
+		t.Errorf("read-only server refused a write outside the request mix: %s", line)
+	}
+	if refused != 1 {
+		t.Errorf("the admin POST logged %d refused writes, want 1:\n%s", refused, log)
 	}
 }
 
@@ -205,6 +233,12 @@ func bootAndServe(t *testing.T, ctx context.Context, dsn string, readOnly bool) 
 		"LOG_FORMAT=text", "LOG_LEVEL=info")
 	var out lockedBuffer
 	cmd.Stdout, cmd.Stderr = &out, &out
+	// Its own process group, so cleanup reaches anything it started.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -213,9 +247,10 @@ func bootAndServe(t *testing.T, ctx context.Context, dsn string, readOnly bool) 
 	stopped := false
 	defer func() {
 		if !stopped {
-			_ = cmd.Process.Kill()
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 			<-done
 		}
+		stdin.Close()
 	}()
 
 	base := "http://" + addr
@@ -289,6 +324,24 @@ func bootAndServe(t *testing.T, ctx context.Context, dsn string, readOnly bool) 
 func snapshotTables(t *testing.T, ctx context.Context, conn *pgx.Conn, database string) map[string]tableStat {
 	t.Helper()
 	defer conn.Close(context.Background())
+	waitSessionsGone(t, ctx, conn, database)
+	// Statistics arrive as backends flush them; read until two snapshots in a row agree.
+	prev := readTables(t, ctx, conn)
+	for deadline := time.Now().Add(30 * time.Second); ; {
+		time.Sleep(300 * time.Millisecond)
+		cur := readTables(t, ctx, conn)
+		if maps.Equal(prev, cur) {
+			return cur
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("table statistics did not settle")
+		}
+		prev = cur
+	}
+}
+
+func waitSessionsGone(t *testing.T, ctx context.Context, conn *pgx.Conn, database string) {
+	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		var n int
@@ -303,6 +356,11 @@ func snapshotTables(t *testing.T, ctx context.Context, conn *pgx.Conn, database 
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+// readTables reads every user table's row count and tuple counters.
+func readTables(t *testing.T, ctx context.Context, conn *pgx.Conn) map[string]tableStat {
+	t.Helper()
 	if _, err := conn.Exec(ctx, "SELECT pg_stat_clear_snapshot()"); err != nil {
 		t.Fatal(err)
 	}
