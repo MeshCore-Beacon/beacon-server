@@ -4,11 +4,13 @@
 package planguard_test
 
 import (
+	"io/fs"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
 
+	pgdata "github.com/MeshCore-Beacon/beacon-server/db/planguard"
 	"github.com/MeshCore-Beacon/beacon-server/internal/planguard"
 )
 
@@ -58,6 +60,9 @@ func TestCorpusValidation(t *testing.T) {
 		{"bad_select_writes.yaml", []string{`statement "M"`, "kind select", "DELETE"}},
 		{"bad_select_cte_writes.yaml", []string{`statement "W"`, "kind select", "DELETE"}},
 		{"bad_entry_id.yaml", []string{"entry 0", `"../escape"`}},
+		{"bad_resolver_ref.yaml", []string{`entry "a"`, "param 2", `resolver "nope"`}},
+		{"bad_inline_resolver_schema.yaml", []string{`entry "a"`, "param 1", "t_fix_routes_hop."}},
+		{"bad_param_key.yaml", []string{`entry "a"`, "param 1", `"rr"`}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.file, func(t *testing.T) {
@@ -141,33 +146,62 @@ func TestCorpusValidation(t *testing.T) {
 	}
 }
 
+// A sqlc statement in planpolicy.Legacy runs on api_legacy, so the corpus must label it plan legacy.
+func TestCorpusLegacyStatementsArePlanLegacy(t *testing.T) {
+	sqlcText := map[string]string{"GetTopNodes": "-- name: GetTopNodes :many\nSELECT 1"}
+	for _, plan := range []string{"custom", "cached"} {
+		body := "admission_profiles: {by_id: [hit, miss]}\nstatements:\n  GetTopNodes: {sqlc: GetTopNodes, plan: " + plan
+		if plan == "cached" {
+			body += ", admission: by_id"
+		}
+		body += "}\n"
+		_, err := planguard.LoadCorpus(mapFS(map[string]string{"c.yaml": body}), "c.yaml", sqlcText)
+		if err == nil || !strings.Contains(err.Error(), `statement "GetTopNodes"`) || !strings.Contains(err.Error(), "planpolicy.Legacy") {
+			t.Errorf("plan %s: err = %v, want one naming the statement and planpolicy.Legacy", plan, err)
+		}
+	}
+	body := "statements:\n  GetTopNodes: {sqlc: GetTopNodes, plan: legacy}\n"
+	if _, err := planguard.LoadCorpus(mapFS(map[string]string{"c.yaml": body}), "c.yaml", sqlcText); err != nil {
+		t.Errorf("plan legacy: %v", err)
+	}
+}
+
 func TestDerivedStatementsMatchSource(t *testing.T) {
 	sqlcText, err := planguard.LoadStatements("../../db/sqlc")
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := planguard.LoadCorpus(os.DirFS("testdata/corpus"), "derived.yaml", sqlcText)
-	if err != nil {
-		t.Fatalf("derived.yaml: %v", err)
-	}
-	n := 0
-	for name, st := range c.Statements {
-		if st.DerivedFrom == "" {
-			continue
+	for _, src := range []struct {
+		name string
+		fsys fs.FS
+		file string
+	}{
+		{"testdata", os.DirFS("testdata/corpus"), "derived.yaml"},
+		{"repo", pgdata.Files, "corpus.yaml"},
+	} {
+		c, err := planguard.LoadCorpus(src.fsys, src.file, sqlcText)
+		if err != nil {
+			t.Fatalf("%s %s: %v", src.name, src.file, err)
 		}
-		n++
-		src := sqlcText[st.DerivedFrom]
-		if !planguard.DerivedBodyMatches(src, st.SQL) {
-			t.Errorf("%s: body is not part of %s", name, st.DerivedFrom)
+		n := 0
+		for name, st := range c.Statements {
+			if st.DerivedFrom == "" {
+				continue
+			}
+			n++
+			text := sqlcText[st.DerivedFrom]
+			if !planguard.DerivedBodyMatches(text, st.SQL) {
+				t.Errorf("%s %s: body is not part of %s", src.name, name, st.DerivedFrom)
+			}
+			// One edited token must break the match.
+			edited := strings.Replace(st.SQL, "LIMIT", "OFFSET", 1)
+			if edited == st.SQL || planguard.DerivedBodyMatches(text, edited) {
+				t.Errorf("%s %s: an edited body still matches", src.name, name)
+			}
 		}
-		// One edited token must break the match.
-		edited := strings.Replace(st.SQL, "LIMIT", "OFFSET", 1)
-		if edited == st.SQL || planguard.DerivedBodyMatches(src, edited) {
-			t.Errorf("%s: an edited body still matches", name)
+		if n == 0 {
+			t.Fatalf("%s: no derived statement checked", src.name)
 		}
-	}
-	if n == 0 {
-		t.Fatal("no derived statement checked")
 	}
 
 	_, err = planguard.LoadCorpus(os.DirFS("testdata/corpus"), "bad_derived_edited.yaml", sqlcText)

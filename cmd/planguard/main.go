@@ -7,6 +7,7 @@
 //	              [--out planguard-out] [--only RE] [--skip RE] [--modes m,..] [--include-pending] [--search-path P]
 //	              [--baseline check|write|off] [--emit resolvers|plans --params FILE] [--plans FILE --params FILE]
 //	              [--fidelity-against results.jsonl]
+//	planguard gen-policy [--corpus db/planguard/corpus.yaml] [--out db/planpolicy/cached_gen.go]
 //
 // Exit status: 0 when no run fails, 1 when one does (or the run cannot be made), 2 on usage errors.
 package main
@@ -24,11 +25,13 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/MeshCore-Beacon/beacon-server/db/planpolicy"
 	"github.com/MeshCore-Beacon/beacon-server/internal/planguard"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-const usage = "usage: planguard run --tier fixture|local|prod [flags] (planguard run -h for the flags)"
+const usage = "usage: planguard run --tier fixture|local|prod [flags] (planguard run -h for the flags)\n" +
+	"       planguard gen-policy [--corpus db/planguard/corpus.yaml] [--out db/planpolicy/cached_gen.go]"
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -42,7 +45,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "run":
 		return runCmd(args[1:], stdout, stderr)
-	case "gen-policy", "diff", "storediff":
+	case "gen-policy":
+		return genPolicyCmd(args[1:], stdout, stderr)
+	case "diff", "storediff":
 		fmt.Fprintf(stderr, "planguard %s: not implemented\n", args[0])
 		return 1
 	case "-h", "-help", "--help", "help":
@@ -51,6 +56,47 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stderr, "planguard: unknown subcommand %q\n%s\n", args[0], usage)
 	return 2
+}
+
+// genPolicyCmd writes db/planpolicy/cached_gen.go from the corpus: the cached statements whose entries prove
+// every shape and mode of their admission profile.
+func genPolicyCmd(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("gen-policy", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	corpus := fs.String("corpus", "db/planguard/corpus.yaml", "corpus file")
+	out := fs.String("out", "db/planpolicy/cached_gen.go", "generated Go file")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() > 0 {
+		fmt.Fprintf(stderr, "planguard gen-policy: unexpected argument %q\n", fs.Arg(0))
+		return 2
+	}
+	sqlc, err := planguard.LoadStatements("db/sqlc")
+	if err != nil {
+		fmt.Fprintln(stderr, "planguard:", err)
+		return 1
+	}
+	c, err := planguard.LoadCorpus(os.DirFS(filepath.Dir(*corpus)), filepath.Base(*corpus), sqlc)
+	if err != nil {
+		fmt.Fprintln(stderr, "planguard:", err)
+		return 1
+	}
+	src, err := planguard.GenPolicy(c, planpolicy.Legacy)
+	if err != nil {
+		fmt.Fprintln(stderr, "planguard gen-policy:", err)
+		return 1
+	}
+	if old, err := os.ReadFile(*out); err == nil && string(old) == string(src) {
+		fmt.Fprintf(stdout, "%s is up to date\n", *out)
+		return 0
+	}
+	if err := os.WriteFile(*out, src, 0o644); err != nil {
+		fmt.Fprintln(stderr, "planguard:", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "wrote %s\n", *out)
+	return 0
 }
 
 type runFlags struct {

@@ -296,7 +296,8 @@ func resolverRef(c *Corpus, m map[string]any) (key, sql string, ok bool) {
 }
 
 // neededResolvers returns key → SQL for every resolver the entries' params use. An unknown name maps to "".
-func neededResolvers(c *Corpus, entries []*Entry) map[string]string {
+// Entries of pending statements are left out unless includePending: they skip, so their resolvers never run.
+func neededResolvers(c *Corpus, entries []*Entry, includePending bool) map[string]string {
 	need := map[string]string{}
 	var visit func(v any)
 	visit = func(v any) {
@@ -312,6 +313,9 @@ func neededResolvers(c *Corpus, entries []*Entry) map[string]string {
 		}
 	}
 	for _, e := range entries {
+		if st := c.Statements[e.Stmt]; st != nil && st.Pending != "" && !includePending {
+			continue
+		}
 		for _, p := range e.Params {
 			visit(p)
 		}
@@ -326,7 +330,7 @@ func resolverSelect(sql string) string {
 // resolve runs the entries' resolvers in one READ ONLY transaction, each under a savepoint so that one failing
 // resolver fails only its own entries. The error is for a session that cannot go on.
 func resolve(ctx context.Context, s Session, c *Corpus, o RunOptions, entries []*Entry) (map[string]*string, map[string]string, error) {
-	need := neededResolvers(c, entries)
+	need := neededResolvers(c, entries, o.IncludePending)
 	vals, errs := map[string]*string{}, map[string]string{}
 	if len(need) == 0 {
 		return vals, errs, nil

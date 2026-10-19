@@ -68,7 +68,7 @@ jobs:
       - name: Verify planguard against PostgreSQL 16
         env:
           BEACON_TEST_POSTGRES_DSN: postgres://postgres:backup-ci-only@127.0.0.1:5432/postgres?sslmode=disable
-        run: go test ./internal/planguard -run '^Test(RunnerReadOnly|RunnerRecoversAfterError|UnresolvedParamsSkip|GenericModeShowsParams)Postgres$' -count=1 -v
+        run: go test ./internal/planguard -run '^Test(RunnerReadOnly|RunnerRecoversAfterError|UnresolvedParamsSkip|GenericModeShowsParams|CorpusStatementsPrepareClean)Postgres$' -count=1 -v
 
       - name: Verify backup command against PostgreSQL 16
         run: |

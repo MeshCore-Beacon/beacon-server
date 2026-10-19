@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/MeshCore-Beacon/beacon-server/db/planpolicy"
 	"gopkg.in/yaml.v3"
 )
 
@@ -298,6 +299,9 @@ func (c *Corpus) loadStatement(fsys fs.FS, dir string, st *Statement, sqlcText m
 	if _, ok := classModes[st.Plan]; !ok {
 		return fmt.Errorf("unknown plan %q (want cached, custom, maint, ingest, legacy or harness)", st.Plan)
 	}
+	if st.SQLC != "" && planpolicy.Legacy[st.SQLC] && st.Plan != "legacy" {
+		return fmt.Errorf("sqlc statement %q is in planpolicy.Legacy, so its plan is legacy, not %q", st.SQLC, st.Plan)
+	}
 	if st.Plan == "cached" {
 		if st.Admission == "" {
 			return errors.New("plan cached needs an admission profile")
@@ -557,6 +561,11 @@ func (c *Corpus) checkEntry(e *Entry) error {
 			return fmt.Errorf("unknown mode %q (want custom, generic or auto)", m)
 		}
 	}
+	for i, p := range e.Params {
+		if err := c.checkParam(p); err != nil {
+			return fmt.Errorf("param %d: %w", i+1, err)
+		}
+	}
 	if e.Baseline != "" && !strings.HasPrefix(e.Baseline, "unstable: ") {
 		return fmt.Errorf("baseline %q must be empty or \"unstable: <reason>\"", e.Baseline)
 	}
@@ -577,6 +586,43 @@ func (c *Corpus) checkEntry(e *Entry) error {
 		if o.DegradeTo != nil {
 			if err := c.checkExpect(o.DegradeTo); err != nil {
 				return fmt.Errorf("mode %q degrade_to: %w", m, err)
+			}
+		}
+	}
+	return nil
+}
+
+// checkParam validates one param: a scalar, a list of params, or a one-key map {r: name} naming a resolver,
+// {sql: query} (an inline resolver, held to the resolvers' rules) or {raw: text}.
+func (c *Corpus) checkParam(v any) error {
+	switch x := v.(type) {
+	case []any:
+		for _, y := range x {
+			if err := c.checkParam(y); err != nil {
+				return err
+			}
+		}
+	case map[string]any:
+		if len(x) != 1 {
+			return fmt.Errorf("%v: want exactly one of r, sql or raw", x)
+		}
+		for k, val := range x {
+			s, ok := val.(string)
+			if !ok || s == "" {
+				return fmt.Errorf("%s: want a non-empty string", k)
+			}
+			switch k {
+			case "r":
+				if _, ok := c.Resolvers[s]; !ok {
+					return fmt.Errorf("resolver %q is not in resolvers", s)
+				}
+			case "sql":
+				if m := componentSchema.FindString(s); m != "" {
+					return fmt.Errorf("inline resolver reads schema %q; resolvers read Beacon tables only", m)
+				}
+			case "raw":
+			default:
+				return fmt.Errorf("unknown param key %q (want r, sql or raw)", k)
 			}
 		}
 	}

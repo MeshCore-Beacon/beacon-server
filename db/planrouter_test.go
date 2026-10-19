@@ -323,8 +323,8 @@ func TestPlanRouterRoutesByClass(t *testing.T) {
 
 	// A class C statement never reaches api_cached, and nothing does outside split.
 	for _, layout := range []planpolicy.Layout{planpolicy.CustomAll, planpolicy.Split, planpolicy.Single} {
-		f := newRouterFixture(layout, nil) // the real policy: Cached is empty, so every non-Legacy name is C
-		for _, stmt := range []string{"ListPackets", "GetNodeByID", "ListKnownRoutesByIATAHop", "ListKnownRoutesGlobalHop", ""} {
+		f := newRouterFixture(layout, nil) // the real policy
+		for _, stmt := range []string{"ListPackets", "ListChannels", "ListKnownRoutesByIATAHop", "ListKnownRoutesGlobalHop", ""} {
 			sql := "SELECT 1"
 			if stmt != "" {
 				sql = "-- name: " + stmt + " :one\nSELECT 1"
@@ -356,6 +356,29 @@ func TestPlanRouterRoutesByClass(t *testing.T) {
 		}
 		if hops != 2*len(routerMethods) {
 			t.Errorf("%s: %d hop statements on %s, want %d", layout, hops, hopPool.n, 2*len(routerMethods))
+		}
+	}
+
+	// The real policy admits GetNodeByID (class G): under split it runs named on api_cached, with no mode argument.
+	f := newRouterFixture(planpolicy.Split, nil)
+	sql := "-- name: GetNodeByID :one\nSELECT $1"
+	for _, method := range routerMethods {
+		if err := runVia(context.Background(), f.r, method, sql, 7); err != nil {
+			t.Fatal(err)
+		}
+	}
+	calls, _, _ := f.cached.snapshot()
+	if len(calls) != len(routerMethods) {
+		t.Fatalf("split: api_cached ran %d GetNodeByID statements, want %d", len(calls), len(routerMethods))
+	}
+	for _, c := range calls {
+		if c.sql != sql || !reflect.DeepEqual(c.args, []any{7}) {
+			t.Errorf("split: api_cached call %q %v, want %q [7]", c.sql, c.args, sql)
+		}
+	}
+	for _, p := range []*fakePool{f.custom, f.legacy} {
+		if calls, _, _ := p.snapshot(); len(calls) != 0 {
+			t.Errorf("split: %s ran %d statements, want 0", p.n, len(calls))
 		}
 	}
 

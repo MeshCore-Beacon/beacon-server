@@ -21,11 +21,13 @@ statements:
 resolvers:
   top: SELECT public_key FROM nodes ORDER BY last_seen DESC LIMIT 1
   gone: SELECT NULL::text
+  pend: SELECT iata FROM a_table_of_the_pending_feature LIMIT 1
 entries:
   - {id: q.top, stmt: Q, params: [{r: top}], modes: [custom, generic]}
   - {id: q.gone, stmt: Q, params: [{r: gone}]}
   - {id: q.lit, stmt: Q, params: ["it's"]}
   - {id: p.one, stmt: P}
+  - {id: p.res, stmt: P, params: [{r: pend}]}
 `
 
 func loadEmitCorpus(t *testing.T) *planguard.Corpus {
@@ -45,6 +47,21 @@ func TestNewNonce(t *testing.T) {
 	b, _ := planguard.NewNonce()
 	if !regexp.MustCompile(`^[0-9a-f]{16}$`).MatchString(a) || a == b {
 		t.Errorf("nonces %q %q, want two different 16-hex strings", a, b)
+	}
+}
+
+// A pending entry skips, so its resolvers are not emitted (or run): they may read tables that do not exist yet.
+func TestEmitResolversLeavesOutPending(t *testing.T) {
+	c := loadEmitCorpus(t)
+	const nonce = "0123456789abcdef"
+	for _, include := range []bool{false, true} {
+		var rs bytes.Buffer
+		if err := planguard.EmitResolvers(&rs, c, planguard.RunOptions{Tier: "prod", IncludePending: include}, nonce); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Contains(rs.String(), `\echo @@`+nonce+` R pend`); got != include {
+			t.Errorf("include pending %v: script has the pending resolver: %v", include, got)
+		}
 	}
 }
 
@@ -195,7 +212,10 @@ func TestCheckPlans(t *testing.T) {
 	if r := got["q.lit|custom"]; r.Verdict != planguard.VerdictError {
 		t.Errorf("q.lit with no plan in the output: %+v", r)
 	}
-	if len(rep.Results) != 5 || !contains(rep.Indexes, "nodes_pkey") {
+	if r := got["p.res|custom"]; r.Verdict != planguard.VerdictSkip || r.Skip != "pending: some_feature" {
+		t.Errorf("p.res: %+v", r)
+	}
+	if len(rep.Results) != 6 || !contains(rep.Indexes, "nodes_pkey") {
 		t.Errorf("results %d, indexes %v", len(rep.Results), rep.Indexes)
 	}
 	if _, err := planguard.CheckPlans(c, o, map[string][]byte{"stranger|custom": plan}); err == nil {

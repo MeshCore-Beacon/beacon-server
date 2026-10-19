@@ -87,7 +87,7 @@ func EmitResolvers(w io.Writer, c *Corpus, o RunOptions, nonce string) error {
 	if err := o.validate(c); err != nil {
 		return err
 	}
-	need := neededResolvers(c, c.selection(o))
+	need := neededResolvers(c, c.selection(o), o.IncludePending)
 	var b strings.Builder
 	scriptStart(&b, nonce, c.baseSearchPath(o))
 	for _, name := range sortedKeys(need) {

@@ -25,7 +25,8 @@ func TestPlanPolicyNamesExist(t *testing.T) {
 		}
 	}
 	if len(planpolicy.Legacy) != 10 || planpolicy.ClassOf("ListPackets") != planpolicy.ClassLegacy ||
-		planpolicy.ClassOf("GetNodeByID") != planpolicy.ClassC || planpolicy.ClassOf("") != planpolicy.ClassC {
+		planpolicy.ClassOf("ListKnownRoutesGlobalHop") != planpolicy.ClassC || planpolicy.ClassOf("GetNodeByID") != planpolicy.ClassG ||
+		planpolicy.ClassOf("") != planpolicy.ClassC {
 		t.Fatal("ClassOf")
 	}
 }

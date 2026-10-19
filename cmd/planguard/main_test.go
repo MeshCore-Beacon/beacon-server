@@ -25,6 +25,8 @@ func TestCLIUsage(t *testing.T) {
 		{"emit on local", []string{"run", "--tier", "local", "--emit", "resolvers"}, "--tier prod"},
 		{"plans on fixture", []string{"run", "--tier", "fixture", "--plans", "p.out", "--params", "r.out"}, "--tier prod"},
 		{"unknown flag", []string{"run", "--tier", "local", "--nope"}, "nope"},
+		{"gen-policy unknown flag", []string{"gen-policy", "--nope"}, "nope"},
+		{"gen-policy argument", []string{"gen-policy", "extra"}, "extra"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
