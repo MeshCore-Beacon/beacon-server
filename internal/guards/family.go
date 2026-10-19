@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 )
@@ -62,22 +63,13 @@ func Classify(r *http.Request) (Family, Class) {
 	p := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1"), "/")
 	segs := strings.Split(p, "/")
 	q := r.URL.Query()
-	set := func(keys ...string) bool {
-		for _, k := range keys {
-			for _, v := range q[k] {
-				if v != "" {
-					return true
-				}
-			}
-		}
-		return false
-	}
-	region := func() bool { return set("iata", "iatas", "region", "regionId") }
+	set := func(k string) bool { return q.Get(k) != "" }
+	region := func() bool { return len(parseIATAs(q)) > 0 || set("regionId") || set("region") }
 	n := len(segs)
 	switch segs[0] {
 	case "packets":
 		switch {
-		case n == 1 && set("since", "until"):
+		case n == 1 && (set("since") || set("until")):
 			return PacketsWindow, Aggregation
 		case n == 1 || (n == 2 && segs[1] == "backfill"):
 			if region() {
@@ -143,4 +135,23 @@ func Classify(r *http.Request) (Family, Class) {
 		}
 	}
 	return Other, Entity
+}
+
+// parseIATAs reads iatas (comma-separated) with iata as the fallback, exactly as
+// the API handlers do, so a request is classified by the IATAs it will query.
+func parseIATAs(q url.Values) []string {
+	raw := q.Get("iatas")
+	if raw == "" {
+		if single := q.Get("iata"); single != "" {
+			return []string{strings.ToUpper(strings.TrimSpace(single))}
+		}
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(raw, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, strings.ToUpper(p))
+		}
+	}
+	return out
 }

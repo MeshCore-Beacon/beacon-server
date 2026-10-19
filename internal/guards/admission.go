@@ -26,6 +26,9 @@ const (
 	BudgetBurst = 30 * time.Second
 )
 
+// errGuardDeadline is the cause of a statement context cut by the class deadline.
+var errGuardDeadline = errors.New("guards: request database deadline exceeded")
+
 var guardNames = []string{"deadline", "cap", "admission", "budget"}
 
 func init() {
@@ -424,7 +427,7 @@ func (t *ticket) Start(ctx context.Context) (context.Context, context.CancelFunc
 		t.stmtCtx = ctx
 		return ctx, func() {}
 	}
-	sctx, cancel := context.WithDeadline(ctx, deadline)
+	sctx, cancel := context.WithDeadlineCause(ctx, deadline, errGuardDeadline)
 	t.stmtCtx = sctx
 	return sctx, cancel
 }
@@ -440,7 +443,8 @@ func (t *ticket) Finish() {
 		return
 	}
 	if st.enforced {
-		if errors.Is(t.stmtCtx.Err(), context.DeadlineExceeded) {
+		// Only the guard's own deadline counts; a handler's shorter timeout is its own business.
+		if context.Cause(t.stmtCtx) == errGuardDeadline {
 			st.count("deadline", deadlineRefusal())
 		}
 	} else if now.After(deadline) {

@@ -5,6 +5,7 @@ package guards
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -199,8 +200,11 @@ func TestGuardsEnforceRefuses(t *testing.T) {
 		expectResult(t, r, 503, "2", `{"error":{"code":"service_unavailable","message":"The server is busy. Retry later."}}`, 5*time.Second)
 		ctx, finish := g.Begin(context.Background(), "192.0.2.14", Routes, List)
 		tk, err := g.Admit(ctx)
-		if err != nil || tk.AcquireTimeout() != 5*time.Second {
-			t.Errorf("enforced AcquireTimeout = %v (err %v), want 5s", tk.AcquireTimeout(), err)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tk.AcquireTimeout() != 5*time.Second {
+			t.Errorf("enforced AcquireTimeout = %v, want 5s", tk.AcquireTimeout())
 		}
 		finish()
 
@@ -296,4 +300,111 @@ func TestRefusalWriterPassesOtherStatuses(t *testing.T) {
 		t.Errorf("got %d %q", rec.Code, rec.Body.String())
 	}
 	var _ interface{ Unwrap() http.ResponseWriter } = &refusalWriter{}
+}
+
+// A handler's own, shorter timeout is not the guard's deadline: its response passes through.
+func TestHandlerTimeoutIsNotAGuardDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		g := New(Options{Enforce: Families})
+		before := takeSnapshot()
+		const own = `{"error":{"code":"service_unavailable","message":"own timeout"}}`
+		h := Middleware(g)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+			defer cancel()
+			if err := stmt(ctx, g, 0, 20*time.Second, nil); err != nil {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(own))
+				return
+			}
+			_, _ = w.Write([]byte("ok"))
+		}))
+		r := serve(time.Now(), h, "/api/v1/stats/paths", "192.0.2.30:1", 1)[0]
+		expectResult(t, r, 503, "", own, 15*time.Second)
+		if d := before.delta("refused", Stats, "deadline"); d != 0 {
+			t.Errorf("refused{stats,deadline} delta = %v, want 0", d)
+		}
+	})
+}
+
+// An enforced waiter whose context ends leaves the queue and is not counted.
+func TestEnforcedWaiterContextEnds(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		g := New(Options{Enforce: Families})
+		const remote, key = "192.0.2.31:1", "192.0.2.31"
+		long := Middleware(g)(handler(g, 0, 20*time.Second, nil))
+		t0 := time.Now()
+		var holders []<-chan result
+		for range 4 {
+			holders = append(holders, serveAsync(t0, long, "/api/v1/stats/paths", remote))
+		}
+		synctest.Wait()
+		before := takeSnapshot()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		ctx, finish := g.Begin(ctx, key, Stats, Aggregation)
+		if _, err := g.Admit(ctx); !errors.Is(err, context.DeadlineExceeded) || time.Since(t0) != 2*time.Second {
+			t.Errorf("Admit = %v at %s, want DeadlineExceeded at 2s", err, time.Since(t0))
+		}
+		g.mu.Lock()
+		waiting := len(g.slots[key].waiters)
+		g.mu.Unlock()
+		if waiting != 0 {
+			t.Errorf("waiters = %d, want 0", waiting)
+		}
+		finish()
+		if d := before.delta("refused", Stats, "cap") + before.delta("would", Stats, "cap"); d != 0 {
+			t.Errorf("cap counters moved by %v", d)
+		}
+		for _, ch := range holders {
+			expectResult(t, <-ch, 200, "", "ok", 20*time.Second)
+		}
+		if n := g.slotsHeld(key); n != 0 {
+			t.Errorf("slotsHeld = %d, want 0", n)
+		}
+	})
+}
+
+// A handler panic still releases the client slot.
+func TestHandlerPanicReleasesSlot(t *testing.T) {
+	g := New(Options{Enforce: Families})
+	h := Middleware(g)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := g.Admit(r.Context()); err != nil {
+			t.Error(err)
+		}
+		if n := g.slotsHeld("192.0.2.32"); n != 1 {
+			t.Errorf("slotsHeld in handler = %d, want 1", n)
+		}
+		panic("boom")
+	}))
+	func() {
+		defer func() { _ = recover() }()
+		req := httptest.NewRequest("GET", "/api/v1/routes", nil)
+		req.RemoteAddr = "192.0.2.32:1"
+		h.ServeHTTP(httptest.NewRecorder(), req)
+	}()
+	if n := g.slotsHeld("192.0.2.32"); n != 0 {
+		t.Errorf("slotsHeld after panic = %d, want 0", n)
+	}
+}
+
+// In observe mode a would-refuse never replaces the handler's own 5xx.
+func TestObservedFiveHundredPassesThrough(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		g := New(Options{})
+		before := takeSnapshot()
+		h := Middleware(g)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = stmt(r.Context(), g, 6*time.Second, 11*time.Second, nil) // would-refuse admission and deadline
+			w.Header().Set("X-Own", "yes")
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte("boom"))
+		}))
+		r := serve(time.Now(), h, "/api/v1/routes", "192.0.2.33:1", 1)[0]
+		expectResult(t, r, 500, "", "boom", 17*time.Second)
+		if r.rec.Header().Get("X-Own") != "yes" || r.rec.Header().Get("Content-Type") == "application/json" {
+			t.Errorf("headers changed: %v", r.rec.Header())
+		}
+		if before.delta("would", Routes, "deadline") != 1 || before.delta("would", Routes, "admission") != 1 {
+			t.Error("observe mode did not count would-refuse")
+		}
+	})
 }
