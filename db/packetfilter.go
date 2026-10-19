@@ -32,7 +32,7 @@ type packetFilter struct {
 }
 
 // newPacketFilter normalises a request. ok is false when no row can match: a type list that held values and lost
-// all of them to the domain drop, or since after until. The caller then returns an empty page without a query.
+// all of them to the domain drop. The caller then returns an empty page without a query.
 func newPacketFilter(payloadTypes, routeTypes []int16, scopes []string, since, until time.Time, cursor int64, pageCursor *api.PacketCursor, limit int32) (f packetFilter, ok bool) {
 	var ptOK, rtOK bool
 	f.payloadTypes, ptOK = normaliseTypes(payloadTypes, payloadTypeCount)
@@ -44,6 +44,8 @@ func newPacketFilter(payloadTypes, routeTypes []int16, scopes []string, since, u
 
 	f.scopes = dedupeStrings(scopes)
 
+	// since after until is not short-circuited: the statement compares the encoded values, which wrap for
+	// out-of-range times exactly as they always have, so it alone decides which rows match.
 	f.since = pgtype.Timestamptz{InfinityModifier: pgtype.NegativeInfinity, Valid: true}
 	f.until = pgtype.Timestamptz{InfinityModifier: pgtype.Infinity, Valid: true}
 	if !since.IsZero() {
@@ -53,9 +55,6 @@ func newPacketFilter(payloadTypes, routeTypes []int16, scopes []string, since, u
 	if !until.IsZero() {
 		f.until = pgtype.Timestamptz{Time: until, Valid: true}
 		f.windowed = true
-	}
-	if !since.IsZero() && !until.IsZero() && since.After(until) {
-		return packetFilter{}, false
 	}
 
 	switch {

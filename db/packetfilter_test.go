@@ -50,13 +50,13 @@ func TestPacketFilterNormalisation(t *testing.T) {
 		{"route given payload dropped", []int16{99}, []int16{1}, nil, zero, zero, false, false, nil, nil, nil, false},
 		{"scope dups kept untrimmed", nil, nil, []string{"#a", " #b", "#a"}, zero, zero, true, false, full16, full4, []string{"#a", " #b"}, false},
 		{"scope blank singular kept", nil, nil, []string{" "}, zero, zero, true, false, full16, full4, []string{" "}, false},
-		{"since > until", nil, nil, nil, t1, t0, false, false, nil, nil, nil, false},
+		{"since > until is left to the statement", nil, nil, nil, t1, t0, true, false, full16, full4, nil, true},
 		{"since = until", nil, nil, nil, t0, t0, true, false, full16, full4, nil, true},
 		{"since < until", nil, nil, nil, t0, t1, true, false, full16, full4, nil, true},
 		{"until only", nil, nil, nil, zero, t0, true, false, full16, full4, nil, true},
 		{"since only", nil, nil, nil, t0, zero, true, false, full16, full4, nil, true},
 		{"since epoch is a bound", nil, nil, nil, epoch, zero, true, false, full16, full4, nil, true},
-		{"since epoch > until", nil, nil, nil, epoch, time.UnixMilli(-1), false, false, nil, nil, nil, false},
+		{"since epoch > until", nil, nil, nil, epoch, time.UnixMilli(-1), true, false, full16, full4, nil, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f, ok := newPacketFilter(tc.pt, tc.rt, tc.scopes, tc.since, tc.until, 0, nil, 50)
@@ -135,6 +135,7 @@ func TestPacketFilterCursor(t *testing.T) {
 		{"legacy max int64 wraps as today", 9223372036854775807, nil, false, time.UnixMilli(9223372036854775807), []byte{}},
 		{"pageCursor", 0, &api.PacketCursor{At: at, Hash: hash}, false, at, hash},
 		{"pageCursor wins over cursor", 5, &api.PacketCursor{At: at, Hash: hash}, false, at, hash},
+		{"pageCursor with nil hash", 0, &api.PacketCursor{At: at}, false, at, []byte{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f, ok := newPacketFilter(nil, nil, nil, zero, zero, tc.cursor, tc.pc, 100)

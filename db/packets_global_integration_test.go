@@ -183,6 +183,9 @@ func globalShapes() []packetShape {
 		{name: "window scoped", since: packetBase.Add(-5 * time.Second), scopes: []string{"#a", "#b"}},
 		{name: "window since = until", since: oneFirst, until: oneFirst},
 		{name: "window since > until", since: oneFirst, until: oneFirst.Add(-time.Microsecond)},
+		{name: "window since > until by ms", since: packetBase.Add(20 * time.Millisecond), until: packetBase.Add(10 * time.Millisecond)},
+		{name: "window since max int64", since: time.UnixMilli(math.MaxInt64), until: packetBase.Add(20 * time.Millisecond)},
+		{name: "window until max int64", since: packetBase.Add(-5 * time.Second), until: time.UnixMilli(math.MaxInt64)},
 		{name: "5000 bogus scopes", scopes: bogus},
 	}
 }
@@ -220,6 +223,11 @@ func TestListPacketsGlobalMatchesLegacyPostgres(t *testing.T) {
 				}
 			}
 		}
+	}
+	// since = MaxInt64 ms wraps when encoded and today returns rows; a time-based since > until check would not.
+	wrapped := packetShape{since: time.UnixMilli(math.MaxInt64), until: packetBase.Add(20 * time.Millisecond)}
+	if len(legacyPacketRows(t, ctx, tx, legacyListPackets, wrapped, 0, 100000)) == 0 {
+		t.Fatal("fixture: the wrapped since returns no rows today, so the shape pins nothing")
 	}
 	if nonEmpty < 500 {
 		t.Fatalf("only %d non-empty comparisons; the fixture does not exercise the statements", nonEmpty)

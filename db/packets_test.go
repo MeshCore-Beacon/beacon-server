@@ -718,7 +718,9 @@ func TestListPacketsDispatch(t *testing.T) {
 			}).Return(nil, nil)
 		}},
 		{name: "unknown payload type", pt: []int16{99}, expect: func(*mockdb.MockQuerier) {}},
-		{name: "since after until", since: since, until: since.Add(-time.Millisecond), expect: func(*mockdb.MockQuerier) {}},
+		{name: "since after until", since: since, until: since.Add(-time.Millisecond), expect: func(m *mockdb.MockQuerier) {
+			m.EXPECT().ListPacketsWindow(gomock.Any(), gomock.Any()).Return(nil, nil)
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
