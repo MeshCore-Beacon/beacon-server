@@ -6,6 +6,7 @@ package planguard
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -15,6 +16,7 @@ import (
 	"os/exec"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -207,6 +209,23 @@ func stripLineComments(sql string) string {
 }
 
 var lockClause = regexp.MustCompile(`(?i)\s*\bFOR\s+UPDATE(\s+OF\s+\w+(\s*,\s*\w+)*)?\s+SKIP\s+LOCKED\b`)
+
+// hasStatementSeparator reports a ';' outside literals, quoted identifiers and comments, once one trailing ';' is
+// dropped.
+func hasStatementSeparator(sql string) bool {
+	words, _ := sqlWords(trimStmt(sql))
+	return slices.Contains(words, ";")
+}
+
+// checkOneStatement refuses text that holds more than one statement. Statement texts and resolvers are sent over
+// the simple protocol (and into psql scripts), where a second statement, a COMMIT say, would run outside the
+// READ ONLY transaction.
+func checkOneStatement(sql string) error {
+	if hasStatementSeparator(sql) {
+		return errors.New("more than one statement (a ';' outside literals and comments)")
+	}
+	return nil
+}
 
 // StripLockClause removes every "FOR UPDATE [OF x[, y]] SKIP LOCKED" from sql.
 func StripLockClause(sql string) string {

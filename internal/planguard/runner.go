@@ -358,6 +358,10 @@ func resolve(ctx context.Context, s Session, c *Corpus, o RunOptions, entries []
 				errs[name] = "no such resolver in the corpus"
 				continue
 			}
+			if err := checkOneStatement(need[name]); err != nil {
+				errs[name] = err.Error()
+				continue
+			}
 			if _, err := s.Exec(ctx, "SAVEPOINT planguard_r"); err != nil {
 				return err
 			}
@@ -463,6 +467,10 @@ func (c *Corpus) spec(o RunOptions, e *Entry, mode string, res map[string]*strin
 	text := trimStmt(st.SQL)
 	if text == "" {
 		sp.err = fmt.Sprintf("statement %s has no text on this build", e.Stmt)
+		return sp
+	}
+	if err := checkOneStatement(text); err != nil {
+		sp.err = fmt.Sprintf("statement %s: %v", e.Stmt, err)
 		return sp
 	}
 

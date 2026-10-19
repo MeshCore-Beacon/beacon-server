@@ -383,20 +383,13 @@ func checkDiffParam(v any) error {
 // checkSingleSelect refuses text that is more than one statement or that modifies data. Statements are sent over
 // the simple protocol, where a second statement (a COMMIT, say) would run outside the READ ONLY transaction.
 func checkSingleSelect(sql string) error {
-	if hasStatementSeparator(sql) {
-		return errors.New("more than one statement (a ';' outside literals and comments)")
+	if err := checkOneStatement(sql); err != nil {
+		return err
 	}
 	if kw := dataModifying(sql); kw != "" {
 		return fmt.Errorf("runs %s; diff statements must not modify data", kw)
 	}
 	return nil
-}
-
-// hasStatementSeparator reports a ';' outside literals, quoted identifiers and comments, once one trailing ';' is
-// dropped.
-func hasStatementSeparator(sql string) bool {
-	words, _ := sqlWords(trimStmt(sql))
-	return slices.Contains(words, ";")
 }
 
 // paramText is a param's value as text, the way it is sent before the server types it; res holds the values of

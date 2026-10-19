@@ -94,6 +94,9 @@ func EmitResolvers(w io.Writer, c *Corpus, o RunOptions, nonce string) error {
 		if need[name] == "" {
 			return fmt.Errorf("resolver %s is not in the corpus", name)
 		}
+		if err := checkOneStatement(need[name]); err != nil {
+			return fmt.Errorf("resolver %s: %w", name, err)
+		}
 		fmt.Fprintf(&b, "\\echo @@%s R %s\nSELECT coalesce('V' || ((%s)::text), 'N');\n", nonce, name, trimStmt(need[name]))
 	}
 	fmt.Fprintf(&b, "\\echo @@%s END\n", nonce)
