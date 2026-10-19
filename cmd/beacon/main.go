@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/db"
+	pgdata "github.com/MeshCore-Beacon/beacon-server/db/planguard"
 	"github.com/MeshCore-Beacon/beacon-server/db/planpolicy"
 	"github.com/MeshCore-Beacon/beacon-server/docs"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
@@ -34,6 +35,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/keystore"
 	"github.com/MeshCore-Beacon/beacon-server/internal/logging"
 	"github.com/MeshCore-Beacon/beacon-server/internal/meshmapper"
+	"github.com/MeshCore-Beacon/beacon-server/internal/planguard"
 	"github.com/MeshCore-Beacon/beacon-server/internal/presence"
 	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
 
@@ -479,6 +481,22 @@ func main() {
 	if repeaterImporter != nil && cfg.MeshMapper.Repeaters.Enabled {
 		tasks = append(tasks, background.Task{Name: "meshmapper.repeaters", Interval: meshmapper.PollInterval, Run: repeaterImporter.Refresh})
 	}
+	// The daily read-only plan check on the maintenance pool. It runs with the other jobs, so never when the
+	// server is read-only; a corpus that does not load disables it but never stops the server.
+	var pg *background.Planguard
+	if mode.Jobs {
+		checker, err := planguard.NewProdChecker(pools.Maint, db.SQLCSources, pgdata.Files)
+		if err != nil {
+			slog.Error("plan check disabled", "component", "startup", "error", err)
+		} else {
+			pg = background.NewPlanguard(checker.Run)
+			tasks = append(tasks, pg.Task(24*time.Hour))
+		}
+	}
+	var pgSource handlers.PlanguardSource // stays a nil interface without a checker, so /planguard is 404
+	if pg != nil {
+		pgSource = planguardSource{pg}
+	}
 	profiles := configureProfiling(ctx, pools.Maint)
 	defer profiles.Stop()
 	for i := range tasks {
@@ -505,7 +523,7 @@ func main() {
 		AdminRoutes: map[string]http.Handler{
 			"/accounts": handlers.AccountsRouter(maintStore),
 			"/backup":   handlers.BackupRouter(backupOpts, ctx),
-			"/db":       handlers.DBAdminRouter(maintStore),
+			"/db":       handlers.DBAdminRouter(maintStore, pgSource),
 		},
 		Guards:        guard,
 		APIPlanLayout: string(layout),
@@ -577,4 +595,23 @@ func getEnv(key string) string {
 		slog.Warn(fmt.Sprintf("warning: %s is not set", key), "component", "startup")
 	}
 	return v
+}
+
+// planguardSource serves the plan check's reports in their API shape.
+type planguardSource struct{ pg *background.Planguard }
+
+func (s planguardSource) Last() (api.PlanguardReport, error) {
+	rep, ok := s.pg.Last()
+	if !ok {
+		return api.PlanguardReport{}, api.ErrPlanguardNotRun
+	}
+	return rep.API(), nil
+}
+
+func (s planguardSource) RunNow(ctx context.Context) (api.PlanguardReport, error) {
+	rep, err := s.pg.RunNow(ctx)
+	if err != nil {
+		return api.PlanguardReport{}, err
+	}
+	return rep.API(), nil
 }

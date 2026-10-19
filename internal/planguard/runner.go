@@ -36,6 +36,8 @@ type RunOptions struct {
 	Tier           string // fixture | local | prod
 	Only, Skip     *regexp.Regexp
 	Modes          []string // override every entry's modes
+	KeepModes      []string // keep only these of each entry's own modes (after Modes)
+	RunTimeoutS    int      // caps each run's statement_timeout below the tier's cap; 0 = no extra cap
 	IncludePending bool     // run pending statements too (local overlays only)
 	SearchPath     string   // override every group's search_path
 	Baseline       BaselineMode
@@ -114,7 +116,7 @@ func (o *RunOptions) validate(c *Corpus) error {
 	if !validTiers[o.Tier] {
 		return fmt.Errorf("unknown tier %q (want fixture, local or prod)", o.Tier)
 	}
-	for _, m := range o.Modes {
+	for _, m := range append(slices.Clone(o.Modes), o.KeepModes...) {
 		if !validModes[m] {
 			return fmt.Errorf("unknown mode %q (want custom, generic or auto)", m)
 		}
@@ -197,10 +199,20 @@ func (c *Corpus) selection(o RunOptions) []*Entry {
 }
 
 func (o RunOptions) modesOf(c *Corpus, e *Entry) []string {
+	modes := c.ModesOf(e)
 	if len(o.Modes) > 0 {
-		return o.Modes
+		modes = o.Modes
 	}
-	return c.ModesOf(e)
+	if len(o.KeepModes) == 0 {
+		return modes
+	}
+	var out []string
+	for _, m := range modes {
+		if slices.Contains(o.KeepModes, m) {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // baseSearchPath is the search_path of resolvers and of the report's index list: the override, else the tier's.
@@ -493,6 +505,9 @@ func (c *Corpus) spec(o RunOptions, e *Entry, mode string, res map[string]*strin
 	}
 	if o.Tier == "prod" && timeout > prodTimeoutS {
 		timeout = prodTimeoutS
+	}
+	if o.RunTimeoutS > 0 && timeout > o.RunTimeoutS {
+		timeout = o.RunTimeoutS
 	}
 
 	// Every statement sent (and emitted into a psql script) is checked once rendered, settings, search_path and

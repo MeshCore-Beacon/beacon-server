@@ -99,6 +99,18 @@ var (
 		Name: "beacon_index_bloat_ratio",
 		Help: "Estimated index bloat ratio, by index.",
 	}, []string{"index"})
+
+	// PlanguardFailures marks each corpus entry and plan mode that failed the last daily plan check.
+	PlanguardFailures = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "beacon_planguard_failures",
+		Help: "1 for each corpus entry and plan mode whose last daily plan check failed.",
+	}, []string{"entry", "mode"})
+
+	// PlanguardLastRun is when the daily plan check last finished; 0 until its first run.
+	PlanguardLastRun = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "beacon_planguard_last_run_timestamp_seconds",
+		Help: "Unix time the daily plan check last finished.",
+	})
 )
 
 // PgActivity is one snapshot of PostgreSQL-wide activity counters.
@@ -154,7 +166,7 @@ func init() {
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		GuardWouldRefuse, GuardRefused, GuardDB, DBTime, HTTPRequest, PoolAcquire,
 		IngestQueueDepth, IngestDropped, JobDuration, JobRows, IndexBytes, IndexBloat,
-		pgActivity,
+		PlanguardFailures, PlanguardLastRun, pgActivity,
 	)
 }
 

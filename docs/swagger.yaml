@@ -1331,6 +1331,59 @@ definitions:
       payloadTypeName:
         type: string
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.PlanguardReport:
+    properties:
+      clean:
+        description: no FALSE_POSITIVE, MISSED or ERROR
+        type: boolean
+      counts:
+        additionalProperties:
+          type: integer
+        description: verdict → runs
+        type: object
+      duration_ms:
+        type: number
+      failures:
+        description: never null
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PlanguardRun'
+        type: array
+      runs:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PlanguardRun'
+        type: array
+      started_at:
+        type: string
+      tier:
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.PlanguardRun:
+    properties:
+      drivers:
+        description: relation:node:index of each driving scan
+        items:
+          type: string
+        type: array
+      entry:
+        type: string
+      failures:
+        description: the plan rules the run broke
+        items:
+          type: string
+        type: array
+      mode:
+        description: custom or generic
+        type: string
+      skip:
+        description: why the run was not made
+        type: string
+      stmt:
+        type: string
+      verdict:
+        description: ok, DETECTED, MISSED, FALSE_POSITIVE, RETIRED_INDEX, KNOWN_ISSUE,
+          SKIP or ERROR
+        type: string
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.RadioPreset:
     properties:
       count:
@@ -2249,6 +2302,56 @@ paths:
       security:
       - AdminKey: []
       summary: Update runtime CORS origins and enforced guard families
+      tags:
+      - Admin
+  /admin/db/planguard:
+    get:
+      description: Plans every corpus statement in custom and generic mode against
+        this database, read-only and without executing it (plain EXPLAIN, 5 s per
+        plan, 1 s lock timeout), and checks each plan against the corpus. The check
+        runs about an hour after boot and then daily; until its first run this returns
+        404. fresh=true runs it now, shared with any run in progress; within 5 minutes
+        of the last run it returns that run's outcome. Not served when the server
+        is read-only.
+      parameters:
+      - description: Run the check now instead of returning the last report
+        in: query
+        name: fresh
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PlanguardReport'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - AdminKey: []
+      summary: Last daily plan regression check
       tags:
       - Admin
   /admin/db/statements:

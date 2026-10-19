@@ -38,3 +38,19 @@ func TestHandlerServesBeaconMetrics(t *testing.T) {
 		}
 	}
 }
+
+func TestRegistryGathersPlanguard(t *testing.T) {
+	// A GaugeVec with no series is not gathered: set one first.
+	PlanguardFailures.WithLabelValues("routes.example", "custom").Set(1)
+	defer PlanguardFailures.Reset()
+	PlanguardLastRun.Set(1760000000)
+	body := scrape(t)
+	for _, want := range []string{
+		`beacon_planguard_failures{entry="routes.example",mode="custom"} 1`,
+		`beacon_planguard_last_run_timestamp_seconds 1.76e+09`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+}
