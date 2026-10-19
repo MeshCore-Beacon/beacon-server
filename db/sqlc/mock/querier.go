@@ -1061,19 +1061,34 @@ func (mr *MockQuerierMockRecorder) GetStatsClockDrift(ctx, arg any) *gomock.Call
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetStatsClockDrift", reflect.TypeOf((*MockQuerier)(nil).GetStatsClockDrift), ctx, arg)
 }
 
-// GetStatsNodeTypes mocks base method.
-func (m *MockQuerier) GetStatsNodeTypes(ctx context.Context, dollar_1 []string) ([]db.GetStatsNodeTypesRow, error) {
+// GetStatsNodeTypesAll mocks base method.
+func (m *MockQuerier) GetStatsNodeTypesAll(ctx context.Context) ([]db.GetStatsNodeTypesAllRow, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetStatsNodeTypes", ctx, dollar_1)
-	ret0, _ := ret[0].([]db.GetStatsNodeTypesRow)
+	ret := m.ctrl.Call(m, "GetStatsNodeTypesAll", ctx)
+	ret0, _ := ret[0].([]db.GetStatsNodeTypesAllRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// GetStatsNodeTypes indicates an expected call of GetStatsNodeTypes.
-func (mr *MockQuerierMockRecorder) GetStatsNodeTypes(ctx, dollar_1 any) *gomock.Call {
+// GetStatsNodeTypesAll indicates an expected call of GetStatsNodeTypesAll.
+func (mr *MockQuerierMockRecorder) GetStatsNodeTypesAll(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetStatsNodeTypes", reflect.TypeOf((*MockQuerier)(nil).GetStatsNodeTypes), ctx, dollar_1)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetStatsNodeTypesAll", reflect.TypeOf((*MockQuerier)(nil).GetStatsNodeTypesAll), ctx)
+}
+
+// GetStatsNodeTypesByIATAs mocks base method.
+func (m *MockQuerier) GetStatsNodeTypesByIATAs(ctx context.Context, iatas []string) ([]db.GetStatsNodeTypesByIATAsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetStatsNodeTypesByIATAs", ctx, iatas)
+	ret0, _ := ret[0].([]db.GetStatsNodeTypesByIATAsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetStatsNodeTypesByIATAs indicates an expected call of GetStatsNodeTypesByIATAs.
+func (mr *MockQuerierMockRecorder) GetStatsNodeTypesByIATAs(ctx, iatas any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetStatsNodeTypesByIATAs", reflect.TypeOf((*MockQuerier)(nil).GetStatsNodeTypesByIATAs), ctx, iatas)
 }
 
 // GetStatsPayloadBreakdown mocks base method.

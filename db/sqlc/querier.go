@@ -143,8 +143,10 @@ type Querier interface {
 	// latest measured drift, not an aggregate over a period.
 	// Select the filtered page before aggregating its IATA memberships.
 	GetStatsClockDrift(ctx context.Context, arg GetStatsClockDriftParams) ([]GetStatsClockDriftRow, error)
-	// Returns node counts grouped by type, optionally filtered by IATA.
-	GetStatsNodeTypes(ctx context.Context, dollar_1 []string) ([]GetStatsNodeTypesRow, error)
+	// Unfiltered node counts by type; never reads node_iatas.
+	GetStatsNodeTypesAll(ctx context.Context) ([]GetStatsNodeTypesAllRow, error)
+	// Node counts by type for nodes heard in any of @iatas.
+	GetStatsNodeTypesByIATAs(ctx context.Context, iatas []string) ([]GetStatsNodeTypesByIATAsRow, error)
 	// Payload-type observation counts since the given hour, from the hourly rollup.
 	GetStatsPayloadBreakdown(ctx context.Context, arg GetStatsPayloadBreakdownParams) ([]GetStatsPayloadBreakdownRow, error)
 	// One row per hour in [since, until) plus a summary row (hour NULL) over its complete hours.

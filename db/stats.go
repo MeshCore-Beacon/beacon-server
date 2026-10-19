@@ -256,10 +256,24 @@ func (s *Store) GetScopeStats(ctx context.Context, iatas []string, since time.Ti
 	return items, nil
 }
 
+// GetStatsNodeTypes reads node_iatas only when filtering, so the unfiltered page never joins it.
 func (s *Store) GetStatsNodeTypes(ctx context.Context, iatas []string) ([]api.NodeTypeCount, error) {
-	rows, err := s.q.GetStatsNodeTypes(ctx, iatas)
-	if err != nil {
-		return nil, err
+	var rows []sqlc.GetStatsNodeTypesAllRow
+	if len(iatas) == 0 {
+		all, err := s.q.GetStatsNodeTypesAll(ctx)
+		if err != nil {
+			return nil, err
+		}
+		rows = all
+	} else {
+		filtered, err := s.q.GetStatsNodeTypesByIATAs(ctx, iatas)
+		if err != nil {
+			return nil, err
+		}
+		rows = make([]sqlc.GetStatsNodeTypesAllRow, 0, len(filtered))
+		for _, r := range filtered {
+			rows = append(rows, sqlc.GetStatsNodeTypesAllRow(r))
+		}
 	}
 	result := make([]api.NodeTypeCount, 0, len(rows))
 	for _, r := range rows {
