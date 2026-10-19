@@ -72,43 +72,6 @@ func (q *Queries) AddRegionIATAs(ctx context.Context, arg AddRegionIATAsParams) 
 	return err
 }
 
-const ambiguousPrefixes = `-- name: AmbiguousPrefixes :many
-SELECT iata::text AS iata, 1::int AS len, prefix_1 AS prefix FROM node_short_ids GROUP BY iata, prefix_1 HAVING COUNT(*) > 1
-UNION ALL
-SELECT iata::text, 2::int, prefix_2 FROM node_short_ids GROUP BY iata, prefix_2 HAVING COUNT(*) > 1
-UNION ALL
-SELECT iata::text, 3::int, prefix_3 FROM node_short_ids GROUP BY iata, prefix_3 HAVING COUNT(*) > 1
-UNION ALL
-SELECT iata::text, 4::int, prefix_4 FROM node_short_ids GROUP BY iata, prefix_4 HAVING COUNT(*) > 1
-`
-
-type AmbiguousPrefixesRow struct {
-	Iata   string `json:"iata"`
-	Len    int32  `json:"len"`
-	Prefix []byte `json:"prefix"`
-}
-
-// Hop prefixes that match >1 node in an IATA, per width. Computed once per reconfirm run.
-func (q *Queries) AmbiguousPrefixes(ctx context.Context) ([]AmbiguousPrefixesRow, error) {
-	rows, err := q.db.Query(ctx, ambiguousPrefixes)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []AmbiguousPrefixesRow{}
-	for rows.Next() {
-		var i AmbiguousPrefixesRow
-		if err := rows.Scan(&i.Iata, &i.Len, &i.Prefix); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const clearRepeaters = `-- name: ClearRepeaters :execrows
 WITH reset AS (UPDATE meshmapper_repeater_sources SET etag = NULL, checked_at = NULL)
 DELETE FROM meshmapper_repeaters
@@ -4775,80 +4738,6 @@ OR (
 func (q *Queries) ReconfirmNeighbors(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, reconfirmNeighbors)
 	return err
-}
-
-const reconfirmRoutes = `-- name: ReconfirmRoutes :one
-WITH batch AS MATERIALIZED (
-    SELECT r.iata, r.path_key, r.node_ids, r.hash_prefix
-    FROM known_routes r
-    WHERE r.last_reconfirmed_at < $1
-    ORDER BY r.last_reconfirmed_at
-    LIMIT $2
-    FOR UPDATE OF r SKIP LOCKED
-),
-amb AS (
-    SELECT a.iata::char(3) AS iata, a.len, a.p
-    FROM ROWS FROM (unnest($3::text[]), unnest($4::int[]), unnest($5::bytea[])) AS a(iata, len, p)
-),
-dead AS (
-    SELECT b.iata, b.path_key
-    FROM batch b
-    WHERE EXISTS (
-        SELECT 1
-        FROM unnest(b.node_ids) AS hop_node_id
-        WHERE NOT EXISTS (
-            SELECT 1 FROM node_short_ids ns
-            WHERE ns.node_id = hop_node_id
-              AND ns.iata = b.iata
-        )
-    )
-    UNION
-    SELECT DISTINCT b.iata, b.path_key
-    FROM batch b
-    CROSS JOIN LATERAL unnest(b.hash_prefix) AS hp
-    JOIN amb a ON a.iata = b.iata AND a.len = length(hp) AND a.p = hp
-),
-deleted AS (
-    DELETE FROM known_routes kr
-    USING dead d
-    WHERE kr.iata = d.iata AND kr.path_key = d.path_key
-),
-updated AS (
-    UPDATE known_routes kr
-    SET last_reconfirmed_at = GREATEST(NOW(), $1::timestamptz)
-    FROM batch b
-    WHERE kr.iata = b.iata AND kr.path_key = b.path_key
-      AND NOT EXISTS (
-          SELECT 1 FROM dead d
-          WHERE d.iata = b.iata AND d.path_key = b.path_key
-      )
-)
-SELECT count(*) FROM batch
-`
-
-type ReconfirmRoutesParams struct {
-	Before    pgtype.Timestamptz `json:"before"`
-	BatchSize int32              `json:"batch_size"`
-	AmbIata   []string           `json:"amb_iata"`
-	AmbLen    []int32            `json:"amb_len"`
-	AmbPrefix [][]byte           `json:"amb_prefix"`
-}
-
-// Checks one batch of least-recently-reconfirmed routes: deletes those with a departed
-// hop node or a hop prefix now matching >1 node in that IATA (length-aware:
-// 1/2/3/4-byte hop prefixes check prefix_1/2/3/4; ambiguity set supplied by AmbiguousPrefixes),
-// and stamps the survivors.
-func (q *Queries) ReconfirmRoutes(ctx context.Context, arg ReconfirmRoutesParams) (int64, error) {
-	row := q.db.QueryRow(ctx, reconfirmRoutes,
-		arg.Before,
-		arg.BatchSize,
-		arg.AmbIata,
-		arg.AmbLen,
-		arg.AmbPrefix,
-	)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
 }
 
 const reconfirmRoutesBatch = `-- name: ReconfirmRoutesBatch :one

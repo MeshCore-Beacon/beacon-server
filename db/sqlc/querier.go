@@ -18,8 +18,6 @@ type Querier interface {
 	AddChannelMembers(ctx context.Context, arg AddChannelMembersParams) error
 	AddIATAs(ctx context.Context, iatas []string) error
 	AddRegionIATAs(ctx context.Context, arg AddRegionIATAsParams) error
-	// Hop prefixes that match >1 node in an IATA, per width. Computed once per reconfirm run.
-	AmbiguousPrefixes(ctx context.Context) ([]AmbiguousPrefixesRow, error)
 	// Keeps fetch timing so re-enabling still respects backoff; the ETag goes with the rows.
 	ClearRepeaters(ctx context.Context) (int64, error)
 	CreateAccount(ctx context.Context, name string) (Account, error)
@@ -306,11 +304,6 @@ type Querier interface {
 	// Delete node_neighbors where the neighbor has departed from node_short_ids
 	// for that IATA, or where its prefix_4 is now ambiguous.
 	ReconfirmNeighbors(ctx context.Context) error
-	// Checks one batch of least-recently-reconfirmed routes: deletes those with a departed
-	// hop node or a hop prefix now matching >1 node in that IATA (length-aware:
-	// 1/2/3/4-byte hop prefixes check prefix_1/2/3/4; ambiguity set supplied by AmbiguousPrefixes),
-	// and stamps the survivors.
-	ReconfirmRoutes(ctx context.Context, arg ReconfirmRoutesParams) (int64, error)
 	// The next batch_size routes after the cursor in pkey order: deletes those with a departed hop
 	// node or a hop prefix matching >1 node in that IATA (length-aware, reconfirm_amb). Writes no stamp.
 	// The DELETE re-checks the newest row version. An empty last_iata means the walk passed the end.

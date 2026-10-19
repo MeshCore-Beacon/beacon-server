@@ -100,21 +100,6 @@ func (mr *MockQuerierMockRecorder) AddRegionIATAs(ctx, arg any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddRegionIATAs", reflect.TypeOf((*MockQuerier)(nil).AddRegionIATAs), ctx, arg)
 }
 
-// AmbiguousPrefixes mocks base method.
-func (m *MockQuerier) AmbiguousPrefixes(ctx context.Context) ([]db.AmbiguousPrefixesRow, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "AmbiguousPrefixes", ctx)
-	ret0, _ := ret[0].([]db.AmbiguousPrefixesRow)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// AmbiguousPrefixes indicates an expected call of AmbiguousPrefixes.
-func (mr *MockQuerierMockRecorder) AmbiguousPrefixes(ctx any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AmbiguousPrefixes", reflect.TypeOf((*MockQuerier)(nil).AmbiguousPrefixes), ctx)
-}
-
 // ClearRepeaters mocks base method.
 func (m *MockQuerier) ClearRepeaters(ctx context.Context) (int64, error) {
 	m.ctrl.T.Helper()
@@ -1910,21 +1895,6 @@ func (m *MockQuerier) ReconfirmNeighbors(ctx context.Context) error {
 func (mr *MockQuerierMockRecorder) ReconfirmNeighbors(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReconfirmNeighbors", reflect.TypeOf((*MockQuerier)(nil).ReconfirmNeighbors), ctx)
-}
-
-// ReconfirmRoutes mocks base method.
-func (m *MockQuerier) ReconfirmRoutes(ctx context.Context, arg db.ReconfirmRoutesParams) (int64, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ReconfirmRoutes", ctx, arg)
-	ret0, _ := ret[0].(int64)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// ReconfirmRoutes indicates an expected call of ReconfirmRoutes.
-func (mr *MockQuerierMockRecorder) ReconfirmRoutes(ctx, arg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReconfirmRoutes", reflect.TypeOf((*MockQuerier)(nil).ReconfirmRoutes), ctx, arg)
 }
 
 // ReconfirmRoutesBatch mocks base method.

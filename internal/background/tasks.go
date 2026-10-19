@@ -119,16 +119,11 @@ func rawCutoff(ctx context.Context, store cleanupStore, retentionCutoff time.Tim
 	return held, nil
 }
 
-// Limit lock lifetime while retaining the per-run work budget.
-const (
-	reconfirmRunLimit     = 750_000
-	reconfirmBatchSize    = 1_000
-	reconfirmBatchTimeout = 5 * time.Second
-)
+// ReconfirmTick is how often the reconfirm sweep runs: the hourly row budget is spent in slices this long.
+const ReconfirmTick = 5 * time.Minute
 
-type routeMaintainer interface {
-	AmbiguousPrefixes(context.Context) (db.AmbiguousPrefixes, error)
-	ReconfirmRoutes(context.Context, int32, time.Time, db.AmbiguousPrefixes) (int64, error)
+type routeReconfirmer interface {
+	ReconfirmSweep(context.Context, int) (db.ReconfirmResult, error)
 }
 
 type observerCleaner interface {
@@ -158,31 +153,20 @@ func ObserverCleanupTask(store observerCleaner, deleteAfter, interval time.Durat
 	}
 }
 
-// ReconfirmTask returns a Task that reconfirms stale and ambiguous resolved paths.
-// RouteRetentionTask prunes aged routes and neighbors.
-func ReconfirmTask(store routeMaintainer, interval time.Duration) Task {
+// ReconfirmTask returns a Task that walks known_routes in primary-key order, deleting routes
+// with a departed or now-ambiguous hop. Each tick checks rowsPerHour's share of the hour.
+func ReconfirmTask(store routeReconfirmer, rowsPerHour int, tick time.Duration) Task {
+	budget := max(1, rowsPerHour*int(tick/time.Minute)/60)
 	return Task{
 		Name:     "reconfirm",
-		Interval: interval,
+		Interval: tick,
 		Run: func(ctx context.Context) error {
-			now := time.Now()
-			amb, err := store.AmbiguousPrefixes(ctx)
+			res, err := store.ReconfirmSweep(ctx, budget)
 			if err != nil {
-				return fmt.Errorf("ambiguous prefixes: %w", err)
+				return fmt.Errorf("routes: %w", err)
 			}
-			for remaining := int64(reconfirmRunLimit); remaining > 0; {
-				limit := min(int64(reconfirmBatchSize), remaining)
-				batchCtx, cancel := context.WithTimeout(ctx, reconfirmBatchTimeout)
-				n, err := store.ReconfirmRoutes(batchCtx, int32(limit), now, amb)
-				cancel()
-				if err != nil {
-					return fmt.Errorf("routes: %w", err)
-				}
-				remaining -= n
-				if n < limit {
-					break
-				}
-			}
+			slog.Debug("route reconfirm", "component", "background", "scanned", res.Scanned,
+				"deleted", res.Deleted, "skipped", res.Skipped, "timed_out", res.TimedOut, "wrapped", res.Wrapped)
 			return nil
 		},
 	}

@@ -410,7 +410,7 @@ func main() {
 			Interval:           resolved.CleanupInterval,
 		}),
 		background.RouteRetentionTask(store, resolved.RouteRetention, resolved.RouteGrace, int64(resolved.RouteMinObservations), resolved.ReconfirmInterval),
-		background.ReconfirmTask(store, resolved.ReconfirmInterval),
+		background.ReconfirmTask(store, resolved.RouteReconfirmRowsPerHour, background.ReconfirmTick),
 	}
 	if resolved.ObserverDeleteAfter > 0 {
 		var onDelete func(context.Context, uuid.UUID)
