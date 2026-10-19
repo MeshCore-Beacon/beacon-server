@@ -180,3 +180,21 @@ func TestRunMigrationsHopIndexPrebuiltPostgres(t *testing.T) {
 		t.Fatalf("006 not recorded: %v", err)
 	}
 }
+
+// The migrations leave known_routes with exactly the indexes some statement reads, all usable.
+func TestKnownRoutesIndexSetPostgres(t *testing.T) {
+	ctx, pool := schemaPool(t)
+	if err := RunMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	var got, bad []string
+	if err := pool.QueryRow(ctx, `SELECT coalesce(array_agg(indexrelid::regclass::text ORDER BY indexrelid::regclass::text), '{}'),
+       coalesce(array_agg(indexrelid::regclass::text) FILTER (WHERE NOT (indisvalid AND indisready)), '{}')
+FROM pg_index WHERE indrelid = 'known_routes'::regclass`).Scan(&got, &bad); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"idx_known_routes_hop_iata", "idx_known_routes_iata_keyset", "idx_known_routes_keyset", "idx_known_routes_node_ids", "known_routes_pkey"}
+	if strings.Join(got, ",") != strings.Join(want, ",") || len(bad) != 0 {
+		t.Fatalf("known_routes indexes = %v, want %v; not valid and ready: %v", got, want, bad)
+	}
+}

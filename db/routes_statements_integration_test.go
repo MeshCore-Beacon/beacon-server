@@ -82,7 +82,7 @@ func TestKnownRoutesCursorTiesPostgres(t *testing.T) {
 }
 
 // An unanalyzed region pages from iata_keyset, never a Sort over the region. Built on the
-// end-state index set (a later change drops the rest), where the (hop_count, iata) index must not win.
+// end-state index set (the baseline less what migrations 004-009 drop), where the (hop_count, iata) index must not win.
 func TestKnownRoutesUnanalyzedRegionPostgres(t *testing.T) {
 	ctx, tx := retentionTx(t)
 	applyBaseline(t, ctx, tx)
