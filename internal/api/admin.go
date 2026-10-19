@@ -3,6 +3,8 @@
 
 package api
 
+import "errors"
+
 // AdminConfig is a whitelist of selected nonsecret running settings.
 // It is not a serialization of the full file or environment configuration.
 type AdminConfig struct {
@@ -53,4 +55,24 @@ type UpdateAdminConfigResponse struct {
 	Config          AdminConfig `json:"config"`
 	Persisted       bool        `json:"persisted"`
 	RequiresRestart bool        `json:"requires_restart"`
+}
+
+// ErrStatementsUnavailable means the pg_stat_statements extension is missing or not preloaded.
+var ErrStatementsUnavailable = errors.New("pg_stat_statements is not available")
+
+// DBStatement sums pg_stat_statements rows for one sqlc statement in the current database.
+type DBStatement struct {
+	Name       string  `json:"name"` // sqlc statement name; "(unnamed)" aggregates the rest
+	Calls      int64   `json:"calls"`
+	ExecMs     float64 `json:"exec_ms"`
+	PlanMs     float64 `json:"plan_ms"` // 0 unless pg_stat_statements.track_planning is on
+	SharedHit  int64   `json:"shared_hit"`
+	SharedRead int64   `json:"shared_read"`
+	Rows       int64   `json:"rows"`
+	WALBytes   int64   `json:"wal_bytes"`
+}
+
+// DBStatementsResponse lists statements by total execution time, highest first.
+type DBStatementsResponse struct {
+	Items []DBStatement `json:"items"`
 }

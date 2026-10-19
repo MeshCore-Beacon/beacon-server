@@ -269,6 +269,34 @@ definitions:
       totalHops:
         type: integer
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.DBStatement:
+    properties:
+      calls:
+        type: integer
+      exec_ms:
+        type: number
+      name:
+        description: sqlc statement name; "(unnamed)" aggregates the rest
+        type: string
+      plan_ms:
+        description: 0 unless pg_stat_statements.track_planning is on
+        type: number
+      rows:
+        type: integer
+      shared_hit:
+        type: integer
+      shared_read:
+        type: integer
+      wal_bytes:
+        type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.DBStatementsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.DBStatement'
+        type: array
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.IATA:
     properties:
       displayName:
@@ -2184,6 +2212,43 @@ paths:
       security:
       - AdminKey: []
       summary: Update runtime CORS origins
+      tags:
+      - Admin
+  /admin/db/statements:
+    get:
+      description: Sums pg_stat_statements for this database by sqlc statement name,
+        highest total execution time first. Statements without a name are summed as
+        "(unnamed)". Times are milliseconds rounded to microseconds; plan_ms stays
+        0 unless pg_stat_statements.track_planning is on. Counters run from the last
+        pg_stat_statements reset.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.DBStatementsResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - AdminKey: []
+      summary: Statement statistics by sqlc name
       tags:
       - Admin
   /brokers:

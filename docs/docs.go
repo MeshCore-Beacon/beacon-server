@@ -557,6 +557,58 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/db/statements": {
+            "get": {
+                "security": [
+                    {
+                        "AdminKey": []
+                    }
+                ],
+                "description": "Sums pg_stat_statements for this database by sqlc statement name, highest total execution time first. Statements without a name are summed as \"(unnamed)\". Times are milliseconds rounded to microseconds; plan_ms stays 0 unless pg_stat_statements.track_planning is on. Counters run from the last pg_stat_statements reset.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Statement statistics by sqlc name",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.DBStatementsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/brokers": {
             "get": {
                 "produces": [
@@ -4017,6 +4069,48 @@ const docTemplate = `{
                 },
                 "totalHops": {
                     "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.DBStatement": {
+            "type": "object",
+            "properties": {
+                "calls": {
+                    "type": "integer"
+                },
+                "exec_ms": {
+                    "type": "number"
+                },
+                "name": {
+                    "description": "sqlc statement name; \"(unnamed)\" aggregates the rest",
+                    "type": "string"
+                },
+                "plan_ms": {
+                    "description": "0 unless pg_stat_statements.track_planning is on",
+                    "type": "number"
+                },
+                "rows": {
+                    "type": "integer"
+                },
+                "shared_hit": {
+                    "type": "integer"
+                },
+                "shared_read": {
+                    "type": "integer"
+                },
+                "wal_bytes": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.DBStatementsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.DBStatement"
+                    }
                 }
             }
         },
