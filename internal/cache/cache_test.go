@@ -196,8 +196,8 @@ func (s *stubReader) SearchPacketsByHashPrefix(_ context.Context, _, _ []byte, _
 	return api.Page[api.PacketSummary]{}, nil
 }
 
-func (s *stubReader) ListPackets(_ context.Context, _, _ []int16, _ []string, _ []string, _, _ time.Time, _ int64, _ int32) (api.Page[api.PacketSummary], error) {
-	return api.Page[api.PacketSummary]{}, nil
+func (s *stubReader) ListPackets(_ context.Context, _, _ []int16, _ []string, _ []string, _, _ time.Time, _ int64, _ *api.PacketCursor, _ int32) (api.PacketPage, error) {
+	return api.PacketPage{}, nil
 }
 
 func (s *stubReader) ListPacketsAfterID(_ context.Context, _ int64, _, _ int16, _ []string, _ string, _ int32) ([]api.PacketSummary, error) {

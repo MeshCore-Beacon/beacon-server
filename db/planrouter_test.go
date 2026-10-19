@@ -270,7 +270,7 @@ func runVia(ctx context.Context, r *PlanRouter, method, sql string, args ...any)
 
 func TestPlanRouterRoutesByClass(t *testing.T) {
 	classOf := func(name string) planpolicy.Class {
-		return map[string]planpolicy.Class{"ListPackets": planpolicy.ClassLegacy, "ProbeG": planpolicy.ClassG}[name] // else ClassC
+		return map[string]planpolicy.Class{"ListPacketsByIATAs": planpolicy.ClassLegacy, "ProbeG": planpolicy.ClassG}[name] // else ClassC
 	}
 	for _, c := range []struct {
 		layout     planpolicy.Layout
@@ -278,13 +278,13 @@ func TestPlanRouterRoutesByClass(t *testing.T) {
 		describe   bool
 		admits     int
 	}{
-		{planpolicy.CustomAll, "ListPackets", PoolAPILegacy, false, 0},
+		{planpolicy.CustomAll, "ListPacketsByIATAs", PoolAPILegacy, false, 0},
 		{planpolicy.CustomAll, "ProbeG", PoolAPICustom, false, 1},
 		{planpolicy.CustomAll, "ProbeC", PoolAPICustom, true, 1},
-		{planpolicy.Split, "ListPackets", PoolAPILegacy, false, 0},
+		{planpolicy.Split, "ListPacketsByIATAs", PoolAPILegacy, false, 0},
 		{planpolicy.Split, "ProbeG", PoolAPICached, false, 1},
 		{planpolicy.Split, "ProbeC", PoolAPICustom, true, 1},
-		{planpolicy.Single, "ListPackets", PoolAPILegacy, false, 0},
+		{planpolicy.Single, "ListPacketsByIATAs", PoolAPILegacy, false, 0},
 		{planpolicy.Single, "ProbeG", PoolAPILegacy, false, 1},
 		{planpolicy.Single, "ProbeC", PoolAPILegacy, true, 1},
 	} {
@@ -324,7 +324,7 @@ func TestPlanRouterRoutesByClass(t *testing.T) {
 	// A class C statement never reaches api_cached, and nothing does outside split.
 	for _, layout := range []planpolicy.Layout{planpolicy.CustomAll, planpolicy.Split, planpolicy.Single} {
 		f := newRouterFixture(layout, nil) // the real policy
-		for _, stmt := range []string{"ListPackets", "ListChannels", "ListKnownRoutesByIATAHop", "ListKnownRoutesGlobalHop", ""} {
+		for _, stmt := range []string{"ListPacketsByIATAs", "ListChannels", "ListKnownRoutesByIATAHop", "ListKnownRoutesGlobalHop", ""} {
 			sql := "SELECT 1"
 			if stmt != "" {
 				sql = "-- name: " + stmt + " :one\nSELECT 1"
@@ -403,7 +403,7 @@ func TestPlanRouterRoutesByClass(t *testing.T) {
 		{planpolicy.Single, &Pools{APILegacy: unconnected()}},
 	} {
 		r := NewPlanRouter(tc.pools, tc.layout, nil)
-		for _, stmt := range []string{"ListPackets", "GetNodeByID"} {
+		for _, stmt := range []string{"ListPacketsByIATAs", "GetNodeByID"} {
 			for _, method := range routerMethods {
 				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 				err := runVia(ctx, r, method, "-- name: "+stmt+" :one\nSELECT 1")
@@ -544,7 +544,7 @@ func TestLegacyStatementNeverCut(t *testing.T) {
 		r := newPlanRouter(legacy, custom, nil, planpolicy.CustomAll, g, nil)
 
 		start := time.Now()
-		if err := runVia(ctx, r, "Query", "-- name: ListPackets :many\nSELECT 1"); err != nil {
+		if err := runVia(ctx, r, "Query", "-- name: ListPacketsByIATAs :many\nSELECT 1"); err != nil {
 			t.Fatalf("legacy statement: %v", err)
 		}
 		if d := time.Since(start); d != 8*time.Second {

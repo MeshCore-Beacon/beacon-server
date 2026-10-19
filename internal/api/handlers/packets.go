@@ -112,16 +112,18 @@ func listPackets(reader api.Reader) http.HandlerFunc {
 			iatas = append(iatas, regionIATAs...)
 		}
 		scopes := parseCSVOrSingle(r, "scopes", "scope")
-		var packets api.Page[api.PacketSummary]
+		var packets api.PacketPage
 		if p := r.URL.Query().Get("hashPrefix"); p != "" {
 			lo, hi, err := hashPrefixRange(p)
 			if err != nil {
 				respondError(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			packets, err = reader.SearchPacketsByHashPrefix(r.Context(), lo, hi, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
+			var page api.Page[api.PacketSummary]
+			page, err = reader.SearchPacketsByHashPrefix(r.Context(), lo, hi, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
+			packets = api.PacketPage{Page: page}
 		} else {
-			packets, err = reader.ListPackets(r.Context(), payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
+			packets, err = reader.ListPackets(r.Context(), payloadTypes, routeTypes, iatas, scopes, since, until, cursor, nil, limit)
 		}
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "internal server error")

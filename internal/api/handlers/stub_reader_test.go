@@ -43,7 +43,7 @@ type stubReader struct {
 	getNodeNeighbors             func(ctx context.Context, nodeID uuid.UUID) ([]api.NodeNeighbor, error)
 	listNodeObservations         func(ctx context.Context, nodeID uuid.UUID, cursor int64, limit int32) (api.Page[api.PacketObservationSummary], error)
 	searchPacketsByHashPrefix    func(ctx context.Context, lo, hi []byte, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error)
-	listPackets                  func(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error)
+	listPackets                  func(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, pageCursor *api.PacketCursor, limit int32) (api.PacketPage, error)
 	listPacketsAfterID           func(ctx context.Context, afterObservationID int64, payloadType, routeType int16, iatas []string, scope string, limit int32) ([]api.PacketSummary, error)
 	getPacket                    func(ctx context.Context, packetHash []byte) (*api.Packet, error)
 	getRadioPresets              func(ctx context.Context, preset string, iatas []string) ([]api.RadioPreset, error)
@@ -243,11 +243,11 @@ func (s stubReader) ListNodeObservations(ctx context.Context, nodeID uuid.UUID, 
 	return api.Page[api.PacketObservationSummary]{}, nil
 }
 
-func (s stubReader) ListPackets(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
+func (s stubReader) ListPackets(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, pageCursor *api.PacketCursor, limit int32) (api.PacketPage, error) {
 	if s.listPackets != nil {
-		return s.listPackets(ctx, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
+		return s.listPackets(ctx, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, pageCursor, limit)
 	}
-	return api.Page[api.PacketSummary]{}, nil
+	return api.PacketPage{}, nil
 }
 
 func (s stubReader) SearchPacketsByHashPrefix(ctx context.Context, lo, hi []byte, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {

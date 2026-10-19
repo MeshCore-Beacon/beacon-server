@@ -128,8 +128,8 @@ func TestListPacketsBackfill_InvalidLimit(t *testing.T) {
 func TestListPackets_OK(t *testing.T) {
 	r := chi.NewRouter()
 	r.Get("/packets", listPackets(stubReader{
-		listPackets: func(_ context.Context, _, _ []int16, _ []string, _ []string, _, _ time.Time, _ int64, _ int32) (api.Page[api.PacketSummary], error) {
-			return api.Page[api.PacketSummary]{Items: []api.PacketSummary{{PacketHash: "deadbeef"}}}, nil
+		listPackets: func(_ context.Context, _, _ []int16, _ []string, _ []string, _, _ time.Time, _ int64, _ *api.PacketCursor, _ int32) (api.PacketPage, error) {
+			return api.PacketPage{Page: api.Page[api.PacketSummary]{Items: []api.PacketSummary{{PacketHash: "deadbeef"}}}}, nil
 		},
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/packets", nil)
@@ -145,11 +145,11 @@ func TestListPackets_PluralParams_PassedThrough(t *testing.T) {
 	var gotScopes []string
 	r := chi.NewRouter()
 	r.Get("/packets", listPackets(stubReader{
-		listPackets: func(_ context.Context, payloadTypes, routeTypes []int16, _ []string, scopes []string, _, _ time.Time, _ int64, _ int32) (api.Page[api.PacketSummary], error) {
+		listPackets: func(_ context.Context, payloadTypes, routeTypes []int16, _ []string, scopes []string, _, _ time.Time, _ int64, _ *api.PacketCursor, _ int32) (api.PacketPage, error) {
 			gotPayloadTypes = payloadTypes
 			gotRouteTypes = routeTypes
 			gotScopes = scopes
-			return api.Page[api.PacketSummary]{}, nil
+			return api.PacketPage{Page: api.Page[api.PacketSummary]{}}, nil
 		},
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/packets?payloadTypes=2,4&routeTypes=0,1&scopes=%23bc,%23west", nil)
@@ -174,11 +174,11 @@ func TestListPackets_SingularParams_StillWork(t *testing.T) {
 	var gotScopes []string
 	r := chi.NewRouter()
 	r.Get("/packets", listPackets(stubReader{
-		listPackets: func(_ context.Context, payloadTypes, routeTypes []int16, _ []string, scopes []string, _, _ time.Time, _ int64, _ int32) (api.Page[api.PacketSummary], error) {
+		listPackets: func(_ context.Context, payloadTypes, routeTypes []int16, _ []string, scopes []string, _, _ time.Time, _ int64, _ *api.PacketCursor, _ int32) (api.PacketPage, error) {
 			gotPayloadTypes = payloadTypes
 			gotRouteTypes = routeTypes
 			gotScopes = scopes
-			return api.Page[api.PacketSummary]{}, nil
+			return api.PacketPage{Page: api.Page[api.PacketSummary]{}}, nil
 		},
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/packets?payloadType=4&routeType=1&scope=%23bc", nil)
@@ -204,9 +204,9 @@ func TestListPackets_PluralParams_TakePrecedenceOverSingular(t *testing.T) {
 	var gotPayloadTypes []int16
 	r := chi.NewRouter()
 	r.Get("/packets", listPackets(stubReader{
-		listPackets: func(_ context.Context, payloadTypes, _ []int16, _ []string, _ []string, _, _ time.Time, _ int64, _ int32) (api.Page[api.PacketSummary], error) {
+		listPackets: func(_ context.Context, payloadTypes, _ []int16, _ []string, _ []string, _, _ time.Time, _ int64, _ *api.PacketCursor, _ int32) (api.PacketPage, error) {
 			gotPayloadTypes = payloadTypes
-			return api.Page[api.PacketSummary]{}, nil
+			return api.PacketPage{Page: api.Page[api.PacketSummary]{}}, nil
 		},
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/packets?payloadType=9&payloadTypes=2,4", nil)
@@ -310,9 +310,9 @@ func TestListPackets_HashPrefix(t *testing.T) {
 	var gotIATAs []string
 	r := chi.NewRouter()
 	r.Get("/packets", listPackets(stubReader{
-		listPackets: func(_ context.Context, _, _ []int16, _ []string, _ []string, _, _ time.Time, _ int64, _ int32) (api.Page[api.PacketSummary], error) {
+		listPackets: func(_ context.Context, _, _ []int16, _ []string, _ []string, _, _ time.Time, _ int64, _ *api.PacketCursor, _ int32) (api.PacketPage, error) {
 			t.Error("ListPackets called for a hashPrefix search")
-			return api.Page[api.PacketSummary]{}, nil
+			return api.PacketPage{Page: api.Page[api.PacketSummary]{}}, nil
 		},
 		searchPacketsByHashPrefix: func(_ context.Context, lo, hi []byte, _, _ []int16, iatas []string, _ []string, _, _ time.Time, _ int64, _ int32) (api.Page[api.PacketSummary], error) {
 			gotLo, gotHi, gotIATAs = lo, hi, iatas

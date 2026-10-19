@@ -345,8 +345,8 @@ func (cr *CachedReader) SearchPacketsByHashPrefix(ctx context.Context, lo, hi []
 }
 
 // ListPackets implements [api.Reader].
-func (cr *CachedReader) ListPackets(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
-	return cr.inner.ListPackets(ctx, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
+func (cr *CachedReader) ListPackets(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, pageCursor *api.PacketCursor, limit int32) (api.PacketPage, error) {
+	return cr.inner.ListPackets(ctx, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, pageCursor, limit)
 }
 
 // ListPacketsAfterID implements [api.Reader].

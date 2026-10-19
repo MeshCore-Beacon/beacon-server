@@ -43,7 +43,7 @@ VALUES ('\x01', 4, 0, 1, '\x00', '\x00', NOW(), NOW())`)
 		t.Fatal(err)
 	}
 	store := &Store{q: sqlc.New(tx)}
-	page, err := store.ListPackets(ctx, nil, nil, nil, nil, time.Time{}, time.Time{}, 0, 50)
+	page, err := store.ListPackets(ctx, nil, nil, nil, nil, time.Time{}, time.Time{}, 0, nil, 50)
 	if err != nil {
 		t.Fatalf("packet without observation must remain readable: %v", err)
 	}
@@ -62,7 +62,7 @@ UPDATE packets SET observation_count = 1 WHERE packet_hash = '\x01';`)
 		t.Fatal(err)
 	}
 	for _, iatas := range [][]string{nil, {"YVR"}} {
-		page, err := store.ListPackets(ctx, nil, nil, iatas, nil, time.Time{}, time.Time{}, 0, 50)
+		page, err := store.ListPackets(ctx, nil, nil, iatas, nil, time.Time{}, time.Time{}, 0, nil, 50)
 		if err != nil {
 			t.Fatal(err)
 		}

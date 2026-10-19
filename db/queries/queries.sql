@@ -473,10 +473,14 @@ LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE p.trace_tag = decode($1, 'hex')
 ORDER BY p.first_heard_at ASC;
 
--- name: ListPackets :many
--- Returns packets with the latest observation rolled in for display.
--- Pass cursor=0 to start from the beginning. IATA-filtered requests are
--- served by ListPacketsByIATAs instead.
+-- name: ListPacketsPage :many
+-- Unfiltered packet page: newest (last_heard_at, packet_hash) first.
+WITH page AS MATERIALIZED (
+  SELECT p.packet_hash, p.last_heard_at AS k FROM packets p
+  WHERE (p.last_heard_at, p.packet_hash) < (@cursor_ts::timestamptz, @cursor_hash::bytea)
+  ORDER BY p.last_heard_at DESC, p.packet_hash DESC
+  LIMIT @page_limit
+)
 SELECT
   p.packet_hash,
   p.payload_type,
@@ -508,25 +512,338 @@ SELECT
   po.path_bytes AS latest_observer_path_bytes,
   p.raw_payload,
   p.origin_pubkey
-FROM packets p
+FROM page pg
+JOIN packets p ON p.packet_hash = pg.packet_hash
 LEFT JOIN LATERAL (
   SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes
   FROM packet_observations
   WHERE packet_hash = p.packet_hash
-  ORDER BY heard_at DESC
+  ORDER BY heard_at DESC, id DESC
   LIMIT 1
 ) po ON true
 LEFT JOIN observers o ON o.id = po.observer_id
 LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
-WHERE
-  (COALESCE(cardinality($1::smallint[]), 0) = 0 OR p.payload_type = ANY($1::smallint[]))
-  AND (COALESCE(cardinality($2::smallint[]), 0) = 0 OR p.route_type = ANY($2::smallint[]))
-  AND ($3::timestamptz IS NULL OR p.first_heard_at >= $3)
-  AND ($4::timestamptz IS NULL OR p.first_heard_at <= $4)
-  AND ($5::timestamptz IS NULL OR p.last_heard_at < $5)
-  AND (COALESCE(cardinality($7::text[]), 0) = 0 OR ts.name = ANY($7::text[]))
-ORDER BY p.last_heard_at DESC
-LIMIT $6;
+ORDER BY pg.k DESC, pg.packet_hash DESC;
+
+-- name: ListPacketsByTypes :many
+-- One range per (payload type, route type) pair; DISTINCT keeps a repeated type from returning rows twice.
+WITH page AS MATERIALIZED (
+  SELECT x.packet_hash, x.last_heard_at AS k
+  FROM (SELECT DISTINCT unnest(@payload_types::smallint[])) pt(t)
+  CROSS JOIN (SELECT DISTINCT unnest(@route_types::smallint[])) rt(t)
+  CROSS JOIN LATERAL (
+    SELECT p.packet_hash, p.last_heard_at FROM packets p
+    WHERE p.payload_type = pt.t AND p.route_type = rt.t
+      AND (p.last_heard_at, p.packet_hash) < (@cursor_ts::timestamptz, @cursor_hash::bytea)
+    ORDER BY p.last_heard_at DESC, p.packet_hash DESC
+    LIMIT @page_limit
+  ) x
+  ORDER BY x.last_heard_at DESC, x.packet_hash DESC
+  LIMIT @page_limit
+)
+SELECT
+  p.packet_hash,
+  p.payload_type,
+  COALESCE(CASE
+    WHEN p.payload_type = 4 AND jsonb_typeof(p.parsed_payload #> '{appData,name}') = 'string'
+      THEN p.parsed_payload #>> '{appData,name}'
+    WHEN p.payload_type = 3 AND p.parsed_payload ->> 'type' = 'ACK'
+      AND jsonb_typeof(p.parsed_payload -> 'checksum') = 'string'
+      AND p.parsed_payload ->> 'checksum' ~ '^[0-9a-fA-F]{8}$'
+      THEN 'ACK ' || lower(p.parsed_payload ->> 'checksum')
+    WHEN p.payload_type = 9 AND p.parsed_payload ->> 'type' IN ('TRACE', 'PING')
+      AND jsonb_typeof(p.parsed_payload -> 'traceTag') = 'string'
+      AND p.parsed_payload ->> 'traceTag' ~ '^[0-9a-fA-F]{8}$'
+      THEN (p.parsed_payload ->> 'type') || ' ' || lower(p.parsed_payload ->> 'traceTag')
+    END, '')::text AS summary,
+  p.route_type,
+  p.first_heard_at,
+  p.last_heard_at,
+  p.scope_id,
+  ts.name AS scope_name,
+  p.observation_count AS observation_count,
+  -- sqlc loses LATERAL nullability; these scalar defaults are ignored when observer_id is NULL.
+  po.observer_id AS latest_observer_id,
+  o.display_name AS latest_observer_name,
+  COALESCE(po.iata, ''::bpchar) AS latest_observer_iata,
+  COALESCE(po.path_length_byte, 0::smallint) AS latest_observer_path_length_byte,
+  COALESCE(po.hash_size, 0::smallint) AS latest_observer_hash_size,
+  COALESCE(po.hop_count, 0::smallint) AS latest_observer_hop_count,
+  po.path_bytes AS latest_observer_path_bytes,
+  p.raw_payload,
+  p.origin_pubkey
+FROM page pg
+JOIN packets p ON p.packet_hash = pg.packet_hash
+LEFT JOIN LATERAL (
+  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes
+  FROM packet_observations
+  WHERE packet_hash = p.packet_hash
+  ORDER BY heard_at DESC, id DESC
+  LIMIT 1
+) po ON true
+LEFT JOIN observers o ON o.id = po.observer_id
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+ORDER BY pg.k DESC, pg.packet_hash DESC;
+
+-- name: ListPacketsByScopes :many
+-- One range per named scope; a zero-hit scope costs a single index probe.
+WITH page AS MATERIALIZED (
+  SELECT x.packet_hash, x.last_heard_at AS k
+  FROM transport_scopes s
+  CROSS JOIN LATERAL (
+    SELECT p.packet_hash, p.last_heard_at FROM packets p
+    WHERE p.scope_id = s.id
+      AND (p.last_heard_at, p.packet_hash) < (@cursor_ts::timestamptz, @cursor_hash::bytea)
+    ORDER BY p.last_heard_at DESC, p.packet_hash DESC
+    LIMIT @page_limit
+  ) x
+  WHERE s.name = ANY(@scope_names::text[])
+  ORDER BY x.last_heard_at DESC, x.packet_hash DESC
+  LIMIT @page_limit
+)
+SELECT
+  p.packet_hash,
+  p.payload_type,
+  COALESCE(CASE
+    WHEN p.payload_type = 4 AND jsonb_typeof(p.parsed_payload #> '{appData,name}') = 'string'
+      THEN p.parsed_payload #>> '{appData,name}'
+    WHEN p.payload_type = 3 AND p.parsed_payload ->> 'type' = 'ACK'
+      AND jsonb_typeof(p.parsed_payload -> 'checksum') = 'string'
+      AND p.parsed_payload ->> 'checksum' ~ '^[0-9a-fA-F]{8}$'
+      THEN 'ACK ' || lower(p.parsed_payload ->> 'checksum')
+    WHEN p.payload_type = 9 AND p.parsed_payload ->> 'type' IN ('TRACE', 'PING')
+      AND jsonb_typeof(p.parsed_payload -> 'traceTag') = 'string'
+      AND p.parsed_payload ->> 'traceTag' ~ '^[0-9a-fA-F]{8}$'
+      THEN (p.parsed_payload ->> 'type') || ' ' || lower(p.parsed_payload ->> 'traceTag')
+    END, '')::text AS summary,
+  p.route_type,
+  p.first_heard_at,
+  p.last_heard_at,
+  p.scope_id,
+  ts.name AS scope_name,
+  p.observation_count AS observation_count,
+  -- sqlc loses LATERAL nullability; these scalar defaults are ignored when observer_id is NULL.
+  po.observer_id AS latest_observer_id,
+  o.display_name AS latest_observer_name,
+  COALESCE(po.iata, ''::bpchar) AS latest_observer_iata,
+  COALESCE(po.path_length_byte, 0::smallint) AS latest_observer_path_length_byte,
+  COALESCE(po.hash_size, 0::smallint) AS latest_observer_hash_size,
+  COALESCE(po.hop_count, 0::smallint) AS latest_observer_hop_count,
+  po.path_bytes AS latest_observer_path_bytes,
+  p.raw_payload,
+  p.origin_pubkey
+FROM page pg
+JOIN packets p ON p.packet_hash = pg.packet_hash
+LEFT JOIN LATERAL (
+  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes
+  FROM packet_observations
+  WHERE packet_hash = p.packet_hash
+  ORDER BY heard_at DESC, id DESC
+  LIMIT 1
+) po ON true
+LEFT JOIN observers o ON o.id = po.observer_id
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+ORDER BY pg.k DESC, pg.packet_hash DESC;
+
+-- name: ListPacketsByScopesTypes :many
+-- ListPacketsByScopes with the type tests inside each scope range (index-only through the included columns).
+WITH page AS MATERIALIZED (
+  SELECT x.packet_hash, x.last_heard_at AS k
+  FROM transport_scopes s
+  CROSS JOIN LATERAL (
+    SELECT p.packet_hash, p.last_heard_at FROM packets p
+    WHERE p.scope_id = s.id
+      AND (p.last_heard_at, p.packet_hash) < (@cursor_ts::timestamptz, @cursor_hash::bytea)
+      AND p.payload_type = ANY(@payload_types::smallint[]) AND p.route_type = ANY(@route_types::smallint[])
+    ORDER BY p.last_heard_at DESC, p.packet_hash DESC
+    LIMIT @page_limit
+  ) x
+  WHERE s.name = ANY(@scope_names::text[])
+  ORDER BY x.last_heard_at DESC, x.packet_hash DESC
+  LIMIT @page_limit
+)
+SELECT
+  p.packet_hash,
+  p.payload_type,
+  COALESCE(CASE
+    WHEN p.payload_type = 4 AND jsonb_typeof(p.parsed_payload #> '{appData,name}') = 'string'
+      THEN p.parsed_payload #>> '{appData,name}'
+    WHEN p.payload_type = 3 AND p.parsed_payload ->> 'type' = 'ACK'
+      AND jsonb_typeof(p.parsed_payload -> 'checksum') = 'string'
+      AND p.parsed_payload ->> 'checksum' ~ '^[0-9a-fA-F]{8}$'
+      THEN 'ACK ' || lower(p.parsed_payload ->> 'checksum')
+    WHEN p.payload_type = 9 AND p.parsed_payload ->> 'type' IN ('TRACE', 'PING')
+      AND jsonb_typeof(p.parsed_payload -> 'traceTag') = 'string'
+      AND p.parsed_payload ->> 'traceTag' ~ '^[0-9a-fA-F]{8}$'
+      THEN (p.parsed_payload ->> 'type') || ' ' || lower(p.parsed_payload ->> 'traceTag')
+    END, '')::text AS summary,
+  p.route_type,
+  p.first_heard_at,
+  p.last_heard_at,
+  p.scope_id,
+  ts.name AS scope_name,
+  p.observation_count AS observation_count,
+  -- sqlc loses LATERAL nullability; these scalar defaults are ignored when observer_id is NULL.
+  po.observer_id AS latest_observer_id,
+  o.display_name AS latest_observer_name,
+  COALESCE(po.iata, ''::bpchar) AS latest_observer_iata,
+  COALESCE(po.path_length_byte, 0::smallint) AS latest_observer_path_length_byte,
+  COALESCE(po.hash_size, 0::smallint) AS latest_observer_hash_size,
+  COALESCE(po.hop_count, 0::smallint) AS latest_observer_hop_count,
+  po.path_bytes AS latest_observer_path_bytes,
+  p.raw_payload,
+  p.origin_pubkey
+FROM page pg
+JOIN packets p ON p.packet_hash = pg.packet_hash
+LEFT JOIN LATERAL (
+  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes
+  FROM packet_observations
+  WHERE packet_hash = p.packet_hash
+  ORDER BY heard_at DESC, id DESC
+  LIMIT 1
+) po ON true
+LEFT JOIN observers o ON o.id = po.observer_id
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+ORDER BY pg.k DESC, pg.packet_hash DESC;
+
+-- name: ListPacketsWindow :many
+-- first_heard_at window. Branch 1 walks last_heard_at down to since; branch 2 adds the rows a concurrent
+-- upsert left with last_heard_at below first_heard_at, which that bound cannot see.
+WITH page AS MATERIALIZED (
+  SELECT u.packet_hash, u.k FROM (
+    (SELECT p.packet_hash, p.last_heard_at AS k FROM packets p
+     WHERE p.last_heard_at >= @since_ts::timestamptz
+       AND (p.last_heard_at, p.packet_hash) < (@cursor_ts::timestamptz, @cursor_hash::bytea)
+       AND (p.first_heard_at >= @since_ts AND p.first_heard_at <= @until_ts::timestamptz) IS TRUE
+       AND p.payload_type = ANY(@payload_types::smallint[]) AND p.route_type = ANY(@route_types::smallint[])
+     ORDER BY p.last_heard_at DESC, p.packet_hash DESC
+     LIMIT @page_limit)
+    UNION ALL
+    (SELECT p.packet_hash, p.last_heard_at AS k FROM packets p
+     WHERE (p.first_heard_at > p.last_heard_at) IS TRUE
+       AND (p.first_heard_at >= @since_ts AND p.first_heard_at <= @until_ts
+            AND p.last_heard_at < @since_ts
+            AND (p.last_heard_at, p.packet_hash) < (@cursor_ts, @cursor_hash)
+            AND p.payload_type = ANY(@payload_types) AND p.route_type = ANY(@route_types)) IS TRUE)
+  ) u
+  ORDER BY u.k DESC, u.packet_hash DESC
+  LIMIT @page_limit
+)
+SELECT
+  p.packet_hash,
+  p.payload_type,
+  COALESCE(CASE
+    WHEN p.payload_type = 4 AND jsonb_typeof(p.parsed_payload #> '{appData,name}') = 'string'
+      THEN p.parsed_payload #>> '{appData,name}'
+    WHEN p.payload_type = 3 AND p.parsed_payload ->> 'type' = 'ACK'
+      AND jsonb_typeof(p.parsed_payload -> 'checksum') = 'string'
+      AND p.parsed_payload ->> 'checksum' ~ '^[0-9a-fA-F]{8}$'
+      THEN 'ACK ' || lower(p.parsed_payload ->> 'checksum')
+    WHEN p.payload_type = 9 AND p.parsed_payload ->> 'type' IN ('TRACE', 'PING')
+      AND jsonb_typeof(p.parsed_payload -> 'traceTag') = 'string'
+      AND p.parsed_payload ->> 'traceTag' ~ '^[0-9a-fA-F]{8}$'
+      THEN (p.parsed_payload ->> 'type') || ' ' || lower(p.parsed_payload ->> 'traceTag')
+    END, '')::text AS summary,
+  p.route_type,
+  p.first_heard_at,
+  p.last_heard_at,
+  p.scope_id,
+  ts.name AS scope_name,
+  p.observation_count AS observation_count,
+  -- sqlc loses LATERAL nullability; these scalar defaults are ignored when observer_id is NULL.
+  po.observer_id AS latest_observer_id,
+  o.display_name AS latest_observer_name,
+  COALESCE(po.iata, ''::bpchar) AS latest_observer_iata,
+  COALESCE(po.path_length_byte, 0::smallint) AS latest_observer_path_length_byte,
+  COALESCE(po.hash_size, 0::smallint) AS latest_observer_hash_size,
+  COALESCE(po.hop_count, 0::smallint) AS latest_observer_hop_count,
+  po.path_bytes AS latest_observer_path_bytes,
+  p.raw_payload,
+  p.origin_pubkey
+FROM page pg
+JOIN packets p ON p.packet_hash = pg.packet_hash
+LEFT JOIN LATERAL (
+  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes
+  FROM packet_observations
+  WHERE packet_hash = p.packet_hash
+  ORDER BY heard_at DESC, id DESC
+  LIMIT 1
+) po ON true
+LEFT JOIN observers o ON o.id = po.observer_id
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+ORDER BY pg.k DESC, pg.packet_hash DESC;
+
+-- name: ListPacketsWindowScoped :many
+-- ListPacketsWindow with branch 1 run once per named scope and branch 2 limited to those scopes.
+WITH page AS MATERIALIZED (
+  SELECT u.packet_hash, u.k FROM (
+    (SELECT x.packet_hash, x.last_heard_at AS k
+     FROM transport_scopes s
+     CROSS JOIN LATERAL (
+       SELECT p.packet_hash, p.last_heard_at FROM packets p
+       WHERE p.scope_id = s.id
+         AND p.last_heard_at >= @since_ts::timestamptz
+         AND (p.last_heard_at, p.packet_hash) < (@cursor_ts::timestamptz, @cursor_hash::bytea)
+         AND (p.first_heard_at >= @since_ts AND p.first_heard_at <= @until_ts::timestamptz) IS TRUE
+         AND p.payload_type = ANY(@payload_types::smallint[]) AND p.route_type = ANY(@route_types::smallint[])
+       ORDER BY p.last_heard_at DESC, p.packet_hash DESC
+       LIMIT @page_limit) x
+     WHERE s.name = ANY(@scope_names::text[]))
+    UNION ALL
+    (SELECT p.packet_hash, p.last_heard_at AS k FROM packets p
+     WHERE (p.first_heard_at > p.last_heard_at) IS TRUE
+       AND (p.first_heard_at >= @since_ts AND p.first_heard_at <= @until_ts
+            AND p.last_heard_at < @since_ts
+            AND (p.last_heard_at, p.packet_hash) < (@cursor_ts, @cursor_hash)
+            AND p.payload_type = ANY(@payload_types) AND p.route_type = ANY(@route_types)
+            AND p.scope_id = ANY(ARRAY(SELECT id FROM transport_scopes WHERE name = ANY(@scope_names)))) IS TRUE)
+  ) u
+  ORDER BY u.k DESC, u.packet_hash DESC
+  LIMIT @page_limit
+)
+SELECT
+  p.packet_hash,
+  p.payload_type,
+  COALESCE(CASE
+    WHEN p.payload_type = 4 AND jsonb_typeof(p.parsed_payload #> '{appData,name}') = 'string'
+      THEN p.parsed_payload #>> '{appData,name}'
+    WHEN p.payload_type = 3 AND p.parsed_payload ->> 'type' = 'ACK'
+      AND jsonb_typeof(p.parsed_payload -> 'checksum') = 'string'
+      AND p.parsed_payload ->> 'checksum' ~ '^[0-9a-fA-F]{8}$'
+      THEN 'ACK ' || lower(p.parsed_payload ->> 'checksum')
+    WHEN p.payload_type = 9 AND p.parsed_payload ->> 'type' IN ('TRACE', 'PING')
+      AND jsonb_typeof(p.parsed_payload -> 'traceTag') = 'string'
+      AND p.parsed_payload ->> 'traceTag' ~ '^[0-9a-fA-F]{8}$'
+      THEN (p.parsed_payload ->> 'type') || ' ' || lower(p.parsed_payload ->> 'traceTag')
+    END, '')::text AS summary,
+  p.route_type,
+  p.first_heard_at,
+  p.last_heard_at,
+  p.scope_id,
+  ts.name AS scope_name,
+  p.observation_count AS observation_count,
+  -- sqlc loses LATERAL nullability; these scalar defaults are ignored when observer_id is NULL.
+  po.observer_id AS latest_observer_id,
+  o.display_name AS latest_observer_name,
+  COALESCE(po.iata, ''::bpchar) AS latest_observer_iata,
+  COALESCE(po.path_length_byte, 0::smallint) AS latest_observer_path_length_byte,
+  COALESCE(po.hash_size, 0::smallint) AS latest_observer_hash_size,
+  COALESCE(po.hop_count, 0::smallint) AS latest_observer_hop_count,
+  po.path_bytes AS latest_observer_path_bytes,
+  p.raw_payload,
+  p.origin_pubkey
+FROM page pg
+JOIN packets p ON p.packet_hash = pg.packet_hash
+LEFT JOIN LATERAL (
+  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes
+  FROM packet_observations
+  WHERE packet_hash = p.packet_hash
+  ORDER BY heard_at DESC, id DESC
+  LIMIT 1
+) po ON true
+LEFT JOIN observers o ON o.id = po.observer_id
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+ORDER BY pg.k DESC, pg.packet_hash DESC;
 
 -- name: ListPacketsByIATAs :many
 -- IATA-filtered packet list, driven from idx_observations_iata_heard.

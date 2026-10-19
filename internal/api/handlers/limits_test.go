@@ -59,10 +59,10 @@ func TestListLimits(t *testing.T) {
 			got = limit
 			return api.Page[api.PacketObservationSummary]{}, nil
 		},
-		listPackets: func(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
+		listPackets: func(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, pageCursor *api.PacketCursor, limit int32) (api.PacketPage, error) {
 			calls++
 			got = limit
-			return api.Page[api.PacketSummary]{}, nil
+			return api.PacketPage{Page: api.Page[api.PacketSummary]{}}, nil
 		},
 		listPacketsAfterID: func(ctx context.Context, afterObservationID int64, payloadType, routeType int16, iatas []string, scope string, limit int32) ([]api.PacketSummary, error) {
 			calls++

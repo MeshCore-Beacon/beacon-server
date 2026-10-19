@@ -248,10 +248,6 @@ type Querier interface {
 	// Pass cursor=0 to start from the beginning, or the last seen observer's rownum for pagination.
 	// Note: observers use UUID PKs so we order by last_seen and use a keyset on last_seen+id.
 	ListObservers(ctx context.Context, arg ListObserversParams) ([]ListObserversRow, error)
-	// Returns packets with the latest observation rolled in for display.
-	// Pass cursor=0 to start from the beginning. IATA-filtered requests are
-	// served by ListPacketsByIATAs instead.
-	ListPackets(ctx context.Context, arg ListPacketsParams) ([]ListPacketsRow, error)
 	// Returns packets with observations after the given observation ID, ordered oldest first.
 	// Used for WS reconnect backfill. Pass afterObservationId=0 to start from the beginning.
 	ListPacketsAfterID(ctx context.Context, arg ListPacketsAfterIDParams) ([]ListPacketsAfterIDRow, error)
@@ -269,6 +265,19 @@ type Querier interface {
 	// A site that filled scan_depth still has unread history below its floor.
 	// The newest such floor is the point above which every site is covered.
 	ListPacketsByIATAs(ctx context.Context, arg ListPacketsByIATAsParams) ([]ListPacketsByIATAsRow, error)
+	// One range per named scope; a zero-hit scope costs a single index probe.
+	ListPacketsByScopes(ctx context.Context, arg ListPacketsByScopesParams) ([]ListPacketsByScopesRow, error)
+	// ListPacketsByScopes with the type tests inside each scope range (index-only through the included columns).
+	ListPacketsByScopesTypes(ctx context.Context, arg ListPacketsByScopesTypesParams) ([]ListPacketsByScopesTypesRow, error)
+	// One range per (payload type, route type) pair; DISTINCT keeps a repeated type from returning rows twice.
+	ListPacketsByTypes(ctx context.Context, arg ListPacketsByTypesParams) ([]ListPacketsByTypesRow, error)
+	// Unfiltered packet page: newest (last_heard_at, packet_hash) first.
+	ListPacketsPage(ctx context.Context, arg ListPacketsPageParams) ([]ListPacketsPageRow, error)
+	// first_heard_at window. Branch 1 walks last_heard_at down to since; branch 2 adds the rows a concurrent
+	// upsert left with last_heard_at below first_heard_at, which that bound cannot see.
+	ListPacketsWindow(ctx context.Context, arg ListPacketsWindowParams) ([]ListPacketsWindowRow, error)
+	// ListPacketsWindow with branch 1 run once per named scope and branch 2 limited to those scopes.
+	ListPacketsWindowScoped(ctx context.Context, arg ListPacketsWindowScopedParams) ([]ListPacketsWindowScopedRow, error)
 	// Every region with its members, for reconciling imported MeshMapper groups.
 	ListRegionState(ctx context.Context) ([]ListRegionStateRow, error)
 	// ============================================================

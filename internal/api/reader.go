@@ -138,7 +138,8 @@ type Reader interface {
 	// cursor is epoch ms in either case; pass 0 to start from the beginning.
 	// payloadTypes/routeTypes/scopes are OR'd within each filter, ANDed across filters; pass
 	// nil/empty to skip a filter.
-	ListPackets(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (Page[PacketSummary], error)
+	// pageCursor wins over cursor on the global path; the IATA path ignores it.
+	ListPackets(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, pageCursor *PacketCursor, limit int32) (PacketPage, error)
 
 	// SearchPacketsByHashPrefix lists packets whose hash is in [lo, hi) (nil hi is unbounded),
 	// newest last_heard_at first. Other filters behave as in ListPackets; iatas only
