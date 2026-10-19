@@ -22,9 +22,7 @@ CREATE TABLE packets_life (p int NOT NULL, life_s float8 NOT NULL);
 -- packet_observations
 CREATE TABLE po_iata (iata char(3) NOT NULL, n bigint NOT NULL);
 CREATE TABLE po_sites_per_packet (n_sites int NOT NULL, packets bigint NOT NULL);
-CREATE TABLE po_observer (rank int NOT NULL, n bigint NOT NULL, n_adverts bigint NOT NULL, home_iata char(3) NOT NULL,
-  home_n bigint NOT NULL);
-CREATE TABLE po_delay (p int NOT NULL, delay_s float8 NOT NULL);
+CREATE TABLE po_observer (rank int NOT NULL, n bigint NOT NULL, home_iata char(3) NOT NULL);  -- each observer hears at its home site
 CREATE TABLE po_hop (hop_count smallint NOT NULL, n bigint NOT NULL);
 CREATE TABLE po_whole_second (whole_second_pct numeric NOT NULL);
 -- channel messages by channel rank, with the site that hears each channel most

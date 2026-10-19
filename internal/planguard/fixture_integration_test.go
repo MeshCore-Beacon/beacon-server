@@ -6,6 +6,7 @@ package planguard_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -105,11 +106,14 @@ func fixtureDB(t *testing.T, ctx context.Context) *pgxpool.Pool {
 		t.Fatal(err)
 	}
 	var got string
-	if err := pool.QueryRow(ctx, "SELECT coalesce(max(hash) FILTER (WHERE built_at IS NOT NULL), '') FROM planguard_src.fixture_marker").Scan(&got); err != nil {
+	var sameServer bool
+	if err := pool.QueryRow(ctx, `SELECT coalesce(max(hash) FILTER (WHERE built_at IS NOT NULL), ''),
+  coalesce(bool_and(server_version_num = current_setting('server_version_num')::int), false)
+FROM planguard_src.fixture_marker`).Scan(&got, &sameServer); err != nil {
 		t.Fatalf("PLANGUARD_FIXTURE_DSN: no fixture marker: %v", err)
 	}
-	if got != want {
-		t.Fatalf("PLANGUARD_FIXTURE_DSN holds a fixture of hash %q, want a finished build of these files (%s)", got, want)
+	if got != want || !sameServer {
+		t.Fatalf("PLANGUARD_FIXTURE_DSN holds a fixture of hash %q (same server version: %v), want a finished build of these inputs (%s) on this server", got, sameServer, want)
 	}
 	t.Logf("reusing the fixture built from these files (%s)", want)
 	return pool
@@ -230,36 +234,61 @@ func TestBuildFixtureThroughMigrationsPostgres(t *testing.T) {
 	}
 }
 
+// Without a fixture marker BuildFixture writes nothing to a database that holds data or a schema it did not make:
+// a row in packets, a freshly migrated Beacon database (its singleton rows), or public tables without a migration
+// ledger.
 func TestBuildFixtureRefusesRealDatabasePostgres(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	pool := throwawayDB(t, ctx, "planguard_refuse_test")
-	if err := db.RunMigrations(ctx, pool); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, `INSERT INTO packets (packet_hash, payload_type, payload_version, route_type, raw_payload,
-  raw_header, first_heard_at, last_heard_at) VALUES ('\x0102030405060708', 4, 0, 1, '\x00', '\x00', now(), now())`); err != nil {
-		t.Fatal(err)
-	}
-	var migrations int
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM schema_migrations").Scan(&migrations); err != nil {
-		t.Fatal(err)
-	}
-
-	err := planguard.BuildFixture(ctx, pool, pgdata.Files)
-	if err == nil || !strings.Contains(err.Error(), "not a planguard fixture database") {
-		t.Fatalf("BuildFixture on a database with packets = %v, want %q", err, "not a planguard fixture database")
-	}
-
-	// Nothing was written.
-	var packets, routes, after int
-	var src bool
-	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM packets), (SELECT count(*) FROM known_routes),
-  (SELECT count(*) FROM schema_migrations), to_regnamespace('planguard_src') IS NOT NULL`).Scan(&packets, &routes, &after, &src); err != nil {
-		t.Fatal(err)
-	}
-	if packets != 1 || routes != 0 || after != migrations || src {
-		t.Errorf("after the refusal: packets %d, known_routes %d, migrations %d (was %d), planguard_src exists %v; want 1, 0, unchanged, false",
-			packets, routes, after, migrations, src)
+	for _, tc := range []struct {
+		name, setup, want string
+		migrate           bool
+	}{
+		{name: "packets", migrate: true, want: "public.packets holds data", setup: `INSERT INTO packets (packet_hash, payload_type,
+  payload_version, route_type, raw_payload, raw_header, first_heard_at, last_heard_at)
+VALUES ('\x0102030405060708', 4, 0, 1, '\x00', '\x00', now(), now())`},
+		{name: "migrated", migrate: true, want: "holds data"},
+		{name: "no_ledger", setup: "CREATE TABLE public.notes (body text)", want: "no schema_migrations"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pool := throwawayDB(t, ctx, "planguard_refuse_"+tc.name)
+			if tc.migrate {
+				if err := db.RunMigrations(ctx, pool); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.setup != "" {
+				if _, err := pool.Exec(ctx, tc.setup); err != nil {
+					t.Fatal(err)
+				}
+			}
+			snapshot := func() string {
+				var s string
+				if err := pool.QueryRow(ctx, `SELECT coalesce(string_agg(n.nspname || '.' || c.relname, ',' ORDER BY n.nspname, c.relname), '')
+FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')`).Scan(&s); err != nil {
+					t.Fatal(err)
+				}
+				var rows int
+				if tc.migrate {
+					if err := pool.QueryRow(ctx, "SELECT (SELECT count(*) FROM packets) + (SELECT count(*) FROM known_routes) + (SELECT count(*) FROM schema_migrations)").Scan(&rows); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return fmt.Sprintf("%s|%d", s, rows)
+			}
+			before := snapshot()
+			err := planguard.BuildFixture(ctx, pool, pgdata.Files)
+			if err == nil || !strings.Contains(err.Error(), "not a planguard fixture database") || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("BuildFixture = %v, want %q naming %q", err, "not a planguard fixture database", tc.want)
+			}
+			if after := snapshot(); after != before {
+				t.Errorf("BuildFixture wrote after refusing:\nbefore %s\nafter  %s", before, after)
+			}
+			var src bool
+			if err := pool.QueryRow(ctx, "SELECT to_regnamespace('planguard_src') IS NOT NULL").Scan(&src); err != nil || src {
+				t.Errorf("planguard_src exists after the refusal (%v)", err)
+			}
+		})
 	}
 }

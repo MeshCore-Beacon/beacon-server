@@ -210,12 +210,12 @@ func TestRepoCorpusCachedEntries(t *testing.T) {
 	}
 }
 
-// The fixture's data files hold aggregates only: every cell is a count, a number, a boolean, a timestamp or an IATA
-// code. A name, key, UUID or any other text (a node, observer, channel, scope or broker name) fails, as does a
+// The fixture's data files hold aggregates only: every cell is a count, a number (at most 15 integer digits, so a
+// key cannot pass as one), a boolean, a timestamp or an IATA code. A name, key, UUID or any other text (a node, observer, channel, scope or broker name) fails, as does a
 // file that is not CSV.
 func TestFixtureDataHoldsOnlyAggregates(t *testing.T) {
 	header := regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
-	cell := regexp.MustCompile(`^(-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?|t|f|true|false|[A-Z0-9]{3}|[0-9]{4}-[0-9]{2}-[0-9]{2}[ T][0-9:.]+([+-][0-9:]+|Z)?|)$`)
+	cell := regexp.MustCompile(`^(-?[0-9]{1,15}(\.[0-9]+)?([eE][-+]?[0-9]+)?|t|f|true|false|[A-Z0-9]{3}|[0-9]{4}-[0-9]{2}-[0-9]{2}[ T][0-9:.]+([+-][0-9:]+|Z)?|)$`)
 	n := 0
 	err := fs.WalkDir(pgdata.Files, "fixture/testdata", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {

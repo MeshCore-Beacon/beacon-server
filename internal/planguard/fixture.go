@@ -32,6 +32,9 @@ const (
 	fixtureStatsTgt = 200
 	// Generator files from this number on run after ANALYZE: they change data the statistics must not see.
 	fixtureAfterAnalyze = 90
+	// fixtureFormat versions the Go side of the generator (the build sequence and the marker); bump it when a change
+	// here alters what a build produces.
+	fixtureFormat = 2
 )
 
 var (
@@ -39,21 +42,41 @@ var (
 	fixtureCSVRe  = regexp.MustCompile(`^[a-z][a-z0-9_]*\.csv$`)
 )
 
-// fixtureGuardTables are the public tables BuildFixture looks at before it writes: a database where one of them
-// holds a row and that carries no fixture marker is somebody's data, and BuildFixture refuses it.
-var fixtureGuardTables = []string{"packets", "packet_observations", "known_routes", "nodes", "channel_messages"}
+// generatorInputs are the generator's inputs that live in Go rather than in fixture/. They are hashed with the
+// files, and generateFixture builds from the copy it hashed.
+type generatorInputs struct {
+	format       int
+	settings     string // the build session's SETs
+	statsTarget  int    // default_statistics_target for ANALYZE
+	afterAnalyze int    // the first step number that runs after ANALYZE
+}
+
+var currentInputs = generatorInputs{fixtureFormat, buildSettings, fixtureStatsTgt, fixtureAfterAnalyze}
 
 type fixtureFiles struct {
+	in     generatorInputs
 	source string
 	csvs   []string // base names, sorted
 	steps  []string // NN_*.sql base names, sorted
 	hash   string
 }
 
-// readFixtureFiles lists the generator in fsys and hashes every file of it.
+// generatorFile reports whether a directory entry belongs to the generator. Names starting with "." or "_" are
+// left out, as go:embed leaves them out, so editor and system files beside the generator do not break it.
+func generatorFile(d fs.DirEntry) bool {
+	return !d.IsDir() && !strings.HasPrefix(d.Name(), ".") && !strings.HasPrefix(d.Name(), "_")
+}
+
+// readFixtureFiles lists the generator in fsys and hashes its Go-side inputs and every file of it.
 func readFixtureFiles(fsys fs.FS) (fixtureFiles, error) {
-	var ff fixtureFiles
+	return readFixtureFilesWith(fsys, currentInputs)
+}
+
+func readFixtureFilesWith(fsys fs.FS, in generatorInputs) (fixtureFiles, error) {
+	ff := fixtureFiles{in: in}
 	h := sha256.New()
+	fmt.Fprintf(h, "format=%d\x00settings=%s\x00stats_target=%d\x00after_analyze=%d\x00", in.format, in.settings,
+		in.statsTarget, in.afterAnalyze)
 	add := func(p string) error {
 		b, err := fs.ReadFile(fsys, p)
 		if err != nil {
@@ -72,7 +95,7 @@ func readFixtureFiles(fsys fs.FS) (fixtureFiles, error) {
 		return ff, fmt.Errorf("fixture: %w", err)
 	}
 	for _, d := range steps {
-		if d.IsDir() || d.Name() == path.Base(fixtureSource) {
+		if !generatorFile(d) || d.Name() == path.Base(fixtureSource) {
 			continue
 		}
 		if !fixtureStepRe.MatchString(d.Name()) {
@@ -85,7 +108,13 @@ func readFixtureFiles(fsys fs.FS) (fixtureFiles, error) {
 		return ff, fmt.Errorf("fixture: %w", err)
 	}
 	for _, d := range csvs {
-		if d.IsDir() || !fixtureCSVRe.MatchString(d.Name()) {
+		if d.IsDir() && !strings.HasPrefix(d.Name(), ".") && !strings.HasPrefix(d.Name(), "_") {
+			return ff, fmt.Errorf("fixture: %s/%s is a directory", fixtureData, d.Name())
+		}
+		if !generatorFile(d) {
+			continue
+		}
+		if !fixtureCSVRe.MatchString(d.Name()) {
 			return ff, fmt.Errorf("fixture: %s/%s is not a lower-case name.csv", fixtureData, d.Name())
 		}
 		ff.csvs = append(ff.csvs, d.Name())
@@ -109,8 +138,9 @@ func readFixtureFiles(fsys fs.FS) (fixtureFiles, error) {
 	return ff, nil
 }
 
-// FixtureHash is the hash BuildFixture records for the generator in fsys: a database whose finished marker holds
-// it was built from exactly these files.
+// FixtureHash is the hash BuildFixture records for the generator in fsys and this build of the code: a database
+// whose finished marker holds it, on a server of the marker's server_version_num, was built from exactly these
+// inputs.
 func FixtureHash(fsys fs.FS) (string, error) {
 	ff, err := readFixtureFiles(fsys)
 	return ff.hash, err
@@ -119,44 +149,58 @@ func FixtureHash(fsys fs.FS) (string, error) {
 // fixtureState is what the database says about an earlier build.
 type fixtureState struct {
 	marker   bool   // planguard_src.fixture_marker exists
-	hash     string // its hash; "" when the build did not finish
-	hasData  bool   // a guard table holds a row
-	ledger   bool   // schema_migrations exists
+	hash     string // the hash of a finished build; "" when the build did not finish
+	version  int    // server_version_num the finished build ran on
+	dataIn   string // a public table that holds a row (schema_migrations aside), or ""
+	noLedger bool   // public holds tables but no schema_migrations
 	migrated int    // rows in schema_migrations
 }
 
 func readFixtureState(ctx context.Context, conn *pgx.Conn) (fixtureState, error) {
 	var st fixtureState
-	if err := conn.QueryRow(ctx, "SELECT to_regclass('"+fixtureSchema+".fixture_marker') IS NOT NULL, "+
-		"to_regclass('public.schema_migrations') IS NOT NULL").Scan(&st.marker, &st.ledger); err != nil {
+	if err := conn.QueryRow(ctx, "SELECT to_regclass('"+fixtureSchema+".fixture_marker') IS NOT NULL").Scan(&st.marker); err != nil {
 		return st, err
 	}
 	if st.marker {
-		err := conn.QueryRow(ctx, "SELECT coalesce(max(hash) FILTER (WHERE built_at IS NOT NULL), '') FROM "+
-			fixtureSchema+".fixture_marker").Scan(&st.hash)
+		// to_jsonb reads a marker of an older format too, which has no server_version_num.
+		err := conn.QueryRow(ctx, "SELECT coalesce(max(m.hash) FILTER (WHERE m.built_at IS NOT NULL), ''), "+
+			"coalesce(max((to_jsonb(m) ->> 'server_version_num')::int) FILTER (WHERE m.built_at IS NOT NULL), 0) FROM "+
+			fixtureSchema+".fixture_marker m").Scan(&st.hash, &st.version)
 		if err != nil {
 			return st, err
 		}
 	}
-	if st.ledger {
-		if err := conn.QueryRow(ctx, "SELECT count(*) FROM public.schema_migrations").Scan(&st.migrated); err != nil {
-			return st, err
-		}
+	// packets first, so a Beacon database is named by its packets.
+	rows, err := conn.Query(ctx, "SELECT c.relname FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace "+
+		"AND c.relkind IN ('r', 'p') ORDER BY c.relname <> 'packets', c.relname")
+	if err != nil {
+		return st, err
 	}
-	for _, t := range fixtureGuardTables {
-		var exists bool
-		if err := conn.QueryRow(ctx, "SELECT to_regclass($1) IS NOT NULL", "public."+t).Scan(&exists); err != nil {
-			return st, err
+	tables, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return st, err
+	}
+	ledger := false
+	for _, t := range tables {
+		if t == "schema_migrations" {
+			ledger = true
+			if err := conn.QueryRow(ctx, "SELECT count(*) FROM public.schema_migrations").Scan(&st.migrated); err != nil {
+				return st, err
+			}
+			continue
 		}
-		if !exists {
+		if st.dataIn != "" {
 			continue
 		}
 		var has bool
-		if err := conn.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM public."+t+")").Scan(&has); err != nil {
+		if err := conn.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM public."+pgx.Identifier{t}.Sanitize()+")").Scan(&has); err != nil {
 			return st, err
 		}
-		st.hasData = st.hasData || has
+		if has {
+			st.dataIn = t
+		}
 	}
+	st.noLedger = len(tables) > 0 && !ledger
 	return st, nil
 }
 
@@ -165,12 +209,17 @@ func readFixtureState(ctx context.Context, conn *pgx.Conn) (fixtureState, error)
 // default_statistics_target = 200, runs the stale-region step, and records planguard_src.fixture_marker(hash,
 // built_at). It returns early when the marker's hash equals the hash of the embedded fixture files.
 // It refuses (error "not a planguard fixture database") when public.packets has a row and no marker exists.
-// (It checks packet_observations, known_routes, nodes and channel_messages the same way.)
+//
+// The guard is wider than packets: without a marker, it refuses a database where any public table other than
+// schema_migrations holds a row (a migrated Beacon database already does), or where public holds tables but no
+// schema_migrations. The hash covers the generator's Go-side inputs too (format, build settings, statistics
+// target, the after-ANALYZE step number), and a build is reused only on the server version it ran on.
 //
 // fixture/source.sql creates the planguard_src tables the CSVs load into. Steps numbered 90 and up run after
 // ANALYZE. Autovacuum is switched off on every public table the build fills, so the statistics stay the ones
-// it took. The pool's connections must resolve unqualified names to public. A build that stops part way leaves
-// an unfinished marker, and the next call starts again from empty tables.
+// it took. The pool's connections must resolve unqualified names to public. The marker is written, unfinished,
+// before the first migration, so a build that stops part way is recognised as a fixture and rebuilt from empty
+// tables by the next call.
 func BuildFixture(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) error {
 	ff, err := readFixtureFiles(fsys)
 	if err != nil {
@@ -183,7 +232,8 @@ func BuildFixture(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) error {
 	defer pc.Release()
 	conn := pc.Conn()
 	var sp string
-	if err := conn.QueryRow(ctx, "SELECT current_schemas(false)::text").Scan(&sp); err != nil {
+	var version int
+	if err := conn.QueryRow(ctx, "SELECT current_schemas(false)::text, current_setting('server_version_num')::int").Scan(&sp, &version); err != nil {
 		return err
 	}
 	if !strings.HasPrefix(sp, "{public") {
@@ -194,23 +244,38 @@ func BuildFixture(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) error {
 	if err != nil {
 		return fmt.Errorf("fixture: read state: %w", err)
 	}
-	if !st.marker && st.hasData {
-		return fmt.Errorf("%w: it holds data and no %s.fixture_marker", ErrNotFixture, fixtureSchema)
+	if !st.marker {
+		switch {
+		case st.dataIn != "":
+			return fmt.Errorf("%w: public.%s holds data and there is no %s.fixture_marker", ErrNotFixture, st.dataIn, fixtureSchema)
+		case st.noLedger:
+			return fmt.Errorf("%w: public holds tables but no schema_migrations", ErrNotFixture)
+		}
 	}
-	if err := db.RunMigrations(ctx, pool); err != nil {
-		return err
-	}
-	var migrated int
-	if err := conn.QueryRow(ctx, "SELECT count(*) FROM public.schema_migrations").Scan(&migrated); err != nil {
-		return err
-	}
-	if st.marker && st.hash == ff.hash && migrated == st.migrated {
-		return nil
+	if st.marker && st.hash == ff.hash && st.version == version {
+		if err := db.RunMigrations(ctx, pool); err != nil {
+			return err
+		}
+		var migrated int
+		if err := conn.QueryRow(ctx, "SELECT count(*) FROM public.schema_migrations").Scan(&migrated); err != nil {
+			return err
+		}
+		if migrated == st.migrated {
+			return nil
+		}
 	}
 	if st.marker {
 		if err := resetFixture(ctx, conn); err != nil {
 			return fmt.Errorf("fixture: reset: %w", err)
 		}
+	}
+	if _, err := conn.Exec(ctx, "CREATE SCHEMA "+fixtureSchema+"; CREATE TABLE "+fixtureSchema+
+		".fixture_marker (hash text NOT NULL, server_version_num int NOT NULL, built_at timestamptz); INSERT INTO "+
+		fixtureSchema+".fixture_marker (hash, server_version_num) VALUES ('"+ff.hash+"', "+fmt.Sprint(version)+")"); err != nil {
+		return fmt.Errorf("fixture: marker: %w", err)
+	}
+	if err := db.RunMigrations(ctx, pool); err != nil {
+		return err
 	}
 	if err := generateFixture(ctx, conn, fsys, ff); err != nil {
 		return fmt.Errorf("fixture: %w", err)
@@ -247,7 +312,7 @@ SET enable_mergejoin = on; SET enable_nestloop = on; SET enable_sort = on; SET e
 SET enable_material = on; SET enable_memoize = on; SET enable_incremental_sort = on`
 
 func generateFixture(ctx context.Context, conn *pgx.Conn, fsys fs.FS, ff fixtureFiles) error {
-	if _, err := conn.Exec(ctx, buildSettings); err != nil {
+	if _, err := conn.Exec(ctx, ff.in.settings); err != nil {
 		return err
 	}
 	defer func() {
@@ -266,24 +331,19 @@ func generateFixture(ctx context.Context, conn *pgx.Conn, fsys fs.FS, ff fixture
 	var before, after []string
 	for _, s := range ff.steps {
 		n := int(s[0]-'0')*10 + int(s[1]-'0')
-		if n >= fixtureAfterAnalyze {
+		if n >= ff.in.afterAnalyze {
 			after = append(after, s)
 		} else {
 			before = append(before, s)
 		}
 	}
 
-	// Load and generate in one transaction, marker included but unfinished.
+	// Load and generate in one transaction; the marker stays unfinished until the end.
 	tx, err := conn.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
-	if _, err := tx.Exec(ctx, "CREATE SCHEMA "+fixtureSchema+"; CREATE TABLE "+fixtureSchema+
-		".fixture_marker (hash text NOT NULL, built_at timestamptz); INSERT INTO "+fixtureSchema+
-		".fixture_marker (hash) VALUES ('"+ff.hash+"')"); err != nil {
-		return err
-	}
 	if err := run(ff.source); err != nil {
 		return err
 	}
@@ -318,7 +378,7 @@ END $$`); err != nil {
 	}
 
 	// VACUUM sets the visibility map, so index-only scans are costed as on a settled database.
-	if _, err := conn.Exec(ctx, fmt.Sprintf("SET default_statistics_target = %d", fixtureStatsTgt)); err != nil {
+	if _, err := conn.Exec(ctx, fmt.Sprintf("SET default_statistics_target = %d", ff.in.statsTarget)); err != nil {
 		return err
 	}
 	if _, err := conn.Exec(ctx, "VACUUM (ANALYZE)"); err != nil {
