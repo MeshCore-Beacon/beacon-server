@@ -57,6 +57,9 @@ func keysetTx(t *testing.T) (context.Context, pgx.Tx, *Store) {
 	applyBaseline(t, ctx, tx)
 	applyMigrationsTx(t, ctx, tx, smallTableMigrations...)
 	mustExec(t, ctx, tx, keysetFixture)
+	// enable_seqscan = off pushes every plan past jit_above_cost; JIT-compiling thousands of queries times out on
+	// servers built with LLVM.
+	mustExec(t, ctx, tx, "SET LOCAL jit = off")
 	return ctx, tx, &Store{q: sqlc.New(tx)}
 }
 
