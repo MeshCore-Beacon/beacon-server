@@ -383,7 +383,7 @@ func checkDiffParam(v any) error {
 // checkSingleSelect refuses text that is more than one statement or that modifies data. Statements are sent over
 // the simple protocol, where a second statement (a COMMIT, say) would run outside the READ ONLY transaction.
 func checkSingleSelect(sql string) error {
-	if err := checkOneStatement(sql); err != nil {
+	if err := checkStatementText(sql); err != nil {
 		return err
 	}
 	if kw := dataModifying(sql); kw != "" {

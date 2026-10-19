@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -94,10 +95,14 @@ func EmitResolvers(w io.Writer, c *Corpus, o RunOptions, nonce string) error {
 		if need[name] == "" {
 			return fmt.Errorf("resolver %s is not in the corpus", name)
 		}
-		if err := checkOneStatement(need[name]); err != nil {
+		if err := checkStatementText(need[name]); err != nil {
 			return fmt.Errorf("resolver %s: %w", name, err)
 		}
-		fmt.Fprintf(&b, "\\echo @@%s R %s\nSELECT coalesce('V' || ((%s)::text), 'N');\n", nonce, name, trimStmt(need[name]))
+		body := fmt.Sprintf("SELECT coalesce('V' || ((%s)::text), 'N');", trimStmt(need[name]))
+		if err := checkScriptLines(body); err != nil {
+			return fmt.Errorf("resolver %s: %w", name, err)
+		}
+		fmt.Fprintf(&b, "\\echo @@%s R %s\n%s\n", nonce, name, body)
 	}
 	fmt.Fprintf(&b, "\\echo @@%s END\n", nonce)
 	_, err := io.WriteString(w, b.String())
@@ -134,6 +139,11 @@ func EmitPlans(w io.Writer, c *Corpus, o RunOptions, params map[string]*string, 
 			sp := c.spec(o, e, mode, params, nil, true)
 			if sp.skip != "" || sp.err != "" {
 				continue
+			}
+			for _, l := range append(slices.Clone(sp.setup), sp.explain) {
+				if err := checkScriptLines(l); err != nil {
+					return fmt.Errorf("%s|%s: %w", e.ID, mode, err)
+				}
 			}
 			for _, l := range sp.setup {
 				if strings.HasPrefix(l, "PREPARE ") {

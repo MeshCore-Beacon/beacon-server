@@ -16,7 +16,6 @@ import (
 	"os/exec"
 	"path"
 	"regexp"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -210,19 +209,127 @@ func stripLineComments(sql string) string {
 
 var lockClause = regexp.MustCompile(`(?i)\s*\bFOR\s+UPDATE(\s+OF\s+\w+(\s*,\s*\w+)*)?\s+SKIP\s+LOCKED\b`)
 
-// hasStatementSeparator reports a ';' outside literals, quoted identifiers and comments, once one trailing ';' is
-// dropped.
-func hasStatementSeparator(sql string) bool {
-	words, _ := sqlWords(trimStmt(sql))
-	return slices.Contains(words, ";")
+// statementProblem scans sql, after one trailing ';' is dropped, and names the first thing that makes it unsafe to
+// send over the simple protocol or into a psql script, or returns "":
+//   - a ';' outside literals, quoted identifiers, dollar quotes and comments: a second statement (a COMMIT, say)
+//     would run outside the READ ONLY transaction;
+//   - an escape string (E'...'): a backslash there escapes a quote, so the scan could not tell where it ends;
+//   - a backslash anywhere but inside a standard single-quoted literal or a dollar quote: psql reads it as a
+//     meta-command (\! runs a shell, \o writes a file);
+//   - a literal, quoted identifier, dollar quote or comment that does not end.
+func statementProblem(sql string) string {
+	s := trimStmt(sql)
+	for i := 0; i < len(s); {
+		c := s[i]
+		switch {
+		case c == '-' && strings.HasPrefix(s[i:], "--"):
+			end := len(s)
+			if j := strings.IndexByte(s[i:], '\n'); j >= 0 {
+				end = i + j
+			}
+			if strings.IndexByte(s[i:end], '\\') >= 0 {
+				return "a backslash in a comment (psql reads it as a meta-command)"
+			}
+			i = end
+		case c == '/' && strings.HasPrefix(s[i:], "/*"):
+			depth, j := 1, i+2
+			for j < len(s) && depth > 0 {
+				switch {
+				case strings.HasPrefix(s[j:], "/*"):
+					depth, j = depth+1, j+2
+				case strings.HasPrefix(s[j:], "*/"):
+					depth, j = depth-1, j+2
+				case s[j] == '\\':
+					return "a backslash in a comment (psql reads it as a meta-command)"
+				default:
+					j++
+				}
+			}
+			if depth > 0 {
+				return "a comment that does not end"
+			}
+			i = j
+		case c == '\'':
+			if i > 0 && (s[i-1] == 'E' || s[i-1] == 'e') && (i == 1 || !isIdent(s[i-2])) {
+				return "an E'' escape string (a backslash there escapes a quote)"
+			}
+			j := i + 1
+			for ; ; j++ {
+				if j >= len(s) {
+					return "a string literal that does not end"
+				}
+				if s[j] == '\'' {
+					if j+1 < len(s) && s[j+1] == '\'' {
+						j++
+						continue
+					}
+					break
+				}
+			}
+			i = j + 1
+		case c == '"':
+			j := i + 1
+			for ; ; j++ {
+				if j >= len(s) {
+					return "a quoted identifier that does not end"
+				}
+				if s[j] == '\\' {
+					return "a backslash in a quoted identifier (psql reads it as a meta-command)"
+				}
+				if s[j] == '"' {
+					if j+1 < len(s) && s[j+1] == '"' {
+						j++
+						continue
+					}
+					break
+				}
+			}
+			i = j + 1
+		case c == '$':
+			j := i + 1
+			for j < len(s) && isIdent(s[j]) && !(j == i+1 && s[j] >= '0' && s[j] <= '9') {
+				j++
+			}
+			if j < len(s) && s[j] == '$' {
+				tag := s[i : j+1]
+				k := strings.Index(s[j+1:], tag)
+				if k < 0 {
+					return "a dollar quote that does not end"
+				}
+				i = j + 1 + k + len(tag)
+			} else {
+				i = j
+			}
+		case isIdent(c):
+			for i < len(s) && (isIdent(s[i]) || s[i] == '$') {
+				i++
+			}
+		case c == '\\':
+			return "a backslash outside a literal (psql reads it as a meta-command)"
+		case c == ';':
+			return "more than one statement (a ';' outside literals and comments)"
+		default:
+			i++
+		}
+	}
+	return ""
 }
 
-// checkOneStatement refuses text that holds more than one statement. Statement texts and resolvers are sent over
-// the simple protocol (and into psql scripts), where a second statement, a COMMIT say, would run outside the
-// READ ONLY transaction.
-func checkOneStatement(sql string) error {
-	if hasStatementSeparator(sql) {
-		return errors.New("more than one statement (a ';' outside literals and comments)")
+// checkStatementText refuses statement, resolver and inline {sql} text that statementProblem objects to.
+func checkStatementText(sql string) error {
+	if p := statementProblem(sql); p != "" {
+		return errors.New(p)
+	}
+	return nil
+}
+
+// checkScriptLines refuses an emitted SQL body with a line that starts with a backslash once trimmed: psql would
+// run it as a meta-command even where the SQL lexer would read it as part of a literal.
+func checkScriptLines(body string) error {
+	for _, l := range strings.Split(body, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), "\\") {
+			return fmt.Errorf("a line starts with a backslash (a psql meta-command): %q", firstLine(strings.TrimSpace(l)))
+		}
 	}
 	return nil
 }

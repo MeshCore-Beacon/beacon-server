@@ -277,7 +277,7 @@ func (c *Corpus) checkTopLevel() error {
 		if m := componentSchema.FindString(c.Resolvers[name]); m != "" {
 			return fmt.Errorf("resolver %q reads schema %q; resolvers read Beacon tables only", name, m)
 		}
-		if err := checkOneStatement(c.Resolvers[name]); err != nil {
+		if err := checkStatementText(c.Resolvers[name]); err != nil {
 			return fmt.Errorf("resolver %q: %w", name, err)
 		}
 	}
@@ -363,7 +363,7 @@ func (c *Corpus) loadStatement(fsys fs.FS, dir string, st *Statement, sqlcText m
 		return errors.New("needs sqlc or file")
 	}
 	if st.SQL != "" {
-		if err := checkOneStatement(st.SQL); err != nil {
+		if err := checkStatementText(st.SQL); err != nil {
 			return err
 		}
 	}
@@ -641,7 +641,7 @@ func (c *Corpus) checkParam(v any) error {
 				if m := componentSchema.FindString(s); m != "" {
 					return fmt.Errorf("inline resolver reads schema %q; resolvers read Beacon tables only", m)
 				}
-				if err := checkOneStatement(s); err != nil {
+				if err := checkStatementText(s); err != nil {
 					return fmt.Errorf("inline resolver: %w", err)
 				}
 			case "raw":

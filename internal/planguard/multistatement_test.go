@@ -35,15 +35,29 @@ entries:
 	if err := load(base, "SELECT ';' AS a, $$;$$ AS b -- ;\n;\n", testSQLC); err != nil {
 		t.Fatalf("';' in literals and comments, and a trailing ';': %v", err)
 	}
-	bad := map[string]error{
-		"file statement": load(base, "SELECT 1; COMMIT", testSQLC),
-		"sqlc statement": load(base, "SELECT 1", map[string]string{"Q": "-- name: Q :one\nSELECT 1; COMMIT; DELETE FROM nodes"}),
-		"resolver":       load(strings.Replace(base, "LIMIT 1", "LIMIT 1; COMMIT", 1), "SELECT 1", testSQLC),
-		"inline sql":     load(strings.Replace(base, `{sql: "SELECT 1"}`, `{sql: "SELECT 1; COMMIT"}`, 1), "SELECT 1", testSQLC),
+	// standard_conforming_strings is on: a backslash inside a plain literal is text.
+	if err := load(base, "SELECT '\\x01'::bytea, 'a\\b'", testSQLC); err != nil {
+		t.Fatalf("backslash inside a plain literal: %v", err)
 	}
-	for name, err := range bad {
-		if err == nil || !strings.Contains(err.Error(), "more than one statement") {
-			t.Errorf("%s: err %v, want more than one statement", name, err)
+	const multi, esc, meta = "more than one statement", "escape string", "meta-command"
+	bad := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"file statement", load(base, "SELECT 1; COMMIT", testSQLC), multi},
+		{"sqlc statement", load(base, "SELECT 1", map[string]string{"Q": "-- name: Q :one\nSELECT 1; COMMIT; DELETE FROM nodes"}), multi},
+		{"resolver", load(strings.Replace(base, "LIMIT 1", "LIMIT 1; COMMIT", 1), "SELECT 1", testSQLC), multi},
+		{"inline sql", load(strings.Replace(base, `{sql: "SELECT 1"}`, `{sql: "SELECT 1; COMMIT"}`, 1), "SELECT 1", testSQLC), multi},
+		{"file escape string", load(base, "SELECT E'\\';'", testSQLC), esc},
+		{"file psql meta-command", load(base, "SELECT 1\n\\! id", testSQLC), meta},
+		{"sqlc escape string", load(base, "SELECT 1", map[string]string{"Q": "-- name: Q :one\nSELECT e'\\';' FROM nodes"}), esc},
+		{"resolver meta-command", load(strings.Replace(base, "LIMIT 1", "LIMIT 1 \\! id", 1), "SELECT 1", testSQLC), meta},
+		{"inline sql escape string", load(strings.Replace(base, `{sql: "SELECT 1"}`, `{sql: "SELECT E'x'"}`, 1), "SELECT 1", testSQLC), esc},
+	}
+	for _, b := range bad {
+		if b.err == nil || !strings.Contains(b.err.Error(), b.want) {
+			t.Errorf("%s: err %v, want %q", b.name, b.err, b.want)
 		}
 	}
 }
@@ -88,6 +102,30 @@ func TestRunnerRefusesMultiStatement(t *testing.T) {
 	}
 }
 
+func TestRunnerRefusesMetaCommands(t *testing.T) {
+	for name, text := range map[string]string{
+		"meta-command":  "-- name: Q :one\nSELECT 1\n\\! id",
+		"escape string": "-- name: Q :one\nSELECT E'\\';' FROM nodes",
+	} {
+		c := loadEmitCorpus(t)
+		c.Statements["Q"].SQL = text
+		s := &recordSession{}
+		rep, err := planguard.Run(context.Background(), c, s, planguard.RunOptions{
+			Tier: "local", Baseline: planguard.BaselineOff, Only: regexp.MustCompile(`^q\.lit$`)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, sql := range s.sent {
+			if strings.Contains(sql, "PREPARE") {
+				t.Errorf("%s: sent %q", name, sql)
+			}
+		}
+		if len(rep.Results) == 0 || rep.Results[0].Verdict != planguard.VerdictError {
+			t.Errorf("%s: results %+v, want ERROR", name, rep.Results)
+		}
+	}
+}
+
 func TestEmitRefusesMultiStatement(t *testing.T) {
 	const nonce = "0123456789abcdef"
 	c := loadEmitCorpus(t)
@@ -95,6 +133,23 @@ func TestEmitRefusesMultiStatement(t *testing.T) {
 	var b bytes.Buffer
 	if err := planguard.EmitResolvers(&b, c, planguard.RunOptions{Tier: "prod"}, nonce); err == nil || !strings.Contains(err.Error(), "more than one statement") {
 		t.Errorf("EmitResolvers: err %v, want more than one statement", err)
+	}
+
+	for _, r := range []string{"SELECT E'\\';'", "SELECT 1\n\\! id"} {
+		c := loadEmitCorpus(t)
+		c.Resolvers["top"] = r
+		b.Reset()
+		if err := planguard.EmitResolvers(&b, c, planguard.RunOptions{Tier: "prod"}, nonce); err == nil {
+			t.Errorf("EmitResolvers with resolver %q: no error", r)
+		}
+	}
+	// A line of an emitted body that starts with a backslash is refused even inside a literal.
+	c = loadEmitCorpus(t)
+	b.Reset()
+	line := "x\n\\! id"
+	if err := planguard.EmitPlans(&b, c, planguard.RunOptions{Tier: "prod"}, map[string]*string{"top": &line}, nonce); err == nil ||
+		!strings.Contains(err.Error(), "backslash") {
+		t.Errorf("EmitPlans with a param line starting with a backslash: err %v", err)
 	}
 
 	c = loadEmitCorpus(t)
