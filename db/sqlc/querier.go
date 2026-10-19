@@ -26,6 +26,9 @@ type Querier interface {
 	// in id order, that lack one. Rows that already carry a type are never touched. Returns how many
 	// untyped rows it picked, how many it typed, and the last picked id (0 when it picked none).
 	BackfillObservationPayloadTypes(ctx context.Context, arg BackfillObservationPayloadTypesParams) (BackfillObservationPayloadTypesRow, error)
+	// Exact check of messages in (after_id, through_id]: pairs the definition has and the table lacks (counting
+	// observations up to obs_through only), and table pairs no stored observation backs.
+	CheckChannelMessageIATAs(ctx context.Context, arg CheckChannelMessageIATAsParams) (CheckChannelMessageIATAsRow, error)
 	// Keeps fetch timing so re-enabling still respects backoff; the ETag goes with the rows.
 	ClearRepeaters(ctx context.Context) (int64, error)
 	CreateAccount(ctx context.Context, name string) (Account, error)
@@ -72,6 +75,11 @@ type Querier interface {
 	DeleteRollupHour(ctx context.Context, hour pgtype.Timestamptz) error
 	// Dirty hours that can no longer be re-rolled.
 	DeleteStaleDirtyHours(ctx context.Context) error
+	// Every site of every message in (after_id, through_id]: the backfill and the reconcile's message part.
+	FillChannelMessageIATAsByMessages(ctx context.Context, arg FillChannelMessageIATAsByMessagesParams) (int64, error)
+	// The site of every group-text observation in (after_id, through_id] whose packet has a message.
+	// An untyped observation is checked too: older rows may have no payload type.
+	FillChannelMessageIATAsByObservations(ctx context.Context, arg FillChannelMessageIATAsByObservationsParams) (int64, error)
 	// Hop prefixes that match >1 node in an IATA, per width, into the sweep's temp table.
 	FillReconfirmAmb(ctx context.Context) error
 	FillRollupObs(ctx context.Context, dollar_1 pgtype.Timestamptz) error
@@ -341,6 +349,10 @@ type Querier interface {
 	// Hours whose raw rows cleanup already started deleting can never be rolled completely.
 	// Readers report the new status, so the revision moves too.
 	MarkPartialRollupHours(ctx context.Context) error
+	MaxChannelMessageID(ctx context.Context) (int64, error)
+	MaxObservationID(ctx context.Context) (int64, error)
+	// The first message id above after_id, or 0 when there is none.
+	NextChannelMessageID(ctx context.Context, afterID int64) (int64, error)
 	OldestMissingRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
 	PruneImportedRegions(ctx context.Context, keep []string) ([]string, error)
 	// Drops imports for IATAs no longer configured, so their manual border returns.

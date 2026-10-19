@@ -31,3 +31,125 @@ func (q *Queries) AddChannelMessageIATA(ctx context.Context, arg AddChannelMessa
 	_, err := q.db.Exec(ctx, addChannelMessageIATA, arg.Iata, arg.PacketHash)
 	return err
 }
+
+const checkChannelMessageIATAs = `-- name: CheckChannelMessageIATAs :one
+WITH def AS (
+  SELECT DISTINCT cm.id AS message_id, po.iata, cm.channel_id, p.scope_id, po.id <= $1::bigint AS settled
+  FROM channel_messages cm
+  JOIN packets p ON p.packet_hash = cm.packet_hash
+  JOIN packet_observations po ON po.packet_hash = cm.packet_hash
+  WHERE cm.id > $2::bigint AND cm.id <= $3::bigint
+), have AS (
+  SELECT i.message_id, i.iata, i.channel_id, i.scope_id
+  FROM channel_message_iatas i
+  WHERE i.message_id > $2::bigint AND i.message_id <= $3::bigint
+)
+SELECT
+  (SELECT count(*) FROM (SELECT message_id, iata, channel_id, scope_id FROM def WHERE settled
+                         EXCEPT SELECT message_id, iata, channel_id, scope_id FROM have) m)::bigint AS missing,
+  (SELECT count(*) FROM (SELECT message_id, iata, channel_id, scope_id FROM have
+                         EXCEPT SELECT message_id, iata, channel_id, scope_id FROM def) x)::bigint AS extra
+`
+
+type CheckChannelMessageIATAsParams struct {
+	ObsThrough int64 `json:"obs_through"`
+	AfterID    int64 `json:"after_id"`
+	ThroughID  int64 `json:"through_id"`
+}
+
+type CheckChannelMessageIATAsRow struct {
+	Missing int64 `json:"missing"`
+	Extra   int64 `json:"extra"`
+}
+
+// Exact check of messages in (after_id, through_id]: pairs the definition has and the table lacks (counting
+// observations up to obs_through only), and table pairs no stored observation backs.
+func (q *Queries) CheckChannelMessageIATAs(ctx context.Context, arg CheckChannelMessageIATAsParams) (CheckChannelMessageIATAsRow, error) {
+	row := q.db.QueryRow(ctx, checkChannelMessageIATAs, arg.ObsThrough, arg.AfterID, arg.ThroughID)
+	var i CheckChannelMessageIATAsRow
+	err := row.Scan(&i.Missing, &i.Extra)
+	return i, err
+}
+
+const fillChannelMessageIATAsByMessages = `-- name: FillChannelMessageIATAsByMessages :execrows
+INSERT INTO channel_message_iatas (message_id, iata, channel_id, scope_id)
+SELECT DISTINCT cm.id, po.iata, cm.channel_id, p.scope_id
+FROM channel_messages cm
+JOIN packets p ON p.packet_hash = cm.packet_hash
+JOIN packet_observations po ON po.packet_hash = cm.packet_hash
+WHERE cm.id > $1::bigint AND cm.id <= $2::bigint
+ON CONFLICT (message_id, iata) DO NOTHING
+`
+
+type FillChannelMessageIATAsByMessagesParams struct {
+	AfterID   int64 `json:"after_id"`
+	ThroughID int64 `json:"through_id"`
+}
+
+// Every site of every message in (after_id, through_id]: the backfill and the reconcile's message part.
+func (q *Queries) FillChannelMessageIATAsByMessages(ctx context.Context, arg FillChannelMessageIATAsByMessagesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, fillChannelMessageIATAsByMessages, arg.AfterID, arg.ThroughID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const fillChannelMessageIATAsByObservations = `-- name: FillChannelMessageIATAsByObservations :execrows
+INSERT INTO channel_message_iatas (message_id, iata, channel_id, scope_id)
+SELECT DISTINCT cm.id, po.iata, cm.channel_id, p.scope_id
+FROM packet_observations po
+JOIN channel_messages cm ON cm.packet_hash = po.packet_hash
+JOIN packets p ON p.packet_hash = po.packet_hash
+WHERE po.id > $1::bigint AND po.id <= $2::bigint AND COALESCE(po.payload_type, 5) = 5
+ON CONFLICT (message_id, iata) DO NOTHING
+`
+
+type FillChannelMessageIATAsByObservationsParams struct {
+	AfterID   int64 `json:"after_id"`
+	ThroughID int64 `json:"through_id"`
+}
+
+// The site of every group-text observation in (after_id, through_id] whose packet has a message.
+// An untyped observation is checked too: older rows may have no payload type.
+func (q *Queries) FillChannelMessageIATAsByObservations(ctx context.Context, arg FillChannelMessageIATAsByObservationsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, fillChannelMessageIATAsByObservations, arg.AfterID, arg.ThroughID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const maxChannelMessageID = `-- name: MaxChannelMessageID :one
+SELECT COALESCE(max(id), 0)::bigint AS id FROM channel_messages
+`
+
+func (q *Queries) MaxChannelMessageID(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, maxChannelMessageID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const maxObservationID = `-- name: MaxObservationID :one
+SELECT COALESCE(max(id), 0)::bigint AS id FROM packet_observations
+`
+
+func (q *Queries) MaxObservationID(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, maxObservationID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const nextChannelMessageID = `-- name: NextChannelMessageID :one
+SELECT COALESCE(min(id), 0)::bigint AS id FROM channel_messages WHERE id > $1::bigint
+`
+
+// The first message id above after_id, or 0 when there is none.
+func (q *Queries) NextChannelMessageID(ctx context.Context, afterID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, nextChannelMessageID, afterID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}

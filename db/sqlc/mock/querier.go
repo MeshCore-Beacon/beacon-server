@@ -129,6 +129,21 @@ func (mr *MockQuerierMockRecorder) BackfillObservationPayloadTypes(ctx, arg any)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BackfillObservationPayloadTypes", reflect.TypeOf((*MockQuerier)(nil).BackfillObservationPayloadTypes), ctx, arg)
 }
 
+// CheckChannelMessageIATAs mocks base method.
+func (m *MockQuerier) CheckChannelMessageIATAs(ctx context.Context, arg db.CheckChannelMessageIATAsParams) (db.CheckChannelMessageIATAsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CheckChannelMessageIATAs", ctx, arg)
+	ret0, _ := ret[0].(db.CheckChannelMessageIATAsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CheckChannelMessageIATAs indicates an expected call of CheckChannelMessageIATAs.
+func (mr *MockQuerierMockRecorder) CheckChannelMessageIATAs(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckChannelMessageIATAs", reflect.TypeOf((*MockQuerier)(nil).CheckChannelMessageIATAs), ctx, arg)
+}
+
 // ClearRepeaters mocks base method.
 func (m *MockQuerier) ClearRepeaters(ctx context.Context) (int64, error) {
 	m.ctrl.T.Helper()
@@ -414,6 +429,36 @@ func (m *MockQuerier) DeleteStaleDirtyHours(ctx context.Context) error {
 func (mr *MockQuerierMockRecorder) DeleteStaleDirtyHours(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteStaleDirtyHours", reflect.TypeOf((*MockQuerier)(nil).DeleteStaleDirtyHours), ctx)
+}
+
+// FillChannelMessageIATAsByMessages mocks base method.
+func (m *MockQuerier) FillChannelMessageIATAsByMessages(ctx context.Context, arg db.FillChannelMessageIATAsByMessagesParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FillChannelMessageIATAsByMessages", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FillChannelMessageIATAsByMessages indicates an expected call of FillChannelMessageIATAsByMessages.
+func (mr *MockQuerierMockRecorder) FillChannelMessageIATAsByMessages(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FillChannelMessageIATAsByMessages", reflect.TypeOf((*MockQuerier)(nil).FillChannelMessageIATAsByMessages), ctx, arg)
+}
+
+// FillChannelMessageIATAsByObservations mocks base method.
+func (m *MockQuerier) FillChannelMessageIATAsByObservations(ctx context.Context, arg db.FillChannelMessageIATAsByObservationsParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FillChannelMessageIATAsByObservations", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FillChannelMessageIATAsByObservations indicates an expected call of FillChannelMessageIATAsByObservations.
+func (mr *MockQuerierMockRecorder) FillChannelMessageIATAsByObservations(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FillChannelMessageIATAsByObservations", reflect.TypeOf((*MockQuerier)(nil).FillChannelMessageIATAsByObservations), ctx, arg)
 }
 
 // FillReconfirmAmb mocks base method.
@@ -2075,6 +2120,51 @@ func (m *MockQuerier) MarkPartialRollupHours(ctx context.Context) error {
 func (mr *MockQuerierMockRecorder) MarkPartialRollupHours(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkPartialRollupHours", reflect.TypeOf((*MockQuerier)(nil).MarkPartialRollupHours), ctx)
+}
+
+// MaxChannelMessageID mocks base method.
+func (m *MockQuerier) MaxChannelMessageID(ctx context.Context) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MaxChannelMessageID", ctx)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// MaxChannelMessageID indicates an expected call of MaxChannelMessageID.
+func (mr *MockQuerierMockRecorder) MaxChannelMessageID(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MaxChannelMessageID", reflect.TypeOf((*MockQuerier)(nil).MaxChannelMessageID), ctx)
+}
+
+// MaxObservationID mocks base method.
+func (m *MockQuerier) MaxObservationID(ctx context.Context) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MaxObservationID", ctx)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// MaxObservationID indicates an expected call of MaxObservationID.
+func (mr *MockQuerierMockRecorder) MaxObservationID(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MaxObservationID", reflect.TypeOf((*MockQuerier)(nil).MaxObservationID), ctx)
+}
+
+// NextChannelMessageID mocks base method.
+func (m *MockQuerier) NextChannelMessageID(ctx context.Context, afterID int64) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "NextChannelMessageID", ctx, afterID)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// NextChannelMessageID indicates an expected call of NextChannelMessageID.
+func (mr *MockQuerierMockRecorder) NextChannelMessageID(ctx, afterID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NextChannelMessageID", reflect.TypeOf((*MockQuerier)(nil).NextChannelMessageID), ctx, afterID)
 }
 
 // OldestMissingRollupHour mocks base method.
