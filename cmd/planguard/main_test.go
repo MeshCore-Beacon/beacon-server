@@ -5,6 +5,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -41,14 +43,24 @@ func TestCLIUsage(t *testing.T) {
 	}
 }
 
-// gen-policy finds the module root from a subdirectory and reports the committed file as current.
+// gen-policy finds the module root from a subdirectory. It writes to a temporary file, which must equal the
+// committed cached_gen.go; the committed file is never written.
 func TestGenPolicyFromSubdirectory(t *testing.T) {
+	want, err := os.ReadFile("../../db/planpolicy/cached_gen.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "cached_gen.go")
 	t.Chdir("../../internal")
-	var out, errb bytes.Buffer
-	if code := run([]string{"gen-policy"}, &out, &errb); code != 0 {
+	var stdout, errb bytes.Buffer
+	if code := run([]string{"gen-policy", "--out", out}, &stdout, &errb); code != 0 {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "cached_gen.go is up to date") {
-		t.Errorf("stdout %q, want the committed file up to date", out.String())
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("generated policy differs from the committed db/planpolicy/cached_gen.go:\n%s", got)
 	}
 }

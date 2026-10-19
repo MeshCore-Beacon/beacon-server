@@ -42,7 +42,7 @@ func TestGenPolicyRejectsCachedWithoutAdversarialShapes(t *testing.T) {
 		want   []string // every fragment must appear in the error
 	}{
 		{"genpolicy_hop.yaml", nil, []string{"ListKnownRoutesGlobalHop", "rare_hop", "absent_hop"}},
-		{"genpolicy_hop_skip.yaml", nil, []string{"ListKnownRoutesGlobalHop", "gh.rare", "gh.absent", "generic"}},
+		{"genpolicy_hop_skip.yaml", nil, []string{"ListKnownRoutesGlobalHop", "entry gh.rare skips generic", "entry gh.absent skips generic"}},
 		{"genpolicy_region_no_stale.yaml", nil, []string{"ListKnownRoutesByIATA", "stale_region"}},
 		{"genpolicy_legacy_pending.yaml", map[string]bool{"GetNodeByID": true}, []string{"GetNodeByID", "planpolicy.Legacy"}},
 		{"genpolicy_refuse_mode_known_issue_generic.yaml", nil, []string{"GetNodeByID", "entry node.miss has a known_issue in generic"}},
@@ -52,6 +52,9 @@ func TestGenPolicyRejectsCachedWithoutAdversarialShapes(t *testing.T) {
 		{"genpolicy_refuse_degrade_to.yaml", nil, []string{"GetNodeByID", "entry node.miss degrades auto"}},
 		{"genpolicy_refuse_no_generic.yaml", nil, []string{"GetNodeByID", "entry node.miss does not run generic"}},
 		{"genpolicy_refuse_no_auto.yaml", nil, []string{"GetNodeByID", "entry node.miss does not run auto"}},
+		{"genpolicy_refuse_skip_auto.yaml", nil, []string{"GetNodeByID", "entry node.miss skips auto"}},
+		{"genpolicy_refuse_no_sqlc.yaml", nil, []string{"statement Frozen", "has no sqlc source"}},
+		{"genpolicy_refuse_no_entries.yaml", nil, []string{"GetNodeByID", "has no entries"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.file, func(t *testing.T) {

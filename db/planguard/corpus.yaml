@@ -228,12 +228,14 @@ resolvers:
   s_f877_0867_all_i: "WITH cand AS (SELECT h.hx, ns.iata, ns.node_id FROM (VALUES ('f877'), ('0867')) h(hx) JOIN node_short_ids ns ON (length(h.hx) = 2 AND ns.prefix_1 = decode(h.hx, 'hex')) OR (length(h.hx) = 4 AND ns.prefix_2 = decode(h.hx, 'hex')) JOIN nodes n ON n.id = ns.node_id AND n.node_type IN (2, 3) WHERE ns.iata IN (SELECT iata FROM iata_codes)) SELECT array_agg(DISTINCT a.iata ORDER BY a.iata) FROM cand a JOIN cand b ON b.iata = a.iata AND b.hx = '0867' WHERE a.hx = 'f877'"
   s_f877_0867_all_t: "WITH cand AS (SELECT h.hx, ns.iata, ns.node_id FROM (VALUES ('f877'), ('0867')) h(hx) JOIN node_short_ids ns ON (length(h.hx) = 2 AND ns.prefix_1 = decode(h.hx, 'hex')) OR (length(h.hx) = 4 AND ns.prefix_2 = decode(h.hx, 'hex')) JOIN nodes n ON n.id = ns.node_id AND n.node_type IN (2, 3) WHERE ns.iata IN (SELECT iata FROM iata_codes)) SELECT array_agg(c.node_id ORDER BY c.iata, c.node_id) FROM cand c WHERE c.hx = '0867'"
   # The SEA relay cases read only the newest 50,000 SEA routes through the region keyset index, so they stay
-  # far below the prod tier's 20 s cap (about 0.2 s each on the reference copy).
+  # far below the prod tier's 20 s cap (0.1-0.4 s each on the reference copy). The rare relay is also held to
+  # 20-80 SEA routes in total, counted among at most 500 of its routes through the node_ids GIN index for the 50
+  # rarest recent candidates only.
   s_sea_pop_f: "SELECT ARRAY[p.n] FROM (SELECT u.n FROM (SELECT kr.node_ids FROM known_routes kr WHERE kr.iata >= 'SEA' AND kr.iata <= 'SEA' ORDER BY kr.iata, date_trunc('milliseconds', kr.last_seen, 'UTC') DESC, kr.id DESC LIMIT 50000) r, unnest(r.node_ids) u(n) WHERE u.n IN (SELECT ns.node_id FROM node_short_ids ns JOIN nodes n ON n.id = ns.node_id AND n.node_type IN (2, 3) WHERE ns.iata = 'SEA') GROUP BY u.n ORDER BY count(*) DESC, u.n OFFSET 0 LIMIT 1) p"
   s_sea_pop_t: "SELECT ARRAY[p.n] FROM (SELECT u.n FROM (SELECT kr.node_ids FROM known_routes kr WHERE kr.iata >= 'SEA' AND kr.iata <= 'SEA' ORDER BY kr.iata, date_trunc('milliseconds', kr.last_seen, 'UTC') DESC, kr.id DESC LIMIT 50000) r, unnest(r.node_ids) u(n) WHERE u.n IN (SELECT ns.node_id FROM node_short_ids ns JOIN nodes n ON n.id = ns.node_id AND n.node_type IN (2, 3) WHERE ns.iata = 'SEA') GROUP BY u.n ORDER BY count(*) DESC, u.n OFFSET 1 LIMIT 1) p"
   s_sea_prefix_2525: "SELECT array_agg(ns.node_id ORDER BY ns.node_id) FROM node_short_ids ns JOIN nodes n ON n.id = ns.node_id AND n.node_type IN (2, 3) WHERE ns.iata = 'SEA' AND ns.prefix_2 = '\\x2525'"
   s_sea_prefix_fade: "SELECT array_agg(ns.node_id ORDER BY ns.node_id) FROM node_short_ids ns JOIN nodes n ON n.id = ns.node_id AND n.node_type IN (2, 3) WHERE ns.iata = 'SEA' AND ns.prefix_2 = '\\xfade'"
-  s_sea_rare_t: "SELECT ARRAY[p.n] FROM (SELECT c.n FROM (SELECT u.n, count(*) c FROM (SELECT kr.node_ids FROM known_routes kr WHERE kr.iata >= 'SEA' AND kr.iata <= 'SEA' ORDER BY kr.iata, date_trunc('milliseconds', kr.last_seen, 'UTC') DESC, kr.id DESC LIMIT 50000) r, unnest(r.node_ids) u(n) GROUP BY u.n HAVING count(*) >= 2) c JOIN node_short_ids ns ON ns.node_id = c.n AND ns.iata = 'SEA' WHERE (SELECT count(*) FROM node_short_ids x JOIN nodes nn ON nn.id = x.node_id AND nn.node_type IN (2, 3) WHERE x.iata = 'SEA' AND x.prefix_2 = ns.prefix_2) = 1 ORDER BY c.c, c.n LIMIT 1) p"
+  s_sea_rare_t: "WITH recent AS MATERIALIZED (SELECT u.n, count(*) c FROM (SELECT kr.node_ids FROM known_routes kr WHERE kr.iata >= 'SEA' AND kr.iata <= 'SEA' ORDER BY kr.iata, date_trunc('milliseconds', kr.last_seen, 'UTC') DESC, kr.id DESC LIMIT 50000) r, unnest(r.node_ids) u(n) GROUP BY u.n HAVING count(*) >= 2), cand AS MATERIALIZED (SELECT c.n, c.c FROM recent c JOIN node_short_ids ns ON ns.node_id = c.n AND ns.iata = 'SEA' WHERE (SELECT count(*) FROM node_short_ids x JOIN nodes nn ON nn.id = x.node_id AND nn.node_type IN (2, 3) WHERE x.iata = 'SEA' AND x.prefix_2 = ns.prefix_2) = 1 ORDER BY c.c, c.n LIMIT 50) SELECT ARRAY[cand.n] FROM cand WHERE (SELECT count(*) FILTER (WHERE t.iata = 'SEA') FROM (SELECT k.iata FROM known_routes k WHERE k.node_ids @> ARRAY[cand.n] LIMIT 500) t) BETWEEN 20 AND 80 ORDER BY cand.c, cand.n LIMIT 1"
   sea50_id: "SELECT id FROM known_routes WHERE iata = 'SEA' ORDER BY iata, date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC OFFSET 49 LIMIT 1"
   sea50_ts: "SELECT date_trunc('milliseconds', last_seen, 'UTC') FROM known_routes WHERE iata = 'SEA' ORDER BY iata, date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC OFFSET 49 LIMIT 1"
   sea_i: "SELECT '{SEA}'::bpchar[]"
@@ -711,8 +713,8 @@ entries:
       driver: [{relation: known_routes, alias: kr, nodes: ["Bitmap Heap Scan", "Index Scan"]}]
       forbid: [{node: "Incremental Sort", reason: "hop-ordered walk of a hop index: hop_count + 0 must keep it out"}]
       sort_exempt: [route_search_top_n]
-      budget: {buffers: 97143, planning_ms: 10}
-    note: "measured: 64762 custom with hop_count + 0"
+      budget: {buffers: 75092, planning_ms: 10}
+    note: "measured: 50061 custom"
   - id: routes.search.s_sea_pop_rare
     stmt: SearchKnownRoutesByNodes
     shape: "route search, SEA: the most-routed relay to a rare relay (fewest of the newest 50,000 SEA routes)"
@@ -721,8 +723,8 @@ entries:
       driver: [{relation: known_routes, alias: kr, nodes: ["Bitmap Heap Scan", "Index Scan"]}]
       forbid: [{node: "Incremental Sort", reason: "hop-ordered walk of a hop index: hop_count + 0 must keep it out"}]
       sort_exempt: [route_search_top_n]
-      budget: {buffers: 686, planning_ms: 10}
-    note: "measured: 457 custom with hop_count + 0"
+      budget: {buffers: 110, planning_ms: 10}
+    note: "measured: 73 custom"
   - id: routes.cross.x_0355
     stmt: GetKnownRoutesByNodes
     shape: "route cross x_0355"
@@ -791,8 +793,8 @@ entries:
       driver: [{relation: known_routes, alias: kr, nodes: ["Bitmap Heap Scan", "Index Scan"]}]
       forbid: [{node: "Incremental Sort", reason: "hop-ordered walk of a hop index: hop_count + 0 must keep it out"}]
       sort_exempt: [route_search_top_n]
-      budget: {buffers: 957, planning_ms: 10}
-    note: "measured: 638 custom with hop_count + 0"
+      budget: {buffers: 221, planning_ms: 10}
+    note: "measured: 147 custom"
   - id: routes.cross.x_sea_top1
     stmt: GetKnownRoutesByNodes
     shape: "route cross, SEA: the relay on the most of the newest 50,000 SEA routes"
@@ -801,8 +803,8 @@ entries:
       driver: [{relation: known_routes, alias: kr, nodes: ["Bitmap Heap Scan", "Index Scan"]}]
       forbid: [{node: "Incremental Sort", reason: "hop-ordered walk of a hop index: hop_count + 0 must keep it out"}]
       sort_exempt: [route_search_top_n]
-      budget: {buffers: 236624, planning_ms: 10}
-    note: "measured: 157749 custom with hop_count + 0"
+      budget: {buffers: 122249, planning_ms: 10}
+    note: "measured: 81499 custom"
 
   # ---- route retention: keyset walk with a cursor, grace slices in bounded 6 h windows (maint) ----
   - id: retention.expired.select
