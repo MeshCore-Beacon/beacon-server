@@ -46,7 +46,6 @@ const (
 
 // Legacy lists the statements not yet rewritten. Each is removed in the change that replaces it.
 var Legacy = map[string]bool{
-	"ListPackets":            true,
 	"ListPacketsByIATAs":     true,
 	"ListChannelMessages":    true,
 	"ListAllChannelMessages": true,

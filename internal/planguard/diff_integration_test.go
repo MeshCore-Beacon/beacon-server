@@ -58,6 +58,13 @@ const diffCases = `batches:
       - id: novalue
         ref: {stmt: page, params: [{sql: "SELECT k FROM t WHERE false"}, 2147483647, 5]}
         cands: [{stmt: oracle, params: [30, 2147483647, 5]}]
+      - id: empty
+        ref: {stmt: page, params: [-1, -1, 5]}
+        cands: [{stmt: oracle, params: [-1, -1, 5]}]
+        key: [k]
+        allowed: [latest_observer_tie]
+        omit: [v]
+        expect: {oracle: identical}
 `
 
 const writeCases = `batches:
@@ -183,6 +190,18 @@ CREATE FUNCTION `+schema+`.write_row() RETURNS int LANGUAGE sql AS
 	}
 	if r := got["novalue|oracle"]; r.Verdict != planguard.DiffSkip || r.OK || len(rep.Skipped()) != 1 {
 		t.Errorf("pair whose resolver finds nothing: %+v (skipped %d), want one skip", r, len(rep.Skipped()))
+	}
+
+	// An empty result keeps its columns, so the omit columns of a pair whose results are both empty are found.
+	if r := got["empty|oracle"]; r.Verdict != planguard.DiffIdentical || r.RefRows != 0 || !r.OK {
+		t.Errorf("empty pair: %+v, want identical", r)
+	}
+	empty, err := planguard.ReadCaseFile(filepath.Join(out, "snap", "empty.ref.page.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(empty.Columns, ",") != "id,k,v" || len(empty.Rows) != 0 {
+		t.Errorf("empty result: columns %v, %d rows; want id,k,v and none", empty.Columns, len(empty.Rows))
 	}
 
 	// One case file per (pair, role, alias), read back for the comparison.

@@ -8,6 +8,12 @@
 #
 # /routes answers a bare array: it has more while a page is full, and the next page starts at the last route's
 # lastSeen and id.
+#
+# /packets, /nodes and /observers add nextPageCursor to every page (additive_keys). /packets also orders rows tied on
+# lastHeardAt by hash (tie_order) and picks the highest observation id as the latest observer on a heard_at tie
+# (latest_observer_tie). /observers takes nextCursor from last_seen now, so its first page differs at $.nextCursor
+# by design; storediff/packets_global.yaml holds the full set of these cases. The nodes_type cases filter, so their
+# walks reach the last page at the web limits 50 and 3.
 cases:
   - id: routes_sea
     path: /api/v1/routes
@@ -24,14 +30,41 @@ cases:
     path: /api/v1/nodes
     follow:
       - {param: cursor, from: nextCursor}
+    allowed: [additive_keys]
+  - id: nodes_type1
+    path: /api/v1/nodes
+    query: {type: "1"}
+    pages: 500
+    follow:
+      - {param: cursor, from: nextCursor}
+    allowed: [additive_keys]
+  - id: nodes_type3
+    path: /api/v1/nodes
+    query: {type: "3"}
+    pages: 100
+    follow:
+      - {param: cursor, from: nextCursor}
+    allowed: [additive_keys]
+  - id: nodes_type3_l3
+    path: /api/v1/nodes
+    query: {type: "3"}
+    web_limit: 3
+    pages: 1200
+    follow:
+      - {param: cursor, from: nextCursor}
+    allowed: [additive_keys]
   - id: observers
     path: /api/v1/observers
     follow:
       - {param: cursor, from: nextCursor}
+    allowed: [additive_keys]
   - id: packets
     path: /api/v1/packets
     follow:
       - {param: cursor, from: nextCursor}
+    allowed: [tie_order, additive_keys, latest_observer_tie]
+    key: [lastHeardAt]
+    omit: [latestObserver]
   - id: channel_messages
     # The channel heard most recently: /channels is ordered by last seen.
     path: /api/v1/channels/{channel}/messages

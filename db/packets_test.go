@@ -4,12 +4,15 @@
 package db
 
 import (
+	"bytes"
 	"context"
+	"slices"
 	"testing"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	mockdb "github.com/MeshCore-Beacon/beacon-server/db/sqlc/mock"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -65,9 +68,9 @@ func TestListPackets_Pagination(t *testing.T) {
 	mock := mockdb.NewMockQuerier(ctrl)
 
 	heardAt := pgtype.Timestamptz{Time: time.UnixMilli(1700000000000), Valid: true}
-	rows := make([]sqlc.ListPacketsRow, 3)
+	rows := make([]sqlc.ListPacketsPageRow, 3)
 	for i := range rows {
-		rows[i] = sqlc.ListPacketsRow{
+		rows[i] = sqlc.ListPacketsPageRow{
 			PacketHash:   []byte{0xde, 0xad},
 			FirstHeardAt: heardAt,
 			LastHeardAt:  heardAt,
@@ -75,11 +78,11 @@ func TestListPackets_Pagination(t *testing.T) {
 	}
 
 	mock.EXPECT().
-		ListPackets(gomock.Any(), gomock.Any()).
+		ListPacketsPage(gomock.Any(), gomock.Any()).
 		Return(rows, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListPackets(context.Background(), nil, nil, nil, nil, time.Time{}, time.Time{}, 0, 2)
+	page, err := store.ListPackets(context.Background(), nil, nil, nil, nil, time.Time{}, time.Time{}, 0, nil, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -101,8 +104,8 @@ func TestListPackets_LatestObserverNil(t *testing.T) {
 	heardAt := pgtype.Timestamptz{Time: time.UnixMilli(1700000000000), Valid: true}
 
 	mock.EXPECT().
-		ListPackets(gomock.Any(), gomock.Any()).
-		Return([]sqlc.ListPacketsRow{
+		ListPacketsPage(gomock.Any(), gomock.Any()).
+		Return([]sqlc.ListPacketsPageRow{
 			{
 				PacketHash:       []byte{0xde, 0xad},
 				FirstHeardAt:     heardAt,
@@ -112,7 +115,7 @@ func TestListPackets_LatestObserverNil(t *testing.T) {
 		}, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListPackets(context.Background(), nil, nil, nil, nil, time.Time{}, time.Time{}, 0, 10)
+	page, err := store.ListPackets(context.Background(), nil, nil, nil, nil, time.Time{}, time.Time{}, 0, nil, 10)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -131,8 +134,8 @@ func TestListPackets_LatestObserverSet(t *testing.T) {
 	observerIATA := "YVR"
 
 	mock.EXPECT().
-		ListPackets(gomock.Any(), gomock.Any()).
-		Return([]sqlc.ListPacketsRow{
+		ListPacketsPage(gomock.Any(), gomock.Any()).
+		Return([]sqlc.ListPacketsPageRow{
 			{
 				PacketHash:         []byte{0xde, 0xad},
 				FirstHeardAt:       heardAt,
@@ -144,7 +147,7 @@ func TestListPackets_LatestObserverSet(t *testing.T) {
 		}, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListPackets(context.Background(), nil, nil, nil, nil, time.Time{}, time.Time{}, 0, 10)
+	page, err := store.ListPackets(context.Background(), nil, nil, nil, nil, time.Time{}, time.Time{}, 0, nil, 10)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -168,8 +171,8 @@ func TestListPackets_LatestObserverPathFields(t *testing.T) {
 	pathBytes := []byte{0xa1, 0xb2}
 
 	mock.EXPECT().
-		ListPackets(gomock.Any(), gomock.Any()).
-		Return([]sqlc.ListPacketsRow{
+		ListPacketsPage(gomock.Any(), gomock.Any()).
+		Return([]sqlc.ListPacketsPageRow{
 			{
 				PacketHash:                   []byte{0xde, 0xad},
 				FirstHeardAt:                 heardAt,
@@ -183,7 +186,7 @@ func TestListPackets_LatestObserverPathFields(t *testing.T) {
 		}, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListPackets(context.Background(), nil, nil, nil, nil, time.Time{}, time.Time{}, 0, 10)
+	page, err := store.ListPackets(context.Background(), nil, nil, nil, nil, time.Time{}, time.Time{}, 0, nil, 10)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -513,7 +516,7 @@ func TestListPackets_IATAFilterRoutesToObservationIndex(t *testing.T) {
 		})
 
 	store := &Store{q: mock}
-	page, err := store.ListPackets(context.Background(), nil, nil, []string{"ALF"}, nil, time.Time{}, time.Time{}, 0, 1)
+	page, err := store.ListPackets(context.Background(), nil, nil, []string{"ALF"}, nil, time.Time{}, time.Time{}, 0, nil, 1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -555,7 +558,7 @@ func TestListPackets_SaturatedShortPageKeepsPaging(t *testing.T) {
 		}, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListPackets(context.Background(), nil, nil, []string{"YOW"}, nil, time.Time{}, time.Time{}, 0, 5)
+	page, err := store.ListPackets(context.Background(), nil, nil, []string{"YOW"}, nil, time.Time{}, time.Time{}, 0, nil, 5)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -590,7 +593,7 @@ func TestListPackets_CursorClampsToScanFloor(t *testing.T) {
 		}}, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListPackets(context.Background(), nil, nil, []string{"YOW", "YYZ"}, nil, time.Time{}, time.Time{}, 0, 5)
+	page, err := store.ListPackets(context.Background(), nil, nil, []string{"YOW", "YYZ"}, nil, time.Time{}, time.Time{}, 0, nil, 5)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -615,7 +618,7 @@ func TestListPackets_UnsaturatedShortPageEndsPaging(t *testing.T) {
 		}}, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListPackets(context.Background(), nil, nil, []string{"YOW"}, nil, time.Time{}, time.Time{}, 0, 5)
+	page, err := store.ListPackets(context.Background(), nil, nil, []string{"YOW"}, nil, time.Time{}, time.Time{}, 0, nil, 5)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -633,11 +636,11 @@ func TestListPackets_UnfilteredKeepsGlobalQuery(t *testing.T) {
 
 	// gomock is strict: an unexpected ListPacketsByIATAs call fails the test.
 	mock.EXPECT().
-		ListPackets(gomock.Any(), gomock.Any()).
-		Return([]sqlc.ListPacketsRow{}, nil)
+		ListPacketsPage(gomock.Any(), gomock.Any()).
+		Return([]sqlc.ListPacketsPageRow{}, nil)
 
 	store := &Store{q: mock}
-	if _, err := store.ListPackets(context.Background(), nil, nil, nil, nil, time.Time{}, time.Time{}, 0, 50); err != nil {
+	if _, err := store.ListPackets(context.Background(), nil, nil, nil, nil, time.Time{}, time.Time{}, 0, nil, 50); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -659,5 +662,235 @@ func TestDeleteOldPackets_LoopsUntilShortBatch(t *testing.T) {
 
 	if err := store.DeleteOldPackets(context.Background(), cutoff); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Each request shape runs exactly one statement (gomock fails on any other call), and a filter no row can match
+// runs none and answers an empty page.
+func TestListPacketsDispatch(t *testing.T) {
+	since := time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC)
+	allPayload := []int16{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
+	cases := []struct {
+		name         string
+		pt, rt       []int16
+		iatas        []string
+		scopes       []string
+		since, until time.Time
+		expect       func(m *mockdb.MockQuerier)
+	}{
+		{name: "unfiltered", expect: func(m *mockdb.MockQuerier) {
+			m.EXPECT().ListPacketsPage(gomock.Any(), gomock.Any()).Return(nil, nil)
+		}},
+		{name: "payload types", pt: []int16{4}, expect: func(m *mockdb.MockQuerier) {
+			m.EXPECT().ListPacketsByTypes(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsByTypesParams) bool {
+				return slices.Equal(p.PayloadTypes, []int16{4}) && slices.Equal(p.RouteTypes, []int16{0, 1, 2, 3})
+			})).Return(nil, nil)
+		}},
+		{name: "route types only", rt: []int16{3}, expect: func(m *mockdb.MockQuerier) {
+			m.EXPECT().ListPacketsByTypes(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsByTypesParams) bool {
+				return slices.Equal(p.PayloadTypes, allPayload) && slices.Equal(p.RouteTypes, []int16{3})
+			})).Return(nil, nil)
+		}},
+		{name: "scopes", scopes: []string{"#a"}, expect: func(m *mockdb.MockQuerier) {
+			m.EXPECT().ListPacketsByScopes(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsByScopesParams) bool {
+				return slices.Equal(p.ScopeNames, []string{"#a"})
+			})).Return(nil, nil)
+		}},
+		{name: "scopes and types", pt: []int16{4}, scopes: []string{"#a"}, expect: func(m *mockdb.MockQuerier) {
+			m.EXPECT().ListPacketsByScopesTypes(gomock.Any(), gomock.Any()).Return(nil, nil)
+		}},
+		{name: "since", since: since, expect: func(m *mockdb.MockQuerier) {
+			m.EXPECT().ListPacketsWindow(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsWindowParams) bool {
+				return p.SinceTs.Time.Equal(since) && p.UntilTs.InfinityModifier == pgtype.Infinity
+			})).Return(nil, nil)
+		}},
+		{name: "since and scopes", since: since, scopes: []string{"#a"}, expect: func(m *mockdb.MockQuerier) {
+			m.EXPECT().ListPacketsWindowScoped(gomock.Any(), gomock.Any()).Return(nil, nil)
+		}},
+		{name: "iatas", pt: []int16{4}, iatas: []string{"YVR"}, scopes: []string{"#a"}, since: since, expect: func(m *mockdb.MockQuerier) {
+			m.EXPECT().ListPacketsByIATAs(gomock.Any(), sqlc.ListPacketsByIATAsParams{
+				Iatas:        []string{"YVR"},
+				ScanDepth:    (7 + 1) * 8,
+				PayloadTypes: []int16{4},
+				SinceTs:      pgtype.Timestamptz{Time: since, Valid: true},
+				ScopeNames:   []string{"#a"},
+				PageLimit:    7 + 1,
+			}).Return(nil, nil)
+		}},
+		{name: "unknown payload type", pt: []int16{99}, expect: func(*mockdb.MockQuerier) {}},
+		{name: "since after until", since: since, until: since.Add(-time.Millisecond), expect: func(m *mockdb.MockQuerier) {
+			m.EXPECT().ListPacketsWindow(gomock.Any(), gomock.Any()).Return(nil, nil)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			mock := mockdb.NewMockQuerier(ctrl)
+			tc.expect(mock)
+			store := &Store{q: mock}
+			page, err := store.ListPackets(context.Background(), tc.pt, tc.rt, tc.iatas, tc.scopes, tc.since, tc.until, 0, nil, 7)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if page.Items == nil {
+				t.Error("Items is nil, want an empty slice")
+			}
+			if len(page.Items) != 0 || page.HasMore || page.NextCursor != nil || page.NextPageCursor != nil {
+				t.Errorf("page = %+v, want empty", page)
+			}
+		})
+	}
+}
+
+// pgx sends a nil []byte as NULL, and (k, h) < (ts, NULL) matches no row: every statement must get a non-nil hash.
+func TestListPackets_CursorHashNeverNil(t *testing.T) {
+	since := time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC)
+	shapes := []struct {
+		name   string
+		pt     []int16
+		scopes []string
+		since  time.Time
+	}{
+		{name: "page"},
+		{name: "types", pt: []int16{4}},
+		{name: "scopes", scopes: []string{"#a"}},
+		{name: "scopes types", pt: []int16{4}, scopes: []string{"#a"}},
+		{name: "window", since: since},
+		{name: "window scoped", since: since, scopes: []string{"#a"}},
+	}
+	cursors := []struct {
+		name       string
+		cursor     int64
+		pageCursor *api.PacketCursor
+	}{
+		{name: "first page"},
+		{name: "legacy cursor", cursor: 1792442625019},
+		{name: "pageCursor", pageCursor: &api.PacketCursor{At: since, Hash: []byte{0xab}}},
+	}
+	for _, sh := range shapes {
+		for _, cur := range cursors {
+			t.Run(sh.name+"/"+cur.name, func(t *testing.T) {
+				ctrl := gomock.NewController(t)
+				mock := mockdb.NewMockQuerier(ctrl)
+				var hash []byte
+				mock.EXPECT().ListPacketsPage(gomock.Any(), gomock.Any()).AnyTimes().
+					DoAndReturn(func(_ context.Context, p sqlc.ListPacketsPageParams) ([]sqlc.ListPacketsPageRow, error) {
+						hash = p.CursorHash
+						return nil, nil
+					})
+				mock.EXPECT().ListPacketsByTypes(gomock.Any(), gomock.Any()).AnyTimes().
+					DoAndReturn(func(_ context.Context, p sqlc.ListPacketsByTypesParams) ([]sqlc.ListPacketsByTypesRow, error) {
+						hash = p.CursorHash
+						return nil, nil
+					})
+				mock.EXPECT().ListPacketsByScopes(gomock.Any(), gomock.Any()).AnyTimes().
+					DoAndReturn(func(_ context.Context, p sqlc.ListPacketsByScopesParams) ([]sqlc.ListPacketsByScopesRow, error) {
+						hash = p.CursorHash
+						return nil, nil
+					})
+				mock.EXPECT().ListPacketsByScopesTypes(gomock.Any(), gomock.Any()).AnyTimes().
+					DoAndReturn(func(_ context.Context, p sqlc.ListPacketsByScopesTypesParams) ([]sqlc.ListPacketsByScopesTypesRow, error) {
+						hash = p.CursorHash
+						return nil, nil
+					})
+				mock.EXPECT().ListPacketsWindow(gomock.Any(), gomock.Any()).AnyTimes().
+					DoAndReturn(func(_ context.Context, p sqlc.ListPacketsWindowParams) ([]sqlc.ListPacketsWindowRow, error) {
+						hash = p.CursorHash
+						return nil, nil
+					})
+				mock.EXPECT().ListPacketsWindowScoped(gomock.Any(), gomock.Any()).AnyTimes().
+					DoAndReturn(func(_ context.Context, p sqlc.ListPacketsWindowScopedParams) ([]sqlc.ListPacketsWindowScopedRow, error) {
+						hash = p.CursorHash
+						return nil, nil
+					})
+				store := &Store{q: mock}
+				if _, err := store.ListPackets(context.Background(), sh.pt, nil, nil, sh.scopes, sh.since, time.Time{}, cur.cursor, cur.pageCursor, 50); err != nil {
+					t.Fatal(err)
+				}
+				if hash == nil {
+					t.Fatal("CursorHash is nil")
+				}
+				if cur.pageCursor != nil && !bytes.Equal(hash, cur.pageCursor.Hash) {
+					t.Errorf("CursorHash = %x, want %x", hash, cur.pageCursor.Hash)
+				}
+			})
+		}
+	}
+}
+
+// A full page carries both cursors from its last row; the final page carries neither.
+func TestListPackets_NextPageCursor(t *testing.T) {
+	base := time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC)
+	rows := []sqlc.ListPacketsPageRow{
+		{PacketHash: []byte{0x03}, LastHeardAt: pgtype.Timestamptz{Time: base.Add(3*time.Millisecond + 7*time.Microsecond), Valid: true}},
+		{PacketHash: []byte{0x02, 0xff}, LastHeardAt: pgtype.Timestamptz{Time: base.Add(2*time.Millisecond + 5*time.Microsecond), Valid: true}},
+		{PacketHash: []byte{0x01}, LastHeardAt: pgtype.Timestamptz{Time: base.Add(time.Millisecond), Valid: true}},
+	}
+	run := func(t *testing.T, rows []sqlc.ListPacketsPageRow) api.PacketPage {
+		t.Helper()
+		ctrl := gomock.NewController(t)
+		mock := mockdb.NewMockQuerier(ctrl)
+		mock.EXPECT().ListPacketsPage(gomock.Any(), gomock.Any()).Return(rows, nil)
+		page, err := (&Store{q: mock}).ListPackets(context.Background(), nil, nil, nil, nil, time.Time{}, time.Time{}, 0, nil, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return page
+	}
+
+	t.Run("full page", func(t *testing.T) {
+		page := run(t, rows)
+		last := rows[1]
+		wantPC := api.PacketCursor{At: last.LastHeardAt.Time, Hash: last.PacketHash}.String()
+		if len(page.Items) != 2 || !page.HasMore {
+			t.Fatalf("items %d, hasMore %v; want 2, true", len(page.Items), page.HasMore)
+		}
+		if page.NextCursor == nil || *page.NextCursor != last.LastHeardAt.Time.UnixMilli() {
+			t.Errorf("NextCursor = %v, want %d", page.NextCursor, last.LastHeardAt.Time.UnixMilli())
+		}
+		if page.NextPageCursor == nil || *page.NextPageCursor != wantPC {
+			t.Errorf("NextPageCursor = %v, want %s", page.NextPageCursor, wantPC)
+		}
+	})
+	t.Run("last page", func(t *testing.T) {
+		page := run(t, rows[:2])
+		if len(page.Items) != 2 || page.HasMore || page.NextCursor != nil || page.NextPageCursor != nil {
+			t.Errorf("page = %+v, want 2 items and no cursors", page)
+		}
+	})
+}
+
+// The region path keeps today's numeric cursor, saturation padding and scan-floor clamp, and emits no pageCursor.
+func TestListPackets_RegionPathIgnoresPageCursor(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mock := mockdb.NewMockQuerier(ctrl)
+	const cursor = int64(1792442625019)
+	oldest := time.Date(2026, 8, 7, 12, 57, 25, 0, time.UTC)
+	floor := oldest.Add(30 * time.Second)
+
+	mock.EXPECT().
+		ListPacketsByIATAs(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsByIATAsParams) bool {
+			return p.CursorTs.Valid && p.CursorTs.Time.Equal(time.UnixMilli(cursor)) && slices.Equal(p.Iatas, []string{"YVR"})
+		})).
+		Return([]sqlc.ListPacketsByIATAsRow{{
+			PacketHash:    []byte{0x01},
+			SiteHeardAt:   pgtype.Timestamptz{Time: oldest, Valid: true},
+			ScanSaturated: true,
+			ScanFloor:     pgtype.Timestamptz{Time: floor, Valid: true},
+		}}, nil)
+
+	pc := &api.PacketCursor{At: time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC), Hash: []byte{0xab}}
+	page, err := (&Store{q: mock}).ListPackets(context.Background(), nil, nil, []string{"YVR"}, nil, time.Time{}, time.Time{}, cursor, pc, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || !page.HasMore {
+		t.Fatalf("items %d, hasMore %v; want 1, true", len(page.Items), page.HasMore)
+	}
+	if page.NextCursor == nil || *page.NextCursor != floor.UnixMilli() {
+		t.Errorf("NextCursor = %v, want the scan floor %d", page.NextCursor, floor.UnixMilli())
+	}
+	if page.NextPageCursor != nil {
+		t.Errorf("NextPageCursor = %q, want nil", *page.NextPageCursor)
 	}
 }

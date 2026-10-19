@@ -561,8 +561,9 @@ func TestRepoDiffCasesLoad(t *testing.T) {
 		}
 		for _, b := range spec.Batches {
 			for alias, src := range b.Statements {
+				// old: names come from the --old-ref build and may be gone from this one; the run checks them.
 				kind, name, _ := strings.Cut(src, ":")
-				if (kind == "old" || kind == "new") && sqlc[name] == "" {
+				if kind == "new" && sqlc[name] == "" {
 					t.Errorf("%s: %s: %s names no sqlc statement", f, alias, src)
 				}
 			}

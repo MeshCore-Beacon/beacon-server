@@ -589,6 +589,19 @@ definitions:
       snr:
         type: number
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.NodePage:
+    properties:
+      hasMore:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeSummary'
+        type: array
+      nextCursor:
+        type: integer
+      nextPageCursor:
+        type: string
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.NodeSummary:
     properties:
       defaultScope:
@@ -927,6 +940,19 @@ definitions:
         description: '"online" or "offline" derived from last_status_at'
         type: string
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverPage:
+    properties:
+      hasMore:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverSummary'
+        type: array
+      nextCursor:
+        type: integer
+      nextPageCursor:
+        type: string
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverSummary:
     properties:
       displayName:
@@ -1152,6 +1178,19 @@ definitions:
       snr:
         type: number
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.PacketPage:
+    properties:
+      hasMore:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PacketSummary'
+        type: array
+      nextCursor:
+        type: integer
+      nextPageCursor:
+        type: string
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.PacketPathLength:
     properties:
       hashSize:
@@ -1219,28 +1258,6 @@ definitions:
       items:
         items:
           $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdvertObservation'
-        type: array
-      nextCursor:
-        type: integer
-    type: object
-  github_com_MeshCore-Beacon_beacon-server_internal_api.Page-github_com_MeshCore-Beacon_beacon-server_internal_api_NodeSummary:
-    properties:
-      hasMore:
-        type: boolean
-      items:
-        items:
-          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeSummary'
-        type: array
-      nextCursor:
-        type: integer
-    type: object
-  github_com_MeshCore-Beacon_beacon-server_internal_api.Page-github_com_MeshCore-Beacon_beacon-server_internal_api_ObserverSummary:
-    properties:
-      hasMore:
-        type: boolean
-      items:
-        items:
-          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverSummary'
         type: array
       nextCursor:
         type: integer
@@ -1938,7 +1955,7 @@ info:
     name: AGPL-3-or-later
   termsOfService: https://github.com/MeshCore-Beacon/beacon-server
   title: MeshCore Beacon API
-  version: 2.0.8
+  version: 2.1.0
 paths:
   /admin/accounts:
     get:
@@ -2814,6 +2831,11 @@ paths:
         in: query
         name: cursor
         type: integer
+      - description: Opaque nextPageCursor from a previous response; keeps millisecond
+          ties. Wins over cursor when both are sent
+        in: query
+        name: pageCursor
+        type: string
       - description: Max results (default 50); must be positive, values above 200
           are clamped
         in: query
@@ -2827,7 +2849,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.Page-github_com_MeshCore-Beacon_beacon-server_internal_api_NodeSummary'
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodePage'
         "400":
           description: Bad Request
           schema:
@@ -2973,10 +2995,15 @@ paths:
         in: query
         name: scope
         type: string
-      - description: last_seen epoch ms of last item for pagination
+      - description: last_seen epoch ms of the last item
         in: query
         name: cursor
         type: integer
+      - description: Opaque nextPageCursor from a previous response; keeps millisecond
+          ties. Wins over cursor when both are sent
+        in: query
+        name: pageCursor
+        type: string
       - description: Max results (default 50); must be positive, values above 200
           are clamped
         in: query
@@ -2990,7 +3017,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.Page-github_com_MeshCore-Beacon_beacon-server_internal_api_ObserverSummary'
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverPage'
         "400":
           description: Bad Request
           schema:
@@ -3298,11 +3325,17 @@ paths:
         in: query
         name: until
         type: integer
-      - description: epoch ms of last item for pagination; last_heard_at, or site-local
-          heard_at when iatas is set
+      - description: epoch ms of the last item; last_heard_at, or site-local heard_at
+          when iatas is set. Prefer pageCursor where nextPageCursor is returned
         in: query
         name: cursor
         type: integer
+      - description: Opaque nextPageCursor from a previous response; keeps millisecond
+          ties. Wins over cursor when both are sent. Ignored with hashPrefix or an
+          IATA or region filter, which page by cursor
+        in: query
+        name: pageCursor
+        type: string
       - description: Max results (default 50); must be positive, values above 200
           are clamped
         in: query
@@ -3321,7 +3354,7 @@ paths:
         "200":
           description: OK
           schema:
-            type: object
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PacketPage'
         "400":
           description: Bad Request
           schema:

@@ -32,7 +32,8 @@ type StoreDiffSpec struct {
 // The whole JSON body of every page is compared. Each relaxation is a named class that must be listed in Allowed:
 //   - tie_order: within each run of items with equal Key, the new items are a permutation of the old ones (same
 //     count, keys equal position by position);
-//   - additive_keys: new objects may hold keys the old ones lack; each added path is listed.
+//   - additive_keys: new objects may hold keys the old ones lack; each added path is listed;
+//   - latest_observer_tie: the Omit fields of an item may differ; each such item is listed.
 //
 // Any other difference fails.
 type StoreCase struct {
@@ -42,8 +43,9 @@ type StoreCase struct {
 	WebLimit int                 `yaml:"web_limit"` // the client's page size; default 50
 	Pages    int                 `yaml:"pages"`     // walk cap per limit; default 50
 	Follow   []Follow            `yaml:"follow"`    // param ← nextPageCursor | nextCursor | last.<field>
-	Allowed  []string            `yaml:"allowed"`   // tie_order (keyed by key) | additive_keys
+	Allowed  []string            `yaml:"allowed"`   // tie_order (keyed by key) | additive_keys | latest_observer_tie
 	Key      []string            `yaml:"key"`       // item fields for tie_order
+	Omit     []string            `yaml:"omit"`      // item fields for latest_observer_tie
 	Vars     map[string]StoreVar `yaml:"vars"`      // path values read from another endpoint
 }
 
@@ -91,7 +93,7 @@ var (
 	storeVarRe    = regexp.MustCompile(`\{([a-z][a-z0-9_]*)\}`)
 	storeParamRe  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
 	storeFieldRe  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$`)
-	storeClassSet = map[string]bool{ClassTieOrder: true, ClassAdditiveKeys: true}
+	storeClassSet = map[string]bool{ClassTieOrder: true, ClassAdditiveKeys: true, ClassLatestObserverTie: true}
 )
 
 // LoadStoreDiffSpec reads and validates a storediff case file.
@@ -219,7 +221,7 @@ func (c StoreCase) validate() error {
 	allowed := map[string]bool{}
 	for _, a := range c.Allowed {
 		if !storeClassSet[a] {
-			return fmt.Errorf("allowed %q: want tie_order or additive_keys", a)
+			return fmt.Errorf("allowed %q: want tie_order, additive_keys or latest_observer_tie", a)
 		}
 		allowed[a] = true
 	}
@@ -229,6 +231,17 @@ func (c StoreCase) validate() error {
 	for _, k := range c.Key {
 		if !storeFieldRe.MatchString(k) {
 			return fmt.Errorf("key %q is not a field name", k)
+		}
+	}
+	if allowed[ClassLatestObserverTie] != (len(c.Omit) > 0) {
+		return errors.New("omit and the class latest_observer_tie go together")
+	}
+	for _, f := range c.Omit {
+		if !storeFieldRe.MatchString(f) {
+			return fmt.Errorf("omit %q is not a field name", f)
+		}
+		if slices.Contains(c.Key, f) {
+			return fmt.Errorf("omit field %s is a key field", f)
 		}
 	}
 	return nil
@@ -538,7 +551,7 @@ func (sd *storeDiff) walk(c StoreCase, path string, limit int, res *StoreCaseRes
 		if allowed[ClassTieOrder] {
 			var moved int
 			var bad string
-			nb, moved, bad = alignTies(o.body, nb, c.Key, allowed[ClassAdditiveKeys])
+			nb, moved, bad = alignTies(o.body, nb, c.Key, c.Omit, allowed[ClassAdditiveKeys])
 			if bad != "" {
 				res.Verdict, res.Detail = DiffDifferent, fmt.Sprintf("page %d: tie_order: %s", page, bad)
 				return nil
@@ -546,6 +559,14 @@ func (sd *storeDiff) walk(c StoreCase, path string, limit int, res *StoreCaseRes
 			if moved > 0 {
 				counts[ClassTieOrder] += moved
 				notes = append(notes, fmt.Sprintf("page %d: tie_order: %d items hold another position within their run of equal %s", page, moved, strings.Join(c.Key, ", ")))
+			}
+		}
+		if allowed[ClassLatestObserverTie] {
+			var listed []string
+			nb, listed = alignOmitted(o.body, nb, c.Omit, allowed[ClassAdditiveKeys])
+			if len(listed) > 0 {
+				counts[ClassLatestObserverTie] += len(listed)
+				notes = append(notes, fmt.Sprintf("page %d: latest_observer_tie: %s", page, strings.Join(listed, ", ")))
 			}
 		}
 		var added []string
@@ -611,7 +632,7 @@ func (sd *storeDiff) walk(c StoreCase, path string, limit int, res *StoreCaseRes
 		seen[k] = true
 		follow = next
 	}
-	for _, cl := range []string{ClassTieOrder, ClassAdditiveKeys} {
+	for _, cl := range []string{ClassTieOrder, ClassLatestObserverTie, ClassAdditiveKeys} {
 		if n := counts[cl]; n > 0 {
 			res.Classes = append(res.Classes, fmt.Sprintf("%s(%d)", cl, n))
 		}
@@ -634,9 +655,10 @@ func cursorText(v string, ok bool, err error) string {
 }
 
 // alignTies returns newBody with its items reordered to old's order within runs of equal key, when the items
-// differ only that way, and the number of items that moved. Otherwise it returns newBody unchanged. bad names an
-// item that lacks a key field: without it every such item would share one run and any order would pass.
-func alignTies(oldBody, newBody any, key []string, additive bool) (out any, moved int, bad string) {
+// differ only that way (and in their omit fields), and the number of items that moved. Otherwise it returns
+// newBody unchanged. bad names an item that lacks a key field: without it every such item would share one run and
+// any order would pass.
+func alignTies(oldBody, newBody any, key, omit []string, additive bool) (out any, moved int, bad string) {
 	oi, ok1 := pageItems(oldBody)
 	ni, ok2 := pageItems(newBody)
 	if !ok1 || !ok2 {
@@ -673,14 +695,7 @@ func alignTies(oldBody, newBody any, key []string, additive bool) (out any, move
 	if len(oi) != len(ni) || !slices.Equal(oldKeys, newKeys) {
 		return newBody, 0, ""
 	}
-	equal := func(a, b any) bool {
-		var added []string
-		var p *[]string
-		if additive {
-			p = &added
-		}
-		return jsonDiff(a, b, "$", p) == nil
-	}
+	equal := func(a, b any) bool { return sameExcept(a, b, omit, additive) }
 	items := make([]any, len(ni))
 	for start := 0; start < len(oi); {
 		end := start + 1
@@ -714,15 +729,118 @@ func alignTies(oldBody, newBody any, key []string, additive bool) (out any, move
 	if moved == 0 {
 		return newBody, 0, ""
 	}
-	if _, isArray := newBody.([]any); isArray {
-		return items, moved, ""
+	return withItems(newBody, items), moved, ""
+}
+
+// withItems returns body with its items replaced: items itself for a bare array, else a copy of the object.
+func withItems(body any, items []any) any {
+	if _, isArray := body.([]any); isArray {
+		return items
 	}
 	m := map[string]any{}
-	for k, v := range newBody.(map[string]any) {
+	for k, v := range body.(map[string]any) {
 		m[k] = v
 	}
 	m["items"] = items
-	return m, moved, ""
+	return m
+}
+
+// sameExcept reports whether two items are equal once their omit fields are dropped.
+func sameExcept(a, b any, omit []string, additive bool) bool {
+	var added []string
+	var p *[]string
+	if additive {
+		p = &added
+	}
+	return jsonDiff(dropFields(a, omit), dropFields(b, omit), "$", p) == nil
+}
+
+// dropFields returns item without the (dotted) fields, copying only the objects on their paths.
+func dropFields(item any, fields []string) any {
+	for _, f := range fields {
+		item = dropField(item, strings.Split(f, "."))
+	}
+	return item
+}
+
+func dropField(v any, path []string) any {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return v
+	}
+	if _, ok := m[path[0]]; !ok {
+		return v
+	}
+	out := make(map[string]any, len(m))
+	for k, x := range m {
+		out[k] = x
+	}
+	if len(path) == 1 {
+		delete(out, path[0])
+	} else {
+		out[path[0]] = dropField(m[path[0]], path[1:])
+	}
+	return out
+}
+
+// takeFields returns dst with the (dotted) fields set to src's values, or dropped where src lacks them, copying
+// only the objects on their paths.
+func takeFields(dst, src any, fields []string) any {
+	for _, f := range fields {
+		dst = takeField(dst, src, strings.Split(f, "."))
+	}
+	return dst
+}
+
+func takeField(dst, src any, path []string) any {
+	d, ok := dst.(map[string]any)
+	if !ok {
+		return dst
+	}
+	s, _ := src.(map[string]any)
+	sv, inSrc := s[path[0]]
+	if _, inDst := d[path[0]]; len(path) > 1 && !inDst {
+		return dst
+	}
+	out := make(map[string]any, len(d))
+	for k, x := range d {
+		out[k] = x
+	}
+	switch {
+	case len(path) > 1 && inSrc:
+		out[path[0]] = takeField(d[path[0]], sv, path[1:])
+	case len(path) > 1:
+		out[path[0]] = dropField(d[path[0]], path[1:])
+	case inSrc:
+		out[path[0]] = sv
+	default:
+		delete(out, path[0])
+	}
+	return out
+}
+
+// alignOmitted returns newBody with each item that differs from old's item at its position only in the omit
+// fields given old's values for them, and the JSON paths of those items. Items that differ in anything else are left
+// as they are, so the page comparison reports them.
+func alignOmitted(oldBody, newBody any, omit []string, additive bool) (any, []string) {
+	oi, ok1 := pageItems(oldBody)
+	ni, ok2 := pageItems(newBody)
+	if !ok1 || !ok2 {
+		return newBody, nil
+	}
+	var listed []string
+	items := slices.Clone(ni)
+	for i := range min(len(oi), len(ni)) {
+		if jsonDiff(oi[i], ni[i], "$", nil) == nil || !sameExcept(oi[i], ni[i], omit, additive) {
+			continue
+		}
+		items[i] = takeFields(ni[i], oi[i], omit)
+		listed = append(listed, fmt.Sprintf("$.items[%d]", i))
+	}
+	if len(listed) == 0 {
+		return newBody, nil
+	}
+	return withItems(newBody, items), listed
 }
 
 // jsonPathDiff is the first difference between two JSON values.

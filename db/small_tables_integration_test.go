@@ -296,7 +296,7 @@ func TestNodeReadersAfterIndexDropsPostgres(t *testing.T) {
 	nodeKey := func(n api.NodeSummary) string { return lastSeen[n.ID] }
 	nodeID := func(n api.NodeSummary) string { return n.ID.String() }
 	normNodes := func(v any) any {
-		p := v.(api.Page[api.NodeSummary])
+		p := v.(api.NodePage)
 		p.Items = sortTieRuns(p.Items, nodeKey, nodeID)
 		return p
 	}
@@ -306,7 +306,7 @@ func TestNodeReadersAfterIndexDropsPostgres(t *testing.T) {
 			ms = cursor.UnixMilli()
 		}
 		return readerShape{name: name, norm: normNodes, run: func() (any, error) {
-			return store.ListNodes(ctx, nodeType, iatas, mbPaths, mbTraces, nil, prefix, nameFilter, "", ms, limit, neighbors)
+			return store.ListNodes(ctx, nodeType, iatas, mbPaths, mbTraces, nil, prefix, nameFilter, "", ms, nil, limit, neighbors)
 		}}
 	}
 	var none time.Time
@@ -348,7 +348,7 @@ func TestNodeReadersAfterIndexDropsPostgres(t *testing.T) {
 
 	before := runShapes(t, ctx, tx, shapes)
 	for _, r := range before["type9"] {
-		if items := r.val.(api.Page[api.NodeSummary]).Items; items == nil || len(items) != 0 {
+		if items := r.val.(api.NodePage).Items; items == nil || len(items) != 0 {
 			t.Fatalf("type9 items = %#v, want empty non-nil", items)
 		}
 	}
@@ -369,7 +369,7 @@ func TestNodeReadersAfterIndexDropsPostgres(t *testing.T) {
 	// LIMIT 150 splits the 25-node tie run at ranks 140-164: rows 1-139 are fixed, the last 11 are any 11 of the run.
 	for i := range planSettings {
 		for _, r := range []shapeResult{before["global l150"][i], after["global l150"][i]} {
-			p := r.val.(api.Page[api.NodeSummary])
+			p := r.val.(api.NodePage)
 			if len(p.Items) != 150 || !p.HasMore || p.NextCursor == nil {
 				t.Fatalf("global l150 under %q: %d items, hasMore %v", planSettings[i], len(p.Items), p.HasMore)
 			}
@@ -381,7 +381,7 @@ func TestNodeReadersAfterIndexDropsPostgres(t *testing.T) {
 				seen[n.ID] = true
 			}
 		}
-		b, a := before["global l150"][i].val.(api.Page[api.NodeSummary]), after["global l150"][i].val.(api.Page[api.NodeSummary])
+		b, a := before["global l150"][i].val.(api.NodePage), after["global l150"][i].val.(api.NodePage)
 		if !reflect.DeepEqual(a.Items[:139], b.Items[:139]) || *a.NextCursor != *b.NextCursor {
 			t.Errorf("global l150 under %q: first 139 rows or cursor differ after the drops", planSettings[i])
 		}
@@ -431,7 +431,7 @@ func TestObserverChannelReadersAfterIndexDropsPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	normObservers := func(v any) any {
-		p := v.(api.Page[api.ObserverSummary])
+		p := v.(api.ObserverPage)
 		p.Items = sortTieRuns(p.Items, func(o api.ObserverSummary) string { return lastSeen[o.ID] },
 			func(o api.ObserverSummary) string { return o.ID.String() })
 		return p
@@ -442,7 +442,7 @@ func TestObserverChannelReadersAfterIndexDropsPostgres(t *testing.T) {
 			ms = cursor.UnixMilli()
 		}
 		return readerShape{name: name, norm: normObservers, run: func() (any, error) {
-			return store.ListObservers(ctx, iatas, observerType, broker, status, nameFilter, scope, ms, limit)
+			return store.ListObservers(ctx, iatas, observerType, broker, status, nameFilter, scope, ms, nil, limit)
 		}}
 	}
 	exact := func(v any) any { return v }
@@ -474,10 +474,10 @@ func TestObserverChannelReadersAfterIndexDropsPostgres(t *testing.T) {
 	}
 
 	before := runShapes(t, ctx, tx, shapes)
-	if n := len(before["observers first l201"][0].val.(api.Page[api.ObserverSummary]).Items); n != 201 {
+	if n := len(before["observers first l201"][0].val.(api.ObserverPage).Items); n != 201 {
 		t.Fatalf("observers first page has %d rows, want 201", n)
 	}
-	if n := len(before["observers scope #test"][0].val.(api.Page[api.ObserverSummary]).Items); n != 1 {
+	if n := len(before["observers scope #test"][0].val.(api.ObserverPage).Items); n != 1 {
 		t.Fatalf("observers in #test = %d, want 1", n)
 	}
 	if n := len(before["channels hash 05"][0].val.(api.ChannelPage).Items); n != 3 {
