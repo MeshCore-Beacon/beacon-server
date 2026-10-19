@@ -1613,6 +1613,36 @@ func (mr *MockQuerierMockRecorder) ListChannelIDs(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChannelIDs", reflect.TypeOf((*MockQuerier)(nil).ListChannelIDs), ctx)
 }
 
+// ListChannelMessageIATASamples mocks base method.
+func (m *MockQuerier) ListChannelMessageIATASamples(ctx context.Context, arg db.ListChannelMessageIATASamplesParams) ([]db.ListChannelMessageIATASamplesRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListChannelMessageIATASamples", ctx, arg)
+	ret0, _ := ret[0].([]db.ListChannelMessageIATASamplesRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListChannelMessageIATASamples indicates an expected call of ListChannelMessageIATASamples.
+func (mr *MockQuerierMockRecorder) ListChannelMessageIATASamples(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChannelMessageIATASamples", reflect.TypeOf((*MockQuerier)(nil).ListChannelMessageIATASamples), ctx, arg)
+}
+
+// ListChannelMessageScopeSamples mocks base method.
+func (m *MockQuerier) ListChannelMessageScopeSamples(ctx context.Context, arg db.ListChannelMessageScopeSamplesParams) ([]db.ListChannelMessageScopeSamplesRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListChannelMessageScopeSamples", ctx, arg)
+	ret0, _ := ret[0].([]db.ListChannelMessageScopeSamplesRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListChannelMessageScopeSamples indicates an expected call of ListChannelMessageScopeSamples.
+func (mr *MockQuerierMockRecorder) ListChannelMessageScopeSamples(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChannelMessageScopeSamples", reflect.TypeOf((*MockQuerier)(nil).ListChannelMessageScopeSamples), ctx, arg)
+}
+
 // ListChannelMessages mocks base method.
 func (m *MockQuerier) ListChannelMessages(ctx context.Context, arg db.ListChannelMessagesParams) ([]db.ListChannelMessagesRow, error) {
 	m.ctrl.T.Helper()

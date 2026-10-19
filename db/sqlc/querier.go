@@ -246,6 +246,10 @@ type Querier interface {
 	ListChannelCatalogues(ctx context.Context) ([]MeshmapperChannelCatalogue, error)
 	// Every channel key and its id, preloaded at boot for the ingest write-through.
 	ListChannelIDs(ctx context.Context) ([]ListChannelIDsRow, error)
+	// The busiest (channel, site) pairs among recent messages; the first-time verification compares their pages.
+	ListChannelMessageIATASamples(ctx context.Context, arg ListChannelMessageIATASamplesParams) ([]ListChannelMessageIATASamplesRow, error)
+	// The busiest (channel, scope) pairs among recent messages, with the scope name today's statement filters on.
+	ListChannelMessageScopeSamples(ctx context.Context, arg ListChannelMessageScopeSamplesParams) ([]ListChannelMessageScopeSamplesRow, error)
 	// Returns messages for a channel identified by integer ID.
 	// Pass a zero/null timestamp for since to return all messages up to limit.
 	// Pass empty string for iata to skip IATA filtering.

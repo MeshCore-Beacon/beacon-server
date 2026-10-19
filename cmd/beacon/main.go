@@ -165,6 +165,14 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	// The read-model boot repair waits for every transaction that began before this instant.
+	bootTS, err := db.DatabaseNow(ctx, pools.Maint)
+	if err != nil {
+		slog.Error("reading the database clock failed", "component", "startup", "error", err)
+		os.Exit(1)
+	}
+	// Trust in each read model is per process: earned by this boot's repair, dropped by any writer's failure.
+	readModels := &db.ReadModels{Cmi: db.NewTrust("cmi", resolved.ReadModelCmiEnabled, db.CmiTrustPolicy)}
 
 	// Three stores: ingest writes, background and operator work, and API reads. The API store
 	// routes each statement by plan class through the guards; it never runs background jobs.
@@ -172,9 +180,9 @@ func main() {
 	guard := guards.New(guards.Options{Enforce: enforce, ForceObserve: layout == planpolicy.Single, Budget: resolved.GuardsBudget})
 	// Ingest and maintenance share one channel id cache; the API never writes channels.
 	channelIDs := db.NewChannelIDCache()
-	ingestStore := db.New(pools.Ingest, pools.Ingest, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold, db.WithChannelIDs(channelIDs))
-	maintStore := db.New(pools.Maint, pools.Maint, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold, db.WithChannelIDs(channelIDs))
-	apiStore := db.NewAPIStore(pools, layout, guard, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold)
+	ingestStore := db.New(pools.Ingest, pools.Ingest, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold, db.WithChannelIDs(channelIDs), db.WithReadModels(readModels))
+	maintStore := db.New(pools.Maint, pools.Maint, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold, db.WithChannelIDs(channelIDs), db.WithReadModels(readModels))
+	apiStore := db.NewAPIStore(pools, layout, guard, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold, db.WithReadModels(readModels))
 	if err := maintStore.PreloadChannelIDs(ctx); err != nil {
 		slog.Warn("channel id preload failed; known channels upsert until cached", "component", "startup", "error", err)
 	} else {
@@ -483,6 +491,25 @@ func main() {
 	if repeaterImporter != nil && cfg.MeshMapper.Repeaters.Enabled {
 		tasks = append(tasks, background.Task{Name: "meshmapper.repeaters", Interval: meshmapper.PollInterval, Run: repeaterImporter.Refresh})
 	}
+	cmiJobs := &background.CmiJobs{
+		Begin: func(ctx context.Context) (background.CmiSession, bool, error) {
+			s, ok, err := maintStore.BeginCmi(ctx)
+			if s == nil {
+				return nil, ok, err
+			}
+			return s, ok, err
+		},
+		Wait: func(ctx context.Context) error {
+			return db.WaitForPreBootWriters(ctx, pools.Maint, bootTS, time.Minute)
+		},
+		Trust:    readModels.Cmi,
+		Interval: background.CmiInterval,
+	}
+	if mode.Jobs {
+		tasks = append(tasks, cmiJobs.Task())
+	} else {
+		go background.CmiReadOnlyWatch(ctx, maintStore.CheckCmiReadOnly, readModels.Cmi, background.CmiInterval)
+	}
 	pgSource, pgTask := planguardWiring(ctx, resolved.PlanguardDailyCheck, mode.Jobs, pools.Maint)
 	if pgTask != nil {
 		tasks = append(tasks, *pgTask)
@@ -495,6 +522,7 @@ func main() {
 	if mode.Jobs {
 		scheduler := background.New(tasks)
 		go scheduler.Start(ctx)
+		go cmiJobs.Boot(ctx)
 	}
 
 	// ── HTTP server ──────────────────────────────────────────────────────────

@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"reflect"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -260,11 +262,125 @@ func (c *CmiSession) checkRanges(ctx context.Context, q sqlc.Querier, ranges [][
 	return v, nil
 }
 
-// Verify runs the exact check over the newest messages and one random range below them.
+// Verify is the first-time verification: it reconciles, VACUUMs and ANALYZEs the table (the index-only scans need
+// its visibility map), then in one read-only snapshot runs the exact check over the newest messages and one random
+// range below them, and compares today's and the read model's pages on the busiest recent sites and scopes, from
+// the newest message and from a deeper cursor. The first pass is persisted as FirstVerifiedAt. An in-flight Add can
+// make one attempt differ; the caller retries every interval.
 func (c *CmiSession) Verify(ctx context.Context) (CmiVerification, error) {
-	first, err := c.q.NextChannelMessageID(ctx, 0)
+	if _, err := c.Reconcile(ctx); err != nil {
+		return CmiVerification{}, err
+	}
+	if _, err := c.conn.Exec(ctx, "VACUUM (ANALYZE) channel_message_iatas"); err != nil {
+		return CmiVerification{}, fmt.Errorf("cmi vacuum: %w", err)
+	}
+	tx, err := c.conn.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return CmiVerification{}, err
 	}
-	return c.checkRanges(ctx, c.q, c.verifyRanges(first))
+	defer tx.Rollback(context.Background()) //nolint:errcheck // read-only
+	q := sqlc.New(tx)
+	first, err := q.NextChannelMessageID(ctx, 0)
+	if err != nil {
+		return CmiVerification{}, err
+	}
+	v, err := c.checkRanges(ctx, q, c.verifyRanges(first))
+	if err != nil {
+		return v, err
+	}
+	if err := comparePages(ctx, q, max(c.state.MsgHi-cmiVerifyMessages, 0), &v); err != nil {
+		return v, err
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		return v, err
+	}
+	if !v.OK() {
+		slog.Error("cmi verification failed; pages stay on the original statements", "component", "readmodel",
+			"missing", v.Missing, "extra", v.Extra, "pages", v.PagesCompared, "diffs", len(v.PageDiffs), "first", v.PageDiffs[:min(len(v.PageDiffs), 3)])
+		return v, nil
+	}
+	if c.state.FirstVerifiedAt == nil {
+		now := time.Now().UTC()
+		c.state.FirstVerifiedAt = &now
+		if err := c.save(ctx); err != nil {
+			return v, err
+		}
+		slog.Info("cmi first-time verification passed", "component", "readmodel", "pages", v.PagesCompared)
+	}
+	return v, nil
+}
+
+const (
+	cmiVerifySites  = 5
+	cmiVerifyScopes = 3
+	cmiVerifyLimit  = 50
+)
+
+// comparePages compares today's statement with the read model's on the busiest sites and scopes among messages
+// above after: channel and all-channel pages, from cursor 0 and from page 1's 26th id.
+func comparePages(ctx context.Context, q sqlc.Querier, after int64, v *CmiVerification) error {
+	type request struct {
+		channel *int32
+		iatas   []string
+		scope   string
+	}
+	var requests []request
+	sites, err := q.ListChannelMessageIATASamples(ctx, sqlc.ListChannelMessageIATASamplesParams{AfterID: after, RowLimit: cmiVerifySites})
+	if err != nil {
+		return err
+	}
+	for _, s := range sites {
+		requests = append(requests, request{channel: &s.ChannelID, iatas: []string{s.Iata}}, request{iatas: []string{s.Iata}})
+	}
+	scopes, err := q.ListChannelMessageScopeSamples(ctx, sqlc.ListChannelMessageScopeSamplesParams{AfterID: after, RowLimit: cmiVerifyScopes})
+	if err != nil {
+		return err
+	}
+	for _, s := range scopes {
+		requests = append(requests, request{channel: &s.ChannelID, scope: s.Name}, request{scope: s.Name})
+	}
+	for _, r := range requests {
+		cursors := []int64{0}
+		for i, cursor := 0, int64(0); i < len(cursors); i++ {
+			cursor = cursors[i]
+			legacy, err := listChannelMessages(ctx, q, false, r.channel, time.Time{}, cmiVerifyLimit, r.iatas, r.scope, cursor)
+			if err != nil {
+				return err
+			}
+			model, err := listChannelMessages(ctx, q, true, r.channel, time.Time{}, cmiVerifyLimit, r.iatas, r.scope, cursor)
+			if err != nil {
+				return err
+			}
+			v.PagesCompared++
+			if !reflect.DeepEqual(legacy, model) {
+				at := 0
+				for at < min(len(legacy.Items), len(model.Items)) && reflect.DeepEqual(legacy.Items[at], model.Items[at]) {
+					at++
+				}
+				where := "all channels"
+				if r.channel != nil {
+					where = fmt.Sprintf("channel %d", *r.channel)
+				}
+				v.PageDiffs = append(v.PageDiffs, fmt.Sprintf("%s iatas %v scope %q cursor %d: legacy %d rows, cmi %d rows, first difference at %d",
+					where, r.iatas, r.scope, cursor, len(legacy.Items), len(model.Items), at))
+			}
+			if cursor == 0 && len(legacy.Items) > cmiVerifyLimit/2 {
+				cursors = append(cursors, legacy.Items[cmiVerifyLimit/2].ID)
+			}
+		}
+	}
+	return nil
+}
+
+// CheckCmiReadOnly reads the persisted cmi state and runs the exact check over the newest messages. It writes
+// nothing, so a read-only server can decide whether to trust the table another process maintains.
+func (s *Store) CheckCmiReadOnly(ctx context.Context) (CmiState, CmiVerification, error) {
+	var st CmiState
+	found, err := loadState(ctx, s.q, cmiStateKey, &st)
+	if err != nil || !found {
+		return st, CmiVerification{}, err
+	}
+	c := &CmiSession{state: st}
+	v, err := c.checkRanges(ctx, s.q, [][2]int64{{max(st.MsgHi-cmiVerifyMessages, 0), st.MsgHi}})
+	return st, v, err
 }

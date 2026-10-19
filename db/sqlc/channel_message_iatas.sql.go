@@ -592,6 +592,95 @@ func (q *Queries) ListAllChannelMessagesSince(ctx context.Context, arg ListAllCh
 	return items, nil
 }
 
+const listChannelMessageIATASamples = `-- name: ListChannelMessageIATASamples :many
+SELECT i.channel_id, i.iata, count(*)::bigint AS n
+FROM channel_message_iatas i
+WHERE i.message_id > $1::bigint
+GROUP BY i.channel_id, i.iata
+ORDER BY n DESC, i.channel_id, i.iata
+LIMIT $2
+`
+
+type ListChannelMessageIATASamplesParams struct {
+	AfterID  int64 `json:"after_id"`
+	RowLimit int32 `json:"row_limit"`
+}
+
+type ListChannelMessageIATASamplesRow struct {
+	ChannelID int32  `json:"channel_id"`
+	Iata      string `json:"iata"`
+	N         int64  `json:"n"`
+}
+
+// The busiest (channel, site) pairs among recent messages; the first-time verification compares their pages.
+func (q *Queries) ListChannelMessageIATASamples(ctx context.Context, arg ListChannelMessageIATASamplesParams) ([]ListChannelMessageIATASamplesRow, error) {
+	rows, err := q.db.Query(ctx, listChannelMessageIATASamples, arg.AfterID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChannelMessageIATASamplesRow{}
+	for rows.Next() {
+		var i ListChannelMessageIATASamplesRow
+		if err := rows.Scan(&i.ChannelID, &i.Iata, &i.N); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChannelMessageScopeSamples = `-- name: ListChannelMessageScopeSamples :many
+SELECT i.channel_id, i.scope_id, ts.name, count(*)::bigint AS n
+FROM channel_message_iatas i
+JOIN transport_scopes ts ON ts.id = i.scope_id
+WHERE i.message_id > $1::bigint AND i.scope_id IS NOT NULL
+GROUP BY i.channel_id, i.scope_id, ts.name
+ORDER BY n DESC, i.channel_id, i.scope_id
+LIMIT $2
+`
+
+type ListChannelMessageScopeSamplesParams struct {
+	AfterID  int64 `json:"after_id"`
+	RowLimit int32 `json:"row_limit"`
+}
+
+type ListChannelMessageScopeSamplesRow struct {
+	ChannelID int32  `json:"channel_id"`
+	ScopeID   *int32 `json:"scope_id"`
+	Name      string `json:"name"`
+	N         int64  `json:"n"`
+}
+
+// The busiest (channel, scope) pairs among recent messages, with the scope name today's statement filters on.
+func (q *Queries) ListChannelMessageScopeSamples(ctx context.Context, arg ListChannelMessageScopeSamplesParams) ([]ListChannelMessageScopeSamplesRow, error) {
+	rows, err := q.db.Query(ctx, listChannelMessageScopeSamples, arg.AfterID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChannelMessageScopeSamplesRow{}
+	for rows.Next() {
+		var i ListChannelMessageScopeSamplesRow
+		if err := rows.Scan(
+			&i.ChannelID,
+			&i.ScopeID,
+			&i.Name,
+			&i.N,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChannelMessagesByIATAs = `-- name: ListChannelMessagesByIATAs :many
 WITH hits AS MATERIALIZED (
   SELECT m.message_id

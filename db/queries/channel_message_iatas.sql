@@ -280,3 +280,22 @@ WHERE cm.sent_at >= @since::timestamptz
   AND EXISTS (SELECT 1 FROM packet_observations po WHERE po.packet_hash = cm.packet_hash)
 ORDER BY cm.id DESC
 LIMIT @page_limit;
+
+-- name: ListChannelMessageIATASamples :many
+-- The busiest (channel, site) pairs among recent messages; the first-time verification compares their pages.
+SELECT i.channel_id, i.iata, count(*)::bigint AS n
+FROM channel_message_iatas i
+WHERE i.message_id > @after_id::bigint
+GROUP BY i.channel_id, i.iata
+ORDER BY n DESC, i.channel_id, i.iata
+LIMIT @row_limit;
+
+-- name: ListChannelMessageScopeSamples :many
+-- The busiest (channel, scope) pairs among recent messages, with the scope name today's statement filters on.
+SELECT i.channel_id, i.scope_id, ts.name, count(*)::bigint AS n
+FROM channel_message_iatas i
+JOIN transport_scopes ts ON ts.id = i.scope_id
+WHERE i.message_id > @after_id::bigint AND i.scope_id IS NOT NULL
+GROUP BY i.channel_id, i.scope_id, ts.name
+ORDER BY n DESC, i.channel_id, i.scope_id
+LIMIT @row_limit;
