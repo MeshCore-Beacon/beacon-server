@@ -52,25 +52,6 @@ func TestUpsertKnownRoute_ComputesPathKey(t *testing.T) {
 	}
 }
 
-func TestDeleteOldRoutes_PassesCutoffs(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	mock := mockdb.NewMockQuerier(ctrl)
-	store := &Store{q: mock}
-
-	retention := time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)
-	grace := time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC)
-
-	mock.EXPECT().DeleteOldRoutes(gomock.Any(), gomock.Cond(func(p sqlc.DeleteOldRoutesParams) bool {
-		return p.RetentionCutoff.Time.Equal(retention) && p.MinObservations == 3 && p.GraceCutoff.Time.Equal(grace) &&
-			p.BatchSize == routeDeleteBatch
-	})).Return(int64(0), nil)
-
-	if err := store.DeleteOldRoutes(context.Background(), retention, 3, grace); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // RF3: a value ending in a blank matches no character(3) code; no statement runs, and it encodes as [].
 func TestListKnownRoutesTrailingBlankIATA(t *testing.T) {
 	ctrl := gomock.NewController(t)
@@ -132,18 +113,29 @@ func TestRouteCutoffCeil(t *testing.T) {
 		mock := mockdb.NewMockQuerier(ctrl)
 		store := &Store{q: mock, qc: mock}
 		windowEnd := base.Add(time.Millisecond)
+		start := base.Add(-time.Hour)
 		mock.EXPECT().DeleteGraceRoutesSlice(gomock.Any(), gomock.Cond(func(p sqlc.DeleteGraceRoutesSliceParams) bool {
 			return p.GraceCeil.Valid && p.GraceCeil.Time.Equal(c.ceil) &&
 				p.GraceCutoff.Valid && p.GraceCutoff.Time.Equal(c.cutoff) &&
-				p.AfterTs.Valid && p.AfterTs.InfinityModifier == pgtype.NegativeInfinity && p.AfterID == 0 &&
+				p.AfterTs.Valid && p.AfterTs.InfinityModifier == pgtype.Finite && p.AfterTs.Time.Equal(start) && p.AfterID == 0 &&
 				p.MinObservations == 3 && p.BatchSize == 7
 		})).Return(sqlc.DeleteGraceRoutesSliceRow{WindowEnd: pgtype.Timestamptz{Time: windowEnd, Valid: true}}, nil)
-		res, err := store.DeleteGraceRoutesSlice(context.Background(), RouteKey{}, c.cutoff, 3, 7)
+		res, err := store.DeleteGraceRoutesSlice(context.Background(), RouteKey{TS: start}, c.cutoff, 3, 7)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if res.Last != (RouteKey{}) || res.Unresolved != nil || !res.WindowEnd.Equal(windowEnd) {
 			t.Errorf("empty slice mapped to %+v", res)
+		}
+		ctrl.Finish()
+	}
+
+	// A grace walk from -infinity would never advance: refused before any statement runs.
+	{
+		ctrl := gomock.NewController(t)
+		store := &Store{q: mockdb.NewMockQuerier(ctrl)} // no EXPECT: any call fails the test
+		if _, err := store.DeleteGraceRoutesSlice(context.Background(), RouteKey{}, base, 3, 7); err == nil {
+			t.Error("DeleteGraceRoutesSlice from RouteKey{} returned no error")
 		}
 		ctrl.Finish()
 	}

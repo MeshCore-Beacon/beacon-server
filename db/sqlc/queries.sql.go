@@ -417,42 +417,6 @@ func (q *Queries) DeleteOldPackets(ctx context.Context, arg DeleteOldPacketsPara
 	return count, err
 }
 
-const deleteOldRoutes = `-- name: DeleteOldRoutes :execrows
-WITH expired AS (
-    SELECT r.iata, r.path_key
-    FROM known_routes r
-    WHERE r.last_seen < GREATEST($1::timestamptz, $2::timestamptz)
-      AND (r.last_seen < $1 OR
-           (r.observation_count < $3 AND r.last_seen < $2))
-    LIMIT $4
-    FOR UPDATE OF r SKIP LOCKED
-)
-DELETE FROM known_routes kr USING expired e
-WHERE kr.iata = e.iata AND kr.path_key = e.path_key
-`
-
-type DeleteOldRoutesParams struct {
-	RetentionCutoff pgtype.Timestamptz `json:"retention_cutoff"`
-	GraceCutoff     pgtype.Timestamptz `json:"grace_cutoff"`
-	MinObservations int64              `json:"min_observations"`
-	BatchSize       int32              `json:"batch_size"`
-}
-
-// One batch of routes past retention, or past grace with too few observations.
-// GREATEST keeps the scan on idx_known_routes_last_seen.
-func (q *Queries) DeleteOldRoutes(ctx context.Context, arg DeleteOldRoutesParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteOldRoutes,
-		arg.RetentionCutoff,
-		arg.GraceCutoff,
-		arg.MinObservations,
-		arg.BatchSize,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const deleteOldTelemetry = `-- name: DeleteOldTelemetry :exec
 DELETE FROM observer_telemetry WHERE reported_at < $1
 `

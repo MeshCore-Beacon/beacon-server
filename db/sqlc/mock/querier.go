@@ -304,21 +304,6 @@ func (mr *MockQuerierMockRecorder) DeleteOldRollups(ctx, cutoff any) *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldRollups", reflect.TypeOf((*MockQuerier)(nil).DeleteOldRollups), ctx, cutoff)
 }
 
-// DeleteOldRoutes mocks base method.
-func (m *MockQuerier) DeleteOldRoutes(ctx context.Context, arg db.DeleteOldRoutesParams) (int64, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteOldRoutes", ctx, arg)
-	ret0, _ := ret[0].(int64)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// DeleteOldRoutes indicates an expected call of DeleteOldRoutes.
-func (mr *MockQuerierMockRecorder) DeleteOldRoutes(ctx, arg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldRoutes", reflect.TypeOf((*MockQuerier)(nil).DeleteOldRoutes), ctx, arg)
-}
-
 // DeleteOldTelemetry mocks base method.
 func (m *MockQuerier) DeleteOldTelemetry(ctx context.Context, reportedAt pgtype.Timestamptz) error {
 	m.ctrl.T.Helper()

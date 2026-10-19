@@ -772,21 +772,6 @@ DELETE FROM nodes
 WHERE last_seen < $1
   AND id NOT IN (SELECT owner_node_id FROM observer_owners WHERE owner_node_id IS NOT NULL);
 
--- name: DeleteOldRoutes :execrows
--- One batch of routes past retention, or past grace with too few observations.
--- GREATEST keeps the scan on idx_known_routes_last_seen.
-WITH expired AS (
-    SELECT r.iata, r.path_key
-    FROM known_routes r
-    WHERE r.last_seen < GREATEST(@retention_cutoff::timestamptz, @grace_cutoff::timestamptz)
-      AND (r.last_seen < @retention_cutoff OR
-           (r.observation_count < @min_observations AND r.last_seen < @grace_cutoff))
-    LIMIT @batch_size
-    FOR UPDATE OF r SKIP LOCKED
-)
-DELETE FROM known_routes kr USING expired e
-WHERE kr.iata = e.iata AND kr.path_key = e.path_key;
-
 -- name: DeleteExpiredRoutes :one
 -- One batch past retention, keyset after the per-run cursor (the first call passes -infinity, 0).
 -- The truncated bound (ms ceiling of the cutoff) drives idx_known_routes_keyset; the exact

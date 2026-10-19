@@ -409,7 +409,8 @@ func main() {
 			NodeDeleteAfter:    resolved.NodeDeleteAfter,
 			Interval:           resolved.CleanupInterval,
 		}),
-		background.ReconfirmTask(store, resolved.RouteRetention, resolved.RouteGrace, int64(resolved.RouteMinObservations), resolved.ReconfirmInterval),
+		background.RouteRetentionTask(store, resolved.RouteRetention, resolved.RouteGrace, int64(resolved.RouteMinObservations), resolved.ReconfirmInterval),
+		background.ReconfirmTask(store, resolved.ReconfirmInterval),
 	}
 	if resolved.ObserverDeleteAfter > 0 {
 		var onDelete func(context.Context, uuid.UUID)

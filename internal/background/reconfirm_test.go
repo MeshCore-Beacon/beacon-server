@@ -14,13 +14,8 @@ import (
 )
 
 type reconfirmStore struct {
-	run       func(context.Context, int32, time.Time) (int64, error)
-	ambCalls  int
-	neighbors bool
-}
-
-func (*reconfirmStore) DeleteOldRoutes(context.Context, time.Time, int64, time.Time) error {
-	return nil
+	run      func(context.Context, int32, time.Time) (int64, error)
+	ambCalls int
 }
 
 func (s *reconfirmStore) AmbiguousPrefixes(context.Context) (db.AmbiguousPrefixes, error) {
@@ -30,11 +25,6 @@ func (s *reconfirmStore) AmbiguousPrefixes(context.Context) (db.AmbiguousPrefixe
 
 func (s *reconfirmStore) ReconfirmRoutes(ctx context.Context, n int32, before time.Time, _ db.AmbiguousPrefixes) (int64, error) {
 	return s.run(ctx, n, before)
-}
-
-func (s *reconfirmStore) ReconfirmNeighbors(context.Context) error {
-	s.neighbors = true
-	return nil
 }
 
 func TestReconfirmCoverage(t *testing.T) {
@@ -62,11 +52,11 @@ func TestReconfirmCoverage(t *testing.T) {
 				left -= checked
 				return checked, ctx.Err()
 			}}
-			if err := ReconfirmTask(s, time.Hour, time.Minute, 3, time.Hour).Run(context.Background()); err != nil {
+			if err := ReconfirmTask(s, time.Hour).Run(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			if left != tc.wantLeft || !s.neighbors {
-				t.Fatalf("remaining %d, neighbor cleanup %t", left, s.neighbors)
+			if left != tc.wantLeft {
+				t.Fatalf("remaining %d", left)
 			}
 			if s.ambCalls != 1 {
 				t.Fatalf("ambiguity computed %d times, want once per run", s.ambCalls)
@@ -85,9 +75,9 @@ func TestReconfirmStopsOnFailure(t *testing.T) {
 		}
 		return 0, want
 	}}
-	err := ReconfirmTask(s, time.Hour, time.Minute, 3, time.Hour).Run(context.Background())
-	if !errors.Is(err, want) || calls != 2 || s.neighbors {
-		t.Fatalf("failure was not propagated: error %v, calls %d, neighbors %t", err, calls, s.neighbors)
+	err := ReconfirmTask(s, time.Hour).Run(context.Background())
+	if !errors.Is(err, want) || calls != 2 {
+		t.Fatalf("failure was not propagated: error %v, calls %d", err, calls)
 	}
 }
 
@@ -98,9 +88,9 @@ func TestReconfirmBatchDeadline(t *testing.T) {
 			return 0, ctx.Err()
 		}}
 		start := time.Now()
-		err := ReconfirmTask(s, time.Hour, time.Minute, 3, time.Hour).Run(context.Background())
-		if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 5*time.Second || s.neighbors {
-			t.Fatalf("batch exceeded its deadline: error %v, duration %s, neighbors %t", err, time.Since(start), s.neighbors)
+		err := ReconfirmTask(s, time.Hour).Run(context.Background())
+		if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 5*time.Second {
+			t.Fatalf("batch exceeded its deadline: error %v, duration %s", err, time.Since(start))
 		}
 	})
 }

@@ -5,6 +5,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
@@ -25,7 +26,8 @@ type GraceSliceResult struct {
 	WindowEnd           time.Time  // LEAST(ceil_ms(cutoff), after.TS + 6h): the statement's upper bound
 }
 
-// GraceWindow is the widest slice of last_seen one DeleteGraceRoutesSlice call scans.
+// GraceWindow is the widest slice of last_seen one DeleteGraceRoutesSlice call scans. It must
+// match the interval '6 hours' in DeleteGraceRoutesSlice (db/queries/queries.sql).
 const GraceWindow = 6 * time.Hour
 
 // ceilMs rounds t up to the next whole millisecond.
@@ -75,7 +77,11 @@ func (s *Store) DeleteExpiredRoutes(ctx context.Context, after RouteKey, retenti
 
 // DeleteGraceRoutesSlice deletes one batch of routes last seen before graceCutoff with fewer than
 // minObs observations, after after and below WindowEnd (at most GraceWindow past after.TS).
+// after.TS must be finite: from -infinity the window would never advance.
 func (s *Store) DeleteGraceRoutesSlice(ctx context.Context, after RouteKey, graceCutoff time.Time, minObs int64, batch int32) (GraceSliceResult, error) {
+	if after.TS.IsZero() {
+		return GraceSliceResult{}, errors.New("grace slice needs a finite start")
+	}
 	row, err := s.q.DeleteGraceRoutesSlice(ctx, sqlc.DeleteGraceRoutesSliceParams{
 		GraceCeil:       cutoffCeil(graceCutoff),
 		AfterTs:         after.ts(),

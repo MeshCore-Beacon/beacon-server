@@ -55,9 +55,6 @@ type Querier interface {
 	DeleteOldPackets(ctx context.Context, arg DeleteOldPacketsParams) (int64, error)
 	// Bumps coverage when hours go, so cached responses that included them are not reused.
 	DeleteOldRollups(ctx context.Context, cutoff pgtype.Timestamptz) error
-	// One batch of routes past retention, or past grace with too few observations.
-	// GREATEST keeps the scan on idx_known_routes_last_seen.
-	DeleteOldRoutes(ctx context.Context, arg DeleteOldRoutesParams) (int64, error)
 	// Deletes telemetry rows older than the given cutoff. Called by the cleanup goroutine.
 	DeleteOldTelemetry(ctx context.Context, reportedAt pgtype.Timestamptz) error
 	// Keeps the trace IATA filter in step with packet retention.

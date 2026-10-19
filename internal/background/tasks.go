@@ -127,10 +127,8 @@ const (
 )
 
 type routeMaintainer interface {
-	DeleteOldRoutes(context.Context, time.Time, int64, time.Time) error
 	AmbiguousPrefixes(context.Context) (db.AmbiguousPrefixes, error)
 	ReconfirmRoutes(context.Context, int32, time.Time, db.AmbiguousPrefixes) (int64, error)
-	ReconfirmNeighbors(context.Context) error
 }
 
 type observerCleaner interface {
@@ -160,17 +158,14 @@ func ObserverCleanupTask(store observerCleaner, deleteAfter, interval time.Durat
 	}
 }
 
-// ReconfirmTask returns a Task that prunes aged routes first, then reconfirms
-// stale and ambiguous resolved paths and neighbors in order.
-func ReconfirmTask(store routeMaintainer, routeRetention, routeGrace time.Duration, routeMinObservations int64, interval time.Duration) Task {
+// ReconfirmTask returns a Task that reconfirms stale and ambiguous resolved paths.
+// RouteRetentionTask prunes aged routes and neighbors.
+func ReconfirmTask(store routeMaintainer, interval time.Duration) Task {
 	return Task{
 		Name:     "reconfirm",
 		Interval: interval,
 		Run: func(ctx context.Context) error {
 			now := time.Now()
-			if err := store.DeleteOldRoutes(ctx, now.Add(-routeRetention), routeMinObservations, now.Add(-routeGrace)); err != nil {
-				return fmt.Errorf("route retention: %w", err)
-			}
 			amb, err := store.AmbiguousPrefixes(ctx)
 			if err != nil {
 				return fmt.Errorf("ambiguous prefixes: %w", err)
@@ -187,9 +182,6 @@ func ReconfirmTask(store routeMaintainer, routeRetention, routeGrace time.Durati
 				if n < limit {
 					break
 				}
-			}
-			if err := store.ReconfirmNeighbors(ctx); err != nil {
-				return fmt.Errorf("neighbors: %w", err)
 			}
 			return nil
 		},
