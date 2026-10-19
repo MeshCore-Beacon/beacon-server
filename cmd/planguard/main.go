@@ -10,10 +10,14 @@
 //	planguard gen-policy [--corpus FILE] [--out FILE]   (defaults and db/sqlc are under the module root)
 //	planguard diff --cases db/planguard/diff/NAME.yaml [--old-ref origin/dev] [--walk 1,2,3,web] [--dsn $PLANGUARD_DSN]
 //	               [--out planguard-out] [--files db/planguard]
+//	planguard storediff --old URL --new URL --cases db/planguard/storediff/NAME.yaml [--walk 1,2,3,web] [--out DIR]
 //
 // diff runs each batch of a case file in one READ ONLY snapshot and compares every pair's full results. old:
 // statements are read from db/sqlc at --old-ref through git (the checkout is never switched), new: from the working
 // tree's db/sqlc, file: from --files.
+//
+// storediff walks each case of a case file page by page on two running servers (normally both read-only on one
+// database) and compares the whole JSON of every page.
 //
 // --tier fixture first builds the synthetic fixture on --dsn through the migrations (or finds it built from the same
 // files); it refuses a database that holds data and was not built that way.
@@ -27,6 +31,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -44,7 +50,8 @@ import (
 
 const usage = "usage: planguard run --tier fixture|local|prod [flags] (planguard run -h for the flags)\n" +
 	"       planguard gen-policy [--corpus FILE] [--out FILE] (paths default to the module root's db/)\n" +
-	"       planguard diff --cases FILE [--old-ref REF] [--walk 1,2,3,web] [--dsn DSN] [--out DIR] [--files DIR]"
+	"       planguard diff --cases FILE [--old-ref REF] [--walk 1,2,3,web] [--dsn DSN] [--out DIR] [--files DIR]\n" +
+	"       planguard storediff --old URL --new URL --cases FILE [--walk 1,2,3,web] [--out DIR]"
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -63,8 +70,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "diff":
 		return diffCmd(args[1:], stderr)
 	case "storediff":
-		fmt.Fprintf(stderr, "planguard %s: not implemented\n", args[0])
-		return 1
+		return storeDiffCmd(args[1:], stderr)
 	case "-h", "-help", "--help", "help":
 		fmt.Fprintln(stderr, usage)
 		return 2
@@ -225,6 +231,78 @@ func diffCmd(args []string, stderr io.Writer) int {
 	}
 	if runErr != nil {
 		fmt.Fprintln(stderr, "planguard diff:", runErr)
+		code = 1
+	}
+	return code
+}
+
+// storeDiffCmd compares the pages of two servers' API.
+func storeDiffCmd(args []string, stderr io.Writer) int {
+	fs := flag.NewFlagSet("storediff", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	oldBase := fs.String("old", "", "base URL of the old server, e.g. http://127.0.0.1:8481 (required)")
+	newBase := fs.String("new", "", "base URL of the new server, e.g. http://127.0.0.1:8482 (required)")
+	cases := fs.String("cases", "", "storediff case file, e.g. db/planguard/storediff/smoke.yaml (required)")
+	walk := fs.String("walk", "web", "comma list of page sizes; web = each case's web_limit")
+	out := fs.String("out", "", "directory for storediff_report.md (default: no file)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	usageErr := func(format string, a ...any) int {
+		fmt.Fprintf(stderr, "planguard storediff: "+format+"\n", a...)
+		return 2
+	}
+	if fs.NArg() > 0 {
+		return usageErr("unexpected argument %q", fs.Arg(0))
+	}
+	if *oldBase == "" || *newBase == "" || *cases == "" {
+		return usageErr("--old, --new and --cases are required")
+	}
+	for _, base := range []string{*oldBase, *newBase} {
+		if u, err := url.Parse(base); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return usageErr("%q is not an http(s) base URL", base)
+		}
+	}
+	if _, err := parseWalk(*walk); err != nil {
+		return usageErr("--walk: %v", err)
+	}
+	spec, err := planguard.LoadStoreDiffSpec(*cases)
+	if err != nil {
+		fmt.Fprintln(stderr, "planguard storediff:", err)
+		return 1
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	hc := &http.Client{Timeout: 2 * time.Minute}
+	rep, runErr := planguard.RunStoreDiff(ctx, hc, *oldBase, *newBase, spec, strings.Split(*walk, ","))
+	code := 0
+	if rep != nil {
+		for _, c := range rep.Cases {
+			fmt.Fprintln(stderr, c.Line())
+		}
+		if *out != "" {
+			path := filepath.Join(*out, "storediff_report.md")
+			if err := os.MkdirAll(*out, 0o755); err != nil {
+				fmt.Fprintln(stderr, "planguard storediff:", err)
+				code = 1
+			} else if err := os.WriteFile(path, []byte(rep.Markdown()), 0o644); err != nil {
+				fmt.Fprintln(stderr, "planguard storediff:", err)
+				code = 1
+			} else {
+				fmt.Fprintf(stderr, "report: %s\n", path)
+			}
+		}
+		if n := len(rep.Failed()); n > 0 {
+			fmt.Fprintf(stderr, "%d results differ\n", n)
+			code = 1
+		}
+		if n := len(rep.Skipped()); n > 0 {
+			fmt.Fprintf(stderr, "%d results were skipped: a path var found no value, so they prove nothing\n", n)
+			code = 1
+		}
+	}
+	if runErr != nil {
+		fmt.Fprintln(stderr, "planguard storediff:", runErr)
 		code = 1
 	}
 	return code

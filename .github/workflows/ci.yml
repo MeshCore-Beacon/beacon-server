@@ -59,15 +59,15 @@ jobs:
       - name: Verify scope refresh concurrency
         run: go test -race ./internal/meshmapper ./internal/scopestore && go test -race ./db -run '^TestChannelIDCache'
 
-      - name: Verify backup startup against PostgreSQL 16
+      - name: Verify backup startup and the read-only boot against PostgreSQL 16
         env:
           BEACON_TEST_POSTGRES_DSN: postgres://postgres:backup-ci-only@127.0.0.1:5432/postgres?sslmode=disable
-        run: go test ./cmd/beacon -run '^TestBackupConfigurationPostgres$' -count=1 -v
+        run: go test ./cmd/beacon -run '^Test(BackupConfiguration|ReadOnlyBootWritesNothing)Postgres$' -count=1 -v
 
       - name: Verify stats and endpoint queries against PostgreSQL 16
         env:
           BEACON_TEST_POSTGRES_DSN: postgres://postgres:backup-ci-only@127.0.0.1:5432/postgres?sslmode=disable
-        run: go test ./db -run '^Test(Signal|Paths|PacketSummaries|PacketEndpointsResolveLive|ObserverMetrics|RouteEvidence|RouteEvidenceIndex|AnalyticsRetention|AnalyticsRetentionConcurrent|DeleteOldPacketsBatches|MeshMapperCatalogue|ChannelMessageScopes|NodeLocationReset|RunMigrations[A-Za-z]*|KnownRoutesIndexSet|Reconfirm[A-Za-z]*|BigintCursors|RouteSearchHopOrder|StatsNodeTypesSplit|ListKnownRoutes|ListKnownRoutesMatchesLegacy|KnownRoutesCursorTies|KnownRoutesUnanalyzedRegion|KnownRoutesHopStatementsStayCustom|KnownRoutePaginationTies|RouteRetentionCutoffsExact|DeleteExpiredRoutes|DeleteGraceRoutesSlice|GraceWatermarkHeldByLockedRow|OpenPoolsSettings|PlanRouterClassCUnnamed|APIStoreHopStatementsUnnamed|PgStatStatementsMigrationGuarded|DBStatements|DBStatementsNoExtension|PgStatStatementsMigrationNoCreatableSchema|IndexHealthBaselineOnReindex|UnusedIndexes|PgActivity|RollHourSetsWorkMem|SmallTableIndexSet|NodeReadersAfterIndexDrops|ObserverChannelReadersAfterIndexDrops|UpsertChannelWriteThrough|UpsertChannelHashOnlyWriteThrough)Postgres$' -count=1 -v
+        run: go test ./db -run '^Test(Signal|Paths|PacketSummaries|PacketEndpointsResolveLive|ObserverMetrics|RouteEvidence|RouteEvidenceIndex|AnalyticsRetention|AnalyticsRetentionConcurrent|DeleteOldPacketsBatches|MeshMapperCatalogue|ChannelMessageScopes|NodeLocationReset|RunMigrations[A-Za-z]*|KnownRoutesIndexSet|Reconfirm[A-Za-z]*|BigintCursors|RouteSearchHopOrder|StatsNodeTypesSplit|ListKnownRoutes|ListKnownRoutesMatchesLegacy|KnownRoutesCursorTies|KnownRoutesUnanalyzedRegion|KnownRoutesHopStatementsStayCustom|KnownRoutePaginationTies|RouteRetentionCutoffsExact|DeleteExpiredRoutes|DeleteGraceRoutesSlice|GraceWatermarkHeldByLockedRow|OpenPoolsSettings|PlanRouterClassCUnnamed|APIStoreHopStatementsUnnamed|PgStatStatementsMigrationGuarded|DBStatements|DBStatementsNoExtension|PgStatStatementsMigrationNoCreatableSchema|IndexHealthBaselineOnReindex|UnusedIndexes|PgActivity|RollHourSetsWorkMem|SmallTableIndexSet|NodeReadersAfterIndexDrops|ObserverChannelReadersAfterIndexDrops|UpsertChannelWriteThrough|UpsertChannelHashOnlyWriteThrough|ReadOnlyPoolsRejectWrites)Postgres$' -count=1 -v
 
       - name: Verify route retention task against PostgreSQL 16
         env:

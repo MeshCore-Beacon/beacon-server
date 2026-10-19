@@ -1,0 +1,42 @@
+# Smoke cases: two read-only servers on one database, walked page by page and compared as whole JSON.
+#
+#   planguard storediff --old http://127.0.0.1:8481 --new http://127.0.0.1:8482 \
+#     --cases db/planguard/storediff/smoke.yaml --walk 1,2,3,web
+#
+# /routes answers a bare array: it has more while a page is full, and the next page starts at the last route's
+# lastSeen and id.
+cases:
+  - id: routes_sea
+    path: /api/v1/routes
+    query: {iata: SEA}
+    follow:
+      - {param: cursor, from: last.lastSeen}
+      - {param: cursorId, from: last.id}
+  - id: routes_global
+    path: /api/v1/routes
+    follow:
+      - {param: cursor, from: last.lastSeen}
+      - {param: cursorId, from: last.id}
+  - id: nodes
+    path: /api/v1/nodes
+    follow:
+      - {param: cursor, from: nextCursor}
+  - id: observers
+    path: /api/v1/observers
+    follow:
+      - {param: cursor, from: nextCursor}
+  - id: packets
+    path: /api/v1/packets
+    follow:
+      - {param: cursor, from: nextCursor}
+  - id: channel_messages
+    # The channel heard most recently: /channels is ordered by last seen.
+    path: /api/v1/channels/{channel}/messages
+    vars:
+      channel: {path: /api/v1/channels, query: {limit: "1"}, from: first.id}
+    follow:
+      - {param: cursor, from: nextCursor}
+  - id: messages
+    path: /api/v1/messages
+    follow:
+      - {param: cursor, from: nextCursor}

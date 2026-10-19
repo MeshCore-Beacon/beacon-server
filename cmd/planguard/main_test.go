@@ -5,6 +5,9 @@ package main
 
 import (
 	"bytes"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,6 +36,9 @@ func TestCLIUsage(t *testing.T) {
 		{"diff bad walk", []string{"diff", "--cases", "c.yaml", "--walk", "1,0"}, "--walk"},
 		{"diff bad walk word", []string{"diff", "--cases", "c.yaml", "--walk", "web,all"}, "all"},
 		{"diff unknown flag", []string{"diff", "--nope"}, "nope"},
+		{"storediff without new", []string{"storediff", "--old", "http://a", "--cases", "c.yaml"}, "--new"},
+		{"storediff bad url", []string{"storediff", "--old", "a:8481", "--new", "http://b", "--cases", "c.yaml"}, "a:8481"},
+		{"storediff bad walk", []string{"storediff", "--old", "http://a", "--new", "http://b", "--cases", "c.yaml", "--walk", "0"}, "--walk"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -66,5 +72,36 @@ func TestGenPolicyFromSubdirectory(t *testing.T) {
 	}
 	if !bytes.Equal(got, want) {
 		t.Errorf("generated policy differs from the committed db/planpolicy/cached_gen.go:\n%s", got)
+	}
+}
+
+// storediff exits 0 when every page matches and 1 when one differs, and writes its report under --out.
+func TestStoreDiffCLI(t *testing.T) {
+	serve := func(name string) *httptest.Server {
+		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"items":[{"id":1,"name":%q}],"hasMore":false}`, name)
+		}))
+		t.Cleanup(s.Close)
+		return s
+	}
+	dir := t.TempDir()
+	cases := filepath.Join(dir, "cases.yaml")
+	if err := os.WriteFile(cases, []byte("cases:\n  - id: things\n    path: /api/v1/things\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a, b, c := serve("x"), serve("x"), serve("y")
+	var out, errb bytes.Buffer
+	if code := run([]string{"storediff", "--old", a.URL, "--new", b.URL, "--cases", cases, "--walk", "1,web", "--out", dir}, &out, &errb); code != 0 {
+		t.Fatalf("same servers: exit %d, stderr %s", code, errb.String())
+	}
+	report, err := os.ReadFile(filepath.Join(dir, "storediff_report.md"))
+	if err != nil || !strings.Contains(string(report), "| things | 50 | 1 | identical |") {
+		t.Errorf("report %q (%v)", report, err)
+	}
+	errb.Reset()
+	if code := run([]string{"storediff", "--old", a.URL, "--new", c.URL, "--cases", cases}, &out, &errb); code != 1 ||
+		!strings.Contains(errb.String(), `$.items[0].name: old "x", new "y"`) {
+		t.Errorf("different servers: exit %d, stderr %s", code, errb.String())
 	}
 }

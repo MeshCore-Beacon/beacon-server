@@ -6,6 +6,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -461,5 +462,32 @@ func TestGuardFamiliesMatch(t *testing.T) {
 	}
 	if strings.Join(guardFamilies, ",") != strings.Join(want, ",") {
 		t.Errorf("guardFamilies = %v, want %v", guardFamilies, want)
+	}
+}
+
+func TestLoad_ServerReadOnly(t *testing.T) {
+	for _, tc := range []struct {
+		yaml string
+		want bool
+	}{
+		{"server:\n  read_only: true\n", true},
+		{"server:\n  admin_listen: \"\"\n", false},
+		{"server:\n  read_only: yes\n", true},
+		{"server:\n  read_only: false\n", false},
+	} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte(tc.yaml), 0600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load(%q): %v", tc.yaml, err)
+		}
+		if cfg.Server.ReadOnly != tc.want {
+			t.Errorf("Load(%q): ReadOnly = %v, want %v", tc.yaml, cfg.Server.ReadOnly, tc.want)
+		}
+		if r := Resolve(cfg); r.ReadOnly != tc.want || !strings.Contains(r.String(), "readOnly="+strconv.FormatBool(tc.want)) {
+			t.Errorf("Resolve(%q): ReadOnly = %v (%s), want %v", tc.yaml, r.ReadOnly, r, tc.want)
+		}
 	}
 }

@@ -38,6 +38,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 )
 
@@ -139,7 +140,13 @@ func main() {
 
 	dsn := getEnv("POSTGRES_DSN")
 	layout := resolved.APIPlanLayout
-	pools, err := db.OpenPools(ctx, dsn, layout)
+	mode := bootModeFor(resolved.ReadOnly)
+	var tune []func(string, *pgxpool.Config)
+	if resolved.ReadOnly {
+		slog.Warn(readOnlyWarning, "component", "startup")
+		tune = append(tune, readOnlyTune)
+	}
+	pools, err := db.OpenPools(ctx, dsn, layout, tune...)
 	if err != nil {
 		// Parse errors can embed the complete DSN, including its password.
 		slog.Error("invalid PostgreSQL connection configuration; check POSTGRES_DSN", "component", "startup")
@@ -149,9 +156,11 @@ func main() {
 	slog.Info("database pools open", "component", "startup", "layout", layout, "connections", pools.Total())
 	backupOpts := configureBackup(ctx, cfg, pools.Maint, dsn, configPath)
 
-	if err := db.RunMigrations(ctx, pools.Maint); err != nil {
-		slog.Error("migrations failed", "component", "startup", "error", err)
-		os.Exit(1)
+	if mode.Migrate {
+		if err := db.RunMigrations(ctx, pools.Maint); err != nil {
+			slog.Error("migrations failed", "component", "startup", "error", err)
+			os.Exit(1)
+		}
 	}
 
 	// Three stores: ingest writes, background and operator work, and API reads. The API store
@@ -172,7 +181,9 @@ func main() {
 	// ── Presence write coalescing ────────────────────────────────────────────
 	// Ingest writes go through the coalescer; reads use the API store.
 	coalescer := presence.New(ingestStore, resolved.PresenceFlushInterval, resolved.PresencePacketTTL)
-	go coalescer.Run(ctx)
+	if mode.Coalescer {
+		go coalescer.Run(ctx)
+	}
 
 	// ── Redis cache layer ────────────────────────────────────────────────────
 	var reader api.Reader = apiStore
@@ -201,9 +212,11 @@ func main() {
 	}
 
 	// ── Seed config data ─────────────────────────────────────────────────────
-	if err := config.Seed(ctx, cfg, maintStore); err != nil {
-		slog.Error("failed to seed config", "component", "startup", "error", err)
-		os.Exit(1)
+	if mode.Seed {
+		if err := config.Seed(ctx, cfg, maintStore); err != nil {
+			slog.Error("failed to seed config", "component", "startup", "error", err)
+			os.Exit(1)
+		}
 	}
 
 	// ── Build transport scope keystore ───────────────────────────────────────
@@ -217,7 +230,7 @@ func main() {
 	scopes.SetManualMembers(cfg.ManualScopeMembers())
 	slog.Info(fmt.Sprintf("loaded %d transport scopes", len(scopeEntries)), "component", "startup")
 	directory := meshmapper.NewDirectory(maintStore, cfg.MeshMapper.APIKey)
-	if mm := cfg.MeshMapper; mm.Scopes.Enabled || mm.Zones.Enabled || mm.Channels.Enabled || mm.Repeaters.Enabled {
+	if mm := cfg.MeshMapper; mode.MeshMapper && (mm.Scopes.Enabled || mm.Zones.Enabled || mm.Channels.Enabled || mm.Repeaters.Enabled) {
 		if cfg.MeshMapper.APIKey == "" {
 			slog.Warn("MeshMapper integration unconfigured: set MESHMAPPER_API_KEY or meshmapper.api_key; retaining cached data", "component", "meshmapper")
 		}
@@ -230,7 +243,7 @@ func main() {
 		}
 	}
 	var scopeImporter *meshmapper.Importer
-	if cfg.MeshMapper.Scopes.Enabled {
+	if mode.MeshMapper && cfg.MeshMapper.Scopes.Enabled {
 		restoreCtx, cancelRestore := context.WithTimeout(ctx, 10*time.Second)
 		scopeImporter, err = meshmapper.New(restoreCtx, cfg.MeshMapper.Scopes, maintStore, directory, scopes, scopeEntries)
 		cancelRestore()
@@ -264,12 +277,15 @@ func main() {
 			localBorders.Store(local)
 		})
 	}
-	restoreCtx, cancelRestore := context.WithTimeout(ctx, 10*time.Second)
-	err = zones.Restore(restoreCtx)
-	cancelRestore()
-	if err != nil {
-		slog.Error("failed to restore MeshMapper boundaries", "component", "startup", "error", err)
-		os.Exit(1)
+	// Restore prunes boundaries a disabled import left behind, so a read-only server skips it.
+	if mode.MeshMapper {
+		restoreCtx, cancelRestore := context.WithTimeout(ctx, 10*time.Second)
+		err = zones.Restore(restoreCtx)
+		cancelRestore()
+		if err != nil {
+			slog.Error("failed to restore MeshMapper boundaries", "component", "startup", "error", err)
+			os.Exit(1)
+		}
 	}
 	if localBorders != nil && !localBorders.Ready() {
 		slog.Warn("nodes.mark_foreign has no boundaries yet; waiting for MeshMapper", "component", "startup")
@@ -315,47 +331,56 @@ func main() {
 
 	keys := keystore.NewMapKeyStore(entries)
 
-	// Restored before the boot backfill so saved MeshMapper keys decrypt history too.
-	restoreCtx, cancelRestore = context.WithTimeout(ctx, 10*time.Second)
-	channelImporter, err := meshmapper.NewChannels(restoreCtx, cfg.MeshMapper.Channels, maintStore, directory, keys)
-	cancelRestore()
-	if err != nil {
-		slog.Error("failed to restore MeshMapper channels", "component", "startup", "error", err)
-		os.Exit(1)
+	// Restored before the boot backfill so saved MeshMapper keys decrypt history too. Both
+	// constructors may clear rows when their import is disabled, so a read-only server skips them.
+	var channelImporter *meshmapper.Channels
+	var repeaterImporter *meshmapper.Repeaters
+	if mode.MeshMapper {
+		restoreCtx, cancelRestore := context.WithTimeout(ctx, 10*time.Second)
+		channelImporter, err = meshmapper.NewChannels(restoreCtx, cfg.MeshMapper.Channels, maintStore, directory, keys)
+		cancelRestore()
+		if err != nil {
+			slog.Error("failed to restore MeshMapper channels", "component", "startup", "error", err)
+			os.Exit(1)
+		}
+		var onRepeatersChange func(context.Context)
+		if cr, ok := reader.(*cache.CachedReader); ok {
+			onRepeatersChange = cr.InvalidateNodeDetails
+		}
+		restoreCtx, cancelRestore = context.WithTimeout(ctx, 10*time.Second)
+		repeaterImporter, err = meshmapper.NewRepeaters(restoreCtx, cfg.MeshMapper.Repeaters, maintStore, directory, onRepeatersChange)
+		cancelRestore()
+		if err != nil {
+			slog.Error("failed to restore MeshMapper repeaters", "component", "startup", "error", err)
+			os.Exit(1)
+		}
 	}
-	var onRepeatersChange func(context.Context)
-	if cr, ok := reader.(*cache.CachedReader); ok {
-		onRepeatersChange = cr.InvalidateNodeDetails
+	if channelImporter != nil && mode.Backfill {
+		channelImporter.OnNewKeys(func(hashes [][]byte) {
+			// Off the refresh tick: a backfill can outlast it, and history isn't urgent.
+			go func() {
+				backfillCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+				defer cancel()
+				if n, err := ingest.BackfillChannelHashes(backfillCtx, maintStore, keys, hashes); err != nil {
+					slog.Error("MeshMapper channel backfill failed", "component", "meshmapper.channels", "error", err)
+				} else if n > 0 {
+					slog.Info(fmt.Sprintf("backfilled %d channel message(s) for imported keys", n), "component", "meshmapper.channels")
+				}
+			}()
+		})
 	}
-	restoreCtx, cancelRestore = context.WithTimeout(ctx, 10*time.Second)
-	repeaterImporter, err := meshmapper.NewRepeaters(restoreCtx, cfg.MeshMapper.Repeaters, maintStore, directory, onRepeatersChange)
-	cancelRestore()
-	if err != nil {
-		slog.Error("failed to restore MeshMapper repeaters", "component", "startup", "error", err)
-		os.Exit(1)
-	}
-	channelImporter.OnNewKeys(func(hashes [][]byte) {
-		// Off the refresh tick: a backfill can outlast it, and history isn't urgent.
-		go func() {
-			backfillCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-			defer cancel()
-			if n, err := ingest.BackfillChannelHashes(backfillCtx, maintStore, keys, hashes); err != nil {
-				slog.Error("MeshMapper channel backfill failed", "component", "meshmapper.channels", "error", err)
-			} else if n > 0 {
-				slog.Info(fmt.Sprintf("backfilled %d channel message(s) for imported keys", n), "component", "meshmapper.channels")
-			}
-		}()
-	})
 
 	// ── Backfill channel messages ────────────────────────────────────────────
 	// Packets whose channel key wasn't yet configured at ingest time were stored as
 	// hash-only channels and never decrypted. Retry them now against the keystore we just
 	// built, so adding a channel key to the config surfaces its history on the next boot
 	// instead of leaving it stranded in the DB indefinitely.
-	if n, err := ingest.BackfillChannelMessages(ctx, maintStore, keys); err != nil {
-		slog.Error("config: channel message backfill failed", "component", "startup", "error", err)
-	} else if n > 0 {
-		slog.Info(fmt.Sprintf("config: backfilled %d previously-undecrypted channel message(s)", n), "component", "startup")
+	if mode.Backfill {
+		if n, err := ingest.BackfillChannelMessages(ctx, maintStore, keys); err != nil {
+			slog.Error("config: channel message backfill failed", "component", "startup", "error", err)
+		} else if n > 0 {
+			slog.Info(fmt.Sprintf("config: backfilled %d previously-undecrypted channel message(s)", n), "component", "startup")
+		}
 	}
 
 	// ── Build geographic ingest filter ───────────────────────────────────────────────────────────
@@ -407,15 +432,19 @@ func main() {
 	}
 
 	var ingestWorkers sync.WaitGroup
-	ingestWorkers.Go(func() { broker1.Start(ctx) })
-	ingestWorkers.Go(func() { broker2.Start(ctx) })
+	if mode.Ingest {
+		ingestWorkers.Go(func() { broker1.Start(ctx) })
+		ingestWorkers.Go(func() { broker2.Start(ctx) })
+	}
 
 	rollup := background.NewRollup(maintStore, resolved.PacketRetention, resolved.RollupRetention)
-	go func() {
-		if err := rollup.CatchUp(ctx); err != nil {
-			slog.Error("analytics rollup catch-up failed", "component", "background", "error", err)
-		}
-	}()
+	if mode.Jobs {
+		go func() {
+			if err := rollup.CatchUp(ctx); err != nil {
+				slog.Error("analytics rollup catch-up failed", "component", "background", "error", err)
+			}
+		}()
+	}
 	tasks := []background.Task{
 		rollup.Task(),
 		background.ViewRefreshTask(maintStore, resolved.ViewRefreshInterval),
@@ -441,13 +470,13 @@ func main() {
 	if scopeImporter != nil {
 		tasks = append(tasks, background.Task{Name: "meshmapper.scopes", Interval: meshmapper.PollInterval, Run: scopeImporter.Refresh})
 	}
-	if cfg.MeshMapper.Zones.Enabled {
+	if mode.MeshMapper && cfg.MeshMapper.Zones.Enabled {
 		tasks = append(tasks, background.Task{Name: "meshmapper.zones", Interval: meshmapper.PollInterval, Run: zones.Refresh})
 	}
-	if cfg.MeshMapper.Channels.Enabled {
+	if channelImporter != nil && cfg.MeshMapper.Channels.Enabled {
 		tasks = append(tasks, background.Task{Name: "meshmapper.channels", Interval: meshmapper.PollInterval, Run: channelImporter.Refresh})
 	}
-	if cfg.MeshMapper.Repeaters.Enabled {
+	if repeaterImporter != nil && cfg.MeshMapper.Repeaters.Enabled {
 		tasks = append(tasks, background.Task{Name: "meshmapper.repeaters", Interval: meshmapper.PollInterval, Run: repeaterImporter.Refresh})
 	}
 	profiles := configureProfiling(ctx, pools.Maint)
@@ -455,8 +484,10 @@ func main() {
 	for i := range tasks {
 		tasks[i].Run = profiles.WrapTask(tasks[i].Name, tasks[i].Run)
 	}
-	scheduler := background.New(tasks)
-	go scheduler.Start(ctx)
+	if mode.Jobs {
+		scheduler := background.New(tasks)
+		go scheduler.Start(ctx)
+	}
 
 	// ── HTTP server ──────────────────────────────────────────────────────────
 	// Wrap after wiring cache invalidators and cleanup callbacks to the actual
@@ -520,7 +551,9 @@ func main() {
 		}
 	}
 	ingestWorkers.Wait()
-	coalescer.Flush(shutdownCtx)
+	if mode.Coalescer {
+		coalescer.Flush(shutdownCtx)
+	}
 }
 
 // proxyLimitWarning explains why per-IP limits go site-wide behind an unlisted reverse proxy.
