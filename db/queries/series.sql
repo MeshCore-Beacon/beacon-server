@@ -18,12 +18,15 @@ WITH hours AS (
 ), obs_agg AS (
     SELECT hour, sum(observation_count)::bigint AS observations, count(DISTINCT iata)::bigint AS active_iatas
     FROM obs GROUP BY GROUPING SETS ((), (hour))
+), pkt_rows AS MATERIALIZED (
+    SELECT s.hour, s.packets FROM analytics_hourly_packet_sets s
+    WHERE cardinality(@iatas::bpchar[]) > 0 AND s.iatas && @iatas::bpchar[]
+      AND s.hour >= @since::timestamptz AND s.hour < @until::timestamptz
 ), pkt AS (
     SELECT s.hour, s.packets FROM analytics_hourly_packet_sets s JOIN complete c ON c.hour = s.hour
     WHERE COALESCE(cardinality(@iatas::bpchar[]), 0) = 0
     UNION ALL
-    SELECT s.hour, s.packets FROM analytics_hourly_packet_sets s JOIN complete c ON c.hour = s.hour
-    WHERE cardinality(@iatas::bpchar[]) > 0 AND s.iatas && @iatas::bpchar[]
+    SELECT s.hour, s.packets FROM pkt_rows s JOIN complete c ON c.hour = s.hour
 ), pkt_agg AS (
     SELECT hour, sum(packets)::bigint AS unique_packets FROM pkt GROUP BY GROUPING SETS ((), (hour))
 ), obsr AS (
@@ -34,12 +37,15 @@ WITH hours AS (
     WHERE cardinality(@iatas::bpchar[]) > 0 AND i.iata = ANY(@iatas::bpchar[])
 ), obsr_agg AS (
     SELECT hour, count(DISTINCT observer_id)::bigint AS active_observers FROM obsr GROUP BY GROUPING SETS ((), (hour))
+), scp_rows AS MATERIALIZED (
+    SELECT s.hour, s.scope_id, s.packets FROM analytics_hourly_scope_sets s
+    WHERE cardinality(@iatas::bpchar[]) > 0 AND s.iatas && @iatas::bpchar[]
+      AND s.hour >= @since::timestamptz AND s.hour < @until::timestamptz
 ), scp AS (
     SELECT s.hour, s.scope_id, s.packets FROM analytics_hourly_scope_sets s JOIN complete c ON c.hour = s.hour
     WHERE COALESCE(cardinality(@iatas::bpchar[]), 0) = 0
     UNION ALL
-    SELECT s.hour, s.scope_id, s.packets FROM analytics_hourly_scope_sets s JOIN complete c ON c.hour = s.hour
-    WHERE cardinality(@iatas::bpchar[]) > 0 AND s.iatas && @iatas::bpchar[]
+    SELECT s.hour, s.scope_id, s.packets FROM scp_rows s JOIN complete c ON c.hour = s.hour
 ), scp_agg AS (
     SELECT hour, sum(packets)::bigint AS scoped_packets, count(DISTINCT scope_id)::bigint AS active_scopes
     FROM scp GROUP BY GROUPING SETS ((), (hour))

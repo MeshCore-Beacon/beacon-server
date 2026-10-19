@@ -166,9 +166,9 @@ func TestTestdataHoldsNoDeploymentIDs(t *testing.T) {
 	}
 }
 
-// Legacy readers run on api_legacy with automatic plan caching: their entries run custom and auto, and the auto
-// mode carries a known issue until their rewrite lands, so a generic flip reads KNOWN_ISSUE.
-func TestRepoCorpusLegacyAutoKnownIssue(t *testing.T) {
+// Today's wide stats statements still serve lists over 32 distinct IATAs, now as class custom: their entries run
+// custom only, with no known issue left over from their legacy days.
+func TestRepoCorpusWideStatsRunCustom(t *testing.T) {
 	c, err := planguard.LoadCorpus(pgdata.Files, "corpus.yaml", repoSQLC(t))
 	if err != nil {
 		t.Fatal(err)
@@ -181,12 +181,12 @@ func TestRepoCorpusLegacyAutoKnownIssue(t *testing.T) {
 			continue
 		}
 		n++
-		if !slices.Equal(c.ModesOf(e), []string{"custom", "auto"}) || e.KnownIssueIn("auto") == "" || e.KnownIssueIn("custom") != "" {
-			t.Errorf("entry %s: modes %v, auto known issue %q, custom known issue %q", e.ID, c.ModesOf(e), e.KnownIssueIn("auto"), e.KnownIssueIn("custom"))
+		if c.Statements[e.Stmt].Plan != "custom" || !slices.Equal(c.ModesOf(e), []string{"custom"}) || e.KnownIssueIn("auto") != "" || e.KnownIssueIn("custom") != "" {
+			t.Errorf("entry %s: plan %s, modes %v, auto known issue %q, custom known issue %q", e.ID, c.Statements[e.Stmt].Plan, c.ModesOf(e), e.KnownIssueIn("auto"), e.KnownIssueIn("custom"))
 		}
 	}
 	if n != 3 {
-		t.Errorf("%d legacy reader entries, want 3", n)
+		t.Errorf("%d wide stats entries, want 3", n)
 	}
 }
 

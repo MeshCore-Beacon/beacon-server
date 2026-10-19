@@ -238,6 +238,16 @@ WHERE observer_id = $1
   AND ($4::bigint = 0 OR id > $4::bigint)
 ORDER BY reported_at ASC;
 
+-- name: GetObserverTelemetrySince :many
+-- The API's only telemetry shape (a start, no end): reported_at >= @since without the NULL branch.
+SELECT id, reported_at, battery_voltage_mv, airtime_tx_secs, airtime_rx_secs,
+       noise_floor_db, uptime_seconds, queue_length, debug_flags, receive_errors
+FROM observer_telemetry
+WHERE observer_id = @observer_id
+  AND reported_at >= @since::timestamptz
+  AND id > @after_id::bigint
+ORDER BY reported_at ASC;
+
 -- name: GetObserverActivityRaw :many
 -- Sub-hour activity buckets straight off idx_observations_observer; no join to packets.
 -- Aggregates are COALESCEd and paired with a count column: sqlc types a cast expression as
@@ -310,6 +320,31 @@ GROUP BY payload_type
 ORDER BY count DESC;
 
 -- name: ListObserverAdverts :many
+-- Advert observations (payload_type 4) heard by one observer, oldest id first, after @cursor_id
+-- (0 starts at the beginning). Reads idx_observations_adverts; needs payload_type on every observation.
+-- Keep missing-origin adverts; the generated key field expects a string, not NULL.
+SELECT
+  po.id,
+  encode(po.packet_hash, 'hex') AS packet_hash_hex,
+  p.payload_type,
+  po.iata,
+  po.heard_at,
+  po.rssi,
+  po.snr,
+  po.hop_count,
+  n.name AS node_name,
+  COALESCE(encode(p.origin_pubkey, 'hex'), '')::text AS node_public_key
+FROM packet_observations po
+JOIN packets p ON p.packet_hash = po.packet_hash
+LEFT JOIN nodes n ON n.public_key = p.origin_pubkey
+WHERE po.observer_id = @observer_id
+  AND po.payload_type = 4
+  AND po.id > @cursor_id::bigint
+ORDER BY po.id ASC
+LIMIT @row_limit;
+
+-- name: ListObserverAdvertsJoinFilter :many
+-- Filters on the packet's payload type: serves until every observation carries its own.
 -- Returns advert packets (payload_type=4) heard by a specific observer.
 -- Pass cursor=0 to start from the beginning, or the last seen id for pagination.
 -- Keep missing-origin adverts; the generated key field expects a string, not NULL.
@@ -332,6 +367,35 @@ WHERE po.observer_id = $1
   AND ($2::bigint = 0 OR po.id > $2::bigint)
 ORDER BY po.id ASC
 LIMIT $3;
+
+-- name: BackfillObservationPayloadTypes :one
+-- Copies the packet's payload type onto the first @max_rows observations in [@from_id, @to_id),
+-- in id order, that lack one. Rows that already carry a type are never touched. Returns how many
+-- untyped rows it picked, how many it typed, and the last picked id (0 when it picked none).
+WITH picked AS (
+  SELECT id
+  FROM packet_observations
+  WHERE id >= @from_id::bigint AND id < @to_id::bigint
+    AND payload_type IS NULL
+  ORDER BY id
+  LIMIT @max_rows::int
+), typed AS (
+  UPDATE packet_observations po
+  SET payload_type = p.payload_type
+  FROM packets p
+  WHERE po.id = ANY(ARRAY(SELECT id FROM picked)) -- a pkey probe; a join to picked can seq-scan the table
+    AND po.payload_type IS NULL
+    AND p.packet_hash = po.packet_hash
+  RETURNING po.id
+)
+SELECT
+  (SELECT count(*) FROM picked)::bigint AS picked,
+  (SELECT count(*) FROM typed)::bigint AS typed,
+  COALESCE((SELECT max(id) FROM picked), 0)::bigint AS last_id;
+
+-- name: GetObservationIDRange :one
+SELECT COALESCE(min(id), 0)::bigint AS min_id, COALESCE(max(id), 0)::bigint AS max_id
+FROM packet_observations;
 
 -- name: DeleteOldTelemetry :exec
 -- Deletes telemetry rows older than the given cutoff. Called by the cleanup goroutine.
@@ -1596,6 +1660,37 @@ FROM ranked r
 LEFT JOIN nodes n ON n.public_key = r.origin_pubkey
 ORDER BY r.observation_count DESC, r.origin_pubkey;
 
+-- name: GetTopNodesProbe :many
+-- GetTopNodes for at most 32 distinct IATAs: one rollup probe per (hour, IATA). @since is a UTC hour.
+-- The hours walked stay inside the table's own [min(hour), max(hour)]; an empty table walks none
+-- (a NULL start makes generate_series return no rows).
+WITH src AS (
+  SELECT origin_pubkey, observations, last_heard, iata, name, node_type
+  FROM analytics_hourly_advert_hearings
+  WHERE hour >= @since::timestamptz AND COALESCE(cardinality(@iatas::bpchar[]), 0) = 0
+  UNION ALL
+  SELECT a.origin_pubkey, a.observations, a.last_heard, a.iata, a.name, a.node_type
+  FROM generate_series((SELECT CASE WHEN min(hour) IS NOT NULL THEN GREATEST(@since::timestamptz, min(hour)) END FROM analytics_hourly_advert_hearings),
+                       (SELECT LEAST(date_trunc('hour', now(), 'UTC'), max(hour)) FROM analytics_hourly_advert_hearings), interval '1 hour') g(h)
+  CROSS JOIN (SELECT DISTINCT unnest(@iatas::bpchar[]) AS iata) i
+  CROSS JOIN LATERAL (SELECT x.origin_pubkey, x.observations, x.last_heard, x.iata, x.name, x.node_type
+                      FROM analytics_hourly_advert_hearings x WHERE x.hour = g.h AND x.iata = i.iata OFFSET 0) a
+  WHERE cardinality(@iatas::bpchar[]) > 0
+), ranked AS (
+  SELECT origin_pubkey, SUM(observations)::bigint AS observation_count, MAX(last_heard) AS last_heard,
+         MAX(iata) AS iata, MAX(name) AS name, MAX(node_type) AS node_type
+  FROM src
+  GROUP BY origin_pubkey
+  ORDER BY observation_count DESC, origin_pubkey
+  LIMIT @row_limit
+)
+SELECT n.id AS node_id, encode(r.origin_pubkey, 'hex') AS public_key,
+       COALESCE(n.name, r.name, '')::text AS name, COALESCE(n.node_type, r.node_type, 0)::smallint AS node_type,
+       r.iata::bpchar AS iata, r.observation_count, r.last_heard::timestamptz AS last_heard
+FROM ranked r
+LEFT JOIN nodes n ON n.public_key = r.origin_pubkey
+ORDER BY r.observation_count DESC, r.origin_pubkey;
+
 -- name: GetStatsPayloadBreakdown :many
 -- Payload-type observation counts since the given hour, from the hourly rollup.
 SELECT
@@ -1662,6 +1757,46 @@ WITH ranked AS (
   WHERE h.hour >= @since::timestamptz AND h.origin_pubkey IN (SELECT origin_pubkey FROM ranked)
     AND (COALESCE(cardinality(@iatas::bpchar[]), 0) = 0 OR h.iata = ANY(@iatas::bpchar[]))
   GROUP BY h.origin_pubkey
+)
+SELECT n.id AS node_id, encode(r.origin_pubkey, 'hex') AS public_key,
+       COALESCE(n.name, h.name, '')::text AS name, COALESCE(n.node_type, h.node_type, 0)::smallint AS node_type,
+       r.advert_count, r.flood_advert_count, r.direct_advert_count,
+       h.last_heard::timestamptz AS last_heard, COALESCE(h.iata, '')::bpchar AS iata
+FROM ranked r
+LEFT JOIN heard h ON h.origin_pubkey = r.origin_pubkey
+LEFT JOIN nodes n ON n.public_key = r.origin_pubkey
+ORDER BY CASE WHEN @sort::text = 'flood' THEN r.flood_advert_count ELSE r.direct_advert_count END DESC,
+         r.advert_count DESC, r.origin_pubkey;
+
+-- name: GetStatsTopAdvertisersProbe :many
+-- GetStatsTopAdvertisers for at most 32 distinct IATAs: the hearings part probes per (hour, IATA),
+-- walking only hours inside the hearings table's [min(hour), max(hour)].
+WITH ranked AS (
+  SELECT origin_pubkey, SUM(advert_packets)::bigint AS advert_count,
+         SUM(flood_packets)::bigint AS flood_advert_count, SUM(direct_packets)::bigint AS direct_advert_count
+  FROM analytics_hourly_advert_sets
+  WHERE hour >= @since::timestamptz
+    AND (COALESCE(cardinality(@iatas::bpchar[]), 0) = 0 OR iatas && @iatas::bpchar[])
+  GROUP BY origin_pubkey
+  ORDER BY CASE WHEN @sort::text = 'flood' THEN SUM(flood_packets) ELSE SUM(direct_packets) END DESC,
+           advert_count DESC, origin_pubkey
+  LIMIT @row_limit
+), heard_rows AS (
+  SELECT h.origin_pubkey, h.last_heard, h.iata, h.name, h.node_type
+  FROM analytics_hourly_advert_hearings h
+  WHERE h.hour >= @since::timestamptz AND COALESCE(cardinality(@iatas::bpchar[]), 0) = 0
+    AND h.origin_pubkey IN (SELECT origin_pubkey FROM ranked)
+  UNION ALL
+  SELECT h.origin_pubkey, h.last_heard, h.iata, h.name, h.node_type
+  FROM generate_series((SELECT CASE WHEN min(hour) IS NOT NULL THEN GREATEST(@since::timestamptz, min(hour)) END FROM analytics_hourly_advert_hearings),
+                       (SELECT LEAST(date_trunc('hour', now(), 'UTC'), max(hour)) FROM analytics_hourly_advert_hearings), interval '1 hour') g(h)
+  CROSS JOIN (SELECT DISTINCT unnest(@iatas::bpchar[]) AS iata) i
+  CROSS JOIN LATERAL (SELECT x.origin_pubkey, x.last_heard, x.iata, x.name, x.node_type
+                      FROM analytics_hourly_advert_hearings x WHERE x.hour = g.h AND x.iata = i.iata OFFSET 0) h
+  WHERE cardinality(@iatas::bpchar[]) > 0 AND h.origin_pubkey IN (SELECT origin_pubkey FROM ranked)
+), heard AS (
+  SELECT origin_pubkey, MAX(last_heard) AS last_heard, MAX(iata) AS iata, MAX(name) AS name, MAX(node_type) AS node_type
+  FROM heard_rows GROUP BY origin_pubkey
 )
 SELECT n.id AS node_id, encode(r.origin_pubkey, 'hex') AS public_key,
        COALESCE(n.name, h.name, '')::text AS name, COALESCE(n.node_type, h.node_type, 0)::smallint AS node_type,
@@ -1884,9 +2019,10 @@ WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR EXISTS (
   AND ($3::timestamptz IS NULL OR t.first_heard_at >= $3)
   AND ($4::timestamptz IS NULL OR t.first_heard_at <= $4)
   -- Keyset on the millisecond clients see, tie-broken by tag; matches idx_trace_tags_keyset.
-  AND ($5::timestamptz IS NULL
-       OR date_trunc('milliseconds', t.last_heard_at, 'UTC') < $5
-       OR ($8::bytea IS NOT NULL AND date_trunc('milliseconds', t.last_heard_at, 'UTC') = $5 AND t.trace_tag < $8))
+  -- A NULL cursor starts at ('infinity', ''), which is above every row only while last_heard_at is finite: UpsertPacket
+  -- writes NOW() and RecordTrace a finite heard time.
+  AND (date_trunc('milliseconds', t.last_heard_at, 'UTC'), t.trace_tag)
+      < (COALESCE($5::timestamptz, 'infinity'::timestamptz), COALESCE($8::bytea, ''::bytea))
   AND ($7::text = '' OR t.trace_type = $7)
 ORDER BY date_trunc('milliseconds', t.last_heard_at, 'UTC') DESC, t.trace_tag DESC
 LIMIT $6;

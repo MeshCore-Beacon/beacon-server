@@ -92,9 +92,22 @@ func (s *Store) GetStatsPayloadBreakdown(ctx context.Context, iatas []string, si
 }
 
 func (s *Store) GetStatsTopNodes(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopNode, error) {
-	rows, err := s.q.GetTopNodes(ctx, sqlc.GetTopNodesParams{Since: rollupSince(since, 7*24*time.Hour), Iatas: iatas, RowLimit: limit})
-	if err != nil {
-		return nil, err
+	from := rollupSince(since, 7*24*time.Hour)
+	var rows []sqlc.GetTopNodesRow
+	if useStatsProbe(iatas, from.Time) {
+		probeRows, err := s.q.GetTopNodesProbe(ctx, sqlc.GetTopNodesProbeParams{Since: from, Iatas: iatas, RowLimit: limit})
+		if err != nil {
+			return nil, err
+		}
+		rows = make([]sqlc.GetTopNodesRow, len(probeRows))
+		for i, r := range probeRows {
+			rows[i] = sqlc.GetTopNodesRow(r)
+		}
+	} else {
+		var err error
+		if rows, err = s.q.GetTopNodes(ctx, sqlc.GetTopNodesParams{Since: from, Iatas: iatas, RowLimit: limit}); err != nil {
+			return nil, err
+		}
 	}
 	items := make([]api.TopNode, 0, len(rows))
 	for _, v := range rows {
@@ -131,9 +144,22 @@ func (s *Store) GetStatsTopObservers(ctx context.Context, iatas []string, since 
 }
 
 func (s *Store) GetStatsTopAdvertisers(ctx context.Context, iatas []string, since time.Time, limit int32, sort api.AdvertiserSort) ([]api.TopAdvertiser, error) {
-	rows, err := s.q.GetStatsTopAdvertisers(ctx, sqlc.GetStatsTopAdvertisersParams{Sort: string(sort), Since: rollupSince(since, 24*time.Hour), Iatas: iatas, RowLimit: limit})
-	if err != nil {
-		return nil, err
+	from := rollupSince(since, 24*time.Hour)
+	var rows []sqlc.GetStatsTopAdvertisersRow
+	if useStatsProbe(iatas, from.Time) {
+		probeRows, err := s.q.GetStatsTopAdvertisersProbe(ctx, sqlc.GetStatsTopAdvertisersProbeParams{Sort: string(sort), Since: from, Iatas: iatas, RowLimit: limit})
+		if err != nil {
+			return nil, err
+		}
+		rows = make([]sqlc.GetStatsTopAdvertisersRow, len(probeRows))
+		for i, r := range probeRows {
+			rows[i] = sqlc.GetStatsTopAdvertisersRow(r)
+		}
+	} else {
+		var err error
+		if rows, err = s.q.GetStatsTopAdvertisers(ctx, sqlc.GetStatsTopAdvertisersParams{Sort: string(sort), Since: from, Iatas: iatas, RowLimit: limit}); err != nil {
+			return nil, err
+		}
 	}
 	items := make([]api.TopAdvertiser, 0, len(rows))
 	for _, v := range rows {

@@ -177,15 +177,35 @@ func (s *Store) InsertObserverTelemetry(ctx context.Context, observerID uuid.UUI
 	})
 }
 
+// GetObserverTelemetry reads a start with no end, the shape the API sends, through the since-only statement; every
+// other shape takes the catch-all. Both return the same rows: ids start at 1, so id > afterID equals the catch-all's
+// afterID = 0 escape for every afterID <= 0.
 func (s *Store) GetObserverTelemetry(ctx context.Context, observerID uuid.UUID, since, until time.Time, afterID int64) (*api.ObserverTelemetry, error) {
-	rows, err := s.q.GetObserverTelemetry(ctx, sqlc.GetObserverTelemetryParams{
-		ObserverID: observerID,
-		Column2:    pgtype.Timestamptz{Time: since, Valid: !since.IsZero()},
-		Column3:    pgtype.Timestamptz{Time: until, Valid: !until.IsZero()},
-		Column4:    afterID,
-	})
-	if err != nil {
-		return nil, err
+	var rows []sqlc.GetObserverTelemetryRow
+	if !since.IsZero() && until.IsZero() {
+		sinceRows, err := s.q.GetObserverTelemetrySince(ctx, sqlc.GetObserverTelemetrySinceParams{
+			ObserverID: observerID,
+			Since:      pgtype.Timestamptz{Time: since, Valid: true},
+			AfterID:    afterID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		rows = make([]sqlc.GetObserverTelemetryRow, len(sinceRows))
+		for i, r := range sinceRows {
+			rows[i] = sqlc.GetObserverTelemetryRow(r)
+		}
+	} else {
+		var err error
+		rows, err = s.q.GetObserverTelemetry(ctx, sqlc.GetObserverTelemetryParams{
+			ObserverID: observerID,
+			Column2:    pgtype.Timestamptz{Time: since, Valid: !since.IsZero()},
+			Column3:    pgtype.Timestamptz{Time: until, Valid: !until.IsZero()},
+			Column4:    afterID,
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 	points := make([]api.ObserverTelemetryPoint, 0, len(rows))
 	for _, v := range rows {
@@ -397,11 +417,25 @@ func (s *Store) GetObserverActivity(ctx context.Context, observerID uuid.UUID, w
 }
 
 func (s *Store) ListObserverAdverts(ctx context.Context, observerID uuid.UUID, cursor int64, limit int32) (api.Page[api.AdvertObservation], error) {
-	rows, err := s.q.ListObserverAdverts(ctx, sqlc.ListObserverAdvertsParams{
-		ObserverID: observerID,
-		Column2:    cursor,
-		Limit:      limit + 1, // fetch one extra to detect hasMore
-	})
+	var rows []sqlc.ListObserverAdvertsRow
+	var err error
+	if s.payloadTypesReady(ctx) {
+		rows, err = s.q.ListObserverAdverts(ctx, sqlc.ListObserverAdvertsParams{
+			ObserverID: observerID,
+			CursorID:   cursor,
+			RowLimit:   limit + 1, // fetch one extra to detect hasMore
+		})
+	} else {
+		var rs []sqlc.ListObserverAdvertsJoinFilterRow
+		rs, err = s.q.ListObserverAdvertsJoinFilter(ctx, sqlc.ListObserverAdvertsJoinFilterParams{
+			ObserverID: observerID,
+			Column2:    cursor,
+			Limit:      limit + 1,
+		})
+		for _, r := range rs {
+			rows = append(rows, sqlc.ListObserverAdvertsRow(r))
+		}
+	}
 	if err != nil {
 		slog.Error("api: ListObserverAdverts failed", "component", "db", "error", err)
 		return api.Page[api.AdvertObservation]{}, err

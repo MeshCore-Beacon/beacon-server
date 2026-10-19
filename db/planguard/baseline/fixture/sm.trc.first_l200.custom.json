@@ -1,0 +1,7 @@
+[
+ "Limit",
+ "  Sort",
+ "    Seq Scan on trace_tags t",
+ "      Aggregate partial=Simple [SubPlan]",
+ "        Seq Scan on trace_iatas ti"
+]

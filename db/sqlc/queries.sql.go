@@ -72,6 +72,51 @@ func (q *Queries) AddRegionIATAs(ctx context.Context, arg AddRegionIATAsParams) 
 	return err
 }
 
+const backfillObservationPayloadTypes = `-- name: BackfillObservationPayloadTypes :one
+WITH picked AS (
+  SELECT id
+  FROM packet_observations
+  WHERE id >= $1::bigint AND id < $2::bigint
+    AND payload_type IS NULL
+  ORDER BY id
+  LIMIT $3::int
+), typed AS (
+  UPDATE packet_observations po
+  SET payload_type = p.payload_type
+  FROM packets p
+  WHERE po.id = ANY(ARRAY(SELECT id FROM picked)) -- a pkey probe; a join to picked can seq-scan the table
+    AND po.payload_type IS NULL
+    AND p.packet_hash = po.packet_hash
+  RETURNING po.id
+)
+SELECT
+  (SELECT count(*) FROM picked)::bigint AS picked,
+  (SELECT count(*) FROM typed)::bigint AS typed,
+  COALESCE((SELECT max(id) FROM picked), 0)::bigint AS last_id
+`
+
+type BackfillObservationPayloadTypesParams struct {
+	FromID  int64 `json:"from_id"`
+	ToID    int64 `json:"to_id"`
+	MaxRows int32 `json:"max_rows"`
+}
+
+type BackfillObservationPayloadTypesRow struct {
+	Picked int64 `json:"picked"`
+	Typed  int64 `json:"typed"`
+	LastID int64 `json:"last_id"`
+}
+
+// Copies the packet's payload type onto the first @max_rows observations in [@from_id, @to_id),
+// in id order, that lack one. Rows that already carry a type are never touched. Returns how many
+// untyped rows it picked, how many it typed, and the last picked id (0 when it picked none).
+func (q *Queries) BackfillObservationPayloadTypes(ctx context.Context, arg BackfillObservationPayloadTypesParams) (BackfillObservationPayloadTypesRow, error) {
+	row := q.db.QueryRow(ctx, backfillObservationPayloadTypes, arg.FromID, arg.ToID, arg.MaxRows)
+	var i BackfillObservationPayloadTypesRow
+	err := row.Scan(&i.Picked, &i.Typed, &i.LastID)
+	return i, err
+}
+
 const clearRepeaters = `-- name: ClearRepeaters :execrows
 WITH reset AS (UPDATE meshmapper_repeater_sources SET etag = NULL, checked_at = NULL)
 DELETE FROM meshmapper_repeaters
@@ -904,6 +949,23 @@ func (q *Queries) GetNodesByPubkeys(ctx context.Context, pubkeys [][]byte) ([]Ge
 	return items, nil
 }
 
+const getObservationIDRange = `-- name: GetObservationIDRange :one
+SELECT COALESCE(min(id), 0)::bigint AS min_id, COALESCE(max(id), 0)::bigint AS max_id
+FROM packet_observations
+`
+
+type GetObservationIDRangeRow struct {
+	MinID int64 `json:"min_id"`
+	MaxID int64 `json:"max_id"`
+}
+
+func (q *Queries) GetObservationIDRange(ctx context.Context) (GetObservationIDRangeRow, error) {
+	row := q.db.QueryRow(ctx, getObservationIDRange)
+	var i GetObservationIDRangeRow
+	err := row.Scan(&i.MinID, &i.MaxID)
+	return i, err
+}
+
 const getObserverActivityHourly = `-- name: GetObserverActivityHourly :many
 WITH src AS (
   SELECT a.hour AS t, a.observations, a.airtime_ms, a.airtime_n, a.snr_sum, a.snr_n, a.snr_min, a.rssi_sum, a.rssi_n
@@ -1407,6 +1469,67 @@ func (q *Queries) GetObserverTelemetry(ctx context.Context, arg GetObserverTelem
 	items := []GetObserverTelemetryRow{}
 	for rows.Next() {
 		var i GetObserverTelemetryRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ReportedAt,
+			&i.BatteryVoltageMv,
+			&i.AirtimeTxSecs,
+			&i.AirtimeRxSecs,
+			&i.NoiseFloorDb,
+			&i.UptimeSeconds,
+			&i.QueueLength,
+			&i.DebugFlags,
+			&i.ReceiveErrors,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getObserverTelemetrySince = `-- name: GetObserverTelemetrySince :many
+SELECT id, reported_at, battery_voltage_mv, airtime_tx_secs, airtime_rx_secs,
+       noise_floor_db, uptime_seconds, queue_length, debug_flags, receive_errors
+FROM observer_telemetry
+WHERE observer_id = $1
+  AND reported_at >= $2::timestamptz
+  AND id > $3::bigint
+ORDER BY reported_at ASC
+`
+
+type GetObserverTelemetrySinceParams struct {
+	ObserverID uuid.UUID          `json:"observer_id"`
+	Since      pgtype.Timestamptz `json:"since"`
+	AfterID    int64              `json:"after_id"`
+}
+
+type GetObserverTelemetrySinceRow struct {
+	ID               int64              `json:"id"`
+	ReportedAt       pgtype.Timestamptz `json:"reported_at"`
+	BatteryVoltageMv *int32             `json:"battery_voltage_mv"`
+	AirtimeTxSecs    *float32           `json:"airtime_tx_secs"`
+	AirtimeRxSecs    *float32           `json:"airtime_rx_secs"`
+	NoiseFloorDb     *float32           `json:"noise_floor_db"`
+	UptimeSeconds    *int64             `json:"uptime_seconds"`
+	QueueLength      *int32             `json:"queue_length"`
+	DebugFlags       *int32             `json:"debug_flags"`
+	ReceiveErrors    *int32             `json:"receive_errors"`
+}
+
+// The API's only telemetry shape (a start, no end): reported_at >= @since without the NULL branch.
+func (q *Queries) GetObserverTelemetrySince(ctx context.Context, arg GetObserverTelemetrySinceParams) ([]GetObserverTelemetrySinceRow, error) {
+	rows, err := q.db.Query(ctx, getObserverTelemetrySince, arg.ObserverID, arg.Since, arg.AfterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetObserverTelemetrySinceRow{}
+	for rows.Next() {
+		var i GetObserverTelemetrySinceRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ReportedAt,
@@ -2186,6 +2309,101 @@ func (q *Queries) GetStatsTopAdvertisers(ctx context.Context, arg GetStatsTopAdv
 	return items, nil
 }
 
+const getStatsTopAdvertisersProbe = `-- name: GetStatsTopAdvertisersProbe :many
+WITH ranked AS (
+  SELECT origin_pubkey, SUM(advert_packets)::bigint AS advert_count,
+         SUM(flood_packets)::bigint AS flood_advert_count, SUM(direct_packets)::bigint AS direct_advert_count
+  FROM analytics_hourly_advert_sets
+  WHERE hour >= $2::timestamptz
+    AND (COALESCE(cardinality($3::bpchar[]), 0) = 0 OR iatas && $3::bpchar[])
+  GROUP BY origin_pubkey
+  ORDER BY CASE WHEN $1::text = 'flood' THEN SUM(flood_packets) ELSE SUM(direct_packets) END DESC,
+           advert_count DESC, origin_pubkey
+  LIMIT $4
+), heard_rows AS (
+  SELECT h.origin_pubkey, h.last_heard, h.iata, h.name, h.node_type
+  FROM analytics_hourly_advert_hearings h
+  WHERE h.hour >= $2::timestamptz AND COALESCE(cardinality($3::bpchar[]), 0) = 0
+    AND h.origin_pubkey IN (SELECT origin_pubkey FROM ranked)
+  UNION ALL
+  SELECT h.origin_pubkey, h.last_heard, h.iata, h.name, h.node_type
+  FROM generate_series((SELECT CASE WHEN min(hour) IS NOT NULL THEN GREATEST($2::timestamptz, min(hour)) END FROM analytics_hourly_advert_hearings),
+                       (SELECT LEAST(date_trunc('hour', now(), 'UTC'), max(hour)) FROM analytics_hourly_advert_hearings), interval '1 hour') g(h)
+  CROSS JOIN (SELECT DISTINCT unnest($3::bpchar[]) AS iata) i
+  CROSS JOIN LATERAL (SELECT x.origin_pubkey, x.last_heard, x.iata, x.name, x.node_type
+                      FROM analytics_hourly_advert_hearings x WHERE x.hour = g.h AND x.iata = i.iata OFFSET 0) h
+  WHERE cardinality($3::bpchar[]) > 0 AND h.origin_pubkey IN (SELECT origin_pubkey FROM ranked)
+), heard AS (
+  SELECT origin_pubkey, MAX(last_heard) AS last_heard, MAX(iata) AS iata, MAX(name) AS name, MAX(node_type) AS node_type
+  FROM heard_rows GROUP BY origin_pubkey
+)
+SELECT n.id AS node_id, encode(r.origin_pubkey, 'hex') AS public_key,
+       COALESCE(n.name, h.name, '')::text AS name, COALESCE(n.node_type, h.node_type, 0)::smallint AS node_type,
+       r.advert_count, r.flood_advert_count, r.direct_advert_count,
+       h.last_heard::timestamptz AS last_heard, COALESCE(h.iata, '')::bpchar AS iata
+FROM ranked r
+LEFT JOIN heard h ON h.origin_pubkey = r.origin_pubkey
+LEFT JOIN nodes n ON n.public_key = r.origin_pubkey
+ORDER BY CASE WHEN $1::text = 'flood' THEN r.flood_advert_count ELSE r.direct_advert_count END DESC,
+         r.advert_count DESC, r.origin_pubkey
+`
+
+type GetStatsTopAdvertisersProbeParams struct {
+	Sort     string             `json:"sort"`
+	Since    pgtype.Timestamptz `json:"since"`
+	Iatas    []string           `json:"iatas"`
+	RowLimit int32              `json:"row_limit"`
+}
+
+type GetStatsTopAdvertisersProbeRow struct {
+	NodeID            pgtype.UUID        `json:"node_id"`
+	PublicKey         string             `json:"public_key"`
+	Name              string             `json:"name"`
+	NodeType          int16              `json:"node_type"`
+	AdvertCount       int64              `json:"advert_count"`
+	FloodAdvertCount  int64              `json:"flood_advert_count"`
+	DirectAdvertCount int64              `json:"direct_advert_count"`
+	LastHeard         pgtype.Timestamptz `json:"last_heard"`
+	Iata              string             `json:"iata"`
+}
+
+// GetStatsTopAdvertisers for at most 32 distinct IATAs: the hearings part probes per (hour, IATA),
+// walking only hours inside the hearings table's [min(hour), max(hour)].
+func (q *Queries) GetStatsTopAdvertisersProbe(ctx context.Context, arg GetStatsTopAdvertisersProbeParams) ([]GetStatsTopAdvertisersProbeRow, error) {
+	rows, err := q.db.Query(ctx, getStatsTopAdvertisersProbe,
+		arg.Sort,
+		arg.Since,
+		arg.Iatas,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetStatsTopAdvertisersProbeRow{}
+	for rows.Next() {
+		var i GetStatsTopAdvertisersProbeRow
+		if err := rows.Scan(
+			&i.NodeID,
+			&i.PublicKey,
+			&i.Name,
+			&i.NodeType,
+			&i.AdvertCount,
+			&i.FloodAdvertCount,
+			&i.DirectAdvertCount,
+			&i.LastHeard,
+			&i.Iata,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getStatsTopObservers = `-- name: GetStatsTopObservers :many
 WITH ranked AS (
   SELECT observer_id, SUM(observation_count)::bigint AS observation_count, MAX(iata) AS iata,
@@ -2340,6 +2558,82 @@ func (q *Queries) GetTopNodes(ctx context.Context, arg GetTopNodesParams) ([]Get
 	items := []GetTopNodesRow{}
 	for rows.Next() {
 		var i GetTopNodesRow
+		if err := rows.Scan(
+			&i.NodeID,
+			&i.PublicKey,
+			&i.Name,
+			&i.NodeType,
+			&i.Iata,
+			&i.ObservationCount,
+			&i.LastHeard,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getTopNodesProbe = `-- name: GetTopNodesProbe :many
+WITH src AS (
+  SELECT origin_pubkey, observations, last_heard, iata, name, node_type
+  FROM analytics_hourly_advert_hearings
+  WHERE hour >= $1::timestamptz AND COALESCE(cardinality($2::bpchar[]), 0) = 0
+  UNION ALL
+  SELECT a.origin_pubkey, a.observations, a.last_heard, a.iata, a.name, a.node_type
+  FROM generate_series((SELECT CASE WHEN min(hour) IS NOT NULL THEN GREATEST($1::timestamptz, min(hour)) END FROM analytics_hourly_advert_hearings),
+                       (SELECT LEAST(date_trunc('hour', now(), 'UTC'), max(hour)) FROM analytics_hourly_advert_hearings), interval '1 hour') g(h)
+  CROSS JOIN (SELECT DISTINCT unnest($2::bpchar[]) AS iata) i
+  CROSS JOIN LATERAL (SELECT x.origin_pubkey, x.observations, x.last_heard, x.iata, x.name, x.node_type
+                      FROM analytics_hourly_advert_hearings x WHERE x.hour = g.h AND x.iata = i.iata OFFSET 0) a
+  WHERE cardinality($2::bpchar[]) > 0
+), ranked AS (
+  SELECT origin_pubkey, SUM(observations)::bigint AS observation_count, MAX(last_heard) AS last_heard,
+         MAX(iata) AS iata, MAX(name) AS name, MAX(node_type) AS node_type
+  FROM src
+  GROUP BY origin_pubkey
+  ORDER BY observation_count DESC, origin_pubkey
+  LIMIT $3
+)
+SELECT n.id AS node_id, encode(r.origin_pubkey, 'hex') AS public_key,
+       COALESCE(n.name, r.name, '')::text AS name, COALESCE(n.node_type, r.node_type, 0)::smallint AS node_type,
+       r.iata::bpchar AS iata, r.observation_count, r.last_heard::timestamptz AS last_heard
+FROM ranked r
+LEFT JOIN nodes n ON n.public_key = r.origin_pubkey
+ORDER BY r.observation_count DESC, r.origin_pubkey
+`
+
+type GetTopNodesProbeParams struct {
+	Since    pgtype.Timestamptz `json:"since"`
+	Iatas    []string           `json:"iatas"`
+	RowLimit int32              `json:"row_limit"`
+}
+
+type GetTopNodesProbeRow struct {
+	NodeID           pgtype.UUID        `json:"node_id"`
+	PublicKey        string             `json:"public_key"`
+	Name             string             `json:"name"`
+	NodeType         int16              `json:"node_type"`
+	Iata             string             `json:"iata"`
+	ObservationCount int64              `json:"observation_count"`
+	LastHeard        pgtype.Timestamptz `json:"last_heard"`
+}
+
+// GetTopNodes for at most 32 distinct IATAs: one rollup probe per (hour, IATA). @since is a UTC hour.
+// The hours walked stay inside the table's own [min(hour), max(hour)]; an empty table walks none
+// (a NULL start makes generate_series return no rows).
+func (q *Queries) GetTopNodesProbe(ctx context.Context, arg GetTopNodesProbeParams) ([]GetTopNodesProbeRow, error) {
+	rows, err := q.db.Query(ctx, getTopNodesProbe, arg.Since, arg.Iatas, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetTopNodesProbeRow{}
+	for rows.Next() {
+		var i GetTopNodesProbeRow
 		if err := rows.Scan(
 			&i.NodeID,
 			&i.PublicKey,
@@ -3705,6 +3999,81 @@ func (q *Queries) ListObservationsForPacket(ctx context.Context, packetHash []by
 }
 
 const listObserverAdverts = `-- name: ListObserverAdverts :many
+SELECT
+  po.id,
+  encode(po.packet_hash, 'hex') AS packet_hash_hex,
+  p.payload_type,
+  po.iata,
+  po.heard_at,
+  po.rssi,
+  po.snr,
+  po.hop_count,
+  n.name AS node_name,
+  COALESCE(encode(p.origin_pubkey, 'hex'), '')::text AS node_public_key
+FROM packet_observations po
+JOIN packets p ON p.packet_hash = po.packet_hash
+LEFT JOIN nodes n ON n.public_key = p.origin_pubkey
+WHERE po.observer_id = $1
+  AND po.payload_type = 4
+  AND po.id > $2::bigint
+ORDER BY po.id ASC
+LIMIT $3
+`
+
+type ListObserverAdvertsParams struct {
+	ObserverID uuid.UUID `json:"observer_id"`
+	CursorID   int64     `json:"cursor_id"`
+	RowLimit   int32     `json:"row_limit"`
+}
+
+type ListObserverAdvertsRow struct {
+	ID            int64              `json:"id"`
+	PacketHashHex string             `json:"packet_hash_hex"`
+	PayloadType   int16              `json:"payload_type"`
+	Iata          string             `json:"iata"`
+	HeardAt       pgtype.Timestamptz `json:"heard_at"`
+	Rssi          *int16             `json:"rssi"`
+	Snr           *float32           `json:"snr"`
+	HopCount      int16              `json:"hop_count"`
+	NodeName      *string            `json:"node_name"`
+	NodePublicKey string             `json:"node_public_key"`
+}
+
+// Advert observations (payload_type 4) heard by one observer, oldest id first, after @cursor_id
+// (0 starts at the beginning). Reads idx_observations_adverts; needs payload_type on every observation.
+// Keep missing-origin adverts; the generated key field expects a string, not NULL.
+func (q *Queries) ListObserverAdverts(ctx context.Context, arg ListObserverAdvertsParams) ([]ListObserverAdvertsRow, error) {
+	rows, err := q.db.Query(ctx, listObserverAdverts, arg.ObserverID, arg.CursorID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListObserverAdvertsRow{}
+	for rows.Next() {
+		var i ListObserverAdvertsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PacketHashHex,
+			&i.PayloadType,
+			&i.Iata,
+			&i.HeardAt,
+			&i.Rssi,
+			&i.Snr,
+			&i.HopCount,
+			&i.NodeName,
+			&i.NodePublicKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listObserverAdvertsJoinFilter = `-- name: ListObserverAdvertsJoinFilter :many
 SELECT 
   po.id,
   encode(po.packet_hash, 'hex') AS packet_hash_hex,
@@ -3726,13 +4095,13 @@ ORDER BY po.id ASC
 LIMIT $3
 `
 
-type ListObserverAdvertsParams struct {
+type ListObserverAdvertsJoinFilterParams struct {
 	ObserverID uuid.UUID `json:"observer_id"`
 	Column2    int64     `json:"column_2"`
 	Limit      int32     `json:"limit"`
 }
 
-type ListObserverAdvertsRow struct {
+type ListObserverAdvertsJoinFilterRow struct {
 	ID            int64              `json:"id"`
 	PacketHashHex string             `json:"packet_hash_hex"`
 	PayloadType   int16              `json:"payload_type"`
@@ -3745,18 +4114,19 @@ type ListObserverAdvertsRow struct {
 	NodePublicKey string             `json:"node_public_key"`
 }
 
+// Filters on the packet's payload type: serves until every observation carries its own.
 // Returns advert packets (payload_type=4) heard by a specific observer.
 // Pass cursor=0 to start from the beginning, or the last seen id for pagination.
 // Keep missing-origin adverts; the generated key field expects a string, not NULL.
-func (q *Queries) ListObserverAdverts(ctx context.Context, arg ListObserverAdvertsParams) ([]ListObserverAdvertsRow, error) {
-	rows, err := q.db.Query(ctx, listObserverAdverts, arg.ObserverID, arg.Column2, arg.Limit)
+func (q *Queries) ListObserverAdvertsJoinFilter(ctx context.Context, arg ListObserverAdvertsJoinFilterParams) ([]ListObserverAdvertsJoinFilterRow, error) {
+	rows, err := q.db.Query(ctx, listObserverAdvertsJoinFilter, arg.ObserverID, arg.Column2, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListObserverAdvertsRow{}
+	items := []ListObserverAdvertsJoinFilterRow{}
 	for rows.Next() {
-		var i ListObserverAdvertsRow
+		var i ListObserverAdvertsJoinFilterRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.PacketHashHex,
@@ -5194,9 +5564,10 @@ WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR EXISTS (
   AND ($3::timestamptz IS NULL OR t.first_heard_at >= $3)
   AND ($4::timestamptz IS NULL OR t.first_heard_at <= $4)
   -- Keyset on the millisecond clients see, tie-broken by tag; matches idx_trace_tags_keyset.
-  AND ($5::timestamptz IS NULL
-       OR date_trunc('milliseconds', t.last_heard_at, 'UTC') < $5
-       OR ($8::bytea IS NOT NULL AND date_trunc('milliseconds', t.last_heard_at, 'UTC') = $5 AND t.trace_tag < $8))
+  -- A NULL cursor starts at ('infinity', ''), which is above every row only while last_heard_at is finite: UpsertPacket
+  -- writes NOW() and RecordTrace a finite heard time.
+  AND (date_trunc('milliseconds', t.last_heard_at, 'UTC'), t.trace_tag)
+      < (COALESCE($5::timestamptz, 'infinity'::timestamptz), COALESCE($8::bytea, ''::bytea))
   AND ($7::text = '' OR t.trace_type = $7)
 ORDER BY date_trunc('milliseconds', t.last_heard_at, 'UTC') DESC, t.trace_tag DESC
 LIMIT $6

@@ -18,6 +18,10 @@ type Querier interface {
 	AddChannelMembers(ctx context.Context, arg AddChannelMembersParams) error
 	AddIATAs(ctx context.Context, iatas []string) error
 	AddRegionIATAs(ctx context.Context, arg AddRegionIATAsParams) error
+	// Copies the packet's payload type onto the first @max_rows observations in [@from_id, @to_id),
+	// in id order, that lack one. Rows that already carry a type are never touched. Returns how many
+	// untyped rows it picked, how many it typed, and the last picked id (0 when it picked none).
+	BackfillObservationPayloadTypes(ctx context.Context, arg BackfillObservationPayloadTypesParams) (BackfillObservationPayloadTypesRow, error)
 	// Keeps fetch timing so re-enabling still respects backoff; the ETag goes with the rows.
 	ClearRepeaters(ctx context.Context) (int64, error)
 	CreateAccount(ctx context.Context, name string) (Account, error)
@@ -98,6 +102,7 @@ type Querier interface {
 	GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]GetNodeNeighborsRow, error)
 	GetNodesByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]GetNodesByIDsRow, error)
 	GetNodesByPubkeys(ctx context.Context, pubkeys [][]byte) ([]GetNodesByPubkeysRow, error)
+	GetObservationIDRange(ctx context.Context) (GetObservationIDRangeRow, error)
 	// Hour-or-coarser buckets summed from the hourly rollup; same COALESCE-plus-count shape as the raw query.
 	// Hours from @tail_start on aren't rolled yet and read raw rows.
 	GetObserverActivityHourly(ctx context.Context, arg GetObserverActivityHourlyParams) ([]GetObserverActivityHourlyRow, error)
@@ -120,12 +125,18 @@ type Querier interface {
 	GetObserverRadio(ctx context.Context, id uuid.UUID) (GetObserverRadioRow, error)
 	GetObserverScopes(ctx context.Context, observerID uuid.UUID) ([]string, error)
 	GetObserverTelemetry(ctx context.Context, arg GetObserverTelemetryParams) ([]GetObserverTelemetryRow, error)
+	// The API's only telemetry shape (a start, no end): reported_at >= @since without the NULL branch.
+	GetObserverTelemetrySince(ctx context.Context, arg GetObserverTelemetrySinceParams) ([]GetObserverTelemetrySinceRow, error)
 	GetPacketByHash(ctx context.Context, packetHash []byte) (GetPacketByHashRow, error)
 	// Return distinct observation IATAs in first-heard order for path resolution,
 	// without fetching full observations separately for every trace packet.
 	GetPacketsByTraceTag(ctx context.Context, decode string) ([]GetPacketsByTraceTagRow, error)
 	// All HTTP aggregates read the hourly rollup, never observations.
 	GetPathStats(ctx context.Context, arg GetPathStatsParams) ([]GetPathStatsRow, error)
+	// GetPathStats for at most 32 distinct IATAs: one rollup probe per (hour, IATA). @since and @until are UTC hours.
+	// The hours walked stay inside the table's own [min(hour), max(hour)]; an empty table walks none
+	// (a NULL start makes generate_series return no rows).
+	GetPathStatsProbe(ctx context.Context, arg GetPathStatsProbeParams) ([]GetPathStatsProbeRow, error)
 	GetRadioPresets(ctx context.Context, arg GetRadioPresetsParams) ([]MvRadioPreset, error)
 	GetRegion(ctx context.Context, id int32) (GetRegionRow, error)
 	GetRegionBySlug(ctx context.Context, slug string) (GetRegionBySlugRow, error)
@@ -163,6 +174,9 @@ type Querier interface {
 	// Top N advertisers since the given hour, ranked by flood or direct adverts (@sort). Each ADVERT
 	// packet counts once per hour heard, however many of the requested IATAs heard it. Live names win.
 	GetStatsTopAdvertisers(ctx context.Context, arg GetStatsTopAdvertisersParams) ([]GetStatsTopAdvertisersRow, error)
+	// GetStatsTopAdvertisers for at most 32 distinct IATAs: the hearings part probes per (hour, IATA),
+	// walking only hours inside the hearings table's [min(hour), max(hour)].
+	GetStatsTopAdvertisersProbe(ctx context.Context, arg GetStatsTopAdvertisersProbeParams) ([]GetStatsTopAdvertisersProbeRow, error)
 	// Top N observers since the given hour. Counts sum across matched IATAs; iata is a
 	// representative one. Live names win over the rolled snapshot.
 	GetStatsTopObservers(ctx context.Context, arg GetStatsTopObserversParams) ([]GetStatsTopObserversRow, error)
@@ -172,6 +186,10 @@ type Querier interface {
 	// Nodes by ADVERT hearings since the given hour. Live names win over the rolled snapshot;
 	// node_id is NULL once the node row is gone. iata is a representative one.
 	GetTopNodes(ctx context.Context, arg GetTopNodesParams) ([]GetTopNodesRow, error)
+	// GetTopNodes for at most 32 distinct IATAs: one rollup probe per (hour, IATA). @since is a UTC hour.
+	// The hours walked stay inside the table's own [min(hour), max(hour)]; an empty table walks none
+	// (a NULL start makes generate_series return no rows).
+	GetTopNodesProbe(ctx context.Context, arg GetTopNodesProbeParams) ([]GetTopNodesProbeRow, error)
 	GetTransportScopeByName(ctx context.Context, name string) (int32, error)
 	GetTransportScopes(ctx context.Context) ([]GetTransportScopesRow, error)
 	// ============================================================
@@ -238,10 +256,15 @@ type Querier interface {
 	// Limit the filtered node page before enriching IATA membership and neighbours.
 	ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNodesRow, error)
 	ListObservationsForPacket(ctx context.Context, packetHash []byte) ([]ListObservationsForPacketRow, error)
+	// Advert observations (payload_type 4) heard by one observer, oldest id first, after @cursor_id
+	// (0 starts at the beginning). Reads idx_observations_adverts; needs payload_type on every observation.
+	// Keep missing-origin adverts; the generated key field expects a string, not NULL.
+	ListObserverAdverts(ctx context.Context, arg ListObserverAdvertsParams) ([]ListObserverAdvertsRow, error)
+	// Filters on the packet's payload type: serves until every observation carries its own.
 	// Returns advert packets (payload_type=4) heard by a specific observer.
 	// Pass cursor=0 to start from the beginning, or the last seen id for pagination.
 	// Keep missing-origin adverts; the generated key field expects a string, not NULL.
-	ListObserverAdverts(ctx context.Context, arg ListObserverAdvertsParams) ([]ListObserverAdvertsRow, error)
+	ListObserverAdvertsJoinFilter(ctx context.Context, arg ListObserverAdvertsJoinFilterParams) ([]ListObserverAdvertsJoinFilterRow, error)
 	// Copyright 2026 Beacon Contributors
 	// SPDX-License-Identifier: AGPL-3.0-or-later
 	ListObserverDirectory(ctx context.Context, arg ListObserverDirectoryParams) (string, error)

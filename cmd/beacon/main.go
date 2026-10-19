@@ -461,6 +461,7 @@ func main() {
 		background.RouteRetentionTask(maintStore, resolved.RouteRetention, resolved.RouteGrace, int64(resolved.RouteMinObservations), resolved.ReconfirmInterval),
 		background.ReconfirmTask(maintStore, resolved.RouteReconfirmRowsPerHour, background.ReconfirmTick),
 		background.IndexHealthTask(maintStore, time.Hour),
+		background.PayloadTypeBackfillTask(maintStore, time.Minute),
 		background.PgStatsTask(maintStore, time.Minute),
 	}
 	if resolved.ObserverDeleteAfter > 0 {
