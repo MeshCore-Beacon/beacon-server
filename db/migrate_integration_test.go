@@ -198,3 +198,41 @@ FROM pg_index WHERE indrelid = 'known_routes'::regclass`).Scan(&got, &bad); err 
 		t.Fatalf("known_routes indexes = %v, want %v; not valid and ready: %v", got, want, bad)
 	}
 }
+
+// The operator pre-builds the four packet indexes; the migrations record them, not fail or rebuild them.
+func TestRunMigrationsPacketsIndexesPrebuiltPostgres(t *testing.T) {
+	ctx, pool := schemaPool(t)
+	if err := RunMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	oids := map[string]uint32{}
+	for _, idx := range packetsEndStateIndexes {
+		var oid uint32
+		if err := pool.QueryRow(ctx, "SELECT $1::regclass::oid", idx).Scan(&oid); err != nil {
+			t.Fatalf("%s: %v", idx, err)
+		}
+		oids[idx] = oid
+	}
+	files := []string{
+		"029_packets_last_heard_hash.sql",
+		"030_packets_type_last_heard.sql",
+		"031_packets_scope_last_heard.sql",
+		"032_packets_heard_inverted.sql",
+	}
+	if _, err := pool.Exec(ctx, "DELETE FROM schema_migrations WHERE filename = ANY($1)", files); err != nil {
+		t.Fatal(err)
+	}
+	if err := RunMigrations(ctx, pool); err != nil {
+		t.Fatalf("029-032 over pre-built indexes: %v", err)
+	}
+	checkRecorded(t, ctx, pool, files...)
+	for idx, before := range oids {
+		var after uint32
+		if err := pool.QueryRow(ctx, "SELECT $1::regclass::oid", idx).Scan(&after); err != nil {
+			t.Fatalf("%s: %v", idx, err)
+		}
+		if after != before {
+			t.Errorf("%s rebuilt: oid %d -> %d", idx, before, after)
+		}
+	}
+}
