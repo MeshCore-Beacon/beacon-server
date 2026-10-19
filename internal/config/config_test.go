@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/db/planpolicy"
+	"github.com/MeshCore-Beacon/beacon-server/internal/guards"
 )
 
 func TestLoadLogConfig(t *testing.T) {
@@ -444,5 +445,16 @@ func TestLoad_DatabaseGuardsValidation(t *testing.T) {
 	if r.AdminListen != ":9090" || r.APIPlanLayout != planpolicy.Split || r.GuardsBudget != "shadow" ||
 		strings.Join(r.GuardsEnforce, ",") != "routes,stats" {
 		t.Fatalf("resolved = %s", r)
+	}
+}
+
+// TestGuardFamiliesMatch keeps the config's family list in step with the guards package.
+func TestGuardFamiliesMatch(t *testing.T) {
+	var want []string
+	for _, f := range guards.Families {
+		want = append(want, string(f))
+	}
+	if strings.Join(guardFamilies, ",") != strings.Join(want, ",") {
+		t.Errorf("guardFamilies = %v, want %v", guardFamilies, want)
 	}
 }
