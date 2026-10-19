@@ -2312,8 +2312,10 @@ paths:
         planguard.daily_check is set (404 "planguard daily check is disabled"); when
         on, the check runs about an hour after boot and then daily, and until its
         first run this returns 404. fresh=true runs it now, shared with any run in
-        progress; within 5 minutes of the last run it returns that run's outcome.
-        Not served when the server is read-only.
+        progress and cancelled at server shutdown; within 5 minutes of the last run's
+        end it starts nothing and returns the last successful report (started_at gives
+        its age), or 500 when no run has succeeded yet. Not served when the server
+        is read-only.
       parameters:
       - description: Run the check now instead of returning the last report
         in: query

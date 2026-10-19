@@ -16,16 +16,17 @@ import (
 )
 
 const (
-	// freshMinGap is the least time between two runs RunNow starts; inside it RunNow returns the last outcome.
+	// freshMinGap is the least time between two runs RunNow starts; inside it RunNow returns the last report.
 	freshMinGap = 5 * time.Minute
-	// freshRunTimeout bounds a run RunNow starts, which outlives the request that asked for it.
+	// freshRunTimeout bounds a run RunNow starts, which outlives the request that asked for it but not the server.
 	freshRunTimeout = 15 * time.Minute
 )
 
 // Planguard runs the read-only plan check, keeps its last report and exports it as metrics.
 type Planguard struct {
-	run func(context.Context) (*planguard.Report, error)
-	now func() time.Time
+	base context.Context // ends at server shutdown; fresh runs derive from it
+	run  func(context.Context) (*planguard.Report, error)
+	now  func() time.Time
 
 	mu         sync.Mutex
 	last       *planguard.Report
@@ -41,9 +42,9 @@ type planguardCall struct {
 	err  error
 }
 
-// NewPlanguard returns a Planguard that checks plans with run.
-func NewPlanguard(run func(context.Context) (*planguard.Report, error)) *Planguard {
-	return &Planguard{run: run, now: time.Now}
+// NewPlanguard returns a Planguard that checks plans with run. base ends every run when it ends (server shutdown).
+func NewPlanguard(base context.Context, run func(context.Context) (*planguard.Report, error)) *Planguard {
+	return &Planguard{base: base, run: run, now: time.Now}
 }
 
 // Task ticks hourly and runs when it has never run or the last run started at least every ago, so the first
@@ -59,40 +60,17 @@ func (p *Planguard) Task(every time.Duration) Task {
 			if !due {
 				return nil
 			}
-			_, err := p.do(ctx)
+			_, err := p.do(ctx, false)
 			return err
 		},
 	}
 }
 
 // RunNow runs the check now and returns its report. Concurrent callers share one run, which outlives a caller that
-// gives up. Within freshMinGap of the last run's end it returns that run's outcome instead of running again.
+// gives up but not the server. Within freshMinGap of the last run's end it starts nothing: it returns the last
+// successful report (its StartedAt gives its age), or the last attempt's error when there is no report.
 func (p *Planguard) RunNow(ctx context.Context) (*planguard.Report, error) {
-	p.mu.Lock()
-	if p.inflight == nil && !p.attemptAt.IsZero() && p.now().Sub(p.attemptAt) < freshMinGap {
-		rep, err := p.last, p.attemptErr
-		p.mu.Unlock()
-		if err != nil {
-			return nil, err
-		}
-		return rep, nil
-	}
-	p.mu.Unlock()
-	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), freshRunTimeout)
-	ch := make(chan struct{})
-	var rep *planguard.Report
-	var err error
-	go func() {
-		defer close(ch)
-		defer cancel()
-		rep, err = p.do(runCtx)
-	}()
-	select {
-	case <-ch:
-		return rep, err
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
+	return p.do(ctx, true)
 }
 
 // Last returns the report of the last run that finished.
@@ -102,18 +80,49 @@ func (p *Planguard) Last() (*planguard.Report, bool) {
 	return p.last, p.last != nil
 }
 
-// do joins the run in flight, or starts one on ctx, and waits for it.
-func (p *Planguard) do(ctx context.Context) (*planguard.Report, error) {
+// do joins the run in flight or starts one, and waits for it or for ctx. A fresh run is bounded by base and
+// freshRunTimeout; a scheduled one ends with ctx or base. For fresh callers, the gap is checked under the same lock
+// that starts a run, so callers cannot chain runs.
+func (p *Planguard) do(ctx context.Context, fresh bool) (*planguard.Report, error) {
 	p.mu.Lock()
-	if c := p.inflight; c != nil {
+	c := p.inflight
+	if c == nil && fresh && !p.attemptAt.IsZero() && p.now().Sub(p.attemptAt) < freshMinGap {
+		rep, err := p.last, p.attemptErr
 		p.mu.Unlock()
-		<-c.done
-		return c.rep, c.err
+		if rep != nil {
+			return rep, nil
+		}
+		return nil, err
 	}
-	c := &planguardCall{done: make(chan struct{})}
-	p.inflight = c
+	if c == nil {
+		c = &planguardCall{done: make(chan struct{})}
+		p.inflight = c
+		var runCtx context.Context
+		var cleanup func()
+		if fresh {
+			var cancel context.CancelFunc
+			runCtx, cancel = context.WithTimeout(p.base, freshRunTimeout)
+			cleanup = cancel
+		} else {
+			var cancel context.CancelFunc
+			runCtx, cancel = context.WithCancel(ctx)
+			stopBase := context.AfterFunc(p.base, cancel)
+			cleanup = func() { stopBase(); cancel() }
+		}
+		go p.start(runCtx, cleanup, c)
+	}
 	p.mu.Unlock()
+	select {
+	case <-c.done:
+		return c.rep, c.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 
+// start makes one run on ctx and publishes its outcome to c and, when it succeeds, to Last and the metrics.
+func (p *Planguard) start(ctx context.Context, cleanup func(), c *planguardCall) {
+	defer cleanup()
 	start := p.now()
 	rep, err := p.run(ctx)
 	if err == nil && rep == nil {
@@ -131,7 +140,6 @@ func (p *Planguard) do(ctx context.Context) (*planguard.Report, error) {
 	p.inflight = nil
 	p.mu.Unlock()
 	close(c.done)
-	return rep, err
 }
 
 var errNoReport = errors.New("plan check returned no report")

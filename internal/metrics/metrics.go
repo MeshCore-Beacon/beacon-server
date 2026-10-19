@@ -107,21 +107,32 @@ var (
 		Help: "1 for each corpus entry and plan mode whose last daily plan check failed.",
 	}, []string{"entry", "mode"})
 
-	// PlanguardLastRun is when the daily plan check last finished. It is not exported until set, so a server
-	// that never runs the check carries no series.
+	// PlanguardLastRun is when the daily plan check last finished. A server with the check off carries no
+	// series; with it on (EnablePlanguard) the series is 0 until the first run.
 	PlanguardLastRun = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "beacon_planguard_last_run_timestamp_seconds",
 		Help: "Unix time the daily plan check last finished.",
 	})
 )
 
-// setGauge exports its gauge only once it holds a non-zero value.
-type setGauge struct{ prometheus.Gauge }
+var planguardEnabled atomic.Bool
+
+// EnablePlanguard exports PlanguardLastRun from now on, 0 until the first run, so a staleness alert on it fires
+// for a check that is on but never succeeds. Without it the gauge is exported only once set.
+func EnablePlanguard() { planguardEnabled.Store(true) }
+
+// setGauge exports its gauge once it holds a non-zero value, or always once enabled reports true.
+type setGauge struct {
+	prometheus.Gauge
+	enabled *atomic.Bool
+}
 
 func (g setGauge) Collect(ch chan<- prometheus.Metric) {
-	var m dto.Metric
-	if err := g.Write(&m); err != nil || m.GetGauge().GetValue() == 0 {
-		return
+	if !g.enabled.Load() {
+		var m dto.Metric
+		if err := g.Write(&m); err != nil || m.GetGauge().GetValue() == 0 {
+			return
+		}
 	}
 	ch <- g.Gauge
 }
@@ -179,7 +190,7 @@ func init() {
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		GuardWouldRefuse, GuardRefused, GuardDB, DBTime, HTTPRequest, PoolAcquire,
 		IngestQueueDepth, IngestDropped, JobDuration, JobRows, IndexBytes, IndexBloat,
-		PlanguardFailures, setGauge{PlanguardLastRun}, pgActivity,
+		PlanguardFailures, setGauge{PlanguardLastRun, &planguardEnabled}, pgActivity,
 	)
 }
 

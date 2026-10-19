@@ -38,7 +38,7 @@ func DBAdminRouter(reader DBStatementsReader, pg PlanguardSource) http.Handler {
 // getPlanguard godoc
 //
 // @Summary Last daily plan regression check
-// @Description Plans every corpus statement in custom and generic mode against this database, read-only and without executing it (plain EXPLAIN, 5 s per plan, 1 s lock timeout), and checks each plan against the corpus. Off unless planguard.daily_check is set (404 "planguard daily check is disabled"); when on, the check runs about an hour after boot and then daily, and until its first run this returns 404. fresh=true runs it now, shared with any run in progress; within 5 minutes of the last run it returns that run's outcome. Not served when the server is read-only.
+// @Description Plans every corpus statement in custom and generic mode against this database, read-only and without executing it (plain EXPLAIN, 5 s per plan, 1 s lock timeout), and checks each plan against the corpus. Off unless planguard.daily_check is set (404 "planguard daily check is disabled"); when on, the check runs about an hour after boot and then daily, and until its first run this returns 404. fresh=true runs it now, shared with any run in progress and cancelled at server shutdown; within 5 minutes of the last run's end it starts nothing and returns the last successful report (started_at gives its age), or 500 when no run has succeeded yet. Not served when the server is read-only.
 // @Tags Admin
 // @Produce json
 // @Security AdminKey

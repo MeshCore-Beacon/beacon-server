@@ -55,12 +55,17 @@ func TestRegistryGathersPlanguard(t *testing.T) {
 	}
 }
 
-// Until the plan check runs (or when it is off) neither metric carries a series, so a staleness alert on the
-// timestamp cannot fire on a server that never runs the check.
-func TestPlanguardMetricsEmptyUntilRun(t *testing.T) {
+// With the check off neither metric carries a series, so a staleness alert cannot fire on a server that never
+// runs it. Once enabled, the timestamp is exported at 0 before the first run, so a check that never succeeds
+// trips the alert. (EnablePlanguard cannot be undone: the off state is checked first.)
+func TestPlanguardMetricsOffAndEnabled(t *testing.T) {
 	PlanguardFailures.Reset()
 	PlanguardLastRun.Set(0)
 	if body := scrape(t); strings.Contains(body, "\nbeacon_planguard_failures{") || strings.Contains(body, "\nbeacon_planguard_last_run_timestamp_seconds ") {
-		t.Errorf("planguard series before any run:\n%s", body)
+		t.Errorf("planguard series with the check off:\n%s", body)
+	}
+	EnablePlanguard()
+	if body := scrape(t); !strings.Contains(body, "\nbeacon_planguard_last_run_timestamp_seconds 0\n") {
+		t.Errorf("enabled check: no timestamp series at 0")
 	}
 }

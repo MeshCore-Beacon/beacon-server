@@ -237,6 +237,121 @@ ANALYZE known_routes`); err != nil {
 	if n := e.pooled(t, "SELECT count(*)::text FROM pg_prepared_statements WHERE name LIKE 'planguard%'"); n != "0" {
 		t.Errorf("%s planguard prepared statements left after the locked run", n)
 	}
+
+	// 4) A holder with SHARE on known_routes blocks only the DML run's ROW EXCLUSIVE. A third session asking for
+	//    SHARE is compatible with the holder but queues behind that waiting request, so it waits at most the
+	//    check's 1 s lock_timeout.
+	third, err := pgx.Connect(e.ctx, e.dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer third.Close(context.Background())
+	if tx, err = holder.Begin(e.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(e.ctx, "LOCK TABLE "+e.schema+".known_routes IN SHARE MODE"); err != nil {
+		t.Fatal(err)
+	}
+	done = make(chan struct{})
+	var shared *planguard.Report
+	go func() {
+		defer close(done)
+		shared, runErr = p.Run(e.ctx)
+	}()
+	var thirdMax time.Duration
+	for running := true; running; {
+		select {
+		case <-done:
+			running = false
+		case <-time.After(20 * time.Millisecond):
+			t1 := time.Now()
+			if _, err := third.Exec(e.ctx, "BEGIN; LOCK TABLE "+e.schema+".known_routes IN SHARE MODE; ROLLBACK"); err != nil {
+				t.Fatal(err)
+			}
+			thirdMax = max(thirdMax, time.Since(t1))
+		}
+	}
+	if err := tx.Rollback(e.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if runErr != nil {
+		t.Fatalf("run beside the SHARE holder: %v", runErr)
+	}
+	if r := byKey(shared)["routes.delete_expired|custom"]; r.Verdict != planguard.VerdictError || len(r.Failures) == 0 || !strings.Contains(r.Failures[0].Msg, "55P03") {
+		t.Errorf("DML beside the SHARE holder: %s %v, want ERROR 55P03", r.Verdict, r.Failures)
+	}
+	// It queued (well above a bare LOCK) and was released by the check's lock_timeout.
+	if thirdMax < 300*time.Millisecond || thirdMax > 1500*time.Millisecond {
+		t.Errorf("the session queued behind the check waited at most %v, want about 1 s or less (and > 300 ms, to show it queued)", thirdMax)
+	}
+}
+
+// Cancelling a run mid-flight never hands the connection back to the pool with an open transaction or a prepared
+// statement: it is closed.
+func TestPlanguardProdCancelPostgres(t *testing.T) {
+	e := newProdEnv(t)
+	p := e.checker(t, "testdata/prodcorpus")
+	pid := e.pooled(t, "SELECT pg_backend_pid()::text")
+	holder, err := pgx.Connect(e.ctx, e.dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close(context.Background())
+	tx, err := holder.Begin(e.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	// SHARE lets the readers through and holds the DML run on its lock, inside its transaction, after PREPARE
+	// began: that is where the cancel lands.
+	if _, err := tx.Exec(e.ctx, "LOCK TABLE "+e.schema+".known_routes IN SHARE MODE"); err != nil {
+		t.Fatal(err)
+	}
+	// The observer reads pg_stat_activity outside any transaction, so each read is a fresh snapshot.
+	observer, err := pgx.Connect(e.ctx, e.dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer observer.Close(context.Background())
+	ctx, cancel := context.WithCancel(e.ctx)
+	probeDone := make(chan struct{})
+	go func() {
+		defer close(probeDone)
+		// Wait until the check's connection is waiting on the lock, then cancel.
+		for ctx.Err() == nil {
+			var n int
+			if err := observer.QueryRow(e.ctx, "SELECT count(*) FROM pg_stat_activity WHERE pid = $1::int AND wait_event_type = 'Lock'", pid).Scan(&n); err == nil && n > 0 {
+				cancel()
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+	rep, err := p.Run(ctx)
+	cancel()
+	<-probeDone
+	if err == nil {
+		t.Fatalf("run survived its cancel: %d runs", len(rep.Results))
+	}
+	if got := e.pooled(t, "SELECT pg_backend_pid()::text"); got == pid {
+		t.Errorf("the cancelled run's connection (pid %s) went back to the pool", pid)
+	}
+	if n := e.pooled(t, "SELECT count(*)::text FROM pg_prepared_statements WHERE name LIKE 'planguard%'"); n != "0" {
+		t.Errorf("%s planguard prepared statements on the pooled connection", n)
+	}
+	if ro := e.pooled(t, "SHOW transaction_read_only"); ro != "off" {
+		t.Errorf("pooled connection inside a read-only transaction")
+	}
+	// The closed backend leaves pg_stat_activity once it has processed the terminate.
+	alive := 1
+	for deadline := time.Now().Add(5 * time.Second); alive != 0 && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if err := observer.QueryRow(e.ctx, "SELECT count(*) FROM pg_stat_activity WHERE pid = $1::int", pid).Scan(&alive); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if alive != 0 {
+		t.Errorf("the cancelled run's backend %s is still connected", pid)
+	}
 }
 
 // checkProdRuns checks a run of testdata/prodcorpus: nothing fails, the null resolver and the pending statement

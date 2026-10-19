@@ -35,6 +35,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/keystore"
 	"github.com/MeshCore-Beacon/beacon-server/internal/logging"
 	"github.com/MeshCore-Beacon/beacon-server/internal/meshmapper"
+	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
 	"github.com/MeshCore-Beacon/beacon-server/internal/planguard"
 	"github.com/MeshCore-Beacon/beacon-server/internal/presence"
 	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
@@ -481,7 +482,7 @@ func main() {
 	if repeaterImporter != nil && cfg.MeshMapper.Repeaters.Enabled {
 		tasks = append(tasks, background.Task{Name: "meshmapper.repeaters", Interval: meshmapper.PollInterval, Run: repeaterImporter.Refresh})
 	}
-	pgSource, pgTask := planguardWiring(resolved.PlanguardDailyCheck, mode.Jobs, pools.Maint)
+	pgSource, pgTask := planguardWiring(ctx, resolved.PlanguardDailyCheck, mode.Jobs, pools.Maint)
 	if pgTask != nil {
 		tasks = append(tasks, *pgTask)
 	}
@@ -586,13 +587,17 @@ func getEnv(key string) string {
 }
 
 // planguardWiring builds the daily read-only plan check on the maintenance pool, behind planguard.daily_check.
+// ctx is the server's root context: its end cancels any run in flight.
 // Off, /planguard answers that the check is disabled. On, the check runs with the other jobs (config validation
 // refuses it on a read-only server); a corpus that does not load disables it but never stops the server, and the
 // source stays a nil interface, so /planguard is 404.
-func planguardWiring(enabled, jobs bool, maint *pgxpool.Pool) (handlers.PlanguardSource, *background.Task) {
+func planguardWiring(ctx context.Context, enabled, jobs bool, maint *pgxpool.Pool) (handlers.PlanguardSource, *background.Task) {
 	if !enabled {
 		return disabledPlanguard{}, nil
 	}
+	// On, the last-run timestamp is exported from boot (0 until a run succeeds), so a check that never succeeds,
+	// even one whose corpus does not load, still trips the staleness alert.
+	metrics.EnablePlanguard()
 	if !jobs {
 		return nil, nil
 	}
@@ -601,7 +606,7 @@ func planguardWiring(enabled, jobs bool, maint *pgxpool.Pool) (handlers.Planguar
 		slog.Error("plan check disabled", "component", "startup", "error", err)
 		return nil, nil
 	}
-	pg := background.NewPlanguard(checker.Run)
+	pg := background.NewPlanguard(ctx, checker.Run)
 	task := pg.Task(24 * time.Hour)
 	return planguardSource{pg}, &task
 }
