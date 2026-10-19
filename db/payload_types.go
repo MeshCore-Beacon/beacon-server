@@ -5,6 +5,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -70,11 +71,14 @@ func (s *Store) ObservationIDRange(ctx context.Context) (minID, maxID int64, err
 // [fromID, toID) that carry no payload type, in id order. It returns the rows typed and where the
 // walk continues: after the last row it picked when it picked maxRows, otherwise toID.
 func (s *Store) BackfillObservationPayloadTypes(ctx context.Context, fromID, toID int64, maxRows int32) (typed, next int64, err error) {
+	if maxRows <= 0 {
+		return 0, 0, fmt.Errorf("backfill observation payload types: maxRows %d, want > 0", maxRows)
+	}
 	r, err := s.q.BackfillObservationPayloadTypes(ctx, sqlc.BackfillObservationPayloadTypesParams{FromID: fromID, ToID: toID, MaxRows: maxRows})
 	if err != nil {
 		return 0, 0, err
 	}
-	if r.Picked >= int64(maxRows) {
+	if r.Picked > 0 && r.Picked >= int64(maxRows) {
 		return r.Typed, r.LastID + 1, nil
 	}
 	return r.Typed, toID, nil
