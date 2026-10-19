@@ -1297,6 +1297,12 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "Opaque nextPageCursor from a previous response; keeps millisecond ties. Wins over cursor when both are sent",
+                        "name": "pageCursor",
+                        "in": "query"
+                    },
+                    {
                         "maximum": 200,
                         "minimum": 1,
                         "type": "integer",
@@ -1309,7 +1315,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.Page-github_com_MeshCore-Beacon_beacon-server_internal_api_NodeSummary"
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodePage"
                         }
                     },
                     "400": {
@@ -1536,8 +1542,14 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "last_seen epoch ms of last item for pagination",
+                        "description": "last_seen epoch ms of the last item",
                         "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Opaque nextPageCursor from a previous response; keeps millisecond ties. Wins over cursor when both are sent",
+                        "name": "pageCursor",
                         "in": "query"
                     },
                     {
@@ -1553,7 +1565,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.Page-github_com_MeshCore-Beacon_beacon-server_internal_api_ObserverSummary"
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverPage"
                         }
                     },
                     "400": {
@@ -2004,8 +2016,14 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "epoch ms of last item for pagination; last_heard_at, or site-local heard_at when iatas is set",
+                        "description": "epoch ms of the last item; last_heard_at, or site-local heard_at when iatas is set. Prefer pageCursor where nextPageCursor is returned",
                         "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Opaque nextPageCursor from a previous response; keeps millisecond ties. Wins over cursor when both are sent. Ignored with hashPrefix or an IATA or region filter, which page by cursor",
+                        "name": "pageCursor",
                         "in": "query"
                     },
                     {
@@ -2027,7 +2045,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object"
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PacketPage"
                         }
                     },
                     "400": {
@@ -4581,6 +4599,26 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.NodePage": {
+            "type": "object",
+            "properties": {
+                "hasMore": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeSummary"
+                    }
+                },
+                "nextCursor": {
+                    "type": "integer"
+                },
+                "nextPageCursor": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_MeshCore-Beacon_beacon-server_internal_api.NodeSummary": {
             "type": "object",
             "properties": {
@@ -5052,6 +5090,26 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverPage": {
+            "type": "object",
+            "properties": {
+                "hasMore": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverSummary"
+                    }
+                },
+                "nextCursor": {
+                    "type": "integer"
+                },
+                "nextPageCursor": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverSummary": {
             "type": "object",
             "properties": {
@@ -5366,6 +5424,26 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.PacketPage": {
+            "type": "object",
+            "properties": {
+                "hasMore": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PacketSummary"
+                    }
+                },
+                "nextCursor": {
+                    "type": "integer"
+                },
+                "nextPageCursor": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_MeshCore-Beacon_beacon-server_internal_api.PacketPathLength": {
             "type": "object",
             "properties": {
@@ -5464,40 +5542,6 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdvertObservation"
-                    }
-                },
-                "nextCursor": {
-                    "type": "integer"
-                }
-            }
-        },
-        "github_com_MeshCore-Beacon_beacon-server_internal_api.Page-github_com_MeshCore-Beacon_beacon-server_internal_api_NodeSummary": {
-            "type": "object",
-            "properties": {
-                "hasMore": {
-                    "type": "boolean"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeSummary"
-                    }
-                },
-                "nextCursor": {
-                    "type": "integer"
-                }
-            }
-        },
-        "github_com_MeshCore-Beacon_beacon-server_internal_api.Page-github_com_MeshCore-Beacon_beacon-server_internal_api_ObserverSummary": {
-            "type": "object",
-            "properties": {
-                "hasMore": {
-                    "type": "boolean"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverSummary"
                     }
                 },
                 "nextCursor": {

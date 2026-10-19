@@ -49,9 +49,10 @@ func ObserversRouter(reader api.Reader) http.Handler {
 //	@Param		status	query		string	false	"Filter by status (online or offline)"
 //	@Param		name	query		string	false	"Partial case-insensitive display name match"
 //	@Param		scope	query		string	false	"Filter by transport scope name e.g. %23bc (URL-encoded #bc)"
-//	@Param		cursor	query		int		false	"last_seen epoch ms of last item for pagination"
+//	@Param		cursor	query		int		false	"last_seen epoch ms of the last item"
+//	@Param		pageCursor	query		string	false	"Opaque nextPageCursor from a previous response; keeps millisecond ties. Wins over cursor when both are sent"
 //	@Param		limit	query		int		false	"Max results (default 50); must be positive, values above 200 are clamped" minimum(1) maximum(200)
-//	@Success	200		{object}	api.Page[api.ObserverSummary]
+//	@Success	200		{object}	api.ObserverPage
 //	@Failure	400		{object}	handlers.APIError
 //	@Failure	500		{object}	handlers.APIError
 //	@Router		/observers [get]
@@ -71,6 +72,15 @@ func listObservers(reader api.Reader) http.HandlerFunc {
 			}
 			cursor = c
 		}
+		var pageCursor *api.ObserverCursor
+		if raw := r.URL.Query().Get("pageCursor"); raw != "" {
+			pc, err := api.ParseObserverCursor(raw)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "invalid pageCursor")
+				return
+			}
+			pageCursor = pc
+		}
 		limit, err := parseLimit(r, 50)
 		if err != nil {
 			respondError(w, http.StatusBadRequest, err.Error())
@@ -85,7 +95,7 @@ func listObservers(reader api.Reader) http.HandlerFunc {
 			}
 			iatas = append(iatas, regionIATAs...)
 		}
-		observers, err := reader.ListObservers(r.Context(), iatas, observerType, broker, status, name, scope, cursor, nil, limit)
+		observers, err := reader.ListObservers(r.Context(), iatas, observerType, broker, status, name, scope, cursor, pageCursor, limit)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "failed to get list of observers")
 			return

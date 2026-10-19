@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -431,4 +432,47 @@ func TestGetObserverActivity_NullsSerialise(t *testing.T) {
 	if airtime != nil {
 		t.Errorf("expected airtimeMs null, got %v", airtime)
 	}
+}
+
+func TestObserversCursorPrecedence(t *testing.T) {
+	const valid = "v1:1792442625019123:0b7e2c4a-5f1d-4c3e-9a2b-8d6f1e0c3a57"
+	var called bool
+	var gotCursor int64
+	var gotPage *api.ObserverCursor
+	next := "v1:1:0b7e2c4a-5f1d-4c3e-9a2b-8d6f1e0c3a57"
+	reader := stubReader{
+		listObservers: func(_ context.Context, _ []string, _, _, _, _, _ string, cursor int64, pageCursor *api.ObserverCursor, _ int32) (api.ObserverPage, error) {
+			called, gotCursor, gotPage = true, cursor, pageCursor
+			return api.ObserverPage{Page: api.Page[api.ObserverSummary]{Items: []api.ObserverSummary{}}, NextPageCursor: &next}, nil
+		},
+	}
+	serve := func(url string) *httptest.ResponseRecorder {
+		called, gotCursor, gotPage = false, 0, nil
+		r := chi.NewRouter()
+		r.Get("/observers", listObservers(reader))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, url, nil))
+		return w
+	}
+
+	w := serve("/observers?pageCursor=" + valid + "&cursor=1792442625000")
+	if w.Code != http.StatusOK || !called || gotCursor != 1792442625000 || gotPage == nil || gotPage.String() != valid {
+		t.Fatalf("both sent: status %d, cursor %d, pageCursor %v", w.Code, gotCursor, gotPage)
+	}
+	if !strings.Contains(w.Body.String(), `"nextPageCursor":"`+next+`"`) {
+		t.Fatalf("body lacks nextPageCursor: %s", w.Body.String())
+	}
+
+	w = serve("/observers?pageCursor=" + next)
+	if w.Code != http.StatusOK || gotPage == nil || gotPage.LastSeen.UnixMicro() != 1 || gotPage.ID != uuid.MustParse("0b7e2c4a-5f1d-4c3e-9a2b-8d6f1e0c3a57") {
+		t.Fatalf("v1:1:<uuid>: status %d, pageCursor %v", w.Code, gotPage)
+	}
+
+	for _, url := range []string{"/observers?pageCursor=garbage", "/observers?pageCursor=v1:1:ab01", "/observers?pageCursor=garbage&region=bc"} {
+		wantError(t, serve(url), http.StatusBadRequest, "invalid pageCursor")
+		if called {
+			t.Fatalf("%s: reader called", url)
+		}
+	}
+	wantError(t, serve("/observers?cursor=abc&pageCursor="+valid), http.StatusBadRequest, "cursor must be an integer")
 }
