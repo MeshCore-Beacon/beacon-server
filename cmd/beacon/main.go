@@ -158,9 +158,16 @@ func main() {
 	// routes each statement by plan class through the guards; it never runs background jobs.
 	enforce, _ := guards.ParseFamilies(resolved.GuardsEnforce) // validated by config.Load
 	guard := guards.New(guards.Options{Enforce: enforce, ForceObserve: layout == planpolicy.Single, Budget: resolved.GuardsBudget})
-	ingestStore := db.New(pools.Ingest, pools.Ingest, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold)
-	maintStore := db.New(pools.Maint, pools.Maint, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold)
+	// Ingest and maintenance share one channel id cache; the API never writes channels.
+	channelIDs := db.NewChannelIDCache()
+	ingestStore := db.New(pools.Ingest, pools.Ingest, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold, db.WithChannelIDs(channelIDs))
+	maintStore := db.New(pools.Maint, pools.Maint, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold, db.WithChannelIDs(channelIDs))
 	apiStore := db.NewAPIStore(pools, layout, guard, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold)
+	if err := maintStore.PreloadChannelIDs(ctx); err != nil {
+		slog.Warn("channel id preload failed; known channels upsert until cached", "component", "startup", "error", err)
+	} else {
+		slog.Info(fmt.Sprintf("preloaded %d channel ids", channelIDs.Len()), "component", "startup")
+	}
 
 	// ── Presence write coalescing ────────────────────────────────────────────
 	// Ingest writes go through the coalescer; reads use the API store.
