@@ -213,6 +213,9 @@ func (c *Corpus) load(fsys fs.FS, dir string, sqlcText map[string]string) error 
 		if e == nil || e.ID == "" {
 			return fmt.Errorf("entry %d: missing id", i)
 		}
+		if err := CheckName(e.ID); err != nil {
+			return fmt.Errorf("entry %d: id: %w", i, err)
+		}
 		if _, dup := c.byID[e.ID]; dup {
 			return fmt.Errorf("duplicate entry id %q", e.ID)
 		}
@@ -258,6 +261,9 @@ func (c *Corpus) checkTopLevel() error {
 		}
 	}
 	for _, name := range sortedKeys(c.Resolvers) {
+		if err := CheckName(name); err != nil {
+			return fmt.Errorf("resolver name: %w", err)
+		}
 		if m := componentSchema.FindString(c.Resolvers[name]); m != "" {
 			return fmt.Errorf("resolver %q reads schema %q; resolvers read Beacon tables only", name, m)
 		}
@@ -340,7 +346,123 @@ func (c *Corpus) loadStatement(fsys fs.FS, dir string, st *Statement, sqlcText m
 	default:
 		return errors.New("needs sqlc or file")
 	}
+	if st.Kind == "select" && st.SQL != "" {
+		if kw := dataModifying(st.SQL); kw != "" {
+			return fmt.Errorf("kind select, but the text runs %s; data-modifying statements are kind dml (plain EXPLAIN only)", kw)
+		}
+	}
 	return nil
+}
+
+var nameRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
+
+// CheckName validates an entry id or resolver name. Both end up in psql \echo lines and in file names, so they are
+// limited to letters, digits, '_', '.' and '-', with no ".." (no path escapes, no psql backticks or variables).
+func CheckName(name string) error {
+	if !nameRe.MatchString(name) || strings.Contains(name, "..") {
+		return fmt.Errorf("%q must match %s and hold no \"..\"", name, nameRe)
+	}
+	return nil
+}
+
+// dataModifying returns the data-modifying keyword (INSERT, UPDATE, DELETE or MERGE) a statement runs, or "".
+// Best effort: it checks the leading keyword and, under a WITH, every keyword at the top level or one level of
+// parentheses deep (the CTE bodies). Literals, quoted identifiers and comments are skipped; "FOR [NO KEY] UPDATE"
+// is a lock clause, not a write.
+func dataModifying(sql string) string {
+	words, depths := sqlWords(sql)
+	if len(words) == 0 {
+		return ""
+	}
+	isDML := func(i int) bool {
+		switch words[i] {
+		case "insert", "delete", "merge":
+			return true
+		case "update":
+			return i == 0 || (words[i-1] != "for" && words[i-1] != "key" && words[i-1] != "do")
+		}
+		return false
+	}
+	if isDML(0) {
+		return strings.ToUpper(words[0])
+	}
+	if words[0] != "with" {
+		return ""
+	}
+	for i := range words {
+		if depths[i] <= 1 && isDML(i) {
+			return strings.ToUpper(words[i])
+		}
+	}
+	return ""
+}
+
+// sqlWords returns the lower-cased bare words of sql with their parenthesis depth, skipping comments, string
+// literals, quoted identifiers and dollar-quoted bodies.
+func sqlWords(sql string) ([]string, []int) {
+	var words []string
+	var depths []int
+	depth := 0
+	for i := 0; i < len(sql); {
+		c := sql[i]
+		switch {
+		case c == '-' && strings.HasPrefix(sql[i:], "--"):
+			for i < len(sql) && sql[i] != '\n' {
+				i++
+			}
+		case c == '/' && strings.HasPrefix(sql[i:], "/*"):
+			if j := strings.Index(sql[i+2:], "*/"); j >= 0 {
+				i += j + 4
+			} else {
+				i = len(sql)
+			}
+		case c == '\'' || c == '"':
+			i++
+			for i < len(sql) {
+				if sql[i] == c {
+					if i+1 < len(sql) && sql[i+1] == c {
+						i += 2
+						continue
+					}
+					break
+				}
+				i++
+			}
+			i++
+		case c == '$':
+			j := i + 1
+			for j < len(sql) && isIdent(sql[j]) && !(sql[j] >= '0' && sql[j] <= '9' && j == i+1) {
+				j++
+			}
+			if j < len(sql) && sql[j] == '$' {
+				tag := sql[i : j+1]
+				if k := strings.Index(sql[j+1:], tag); k >= 0 {
+					i = j + 1 + k + len(tag)
+				} else {
+					i = len(sql)
+				}
+			} else {
+				i = j
+			}
+		case c == '(':
+			depth++
+			i++
+		case c == ')':
+			depth--
+			i++
+		case isIdent(c) && !(c >= '0' && c <= '9'):
+			j := i
+			for j < len(sql) && (isIdent(sql[j]) || sql[j] == '$') {
+				j++
+			}
+			words = append(words, strings.ToLower(sql[i:j]))
+			depths = append(depths, depth)
+			i = j
+		default:
+			i++
+		}
+	}
+	return words, depths
 }
 
 func (c *Corpus) resolveInherit() error {

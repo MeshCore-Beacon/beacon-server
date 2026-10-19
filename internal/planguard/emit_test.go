@@ -79,7 +79,7 @@ func TestEmitScripts(t *testing.T) {
 	for _, want := range []string{
 		`\echo @@` + nonce + ` P q.top|custom`, `\echo @@` + nonce + ` P q.top|generic`, `\echo @@` + nonce + ` P q.lit|custom`,
 		"EXPLAIN (FORMAT JSON) EXECUTE planguard_q('abc');", "EXPLAIN (FORMAT JSON) EXECUTE planguard_q('it''s');",
-		"BEGIN ISOLATION LEVEL READ COMMITTED READ ONLY;", "SET LOCAL plan_cache_mode = force_generic_plan;",
+		"BEGIN ISOLATION LEVEL READ COMMITTED READ ONLY;", "SET standard_conforming_strings = on;", "SET LOCAL standard_conforming_strings = on", "SET LOCAL plan_cache_mode = force_generic_plan;",
 		"ROLLBACK;\nDEALLOCATE planguard_q;", `\echo @@` + nonce + ` I indexes`, `\echo @@` + nonce + ` END`,
 	} {
 		if !strings.Contains(script, want) {
@@ -208,4 +208,51 @@ func deref(s *string) string {
 		return "<nil>"
 	}
 	return *s
+}
+
+func TestEmitRejectsHostileNames(t *testing.T) {
+	hostile := []string{"a`touch /tmp/x`", "a\nb", "../../etc/x", "a/b", "..", "a:b", "a b", ""}
+	for _, id := range hostile {
+		body := strings.Replace(emitCorpus, "{id: q.lit,", "{id: "+yamlQuote(id)+",", 1)
+		if _, err := planguard.LoadCorpus(mapFS(map[string]string{"c.yaml": body}), "c.yaml", testSQLC); err == nil {
+			t.Errorf("entry id %q loaded", id)
+		}
+		res := strings.Replace(emitCorpus, "  gone: SELECT", "  "+yamlQuote(id)+": SELECT", 1)
+		if _, err := planguard.LoadCorpus(mapFS(map[string]string{"c.yaml": res}), "c.yaml", testSQLC); err == nil {
+			t.Errorf("resolver name %q loaded", id)
+		}
+	}
+
+	// A corpus changed after loading is checked again before anything is emitted.
+	for _, id := range hostile {
+		c := loadEmitCorpus(t)
+		c.Entries[2].ID = id
+		var b bytes.Buffer
+		if err := planguard.EmitPlans(&b, c, planguard.RunOptions{Tier: "prod"}, nil, "0123456789abcdef"); err == nil {
+			t.Errorf("EmitPlans accepted entry id %q:\n%s", id, b.String())
+		}
+		c = loadEmitCorpus(t)
+		c.Resolvers[id] = "SELECT 1"
+		if err := planguard.EmitResolvers(&b, c, planguard.RunOptions{Tier: "prod"}, "0123456789abcdef"); err == nil {
+			t.Errorf("EmitResolvers accepted resolver name %q", id)
+		}
+	}
+}
+
+func TestSearchPathElements(t *testing.T) {
+	c := loadEmitCorpus(t)
+	for sp, ok := range map[string]bool{
+		"": true, "public": true, "t_s2b, public": true, `"My Schema", public`: true,
+		`"$user", public`: false, "public; DROP TABLE x": false, "pub$lic": false, "a,,b": false, "'x'": false, `"a"b"`: false,
+	} {
+		var b bytes.Buffer
+		err := planguard.EmitResolvers(&b, c, planguard.RunOptions{Tier: "prod", SearchPath: sp}, "0123456789abcdef")
+		if (err == nil) != ok {
+			t.Errorf("search_path %q: err = %v, want ok=%v", sp, err, ok)
+		}
+	}
+}
+
+func yamlQuote(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`).Replace(s) + `"`
 }

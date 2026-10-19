@@ -14,6 +14,9 @@ statements:
   ListKnownRoutesGlobalHop: {sqlc: ListKnownRoutesGlobalHop, plan: custom}
   DeleteExpiredRoutes: {sqlc: DeleteExpiredRoutes, plan: maint, kind: dml}
   Sleep: {file: sql/harness/H.sql, plan: harness}
+  # A data-modifying CTE. The read-only test relabels it kind select, as a mislabelled statement would be, and
+  # expects the READ ONLY transaction to refuse it.
+  DeleteAll: {file: sql/harness/WriteCTE.sql, plan: harness, kind: dml}
 resolvers:
   no_region: SELECT iata FROM known_routes WHERE iata = 'ZZZ' LIMIT 1
   broken: SELECT (1 / 0)::text
@@ -37,7 +40,10 @@ entries:
     params: [2, null, 0, 50]
   - id: routes.delete_expired
     stmt: DeleteExpiredRoutes
-    params: ["-infinity", 0, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", 1000]
+    params: ["-infinity", 0, "2027-01-01T00:00:00Z", "2027-01-01T00:00:00Z", 1000]
+  - id: harness.delete_all
+    stmt: DeleteAll
+    modes: [custom]
   - id: routes.byiata.no_region
     stmt: ListKnownRoutesByIATA
     params: [{r: no_region}, null, 0, 50]

@@ -63,8 +63,9 @@ var plannerSettings = []string{
 }
 
 var (
-	searchPathRe = regexp.MustCompile(`^[A-Za-z0-9_$", ]*$`)
-	gucNameRe    = regexp.MustCompile(`^[a-z_][a-z0-9_.]*$`)
+	plainIdentRe  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	quotedIdentRe = regexp.MustCompile(`^"[^"$]+"$`)
+	gucNameRe     = regexp.MustCompile(`^[a-z_][a-z0-9_.]*$`)
 )
 
 // Run plans every selected (entry, mode) on s, one READ ONLY transaction per run, and checks each plan. It never
@@ -130,12 +131,22 @@ func (o *RunOptions) validate(c *Corpus) error {
 	default:
 		return fmt.Errorf("unknown baseline mode %q (want check, write or off)", o.Baseline)
 	}
-	if !searchPathRe.MatchString(o.SearchPath) {
-		return fmt.Errorf("search_path %q holds characters a schema list does not", o.SearchPath)
+	if err := checkSearchPath(o.SearchPath); err != nil {
+		return err
+	}
+	for _, e := range c.Entries {
+		if err := CheckName(e.ID); err != nil {
+			return fmt.Errorf("entry id: %w", err)
+		}
+	}
+	for name := range c.Resolvers {
+		if err := CheckName(name); err != nil {
+			return fmt.Errorf("resolver name: %w", err)
+		}
 	}
 	for name, ts := range c.Tiers {
-		if !searchPathRe.MatchString(ts.SearchPath) {
-			return fmt.Errorf("tier %s: search_path %q holds characters a schema list does not", name, ts.SearchPath)
+		if err := checkSearchPath(ts.SearchPath); err != nil {
+			return fmt.Errorf("tier %s: %w", name, err)
 		}
 		for k := range ts.Settings {
 			if !gucNameRe.MatchString(k) {
@@ -145,9 +156,24 @@ func (o *RunOptions) validate(c *Corpus) error {
 	}
 	for name, g := range c.Groups {
 		for tier, sp := range g.SearchPath {
-			if !searchPathRe.MatchString(sp) {
-				return fmt.Errorf("group %s: %s search_path %q holds characters a schema list does not", name, tier, sp)
+			if err := checkSearchPath(sp); err != nil {
+				return fmt.Errorf("group %s: %s: %w", name, tier, err)
 			}
+		}
+	}
+	return nil
+}
+
+// checkSearchPath accepts "" (no SET) or a comma list of plain identifiers and double-quoted identifiers without
+// '$'. The list is sent unquoted in SET search_path, so nothing else may appear in it.
+func checkSearchPath(sp string) error {
+	if sp == "" {
+		return nil
+	}
+	for _, el := range strings.Split(sp, ",") {
+		el = strings.TrimSpace(el)
+		if !plainIdentRe.MatchString(el) && !quotedIdentRe.MatchString(el) {
+			return fmt.Errorf("search_path %q: element %q is not a plain or double-quoted identifier (no $)", sp, el)
 		}
 	}
 	return nil
@@ -204,7 +230,8 @@ func (c *Corpus) searchPath(o RunOptions, st *Statement) string {
 
 // readMeta fills rep.Settings and rep.Indexes in one READ ONLY transaction.
 func readMeta(ctx context.Context, s Session, c *Corpus, o RunOptions, rep *Report) error {
-	lines := []string{"BEGIN ISOLATION LEVEL READ COMMITTED READ ONLY", "SET LOCAL lock_timeout = '1s'; SET LOCAL statement_timeout = '20s'"}
+	lines := []string{"BEGIN ISOLATION LEVEL READ COMMITTED READ ONLY",
+		"SET LOCAL lock_timeout = '1s'; SET LOCAL statement_timeout = '20s'; SET LOCAL standard_conforming_strings = on"}
 	if sp := c.baseSearchPath(o); sp != "" {
 		lines = append(lines, "SET LOCAL search_path = "+sp)
 	}
@@ -247,7 +274,7 @@ func readMeta(ctx context.Context, s Session, c *Corpus, o RunOptions, rep *Repo
 		}
 		return nil
 	}()
-	if rbErr := rollback(ctx, s); rbErr != nil {
+	if rbErr := cleanupRollback(ctx, s); rbErr != nil {
 		return fmt.Errorf("read settings: rollback: %w", rbErr)
 	}
 	if err != nil {
@@ -311,7 +338,7 @@ func resolve(ctx context.Context, s Session, c *Corpus, o RunOptions, entries []
 	setup := []string{
 		"BEGIN ISOLATION LEVEL READ COMMITTED READ ONLY",
 		fmt.Sprintf("SET LOCAL statement_timeout = '%ds'; SET LOCAL lock_timeout = '1s'", timeout),
-		"SET LOCAL jit = off; SET LOCAL timezone = 'UTC'",
+		"SET LOCAL jit = off; SET LOCAL timezone = 'UTC'; SET LOCAL standard_conforming_strings = on",
 	}
 	if sp := c.baseSearchPath(o); sp != "" {
 		setup = append(setup, "SET LOCAL search_path = "+sp)
@@ -344,6 +371,9 @@ func resolve(ctx context.Context, s Session, c *Corpus, o RunOptions, entries []
 			rows := lastRows(res)
 			if len(rows) != 1 || len(rows[0]) != 1 {
 				errs[name] = fmt.Sprintf("returned %d rows", len(rows))
+				if _, err := s.Exec(ctx, "RELEASE SAVEPOINT planguard_r"); err != nil {
+					return err
+				}
 				continue
 			}
 			if rows[0][0] != nil {
@@ -358,7 +388,7 @@ func resolve(ctx context.Context, s Session, c *Corpus, o RunOptions, entries []
 		}
 		return nil
 	}()
-	if rbErr := rollback(ctx, s); rbErr != nil {
+	if rbErr := cleanupRollback(ctx, s); rbErr != nil {
 		return nil, nil, fmt.Errorf("resolvers: rollback: %w", rbErr)
 	}
 	if err != nil {
@@ -455,7 +485,7 @@ func (c *Corpus) spec(o RunOptions, e *Entry, mode string, res map[string]*strin
 		timeout = prodTimeoutS
 	}
 
-	l2 := "SET LOCAL jit = off; SET LOCAL timezone = 'UTC'"
+	l2 := "SET LOCAL jit = off; SET LOCAL timezone = 'UTC'; SET LOCAL standard_conforming_strings = on"
 	if path := c.searchPath(o, st); path != "" {
 		l2 += "; SET LOCAL search_path = " + path
 	}
@@ -529,7 +559,7 @@ func (c *Corpus) runOne(ctx context.Context, s Session, o RunOptions, sp runSpec
 	}()
 	r.WallMs = msSince(t0)
 	// Prepared statements outlive ROLLBACK: end the transaction, then deallocate, as separate commands.
-	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	cctx, cancel := cleanupCtx(ctx)
 	defer cancel()
 	rbErr := rollback(cctx, s)
 	_, daErr := s.Exec(cctx, "DEALLOCATE "+stmtName)
@@ -709,6 +739,17 @@ func unquoteLit(s string) (string, bool) {
 // trimStmt drops surrounding space and one trailing semicolon.
 func trimStmt(sql string) string {
 	return strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(sql), ";"))
+}
+
+// cleanupCtx outlives ctx's cancellation, so a transaction still ends when the run is interrupted.
+func cleanupCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+}
+
+func cleanupRollback(ctx context.Context, s Session) error {
+	cctx, cancel := cleanupCtx(ctx)
+	defer cancel()
+	return rollback(cctx, s)
 }
 
 func rollback(ctx context.Context, s Session) error {

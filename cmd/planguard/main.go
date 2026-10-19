@@ -199,6 +199,9 @@ func (f runFlags) options(stderr io.Writer) (planguard.RunOptions, int) {
 			}
 		}
 	}
+	if (f.emit != "" || f.plans != "") && f.tier != "prod" {
+		return o, usageErr(stderr, "--emit and --plans are the prod tier's psql path; use them with --tier prod")
+	}
 	switch f.emit {
 	case "", "resolvers":
 	case "plans":

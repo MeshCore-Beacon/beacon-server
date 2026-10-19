@@ -131,15 +131,26 @@ func TestRunnerReadOnlyPostgres(t *testing.T) {
 	if err := e.pool.QueryRow(e.ctx, "SELECT count(*) FROM known_routes").Scan(&before); err != nil {
 		t.Fatal(err)
 	}
-	rep := e.run(t, `^routes\.(byiata|globalhop|delete_expired)$`)
+	// A statement that writes, labelled select: the run executes and EXPLAIN ANALYZEs it, so only the READ ONLY
+	// transaction stands between it and the table.
+	e.corpus.Statements["DeleteAll"].Kind = "select"
+	rep := e.run(t, `^(routes\.(byiata|globalhop|delete_expired)|harness\.delete_all)$`)
 	got := byKey(rep)
+	del, ok := got["harness.delete_all|custom"]
+	if !ok {
+		t.Fatalf("no harness.delete_all result: %v", got)
+	}
+	if del.Verdict != planguard.VerdictError || len(del.Failures) == 0 || !strings.Contains(del.Failures[0].Msg, "25006") {
+		t.Errorf("harness.delete_all: verdict %s failures %v, want ERROR 25006 (read-only transaction)", del.Verdict, del.Failures)
+	}
+	delete(got, "harness.delete_all|custom")
 	for _, k := range []string{"routes.byiata|custom", "routes.byiata|generic", "routes.globalhop|custom", "routes.delete_expired|custom"} {
 		if _, ok := got[k]; !ok {
 			t.Fatalf("no result for %s; results %v", k, got)
 		}
 	}
-	if len(rep.Results) != 4 {
-		t.Errorf("results = %d, want 4", len(rep.Results))
+	if len(rep.Results) != 5 {
+		t.Errorf("results = %d, want 5", len(rep.Results))
 	}
 	for k, r := range got {
 		if r.Verdict.Failing() {
@@ -167,6 +178,9 @@ func TestRunnerReadOnlyPostgres(t *testing.T) {
 	var after int
 	if err := e.pool.QueryRow(e.ctx, "SELECT count(*) FROM known_routes").Scan(&after); err != nil {
 		t.Fatal(err)
+	}
+	if before != 2000 {
+		t.Errorf("seeded %d rows, want 2000 (all inside the delete cutoffs)", before)
 	}
 	if after != before {
 		t.Errorf("known_routes rows %d → %d; the runner wrote", before, after)

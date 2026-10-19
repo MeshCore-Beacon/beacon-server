@@ -22,6 +22,8 @@ func TestCLIUsage(t *testing.T) {
 		{"bad baseline", []string{"run", "--tier", "local", "--baseline", "maybe"}, "--baseline"},
 		{"bad only", []string{"run", "--tier", "local", "--only", "("}, "--only"},
 		{"emit plans without params", []string{"run", "--tier", "prod", "--emit", "plans"}, "--params"},
+		{"emit on local", []string{"run", "--tier", "local", "--emit", "resolvers"}, "--tier prod"},
+		{"plans on fixture", []string{"run", "--tier", "fixture", "--plans", "p.out", "--params", "r.out"}, "--tier prod"},
 		{"unknown flag", []string{"run", "--tier", "local", "--nope"}, "nope"},
 	}
 	for _, tc := range cases {

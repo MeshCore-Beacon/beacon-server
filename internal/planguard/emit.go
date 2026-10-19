@@ -31,7 +31,7 @@ const IndexesKey = "indexes"
 
 const scriptHead = "SET default_transaction_read_only = on; SET lock_timeout = '1s'; SET statement_timeout = '20s';\n" +
 	"\\set QUIET on\n\\set ON_ERROR_STOP off\n\\pset format unaligned\n\\pset tuples_only on\n\\pset pager off\n" +
-	"SET jit = off; SET timezone = 'UTC';\n"
+	"SET jit = off; SET timezone = 'UTC'; SET standard_conforming_strings = on;\n"
 
 var (
 	nonceRe       = regexp.MustCompile(`^[0-9a-f]{16}$`)

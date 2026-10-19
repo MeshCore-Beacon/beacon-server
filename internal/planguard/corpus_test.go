@@ -55,6 +55,9 @@ func TestCorpusValidation(t *testing.T) {
 		{"bad_unknown_mode.yaml", []string{`entry "a"`, `mode "forced"`}},
 		{"bad_unknown_mode_override.yaml", []string{`entry "a"`, `mode "plain"`}},
 		{"bad_missing_sqlc.yaml", []string{`statement "Gone"`, "sqlc"}},
+		{"bad_select_writes.yaml", []string{`statement "M"`, "kind select", "DELETE"}},
+		{"bad_select_cte_writes.yaml", []string{`statement "W"`, "kind select", "DELETE"}},
+		{"bad_entry_id.yaml", []string{"entry 0", `"../escape"`}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.file, func(t *testing.T) {
