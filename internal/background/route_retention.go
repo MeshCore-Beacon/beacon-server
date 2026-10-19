@@ -48,7 +48,9 @@ func routeRetentionTask(store routeRetainer, retention, grace time.Duration, min
 		Interval: interval,
 		Run: func(ctx context.Context) error {
 			t := now()
-			R, G := t.Add(-retention), t.Add(-grace) // exact instants, as the old single statement used
+			// The exact cutoffs floored to µs, as pgx sends them (lossless). Every comparison below uses
+			// these values, so the walk's stop test agrees with the window end the SQL computes.
+			R, G := t.Add(-retention).Truncate(time.Microsecond), t.Add(-grace).Truncate(time.Microsecond)
 
 			var expired int64
 			for after := (db.RouteKey{}); ; {
@@ -68,7 +70,7 @@ func routeRetentionTask(store routeRetainer, retention, grace time.Duration, min
 			if err != nil {
 				return fmt.Errorf("route grace state: %w", err)
 			}
-			full := !ok || st.MinObservations != minObs || st.Grace != grace.String() || t.Sub(st.LastFullPass) >= fullPassEvery
+			full := !ok || st.MinObservations != minObs || st.Grace != grace.String() || t.Before(st.LastFullPass) || t.Sub(st.LastFullPass) >= fullPassEvery
 			// Never from RouteKey{} (-infinity): routes before R are gone, so the walk starts at floor_ms(R).
 			start := R.Truncate(time.Millisecond)
 			lastFull := st.LastFullPass
@@ -100,7 +102,8 @@ func routeRetentionTask(store routeRetainer, retention, grace time.Duration, min
 
 // graceWalk runs the grace slices from start until a window reaches ceil_ms(G): a full batch stays
 // in its window, a short one moves to the next. It returns min(floor_ms(G), earliest unresolved
-// candidate), where the next incremental walk starts.
+// candidate), where the next incremental walk starts. A window that does not advance is an error,
+// never a retry of the same statement.
 func graceWalk(ctx context.Context, store routeRetainer, start, G time.Time, minObs int64, batch int32) (watermark time.Time, candidates, deleted int64, err error) {
 	watermark = G.Truncate(time.Millisecond)
 	after := db.RouteKey{TS: start}
@@ -117,10 +120,13 @@ func graceWalk(ctx context.Context, store routeRetainer, start, G time.Time, min
 		switch {
 		case res.Candidates == int64(batch):
 			after = res.Last
-		case res.WindowEnd.Before(G):
-			after = db.RouteKey{TS: res.WindowEnd}
-		default:
+		case !res.WindowEnd.Before(G):
 			return watermark, candidates, deleted, nil
+		case !res.WindowEnd.After(after.TS):
+			return time.Time{}, 0, 0, fmt.Errorf("grace walk made no progress at %v (window end %v, cutoff %v)",
+				after.TS, res.WindowEnd, G)
+		default:
+			after = db.RouteKey{TS: res.WindowEnd}
 		}
 	}
 }

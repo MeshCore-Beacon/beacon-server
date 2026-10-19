@@ -41,6 +41,11 @@ type fakeRetainer struct {
 	last       map[int]db.RouteKey
 	unresolved map[int]time.Time
 	graceErr   map[int]error
+	windowEnd  map[int]time.Time // overrides the SQL's window end
+	expiredErr error
+	loadErr    error
+	saveErr    error
+	neighErr   error
 	saves      int
 	neighbors  int
 }
@@ -52,11 +57,15 @@ func newFakeRetainer() *fakeRetainer {
 		last:       map[int]db.RouteKey{},
 		unresolved: map[int]time.Time{},
 		graceErr:   map[int]error{},
+		windowEnd:  map[int]time.Time{},
 	}
 }
 
 func (f *fakeRetainer) DeleteExpiredRoutes(_ context.Context, after db.RouteKey, cutoff time.Time, batch int32) (int64, db.RouteKey, error) {
 	f.expired = append(f.expired, expiredCall{after, cutoff, batch})
+	if f.expiredErr != nil {
+		return 0, db.RouteKey{}, f.expiredErr
+	}
 	if i := len(f.expired) - 1; i < len(f.expiredRes) {
 		return f.expiredRes[i].selected, f.expiredRes[i].last, nil
 	}
@@ -75,6 +84,9 @@ func testCeilMs(t time.Time) time.Time {
 
 func (f *fakeRetainer) DeleteGraceRoutesSlice(_ context.Context, after db.RouteKey, cutoff time.Time, minObs int64, batch int32) (db.GraceSliceResult, error) {
 	n := len(f.grace) + 1
+	if n > 10_000 {
+		return db.GraceSliceResult{}, errors.New("grace walk does not terminate")
+	}
 	if after.TS.IsZero() {
 		return db.GraceSliceResult{}, errors.New("grace walk from -infinity")
 	}
@@ -86,6 +98,9 @@ func (f *fakeRetainer) DeleteGraceRoutesSlice(_ context.Context, after db.RouteK
 	if w := after.TS.Add(db.GraceWindow); w.Before(end) {
 		end = w
 	}
+	if w, ok := f.windowEnd[n]; ok {
+		end = w
+	}
 	res := db.GraceSliceResult{Candidates: f.candidates[n], Deleted: f.candidates[n], Last: f.last[n], WindowEnd: end}
 	if u, ok := f.unresolved[n]; ok {
 		res.Unresolved = &u
@@ -95,6 +110,9 @@ func (f *fakeRetainer) DeleteGraceRoutesSlice(_ context.Context, after db.RouteK
 }
 
 func (f *fakeRetainer) LoadState(_ context.Context, key string, v any) (bool, error) {
+	if f.loadErr != nil {
+		return false, f.loadErr
+	}
 	raw, ok := f.state[key]
 	if !ok {
 		return false, nil
@@ -104,6 +122,9 @@ func (f *fakeRetainer) LoadState(_ context.Context, key string, v any) (bool, er
 
 func (f *fakeRetainer) SaveState(_ context.Context, key string, v any) error {
 	f.saves++
+	if f.saveErr != nil {
+		return f.saveErr
+	}
 	raw, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -114,7 +135,7 @@ func (f *fakeRetainer) SaveState(_ context.Context, key string, v any) error {
 
 func (f *fakeRetainer) ReconfirmNeighbors(context.Context) error {
 	f.neighbors++
-	return nil
+	return f.neighErr
 }
 
 func (f *fakeRetainer) put(t *testing.T, s routesGraceState) {
@@ -147,7 +168,7 @@ func TestRouteRetentionLoop(t *testing.T) {
 		minObs    int64 = 3
 		batch     int32 = 7
 	)
-	R, G := now.Add(-retention), now.Add(-grace)
+	R, G := now.Add(-retention).Truncate(time.Microsecond), now.Add(-grace).Truncate(time.Microsecond) // as the task floors them
 	floorR, floorG, ceilG := R.Truncate(time.Millisecond), G.Truncate(time.Millisecond), testCeilMs(G)
 	clock := func() time.Time { return now }
 	run := func(t *testing.T, f *fakeRetainer, retention, grace time.Duration) error {
@@ -325,17 +346,91 @@ func TestRouteRetentionLoop(t *testing.T) {
 		if err := run(t, f, ret, 24*time.Hour); err != nil {
 			t.Fatal(err)
 		}
-		exact := now.Add(-ret)
-		if !f.expired[0].cutoff.Equal(exact) || f.expired[0].cutoff.Nanosecond() != exact.Nanosecond() {
+		// R and G are floored to µs once, as pgx sends them; nothing else is truncated.
+		exact := now.Add(-ret).Truncate(time.Microsecond)
+		if !f.expired[0].cutoff.Equal(exact) {
 			t.Errorf("retention cutoff %v, want %v", f.expired[0].cutoff, exact)
 		}
-		if !f.grace[0].cutoff.Equal(now.Add(-24 * time.Hour)) {
-			t.Errorf("grace cutoff %v, want %v", f.grace[0].cutoff, now.Add(-24*time.Hour))
+		if g := now.Add(-24 * time.Hour).Truncate(time.Microsecond); !f.grace[0].cutoff.Equal(g) {
+			t.Errorf("grace cutoff %v, want %v", f.grace[0].cutoff, g)
 		}
-		if start := f.grace[0].after.TS; !start.Equal(exact.Truncate(time.Microsecond).Truncate(time.Millisecond)) {
+		if start := f.grace[0].after.TS; !start.Equal(exact.Truncate(time.Millisecond)) {
 			t.Errorf("grace start %v", start)
 		}
 	})
+}
+
+// Sub-µs parts of now: G's µs floor can sit on a whole ms, so ceil_ms(G as sent) < G exactly.
+func TestRouteRetentionSubMicrosecondNow(t *testing.T) {
+	for _, ns := range []int{400, 999} {
+		now := time.Date(2026, 1, 15, 12, 34, 56, ns, time.UTC)
+		f := newFakeRetainer()
+		clock := func() time.Time { return now }
+		if err := routeRetentionTask(f, 14*24*time.Hour, 7*24*time.Hour, 3, time.Hour, clock, 7).Run(context.Background()); err != nil {
+			t.Fatalf("+%dns: %v", ns, err)
+		}
+		// floor_ms(R)+7d is G's µs floor, a whole ms: 28 windows, the last ending at ceil_ms(G) itself.
+		if len(f.grace) != 28 {
+			t.Errorf("+%dns: %d grace calls, want 28", ns, len(f.grace))
+		}
+		if f.saves != 1 || f.neighbors != 1 {
+			t.Errorf("+%dns: saves %d, neighbors %d", ns, f.saves, f.neighbors)
+		}
+	}
+}
+
+func TestRouteRetentionErrors(t *testing.T) {
+	now := time.Date(2026, 1, 15, 12, 34, 56, 586_400, time.UTC)
+	boom := errors.New("boom")
+	run := func(f *fakeRetainer) error {
+		return routeRetentionTask(f, 14*24*time.Hour, 7*24*time.Hour, 3, time.Hour, func() time.Time { return now }, 7).Run(context.Background())
+	}
+	for _, c := range []struct {
+		name             string
+		set              func(*fakeRetainer)
+		saves, neighbors int
+	}{
+		{"expired", func(f *fakeRetainer) { f.expiredErr = boom }, 0, 0},
+		{"load state", func(f *fakeRetainer) { f.loadErr = boom }, 0, 0},
+		{"save state", func(f *fakeRetainer) { f.saveErr = boom }, 1, 0},
+		{"neighbors", func(f *fakeRetainer) { f.neighErr = boom }, 1, 1},
+	} {
+		f := newFakeRetainer()
+		c.set(f)
+		if err := run(f); !errors.Is(err, boom) {
+			t.Errorf("%s: error %v", c.name, err)
+		}
+		if f.saves != c.saves || f.neighbors != c.neighbors {
+			t.Errorf("%s: saves %d, neighbors %d; want %d, %d", c.name, f.saves, f.neighbors, c.saves, c.neighbors)
+		}
+	}
+	t.Run("no progress", func(t *testing.T) {
+		f := newFakeRetainer()
+		R := now.Add(-14 * 24 * time.Hour).Truncate(time.Millisecond)
+		f.windowEnd[2] = R.Add(6 * time.Hour) // call 2 starts there: the window does not advance
+		err := run(f)
+		if err == nil || len(f.grace) != 2 || f.saves != 0 || f.neighbors != 0 {
+			t.Fatalf("error %v, calls %d, saves %d, neighbors %d", err, len(f.grace), f.saves, f.neighbors)
+		}
+	})
+}
+
+func TestRouteRetentionClockJump(t *testing.T) {
+	now := time.Date(2026, 1, 15, 12, 34, 56, 586_400, time.UTC)
+	f := newFakeRetainer()
+	f.put(t, routesGraceState{
+		Watermark: now.Add(-7*24*time.Hour - time.Hour).Truncate(time.Millisecond), MinObservations: 3,
+		Grace: (7 * 24 * time.Hour).String(), LastFullPass: now.Add(48 * time.Hour), // a pass "in the future"
+	})
+	if err := routeRetentionTask(f, 14*24*time.Hour, 7*24*time.Hour, 3, time.Hour, func() time.Time { return now }, 7).Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if R := now.Add(-14 * 24 * time.Hour).Truncate(time.Millisecond); !f.grace[0].after.TS.Equal(R) {
+		t.Errorf("start %v, want full pass from %v", f.grace[0].after.TS, R)
+	}
+	if got := f.saved(t).LastFullPass; !got.Equal(now.Truncate(time.Hour)) {
+		t.Errorf("LastFullPass %v, want %v", got, now.Truncate(time.Hour))
+	}
 }
 
 func TestRouteRetentionTaskName(t *testing.T) {
