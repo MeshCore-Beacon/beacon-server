@@ -40,11 +40,11 @@ server:
 # the proxy's budget. IPv6 clients share a /64 budget to prevent address rotation.
 ratelimit:
   enabled: true
-  requests_per_minute: 300
+  requests_per_minute: 600
   # Maximum requests in a one-second sliding window, not token-bucket capacity.
   # Omitted/zero defaults to requests_per_minute. Negative limits prevent startup.
   # A 429 returns error.code=rate_limited and Retry-After (1 or 60 seconds).
-  burst: 300
+  burst: 600
 
 # MeshMapper integrations (optional, require a regional or grouped-region API key).
 # Your local MeshMapper regional or grouped-region admin can generate the key.
