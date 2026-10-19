@@ -4,6 +4,8 @@
 package planguard_test
 
 import (
+	"bytes"
+	"encoding/csv"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -205,5 +207,56 @@ func TestRepoCorpusCachedEntries(t *testing.T) {
 		if !slices.Equal(c.ModesOf(e), []string{"custom", "generic", "auto"}) {
 			t.Errorf("entry %s of cached %s runs %v", e.ID, e.Stmt, c.ModesOf(e))
 		}
+	}
+}
+
+// The fixture's data files hold aggregates only: every cell is a count, a number, a boolean, a timestamp or an IATA
+// code. A name, key, UUID or any other text (a node, observer, channel, scope or broker name) fails, as does a
+// file that is not CSV.
+func TestFixtureDataHoldsOnlyAggregates(t *testing.T) {
+	header := regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	cell := regexp.MustCompile(`^(-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?|t|f|true|false|[A-Z0-9]{3}|[0-9]{4}-[0-9]{2}-[0-9]{2}[ T][0-9:.]+([+-][0-9:]+|Z)?|)$`)
+	n := 0
+	err := fs.WalkDir(pgdata.Files, "fixture/testdata", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		n++
+		if !strings.HasSuffix(p, ".csv") {
+			t.Errorf("%s: only CSV files belong in the fixture data", p)
+			return nil
+		}
+		body, err := fs.ReadFile(pgdata.Files, p)
+		if err != nil {
+			return err
+		}
+		recs, err := csv.NewReader(bytes.NewReader(body)).ReadAll()
+		if err != nil {
+			t.Errorf("%s: %v", p, err)
+			return nil
+		}
+		if len(recs) < 2 {
+			t.Errorf("%s: no data rows", p)
+			return nil
+		}
+		for _, h := range recs[0] {
+			if !header.MatchString(h) {
+				t.Errorf("%s: header %q is not a column name", p, h)
+			}
+		}
+		for i, rec := range recs[1:] {
+			for j, c := range rec {
+				if !cell.MatchString(c) {
+					t.Errorf("%s:%d column %s holds %q: not a count, number, boolean, timestamp or IATA code", p, i+2, recs[0][j], c)
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n == 0 {
+		t.Fatal("no fixture data files")
 	}
 }

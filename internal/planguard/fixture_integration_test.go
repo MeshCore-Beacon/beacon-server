@@ -80,16 +80,49 @@ func planRows(t *testing.T, ctx context.Context, pool *pgxpool.Pool, query strin
 	return doc[0].Plan.Rows
 }
 
+// fixtureDB returns a pool on a built fixture. With PLANGUARD_FIXTURE_DSN set (CI, after the fixture-tier step
+// built it) it reuses that database, after checking its marker records a finished build of these very files;
+// otherwise it builds one in a fresh database.
+func fixtureDB(t *testing.T, ctx context.Context) *pgxpool.Pool {
+	t.Helper()
+	dsn := os.Getenv("PLANGUARD_FIXTURE_DSN")
+	if dsn == "" {
+		pool := throwawayDB(t, ctx, "planguard_fixture_test")
+		t0 := time.Now()
+		if err := planguard.BuildFixture(ctx, pool, pgdata.Files); err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("fixture built in %.1f s", time.Since(t0).Seconds())
+		return pool
+	}
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	want, err := planguard.FixtureHash(pgdata.Files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := pool.QueryRow(ctx, "SELECT coalesce(max(hash) FILTER (WHERE built_at IS NOT NULL), '') FROM planguard_src.fixture_marker").Scan(&got); err != nil {
+		t.Fatalf("PLANGUARD_FIXTURE_DSN: no fixture marker: %v", err)
+	}
+	if got != want {
+		t.Fatalf("PLANGUARD_FIXTURE_DSN holds a fixture of hash %q, want a finished build of these files (%s)", got, want)
+	}
+	t.Logf("reusing the fixture built from these files (%s)", want)
+	return pool
+}
+
 func TestBuildFixtureThroughMigrationsPostgres(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
-	pool := throwawayDB(t, ctx, "planguard_fixture_test")
-
-	t0 := time.Now()
-	if err := planguard.BuildFixture(ctx, pool, pgdata.Files); err != nil {
-		t.Fatal(err)
+	testDSN := os.Getenv("BEACON_TEST_POSTGRES_DSN")
+	if testDSN == "" {
+		t.Skip("set BEACON_TEST_POSTGRES_DSN for PostgreSQL tests")
 	}
-	t.Logf("fixture built in %.1f s", time.Since(t0).Seconds())
+	pool := fixtureDB(t, ctx)
 
 	// Every embedded migration is applied.
 	files, err := filepath.Glob("../../db/migrations/*.sql")
@@ -125,25 +158,34 @@ func TestBuildFixtureThroughMigrationsPostgres(t *testing.T) {
 		t.Errorf("known_routes covers %d regions, want >= 300", regions)
 	}
 
-	// The fixture adds no index: known_routes carries exactly the migrations' set, read from a schema migrated
-	// on its own.
+	// The fixture adds no index: known_routes carries exactly the migrations' set, read from a schema migrated on
+	// its own in the test database.
 	schema := "planguard_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	if _, err := pool.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
+	cfg, err := pgxpool.ParseConfig(testDSN)
+	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := pool.Config().Copy()
 	cfg.ConnConfig.RuntimeParams["search_path"] = schema
+	cfg.MaxConns = 1
 	ref, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer ref.Close()
+	if _, err := ref.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if _, err := ref.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE"); err != nil {
+			t.Error(err)
+		}
+	}()
 	if err := db.RunMigrations(ctx, ref); err != nil {
 		t.Fatal(err)
 	}
-	ref.Close()
-	indexes := func(ns string) []string {
+	indexes := func(p *pgxpool.Pool, ns string) []string {
 		var out []string
-		rows, err := pool.Query(ctx, "SELECT indexname FROM pg_indexes WHERE schemaname = $1 AND tablename = 'known_routes' ORDER BY 1", ns)
+		rows, err := p.Query(ctx, "SELECT indexname FROM pg_indexes WHERE schemaname = $1 AND tablename = 'known_routes' ORDER BY 1", ns)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -157,11 +199,8 @@ func TestBuildFixtureThroughMigrationsPostgres(t *testing.T) {
 		}
 		return out
 	}
-	if got, want := indexes("public"), indexes(schema); !slices.Equal(got, want) || len(want) == 0 {
+	if got, want := indexes(pool, "public"), indexes(ref, schema); !slices.Equal(got, want) || len(want) == 0 {
 		t.Errorf("known_routes indexes %v, want the migrations' %v", got, want)
-	}
-	if _, err := pool.Exec(ctx, "DROP SCHEMA "+schema+" CASCADE"); err != nil {
-		t.Fatal(err)
 	}
 
 	// The stale region: thousands of rows the statistics have never seen.

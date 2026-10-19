@@ -109,6 +109,13 @@ func readFixtureFiles(fsys fs.FS) (fixtureFiles, error) {
 	return ff, nil
 }
 
+// FixtureHash is the hash BuildFixture records for the generator in fsys: a database whose finished marker holds
+// it was built from exactly these files.
+func FixtureHash(fsys fs.FS) (string, error) {
+	ff, err := readFixtureFiles(fsys)
+	return ff.hash, err
+}
+
 // fixtureState is what the database says about an earlier build.
 type fixtureState struct {
 	marker   bool   // planguard_src.fixture_marker exists
