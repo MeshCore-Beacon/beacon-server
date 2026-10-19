@@ -5,10 +5,13 @@ package background
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
 )
 
 func TestScheduler_RunsTask(t *testing.T) {
@@ -110,5 +113,51 @@ func TestScheduler_MultipleTasksRunIndependently(t *testing.T) {
 		if calls2.Load() == 0 {
 			t.Error("expected task2 to have run")
 		}
+	})
+}
+
+// histogramCount reads the sample count of metric{job=job} from the registry.
+func histogramCount(t *testing.T, metric, job string) uint64 {
+	t.Helper()
+	mfs, err := metrics.Registry.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mf := range mfs {
+		if mf.GetName() != metric {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			for _, l := range m.GetLabel() {
+				if l.GetName() == "job" && l.GetValue() == job {
+					return m.GetHistogram().GetSampleCount()
+				}
+			}
+		}
+	}
+	return 0
+}
+
+func TestSchedulerRecordsJobDuration(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const job = "duration-test-task"
+		before := histogramCount(t, "beacon_job_duration_seconds", job)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		s := New([]Task{{Name: job, Interval: time.Second, Run: func(ctx context.Context) error {
+			select {
+			case <-time.After(2 * time.Second):
+			case <-ctx.Done():
+			}
+			return errors.New("fails, still timed")
+		}}})
+		go s.Start(ctx)
+		time.Sleep(3500 * time.Millisecond)
+		synctest.Wait()
+		if got := histogramCount(t, "beacon_job_duration_seconds", job); got != before+1 {
+			t.Errorf("%d runs observed, want %d", got-before, 1)
+		}
+		cancel()
+		synctest.Wait()
 	})
 }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/db"
+	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
 )
 
 // RoutesGraceKey is the background_state key of the grace walk's watermark.
@@ -89,6 +90,7 @@ func routeRetentionTask(store routeRetainer, retention, grace time.Duration, min
 			}); err != nil {
 				return fmt.Errorf("route grace state: %w", err)
 			}
+			metrics.JobRows.WithLabelValues("route_retention").Add(float64(expired + deleted))
 			slog.Debug("route retention", "component", "background", "expired", expired,
 				"grace_candidates", candidates, "grace_deleted", deleted, "full_pass", full, "watermark", watermark)
 

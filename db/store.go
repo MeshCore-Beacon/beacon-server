@@ -9,6 +9,7 @@ package db
 import (
 	"context"
 	"encoding/hex"
+	"sync/atomic"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
@@ -25,6 +26,7 @@ type Store struct {
 	pool                *pgxpool.Pool // dedicated connections (rollups, reconfirm, catalog reads); nil for the API store and mocks
 	clockDriftThreshold time.Duration // see api.Node.ClockOutOfSync
 	staleThreshold      time.Duration // see api.NodeSummary.Stale
+	pgVersion           atomic.Int32  // server_version_num, read by the first PgActivity call
 }
 
 // New creates a Store whose statements run on dbtx (a pool, or a PlanRouter for the API).
