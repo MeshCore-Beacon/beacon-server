@@ -10,4 +10,6 @@ var Cached = map[string]bool{
 	"GetNodeByID":           true,
 	"ListKnownRoutesByIATA": true,
 	"ListKnownRoutesGlobal": true,
+	"ListPacketsByTypes":    true,
+	"ListPacketsPage":       true,
 }

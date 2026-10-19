@@ -58,8 +58,8 @@ ratelimit:
 # Keep max_connections well above that.
 #database:
 #  # custom_all (default): every API statement gets a custom plan.
-#  # split: statements admitted to the generic-plan class run on cached generic plans. No statement
-#  #   is admitted yet, so split has no effect; keep custom_all.
+#  # split: statements admitted to the generic-plan class (db/planpolicy/cached_gen.go) run on cached
+#  #   generic plans on api_cached; every other API statement keeps custom plans.
 #  # single: rollback. One API pool on today's settings; every guard family observes.
 #  api_plan_layout: custom_all
 

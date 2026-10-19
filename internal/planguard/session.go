@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -24,8 +25,19 @@ func NewSession(pc *pgconn.PgConn) Session { return pgSession{pc} }
 type pgSession struct{ pc *pgconn.PgConn }
 
 func (s pgSession) Exec(ctx context.Context, sql string) ([]*pgconn.Result, error) {
-	res, err := s.pc.Exec(ctx, sql).ReadAll()
-	if err != nil {
+	// As MultiResultReader.ReadAll, but a result without rows keeps its columns: Read fills FieldDescriptions
+	// from the first row only.
+	mrr := s.pc.Exec(ctx, sql)
+	var res []*pgconn.Result
+	for mrr.NextResult() {
+		rr := mrr.ResultReader()
+		r := rr.Read()
+		if r.FieldDescriptions == nil && rr.FieldDescriptions() != nil {
+			r.FieldDescriptions = slices.Clone(rr.FieldDescriptions())
+		}
+		res = append(res, r)
+	}
+	if err := mrr.Close(); err != nil {
 		return res, err
 	}
 	for _, r := range res {

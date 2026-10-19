@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -250,7 +251,7 @@ func TestStoreDiffSpecValidation(t *testing.T) {
 		{"cases:\n- id: a\n  path: /api/v1/x\n  query: {limit: \"5\"}\n", "query limit is set by the walk"},
 		{"cases:\n- id: a\n  path: /api/v1/x\n  follow: [{param: cursor, from: prevCursor}]\n", "want nextCursor, nextPageCursor or last.<field>"},
 		{"cases:\n- id: a\n  path: /api/v1/x\n  allowed: [tie_order]\n", "tie_order needs key"},
-		{"cases:\n- id: a\n  path: /api/v1/x\n  allowed: [saturated_suffix]\n", "want tie_order or additive_keys"},
+		{"cases:\n- id: a\n  path: /api/v1/x\n  allowed: [saturated_suffix]\n", "want tie_order, additive_keys or latest_observer_tie"},
 		{"cases:\n- id: a\n  path: /api/v1/x/{id}\n", "vars does not define it"},
 		{"cases:\n- id: a\n  path: /api/v1/x\n- id: a\n  path: /api/v1/y\n", "case id a is used twice"},
 	} {
@@ -300,12 +301,20 @@ func TestStoreDiffPathVars(t *testing.T) {
 // The repo's storediff case files load, and every query, follow and var param is a query param of its handler in
 // the generated Swagger.
 func TestRepoStoreDiffCasesLoad(t *testing.T) {
-	spec, err := planguard.LoadStoreDiffSpec("../../db/planguard/storediff/smoke.yaml")
-	if err != nil {
-		t.Fatal(err)
+	files, err := filepath.Glob("../../db/planguard/storediff/*.yaml")
+	if err != nil || len(files) < 2 {
+		t.Fatalf("storediff case files %v: %v", files, err)
 	}
-	if len(spec.Cases) < 7 {
-		t.Errorf("smoke.yaml has %d cases, want at least 7", len(spec.Cases))
+	spec := &planguard.StoreDiffSpec{}
+	for _, f := range files {
+		s, err := planguard.LoadStoreDiffSpec(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if filepath.Base(f) == "smoke.yaml" && len(s.Cases) < 7 {
+			t.Errorf("smoke.yaml has %d cases, want at least 7", len(s.Cases))
+		}
+		spec.Cases = append(spec.Cases, s.Cases...)
 	}
 	raw, err := os.ReadFile("../../docs/swagger.json")
 	if err != nil {
@@ -427,5 +436,98 @@ func TestStoreDiffTieOrderChecksEachBuildsCursor(t *testing.T) {
 	rep = runStoreDiff(t, old, descServer(t, inside), spec, "4")
 	if c := rep.Cases[0]; c.Verdict != planguard.DiffAllowed || c.Pages != 2 {
 		t.Errorf("tie inside the page: got %+v, want allowed over 2 pages", c)
+	}
+}
+
+// A top-level key the new build adds to every page is allowed under additive_keys; when both builds hold the key,
+// it is compared.
+func TestStoreDiffAdditiveKeys(t *testing.T) {
+	add := func(v any) func(page int, body map[string]any) {
+		return func(page int, body map[string]any) { body["nextPageCursor"] = v }
+	}
+	old := pageServer(t, nil, nil)
+	rep := runStoreDiff(t, old, pageServer(t, add("v1:x"), nil), thingsSpec([]string{planguard.ClassAdditiveKeys}, nil), "3")
+	if c := rep.Cases[0]; c.Verdict != planguard.DiffAllowed || len(c.Classes) != 1 || c.Classes[0] != "additive_keys(3)" ||
+		!strings.Contains(c.Detail, "page 1: additive_keys: $.nextPageCursor") {
+		t.Errorf("added on every page: got %+v, want allowed additive_keys(3)", c)
+	}
+	rep = runStoreDiff(t, old, pageServer(t, add("v1:x"), nil), thingsSpec(nil, nil), "3")
+	if c := rep.Cases[0]; c.Verdict != planguard.DiffDifferent || c.Detail != `page 1: $.nextPageCursor: old (absent), new "v1:x"` {
+		t.Errorf("undeclared: got %+v, want different at $.nextPageCursor", c)
+	}
+	rep = runStoreDiff(t, pageServer(t, add("v1:a"), nil), pageServer(t, add("v1:b"), nil), thingsSpec([]string{planguard.ClassAdditiveKeys}, nil), "3")
+	if c := rep.Cases[0]; c.Verdict != planguard.DiffDifferent || c.Detail != `page 1: $.nextPageCursor: old "v1:a", new "v1:b"` {
+		t.Errorf("both hold the key: got %+v, want different at $.nextPageCursor", c)
+	}
+}
+
+// latest_observer_tie lets the omit fields of an item differ, and lists each such item; any other field still
+// counts.
+func TestStoreDiffLatestObserverTie(t *testing.T) {
+	observer := func(page int, body map[string]any) {
+		for _, it := range body["items"].([]any) {
+			it.(map[string]any)["latestObserver"] = map[string]any{"name": "a"}
+		}
+	}
+	tie := func(field string) func(page int, body map[string]any) {
+		return func(page int, body map[string]any) {
+			observer(page, body)
+			if items := body["items"].([]any); page == 1 && len(items) > 3 {
+				if field == "latestObserver" {
+					items[3].(map[string]any)[field] = map[string]any{"name": "b"}
+				} else {
+					items[3].(map[string]any)[field] = "other"
+				}
+			}
+		}
+	}
+	spec := func(allowed []string, omit []string) *planguard.StoreDiffSpec {
+		s := thingsSpec(allowed, nil)
+		s.Cases[0].Omit = omit
+		return s
+	}
+	old := pageServer(t, observer, nil)
+	lot := []string{planguard.ClassLatestObserverTie}
+
+	rep := runStoreDiff(t, old, pageServer(t, tie("latestObserver"), nil), spec(lot, []string{"latestObserver"}), "5")
+	if c := rep.Cases[0]; c.Verdict != planguard.DiffAllowed || len(c.Classes) != 1 || c.Classes[0] != "latest_observer_tie(1)" ||
+		!strings.Contains(c.Detail, "page 1: latest_observer_tie: $.items[3]") {
+		t.Errorf("observer differs: got %+v, want allowed latest_observer_tie(1) listing $.items[3]", c)
+	}
+	rep = runStoreDiff(t, old, pageServer(t, tie("latestObserver"), nil), spec(nil, nil), "5")
+	if c := rep.Cases[0]; c.Verdict != planguard.DiffDifferent || c.Detail != `page 1: $.items[3].latestObserver.name: old "a", new "b"` {
+		t.Errorf("undeclared: got %+v, want different", c)
+	}
+	rep = runStoreDiff(t, old, pageServer(t, tie("name"), nil), spec(lot, []string{"latestObserver"}), "5")
+	if c := rep.Cases[0]; c.Verdict != planguard.DiffDifferent || c.Detail != `page 1: $.items[3].name: old "n4", new "other"` {
+		t.Errorf("another field differs: got %+v, want different at $.items[3].name", c)
+	}
+
+	// With tie_order, an item whose observer differs still pairs within its run of equal keys.
+	swapTie := func(page int, body map[string]any) {
+		tie("latestObserver")(page, body)
+		if items := body["items"].([]any); page == 1 && len(items) > 3 {
+			items[2], items[3] = items[3], items[2]
+		}
+	}
+	both := spec([]string{planguard.ClassTieOrder, planguard.ClassLatestObserverTie}, []string{"latestObserver"})
+	both.Cases[0].Key = []string{"group"}
+	rep = runStoreDiff(t, old, pageServer(t, swapTie, nil), both, "5")
+	if c := rep.Cases[0]; c.Verdict != planguard.DiffAllowed || strings.Join(c.Classes, " ") != "tie_order(2) latest_observer_tie(1)" {
+		t.Errorf("tie and observer: got %+v, want allowed tie_order(2) latest_observer_tie(1)", c)
+	}
+
+	for _, tc := range []struct{ yaml, err string }{
+		{"cases:\n- id: a\n  path: /api/v1/x\n  omit: [latestObserver]\n", "omit and the class latest_observer_tie go together"},
+		{"cases:\n- id: a\n  path: /api/v1/x\n  allowed: [latest_observer_tie]\n", "omit and the class latest_observer_tie go together"},
+		{"cases:\n- id: a\n  path: /api/v1/x\n  allowed: [tie_order, latest_observer_tie]\n  key: [lastHeardAt]\n  omit: [lastHeardAt]\n", "omit field lastHeardAt is a key field"},
+		{"cases:\n- id: a\n  path: /api/v1/x\n  allowed: [latest_observer_tie]\n  omit: [\"a b\"]\n", "is not a field name"},
+	} {
+		if _, err := planguard.ParseStoreDiffSpec([]byte(tc.yaml), "t.yaml"); err == nil || !strings.Contains(err.Error(), tc.err) {
+			t.Errorf("%q: error %v, want %q", tc.yaml, err, tc.err)
+		}
+	}
+	if _, err := planguard.ParseStoreDiffSpec([]byte("cases:\n- id: a\n  path: /api/v1/x\n  allowed: [latest_observer_tie]\n  omit: [latestObserver]\n"), "t.yaml"); err != nil {
+		t.Errorf("valid omit: %v", err)
 	}
 }
