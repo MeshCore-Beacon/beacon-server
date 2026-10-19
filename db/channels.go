@@ -16,6 +16,9 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+// UpsertChannel records a hearing of a keyed (or, with a nil fingerprint, hash-only)
+// channel and returns its id. With a cache, a known key is touched by id; a touch that
+// finds no row (deleted or re-keyed since cached) falls back to the upsert.
 func (s *Store) UpsertChannel(ctx context.Context, channelHash []byte, keyFingerprint []byte, name string, hashtag string) (int, error) {
 	var namePtr, hashtagPtr *string
 	if name != "" {
@@ -23,6 +26,25 @@ func (s *Store) UpsertChannel(ctx context.Context, channelHash []byte, keyFinger
 	}
 	if hashtag != "" {
 		hashtagPtr = &hashtag
+	}
+	cached := s.channelIDs != nil && keyFingerprint != nil
+	key := channelKey{hash: string(channelHash), fp: string(keyFingerprint)}
+	if cached {
+		if id, ok := s.channelIDs.get(key); ok {
+			touched, err := s.q.TouchChannel(ctx, sqlc.TouchChannelParams{
+				Name:           namePtr,
+				ID:             id,
+				ChannelHash:    channelHash,
+				KeyFingerprint: keyFingerprint,
+			})
+			if err == nil {
+				return int(touched), nil
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return 0, err
+			}
+			s.channelIDs.forget(key)
+		}
 	}
 	isHashtag := hashtag != ""
 	row, err := s.q.UpsertChannel(ctx, sqlc.UpsertChannelParams{
@@ -35,13 +57,33 @@ func (s *Store) UpsertChannel(ctx context.Context, channelHash []byte, keyFinger
 	if err != nil {
 		return 0, err
 	}
+	if cached {
+		s.channelIDs.put(key, row.ID)
+	}
 	return int(row.ID), nil
 }
 
+// UpsertChannelHashOnly is UpsertChannel for a channel whose key is unknown.
 func (s *Store) UpsertChannelHashOnly(ctx context.Context, channelHash []byte) (int, error) {
+	key := channelKey{hash: string(channelHash), hashOnly: true}
+	if s.channelIDs != nil {
+		if id, ok := s.channelIDs.get(key); ok {
+			touched, err := s.q.TouchChannelHashOnly(ctx, sqlc.TouchChannelHashOnlyParams{ID: id, ChannelHash: channelHash})
+			if err == nil {
+				return int(touched), nil
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return 0, err
+			}
+			s.channelIDs.forget(key)
+		}
+	}
 	rowID, err := s.q.UpsertChannelHashOnly(ctx, channelHash)
 	if err != nil {
 		return 0, err
+	}
+	if s.channelIDs != nil {
+		s.channelIDs.put(key, rowID)
 	}
 	return int(rowID), nil
 }
