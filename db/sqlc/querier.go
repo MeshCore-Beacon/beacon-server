@@ -196,6 +196,8 @@ type Querier interface {
 	// Pass cursor=0 to start from the beginning.
 	ListAllChannelMessages(ctx context.Context, arg ListAllChannelMessagesParams) ([]ListAllChannelMessagesRow, error)
 	ListChannelCatalogues(ctx context.Context) ([]MeshmapperChannelCatalogue, error)
+	// Every channel key and its id, preloaded at boot for the ingest write-through.
+	ListChannelIDs(ctx context.Context) ([]ListChannelIDsRow, error)
 	// Returns messages for a channel identified by integer ID.
 	// Pass a zero/null timestamp for since to return all messages up to limit.
 	// Pass empty string for iata to skip IATA filtering.
@@ -212,7 +214,7 @@ type Querier interface {
 	// Pass cursor=0 to start from the beginning (cursor is last_seen epoch ms).
 	ListChannels(ctx context.Context, arg ListChannelsParams) ([]Channel, error)
 	// Keep the non-null tuple boundary separate from the legacy optional cursor so
-	// generic prepared plans can seek directly into the composite ordered index.
+	// generic prepared plans see a plain row comparison on (last_seen, id).
 	ListChannelsAfter(ctx context.Context, arg ListChannelsAfterParams) ([]Channel, error)
 	// Only complete hours whose raw rows are still intact can be re-rolled. Queued missing hours
 	// wait: their first roll consumes the entry only if the entry predates its snapshot.
@@ -397,6 +399,11 @@ type Querier interface {
 	SetNodeMultibyteTraces(ctx context.Context, id uuid.UUID) error
 	SetPacketDecrypted(ctx context.Context, packetHash []byte) error
 	SetRollupHourPartial(ctx context.Context, hour pgtype.Timestamptz) error
+	// Write-through for a cached keyed channel: the UpsertChannel conflict update, by id.
+	// No row (deleted or re-keyed since cached) sends the caller back to UpsertChannel.
+	TouchChannel(ctx context.Context, arg TouchChannelParams) (int32, error)
+	// Write-through for a cached hash-only channel: the UpsertChannelHashOnly conflict update, by id.
+	TouchChannelHashOnly(ctx context.Context, arg TouchChannelHashOnlyParams) (int32, error)
 	TouchObserverBrokers(ctx context.Context, arg TouchObserverBrokersParams) error
 	// Batched flush of coalesced presence bumps. GREATEST keeps a late flush
 	// from regressing a newer write-through (e.g. a status update).
