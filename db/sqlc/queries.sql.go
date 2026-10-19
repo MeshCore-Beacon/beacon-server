@@ -3705,6 +3705,81 @@ func (q *Queries) ListObservationsForPacket(ctx context.Context, packetHash []by
 }
 
 const listObserverAdverts = `-- name: ListObserverAdverts :many
+SELECT
+  po.id,
+  encode(po.packet_hash, 'hex') AS packet_hash_hex,
+  p.payload_type,
+  po.iata,
+  po.heard_at,
+  po.rssi,
+  po.snr,
+  po.hop_count,
+  n.name AS node_name,
+  COALESCE(encode(p.origin_pubkey, 'hex'), '')::text AS node_public_key
+FROM packet_observations po
+JOIN packets p ON p.packet_hash = po.packet_hash
+LEFT JOIN nodes n ON n.public_key = p.origin_pubkey
+WHERE po.observer_id = $1
+  AND po.payload_type = 4
+  AND po.id > $2::bigint
+ORDER BY po.id ASC
+LIMIT $3
+`
+
+type ListObserverAdvertsParams struct {
+	ObserverID uuid.UUID `json:"observer_id"`
+	CursorID   int64     `json:"cursor_id"`
+	RowLimit   int32     `json:"row_limit"`
+}
+
+type ListObserverAdvertsRow struct {
+	ID            int64              `json:"id"`
+	PacketHashHex string             `json:"packet_hash_hex"`
+	PayloadType   int16              `json:"payload_type"`
+	Iata          string             `json:"iata"`
+	HeardAt       pgtype.Timestamptz `json:"heard_at"`
+	Rssi          *int16             `json:"rssi"`
+	Snr           *float32           `json:"snr"`
+	HopCount      int16              `json:"hop_count"`
+	NodeName      *string            `json:"node_name"`
+	NodePublicKey string             `json:"node_public_key"`
+}
+
+// Advert observations (payload_type 4) heard by one observer, oldest id first, after @cursor_id
+// (0 starts at the beginning). Reads idx_observations_adverts; needs payload_type on every observation.
+// Keep missing-origin adverts; the generated key field expects a string, not NULL.
+func (q *Queries) ListObserverAdverts(ctx context.Context, arg ListObserverAdvertsParams) ([]ListObserverAdvertsRow, error) {
+	rows, err := q.db.Query(ctx, listObserverAdverts, arg.ObserverID, arg.CursorID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListObserverAdvertsRow{}
+	for rows.Next() {
+		var i ListObserverAdvertsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PacketHashHex,
+			&i.PayloadType,
+			&i.Iata,
+			&i.HeardAt,
+			&i.Rssi,
+			&i.Snr,
+			&i.HopCount,
+			&i.NodeName,
+			&i.NodePublicKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listObserverAdvertsJoinFilter = `-- name: ListObserverAdvertsJoinFilter :many
 SELECT 
   po.id,
   encode(po.packet_hash, 'hex') AS packet_hash_hex,
@@ -3726,13 +3801,13 @@ ORDER BY po.id ASC
 LIMIT $3
 `
 
-type ListObserverAdvertsParams struct {
+type ListObserverAdvertsJoinFilterParams struct {
 	ObserverID uuid.UUID `json:"observer_id"`
 	Column2    int64     `json:"column_2"`
 	Limit      int32     `json:"limit"`
 }
 
-type ListObserverAdvertsRow struct {
+type ListObserverAdvertsJoinFilterRow struct {
 	ID            int64              `json:"id"`
 	PacketHashHex string             `json:"packet_hash_hex"`
 	PayloadType   int16              `json:"payload_type"`
@@ -3745,18 +3820,19 @@ type ListObserverAdvertsRow struct {
 	NodePublicKey string             `json:"node_public_key"`
 }
 
+// Filters on the packet's payload type: serves until every observation carries its own.
 // Returns advert packets (payload_type=4) heard by a specific observer.
 // Pass cursor=0 to start from the beginning, or the last seen id for pagination.
 // Keep missing-origin adverts; the generated key field expects a string, not NULL.
-func (q *Queries) ListObserverAdverts(ctx context.Context, arg ListObserverAdvertsParams) ([]ListObserverAdvertsRow, error) {
-	rows, err := q.db.Query(ctx, listObserverAdverts, arg.ObserverID, arg.Column2, arg.Limit)
+func (q *Queries) ListObserverAdvertsJoinFilter(ctx context.Context, arg ListObserverAdvertsJoinFilterParams) ([]ListObserverAdvertsJoinFilterRow, error) {
+	rows, err := q.db.Query(ctx, listObserverAdvertsJoinFilter, arg.ObserverID, arg.Column2, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListObserverAdvertsRow{}
+	items := []ListObserverAdvertsJoinFilterRow{}
 	for rows.Next() {
-		var i ListObserverAdvertsRow
+		var i ListObserverAdvertsJoinFilterRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.PacketHashHex,

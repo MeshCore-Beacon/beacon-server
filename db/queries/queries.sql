@@ -310,6 +310,31 @@ GROUP BY payload_type
 ORDER BY count DESC;
 
 -- name: ListObserverAdverts :many
+-- Advert observations (payload_type 4) heard by one observer, oldest id first, after @cursor_id
+-- (0 starts at the beginning). Reads idx_observations_adverts; needs payload_type on every observation.
+-- Keep missing-origin adverts; the generated key field expects a string, not NULL.
+SELECT
+  po.id,
+  encode(po.packet_hash, 'hex') AS packet_hash_hex,
+  p.payload_type,
+  po.iata,
+  po.heard_at,
+  po.rssi,
+  po.snr,
+  po.hop_count,
+  n.name AS node_name,
+  COALESCE(encode(p.origin_pubkey, 'hex'), '')::text AS node_public_key
+FROM packet_observations po
+JOIN packets p ON p.packet_hash = po.packet_hash
+LEFT JOIN nodes n ON n.public_key = p.origin_pubkey
+WHERE po.observer_id = @observer_id
+  AND po.payload_type = 4
+  AND po.id > @cursor_id::bigint
+ORDER BY po.id ASC
+LIMIT @row_limit;
+
+-- name: ListObserverAdvertsJoinFilter :many
+-- Filters on the packet's payload type: serves until every observation carries its own.
 -- Returns advert packets (payload_type=4) heard by a specific observer.
 -- Pass cursor=0 to start from the beginning, or the last seen id for pagination.
 -- Keep missing-origin adverts; the generated key field expects a string, not NULL.

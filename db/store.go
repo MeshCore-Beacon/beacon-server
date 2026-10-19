@@ -28,6 +28,8 @@ type Store struct {
 	staleThreshold      time.Duration   // see api.NodeSummary.Stale
 	pgVersion           atomic.Int32    // server_version_num, read by the first PgActivity call
 	channelIDs          *ChannelIDCache // shared by the stores that write channels; nil for the API store and mocks
+	payloadTypeGate     bool            // see WithPayloadTypeGate
+	payloadTypesDone    atomic.Bool     // the payload-type backfill state has read done
 }
 
 // New creates a Store whose statements run on dbtx (a pool, or a PlanRouter for the API).

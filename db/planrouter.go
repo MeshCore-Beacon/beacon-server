@@ -221,7 +221,7 @@ func (r *routerRows) Scan(dest ...any) error {
 // over p's API pools, gated by gate. It has no dedicated pool, so rollups, sweeps and statement
 // statistics refuse to run on it; they belong on the maintenance store.
 func NewAPIStore(p *Pools, layout planpolicy.Layout, gate guards.Gate, clockDriftThreshold, staleThreshold time.Duration) *Store {
-	return New(NewPlanRouter(p, layout, gate), nil, clockDriftThreshold, staleThreshold)
+	return New(NewPlanRouter(p, layout, gate), nil, clockDriftThreshold, staleThreshold, WithPayloadTypeGate())
 }
 
 // routerRow scans the first row like pgx's own Row: no row is pgx.ErrNoRows, and the rows

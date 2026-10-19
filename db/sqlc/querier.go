@@ -238,10 +238,15 @@ type Querier interface {
 	// Limit the filtered node page before enriching IATA membership and neighbours.
 	ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNodesRow, error)
 	ListObservationsForPacket(ctx context.Context, packetHash []byte) ([]ListObservationsForPacketRow, error)
+	// Advert observations (payload_type 4) heard by one observer, oldest id first, after @cursor_id
+	// (0 starts at the beginning). Reads idx_observations_adverts; needs payload_type on every observation.
+	// Keep missing-origin adverts; the generated key field expects a string, not NULL.
+	ListObserverAdverts(ctx context.Context, arg ListObserverAdvertsParams) ([]ListObserverAdvertsRow, error)
+	// Filters on the packet's payload type: serves until every observation carries its own.
 	// Returns advert packets (payload_type=4) heard by a specific observer.
 	// Pass cursor=0 to start from the beginning, or the last seen id for pagination.
 	// Keep missing-origin adverts; the generated key field expects a string, not NULL.
-	ListObserverAdverts(ctx context.Context, arg ListObserverAdvertsParams) ([]ListObserverAdvertsRow, error)
+	ListObserverAdvertsJoinFilter(ctx context.Context, arg ListObserverAdvertsJoinFilterParams) ([]ListObserverAdvertsJoinFilterRow, error)
 	// Copyright 2026 Beacon Contributors
 	// SPDX-License-Identifier: AGPL-3.0-or-later
 	ListObserverDirectory(ctx context.Context, arg ListObserverDirectoryParams) (string, error)
