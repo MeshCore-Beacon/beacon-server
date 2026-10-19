@@ -1,0 +1,56 @@
+[
+ {
+  "Plan": {
+   "Node Type": "Limit",
+   "Parallel Aware": false,
+   "Total Cost": 88706.08,
+   "Plan Rows": 1,
+   "Actual Rows": 0,
+   "Actual Loops": 1,
+   "Shared Hit Blocks": 8902,
+   "Shared Read Blocks": 0,
+   "Plans": [
+    {
+     "Node Type": "Sort",
+     "Parent Relationship": "Outer",
+     "Parallel Aware": false,
+     "Total Cost": 88706.08,
+     "Plan Rows": 1,
+     "Actual Rows": 0,
+     "Actual Loops": 1,
+     "Sort Key": [
+      "(date_trunc('milliseconds'::text, last_seen, 'UTC'::text)) DESC",
+      "id DESC"
+     ],
+     "Shared Hit Blocks": 8902,
+     "Shared Read Blocks": 0,
+     "Plans": [
+      {
+       "Node Type": "Index Scan",
+       "Parent Relationship": "Outer",
+       "Parallel Aware": false,
+       "Index Name": "idx_known_routes_hop_count",
+       "Relation Name": "known_routes",
+       "Alias": "known_routes",
+       "Total Cost": 88706.07,
+       "Plan Rows": 1,
+       "Actual Rows": 0,
+       "Actual Loops": 1,
+       "Index Cond": "(hop_count = 1)",
+       "Filter": "(ROW(date_trunc('milliseconds'::text, last_seen, 'UTC'::text), id) < ROW('infinity'::timestamp with time zone, '0'::bigint))",
+       "Rows Removed by Filter": 0,
+       "Shared Hit Blocks": 8902,
+       "Shared Read Blocks": 0
+      }
+     ]
+    }
+   ]
+  },
+  "Planning": {
+   "Shared Hit Blocks": 4,
+   "Shared Read Blocks": 0
+  },
+  "Planning Time": 0.081,
+  "Execution Time": 5.901
+ }
+]

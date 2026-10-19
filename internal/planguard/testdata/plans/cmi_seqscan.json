@@ -1,0 +1,217 @@
+[
+ {
+  "Plan": {
+   "Node Type": "Limit",
+   "Parallel Aware": false,
+   "Total Cost": 15971.65,
+   "Plan Rows": 21,
+   "Actual Rows": 21,
+   "Actual Loops": 1,
+   "Shared Hit Blocks": 22124,
+   "Shared Read Blocks": 0,
+   "Plans": [
+    {
+     "Node Type": "Sort",
+     "Parent Relationship": "Outer",
+     "Parallel Aware": false,
+     "Total Cost": 15971.84,
+     "Plan Rows": 94,
+     "Actual Rows": 21,
+     "Actual Loops": 1,
+     "Sort Key": [
+      "cm.id DESC"
+     ],
+     "Shared Hit Blocks": 22124,
+     "Shared Read Blocks": 0,
+     "Plans": [
+      {
+       "Node Type": "Nested Loop",
+       "Parent Relationship": "Outer",
+       "Parallel Aware": false,
+       "Join Type": "Left",
+       "Total Cost": 15969.07,
+       "Plan Rows": 94,
+       "Actual Rows": 1785,
+       "Actual Loops": 1,
+       "Shared Hit Blocks": 22124,
+       "Shared Read Blocks": 0,
+       "Plans": [
+        {
+         "Node Type": "Nested Loop",
+         "Parent Relationship": "Outer",
+         "Parallel Aware": false,
+         "Join Type": "Inner",
+         "Total Cost": 15965.16,
+         "Plan Rows": 94,
+         "Actual Rows": 1785,
+         "Actual Loops": 1,
+         "Shared Hit Blocks": 22121,
+         "Shared Read Blocks": 0,
+         "Plans": [
+          {
+           "Node Type": "Nested Loop",
+           "Parent Relationship": "Outer",
+           "Parallel Aware": false,
+           "Join Type": "Semi",
+           "Total Cost": 15937.66,
+           "Plan Rows": 94,
+           "Actual Rows": 1785,
+           "Actual Loops": 1,
+           "Shared Hit Blocks": 16766,
+           "Shared Read Blocks": 0,
+           "Plans": [
+            {
+             "Node Type": "Hash Join",
+             "Parent Relationship": "Outer",
+             "Parallel Aware": false,
+             "Join Type": "Inner",
+             "Total Cost": 15641.76,
+             "Plan Rows": 619,
+             "Actual Rows": 1785,
+             "Actual Loops": 1,
+             "Hash Cond": "(cm.packet_hash = p.packet_hash)",
+             "Shared Hit Blocks": 11123,
+             "Shared Read Blocks": 0,
+             "Plans": [
+              {
+               "Node Type": "Seq Scan",
+               "Parent Relationship": "Outer",
+               "Parallel Aware": false,
+               "Relation Name": "channel_messages",
+               "Alias": "cm",
+               "Total Cost": 5350.36,
+               "Plan Rows": 196669,
+               "Actual Rows": 196804,
+               "Actual Loops": 1,
+               "Filter": "(id < '9223372036854775807'::bigint)",
+               "Rows Removed by Filter": 0,
+               "Shared Hit Blocks": 2892,
+               "Shared Read Blocks": 0
+              },
+              {
+               "Node Type": "Hash",
+               "Parent Relationship": "Inner",
+               "Parallel Aware": false,
+               "Total Cost": 9655.11,
+               "Plan Rows": 9603,
+               "Actual Rows": 9592,
+               "Actual Loops": 1,
+               "Hash Buckets": 16384,
+               "Original Hash Buckets": 16384,
+               "Hash Batches": 1,
+               "Original Hash Batches": 1,
+               "Peak Memory Usage": 728,
+               "Shared Hit Blocks": 8231,
+               "Shared Read Blocks": 0,
+               "Plans": [
+                {
+                 "Node Type": "Bitmap Heap Scan",
+                 "Parent Relationship": "Outer",
+                 "Parallel Aware": false,
+                 "Relation Name": "packets",
+                 "Alias": "p",
+                 "Total Cost": 9655.11,
+                 "Plan Rows": 9603,
+                 "Actual Rows": 9592,
+                 "Actual Loops": 1,
+                 "Recheck Cond": "(scope_id = 175)",
+                 "Exact Heap Blocks": 8159,
+                 "Lossy Heap Blocks": 0,
+                 "Shared Hit Blocks": 8231,
+                 "Shared Read Blocks": 0,
+                 "Plans": [
+                  {
+                   "Node Type": "Bitmap Index Scan",
+                   "Parent Relationship": "Outer",
+                   "Parallel Aware": false,
+                   "Index Name": "idx_packets_scope_last_heard",
+                   "Total Cost": 148.34,
+                   "Plan Rows": 9603,
+                   "Actual Rows": 9592,
+                   "Actual Loops": 1,
+                   "Index Cond": "(scope_id = 175)",
+                   "Shared Hit Blocks": 72,
+                   "Shared Read Blocks": 0
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            },
+            {
+             "Node Type": "Index Only Scan",
+             "Parent Relationship": "Inner",
+             "Parallel Aware": false,
+             "Index Name": "idx_observations_packet",
+             "Relation Name": "packet_observations",
+             "Alias": "po",
+             "Total Cost": 2.53,
+             "Plan Rows": 64,
+             "Actual Rows": 1,
+             "Actual Loops": 1785,
+             "Index Cond": "(packet_hash = p.packet_hash)",
+             "Shared Hit Blocks": 5643,
+             "Shared Read Blocks": 0
+            }
+           ]
+          },
+          {
+           "Node Type": "Index Scan",
+           "Parent Relationship": "Inner",
+           "Parallel Aware": false,
+           "Index Name": "channels_pkey",
+           "Relation Name": "channels",
+           "Alias": "c",
+           "Total Cost": 0.29,
+           "Plan Rows": 1,
+           "Actual Rows": 1,
+           "Actual Loops": 1785,
+           "Index Cond": "(id = cm.channel_id)",
+           "Shared Hit Blocks": 5355,
+           "Shared Read Blocks": 0
+          }
+         ]
+        },
+        {
+         "Node Type": "Materialize",
+         "Parent Relationship": "Inner",
+         "Parallel Aware": false,
+         "Total Cost": 2.5,
+         "Plan Rows": 1,
+         "Actual Rows": 1,
+         "Actual Loops": 1785,
+         "Shared Hit Blocks": 3,
+         "Shared Read Blocks": 0,
+         "Plans": [
+          {
+           "Node Type": "Index Scan",
+           "Parent Relationship": "Outer",
+           "Parallel Aware": false,
+           "Index Name": "transport_scopes_pkey",
+           "Relation Name": "transport_scopes",
+           "Alias": "ts",
+           "Total Cost": 2.5,
+           "Plan Rows": 1,
+           "Actual Rows": 1,
+           "Actual Loops": 1,
+           "Index Cond": "(id = 175)",
+           "Shared Hit Blocks": 3,
+           "Shared Read Blocks": 0
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "Planning": {
+   "Shared Hit Blocks": 67,
+   "Shared Read Blocks": 0
+  },
+  "Planning Time": 0.37,
+  "Execution Time": 26.02
+ }
+]
