@@ -511,7 +511,7 @@ FROM known_routes kr
 WHERE kr.node_ids && $1::uuid[]
   AND kr.iata = ANY($2::bpchar[])
   AND ($1::uuid[])[array_position($2::bpchar[], kr.iata)] = ANY(kr.node_ids)
-ORDER BY hop_count ASC, last_seen DESC
+ORDER BY hop_count + 0 ASC, last_seen DESC
 LIMIT $3
 `
 
@@ -534,6 +534,7 @@ type GetKnownRoutesByNodesRow struct {
 
 // Routes containing @nodes[i] in IATA @iatas[i] (aligned, one node per IATA). The &&
 // drives the node_ids GIN index; the indexed check keeps LIMIT counting real matches.
+// hop_count + 0: no hop_count-led index may supply this order (a LIMIT walk would check the GIN conditions row by row).
 func (q *Queries) GetKnownRoutesByNodes(ctx context.Context, arg GetKnownRoutesByNodesParams) ([]GetKnownRoutesByNodesRow, error) {
 	rows, err := q.db.Query(ctx, getKnownRoutesByNodes, arg.Nodes, arg.Iatas, arg.RowLimit)
 	if err != nil {
@@ -5317,7 +5318,7 @@ FROM known_routes kr
 WHERE kr.node_ids && $1::uuid[]
   AND kr.node_ids && $2::uuid[]
   AND kr.iata = ANY($3::bpchar[])
-ORDER BY hop_count ASC, last_seen DESC
+ORDER BY hop_count + 0 ASC, last_seen DESC
 LIMIT $4
 `
 
@@ -5342,6 +5343,7 @@ type SearchKnownRoutesByNodesRow struct {
 // Routes holding a source and a destination candidate; callers check order and IATA.
 // A route's hops resolve in its own IATA, so candidates from other IATAs can't match.
 // Both && predicates use the node_ids GIN index.
+// hop_count + 0: no hop_count-led index may supply this order (a LIMIT walk would check the GIN conditions row by row).
 func (q *Queries) SearchKnownRoutesByNodes(ctx context.Context, arg SearchKnownRoutesByNodesParams) ([]SearchKnownRoutesByNodesRow, error) {
 	rows, err := q.db.Query(ctx, searchKnownRoutesByNodes,
 		arg.FromNodes,
