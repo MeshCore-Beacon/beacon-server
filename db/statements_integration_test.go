@@ -195,7 +195,9 @@ func TestDBStatementsPostgres(t *testing.T) {
 		return
 	}
 	for range 3 {
-		if err := pool.QueryRow(ctx, "-- name: ProbeStatements :one\nSELECT $1::int", 1).Scan(new(int)); err != nil {
+		// The probe reads this test's own schema_migrations, so its query id is unique to this
+		// schema: pg_stat_statements ignores comments and keeps the first text it saw for an id.
+		if err := pool.QueryRow(ctx, "-- name: ProbeStatements :one\nSELECT count(*)::int FROM schema_migrations WHERE filename <> $1", "").Scan(new(int)); err != nil {
 			t.Fatal(err)
 		}
 	}
