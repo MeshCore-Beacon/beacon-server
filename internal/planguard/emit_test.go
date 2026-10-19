@@ -276,3 +276,44 @@ func TestSearchPathElements(t *testing.T) {
 func yamlQuote(s string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`).Replace(s) + `"`
 }
+
+// A mode's own known_issue turns that mode's failures into KNOWN_ISSUE; other modes still fail, and an error is
+// always ERROR.
+func TestModeKnownIssue(t *testing.T) {
+	const body = `
+defaults: {big_tables: [nodes], forbid: [{node: Seq Scan, relations: [big]}]}
+tiers: {prod: {}}
+statements:
+  Q: {sqlc: Q, plan: custom}
+entries:
+  - {id: q.seq, stmt: Q, params: [x], modes: [custom, generic], mode: {generic: {known_issue: generic plan is known to scan}}}
+  - {id: q.err, stmt: Q, params: [y], modes: [generic], mode: {generic: {known_issue: generic plan is known to scan}}}
+`
+	c, err := planguard.LoadCorpus(mapFS(map[string]string{"c.yaml": body}), "c.yaml", testSQLC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq := []byte(`[{"Plan": {"Node Type": "Seq Scan", "Relation Name": "nodes"}}]`)
+	rep, err := planguard.CheckPlans(c, planguard.RunOptions{Tier: "prod", Params: map[string]*string{}},
+		map[string][]byte{"q.seq|custom": seq, "q.seq|generic": seq})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]planguard.Verdict{
+		"q.seq|custom":  planguard.VerdictFalsePositive,
+		"q.seq|generic": planguard.VerdictKnownIssue,
+		"q.err|generic": planguard.VerdictError, // no plan in the output
+	}
+	for _, r := range rep.Results {
+		if v := want[r.ID+"|"+r.Mode]; r.Verdict != v {
+			t.Errorf("%s|%s: verdict %s, want %s", r.ID, r.Mode, r.Verdict, v)
+		}
+	}
+
+	bad := strings.Replace(body, "{generic: {known_issue: generic plan is known to scan}}}\n  - {id: q.err",
+		"{generic: {skip: no, known_issue: generic plan is known to scan}}}\n  - {id: q.err", 1)
+	if _, err := planguard.LoadCorpus(mapFS(map[string]string{"c.yaml": bad}), "c.yaml", testSQLC); err == nil ||
+		!strings.Contains(err.Error(), "skip excludes") {
+		t.Errorf("skip with known_issue: err = %v", err)
+	}
+}

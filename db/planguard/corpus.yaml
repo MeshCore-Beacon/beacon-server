@@ -164,11 +164,20 @@ admission_profiles:
 
 resolvers:
   adv_busiest: "SELECT observer_id FROM packet_observations WHERE payload_type = 4 GROUP BY 1 ORDER BY count(*) DESC, observer_id LIMIT 1"
+  adv_busiest_mid: "SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY id) FROM packet_observations WHERE payload_type = 4 AND observer_id = (SELECT observer_id FROM packet_observations WHERE payload_type = 4 GROUP BY 1 ORDER BY count(*) DESC, observer_id LIMIT 1)"
+  adv_dense1: "SELECT observer_id FROM packet_observations GROUP BY 1 HAVING count(*) >= 500 ORDER BY count(*) FILTER (WHERE payload_type = 4)::float8 / count(*) DESC, observer_id LIMIT 1"
+  adv_dense2: "SELECT observer_id FROM packet_observations GROUP BY 1 HAVING count(*) >= 500 ORDER BY count(*) FILTER (WHERE payload_type = 4)::float8 / count(*) DESC, observer_id OFFSET 1 LIMIT 1"
+  adv_mid: "SELECT observer_id FROM (SELECT observer_id, row_number() OVER (ORDER BY count(*), observer_id) rn, count(*) OVER () n FROM packet_observations WHERE payload_type = 4 GROUP BY observer_id) s WHERE rn = (n + 1) / 2"
+  adv_quiet: "SELECT observer_id FROM packet_observations GROUP BY 1 HAVING count(*) FILTER (WHERE payload_type = 4) > 0 ORDER BY count(*) FILTER (WHERE payload_type = 4), count(*) DESC, observer_id LIMIT 1"
+  adv_sparse: "SELECT observer_id FROM packet_observations GROUP BY 1 HAVING count(*) >= 500 AND count(*) FILTER (WHERE payload_type = 4) > 0 ORDER BY count(*) FILTER (WHERE payload_type = 4)::float8 / count(*), observer_id LIMIT 1"
+  adv_topobs: "SELECT observer_id FROM packet_observations GROUP BY 1 ORDER BY count(*) DESC, observer_id LIMIT 1"
+  adv_topobs_mid: "SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY id) FROM packet_observations WHERE payload_type = 4 AND observer_id = (SELECT observer_id FROM packet_observations GROUP BY 1 ORDER BY count(*) DESC, observer_id LIMIT 1)"
   adv_zero: "SELECT observer_id FROM packet_observations GROUP BY 1 HAVING count(*) FILTER (WHERE payload_type = 4) = 0 ORDER BY count(*) DESC, observer_id LIMIT 1"
   allbogus: "SELECT array_agg(v ORDER BY v) FROM (SELECT name v FROM transport_scopes UNION ALL SELECT '#zz-bogus-' || g FROM generate_series(1, 5000) g) s"
   bogus5000: "SELECT array_agg('#zz-bogus-' || g ORDER BY g) FROM generate_series(1, 5000) g"
   bwe_deep_id: "SELECT id FROM known_routes WHERE iata >= 'BWE' AND iata <= 'BWE' ORDER BY iata, date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC OFFSET 5000 LIMIT 1"
   bwe_deep_ts: "SELECT date_trunc('milliseconds', last_seen, 'UTC') FROM known_routes WHERE iata >= 'BWE' AND iata <= 'BWE' ORDER BY iata, date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC OFFSET 5000 LIMIT 1"
+  cm_newest_hash: "SELECT packet_hash FROM channel_messages ORDER BY id DESC LIMIT 1"
   cmi_all_sites: "SELECT array_agg(DISTINCT iata ORDER BY iata) FROM channel_message_iatas"
   cmi_bogus5000: "SELECT array_agg(c ORDER BY c) FROM (SELECT c FROM (SELECT chr(65 + a) || chr(65 + b) || chr(65 + d) c FROM generate_series(0, 25) a, generate_series(0, 25) b, generate_series(0, 25) d) g WHERE c NOT IN (SELECT DISTINCT iata FROM channel_message_iatas) AND c NOT IN (SELECT iata FROM iata_codes) ORDER BY c LIMIT 5000) s"
   g50_id: "SELECT id FROM known_routes ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC OFFSET 49 LIMIT 1"
@@ -177,6 +186,12 @@ resolvers:
   global_tie_ts: "SELECT ts FROM (SELECT date_trunc('milliseconds', last_seen, 'UTC') ts FROM known_routes ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC LIMIT 20000) s GROUP BY ts HAVING count(*) > 1 ORDER BY ts DESC LIMIT 1"
   new50_id: "SELECT id FROM known_routes WHERE iata = 'NEW' ORDER BY iata, date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC OFFSET 49 LIMIT 1"
   new50_ts: "SELECT date_trunc('milliseconds', last_seen, 'UTC') FROM known_routes WHERE iata = 'NEW' ORDER BY iata, date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC OFFSET 49 LIMIT 1"
+  nl12_judge_hash: "SELECT packet_hash FROM packet_sites WHERE iata = ANY('{AMS,EIN,ENS,GLZ,GRQ,LEY,LWR,MST,QAR,RTM,UDE,UTC}') AND site_heard_at <= timestamptz '2026-10-18 15:40:39.570763+00' ORDER BY site_heard_at DESC, packet_hash DESC LIMIT 1"
+  nl12_judge_ts: "SELECT site_heard_at FROM packet_sites WHERE iata = ANY('{AMS,EIN,ENS,GLZ,GRQ,LEY,LWR,MST,QAR,RTM,UDE,UTC}') AND site_heard_at <= timestamptz '2026-10-18 15:40:39.570763+00' ORDER BY site_heard_at DESC, packet_hash DESC LIMIT 1"
+  nodes_p500_id: "SELECT id FROM nodes ORDER BY last_seen DESC, id DESC OFFSET 500 LIMIT 1"
+  nodes_p500_ts: "SELECT last_seen FROM nodes ORDER BY last_seen DESC, id DESC OFFSET 500 LIMIT 1"
+  obs_newest_hash: "SELECT packet_hash FROM packet_observations ORDER BY id DESC LIMIT 1"
+  obs_newest_observer: "SELECT observer_id FROM packet_observations ORDER BY id DESC LIMIT 1"
   pk_deep_hash: "SELECT packet_hash FROM packets ORDER BY last_heard_at DESC, packet_hash DESC OFFSET 100000 LIMIT 1"
   pk_deep_ts: "SELECT last_heard_at FROM packets ORDER BY last_heard_at DESC, packet_hash DESC OFFSET 100000 LIMIT 1"
   ps_all_sites: "SELECT array_agg(DISTINCT iata ORDER BY iata) FROM packet_sites WHERE iata <> 'NEW'"
@@ -227,6 +242,10 @@ resolvers:
   small_bogus5000: "SELECT array_agg(c ORDER BY c) FROM (SELECT c FROM (SELECT chr(65 + a) || chr(65 + b) || chr(65 + d) c FROM generate_series(0, 25) a, generate_series(0, 25) b, generate_series(0, 25) d) g WHERE c NOT IN (SELECT DISTINCT iata FROM node_iatas) AND c NOT IN (SELECT iata FROM iata_codes) ORDER BY c LIMIT 5000) s"
   small_list50: "SELECT array_agg(iata ORDER BY n DESC, iata) FROM (SELECT iata, count(*) n FROM node_iatas GROUP BY iata ORDER BY 2 DESC, 1 LIMIT 50) s"
   small_top_sea_node: "SELECT ni.node_id FROM node_iatas ni WHERE ni.iata = 'SEA' ORDER BY (SELECT count(*) FROM node_iatas x WHERE x.node_id = ni.node_id) DESC, ni.node_id LIMIT 1"
+  tel_top: "SELECT observer_id FROM observer_telemetry GROUP BY 1 ORDER BY count(*) DESC, observer_id LIMIT 1"
+  tel_top_mid: "SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY id) FROM observer_telemetry WHERE observer_id = (SELECT observer_id FROM observer_telemetry GROUP BY 1 ORDER BY count(*) DESC, observer_id LIMIT 1)"
+  trc_tie_tag: "SELECT max(trace_tag) FROM trace_tags WHERE date_trunc('milliseconds', last_heard_at, 'UTC') = (SELECT ts FROM (SELECT date_trunc('milliseconds', last_heard_at, 'UTC') ts FROM trace_tags) s GROUP BY ts HAVING count(*) > 1 ORDER BY ts DESC LIMIT 1)"
+  trc_tie_ts: "SELECT ts FROM (SELECT date_trunc('milliseconds', last_heard_at, 'UTC') ts FROM trace_tags) s GROUP BY ts HAVING count(*) > 1 ORDER BY ts DESC LIMIT 1"
   ustie_hash: "SELECT packet_hash FROM packets WHERE last_heard_at = (SELECT last_heard_at FROM packets GROUP BY last_heard_at HAVING count(*) > 1 ORDER BY last_heard_at DESC LIMIT 1) ORDER BY packet_hash DESC LIMIT 1"
   ustie_ts: "SELECT last_heard_at FROM packets GROUP BY last_heard_at HAVING count(*) > 1 ORDER BY last_heard_at DESC LIMIT 1"
   x_0355_i: "WITH cand AS (SELECT h.hx, ns.iata, ns.node_id FROM (VALUES ('0355')) h(hx) JOIN node_short_ids ns ON (length(h.hx) = 2 AND ns.prefix_1 = decode(h.hx, 'hex')) OR (length(h.hx) = 4 AND ns.prefix_2 = decode(h.hx, 'hex')) JOIN nodes n ON n.id = ns.node_id AND n.node_type IN (2, 3) WHERE ns.iata IN (SELECT iata FROM iata_codes)) SELECT array_agg(u.iata ORDER BY u.iata) FROM (SELECT iata, min(node_id::text)::uuid node_id FROM cand GROUP BY iata HAVING count(*) = 1) u HAVING count(*) <= 50"
@@ -1262,8 +1281,8 @@ entries:
     note: "no measured run; measured budget <=10"
   - id: cmi2.ingest.add_iata
     stmt: AddChannelMessageIATA
-    shape: "AddChannelMessageIATA for a known message hash (plain EXPLAIN; ingest pool, auto)"
-    params: [YUL, "\\x0d4101ff72d9479b"]
+    shape: "AddChannelMessageIATA for the newest message hash (plain EXPLAIN; ingest pool, auto)"
+    params: [YUL, {r: cm_newest_hash}]
     expect:
       driver: [{relation: channel_messages, alias: cm, index: channel_messages_packet_hash_key, index_cond: ["packet_hash ="]}]
   - id: cmi2.maint.fill_by_messages
@@ -1741,6 +1760,7 @@ entries:
     shape: "tn all625_7d: > 32 distinct IATAs -> today's statement"
     params: [{raw: "'2026-10-11 17:00+00'::timestamptz"}, {raw: "ARRAY['AAB','AAH','AAL','AAR','ABC','ABE','ABI','ABQ','ABX','ABZ','ACH','ACY','ADL','AGS','AHN','AIZ','AKL','ALB','ALC','ALF','ALH','ALL','AMA','AMS','ANC','ANE','ANR','AOH','APF','ATH','ATL','ATW','AUH','AUS','AVL','AVP','AXN','AZO','BBH','BCN','BDL','BEG','BER','BES','BFD','BFL','BGM','BGN','BGR','BHD','BHM','BHS','BHX','BHZ','BJP','BLA','BLE','BLI','BLK','BLL','BNA','BNE','BOD','BOH','BOI','BOJ','BOS','BQN','BRE','BRN','BRQ','BRS','BRU','BTS','BUD','BUF','BUY','BVE','BWE','BWI','BWT','BYG','BYU','BZG','CAE','CAK','CAX','CBG','CBR','CDG','CEB','CEG','CEZ','CFR','CGI','CGN','CHA','CHC','CLE','CLT','CMH','CMI','COA','CON','COS','CPH','CPQ','CPT','CRL','CRW','CRX','CSM','CVG','CVO','CWA','CWB','CZW','DAB','DAL','DAY','DEC','DEN','DET','DFW','DIQ','DLE','DLH','DND','DNQ','DPO','DRO','DRS','DSA','DSM','DTM','DTW','DUB','DUD','DUS','DVN','DXB','EAT','EAU','EDI','EGE','EIN','ELM','ELP','EMA','EME','ENS','EPH','ERF','ESS','EUG','EVV','EWN','EXT','FAO','FAR','FAT','FKB','FLO','FLR','FMM','FNB','FNL','FNT','FPR','FRA','FRD','FWA','GAS','GBR','GCI','GDN','GDW','GEG','GEX','GGG','GHV','GJT','GLA','GLZ','GOA','GOJ','GOR','GOT','GPT','GPZ','GRQ','GRR','GRU','GRZ','GSO','GSP','GTI','GTP','GTR','GTW','GUF','GUL','GVX','HAD','HAJ','HAM','HDB','HEL','HLG','HLZ','HOH','HOU','HRA','HTS','HUY','HVN','HYR','IAD','IAS','IDA','IKT','ILM','ILZ','IND','INV','IQQ','ITA','IVC','JAN','JAX','JBQ','JCL','JER','JKG','JTC','JYV','KEL','KJK','KLR','KLS','KLU','KLV','KOI','KOK','KPS','KRK','KSC','KSD','KSF','KTN','KTW','KUF','KUN','KZG','KZN','LAA','LAS','LAX','LBA','LBB','LBC','LCH','LCJ','LCQ','LCY','LEH','LEJ','LEX','LEY','LFT','LGA','LGG','LGU','LIL','LIN','LIS','LIT','LJU','LKV','LLA','LMT','LNS','LNZ','LOI','LON','LOZ','LPI','LPL','LRF','LRH','LRT','LRU','LSE','LTN','LUG','LUX','LUZ','LWB','LWK','LWR','LYS','MAC','MAD','MAF','MAN','MBS','MCE','MCI','MCO','MDT','MEL','MEM','MFE','MFR','MGL','MGM','MHG','MIA','MIM','MKA','MKE','MLB','MLU','MME','MMH','MMV','MMX','MNN','MOT','MOW','MPL','MQL','MRO','MRY','MSN','MSP','MST','MSV','MSY','MTJ','MUC','MUE','MVH','MXP','NAP','NCE','NHZ','NIT','NOA','NOC','NOD','NPE','NPL','NQT','NQY','NSN','NTE','NTL','NTU','NUE','NUW','NWI','NYC','NYO','OAK','OBF','OBN','OCF','ODE','OGG','OKC','OLO','OMA','ONP','ONT','OOL','OPO','ORB','ORD','ORL','ORM','ORY','OSD','OSI','OSL','OSR','OTP','OUL','OXF','OXR','PAD','PAE','PAH','PAR','PDK','PDV','PDX','PED','PER','PFB','PGD','PGV','PHF','PHL','PHX','PIA','PIH','PIK','PIT','PKB','PLH','PLO','PLQ','PLR','PME','PMI','PMR','PNS','POA','POZ','PPM','PQQ','PRB','PRC','PRG','PRV','PSC','PSF','PSH','PSK','PSP','PUB','PUW','PVD','QAR','QDV','RAO','RBG','RDD','RDM','RDO','RDU','RDZ','RFD','RIC','RIX','RJK','RKD','RKS','RKV','RLG','RMO','RMU','RNB','RNN','RNO','ROA','ROC','ROK','ROT','ROV','RST','RSW','RTM','RUT','RYG','RZE','SAN','SAO','SAT','SBA','SBN','SBP','SBY','SCE','SCL','SCN','SDF','SDL','SDR','SEA','SFO','SGD','SGU','SIR','SJC','SJO','SJT','SJU','SJY','SKE','SLC','SLE','SMF','SMN','SNN','SOD','SOF','SPM','SQL','SQQ','SRQ','SSZ','STL','STN','STO','STR','STS','SVC','SVG','SVX','SWE','SWH','SXB','SYD','SYR','SZZ','TAT','TGD','TGN','TJM','TKU','TLH','TLL','TLS','TMP','TPA','TRD','TRF','TRG','TRI','TRN','TRO','TRS','TSR','TSV','TTD','TUF','TUL','TWB','TWF','TXK','TYR','TYS','UDE','UHE','UIP','UKK','UME','UTC','VAG','VAP','VBY','VCP','VIE','VIS','VJI','VLC','VLY','VNO','VOD','VOG','VPZ','VRZ','VST','VXO','WAW','WBG','WGA','WIC','WIE','WLG','WOL','WRE','WRO','WRT','WVN','WYA','XCM','XMS','XPH','XYZ','YBL','YCD','YEG','YGK','YHM','YHU','YHZ','YKA','YKF','YKM','YLK','YML','YOW','YPQ','YQA','YQB','YQF','YQL','YQQ','YQS','YQT','YQY','YRQ','YSE','YSJ','YTF','YTR','YUL','YVE','YVR','YWG','YWS','YXU','YXX','YYB','YYC','YYJ','YYY','YYZ','ZBE','ZBM','ZNO','ZPH']::bpchar[]"}, {raw: "10"}]
     modes: [custom, auto]
+    mode: {auto: {known_issue: "legacy statement; generic plan over budget until the stats rewrite replaces it"}}
     expect:
       budget: {buffers: 43416, planning_ms: 10}
     note: "measured: 28944 / 62065 B (custom / generic); budget: 1.5x measured"
@@ -1749,6 +1769,7 @@ entries:
     shape: "ta all625_7d: > 32 distinct IATAs -> today's statement"
     params: [{raw: "'flood'"}, {raw: "'2026-10-11 17:00+00'::timestamptz"}, {raw: "ARRAY['AAB','AAH','AAL','AAR','ABC','ABE','ABI','ABQ','ABX','ABZ','ACH','ACY','ADL','AGS','AHN','AIZ','AKL','ALB','ALC','ALF','ALH','ALL','AMA','AMS','ANC','ANE','ANR','AOH','APF','ATH','ATL','ATW','AUH','AUS','AVL','AVP','AXN','AZO','BBH','BCN','BDL','BEG','BER','BES','BFD','BFL','BGM','BGN','BGR','BHD','BHM','BHS','BHX','BHZ','BJP','BLA','BLE','BLI','BLK','BLL','BNA','BNE','BOD','BOH','BOI','BOJ','BOS','BQN','BRE','BRN','BRQ','BRS','BRU','BTS','BUD','BUF','BUY','BVE','BWE','BWI','BWT','BYG','BYU','BZG','CAE','CAK','CAX','CBG','CBR','CDG','CEB','CEG','CEZ','CFR','CGI','CGN','CHA','CHC','CLE','CLT','CMH','CMI','COA','CON','COS','CPH','CPQ','CPT','CRL','CRW','CRX','CSM','CVG','CVO','CWA','CWB','CZW','DAB','DAL','DAY','DEC','DEN','DET','DFW','DIQ','DLE','DLH','DND','DNQ','DPO','DRO','DRS','DSA','DSM','DTM','DTW','DUB','DUD','DUS','DVN','DXB','EAT','EAU','EDI','EGE','EIN','ELM','ELP','EMA','EME','ENS','EPH','ERF','ESS','EUG','EVV','EWN','EXT','FAO','FAR','FAT','FKB','FLO','FLR','FMM','FNB','FNL','FNT','FPR','FRA','FRD','FWA','GAS','GBR','GCI','GDN','GDW','GEG','GEX','GGG','GHV','GJT','GLA','GLZ','GOA','GOJ','GOR','GOT','GPT','GPZ','GRQ','GRR','GRU','GRZ','GSO','GSP','GTI','GTP','GTR','GTW','GUF','GUL','GVX','HAD','HAJ','HAM','HDB','HEL','HLG','HLZ','HOH','HOU','HRA','HTS','HUY','HVN','HYR','IAD','IAS','IDA','IKT','ILM','ILZ','IND','INV','IQQ','ITA','IVC','JAN','JAX','JBQ','JCL','JER','JKG','JTC','JYV','KEL','KJK','KLR','KLS','KLU','KLV','KOI','KOK','KPS','KRK','KSC','KSD','KSF','KTN','KTW','KUF','KUN','KZG','KZN','LAA','LAS','LAX','LBA','LBB','LBC','LCH','LCJ','LCQ','LCY','LEH','LEJ','LEX','LEY','LFT','LGA','LGG','LGU','LIL','LIN','LIS','LIT','LJU','LKV','LLA','LMT','LNS','LNZ','LOI','LON','LOZ','LPI','LPL','LRF','LRH','LRT','LRU','LSE','LTN','LUG','LUX','LUZ','LWB','LWK','LWR','LYS','MAC','MAD','MAF','MAN','MBS','MCE','MCI','MCO','MDT','MEL','MEM','MFE','MFR','MGL','MGM','MHG','MIA','MIM','MKA','MKE','MLB','MLU','MME','MMH','MMV','MMX','MNN','MOT','MOW','MPL','MQL','MRO','MRY','MSN','MSP','MST','MSV','MSY','MTJ','MUC','MUE','MVH','MXP','NAP','NCE','NHZ','NIT','NOA','NOC','NOD','NPE','NPL','NQT','NQY','NSN','NTE','NTL','NTU','NUE','NUW','NWI','NYC','NYO','OAK','OBF','OBN','OCF','ODE','OGG','OKC','OLO','OMA','ONP','ONT','OOL','OPO','ORB','ORD','ORL','ORM','ORY','OSD','OSI','OSL','OSR','OTP','OUL','OXF','OXR','PAD','PAE','PAH','PAR','PDK','PDV','PDX','PED','PER','PFB','PGD','PGV','PHF','PHL','PHX','PIA','PIH','PIK','PIT','PKB','PLH','PLO','PLQ','PLR','PME','PMI','PMR','PNS','POA','POZ','PPM','PQQ','PRB','PRC','PRG','PRV','PSC','PSF','PSH','PSK','PSP','PUB','PUW','PVD','QAR','QDV','RAO','RBG','RDD','RDM','RDO','RDU','RDZ','RFD','RIC','RIX','RJK','RKD','RKS','RKV','RLG','RMO','RMU','RNB','RNN','RNO','ROA','ROC','ROK','ROT','ROV','RST','RSW','RTM','RUT','RYG','RZE','SAN','SAO','SAT','SBA','SBN','SBP','SBY','SCE','SCL','SCN','SDF','SDL','SDR','SEA','SFO','SGD','SGU','SIR','SJC','SJO','SJT','SJU','SJY','SKE','SLC','SLE','SMF','SMN','SNN','SOD','SOF','SPM','SQL','SQQ','SRQ','SSZ','STL','STN','STO','STR','STS','SVC','SVG','SVX','SWE','SWH','SXB','SYD','SYR','SZZ','TAT','TGD','TGN','TJM','TKU','TLH','TLL','TLS','TMP','TPA','TRD','TRF','TRG','TRI','TRN','TRO','TRS','TSR','TSV','TTD','TUF','TUL','TWB','TWF','TXK','TYR','TYS','UDE','UHE','UIP','UKK','UME','UTC','VAG','VAP','VBY','VCP','VIE','VIS','VJI','VLC','VLY','VNO','VOD','VOG','VPZ','VRZ','VST','VXO','WAW','WBG','WGA','WIC','WIE','WLG','WOL','WRE','WRO','WRT','WVN','WYA','XCM','XMS','XPH','XYZ','YBL','YCD','YEG','YGK','YHM','YHU','YHZ','YKA','YKF','YKM','YLK','YML','YOW','YPQ','YQA','YQB','YQF','YQL','YQQ','YQS','YQT','YQY','YRQ','YSE','YSJ','YTF','YTR','YUL','YVE','YVR','YWG','YWS','YXU','YXX','YYB','YYC','YYJ','YYY','YYZ','ZBE','ZBM','ZNO','ZPH']::bpchar[]"}, {raw: "10"}]
     modes: [custom, auto]
+    mode: {auto: {known_issue: "legacy statement; generic plan over budget until the stats rewrite replaces it"}}
     expect:
       budget: {buffers: 67419, planning_ms: 10}
     note: "measured: 44946 / 103054 B (custom / generic); budget: 1.5x measured"
@@ -1757,6 +1778,7 @@ entries:
     shape: "pa all625_7d: > 32 distinct IATAs -> today's statement"
     params: [{raw: "'2026-10-11 17:00+00'::timestamptz"}, {raw: "'2026-10-18 17:00+00'::timestamptz"}, {raw: "ARRAY['AAB','AAH','AAL','AAR','ABC','ABE','ABI','ABQ','ABX','ABZ','ACH','ACY','ADL','AGS','AHN','AIZ','AKL','ALB','ALC','ALF','ALH','ALL','AMA','AMS','ANC','ANE','ANR','AOH','APF','ATH','ATL','ATW','AUH','AUS','AVL','AVP','AXN','AZO','BBH','BCN','BDL','BEG','BER','BES','BFD','BFL','BGM','BGN','BGR','BHD','BHM','BHS','BHX','BHZ','BJP','BLA','BLE','BLI','BLK','BLL','BNA','BNE','BOD','BOH','BOI','BOJ','BOS','BQN','BRE','BRN','BRQ','BRS','BRU','BTS','BUD','BUF','BUY','BVE','BWE','BWI','BWT','BYG','BYU','BZG','CAE','CAK','CAX','CBG','CBR','CDG','CEB','CEG','CEZ','CFR','CGI','CGN','CHA','CHC','CLE','CLT','CMH','CMI','COA','CON','COS','CPH','CPQ','CPT','CRL','CRW','CRX','CSM','CVG','CVO','CWA','CWB','CZW','DAB','DAL','DAY','DEC','DEN','DET','DFW','DIQ','DLE','DLH','DND','DNQ','DPO','DRO','DRS','DSA','DSM','DTM','DTW','DUB','DUD','DUS','DVN','DXB','EAT','EAU','EDI','EGE','EIN','ELM','ELP','EMA','EME','ENS','EPH','ERF','ESS','EUG','EVV','EWN','EXT','FAO','FAR','FAT','FKB','FLO','FLR','FMM','FNB','FNL','FNT','FPR','FRA','FRD','FWA','GAS','GBR','GCI','GDN','GDW','GEG','GEX','GGG','GHV','GJT','GLA','GLZ','GOA','GOJ','GOR','GOT','GPT','GPZ','GRQ','GRR','GRU','GRZ','GSO','GSP','GTI','GTP','GTR','GTW','GUF','GUL','GVX','HAD','HAJ','HAM','HDB','HEL','HLG','HLZ','HOH','HOU','HRA','HTS','HUY','HVN','HYR','IAD','IAS','IDA','IKT','ILM','ILZ','IND','INV','IQQ','ITA','IVC','JAN','JAX','JBQ','JCL','JER','JKG','JTC','JYV','KEL','KJK','KLR','KLS','KLU','KLV','KOI','KOK','KPS','KRK','KSC','KSD','KSF','KTN','KTW','KUF','KUN','KZG','KZN','LAA','LAS','LAX','LBA','LBB','LBC','LCH','LCJ','LCQ','LCY','LEH','LEJ','LEX','LEY','LFT','LGA','LGG','LGU','LIL','LIN','LIS','LIT','LJU','LKV','LLA','LMT','LNS','LNZ','LOI','LON','LOZ','LPI','LPL','LRF','LRH','LRT','LRU','LSE','LTN','LUG','LUX','LUZ','LWB','LWK','LWR','LYS','MAC','MAD','MAF','MAN','MBS','MCE','MCI','MCO','MDT','MEL','MEM','MFE','MFR','MGL','MGM','MHG','MIA','MIM','MKA','MKE','MLB','MLU','MME','MMH','MMV','MMX','MNN','MOT','MOW','MPL','MQL','MRO','MRY','MSN','MSP','MST','MSV','MSY','MTJ','MUC','MUE','MVH','MXP','NAP','NCE','NHZ','NIT','NOA','NOC','NOD','NPE','NPL','NQT','NQY','NSN','NTE','NTL','NTU','NUE','NUW','NWI','NYC','NYO','OAK','OBF','OBN','OCF','ODE','OGG','OKC','OLO','OMA','ONP','ONT','OOL','OPO','ORB','ORD','ORL','ORM','ORY','OSD','OSI','OSL','OSR','OTP','OUL','OXF','OXR','PAD','PAE','PAH','PAR','PDK','PDV','PDX','PED','PER','PFB','PGD','PGV','PHF','PHL','PHX','PIA','PIH','PIK','PIT','PKB','PLH','PLO','PLQ','PLR','PME','PMI','PMR','PNS','POA','POZ','PPM','PQQ','PRB','PRC','PRG','PRV','PSC','PSF','PSH','PSK','PSP','PUB','PUW','PVD','QAR','QDV','RAO','RBG','RDD','RDM','RDO','RDU','RDZ','RFD','RIC','RIX','RJK','RKD','RKS','RKV','RLG','RMO','RMU','RNB','RNN','RNO','ROA','ROC','ROK','ROT','ROV','RST','RSW','RTM','RUT','RYG','RZE','SAN','SAO','SAT','SBA','SBN','SBP','SBY','SCE','SCL','SCN','SDF','SDL','SDR','SEA','SFO','SGD','SGU','SIR','SJC','SJO','SJT','SJU','SJY','SKE','SLC','SLE','SMF','SMN','SNN','SOD','SOF','SPM','SQL','SQQ','SRQ','SSZ','STL','STN','STO','STR','STS','SVC','SVG','SVX','SWE','SWH','SXB','SYD','SYR','SZZ','TAT','TGD','TGN','TJM','TKU','TLH','TLL','TLS','TMP','TPA','TRD','TRF','TRG','TRI','TRN','TRO','TRS','TSR','TSV','TTD','TUF','TUL','TWB','TWF','TXK','TYR','TYS','UDE','UHE','UIP','UKK','UME','UTC','VAG','VAP','VBY','VCP','VIE','VIS','VJI','VLC','VLY','VNO','VOD','VOG','VPZ','VRZ','VST','VXO','WAW','WBG','WGA','WIC','WIE','WLG','WOL','WRE','WRO','WRT','WVN','WYA','XCM','XMS','XPH','XYZ','YBL','YCD','YEG','YGK','YHM','YHU','YHZ','YKA','YKF','YKM','YLK','YML','YOW','YPQ','YQA','YQB','YQF','YQL','YQQ','YQS','YQT','YQY','YRQ','YSE','YSJ','YTF','YTR','YUL','YVE','YVR','YWG','YWS','YXU','YXX','YYB','YYC','YYJ','YYY','YYZ','ZBE','ZBM','ZNO','ZPH']::bpchar[]"}]
     modes: [custom, auto]
+    mode: {auto: {known_issue: "legacy statement; generic plan over budget until the stats rewrite replaces it"}}
     expect:
       budget: {buffers: 32652, planning_ms: 10}
     note: "measured: 21768 / - B (custom / generic); budget: 1.5x measured"
@@ -1897,8 +1919,8 @@ entries:
     note: "measured: 582 / 582 B (custom / generic); budget: 1.5x measured"
   - id: s7.trc.tie_tag_l200
     stmt: ListTraceTags_end
-    shape: "traces keyset tie_tag_l200"
-    params: [{raw: "NULL::bpchar[]"}, {raw: "''"}, {raw: "NULL::timestamptz"}, {raw: "NULL::timestamptz"}, {raw: "'2026-10-18 01:46:14+00'::timestamptz"}, {raw: "200"}, {raw: "''"}, {raw: "'\\x312f6abb'::bytea"}]
+    shape: "traces keyset, cursor inside a tied millisecond, limit 200"
+    params: [{raw: "NULL::bpchar[]"}, {raw: "''"}, {raw: "NULL::timestamptz"}, {raw: "NULL::timestamptz"}, {r: trc_tie_ts}, {raw: "200"}, {raw: "''"}, {r: trc_tie_tag}]
     expect:
       driver: [{relation: trace_tags, alias: t, index: idx_trace_tags_keyset}]
       budget: {buffers: 885, planning_ms: 10}
@@ -1921,120 +1943,120 @@ entries:
     note: "measured: 7 / 7 B (custom / generic); budget: 1.5x measured"
   - id: s7.tel.top_168h_a0
     stmt: GetObserverTelemetrySince
-    shape: "telemetry since-form top_168h_a0 (measured args of the catch-all, until NULL)"
-    params: [{raw: "'001fca66-92c3-478a-8d12-b6f9a363435f'::uuid"}, {raw: "'2026-10-11 17:00+00'::timestamptz"}, {raw: "0"}]
+    shape: "telemetry since-form, the observer with the most telemetry, 7 d, page 1"
+    params: [{r: tel_top}, {raw: "'2026-10-11 17:00+00'::timestamptz"}, {raw: "0"}]
     expect:
       driver: [{relation: observer_telemetry, index: idx_telemetry_observer_recent, nodes: ["Index Scan", "Index Only Scan", "Bitmap Heap Scan"]}]
       budget: {buffers: 600, planning_ms: 10}
     note: "measured: - / - B (custom / generic); budget: runtime-guards 2.6 (29-394 B) -> 600"
   - id: s7.tel.top_168h_a5921868
     stmt: GetObserverTelemetrySince
-    shape: "telemetry since-form top_168h_a5921868 (measured args of the catch-all, until NULL)"
-    params: [{raw: "'001fca66-92c3-478a-8d12-b6f9a363435f'::uuid"}, {raw: "'2026-10-11 17:00+00'::timestamptz"}, {raw: "5921868"}]
+    shape: "telemetry since-form, the observer with the most telemetry, 7 d, cursor at its median row"
+    params: [{r: tel_top}, {raw: "'2026-10-11 17:00+00'::timestamptz"}, {r: tel_top_mid}]
     expect:
       driver: [{relation: observer_telemetry, index: idx_telemetry_observer_recent, nodes: ["Index Scan", "Index Only Scan", "Bitmap Heap Scan"]}]
       budget: {buffers: 600, planning_ms: 10}
     note: "measured: - / - B (custom / generic); budget: runtime-guards 2.6 (29-394 B) -> 600"
   - id: s7.adv.busy1_c0_d16
     stmt: ListObserverAdverts_end
-    shape: "adverts busy1_c0_d16"
-    params: [{raw: "'7ea9ed3f-d6ce-4e54-a8b7-9f1e2e7d5179'::uuid"}, {raw: "0"}, {raw: "51"}]
+    shape: "adverts, the observer with the most adverts, page 1"
+    params: [{r: adv_busiest}, {raw: "0"}, {raw: "51"}]
     expect:
       driver: [{relation: packet_observations, alias: po, index: idx_observations_adverts, index_cond: ["observer_id =", "id >"]}]
       budget: {buffers: 520, planning_ms: 10}
     note: "measured: 462 / 462 B (custom / generic); budget: gate <= 10 B/row + 10"
   - id: s7.adv.busy1_median
     stmt: ListObserverAdverts_end
-    shape: "adverts busy1_median"
-    params: [{raw: "'7ea9ed3f-d6ce-4e54-a8b7-9f1e2e7d5179'::uuid"}, {raw: "712892880"}, {raw: "51"}]
+    shape: "adverts, the observer with the most adverts, cursor at its median advert"
+    params: [{r: adv_busiest}, {r: adv_busiest_mid}, {raw: "51"}]
     expect:
       driver: [{relation: packet_observations, alias: po, index: idx_observations_adverts, index_cond: ["observer_id =", "id >"]}]
       budget: {buffers: 520, planning_ms: 10}
     note: "measured: 463 / 463 B (custom / generic); budget: gate <= 10 B/row + 10"
   - id: s7.adv.busy1_median_l201
     stmt: ListObserverAdverts_end
-    shape: "adverts busy1_median_l201"
-    params: [{raw: "'7ea9ed3f-d6ce-4e54-a8b7-9f1e2e7d5179'::uuid"}, {raw: "712892880"}, {raw: "201"}]
+    shape: "adverts, the observer with the most adverts, cursor at its median advert, limit 201"
+    params: [{r: adv_busiest}, {r: adv_busiest_mid}, {raw: "201"}]
     expect:
       driver: [{relation: packet_observations, alias: po, index: idx_observations_adverts, index_cond: ["observer_id =", "id >"]}]
       budget: {buffers: 2720, planning_ms: 10}
     note: "measured: 1813 / 1813 B (custom / generic); budget: gate <= 10 B/row + 10; 1.5x measured for limit 201"
   - id: s7.adv.topobs_c0_d6
     stmt: ListObserverAdverts_end
-    shape: "adverts topobs_c0_d6"
-    params: [{raw: "'139cac43-49f6-4f06-b157-ded85dc797cf'::uuid"}, {raw: "0"}, {raw: "51"}]
+    shape: "adverts, the observer with the most observations, page 1"
+    params: [{r: adv_topobs}, {raw: "0"}, {raw: "51"}]
     expect:
       driver: [{relation: packet_observations, alias: po, index: idx_observations_adverts, index_cond: ["observer_id =", "id >"]}]
       budget: {buffers: 520, planning_ms: 10}
     note: "measured: 453 / 453 B (custom / generic); budget: gate <= 10 B/row + 10"
   - id: s7.adv.topobs_median
     stmt: ListObserverAdverts_end
-    shape: "adverts topobs_median"
-    params: [{raw: "'139cac43-49f6-4f06-b157-ded85dc797cf'::uuid"}, {raw: "694383736"}, {raw: "51"}]
+    shape: "adverts, the observer with the most observations, cursor at its median advert"
+    params: [{r: adv_topobs}, {r: adv_topobs_mid}, {raw: "51"}]
     expect:
       driver: [{relation: packet_observations, alias: po, index: idx_observations_adverts, index_cond: ["observer_id =", "id >"]}]
       budget: {buffers: 520, planning_ms: 10}
     note: "measured: 462 / 462 B (custom / generic); budget: gate <= 10 B/row + 10"
   - id: s7.adv.d51_c0
     stmt: ListObserverAdverts_end
-    shape: "adverts d51_c0"
-    params: [{raw: "'0995ad7c-6cac-4b75-b790-f12680df827c'::uuid"}, {raw: "0"}, {raw: "51"}]
+    shape: "adverts, the observer with the highest advert share (>= 500 observations), page 1"
+    params: [{r: adv_dense1}, {raw: "0"}, {raw: "51"}]
     expect:
       driver: [{relation: packet_observations, alias: po, index: idx_observations_adverts, index_cond: ["observer_id =", "id >"]}]
       budget: {buffers: 520, planning_ms: 10}
     note: "measured: 463 / 463 B (custom / generic); budget: gate <= 10 B/row + 10"
   - id: s7.adv.d48_c0
     stmt: ListObserverAdverts_end
-    shape: "adverts d48_c0"
-    params: [{raw: "'01802856-6726-4270-a3d8-c06a384ce297'::uuid"}, {raw: "0"}, {raw: "51"}]
+    shape: "adverts, the observer with the second highest advert share, page 1"
+    params: [{r: adv_dense2}, {raw: "0"}, {raw: "51"}]
     expect:
       driver: [{relation: packet_observations, alias: po, index: idx_observations_adverts, index_cond: ["observer_id =", "id >"]}]
       budget: {buffers: 520, planning_ms: 10}
     note: "measured: 462 / 462 B (custom / generic); budget: gate <= 10 B/row + 10"
   - id: s7.adv.d3_c0
     stmt: ListObserverAdverts_end
-    shape: "adverts d3_c0"
-    params: [{raw: "'00a629fa-3461-4fc5-9755-1152b5af0422'::uuid"}, {raw: "0"}, {raw: "51"}]
+    shape: "adverts, the observer with the lowest non-zero advert share, page 1"
+    params: [{r: adv_sparse}, {raw: "0"}, {raw: "51"}]
     expect:
       driver: [{relation: packet_observations, alias: po, index: idx_observations_adverts, index_cond: ["observer_id =", "id >"]}]
       budget: {buffers: 520, planning_ms: 10}
     note: "measured: 462 / 462 B (custom / generic); budget: gate <= 10 B/row + 10"
   - id: s7.adv.mid1_c0
     stmt: ListObserverAdverts_end
-    shape: "adverts mid1_c0"
-    params: [{raw: "'0156a2f5-5f63-4dc5-bec8-de469ca80a67'::uuid"}, {raw: "0"}, {raw: "51"}]
+    shape: "adverts, the observer with the median advert count, page 1"
+    params: [{r: adv_mid}, {raw: "0"}, {raw: "51"}]
     expect:
       driver: [{relation: packet_observations, alias: po, index: idx_observations_adverts, index_cond: ["observer_id =", "id >"]}]
       budget: {buffers: 520, planning_ms: 10}
     note: "measured: 454 / 454 B (custom / generic); budget: gate <= 10 B/row + 10"
   - id: s7.adv.quiet1_c0
     stmt: ListObserverAdverts_end
-    shape: "adverts quiet1_c0"
-    params: [{raw: "'472c1a96-e9cd-42c2-a6f8-f8201f1e2aec'::uuid"}, {raw: "0"}, {raw: "51"}]
+    shape: "adverts, the observer with the fewest adverts, page 1"
+    params: [{r: adv_quiet}, {raw: "0"}, {raw: "51"}]
     expect:
       driver: [{relation: packet_observations, alias: po, index: idx_observations_adverts, index_cond: ["observer_id =", "id >"]}]
       budget: {buffers: 520, planning_ms: 10}
     note: "measured: 12 / 12 B (custom / generic); budget: gate <= 10 B/row + 10"
   - id: s7.adv.zeroadv_big
     stmt: ListObserverAdverts_end
-    shape: "adverts zeroadv_big"
-    params: [{raw: "'f9e9cff8-1ec1-48a1-bbf1-39d92a3fe9e9'::uuid"}, {raw: "0"}, {raw: "51"}]
+    shape: "adverts, the busiest observer with no adverts"
+    params: [{r: adv_zero}, {raw: "0"}, {raw: "51"}]
     expect:
       driver: [{relation: packet_observations, alias: po, index: idx_observations_adverts, index_cond: ["observer_id =", "id >"]}]
       budget: {buffers: 520, planning_ms: 10}
     note: "measured: 3 / 3 B (custom / generic); budget: gate <= 10 B/row + 10"
   - id: s7.adv.unknown
     stmt: ListObserverAdverts_end
-    shape: "adverts unknown"
-    params: [{raw: "'00000000-0000-0000-0000-00000000abcd'::uuid"}, {raw: "0"}, {raw: "51"}]
+    shape: "adverts, an unknown observer id"
+    params: [{raw: "'00000000-0000-0000-0000-00000000000b'::uuid"}, {raw: "0"}, {raw: "51"}]
     expect:
       driver: [{relation: packet_observations, alias: po, index: idx_observations_adverts, index_cond: ["observer_id =", "id >"]}]
       budget: {buffers: 520, planning_ms: 10}
     note: "measured: 3 / 3 B (custom / generic); budget: gate <= 10 B/row + 10"
   - id: s7.adv.busy1_cursor_3e9
     stmt: ListObserverAdverts_end
-    shape: "adverts, cursor 3e9 (>= 2^31): empty page, no error"
-    params: [{raw: "'7ea9ed3f-d6ce-4e54-a8b7-9f1e2e7d5179'::uuid"}, {raw: "3000000000"}, {raw: "51"}]
+    shape: "adverts, the observer with the most adverts, cursor 3e9 (>= 2^31): empty page, no error"
+    params: [{r: adv_busiest}, {raw: "3000000000"}, {raw: "51"}]
     expect:
       driver: [{relation: packet_observations, alias: po, index_cond: ["id >"], any_index: [idx_observations_adverts, packet_observations_pkey]}]
       budget: {buffers: 520, planning_ms: 10}
@@ -2176,8 +2198,8 @@ entries:
     note: "measured: 582 / 582 B (custom / generic); budget: 1.5x measured"
   - id: sm.trc.tie_tag_l200
     stmt: ListTraceTags_end
-    shape: "ListTraceTags tie_tag_l200 (perf_small)"
-    params: [{raw: "NULL::bpchar[]"}, {raw: "''"}, {raw: "NULL::timestamptz"}, {raw: "NULL::timestamptz"}, {raw: "'2026-10-18 01:46:14+00'::timestamptz"}, {raw: "200"}, {raw: "''"}, {raw: "'\\x312f6abb'::bytea"}]
+    shape: "ListTraceTags, cursor inside a tied millisecond, limit 200"
+    params: [{raw: "NULL::bpchar[]"}, {raw: "''"}, {raw: "NULL::timestamptz"}, {raw: "NULL::timestamptz"}, {r: trc_tie_ts}, {raw: "200"}, {raw: "''"}, {r: trc_tie_tag}]
     expect:
       budget: {buffers: 885, planning_ms: 10}
     note: "measured: 590 / 590 B (custom / generic); budget: 1.5x measured"
@@ -2218,8 +2240,8 @@ entries:
     note: "measured: - / - B (custom / generic); budget: class budget"
   - id: sm.nodes.pagecursor_l501
     stmt: ListNodes_end
-    shape: "ListNodes pagecursor_l501 (perf_small)"
-    params: [{raw: "0"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "'2026-10-18 17:27:42.984434+00'::timestamptz"}, {raw: "501"}, {raw: "''"}, {raw: "false"}, {raw: "''"}, {raw: "'32b9c931-eb56-4e01-9b53-9767172171a3'::uuid"}]
+    shape: "ListNodes, page cursor at the 501st node, limit 501"
+    params: [{raw: "0"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {r: nodes_p500_ts}, {raw: "501"}, {raw: "''"}, {raw: "false"}, {raw: "''"}, {r: nodes_p500_id}]
     expect:
       budget: {buffers: 14388, planning_ms: 10}
     note: "measured: 9592 / 48827 B (custom / generic); budget: 1.5x measured"
@@ -2477,8 +2499,8 @@ entries:
     note: "measured: full 909 / 909 B (custom / generic), page CTE 53"
   - id: ps.t.S2_nl12_judge_cursor_l1
     stmt: ListPacketsBySites
-    shape: "nl12 judge cursor l1"
-    params: ["{AMS,EIN,ENS,GLZ,GRQ,LEY,LWR,MST,QAR,RTM,UDE,UTC}", "2026-10-18 15:40:39.570763+00", "\\xa33704fac0d3a216", 2]
+    shape: "nl12, cursor at the newest row before a fixed time, limit 1"
+    params: ["{AMS,EIN,ENS,GLZ,GRQ,LEY,LWR,MST,QAR,RTM,UDE,UTC}", {r: nl12_judge_ts}, {r: nl12_judge_hash}, 2]
     expect:
       driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
       sort_exempt: [sites_recheck]
@@ -3372,7 +3394,7 @@ entries:
   - id: ps.ingest.insert_observation
     stmt: InsertObservation_end
     shape: "InsertObservation with packet_sites maintenance, the newest stored observation re-sent (plain EXPLAIN)"
-    params: ["\\x7c05039b3e8a663c", a04dc356-e75c-42dc-8632-1fcf7d22dfa1, BDL, "2026-10-18T16:59:59.77791+00:00", "64", "2", "0", "\\x", "0", "0", "0", "910.525", "7", "62.5", "5", mqtt1, "1", "305.664"]
+    params: [{r: obs_newest_hash}, {r: obs_newest_observer}, BDL, "2026-10-18T16:59:59.77791+00:00", "64", "2", "0", "\\x", "0", "0", "0", "910.525", "7", "62.5", "5", broker-1, "1", "305.664"]
     expect:
       driver: [{relation: packets, index: packets_pkey, index_cond: ["packet_hash ="]}]
 

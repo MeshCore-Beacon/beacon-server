@@ -110,11 +110,12 @@ type Expect struct {
 	Budget     Budget       `yaml:"budget"`
 }
 
-// ModeOverride skips one plan mode or relaxes its expectations.
+// ModeOverride skips one plan mode, relaxes its expectations, or marks its failures as a known issue.
 type ModeOverride struct {
-	Skip      string  `yaml:"skip"`
-	DegradeTo *Expect `yaml:"degrade_to"`
-	Reason    string  `yaml:"reason"`
+	Skip       string  `yaml:"skip"`
+	DegradeTo  *Expect `yaml:"degrade_to"`
+	KnownIssue string  `yaml:"known_issue"` // this mode's failures read KNOWN_ISSUE; errors still fail
+	Reason     string  `yaml:"reason"`
 }
 
 // Entry is one statement with one set of parameters.
@@ -134,6 +135,14 @@ type Entry struct {
 	KnownIssue      string                   `yaml:"known_issue"`
 	Baseline        string                   `yaml:"baseline"` // "" or "unstable: <reason>"
 	Note            string                   `yaml:"note"`
+}
+
+// KnownIssueIn returns the known issue that covers e's failures in mode: the mode override's, else the entry's.
+func (e *Entry) KnownIssueIn(mode string) string {
+	if o := e.Mode[mode]; o != nil && o.KnownIssue != "" {
+		return o.KnownIssue
+	}
+	return e.KnownIssue
 }
 
 // Plan modes: how a statement's plan is chosen (plan_cache_mode).
@@ -580,8 +589,8 @@ func (c *Corpus) checkEntry(e *Entry) error {
 		if o == nil {
 			return fmt.Errorf("mode %q: empty override", m)
 		}
-		if o.Skip != "" && o.DegradeTo != nil {
-			return fmt.Errorf("mode %q: skip and degrade_to are exclusive", m)
+		if o.Skip != "" && (o.DegradeTo != nil || o.KnownIssue != "") {
+			return fmt.Errorf("mode %q: skip excludes degrade_to and known_issue", m)
 		}
 		if o.DegradeTo != nil {
 			if err := c.checkExpect(o.DegradeTo); err != nil {

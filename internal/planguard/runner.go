@@ -607,7 +607,7 @@ func (c *Corpus) judge(r *Result, sp runSpec, plan []byte, o RunOptions) error {
 	if err := baselineStep(r, sp.e, o); err != nil {
 		return err
 	}
-	r.Verdict = Decide(sp.e.ExpectFail, sp.e.KnownIssue, r.Failures, r.Retired)
+	r.Verdict = Decide(sp.e.ExpectFail, sp.e.KnownIssueIn(r.Mode), r.Failures, r.Retired)
 	return nil
 }
 

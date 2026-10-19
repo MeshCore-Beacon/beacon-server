@@ -107,6 +107,8 @@ func (c *Corpus) admissionProblems(name string, st *Statement, legacy map[string
 				out = append(out, fmt.Sprintf("entry %s skips %s", e.ID, m))
 			case ov != nil && ov.DegradeTo != nil:
 				out = append(out, fmt.Sprintf("entry %s degrades %s", e.ID, m))
+			case ov != nil && ov.KnownIssue != "":
+				out = append(out, fmt.Sprintf("entry %s has a known_issue in %s", e.ID, m))
 			}
 		}
 		if e.ExpectFail {
