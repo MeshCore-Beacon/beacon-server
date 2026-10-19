@@ -218,6 +218,10 @@ func diffCmd(args []string, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "%d pairs missed their expectation\n", n)
 			code = 1
 		}
+		if n := len(rep.Skipped()); n > 0 {
+			fmt.Fprintf(stderr, "%d pairs were skipped: their {sql: …} params found no value on this snapshot, so they prove nothing\n", n)
+			code = 1
+		}
 	}
 	if runErr != nil {
 		fmt.Fprintln(stderr, "planguard diff:", runErr)

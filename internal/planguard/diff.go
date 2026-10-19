@@ -47,18 +47,29 @@ type SaturatedSpec struct {
 	Floor string `yaml:"floor"`
 }
 
+// TieCursor names the cand's own page cursor: the params holding its timestamp and hash bound (1-based) and the
+// result column holding the hash.
+type TieCursor struct {
+	TS         int    `yaml:"ts"`
+	Hash       int    `yaml:"hash"`
+	HashColumn string `yaml:"hash_column"`
+}
+
 // DiffPair compares one ref result with one or more cand results.
 //
 // Every ref column is compared. Each relaxation is a named class that must be listed in Allowed:
 //   - tie_order: within each run of equal Key, cand rows are a permutation of ref rows (same count, keys equal
 //     position by position);
 //   - saturated_suffix: when ref row 1 has Saturated.Flag = t, ref rows whose Key[0] is below Saturated.Floor may
-//     be missing from or differ in cand; the only class that relaxes the row count, and only by those rows;
+//     be missing from or differ in cand; the only class that relaxes the row count, and only by those rows. The
+//     cand rows in their place must be below the floor too, keep the descending key order, and repeat no row;
 //   - latest_observer_tie: the Omit columns may differ; each such row is listed;
 //   - pagecursor_tie_rows: cand may start with k rows ref lacks whose Key[0], truncated to the millisecond, equals
-//     the millisecond of ref param TieBoundary; then cand[k:] must equal ref[:len(ref)-k].
+//     the millisecond of ref param TieBoundary, and which sort at or below the cand's own cursor (TieCursor:
+//     (Key[0], hash) ≤ (ts, hash bound)); then cand[k:] must equal ref[:len(ref)-k].
 //
-// Param indexes (TieBoundary, Walk.LimitParam, Walk.Cursor[].Param) are 1-based, like $n.
+// Require lists classes that must fire for every cand: a case that exists to show a class shows it, or fails.
+// Param indexes (TieBoundary, TieCursor, Walk.LimitParam, Walk.Cursor[].Param) are 1-based, like $n.
 type DiffPair struct {
 	ID          string            `yaml:"id"`
 	Ref         Call              `yaml:"ref"`
@@ -68,6 +79,8 @@ type DiffPair struct {
 	Omit        []string          `yaml:"omit"`
 	Saturated   *SaturatedSpec    `yaml:"saturated"`
 	TieBoundary *int              `yaml:"tie_boundary"`
+	TieCursor   *TieCursor        `yaml:"tie_cursor"`
+	Require     []string          `yaml:"require"`
 	Walk        *WalkSpec         `yaml:"walk"`
 	Expect      map[string]string `yaml:"expect"` // cand alias → identical | allowed | same | different; default same
 }
@@ -84,6 +97,7 @@ const (
 	DiffIdentical = "identical"
 	DiffAllowed   = "allowed"
 	DiffDifferent = "different"
+	DiffSkip      = "skip" // a {sql: …} param found no value on this snapshot; the pair did not run
 
 	ClassTieOrder          = "tie_order"
 	ClassSaturatedSuffix   = "saturated_suffix"
@@ -139,8 +153,8 @@ func ParseDiffSpec(raw []byte, p string, fsys fs.FS) (*DiffSpec, error) {
 			if err != nil {
 				return nil, fmt.Errorf("%s: batch %s: %s: %w", p, b.Name, alias, err)
 			}
-			if kw := dataModifying(string(text)); kw != "" {
-				return nil, fmt.Errorf("%s: batch %s: %s runs %s; diff statements must not modify data", p, b.Name, alias, kw)
+			if err := checkSingleSelect(string(text)); err != nil {
+				return nil, fmt.Errorf("%s: batch %s: %s: %w", p, b.Name, alias, err)
 			}
 		}
 	}
@@ -261,8 +275,16 @@ func (p DiffPair) Validate() error {
 	if p.Saturated != nil && (p.Saturated.Flag == "" || p.Saturated.Floor == "" || len(p.Key) == 0) {
 		return fail("saturated needs flag, floor and a key")
 	}
-	if (p.TieBoundary != nil) != allowed[ClassPageCursorTieRows] {
-		return fail("tie_boundary and the class pagecursor_tie_rows go together")
+	if (p.TieBoundary != nil) != allowed[ClassPageCursorTieRows] || (p.TieCursor != nil) != allowed[ClassPageCursorTieRows] {
+		return fail("tie_boundary, tie_cursor and the class pagecursor_tie_rows go together")
+	}
+	if tc := p.TieCursor; tc != nil && (tc.TS < 1 || tc.Hash < 1 || tc.TS == tc.Hash || tc.HashColumn == "") {
+		return fail("tie_cursor needs two different param numbers (ts, hash) and hash_column")
+	}
+	for _, c := range p.Require {
+		if !allowed[c] {
+			return fail("require %s: not an allowed class", c)
+		}
 	}
 	if p.TieBoundary != nil && (*p.TieBoundary < 1 || len(p.Key) == 0) {
 		return fail("tie_boundary %d must be a param number ($1 = 1) and needs a key", *p.TieBoundary)
@@ -313,6 +335,13 @@ func (p DiffPair) checkCalls(stmts map[string]string) error {
 	if p.TieBoundary != nil && *p.TieBoundary > len(p.Ref.Params) {
 		return fmt.Errorf("tie_boundary $%d: the ref has %d params", *p.TieBoundary, len(p.Ref.Params))
 	}
+	if tc := p.TieCursor; tc != nil {
+		for _, c := range p.Cands {
+			if max(tc.TS, tc.Hash) > len(c.Params) {
+				return fmt.Errorf("tie_cursor: %s has %d params", c.Stmt, len(c.Params))
+			}
+		}
+	}
 	if p.Walk != nil {
 		for _, c := range append([]Call{p.Ref}, p.Cands...) {
 			if err := p.Walk.checkParams(len(c.Params)); err != nil {
@@ -323,7 +352,8 @@ func (p DiffPair) checkCalls(stmts map[string]string) error {
 	return nil
 }
 
-// checkDiffParam accepts what renderParam renders without a corpus: scalars, lists and {raw: …}.
+// checkDiffParam accepts what renderParam renders without a corpus: scalars, lists, {raw: …} and {sql: …}, a
+// single read-only SELECT resolved inside the batch's snapshot (no row or NULL: the pair is skipped).
 func checkDiffParam(v any) error {
 	switch x := v.(type) {
 	case nil, string, int, int64, uint64, float64, bool:
@@ -342,21 +372,49 @@ func checkDiffParam(v any) error {
 		if _, ok := x["raw"].(string); ok && len(x) == 1 {
 			return nil
 		}
-		return fmt.Errorf("param %v: want a value, a list or {raw: …} (diff cases have no resolvers)", x)
+		if q, ok := x["sql"].(string); ok && len(x) == 1 {
+			return checkSingleSelect(q)
+		}
+		return fmt.Errorf("param %v: want a value, a list, {raw: …} or {sql: …}", x)
 	}
 	return fmt.Errorf("unsupported param type %T", v)
 }
 
-// paramText is a param's value as text, the way it is sent before the server types it.
-func paramText(v any) string {
+// checkSingleSelect refuses text that is more than one statement or that modifies data. Statements are sent over
+// the simple protocol, where a second statement (a COMMIT, say) would run outside the READ ONLY transaction.
+func checkSingleSelect(sql string) error {
+	if hasStatementSeparator(sql) {
+		return errors.New("more than one statement (a ';' outside literals and comments)")
+	}
+	if kw := dataModifying(sql); kw != "" {
+		return fmt.Errorf("runs %s; diff statements must not modify data", kw)
+	}
+	return nil
+}
+
+// hasStatementSeparator reports a ';' outside literals, quoted identifiers and comments, once one trailing ';' is
+// dropped.
+func hasStatementSeparator(sql string) bool {
+	words, _ := sqlWords(trimStmt(sql))
+	return slices.Contains(words, ";")
+}
+
+// paramText is a param's value as text, the way it is sent before the server types it; res holds the values of
+// {sql: …} params.
+func paramText(v any, res map[string]*string) string {
 	switch x := v.(type) {
 	case nil:
 		return ""
 	case string:
 		return x
 	case map[string]any:
-		raw, _ := x["raw"].(string)
-		return raw
+		if raw, ok := x["raw"].(string); ok {
+			return raw
+		}
+		if key, _, ok := resolverRef(&Corpus{}, x); ok && res[key] != nil {
+			return *res[key]
+		}
+		return ""
 	}
 	lit, _, err := renderParam(&Corpus{}, v, nil, nil)
 	if err != nil {
@@ -533,10 +591,10 @@ func cellTime(v *string) (time.Time, bool) {
 	return parseTime(*v)
 }
 
-// Compare compares a ref result with a cand result under the pair's classes. refParams are the ref call's params
-// as text (pagecursor_tie_rows reads its cursor from them). An invalid pair, or columns that do not line up, is
-// different: nothing is relaxed that the pair does not name.
-func Compare(ref, cand RowSet, p DiffPair, refParams []string) Outcome {
+// Compare compares a ref result with a cand result under the pair's classes. refParams and candParams are the
+// calls' params as text (pagecursor_tie_rows reads both cursors from them). An invalid pair, or columns that do not
+// line up, is different: nothing is relaxed that the pair does not name.
+func Compare(ref, cand RowSet, p DiffPair, refParams, candParams []string) Outcome {
 	diff := func(format string, a ...any) Outcome {
 		return Outcome{Verdict: DiffDifferent, Detail: fmt.Sprintf(format, a...)}
 	}
@@ -566,7 +624,7 @@ func Compare(ref, cand RowSet, p DiffPair, refParams []string) Outcome {
 	r0, r1, c0, c1 := 0, len(rt), 0, len(ct)
 
 	if allowed[ClassPageCursorTieRows] {
-		if k, ms := leadTieRows(ref, cand, rt, ct, cp, *p.TieBoundary, refParams); k > 0 && len(ct) == len(rt) {
+		if k, ms := leadTieRows(cand, rt, ct, cp, p, refParams, candParams); k > 0 && len(ct) == len(rt) {
 			c0, r1 = k, len(rt)-k
 			counts[ClassPageCursorTieRows] = k
 			notes = append(notes, fmt.Sprintf("pagecursor_tie_rows: cand rows 1..%d are at the cursor's millisecond %s and not in ref", k, ms))
@@ -574,11 +632,14 @@ func Compare(ref, cand RowSet, p DiffPair, refParams []string) Outcome {
 	}
 
 	if allowed[ClassSaturatedSuffix] && r1 > r0 {
-		if cut, floor, ok := saturatedCut(ref, cp, p, r0, r1); ok && cut < r1 {
+		if cut, floor, floorT, ok := saturatedCut(ref, cp, p, r0, r1); ok && cut < r1 {
 			n := cut - r0 // ref rows that must match
 			if c1-c0 < n || c1-c0 > r1-r0 {
 				return diff("row count: ref %d, cand %d; saturated_suffix relaxes only the %d ref rows below the floor %s",
 					r1-r0, c1-c0, r1-cut, floor)
+			}
+			if msg := relaxedTail(cand, ct, cp, c0, c0+n, c1, floorT); msg != "" {
+				return diff("saturated_suffix: %s (floor %s)", msg, floor)
 			}
 			changed := 0
 			for i := 0; i < r1-cut; i++ {
@@ -656,14 +717,24 @@ func Compare(ref, cand RowSet, p DiffPair, refParams []string) Outcome {
 	return o
 }
 
-// leadTieRows counts the leading cand rows that ref lacks and whose first key, truncated to the millisecond, is the
-// millisecond of the ref's cursor param.
-func leadTieRows(ref, cand RowSet, rt, ct []string, cp *colPlan, boundary int, refParams []string) (int, string) {
-	if boundary < 1 || boundary > len(refParams) {
+// leadTieRows counts the leading cand rows that ref lacks, whose first key, truncated to the millisecond, is the
+// millisecond of the ref's cursor param, and which sort at or below the cand's own cursor (ts, hash bound).
+func leadTieRows(cand RowSet, rt, ct []string, cp *colPlan, p DiffPair, refParams, candParams []string) (int, string) {
+	boundary, tc := *p.TieBoundary, p.TieCursor
+	if boundary > len(refParams) || max(tc.TS, tc.Hash) > len(candParams) {
 		return 0, ""
 	}
 	b, ok := parseTime(refParams[boundary-1])
 	if !ok {
+		return 0, ""
+	}
+	curTS, ok := parseTime(candParams[tc.TS-1])
+	if !ok {
+		return 0, ""
+	}
+	curHash := strings.ToLower(candParams[tc.Hash-1])
+	hi := slices.Index(cand.Columns, tc.HashColumn)
+	if hi < 0 {
 		return 0, ""
 	}
 	ms := b.Truncate(time.Millisecond)
@@ -677,25 +748,58 @@ func leadTieRows(ref, cand RowSet, rt, ct []string, cp *colPlan, boundary int, r
 		if !ok || !t.Truncate(time.Millisecond).Equal(ms) {
 			break
 		}
+		h := cand.Rows[k][hi]
+		if t.After(curTS) || t.Equal(curTS) && (h == nil || strings.ToLower(*h) > curHash) {
+			break // above the cand's own cursor: no page from that cursor can hold it
+		}
 		k++
 	}
 	return k, ms.UTC().Format("2006-01-02 15:04:05.000Z")
 }
 
+// relaxedTail checks the cand rows [from, to) that stand in for ref rows below the floor: each is below the floor,
+// they keep the descending key order from the cand row before them, and none repeats a matched row or another tail
+// row (rows [c0, from) are the matched prefix). It returns why they do not, or "".
+func relaxedTail(cand RowSet, ct []string, cp *colPlan, c0, from, to int, floor time.Time) string {
+	seen := map[string]bool{}
+	for j := c0; j < from; j++ {
+		seen[ct[j]] = true
+	}
+	var prev time.Time
+	havePrev := false
+	if from > c0 {
+		prev, havePrev = cellTime(cand.Rows[from-1][cp.keyCand[0]])
+	}
+	for j := from; j < to; j++ {
+		row := cand.Rows[j]
+		t, ok := cellTime(row[cp.keyCand[0]])
+		switch {
+		case !ok || !t.Before(floor):
+			return fmt.Sprintf("cand row %d %s stands in for a ref row below the floor but is not below it", j+1, cp.rowLabel(row, false))
+		case havePrev && t.After(prev):
+			return fmt.Sprintf("cand row %d %s is newer than the row before it", j+1, cp.rowLabel(row, false))
+		case seen[ct[j]]:
+			return fmt.Sprintf("cand row %d %s repeats an earlier row", j+1, cp.rowLabel(row, false))
+		}
+		seen[ct[j]], prev, havePrev = true, t, true
+	}
+	return ""
+}
+
 // saturatedCut returns the first ref row of the trailing run below the floor, when ref row 1 is saturated.
-func saturatedCut(ref RowSet, cp *colPlan, p DiffPair, r0, r1 int) (int, string, bool) {
+func saturatedCut(ref RowSet, cp *colPlan, p DiffPair, r0, r1 int) (int, string, time.Time, bool) {
 	fi := slices.Index(ref.Columns, p.Saturated.Flag)
 	li := slices.Index(ref.Columns, p.Saturated.Floor)
 	if len(ref.Rows) == 0 {
-		return 0, "", false
+		return 0, "", time.Time{}, false
 	}
 	first := ref.Rows[0]
 	if first[fi] == nil || *first[fi] != "t" {
-		return 0, "", false
+		return 0, "", time.Time{}, false
 	}
 	floor, ok := cellTime(first[li])
 	if !ok {
-		return 0, "", false
+		return 0, "", time.Time{}, false
 	}
 	cut := r1
 	for cut > r0 {
@@ -705,7 +809,7 @@ func saturatedCut(ref RowSet, cp *colPlan, p DiffPair, r0, r1 int) (int, string,
 		}
 		cut--
 	}
-	return cut, *first[li], true
+	return cut, *first[li], floor, true
 }
 
 // tiePairs checks that the keys are equal position by position and that each run of equal keys holds the same
@@ -820,110 +924,6 @@ func worse(a, b string) string {
 	return a
 }
 
-// DiffReport is the outcome of RunDiff.
-type DiffReport struct {
-	StartedAt  time.Time
-	DurationMs float64
-	Batches    []BatchReport
-}
-
-// BatchReport is one batch: its pairs, or the error that stopped it.
-type BatchReport struct {
-	Name       string
-	DurationMs float64
-	Err        string
-	Pairs      []PairResult
-}
-
-// PairResult is one (pair, cand): the snapshot comparison, the walks, and whether the verdict met the expectation.
-type PairResult struct {
-	Batch, Pair, Ref, Cand string
-	RefRows, CandRows      int
-	Outcome                Outcome
-	Walks                  []WalkResult
-	Verdict                string // the snapshot verdict combined with every walk's
-	Expect                 string
-	OK                     bool
-}
-
-// WalkResult is one cand walk at one page size.
-type WalkResult struct {
-	Limit   int
-	RefRows int
-	Outcome WalkOutcome
-}
-
-// Failed returns the pairs that missed their expectation.
-func (r *DiffReport) Failed() []PairResult {
-	var out []PairResult
-	for _, b := range r.Batches {
-		for _, p := range b.Pairs {
-			if !p.OK {
-				out = append(out, p)
-			}
-		}
-	}
-	return out
-}
-
-// Line is a one-line summary of a pair result.
-func (p PairResult) Line() string {
-	mark := "ok"
-	if !p.OK {
-		mark = "FAIL"
-	}
-	s := fmt.Sprintf("%-4s %s/%s %s vs %s: %s (expect %s), rows %d/%d", mark, p.Batch, p.Pair, p.Ref, p.Cand, p.Verdict, p.Expect, p.RefRows, p.CandRows)
-	if len(p.Outcome.Classes) > 0 {
-		s += " " + strings.Join(p.Outcome.Classes, " ")
-	}
-	for _, w := range p.Walks {
-		if !w.Outcome.Clean() {
-			s += fmt.Sprintf("; walk %d: first wrong %d, missing %d", w.Limit, w.Outcome.FirstWrong, w.Outcome.Missing)
-		}
-	}
-	return s
-}
-
-// Markdown renders the report.
-func (r *DiffReport) Markdown() string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "# planguard diff\n\nStarted %s, %.1f s. %d pairs missed their expectation.\n\n",
-		r.StartedAt.UTC().Format(time.RFC3339), r.DurationMs/1000, len(r.Failed()))
-	esc := func(s string) string { return strings.ReplaceAll(strings.ReplaceAll(s, "|", `\|`), "\n", `\n`) }
-	for _, bt := range r.Batches {
-		fmt.Fprintf(&b, "## %s (one REPEATABLE READ READ ONLY snapshot, %.1f s)\n\n", bt.Name, bt.DurationMs/1000)
-		if bt.Err != "" {
-			fmt.Fprintf(&b, "**Error:** %s\n\n", esc(bt.Err))
-		}
-		if len(bt.Pairs) == 0 {
-			continue
-		}
-		b.WriteString("| pair | ref | cand | rows ref/cand | verdict | expect | classes | detail |\n|---|---|---|---|---|---|---|---|\n")
-		var walks bool
-		for _, p := range bt.Pairs {
-			v := p.Verdict
-			if !p.OK {
-				v = "**" + v + " (FAIL)**"
-			}
-			fmt.Fprintf(&b, "| %s | %s | %s | %d/%d | %s | %s | %s | %s |\n", esc(p.Pair), p.Ref, p.Cand, p.RefRows, p.CandRows,
-				v, p.Expect, strings.Join(p.Outcome.Classes, " "), esc(p.Outcome.Detail))
-			walks = walks || len(p.Walks) > 0
-		}
-		if walks {
-			b.WriteString("\n| pair | cand | limit | rows ref/cand | first wrong | missing | duplicates | out of order | stuck |\n|---|---|---|---|---|---|---|---|---|\n")
-			for _, p := range bt.Pairs {
-				for _, w := range p.Walks {
-					o := w.Outcome
-					fmt.Fprintf(&b, "| %s | %s | %d | %d/%d | %d | %d | %d | %d | %s |\n", esc(p.Pair), p.Cand, w.Limit, w.RefRows, o.Rows,
-						o.FirstWrong, o.Missing, o.Duplicates, o.OutOfOrder, o.Stuck)
-				}
-			}
-		}
-		b.WriteString("\n")
-	}
-	return b.String()
-}
-
 const (
 	diffStmtPrefix = "planguard_d_"
 	diffTimeoutS   = 600
@@ -1013,8 +1013,8 @@ func batchTexts(b DiffBatch, oldSQL, newSQL map[string]string, fsys fs.FS) (map[
 		if Normalize(text) == "" {
 			return nil, fmt.Errorf("%s: empty statement", alias)
 		}
-		if kw := dataModifying(text); kw != "" {
-			return nil, fmt.Errorf("%s runs %s; diff statements must not modify data", alias, kw)
+		if err := checkSingleSelect(text); err != nil {
+			return nil, fmt.Errorf("%s: %w", alias, err)
 		}
 		out[alias] = text
 	}
@@ -1027,6 +1027,7 @@ type batchRun struct {
 	s   Session
 	b   DiffBatch
 	dir string
+	res map[string]*string // {sql: …} param values, resolved in the batch's snapshot
 }
 
 func runBatch(ctx context.Context, s Session, b DiffBatch, texts map[string]string, outDir string, walkLimits []int) (BatchReport, error) {
@@ -1054,6 +1055,9 @@ func runBatch(ctx context.Context, s Session, b DiffBatch, texts map[string]stri
 			if _, err := s.Exec(ctx, l); err != nil {
 				return fmt.Errorf("%s: %s", firstLine(l), errText(err))
 			}
+		}
+		if err := r.resolve(); err != nil {
+			return err
 		}
 		for _, p := range b.Pairs {
 			prs, err := r.pair(p, walkLimits)
@@ -1124,16 +1128,77 @@ func (r *batchRun) exec(alias string, lits []string) (RowSet, error) {
 	return rs, nil
 }
 
-func renderLits(params []any) ([]string, error) {
+// resolve runs every {sql: …} param of the batch once, inside its snapshot. A resolver that fails stops the batch.
+func (r *batchRun) resolve() error {
+	r.res = map[string]*string{}
+	var visit func(v any) error
+	visit = func(v any) error {
+		m, ok := v.(map[string]any)
+		if !ok {
+			return nil
+		}
+		key, q, ok := resolverRef(&Corpus{}, m)
+		if !ok || q == "" {
+			return nil
+		}
+		if _, done := r.res[key]; done {
+			return nil
+		}
+		res, err := r.s.Exec(r.ctx, resolverSelect(q))
+		if err != nil {
+			return fmt.Errorf("resolver %s: %s", firstLine(q), errText(err))
+		}
+		rows := lastRows(res)
+		if len(rows) == 1 && len(rows[0]) == 1 && rows[0][0] != nil {
+			v := string(rows[0][0])
+			r.res[key] = &v
+		} else {
+			r.res[key] = nil
+		}
+		return nil
+	}
+	for _, p := range r.b.Pairs {
+		params := slices.Clone(p.Ref.Params)
+		for _, c := range p.Cands {
+			params = append(params, c.Params...)
+		}
+		if p.Walk != nil {
+			params = append(params, p.Walk.First...)
+		}
+		for _, v := range params {
+			if err := visit(v); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// renderLits renders params as literals; skip names a {sql: …} param that resolved to no value.
+func (r *batchRun) renderLits(params []any) ([]string, string, error) {
 	lits := make([]string, len(params))
 	for i, v := range params {
-		lit, _, err := renderParam(&Corpus{}, v, nil, nil)
-		if err != nil {
-			return nil, err
+		lit, skip, err := renderParam(&Corpus{}, v, r.res, nil)
+		if skip != "" || err != nil {
+			return nil, skip, err
 		}
 		lits[i] = lit
 	}
-	return lits, nil
+	return lits, "", nil
+}
+
+// skipReason is why a pair cannot run on this snapshot: one of its {sql: …} params has no value.
+func (r *batchRun) skipReason(p DiffPair) (string, error) {
+	calls := append([]Call{p.Ref}, p.Cands...)
+	if p.Walk != nil {
+		calls = append(calls, Call{Stmt: "walk.first", Params: p.Walk.First})
+	}
+	for _, c := range calls {
+		if _, skip, err := r.renderLits(c.Params); skip != "" || err != nil {
+			return skip, err
+		}
+	}
+	return "", nil
 }
 
 // roundTrip writes rs to its case file and reads it back, so every comparison reads what was written.
@@ -1146,7 +1211,7 @@ func (r *batchRun) roundTrip(name string, rs RowSet) (RowSet, error) {
 }
 
 func (r *batchRun) call(p DiffPair, role string, c Call) (RowSet, error) {
-	lits, err := renderLits(c.Params)
+	lits, _, err := r.renderLits(c.Params)
 	if err != nil {
 		return RowSet{}, err
 	}
@@ -1159,11 +1224,11 @@ func (r *batchRun) call(p DiffPair, role string, c Call) (RowSet, error) {
 
 // fetcher pages through a call: the walk's cursor params from First or the cursor, its limit param limit+FetchExtra.
 func (r *batchRun) fetcher(w *WalkSpec, c Call) (PageFetcher, error) {
-	base, err := renderLits(c.Params)
+	base, _, err := r.renderLits(c.Params)
 	if err != nil {
 		return nil, err
 	}
-	first, err := renderLits(w.First)
+	first, _, err := r.renderLits(w.First)
 	if err != nil {
 		return nil, err
 	}
@@ -1183,21 +1248,37 @@ func (r *batchRun) fetcher(w *WalkSpec, c Call) (PageFetcher, error) {
 
 // pair runs one pair: the ref, each cand and their comparison, then the walks.
 func (r *batchRun) pair(p DiffPair, walkLimits []int) ([]PairResult, error) {
+	skip, err := r.skipReason(p)
+	if err != nil {
+		return nil, err
+	}
+	if skip != "" {
+		var out []PairResult
+		for _, c := range p.Cands {
+			out = append(out, PairResult{Batch: r.b.Name, Pair: p.ID, Ref: p.Ref.Stmt, Cand: c.Stmt, Verdict: DiffSkip,
+				Skip: skip, Expect: expectOf(p, c.Stmt)})
+		}
+		return out, nil
+	}
 	ref, err := r.call(p, "ref", p.Ref)
 	if err != nil {
 		return nil, err
 	}
-	refParams := make([]string, len(p.Ref.Params))
-	for i, v := range p.Ref.Params {
-		refParams[i] = paramText(v)
+	texts := func(params []any) []string {
+		out := make([]string, len(params))
+		for i, v := range params {
+			out[i] = paramText(v, r.res)
+		}
+		return out
 	}
+	refParams := texts(p.Ref.Params)
 	var out []PairResult
 	for _, c := range p.Cands {
 		cand, err := r.call(p, "cand", c)
 		if err != nil {
 			return out, err
 		}
-		o := Compare(ref, cand, p, refParams)
+		o := Compare(ref, cand, p, refParams, texts(c.Params))
 		out = append(out, PairResult{Batch: r.b.Name, Pair: p.ID, Ref: p.Ref.Stmt, Cand: c.Stmt,
 			RefRows: len(ref.Rows), CandRows: len(cand.Rows), Outcome: o, Verdict: o.Verdict})
 	}
@@ -1212,13 +1293,23 @@ func (r *batchRun) pair(p DiffPair, walkLimits []int) ([]PairResult, error) {
 		}
 	}
 	for i := range out {
-		out[i].Expect = p.Expect[out[i].Cand]
-		if out[i].Expect == "" {
-			out[i].Expect = defaultExpect
-		}
+		out[i].Expect = expectOf(p, out[i].Cand)
 		out[i].OK = expectMet(out[i].Expect, out[i].Verdict)
+		for _, c := range p.Require {
+			if !slices.ContainsFunc(out[i].Outcome.Classes, func(x string) bool { return strings.HasPrefix(x, c+"(") }) {
+				out[i].OK = false
+				out[i].Missing = append(out[i].Missing, c)
+			}
+		}
 	}
 	return out, nil
+}
+
+func expectOf(p DiffPair, cand string) string {
+	if e := p.Expect[cand]; e != "" {
+		return e
+	}
+	return defaultExpect
 }
 
 // walks walks the ref (or fetches the oracle) and every cand at one page size.
@@ -1257,7 +1348,10 @@ func (r *batchRun) walks(p DiffPair, limit int, out []PairResult) error {
 		if cand, err = r.roundTrip(tag+".cand."+c.Stmt, cand); err != nil {
 			return err
 		}
-		wo := CompareWalk(ref, cand, cols)
+		wo, err := CompareWalk(ref, cand, cols)
+		if err != nil {
+			return fmt.Errorf("cand %s: %w", c.Stmt, err)
+		}
 		wo.Stuck = stuck
 		out[i].Walks = append(out[i].Walks, WalkResult{Limit: limit, RefRows: len(ref.Rows), Outcome: wo})
 		if !wo.Clean() {

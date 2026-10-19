@@ -51,6 +51,13 @@ const diffCases = `batches:
           web_limit: 50
           oracle: true
         expect: {page: identical}
+      - id: resolved
+        ref: {stmt: page, params: [{sql: "SELECT max(k) FROM t"}, 2147483647, 5]}
+        cands: [{stmt: oracle, params: [{sql: "SELECT max(k) FROM t"}, 2147483647, 5]}]
+        expect: {oracle: identical}
+      - id: novalue
+        ref: {stmt: page, params: [{sql: "SELECT k FROM t WHERE false"}, 2147483647, 5]}
+        cands: [{stmt: oracle, params: [30, 2147483647, 5]}]
 `
 
 const writeCases = `batches:
@@ -169,6 +176,13 @@ CREATE FUNCTION `+schema+`.write_row() RETURNS int LANGUAGE sql AS
 	}
 	if len(rep.Failed()) != 0 {
 		t.Errorf("failed pairs: %+v", rep.Failed())
+	}
+	// {sql: …} params are read in the snapshot; one that finds no value skips its pair.
+	if r := got["resolved|oracle"]; r.Verdict != "identical" || r.RefRows != 5 || !r.OK {
+		t.Errorf("resolved pair: %+v", r)
+	}
+	if r := got["novalue|oracle"]; r.Verdict != planguard.DiffSkip || r.OK || len(rep.Skipped()) != 1 {
+		t.Errorf("pair whose resolver finds nothing: %+v (skipped %d), want one skip", r, len(rep.Skipped()))
 	}
 
 	// One case file per (pair, role, alias), read back for the comparison.
@@ -320,7 +334,7 @@ ANALYZE packet_sites;`); err != nil {
 		t.Fatal(err)
 	}
 	defer pc.Close(context.Background())
-	rep, err := planguard.RunDiff(ctx, planguard.NewSession(pc), spec, nil, nil, pgdata.Files, t.TempDir(), []int{1, 7})
+	rep, err := planguard.RunDiff(ctx, planguard.NewSession(pc), spec, nil, nil, pgdata.Files, t.TempDir(), []int{1, 2, 3, 7})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,21 +342,18 @@ ANALYZE packet_sites;`); err != nil {
 		t.Errorf("failed pairs: %+v", f)
 	}
 	for _, p := range rep.Batches[0].Pairs {
-		if len(p.Walks) != 2 {
-			t.Fatalf("%s: %d walks, want 2", p.Cand, len(p.Walks))
+		if len(p.Walks) != 4 {
+			t.Fatalf("%s: %d walks, want 4", p.Cand, len(p.Walks))
 		}
-		w1, w7 := p.Walks[0].Outcome, p.Walks[1].Outcome
-		switch p.Cand {
-		case "rm":
-			if w1.FirstWrong != 3 || w1.Missing == 0 {
-				t.Errorf("rm at limit 1: %+v, want the first wrong row at 3 and rows missing", w1)
-			}
-			if !w7.Clean() || w7.Rows != 40 {
-				t.Errorf("rm at limit 7: %+v, want clean over 40 rows", w7)
-			}
-		case "end":
-			if !w1.Clean() || !w7.Clean() || w1.Rows != 40 || w7.Rows != 40 {
-				t.Errorf("end: %+v / %+v, want clean over 40 rows", w1, w7)
+		for _, w := range p.Walks {
+			o := w.Outcome
+			switch {
+			case p.Cand == "rm" && w.Limit == 1:
+				if o.FirstWrong != 3 || o.Missing == 0 {
+					t.Errorf("rm at limit 1: %+v, want the first wrong row at 3 and rows missing", o)
+				}
+			case !o.Clean() || o.Rows != 40:
+				t.Errorf("%s at limit %d: %+v, want clean over 40 rows", p.Cand, w.Limit, o)
 			}
 		}
 	}

@@ -48,7 +48,7 @@ func TestDiffComparesAllColumnsByDefault(t *testing.T) {
 	// A value changed in a column the pair names nowhere.
 	cand := tieRef()
 	cand.Rows[1][2] = s("B")
-	o := planguard.Compare(tieRef(), cand, pair(), nil)
+	o := planguard.Compare(tieRef(), cand, pair(), nil, nil)
 	if o.Verdict != "different" {
 		t.Fatalf("value change in an unnamed column: %+v, want different", o)
 	}
@@ -61,7 +61,7 @@ func TestDiffComparesAllColumnsByDefault(t *testing.T) {
 	nullCand.Rows[0][2] = nil
 	emptyRef := tieRef()
 	emptyRef.Rows[0][2] = s("")
-	if o := planguard.Compare(emptyRef, nullCand, pair(), nil); o.Verdict != "different" {
+	if o := planguard.Compare(emptyRef, nullCand, pair(), nil, nil); o.Verdict != "different" {
 		t.Errorf("NULL vs empty text: %+v, want different", o)
 	}
 
@@ -71,7 +71,7 @@ func TestDiffComparesAllColumnsByDefault(t *testing.T) {
 	if err := p.Validate(); err == nil || !strings.Contains(err.Error(), "latest_observer_tie") {
 		t.Errorf("omit without latest_observer_tie: Validate() = %v, want an error naming the class", err)
 	}
-	if o := planguard.Compare(tieRef(), cand, p, nil); o.Verdict != "different" || !strings.Contains(o.Detail, "invalid pair") {
+	if o := planguard.Compare(tieRef(), cand, p, nil, nil); o.Verdict != "different" || !strings.Contains(o.Detail, "invalid pair") {
 		t.Errorf("Compare on an invalid pair: %+v, want different (invalid pair)", o)
 	}
 
@@ -86,7 +86,7 @@ func TestDiffComparesAllColumnsByDefault(t *testing.T) {
 	if err := p.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	o = planguard.Compare(tieRef(), cand, p, nil)
+	o = planguard.Compare(tieRef(), cand, p, nil, nil)
 	if o.Verdict != "allowed" || !reflect.DeepEqual(o.Classes, []string{"latest_observer_tie(1)"}) {
 		t.Fatalf("omit + latest_observer_tie: %+v, want allowed [latest_observer_tie(1)]", o)
 	}
@@ -99,21 +99,21 @@ func TestDiffComparesAllColumnsByDefault(t *testing.T) {
 	// The omitted columns are the only relaxed ones: another column still counts.
 	cand2 := tieRef()
 	cand2.Rows[1][0] = s("9")
-	if o := planguard.Compare(tieRef(), cand2, p, nil); o.Verdict != "different" {
+	if o := planguard.Compare(tieRef(), cand2, p, nil, nil); o.Verdict != "different" {
 		t.Errorf("id changed under omit [latest_observer_name]: %+v, want different", o)
 	}
 
 	// A ref column the cand lacks is a difference; an extra cand column is not.
 	short := rows([]string{"id", "k"}, []string{"1", "30"}, []string{"2", "20"}, []string{"3", "20"})
-	if o := planguard.Compare(tieRef(), short, pair(), nil); o.Verdict != "different" || !strings.Contains(o.Detail, "latest_observer_name") {
+	if o := planguard.Compare(tieRef(), short, pair(), nil, nil); o.Verdict != "different" || !strings.Contains(o.Detail, "latest_observer_name") {
 		t.Errorf("cand lacks a column: %+v, want different naming it", o)
 	}
-	if o := planguard.Compare(short, tieRef(), pair(), nil); o.Verdict != "identical" {
+	if o := planguard.Compare(short, tieRef(), pair(), nil, nil); o.Verdict != "identical" {
 		t.Errorf("cand adds a column: %+v, want identical", o)
 	}
 
 	// Identical sets are identical.
-	if o := planguard.Compare(tieRef(), tieRef(), pair(), nil); o.Verdict != "identical" || len(o.Classes) != 0 {
+	if o := planguard.Compare(tieRef(), tieRef(), pair(), nil, nil); o.Verdict != "identical" || len(o.Classes) != 0 {
 		t.Errorf("same rows: %+v, want identical", o)
 	}
 }
@@ -124,10 +124,10 @@ func TestDiffTieOrder(t *testing.T) {
 		[]string{"3", "20", "c"},
 		[]string{"2", "20", "b"},
 	)
-	if o := planguard.Compare(tieRef(), perm, pair(), nil); o.Verdict != "different" {
+	if o := planguard.Compare(tieRef(), perm, pair(), nil, nil); o.Verdict != "different" {
 		t.Errorf("tie permutation without tie_order: %+v, want different", o)
 	}
-	o := planguard.Compare(tieRef(), perm, pair("tie_order"), nil)
+	o := planguard.Compare(tieRef(), perm, pair("tie_order"), nil, nil)
 	if o.Verdict != "allowed" || !reflect.DeepEqual(o.Classes, []string{"tie_order(2)"}) {
 		t.Errorf("tie permutation with tie_order: %+v, want allowed [tie_order(2)]", o)
 	}
@@ -137,7 +137,7 @@ func TestDiffTieOrder(t *testing.T) {
 		[]string{"1", "30", "a"},
 		[]string{"3", "20", "c"},
 	)
-	if o := planguard.Compare(tieRef(), cross, pair("tie_order"), nil); o.Verdict != "different" {
+	if o := planguard.Compare(tieRef(), cross, pair("tie_order"), nil, nil); o.Verdict != "different" {
 		t.Errorf("rows moved across keys: %+v, want different", o)
 	}
 	// A tie run whose rows are swapped for another row is not a permutation.
@@ -146,7 +146,7 @@ func TestDiffTieOrder(t *testing.T) {
 		[]string{"3", "20", "c"},
 		[]string{"4", "20", "d"},
 	)
-	if o := planguard.Compare(tieRef(), swapped, pair("tie_order"), nil); o.Verdict != "different" {
+	if o := planguard.Compare(tieRef(), swapped, pair("tie_order"), nil, nil); o.Verdict != "different" {
 		t.Errorf("tie run with another row: %+v, want different", o)
 	}
 }
@@ -159,7 +159,7 @@ func TestDiffOnlySaturatedSuffixRelaxesCount(t *testing.T) {
 		[]string{"2", "20", "b"},
 		[]string{"2", "20", "b"},
 	)
-	if o := planguard.Compare(tieRef(), permDup, pair("tie_order"), nil); o.Verdict != "different" {
+	if o := planguard.Compare(tieRef(), permDup, pair("tie_order"), nil, nil); o.Verdict != "different" {
 		t.Errorf("permutation + duplicate row: %+v, want different", o)
 	}
 	// A duplicated trailing row only.
@@ -169,7 +169,7 @@ func TestDiffOnlySaturatedSuffixRelaxesCount(t *testing.T) {
 		[]string{"3", "20", "c"},
 		[]string{"3", "20", "c"},
 	)
-	o := planguard.Compare(tieRef(), dupOnly, pair("tie_order"), nil)
+	o := planguard.Compare(tieRef(), dupOnly, pair("tie_order"), nil, nil)
 	if o.Verdict != "different" || !strings.Contains(o.Detail, "row count") {
 		t.Errorf("duplicate row: %+v, want different (row count)", o)
 	}
@@ -190,21 +190,56 @@ func TestDiffOnlySaturatedSuffixRelaxesCount(t *testing.T) {
 		t.Fatal(err)
 	}
 	missingBelow := rows(candCols, []string{"\\xaa", "2026-10-18 15:40:39.570763+00"}, []string{"\\xbb", "2026-10-18 15:40:39.5+00"})
-	o = planguard.Compare(ref, missingBelow, sat, nil)
+	o = planguard.Compare(ref, missingBelow, sat, nil, nil)
 	if o.Verdict != "allowed" || !reflect.DeepEqual(o.Classes, []string{"saturated_suffix(1)"}) {
 		t.Errorf("row below the floor missing: %+v, want allowed [saturated_suffix(1)]", o)
 	}
 	differsBelow := rows(candCols, []string{"\\xaa", "2026-10-18 15:40:39.570763+00"}, []string{"\\xbb", "2026-10-18 15:40:39.5+00"}, []string{"\\xdd", "2026-10-18 15:40:37+00"})
-	if o := planguard.Compare(ref, differsBelow, sat, nil); o.Verdict != "allowed" {
+	if o := planguard.Compare(ref, differsBelow, sat, nil, nil); o.Verdict != "allowed" {
 		t.Errorf("row below the floor differs: %+v, want allowed", o)
 	}
 	missingAbove := rows(candCols, []string{"\\xaa", "2026-10-18 15:40:39.570763+00"}, []string{"\\xcc", "2026-10-18 15:40:38.1+00"})
-	if o := planguard.Compare(ref, missingAbove, sat, nil); o.Verdict != "different" {
+	if o := planguard.Compare(ref, missingAbove, sat, nil, nil); o.Verdict != "different" {
 		t.Errorf("row above the floor missing: %+v, want different", o)
+	}
+	// The cand rows in place of the relaxed ref rows: below the floor, in order, and new.
+	dupTail := rows(candCols, []string{"\\xaa", "2026-10-18 15:40:39.570763+00"}, []string{"\\xbb", "2026-10-18 15:40:39.5+00"}, []string{"\\xbb", "2026-10-18 15:40:39.5+00"})
+	if o := planguard.Compare(ref, dupTail, sat, nil, nil); o.Verdict != "different" {
+		t.Errorf("relaxed tail repeats a row: %+v, want different", o)
+	}
+	newerTail := rows(candCols, []string{"\\xaa", "2026-10-18 15:40:39.570763+00"}, []string{"\\xbb", "2026-10-18 15:40:39.5+00"}, []string{"\\xee", "2026-10-18 15:40:40+00"})
+	if o := planguard.Compare(ref, newerTail, sat, nil, nil); o.Verdict != "different" {
+		t.Errorf("relaxed tail row newer than the floor and out of order: %+v, want different", o)
+	}
+	ref4 := rows(cols,
+		[]string{"\\xaa", "2026-10-18 15:40:39.570763+00", "t", "2026-10-18 15:40:39.5+00"},
+		[]string{"\\xbb", "2026-10-18 15:40:39.5+00", "t", "2026-10-18 15:40:39.5+00"},
+		[]string{"\\xcc", "2026-10-18 15:40:38.1+00", "t", "2026-10-18 15:40:39.5+00"},
+		[]string{"\\xdd", "2026-10-18 15:40:37+00", "t", "2026-10-18 15:40:39.5+00"},
+	)
+	unordered := rows(candCols, []string{"\\xaa", "2026-10-18 15:40:39.570763+00"}, []string{"\\xbb", "2026-10-18 15:40:39.5+00"},
+		[]string{"\\xff", "2026-10-18 15:40:36+00"}, []string{"\\xee", "2026-10-18 15:40:38+00"})
+	if o := planguard.Compare(ref4, unordered, sat, nil, nil); o.Verdict != "different" {
+		t.Errorf("relaxed tail rows below the floor out of order: %+v, want different", o)
+	}
+	dupBelow := rows(candCols, []string{"\\xaa", "2026-10-18 15:40:39.570763+00"}, []string{"\\xbb", "2026-10-18 15:40:39.5+00"},
+		[]string{"\\xee", "2026-10-18 15:40:38+00"}, []string{"\\xee", "2026-10-18 15:40:38+00"})
+	if o := planguard.Compare(ref4, dupBelow, sat, nil, nil); o.Verdict != "different" {
+		t.Errorf("relaxed tail repeats a row below the floor: %+v, want different", o)
+	}
+	atFloor := rows(candCols, []string{"\\xaa", "2026-10-18 15:40:39.570763+00"}, []string{"\\xbb", "2026-10-18 15:40:39.5+00"},
+		[]string{"\\xab", "2026-10-18 15:40:39.5+00"}, []string{"\\xff", "2026-10-18 15:40:36+00"})
+	if o := planguard.Compare(ref4, atFloor, sat, nil, nil); o.Verdict != "different" {
+		t.Errorf("relaxed tail row at the floor, in order and new: %+v, want different", o)
+	}
+	ordered := rows(candCols, []string{"\\xaa", "2026-10-18 15:40:39.570763+00"}, []string{"\\xbb", "2026-10-18 15:40:39.5+00"},
+		[]string{"\\xee", "2026-10-18 15:40:38+00"}, []string{"\\xff", "2026-10-18 15:40:36+00"})
+	if o := planguard.Compare(ref4, ordered, sat, nil, nil); o.Verdict != "allowed" {
+		t.Errorf("relaxed tail rows below the floor in order: %+v, want allowed", o)
 	}
 	extra := rows(candCols, []string{"\\xaa", "2026-10-18 15:40:39.570763+00"}, []string{"\\xbb", "2026-10-18 15:40:39.5+00"},
 		[]string{"\\xcc", "2026-10-18 15:40:38.1+00"}, []string{"\\xdd", "2026-10-18 15:40:37+00"})
-	if o := planguard.Compare(ref, extra, sat, nil); o.Verdict != "different" {
+	if o := planguard.Compare(ref, extra, sat, nil, nil); o.Verdict != "different" {
 		t.Errorf("cand adds a row: %+v, want different (only ref rows below the floor are relaxed)", o)
 	}
 	unsat := rows(cols,
@@ -212,12 +247,12 @@ func TestDiffOnlySaturatedSuffixRelaxesCount(t *testing.T) {
 		[]string{"\\xbb", "2026-10-18 15:40:39.5+00", "f", "@@NULL"},
 		[]string{"\\xcc", "2026-10-18 15:40:38.1+00", "f", "@@NULL"},
 	)
-	if o := planguard.Compare(unsat, missingBelow, sat, nil); o.Verdict != "different" {
+	if o := planguard.Compare(unsat, missingBelow, sat, nil, nil); o.Verdict != "different" {
 		t.Errorf("unsaturated ref, cand missing a row: %+v, want different", o)
 	}
 	// Without the class the same cand is a difference.
 	plain := planguard.DiffPair{ID: "sat", Key: []string{"site_heard_at"}}
-	if o := planguard.Compare(ref, missingBelow, plain, nil); o.Verdict != "different" {
+	if o := planguard.Compare(ref, missingBelow, plain, nil, nil); o.Verdict != "different" {
 		t.Errorf("saturated ref without the class: %+v, want different", o)
 	}
 	// saturated without the class, or the class without saturated, is a spec error.
@@ -241,17 +276,19 @@ func TestPageCursorTieRows(t *testing.T) {
 		[]string{"\\x03", "2026-10-18 15:40:39.3+00"},
 	)
 	tb := 2
-	p := planguard.DiffPair{ID: "pc", Key: []string{"site_heard_at"}, Allowed: []string{"pagecursor_tie_rows"}, TieBoundary: &tb}
+	p := planguard.DiffPair{ID: "pc", Key: []string{"site_heard_at"}, Allowed: []string{"pagecursor_tie_rows"}, TieBoundary: &tb,
+		TieCursor: &planguard.TieCursor{TS: 2, Hash: 3, HashColumn: "packet_hash"}}
 	if err := p.Validate(); err != nil {
 		t.Fatal(err)
 	}
 	params := []string{"{AMS}", "2026-10-18 15:40:39.570+00", "16", "4"}
+	candParams := []string{"{AMS}", "2026-10-18 15:40:39.570763+00", "\\x0a", "4"}
 	cand := rows(cols,
 		[]string{"\\x09", "2026-10-18 15:40:39.570763+00"},
 		[]string{"\\x01", "2026-10-18 15:40:39.5+00"},
 		[]string{"\\x02", "2026-10-18 15:40:39.4+00"},
 	)
-	o := planguard.Compare(ref, cand, p, params)
+	o := planguard.Compare(ref, cand, p, params, candParams)
 	if o.Verdict != "allowed" || !reflect.DeepEqual(o.Classes, []string{"pagecursor_tie_rows(1)"}) {
 		t.Errorf("a lead row at the cursor's millisecond: %+v, want allowed [pagecursor_tie_rows(1)]", o)
 	}
@@ -260,10 +297,10 @@ func TestPageCursorTieRows(t *testing.T) {
 		[]string{"\\x01", "2026-10-18 15:40:39.5+00"},
 		[]string{"\\x02", "2026-10-18 15:40:39.4+00"},
 	)
-	if o := planguard.Compare(ref, early, p, params); o.Verdict != "different" {
+	if o := planguard.Compare(ref, early, p, params, candParams); o.Verdict != "different" {
 		t.Errorf("a lead row 1 ms earlier: %+v, want different", o)
 	}
-	if o := planguard.Compare(ref, cand, planguard.DiffPair{ID: "pc", Key: []string{"site_heard_at"}}, params); o.Verdict != "different" {
+	if o := planguard.Compare(ref, cand, planguard.DiffPair{ID: "pc", Key: []string{"site_heard_at"}}, params, candParams); o.Verdict != "different" {
 		t.Errorf("a lead row without the class: %+v, want different", o)
 	}
 	// The counts must be equal: a lead row plus all of ref is a difference.
@@ -273,7 +310,7 @@ func TestPageCursorTieRows(t *testing.T) {
 		[]string{"\\x02", "2026-10-18 15:40:39.4+00"},
 		[]string{"\\x03", "2026-10-18 15:40:39.3+00"},
 	)
-	if o := planguard.Compare(ref, longer, p, params); o.Verdict != "different" {
+	if o := planguard.Compare(ref, longer, p, params, candParams); o.Verdict != "different" {
 		t.Errorf("lead row + every ref row: %+v, want different", o)
 	}
 	// cand[k:] must equal ref[:n-k].
@@ -282,7 +319,7 @@ func TestPageCursorTieRows(t *testing.T) {
 		[]string{"\\x01", "2026-10-18 15:40:39.5+00"},
 		[]string{"\\x03", "2026-10-18 15:40:39.3+00"},
 	)
-	if o := planguard.Compare(ref, shifted, p, params); o.Verdict != "different" {
+	if o := planguard.Compare(ref, shifted, p, params, candParams); o.Verdict != "different" {
 		t.Errorf("lead row, then a row missing: %+v, want different", o)
 	}
 	// Only rows ref lacks are lead rows: a ref row in the cursor's millisecond is compared as usual.
@@ -290,13 +327,38 @@ func TestPageCursorTieRows(t *testing.T) {
 		[]string{"\\x09", "2026-10-18 15:40:39.570763+00"},
 		[]string{"\\x01", "2026-10-18 15:40:39.5+00"},
 	)
-	if o := planguard.Compare(atMs, atMs, p, params); o.Verdict != "identical" {
+	if o := planguard.Compare(atMs, atMs, p, params, candParams); o.Verdict != "identical" {
 		t.Errorf("ref and cand both hold the row in the cursor's millisecond: %+v, want identical", o)
+	}
+	// Lead rows must sort at or below the cand's own cursor: a row above it cannot come from that cursor.
+	above := rows(cols,
+		[]string{"\\x09", "2026-10-18 15:40:39.570999+00"},
+		[]string{"\\x01", "2026-10-18 15:40:39.5+00"},
+		[]string{"\\x02", "2026-10-18 15:40:39.4+00"},
+	)
+	if o := planguard.Compare(ref, above, p, params, candParams); o.Verdict != "different" {
+		t.Errorf("a lead row at .570999 above the cand cursor .570763: %+v, want different", o)
+	}
+	sameTS := rows(cols,
+		[]string{"\\x0b", "2026-10-18 15:40:39.570763+00"},
+		[]string{"\\x01", "2026-10-18 15:40:39.5+00"},
+		[]string{"\\x02", "2026-10-18 15:40:39.4+00"},
+	)
+	if o := planguard.Compare(ref, sameTS, p, params, candParams); o.Verdict != "different" {
+		t.Errorf("a lead row at the cursor's ts with a hash above its bound: %+v, want different", o)
+	}
+	if o := planguard.Compare(ref, cand, p, params, nil); o.Verdict != "different" {
+		t.Errorf("no cand params: %+v, want different (the class needs the cand cursor)", o)
 	}
 	bad := p
 	bad.TieBoundary = nil
 	if err := bad.Validate(); err == nil {
 		t.Error("pagecursor_tie_rows without tie_boundary: Validate() = nil")
+	}
+	bad = p
+	bad.TieCursor = nil
+	if err := bad.Validate(); err == nil {
+		t.Error("pagecursor_tie_rows without tie_cursor: Validate() = nil")
 	}
 }
 
@@ -357,7 +419,7 @@ func TestDiffFailsOnParseError(t *testing.T) {
 	if !reflect.DeepEqual(ref2, ref) {
 		t.Errorf("marker text did not round-trip: %+v", ref2)
 	}
-	o := planguard.Compare(ref2, cand2, planguard.DiffPair{ID: "marker", Key: []string{"id"}}, nil)
+	o := planguard.Compare(ref2, cand2, planguard.DiffPair{ID: "marker", Key: []string{"id"}}, nil, nil)
 	if o.Verdict != "different" || !strings.Contains(o.Detail, "row 2") {
 		t.Errorf("marker text: %+v, want different at row 2", o)
 	}
@@ -442,17 +504,21 @@ func TestDiffSpecValidation(t *testing.T) {
 		t.Fatalf("spec %+v", spec)
 	}
 	for name, edit := range map[string][2]string{
-		"unknown class":      {"allowed: [tie_order]", "allowed: [close_enough]"},
-		"unknown alias":      {"cands: [{stmt: cand", "cands: [{stmt: nope"},
-		"bad expect":         {"expect: {cand: allowed}", "expect: {cand: maybe}"},
-		"expect non-cand":    {"expect: {cand: allowed}", "expect: {ref: same}"},
-		"bad statement kind": {`cand: "new:ListT"`, `cand: "head:ListT"`},
-		"bad alias name":     {"      cand: \"new:ListT\"", "      Cand-1: \"new:ListT\""},
-		"bad pair id":        {"id: p1", "id: ../p1"},
-		"bad search_path":    {`search_path: "t_x, public"`, `search_path: "t_x; DROP"`},
-		"unknown field":      {"key: [k]", "key: [k]\n        colums: [a]"},
-		"tie_order no key":   {"key: [k]", "key: []"},
-		"file escapes":       {`ref: "file:ref.sql"`, `ref: "file:../ref.sql"`},
+		"unknown class":       {"allowed: [tie_order]", "allowed: [close_enough]"},
+		"unknown alias":       {"cands: [{stmt: cand", "cands: [{stmt: nope"},
+		"bad expect":          {"expect: {cand: allowed}", "expect: {cand: maybe}"},
+		"expect non-cand":     {"expect: {cand: allowed}", "expect: {ref: same}"},
+		"bad statement kind":  {`cand: "new:ListT"`, `cand: "head:ListT"`},
+		"bad alias name":      {"      cand: \"new:ListT\"", "      Cand-1: \"new:ListT\""},
+		"bad pair id":         {"id: p1", "id: ../p1"},
+		"bad search_path":     {`search_path: "t_x, public"`, `search_path: "t_x; DROP"`},
+		"unknown field":       {"key: [k]", "key: [k]\n        colums: [a]"},
+		"tie_order no key":    {"key: [k]", "key: []"},
+		"file escapes":        {`ref: "file:ref.sql"`, `ref: "file:../ref.sql"`},
+		"require not allowed": {"key: [k]", "key: [k]\n        require: [saturated_suffix]"},
+		"sql param two stmts": {"ref: {stmt: ref, params: [1]}", "ref: {stmt: ref, params: [{sql: \"SELECT 1; COMMIT\"}]}"},
+		"sql param writes":    {"ref: {stmt: ref, params: [1]}", "ref: {stmt: ref, params: [{sql: \"DELETE FROM t RETURNING 1\"}]}"},
+		"sql param and more":  {"ref: {stmt: ref, params: [1]}", "ref: {stmt: ref, params: [{sql: \"SELECT 1\", raw: \"2\"}]}"},
 	} {
 		body := strings.Replace(base, edit[0], edit[1], 1)
 		if body == base {
@@ -465,6 +531,18 @@ func TestDiffSpecValidation(t *testing.T) {
 	// A data-modifying statement is refused before anything runs.
 	if _, err := planguard.LoadDiffSpec(mapFS(map[string]string{"d.yaml": base, "ref.sql": "INSERT INTO t VALUES (1)"}), "d.yaml"); err == nil {
 		t.Error("LoadDiffSpec accepted an INSERT statement")
+	}
+	// Statements go over the simple protocol, where a second statement (a COMMIT) would leave the READ ONLY
+	// transaction: more than one statement is refused. A ';' in a literal or comment, or one trailing, is fine.
+	if _, err := planguard.LoadDiffSpec(mapFS(map[string]string{"d.yaml": base, "ref.sql": "SELECT 1; COMMIT; SELECT 2"}), "d.yaml"); err == nil {
+		t.Error("LoadDiffSpec accepted two statements")
+	}
+	if _, err := planguard.LoadDiffSpec(mapFS(map[string]string{"d.yaml": base, "ref.sql": "SELECT ';' AS a, $$;$$ AS b -- ;\n;\n"}), "d.yaml"); err != nil {
+		t.Errorf("';' in literals and comments: %v", err)
+	}
+	ok := strings.Replace(base, "ref: {stmt: ref, params: [1]}", "ref: {stmt: ref, params: [{sql: \"SELECT 1\"}]}", 1)
+	if _, err := planguard.LoadDiffSpec(mapFS(map[string]string{"d.yaml": ok, "ref.sql": "SELECT 1"}), "d.yaml"); err != nil {
+		t.Errorf("a {sql: …} param: %v", err)
 	}
 }
 

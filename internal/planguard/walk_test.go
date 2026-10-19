@@ -171,7 +171,10 @@ func TestWalkModeFindsReadmodelsSkip(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		w := planguard.CompareWalk(oracle, rs, identity)
+		w, err := planguard.CompareWalk(oracle, rs, identity)
+		if err != nil {
+			t.Fatal(err)
+		}
 		w.Stuck = stuck
 		return w
 	}
@@ -202,24 +205,44 @@ func TestCompareWalkCounts(t *testing.T) {
 	cols := []string{"packet_hash", "site_heard_at"}
 	ref := rows(cols, []string{"a", "5"}, []string{"b", "4"}, []string{"c", "3"}, []string{"d", "2"})
 	id := []string{"packet_hash"}
-	if w := planguard.CompareWalk(ref, ref, id); !clean(w) || w.Rows != 4 {
+	if w := compareWalk(t, ref, ref, id); !clean(w) || w.Rows != 4 {
 		t.Errorf("same walk: %+v", w)
 	}
 	dup := rows(cols, []string{"a", "5"}, []string{"b", "4"}, []string{"b", "4"}, []string{"c", "3"}, []string{"d", "2"})
-	if w := planguard.CompareWalk(ref, dup, id); w.Duplicates != 1 || w.FirstWrong != 3 || w.Missing != 0 {
+	if w := compareWalk(t, ref, dup, id); w.Duplicates != 1 || w.FirstWrong != 3 || w.Missing != 0 {
 		t.Errorf("duplicate row: %+v", w)
 	}
 	swap := rows(cols, []string{"a", "5"}, []string{"c", "3"}, []string{"b", "4"}, []string{"d", "2"})
-	if w := planguard.CompareWalk(ref, swap, id); w.OutOfOrder != 1 || w.FirstWrong != 2 || w.Missing != 0 {
+	if w := compareWalk(t, ref, swap, id); w.OutOfOrder != 1 || w.FirstWrong != 2 || w.Missing != 0 {
 		t.Errorf("rows out of order: %+v", w)
 	}
 	val := rows(cols, []string{"a", "5"}, []string{"b", "9"}, []string{"c", "3"}, []string{"d", "2"})
-	if w := planguard.CompareWalk(ref, val, id); w.FirstWrong != 2 || w.Missing != 0 {
+	if w := compareWalk(t, ref, val, id); w.FirstWrong != 2 || w.Missing != 0 {
 		t.Errorf("value changed: %+v", w)
 	}
 	short := rows(cols, []string{"a", "5"}, []string{"b", "4"})
-	if w := planguard.CompareWalk(ref, short, id); w.Missing != 2 || w.FirstWrong != 3 {
+	if w := compareWalk(t, ref, short, id); w.Missing != 2 || w.FirstWrong != 3 {
 		t.Errorf("walk stopped early: %+v", w)
+	}
+}
+
+func compareWalk(t *testing.T, ref, cand planguard.RowSet, key []string) planguard.WalkOutcome {
+	t.Helper()
+	w, err := planguard.CompareWalk(ref, cand, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return w
+}
+
+func TestCompareWalkRefDuplicates(t *testing.T) {
+	cols := []string{"packet_hash", "site_heard_at"}
+	ref := rows(cols, []string{"a", "5"}, []string{"a", "4"})
+	if _, err := planguard.CompareWalk(ref, ref, []string{"packet_hash"}); err == nil || !strings.Contains(err.Error(), "rows 1 and 2") {
+		t.Errorf("ref with a repeated identity: err %v, want an error naming rows 1 and 2", err)
+	}
+	if _, err := planguard.CompareWalk(ref, ref, []string{"nope"}); err == nil {
+		t.Error("identity column missing from the ref: no error")
 	}
 }
 

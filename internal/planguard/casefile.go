@@ -92,6 +92,9 @@ func ReadCaseFile(path string) (RowSet, error) {
 			return RowSet{}, fmt.Errorf("%s: line %d: %w", path, line, err)
 		}
 		if line == 1 {
+			if !utf8.Valid(raw) {
+				return RowSet{}, fmt.Errorf("%s: line 1: not UTF-8", path)
+			}
 			var h caseHeader
 			dec := json.NewDecoder(bytes.NewReader(raw))
 			dec.DisallowUnknownFields()
@@ -100,6 +103,9 @@ func ReadCaseFile(path string) (RowSet, error) {
 			}
 			rs.Columns, want = h.Columns, *h.Rows
 			continue
+		}
+		if !utf8.Valid(raw) {
+			return RowSet{}, fmt.Errorf("%s: line %d: not UTF-8", path, line)
 		}
 		row, err := decodeRow(raw, len(rs.Columns))
 		if err != nil {

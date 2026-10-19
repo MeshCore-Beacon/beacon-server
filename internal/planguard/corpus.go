@@ -410,8 +410,8 @@ func dataModifying(sql string) string {
 	return ""
 }
 
-// sqlWords returns the lower-cased bare words of sql with their parenthesis depth, skipping comments, string
-// literals, quoted identifiers and dollar-quoted bodies.
+// sqlWords returns the lower-cased bare words of sql, and each ';', with their parenthesis depth, skipping comments,
+// string literals, quoted identifiers and dollar-quoted bodies.
 func sqlWords(sql string) ([]string, []int) {
 	var words []string
 	var depths []int
@@ -457,6 +457,10 @@ func sqlWords(sql string) ([]string, []int) {
 			} else {
 				i = j
 			}
+		case c == ';':
+			words = append(words, ";")
+			depths = append(depths, depth)
+			i++
 		case c == '(':
 			depth++
 			i++

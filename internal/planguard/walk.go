@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 )
 
 // DefaultWalkRows caps a walk when its spec sets no max_rows.
@@ -173,8 +174,9 @@ func Walk(ctx context.Context, fetch PageFetcher, cursorCols []string, limit, ma
 }
 
 // CompareWalk compares a walk with its ref. key names the identity columns (the cursor columns; empty: every ref
-// column). FirstWrong compares whole rows over the ref's columns.
-func CompareWalk(ref, cand RowSet, key []string) WalkOutcome {
+// column). FirstWrong compares whole rows over the ref's columns. A ref that holds one identity twice cannot be
+// compared by identity, so it is an error.
+func CompareWalk(ref, cand RowSet, key []string) (WalkOutcome, error) {
 	w := WalkOutcome{Rows: len(cand.Rows)}
 	full := make([]int, len(ref.Columns))
 	fullC := make([]int, len(ref.Columns))
@@ -185,7 +187,7 @@ func CompareWalk(ref, cand RowSet, key []string) WalkOutcome {
 	if slices.Contains(fullC, -1) {
 		// The walk lacks a ref column: no row matches.
 		w.FirstWrong, w.Missing = 1, len(ref.Rows)
-		return w
+		return w, nil
 	}
 	if len(key) == 0 {
 		key = ref.Columns
@@ -193,9 +195,12 @@ func CompareWalk(ref, cand RowSet, key []string) WalkOutcome {
 	var keyR, keyC []int
 	for _, k := range key {
 		i, j := slices.Index(ref.Columns, k), slices.Index(cand.Columns, k)
-		if i < 0 || j < 0 {
+		if i < 0 {
+			return w, fmt.Errorf("identity column %s is not in the ref", k)
+		}
+		if j < 0 {
 			w.FirstWrong, w.Missing = 1, len(ref.Rows)
-			return w
+			return w, nil
 		}
 		keyR, keyC = append(keyR, i), append(keyC, j)
 	}
@@ -211,9 +216,11 @@ func CompareWalk(ref, cand RowSet, key []string) WalkOutcome {
 	}
 	pos := map[string]int{}
 	for i, r := range ref.Rows {
-		if _, dup := pos[tuple(r, keyR)]; !dup {
-			pos[tuple(r, keyR)] = i
+		k := tuple(r, keyR)
+		if first, dup := pos[k]; dup {
+			return w, fmt.Errorf("the ref holds rows %d and %d with the same %s", first+1, i+1, strings.Join(key, ", "))
 		}
+		pos[k] = i
 	}
 	got := map[string]bool{}
 	highest := -1
@@ -237,5 +244,5 @@ func CompareWalk(ref, cand RowSet, key []string) WalkOutcome {
 			w.Missing++
 		}
 	}
-	return w
+	return w, nil
 }

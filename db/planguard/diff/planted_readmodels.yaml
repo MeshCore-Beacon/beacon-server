@@ -11,6 +11,10 @@
 # The legacy pairs compare today's ListPacketsByIATAs (millisecond cursor, a saturating per-site scan, the latest
 # observer picked without a tie-break) with the packet_sites statements at the same cursor: the named classes cover
 # exactly those differences, and nothing else may differ.
+#
+# The legacy judge pairs and nl.walk.judge use fixed times from a 2026-10-18 snapshot: they mean something only on
+# a copy that holds data around those times (elsewhere they compare near-empty pages). nl.l1.pagecursor.tie derives
+# its cursor from the data instead, and is skipped (which fails the run) on a snapshot without a microsecond tie.
 batches:
   - name: planted_readmodels
     search_path: "t_s2b, public"
@@ -33,6 +37,21 @@ batches:
           fetch_extra: 1
           cursor: [{param: 2, column: site_heard_at}, {param: 3, column: packet_hash}]
           first: [infinity, '\x']
+          web_limit: 50
+          oracle: true
+        expect: {rm: different, end: same}
+      # The same walk from just above the judge times below, so every cursor around them is a page boundary.
+      - id: nl.walk.judge
+        ref: {stmt: oracle, params: [*nl, "2026-10-18 15:41:00+00", '\x', 2]}
+        cands:
+          - {stmt: rm, params: [*nl, "2026-10-18 15:41:00+00", '\x', 2]}
+          - {stmt: end, params: [*nl, "2026-10-18 15:41:00+00", '\x', 2]}
+        key: [site_heard_at]
+        walk:
+          limit_param: 4
+          fetch_extra: 1
+          cursor: [{param: 2, column: site_heard_at}, {param: 3, column: packet_hash}]
+          first: ["2026-10-18 15:41:00+00", '\x']
           web_limit: 50
           oracle: true
         expect: {rm: different, end: same}
@@ -60,18 +79,54 @@ batches:
         saturated: {flag: scan_saturated, floor: scan_floor}
         expect: {end: same}
 
-      # The page cursor (exact microseconds and a hash bound) against the legacy millisecond cursor: the cand may
-      # lead with rows in the cursor's millisecond that the legacy page leaves out.
+      # The page cursor (exact microseconds and hash) against the legacy millisecond cursor at a real tie: the
+      # newest key two packets share to the microsecond. The cand's cursor is (that key, the larger hash), so its
+      # page leads with the other tied packet, which the legacy page (below the key's millisecond) leaves out. The
+      # three params are read from the overlay in the batch's snapshot; no tie, and the pair is skipped.
       - id: nl.l1.pagecursor.tie
-        ref: {stmt: old, params: [*nl, "2026-10-18 15:40:39.570+00", null, null, null, null, null, 16, 2]}
+        ref:
+          stmt: old
+          params:
+            - *nl
+            - sql: >-
+                WITH k AS (SELECT packet_hash, max(site_heard_at) AS k FROM packet_sites
+                           WHERE iata = ANY('{AMS,EIN,ENS,GLZ,GRQ,LEY,LWR,MST,QAR,RTM,UDE,UTC}'::bpchar[])
+                           GROUP BY packet_hash),
+                t AS (SELECT k FROM k GROUP BY k HAVING count(*) >= 2 ORDER BY k DESC LIMIT 1)
+                SELECT date_trunc('milliseconds', k) FROM t
+            - null
+            - null
+            - null
+            - null
+            - null
+            - 16
+            - 2
         cands:
-          - {stmt: end, params: [*nl, "2026-10-18 15:40:39.570763+00", '\xff', 2]}
+          - stmt: end
+            params:
+              - *nl
+              - sql: >-
+                  WITH k AS (SELECT packet_hash, max(site_heard_at) AS k FROM packet_sites
+                             WHERE iata = ANY('{AMS,EIN,ENS,GLZ,GRQ,LEY,LWR,MST,QAR,RTM,UDE,UTC}'::bpchar[])
+                             GROUP BY packet_hash),
+                  t AS (SELECT k FROM k GROUP BY k HAVING count(*) >= 2 ORDER BY k DESC LIMIT 1)
+                  SELECT k FROM t
+              - sql: >-
+                  WITH k AS (SELECT packet_hash, max(site_heard_at) AS k FROM packet_sites
+                             WHERE iata = ANY('{AMS,EIN,ENS,GLZ,GRQ,LEY,LWR,MST,QAR,RTM,UDE,UTC}'::bpchar[])
+                             GROUP BY packet_hash),
+                  t AS (SELECT k, (array_agg(packet_hash ORDER BY packet_hash DESC))[1] AS h FROM k
+                        GROUP BY k HAVING count(*) >= 2 ORDER BY k DESC LIMIT 1)
+                  SELECT h FROM t
+              - 2
         key: [site_heard_at]
         allowed: [pagecursor_tie_rows, tie_order, saturated_suffix, latest_observer_tie]
+        require: [pagecursor_tie_rows]
         tie_boundary: 2
+        tie_cursor: {ts: 2, hash: 3, hash_column: packet_hash}
         omit: *latest
         saturated: {flag: scan_saturated, floor: scan_floor}
-        expect: {end: same}
+        expect: {end: allowed}
 
       # Control: a shape where rm is right, so a diff that flags everything would show here.
       - id: nl.l50.first
