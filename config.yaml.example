@@ -49,12 +49,14 @@ ratelimit:
   # A 429 returns error.code=rate_limited and Retry-After (1 or 60 seconds).
   burst: 600
 
-# Database pools. Every deployment opens: api_legacy 8, api_custom 8, ingest 6, maint 4 connections
-# (26), or 30 with split (api_custom 7, api_cached 5). Keep max_connections well above that.
+# Database pools. custom_all (default) opens api_legacy 8, api_custom 8, ingest 6, maint 4 connections
+# (26); split opens 30 (api_custom 7, api_cached 5); single opens 18 (api_legacy, ingest, maint).
+# ingest grows to one connection per CPU on hosts with more than 6 CPUs, adding to each total.
+# Keep max_connections well above that.
 #database:
 #  # custom_all (default): every API statement gets a custom plan.
-#  # split: statements planguard proved safe run on cached generic plans; turn on only after the
-#  #   daily planguard prod check is clean on this deployment.
+#  # split: statements admitted to the generic-plan class run on cached generic plans. No statement
+#  #   is admitted yet, so split has no effect; keep custom_all.
 #  # single: rollback. One API pool on today's settings; every guard family observes.
 #  api_plan_layout: custom_all
 

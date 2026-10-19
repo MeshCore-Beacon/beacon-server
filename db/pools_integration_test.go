@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -37,7 +38,7 @@ func TestOpenPoolsSettingsPostgres(t *testing.T) {
 		PoolAPILegacy: {"beacon-api_legacy", "auto", dflt, dflt, "0", "0"},
 		PoolAPICustom: {"beacon-api_custom", "force_custom_plan", "off", "0", "35s", "30s"},
 		PoolAPICached: {"beacon-api_cached", "force_generic_plan", "off", "0", "35s", "30s"},
-		PoolIngest:    {"beacon-ingest", "auto", "off", dflt, "30s", "0"},
+		PoolIngest:    {"beacon-ingest", "auto", "off", dflt, "0", "0"},
 		PoolMaint:     {"beacon-maint", "force_custom_plan", "off", "0", "0", "0"},
 	}
 	shows := []string{"application_name", "plan_cache_mode", "jit", "max_parallel_workers_per_gather",
@@ -48,10 +49,15 @@ func TestOpenPoolsSettingsPostgres(t *testing.T) {
 		want   map[string]int32
 		total  int32
 	}{
-		{planpolicy.CustomAll, map[string]int32{"api_legacy": 8, "api_custom": 8, "ingest": 6, "maint": 4}, 26},
-		{planpolicy.Split, map[string]int32{"api_legacy": 8, "api_custom": 7, "api_cached": 5, "ingest": 6, "maint": 4}, 30},
-		{planpolicy.Single, map[string]int32{"api_legacy": 8, "ingest": 6, "maint": 4}, 18},
+		{planpolicy.CustomAll, map[string]int32{"api_legacy": 8, "api_custom": 8, "maint": 4}, 0},
+		{planpolicy.Split, map[string]int32{"api_legacy": 8, "api_custom": 7, "api_cached": 5, "maint": 4}, 0},
+		{planpolicy.Single, map[string]int32{"api_legacy": 8, "maint": 4}, 0},
 	} {
+		// The ingest pool follows the host: at least 6, and one per CPU.
+		tc.want["ingest"] = int32(max(6, runtime.NumCPU()))
+		for _, n := range tc.want {
+			tc.total += n
+		}
 		t.Run(string(tc.layout), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
@@ -75,37 +81,40 @@ func TestOpenPoolsSettingsPostgres(t *testing.T) {
 				if got := pool.Config().MaxConns; got != size {
 					t.Errorf("%s: MaxConns = %d, want %d", name, got, size)
 				}
-				conn, err := pool.Acquire(ctx)
-				if err != nil {
-					t.Fatalf("%s: acquire: %v", name, err)
-				}
-				for i, guc := range shows {
-					want := settings[name][i]
-					if want == dflt {
-						continue
+				// A failed assertion must release the connection, or the deferred Close waits on it.
+				func() {
+					conn, err := pool.Acquire(ctx)
+					if err != nil {
+						t.Fatalf("%s: acquire: %v", name, err)
 					}
-					var got string
-					if err := conn.QueryRow(ctx, "SHOW "+guc).Scan(&got); err != nil {
-						t.Fatalf("%s: SHOW %s: %v", name, guc, err)
+					defer conn.Release()
+					for i, guc := range shows {
+						want := settings[name][i]
+						if want == dflt {
+							continue
+						}
+						var got string
+						if err := conn.QueryRow(ctx, "SHOW "+guc).Scan(&got); err != nil {
+							t.Fatalf("%s: SHOW %s: %v", name, guc, err)
+						}
+						if got != want {
+							t.Errorf("%s: %s = %q, want %q", name, guc, got, want)
+						}
 					}
-					if got != want {
-						t.Errorf("%s: %s = %q, want %q", name, guc, got, want)
+					var path string
+					if err := conn.QueryRow(ctx, "SHOW search_path").Scan(&path); err != nil {
+						t.Fatal(err)
 					}
-				}
-				var path string
-				if err := conn.QueryRow(ctx, "SHOW search_path").Scan(&path); err != nil {
-					t.Fatal(err)
-				}
-				if path != "pools_test_path" {
-					t.Errorf("%s: search_path = %q, want the DSN's pools_test_path", name, path)
-				}
-				// The tracer labels the statement with its sqlc name, and Query ends at rows.Close.
-				rows, err := conn.Query(ctx, "-- name: PoolsTracerProbe :many\nSELECT 1")
-				if err != nil {
-					t.Fatal(err)
-				}
-				rows.Close()
-				conn.Release()
+					if path != "pools_test_path" {
+						t.Errorf("%s: search_path = %q, want the DSN's pools_test_path", name, path)
+					}
+					// The tracer labels the statement with its sqlc name, and Query ends at rows.Close.
+					rows, err := conn.Query(ctx, "-- name: PoolsTracerProbe :many\nSELECT 1")
+					if err != nil {
+						t.Fatal(err)
+					}
+					rows.Close()
+				}()
 				body := scrapeMetrics(t)
 				for _, want := range []string{
 					`beacon_db_time_seconds_count{pool="` + name + `",statement="PoolsTracerProbe"}`,

@@ -47,7 +47,7 @@ func getAdminConfig(runtime *mw.RuntimeConfig) http.HandlerFunc {
 
 // updateAdminConfig godoc
 // @Summary Update runtime CORS origins and enforced guard families
-// @Description Replaces cors.allowed_origins, guards.enforce or both immediately; at least one is required. Both are validated before either is applied. An empty guards.enforce list makes every family observe. Updates are serialized; concurrent valid updates are applied one at a time. Already-running requests may finish with the previous policy. Nothing is persisted; restart reloads saved configuration. PUT also replaces guards.enforce at runtime; the configuration file is the boot default.
+// @Description Replaces cors.allowed_origins, guards.enforce or both immediately; at least one is required. Both are validated before either is applied. An empty guards.enforce list makes every family observe. Updates are serialized; concurrent valid updates are applied one at a time. Already-running requests may finish with the previous policy. Nothing is persisted; restart reloads saved configuration.
 // @Tags Admin
 // @Accept json
 // @Produce json

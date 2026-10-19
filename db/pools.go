@@ -6,6 +6,9 @@ package db
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"runtime"
+	"strings"
 
 	"github.com/MeshCore-Beacon/beacon-server/db/planpolicy"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -67,12 +70,12 @@ var poolSpecs = []poolSpec{
 	},
 	{
 		name: PoolIngest,
-		size: map[planpolicy.Layout]int32{planpolicy.CustomAll: 6, planpolicy.Split: 6, planpolicy.Single: 6},
+		size: map[planpolicy.Layout]int32{planpolicy.CustomAll: ingestPoolSize(), planpolicy.Split: ingestPoolSize(), planpolicy.Single: ingestPoolSize()},
+		// No statement_timeout: a failed ingest write drops its packet, so a write waits out a lock instead.
 		params: map[string]string{
-			"application_name":  "beacon-ingest",
-			"plan_cache_mode":   "auto",
-			"jit":               "off",
-			"statement_timeout": "30s",
+			"application_name": "beacon-ingest",
+			"plan_cache_mode":  "auto",
+			"jit":              "off",
 		},
 	},
 	{
@@ -85,6 +88,12 @@ var poolSpecs = []poolSpec{
 			"max_parallel_workers_per_gather": "0",
 		},
 	},
+}
+
+// ingestPoolSize is at least 6 and at least one connection per CPU, so ingest never has fewer
+// connections than the single shared pool gave it before the pools split.
+func ingestPoolSize() int32 {
+	return int32(max(6, runtime.NumCPU()))
 }
 
 func (p *Pools) slot(name string) **pgxpool.Pool {
@@ -104,12 +113,17 @@ func (p *Pools) slot(name string) **pgxpool.Pool {
 }
 
 // OpenPools opens the pools the layout uses, each with its fixed size and session settings
-// merged over the DSN's own parameters. Each tune func may adjust a pool's config before it opens.
-// On error it closes the pools it already opened. Errors name the pool but never include the DSN,
-// since parse errors can embed its password.
+// merged over the DSN's own parameters. A pool_max_conns in the DSN is overridden by the layout's
+// sizes. The settings are sent as startup parameters, so behind PgBouncer its
+// ignore_startup_parameters must list them. Each tune func may adjust a pool's config before it
+// opens. On error it closes the pools it already opened. Errors name the pool but never include
+// the DSN, since parse errors can embed its password.
 func OpenPools(ctx context.Context, dsn string, layout planpolicy.Layout, tune ...func(pool string, cfg *pgxpool.Config)) (*Pools, error) {
 	if _, ok := poolSpecs[0].size[layout]; !ok {
 		return nil, fmt.Errorf("unknown API plan layout %q", layout)
+	}
+	if strings.Contains(dsn, "pool_max_conns") {
+		slog.Info("POSTGRES_DSN sets pool_max_conns; the database pool sizes override it", "component", "db", "layout", layout)
 	}
 	p := &Pools{}
 	for _, spec := range poolSpecs {

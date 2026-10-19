@@ -38,24 +38,30 @@ type UnusedIndex struct {
 
 // The catalog statements stay raw SQL: sqlc does not know the pg_stat_* views.
 const (
-	listIndexSizes = `SELECT c.relname::text, pg_relation_filenode(c.oid)::bigint, pg_relation_size(c.oid)::bigint, c.reltuples::float8
+	listIndexSizes = `-- name: ListIndexSizes :many
+SELECT c.relname::text, pg_relation_filenode(c.oid)::bigint, pg_relation_size(c.oid)::bigint, c.reltuples::float8
 FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = current_schema()
 ORDER BY 1`
 
-	listUnusedIndexes = `SELECT s.indexrelname::text, pg_relation_size(s.indexrelid)::bigint AS bytes
+	listUnusedIndexes = `-- name: ListUnusedIndexes :many
+SELECT s.indexrelname::text, pg_relation_size(s.indexrelid)::bigint AS bytes
 FROM pg_stat_user_indexes s JOIN pg_index i ON i.indexrelid = s.indexrelid
 WHERE s.schemaname = current_schema() AND s.idx_scan = 0 AND NOT i.indisunique
 ORDER BY bytes DESC, 1`
 
-	getPgActivity = `SELECT (SELECT wal_bytes FROM pg_stat_wal)::bigint, checkpoints_timed, checkpoints_req,
+	getPgActivity = `-- name: GetPgActivity :one
+SELECT (SELECT wal_bytes FROM pg_stat_wal)::bigint, checkpoints_timed, checkpoints_req,
        (SELECT age(datfrozenxid) FROM pg_database WHERE datname = current_database())::bigint
 FROM pg_stat_bgwriter`
 
 	// PostgreSQL 17 moved the checkpoint counters to pg_stat_checkpointer.
-	getPgActivity17 = `SELECT (SELECT wal_bytes FROM pg_stat_wal)::bigint, num_timed, num_requested,
+	getPgActivity17 = `-- name: GetPgActivity17 :one
+SELECT (SELECT wal_bytes FROM pg_stat_wal)::bigint, num_timed, num_requested,
        (SELECT age(datfrozenxid) FROM pg_database WHERE datname = current_database())::bigint
 FROM pg_stat_checkpointer`
+
+	getServerVersionNum = "-- name: GetServerVersionNum :one\nSELECT current_setting('server_version_num')::int"
 )
 
 // MeasureIndexHealth reads every index in the current schema and compares its bytes per row with
@@ -131,7 +137,7 @@ func (s *Store) PgActivity(ctx context.Context) (metrics.PgActivity, error) {
 	version := s.pgVersion.Load()
 	if version == 0 {
 		var v int32
-		if err := s.pool.QueryRow(ctx, "SELECT current_setting('server_version_num')::int").Scan(&v); err != nil {
+		if err := s.pool.QueryRow(ctx, getServerVersionNum).Scan(&v); err != nil {
 			return metrics.PgActivity{}, err
 		}
 		s.pgVersion.Store(v)

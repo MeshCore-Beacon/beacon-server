@@ -21,11 +21,11 @@ func sqlcName(sql string) string {
 		return ""
 	}
 	line, _, _ := strings.Cut(rest, "\n")
-	f := strings.Fields(line)
-	if len(f) < 2 || !strings.HasPrefix(f[1], ":") {
+	name, kind, ok := strings.Cut(line, " ")
+	if !ok || name == "" || !strings.HasPrefix(kind, ":") {
 		return ""
 	}
-	return f[0]
+	return name
 }
 
 type queryStartKey struct{}

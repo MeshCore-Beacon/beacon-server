@@ -38,7 +38,7 @@ type Class int
 const (
 	// ClassC gets a custom plan on every execution: the default for every name.
 	ClassC Class = iota
-	// ClassG is proven generic-safe by planguard and runs on a cached generic plan under Split.
+	// ClassG is admitted as generic-safe and runs on a cached generic plan under Split.
 	ClassG
 	// ClassLegacy is a statement not yet rewritten: it runs on api_legacy, unguarded.
 	ClassLegacy
