@@ -1228,14 +1228,18 @@ WHERE (COALESCE(cardinality(@iatas::bpchar[]), 0) = 0 OR iata = ANY(@iatas::bpch
 GROUP BY payload_type
 ORDER BY count DESC;
 
--- name: GetStatsNodeTypes :many
--- Returns node counts grouped by type, optionally filtered by IATA.
-SELECT
-  n.node_type,
-  COUNT(DISTINCT n.id)::bigint AS count
+-- name: GetStatsNodeTypesAll :many
+-- Unfiltered node counts by type; never reads node_iatas.
+SELECT n.node_type, count(*)::bigint AS count
 FROM nodes n
-LEFT JOIN node_iatas ni ON ni.node_id = n.id
-WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR ni.iata = ANY($1::bpchar[]))
+GROUP BY n.node_type
+ORDER BY count DESC;
+
+-- name: GetStatsNodeTypesByIATAs :many
+-- Node counts by type for nodes heard in any of @iatas.
+SELECT n.node_type, count(*)::bigint AS count
+FROM nodes n
+WHERE EXISTS (SELECT 1 FROM node_iatas ni WHERE ni.node_id = n.id AND ni.iata = ANY(@iatas::bpchar[]))
 GROUP BY n.node_type
 ORDER BY count DESC;
 
@@ -1560,24 +1564,26 @@ LIMIT $4;
 -- name: GetKnownRoutesByNodes :many
 -- Routes containing @nodes[i] in IATA @iatas[i] (aligned, one node per IATA). The &&
 -- drives the node_ids GIN index; the indexed check keeps LIMIT counting real matches.
+-- hop_count + 0: no hop_count-led index may supply this order (a LIMIT walk would check the GIN conditions row by row).
 SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
 FROM known_routes kr
 WHERE kr.node_ids && @nodes::uuid[]
   AND kr.iata = ANY(@iatas::bpchar[])
   AND (@nodes::uuid[])[array_position(@iatas::bpchar[], kr.iata)] = ANY(kr.node_ids)
-ORDER BY hop_count ASC, last_seen DESC
+ORDER BY hop_count + 0 ASC, last_seen DESC
 LIMIT @row_limit;
 
 -- name: SearchKnownRoutesByNodes :many
 -- Routes holding a source and a destination candidate; callers check order and IATA.
 -- A route's hops resolve in its own IATA, so candidates from other IATAs can't match.
 -- Both && predicates use the node_ids GIN index.
+-- hop_count + 0: no hop_count-led index may supply this order (a LIMIT walk would check the GIN conditions row by row).
 SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
 FROM known_routes kr
 WHERE kr.node_ids && @from_nodes::uuid[]
   AND kr.node_ids && @to_nodes::uuid[]
   AND kr.iata = ANY(@iatas::bpchar[])
-ORDER BY hop_count ASC, last_seen DESC
+ORDER BY hop_count + 0 ASC, last_seen DESC
 LIMIT @row_limit;
 
 -- ============================================================

@@ -114,3 +114,36 @@ func TestApplyMigrationRecoversInvalidIndexPostgres(t *testing.T) {
 		t.Fatalf("plain duplicate index must surface 42P07, got %v", err)
 	}
 }
+
+const drop004 = "004_drop_known_routes_iata_last_seen.sql"
+
+// Every index the migrations leave must be usable, and 004 must also apply where an operator already dropped it by hand.
+func TestRunMigrationsIndexesValidPostgres(t *testing.T) {
+	ctx, pool := schemaPool(t)
+	if err := RunMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	var total int
+	var bad []string
+	if err := pool.QueryRow(ctx, `SELECT count(*), coalesce(array_agg(c.relname::text) FILTER (WHERE NOT (i.indisvalid AND i.indisready)), '{}')
+FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relnamespace = current_schema()::regnamespace`).Scan(&total, &bad); err != nil {
+		t.Fatal(err)
+	}
+	if total == 0 || len(bad) != 0 {
+		t.Fatalf("%d indexes, not valid and ready: %v", total, bad)
+	}
+	var gone bool
+	if err := pool.QueryRow(ctx, "SELECT to_regclass('idx_known_routes_iata_last_seen') IS NULL").Scan(&gone); err != nil || !gone {
+		t.Fatalf("idx_known_routes_iata_last_seen survived migrations: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "DELETE FROM schema_migrations WHERE filename = '"+drop004+"'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := RunMigrations(ctx, pool); err != nil {
+		t.Fatalf("004 after a manual drop: %v", err)
+	}
+	var recorded bool
+	if err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE filename = $1)", drop004).Scan(&recorded); err != nil || !recorded {
+		t.Fatalf("004 not recorded after a manual drop: %v", err)
+	}
+}

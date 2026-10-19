@@ -79,6 +79,7 @@ type Querier interface {
 	GetIATABorder(ctx context.Context, iata string) (json.RawMessage, error)
 	// Routes containing @nodes[i] in IATA @iatas[i] (aligned, one node per IATA). The &&
 	// drives the node_ids GIN index; the indexed check keeps LIMIT counting real matches.
+	// hop_count + 0: no hop_count-led index may supply this order (a LIMIT walk would check the GIN conditions row by row).
 	GetKnownRoutesByNodes(ctx context.Context, arg GetKnownRoutesByNodesParams) ([]GetKnownRoutesByNodesRow, error)
 	GetLatestCompleteRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
 	// Neighbor rows between @a_nodes and @b_nodes in either orientation: ingest writes
@@ -142,8 +143,10 @@ type Querier interface {
 	// latest measured drift, not an aggregate over a period.
 	// Select the filtered page before aggregating its IATA memberships.
 	GetStatsClockDrift(ctx context.Context, arg GetStatsClockDriftParams) ([]GetStatsClockDriftRow, error)
-	// Returns node counts grouped by type, optionally filtered by IATA.
-	GetStatsNodeTypes(ctx context.Context, dollar_1 []string) ([]GetStatsNodeTypesRow, error)
+	// Unfiltered node counts by type; never reads node_iatas.
+	GetStatsNodeTypesAll(ctx context.Context) ([]GetStatsNodeTypesAllRow, error)
+	// Node counts by type for nodes heard in any of @iatas.
+	GetStatsNodeTypesByIATAs(ctx context.Context, iatas []string) ([]GetStatsNodeTypesByIATAsRow, error)
 	// Payload-type observation counts since the given hour, from the hourly rollup.
 	GetStatsPayloadBreakdown(ctx context.Context, arg GetStatsPayloadBreakdownParams) ([]GetStatsPayloadBreakdownRow, error)
 	// One row per hour in [since, until) plus a summary row (hour NULL) over its complete hours.
@@ -371,6 +374,7 @@ type Querier interface {
 	// Routes holding a source and a destination candidate; callers check order and IATA.
 	// A route's hops resolve in its own IATA, so candidates from other IATAs can't match.
 	// Both && predicates use the node_ids GIN index.
+	// hop_count + 0: no hop_count-led index may supply this order (a LIMIT walk would check the GIN conditions row by row).
 	SearchKnownRoutesByNodes(ctx context.Context, arg SearchKnownRoutesByNodesParams) ([]SearchKnownRoutesByNodesRow, error)
 	// Packets whose hash falls in [lo, hi). The materialized CTE pins the primary key
 	// range scan; otherwise generic plans walk idx_packets_last_heard across the table.

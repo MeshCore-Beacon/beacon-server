@@ -511,7 +511,7 @@ FROM known_routes kr
 WHERE kr.node_ids && $1::uuid[]
   AND kr.iata = ANY($2::bpchar[])
   AND ($1::uuid[])[array_position($2::bpchar[], kr.iata)] = ANY(kr.node_ids)
-ORDER BY hop_count ASC, last_seen DESC
+ORDER BY hop_count + 0 ASC, last_seen DESC
 LIMIT $3
 `
 
@@ -534,6 +534,7 @@ type GetKnownRoutesByNodesRow struct {
 
 // Routes containing @nodes[i] in IATA @iatas[i] (aligned, one node per IATA). The &&
 // drives the node_ids GIN index; the indexed check keeps LIMIT counting real matches.
+// hop_count + 0: no hop_count-led index may supply this order (a LIMIT walk would check the GIN conditions row by row).
 func (q *Queries) GetKnownRoutesByNodes(ctx context.Context, arg GetKnownRoutesByNodesParams) ([]GetKnownRoutesByNodesRow, error) {
 	rows, err := q.db.Query(ctx, getKnownRoutesByNodes, arg.Nodes, arg.Iatas, arg.RowLimit)
 	if err != nil {
@@ -1916,32 +1917,62 @@ func (q *Queries) GetStatsClockDrift(ctx context.Context, arg GetStatsClockDrift
 	return items, nil
 }
 
-const getStatsNodeTypes = `-- name: GetStatsNodeTypes :many
-SELECT
-  n.node_type,
-  COUNT(DISTINCT n.id)::bigint AS count
+const getStatsNodeTypesAll = `-- name: GetStatsNodeTypesAll :many
+SELECT n.node_type, count(*)::bigint AS count
 FROM nodes n
-LEFT JOIN node_iatas ni ON ni.node_id = n.id
-WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR ni.iata = ANY($1::bpchar[]))
 GROUP BY n.node_type
 ORDER BY count DESC
 `
 
-type GetStatsNodeTypesRow struct {
+type GetStatsNodeTypesAllRow struct {
 	NodeType int16 `json:"node_type"`
 	Count    int64 `json:"count"`
 }
 
-// Returns node counts grouped by type, optionally filtered by IATA.
-func (q *Queries) GetStatsNodeTypes(ctx context.Context, dollar_1 []string) ([]GetStatsNodeTypesRow, error) {
-	rows, err := q.db.Query(ctx, getStatsNodeTypes, dollar_1)
+// Unfiltered node counts by type; never reads node_iatas.
+func (q *Queries) GetStatsNodeTypesAll(ctx context.Context) ([]GetStatsNodeTypesAllRow, error) {
+	rows, err := q.db.Query(ctx, getStatsNodeTypesAll)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []GetStatsNodeTypesRow{}
+	items := []GetStatsNodeTypesAllRow{}
 	for rows.Next() {
-		var i GetStatsNodeTypesRow
+		var i GetStatsNodeTypesAllRow
+		if err := rows.Scan(&i.NodeType, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getStatsNodeTypesByIATAs = `-- name: GetStatsNodeTypesByIATAs :many
+SELECT n.node_type, count(*)::bigint AS count
+FROM nodes n
+WHERE EXISTS (SELECT 1 FROM node_iatas ni WHERE ni.node_id = n.id AND ni.iata = ANY($1::bpchar[]))
+GROUP BY n.node_type
+ORDER BY count DESC
+`
+
+type GetStatsNodeTypesByIATAsRow struct {
+	NodeType int16 `json:"node_type"`
+	Count    int64 `json:"count"`
+}
+
+// Node counts by type for nodes heard in any of @iatas.
+func (q *Queries) GetStatsNodeTypesByIATAs(ctx context.Context, iatas []string) ([]GetStatsNodeTypesByIATAsRow, error) {
+	rows, err := q.db.Query(ctx, getStatsNodeTypesByIATAs, iatas)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetStatsNodeTypesByIATAsRow{}
+	for rows.Next() {
+		var i GetStatsNodeTypesByIATAsRow
 		if err := rows.Scan(&i.NodeType, &i.Count); err != nil {
 			return nil, err
 		}
@@ -5317,7 +5348,7 @@ FROM known_routes kr
 WHERE kr.node_ids && $1::uuid[]
   AND kr.node_ids && $2::uuid[]
   AND kr.iata = ANY($3::bpchar[])
-ORDER BY hop_count ASC, last_seen DESC
+ORDER BY hop_count + 0 ASC, last_seen DESC
 LIMIT $4
 `
 
@@ -5342,6 +5373,7 @@ type SearchKnownRoutesByNodesRow struct {
 // Routes holding a source and a destination candidate; callers check order and IATA.
 // A route's hops resolve in its own IATA, so candidates from other IATAs can't match.
 // Both && predicates use the node_ids GIN index.
+// hop_count + 0: no hop_count-led index may supply this order (a LIMIT walk would check the GIN conditions row by row).
 func (q *Queries) SearchKnownRoutesByNodes(ctx context.Context, arg SearchKnownRoutesByNodesParams) ([]SearchKnownRoutesByNodesRow, error) {
 	rows, err := q.db.Query(ctx, searchKnownRoutesByNodes,
 		arg.FromNodes,
