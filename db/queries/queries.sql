@@ -1652,13 +1652,16 @@ ORDER BY r.observation_count DESC, r.origin_pubkey;
 
 -- name: GetTopNodesProbe :many
 -- GetTopNodes for at most 32 distinct IATAs: one rollup probe per (hour, IATA). @since is a UTC hour.
+-- The hours walked stay inside the table's own [min(hour), max(hour)]; an empty table walks none
+-- (a NULL start makes generate_series return no rows).
 WITH src AS (
   SELECT origin_pubkey, observations, last_heard, iata, name, node_type
   FROM analytics_hourly_advert_hearings
   WHERE hour >= @since::timestamptz AND COALESCE(cardinality(@iatas::bpchar[]), 0) = 0
   UNION ALL
   SELECT a.origin_pubkey, a.observations, a.last_heard, a.iata, a.name, a.node_type
-  FROM generate_series(GREATEST(@since::timestamptz, (SELECT min(hour) FROM analytics_hourly_advert_hearings)), date_trunc('hour', now(), 'UTC'), interval '1 hour') g(h)
+  FROM generate_series((SELECT CASE WHEN min(hour) IS NOT NULL THEN GREATEST(@since::timestamptz, min(hour)) END FROM analytics_hourly_advert_hearings),
+                       (SELECT LEAST(date_trunc('hour', now(), 'UTC'), max(hour)) FROM analytics_hourly_advert_hearings), interval '1 hour') g(h)
   CROSS JOIN (SELECT DISTINCT unnest(@iatas::bpchar[]) AS iata) i
   CROSS JOIN LATERAL (SELECT x.origin_pubkey, x.observations, x.last_heard, x.iata, x.name, x.node_type
                       FROM analytics_hourly_advert_hearings x WHERE x.hour = g.h AND x.iata = i.iata OFFSET 0) a
@@ -1756,7 +1759,8 @@ ORDER BY CASE WHEN @sort::text = 'flood' THEN r.flood_advert_count ELSE r.direct
          r.advert_count DESC, r.origin_pubkey;
 
 -- name: GetStatsTopAdvertisersProbe :many
--- GetStatsTopAdvertisers for at most 32 distinct IATAs: the hearings part probes per (hour, IATA).
+-- GetStatsTopAdvertisers for at most 32 distinct IATAs: the hearings part probes per (hour, IATA),
+-- walking only hours inside the hearings table's [min(hour), max(hour)].
 WITH ranked AS (
   SELECT origin_pubkey, SUM(advert_packets)::bigint AS advert_count,
          SUM(flood_packets)::bigint AS flood_advert_count, SUM(direct_packets)::bigint AS direct_advert_count
@@ -1774,7 +1778,8 @@ WITH ranked AS (
     AND h.origin_pubkey IN (SELECT origin_pubkey FROM ranked)
   UNION ALL
   SELECT h.origin_pubkey, h.last_heard, h.iata, h.name, h.node_type
-  FROM generate_series(GREATEST(@since::timestamptz, (SELECT min(hour) FROM analytics_hourly_advert_hearings)), date_trunc('hour', now(), 'UTC'), interval '1 hour') g(h)
+  FROM generate_series((SELECT CASE WHEN min(hour) IS NOT NULL THEN GREATEST(@since::timestamptz, min(hour)) END FROM analytics_hourly_advert_hearings),
+                       (SELECT LEAST(date_trunc('hour', now(), 'UTC'), max(hour)) FROM analytics_hourly_advert_hearings), interval '1 hour') g(h)
   CROSS JOIN (SELECT DISTINCT unnest(@iatas::bpchar[]) AS iata) i
   CROSS JOIN LATERAL (SELECT x.origin_pubkey, x.last_heard, x.iata, x.name, x.node_type
                       FROM analytics_hourly_advert_hearings x WHERE x.hour = g.h AND x.iata = i.iata OFFSET 0) h

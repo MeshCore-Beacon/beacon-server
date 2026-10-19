@@ -178,7 +178,9 @@ func TestStatsWideIATAListUsesTodayStatement(t *testing.T) {
 		})
 		t.Run("until off the hour", func(t *testing.T) {
 			mock := mockdb.NewMockQuerier(gomock.NewController(t))
-			mock.EXPECT().GetPathStats(gomock.Any(), gomock.Any()).Return(rows, nil)
+			mock.EXPECT().GetPathStats(gomock.Any(), sqlc.GetPathStatsParams{
+				Since: pgtype.Timestamptz{Time: from, Valid: true}, Until: pgtype.Timestamptz{Time: until.Add(time.Minute), Valid: true},
+			}).Return(rows, nil)
 			if _, err := (&Store{q: mock}).GetPathStats(context.Background(), from, until.Add(time.Minute), nil); err != nil {
 				t.Fatal(err)
 			}

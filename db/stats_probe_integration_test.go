@@ -190,6 +190,13 @@ VALUES ($3, 'P00', decode(repeat('10', 32), 'hex'), 500, $3::timestamptz + inter
 		{"-7d", now.Add(-7 * 24 * time.Hour)}, {"-14d", now.Add(-14 * 24 * time.Hour)},
 		{"newest rolled hour", newest}, {"current hour", now}, {"+2h", now.Add(2 * time.Hour)},
 	}
+	// Unbounded starts an API caller can send: since=0 and an empty since (Go's zero time). Both are
+	// on the hour, so the store picks the probe; the probes must not walk from them.
+	wideSinces := []struct {
+		name string
+		at   time.Time
+	}{{"since=0", time.UnixMilli(0).UTC()}, {"zero since", time.Time{}}}
+	farUntil := now.Add(100 * 365 * 24 * time.Hour)
 	tstz := func(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
 
 	tx, err := pool.Begin(ctx)
@@ -197,84 +204,120 @@ VALUES ($3, 'P00', decode(repeat('10', 32), 'hex'), 500, $3::timestamptz + inter
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
+	// A probe that walked from year 1 or 1970 would run for minutes; this turns it into an error.
+	if _, err := tx.Exec(ctx, "SET LOCAL statement_timeout = '10s'"); err != nil {
+		t.Fatal(err)
+	}
 	q := sqlc.New(tx)
 	nonEmpty := map[string]int{}
 
-	for _, l := range lists {
-		for _, s := range sinces {
-			name := l.name + "/" + s.name
-			for _, limit := range []int32{1, 10, 200} {
-				want, err := q.GetTopNodes(ctx, sqlc.GetTopNodesParams{Since: tstz(s.at), Iatas: l.iatas, RowLimit: limit})
-				if err != nil {
-					t.Fatal(err)
-				}
-				probe, err := q.GetTopNodesProbe(ctx, sqlc.GetTopNodesProbeParams{Since: tstz(s.at), Iatas: l.iatas, RowLimit: limit})
-				if err != nil {
-					t.Fatal(err)
-				}
-				got := make([]sqlc.GetTopNodesRow, len(probe))
-				for i, r := range probe {
-					got[i] = sqlc.GetTopNodesRow(r)
-				}
-				if !sameRows(got, want) {
-					t.Errorf("top nodes %s limit %d:\nprobe %+v\ntoday %+v", name, limit, got, want)
-				}
-				if len(want) > 0 {
-					nonEmpty["top nodes"]++
-				}
-				for _, sort := range []string{"flood", "direct", "bogus"} {
-					want, err := q.GetStatsTopAdvertisers(ctx, sqlc.GetStatsTopAdvertisersParams{Sort: sort, Since: tstz(s.at), Iatas: l.iatas, RowLimit: limit})
-					if err != nil {
-						t.Fatal(err)
+	topNodes := func(name string, since time.Time, iatas []string, limit int32) {
+		t.Helper()
+		want, err := q.GetTopNodes(ctx, sqlc.GetTopNodesParams{Since: tstz(since), Iatas: iatas, RowLimit: limit})
+		if err != nil {
+			t.Fatal(err)
+		}
+		probe, err := q.GetTopNodesProbe(ctx, sqlc.GetTopNodesProbeParams{Since: tstz(since), Iatas: iatas, RowLimit: limit})
+		if err != nil {
+			t.Fatalf("top nodes probe %s limit %d: %v", name, limit, err)
+		}
+		got := make([]sqlc.GetTopNodesRow, len(probe))
+		for i, r := range probe {
+			got[i] = sqlc.GetTopNodesRow(r)
+		}
+		if !sameRows(got, want) {
+			t.Errorf("top nodes %s limit %d:\nprobe %+v\ntoday %+v", name, limit, got, want)
+		}
+		if len(want) > 0 {
+			nonEmpty["top nodes"]++
+		}
+	}
+	advertisers := func(name string, since time.Time, iatas []string, limit int32, sort string) {
+		t.Helper()
+		want, err := q.GetStatsTopAdvertisers(ctx, sqlc.GetStatsTopAdvertisersParams{Sort: sort, Since: tstz(since), Iatas: iatas, RowLimit: limit})
+		if err != nil {
+			t.Fatal(err)
+		}
+		probe, err := q.GetStatsTopAdvertisersProbe(ctx, sqlc.GetStatsTopAdvertisersProbeParams{Sort: sort, Since: tstz(since), Iatas: iatas, RowLimit: limit})
+		if err != nil {
+			t.Fatalf("top advertisers probe %s limit %d sort %s: %v", name, limit, sort, err)
+		}
+		got := make([]sqlc.GetStatsTopAdvertisersRow, len(probe))
+		for i, r := range probe {
+			got[i] = sqlc.GetStatsTopAdvertisersRow(r)
+		}
+		if !sameRows(got, want) {
+			t.Errorf("top advertisers %s limit %d sort %s:\nprobe %+v\ntoday %+v", name, limit, sort, got, want)
+		}
+		if len(want) > 0 {
+			nonEmpty["top advertisers"]++
+		}
+	}
+	paths := func(name string, since, until time.Time, iatas []string) {
+		t.Helper()
+		want, err := q.GetPathStats(ctx, sqlc.GetPathStatsParams{Since: tstz(since), Until: tstz(until), Iatas: iatas})
+		if err != nil {
+			t.Fatal(err)
+		}
+		probe, err := q.GetPathStatsProbe(ctx, sqlc.GetPathStatsProbeParams{Since: tstz(since), Until: tstz(until), Iatas: iatas})
+		if err != nil {
+			t.Fatalf("path stats probe %s until %s: %v", name, until, err)
+		}
+		got := make([]sqlc.GetPathStatsRow, len(probe))
+		for i, r := range probe {
+			got[i] = sqlc.GetPathStatsRow(r)
+		}
+		if !sameRows(got, want) {
+			t.Errorf("path stats %s until %s:\nprobe %+v\ntoday %+v", name, until, got, want)
+		}
+		if len(want) > 0 {
+			nonEmpty["path stats"]++
+		}
+	}
+	series := func(name string, since, until time.Time, iatas []string) {
+		t.Helper()
+		got, err := q.GetStatsSeries(ctx, sqlc.GetStatsSeriesParams{Since: tstz(since), Until: tstz(until), Iatas: iatas})
+		if err != nil {
+			t.Fatal(err)
+		}
+		today := legacyRows[sqlc.GetStatsSeriesRow](t, ctx, tx, legacyGetStatsSeries, tstz(since), tstz(until), iatas)
+		if !sameRows(got, today) {
+			t.Errorf("series %s %s..%s:\nnew   %+v\ntoday %+v", name, since, until, got, today)
+		}
+		if len(today) > 0 && today[len(today)-1].UniquePackets > 0 && today[len(today)-1].ScopedPackets > 0 {
+			nonEmpty["series"]++
+		}
+	}
+	grid := func(sinces []struct {
+		name string
+		at   time.Time
+	}, untils func(time.Time) []time.Time, withSeries bool) {
+		for _, l := range lists {
+			for _, s := range sinces {
+				name := l.name + "/" + s.name
+				for _, limit := range []int32{1, 10, 200} {
+					topNodes(name, s.at, l.iatas, limit)
+					for _, sort := range []string{"flood", "direct", "bogus"} {
+						advertisers(name, s.at, l.iatas, limit, sort)
 					}
-					probe, err := q.GetStatsTopAdvertisersProbe(ctx, sqlc.GetStatsTopAdvertisersProbeParams{Sort: sort, Since: tstz(s.at), Iatas: l.iatas, RowLimit: limit})
-					if err != nil {
-						t.Fatal(err)
+				}
+				for _, until := range untils(s.at) {
+					paths(name, s.at, until, l.iatas)
+					if withSeries {
+						series(name, s.at, until, l.iatas)
+						// The series also serves windows that do not start on the hour.
+						series(name+" +30m", s.at.Add(30*time.Minute), until, l.iatas)
 					}
-					got := make([]sqlc.GetStatsTopAdvertisersRow, len(probe))
-					for i, r := range probe {
-						got[i] = sqlc.GetStatsTopAdvertisersRow(r)
-					}
-					if !sameRows(got, want) {
-						t.Errorf("top advertisers %s limit %d sort %s:\nprobe %+v\ntoday %+v", name, limit, sort, got, want)
-					}
-					if len(want) > 0 {
-						nonEmpty["top advertisers"]++
-					}
-				}
-			}
-			for _, until := range []time.Time{newest.Add(time.Hour), s.at.Add(time.Hour)} {
-				want, err := q.GetPathStats(ctx, sqlc.GetPathStatsParams{Since: tstz(s.at), Until: tstz(until), Iatas: l.iatas})
-				if err != nil {
-					t.Fatal(err)
-				}
-				probe, err := q.GetPathStatsProbe(ctx, sqlc.GetPathStatsProbeParams{Since: tstz(s.at), Until: tstz(until), Iatas: l.iatas})
-				if err != nil {
-					t.Fatal(err)
-				}
-				got := make([]sqlc.GetPathStatsRow, len(probe))
-				for i, r := range probe {
-					got[i] = sqlc.GetPathStatsRow(r)
-				}
-				if !sameRows(got, want) {
-					t.Errorf("path stats %s until %s:\nprobe %+v\ntoday %+v", name, until, got, want)
-				}
-				if len(want) > 0 {
-					nonEmpty["path stats"]++
-				}
-				series, err := q.GetStatsSeries(ctx, sqlc.GetStatsSeriesParams{Since: tstz(s.at), Until: tstz(until), Iatas: l.iatas})
-				if err != nil {
-					t.Fatal(err)
-				}
-				today := legacyRows[sqlc.GetStatsSeriesRow](t, ctx, tx, legacyGetStatsSeries, tstz(s.at), tstz(until), l.iatas)
-				if !sameRows(series, today) {
-					t.Errorf("series %s until %s:\nnew   %+v\ntoday %+v", name, until, series, today)
-				}
-				if len(today) > 0 && today[len(today)-1].UniquePackets > 0 && today[len(today)-1].ScopedPackets > 0 {
-					nonEmpty["series"]++
 				}
 			}
 		}
+	}
+
+	grid(sinces, func(at time.Time) []time.Time { return []time.Time{newest.Add(time.Hour), at.Add(time.Hour)} }, true)
+	// The series has no probe and walks its own window, so the unbounded starts only run the probes.
+	grid(wideSinces, func(time.Time) []time.Time { return []time.Time{newest.Add(time.Hour), farUntil} }, false)
+	for _, s := range sinces {
+		paths("far-future until/"+s.name, s.at, farUntil, codes(6))
 	}
 	// The comparisons above must cover real rows, not only empty results.
 	for _, k := range []string{"top nodes", "top advertisers", "path stats", "series"} {
@@ -297,5 +340,22 @@ VALUES ($3, 'P00', decode(repeat('10', 32), 'hex'), 500, $3::timestamptz + inter
 	if err := tx.QueryRow(ctx, "SELECT count(*) FILTER (WHERE status = 'partial'), 30 - count(*) FILTER (WHERE hour < $1) FROM analytics_rollup_hours WHERE hour >= $2",
 		newest.Add(time.Hour), first).Scan(&partial, &missing); err != nil || partial != 1 || missing != 1 {
 		t.Errorf("series fixture: %d partial and %d missing hours (%v), want 1 and 1", partial, missing, err)
+	}
+
+	// A fresh deployment: empty rollup tables. The probes walk no hours, whatever the window.
+	if _, err := tx.Exec(ctx, "DELETE FROM analytics_hourly_advert_hearings; DELETE FROM analytics_hourly_paths"); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range append(wideSinces, sinces...) {
+		for _, l := range lists {
+			name := "empty rollups/" + l.name + "/" + s.name
+			start := time.Now()
+			topNodes(name, s.at, l.iatas, 10)
+			advertisers(name, s.at, l.iatas, 10, "flood")
+			paths(name, s.at, farUntil, l.iatas)
+			if d := time.Since(start); d > 2*time.Second {
+				t.Errorf("%s: %s, want the probes to return at once", name, d)
+			}
+		}
 	}
 }

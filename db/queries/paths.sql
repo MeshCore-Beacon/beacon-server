@@ -21,13 +21,16 @@ ORDER BY is_hourly, hour, category, hash_bytes, entries;
 
 -- name: GetPathStatsProbe :many
 -- GetPathStats for at most 32 distinct IATAs: one rollup probe per (hour, IATA). @since and @until are UTC hours.
+-- The hours walked stay inside the table's own [min(hour), max(hour)]; an empty table walks none
+-- (a NULL start makes generate_series return no rows).
 WITH readings AS (
     SELECT iata, hour, category, hash_bytes, entries, receptions FROM analytics_hourly_paths
     WHERE hour >= @since::timestamptz AND hour < @until::timestamptz
       AND COALESCE(cardinality(@iatas::bpchar[]), 0) = 0
     UNION ALL
     SELECT p.iata, p.hour, p.category, p.hash_bytes, p.entries, p.receptions
-    FROM generate_series(GREATEST(@since::timestamptz, (SELECT min(hour) FROM analytics_hourly_paths)), @until::timestamptz, interval '1 hour') g(h)
+    FROM generate_series((SELECT CASE WHEN min(hour) IS NOT NULL THEN GREATEST(@since::timestamptz, min(hour)) END FROM analytics_hourly_paths),
+                         (SELECT LEAST(@until::timestamptz, max(hour)) FROM analytics_hourly_paths), interval '1 hour') g(h)
     CROSS JOIN (SELECT DISTINCT unnest(@iatas::bpchar[]) AS iata) i
     CROSS JOIN LATERAL (SELECT x.iata, x.hour, x.category, x.hash_bytes, x.entries, x.receptions
                         FROM analytics_hourly_paths x WHERE x.hour = g.h AND x.iata = i.iata OFFSET 0) p

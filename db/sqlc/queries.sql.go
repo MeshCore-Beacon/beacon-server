@@ -2266,7 +2266,8 @@ WITH ranked AS (
     AND h.origin_pubkey IN (SELECT origin_pubkey FROM ranked)
   UNION ALL
   SELECT h.origin_pubkey, h.last_heard, h.iata, h.name, h.node_type
-  FROM generate_series(GREATEST($2::timestamptz, (SELECT min(hour) FROM analytics_hourly_advert_hearings)), date_trunc('hour', now(), 'UTC'), interval '1 hour') g(h)
+  FROM generate_series((SELECT CASE WHEN min(hour) IS NOT NULL THEN GREATEST($2::timestamptz, min(hour)) END FROM analytics_hourly_advert_hearings),
+                       (SELECT LEAST(date_trunc('hour', now(), 'UTC'), max(hour)) FROM analytics_hourly_advert_hearings), interval '1 hour') g(h)
   CROSS JOIN (SELECT DISTINCT unnest($3::bpchar[]) AS iata) i
   CROSS JOIN LATERAL (SELECT x.origin_pubkey, x.last_heard, x.iata, x.name, x.node_type
                       FROM analytics_hourly_advert_hearings x WHERE x.hour = g.h AND x.iata = i.iata OFFSET 0) h
@@ -2305,7 +2306,8 @@ type GetStatsTopAdvertisersProbeRow struct {
 	Iata              string             `json:"iata"`
 }
 
-// GetStatsTopAdvertisers for at most 32 distinct IATAs: the hearings part probes per (hour, IATA).
+// GetStatsTopAdvertisers for at most 32 distinct IATAs: the hearings part probes per (hour, IATA),
+// walking only hours inside the hearings table's [min(hour), max(hour)].
 func (q *Queries) GetStatsTopAdvertisersProbe(ctx context.Context, arg GetStatsTopAdvertisersProbeParams) ([]GetStatsTopAdvertisersProbeRow, error) {
 	rows, err := q.db.Query(ctx, getStatsTopAdvertisersProbe,
 		arg.Sort,
@@ -2521,7 +2523,8 @@ WITH src AS (
   WHERE hour >= $1::timestamptz AND COALESCE(cardinality($2::bpchar[]), 0) = 0
   UNION ALL
   SELECT a.origin_pubkey, a.observations, a.last_heard, a.iata, a.name, a.node_type
-  FROM generate_series(GREATEST($1::timestamptz, (SELECT min(hour) FROM analytics_hourly_advert_hearings)), date_trunc('hour', now(), 'UTC'), interval '1 hour') g(h)
+  FROM generate_series((SELECT CASE WHEN min(hour) IS NOT NULL THEN GREATEST($1::timestamptz, min(hour)) END FROM analytics_hourly_advert_hearings),
+                       (SELECT LEAST(date_trunc('hour', now(), 'UTC'), max(hour)) FROM analytics_hourly_advert_hearings), interval '1 hour') g(h)
   CROSS JOIN (SELECT DISTINCT unnest($2::bpchar[]) AS iata) i
   CROSS JOIN LATERAL (SELECT x.origin_pubkey, x.observations, x.last_heard, x.iata, x.name, x.node_type
                       FROM analytics_hourly_advert_hearings x WHERE x.hour = g.h AND x.iata = i.iata OFFSET 0) a
@@ -2559,6 +2562,8 @@ type GetTopNodesProbeRow struct {
 }
 
 // GetTopNodes for at most 32 distinct IATAs: one rollup probe per (hour, IATA). @since is a UTC hour.
+// The hours walked stay inside the table's own [min(hour), max(hour)]; an empty table walks none
+// (a NULL start makes generate_series return no rows).
 func (q *Queries) GetTopNodesProbe(ctx context.Context, arg GetTopNodesProbeParams) ([]GetTopNodesProbeRow, error) {
 	rows, err := q.db.Query(ctx, getTopNodesProbe, arg.Since, arg.Iatas, arg.RowLimit)
 	if err != nil {
