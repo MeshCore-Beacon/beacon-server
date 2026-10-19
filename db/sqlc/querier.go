@@ -16,6 +16,10 @@ type Querier interface {
 	// An empty region places the channel Beacon-wide.
 	AddChannelConfigScopes(ctx context.Context, arg AddChannelConfigScopesParams) error
 	AddChannelMembers(ctx context.Context, arg AddChannelMembersParams) error
+	// Copyright 2026 Beacon Contributors
+	// SPDX-License-Identifier: AGPL-3.0-or-later
+	// A stored observation's site for a message another statement created. A no-op when the packet has no message.
+	AddChannelMessageIATA(ctx context.Context, arg AddChannelMessageIATAParams) error
 	AddIATAs(ctx context.Context, iatas []string) error
 	AddRegionIATAs(ctx context.Context, arg AddRegionIATAsParams) error
 	// Copies the packet's payload type onto the first @max_rows observations in [@from_id, @to_id),
@@ -203,6 +207,9 @@ type Querier interface {
 	// message_count is a lifetime count, bumped only for a new message. A historical (backfilled)
 	// message queues its observation hours for a re-roll in the same statement, so the two can't diverge.
 	InsertChannelMessage(ctx context.Context, arg InsertChannelMessageParams) (InsertChannelMessageRow, error)
+	// The seeded insert's fallback: the same statement without the site seed. The read-model
+	// reconcile adds the message's sites within one interval.
+	InsertChannelMessageUnseeded(ctx context.Context, arg InsertChannelMessageUnseededParams) (InsertChannelMessageUnseededRow, error)
 	// ============================================================
 	// PACKET OBSERVATIONS
 	// ============================================================

@@ -72,6 +72,20 @@ func (mr *MockQuerierMockRecorder) AddChannelMembers(ctx, arg any) *gomock.Call 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddChannelMembers", reflect.TypeOf((*MockQuerier)(nil).AddChannelMembers), ctx, arg)
 }
 
+// AddChannelMessageIATA mocks base method.
+func (m *MockQuerier) AddChannelMessageIATA(ctx context.Context, arg db.AddChannelMessageIATAParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AddChannelMessageIATA", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// AddChannelMessageIATA indicates an expected call of AddChannelMessageIATA.
+func (mr *MockQuerierMockRecorder) AddChannelMessageIATA(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddChannelMessageIATA", reflect.TypeOf((*MockQuerier)(nil).AddChannelMessageIATA), ctx, arg)
+}
+
 // AddIATAs mocks base method.
 func (m *MockQuerier) AddIATAs(ctx context.Context, iatas []string) error {
 	m.ctrl.T.Helper()
@@ -1358,6 +1372,21 @@ func (m *MockQuerier) InsertChannelMessage(ctx context.Context, arg db.InsertCha
 func (mr *MockQuerierMockRecorder) InsertChannelMessage(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertChannelMessage", reflect.TypeOf((*MockQuerier)(nil).InsertChannelMessage), ctx, arg)
+}
+
+// InsertChannelMessageUnseeded mocks base method.
+func (m *MockQuerier) InsertChannelMessageUnseeded(ctx context.Context, arg db.InsertChannelMessageUnseededParams) (db.InsertChannelMessageUnseededRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InsertChannelMessageUnseeded", ctx, arg)
+	ret0, _ := ret[0].(db.InsertChannelMessageUnseededRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// InsertChannelMessageUnseeded indicates an expected call of InsertChannelMessageUnseeded.
+func (mr *MockQuerierMockRecorder) InsertChannelMessageUnseeded(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertChannelMessageUnseeded", reflect.TypeOf((*MockQuerier)(nil).InsertChannelMessageUnseeded), ctx, arg)
 }
 
 // InsertObservation mocks base method.

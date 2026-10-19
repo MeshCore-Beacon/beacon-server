@@ -136,6 +136,9 @@ type DB interface {
 	// InsertChannelMessage stores a decrypted group text message. Returns the inserted message, nil for a duplicate, and an error.
 	InsertChannelMessage(ctx context.Context, m InsertChannelMessageParams) (*InsertedChannelMessage, error)
 
+	// AddChannelMessageIATA records iata as a site of the packet's message; a no-op when the packet has none.
+	AddChannelMessageIATA(ctx context.Context, packetHash []byte, iata string) error
+
 	// UpdateObserverStatus updates the observer row from a /status message. Returns the OberserID
 	// and any error.
 	UpdateObserverStatus(ctx context.Context, p UpdateObserverStatusParams) (uuid.UUID, error)

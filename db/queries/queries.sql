@@ -1557,6 +1557,37 @@ WITH inserted AS (
   FROM packet_observations po JOIN inserted i ON i.packet_hash = po.packet_hash
   WHERE $6::boolean
   ON CONFLICT (hour) DO UPDATE SET enqueued_at = now()
+), seed AS (
+  -- Every stored observation's site, in the same statement; a later observation adds its own site.
+  INSERT INTO channel_message_iatas (message_id, iata, channel_id, scope_id)
+  SELECT DISTINCT i.id, po.iata, i.channel_id, p.scope_id
+  FROM inserted i
+  JOIN packets p ON p.packet_hash = i.packet_hash
+  JOIN packet_observations po ON po.packet_hash = i.packet_hash
+  ON CONFLICT (message_id, iata) DO NOTHING
+)
+SELECT inserted.id, ts.name AS scope_name, p.transport_codes_present
+FROM inserted
+JOIN packets p ON p.packet_hash = inserted.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id;
+
+-- name: InsertChannelMessageUnseeded :one
+-- The seeded insert's fallback: the same statement without the site seed. The read-model
+-- reconcile adds the message's sites within one interval.
+WITH inserted AS (
+  INSERT INTO channel_messages (channel_id, packet_hash, sender_name, content, sent_at)
+  VALUES ($1, $2, $3, $4, $5)
+  ON CONFLICT (packet_hash) DO NOTHING
+  RETURNING id, packet_hash, channel_id
+), bump AS (
+  UPDATE channels c SET message_count = c.message_count + 1
+  FROM inserted WHERE c.id = inserted.channel_id
+), dirty AS (
+  INSERT INTO analytics_dirty_hours (hour)
+  SELECT DISTINCT date_trunc('hour', po.heard_at, 'UTC')
+  FROM packet_observations po JOIN inserted i ON i.packet_hash = po.packet_hash
+  WHERE $6::boolean
+  ON CONFLICT (hour) DO UPDATE SET enqueued_at = now()
 )
 SELECT inserted.id, ts.name AS scope_name, p.transport_codes_present
 FROM inserted

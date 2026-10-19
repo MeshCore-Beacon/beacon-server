@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"log/slog"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
@@ -217,16 +218,35 @@ func (s *Store) GetChannel(ctx context.Context, channelID int32) (*api.Channel, 
 	return &channel, nil
 }
 
+// InsertChannelMessage stores a message and, in the same statement, the site of every stored observation of
+// its packet. If that statement fails for any reason but cancellation, the message is stored without its sites
+// (the read-model reconcile adds them), so no error path loses a message today's statement would store.
 func (s *Store) InsertChannelMessage(ctx context.Context, m ingest.InsertChannelMessageParams) (*ingest.InsertedChannelMessage, error) {
 	params := sqlc.InsertChannelMessageParams{ChannelID: int32(m.ChannelID), PacketHash: m.PacketHash, SenderName: &m.SenderName, Content: &m.Content, SentAt: pgtype.Timestamptz{Time: m.SentAt, Valid: true}, Column6: m.Historical}
 	row, err := s.q.InsertChannelMessage(ctx, params)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil // duplicate
 	}
+	if err != nil && ctx.Err() == nil {
+		slog.Warn("channel message site seed failed; storing the message without it", "component", "db", "packet_hash", hex.EncodeToString(m.PacketHash), "error", err)
+		unseeded, uerr := s.q.InsertChannelMessageUnseeded(ctx, sqlc.InsertChannelMessageUnseededParams(params))
+		if errors.Is(uerr, pgx.ErrNoRows) {
+			return nil, nil // duplicate
+		}
+		if uerr != nil {
+			return nil, uerr
+		}
+		row, err = sqlc.InsertChannelMessageRow(unseeded), nil
+	}
 	if err != nil {
 		return nil, err
 	}
 	return &ingest.InsertedChannelMessage{ID: row.ID, Scope: row.ScopeName, ScopeStatus: api.RecordedChannelScopeStatus(row.ScopeName, row.TransportCodesPresent)}, nil
+}
+
+// AddChannelMessageIATA records iata as a site of the packet's message, when the packet has one.
+func (s *Store) AddChannelMessageIATA(ctx context.Context, packetHash []byte, iata string) error {
+	return s.q.AddChannelMessageIATA(ctx, sqlc.AddChannelMessageIATAParams{Iata: iata, PacketHash: packetHash})
 }
 
 func (s *Store) ListChannelMessages(ctx context.Context, channelID *int32, since time.Time, limit int32, iatas []string, scope string, cursor int64) (api.Page[api.ChannelMessage], error) {

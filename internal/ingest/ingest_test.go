@@ -190,6 +190,20 @@ type stubDB struct {
 	undecryptedByHash          []UndecryptedPacket
 	backfillHashes             [][]byte
 	dbHook                     func() // runs in UpsertChannelIATA, the first DB call after InsertObservation
+	upsertChannelErr           error
+	addCalls                   []addCall
+	addErr                     error
+}
+
+// addCall is one AddChannelMessageIATA call.
+type addCall struct {
+	hash string
+	iata string
+}
+
+func (s *stubDB) AddChannelMessageIATA(_ context.Context, packetHash []byte, iata string) error {
+	s.addCalls = append(s.addCalls, addCall{string(packetHash), iata})
+	return s.addErr
 }
 
 type setCapabilityCall struct {
@@ -273,7 +287,7 @@ func (s *stubDB) ResolveEndpointHashes(_ context.Context, _ string, _ [][]byte) 
 
 func (s *stubDB) UpsertChannel(_ context.Context, _ []byte, _ []byte, _, _ string) (int, error) {
 	s.upsertChannelCalls++
-	return 0, nil
+	return 0, s.upsertChannelErr
 }
 
 func (s *stubDB) UpsertChannelHashOnly(_ context.Context, _ []byte) (int, error) {
