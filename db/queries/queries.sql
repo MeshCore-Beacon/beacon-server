@@ -171,8 +171,7 @@ WHERE observer_id = $1
 ORDER BY last_seen DESC;
 
 -- name: ListObservers :many
--- Pass cursor=0 to start from the beginning, or the last seen observer's rownum for pagination.
--- Note: observers use UUID PKs so we order by last_seen and use a keyset on last_seen+id.
+-- Observers newest last_seen first; the cursor is the (last_seen, id) of the last row.
 SELECT
   o.id,
   o.display_name,
@@ -186,7 +185,8 @@ COALESCE(CASE
     WHEN GREATEST(COALESCE(o.last_status_at, o.last_seen), o.last_seen) > NOW() - INTERVAL '5 minutes' THEN 'online'
     ELSE 'offline'
 END, 'offline')::text AS status,
-COALESCE(o.last_iata, '')::text AS iata
+COALESCE(o.last_iata, '')::text AS iata,
+o.last_seen
 FROM observers o
 LEFT JOIN observer_brokers ob ON ob.observer_id = o.id
 LEFT JOIN observer_scopes os ON os.observer_id = o.id
@@ -200,14 +200,14 @@ WHERE
     ELSE 'offline'
   END = $4)
   AND ($5 = '' OR o.display_name ILIKE '%' || $5 || '%')
-  AND ($6::timestamptz IS NULL OR o.last_seen < $6)
+  AND (o.last_seen, o.id) < ($6::timestamptz, $9::uuid)
   AND ($8::text = '' OR EXISTS (
     SELECT 1 FROM observer_scopes os2
     JOIN transport_scopes ts2 ON ts2.id = os2.scope_id
     WHERE os2.observer_id = o.id AND ts2.name = $8::text
   ))
 GROUP BY o.id
-ORDER BY o.last_seen DESC
+ORDER BY o.last_seen DESC, o.id DESC
 LIMIT $7;
 
 -- name: GetObserverLastIATA :one
@@ -1285,10 +1285,10 @@ WHERE
   )
   AND ($5::bytea IS NULL OR n.public_key = $5)
   AND ($6 = '' OR n.name ILIKE '%' || $6 || '%')
-  AND ($7::timestamptz IS NULL OR n.last_seen < $7)
+  AND (n.last_seen, n.id) < ($7::timestamptz, $12::uuid)
   AND ($9::text = '' OR ts.name = $9::text)
   AND ($11::text = '' OR encode(n.public_key, 'hex') ILIKE $11 || '%')
-ORDER BY n.last_seen DESC
+ORDER BY n.last_seen DESC, n.id DESC
 LIMIT $8
 )
 SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen,
@@ -1302,7 +1302,7 @@ SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_
     (SELECT COALESCE(array_agg(DISTINCT nn.neighbor_id), '{}'::uuid[]) FROM node_neighbors nn WHERE nn.node_id = n.id)
   ELSE NULL END)::uuid[] AS neighbor_ids
 FROM page n
-ORDER BY n.last_seen DESC;
+ORDER BY n.last_seen DESC, n.id DESC;
 
 -- name: ListNodeObservations :many
 SELECT po.id, encode(po.packet_hash, 'hex') AS packet_hash_hex,

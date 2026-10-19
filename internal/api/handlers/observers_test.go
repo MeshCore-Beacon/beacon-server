@@ -75,8 +75,8 @@ func TestListObservers_OK(t *testing.T) {
 	observerID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	r := chi.NewRouter()
 	r.Get("/observers", listObservers(stubReader{
-		listObservers: func(_ context.Context, _ []string, _, _, _, _, _ string, _ int64, _ int32) (api.Page[api.ObserverSummary], error) {
-			return api.Page[api.ObserverSummary]{Items: []api.ObserverSummary{{ID: observerID}}}, nil
+		listObservers: func(_ context.Context, _ []string, _, _, _, _, _ string, _ int64, _ *api.ObserverCursor, _ int32) (api.ObserverPage, error) {
+			return api.ObserverPage{Page: api.Page[api.ObserverSummary]{Items: []api.ObserverSummary{{ID: observerID}}}}, nil
 		},
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/observers", nil)

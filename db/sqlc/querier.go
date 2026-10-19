@@ -245,8 +245,7 @@ type Querier interface {
 	// Copyright 2026 Beacon Contributors
 	// SPDX-License-Identifier: AGPL-3.0-or-later
 	ListObserverDirectory(ctx context.Context, arg ListObserverDirectoryParams) (string, error)
-	// Pass cursor=0 to start from the beginning, or the last seen observer's rownum for pagination.
-	// Note: observers use UUID PKs so we order by last_seen and use a keyset on last_seen+id.
+	// Observers newest last_seen first; the cursor is the (last_seen, id) of the last row.
 	ListObservers(ctx context.Context, arg ListObserversParams) ([]ListObserversRow, error)
 	// Returns packets with observations after the given observation ID, ordered oldest first.
 	// Used for WS reconnect backfill. Pass afterObservationId=0 to start from the beginning.

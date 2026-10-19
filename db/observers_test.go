@@ -82,6 +82,7 @@ func TestListObservers_Pagination(t *testing.T) {
 		rows[i] = sqlc.ListObserversRow{
 			ID:           observerID,
 			LastStatusAt: lastStatusAt,
+			LastSeen:     lastStatusAt,
 		}
 	}
 
@@ -90,7 +91,7 @@ func TestListObservers_Pagination(t *testing.T) {
 		Return(rows, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListObservers(context.Background(), []string{"YVR"}, "", "", "", "", "", 0, 2)
+	page, err := store.ListObservers(context.Background(), []string{"YVR"}, "", "", "", "", "", 0, nil, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -126,7 +127,7 @@ func TestListObservers_RadioStringFormatting(t *testing.T) {
 		}, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListObservers(context.Background(), nil, "", "", "", "", "", 0, 10)
+	page, err := store.ListObservers(context.Background(), nil, "", "", "", "", "", 0, nil, 10)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -154,7 +155,7 @@ func TestListObservers_NilRadioFields(t *testing.T) {
 		}, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListObservers(context.Background(), nil, "", "", "", "", "", 0, 10)
+	page, err := store.ListObservers(context.Background(), nil, "", "", "", "", "", 0, nil, 10)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -172,7 +173,7 @@ func TestListObservers_DBError(t *testing.T) {
 		Return(nil, errors.New("db error"))
 
 	store := &Store{q: mock}
-	_, err := store.ListObservers(context.Background(), nil, "", "", "", "", "", 0, 10)
+	_, err := store.ListObservers(context.Background(), nil, "", "", "", "", "", 0, nil, 10)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -952,5 +953,70 @@ func TestGetObserverActivity_SinceAlignedToInterval(t *testing.T) {
 	}
 	if !gotInterval.Valid || gotInterval.Microseconds != interval.Microseconds() {
 		t.Errorf("expected interval %d us, got %+v", interval.Microseconds(), gotInterval)
+	}
+}
+
+// Page 1 starts at infinity, a numeric cursor pairs its millisecond with the nil uuid, and a pageCursor sends its
+// exact pair, winning over a numeric cursor sent alongside.
+func TestListObservers_CursorParams(t *testing.T) {
+	const legacy = int64(1792442625019)
+	pc := &api.ObserverCursor{LastSeen: time.UnixMicro(1792442625019123).UTC(), ID: uuid.MustParse("0b0b0b0b-0000-0000-0000-000000000001")}
+	for _, tc := range []struct {
+		name   string
+		cursor int64
+		pc     *api.ObserverCursor
+		ts     pgtype.Timestamptz
+		id     uuid.UUID
+	}{
+		{"page 1", 0, nil, pgtype.Timestamptz{InfinityModifier: pgtype.Infinity, Valid: true}, uuid.Nil},
+		{"negative cursor", -5, nil, pgtype.Timestamptz{InfinityModifier: pgtype.Infinity, Valid: true}, uuid.Nil},
+		{"legacy cursor", legacy, nil, pgtype.Timestamptz{Time: time.UnixMilli(legacy), Valid: true}, uuid.Nil},
+		{"pageCursor", 0, pc, pgtype.Timestamptz{Time: pc.LastSeen, Valid: true}, pc.ID},
+		{"pageCursor wins", legacy, pc, pgtype.Timestamptz{Time: pc.LastSeen, Valid: true}, pc.ID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			mock := mockdb.NewMockQuerier(ctrl)
+			mock.EXPECT().
+				ListObservers(gomock.Any(), gomock.Eq(sqlc.ListObserversParams{
+					Column1: []string{"YVR"}, Column2: "repeater", Column3: "b1", Column4: "online", Column5: "n",
+					Column6: tc.ts, Limit: 6, Column8: "#test", Column9: tc.id,
+				})).
+				Return(nil, nil)
+			store := &Store{q: mock}
+			page, err := store.ListObservers(context.Background(), []string{"YVR"}, "repeater", "b1", "online", "n", "#test", tc.cursor, tc.pc, 5)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if page.Items == nil || page.HasMore || page.NextCursor != nil || page.NextPageCursor != nil {
+				t.Fatalf("empty page: %+v", page)
+			}
+		})
+	}
+}
+
+// Both cursors come from the last row's last_seen, also when its last_status_at is NULL.
+func TestListObservers_NextCursorFromLastSeen(t *testing.T) {
+	rows := []sqlc.ListObserversRow{
+		{ID: uuid.MustParse("00000000-0000-0000-0000-000000000001"), LastSeen: pgtype.Timestamptz{Time: time.UnixMicro(1792442625019123).UTC(), Valid: true},
+			LastStatusAt: pgtype.Timestamptz{Time: time.UnixMilli(1700000000000), Valid: true}},
+		{ID: uuid.MustParse("00000000-0000-0000-0000-000000000002"), LastSeen: pgtype.Timestamptz{Time: time.UnixMicro(1792442625018456).UTC(), Valid: true}},
+		{ID: uuid.MustParse("00000000-0000-0000-0000-000000000003"), LastSeen: pgtype.Timestamptz{Time: time.UnixMicro(1792442625017000).UTC(), Valid: true}},
+	}
+	for _, limit := range []int32{1, 2} {
+		ctrl := gomock.NewController(t)
+		mock := mockdb.NewMockQuerier(ctrl)
+		mock.EXPECT().ListObservers(gomock.Any(), gomock.Any()).Return(rows[:limit+1], nil)
+		store := &Store{q: mock}
+		page, err := store.ListObservers(context.Background(), nil, "", "", "", "", "", 0, nil, limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		last := rows[limit-1]
+		want := api.ObserverCursor{LastSeen: last.LastSeen.Time, ID: last.ID}.String()
+		if !page.HasMore || page.NextCursor == nil || *page.NextCursor != last.LastSeen.Time.UnixMilli() ||
+			page.NextPageCursor == nil || *page.NextPageCursor != want {
+			t.Fatalf("limit %d: hasMore=%t nextCursor=%v nextPageCursor=%v, want %s", limit, page.HasMore, page.NextCursor, page.NextPageCursor, want)
+		}
 	}
 }

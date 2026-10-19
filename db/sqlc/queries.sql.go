@@ -3527,10 +3527,10 @@ WHERE
   )
   AND ($5::bytea IS NULL OR n.public_key = $5)
   AND ($6 = '' OR n.name ILIKE '%' || $6 || '%')
-  AND ($7::timestamptz IS NULL OR n.last_seen < $7)
+  AND (n.last_seen, n.id) < ($7::timestamptz, $12::uuid)
   AND ($9::text = '' OR ts.name = $9::text)
   AND ($11::text = '' OR encode(n.public_key, 'hex') ILIKE $11 || '%')
-ORDER BY n.last_seen DESC
+ORDER BY n.last_seen DESC, n.id DESC
 LIMIT $8
 )
 SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen,
@@ -3544,7 +3544,7 @@ SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_
     (SELECT COALESCE(array_agg(DISTINCT nn.neighbor_id), '{}'::uuid[]) FROM node_neighbors nn WHERE nn.node_id = n.id)
   ELSE NULL END)::uuid[] AS neighbor_ids
 FROM page n
-ORDER BY n.last_seen DESC
+ORDER BY n.last_seen DESC, n.id DESC
 `
 
 type ListNodesParams struct {
@@ -3559,6 +3559,7 @@ type ListNodesParams struct {
 	Column9  string             `json:"column_9"`
 	Column10 bool               `json:"column_10"`
 	Column11 string             `json:"column_11"`
+	Column12 uuid.UUID          `json:"column_12"`
 }
 
 type ListNodesRow struct {
@@ -3594,6 +3595,7 @@ func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNod
 		arg.Column9,
 		arg.Column10,
 		arg.Column11,
+		arg.Column12,
 	)
 	if err != nil {
 		return nil, err
@@ -3791,7 +3793,8 @@ COALESCE(CASE
     WHEN GREATEST(COALESCE(o.last_status_at, o.last_seen), o.last_seen) > NOW() - INTERVAL '5 minutes' THEN 'online'
     ELSE 'offline'
 END, 'offline')::text AS status,
-COALESCE(o.last_iata, '')::text AS iata
+COALESCE(o.last_iata, '')::text AS iata,
+o.last_seen
 FROM observers o
 LEFT JOIN observer_brokers ob ON ob.observer_id = o.id
 LEFT JOIN observer_scopes os ON os.observer_id = o.id
@@ -3805,14 +3808,14 @@ WHERE
     ELSE 'offline'
   END = $4)
   AND ($5 = '' OR o.display_name ILIKE '%' || $5 || '%')
-  AND ($6::timestamptz IS NULL OR o.last_seen < $6)
+  AND (o.last_seen, o.id) < ($6::timestamptz, $9::uuid)
   AND ($8::text = '' OR EXISTS (
     SELECT 1 FROM observer_scopes os2
     JOIN transport_scopes ts2 ON ts2.id = os2.scope_id
     WHERE os2.observer_id = o.id AND ts2.name = $8::text
   ))
 GROUP BY o.id
-ORDER BY o.last_seen DESC
+ORDER BY o.last_seen DESC, o.id DESC
 LIMIT $7
 `
 
@@ -3825,6 +3828,7 @@ type ListObserversParams struct {
 	Column6 pgtype.Timestamptz `json:"column_6"`
 	Limit   int32              `json:"limit"`
 	Column8 string             `json:"column_8"`
+	Column9 uuid.UUID          `json:"column_9"`
 }
 
 type ListObserversRow struct {
@@ -3838,10 +3842,10 @@ type ListObserversRow struct {
 	Scopes       []string           `json:"scopes"`
 	Status       string             `json:"status"`
 	Iata         string             `json:"iata"`
+	LastSeen     pgtype.Timestamptz `json:"last_seen"`
 }
 
-// Pass cursor=0 to start from the beginning, or the last seen observer's rownum for pagination.
-// Note: observers use UUID PKs so we order by last_seen and use a keyset on last_seen+id.
+// Observers newest last_seen first; the cursor is the (last_seen, id) of the last row.
 func (q *Queries) ListObservers(ctx context.Context, arg ListObserversParams) ([]ListObserversRow, error) {
 	rows, err := q.db.Query(ctx, listObservers,
 		arg.Column1,
@@ -3852,6 +3856,7 @@ func (q *Queries) ListObservers(ctx context.Context, arg ListObserversParams) ([
 		arg.Column6,
 		arg.Limit,
 		arg.Column8,
+		arg.Column9,
 	)
 	if err != nil {
 		return nil, err
@@ -3871,6 +3876,7 @@ func (q *Queries) ListObservers(ctx context.Context, arg ListObserversParams) ([
 			&i.Scopes,
 			&i.Status,
 			&i.Iata,
+			&i.LastSeen,
 		); err != nil {
 			return nil, err
 		}

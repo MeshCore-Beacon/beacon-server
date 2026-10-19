@@ -85,7 +85,7 @@ func listObservers(reader api.Reader) http.HandlerFunc {
 			}
 			iatas = append(iatas, regionIATAs...)
 		}
-		observers, err := reader.ListObservers(r.Context(), iatas, observerType, broker, status, name, scope, cursor, limit)
+		observers, err := reader.ListObservers(r.Context(), iatas, observerType, broker, status, name, scope, cursor, nil, limit)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "failed to get list of observers")
 			return

@@ -71,4 +71,106 @@ func init() {
 		!strings.Contains(legacyListPacketsDet, "heard_at DESC, id DESC\n  LIMIT 1") {
 		panic("legacyListPacketsDet: a tiebreak replacement did not apply")
 	}
+	if strings.Count(legacyListNodesDet, "n.last_seen DESC, n.id DESC\n") != 2 {
+		panic("legacyListNodesDet: a tiebreak replacement did not apply")
+	}
+	if !strings.Contains(legacyListObserversDet, "o.last_seen DESC, o.id DESC\nLIMIT $7") {
+		panic("legacyListObserversDet: the tiebreak replacement did not apply")
+	}
 }
+
+// legacyListNodes is the pre-change ListNodes statement, verbatim. Args: $1 node_type, $2 iatas, $3 paths tristate,
+// $4 traces tristate, $5 pubkey, $6 name, $7 cursor (NULL when absent), $8 limit, $9 scope, $10 neighbors,
+// $11 pubkey prefix.
+const legacyListNodes = `-- name: ListNodes :many
+WITH page AS (
+SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen,
+  n.radio_freq_mhz, n.radio_sf, n.radio_bw_khz, ts.name AS default_scope_name
+FROM nodes n
+LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id
+WHERE
+  ($1 = 0 OR n.node_type = $1)
+  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR n.id IN (SELECT node_id FROM node_iatas WHERE iata = ANY($2::bpchar[])))
+  AND (
+    $3::text = 'any'
+    OR ($3::text = 'true' AND n.supports_multibyte_paths = TRUE)
+    OR ($3::text = 'false' AND n.supports_multibyte_paths = FALSE)
+  )
+  AND (
+    $4::text = 'any'
+    OR ($4::text = 'true' AND n.supports_multibyte_traces = TRUE)
+    OR ($4::text = 'false' AND n.supports_multibyte_traces = FALSE)
+  )
+  AND ($5::bytea IS NULL OR n.public_key = $5)
+  AND ($6 = '' OR n.name ILIKE '%' || $6 || '%')
+  AND ($7::timestamptz IS NULL OR n.last_seen < $7)
+  AND ($9::text = '' OR ts.name = $9::text)
+  AND ($11::text = '' OR encode(n.public_key, 'hex') ILIKE $11 || '%')
+ORDER BY n.last_seen DESC
+LIMIT $8
+)
+SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen,
+  n.radio_freq_mhz, n.radio_sf, n.radio_bw_khz, n.default_scope_name,
+  (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
+   FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas,
+  EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
+  (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
+  (SELECT COUNT(DISTINCT nn.neighbor_id) FROM node_neighbors nn WHERE nn.node_id = n.id)::bigint AS known_neighbor_count,
+  (CASE WHEN $10::bool THEN
+    (SELECT COALESCE(array_agg(DISTINCT nn.neighbor_id), '{}'::uuid[]) FROM node_neighbors nn WHERE nn.node_id = n.id)
+  ELSE NULL END)::uuid[] AS neighbor_ids
+FROM page n
+ORDER BY n.last_seen DESC
+`
+
+// legacyListNodesDet is today's ListNodes plus the id tiebreak in both ORDER BYs.
+var legacyListNodesDet = strings.NewReplacer(
+	"ORDER BY n.last_seen DESC\nLIMIT $8", "ORDER BY n.last_seen DESC, n.id DESC\nLIMIT $8",
+	"FROM page n\nORDER BY n.last_seen DESC\n", "FROM page n\nORDER BY n.last_seen DESC, n.id DESC\n",
+).Replace(legacyListNodes)
+
+// legacyListObservers is the pre-change ListObservers statement, verbatim. Args: $1 iatas, $2 type, $3 broker,
+// $4 status, $5 name, $6 cursor (NULL when absent), $7 limit, $8 scope.
+const legacyListObservers = `-- name: ListObservers :many
+SELECT
+  o.id,
+  o.display_name,
+  o.observer_type,
+  o.last_status_at,
+  o.radio_freq_mhz,
+  o.radio_sf,
+  o.radio_bw_khz,
+  array_remove(array_agg(DISTINCT ts.name ORDER BY ts.name), NULL)::text[] AS scopes,
+COALESCE(CASE
+    WHEN GREATEST(COALESCE(o.last_status_at, o.last_seen), o.last_seen) > NOW() - INTERVAL '5 minutes' THEN 'online'
+    ELSE 'offline'
+END, 'offline')::text AS status,
+COALESCE(o.last_iata, '')::text AS iata
+FROM observers o
+LEFT JOIN observer_brokers ob ON ob.observer_id = o.id
+LEFT JOIN observer_scopes os ON os.observer_id = o.id
+LEFT JOIN transport_scopes ts ON ts.id = os.scope_id
+WHERE
+  (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR o.last_iata = ANY($1::bpchar[]))
+  AND ($2 = '' OR o.observer_type = $2)
+  AND ($3 = '' OR ob.broker_name = $3)
+  AND ($4 = '' OR CASE
+    WHEN GREATEST(COALESCE(o.last_status_at, o.last_seen), o.last_seen) > NOW() - INTERVAL '5 minutes' THEN 'online'
+    ELSE 'offline'
+  END = $4)
+  AND ($5 = '' OR o.display_name ILIKE '%' || $5 || '%')
+  AND ($6::timestamptz IS NULL OR o.last_seen < $6)
+  AND ($8::text = '' OR EXISTS (
+    SELECT 1 FROM observer_scopes os2
+    JOIN transport_scopes ts2 ON ts2.id = os2.scope_id
+    WHERE os2.observer_id = o.id AND ts2.name = $8::text
+  ))
+GROUP BY o.id
+ORDER BY o.last_seen DESC
+LIMIT $7
+`
+
+// legacyListObserversDet is today's ListObservers plus the id tiebreak.
+var legacyListObserversDet = strings.NewReplacer(
+	"ORDER BY o.last_seen DESC\nLIMIT $7", "ORDER BY o.last_seen DESC, o.id DESC\nLIMIT $7",
+).Replace(legacyListObservers)

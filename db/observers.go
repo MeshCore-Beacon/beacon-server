@@ -32,12 +32,17 @@ func (s *Store) UpsertObserver(ctx context.Context, pubkey []byte, iata string) 
 	return row.ID, displayName, err
 }
 
-func (s *Store) ListObservers(ctx context.Context, iatas []string, observerType, broker, status, name, scope string, cursor int64, limit int32) (api.Page[api.ObserverSummary], error) {
-	var cursorTS pgtype.Timestamptz
-	if cursor > 0 {
-		cursorTS = pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}
+// listObserversParams builds the statement's arguments for one ListObservers request.
+func listObserversParams(iatas []string, observerType, broker, status, name, scope string, cursor int64, pageCursor *api.ObserverCursor, limit int32) sqlc.ListObserversParams {
+	var (
+		at *time.Time
+		id uuid.UUID
+	)
+	if pageCursor != nil {
+		at, id = &pageCursor.LastSeen, pageCursor.ID
 	}
-	params := sqlc.ListObserversParams{
+	cursorTS, cursorID := uuidKeysetCursor(cursor, at, id)
+	return sqlc.ListObserversParams{
 		Column1: iatas,
 		Column2: observerType,
 		Column3: broker,
@@ -46,10 +51,15 @@ func (s *Store) ListObservers(ctx context.Context, iatas []string, observerType,
 		Column6: cursorTS,
 		Limit:   limit + 1,
 		Column8: scope,
+		Column9: cursorID,
 	}
+}
+
+func (s *Store) ListObservers(ctx context.Context, iatas []string, observerType, broker, status, name, scope string, cursor int64, pageCursor *api.ObserverCursor, limit int32) (api.ObserverPage, error) {
+	params := listObserversParams(iatas, observerType, broker, status, name, scope, cursor, pageCursor, limit)
 	rows, err := s.q.ListObservers(ctx, params)
 	if err != nil {
-		return api.Page[api.ObserverSummary]{}, err
+		return api.ObserverPage{}, err
 	}
 	hasMore := len(rows) > int(limit)
 	if hasMore {
@@ -75,19 +85,16 @@ func (s *Store) ListObservers(ctx context.Context, iatas []string, observerType,
 		}
 		items = append(items, observer)
 	}
-	var nextCursor *int64
-	if hasMore {
-		// observers use UUID so encode last_seen as cursor
-		if rows[len(rows)-1].LastStatusAt.Valid {
-			ms := rows[len(rows)-1].LastStatusAt.Time.UnixMilli()
-			nextCursor = &ms
-		}
+	page := api.ObserverPage{Page: api.Page[api.ObserverSummary]{Items: items, HasMore: hasMore}}
+	if hasMore && len(rows) > 0 {
+		// Both cursors follow the ORDER BY column, last_seen.
+		last := rows[len(rows)-1]
+		ms := last.LastSeen.Time.UnixMilli()
+		next := api.ObserverCursor{LastSeen: last.LastSeen.Time, ID: last.ID}.String()
+		page.NextCursor = &ms
+		page.NextPageCursor = &next
 	}
-	return api.Page[api.ObserverSummary]{
-		Items:      items,
-		NextCursor: nextCursor,
-		HasMore:    hasMore,
-	}, nil
+	return page, nil
 }
 
 func (s *Store) GetObserver(ctx context.Context, observerID uuid.UUID) (*api.Observer, error) {

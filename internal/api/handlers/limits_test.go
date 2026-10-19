@@ -39,20 +39,20 @@ func TestListLimits(t *testing.T) {
 			got = limit
 			return nil, nil
 		},
-		listObservers: func(ctx context.Context, iatas []string, observerType, broker, status, name, scope string, cursor int64, limit int32) (api.Page[api.ObserverSummary], error) {
+		listObservers: func(ctx context.Context, iatas []string, observerType, broker, status, name, scope string, cursor int64, pageCursor *api.ObserverCursor, limit int32) (api.ObserverPage, error) {
 			calls++
 			got = limit
-			return api.Page[api.ObserverSummary]{}, nil
+			return api.ObserverPage{}, nil
 		},
 		listObserverAdverts: func(ctx context.Context, observerID uuid.UUID, cursor int64, limit int32) (api.Page[api.AdvertObservation], error) {
 			calls++
 			got = limit
 			return api.Page[api.AdvertObservation]{}, nil
 		},
-		listNodes: func(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, limit int32, includeNeighbors bool) (api.Page[api.NodeSummary], error) {
+		listNodes: func(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
 			calls++
 			got = limit
-			return api.Page[api.NodeSummary]{}, nil
+			return api.NodePage{}, nil
 		},
 		listNodeObservations: func(ctx context.Context, nodeID uuid.UUID, cursor int64, limit int32) (api.Page[api.PacketObservationSummary], error) {
 			calls++
