@@ -1294,7 +1294,7 @@ FROM observer_telemetry
 WHERE observer_id = $1
   AND ($2::timestamptz IS NULL OR reported_at >= $2)
   AND ($3::timestamptz IS NULL OR reported_at <= $3)
-  AND ($4 = 0 OR id > $4)
+  AND ($4::bigint = 0 OR id > $4::bigint)
 ORDER BY reported_at ASC
 `
 
@@ -1302,7 +1302,7 @@ type GetObserverTelemetryParams struct {
 	ObserverID uuid.UUID          `json:"observer_id"`
 	Column2    pgtype.Timestamptz `json:"column_2"`
 	Column3    pgtype.Timestamptz `json:"column_3"`
-	Column4    interface{}        `json:"column_4"`
+	Column4    int64              `json:"column_4"`
 }
 
 type GetObserverTelemetryRow struct {
@@ -2589,7 +2589,7 @@ LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE ($1::timestamptz IS NULL OR cm.sent_at >= $1)
   AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR po.iata = ANY($2::bpchar[]))
   AND ($3::text = '' OR ts.name = $3::text)
-  AND ($4 = 0 OR cm.id < $4)
+  AND ($4::bigint = 0 OR cm.id < $4::bigint)
 ORDER BY cm.id DESC
 LIMIT $5
 `
@@ -2598,7 +2598,7 @@ type ListAllChannelMessagesParams struct {
 	Column1 pgtype.Timestamptz `json:"column_1"`
 	Column2 []string           `json:"column_2"`
 	Column3 string             `json:"column_3"`
-	Column4 interface{}        `json:"column_4"`
+	Column4 int64              `json:"column_4"`
 	Limit   int32              `json:"limit"`
 }
 
@@ -3220,15 +3220,15 @@ FROM packet_observations po
 JOIN packets p ON p.packet_hash = po.packet_hash
 JOIN nodes n ON n.public_key = p.origin_pubkey
 WHERE n.id = $1
-  AND ($2 = 0 OR po.id < $2)
+  AND ($2::bigint = 0 OR po.id < $2::bigint)
 ORDER BY po.id DESC
 LIMIT $3
 `
 
 type ListNodeObservationsParams struct {
-	ID      uuid.UUID   `json:"id"`
-	Column2 interface{} `json:"column_2"`
-	Limit   int32       `json:"limit"`
+	ID      uuid.UUID `json:"id"`
+	Column2 int64     `json:"column_2"`
+	Limit   int32     `json:"limit"`
 }
 
 type ListNodeObservationsRow struct {
@@ -3484,15 +3484,15 @@ JOIN packets p ON p.packet_hash = po.packet_hash
 LEFT JOIN nodes n ON n.public_key = p.origin_pubkey
 WHERE po.observer_id = $1
   AND p.payload_type = 4
-  AND ($2 = 0 OR po.id > $2)
+  AND ($2::bigint = 0 OR po.id > $2::bigint)
 ORDER BY po.id ASC
 LIMIT $3
 `
 
 type ListObserverAdvertsParams struct {
-	ObserverID uuid.UUID   `json:"observer_id"`
-	Column2    interface{} `json:"column_2"`
-	Limit      int32       `json:"limit"`
+	ObserverID uuid.UUID `json:"observer_id"`
+	Column2    int64     `json:"column_2"`
+	Limit      int32     `json:"limit"`
 }
 
 type ListObserverAdvertsRow struct {
