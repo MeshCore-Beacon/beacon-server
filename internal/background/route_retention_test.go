@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/db"
+	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 type expiredCall struct {
@@ -437,5 +439,22 @@ func TestRouteRetentionTaskName(t *testing.T) {
 	task := RouteRetentionTask(newFakeRetainer(), time.Hour, time.Hour, 3, 2*time.Hour)
 	if task.Name != "route_retention" || task.Interval != 2*time.Hour {
 		t.Errorf("task %q every %v", task.Name, task.Interval)
+	}
+}
+
+func TestRouteRetentionCountsJobRows(t *testing.T) {
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	f := newFakeRetainer()
+	f.expiredRes = append(f.expiredRes, struct {
+		selected int64
+		last     db.RouteKey
+	}{5, db.RouteKey{TS: now.Add(-15 * 24 * time.Hour), ID: 9}})
+	f.candidates[1] = 3
+	before := testutil.ToFloat64(metrics.JobRows.WithLabelValues("route_retention"))
+	if err := routeRetentionTask(f, 14*24*time.Hour, 7*24*time.Hour, 3, time.Hour, func() time.Time { return now }, 7).Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := testutil.ToFloat64(metrics.JobRows.WithLabelValues("route_retention")) - before; got != 8 {
+		t.Errorf("route retention rows +%v, want +8 (5 expired, 3 grace)", got)
 	}
 }

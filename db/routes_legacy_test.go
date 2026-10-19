@@ -59,8 +59,8 @@ INSERT INTO known_routes (id,path_key,node_ids,hash_prefix,iata,hop_count,first_
 SELECT 1000 + i, int8send(1000 + i), ARRAY[md5('g' || i)::uuid], ARRAY['\x02'::bytea], 'GPT', 2 + i % 4, '2026-01-01',
        '2026-01-09'::timestamptz - i * interval '1 second' FROM generate_series(1, 60) i;`
 
-// routeStore is a Store over tx whose class C statements go unnamed, as New wires it.
-func routeStore(tx pgx.Tx) *Store { return &Store{q: sqlc.New(tx), qc: sqlc.New(unnamedDBTX{tx})} }
+// routeStore is a Store over tx whose statements all go unnamed, as PlanRouter sends class C.
+func routeStore(tx pgx.Tx) *Store { return &Store{q: sqlc.New(unnamedDBTX{tx})} }
 
 func mustExec(t *testing.T, ctx context.Context, tx pgx.Tx, sql string) {
 	t.Helper()

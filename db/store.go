@@ -9,6 +9,7 @@ package db
 import (
 	"context"
 	"encoding/hex"
+	"sync/atomic"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
@@ -22,19 +23,20 @@ import (
 // Store wraps the sqlc-generated Queries and implements both ingest.DB and api.Reader.
 type Store struct {
 	q                   sqlc.Querier
-	qc                  sqlc.Querier  // class C: unnamed, so always a custom plan (execmode.go)
-	pool                *pgxpool.Pool // rollups need a dedicated connection; nil in mock-backed tests
+	pool                *pgxpool.Pool // dedicated connections (rollups, reconfirm, catalog reads); nil for the API store and mocks
 	clockDriftThreshold time.Duration // see api.Node.ClockOutOfSync
 	staleThreshold      time.Duration // see api.NodeSummary.Stale
+	pgVersion           atomic.Int32  // server_version_num, read by the first PgActivity call
 }
 
-// New creates a Store backed by the given pgxpool connection pool. clockDriftThreshold is
-// the |device clock - server clock| magnitude above which a repeater/room server's
-// clockOutOfSync is reported true; see internal/config.ResolvedConfig.ClockDriftThreshold.
+// New creates a Store whose statements run on dbtx (a pool, or a PlanRouter for the API).
+// pool serves the work that needs a dedicated connection; the API store passes nil.
+// clockDriftThreshold is the |device clock - server clock| magnitude above which a repeater/room
+// server's clockOutOfSync is reported true; see internal/config.ResolvedConfig.ClockDriftThreshold.
 // staleThreshold is how long since last_seen before a node's Stale is reported true; see
 // internal/config.ResolvedConfig.NodeStaleThreshold.
-func New(pool *pgxpool.Pool, clockDriftThreshold, staleThreshold time.Duration) *Store {
-	return &Store{q: sqlc.New(pool), qc: sqlc.New(unnamedDBTX{pool}), pool: pool, clockDriftThreshold: clockDriftThreshold, staleThreshold: staleThreshold}
+func New(dbtx sqlc.DBTX, pool *pgxpool.Pool, clockDriftThreshold, staleThreshold time.Duration) *Store {
+	return &Store{q: sqlc.New(dbtx), pool: pool, clockDriftThreshold: clockDriftThreshold, staleThreshold: staleThreshold}
 }
 
 func (s *Store) ResolvePathHashes(ctx context.Context, iata string, hashes [][]byte) (map[string][]api.ResolvedPathEntry, error) {

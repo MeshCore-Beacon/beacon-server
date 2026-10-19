@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
@@ -36,6 +37,7 @@ func newMessageQueue(workers, capacity, maxBytes int, handle func(context.Contex
 					return
 				}
 				handleSafely(ctx, m, handle)
+				metrics.IngestQueueDepth.Dec()
 				q.mu.Lock()
 				q.bytes -= len(m.Topic()) + len(m.Payload())
 				q.mu.Unlock()
@@ -79,14 +81,19 @@ func (q *messageQueue) enqueue(m mqtt.Message) bool {
 	}
 	if size > q.maxBytes-q.bytes {
 		q.dropped++
+		metrics.IngestDropped.Inc()
 		return false
 	}
+	// Counted before the send: the lane may finish the message (and decrement) before the send returns.
+	metrics.IngestQueueDepth.Inc()
 	select {
 	case q.lanes[int(hash%uint32(len(q.lanes)))] <- m:
 		q.bytes += size
 		return true
 	default:
+		metrics.IngestQueueDepth.Dec()
 		q.dropped++
+		metrics.IngestDropped.Inc()
 		return false
 	}
 }

@@ -198,7 +198,7 @@ INSERT INTO node_neighbors (node_id, neighbor_id, iata) VALUES
 	}
 	insert()
 
-	store := &graceStartRecorder{Store: db.New(pool, time.Hour, time.Hour)}
+	store := &graceStartRecorder{Store: db.New(pool, pool, time.Hour, time.Hour)}
 	if err := routeRetentionTask(store, retention, grace, m, time.Hour, func() time.Time { return now1 }, batch).Run(ctx); err != nil {
 		t.Fatal(err)
 	}

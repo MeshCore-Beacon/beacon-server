@@ -3,14 +3,25 @@
 
 package api
 
+import "errors"
+
 // AdminConfig is a whitelist of selected nonsecret running settings.
 // It is not a serialization of the full file or environment configuration.
 type AdminConfig struct {
-	Auth   AdminAuthConfig   `json:"auth"`
-	CORS   AdminCORSConfig   `json:"cors"`
-	Ingest AdminIngestConfig `json:"ingest"`
-	Mobile AdminMobileConfig `json:"mobile"`
-	Web    AdminWebConfig    `json:"web"`
+	Auth   AdminAuthConfig    `json:"auth"`
+	CORS   AdminCORSConfig    `json:"cors"`
+	Ingest AdminIngestConfig  `json:"ingest"`
+	Mobile AdminMobileConfig  `json:"mobile"`
+	Web    AdminWebConfig     `json:"web"`
+	Guards *AdminGuardsConfig `json:"guards,omitempty"` // absent when database guards are not configured
+}
+
+// AdminGuardsConfig reports the database cost guards.
+type AdminGuardsConfig struct {
+	Enforce       []string `json:"enforce"`         // families currently enforced; the configuration file is the boot default
+	ObserveOnly   bool     `json:"observe_only"`    // the single plan layout makes every family observe
+	Budget        string   `json:"budget"`          // always "shadow"
+	APIPlanLayout string   `json:"api_plan_layout"` // custom_all, split or single
 }
 
 type AdminMobileConfig struct {
@@ -41,16 +52,43 @@ type AdminIngestConfig struct {
 	BrokerCount int `json:"broker_count"`
 }
 
+// UpdateAdminConfigRequest carries cors, guards or both; at least one is required.
 type UpdateAdminConfigRequest struct {
-	CORS *UpdateAdminCORSRequest `json:"cors" validate:"required"`
+	CORS   *UpdateAdminCORSRequest   `json:"cors"`
+	Guards *UpdateAdminGuardsRequest `json:"guards"`
 }
 
 type UpdateAdminCORSRequest struct {
 	AllowedOrigins *[]string `json:"allowed_origins" validate:"required"`
 }
 
+// UpdateAdminGuardsRequest replaces the enforced guard families; an empty list makes every family observe.
+type UpdateAdminGuardsRequest struct {
+	Enforce *[]string `json:"enforce" validate:"required"`
+}
+
 type UpdateAdminConfigResponse struct {
 	Config          AdminConfig `json:"config"`
 	Persisted       bool        `json:"persisted"`
 	RequiresRestart bool        `json:"requires_restart"`
+}
+
+// ErrStatementsUnavailable means the pg_stat_statements extension is missing or not preloaded.
+var ErrStatementsUnavailable = errors.New("pg_stat_statements is not available")
+
+// DBStatement sums pg_stat_statements rows for one sqlc statement in the current database.
+type DBStatement struct {
+	Name       string  `json:"name"` // sqlc statement name; "(unnamed)" aggregates the rest
+	Calls      int64   `json:"calls"`
+	ExecMs     float64 `json:"exec_ms"`
+	PlanMs     float64 `json:"plan_ms"` // 0 unless pg_stat_statements.track_planning is on
+	SharedHit  int64   `json:"shared_hit"`
+	SharedRead int64   `json:"shared_read"`
+	Rows       int64   `json:"rows"`
+	WALBytes   int64   `json:"wal_bytes"`
+}
+
+// DBStatementsResponse lists statements by total execution time, highest first.
+type DBStatementsResponse struct {
+	Items []DBStatement `json:"items"`
 }

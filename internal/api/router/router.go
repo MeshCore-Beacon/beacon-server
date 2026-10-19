@@ -15,6 +15,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api/handlers"
 	mw "github.com/MeshCore-Beacon/beacon-server/internal/api/middleware"
+	"github.com/MeshCore-Beacon/beacon-server/internal/guards"
 	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ws"
@@ -81,6 +82,11 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 		info.MinWebVersion = &opts.MinWebVersion
 	}
 	runtimeConfig := mw.NewRuntimeConfig(adminConfig, []string{"Retry-After"})
+	if opts.Guards != nil {
+		runtimeConfig.BindGuards(opts.Guards, api.AdminGuardsConfig{
+			ObserveOnly: opts.Guards.ForceObserve(), Budget: "shadow", APIPlanLayout: opts.APIPlanLayout,
+		})
+	}
 	r.Use(runtimeConfig.CORS)
 
 	// ── Global middleware ────────────────────────────────────────────────────
@@ -106,8 +112,12 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 	// ── Public REST API (v1) ─────────────────────────────────────────────────
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(mw.RateLimit(opts.RateLimit))
-		// Public group — no authentication required.
+		// Public group — no authentication required. Guards run here only, after TrustedProxyIP,
+		// so /ws and the admin subtree never carry guard state.
 		r.Group(func(r chi.Router) {
+			if opts.Guards != nil {
+				r.Use(guards.Middleware(opts.Guards))
+			}
 			r.Mount("/packets", handlers.PacketsRouter(reader))
 			r.Mount("/nodes", handlers.NodesRouter(reader))
 			r.Mount("/brokers", handlers.BrokersRouter(workers))

@@ -98,7 +98,7 @@ INSERT INTO known_routes (id,path_key,node_ids,hash_prefix,iata,hop_count,last_s
 SELECT 100000 + i, int8send(100000 + i), '{}', '{}', 'NEW', 2 + i % 20, '2026-01-02'::timestamptz - i * interval '1 second'
 FROM generate_series(1, 20000) i;`)
 	capture := &statementCapture{Tx: tx, name: "ListKnownRoutesByIATA"}
-	s := &Store{q: sqlc.New(capture), qc: sqlc.New(unnamedDBTX{capture})}
+	s := &Store{q: sqlc.New(unnamedDBTX{capture})}
 	if _, err := s.listKnownRouteRows(ctx, "NEW", 0, time.Time{}, 0, 50); err != nil {
 		t.Fatal(err)
 	}

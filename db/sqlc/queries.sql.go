@@ -3185,7 +3185,7 @@ type ListKnownRoutesByIATAHopRow struct {
 	ObservationCount int64              `json:"observation_count"`
 }
 
-// Custom plans only (Store.qc): a generic plan walks the whole region for a rare hop.
+// Custom plans only (class C: PlanRouter runs it unnamed): a generic plan walks the whole region for a rare hop.
 // The = form prices the Sort correctly; the range form under-costs it when a hop index exists.
 func (q *Queries) ListKnownRoutesByIATAHop(ctx context.Context, arg ListKnownRoutesByIATAHopParams) ([]ListKnownRoutesByIATAHopRow, error) {
 	rows, err := q.db.Query(ctx, listKnownRoutesByIATAHop,
@@ -3305,7 +3305,7 @@ type ListKnownRoutesGlobalHopRow struct {
 	ObservationCount int64              `json:"observation_count"`
 }
 
-// Custom plans only (Store.qc): the generic plan walks the whole keyset index for an absent hop.
+// Custom plans only (class C: PlanRouter runs it unnamed): the generic plan walks the whole keyset index for an absent hop.
 func (q *Queries) ListKnownRoutesGlobalHop(ctx context.Context, arg ListKnownRoutesGlobalHopParams) ([]ListKnownRoutesGlobalHopRow, error) {
 	rows, err := q.db.Query(ctx, listKnownRoutesGlobalHop,
 		arg.HopCount,

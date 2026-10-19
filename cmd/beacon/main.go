@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/db"
+	"github.com/MeshCore-Beacon/beacon-server/db/planpolicy"
 	"github.com/MeshCore-Beacon/beacon-server/docs"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api/handlers"
@@ -26,6 +27,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/borders"
 	"github.com/MeshCore-Beacon/beacon-server/internal/cache"
 	"github.com/MeshCore-Beacon/beacon-server/internal/config"
+	"github.com/MeshCore-Beacon/beacon-server/internal/guards"
 	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
 	"github.com/MeshCore-Beacon/beacon-server/internal/iatadb"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
@@ -36,7 +38,6 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 )
 
@@ -49,6 +50,7 @@ var version = "dev"
 //	@description	MeshCore network observation backend. Ingests LoRa packets from MQTT brokers, stores in PostgreSQL, and streams live events via WebSocket.
 //	@description	REST requests share a configurable per-client rate limit (default 600/minute and a 600-request one-second burst cap). Exceeded limits return HTTP 429 with error.code=rate_limited and a Retry-After header in seconds. CORS preflights and WebSocket upgrades do not consume this API budget.
 //	@description	WebSocket upgrade attempts at /ws have a configurable per-client limit (default 10/minute, including failed handshakes). Rate exhaustion returns HTTP 429 with Retry-After before upgrade. An accepted socket exceeding the concurrent cap closes with code 1013 before hello; established connections remain open.
+//	@description	Database cost guards: a guarded family returns 429 (rate_limited, Retry-After 1) above 4 concurrent database requests per client, or 503 with Retry-After (deadline_exceeded, 5 s; service_unavailable, 2 s). Families observe by default and refuse nothing until an operator enforces them.
 //	@termsOfService	https://github.com/MeshCore-Beacon/beacon-server
 
 //	@contact.name	MeshCore Beacon
@@ -136,29 +138,37 @@ func main() {
 	defer cancel()
 
 	dsn := getEnv("POSTGRES_DSN")
-	pool, err := pgxpool.New(ctx, dsn)
+	layout := resolved.APIPlanLayout
+	pools, err := db.OpenPools(ctx, dsn, layout)
 	if err != nil {
 		// Parse errors can embed the complete DSN, including its password.
 		slog.Error("invalid PostgreSQL connection configuration; check POSTGRES_DSN", "component", "startup")
 		os.Exit(1)
 	}
-	defer pool.Close()
-	backupOpts := configureBackup(ctx, cfg, pool, dsn, configPath)
+	defer pools.Close()
+	slog.Info("database pools open", "component", "startup", "layout", layout, "connections", pools.Total())
+	backupOpts := configureBackup(ctx, cfg, pools.Maint, dsn, configPath)
 
-	if err := db.RunMigrations(ctx, pool); err != nil {
+	if err := db.RunMigrations(ctx, pools.Maint); err != nil {
 		slog.Error("migrations failed", "component", "startup", "error", err)
 		os.Exit(1)
 	}
 
-	store := db.New(pool, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold)
+	// Three stores: ingest writes, background and operator work, and API reads. The API store
+	// routes each statement by plan class through the guards; it never runs background jobs.
+	enforce, _ := guards.ParseFamilies(resolved.GuardsEnforce) // validated by config.Load
+	guard := guards.New(guards.Options{Enforce: enforce, ForceObserve: layout == planpolicy.Single, Budget: resolved.GuardsBudget})
+	ingestStore := db.New(pools.Ingest, pools.Ingest, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold)
+	maintStore := db.New(pools.Maint, pools.Maint, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold)
+	apiStore := db.NewAPIStore(pools, layout, guard, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold)
 
 	// ── Presence write coalescing ────────────────────────────────────────────
-	// Ingest writes go through the coalescer; reads keep using the store.
-	coalescer := presence.New(store, resolved.PresenceFlushInterval, resolved.PresencePacketTTL)
+	// Ingest writes go through the coalescer; reads use the API store.
+	coalescer := presence.New(ingestStore, resolved.PresenceFlushInterval, resolved.PresencePacketTTL)
 	go coalescer.Run(ctx)
 
 	// ── Redis cache layer ────────────────────────────────────────────────────
-	var reader api.Reader = store
+	var reader api.Reader = apiStore
 	if redisAddr := os.Getenv("REDIS_ADDR"); redisAddr != "" {
 		redisClient := cache.NewClient(
 			redisAddr,
@@ -177,21 +187,21 @@ func main() {
 			slog.Warn(fmt.Sprintf("warning: redis unavailable at %s, caching disabled", redisAddr), "component", "startup", "error", err)
 		} else {
 			ttls := cache.ResolveTTLs(cfg.Cache)
-			reader = cache.NewCachedReader(store, redisClient, ttls)
+			reader = cache.NewCachedReader(apiStore, redisClient, ttls)
 			defer redisClient.Close()
 			slog.Info(fmt.Sprintf("cache: Redis connected at %s (stats=%s reference=%s nodes=%s observers=%s)", redisAddr, ttls.Stats, ttls.Reference, ttls.Nodes, ttls.Observers), "component", "startup")
 		}
 	}
 
 	// ── Seed config data ─────────────────────────────────────────────────────
-	if err := config.Seed(ctx, cfg, store); err != nil {
+	if err := config.Seed(ctx, cfg, maintStore); err != nil {
 		slog.Error("failed to seed config", "component", "startup", "error", err)
 		os.Exit(1)
 	}
 
 	// ── Build transport scope keystore ───────────────────────────────────────
 	scopes := scopestore.New()
-	scopeEntries, err := store.GetTransportScopes(ctx)
+	scopeEntries, err := maintStore.GetTransportScopes(ctx)
 	if err != nil {
 		slog.Error("failed to load transport scopes", "component", "startup", "error", err)
 		os.Exit(1)
@@ -199,7 +209,7 @@ func main() {
 	scopes.Load(scopeEntries)
 	scopes.SetManualMembers(cfg.ManualScopeMembers())
 	slog.Info(fmt.Sprintf("loaded %d transport scopes", len(scopeEntries)), "component", "startup")
-	directory := meshmapper.NewDirectory(store, cfg.MeshMapper.APIKey)
+	directory := meshmapper.NewDirectory(maintStore, cfg.MeshMapper.APIKey)
 	if mm := cfg.MeshMapper; mm.Scopes.Enabled || mm.Zones.Enabled || mm.Channels.Enabled || mm.Repeaters.Enabled {
 		if cfg.MeshMapper.APIKey == "" {
 			slog.Warn("MeshMapper integration unconfigured: set MESHMAPPER_API_KEY or meshmapper.api_key; retaining cached data", "component", "meshmapper")
@@ -215,7 +225,7 @@ func main() {
 	var scopeImporter *meshmapper.Importer
 	if cfg.MeshMapper.Scopes.Enabled {
 		restoreCtx, cancelRestore := context.WithTimeout(ctx, 10*time.Second)
-		scopeImporter, err = meshmapper.New(restoreCtx, cfg.MeshMapper.Scopes, store, directory, scopes, scopeEntries)
+		scopeImporter, err = meshmapper.New(restoreCtx, cfg.MeshMapper.Scopes, maintStore, directory, scopes, scopeEntries)
 		cancelRestore()
 		if err != nil {
 			slog.Error("failed to restore MeshMapper scope catalogues", "component", "startup", "error", err)
@@ -224,7 +234,7 @@ func main() {
 	}
 
 	// Always restored, so disabling the import prunes it and file borders return.
-	zones := meshmapper.NewZones(cfg.MeshMapper.Zones, store, directory)
+	zones := meshmapper.NewZones(cfg.MeshMapper.Zones, maintStore, directory)
 	var detailed []string
 	for iata, d := range cfg.IATAs {
 		if d.Name != "" || d.Lat != nil || d.Lng != nil {
@@ -300,7 +310,7 @@ func main() {
 
 	// Restored before the boot backfill so saved MeshMapper keys decrypt history too.
 	restoreCtx, cancelRestore = context.WithTimeout(ctx, 10*time.Second)
-	channelImporter, err := meshmapper.NewChannels(restoreCtx, cfg.MeshMapper.Channels, store, directory, keys)
+	channelImporter, err := meshmapper.NewChannels(restoreCtx, cfg.MeshMapper.Channels, maintStore, directory, keys)
 	cancelRestore()
 	if err != nil {
 		slog.Error("failed to restore MeshMapper channels", "component", "startup", "error", err)
@@ -311,7 +321,7 @@ func main() {
 		onRepeatersChange = cr.InvalidateNodeDetails
 	}
 	restoreCtx, cancelRestore = context.WithTimeout(ctx, 10*time.Second)
-	repeaterImporter, err := meshmapper.NewRepeaters(restoreCtx, cfg.MeshMapper.Repeaters, store, directory, onRepeatersChange)
+	repeaterImporter, err := meshmapper.NewRepeaters(restoreCtx, cfg.MeshMapper.Repeaters, maintStore, directory, onRepeatersChange)
 	cancelRestore()
 	if err != nil {
 		slog.Error("failed to restore MeshMapper repeaters", "component", "startup", "error", err)
@@ -322,7 +332,7 @@ func main() {
 		go func() {
 			backfillCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 			defer cancel()
-			if n, err := ingest.BackfillChannelHashes(backfillCtx, store, keys, hashes); err != nil {
+			if n, err := ingest.BackfillChannelHashes(backfillCtx, maintStore, keys, hashes); err != nil {
 				slog.Error("MeshMapper channel backfill failed", "component", "meshmapper.channels", "error", err)
 			} else if n > 0 {
 				slog.Info(fmt.Sprintf("backfilled %d channel message(s) for imported keys", n), "component", "meshmapper.channels")
@@ -335,7 +345,7 @@ func main() {
 	// hash-only channels and never decrypted. Retry them now against the keystore we just
 	// built, so adding a channel key to the config surfaces its history on the next boot
 	// instead of leaving it stranded in the DB indefinitely.
-	if n, err := ingest.BackfillChannelMessages(ctx, store, keys); err != nil {
+	if n, err := ingest.BackfillChannelMessages(ctx, maintStore, keys); err != nil {
 		slog.Error("config: channel message backfill failed", "component", "startup", "error", err)
 	} else if n > 0 {
 		slog.Info(fmt.Sprintf("config: backfilled %d previously-undecrypted channel message(s)", n), "component", "startup")
@@ -393,7 +403,7 @@ func main() {
 	ingestWorkers.Go(func() { broker1.Start(ctx) })
 	ingestWorkers.Go(func() { broker2.Start(ctx) })
 
-	rollup := background.NewRollup(store, resolved.PacketRetention, resolved.RollupRetention)
+	rollup := background.NewRollup(maintStore, resolved.PacketRetention, resolved.RollupRetention)
 	go func() {
 		if err := rollup.CatchUp(ctx); err != nil {
 			slog.Error("analytics rollup catch-up failed", "component", "background", "error", err)
@@ -401,16 +411,18 @@ func main() {
 	}()
 	tasks := []background.Task{
 		rollup.Task(),
-		background.ViewRefreshTask(store, resolved.ViewRefreshInterval),
-		background.CleanupTask(store, background.CleanupConfig{
+		background.ViewRefreshTask(maintStore, resolved.ViewRefreshInterval),
+		background.CleanupTask(maintStore, background.CleanupConfig{
 			TelemetryRetention: resolved.TelemetryRetention,
 			PacketRetention:    resolved.PacketRetention,
 			RollupRetention:    resolved.RollupRetention,
 			NodeDeleteAfter:    resolved.NodeDeleteAfter,
 			Interval:           resolved.CleanupInterval,
 		}),
-		background.RouteRetentionTask(store, resolved.RouteRetention, resolved.RouteGrace, int64(resolved.RouteMinObservations), resolved.ReconfirmInterval),
-		background.ReconfirmTask(store, resolved.RouteReconfirmRowsPerHour, background.ReconfirmTick),
+		background.RouteRetentionTask(maintStore, resolved.RouteRetention, resolved.RouteGrace, int64(resolved.RouteMinObservations), resolved.ReconfirmInterval),
+		background.ReconfirmTask(maintStore, resolved.RouteReconfirmRowsPerHour, background.ReconfirmTick),
+		background.IndexHealthTask(maintStore, time.Hour),
+		background.PgStatsTask(maintStore, time.Minute),
 	}
 	if resolved.ObserverDeleteAfter > 0 {
 		var onDelete func(context.Context, uuid.UUID)
@@ -431,7 +443,7 @@ func main() {
 	if cfg.MeshMapper.Repeaters.Enabled {
 		tasks = append(tasks, background.Task{Name: "meshmapper.repeaters", Interval: meshmapper.PollInterval, Run: repeaterImporter.Refresh})
 	}
-	profiles := configureProfiling(ctx, pool)
+	profiles := configureProfiling(ctx, pools.Maint)
 	defer profiles.Stop()
 	for i := range tasks {
 		tasks[i].Run = profiles.WrapTask(tasks[i].Name, tasks[i].Run)
@@ -453,17 +465,15 @@ func main() {
 		MinWebVersion: api.HigherVersion(api.MinWebVersion, cfg.Web.MinWebVersion),
 		ServerVersion: docs.SwaggerInfo.Version,
 		AdminRoutes: map[string]http.Handler{
-			"/accounts": handlers.AccountsRouter(store),
+			"/accounts": handlers.AccountsRouter(maintStore),
 			"/backup":   handlers.BackupRouter(backupOpts, ctx),
+			"/db":       handlers.DBAdminRouter(maintStore),
 		},
+		Guards:        guard,
+		APIPlanLayout: string(layout),
 	})
 
-	srv := &http.Server{
-		Addr:     addr,
-		Handler:  r,
-		ErrorLog: slog.NewLogLogger(slog.Default().With("component", "http").Handler(), slog.LevelError),
-	}
-
+	srv := newHTTPServer(addr, r)
 	go func() {
 		slog.Info(fmt.Sprintf("Beacon listening on %s", addr), "component", "startup")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -471,6 +481,19 @@ func main() {
 			os.Exit(1)
 		}
 	}()
+
+	// The admin listener serves only /metrics; keep it off the public network.
+	var adminSrv *http.Server
+	if resolved.AdminListen != "" {
+		adminSrv = newHTTPServer(resolved.AdminListen, metricsMux())
+		go func() {
+			slog.Info(fmt.Sprintf("metrics listening on %s", resolved.AdminListen), "component", "startup")
+			if err := adminSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				slog.Error("metrics server error", "component", "startup", "error", err)
+				os.Exit(1)
+			}
+		}()
+	}
 
 	// ── Graceful shutdown ────────────────────────────────────────────────────
 	quit := make(chan os.Signal, 1)
@@ -483,6 +506,11 @@ func main() {
 	defer shutdownCancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("server shutdown error", "component", "startup", "error", err)
+	}
+	if adminSrv != nil {
+		if err := adminSrv.Shutdown(shutdownCtx); err != nil {
+			slog.Error("metrics server shutdown error", "component", "startup", "error", err)
+		}
 	}
 	ingestWorkers.Wait()
 	coalescer.Flush(shutdownCtx)

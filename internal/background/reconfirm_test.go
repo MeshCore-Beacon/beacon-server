@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/db"
+	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 type reconfirmStore struct {
@@ -67,5 +69,21 @@ func TestReconfirmTaskReturnsSweepError(t *testing.T) {
 	}
 	if len(s.budgets) != 1 {
 		t.Fatalf("sweep called %d times, want 1", len(s.budgets))
+	}
+}
+
+type deletingReconfirmer struct{}
+
+func (deletingReconfirmer) ReconfirmSweep(context.Context, int) (db.ReconfirmResult, error) {
+	return db.ReconfirmResult{Scanned: 10, Deleted: 4}, nil
+}
+
+func TestReconfirmTaskCountsDeletedRows(t *testing.T) {
+	before := testutil.ToFloat64(metrics.JobRows.WithLabelValues("reconfirm"))
+	if err := ReconfirmTask(deletingReconfirmer{}, 12000, ReconfirmTick).Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := testutil.ToFloat64(metrics.JobRows.WithLabelValues("reconfirm")) - before; got != 4 {
+		t.Errorf("reconfirm rows +%v, want +4", got)
 	}
 }

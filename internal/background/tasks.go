@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/db"
+	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
 	"github.com/google/uuid"
 )
 
@@ -165,6 +166,7 @@ func ReconfirmTask(store routeReconfirmer, rowsPerHour int, tick time.Duration) 
 			if err != nil {
 				return fmt.Errorf("routes: %w", err)
 			}
+			metrics.JobRows.WithLabelValues("reconfirm").Add(float64(res.Deleted))
 			slog.Debug("route reconfirm", "component", "background", "scanned", res.Scanned,
 				"deleted", res.Deleted, "skipped", res.Skipped, "timed_out", res.TimedOut, "wrapped", res.Wrapped)
 			return nil

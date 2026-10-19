@@ -171,7 +171,7 @@ func TestTraceSummarySurvivesMissedHearingPostgres(t *testing.T) {
 	if _, err := pool.Exec(ctx, "INSERT INTO iata_codes (iata) VALUES ('YVR')"); err != nil {
 		t.Fatal(err)
 	}
-	store := New(pool, 0, 0)
+	store := New(pool, pool, 0, 0)
 	tag := []byte{0xee, 0xee, 0xee, 0xee}
 	payload := json.RawMessage(`{"type":"TRACE","pathHashes":["aa","bb"],"snrValues":[1,2]}`)
 	upsert := func(hash byte) {

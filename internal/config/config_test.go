@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/db/planpolicy"
+	"github.com/MeshCore-Beacon/beacon-server/internal/guards"
 )
 
 func TestLoadLogConfig(t *testing.T) {
@@ -416,6 +417,11 @@ func TestLoad_DatabaseGuardsValidation(t *testing.T) {
 		{"guards:\n  enforce: [routes, bogus]\n", `guards.enforce[1]: unknown family "bogus" (routes, channel_messages, packets_global, packets_region, packets_window, packet_detail, stats, other)`},
 		{"guards:\n  budget: enforce\n", "guards.budget must be shadow (budget enforcement is not available)"},
 		{"server:\n  admin_listen: \"9090\"\n", "server.admin_listen must be host:port, e.g. 127.0.0.1:9090"},
+		{"server:\n  admin_listen: \"127.0.0.1:\"\n", "server.admin_listen must be host:port, e.g. 127.0.0.1:9090"},
+		{"server:\n  admin_listen: \":\"\n", "server.admin_listen must be host:port, e.g. 127.0.0.1:9090"},
+		{"server:\n  admin_listen: \"127.0.0.1:metrics\"\n", "server.admin_listen must be host:port, e.g. 127.0.0.1:9090"},
+		{"server:\n  admin_listen: \"127.0.0.1:70000\"\n", "server.admin_listen must be host:port, e.g. 127.0.0.1:9090"},
+		{"server:\n  admin_listen: \"127.0.0.1:0\"\n", "server.admin_listen must be host:port, e.g. 127.0.0.1:9090"},
 	} {
 		path := filepath.Join(t.TempDir(), "config.yaml")
 		if err := os.WriteFile(path, []byte(tc.yaml), 0600); err != nil {
@@ -428,7 +434,7 @@ func TestLoad_DatabaseGuardsValidation(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	yml := "server:\n  trusted_proxies: [10.0.0.0/8]\n  admin_listen: \":9090\"\n" +
-		"database:\n  api_plan_layout: split\nguards:\n  enforce: [routes, stats]\n  budget: shadow\n"
+		"database:\n  api_plan_layout: split\nguards:\n  enforce: [stats, routes, stats]\n  budget: shadow\n"
 	if err := os.WriteFile(path, []byte(yml), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -444,5 +450,16 @@ func TestLoad_DatabaseGuardsValidation(t *testing.T) {
 	if r.AdminListen != ":9090" || r.APIPlanLayout != planpolicy.Split || r.GuardsBudget != "shadow" ||
 		strings.Join(r.GuardsEnforce, ",") != "routes,stats" {
 		t.Fatalf("resolved = %s", r)
+	}
+}
+
+// TestGuardFamiliesMatch keeps the config's family list in step with the guards package.
+func TestGuardFamiliesMatch(t *testing.T) {
+	var want []string
+	for _, f := range guards.Families {
+		want = append(want, string(f))
+	}
+	if strings.Join(guardFamilies, ",") != strings.Join(want, ",") {
+		t.Errorf("guardFamilies = %v, want %v", guardFamilies, want)
 	}
 }
