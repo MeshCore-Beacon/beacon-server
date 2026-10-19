@@ -45,6 +45,13 @@ func TestGenPolicyRejectsCachedWithoutAdversarialShapes(t *testing.T) {
 		{"genpolicy_hop_skip.yaml", nil, []string{"ListKnownRoutesGlobalHop", "gh.rare", "gh.absent", "generic"}},
 		{"genpolicy_region_no_stale.yaml", nil, []string{"ListKnownRoutesByIATA", "stale_region"}},
 		{"genpolicy_legacy_pending.yaml", map[string]bool{"GetNodeByID": true}, []string{"GetNodeByID", "planpolicy.Legacy"}},
+		{"genpolicy_refuse_mode_known_issue_generic.yaml", nil, []string{"GetNodeByID", "entry node.miss has a known_issue in generic"}},
+		{"genpolicy_refuse_mode_known_issue_auto.yaml", nil, []string{"GetNodeByID", "entry node.miss has a known_issue in auto"}},
+		{"genpolicy_refuse_entry_known_issue.yaml", nil, []string{"GetNodeByID", "entry node.miss has a known_issue"}},
+		{"genpolicy_refuse_expect_fail.yaml", nil, []string{"GetNodeByID", "entry node.miss is expect_fail"}},
+		{"genpolicy_refuse_degrade_to.yaml", nil, []string{"GetNodeByID", "entry node.miss degrades auto"}},
+		{"genpolicy_refuse_no_generic.yaml", nil, []string{"GetNodeByID", "entry node.miss does not run generic"}},
+		{"genpolicy_refuse_no_auto.yaml", nil, []string{"GetNodeByID", "entry node.miss does not run auto"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.file, func(t *testing.T) {

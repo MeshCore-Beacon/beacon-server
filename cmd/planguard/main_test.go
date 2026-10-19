@@ -40,3 +40,15 @@ func TestCLIUsage(t *testing.T) {
 		})
 	}
 }
+
+// gen-policy finds the module root from a subdirectory and reports the committed file as current.
+func TestGenPolicyFromSubdirectory(t *testing.T) {
+	t.Chdir("../../internal")
+	var out, errb bytes.Buffer
+	if code := run([]string{"gen-policy"}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "cached_gen.go is up to date") {
+		t.Errorf("stdout %q, want the committed file up to date", out.String())
+	}
+}

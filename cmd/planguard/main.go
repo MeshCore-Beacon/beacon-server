@@ -7,7 +7,7 @@
 //	              [--out planguard-out] [--only RE] [--skip RE] [--modes m,..] [--include-pending] [--search-path P]
 //	              [--baseline check|write|off] [--emit resolvers|plans --params FILE] [--plans FILE --params FILE]
 //	              [--fidelity-against results.jsonl]
-//	planguard gen-policy [--corpus db/planguard/corpus.yaml] [--out db/planpolicy/cached_gen.go]
+//	planguard gen-policy [--corpus FILE] [--out FILE]   (defaults and db/sqlc are under the module root)
 //
 // Exit status: 0 when no run fails, 1 when one does (or the run cannot be made), 2 on usage errors.
 package main
@@ -31,7 +31,7 @@ import (
 )
 
 const usage = "usage: planguard run --tier fixture|local|prod [flags] (planguard run -h for the flags)\n" +
-	"       planguard gen-policy [--corpus db/planguard/corpus.yaml] [--out db/planpolicy/cached_gen.go]"
+	"       planguard gen-policy [--corpus FILE] [--out FILE] (paths default to the module root's db/)"
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -59,12 +59,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 }
 
 // genPolicyCmd writes db/planpolicy/cached_gen.go from the corpus: the cached statements whose entries prove
-// every shape and mode of their admission profile.
+// every shape and mode of their admission profile. Statement texts come from db/sqlc of the module that holds the
+// working directory (found by walking up to go.mod), so it runs from any directory of the checkout.
 func genPolicyCmd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("gen-policy", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	corpus := fs.String("corpus", "db/planguard/corpus.yaml", "corpus file")
-	out := fs.String("out", "db/planpolicy/cached_gen.go", "generated Go file")
+	corpus := fs.String("corpus", "", "corpus file (default <module root>/db/planguard/corpus.yaml)")
+	out := fs.String("out", "", "generated Go file (default <module root>/db/planpolicy/cached_gen.go)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -72,7 +73,18 @@ func genPolicyCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "planguard gen-policy: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
-	sqlc, err := planguard.LoadStatements("db/sqlc")
+	root, err := moduleRoot()
+	if err != nil {
+		fmt.Fprintln(stderr, "planguard gen-policy:", err)
+		return 1
+	}
+	if *corpus == "" {
+		*corpus = filepath.Join(root, "db", "planguard", "corpus.yaml")
+	}
+	if *out == "" {
+		*out = filepath.Join(root, "db", "planpolicy", "cached_gen.go")
+	}
+	sqlc, err := planguard.LoadStatements(filepath.Join(root, "db", "sqlc"))
 	if err != nil {
 		fmt.Fprintln(stderr, "planguard:", err)
 		return 1
@@ -97,6 +109,24 @@ func genPolicyCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "wrote %s\n", *out)
 	return 0
+}
+
+// moduleRoot returns the nearest directory at or above the working directory that holds go.mod.
+func moduleRoot() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", errors.New("no go.mod at or above the working directory; run it inside the beacon-server checkout")
+		}
+		dir = parent
+	}
 }
 
 type runFlags struct {

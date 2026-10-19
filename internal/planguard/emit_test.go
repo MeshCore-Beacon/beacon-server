@@ -304,6 +304,9 @@ entries:
 		"q.seq|generic": planguard.VerdictKnownIssue,
 		"q.err|generic": planguard.VerdictError, // no plan in the output
 	}
+	if len(rep.Results) != 3 {
+		t.Fatalf("%d results, want 3", len(rep.Results))
+	}
 	for _, r := range rep.Results {
 		if v := want[r.ID+"|"+r.Mode]; r.Verdict != v {
 			t.Errorf("%s|%s: verdict %s, want %s", r.ID, r.Mode, r.Verdict, v)

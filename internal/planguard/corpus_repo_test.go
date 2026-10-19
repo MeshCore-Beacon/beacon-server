@@ -5,6 +5,8 @@ package planguard_test
 
 import (
 	"io/fs"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -17,15 +19,49 @@ import (
 // planIDs matches internal plan identifiers, which must not appear in the corpus or its SQL files.
 var planIDs = regexp.MustCompile(`\b(S[0-9]+[a-z]?|V[0-9]|P[0-9]|§[0-9])\b`)
 
-// realIDs matches identifiers copied from a deployment: a UUID that is not one of the synthetic
-// 00000000-0000-0000-0000-… ids, or a hex byte string of 8 bytes or more (packet hashes, public keys) other than
-// the synthetic 0102030405060708. Cases name such rows through resolvers instead.
+// Identifiers copied from a deployment must not ship: a UUID that is not one of the synthetic
+// 00000000-0000-0000-0000-… ids, or a hex run of 16 digits or more holding a letter (a packet hash or public key,
+// as a \x byte string or bare) unless it is synthetic: it starts with eight zeros, or it is 0102030405060708.
+// All-digit runs are numbers. Cases name such rows through resolvers instead.
 var (
-	uuidRe     = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
-	longHexRe  = regexp.MustCompile(`\\x[0-9a-fA-F]{16,}`)
-	synthUUID  = "00000000-0000-0000-0000-"
-	synthBytes = `\x0102030405060708`
+	uuidRe    = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
+	longHexRe = regexp.MustCompile(`(\\x)?([0-9a-fA-F]{16,})`)
+	letterRe  = regexp.MustCompile(`[a-fA-F]`)
+	synthUUID = "00000000-0000-0000-0000-"
 )
+
+// deploymentIDs returns the copied identifiers on one line.
+func deploymentIDs(line string) []string {
+	var out []string
+	for _, u := range uuidRe.FindAllString(line, -1) {
+		if !strings.HasPrefix(u, synthUUID) {
+			out = append(out, u)
+		}
+	}
+	line = uuidRe.ReplaceAllString(line, "")
+	for _, m := range longHexRe.FindAllStringSubmatch(line, -1) {
+		h := m[2]
+		if (m[1] != "" || letterRe.MatchString(h)) && !strings.HasPrefix(h, "00000000") && h != "0102030405060708" {
+			out = append(out, m[0])
+		}
+	}
+	return out
+}
+
+func TestDeploymentIDs(t *testing.T) {
+	for line, want := range map[string]int{
+		`params: ["\\x7c05039b3e8a663c"]`:              1,
+		`"hash": "a33704fac0d3a216"`:                   1,
+		`id: 7ea9ed3f-d6ce-4e54-a8b7-9f1e2e7d5179`:     1,
+		`limit 9223372036854775807`:                    0,
+		`"00000000000000a2" and \\x0102030405060708`:   0,
+		`'00000000-0000-0000-0000-00000000000b'::uuid`: 0,
+	} {
+		if got := len(deploymentIDs(line)); got != want {
+			t.Errorf("deploymentIDs(%q) found %d, want %d", line, got, want)
+		}
+	}
+}
 
 func TestRepoCorpusLoads(t *testing.T) {
 	c, err := planguard.LoadCorpus(pgdata.Files, "corpus.yaml", repoSQLC(t))
@@ -73,7 +109,7 @@ func TestRepoCorpusLoads(t *testing.T) {
 		}
 	}
 
-	// No plan IDs in the corpus or the frozen SQL.
+	// No plan IDs or deployment identifiers in the corpus or the frozen SQL.
 	err = fs.WalkDir(pgdata.Files, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !(p == "corpus.yaml" || strings.HasPrefix(p, "sql/")) {
 			return err
@@ -86,15 +122,30 @@ func TestRepoCorpusLoads(t *testing.T) {
 			if m := planIDs.FindString(line); m != "" {
 				t.Errorf("%s:%d holds the plan ID %q: %s", p, i+1, m, strings.TrimSpace(line))
 			}
-			for _, u := range uuidRe.FindAllString(line, -1) {
-				if !strings.HasPrefix(u, synthUUID) {
-					t.Errorf("%s:%d holds the deployment UUID %s", p, i+1, u)
-				}
+			for _, id := range deploymentIDs(line) {
+				t.Errorf("%s:%d holds the deployment identifier %s", p, i+1, id)
 			}
-			for _, h := range longHexRe.FindAllString(line, -1) {
-				if h != synthBytes {
-					t.Errorf("%s:%d holds the deployment byte string %s", p, i+1, h)
-				}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The engine's own test data holds no deployment identifiers either.
+func TestTestdataHoldsNoDeploymentIDs(t *testing.T) {
+	err := fs.WalkDir(os.DirFS("testdata"), ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		body, err := os.ReadFile(filepath.Join("testdata", p))
+		if err != nil {
+			return err
+		}
+		for i, line := range strings.Split(string(body), "\n") {
+			for _, id := range deploymentIDs(line) {
+				t.Errorf("testdata/%s:%d holds the deployment identifier %s", p, i+1, id)
 			}
 		}
 		return nil
