@@ -1,0 +1,4 @@
+[
+ "Limit",
+ "  Index Scan on known_routes r using idx_known_routes_keyset scan=Backward"
+]

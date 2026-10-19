@@ -3,7 +3,10 @@
 
 package api
 
-import "errors"
+import (
+	"errors"
+	"time"
+)
 
 // AdminConfig is a whitelist of selected nonsecret running settings.
 // It is not a serialization of the full file or environment configuration.
@@ -91,4 +94,32 @@ type DBStatement struct {
 // DBStatementsResponse lists statements by total execution time, highest first.
 type DBStatementsResponse struct {
 	Items []DBStatement `json:"items"`
+}
+
+// ErrPlanguardNotRun means the daily plan check has not finished a run since the server started.
+var ErrPlanguardNotRun = errors.New("planguard has not run yet")
+
+// ErrPlanguardDisabled means planguard.daily_check is off.
+var ErrPlanguardDisabled = errors.New("planguard daily check is disabled")
+
+// PlanguardRun is one corpus entry planned in one plan mode.
+type PlanguardRun struct {
+	Entry    string   `json:"entry"`
+	Stmt     string   `json:"stmt"`
+	Mode     string   `json:"mode"`               // custom or generic
+	Verdict  string   `json:"verdict"`            // ok, DETECTED, MISSED, FALSE_POSITIVE, RETIRED_INDEX, KNOWN_ISSUE, SKIP or ERROR
+	Failures []string `json:"failures,omitempty"` // the plan rules the run broke
+	Drivers  []string `json:"drivers,omitempty"`  // relation:node:index of each driving scan
+	Skip     string   `json:"skip,omitempty"`     // why the run was not made
+}
+
+// PlanguardReport is one read-only plan regression check of the corpus against this database.
+type PlanguardReport struct {
+	Tier       string         `json:"tier"`
+	StartedAt  time.Time      `json:"started_at"`
+	DurationMs float64        `json:"duration_ms"`
+	Clean      bool           `json:"clean"`    // no FALSE_POSITIVE, MISSED or ERROR
+	Counts     map[string]int `json:"counts"`   // verdict → runs
+	Failures   []PlanguardRun `json:"failures"` // never null
+	Runs       []PlanguardRun `json:"runs"`
 }

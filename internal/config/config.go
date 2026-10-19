@@ -52,6 +52,14 @@ type Config struct {
 	Web         WebConfig             `yaml:"web"`
 	Database    DatabaseConfig        `yaml:"database"`
 	Guards      GuardsConfig          `yaml:"guards"`
+	Planguard   PlanguardConfig       `yaml:"planguard"`
+}
+
+// PlanguardConfig controls the daily read-only plan regression check.
+type PlanguardConfig struct {
+	// DailyCheck runs the check about an hour after boot and then daily. Off by default: the corpus's plan
+	// expectations assume production-sized tables, so small deployments would report false failures.
+	DailyCheck bool `yaml:"daily_check"`
 }
 
 // DatabaseConfig controls how API statements are spread across connection pools.
@@ -107,6 +115,8 @@ type ServerConfig struct {
 	TrustedProxies []netip.Prefix `yaml:"trusted_proxies"`
 	// AdminListen is the host:port of the admin listener serving /metrics; empty disables it.
 	AdminListen string `yaml:"admin_listen"`
+	// ReadOnly boots a server with no migrations, ingest, jobs or boot writes; every database session is read-only.
+	ReadOnly bool `yaml:"read_only"`
 }
 
 func (c *ServerConfig) UnmarshalYAML(node *yaml.Node) error {
@@ -115,6 +125,7 @@ func (c *ServerConfig) UnmarshalYAML(node *yaml.Node) error {
 	var raw struct {
 		TrustedProxies []*netip.Prefix `yaml:"trusted_proxies"`
 		AdminListen    string          `yaml:"admin_listen"`
+		ReadOnly       bool            `yaml:"read_only"`
 	}
 	if err := node.Decode(&raw); err != nil {
 		return err
@@ -126,6 +137,7 @@ func (c *ServerConfig) UnmarshalYAML(node *yaml.Node) error {
 		}
 	}
 	c.AdminListen = raw.AdminListen
+	c.ReadOnly = raw.ReadOnly
 	return nil
 }
 
@@ -169,6 +181,10 @@ type ResolvedConfig struct {
 	GuardsBudget string
 	// AdminListen is the admin listener address; empty disables it.
 	AdminListen string
+	// ReadOnly: no migrations, ingest, background jobs or boot writes; every database session is read-only.
+	ReadOnly bool
+	// PlanguardDailyCheck runs the daily read-only plan check; off by default.
+	PlanguardDailyCheck bool
 }
 
 // RateLimitConfig controls the per-client REST API request budget.
@@ -513,6 +529,9 @@ func Load(path string) (*Config, error) {
 	if err := cfg.validateClientVersions(); err != nil {
 		return nil, err
 	}
+	if cfg.Planguard.DailyCheck && cfg.Server.ReadOnly {
+		return nil, fmt.Errorf("planguard.daily_check cannot be enabled with server.read_only: a read-only server runs no background jobs")
+	}
 	if cfg.Nodes.MarkForeign && !cfg.MeshMapper.Zones.Enabled && !cfg.hasBorderFile() {
 		return nil, fmt.Errorf("nodes.mark_foreign requires an iatas.*.borderFile or meshmapper.zones")
 	}
@@ -684,6 +703,9 @@ func Resolve(cfg *Config) ResolvedConfig {
 		GuardsEnforce: canonicalFamilies(cfg.Guards.Enforce),
 		GuardsBudget:  cfg.Guards.Budget,
 		AdminListen:   cfg.Server.AdminListen,
+		ReadOnly:      cfg.Server.ReadOnly,
+
+		PlanguardDailyCheck: cfg.Planguard.DailyCheck,
 	}
 	// Load has validated the layout; an unvalidated config falls back to the default.
 	r.APIPlanLayout, _ = planpolicy.ParseLayout(cfg.Database.APIPlanLayout)
@@ -758,12 +780,12 @@ func Resolve(cfg *Config) ResolvedConfig {
 
 func (r ResolvedConfig) String() string {
 	return fmt.Sprintf(
-		"telemetryResolution=%s telemetryRetention=%s rollupRetention=%s packetRetention=%s routeRetention=%s routeGrace=%s routeMinObs=%d routeReconfirmRowsPerHour=%d maxConnsPerIP=%d maxConnectsPerMinute=%d viewRefresh=%s reconfirm=%s cleanup=%s presenceFlush=%s presencePacketTTL=%s clockDriftThreshold=%s nodeStaleThreshold=%s nodeDeleteAfter=%s observerDeleteAfter=%s rateLimitEnabled=%t requestsPerMinute=%d burst=%d apiPlanLayout=%s guardsEnforce=%v guardsBudget=%s adminListen=%q",
+		"telemetryResolution=%s telemetryRetention=%s rollupRetention=%s packetRetention=%s routeRetention=%s routeGrace=%s routeMinObs=%d routeReconfirmRowsPerHour=%d maxConnsPerIP=%d maxConnectsPerMinute=%d viewRefresh=%s reconfirm=%s cleanup=%s presenceFlush=%s presencePacketTTL=%s clockDriftThreshold=%s nodeStaleThreshold=%s nodeDeleteAfter=%s observerDeleteAfter=%s rateLimitEnabled=%t requestsPerMinute=%d burst=%d apiPlanLayout=%s guardsEnforce=%v guardsBudget=%s adminListen=%q readOnly=%t planguardDailyCheck=%t",
 		r.TelemetryResolution, r.TelemetryRetention, r.RollupRetention, r.PacketRetention, r.RouteRetention, r.RouteGrace, r.RouteMinObservations, r.RouteReconfirmRowsPerHour,
 		r.MaxConnsPerIP, r.MaxConnectsPerMinute, r.ViewRefreshInterval, r.ReconfirmInterval, r.CleanupInterval,
 		r.PresenceFlushInterval, r.PresencePacketTTL, r.ClockDriftThreshold,
 		r.NodeStaleThreshold, r.NodeDeleteAfter, r.ObserverDeleteAfter,
 		r.RateLimit.Enabled, r.RateLimit.RequestsPerMinute, r.RateLimit.Burst,
-		r.APIPlanLayout, r.GuardsEnforce, r.GuardsBudget, r.AdminListen,
+		r.APIPlanLayout, r.GuardsEnforce, r.GuardsBudget, r.AdminListen, r.ReadOnly, r.PlanguardDailyCheck,
 	)
 }

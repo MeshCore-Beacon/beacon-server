@@ -5,6 +5,9 @@
 
 package planpolicy
 
-// Cached lists class G statements: those admitted to the generic-plan class. It is empty, so
-// split has no effect yet.
-var Cached = map[string]bool{}
+// Cached lists class G statements: those admitted to the generic-plan class.
+var Cached = map[string]bool{
+	"GetNodeByID":           true,
+	"ListKnownRoutesByIATA": true,
+	"ListKnownRoutesGlobal": true,
+}

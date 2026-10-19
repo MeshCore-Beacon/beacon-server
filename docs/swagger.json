@@ -555,6 +555,75 @@
                 }
             }
         },
+        "/admin/db/planguard": {
+            "get": {
+                "security": [
+                    {
+                        "AdminKey": []
+                    }
+                ],
+                "description": "Plans every corpus statement in custom and generic mode against this database, read-only and without executing it (plain EXPLAIN, 5 s per plan, 1 s lock timeout), and checks each plan against the corpus. Off unless planguard.daily_check is set (404 \"planguard daily check is disabled\"); when on, the check runs about an hour after boot and then daily, and until its first run this returns 404. fresh=true runs it now, shared with any run in progress and cancelled at server shutdown; within 5 minutes of the last run's end it starts nothing and returns the last successful report (started_at gives its age), or 500 when no run has succeeded yet. A read-only server cannot enable the check (configuration refuses planguard.daily_check with server.read_only), so there this returns 404 \"planguard daily check is disabled\".",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Last daily plan regression check",
+                "parameters": [
+                    {
+                        "type": "boolean",
+                        "description": "Run the check now instead of returning the last report",
+                        "name": "fresh",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PlanguardReport"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/admin/db/statements": {
             "get": {
                 "security": [
@@ -5560,6 +5629,81 @@
                     "type": "integer"
                 },
                 "payloadTypeName": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.PlanguardReport": {
+            "type": "object",
+            "properties": {
+                "clean": {
+                    "description": "no FALSE_POSITIVE, MISSED or ERROR",
+                    "type": "boolean"
+                },
+                "counts": {
+                    "description": "verdict → runs",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "duration_ms": {
+                    "type": "number"
+                },
+                "failures": {
+                    "description": "never null",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PlanguardRun"
+                    }
+                },
+                "runs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PlanguardRun"
+                    }
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "tier": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.PlanguardRun": {
+            "type": "object",
+            "properties": {
+                "drivers": {
+                    "description": "relation:node:index of each driving scan",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "entry": {
+                    "type": "string"
+                },
+                "failures": {
+                    "description": "the plan rules the run broke",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "mode": {
+                    "description": "custom or generic",
+                    "type": "string"
+                },
+                "skip": {
+                    "description": "why the run was not made",
+                    "type": "string"
+                },
+                "stmt": {
+                    "type": "string"
+                },
+                "verdict": {
+                    "description": "ok, DETECTED, MISSED, FALSE_POSITIVE, RETIRED_INDEX, KNOWN_ISSUE, SKIP or ERROR",
                     "type": "string"
                 }
             }

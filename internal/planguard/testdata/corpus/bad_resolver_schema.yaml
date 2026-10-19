@@ -1,0 +1,9 @@
+# Copyright 2026 Beacon Contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+statements:
+  Q: {sqlc: Q, plan: custom}
+resolvers:
+  hop_case: SELECT x FROM t_fix_routes_hop.search_cases
+entries:
+  - {id: a, stmt: Q}

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/go-chi/chi/v5"
@@ -18,11 +19,70 @@ type DBStatementsReader interface {
 	DBStatements(context.Context) ([]api.DBStatement, error)
 }
 
-// DBAdminRouter serves database diagnostics under the admin router.
-func DBAdminRouter(reader DBStatementsReader) http.Handler {
+// PlanguardSource holds the daily plan regression check.
+type PlanguardSource interface {
+	Last() (api.PlanguardReport, error) // api.ErrPlanguardNotRun before the first run; api.ErrPlanguardDisabled when off
+	RunNow(ctx context.Context) (api.PlanguardReport, error)
+}
+
+// DBAdminRouter serves database diagnostics under the admin router. With pg nil, /planguard is not served.
+func DBAdminRouter(reader DBStatementsReader, pg PlanguardSource) http.Handler {
 	r := chi.NewRouter()
 	r.Get("/statements", getDBStatements(reader))
+	if pg != nil {
+		r.Get("/planguard", getPlanguard(pg))
+	}
 	return r
+}
+
+// getPlanguard godoc
+//
+// @Summary Last daily plan regression check
+// @Description Plans every corpus statement in custom and generic mode against this database, read-only and without executing it (plain EXPLAIN, 5 s per plan, 1 s lock timeout), and checks each plan against the corpus. Off unless planguard.daily_check is set (404 "planguard daily check is disabled"); when on, the check runs about an hour after boot and then daily, and until its first run this returns 404. fresh=true runs it now, shared with any run in progress and cancelled at server shutdown; within 5 minutes of the last run's end it starts nothing and returns the last successful report (started_at gives its age), or 500 when no run has succeeded yet. A read-only server cannot enable the check (configuration refuses planguard.daily_check with server.read_only), so there this returns 404 "planguard daily check is disabled".
+// @Tags Admin
+// @Produce json
+// @Security AdminKey
+// @Param fresh query bool false "Run the check now instead of returning the last report"
+// @Success 200 {object} api.PlanguardReport
+// @Failure 400,401,404,500 {object} map[string]APIError
+// @Router /admin/db/planguard [get]
+func getPlanguard(pg PlanguardSource) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		fresh := false
+		if v := r.URL.Query().Get("fresh"); v != "" {
+			b, err := strconv.ParseBool(v)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "invalid fresh value")
+				return
+			}
+			fresh = b
+		}
+		if fresh {
+			rep, err := pg.RunNow(r.Context())
+			if errors.Is(err, api.ErrPlanguardDisabled) {
+				respondError(w, http.StatusNotFound, err.Error())
+				return
+			}
+			if err != nil {
+				slog.Error("api: plan check", "component", "api", "error", err)
+				respondError(w, http.StatusInternalServerError, "cannot run the plan check")
+				return
+			}
+			respond(w, http.StatusOK, rep)
+			return
+		}
+		rep, err := pg.Last()
+		if errors.Is(err, api.ErrPlanguardNotRun) || errors.Is(err, api.ErrPlanguardDisabled) {
+			respondError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		if err != nil {
+			slog.Error("api: read plan check", "component", "api", "error", err)
+			respondError(w, http.StatusInternalServerError, "cannot read the plan check")
+			return
+		}
+		respond(w, http.StatusOK, rep)
+	}
 }
 
 // getDBStatements godoc

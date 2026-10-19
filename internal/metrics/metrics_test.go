@@ -38,3 +38,34 @@ func TestHandlerServesBeaconMetrics(t *testing.T) {
 		}
 	}
 }
+
+func TestRegistryGathersPlanguard(t *testing.T) {
+	// A GaugeVec with no series is not gathered: set one first.
+	PlanguardFailures.WithLabelValues("routes.example", "custom").Set(1)
+	defer PlanguardFailures.Reset()
+	PlanguardLastRun.Set(1760000000)
+	body := scrape(t)
+	for _, want := range []string{
+		`beacon_planguard_failures{entry="routes.example",mode="custom"} 1`,
+		`beacon_planguard_last_run_timestamp_seconds 1.76e+09`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+}
+
+// With the check off neither metric carries a series, so a staleness alert cannot fire on a server that never
+// runs it. Once enabled, the timestamp is exported at 0 before the first run, so a check that never succeeds
+// trips the alert. (EnablePlanguard cannot be undone: the off state is checked first.)
+func TestPlanguardMetricsOffAndEnabled(t *testing.T) {
+	PlanguardFailures.Reset()
+	PlanguardLastRun.Set(0)
+	if body := scrape(t); strings.Contains(body, "\nbeacon_planguard_failures{") || strings.Contains(body, "\nbeacon_planguard_last_run_timestamp_seconds ") {
+		t.Errorf("planguard series with the check off:\n%s", body)
+	}
+	EnablePlanguard()
+	if body := scrape(t); !strings.Contains(body, "\nbeacon_planguard_last_run_timestamp_seconds 0\n") {
+		t.Errorf("enabled check: no timestamp series at 0")
+	}
+}

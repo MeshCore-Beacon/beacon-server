@@ -6,6 +6,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -461,5 +462,64 @@ func TestGuardFamiliesMatch(t *testing.T) {
 	}
 	if strings.Join(guardFamilies, ",") != strings.Join(want, ",") {
 		t.Errorf("guardFamilies = %v, want %v", guardFamilies, want)
+	}
+}
+
+func TestLoad_ServerReadOnly(t *testing.T) {
+	for _, tc := range []struct {
+		yaml string
+		want bool
+	}{
+		{"server:\n  read_only: true\n", true},
+		{"server:\n  admin_listen: \"\"\n", false},
+		{"server:\n  read_only: yes\n", true},
+		{"server:\n  read_only: false\n", false},
+	} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte(tc.yaml), 0600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load(%q): %v", tc.yaml, err)
+		}
+		if cfg.Server.ReadOnly != tc.want {
+			t.Errorf("Load(%q): ReadOnly = %v, want %v", tc.yaml, cfg.Server.ReadOnly, tc.want)
+		}
+		if r := Resolve(cfg); r.ReadOnly != tc.want || !strings.Contains(r.String(), "readOnly="+strconv.FormatBool(tc.want)) {
+			t.Errorf("Resolve(%q): ReadOnly = %v (%s), want %v", tc.yaml, r.ReadOnly, r, tc.want)
+		}
+	}
+}
+
+func TestLoad_PlanguardDailyCheck(t *testing.T) {
+	for _, tc := range []struct {
+		yaml    string
+		want    bool
+		wantErr string
+	}{
+		{"", false, ""},
+		{"planguard: {}\n", false, ""},
+		{"planguard:\n  daily_check: true\n", true, ""},
+		{"planguard:\n  daily_check: false\n", false, ""},
+		{"planguard:\n  daily_check: true\nserver:\n  read_only: true\n", false, "planguard.daily_check cannot be enabled with server.read_only"},
+	} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte(tc.yaml), 0600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if tc.wantErr != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("Load(%q): err %v, want %q", tc.yaml, err, tc.wantErr)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("Load(%q): %v", tc.yaml, err)
+		}
+		if r := Resolve(cfg); r.PlanguardDailyCheck != tc.want || !strings.Contains(r.String(), "planguardDailyCheck="+strconv.FormatBool(tc.want)) {
+			t.Errorf("Resolve(%q): PlanguardDailyCheck = %v (%s), want %v", tc.yaml, r.PlanguardDailyCheck, r, tc.want)
+		}
 	}
 }

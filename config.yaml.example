@@ -37,6 +37,9 @@ server:
   # Address of the admin listener serving Prometheus /metrics, e.g. 127.0.0.1:9090. Off when empty.
   # It has no authentication: bind it to a private interface.
   admin_listen: ""
+  # read_only: true boots a server that never writes: no migrations, no ingest, no background jobs, no
+  # MeshMapper imports, and every database session is read-only. Used to compare two builds on one database.
+  read_only: false
 
 # Applies to /api/v1/* only. Both counters are local to this Beacon instance.
 # Set trusted_proxies correctly before using a reverse proxy, or clients share
@@ -68,6 +71,11 @@ ratelimit:
 #guards:
 #  enforce: []
 #  budget: shadow   # the per-client DB-time budget only records; enforcement is not available
+
+# Daily read-only plan regression check (GET /api/v1/admin/db/planguard, beacon_planguard_* metrics).
+# Enable on large deployments; plan expectations assume production-sized tables.
+#planguard:
+#  daily_check: false
 
 # MeshMapper integrations (optional, require a regional or grouped-region API key).
 # Your local MeshMapper regional or grouped-region admin can generate the key.

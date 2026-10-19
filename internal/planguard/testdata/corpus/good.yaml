@@ -1,0 +1,90 @@
+# Copyright 2026 Beacon Contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# A corpus that exercises every field the loader knows.
+defaults:
+  big_tables: [packets, packet_observations]
+  executions: 6
+  timeout_s: 60
+  forbid:
+    - node: Seq Scan
+      relations: [big]
+      reason: no full scan of a big table
+  forbid_sort_above_limit: true
+  sort_exempt: [latest_observation]
+  retired_indexes: [idx_retired_example]
+tiers:
+  fixture:
+    settings:
+      random_page_cost: "1.1"
+    search_path: public
+  local: {}
+  prod: {}
+groups:
+  routes:
+    search_path:
+      local: t_s2b, public
+statements:
+  Q: {sqlc: Q, group: routes, plan: cached, admission: by_id}
+  C: {sqlc: C, plan: custom}
+  M: {sqlc: M, plan: maint, kind: dml}
+  I: {sqlc: I, plan: ingest, kind: dml}
+  L: {sqlc: L, plan: legacy}
+  H: {file: sql/harness/H.sql, plan: harness}
+  P: {sqlc: NotMergedYet, plan: custom, pending: some_feature}
+sort_exempt_sets:
+  latest_observation:
+    - relation: packet_observations
+      index_cond: packet_hash = p.packet_hash
+      reason: one probe per packet
+  hop_group:
+    - relation: known_routes
+      index: idx_known_routes_hop_iata
+      index_cond: "hop_count ="
+      reason: a hop group sorts its own rows
+admission_profiles:
+  by_id: [hit, miss]
+resolvers:
+  top_node: SELECT public_key FROM nodes ORDER BY last_seen DESC LIMIT 1
+entries:
+  - id: q.hit
+    stmt: Q
+    shape: hit
+    shapes: [hit]
+    params: [abc]
+    tiers: [fixture, local]
+    expect:
+      driver:
+        - relation: nodes
+          index: nodes_pkey
+          nodes: [Index Scan]
+          index_cond: ["public_key ="]
+      forbid:
+        - node: Seq Scan
+          relations: [big, nodes]
+      sort_exempt: [hop_group]
+      budget: {buffers: 10, planning_ms: 5, rows: 1}
+    mode:
+      generic:
+        degrade_to:
+          budget: {buffers: 20}
+        reason: generic probes twice
+  - id: q.miss
+    stmt: Q
+    shape: miss
+    shapes: [miss]
+    inherit: q.hit
+  - id: q.miss_own
+    stmt: Q
+    inherit: q.hit
+    tiers: [prod]
+    modes: [custom]
+    expect:
+      budget: {buffers: 3}
+  - {id: c.one, stmt: C}
+  - {id: c.modes, stmt: C, modes: [custom, generic]}
+  - {id: m.one, stmt: M, analyze: false}
+  - {id: i.one, stmt: I, executions: 1, timeout_s: 5}
+  - {id: l.one, stmt: L, baseline: "unstable: row estimate moves", note: legacy reader}
+  - {id: h.one, stmt: H, expect_fail: true, known_issue: planted}
+  - {id: p.one, stmt: P}
