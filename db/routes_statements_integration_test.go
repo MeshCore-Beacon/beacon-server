@@ -45,7 +45,7 @@ func TestListKnownRoutesMatchesLegacyPostgres(t *testing.T) {
 	}
 }
 
-// RF1: a legacy cursor page skips the tied ms as today; cursor+cursorId walks every row once.
+// A legacy cursor page skips the tied ms as today; cursor+cursorId walks every row once.
 func TestKnownRoutesCursorTiesPostgres(t *testing.T) {
 	ctx, tx := retentionTx(t)
 	applyBaseline(t, ctx, tx)
@@ -81,8 +81,8 @@ func TestKnownRoutesCursorTiesPostgres(t *testing.T) {
 	}
 }
 
-// RF3: an unanalyzed region pages from iata_keyset, never a Sort over the region. Built on the
-// end-state index set (S3b drops the rest), where the (hop_count, iata) index must not win.
+// An unanalyzed region pages from iata_keyset, never a Sort over the region. Built on the
+// end-state index set (a later change drops the rest), where the (hop_count, iata) index must not win.
 func TestKnownRoutesUnanalyzedRegionPostgres(t *testing.T) {
 	ctx, tx := retentionTx(t)
 	applyBaseline(t, ctx, tx)
@@ -104,7 +104,7 @@ FROM generate_series(1, 20000) i;`)
 	}
 	plan := explainJSON(t, ctx, tx, capture.statement, capture.args...)
 	if !strings.Contains(plan, `"Index Name": "idx_known_routes_iata_keyset"`) || strings.Contains(plan, `"Node Type": "Sort"`) ||
-		strings.Contains(plan, `"Node Type": "Incremental Sort"`) || sharedBuffers(plan) > 300 {
+		strings.Contains(plan, `"Node Type": "Incremental Sort"`) || sharedBuffers(t, plan) > 300 {
 		t.Fatalf("unanalyzed region plan:\n%s", plan)
 	}
 }
@@ -113,8 +113,9 @@ FROM generate_series(1, 20000) i;`)
 // Postgres has no per-transaction index view, so a scan that filters hop_count shows here as heap fetches.
 const xactReads = `SELECT coalesce(seq_tup_read, 0) + coalesce(idx_tup_fetch, 0) FROM pg_stat_xact_user_tables WHERE relid = 'known_routes'::regclass`
 
-// RF2: the hop pair never runs as a named prepared statement, and the 7th call of an absent
-// hop on one connection still reads only the hop index.
+// The hop pair never runs as a named prepared statement: the pg_prepared_statements check is the
+// guard. The tuple count on the 7th call of an absent hop is only a coarse sanity check; it does
+// not pin the plan.
 func TestKnownRoutesHopStatementsStayCustomPostgres(t *testing.T) {
 	ctx, tx := retentionTx(t)
 	applyBaseline(t, ctx, tx)

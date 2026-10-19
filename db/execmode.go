@@ -17,8 +17,8 @@ import (
 // go through it (Store.qc).
 //
 // Unnamed statements are planned with their values on every call under plan_cache_mode auto or
-// force_custom_plan. force_generic_plan still makes them generic, so S2a must never route class C
-// statements to a generic pool.
+// force_custom_plan. force_generic_plan still makes them generic, so a future generic-plan pool
+// must never take these statements.
 type unnamedDBTX struct{ sqlc.DBTX }
 
 func (u unnamedDBTX) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {

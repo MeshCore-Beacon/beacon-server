@@ -52,7 +52,7 @@ func TestUpsertKnownRoute_ComputesPathKey(t *testing.T) {
 	}
 }
 
-// RF3: a value ending in a blank matches no character(3) code; no statement runs, and it encodes as [].
+// A value ending in a blank matches no character(3) code; no statement runs, and it encodes as [].
 func TestListKnownRoutesTrailingBlankIATA(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mock := mockdb.NewMockQuerier(ctrl) // no EXPECT: any call fails the test

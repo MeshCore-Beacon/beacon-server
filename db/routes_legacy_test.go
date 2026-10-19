@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// legacyListKnownRoutes is origin/dev's ListKnownRoutes, verbatim. Args: iata, hopCount, cursor
+// legacyListKnownRoutes is the pre-change statement, ListKnownRoutes verbatim. Args: iata, hopCount, cursor
 // (pgtype.Timestamptz), limit (int32), cursorID (int64).
 const legacyListKnownRoutes = `
 SELECT r.id, r.node_ids, r.hash_prefix, r.iata, r.hop_count, r.first_seen, r.last_seen, r.observation_count
@@ -95,7 +95,8 @@ func explainJSON(t *testing.T, ctx context.Context, tx pgx.Tx, sql string, args 
 }
 
 // sharedBuffers is the top plan node's shared hit + read blocks.
-func sharedBuffers(plan string) int {
+func sharedBuffers(t *testing.T, plan string) int {
+	t.Helper()
 	var plans []struct {
 		Plan struct {
 			Hit  int `json:"Shared Hit Blocks"`
@@ -103,7 +104,7 @@ func sharedBuffers(plan string) int {
 		}
 	}
 	if err := json.Unmarshal([]byte(plan), &plans); err != nil || len(plans) == 0 {
-		return -1
+		t.Fatalf("EXPLAIN JSON did not parse (%v): %s", err, plan)
 	}
 	return plans[0].Plan.Hit + plans[0].Plan.Read
 }

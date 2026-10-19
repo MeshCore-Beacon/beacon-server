@@ -14,7 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// legacyDeleteOldRoutes is DeleteOldRoutes as origin/dev generates it: the deleted set the new
+// legacyDeleteOldRoutes is the pre-change statement, DeleteOldRoutes as sqlc generated it: the deleted set the new
 // statements must reproduce.
 const legacyDeleteOldRoutes = `WITH expired AS (
     SELECT r.iata, r.path_key
@@ -129,7 +129,7 @@ func deleteExpiredAll(t *testing.T, ctx context.Context, s *Store, R time.Time, 
 	}
 }
 
-// graceWalk is one grace run as Task 4 drives it: windows from start up to G. It returns the
+// graceWalk is one grace run as RouteRetentionTask drives it: windows from start up to G. It returns the
 // watermark the next run starts from, min(floor_ms(G), earliest unresolved candidate).
 func graceWalk(t *testing.T, ctx context.Context, s *Store, start, G time.Time, m int64, batch int32) time.Time {
 	t.Helper()
@@ -184,7 +184,7 @@ func countAt(t *testing.T, ctx context.Context, tx pgx.Tx, at time.Time, obs int
 	return n
 }
 
-// Review Focus 1: exact cutoffs. R and G carry µs (…00.000586), as today's now.Add(-d) does.
+// Exact cutoffs: R and G carry µs (…00.000586), as today's now.Add(-d) does.
 func TestRouteRetentionCutoffsExactPostgres(t *testing.T) {
 	ctx, tx := retentionTx(t)
 	applyBaseline(t, ctx, tx)

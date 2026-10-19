@@ -151,7 +151,7 @@ FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relnamespace = c
 
 const hopIndex006 = "006_known_routes_hop_iata.sql"
 
-// P4a pre-builds the hop index on prod; the migration must record it, not fail or rebuild it.
+// An operator may pre-build the hop index; the migration must record it, not fail or rebuild it.
 func TestRunMigrationsHopIndexPrebuiltPostgres(t *testing.T) {
 	ctx, pool := schemaPool(t)
 	if err := RunMigrations(ctx, pool); err != nil {
@@ -168,7 +168,7 @@ func TestRunMigrationsHopIndexPrebuiltPostgres(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT to_regclass('background_state') IS NOT NULL").Scan(&stateTable); err != nil || !stateTable {
 		t.Fatalf("background_state missing: %v", err)
 	}
-	// Pre-built by hand under the migration's exact name (P4a), then the binary boots.
+	// An operator pre-built the index by hand under the migration's exact name, then the binary boots.
 	if _, err := pool.Exec(ctx, "DELETE FROM schema_migrations WHERE filename = '"+hopIndex006+"'"); err != nil {
 		t.Fatal(err)
 	}

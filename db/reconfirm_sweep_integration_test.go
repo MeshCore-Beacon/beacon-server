@@ -18,7 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// legacyAmbiguousPrefixes and legacyReconfirmRoutes are today's statements (origin/dev
+// legacyAmbiguousPrefixes and legacyReconfirmRoutes are the pre-change statements (from
 // db/queries/queries.sql), verbatim with sqlc's parameter numbering. legacyReconfirmRoutes takes
 // before, batchSize, ambIata, ambLen, ambPrefix.
 const legacyAmbiguousPrefixes = `SELECT iata::text AS iata, 1::int AS len, prefix_1 AS prefix FROM node_short_ids GROUP BY iata, prefix_1 HAVING COUNT(*) > 1
@@ -78,7 +78,7 @@ SELECT count(*) FROM batch`
 
 // reconfirmLegacyFixture: 3 regions x 400 generated routes over random and deliberately colliding
 // short ids (departed hops, hops known only in another region, 1-4-byte ambiguous prefixes), plus
-// the edge rows x01-x15 of routes-reconfirm.check.md 1a.
+// the hand-written edge rows x01-x15.
 const reconfirmLegacyFixture = `
 TRUNCATE known_routes, node_short_ids;
 INSERT INTO node_short_ids (node_id, iata, prefix_4)
@@ -145,7 +145,7 @@ func loadReconfirmCursor(t *testing.T, ctx context.Context, store *Store) (recon
 	return cur, ok
 }
 
-// D8: the sweep deletes exactly what today's ReconfirmTask loop deletes, and stamps nothing.
+// The sweep deletes exactly what today's ReconfirmTask loop deletes, and stamps nothing.
 func TestReconfirmSweepMatchesLegacyPostgres(t *testing.T) {
 	ctx, pool, store := reconfirmPool(t)
 	if _, err := pool.Exec(ctx, reconfirmLegacyFixture); err != nil {
@@ -254,7 +254,7 @@ CREATE TABLE %[1]s.orig AS SELECT * FROM %[2]s.known_routes;`, old, cur))
 	t.Logf("%d routes, %d deleted by both", total, oldDeleted)
 }
 
-// Review Focus 5: a statement timeout rolls back the batch but keeps the connection and its
+// A statement timeout rolls back the batch but keeps the connection and its
 // reconfirm_amb; a twice-timed-out slice is skipped.
 func TestReconfirmBatchTimeoutKeepsConnectionPostgres(t *testing.T) {
 	ctx, pool, store := reconfirmPool(t)
