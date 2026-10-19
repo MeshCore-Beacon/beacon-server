@@ -13,39 +13,58 @@ import (
 
 	"github.com/MeshCore-Beacon/beacon-server/db"
 	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 type idRange struct{ from, to int64 }
 
-// fakeBackfiller records every call and holds the state in memory. Each batch reports rows rows.
-// failCall makes the Nth backfill call (1-based) fail; saveErr fails every SaveState.
+// fakeBackfiller records every call and holds the state in memory. A batch types the untyped ids
+// in its range, in order, up to its row cap, as the SQL does. failCall makes the Nth backfill call
+// (1-based) fail with a deadlock; saveErr fails every SaveState.
 type fakeBackfiller struct {
 	state    map[string]json.RawMessage
 	minID    int64
 	maxID    int64
-	rows     int64
+	untyped  []int64 // ascending
 	ranges   int
 	batches  []idRange
+	caps     []int32
 	failCall int
 	saveErr  error
 }
 
-func newFakeBackfiller(minID, maxID int64) *fakeBackfiller {
-	return &fakeBackfiller{state: map[string]json.RawMessage{}, minID: minID, maxID: maxID, rows: 7}
+func newFakeBackfiller(minID, maxID int64, untyped ...int64) *fakeBackfiller {
+	return &fakeBackfiller{state: map[string]json.RawMessage{}, minID: minID, maxID: maxID, untyped: untyped}
 }
+
+var errDeadlock = &pgconn.PgError{Code: "40P01", Message: "deadlock detected"}
 
 func (f *fakeBackfiller) ObservationIDRange(context.Context) (int64, int64, error) {
 	f.ranges++
 	return f.minID, f.maxID, nil
 }
 
-func (f *fakeBackfiller) BackfillObservationPayloadTypes(_ context.Context, from, to int64) (int64, error) {
+func (f *fakeBackfiller) BackfillObservationPayloadTypes(_ context.Context, from, to int64, maxRows int32) (int64, int64, error) {
 	f.batches = append(f.batches, idRange{from, to})
+	f.caps = append(f.caps, maxRows)
 	if f.failCall == len(f.batches) {
-		return 0, errors.New("deadlock detected")
+		return 0, 0, errDeadlock
 	}
-	return f.rows, nil
+	var picked []int64
+	kept := f.untyped[:0:0]
+	for _, id := range f.untyped {
+		if id >= from && id < to && len(picked) < int(maxRows) {
+			picked = append(picked, id)
+		} else {
+			kept = append(kept, id)
+		}
+	}
+	f.untyped = kept
+	if len(picked) == int(maxRows) {
+		return int64(len(picked)), picked[len(picked)-1] + 1, nil
+	}
+	return int64(len(picked)), to, nil
 }
 
 func (f *fakeBackfiller) LoadState(_ context.Context, key string, v any) (bool, error) {
@@ -107,8 +126,8 @@ func TestPayloadTypeBackfillTask(t *testing.T) {
 	}
 
 	t.Run("walks to the max and stops", func(t *testing.T) {
-		f := newFakeBackfiller(100, 2_350_000)
-		task := payloadTypeBackfillTask(f, time.Minute, span, 2)
+		f := newFakeBackfiller(100, 2_350_000, 100, 150, 1_000_099, 1_000_100, 2_000_100, 2_350_000)
+		task := payloadTypeBackfillTask(f, time.Minute, span, 1000, 2)
 		if task.Name != "payload_type_backfill" || task.Interval != time.Minute {
 			t.Fatalf("task %q every %v", task.Name, task.Interval)
 		}
@@ -117,8 +136,8 @@ func TestPayloadTypeBackfillTask(t *testing.T) {
 		expect(t, f, []idRange{{100, 1_000_100}, {1_000_100, 2_000_100}}, db.ObservationPayloadTypeState{NextID: 2_000_100})
 		run(t, task)
 		expect(t, f, []idRange{{2_000_100, 2_350_001}}, db.ObservationPayloadTypeState{NextID: 2_350_001, Done: true})
-		if got := testutil.ToFloat64(metrics.JobRows.WithLabelValues("payload_type_backfill")) - before; got != 3*7 {
-			t.Fatalf("job rows grew by %v, want 21", got)
+		if got := testutil.ToFloat64(metrics.JobRows.WithLabelValues("payload_type_backfill")) - before; got != 6 || len(f.untyped) != 0 {
+			t.Fatalf("job rows grew by %v, want 6; still untyped %v", got, f.untyped)
 		}
 		ranges := f.ranges
 		run(t, task)
@@ -129,7 +148,7 @@ func TestPayloadTypeBackfillTask(t *testing.T) {
 
 	t.Run("last batch of a run ends at the max", func(t *testing.T) {
 		f := newFakeBackfiller(1, 1_500_000)
-		task := payloadTypeBackfillTask(f, time.Minute, span, 2)
+		task := payloadTypeBackfillTask(f, time.Minute, span, 1000, 2)
 		run(t, task)
 		expect(t, f, []idRange{{1, 1_000_001}, {1_000_001, 1_500_001}}, db.ObservationPayloadTypeState{NextID: 1_500_001})
 		run(t, task)
@@ -141,13 +160,13 @@ func TestPayloadTypeBackfillTask(t *testing.T) {
 		if err := f.SaveState(ctx, db.ObservationPayloadTypeKey, db.ObservationPayloadTypeState{NextID: 3_000_000}); err != nil {
 			t.Fatal(err)
 		}
-		run(t, payloadTypeBackfillTask(f, time.Minute, span, 2))
+		run(t, payloadTypeBackfillTask(f, time.Minute, span, 1000, 2))
 		expect(t, f, []idRange{{5_000_000, 5_200_001}}, db.ObservationPayloadTypeState{NextID: 5_200_001, Done: true})
 	})
 
 	t.Run("the max grows between runs", func(t *testing.T) {
 		f := newFakeBackfiller(1, 1_200_000)
-		task := payloadTypeBackfillTask(f, time.Minute, span, 1)
+		task := payloadTypeBackfillTask(f, time.Minute, span, 1000, 1)
 		run(t, task)
 		expect(t, f, []idRange{{1, 1_000_001}}, db.ObservationPayloadTypeState{NextID: 1_000_001})
 		f.maxID = 2_600_000
@@ -164,23 +183,24 @@ func TestPayloadTypeBackfillTask(t *testing.T) {
 
 	t.Run("ids above 2^31", func(t *testing.T) {
 		f := newFakeBackfiller(1<<31-10, 1<<31+10)
-		run(t, payloadTypeBackfillTask(f, time.Minute, 8, 10))
+		run(t, payloadTypeBackfillTask(f, time.Minute, 8, 1000, 10))
 		expect(t, f, []idRange{{1<<31 - 10, 1<<31 - 2}, {1<<31 - 2, 1<<31 + 6}, {1<<31 + 6, 1<<31 + 11}},
 			db.ObservationPayloadTypeState{NextID: 1<<31 + 11, Done: true})
 	})
 
 	t.Run("empty table is done at once", func(t *testing.T) {
 		f := newFakeBackfiller(0, 0)
-		run(t, payloadTypeBackfillTask(f, time.Minute, span, 2))
+		run(t, payloadTypeBackfillTask(f, time.Minute, span, 1000, 2))
 		expect(t, f, nil, db.ObservationPayloadTypeState{NextID: 0, Done: true})
 	})
 
 	t.Run("a failed batch keeps the position", func(t *testing.T) {
 		f := newFakeBackfiller(100, 2_350_000)
 		f.failCall = 2
-		task := payloadTypeBackfillTask(f, time.Minute, span, 3)
-		if err := task.Run(ctx); err == nil {
-			t.Fatal("want the batch error")
+		task := payloadTypeBackfillTask(f, time.Minute, span, 1000, 3)
+		var pgErr *pgconn.PgError
+		if err := task.Run(ctx); !errors.As(err, &pgErr) || pgErr.Code != "40P01" {
+			t.Fatalf("err %v, want the batch's 40P01", err)
 		}
 		expect(t, f, []idRange{{100, 1_000_100}, {1_000_100, 2_000_100}}, db.ObservationPayloadTypeState{NextID: 1_000_100})
 		f.failCall = 0
@@ -191,7 +211,7 @@ func TestPayloadTypeBackfillTask(t *testing.T) {
 	t.Run("a failed save fails the run", func(t *testing.T) {
 		f := newFakeBackfiller(100, 2_350_000)
 		f.saveErr = errors.New("save failed")
-		if err := payloadTypeBackfillTask(f, time.Minute, span, 2).Run(ctx); !errors.Is(err, f.saveErr) {
+		if err := payloadTypeBackfillTask(f, time.Minute, span, 1000, 2).Run(ctx); !errors.Is(err, f.saveErr) {
 			t.Fatalf("err %v, want the save error", err)
 		}
 		if len(f.batches) != 1 {
@@ -202,9 +222,29 @@ func TestPayloadTypeBackfillTask(t *testing.T) {
 	t.Run("a failed save on completion fails the run", func(t *testing.T) {
 		f := newFakeBackfiller(0, 0)
 		f.saveErr = errors.New("save failed")
-		if err := payloadTypeBackfillTask(f, time.Minute, span, 2).Run(ctx); !errors.Is(err, f.saveErr) {
+		if err := payloadTypeBackfillTask(f, time.Minute, span, 1000, 2).Run(ctx); !errors.Is(err, f.saveErr) {
 			t.Fatalf("err %v, want the save error", err)
 		}
+	})
+
+	t.Run("a dense span takes several capped batches", func(t *testing.T) {
+		var dense []int64
+		for id := int64(10); id < 17; id++ {
+			dense = append(dense, id)
+		}
+		f := newFakeBackfiller(1, 1_000_000, append(dense, 500_000)...)
+		task := payloadTypeBackfillTask(f, time.Minute, span, 3, 2)
+		run(t, task)
+		expect(t, f, []idRange{{1, 1_000_001}, {13, 1_000_001}}, db.ObservationPayloadTypeState{NextID: 16})
+		run(t, task) // 16 and 500,000: under the cap, so the batch ends at its span end
+		expect(t, f, []idRange{{16, 1_000_001}}, db.ObservationPayloadTypeState{NextID: 1_000_001, Done: true})
+		if len(f.untyped) != 0 {
+			t.Fatalf("still untyped %v", f.untyped)
+		}
+		f = newFakeBackfiller(1, 1_000_000, 10, 11, 12) // exactly the cap: one more batch finds none
+		task = payloadTypeBackfillTask(f, time.Minute, span, 3, 3)
+		run(t, task)
+		expect(t, f, []idRange{{1, 1_000_001}, {13, 1_000_001}}, db.ObservationPayloadTypeState{NextID: 1_000_001, Done: true})
 	})
 
 	t.Run("production values", func(t *testing.T) {
@@ -214,6 +254,11 @@ func TestPayloadTypeBackfillTask(t *testing.T) {
 		b := f.takeBatches()
 		if len(b) != 10 || b[0] != (idRange{1, 1_000_001}) || b[9] != (idRange{9_000_001, 10_000_001}) {
 			t.Fatalf("batches %v, want ten spans of 1,000,000 from 1", b)
+		}
+		for _, c := range f.caps {
+			if c != 50_000 {
+				t.Fatalf("row caps %v, want 50,000", f.caps)
+			}
 		}
 	})
 }

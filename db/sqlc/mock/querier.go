@@ -101,10 +101,10 @@ func (mr *MockQuerierMockRecorder) AddRegionIATAs(ctx, arg any) *gomock.Call {
 }
 
 // BackfillObservationPayloadTypes mocks base method.
-func (m *MockQuerier) BackfillObservationPayloadTypes(ctx context.Context, arg db.BackfillObservationPayloadTypesParams) (int64, error) {
+func (m *MockQuerier) BackfillObservationPayloadTypes(ctx context.Context, arg db.BackfillObservationPayloadTypesParams) (db.BackfillObservationPayloadTypesRow, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "BackfillObservationPayloadTypes", ctx, arg)
-	ret0, _ := ret[0].(int64)
+	ret0, _ := ret[0].(db.BackfillObservationPayloadTypesRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

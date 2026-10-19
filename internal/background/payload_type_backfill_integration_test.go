@@ -6,6 +6,7 @@ package background
 import (
 	"context"
 	"maps"
+	"slices"
 	"testing"
 	"time"
 
@@ -27,15 +28,18 @@ SELECT p.packet_hash,'00000000-0000-0000-0000-0000000000a1','YOW','2026-01-01'::
  CASE WHEN i = 1 THEN 5 WHEN i % 3 = 0 OR i > 2000 THEN NULL ELSE p.payload_type END
 FROM generate_series(1,2020) i JOIN packets p ON p.packet_hash = int4send(i) ORDER BY i;`
 
-// backfillFromRecorder is the real store; it records the fromID of every batch.
+// backfillFromRecorder is the real store; it records the fromID and rows typed of every batch.
 type backfillFromRecorder struct {
 	*db.Store
-	from []int64
+	from  []int64
+	typed []int64
 }
 
-func (r *backfillFromRecorder) BackfillObservationPayloadTypes(ctx context.Context, fromID, toID int64) (int64, error) {
+func (r *backfillFromRecorder) BackfillObservationPayloadTypes(ctx context.Context, fromID, toID int64, maxRows int32) (int64, int64, error) {
 	r.from = append(r.from, fromID)
-	return r.Store.BackfillObservationPayloadTypes(ctx, fromID, toID)
+	n, next, err := r.Store.BackfillObservationPayloadTypes(ctx, fromID, toID, maxRows)
+	r.typed = append(r.typed, n)
+	return n, next, err
 }
 
 // TestPayloadTypeBackfillPostgres drives the task on a real store through ingest and retention
@@ -50,6 +54,7 @@ func TestPayloadTypeBackfillPostgres(t *testing.T) {
 		first    int64 = 2_147_483_641
 		mismatch       = first // holds 5; its packet is 4
 		span     int64 = 500
+		maxRows  int32 = 50_000
 	)
 
 	count := func(query string, args ...any) int64 {
@@ -143,14 +148,17 @@ WHERE po.payload_type IS DISTINCT FROM p.payload_type ORDER BY po.id`)
 	}
 
 	untyped := idList(`SELECT id FROM packet_observations WHERE payload_type IS NULL ORDER BY id`)
-	if len(untyped) != 686 || untyped[len(untyped)-1] != first+2019 || count(`SELECT count(*) FROM packet_observations WHERE payload_type IS NULL AND id >= 2147483648`) < 600 {
+	if len(untyped) != 686 || untyped[len(untyped)-1] != first+2019 {
 		t.Fatalf("fixture: %d untyped rows, last %d", len(untyped), untyped[len(untyped)-1])
+	}
+	if n := count(`SELECT count(*) FROM packet_observations WHERE payload_type IS NULL AND id >= 2147483648`); n < 600 {
+		t.Fatalf("fixture: %d untyped rows at or above 2^31, want at least 600", n)
 	}
 
 	// Run 1 types [first, first+1500). Before run 2, retention deletes the packet of an untyped row in
 	// the next range (the observation goes with it), and ingest adds 5 typed rows above the max.
 	var deleted, maxAtLastRun int64
-	runs := runUntilDone(payloadTypeBackfillTask(store, time.Minute, span, 3), func() {
+	runs := runUntilDone(payloadTypeBackfillTask(store, time.Minute, span, maxRows, 3), func() {
 		if st := state(); st != (db.ObservationPayloadTypeState{NextID: first + 3*span}) {
 			t.Fatalf("after run 1: state %+v", st)
 		}
@@ -186,11 +194,11 @@ WHERE po.id = ANY($1) AND po.payload_type = p.payload_type`, untyped); n != int6
 
 	// Done: a run and a direct batch over the whole range write nothing.
 	before := xmins()
-	if err := payloadTypeBackfillTask(store, time.Minute, span, 3).Run(ctx); err != nil {
+	if err := payloadTypeBackfillTask(store, time.Minute, span, maxRows, 3).Run(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := store.BackfillObservationPayloadTypes(ctx, first, maxAtLastRun+1); err != nil || n != 0 {
-		t.Fatalf("a batch over typed rows wrote %d rows (err %v)", n, err)
+	if n, next, err := store.BackfillObservationPayloadTypes(ctx, first, maxAtLastRun+1, maxRows); err != nil || n != 0 || next != maxAtLastRun+1 {
+		t.Fatalf("a batch over typed rows wrote %d rows, next %d (err %v)", n, next, err)
 	}
 	if after := xmins(); !maps.Equal(before, after) {
 		t.Fatal("rows rewritten after the walk finished")
@@ -205,14 +213,14 @@ WHERE po.id = ANY($1) AND po.payload_type = p.payload_type`, untyped); n != int6
 	if err := store.SaveState(ctx, db.ObservationPayloadTypeKey, db.ObservationPayloadTypeState{NextID: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if err := payloadTypeBackfillTask(store, time.Minute, span, 1).Run(ctx); err != nil {
+	if err := payloadTypeBackfillTask(store, time.Minute, span, maxRows, 1).Run(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if st := state(); st != (db.ObservationPayloadTypeState{NextID: first + span}) {
 		t.Fatalf("after one batch: state %+v, want next_id %d", st, first+span)
 	}
 	rec := &backfillFromRecorder{Store: store}
-	runUntilDone(payloadTypeBackfillTask(rec, time.Minute, span, 1), nil)
+	runUntilDone(payloadTypeBackfillTask(rec, time.Minute, span, maxRows, 1), nil)
 	if len(rec.from) == 0 || rec.from[0] != first+span {
 		t.Fatalf("resumed batches from %v, want the first at %d", rec.from, first+span)
 	}
@@ -220,4 +228,35 @@ WHERE po.id = ANY($1) AND po.payload_type = p.payload_type`, untyped); n != int6
 		t.Fatalf("state after resume %+v", st)
 	}
 	typedFromPacket("after the resume")
+
+	// A dense span: 300 untyped rows in a row and a cap of 100 take three capped statements, each
+	// typing the lowest untyped ids and continuing after the last one.
+	if tag, err := pool.Exec(ctx, `UPDATE packet_observations SET payload_type = NULL WHERE id > $1 AND id <= $1 + 300`, first); err != nil || tag.RowsAffected() != 300 {
+		t.Fatalf("untyped %d rows (err %v)", tag.RowsAffected(), err)
+	}
+	if err := store.SaveState(ctx, db.ObservationPayloadTypeKey, db.ObservationPayloadTypeState{NextID: 1}); err != nil {
+		t.Fatal(err)
+	}
+	rec = &backfillFromRecorder{Store: store}
+	capped := payloadTypeBackfillTask(rec, time.Minute, span, 100, 2)
+	if err := capped.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if st := state(); st != (db.ObservationPayloadTypeState{NextID: first + 201}) {
+		t.Fatalf("after two capped batches: state %+v, want next_id %d", st, first+201)
+	}
+	if !slices.Equal(rec.from, []int64{first, first + 101}) || !slices.Equal(rec.typed, []int64{100, 100}) {
+		t.Fatalf("capped batches from %v typed %v", rec.from, rec.typed)
+	}
+	if left := idList(`SELECT id FROM packet_observations WHERE payload_type IS NULL ORDER BY id`); len(left) != 100 || left[0] != first+201 || left[99] != first+300 {
+		t.Fatalf("after two capped batches %d rows untyped, want ids %d..%d", len(left), first+201, first+300)
+	}
+	runUntilDone(capped, nil)
+	if !slices.Equal(rec.from[:4], []int64{first, first + 101, first + 201, first + 301}) || rec.typed[2] != 100 || rec.typed[3] != 0 {
+		t.Fatalf("capped batches from %v typed %v", rec.from, rec.typed)
+	}
+	if st := state(); st != (db.ObservationPayloadTypeState{NextID: maxAtLastRun + 1, Done: true}) {
+		t.Fatalf("state after the capped walk %+v", st)
+	}
+	typedFromPacket("after the capped walk")
 }

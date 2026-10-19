@@ -18,9 +18,10 @@ type Querier interface {
 	AddChannelMembers(ctx context.Context, arg AddChannelMembersParams) error
 	AddIATAs(ctx context.Context, iatas []string) error
 	AddRegionIATAs(ctx context.Context, arg AddRegionIATAsParams) error
-	// Copies the packet's payload type onto observations in [@from_id, @to_id) that lack one.
-	// Rows that already carry a type are never touched.
-	BackfillObservationPayloadTypes(ctx context.Context, arg BackfillObservationPayloadTypesParams) (int64, error)
+	// Copies the packet's payload type onto the first @max_rows observations in [@from_id, @to_id),
+	// in id order, that lack one. Rows that already carry a type are never touched. Returns how many
+	// untyped rows it picked, how many it typed, and the last picked id (0 when it picked none).
+	BackfillObservationPayloadTypes(ctx context.Context, arg BackfillObservationPayloadTypesParams) (BackfillObservationPayloadTypesRow, error)
 	// Keeps fetch timing so re-enabling still respects backoff; the ETag goes with the rows.
 	ClearRepeaters(ctx context.Context) (int64, error)
 	CreateAccount(ctx context.Context, name string) (Account, error)

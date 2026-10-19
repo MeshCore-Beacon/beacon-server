@@ -72,28 +72,49 @@ func (q *Queries) AddRegionIATAs(ctx context.Context, arg AddRegionIATAsParams) 
 	return err
 }
 
-const backfillObservationPayloadTypes = `-- name: BackfillObservationPayloadTypes :execrows
-UPDATE packet_observations po
-SET payload_type = p.payload_type
-FROM packets p
-WHERE po.id >= $1::bigint AND po.id < $2::bigint
-  AND po.payload_type IS NULL
-  AND p.packet_hash = po.packet_hash
+const backfillObservationPayloadTypes = `-- name: BackfillObservationPayloadTypes :one
+WITH picked AS (
+  SELECT id
+  FROM packet_observations
+  WHERE id >= $1::bigint AND id < $2::bigint
+    AND payload_type IS NULL
+  ORDER BY id
+  LIMIT $3::int
+), typed AS (
+  UPDATE packet_observations po
+  SET payload_type = p.payload_type
+  FROM packets p
+  WHERE po.id = ANY(ARRAY(SELECT id FROM picked)) -- a pkey probe; a join to picked can seq-scan the table
+    AND po.payload_type IS NULL
+    AND p.packet_hash = po.packet_hash
+  RETURNING po.id
+)
+SELECT
+  (SELECT count(*) FROM picked)::bigint AS picked,
+  (SELECT count(*) FROM typed)::bigint AS typed,
+  COALESCE((SELECT max(id) FROM picked), 0)::bigint AS last_id
 `
 
 type BackfillObservationPayloadTypesParams struct {
-	FromID int64 `json:"from_id"`
-	ToID   int64 `json:"to_id"`
+	FromID  int64 `json:"from_id"`
+	ToID    int64 `json:"to_id"`
+	MaxRows int32 `json:"max_rows"`
 }
 
-// Copies the packet's payload type onto observations in [@from_id, @to_id) that lack one.
-// Rows that already carry a type are never touched.
-func (q *Queries) BackfillObservationPayloadTypes(ctx context.Context, arg BackfillObservationPayloadTypesParams) (int64, error) {
-	result, err := q.db.Exec(ctx, backfillObservationPayloadTypes, arg.FromID, arg.ToID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+type BackfillObservationPayloadTypesRow struct {
+	Picked int64 `json:"picked"`
+	Typed  int64 `json:"typed"`
+	LastID int64 `json:"last_id"`
+}
+
+// Copies the packet's payload type onto the first @max_rows observations in [@from_id, @to_id),
+// in id order, that lack one. Rows that already carry a type are never touched. Returns how many
+// untyped rows it picked, how many it typed, and the last picked id (0 when it picked none).
+func (q *Queries) BackfillObservationPayloadTypes(ctx context.Context, arg BackfillObservationPayloadTypesParams) (BackfillObservationPayloadTypesRow, error) {
+	row := q.db.QueryRow(ctx, backfillObservationPayloadTypes, arg.FromID, arg.ToID, arg.MaxRows)
+	var i BackfillObservationPayloadTypesRow
+	err := row.Scan(&i.Picked, &i.Typed, &i.LastID)
+	return i, err
 }
 
 const clearRepeaters = `-- name: ClearRepeaters :execrows

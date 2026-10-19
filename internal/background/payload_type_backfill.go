@@ -14,27 +14,29 @@ import (
 )
 
 const (
-	payloadTypeBackfillSpan    int64 = 1_000_000 // ids per batch
+	payloadTypeBackfillSpan    int64 = 1_000_000 // ids a batch reads at most
+	payloadTypeBackfillRows    int32 = 50_000    // rows a batch writes at most
 	payloadTypeBackfillBatches       = 10        // batches per run
 )
 
 type payloadTypeBackfiller interface {
 	ObservationIDRange(context.Context) (int64, int64, error)
-	BackfillObservationPayloadTypes(context.Context, int64, int64) (int64, error)
+	BackfillObservationPayloadTypes(context.Context, int64, int64, int32) (int64, int64, error)
 	LoadState(context.Context, string, any) (bool, error)
 	SaveState(context.Context, string, any) error
 }
 
 // PayloadTypeBackfillTask types observations stored without a payload type, a bounded id range at a time.
 func PayloadTypeBackfillTask(store payloadTypeBackfiller, interval time.Duration) Task {
-	return payloadTypeBackfillTask(store, interval, payloadTypeBackfillSpan, payloadTypeBackfillBatches)
+	return payloadTypeBackfillTask(store, interval, payloadTypeBackfillSpan, payloadTypeBackfillRows, payloadTypeBackfillBatches)
 }
 
-// payloadTypeBackfillTask walks packet_observations by id in spans of span ids, at most batches
-// spans per run, up to the max id read at the run's start. It saves the next id after every
-// batch, so a failed or interrupted run resumes where it stopped, and it saves done when a batch
+// payloadTypeBackfillTask walks packet_observations by id, at most batches statements per run, up
+// to the max id read at the run's start. Each batch reads at most span ids and types at most
+// maxRows of them; when it hits maxRows it continues after the last row it picked. It saves the
+// next id after every batch, so a failed or interrupted run resumes where it stopped, and it saves done when a batch
 // slot finds the walk past the max (at once for an empty table). Once done, a run only reads the state.
-func payloadTypeBackfillTask(store payloadTypeBackfiller, interval time.Duration, span int64, batches int) Task {
+func payloadTypeBackfillTask(store payloadTypeBackfiller, interval time.Duration, span int64, maxRows int32, batches int) Task {
 	return Task{
 		Name:     "payload_type_backfill",
 		Interval: interval,
@@ -64,8 +66,7 @@ func payloadTypeBackfillTask(store payloadTypeBackfiller, interval time.Duration
 					slog.Info("observation payload types complete", "component", "background", "next_id", next)
 					return nil
 				}
-				to := min(next+span, maxID+1)
-				n, err := store.BackfillObservationPayloadTypes(ctx, next, to)
+				n, to, err := store.BackfillObservationPayloadTypes(ctx, next, min(next+span, maxID+1), maxRows)
 				if err != nil {
 					return fmt.Errorf("payload type backfill: %w", err)
 				}

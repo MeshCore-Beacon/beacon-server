@@ -358,15 +358,30 @@ WHERE po.observer_id = $1
 ORDER BY po.id ASC
 LIMIT $3;
 
--- name: BackfillObservationPayloadTypes :execrows
--- Copies the packet's payload type onto observations in [@from_id, @to_id) that lack one.
--- Rows that already carry a type are never touched.
-UPDATE packet_observations po
-SET payload_type = p.payload_type
-FROM packets p
-WHERE po.id >= @from_id::bigint AND po.id < @to_id::bigint
-  AND po.payload_type IS NULL
-  AND p.packet_hash = po.packet_hash;
+-- name: BackfillObservationPayloadTypes :one
+-- Copies the packet's payload type onto the first @max_rows observations in [@from_id, @to_id),
+-- in id order, that lack one. Rows that already carry a type are never touched. Returns how many
+-- untyped rows it picked, how many it typed, and the last picked id (0 when it picked none).
+WITH picked AS (
+  SELECT id
+  FROM packet_observations
+  WHERE id >= @from_id::bigint AND id < @to_id::bigint
+    AND payload_type IS NULL
+  ORDER BY id
+  LIMIT @max_rows::int
+), typed AS (
+  UPDATE packet_observations po
+  SET payload_type = p.payload_type
+  FROM packets p
+  WHERE po.id = ANY(ARRAY(SELECT id FROM picked)) -- a pkey probe; a join to picked can seq-scan the table
+    AND po.payload_type IS NULL
+    AND p.packet_hash = po.packet_hash
+  RETURNING po.id
+)
+SELECT
+  (SELECT count(*) FROM picked)::bigint AS picked,
+  (SELECT count(*) FROM typed)::bigint AS typed,
+  COALESCE((SELECT max(id) FROM picked), 0)::bigint AS last_id;
 
 -- name: GetObservationIDRange :one
 SELECT COALESCE(min(id), 0)::bigint AS min_id, COALESCE(max(id), 0)::bigint AS max_id
