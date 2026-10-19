@@ -67,6 +67,11 @@ func (s *Store) ObservationIDRange(ctx context.Context) (minID, maxID int64, err
 	return r.MinID, r.MaxID, nil
 }
 
+// HasUntypedObservations reports whether any observation with id <= maxID lacks a payload type.
+func (s *Store) HasUntypedObservations(ctx context.Context, maxID int64) (bool, error) {
+	return s.q.HasUntypedObservations(ctx, maxID)
+}
+
 // BackfillObservationPayloadTypes types, from their own packet, the first maxRows observations in
 // [fromID, toID) that carry no payload type, in id order. It returns the rows typed and where the
 // walk continues: after the last row it picked when it picked maxRows, otherwise toID.

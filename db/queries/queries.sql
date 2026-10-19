@@ -393,6 +393,14 @@ SELECT
   (SELECT count(*) FROM typed)::bigint AS typed,
   COALESCE((SELECT max(id) FROM picked), 0)::bigint AS last_id;
 
+-- name: HasUntypedObservations :one
+-- Whether any observation up to @max_id lacks a payload type. A full scan, run at most once per
+-- process by the payload-type backfill.
+SELECT EXISTS (
+  SELECT 1 FROM packet_observations
+  WHERE payload_type IS NULL AND id <= @max_id::bigint
+) AS untyped;
+
 -- name: GetObservationIDRange :one
 SELECT COALESCE(min(id), 0)::bigint AS min_id, COALESCE(max(id), 0)::bigint AS max_id
 FROM packet_observations;

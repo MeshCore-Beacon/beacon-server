@@ -192,6 +192,9 @@ type Querier interface {
 	GetTopNodesProbe(ctx context.Context, arg GetTopNodesProbeParams) ([]GetTopNodesProbeRow, error)
 	GetTransportScopeByName(ctx context.Context, name string) (int32, error)
 	GetTransportScopes(ctx context.Context) ([]GetTransportScopesRow, error)
+	// Whether any observation up to @max_id lacks a payload type. A full scan, run at most once per
+	// process by the payload-type backfill.
+	HasUntypedObservations(ctx context.Context, maxID int64) (bool, error)
 	// ============================================================
 	// CHANNEL MESSAGES
 	// ============================================================

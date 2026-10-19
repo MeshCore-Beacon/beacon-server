@@ -6,11 +6,18 @@ package background
 import (
 	"context"
 	"maps"
+	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/db"
+	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Packets 1..2,100 of types 2, 4, 5 and 9 (packet i has type [2,4,5,9][i%4]), one observation each.
@@ -259,4 +266,173 @@ WHERE po.id = ANY($1) AND po.payload_type = p.payload_type`, untyped); n != int6
 		t.Fatalf("state after the capped walk %+v", st)
 	}
 	typedFromPacket("after the capped walk")
+}
+
+// advertStatementRecorder records the sqlc name of every adverts statement read through it.
+type advertStatementRecorder struct {
+	sqlc.DBTX
+	names []string
+}
+
+func (r *advertStatementRecorder) record(sql string) {
+	if rest, ok := strings.CutPrefix(sql, "-- name: "); ok {
+		if name, _, _ := strings.Cut(rest, " "); strings.HasPrefix(name, "ListObserverAdverts") {
+			r.names = append(r.names, name)
+		}
+	}
+}
+
+func (r *advertStatementRecorder) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	r.record(sql)
+	return r.DBTX.Query(ctx, sql, args...)
+}
+
+func (r *advertStatementRecorder) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	r.record(sql)
+	return r.DBTX.QueryRow(ctx, sql, args...)
+}
+
+// TestPayloadTypeBackfillProbePostgres checks the one-time probe on a real store: an empty and a
+// fully typed table are done after one run without a batch, and the adverts gate then switches to
+// the observation-typed statement with the same pages; a table with untyped rows still walks.
+func TestPayloadTypeBackfillProbePostgres(t *testing.T) {
+	const (
+		first   int64 = 2_147_483_641
+		span    int64 = 500
+		maxRows int32 = 50_000
+	)
+	observer := uuid.MustParse("00000000-0000-0000-0000-0000000000a1")
+
+	setup := func(t *testing.T, fixture string) (context.Context, *pgxpool.Pool, *db.Store, func(string) int64) {
+		t.Helper()
+		ctx, pool := migratedPool(t)
+		if fixture != "" {
+			if _, err := pool.Exec(ctx, fixture); err != nil {
+				t.Fatal(err)
+			}
+		}
+		count := func(query string) int64 {
+			t.Helper()
+			var n int64
+			if err := pool.QueryRow(ctx, query).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			return n
+		}
+		return ctx, pool, db.New(pool, pool, 0, 0), count
+	}
+	state := func(t *testing.T, ctx context.Context, store *db.Store) (db.ObservationPayloadTypeState, bool) {
+		t.Helper()
+		var st db.ObservationPayloadTypeState
+		found, err := store.LoadState(ctx, db.ObservationPayloadTypeKey, &st)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st, found
+	}
+
+	t.Run("empty table", func(t *testing.T) {
+		ctx, _, store, _ := setup(t, "")
+		rec := &backfillFromRecorder{Store: store}
+		if err := payloadTypeBackfillTask(rec, time.Minute, span, maxRows, 10).Run(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if st, found := state(t, ctx, store); !found || st != (db.ObservationPayloadTypeState{Done: true}) || len(rec.from) != 0 {
+			t.Fatalf("state %+v (found %v), batches from %v", st, found, rec.from)
+		}
+	})
+
+	t.Run("fully typed table", func(t *testing.T) {
+		ctx, pool, store, count := setup(t, payloadTypeBackfillFixture+`
+UPDATE packet_observations po SET payload_type = p.payload_type
+FROM packets p WHERE p.packet_hash = po.packet_hash AND po.payload_type IS DISTINCT FROM p.payload_type;`)
+		if n := count(`SELECT count(*) FROM packet_observations WHERE payload_type IS NULL`); n != 0 {
+			t.Fatalf("fixture: %d untyped rows", n)
+		}
+		maxID := count(`SELECT max(id) FROM packet_observations`)
+		xmins := count(`SELECT sum(xmin::text::bigint) FROM packet_observations`)
+
+		rec := &advertStatementRecorder{DBTX: pool}
+		apiStore := db.New(rec, nil, 0, 0, db.WithPayloadTypeGate())
+		pages := func(t *testing.T, want string) []api.Page[api.AdvertObservation] {
+			t.Helper()
+			var out []api.Page[api.AdvertObservation]
+			for cursor := int64(0); ; {
+				p, err := apiStore.ListObserverAdverts(ctx, observer, cursor, 97)
+				if err != nil {
+					t.Fatal(err)
+				}
+				out = append(out, p)
+				if !p.HasMore {
+					break
+				}
+				cursor = *p.NextCursor
+			}
+			for _, n := range rec.names {
+				if n != want {
+					t.Fatalf("statements %v, want only %s", rec.names, want)
+				}
+			}
+			rec.names = nil
+			return out
+		}
+		before := pages(t, "ListObserverAdvertsJoinFilter")
+		if len(before) < 5 {
+			t.Fatalf("fixture: %d adverts pages", len(before))
+		}
+
+		backfill := &backfillFromRecorder{Store: store}
+		if err := payloadTypeBackfillTask(backfill, time.Minute, span, maxRows, 10).Run(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if st, found := state(t, ctx, store); !found || st != (db.ObservationPayloadTypeState{NextID: maxID + 1, Done: true}) {
+			t.Fatalf("state %+v (found %v), want done past %d", st, found, maxID)
+		}
+		if len(backfill.from) != 0 {
+			t.Fatalf("batches from %v, want none", backfill.from)
+		}
+		if got := count(`SELECT sum(xmin::text::bigint) FROM packet_observations`); got != xmins {
+			t.Fatal("the probe rewrote observations")
+		}
+		if after := pages(t, "ListObserverAdverts"); !reflect.DeepEqual(after, before) {
+			t.Fatalf("adverts pages changed after the switch:\n%+v\n%+v", after, before)
+		}
+	})
+
+	t.Run("untyped rows walk", func(t *testing.T) {
+		ctx, _, store, count := setup(t, payloadTypeBackfillFixture)
+		if n := count(`SELECT count(*) FROM packet_observations WHERE payload_type IS NULL`); n != 686 {
+			t.Fatalf("fixture: %d untyped rows", n)
+		}
+		rec := &backfillFromRecorder{Store: store}
+		task := payloadTypeBackfillTask(rec, time.Minute, span, maxRows, 1)
+		if err := task.Run(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if st, _ := state(t, ctx, store); st != (db.ObservationPayloadTypeState{NextID: first + span}) {
+			t.Fatalf("after one batch: state %+v", st)
+		}
+		for i := 0; i < 10; i++ {
+			if st, _ := state(t, ctx, store); st.Done {
+				break
+			}
+			if err := task.Run(ctx); err != nil {
+				t.Fatal(err)
+			}
+		}
+		maxID := count(`SELECT max(id) FROM packet_observations`)
+		if st, _ := state(t, ctx, store); st != (db.ObservationPayloadTypeState{NextID: maxID + 1, Done: true}) {
+			t.Fatalf("state %+v", st)
+		}
+		if !slices.Equal(rec.from, []int64{first, first + span, first + 2*span, first + 3*span, first + 4*span}) {
+			t.Fatalf("batches from %v", rec.from)
+		}
+		if n := count(`SELECT count(*) FROM packet_observations WHERE payload_type IS NULL`); n != 0 {
+			t.Fatalf("%d rows still untyped", n)
+		}
+		if n := count(`SELECT count(*) FROM packet_observations po JOIN packets p ON p.packet_hash = po.packet_hash
+WHERE po.payload_type IS DISTINCT FROM p.payload_type`); n != 1 {
+			t.Fatalf("%d rows differ from their packet, want only the fixture's mismatch", n)
+		}
+	})
 }

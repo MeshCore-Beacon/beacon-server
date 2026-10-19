@@ -1330,6 +1330,21 @@ func (mr *MockQuerierMockRecorder) GetTransportScopes(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTransportScopes", reflect.TypeOf((*MockQuerier)(nil).GetTransportScopes), ctx)
 }
 
+// HasUntypedObservations mocks base method.
+func (m *MockQuerier) HasUntypedObservations(ctx context.Context, maxID int64) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "HasUntypedObservations", ctx, maxID)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// HasUntypedObservations indicates an expected call of HasUntypedObservations.
+func (mr *MockQuerierMockRecorder) HasUntypedObservations(ctx, maxID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HasUntypedObservations", reflect.TypeOf((*MockQuerier)(nil).HasUntypedObservations), ctx, maxID)
+}
+
 // InsertChannelMessage mocks base method.
 func (m *MockQuerier) InsertChannelMessage(ctx context.Context, arg db.InsertChannelMessageParams) (db.InsertChannelMessageRow, error) {
 	m.ctrl.T.Helper()

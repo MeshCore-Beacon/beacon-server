@@ -2694,6 +2694,22 @@ func (q *Queries) GetTransportScopes(ctx context.Context) ([]GetTransportScopesR
 	return items, nil
 }
 
+const hasUntypedObservations = `-- name: HasUntypedObservations :one
+SELECT EXISTS (
+  SELECT 1 FROM packet_observations
+  WHERE payload_type IS NULL AND id <= $1::bigint
+) AS untyped
+`
+
+// Whether any observation up to @max_id lacks a payload type. A full scan, run at most once per
+// process by the payload-type backfill.
+func (q *Queries) HasUntypedObservations(ctx context.Context, maxID int64) (bool, error) {
+	row := q.db.QueryRow(ctx, hasUntypedObservations, maxID)
+	var untyped bool
+	err := row.Scan(&untyped)
+	return untyped, err
+}
+
 const insertChannelMessage = `-- name: InsertChannelMessage :one
 
 WITH inserted AS (
