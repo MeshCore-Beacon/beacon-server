@@ -1,0 +1,133 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+package db
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
+	mockdb "github.com/MeshCore-Beacon/beacon-server/db/sqlc/mock"
+	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
+	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
+	"github.com/jackc/pgx/v5"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+	"go.uber.org/mock/gomock"
+)
+
+func TestTrustPolicy(t *testing.T) {
+	tr := NewTrust("cmi_policy_test", true, CmiTrustPolicy)
+	gauge := func() float64 { return testutil.ToFloat64(metrics.ReadModelTrusted.WithLabelValues("cmi_policy_test")) }
+	step := func(label string, want bool) {
+		t.Helper()
+		if tr.Trusted() != want {
+			t.Fatalf("%s: trusted %v, want %v", label, tr.Trusted(), want)
+		}
+		if g := gauge(); (g == 1) != want {
+			t.Fatalf("%s: gauge %v, want trusted %v", label, g, want)
+		}
+	}
+	step("new", false)
+	tr.ObserveRun(5)
+	step("a repairing run before earn", false)
+	tr.Earn()
+	step("earned", true)
+	tr.ObserveRun(1)
+	tr.ObserveRun(1)
+	step("two repairing runs", true)
+	tr.ObserveRun(1)
+	step("three repairing runs", false)
+	tr.ObserveRun(0)
+	step("one clean run", false)
+	tr.ObserveRun(0)
+	step("two clean runs", true)
+	tr.ObserveRun(1)
+	tr.ObserveRun(0)
+	tr.ObserveRun(1)
+	tr.ObserveRun(1)
+	step("dirty, clean, dirty, dirty", true)
+
+	disabled := NewTrust("cmi_policy_test_disabled", false, CmiTrustPolicy)
+	disabled.Earn()
+	if disabled.Trusted() || disabled.Model() != "cmi_policy_test_disabled" {
+		t.Fatal("a disabled model earned trust")
+	}
+	if (*Trust)(nil).Trusted() {
+		t.Fatal("a nil Trust is trusted")
+	}
+	(*Trust)(nil).Invalidate("nil-safe")
+	if (*ReadModels)(nil).cmiTrusted() {
+		t.Fatal("nil ReadModels trusted")
+	}
+}
+
+// A writer failure drops trust at once; only a reconcile run that began after the last failure restores it.
+func TestTrustInvalidate(t *testing.T) {
+	tr := NewTrust("cmi_invalidate_test", true, CmiTrustPolicy)
+	before := tr.Generation()
+	tr.Invalidate("failed add")
+	tr.Earn()
+	tr.Repaired(before) // the boot run began before the failure
+	if tr.Trusted() {
+		t.Fatal("a run that began before the failure restored trust")
+	}
+	gen := tr.Generation()
+	tr.Repaired(gen)
+	if !tr.Trusted() {
+		t.Fatal("a run that began after the failure did not restore trust")
+	}
+	gen = tr.Generation()
+	tr.Invalidate("unseeded message")
+	if tr.Trusted() {
+		t.Fatal("an invalidation left trust on")
+	}
+	tr.Repaired(gen) // began before this failure
+	if tr.Trusted() {
+		t.Fatal("restored by an older run")
+	}
+	tr.Repaired(tr.Generation())
+	if !tr.Trusted() {
+		t.Fatal("not restored")
+	}
+}
+
+// The writers drop cmi trust when they leave a pair missing: a failed Add, or a message stored without its seed.
+func TestCmiWriterFailuresDropTrust(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mock := mockdb.NewMockQuerier(ctrl)
+	tr := NewTrust("cmi_writer_test", true, CmiTrustPolicy)
+	tr.Earn()
+	s := &Store{q: mock}
+	WithReadModels(&ReadModels{Cmi: tr})(s)
+
+	mock.EXPECT().AddChannelMessageIATA(gomock.Any(), gomock.Any()).Return(errors.New("add failed"))
+	if err := s.AddChannelMessageIATA(context.Background(), []byte{1}, "YUL"); err == nil {
+		t.Fatal("Add error not returned")
+	}
+	if tr.Trusted() {
+		t.Fatal("a failed Add left cmi trusted")
+	}
+	tr.Repaired(tr.Generation())
+
+	mock.EXPECT().InsertChannelMessage(gomock.Any(), gomock.Any()).Return(sqlc.InsertChannelMessageRow{}, errors.New("seed failed"))
+	mock.EXPECT().InsertChannelMessageUnseeded(gomock.Any(), gomock.Any()).Return(sqlc.InsertChannelMessageUnseededRow{ID: 9}, nil)
+	if m, err := s.InsertChannelMessage(context.Background(), ingest.InsertChannelMessageParams{ChannelID: 1, PacketHash: []byte{2}}); err != nil || m == nil || m.ID != 9 {
+		t.Fatalf("fallback = %+v, %v", m, err)
+	}
+	if tr.Trusted() {
+		t.Fatal("a message stored without its seed left cmi trusted")
+	}
+	tr.Repaired(tr.Generation())
+
+	// The fallback finding a duplicate stored nothing: trust stays.
+	mock.EXPECT().InsertChannelMessage(gomock.Any(), gomock.Any()).Return(sqlc.InsertChannelMessageRow{}, errors.New("seed failed"))
+	mock.EXPECT().InsertChannelMessageUnseeded(gomock.Any(), gomock.Any()).Return(sqlc.InsertChannelMessageUnseededRow{}, pgx.ErrNoRows)
+	if m, err := s.InsertChannelMessage(context.Background(), ingest.InsertChannelMessageParams{ChannelID: 1, PacketHash: []byte{2}}); err != nil || m != nil {
+		t.Fatalf("duplicate fallback = %+v, %v", m, err)
+	}
+	if !tr.Trusted() {
+		t.Fatal("a duplicate dropped trust")
+	}
+}

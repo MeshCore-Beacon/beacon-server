@@ -60,3 +60,223 @@ SELECT
                          EXCEPT SELECT message_id, iata, channel_id, scope_id FROM have) m)::bigint AS missing,
   (SELECT count(*) FROM (SELECT message_id, iata, channel_id, scope_id FROM have
                          EXCEPT SELECT message_id, iata, channel_id, scope_id FROM def) x)::bigint AS extra;
+
+-- name: ListChannelMessagesByIATAs :many
+-- One channel filtered by sites: each site's newest message ids from the read model, merged.
+WITH hits AS MATERIALIZED (
+  SELECT m.message_id
+  FROM unnest(@iatas::bpchar[]) AS req(iata)
+  CROSS JOIN LATERAL (
+    SELECT i.message_id FROM channel_message_iatas i
+    WHERE i.channel_id = @channel_id::int AND i.iata = req.iata
+      AND i.message_id < @cursor_id::bigint
+    ORDER BY i.message_id DESC
+    LIMIT @page_limit) m
+  GROUP BY m.message_id
+  ORDER BY m.message_id DESC
+  LIMIT @page_limit)
+SELECT cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at,
+       encode(cm.packet_hash, 'hex') AS packet_hash_hex, c.channel_hash, ts.name AS scope_name,
+       p.transport_codes_present, p.observation_count AS observation_count
+FROM hits h
+JOIN channel_messages cm ON cm.id = h.message_id
+JOIN channels c ON c.id = cm.channel_id
+JOIN packets p ON p.packet_hash = cm.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+ORDER BY cm.id DESC;
+
+-- name: ListChannelMessagesByIATAsScoped :many
+-- One channel filtered by sites and scope.
+WITH hits AS MATERIALIZED (
+  SELECT m.message_id
+  FROM unnest(@iatas::bpchar[]) AS req(iata)
+  CROSS JOIN LATERAL (
+    SELECT i.message_id FROM channel_message_iatas i
+    WHERE i.channel_id = @channel_id::int AND i.iata = req.iata AND i.scope_id = @scope_id::int
+      AND i.message_id < @cursor_id::bigint
+    ORDER BY i.message_id DESC
+    LIMIT @page_limit) m
+  GROUP BY m.message_id
+  ORDER BY m.message_id DESC
+  LIMIT @page_limit)
+SELECT cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at,
+       encode(cm.packet_hash, 'hex') AS packet_hash_hex, c.channel_hash, ts.name AS scope_name,
+       p.transport_codes_present, p.observation_count AS observation_count
+FROM hits h
+JOIN channel_messages cm ON cm.id = h.message_id
+JOIN channels c ON c.id = cm.channel_id
+JOIN packets p ON p.packet_hash = cm.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+ORDER BY cm.id DESC;
+
+-- name: ListChannelMessagesPlainScoped :many
+-- One channel and scope: the read model has a row exactly when the message has a stored observation.
+WITH hits AS MATERIALIZED (
+  SELECT DISTINCT i.message_id
+  FROM channel_message_iatas i
+  WHERE i.channel_id = @channel_id::int AND i.scope_id = @scope_id::int AND i.message_id < @cursor_id::bigint
+  ORDER BY i.message_id DESC
+  LIMIT @page_limit)
+SELECT cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at,
+       encode(cm.packet_hash, 'hex') AS packet_hash_hex, c.channel_hash, ts.name AS scope_name,
+       p.transport_codes_present, p.observation_count AS observation_count
+FROM hits h
+JOIN channel_messages cm ON cm.id = h.message_id
+JOIN channels c ON c.id = cm.channel_id
+JOIN packets p ON p.packet_hash = cm.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+ORDER BY cm.id DESC;
+
+-- name: ListChannelMessagesPlain :many
+-- One channel, unfiltered: a walk of the channel by id; a message counts once it has a stored observation.
+SELECT cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at,
+       encode(cm.packet_hash, 'hex') AS packet_hash_hex, c.channel_hash, ts.name AS scope_name,
+       p.transport_codes_present, p.observation_count AS observation_count
+FROM channel_messages cm
+JOIN channels c ON c.id = cm.channel_id
+JOIN packets p ON p.packet_hash = cm.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+WHERE cm.channel_id = @channel_id::int AND cm.id < @cursor_id::bigint
+  AND EXISTS (SELECT 1 FROM packet_observations po WHERE po.packet_hash = cm.packet_hash)
+ORDER BY cm.id DESC
+LIMIT @page_limit;
+
+-- name: ListChannelMessagesSinceWalk :many
+-- One channel with since (no client sends it): a channel walk; sites filter through the read model.
+SELECT cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at,
+       encode(cm.packet_hash, 'hex') AS packet_hash_hex, c.channel_hash, ts.name AS scope_name,
+       p.transport_codes_present, p.observation_count AS observation_count
+FROM channel_messages cm
+JOIN channels c ON c.id = cm.channel_id
+JOIN packets p ON p.packet_hash = cm.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+WHERE cm.channel_id = @channel_id::int
+  AND cm.sent_at >= @since::timestamptz
+  AND EXISTS (SELECT 1 FROM packet_observations po WHERE po.packet_hash = cm.packet_hash)
+  AND (COALESCE(cardinality(@iatas::bpchar[]), 0) = 0
+       OR EXISTS (SELECT 1 FROM channel_message_iatas i WHERE i.message_id = cm.id AND i.iata = ANY(@iatas::bpchar[])))
+  AND (sqlc.narg('scope_id')::int IS NULL OR p.scope_id = sqlc.narg('scope_id')::int)
+  AND cm.id < @cursor_id::bigint
+ORDER BY cm.id DESC
+LIMIT @page_limit;
+
+-- name: ListAllChannelMessagesByIATAs :many
+-- Every channel filtered by sites: each site's newest message ids from the read model, merged.
+WITH hits AS MATERIALIZED (
+  SELECT m.message_id
+  FROM unnest(@iatas::bpchar[]) AS req(iata)
+  CROSS JOIN LATERAL (
+    SELECT i.message_id FROM channel_message_iatas i
+    WHERE i.iata = req.iata AND i.message_id < @cursor_id::bigint
+    ORDER BY i.message_id DESC
+    LIMIT @page_limit) m
+  GROUP BY m.message_id
+  ORDER BY m.message_id DESC
+  LIMIT @page_limit)
+SELECT cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at,
+       encode(cm.packet_hash, 'hex') AS packet_hash_hex, c.channel_hash, ts.name AS scope_name,
+       p.transport_codes_present, p.observation_count AS observation_count
+FROM hits h
+JOIN channel_messages cm ON cm.id = h.message_id
+JOIN channels c ON c.id = cm.channel_id
+JOIN packets p ON p.packet_hash = cm.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+ORDER BY cm.id DESC;
+
+-- name: ListAllChannelMessagesByIATAsScoped :many
+-- Every channel filtered by sites and scope.
+WITH hits AS MATERIALIZED (
+  SELECT m.message_id
+  FROM unnest(@iatas::bpchar[]) AS req(iata)
+  CROSS JOIN LATERAL (
+    SELECT i.message_id FROM channel_message_iatas i
+    WHERE i.iata = req.iata AND i.scope_id = @scope_id::int AND i.message_id < @cursor_id::bigint
+    ORDER BY i.message_id DESC
+    LIMIT @page_limit) m
+  GROUP BY m.message_id
+  ORDER BY m.message_id DESC
+  LIMIT @page_limit)
+SELECT cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at,
+       encode(cm.packet_hash, 'hex') AS packet_hash_hex, c.channel_hash, ts.name AS scope_name,
+       p.transport_codes_present, p.observation_count AS observation_count
+FROM hits h
+JOIN channel_messages cm ON cm.id = h.message_id
+JOIN channels c ON c.id = cm.channel_id
+JOIN packets p ON p.packet_hash = cm.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+ORDER BY cm.id DESC;
+
+-- name: ListAllChannelMessagesByIATAsSince :many
+-- Every channel filtered by sites and since, optionally by scope.
+WITH hits AS MATERIALIZED (
+  SELECT m.message_id
+  FROM unnest(@iatas::bpchar[]) AS req(iata)
+  CROSS JOIN LATERAL (
+    SELECT i.message_id FROM channel_message_iatas i
+    JOIN channel_messages cm ON cm.id = i.message_id
+    WHERE i.iata = req.iata
+      AND cm.sent_at >= @since::timestamptz
+      AND (sqlc.narg('scope_id')::int IS NULL OR i.scope_id = sqlc.narg('scope_id')::int)
+      AND i.message_id < @cursor_id::bigint
+    ORDER BY i.message_id DESC
+    LIMIT @page_limit) m
+  GROUP BY m.message_id
+  ORDER BY m.message_id DESC
+  LIMIT @page_limit)
+SELECT cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at,
+       encode(cm.packet_hash, 'hex') AS packet_hash_hex, c.channel_hash, ts.name AS scope_name,
+       p.transport_codes_present, p.observation_count AS observation_count
+FROM hits h
+JOIN channel_messages cm ON cm.id = h.message_id
+JOIN channels c ON c.id = cm.channel_id
+JOIN packets p ON p.packet_hash = cm.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+ORDER BY cm.id DESC;
+
+-- name: ListAllChannelMessagesPlainScoped :many
+-- Every channel filtered by scope alone: the scope's newest message ids from the read model.
+WITH hits AS MATERIALIZED (
+  SELECT DISTINCT i.message_id
+  FROM channel_message_iatas i
+  WHERE i.scope_id = @scope_id::int AND i.message_id < @cursor_id::bigint
+  ORDER BY i.message_id DESC
+  LIMIT @page_limit)
+SELECT cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at,
+       encode(cm.packet_hash, 'hex') AS packet_hash_hex, c.channel_hash, ts.name AS scope_name,
+       p.transport_codes_present, p.observation_count AS observation_count
+FROM hits h
+JOIN channel_messages cm ON cm.id = h.message_id
+JOIN channels c ON c.id = cm.channel_id
+JOIN packets p ON p.packet_hash = cm.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+ORDER BY cm.id DESC;
+
+-- name: ListAllChannelMessagesPlain :many
+-- Every channel, unfiltered: a walk by id; a message counts once it has a stored observation.
+SELECT cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at,
+       encode(cm.packet_hash, 'hex') AS packet_hash_hex, c.channel_hash, ts.name AS scope_name,
+       p.transport_codes_present, p.observation_count AS observation_count
+FROM channel_messages cm
+JOIN channels c ON c.id = cm.channel_id
+JOIN packets p ON p.packet_hash = cm.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+WHERE cm.id < @cursor_id::bigint
+  AND EXISTS (SELECT 1 FROM packet_observations po WHERE po.packet_hash = cm.packet_hash)
+ORDER BY cm.id DESC
+LIMIT @page_limit;
+
+-- name: ListAllChannelMessagesSince :many
+-- Every channel with since, optionally by scope (no sites): a walk by id.
+SELECT cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at,
+       encode(cm.packet_hash, 'hex') AS packet_hash_hex, c.channel_hash, ts.name AS scope_name,
+       p.transport_codes_present, p.observation_count AS observation_count
+FROM channel_messages cm
+JOIN channels c ON c.id = cm.channel_id
+JOIN packets p ON p.packet_hash = cm.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+WHERE cm.sent_at >= @since::timestamptz
+  AND (sqlc.narg('scope_id')::int IS NULL OR p.scope_id = sqlc.narg('scope_id')::int)
+  AND cm.id < @cursor_id::bigint
+  AND EXISTS (SELECT 1 FROM packet_observations po WHERE po.packet_hash = cm.packet_hash)
+ORDER BY cm.id DESC
+LIMIT @page_limit;

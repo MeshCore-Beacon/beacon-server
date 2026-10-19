@@ -231,6 +231,18 @@ type Querier interface {
 	// Pass empty string for iata or scope to skip those filters.
 	// Pass cursor=0 to start from the beginning.
 	ListAllChannelMessages(ctx context.Context, arg ListAllChannelMessagesParams) ([]ListAllChannelMessagesRow, error)
+	// Every channel filtered by sites: each site's newest message ids from the read model, merged.
+	ListAllChannelMessagesByIATAs(ctx context.Context, arg ListAllChannelMessagesByIATAsParams) ([]ListAllChannelMessagesByIATAsRow, error)
+	// Every channel filtered by sites and scope.
+	ListAllChannelMessagesByIATAsScoped(ctx context.Context, arg ListAllChannelMessagesByIATAsScopedParams) ([]ListAllChannelMessagesByIATAsScopedRow, error)
+	// Every channel filtered by sites and since, optionally by scope.
+	ListAllChannelMessagesByIATAsSince(ctx context.Context, arg ListAllChannelMessagesByIATAsSinceParams) ([]ListAllChannelMessagesByIATAsSinceRow, error)
+	// Every channel, unfiltered: a walk by id; a message counts once it has a stored observation.
+	ListAllChannelMessagesPlain(ctx context.Context, arg ListAllChannelMessagesPlainParams) ([]ListAllChannelMessagesPlainRow, error)
+	// Every channel filtered by scope alone: the scope's newest message ids from the read model.
+	ListAllChannelMessagesPlainScoped(ctx context.Context, arg ListAllChannelMessagesPlainScopedParams) ([]ListAllChannelMessagesPlainScopedRow, error)
+	// Every channel with since, optionally by scope (no sites): a walk by id.
+	ListAllChannelMessagesSince(ctx context.Context, arg ListAllChannelMessagesSinceParams) ([]ListAllChannelMessagesSinceRow, error)
 	ListChannelCatalogues(ctx context.Context) ([]MeshmapperChannelCatalogue, error)
 	// Every channel key and its id, preloaded at boot for the ingest write-through.
 	ListChannelIDs(ctx context.Context) ([]ListChannelIDsRow, error)
@@ -244,6 +256,16 @@ type Querier interface {
 	// Pass empty string for iata or scope to skip those filters.
 	// Pass cursor=0 to start from the beginning.
 	ListChannelMessagesByHash(ctx context.Context, arg ListChannelMessagesByHashParams) ([]ListChannelMessagesByHashRow, error)
+	// One channel filtered by sites: each site's newest message ids from the read model, merged.
+	ListChannelMessagesByIATAs(ctx context.Context, arg ListChannelMessagesByIATAsParams) ([]ListChannelMessagesByIATAsRow, error)
+	// One channel filtered by sites and scope.
+	ListChannelMessagesByIATAsScoped(ctx context.Context, arg ListChannelMessagesByIATAsScopedParams) ([]ListChannelMessagesByIATAsScopedRow, error)
+	// One channel, unfiltered: a walk of the channel by id; a message counts once it has a stored observation.
+	ListChannelMessagesPlain(ctx context.Context, arg ListChannelMessagesPlainParams) ([]ListChannelMessagesPlainRow, error)
+	// One channel and scope: the read model has a row exactly when the message has a stored observation.
+	ListChannelMessagesPlainScoped(ctx context.Context, arg ListChannelMessagesPlainScopedParams) ([]ListChannelMessagesPlainScopedRow, error)
+	// One channel with since (no client sends it): a channel walk; sites filter through the read model.
+	ListChannelMessagesSinceWalk(ctx context.Context, arg ListChannelMessagesSinceWalkParams) ([]ListChannelMessagesSinceWalkRow, error)
 	// Channels ordered by last seen, optionally filtered by hash and/or IATAs.
 	// A channel belongs to an IATA when MeshMapper lists it there or config scopes it
 	// to a region containing it (or Beacon-wide). NULL hash / empty array / NULL key_known skip those filters.

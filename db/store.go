@@ -31,6 +31,7 @@ type Store struct {
 	payloadTypeGate     bool            // see WithPayloadTypeGate
 	payloadTypesDone    atomic.Bool     // the payload-type backfill state has read done
 	payloadTypeWarnAt   atomic.Int64    // unix ns of the last state-read Warn; see payloadTypesReady
+	readModels          *ReadModels     // see WithReadModels; nil serves every page from the original statements
 }
 
 // New creates a Store whose statements run on dbtx (a pool, or a PlanRouter for the API).

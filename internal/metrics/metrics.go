@@ -113,6 +113,12 @@ var (
 		Name: "beacon_planguard_last_run_timestamp_seconds",
 		Help: "Unix time the daily plan check last finished.",
 	})
+
+	// ReadModelTrusted is 1 while this process serves pages from a read model, by model.
+	ReadModelTrusted = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "beacon_readmodel_trusted",
+		Help: "1 while this process serves pages from the read model, 0 while it serves the original statements.",
+	}, []string{"model"})
 )
 
 var planguardEnabled atomic.Bool
@@ -190,7 +196,7 @@ func init() {
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		GuardWouldRefuse, GuardRefused, GuardDB, DBTime, HTTPRequest, PoolAcquire,
 		IngestQueueDepth, IngestDropped, JobDuration, JobRows, IndexBytes, IndexBloat,
-		PlanguardFailures, setGauge{PlanguardLastRun, &planguardEnabled}, pgActivity,
+		PlanguardFailures, setGauge{PlanguardLastRun, &planguardEnabled}, pgActivity, ReadModelTrusted,
 	)
 }
 

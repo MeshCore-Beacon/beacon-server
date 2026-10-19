@@ -8,6 +8,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"log/slog"
+	"math"
+	"slices"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
@@ -236,6 +238,7 @@ func (s *Store) InsertChannelMessage(ctx context.Context, m ingest.InsertChannel
 		if uerr != nil {
 			return nil, uerr
 		}
+		s.readModels.invalidateCmi("a message was stored without its sites")
 		row, err = sqlc.InsertChannelMessageRow(unseeded), nil
 	}
 	if err != nil {
@@ -245,16 +248,124 @@ func (s *Store) InsertChannelMessage(ctx context.Context, m ingest.InsertChannel
 }
 
 // AddChannelMessageIATA records iata as a site of the packet's message, when the packet has one.
+// A failure drops cmi trust until the next reconcile adds the pair.
 func (s *Store) AddChannelMessageIATA(ctx context.Context, packetHash []byte, iata string) error {
-	return s.q.AddChannelMessageIATA(ctx, sqlc.AddChannelMessageIATAParams{Iata: iata, PacketHash: packetHash})
+	err := s.q.AddChannelMessageIATA(ctx, sqlc.AddChannelMessageIATAParams{Iata: iata, PacketHash: packetHash})
+	if err != nil {
+		s.readModels.invalidateCmi("a message site was not recorded")
+	}
+	return err
 }
 
+// ListChannelMessages serves /channels/{id}/messages (channelID set) and /messages.
 func (s *Store) ListChannelMessages(ctx context.Context, channelID *int32, since time.Time, limit int32, iatas []string, scope string, cursor int64) (api.Page[api.ChannelMessage], error) {
+	return listChannelMessages(ctx, s.q, s.readModels.cmiTrusted(), channelID, since, limit, iatas, scope, cursor)
+}
+
+// listChannelMessages runs one statement per request shape. A zero since is "no since", nil and empty iatas are
+// "no region", "" is "no scope". The shapes filtered by site, and those filtered by scope without since, read
+// channel_message_iatas; without useReadModel they run today's statement unchanged. The others never read it.
+func listChannelMessages(ctx context.Context, q sqlc.Querier, useReadModel bool, channelID *int32, since time.Time, limit int32, iatas []string, scope string, cursor int64) (api.Page[api.ChannelMessage], error) {
+	hasSince, hasSites, hasScope := !since.IsZero(), len(iatas) > 0, scope != ""
+	if (hasSites || (hasScope && !hasSince)) && !useReadModel {
+		return listChannelMessagesLegacy(ctx, q, channelID, since, limit, iatas, scope, cursor)
+	}
+	var scopeID *int32
+	if hasScope {
+		id, err := q.GetTransportScopeByName(ctx, scope)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return api.Page[api.ChannelMessage]{Items: []api.ChannelMessage{}}, nil
+		}
+		if err != nil {
+			return api.Page[api.ChannelMessage]{}, err
+		}
+		scopeID = &id
+	}
+	sites := make([]string, 0, len(iatas))
+	for _, iata := range iatas {
+		if !slices.Contains(sites, iata) {
+			sites = append(sites, iata)
+		}
+	}
+	cursorID := cursor
+	if cursor == 0 {
+		cursorID = math.MaxInt64
+	}
+	pageLimit := limit + 1
+	ts := pgtype.Timestamptz{Time: since, Valid: true}
+
+	var rows []sqlc.ListChannelMessagesRow
+	var err error
+	switch {
+	case channelID != nil && hasSince:
+		rows, err = convertRows(q.ListChannelMessagesSinceWalk(ctx, sqlc.ListChannelMessagesSinceWalkParams{ChannelID: *channelID, Since: ts, Iatas: sites, ScopeID: scopeID, CursorID: cursorID, PageLimit: pageLimit}))
+	case channelID != nil && hasSites && hasScope:
+		rows, err = convertRows(q.ListChannelMessagesByIATAsScoped(ctx, sqlc.ListChannelMessagesByIATAsScopedParams{Iatas: sites, ChannelID: *channelID, ScopeID: *scopeID, CursorID: cursorID, PageLimit: pageLimit}))
+	case channelID != nil && hasSites:
+		rows, err = convertRows(q.ListChannelMessagesByIATAs(ctx, sqlc.ListChannelMessagesByIATAsParams{Iatas: sites, ChannelID: *channelID, CursorID: cursorID, PageLimit: pageLimit}))
+	case channelID != nil && hasScope:
+		rows, err = convertRows(q.ListChannelMessagesPlainScoped(ctx, sqlc.ListChannelMessagesPlainScopedParams{ChannelID: *channelID, ScopeID: *scopeID, CursorID: cursorID, PageLimit: pageLimit}))
+	case channelID != nil:
+		rows, err = convertRows(q.ListChannelMessagesPlain(ctx, sqlc.ListChannelMessagesPlainParams{ChannelID: *channelID, CursorID: cursorID, PageLimit: pageLimit}))
+	case hasSites && hasSince:
+		rows, err = convertRows(q.ListAllChannelMessagesByIATAsSince(ctx, sqlc.ListAllChannelMessagesByIATAsSinceParams{Iatas: sites, Since: ts, ScopeID: scopeID, CursorID: cursorID, PageLimit: pageLimit}))
+	case hasSites && hasScope:
+		rows, err = convertRows(q.ListAllChannelMessagesByIATAsScoped(ctx, sqlc.ListAllChannelMessagesByIATAsScopedParams{Iatas: sites, ScopeID: *scopeID, CursorID: cursorID, PageLimit: pageLimit}))
+	case hasSites:
+		rows, err = convertRows(q.ListAllChannelMessagesByIATAs(ctx, sqlc.ListAllChannelMessagesByIATAsParams{Iatas: sites, CursorID: cursorID, PageLimit: pageLimit}))
+	case hasSince:
+		rows, err = convertRows(q.ListAllChannelMessagesSince(ctx, sqlc.ListAllChannelMessagesSinceParams{Since: ts, ScopeID: scopeID, CursorID: cursorID, PageLimit: pageLimit}))
+	case hasScope:
+		rows, err = convertRows(q.ListAllChannelMessagesPlainScoped(ctx, sqlc.ListAllChannelMessagesPlainScopedParams{ScopeID: *scopeID, CursorID: cursorID, PageLimit: pageLimit}))
+	default:
+		rows, err = convertRows(q.ListAllChannelMessagesPlain(ctx, sqlc.ListAllChannelMessagesPlainParams{CursorID: cursorID, PageLimit: pageLimit}))
+	}
+	if err != nil {
+		return api.Page[api.ChannelMessage]{}, err
+	}
+	hasMore := len(rows) > int(limit)
+	if hasMore {
+		rows = rows[:limit]
+	}
+	messages := make([]api.ChannelMessage, 0, len(rows))
+	for _, v := range rows {
+		messages = append(messages, toChannelMessage(v.ID, v.PacketHashHex, v.ChannelHash, v.SenderName, v.Content, v.SentAt, v.ObservationCount, v.ScopeName, v.TransportCodesPresent))
+	}
+	var nextCursor *int64
+	if hasMore && len(messages) > 0 {
+		last := messages[len(messages)-1].ID
+		nextCursor = &last
+	}
+	return api.Page[api.ChannelMessage]{Items: messages, NextCursor: nextCursor, HasMore: hasMore}, nil
+}
+
+// messageRow is every list statement's row: the columns of sqlc.ListChannelMessagesRow.
+type messageRow interface {
+	sqlc.ListChannelMessagesByIATAsRow | sqlc.ListChannelMessagesByIATAsScopedRow | sqlc.ListChannelMessagesPlainRow |
+		sqlc.ListChannelMessagesPlainScopedRow | sqlc.ListChannelMessagesSinceWalkRow | sqlc.ListAllChannelMessagesByIATAsRow |
+		sqlc.ListAllChannelMessagesByIATAsScopedRow | sqlc.ListAllChannelMessagesByIATAsSinceRow | sqlc.ListAllChannelMessagesPlainRow |
+		sqlc.ListAllChannelMessagesPlainScopedRow | sqlc.ListAllChannelMessagesSinceRow
+}
+
+func convertRows[R messageRow](rows []R, err error) ([]sqlc.ListChannelMessagesRow, error) {
+	if err != nil {
+		return nil, err
+	}
+	out := make([]sqlc.ListChannelMessagesRow, len(rows))
+	for i, r := range rows {
+		out[i] = sqlc.ListChannelMessagesRow(r)
+	}
+	return out, nil
+}
+
+// listChannelMessagesLegacy is today's statement pair: one join over every observation, filtered in place. It
+// serves the shapes that read the read model while this process does not trust it.
+func listChannelMessagesLegacy(ctx context.Context, q sqlc.Querier, channelID *int32, since time.Time, limit int32, iatas []string, scope string, cursor int64) (api.Page[api.ChannelMessage], error) {
 	ts := pgtype.Timestamptz{Time: since, Valid: !since.IsZero()}
 	var messages []api.ChannelMessage
 	var hasMore bool
 	if channelID == nil {
-		rows, err := s.q.ListAllChannelMessages(ctx, sqlc.ListAllChannelMessagesParams{
+		rows, err := q.ListAllChannelMessages(ctx, sqlc.ListAllChannelMessagesParams{
 			Column1: ts,
 			Column2: iatas,
 			Column3: scope,
@@ -273,7 +384,7 @@ func (s *Store) ListChannelMessages(ctx context.Context, channelID *int32, since
 			messages = append(messages, toChannelMessage(v.ID, v.PacketHashHex, v.ChannelHash, v.SenderName, v.Content, v.SentAt, v.ObservationCount, v.ScopeName, v.TransportCodesPresent))
 		}
 	} else {
-		rows, err := s.q.ListChannelMessages(ctx, sqlc.ListChannelMessagesParams{
+		rows, err := q.ListChannelMessages(ctx, sqlc.ListChannelMessagesParams{
 			ChannelID: *channelID,
 			Column2:   ts,
 			Column3:   iatas,
