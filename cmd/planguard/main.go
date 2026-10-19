@@ -8,6 +8,12 @@
 //	              [--baseline check|write|off] [--emit resolvers|plans --params FILE] [--plans FILE --params FILE]
 //	              [--fidelity-against results.jsonl]
 //	planguard gen-policy [--corpus FILE] [--out FILE]   (defaults and db/sqlc are under the module root)
+//	planguard diff --cases db/planguard/diff/NAME.yaml [--old-ref origin/dev] [--walk 1,2,3,web] [--dsn $PLANGUARD_DSN]
+//	               [--out planguard-out] [--files db/planguard]
+//
+// diff runs each batch of a case file in one READ ONLY snapshot and compares every pair's full results. old:
+// statements are read from db/sqlc at --old-ref through git (the checkout is never switched), new: from the working
+// tree's db/sqlc, file: from --files.
 //
 // --tier fixture first builds the synthetic fixture on --dsn through the migrations (or finds it built from the same
 // files); it refuses a database that holds data and was not built that way.
@@ -25,6 +31,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -36,7 +43,8 @@ import (
 )
 
 const usage = "usage: planguard run --tier fixture|local|prod [flags] (planguard run -h for the flags)\n" +
-	"       planguard gen-policy [--corpus FILE] [--out FILE] (paths default to the module root's db/)"
+	"       planguard gen-policy [--corpus FILE] [--out FILE] (paths default to the module root's db/)\n" +
+	"       planguard diff --cases FILE [--old-ref REF] [--walk 1,2,3,web] [--dsn DSN] [--out DIR] [--files DIR]"
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -52,7 +60,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runCmd(args[1:], stdout, stderr)
 	case "gen-policy":
 		return genPolicyCmd(args[1:], stdout, stderr)
-	case "diff", "storediff":
+	case "diff":
+		return diffCmd(args[1:], stderr)
+	case "storediff":
 		fmt.Fprintf(stderr, "planguard %s: not implemented\n", args[0])
 		return 1
 	case "-h", "-help", "--help", "help":
@@ -114,6 +124,127 @@ func genPolicyCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "wrote %s\n", *out)
 	return 0
+}
+
+// diffCmd compares old and new statement results on one snapshot per batch.
+func diffCmd(args []string, stderr io.Writer) int {
+	fs := flag.NewFlagSet("diff", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	cases := fs.String("cases", "", "diff case file, e.g. db/planguard/diff/planted_readmodels.yaml (required)")
+	oldRef := fs.String("old-ref", "", "git ref whose db/sqlc gives the old: statements (required when the cases use old:)")
+	walk := fs.String("walk", "", "comma list of page sizes to walk the pairs that have a walk at; web = each walk's web_limit")
+	dsn := fs.String("dsn", os.Getenv("PLANGUARD_DSN"), "PostgreSQL DSN (default $PLANGUARD_DSN)")
+	out := fs.String("out", "planguard-out", "output directory")
+	files := fs.String("files", "", "directory file: statements are relative to (default <module root>/db/planguard)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	usageErr := func(format string, a ...any) int {
+		fmt.Fprintf(stderr, "planguard diff: "+format+"\n", a...)
+		return 2
+	}
+	if fs.NArg() > 0 {
+		return usageErr("unexpected argument %q", fs.Arg(0))
+	}
+	if *cases == "" {
+		return usageErr("--cases is required")
+	}
+	limits, err := parseWalk(*walk)
+	if err != nil {
+		return usageErr("--walk: %v", err)
+	}
+	if *dsn == "" {
+		return usageErr("--dsn (or $PLANGUARD_DSN) is required")
+	}
+	root, err := moduleRoot()
+	if err != nil {
+		fmt.Fprintln(stderr, "planguard diff:", err)
+		return 1
+	}
+	if *files == "" {
+		*files = filepath.Join(root, "db", "planguard")
+	}
+	raw, err := os.ReadFile(*cases)
+	if err != nil {
+		fmt.Fprintln(stderr, "planguard diff:", err)
+		return 1
+	}
+	fsys := os.DirFS(*files)
+	spec, err := planguard.ParseDiffSpec(raw, *cases, fsys)
+	if err != nil {
+		fmt.Fprintln(stderr, "planguard diff:", err)
+		return 1
+	}
+	needOld := false
+	for _, b := range spec.Batches {
+		for _, src := range b.Statements {
+			needOld = needOld || strings.HasPrefix(src, "old:")
+		}
+	}
+	var oldSQL map[string]string
+	if needOld {
+		if *oldRef == "" {
+			return usageErr("--old-ref is required: %s uses old: statements", *cases)
+		}
+		if oldSQL, err = planguard.LoadStatementsAtRef(root, *oldRef); err != nil {
+			fmt.Fprintln(stderr, "planguard diff:", err)
+			return 1
+		}
+	}
+	newSQL, err := planguard.LoadStatements(filepath.Join(root, "db", "sqlc"))
+	if err != nil {
+		fmt.Fprintln(stderr, "planguard diff:", err)
+		return 1
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	pc, err := pgconn.Connect(ctx, *dsn)
+	if err != nil {
+		fmt.Fprintln(stderr, "planguard diff: connect:", err)
+		return 1
+	}
+	defer pc.Close(context.Background())
+	rep, runErr := planguard.RunDiff(ctx, planguard.NewSession(pc), spec, oldSQL, newSQL, fsys, *out, limits)
+	code := 0
+	if rep != nil {
+		for _, b := range rep.Batches {
+			for _, p := range b.Pairs {
+				fmt.Fprintln(stderr, p.Line())
+			}
+		}
+		fmt.Fprintf(stderr, "report: %s\n", filepath.Join(*out, "diff_report.md"))
+		if n := len(rep.Failed()); n > 0 {
+			fmt.Fprintf(stderr, "%d pairs missed their expectation\n", n)
+			code = 1
+		}
+	}
+	if runErr != nil {
+		fmt.Fprintln(stderr, "planguard diff:", runErr)
+		code = 1
+	}
+	return code
+}
+
+// parseWalk reads "1,2,3,web" (web → 0, each walk's web_limit).
+func parseWalk(s string) ([]int, error) {
+	if s == "" {
+		return nil, nil
+	}
+	var out []int
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part == "web" {
+			out = append(out, 0)
+			continue
+		}
+		n, err := strconv.Atoi(part)
+		if err != nil || n < 1 {
+			return nil, fmt.Errorf("%q is not a page size ≥ 1 or web", part)
+		}
+		out = append(out, n)
+	}
+	return out, nil
 }
 
 // moduleRoot returns the nearest directory at or above the working directory that holds go.mod.

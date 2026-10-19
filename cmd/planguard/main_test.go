@@ -29,6 +29,10 @@ func TestCLIUsage(t *testing.T) {
 		{"unknown flag", []string{"run", "--tier", "local", "--nope"}, "nope"},
 		{"gen-policy unknown flag", []string{"gen-policy", "--nope"}, "nope"},
 		{"gen-policy argument", []string{"gen-policy", "extra"}, "extra"},
+		{"diff without cases", []string{"diff", "--dsn", "x"}, "--cases"},
+		{"diff bad walk", []string{"diff", "--cases", "c.yaml", "--walk", "1,0"}, "--walk"},
+		{"diff bad walk word", []string{"diff", "--cases", "c.yaml", "--walk", "web,all"}, "all"},
+		{"diff unknown flag", []string{"diff", "--nope"}, "nope"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
