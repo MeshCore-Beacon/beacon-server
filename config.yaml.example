@@ -34,6 +34,9 @@ server:
   # With additional proxy hops, first configure their trust at the edge proxy
   # and pass its validated client address rather than a client-supplied header.
   trusted_proxies: []
+  # Address of the admin listener serving Prometheus /metrics, e.g. 127.0.0.1:9090. Off when empty.
+  # It has no authentication: bind it to a private interface.
+  admin_listen: ""
 
 # Applies to /api/v1/* only. Both counters are local to this Beacon instance.
 # Set trusted_proxies correctly before using a reverse proxy, or clients share
@@ -45,6 +48,24 @@ ratelimit:
   # Omitted/zero defaults to requests_per_minute. Negative limits prevent startup.
   # A 429 returns error.code=rate_limited and Retry-After (1 or 60 seconds).
   burst: 600
+
+# Database pools. Every deployment opens: api_legacy 8, api_custom 8, ingest 6, maint 4 connections
+# (26), or 30 with split (api_custom 7, api_cached 5). Keep max_connections well above that.
+#database:
+#  # custom_all (default): every API statement gets a custom plan.
+#  # split: statements planguard proved safe run on cached generic plans; turn on only after the
+#  #   daily planguard prod check is clean on this deployment.
+#  # single: rollback. One API pool on today's settings; every guard family observes.
+#  api_plan_layout: custom_all
+
+# Cost guards on the public /api/v1 group (not /admin, not /ws). Every family observes by default:
+# nothing is refused, only beacon_guard_would_refuse_total counts. Listed families enforce:
+# 429 (4 concurrent DB requests per client, 5 s wait), 503 (pool busy 5 s; class deadline 5/10/30 s).
+# Families: routes, channel_messages, packets_global, packets_region, packets_window,
+#           packet_detail, stats, other. PUT /api/v1/admin/config changes the list at runtime.
+#guards:
+#  enforce: []
+#  budget: shadow   # the per-client DB-time budget only records; enforcement is not available
 
 # MeshMapper integrations (optional, require a regional or grouped-region API key).
 # Your local MeshMapper regional or grouped-region admin can generate the key.

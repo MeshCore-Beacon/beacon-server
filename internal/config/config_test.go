@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/MeshCore-Beacon/beacon-server/db/planpolicy"
 )
 
 func TestLoadLogConfig(t *testing.T) {
@@ -387,5 +389,60 @@ func TestLoadMinWebVersion(t *testing.T) {
 				t.Fatalf("min_web_version = %q, want %q", cfg.Web.MinWebVersion, tc.want)
 			}
 		})
+	}
+}
+
+func TestResolve_DatabaseGuardsDefaults(t *testing.T) {
+	r := Resolve(&Config{})
+	if r.APIPlanLayout != planpolicy.CustomAll {
+		t.Errorf("APIPlanLayout = %q, want %q", r.APIPlanLayout, planpolicy.CustomAll)
+	}
+	if r.GuardsEnforce == nil || len(r.GuardsEnforce) != 0 {
+		t.Errorf("GuardsEnforce = %#v, want non-nil empty", r.GuardsEnforce)
+	}
+	if r.GuardsBudget != "shadow" {
+		t.Errorf("GuardsBudget = %q, want shadow", r.GuardsBudget)
+	}
+	if r.AdminListen != "" {
+		t.Errorf("AdminListen = %q, want empty", r.AdminListen)
+	}
+}
+
+func TestLoad_DatabaseGuardsValidation(t *testing.T) {
+	for _, tc := range []struct {
+		yaml, err string
+	}{
+		{"database:\n  api_plan_layout: generic\n", "database.api_plan_layout must be custom_all, split or single"},
+		{"guards:\n  enforce: [routes, bogus]\n", `guards.enforce[1]: unknown family "bogus" (routes, channel_messages, packets_global, packets_region, packets_window, packet_detail, stats, other)`},
+		{"guards:\n  budget: enforce\n", "guards.budget must be shadow (budget enforcement is not available)"},
+		{"server:\n  admin_listen: \"9090\"\n", "server.admin_listen must be host:port, e.g. 127.0.0.1:9090"},
+	} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte(tc.yaml), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(path); err == nil || err.Error() != tc.err {
+			t.Errorf("Load(%q) error = %v, want %q", tc.yaml, err, tc.err)
+		}
+	}
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	yml := "server:\n  trusted_proxies: [10.0.0.0/8]\n  admin_listen: \":9090\"\n" +
+		"database:\n  api_plan_layout: split\nguards:\n  enforce: [routes, stats]\n  budget: shadow\n"
+	if err := os.WriteFile(path, []byte(yml), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Server.TrustedProxies) != 1 || cfg.Server.TrustedProxies[0].String() != "10.0.0.0/8" ||
+		cfg.Server.AdminListen != ":9090" {
+		t.Fatalf("server config = %+v", cfg.Server)
+	}
+	r := Resolve(cfg)
+	if r.AdminListen != ":9090" || r.APIPlanLayout != planpolicy.Split || r.GuardsBudget != "shadow" ||
+		strings.Join(r.GuardsEnforce, ",") != "routes,stats" {
+		t.Fatalf("resolved = %s", r)
 	}
 }

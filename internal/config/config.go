@@ -7,6 +7,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/netip"
 	"net/url"
 	"os"
@@ -18,6 +19,8 @@ import (
 	"unicode"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/MeshCore-Beacon/beacon-server/db/planpolicy"
 )
 
 // Config is the top-level structure of the Beacon config file.
@@ -46,7 +49,26 @@ type Config struct {
 	Analytics   AnalyticsConfig       `yaml:"analytics"`
 	Mobile      MobileConfig          `yaml:"mobile"`
 	Web         WebConfig             `yaml:"web"`
+	Database    DatabaseConfig        `yaml:"database"`
+	Guards      GuardsConfig          `yaml:"guards"`
 }
+
+// DatabaseConfig controls how API statements are spread across connection pools.
+type DatabaseConfig struct {
+	// APIPlanLayout is custom_all (default), split or single.
+	APIPlanLayout string `yaml:"api_plan_layout"`
+}
+
+// GuardsConfig controls the cost guards on the public API.
+type GuardsConfig struct {
+	// Enforce lists the guard families that refuse; every other family only observes.
+	Enforce []string `yaml:"enforce"`
+	// Budget must be shadow: the per-client DB-time budget only records.
+	Budget string `yaml:"budget"`
+}
+
+// guardFamilies are the guard family names accepted by guards.enforce, in display order.
+var guardFamilies = []string{"routes", "channel_messages", "packets_global", "packets_region", "packets_window", "packet_detail", "stats", "other"}
 
 // MobileConfig holds settings the BEACON Mobile app reads from /info.
 type MobileConfig struct {
@@ -82,6 +104,8 @@ type ServerConfig struct {
 	// TrustedProxies accepts IPv4/IPv6 CIDRs; an empty list trusts no proxy.
 	// netip.Prefix validates each CIDR while the configuration is loaded.
 	TrustedProxies []netip.Prefix `yaml:"trusted_proxies"`
+	// AdminListen is the host:port of the admin listener serving /metrics; empty disables it.
+	AdminListen string `yaml:"admin_listen"`
 }
 
 func (c *ServerConfig) UnmarshalYAML(node *yaml.Node) error {
@@ -89,6 +113,7 @@ func (c *ServerConfig) UnmarshalYAML(node *yaml.Node) error {
 	// Leave them as invalid prefixes for Load's validation below.
 	var raw struct {
 		TrustedProxies []*netip.Prefix `yaml:"trusted_proxies"`
+		AdminListen    string          `yaml:"admin_listen"`
 	}
 	if err := node.Decode(&raw); err != nil {
 		return err
@@ -99,6 +124,7 @@ func (c *ServerConfig) UnmarshalYAML(node *yaml.Node) error {
 			c.TrustedProxies[i] = *prefix
 		}
 	}
+	c.AdminListen = raw.AdminListen
 	return nil
 }
 
@@ -133,6 +159,15 @@ type ResolvedConfig struct {
 	NodeStaleThreshold  time.Duration
 	NodeDeleteAfter     time.Duration
 	ObserverDeleteAfter time.Duration
+
+	// APIPlanLayout selects the API pool layout; defaults to custom_all.
+	APIPlanLayout planpolicy.Layout
+	// GuardsEnforce lists the enforcing guard families; empty (never nil) when unset.
+	GuardsEnforce []string
+	// GuardsBudget is the per-client DB-time budget mode; always "shadow".
+	GuardsBudget string
+	// AdminListen is the admin listener address; empty disables it.
+	AdminListen string
 }
 
 // RateLimitConfig controls the per-client REST API request budget.
@@ -486,7 +521,31 @@ func Load(path string) (*Config, error) {
 			cfg.IATAs[iata] = details
 		}
 	}
+	if err := cfg.validateDatabaseGuards(); err != nil {
+		return nil, err
+	}
 	return cfg, nil
+}
+
+// validateDatabaseGuards checks the plan layout, guard families, budget mode and admin listener address.
+func (c *Config) validateDatabaseGuards() error {
+	if _, err := planpolicy.ParseLayout(c.Database.APIPlanLayout); err != nil {
+		return err
+	}
+	for i, family := range c.Guards.Enforce {
+		if !slices.Contains(guardFamilies, family) {
+			return fmt.Errorf("guards.enforce[%d]: unknown family %q (%s)", i, family, strings.Join(guardFamilies, ", "))
+		}
+	}
+	if c.Guards.Budget != "" && c.Guards.Budget != "shadow" {
+		return fmt.Errorf("guards.budget must be shadow (budget enforcement is not available)")
+	}
+	if c.Server.AdminListen != "" {
+		if _, _, err := net.SplitHostPort(c.Server.AdminListen); err != nil {
+			return fmt.Errorf("server.admin_listen must be host:port, e.g. 127.0.0.1:9090")
+		}
+	}
+	return nil
 }
 
 // minAPIKeyLength keeps the admin key out of guessing range.
@@ -608,6 +667,18 @@ func Resolve(cfg *Config) ResolvedConfig {
 		NodeStaleThreshold:  cfg.Nodes.StaleThreshold.Duration,
 		NodeDeleteAfter:     cfg.Nodes.DeleteAfter.Duration,
 		ObserverDeleteAfter: cfg.Observers.DeleteAfter.Duration,
+
+		GuardsEnforce: append([]string{}, cfg.Guards.Enforce...),
+		GuardsBudget:  cfg.Guards.Budget,
+		AdminListen:   cfg.Server.AdminListen,
+	}
+	// Load has validated the layout; an unvalidated config falls back to the default.
+	r.APIPlanLayout, _ = planpolicy.ParseLayout(cfg.Database.APIPlanLayout)
+	if r.APIPlanLayout == "" {
+		r.APIPlanLayout = planpolicy.CustomAll
+	}
+	if r.GuardsBudget == "" {
+		r.GuardsBudget = "shadow"
 	}
 	if r.RateLimit.RequestsPerMinute == 0 {
 		r.RateLimit.RequestsPerMinute = 600
@@ -674,11 +745,12 @@ func Resolve(cfg *Config) ResolvedConfig {
 
 func (r ResolvedConfig) String() string {
 	return fmt.Sprintf(
-		"telemetryResolution=%s telemetryRetention=%s rollupRetention=%s packetRetention=%s routeRetention=%s routeGrace=%s routeMinObs=%d routeReconfirmRowsPerHour=%d maxConnsPerIP=%d maxConnectsPerMinute=%d viewRefresh=%s reconfirm=%s cleanup=%s presenceFlush=%s presencePacketTTL=%s clockDriftThreshold=%s nodeStaleThreshold=%s nodeDeleteAfter=%s observerDeleteAfter=%s rateLimitEnabled=%t requestsPerMinute=%d burst=%d",
+		"telemetryResolution=%s telemetryRetention=%s rollupRetention=%s packetRetention=%s routeRetention=%s routeGrace=%s routeMinObs=%d routeReconfirmRowsPerHour=%d maxConnsPerIP=%d maxConnectsPerMinute=%d viewRefresh=%s reconfirm=%s cleanup=%s presenceFlush=%s presencePacketTTL=%s clockDriftThreshold=%s nodeStaleThreshold=%s nodeDeleteAfter=%s observerDeleteAfter=%s rateLimitEnabled=%t requestsPerMinute=%d burst=%d apiPlanLayout=%s guardsEnforce=%v guardsBudget=%s adminListen=%q",
 		r.TelemetryResolution, r.TelemetryRetention, r.RollupRetention, r.PacketRetention, r.RouteRetention, r.RouteGrace, r.RouteMinObservations, r.RouteReconfirmRowsPerHour,
 		r.MaxConnsPerIP, r.MaxConnectsPerMinute, r.ViewRefreshInterval, r.ReconfirmInterval, r.CleanupInterval,
 		r.PresenceFlushInterval, r.PresencePacketTTL, r.ClockDriftThreshold,
 		r.NodeStaleThreshold, r.NodeDeleteAfter, r.ObserverDeleteAfter,
 		r.RateLimit.Enabled, r.RateLimit.RequestsPerMinute, r.RateLimit.Burst,
+		r.APIPlanLayout, r.GuardsEnforce, r.GuardsBudget, r.AdminListen,
 	)
 }
