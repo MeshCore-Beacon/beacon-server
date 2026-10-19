@@ -14,6 +14,7 @@ import (
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	mockdb "github.com/MeshCore-Beacon/beacon-server/db/sqlc/mock"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"go.uber.org/mock/gomock"
 )
@@ -105,5 +106,97 @@ func TestListKnownRoutes_Dispatch(t *testing.T) {
 		if err != nil || routes == nil || len(routes) != 0 {
 			t.Fatalf("%+v: %v %v", c, routes, err)
 		}
+	}
+}
+
+func TestRouteCutoffCeil(t *testing.T) {
+	base := time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC)
+	for _, c := range []struct{ in, want time.Time }{
+		{base.Add(586 * time.Microsecond), base.Add(time.Millisecond)},
+		{base.Add(time.Millisecond), base.Add(time.Millisecond)},
+		{base, base},
+		{base.Add(586_400 * time.Nanosecond), base.Add(time.Millisecond)},
+	} {
+		if got := ceilMs(c.in.Truncate(time.Microsecond)); !got.Equal(c.want) {
+			t.Errorf("ceilMs(%v) = %v, want %v", c.in, got, c.want)
+		}
+	}
+
+	// The store sends the exact cutoff (pgx floors it to µs) and the ms ceiling of its µs floor;
+	// 1 ms + 400 ns floors to 1 ms, so its ceiling stays 1 ms.
+	for _, c := range []struct{ cutoff, ceil time.Time }{
+		{base.Add(586_400 * time.Nanosecond), base.Add(time.Millisecond)},
+		{base.Add(time.Millisecond + 400*time.Nanosecond), base.Add(time.Millisecond)},
+	} {
+		ctrl := gomock.NewController(t)
+		mock := mockdb.NewMockQuerier(ctrl)
+		store := &Store{q: mock, qc: mock}
+		windowEnd := base.Add(time.Millisecond)
+		mock.EXPECT().DeleteGraceRoutesSlice(gomock.Any(), gomock.Cond(func(p sqlc.DeleteGraceRoutesSliceParams) bool {
+			return p.GraceCeil.Valid && p.GraceCeil.Time.Equal(c.ceil) &&
+				p.GraceCutoff.Valid && p.GraceCutoff.Time.Equal(c.cutoff) &&
+				p.AfterTs.Valid && p.AfterTs.InfinityModifier == pgtype.NegativeInfinity && p.AfterID == 0 &&
+				p.MinObservations == 3 && p.BatchSize == 7
+		})).Return(sqlc.DeleteGraceRoutesSliceRow{WindowEnd: pgtype.Timestamptz{Time: windowEnd, Valid: true}}, nil)
+		res, err := store.DeleteGraceRoutesSlice(context.Background(), RouteKey{}, c.cutoff, 3, 7)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Last != (RouteKey{}) || res.Unresolved != nil || !res.WindowEnd.Equal(windowEnd) {
+			t.Errorf("empty slice mapped to %+v", res)
+		}
+		ctrl.Finish()
+	}
+
+	// DeleteExpiredRoutes sends the same pair, and maps the batch's last key.
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mock := mockdb.NewMockQuerier(ctrl)
+	store := &Store{q: mock, qc: mock}
+	cutoff := base.Add(586 * time.Microsecond)
+	after := RouteKey{TS: base, ID: 9}
+	mock.EXPECT().DeleteExpiredRoutes(gomock.Any(), gomock.Cond(func(p sqlc.DeleteExpiredRoutesParams) bool {
+		return p.RetentionCeil.Time.Equal(base.Add(time.Millisecond)) && p.RetentionCutoff.Time.Equal(cutoff) &&
+			p.AfterTs.InfinityModifier == pgtype.Finite && p.AfterTs.Time.Equal(base) && p.AfterID == 9 && p.BatchSize == 7
+	})).Return(sqlc.DeleteExpiredRoutesRow{Selected: 7, LastTs: pgtype.Timestamptz{Time: base, Valid: true}, LastID: 20}, nil)
+	selected, last, err := store.DeleteExpiredRoutes(context.Background(), after, cutoff, 7)
+	if err != nil || selected != 7 || last != (RouteKey{TS: base, ID: 20}) {
+		t.Errorf("DeleteExpiredRoutes = %d, %+v, %v", selected, last, err)
+	}
+}
+
+func TestStateRoundTrip(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mock := mockdb.NewMockQuerier(ctrl)
+	store := &Store{q: mock}
+	type pos struct {
+		TS time.Time `json:"ts"`
+		ID int64     `json:"id"`
+	}
+	in := pos{TS: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), ID: 42}
+	var saved json.RawMessage
+	mock.EXPECT().UpsertBackgroundState(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, p sqlc.UpsertBackgroundStateParams) error {
+			if p.Key != "routes.grace" {
+				t.Errorf("key %q", p.Key)
+			}
+			saved = p.Value
+			return nil
+		})
+	if err := store.SaveState(context.Background(), "routes.grace", in); err != nil {
+		t.Fatal(err)
+	}
+
+	mock.EXPECT().GetBackgroundState(gomock.Any(), "routes.grace").DoAndReturn(
+		func(context.Context, string) (json.RawMessage, error) { return saved, nil })
+	var out pos
+	if ok, err := store.LoadState(context.Background(), "routes.grace", &out); err != nil || !ok || out != in {
+		t.Errorf("LoadState = %v, %v, %+v; want true, nil, %+v", ok, err, out, in)
+	}
+
+	mock.EXPECT().GetBackgroundState(gomock.Any(), "missing").Return(nil, pgx.ErrNoRows)
+	if ok, err := store.LoadState(context.Background(), "missing", &out); err != nil || ok {
+		t.Errorf("missing key: %v, %v; want false, nil", ok, err)
 	}
 }

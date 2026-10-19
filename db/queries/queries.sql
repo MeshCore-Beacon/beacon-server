@@ -787,6 +787,63 @@ WITH expired AS (
 DELETE FROM known_routes kr USING expired e
 WHERE kr.iata = e.iata AND kr.path_key = e.path_key;
 
+-- name: DeleteExpiredRoutes :one
+-- One batch past retention, keyset after the per-run cursor (the first call passes -infinity, 0).
+-- The truncated bound (ms ceiling of the cutoff) drives idx_known_routes_keyset; the exact
+-- residual decides membership. + interval 0 keeps it off idx_known_routes_last_seen.
+WITH expired AS (
+  SELECT r.iata, r.path_key, date_trunc('milliseconds', r.last_seen, 'UTC') AS ts, r.id
+  FROM known_routes r
+  WHERE (date_trunc('milliseconds', r.last_seen, 'UTC'), r.id) > (@after_ts::timestamptz, @after_id::bigint)
+    AND date_trunc('milliseconds', r.last_seen, 'UTC') < @retention_ceil::timestamptz
+    AND r.last_seen + interval '0' < @retention_cutoff::timestamptz
+  ORDER BY date_trunc('milliseconds', r.last_seen, 'UTC'), r.id
+  LIMIT @batch_size
+  FOR UPDATE OF r SKIP LOCKED),
+deleted AS (DELETE FROM known_routes kr USING expired e
+            WHERE kr.iata = e.iata AND kr.path_key = e.path_key RETURNING 1)
+SELECT (SELECT count(*) FROM expired) AS selected,
+       (SELECT ts FROM expired ORDER BY ts DESC, id DESC LIMIT 1)::timestamptz AS last_ts,
+       coalesce((SELECT id FROM expired ORDER BY ts DESC, id DESC LIMIT 1), 0)::bigint AS last_id;
+
+-- name: DeleteGraceRoutesSlice :one
+-- One batch of rarely-seen routes after the cursor, inside a window of at most 6 h below the grace
+-- cutoff: candidates without locks, then lock SKIP LOCKED through the pkey (re-checked on the newest
+-- version) and delete. unresolved_ts is the earliest candidate left behind; window_end is the bound used.
+WITH cand AS MATERIALIZED (
+  SELECT r.iata, r.path_key, date_trunc('milliseconds', r.last_seen, 'UTC') AS ts, r.id
+  FROM known_routes r
+  WHERE (date_trunc('milliseconds', r.last_seen, 'UTC'), r.id) > (@after_ts::timestamptz, @after_id::bigint)
+    AND date_trunc('milliseconds', r.last_seen, 'UTC')
+          < LEAST(@grace_ceil::timestamptz, sqlc.arg('after_ts')::timestamptz + interval '6 hours')
+    AND r.last_seen + interval '0' < @grace_cutoff::timestamptz
+    AND r.observation_count < @min_observations::bigint
+  ORDER BY date_trunc('milliseconds', r.last_seen, 'UTC'), r.id
+  LIMIT @batch_size),
+locked AS (
+  SELECT r.iata, r.path_key FROM known_routes r
+  JOIN cand c ON c.iata = r.iata AND c.path_key = r.path_key
+  WHERE r.last_seen < @grace_cutoff::timestamptz
+    AND r.observation_count < @min_observations::bigint
+  FOR UPDATE OF r SKIP LOCKED),
+deleted AS (DELETE FROM known_routes kr USING locked l
+            WHERE kr.iata = l.iata AND kr.path_key = l.path_key RETURNING kr.iata, kr.path_key)
+SELECT (SELECT count(*) FROM cand) AS candidates,
+       (SELECT count(*) FROM deleted) AS deleted,
+       (SELECT ts FROM cand ORDER BY ts DESC, id DESC LIMIT 1)::timestamptz AS last_ts,
+       coalesce((SELECT id FROM cand ORDER BY ts DESC, id DESC LIMIT 1), 0)::bigint AS last_id,
+       (SELECT min(c.ts) FROM cand c
+         WHERE NOT EXISTS (SELECT 1 FROM deleted d WHERE d.iata = c.iata AND d.path_key = c.path_key))::timestamptz
+         AS unresolved_ts,
+       LEAST(@grace_ceil::timestamptz, sqlc.arg('after_ts')::timestamptz + interval '6 hours')::timestamptz AS window_end;
+
+-- name: GetBackgroundState :one
+SELECT value FROM background_state WHERE key = @key;
+
+-- name: UpsertBackgroundState :exec
+INSERT INTO background_state (key, value, updated_at) VALUES (@key, @value, now())
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
+
 -- name: DeleteOldChannelIATAs :exec
 -- Keeps the channel IATA filter in step with packet retention.
 DELETE FROM channel_iatas WHERE last_heard < $1;

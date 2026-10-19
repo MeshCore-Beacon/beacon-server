@@ -199,6 +199,124 @@ func (q *Queries) DeleteChannelMembersNotIn(ctx context.Context, arg DeleteChann
 	return err
 }
 
+const deleteExpiredRoutes = `-- name: DeleteExpiredRoutes :one
+WITH expired AS (
+  SELECT r.iata, r.path_key, date_trunc('milliseconds', r.last_seen, 'UTC') AS ts, r.id
+  FROM known_routes r
+  WHERE (date_trunc('milliseconds', r.last_seen, 'UTC'), r.id) > ($1::timestamptz, $2::bigint)
+    AND date_trunc('milliseconds', r.last_seen, 'UTC') < $3::timestamptz
+    AND r.last_seen + interval '0' < $4::timestamptz
+  ORDER BY date_trunc('milliseconds', r.last_seen, 'UTC'), r.id
+  LIMIT $5
+  FOR UPDATE OF r SKIP LOCKED),
+deleted AS (DELETE FROM known_routes kr USING expired e
+            WHERE kr.iata = e.iata AND kr.path_key = e.path_key RETURNING 1)
+SELECT (SELECT count(*) FROM expired) AS selected,
+       (SELECT ts FROM expired ORDER BY ts DESC, id DESC LIMIT 1)::timestamptz AS last_ts,
+       coalesce((SELECT id FROM expired ORDER BY ts DESC, id DESC LIMIT 1), 0)::bigint AS last_id
+`
+
+type DeleteExpiredRoutesParams struct {
+	AfterTs         pgtype.Timestamptz `json:"after_ts"`
+	AfterID         int64              `json:"after_id"`
+	RetentionCeil   pgtype.Timestamptz `json:"retention_ceil"`
+	RetentionCutoff pgtype.Timestamptz `json:"retention_cutoff"`
+	BatchSize       int32              `json:"batch_size"`
+}
+
+type DeleteExpiredRoutesRow struct {
+	Selected int64              `json:"selected"`
+	LastTs   pgtype.Timestamptz `json:"last_ts"`
+	LastID   int64              `json:"last_id"`
+}
+
+// One batch past retention, keyset after the per-run cursor (the first call passes -infinity, 0).
+// The truncated bound (ms ceiling of the cutoff) drives idx_known_routes_keyset; the exact
+// residual decides membership. + interval 0 keeps it off idx_known_routes_last_seen.
+func (q *Queries) DeleteExpiredRoutes(ctx context.Context, arg DeleteExpiredRoutesParams) (DeleteExpiredRoutesRow, error) {
+	row := q.db.QueryRow(ctx, deleteExpiredRoutes,
+		arg.AfterTs,
+		arg.AfterID,
+		arg.RetentionCeil,
+		arg.RetentionCutoff,
+		arg.BatchSize,
+	)
+	var i DeleteExpiredRoutesRow
+	err := row.Scan(&i.Selected, &i.LastTs, &i.LastID)
+	return i, err
+}
+
+const deleteGraceRoutesSlice = `-- name: DeleteGraceRoutesSlice :one
+WITH cand AS MATERIALIZED (
+  SELECT r.iata, r.path_key, date_trunc('milliseconds', r.last_seen, 'UTC') AS ts, r.id
+  FROM known_routes r
+  WHERE (date_trunc('milliseconds', r.last_seen, 'UTC'), r.id) > ($2::timestamptz, $3::bigint)
+    AND date_trunc('milliseconds', r.last_seen, 'UTC')
+          < LEAST($1::timestamptz, $2::timestamptz + interval '6 hours')
+    AND r.last_seen + interval '0' < $4::timestamptz
+    AND r.observation_count < $5::bigint
+  ORDER BY date_trunc('milliseconds', r.last_seen, 'UTC'), r.id
+  LIMIT $6),
+locked AS (
+  SELECT r.iata, r.path_key FROM known_routes r
+  JOIN cand c ON c.iata = r.iata AND c.path_key = r.path_key
+  WHERE r.last_seen < $4::timestamptz
+    AND r.observation_count < $5::bigint
+  FOR UPDATE OF r SKIP LOCKED),
+deleted AS (DELETE FROM known_routes kr USING locked l
+            WHERE kr.iata = l.iata AND kr.path_key = l.path_key RETURNING kr.iata, kr.path_key)
+SELECT (SELECT count(*) FROM cand) AS candidates,
+       (SELECT count(*) FROM deleted) AS deleted,
+       (SELECT ts FROM cand ORDER BY ts DESC, id DESC LIMIT 1)::timestamptz AS last_ts,
+       coalesce((SELECT id FROM cand ORDER BY ts DESC, id DESC LIMIT 1), 0)::bigint AS last_id,
+       (SELECT min(c.ts) FROM cand c
+         WHERE NOT EXISTS (SELECT 1 FROM deleted d WHERE d.iata = c.iata AND d.path_key = c.path_key))::timestamptz
+         AS unresolved_ts,
+       LEAST($1::timestamptz, $2::timestamptz + interval '6 hours')::timestamptz AS window_end
+`
+
+type DeleteGraceRoutesSliceParams struct {
+	GraceCeil       pgtype.Timestamptz `json:"grace_ceil"`
+	AfterTs         pgtype.Timestamptz `json:"after_ts"`
+	AfterID         int64              `json:"after_id"`
+	GraceCutoff     pgtype.Timestamptz `json:"grace_cutoff"`
+	MinObservations int64              `json:"min_observations"`
+	BatchSize       int32              `json:"batch_size"`
+}
+
+type DeleteGraceRoutesSliceRow struct {
+	Candidates   int64              `json:"candidates"`
+	Deleted      int64              `json:"deleted"`
+	LastTs       pgtype.Timestamptz `json:"last_ts"`
+	LastID       int64              `json:"last_id"`
+	UnresolvedTs pgtype.Timestamptz `json:"unresolved_ts"`
+	WindowEnd    pgtype.Timestamptz `json:"window_end"`
+}
+
+// One batch of rarely-seen routes after the cursor, inside a window of at most 6 h below the grace
+// cutoff: candidates without locks, then lock SKIP LOCKED through the pkey (re-checked on the newest
+// version) and delete. unresolved_ts is the earliest candidate left behind; window_end is the bound used.
+func (q *Queries) DeleteGraceRoutesSlice(ctx context.Context, arg DeleteGraceRoutesSliceParams) (DeleteGraceRoutesSliceRow, error) {
+	row := q.db.QueryRow(ctx, deleteGraceRoutesSlice,
+		arg.GraceCeil,
+		arg.AfterTs,
+		arg.AfterID,
+		arg.GraceCutoff,
+		arg.MinObservations,
+		arg.BatchSize,
+	)
+	var i DeleteGraceRoutesSliceRow
+	err := row.Scan(
+		&i.Candidates,
+		&i.Deleted,
+		&i.LastTs,
+		&i.LastID,
+		&i.UnresolvedTs,
+		&i.WindowEnd,
+	)
+	return i, err
+}
+
 const deleteOldChannelIATAs = `-- name: DeleteOldChannelIATAs :exec
 DELETE FROM channel_iatas WHERE last_heard < $1
 `
@@ -402,6 +520,17 @@ func (q *Queries) GetAccount(ctx context.Context, id uuid.UUID) (Account, error)
 		&i.DeactivatedAt,
 	)
 	return i, err
+}
+
+const getBackgroundState = `-- name: GetBackgroundState :one
+SELECT value FROM background_state WHERE key = $1
+`
+
+func (q *Queries) GetBackgroundState(ctx context.Context, key string) (json.RawMessage, error) {
+	row := q.db.QueryRow(ctx, getBackgroundState, key)
+	var value json.RawMessage
+	err := row.Scan(&value)
+	return value, err
 }
 
 const getChannelByID = `-- name: GetChannelByID :one
@@ -5923,6 +6052,21 @@ func (q *Queries) UpdateObserverStatus(ctx context.Context, arg UpdateObserverSt
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const upsertBackgroundState = `-- name: UpsertBackgroundState :exec
+INSERT INTO background_state (key, value, updated_at) VALUES ($1, $2, now())
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+`
+
+type UpsertBackgroundStateParams struct {
+	Key   string          `json:"key"`
+	Value json.RawMessage `json:"value"`
+}
+
+func (q *Queries) UpsertBackgroundState(ctx context.Context, arg UpsertBackgroundStateParams) error {
+	_, err := q.db.Exec(ctx, upsertBackgroundState, arg.Key, arg.Value)
+	return err
 }
 
 const upsertChannel = `-- name: UpsertChannel :one

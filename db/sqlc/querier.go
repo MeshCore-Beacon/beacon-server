@@ -29,6 +29,14 @@ type Querier interface {
 	DeleteAllChannelMembers(ctx context.Context) error
 	DeleteChannelConfigScopes(ctx context.Context) error
 	DeleteChannelMembersNotIn(ctx context.Context, arg DeleteChannelMembersNotInParams) error
+	// One batch past retention, keyset after the per-run cursor (the first call passes -infinity, 0).
+	// The truncated bound (ms ceiling of the cutoff) drives idx_known_routes_keyset; the exact
+	// residual decides membership. + interval 0 keeps it off idx_known_routes_last_seen.
+	DeleteExpiredRoutes(ctx context.Context, arg DeleteExpiredRoutesParams) (DeleteExpiredRoutesRow, error)
+	// One batch of rarely-seen routes after the cursor, inside a window of at most 6 h below the grace
+	// cutoff: candidates without locks, then lock SKIP LOCKED through the pkey (re-checked on the newest
+	// version) and delete. unresolved_ts is the earliest candidate left behind; window_end is the bound used.
+	DeleteGraceRoutesSlice(ctx context.Context, arg DeleteGraceRoutesSliceParams) (DeleteGraceRoutesSliceRow, error)
 	// Keeps the channel IATA filter in step with packet retention.
 	DeleteOldChannelIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error
 	// Deletes nodes not seen since the given cutoff. node_iatas and node_neighbors cascade-
@@ -66,6 +74,7 @@ type Querier interface {
 	GetAccount(ctx context.Context, id uuid.UUID) (Account, error)
 	// Both counters only grow, so their sum changes whenever rolled content or coverage does.
 	GetAnalyticsRevision(ctx context.Context) (int64, error)
+	GetBackgroundState(ctx context.Context, key string) (json.RawMessage, error)
 	GetChannelByID(ctx context.Context, id int32) (Channel, error)
 	GetEarliestCompleteRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
 	// ============================================================
@@ -404,6 +413,7 @@ type Querier interface {
 	// unconditionally overwrites, unlike the neighbor-side region_scope.
 	UpdateObserverRegionScope(ctx context.Context, arg UpdateObserverRegionScopeParams) error
 	UpdateObserverStatus(ctx context.Context, arg UpdateObserverStatusParams) (uuid.UUID, error)
+	UpsertBackgroundState(ctx context.Context, arg UpsertBackgroundStateParams) error
 	// ============================================================
 	// CHANNELS
 	// ============================================================

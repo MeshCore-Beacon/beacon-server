@@ -202,6 +202,36 @@ func (mr *MockQuerierMockRecorder) DeleteChannelMembersNotIn(ctx, arg any) *gomo
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteChannelMembersNotIn", reflect.TypeOf((*MockQuerier)(nil).DeleteChannelMembersNotIn), ctx, arg)
 }
 
+// DeleteExpiredRoutes mocks base method.
+func (m *MockQuerier) DeleteExpiredRoutes(ctx context.Context, arg db.DeleteExpiredRoutesParams) (db.DeleteExpiredRoutesRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteExpiredRoutes", ctx, arg)
+	ret0, _ := ret[0].(db.DeleteExpiredRoutesRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteExpiredRoutes indicates an expected call of DeleteExpiredRoutes.
+func (mr *MockQuerierMockRecorder) DeleteExpiredRoutes(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteExpiredRoutes", reflect.TypeOf((*MockQuerier)(nil).DeleteExpiredRoutes), ctx, arg)
+}
+
+// DeleteGraceRoutesSlice mocks base method.
+func (m *MockQuerier) DeleteGraceRoutesSlice(ctx context.Context, arg db.DeleteGraceRoutesSliceParams) (db.DeleteGraceRoutesSliceRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteGraceRoutesSlice", ctx, arg)
+	ret0, _ := ret[0].(db.DeleteGraceRoutesSliceRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteGraceRoutesSlice indicates an expected call of DeleteGraceRoutesSlice.
+func (mr *MockQuerierMockRecorder) DeleteGraceRoutesSlice(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteGraceRoutesSlice", reflect.TypeOf((*MockQuerier)(nil).DeleteGraceRoutesSlice), ctx, arg)
+}
+
 // DeleteOldChannelIATAs mocks base method.
 func (m *MockQuerier) DeleteOldChannelIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error {
 	m.ctrl.T.Helper()
@@ -444,6 +474,21 @@ func (m *MockQuerier) GetAnalyticsRevision(ctx context.Context) (int64, error) {
 func (mr *MockQuerierMockRecorder) GetAnalyticsRevision(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAnalyticsRevision", reflect.TypeOf((*MockQuerier)(nil).GetAnalyticsRevision), ctx)
+}
+
+// GetBackgroundState mocks base method.
+func (m *MockQuerier) GetBackgroundState(ctx context.Context, key string) (json.RawMessage, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetBackgroundState", ctx, key)
+	ret0, _ := ret[0].(json.RawMessage)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetBackgroundState indicates an expected call of GetBackgroundState.
+func (mr *MockQuerierMockRecorder) GetBackgroundState(ctx, key any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBackgroundState", reflect.TypeOf((*MockQuerier)(nil).GetBackgroundState), ctx, key)
 }
 
 // GetChannelByID mocks base method.
@@ -2554,6 +2599,20 @@ func (m *MockQuerier) UpdateObserverStatus(ctx context.Context, arg db.UpdateObs
 func (mr *MockQuerierMockRecorder) UpdateObserverStatus(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateObserverStatus", reflect.TypeOf((*MockQuerier)(nil).UpdateObserverStatus), ctx, arg)
+}
+
+// UpsertBackgroundState mocks base method.
+func (m *MockQuerier) UpsertBackgroundState(ctx context.Context, arg db.UpsertBackgroundStateParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpsertBackgroundState", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpsertBackgroundState indicates an expected call of UpsertBackgroundState.
+func (mr *MockQuerierMockRecorder) UpsertBackgroundState(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertBackgroundState", reflect.TypeOf((*MockQuerier)(nil).UpsertBackgroundState), ctx, arg)
 }
 
 // UpsertChannel mocks base method.
