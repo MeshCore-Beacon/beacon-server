@@ -196,7 +196,7 @@ VALUES ($3, 'P00', decode(repeat('10', 32), 'hex'), 500, $3::timestamptz + inter
 		name string
 		at   time.Time
 	}{{"since=0", time.UnixMilli(0).UTC()}, {"zero since", time.Time{}}}
-	farUntil := now.Add(100 * 365 * 24 * time.Hour)
+	farUntil := time.Date(9999, 12, 31, 0, 0, 0, 0, time.UTC)
 	tstz := func(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
 
 	tx, err := pool.Begin(ctx)
