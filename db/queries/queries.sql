@@ -235,7 +235,7 @@ FROM observer_telemetry
 WHERE observer_id = $1
   AND ($2::timestamptz IS NULL OR reported_at >= $2)
   AND ($3::timestamptz IS NULL OR reported_at <= $3)
-  AND ($4 = 0 OR id > $4)
+  AND ($4::bigint = 0 OR id > $4::bigint)
 ORDER BY reported_at ASC;
 
 -- name: GetObserverActivityRaw :many
@@ -329,7 +329,7 @@ JOIN packets p ON p.packet_hash = po.packet_hash
 LEFT JOIN nodes n ON n.public_key = p.origin_pubkey
 WHERE po.observer_id = $1
   AND p.payload_type = 4
-  AND ($2 = 0 OR po.id > $2)
+  AND ($2::bigint = 0 OR po.id > $2::bigint)
 ORDER BY po.id ASC
 LIMIT $3;
 
@@ -953,7 +953,7 @@ FROM packet_observations po
 JOIN packets p ON p.packet_hash = po.packet_hash
 JOIN nodes n ON n.public_key = p.origin_pubkey
 WHERE n.id = $1
-  AND ($2 = 0 OR po.id < $2)
+  AND ($2::bigint = 0 OR po.id < $2::bigint)
 ORDER BY po.id DESC
 LIMIT $3;
 
@@ -1148,7 +1148,7 @@ LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 WHERE ($1::timestamptz IS NULL OR cm.sent_at >= $1)
   AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR po.iata = ANY($2::bpchar[]))
   AND ($3::text = '' OR ts.name = $3::text)
-  AND ($4 = 0 OR cm.id < $4)
+  AND ($4::bigint = 0 OR cm.id < $4::bigint)
 ORDER BY cm.id DESC
 LIMIT $5;
 
