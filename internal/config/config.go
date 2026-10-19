@@ -600,7 +600,7 @@ func Resolve(cfg *Config) ResolvedConfig {
 		ObserverDeleteAfter: cfg.Observers.DeleteAfter.Duration,
 	}
 	if r.RateLimit.RequestsPerMinute == 0 {
-		r.RateLimit.RequestsPerMinute = 300
+		r.RateLimit.RequestsPerMinute = 600
 	}
 	if r.RateLimit.Burst == 0 {
 		r.RateLimit.Burst = r.RateLimit.RequestsPerMinute
