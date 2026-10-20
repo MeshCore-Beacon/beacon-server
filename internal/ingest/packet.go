@@ -788,18 +788,23 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		w.log.Error(fmt.Sprintf("db: insert observation failed from %s/%s", iata, pubkeyHex), "error", err)
 		return
 	}
-	// A hearing of a stored message records its site before any other work, so region pages see it at once. The
-	// group-text side effects add it again after their insert attempt, which covers a message still being created.
-	if inserted && packet.PayloadType() == meshcore.PayloadTypeGrpTxt {
-		if err := w.db.AddChannelMessageIATA(ctx, packetHash[:], iata); err != nil {
-			w.log.Error(fmt.Sprintf("db: record channel message site failed from %s/%s", iata, pubkeyHex), "error", err)
-		}
-	}
 	// Record the path before any more DB work so a broker copy racing through it can't be
 	// streamed as a repeat of this hearing; TRACE reuses Path for per-hop SNR.
 	pathNew := packet.PayloadType() != meshcore.PayloadTypeTrace && w.hub.MarkSent(packetHash[:], id[:], packet.Path)
 	// A duplicate is streamed, never stored, to includeRepeats clients when its path is new.
 	repeat := !inserted && pathNew && w.hub.RepeatsWanted()
+
+	// A hearing of a stored message records its site next, before any other DB work, so region pages see it at
+	// once. When no committed message was found, the group-text side effects add it again after their insert
+	// attempt, which covers a message another hearing is still creating.
+	siteRecorded := false
+	if inserted && packet.PayloadType() == meshcore.PayloadTypeGrpTxt {
+		found, err := w.db.AddChannelMessageIATA(ctx, packetHash[:], iata)
+		if err != nil {
+			w.log.Error(fmt.Sprintf("db: record channel message site failed from %s/%s", iata, pubkeyHex), "error", err)
+		}
+		siteRecorded = found && err == nil
+	}
 
 	if scopeID != nil && inserted {
 		if err := w.db.UpsertObserverScope(ctx, id, *scopeID); err != nil {
@@ -863,7 +868,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 
 	if inserted || repeat {
 		if inserted {
-			w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio, scopeID, matchedScope, pubkeyBytes, float32(parseNumber(envelope.SNR)))
+			w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio, scopeID, matchedScope, pubkeyBytes, float32(parseNumber(envelope.SNR)), siteRecorded)
 		}
 		// Resolve after advert updates; suppressed copies need no endpoint lookup.
 		var resolvedSource, resolvedDestination *api.ResolvedHop

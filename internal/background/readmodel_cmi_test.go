@@ -263,7 +263,7 @@ func TestCmiReadOnlyTrust(t *testing.T) {
 		want bool
 	}{
 		{"clean", db.CmiState{Complete: true, FirstVerifiedAt: &now}, db.CmiVerification{}, fresh, nil, true},
-		{"two intervals old", db.CmiState{Complete: true, FirstVerifiedAt: &now}, db.CmiVerification{}, 2 * CmiInterval, nil, true},
+		{"just under two intervals old", db.CmiState{Complete: true, FirstVerifiedAt: &now}, db.CmiVerification{}, 2*CmiInterval - time.Second, nil, true},
 		{"stale writer", db.CmiState{Complete: true, FirstVerifiedAt: &now}, db.CmiVerification{}, 2*CmiInterval + time.Second, nil, false},
 		{"never verified", db.CmiState{Complete: true}, db.CmiVerification{}, fresh, nil, false},
 		{"incomplete", db.CmiState{FirstVerifiedAt: &now}, db.CmiVerification{}, fresh, nil, false},
@@ -280,6 +280,20 @@ func TestCmiReadOnlyTrust(t *testing.T) {
 			t.Errorf("%s: trusted %v, want %v", c.name, tr.Trusted(), c.want)
 		}
 	}
+	// Trust ends when the writer's state turns two intervals old, not at the next check: a state 9 min 30 s old
+	// leaves 30 s of trust.
+	tr := db.NewTrust("cmi", true, db.CmiTrustPolicy)
+	CmiReadOnlyTrust(ctx, func(context.Context) (db.CmiReadOnlyCheck, error) {
+		return db.CmiReadOnlyCheck{Found: true, State: db.CmiState{Complete: true, FirstVerifiedAt: &now}, Age: 2*CmiInterval - 30*time.Second}, nil
+	}, tr)
+	if exp := tr.Expiry(); !tr.Trusted() || exp.Before(time.Now().Add(25*time.Second)) || exp.After(time.Now().Add(31*time.Second)) {
+		t.Fatalf("trusted %v until %v, want about 30 s from now", tr.Trusted(), exp)
+	}
+	tr.SetExpiry(time.Now().Add(-time.Millisecond)) // the deadline passed
+	if tr.Trusted() {
+		t.Fatal("trusted past the writer's deadline")
+	}
+
 	// The read-only server publishes the writer's watermark age.
 	CmiReadOnlyTrust(ctx, func(context.Context) (db.CmiReadOnlyCheck, error) {
 		return db.CmiReadOnlyCheck{Found: true, State: db.CmiState{Complete: true, FirstVerifiedAt: &now}, Age: 90 * time.Second}, nil

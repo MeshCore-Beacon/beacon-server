@@ -11,27 +11,35 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const addChannelMessageIATA = `-- name: AddChannelMessageIATA :exec
+const addChannelMessageIATA = `-- name: AddChannelMessageIATA :one
 
-INSERT INTO channel_message_iatas (message_id, iata, channel_id, scope_id)
-SELECT cm.id, $1::bpchar, cm.channel_id, p.scope_id
-FROM channel_messages cm
-JOIN packets p ON p.packet_hash = cm.packet_hash
-WHERE cm.packet_hash = $2::bytea
-ON CONFLICT (message_id, iata) DO NOTHING
+WITH m AS (
+  SELECT cm.id, cm.channel_id, p.scope_id
+  FROM channel_messages cm
+  JOIN packets p ON p.packet_hash = cm.packet_hash
+  WHERE cm.packet_hash = $1::bytea
+), added AS (
+  INSERT INTO channel_message_iatas (message_id, iata, channel_id, scope_id)
+  SELECT m.id, $2::bpchar, m.channel_id, m.scope_id FROM m
+  ON CONFLICT (message_id, iata) DO NOTHING
+)
+SELECT EXISTS (SELECT 1 FROM m) AS found
 `
 
 type AddChannelMessageIATAParams struct {
-	Iata       string `json:"iata"`
 	PacketHash []byte `json:"packet_hash"`
+	Iata       string `json:"iata"`
 }
 
 // Copyright 2026 Beacon Contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A stored observation's site for a message another statement created. A no-op when the packet has no message.
-func (q *Queries) AddChannelMessageIATA(ctx context.Context, arg AddChannelMessageIATAParams) error {
-	_, err := q.db.Exec(ctx, addChannelMessageIATA, arg.Iata, arg.PacketHash)
-	return err
+// A stored observation's site for a message another statement created. A no-op when the packet has no message;
+// found says whether the packet has a committed message (then the site is recorded, now or before).
+func (q *Queries) AddChannelMessageIATA(ctx context.Context, arg AddChannelMessageIATAParams) (bool, error) {
+	row := q.db.QueryRow(ctx, addChannelMessageIATA, arg.PacketHash, arg.Iata)
+	var found bool
+	err := row.Scan(&found)
+	return found, err
 }
 
 const checkChannelMessageIATAs = `-- name: CheckChannelMessageIATAs :one

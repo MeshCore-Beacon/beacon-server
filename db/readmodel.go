@@ -83,6 +83,7 @@ type Trust struct {
 	gen             uint64 // writer invalidations so far
 	repairedGen     uint64 // gen covered by the last finished reconcile
 	trusted         atomic.Bool
+	expiry          atomic.Int64 // unix ns after which trust ends without another call; 0 = none
 }
 
 // NewTrust returns an untrusted model; enabled=false keeps it untrusted for the life of the process.
@@ -95,7 +96,39 @@ func NewTrust(model string, enabled bool, p TrustPolicy) *Trust {
 }
 
 // Trusted reports whether pages may be served from the model. A nil *Trust is untrusted.
-func (t *Trust) Trusted() bool { return t != nil && t.trusted.Load() }
+func (t *Trust) Trusted() bool {
+	if t == nil || !t.trusted.Load() {
+		return false
+	}
+	if e := t.expiry.Load(); e != 0 && time.Now().UnixNano() >= e {
+		t.mu.Lock()
+		t.update()
+		t.mu.Unlock()
+		return false
+	}
+	return true
+}
+
+// SetExpiry makes trust end at at, read by read, until a later SetExpiry; the zero time removes the expiry. A
+// read-only server sets it to the instant its writer's saved state turns too old.
+func (t *Trust) SetExpiry(at time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if at.IsZero() {
+		t.expiry.Store(0)
+	} else {
+		t.expiry.Store(at.UnixNano())
+	}
+	t.update()
+}
+
+// Expiry returns the instant trust ends without another call, or the zero time.
+func (t *Trust) Expiry() time.Time {
+	if e := t.expiry.Load(); e != 0 {
+		return time.Unix(0, e)
+	}
+	return time.Time{}
+}
 
 // Model returns the model's metric label.
 func (t *Trust) Model() string { return t.model }
@@ -162,7 +195,8 @@ func (t *Trust) Repaired(gen uint64) {
 
 // update recomputes trusted and the gauge; t.mu is held.
 func (t *Trust) update() {
-	on := t.enabled && t.earned && !t.dropped && t.repairedGen >= t.gen
+	e := t.expiry.Load()
+	on := t.enabled && t.earned && !t.dropped && t.repairedGen >= t.gen && (e == 0 || time.Now().UnixNano() < e)
 	t.trusted.Store(on)
 	v := 0.0
 	if on {

@@ -201,9 +201,9 @@ type addCall struct {
 	iata string
 }
 
-func (s *stubDB) AddChannelMessageIATA(_ context.Context, packetHash []byte, iata string) error {
+func (s *stubDB) AddChannelMessageIATA(_ context.Context, packetHash []byte, iata string) (bool, error) {
 	s.addCalls = append(s.addCalls, addCall{string(packetHash), iata})
-	return s.addErr
+	return false, s.addErr
 }
 
 type setCapabilityCall struct {

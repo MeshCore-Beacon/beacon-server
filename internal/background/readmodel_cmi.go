@@ -252,6 +252,9 @@ func CmiReadOnlyTrust(ctx context.Context, check func(context.Context) (db.CmiRe
 		if !trust.Trusted() {
 			slog.Info("cmi trusted on this read-only server: region and scope message pages read channel_message_iatas", "component", "readmodel")
 		}
+		// Trust ends when the writer's state turns too old, not at the next check, unless that check finds it
+		// saved again.
+		trust.SetExpiry(time.Now().Add(cmiReadOnlyMaxAge - c.Age))
 		trust.Earn()
 		trust.Repaired(gen)
 		return

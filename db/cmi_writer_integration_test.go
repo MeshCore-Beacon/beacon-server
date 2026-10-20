@@ -201,16 +201,16 @@ func TestInsertChannelMessageSeedFallbackPostgres(t *testing.T) {
 func TestAddChannelMessageIATAPostgres(t *testing.T) {
 	f := newCmiFixture(t)
 	p := f.packet("P", 3)
-	if err := f.store.AddChannelMessageIATA(f.ctx, p, "YOW"); err != nil {
-		t.Fatal(err)
+	if found, err := f.store.AddChannelMessageIATA(f.ctx, p, "YOW"); err != nil || found {
+		t.Fatalf("Add with no message: found %v, %v", found, err)
 	}
 	if got := f.rows(); len(got) != 0 {
 		t.Fatalf("Add with no message wrote %v", got)
 	}
 	m := f.message(f.store, 9, p, false)
 	for range 2 {
-		if err := f.store.AddChannelMessageIATA(f.ctx, p, "YOW"); err != nil {
-			t.Fatal(err)
+		if found, err := f.store.AddChannelMessageIATA(f.ctx, p, "YOW"); err != nil || !found {
+			t.Fatalf("Add with a message: found %v, %v", found, err)
 		}
 	}
 	if got, want := f.rows(), []string{fmt.Sprintf("%d/YOW/9/3", m.ID)}; !slices.Equal(got, want) {
@@ -260,7 +260,7 @@ func (l *cmiLane) icm(historical bool) *ingest.InsertedChannelMessage {
 
 func (l *cmiLane) add() {
 	l.f.t.Helper()
-	if err := New(l.conn, nil, 0, 0).AddChannelMessageIATA(l.f.ctx, l.hash, l.site); err != nil {
+	if _, err := New(l.conn, nil, 0, 0).AddChannelMessageIATA(l.f.ctx, l.hash, l.site); err != nil {
 		l.f.t.Fatal(err)
 	}
 }
@@ -299,7 +299,7 @@ func (l *cmiLane) icmWaiting() func() *ingest.InsertedChannelMessage {
 	go func() {
 		m, err := New(l.conn, nil, 0, 0).InsertChannelMessage(l.f.ctx, ingest.InsertChannelMessageParams{ChannelID: 7, PacketHash: l.hash, SenderName: "s", Content: "c", SentAt: time.Now()})
 		if err == nil && m == nil {
-			err = New(l.conn, nil, 0, 0).AddChannelMessageIATA(l.f.ctx, l.hash, l.site)
+			_, err = New(l.conn, nil, 0, 0).AddChannelMessageIATA(l.f.ctx, l.hash, l.site)
 		}
 		if err != nil {
 			failed <- err

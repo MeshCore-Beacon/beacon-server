@@ -1,14 +1,20 @@
 -- Copyright 2026 Beacon Contributors
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
--- name: AddChannelMessageIATA :exec
--- A stored observation's site for a message another statement created. A no-op when the packet has no message.
-INSERT INTO channel_message_iatas (message_id, iata, channel_id, scope_id)
-SELECT cm.id, @iata::bpchar, cm.channel_id, p.scope_id
-FROM channel_messages cm
-JOIN packets p ON p.packet_hash = cm.packet_hash
-WHERE cm.packet_hash = @packet_hash::bytea
-ON CONFLICT (message_id, iata) DO NOTHING;
+-- name: AddChannelMessageIATA :one
+-- A stored observation's site for a message another statement created. A no-op when the packet has no message;
+-- found says whether the packet has a committed message (then the site is recorded, now or before).
+WITH m AS (
+  SELECT cm.id, cm.channel_id, p.scope_id
+  FROM channel_messages cm
+  JOIN packets p ON p.packet_hash = cm.packet_hash
+  WHERE cm.packet_hash = @packet_hash::bytea
+), added AS (
+  INSERT INTO channel_message_iatas (message_id, iata, channel_id, scope_id)
+  SELECT m.id, @iata::bpchar, m.channel_id, m.scope_id FROM m
+  ON CONFLICT (message_id, iata) DO NOTHING
+)
+SELECT EXISTS (SELECT 1 FROM m) AS found;
 
 -- name: FillChannelMessageIATAsByMessages :execrows
 -- Every site of every message in (after_id, through_id]: the backfill and the reconcile's message part.

@@ -82,7 +82,9 @@ type nodeUpdateEvent struct {
 // new observation is confirmed inserted. Currently handles:
 //   - PayloadTypeAdvert (0x04): upsert node and node_iatas
 //   - PayloadTypeGrpTxt (0x05): decrypt and store channel message if key is known
-func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshcore.Packet, iata string, packetHash []byte, radio RadioSettings, scopeID *int32, matchedScope *string, observerPubkey []byte, rxSNR float32) {
+//
+// siteRecorded says an earlier Add for this hearing found the stored message, so its site is already recorded.
+func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshcore.Packet, iata string, packetHash []byte, radio RadioSettings, scopeID *int32, matchedScope *string, observerPubkey []byte, rxSNR float32, siteRecorded bool) {
 	if packet.PayloadType() == meshcore.PayloadTypeAdvert {
 		advert, err := meshcore.AdvertFromBytes(packet.Payload)
 		if err != nil {
@@ -200,7 +202,7 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 		return
 	}
 	if packet.PayloadType() == meshcore.PayloadTypeGrpTxt {
-		result, err := StoreGroupText(ctx, w.db, w.keys, packetHash, packet.Payload, iata)
+		result, err := StoreGroupText(ctx, w.db, w.keys, packetHash, packet.Payload, iata, siteRecorded)
 		if err != nil {
 			if _, decodeErr := meshcore.GroupTextFromBytes(packet.Payload); decodeErr != nil {
 				w.log.Warn("error decoding group text payload", "error", decodeErr)

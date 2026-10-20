@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	mockdb "github.com/MeshCore-Beacon/beacon-server/db/sqlc/mock"
@@ -102,8 +103,8 @@ func TestCmiWriterFailuresDropTrust(t *testing.T) {
 	s := &Store{q: mock}
 	WithReadModels(&ReadModels{Cmi: tr})(s)
 
-	mock.EXPECT().AddChannelMessageIATA(gomock.Any(), gomock.Any()).Return(errors.New("add failed"))
-	if err := s.AddChannelMessageIATA(context.Background(), []byte{1}, "YUL"); err == nil {
+	mock.EXPECT().AddChannelMessageIATA(gomock.Any(), gomock.Any()).Return(false, errors.New("add failed"))
+	if _, err := s.AddChannelMessageIATA(context.Background(), []byte{1}, "YUL"); err == nil {
 		t.Fatal("Add error not returned")
 	}
 	if tr.Trusted() {
@@ -145,5 +146,31 @@ func TestCmiWriterFailuresDropTrust(t *testing.T) {
 	}
 	if !tr.Trusted() {
 		t.Fatal("a duplicate dropped trust")
+	}
+}
+
+// A trust with an expiry is untrusted from that instant on, read by read, and the gauge follows; earning again
+// with a later expiry restores it.
+func TestTrustExpiry(t *testing.T) {
+	tr := NewTrust("cmi_expiry_test", true, CmiTrustPolicy)
+	tr.Earn()
+	tr.SetExpiry(time.Now().Add(30 * time.Millisecond))
+	if !tr.Trusted() {
+		t.Fatal("not trusted before the expiry")
+	}
+	time.Sleep(40 * time.Millisecond)
+	if tr.Trusted() {
+		t.Fatal("trusted after the expiry")
+	}
+	if g := testutil.ToFloat64(metrics.ReadModelTrusted.WithLabelValues("cmi_expiry_test")); g != 0 {
+		t.Fatalf("gauge %v after the expiry", g)
+	}
+	tr.SetExpiry(time.Now().Add(time.Minute))
+	if !tr.Trusted() || testutil.ToFloat64(metrics.ReadModelTrusted.WithLabelValues("cmi_expiry_test")) != 1 {
+		t.Fatal("a later expiry did not restore trust")
+	}
+	tr.SetExpiry(time.Time{})
+	if !tr.Trusted() {
+		t.Fatal("no expiry: untrusted")
 	}
 }

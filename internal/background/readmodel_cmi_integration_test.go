@@ -90,7 +90,7 @@ func cmiSite(t *testing.T, ctx context.Context, store *db.Store, hash string, ob
 			if _, err := store.InsertChannelMessage(ctx, ingest.InsertChannelMessageParams{ChannelID: 7, PacketHash: []byte(hash), SentAt: time.Now()}); err != nil {
 				t.Fatal(err)
 			}
-		} else if err := store.AddChannelMessageIATA(ctx, []byte(hash), site); err != nil {
+		} else if _, err := store.AddChannelMessageIATA(ctx, []byte(hash), site); err != nil {
 			t.Fatal(err)
 		}
 	}

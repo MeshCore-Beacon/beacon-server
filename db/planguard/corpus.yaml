@@ -1473,7 +1473,7 @@ entries:
   - id: cmi.ingest.add
     stmt: AddChannelMessageIATA
     shape: "a later hearing's site for the newest message (ingest pool, auto)"
-    params: [{r: cmi_site_s}, {r: cm_newest_hash}]
+    params: [{r: cm_newest_hash}, {r: cmi_site_s}]
     expect:
       driver: [{relation: channel_messages, alias: cm, index: channel_messages_packet_hash_key, index_cond: ["packet_hash ="]}]
   - id: cmi.ingest.insert

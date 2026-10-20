@@ -251,13 +251,14 @@ func (s *Store) InsertChannelMessage(ctx context.Context, m ingest.InsertChannel
 }
 
 // AddChannelMessageIATA records iata as a site of the packet's message, when the packet has one.
-// A failure drops cmi trust until the next reconcile adds the pair.
-func (s *Store) AddChannelMessageIATA(ctx context.Context, packetHash []byte, iata string) error {
-	err := s.q.AddChannelMessageIATA(ctx, sqlc.AddChannelMessageIATAParams{Iata: iata, PacketHash: packetHash})
+// found says the packet has a committed message, so the site is recorded. A failure drops cmi trust until the next
+// reconcile adds the pair.
+func (s *Store) AddChannelMessageIATA(ctx context.Context, packetHash []byte, iata string) (bool, error) {
+	found, err := s.q.AddChannelMessageIATA(ctx, sqlc.AddChannelMessageIATAParams{PacketHash: packetHash, Iata: iata})
 	if err != nil {
 		s.readModels.invalidateCmi("a message site was not recorded")
 	}
-	return err
+	return found, err
 }
 
 // ListChannelMessages serves /channels/{id}/messages (channelID set) and /messages.

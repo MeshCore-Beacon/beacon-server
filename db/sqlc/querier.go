@@ -18,8 +18,9 @@ type Querier interface {
 	AddChannelMembers(ctx context.Context, arg AddChannelMembersParams) error
 	// Copyright 2026 Beacon Contributors
 	// SPDX-License-Identifier: AGPL-3.0-or-later
-	// A stored observation's site for a message another statement created. A no-op when the packet has no message.
-	AddChannelMessageIATA(ctx context.Context, arg AddChannelMessageIATAParams) error
+	// A stored observation's site for a message another statement created. A no-op when the packet has no message;
+	// found says whether the packet has a committed message (then the site is recorded, now or before).
+	AddChannelMessageIATA(ctx context.Context, arg AddChannelMessageIATAParams) (bool, error)
 	AddIATAs(ctx context.Context, iatas []string) error
 	AddRegionIATAs(ctx context.Context, arg AddRegionIATAsParams) error
 	// Copies the packet's payload type onto the first @max_rows observations in [@from_id, @to_id),

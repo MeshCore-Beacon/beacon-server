@@ -108,7 +108,7 @@ INSERT INTO observers (id, public_key) VALUES ('00000000-0000-0000-0000-00000000
 
 	k1 := keys{0x11: {{Key: psk, Fingerprint: []byte{1}, Name: "fixture"}}}
 	observe("00000000-0000-0000-0000-000000000001", "YUL")
-	created, err := ingest.StoreGroupText(ctx, store, k1, hash, payload, "YUL")
+	created, err := ingest.StoreGroupText(ctx, store, k1, hash, payload, "YUL", false)
 	if err != nil || created == nil || created.Message == nil {
 		t.Fatalf("first hearing: %+v, %v", created, err)
 	}
@@ -116,7 +116,7 @@ INSERT INTO observers (id, public_key) VALUES ('00000000-0000-0000-0000-00000000
 
 	// The key is gone; the next hearing cannot decrypt.
 	observe("00000000-0000-0000-0000-000000000002", "YOW")
-	result, err := ingest.StoreGroupText(ctx, store, keys{}, hash, payload, "YOW")
+	result, err := ingest.StoreGroupText(ctx, store, keys{}, hash, payload, "YOW", false)
 	if result != nil || err != nil {
 		t.Fatalf("keyless hearing: %+v, %v", result, err)
 	}

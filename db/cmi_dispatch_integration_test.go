@@ -108,7 +108,7 @@ func buildCmiMessages(f *cmiFixture) cmiMessages {
 				n = 1
 			}
 			hear(site, n)
-			if err := f.store.AddChannelMessageIATA(f.ctx, hash, site); err != nil {
+			if _, err := f.store.AddChannelMessageIATA(f.ctx, hash, site); err != nil {
 				f.t.Fatal(err)
 			}
 		}

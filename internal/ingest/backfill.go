@@ -95,12 +95,12 @@ func DecryptGroupText(ctx context.Context, db DB, keys ChannelKeyStore, packetHa
 
 // StoreGroupText decrypts and stores a live group-text observation's message (DecryptGroupText, historical=false).
 // Whenever this call did not create the message (no key, a decrypt or store error, a payload that does not decode,
-// a message that already exists) it records the observation's site with AddChannelMessageIATA; an Add error is
-// logged and never returned.
-func StoreGroupText(ctx context.Context, db DB, keys ChannelKeyStore, packetHash, rawPayload []byte, iata string) (*DecryptGroupTextResult, error) {
+// a message that already exists) it records the observation's site with AddChannelMessageIATA, unless siteRecorded
+// says an earlier Add for this hearing already found the stored message; an Add error is logged and never returned.
+func StoreGroupText(ctx context.Context, db DB, keys ChannelKeyStore, packetHash, rawPayload []byte, iata string, siteRecorded bool) (*DecryptGroupTextResult, error) {
 	result, err := DecryptGroupText(ctx, db, keys, packetHash, rawPayload, false)
-	if err != nil || result == nil || result.Message == nil {
-		if addErr := db.AddChannelMessageIATA(ctx, packetHash, iata); addErr != nil {
+	if !siteRecorded && (err != nil || result == nil || result.Message == nil) {
+		if _, addErr := db.AddChannelMessageIATA(ctx, packetHash, iata); addErr != nil {
 			slog.Error(fmt.Sprintf("ingest: failed to record site %s for channel packet %s", iata, hex.EncodeToString(packetHash)), "component", "ingest", "error", addErr)
 		}
 	}

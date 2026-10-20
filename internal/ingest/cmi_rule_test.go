@@ -43,7 +43,7 @@ func TestStoreGroupTextAddsSiteUnlessCreated(t *testing.T) {
 			if c.setup != nil {
 				c.setup(db)
 			}
-			result, err := StoreGroupText(context.Background(), db, c.keys, hash, c.payload, "YOW")
+			result, err := StoreGroupText(context.Background(), db, c.keys, hash, c.payload, "YOW", false)
 			if (err != nil) != c.err || (result != nil) != c.result {
 				t.Fatalf("result %+v, err %v", result, err)
 			}
@@ -70,21 +70,21 @@ func TestGroupTextAddErrorStillBroadcasts(t *testing.T) {
 	packet := &meshcore.Packet{Header: meshcore.MakeHeader(meshcore.RouteTypeFlood, meshcore.PayloadTypeGrpTxt, 0), Payload: encryptedGroupText(t, 0x11, psk, "Fixture", "test")}
 
 	// No key: the Add fails, the hash-only channel is still recorded.
-	w.handlePayloadTypeSideEffects(ctx, packet, "YOW", []byte{1}, RadioSettings{}, nil, nil, nil, 0)
+	w.handlePayloadTypeSideEffects(ctx, packet, "YOW", []byte{1}, RadioSettings{}, nil, nil, nil, 0, false)
 	if db.upsertChannelHashOnlyCalls != 1 || len(db.addCalls) != 1 {
 		t.Fatalf("hash-only upserts %d, adds %d", db.upsertChannelHashOnlyCalls, len(db.addCalls))
 	}
 
 	// A duplicate with a key: the Add fails, nothing is broadcast, nothing panics.
 	w.keys = &mapKeys{entries: map[byte][]keystore.Entry{0x11: {{Key: psk, Fingerprint: []byte{1}, Name: "fixture"}}}}
-	w.handlePayloadTypeSideEffects(ctx, packet, "YUL", []byte{2}, RadioSettings{}, nil, nil, nil, 0)
+	w.handlePayloadTypeSideEffects(ctx, packet, "YUL", []byte{2}, RadioSettings{}, nil, nil, nil, 0, false)
 	if len(db.addCalls) != 2 {
 		t.Fatalf("adds = %v", db.addCalls)
 	}
 
 	// A new message: no Add, and the event is broadcast.
 	db.insertChannelMessageResult = true
-	w.handlePayloadTypeSideEffects(ctx, packet, "YYZ", []byte{3}, RadioSettings{}, nil, nil, nil, 0)
+	w.handlePayloadTypeSideEffects(ctx, packet, "YYZ", []byte{3}, RadioSettings{}, nil, nil, nil, 0, false)
 	select {
 	case event := <-client.Send:
 		var got channelMessageEvent
@@ -120,5 +120,58 @@ func TestGroupTextObservationAddsSiteAtOnce(t *testing.T) {
 	w.handlePacket(context.Background(), "YOW", "0102", packetEnvelope(t, packet))
 	if len(db.addCalls) != 0 {
 		t.Fatalf("a duplicate hearing added %v", db.addCalls)
+	}
+}
+
+// orderDB records whether the hearing's path was already marked sent when the early Add ran.
+type orderDB struct {
+	*stubDB
+	w           *Worker
+	path        []byte
+	markedFirst []bool
+	found       bool
+}
+
+func (o *orderDB) AddChannelMessageIATA(ctx context.Context, hash []byte, iata string) (bool, error) {
+	// MarkSent answers true for a new path only once the hearing's first path is recorded, so probing a path no
+	// copy uses tells whether the worker already marked this hearing.
+	o.markedFirst = append(o.markedFirst, o.w.hub.MarkSent(hash, make([]byte, 16), append(slices.Clone(o.path), 0xee, 0xee)))
+	_, err := o.stubDB.AddChannelMessageIATA(ctx, hash, iata)
+	return o.found, err
+}
+
+// The hearing's path is recorded before the early Add, so a broker copy racing through the Add cannot be streamed as
+// a repeat of this hearing.
+func TestGroupTextAddAfterMarkSent(t *testing.T) {
+	w, base := newTestWorker()
+	base.observationInserted = true
+	packet := buildGrpTxtPacket(t, 0x1a, make([]byte, 16))
+	db := &orderDB{stubDB: base, w: w, path: packet.Path}
+	w.db = db
+	w.handlePacket(context.Background(), "YOW", "0102", packetEnvelope(t, packet))
+	if len(db.markedFirst) == 0 || !db.markedFirst[0] {
+		t.Fatalf("the early Add ran before MarkSent recorded the path: %v", db.markedFirst)
+	}
+}
+
+// When the early Add found the stored message, the hearing's site is recorded and the backstop Add is skipped; when it
+// found none (the message is new, or still being created by another hearing), the backstop runs.
+func TestGroupTextBackstopOnlyWithoutStoredMessage(t *testing.T) {
+	psk := make([]byte, 16)
+	for _, c := range []struct {
+		found bool
+		adds  int
+	}{{true, 1}, {false, 2}} {
+		w, base := newTestWorker()
+		base.observationInserted = true
+		w.keys = &mapKeys{entries: map[byte][]keystore.Entry{0x11: {{Key: psk, Fingerprint: []byte{1}, Name: "fixture"}}}}
+		packet := &meshcore.Packet{Header: meshcore.MakeHeader(meshcore.RouteTypeFlood, meshcore.PayloadTypeGrpTxt, 0), Payload: encryptedGroupText(t, 0x11, psk, "Fixture", "test")}
+		db := &orderDB{stubDB: base, w: w, path: packet.Path, found: c.found}
+		w.db = db
+		w.handlePacket(context.Background(), "YOW", "0102", packetEnvelope(t, packet))
+		if len(base.addCalls) != c.adds {
+			t.Errorf("message found %v: %d Adds, want %d", c.found, len(base.addCalls), c.adds)
+		}
+		t.Logf("message found %v: %d Adds, %d channel upserts, %d message inserts", c.found, len(base.addCalls), base.upsertChannelCalls, len(base.channelMessages))
 	}
 }

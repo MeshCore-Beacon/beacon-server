@@ -73,11 +73,12 @@ func (mr *MockQuerierMockRecorder) AddChannelMembers(ctx, arg any) *gomock.Call 
 }
 
 // AddChannelMessageIATA mocks base method.
-func (m *MockQuerier) AddChannelMessageIATA(ctx context.Context, arg db.AddChannelMessageIATAParams) error {
+func (m *MockQuerier) AddChannelMessageIATA(ctx context.Context, arg db.AddChannelMessageIATAParams) (bool, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "AddChannelMessageIATA", ctx, arg)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // AddChannelMessageIATA indicates an expected call of AddChannelMessageIATA.

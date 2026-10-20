@@ -137,7 +137,8 @@ type DB interface {
 	InsertChannelMessage(ctx context.Context, m InsertChannelMessageParams) (*InsertedChannelMessage, error)
 
 	// AddChannelMessageIATA records iata as a site of the packet's message; a no-op when the packet has none.
-	AddChannelMessageIATA(ctx context.Context, packetHash []byte, iata string) error
+	// found says whether the packet has a committed message (its site is then recorded).
+	AddChannelMessageIATA(ctx context.Context, packetHash []byte, iata string) (found bool, err error)
 
 	// UpdateObserverStatus updates the observer row from a /status message. Returns the OberserID
 	// and any error.
