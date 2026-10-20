@@ -23,7 +23,8 @@ import (
 const (
 	packetSitesStateKey = "packet_sites"
 	// packetSitesSlice is the observation ids one fill covers, in the backfill, the reconcile and the audit.
-	packetSitesSlice int64 = 500_000
+	packetSitesSlice     int64 = 500_000
+	packetSitesBootSlice int64 = 50_000
 	// packetSitesFillAttempts bounds the retries of a fill that lost a packet to a concurrent cascade (23503).
 	packetSitesFillAttempts = 3
 	// packetSitesBackfillPause separates backfill slices, so the one-off backfill leaves room for other work.
@@ -45,12 +46,14 @@ type PacketSitesState struct {
 // PacketSitesSession holds the packet_sites lock on one maintenance connection and the state it read after taking
 // the lock; every statement and state write goes through it.
 type PacketSitesSession struct {
-	store *Store
-	conn  *pgxpool.Conn
-	q     *sqlc.Queries
-	state PacketSitesState
-	found bool // the state existed when the lock was taken
-	pause time.Duration
+	store         *Store
+	conn          *pgxpool.Conn
+	q             *sqlc.Queries
+	state         PacketSitesState
+	found         bool // the state existed when the lock was taken
+	pause         time.Duration
+	backfillSpan  int64
+	backfillLimit time.Duration
 
 	// fillStmt runs one fill; tests replace it. fills lists the (after, through] ranges filled, and retries counts
 	// 23503 retries, for tests.
@@ -150,11 +153,14 @@ func (p *PacketSitesSession) fillWith(ctx context.Context, after, through int64,
 	return 0, err
 }
 
-// Backfill fills packet_sites from WriterFromID down, one slice of packetSitesSlice observation ids at a time,
-// newest first, until it passes the oldest observation (then Complete) or budget is spent. Progress is saved after
-// every slice, and a failed slice is retried from the same place on the next call.
+// Backfill fills packet_sites from WriterFromID down, newest first, until it passes the oldest observation (then
+// Complete) or budget is spent. Boot writes start at packetSitesBootSlice and halve after a statement timeout.
+// Progress is saved only after a committed slice; a failed slice is retried from the same place.
 func (p *PacketSitesSession) Backfill(ctx context.Context, budget time.Duration) (PacketSitesState, error) {
 	deadline := time.Now().Add(budget)
+	if p.backfillSpan <= 0 {
+		p.backfillSpan = packetSitesBootSlice
+	}
 	for !p.state.Complete && time.Now().Before(deadline) {
 		if err := ctx.Err(); err != nil {
 			return p.state, err
@@ -171,9 +177,19 @@ func (p *PacketSitesSession) Backfill(ctx context.Context, budget time.Duration)
 			slog.Info("packet_sites backfill complete", "component", "readmodel", "writer_from_id", p.state.WriterFromID)
 			break
 		}
-		from := max(p.state.BackfilledDownToID-packetSitesSlice, lo-1)
-		if _, err := p.fill(ctx, from, p.state.BackfilledDownToID); err != nil {
-			return p.state, fmt.Errorf("packet_sites backfill (%d, %d]: %w", from, p.state.BackfilledDownToID, err)
+		top := p.state.BackfilledDownToID
+		from := max(top-p.backfillSpan, lo-1)
+		_, err = p.fillWith(ctx, from, top, func(ctx context.Context, after, through int64) (int64, error) {
+			return backfillWrite(ctx, p.conn, backfillTimeout(p.backfillLimit, deadline), func() (int64, error) {
+				return p.fillStmt(ctx, after, through)
+			})
+		})
+		if err != nil {
+			if backfillTimedOut(ctx, err) && top-from > 1 {
+				p.backfillSpan = max(1, (top-from)/2)
+				continue
+			}
+			return p.state, fmt.Errorf("packet_sites backfill (%d, %d]: %w", from, top, err)
 		}
 		p.state.BackfilledDownToID = from
 		if err := p.save(ctx); err != nil {
