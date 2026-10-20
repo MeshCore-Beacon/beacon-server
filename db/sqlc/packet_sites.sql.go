@@ -7,6 +7,9 @@ package db
 
 import (
 	"context"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const checkPacketSitesSlice = `-- name: CheckPacketSitesSlice :one
@@ -86,6 +89,964 @@ func (q *Queries) FillPacketSitesSlice(ctx context.Context, arg FillPacketSitesS
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const filterKnownSites = `-- name: FilterKnownSites :one
+SELECT COALESCE(array_agg(DISTINCT u ORDER BY u), '{}')::bpchar[] AS iatas
+FROM unnest($1::bpchar[]) AS u
+WHERE EXISTS (SELECT 1 FROM packet_sites ps WHERE ps.iata = u)
+`
+
+// The requested sites that have at least one row: a site with none adds no row to any site page.
+func (q *Queries) FilterKnownSites(ctx context.Context, iatas []string) ([]string, error) {
+	row := q.db.QueryRow(ctx, filterKnownSites, iatas)
+	var iatas_2 []string
+	err := row.Scan(&iatas_2)
+	return iatas_2, err
+}
+
+const listPacketsBySite = `-- name: ListPacketsBySite :many
+WITH page AS MATERIALIZED (
+  SELECT ps.packet_hash, ps.site_heard_at AS k
+  FROM packet_sites ps
+  WHERE ps.iata = $1::bpchar
+    AND (ps.site_heard_at, ps.packet_hash) < ($2::timestamptz, $3::bytea)
+  ORDER BY ps.site_heard_at DESC, ps.packet_hash DESC
+  LIMIT $4
+)
+SELECT p.packet_hash, p.payload_type,
+  COALESCE(CASE
+    WHEN p.payload_type = 4 AND jsonb_typeof(p.parsed_payload #> '{appData,name}') = 'string'
+      THEN p.parsed_payload #>> '{appData,name}'
+    WHEN p.payload_type = 3 AND p.parsed_payload ->> 'type' = 'ACK'
+      AND jsonb_typeof(p.parsed_payload -> 'checksum') = 'string'
+      AND p.parsed_payload ->> 'checksum' ~ '^[0-9a-fA-F]{8}$'
+      THEN 'ACK ' || lower(p.parsed_payload ->> 'checksum')
+    WHEN p.payload_type = 9 AND p.parsed_payload ->> 'type' IN ('TRACE', 'PING')
+      AND jsonb_typeof(p.parsed_payload -> 'traceTag') = 'string'
+      AND p.parsed_payload ->> 'traceTag' ~ '^[0-9a-fA-F]{8}$'
+      THEN (p.parsed_payload ->> 'type') || ' ' || lower(p.parsed_payload ->> 'traceTag')
+    END, '')::text AS summary,
+  p.route_type, p.first_heard_at, p.last_heard_at, p.scope_id, ts.name AS scope_name,
+  pg.k::timestamptz AS site_heard_at,
+  p.observation_count AS observation_count,
+  -- sqlc loses LATERAL nullability; these scalar defaults are ignored when observer_id is NULL.
+  po.observer_id AS latest_observer_id, o.display_name AS latest_observer_name,
+  COALESCE(po.iata, ''::bpchar) AS latest_observer_iata,
+  COALESCE(po.path_length_byte, 0::smallint) AS latest_observer_path_length_byte,
+  COALESCE(po.hash_size, 0::smallint) AS latest_observer_hash_size,
+  COALESCE(po.hop_count, 0::smallint) AS latest_observer_hop_count,
+  po.path_bytes AS latest_observer_path_bytes, p.raw_payload, p.origin_pubkey
+FROM page pg
+JOIN packets p ON p.packet_hash = pg.packet_hash
+LEFT JOIN LATERAL (
+  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes
+  FROM packet_observations WHERE packet_hash = p.packet_hash
+  ORDER BY heard_at DESC, id DESC LIMIT 1
+) po ON true
+LEFT JOIN observers o ON o.id = po.observer_id
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+ORDER BY pg.k DESC, pg.packet_hash DESC
+`
+
+type ListPacketsBySiteParams struct {
+	Iata       string             `json:"iata"`
+	CursorTs   pgtype.Timestamptz `json:"cursor_ts"`
+	CursorHash []byte             `json:"cursor_hash"`
+	PageLimit  int32              `json:"page_limit"`
+}
+
+type ListPacketsBySiteRow struct {
+	PacketHash                   []byte             `json:"packet_hash"`
+	PayloadType                  int16              `json:"payload_type"`
+	Summary                      string             `json:"summary"`
+	RouteType                    int16              `json:"route_type"`
+	FirstHeardAt                 pgtype.Timestamptz `json:"first_heard_at"`
+	LastHeardAt                  pgtype.Timestamptz `json:"last_heard_at"`
+	ScopeID                      *int32             `json:"scope_id"`
+	ScopeName                    *string            `json:"scope_name"`
+	SiteHeardAt                  pgtype.Timestamptz `json:"site_heard_at"`
+	ObservationCount             int64              `json:"observation_count"`
+	LatestObserverID             uuid.UUID          `json:"latest_observer_id"`
+	LatestObserverName           *string            `json:"latest_observer_name"`
+	LatestObserverIata           string             `json:"latest_observer_iata"`
+	LatestObserverPathLengthByte int16              `json:"latest_observer_path_length_byte"`
+	LatestObserverHashSize       int16              `json:"latest_observer_hash_size"`
+	LatestObserverHopCount       int16              `json:"latest_observer_hop_count"`
+	LatestObserverPathBytes      []byte             `json:"latest_observer_path_bytes"`
+	RawPayload                   []byte             `json:"raw_payload"`
+	OriginPubkey                 []byte             `json:"origin_pubkey"`
+}
+
+// One site: one range of its (site_heard_at, packet_hash) index.
+func (q *Queries) ListPacketsBySite(ctx context.Context, arg ListPacketsBySiteParams) ([]ListPacketsBySiteRow, error) {
+	rows, err := q.db.Query(ctx, listPacketsBySite,
+		arg.Iata,
+		arg.CursorTs,
+		arg.CursorHash,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPacketsBySiteRow{}
+	for rows.Next() {
+		var i ListPacketsBySiteRow
+		if err := rows.Scan(
+			&i.PacketHash,
+			&i.PayloadType,
+			&i.Summary,
+			&i.RouteType,
+			&i.FirstHeardAt,
+			&i.LastHeardAt,
+			&i.ScopeID,
+			&i.ScopeName,
+			&i.SiteHeardAt,
+			&i.ObservationCount,
+			&i.LatestObserverID,
+			&i.LatestObserverName,
+			&i.LatestObserverIata,
+			&i.LatestObserverPathLengthByte,
+			&i.LatestObserverHashSize,
+			&i.LatestObserverHopCount,
+			&i.LatestObserverPathBytes,
+			&i.RawPayload,
+			&i.OriginPubkey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPacketsBySiteKeys = `-- name: ListPacketsBySiteKeys :many
+WITH page AS MATERIALIZED (
+  SELECT h.packet_hash, t.k, h.ord
+  FROM unnest($1::bytea[]) WITH ORDINALITY AS h(packet_hash, ord)
+  JOIN unnest($2::timestamptz[]) WITH ORDINALITY AS t(k, ord) ON t.ord = h.ord
+)
+SELECT p.packet_hash, p.payload_type,
+  COALESCE(CASE
+    WHEN p.payload_type = 4 AND jsonb_typeof(p.parsed_payload #> '{appData,name}') = 'string'
+      THEN p.parsed_payload #>> '{appData,name}'
+    WHEN p.payload_type = 3 AND p.parsed_payload ->> 'type' = 'ACK'
+      AND jsonb_typeof(p.parsed_payload -> 'checksum') = 'string'
+      AND p.parsed_payload ->> 'checksum' ~ '^[0-9a-fA-F]{8}$'
+      THEN 'ACK ' || lower(p.parsed_payload ->> 'checksum')
+    WHEN p.payload_type = 9 AND p.parsed_payload ->> 'type' IN ('TRACE', 'PING')
+      AND jsonb_typeof(p.parsed_payload -> 'traceTag') = 'string'
+      AND p.parsed_payload ->> 'traceTag' ~ '^[0-9a-fA-F]{8}$'
+      THEN (p.parsed_payload ->> 'type') || ' ' || lower(p.parsed_payload ->> 'traceTag')
+    END, '')::text AS summary,
+  p.route_type, p.first_heard_at, p.last_heard_at, p.scope_id, ts.name AS scope_name,
+  pg.k::timestamptz AS site_heard_at,
+  p.observation_count AS observation_count,
+  -- sqlc loses LATERAL nullability; these scalar defaults are ignored when observer_id is NULL.
+  po.observer_id AS latest_observer_id, o.display_name AS latest_observer_name,
+  COALESCE(po.iata, ''::bpchar) AS latest_observer_iata,
+  COALESCE(po.path_length_byte, 0::smallint) AS latest_observer_path_length_byte,
+  COALESCE(po.hash_size, 0::smallint) AS latest_observer_hash_size,
+  COALESCE(po.hop_count, 0::smallint) AS latest_observer_hop_count,
+  po.path_bytes AS latest_observer_path_bytes, p.raw_payload, p.origin_pubkey
+FROM page pg
+JOIN packets p ON p.packet_hash = pg.packet_hash
+LEFT JOIN LATERAL (
+  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes
+  FROM packet_observations WHERE packet_hash = p.packet_hash
+  ORDER BY heard_at DESC, id DESC LIMIT 1
+) po ON true
+LEFT JOIN observers o ON o.id = po.observer_id
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+ORDER BY pg.ord
+`
+
+type ListPacketsBySiteKeysParams struct {
+	PacketHashes [][]byte             `json:"packet_hashes"`
+	SiteHeardAts []pgtype.Timestamptz `json:"site_heard_ats"`
+}
+
+type ListPacketsBySiteKeysRow struct {
+	PacketHash                   []byte             `json:"packet_hash"`
+	PayloadType                  int16              `json:"payload_type"`
+	Summary                      string             `json:"summary"`
+	RouteType                    int16              `json:"route_type"`
+	FirstHeardAt                 pgtype.Timestamptz `json:"first_heard_at"`
+	LastHeardAt                  pgtype.Timestamptz `json:"last_heard_at"`
+	ScopeID                      *int32             `json:"scope_id"`
+	ScopeName                    *string            `json:"scope_name"`
+	SiteHeardAt                  pgtype.Timestamptz `json:"site_heard_at"`
+	ObservationCount             int64              `json:"observation_count"`
+	LatestObserverID             uuid.UUID          `json:"latest_observer_id"`
+	LatestObserverName           *string            `json:"latest_observer_name"`
+	LatestObserverIata           string             `json:"latest_observer_iata"`
+	LatestObserverPathLengthByte int16              `json:"latest_observer_path_length_byte"`
+	LatestObserverHashSize       int16              `json:"latest_observer_hash_size"`
+	LatestObserverHopCount       int16              `json:"latest_observer_hop_count"`
+	LatestObserverPathBytes      []byte             `json:"latest_observer_path_bytes"`
+	RawPayload                   []byte             `json:"raw_payload"`
+	OriginPubkey                 []byte             `json:"origin_pubkey"`
+}
+
+// The page rows for keys from ListPacketsBySitesSince or ListPacketsBySitesScoped, in the given order.
+func (q *Queries) ListPacketsBySiteKeys(ctx context.Context, arg ListPacketsBySiteKeysParams) ([]ListPacketsBySiteKeysRow, error) {
+	rows, err := q.db.Query(ctx, listPacketsBySiteKeys, arg.PacketHashes, arg.SiteHeardAts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPacketsBySiteKeysRow{}
+	for rows.Next() {
+		var i ListPacketsBySiteKeysRow
+		if err := rows.Scan(
+			&i.PacketHash,
+			&i.PayloadType,
+			&i.Summary,
+			&i.RouteType,
+			&i.FirstHeardAt,
+			&i.LastHeardAt,
+			&i.ScopeID,
+			&i.ScopeName,
+			&i.SiteHeardAt,
+			&i.ObservationCount,
+			&i.LatestObserverID,
+			&i.LatestObserverName,
+			&i.LatestObserverIata,
+			&i.LatestObserverPathLengthByte,
+			&i.LatestObserverHashSize,
+			&i.LatestObserverHopCount,
+			&i.LatestObserverPathBytes,
+			&i.RawPayload,
+			&i.OriginPubkey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPacketsBySites = `-- name: ListPacketsBySites :many
+WITH page AS MATERIALIZED (
+  SELECT s.packet_hash, max(s.site_heard_at) AS k
+  FROM unnest($1::bpchar[]) AS req(iata)
+  CROSS JOIN LATERAL (
+    SELECT ps.packet_hash, ps.site_heard_at
+    FROM packet_sites ps
+    WHERE ps.iata = req.iata
+      AND (ps.site_heard_at, ps.packet_hash) < ($2::timestamptz, $3::bytea)
+      AND NOT EXISTS (SELECT 1 FROM packet_sites x
+                      WHERE x.packet_hash = ps.packet_hash
+                        AND x.iata = ANY($1::bpchar[])
+                        AND (x.site_heard_at, x.packet_hash) >= ($2::timestamptz, $3::bytea)
+                      OFFSET 0)   -- a per-row SubPlan in both plan modes, never an anti join
+    ORDER BY ps.site_heard_at DESC, ps.packet_hash DESC
+    LIMIT $4) s
+  GROUP BY s.packet_hash
+  ORDER BY max(s.site_heard_at) DESC, s.packet_hash DESC
+  LIMIT $4
+)
+SELECT p.packet_hash, p.payload_type,
+  COALESCE(CASE
+    WHEN p.payload_type = 4 AND jsonb_typeof(p.parsed_payload #> '{appData,name}') = 'string'
+      THEN p.parsed_payload #>> '{appData,name}'
+    WHEN p.payload_type = 3 AND p.parsed_payload ->> 'type' = 'ACK'
+      AND jsonb_typeof(p.parsed_payload -> 'checksum') = 'string'
+      AND p.parsed_payload ->> 'checksum' ~ '^[0-9a-fA-F]{8}$'
+      THEN 'ACK ' || lower(p.parsed_payload ->> 'checksum')
+    WHEN p.payload_type = 9 AND p.parsed_payload ->> 'type' IN ('TRACE', 'PING')
+      AND jsonb_typeof(p.parsed_payload -> 'traceTag') = 'string'
+      AND p.parsed_payload ->> 'traceTag' ~ '^[0-9a-fA-F]{8}$'
+      THEN (p.parsed_payload ->> 'type') || ' ' || lower(p.parsed_payload ->> 'traceTag')
+    END, '')::text AS summary,
+  p.route_type, p.first_heard_at, p.last_heard_at, p.scope_id, ts.name AS scope_name,
+  pg.k::timestamptz AS site_heard_at,
+  p.observation_count AS observation_count,
+  -- sqlc loses LATERAL nullability; these scalar defaults are ignored when observer_id is NULL.
+  po.observer_id AS latest_observer_id, o.display_name AS latest_observer_name,
+  COALESCE(po.iata, ''::bpchar) AS latest_observer_iata,
+  COALESCE(po.path_length_byte, 0::smallint) AS latest_observer_path_length_byte,
+  COALESCE(po.hash_size, 0::smallint) AS latest_observer_hash_size,
+  COALESCE(po.hop_count, 0::smallint) AS latest_observer_hop_count,
+  po.path_bytes AS latest_observer_path_bytes, p.raw_payload, p.origin_pubkey
+FROM page pg
+JOIN packets p ON p.packet_hash = pg.packet_hash
+LEFT JOIN LATERAL (
+  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes
+  FROM packet_observations WHERE packet_hash = p.packet_hash
+  ORDER BY heard_at DESC, id DESC LIMIT 1
+) po ON true
+LEFT JOIN observers o ON o.id = po.observer_id
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+ORDER BY pg.k DESC, pg.packet_hash DESC
+`
+
+type ListPacketsBySitesParams struct {
+	Iatas      []string           `json:"iatas"`
+	CursorTs   pgtype.Timestamptz `json:"cursor_ts"`
+	CursorHash []byte             `json:"cursor_hash"`
+	PageLimit  int32              `json:"page_limit"`
+}
+
+type ListPacketsBySitesRow struct {
+	PacketHash                   []byte             `json:"packet_hash"`
+	PayloadType                  int16              `json:"payload_type"`
+	Summary                      string             `json:"summary"`
+	RouteType                    int16              `json:"route_type"`
+	FirstHeardAt                 pgtype.Timestamptz `json:"first_heard_at"`
+	LastHeardAt                  pgtype.Timestamptz `json:"last_heard_at"`
+	ScopeID                      *int32             `json:"scope_id"`
+	ScopeName                    *string            `json:"scope_name"`
+	SiteHeardAt                  pgtype.Timestamptz `json:"site_heard_at"`
+	ObservationCount             int64              `json:"observation_count"`
+	LatestObserverID             uuid.UUID          `json:"latest_observer_id"`
+	LatestObserverName           *string            `json:"latest_observer_name"`
+	LatestObserverIata           string             `json:"latest_observer_iata"`
+	LatestObserverPathLengthByte int16              `json:"latest_observer_path_length_byte"`
+	LatestObserverHashSize       int16              `json:"latest_observer_hash_size"`
+	LatestObserverHopCount       int16              `json:"latest_observer_hop_count"`
+	LatestObserverPathBytes      []byte             `json:"latest_observer_path_bytes"`
+	RawPayload                   []byte             `json:"raw_payload"`
+	OriginPubkey                 []byte             `json:"origin_pubkey"`
+}
+
+// Two or more sites with a cursor: one range per site; a packet whose newest requested-site row is at or above
+// the cursor was already returned, so the in-range re-check drops it.
+func (q *Queries) ListPacketsBySites(ctx context.Context, arg ListPacketsBySitesParams) ([]ListPacketsBySitesRow, error) {
+	rows, err := q.db.Query(ctx, listPacketsBySites,
+		arg.Iatas,
+		arg.CursorTs,
+		arg.CursorHash,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPacketsBySitesRow{}
+	for rows.Next() {
+		var i ListPacketsBySitesRow
+		if err := rows.Scan(
+			&i.PacketHash,
+			&i.PayloadType,
+			&i.Summary,
+			&i.RouteType,
+			&i.FirstHeardAt,
+			&i.LastHeardAt,
+			&i.ScopeID,
+			&i.ScopeName,
+			&i.SiteHeardAt,
+			&i.ObservationCount,
+			&i.LatestObserverID,
+			&i.LatestObserverName,
+			&i.LatestObserverIata,
+			&i.LatestObserverPathLengthByte,
+			&i.LatestObserverHashSize,
+			&i.LatestObserverHopCount,
+			&i.LatestObserverPathBytes,
+			&i.RawPayload,
+			&i.OriginPubkey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPacketsBySitesFirst = `-- name: ListPacketsBySitesFirst :many
+WITH page AS MATERIALIZED (
+  SELECT s.packet_hash, max(s.site_heard_at) AS k
+  FROM unnest($1::bpchar[]) AS req(iata)
+  CROSS JOIN LATERAL (
+    SELECT ps.packet_hash, ps.site_heard_at
+    FROM packet_sites ps
+    WHERE ps.iata = req.iata
+      AND (ps.site_heard_at, ps.packet_hash) < ($2::timestamptz, $3::bytea)
+    ORDER BY ps.site_heard_at DESC, ps.packet_hash DESC
+    LIMIT $4) s
+  GROUP BY s.packet_hash
+  ORDER BY max(s.site_heard_at) DESC, s.packet_hash DESC
+  LIMIT $4
+)
+SELECT p.packet_hash, p.payload_type,
+  COALESCE(CASE
+    WHEN p.payload_type = 4 AND jsonb_typeof(p.parsed_payload #> '{appData,name}') = 'string'
+      THEN p.parsed_payload #>> '{appData,name}'
+    WHEN p.payload_type = 3 AND p.parsed_payload ->> 'type' = 'ACK'
+      AND jsonb_typeof(p.parsed_payload -> 'checksum') = 'string'
+      AND p.parsed_payload ->> 'checksum' ~ '^[0-9a-fA-F]{8}$'
+      THEN 'ACK ' || lower(p.parsed_payload ->> 'checksum')
+    WHEN p.payload_type = 9 AND p.parsed_payload ->> 'type' IN ('TRACE', 'PING')
+      AND jsonb_typeof(p.parsed_payload -> 'traceTag') = 'string'
+      AND p.parsed_payload ->> 'traceTag' ~ '^[0-9a-fA-F]{8}$'
+      THEN (p.parsed_payload ->> 'type') || ' ' || lower(p.parsed_payload ->> 'traceTag')
+    END, '')::text AS summary,
+  p.route_type, p.first_heard_at, p.last_heard_at, p.scope_id, ts.name AS scope_name,
+  pg.k::timestamptz AS site_heard_at,
+  p.observation_count AS observation_count,
+  -- sqlc loses LATERAL nullability; these scalar defaults are ignored when observer_id is NULL.
+  po.observer_id AS latest_observer_id, o.display_name AS latest_observer_name,
+  COALESCE(po.iata, ''::bpchar) AS latest_observer_iata,
+  COALESCE(po.path_length_byte, 0::smallint) AS latest_observer_path_length_byte,
+  COALESCE(po.hash_size, 0::smallint) AS latest_observer_hash_size,
+  COALESCE(po.hop_count, 0::smallint) AS latest_observer_hop_count,
+  po.path_bytes AS latest_observer_path_bytes, p.raw_payload, p.origin_pubkey
+FROM page pg
+JOIN packets p ON p.packet_hash = pg.packet_hash
+LEFT JOIN LATERAL (
+  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes
+  FROM packet_observations WHERE packet_hash = p.packet_hash
+  ORDER BY heard_at DESC, id DESC LIMIT 1
+) po ON true
+LEFT JOIN observers o ON o.id = po.observer_id
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+ORDER BY pg.k DESC, pg.packet_hash DESC
+`
+
+type ListPacketsBySitesFirstParams struct {
+	Iatas      []string           `json:"iatas"`
+	CursorTs   pgtype.Timestamptz `json:"cursor_ts"`
+	CursorHash []byte             `json:"cursor_hash"`
+	PageLimit  int32              `json:"page_limit"`
+}
+
+type ListPacketsBySitesFirstRow struct {
+	PacketHash                   []byte             `json:"packet_hash"`
+	PayloadType                  int16              `json:"payload_type"`
+	Summary                      string             `json:"summary"`
+	RouteType                    int16              `json:"route_type"`
+	FirstHeardAt                 pgtype.Timestamptz `json:"first_heard_at"`
+	LastHeardAt                  pgtype.Timestamptz `json:"last_heard_at"`
+	ScopeID                      *int32             `json:"scope_id"`
+	ScopeName                    *string            `json:"scope_name"`
+	SiteHeardAt                  pgtype.Timestamptz `json:"site_heard_at"`
+	ObservationCount             int64              `json:"observation_count"`
+	LatestObserverID             uuid.UUID          `json:"latest_observer_id"`
+	LatestObserverName           *string            `json:"latest_observer_name"`
+	LatestObserverIata           string             `json:"latest_observer_iata"`
+	LatestObserverPathLengthByte int16              `json:"latest_observer_path_length_byte"`
+	LatestObserverHashSize       int16              `json:"latest_observer_hash_size"`
+	LatestObserverHopCount       int16              `json:"latest_observer_hop_count"`
+	LatestObserverPathBytes      []byte             `json:"latest_observer_path_bytes"`
+	RawPayload                   []byte             `json:"raw_payload"`
+	OriginPubkey                 []byte             `json:"origin_pubkey"`
+}
+
+// ListPacketsBySites for the first page or one site, where the re-check cannot match.
+func (q *Queries) ListPacketsBySitesFirst(ctx context.Context, arg ListPacketsBySitesFirstParams) ([]ListPacketsBySitesFirstRow, error) {
+	rows, err := q.db.Query(ctx, listPacketsBySitesFirst,
+		arg.Iatas,
+		arg.CursorTs,
+		arg.CursorHash,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPacketsBySitesFirstRow{}
+	for rows.Next() {
+		var i ListPacketsBySitesFirstRow
+		if err := rows.Scan(
+			&i.PacketHash,
+			&i.PayloadType,
+			&i.Summary,
+			&i.RouteType,
+			&i.FirstHeardAt,
+			&i.LastHeardAt,
+			&i.ScopeID,
+			&i.ScopeName,
+			&i.SiteHeardAt,
+			&i.ObservationCount,
+			&i.LatestObserverID,
+			&i.LatestObserverName,
+			&i.LatestObserverIata,
+			&i.LatestObserverPathLengthByte,
+			&i.LatestObserverHashSize,
+			&i.LatestObserverHopCount,
+			&i.LatestObserverPathBytes,
+			&i.RawPayload,
+			&i.OriginPubkey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPacketsBySitesScoped = `-- name: ListPacketsBySitesScoped :many
+WITH scanned AS MATERIALIZED (
+  SELECT w.iata, w.scope_id, w.packet_hash, w.site_heard_at, w.first_heard_at, w.payload_type, w.route_type
+  FROM unnest($1::bpchar[]) AS req(iata)
+  CROSS JOIN (SELECT id FROM transport_scopes WHERE name = ANY($2::text[])) sc
+  CROSS JOIN LATERAL (
+    SELECT ps.iata, ps.scope_id, ps.packet_hash, ps.site_heard_at, ps.first_heard_at, ps.payload_type, ps.route_type
+    FROM packet_sites ps
+    WHERE ps.iata = req.iata AND ps.scope_id = sc.id
+      AND (ps.site_heard_at, ps.packet_hash) < ($3::timestamptz, $4::bytea)
+    ORDER BY ps.site_heard_at DESC, ps.packet_hash DESC
+    LIMIT $5) w
+), floor AS (
+  -- Every range that filled scan_depth has unread entries below its last one; the highest such entry bounds
+  -- what this page knows exactly.
+  SELECT f.site_heard_at, f.packet_hash
+  FROM (SELECT DISTINCT ON (w.iata, w.scope_id) w.site_heard_at, w.packet_hash
+        FROM scanned w
+        WHERE (w.iata, w.scope_id) IN (SELECT w.iata, w.scope_id FROM scanned w GROUP BY w.iata, w.scope_id HAVING count(*) >= $5)
+        ORDER BY w.iata, w.scope_id, w.site_heard_at, w.packet_hash) f
+  ORDER BY f.site_heard_at DESC, f.packet_hash DESC
+  LIMIT 1
+), page AS (
+  SELECT s.packet_hash, max(s.site_heard_at) AS k
+  FROM scanned s
+  WHERE s.first_heard_at >= $6::timestamptz AND s.first_heard_at <= $7::timestamptz
+    AND s.payload_type = ANY($8::smallint[]) AND s.route_type = ANY($9::smallint[])
+  GROUP BY s.packet_hash
+  HAVING NOT EXISTS (SELECT 1 FROM floor f WHERE (max(s.site_heard_at), s.packet_hash) < (f.site_heard_at, f.packet_hash))
+    AND (NOT $10::boolean OR NOT EXISTS (
+      SELECT 1 FROM packet_sites x
+      WHERE x.packet_hash = s.packet_hash
+        AND x.iata = ANY($1::bpchar[])
+        AND (x.site_heard_at, x.packet_hash) >= ($3::timestamptz, $4::bytea)))
+  ORDER BY max(s.site_heard_at) DESC, s.packet_hash DESC
+  LIMIT $11
+)
+SELECT false AS is_floor, pg.packet_hash, pg.k::timestamptz AS site_heard_at FROM page pg
+UNION ALL
+SELECT true, f.packet_hash, f.site_heard_at FROM floor f
+ORDER BY 1, 3 DESC, 2 DESC
+`
+
+type ListPacketsBySitesScopedParams struct {
+	Iatas        []string           `json:"iatas"`
+	ScopeNames   []string           `json:"scope_names"`
+	CursorTs     pgtype.Timestamptz `json:"cursor_ts"`
+	CursorHash   []byte             `json:"cursor_hash"`
+	ScanDepth    int32              `json:"scan_depth"`
+	SinceTs      pgtype.Timestamptz `json:"since_ts"`
+	UntilTs      pgtype.Timestamptz `json:"until_ts"`
+	PayloadTypes []int16            `json:"payload_types"`
+	RouteTypes   []int16            `json:"route_types"`
+	Recheck      bool               `json:"recheck"`
+	PageLimit    int32              `json:"page_limit"`
+}
+
+type ListPacketsBySitesScopedRow struct {
+	IsFloor     bool               `json:"is_floor"`
+	PacketHash  []byte             `json:"packet_hash"`
+	SiteHeardAt pgtype.Timestamptz `json:"site_heard_at"`
+}
+
+// ListPacketsBySitesSince with one range per (site, named scope).
+func (q *Queries) ListPacketsBySitesScoped(ctx context.Context, arg ListPacketsBySitesScopedParams) ([]ListPacketsBySitesScopedRow, error) {
+	rows, err := q.db.Query(ctx, listPacketsBySitesScoped,
+		arg.Iatas,
+		arg.ScopeNames,
+		arg.CursorTs,
+		arg.CursorHash,
+		arg.ScanDepth,
+		arg.SinceTs,
+		arg.UntilTs,
+		arg.PayloadTypes,
+		arg.RouteTypes,
+		arg.Recheck,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPacketsBySitesScopedRow{}
+	for rows.Next() {
+		var i ListPacketsBySitesScopedRow
+		if err := rows.Scan(&i.IsFloor, &i.PacketHash, &i.SiteHeardAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPacketsBySitesSince = `-- name: ListPacketsBySitesSince :many
+WITH scanned AS MATERIALIZED (
+  SELECT w.iata, w.scope_id, w.packet_hash, w.site_heard_at, w.first_heard_at, w.payload_type, w.route_type
+  FROM unnest($1::bpchar[]) AS req(iata)
+  CROSS JOIN LATERAL (
+    SELECT ps.iata, ps.scope_id, ps.packet_hash, ps.site_heard_at, ps.first_heard_at, ps.payload_type, ps.route_type
+    FROM packet_sites ps
+    WHERE ps.iata = req.iata
+      AND (ps.site_heard_at, ps.packet_hash) < ($2::timestamptz, $3::bytea)
+    ORDER BY ps.site_heard_at DESC, ps.packet_hash DESC
+    LIMIT $4) w
+), floor AS (
+  -- Every range that filled scan_depth has unread entries below its last one; the highest such entry bounds
+  -- what this page knows exactly.
+  SELECT f.site_heard_at, f.packet_hash
+  FROM (SELECT DISTINCT ON (w.iata) w.site_heard_at, w.packet_hash
+        FROM scanned w
+        WHERE (w.iata) IN (SELECT w.iata FROM scanned w GROUP BY w.iata HAVING count(*) >= $4)
+        ORDER BY w.iata, w.site_heard_at, w.packet_hash) f
+  ORDER BY f.site_heard_at DESC, f.packet_hash DESC
+  LIMIT 1
+), page AS (
+  SELECT s.packet_hash, max(s.site_heard_at) AS k
+  FROM scanned s
+  WHERE s.first_heard_at >= $5::timestamptz AND s.first_heard_at <= $6::timestamptz
+    AND s.payload_type = ANY($7::smallint[]) AND s.route_type = ANY($8::smallint[])
+  GROUP BY s.packet_hash
+  HAVING NOT EXISTS (SELECT 1 FROM floor f WHERE (max(s.site_heard_at), s.packet_hash) < (f.site_heard_at, f.packet_hash))
+    AND (NOT $9::boolean OR NOT EXISTS (
+      SELECT 1 FROM packet_sites x
+      WHERE x.packet_hash = s.packet_hash
+        AND x.iata = ANY($1::bpchar[])
+        AND (x.site_heard_at, x.packet_hash) >= ($2::timestamptz, $3::bytea)))
+  ORDER BY max(s.site_heard_at) DESC, s.packet_hash DESC
+  LIMIT $10
+)
+SELECT false AS is_floor, pg.packet_hash, pg.k::timestamptz AS site_heard_at FROM page pg
+UNION ALL
+SELECT true, f.packet_hash, f.site_heard_at FROM floor f
+ORDER BY 1, 3 DESC, 2 DESC
+`
+
+type ListPacketsBySitesSinceParams struct {
+	Iatas        []string           `json:"iatas"`
+	CursorTs     pgtype.Timestamptz `json:"cursor_ts"`
+	CursorHash   []byte             `json:"cursor_hash"`
+	ScanDepth    int32              `json:"scan_depth"`
+	SinceTs      pgtype.Timestamptz `json:"since_ts"`
+	UntilTs      pgtype.Timestamptz `json:"until_ts"`
+	PayloadTypes []int16            `json:"payload_types"`
+	RouteTypes   []int16            `json:"route_types"`
+	Recheck      bool               `json:"recheck"`
+	PageLimit    int32              `json:"page_limit"`
+}
+
+type ListPacketsBySitesSinceRow struct {
+	IsFloor     bool               `json:"is_floor"`
+	PacketHash  []byte             `json:"packet_hash"`
+	SiteHeardAt pgtype.Timestamptz `json:"site_heard_at"`
+}
+
+// Page keys for a first_heard_at window or many type pairs (absent window sides are -infinity and infinity).
+// Each site range is read to at most scan_depth entries, as deep as the observation statement reads, and the
+// window and type tests filter what was read; the last row (is_floor) is the floor below which this page is
+// incomplete, when a range filled scan_depth. Rows below the floor are left to the next page.
+func (q *Queries) ListPacketsBySitesSince(ctx context.Context, arg ListPacketsBySitesSinceParams) ([]ListPacketsBySitesSinceRow, error) {
+	rows, err := q.db.Query(ctx, listPacketsBySitesSince,
+		arg.Iatas,
+		arg.CursorTs,
+		arg.CursorHash,
+		arg.ScanDepth,
+		arg.SinceTs,
+		arg.UntilTs,
+		arg.PayloadTypes,
+		arg.RouteTypes,
+		arg.Recheck,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPacketsBySitesSinceRow{}
+	for rows.Next() {
+		var i ListPacketsBySitesSinceRow
+		if err := rows.Scan(&i.IsFloor, &i.PacketHash, &i.SiteHeardAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPacketsBySitesTyped = `-- name: ListPacketsBySitesTyped :many
+WITH page AS MATERIALIZED (
+  SELECT s.packet_hash, max(s.site_heard_at) AS k
+  FROM unnest($1::bpchar[]) AS req(iata)
+  CROSS JOIN unnest($2::smallint[]) AS pt(t)
+  CROSS JOIN unnest($3::smallint[]) AS rt(t)
+  CROSS JOIN LATERAL (
+    SELECT ps.packet_hash, ps.site_heard_at
+    FROM packet_sites ps
+    WHERE ps.iata = req.iata AND ps.payload_type = pt.t AND ps.route_type = rt.t
+      AND (ps.site_heard_at, ps.packet_hash) < ($4::timestamptz, $5::bytea)
+      AND NOT EXISTS (SELECT 1 FROM packet_sites x
+                      WHERE x.packet_hash = ps.packet_hash
+                        AND x.iata = ANY($1::bpchar[])
+                        AND (x.site_heard_at, x.packet_hash) >= ($4::timestamptz, $5::bytea)
+                      OFFSET 0)   -- a per-row SubPlan in both plan modes, never an anti join
+    ORDER BY ps.site_heard_at DESC, ps.packet_hash DESC
+    LIMIT $6) s
+  GROUP BY s.packet_hash
+  ORDER BY max(s.site_heard_at) DESC, s.packet_hash DESC
+  LIMIT $6
+)
+SELECT p.packet_hash, p.payload_type,
+  COALESCE(CASE
+    WHEN p.payload_type = 4 AND jsonb_typeof(p.parsed_payload #> '{appData,name}') = 'string'
+      THEN p.parsed_payload #>> '{appData,name}'
+    WHEN p.payload_type = 3 AND p.parsed_payload ->> 'type' = 'ACK'
+      AND jsonb_typeof(p.parsed_payload -> 'checksum') = 'string'
+      AND p.parsed_payload ->> 'checksum' ~ '^[0-9a-fA-F]{8}$'
+      THEN 'ACK ' || lower(p.parsed_payload ->> 'checksum')
+    WHEN p.payload_type = 9 AND p.parsed_payload ->> 'type' IN ('TRACE', 'PING')
+      AND jsonb_typeof(p.parsed_payload -> 'traceTag') = 'string'
+      AND p.parsed_payload ->> 'traceTag' ~ '^[0-9a-fA-F]{8}$'
+      THEN (p.parsed_payload ->> 'type') || ' ' || lower(p.parsed_payload ->> 'traceTag')
+    END, '')::text AS summary,
+  p.route_type, p.first_heard_at, p.last_heard_at, p.scope_id, ts.name AS scope_name,
+  pg.k::timestamptz AS site_heard_at,
+  p.observation_count AS observation_count,
+  -- sqlc loses LATERAL nullability; these scalar defaults are ignored when observer_id is NULL.
+  po.observer_id AS latest_observer_id, o.display_name AS latest_observer_name,
+  COALESCE(po.iata, ''::bpchar) AS latest_observer_iata,
+  COALESCE(po.path_length_byte, 0::smallint) AS latest_observer_path_length_byte,
+  COALESCE(po.hash_size, 0::smallint) AS latest_observer_hash_size,
+  COALESCE(po.hop_count, 0::smallint) AS latest_observer_hop_count,
+  po.path_bytes AS latest_observer_path_bytes, p.raw_payload, p.origin_pubkey
+FROM page pg
+JOIN packets p ON p.packet_hash = pg.packet_hash
+LEFT JOIN LATERAL (
+  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes
+  FROM packet_observations WHERE packet_hash = p.packet_hash
+  ORDER BY heard_at DESC, id DESC LIMIT 1
+) po ON true
+LEFT JOIN observers o ON o.id = po.observer_id
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+ORDER BY pg.k DESC, pg.packet_hash DESC
+`
+
+type ListPacketsBySitesTypedParams struct {
+	Iatas        []string           `json:"iatas"`
+	PayloadTypes []int16            `json:"payload_types"`
+	RouteTypes   []int16            `json:"route_types"`
+	CursorTs     pgtype.Timestamptz `json:"cursor_ts"`
+	CursorHash   []byte             `json:"cursor_hash"`
+	PageLimit    int32              `json:"page_limit"`
+}
+
+type ListPacketsBySitesTypedRow struct {
+	PacketHash                   []byte             `json:"packet_hash"`
+	PayloadType                  int16              `json:"payload_type"`
+	Summary                      string             `json:"summary"`
+	RouteType                    int16              `json:"route_type"`
+	FirstHeardAt                 pgtype.Timestamptz `json:"first_heard_at"`
+	LastHeardAt                  pgtype.Timestamptz `json:"last_heard_at"`
+	ScopeID                      *int32             `json:"scope_id"`
+	ScopeName                    *string            `json:"scope_name"`
+	SiteHeardAt                  pgtype.Timestamptz `json:"site_heard_at"`
+	ObservationCount             int64              `json:"observation_count"`
+	LatestObserverID             uuid.UUID          `json:"latest_observer_id"`
+	LatestObserverName           *string            `json:"latest_observer_name"`
+	LatestObserverIata           string             `json:"latest_observer_iata"`
+	LatestObserverPathLengthByte int16              `json:"latest_observer_path_length_byte"`
+	LatestObserverHashSize       int16              `json:"latest_observer_hash_size"`
+	LatestObserverHopCount       int16              `json:"latest_observer_hop_count"`
+	LatestObserverPathBytes      []byte             `json:"latest_observer_path_bytes"`
+	RawPayload                   []byte             `json:"raw_payload"`
+	OriginPubkey                 []byte             `json:"origin_pubkey"`
+}
+
+// One range per (site, payload type, route type); Go passes each type list deduplicated and sends only a few
+// type pairs here.
+func (q *Queries) ListPacketsBySitesTyped(ctx context.Context, arg ListPacketsBySitesTypedParams) ([]ListPacketsBySitesTypedRow, error) {
+	rows, err := q.db.Query(ctx, listPacketsBySitesTyped,
+		arg.Iatas,
+		arg.PayloadTypes,
+		arg.RouteTypes,
+		arg.CursorTs,
+		arg.CursorHash,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPacketsBySitesTypedRow{}
+	for rows.Next() {
+		var i ListPacketsBySitesTypedRow
+		if err := rows.Scan(
+			&i.PacketHash,
+			&i.PayloadType,
+			&i.Summary,
+			&i.RouteType,
+			&i.FirstHeardAt,
+			&i.LastHeardAt,
+			&i.ScopeID,
+			&i.ScopeName,
+			&i.SiteHeardAt,
+			&i.ObservationCount,
+			&i.LatestObserverID,
+			&i.LatestObserverName,
+			&i.LatestObserverIata,
+			&i.LatestObserverPathLengthByte,
+			&i.LatestObserverHashSize,
+			&i.LatestObserverHopCount,
+			&i.LatestObserverPathBytes,
+			&i.RawPayload,
+			&i.OriginPubkey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPacketsBySitesTypedFirst = `-- name: ListPacketsBySitesTypedFirst :many
+WITH page AS MATERIALIZED (
+  SELECT s.packet_hash, max(s.site_heard_at) AS k
+  FROM unnest($1::bpchar[]) AS req(iata)
+  CROSS JOIN unnest($2::smallint[]) AS pt(t)
+  CROSS JOIN unnest($3::smallint[]) AS rt(t)
+  CROSS JOIN LATERAL (
+    SELECT ps.packet_hash, ps.site_heard_at
+    FROM packet_sites ps
+    WHERE ps.iata = req.iata AND ps.payload_type = pt.t AND ps.route_type = rt.t
+      AND (ps.site_heard_at, ps.packet_hash) < ($4::timestamptz, $5::bytea)
+    ORDER BY ps.site_heard_at DESC, ps.packet_hash DESC
+    LIMIT $6) s
+  GROUP BY s.packet_hash
+  ORDER BY max(s.site_heard_at) DESC, s.packet_hash DESC
+  LIMIT $6
+)
+SELECT p.packet_hash, p.payload_type,
+  COALESCE(CASE
+    WHEN p.payload_type = 4 AND jsonb_typeof(p.parsed_payload #> '{appData,name}') = 'string'
+      THEN p.parsed_payload #>> '{appData,name}'
+    WHEN p.payload_type = 3 AND p.parsed_payload ->> 'type' = 'ACK'
+      AND jsonb_typeof(p.parsed_payload -> 'checksum') = 'string'
+      AND p.parsed_payload ->> 'checksum' ~ '^[0-9a-fA-F]{8}$'
+      THEN 'ACK ' || lower(p.parsed_payload ->> 'checksum')
+    WHEN p.payload_type = 9 AND p.parsed_payload ->> 'type' IN ('TRACE', 'PING')
+      AND jsonb_typeof(p.parsed_payload -> 'traceTag') = 'string'
+      AND p.parsed_payload ->> 'traceTag' ~ '^[0-9a-fA-F]{8}$'
+      THEN (p.parsed_payload ->> 'type') || ' ' || lower(p.parsed_payload ->> 'traceTag')
+    END, '')::text AS summary,
+  p.route_type, p.first_heard_at, p.last_heard_at, p.scope_id, ts.name AS scope_name,
+  pg.k::timestamptz AS site_heard_at,
+  p.observation_count AS observation_count,
+  -- sqlc loses LATERAL nullability; these scalar defaults are ignored when observer_id is NULL.
+  po.observer_id AS latest_observer_id, o.display_name AS latest_observer_name,
+  COALESCE(po.iata, ''::bpchar) AS latest_observer_iata,
+  COALESCE(po.path_length_byte, 0::smallint) AS latest_observer_path_length_byte,
+  COALESCE(po.hash_size, 0::smallint) AS latest_observer_hash_size,
+  COALESCE(po.hop_count, 0::smallint) AS latest_observer_hop_count,
+  po.path_bytes AS latest_observer_path_bytes, p.raw_payload, p.origin_pubkey
+FROM page pg
+JOIN packets p ON p.packet_hash = pg.packet_hash
+LEFT JOIN LATERAL (
+  SELECT observer_id, iata, path_length_byte, hash_size, hop_count, path_bytes
+  FROM packet_observations WHERE packet_hash = p.packet_hash
+  ORDER BY heard_at DESC, id DESC LIMIT 1
+) po ON true
+LEFT JOIN observers o ON o.id = po.observer_id
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+ORDER BY pg.k DESC, pg.packet_hash DESC
+`
+
+type ListPacketsBySitesTypedFirstParams struct {
+	Iatas        []string           `json:"iatas"`
+	PayloadTypes []int16            `json:"payload_types"`
+	RouteTypes   []int16            `json:"route_types"`
+	CursorTs     pgtype.Timestamptz `json:"cursor_ts"`
+	CursorHash   []byte             `json:"cursor_hash"`
+	PageLimit    int32              `json:"page_limit"`
+}
+
+type ListPacketsBySitesTypedFirstRow struct {
+	PacketHash                   []byte             `json:"packet_hash"`
+	PayloadType                  int16              `json:"payload_type"`
+	Summary                      string             `json:"summary"`
+	RouteType                    int16              `json:"route_type"`
+	FirstHeardAt                 pgtype.Timestamptz `json:"first_heard_at"`
+	LastHeardAt                  pgtype.Timestamptz `json:"last_heard_at"`
+	ScopeID                      *int32             `json:"scope_id"`
+	ScopeName                    *string            `json:"scope_name"`
+	SiteHeardAt                  pgtype.Timestamptz `json:"site_heard_at"`
+	ObservationCount             int64              `json:"observation_count"`
+	LatestObserverID             uuid.UUID          `json:"latest_observer_id"`
+	LatestObserverName           *string            `json:"latest_observer_name"`
+	LatestObserverIata           string             `json:"latest_observer_iata"`
+	LatestObserverPathLengthByte int16              `json:"latest_observer_path_length_byte"`
+	LatestObserverHashSize       int16              `json:"latest_observer_hash_size"`
+	LatestObserverHopCount       int16              `json:"latest_observer_hop_count"`
+	LatestObserverPathBytes      []byte             `json:"latest_observer_path_bytes"`
+	RawPayload                   []byte             `json:"raw_payload"`
+	OriginPubkey                 []byte             `json:"origin_pubkey"`
+}
+
+// ListPacketsBySitesTyped for the first page or one site.
+func (q *Queries) ListPacketsBySitesTypedFirst(ctx context.Context, arg ListPacketsBySitesTypedFirstParams) ([]ListPacketsBySitesTypedFirstRow, error) {
+	rows, err := q.db.Query(ctx, listPacketsBySitesTypedFirst,
+		arg.Iatas,
+		arg.PayloadTypes,
+		arg.RouteTypes,
+		arg.CursorTs,
+		arg.CursorHash,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPacketsBySitesTypedFirstRow{}
+	for rows.Next() {
+		var i ListPacketsBySitesTypedFirstRow
+		if err := rows.Scan(
+			&i.PacketHash,
+			&i.PayloadType,
+			&i.Summary,
+			&i.RouteType,
+			&i.FirstHeardAt,
+			&i.LastHeardAt,
+			&i.ScopeID,
+			&i.ScopeName,
+			&i.SiteHeardAt,
+			&i.ObservationCount,
+			&i.LatestObserverID,
+			&i.LatestObserverName,
+			&i.LatestObserverIata,
+			&i.LatestObserverPathLengthByte,
+			&i.LatestObserverHashSize,
+			&i.LatestObserverHopCount,
+			&i.LatestObserverPathBytes,
+			&i.RawPayload,
+			&i.OriginPubkey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const minObservationID = `-- name: MinObservationID :one

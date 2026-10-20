@@ -92,6 +92,8 @@ type Querier interface {
 	// Hop prefixes that match >1 node in an IATA, per width, into the sweep's temp table.
 	FillReconfirmAmb(ctx context.Context) error
 	FillRollupObs(ctx context.Context, dollar_1 pgtype.Timestamptz) error
+	// The requested sites that have at least one row: a site with none adds no row to any site page.
+	FilterKnownSites(ctx context.Context, iatas []string) ([]string, error)
 	// Marks the hour complete and bumps the revision only when its content changed.
 	FinishRollupHour(ctx context.Context, arg FinishRollupHourParams) (bool, error)
 	GetAccount(ctx context.Context, id uuid.UUID) (Account, error)
@@ -346,6 +348,27 @@ type Querier interface {
 	ListPacketsByScopes(ctx context.Context, arg ListPacketsByScopesParams) ([]ListPacketsByScopesRow, error)
 	// ListPacketsByScopes with the type tests inside each scope range (index-only through the included columns).
 	ListPacketsByScopesTypes(ctx context.Context, arg ListPacketsByScopesTypesParams) ([]ListPacketsByScopesTypesRow, error)
+	// One site: one range of its (site_heard_at, packet_hash) index.
+	ListPacketsBySite(ctx context.Context, arg ListPacketsBySiteParams) ([]ListPacketsBySiteRow, error)
+	// The page rows for keys from ListPacketsBySitesSince or ListPacketsBySitesScoped, in the given order.
+	ListPacketsBySiteKeys(ctx context.Context, arg ListPacketsBySiteKeysParams) ([]ListPacketsBySiteKeysRow, error)
+	// Two or more sites with a cursor: one range per site; a packet whose newest requested-site row is at or above
+	// the cursor was already returned, so the in-range re-check drops it.
+	ListPacketsBySites(ctx context.Context, arg ListPacketsBySitesParams) ([]ListPacketsBySitesRow, error)
+	// ListPacketsBySites for the first page or one site, where the re-check cannot match.
+	ListPacketsBySitesFirst(ctx context.Context, arg ListPacketsBySitesFirstParams) ([]ListPacketsBySitesFirstRow, error)
+	// ListPacketsBySitesSince with one range per (site, named scope).
+	ListPacketsBySitesScoped(ctx context.Context, arg ListPacketsBySitesScopedParams) ([]ListPacketsBySitesScopedRow, error)
+	// Page keys for a first_heard_at window or many type pairs (absent window sides are -infinity and infinity).
+	// Each site range is read to at most scan_depth entries, as deep as the observation statement reads, and the
+	// window and type tests filter what was read; the last row (is_floor) is the floor below which this page is
+	// incomplete, when a range filled scan_depth. Rows below the floor are left to the next page.
+	ListPacketsBySitesSince(ctx context.Context, arg ListPacketsBySitesSinceParams) ([]ListPacketsBySitesSinceRow, error)
+	// One range per (site, payload type, route type); Go passes each type list deduplicated and sends only a few
+	// type pairs here.
+	ListPacketsBySitesTyped(ctx context.Context, arg ListPacketsBySitesTypedParams) ([]ListPacketsBySitesTypedRow, error)
+	// ListPacketsBySitesTyped for the first page or one site.
+	ListPacketsBySitesTypedFirst(ctx context.Context, arg ListPacketsBySitesTypedFirstParams) ([]ListPacketsBySitesTypedFirstRow, error)
 	// One range per (payload type, route type) pair; DISTINCT keeps a repeated type from returning rows twice.
 	ListPacketsByTypes(ctx context.Context, arg ListPacketsByTypesParams) ([]ListPacketsByTypesRow, error)
 	// Unfiltered packet page: newest (last_heard_at, packet_hash) first.

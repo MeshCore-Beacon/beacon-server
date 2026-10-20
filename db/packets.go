@@ -88,13 +88,12 @@ func buildLatestObserverPath(pathLengthByte, hashSize, hopCount *int16, pathByte
 // packetRow is the shared row of the six global packets statements; the other five Row types convert to it.
 type packetRow = sqlc.ListPacketsPageRow
 
-// ListPackets serves the packet list. Region (iatas) requests keep their site-local statement and cursor and ignore
-// pageCursor. Every other request is normalised and sent to the one statement for its filter shape; pageCursor wins
-// over cursor there.
+// ListPackets serves the packet list. Region (iatas) requests page by site-local recency (listPacketsByRegion).
+// Every other request is normalised and sent to the one statement for its filter shape. pageCursor wins over
+// cursor wherever a page can return nextPageCursor.
 func (s *Store) ListPackets(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, pageCursor *api.PacketCursor, limit int32) (api.PacketPage, error) {
 	if len(iatas) > 0 {
-		p, err := s.listPacketsByIATAs(ctx, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
-		return api.PacketPage{Page: p}, err
+		return s.listPacketsByRegion(ctx, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, pageCursor, limit)
 	}
 	f, ok := newPacketFilter(payloadTypes, routeTypes, scopes, since, until, cursor, pageCursor, limit)
 	if !ok {
