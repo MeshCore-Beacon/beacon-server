@@ -788,6 +788,13 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		w.log.Error(fmt.Sprintf("db: insert observation failed from %s/%s", iata, pubkeyHex), "error", err)
 		return
 	}
+	// A hearing of a stored message records its site before any other work, so region pages see it at once. The
+	// group-text side effects add it again after their insert attempt, which covers a message still being created.
+	if inserted && packet.PayloadType() == meshcore.PayloadTypeGrpTxt {
+		if err := w.db.AddChannelMessageIATA(ctx, packetHash[:], iata); err != nil {
+			w.log.Error(fmt.Sprintf("db: record channel message site failed from %s/%s", iata, pubkeyHex), "error", err)
+		}
+	}
 	// Record the path before any more DB work so a broker copy racing through it can't be
 	// streamed as a repeat of this hearing; TRACE reuses Path for per-hop SNR.
 	pathNew := packet.PayloadType() != meshcore.PayloadTypeTrace && w.hub.MarkSent(packetHash[:], id[:], packet.Path)

@@ -5,14 +5,21 @@ package ingest_test
 
 import (
 	"context"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"math/rand/v2"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/db"
+	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
 	"github.com/MeshCore-Beacon/beacon-server/internal/keystore"
+	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -136,5 +143,116 @@ SELECT (SELECT count(*) FROM (SELECT * FROM def EXCEPT SELECT * FROM have) m), (
 	page, err := store.ListChannelMessages(ctx, &channelID, time.Time{}, 50, []string{"YOW"}, "", 0)
 	if err != nil || len(page.Items) != 1 || page.Items[0].ID != m {
 		t.Fatalf("YOW page = %+v, %v", page, err)
+	}
+}
+
+type noScopes struct{}
+
+func (noScopes) Entries() []scopestore.Entry { return nil }
+
+// A clean ingest run, four workers hearing the same packets at once, leaves nothing for the reconcile: every site
+// is recorded by the writers themselves. Reconciles run beside the workers too; what they repair is logged.
+func TestCmiCleanIngestReconcilesNothingPostgres(t *testing.T) {
+	ctx, pool := migratedPool(t)
+	store := db.New(pool, pool, 0, 0)
+	h := hub.New()
+	go h.Run()
+	psk := make([]byte, 16)
+	k := keys{0x11: {{Key: psk, Fingerprint: []byte{1}, Name: "fixture"}}}
+	c, ok, err := store.BeginCmi(ctx)
+	if err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	defer c.Close(context.Background())
+	if _, err := c.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	type hearing struct {
+		site, observer string
+		env            []byte
+	}
+	var hearings []hearing
+	sites := []string{"YUL", "YOW", "YYZ", "YVR"}
+	for i := range 40 {
+		ch := byte(0x11)
+		if i%3 == 2 {
+			ch = 0x22 // no key: hash-only, no message
+		}
+		g, err := (&meshcore.GroupTextPayload{Timestamp: uint32(1000 + i), Sender: "s", Text: fmt.Sprint("m", i)}).Encrypt(ch, psk)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, err := g.ToBytes()
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := (&meshcore.Packet{Header: meshcore.MakeHeader(meshcore.RouteTypeFlood, meshcore.PayloadTypeGrpTxt, 0), Payload: payload}).ToBytes()
+		if err != nil {
+			t.Fatal(err)
+		}
+		env, _ := json.Marshal(map[string]string{"raw": hex.EncodeToString(raw), "timestamp": time.Now().UTC().Format("2006-01-02T15:04:05.000000")})
+		for o, site := range sites {
+			hearings = append(hearings, hearing{site, fmt.Sprintf("%02x%062x", o+1, i), env})
+		}
+	}
+	rand.New(rand.NewPCG(7, 7)).Shuffle(len(hearings), func(a, b int) { hearings[a], hearings[b] = hearings[b], hearings[a] })
+
+	work := make(chan hearing)
+	var wg sync.WaitGroup
+	for range 4 {
+		w := ingest.New(ingest.Config{BrokerName: "test"}, store, h, k, noScopes{})
+		wg.Go(func() {
+			for hr := range work {
+				w.HandlePacketForTest(ctx, hr.site, hr.observer, hr.env)
+			}
+		})
+	}
+	stop := make(chan struct{})
+	var during int64
+	var runs int
+	reconciled := make(chan struct{})
+	go func() {
+		defer close(reconciled)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			n, err := c.Reconcile(ctx)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			during += n
+			runs++
+		}
+	}()
+	for _, hr := range hearings {
+		work <- hr
+	}
+	close(work)
+	wg.Wait()
+	close(stop)
+	<-reconciled
+	t.Logf("%d reconciles beside 4 workers and %d hearings repaired %d pairs", runs, len(hearings), during)
+
+	// After the run, a reconcile (both overlapping ranges) finds nothing to repair, and the table is exact.
+	for range 2 {
+		if n, err := c.Reconcile(ctx); err != nil || n != 0 {
+			t.Fatalf("reconcile after a clean ingest run repaired %d (%v)", n, err)
+		}
+	}
+	var messages, missing, extra int64
+	if err := pool.QueryRow(ctx, `WITH def AS (
+  SELECT DISTINCT cm.id AS message_id, po.iata, cm.channel_id, p.scope_id
+  FROM channel_messages cm JOIN packets p ON p.packet_hash = cm.packet_hash JOIN packet_observations po ON po.packet_hash = cm.packet_hash
+), have AS (SELECT message_id, iata, channel_id, scope_id FROM channel_message_iatas)
+SELECT (SELECT count(*) FROM channel_messages), (SELECT count(*) FROM (SELECT * FROM def EXCEPT SELECT * FROM have) m), (SELECT count(*) FROM (SELECT * FROM have EXCEPT SELECT * FROM def) x)`).Scan(&messages, &missing, &extra); err != nil {
+		t.Fatal(err)
+	}
+	if messages == 0 || missing != 0 || extra != 0 {
+		t.Fatalf("%d messages, missing %d, extra %d", messages, missing, extra)
 	}
 }

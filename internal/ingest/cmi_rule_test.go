@@ -101,3 +101,24 @@ func TestGroupTextAddErrorStillBroadcasts(t *testing.T) {
 		t.Fatalf("a created message added its site: %v", db.addCalls)
 	}
 }
+
+// A stored group-text hearing records its site right after the observation insert, before any other DB call, so a
+// message that already exists gains the site at once; a duplicate hearing records nothing.
+func TestGroupTextObservationAddsSiteAtOnce(t *testing.T) {
+	w, db := newTestWorker()
+	db.observationInserted = true
+	adds := -1
+	db.dbHook = func() { adds = len(db.addCalls) }
+	packet := buildGrpTxtPacket(t, 0x1a, make([]byte, 16))
+	w.handlePacket(context.Background(), "YOW", "0102", packetEnvelope(t, packet))
+	if adds != 1 || db.addCalls[0].iata != "YOW" {
+		t.Fatalf("adds before the next DB call = %d (%v), want 1 at YOW", adds, db.addCalls)
+	}
+
+	w, db = newTestWorker()
+	db.observationInserted = false
+	w.handlePacket(context.Background(), "YOW", "0102", packetEnvelope(t, packet))
+	if len(db.addCalls) != 0 {
+		t.Fatalf("a duplicate hearing added %v", db.addCalls)
+	}
+}
