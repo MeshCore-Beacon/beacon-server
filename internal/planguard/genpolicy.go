@@ -35,12 +35,12 @@ package planpolicy
 // "package planpolicy", the Cached doc comment and `var Cached = map[string]bool{…}` with the admitted sqlc
 // names sorted.
 //
-// A statement is admitted iff its plan is cached, it has a sqlc source and no pending, it is not in legacy, its
+// A statement is admitted iff its plan is cached, it has a sqlc source and no pending, it is not in slow, its
 // entries' shapes cover every tag of its admission profile (plus rare_hop and absent_hop when its text filters on
 // a hop parameter), and every entry of it runs generic and auto with no skip or degrade_to and is neither
 // expect_fail nor known_issue. A pending cached statement is left out silently; any other cached statement that
 // misses a rule is an error naming the statement and what is missing, never a silent drop.
-func GenPolicy(c *Corpus, legacy map[string]bool) ([]byte, error) {
+func GenPolicy(c *Corpus, slow map[string]bool) ([]byte, error) {
 	var admitted []string
 	var errs []error
 	for _, name := range sortedKeys(c.Statements) {
@@ -48,7 +48,7 @@ func GenPolicy(c *Corpus, legacy map[string]bool) ([]byte, error) {
 		if st.Plan != "cached" || st.Pending != "" {
 			continue
 		}
-		problems := c.admissionProblems(name, st, legacy)
+		problems := c.admissionProblems(name, st, slow)
 		if len(problems) > 0 {
 			errs = append(errs, fmt.Errorf("statement %s is plan cached but %s", name, strings.Join(problems, "; ")))
 			continue
@@ -76,13 +76,13 @@ func GenPolicy(c *Corpus, legacy map[string]bool) ([]byte, error) {
 }
 
 // admissionProblems lists why a non-pending cached statement cannot be admitted; empty means it can.
-func (c *Corpus) admissionProblems(name string, st *Statement, legacy map[string]bool) []string {
+func (c *Corpus) admissionProblems(name string, st *Statement, slow map[string]bool) []string {
 	var out []string
 	if st.SQLC == "" {
 		return []string{"has no sqlc source (only sqlc statements are served)"}
 	}
-	if legacy[st.SQLC] {
-		out = append(out, "is in planpolicy.Legacy")
+	if slow[st.SQLC] {
+		out = append(out, "is in planpolicy.Slow")
 	}
 	want := append([]string(nil), c.AdmissionProfiles[st.Admission]...)
 	if hopParam.MatchString(st.SQL) {

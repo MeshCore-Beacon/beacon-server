@@ -17,6 +17,7 @@ import (
 // Pool names. Each is also the pool's metric label and, prefixed with "beacon-", its application_name.
 const (
 	PoolAPILegacy = "api_legacy"
+	PoolAPISlow   = "api_slow"
 	PoolAPICustom = "api_custom"
 	PoolAPICached = "api_cached"
 	PoolIngest    = "ingest"
@@ -25,7 +26,7 @@ const (
 
 // Pools holds one pgx pool per workload. A pool is nil when the layout does not open it.
 type Pools struct {
-	APILegacy, APICustom, APICached, Ingest, Maint *pgxpool.Pool
+	APILegacy, APISlow, APICustom, APICached, Ingest, Maint *pgxpool.Pool
 }
 
 type poolSpec struct {
@@ -34,14 +35,28 @@ type poolSpec struct {
 	params map[string]string
 }
 
-// poolSpecs is the fixed size and session settings of each pool. api_legacy keeps today's
-// session settings: only its application_name differs.
+// poolSpecs is the fixed size and session settings of each pool.
 var poolSpecs = []poolSpec{
 	{
+		// The rollback layout's only API pool: automatic plan caching and the server's own settings, as before the
+		// pools split.
 		name: PoolAPILegacy,
-		size: map[planpolicy.Layout]int32{planpolicy.CustomAll: 8, planpolicy.Split: 8, planpolicy.Single: 8},
+		size: map[planpolicy.Layout]int32{planpolicy.Single: 8},
 		params: map[string]string{
 			"application_name": "beacon-api_legacy",
+		},
+	},
+	{
+		// The statements that may walk whole site histories (planpolicy.Slow). Two connections, so they can never
+		// hold more of the server than that; a statement limit, so none runs unbounded; no parallel workers, whose
+		// plans for these walks ran several times longer (measured: a sparse filter over every site, 26 s without
+		// workers, 4 min with). Otherwise the server's own planner settings, as api_legacy.
+		name: PoolAPISlow,
+		size: map[planpolicy.Layout]int32{planpolicy.CustomAll: 2, planpolicy.Split: 2},
+		params: map[string]string{
+			"application_name":                "beacon-api_slow",
+			"statement_timeout":               "120s",
+			"max_parallel_workers_per_gather": "0",
 		},
 	},
 	{
@@ -100,6 +115,8 @@ func (p *Pools) slot(name string) **pgxpool.Pool {
 	switch name {
 	case PoolAPILegacy:
 		return &p.APILegacy
+	case PoolAPISlow:
+		return &p.APISlow
 	case PoolAPICustom:
 		return &p.APICustom
 	case PoolAPICached:
@@ -119,7 +136,9 @@ func (p *Pools) slot(name string) **pgxpool.Pool {
 // opens. On error it closes the pools it already opened. Errors name the pool but never include
 // the DSN, since parse errors can embed its password.
 func OpenPools(ctx context.Context, dsn string, layout planpolicy.Layout, tune ...func(pool string, cfg *pgxpool.Config)) (*Pools, error) {
-	if _, ok := poolSpecs[0].size[layout]; !ok {
+	switch layout {
+	case planpolicy.CustomAll, planpolicy.Split, planpolicy.Single:
+	default:
 		return nil, fmt.Errorf("unknown API plan layout %q", layout)
 	}
 	if strings.Contains(dsn, "pool_max_conns") {

@@ -11,30 +11,33 @@ import (
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 )
 
-// Every Legacy/Cached name is a statement in db/sqlc, so a stale entry fails CI; the two sets are disjoint.
+// Every Slow/Cached name is a statement in db/sqlc, so a stale entry fails CI; the two sets are disjoint.
 func TestPlanPolicyNamesExist(t *testing.T) {
 	q := reflect.TypeOf((*sqlc.Querier)(nil)).Elem()
-	for _, set := range []map[string]bool{planpolicy.Legacy, planpolicy.Cached} {
+	for _, set := range []map[string]bool{planpolicy.Slow, planpolicy.Cached} {
 		for name := range set {
 			if _, ok := q.MethodByName(name); !ok {
 				t.Errorf("%s is not a sqlc statement", name)
 			}
-			if planpolicy.Legacy[name] && planpolicy.Cached[name] {
-				t.Errorf("%s is both Legacy and Cached", name)
+			if planpolicy.Slow[name] && planpolicy.Cached[name] {
+				t.Errorf("%s is both Slow and Cached", name)
 			}
 		}
 	}
-	// The rewritten stats, adverts and traces readers left Legacy; today's adverts text stays there as the
-	// fallback served until every observation carries its payload type.
+	// The rewritten stats, adverts and traces readers are C or G.
 	for _, name := range []string{"GetStatsSeries", "GetPathStats", "GetTopNodes", "GetStatsTopAdvertisers", "ListObserverAdverts", "ListTraceTags"} {
 		if c := planpolicy.ClassOf(name); c != planpolicy.ClassC && c != planpolicy.ClassG {
 			t.Errorf("%s is class %d, want C or G", name, c)
 		}
 	}
-	if planpolicy.ClassOf("ListObserverAdvertsJoinFilter") != planpolicy.ClassLegacy || planpolicy.ClassOf("GetTopNodesProbe") != planpolicy.ClassC {
-		t.Error("ListObserverAdvertsJoinFilter must stay Legacy and GetTopNodesProbe class C")
+	if planpolicy.ClassOf("GetTopNodesProbe") != planpolicy.ClassC {
+		t.Error("GetTopNodesProbe must be class C")
 	}
-	if len(planpolicy.Legacy) != 4 || planpolicy.ClassOf("ListPacketsByIATAs") != planpolicy.ClassLegacy ||
+	// Exactly the statements that may walk whole site histories run on the slow pool.
+	if want := map[string]bool{"ListPacketsByIATAs": true, "ListPacketsByIATAsAfter": true, "ListAllChannelMessages": true}; !reflect.DeepEqual(planpolicy.Slow, want) {
+		t.Errorf("Slow = %v, want %v", planpolicy.Slow, want)
+	}
+	if planpolicy.ClassOf("ListPacketsByIATAs") != planpolicy.ClassSlow ||
 		planpolicy.ClassOf("ListKnownRoutesGlobalHop") != planpolicy.ClassC || planpolicy.ClassOf("GetNodeByID") != planpolicy.ClassG ||
 		planpolicy.ClassOf("") != planpolicy.ClassC {
 		t.Fatal("ClassOf")
@@ -65,7 +68,8 @@ func TestParseLayout(t *testing.T) {
 }
 
 // The channel message statements: the four whose plan is stable under every layout are generic-safe; the scoped,
-// since and scope-only ones are planned with their values; today's two statements stay on the legacy pool.
+// since and scope-only ones are planned with their values; the all-channel statement for sites with a since or scope
+// runs on the slow pool, and the per-channel one is class C.
 func TestCmiPlanClasses(t *testing.T) {
 	for name, want := range map[string]planpolicy.Class{
 		"ListChannelMessagesByIATAs":        planpolicy.ClassG,
@@ -78,8 +82,8 @@ func TestCmiPlanClasses(t *testing.T) {
 		"ListAllChannelMessagesPlainScoped": planpolicy.ClassC,
 		"ListAllChannelMessagesSince":       planpolicy.ClassC,
 		"GetTransportScopeByName":           planpolicy.ClassC,
-		"ListChannelMessages":               planpolicy.ClassLegacy,
-		"ListAllChannelMessages":            planpolicy.ClassLegacy,
+		"ListChannelMessages":               planpolicy.ClassC,
+		"ListAllChannelMessages":            planpolicy.ClassSlow,
 	} {
 		if got := planpolicy.ClassOf(name); got != want {
 			t.Errorf("ClassOf(%s) = %v, want %v", name, got, want)
@@ -98,7 +102,8 @@ func TestPacketSitesPlanClasses(t *testing.T) {
 		"ListPacketsBySitesScoped":     planpolicy.ClassC,
 		"ListPacketsBySiteKeys":        planpolicy.ClassC,
 		"FilterKnownSites":             planpolicy.ClassC,
-		"ListPacketsByIATAs":           planpolicy.ClassLegacy,
+		"ListPacketsByIATAs":           planpolicy.ClassSlow,
+		"ListPacketsByIATAsAfter":      planpolicy.ClassSlow,
 	} {
 		if got := planpolicy.ClassOf(name); got != want {
 			t.Errorf("ClassOf(%s) = %v, want %v", name, got, want)

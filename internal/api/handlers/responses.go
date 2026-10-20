@@ -6,11 +6,28 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/MeshCore-Beacon/beacon-server/internal/guards"
 )
+
+// respondUnavailable answers a reader error the client should retry with 503 and Retry-After, in the same shape as
+// the guards' refusals, and reports whether it did.
+func respondUnavailable(w http.ResponseWriter, err error) bool {
+	switch {
+	case errors.Is(err, api.ErrSlowPoolBusy):
+		slog.Warn("api: slow request refused, every slow connection is busy", "component", "api")
+		guards.WriteRefusal(w, &guards.Refusal{Guard: "slow_pool", Status: http.StatusServiceUnavailable, RetryAfter: 5,
+			Code: "service_unavailable", Message: "The server is busy with other slow requests. Retry later."})
+		return true
+	}
+	return false
+}
 
 // APIError is the standard error response shape for all Beacon API endpoints.
 // Code is a stable snake_case identifier derived from the HTTP status text,

@@ -147,6 +147,7 @@ func getObserver(reader api.Reader) http.HandlerFunc {
 //	@Success	200			{object}	api.Page[api.AdvertObservation]
 //	@Failure	400			{object}	handlers.APIError
 //	@Failure	500			{object}	handlers.APIError
+//	@Failure	503				{object}	handlers.APIError	"Not available yet, or the server is busy: retry after Retry-After seconds"
 //	@Router		/observers/{observerId}/adverts [get]
 func listObserverAdverts(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -171,7 +172,9 @@ func listObserverAdverts(reader api.Reader) http.HandlerFunc {
 		}
 		adverts, err := reader.ListObserverAdverts(r.Context(), observerID, cursor, limit)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			if !respondUnavailable(w, err) {
+				respondError(w, http.StatusInternalServerError, "internal server error")
+			}
 			return
 		}
 		respond(w, http.StatusOK, adverts)

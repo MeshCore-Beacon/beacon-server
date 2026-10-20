@@ -95,7 +95,7 @@ func newPlanRouterFromPools(p *Pools, layout planpolicy.Layout, gate guards.Gate
 		}
 		return planpolicy.ClassOf(name)
 	}
-	return newPlanRouter(wrapPool(p.APILegacy, PoolAPILegacy), wrapPool(p.APICustom, PoolAPICustom),
+	return newPlanRouter(wrapPool(p.APILegacy, PoolAPILegacy), wrapPool(p.APISlow, PoolAPISlow), wrapPool(p.APICustom, PoolAPICustom),
 		wrapPool(p.APICached, PoolAPICached), layout, gate, classOf)
 }
 

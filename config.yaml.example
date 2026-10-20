@@ -52,8 +52,9 @@ ratelimit:
   # A 429 returns error.code=rate_limited and Retry-After (1 or 60 seconds).
   burst: 600
 
-# Database pools. custom_all (default) opens api_legacy 8, api_custom 8, ingest 6, maint 4 connections
-# (26); split opens 30 (api_custom 7, api_cached 5); single opens 18 (api_legacy, ingest, maint).
+# Database pools. custom_all (default) opens api_custom 8, api_slow 2, ingest 6, maint 4 connections
+# (20); split opens 24 (api_custom 7, api_cached 5, api_slow 2); single opens 18 (api_legacy 8, ingest, maint).
+# api_slow runs only the region and message statements that may walk whole site histories, each limited to 120 s.
 # ingest grows to one connection per CPU on hosts with more than 6 CPUs, adding to each total.
 # Keep max_connections well above that.
 #database:

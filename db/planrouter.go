@@ -5,11 +5,14 @@ package db
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/db/planpolicy"
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/guards"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -19,19 +22,24 @@ import (
 // PlanRouter runs each API statement on the pool its plan class and the layout pick:
 //
 //	class    custom_all   split        single
-//	Legacy   api_legacy   api_legacy   api_legacy   (ungated, as given)
+//	Slow     api_slow     api_slow     api_legacy   (ungated, unnamed statement)
 //	G        api_custom   api_cached   api_legacy   (gated, named statement)
 //	C        api_custom   api_custom   api_legacy   (gated, unnamed statement)
 //
-// Class C statements always run unnamed (pgx.QueryExecModeCacheDescribe), so Postgres plans them
+// Class C and Slow statements always run unnamed (pgx.QueryExecModeCacheDescribe), so Postgres plans them
 // with their values on every call. They never reach api_cached, whose force_generic_plan would
-// make even an unnamed statement generic.
+// make even an unnamed statement generic. A Slow statement waits at most slowAcquireWait for one of
+// api_slow's connections and then fails with api.ErrSlowPoolBusy, so a burst of them never queues
+// behind each other for minutes and never touches the other pools.
 type PlanRouter struct {
-	legacy, custom, cached routerPool
-	layout                 planpolicy.Layout
-	gate                   guards.Gate
-	classOf                func(sql string) planpolicy.Class
+	legacy, slow, custom, cached routerPool
+	layout                       planpolicy.Layout
+	gate                         guards.Gate
+	classOf                      func(sql string) planpolicy.Class
 }
+
+// slowAcquireWait is how long a Slow statement waits for an api_slow connection.
+var slowAcquireWait = 5 * time.Second // a var only so tests can shorten it
 
 var _ sqlc.DBTX = (*PlanRouter)(nil)
 
@@ -65,40 +73,45 @@ func wrapPool(p *pgxpool.Pool, name string) routerPool {
 
 // NewPlanRouter routes over p's API pools. A nil gate admits everything.
 func NewPlanRouter(p *Pools, layout planpolicy.Layout, gate guards.Gate) *PlanRouter {
-	return newPlanRouter(wrapPool(p.APILegacy, PoolAPILegacy), wrapPool(p.APICustom, PoolAPICustom),
+	return newPlanRouter(wrapPool(p.APILegacy, PoolAPILegacy), wrapPool(p.APISlow, PoolAPISlow), wrapPool(p.APICustom, PoolAPICustom),
 		wrapPool(p.APICached, PoolAPICached), layout, gate, nil)
 }
 
-func newPlanRouter(legacy, custom, cached routerPool, layout planpolicy.Layout, gate guards.Gate, classOf func(string) planpolicy.Class) *PlanRouter {
+func newPlanRouter(legacy, slow, custom, cached routerPool, layout planpolicy.Layout, gate guards.Gate, classOf func(string) planpolicy.Class) *PlanRouter {
 	if gate == nil {
 		gate = guards.NopGate
 	}
 	if classOf == nil {
 		classOf = planpolicy.ClassOf
 	}
-	return &PlanRouter{legacy: legacy, custom: custom, cached: cached, layout: layout, gate: gate,
+	return &PlanRouter{legacy: legacy, slow: slow, custom: custom, cached: cached, layout: layout, gate: gate,
 		classOf: func(sql string) planpolicy.Class { return classOf(sqlcName(sql)) }}
 }
 
-// route returns the pool, the gate and the args for one statement.
-func (r *PlanRouter) route(sql string, args []any) (routerPool, guards.Gate, []any) {
+// route returns the pool, the gate and the args for one statement, and how long it may wait for a connection when
+// its gate sets no limit (0: only ctx bounds the wait).
+func (r *PlanRouter) route(sql string, args []any) (routerPool, guards.Gate, []any, time.Duration) {
 	switch r.classOf(sql) {
-	case planpolicy.ClassLegacy:
-		return r.legacy, guards.NopGate, args
+	case planpolicy.ClassSlow:
+		args = append([]any{pgx.QueryExecModeCacheDescribe}, args...)
+		if r.layout == planpolicy.Single {
+			return r.legacy, guards.NopGate, args, 0
+		}
+		return r.slow, guards.NopGate, args, slowAcquireWait
 	case planpolicy.ClassG:
 		switch r.layout {
 		case planpolicy.Single:
-			return r.legacy, r.gate, args
+			return r.legacy, r.gate, args, 0
 		case planpolicy.Split:
-			return r.cached, r.gate, args
+			return r.cached, r.gate, args, 0
 		}
-		return r.custom, r.gate, args
+		return r.custom, r.gate, args, 0
 	}
 	args = append([]any{pgx.QueryExecModeCacheDescribe}, args...)
 	if r.layout == planpolicy.Single {
-		return r.legacy, r.gate, args
+		return r.legacy, r.gate, args, 0
 	}
-	return r.custom, r.gate, args
+	return r.custom, r.gate, args, 0
 }
 
 // stmt is one statement holding a ticket and a connection; end releases both once.
@@ -114,7 +127,7 @@ type stmt struct {
 // begin admits the statement, acquires its connection and starts its context. On error,
 // everything it took is already given back.
 func (r *PlanRouter) begin(ctx context.Context, sql string, args []any) (*stmt, error) {
-	pool, gate, args := r.route(sql, args)
+	pool, gate, args, wait := r.route(sql, args)
 	t, err := gate.Admit(ctx)
 	if err != nil {
 		return nil, err
@@ -125,7 +138,7 @@ func (r *PlanRouter) begin(ctx context.Context, sql string, args []any) (*stmt, 
 			t.Finish()
 		}
 	}()
-	conn, err := acquire(ctx, pool, t)
+	conn, err := acquire(ctx, pool, t, wait)
 	t.Acquired(err)
 	if err != nil {
 		return nil, err
@@ -135,12 +148,22 @@ func (r *PlanRouter) begin(ctx context.Context, sql string, args []any) (*stmt, 
 	return &stmt{conn: conn, ctx: sctx, args: args, ticket: t, cancel: cancel}, nil
 }
 
-// acquire waits at most the ticket's acquire timeout; 0 means only ctx bounds the wait.
-func acquire(ctx context.Context, pool routerPool, t guards.Ticket) (routerConn, error) {
+// acquire waits at most the ticket's acquire timeout, else at most wait; 0 for both means only ctx bounds the wait.
+// Running out of wait (with ctx still live) is api.ErrSlowPoolBusy.
+func acquire(ctx context.Context, pool routerPool, t guards.Ticket, wait time.Duration) (routerConn, error) {
 	if d := t.AcquireTimeout(); d > 0 {
 		actx, cancel := context.WithTimeout(ctx, d)
 		defer cancel()
 		return pool.acquire(actx)
+	}
+	if wait > 0 {
+		actx, cancel := context.WithTimeout(ctx, wait)
+		defer cancel()
+		conn, err := pool.acquire(actx)
+		if err != nil && ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("%w (%s, waited %s)", api.ErrSlowPoolBusy, pool.name(), wait)
+		}
+		return conn, err
 	}
 	return pool.acquire(ctx)
 }

@@ -2569,6 +2569,11 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'Not available yet, or the server is busy: retry after Retry-After
+            seconds'
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List messages for a channel
       tags:
       - Channels
@@ -2715,6 +2720,11 @@ paths:
             $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'Not available yet, or the server is busy: retry after Retry-After
+            seconds'
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List channel messages
@@ -3139,6 +3149,11 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'Not available yet, or the server is busy: retry after Retry-After
+            seconds'
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List advert packets heard by an observer
       tags:
       - Observers
@@ -3364,6 +3379,11 @@ paths:
             $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'Not available yet, or the server is busy: retry after Retry-After
+            seconds'
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List packets

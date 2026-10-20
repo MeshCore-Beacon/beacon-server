@@ -18,7 +18,7 @@
 #   custom   custom                 sent unnamed, so no layout ever plans it generic
 #   maint    custom                 the maint pool forces custom plans
 #   ingest   auto                   the ingest pool keeps automatic plan caching
-#   legacy   custom, generic, auto  planpolicy.Legacy: runs on api_legacy with automatic plan caching
+#   slow     custom                 planpolicy.Slow: sent unnamed on api_slow (its own two connections, 120 s limit)
 #   harness  custom, generic, auto  planted regressions and oracles; never served
 #
 # Verdicts: a failing check is FALSE_POSITIVE (a real regression), a planted entry (expect_fail) that passes is
@@ -37,7 +37,7 @@ defaults:
   sort_exempt: [latest_observation]
   # Indexes the end state drops. A plan that fails only because it uses one of them is RETIRED_INDEX, not a failure.
   retired_indexes: [idx_known_routes_iata_last_seen, idx_known_routes_last_seen, idx_known_routes_hop_count, idx_known_routes_reconfirm,
-                    idx_packets_last_heard, idx_packets_payload_type, idx_packets_route_type, idx_packets_scope,
+                    idx_packets_last_heard, idx_packets_payload_type, idx_packets_scope,
                     idx_observations_packet, idx_observations_observer_id, idx_channel_messages_channel, idx_channel_messages_sent_brin,
                     idx_packets_first_heard_brin,
                     idx_channel_iatas_iata, idx_node_neighbors_node, idx_transport_scopes_fingerprint,
@@ -116,10 +116,14 @@ statements:
   # One observer's adverts and telemetry pages.
   ListObserverAdverts: {sqlc: ListObserverAdverts, group: stats_adverts, plan: cached, admission: observer_page}
   GetObserverTelemetrySince: {sqlc: GetObserverTelemetrySince, group: stats_adverts, plan: cached, admission: observer_page}
-  # Legacy readers (planpolicy.Legacy): they run on api_legacy with automatic plan caching.
-  ListChannelMessages: {sqlc: ListChannelMessages, plan: legacy}
-  # Today's adverts text: the fallback until observations carry their payload type.
-  ListObserverAdvertsJoinFilter: {sqlc: ListObserverAdvertsJoinFilter, group: stats_adverts, plan: legacy}
+  # Today's per-channel message text and adverts text: class C.
+  ListChannelMessages: {sqlc: ListChannelMessages, plan: custom}
+  ListObserverAdvertsJoinFilter: {sqlc: ListObserverAdvertsJoinFilter, group: stats_adverts, plan: custom}
+  # planpolicy.Slow: the region statement that answers when the site read model's bounded reads run out of budget
+  # (millisecond and exact cursor forms), and the all-channel message statement for sites with a since or a scope.
+  ListPacketsByIATAs: {sqlc: ListPacketsByIATAs, plan: slow}
+  ListPacketsByIATAsAfter: {sqlc: ListPacketsByIATAsAfter, plan: slow}
+  ListAllChannelMessages: {sqlc: ListAllChannelMessages, plan: slow}
   # Planted regressions and harness texts: frozen, never served.
   ListKnownRoutes_202acc6: {file: sql/planted/ListKnownRoutes_202acc6.sql, plan: harness}
   DeleteOldRoutes_202acc6: {file: sql/planted/DeleteOldRoutes_202acc6.sql, kind: dml, plan: harness}
@@ -172,6 +176,17 @@ sort_exempt_sets:
     - {relation: packet_sites, index_cond: "packet_hash = ps.packet_hash", reason: "the cross-site re-check probes one packet's sites; the per-site ranges each have their own Limit"}
   bounded_scan:
     - {relation: packet_sites, index_cond: "packet_hash = s.packet_hash", reason: "the bounded forms re-check each packet read from at most scan_depth entries per range"}
+  slow_walk:
+    - {relation: packet_observations, index: idx_observations_iata_heard, reason: "the slow pool's statements walk site histories by design; api_slow's two connections and 120 s limit bound them"}
+    - {relation: packet_observations, index: idx_observations_heard, reason: "the slow pool's statements walk site histories by design; api_slow's two connections and 120 s limit bound them"}
+    - {relation: packet_observations, index: idx_observations_packet, reason: "the slow pool's statements walk site histories by design; api_slow's two connections and 120 s limit bound them"}
+    - {relation: packets, index: idx_packets_payload_type, reason: "the slow pool's statements walk site histories by design; api_slow's two connections and 120 s limit bound them"}
+    - {relation: packets, index: idx_packets_route_type, reason: "the slow pool's statements walk site histories by design; api_slow's two connections and 120 s limit bound them"}
+    - {relation: packets, index: idx_packets_scope, reason: "the slow pool's statements walk site histories by design; api_slow's two connections and 120 s limit bound them"}
+    - {relation: packets, index: idx_packets_type_last_heard, reason: "the slow pool's statements walk site histories by design; api_slow's two connections and 120 s limit bound them"}
+    - {relation: packets, index: idx_packets_scope_last_heard, reason: "the slow pool's statements walk site histories by design; api_slow's two connections and 120 s limit bound them"}
+    - {relation: packets, index: idx_packets_last_heard_hash, reason: "the slow pool's statements walk site histories by design; api_slow's two connections and 120 s limit bound them"}
+    - {relation: packets, index: idx_packets_first_heard_brin, reason: "the slow pool's statements walk site histories by design; api_slow's two connections and 120 s limit bound them"}
   window_branches:
     - {relation: packets, index: idx_packets_heard_inverted, reason: "branch 2 reads only the inverted rows (partial index)"}
     - {relation: packets, index: idx_packets_type_last_heard, index_cond: "payload_type = ANY", reason: "branch 1's type range is bounded by last_heard_at >= since"}
@@ -343,6 +358,13 @@ resolvers:
   lk_rare_scope: "SELECT ts.name FROM transport_scopes ts JOIN analytics_hourly_scope_sets s ON s.scope_id = ts.id GROUP BY ts.id, ts.name ORDER BY count(*), ts.name LIMIT 1"
   lk_link_nodes40: "SELECT array_agg(node_id ORDER BY n DESC, node_id) FROM (SELECT node_id, count(*) n FROM node_neighbors GROUP BY node_id ORDER BY 2 DESC, 1 LIMIT 40) s"
   lk_link_neighbors40: "SELECT array_agg(neighbor_id ORDER BY n DESC, neighbor_id) FROM (SELECT neighbor_id, count(*) n FROM node_neighbors GROUP BY neighbor_id ORDER BY 2 DESC, 1 LIMIT 40) s"
+  # Slow-pool roles: the three payload types with the fewest packets among the newest 50,000, a one-hour window 60
+  # hours before the newest observation, every known IATA, and the busiest scope among the newest 20,000 messages.
+  slow_rare3_types: "SELECT '{' || string_agg(t::text, ',' ORDER BY t) || '}' FROM (SELECT payload_type t FROM (SELECT payload_type FROM packets ORDER BY last_heard_at DESC, packet_hash DESC LIMIT 50000) p GROUP BY 1 ORDER BY count(*), 1 LIMIT 3) s"
+  slow_window_since: "SELECT heard_at - interval '60 hours' FROM packet_observations ORDER BY id DESC LIMIT 1"
+  slow_window_until: "SELECT heard_at - interval '59 hours' FROM packet_observations ORDER BY id DESC LIMIT 1"
+  slow_all_sites: "SELECT array_agg(iata ORDER BY iata) FROM iata_codes"
+  slow_msg_scope: "SELECT ts.name FROM (SELECT packet_hash FROM channel_messages ORDER BY id DESC LIMIT 20000) cm JOIN packets p ON p.packet_hash = cm.packet_hash JOIN transport_scopes ts ON ts.id = p.scope_id GROUP BY ts.name ORDER BY count(*) DESC, ts.name LIMIT 1"
   lk_trace_since: "SELECT max(first_heard_at) - interval '1 day' FROM trace_tags"
   lk_trace_until: "SELECT max(first_heard_at) - interval '12 hours' FROM trace_tags"
   tel_top: "SELECT observer_id FROM observer_telemetry WHERE id > (SELECT max(id) FROM observer_telemetry) - 200000 GROUP BY 1 ORDER BY count(*) DESC, observer_id LIMIT 1"
@@ -2624,6 +2646,72 @@ entries:
     expect:
       budget: {buffers: 1000, planning_ms: 10}
     note: "measured: - / - B (custom / generic); budget: class budget"
+  # The slow pool's statements at their worst measured shapes (sparse filters over busy sites). They run on api_slow
+  # under its 120 s statement limit; budgets are 1.5x measured.
+  - id: slow.after.busy13.rare3
+    stmt: ListPacketsByIATAsAfter
+    shape: "exact-cursor fallback, the 13 busiest recent sites, the three rarest payload types, page 1"
+    params: [{r: ps_busy_sites13}, "infinity", {r: slow_rare3_types}, "{}", {raw: "NULL::timestamptz"}, {raw: "NULL::timestamptz"}, "{}", 408, "\\x", 51]
+    tiers: [fixture, local]
+    executions: 1
+    timeout_s: 180
+    expect:
+      sort_exempt: [slow_walk]
+      budget: {buffers: 3650000, planning_ms: 20}
+    note: "measured: 2431730 B on the local copy; budget: 1.5x measured"
+  - id: slow.after.busy13.window1h
+    stmt: ListPacketsByIATAsAfter
+    shape: "exact-cursor fallback, the 13 busiest recent sites, a one-hour first-heard window 60 hours back"
+    params: [{r: ps_busy_sites13}, "infinity", "{}", "{}", {r: slow_window_since}, {r: slow_window_until}, "{}", 408, "\\x", 51]
+    tiers: [fixture, local]
+    executions: 1
+    timeout_s: 180
+    expect:
+      sort_exempt: [slow_walk]
+      budget: {buffers: 5490000, planning_ms: 20}
+    note: "measured: 3659106 B on the local copy; budget: 1.5x measured"
+  - id: slow.after.all_sites.window1h
+    stmt: ListPacketsByIATAsAfter
+    shape: "exact-cursor fallback, every known IATA, a one-hour first-heard window 60 hours back (plan only: about 93 s on the copy)"
+    params: [{r: slow_all_sites}, "infinity", "{}", "{}", {r: slow_window_since}, {r: slow_window_until}, "{}", 408, "\\x", 51]
+    tiers: [local]
+    analyze: false
+    timeout_s: 180
+    expect:
+      sort_exempt: [slow_walk]
+  - id: slow.after.busy13.route3
+    stmt: ListPacketsByIATAsAfter
+    shape: "exact-cursor fallback, the 13 busiest recent sites, route type 3 with three payload types"
+    params: [{r: ps_busy_sites13}, "infinity", {r: slow_rare3_types}, "{3}", {raw: "NULL::timestamptz"}, {raw: "NULL::timestamptz"}, "{}", 408, "\\x", 51]
+    tiers: [fixture, local]
+    executions: 1
+    timeout_s: 180
+    expect:
+      sort_exempt: [slow_walk]
+      budget: {buffers: 86800, planning_ms: 20}
+    note: "measured: 57815 B on the local copy; budget: 1.5x measured"
+  - id: slow.iatas.busy13.rare3
+    stmt: ListPacketsByIATAs
+    shape: "millisecond-cursor fallback, the 13 busiest recent sites, the three rarest payload types"
+    params: [{r: ps_busy_sites13}, {raw: "NULL::timestamptz"}, {r: slow_rare3_types}, "{}", {raw: "NULL::timestamptz"}, {raw: "NULL::timestamptz"}, "{}", 408, 51]
+    tiers: [fixture, local]
+    executions: 1
+    timeout_s: 180
+    expect:
+      sort_exempt: [slow_walk]
+      budget: {buffers: 3650000, planning_ms: 20}
+    note: "measured: 2431727 B on the local copy; budget: 1.5x measured"
+  - id: slow.allmsg.busy_site.scope_since
+    stmt: ListAllChannelMessages
+    shape: "all channels, the busiest recent site, the busiest message scope, since 3 days before the newest message"
+    params: [{r: cm_since3d}, {r: ps_busy1_list}, {r: slow_msg_scope}, 0, 51]
+    tiers: [fixture, local]
+    executions: 1
+    timeout_s: 180
+    expect:
+      sort_exempt: [slow_walk]
+      budget: {buffers: 339000, planning_ms: 20}
+    note: "measured: 225952 B on the local copy; budget: 1.5x measured"
   # Lookup tables without their cold indexes (migrations 047-052), and the scope sets index that stays.
   - id: lk.neighbors.top_node
     stmt: GetNodeNeighbors
