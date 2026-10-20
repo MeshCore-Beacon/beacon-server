@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math"
 	"time"
@@ -271,14 +272,17 @@ func (s *Store) ListChannelMessages(ctx context.Context, channelID *int32, since
 
 // listChannelMessages runs one statement per request shape. A zero since is "no since", nil and empty iatas are
 // "no region", "" is "no scope". The shapes filtered by site, and those filtered by scope without since, read
-// channel_message_iatas; without useReadModel they run today's statement unchanged. The others never read it.
+// channel_message_iatas; without useReadModel they answer api.ErrPagesNotReady. The others never read it.
 func listChannelMessages(ctx context.Context, q sqlc.Querier, useReadModel bool, channelID *int32, since time.Time, limit int32, iatas []string, scope string, cursor int64) (api.Page[api.ChannelMessage], error) {
 	hasSince, hasSites, hasScope := !since.IsZero(), len(iatas) > 0, scope != ""
 	// Sites with a since or a scope across every channel have no index that bounds both: each site's range would
-	// be walked until enough rows pass the filter, so today's statement serves them, trusted or not.
-	allChannelsFiltered := channelID == nil && hasSites && (hasSince || hasScope)
-	if allChannelsFiltered || ((hasSites || (hasScope && !hasSince)) && !useReadModel) {
-		return listChannelMessagesLegacy(ctx, q, channelID, since, limit, iatas, scope, cursor)
+	// be walked until enough rows pass the filter, so the original all-channel statement serves them (on the slow
+	// pool), trusted or not.
+	if channelID == nil && hasSites && (hasSince || hasScope) {
+		return listChannelMessagesLegacy(ctx, q, nil, since, limit, iatas, scope, cursor)
+	}
+	if (hasSites || (hasScope && !hasSince)) && !useReadModel {
+		return api.Page[api.ChannelMessage]{}, fmt.Errorf("channel messages: %w", api.ErrPagesNotReady)
 	}
 	var scopeID *int32
 	if hasScope {
@@ -372,8 +376,9 @@ func convertRows[R messageRow](rows []R, err error) ([]sqlc.ListChannelMessagesR
 	return out, nil
 }
 
-// listChannelMessagesLegacy is today's statement pair: one join over every observation, filtered in place. It
-// serves the shapes that read the read model while this process does not trust it.
+// listChannelMessagesLegacy is the original statement pair: one join over every observation, filtered in place.
+// The all-channel one serves sites with a since or a scope; the per-channel one (ListChannelMessages) is only the
+// first-time verification's oracle and is never routed to an API pool.
 func listChannelMessagesLegacy(ctx context.Context, q sqlc.Querier, channelID *int32, since time.Time, limit int32, iatas []string, scope string, cursor int64) (api.Page[api.ChannelMessage], error) {
 	ts := pgtype.Timestamptz{Time: since, Valid: !since.IsZero()}
 	var messages []api.ChannelMessage

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -49,7 +50,7 @@ const siteTypedPairs = 8
 // observation statement reads each site's observations.
 var siteScanDepthPerRow int32 = 8 // a var only so tests can shrink the reads
 
-// siteBoundedRounds is how many bounded reads one request makes before today's statement answers it instead: a
+// siteBoundedRounds is how many bounded reads one request makes before the original statement answers it instead: a
 // filter that matches little keeps reading from the floor until the page is full, within this budget.
 var siteBoundedRounds = 8 // a var only so tests can shrink the budget
 
@@ -202,21 +203,14 @@ func convertSiteRows[R any](rows []R, conv func(R) siteRow) []siteRow {
 	return out
 }
 
-// listPacketsByRegion serves a region page. Until this process trusts packet_sites, it runs today's statement; a
-// pageCursor sent alone then pages by its millisecond, which is the cursor the same row would have produced, so a
-// walk never restarts. Trusted, it pages by the exact (site_heard_at, packet_hash) key and returns nextPageCursor;
-// a request whose bounded reads run out of budget is answered by today's statement the same way.
+// listPacketsByRegion serves a region page from packet_sites. Until this process trusts packet_sites (first fill,
+// repair, a failed verification, or the operator turned it off) it answers api.ErrPagesNotReady. Trusted, it pages
+// by the exact (site_heard_at, packet_hash) key and returns nextPageCursor. A request whose bounded reads run out of
+// budget is answered by the original region statement, on the slow pool: from an exact position when it has one,
+// else by its millisecond cursor as before.
 func (s *Store) listPacketsByRegion(ctx context.Context, payloadTypes, routeTypes []int16, iatas, scopes []string, since, until time.Time, cursor int64, pageCursor *api.PacketCursor, limit int32) (api.PacketPage, error) {
-	legacy := func() (api.PacketPage, error) {
-		c := cursor
-		if c <= 0 && pageCursor != nil {
-			c = pageCursor.At.UnixMilli()
-		}
-		page, err := s.listPacketsByIATAs(ctx, payloadTypes, routeTypes, iatas, scopes, since, until, c, limit)
-		return api.PacketPage{Page: page}, err
-	}
 	if !s.readModels.packetSitesTrusted() {
-		return legacy()
+		return api.PacketPage{}, fmt.Errorf("region packets: %w", api.ErrPagesNotReady)
 	}
 	empty := api.PacketPage{Page: api.Page[api.PacketSummary]{Items: []api.PacketSummary{}}}
 	f, ok := newPacketFilter(payloadTypes, routeTypes, scopes, since, until, cursor, pageCursor, limit)
@@ -234,7 +228,9 @@ func (s *Store) listPacketsByRegion(ctx context.Context, payloadTypes, routeType
 			// Page 1: from the top, with an exact next cursor, so the walk can stay exact.
 			return s.listPacketsByIATAsAfter(ctx, payloadTypes, routeTypes, iatas, scopes, since, until, f.cursorTS, f.cursorHash, limit)
 		}
-		return legacy() // a millisecond cursor alone: today's behaviour
+		// A millisecond cursor alone: the original statement by that millisecond.
+		page, err := s.listPacketsByIATAs(ctx, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
+		return api.PacketPage{Page: page}, err
 	}
 	if err != nil {
 		return api.PacketPage{}, err

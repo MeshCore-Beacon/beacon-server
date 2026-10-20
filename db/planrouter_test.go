@@ -696,3 +696,24 @@ func TestPlanRouterSlowPoolCannotStarveOthers(t *testing.T) {
 		}
 	})
 }
+
+// A verification-only statement never reaches an API pool: the router refuses it before admission or acquire.
+func TestPlanRouterRefusesVerificationOnly(t *testing.T) {
+	for _, layout := range []planpolicy.Layout{planpolicy.CustomAll, planpolicy.Split, planpolicy.Single} {
+		f := newRouterFixture(layout, nil)
+		for _, method := range routerMethods {
+			err := runVia(context.Background(), f.r, method, "-- name: ListChannelMessages :many\nSELECT 1")
+			if err == nil || !strings.Contains(err.Error(), "verification") {
+				t.Errorf("%s %s: err = %v, want a refusal", layout, method, err)
+			}
+		}
+		for _, p := range []*fakePool{f.legacy, f.slow, f.custom, f.cached} {
+			if _, acquires, _ := p.snapshot(); acquires != 0 {
+				t.Errorf("%s: %s acquired %d connections", layout, p.n, acquires)
+			}
+		}
+		if f.gate.admits != 0 {
+			t.Errorf("%s: gate admitted %d", layout, f.gate.admits)
+		}
+	}
+}

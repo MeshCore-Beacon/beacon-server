@@ -6,6 +6,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand/v2"
@@ -387,42 +388,49 @@ func TestCmiTrustLifecyclePostgres(t *testing.T) {
 	tr := NewTrust("cmi_lifecycle_test", true, CmiTrustPolicy)
 	s := New(rec, nil, 0, 0, WithReadModels(&ReadModels{Cmi: tr}))
 	ch := int32(7)
-	var first api.Page[api.ChannelMessage]
-	step := func(label, want string) {
+	// The original statement's page is the oracle; while trusted every page equals it.
+	want, err := listChannelMessagesLegacy(f.ctx, sqlc.New(f.pool), &ch, time.Time{}, 50, []string{"YUL"}, "", 0)
+	if err != nil || len(want.Items) == 0 {
+		t.Fatalf("oracle page %+v, %v", want, err)
+	}
+	// step checks one page: a statement name means served by it with the oracle's rows; "" means not ready, with no
+	// statement run.
+	step := func(label, stmt string) {
 		t.Helper()
 		rec.names = nil
 		page, err := s.ListChannelMessages(f.ctx, &ch, time.Time{}, 50, []string{"YUL"}, "", 0)
+		if got := strings.Join(rec.names, ","); got != stmt {
+			t.Fatalf("%s: ran %q, want %q", label, got, stmt)
+		}
+		if stmt == "" {
+			if !errors.Is(err, api.ErrPagesNotReady) {
+				t.Fatalf("%s: err = %v, want ErrPagesNotReady", label, err)
+			}
+			return
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := strings.Join(rec.names, ","); got != want {
-			t.Fatalf("%s: ran %s, want %s", label, got, want)
-		}
-		if len(page.Items) == 0 {
-			t.Fatalf("%s: empty page", label)
-		}
-		if first.Items == nil {
-			first = page
-		} else if !reflect.DeepEqual(page, first) {
-			t.Fatalf("%s: page differs", label)
+		if !reflect.DeepEqual(page, want) {
+			t.Fatalf("%s: page differs from the original statement's", label)
 		}
 	}
-	step("not earned", "ListChannelMessages")
+	step("not earned", "")
 	tr.Earn()
 	step("earned", "ListChannelMessagesByIATAs")
 	for range 3 {
 		tr.ObserveRun(1)
 	}
-	step("three repairing runs", "ListChannelMessages")
+	step("three repairing runs", "")
 	tr.ObserveRun(0)
 	tr.ObserveRun(0)
 	step("two clean runs", "ListChannelMessagesByIATAs")
 	tr.Invalidate("failed add")
-	step("a writer failure", "ListChannelMessages")
+	step("a writer failure", "")
 	tr.Repaired(tr.Generation())
 	step("the next reconcile", "ListChannelMessagesByIATAs")
 	disabled := NewTrust("cmi_lifecycle_disabled", false, CmiTrustPolicy)
 	disabled.Earn()
 	s.readModels = &ReadModels{Cmi: disabled}
-	step("disabled", "ListChannelMessages")
+	step("disabled", "")
 }

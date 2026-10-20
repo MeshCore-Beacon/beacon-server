@@ -116,9 +116,11 @@ statements:
   # One observer's adverts and telemetry pages.
   ListObserverAdverts: {sqlc: ListObserverAdverts, group: stats_adverts, plan: cached, admission: observer_page}
   GetObserverTelemetrySince: {sqlc: GetObserverTelemetrySince, group: stats_adverts, plan: cached, admission: observer_page}
-  # Today's per-channel message text and adverts text: class C.
-  ListChannelMessages: {sqlc: ListChannelMessages, plan: custom}
-  ListObserverAdvertsJoinFilter: {sqlc: ListObserverAdvertsJoinFilter, group: stats_adverts, plan: custom}
+  # The per-channel original statement: only the channel read model's first-time verification runs it, on the
+  # maint connection (planpolicy.VerificationOnly; the API router refuses it).
+  ListChannelMessages: {sqlc: ListChannelMessages, plan: maint}
+  # The adverts text served until every observation carried its payload type (removed), frozen for its planted entries.
+  ListObserverAdvertsJoinFilter_16fb706: {file: sql/planted/ListObserverAdvertsJoinFilter_16fb706.sql, group: stats_adverts, plan: harness}
   # planpolicy.Slow: the region statement that answers when the site read model's bounded reads run out of budget
   # (millisecond and exact cursor forms), and the all-channel message statement for sites with a since or a scope.
   ListPacketsByIATAs: {sqlc: ListPacketsByIATAs, plan: slow}
@@ -4545,7 +4547,7 @@ entries:
     inherit: s7.se.LIS_7d
     expect_fail: true
   - id: planted.extra.adverts.today.busiest
-    stmt: ListObserverAdvertsJoinFilter
+    stmt: ListObserverAdvertsJoinFilter_16fb706
     shape: "today's ListObserverAdverts (the fallback), busiest observer"
     params: [{r: adv_busiest}, 0, 51]
     tiers: [local]
@@ -4553,7 +4555,7 @@ entries:
     inherit: s7.adv.busy1_c0_d16
     expect_fail: true
   - id: planted.extra.adverts.today.zero
-    stmt: ListObserverAdvertsJoinFilter
+    stmt: ListObserverAdvertsJoinFilter_16fb706
     shape: "today's ListObserverAdverts (the fallback), observer with no adverts"
     params: [{r: adv_zero}, 0, 51]
     tiers: [local]

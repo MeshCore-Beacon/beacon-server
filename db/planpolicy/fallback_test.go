@@ -10,8 +10,8 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/db/planpolicy"
 )
 
-// The per-channel message and adverts fallbacks route to the slow pool: ungated, on their own connections, as on the
-// old legacy pool.
+// The two statements that served read-model pages before the fallbacks were removed route to the slow pool: if that
+// removal is reverted they come back ungated, on their own connections, as on the old legacy pool.
 func TestReadModelFallbacksRouteSlow(t *testing.T) {
 	want := map[string]bool{"ListChannelMessages": true, "ListObserverAdvertsJoinFilter": true}
 	if !reflect.DeepEqual(planpolicy.ReadModelFallbacks, want) {

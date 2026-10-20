@@ -71,12 +71,13 @@ type PacketSitesJobs struct {
 }
 
 // Boot waits until no transaction from before boot can still write, then repairs the table, finishes the backfill
-// and, the first time ever, verifies it; then trust is earned. Until then region pages are served by the original
-// statement. A failure is logged and the repair retried after Interval. Boot returns once the repair is done (trust
+// and, the first time ever, verifies it; then trust is earned. Until then region packet pages answer 503 with
+// Retry-After. A failure is logged and the repair retried after Interval. Boot returns once the repair is done (trust
 // earned, or a failed first verification left to the periodic task) or ctx ends; main runs it in a goroutine.
 func (j *PacketSitesJobs) Boot(ctx context.Context) {
 	// Until the first reconcile finishes, the watermark age counts from boot, so a boot that never finishes shows.
 	metrics.SetReadModelWatermark(packetSitesModel, time.Now())
+	slog.Info("packet_sites boot repair starting: region packet pages answer 503 until it is trusted", "component", "readmodel")
 	for {
 		err := j.Wait(ctx)
 		if err == nil {
@@ -251,7 +252,7 @@ func (j *PacketSitesJobs) reconcileRun(ctx context.Context) (int64, *openRun, ui
 		return 0, nil, gen, err
 	}
 	if !st.Complete || st.FirstVerifiedAt == nil {
-		// Rebuilt or never verified since this process earned trust: serve today's statement until this run (or a
+		// Rebuilt or never verified since this process earned trust: region pages answer 503 until this run (or a
 		// later one) completes and verifies it.
 		j.Trust.Invalidate("the read model state is incomplete or unverified")
 		gen = j.Trust.Generation()

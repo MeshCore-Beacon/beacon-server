@@ -5,6 +5,7 @@ package background
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/MeshCore-Beacon/beacon-server/db"
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -170,9 +172,8 @@ func TestPacketSitesRollbackRollForwardPostgres(t *testing.T) {
 	tr2 := db.NewTrust("packet_sites", true, db.PacketSitesTrustPolicy)
 	served := db.New(rec, nil, 0, 0, db.WithReadModels(&db.ReadModels{PacketSites: tr2}))
 	rec.names = nil
-	psPage(t, ctx, served, []string{"AAA"})
-	if got := strings.Join(rec.names, ","); !strings.HasPrefix(got, "ListPacketsByIATAs") {
-		t.Fatalf("before the boot repair the store ran %s", got)
+	if _, err := served.ListPackets(ctx, nil, nil, []string{"AAA"}, nil, time.Time{}, time.Time{}, 0, nil, 200); !errors.Is(err, api.ErrPagesNotReady) || len(rec.names) != 0 {
+		t.Fatalf("before the boot repair: err %v, statements %v; want ErrPagesNotReady and none", err, rec.names)
 	}
 	before := repairedRows("packet_sites")
 	j := psJobsFor(maint, tr2)

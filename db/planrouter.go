@@ -127,6 +127,9 @@ type stmt struct {
 // begin admits the statement, acquires its connection and starts its context. On error,
 // everything it took is already given back.
 func (r *PlanRouter) begin(ctx context.Context, sql string, args []any) (*stmt, error) {
+	if name := sqlcName(sql); planpolicy.VerificationOnly[name] {
+		return nil, fmt.Errorf("db: %s is a verification-only statement and never runs on an API pool", name)
+	}
 	pool, gate, args, wait := r.route(sql, args)
 	t, err := gate.Admit(ctx)
 	if err != nil {

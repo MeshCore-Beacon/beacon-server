@@ -4,11 +4,13 @@
 package handlers
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"sync/atomic"
 	"time"
 
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
 )
 
@@ -24,7 +26,11 @@ func respondUnavailableFor(w http.ResponseWriter, err error, model string) bool 
 	if !respondUnavailable(w, err) {
 		return false
 	}
-	metrics.APIUnavailable.WithLabelValues("slow_pool_busy", model).Inc()
+	reason := "not_ready"
+	if errors.Is(err, api.ErrSlowPoolBusy) {
+		reason = "slow_pool_busy"
+	}
+	metrics.APIUnavailable.WithLabelValues(reason, model).Inc()
 	return true
 }
 

@@ -110,3 +110,15 @@ func TestPacketSitesPlanClasses(t *testing.T) {
 		}
 	}
 }
+
+// The per-channel original message statement is verification-only, and nothing else is.
+func TestVerificationOnly(t *testing.T) {
+	if want := map[string]bool{"ListChannelMessages": true}; !reflect.DeepEqual(planpolicy.VerificationOnly, want) {
+		t.Errorf("VerificationOnly = %v, want %v", planpolicy.VerificationOnly, want)
+	}
+	for name := range planpolicy.VerificationOnly {
+		if planpolicy.Slow[name] || planpolicy.Cached[name] {
+			t.Errorf("%s is verification-only and also routed", name)
+		}
+	}
+}

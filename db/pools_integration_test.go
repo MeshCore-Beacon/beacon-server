@@ -55,8 +55,8 @@ func TestOpenPoolsSettingsPostgres(t *testing.T) {
 		want   map[string]int32
 		total  int32
 	}{
-		{planpolicy.CustomAll, map[string]int32{"api_slow": 8, "api_custom": 8, "maint": 4}, 0},
-		{planpolicy.Split, map[string]int32{"api_slow": 8, "api_custom": 7, "api_cached": 5, "maint": 4}, 0},
+		{planpolicy.CustomAll, map[string]int32{"api_slow": 2, "api_custom": 8, "maint": 4}, 0},
+		{planpolicy.Split, map[string]int32{"api_slow": 2, "api_custom": 7, "api_cached": 5, "maint": 4}, 0},
 		{planpolicy.Single, map[string]int32{"api_legacy": 8, "maint": 4}, 0},
 	} {
 		// The ingest pool follows the host: at least 6, and one per CPU.
@@ -135,8 +135,8 @@ func TestOpenPoolsSettingsPostgres(t *testing.T) {
 			if got := p.Total(); got != tc.total {
 				t.Errorf("Total() = %d, want %d", got, tc.total)
 			}
-			// Without ingest (6 on up to 6 CPUs): custom_all 26 in all, split 30, single 18.
-			if rest := tc.total - tc.want["ingest"]; rest != map[planpolicy.Layout]int32{planpolicy.CustomAll: 20, planpolicy.Split: 24, planpolicy.Single: 12}[tc.layout] {
+			// Without ingest (6 on up to 6 CPUs): custom_all 20 in all, split 24, single 18.
+			if rest := tc.total - tc.want["ingest"]; rest != map[planpolicy.Layout]int32{planpolicy.CustomAll: 14, planpolicy.Split: 18, planpolicy.Single: 12}[tc.layout] {
 				t.Errorf("%s: %d connections besides ingest", tc.layout, rest)
 			}
 		})

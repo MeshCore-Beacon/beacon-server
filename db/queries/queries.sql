@@ -343,31 +343,6 @@ WHERE po.observer_id = @observer_id
 ORDER BY po.id ASC
 LIMIT @row_limit;
 
--- name: ListObserverAdvertsJoinFilter :many
--- Filters on the packet's payload type: serves until every observation carries its own.
--- Returns advert packets (payload_type=4) heard by a specific observer.
--- Pass cursor=0 to start from the beginning, or the last seen id for pagination.
--- Keep missing-origin adverts; the generated key field expects a string, not NULL.
-SELECT 
-  po.id,
-  encode(po.packet_hash, 'hex') AS packet_hash_hex,
-  p.payload_type,
-  po.iata,
-  po.heard_at,
-  po.rssi,
-  po.snr,
-  po.hop_count,
-  n.name AS node_name,
-  COALESCE(encode(p.origin_pubkey, 'hex'), '')::text AS node_public_key
-FROM packet_observations po
-JOIN packets p ON p.packet_hash = po.packet_hash
-LEFT JOIN nodes n ON n.public_key = p.origin_pubkey
-WHERE po.observer_id = $1
-  AND p.payload_type = 4
-  AND ($2::bigint = 0 OR po.id > $2::bigint)
-ORDER BY po.id ASC
-LIMIT $3;
-
 -- name: BackfillObservationPayloadTypes :one
 -- Copies the packet's payload type onto the first @max_rows observations in [@from_id, @to_id),
 -- in id order, that lack one. Rows that already carry a type are never touched. Returns how many

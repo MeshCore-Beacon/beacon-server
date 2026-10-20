@@ -6,6 +6,7 @@ package db
 import (
 	"bytes"
 	"context"
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -312,7 +313,9 @@ func TestListPacketsRegionHasMoreFromKeys(t *testing.T) {
 
 // Untrusted (no read models, disabled, invalidated, never earned): today's statement with today's params; a
 // pageCursor sent alone pages by its millisecond; no nextPageCursor.
-func TestListPacketsRegionUntrustedCursor(t *testing.T) {
+// Until this process trusts packet_sites (never earned, turned off, invalidated, or no read models at all), a
+// region page answers ErrPagesNotReady and runs no statement, whatever its cursor.
+func TestListPacketsRegionUntrustedNotReady(t *testing.T) {
 	pc := &api.PacketCursor{At: time.Date(2026, 1, 9, 0, 0, 0, 123456000, time.UTC), Hash: []byte{0xab}}
 	disabled := NewTrust("packet_sites_untrusted_disabled", false, PacketSitesTrustPolicy)
 	disabled.Earn()
@@ -329,28 +332,21 @@ func TestListPacketsRegionUntrustedCursor(t *testing.T) {
 			for _, tc := range []struct {
 				cursor int64
 				pc     *api.PacketCursor
-				wantMs int64
+				pt     []int16
+				since  time.Time
 			}{
-				{5, pc, 5},
-				{0, pc, pc.At.UnixMilli()},
-				{0, nil, 0},
+				{5, pc, nil, time.Time{}},
+				{0, pc, nil, time.Time{}},
+				{0, nil, nil, time.Time{}},
+				{0, nil, []int16{4, 5, 6}, time.Time{}},
+				{0, nil, nil, pc.At},
 			} {
 				ctrl := gomock.NewController(t)
-				mock := mockdb.NewMockQuerier(ctrl)
-				mock.EXPECT().ListPacketsByIATAs(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsByIATAsParams) bool {
-					if tc.wantMs == 0 {
-						return !p.CursorTs.Valid
-					}
-					return p.CursorTs.Valid && p.CursorTs.Time.Equal(time.UnixMilli(tc.wantMs)) && p.ScanDepth == 6*8
-				})).Return([]sqlc.ListPacketsByIATAsRow{{
-					PacketHash: []byte{1}, SiteHeardAt: pgtype.Timestamptz{Time: pc.At, Valid: true},
-					ScanSaturated: true, ScanFloor: pgtype.Timestamptz{Time: pc.At.Add(time.Second), Valid: true},
-				}}, nil)
-				s := &Store{q: mock}
+				s := &Store{q: mockdb.NewMockQuerier(ctrl)} // strict: any statement fails the test
 				WithReadModels(rm)(s)
-				page, err := s.ListPackets(context.Background(), nil, nil, []string{"AAA"}, nil, time.Time{}, time.Time{}, tc.cursor, tc.pc, 5)
-				if err != nil || !page.HasMore || page.NextPageCursor != nil || *page.NextCursor != pc.At.Add(time.Second).UnixMilli() {
-					t.Fatalf("cursor %d: page %+v, %v", tc.cursor, page, err)
+				page, err := s.ListPackets(context.Background(), tc.pt, nil, []string{"AAA", "BBB"}, nil, tc.since, time.Time{}, tc.cursor, tc.pc, 5)
+				if !errors.Is(err, api.ErrPagesNotReady) || page.Items != nil {
+					t.Fatalf("cursor %d: page %+v, err %v; want ErrPagesNotReady", tc.cursor, page, err)
 				}
 				ctrl.Finish()
 			}

@@ -55,6 +55,13 @@ var Slow = map[string]bool{
 	"ListAllChannelMessages":  true,
 }
 
+// VerificationOnly lists statements that only a read model's first-time verification runs, on its maintenance
+// connection; the API router refuses them, so no page can reach them. ListChannelMessages is the original
+// per-channel message statement, kept as the channel read model's oracle.
+var VerificationOnly = map[string]bool{
+	"ListChannelMessages": true,
+}
+
 // ClassOf returns the plan class for a sqlc statement name.
 func ClassOf(name string) Class {
 	switch {

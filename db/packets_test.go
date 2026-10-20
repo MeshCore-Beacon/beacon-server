@@ -516,7 +516,7 @@ func TestListPackets_IATAFilterRoutesToObservationIndex(t *testing.T) {
 		})
 
 	store := &Store{q: mock}
-	page, err := store.ListPackets(context.Background(), nil, nil, []string{"ALF"}, nil, time.Time{}, time.Time{}, 0, nil, 1)
+	page, err := store.listPacketsByIATAs(context.Background(), nil, nil, []string{"ALF"}, nil, time.Time{}, time.Time{}, 0, 1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -558,7 +558,7 @@ func TestListPackets_SaturatedShortPageKeepsPaging(t *testing.T) {
 		}, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListPackets(context.Background(), nil, nil, []string{"YOW"}, nil, time.Time{}, time.Time{}, 0, nil, 5)
+	page, err := store.listPacketsByIATAs(context.Background(), nil, nil, []string{"YOW"}, nil, time.Time{}, time.Time{}, 0, 5)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -593,7 +593,7 @@ func TestListPackets_CursorClampsToScanFloor(t *testing.T) {
 		}}, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListPackets(context.Background(), nil, nil, []string{"YOW", "YYZ"}, nil, time.Time{}, time.Time{}, 0, nil, 5)
+	page, err := store.listPacketsByIATAs(context.Background(), nil, nil, []string{"YOW", "YYZ"}, nil, time.Time{}, time.Time{}, 0, 5)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -618,7 +618,7 @@ func TestListPackets_UnsaturatedShortPageEndsPaging(t *testing.T) {
 		}}, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListPackets(context.Background(), nil, nil, []string{"YOW"}, nil, time.Time{}, time.Time{}, 0, nil, 5)
+	page, err := store.listPacketsByIATAs(context.Background(), nil, nil, []string{"YOW"}, nil, time.Time{}, time.Time{}, 0, 5)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -706,16 +706,6 @@ func TestListPacketsDispatch(t *testing.T) {
 		}},
 		{name: "since and scopes", since: since, scopes: []string{"#a"}, expect: func(m *mockdb.MockQuerier) {
 			m.EXPECT().ListPacketsWindowScoped(gomock.Any(), gomock.Any()).Return(nil, nil)
-		}},
-		{name: "iatas", pt: []int16{4}, iatas: []string{"YVR"}, scopes: []string{"#a"}, since: since, expect: func(m *mockdb.MockQuerier) {
-			m.EXPECT().ListPacketsByIATAs(gomock.Any(), sqlc.ListPacketsByIATAsParams{
-				Iatas:        []string{"YVR"},
-				ScanDepth:    (7 + 1) * 8,
-				PayloadTypes: []int16{4},
-				SinceTs:      pgtype.Timestamptz{Time: since, Valid: true},
-				ScopeNames:   []string{"#a"},
-				PageLimit:    7 + 1,
-			}).Return(nil, nil)
 		}},
 		{name: "unknown payload type", pt: []int16{99}, expect: func(*mockdb.MockQuerier) {}},
 		{name: "since after until", since: since, until: since.Add(-time.Millisecond), expect: func(m *mockdb.MockQuerier) {
@@ -858,39 +848,4 @@ func TestListPackets_NextPageCursor(t *testing.T) {
 			t.Errorf("page = %+v, want 2 items and no cursors", page)
 		}
 	})
-}
-
-// The region path keeps today's numeric cursor, saturation padding and scan-floor clamp, and emits no pageCursor.
-func TestListPackets_RegionPathIgnoresPageCursor(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	mock := mockdb.NewMockQuerier(ctrl)
-	const cursor = int64(1792442625019)
-	oldest := time.Date(2026, 8, 7, 12, 57, 25, 0, time.UTC)
-	floor := oldest.Add(30 * time.Second)
-
-	mock.EXPECT().
-		ListPacketsByIATAs(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsByIATAsParams) bool {
-			return p.CursorTs.Valid && p.CursorTs.Time.Equal(time.UnixMilli(cursor)) && slices.Equal(p.Iatas, []string{"YVR"})
-		})).
-		Return([]sqlc.ListPacketsByIATAsRow{{
-			PacketHash:    []byte{0x01},
-			SiteHeardAt:   pgtype.Timestamptz{Time: oldest, Valid: true},
-			ScanSaturated: true,
-			ScanFloor:     pgtype.Timestamptz{Time: floor, Valid: true},
-		}}, nil)
-
-	pc := &api.PacketCursor{At: time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC), Hash: []byte{0xab}}
-	page, err := (&Store{q: mock}).ListPackets(context.Background(), nil, nil, []string{"YVR"}, nil, time.Time{}, time.Time{}, cursor, pc, 5)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(page.Items) != 1 || !page.HasMore {
-		t.Fatalf("items %d, hasMore %v; want 1, true", len(page.Items), page.HasMore)
-	}
-	if page.NextCursor == nil || *page.NextCursor != floor.UnixMilli() {
-		t.Errorf("NextCursor = %v, want the scan floor %d", page.NextCursor, floor.UnixMilli())
-	}
-	if page.NextPageCursor != nil {
-		t.Errorf("NextPageCursor = %q, want nil", *page.NextPageCursor)
-	}
 }

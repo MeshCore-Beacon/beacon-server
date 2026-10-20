@@ -62,8 +62,8 @@ type ReadModelsConfig struct {
 	PacketSites ReadModelConfig `yaml:"packet_sites"`
 }
 
-// ReadModelConfig controls one read model. Enabled false serves every page from the original statements; the
-// model is still maintained, so turning it back on needs only a restart.
+// ReadModelConfig controls one read model. Enabled false turns the pages it serves off (they answer 503 with
+// Retry-After); the model is still maintained, so turning it back on needs only a restart.
 type ReadModelConfig struct {
 	Enabled *bool `yaml:"enabled"` // nil = true
 }
@@ -79,7 +79,7 @@ type PlanguardConfig struct {
 type DatabaseConfig struct {
 	// APIPlanLayout is custom_all (default), split or single.
 	APIPlanLayout string `yaml:"api_plan_layout"`
-	// SlowPoolSize is api_slow's connection count under custom_all and split; nil means 8.
+	// SlowPoolSize is api_slow's connection count under custom_all and split; nil means 2.
 	SlowPoolSize *int `yaml:"slow_pool_size"`
 }
 
@@ -190,7 +190,7 @@ type ResolvedConfig struct {
 
 	// APIPlanLayout selects the API pool layout; defaults to custom_all.
 	APIPlanLayout planpolicy.Layout
-	// SlowPoolSize is api_slow's connection count; defaults to 8.
+	// SlowPoolSize is api_slow's connection count; defaults to 2.
 	SlowPoolSize int32
 	// GuardsEnforce lists the enforcing guard families; empty (never nil) when unset.
 	GuardsEnforce []string
@@ -202,9 +202,11 @@ type ResolvedConfig struct {
 	ReadOnly bool
 	// PlanguardDailyCheck runs the daily read-only plan check; off by default.
 	PlanguardDailyCheck bool
-	// ReadModelCmiEnabled serves region and scope message pages from channel_message_iatas once trusted; default true.
+	// ReadModelCmiEnabled serves region and scope message pages from channel_message_iatas once trusted; false turns
+	// those pages off (503). Default true.
 	ReadModelCmiEnabled bool
-	// ReadModelPacketSitesEnabled serves region packet pages from packet_sites once trusted; default true.
+	// ReadModelPacketSitesEnabled serves region packet pages from packet_sites once trusted; false turns those pages
+	// off (503). Default true.
 	ReadModelPacketSitesEnabled bool
 }
 
@@ -741,7 +743,7 @@ func Resolve(cfg *Config) ResolvedConfig {
 	if r.APIPlanLayout == "" {
 		r.APIPlanLayout = planpolicy.CustomAll
 	}
-	r.SlowPoolSize = 8
+	r.SlowPoolSize = 2
 	if n := cfg.Database.SlowPoolSize; n != nil && *n >= 1 {
 		r.SlowPoolSize = int32(min(*n, 1000))
 	}

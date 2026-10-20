@@ -125,7 +125,7 @@ SELECT id,decode(lpad(to_hex(id),2,'0'),'hex'),'00000000-0000-0000-0000-00000000
 		t.Fatal(err)
 	}
 	for _, iatas := range [][]string{nil, {"YVR"}} {
-		page, err := store.ListPackets(ctx, nil, nil, iatas, nil, time.Time{}, time.Time{}, 0, nil, 50)
+		page, err := listPacketsAnyPath(ctx, store, iatas, 50)
 		if err != nil {
 			t.Fatal(err)
 		}

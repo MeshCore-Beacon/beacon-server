@@ -137,7 +137,7 @@ VALUES ($1,decode($2,'hex'),$3,$4,$5,0,1,0)`, n, fmt.Sprintf("%064x", n), observ
 	// One page query plus one hash batch and one advert batch.
 	for _, iatas := range [][]string{nil, {"YYZ", "YVR"}} {
 		q.calls = 0
-		page, err := store.ListPackets(ctx, nil, nil, iatas, nil, time.Time{}, time.Time{}, 0, nil, 50)
+		page, err := listPacketsAnyPath(ctx, store, iatas, 50)
 		if err != nil || len(page.Items) != 4 || q.calls != 3 {
 			t.Fatalf("list %v: rows=%d queries=%d err=%v", iatas, len(page.Items), q.calls, err)
 		}
