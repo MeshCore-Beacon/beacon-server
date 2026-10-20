@@ -16,7 +16,7 @@
 # nextCursor by design and are listed by case in the run's report. Page 1 only: later pages follow the old server's
 # cursor, which a saturated old page moves to its scan floor.
 #
-# Everything is read from the data: sites are those of the most and the least recently seen observer
+# The walk_ cases follow the old server's cursor for 20 pages. Everything is read from the data: sites are those of the most and the least recently seen observer
 # (/api/v1/observers), since is 75 minutes before the newest packet, the region is the first one listed. ZZZ is a
 # code no site uses.
 cases:
@@ -71,6 +71,73 @@ cases:
     path: /api/v1/packets
     query: {iatas: "ZZZ"}
     pages: 1
+    allowed: *classes
+    key: *heard
+    omit: *observer
+  # The shapes the bounded forms serve, walked 20 pages with the old server's cursor: two payload types with no
+  # route filter (eight type pairs, the exact typed form), three types (the bounded form), an until in the past, a
+  # since window, a since after every packet, at one site, two sites and the first region. Every page must equal
+  # today's; none may be short with more.
+  - id: walk_site_a_two_types
+    path: /api/v1/packets
+    query: {iatas: "{a}", payloadTypes: "4,5"}
+    vars: *a
+    pages: 20
+    follow: &cursor
+      - {param: cursor, from: nextCursor}
+    allowed: *classes
+    key: *heard
+    omit: *observer
+  - id: walk_sites_ab_three_types
+    path: /api/v1/packets
+    query: {iatas: "{a},{b}", payloadTypes: "2,4,5"}
+    vars: *ab
+    pages: 20
+    follow: *cursor
+    allowed: *classes
+    key: *heard
+    omit: *observer
+  - id: walk_region_three_types
+    path: /api/v1/packets
+    query: {region: "{r}", payloadTypes: "2,4,5"}
+    vars: &r
+      r: {path: /api/v1/regions, from: first.slug}
+    pages: 20
+    follow: *cursor
+    allowed: *classes
+    key: *heard
+    omit: *observer
+  - id: walk_sites_ab_until_past
+    path: /api/v1/packets
+    query: {iatas: "{a},{b}", until: "{until}"}
+    vars:
+      a: {path: /api/v1/observers, from: first.iata}
+      b: {path: /api/v1/observers, from: last.iata}
+      until: {path: /api/v1/packets, from: first.lastHeardAt, add: -86400000}
+    pages: 20
+    follow: *cursor
+    allowed: *classes
+    key: *heard
+    omit: *observer
+  - id: walk_region_since
+    path: /api/v1/packets
+    query: {region: "{r}", since: "{since}"}
+    vars:
+      r: {path: /api/v1/regions, from: first.slug}
+      since: {path: /api/v1/packets, from: first.lastHeardAt, add: -4500000}
+    pages: 20
+    follow: *cursor
+    allowed: *classes
+    key: *heard
+    omit: *observer
+  - id: walk_site_a_since_future
+    path: /api/v1/packets
+    query: {iatas: "{a}", since: "{since}"}
+    vars:
+      a: {path: /api/v1/observers, from: first.iata}
+      since: {path: /api/v1/packets, from: first.lastHeardAt, add: 86400000}
+    pages: 20
+    follow: *cursor
     allowed: *classes
     key: *heard
     omit: *observer
