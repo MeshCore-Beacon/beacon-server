@@ -207,12 +207,18 @@ func (c *CmiSession) Backfill(ctx context.Context, budget time.Duration) (CmiSta
 			c.progress.Start(c.state.BackfilledToID)
 		}
 		hi := min(next-1+c.backfillSpan, c.state.BackfillMaxID)
+		timeout := backfillTimeout(c.backfillLimit, deadline)
 		_, err = c.fill(ctx, func() (int64, error) {
-			return backfillWrite(ctx, c.conn, backfillTimeout(c.backfillLimit, deadline), func() (int64, error) {
+			return backfillWrite(ctx, c.conn, timeout, func() (int64, error) {
 				return c.q.FillChannelMessageIATAsByMessages(ctx, sqlc.FillChannelMessageIATAsByMessagesParams{AfterID: next - 1, ThroughID: hi})
 			})
 		})
 		if err != nil {
+			// A short remaining cycle is not evidence that the batch is too large.
+			// Leave its watermark and size intact for the next full budget.
+			if backfillTimedOut(ctx, err) && timeout < backfillMaxTimeout(c.backfillLimit) {
+				return c.state, nil
+			}
 			if backfillTimedOut(ctx, err) && hi-(next-1) > 1 {
 				c.backfillSpan = max(1, (hi-(next-1))/2)
 				continue

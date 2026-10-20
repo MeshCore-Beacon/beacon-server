@@ -60,9 +60,13 @@ func backfillTimedOut(ctx context.Context, err error) bool {
 	return ctx.Err() == nil && isStatementTimeout(err)
 }
 
-func backfillTimeout(limit time.Duration, deadline time.Time) time.Duration {
+func backfillMaxTimeout(limit time.Duration) time.Duration {
 	if limit <= 0 {
 		limit = backfillStatementTimeout
 	}
-	return max(time.Millisecond, min(limit, time.Until(deadline)))
+	return limit
+}
+
+func backfillTimeout(limit time.Duration, deadline time.Time) time.Duration {
+	return max(time.Millisecond, min(backfillMaxTimeout(limit), time.Until(deadline)))
 }

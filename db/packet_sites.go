@@ -208,12 +208,17 @@ func (p *PacketSitesSession) Backfill(ctx context.Context, budget time.Duration)
 		}
 		top := p.state.BackfilledDownToID
 		from := max(top-p.backfillSpan, lo-1)
+		timeout := backfillTimeout(p.backfillLimit, deadline)
 		_, err = p.fillWith(ctx, from, top, func(ctx context.Context, after, through int64) (int64, error) {
-			return backfillWrite(ctx, p.conn, backfillTimeout(p.backfillLimit, deadline), func() (int64, error) {
+			return backfillWrite(ctx, p.conn, timeout, func() (int64, error) {
 				return p.fillStmt(ctx, after, through)
 			})
 		})
 		if err != nil {
+			// Do not carry a deadline-induced shrink into every later cycle.
+			if backfillTimedOut(ctx, err) && timeout < backfillMaxTimeout(p.backfillLimit) {
+				return p.state, nil
+			}
 			if backfillTimedOut(ctx, err) && top-from > 1 {
 				p.backfillSpan = max(1, (top-from)/2)
 				continue
