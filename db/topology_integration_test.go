@@ -56,9 +56,9 @@ func TestTopologyLinksPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO known_routes(path_key,node_ids,hash_prefix,iata,hop_count,first_seen,last_seen) VALUES
- (decode(md5('before'),'hex'),$1,ARRAY['\xaa'::bytea,'\xbb'::bytea],'YKF',2,$4,$4+interval '100 microseconds'),
- (decode(md5('inside'),'hex'),$2,ARRAY['\xbb'::bytea,'\xcc'::bytea],'YKF',2,$4,$4+interval '500 microseconds'),
- (decode(md5('after'),'hex'),$3,ARRAY['\xaa'::bytea,'\xcc'::bytea],'YKF',2,$4,$4+interval '900 microseconds')`,
+ (decode(md5('before'),'hex'),$1,ARRAY['\xaa'::bytea,'\xbb'::bytea],'YKF',2,$4::timestamptz,$4::timestamptz+interval '100 microseconds'),
+ (decode(md5('inside'),'hex'),$2,ARRAY['\xbb'::bytea,'\xcc'::bytea],'YKF',2,$4::timestamptz,$4::timestamptz+interval '500 microseconds'),
+ (decode(md5('after'),'hex'),$3,ARRAY['\xaa'::bytea,'\xcc'::bytea],'YKF',2,$4::timestamptz,$4::timestamptz+interval '900 microseconds')`,
 		ids[:2], ids[1:], []uuid.UUID{ids[0], ids[2]}, now)
 	if err != nil {
 		t.Fatal(err)
