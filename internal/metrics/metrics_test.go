@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 func scrape(t *testing.T) string {
@@ -98,4 +100,37 @@ func TestPlanguardMetricsOffAndEnabled(t *testing.T) {
 	if body := scrape(t); !strings.Contains(body, "\nbeacon_planguard_last_run_timestamp_seconds 0\n") {
 		t.Errorf("enabled check: no timestamp series at 0")
 	}
+}
+
+// The sequence gauge exports the latest snapshot only: a sequence missing from it disappears.
+func TestSequenceCollector(t *testing.T) {
+	c := &sequenceCollector{}
+	count := func() int { return testutilCollect(t, c) }
+	if n := count(); n != 0 {
+		t.Fatalf("%d series before any snapshot", n)
+	}
+	SetSequenceUse([]SequenceUse{{Name: "channels_id_seq", UsedRatio: 0.021}, {Name: "regions_id_seq", UsedRatio: 0}})
+	out := scrape(t)
+	for _, want := range []string{`beacon_db_sequence_used_ratio{sequence="channels_id_seq"} 0.021`, `beacon_db_sequence_used_ratio{sequence="regions_id_seq"} 0`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("scrape lacks %q", want)
+		}
+	}
+	SetSequenceUse([]SequenceUse{{Name: "channels_id_seq", UsedRatio: 0.03}})
+	out = scrape(t)
+	if !strings.Contains(out, `beacon_db_sequence_used_ratio{sequence="channels_id_seq"} 0.03`) || strings.Contains(out, "regions_id_seq") {
+		t.Errorf("after the second snapshot:\n%s", out)
+	}
+}
+
+func testutilCollect(t *testing.T, c prometheus.Collector) int {
+	t.Helper()
+	ch := make(chan prometheus.Metric, 16)
+	c.Collect(ch)
+	close(ch)
+	n := 0
+	for range ch {
+		n++
+	}
+	return n
 }

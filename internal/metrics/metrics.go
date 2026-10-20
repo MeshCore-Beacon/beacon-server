@@ -199,6 +199,41 @@ func SetPgActivity(a PgActivity) {
 	pgActivity.last.Store(&a)
 }
 
+// SequenceUse is how much of one sequence's usable range is already handed out.
+type SequenceUse struct {
+	Name      string
+	UsedRatio float64
+}
+
+var sequenceUsedDesc = prometheus.NewDesc("beacon_db_sequence_used_ratio",
+	"Share of a sequence's usable values already handed out (its own limit or its column type's, whichever is lower).",
+	[]string{"sequence"}, nil)
+
+// sequenceCollector emits the last SequenceUse snapshot; it emits nothing until SetSequenceUse has been called.
+type sequenceCollector struct {
+	last atomic.Pointer[[]SequenceUse]
+}
+
+func (c *sequenceCollector) Describe(ch chan<- *prometheus.Desc) { ch <- sequenceUsedDesc }
+
+func (c *sequenceCollector) Collect(ch chan<- prometheus.Metric) {
+	seqs := c.last.Load()
+	if seqs == nil {
+		return
+	}
+	for _, s := range *seqs {
+		ch <- prometheus.MustNewConstMetric(sequenceUsedDesc, prometheus.GaugeValue, s.UsedRatio, s.Name)
+	}
+}
+
+var sequences = &sequenceCollector{}
+
+// SetSequenceUse replaces the sequence snapshot for the next scrape; a sequence missing from it is no longer exported.
+func SetSequenceUse(seqs []SequenceUse) {
+	cp := append([]SequenceUse(nil), seqs...)
+	sequences.last.Store(&cp)
+}
+
 var watermarkAgeDesc = prometheus.NewDesc("beacon_readmodel_watermark_age_seconds",
 	"Seconds since this process last finished a reconcile of the read model, by model.", []string{"model"}, nil)
 
@@ -271,7 +306,7 @@ func init() {
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		GuardWouldRefuse, GuardRefused, GuardDB, DBTime, HTTPRequest, PoolAcquire,
 		IngestQueueDepth, IngestDropped, JobDuration, JobRows, IndexBytes, IndexBloat,
-		PlanguardFailures, setGauge{PlanguardLastRun, &planguardEnabled}, pgActivity, ReadModelRepaired, ReadModelTrusted, watermarks,
+		PlanguardFailures, setGauge{PlanguardLastRun, &planguardEnabled}, pgActivity, sequences, ReadModelRepaired, ReadModelTrusted, watermarks,
 		PacketSitesFrontLive, PacketSitesSweepPlanOK, PacketSitesBytes, sweepAge,
 	)
 }

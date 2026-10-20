@@ -134,6 +134,54 @@ type fakePgActivity struct {
 
 func (f *fakePgActivity) PgActivity(context.Context) (metrics.PgActivity, error) { return f.a, f.err }
 
+func (f *fakePgActivity) SequenceUse(context.Context) ([]metrics.SequenceUse, error) { return nil, nil }
+
+type fakeSequences struct {
+	fakePgActivity
+	seqs  []metrics.SequenceUse
+	err   error
+	calls int
+}
+
+func (f *fakeSequences) SequenceUse(context.Context) ([]metrics.SequenceUse, error) {
+	f.calls++
+	return f.seqs, f.err
+}
+
+// The task exports each sequence's used share; a failing read keeps the activity metrics and fails nothing.
+func TestPgStatsTaskSequences(t *testing.T) {
+	f := &fakeSequences{fakePgActivity: fakePgActivity{a: metrics.PgActivity{WALBytes: 9}},
+		seqs: []metrics.SequenceUse{{Name: "channels_id_seq", UsedRatio: 0.25}, {Name: "regions_id_seq", UsedRatio: 0}}}
+	task := PgStatsTask(f, time.Minute)
+	if err := task.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.GatherAndCompare(metrics.Registry, strings.NewReader(`
+# HELP beacon_db_sequence_used_ratio Share of a sequence's usable values already handed out (its own limit or its column type's, whichever is lower).
+# TYPE beacon_db_sequence_used_ratio gauge
+beacon_db_sequence_used_ratio{sequence="channels_id_seq"} 0.25
+beacon_db_sequence_used_ratio{sequence="regions_id_seq"} 0
+`), "beacon_db_sequence_used_ratio"); err != nil {
+		t.Error(err)
+	}
+	f.err, f.a.WALBytes = errors.New("permission denied for sequence x"), 11
+	for range 3 {
+		if err := task.Run(context.Background()); err != nil {
+			t.Errorf("error returned: %v", err)
+		}
+	}
+	if f.calls != 4 {
+		t.Errorf("SequenceUse called %d times, want 4", f.calls)
+	}
+	if err := testutil.GatherAndCompare(metrics.Registry, strings.NewReader(`
+# HELP beacon_pg_wal_bytes_total WAL bytes PostgreSQL has generated.
+# TYPE beacon_pg_wal_bytes_total counter
+beacon_pg_wal_bytes_total 11
+`), "beacon_pg_wal_bytes_total"); err != nil {
+		t.Error(err)
+	}
+}
+
 func TestPgStatsTaskSetsActivity(t *testing.T) {
 	f := &fakePgActivity{a: metrics.PgActivity{WALBytes: 5, CheckpointsTimed: 3, CheckpointsRequested: 1, XIDAge: 42}}
 	task := PgStatsTask(f, time.Minute)

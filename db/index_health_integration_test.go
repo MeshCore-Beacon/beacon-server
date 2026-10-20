@@ -123,3 +123,63 @@ func TestPgActivityPostgres(t *testing.T) {
 		}
 	}
 }
+
+// The headroom of every sequence in the schema, against the tighter of its own limit and its column's type.
+func TestSequenceUsePostgres(t *testing.T) {
+	ctx, pool := schemaPool(t)
+	if err := RunMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	mustPoolExec(t, ctx, pool, `SELECT setval('channels_id_seq', 1073741824);
+SELECT setval('packet_observations_id_seq', 3000000000);
+CREATE SEQUENCE probe_seq AS bigint;
+CREATE TABLE probe (id integer DEFAULT nextval('probe_seq'));
+ALTER SEQUENCE probe_seq OWNED BY probe.id;
+SELECT setval('probe_seq', 1073741824);
+CREATE SEQUENCE down_seq INCREMENT -1 MINVALUE 1 MAXVALUE 100 START 100;
+SELECT nextval('down_seq') FROM generate_series(1, 51);
+CREATE TABLE ident (id integer GENERATED ALWAYS AS IDENTITY);
+INSERT INTO ident DEFAULT VALUES;
+CREATE SCHEMA IF NOT EXISTS seq_elsewhere;
+CREATE SEQUENCE IF NOT EXISTS seq_elsewhere.far_seq;`)
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DROP SCHEMA seq_elsewhere CASCADE") })
+
+	store := New(pool, pool, 0, 0)
+	got, err := store.SequenceUse(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	use := map[string]float64{}
+	for i, s := range got {
+		use[s.Name] = s.UsedRatio
+		if i > 0 && got[i-1].Name >= s.Name {
+			t.Errorf("not sorted by name: %q then %q", got[i-1].Name, s.Name)
+		}
+	}
+	want := map[string]float64{
+		"channels_id_seq":            0.5,       // integer sequence half used
+		"packet_observations_id_seq": 0,         // bigint column: 3e9 is nothing
+		"regions_id_seq":             0,         // never called
+		"probe_seq":                  0.5,       // bigint sequence, integer column: the column's limit wins
+		"down_seq":                   50.0 / 99, // descending, measured from the top
+		"ident_id_seq":               0,         // the identity column's sequence is listed
+	}
+	for name, w := range want {
+		g, ok := use[name]
+		if !ok {
+			t.Errorf("%s missing from %v", name, use)
+			continue
+		}
+		if math.Abs(g-w) > 1e-6 {
+			t.Errorf("%s = %v, want %v", name, g, w)
+		}
+	}
+	if _, ok := use["far_seq"]; ok {
+		t.Error("a sequence in another schema is listed")
+	}
+	for name, v := range use {
+		if v < 0 || v > 1 {
+			t.Errorf("%s = %v, outside 0..1", name, v)
+		}
+	}
+}
