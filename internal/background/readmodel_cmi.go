@@ -224,6 +224,9 @@ func CmiReadOnlyTrust(ctx context.Context, check func(context.Context) (db.CmiSt
 	case !v.OK():
 		slog.Warn("cmi not trusted on this read-only server: the newest messages fail the exact check", "component", "readmodel", "missing", v.Missing, "extra", v.Extra)
 	default:
+		if !trust.Trusted() {
+			slog.Info("cmi trusted on this read-only server: region and scope message pages read channel_message_iatas", "component", "readmodel")
+		}
 		trust.Earn()
 		trust.Repaired(gen)
 		return
