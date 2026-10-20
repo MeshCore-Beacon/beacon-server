@@ -58,7 +58,7 @@ var Slow = map[string]bool{
 // ClassOf returns the plan class for a sqlc statement name.
 func ClassOf(name string) Class {
 	switch {
-	case Slow[name], RestoredFallbacks[name]:
+	case Slow[name], ReadModelFallbacks[name]:
 		return ClassSlow
 	case Cached[name]:
 		return ClassG
