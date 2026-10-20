@@ -119,6 +119,10 @@ var (
 
 	// ReadModelRepaired counts the rows each read model's reconcile wrote: anything above zero was missed by a writer
 	// that bypassed the model.
+	APIUnavailable = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "beacon_api_unavailable_total",
+		Help: "503s a page answered because its data was not ready (reason not_ready) or the slow pool was busy (reason slow_pool_busy), by the model the page reads.",
+	}, []string{"reason", "model"})
 	ReadModelRepaired = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "beacon_readmodel_repaired_rows_total",
 		Help: "Rows the read-model reconcile repaired, by model.",
@@ -308,7 +312,7 @@ func init() {
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		GuardWouldRefuse, GuardRefused, GuardDB, DBTime, HTTPRequest, PoolAcquire,
 		IngestQueueDepth, IngestDropped, JobDuration, JobRows, IndexBytes, IndexBloat,
-		PlanguardFailures, setGauge{PlanguardLastRun, &planguardEnabled}, pgActivity, sequences, ReadModelRepaired, ReadModelTrusted, watermarks,
+		PlanguardFailures, setGauge{PlanguardLastRun, &planguardEnabled}, pgActivity, sequences, APIUnavailable, ReadModelRepaired, ReadModelTrusted, watermarks,
 		PacketSitesFrontLive, PacketSitesSweepPlanOK, PacketSitesBytes, sweepAge,
 	)
 }

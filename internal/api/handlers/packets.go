@@ -137,7 +137,7 @@ func listPackets(reader api.Reader) http.HandlerFunc {
 			packets, err = reader.ListPackets(r.Context(), payloadTypes, routeTypes, iatas, scopes, since, until, cursor, pageCursor, limit)
 		}
 		if err != nil {
-			if !respondUnavailable(w, err) {
+			if !respondUnavailableFor(w, err, modelPacketSites) {
 				respondError(w, http.StatusInternalServerError, "internal server error")
 			}
 			return

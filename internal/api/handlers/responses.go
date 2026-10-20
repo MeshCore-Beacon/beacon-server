@@ -21,7 +21,7 @@ import (
 func respondUnavailable(w http.ResponseWriter, err error) bool {
 	switch {
 	case errors.Is(err, api.ErrSlowPoolBusy):
-		slog.Warn("api: slow request refused, every slow connection is busy", "component", "api")
+		warnSlowPoolBusy()
 		guards.WriteRefusal(w, &guards.Refusal{Guard: "slow_pool", Status: http.StatusServiceUnavailable, RetryAfter: 5,
 			Code: "service_unavailable", Message: "The server is busy with other slow requests. Retry later."})
 		return true
