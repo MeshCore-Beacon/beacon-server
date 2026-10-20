@@ -330,8 +330,9 @@ WITH scanned AS MATERIALIZED (
     LIMIT @scan_depth) w
   -- No packet was first heard at or after since: nothing can match, so no range is read. A packet's last_heard_at
   -- is at or after its first_heard_at, except the rows idx_packets_heard_inverted holds.
-  WHERE EXISTS (SELECT 1 FROM packets g WHERE g.last_heard_at >= @since_ts::timestamptz)
-     OR EXISTS (SELECT 1 FROM packets g WHERE (g.first_heard_at > g.last_heard_at) IS TRUE AND g.first_heard_at >= @since_ts::timestamptz)
+  -- Both maxima are one index probe each.
+  WHERE (SELECT max(g.last_heard_at) FROM packets g) >= @since_ts::timestamptz
+     OR (SELECT max(g.first_heard_at) FROM packets g WHERE (g.first_heard_at > g.last_heard_at) IS TRUE) >= @since_ts::timestamptz
 ), floor AS (
   -- Every range that filled scan_depth has unread entries below its last one; the highest such entry bounds
   -- what this page knows exactly.
@@ -377,8 +378,9 @@ WITH scanned AS MATERIALIZED (
     LIMIT @scan_depth) w
   -- No packet was first heard at or after since: nothing can match, so no range is read. A packet's last_heard_at
   -- is at or after its first_heard_at, except the rows idx_packets_heard_inverted holds.
-  WHERE EXISTS (SELECT 1 FROM packets g WHERE g.last_heard_at >= @since_ts::timestamptz)
-     OR EXISTS (SELECT 1 FROM packets g WHERE (g.first_heard_at > g.last_heard_at) IS TRUE AND g.first_heard_at >= @since_ts::timestamptz)
+  -- Both maxima are one index probe each.
+  WHERE (SELECT max(g.last_heard_at) FROM packets g) >= @since_ts::timestamptz
+     OR (SELECT max(g.first_heard_at) FROM packets g WHERE (g.first_heard_at > g.last_heard_at) IS TRUE) >= @since_ts::timestamptz
 ), floor AS (
   -- Every range that filled scan_depth has unread entries below its last one; the highest such entry bounds
   -- what this page knows exactly.
