@@ -56,6 +56,7 @@ type PacketSitesSession struct {
 	duty     float64
 	slice    int64
 	progress *FillProgress
+	analyzed bool // ANALYZE ran after this session's first backfill slice
 
 	// fillStmt runs one fill; tests replace it. fills lists the (after, through] ranges filled, and retries counts
 	// 23503 retries, for tests.
@@ -83,6 +84,11 @@ func (s *Store) BeginPacketSites(ctx context.Context) (*PacketSitesSession, bool
 		conn.Release()
 		return nil, false, nil
 	}
+	if _, err := conn.Exec(ctx, fillPlanMode); err != nil {
+		_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock($1, hashtext(current_schema()))", packetSitesReconcileLockKey)
+		conn.Release()
+		return nil, false, err
+	}
 	pace := s.FillPacing()
 	p := &PacketSitesSession{store: s, conn: conn, q: sqlc.New(conn),
 		pause: pace.MinPause, duty: pace.Duty, slice: pace.PacketSitesSlice, progress: &s.packetSitesProgress}
@@ -93,6 +99,7 @@ func (s *Store) BeginPacketSites(ctx context.Context) (*PacketSitesSession, bool
 		p.Close(ctx)
 		return nil, false, fmt.Errorf("packet_sites state: %w", err)
 	}
+	analyzeIfUnanalyzed(ctx, conn, "packet_sites")
 	return p, true, nil
 }
 
@@ -101,7 +108,8 @@ func (p *PacketSitesSession) Close(ctx context.Context) {
 	if p.conn == nil {
 		return
 	}
-	if _, err := p.conn.Exec(ctx, "SELECT pg_advisory_unlock($1, hashtext(current_schema()))", packetSitesReconcileLockKey); err != nil {
+	_, resetErr := p.conn.Exec(ctx, "RESET plan_cache_mode")
+	if _, err := p.conn.Exec(ctx, "SELECT pg_advisory_unlock($1, hashtext(current_schema()))", packetSitesReconcileLockKey); err != nil || resetErr != nil {
 		_ = p.conn.Conn().Close(ctx)
 	}
 	p.conn.Release()
@@ -194,6 +202,11 @@ func (p *PacketSitesSession) Backfill(ctx context.Context, budget time.Duration)
 		p.state.BackfilledDownToID = from
 		if err := p.save(ctx); err != nil {
 			return p.state, err
+		}
+		if !p.analyzed {
+			// The table now holds a slice's rows; plan the next slices on them.
+			analyzeFillTable(ctx, p.conn, "packet_sites")
+			p.analyzed = true
 		}
 		if p.progress != nil && p.progress.Due() {
 			p.progress.Log("packet_sites backfill progress", p.state.WriterFromID-from, from-(lo-1),

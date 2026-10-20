@@ -8,6 +8,9 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // FillPacing paces the one-off backfills (packet_sites, cmi and observation payload types). After each slice or
@@ -124,4 +127,48 @@ func (p *FillProgress) Log(msg string, done, remaining int64, attrs ...any) (tim
 	}
 	slog.Info(msg, attrs...)
 	return eta, ok
+}
+
+// fillPlanMode is set on every read-model fill and reconcile connection for the session (and reset on Close). With
+// automatic plan caching, a prepared fill statement switches to a generic plan after five executions. Built while a
+// new read-model table has no statistics, that plan assumes a few thousand rows per slice; measured on 3 million
+// observations, the 6th 500,000-id packet_sites slice ran past a 2-minute timeout instead of taking 14 s. Custom
+// plans see each slice's real bounds. The maint pool sets the same at connect; this keeps it when a pooler drops
+// startup parameters, or when the store runs on another pool.
+const fillPlanMode = "SET plan_cache_mode = force_custom_plan"
+
+// fillAnalyzeLockTimeout bounds how long ANALYZE of a read-model table waits for its lock (an autovacuum holds it);
+// tests shorten it.
+var fillAnalyzeLockTimeout = "10s"
+
+// analyzeIfUnanalyzed ANALYZEs table when it has never been analyzed or vacuumed (reltuples -1): a new read-model
+// table, whose fill would otherwise be planned blind. A failure is logged and ignored.
+func analyzeIfUnanalyzed(ctx context.Context, conn *pgxpool.Conn, table string) {
+	var never bool
+	if err := conn.QueryRow(ctx, "SELECT reltuples < 0 FROM pg_class WHERE oid = $1::regclass", table).Scan(&never); err != nil {
+		slog.Warn("read-model statistics check failed; the fill goes on", "component", "readmodel", "table", table, "error", err)
+		return
+	}
+	if never {
+		analyzeFillTable(ctx, conn, table)
+	}
+}
+
+// analyzeFillTable runs ANALYZE table with no statement timeout and a bounded lock wait, so the fill's later
+// statements are planned on the table's real size. It is cheap: at the default statistics target it samples at most
+// 30,000 rows. A failure is logged and ignored: statistics help the plans, the fill does not need them.
+func analyzeFillTable(ctx context.Context, conn *pgxpool.Conn, table string) {
+	err := pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SET LOCAL statement_timeout = 0"); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, "SET LOCAL lock_timeout = '"+fillAnalyzeLockTimeout+"'"); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, "ANALYZE "+pgx.Identifier{table}.Sanitize())
+		return err
+	})
+	if err != nil {
+		slog.Warn("read-model ANALYZE failed; the fill goes on", "component", "readmodel", "table", table, "error", err)
+	}
 }

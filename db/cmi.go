@@ -58,6 +58,7 @@ type CmiSession struct {
 	duty     float64
 	batch    int64
 	progress *FillProgress
+	analyzed bool // ANALYZE ran after this session's first backfill batch
 }
 
 // BeginCmi takes the cmi lock for this schema on a dedicated connection. ok is false when another session holds it.
@@ -78,6 +79,12 @@ func (s *Store) BeginCmi(ctx context.Context) (*CmiSession, bool, error) {
 		conn.Release()
 		return nil, false, nil
 	}
+	if _, err := conn.Exec(ctx, fillPlanMode); err != nil {
+		_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock($1, hashtext(current_schema()))", cmiReconcileLockKey)
+		conn.Release()
+		return nil, false, err
+	}
+	analyzeIfUnanalyzed(ctx, conn, "channel_message_iatas")
 	pace := s.FillPacing()
 	return &CmiSession{conn: conn, q: sqlc.New(conn),
 		pause: pace.MinPause, duty: pace.Duty, batch: pace.CmiBatch, progress: &s.cmiProgress}, true, nil
@@ -88,7 +95,8 @@ func (c *CmiSession) Close(ctx context.Context) {
 	if c.conn == nil {
 		return
 	}
-	if _, err := c.conn.Exec(ctx, "SELECT pg_advisory_unlock($1, hashtext(current_schema()))", cmiReconcileLockKey); err != nil {
+	_, resetErr := c.conn.Exec(ctx, "RESET plan_cache_mode")
+	if _, err := c.conn.Exec(ctx, "SELECT pg_advisory_unlock($1, hashtext(current_schema()))", cmiReconcileLockKey); err != nil || resetErr != nil {
 		_ = c.conn.Conn().Close(ctx)
 	}
 	c.conn.Release()
@@ -194,6 +202,11 @@ func (c *CmiSession) Backfill(ctx context.Context, budget time.Duration) (CmiSta
 		c.state.BackfilledToID = hi
 		if err := c.save(ctx); err != nil {
 			return c.state, err
+		}
+		if !c.analyzed {
+			// The table now holds a batch's rows; plan the next batches on them.
+			analyzeFillTable(ctx, c.conn, "channel_message_iatas")
+			c.analyzed = true
 		}
 		if c.progress != nil && c.progress.Due() {
 			c.logProgress(ctx)

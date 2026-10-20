@@ -10,6 +10,7 @@ import (
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
+	"github.com/jackc/pgx/v5"
 )
 
 // ObservationPayloadTypeKey is the background_state key of the observation payload-type backfill.
@@ -79,7 +80,20 @@ func (s *Store) BackfillObservationPayloadTypes(ctx context.Context, fromID, toI
 	if maxRows <= 0 {
 		return 0, 0, fmt.Errorf("backfill observation payload types: maxRows %d, want > 0", maxRows)
 	}
-	r, err := s.q.BackfillObservationPayloadTypes(ctx, sqlc.BackfillObservationPayloadTypesParams{FromID: fromID, ToID: toID, MaxRows: maxRows})
+	params := sqlc.BackfillObservationPayloadTypesParams{FromID: fromID, ToID: toID, MaxRows: maxRows}
+	var r sqlc.BackfillObservationPayloadTypesRow
+	if s.pool != nil {
+		// Custom plans for this statement whatever the pool's setting; see fillPlanMode.
+		err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, "SET LOCAL plan_cache_mode = force_custom_plan"); err != nil {
+				return err
+			}
+			r, err = sqlc.New(tx).BackfillObservationPayloadTypes(ctx, params)
+			return err
+		})
+	} else {
+		r, err = s.q.BackfillObservationPayloadTypes(ctx, params)
+	}
 	if err != nil {
 		return 0, 0, err
 	}
