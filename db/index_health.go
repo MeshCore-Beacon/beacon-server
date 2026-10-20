@@ -21,6 +21,19 @@ type indexBaseline struct {
 	BytesPerRow float64 `json:"bytes_per_row"`
 }
 
+// freshBytesPerRow are the bytes per row of a freshly built packet_sites index (sorted builds on 7.4M rows). That
+// table is never built fresh, so its first-seen size would be a half-churned baseline: these indexes start from the
+// constant instead, once the table holds freshBaselineMinRows rows (smaller tables give meaningless ratios). A
+// rebuild (a new filenode) re-baselines from the measurement as for any index.
+var freshBytesPerRow = map[string]float64{
+	"packet_sites_pkey":           40.5,
+	"idx_packet_sites_site":       59.1,
+	"idx_packet_sites_site_type":  49.9,
+	"idx_packet_sites_site_scope": 58.4,
+}
+
+const freshBaselineMinRows = 100_000
+
 // IndexHealth is one index's size and its bytes per row relative to its baseline. HasRatio is
 // false for an index that has never been analyzed.
 type IndexHealth struct {
@@ -98,7 +111,15 @@ func (s *Store) MeasureIndexHealth(ctx context.Context) ([]IndexHealth, error) {
 		b, ok := baselines[x.name]
 		if x.reltuples > 0 {
 			bpr := float64(x.bytes) / x.reltuples
-			if !ok || b.Filenode != x.filenode || b.BytesPerRow <= 0 {
+			fresh, isFresh := freshBytesPerRow[x.name]
+			switch {
+			case ok && b.Filenode == x.filenode && b.BytesPerRow > 0:
+			case isFresh && !ok && x.reltuples < freshBaselineMinRows:
+				out = append(out, h) // too small for a ratio; no baseline yet
+				continue
+			case isFresh && !ok:
+				b, ok = indexBaseline{Filenode: x.filenode, BytesPerRow: fresh}, true
+			default:
 				b, ok = indexBaseline{Filenode: x.filenode, BytesPerRow: bpr}, true
 			}
 			h.Ratio, h.HasRatio = bpr/b.BytesPerRow, true

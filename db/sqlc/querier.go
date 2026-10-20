@@ -415,6 +415,7 @@ type Querier interface {
 	// The first message id above after_id, or 0 when there is none.
 	NextChannelMessageID(ctx context.Context, afterID int64) (int64, error)
 	OldestMissingRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
+	PacketSitesTotalBytes(ctx context.Context) (int64, error)
 	PruneImportedRegions(ctx context.Context, keep []string) ([]string, error)
 	// Drops imports for IATAs no longer configured, so their manual border returns.
 	PruneZoneBoundaries(ctx context.Context, keep []string) ([]string, error)
@@ -513,6 +514,13 @@ type Querier interface {
 	SetNodeMultibyteTraces(ctx context.Context, id uuid.UUID) error
 	SetPacketDecrypted(ctx context.Context, packetHash []byte) error
 	SetRollupHourPartial(ctx context.Context, hour pgtype.Timestamptz) error
+	// Read-only. Visits, through each time-ordered packet_sites index, every entry whose key was written in the last
+	// lookback (2 minutes). An index scan that reaches an entry whose heap tuple is dead to every snapshot sets the
+	// entry's LP_DEAD hint; when that leaf later fills, the inserting backend deletes hinted entries instead of splitting
+	// (nbtree simple deletion). Keeps the three indexes at about 2x a fresh build instead of 4-9x. Changes no row.
+	// The ORDER BY ... LIMIT keeps every lateral a per-front index range scan (never flattened into a join).
+	// The cap is far above any front's 2-minute volume (the busiest site: about 150 entries) and only bounds the gauge.
+	SweepPacketSitesFronts(ctx context.Context, lookback pgtype.Interval) (SweepPacketSitesFrontsRow, error)
 	// Write-through for a cached keyed channel: the UpsertChannel conflict update, by id.
 	// No row (deleted or re-keyed since cached) sends the caller back to UpsertChannel.
 	TouchChannel(ctx context.Context, arg TouchChannelParams) (int32, error)

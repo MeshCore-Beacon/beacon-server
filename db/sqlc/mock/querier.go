@@ -2558,6 +2558,21 @@ func (mr *MockQuerierMockRecorder) OldestMissingRollupHour(ctx any) *gomock.Call
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OldestMissingRollupHour", reflect.TypeOf((*MockQuerier)(nil).OldestMissingRollupHour), ctx)
 }
 
+// PacketSitesTotalBytes mocks base method.
+func (m *MockQuerier) PacketSitesTotalBytes(ctx context.Context) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PacketSitesTotalBytes", ctx)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PacketSitesTotalBytes indicates an expected call of PacketSitesTotalBytes.
+func (mr *MockQuerierMockRecorder) PacketSitesTotalBytes(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PacketSitesTotalBytes", reflect.TypeOf((*MockQuerier)(nil).PacketSitesTotalBytes), ctx)
+}
+
 // PruneImportedRegions mocks base method.
 func (m *MockQuerier) PruneImportedRegions(ctx context.Context, keep []string) ([]string, error) {
 	m.ctrl.T.Helper()
@@ -3217,6 +3232,21 @@ func (m *MockQuerier) SetRollupHourPartial(ctx context.Context, hour pgtype.Time
 func (mr *MockQuerierMockRecorder) SetRollupHourPartial(ctx, hour any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetRollupHourPartial", reflect.TypeOf((*MockQuerier)(nil).SetRollupHourPartial), ctx, hour)
+}
+
+// SweepPacketSitesFronts mocks base method.
+func (m *MockQuerier) SweepPacketSitesFronts(ctx context.Context, lookback pgtype.Interval) (db.SweepPacketSitesFrontsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SweepPacketSitesFronts", ctx, lookback)
+	ret0, _ := ret[0].(db.SweepPacketSitesFrontsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SweepPacketSitesFronts indicates an expected call of SweepPacketSitesFronts.
+func (mr *MockQuerierMockRecorder) SweepPacketSitesFronts(ctx, lookback any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SweepPacketSitesFronts", reflect.TypeOf((*MockQuerier)(nil).SweepPacketSitesFronts), ctx, lookback)
 }
 
 // TouchChannel mocks base method.

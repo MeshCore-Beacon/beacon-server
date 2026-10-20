@@ -32,7 +32,20 @@ func TestHandlerServesBeaconMetrics(t *testing.T) {
 	ReadModelRepaired.WithLabelValues("cmi_test").Add(3)
 	ReadModelTrusted.WithLabelValues("cmi_test").Set(1)
 	SetReadModelWatermark("cmi_test", time.Now().Add(-90*time.Second))
+	PacketSitesFrontLive.WithLabelValues("idx_packet_sites_site").Set(4)
+	PacketSitesSweepPlanOK.Set(1)
+	PacketSitesBytes.Set(8192)
+	MarkPacketSitesSwept(time.Now().Add(-90 * time.Second))
 	body := scrape(t)
+	var sweepAge float64
+	for _, line := range strings.Split(body, "\n") {
+		if v, ok := strings.CutPrefix(line, "beacon_packet_sites_sweep_age_seconds "); ok {
+			sweepAge, _ = strconv.ParseFloat(v, 64)
+		}
+	}
+	if sweepAge < 90 || sweepAge > 120 {
+		t.Errorf("sweep age = %v, want about 90", sweepAge)
+	}
 	var age float64
 	for _, line := range strings.Split(body, "\n") {
 		if v, ok := strings.CutPrefix(line, `beacon_readmodel_watermark_age_seconds{model="cmi_test"} `); ok {
@@ -45,6 +58,8 @@ func TestHandlerServesBeaconMetrics(t *testing.T) {
 	for _, want := range []string{
 		`beacon_readmodel_repaired_rows_total{model="cmi_test"} 3`, `beacon_readmodel_trusted{model="cmi_test"} 1`,
 		`beacon_guard_would_refuse_total{family="other",guard="cap"} 1`,
+		`beacon_packet_sites_front_live{index="idx_packet_sites_site"} 4`, `beacon_packet_sites_sweep_plan_ok 1`,
+		`beacon_packet_sites_bytes 8192`,
 		`beacon_pg_wal_bytes_total 7`, `beacon_pg_checkpoints_total{kind="requested"} 1`, `beacon_pg_xid_age 9`,
 		"go_goroutines",
 	} {
