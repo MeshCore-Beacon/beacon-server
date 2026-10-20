@@ -314,11 +314,10 @@ FROM o JOIN p ON p.packet_hash = o.h`, hashes, iatas, ats); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `
-CREATE TABLE packet_sites AS
-SELECT po.packet_hash, po.iata, max(po.heard_at) AS site_heard_at, p.payload_type, p.route_type, p.scope_id
+INSERT INTO packet_sites (packet_hash, iata, site_heard_at, first_heard_at, payload_type, route_type, scope_id)
+SELECT po.packet_hash, po.iata, max(po.heard_at), p.first_heard_at, p.payload_type, p.route_type, p.scope_id
 FROM packet_observations po JOIN packets p USING (packet_hash)
-GROUP BY po.packet_hash, po.iata, p.payload_type, p.route_type, p.scope_id;
-CREATE INDEX ON packet_sites (iata, site_heard_at DESC, packet_hash DESC);
+GROUP BY po.packet_hash, po.iata, p.first_heard_at, p.payload_type, p.route_type, p.scope_id;
 ANALYZE packet_sites;`); err != nil {
 		t.Fatal(err)
 	}

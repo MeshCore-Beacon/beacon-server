@@ -471,6 +471,16 @@ type PacketObservation struct {
 	AirtimeMs         *float32           `json:"airtime_ms"`
 }
 
+type PacketSite struct {
+	PacketHash   []byte             `json:"packet_hash"`
+	Iata         string             `json:"iata"`
+	SiteHeardAt  pgtype.Timestamptz `json:"site_heard_at"`
+	FirstHeardAt pgtype.Timestamptz `json:"first_heard_at"`
+	PayloadType  int16              `json:"payload_type"`
+	RouteType    int16              `json:"route_type"`
+	ScopeID      *int32             `json:"scope_id"`
+}
+
 type ReconfirmAmb struct {
 	Iata   string `json:"iata"`
 	Len    int32  `json:"len"`

@@ -47,6 +47,14 @@ func applyBaseline(t *testing.T, ctx context.Context, tx pgx.Tx) {
 	if _, err := tx.Exec(ctx, string(cmi)); err != nil {
 		t.Fatal(err)
 	}
+	// and the site read-model table the observation writer maintains
+	sites, err := migrationFiles.ReadFile("migrations/" + packetSitesMigrations[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, string(sites)); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := tx.Exec(ctx, "INSERT INTO iata_codes (iata) VALUES ('YVR'),('YYJ'),('YYZ'),('YOW')"); err != nil {
 		t.Fatal(err)
 	}
