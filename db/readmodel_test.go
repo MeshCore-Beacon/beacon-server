@@ -292,3 +292,27 @@ func TestInsertObservationSiteFallbackDropsTrust(t *testing.T) {
 		})
 	}
 }
+
+// The message writer drops cmi trust again once the unseeded fallback has returned: a reconcile that took its
+// snapshot between the first invalidation and the fallback's commit must not be the one that restores trust.
+func TestCmiUnseededFallbackInvalidatesAfter(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mock := mockdb.NewMockQuerier(ctrl)
+	tr := NewTrust("cmi_unseeded_after_test", true, CmiTrustPolicy)
+	tr.Earn()
+	s := &Store{q: mock}
+	WithReadModels(&ReadModels{Cmi: tr})(s)
+	var during uint64
+	mock.EXPECT().InsertChannelMessage(gomock.Any(), gomock.Any()).Return(sqlc.InsertChannelMessageRow{}, errors.New("seed failed"))
+	mock.EXPECT().InsertChannelMessageUnseeded(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(context.Context, sqlc.InsertChannelMessageUnseededParams) (sqlc.InsertChannelMessageUnseededRow, error) {
+			during = tr.Generation()
+			return sqlc.InsertChannelMessageUnseededRow{ID: 9}, nil
+		})
+	if m, err := s.InsertChannelMessage(context.Background(), ingest.InsertChannelMessageParams{ChannelID: 1, PacketHash: []byte{2}}); err != nil || m == nil {
+		t.Fatalf("fallback = %+v, %v", m, err)
+	}
+	if tr.Generation() <= during {
+		t.Fatalf("generation %d after the unseeded insert, %d during it: no invalidation after the fallback", tr.Generation(), during)
+	}
+}
