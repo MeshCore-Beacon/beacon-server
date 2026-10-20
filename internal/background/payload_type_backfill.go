@@ -27,6 +27,12 @@ type payloadTypeBackfiller interface {
 	SaveState(context.Context, string, any) error
 }
 
+// fillPacer is a store that carries the backfills' pacing (db.Store does); a store without it is paced with
+// db.DefaultFillPacing.
+type fillPacer interface {
+	FillPacing() db.FillPacing
+}
+
 // PayloadTypeBackfillTask types observations stored without a payload type, a bounded id range at a time.
 func PayloadTypeBackfillTask(store payloadTypeBackfiller, interval time.Duration) Task {
 	return payloadTypeBackfillTask(store, interval, payloadTypeBackfillSpan, payloadTypeBackfillRows, payloadTypeBackfillBatches)
@@ -36,7 +42,9 @@ func PayloadTypeBackfillTask(store payloadTypeBackfiller, interval time.Duration
 // to the max id read at the run's start. Each batch reads at most span ids and types at most
 // maxRows of them; when it hits maxRows it continues after the last row it picked. It saves the
 // next id after every batch, so a failed or interrupted run resumes where it stopped, and it saves done when a batch
-// slot finds the walk past the max (at once for an empty table). Once done, a run only reads the state.
+// slot finds the walk past the max (at once for an empty table). Once done, a run only reads the state. After each
+// batch it waits as db.FillPacing.Wait does with the store's pacing, so it is busy at most the pacing's duty of the
+// time.
 //
 // Before its first batch, a task value asks once whether any observation up to the max lacks a
 // payload type. When none does it saves done at once instead of walking the whole id range. That
@@ -46,6 +54,11 @@ func PayloadTypeBackfillTask(store payloadTypeBackfiller, interval time.Duration
 // (logged once), the task walks as before and never probes again.
 func payloadTypeBackfillTask(store payloadTypeBackfiller, interval time.Duration, span int64, maxRows int32, batches int) Task {
 	probed := false
+	pace := db.DefaultFillPacing()
+	if p, ok := store.(fillPacer); ok {
+		pace = p.FillPacing()
+	}
+	var progress db.FillProgress
 	return Task{
 		Name:     "payload_type_backfill",
 		Interval: interval,
@@ -77,11 +90,17 @@ func payloadTypeBackfillTask(store payloadTypeBackfiller, interval time.Duration
 				}
 			}
 			next := max(st.NextID, minID)
+			progress.Start(maxID + 1 - next)
 			var rows int64
 			defer func() {
 				metrics.JobRows.WithLabelValues("payload_type_backfill").Add(float64(rows))
-				slog.Info("observation payload type backfill progress: observer advert pages answer 503 until it is done",
-					"component", "background", "next_id", next, "max_id", maxID, "rows", rows)
+				remaining := max(maxID+1-next, 0)
+				attrs := []any{"component", "background", "next_id", next, "max_id", maxID, "rows", rows,
+					"ids_done", max(next-minID, 0), "ids_remaining", remaining}
+				if eta, ok := progress.ETA(remaining); ok {
+					attrs = append(attrs, "eta", eta.Round(time.Second).String())
+				}
+				slog.Info("observation payload type backfill progress: observer advert pages answer 503 until it is done", attrs...)
 			}()
 			for range batches {
 				if maxID == 0 || next > maxID {
@@ -91,6 +110,7 @@ func payloadTypeBackfillTask(store payloadTypeBackfiller, interval time.Duration
 					slog.Info("observation payload types complete", "component", "background", "next_id", next)
 					return nil
 				}
+				began := time.Now()
 				n, to, err := store.BackfillObservationPayloadTypes(ctx, next, min(next+span, maxID+1), maxRows)
 				if err != nil {
 					return fmt.Errorf("payload type backfill: %w", err)
@@ -99,6 +119,9 @@ func payloadTypeBackfillTask(store payloadTypeBackfiller, interval time.Duration
 				next = to
 				if err := store.SaveState(ctx, db.ObservationPayloadTypeKey, db.ObservationPayloadTypeState{NextID: next}); err != nil {
 					return fmt.Errorf("payload type backfill: %w", err)
+				}
+				if !pace.Wait(ctx, time.Since(began)) {
+					return ctx.Err()
 				}
 			}
 			return nil
