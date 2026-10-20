@@ -523,6 +523,23 @@ func (q *Queries) GetBackgroundState(ctx context.Context, key string) (json.RawM
 	return value, err
 }
 
+const getBackgroundStateAge = `-- name: GetBackgroundStateAge :one
+SELECT value, extract(epoch FROM statement_timestamp() - updated_at)::float8 AS age_seconds FROM background_state WHERE key = $1
+`
+
+type GetBackgroundStateAgeRow struct {
+	Value      json.RawMessage `json:"value"`
+	AgeSeconds float64         `json:"age_seconds"`
+}
+
+// A state with its age on the database clock: how long since its writer last saved it.
+func (q *Queries) GetBackgroundStateAge(ctx context.Context, key string) (GetBackgroundStateAgeRow, error) {
+	row := q.db.QueryRow(ctx, getBackgroundStateAge, key)
+	var i GetBackgroundStateAgeRow
+	err := row.Scan(&i.Value, &i.AgeSeconds)
+	return i, err
+}
+
 const getChannelByID = `-- name: GetChannelByID :one
 SELECT id, channel_hash, key_fingerprint, name, hashtag, is_hashtag, is_public, key_known, first_seen, last_seen, message_count FROM channels WHERE id = $1
 `
@@ -2726,6 +2743,14 @@ WITH inserted AS (
   FROM packet_observations po JOIN inserted i ON i.packet_hash = po.packet_hash
   WHERE $6::boolean
   ON CONFLICT (hour) DO UPDATE SET enqueued_at = now()
+), seed AS (
+  -- Every stored observation's site, in the same statement; a later observation adds its own site.
+  INSERT INTO channel_message_iatas (message_id, iata, channel_id, scope_id)
+  SELECT DISTINCT i.id, po.iata, i.channel_id, p.scope_id
+  FROM inserted i
+  JOIN packets p ON p.packet_hash = i.packet_hash
+  JOIN packet_observations po ON po.packet_hash = i.packet_hash
+  ON CONFLICT (message_id, iata) DO NOTHING
 )
 SELECT inserted.id, ts.name AS scope_name, p.transport_codes_present
 FROM inserted
@@ -2765,6 +2790,59 @@ func (q *Queries) InsertChannelMessage(ctx context.Context, arg InsertChannelMes
 		arg.Column6,
 	)
 	var i InsertChannelMessageRow
+	err := row.Scan(&i.ID, &i.ScopeName, &i.TransportCodesPresent)
+	return i, err
+}
+
+const insertChannelMessageUnseeded = `-- name: InsertChannelMessageUnseeded :one
+WITH inserted AS (
+  INSERT INTO channel_messages (channel_id, packet_hash, sender_name, content, sent_at)
+  VALUES ($1, $2, $3, $4, $5)
+  ON CONFLICT (packet_hash) DO NOTHING
+  RETURNING id, packet_hash, channel_id
+), bump AS (
+  UPDATE channels c SET message_count = c.message_count + 1
+  FROM inserted WHERE c.id = inserted.channel_id
+), dirty AS (
+  INSERT INTO analytics_dirty_hours (hour)
+  SELECT DISTINCT date_trunc('hour', po.heard_at, 'UTC')
+  FROM packet_observations po JOIN inserted i ON i.packet_hash = po.packet_hash
+  WHERE $6::boolean
+  ON CONFLICT (hour) DO UPDATE SET enqueued_at = now()
+)
+SELECT inserted.id, ts.name AS scope_name, p.transport_codes_present
+FROM inserted
+JOIN packets p ON p.packet_hash = inserted.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+`
+
+type InsertChannelMessageUnseededParams struct {
+	ChannelID  int32              `json:"channel_id"`
+	PacketHash []byte             `json:"packet_hash"`
+	SenderName *string            `json:"sender_name"`
+	Content    *string            `json:"content"`
+	SentAt     pgtype.Timestamptz `json:"sent_at"`
+	Column6    bool               `json:"column_6"`
+}
+
+type InsertChannelMessageUnseededRow struct {
+	ID                    int64   `json:"id"`
+	ScopeName             *string `json:"scope_name"`
+	TransportCodesPresent *bool   `json:"transport_codes_present"`
+}
+
+// The seeded insert's fallback: the same statement without the site seed. The read-model
+// reconcile adds the message's sites within one interval.
+func (q *Queries) InsertChannelMessageUnseeded(ctx context.Context, arg InsertChannelMessageUnseededParams) (InsertChannelMessageUnseededRow, error) {
+	row := q.db.QueryRow(ctx, insertChannelMessageUnseeded,
+		arg.ChannelID,
+		arg.PacketHash,
+		arg.SenderName,
+		arg.Content,
+		arg.SentAt,
+		arg.Column6,
+	)
+	var i InsertChannelMessageUnseededRow
 	err := row.Scan(&i.ID, &i.ScopeName, &i.TransportCodesPresent)
 	return i, err
 }

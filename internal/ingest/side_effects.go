@@ -82,7 +82,9 @@ type nodeUpdateEvent struct {
 // new observation is confirmed inserted. Currently handles:
 //   - PayloadTypeAdvert (0x04): upsert node and node_iatas
 //   - PayloadTypeGrpTxt (0x05): decrypt and store channel message if key is known
-func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshcore.Packet, iata string, packetHash []byte, radio RadioSettings, scopeID *int32, matchedScope *string, observerPubkey []byte, rxSNR float32) {
+//
+// siteRecorded says an earlier Add for this hearing found the stored message, so its site is already recorded.
+func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshcore.Packet, iata string, packetHash []byte, radio RadioSettings, scopeID *int32, matchedScope *string, observerPubkey []byte, rxSNR float32, siteRecorded bool) {
 	if packet.PayloadType() == meshcore.PayloadTypeAdvert {
 		advert, err := meshcore.AdvertFromBytes(packet.Payload)
 		if err != nil {
@@ -200,16 +202,13 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 		return
 	}
 	if packet.PayloadType() == meshcore.PayloadTypeGrpTxt {
-		grpTxt, err := meshcore.GroupTextFromBytes(packet.Payload)
+		result, err := StoreGroupText(ctx, w.db, w.keys, packetHash, packet.Payload, iata, siteRecorded)
 		if err != nil {
-			w.log.Warn("error decoding group text payload", "error", err)
-			return
-		}
-		channelHashBytes := []byte{grpTxt.ChannelHash}
-
-		result, err := DecryptGroupText(ctx, w.db, w.keys, packetHash, packet.Payload, false)
-		if err != nil {
-			w.log.Error("decrypt group text failed", "error", err)
+			if _, decodeErr := meshcore.GroupTextFromBytes(packet.Payload); decodeErr != nil {
+				w.log.Warn("error decoding group text payload", "error", decodeErr)
+			} else {
+				w.log.Error("decrypt group text failed", "error", err)
+			}
 			return
 		}
 		if result == nil {
@@ -217,7 +216,8 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 			// record a hash-only row so the channel is still visible. If a matching key
 			// gets added to the config later, BackfillChannelMessages retries this packet
 			// at the next boot.
-			_, _ = w.db.UpsertChannelHashOnly(ctx, channelHashBytes)
+			grpTxt, _ := meshcore.GroupTextFromBytes(packet.Payload) // decoded inside StoreGroupText
+			_, _ = w.db.UpsertChannelHashOnly(ctx, []byte{grpTxt.ChannelHash})
 			return
 		}
 
@@ -227,13 +227,13 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 				Scope:       result.Message.Scope,
 				ScopeStatus: result.Message.ScopeStatus,
 				ChannelID:   result.ChannelID,
-				ChannelHash: hex.EncodeToString(channelHashBytes),
+				ChannelHash: hex.EncodeToString(result.ChannelHash),
 				PacketHash:  hex.EncodeToString(packetHash),
 				SenderName:  cleanText(result.Payload.Sender),
 				Content:     cleanText(result.Payload.Text),
 				SentAt:      time.Unix(int64(result.Payload.Timestamp), 0).UnixMilli(),
 			}
-			w.broadcast(hub.EventChannelMessage, iata, 0, fmt.Sprintf("%02x", grpTxt.ChannelHash), evt)
+			w.broadcast(hub.EventChannelMessage, iata, 0, fmt.Sprintf("%02x", result.ChannelHash[0]), evt)
 		}
 		return
 	}

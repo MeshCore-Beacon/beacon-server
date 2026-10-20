@@ -46,7 +46,7 @@ func TestChannelMessageScopesPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(context.Background())
-	for _, table := range []string{"transport_scopes", "packets", "packet_observations", "channels", "channel_messages"} {
+	for _, table := range []string{"transport_scopes", "packets", "packet_observations", "channels", "channel_messages", "channel_message_iatas"} {
 		if _, err := tx.Exec(ctx, "CREATE TEMP TABLE "+table+" (LIKE public."+table+" INCLUDING ALL) ON COMMIT DROP"); err != nil {
 			t.Fatal(err)
 		}

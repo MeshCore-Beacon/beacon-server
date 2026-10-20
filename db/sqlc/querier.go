@@ -16,12 +16,20 @@ type Querier interface {
 	// An empty region places the channel Beacon-wide.
 	AddChannelConfigScopes(ctx context.Context, arg AddChannelConfigScopesParams) error
 	AddChannelMembers(ctx context.Context, arg AddChannelMembersParams) error
+	// Copyright 2026 Beacon Contributors
+	// SPDX-License-Identifier: AGPL-3.0-or-later
+	// A stored observation's site for a message another statement created. A no-op when the packet has no message;
+	// found says whether the packet has a committed message (then the site is recorded, now or before).
+	AddChannelMessageIATA(ctx context.Context, arg AddChannelMessageIATAParams) (bool, error)
 	AddIATAs(ctx context.Context, iatas []string) error
 	AddRegionIATAs(ctx context.Context, arg AddRegionIATAsParams) error
 	// Copies the packet's payload type onto the first @max_rows observations in [@from_id, @to_id),
 	// in id order, that lack one. Rows that already carry a type are never touched. Returns how many
 	// untyped rows it picked, how many it typed, and the last picked id (0 when it picked none).
 	BackfillObservationPayloadTypes(ctx context.Context, arg BackfillObservationPayloadTypesParams) (BackfillObservationPayloadTypesRow, error)
+	// Exact check of messages in (after_id, through_id]: pairs the definition has and the table lacks (counting
+	// observations up to obs_through only), and table pairs no stored observation backs.
+	CheckChannelMessageIATAs(ctx context.Context, arg CheckChannelMessageIATAsParams) (CheckChannelMessageIATAsRow, error)
 	// Keeps fetch timing so re-enabling still respects backoff; the ETag goes with the rows.
 	ClearRepeaters(ctx context.Context) (int64, error)
 	CreateAccount(ctx context.Context, name string) (Account, error)
@@ -68,6 +76,11 @@ type Querier interface {
 	DeleteRollupHour(ctx context.Context, hour pgtype.Timestamptz) error
 	// Dirty hours that can no longer be re-rolled.
 	DeleteStaleDirtyHours(ctx context.Context) error
+	// Every site of every message in (after_id, through_id]: the backfill and the reconcile's message part.
+	FillChannelMessageIATAsByMessages(ctx context.Context, arg FillChannelMessageIATAsByMessagesParams) (int64, error)
+	// The site of every group-text observation in (after_id, through_id] whose packet has a message.
+	// An untyped observation is checked too: older rows may have no payload type.
+	FillChannelMessageIATAsByObservations(ctx context.Context, arg FillChannelMessageIATAsByObservationsParams) (int64, error)
 	// Hop prefixes that match >1 node in an IATA, per width, into the sweep's temp table.
 	FillReconfirmAmb(ctx context.Context) error
 	FillRollupObs(ctx context.Context, dollar_1 pgtype.Timestamptz) error
@@ -77,6 +90,8 @@ type Querier interface {
 	// Both counters only grow, so their sum changes whenever rolled content or coverage does.
 	GetAnalyticsRevision(ctx context.Context) (int64, error)
 	GetBackgroundState(ctx context.Context, key string) (json.RawMessage, error)
+	// A state with its age on the database clock: how long since its writer last saved it.
+	GetBackgroundStateAge(ctx context.Context, key string) (GetBackgroundStateAgeRow, error)
 	GetChannelByID(ctx context.Context, id int32) (Channel, error)
 	GetEarliestCompleteRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
 	// ============================================================
@@ -203,6 +218,9 @@ type Querier interface {
 	// message_count is a lifetime count, bumped only for a new message. A historical (backfilled)
 	// message queues its observation hours for a re-roll in the same statement, so the two can't diverge.
 	InsertChannelMessage(ctx context.Context, arg InsertChannelMessageParams) (InsertChannelMessageRow, error)
+	// The seeded insert's fallback: the same statement without the site seed. The read-model
+	// reconcile adds the message's sites within one interval.
+	InsertChannelMessageUnseeded(ctx context.Context, arg InsertChannelMessageUnseededParams) (InsertChannelMessageUnseededRow, error)
 	// ============================================================
 	// PACKET OBSERVATIONS
 	// ============================================================
@@ -216,9 +234,21 @@ type Querier interface {
 	// Pass empty string for iata or scope to skip those filters.
 	// Pass cursor=0 to start from the beginning.
 	ListAllChannelMessages(ctx context.Context, arg ListAllChannelMessagesParams) ([]ListAllChannelMessagesRow, error)
+	// Every channel filtered by sites: each site's newest message ids from the read model, merged.
+	ListAllChannelMessagesByIATAs(ctx context.Context, arg ListAllChannelMessagesByIATAsParams) ([]ListAllChannelMessagesByIATAsRow, error)
+	// Every channel, unfiltered: a walk by id; a message counts once it has a stored observation.
+	ListAllChannelMessagesPlain(ctx context.Context, arg ListAllChannelMessagesPlainParams) ([]ListAllChannelMessagesPlainRow, error)
+	// Every channel filtered by scope alone: the scope's newest message ids from the read model.
+	ListAllChannelMessagesPlainScoped(ctx context.Context, arg ListAllChannelMessagesPlainScopedParams) ([]ListAllChannelMessagesPlainScopedRow, error)
+	// Every channel with since, optionally by scope (no sites): a walk by id.
+	ListAllChannelMessagesSince(ctx context.Context, arg ListAllChannelMessagesSinceParams) ([]ListAllChannelMessagesSinceRow, error)
 	ListChannelCatalogues(ctx context.Context) ([]MeshmapperChannelCatalogue, error)
 	// Every channel key and its id, preloaded at boot for the ingest write-through.
 	ListChannelIDs(ctx context.Context) ([]ListChannelIDsRow, error)
+	// The busiest (channel, site) pairs among recent messages; the first-time verification compares their pages.
+	ListChannelMessageIATASamples(ctx context.Context, arg ListChannelMessageIATASamplesParams) ([]ListChannelMessageIATASamplesRow, error)
+	// The busiest (channel, scope) pairs among recent messages, with the scope name today's statement filters on.
+	ListChannelMessageScopeSamples(ctx context.Context, arg ListChannelMessageScopeSamplesParams) ([]ListChannelMessageScopeSamplesRow, error)
 	// Returns messages for a channel identified by integer ID.
 	// Pass a zero/null timestamp for since to return all messages up to limit.
 	// Pass empty string for iata to skip IATA filtering.
@@ -229,6 +259,16 @@ type Querier interface {
 	// Pass empty string for iata or scope to skip those filters.
 	// Pass cursor=0 to start from the beginning.
 	ListChannelMessagesByHash(ctx context.Context, arg ListChannelMessagesByHashParams) ([]ListChannelMessagesByHashRow, error)
+	// One channel filtered by sites: each site's newest message ids from the read model, merged.
+	ListChannelMessagesByIATAs(ctx context.Context, arg ListChannelMessagesByIATAsParams) ([]ListChannelMessagesByIATAsRow, error)
+	// One channel filtered by sites and scope.
+	ListChannelMessagesByIATAsScoped(ctx context.Context, arg ListChannelMessagesByIATAsScopedParams) ([]ListChannelMessagesByIATAsScopedRow, error)
+	// One channel, unfiltered: a walk of the channel by id; a message counts once it has a stored observation.
+	ListChannelMessagesPlain(ctx context.Context, arg ListChannelMessagesPlainParams) ([]ListChannelMessagesPlainRow, error)
+	// One channel and scope: the read model has a row exactly when the message has a stored observation.
+	ListChannelMessagesPlainScoped(ctx context.Context, arg ListChannelMessagesPlainScopedParams) ([]ListChannelMessagesPlainScopedRow, error)
+	// One channel with since (no client sends it): a channel walk; sites filter through the read model.
+	ListChannelMessagesSinceWalk(ctx context.Context, arg ListChannelMessagesSinceWalkParams) ([]ListChannelMessagesSinceWalkRow, error)
 	// Channels ordered by last seen, optionally filtered by hash and/or IATAs.
 	// A channel belongs to an IATA when MeshMapper lists it there or config scopes it
 	// to a region containing it (or Beacon-wide). NULL hash / empty array / NULL key_known skip those filters.
@@ -334,6 +374,10 @@ type Querier interface {
 	// Hours whose raw rows cleanup already started deleting can never be rolled completely.
 	// Readers report the new status, so the revision moves too.
 	MarkPartialRollupHours(ctx context.Context) error
+	MaxChannelMessageID(ctx context.Context) (int64, error)
+	MaxObservationID(ctx context.Context) (int64, error)
+	// The first message id above after_id, or 0 when there is none.
+	NextChannelMessageID(ctx context.Context, afterID int64) (int64, error)
 	OldestMissingRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
 	PruneImportedRegions(ctx context.Context, keep []string) ([]string, error)
 	// Drops imports for IATAs no longer configured, so their manual border returns.

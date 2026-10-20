@@ -38,15 +38,15 @@ type StoreDiffSpec struct {
 // Any other difference fails.
 type StoreCase struct {
 	ID       string              `yaml:"id"`
-	Path     string              `yaml:"path"` // /api/v1/...; {name} is replaced by Vars[name]
-	Query    map[string]string   `yaml:"query"`
+	Path     string              `yaml:"path"`      // /api/v1/...; {name} is replaced by Vars[name]
+	Query    map[string]string   `yaml:"query"`     // values may hold {name} too
 	WebLimit int                 `yaml:"web_limit"` // the client's page size; default 50
 	Pages    int                 `yaml:"pages"`     // walk cap per limit; default 50
 	Follow   []Follow            `yaml:"follow"`    // param ← nextPageCursor | nextCursor | last.<field>
 	Allowed  []string            `yaml:"allowed"`   // tie_order (keyed by key) | additive_keys | latest_observer_tie
 	Key      []string            `yaml:"key"`       // item fields for tie_order
 	Omit     []string            `yaml:"omit"`      // item fields for latest_observer_tie
-	Vars     map[string]StoreVar `yaml:"vars"`      // path values read from another endpoint
+	Vars     map[string]StoreVar `yaml:"vars"`      // path and query values read from another endpoint
 }
 
 // Follow sets a query param of the next page from the old server's page.
@@ -55,12 +55,14 @@ type Follow struct {
 	From  string `yaml:"from"`
 }
 
-// StoreVar reads one path value from an endpoint of both servers: From is first.<field> or last.<field> of its
-// items. Both servers must give the same value.
+// StoreVar reads one value from an endpoint of both servers: From is first.<field> or last.<field> of its items.
+// Add, when set, is added to the value, which must then be an integer (a time in epoch milliseconds, say). Both
+// servers must give the same value.
 type StoreVar struct {
 	Path  string            `yaml:"path"`
 	Query map[string]string `yaml:"query"`
 	From  string            `yaml:"from"`
+	Add   int64             `yaml:"add"`
 }
 
 // StoreDiffReport is the outcome of RunStoreDiff: one result per case and page size.
@@ -180,12 +182,20 @@ func (c StoreCase) validate() error {
 		}
 		used[m[1]] = true
 	}
+	for k, v := range c.Query {
+		for _, m := range storeVarRe.FindAllStringSubmatch(v, -1) {
+			if _, ok := c.Vars[m[1]]; !ok {
+				return fmt.Errorf("query %s uses {%s}, but vars does not define it", k, m[1])
+			}
+			used[m[1]] = true
+		}
+	}
 	if strings.ContainsAny(storeVarRe.ReplaceAllString(c.Path, ""), "{}") {
 		return fmt.Errorf("path %q: a {name} must be [a-z][a-z0-9_]*", c.Path)
 	}
 	for name, v := range c.Vars {
 		if !used[name] {
-			return fmt.Errorf("vars %s is not used in the path", name)
+			return fmt.Errorf("vars %s is used in neither the path nor the query", name)
 		}
 		if err := validStorePath(v.Path); err != nil {
 			return fmt.Errorf("vars %s: %w", name, err)
@@ -272,10 +282,11 @@ func RunStoreDiff(ctx context.Context, hc *http.Client, oldBase, newBase string,
 	sd := &storeDiff{ctx: ctx, hc: hc, old: strings.TrimRight(oldBase, "/"), new: strings.TrimRight(newBase, "/")}
 	rep := &StoreDiffReport{}
 	for _, c := range spec.Cases {
-		path, skip, detail, err := sd.resolvePath(c)
+		path, query, skip, detail, err := sd.resolvePath(c)
 		if err != nil {
 			return rep, fmt.Errorf("case %s: %w", c.ID, err)
 		}
+		c.Query = query
 		for _, size := range sizes {
 			limit := size
 			if limit == 0 {
@@ -395,8 +406,9 @@ func samePage(o, n storePage) string {
 }
 
 // resolvePath fills the path's {name}s from both servers. skip: a var found no value; detail: the servers disagree.
-func (sd *storeDiff) resolvePath(c StoreCase) (path string, skip bool, detail string, err error) {
+func (sd *storeDiff) resolvePath(c StoreCase) (path string, query map[string]string, skip bool, detail string, err error) {
 	path = c.Path
+	query = maps.Clone(c.Query)
 	for _, name := range slices.Sorted(maps.Keys(c.Vars)) {
 		v := c.Vars[name]
 		q := url.Values{}
@@ -407,27 +419,37 @@ func (sd *storeDiff) resolvePath(c StoreCase) (path string, skip bool, detail st
 		for i, base := range []string{sd.old, sd.new} {
 			p, err := sd.get(base, v.Path, q)
 			if err != nil {
-				return "", false, "", fmt.Errorf("vars %s: %w", name, err)
+				return "", nil, false, "", fmt.Errorf("vars %s: %w", name, err)
 			}
 			side := [2]string{"old", "new"}[i]
 			if p.status != http.StatusOK || !p.json {
-				return "", false, fmt.Sprintf("vars %s: %s server answered %d", name, side, p.status), nil
+				return "", nil, false, fmt.Sprintf("vars %s: %s server answered %d", name, side, p.status), nil
 			}
 			val, ok, err := pickValue(p.body, v.From)
 			if err != nil {
-				return "", false, fmt.Sprintf("vars %s: %s server: %v", name, side, err), nil
+				return "", nil, false, fmt.Sprintf("vars %s: %s server: %v", name, side, err), nil
 			}
 			if !ok {
-				return "", true, fmt.Sprintf("vars %s: %s %s found no value", name, v.Path, v.From), nil
+				return "", nil, true, fmt.Sprintf("vars %s: %s %s found no value", name, v.Path, v.From), nil
+			}
+			if v.Add != 0 {
+				n, err := strconv.ParseInt(val, 10, 64)
+				if err != nil {
+					return "", nil, false, fmt.Sprintf("vars %s: %s server: %q is not an integer to add to", name, side, val), nil
+				}
+				val = strconv.FormatInt(n+v.Add, 10)
 			}
 			vals[i] = val
 		}
 		if vals[0] != vals[1] {
-			return "", false, fmt.Sprintf("vars %s: old %s, new %s", name, vals[0], vals[1]), nil
+			return "", nil, false, fmt.Sprintf("vars %s: old %s, new %s", name, vals[0], vals[1]), nil
 		}
 		path = strings.ReplaceAll(path, "{"+name+"}", url.PathEscape(vals[0]))
+		for k, qv := range query {
+			query[k] = strings.ReplaceAll(qv, "{"+name+"}", vals[0])
+		}
 	}
-	return path, false, "", nil
+	return path, query, false, "", nil
 }
 
 // pageItems returns a page's items: the body when it is an array, else its items field.

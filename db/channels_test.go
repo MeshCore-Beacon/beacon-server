@@ -6,6 +6,8 @@ package db
 import (
 	"context"
 	"errors"
+	"math"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -346,7 +348,7 @@ func TestListChannelMessages_DBError(t *testing.T) {
 	mock := mockdb.NewMockQuerier(ctrl)
 
 	mock.EXPECT().
-		ListAllChannelMessages(gomock.Any(), gomock.Any()).
+		ListAllChannelMessagesPlain(gomock.Any(), gomock.Any()).
 		Return(nil, errors.New("db error"))
 
 	store := &Store{q: mock}
@@ -688,5 +690,200 @@ func TestUpsertChannelFallbackErrorForgetsKey(t *testing.T) {
 	}
 	if _, ok := cache.get(key); ok {
 		t.Fatal("a key whose row is gone stayed cached")
+	}
+}
+
+// earnedCmi returns read models whose cmi trust is earned.
+func earnedCmi() *ReadModels {
+	tr := NewTrust("cmi_dispatch_test", true, CmiTrustPolicy)
+	tr.Earn()
+	return &ReadModels{Cmi: tr}
+}
+
+func TestListChannelMessagesDispatch(t *testing.T) {
+	ch := int32(7)
+	since := time.Date(2026, 10, 18, 6, 48, 0, 0, time.UTC)
+	ts := pgtype.Timestamptz{Time: since, Valid: true}
+	scope := int32(3)
+	const maxCursor = int64(math.MaxInt64)
+	type call func(m *mockdb.MockQuerier)
+	scopeLookup := func(m *mockdb.MockQuerier) {
+		m.EXPECT().GetTransportScopeByName(gomock.Any(), "#fr").Return(scope, nil)
+	}
+	cases := []struct {
+		name    string
+		channel *int32
+		since   time.Time
+		iatas   []string
+		scope   string
+		trusted bool
+		expect  []call
+	}{
+		{"by sites", &ch, time.Time{}, []string{"YUL", "YUL", "YOW"}, "", true, []call{func(m *mockdb.MockQuerier) {
+			m.EXPECT().ListChannelMessagesByIATAs(gomock.Any(), sqlc.ListChannelMessagesByIATAsParams{Iatas: []string{"YUL", "YOW"}, ChannelID: 7, CursorID: maxCursor, PageLimit: 51}).Return([]sqlc.ListChannelMessagesByIATAsRow{{ID: 1}}, nil)
+		}}},
+		{"by sites and scope", &ch, time.Time{}, []string{"YUL"}, "#fr", true, []call{scopeLookup, func(m *mockdb.MockQuerier) {
+			m.EXPECT().ListChannelMessagesByIATAsScoped(gomock.Any(), sqlc.ListChannelMessagesByIATAsScopedParams{Iatas: []string{"YUL"}, ChannelID: 7, ScopeID: 3, CursorID: maxCursor, PageLimit: 51}).Return(nil, nil)
+		}}},
+		{"plain nil sites", &ch, time.Time{}, nil, "", true, []call{func(m *mockdb.MockQuerier) {
+			m.EXPECT().ListChannelMessagesPlain(gomock.Any(), sqlc.ListChannelMessagesPlainParams{ChannelID: 7, CursorID: maxCursor, PageLimit: 51}).Return(nil, nil)
+		}}},
+		{"plain empty sites untrusted", &ch, time.Time{}, []string{}, "", false, []call{func(m *mockdb.MockQuerier) {
+			m.EXPECT().ListChannelMessagesPlain(gomock.Any(), sqlc.ListChannelMessagesPlainParams{ChannelID: 7, CursorID: maxCursor, PageLimit: 51}).Return(nil, nil)
+		}}},
+		{"plain scoped", &ch, time.Time{}, nil, "#fr", true, []call{scopeLookup, func(m *mockdb.MockQuerier) {
+			m.EXPECT().ListChannelMessagesPlainScoped(gomock.Any(), sqlc.ListChannelMessagesPlainScopedParams{ChannelID: 7, ScopeID: 3, CursorID: maxCursor, PageLimit: 51}).Return(nil, nil)
+		}}},
+		{"since walk with sites and scope", &ch, since, []string{"YUL"}, "#fr", true, []call{scopeLookup, func(m *mockdb.MockQuerier) {
+			m.EXPECT().ListChannelMessagesSinceWalk(gomock.Any(), sqlc.ListChannelMessagesSinceWalkParams{ChannelID: 7, Since: ts, Iatas: []string{"YUL"}, ScopeID: &scope, CursorID: maxCursor, PageLimit: 51}).Return(nil, nil)
+		}}},
+		{"since walk untrusted reads no cmi", &ch, since, nil, "", false, []call{func(m *mockdb.MockQuerier) {
+			m.EXPECT().ListChannelMessagesSinceWalk(gomock.Any(), sqlc.ListChannelMessagesSinceWalkParams{ChannelID: 7, Since: ts, Iatas: []string{}, CursorID: maxCursor, PageLimit: 51}).Return(nil, nil)
+		}}},
+		{"all by sites", nil, time.Time{}, []string{"YUL"}, "", true, []call{func(m *mockdb.MockQuerier) {
+			m.EXPECT().ListAllChannelMessagesByIATAs(gomock.Any(), sqlc.ListAllChannelMessagesByIATAsParams{Iatas: []string{"YUL"}, CursorID: maxCursor, PageLimit: 51}).Return(nil, nil)
+		}}},
+		// Sites with a scope or a since across every channel: each site's range has no bound on the scope or since,
+		// so these run today's statement, trusted or not.
+		{"all by sites and scope", nil, time.Time{}, []string{"YUL"}, "#fr", true, []call{func(m *mockdb.MockQuerier) {
+			m.EXPECT().ListAllChannelMessages(gomock.Any(), sqlc.ListAllChannelMessagesParams{Column1: pgtype.Timestamptz{}, Column2: []string{"YUL"}, Column3: "#fr", Column4: 0, Limit: 51}).Return(nil, nil)
+		}}},
+		{"all by sites since", nil, since, []string{"YUL"}, "", true, []call{func(m *mockdb.MockQuerier) {
+			m.EXPECT().ListAllChannelMessages(gomock.Any(), sqlc.ListAllChannelMessagesParams{Column1: ts, Column2: []string{"YUL"}, Column3: "", Column4: 0, Limit: 51}).Return(nil, nil)
+		}}},
+		{"all since scoped untrusted reads no cmi", nil, since, nil, "#fr", false, []call{scopeLookup, func(m *mockdb.MockQuerier) {
+			m.EXPECT().ListAllChannelMessagesSince(gomock.Any(), sqlc.ListAllChannelMessagesSinceParams{Since: ts, ScopeID: &scope, CursorID: maxCursor, PageLimit: 51}).Return(nil, nil)
+		}}},
+		{"all plain untrusted", nil, time.Time{}, nil, "", false, []call{func(m *mockdb.MockQuerier) {
+			m.EXPECT().ListAllChannelMessagesPlain(gomock.Any(), sqlc.ListAllChannelMessagesPlainParams{CursorID: maxCursor, PageLimit: 51}).Return(nil, nil)
+		}}},
+		{"all plain scoped", nil, time.Time{}, nil, "#fr", true, []call{scopeLookup, func(m *mockdb.MockQuerier) {
+			m.EXPECT().ListAllChannelMessagesPlainScoped(gomock.Any(), sqlc.ListAllChannelMessagesPlainScopedParams{ScopeID: 3, CursorID: maxCursor, PageLimit: 51}).Return(nil, nil)
+		}}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			m := mockdb.NewMockQuerier(ctrl)
+			for _, e := range c.expect {
+				e(m)
+			}
+			s := &Store{q: m}
+			if c.trusted {
+				s.readModels = earnedCmi()
+			}
+			page, err := s.ListChannelMessages(context.Background(), c.channel, c.since, 50, c.iatas, c.scope, 0)
+			if err != nil || page.Items == nil {
+				t.Fatalf("page = %+v, %v", page, err)
+			}
+		})
+	}
+
+	// Every shape that reads cmi runs today's statement, with today's params, when cmi is not trusted.
+	disabled := NewTrust("cmi_dispatch_disabled", false, CmiTrustPolicy)
+	disabled.Earn()
+	dropped := NewTrust("cmi_dispatch_dropped", true, CmiTrustPolicy)
+	dropped.Earn()
+	for range 3 {
+		dropped.ObserveRun(1)
+	}
+	untrusted := map[string]*ReadModels{
+		"nil": nil, "nil trust": {}, "not earned": {Cmi: NewTrust("cmi_dispatch_new", true, CmiTrustPolicy)},
+		"disabled": {Cmi: disabled}, "dropped": {Cmi: dropped},
+	}
+	shapes := []struct {
+		channel *int32
+		since   time.Time
+		iatas   []string
+		scope   string
+	}{
+		{&ch, time.Time{}, []string{"YUL"}, ""}, {&ch, time.Time{}, []string{"YUL"}, "#fr"}, {&ch, time.Time{}, nil, "#fr"},
+		{&ch, since, []string{"YUL"}, ""}, {nil, time.Time{}, []string{"YUL"}, ""}, {nil, time.Time{}, []string{"YUL"}, "#fr"},
+		{nil, since, []string{"YUL"}, "#fr"}, {nil, time.Time{}, nil, "#fr"},
+	}
+	for name, rm := range untrusted {
+		for i, sh := range shapes {
+			ctrl := gomock.NewController(t)
+			m := mockdb.NewMockQuerier(ctrl)
+			legacyTS := pgtype.Timestamptz{Time: sh.since, Valid: !sh.since.IsZero()}
+			if sh.channel != nil {
+				m.EXPECT().ListChannelMessages(gomock.Any(), sqlc.ListChannelMessagesParams{ChannelID: 7, Column2: legacyTS, Column3: sh.iatas, Column4: sh.scope, Column5: 0, Limit: 51}).Return(nil, nil)
+			} else {
+				m.EXPECT().ListAllChannelMessages(gomock.Any(), sqlc.ListAllChannelMessagesParams{Column1: legacyTS, Column2: sh.iatas, Column3: sh.scope, Column4: 0, Limit: 51}).Return(nil, nil)
+			}
+			s := &Store{q: m, readModels: rm}
+			if _, err := s.ListChannelMessages(context.Background(), sh.channel, sh.since, 50, sh.iatas, sh.scope, 0); err != nil {
+				t.Fatalf("%s shape %d: %v", name, i, err)
+			}
+			ctrl.Finish()
+		}
+	}
+
+	// An unknown scope answers an empty page with no list query; another lookup error is returned.
+	for _, trusted := range []bool{true, false} {
+		ctrl := gomock.NewController(t)
+		m := mockdb.NewMockQuerier(ctrl)
+		m.EXPECT().GetTransportScopeByName(gomock.Any(), "#nope").Return(int32(0), pgx.ErrNoRows)
+		s := &Store{q: m}
+		var shapeChannel *int32
+		shapeSince := time.Time{}
+		if trusted {
+			s.readModels = earnedCmi()
+		} else {
+			shapeSince = since // untrusted, only the non-cmi shapes look the scope up
+		}
+		page, err := s.ListChannelMessages(context.Background(), shapeChannel, shapeSince, 50, nil, "#nope", 0)
+		if err != nil || page.Items == nil || len(page.Items) != 0 || page.HasMore || page.NextCursor != nil {
+			t.Fatalf("unknown scope: %+v, %v", page, err)
+		}
+		ctrl.Finish()
+	}
+	ctrl := gomock.NewController(t)
+	m := mockdb.NewMockQuerier(ctrl)
+	m.EXPECT().GetTransportScopeByName(gomock.Any(), "#fr").Return(int32(0), errors.New("lookup failed"))
+	if _, err := (&Store{q: m, readModels: earnedCmi()}).ListChannelMessages(context.Background(), &ch, time.Time{}, 50, nil, "#fr", 0); err == nil {
+		t.Fatal("lookup error not returned")
+	}
+
+	// Cursors: 0 is the newest page, any other value is passed as given; limit+1 rows fetched.
+	for _, cur := range []int64{-1, 3_000_000_000} {
+		ctrl := gomock.NewController(t)
+		m := mockdb.NewMockQuerier(ctrl)
+		m.EXPECT().ListChannelMessagesPlain(gomock.Any(), sqlc.ListChannelMessagesPlainParams{ChannelID: 7, CursorID: cur, PageLimit: 51}).Return(nil, nil)
+		if _, err := (&Store{q: m}).ListChannelMessages(context.Background(), &ch, time.Time{}, 50, nil, "", cur); err != nil {
+			t.Fatal(err)
+		}
+		ctrl.Finish()
+	}
+	ctrl = gomock.NewController(t)
+	m = mockdb.NewMockQuerier(ctrl)
+	rows := make([]sqlc.ListChannelMessagesPlainRow, 51)
+	for i := range rows {
+		rows[i] = sqlc.ListChannelMessagesPlainRow{ID: int64(100 - i)}
+	}
+	m.EXPECT().ListChannelMessagesPlain(gomock.Any(), gomock.Any()).Return(rows, nil)
+	page, err := (&Store{q: m}).ListChannelMessages(context.Background(), &ch, time.Time{}, 50, nil, "", 0)
+	if err != nil || len(page.Items) != 50 || !page.HasMore || page.NextCursor == nil || *page.NextCursor != 51 {
+		t.Fatalf("page of 51 = %d items, hasMore %v, next %v, %v", len(page.Items), page.HasMore, page.NextCursor, err)
+	}
+}
+
+// Site lists come from the request with no cap: the dedupe is one pass, keeps first-occurrence order and is never nil.
+func TestDedupeSitesLargeList(t *testing.T) {
+	in := make([]string, 200_000)
+	for i := range in {
+		in[i] = []string{"YUL", "YOW", "YYZ"}[i%3]
+	}
+	in[199_999] = "ZZZ"
+	start := time.Now()
+	got := dedupeSites(in)
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("200K codes took %s", d)
+	}
+	if strings.Join(got, ",") != "YUL,YOW,YYZ,ZZZ" {
+		t.Fatalf("dedupe = %v", got)
+	}
+	if empty := dedupeSites(nil); empty == nil || len(empty) != 0 {
+		t.Fatalf("nil input gave %#v", empty)
 	}
 }

@@ -6,8 +6,10 @@ package metrics
 import (
 	"io"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func scrape(t *testing.T) string {
@@ -27,8 +29,21 @@ func scrape(t *testing.T) string {
 func TestHandlerServesBeaconMetrics(t *testing.T) {
 	GuardWouldRefuse.WithLabelValues("other", "cap").Inc()
 	SetPgActivity(PgActivity{WALBytes: 7, CheckpointsTimed: 2, CheckpointsRequested: 1, XIDAge: 9})
+	ReadModelRepaired.WithLabelValues("cmi_test").Add(3)
+	ReadModelTrusted.WithLabelValues("cmi_test").Set(1)
+	SetReadModelWatermark("cmi_test", time.Now().Add(-90*time.Second))
 	body := scrape(t)
+	var age float64
+	for _, line := range strings.Split(body, "\n") {
+		if v, ok := strings.CutPrefix(line, `beacon_readmodel_watermark_age_seconds{model="cmi_test"} `); ok {
+			age, _ = strconv.ParseFloat(v, 64)
+		}
+	}
+	if age < 90 || age > 120 {
+		t.Errorf("watermark age = %v, want about 90", age)
+	}
 	for _, want := range []string{
+		`beacon_readmodel_repaired_rows_total{model="cmi_test"} 3`, `beacon_readmodel_trusted{model="cmi_test"} 1`,
 		`beacon_guard_would_refuse_total{family="other",guard="cap"} 1`,
 		`beacon_pg_wal_bytes_total 7`, `beacon_pg_checkpoints_total{kind="requested"} 1`, `beacon_pg_xid_age 9`,
 		"go_goroutines",

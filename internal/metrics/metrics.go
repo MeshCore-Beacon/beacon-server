@@ -7,7 +7,9 @@ package metrics
 
 import (
 	"net/http"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -113,6 +115,19 @@ var (
 		Name: "beacon_planguard_last_run_timestamp_seconds",
 		Help: "Unix time the daily plan check last finished.",
 	})
+
+	// ReadModelRepaired counts the rows each read model's reconcile wrote: anything above zero was missed by a writer
+	// that bypassed the model.
+	ReadModelRepaired = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "beacon_readmodel_repaired_rows_total",
+		Help: "Rows the read-model reconcile repaired, by model.",
+	}, []string{"model"})
+
+	// ReadModelTrusted is 1 while this process serves pages from a read model, by model.
+	ReadModelTrusted = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "beacon_readmodel_trusted",
+		Help: "1 while this process serves pages from the read model, 0 while it serves the original statements.",
+	}, []string{"model"})
 )
 
 var planguardEnabled atomic.Bool
@@ -184,13 +199,41 @@ func SetPgActivity(a PgActivity) {
 	pgActivity.last.Store(&a)
 }
 
+var watermarkAgeDesc = prometheus.NewDesc("beacon_readmodel_watermark_age_seconds",
+	"Seconds since this process last finished a reconcile of the read model, by model.", []string{"model"}, nil)
+
+// watermarkCollector emits the age of each model's last finished reconcile at scrape time.
+type watermarkCollector struct {
+	mu sync.Mutex
+	at map[string]time.Time
+}
+
+func (c *watermarkCollector) Describe(ch chan<- *prometheus.Desc) { ch <- watermarkAgeDesc }
+
+func (c *watermarkCollector) Collect(ch chan<- prometheus.Metric) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for model, at := range c.at {
+		ch <- prometheus.MustNewConstMetric(watermarkAgeDesc, prometheus.GaugeValue, time.Since(at).Seconds(), model)
+	}
+}
+
+var watermarks = &watermarkCollector{at: map[string]time.Time{}}
+
+// SetReadModelWatermark records when model's reconcile last finished.
+func SetReadModelWatermark(model string, at time.Time) {
+	watermarks.mu.Lock()
+	watermarks.at[model] = at
+	watermarks.mu.Unlock()
+}
+
 func init() {
 	Registry.MustRegister(
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		GuardWouldRefuse, GuardRefused, GuardDB, DBTime, HTTPRequest, PoolAcquire,
 		IngestQueueDepth, IngestDropped, JobDuration, JobRows, IndexBytes, IndexBloat,
-		PlanguardFailures, setGauge{PlanguardLastRun, &planguardEnabled}, pgActivity,
+		PlanguardFailures, setGauge{PlanguardLastRun, &planguardEnabled}, pgActivity, ReadModelRepaired, ReadModelTrusted, watermarks,
 	)
 }
 

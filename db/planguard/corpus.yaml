@@ -52,10 +52,13 @@ tiers:
 groups:
   # These groups plan against an overlay schema on the local copy: packets_global against overlay/packets_global.sql
   # (packets with its new indexes; nodes and observers as migrated), stats_adverts against overlay/stats_adverts.sql
-  # (packet_observations with the partial adverts index), the pending groups against one a later change builds.
+  # (packet_observations with the partial adverts index), channel_message_iatas against
+  # overlay/channel_message_iatas.sql (channel_messages with its channel walk index and the read model; its local run
+  # passes --search-path, since its resolvers read the read model too), the pending group against one a later change
+  # builds.
   packets_global: {search_path: {local: "t_s5a, public"}}
   packet_sites: {search_path: {local: "t_s2b, public"}}
-  channel_message_iatas: {search_path: {local: "t_s2b, public"}}
+  channel_message_iatas: {search_path: {local: "t_s4a, public"}}
   stats_adverts: {search_path: {local: "t_s7a, public"}}
 
 statements:
@@ -130,27 +133,28 @@ statements:
   FilterKnownSites: {file: sql/pending/FilterKnownSites.sql, group: packet_sites, plan: custom, pending: packet_sites}
   SweepPacketSitesFronts: {file: sql/pending/SweepPacketSitesFronts.sql, group: packet_sites, plan: maint, pending: packet_sites}
   InsertObservation_end: {file: sql/pending/InsertObservation.sql, kind: dml, group: packet_sites, plan: ingest, pending: packet_sites}
-  ListChannelMessagesByIATAs: {file: sql/pending/ListChannelMessagesByIATAs.sql, group: channel_message_iatas, plan: cached, admission: region_list, pending: channel_message_iatas}
-  ListChannelMessagesByIATAsScoped: {file: sql/pending/ListChannelMessagesByIATAsScoped.sql, group: channel_message_iatas, plan: cached, admission: region_list, pending: channel_message_iatas}
-  ListChannelMessagesPlain: {file: sql/pending/ListChannelMessagesPlain.sql, group: channel_message_iatas, plan: cached, admission: global_page, pending: channel_message_iatas}
-  ListAllChannelMessagesByIATAs: {file: sql/pending/ListAllChannelMessagesByIATAs.sql, group: channel_message_iatas, plan: cached, admission: region_list, pending: channel_message_iatas}
-  ListAllChannelMessagesPlain: {file: sql/pending/ListAllChannelMessagesPlain.sql, group: channel_message_iatas, plan: cached, admission: global_page, pending: channel_message_iatas}
-  ListChannelMessagesPlainScoped: {file: sql/pending/ListChannelMessagesPlainScoped.sql, group: channel_message_iatas, plan: custom, pending: channel_message_iatas}
-  ListAllChannelMessagesByIATAsScoped: {file: sql/pending/ListAllChannelMessagesByIATAsScoped.sql, group: channel_message_iatas, plan: custom, pending: channel_message_iatas}
-  ListAllChannelMessagesPlainScoped: {file: sql/pending/ListAllChannelMessagesPlainScoped.sql, group: channel_message_iatas, plan: custom, pending: channel_message_iatas}
-  ListAllChannelMessagesSince: {file: sql/pending/ListAllChannelMessagesSince.sql, group: channel_message_iatas, plan: custom, pending: channel_message_iatas}
-  ListAllChannelMessagesByIATAsSince: {file: sql/pending/ListAllChannelMessagesByIATAsSince.sql, group: channel_message_iatas, plan: custom, pending: channel_message_iatas}
-  ListChannelMessagesSinceWalk: {file: sql/pending/ListChannelMessagesSinceWalk.sql, group: channel_message_iatas, plan: custom, pending: channel_message_iatas}
-  AddChannelMessageIATA: {file: sql/pending/AddChannelMessageIATA.sql, kind: dml, group: channel_message_iatas, plan: ingest, pending: channel_message_iatas}
-  FillChannelMessageIATAsByMessages: {file: sql/pending/FillChannelMessageIATAsByMessages.sql, kind: dml, group: channel_message_iatas, plan: maint, pending: channel_message_iatas}
+  # Channel message pages, one statement per filter shape; the site and scope shapes read channel_message_iatas
+  # while the server trusts it. The scoped, since and scope-only shapes are planned with their values. Sites with a
+  # since or a scope across every channel run today's statement (no index bounds both).
+  ListChannelMessagesByIATAs: {sqlc: ListChannelMessagesByIATAs, group: channel_message_iatas, plan: cached, admission: region_list}
+  ListAllChannelMessagesByIATAs: {sqlc: ListAllChannelMessagesByIATAs, group: channel_message_iatas, plan: cached, admission: region_list}
+  ListChannelMessagesPlain: {sqlc: ListChannelMessagesPlain, group: channel_message_iatas, plan: cached, admission: global_page}
+  ListAllChannelMessagesPlain: {sqlc: ListAllChannelMessagesPlain, group: channel_message_iatas, plan: cached, admission: global_page}
+  ListChannelMessagesByIATAsScoped: {sqlc: ListChannelMessagesByIATAsScoped, group: channel_message_iatas, plan: custom}
+  ListChannelMessagesPlainScoped: {sqlc: ListChannelMessagesPlainScoped, group: channel_message_iatas, plan: custom}
+  ListChannelMessagesSinceWalk: {sqlc: ListChannelMessagesSinceWalk, group: channel_message_iatas, plan: custom}
+  ListAllChannelMessagesPlainScoped: {sqlc: ListAllChannelMessagesPlainScoped, group: channel_message_iatas, plan: custom}
+  ListAllChannelMessagesSince: {sqlc: ListAllChannelMessagesSince, group: channel_message_iatas, plan: custom}
+  AddChannelMessageIATA: {sqlc: AddChannelMessageIATA, kind: dml, group: channel_message_iatas, plan: ingest}
+  InsertChannelMessage: {sqlc: InsertChannelMessage, kind: dml, group: channel_message_iatas, plan: ingest}
+  FillChannelMessageIATAsByMessages: {sqlc: FillChannelMessageIATAsByMessages, kind: dml, group: channel_message_iatas, plan: maint}
+  FillChannelMessageIATAsByObservations: {sqlc: FillChannelMessageIATAsByObservations, kind: dml, group: channel_message_iatas, plan: maint}
 
 sort_exempt_sets:
   hop_group:
     - {relation: known_routes, index: idx_known_routes_hop_iata, index_cond: "hop_count =", reason: "a hop page sorts one (hop, region) group, bounded by the group size"}
   latest_observation:
     - {relation: packet_observations, index_cond: "packet_hash = p.packet_hash", reason: "the latest-observation LATERAL sorts one packet's observations (a few hundred at most)"}
-  per_site_message_ranges:
-    - {relation: packets, index: idx_packets_scope_last_heard, index_cond: "scope_id =", reason: "a scope's message page walks one scope's packets newest first and stops at the page"}
   route_search_top_n:
     - {relation: known_routes, index_cond: "node_ids &&", reason: "route search and cross sort their GIN matches for the top 500, as today"}
     - {relation: known_routes, index: idx_known_routes_iata_keyset, index_cond: "iata = ANY", reason: "the same top 500 when the region list is the narrower path"}
@@ -189,8 +193,48 @@ resolvers:
   bwe_deep_id: "SELECT id FROM known_routes WHERE iata >= 'BWE' AND iata <= 'BWE' ORDER BY iata, date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC OFFSET 5000 LIMIT 1"
   bwe_deep_ts: "SELECT date_trunc('milliseconds', last_seen, 'UTC') FROM known_routes WHERE iata >= 'BWE' AND iata <= 'BWE' ORDER BY iata, date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC OFFSET 5000 LIMIT 1"
   cm_newest_hash: "SELECT packet_hash FROM channel_messages ORDER BY id DESC LIMIT 1"
-  cmi_all_sites: "SELECT array_agg(DISTINCT iata ORDER BY iata) FROM channel_message_iatas"
-  cmi_bogus5000: "SELECT array_agg(c ORDER BY c) FROM (SELECT c FROM (SELECT chr(65 + a) || chr(65 + b) || chr(65 + d) c FROM generate_series(0, 25) a, generate_series(0, 25) b, generate_series(0, 25) d) g WHERE c NOT IN (SELECT DISTINCT iata FROM channel_message_iatas) AND c NOT IN (SELECT iata FROM iata_codes) ORDER BY c LIMIT 5000) s"
+  # Channel message roles are picked among the newest 20,000 channel_message_iatas rows (a pkey range); cursors walk
+  # at most 5,000 index entries of one channel, site or scope. Zero-hit sites and scopes probe one index entry per
+  # code or scope. Since times count back from the newest message.
+  cm_50: "SELECT id FROM channel_messages ORDER BY id DESC OFFSET 49 LIMIT 1"
+  cm_ch_50: "SELECT id FROM channel_messages WHERE channel_id = (SELECT channel_id FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 1) ORDER BY id DESC OFFSET 49 LIMIT 1"
+  cm_ch_deep: "SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY id) FROM (SELECT id FROM channel_messages WHERE channel_id = (SELECT channel_id FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 1) ORDER BY id DESC LIMIT 5000) s"
+  cm_deep: "SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY id) FROM (SELECT id FROM channel_messages ORDER BY id DESC LIMIT 20000) s"
+  cm_fill_hi: "SELECT coalesce(max(id), 0) FROM channel_messages"
+  cm_fill_lo: "SELECT coalesce(max(id), 0) - 10000 FROM channel_messages"
+  cm_since10h: "SELECT sent_at - interval '10 hours' FROM channel_messages ORDER BY id DESC LIMIT 1"
+  cm_since3d: "SELECT sent_at - interval '3 days' FROM channel_messages ORDER BY id DESC LIMIT 1"
+  cm_since_cursor: "SELECT min(id) FROM (SELECT id FROM channel_messages ORDER BY id DESC LIMIT 100) s"
+  cmi_bogus5000: "SELECT array_agg(c ORDER BY c)::bpchar[] FROM (SELECT c FROM (SELECT chr(65 + a) || chr(65 + b) || chr(65 + d) c FROM generate_series(0, 25) a, generate_series(0, 25) b, generate_series(0, 25) d) g WHERE c NOT IN (SELECT iata FROM iata_codes) ORDER BY c LIMIT 5000) s"
+  cmi_ch: "SELECT (SELECT channel_id FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 1)"
+  cmi_ch_empty: "SELECT ARRAY[ic.iata]::bpchar[] FROM iata_codes ic WHERE NOT EXISTS (SELECT 1 FROM channel_message_iatas i WHERE i.channel_id = (SELECT channel_id FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 1) AND i.iata = ic.iata) ORDER BY ic.iata LIMIT 1"
+  cmi_ch_list: "SELECT array_agg(iata ORDER BY iata)::bpchar[] FROM (SELECT iata FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) AND channel_id = (SELECT channel_id FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 1) GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 22) s"
+  cmi_ch_site: "SELECT ARRAY[(SELECT iata FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) AND channel_id = (SELECT channel_id FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 1) GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 1)]::bpchar[]"
+  cmi_ch_site_50: "SELECT message_id FROM channel_message_iatas WHERE channel_id = (SELECT channel_id FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 1) AND iata = (SELECT iata FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) AND channel_id = (SELECT channel_id FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 1) GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 1) ORDER BY message_id DESC OFFSET 49 LIMIT 1"
+  cmi_ch_site_deep: "SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY message_id) FROM (SELECT message_id FROM channel_message_iatas WHERE channel_id = (SELECT channel_id FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 1) AND iata = (SELECT iata FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) AND channel_id = (SELECT channel_id FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 1) GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 1) ORDER BY message_id DESC LIMIT 5000) s"
+  cmi_ch_sparse: "SELECT ARRAY[iata]::bpchar[] FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) AND channel_id = (SELECT channel_id FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 1) GROUP BY iata ORDER BY count(*), iata LIMIT 1"
+  cmi_codes: "SELECT array_agg(iata ORDER BY iata)::bpchar[] FROM iata_codes"
+  cmi_list: "SELECT array_agg(iata ORDER BY iata)::bpchar[] FROM (SELECT iata FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 22) s"
+  cmi_list13: "SELECT array_agg(iata ORDER BY iata)::bpchar[] FROM (SELECT iata FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 13) s"
+  cmi_new: "SELECT '{NEW}'::bpchar[]"
+  cmi_sc: "SELECT scope_id FROM (SELECT channel_id, scope_id FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) AND scope_id IS NOT NULL GROUP BY 1, 2 ORDER BY count(*) DESC, 1, 2 LIMIT 1) s"
+  cmi_sc_ch: "SELECT channel_id FROM (SELECT channel_id, scope_id FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) AND scope_id IS NOT NULL GROUP BY 1, 2 ORDER BY count(*) DESC, 1, 2 LIMIT 1) s"
+  cmi_sc_deep: "SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY message_id) FROM (SELECT message_id FROM channel_message_iatas WHERE channel_id = (SELECT channel_id FROM (SELECT channel_id, scope_id FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) AND scope_id IS NOT NULL GROUP BY 1, 2 ORDER BY count(*) DESC, 1, 2 LIMIT 1) p) AND scope_id = (SELECT scope_id FROM (SELECT channel_id, scope_id FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) AND scope_id IS NOT NULL GROUP BY 1, 2 ORDER BY count(*) DESC, 1, 2 LIMIT 1) p) ORDER BY message_id DESC LIMIT 5000) s"
+  cmi_sc_list: "SELECT array_agg(iata ORDER BY iata)::bpchar[] FROM (SELECT iata FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) AND channel_id = (SELECT channel_id FROM (SELECT channel_id, scope_id FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) AND scope_id IS NOT NULL GROUP BY 1, 2 ORDER BY count(*) DESC, 1, 2 LIMIT 1) p) GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 22) s"
+  cmi_sc_rare: "SELECT scope_id FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) AND channel_id = (SELECT channel_id FROM (SELECT channel_id, scope_id FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) AND scope_id IS NOT NULL GROUP BY 1, 2 ORDER BY count(*) DESC, 1, 2 LIMIT 1) p) AND scope_id IS NOT NULL GROUP BY 1 ORDER BY count(*), 1 LIMIT 1"
+  cmi_scope: "SELECT (SELECT scope_id FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) AND scope_id IS NOT NULL GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 1)"
+  cmi_scope_50: "SELECT message_id FROM channel_message_iatas WHERE scope_id = (SELECT scope_id FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) AND scope_id IS NOT NULL GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 1) ORDER BY message_id DESC OFFSET 49 LIMIT 1"
+  cmi_scope_absent: "SELECT ts.id FROM transport_scopes ts WHERE NOT EXISTS (SELECT 1 FROM channel_message_iatas i WHERE i.scope_id = ts.id) ORDER BY ts.id LIMIT 1"
+  cmi_scope_deep: "SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY message_id) FROM (SELECT message_id FROM channel_message_iatas WHERE scope_id = (SELECT scope_id FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) AND scope_id IS NOT NULL GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 1) ORDER BY message_id DESC LIMIT 5000) s"
+  cmi_scope_rare: "SELECT scope_id FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) AND scope_id IS NOT NULL GROUP BY 1 ORDER BY count(*), 1 LIMIT 1"
+  cmi_site: "SELECT ARRAY[(SELECT iata FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 1)]::bpchar[]"
+  cmi_site_50: "SELECT message_id FROM channel_message_iatas WHERE iata = (SELECT iata FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 1) ORDER BY message_id DESC OFFSET 49 LIMIT 1"
+  cmi_site_deep: "SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY message_id) FROM (SELECT message_id FROM channel_message_iatas WHERE iata = (SELECT iata FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 1) ORDER BY message_id DESC LIMIT 5000) s"
+  cmi_site_empty: "SELECT ARRAY[ic.iata]::bpchar[] FROM iata_codes ic WHERE NOT EXISTS (SELECT 1 FROM channel_message_iatas i WHERE i.iata = ic.iata) ORDER BY ic.iata LIMIT 1"
+  cmi_site_s: "SELECT (SELECT iata FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 1)"
+  cmi_site_sparse: "SELECT ARRAY[iata]::bpchar[] FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) GROUP BY iata ORDER BY count(*), iata LIMIT 1"
+  po_fill_hi: "SELECT coalesce(max(id), 0) FROM packet_observations"
+  po_fill_lo: "SELECT coalesce(max(id), 0) - 340000 FROM packet_observations"
   g50_id: "SELECT id FROM known_routes ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC OFFSET 49 LIMIT 1"
   g50_ts: "SELECT date_trunc('milliseconds', last_seen, 'UTC') FROM known_routes ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC OFFSET 49 LIMIT 1"
   global_tie_id: "SELECT max(id) FROM known_routes WHERE date_trunc('milliseconds', last_seen, 'UTC') = (SELECT ts FROM (SELECT date_trunc('milliseconds', last_seen, 'UTC') ts FROM known_routes ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC LIMIT 20000) s GROUP BY ts HAVING count(*) > 1 ORDER BY ts DESC LIMIT 1)"
@@ -886,452 +930,570 @@ entries:
       driver: [{relation: known_routes, index: idx_known_routes_keyset, index_cond: ["ROW(date_trunc"]}]
       budget: {buffers: 10, planning_ms: 10}
 
-  # ---- channel messages through channel_message_iatas (pending) ----
     note: "measured: 3 B on the full local copy (max over modes)"
-  - id: cmi2.P01
+
+  # ---- channel messages: site and scope pages through channel_message_iatas, walks by id ----
+  - id: cmi.ch.site.page1
     stmt: ListChannelMessagesByIATAs
-    shape: "ch27 YUL p1 lim50"
-    params: ["{YUL}", 27, 9223372036854775807, 51]
+    shape: "the busiest channel's busiest site, page 1"
+    shapes: [dense, page1]
+    params: [{r: cmi_ch_site}, {r: cmi_ch}, 9223372036854775807, 51]
     expect:
       driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "message_id <"]}]
       forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 600, planning_ms: 10}
-    note: "measured: 574 / 574 B (custom / generic), idx ,idx_cmi_channel_site; measured budget <=600"
-  - id: cmi2.P02
+      budget: {buffers: 1131, planning_ms: 10}
+    note: "measured: 754 / 754 / 754 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.ch.site.limit201
     stmt: ListChannelMessagesByIATAs
-    shape: "ch27 YUL cursor page (2)"
-    params: ["{YUL}", 27, 17936665, 51]
+    shape: "the busiest channel's busiest site, page 1, limit 200"
+    shapes: [dense, page1]
+    params: [{r: cmi_ch_site}, {r: cmi_ch}, 9223372036854775807, 201]
     expect:
       driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "message_id <"]}]
       forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 600, planning_ms: 10}
-    note: "measured: 565 / 565 B (custom / generic), idx ,idx_cmi_channel_site; measured budget <=600"
-  - id: cmi2.P03
+      budget: {buffers: 4418, planning_ms: 10}
+    note: "measured: 2945 / 2945 / 2945 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.ch.site.deep
     stmt: ListChannelMessagesByIATAs
-    shape: "ch27 YUL deep cursor"
-    params: ["{YUL}", 27, 15018736, 51]
+    shape: "the busiest channel's busiest site, cursor amid its newest 5,000 messages"
+    shapes: [dense, deep]
+    params: [{r: cmi_ch_site}, {r: cmi_ch}, {r: cmi_ch_site_deep}, 51]
     expect:
       driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "message_id <"]}]
       forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 600, planning_ms: 10}
-    note: "measured: 499 / 499 B (custom / generic), idx ,idx_cmi_channel_site; measured budget <=600"
-  - id: cmi2.P04
+      budget: {buffers: 1127, planning_ms: 10}
+    note: "measured: 751 / 751 / 751 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.ch.site.at50
     stmt: ListChannelMessagesByIATAs
-    shape: "zero-hit ch14 GDW"
-    params: ["{GDW}", 14, 9223372036854775807, 51]
+    shape: "the busiest channel's busiest site, cursor at page 1's 50th id"
+    shapes: [dense, tie]
+    params: [{r: cmi_ch_site}, {r: cmi_ch}, {r: cmi_ch_site_50}, 51]
     expect:
       driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "message_id <"]}]
       forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
+      budget: {buffers: 1136, planning_ms: 10}
+    note: "measured: 757 / 757 / 757 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.ch.site.cursor_3e9
+    stmt: ListChannelMessagesByIATAs
+    shape: "the busiest channel's busiest site, cursor 3e9"
+    shapes: [dense, deep]
+    params: [{r: cmi_ch_site}, {r: cmi_ch}, 3000000000, 51]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 1131, planning_ms: 10}
+    note: "measured: 754 / 754 / 754 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.ch.sparse
+    stmt: ListChannelMessagesByIATAs
+    shape: "the busiest channel's quietest recent site, page 1"
+    shapes: [sparse, page1]
+    params: [{r: cmi_ch_sparse}, {r: cmi_ch}, 9223372036854775807, 51]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 924, planning_ms: 10}
+    note: "measured: 616 / 616 / 616 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.ch.empty
+    stmt: ListChannelMessagesByIATAs
+    shape: "the busiest channel, a known site that never heard it"
+    shapes: [empty_region, page1]
+    params: [{r: cmi_ch_empty}, {r: cmi_ch}, 9223372036854775807, 51]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
       budget: {buffers: 10, planning_ms: 10}
-    note: "measured: 3 / 3 B (custom / generic), idx ,idx_cmi_channel_site; measured budget <=10"
-  - id: cmi2.P05
+    note: "measured: 3 / 3 / 3 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.ch.new
     stmt: ListChannelMessagesByIATAs
-    shape: "zero-hit ch27 BLK (valid code)"
-    params: ["{BLK}", 27, 9223372036854775807, 51]
+    shape: "the busiest channel, the site its statistics have not seen"
+    shapes: [stale_region, page1]
+    tiers: [fixture]
+    params: [{r: cmi_new}, {r: cmi_ch}, 9223372036854775807, 51]
     expect:
       driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "message_id <"]}]
       forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
+  - id: cmi.ch.list22
+    stmt: ListChannelMessagesByIATAs
+    shape: "the busiest channel, its 22 busiest recent sites, page 1"
+    shapes: [dense, page1]
+    params: [{r: cmi_ch_list}, {r: cmi_ch}, 9223372036854775807, 51]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 2717, planning_ms: 10}
+    note: "measured: 1811 / 1811 / 1811 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.ch.list22.deep
+    stmt: ListChannelMessagesByIATAs
+    shape: "the busiest channel, its 22 busiest recent sites, deep cursor"
+    shapes: [dense, deep]
+    params: [{r: cmi_ch_list}, {r: cmi_ch}, {r: cmi_ch_site_deep}, 51]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 2748, planning_ms: 10}
+    note: "measured: 1832 / 1832 / 1832 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.ch.codes
+    stmt: ListChannelMessagesByIATAs
+    shape: "the busiest channel, every known site"
+    shapes: [giant_list, page1]
+    params: [{r: cmi_codes}, {r: cmi_ch}, 9223372036854775807, 51]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 30891, planning_ms: 10}
+    note: "measured: 20594 / 20594 / 20594 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.ch.bogus5000
+    stmt: ListChannelMessagesByIATAs
+    shape: "the busiest channel, 5,000 codes that are no site"
+    shapes: [giant_list, empty_region]
+    params: [{r: cmi_bogus5000}, {r: cmi_ch}, 9223372036854775807, 51]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 22500, planning_ms: 10}
+    note: "measured: 15000 / 15000 / 15000 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.all.site.page1
+    stmt: ListAllChannelMessagesByIATAs
+    shape: "/messages, the busiest site, page 1"
+    shapes: [dense, page1]
+    params: [{r: cmi_site}, 9223372036854775807, 51]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 1137, planning_ms: 10}
+    note: "measured: 758 / 758 / 758 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.all.site.limit201
+    stmt: ListAllChannelMessagesByIATAs
+    shape: "/messages, the busiest site, page 1, limit 200"
+    shapes: [dense, page1]
+    params: [{r: cmi_site}, 9223372036854775807, 201]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 4467, planning_ms: 10}
+    note: "measured: 2978 / 2978 / 2978 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.all.site.deep
+    stmt: ListAllChannelMessagesByIATAs
+    shape: "/messages, the busiest site, cursor amid its newest 5,000 messages"
+    shapes: [dense, deep]
+    params: [{r: cmi_site}, {r: cmi_site_deep}, 51]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 1131, planning_ms: 10}
+    note: "measured: 754 / 754 / 754 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.all.site.at50
+    stmt: ListAllChannelMessagesByIATAs
+    shape: "/messages, the busiest site, cursor at page 1's 50th id"
+    shapes: [dense, tie]
+    params: [{r: cmi_site}, {r: cmi_site_50}, 51]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 1136, planning_ms: 10}
+    note: "measured: 757 / 757 / 757 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.all.site.cursor_3e9
+    stmt: ListAllChannelMessagesByIATAs
+    shape: "/messages, the busiest site, cursor 3e9"
+    shapes: [dense, deep]
+    params: [{r: cmi_site}, 3000000000, 51]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 1137, planning_ms: 10}
+    note: "measured: 758 / 758 / 758 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.all.sparse
+    stmt: ListAllChannelMessagesByIATAs
+    shape: "/messages, the quietest recent site"
+    shapes: [sparse, page1]
+    params: [{r: cmi_site_sparse}, 9223372036854775807, 51]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 923, planning_ms: 10}
+    note: "measured: 615 / 615 / 615 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.all.empty
+    stmt: ListAllChannelMessagesByIATAs
+    shape: "/messages, a known site with no message"
+    shapes: [empty_region, page1]
+    params: [{r: cmi_site_empty}, 9223372036854775807, 51]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
       budget: {buffers: 10, planning_ms: 10}
-    note: "measured: 3 / 3 B (custom / generic), idx ,idx_cmi_channel_site; measured budget <=10"
-  - id: cmi2.P06
-    stmt: ListChannelMessagesByIATAs
-    shape: "zero-hit ch27 ZZZ"
-    params: ["{ZZZ}", 27, 9223372036854775807, 51]
-    expect:
-      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "message_id <"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 10, planning_ms: 10}
-    note: "measured: 3 / 3 B (custom / generic), idx ,idx_cmi_channel_site; measured budget <=10"
-  - id: cmi2.P07
-    stmt: ListChannelMessagesByIATAs
-    shape: "ch27 UK22 p1 lim50"
-    params: ["{BHX,BLK,BOH,BRS,CAX,CEG,DSA,EMA,EXT,HUY,LCY,LON,LPL,MAN,MME,NQT,NQY,NWI,ORM,PLH,PME,VLY}", 27, 9223372036854775807, 51]
-    expect:
-      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "message_id <"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 1500, planning_ms: 10}
-    note: "measured: 646 / 646 B (custom / generic), idx ,idx_cmi_channel_site; measured budget <=1500"
-  - id: cmi2.P08
-    stmt: ListChannelMessagesByIATAs
-    shape: "ch27 UK22 deep cursor"
-    params: ["{BHX,BLK,BOH,BRS,CAX,CEG,DSA,EMA,EXT,HUY,LCY,LON,LPL,MAN,MME,NQT,NQY,NWI,ORM,PLH,PME,VLY}", 27, 15018736, 51]
-    expect:
-      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "message_id <"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 1500, planning_ms: 10}
-    note: "measured: 640 / 640 B (custom / generic), idx ,idx_cmi_channel_site; measured budget <=1500"
-  - id: cmi2.P09
-    stmt: ListChannelMessagesByIATAs
-    shape: "ch5 SEA lim200"
-    params: ["{SEA}", 5, 9223372036854775807, 201]
-    expect:
-      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "message_id <"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 3333, planning_ms: 10}
-    note: "measured: 2222 / 2222 B (custom / generic), idx ,idx_cmi_channel_site; 1.5x measured"
-  - id: cmi2.P10
-    stmt: ListChannelMessagesByIATAs
-    shape: "ch5 ALL625 list lim50"
-    params: ["{AAB,AAH,AAL,AAR,ABC,ABE,ABI,ABQ,ABX,ABZ,ACH,ACY,ADL,AGS,AHN,AIZ,AKL,ALB,ALC,ALF,ALH,ALL,AMA,AMS,ANC,ANE,ANR,AOH,APF,ATH,ATL,ATW,AUH,AUS,AVL,AVP,AXN,AZO,BBH,BCN,BDL,BEG,BER,BES,BFD,BFL,BGM,BGN,BGR,BHD,BHM,BHS,BHX,BHZ,BJP,BLA,BLE,BLI,BLK,BLL,BNA,BNE,BOD,BOH,BOI,BOJ,BOS,BQN,BRE,BRN,BRQ,BRS,BRU,BTS,BUD,BUF,BUY,BVE,BWE,BWI,BWT,BYG,BYU,BZG,CAE,CAK,CAX,CBG,CBR,CDG,CEB,CEG,CEZ,CFR,CGI,CGN,CHA,CHC,CLE,CLT,CMH,CMI,COA,CON,COS,CPH,CPQ,CPT,CRL,CRW,CRX,CSM,CVG,CVO,CWA,CWB,CZW,DAB,DAL,DAY,DEC,DEN,DET,DFW,DIQ,DLE,DLH,DND,DNQ,DPO,DRO,DRS,DSA,DSM,DTM,DTW,DUB,DUD,DUS,DVN,DXB,EAT,EAU,EDI,EGE,EIN,ELM,ELP,EMA,EME,ENS,EPH,ERF,ESS,EUG,EVV,EWN,EXT,FAO,FAR,FAT,FKB,FLO,FLR,FMM,FNB,FNL,FNT,FPR,FRA,FRD,FWA,GAS,GBR,GCI,GDN,GDW,GEG,GEX,GGG,GHV,GJT,GLA,GLZ,GOA,GOJ,GOR,GOT,GPT,GPZ,GRQ,GRR,GRU,GRZ,GSO,GSP,GTI,GTP,GTR,GTW,GUF,GUL,GVX,HAD,HAJ,HAM,HDB,HEL,HLG,HLZ,HOH,HOU,HRA,HTS,HUY,HVN,HYR,IAD,IAS,IDA,IKT,ILM,ILZ,IND,INV,IQQ,ITA,IVC,JAN,JAX,JBQ,JCL,JER,JKG,JTC,JYV,KEL,KJK,KLR,KLS,KLU,KLV,KOI,KOK,KPS,KRK,KSC,KSD,KSF,KTN,KTW,KUF,KUN,KZG,KZN,LAA,LAS,LAX,LBA,LBB,LBC,LCH,LCJ,LCQ,LCY,LEH,LEJ,LEX,LEY,LFT,LGA,LGG,LGU,LIL,LIN,LIS,LIT,LJU,LKV,LLA,LMT,LNS,LNZ,LOI,LON,LOZ,LPI,LPL,LRF,LRH,LRT,LRU,LSE,LTN,LUG,LUX,LUZ,LWB,LWK,LWR,LYS,MAC,MAD,MAF,MAN,MBS,MCE,MCI,MCO,MDT,MEL,MEM,MFE,MFR,MGL,MGM,MHG,MIA,MIM,MKA,MKE,MLB,MLU,MME,MMH,MMV,MMX,MNN,MOT,MOW,MPL,MQL,MRO,MRY,MSN,MSP,MST,MSV,MSY,MTJ,MUC,MUE,MVH,MXP,NAP,NCE,NHZ,NIT,NOA,NOC,NOD,NPE,NPL,NQT,NQY,NSN,NTE,NTL,NTU,NUE,NUW,NWI,NYC,NYO,OAK,OBF,OBN,OCF,ODE,OGG,OKC,OLO,OMA,ONP,ONT,OOL,OPO,ORB,ORD,ORL,ORM,ORY,OSD,OSI,OSL,OSR,OTP,OUL,OXF,OXR,PAD,PAE,PAH,PAR,PDK,PDV,PDX,PED,PER,PFB,PGD,PGV,PHF,PHL,PHX,PIA,PIH,PIK,PIT,PKB,PLH,PLO,PLQ,PLR,PME,PMI,PMR,PNS,POA,POZ,PPM,PQQ,PRB,PRC,PRG,PRV,PSC,PSF,PSH,PSK,PSP,PUB,PUW,PVD,QAR,QDV,RAO,RBG,RDD,RDM,RDO,RDU,RDZ,RFD,RIC,RIX,RJK,RKD,RKS,RKV,RLG,RMO,RMU,RNB,RNN,RNO,ROA,ROC,ROK,ROT,ROV,RST,RSW,RTM,RUT,RYG,RZE,SAN,SAO,SAT,SBA,SBN,SBP,SBY,SCE,SCL,SCN,SDF,SDL,SDR,SEA,SFO,SGD,SGU,SIR,SJC,SJO,SJT,SJU,SJY,SKE,SLC,SLE,SMF,SMN,SNN,SOD,SOF,SPM,SQL,SQQ,SRQ,SSZ,STL,STN,STO,STR,STS,SVC,SVG,SVX,SWE,SWH,SXB,SYD,SYR,SZZ,TAT,TGD,TGN,TJM,TKU,TLH,TLL,TLS,TMP,TPA,TRD,TRF,TRG,TRI,TRN,TRO,TRS,TSR,TSV,TTD,TUF,TUL,TWB,TWF,TXK,TYR,TYS,UDE,UHE,UIP,UKK,UME,UTC,VAG,VAP,VBY,VCP,VIE,VIS,VJI,VLC,VLY,VNO,VOD,VOG,VPZ,VRZ,VST,VXO,WAW,WBG,WGA,WIC,WIE,WLG,WOL,WRE,WRO,WRT,WVN,WYA,XCM,XMS,XPH,XYZ,YBL,YCD,YEG,YGK,YHM,YHU,YHZ,YKA,YKF,YKM,YLK,YML,YOW,YPQ,YQA,YQB,YQF,YQL,YQQ,YQS,YQT,YQY,YRQ,YSE,YSJ,YTF,YTR,YUL,YVE,YVR,YWG,YWS,YXU,YXX,YYB,YYC,YYJ,YYY,YYZ,ZBE,ZBM,ZNO,ZPH}", 5, 9223372036854775807, 51]
-    expect:
-      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "message_id <"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 3770, planning_ms: 10}
-    note: "measured: 2513 / 2513 B (custom / generic), idx ,idx_cmi_channel_site; 1.5x measured"
-  - id: cmi2.P11
-    stmt: ListChannelMessagesByIATAsScoped
-    shape: "ch27 UK22 scope #fr lim50"
-    params: ["{BHX,BLK,BOH,BRS,CAX,CEG,DSA,EMA,EXT,HUY,LCY,LON,LPL,MAN,MME,NQT,NQY,NWI,ORM,PLH,PME,VLY}", 27, 175, 9223372036854775807, 51]
-    expect:
-      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "message_id <"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 1500, planning_ms: 10}
-    note: "measured: 66 / 66 B (custom / generic), idx ,idx_cmi_channel_site_scope; measured budget <=1500"
-  - id: cmi2.P12
+    note: "measured: 3 / 3 / 3 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.all.new
     stmt: ListAllChannelMessagesByIATAs
-    shape: "/messages?iatas=YUL lim50"
-    params: ["{YUL}", 9223372036854775807, 51]
+    shape: "/messages, the site the statistics have not seen"
+    shapes: [stale_region, page1]
+    tiers: [fixture]
+    params: [{r: cmi_new}, 9223372036854775807, 51]
     expect:
       driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["message_id <"]}]
       forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 600, planning_ms: 10}
-    note: "measured: 569 / 569 B (custom / generic), idx ,idx_cmi_site; measured budget <=600"
-  - id: cmi2.P13
+  - id: cmi.all.list22
     stmt: ListAllChannelMessagesByIATAs
-    shape: "/messages?iatas=UK22 lim50"
-    params: ["{BHX,BLK,BOH,BRS,CAX,CEG,DSA,EMA,EXT,HUY,LCY,LON,LPL,MAN,MME,NQT,NQY,NWI,ORM,PLH,PME,VLY}", 9223372036854775807, 51]
+    shape: "/messages, the 22 busiest recent sites, page 1"
+    shapes: [dense, page1]
+    params: [{r: cmi_list}, 9223372036854775807, 51]
     expect:
       driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["message_id <"]}]
       forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 1500, planning_ms: 10}
-    note: "measured: 652 / 652 B (custom / generic), idx ,idx_cmi_site; measured budget <=1500"
-  - id: cmi2.P14
-    stmt: ListChannelMessagesPlain
-    shape: "plain ch27 lim50"
-    params: [27, 9223372036854775807, 51]
-    expect:
-      driver: [{relation: channel_messages, alias: cm, index: idx_channel_messages_channel_id, index_cond: ["channel_id =", "id <"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 1000, planning_ms: 10}
-    note: "measured: 413 / 422 B (custom / generic), idx ,idx_channel_messages_channel_id,idx_observations_packet; measured budget <=1000"
-  - id: cmi2.P15
-    stmt: ListChannelMessagesPlain
-    shape: "plain ch27 mid cursor lim50"
-    params: [27, 16415687, 51]
-    expect:
-      driver: [{relation: channel_messages, alias: cm, index: idx_channel_messages_channel_id, index_cond: ["channel_id =", "id <"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 1000, planning_ms: 10}
-    note: "measured: 411 / 411 B (custom / generic), idx ,idx_channel_messages_channel_id,idx_observations_packet; measured budget <=1000"
-  - id: cmi2.P20
-    stmt: ListAllChannelMessagesByIATAsSince
-    shape: "/messages since-10.2h + PNW13 lim200"
-    params: ["{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}", "2026-10-18 06:48+00", null, 9223372036854775807, 201]
+      budget: {buffers: 2721, planning_ms: 10}
+    note: "measured: 1814 / 1814 / 1814 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.all.list22.deep
+    stmt: ListAllChannelMessagesByIATAs
+    shape: "/messages, the 22 busiest recent sites, deep cursor"
+    shapes: [dense, deep]
+    params: [{r: cmi_list}, {r: cmi_site_deep}, 51]
     expect:
       driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["message_id <"]}]
       forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 42152, planning_ms: 10}
-    note: "measured: 28101 / 168613 B (custom / generic), idx ,idx_cmi_site; 1.5x measured"
-  - id: cmi2.P21
-    stmt: ListAllChannelMessagesSince
-    shape: "/messages since-10.2h cursor lim200 (pathfinder)"
-    params: ["2026-10-18 06:48+00", null, 18200000, 201]
-    expect:
-      driver: [{relation: channel_messages, alias: cm, nodes: ["Index Scan", "Index Only Scan", "Bitmap Heap Scan"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 2573, planning_ms: 10}
-    note: "measured: 1715 / 3132 B (custom / generic), idx ,idx_observations_packet; 1.5x measured"
-  - id: cmi2.P22
-    stmt: ListAllChannelMessagesSince
-    shape: "/messages since-10.2h past the end (last page)"
-    params: ["2026-10-18 06:48+00", null, 18100000, 201]
-    expect:
-      driver: [{relation: channel_messages, alias: cm, nodes: ["Index Scan", "Index Only Scan", "Bitmap Heap Scan"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 2549, planning_ms: 10}
-    note: "measured: 1699 / 2997 B (custom / generic), idx ,idx_observations_packet; 1.5x measured"
-  - id: cmi2.P23
-    stmt: ListAllChannelMessagesPlain
-    shape: "/messages plain lim100"
-    params: [9223372036854775807, 101]
-    expect:
-      driver: [{relation: channel_messages, alias: cm, nodes: ["Index Scan", "Index Only Scan", "Bitmap Heap Scan"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 1000, planning_ms: 10}
-    note: "measured: 877 / 2174 B (custom / generic), idx ,idx_observations_packet; measured budget <=1000"
-  - id: cmi2.P24
-    stmt: ListAllChannelMessagesPlainScoped
-    shape: "/messages scope #fr lim20"
-    params: [175, 9223372036854775807, 21]
-    expect:
-      driver: [{relation: channel_messages, alias: cm, nodes: ["Index Scan", "Index Only Scan", "Bitmap Heap Scan"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 83595, planning_ms: 10}
-    known_issue: "/messages?scope= has no bounded path until it reads channel_message_iatas by scope"
-    note: "measured: 55730 / 50294 B (custom / generic), idx ,cm_packet_hash_key,idx_observations_packet,idx_packets_scope; 1.5x measured"
-  - id: cmi2.P25
-    stmt: ListAllChannelMessagesPlainScoped
-    shape: "/messages scope #rheinland (0 msgs)"
-    params: [5, 9223372036854775807, 51]
-    expect:
-      driver: [{relation: channel_messages, alias: cm, nodes: ["Index Scan", "Index Only Scan", "Bitmap Heap Scan"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 180, planning_ms: 10}
-    note: "measured: 120 / 120 B (custom / generic), idx ,cm_packet_hash_key,idx_observations_packet,idx_packets_scope; 1.5x measured"
-  - id: cmi2.P26
-    stmt: ListChannelMessagesSinceWalk
-    shape: "SinceWalk ch5 YUL since-3d lim50"
-    params: [5, "2026-10-15 17:00+00", "{YUL}", null, 9223372036854775807, 51]
-    expect:
-      driver: [{relation: channel_messages, alias: cm, index: idx_channel_messages_channel_id, index_cond: ["channel_id =", "id <"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 63578, planning_ms: 10}
-    note: "measured: 42385 / 192982 B (custom / generic), idx ,idx_channel_messages_channel_id,idx_cmi_site,idx_observations_packet; 1.5x measured"
-  - id: cmi2.P27
-    stmt: ListChannelMessagesSinceWalk
-    shape: "SinceWalk ch27 since-10.2h lim50"
-    params: [27, "2026-10-18 06:48+00", "{}", null, 9223372036854775807, 51]
-    expect:
-      driver: [{relation: channel_messages, alias: cm, index: idx_channel_messages_channel_id, index_cond: ["channel_id =", "id <"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 620, planning_ms: 10}
-    note: "measured: 413 / 572 B (custom / generic), idx ,idx_channel_messages_channel_id,idx_observations_packet; 1.5x measured"
-  - id: cmi2.P32
-    stmt: ListAllChannelMessagesPlainScoped
-    shape: "/messages scope #nl lim50"
-    params: [50, 9223372036854775807, 51]
-    expect:
-      driver: [{relation: channel_messages, alias: cm, nodes: ["Index Scan", "Index Only Scan", "Bitmap Heap Scan"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 28782, planning_ms: 10}
-    known_issue: "/messages?scope= has no bounded path until it reads channel_message_iatas by scope"
-    note: "measured: 19188 / 97204 B (custom / generic), idx idx_observations_packet,idx_packets_scope; 1.5x measured"
-  - id: cmi2.P16_cmi
-    stmt: ListChannelMessagesPlainScoped
-    shape: "PlainScoped ch27 #fr lim50"
-    params: [27, 175, 9223372036854775807, 51]
-    expect:
-      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "scope_id =", "message_id <"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 1077, planning_ms: 10}
-    note: "measured: 718 / 718 B (custom / generic), idx channels_pkey,cm_pkey,idx_cmi_channel_scope,packets_pkey,transport_scopes_pkey; 1.5x measured"
-  - id: cmi2.P17_cmi
-    stmt: ListChannelMessagesPlainScoped
-    shape: "PlainScoped ch27 #bx (1 msg, deep)"
-    params: [27, 65, 9223372036854775807, 51]
-    expect:
-      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "scope_id =", "message_id <"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 50, planning_ms: 10}
-    note: "measured: 18 / 18 B (custom / generic), idx channels_pkey,cm_pkey,idx_cmi_channel_scope,packets_pkey,transport_scopes_pkey; 1.5x measured"
-  - id: cmi2.P18_cmi
-    stmt: ListChannelMessagesPlainScoped
-    shape: "PlainScoped ch27 #rheinland (0 msgs)"
-    params: [27, 5, 9223372036854775807, 51]
-    expect:
-      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "scope_id =", "message_id <"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 50, planning_ms: 10}
-    note: "measured: 3 / 3 B (custom / generic), idx channels_pkey,cm_pkey,idx_cmi_channel_scope,packets_pkey,transport_scopes_pkey; 1.5x measured"
-  - id: cmi2.P19_cmi
-    stmt: ListChannelMessagesPlainScoped
-    shape: "PlainScoped ch5 #rheinland (0 msgs)"
-    params: [5, 5, 9223372036854775807, 51]
-    expect:
-      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "scope_id =", "message_id <"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 50, planning_ms: 10}
-    note: "measured: 3 / 3 B (custom / generic), idx channels_pkey,cm_pkey,idx_cmi_channel_scope,packets_pkey,transport_scopes_pkey; 1.5x measured"
-  - id: cmi2.P28_cmi
-    stmt: ListChannelMessagesPlainScoped
-    shape: "PlainScoped ch23 #de (5 msgs)"
-    params: [23, 2, 9223372036854775807, 51]
-    expect:
-      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "scope_id =", "message_id <"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 111, planning_ms: 10}
-    note: "measured: 74 / 74 B (custom / generic), idx channels_pkey,cm_pkey,idx_cmi_channel_scope,packets_pkey,transport_scopes_pkey; 1.5x measured"
-  - id: cmi2.P29_cmi
-    stmt: ListChannelMessagesPlainScoped
-    shape: "PlainScoped ch5 #de lim50"
-    params: [5, 2, 9223372036854775807, 51]
-    expect:
-      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "scope_id =", "message_id <"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 1079, planning_ms: 10}
-    note: "measured: 719 / 719 B (custom / generic), idx channels_pkey,cm_pkey,idx_cmi_channel_scope,packets_pkey,transport_scopes_pkey; 1.5x measured"
-  - id: cmi2.P30_cmi
-    stmt: ListChannelMessagesPlainScoped
-    shape: "PlainScoped ch23 #nl (0 msgs)"
-    params: [23, 50, 9223372036854775807, 51]
-    expect:
-      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "scope_id =", "message_id <"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 50, planning_ms: 10}
-    note: "measured: 3 / 3 B (custom / generic), idx channels_pkey,cm_pkey,idx_cmi_channel_scope,packets_pkey,transport_scopes_pkey; 1.5x measured"
-  - id: cmi2.P31_cmi
-    stmt: ListChannelMessagesPlainScoped
-    shape: "PlainScoped ch27 #nl lim200"
-    params: [27, 50, 9223372036854775807, 201]
-    expect:
-      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "scope_id =", "message_id <"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 2459, planning_ms: 10}
-    note: "measured: 1639 / 2821 B (custom / generic), idx channels_pkey,cm_pkey,idx_cmi_channel_scope,packets_pkey,transport_scopes_pkey; 1.5x measured"
-  - id: cmi2.P33_cmi
-    stmt: ListChannelMessagesPlainScoped
-    shape: "PlainScoped ch5 #bx (0 msgs)"
-    params: [5, 65, 9223372036854775807, 51]
-    expect:
-      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "scope_id =", "message_id <"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 50, planning_ms: 10}
-    note: "measured: 3 / 3 B (custom / generic), idx channels_pkey,cm_pkey,idx_cmi_channel_scope,packets_pkey,transport_scopes_pkey; 1.5x measured"
-  - id: cmi2.P34_cmi
-    stmt: ListChannelMessagesPlainScoped
-    shape: "PlainScoped ch5 #de deep cursor"
-    params: [5, 2, 14994622, 51]
-    expect:
-      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "scope_id =", "message_id <"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 1077, planning_ms: 10}
-    note: "measured: 718 / 718 B (custom / generic), idx channels_pkey,cm_pkey,idx_cmi_channel_scope,packets_pkey,transport_scopes_pkey; 1.5x measured"
-  - id: cmi2.v_ch27_yul_cursor_3e9
-    stmt: ListChannelMessagesByIATAs
-    shape: "channel endpoint, cursor 3e9 (>= 2^31)"
-    params: ["{YUL}", 27, 3000000000, 51]
-    expect:
-      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "message_id <"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 600, planning_ms: 10}
-    note: "no measured run; measured budget <=600"
-  - id: cmi2.v_all_yul_cursor_3e9
+      budget: {buffers: 2744, planning_ms: 10}
+    note: "measured: 1829 / 1829 / 1829 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.all.codes
     stmt: ListAllChannelMessagesByIATAs
-    shape: "/messages?iatas=YUL, cursor 3e9 (>= 2^31; today: 500)"
-    params: ["{YUL}", 3000000000, 51]
+    shape: "/messages, every known site"
+    shapes: [giant_list, page1]
+    params: [{r: cmi_codes}, 9223372036854775807, 51]
     expect:
       driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["message_id <"]}]
       forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 600, planning_ms: 10}
-    note: "no measured run; measured budget <=600"
-  - id: cmi2.v_all_plain_cursor_3e9
-    stmt: ListAllChannelMessagesPlain
-    shape: "/messages plain, cursor 3e9 (>= 2^31; today: 500)"
-    params: [3000000000, 101]
-    expect:
-      driver: [{relation: channel_messages, alias: cm, nodes: ["Index Scan", "Index Only Scan", "Bitmap Heap Scan"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 1000, planning_ms: 10}
-    note: "no measured run; measured budget <=1000"
-  - id: cmi2.v_all_since_cursor_3e9
-    stmt: ListAllChannelMessagesSince
-    shape: "/messages since T0-10.2h, cursor 3e9"
-    params: ["2026-10-18 06:48+00", null, 3000000000, 201]
-    expect:
-      driver: [{relation: channel_messages, alias: cm, nodes: ["Index Scan", "Index Only Scan", "Bitmap Heap Scan"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 25000, planning_ms: 10}
-    note: "no measured run; class budget"
-  - id: cmi2.v_ch27_bogus5000
-    stmt: ListChannelMessagesByIATAs
-    shape: "channel 27 + 5,000 bogus IATAs"
-    params: [{r: cmi_bogus5000}, 27, 9223372036854775807, 51]
-    expect:
-      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "message_id <"]}]
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 25000, planning_ms: 60}
-    note: "no measured run; measured budget <=25000"
-  - id: cmi2.v_all_bogus5000
+      budget: {buffers: 39261, planning_ms: 10}
+    note: "measured: 26174 / 26174 / 26174 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.all.bogus5000
     stmt: ListAllChannelMessagesByIATAs
-    shape: "/messages + 5,000 bogus IATAs"
+    shape: "/messages, 5,000 codes that are no site"
+    shapes: [giant_list, empty_region]
     params: [{r: cmi_bogus5000}, 9223372036854775807, 51]
     expect:
       driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["message_id <"]}]
       forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 25000, planning_ms: 60}
-    note: "no measured run; measured budget <=25000"
-  - id: cmi2.v_ch27_allcmi
-    stmt: ListChannelMessagesByIATAs
-    shape: "channel 27 + every site with a message"
-    params: [{r: cmi_all_sites}, 27, 9223372036854775807, 51]
+      budget: {buffers: 22500, planning_ms: 10}
+    note: "measured: 15000 / 15000 / 15000 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.plain.page1
+    stmt: ListChannelMessagesPlain
+    shape: "the busiest channel, unfiltered, page 1"
+    shapes: [page1]
+    params: [{r: cmi_ch}, 9223372036854775807, 51]
     expect:
-      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "message_id <"]}]
+      driver: [{relation: channel_messages, alias: cm, index: idx_channel_messages_channel_id, index_cond: ["channel_id =", "id <"]}]
       forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 25000, planning_ms: 10}
-    note: "no measured run; measured budget <=25000"
-  - id: cmi2.v_all_allcmi
-    stmt: ListAllChannelMessagesByIATAs
-    shape: "/messages + every site with a message"
-    params: [{r: cmi_all_sites}, 9223372036854775807, 51]
+      budget: {buffers: 671, planning_ms: 10}
+    note: "measured: 426 / 447 / 447 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.plain.limit201
+    stmt: ListChannelMessagesPlain
+    shape: "the busiest channel, unfiltered, page 1, limit 200"
+    shapes: [page1]
+    params: [{r: cmi_ch}, 9223372036854775807, 201]
     expect:
-      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["message_id <"]}]
+      driver: [{relation: channel_messages, alias: cm, index: idx_channel_messages_channel_id, index_cond: ["channel_id =", "id <"]}]
       forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
-      budget: {buffers: 25000, planning_ms: 10}
-    note: "no measured run; measured budget <=25000"
-  - id: cmi2.v_ch27_new_zerohit_scoped
+      budget: {buffers: 2654, planning_ms: 10}
+    note: "measured: 1631 / 1769 / 1769 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.plain.deep
+    stmt: ListChannelMessagesPlain
+    shape: "the busiest channel, unfiltered, cursor amid its newest 5,000 messages"
+    shapes: [deep]
+    params: [{r: cmi_ch}, {r: cm_ch_deep}, 51]
+    expect:
+      driver: [{relation: channel_messages, alias: cm, index: idx_channel_messages_channel_id, index_cond: ["channel_id =", "id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 756, planning_ms: 10}
+    note: "measured: 432 / 504 / 504 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.plain.at50
+    stmt: ListChannelMessagesPlain
+    shape: "the busiest channel, unfiltered, cursor at page 1's 50th id"
+    shapes: [tie]
+    params: [{r: cmi_ch}, {r: cm_ch_50}, 51]
+    expect:
+      driver: [{relation: channel_messages, alias: cm, index: idx_channel_messages_channel_id, index_cond: ["channel_id =", "id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 669, planning_ms: 10}
+    note: "measured: 422 / 446 / 446 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.plain.cursor_3e9
+    stmt: ListChannelMessagesPlain
+    shape: "the busiest channel, unfiltered, cursor 3e9"
+    shapes: [deep]
+    params: [{r: cmi_ch}, 3000000000, 51]
+    expect:
+      driver: [{relation: channel_messages, alias: cm, index: idx_channel_messages_channel_id, index_cond: ["channel_id =", "id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 671, planning_ms: 10}
+    note: "measured: 426 / 447 / 447 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.allplain.page1
+    stmt: ListAllChannelMessagesPlain
+    shape: "/messages unfiltered, page 1, limit 100"
+    shapes: [page1]
+    params: [9223372036854775807, 101]
+    expect:
+      driver: [{relation: channel_messages, alias: cm, index: channel_messages_pkey, index_cond: ["id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 1316, planning_ms: 10}
+    note: "measured: 877 / 877 / 877 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.allplain.deep
+    stmt: ListAllChannelMessagesPlain
+    shape: "/messages unfiltered, cursor amid the newest 20,000 messages"
+    shapes: [deep]
+    params: [{r: cm_deep}, 51]
+    expect:
+      driver: [{relation: channel_messages, alias: cm, index: channel_messages_pkey, index_cond: ["id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 663, planning_ms: 10}
+    note: "measured: 442 / 442 / 442 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.allplain.at50
+    stmt: ListAllChannelMessagesPlain
+    shape: "/messages unfiltered, cursor at page 1's 50th id"
+    shapes: [tie]
+    params: [{r: cm_50}, 51]
+    expect:
+      driver: [{relation: channel_messages, alias: cm, index: channel_messages_pkey, index_cond: ["id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 722, planning_ms: 10}
+    note: "measured: 481 / 481 / 481 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.allplain.cursor_3e9
+    stmt: ListAllChannelMessagesPlain
+    shape: "/messages unfiltered, cursor 3e9"
+    shapes: [deep]
+    params: [3000000000, 51]
+    expect:
+      driver: [{relation: channel_messages, alias: cm, index: channel_messages_pkey, index_cond: ["id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 648, planning_ms: 10}
+    note: "measured: 432 / 432 / 432 B (custom / generic / auto) on the full local copy; budget 1.5x"
+  - id: cmi.chscope.list22
     stmt: ListChannelMessagesByIATAsScoped
-    shape: "channel 27 + YUL + a scope with no messages there (#rheinland)"
-    params: ["{YUL}", 27, 5, 9223372036854775807, 51]
+    shape: "the busiest scoped channel, its 22 busiest sites, its busiest scope"
+    params: [{r: cmi_sc_list}, {r: cmi_sc_ch}, {r: cmi_sc}, 9223372036854775807, 51]
     expect:
-      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "message_id <"]}]
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "scope_id =", "message_id <"]}]
       forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-      sort_exempt: [per_site_message_ranges]
+      budget: {buffers: 1787, planning_ms: 10}
+    note: "class C: its generic plan switches to idx_cmi_channel_scope when the visibility map is stale; measured: 1191 B (custom) on the full local copy; budget 1.5x"
+  - id: cmi.chscope.zerohit
+    stmt: ListChannelMessagesByIATAsScoped
+    shape: "the busiest channel's busiest site with a scope no message carries"
+    params: [{r: cmi_ch_site}, {r: cmi_ch}, {r: cmi_scope_absent}, 9223372036854775807, 51]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, any_index: [idx_cmi_channel_site_scope, idx_cmi_scope], nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
       budget: {buffers: 10, planning_ms: 10}
-    note: "no measured run; measured budget <=10"
-  - id: cmi2.ingest.add_iata
+    note: "measured: 3 B (custom) on the full local copy; budget 1.5x"
+  - id: cmi.plainscope.busy
+    stmt: ListChannelMessagesPlainScoped
+    shape: "the busiest scoped channel and scope, page 1"
+    params: [{r: cmi_sc_ch}, {r: cmi_sc}, 9223372036854775807, 51]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "scope_id =", "message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 1521, planning_ms: 10}
+    note: "measured: 1014 B (custom) on the full local copy; budget 1.5x"
+  - id: cmi.plainscope.limit201
+    stmt: ListChannelMessagesPlainScoped
+    shape: "the busiest scoped channel and scope, limit 200"
+    params: [{r: cmi_sc_ch}, {r: cmi_sc}, 9223372036854775807, 201]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "scope_id =", "message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 4142, planning_ms: 10}
+    note: "measured: 2761 B (custom) on the full local copy; budget 1.5x"
+  - id: cmi.plainscope.deep
+    stmt: ListChannelMessagesPlainScoped
+    shape: "the busiest scoped channel and scope, cursor amid its newest 5,000 messages"
+    params: [{r: cmi_sc_ch}, {r: cmi_sc}, {r: cmi_sc_deep}, 51]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "scope_id =", "message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 1523, planning_ms: 10}
+    note: "measured: 1015 B (custom) on the full local copy; budget 1.5x"
+  - id: cmi.plainscope.rare
+    stmt: ListChannelMessagesPlainScoped
+    shape: "the busiest scoped channel, its rarest recent scope"
+    params: [{r: cmi_sc_ch}, {r: cmi_sc_rare}, 9223372036854775807, 51]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "scope_id =", "message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 120, planning_ms: 10}
+    note: "measured: 80 B (custom) on the full local copy; budget 1.5x"
+  - id: cmi.plainscope.absent
+    stmt: ListChannelMessagesPlainScoped
+    shape: "the busiest channel, a scope no message carries"
+    params: [{r: cmi_ch}, {r: cmi_scope_absent}, 9223372036854775807, 51]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, any_index: [idx_cmi_channel_scope, idx_cmi_scope], nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 10, planning_ms: 10}
+    note: "measured: 3 B (custom) on the full local copy; budget 1.5x"
+  - id: cmi.plainscope.cursor_3e9
+    stmt: ListChannelMessagesPlainScoped
+    shape: "the busiest scoped channel and scope, cursor 3e9"
+    params: [{r: cmi_sc_ch}, {r: cmi_sc}, 3000000000, 51]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_channel_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["channel_id =", "scope_id =", "message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 1521, planning_ms: 10}
+    note: "measured: 1014 B (custom) on the full local copy; budget 1.5x"
+  - id: cmi.allplainscope.limit20
+    stmt: ListAllChannelMessagesPlainScoped
+    shape: "/messages, the busiest scope, limit 20"
+    params: [{r: cmi_scope}, 9223372036854775807, 21]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 630, planning_ms: 10}
+    note: "measured: 420 B (custom) on the full local copy; budget 1.5x"
+  - id: cmi.allplainscope.page1
+    stmt: ListAllChannelMessagesPlainScoped
+    shape: "/messages, the busiest scope, page 1"
+    params: [{r: cmi_scope}, 9223372036854775807, 51]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 1515, planning_ms: 10}
+    note: "measured: 1010 B (custom) on the full local copy; budget 1.5x"
+  - id: cmi.allplainscope.limit201
+    stmt: ListAllChannelMessagesPlainScoped
+    shape: "/messages, the busiest scope, limit 200"
+    params: [{r: cmi_scope}, 9223372036854775807, 201]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 4107, planning_ms: 10}
+    note: "measured: 2738 B (custom) on the full local copy; budget 1.5x"
+  - id: cmi.allplainscope.deep
+    stmt: ListAllChannelMessagesPlainScoped
+    shape: "/messages, the busiest scope, cursor amid its newest 5,000 messages"
+    params: [{r: cmi_scope}, {r: cmi_scope_deep}, 51]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 1601, planning_ms: 10}
+    note: "measured: 1067 B (custom) on the full local copy; budget 1.5x"
+  - id: cmi.allplainscope.at50
+    stmt: ListAllChannelMessagesPlainScoped
+    shape: "/messages, the busiest scope, cursor at page 1's 50th id"
+    params: [{r: cmi_scope}, {r: cmi_scope_50}, 51]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 1493, planning_ms: 10}
+    note: "measured: 995 B (custom) on the full local copy; budget 1.5x"
+  - id: cmi.allplainscope.cursor_3e9
+    stmt: ListAllChannelMessagesPlainScoped
+    shape: "/messages, the busiest scope, cursor 3e9"
+    params: [{r: cmi_scope}, 3000000000, 51]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 1515, planning_ms: 10}
+    note: "measured: 1010 B (custom) on the full local copy; budget 1.5x"
+  - id: cmi.allplainscope.rare
+    stmt: ListAllChannelMessagesPlainScoped
+    shape: "/messages, the rarest recent scope"
+    params: [{r: cmi_scope_rare}, 9223372036854775807, 51]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 1154, planning_ms: 10}
+    note: "measured: 769 B (custom) on the full local copy; budget 1.5x"
+  - id: cmi.allplainscope.absent
+    stmt: ListAllChannelMessagesPlainScoped
+    shape: "/messages, a scope no message carries"
+    params: [{r: cmi_scope_absent}, 9223372036854775807, 51]
+    expect:
+      driver: [{scope: "CTE hits", relation: channel_message_iatas, alias: i, index: idx_cmi_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "message_id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 10, planning_ms: 10}
+    note: "measured: 3 B (custom) on the full local copy; budget 1.5x"
+  - id: cmi.allsince.page1
+    stmt: ListAllChannelMessagesSince
+    shape: "/messages since 10 hours before the newest message, limit 200"
+    params: [{r: cm_since10h}, null, 9223372036854775807, 201]
+    expect:
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 2540, planning_ms: 10}
+    note: "measured: 1693 B (custom) on the full local copy; budget 1.5x"
+  - id: cmi.allsince.cursor
+    stmt: ListAllChannelMessagesSince
+    shape: "/messages since 10 hours before the newest message, second page"
+    params: [{r: cm_since10h}, null, {r: cm_since_cursor}, 201]
+    expect:
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 2555, planning_ms: 10}
+    note: "measured: 1703 B (custom) on the full local copy; budget 1.5x"
+  - id: cmi.allsince.scoped
+    stmt: ListAllChannelMessagesSince
+    shape: "/messages since 10 hours before the newest message, the busiest scope"
+    params: [{r: cm_since10h}, {r: cmi_scope}, 9223372036854775807, 201]
+    expect:
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 38972, planning_ms: 10}
+    known_issue: "since with a scope and no sites (no client sends it): today's statement and this one read the scope's packets through idx_packets_scope, idx_channel_messages_sent_brin and idx_observations_packet, all due to be dropped, and sort them unbounded under the Limit; re-measure before dropping those indexes"
+    note: "measured: 25981 B (custom) on the full local copy; budget 1.5x"
+  - id: cmi.allsince.future
+    stmt: ListAllChannelMessagesSince
+    shape: "/messages since a time after every message (2100), limit 200"
+    params: [{raw: "'2100-01-01 00:00+00'::timestamptz"}, null, 9223372036854775807, 201]
+    expect:
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+    note: "no worse than today's statement: both stop on the sent_at index; re-measure before the drop of idx_channel_messages_sent_brin"
+  - id: cmi.allsince.cursor_3e9
+    stmt: ListAllChannelMessagesSince
+    shape: "/messages since 10 hours before the newest message, cursor 3e9"
+    params: [{r: cm_since10h}, null, 3000000000, 201]
+    expect:
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 2540, planning_ms: 10}
+    note: "measured: 1693 B (custom) on the full local copy; budget 1.5x"
+  - id: cmi.sincewalk.site3d
+    stmt: ListChannelMessagesSinceWalk
+    shape: "the busiest channel since 3 days before the newest message, its busiest site"
+    params: [{r: cmi_ch}, {r: cm_since3d}, {r: cmi_ch_site}, null, 9223372036854775807, 51]
+    expect:
+      driver: [{relation: channel_messages, alias: cm, index: idx_channel_messages_channel_id, index_cond: ["channel_id =", "id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 6891, planning_ms: 10}
+    note: "measured: 4594 B (custom) on the full local copy; budget 1.5x"
+  - id: cmi.sincewalk.future
+    stmt: ListChannelMessagesSinceWalk
+    shape: "the busiest channel since a time after every message (2100), its busiest site"
+    params: [{r: cmi_ch}, {raw: "'2100-01-01 00:00+00'::timestamptz"}, {r: cmi_ch_site}, null, 9223372036854775807, 51]
+    expect:
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+    note: "no worse than today's statement: both stop on the channel's sent_at index; re-measure before the drop of idx_channel_messages_channel"
+  - id: cmi.sincewalk.plain10h
+    stmt: ListChannelMessagesSinceWalk
+    shape: "the busiest channel since 10 hours before the newest message, unfiltered"
+    params: [{r: cmi_ch}, {r: cm_since10h}, "{}", null, 9223372036854775807, 51]
+    expect:
+      driver: [{relation: channel_messages, alias: cm, index: idx_channel_messages_channel_id, index_cond: ["channel_id =", "id <"]}]
+      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      budget: {buffers: 639, planning_ms: 10}
+    note: "measured: 426 B (custom) on the full local copy; budget 1.5x"
+  - id: cmi.ingest.add
     stmt: AddChannelMessageIATA
-    shape: "AddChannelMessageIATA for the newest message hash (plain EXPLAIN; ingest pool, auto)"
-    params: [YUL, {r: cm_newest_hash}]
+    shape: "a later hearing's site for the newest message (ingest pool, auto)"
+    params: [{r: cm_newest_hash}, {r: cmi_site_s}]
     expect:
       driver: [{relation: channel_messages, alias: cm, index: channel_messages_packet_hash_key, index_cond: ["packet_hash ="]}]
-  - id: cmi2.maint.fill_by_messages
+  - id: cmi.ingest.insert
+    stmt: InsertChannelMessage
+    shape: "a message with its seed, for the newest observation's packet (ingest pool, auto)"
+    params: [1, {r: obs_newest_hash}, s, c, "2026-10-18 17:00+00", false]
+  - id: cmi.maint.fill_by_messages
     stmt: FillChannelMessageIATAsByMessages
-    shape: "backfill / reconcile message part over one 10K-message id range (plain EXPLAIN; maint)"
-    params: [17000000, 17010000]
+    shape: "backfill or reconcile message part: the newest 10,000 message ids"
+    tiers: [local, prod]
+    params: [{r: cm_fill_lo}, {r: cm_fill_hi}]
     expect:
       driver: [{relation: channel_messages, alias: cm, index: channel_messages_pkey, index_cond: ["id >"]}]
+  - id: cmi.maint.fill_by_observations
+    stmt: FillChannelMessageIATAsByObservations
+    shape: "reconcile observation part: the newest 340,000 observation ids"
+    tiers: [local, prod]
+    params: [{r: po_fill_lo}, {r: po_fill_hi}]
+    expect:
+      driver: [{relation: packet_observations, alias: po, index: packet_observations_pkey, index_cond: ["id >"]}]
 
   # ---- stats, adverts, traces and telemetry (legacy readers and pending rewrites) ----
   - id: s7.tn.LIS_1d

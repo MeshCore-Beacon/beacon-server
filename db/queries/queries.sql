@@ -1215,6 +1215,10 @@ SELECT (SELECT count(*) FROM cand) AS candidates,
 -- name: GetBackgroundState :one
 SELECT value FROM background_state WHERE key = @key;
 
+-- name: GetBackgroundStateAge :one
+-- A state with its age on the database clock: how long since its writer last saved it.
+SELECT value, extract(epoch FROM statement_timestamp() - updated_at)::float8 AS age_seconds FROM background_state WHERE key = @key;
+
 -- name: UpsertBackgroundState :exec
 INSERT INTO background_state (key, value, updated_at) VALUES (@key, @value, now())
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
@@ -1543,6 +1547,37 @@ SELECT * FROM channels WHERE id = $1;
 -- A later reception's transport code must not give live and historical messages different tags.
 -- message_count is a lifetime count, bumped only for a new message. A historical (backfilled)
 -- message queues its observation hours for a re-roll in the same statement, so the two can't diverge.
+WITH inserted AS (
+  INSERT INTO channel_messages (channel_id, packet_hash, sender_name, content, sent_at)
+  VALUES ($1, $2, $3, $4, $5)
+  ON CONFLICT (packet_hash) DO NOTHING
+  RETURNING id, packet_hash, channel_id
+), bump AS (
+  UPDATE channels c SET message_count = c.message_count + 1
+  FROM inserted WHERE c.id = inserted.channel_id
+), dirty AS (
+  INSERT INTO analytics_dirty_hours (hour)
+  SELECT DISTINCT date_trunc('hour', po.heard_at, 'UTC')
+  FROM packet_observations po JOIN inserted i ON i.packet_hash = po.packet_hash
+  WHERE $6::boolean
+  ON CONFLICT (hour) DO UPDATE SET enqueued_at = now()
+), seed AS (
+  -- Every stored observation's site, in the same statement; a later observation adds its own site.
+  INSERT INTO channel_message_iatas (message_id, iata, channel_id, scope_id)
+  SELECT DISTINCT i.id, po.iata, i.channel_id, p.scope_id
+  FROM inserted i
+  JOIN packets p ON p.packet_hash = i.packet_hash
+  JOIN packet_observations po ON po.packet_hash = i.packet_hash
+  ON CONFLICT (message_id, iata) DO NOTHING
+)
+SELECT inserted.id, ts.name AS scope_name, p.transport_codes_present
+FROM inserted
+JOIN packets p ON p.packet_hash = inserted.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id;
+
+-- name: InsertChannelMessageUnseeded :one
+-- The seeded insert's fallback: the same statement without the site seed. The read-model
+-- reconcile adds the message's sites within one interval.
 WITH inserted AS (
   INSERT INTO channel_messages (channel_id, packet_hash, sender_name, content, sent_at)
   VALUES ($1, $2, $3, $4, $5)

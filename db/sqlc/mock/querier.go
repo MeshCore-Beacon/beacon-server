@@ -72,6 +72,21 @@ func (mr *MockQuerierMockRecorder) AddChannelMembers(ctx, arg any) *gomock.Call 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddChannelMembers", reflect.TypeOf((*MockQuerier)(nil).AddChannelMembers), ctx, arg)
 }
 
+// AddChannelMessageIATA mocks base method.
+func (m *MockQuerier) AddChannelMessageIATA(ctx context.Context, arg db.AddChannelMessageIATAParams) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AddChannelMessageIATA", ctx, arg)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// AddChannelMessageIATA indicates an expected call of AddChannelMessageIATA.
+func (mr *MockQuerierMockRecorder) AddChannelMessageIATA(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddChannelMessageIATA", reflect.TypeOf((*MockQuerier)(nil).AddChannelMessageIATA), ctx, arg)
+}
+
 // AddIATAs mocks base method.
 func (m *MockQuerier) AddIATAs(ctx context.Context, iatas []string) error {
 	m.ctrl.T.Helper()
@@ -113,6 +128,21 @@ func (m *MockQuerier) BackfillObservationPayloadTypes(ctx context.Context, arg d
 func (mr *MockQuerierMockRecorder) BackfillObservationPayloadTypes(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BackfillObservationPayloadTypes", reflect.TypeOf((*MockQuerier)(nil).BackfillObservationPayloadTypes), ctx, arg)
+}
+
+// CheckChannelMessageIATAs mocks base method.
+func (m *MockQuerier) CheckChannelMessageIATAs(ctx context.Context, arg db.CheckChannelMessageIATAsParams) (db.CheckChannelMessageIATAsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CheckChannelMessageIATAs", ctx, arg)
+	ret0, _ := ret[0].(db.CheckChannelMessageIATAsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CheckChannelMessageIATAs indicates an expected call of CheckChannelMessageIATAs.
+func (mr *MockQuerierMockRecorder) CheckChannelMessageIATAs(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckChannelMessageIATAs", reflect.TypeOf((*MockQuerier)(nil).CheckChannelMessageIATAs), ctx, arg)
 }
 
 // ClearRepeaters mocks base method.
@@ -402,6 +432,36 @@ func (mr *MockQuerierMockRecorder) DeleteStaleDirtyHours(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteStaleDirtyHours", reflect.TypeOf((*MockQuerier)(nil).DeleteStaleDirtyHours), ctx)
 }
 
+// FillChannelMessageIATAsByMessages mocks base method.
+func (m *MockQuerier) FillChannelMessageIATAsByMessages(ctx context.Context, arg db.FillChannelMessageIATAsByMessagesParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FillChannelMessageIATAsByMessages", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FillChannelMessageIATAsByMessages indicates an expected call of FillChannelMessageIATAsByMessages.
+func (mr *MockQuerierMockRecorder) FillChannelMessageIATAsByMessages(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FillChannelMessageIATAsByMessages", reflect.TypeOf((*MockQuerier)(nil).FillChannelMessageIATAsByMessages), ctx, arg)
+}
+
+// FillChannelMessageIATAsByObservations mocks base method.
+func (m *MockQuerier) FillChannelMessageIATAsByObservations(ctx context.Context, arg db.FillChannelMessageIATAsByObservationsParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FillChannelMessageIATAsByObservations", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FillChannelMessageIATAsByObservations indicates an expected call of FillChannelMessageIATAsByObservations.
+func (mr *MockQuerierMockRecorder) FillChannelMessageIATAsByObservations(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FillChannelMessageIATAsByObservations", reflect.TypeOf((*MockQuerier)(nil).FillChannelMessageIATAsByObservations), ctx, arg)
+}
+
 // FillReconfirmAmb mocks base method.
 func (m *MockQuerier) FillReconfirmAmb(ctx context.Context) error {
 	m.ctrl.T.Helper()
@@ -488,6 +548,21 @@ func (m *MockQuerier) GetBackgroundState(ctx context.Context, key string) (json.
 func (mr *MockQuerierMockRecorder) GetBackgroundState(ctx, key any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBackgroundState", reflect.TypeOf((*MockQuerier)(nil).GetBackgroundState), ctx, key)
+}
+
+// GetBackgroundStateAge mocks base method.
+func (m *MockQuerier) GetBackgroundStateAge(ctx context.Context, key string) (db.GetBackgroundStateAgeRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetBackgroundStateAge", ctx, key)
+	ret0, _ := ret[0].(db.GetBackgroundStateAgeRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetBackgroundStateAge indicates an expected call of GetBackgroundStateAge.
+func (mr *MockQuerierMockRecorder) GetBackgroundStateAge(ctx, key any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBackgroundStateAge", reflect.TypeOf((*MockQuerier)(nil).GetBackgroundStateAge), ctx, key)
 }
 
 // GetChannelByID mocks base method.
@@ -1360,6 +1435,21 @@ func (mr *MockQuerierMockRecorder) InsertChannelMessage(ctx, arg any) *gomock.Ca
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertChannelMessage", reflect.TypeOf((*MockQuerier)(nil).InsertChannelMessage), ctx, arg)
 }
 
+// InsertChannelMessageUnseeded mocks base method.
+func (m *MockQuerier) InsertChannelMessageUnseeded(ctx context.Context, arg db.InsertChannelMessageUnseededParams) (db.InsertChannelMessageUnseededRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InsertChannelMessageUnseeded", ctx, arg)
+	ret0, _ := ret[0].(db.InsertChannelMessageUnseededRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// InsertChannelMessageUnseeded indicates an expected call of InsertChannelMessageUnseeded.
+func (mr *MockQuerierMockRecorder) InsertChannelMessageUnseeded(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertChannelMessageUnseeded", reflect.TypeOf((*MockQuerier)(nil).InsertChannelMessageUnseeded), ctx, arg)
+}
+
 // InsertObservation mocks base method.
 func (m *MockQuerier) InsertObservation(ctx context.Context, arg db.InsertObservationParams) (db.InsertObservationRow, error) {
 	m.ctrl.T.Helper()
@@ -1419,6 +1509,66 @@ func (mr *MockQuerierMockRecorder) ListAllChannelMessages(ctx, arg any) *gomock.
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListAllChannelMessages", reflect.TypeOf((*MockQuerier)(nil).ListAllChannelMessages), ctx, arg)
 }
 
+// ListAllChannelMessagesByIATAs mocks base method.
+func (m *MockQuerier) ListAllChannelMessagesByIATAs(ctx context.Context, arg db.ListAllChannelMessagesByIATAsParams) ([]db.ListAllChannelMessagesByIATAsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListAllChannelMessagesByIATAs", ctx, arg)
+	ret0, _ := ret[0].([]db.ListAllChannelMessagesByIATAsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListAllChannelMessagesByIATAs indicates an expected call of ListAllChannelMessagesByIATAs.
+func (mr *MockQuerierMockRecorder) ListAllChannelMessagesByIATAs(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListAllChannelMessagesByIATAs", reflect.TypeOf((*MockQuerier)(nil).ListAllChannelMessagesByIATAs), ctx, arg)
+}
+
+// ListAllChannelMessagesPlain mocks base method.
+func (m *MockQuerier) ListAllChannelMessagesPlain(ctx context.Context, arg db.ListAllChannelMessagesPlainParams) ([]db.ListAllChannelMessagesPlainRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListAllChannelMessagesPlain", ctx, arg)
+	ret0, _ := ret[0].([]db.ListAllChannelMessagesPlainRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListAllChannelMessagesPlain indicates an expected call of ListAllChannelMessagesPlain.
+func (mr *MockQuerierMockRecorder) ListAllChannelMessagesPlain(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListAllChannelMessagesPlain", reflect.TypeOf((*MockQuerier)(nil).ListAllChannelMessagesPlain), ctx, arg)
+}
+
+// ListAllChannelMessagesPlainScoped mocks base method.
+func (m *MockQuerier) ListAllChannelMessagesPlainScoped(ctx context.Context, arg db.ListAllChannelMessagesPlainScopedParams) ([]db.ListAllChannelMessagesPlainScopedRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListAllChannelMessagesPlainScoped", ctx, arg)
+	ret0, _ := ret[0].([]db.ListAllChannelMessagesPlainScopedRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListAllChannelMessagesPlainScoped indicates an expected call of ListAllChannelMessagesPlainScoped.
+func (mr *MockQuerierMockRecorder) ListAllChannelMessagesPlainScoped(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListAllChannelMessagesPlainScoped", reflect.TypeOf((*MockQuerier)(nil).ListAllChannelMessagesPlainScoped), ctx, arg)
+}
+
+// ListAllChannelMessagesSince mocks base method.
+func (m *MockQuerier) ListAllChannelMessagesSince(ctx context.Context, arg db.ListAllChannelMessagesSinceParams) ([]db.ListAllChannelMessagesSinceRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListAllChannelMessagesSince", ctx, arg)
+	ret0, _ := ret[0].([]db.ListAllChannelMessagesSinceRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListAllChannelMessagesSince indicates an expected call of ListAllChannelMessagesSince.
+func (mr *MockQuerierMockRecorder) ListAllChannelMessagesSince(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListAllChannelMessagesSince", reflect.TypeOf((*MockQuerier)(nil).ListAllChannelMessagesSince), ctx, arg)
+}
+
 // ListChannelCatalogues mocks base method.
 func (m *MockQuerier) ListChannelCatalogues(ctx context.Context) ([]db.MeshmapperChannelCatalogue, error) {
 	m.ctrl.T.Helper()
@@ -1449,6 +1599,36 @@ func (mr *MockQuerierMockRecorder) ListChannelIDs(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChannelIDs", reflect.TypeOf((*MockQuerier)(nil).ListChannelIDs), ctx)
 }
 
+// ListChannelMessageIATASamples mocks base method.
+func (m *MockQuerier) ListChannelMessageIATASamples(ctx context.Context, arg db.ListChannelMessageIATASamplesParams) ([]db.ListChannelMessageIATASamplesRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListChannelMessageIATASamples", ctx, arg)
+	ret0, _ := ret[0].([]db.ListChannelMessageIATASamplesRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListChannelMessageIATASamples indicates an expected call of ListChannelMessageIATASamples.
+func (mr *MockQuerierMockRecorder) ListChannelMessageIATASamples(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChannelMessageIATASamples", reflect.TypeOf((*MockQuerier)(nil).ListChannelMessageIATASamples), ctx, arg)
+}
+
+// ListChannelMessageScopeSamples mocks base method.
+func (m *MockQuerier) ListChannelMessageScopeSamples(ctx context.Context, arg db.ListChannelMessageScopeSamplesParams) ([]db.ListChannelMessageScopeSamplesRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListChannelMessageScopeSamples", ctx, arg)
+	ret0, _ := ret[0].([]db.ListChannelMessageScopeSamplesRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListChannelMessageScopeSamples indicates an expected call of ListChannelMessageScopeSamples.
+func (mr *MockQuerierMockRecorder) ListChannelMessageScopeSamples(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChannelMessageScopeSamples", reflect.TypeOf((*MockQuerier)(nil).ListChannelMessageScopeSamples), ctx, arg)
+}
+
 // ListChannelMessages mocks base method.
 func (m *MockQuerier) ListChannelMessages(ctx context.Context, arg db.ListChannelMessagesParams) ([]db.ListChannelMessagesRow, error) {
 	m.ctrl.T.Helper()
@@ -1477,6 +1657,81 @@ func (m *MockQuerier) ListChannelMessagesByHash(ctx context.Context, arg db.List
 func (mr *MockQuerierMockRecorder) ListChannelMessagesByHash(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChannelMessagesByHash", reflect.TypeOf((*MockQuerier)(nil).ListChannelMessagesByHash), ctx, arg)
+}
+
+// ListChannelMessagesByIATAs mocks base method.
+func (m *MockQuerier) ListChannelMessagesByIATAs(ctx context.Context, arg db.ListChannelMessagesByIATAsParams) ([]db.ListChannelMessagesByIATAsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListChannelMessagesByIATAs", ctx, arg)
+	ret0, _ := ret[0].([]db.ListChannelMessagesByIATAsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListChannelMessagesByIATAs indicates an expected call of ListChannelMessagesByIATAs.
+func (mr *MockQuerierMockRecorder) ListChannelMessagesByIATAs(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChannelMessagesByIATAs", reflect.TypeOf((*MockQuerier)(nil).ListChannelMessagesByIATAs), ctx, arg)
+}
+
+// ListChannelMessagesByIATAsScoped mocks base method.
+func (m *MockQuerier) ListChannelMessagesByIATAsScoped(ctx context.Context, arg db.ListChannelMessagesByIATAsScopedParams) ([]db.ListChannelMessagesByIATAsScopedRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListChannelMessagesByIATAsScoped", ctx, arg)
+	ret0, _ := ret[0].([]db.ListChannelMessagesByIATAsScopedRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListChannelMessagesByIATAsScoped indicates an expected call of ListChannelMessagesByIATAsScoped.
+func (mr *MockQuerierMockRecorder) ListChannelMessagesByIATAsScoped(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChannelMessagesByIATAsScoped", reflect.TypeOf((*MockQuerier)(nil).ListChannelMessagesByIATAsScoped), ctx, arg)
+}
+
+// ListChannelMessagesPlain mocks base method.
+func (m *MockQuerier) ListChannelMessagesPlain(ctx context.Context, arg db.ListChannelMessagesPlainParams) ([]db.ListChannelMessagesPlainRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListChannelMessagesPlain", ctx, arg)
+	ret0, _ := ret[0].([]db.ListChannelMessagesPlainRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListChannelMessagesPlain indicates an expected call of ListChannelMessagesPlain.
+func (mr *MockQuerierMockRecorder) ListChannelMessagesPlain(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChannelMessagesPlain", reflect.TypeOf((*MockQuerier)(nil).ListChannelMessagesPlain), ctx, arg)
+}
+
+// ListChannelMessagesPlainScoped mocks base method.
+func (m *MockQuerier) ListChannelMessagesPlainScoped(ctx context.Context, arg db.ListChannelMessagesPlainScopedParams) ([]db.ListChannelMessagesPlainScopedRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListChannelMessagesPlainScoped", ctx, arg)
+	ret0, _ := ret[0].([]db.ListChannelMessagesPlainScopedRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListChannelMessagesPlainScoped indicates an expected call of ListChannelMessagesPlainScoped.
+func (mr *MockQuerierMockRecorder) ListChannelMessagesPlainScoped(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChannelMessagesPlainScoped", reflect.TypeOf((*MockQuerier)(nil).ListChannelMessagesPlainScoped), ctx, arg)
+}
+
+// ListChannelMessagesSinceWalk mocks base method.
+func (m *MockQuerier) ListChannelMessagesSinceWalk(ctx context.Context, arg db.ListChannelMessagesSinceWalkParams) ([]db.ListChannelMessagesSinceWalkRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListChannelMessagesSinceWalk", ctx, arg)
+	ret0, _ := ret[0].([]db.ListChannelMessagesSinceWalkRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListChannelMessagesSinceWalk indicates an expected call of ListChannelMessagesSinceWalk.
+func (mr *MockQuerierMockRecorder) ListChannelMessagesSinceWalk(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChannelMessagesSinceWalk", reflect.TypeOf((*MockQuerier)(nil).ListChannelMessagesSinceWalk), ctx, arg)
 }
 
 // ListChannels mocks base method.
@@ -2046,6 +2301,51 @@ func (m *MockQuerier) MarkPartialRollupHours(ctx context.Context) error {
 func (mr *MockQuerierMockRecorder) MarkPartialRollupHours(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkPartialRollupHours", reflect.TypeOf((*MockQuerier)(nil).MarkPartialRollupHours), ctx)
+}
+
+// MaxChannelMessageID mocks base method.
+func (m *MockQuerier) MaxChannelMessageID(ctx context.Context) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MaxChannelMessageID", ctx)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// MaxChannelMessageID indicates an expected call of MaxChannelMessageID.
+func (mr *MockQuerierMockRecorder) MaxChannelMessageID(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MaxChannelMessageID", reflect.TypeOf((*MockQuerier)(nil).MaxChannelMessageID), ctx)
+}
+
+// MaxObservationID mocks base method.
+func (m *MockQuerier) MaxObservationID(ctx context.Context) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MaxObservationID", ctx)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// MaxObservationID indicates an expected call of MaxObservationID.
+func (mr *MockQuerierMockRecorder) MaxObservationID(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MaxObservationID", reflect.TypeOf((*MockQuerier)(nil).MaxObservationID), ctx)
+}
+
+// NextChannelMessageID mocks base method.
+func (m *MockQuerier) NextChannelMessageID(ctx context.Context, afterID int64) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "NextChannelMessageID", ctx, afterID)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// NextChannelMessageID indicates an expected call of NextChannelMessageID.
+func (mr *MockQuerierMockRecorder) NextChannelMessageID(ctx, afterID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NextChannelMessageID", reflect.TypeOf((*MockQuerier)(nil).NextChannelMessageID), ctx, afterID)
 }
 
 // OldestMissingRollupHour mocks base method.

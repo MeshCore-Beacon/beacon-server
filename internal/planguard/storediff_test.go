@@ -531,3 +531,47 @@ func TestStoreDiffLatestObserverTie(t *testing.T) {
 		t.Errorf("valid omit: %v", err)
 	}
 }
+
+// Vars fill query values too, and add shifts a numeric value: a case can ask for the newest message's site and a
+// since 10 hours before it, read from the data instead of fixed in the file.
+func TestStoreDiffQueryVars(t *testing.T) {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/observers":
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{map[string]any{"iata": "AAA"}, map[string]any{"iata": "BBB"}}, "hasMore": false})
+		case "/api/v1/messages":
+			if r.URL.Query().Get("since") == "" {
+				_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{map[string]any{"sentAt": 100000}}, "hasMore": false})
+				return
+			}
+			got = append(got, r.URL.Query().Get("iatas")+"|"+r.URL.Query().Get("since"))
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{}, "hasMore": false})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	spec := &planguard.StoreDiffSpec{Cases: []planguard.StoreCase{{
+		ID: "sites_since", Path: "/api/v1/messages", Query: map[string]string{"iatas": "{a},{b}", "since": "{t}"},
+		Vars: map[string]planguard.StoreVar{
+			"a": {Path: "/api/v1/observers", From: "first.iata"},
+			"b": {Path: "/api/v1/observers", From: "last.iata"},
+			"t": {Path: "/api/v1/messages", From: "first.sentAt", Add: -36000},
+		},
+	}}}
+	if err := spec.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if c := runStoreDiff(t, srv, srv, spec, "2").Cases[0]; c.Verdict != planguard.DiffIdentical {
+		t.Fatalf("case: %+v", c)
+	}
+	if len(got) == 0 || got[0] != "AAA,BBB|64000" {
+		t.Fatalf("requests %v, want iatas AAA,BBB and since 64000", got)
+	}
+	bad := &planguard.StoreDiffSpec{Cases: []planguard.StoreCase{{ID: "x", Path: "/api/v1/messages", Query: map[string]string{"iatas": "{nope}"}}}}
+	if err := bad.Validate(); err == nil || !strings.Contains(err.Error(), "vars does not define it") {
+		t.Fatalf("undefined query var: %v", err)
+	}
+}

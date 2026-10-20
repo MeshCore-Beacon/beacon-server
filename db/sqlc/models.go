@@ -202,6 +202,13 @@ type ChannelMessage struct {
 	SentAt       pgtype.Timestamptz `json:"sent_at"`
 }
 
+type ChannelMessageIata struct {
+	MessageID int64  `json:"message_id"`
+	Iata      string `json:"iata"`
+	ChannelID int32  `json:"channel_id"`
+	ScopeID   *int32 `json:"scope_id"`
+}
+
 type IataCode struct {
 	Iata        string             `json:"iata"`
 	DisplayName *string            `json:"display_name"`

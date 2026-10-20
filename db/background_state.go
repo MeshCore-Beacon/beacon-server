@@ -15,7 +15,12 @@ import (
 // LoadState unmarshals the background_state value under key into v. It returns false, nil when
 // the key has no row.
 func (s *Store) LoadState(ctx context.Context, key string, v any) (bool, error) {
-	raw, err := s.q.GetBackgroundState(ctx, key)
+	return loadState(ctx, s.q, key, v)
+}
+
+// loadState reads key through q, which may be bound to one connection or a transaction.
+func loadState(ctx context.Context, q sqlc.Querier, key string, v any) (bool, error) {
+	raw, err := q.GetBackgroundState(ctx, key)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}

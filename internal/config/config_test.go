@@ -4,6 +4,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -520,6 +521,34 @@ func TestLoad_PlanguardDailyCheck(t *testing.T) {
 		}
 		if r := Resolve(cfg); r.PlanguardDailyCheck != tc.want || !strings.Contains(r.String(), "planguardDailyCheck="+strconv.FormatBool(tc.want)) {
 			t.Errorf("Resolve(%q): PlanguardDailyCheck = %v (%s), want %v", tc.yaml, r.PlanguardDailyCheck, r, tc.want)
+		}
+	}
+}
+
+func TestLoad_ReadModelsCmi(t *testing.T) {
+	for _, c := range []struct {
+		yaml string
+		want bool
+	}{
+		{"", true},
+		{"readmodels:\n  cmi:\n    enabled: false\n", false},
+		{"readmodels:\n  cmi:\n    enabled: true\n", true},
+		{"readmodels:\n  cmi: {}\n", true},
+	} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte(c.yaml), 0600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := Resolve(cfg)
+		if r.ReadModelCmiEnabled != c.want {
+			t.Errorf("%q: ReadModelCmiEnabled = %v, want %v", c.yaml, r.ReadModelCmiEnabled, c.want)
+		}
+		if !strings.Contains(r.String(), fmt.Sprintf("readModelCmi=%t", c.want)) {
+			t.Errorf("%q: resolved line %q", c.yaml, r.String())
 		}
 	}
 }
