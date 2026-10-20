@@ -92,7 +92,7 @@ func TestChannelPublicMarkerUsesDecryptionKey(t *testing.T) {
 		w.hub.AddScope(client, "public-marker", hub.Scope{Events: []hub.EventType{hub.EventChannelMessage, hub.EventObserverStatus}})
 		waitForSummarySubscriber(t, ctx, w.hub, client)
 		packet := &meshcore.Packet{Header: meshcore.MakeHeader(meshcore.RouteTypeFlood, meshcore.PayloadTypeGrpTxt, 0), Payload: encryptedGroupText(t, 0x11, key, "Fixture", "test")}
-		w.handlePayloadTypeSideEffects(ctx, packet, "YKF", []byte{1}, RadioSettings{}, nil, nil, nil, 0)
+		w.handlePayloadTypeSideEffects(ctx, packet, "YKF", []byte{1}, RadioSettings{}, nil, nil, nil, 0, false)
 		select {
 		case event := <-client.Send:
 			var got channelMessageEvent
