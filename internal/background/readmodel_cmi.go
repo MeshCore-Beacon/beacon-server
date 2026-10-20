@@ -119,7 +119,6 @@ func (j *CmiJobs) bootOnce(ctx context.Context) (bool, error) {
 		if st, err = s.Backfill(ctx, cmiBackfillBudget); err != nil {
 			return false, err
 		}
-		slog.Info("cmi backfill progress", "component", "readmodel", "backfilled_to_id", st.BackfilledToID, "max_id", st.BackfillMaxID)
 	}
 	j.booted.Store(true)
 	if st.FirstVerifiedAt == nil {

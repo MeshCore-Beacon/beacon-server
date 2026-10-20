@@ -127,3 +127,24 @@ func TestPacketSitesBackfillShrinksPostgres(t *testing.T) {
 		t.Fatalf("retry left incomplete rows: wrote %d, %v", n, err)
 	}
 }
+
+func TestPacketSitesBackfillBudgetDoesNotShrinkPostgres(t *testing.T) {
+	f := newPsFixture(t)
+	stream := f.packets(10)
+	f.unsited(stream[:30]...)
+	p := f.begin()
+	if _, err := p.Init(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	before := p.state.BackfilledDownToID
+	p.backfillLimit = time.Second
+	var calls int
+	p.fillStmt = func(context.Context, int64, int64) (int64, error) {
+		calls++
+		return 0, &pgconn.PgError{Code: "57014", Message: "canceling statement due to statement timeout"}
+	}
+	st, err := p.Backfill(f.ctx, 100*time.Millisecond)
+	if err != nil || calls != 1 || p.backfillSpan != packetSitesBootSlice || st.BackfilledDownToID != before {
+		t.Fatalf("a budget-limited attempt shrank the next cycle: calls=%d span=%d state=%+v err=%v", calls, p.backfillSpan, st, err)
+	}
+}

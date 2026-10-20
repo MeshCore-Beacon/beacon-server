@@ -603,3 +603,60 @@ func TestLoad_ReadModelsPacketSites(t *testing.T) {
 		}
 	}
 }
+
+func TestLoad_ReadModelsFill(t *testing.T) {
+	type fill struct {
+		duty      float64
+		minPause  time.Duration
+		slice     int64
+		cmiBatch  int64
+		resolved  string
+		errSubstr string
+	}
+	defaults := fill{0.5, 100 * time.Millisecond, 500_000, 10_000, "fillDuty=0.5 fillMinPause=100ms fillPacketSitesSlice=500000 fillCmiBatch=10000", ""}
+	for _, c := range []struct {
+		yaml string
+		want fill
+	}{
+		{"", defaults},
+		{"readmodels:\n  fill: {}\n", defaults},
+		{"readmodels:\n  fill:\n    duty: 0.25\n    min_pause: 1s\n    packet_sites_slice: 100000\n    cmi_batch: 2000\n",
+			fill{0.25, time.Second, 100_000, 2_000, "fillDuty=0.25 fillMinPause=1s fillPacketSitesSlice=100000 fillCmiBatch=2000", ""}},
+		{"readmodels:\n  fill:\n    duty: 1\n    min_pause: 0s\n", fill{1, 0, 500_000, 10_000, "fillDuty=1 fillMinPause=0s", ""}},
+		{"readmodels:\n  fill:\n    duty: 0\n", fill{errSubstr: "readmodels.fill.duty"}},
+		{"readmodels:\n  fill:\n    duty: -0.5\n", fill{errSubstr: "readmodels.fill.duty"}},
+		{"readmodels:\n  fill:\n    duty: 1.5\n", fill{errSubstr: "readmodels.fill.duty"}},
+		{"readmodels:\n  fill:\n    duty: 0.009\n", fill{errSubstr: "readmodels.fill.duty"}},
+		{"readmodels:\n  fill:\n    duty: 0.01\n", fill{0.01, 100 * time.Millisecond, 500_000, 10_000, "fillDuty=0.01 ", ""}},
+		{"readmodels:\n  fill:\n    duty: .nan\n", fill{errSubstr: "readmodels.fill.duty"}},
+		{"readmodels:\n  fill:\n    min_pause: -1s\n", fill{errSubstr: "readmodels.fill.min_pause"}},
+		{"readmodels:\n  fill:\n    min_pause: 2m\n", fill{errSubstr: "readmodels.fill.min_pause"}},
+		{"readmodels:\n  fill:\n    packet_sites_slice: 0\n", fill{errSubstr: "readmodels.fill.packet_sites_slice"}},
+		{"readmodels:\n  fill:\n    packet_sites_slice: 20000000\n", fill{errSubstr: "readmodels.fill.packet_sites_slice"}},
+		{"readmodels:\n  fill:\n    cmi_batch: -1\n", fill{errSubstr: "readmodels.fill.cmi_batch"}},
+		{"readmodels:\n  fill:\n    cmi_batch: 2000000\n", fill{errSubstr: "readmodels.fill.cmi_batch"}},
+	} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte(c.yaml), 0600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if c.want.errSubstr != "" {
+			if err == nil || !strings.Contains(err.Error(), c.want.errSubstr) {
+				t.Errorf("%q: Load error %v, want one naming %s", c.yaml, err, c.want.errSubstr)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%q: %v", c.yaml, err)
+		}
+		r := Resolve(cfg)
+		got := fill{r.FillDuty, r.FillMinPause, r.FillPacketSitesSlice, r.FillCmiBatch, c.want.resolved, ""}
+		if got != c.want {
+			t.Errorf("%q: resolved %+v, want %+v", c.yaml, got, c.want)
+		}
+		if !strings.Contains(r.String(), c.want.resolved) {
+			t.Errorf("%q: resolved line %q lacks %q", c.yaml, r.String(), c.want.resolved)
+		}
+	}
+}

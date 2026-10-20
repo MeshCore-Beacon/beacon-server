@@ -21,18 +21,16 @@ import (
 
 const (
 	cmiStateKey = "cmi"
-	// cmiBackfillBatch is the message ids one fill of reconciliation covers.
+	// cmiBackfillBatch is the message ids one fill of the reconcile's message part covers, and the backfill's
+	// default batch (readmodels.fill.cmi_batch).
 	cmiBackfillBatch int64 = 10_000
-	// Boot starts with smaller writes than steady-state reconciliation.
-	cmiBootBatch int64 = 1_000
+	cmiBootBatch     int64 = 1_000
 	// cmiObsSlice is the observation ids one fill of the reconcile's observation part covers.
 	cmiObsSlice int64 = 500_000
 	// cmiFillAttempts bounds the retries of a fill that lost a message to a concurrent cascade (23503).
 	cmiFillAttempts = 3
 	// cmiVerifyMessages is the width of each message range the verification checks exactly.
 	cmiVerifyMessages int64 = 2_000
-	// cmiBatchPause separates backfill batches.
-	cmiBatchPause = 100 * time.Millisecond
 )
 
 // CmiState is background_state['cmi']: the one-off backfill's progress and the reconcile watermarks. Nothing in it
@@ -55,19 +53,15 @@ type CmiSession struct {
 	state CmiState
 	// fills and retries count fill statements and 23503 retries, for tests.
 	fills, retries int
-	pause          time.Duration // between backfill batches; 0 = cmiBatchPause, < 0 = none
 	backfillSpan   int64
 	backfillLimit  time.Duration
-}
-
-func (c *CmiSession) batchPause() time.Duration {
-	switch {
-	case c.pause < 0:
-		return 0
-	case c.pause == 0:
-		return cmiBatchPause
-	}
-	return c.pause
+	// The backfill's pacing (see FillPacing): pause is the shortest wait after a batch, duty the share of time it may
+	// be busy, batch the message ids one batch covers. progress logs it once a minute; nil logs nothing.
+	pause    time.Duration
+	duty     float64
+	batch    int64
+	progress *FillProgress
+	batched  bool // this session's Backfill has filled a batch
 }
 
 // BeginCmi takes the cmi lock for this schema on a dedicated connection. ok is false when another session holds it.
@@ -88,7 +82,15 @@ func (s *Store) BeginCmi(ctx context.Context) (*CmiSession, bool, error) {
 		conn.Release()
 		return nil, false, nil
 	}
-	return &CmiSession{conn: conn, q: sqlc.New(conn)}, true, nil
+	if _, err := conn.Exec(ctx, fillPlanMode); err != nil {
+		_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock($1, hashtext(current_schema()))", cmiReconcileLockKey)
+		conn.Release()
+		return nil, false, err
+	}
+	analyzeAtStart(ctx, conn, "channel_message_iatas")
+	pace := s.FillPacing()
+	return &CmiSession{conn: conn, q: sqlc.New(conn),
+		pause: pace.MinPause, duty: pace.Duty, batch: pace.CmiBatch, progress: &s.cmiProgress}, true, nil
 }
 
 // Close releases the lock and the connection. If the unlock fails, the connection is closed, which drops the lock.
@@ -96,7 +98,8 @@ func (c *CmiSession) Close(ctx context.Context) {
 	if c.conn == nil {
 		return
 	}
-	if _, err := c.conn.Exec(ctx, "SELECT pg_advisory_unlock($1, hashtext(current_schema()))", cmiReconcileLockKey); err != nil {
+	_, resetErr := c.conn.Exec(ctx, "RESET plan_cache_mode")
+	if _, err := c.conn.Exec(ctx, "SELECT pg_advisory_unlock($1, hashtext(current_schema()))", cmiReconcileLockKey); err != nil || resetErr != nil {
 		_ = c.conn.Conn().Close(ctx)
 	}
 	c.conn.Release()
@@ -121,6 +124,9 @@ func (c *CmiSession) Init(ctx context.Context) (CmiState, error) {
 	if found {
 		c.state = st
 		return st, nil
+	}
+	if c.progress != nil {
+		c.progress.Reset() // a new fill (first install or rebuild) times itself from its own start
 	}
 	msgHi, err := c.q.MaxChannelMessageID(ctx)
 	if err != nil {
@@ -166,18 +172,22 @@ func (c *CmiSession) fillMessages(ctx context.Context, after, through int64) (in
 	})
 }
 
-// Backfill fills cmi oldest to newest, jumping id gaps, until it reaches BackfillMaxID (then Complete) or budget is
-// spent. Boot writes start at cmiBootBatch and halve after a statement timeout. Progress is saved only after a
-// committed batch; retrying a failed or interrupted range is idempotent.
+// Backfill fills cmi oldest to newest in batches of message ids (the session's batch, cmiBackfillBatch by default),
+// jumping id gaps, until it reaches BackfillMaxID (then Complete) or budget is spent. Progress is saved after every
+// batch. After each batch it waits as FillPacing.Wait does, so it is busy at most duty of the time.
 func (c *CmiSession) Backfill(ctx context.Context, budget time.Duration) (CmiState, error) {
 	deadline := time.Now().Add(budget)
 	if c.backfillSpan <= 0 {
 		c.backfillSpan = cmiBootBatch
+		if c.batch > 0 {
+			c.backfillSpan = min(c.backfillSpan, c.batch)
+		}
 	}
 	for !c.state.Complete && time.Now().Before(deadline) {
 		if err := ctx.Err(); err != nil {
 			return c.state, err
 		}
+		began := time.Now()
 		next, err := c.q.NextChannelMessageID(ctx, c.state.BackfilledToID)
 		if err != nil {
 			return c.state, err
@@ -188,15 +198,27 @@ func (c *CmiSession) Backfill(ctx context.Context, budget time.Duration) (CmiSta
 				return c.state, err
 			}
 			slog.Info("cmi backfill complete", "component", "readmodel", "max_id", c.state.BackfillMaxID)
+			if c.progress != nil {
+				c.progress.Reset()
+			}
 			break
 		}
+		if c.progress != nil {
+			c.progress.Start(c.state.BackfilledToID)
+		}
 		hi := min(next-1+c.backfillSpan, c.state.BackfillMaxID)
+		timeout := backfillTimeout(c.backfillLimit, deadline)
 		_, err = c.fill(ctx, func() (int64, error) {
-			return backfillWrite(ctx, c.conn, backfillTimeout(c.backfillLimit, deadline), func() (int64, error) {
+			return backfillWrite(ctx, c.conn, timeout, func() (int64, error) {
 				return c.q.FillChannelMessageIATAsByMessages(ctx, sqlc.FillChannelMessageIATAsByMessagesParams{AfterID: next - 1, ThroughID: hi})
 			})
 		})
 		if err != nil {
+			// A short remaining cycle is not evidence that the batch is too large.
+			// Leave its watermark and size intact for the next full budget.
+			if backfillTimedOut(ctx, err) && timeout < backfillMaxTimeout(c.backfillLimit) {
+				return c.state, nil
+			}
 			if backfillTimedOut(ctx, err) && hi-(next-1) > 1 {
 				c.backfillSpan = max(1, (hi-(next-1))/2)
 				continue
@@ -207,14 +229,31 @@ func (c *CmiSession) Backfill(ctx context.Context, budget time.Duration) (CmiSta
 		if err := c.save(ctx); err != nil {
 			return c.state, err
 		}
-		// A short pause between batches leaves room for ingest's writes and WAL on large deployments.
-		select {
-		case <-ctx.Done():
+		if !c.batched {
+			// A new table now holds a batch's rows; plan the next batches on them.
+			analyzeAfterFirstSlice(ctx, c.conn, "channel_message_iatas")
+			c.batched = true
+		}
+		if c.progress != nil && c.progress.Due() {
+			c.logProgress(ctx)
+		}
+		// The pause leaves room for ingest's writes and WAL, and stretches with the batch's cost on a slow disk.
+		pace := FillPacing{Duty: c.duty, MinPause: c.pause}
+		if !pace.Wait(ctx, time.Since(began)) {
 			return c.state, ctx.Err()
-		case <-time.After(c.batchPause()):
 		}
 	}
 	return c.state, nil
+}
+
+// logProgress logs the backfill's progress: the message ids done from the oldest message and those left.
+func (c *CmiSession) logProgress(ctx context.Context) {
+	first, err := c.q.NextChannelMessageID(ctx, 0)
+	if err != nil || first == 0 {
+		first = c.state.BackfilledToID + 1 // unknown: report none done rather than fail the batch
+	}
+	c.progress.Log("cmi backfill progress", c.state.BackfilledToID, max(c.state.BackfilledToID-(first-1), 0), c.state.BackfillMaxID-c.state.BackfilledToID,
+		"backfilled_to_id", c.state.BackfilledToID, "max_id", c.state.BackfillMaxID)
 }
 
 // Reconcile fills the observation ids and the message ids that arrived since the run before last, so each range

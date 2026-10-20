@@ -69,7 +69,7 @@ func (f *psFixture) begin() *PacketSitesSession {
 		f.t.Fatalf("BeginPacketSites = %v, %v", ok, err)
 	}
 	f.t.Cleanup(func() { p.Close(context.Background()) })
-	p.pause = 0
+	p.pause, p.duty = 0, 1 // no pacing in tests
 	return p
 }
 
