@@ -69,7 +69,7 @@ func TestParseLayout(t *testing.T) {
 
 // The channel message statements: the four whose plan is stable under every layout are generic-safe; the scoped,
 // since and scope-only ones are planned with their values; the all-channel statement for sites with a since or scope
-// runs on the slow pool, and the per-channel one is class C.
+// and the per-channel one (verification-only today) route to the slow pool.
 func TestCmiPlanClasses(t *testing.T) {
 	for name, want := range map[string]planpolicy.Class{
 		"ListChannelMessagesByIATAs":        planpolicy.ClassG,
@@ -82,7 +82,7 @@ func TestCmiPlanClasses(t *testing.T) {
 		"ListAllChannelMessagesPlainScoped": planpolicy.ClassC,
 		"ListAllChannelMessagesSince":       planpolicy.ClassC,
 		"GetTransportScopeByName":           planpolicy.ClassC,
-		"ListChannelMessages":               planpolicy.ClassC,
+		"ListChannelMessages":               planpolicy.ClassSlow,
 		"ListAllChannelMessages":            planpolicy.ClassSlow,
 	} {
 		if got := planpolicy.ClassOf(name); got != want {
