@@ -5,6 +5,7 @@ package db
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 )
@@ -35,6 +36,27 @@ func TestFillPause(t *testing.T) {
 	// An unset duty (a zero FillPacing) means no stretching, never a division by zero.
 	if got := (FillPacing{MinPause: minPause}).Pause(time.Second); got != minPause {
 		t.Errorf("zero duty: pause %v, want %v", got, minPause)
+	}
+	// A duty below MinFillDuty is raised to it: 99 times the slice.
+	if got := (FillPacing{Duty: 1e-12}).Pause(time.Second); got != 99*time.Second {
+		t.Errorf("duty 1e-12: pause %v, want 99s", got)
+	}
+	// No pause exceeds MaxFillPause, and nothing overflows: a long slice, a tiny duty, a huge floor.
+	for _, c := range []struct {
+		p       FillPacing
+		elapsed time.Duration
+	}{
+		{FillPacing{Duty: 0.01}, time.Hour},
+		{FillPacing{Duty: 1e-300}, 10 * time.Second},
+		{FillPacing{Duty: 0.5}, time.Duration(math.MaxInt64)},
+		{FillPacing{Duty: 1, MinPause: time.Duration(math.MaxInt64)}, 0},
+	} {
+		if got := c.p.Pause(c.elapsed); got != MaxFillPause {
+			t.Errorf("%+v elapsed %v: pause %v, want the cap %v", c.p, c.elapsed, got, MaxFillPause)
+		}
+	}
+	if got := (FillPacing{Duty: 0.5, MinPause: -time.Second}).Pause(-time.Second); got != 0 {
+		t.Errorf("negative inputs: pause %v, want 0", got)
 	}
 }
 
@@ -85,9 +107,9 @@ func TestFillProgress(t *testing.T) {
 	var p FillProgress
 	p.now = func() time.Time { return now }
 	if p.Due() {
-		t.Fatal("due at the first call")
+		t.Fatal("due before Start")
 	}
-	p.Start(1_000_000)
+	p.Start(1_000)
 	now = now.Add(30 * time.Second)
 	if p.Due() {
 		t.Fatal("due after 30 s")
@@ -96,8 +118,8 @@ func TestFillProgress(t *testing.T) {
 	if !p.Due() {
 		t.Fatal("not due after a minute")
 	}
-	// 250K of 1M ids in a minute: 750K left at the same rate is three minutes.
-	if eta, ok := p.Log("packet_sites backfill progress", 250_000, 750_000); !ok || eta != 3*time.Minute {
+	// The position moved 250K in a minute: 750K left at that rate is three minutes.
+	if eta, ok := p.Log("packet_sites backfill progress", 251_000, 250_000, 750_000); !ok || eta != 3*time.Minute {
 		t.Fatalf("ETA %v, %v; want 3m", eta, ok)
 	}
 	if p.Due() {
@@ -107,12 +129,33 @@ func TestFillProgress(t *testing.T) {
 	if !p.Due() {
 		t.Fatal("not due a minute after the last log")
 	}
-	// No progress since the start: no ETA.
+	// The remaining count grew (ingest) while the position kept its rate: the ETA follows today's count.
+	if eta, ok := p.ETA(501_000, 1_000_000); !ok || eta != 4*time.Minute {
+		t.Fatalf("ETA with a grown remaining %v, %v; want 4m", eta, ok)
+	}
+	// A later Start does not move the clock; Reset does.
+	p.Start(900_000)
+	if eta, _ := p.ETA(501_000, 1_000_000); eta != 4*time.Minute {
+		t.Fatalf("a second Start moved the clock: ETA %v", eta)
+	}
+	p.Reset()
+	if p.Due() {
+		t.Fatal("due after Reset")
+	}
+	if _, ok := p.ETA(501_000, 10); ok {
+		t.Fatal("an ETA after Reset")
+	}
+	p.Start(0)
+	now = now.Add(time.Minute)
+	if eta, ok := p.ETA(100, 100); !ok || eta != time.Minute {
+		t.Fatalf("ETA after a restart %v, %v; want 1m", eta, ok)
+	}
+	// No movement since the start: no ETA.
 	var q FillProgress
 	q.now = func() time.Time { return now }
 	q.Start(10)
 	now = now.Add(time.Minute)
-	if _, ok := q.Log("x", 0, 10); ok {
+	if _, ok := q.Log("x", 10, 0, 10); ok {
 		t.Fatal("an ETA without progress")
 	}
 }

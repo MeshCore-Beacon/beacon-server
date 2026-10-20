@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -60,6 +61,15 @@ func explainFill(t *testing.T, ctx context.Context, conn *pgxpool.Conn, after, t
 		plan = append(plan, line)
 	}
 	return strings.Join(plan, "\n")
+}
+
+// countAnalyzes records the read-model ANALYZEs run (or tried) until the test ends.
+func countAnalyzes(t *testing.T) *[]string {
+	t.Helper()
+	var tables []string
+	analyzeHook = func(table string) { tables = append(tables, table) }
+	t.Cleanup(func() { analyzeHook = nil })
+	return &tables
 }
 
 func showPlanMode(t *testing.T, ctx context.Context, conn *pgxpool.Conn) string {
@@ -114,7 +124,8 @@ func TestFillSessionsPlanCustomPostgres(t *testing.T) {
 		}
 	}()
 
-	// The fill session: custom plans with the bounds as constants, and statistics from the start.
+	// The fill session: custom plans with the bounds as constants. The table is empty, so no ANALYZE yet.
+	analyzed := countAnalyzes(t)
 	store := New(generic, generic, 0, 0, WithFillPacing(FillPacing{Duty: 1, PacketSitesSlice: 50}))
 	p, ok, err := store.BeginPacketSites(f.ctx)
 	if err != nil || !ok {
@@ -124,8 +135,8 @@ func TestFillSessionsPlanCustomPostgres(t *testing.T) {
 	if mode := showPlanMode(t, f.ctx, p.conn); mode != "force_custom_plan" {
 		t.Fatalf("fill session plan_cache_mode %s", mode)
 	}
-	if n := reltuples(t, f.ctx, f.pool, "packet_sites"); n < 0 {
-		t.Fatal("packet_sites still has no statistics after the session started")
+	if n := reltuples(t, f.ctx, f.pool, "packet_sites"); n >= 0 || len(*analyzed) != 0 {
+		t.Fatalf("an empty packet_sites was analyzed at session start: reltuples %v, ANALYZEs %v", n, *analyzed)
 	}
 	plan := explainFill(t, f.ctx, p.conn, hi-50, hi)
 	if strings.Contains(plan, "$1") || !strings.Contains(plan, "'"+strconv.FormatInt(hi-50, 10)+"'::bigint") {
@@ -138,8 +149,8 @@ func TestFillSessionsPlanCustomPostgres(t *testing.T) {
 	if st, err := p.Backfill(f.ctx, time.Minute); err != nil || !st.Complete {
 		t.Fatalf("Backfill = %+v, %v", st, err)
 	}
-	if !p.analyzed {
-		t.Fatal("no ANALYZE after the first slice")
+	if fmt.Sprint(*analyzed) != "[packet_sites]" {
+		t.Fatalf("ANALYZEs %v, want one after the first slice", *analyzed)
 	}
 	if n := reltuples(t, f.ctx, f.pool, "packet_sites"); n <= 0 {
 		t.Fatalf("packet_sites reltuples %v after the backfill's ANALYZE", n)
@@ -184,24 +195,112 @@ func TestFillSessionsPlanCustomPostgres(t *testing.T) {
 	if mode := showPlanMode(t, c.ctx, cs.conn); mode != "force_custom_plan" {
 		t.Fatalf("cmi session plan_cache_mode %s", mode)
 	}
-	if n := reltuples(t, c.ctx, c.pool, "channel_message_iatas"); n < 0 {
-		t.Fatal("channel_message_iatas still has no statistics after the session started")
-	}
 	if _, err := cs.Init(c.ctx); err != nil {
 		t.Fatal(err)
 	}
-	if st, err := cs.Backfill(c.ctx, time.Minute); err != nil || !st.Complete || !cs.analyzed {
-		t.Fatalf("Backfill = %+v, %v, analyzed %v", st, err, cs.analyzed)
+	*analyzed = nil
+	if st, err := cs.Backfill(c.ctx, time.Minute); err != nil || !st.Complete {
+		t.Fatalf("Backfill = %+v, %v", st, err)
+	}
+	if fmt.Sprint(*analyzed) != "[channel_message_iatas]" || reltuples(t, c.ctx, c.pool, "channel_message_iatas") <= 0 {
+		t.Fatalf("ANALYZEs %v, want one after the first batch", *analyzed)
 	}
 	cs.Close(c.ctx)
 	if got := c.check(); got.Missing != 0 || got.Extra != 0 {
 		t.Fatalf("cmi check = %+v", got)
 	}
 
-	// The payload-type backfill's statement runs on the generic pool too, and still types its rows.
-	if _, _, err := store.BackfillObservationPayloadTypes(f.ctx, 0, hi+1, 1000); err != nil {
+	// The payload-type backfill's statement runs on the generic pool with custom plans for its transaction, and
+	// types its rows.
+	f.exec("UPDATE packet_observations SET payload_type = NULL WHERE id % 3 = 0")
+	var untyped int64
+	if err := f.pool.QueryRow(f.ctx, "SELECT count(*) FROM packet_observations WHERE payload_type IS NULL").Scan(&untyped); err != nil || untyped == 0 {
+		t.Fatalf("untyped %d, %v", untyped, err)
+	}
+	var inTx []string
+	payloadTypesTxHook = func(ctx context.Context, tx pgx.Tx) {
+		var mode string
+		if err := tx.QueryRow(ctx, "SELECT current_setting('plan_cache_mode')").Scan(&mode); err != nil {
+			t.Error(err)
+		}
+		inTx = append(inTx, mode)
+	}
+	t.Cleanup(func() { payloadTypesTxHook = nil })
+	typed, _, err := store.BackfillObservationPayloadTypes(f.ctx, 0, hi+1, 100_000)
+	if err != nil || typed != untyped {
+		t.Fatalf("typed %d of %d, %v", typed, untyped, err)
+	}
+	if fmt.Sprint(inTx) != "[force_custom_plan]" {
+		t.Fatalf("plan_cache_mode inside the backfill transaction %v", inTx)
+	}
+	var left int64
+	if err := f.pool.QueryRow(f.ctx, "SELECT count(*) FROM packet_observations WHERE payload_type IS NULL").Scan(&left); err != nil || left != 0 {
+		t.Fatalf("%d observations still untyped, %v", left, err)
+	}
+	func() {
+		conn, err := generic.Acquire(f.ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Release()
+		if mode := showPlanMode(t, f.ctx, conn); mode != "force_generic_plan" {
+			t.Fatalf("after the backfill transaction the connection has plan_cache_mode %s", mode)
+		}
+	}()
+}
+
+// TestFillAnalyzeOnlyNeverAnalyzedPostgres checks that a session never re-ANALYZEs a table that has statistics, and
+// that it ANALYZEs a never-analyzed table holding rows when it starts, and not again after its first slice.
+func TestFillAnalyzeOnlyNeverAnalyzedPostgres(t *testing.T) {
+	analyzed := countAnalyzes(t)
+
+	// Rows from the writer, never analyzed: ANALYZE at the session start only.
+	f := newPsFixture(t)
+	stream := f.packets(20)
+	f.sited(stream[:len(stream)/2]...)
+	f.unsited(stream[len(stream)/2:]...)
+	if n := reltuples(t, f.ctx, f.pool, "packet_sites"); n >= 0 {
+		t.Fatalf("reltuples %v before the session", n)
+	}
+	f.exec("DELETE FROM background_state WHERE key = 'packet_sites'")
+	p := f.begin()
+	if fmt.Sprint(*analyzed) != "[packet_sites]" {
+		t.Fatalf("ANALYZEs at start %v, want packet_sites", *analyzed)
+	}
+	p.slice = 50
+	if _, err := p.Init(f.ctx); err != nil {
 		t.Fatal(err)
 	}
+	if st, err := p.Backfill(f.ctx, time.Minute); err != nil || !st.Complete || len(p.fills) < 2 {
+		t.Fatalf("Backfill = %+v, %v, fills %v", st, err, p.fills)
+	}
+	if fmt.Sprint(*analyzed) != "[packet_sites]" {
+		t.Fatalf("ANALYZEs %v, want only the one at start", *analyzed)
+	}
+	p.Close(f.ctx)
+	f.wantClean("after the backfill")
+
+	// A table that already has statistics: a rebuild's sessions run no ANALYZE.
+	g := newPsFixture(t)
+	g.sited(g.packets(20)...)
+	g.exec("ANALYZE packet_sites")
+	g.exec("DELETE FROM packet_sites WHERE iata = 'AAA'") // a partial loss the rebuild refills
+	*analyzed = nil
+	for range 2 { // a restart in the middle of the fill opens a second session
+		q := g.begin()
+		q.slice = 50
+		if _, err := q.Init(g.ctx); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q.Backfill(g.ctx, time.Minute); err != nil {
+			t.Fatal(err)
+		}
+		q.Close(g.ctx)
+	}
+	if len(*analyzed) != 0 {
+		t.Fatalf("a table with statistics was analyzed again: %v", *analyzed)
+	}
+	g.wantClean("after the rebuild")
 }
 
 // TestFillAnalyzeFailureIsIgnoredPostgres checks that a failed ANALYZE (here: a lock it cannot get in time) is
@@ -220,12 +319,20 @@ func TestFillAnalyzeFailureIsIgnoredPostgres(t *testing.T) {
 	if _, err := holder.Exec(f.ctx, "LOCK TABLE packet_sites IN SHARE UPDATE EXCLUSIVE MODE"); err != nil {
 		t.Fatal(err)
 	}
-	p := f.begin() // the session-start ANALYZE times out on the lock
+	analyzed := countAnalyzes(t)
+	p := f.begin()
 	if _, err := p.Init(f.ctx); err != nil {
 		t.Fatal(err)
 	}
 	if st, err := p.Backfill(f.ctx, time.Minute); err != nil || !st.Complete {
 		t.Fatalf("Backfill with ANALYZE blocked = %+v, %v", st, err)
+	}
+	// The ANALYZE after the first slice was tried and failed on the lock: no statistics, the fill completed.
+	if fmt.Sprint(*analyzed) != "[packet_sites]" {
+		t.Fatalf("ANALYZEs tried %v", *analyzed)
+	}
+	if n := reltuples(t, f.ctx, f.pool, "packet_sites"); n >= 0 {
+		t.Fatalf("reltuples %v: the blocked ANALYZE ran", n)
 	}
 	if err := holder.Rollback(f.ctx); err != nil {
 		t.Fatal(err)

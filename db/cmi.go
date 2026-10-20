@@ -58,7 +58,7 @@ type CmiSession struct {
 	duty     float64
 	batch    int64
 	progress *FillProgress
-	analyzed bool // ANALYZE ran after this session's first backfill batch
+	batched  bool // this session's Backfill has filled a batch
 }
 
 // BeginCmi takes the cmi lock for this schema on a dedicated connection. ok is false when another session holds it.
@@ -84,7 +84,7 @@ func (s *Store) BeginCmi(ctx context.Context) (*CmiSession, bool, error) {
 		conn.Release()
 		return nil, false, err
 	}
-	analyzeIfUnanalyzed(ctx, conn, "channel_message_iatas")
+	analyzeAtStart(ctx, conn, "channel_message_iatas")
 	pace := s.FillPacing()
 	return &CmiSession{conn: conn, q: sqlc.New(conn),
 		pause: pace.MinPause, duty: pace.Duty, batch: pace.CmiBatch, progress: &s.cmiProgress}, true, nil
@@ -121,6 +121,9 @@ func (c *CmiSession) Init(ctx context.Context) (CmiState, error) {
 	if found {
 		c.state = st
 		return st, nil
+	}
+	if c.progress != nil {
+		c.progress.Reset() // a new fill (first install or rebuild) times itself from its own start
 	}
 	msgHi, err := c.q.MaxChannelMessageID(ctx)
 	if err != nil {
@@ -190,10 +193,13 @@ func (c *CmiSession) Backfill(ctx context.Context, budget time.Duration) (CmiSta
 				return c.state, err
 			}
 			slog.Info("cmi backfill complete", "component", "readmodel", "max_id", c.state.BackfillMaxID)
+			if c.progress != nil {
+				c.progress.Reset()
+			}
 			break
 		}
 		if c.progress != nil {
-			c.progress.Start(c.state.BackfillMaxID - c.state.BackfilledToID)
+			c.progress.Start(c.state.BackfilledToID)
 		}
 		hi := min(next-1+batch, c.state.BackfillMaxID)
 		if _, err := c.fillMessages(ctx, next-1, hi); err != nil {
@@ -203,10 +209,10 @@ func (c *CmiSession) Backfill(ctx context.Context, budget time.Duration) (CmiSta
 		if err := c.save(ctx); err != nil {
 			return c.state, err
 		}
-		if !c.analyzed {
-			// The table now holds a batch's rows; plan the next batches on them.
-			analyzeFillTable(ctx, c.conn, "channel_message_iatas")
-			c.analyzed = true
+		if !c.batched {
+			// A new table now holds a batch's rows; plan the next batches on them.
+			analyzeAfterFirstSlice(ctx, c.conn, "channel_message_iatas")
+			c.batched = true
 		}
 		if c.progress != nil && c.progress.Due() {
 			c.logProgress(ctx)
@@ -226,7 +232,7 @@ func (c *CmiSession) logProgress(ctx context.Context) {
 	if err != nil || first == 0 {
 		first = c.state.BackfilledToID + 1 // unknown: report none done rather than fail the batch
 	}
-	c.progress.Log("cmi backfill progress", max(c.state.BackfilledToID-(first-1), 0), c.state.BackfillMaxID-c.state.BackfilledToID,
+	c.progress.Log("cmi backfill progress", c.state.BackfilledToID, max(c.state.BackfilledToID-(first-1), 0), c.state.BackfillMaxID-c.state.BackfilledToID,
 		"backfilled_to_id", c.state.BackfilledToID, "max_id", c.state.BackfillMaxID)
 }
 

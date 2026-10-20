@@ -67,7 +67,7 @@ type ReadModelsConfig struct {
 // batch a fill sleeps max(min_pause, elapsed × (1 − duty) / duty), where elapsed is that slice's run time, so it is
 // busy at most duty of the time and a slow disk stretches the pauses on its own. Unset fields take the defaults.
 type FillConfig struct {
-	Duty             *float64  `yaml:"duty"`               // in (0, 1]; default 0.5
+	Duty             *float64  `yaml:"duty"`               // 0.01 to 1; default 0.5
 	MinPause         *duration `yaml:"min_pause"`          // 0 to 1m; default 100ms
 	PacketSitesSlice *int64    `yaml:"packet_sites_slice"` // observation ids per packet_sites slice; default 500000
 	CmiBatch         *int64    `yaml:"cmi_batch"`          // message ids per cmi batch; default 10000
@@ -76,6 +76,7 @@ type FillConfig struct {
 // Fill pacing defaults and limits.
 const (
 	defaultFillDuty             = 0.5
+	minFillDuty                 = 0.01 // db.MinFillDuty: 1 % busy
 	defaultFillMinPause         = 100 * time.Millisecond
 	defaultFillPacketSitesSlice = 500_000
 	defaultFillCmiBatch         = 10_000
@@ -86,8 +87,8 @@ const (
 
 // validate checks each set value's range.
 func (f FillConfig) validate() error {
-	if d := f.Duty; d != nil && !(*d > 0 && *d <= 1) { // also rejects NaN
-		return fmt.Errorf("readmodels.fill.duty must be greater than 0 and at most 1, got %v", *d)
+	if d := f.Duty; d != nil && !(*d >= minFillDuty && *d <= 1) { // also rejects NaN
+		return fmt.Errorf("readmodels.fill.duty must be between %v and 1, got %v", minFillDuty, *d)
 	}
 	if d := f.MinPause; d != nil && (d.Duration < 0 || d.Duration > maxFillMinPause) {
 		return fmt.Errorf("readmodels.fill.min_pause must be between 0s and %s, got %s", maxFillMinPause, d.Duration)

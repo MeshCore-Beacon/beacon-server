@@ -98,7 +98,7 @@ ratelimit:
 #  # most duty of the time and a slow disk stretches the pauses on its own. Pacing changes only when the fills run,
 #  # not what they write. The resolved values are logged at boot in the "config: loaded" line.
 #  fill:
-#    duty: 0.5                  # share of time a fill may be busy, (0, 1]; 0.25 on a slow (rotational) disk
+#    duty: 0.5                  # share of time a fill may be busy, 0.01 to 1; 0.25 on a slow (rotational) disk
 #    min_pause: 100ms           # shortest pause after a slice or batch, 0s to 1m
 #    packet_sites_slice: 500000 # observation ids per packet_sites backfill slice, 1 to 10000000
 #    cmi_batch: 10000           # message ids per cmi backfill batch, 1 to 1000000

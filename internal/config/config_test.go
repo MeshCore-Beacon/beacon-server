@@ -626,6 +626,8 @@ func TestLoad_ReadModelsFill(t *testing.T) {
 		{"readmodels:\n  fill:\n    duty: 0\n", fill{errSubstr: "readmodels.fill.duty"}},
 		{"readmodels:\n  fill:\n    duty: -0.5\n", fill{errSubstr: "readmodels.fill.duty"}},
 		{"readmodels:\n  fill:\n    duty: 1.5\n", fill{errSubstr: "readmodels.fill.duty"}},
+		{"readmodels:\n  fill:\n    duty: 0.009\n", fill{errSubstr: "readmodels.fill.duty"}},
+		{"readmodels:\n  fill:\n    duty: 0.01\n", fill{0.01, 100 * time.Millisecond, 500_000, 10_000, "fillDuty=0.01 ", ""}},
 		{"readmodels:\n  fill:\n    duty: .nan\n", fill{errSubstr: "readmodels.fill.duty"}},
 		{"readmodels:\n  fill:\n    min_pause: -1s\n", fill{errSubstr: "readmodels.fill.min_pause"}},
 		{"readmodels:\n  fill:\n    min_pause: 2m\n", fill{errSubstr: "readmodels.fill.min_pause"}},

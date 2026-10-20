@@ -45,6 +45,9 @@ func newFakeBackfiller(minID, maxID int64, untyped ...int64) *fakeBackfiller {
 
 var errDeadlock = &pgconn.PgError{Code: "40P01", Message: "deadlock detected"}
 
+// FillPacing turns pacing off: the fake's batches take no time to pace.
+func (f *fakeBackfiller) FillPacing() db.FillPacing { return db.FillPacing{Duty: 1} }
+
 func (f *fakeBackfiller) ObservationIDRange(context.Context) (int64, int64, error) {
 	f.ranges++
 	return f.minID, f.maxID, nil

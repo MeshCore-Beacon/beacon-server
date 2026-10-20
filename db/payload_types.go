@@ -73,6 +73,9 @@ func (s *Store) HasUntypedObservations(ctx context.Context, maxID int64) (bool, 
 	return s.q.HasUntypedObservations(ctx, maxID)
 }
 
+// payloadTypesTxHook, when set by a test, runs inside the backfill statement's transaction, before the statement.
+var payloadTypesTxHook func(ctx context.Context, tx pgx.Tx)
+
 // BackfillObservationPayloadTypes types, from their own packet, the first maxRows observations in
 // [fromID, toID) that carry no payload type, in id order. It returns the rows typed and where the
 // walk continues: after the last row it picked when it picked maxRows, otherwise toID.
@@ -87,6 +90,9 @@ func (s *Store) BackfillObservationPayloadTypes(ctx context.Context, fromID, toI
 		err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 			if _, err := tx.Exec(ctx, "SET LOCAL plan_cache_mode = force_custom_plan"); err != nil {
 				return err
+			}
+			if payloadTypesTxHook != nil {
+				payloadTypesTxHook(ctx, tx)
 			}
 			r, err = sqlc.New(tx).BackfillObservationPayloadTypes(ctx, params)
 			return err

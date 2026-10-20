@@ -90,14 +90,14 @@ func payloadTypeBackfillTask(store payloadTypeBackfiller, interval time.Duration
 				}
 			}
 			next := max(st.NextID, minID)
-			progress.Start(maxID + 1 - next)
+			progress.Start(next) // the ETA uses the rate next moves at and each run's own remaining count
 			var rows int64
 			defer func() {
 				metrics.JobRows.WithLabelValues("payload_type_backfill").Add(float64(rows))
 				remaining := max(maxID+1-next, 0)
 				attrs := []any{"component", "background", "next_id", next, "max_id", maxID, "rows", rows,
 					"ids_done", max(next-minID, 0), "ids_remaining", remaining}
-				if eta, ok := progress.ETA(remaining); ok {
+				if eta, ok := progress.ETA(next, remaining); ok {
 					attrs = append(attrs, "eta", eta.Round(time.Second).String())
 				}
 				slog.Info("observation payload type backfill progress: observer advert pages answer 503 until it is done", attrs...)

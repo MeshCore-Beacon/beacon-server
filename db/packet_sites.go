@@ -56,7 +56,7 @@ type PacketSitesSession struct {
 	duty     float64
 	slice    int64
 	progress *FillProgress
-	analyzed bool // ANALYZE ran after this session's first backfill slice
+	sliced   bool // this session's Backfill has filled a slice
 
 	// fillStmt runs one fill; tests replace it. fills lists the (after, through] ranges filled, and retries counts
 	// 23503 retries, for tests.
@@ -99,7 +99,7 @@ func (s *Store) BeginPacketSites(ctx context.Context) (*PacketSitesSession, bool
 		p.Close(ctx)
 		return nil, false, fmt.Errorf("packet_sites state: %w", err)
 	}
-	analyzeIfUnanalyzed(ctx, conn, "packet_sites")
+	analyzeAtStart(ctx, conn, "packet_sites")
 	return p, true, nil
 }
 
@@ -138,6 +138,9 @@ func (p *PacketSitesSession) Init(ctx context.Context) (PacketSitesState, error)
 		return PacketSitesState{}, err
 	}
 	p.state = PacketSitesState{WriterFromID: hi, BackfilledDownToID: hi, Complete: hi == 0, ReconPrevHi: hi, ReconHi: hi}
+	if p.progress != nil {
+		p.progress.Reset() // a new fill (first install or rebuild) times itself from its own start
+	}
 	return p.state, p.save(ctx)
 }
 
@@ -190,10 +193,13 @@ func (p *PacketSitesSession) Backfill(ctx context.Context, budget time.Duration)
 				return p.state, err
 			}
 			slog.Info("packet_sites backfill complete", "component", "readmodel", "writer_from_id", p.state.WriterFromID)
+			if p.progress != nil {
+				p.progress.Reset()
+			}
 			break
 		}
 		if p.progress != nil {
-			p.progress.Start(p.state.BackfilledDownToID - (lo - 1))
+			p.progress.Start(p.state.WriterFromID - p.state.BackfilledDownToID)
 		}
 		from := max(p.state.BackfilledDownToID-slice, lo-1)
 		if _, err := p.fill(ctx, from, p.state.BackfilledDownToID); err != nil {
@@ -203,13 +209,13 @@ func (p *PacketSitesSession) Backfill(ctx context.Context, budget time.Duration)
 		if err := p.save(ctx); err != nil {
 			return p.state, err
 		}
-		if !p.analyzed {
-			// The table now holds a slice's rows; plan the next slices on them.
-			analyzeFillTable(ctx, p.conn, "packet_sites")
-			p.analyzed = true
+		if !p.sliced {
+			// A new table now holds a slice's rows; plan the next slices on them.
+			analyzeAfterFirstSlice(ctx, p.conn, "packet_sites")
+			p.sliced = true
 		}
 		if p.progress != nil && p.progress.Due() {
-			p.progress.Log("packet_sites backfill progress", p.state.WriterFromID-from, from-(lo-1),
+			p.progress.Log("packet_sites backfill progress", p.state.WriterFromID-from, p.state.WriterFromID-from, from-(lo-1),
 				"backfilled_down_to_id", from, "writer_from_id", p.state.WriterFromID)
 		}
 		pace := FillPacing{Duty: p.duty, MinPause: p.pause}
