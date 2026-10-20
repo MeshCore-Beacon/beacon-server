@@ -327,7 +327,7 @@ ANALYZE packet_sites;`); err != nil {
     search_path: "SCHEMA"
     statements:
       rm: "file:sql/planted/ListPacketsBySitesReadmodels.sql"
-      end: "file:sql/pending/ListPacketsBySites.sql"
+      end: "new:ListPacketsBySites"
       oracle: "file:sql/oracle/OracleBySites.sql"
     pairs:
       - id: walk
@@ -352,7 +352,11 @@ ANALYZE packet_sites;`); err != nil {
 		t.Fatal(err)
 	}
 	defer pc.Close(context.Background())
-	rep, err := planguard.RunDiff(ctx, planguard.NewSession(pc), spec, nil, nil, pgdata.Files, t.TempDir(), []int{1, 2, 3, 7})
+	newSQL, err := planguard.LoadStatements("../../db/sqlc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep, err := planguard.RunDiff(ctx, planguard.NewSession(pc), spec, nil, newSQL, pgdata.Files, t.TempDir(), []int{1, 2, 3, 7})
 	if err != nil {
 		t.Fatal(err)
 	}

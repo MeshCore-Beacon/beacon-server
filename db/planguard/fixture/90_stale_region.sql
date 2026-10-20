@@ -42,3 +42,14 @@ FROM (SELECT id, channel_id, packet_hash, row_number() OVER (ORDER BY id DESC) r
 JOIN packets p ON p.packet_hash = cm.packet_hash
 WHERE cm.rn % 20 = 0
 ORDER BY cm.id;
+
+-- The stale site for packet pages: NEW holds a copy of the tenth busiest recent site's packet_sites rows, added
+-- after the last ANALYZE, so packet_sites' statistics still estimate it at one row.
+ALTER TABLE packet_sites SET (autovacuum_enabled = false);
+INSERT INTO packet_sites (packet_hash, iata, site_heard_at, first_heard_at, payload_type, route_type, scope_id)
+SELECT ps.packet_hash, 'NEW', ps.site_heard_at, ps.first_heard_at, ps.payload_type, ps.route_type, ps.scope_id
+FROM packet_sites ps
+WHERE ps.iata = (SELECT po.iata FROM packet_observations po
+                 WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations)
+                 GROUP BY po.iata ORDER BY count(*) DESC, po.iata OFFSET 9 LIMIT 1)
+ORDER BY ps.site_heard_at;

@@ -136,6 +136,7 @@ type Entry struct {
 	KnownIssue      string                   `yaml:"known_issue"`
 	RequiresIndexes []string                 `yaml:"requires_indexes"` // indexes on big tables the case needs; SKIP when absent
 	Baseline        string                   `yaml:"baseline"`         // "" or "unstable: <reason>"
+	Settings        map[string]string        `yaml:"settings"`         // planner settings SET LOCAL after the tier's
 	Note            string                   `yaml:"note"`
 }
 
@@ -628,6 +629,14 @@ func (c *Corpus) checkEntry(e *Entry) error {
 			return fmt.Errorf("requires_indexes: %q is not an index name", ix)
 		}
 	}
+	if err := checkSettings(e.Settings); err != nil {
+		return fmt.Errorf("settings: %w", err)
+	}
+	for _, k := range sortedKeys(e.Settings) {
+		if !plannerSetting(k) {
+			return fmt.Errorf("settings: %s is not a planner setting (enable_*, random_page_cost, work_mem)", k)
+		}
+	}
 	if e.Baseline != "" && !strings.HasPrefix(e.Baseline, "unstable: ") {
 		return fmt.Errorf("baseline %q must be empty or \"unstable: <reason>\"", e.Baseline)
 	}
@@ -652,6 +661,11 @@ func (c *Corpus) checkEntry(e *Entry) error {
 		}
 	}
 	return nil
+}
+
+// plannerSetting reports whether an entry may set name: a planner method switch or one of two cost inputs.
+func plannerSetting(name string) bool {
+	return strings.HasPrefix(name, "enable_") || name == "random_page_cost" || name == "work_mem"
 }
 
 // checkParam validates one param: a scalar, a list of params, or a one-key map {r: name} naming a resolver,

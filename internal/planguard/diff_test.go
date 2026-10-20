@@ -149,6 +149,22 @@ func TestDiffTieOrder(t *testing.T) {
 	if o := planguard.Compare(tieRef(), swapped, pair("tie_order"), nil, nil); o.Verdict != "different" {
 		t.Errorf("tie run with another row: %+v, want different", o)
 	}
+	// With tie_cut, the last run may keep another member of the tie: both pages end inside it.
+	if o := planguard.Compare(tieRef(), swapped, pair("tie_order", "tie_cut"), nil, nil); o.Verdict != "allowed" || !reflect.DeepEqual(o.Classes, []string{"tie_order(2)", "tie_cut(1)"}) {
+		t.Errorf("last run cut by the limit with tie_cut: %+v, want allowed [tie_order(2) tie_cut(1)]", o)
+	}
+	// A run before the last one must still be a permutation.
+	early := rows(tieCols,
+		[]string{"5", "30", "e"},
+		[]string{"2", "20", "b"},
+		[]string{"3", "20", "c"},
+	)
+	if o := planguard.Compare(tieRef(), early, pair("tie_order", "tie_cut"), nil, nil); o.Verdict != "different" {
+		t.Errorf("an earlier run with another row: %+v, want different", o)
+	}
+	if err := pair("tie_cut").Validate(); err == nil {
+		t.Error("tie_cut without tie_order: Validate() = nil")
+	}
 }
 
 func TestDiffOnlySaturatedSuffixRelaxesCount(t *testing.T) {
@@ -241,6 +257,36 @@ func TestDiffOnlySaturatedSuffixRelaxesCount(t *testing.T) {
 		[]string{"\\xcc", "2026-10-18 15:40:38.1+00"}, []string{"\\xdd", "2026-10-18 15:40:37+00"})
 	if o := planguard.Compare(ref, extra, sat, nil, nil); o.Verdict != "different" {
 		t.Errorf("cand adds a row: %+v, want different (only ref rows below the floor are relaxed)", o)
+	}
+	// saturated_full: a short saturated ref page that the cand fills with rows below the floor, in order and new.
+	short := rows(cols,
+		[]string{"\\xaa", "2026-10-18 15:40:39.570763+00", "t", "2026-10-18 15:40:39.5+00"},
+		[]string{"\\xbb", "2026-10-18 15:40:39.5+00", "t", "2026-10-18 15:40:39.5+00"},
+	)
+	full := sat
+	full.Allowed = []string{"saturated_suffix", "saturated_full"}
+	if err := full.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	filled := rows(candCols, []string{"\\xaa", "2026-10-18 15:40:39.570763+00"}, []string{"\\xbb", "2026-10-18 15:40:39.5+00"},
+		[]string{"\\xee", "2026-10-18 15:40:38+00"}, []string{"\\xff", "2026-10-18 15:40:36+00"})
+	if o := planguard.Compare(short, filled, full, nil, nil); o.Verdict != "allowed" || !reflect.DeepEqual(o.Classes, []string{"saturated_full(2)"}) {
+		t.Errorf("short page filled below the floor: %+v, want allowed [saturated_full(2)]", o)
+	}
+	if o := planguard.Compare(short, filled, sat, nil, nil); o.Verdict != "different" {
+		t.Errorf("short page filled without saturated_full: %+v, want different", o)
+	}
+	aboveFloor := rows(candCols, []string{"\\xaa", "2026-10-18 15:40:39.570763+00"}, []string{"\\xbb", "2026-10-18 15:40:39.5+00"},
+		[]string{"\\xab", "2026-10-18 15:40:39.5+00"})
+	if o := planguard.Compare(short, aboveFloor, full, nil, nil); o.Verdict != "different" {
+		t.Errorf("fill row at the floor: %+v, want different", o)
+	}
+	if o := planguard.Compare(short, rows(candCols, []string{"\\xbb", "2026-10-18 15:40:39.5+00"}, []string{"\\xee", "2026-10-18 15:40:38+00"}), full, nil, nil); o.Verdict != "different" {
+		t.Errorf("ref row missing, cand filled: %+v, want different", o)
+	}
+	noSat := planguard.DiffPair{ID: "full", Key: []string{"site_heard_at"}, Allowed: []string{"saturated_full"}}
+	if err := noSat.Validate(); err == nil {
+		t.Error("saturated_full without saturated: Validate() = nil")
 	}
 	unsat := rows(cols,
 		[]string{"\\xaa", "2026-10-18 15:40:39.570763+00", "f", "@@NULL"},

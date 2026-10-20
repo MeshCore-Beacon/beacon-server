@@ -86,3 +86,22 @@ func TestCmiPlanClasses(t *testing.T) {
 		}
 	}
 }
+
+func TestPacketSitesPlanClasses(t *testing.T) {
+	for name, want := range map[string]planpolicy.Class{
+		"ListPacketsBySite":            planpolicy.ClassG,
+		"ListPacketsBySites":           planpolicy.ClassG,
+		"ListPacketsBySitesFirst":      planpolicy.ClassG,
+		"ListPacketsBySitesTyped":      planpolicy.ClassG,
+		"ListPacketsBySitesTypedFirst": planpolicy.ClassG,
+		"ListPacketsBySitesSince":      planpolicy.ClassC,
+		"ListPacketsBySitesScoped":     planpolicy.ClassC,
+		"ListPacketsBySiteKeys":        planpolicy.ClassC,
+		"FilterKnownSites":             planpolicy.ClassC,
+		"ListPacketsByIATAs":           planpolicy.ClassLegacy,
+	} {
+		if got := planpolicy.ClassOf(name); got != want {
+			t.Errorf("ClassOf(%s) = %v, want %v", name, got, want)
+		}
+	}
+}

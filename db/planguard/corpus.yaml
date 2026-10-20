@@ -38,7 +38,8 @@ defaults:
   # Indexes the end state drops. A plan that fails only because it uses one of them is RETIRED_INDEX, not a failure.
   retired_indexes: [idx_known_routes_iata_last_seen, idx_known_routes_last_seen, idx_known_routes_hop_count, idx_known_routes_reconfirm,
                     idx_packets_last_heard, idx_packets_payload_type, idx_packets_route_type, idx_packets_scope,
-                    idx_observations_packet, idx_observations_observer_id, idx_channel_messages_channel, idx_channel_messages_sent_brin]
+                    idx_observations_packet, idx_observations_observer_id, idx_channel_messages_channel, idx_channel_messages_sent_brin,
+                    idx_packets_first_heard_brin]
 
 tiers:
   fixture:
@@ -54,10 +55,10 @@ groups:
   # (packets with its new indexes; nodes and observers as migrated), stats_adverts against overlay/stats_adverts.sql
   # (packet_observations with the partial adverts index), channel_message_iatas against
   # overlay/channel_message_iatas.sql (channel_messages with its channel walk index and the read model; its local run
-  # passes --search-path, since its resolvers read the read model too), the pending group against one a later change
-  # builds.
+  # passes --search-path, since its resolvers read the read model too), packet_sites against overlay/packet_sites.sql
+  # (the read model and its state; its local run passes --search-path for the same reason).
   packets_global: {search_path: {local: "t_s5a, public"}}
-  packet_sites: {search_path: {local: "t_s2b, public"}}
+  packet_sites: {search_path: {local: "t_s6a, public"}}
   channel_message_iatas: {search_path: {local: "t_s4a, public"}}
   stats_adverts: {search_path: {local: "t_s7a, public"}}
 
@@ -116,23 +117,23 @@ statements:
   DeleteOldRoutes_202acc6: {file: sql/planted/DeleteOldRoutes_202acc6.sql, kind: dml, plan: harness}
   DeleteOldRoutesSelect: {file: sql/planted/DeleteOldRoutesSelect.sql, kind: dml, plan: harness}
   DeleteOldRoutesSelectNoLock: {file: sql/planted/DeleteOldRoutesSelectNoLock.sql, plan: harness}
-  ListPacketsBySitesReadmodels: {file: sql/planted/ListPacketsBySitesReadmodels.sql, group: packet_sites, plan: harness, pending: packet_sites}
+  ListPacketsBySitesReadmodels: {file: sql/planted/ListPacketsBySitesReadmodels.sql, group: packet_sites, plan: harness}
   OracleBySites: {file: sql/oracle/OracleBySites.sql, plan: harness}
   GetStatsSeries_dba66ca: {file: sql/planted/GetStatsSeries_dba66ca.sql, plan: harness}
-  # Not merged yet: frozen end-state texts. They SKIP until their feature lands, which switches them to sqlc:,
-  # drops pending and commits their baselines in the same diff.
-  ListPacketsBySite: {file: sql/pending/ListPacketsBySite.sql, group: packet_sites, plan: cached, admission: region_page, pending: packet_sites}
-  ListPacketsBySites: {file: sql/pending/ListPacketsBySites.sql, group: packet_sites, plan: cached, admission: region_list, pending: packet_sites}
-  ListPacketsBySitesFirst: {file: sql/pending/ListPacketsBySitesFirst.sql, group: packet_sites, plan: cached, admission: region_list, pending: packet_sites}
-  ListPacketsBySitesTyped: {file: sql/pending/ListPacketsBySitesTyped.sql, group: packet_sites, plan: cached, admission: region_list, pending: packet_sites}
-  ListPacketsBySitesTypedFirst: {file: sql/pending/ListPacketsBySitesTypedFirst.sql, group: packet_sites, plan: cached, admission: region_list, pending: packet_sites}
-  ListPacketsBySitesSince: {file: sql/pending/ListPacketsBySitesSince.sql, group: packet_sites, plan: custom, pending: packet_sites}
-  ListPacketsBySitesSinceFirst: {file: sql/pending/ListPacketsBySitesSinceFirst.sql, group: packet_sites, plan: custom, pending: packet_sites}
-  ListPacketsBySitesScoped: {file: sql/pending/ListPacketsBySitesScoped.sql, group: packet_sites, plan: custom, pending: packet_sites}
-  ListPacketsBySitesScopedFirst: {file: sql/pending/ListPacketsBySitesScopedFirst.sql, group: packet_sites, plan: custom, pending: packet_sites}
-  FilterKnownSites: {file: sql/pending/FilterKnownSites.sql, group: packet_sites, plan: custom, pending: packet_sites}
-  SweepPacketSitesFronts: {file: sql/pending/SweepPacketSitesFronts.sql, group: packet_sites, plan: maint, pending: packet_sites}
-  InsertObservation_end: {file: sql/pending/InsertObservation.sql, kind: dml, group: packet_sites, plan: ingest, pending: packet_sites}
+  # Region packet pages through packet_sites, one statement per filter shape; the window, scope and many-type shapes
+  # read each site range to a bounded depth. The pre-filter, the sweeper, the fill and the observation writer.
+  ListPacketsBySite: {sqlc: ListPacketsBySite, group: packet_sites, plan: cached, admission: region_page}
+  ListPacketsBySites: {sqlc: ListPacketsBySites, group: packet_sites, plan: cached, admission: region_list}
+  ListPacketsBySitesFirst: {sqlc: ListPacketsBySitesFirst, group: packet_sites, plan: cached, admission: region_list}
+  ListPacketsBySitesTyped: {sqlc: ListPacketsBySitesTyped, group: packet_sites, plan: cached, admission: region_list}
+  ListPacketsBySitesTypedFirst: {sqlc: ListPacketsBySitesTypedFirst, group: packet_sites, plan: cached, admission: region_list}
+  ListPacketsBySitesSince: {sqlc: ListPacketsBySitesSince, group: packet_sites, plan: custom}
+  ListPacketsBySitesScoped: {sqlc: ListPacketsBySitesScoped, group: packet_sites, plan: custom}
+  ListPacketsBySiteKeys: {sqlc: ListPacketsBySiteKeys, group: packet_sites, plan: custom}
+  FilterKnownSites: {sqlc: FilterKnownSites, group: packet_sites, plan: custom}
+  SweepPacketSitesFronts: {sqlc: SweepPacketSitesFronts, group: packet_sites, plan: maint}
+  FillPacketSitesSlice: {sqlc: FillPacketSitesSlice, kind: dml, group: packet_sites, plan: maint}
+  InsertObservation: {sqlc: InsertObservation, kind: dml, group: packet_sites, plan: ingest}
   # Channel message pages, one statement per filter shape; the site and scope shapes read channel_message_iatas
   # while the server trusts it. The scoped, since and scope-only shapes are planned with their values. Sites with a
   # since or a scope across every channel run today's statement (no index bounds both).
@@ -160,6 +161,8 @@ sort_exempt_sets:
     - {relation: known_routes, index: idx_known_routes_iata_keyset, index_cond: "iata = ANY", reason: "the same top 500 when the region list is the narrower path"}
   sites_recheck:
     - {relation: packet_sites, index_cond: "packet_hash = ps.packet_hash", reason: "the cross-site re-check probes one packet's sites; the per-site ranges each have their own Limit"}
+  bounded_scan:
+    - {relation: packet_sites, index_cond: "packet_hash = s.packet_hash", reason: "the bounded forms re-check each packet read from at most scan_depth entries per range"}
   window_branches:
     - {relation: packets, index: idx_packets_heard_inverted, reason: "branch 2 reads only the inverted rows (partial index)"}
     - {relation: packets, index: idx_packets_type_last_heard, index_cond: "payload_type = ANY", reason: "branch 1's type range is bounded by last_heard_at >= since"}
@@ -174,6 +177,42 @@ admission_profiles:
   observer_page: [hit, miss, page1, deep, past_end]
 
 resolvers:
+  # packet_sites roles (see the packet_sites entries).
+  obs_newest_heard_at: "SELECT heard_at FROM packet_observations ORDER BY id DESC LIMIT 1"
+  obs_newest_iata: "SELECT iata FROM packet_observations ORDER BY id DESC LIMIT 1"
+  ps_all_sites: "SELECT array_agg(c.iata ORDER BY c.iata) FROM iata_codes c WHERE EXISTS (SELECT 1 FROM packet_sites ps WHERE ps.iata = c.iata)"
+  ps_audit_lo: "SELECT max(id) - 840000 FROM packet_observations"
+  ps_bogus5000: "SELECT array_agg(c ORDER BY c) FROM (SELECT c FROM (SELECT chr(65 + a) || chr(65 + b) || chr(65 + d) c FROM generate_series(0, 25) a, generate_series(0, 25) b, generate_series(0, 25) d) g WHERE NOT EXISTS (SELECT 1 FROM iata_codes ic WHERE ic.iata = g.c) ORDER BY c LIMIT 5000) s"
+  ps_busy13_1d: "SELECT (SELECT max((SELECT max(site_heard_at) FROM packet_sites ps WHERE ps.iata = r.iata)) FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r) - interval '1 day'"
+  ps_busy13_2_5d: "SELECT (SELECT max((SELECT max(site_heard_at) FROM packet_sites ps WHERE ps.iata = r.iata)) FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r) - interval '60 hours'"
+  ps_busy13_75m: "SELECT (SELECT max((SELECT max(site_heard_at) FROM packet_sites ps WHERE ps.iata = r.iata)) FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r) - interval '75 minutes'"
+  ps_busy13_tie_hash: "SELECT packet_hash FROM packet_sites WHERE iata = ANY(ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r)) AND site_heard_at = (SELECT site_heard_at FROM packet_sites WHERE iata = ANY(ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r)) AND site_heard_at > (SELECT max((SELECT max(site_heard_at) FROM packet_sites ps WHERE ps.iata = r.iata)) FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r) - interval '6 hours' GROUP BY 1 HAVING count(DISTINCT packet_hash) > 1 ORDER BY 1 DESC LIMIT 1) ORDER BY packet_hash DESC LIMIT 1"
+  ps_busy13_tie_ts: "SELECT site_heard_at FROM packet_sites WHERE iata = ANY(ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r)) AND site_heard_at > (SELECT max((SELECT max(site_heard_at) FROM packet_sites ps WHERE ps.iata = r.iata)) FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r) - interval '6 hours' GROUP BY 1 HAVING count(DISTINCT packet_hash) > 1 ORDER BY 1 DESC LIMIT 1"
+  ps_busy1_1d: "SELECT (SELECT max(site_heard_at) FROM packet_sites WHERE iata = (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r)) - interval '1 day'"
+  ps_busy1_2_5d: "SELECT (SELECT max(site_heard_at) FROM packet_sites WHERE iata = (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r)) - interval '60 hours'"
+  ps_busy1_edge: "SELECT min(site_heard_at) + interval '1 hour' FROM packet_sites WHERE iata = (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r)"
+  ps_busy1_future: "SELECT (SELECT max(site_heard_at) FROM packet_sites WHERE iata = (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r)) + interval '1 day'"
+  ps_busy1_list: "SELECT ARRAY[(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r)]"
+  ps_busy1_sparse: "SELECT ARRAY[(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r), (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata) r ORDER BY n, iata LIMIT 1)]"
+  ps_busy1_stale: "SELECT ARRAY[(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r), 'NEW'] WHERE EXISTS (SELECT 1 FROM packet_sites WHERE iata = 'NEW')"
+  ps_busy1_tie_hash: "SELECT packet_hash FROM packet_sites WHERE iata = (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r) AND site_heard_at = (SELECT site_heard_at FROM packet_sites WHERE iata = (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r) AND site_heard_at > (SELECT max(site_heard_at) FROM packet_sites WHERE iata = (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r)) - interval '6 hours' GROUP BY 1 HAVING count(*) > 1 ORDER BY 1 DESC LIMIT 1) ORDER BY packet_hash DESC LIMIT 1"
+  ps_busy1_tie_ts: "SELECT site_heard_at FROM packet_sites WHERE iata = (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r) AND site_heard_at > (SELECT max(site_heard_at) FROM packet_sites WHERE iata = (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r)) - interval '6 hours' GROUP BY 1 HAVING count(*) > 1 ORDER BY 1 DESC LIMIT 1"
+  ps_busy_scope1: "SELECT ARRAY[name] FROM (SELECT ts.name, count(*) n FROM (SELECT scope_id FROM packets ORDER BY last_heard_at DESC, packet_hash DESC LIMIT 50000) p JOIN transport_scopes ts ON ts.id = p.scope_id GROUP BY ts.name ORDER BY n DESC, ts.name LIMIT 1) s"
+  ps_busy_scopes8: "SELECT array_agg(name ORDER BY n DESC, name) FROM (SELECT ts.name, count(*) n FROM (SELECT scope_id FROM packets ORDER BY last_heard_at DESC, packet_hash DESC LIMIT 50000) p JOIN transport_scopes ts ON ts.id = p.scope_id GROUP BY ts.name ORDER BY n DESC, ts.name LIMIT 8) s"
+  ps_busy_site1: "SELECT (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r)"
+  ps_busy_sites13: "SELECT (SELECT array_agg(iata ORDER BY n DESC, iata) FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r)"
+  ps_busy_sites7: "SELECT array_agg(iata ORDER BY n DESC, iata) FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r"
+  ps_empty_site: "SELECT c.iata FROM iata_codes c WHERE NOT EXISTS (SELECT 1 FROM packet_sites ps WHERE ps.iata = c.iata) ORDER BY c.iata LIMIT 1"
+  ps_empty_sites2: "SELECT array_agg(iata ORDER BY iata) FROM (SELECT c.iata FROM iata_codes c WHERE NOT EXISTS (SELECT 1 FROM packet_sites ps WHERE ps.iata = c.iata) ORDER BY c.iata LIMIT 2) s"
+  ps_fill_hi: "SELECT max(id) FROM packet_observations"
+  ps_fill_lo: "SELECT max(id) - 340000 FROM packet_observations"
+  ps_keys_ats: "SELECT array_agg(site_heard_at ORDER BY site_heard_at DESC, packet_hash DESC) FROM (SELECT packet_hash, site_heard_at FROM packet_sites WHERE iata = (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r) ORDER BY site_heard_at DESC, packet_hash DESC LIMIT 50) s"
+  ps_keys_hashes: "SELECT array_agg(packet_hash ORDER BY site_heard_at DESC, packet_hash DESC) FROM (SELECT packet_hash, site_heard_at FROM packet_sites WHERE iata = (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r) ORDER BY site_heard_at DESC, packet_hash DESC LIMIT 50) s"
+  ps_mid_site: "SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata OFFSET 19 LIMIT 1) r"
+  ps_mid_sites: "SELECT array_agg(iata ORDER BY n DESC, iata) FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata OFFSET 19 LIMIT 10) r"
+  ps_sparse_site: "SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata) r ORDER BY n, iata LIMIT 1"
+  ps_stale_site: "SELECT iata FROM packet_sites WHERE iata = 'NEW' LIMIT 1"
+  ps_zero_scope: "SELECT ARRAY[ts.name] FROM transport_scopes ts WHERE NOT EXISTS (SELECT 1 FROM packet_sites ps WHERE ps.iata = (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r) AND ps.scope_id = ts.id) ORDER BY ts.name LIMIT 1"
   # The adverts and telemetry roles are picked among the newest 5,000,000 observation ids (200,000 telemetry ids, about
   # 10K rows), a pkey range: advert counts are aggregate filters, never a WHERE on payload_type, so the partial adverts
   # index cannot replace the window. They stay far below the prod tier's 20 s cap; adv_zero and adv_quiet then probe
@@ -241,29 +280,12 @@ resolvers:
   global_tie_ts: "SELECT ts FROM (SELECT date_trunc('milliseconds', last_seen, 'UTC') ts FROM known_routes ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC LIMIT 20000) s GROUP BY ts HAVING count(*) > 1 ORDER BY ts DESC LIMIT 1"
   new50_id: "SELECT id FROM known_routes WHERE iata = 'NEW' ORDER BY iata, date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC OFFSET 49 LIMIT 1"
   new50_ts: "SELECT date_trunc('milliseconds', last_seen, 'UTC') FROM known_routes WHERE iata = 'NEW' ORDER BY iata, date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC OFFSET 49 LIMIT 1"
-  nl12_judge_hash: "SELECT packet_hash FROM packet_sites WHERE iata = ANY('{AMS,EIN,ENS,GLZ,GRQ,LEY,LWR,MST,QAR,RTM,UDE,UTC}') AND site_heard_at <= timestamptz '2026-10-18 15:40:39.570763+00' ORDER BY site_heard_at DESC, packet_hash DESC LIMIT 1"
-  nl12_judge_ts: "SELECT site_heard_at FROM packet_sites WHERE iata = ANY('{AMS,EIN,ENS,GLZ,GRQ,LEY,LWR,MST,QAR,RTM,UDE,UTC}') AND site_heard_at <= timestamptz '2026-10-18 15:40:39.570763+00' ORDER BY site_heard_at DESC, packet_hash DESC LIMIT 1"
   nodes_p500_id: "SELECT id FROM nodes ORDER BY last_seen DESC, id DESC OFFSET 500 LIMIT 1"
   nodes_p500_ts: "SELECT last_seen FROM nodes ORDER BY last_seen DESC, id DESC OFFSET 500 LIMIT 1"
   obs_newest_hash: "SELECT packet_hash FROM packet_observations ORDER BY id DESC LIMIT 1"
   obs_newest_observer: "SELECT observer_id FROM packet_observations ORDER BY id DESC LIMIT 1"
   pk_deep_hash: "SELECT packet_hash FROM packets ORDER BY last_heard_at DESC, packet_hash DESC OFFSET 100000 LIMIT 1"
   pk_deep_ts: "SELECT last_heard_at FROM packets ORDER BY last_heard_at DESC, packet_hash DESC OFFSET 100000 LIMIT 1"
-  ps_all_sites: "SELECT array_agg(DISTINCT iata ORDER BY iata) FROM packet_sites WHERE iata <> 'NEW'"
-  ps_bogus5000: "SELECT array_agg(c ORDER BY c) FROM (SELECT c FROM (SELECT chr(65 + a) || chr(65 + b) || chr(65 + d) c FROM generate_series(0, 25) a, generate_series(0, 25) b, generate_series(0, 25) d) g WHERE c NOT IN (SELECT DISTINCT iata FROM packet_sites) AND c NOT IN (SELECT iata FROM iata_codes) ORDER BY c LIMIT 5000) s"
-  ps_kept: "SELECT array_agg(DISTINCT v ORDER BY v) FROM (SELECT ri.iata::text v FROM region_iatas ri JOIN regions r ON r.id = ri.region_id WHERE r.slug IN ('nl', 'pnw', 'gbr', 'cz', 'swe') UNION ALL SELECT unnest('{STR,MHG,FRA,CGN,DTM,ESS,DUS,BWE,RIX,YOW,MAD,DSM,ZZZ}'::text[])) s"
-  ps_list_cz: "SELECT array_agg(ri.iata::text ORDER BY ri.iata) FROM region_iatas ri JOIN regions r ON r.id = ri.region_id WHERE r.slug = 'cz'"
-  ps_list_dash8: "SELECT '{#pnw,#wa,#w-wa,#thurston,#pierce,#oly,#rainier,#tumwater}'::text[]"
-  ps_list_gbr: "SELECT array_agg(ri.iata::text ORDER BY ri.iata) FROM region_iatas ri JOIN regions r ON r.id = ri.region_id WHERE r.slug = 'gbr'"
-  ps_list_nl: "SELECT array_agg(ri.iata::text ORDER BY ri.iata) FROM region_iatas ri JOIN regions r ON r.id = ri.region_id WHERE r.slug = 'nl'"
-  ps_list_pathfinder7: "SELECT '{STR,MHG,FRA,CGN,DTM,ESS,DUS}'::text[]"
-  ps_list_pnw: "SELECT array_agg(ri.iata::text ORDER BY ri.iata) FROM region_iatas ri JOIN regions r ON r.id = ri.region_id WHERE r.slug = 'pnw'"
-  ps_list_scopes1258: "SELECT array_agg(name ORDER BY name) FROM (SELECT name FROM transport_scopes ORDER BY name LIMIT 1258) s"
-  ps_list_scopes_sea41: "SELECT array_agg(name ORDER BY name) FROM (SELECT name FROM transport_scopes ORDER BY name LIMIT 41) s"
-  ps_pnw_tie_hash: "SELECT packet_hash FROM packet_sites WHERE iata = ANY('{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}') AND site_heard_at = (SELECT site_heard_at FROM packet_sites WHERE iata = ANY('{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}') AND site_heard_at > timestamptz '2026-10-18 06:00+00' GROUP BY 1 HAVING count(DISTINCT packet_hash) > 1 ORDER BY 1 DESC LIMIT 1) ORDER BY packet_hash DESC LIMIT 1"
-  ps_pnw_tie_ts: "SELECT site_heard_at FROM packet_sites WHERE iata = ANY('{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}') AND site_heard_at > timestamptz '2026-10-18 06:00+00' GROUP BY 1 HAVING count(DISTINCT packet_hash) > 1 ORDER BY 1 DESC LIMIT 1"
-  ps_sea_tie_hash: "SELECT packet_hash FROM packet_sites WHERE iata = 'SEA' AND site_heard_at = (SELECT site_heard_at FROM packet_sites WHERE iata = 'SEA' AND site_heard_at > timestamptz '2026-10-18 12:00+00' GROUP BY 1 HAVING count(*) > 1 ORDER BY 1 DESC LIMIT 1) ORDER BY packet_hash DESC LIMIT 1"
-  ps_sea_tie_ts: "SELECT site_heard_at FROM packet_sites WHERE iata = 'SEA' AND site_heard_at > timestamptz '2026-10-18 12:00+00' GROUP BY 1 HAVING count(*) > 1 ORDER BY 1 DESC LIMIT 1"
   routes_deep_ts: "SELECT date_trunc('milliseconds', o.ts + (n.ts - o.ts) / 10, 'UTC') FROM (SELECT date_trunc('milliseconds', last_seen, 'UTC') ts FROM known_routes ORDER BY date_trunc('milliseconds', last_seen, 'UTC'), id LIMIT 1) o, (SELECT date_trunc('milliseconds', last_seen, 'UTC') ts FROM known_routes ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC LIMIT 1) n"
   s_1410_3d67_RTM_f: "WITH cand AS (SELECT h.hx, ns.iata, ns.node_id FROM (VALUES ('1410'), ('3d67')) h(hx) JOIN node_short_ids ns ON (length(h.hx) = 2 AND ns.prefix_1 = decode(h.hx, 'hex')) OR (length(h.hx) = 4 AND ns.prefix_2 = decode(h.hx, 'hex')) JOIN nodes n ON n.id = ns.node_id AND n.node_type IN (2, 3) WHERE ns.iata IN (SELECT iata FROM iata_codes)) SELECT array_agg(c.node_id ORDER BY c.iata, c.node_id) FROM cand c WHERE c.hx = '1410' AND c.iata = ANY('{RTM}'::bpchar[])"
   s_1410_3d67_RTM_i: "WITH cand AS (SELECT h.hx, ns.iata, ns.node_id FROM (VALUES ('1410'), ('3d67')) h(hx) JOIN node_short_ids ns ON (length(h.hx) = 2 AND ns.prefix_1 = decode(h.hx, 'hex')) OR (length(h.hx) = 4 AND ns.prefix_2 = decode(h.hx, 'hex')) JOIN nodes n ON n.id = ns.node_id AND n.node_type IN (2, 3) WHERE ns.iata IN (SELECT iata FROM iata_codes)) SELECT array_agg(DISTINCT a.iata ORDER BY a.iata) FROM cand a JOIN cand b ON b.iata = a.iata AND b.hx = '3d67' WHERE a.hx = '1410' AND a.iata = ANY('{RTM}'::bpchar[])"
@@ -2611,1049 +2633,678 @@ entries:
     shape: "UpsertNodeIATA on the swapped node_iatas index set (plain EXPLAIN; ingest)"
     params: ["00000000-0000-0000-0000-000000000000", SEA]
 
-  # ---- packets by site through packet_sites (pending) ----
-  - id: ps.t.S1_SEA_p1
+  # ---- packets by site through packet_sites ----
+  # Roles are data-derived and bounded: sites ranked by their observations among the newest 200,000 ids, scopes by
+  # their packets among the newest 50,000, cursors counted back from a site's newest row (an index probe each), known
+  # codes with no rows probed one index entry per code. NEW is the stale site the fixture and the overlay add.
+  - id: ps.site.busy.page1
     stmt: ListPacketsBySite
-    shape: "SEA p1"
-    params: [SEA, infinity, "\\x", 51]
+    shape: "the busiest recent site, page 1"
+    shapes: [dense, page1]
+    params: [{r: ps_busy_site1}, "infinity", "\\x", 51]
     expect:
       driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
       sort_exempt: [sites_recheck]
-      budget: {buffers: 1128, planning_ms: 10}
-    note: "measured: full 752 / 752 B (custom / generic), page CTE 6"
-  - id: ps.t.S1_SEA_1d
+      budget: {buffers: 1836, planning_ms: 10}
+    note: "measured: 1224 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.site.busy.limit201
     stmt: ListPacketsBySite
-    shape: "SEA 1d"
-    params: [SEA, "2026-10-17 17:00+00", "\\x", 51]
+    shape: "the busiest recent site, page 1, limit 200"
+    shapes: [dense, page1]
+    params: [{r: ps_busy_site1}, "infinity", "\\x", 201]
     expect:
       driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
       sort_exempt: [sites_recheck]
-      budget: {buffers: 1728, planning_ms: 10}
-    note: "measured: full 1152 / 1152 B (custom / generic), page CTE 5"
-  - id: ps.t.S1_SEA_2_5d
+      budget: {buffers: 6399, planning_ms: 10}
+    note: "measured: 4266 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.site.busy.1d
     stmt: ListPacketsBySite
-    shape: "SEA 2.5d"
-    params: [SEA, "2026-10-16 05:00+00", "\\x", 51]
+    shape: "the busiest recent site, a day below its newest row"
+    shapes: [dense, deep]
+    params: [{r: ps_busy_site1}, {r: ps_busy1_1d}, "\\x", 51]
     expect:
       driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
       sort_exempt: [sites_recheck]
-      budget: {buffers: 1745, planning_ms: 10}
-    note: "measured: full 1163 / 1157 B (custom / generic), page CTE 5"
-  - id: ps.t.S1_YOW_p1
+      budget: {buffers: 1524, planning_ms: 10}
+    note: "measured: 1016 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.site.busy.2_5d
     stmt: ListPacketsBySite
-    shape: "YOW p1"
-    params: [YOW, infinity, "\\x", 51]
+    shape: "the busiest recent site, 2.5 days below its newest row"
+    shapes: [dense, deep]
+    params: [{r: ps_busy_site1}, {r: ps_busy1_2_5d}, "\\x", 51]
     expect:
       driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
       sort_exempt: [sites_recheck]
-      budget: {buffers: 686, planning_ms: 10}
-    note: "measured: full 457 / 457 B (custom / generic), page CTE 5"
-  - id: ps.t.S1_RIX_p1
+      budget: {buffers: 1333, planning_ms: 10}
+    note: "measured: 889 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.site.busy.edge
     stmt: ListPacketsBySite
-    shape: "RIX p1"
-    params: [RIX, infinity, "\\x", 51]
+    shape: "the busiest recent site, an hour above its oldest row"
+    shapes: [dense, deep]
+    params: [{r: ps_busy_site1}, {r: ps_busy1_edge}, "\\x", 51]
     expect:
       driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
       sort_exempt: [sites_recheck]
-      budget: {buffers: 1122, planning_ms: 10}
-    note: "measured: full 748 / 748 B (custom / generic), page CTE 5"
-  - id: ps.t.S1_DSM_rare
+      budget: {buffers: 34, planning_ms: 10}
+    note: "measured: 23 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.site.busy.tie
     stmt: ListPacketsBySite
-    shape: "DSM rare"
-    params: [DSM, infinity, "\\x", 51]
+    shape: "the busiest recent site, page cursor inside a group of tied rows"
+    shapes: [dense, tie]
+    params: [{r: ps_busy_site1}, {r: ps_busy1_tie_ts}, {r: ps_busy1_tie_hash}, 51]
     expect:
       driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
       sort_exempt: [sites_recheck]
-      budget: {buffers: 72, planning_ms: 10}
-    note: "measured: full 48 / 48 B (custom / generic), page CTE 5"
-  - id: ps.t.S1_ZZZ_empty
+      budget: {buffers: 1540, planning_ms: 10}
+    note: "measured: 1027 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.site.mid.page1
     stmt: ListPacketsBySite
-    shape: "ZZZ empty"
-    params: [ZZZ, infinity, "\\x", 51]
+    shape: "the 20th busiest recent site, page 1"
+    shapes: [page1]
+    params: [{r: ps_mid_site}, "infinity", "\\x", 51]
     expect:
       driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
       sort_exempt: [sites_recheck]
-      budget: {buffers: 50, planning_ms: 10}
-    note: "measured: full 4 / 4 B (custom / generic), page CTE 4"
-  - id: ps.t.S1_SEA_l200
+      budget: {buffers: 1525, planning_ms: 10}
+    note: "measured: 1017 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.site.sparse.page1
     stmt: ListPacketsBySite
-    shape: "SEA l200"
-    params: [SEA, infinity, "\\x", 201]
+    shape: "the quietest recent site, page 1"
+    shapes: [sparse, page1]
+    params: [{r: ps_sparse_site}, "infinity", "\\x", 51]
     expect:
       driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
       sort_exempt: [sites_recheck]
-      budget: {buffers: 5313, planning_ms: 10}
-    note: "measured: full 3542 / 3542 B (custom / generic), page CTE 7"
-  - id: ps.t.S2_BRE_WVN
-    stmt: ListPacketsBySitesFirst
-    shape: "BRE,WVN"
-    params: ["{BRE,WVN}", infinity, "\\x", 51]
+      budget: {buffers: 649, planning_ms: 10}
+    note: "measured: 433 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.site.empty
+    stmt: ListPacketsBySite
+    shape: "a known code with no rows"
+    shapes: [empty_region, page1]
+    params: [{r: ps_empty_site}, "infinity", "\\x", 51]
     expect:
       driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
       sort_exempt: [sites_recheck]
-      budget: {buffers: 741, planning_ms: 10}
-    note: "measured: full 494 / 494 B (custom / generic), page CTE 9"
-  - id: ps.t.S2_EUG_PDX_SEA_SLE
-    stmt: ListPacketsBySitesFirst
-    shape: "EUG,PDX,SEA,SLE"
-    params: ["{EUG,PDX,SEA,SLE}", infinity, "\\x", 51]
+      budget: {buffers: 30, planning_ms: 10}
+    note: "measured: 4 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.site.stale
+    stmt: ListPacketsBySite
+    shape: "the stale site the statistics never saw, page 1"
+    shapes: [stale_region, page1]
+    tiers: [fixture, local]
+    params: [{r: ps_stale_site}, "infinity", "\\x", 51]
     expect:
       driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
       sort_exempt: [sites_recheck]
-      budget: {buffers: 1197, planning_ms: 10}
-    note: "measured: full 798 / 798 B (custom / generic), page CTE 19"
-  - id: ps.t.S2_pnw13_l50
-    stmt: ListPacketsBySitesFirst
-    shape: "pnw13 l50"
-    params: ["{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}", infinity, "\\x", 51]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 1259, planning_ms: 10}
-    note: "measured: full 839 / 839 B (custom / generic), page CTE 56"
-  - id: ps.t.S2_pnw13_l100
-    stmt: ListPacketsBySitesFirst
-    shape: "pnw13 l100"
-    params: ["{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}", infinity, "\\x", 101]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 2300, planning_ms: 10}
-    note: "measured: full 1533 / 1533 B (custom / generic), page CTE 62"
-  - id: ps.t.S2_pnw13_l100_1d
+      budget: {buffers: 1443, planning_ms: 10}
+    note: "measured: 962 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.sites.busy13.page1
     stmt: ListPacketsBySites
-    shape: "pnw13 l100 1d"
-    params: ["{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}", "2026-10-17 17:00+00", "\\x", 101]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 9977, planning_ms: 10}
-    note: "measured: full 6651 / 6651 B (custom / generic), page CTE 4413"
-  - id: ps.t.S2_pnw13_l100_2_5d
-    stmt: ListPacketsBySites
-    shape: "pnw13 l100 2.5d"
-    params: ["{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}", "2026-10-16 05:00+00", "\\x", 101]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 9297, planning_ms: 10}
-    note: "measured: full 6198 / 6198 B (custom / generic), page CTE 3982"
-  - id: ps.t.S2_pnw13_l200
-    stmt: ListPacketsBySitesFirst
-    shape: "pnw13 l200"
-    params: ["{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}", infinity, "\\x", 201]
+    shape: "the 13 busiest recent sites, page 1"
+    shapes: [dense, page1]
+    params: [{r: ps_busy_sites13}, "infinity", "\\x", 51]
     expect:
       driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
       sort_exempt: [sites_recheck]
-      budget: {buffers: 5190, planning_ms: 10}
-    note: "measured: full 3460 / 3460 B (custom / generic), page CTE 70"
-  - id: ps.t.S2_nl12_l50
-    stmt: ListPacketsBySitesFirst
-    shape: "nl12 l50"
-    params: ["{AMS,EIN,ENS,GLZ,GRQ,LEY,LWR,MST,QAR,RTM,UDE,UTC}", infinity, "\\x", 51]
+      budget: {buffers: 4078, planning_ms: 10}
+    note: "measured: 2719 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.sites.busy13.limit201
+    stmt: ListPacketsBySites
+    shape: "the 13 busiest recent sites, page 1, limit 200"
+    shapes: [dense, page1]
+    params: [{r: ps_busy_sites13}, "infinity", "\\x", 201]
     expect:
       driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
       sort_exempt: [sites_recheck]
-      budget: {buffers: 1364, planning_ms: 10}
-    note: "measured: full 909 / 909 B (custom / generic), page CTE 53"
-  - id: ps.t.S2_nl12_judge_cursor_l1
+      budget: {buffers: 16534, planning_ms: 10}
+    note: "measured: 11023 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.sites.busy13.1d
     stmt: ListPacketsBySites
-    shape: "nl12, cursor at the newest row before a fixed time, limit 1"
-    params: ["{AMS,EIN,ENS,GLZ,GRQ,LEY,LWR,MST,QAR,RTM,UDE,UTC}", {r: nl12_judge_ts}, {r: nl12_judge_hash}, 2]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 275, planning_ms: 10}
-    note: "measured: full 183 / 180 B (custom / generic), page CTE 161"
-  - id: ps.t.S2_gbr22_l50
-    stmt: ListPacketsBySitesFirst
-    shape: "gbr22 l50"
-    params: ["{BHX,BLK,BOH,BRS,CAX,CEG,DSA,EMA,EXT,HUY,LCY,LON,LPL,MAN,MME,NQT,NQY,NWI,ORM,PLH,PME,VLY}", infinity, "\\x", 51]
+    shape: "the 13 busiest recent sites, a day below their newest row"
+    shapes: [dense, deep]
+    params: [{r: ps_busy_sites13}, {r: ps_busy13_1d}, "\\x", 51]
     expect:
       driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
       sort_exempt: [sites_recheck]
-      budget: {buffers: 1386, planning_ms: 10}
-    note: "measured: full 924 / 924 B (custom / generic), page CTE 91"
-  - id: ps.t.S2_gbr22_l100_1d
+      budget: {buffers: 4305, planning_ms: 10}
+    note: "measured: 2870 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.sites.busy13.2_5d
     stmt: ListPacketsBySites
-    shape: "gbr22 l100 1d"
-    params: ["{BHX,BLK,BOH,BRS,CAX,CEG,DSA,EMA,EXT,HUY,LCY,LON,LPL,MAN,MME,NQT,NQY,NWI,ORM,PLH,PME,VLY}", "2026-10-17 17:00+00", "\\x", 101]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 9629, planning_ms: 10}
-    note: "measured: full 6419 / 6419 B (custom / generic), page CTE 4743"
-  - id: ps.t.S3_STR_pt9
-    stmt: ListPacketsBySitesTypedFirst
-    shape: "STR pt9"
-    params: ["{STR}", "{9}", "{0,1,2,3}", infinity, "\\x", 51]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 884, planning_ms: 10}
-    note: "measured: full 469 / 589 B (custom / generic), page CTE 21"
-  - id: ps.t.S3_pf7_pt2_rt2_3_l100
-    stmt: ListPacketsBySitesTypedFirst
-    shape: "pf7 pt2 rt2,3 l100"
-    params: ["{STR,MHG,FRA,CGN,DTM,ESS,DUS}", "{2}", "{2,3}", infinity, "\\x", 101]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 1800, planning_ms: 10}
-    note: "measured: full 948 / 1200 B (custom / generic), page CTE 67"
-  - id: ps.t.S3_pf7_l100_1d
-    stmt: ListPacketsBySitesTyped
-    shape: "pf7 l100 1d"
-    params: ["{STR,MHG,FRA,CGN,DTM,ESS,DUS}", "{2}", "{2,3}", "2026-10-17 17:00+00", "\\x", 101]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 4805, planning_ms: 10}
-    note: "measured: full 2996 / 3203 B (custom / generic), page CTE 2039"
-  - id: ps.t.S3_SEA_pt13
-    stmt: ListPacketsBySitesTypedFirst
-    shape: "SEA pt13"
-    params: ["{SEA}", "{13}", "{0,1,2,3}", infinity, "\\x", 51]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 921, planning_ms: 10}
-    note: "measured: full 524 / 614 B (custom / generic), page CTE 26"
-  - id: ps.t.S3_SEA_rt3
-    stmt: ListPacketsBySitesTypedFirst
-    shape: "SEA rt3"
-    params: ["{SEA}", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{3}", infinity, "\\x", 51]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 1007, planning_ms: 10}
-    note: "measured: full 584 / 671 B (custom / generic), page CTE 100"
-  - id: ps.t.S3_pnw13_rt0_l200
-    stmt: ListPacketsBySitesTypedFirst
-    shape: "pnw13 rt0 l200"
-    params: ["{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0}", infinity, "\\x", 201]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 6645, planning_ms: 10}
-    note: "measured: full 3980 / 4430 B (custom / generic), page CTE 1051"
-  - id: ps.t.S3_pnw13_rt2_l50
-    stmt: ListPacketsBySitesTypedFirst
-    shape: "pnw13 rt2 l50"
-    params: ["{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{2}", infinity, "\\x", 51]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 2327, planning_ms: 10}
-    note: "measured: full 1466 / 1551 B (custom / generic), page CTE 967"
-  - id: ps.t.S4_AMS_nl
-    stmt: ListPacketsBySitesScopedFirst
-    shape: "AMS #nl"
-    params: ["{AMS}", infinity, "\\x", 51, "-infinity", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", "{#nl}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 15000, planning_ms: 10}
-    note: "no matching measured run"
-  - id: ps.t.S4_SEA_GRR
-    stmt: ListPacketsBySitesScopedFirst
-    shape: "SEA #GRR"
-    params: ["{SEA}", infinity, "\\x", 51, "-infinity", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", "{#GRR}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 15000, planning_ms: 10}
-    note: "no matching measured run"
-  - id: ps.t.S4_SEA_dash8_pt4
-    stmt: ListPacketsBySitesScopedFirst
-    shape: "SEA dash8 pt4"
-    params: ["{SEA}", infinity, "\\x", 51, "-infinity", infinity, "{4}", "{0,1,2,3}", {r: ps_list_dash8}]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 15000, planning_ms: 10}
-    note: "no matching measured run"
-  - id: ps.t.S4_SEA_1258
-    stmt: ListPacketsBySitesScopedFirst
-    shape: "SEA 1258"
-    params: ["{SEA}", infinity, "\\x", 51, "-infinity", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", {r: ps_list_scopes1258}]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 15000, planning_ms: 10}
-    note: "no matching measured run"
-  - id: ps.t.S4_pnw13_1258
-    stmt: ListPacketsBySitesScopedFirst
-    shape: "pnw13 1258"
-    params: ["{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}", infinity, "\\x", 51, "-infinity", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", {r: ps_list_scopes1258}]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 75377, planning_ms: 10}
-    note: "no matching measured run; budget corrected from the end-state measurement (was 15000)"
-  - id: ps.t.S4_nl12_nl_1d
-    stmt: ListPacketsBySitesScoped
-    shape: "nl12 #nl 1d"
-    params: ["{AMS,EIN,ENS,GLZ,GRQ,LEY,LWR,MST,QAR,RTM,UDE,UTC}", "2026-10-17 17:00+00", "\\x", 51, "-infinity", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", "{#nl}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 15000, planning_ms: 10}
-    note: "no matching measured run"
-  - id: ps.t.S2_pnw13_l50_1d
-    stmt: ListPacketsBySites
-    shape: "pnw13 l50 1d"
-    params: ["{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}", "2026-10-17 17:00+00", "\\x", 51]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 5165, planning_ms: 10}
-    note: "measured: full 3443 / 3443 B (custom / generic), page CTE 2341"
-  - id: ps.t.S2_nl12_l50_2_5d
-    stmt: ListPacketsBySites
-    shape: "nl12 l50 2.5d"
-    params: ["{AMS,EIN,ENS,GLZ,GRQ,LEY,LWR,MST,QAR,RTM,UDE,UTC}", "2026-10-16 05:00+00", "\\x", 51]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 4181, planning_ms: 10}
-    note: "measured: full 2787 / 2787 B (custom / generic), page CTE 1971"
-  - id: ps.t.S2_gbr22_l50_2_5d
-    stmt: ListPacketsBySites
-    shape: "gbr22 l50 2.5d"
-    params: ["{BHX,BLK,BOH,BRS,CAX,CEG,DSA,EMA,EXT,HUY,LCY,LON,LPL,MAN,MME,NQT,NQY,NWI,ORM,PLH,PME,VLY}", "2026-10-16 05:00+00", "\\x", 51]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 4776, planning_ms: 10}
-    note: "measured: full 3184 / 3184 B (custom / generic), page CTE 2310"
-  - id: ps.t.S2_all561_l50
-    stmt: ListPacketsBySitesFirst
-    shape: "all561 l50"
-    params: [{r: ps_all_sites}, infinity, "\\x", 51]
+    shape: "the 13 busiest recent sites, 2.5 days below their newest row"
+    shapes: [dense, deep]
+    params: [{r: ps_busy_sites13}, {r: ps_busy13_2_5d}, "\\x", 51]
     expect:
       driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
       sort_exempt: [sites_recheck]
-      budget: {buffers: 4865, planning_ms: 10}
-    note: "measured: full 3243 / 3243 B (custom / generic), page CTE 2496"
-  - id: ps.t.S2_all561_l50_1d
+      budget: {buffers: 4555, planning_ms: 10}
+    note: "measured: 3037 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.sites.busy13.tie
     stmt: ListPacketsBySites
-    shape: "all561 l50 1d"
-    params: [{r: ps_all_sites}, "2026-10-17 17:00+00", "\\x", 51]
+    shape: "the 13 busiest recent sites, page cursor inside a group of tied rows"
+    shapes: [dense, tie]
+    params: [{r: ps_busy_sites13}, {r: ps_busy13_tie_ts}, {r: ps_busy13_tie_hash}, 51]
     expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
       sort_exempt: [sites_recheck]
-      budget: {buffers: 135714, planning_ms: 10}
-    note: "measured: full 90476 / 90476 B (custom / generic), page CTE 89703"
-  - id: ps.t.S3_pf7_l100_2_5d
-    stmt: ListPacketsBySitesTyped
-    shape: "pf7 l100 2.5d"
-    params: ["{STR,MHG,FRA,CGN,DTM,ESS,DUS}", "{2}", "{2,3}", "2026-10-16 05:00+00", "\\x", 101]
+      budget: {buffers: 4152, planning_ms: 10}
+    note: "measured: 2768 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.sites.busy7.page1
+    stmt: ListPacketsBySites
+    shape: "the 7 busiest recent sites, page 1"
+    shapes: [dense, page1]
+    params: [{r: ps_busy_sites7}, "infinity", "\\x", 51]
     expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
       sort_exempt: [sites_recheck]
-      budget: {buffers: 3417, planning_ms: 10}
-    note: "measured: full 2011 / 2278 B (custom / generic), page CTE 1157"
-  - id: ps.t.S3_pnw13_rt0_l200_1d
-    stmt: ListPacketsBySitesTyped
-    shape: "pnw13 rt0 l200 1d"
-    params: ["{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0}", "2026-10-17 17:00+00", "\\x", 201]
+      budget: {buffers: 2760, planning_ms: 10}
+    note: "measured: 1840 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.sites.mid.1d
+    stmt: ListPacketsBySites
+    shape: "the 20th-29th busiest recent sites, a day below the busiest site"
+    shapes: [deep]
+    params: [{r: ps_mid_sites}, {r: ps_busy13_1d}, "\\x", 51]
     expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
       sort_exempt: [sites_recheck]
-      budget: {buffers: 27417, planning_ms: 10}
-    note: "measured: full 17792 / 18278 B (custom / generic), page CTE 15136"
-  - id: ps.t.S3_pnw13_rt2_l50_2_5d
-    stmt: ListPacketsBySitesTyped
-    shape: "pnw13 rt2 l50 2.5d"
-    params: ["{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{2}", "2026-10-16 05:00+00", "\\x", 51]
+      budget: {buffers: 3979, planning_ms: 10}
+    note: "measured: 2653 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.sites.sparse
+    stmt: ListPacketsBySites
+    shape: "the busiest and the quietest recent site, page 1"
+    shapes: [sparse, page1]
+    params: [{r: ps_busy1_sparse}, "infinity", "\\x", 51]
     expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
       sort_exempt: [sites_recheck]
-      budget: {buffers: 10610, planning_ms: 10}
-    note: "measured: full 6992 / 7073 B (custom / generic), page CTE 6489"
-  - id: ps.t.S3_STR_pt9_1d
-    stmt: ListPacketsBySitesTypedFirst
-    shape: "STR pt9 1d"
-    params: ["{STR}", "{9}", "{0,1,2,3}", "2026-10-17 17:00+00", "\\x", 51]
+      budget: {buffers: 2290, planning_ms: 10}
+    note: "measured: 1527 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.sites.empty
+    stmt: ListPacketsBySites
+    shape: "two known codes with no rows"
+    shapes: [empty_region, page1]
+    params: [{r: ps_empty_sites2}, "infinity", "\\x", 51]
     expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 30, planning_ms: 10}
+    note: "measured: 8 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.sites.stale
+    stmt: ListPacketsBySites
+    shape: "the busiest recent site and the stale site"
+    shapes: [stale_region, page1]
+    tiers: [fixture, local]
+    params: [{r: ps_busy1_stale}, "infinity", "\\x", 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 2070, planning_ms: 10}
+    note: "measured: 1380 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.sites.all.1d
+    stmt: ListPacketsBySites
+    shape: "every site with rows, a day below the busiest sites"
+    shapes: [giant_list, deep]
+    params: [{r: ps_all_sites}, {r: ps_busy13_1d}, "\\x", 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 135523, planning_ms: 10}
+    note: "measured: 90349 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.sites.bogus.1d
+    stmt: ListPacketsBySites
+    shape: "5,000 codes that are not sites, a day below the busiest sites"
+    shapes: [giant_list, deep]
+    params: [{r: ps_bogus5000}, {r: ps_busy13_1d}, "\\x", 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 30000, planning_ms: 57}
+    note: "measured: 20000 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.first.busy13.page1
+    stmt: ListPacketsBySitesFirst
+    shape: "the 13 busiest recent sites, page 1"
+    shapes: [dense, page1]
+    params: [{r: ps_busy_sites13}, "infinity", "\\x", 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 1078, planning_ms: 10}
+    note: "measured: 719 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.first.busy13.limit201
+    stmt: ListPacketsBySitesFirst
+    shape: "the 13 busiest recent sites, page 1, limit 200"
+    shapes: [dense, page1]
+    params: [{r: ps_busy_sites13}, "infinity", "\\x", 201]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 4707, planning_ms: 10}
+    note: "measured: 3138 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.first.busy13.1d
+    stmt: ListPacketsBySitesFirst
+    shape: "the 13 busiest recent sites, a day below their newest row"
+    shapes: [dense, deep]
+    params: [{r: ps_busy_sites13}, {r: ps_busy13_1d}, "\\x", 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 1308, planning_ms: 10}
+    note: "measured: 872 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.first.busy13.2_5d
+    stmt: ListPacketsBySitesFirst
+    shape: "the 13 busiest recent sites, 2.5 days below their newest row"
+    shapes: [dense, deep]
+    params: [{r: ps_busy_sites13}, {r: ps_busy13_2_5d}, "\\x", 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 1443, planning_ms: 10}
+    note: "measured: 962 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.first.busy13.tie
+    stmt: ListPacketsBySitesFirst
+    shape: "the 13 busiest recent sites, page cursor inside a group of tied rows"
+    shapes: [dense, tie]
+    params: [{r: ps_busy_sites13}, {r: ps_busy13_tie_ts}, {r: ps_busy13_tie_hash}, 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 1105, planning_ms: 10}
+    note: "measured: 737 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.first.busy7.page1
+    stmt: ListPacketsBySitesFirst
+    shape: "the 7 busiest recent sites, page 1"
+    shapes: [dense, page1]
+    params: [{r: ps_busy_sites7}, "infinity", "\\x", 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 1144, planning_ms: 10}
+    note: "measured: 763 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.first.mid.1d
+    stmt: ListPacketsBySitesFirst
+    shape: "the 20th-29th busiest recent sites, a day below the busiest site"
+    shapes: [deep]
+    params: [{r: ps_mid_sites}, {r: ps_busy13_1d}, "\\x", 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 1659, planning_ms: 10}
+    note: "measured: 1106 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.first.sparse
+    stmt: ListPacketsBySitesFirst
+    shape: "the busiest and the quietest recent site, page 1"
+    shapes: [sparse, page1]
+    params: [{r: ps_busy1_sparse}, "infinity", "\\x", 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 1828, planning_ms: 10}
+    note: "measured: 1219 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.first.empty
+    stmt: ListPacketsBySitesFirst
+    shape: "two known codes with no rows"
+    shapes: [empty_region, page1]
+    params: [{r: ps_empty_sites2}, "infinity", "\\x", 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 30, planning_ms: 10}
+    note: "measured: 8 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.first.stale
+    stmt: ListPacketsBySitesFirst
+    shape: "the busiest recent site and the stale site"
+    shapes: [stale_region, page1]
+    tiers: [fixture, local]
+    params: [{r: ps_busy1_stale}, "infinity", "\\x", 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 1608, planning_ms: 10}
+    note: "measured: 1072 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.first.all.1d
+    stmt: ListPacketsBySitesFirst
+    shape: "every site with rows, a day below the busiest sites"
+    shapes: [giant_list, deep]
+    params: [{r: ps_all_sites}, {r: ps_busy13_1d}, "\\x", 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 5259, planning_ms: 10}
+    note: "measured: 3506 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.first.bogus.1d
+    stmt: ListPacketsBySitesFirst
+    shape: "5,000 codes that are not sites, a day below the busiest sites"
+    shapes: [giant_list, deep]
+    params: [{r: ps_bogus5000}, {r: ps_busy13_1d}, "\\x", 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
       sort_exempt: [sites_recheck]
       budget: {buffers: 30000, planning_ms: 10}
-    note: "no matching measured run"
-  - id: ps.t.S4_pnw13_1258_1d
-    stmt: ListPacketsBySitesScoped
-    shape: "pnw13 1258 1d"
-    params: ["{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}", "2026-10-17 17:00+00", "\\x", 51, "-infinity", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", {r: ps_list_scopes1258}]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 85917, planning_ms: 10}
-    note: "no matching measured run; budget corrected from the end-state measurement (was 15000)"
-  - id: ps.t.S4_SEA_dash8_pt4_1d
-    stmt: ListPacketsBySitesScopedFirst
-    shape: "SEA dash8 pt4 1d"
-    params: ["{SEA}", "2026-10-17 17:00+00", "\\x", 51, "-infinity", infinity, "{4}", "{0,1,2,3}", {r: ps_list_dash8}]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 15000, planning_ms: 10}
-    note: "no matching measured run"
-  - id: ps.t.S4_AMS_nl_2_5d
-    stmt: ListPacketsBySitesScopedFirst
-    shape: "AMS #nl 2.5d"
-    params: ["{AMS}", "2026-10-16 05:00+00", "\\x", 51, "-infinity", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", "{#nl}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 15000, planning_ms: 10}
-    note: "no matching measured run"
-  - id: ps.f.SEA_since_T0_3d_L50
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "fixer: SEA since T0-3d L50"
-    params: ["{SEA}", infinity, "\\x", 51, "2026-10-15 17:00+00", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 1125, planning_ms: 10}
-    note: "measured: full 750 / 846 B (custom / generic), page CTE 4"
-  - id: ps.f.SEA_since_0_L50
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "fixer: SEA since=0 L50"
-    params: ["{SEA}", infinity, "\\x", 51, "1970-01-01 00:00+00", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 1125, planning_ms: 10}
-    note: "measured: full 750 / 846 B (custom / generic), page CTE 4"
-  - id: ps.f.SEA_since_T0_10min_L50
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "fixer: SEA since T0-10min L50"
-    params: ["{SEA}", infinity, "\\x", 51, "2026-10-18 16:50+00", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 1269, planning_ms: 10}
-    note: "measured: full 846 / 846 B (custom / generic), page CTE 4"
-  - id: ps.f.MAD_since_T0_3d_L50
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "fixer: MAD since T0-3d L50"
-    params: ["{MAD}", infinity, "\\x", 51, "2026-10-15 17:00+00", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 770, planning_ms: 10}
-    note: "measured: full 513 / 645 B (custom / generic), page CTE 4"
-  - id: ps.f.DSM_since_T0_1d_L50
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "fixer: DSM since T0-1d L50"
-    params: ["{DSM}", infinity, "\\x", 51, "2026-10-17 17:00+00", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 50, planning_ms: 10}
-    note: "measured: full 4 / 4 B (custom / generic), page CTE 4"
-  - id: ps.f.ZZZ_since_T0_1d_L50
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "fixer: ZZZ since T0-1d L50"
-    params: ["{ZZZ}", infinity, "\\x", 51, "2026-10-17 17:00+00", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 50, planning_ms: 10}
-    note: "measured: full 3 / 3 B (custom / generic), page CTE 3"
-  - id: ps.f.pnw_since_T0_1d_L50
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "fixer: pnw since T0-1d L50"
-    params: [{r: ps_list_pnw}, infinity, "\\x", 51, "2026-10-17 17:00+00", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 1241, planning_ms: 10}
-    note: "measured: full 827 / 920 B (custom / generic), page CTE 44"
-  - id: ps.f.pnw_until_only_T0_L50
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "fixer: pnw until-only T0 L50"
-    params: [{r: ps_list_pnw}, infinity, "\\x", 51, "-infinity", "2026-10-18 17:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 1239, planning_ms: 10}
-    note: "measured: full 826 / 919 B (custom / generic), page CTE 43"
-  - id: ps.f.pnw_until_only_T0_2d_L50
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "fixer: pnw until-only T0-2d L50"
-    params: [{r: ps_list_pnw}, infinity, "\\x", 51, "-infinity", "2026-10-16 17:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 4959, planning_ms: 10}
-    note: "measured: full 3306 / 3366 B (custom / generic), page CTE 882"
-  - id: ps.f.pnw_wide_past_T0_3d_T0_1d_L50
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "fixer: pnw wide-past T0-3d..T0-1d L50"
-    params: [{r: ps_list_pnw}, infinity, "\\x", 51, "2026-10-15 17:00+00", "2026-10-17 17:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 4631, planning_ms: 10}
-    note: "measured: full 3087 / 3144 B (custom / generic), page CTE 721"
-  - id: ps.f.pnw_pf_75min_14_00_15_15_L200
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "fixer: pnw pf 75min 14:00-15:15 L200"
-    params: [{r: ps_list_pnw}, infinity, "\\x", 201, "2026-10-18 14:00+00", "2026-10-18 15:15+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 7916, planning_ms: 10}
-    note: "measured: full 5277 / 5277 B (custom / generic), page CTE 541"
-  - id: ps.f.pnw_pf_12_5h_rt0_L200
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "fixer: pnw pf 12.5h rt0 L200"
-    params: [{r: ps_list_pnw}, infinity, "\\x", 201, "2026-10-18 03:30+00", "2026-10-18 16:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 7388, planning_ms: 10}
-    note: "measured: full 4925 / 4925 B (custom / generic), page CTE 1715"
-  - id: ps.f.pnw_pf_12_5h_no_type_L200
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "fixer: pnw pf 12.5h no type L200"
-    params: [{r: ps_list_pnw}, infinity, "\\x", 201, "2026-10-18 03:30+00", "2026-10-18 16:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 7332, planning_ms: 10}
-    note: "measured: full 4888 / 4888 B (custom / generic), page CTE 101"
-  - id: ps.f.pnw_narrow_deep_10_16_17_00_75min_L200
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "fixer: pnw narrow deep 10-16 17:00+75min L200"
-    params: [{r: ps_list_pnw}, infinity, "\\x", 201, "2026-10-16 17:00+00", "2026-10-16 18:15+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 10584, planning_ms: 10}
-    note: "measured: full 7056 / 7056 B (custom / generic), page CTE 2270"
-  - id: ps.f.pnw_pt4_since_T0_1d_L50
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "fixer: pnw pt4 since T0-1d L50"
-    params: [{r: ps_list_pnw}, infinity, "\\x", 51, "2026-10-17 17:00+00", infinity, "{4}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 1535, planning_ms: 10}
-    note: "measured: full 1023 / 1023 B (custom / generic), page CTE 77"
-  - id: ps.f.nl_since_T0_1d_L50
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "fixer: nl since T0-1d L50"
-    params: [{r: ps_list_nl}, infinity, "\\x", 51, "2026-10-17 17:00+00", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 1344, planning_ms: 10}
-    note: "measured: full 896 / 953 B (custom / generic), page CTE 40"
-  - id: ps.f.gbr_wide_past_T0_3d_T0_1d_L50
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "fixer: gbr wide-past T0-3d..T0-1d L50"
-    params: [{r: ps_list_gbr}, infinity, "\\x", 51, "2026-10-15 17:00+00", "2026-10-17 17:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 2460, planning_ms: 10}
-    note: "measured: full 1640 / 1730 B (custom / generic), page CTE 692"
-  - id: ps.f.cz_until_only_T0_2d_L50
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "fixer: cz until-only T0-2d L50"
-    params: [{r: ps_list_cz}, infinity, "\\x", 51, "-infinity", "2026-10-16 17:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 3185, planning_ms: 10}
-    note: "measured: full 2123 / 2216 B (custom / generic), page CTE 1177"
-  - id: ps.f.pf7_pt2_rt2_3_12_5h_L100
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "fixer: pf7 pt2 rt2,3 12.5h L100"
-    params: [{r: ps_list_pathfinder7}, infinity, "\\x", 101, "2026-10-18 03:30+00", "2026-10-18 16:00+00", "{2}", "{2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 3264, planning_ms: 10}
-    note: "measured: full 2176 / 2176 B (custom / generic), page CTE 1035"
-  - id: ps.f.deep_pnw_since_T0_3d_cur_10_17_05_00_L50
-    stmt: ListPacketsBySitesSince
-    shape: "fixer: deep pnw since T0-3d cur 10-17 05:00 L50"
-    params: [{r: ps_list_pnw}, "2026-10-17 05:00+00", "\\x", 51, "2026-10-15 17:00+00", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 5426, planning_ms: 10}
-    note: "measured: full 3617 / 3719 B (custom / generic), page CTE 2207"
-  - id: ps.f.deep_pnw_wide_past_cur_10_16_12_00_L50
-    stmt: ListPacketsBySitesSince
-    shape: "fixer: deep pnw wide-past cur 10-16 12:00 L50"
-    params: [{r: ps_list_pnw}, "2026-10-16 12:00+00", "\\x", 51, "2026-10-15 17:00+00", "2026-10-17 17:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 5156, planning_ms: 10}
-    note: "measured: full 3437 / 3437 B (custom / generic), page CTE 2121"
-  - id: ps.f.deep_pnw_75min_cur_15_00_L200
-    stmt: ListPacketsBySitesSince
-    shape: "fixer: deep pnw 75min cur 15:00 L200"
-    params: [{r: ps_list_pnw}, "2026-10-18 15:00+00", "\\x", 201, "2026-10-18 14:00+00", "2026-10-18 15:15+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 14528, planning_ms: 10}
-    note: "measured: full 9685 / 9685 B (custom / generic), page CTE 5560"
-  - id: ps.f.deep_SEA_since_T0_3d_cur_10_16_05_00_L50
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "fixer: deep SEA since T0-3d cur 10-16 05:00 L50"
-    params: ["{SEA}", "2026-10-16 05:00+00", "\\x", 51, "2026-10-15 17:00+00", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 1907, planning_ms: 10}
-    note: "measured: full 1271 / 1271 B (custom / generic), page CTE 5"
-  - id: ps.f.deep_nl_until_only_cur_10_16_04_00_L100
-    stmt: ListPacketsBySitesSince
-    shape: "fixer: deep nl until-only cur 10-16 04:00 L100"
-    params: [{r: ps_list_nl}, "2026-10-16 04:00+00", "\\x", 101, "-infinity", "2026-10-18 17:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 8612, planning_ms: 10}
-    note: "measured: full 5741 / 5741 B (custom / generic), page CTE 3706"
-  - id: ps.f.deep_gbr_since_T0_2d_cur_10_17_03_00_L100
-    stmt: ListPacketsBySitesSince
-    shape: "fixer: deep gbr since T0-2d cur 10-17 03:00 L100"
-    params: [{r: ps_list_gbr}, "2026-10-17 03:00+00", "\\x", 101, "2026-10-16 17:00+00", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 10170, planning_ms: 10}
-    note: "measured: full 6780 / 6780 B (custom / generic), page CTE 4678"
-  - id: ps.f.sc_nl_nl_pt4_2_1d_L50
-    stmt: ListPacketsBySitesScopedFirst
-    shape: "fixer: sc nl #nl pt4,2 1d L50"
-    params: [{r: ps_list_nl}, infinity, "\\x", 51, "2026-10-16 00:00+00", "2026-10-17 00:00+00", "{4,2}", "{0,1,2,3}", "{#nl}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 3888, planning_ms: 10}
-    note: "measured: full 2592 / 2592 B (custom / generic), page CTE 895"
-  - id: ps.f.sc_pnw_dash8_pt4_since_2_7d_L50
-    stmt: ListPacketsBySitesScopedFirst
-    shape: "fixer: sc pnw dash8 pt4 since 2.7d L50"
-    params: [{r: ps_list_pnw}, infinity, "\\x", 51, "2026-10-16 00:00+00", infinity, "{4}", "{0,1,2,3}", {r: ps_list_dash8}]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 1959, planning_ms: 10}
-    note: "measured: full 1306 / 1306 B (custom / generic), page CTE 344"
-  - id: ps.f.sc_pnw_sea41_since_T0_1d_cur_10_18_06_00_L50
-    stmt: ListPacketsBySitesScoped
-    shape: "fixer: sc pnw sea41 since T0-1d cur 10-18 06:00 L50"
-    params: [{r: ps_list_pnw}, "2026-10-18 06:00+00", "\\x", 51, "2026-10-17 17:00+00", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", {r: ps_list_scopes_sea41}]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 7677, planning_ms: 10}
-    note: "measured: full 5118 / 5118 B (custom / generic), page CTE 4091"
-  - id: ps.f.sc_SEA_GRR_since_T0_3d_L50
-    stmt: ListPacketsBySitesScopedFirst
-    shape: "fixer: sc SEA #GRR since T0-3d L50"
-    params: ["{SEA}", infinity, "\\x", 51, "2026-10-15 17:00+00", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", "{#GRR}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 50, planning_ms: 10}
-    note: "measured: full 6 / 6 B (custom / generic), page CTE 6"
-  - id: ps.f.pnw_since_T0_3d_cur_10_17_05_00_L50_recheck
-    stmt: ListPacketsBySitesSince
-    shape: "fixer: pnw since T0-3d cur 10-17 05:00 L50 [recheck]"
-    params: [{r: ps_list_pnw}, "2026-10-17 05:00+00", "\\x", 51, "2026-10-15 17:00+00", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 5426, planning_ms: 10}
-    note: "measured: full 3617 / 3719 B (custom / generic), page CTE 2207"
-  - id: ps.f.pnw_75min_cur_15_00_L200_recheck
-    stmt: ListPacketsBySitesSince
-    shape: "fixer: pnw 75min cur 15:00 L200 [recheck]"
-    params: [{r: ps_list_pnw}, "2026-10-18 15:00+00", "\\x", 201, "2026-10-18 14:00+00", "2026-10-18 15:15+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 14528, planning_ms: 10}
-    note: "measured: full 9685 / 9685 B (custom / generic), page CTE 5560"
-  - id: ps.f.kept81_75min_14_00_15_15_L200
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "fixer: kept81 75min 14:00-15:15 L200"
-    params: [{r: ps_kept}, infinity, "\\x", 201, "2026-10-18 14:00+00", "2026-10-18 15:15+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 11486, planning_ms: 10}
-    note: "measured: full 7657 / 7657 B (custom / generic), page CTE 1552"
-  - id: ps.f.kept81_since_T0_10min_L50
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "fixer: kept81 since T0-10min L50"
-    params: [{r: ps_kept}, infinity, "\\x", 51, "2026-10-18 16:50+00", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 8237, planning_ms: 10}
-    note: "measured: full 5491 / 5491 B (custom / generic), page CTE 4680"
-  - id: ps.f.kept81_wide_past_T0_3d_T0_1d_L50
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "fixer: kept81 wide-past T0-3d..T0-1d L50"
-    params: [{r: ps_kept}, infinity, "\\x", 51, "2026-10-15 17:00+00", "2026-10-17 17:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 9746, planning_ms: 10}
-    note: "measured: full 6497 / 6542 B (custom / generic), page CTE 4298"
-  - id: ps.f.kept81_empty_match_since_T0_1h_L50
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "fixer: kept81 empty-match since T0+1h L50"
-    params: [{r: ps_kept}, infinity, "\\x", 51, "2026-10-18 18:00+00", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 20489, planning_ms: 10}
-    note: "measured: full 13659 / 13659 B (custom / generic), page CTE 13659"
-  - id: ps.f.kept81_deep_wide_past_cur_10_16_12_00_L50
-    stmt: ListPacketsBySitesSince
-    shape: "fixer: kept81 deep wide-past cur 10-16 12:00 L50"
-    params: [{r: ps_kept}, "2026-10-16 12:00+00", "\\x", 51, "2026-10-15 17:00+00", "2026-10-17 17:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 19031, planning_ms: 10}
-    note: "measured: full 12687 / 12687 B (custom / generic), page CTE 11746"
-  - id: ps.f.S_nl_nl_pt15_0_rows_first
-    stmt: ListPacketsBySitesScopedFirst
-    shape: "fixer: S nl #nl pt15 (0 rows) first"
-    params: [{r: ps_list_nl}, infinity, "\\x", 51, "-infinity", infinity, "{15}", "{0,1,2,3}", "{#nl}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 2111, planning_ms: 10}
-    note: "measured: full 1407 / 1407 B (custom / generic), page CTE 1407"
-  - id: ps.f.S_nl_nl_pt4_1d
-    stmt: ListPacketsBySitesScoped
-    shape: "fixer: S nl #nl pt4 1d"
-    params: [{r: ps_list_nl}, "2026-10-17 17:00+00", "\\x", 51, "-infinity", infinity, "{4}", "{0,1,2,3}", "{#nl}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 5642, planning_ms: 10}
-    note: "measured: full 3761 / 3774 B (custom / generic), page CTE 2030"
-  - id: ps.f.S_AMS_nl_first
-    stmt: ListPacketsBySitesScopedFirst
-    shape: "fixer: S AMS #nl first"
-    params: ["{AMS}", infinity, "\\x", 51, "-infinity", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", "{#nl}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 3068, planning_ms: 10}
-    note: "measured: full 2045 / 2045 B (custom / generic), page CTE 7"
-  - id: ps.f.S_AMS_nl_2_5d
-    stmt: ListPacketsBySitesScopedFirst
-    shape: "fixer: S AMS #nl 2.5d"
-    params: ["{AMS}", "2026-10-16 05:00+00", "\\x", 51, "-infinity", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", "{#nl}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 2582, planning_ms: 10}
-    note: "measured: full 1721 / 1721 B (custom / generic), page CTE 8"
-  - id: ps.f.S_SEA_GRR_0_rows
-    stmt: ListPacketsBySitesScopedFirst
-    shape: "fixer: S SEA #GRR (0 rows)"
-    params: ["{SEA}", infinity, "\\x", 51, "-infinity", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", "{#GRR}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 50, planning_ms: 10}
-    note: "measured: full 6 / 6 B (custom / generic), page CTE 6"
-  - id: ps.f.S_SEA_dash8_pt4_1d
-    stmt: ListPacketsBySitesScopedFirst
-    shape: "fixer: S SEA dash8 pt4 1d"
-    params: ["{SEA}", "2026-10-17 17:00+00", "\\x", 51, "-infinity", infinity, "{4}", "{0,1,2,3}", {r: ps_list_dash8}]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 1250, planning_ms: 10}
-    note: "measured: full 833 / 833 B (custom / generic), page CTE 48"
-  - id: ps.f.S_pnw_sea41_first
-    stmt: ListPacketsBySitesScopedFirst
-    shape: "fixer: S pnw sea41 first"
-    params: [{r: ps_list_pnw}, infinity, "\\x", 51, "-infinity", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", {r: ps_list_scopes_sea41}]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 4025, planning_ms: 10}
-    note: "measured: full 2683 / 2781 B (custom / generic), page CTE 1626"
-  - id: ps.f.S_pnw_sea41_10_17_00_00
-    stmt: ListPacketsBySitesScoped
-    shape: "fixer: S pnw sea41 10-17 00:00"
-    params: [{r: ps_list_pnw}, "2026-10-17 00:00+00", "\\x", 51, "-infinity", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", {r: ps_list_scopes_sea41}]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 7767, planning_ms: 10}
-    note: "measured: full 5178 / 5178 B (custom / generic), page CTE 4188"
-  - id: ps.v.bogus5000_first
-    stmt: ListPacketsBySitesFirst
-    shape: "5,000 bogus IATAs, page 1"
-    params: [{r: ps_bogus5000}, infinity, "\\x", 51]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 25000, planning_ms: 60}
-    note: "no matching measured run"
-  - id: ps.v.bogus5000_1d
-    stmt: ListPacketsBySites
-    shape: "5,000 bogus IATAs, legacy cursor 1 d"
-    params: [{r: ps_bogus5000}, "2026-10-17 17:00:00+00", "\\x", 51]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 25000, planning_ms: 60}
-    note: "no matching measured run; budget corrected from the end-state measurement (was 25000)"
-  - id: ps.v.bogus5000_typed_pt4
-    stmt: ListPacketsBySitesTypedFirst
-    shape: "5,000 bogus IATAs, payloadTypes=4"
-    params: [{r: ps_bogus5000}, "{4}", "{0,1,2,3}", infinity, "\\x", 51]
+    note: "measured: 20000 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.typed.busy7.page1
+    stmt: ListPacketsBySitesTyped
+    shape: "the 7 busiest recent sites, adverts, page 1"
+    shapes: [dense, page1]
+    params: [{r: ps_busy_sites7}, "{4}", "{0,1,2,3}", "infinity", "\\x", 51]
     expect:
       driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
       sort_exempt: [sites_recheck]
-      budget: {buffers: 25000, planning_ms: 60}
-    known_issue: "the page statements must be pre-filtered unknown IATAs (FilterKnownSites): unfiltered, 5,000 bogus IATAs x types cost 4x today"
-    note: "no matching measured run"
-  - id: ps.v.bogus5000_since1d
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "5,000 bogus IATAs, since T0-1d"
-    params: [{r: ps_bogus5000}, infinity, "\\x", 51, "2026-10-17 17:00:00+00", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
+      budget: {buffers: 6460, planning_ms: 10}
+    note: "measured: 4307 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.typed.busy7.1d
+    stmt: ListPacketsBySitesTyped
+    shape: "the 7 busiest recent sites, adverts, a day below the busiest sites"
+    shapes: [dense, deep]
+    params: [{r: ps_busy_sites7}, "{4}", "{0,1,2,3}", {r: ps_busy13_1d}, "\\x", 51]
     expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
       sort_exempt: [sites_recheck]
-      budget: {buffers: 25000, planning_ms: 60}
-    note: "no matching measured run"
-  - id: ps.v.bogus5000_scoped
-    stmt: ListPacketsBySitesScopedFirst
-    shape: "5,000 bogus IATAs x dash8 scopes"
-    params: [{r: ps_bogus5000}, infinity, "\\x", 51, "-infinity", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", {r: ps_list_dash8}]
+      budget: {buffers: 6232, planning_ms: 10}
+    note: "measured: 4155 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.typed.busy1.tie
+    stmt: ListPacketsBySitesTyped
+    shape: "the busiest recent site, adverts, page cursor inside a group of tied rows"
+    shapes: [dense, tie]
+    params: [{r: ps_busy1_list}, "{4}", "{0,1,2,3}", {r: ps_busy1_tie_ts}, {r: ps_busy1_tie_hash}, 51]
     expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
       sort_exempt: [sites_recheck]
-      budget: {buffers: 25000, planning_ms: 60}
-    known_issue: "the page statements must be pre-filtered unknown IATAs (FilterKnownSites): unfiltered, 5,000 bogus IATAs x scopes cost 6x today"
-    note: "no matching measured run"
-  - id: ps.v.prefilter_bogus5000
+      budget: {buffers: 2520, planning_ms: 10}
+    note: "measured: 1680 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.typed.busy13.direct
+    stmt: ListPacketsBySitesTyped
+    shape: "the 13 busiest recent sites, payload types 2 and 5 sent direct"
+    shapes: [dense, page1]
+    params: [{r: ps_busy_sites13}, "{2,5}", "{2}", "infinity", "\\x", 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 4467, planning_ms: 10}
+    note: "measured: 2978 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.typed.sparse
+    stmt: ListPacketsBySitesTyped
+    shape: "the busiest and the quietest recent site, adverts"
+    shapes: [sparse, page1]
+    params: [{r: ps_busy1_sparse}, "{4}", "{0,1,2,3}", "infinity", "\\x", 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 2919, planning_ms: 10}
+    note: "measured: 1946 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.typed.empty
+    stmt: ListPacketsBySitesTyped
+    shape: "two known codes with no rows, adverts"
+    shapes: [empty_region, page1]
+    params: [{r: ps_empty_sites2}, "{4}", "{0,1,2,3}", "infinity", "\\x", 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 48, planning_ms: 10}
+    note: "measured: 32 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.typed.stale
+    stmt: ListPacketsBySitesTyped
+    shape: "the busiest recent site and the stale site, adverts"
+    shapes: [stale_region, page1]
+    tiers: [fixture, local]
+    params: [{r: ps_busy1_stale}, "{4}", "{0,1,2,3}", "infinity", "\\x", 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 3202, planning_ms: 10}
+    note: "measured: 2135 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.typed.all.1d
+    stmt: ListPacketsBySitesTyped
+    shape: "every site with rows, adverts, a day below the busiest sites"
+    shapes: [giant_list, deep]
+    params: [{r: ps_all_sites}, "{4}", "{0,1,2,3}", {r: ps_busy13_1d}, "\\x", 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 281637, planning_ms: 10}
+    note: "measured: 187758 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.typedfirst.busy7.page1
+    stmt: ListPacketsBySitesTypedFirst
+    shape: "the 7 busiest recent sites, adverts, page 1"
+    shapes: [dense, page1]
+    params: [{r: ps_busy_sites7}, "{4}", "{0,1,2,3}", "infinity", "\\x", 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 2047, planning_ms: 10}
+    note: "measured: 1365 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.typedfirst.busy7.1d
+    stmt: ListPacketsBySitesTypedFirst
+    shape: "the 7 busiest recent sites, adverts, a day below the busiest sites"
+    shapes: [dense, deep]
+    params: [{r: ps_busy_sites7}, "{4}", "{0,1,2,3}", {r: ps_busy13_1d}, "\\x", 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 1993, planning_ms: 10}
+    note: "measured: 1329 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.typedfirst.busy1.tie
+    stmt: ListPacketsBySitesTypedFirst
+    shape: "the busiest recent site, adverts, page cursor inside a group of tied rows"
+    shapes: [dense, tie]
+    params: [{r: ps_busy1_list}, "{4}", "{0,1,2,3}", {r: ps_busy1_tie_ts}, {r: ps_busy1_tie_hash}, 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 2014, planning_ms: 10}
+    note: "measured: 1343 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.typedfirst.busy13.direct
+    stmt: ListPacketsBySitesTypedFirst
+    shape: "the 13 busiest recent sites, payload types 2 and 5 sent direct"
+    shapes: [dense, page1]
+    params: [{r: ps_busy_sites13}, "{2,5}", "{2}", "infinity", "\\x", 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 1071, planning_ms: 10}
+    note: "measured: 714 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.typedfirst.sparse
+    stmt: ListPacketsBySitesTypedFirst
+    shape: "the busiest and the quietest recent site, adverts"
+    shapes: [sparse, page1]
+    params: [{r: ps_busy1_sparse}, "{4}", "{0,1,2,3}", "infinity", "\\x", 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 1954, planning_ms: 10}
+    note: "measured: 1303 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.typedfirst.empty
+    stmt: ListPacketsBySitesTypedFirst
+    shape: "two known codes with no rows, adverts"
+    shapes: [empty_region, page1]
+    params: [{r: ps_empty_sites2}, "{4}", "{0,1,2,3}", "infinity", "\\x", 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 48, planning_ms: 10}
+    note: "measured: 32 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.typedfirst.stale
+    stmt: ListPacketsBySitesTypedFirst
+    shape: "the busiest recent site and the stale site, adverts"
+    shapes: [stale_region, page1]
+    tiers: [fixture, local]
+    params: [{r: ps_busy1_stale}, "{4}", "{0,1,2,3}", "infinity", "\\x", 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 1992, planning_ms: 10}
+    note: "measured: 1328 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.typedfirst.all.1d
+    stmt: ListPacketsBySitesTypedFirst
+    shape: "every site with rows, adverts, a day below the busiest sites"
+    shapes: [giant_list, deep]
+    params: [{r: ps_all_sites}, "{4}", "{0,1,2,3}", {r: ps_busy13_1d}, "\\x", 51]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck]
+      budget: {buffers: 17734, planning_ms: 10}
+    note: "measured: 11823 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.since.busy13.75m
+    stmt: ListPacketsBySitesSince
+    shape: "the 13 busiest recent sites, the last 75 minutes, limit 200"
+    requires_indexes: [idx_packets_last_heard_hash, idx_packets_heard_inverted]
+    params: [{r: ps_busy_sites13}, "infinity", "\\x", 1608, {r: ps_busy13_75m}, "infinity", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", "false", 201]
+    expect:
+      driver: [{scope: "CTE scanned", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, bounded_scan]
+      budget: {buffers: 24613, planning_ms: 10}
+    note: "measured: 16409 B on the full local copy with the t_s6a overlay (max over modes); the copy predates the packets window indexes, so the window guard (two index probes) is not in it; budget 1.5x"
+  - id: ps.since.busy13.75m_deep
+    stmt: ListPacketsBySitesSince
+    shape: "the 13 busiest recent sites, the last 75 minutes, a day below their newest row"
+    requires_indexes: [idx_packets_last_heard_hash, idx_packets_heard_inverted]
+    params: [{r: ps_busy_sites13}, {r: ps_busy13_1d}, "\\x", 408, {r: ps_busy13_75m}, "infinity", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", "true", 51]
+    expect:
+      driver: [{scope: "CTE scanned", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, bounded_scan]
+      budget: {buffers: 6328, planning_ms: 10}
+    note: "measured: 4219 B on the full local copy with the t_s6a overlay (max over modes); the copy predates the packets window indexes, so the window guard (two index probes) is not in it; budget 1.5x"
+  - id: ps.since.busy1.future
+    stmt: ListPacketsBySitesSince
+    shape: "the busiest recent site, a window that starts after its newest row"
+    requires_indexes: [idx_packets_last_heard_hash, idx_packets_heard_inverted]
+    params: [{r: ps_busy1_list}, "infinity", "\\x", 408, {r: ps_busy1_future}, "infinity", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", "false", 51]
+    expect:
+      driver: [{scope: "CTE scanned", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, bounded_scan]
+      budget: {buffers: 511, planning_ms: 10}
+    note: "measured: 341 B on the full local copy with the t_s6a overlay (max over modes); the copy predates the packets window indexes, so the window guard (two index probes) is not in it; budget 1.5x"
+  - id: ps.since.busy13.rare
+    stmt: ListPacketsBySitesSince
+    shape: "the 13 busiest recent sites, one rare payload type with every route type"
+    requires_indexes: [idx_packets_last_heard_hash, idx_packets_heard_inverted]
+    params: [{r: ps_busy_sites13}, "infinity", "\\x", 408, "-infinity", "infinity", "{15}", "{0,1,2,3}", "false", 51]
+    expect:
+      driver: [{scope: "CTE scanned", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, bounded_scan]
+      budget: {buffers: 6102, planning_ms: 10}
+    note: "measured: 4068 B on the full local copy with the t_s6a overlay (max over modes); the copy predates the packets window indexes, so the window guard (two index probes) is not in it; budget 1.5x"
+  - id: ps.since.busy13.many_types
+    stmt: ListPacketsBySitesSince
+    shape: "the 13 busiest recent sites, 13 payload types and 3 route types"
+    requires_indexes: [idx_packets_last_heard_hash, idx_packets_heard_inverted]
+    params: [{r: ps_busy_sites13}, {r: ps_busy13_1d}, "\\x", 408, "-infinity", "infinity", "{0,1,2,3,4,5,6,7,8,9,10,11,12}", "{0,1,2}", "true", 51]
+    expect:
+      driver: [{scope: "CTE scanned", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, bounded_scan]
+      budget: {buffers: 13993, planning_ms: 10}
+    note: "measured: 9329 B on the full local copy with the t_s6a overlay (max over modes); the copy predates the packets window indexes, so the window guard (two index probes) is not in it; budget 1.5x"
+  - id: ps.since.all.1h
+    stmt: ListPacketsBySitesSince
+    shape: "every site with rows, the last hour"
+    requires_indexes: [idx_packets_last_heard_hash, idx_packets_heard_inverted]
+    params: [{r: ps_all_sites}, "infinity", "\\x", 408, {r: ps_busy13_75m}, "infinity", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", "false", 51]
+    expect:
+      driver: [{scope: "CTE scanned", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, bounded_scan]
+      budget: {buffers: 266890, planning_ms: 10}
+    note: "measured: 177927 B on the full local copy with the t_s6a overlay (max over modes); the copy predates the packets window indexes, so the window guard (two index probes) is not in it; budget 1.5x"
+  - id: ps.since.bogus
+    stmt: ListPacketsBySitesSince
+    shape: "5,000 codes that are not sites (Go sends only the pre-filter survivors; this is the bound)"
+    requires_indexes: [idx_packets_last_heard_hash, idx_packets_heard_inverted]
+    params: [{r: ps_bogus5000}, "infinity", "\\x", 408, {r: ps_busy13_75m}, "infinity", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", "false", 51]
+    expect:
+      driver: [{scope: "CTE scanned", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, bounded_scan]
+      budget: {buffers: 30000, planning_ms: 10}
+    note: "measured: 20000 B on the full local copy with the t_s6a overlay (max over modes); the copy predates the packets window indexes, so the window guard (two index probes) is not in it; budget 1.5x"
+  - id: ps.scoped.busy13.scopes8
+    stmt: ListPacketsBySitesScoped
+    shape: "the 13 busiest recent sites, the 8 busiest recent scopes, page 1"
+    requires_indexes: [idx_packets_last_heard_hash, idx_packets_heard_inverted]
+    params: [{r: ps_busy_sites13}, {r: ps_busy_scopes8}, "infinity", "\\x", 408, "-infinity", "infinity", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", "false", 51]
+    expect:
+      driver: [{scope: "CTE scanned", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, bounded_scan]
+      budget: {buffers: 511, planning_ms: 10}
+    note: "measured: 341 B on the full local copy with the t_s6a overlay (max over modes); the copy predates the packets window indexes, so the window guard (two index probes) is not in it; budget 1.5x"
+  - id: ps.scoped.busy13.scopes8_1d
+    stmt: ListPacketsBySitesScoped
+    shape: "the 13 busiest recent sites, the 8 busiest recent scopes, a day below their newest row"
+    requires_indexes: [idx_packets_last_heard_hash, idx_packets_heard_inverted]
+    params: [{r: ps_busy_sites13}, {r: ps_busy_scopes8}, {r: ps_busy13_1d}, "\\x", 408, "-infinity", "infinity", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", "true", 51]
+    expect:
+      driver: [{scope: "CTE scanned", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, bounded_scan]
+      budget: {buffers: 3441, planning_ms: 10}
+    note: "measured: 2294 B on the full local copy with the t_s6a overlay (max over modes); the copy predates the packets window indexes, so the window guard (two index probes) is not in it; budget 1.5x"
+  - id: ps.scoped.busy1.zero
+    stmt: ListPacketsBySitesScoped
+    shape: "the busiest recent site, a scope it never heard"
+    requires_indexes: [idx_packets_last_heard_hash, idx_packets_heard_inverted]
+    params: [{r: ps_busy1_list}, {r: ps_zero_scope}, "infinity", "\\x", 408, "-infinity", "infinity", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", "false", 51]
+    expect:
+      driver: [{scope: "CTE scanned", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, bounded_scan]
+      budget: {buffers: 30, planning_ms: 10}
+    note: "measured: 6 B on the full local copy with the t_s6a overlay (max over modes); the copy predates the packets window indexes, so the window guard (two index probes) is not in it; budget 1.5x"
+  - id: ps.scoped.busy13.since
+    stmt: ListPacketsBySitesScoped
+    shape: "the 13 busiest recent sites, the busiest scope, the last 75 minutes, adverts"
+    requires_indexes: [idx_packets_last_heard_hash, idx_packets_heard_inverted]
+    params: [{r: ps_busy_sites13}, {r: ps_busy_scope1}, "infinity", "\\x", 408, {r: ps_busy13_75m}, "infinity", "{4}", "{0,1,2,3}", "false", 51]
+    expect:
+      driver: [{scope: "CTE scanned", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, bounded_scan]
+      budget: {buffers: 69, planning_ms: 10}
+    note: "measured: 46 B on the full local copy with the t_s6a overlay (max over modes); the copy predates the packets window indexes, so the window guard (two index probes) is not in it; budget 1.5x"
+  - id: ps.keys.busy1
+    stmt: ListPacketsBySiteKeys
+    shape: "the rows for the busiest site newest 50 keys"
+    params: [{r: ps_keys_hashes}, {r: ps_keys_ats}]
+    expect:
+      driver: [{relation: packets, alias: p, index: packets_pkey, nodes: ["Index Scan"], index_cond: ["packet_hash ="]}]
+      budget: {buffers: 1797, planning_ms: 10}
+    note: "measured: 1198 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.prefilter.bogus
     stmt: FilterKnownSites
-    shape: "pre-filter on 5,000 bogus IATAs (0 survive: Go returns an empty page, no page statement)"
+    shape: "5,000 codes that are not sites"
     params: [{r: ps_bogus5000}]
     expect:
-      driver: [{relation: packet_sites, alias: ps, nodes: ["Index Only Scan"], index_cond: ["iata ="]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 30005, planning_ms: 60}
-    note: "no matching measured run; budget corrected from the end-state measurement (was 30005)"
-  - id: ps.v.prefilter_all561
+      driver: [{relation: packet_sites, alias: ps, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata ="]}]
+      budget: {buffers: 30000, planning_ms: 10}
+    note: "measured: 20000 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
+  - id: ps.prefilter.all
     stmt: FilterKnownSites
-    shape: "pre-filter on all 561 sites (561 survive)"
+    shape: "every site with rows"
     params: [{r: ps_all_sites}]
     expect:
-      driver: [{relation: packet_sites, alias: ps, nodes: ["Index Only Scan"], index_cond: ["iata ="]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 3599, planning_ms: 10}
-    note: "no matching measured run; budget corrected from the end-state measurement (was 30005)"
-  - id: ps.v.all561_typed_pt4
-    stmt: ListPacketsBySitesTypedFirst
-    shape: "all 561 sites, payloadTypes=4, page 1"
-    params: [{r: ps_all_sites}, "{4}", "{0,1,2,3}", infinity, "\\x", 51]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 60000, planning_ms: 10}
-    note: "no matching measured run"
-  - id: ps.v.all561_typed_pt4_1d
-    stmt: ListPacketsBySitesTyped
-    shape: "all 561 sites, payloadTypes=4, cursor 1 d"
-    params: [{r: ps_all_sites}, "{4}", "{0,1,2,3}", "2026-10-17 17:00:00+00", "\\x", 51]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 281606, planning_ms: 10}
-    note: "no matching measured run; budget corrected from the end-state measurement (was 140000)"
-  - id: ps.v.all561_since75
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "all 561 sites, 75 min window, limit 200"
-    params: [{r: ps_all_sites}, infinity, "\\x", 201, "2026-10-18 14:00:00+00", "2026-10-18 15:15:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 60000, planning_ms: 10}
-    note: "no matching measured run"
-  - id: ps.v.all561_since_cur
-    stmt: ListPacketsBySitesSince
-    shape: "all 561 sites, since T0-1d, cursor 10-18 06:00"
-    params: [{r: ps_all_sites}, "2026-10-18 06:00:00+00", "\\x", 51, "2026-10-17 17:00:00+00", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 140000, planning_ms: 10}
-    note: "no matching measured run"
-  - id: ps.v.all561_future
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "all 561 sites, future since (0 rows: walks every range; documented degrade)"
-    params: [{r: ps_all_sites}, infinity, "\\x", 51, "2026-10-18 18:00:00+00", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 140000, planning_ms: 10}
-    note: "no matching measured run"
-  - id: ps.v.all561_scoped_dash8
-    stmt: ListPacketsBySitesScopedFirst
-    shape: "all 561 sites x dash8 scopes"
-    params: [{r: ps_all_sites}, infinity, "\\x", 51, "-infinity", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", {r: ps_list_dash8}]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 60000, planning_ms: 10}
-    note: "no matching measured run"
-  - id: ps.v.new_first
-    stmt: ListPacketsBySite
-    shape: "unanalyzed region NEW (21,255 rows), page 1"
-    params: [NEW, infinity, "\\x", 51]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 3000, planning_ms: 10}
-    note: "no matching measured run"
-  - id: ps.v.new_1d
-    stmt: ListPacketsBySite
-    shape: "unanalyzed region, legacy cursor 1 d"
-    params: [NEW, "2026-10-17 17:00:00+00", "\\x", 51]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 3000, planning_ms: 10}
-    note: "no matching measured run"
-  - id: ps.v.new_sea_1d
-    stmt: ListPacketsBySites
-    shape: "unanalyzed + dense region, cursor 1 d"
-    params: ["{NEW,SEA}", "2026-10-17 17:00:00+00", "\\x", 51]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 15000, planning_ms: 10}
-    note: "no matching measured run"
-  - id: ps.v.new_typed_pt4
-    stmt: ListPacketsBySitesTypedFirst
-    shape: "unanalyzed region, payloadTypes=4"
-    params: ["{NEW}", "{4}", "{0,1,2,3}", infinity, "\\x", 51]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 30000, planning_ms: 10}
-    note: "no matching measured run"
-  - id: ps.v.new_since1d
-    stmt: ListPacketsBySitesSinceFirst
-    shape: "unanalyzed region, since T0-1d"
-    params: ["{NEW}", infinity, "\\x", 51, "2026-10-17 17:00:00+00", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 15000, planning_ms: 10}
-    note: "no matching measured run"
-  - id: ps.v.new_scoped
-    stmt: ListPacketsBySitesScopedFirst
-    shape: "unanalyzed region x dash8 scopes"
-    params: ["{NEW}", infinity, "\\x", 51, "-infinity", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", {r: ps_list_dash8}]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 15000, planning_ms: 10}
-    note: "no matching measured run"
-  - id: ps.v.sea_tie
-    stmt: ListPacketsBySite
-    shape: "dense region, pageCursor inside a tied site_heard_at"
-    params: [SEA, {r: ps_sea_tie_ts}, {r: ps_sea_tie_hash}, 51]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 3000, planning_ms: 10}
-    note: "no matching measured run"
-  - id: ps.v.pnw_tie
-    stmt: ListPacketsBySites
-    shape: "pnw 13, pageCursor inside a tied site_heard_at, limit 100"
-    params: ["{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}", {r: ps_pnw_tie_ts}, {r: ps_pnw_tie_hash}, 101]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 15000, planning_ms: 10}
-    note: "no matching measured run"
-  - id: ps.v.pnw_tie_since
-    stmt: ListPacketsBySitesSince
-    shape: "pnw 13, since T0-1d, pageCursor in a tie"
-    params: ["{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}", {r: ps_pnw_tie_ts}, {r: ps_pnw_tie_hash}, 51, "2026-10-17 17:00:00+00", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 15000, planning_ms: 10}
-    note: "no matching measured run"
-  - id: ps.v.pnw_edge
-    stmt: ListPacketsBySites
-    shape: "pnw 13, cursor at the retention edge (10-15 17:30), limit 100"
-    params: ["{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}", "2026-10-15 17:30:00+00", "\\x", 101]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}, {scope: "CTE page", relation: packet_sites, alias: x, index: packet_sites_pkey, nodes: ["Index Only Scan"], index_cond: ["packet_hash = ps.packet_hash"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 15000, planning_ms: 10}
-    note: "no matching measured run"
-  - id: ps.v.sea_edge
-    stmt: ListPacketsBySite
-    shape: "dense region, cursor at the retention edge"
-    params: [SEA, "2026-10-15 17:30:00+00", "\\x", 51]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 3000, planning_ms: 10}
-    note: "no matching measured run"
-  - id: ps.v.mad_sparse
-    stmt: ListPacketsBySite
-    shape: "sparse region (MAD), page 1"
-    params: [MAD, infinity, "\\x", 51]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 3000, planning_ms: 10}
-    note: "no matching measured run"
-  - id: ps.v.zzz_sites
-    stmt: ListPacketsBySitesFirst
-    shape: "two empty regions"
-    params: ["{ZZZ,QQQ}", infinity, "\\x", 51]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck]
-      budget: {buffers: 6000, planning_ms: 10}
-    note: "no matching measured run"
+      driver: [{relation: packet_sites, alias: ps, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata ="]}]
+      budget: {buffers: 3598, planning_ms: 10}
+    note: "measured: 2399 B on the full local copy with the t_s6a overlay (max over modes); budget 1.5x"
   - id: ps.maint.sweeper
     stmt: SweepPacketSitesFronts
-    shape: "front sweeper, lookback 2 minutes; run with enable_bitmapscan = off, enable_seqscan = off via PGOPTIONS"
+    shape: "front sweeper, lookback 2 minutes, with the sweep's planner settings"
     params: ["2 minutes"]
+    settings: {enable_bitmapscan: "off", enable_seqscan: "off"}
     expect:
       driver: [{relation: packet_sites, alias: p, nodes: ["Index Scan", "Index Only Scan"]}]
       require: [{node: "Index Scan", relations: [idx_packet_sites_site]}, {node: "Index Only Scan", relations: [idx_packet_sites_site_type]}, {node: "Index Only Scan", relations: [idx_packet_sites_site_scope]}]
-      forbid: [{node: "Bitmap Heap Scan", reason: "a bitmap plan sets no LP_DEAD hints"}]
+      forbid: [{node: "Bitmap Heap Scan", reason: "a bitmap plan sets no dead-entry hints"}]
       budget: {buffers: 20000, planning_ms: 20}
-    note: "maint pool; the copy is static at T0, so now() - 2 min finds no rows: this pins the plan shape, not the cost"
+    note: "maint pool; a static copy has no row in the last 2 minutes, so this pins the plan, not the cost"
+  - id: ps.maint.fill_reconcile
+    stmt: FillPacketSitesSlice
+    shape: "a clean reconcile: the newest 340,000 observation ids (plain EXPLAIN)"
+    tiers: [local, prod]
+    params: [{r: ps_fill_lo}, {r: ps_fill_hi}]
+    expect:
+      driver: [{relation: packet_observations, alias: po, index: packet_observations_pkey, nodes: ["Index Scan"], index_cond: ["id >"]}]
+  - id: ps.maint.fill_audit
+    stmt: FillPacketSitesSlice
+    shape: "the audit: one 500,000-id slice below the reconcile range (plain EXPLAIN)"
+    tiers: [local, prod]
+    params: [{r: ps_audit_lo}, {r: ps_fill_lo}]
+    expect:
+      driver: [{relation: packet_observations, alias: po, index: packet_observations_pkey, nodes: ["Index Scan"], index_cond: ["id >"]}]
   - id: ps.ingest.insert_observation
-    stmt: InsertObservation_end
-    shape: "InsertObservation with packet_sites maintenance, the newest stored observation re-sent (plain EXPLAIN)"
-    params: [{r: obs_newest_hash}, {r: obs_newest_observer}, BDL, "2026-10-18T16:59:59.77791+00:00", "64", "2", "0", "\\x", "0", "0", "0", "910.525", "7", "62.5", "5", broker-1, "1", "305.664"]
+    stmt: InsertObservation
+    shape: "the newest stored observation re-sent (plain EXPLAIN)"
+    params: [{r: obs_newest_hash}, {r: obs_newest_observer}, {r: obs_newest_iata}, {r: obs_newest_heard_at}, "64", "2", "0", "\\x", "0", "0", "0", "910.525", "7", "62.5", "5", broker-1, "1", "305.664"]
     expect:
       driver: [{relation: packets, index: packets_pkey, index_cond: ["packet_hash ="]}]
 

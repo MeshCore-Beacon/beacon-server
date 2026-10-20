@@ -543,6 +543,13 @@ func (c *Corpus) spec(o RunOptions, e *Entry, mode string, res map[string]*strin
 		}
 		sp.setup = append(sp.setup, line(sets...))
 	}
+	if len(sp.e.Settings) > 0 {
+		var sets []string
+		for _, k := range sortedKeys(sp.e.Settings) {
+			sets = append(sets, "SET LOCAL "+k+" = "+quoteLit(sp.e.Settings[k]))
+		}
+		sp.setup = append(sp.setup, line(sets...))
+	}
 	sp.setup = append(sp.setup, line("PREPARE "+stmtName+" AS\n"+text))
 	sp.call = "EXECUTE " + stmtName
 	if len(params) > 0 {

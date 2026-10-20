@@ -116,7 +116,7 @@ func TestGenPolicyMatchesCorpus(t *testing.T) {
 		t.Errorf("db/planpolicy/cached_gen.go is stale; run go run ./cmd/planguard gen-policy. Generated:\n%s", src)
 	}
 	got := slices.Sorted(maps.Keys(planpolicy.Cached))
-	if !slices.Equal(got, []string{"GetNodeByID", "GetObserverTelemetrySince", "ListAllChannelMessagesByIATAs", "ListAllChannelMessagesPlain", "ListChannelMessagesByIATAs", "ListChannelMessagesPlain", "ListKnownRoutesByIATA", "ListKnownRoutesGlobal", "ListObserverAdverts", "ListPacketsByTypes", "ListPacketsPage"}) {
+	if !slices.Equal(got, []string{"GetNodeByID", "GetObserverTelemetrySince", "ListAllChannelMessagesByIATAs", "ListAllChannelMessagesPlain", "ListChannelMessagesByIATAs", "ListChannelMessagesPlain", "ListKnownRoutesByIATA", "ListKnownRoutesGlobal", "ListObserverAdverts", "ListPacketsBySite", "ListPacketsBySites", "ListPacketsBySitesFirst", "ListPacketsBySitesTyped", "ListPacketsBySitesTypedFirst", "ListPacketsByTypes", "ListPacketsPage"}) {
 		t.Errorf("planpolicy.Cached = %v", got)
 	}
 	for _, line := range []string{

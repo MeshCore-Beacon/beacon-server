@@ -1,0 +1,76 @@
+# Copyright 2026 Beacon Contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Region packet pages: two read-only servers on one database, page 1 of each case compared as whole JSON. Old is the
+# build before the site read model; new is this build, which trusts the overlay's table on a read-only server (its
+# state is complete, verified and saved less than two reconcile intervals ago, and the newest observations check
+# clean). Both run with search_path "t_s6a, public" on the overlay overlay/packet_sites.sql:
+#
+#   planguard storediff --old http://127.0.0.1:8481 --new http://127.0.0.1:8482 \
+#     --cases db/planguard/storediff/packet_sites.yaml --walk 1,2,3,web
+#
+# Allowed differences, each a named class: nextPageCursor is new (additive_keys); rows tied on their time come out in
+# a fixed order (tie_order); the latest observer of a packet whose newest observations share heard_at is the highest
+# observation id (latest_observer_tie). Today's statement can return a short page with a scan-floor nextCursor where
+# a site's packets are heard by many observers; the new page is then full. Those pages differ in items, hasMore and
+# nextCursor by design and are listed by case in the run's report. Page 1 only: later pages follow the old server's
+# cursor, which a saturated old page moves to its scan floor.
+#
+# Everything is read from the data: sites are those of the most and the least recently seen observer
+# (/api/v1/observers), since is 75 minutes before the newest packet, the region is the first one listed. ZZZ is a
+# code no site uses.
+cases:
+  - id: site_a
+    path: /api/v1/packets
+    query: {iatas: "{a}"}
+    vars: &a
+      a: {path: /api/v1/observers, from: first.iata}
+    pages: 1
+    allowed: &classes [tie_order, additive_keys, latest_observer_tie]
+    key: &heard [lastHeardAt]
+    omit: &observer [latestObserver]
+  - id: sites_ab
+    path: /api/v1/packets
+    query: {iatas: "{a},{b}"}
+    vars: &ab
+      a: {path: /api/v1/observers, from: first.iata}
+      b: {path: /api/v1/observers, from: last.iata}
+    pages: 1
+    allowed: *classes
+    key: *heard
+    omit: *observer
+  - id: site_a_adverts
+    path: /api/v1/packets
+    query: {iatas: "{a}", payloadTypes: "4"}
+    vars: *a
+    pages: 1
+    allowed: *classes
+    key: *heard
+    omit: *observer
+  - id: sites_ab_window
+    path: /api/v1/packets
+    query: {iatas: "{a},{b}", since: "{since}"}
+    vars:
+      a: {path: /api/v1/observers, from: first.iata}
+      b: {path: /api/v1/observers, from: last.iata}
+      since: {path: /api/v1/packets, from: first.lastHeardAt, add: -4500000}
+    pages: 1
+    allowed: *classes
+    key: *heard
+    omit: *observer
+  - id: region_first
+    path: /api/v1/packets
+    query: {region: "{r}"}
+    vars:
+      r: {path: /api/v1/regions, from: first.slug}
+    pages: 1
+    allowed: *classes
+    key: *heard
+    omit: *observer
+  - id: zzz
+    path: /api/v1/packets
+    query: {iatas: "ZZZ"}
+    pages: 1
+    allowed: *classes
+    key: *heard
+    omit: *observer

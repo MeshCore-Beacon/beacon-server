@@ -16,6 +16,11 @@ var Cached = map[string]bool{
 	"ListKnownRoutesByIATA":         true,
 	"ListKnownRoutesGlobal":         true,
 	"ListObserverAdverts":           true,
+	"ListPacketsBySite":             true,
+	"ListPacketsBySites":            true,
+	"ListPacketsBySitesFirst":       true,
+	"ListPacketsBySitesTyped":       true,
+	"ListPacketsBySitesTypedFirst":  true,
 	"ListPacketsByTypes":            true,
 	"ListPacketsPage":               true,
 }
