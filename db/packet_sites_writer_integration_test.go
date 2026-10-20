@@ -411,12 +411,12 @@ func TestPacketSitesRaceMaxMergePostgres(t *testing.T) {
 	next := 0
 	packet := func() []byte { next++; return f.psPacket(next) }
 
-	p := packet() // R1 the later hearing commits first, then the earlier one
+	p := packet() // the later hearing commits first, then the earlier one
 	l2.insert(psObs(p, 2, "AAA", t2))
 	l1.insert(psObs(p, 1, "AAA", t1))
 	f.psSiteRow("later first", p, "AAA")
 
-	p = packet() // R2 the earlier lane open, the later one waits, the earlier commits
+	p = packet() // the earlier lane open, the later one waits, the earlier commits
 	l1.open(psObs(p, 1, "AAA", t1))
 	wait := l2.insertWaiting(psObs(p, 2, "AAA", t2))
 	l1.end(true)
@@ -425,7 +425,7 @@ func TestPacketSitesRaceMaxMergePostgres(t *testing.T) {
 	}
 	f.psSiteRow("later waits on earlier", p, "AAA")
 
-	p = packet() // R3 the later lane open, the earlier one waits, the later commits
+	p = packet() // the later lane open, the earlier one waits, the later commits
 	l2.open(psObs(p, 2, "AAA", t2))
 	wait = l1.insertWaiting(psObs(p, 1, "AAA", t1))
 	l2.end(true)
@@ -438,7 +438,7 @@ func TestPacketSitesRaceMaxMergePostgres(t *testing.T) {
 		_, err := sqlc.New(db).FillPacketSitesSlice(f.ctx, sqlc.FillPacketSitesSliceParams{AfterID: 0, ThroughID: 1 << 62})
 		return err
 	}
-	p = packet() // R4 a fill over the packet's ids open, a later hearing waits, the fill commits
+	p = packet() // a fill over the packet's ids open, a later hearing waits, the fill commits
 	f.unsited(psObs(p, 1, "AAA", t1))
 	l1.begin()
 	if err := fill(l1.tx, p); err != nil {
@@ -451,7 +451,7 @@ func TestPacketSitesRaceMaxMergePostgres(t *testing.T) {
 	}
 	f.psSiteRow("later waits on a fill", p, "AAA")
 
-	p = packet() // R5 a later hearing open, a fill over the packet's ids waits, the hearing commits
+	p = packet() // a later hearing open, a fill over the packet's ids waits, the hearing commits
 	f.unsited(psObs(p, 1, "AAA", t1))
 	l2.open(psObs(p, 2, "AAA", t2))
 	wait = l1.waiting(func(db sqlc.DBTX) error { return fill(db, p) })
@@ -461,7 +461,7 @@ func TestPacketSitesRaceMaxMergePostgres(t *testing.T) {
 	}
 	f.psSiteRow("fill waits on a later hearing", p, "AAA")
 
-	p = packet() // R6 two observers at one site in the same microsecond
+	p = packet() // two observers at one site in the same microsecond
 	l1.open(psObs(p, 1, "AAA", t2))
 	wait = l2.insertWaiting(psObs(p, 2, "AAA", t2))
 	l1.end(true)
@@ -470,7 +470,7 @@ func TestPacketSitesRaceMaxMergePostgres(t *testing.T) {
 	}
 	f.psSiteRow("same microsecond", p, "AAA")
 
-	p = packet() // R7 one packet heard at two sites at once
+	p = packet() // one packet heard at two sites at once
 	l1.open(psObs(p, 1, "AAA", t1))
 	wait = l2.insertWaiting(psObs(p, 5, "BBB", t2))
 	l1.end(true)
@@ -480,13 +480,13 @@ func TestPacketSitesRaceMaxMergePostgres(t *testing.T) {
 	f.psSiteRow("two sites, AAA", p, "AAA")
 	f.psSiteRow("two sites, BBB", p, "BBB")
 
-	// R8 a re-send with a later hearing than any stored one never moves the row
+	// a re-send with a later hearing than any stored one never moves the row
 	if l1.insert(psObs(p, 1, "AAA", t3)) {
 		t.Fatal("a re-send was inserted")
 	}
 	f.psSiteRow("re-send", p, "AAA")
 
-	p = packet() // R9 the later lane rolls back while the earlier one waits
+	p = packet() // the later lane rolls back while the earlier one waits
 	l2.open(psObs(p, 2, "AAA", t2))
 	wait = l1.insertWaiting(psObs(p, 1, "AAA", t1))
 	l2.end(false)
@@ -495,7 +495,7 @@ func TestPacketSitesRaceMaxMergePostgres(t *testing.T) {
 	}
 	f.psSiteRow("rolled back", p, "AAA")
 
-	p = packet() // R10 the packet is deleted while an observation of it waits: 23503, nothing stored
+	p = packet() // the packet is deleted while an observation of it waits: 23503, nothing stored
 	l1.insert(psObs(p, 1, "BBB", t1))
 	l2.begin()
 	if _, err := l2.tx.Exec(f.ctx, "DELETE FROM packets WHERE packet_hash = $1", p); err != nil {
