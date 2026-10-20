@@ -4,6 +4,7 @@
 package db
 
 import (
+	"bytes"
 	"context"
 	"slices"
 	"testing"
@@ -55,7 +56,8 @@ func TestSiteStatement(t *testing.T) {
 		{"none", nil, nil, nil, time.Time{}, sitePlain},
 		{"types only", []int16{4}, nil, nil, time.Time{}, siteTyped},
 		{"four type pairs", []int16{4, 5}, []int16{0, 1}, nil, time.Time{}, siteTyped},
-		{"many type pairs", []int16{4, 5}, []int16{0, 1, 2}, nil, time.Time{}, siteSince},
+		{"eight type pairs", []int16{4, 5}, nil, nil, time.Time{}, siteTyped},
+		{"many type pairs", []int16{4, 5, 6}, []int16{0, 1, 2}, nil, time.Time{}, siteSince},
 		{"route types only", nil, []int16{3}, nil, time.Time{}, siteSince}, // 16 payload types x 1
 		{"since and types", []int16{4}, nil, nil, since, siteSince},
 		{"scopes, since and types", []int16{4}, nil, []string{"#a"}, since, siteScoped},
@@ -183,30 +185,90 @@ func TestListPacketsRegionNextPageCursor(t *testing.T) {
 	}
 }
 
-// A bounded statement that stopped above the end of a site's history: the page has more, from the floor.
-func TestListPacketsRegionFloor(t *testing.T) {
+func sinceKey(at time.Time, hash byte) sqlc.ListPacketsBySitesSinceRow {
+	return sqlc.ListPacketsBySitesSinceRow{PacketHash: []byte{hash}, SiteHeardAt: pgtype.Timestamptz{Time: at, Valid: true}}
+}
+
+func sinceFloor(at time.Time, hash byte) sqlc.ListPacketsBySitesSinceRow {
+	r := sinceKey(at, hash)
+	r.IsFloor = true
+	return r
+}
+
+// A bounded read that stopped above the end of a range before the page was full reads on from its floor in the
+// same request, with the re-check, until the page is full: no short page with more.
+func TestListPacketsRegionBoundedContinues(t *testing.T) {
 	t0 := time.Date(2026, 1, 10, 0, 0, 0, 456789000, time.UTC)
-	floor := sqlc.ListPacketsBySitesSinceRow{IsFloor: true, PacketHash: []byte{9}, SiteHeardAt: pgtype.Timestamptz{Time: t0.Add(-time.Minute), Valid: true}}
 	ctrl := gomock.NewController(t)
 	mock := mockdb.NewMockQuerier(ctrl)
-	mock.EXPECT().FilterKnownSites(gomock.Any(), gomock.Any()).Return([]string{"AAA"}, nil).Times(2)
-	mock.EXPECT().ListPacketsBySitesSince(gomock.Any(), gomock.Any()).Return([]sqlc.ListPacketsBySitesSinceRow{
-		{PacketHash: []byte{3}, SiteHeardAt: pgtype.Timestamptz{Time: t0, Valid: true}}, floor,
+	mock.EXPECT().FilterKnownSites(gomock.Any(), gomock.Any()).Return([]string{"AAA", "BBB"}, nil)
+	floor := t0.Add(-time.Minute)
+	first := mock.EXPECT().ListPacketsBySitesSince(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsBySitesSinceParams) bool {
+		return p.CursorTs.InfinityModifier == pgtype.Infinity && !p.Recheck && p.PageLimit == 3 && p.ScanDepth == 24
+	})).Return([]sqlc.ListPacketsBySitesSinceRow{sinceKey(t0, 9), sinceFloor(floor, 7)}, nil)
+	mock.EXPECT().ListPacketsBySitesSince(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsBySitesSinceParams) bool {
+		return p.CursorTs.Time.Equal(floor) && bytes.Equal(p.CursorHash, []byte{7}) && p.Recheck && p.PageLimit == 2 && p.ScanDepth == 24
+	})).After(first).Return([]sqlc.ListPacketsBySitesSinceRow{sinceKey(floor.Add(-time.Second), 5), sinceKey(floor.Add(-2*time.Second), 4)}, nil)
+	mock.EXPECT().ListPacketsBySiteKeys(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsBySiteKeysParams) bool {
+		return len(p.PacketHashes) == 3 && p.PacketHashes[0][0] == 9 && p.PacketHashes[2][0] == 4
+	})).Return([]sqlc.ListPacketsBySiteKeysRow{
+		sqlc.ListPacketsBySiteKeysRow(siteRowAt(t0, 9)), sqlc.ListPacketsBySiteKeysRow(siteRowAt(floor.Add(-time.Second), 5)),
+		sqlc.ListPacketsBySiteKeysRow(siteRowAt(floor.Add(-2*time.Second), 4)),
 	}, nil)
-	mock.EXPECT().ListPacketsBySiteKeys(gomock.Any(), sqlc.ListPacketsBySiteKeysParams{
-		PacketHashes: [][]byte{{3}}, SiteHeardAts: []pgtype.Timestamptz{{Time: t0, Valid: true}},
-	}).Return([]sqlc.ListPacketsBySiteKeysRow{sqlc.ListPacketsBySiteKeysRow(siteRowAt(t0, 3))}, nil)
-	mock.EXPECT().ListPacketsBySitesSince(gomock.Any(), gomock.Any()).Return([]sqlc.ListPacketsBySitesSinceRow{floor}, nil)
 	s := &Store{q: mock}
 	WithReadModels(earnedPacketSites())(s)
-	since := t0.Add(time.Hour)
-	for _, want := range []int{1, 0} {
-		page, err := s.ListPackets(context.Background(), nil, nil, []string{"AAA"}, nil, since, time.Time{}, 0, nil, 5)
-		wantPC := api.PacketCursor{At: floor.SiteHeardAt.Time, Hash: floor.PacketHash}.String()
-		if err != nil || len(page.Items) != want || page.Items == nil || !page.HasMore || page.NextPageCursor == nil || *page.NextPageCursor != wantPC ||
-			*page.NextCursor != floor.SiteHeardAt.Time.UnixMilli() {
-			t.Fatalf("page %+v, %v", page, err)
-		}
+	page, err := s.ListPackets(context.Background(), nil, nil, []string{"AAA", "BBB"}, nil, t0.Add(-time.Hour), time.Time{}, 0, nil, 2)
+	if err != nil || len(page.Items) != 2 || !page.HasMore || page.NextPageCursor == nil {
+		t.Fatalf("page %+v, %v", page, err)
+	}
+	if want := (api.PacketCursor{At: floor.Add(-time.Second), Hash: []byte{5}}).String(); *page.NextPageCursor != want {
+		t.Fatalf("next %s, want %s", *page.NextPageCursor, want)
+	}
+}
+
+// When the bounded reads of one request run out of their budget before the page is full, today's statement answers
+// the request.
+func TestListPacketsRegionBoundedFallsBack(t *testing.T) {
+	t0 := time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC)
+	pc := &api.PacketCursor{At: t0.Add(-time.Hour + 123*time.Microsecond), Hash: []byte{1}}
+	ctrl := gomock.NewController(t)
+	mock := mockdb.NewMockQuerier(ctrl)
+	mock.EXPECT().FilterKnownSites(gomock.Any(), gomock.Any()).Return([]string{"AAA"}, nil)
+	calls := 0
+	mock.EXPECT().ListPacketsBySitesSince(gomock.Any(), gomock.Any()).Times(siteBoundedRounds).DoAndReturn(
+		func(_ context.Context, p sqlc.ListPacketsBySitesSinceParams) ([]sqlc.ListPacketsBySitesSinceRow, error) {
+			calls++
+			return []sqlc.ListPacketsBySitesSinceRow{sinceFloor(t0.Add(-time.Duration(calls)*24*time.Hour), byte(calls))}, nil
+		})
+	mock.EXPECT().ListPacketsByIATAs(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsByIATAsParams) bool {
+		return p.CursorTs.Time.Equal(time.UnixMilli(pc.At.UnixMilli())) && p.ScanDepth == 6*8 && p.PageLimit == 6 &&
+			slices.Equal(p.PayloadTypes, []int16{4, 5}) && p.SinceTs.Valid
+	})).Return([]sqlc.ListPacketsByIATAsRow{{PacketHash: []byte{2}, SiteHeardAt: pgtype.Timestamptz{Time: t0.Add(-2 * time.Hour), Valid: true}}}, nil)
+	s := &Store{q: mock}
+	WithReadModels(earnedPacketSites())(s)
+	page, err := s.ListPackets(context.Background(), []int16{4, 5}, nil, []string{"AAA"}, nil, t0.Add(-48*time.Hour), time.Time{}, 0, pc, 5)
+	if err != nil || len(page.Items) != 1 || page.HasMore || page.NextPageCursor != nil {
+		t.Fatalf("fallback page %+v, %v", page, err)
+	}
+}
+
+// hasMore counts the keys: a packet removed between the keys and their rows does not end the walk.
+func TestListPacketsRegionHasMoreFromKeys(t *testing.T) {
+	t0 := time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC)
+	ctrl := gomock.NewController(t)
+	mock := mockdb.NewMockQuerier(ctrl)
+	mock.EXPECT().FilterKnownSites(gomock.Any(), gomock.Any()).Return([]string{"AAA"}, nil)
+	mock.EXPECT().ListPacketsBySitesSince(gomock.Any(), gomock.Any()).Return([]sqlc.ListPacketsBySitesSinceRow{
+		sinceKey(t0, 3), sinceKey(t0.Add(-time.Second), 2), sinceKey(t0.Add(-2*time.Second), 1),
+	}, nil)
+	mock.EXPECT().ListPacketsBySiteKeys(gomock.Any(), gomock.Any()).Return([]sqlc.ListPacketsBySiteKeysRow{
+		sqlc.ListPacketsBySiteKeysRow(siteRowAt(t0, 3)), sqlc.ListPacketsBySiteKeysRow(siteRowAt(t0.Add(-2*time.Second), 1)),
+	}, nil)
+	s := &Store{q: mock}
+	WithReadModels(earnedPacketSites())(s)
+	page, err := s.ListPackets(context.Background(), nil, nil, []string{"AAA"}, nil, t0.Add(-time.Hour), time.Time{}, 0, nil, 2)
+	if err != nil || len(page.Items) != 2 || !page.HasMore {
+		t.Fatalf("page %+v, %v", page, err)
 	}
 }
 

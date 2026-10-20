@@ -5,6 +5,8 @@ package db
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
@@ -37,13 +39,21 @@ const (
 	siteScoped                   // named scopes: bounded reads of each (site, scope) range, filtered
 )
 
-// siteTypedPairs is the most (payload type, route type) pairs the typed statement walks as separate ranges; more
-// pairs read each site range once, bounded, instead.
-const siteTypedPairs = 4
+// siteTypedPairs is the most (payload type, route type) pairs the typed statement walks as separate ranges: it reads
+// at most siteTypedPairs x (limit+1) entries per site, no more than one bounded read. More pairs read each site
+// range once, bounded, instead.
+const siteTypedPairs = siteScanDepthPerRow
 
 // siteScanDepthPerRow is how many entries of each range the bounded statements read per page row, as deep as the
 // observation statement reads each site's observations.
 const siteScanDepthPerRow = 8
+
+// siteBoundedRounds is how many bounded reads one request makes before today's statement answers it instead: a
+// filter that matches little keeps reading from the floor until the page is full, within this budget.
+const siteBoundedRounds = 8
+
+// errSiteBudget means the bounded reads of one request ran out of their budget before the page was full.
+var errSiteBudget = errors.New("bounded region reads exhausted their budget")
 
 // siteFamilyOf picks the family: scopes, then a window, then types.
 func siteFamilyOf(f packetFilter) siteFamily {
@@ -91,77 +101,96 @@ type siteKey struct {
 }
 
 // listSiteRows pre-filters unknown sites (typed, since and scoped families), dispatches and returns up to
-// f.pageLimit rows in (site_heard_at DESC, packet_hash DESC) order. floor is set when a bounded statement left
-// rows below it for the next page. rows is nil when the pre-filter leaves no site. Shared by the store and the
-// first-time verification.
-func listSiteRows(ctx context.Context, q sqlc.Querier, f packetFilter, sites []string) (rows []siteRow, floor *siteKey, err error) {
+// f.pageLimit rows in (site_heard_at DESC, packet_hash DESC) order, and how many keys the page holds (hasMore is
+// keys > limit). rows is nil when the pre-filter leaves no site. A bounded family reads on from its floor within the
+// request until the page is full; errSiteBudget means it gave up. Shared by the store and the first-time
+// verification.
+func listSiteRows(ctx context.Context, q sqlc.Querier, f packetFilter, sites []string) (rows []siteRow, keys int, err error) {
 	fam := siteFamilyOf(f)
 	if fam != sitePlain {
 		if sites, err = q.FilterKnownSites(ctx, sites); err != nil || len(sites) == 0 {
-			return nil, nil, err
+			return nil, 0, err
 		}
 	}
 	hasCursor := f.cursorTS.InfinityModifier != pgtype.Infinity
-	recheck := hasCursor && len(sites) > 1
-	scanDepth := f.pageLimit * siteScanDepthPerRow
 	switch siteStatement(fam, len(sites), hasCursor) {
 	case "ListPacketsBySite":
 		rows, err = q.ListPacketsBySite(ctx, sqlc.ListPacketsBySiteParams{Iata: sites[0], CursorTs: f.cursorTS, CursorHash: f.cursorHash, PageLimit: f.pageLimit})
-		return rows, nil, err
 	case "ListPacketsBySites":
-		r, err := q.ListPacketsBySites(ctx, sqlc.ListPacketsBySitesParams{Iatas: sites, CursorTs: f.cursorTS, CursorHash: f.cursorHash, PageLimit: f.pageLimit})
-		return convertSiteRows(r, func(x sqlc.ListPacketsBySitesRow) siteRow { return siteRow(x) }), nil, err
+		var r []sqlc.ListPacketsBySitesRow
+		r, err = q.ListPacketsBySites(ctx, sqlc.ListPacketsBySitesParams{Iatas: sites, CursorTs: f.cursorTS, CursorHash: f.cursorHash, PageLimit: f.pageLimit})
+		rows = convertSiteRows(r, func(x sqlc.ListPacketsBySitesRow) siteRow { return siteRow(x) })
 	case "ListPacketsBySitesFirst":
-		r, err := q.ListPacketsBySitesFirst(ctx, sqlc.ListPacketsBySitesFirstParams{Iatas: sites, CursorTs: f.cursorTS, CursorHash: f.cursorHash, PageLimit: f.pageLimit})
-		return convertSiteRows(r, func(x sqlc.ListPacketsBySitesFirstRow) siteRow { return siteRow(x) }), nil, err
+		var r []sqlc.ListPacketsBySitesFirstRow
+		r, err = q.ListPacketsBySitesFirst(ctx, sqlc.ListPacketsBySitesFirstParams{Iatas: sites, CursorTs: f.cursorTS, CursorHash: f.cursorHash, PageLimit: f.pageLimit})
+		rows = convertSiteRows(r, func(x sqlc.ListPacketsBySitesFirstRow) siteRow { return siteRow(x) })
 	case "ListPacketsBySitesTyped":
-		r, err := q.ListPacketsBySitesTyped(ctx, sqlc.ListPacketsBySitesTypedParams{Iatas: sites, PayloadTypes: f.payloadTypes, RouteTypes: f.routeTypes, CursorTs: f.cursorTS, CursorHash: f.cursorHash, PageLimit: f.pageLimit})
-		return convertSiteRows(r, func(x sqlc.ListPacketsBySitesTypedRow) siteRow { return siteRow(x) }), nil, err
+		var r []sqlc.ListPacketsBySitesTypedRow
+		r, err = q.ListPacketsBySitesTyped(ctx, sqlc.ListPacketsBySitesTypedParams{Iatas: sites, PayloadTypes: f.payloadTypes, RouteTypes: f.routeTypes, CursorTs: f.cursorTS, CursorHash: f.cursorHash, PageLimit: f.pageLimit})
+		rows = convertSiteRows(r, func(x sqlc.ListPacketsBySitesTypedRow) siteRow { return siteRow(x) })
 	case "ListPacketsBySitesTypedFirst":
-		r, err := q.ListPacketsBySitesTypedFirst(ctx, sqlc.ListPacketsBySitesTypedFirstParams{Iatas: sites, PayloadTypes: f.payloadTypes, RouteTypes: f.routeTypes, CursorTs: f.cursorTS, CursorHash: f.cursorHash, PageLimit: f.pageLimit})
-		return convertSiteRows(r, func(x sqlc.ListPacketsBySitesTypedFirstRow) siteRow { return siteRow(x) }), nil, err
-	case "ListPacketsBySitesSince":
-		r, err := q.ListPacketsBySitesSince(ctx, sqlc.ListPacketsBySitesSinceParams{
-			Iatas: sites, CursorTs: f.cursorTS, CursorHash: f.cursorHash, ScanDepth: scanDepth, SinceTs: f.since, UntilTs: f.until,
-			PayloadTypes: f.payloadTypes, RouteTypes: f.routeTypes, Recheck: recheck, PageLimit: f.pageLimit,
-		})
-		if err != nil {
-			return nil, nil, err
-		}
-		keys := make([]sqlc.ListPacketsBySitesScopedRow, len(r))
-		for i, x := range r {
-			keys[i] = sqlc.ListPacketsBySitesScopedRow(x)
-		}
-		return siteRowsForKeys(ctx, q, keys)
+		var r []sqlc.ListPacketsBySitesTypedFirstRow
+		r, err = q.ListPacketsBySitesTypedFirst(ctx, sqlc.ListPacketsBySitesTypedFirstParams{Iatas: sites, PayloadTypes: f.payloadTypes, RouteTypes: f.routeTypes, CursorTs: f.cursorTS, CursorHash: f.cursorHash, PageLimit: f.pageLimit})
+		rows = convertSiteRows(r, func(x sqlc.ListPacketsBySitesTypedFirstRow) siteRow { return siteRow(x) })
+	default:
+		return boundedSiteRows(ctx, q, fam, f, sites, hasCursor)
 	}
-	keys, err := q.ListPacketsBySitesScoped(ctx, sqlc.ListPacketsBySitesScopedParams{
-		Iatas: sites, ScopeNames: f.scopes, CursorTs: f.cursorTS, CursorHash: f.cursorHash, ScanDepth: scanDepth, SinceTs: f.since,
-		UntilTs: f.until, PayloadTypes: f.payloadTypes, RouteTypes: f.routeTypes, Recheck: recheck, PageLimit: f.pageLimit,
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	return siteRowsForKeys(ctx, q, keys)
+	return rows, len(rows), err
 }
 
-// siteRowsForKeys splits a bounded statement's keys from its floor and reads the page rows for the keys.
-func siteRowsForKeys(ctx context.Context, q sqlc.Querier, keys []sqlc.ListPacketsBySitesScopedRow) ([]siteRow, *siteKey, error) {
-	var floor *siteKey
+// boundedSiteRows runs a bounded family: each read covers at most scan depth entries per range and returns the
+// page keys above its floor; while the page is short and a floor remains, the next read starts at the floor (with
+// the re-check, so no packet repeats), up to siteBoundedRounds reads. Then it reads the rows for the keys.
+func boundedSiteRows(ctx context.Context, q sqlc.Querier, fam siteFamily, f packetFilter, sites []string, hasCursor bool) ([]siteRow, int, error) {
+	cursorTS, cursorHash := f.cursorTS, f.cursorHash
 	var hashes [][]byte
 	var ats []pgtype.Timestamptz
-	for _, k := range keys {
-		if k.IsFloor {
-			floor = &siteKey{at: k.SiteHeardAt.Time, hash: k.PacketHash}
-			continue
+	for round := 0; ; round++ {
+		recheck := len(sites) > 1 && (hasCursor || round > 0)
+		need := f.pageLimit - int32(len(hashes))
+		var keys []sqlc.ListPacketsBySitesScopedRow
+		var err error
+		if fam == siteScoped {
+			keys, err = q.ListPacketsBySitesScoped(ctx, sqlc.ListPacketsBySitesScopedParams{
+				Iatas: sites, ScopeNames: f.scopes, CursorTs: cursorTS, CursorHash: cursorHash, ScanDepth: f.pageLimit * siteScanDepthPerRow,
+				SinceTs: f.since, UntilTs: f.until, PayloadTypes: f.payloadTypes, RouteTypes: f.routeTypes, Recheck: recheck, PageLimit: need,
+			})
+		} else {
+			var r []sqlc.ListPacketsBySitesSinceRow
+			r, err = q.ListPacketsBySitesSince(ctx, sqlc.ListPacketsBySitesSinceParams{
+				Iatas: sites, CursorTs: cursorTS, CursorHash: cursorHash, ScanDepth: f.pageLimit * siteScanDepthPerRow, SinceTs: f.since,
+				UntilTs: f.until, PayloadTypes: f.payloadTypes, RouteTypes: f.routeTypes, Recheck: recheck, PageLimit: need,
+			})
+			keys = make([]sqlc.ListPacketsBySitesScopedRow, len(r))
+			for i, x := range r {
+				keys[i] = sqlc.ListPacketsBySitesScopedRow(x)
+			}
 		}
-		hashes = append(hashes, k.PacketHash)
-		ats = append(ats, k.SiteHeardAt)
+		if err != nil {
+			return nil, 0, err
+		}
+		var floor *siteKey
+		for _, k := range keys {
+			if k.IsFloor {
+				floor = &siteKey{at: k.SiteHeardAt.Time, hash: k.PacketHash}
+				continue
+			}
+			hashes = append(hashes, k.PacketHash)
+			ats = append(ats, k.SiteHeardAt)
+		}
+		if int32(len(hashes)) >= f.pageLimit || floor == nil {
+			break
+		}
+		if round+1 >= siteBoundedRounds {
+			return nil, 0, errSiteBudget
+		}
+		cursorTS, cursorHash = pgtype.Timestamptz{Time: floor.at, Valid: true}, floor.hash
 	}
 	if len(hashes) == 0 {
-		return []siteRow{}, floor, nil
+		return []siteRow{}, 0, nil
 	}
 	r, err := q.ListPacketsBySiteKeys(ctx, sqlc.ListPacketsBySiteKeysParams{PacketHashes: hashes, SiteHeardAts: ats})
-	return convertSiteRows(r, func(x sqlc.ListPacketsBySiteKeysRow) siteRow { return siteRow(x) }), floor, err
+	return convertSiteRows(r, func(x sqlc.ListPacketsBySiteKeysRow) siteRow { return siteRow(x) }), len(hashes), err
 }
 
 func convertSiteRows[R any](rows []R, conv func(R) siteRow) []siteRow {
@@ -174,9 +203,10 @@ func convertSiteRows[R any](rows []R, conv func(R) siteRow) []siteRow {
 
 // listPacketsByRegion serves a region page. Until this process trusts packet_sites, it runs today's statement; a
 // pageCursor sent alone then pages by its millisecond, which is the cursor the same row would have produced, so a
-// walk never restarts. Trusted, it pages by the exact (site_heard_at, packet_hash) key and returns nextPageCursor.
+// walk never restarts. Trusted, it pages by the exact (site_heard_at, packet_hash) key and returns nextPageCursor;
+// a request whose bounded reads run out of budget is answered by today's statement the same way.
 func (s *Store) listPacketsByRegion(ctx context.Context, payloadTypes, routeTypes []int16, iatas, scopes []string, since, until time.Time, cursor int64, pageCursor *api.PacketCursor, limit int32) (api.PacketPage, error) {
-	if !s.readModels.packetSitesTrusted() {
+	legacy := func() (api.PacketPage, error) {
 		c := cursor
 		if c <= 0 && pageCursor != nil {
 			c = pageCursor.At.UnixMilli()
@@ -184,36 +214,37 @@ func (s *Store) listPacketsByRegion(ctx context.Context, payloadTypes, routeType
 		page, err := s.listPacketsByIATAs(ctx, payloadTypes, routeTypes, iatas, scopes, since, until, c, limit)
 		return api.PacketPage{Page: page}, err
 	}
+	if !s.readModels.packetSitesTrusted() {
+		return legacy()
+	}
 	empty := api.PacketPage{Page: api.Page[api.PacketSummary]{Items: []api.PacketSummary{}}}
 	f, ok := newPacketFilter(payloadTypes, routeTypes, scopes, since, until, cursor, pageCursor, limit)
 	if !ok {
 		return empty, nil
 	}
-	rows, floor, err := listSiteRows(ctx, s.q, f, dedupeSites(iatas))
+	rows, keys, err := listSiteRows(ctx, s.q, f, dedupeSites(iatas))
+	if errors.Is(err, errSiteBudget) {
+		slog.Debug("region page: bounded reads ran out of budget; the original statement answers", "component", "db", "sites", len(iatas))
+		return legacy()
+	}
 	if err != nil {
 		return api.PacketPage{}, err
 	}
-	hasMore := len(rows) > int(limit)
-	if hasMore {
+	// hasMore counts the keys: a packet deleted between the keys and their rows does not end the walk (unless every
+	// row went, which only retention at the oldest edge does).
+	hasMore := keys > int(limit) && len(rows) > 0
+	if len(rows) > int(limit) {
 		rows = rows[:limit]
-	}
-	var next *siteKey
-	switch {
-	case hasMore:
-		last := rows[len(rows)-1]
-		next = &siteKey{at: last.SiteHeardAt.Time, hash: last.PacketHash}
-	case floor != nil:
-		// A bounded read stopped above the end of a site's history: the next page starts at the floor.
-		hasMore, next = true, floor
 	}
 	packetRows := make([]packetRow, len(rows))
 	for i, r := range rows {
 		packetRows[i] = siteToPacketRow(r)
 	}
 	page := api.PacketPage{Page: api.Page[api.PacketSummary]{Items: s.packetSummaries(ctx, packetRows), HasMore: hasMore}}
-	if next != nil {
-		ms := next.at.UnixMilli()
-		pc := api.PacketCursor{At: next.at, Hash: next.hash}.String()
+	if hasMore && len(rows) > 0 {
+		last := rows[len(rows)-1]
+		ms := last.SiteHeardAt.Time.UnixMilli()
+		pc := api.PacketCursor{At: last.SiteHeardAt.Time, Hash: last.PacketHash}.String()
 		page.NextCursor = &ms
 		page.NextPageCursor = &pc
 	}

@@ -175,8 +175,9 @@ func (f *siteFixture) page(s *Store, r siteReq, cursor int64, pc *api.PacketCurs
 	return page, keys
 }
 
-// walk pages through r by pageCursor and checks each page against the truth for its cursor: the page is a prefix
-// of the truth page, full unless it ends at a floor, and the concatenation equals the truth with no gap or duplicate.
+// walk pages through r by pageCursor and checks each page against the truth for its cursor: the page equals the
+// truth page (full unless it is the last), hasMore says whether the truth has more, the next cursor is the last
+// row, and the concatenation equals the truth with no gap or duplicate.
 func (f *siteFixture) walk(s *Store, q sqlc.DBTX, r siteReq, limit int32) int {
 	f.t.Helper()
 	all := f.truth(q, r, time.Time{}, nil, 100_000)
@@ -189,18 +190,19 @@ func (f *siteFixture) walk(s *Store, q sqlc.DBTX, r siteReq, limit int32) int {
 			f.t.Fatalf("%v limit %d: walk does not end", r, limit)
 		}
 		page, _ := f.page(s, r, 0, pc, limit)
-		want := f.truth(q, r, at, hash, int(limit))
-		if len(page.Items) > len(want) {
-			f.t.Fatalf("%v limit %d page %d: %d rows, truth %d", r, limit, n, len(page.Items), len(want))
+		want := f.truth(q, r, at, hash, int(limit)+1)
+		wantMore := len(want) > int(limit)
+		if wantMore {
+			want = want[:limit]
+		}
+		if len(page.Items) != len(want) || page.HasMore != wantMore {
+			f.t.Fatalf("%v limit %d page %d: %d rows (more %v), truth %d (more %v)", r, limit, n, len(page.Items), page.HasMore, len(want), wantMore)
 		}
 		for i, it := range page.Items {
 			if it.PacketHash != want[i].hash {
 				f.t.Fatalf("%v limit %d page %d row %d: %s, truth %s", r, limit, n, i, it.PacketHash, want[i].hash)
 			}
 			got = append(got, it.PacketHash)
-		}
-		if len(page.Items) < int(limit) && len(page.Items) < len(want) && !page.HasMore {
-			f.t.Fatalf("%v limit %d page %d: short page without more", r, limit, n)
 		}
 		if !page.HasMore {
 			break
@@ -209,13 +211,9 @@ func (f *siteFixture) walk(s *Store, q sqlc.DBTX, r siteReq, limit int32) int {
 		if err != nil {
 			f.t.Fatal(err)
 		}
-		// The next page starts at the last row, or below it at a floor of a bounded read.
-		if len(page.Items) > 0 {
-			last := want[len(page.Items)-1]
-			lastHash, _ := hex.DecodeString(last.hash)
-			if next.At.After(last.at) || next.At.Equal(last.at) && bytes.Compare(next.Hash, lastHash) > 0 {
-				f.t.Fatalf("%v limit %d page %d: next cursor %v above the last row %v", r, limit, n, next, last)
-			}
+		last := want[len(want)-1]
+		if !next.At.Equal(last.at) || hex.EncodeToString(next.Hash) != last.hash {
+			f.t.Fatalf("%v limit %d page %d: next cursor %v, last row %v", r, limit, n, next, last)
 		}
 		pc, at, hash = next, next.At, next.Hash
 	}
@@ -244,9 +242,13 @@ func (f *siteFixture) legacyWalk(s *Store, q sqlc.DBTX, r siteReq, limit int32) 
 		if cursor > 0 {
 			at = time.UnixMilli(cursor)
 		}
-		want := f.truth(q, r, at, nil, int(limit))
-		if len(page.Items) > len(want) {
-			f.t.Fatalf("%v legacy page %d: %d rows, truth %d", r, n, len(page.Items), len(want))
+		want := f.truth(q, r, at, nil, int(limit)+1)
+		wantMore := len(want) > int(limit)
+		if wantMore {
+			want = want[:limit]
+		}
+		if len(page.Items) != len(want) || page.HasMore != wantMore {
+			f.t.Fatalf("%v legacy page %d: %d rows (more %v), truth %d (more %v)", r, n, len(page.Items), page.HasMore, len(want), wantMore)
 		}
 		for i, it := range page.Items {
 			if it.PacketHash != want[i].hash {
@@ -670,37 +672,45 @@ func TestPacketSitesTrustLifecyclePostgres(t *testing.T) {
 	}
 }
 
-// A window, or many type pairs, reads each site range at most scan depth entries deep, however rare the match: a
-// filter that matches nothing returns empty pages with more, from a floor that moves down by the scan depth. A
-// window that starts after every packet's first hearing reads no range at all.
+// A window, or many type pairs, reads each site range at most scan depth entries deep per read and reads on from the
+// floor within the request until the page is full; when its budget of reads runs out, today's statement answers.
+// No page is short with more. A window that starts after every packet's first hearing reads no range at all.
 func TestPacketsBySitesBoundedPostgres(t *testing.T) {
 	f := newSiteFixture(t)
-	s := f.trusted(f.pool)
 	var aaa int
 	if err := f.pool.QueryRow(f.ctx, "SELECT count(*) FROM packet_sites WHERE iata = 'AAA'").Scan(&aaa); err != nil {
 		t.Fatal(err)
 	}
-	const limit = 5
-	depth := (limit + 1) * siteScanDepthPerRow
 	// Payload types 0, 4, 8 and 12 are only ever sent flood (route type 0) in the fixture: 12 type pairs, none matches.
 	none := siteReq{sites: []string{"AAA", "BBB"}, pt: []int16{0, 4, 8, 12}, rt: []int16{1, 2, 3}}
-	pages := 0
-	for page, pc := (api.PacketPage{}), (*api.PacketCursor)(nil); ; pages++ {
-		page, _ = f.page(s, none, 0, pc, limit)
-		if len(page.Items) != 0 {
-			t.Fatalf("a filter that matches nothing returned rows")
-		}
-		if !page.HasMore {
-			break
-		}
-		pc, _ = api.ParsePacketCursor(*page.NextPageCursor)
-		if pages > aaa {
-			t.Fatal("walk does not end")
-		}
+	run := func(limit int32) ([]string, api.PacketPage) {
+		t.Helper()
+		rec := &recordingDBTX{DBTX: f.pool}
+		page, _ := f.page(f.trusted(rec), none, 0, nil, limit)
+		return rec.names, page
 	}
-	if pages < aaa/depth || pages > aaa/depth+2 {
-		t.Fatalf("%d pages for %d rows at AAA, depth %d", pages, aaa, depth)
+	// limit 50: 8 reads of 408 entries cover AAA's rows; the reads end with no floor.
+	if aaa >= siteBoundedRounds*51*siteScanDepthPerRow || aaa <= 6*siteScanDepthPerRow*siteBoundedRounds {
+		t.Fatalf("fixture AAA holds %d rows; the test needs it between the two budgets", aaa)
 	}
+	names, page := run(50)
+	if len(page.Items) != 0 || page.HasMore || slices.Contains(names, "ListPacketsByIATAs") || strings.Count(strings.Join(names, ","), "ListPacketsBySitesSince") < 2 {
+		t.Fatalf("limit 50: %+v, statements %v", page, names)
+	}
+	// limit 5: 8 reads of 48 entries do not reach AAA's end: today's statement answers (an empty page, no more).
+	names, page = run(5)
+	if len(page.Items) != 0 || page.HasMore || page.NextPageCursor != nil || !slices.Contains(names, "ListPacketsByIATAs") ||
+		strings.Count(strings.Join(names, ","), "ListPacketsBySitesSince") != siteBoundedRounds {
+		t.Fatalf("limit 5: %+v, statements %v", page, names)
+	}
+	// A filter that matches a quarter of the rows walks equal to the truth, every page full until the last.
+	some := siteReq{sites: []string{"AAA", "BBB"}, pt: []int16{0, 4, 8, 12}, rt: []int16{0, 1, 2}}
+	for _, limit := range []int32{3, 5, 50} {
+		f.walk(f.trusted(f.pool), f.pool, some, limit)
+	}
+	const limit = 5
+	depth := (limit + 1) * siteScanDepthPerRow
+	s := f.trusted(f.pool)
 	future := siteReq{sites: []string{"AAA", "BBB"}, since: time.Now().Add(24 * time.Hour)}
 	if page, _ := f.page(s, future, 0, nil, limit); len(page.Items) != 0 || page.HasMore {
 		t.Fatalf("a window after every packet: %+v", page)
