@@ -148,6 +148,15 @@ type Querier interface {
 	GetObserverByPubkey(ctx context.Context, publicKey []byte) (Observer, error)
 	// Count packet identities, not reception rows: a broker repeat or another
 	// reception by the same observer must not inflate the comparison.
+	//
+	// Each observer's receptions are read on their own from idx_observations_observer
+	// (observer_id, heard_at): (packet_hash, observer_id) is unique, so each side
+	// holds a packet at most once, and the full join yields each heard packet once.
+	// The route type is checked once per packet after the join.
+	// The observer ids are scalar subqueries so the planner costs every observer
+	// alike: given a busy observer's own row count, a custom plan may instead walk
+	// every reception in the window through idx_observations_heard, which reads
+	// several times the buffers.
 	GetObserverComparison(ctx context.Context, arg GetObserverComparisonParams) (GetObserverComparisonRow, error)
 	GetObserverLastIATA(ctx context.Context, id uuid.UUID) (string, error)
 	GetObserverRadio(ctx context.Context, id uuid.UUID) (GetObserverRadioRow, error)
