@@ -641,6 +641,10 @@ WITH scanned AS MATERIALIZED (
       AND (ps.site_heard_at, ps.packet_hash) < ($3::timestamptz, $4::bytea)
     ORDER BY ps.site_heard_at DESC, ps.packet_hash DESC
     LIMIT $5) w
+  -- No packet was first heard at or after since: nothing can match, so no range is read. A packet's last_heard_at
+  -- is at or after its first_heard_at, except the rows idx_packets_heard_inverted holds.
+  WHERE EXISTS (SELECT 1 FROM packets g WHERE g.last_heard_at >= $6::timestamptz)
+     OR EXISTS (SELECT 1 FROM packets g WHERE (g.first_heard_at > g.last_heard_at) IS TRUE AND g.first_heard_at >= $6::timestamptz)
 ), floor AS (
   -- Every range that filled scan_depth has unread entries below its last one; the highest such entry bounds
   -- what this page knows exactly.
@@ -736,6 +740,10 @@ WITH scanned AS MATERIALIZED (
       AND (ps.site_heard_at, ps.packet_hash) < ($2::timestamptz, $3::bytea)
     ORDER BY ps.site_heard_at DESC, ps.packet_hash DESC
     LIMIT $4) w
+  -- No packet was first heard at or after since: nothing can match, so no range is read. A packet's last_heard_at
+  -- is at or after its first_heard_at, except the rows idx_packets_heard_inverted holds.
+  WHERE EXISTS (SELECT 1 FROM packets g WHERE g.last_heard_at >= $5::timestamptz)
+     OR EXISTS (SELECT 1 FROM packets g WHERE (g.first_heard_at > g.last_heard_at) IS TRUE AND g.first_heard_at >= $5::timestamptz)
 ), floor AS (
   -- Every range that filled scan_depth has unread entries below its last one; the highest such entry bounds
   -- what this page knows exactly.

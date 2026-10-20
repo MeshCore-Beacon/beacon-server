@@ -670,8 +670,9 @@ func TestPacketSitesTrustLifecyclePostgres(t *testing.T) {
 	}
 }
 
-// A window, or many type pairs, reads each site range at most scan depth entries deep, however rare the match:
-// a window in the future returns empty pages with more, from a floor that moves down by the scan depth.
+// A window, or many type pairs, reads each site range at most scan depth entries deep, however rare the match: a
+// filter that matches nothing returns empty pages with more, from a floor that moves down by the scan depth. A
+// window that starts after every packet's first hearing reads no range at all.
 func TestPacketsBySitesBoundedPostgres(t *testing.T) {
 	f := newSiteFixture(t)
 	s := f.trusted(f.pool)
@@ -679,14 +680,15 @@ func TestPacketsBySitesBoundedPostgres(t *testing.T) {
 	if err := f.pool.QueryRow(f.ctx, "SELECT count(*) FROM packet_sites WHERE iata = 'AAA'").Scan(&aaa); err != nil {
 		t.Fatal(err)
 	}
-	future := siteReq{sites: []string{"AAA", "BBB"}, since: time.Now().Add(24 * time.Hour)}
 	const limit = 5
 	depth := (limit + 1) * siteScanDepthPerRow
+	// Payload types 0, 4, 8 and 12 are only ever sent flood (route type 0) in the fixture: 12 type pairs, none matches.
+	none := siteReq{sites: []string{"AAA", "BBB"}, pt: []int16{0, 4, 8, 12}, rt: []int16{1, 2, 3}}
 	pages := 0
 	for page, pc := (api.PacketPage{}), (*api.PacketCursor)(nil); ; pages++ {
-		page, _ = f.page(s, future, 0, pc, limit)
+		page, _ = f.page(s, none, 0, pc, limit)
 		if len(page.Items) != 0 {
-			t.Fatalf("future window returned rows")
+			t.Fatalf("a filter that matches nothing returned rows")
 		}
 		if !page.HasMore {
 			break
@@ -699,16 +701,15 @@ func TestPacketsBySitesBoundedPostgres(t *testing.T) {
 	if pages < aaa/depth || pages > aaa/depth+2 {
 		t.Fatalf("%d pages for %d rows at AAA, depth %d", pages, aaa, depth)
 	}
-	// Each statement reads at most depth entries per site range.
-	fl, _ := newPacketFilter(nil, []int16{3}, nil, future.since, time.Time{}, 0, nil, limit)
-	for _, stmt := range []struct {
-		sql  string
-		args []any
-	}{
-		{listPacketsBySitesSinceSQL(), []any{future.sites, fl.cursorTS, fl.cursorHash, int32(depth), fl.since, fl.until, fl.payloadTypes, fl.routeTypes, false, fl.pageLimit}},
-	} {
+	future := siteReq{sites: []string{"AAA", "BBB"}, since: time.Now().Add(24 * time.Hour)}
+	if page, _ := f.page(s, future, 0, nil, limit); len(page.Items) != 0 || page.HasMore {
+		t.Fatalf("a window after every packet: %+v", page)
+	}
+	read := func(fl packetFilter) int64 {
+		t.Helper()
 		var plan []byte
-		if err := f.pool.QueryRow(f.ctx, "EXPLAIN (ANALYZE, FORMAT JSON) "+stmt.sql, stmt.args...).Scan(&plan); err != nil {
+		if err := f.pool.QueryRow(f.ctx, "EXPLAIN (ANALYZE, FORMAT JSON) "+listPacketsBySitesSinceSQL(),
+			[]string{"AAA", "BBB"}, fl.cursorTS, fl.cursorHash, int32(depth), fl.since, fl.until, fl.payloadTypes, fl.routeTypes, false, fl.pageLimit).Scan(&plan); err != nil {
 			t.Fatal(err)
 		}
 		var scanned func(any) int64
@@ -733,9 +734,15 @@ func TestPacketsBySitesBoundedPostgres(t *testing.T) {
 		}
 		var doc any
 		_ = json.Unmarshal(plan, &doc)
-		if n := scanned(doc); n > int64(depth*len(future.sites)) {
-			t.Fatalf("packet_sites rows read %d > %d", n, depth*len(future.sites))
-		}
+		return scanned(doc)
+	}
+	fl, _ := newPacketFilter(none.pt, none.rt, nil, time.Time{}, time.Time{}, 0, nil, limit)
+	if n := read(fl); n == 0 || n > int64(depth*2) {
+		t.Fatalf("a filter that matches nothing read %d packet_sites rows, want 1..%d", n, depth*2)
+	}
+	fl, _ = newPacketFilter(nil, nil, nil, future.since, time.Time{}, 0, nil, limit)
+	if n := read(fl); n != 0 {
+		t.Fatalf("a window after every packet read %d packet_sites rows", n)
 	}
 }
 
