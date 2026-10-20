@@ -73,6 +73,7 @@ type ScanPattern struct {
 	Relation  string `yaml:"relation"`
 	Index     string `yaml:"index"`      // optional
 	IndexCond string `yaml:"index_cond"` // fragment, mode-neutral
+	Sort      string `yaml:"sort"`       // optional: the pattern exempts only from this sort node (Sort or Incremental Sort)
 	Reason    string `yaml:"reason"`
 }
 
@@ -291,6 +292,12 @@ func (c *Corpus) checkTopLevel() error {
 			}
 			if err := checkModeNeutral(sp.IndexCond); err != nil {
 				return fmt.Errorf("sort_exempt_sets %q[%d]: %w", name, i, err)
+			}
+			if c.retired(sp.Index) {
+				return fmt.Errorf("sort_exempt_sets %q[%d]: index names retired index %q", name, i, sp.Index)
+			}
+			if sp.Sort != "" && sp.Sort != "Sort" && sp.Sort != "Incremental Sort" {
+				return fmt.Errorf("sort_exempt_sets %q[%d]: sort %q (want Sort or Incremental Sort)", name, i, sp.Sort)
 			}
 		}
 	}
@@ -628,6 +635,9 @@ func (c *Corpus) checkEntry(e *Entry) error {
 		if !plainIdent(ix) {
 			return fmt.Errorf("requires_indexes: %q is not an index name", ix)
 		}
+		if c.retired(ix) {
+			return fmt.Errorf("requires_indexes names retired index %q", ix)
+		}
 	}
 	if err := checkSettings(e.Settings); err != nil {
 		return fmt.Errorf("settings: %w", err)
@@ -725,6 +735,23 @@ func (c *Corpus) checkExpect(x *Expect) error {
 				return fmt.Errorf("driver %d: %w", i, err)
 			}
 		}
+		if c.retired(d.Index) {
+			return fmt.Errorf("driver %d index names retired index %q", i, d.Index)
+		}
+		for _, ix := range d.AnyIndex {
+			if c.retired(ix) {
+				return fmt.Errorf("driver %d any_index names retired index %q", i, ix)
+			}
+		}
+	}
+	for kind, rules := range map[string][]NodeRule{"require": x.Require, "forbid": x.Forbid} {
+		for i, r := range rules {
+			for _, rel := range r.Relations {
+				if c.retired(rel) {
+					return fmt.Errorf("%s %d names retired index %q", kind, i, rel)
+				}
+			}
+		}
 	}
 	var err error
 	if x.Require, err = c.expandBig(x.Require); err != nil {
@@ -734,6 +761,12 @@ func (c *Corpus) checkExpect(x *Expect) error {
 		return err
 	}
 	return nil
+}
+
+// retired reports whether ix is one of defaults.retired_indexes. A database built through the migrations never has
+// one, so no expectation may depend on it.
+func (c *Corpus) retired(ix string) bool {
+	return ix != "" && slices.Contains(c.Defaults.RetiredIndexes, ix)
 }
 
 func (c *Corpus) expandBig(rules []NodeRule) ([]NodeRule, error) {

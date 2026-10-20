@@ -278,3 +278,45 @@ entries:
 		}
 	}
 }
+
+// An expectation may not depend on an index the migrations drop, as a driver, a required index, a require or forbid
+// relation or a sort exemption: a database built through them never has it.
+func TestCorpusRejectsRetiredIndexExpectation(t *testing.T) {
+	const head = `
+defaults: {big_tables: [nodes], retired_indexes: [idx_old]}
+sort_exempt_sets:
+  pinned: [{relation: nodes, index: %s}]
+statements:
+  Q: {sqlc: Q, plan: maint}
+entries:
+`
+	set := func(ix string) string { return strings.Replace(head, "%s", ix, 1) }
+	cases := []struct {
+		name, body, want string
+	}{
+		{"driver index", set("idx_new") + `  - {id: a, stmt: Q, expect: {driver: [{relation: nodes, index: idx_old}]}}`, `entry "a": driver 0 index names retired index "idx_old"`},
+		{"any_index", set("idx_new") + `  - {id: a, stmt: Q, expect: {driver: [{relation: nodes, any_index: [idx_new, idx_old]}]}}`, `entry "a": driver 0 any_index names retired index "idx_old"`},
+		{"requires_indexes", set("idx_new") + `  - {id: a, stmt: Q, requires_indexes: [idx_old]}`, `entry "a": requires_indexes names retired index "idx_old"`},
+		{"degrade_to", set("idx_new") + `  - {id: a, stmt: Q, mode: {custom: {degrade_to: {driver: [{relation: nodes, index: idx_old}]}}}}`, `entry "a": mode "custom" degrade_to: driver 0 index names retired index "idx_old"`},
+		{"sort exempt set", set("idx_old") + `  - {id: a, stmt: Q}`, `sort_exempt_sets "pinned"[0]: index names retired index "idx_old"`},
+		{"require relation", set("idx_new") + `  - {id: a, stmt: Q, expect: {require: [{node: "Index Only Scan", relations: [idx_old]}]}}`, `entry "a": require 0 names retired index "idx_old"`},
+		{"forbid relation", set("idx_new") + `  - {id: a, stmt: Q, expect: {forbid: [{node: "Index Scan", relations: [idx_old]}]}}`, `entry "a": forbid 0 names retired index "idx_old"`},
+		{"sort type", strings.Replace(set("idx_new"), "index: idx_new}", "index: idx_new, sort: Hash}", 1) + `  - {id: a, stmt: Q}`, `sort_exempt_sets "pinned"[0]: sort "Hash"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := planguard.LoadCorpus(mapFS(map[string]string{"c.yaml": tc.body}), "c.yaml", testSQLC)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want it to contain %q", err, tc.want)
+			}
+		})
+	}
+
+	ok := set("idx_new") + `  - {id: a, stmt: Q, requires_indexes: [idx_new], expect: {driver: [{relation: nodes, index: idx_new, any_index: [idx_new]}]}}`
+	if _, err := planguard.LoadCorpus(mapFS(map[string]string{"c.yaml": ok}), "c.yaml", testSQLC); err != nil {
+		t.Fatalf("the same entry on idx_new: %v", err)
+	}
+	if _, err := planguard.LoadCorpus(pgdata.Files, "corpus.yaml", repoSQLC(t)); err != nil {
+		t.Fatalf("repo corpus: %v", err)
+	}
+}

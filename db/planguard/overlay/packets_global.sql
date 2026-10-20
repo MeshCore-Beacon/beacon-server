@@ -1,6 +1,7 @@
 -- Copyright 2026 Beacon Contributors
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- Superseded by end_state.sql for the local tier; kept as the evidence of its change and for its diff cases.
 -- Overlay for the local-copy tier of the packets_global group and for diff/packets_global.yaml, built in the schema
 -- t_s5a from public:
 --   packets     with the index set it has once the old single-column indexes are dropped (migrations 025-033 plus

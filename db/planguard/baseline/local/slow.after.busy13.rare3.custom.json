@@ -8,7 +8,7 @@
  "          Bitmap Heap Scan on packet_observations po3",
  "            Bitmap Index Scan using idx_observations_iata_heard",
  "          Hash",
- "            Index Scan on packets p2 using idx_packets_payload_type scan=Forward",
+ "            Index Only Scan on packets p2 using idx_packets_type_last_heard scan=Forward",
  "  Nested Loop (Left)",
  "    Nested Loop",
  "      Nested Loop (Left)",

@@ -1,6 +1,7 @@
 -- Copyright 2026 Beacon Contributors
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- Superseded by end_state.sql for the local tier; kept as the evidence of its change and for its diff cases.
 -- Overlay for the local-copy tier of the packet_sites group, diff/packet_sites.yaml and storediff/packet_sites.yaml:
 -- it builds t_s6a; it never writes public. It holds
 --   t_s6a.packet_sites      the migrations' table and indexes, filled from public as the backfill fills it (one row

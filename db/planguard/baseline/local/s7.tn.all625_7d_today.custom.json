@@ -4,5 +4,5 @@
  "    Sort",
  "      Aggregate partial=Simple {Hashed}",
  "        Seq Scan on analytics_hourly_advert_hearings",
- "  Index Scan on nodes n using idx_nodes_pubkey scan=Forward"
+ "  Index Scan on nodes n using nodes_public_key_key scan=Forward"
 ]

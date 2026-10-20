@@ -35,11 +35,10 @@ defaults:
   forbid:
     - {node: Seq Scan, relations: [big], reason: page statements never scan a big table}
   sort_exempt: [latest_observation]
-  # Indexes the end state drops. A plan that fails only because it uses one of them is RETIRED_INDEX, not a failure.
+  # Indexes the migrations drop. A database that still has one (production before an upgrade) reports a plan that
+  # fails only because of it as RETIRED_INDEX.
   retired_indexes: [idx_known_routes_iata_last_seen, idx_known_routes_last_seen, idx_known_routes_hop_count, idx_known_routes_reconfirm,
-                    idx_packets_last_heard, idx_packets_payload_type, idx_packets_scope,
-                    idx_observations_packet, idx_observations_observer_id, idx_channel_messages_channel, idx_channel_messages_sent_brin,
-                    idx_packets_first_heard_brin,
+                    idx_observations_observer_id,
                     idx_channel_iatas_iata, idx_node_neighbors_node, idx_transport_scopes_fingerprint,
                     idx_meshmapper_channel_members_fingerprint, idx_region_iatas_iata, idx_trace_tags_first_heard]
 
@@ -49,23 +48,20 @@ tiers:
     # The local copy's planner settings, so fixture plans match the reference copy's.
     settings: {effective_cache_size: 5GB, random_page_cost: "1.1", work_mem: 16MB}
   local:
-    search_path: public
+    # overlay/end_state.sql: the big tables and both read models as a migrated database holds them.
+    search_path: "t_end, public"
   prod: {}  # no search_path: the maint pool's own
 
 groups:
-  # These groups plan against an overlay schema on the local copy: packets_global against overlay/packets_global.sql
-  # (packets with its new indexes; nodes and observers as migrated), stats_adverts against overlay/stats_adverts.sql
-  # (packet_observations with the partial adverts index), channel_message_iatas against
-  # overlay/channel_message_iatas.sql (channel_messages with its channel walk index and the read model; its local run
-  # passes --search-path, since its resolvers read the read model too), packet_sites against overlay/packet_sites.sql
-  # (the read model and its state; its local run passes --search-path for the same reason).
-  packets_global: {search_path: {local: "t_s5a, public"}}
-  packet_sites: {search_path: {local: "t_s6a, public"}}
-  channel_message_iatas: {search_path: {local: "t_s4a, public"}}
-  stats_adverts: {search_path: {local: "t_s7a, public"}}
-  # The lookup-table entries plan against overlay/small_tables_end_state.sql (the six tables without their dropped
-  # indexes).
-  small_tables_end_state: {search_path: {local: "t_s10, public"}}
+  # The local tier plans every group on overlay/end_state.sql (tiers.local). The per-change overlays
+  # (packets_global.sql, stats_adverts.sql, channel_message_iatas.sql, packet_sites.sql, small_tables_end_state.sql) stay
+  # as the evidence of their changes and for the diff and storediff cases; they are superseded by end_state.sql for the
+  # local tier.
+  packets_global: {}
+  packet_sites: {}
+  channel_message_iatas: {}
+  stats_adverts: {}
+  small_tables_end_state: {}
 
 statements:
   # Merged statements, text from db/sqlc.
@@ -192,6 +188,15 @@ sort_exempt_sets:
   window_branches:
     - {relation: packets, index: idx_packets_heard_inverted, reason: "branch 2 reads only the inverted rows (partial index)"}
     - {relation: packets, index: idx_packets_type_last_heard, index_cond: "payload_type = ANY", reason: "branch 1's type range is bounded by last_heard_at >= since"}
+    - {relation: packets, index: idx_packets_last_heard, index_cond: "last_heard_at >=", sort: Incremental Sort, reason: "branch 1 reads last_heard_at >= since in order; its Incremental Sort only orders packets that share a last_heard_at"}
+  scope_rare_type:
+    - {relation: packets, index_cond: "payload_type = ANY", sort: Sort, reason: "a rare type in named scopes: the planner ANDs the scope and type indexes, and the Sort holds that type's packets in those scopes"}
+  rare_type_window:
+    - {relation: packets, index: idx_packets_payload_type, index_cond: "payload_type = ANY", sort: Sort, reason: "a rare type: the Sort holds every packet of the type, bounded by how many it has"}
+  since_messages:
+    - {relation: packet_observations, index: idx_observations_packet, sort: Sort, reason: "one probe per message the since range returns"}
+    - {relation: packets, index: packets_pkey, sort: Sort, reason: "one probe per message the since range returns"}
+    - {relation: packets, index: idx_packets_scope, index_cond: "scope_id =", sort: Sort, reason: "the scope's packets, joined to the messages sent since"}
 
 # The shapes a cached statement's entries must cover before gen-policy admits it. A statement with a hop parameter
 # must also cover rare_hop and absent_hop.
@@ -905,8 +910,8 @@ entries:
       driver: [{relation: known_routes, alias: kr, nodes: ["Bitmap Heap Scan", "Index Scan"]}]
       forbid: [{node: "Incremental Sort", reason: "hop-ordered walk of a hop index: hop_count + 0 must keep it out"}]
       sort_exempt: [route_search_top_n]
-      budget: {buffers: 182, planning_ms: 10}
-    note: "measured: 121 B on the full local copy (max over modes)"
+      budget: {buffers: 785, planning_ms: 10}
+    note: "measured: 523 B on the end-state overlay (custom), 1.5x; the earlier 121 B ANDed idx_known_routes_hop_count, which migration 008 drops"
   - id: routes.cross.x_5731
     stmt: GetKnownRoutesByNodes
     shape: "route cross x_5731"
@@ -1492,7 +1497,13 @@ entries:
     expect:
       forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
       budget: {buffers: 38972, planning_ms: 10}
-    known_issue: "since with a scope and no sites (no client sends it): today's statement and this one read the scope's packets through idx_packets_scope, idx_channel_messages_sent_brin and idx_observations_packet, all due to be dropped, and sort them unbounded under the Limit; re-measure before dropping those indexes"
+    mode:
+      custom:
+        degrade_to:
+          forbid: [{node: "Seq Scan", relations: [channel_message_iatas]}]
+          sort_exempt: [since_messages]
+          budget: {buffers: 38972, planning_ms: 10}
+        reason: "since with a scope and no sites (no client sends it): today's statement and this one read the scope's packets through idx_packets_scope (kept) and probe idx_observations_packet and packets_pkey per message, then sort under the Limit; a small table may be read whole"
     note: "measured: 25981 B (custom) on the full local copy; budget 1.5x"
   - id: cmi.allsince.future
     stmt: ListAllChannelMessagesSince
@@ -1500,7 +1511,14 @@ entries:
     params: [{raw: "'2100-01-01 00:00+00'::timestamptz"}, null, 9223372036854775807, 201]
     expect:
       forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-    note: "no worse than today's statement: both stop on the sent_at index; re-measure before the drop of idx_channel_messages_sent_brin"
+    mode:
+      custom:
+        degrade_to:
+          forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+          sort_exempt: [since_messages]
+          budget: {buffers: 3306, planning_ms: 10}
+        reason: "since after every message: the Sort under the Limit is over the probes of idx_observations_packet and packets_pkey for each message the sent_at range returns (none here; the range reads idx_channel_messages_channel, which is kept); today's statement does the same"
+    note: "measured 2,204 B with the index; without it a seq scan of channel_messages (2,908 B), so the index stays"
   - id: cmi.allsince.cursor_3e9
     stmt: ListAllChannelMessagesSince
     shape: "/messages since 10 hours before the newest message, cursor 3e9"
@@ -1524,7 +1542,14 @@ entries:
     params: [{r: cmi_ch}, {raw: "'2100-01-01 00:00+00'::timestamptz"}, {r: cmi_ch_site}, null, 9223372036854775807, 51]
     expect:
       forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
-    note: "no worse than today's statement: both stop on the channel's sent_at index; re-measure before the drop of idx_channel_messages_channel"
+    mode:
+      custom:
+        degrade_to:
+          forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+          sort_exempt: [since_messages]
+          budget: {buffers: 10, planning_ms: 10}
+        reason: "since after every message: the Sort under the Limit is over the probes of idx_observations_packet and packets_pkey for each message the channel's sent_at range returns (none here; the range reads idx_channel_messages_channel, which is kept); today's statement does the same"
+    note: "measured 3 B with the index; without it the channel walk reads 326 B to 42,153 B, so the index stays"
   - id: cmi.sincewalk.plain10h
     stmt: ListChannelMessagesSinceWalk
     shape: "the busiest channel since 10 hours before the newest message, unfiltered"
@@ -3689,6 +3714,13 @@ entries:
     expect:
       driver: [{scope: "CTE page", relation: packets, index: idx_packets_scope_last_heard, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(last_heard_at, packet_hash) <"]}]
       budget: {buffers: 27040, planning_ms: 10}
+    mode:
+      custom:
+        degrade_to:
+          driver: [{scope: "CTE page", relation: packets, nodes: ["Index Only Scan", "Index Scan", "Bitmap Heap Scan"], index_cond: ["scope_id ="]}]
+          sort_exempt: [scope_rare_type]
+          budget: {buffers: 27040, planning_ms: 10}
+        reason: "a rare type in named scopes: the planner may AND idx_packets_scope with a type index and sort the matches, which reads less than the keyset walk (29 B against 170 B for #nl type 14); both indexes are kept"
     note: "measured page CTE 5935 / 8917 B (custom / generic), access Index Only Scan:idx_packets_scope_last_heard; page-CTE budget 25000"
   - id: pk.s_all_pt4
     stmt: ListPacketsByScopesTypes
@@ -3729,6 +3761,14 @@ entries:
     expect:
       driver: [{scope: "CTE page", relation: packets, index: idx_packets_scope_last_heard, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(last_heard_at, packet_hash) <"]}]
       budget: {buffers: 27040, planning_ms: 10}
+    baseline: "unstable: the plan follows sampled statistics (a bitmap AND of the scope and type indexes, or the keyset walk)"
+    mode:
+      custom:
+        degrade_to:
+          driver: [{scope: "CTE page", relation: packets, nodes: ["Index Only Scan", "Index Scan", "Bitmap Heap Scan"], index_cond: ["scope_id ="]}]
+          sort_exempt: [scope_rare_type]
+          budget: {buffers: 27040, planning_ms: 10}
+        reason: "type 12 with route type 2 in 1,258 scopes: depending on sampled statistics the planner ANDs idx_packets_scope with idx_packets_type_last_heard and sorts the matches (4,096 B on the end-state overlay) or walks the keyset (5,922 B)"
     note: "measured page CTE 8611 / 7724 B (custom / generic), access Index Only Scan:idx_packets_scope_last_heard; page-CTE budget 25000"
   - id: pk.s_big0_pt14
     stmt: ListPacketsByScopesTypes
@@ -3737,6 +3777,13 @@ entries:
     expect:
       driver: [{scope: "CTE page", relation: packets, index: idx_packets_scope_last_heard, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(last_heard_at, packet_hash) <"]}]
       budget: {buffers: 27040, planning_ms: 10}
+    mode:
+      custom:
+        degrade_to:
+          driver: [{scope: "CTE page", relation: packets, nodes: ["Index Only Scan", "Index Scan", "Bitmap Heap Scan"], index_cond: ["scope_id ="]}]
+          sort_exempt: [scope_rare_type]
+          budget: {buffers: 27040, planning_ms: 10}
+        reason: "a rare type in named scopes: the planner may AND idx_packets_scope with a type index and sort the matches, which reads less than the keyset walk (29 B against 170 B for #nl type 14); both indexes are kept"
     note: "measured page CTE 8611 / 7724 B (custom / generic), access Index Only Scan:idx_packets_scope_last_heard; page-CTE budget 25000"
   - id: pk.s_big1
     stmt: ListPacketsByScopes
@@ -3769,6 +3816,13 @@ entries:
     expect:
       driver: [{scope: "CTE page", relation: packets, index: idx_packets_scope_last_heard, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(last_heard_at, packet_hash) <"]}]
       budget: {buffers: 7040, planning_ms: 10}
+    mode:
+      custom:
+        degrade_to:
+          driver: [{scope: "CTE page", relation: packets, nodes: ["Index Only Scan", "Index Scan", "Bitmap Heap Scan"], index_cond: ["scope_id ="]}]
+          sort_exempt: [scope_rare_type]
+          budget: {buffers: 7040, planning_ms: 10}
+        reason: "a rare type in named scopes: the planner may AND idx_packets_scope with a type index and sort the matches, which reads less than the keyset walk (29 B against 170 B for #nl type 14); both indexes are kept"
     note: "measured page CTE 52 / 50 B (custom / generic), access Index Only Scan:idx_packets_scope_last_heard; page-CTE budget 5000"
   - id: pk.s_dash_pt4
     stmt: ListPacketsByScopesTypes
@@ -3852,6 +3906,13 @@ entries:
     expect:
       driver: [{scope: "CTE page", relation: packets, index: idx_packets_scope_last_heard, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(last_heard_at, packet_hash) <"]}]
       budget: {buffers: 7040, planning_ms: 10}
+    mode:
+      custom:
+        degrade_to:
+          driver: [{scope: "CTE page", relation: packets, nodes: ["Index Only Scan", "Index Scan", "Bitmap Heap Scan"], index_cond: ["scope_id ="]}]
+          sort_exempt: [scope_rare_type]
+          budget: {buffers: 7040, planning_ms: 10}
+        reason: "a rare type in named scopes: the planner may AND idx_packets_scope with a type index and sort the matches, which reads less than the keyset walk (29 B against 170 B for #nl type 14); both indexes are kept"
     note: "measured page CTE 161 / 161 B (custom / generic), access Index Only Scan:idx_packets_scope_last_heard; page-CTE budget 5000"
   - id: pk.s_nl_pt4rt1
     stmt: ListPacketsByScopesTypes
@@ -4193,6 +4254,14 @@ entries:
       require: [{node: "Index Only Scan", relations: [idx_packets_heard_inverted]}]
       sort_exempt: [window_branches]
       budget: {buffers: 3171, planning_ms: 10}
+    mode:
+      custom:
+        degrade_to:
+          driver: [{scope: "CTE page", relation: packets, nodes: ["Index Only Scan", "Index Scan", "Bitmap Heap Scan"], index_cond: ["payload_type = ANY"]}]
+          require: [{node: "Index Only Scan", relations: [idx_packets_heard_inverted]}]
+          sort_exempt: [window_branches, rare_type_window]
+          budget: {buffers: 3171, planning_ms: 10}
+        reason: "a rare type: the planner may read every packet of the type through idx_packets_payload_type, which is kept, and sort them (733 rows, 1,274 B on the end-state overlay) instead of the type range by last_heard_at (1,286 B)"
     note: "measured at server defaults page CTE 754 / 233316 B (custom / generic), access IOS:idx_packets_heard_inverted, IS:idx_packets_type_last_heard; page-CTE budget 1131"
   - id: pk.w_pt4rt1_tied
     stmt: ListPacketsWindow
@@ -4457,7 +4526,9 @@ entries:
     shape: "the full DeleteOldPackets statement (plain EXPLAIN)"
     params: ["2026-10-15 17:30:00+00", 10000]
     expect:
-      driver: [{relation: packets, alias: vp, index: idx_packets_last_heard_hash, index_cond: ["last_heard_at <"]}]
+      # idx_packets_last_heard stays (window pages read it), so the locking form may still walk it, as today; its
+      # Incremental Sort only orders packets that share a last_heard_at.
+      driver: [{relation: packets, alias: vp, any_index: [idx_packets_last_heard_hash, idx_packets_last_heard], index_cond: ["last_heard_at <"]}]
 
   # ---- planted regressions: earlier statements that must be reported ----
   # 1. ListKnownRoutes as of 202acc6, judged by the end-state entry's expectations.

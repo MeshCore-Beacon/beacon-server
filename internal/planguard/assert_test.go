@@ -107,6 +107,8 @@ func sortCorpus() *planguard.Corpus {
 			"site_probe_wrong_index": {{
 				Relation: "packet_sites", Index: "idx_packet_sites_site", IndexCond: "packet_hash = ps.packet_hash",
 			}},
+			"site_probe_under_sort":        {{Relation: "packet_sites", IndexCond: "packet_hash = ps.packet_hash", Sort: "Sort"}},
+			"site_probe_under_incremental": {{Relation: "packet_sites", IndexCond: "packet_hash = ps.packet_hash", Sort: "Incremental Sort"}},
 		},
 	}
 }
@@ -136,6 +138,11 @@ func TestSortExemptionScopedToScanPattern(t *testing.T) {
 
 	// A pattern's index must match too: one naming the wrong index exempts nothing.
 	ch = c.Assess(loadPlan(t, "bysites_ok.json"), &planguard.Expect{SortExempt: []string{"site_probe_wrong_index"}}, false)
+	wantKinds(t, ch, planguard.FailSortAboveLimit)
+
+	// A pattern with a sort type exempts the scan only under that sort node: the probe sits under a plain Sort.
+	wantKinds(t, c.Assess(loadPlan(t, "bysites_ok.json"), &planguard.Expect{SortExempt: []string{"site_probe_under_sort"}}, false))
+	ch = c.Assess(loadPlan(t, "bysites_ok.json"), &planguard.Expect{SortExempt: []string{"site_probe_under_incremental"}}, false)
 	wantKinds(t, ch, planguard.FailSortAboveLimit)
 
 	// The defaults set alone covers the latest-observation LATERAL; dropping it fails that scan.

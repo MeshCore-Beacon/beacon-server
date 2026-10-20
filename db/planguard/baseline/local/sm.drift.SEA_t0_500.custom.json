@@ -1,0 +1,12 @@
+[
+ "Sort",
+ "  Subquery Scan",
+ "    Limit [Subquery]",
+ "      Sort",
+ "        Seq Scan on nodes n_1",
+ "          Bitmap Heap Scan on node_iatas [SubPlan]",
+ "            Bitmap Index Scan using idx_node_iatas_iata",
+ "    Aggregate partial=Simple [SubPlan]",
+ "      Sort",
+ "        Index Scan on node_iatas ni using node_iatas_pkey scan=Forward"
+]

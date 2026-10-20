@@ -214,7 +214,7 @@ func (p ScanPattern) matches(n Node) bool {
 // assessSortAboveLimit fails a Sort or Incremental Sort that a Limit reaches through pass-through nodes when its
 // input holds a big-table scan no Limit bounds. A Limit bounds the rows its subtree returns, not the rows a
 // SubPlan or InitPlan below it is run for, so the bound stops at those. A scan matching a sort-exempt pattern is
-// exempt; the exemption covers that scan only.
+// exempt; the exemption covers that scan only, and a pattern with a sort type covers it only under that sort node.
 func (c *Corpus) assessSortAboveLimit(ch *Check, root Node, exempt []ScanPattern) {
 	walk(root, func(n Node, path []Node) {
 		t := n.str("Node Type")
@@ -232,7 +232,7 @@ func (c *Corpus) assessSortAboveLimit(ch *Check, root Node, exempt []ScanPattern
 				bounded = true
 			}
 			if isScan(mt) && !bounded && slices.Contains(c.Defaults.BigTables, m.str("Relation Name")) &&
-				!slices.ContainsFunc(exempt, func(p ScanPattern) bool { return p.matches(m) }) {
+				!slices.ContainsFunc(exempt, func(p ScanPattern) bool { return (p.Sort == "" || p.Sort == t) && p.matches(m) }) {
 				ixs := indexesOf(m)
 				bad = append(bad, m.str("Relation Name")+"/"+strings.Join(ixs, "+"))
 				badIxs = appendNew(badIxs, ixs...)

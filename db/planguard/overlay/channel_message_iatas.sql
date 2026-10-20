@@ -1,6 +1,7 @@
 -- Copyright 2026 Beacon Contributors
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- Superseded by end_state.sql for the local tier; kept as the evidence of its change and for its diff cases.
 -- Overlay for the local-copy tier of the channel_message_iatas group, diff/channel_message_iatas.yaml and
 -- storediff/channel_message_iatas.yaml: it builds t_s4a; it never writes public. It holds
 --   t_s4a.channel_messages       a copy of public's in its physical order, with every index public has plus

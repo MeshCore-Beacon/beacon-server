@@ -1,6 +1,7 @@
 -- Copyright 2026 Beacon Contributors
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- Superseded by end_state.sql for the local tier; kept as the evidence of its change and for its diff cases.
 -- Overlay for the local-copy tier of the stats_adverts group and for diff/stats_adverts.yaml, built in the schema
 -- t_s7a from public: packet_observations with the columns the adverts statements read and the observer indexes it
 -- has between the partial adverts index (migration 034) and the drop of idx_observations_observer_id: the pkey,
