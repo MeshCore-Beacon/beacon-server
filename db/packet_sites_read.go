@@ -4,6 +4,7 @@
 package db
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log/slog"
@@ -42,15 +43,15 @@ const (
 // siteTypedPairs is the most (payload type, route type) pairs the typed statement walks as separate ranges: it reads
 // at most siteTypedPairs x (limit+1) entries per site, no more than one bounded read. More pairs read each site
 // range once, bounded, instead.
-const siteTypedPairs = siteScanDepthPerRow
+const siteTypedPairs = 8
 
 // siteScanDepthPerRow is how many entries of each range the bounded statements read per page row, as deep as the
 // observation statement reads each site's observations.
-const siteScanDepthPerRow = 8
+var siteScanDepthPerRow int32 = 8 // a var only so tests can shrink the reads
 
 // siteBoundedRounds is how many bounded reads one request makes before today's statement answers it instead: a
 // filter that matches little keeps reading from the floor until the page is full, within this budget.
-const siteBoundedRounds = 8
+var siteBoundedRounds = 8 // a var only so tests can shrink the budget
 
 // errSiteBudget means the bounded reads of one request ran out of their budget before the page was full.
 var errSiteBudget = errors.New("bounded region reads exhausted their budget")
@@ -225,7 +226,15 @@ func (s *Store) listPacketsByRegion(ctx context.Context, payloadTypes, routeType
 	rows, keys, err := listSiteRows(ctx, s.q, f, dedupeSites(iatas))
 	if errors.Is(err, errSiteBudget) {
 		slog.Debug("region page: bounded reads ran out of budget; the original statement answers", "component", "db", "sites", len(iatas))
-		return legacy()
+		switch {
+		case pageCursor != nil:
+			// From the page cursor's exact position, so the walk keeps every row once.
+			return s.listPacketsByIATAsAfter(ctx, payloadTypes, routeTypes, iatas, scopes, since, until, f.cursorTS, f.cursorHash, limit)
+		case cursor <= 0:
+			// Page 1: from the top, with an exact next cursor, so the walk can stay exact.
+			return s.listPacketsByIATAsAfter(ctx, payloadTypes, routeTypes, iatas, scopes, since, until, f.cursorTS, f.cursorHash, limit)
+		}
+		return legacy() // a millisecond cursor alone: today's behaviour
 	}
 	if err != nil {
 		return api.PacketPage{}, err
@@ -250,3 +259,71 @@ func (s *Store) listPacketsByRegion(ctx context.Context, payloadTypes, routeType
 	}
 	return page, nil
 }
+
+// listPacketsByIATAsAfter is today's region statement from an exact page cursor position. It pages on by the exact
+// key: a full page ends at its last row; a page today's scan cut short ends at its scan floor, whose own millisecond
+// rows it leaves to the next page, which starts just above that floor.
+func (s *Store) listPacketsByIATAsAfter(ctx context.Context, payloadTypes, routeTypes []int16, iatas, scopes []string, since, until time.Time, cursorTS pgtype.Timestamptz, cursorHash []byte, limit int32) (api.PacketPage, error) {
+	var sinceTS, untilTS pgtype.Timestamptz
+	if !since.IsZero() {
+		sinceTS = pgtype.Timestamptz{Time: since, Valid: true}
+	}
+	if !until.IsZero() {
+		untilTS = pgtype.Timestamptz{Time: until, Valid: true}
+	}
+	r, err := s.q.ListPacketsByIATAsAfter(ctx, sqlc.ListPacketsByIATAsAfterParams{
+		Iatas: iatas, CursorTs: cursorTS, CursorHash: cursorHash, PayloadTypes: payloadTypes,
+		RouteTypes: routeTypes, SinceTs: sinceTS, UntilTs: untilTS, ScopeNames: scopes, ScanDepth: (limit + 1) * 8, PageLimit: limit + 1,
+	})
+	if err != nil {
+		return api.PacketPage{}, err
+	}
+	var next *api.PacketCursor
+	hasMore := len(r) > int(limit)
+	if hasMore {
+		r = r[:limit]
+	}
+	if len(r) > 0 && r[0].ScanSaturated && r[0].ScanFloor.Valid {
+		// The scan stopped at its floor: keys above it are complete, keys at it may not be. Today's statement says
+		// more from here; the rows at the floor move to the next page, which starts at the floor's microsecond above
+		// every hash.
+		floor := r[0].ScanFloor.Time
+		kept := r
+		for len(kept) > 0 && !kept[len(kept)-1].SiteHeardAt.Time.After(floor) {
+			kept = kept[:len(kept)-1]
+		}
+		switch {
+		case len(kept) == 0:
+			hasMore = true // every row sits at the floor: page on from the last one
+		case len(kept) < len(r) || !hasMore:
+			r, hasMore = kept, true
+			next = &api.PacketCursor{At: floor, Hash: bytes.Repeat([]byte{0xff}, maxCursorHashBytes)}
+		}
+	}
+	if hasMore && next == nil && len(r) > 0 {
+		last := r[len(r)-1]
+		next = &api.PacketCursor{At: last.SiteHeardAt.Time, Hash: last.PacketHash}
+	}
+	packetRows := make([]packetRow, len(r))
+	for i, x := range r {
+		packetRows[i] = packetRow{
+			PacketHash: x.PacketHash, PayloadType: x.PayloadType, Summary: x.Summary, RouteType: x.RouteType,
+			FirstHeardAt: x.FirstHeardAt, LastHeardAt: x.LastHeardAt, ScopeID: x.ScopeID, ScopeName: x.ScopeName,
+			ObservationCount: x.ObservationCount, LatestObserverID: x.LatestObserverID, LatestObserverName: x.LatestObserverName,
+			LatestObserverIata: x.LatestObserverIata, LatestObserverPathLengthByte: x.LatestObserverPathLengthByte,
+			LatestObserverHashSize: x.LatestObserverHashSize, LatestObserverHopCount: x.LatestObserverHopCount,
+			LatestObserverPathBytes: x.LatestObserverPathBytes, RawPayload: x.RawPayload, OriginPubkey: x.OriginPubkey,
+		}
+	}
+	page := api.PacketPage{Page: api.Page[api.PacketSummary]{Items: s.packetSummaries(ctx, packetRows), HasMore: hasMore}}
+	if hasMore && next != nil {
+		ms := next.At.UnixMilli()
+		str := next.String()
+		page.NextCursor = &ms
+		page.NextPageCursor = &str
+	}
+	return page, nil
+}
+
+// maxCursorHashBytes is a hash longer than any stored one: (floor, that) sorts above every key at floor.
+const maxCursorHashBytes = 64

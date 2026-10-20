@@ -349,6 +349,12 @@ type Querier interface {
 	// A site that filled scan_depth still has unread history below its floor.
 	// The newest such floor is the point above which every site is covered.
 	ListPacketsByIATAs(ctx context.Context, arg ListPacketsByIATAsParams) ([]ListPacketsByIATAsRow, error)
+	// ListPacketsByIATAs from an exact (site_heard_at, packet_hash) position instead of a millisecond: a region page
+	// cursor's continuation when the site read model's bounded reads ran out of budget. The scan includes the cursor's
+	// microsecond, the page keeps the keys below the position, and ties come out packet_hash DESC.
+	// A site that filled scan_depth still has unread history below its floor.
+	// The newest such floor is the point above which every site is covered.
+	ListPacketsByIATAsAfter(ctx context.Context, arg ListPacketsByIATAsAfterParams) ([]ListPacketsByIATAsAfterRow, error)
 	// One range per named scope; a zero-hit scope costs a single index probe.
 	ListPacketsByScopes(ctx context.Context, arg ListPacketsByScopesParams) ([]ListPacketsByScopesRow, error)
 	// ListPacketsByScopes with the type tests inside each scope range (index-only through the included columns).

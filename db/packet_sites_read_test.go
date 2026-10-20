@@ -226,30 +226,68 @@ func TestListPacketsRegionBoundedContinues(t *testing.T) {
 	}
 }
 
-// When the bounded reads of one request run out of their budget before the page is full, today's statement answers
-// the request.
+// When the bounded reads of one request run out of their budget before the page is full, today's statement answers:
+// from the page cursor's exact position when the request carried one (or from the top on page 1), with the exact
+// next cursor; with a millisecond cursor alone, exactly as today.
 func TestListPacketsRegionBoundedFallsBack(t *testing.T) {
 	t0 := time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC)
 	pc := &api.PacketCursor{At: t0.Add(-time.Hour + 123*time.Microsecond), Hash: []byte{1}}
-	ctrl := gomock.NewController(t)
-	mock := mockdb.NewMockQuerier(ctrl)
-	mock.EXPECT().FilterKnownSites(gomock.Any(), gomock.Any()).Return([]string{"AAA"}, nil)
-	calls := 0
-	mock.EXPECT().ListPacketsBySitesSince(gomock.Any(), gomock.Any()).Times(siteBoundedRounds).DoAndReturn(
-		func(_ context.Context, p sqlc.ListPacketsBySitesSinceParams) ([]sqlc.ListPacketsBySitesSinceRow, error) {
-			calls++
-			return []sqlc.ListPacketsBySitesSinceRow{sinceFloor(t0.Add(-time.Duration(calls)*24*time.Hour), byte(calls))}, nil
-		})
-	mock.EXPECT().ListPacketsByIATAs(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsByIATAsParams) bool {
-		return p.CursorTs.Time.Equal(time.UnixMilli(pc.At.UnixMilli())) && p.ScanDepth == 6*8 && p.PageLimit == 6 &&
-			slices.Equal(p.PayloadTypes, []int16{4, 5}) && p.SinceTs.Valid
-	})).Return([]sqlc.ListPacketsByIATAsRow{{PacketHash: []byte{2}, SiteHeardAt: pgtype.Timestamptz{Time: t0.Add(-2 * time.Hour), Valid: true}}}, nil)
-	s := &Store{q: mock}
-	WithReadModels(earnedPacketSites())(s)
-	page, err := s.ListPackets(context.Background(), []int16{4, 5}, nil, []string{"AAA"}, nil, t0.Add(-48*time.Hour), time.Time{}, 0, pc, 5)
-	if err != nil || len(page.Items) != 1 || page.HasMore || page.NextPageCursor != nil {
-		t.Fatalf("fallback page %+v, %v", page, err)
+	exhausted := func(mock *mockdb.MockQuerier) {
+		mock.EXPECT().FilterKnownSites(gomock.Any(), gomock.Any()).Return([]string{"AAA"}, nil)
+		calls := 0
+		mock.EXPECT().ListPacketsBySitesSince(gomock.Any(), gomock.Any()).Times(siteBoundedRounds).DoAndReturn(
+			func(_ context.Context, p sqlc.ListPacketsBySitesSinceParams) ([]sqlc.ListPacketsBySitesSinceRow, error) {
+				calls++
+				return []sqlc.ListPacketsBySitesSinceRow{sinceFloor(t0.Add(-time.Duration(calls)*24*time.Hour), byte(calls))}, nil
+			})
 	}
+	row := func(at time.Time, h byte) sqlc.ListPacketsByIATAsAfterRow {
+		return sqlc.ListPacketsByIATAsAfterRow{PacketHash: []byte{h}, SiteHeardAt: pgtype.Timestamptz{Time: at, Valid: true}}
+	}
+	for _, tc := range []struct {
+		name   string
+		pc     *api.PacketCursor
+		wantTS pgtype.Timestamptz
+		wantH  []byte
+	}{
+		{"page cursor", pc, pgtype.Timestamptz{Time: pc.At, Valid: true}, pc.Hash},
+		{"page 1", nil, infinityTS, []byte{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			mock := mockdb.NewMockQuerier(ctrl)
+			exhausted(mock)
+			mock.EXPECT().ListPacketsByIATAsAfter(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsByIATAsAfterParams) bool {
+				return p.CursorTs == tc.wantTS && bytes.Equal(p.CursorHash, tc.wantH) && p.ScanDepth == 6*8 && p.PageLimit == 6 &&
+					slices.Equal(p.PayloadTypes, []int16{4, 5}) && p.SinceTs.Valid
+			})).Return([]sqlc.ListPacketsByIATAsAfterRow{
+				row(t0.Add(-2*time.Hour), 6), row(t0.Add(-3*time.Hour), 5), row(t0.Add(-4*time.Hour), 4),
+				row(t0.Add(-5*time.Hour), 3), row(t0.Add(-6*time.Hour), 2), row(t0.Add(-7*time.Hour), 1),
+			}, nil)
+			s := &Store{q: mock}
+			WithReadModels(earnedPacketSites())(s)
+			page, err := s.ListPackets(context.Background(), []int16{4, 5}, nil, []string{"AAA"}, nil, t0.Add(-48*time.Hour), time.Time{}, 0, tc.pc, 5)
+			want := api.PacketCursor{At: t0.Add(-6 * time.Hour), Hash: []byte{2}}.String()
+			if err != nil || len(page.Items) != 5 || !page.HasMore || page.NextPageCursor == nil || *page.NextPageCursor != want {
+				t.Fatalf("fallback page %+v, %v", page, err)
+			}
+		})
+	}
+	t.Run("millisecond cursor", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		mock := mockdb.NewMockQuerier(ctrl)
+		exhausted(mock)
+		const cursor = int64(1792442625019)
+		mock.EXPECT().ListPacketsByIATAs(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsByIATAsParams) bool {
+			return p.CursorTs.Time.Equal(time.UnixMilli(cursor)) && p.ScanDepth == 6*8 && p.PageLimit == 6
+		})).Return([]sqlc.ListPacketsByIATAsRow{{PacketHash: []byte{2}, SiteHeardAt: pgtype.Timestamptz{Time: t0.Add(-2 * time.Hour), Valid: true}}}, nil)
+		s := &Store{q: mock}
+		WithReadModels(earnedPacketSites())(s)
+		page, err := s.ListPackets(context.Background(), []int16{4, 5}, nil, []string{"AAA"}, nil, t0.Add(-48*time.Hour), time.Time{}, cursor, nil, 5)
+		if err != nil || len(page.Items) != 1 || page.HasMore || page.NextPageCursor != nil {
+			t.Fatalf("fallback page %+v, %v", page, err)
+		}
+	})
 }
 
 // hasMore counts the keys: a packet removed between the keys and their rows does not end the walk.

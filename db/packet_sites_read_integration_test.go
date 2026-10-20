@@ -690,16 +690,17 @@ func TestPacketsBySitesBoundedPostgres(t *testing.T) {
 		return rec.names, page
 	}
 	// limit 50: 8 reads of 408 entries cover AAA's rows; the reads end with no floor.
-	if aaa >= siteBoundedRounds*51*siteScanDepthPerRow || aaa <= 6*siteScanDepthPerRow*siteBoundedRounds {
+	if per := int(siteScanDepthPerRow); aaa >= siteBoundedRounds*51*per || aaa <= 6*per*siteBoundedRounds {
 		t.Fatalf("fixture AAA holds %d rows; the test needs it between the two budgets", aaa)
 	}
 	names, page := run(50)
 	if len(page.Items) != 0 || page.HasMore || slices.Contains(names, "ListPacketsByIATAs") || strings.Count(strings.Join(names, ","), "ListPacketsBySitesSince") < 2 {
 		t.Fatalf("limit 50: %+v, statements %v", page, names)
 	}
-	// limit 5: 8 reads of 48 entries do not reach AAA's end: today's statement answers (an empty page, no more).
+	// limit 5: 8 reads of 48 entries do not reach AAA's end: today's statement answers page 1 from the top (an empty
+	// page, no more).
 	names, page = run(5)
-	if len(page.Items) != 0 || page.HasMore || page.NextPageCursor != nil || !slices.Contains(names, "ListPacketsByIATAs") ||
+	if len(page.Items) != 0 || page.HasMore || page.NextPageCursor != nil || !slices.Contains(names, "ListPacketsByIATAsAfter") ||
 		strings.Count(strings.Join(names, ","), "ListPacketsBySitesSince") != siteBoundedRounds {
 		t.Fatalf("limit 5: %+v, statements %v", page, names)
 	}
@@ -709,7 +710,7 @@ func TestPacketsBySitesBoundedPostgres(t *testing.T) {
 		f.walk(f.trusted(f.pool), f.pool, some, limit)
 	}
 	const limit = 5
-	depth := (limit + 1) * siteScanDepthPerRow
+	depth := (limit + 1) * int(siteScanDepthPerRow)
 	s := f.trusted(f.pool)
 	future := siteReq{sites: []string{"AAA", "BBB"}, since: time.Now().Add(24 * time.Hour)}
 	if page, _ := f.page(s, future, 0, nil, limit); len(page.Items) != 0 || page.HasMore {
@@ -770,4 +771,91 @@ type queryRecorder struct {
 func (r *queryRecorder) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
 	*r.text = sql
 	return nil, pgx.ErrNoRows
+}
+
+// A walk by pageCursor whose read budget runs out on some pages, with matching rows several to a millisecond: the
+// pages today's statement answers continue from the page cursor's exact position, so every truth row comes back
+// exactly once and in order.
+func TestPacketsBySitesFallbackKeepsPageCursorPostgres(t *testing.T) {
+	f := &siteFixture{psFixture: newPsFixture(t), usTie: map[string]bool{}}
+	f.exec("INSERT INTO iata_codes (iata) VALUES ('TTT'), ('TTU') ON CONFLICT DO NOTHING")
+	// 60 groups: three matching packets (payload 5, route 3) in one millisecond, then nine that do not match. At TTU
+	// each matching packet is heard by six observers, so today's scan saturates and pages end at its floor.
+	for g := range 60 {
+		base := psT0.Add(time.Duration(g) * time.Second)
+		for k := range 12 {
+			i := g*12 + k
+			pt, rt, at := int16(6), int16(0), base.Add(time.Duration(1+k)*time.Millisecond)
+			if k < 3 {
+				pt, rt, at = 5, 3, base.Add(time.Duration(100*(k+1))*time.Microsecond)
+			}
+			h := psHash(20_000 + i)
+			f.exec(`INSERT INTO packets (packet_hash, payload_type, payload_version, route_type, raw_payload, raw_header, first_heard_at, last_heard_at, observation_count)
+VALUES ($1, $2, 0, $3, '\x00', '\x11', $4, $4, 0)`, h, pt, rt, at)
+			f.sited(psObs(h, 1, "TTT", at))
+			if k < 3 {
+				for o := 2; o <= 7; o++ {
+					f.sited(psObs(h, o, "TTU", at.Add(-time.Duration(o)*time.Microsecond)))
+				}
+			} else {
+				f.sited(psObs(h, 2, "TTU", at))
+			}
+		}
+	}
+	defer func(rounds int, depth int32) { siteBoundedRounds, siteScanDepthPerRow = rounds, depth }(siteBoundedRounds, siteScanDepthPerRow)
+	siteBoundedRounds, siteScanDepthPerRow = 1, 1
+	rec := &recordingDBTX{DBTX: f.pool}
+	s := f.trusted(rec)
+	for _, sites := range [][]string{{"TTT"}, {"TTU"}, {"TTT", "TTU"}} {
+		// Nine type pairs: the bounded form, which with a one-read budget often hands the page to today's statement.
+		r := siteReq{sites: sites, pt: []int16{0, 1, 2, 3, 4, 5, 6, 7, 8}, rt: []int16{3}}
+		all := f.truth(f.pool, r, time.Time{}, nil, 100_000)
+		if len(all) != 180 {
+			t.Fatalf("truth holds %d rows, want 180", len(all))
+		}
+		for _, limit := range []int32{1, 2, 4} {
+			rec.names = nil
+			var got []string
+			var pc *api.PacketCursor
+			var cursor int64
+			for n := 0; n < 1000; n++ {
+				page, err := s.ListPackets(f.ctx, r.pt, r.rt, r.sites, nil, time.Time{}, time.Time{}, cursor, pc, limit)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, it := range page.Items {
+					got = append(got, it.PacketHash)
+				}
+				if !page.HasMore {
+					break
+				}
+				// As the clients do: the page cursor when the page has one, else the millisecond cursor.
+				if page.NextPageCursor != nil {
+					pc, _ = api.ParsePacketCursor(*page.NextPageCursor)
+					cursor = 0
+				} else {
+					pc, cursor = nil, *page.NextCursor
+				}
+			}
+			if !slices.Contains(rec.names, "ListPacketsByIATAs") && !slices.Contains(rec.names, "ListPacketsByIATAsAfter") {
+				t.Fatalf("%v limit %d: the budget never ran out", sites, limit)
+			}
+			want := make([]string, len(all))
+			for i, k := range all {
+				want[i] = k.hash
+			}
+			if !slices.Equal(got, want) {
+				t.Fatalf("%v limit %d: walk returned %d rows, truth %d; first difference at %d", sites, limit, len(got), len(want), firstDiff(got, want))
+			}
+		}
+	}
+}
+
+func firstDiff(a, b []string) int {
+	for i := range min(len(a), len(b)) {
+		if a[i] != b[i] {
+			return i
+		}
+	}
+	return min(len(a), len(b))
 }
