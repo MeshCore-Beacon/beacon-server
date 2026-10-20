@@ -7,6 +7,7 @@ package metrics
 
 import (
 	"net/http"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -203,11 +204,12 @@ func SetPgActivity(a PgActivity) {
 type SequenceUse struct {
 	Name      string
 	UsedRatio float64
+	Cycle     bool // a CYCLE sequence wraps to its start: its ratio is its position, not used-up headroom
 }
 
 var sequenceUsedDesc = prometheus.NewDesc("beacon_db_sequence_used_ratio",
-	"Share of a sequence's usable values already handed out (its own limit or its column type's, whichever is lower).",
-	[]string{"sequence"}, nil)
+	"Share of a sequence's usable values already handed out (its own limit or its column type's, whichever is lower). cycle=\"true\" marks a CYCLE sequence, which wraps: its ratio is a position, not used-up headroom.",
+	[]string{"sequence", "cycle"}, nil)
 
 // sequenceCollector emits the last SequenceUse snapshot; it emits nothing until SetSequenceUse has been called.
 type sequenceCollector struct {
@@ -222,7 +224,7 @@ func (c *sequenceCollector) Collect(ch chan<- prometheus.Metric) {
 		return
 	}
 	for _, s := range *seqs {
-		ch <- prometheus.MustNewConstMetric(sequenceUsedDesc, prometheus.GaugeValue, s.UsedRatio, s.Name)
+		ch <- prometheus.MustNewConstMetric(sequenceUsedDesc, prometheus.GaugeValue, s.UsedRatio, s.Name, strconv.FormatBool(s.Cycle))
 	}
 }
 

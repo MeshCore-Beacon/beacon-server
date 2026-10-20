@@ -154,18 +154,20 @@ func (s *Store) UnusedIndexes(ctx context.Context) ([]UnusedIndex, error) {
 
 // listSequenceUse is each sequence of the current schema and the share of its usable range already handed out. The
 // range ends at the sequence's own limit or its owning column's type limit (smallint, integer), whichever is
-// tighter; a descending sequence counts from its top. last_value is NULL for a sequence never called.
+// tighter; a descending sequence counts from its top. last_value is NULL for a sequence never called. A CYCLE
+// sequence is reported by position and flagged. The schema is joined by name, so any schema name works.
 const listSequenceUse = `-- name: ListSequenceUse :many
 WITH seq AS (
-  SELECT s.sequencename::text AS name, s.min_value, s.max_value, s.increment_by, s.last_value,
+  SELECT s.sequencename::text AS name, s.min_value, s.max_value, s.increment_by, s.last_value, s.cycle,
          max(CASE format_type(a.atttypid, NULL) WHEN 'smallint' THEN 32767 WHEN 'integer' THEN 2147483647 END) AS col_max
   FROM pg_sequences s
-  JOIN pg_class c ON c.relname = s.sequencename AND c.relnamespace = s.schemaname::regnamespace
+  JOIN pg_namespace n ON n.nspname = s.schemaname
+  JOIN pg_class c ON c.relname = s.sequencename AND c.relnamespace = n.oid
   LEFT JOIN pg_depend d ON d.classid = 'pg_class'::regclass AND d.objid = c.oid
                        AND d.refclassid = 'pg_class'::regclass AND d.deptype IN ('a', 'i')
   LEFT JOIN pg_attribute a ON a.attrelid = d.refobjid AND a.attnum = d.refobjsubid
   WHERE s.schemaname = current_schema()
-  GROUP BY 1, 2, 3, 4, 5
+  GROUP BY 1, 2, 3, 4, 5, 6
 )
 SELECT name,
        COALESCE(CASE WHEN last_value IS NULL THEN 0
@@ -173,7 +175,8 @@ SELECT name,
               (last_value - min_value)::numeric / NULLIF(LEAST(max_value, COALESCE(col_max, max_value)) - min_value, 0)
             ELSE
               (max_value - last_value)::numeric / NULLIF(max_value - GREATEST(min_value, COALESCE(-col_max - 1, min_value)), 0)
-       END, 0)::float8 AS used_ratio
+       END, 0)::float8 AS used_ratio,
+       cycle
 FROM seq
 ORDER BY name`
 
@@ -185,7 +188,7 @@ func (s *Store) SequenceUse(ctx context.Context) ([]metrics.SequenceUse, error) 
 	}
 	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (metrics.SequenceUse, error) {
 		var u metrics.SequenceUse
-		err := r.Scan(&u.Name, &u.UsedRatio)
+		err := r.Scan(&u.Name, &u.UsedRatio, &u.Cycle)
 		return u, err
 	})
 }

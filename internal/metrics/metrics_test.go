@@ -109,16 +109,16 @@ func TestSequenceCollector(t *testing.T) {
 	if n := count(); n != 0 {
 		t.Fatalf("%d series before any snapshot", n)
 	}
-	SetSequenceUse([]SequenceUse{{Name: "channels_id_seq", UsedRatio: 0.021}, {Name: "regions_id_seq", UsedRatio: 0}})
+	SetSequenceUse([]SequenceUse{{Name: "channels_id_seq", UsedRatio: 0.021}, {Name: "regions_id_seq", UsedRatio: 0, Cycle: true}})
 	out := scrape(t)
-	for _, want := range []string{`beacon_db_sequence_used_ratio{sequence="channels_id_seq"} 0.021`, `beacon_db_sequence_used_ratio{sequence="regions_id_seq"} 0`} {
+	for _, want := range []string{`beacon_db_sequence_used_ratio{cycle="false",sequence="channels_id_seq"} 0.021`, `beacon_db_sequence_used_ratio{cycle="true",sequence="regions_id_seq"} 0`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("scrape lacks %q", want)
 		}
 	}
 	SetSequenceUse([]SequenceUse{{Name: "channels_id_seq", UsedRatio: 0.03}})
 	out = scrape(t)
-	if !strings.Contains(out, `beacon_db_sequence_used_ratio{sequence="channels_id_seq"} 0.03`) || strings.Contains(out, "regions_id_seq") {
+	if !strings.Contains(out, `beacon_db_sequence_used_ratio{cycle="false",sequence="channels_id_seq"} 0.03`) || strings.Contains(out, "regions_id_seq") {
 		t.Errorf("after the second snapshot:\n%s", out)
 	}
 }

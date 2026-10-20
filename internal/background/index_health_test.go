@@ -157,10 +157,10 @@ func TestPgStatsTaskSequences(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := testutil.GatherAndCompare(metrics.Registry, strings.NewReader(`
-# HELP beacon_db_sequence_used_ratio Share of a sequence's usable values already handed out (its own limit or its column type's, whichever is lower).
+# HELP beacon_db_sequence_used_ratio Share of a sequence's usable values already handed out (its own limit or its column type's, whichever is lower). cycle="true" marks a CYCLE sequence, which wraps: its ratio is a position, not used-up headroom.
 # TYPE beacon_db_sequence_used_ratio gauge
-beacon_db_sequence_used_ratio{sequence="channels_id_seq"} 0.25
-beacon_db_sequence_used_ratio{sequence="regions_id_seq"} 0
+beacon_db_sequence_used_ratio{cycle="false",sequence="channels_id_seq"} 0.25
+beacon_db_sequence_used_ratio{cycle="false",sequence="regions_id_seq"} 0
 `), "beacon_db_sequence_used_ratio"); err != nil {
 		t.Error(err)
 	}
