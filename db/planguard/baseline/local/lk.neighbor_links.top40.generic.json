@@ -1,0 +1,6 @@
+[
+ "Bitmap Heap Scan on node_neighbors",
+ "  BitmapOr",
+ "    Bitmap Index Scan using node_neighbors_pkey",
+ "    Bitmap Index Scan using node_neighbors_pkey"
+]

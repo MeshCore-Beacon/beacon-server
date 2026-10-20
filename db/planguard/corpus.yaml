@@ -39,7 +39,9 @@ defaults:
   retired_indexes: [idx_known_routes_iata_last_seen, idx_known_routes_last_seen, idx_known_routes_hop_count, idx_known_routes_reconfirm,
                     idx_packets_last_heard, idx_packets_payload_type, idx_packets_route_type, idx_packets_scope,
                     idx_observations_packet, idx_observations_observer_id, idx_channel_messages_channel, idx_channel_messages_sent_brin,
-                    idx_packets_first_heard_brin]
+                    idx_packets_first_heard_brin,
+                    idx_channel_iatas_iata, idx_node_neighbors_node, idx_transport_scopes_fingerprint,
+                    idx_meshmapper_channel_members_fingerprint, idx_region_iatas_iata, idx_trace_tags_first_heard]
 
 tiers:
   fixture:
@@ -61,6 +63,9 @@ groups:
   packet_sites: {search_path: {local: "t_s6a, public"}}
   channel_message_iatas: {search_path: {local: "t_s4a, public"}}
   stats_adverts: {search_path: {local: "t_s7a, public"}}
+  # The lookup-table entries plan against overlay/small_tables_end_state.sql (the six tables without their dropped
+  # indexes).
+  small_tables_end_state: {search_path: {local: "t_s10, public"}}
 
 statements:
   # Merged statements, text from db/sqlc.
@@ -73,6 +78,9 @@ statements:
   GetNodeByID: {sqlc: GetNodeByID, plan: cached, admission: by_id}
   ListChannels: {sqlc: ListChannels, plan: custom}
   ListChannelsAfter: {sqlc: ListChannelsAfter, plan: custom}
+  GetNodeNeighbors: {sqlc: GetNodeNeighbors, group: small_tables_end_state, plan: custom}
+  GetScopeByName: {sqlc: GetScopeByName, plan: custom}
+  GetNeighborLinks: {sqlc: GetNeighborLinks, group: small_tables_end_state, plan: custom}
   GetStatsClockDrift: {sqlc: GetStatsClockDrift, plan: custom}
   GetStatsNodeTypesAll: {sqlc: GetStatsNodeTypesAll, plan: custom}
   GetStatsNodeTypesByIATAs: {sqlc: GetStatsNodeTypesByIATAs, plan: custom}
@@ -328,6 +336,15 @@ resolvers:
   small_bogus5000: "SELECT array_agg(c ORDER BY c) FROM (SELECT c FROM (SELECT chr(65 + a) || chr(65 + b) || chr(65 + d) c FROM generate_series(0, 25) a, generate_series(0, 25) b, generate_series(0, 25) d) g WHERE c NOT IN (SELECT DISTINCT iata FROM node_iatas) AND c NOT IN (SELECT iata FROM iata_codes) ORDER BY c LIMIT 5000) s"
   small_list50: "SELECT array_agg(iata ORDER BY n DESC, iata) FROM (SELECT iata, count(*) n FROM node_iatas GROUP BY iata ORDER BY 2 DESC, 1 LIMIT 50) s"
   small_top_sea_node: "SELECT ni.node_id FROM node_iatas ni WHERE ni.iata = 'SEA' ORDER BY (SELECT count(*) FROM node_iatas x WHERE x.node_id = ni.node_id) DESC, ni.node_id LIMIT 1"
+  # Lookup-table roles: the node with the most neighbor rows, the 60 IATAs with the most channel members, the scope
+  # with the fewest rollup rows, and a first-heard window over the newest day of trace tags. Each reads one small table.
+  lk_top_neighbor_node: "SELECT node_id FROM node_neighbors GROUP BY node_id ORDER BY count(*) DESC, node_id LIMIT 1"
+  lk_member_iatas60: "SELECT array_agg(iata::bpchar ORDER BY n DESC, iata) FROM (SELECT iata, count(*) n FROM meshmapper_channel_members GROUP BY iata ORDER BY 2 DESC, 1 LIMIT 60) s"
+  lk_rare_scope: "SELECT ts.name FROM transport_scopes ts JOIN analytics_hourly_scope_sets s ON s.scope_id = ts.id GROUP BY ts.id, ts.name ORDER BY count(*), ts.name LIMIT 1"
+  lk_link_nodes40: "SELECT array_agg(node_id ORDER BY n DESC, node_id) FROM (SELECT node_id, count(*) n FROM node_neighbors GROUP BY node_id ORDER BY 2 DESC, 1 LIMIT 40) s"
+  lk_link_neighbors40: "SELECT array_agg(neighbor_id ORDER BY n DESC, neighbor_id) FROM (SELECT neighbor_id, count(*) n FROM node_neighbors GROUP BY neighbor_id ORDER BY 2 DESC, 1 LIMIT 40) s"
+  lk_trace_since: "SELECT max(first_heard_at) - interval '1 day' FROM trace_tags"
+  lk_trace_until: "SELECT max(first_heard_at) - interval '12 hours' FROM trace_tags"
   tel_top: "SELECT observer_id FROM observer_telemetry WHERE id > (SELECT max(id) FROM observer_telemetry) - 200000 GROUP BY 1 ORDER BY count(*) DESC, observer_id LIMIT 1"
   tel_top_mid: "SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY id) FROM observer_telemetry WHERE observer_id = (SELECT observer_id FROM observer_telemetry WHERE id > (SELECT max(id) FROM observer_telemetry) - 200000 GROUP BY 1 ORDER BY count(*) DESC, observer_id LIMIT 1)"
   trc_tie_tag: "SELECT trace_tag FROM trace_tags WHERE date_trunc('milliseconds', last_heard_at, 'UTC') = (SELECT ts FROM (SELECT date_trunc('milliseconds', last_heard_at, 'UTC') ts FROM trace_tags ORDER BY date_trunc('milliseconds', last_heard_at, 'UTC') DESC, trace_tag DESC LIMIT 20000) s GROUP BY ts HAVING count(*) > 1 ORDER BY ts DESC LIMIT 1) ORDER BY date_trunc('milliseconds', last_heard_at, 'UTC') DESC, trace_tag DESC LIMIT 1"
@@ -2607,6 +2624,52 @@ entries:
     expect:
       budget: {buffers: 1000, planning_ms: 10}
     note: "measured: - / - B (custom / generic); budget: class budget"
+  # Lookup tables without their cold indexes (migrations 047-052), and the scope sets index that stays.
+  - id: lk.neighbors.top_node
+    stmt: GetNodeNeighbors
+    shape: "GetNodeNeighbors, the node with the most neighbor rows (primary key range, no node index)"
+    params: [{r: lk_top_neighbor_node}]
+    tiers: [local]  # the fixture holds no rows for its resolver
+    expect:
+      driver: [{relation: node_neighbors, alias: nn, index: node_neighbors_pkey}]
+      budget: {buffers: 3300, planning_ms: 10}
+    note: "measured: 2184 B with idx_node_neighbors_node, 2183 B without; budget: 1.5x measured"
+  - id: lk.neighbor_links.top40
+    stmt: GetNeighborLinks
+    shape: "GetNeighborLinks, the 40 nodes and 40 neighbors with the most rows (primary key probes, no node index)"
+    params: [{r: lk_link_nodes40}, {r: lk_link_neighbors40}]
+    tiers: [local]  # the fixture holds no rows for its resolver
+    modes: [custom, generic]
+    expect:
+      budget: {buffers: 16400, planning_ms: 10}
+    note: "measured: 1822 B / 4.9 ms with idx_node_neighbors_node, 10922 B / 3.8 ms without (repeat hits on the same primary key pages); budget: 1.5x measured"
+  - id: lk.traces.first_heard_window
+    stmt: ListTraceTags
+    shape: "ListTraceTags, a 12-hour first-heard window a day back, limit 50 (no first-heard index)"
+    params: [{raw: "NULL::bpchar[]"}, {raw: "''"}, {r: lk_trace_since}, {r: lk_trace_until}, {raw: "NULL::timestamptz"}, {raw: "50"}, {raw: "''"}, {raw: "NULL::bytea"}]
+    tiers: [local]  # the fixture holds no rows for its resolver
+    expect:
+      driver: [{relation: trace_tags, alias: t, index: idx_trace_tags_keyset}]
+      budget: {buffers: 14100, planning_ms: 10}
+    note: "measured: 9394 B with idx_trace_tags_first_heard (unused), 9366 B without; budget: 1.5x measured"
+  - id: lk.channels.members60.generic
+    stmt: ListChannels
+    shape: "ListChannels, the 60 IATAs with the most channel members (no fingerprint index)"
+    params: [{raw: "NULL::bytea"}, {r: lk_member_iatas60}, {raw: "NULL::boolean"}, {raw: "NULL::timestamptz"}, {raw: "51"}]
+    tiers: [local]  # the fixture holds no rows for its resolver
+    modes: [custom, generic]
+    expect:
+      budget: {buffers: 4000, planning_ms: 10}
+    note: "measured: custom 293 / 293 B, generic 558 B with the fingerprint index, 293 B without; generic only under the single layout"
+  - id: lk.scope.rare
+    stmt: GetScopeByName
+    shape: "GetScopeByName, the scope with the fewest rollup rows (idx_analytics_scope_sets_scope stays for it)"
+    params: [{r: lk_rare_scope}]
+    tiers: [fixture, local]
+    expect:
+      forbid: [{node: Seq Scan, relations: [analytics_hourly_scope_sets], reason: "the kept scope index serves both lookups"}]
+      budget: {buffers: 2400, planning_ms: 10}
+    note: "measured: 1583 B, of which 3 + 3 B are the two scope-index lookups and 1504 B the node count; without the index the two lookups scan the table; budget: 1.5x measured"
   - id: sm.write.touch_channel
     stmt: TouchChannel
     shape: "TouchChannel write-through (plain EXPLAIN)"
