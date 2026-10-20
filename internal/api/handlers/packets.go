@@ -54,6 +54,7 @@ func PacketsRouter(reader api.Reader) http.Handler {
 //	@Success	200				{object}	api.PacketPage
 //	@Failure	400				{object}	handlers.APIError
 //	@Failure	500				{object}	handlers.APIError
+//	@Failure	503				{object}	handlers.APIError	"Not available yet, or the server is busy: retry after Retry-After seconds"
 //	@Router		/packets [get]
 func listPackets(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +137,9 @@ func listPackets(reader api.Reader) http.HandlerFunc {
 			packets, err = reader.ListPackets(r.Context(), payloadTypes, routeTypes, iatas, scopes, since, until, cursor, pageCursor, limit)
 		}
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			if !respondUnavailableFor(w, err, modelPacketSites) {
+				respondError(w, http.StatusInternalServerError, "internal server error")
+			}
 			return
 		}
 		respond(w, http.StatusOK, packets)

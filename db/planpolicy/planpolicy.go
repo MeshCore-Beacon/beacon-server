@@ -40,29 +40,26 @@ const (
 	ClassC Class = iota
 	// ClassG is admitted as generic-safe and runs on a cached generic plan under Split.
 	ClassG
-	// ClassLegacy is a statement not yet rewritten: it runs on api_legacy, unguarded.
-	ClassLegacy
+	// ClassSlow is a statement that may read whole site histories in one call: it runs on api_slow, ungated, under
+	// that pool's own statement limit.
+	ClassSlow
 )
 
-// Legacy lists the statements not yet rewritten. Each is removed in the change that replaces it.
-var Legacy = map[string]bool{
-	"ListPacketsByIATAs":     true,
-	"ListChannelMessages":    true,
-	"ListAllChannelMessages": true,
-	// Today's adverts text, served until every observation carries its payload type.
-	"ListObserverAdvertsJoinFilter": true,
+// Slow lists the statements that may walk a large part of the observations in one call, so they run on their own
+// small pool and cannot hold the API pool's connections: the region page statement that answers when the site read
+// model's bounded reads run out of budget (both cursor forms), and the all-channel message statement for sites with a
+// since or a scope, which no read-model statement serves.
+var Slow = map[string]bool{
+	"ListPacketsByIATAs":      true,
+	"ListPacketsByIATAsAfter": true,
+	"ListAllChannelMessages":  true,
 }
-
-// Undecided, needs the maintainer's approval before the legacy pool is removed: a Fallback map for the
-// untrusted read-model fallbacks (ListPacketsByIATAs, ListChannelMessages, ListAllChannelMessages) would
-// go here, as a fourth class that the router sends to api_custom like C but never gates, so no deadline
-// ever cuts it.
 
 // ClassOf returns the plan class for a sqlc statement name.
 func ClassOf(name string) Class {
 	switch {
-	case Legacy[name]:
-		return ClassLegacy
+	case Slow[name], ReadModelFallbacks[name]:
+		return ClassSlow
 	case Cached[name]:
 		return ClassG
 	}

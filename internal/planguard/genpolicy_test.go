@@ -44,7 +44,7 @@ func TestGenPolicyRejectsCachedWithoutAdversarialShapes(t *testing.T) {
 		{"genpolicy_hop.yaml", nil, []string{"ListKnownRoutesGlobalHop", "rare_hop", "absent_hop"}},
 		{"genpolicy_hop_skip.yaml", nil, []string{"ListKnownRoutesGlobalHop", "entry gh.rare skips generic", "entry gh.absent skips generic"}},
 		{"genpolicy_region_no_stale.yaml", nil, []string{"ListKnownRoutesByIATA", "stale_region"}},
-		{"genpolicy_legacy_pending.yaml", map[string]bool{"GetNodeByID": true}, []string{"GetNodeByID", "planpolicy.Legacy"}},
+		{"genpolicy_legacy_pending.yaml", map[string]bool{"GetNodeByID": true}, []string{"GetNodeByID", "planpolicy.Slow"}},
 		{"genpolicy_refuse_mode_known_issue_generic.yaml", nil, []string{"GetNodeByID", "entry node.miss has a known_issue in generic"}},
 		{"genpolicy_refuse_mode_known_issue_auto.yaml", nil, []string{"GetNodeByID", "entry node.miss has a known_issue in auto"}},
 		{"genpolicy_refuse_entry_known_issue.yaml", nil, []string{"GetNodeByID", "entry node.miss has a known_issue"}},
@@ -70,7 +70,7 @@ func TestGenPolicyRejectsCachedWithoutAdversarialShapes(t *testing.T) {
 		})
 	}
 
-	// The same corpus with GetNodeByID out of Legacy: GetNodeByID is admitted and the pending cached statement is
+	// The same corpus with GetNodeByID out of Slow: GetNodeByID is admitted and the pending cached statement is
 	// left out without an error.
 	c, err := planguard.LoadCorpus(os.DirFS("testdata/corpus"), "genpolicy_legacy_pending.yaml", repoSQLC(t))
 	if err != nil {
@@ -104,7 +104,7 @@ func TestGenPolicyMatchesCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	src, err := planguard.GenPolicy(c, planpolicy.Legacy)
+	src, err := planguard.GenPolicy(c, planpolicy.Slow)
 	if err != nil {
 		t.Fatal(err)
 	}

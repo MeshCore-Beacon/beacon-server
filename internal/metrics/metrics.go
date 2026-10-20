@@ -7,6 +7,7 @@ package metrics
 
 import (
 	"net/http"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -118,6 +119,10 @@ var (
 
 	// ReadModelRepaired counts the rows each read model's reconcile wrote: anything above zero was missed by a writer
 	// that bypassed the model.
+	APIUnavailable = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "beacon_api_unavailable_total",
+		Help: "503s a page answered because the slow pool was busy (reason slow_pool_busy), by the model the page reads.",
+	}, []string{"reason", "model"})
 	ReadModelRepaired = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "beacon_readmodel_repaired_rows_total",
 		Help: "Rows the read-model reconcile repaired, by model.",
@@ -199,6 +204,42 @@ func SetPgActivity(a PgActivity) {
 	pgActivity.last.Store(&a)
 }
 
+// SequenceUse is how much of one sequence's usable range is already handed out.
+type SequenceUse struct {
+	Name      string
+	UsedRatio float64
+	Cycle     bool // a CYCLE sequence wraps to its start: its ratio is its position, not used-up headroom
+}
+
+var sequenceUsedDesc = prometheus.NewDesc("beacon_db_sequence_used_ratio",
+	"Share of a sequence's usable values already handed out (its own limit or its column type's, whichever is lower). cycle=\"true\" marks a CYCLE sequence, which wraps: its ratio is a position, not used-up headroom.",
+	[]string{"sequence", "cycle"}, nil)
+
+// sequenceCollector emits the last SequenceUse snapshot; it emits nothing until SetSequenceUse has been called.
+type sequenceCollector struct {
+	last atomic.Pointer[[]SequenceUse]
+}
+
+func (c *sequenceCollector) Describe(ch chan<- *prometheus.Desc) { ch <- sequenceUsedDesc }
+
+func (c *sequenceCollector) Collect(ch chan<- prometheus.Metric) {
+	seqs := c.last.Load()
+	if seqs == nil {
+		return
+	}
+	for _, s := range *seqs {
+		ch <- prometheus.MustNewConstMetric(sequenceUsedDesc, prometheus.GaugeValue, s.UsedRatio, s.Name, strconv.FormatBool(s.Cycle))
+	}
+}
+
+var sequences = &sequenceCollector{}
+
+// SetSequenceUse replaces the sequence snapshot for the next scrape; a sequence missing from it is no longer exported.
+func SetSequenceUse(seqs []SequenceUse) {
+	cp := append([]SequenceUse(nil), seqs...)
+	sequences.last.Store(&cp)
+}
+
 var watermarkAgeDesc = prometheus.NewDesc("beacon_readmodel_watermark_age_seconds",
 	"Seconds since this process last finished a reconcile of the read model, by model.", []string{"model"}, nil)
 
@@ -271,7 +312,7 @@ func init() {
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		GuardWouldRefuse, GuardRefused, GuardDB, DBTime, HTTPRequest, PoolAcquire,
 		IngestQueueDepth, IngestDropped, JobDuration, JobRows, IndexBytes, IndexBloat,
-		PlanguardFailures, setGauge{PlanguardLastRun, &planguardEnabled}, pgActivity, ReadModelRepaired, ReadModelTrusted, watermarks,
+		PlanguardFailures, setGauge{PlanguardLastRun, &planguardEnabled}, pgActivity, sequences, APIUnavailable, ReadModelRepaired, ReadModelTrusted, watermarks,
 		PacketSitesFrontLive, PacketSitesSweepPlanOK, PacketSitesBytes, sweepAge,
 	)
 }

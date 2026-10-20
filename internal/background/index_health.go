@@ -93,26 +93,36 @@ func formatBytes(n int64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
-// PgStatsTask exports PostgreSQL's WAL, checkpoint and transaction ID age counters. A failing read
-// logs once per distinct error and never fails the task, so a missing view does not spam.
+// PgStatsTask exports PostgreSQL's WAL, checkpoint and transaction ID age counters and how much of each sequence is
+// used. A failing read logs once per distinct error and never fails the task, so a missing view does not spam; the
+// two reads fail independently.
 func PgStatsTask(store interface {
 	PgActivity(context.Context) (metrics.PgActivity, error)
+	SequenceUse(context.Context) ([]metrics.SequenceUse, error)
 }, interval time.Duration) Task {
-	var lastErr string
+	var lastErr, lastSeqErr string
 	return Task{
 		Name:     "pg_stats",
 		Interval: interval,
 		Run: func(ctx context.Context) error {
-			a, err := store.PgActivity(ctx)
-			if err != nil {
+			if a, err := store.PgActivity(ctx); err != nil {
 				if msg := err.Error(); msg != lastErr {
 					lastErr = msg
 					slog.Warn("postgres activity unavailable", "component", "background", "error", err)
 				}
-				return nil
+			} else {
+				lastErr = ""
+				metrics.SetPgActivity(a)
 			}
-			lastErr = ""
-			metrics.SetPgActivity(a)
+			if seqs, err := store.SequenceUse(ctx); err != nil {
+				if msg := err.Error(); msg != lastSeqErr {
+					lastSeqErr = msg
+					slog.Warn("sequence headroom unavailable", "component", "background", "error", err)
+				}
+			} else {
+				lastSeqErr = ""
+				metrics.SetSequenceUse(seqs)
+			}
 			return nil
 		},
 	}

@@ -76,6 +76,9 @@ updated AS (
 )
 SELECT count(*) FROM batch`
 
+// reconfirmRouteCols are known_routes' columns, without the stamp only today's loop reads.
+const reconfirmRouteCols = `id, path_key, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count`
+
 // reconfirmLegacyFixture: 3 regions x 400 generated routes over random and deliberately colliding
 // short ids (departed hops, hops known only in another region, 1-4-byte ambiguous prefixes), plus
 // the hand-written edge rows x01-x15.
@@ -96,9 +99,9 @@ INSERT INTO node_short_ids (node_id, iata, prefix_4) VALUES
  (md5('sfoOnly')::uuid, 'SFO', '\x0f0f0f0f');
 -- Hop node n of route j: n in 81..95 is departed unless it is one of the colliders 82-84; every
 -- 23rd hop names a node of another region.
-INSERT INTO known_routes (path_key, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count, last_reconfirmed_at)
+INSERT INTO known_routes (path_key, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count)
 SELECT decode(md5(r || '/' || j), 'hex'), h.nodes, h.prefixes, r, cardinality(h.nodes),
-       '2026-01-01', '2026-02-01', j, '2026-03-01'::timestamptz + j * interval '1 second'
+       '2026-01-01', '2026-02-01', j
 FROM unnest(ARRAY['SEA','SFO','YYZ']) r, generate_series(1, 400) j,
 LATERAL (
   SELECT array_agg(md5(x.reg || x.n)::uuid ORDER BY k) AS nodes,
@@ -107,8 +110,8 @@ LATERAL (
   LATERAL (SELECT (j * 7 + k * 13) % 95 + 1 AS n,
                   CASE WHEN (j + k) % 23 = 0 THEN CASE WHEN r = 'SFO' THEN 'SEA' ELSE 'SFO' END ELSE r END AS reg) x
 ) h;
-INSERT INTO known_routes (path_key, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count, last_reconfirmed_at)
-SELECT key, nodes, prefixes, iata, hops, '2026-01-01', '2026-02-01', 1, '2026-03-02'
+INSERT INTO known_routes (path_key, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count)
+SELECT key, nodes, prefixes, iata, hops, '2026-01-01', '2026-02-01', 1
 FROM (VALUES
  (decode(lpad('a1',32,'0'),'hex'), ARRAY[md5('good')::uuid, md5('sfoOnly')::uuid], ARRAY['\x0f0f'::bytea, '\x0f0f'::bytea], 'SEA', 2),
  (decode(lpad('a2',32,'0'),'hex'), ARRAY[md5('good')::uuid, md5('good')::uuid, md5('good')::uuid], ARRAY['\x0f0f'::bytea], 'SEA', 3),
@@ -145,7 +148,8 @@ func loadReconfirmCursor(t *testing.T, ctx context.Context, store *Store) (recon
 	return cur, ok
 }
 
-// The sweep deletes exactly what today's ReconfirmTask loop deletes, and stamps nothing.
+// The sweep deletes exactly what today's ReconfirmTask loop deletes. The loop runs on a copy that has the stamp
+// column it orders by; the sweep's table has none.
 func TestReconfirmSweepMatchesLegacyPostgres(t *testing.T) {
 	ctx, pool, store := reconfirmPool(t)
 	if _, err := pool.Exec(ctx, reconfirmLegacyFixture); err != nil {
@@ -161,10 +165,10 @@ func TestReconfirmSweepMatchesLegacyPostgres(t *testing.T) {
 	_, err := pool.Exec(ctx, fmt.Sprintf(`
 CREATE SCHEMA %[1]s;
 CREATE TABLE %[1]s.known_routes (LIKE %[2]s.known_routes INCLUDING ALL);
+ALTER TABLE %[1]s.known_routes ADD COLUMN IF NOT EXISTS last_reconfirmed_at timestamptz NOT NULL DEFAULT now();
 CREATE TABLE %[1]s.node_short_ids (LIKE %[2]s.node_short_ids INCLUDING ALL);
-INSERT INTO %[1]s.known_routes SELECT * FROM %[2]s.known_routes;
-INSERT INTO %[1]s.node_short_ids (node_id, iata, prefix_4) SELECT node_id, iata, prefix_4 FROM %[2]s.node_short_ids;
-CREATE TABLE %[1]s.orig AS SELECT * FROM %[2]s.known_routes;`, old, cur))
+INSERT INTO %[1]s.known_routes (%[3]s) SELECT %[3]s FROM %[2]s.known_routes;
+INSERT INTO %[1]s.node_short_ids (node_id, iata, prefix_4) SELECT node_id, iata, prefix_4 FROM %[2]s.node_short_ids;`, old, cur, reconfirmRouteCols))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,20 +240,15 @@ CREATE TABLE %[1]s.orig AS SELECT * FROM %[2]s.known_routes;`, old, cur))
 	if !res.Wrapped || res.Scanned != total || res.Deleted != oldDeleted || res.Skipped != 0 || res.TimedOut != 0 {
 		t.Fatalf("sweep = %+v; want Wrapped, Scanned %d, Deleted %d", res, total, oldDeleted)
 	}
-	const cols = `id, path_key, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count`
-	var onlyNew, onlyOld, stamped int64
+	var onlyNew, onlyOld int64
 	if err := pool.QueryRow(ctx, fmt.Sprintf(`SELECT
  (SELECT count(*) FROM (SELECT %[1]s FROM %[2]s.known_routes EXCEPT SELECT %[1]s FROM %[3]s.known_routes) x),
- (SELECT count(*) FROM (SELECT %[1]s FROM %[3]s.known_routes EXCEPT SELECT %[1]s FROM %[2]s.known_routes) x),
- (SELECT count(*) FROM %[2]s.known_routes n JOIN %[3]s.orig o USING (iata, path_key)
-   WHERE n.last_reconfirmed_at IS DISTINCT FROM o.last_reconfirmed_at)`, cols, cur, old)).Scan(&onlyNew, &onlyOld, &stamped); err != nil {
+ (SELECT count(*) FROM (SELECT %[1]s FROM %[3]s.known_routes EXCEPT SELECT %[1]s FROM %[2]s.known_routes) x)`,
+		reconfirmRouteCols, cur, old)).Scan(&onlyNew, &onlyOld); err != nil {
 		t.Fatal(err)
 	}
 	if onlyNew != 0 || onlyOld != 0 {
 		t.Errorf("survivors differ: %d only in new, %d only in old", onlyNew, onlyOld)
-	}
-	if stamped != 0 {
-		t.Errorf("%d survivors had last_reconfirmed_at changed", stamped)
 	}
 	t.Logf("%d routes, %d deleted by both", total, oldDeleted)
 }
@@ -409,16 +408,15 @@ CREATE TRIGGER pause_second_route BEFORE DELETE ON known_routes FOR EACH ROW EXE
 
 func TestReconfirmPreservesRouteDataPostgres(t *testing.T) {
 	ctx, pool, store := reconfirmPool(t)
-	before := time.Now().UTC().Truncate(time.Microsecond)
 	_, err := pool.Exec(ctx, `
 TRUNCATE known_routes, node_short_ids;
 INSERT INTO node_short_ids (node_id,iata,prefix_4) VALUES
  (md5('n1')::uuid,'SEA','\x11223344'), (md5('n2')::uuid,'SEA','\x11223355'),
  (md5('n3')::uuid,'SEA','\xaabbccdd'), (md5('n4')::uuid,'SEA','\xaabbccdd'),
  (md5('n5')::uuid,'SEA','\x55667788'), (md5('n6')::uuid,'SFO','\x55667799');
-INSERT INTO known_routes (id,path_key,node_ids,hash_prefix,iata,hop_count,first_seen,last_seen,observation_count,last_reconfirmed_at)
+INSERT INTO known_routes (id,path_key,node_ids,hash_prefix,iata,hop_count,first_seen,last_seen,observation_count)
 SELECT id,int4send(id),ARRAY[md5(node)::uuid],ARRAY[decode(prefix,'hex')],iata,1,
-       '2025-12-01','2026-01-01',42,'2026-01-01'
+       '2025-12-01','2026-01-01',42
 FROM (VALUES
  (1,'n1','11223344','SEA'), (2,'n2','11223355','SEA'),
  (3,'n5','55','SEA'), (4,'n5','5566','SEA'), (5,'n5','556677','SEA'), (6,'n5','55667788','SEA'),
@@ -430,9 +428,6 @@ FROM (VALUES
 UPDATE known_routes SET node_ids=node_ids || md5('n5')::uuid, hash_prefix=hash_prefix || '\x55667788'::bytea, hop_count=2 WHERE id=13;
 UPDATE known_routes SET node_ids=node_ids || md5('missing')::uuid, hash_prefix=hash_prefix || '\x99'::bytea, hop_count=2 WHERE id=14;`)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, `UPDATE known_routes SET last_reconfirmed_at=$1::timestamptz + CASE WHEN id=16 THEN interval '1 hour' ELSE interval '0' END WHERE id IN (16,17)`, before); err != nil {
 		t.Fatal(err)
 	}
 	snapshot := func() map[int][]byte {
@@ -580,9 +575,8 @@ CREATE TABLE node_short_ids (LIKE public.node_short_ids INCLUDING ALL);
 CREATE TABLE background_state (LIKE public.background_state INCLUDING ALL);
 INSERT INTO node_short_ids (node_id, iata, prefix_4) VALUES
  ('00000000-0000-0000-0000-000000000001', 'SEA', '\x11223344');
-INSERT INTO known_routes (path_key,node_ids,hash_prefix,iata,hop_count,last_reconfirmed_at)
-SELECT int4send(i), ARRAY['00000000-0000-0000-0000-000000000001'::uuid], ARRAY['\x11'::bytea], 'SEA', 1,
-       '2026-01-01'::timestamptz + i * interval '1 second'
+INSERT INTO known_routes (path_key,node_ids,hash_prefix,iata,hop_count)
+SELECT int4send(i), ARRAY['00000000-0000-0000-0000-000000000001'::uuid], ARRAY['\x11'::bytea], 'SEA', 1
 FROM generate_series(1,2) i;`)
 	if err != nil {
 		t.Fatal(err)

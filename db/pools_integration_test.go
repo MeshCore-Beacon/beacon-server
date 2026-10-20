@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/db/planpolicy"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -40,6 +41,7 @@ func TestOpenPoolsSettingsPostgres(t *testing.T) {
 	// idle_in_transaction_session_timeout
 	settings := map[string][6]string{
 		PoolAPILegacy: {"beacon-api_legacy", "auto", dflt, dflt, "0", "0"},
+		PoolAPISlow:   {"beacon-api_slow", "auto", dflt, "0", "2min", "0"},
 		PoolAPICustom: {"beacon-api_custom", "force_custom_plan", "off", "0", "35s", "30s"},
 		PoolAPICached: {"beacon-api_cached", "force_generic_plan", "off", "0", "35s", "30s"},
 		PoolIngest:    {"beacon-ingest", "auto", "off", dflt, "0", "0"},
@@ -53,8 +55,8 @@ func TestOpenPoolsSettingsPostgres(t *testing.T) {
 		want   map[string]int32
 		total  int32
 	}{
-		{planpolicy.CustomAll, map[string]int32{"api_legacy": 8, "api_custom": 8, "maint": 4}, 0},
-		{planpolicy.Split, map[string]int32{"api_legacy": 8, "api_custom": 7, "api_cached": 5, "maint": 4}, 0},
+		{planpolicy.CustomAll, map[string]int32{"api_slow": 8, "api_custom": 8, "maint": 4}, 0},
+		{planpolicy.Split, map[string]int32{"api_slow": 8, "api_custom": 7, "api_cached": 5, "maint": 4}, 0},
 		{planpolicy.Single, map[string]int32{"api_legacy": 8, "maint": 4}, 0},
 	} {
 		// The ingest pool follows the host: at least 6, and one per CPU.
@@ -71,7 +73,7 @@ func TestOpenPoolsSettingsPostgres(t *testing.T) {
 			}
 			defer p.Close()
 			for name, pool := range map[string]*pgxpool.Pool{
-				PoolAPILegacy: p.APILegacy, PoolAPICustom: p.APICustom, PoolAPICached: p.APICached,
+				PoolAPILegacy: p.APILegacy, PoolAPISlow: p.APISlow, PoolAPICustom: p.APICustom, PoolAPICached: p.APICached,
 				PoolIngest: p.Ingest, PoolMaint: p.Maint,
 			} {
 				size, opened := tc.want[name]
@@ -132,6 +134,10 @@ func TestOpenPoolsSettingsPostgres(t *testing.T) {
 			}
 			if got := p.Total(); got != tc.total {
 				t.Errorf("Total() = %d, want %d", got, tc.total)
+			}
+			// Without ingest (6 on up to 6 CPUs): custom_all 26 in all, split 30, single 18.
+			if rest := tc.total - tc.want["ingest"]; rest != map[planpolicy.Layout]int32{planpolicy.CustomAll: 20, planpolicy.Split: 24, planpolicy.Single: 12}[tc.layout] {
+				t.Errorf("%s: %d connections besides ingest", tc.layout, rest)
 			}
 		})
 	}
@@ -195,7 +201,7 @@ func TestReadOnlyPoolsRejectWritesPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer p.Close()
-	pools := map[string]*pgxpool.Pool{PoolAPILegacy: p.APILegacy, PoolAPICustom: p.APICustom, PoolIngest: p.Ingest, PoolMaint: p.Maint}
+	pools := map[string]*pgxpool.Pool{PoolAPISlow: p.APISlow, PoolAPICustom: p.APICustom, PoolIngest: p.Ingest, PoolMaint: p.Maint}
 	for name, pool := range pools {
 		if !tuned[name] {
 			t.Errorf("%s: tune not called", name)
@@ -214,5 +220,84 @@ func TestReadOnlyPoolsRejectWritesPostgres(t *testing.T) {
 	}
 	if len(tuned) != len(pools) {
 		t.Errorf("tune called for %v, want the %d custom_all pools", tuned, len(pools))
+	}
+}
+
+// With every api_slow connection busy, a slow statement waits at most its acquire limit and fails with
+// ErrSlowPoolBusy; it never takes an api_custom connection, and class C statements keep running there.
+func TestSlowPoolIsolationPostgres(t *testing.T) {
+	dsn := os.Getenv("BEACON_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set BEACON_TEST_POSTGRES_DSN")
+	}
+	old := slowAcquireWait
+	slowAcquireWait = 300 * time.Millisecond
+	t.Cleanup(func() { slowAcquireWait = old })
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	p, err := OpenPools(ctx, dsn, planpolicy.CustomAll)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	r := NewPlanRouter(p, planpolicy.CustomAll, nil)
+	const slowSQL = "-- name: ListPacketsByIATAs :many\nSELECT current_setting('application_name')"
+
+	var app string
+	if err := r.QueryRow(ctx, slowSQL).Scan(&app); err != nil || app != "beacon-api_slow" {
+		t.Fatalf("slow statement ran on %q, %v; want beacon-api_slow", app, err)
+	}
+	var held []*pgxpool.Conn
+	for range int(p.APISlow.Config().MaxConns) {
+		c, err := p.APISlow.Acquire(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		held = append(held, c)
+	}
+	customBefore := p.APICustom.Stat().AcquireCount()
+	start := time.Now()
+	err = r.QueryRow(ctx, slowSQL).Scan(&app)
+	if !errors.Is(err, api.ErrSlowPoolBusy) {
+		t.Fatalf("third slow statement err = %v, want ErrSlowPoolBusy", err)
+	}
+	if d := time.Since(start); d < 300*time.Millisecond || d > 5*time.Second {
+		t.Errorf("third slow statement failed after %v, want about 300ms", d)
+	}
+	if n := p.APICustom.Stat().AcquireCount(); n != customBefore {
+		t.Errorf("api_custom acquired %d connections for a slow statement", n-customBefore)
+	}
+	if err := r.QueryRow(ctx, "-- name: ProbeC :one\nSELECT current_setting('application_name')").Scan(&app); err != nil || app != "beacon-api_custom" {
+		t.Errorf("class C statement while api_slow is full: %q, %v", app, err)
+	}
+	for _, c := range held {
+		c.Release()
+	}
+	if err := r.QueryRow(ctx, slowSQL).Scan(&app); err != nil {
+		t.Errorf("slow statement after release: %v", err)
+	}
+}
+
+// SlowPoolSize resizes api_slow, and only api_slow; the single layout opens no api_slow to resize.
+func TestSlowPoolSizePostgres(t *testing.T) {
+	dsn := os.Getenv("BEACON_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set BEACON_TEST_POSTGRES_DSN")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	for _, layout := range []planpolicy.Layout{planpolicy.CustomAll, planpolicy.Split, planpolicy.Single} {
+		p, err := OpenPools(ctx, dsn, layout, SlowPoolSize(8))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if layout == planpolicy.Single {
+			if p.APISlow != nil || p.APILegacy.Config().MaxConns != 8 {
+				t.Errorf("single: api_slow %v, api_legacy %d", p.APISlow, p.APILegacy.Config().MaxConns)
+			}
+		} else if got := p.APISlow.Config().MaxConns; got != 8 || p.APICustom.Config().MaxConns > 8 {
+			t.Errorf("%s: api_slow MaxConns = %d, want 8; api_custom %d", layout, got, p.APICustom.Config().MaxConns)
+		}
+		p.Close()
 	}
 }

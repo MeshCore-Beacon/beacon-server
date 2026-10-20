@@ -71,8 +71,8 @@ SELECT s.rid, array_agg(s.id ORDER BY s.j) AS node_ids,
 FROM planguard_src.kr_slots s JOIN planguard_src.kr1 k ON k.rid = s.rid GROUP BY s.rid;
 
 -- Ids follow first sighting; the heap is in (iata, path_key) order.
-INSERT INTO known_routes (id, path_key, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count, last_reconfirmed_at)
-SELECT 1000 + row_number() OVER (ORDER BY fs, pk), pk, p.node_ids, p.hash_prefix, k.iata, k.hop, fs, k.ls, k.obs, k.ls
+INSERT INTO known_routes (id, path_key, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count)
+SELECT 1000 + row_number() OVER (ORDER BY fs, pk), pk, p.node_ids, p.hash_prefix, k.iata, k.hop, fs, k.ls, k.obs
 FROM (SELECT kr1.*, decode(md5('route' || kr1.rid), 'hex') AS pk,
              greatest(timestamptz '2026-09-01 00:00+00', least(kr1.ls, kr1.ls - (kr1.r_fs * kr1.r_fs * 10) * interval '1 day')) AS fs
       FROM planguard_src.kr1) k

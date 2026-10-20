@@ -416,6 +416,9 @@ func TestLoad_DatabaseGuardsValidation(t *testing.T) {
 		yaml, err string
 	}{
 		{"database:\n  api_plan_layout: generic\n", "database.api_plan_layout must be custom_all, split or single"},
+		{"database:\n  slow_pool_size: 0\n", "database.slow_pool_size must be at least 1"},
+		{"database:\n  slow_pool_size: -3\n", "database.slow_pool_size must be at least 1"},
+		{"database:\n  slow_pool_size: 1001\n", "database.slow_pool_size must be at most 1000"},
 		{"guards:\n  enforce: [routes, bogus]\n", `guards.enforce[1]: unknown family "bogus" (routes, channel_messages, packets_global, packets_region, packets_window, packet_detail, stats, other)`},
 		{"guards:\n  budget: enforce\n", "guards.budget must be shadow (budget enforcement is not available)"},
 		{"server:\n  admin_listen: \"9090\"\n", "server.admin_listen must be host:port, e.g. 127.0.0.1:9090"},
@@ -452,6 +455,26 @@ func TestLoad_DatabaseGuardsValidation(t *testing.T) {
 	if r.AdminListen != ":9090" || r.APIPlanLayout != planpolicy.Split || r.GuardsBudget != "shadow" ||
 		strings.Join(r.GuardsEnforce, ",") != "routes,stats" {
 		t.Fatalf("resolved = %s", r)
+	}
+}
+
+// database.slow_pool_size sizes api_slow: 2 when absent, any positive value as given.
+func TestSlowPoolSize(t *testing.T) {
+	for yml, want := range map[string]int32{"": 8, "database:\n  api_plan_layout: split\n": 8, "database:\n  slow_pool_size: 8\n": 8, "database:\n  slow_pool_size: 1\n": 1} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte(yml), 0600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("%q: %v", yml, err)
+		}
+		if got := Resolve(cfg).SlowPoolSize; got != want {
+			t.Errorf("%q: SlowPoolSize = %d, want %d", yml, got, want)
+		}
+		if !strings.Contains(Resolve(cfg).String(), fmt.Sprintf("slowPoolSize=%d", want)) {
+			t.Errorf("%q: startup line lacks slowPoolSize=%d", yml, want)
+		}
 	}
 }
 

@@ -25,9 +25,9 @@ FROM (SELECT n.rid, n.r_hs, g.j,
       FROM planguard_src.new0 n CROSS JOIN LATERAL generate_series(1, n.hop) g(j)) s
 JOIN planguard_src.region_relays rr ON rr.iata = 'NEW' AND rr.idx = s.idx
 GROUP BY s.rid;
-INSERT INTO known_routes (id, path_key, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count, last_reconfirmed_at)
+INSERT INTO known_routes (id, path_key, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count)
 SELECT (SELECT max(id) FROM known_routes) + row_number() OVER (ORDER BY n.ls, n.rid), decode(md5('new-route' || n.rid), 'hex'),
-       p.node_ids, p.hash_prefix, 'NEW', n.hop, n.ls - interval '2 days', n.ls, n.obs, n.ls
+       p.node_ids, p.hash_prefix, 'NEW', n.hop, n.ls - interval '2 days', n.ls, n.obs
 FROM planguard_src.new0 n JOIN planguard_src.new_paths p ON p.rid = n.rid
 ORDER BY decode(md5('new-route' || n.rid), 'hex');
 SELECT setval('known_routes_new_id_seq', (SELECT max(id) FROM known_routes));
