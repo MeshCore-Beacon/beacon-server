@@ -24,3 +24,10 @@ func (c *statementCapture) Query(ctx context.Context, sql string, args ...any) (
 	}
 	return c.Tx.Query(ctx, sql, args...)
 }
+
+func (c *statementCapture) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if strings.Contains(sql, "-- name: "+c.name) {
+		c.statement, c.args = sql, args
+	}
+	return c.Tx.QueryRow(ctx, sql, args...)
+}
