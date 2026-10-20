@@ -16,10 +16,23 @@ type Querier interface {
 	// An empty region places the channel Beacon-wide.
 	AddChannelConfigScopes(ctx context.Context, arg AddChannelConfigScopesParams) error
 	AddChannelMembers(ctx context.Context, arg AddChannelMembersParams) error
+	// Copyright 2026 Beacon Contributors
+	// SPDX-License-Identifier: AGPL-3.0-or-later
+	// A stored observation's site for a message another statement created. A no-op when the packet has no message;
+	// found says whether the packet has a committed message (then the site is recorded, now or before).
+	AddChannelMessageIATA(ctx context.Context, arg AddChannelMessageIATAParams) (bool, error)
 	AddIATAs(ctx context.Context, iatas []string) error
 	AddRegionIATAs(ctx context.Context, arg AddRegionIATAsParams) error
-	// Hop prefixes that match >1 node in an IATA, per width. Computed once per reconfirm run.
-	AmbiguousPrefixes(ctx context.Context) ([]AmbiguousPrefixesRow, error)
+	// Copies the packet's payload type onto the first @max_rows observations in [@from_id, @to_id),
+	// in id order, that lack one. Rows that already carry a type are never touched. Returns how many
+	// untyped rows it picked, how many it typed, and the last picked id (0 when it picked none).
+	BackfillObservationPayloadTypes(ctx context.Context, arg BackfillObservationPayloadTypesParams) (BackfillObservationPayloadTypesRow, error)
+	// Exact check of messages in (after_id, through_id]: pairs the definition has and the table lacks (counting
+	// observations up to obs_through only), and table pairs no stored observation backs.
+	CheckChannelMessageIATAs(ctx context.Context, arg CheckChannelMessageIATAsParams) (CheckChannelMessageIATAsRow, error)
+	// Exact check of every packet with an observation in (after_id, through_id]: site rows the observations imply
+	// and the table lacks, rows whose hearing time or packet columns differ, and rows no observation backs.
+	CheckPacketSitesSlice(ctx context.Context, arg CheckPacketSitesSliceParams) (CheckPacketSitesSliceRow, error)
 	// Keeps fetch timing so re-enabling still respects backoff; the ETag goes with the rows.
 	ClearRepeaters(ctx context.Context) (int64, error)
 	CreateAccount(ctx context.Context, name string) (Account, error)
@@ -29,6 +42,15 @@ type Querier interface {
 	DeleteAllChannelMembers(ctx context.Context) error
 	DeleteChannelConfigScopes(ctx context.Context) error
 	DeleteChannelMembersNotIn(ctx context.Context, arg DeleteChannelMembersNotInParams) error
+	// One batch past retention, keyset after the per-run cursor (the first call passes -infinity, 0).
+	// The truncated bound (ms ceiling of the cutoff) drives idx_known_routes_keyset; the exact
+	// residual decides membership. + interval 0 keeps the exact cutoff a Filter, so the planner
+	// cannot switch to a last_seen index on deployments that still have one.
+	DeleteExpiredRoutes(ctx context.Context, arg DeleteExpiredRoutesParams) (DeleteExpiredRoutesRow, error)
+	// One batch of rarely-seen routes after the cursor, inside a window of at most 6 h below the grace
+	// cutoff: candidates without locks, then lock SKIP LOCKED through the pkey (re-checked on the newest
+	// version) and delete. unresolved_ts is the earliest candidate left behind; window_end is the bound used.
+	DeleteGraceRoutesSlice(ctx context.Context, arg DeleteGraceRoutesSliceParams) (DeleteGraceRoutesSliceRow, error)
 	// Keeps the channel IATA filter in step with packet retention.
 	DeleteOldChannelIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error
 	// Deletes nodes not seen since the given cutoff. node_iatas and node_neighbors cascade-
@@ -47,9 +69,6 @@ type Querier interface {
 	DeleteOldPackets(ctx context.Context, arg DeleteOldPacketsParams) (int64, error)
 	// Bumps coverage when hours go, so cached responses that included them are not reused.
 	DeleteOldRollups(ctx context.Context, cutoff pgtype.Timestamptz) error
-	// One batch of routes past retention, or past grace with too few observations.
-	// GREATEST keeps the scan on idx_known_routes_last_seen.
-	DeleteOldRoutes(ctx context.Context, arg DeleteOldRoutesParams) (int64, error)
 	// Deletes telemetry rows older than the given cutoff. Called by the cleanup goroutine.
 	DeleteOldTelemetry(ctx context.Context, reportedAt pgtype.Timestamptz) error
 	// Keeps the trace IATA filter in step with packet retention.
@@ -60,12 +79,32 @@ type Querier interface {
 	DeleteRollupHour(ctx context.Context, hour pgtype.Timestamptz) error
 	// Dirty hours that can no longer be re-rolled.
 	DeleteStaleDirtyHours(ctx context.Context) error
+	// Every site of every message in (after_id, through_id]: the backfill and the reconcile's message part.
+	FillChannelMessageIATAsByMessages(ctx context.Context, arg FillChannelMessageIATAsByMessagesParams) (int64, error)
+	// The site of every group-text observation in (after_id, through_id] whose packet has a message.
+	// An untyped observation is checked too: older rows may have no payload type.
+	FillChannelMessageIATAsByObservations(ctx context.Context, arg FillChannelMessageIATAsByObservationsParams) (int64, error)
+	// The audit's fill: each (packet, site) of the observations in (after_id, through_id], at its latest hearing there
+	// among all of the packet's observations, so a pair heard again in a later slice comes back at that hearing.
+	FillPacketSitesAudit(ctx context.Context, arg FillPacketSitesAuditParams) (int64, error)
+	// Copyright 2026 Beacon Contributors
+	// SPDX-License-Identifier: AGPL-3.0-or-later
+	// Each (packet, site) of the observations in (after_id, through_id], at its latest hearing there.
+	// Pairs already at or past that hearing are skipped before the insert, so a clean slice writes nothing.
+	FillPacketSitesSlice(ctx context.Context, arg FillPacketSitesSliceParams) (int64, error)
+	// Hop prefixes that match >1 node in an IATA, per width, into the sweep's temp table.
+	FillReconfirmAmb(ctx context.Context) error
 	FillRollupObs(ctx context.Context, dollar_1 pgtype.Timestamptz) error
+	// The requested sites that have at least one row: a site with none adds no row to any site page.
+	FilterKnownSites(ctx context.Context, iatas []string) ([]string, error)
 	// Marks the hour complete and bumps the revision only when its content changed.
 	FinishRollupHour(ctx context.Context, arg FinishRollupHourParams) (bool, error)
 	GetAccount(ctx context.Context, id uuid.UUID) (Account, error)
 	// Both counters only grow, so their sum changes whenever rolled content or coverage does.
 	GetAnalyticsRevision(ctx context.Context) (int64, error)
+	GetBackgroundState(ctx context.Context, key string) (json.RawMessage, error)
+	// A state with its age on the database clock: how long since its writer last saved it.
+	GetBackgroundStateAge(ctx context.Context, key string) (GetBackgroundStateAgeRow, error)
 	GetChannelByID(ctx context.Context, id int32) (Channel, error)
 	GetEarliestCompleteRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
 	// ============================================================
@@ -79,6 +118,7 @@ type Querier interface {
 	GetIATABorder(ctx context.Context, iata string) (json.RawMessage, error)
 	// Routes containing @nodes[i] in IATA @iatas[i] (aligned, one node per IATA). The &&
 	// drives the node_ids GIN index; the indexed check keeps LIMIT counting real matches.
+	// hop_count + 0: no hop_count-led index may supply this order (a LIMIT walk would check the GIN conditions row by row).
 	GetKnownRoutesByNodes(ctx context.Context, arg GetKnownRoutesByNodesParams) ([]GetKnownRoutesByNodesRow, error)
 	GetLatestCompleteRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
 	// Neighbor rows between @a_nodes and @b_nodes in either orientation: ingest writes
@@ -90,6 +130,7 @@ type Querier interface {
 	GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]GetNodeNeighborsRow, error)
 	GetNodesByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]GetNodesByIDsRow, error)
 	GetNodesByPubkeys(ctx context.Context, pubkeys [][]byte) ([]GetNodesByPubkeysRow, error)
+	GetObservationIDRange(ctx context.Context) (GetObservationIDRangeRow, error)
 	// Hour-or-coarser buckets summed from the hourly rollup; same COALESCE-plus-count shape as the raw query.
 	// Hours from @tail_start on aren't rolled yet and read raw rows.
 	GetObserverActivityHourly(ctx context.Context, arg GetObserverActivityHourlyParams) ([]GetObserverActivityHourlyRow, error)
@@ -112,12 +153,18 @@ type Querier interface {
 	GetObserverRadio(ctx context.Context, id uuid.UUID) (GetObserverRadioRow, error)
 	GetObserverScopes(ctx context.Context, observerID uuid.UUID) ([]string, error)
 	GetObserverTelemetry(ctx context.Context, arg GetObserverTelemetryParams) ([]GetObserverTelemetryRow, error)
+	// The API's only telemetry shape (a start, no end): reported_at >= @since without the NULL branch.
+	GetObserverTelemetrySince(ctx context.Context, arg GetObserverTelemetrySinceParams) ([]GetObserverTelemetrySinceRow, error)
 	GetPacketByHash(ctx context.Context, packetHash []byte) (GetPacketByHashRow, error)
 	// Return distinct observation IATAs in first-heard order for path resolution,
 	// without fetching full observations separately for every trace packet.
 	GetPacketsByTraceTag(ctx context.Context, decode string) ([]GetPacketsByTraceTagRow, error)
 	// All HTTP aggregates read the hourly rollup, never observations.
 	GetPathStats(ctx context.Context, arg GetPathStatsParams) ([]GetPathStatsRow, error)
+	// GetPathStats for at most 32 distinct IATAs: one rollup probe per (hour, IATA). @since and @until are UTC hours.
+	// The hours walked stay inside the table's own [min(hour), max(hour)]; an empty table walks none
+	// (a NULL start makes generate_series return no rows).
+	GetPathStatsProbe(ctx context.Context, arg GetPathStatsProbeParams) ([]GetPathStatsProbeRow, error)
 	GetRadioPresets(ctx context.Context, arg GetRadioPresetsParams) ([]MvRadioPreset, error)
 	GetRegion(ctx context.Context, id int32) (GetRegionRow, error)
 	GetRegionBySlug(ctx context.Context, slug string) (GetRegionBySlugRow, error)
@@ -142,8 +189,10 @@ type Querier interface {
 	// latest measured drift, not an aggregate over a period.
 	// Select the filtered page before aggregating its IATA memberships.
 	GetStatsClockDrift(ctx context.Context, arg GetStatsClockDriftParams) ([]GetStatsClockDriftRow, error)
-	// Returns node counts grouped by type, optionally filtered by IATA.
-	GetStatsNodeTypes(ctx context.Context, dollar_1 []string) ([]GetStatsNodeTypesRow, error)
+	// Unfiltered node counts by type; never reads node_iatas.
+	GetStatsNodeTypesAll(ctx context.Context) ([]GetStatsNodeTypesAllRow, error)
+	// Node counts by type for nodes heard in any of @iatas.
+	GetStatsNodeTypesByIATAs(ctx context.Context, iatas []string) ([]GetStatsNodeTypesByIATAsRow, error)
 	// Payload-type observation counts since the given hour, from the hourly rollup.
 	GetStatsPayloadBreakdown(ctx context.Context, arg GetStatsPayloadBreakdownParams) ([]GetStatsPayloadBreakdownRow, error)
 	// One row per hour in [since, until) plus a summary row (hour NULL) over its complete hours.
@@ -153,6 +202,9 @@ type Querier interface {
 	// Top N advertisers since the given hour, ranked by flood or direct adverts (@sort). Each ADVERT
 	// packet counts once per hour heard, however many of the requested IATAs heard it. Live names win.
 	GetStatsTopAdvertisers(ctx context.Context, arg GetStatsTopAdvertisersParams) ([]GetStatsTopAdvertisersRow, error)
+	// GetStatsTopAdvertisers for at most 32 distinct IATAs: the hearings part probes per (hour, IATA),
+	// walking only hours inside the hearings table's [min(hour), max(hour)].
+	GetStatsTopAdvertisersProbe(ctx context.Context, arg GetStatsTopAdvertisersProbeParams) ([]GetStatsTopAdvertisersProbeRow, error)
 	// Top N observers since the given hour. Counts sum across matched IATAs; iata is a
 	// representative one. Live names win over the rolled snapshot.
 	GetStatsTopObservers(ctx context.Context, arg GetStatsTopObserversParams) ([]GetStatsTopObserversRow, error)
@@ -162,10 +214,18 @@ type Querier interface {
 	// Nodes by ADVERT hearings since the given hour. Live names win over the rolled snapshot;
 	// node_id is NULL once the node row is gone. iata is a representative one.
 	GetTopNodes(ctx context.Context, arg GetTopNodesParams) ([]GetTopNodesRow, error)
+	// GetTopNodes for at most 32 distinct IATAs: one rollup probe per (hour, IATA). @since is a UTC hour.
+	// The hours walked stay inside the table's own [min(hour), max(hour)]; an empty table walks none
+	// (a NULL start makes generate_series return no rows).
+	GetTopNodesProbe(ctx context.Context, arg GetTopNodesProbeParams) ([]GetTopNodesProbeRow, error)
 	// Reduce route history to unique adjacent pairs before transferring it to a browser.
+	// Keep the exact window while using the surviving millisecond keyset indexes.
 	GetTopologyLinks(ctx context.Context, arg GetTopologyLinksParams) ([]GetTopologyLinksRow, error)
 	GetTransportScopeByName(ctx context.Context, name string) (int32, error)
 	GetTransportScopes(ctx context.Context) ([]GetTransportScopesRow, error)
+	// Whether any observation up to @max_id lacks a payload type. A full scan, run at most once per
+	// process by the payload-type backfill.
+	HasUntypedObservations(ctx context.Context, maxID int64) (bool, error)
 	// ============================================================
 	// CHANNEL MESSAGES
 	// ============================================================
@@ -174,11 +234,18 @@ type Querier interface {
 	// message_count is a lifetime count, bumped only for a new message. A historical (backfilled)
 	// message queues its observation hours for a re-roll in the same statement, so the two can't diverge.
 	InsertChannelMessage(ctx context.Context, arg InsertChannelMessageParams) (InsertChannelMessageRow, error)
+	// The seeded insert's fallback: the same statement without the site seed. The read-model
+	// reconcile adds the message's sites within one interval.
+	InsertChannelMessageUnseeded(ctx context.Context, arg InsertChannelMessageUnseededParams) (InsertChannelMessageUnseededRow, error)
 	// ============================================================
 	// PACKET OBSERVATIONS
 	// ============================================================
-	// Bumps packets.observation_count only for a new row; a duplicate returns the current count.
+	// Bumps packets.observation_count and moves the packet's site row forward only for a new row; a duplicate
+	// returns the current count and writes nothing.
 	InsertObservation(ctx context.Context, arg InsertObservationParams) (InsertObservationRow, error)
+	// InsertObservation without the site row: the fallback when that statement fails. The caller marks the site
+	// read model untrusted; its reconcile adds the row.
+	InsertObservationUnsited(ctx context.Context, arg InsertObservationUnsitedParams) (InsertObservationUnsitedRow, error)
 	// Inserts a telemetry snapshot for an observer. The reported_at timestamp should
 	// be truncated to the configured resolution before calling to ensure deduplication.
 	InsertObserverTelemetry(ctx context.Context, arg InsertObserverTelemetryParams) error
@@ -187,7 +254,21 @@ type Querier interface {
 	// Pass empty string for iata or scope to skip those filters.
 	// Pass cursor=0 to start from the beginning.
 	ListAllChannelMessages(ctx context.Context, arg ListAllChannelMessagesParams) ([]ListAllChannelMessagesRow, error)
+	// Every channel filtered by sites: each site's newest message ids from the read model, merged.
+	ListAllChannelMessagesByIATAs(ctx context.Context, arg ListAllChannelMessagesByIATAsParams) ([]ListAllChannelMessagesByIATAsRow, error)
+	// Every channel, unfiltered: a walk by id; a message counts once it has a stored observation.
+	ListAllChannelMessagesPlain(ctx context.Context, arg ListAllChannelMessagesPlainParams) ([]ListAllChannelMessagesPlainRow, error)
+	// Every channel filtered by scope alone: the scope's newest message ids from the read model.
+	ListAllChannelMessagesPlainScoped(ctx context.Context, arg ListAllChannelMessagesPlainScopedParams) ([]ListAllChannelMessagesPlainScopedRow, error)
+	// Every channel with since, optionally by scope (no sites): a walk by id.
+	ListAllChannelMessagesSince(ctx context.Context, arg ListAllChannelMessagesSinceParams) ([]ListAllChannelMessagesSinceRow, error)
 	ListChannelCatalogues(ctx context.Context) ([]MeshmapperChannelCatalogue, error)
+	// Every channel key and its id, preloaded at boot for the ingest write-through.
+	ListChannelIDs(ctx context.Context) ([]ListChannelIDsRow, error)
+	// The busiest (channel, site) pairs among recent messages; the first-time verification compares their pages.
+	ListChannelMessageIATASamples(ctx context.Context, arg ListChannelMessageIATASamplesParams) ([]ListChannelMessageIATASamplesRow, error)
+	// The busiest (channel, scope) pairs among recent messages, with the scope name today's statement filters on.
+	ListChannelMessageScopeSamples(ctx context.Context, arg ListChannelMessageScopeSamplesParams) ([]ListChannelMessageScopeSamplesRow, error)
 	// Returns messages for a channel identified by integer ID.
 	// Pass a zero/null timestamp for since to return all messages up to limit.
 	// Pass empty string for iata to skip IATA filtering.
@@ -198,25 +279,38 @@ type Querier interface {
 	// Pass empty string for iata or scope to skip those filters.
 	// Pass cursor=0 to start from the beginning.
 	ListChannelMessagesByHash(ctx context.Context, arg ListChannelMessagesByHashParams) ([]ListChannelMessagesByHashRow, error)
+	// One channel filtered by sites: each site's newest message ids from the read model, merged.
+	ListChannelMessagesByIATAs(ctx context.Context, arg ListChannelMessagesByIATAsParams) ([]ListChannelMessagesByIATAsRow, error)
+	// One channel filtered by sites and scope.
+	ListChannelMessagesByIATAsScoped(ctx context.Context, arg ListChannelMessagesByIATAsScopedParams) ([]ListChannelMessagesByIATAsScopedRow, error)
+	// One channel, unfiltered: a walk of the channel by id; a message counts once it has a stored observation.
+	ListChannelMessagesPlain(ctx context.Context, arg ListChannelMessagesPlainParams) ([]ListChannelMessagesPlainRow, error)
+	// One channel and scope: the read model has a row exactly when the message has a stored observation.
+	ListChannelMessagesPlainScoped(ctx context.Context, arg ListChannelMessagesPlainScopedParams) ([]ListChannelMessagesPlainScopedRow, error)
+	// One channel with since (no client sends it): a channel walk; sites filter through the read model.
+	ListChannelMessagesSinceWalk(ctx context.Context, arg ListChannelMessagesSinceWalkParams) ([]ListChannelMessagesSinceWalkRow, error)
 	// Channels ordered by last seen, optionally filtered by hash and/or IATAs.
 	// A channel belongs to an IATA when MeshMapper lists it there or config scopes it
 	// to a region containing it (or Beacon-wide). NULL hash / empty array / NULL key_known skip those filters.
 	// Pass cursor=0 to start from the beginning (cursor is last_seen epoch ms).
 	ListChannels(ctx context.Context, arg ListChannelsParams) ([]Channel, error)
 	// Keep the non-null tuple boundary separate from the legacy optional cursor so
-	// generic prepared plans can seek directly into the composite ordered index.
+	// generic prepared plans see a plain row comparison on (last_seen, id).
 	ListChannelsAfter(ctx context.Context, arg ListChannelsAfterParams) ([]Channel, error)
 	// Only complete hours whose raw rows are still intact can be re-rolled. Queued missing hours
 	// wait: their first roll consumes the entry only if the entry predates its snapshot.
 	ListDirtyRollupHours(ctx context.Context, limit int32) ([]pgtype.Timestamptz, error)
 	ListHeardIATAs(ctx context.Context) ([]string, error)
 	ListIATAs(ctx context.Context) ([]IataCode, error)
-	// Only one branch runs. Keep the IATA range ordered by the composite index:
-	// generic plans can otherwise prefer scanning the global timestamp index.
-	// The text equality preserves exact input matching, including trailing spaces.
-	// Pages by (last_seen to the ms, id) so routes sharing the cursor's millisecond
-	// aren't skipped; cursor id 0 keeps the plain timestamp cursor.
-	ListKnownRoutes(ctx context.Context, arg ListKnownRoutesParams) ([]ListKnownRoutesRow, error)
+	// iata as a range keeps it in the pathkeys, so only idx_known_routes_iata_keyset returns rows in
+	// order; with = a generic plan may walk the global keyset. No cursor: NULL ts and id 0.
+	ListKnownRoutesByIATA(ctx context.Context, arg ListKnownRoutesByIATAParams) ([]ListKnownRoutesByIATARow, error)
+	// Custom plans only (class C: PlanRouter runs it unnamed): a generic plan walks the whole region for a rare hop.
+	// The = form prices the Sort correctly; the range form under-costs it when a hop index exists.
+	ListKnownRoutesByIATAHop(ctx context.Context, arg ListKnownRoutesByIATAHopParams) ([]ListKnownRoutesByIATAHopRow, error)
+	ListKnownRoutesGlobal(ctx context.Context, arg ListKnownRoutesGlobalParams) ([]ListKnownRoutesGlobalRow, error)
+	// Custom plans only (class C: PlanRouter runs it unnamed): the generic plan walks the whole keyset index for an absent hop.
+	ListKnownRoutesGlobalHop(ctx context.Context, arg ListKnownRoutesGlobalHopParams) ([]ListKnownRoutesGlobalHopRow, error)
 	// Returns messages after the given message ID, ordered oldest first.
 	// Used for WS reconnect backfill.
 	ListMessagesAfterID(ctx context.Context, arg ListMessagesAfterIDParams) ([]ListMessagesAfterIDRow, error)
@@ -225,20 +319,17 @@ type Querier interface {
 	// Limit the filtered node page before enriching IATA membership and neighbours.
 	ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNodesRow, error)
 	ListObservationsForPacket(ctx context.Context, packetHash []byte) ([]ListObservationsForPacketRow, error)
-	// Returns advert packets (payload_type=4) heard by a specific observer.
-	// Pass cursor=0 to start from the beginning, or the last seen id for pagination.
+	// Advert observations (payload_type 4) heard by one observer, oldest id first, after @cursor_id
+	// (0 starts at the beginning). Reads idx_observations_adverts; needs payload_type on every observation.
 	// Keep missing-origin adverts; the generated key field expects a string, not NULL.
 	ListObserverAdverts(ctx context.Context, arg ListObserverAdvertsParams) ([]ListObserverAdvertsRow, error)
 	// Copyright 2026 Beacon Contributors
 	// SPDX-License-Identifier: AGPL-3.0-or-later
 	ListObserverDirectory(ctx context.Context, arg ListObserverDirectoryParams) (string, error)
-	// Pass cursor=0 to start from the beginning, or the last seen observer's rownum for pagination.
-	// Note: observers use UUID PKs so we order by last_seen and use a keyset on last_seen+id.
+	// Observers newest last_seen first; the cursor is the (last_seen, id) of the last row.
 	ListObservers(ctx context.Context, arg ListObserversParams) ([]ListObserversRow, error)
-	// Returns packets with the latest observation rolled in for display.
-	// Pass cursor=0 to start from the beginning. IATA-filtered requests are
-	// served by ListPacketsByIATAs instead.
-	ListPackets(ctx context.Context, arg ListPacketsParams) ([]ListPacketsRow, error)
+	// The sites with the most packets among observations above after_id; the first-time verification pages them.
+	ListPacketSiteSamples(ctx context.Context, arg ListPacketSiteSamplesParams) ([]ListPacketSiteSamplesRow, error)
 	// Returns packets with observations after the given observation ID, ordered oldest first.
 	// Used for WS reconnect backfill. Pass afterObservationId=0 to start from the beginning.
 	ListPacketsAfterID(ctx context.Context, arg ListPacketsAfterIDParams) ([]ListPacketsAfterIDRow, error)
@@ -256,6 +347,46 @@ type Querier interface {
 	// A site that filled scan_depth still has unread history below its floor.
 	// The newest such floor is the point above which every site is covered.
 	ListPacketsByIATAs(ctx context.Context, arg ListPacketsByIATAsParams) ([]ListPacketsByIATAsRow, error)
+	// ListPacketsByIATAs from an exact (site_heard_at, packet_hash) position instead of a millisecond: a region page
+	// cursor's continuation when the site read model's bounded reads ran out of budget. The scan includes the cursor's
+	// microsecond, the page keeps the keys below the position, and ties come out packet_hash DESC.
+	// A site that filled scan_depth still has unread history below its floor.
+	// The newest such floor is the point above which every site is covered.
+	ListPacketsByIATAsAfter(ctx context.Context, arg ListPacketsByIATAsAfterParams) ([]ListPacketsByIATAsAfterRow, error)
+	// One range per named scope; a zero-hit scope costs a single index probe.
+	ListPacketsByScopes(ctx context.Context, arg ListPacketsByScopesParams) ([]ListPacketsByScopesRow, error)
+	// ListPacketsByScopes with the type tests inside each scope range (index-only through the included columns).
+	ListPacketsByScopesTypes(ctx context.Context, arg ListPacketsByScopesTypesParams) ([]ListPacketsByScopesTypesRow, error)
+	// One site: one range of its (site_heard_at, packet_hash) index.
+	ListPacketsBySite(ctx context.Context, arg ListPacketsBySiteParams) ([]ListPacketsBySiteRow, error)
+	// The page rows for keys from ListPacketsBySitesSince or ListPacketsBySitesScoped, in the given order.
+	ListPacketsBySiteKeys(ctx context.Context, arg ListPacketsBySiteKeysParams) ([]ListPacketsBySiteKeysRow, error)
+	// Two or more sites with a cursor: one range per site; a packet whose newest requested-site row is at or above
+	// the cursor was already returned, so the in-range re-check drops it.
+	ListPacketsBySites(ctx context.Context, arg ListPacketsBySitesParams) ([]ListPacketsBySitesRow, error)
+	// ListPacketsBySites for the first page or one site, where the re-check cannot match.
+	ListPacketsBySitesFirst(ctx context.Context, arg ListPacketsBySitesFirstParams) ([]ListPacketsBySitesFirstRow, error)
+	// ListPacketsBySitesSince with one range per (site, named scope).
+	ListPacketsBySitesScoped(ctx context.Context, arg ListPacketsBySitesScopedParams) ([]ListPacketsBySitesScopedRow, error)
+	// Page keys for a first_heard_at window or many type pairs (absent window sides are -infinity and infinity).
+	// Each site range is read to at most scan_depth entries, as deep as the observation statement reads, and the
+	// window and type tests filter what was read; the last row (is_floor) is the floor below which this page is
+	// incomplete, when a range filled scan_depth. Rows below the floor are left to the next page.
+	ListPacketsBySitesSince(ctx context.Context, arg ListPacketsBySitesSinceParams) ([]ListPacketsBySitesSinceRow, error)
+	// One range per (site, payload type, route type); Go passes each type list deduplicated and sends only a few
+	// type pairs here.
+	ListPacketsBySitesTyped(ctx context.Context, arg ListPacketsBySitesTypedParams) ([]ListPacketsBySitesTypedRow, error)
+	// ListPacketsBySitesTyped for the first page or one site.
+	ListPacketsBySitesTypedFirst(ctx context.Context, arg ListPacketsBySitesTypedFirstParams) ([]ListPacketsBySitesTypedFirstRow, error)
+	// One range per (payload type, route type) pair; DISTINCT keeps a repeated type from returning rows twice.
+	ListPacketsByTypes(ctx context.Context, arg ListPacketsByTypesParams) ([]ListPacketsByTypesRow, error)
+	// Unfiltered packet page: newest (last_heard_at, packet_hash) first.
+	ListPacketsPage(ctx context.Context, arg ListPacketsPageParams) ([]ListPacketsPageRow, error)
+	// first_heard_at window. Branch 1 walks last_heard_at down to since; branch 2 adds the rows a concurrent
+	// upsert left with last_heard_at below first_heard_at, which that bound cannot see.
+	ListPacketsWindow(ctx context.Context, arg ListPacketsWindowParams) ([]ListPacketsWindowRow, error)
+	// ListPacketsWindow with branch 1 run once per named scope and branch 2 limited to those scopes.
+	ListPacketsWindowScoped(ctx context.Context, arg ListPacketsWindowScopedParams) ([]ListPacketsWindowScopedRow, error)
 	// Every region with its members, for reconciling imported MeshMapper groups.
 	ListRegionState(ctx context.Context) ([]ListRegionStateRow, error)
 	// ============================================================
@@ -287,18 +418,25 @@ type Querier interface {
 	// Hours whose raw rows cleanup already started deleting can never be rolled completely.
 	// Readers report the new status, so the revision moves too.
 	MarkPartialRollupHours(ctx context.Context) error
+	MaxChannelMessageID(ctx context.Context) (int64, error)
+	MaxObservationID(ctx context.Context) (int64, error)
+	MinObservationID(ctx context.Context) (int64, error)
+	// The first message id above after_id, or 0 when there is none.
+	NextChannelMessageID(ctx context.Context, afterID int64) (int64, error)
 	OldestMissingRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
+	PacketSitesTotalBytes(ctx context.Context) (int64, error)
 	PruneImportedRegions(ctx context.Context, keep []string) ([]string, error)
 	// Drops imports for IATAs no longer configured, so their manual border returns.
 	PruneZoneBoundaries(ctx context.Context, keep []string) ([]string, error)
 	// Delete node_neighbors where the neighbor has departed from node_short_ids
 	// for that IATA, or where its prefix_4 is now ambiguous.
 	ReconfirmNeighbors(ctx context.Context) error
-	// Checks one batch of least-recently-reconfirmed routes: deletes those with a departed
-	// hop node or a hop prefix now matching >1 node in that IATA (length-aware:
-	// 1/2/3/4-byte hop prefixes check prefix_1/2/3/4; ambiguity set supplied by AmbiguousPrefixes),
-	// and stamps the survivors.
-	ReconfirmRoutes(ctx context.Context, arg ReconfirmRoutesParams) (int64, error)
+	// The next batch_size routes after the cursor in pkey order: deletes those with a departed hop
+	// node or a hop prefix matching >1 node in that IATA (length-aware, reconfirm_amb). Writes no stamp.
+	// The DELETE re-checks the newest row version. An empty last_iata means the walk passed the end.
+	ReconfirmRoutesBatch(ctx context.Context, arg ReconfirmRoutesBatchParams) (ReconfirmRoutesBatchRow, error)
+	// Key of the last route in a slice that timed out: the caller passes the slice's row count - 1.
+	ReconfirmSliceEnd(ctx context.Context, arg ReconfirmSliceEndParams) (ReconfirmSliceEndRow, error)
 	// One hearing of a TRACE packet: trace_iatas refreshes at most hourly and the tag's heard
 	// window widens (the first hearing replaces the packet's provisional times). Packet counts
 	// and payloads come from UpsertPacket.
@@ -376,6 +514,7 @@ type Querier interface {
 	// Routes holding a source and a destination candidate; callers check order and IATA.
 	// A route's hops resolve in its own IATA, so candidates from other IATAs can't match.
 	// Both && predicates use the node_ids GIN index.
+	// hop_count + 0: no hop_count-led index may supply this order (a LIMIT walk would check the GIN conditions row by row).
 	SearchKnownRoutesByNodes(ctx context.Context, arg SearchKnownRoutesByNodesParams) ([]SearchKnownRoutesByNodesRow, error)
 	// Packets whose hash falls in [lo, hi). The materialized CTE pins the primary key
 	// range scan; otherwise generic plans walk idx_packets_last_heard across the table.
@@ -387,11 +526,26 @@ type Querier interface {
 	SetNodeMultibyteTraces(ctx context.Context, id uuid.UUID) error
 	SetPacketDecrypted(ctx context.Context, packetHash []byte) error
 	SetRollupHourPartial(ctx context.Context, hour pgtype.Timestamptz) error
+	// Read-only. Visits, through each time-ordered packet_sites index, every entry whose key was written in the last
+	// lookback (2 minutes). An index scan that reaches an entry whose heap tuple is dead to every snapshot sets the
+	// entry's LP_DEAD hint; when that leaf later fills, the inserting backend deletes hinted entries instead of splitting
+	// (nbtree simple deletion). Keeps the three indexes at about 2x a fresh build instead of 4-9x. Changes no row.
+	// The ORDER BY ... LIMIT keeps every lateral a per-front index range scan (never flattened into a join).
+	// The cap is far above any front's 2-minute volume (the busiest site: about 150 entries) and only bounds the gauge.
+	SweepPacketSitesFronts(ctx context.Context, lookback pgtype.Interval) (SweepPacketSitesFrontsRow, error)
+	// Write-through for a cached keyed channel: the UpsertChannel conflict update, by id.
+	// No row (deleted or re-keyed since cached) sends the caller back to UpsertChannel.
+	TouchChannel(ctx context.Context, arg TouchChannelParams) (int32, error)
+	// Write-through for a cached hash-only channel: the UpsertChannelHashOnly conflict update, by id.
+	TouchChannelHashOnly(ctx context.Context, arg TouchChannelHashOnlyParams) (int32, error)
 	TouchObserverBrokers(ctx context.Context, arg TouchObserverBrokersParams) error
 	// Batched flush of coalesced presence bumps. GREATEST keeps a late flush
 	// from regressing a newer write-through (e.g. a status update).
 	TouchObservers(ctx context.Context, arg TouchObserversParams) error
 	TouchPackets(ctx context.Context, arg TouchPacketsParams) error
+	// Page keys straight from the observations, independent of packet_sites. floor_ts bounds the read: keys at or
+	// above it are exact, because a packet's newest requested-site hearing is unchanged by dropping older ones.
+	TruthPacketsBySitesPage(ctx context.Context, arg TruthPacketsBySitesPageParams) ([]TruthPacketsBySitesPageRow, error)
 	// ============================================================
 	// HOURLY ANALYTICS ROLLUPS
 	// An hour [H, H+1h) is eligible once now() >= H + 95 min (ingest clamps heard_at to ±30 min).
@@ -402,6 +556,7 @@ type Querier interface {
 	// unconditionally overwrites, unlike the neighbor-side region_scope.
 	UpdateObserverRegionScope(ctx context.Context, arg UpdateObserverRegionScopeParams) error
 	UpdateObserverStatus(ctx context.Context, arg UpdateObserverStatusParams) (uuid.UUID, error)
+	UpsertBackgroundState(ctx context.Context, arg UpsertBackgroundStateParams) error
 	// ============================================================
 	// CHANNELS
 	// ============================================================

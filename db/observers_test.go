@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -82,6 +83,7 @@ func TestListObservers_Pagination(t *testing.T) {
 		rows[i] = sqlc.ListObserversRow{
 			ID:           observerID,
 			LastStatusAt: lastStatusAt,
+			LastSeen:     lastStatusAt,
 		}
 	}
 
@@ -90,7 +92,7 @@ func TestListObservers_Pagination(t *testing.T) {
 		Return(rows, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListObservers(context.Background(), []string{"YVR"}, "", "", "", "", "", 0, 2)
+	page, err := store.ListObservers(context.Background(), []string{"YVR"}, "", "", "", "", "", 0, nil, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -126,7 +128,7 @@ func TestListObservers_RadioStringFormatting(t *testing.T) {
 		}, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListObservers(context.Background(), nil, "", "", "", "", "", 0, 10)
+	page, err := store.ListObservers(context.Background(), nil, "", "", "", "", "", 0, nil, 10)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -154,7 +156,7 @@ func TestListObservers_NilRadioFields(t *testing.T) {
 		}, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListObservers(context.Background(), nil, "", "", "", "", "", 0, 10)
+	page, err := store.ListObservers(context.Background(), nil, "", "", "", "", "", 0, nil, 10)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -172,7 +174,7 @@ func TestListObservers_DBError(t *testing.T) {
 		Return(nil, errors.New("db error"))
 
 	store := &Store{q: mock}
-	_, err := store.ListObservers(context.Background(), nil, "", "", "", "", "", 0, 10)
+	_, err := store.ListObservers(context.Background(), nil, "", "", "", "", "", 0, nil, 10)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -393,6 +395,70 @@ func TestGetObserverTelemetry_Empty(t *testing.T) {
 	}
 }
 
+// A start with no end, the only shape the API sends, reads the since-only statement; any other shape keeps the
+// catch-all. Both map the same rows to the same points.
+func TestGetObserverTelemetry_Dispatch(t *testing.T) {
+	observerID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	since := time.Date(2026, 9, 30, 6, 0, 0, 0, time.UTC)
+	until := since.Add(48 * time.Hour)
+	bat, tx, rx, noise, q, dbg, rerr := int32(3700), float32(110), float32(12), float32(-91), int32(2), int32(5), int32(1)
+	up := int64(13600)
+	row := sqlc.GetObserverTelemetryRow{
+		ID: 7, ReportedAt: pgtype.Timestamptz{Time: since.Add(time.Hour), Valid: true},
+		BatteryVoltageMv: &bat, AirtimeTxSecs: &tx, AirtimeRxSecs: &rx, NoiseFloorDb: &noise,
+		UptimeSeconds: &up, QueueLength: &q, DebugFlags: &dbg, ReceiveErrors: &rerr,
+	}
+	want := &api.ObserverTelemetry{Points: []api.ObserverTelemetryPoint{{
+		T: since.Add(time.Hour).UnixMilli(), BatteryMV: &bat, AirtimeTxSecs: &tx, AirtimeRxSecs: &rx,
+		NoiseFloorDB: &noise, UptimeSeconds: &up, QueueLength: &q, ReceiveErrors: &rerr,
+	}}}
+
+	cases := []struct {
+		name         string
+		since, until time.Time
+		expect       func(m *mockdb.MockQuerier)
+	}{
+		{"since only", since, time.Time{}, func(m *mockdb.MockQuerier) {
+			m.EXPECT().GetObserverTelemetrySince(gomock.Any(), sqlc.GetObserverTelemetrySinceParams{
+				ObserverID: observerID, Since: pgtype.Timestamptz{Time: since, Valid: true}, AfterID: 7,
+			}).Return([]sqlc.GetObserverTelemetrySinceRow{sqlc.GetObserverTelemetrySinceRow(row)}, nil)
+		}},
+		{"since and until", since, until, func(m *mockdb.MockQuerier) {
+			m.EXPECT().GetObserverTelemetry(gomock.Any(), sqlc.GetObserverTelemetryParams{
+				ObserverID: observerID,
+				Column2:    pgtype.Timestamptz{Time: since, Valid: true},
+				Column3:    pgtype.Timestamptz{Time: until, Valid: true},
+				Column4:    7,
+			}).Return([]sqlc.GetObserverTelemetryRow{row}, nil)
+		}},
+		{"until only", time.Time{}, until, func(m *mockdb.MockQuerier) {
+			m.EXPECT().GetObserverTelemetry(gomock.Any(), sqlc.GetObserverTelemetryParams{
+				ObserverID: observerID,
+				Column3:    pgtype.Timestamptz{Time: until, Valid: true},
+				Column4:    7,
+			}).Return([]sqlc.GetObserverTelemetryRow{row}, nil)
+		}},
+		{"neither", time.Time{}, time.Time{}, func(m *mockdb.MockQuerier) {
+			m.EXPECT().GetObserverTelemetry(gomock.Any(), sqlc.GetObserverTelemetryParams{
+				ObserverID: observerID, Column4: 7,
+			}).Return([]sqlc.GetObserverTelemetryRow{row}, nil)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := mockdb.NewMockQuerier(gomock.NewController(t))
+			tc.expect(mock)
+			got, err := (&Store{q: mock}).GetObserverTelemetry(context.Background(), observerID, tc.since, tc.until, 7)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("telemetry = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
 func TestGetObserverTelemetryBucketed_Mapping(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mock := mockdb.NewMockQuerier(ctrl)
@@ -407,12 +473,15 @@ func TestGetObserverTelemetryBucketed_Mapping(t *testing.T) {
 	bat := int32(3700)
 
 	mock.EXPECT().
-		GetObserverTelemetry(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, p sqlc.GetObserverTelemetryParams) ([]sqlc.GetObserverTelemetryRow, error) {
-			if want := since.Add(-24 * time.Hour); !p.Column2.Time.Equal(want) {
-				t.Errorf("since = %v, want lookback to %v", p.Column2.Time, want)
+		GetObserverTelemetrySince(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, p sqlc.GetObserverTelemetrySinceParams) ([]sqlc.GetObserverTelemetrySinceRow, error) {
+			if want := since.Add(-24 * time.Hour); !p.Since.Valid || !p.Since.Time.Equal(want) {
+				t.Errorf("since = %+v, want lookback to %v", p.Since, want)
 			}
-			return []sqlc.GetObserverTelemetryRow{
+			if p.ObserverID != observerID || p.AfterID != 0 {
+				t.Errorf("params = %+v", p)
+			}
+			return []sqlc.GetObserverTelemetrySinceRow{
 				{ReportedAt: at(-1), AirtimeTxSecs: f(100), UptimeSeconds: up(10000)},
 				{ReportedAt: at(0), AirtimeTxSecs: f(110), UptimeSeconds: up(13600), BatteryVoltageMv: &bat},
 			}, nil
@@ -952,5 +1021,70 @@ func TestGetObserverActivity_SinceAlignedToInterval(t *testing.T) {
 	}
 	if !gotInterval.Valid || gotInterval.Microseconds != interval.Microseconds() {
 		t.Errorf("expected interval %d us, got %+v", interval.Microseconds(), gotInterval)
+	}
+}
+
+// Page 1 starts at infinity, a numeric cursor pairs its millisecond with the nil uuid, and a pageCursor sends its
+// exact pair, winning over a numeric cursor sent alongside.
+func TestListObservers_CursorParams(t *testing.T) {
+	const legacy = int64(1792442625019)
+	pc := &api.ObserverCursor{LastSeen: time.UnixMicro(1792442625019123).UTC(), ID: uuid.MustParse("0b0b0b0b-0000-0000-0000-000000000001")}
+	for _, tc := range []struct {
+		name   string
+		cursor int64
+		pc     *api.ObserverCursor
+		ts     pgtype.Timestamptz
+		id     uuid.UUID
+	}{
+		{"page 1", 0, nil, pgtype.Timestamptz{InfinityModifier: pgtype.Infinity, Valid: true}, uuid.Nil},
+		{"negative cursor", -5, nil, pgtype.Timestamptz{InfinityModifier: pgtype.Infinity, Valid: true}, uuid.Nil},
+		{"legacy cursor", legacy, nil, pgtype.Timestamptz{Time: time.UnixMilli(legacy), Valid: true}, uuid.Nil},
+		{"pageCursor", 0, pc, pgtype.Timestamptz{Time: pc.LastSeen, Valid: true}, pc.ID},
+		{"pageCursor wins", legacy, pc, pgtype.Timestamptz{Time: pc.LastSeen, Valid: true}, pc.ID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			mock := mockdb.NewMockQuerier(ctrl)
+			mock.EXPECT().
+				ListObservers(gomock.Any(), gomock.Eq(sqlc.ListObserversParams{
+					Column1: []string{"YVR"}, Column2: "repeater", Column3: "b1", Column4: "online", Column5: "n",
+					Column6: tc.ts, Limit: 6, Column8: "#test", Column9: tc.id,
+				})).
+				Return(nil, nil)
+			store := &Store{q: mock}
+			page, err := store.ListObservers(context.Background(), []string{"YVR"}, "repeater", "b1", "online", "n", "#test", tc.cursor, tc.pc, 5)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if page.Items == nil || page.HasMore || page.NextCursor != nil || page.NextPageCursor != nil {
+				t.Fatalf("empty page: %+v", page)
+			}
+		})
+	}
+}
+
+// Both cursors come from the last row's last_seen, also when its last_status_at is NULL.
+func TestListObservers_NextCursorFromLastSeen(t *testing.T) {
+	rows := []sqlc.ListObserversRow{
+		{ID: uuid.MustParse("00000000-0000-0000-0000-000000000001"), LastSeen: pgtype.Timestamptz{Time: time.UnixMicro(1792442625019123).UTC(), Valid: true},
+			LastStatusAt: pgtype.Timestamptz{Time: time.UnixMilli(1700000000000), Valid: true}},
+		{ID: uuid.MustParse("00000000-0000-0000-0000-000000000002"), LastSeen: pgtype.Timestamptz{Time: time.UnixMicro(1792442625018456).UTC(), Valid: true}},
+		{ID: uuid.MustParse("00000000-0000-0000-0000-000000000003"), LastSeen: pgtype.Timestamptz{Time: time.UnixMicro(1792442625017000).UTC(), Valid: true}},
+	}
+	for _, limit := range []int32{1, 2} {
+		ctrl := gomock.NewController(t)
+		mock := mockdb.NewMockQuerier(ctrl)
+		mock.EXPECT().ListObservers(gomock.Any(), gomock.Any()).Return(rows[:limit+1], nil)
+		store := &Store{q: mock}
+		page, err := store.ListObservers(context.Background(), nil, "", "", "", "", "", 0, nil, limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		last := rows[limit-1]
+		want := api.ObserverCursor{LastSeen: last.LastSeen.Time, ID: last.ID}.String()
+		if !page.HasMore || page.NextCursor == nil || *page.NextCursor != last.LastSeen.Time.UnixMilli() ||
+			page.NextPageCursor == nil || *page.NextPageCursor != want {
+			t.Fatalf("limit %d: hasMore=%t nextCursor=%v nextPageCursor=%v, want %s", limit, page.HasMore, page.NextCursor, page.NextPageCursor, want)
+		}
 	}
 }

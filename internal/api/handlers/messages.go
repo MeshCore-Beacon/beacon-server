@@ -41,6 +41,7 @@ func MessagesRouter(reader api.Reader) http.Handler {
 //	@Success	200			{object}	object
 //	@Failure	400			{object}	handlers.APIError
 //	@Failure	500			{object}	handlers.APIError
+//	@Failure	503				{object}	handlers.APIError	"Not available yet, or the server is busy: retry after Retry-After seconds"
 //	@Router		/messages [get]
 func listMessages(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -104,7 +105,9 @@ func listMessages(reader api.Reader) http.HandlerFunc {
 			messages, err = reader.ListChannelMessages(r.Context(), nil, since, limit, iatas, scope, cursor)
 		}
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			if !respondUnavailableFor(w, err, modelCmi) {
+				respondError(w, http.StatusInternalServerError, "internal server error")
+			}
 			return
 		}
 		respond(w, http.StatusOK, messages)

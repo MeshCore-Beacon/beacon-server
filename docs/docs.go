@@ -439,7 +439,7 @@ const docTemplate = `{
                         "AdminKey": []
                     }
                 ],
-                "description": "Returns current CORS options, auth configuration status and configured broker count. Credential fields and other configuration are excluded. Runtime origin updates are lost on restart.",
+                "description": "Returns current CORS options, auth configuration status, configured broker count and, when database guards are configured, their state. Credential fields and other configuration are excluded. Runtime origin updates are lost on restart. PUT also replaces guards.enforce at runtime; the configuration file is the boot default.",
                 "produces": [
                     "application/json"
                 ],
@@ -480,7 +480,7 @@ const docTemplate = `{
                         "AdminKey": []
                     }
                 ],
-                "description": "Replaces only cors.allowed_origins immediately. Updates are serialized; concurrent valid updates are applied one at a time. Already-running requests may finish with the previous policy. Nothing is persisted; restart reloads saved configuration.",
+                "description": "Replaces cors.allowed_origins, guards.enforce or both immediately; at least one is required. Both are validated before either is applied. An empty guards.enforce list makes every family observe. Updates are serialized; concurrent valid updates are applied one at a time. Already-running requests may finish with the previous policy. Nothing is persisted; restart reloads saved configuration.",
                 "consumes": [
                     "application/json"
                 ],
@@ -490,10 +490,10 @@ const docTemplate = `{
                 "tags": [
                     "Admin"
                 ],
-                "summary": "Update runtime CORS origins",
+                "summary": "Update runtime CORS origins and enforced guard families",
                 "parameters": [
                     {
-                        "description": "1-32 ASCII HTTP(S) origins, at most 512 bytes each; one hostname wildcard is supported, or a sole *. Empty/null lists and unsupported fields are rejected. Body at most 16 KiB.",
+                        "description": "cors.allowed_origins: 1-32 ASCII HTTP(S) origins, at most 512 bytes each; one hostname wildcard is supported, or a sole *. Empty/null lists and unsupported fields are rejected. guards.enforce: guard family names, possibly empty. Body at most 16 KiB.",
                         "name": "config",
                         "in": "body",
                         "required": true,
@@ -538,6 +538,127 @@ const docTemplate = `{
                     },
                     "415": {
                         "description": "Unsupported Media Type",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/db/planguard": {
+            "get": {
+                "security": [
+                    {
+                        "AdminKey": []
+                    }
+                ],
+                "description": "Plans every corpus statement in custom and generic mode against this database, read-only and without executing it (plain EXPLAIN, 5 s per plan, 1 s lock timeout), and checks each plan against the corpus. Off unless planguard.daily_check is set (404 \"planguard daily check is disabled\"); when on, the check runs about an hour after boot and then daily, and until its first run this returns 404. fresh=true runs it now, shared with any run in progress and cancelled at server shutdown; within 5 minutes of the last run's end it starts nothing and returns the last successful report (started_at gives its age), or 500 when no run has succeeded yet. A read-only server cannot enable the check (configuration refuses planguard.daily_check with server.read_only), so there this returns 404 \"planguard daily check is disabled\".",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Last daily plan regression check",
+                "parameters": [
+                    {
+                        "type": "boolean",
+                        "description": "Run the check now instead of returning the last report",
+                        "name": "fresh",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PlanguardReport"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/db/statements": {
+            "get": {
+                "security": [
+                    {
+                        "AdminKey": []
+                    }
+                ],
+                "description": "Sums pg_stat_statements for this database by sqlc statement name, highest total execution time first. Statements without a name are summed as \"(unnamed)\". Times are milliseconds rounded to microseconds; plan_ms stays 0 unless pg_stat_statements.track_planning is on. Counters run from the last pg_stat_statements reset.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Statement statistics by sqlc name",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.DBStatementsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -782,6 +903,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
+                    },
+                    "503": {
+                        "description": "Not available yet, or the server is busy: retry after Retry-After seconds",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
                     }
                 }
             }
@@ -1002,6 +1129,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
+                    },
+                    "503": {
+                        "description": "Not available yet, or the server is busy: retry after Retry-After seconds",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
                     }
                 }
             }
@@ -1176,6 +1309,12 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "Opaque nextPageCursor from a previous response; keeps millisecond ties. Wins over cursor when both are sent",
+                        "name": "pageCursor",
+                        "in": "query"
+                    },
+                    {
                         "maximum": 200,
                         "minimum": 1,
                         "type": "integer",
@@ -1188,7 +1327,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.Page-github_com_MeshCore-Beacon_beacon-server_internal_api_NodeSummary"
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodePage"
                         }
                     },
                     "400": {
@@ -1415,8 +1554,14 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "last_seen epoch ms of last item for pagination",
+                        "description": "last_seen epoch ms of the last item",
                         "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Opaque nextPageCursor from a previous response; keeps millisecond ties. Wins over cursor when both are sent",
+                        "name": "pageCursor",
                         "in": "query"
                     },
                     {
@@ -1432,7 +1577,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.Page-github_com_MeshCore-Beacon_beacon-server_internal_api_ObserverSummary"
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverPage"
                         }
                     },
                     "400": {
@@ -1731,6 +1876,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
+                    },
+                    "503": {
+                        "description": "Not available yet, or the server is busy: retry after Retry-After seconds",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
                     }
                 }
             }
@@ -1883,8 +2034,14 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "epoch ms of last item for pagination; last_heard_at, or site-local heard_at when iatas is set",
+                        "description": "epoch ms of the last item: its last_heard_at, or its site-local heard_at when iatas, iata, region or regionId is set (with hashPrefix always last_heard_at). Prefer pageCursor where nextPageCursor is returned",
                         "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Opaque nextPageCursor from a previous response; keeps millisecond ties and wins over cursor when both are sent. A region page served without nextPageCursor pages by cursor: there cursor wins, and a pageCursor sent alone pages by its millisecond. Ignored with hashPrefix, which pages by cursor",
+                        "name": "pageCursor",
                         "in": "query"
                     },
                     {
@@ -1906,7 +2063,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object"
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PacketPage"
                         }
                     },
                     "400": {
@@ -1917,6 +2074,12 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "503": {
+                        "description": "Not available yet, or the server is busy: retry after Retry-After seconds",
                         "schema": {
                             "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
@@ -3772,6 +3935,14 @@ const docTemplate = `{
                 "cors": {
                     "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminCORSConfig"
                 },
+                "guards": {
+                    "description": "absent when database guards are not configured",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminGuardsConfig"
+                        }
+                    ]
+                },
                 "ingest": {
                     "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminIngestConfig"
                 },
@@ -3780,6 +3951,30 @@ const docTemplate = `{
                 },
                 "web": {
                     "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminWebConfig"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.AdminGuardsConfig": {
+            "type": "object",
+            "properties": {
+                "api_plan_layout": {
+                    "description": "custom_all, split or single",
+                    "type": "string"
+                },
+                "budget": {
+                    "description": "always \"shadow\"",
+                    "type": "string"
+                },
+                "enforce": {
+                    "description": "families currently enforced; the configuration file is the boot default",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "observe_only": {
+                    "description": "the single plan layout makes every family observe",
+                    "type": "boolean"
                 }
             }
         },
@@ -4086,6 +4281,48 @@ const docTemplate = `{
                 },
                 "totalHops": {
                     "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.DBStatement": {
+            "type": "object",
+            "properties": {
+                "calls": {
+                    "type": "integer"
+                },
+                "exec_ms": {
+                    "type": "number"
+                },
+                "name": {
+                    "description": "sqlc statement name; \"(unnamed)\" aggregates the rest",
+                    "type": "string"
+                },
+                "plan_ms": {
+                    "description": "0 unless pg_stat_statements.track_planning is on",
+                    "type": "number"
+                },
+                "rows": {
+                    "type": "integer"
+                },
+                "shared_hit": {
+                    "type": "integer"
+                },
+                "shared_read": {
+                    "type": "integer"
+                },
+                "wal_bytes": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.DBStatementsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.DBStatement"
+                    }
                 }
             }
         },
@@ -4452,6 +4689,26 @@ const docTemplate = `{
                 },
                 "snr": {
                     "type": "number"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.NodePage": {
+            "type": "object",
+            "properties": {
+                "hasMore": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeSummary"
+                    }
+                },
+                "nextCursor": {
+                    "type": "integer"
+                },
+                "nextPageCursor": {
+                    "type": "string"
                 }
             }
         },
@@ -4926,6 +5183,26 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverPage": {
+            "type": "object",
+            "properties": {
+                "hasMore": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverSummary"
+                    }
+                },
+                "nextCursor": {
+                    "type": "integer"
+                },
+                "nextPageCursor": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverSummary": {
             "type": "object",
             "properties": {
@@ -5250,6 +5527,26 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.PacketPage": {
+            "type": "object",
+            "properties": {
+                "hasMore": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PacketSummary"
+                    }
+                },
+                "nextCursor": {
+                    "type": "integer"
+                },
+                "nextPageCursor": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_MeshCore-Beacon_beacon-server_internal_api.PacketPathLength": {
             "type": "object",
             "properties": {
@@ -5348,40 +5645,6 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdvertObservation"
-                    }
-                },
-                "nextCursor": {
-                    "type": "integer"
-                }
-            }
-        },
-        "github_com_MeshCore-Beacon_beacon-server_internal_api.Page-github_com_MeshCore-Beacon_beacon-server_internal_api_NodeSummary": {
-            "type": "object",
-            "properties": {
-                "hasMore": {
-                    "type": "boolean"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeSummary"
-                    }
-                },
-                "nextCursor": {
-                    "type": "integer"
-                }
-            }
-        },
-        "github_com_MeshCore-Beacon_beacon-server_internal_api.Page-github_com_MeshCore-Beacon_beacon-server_internal_api_ObserverSummary": {
-            "type": "object",
-            "properties": {
-                "hasMore": {
-                    "type": "boolean"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverSummary"
                     }
                 },
                 "nextCursor": {
@@ -5515,6 +5778,81 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "payloadTypeName": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.PlanguardReport": {
+            "type": "object",
+            "properties": {
+                "clean": {
+                    "description": "no FALSE_POSITIVE, MISSED or ERROR",
+                    "type": "boolean"
+                },
+                "counts": {
+                    "description": "verdict → runs",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "duration_ms": {
+                    "type": "number"
+                },
+                "failures": {
+                    "description": "never null",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PlanguardRun"
+                    }
+                },
+                "runs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PlanguardRun"
+                    }
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "tier": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.PlanguardRun": {
+            "type": "object",
+            "properties": {
+                "drivers": {
+                    "description": "relation:node:index of each driving scan",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "entry": {
+                    "type": "string"
+                },
+                "failures": {
+                    "description": "the plan rules the run broke",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "mode": {
+                    "description": "custom or generic",
+                    "type": "string"
+                },
+                "skip": {
+                    "description": "why the run was not made",
+                    "type": "string"
+                },
+                "stmt": {
+                    "type": "string"
+                },
+                "verdict": {
+                    "description": "ok, DETECTED, MISSED, FALSE_POSITIVE, RETIRED_INDEX, KNOWN_ISSUE, SKIP or ERROR",
                     "type": "string"
                 }
             }
@@ -6277,12 +6615,12 @@ const docTemplate = `{
         },
         "github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateAdminConfigRequest": {
             "type": "object",
-            "required": [
-                "cors"
-            ],
             "properties": {
                 "cors": {
                     "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateAdminCORSRequest"
+                },
+                "guards": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateAdminGuardsRequest"
                 }
             }
         },
@@ -6297,6 +6635,20 @@ const docTemplate = `{
                 },
                 "requires_restart": {
                     "type": "boolean"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateAdminGuardsRequest": {
+            "type": "object",
+            "required": [
+                "enforce"
+            ],
+            "properties": {
+                "enforce": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
@@ -6454,7 +6806,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "/api/v1",
 	Schemes:          []string{"http", "https"},
 	Title:            "MeshCore Beacon API",
-	Description:      "MeshCore network observation backend. Ingests LoRa packets from MQTT brokers, stores in PostgreSQL, and streams live events via WebSocket.\nREST requests share a configurable per-client rate limit (default 300/minute and a 300-request one-second burst cap). Exceeded limits return HTTP 429 with error.code=rate_limited and a Retry-After header in seconds. CORS preflights and WebSocket upgrades do not consume this API budget.\nWebSocket upgrade attempts at /ws have a configurable per-client limit (default 10/minute, including failed handshakes). Rate exhaustion returns HTTP 429 with Retry-After before upgrade. An accepted socket exceeding the concurrent cap closes with code 1013 before hello; established connections remain open.",
+	Description:      "MeshCore network observation backend. Ingests LoRa packets from MQTT brokers, stores in PostgreSQL, and streams live events via WebSocket.\nREST requests share a configurable per-client rate limit (default 600/minute and a 600-request one-second burst cap). Exceeded limits return HTTP 429 with error.code=rate_limited and a Retry-After header in seconds. CORS preflights and WebSocket upgrades do not consume this API budget.\nWebSocket upgrade attempts at /ws have a configurable per-client limit (default 10/minute, including failed handshakes). Rate exhaustion returns HTTP 429 with Retry-After before upgrade. An accepted socket exceeding the concurrent cap closes with code 1013 before hello; established connections remain open.\nDatabase cost guards: a guarded family returns 429 (rate_limited, Retry-After 1) above 4 concurrent database requests per client, or 503 with Retry-After (deadline_exceeded, 5 s; service_unavailable, 2 s). Families observe by default and refuse nothing until an operator enforces them.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

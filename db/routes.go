@@ -40,30 +40,54 @@ func (s *Store) UpsertKnownRoute(ctx context.Context, nodeIDs []uuid.UUID, hashP
 }
 
 func (s *Store) ListKnownRoutes(ctx context.Context, iata string, hopCount int32, cursor time.Time, cursorID int64, limit int32) ([]api.KnownRoute, error) {
-	var cursorTS pgtype.Timestamptz
-	if !cursor.IsZero() {
-		cursorTS = pgtype.Timestamptz{Time: cursor, Valid: true}
+	// No character(3) code ends in a blank, but bpchar comparison ignores trailing blanks.
+	if iata != strings.TrimRight(iata, " ") {
+		return []api.KnownRoute{}, nil
 	}
-	sqlRows, err := s.q.ListKnownRoutes(ctx, sqlc.ListKnownRoutesParams{
-		Column1: iata,
-		Column2: hopCount,
-		Column3: cursorTS,
-		Limit:   limit,
-		Column5: cursorID,
-	})
+	rows, err := s.listKnownRouteRows(ctx, iata, hopCount, cursor, cursorID, limit)
 	if err != nil {
 		return nil, err
 	}
-	rows := make([]knownRouteRow, len(sqlRows))
-	for i, r := range sqlRows {
-		rows[i] = knownRouteRow{ID: r.ID, NodeIds: r.NodeIds, HashPrefix: r.HashPrefix, Iata: r.Iata, HopCount: r.HopCount, FirstSeen: r.FirstSeen, LastSeen: r.LastSeen, ObservationCount: r.ObservationCount}
-	}
-	ids := collectNodeIDs(rows)
-	nodes, err := s.GetNodesByIDs(ctx, ids)
+	nodes, err := s.GetNodesByIDs(ctx, collectNodeIDs(rows))
 	if err != nil {
 		return nil, err
 	}
 	return toKnownRoutes(rows, nodes), nil
+}
+
+// listKnownRouteRows runs the statement for the filter shape. The hop pair is class C, so the
+// PlanRouter sends it unnamed and a rare or absent hop is never planned generically. A zero
+// cursor is NULL; cursorID 0 is a plain timestamp cursor.
+func (s *Store) listKnownRouteRows(ctx context.Context, iata string, hopCount int32, cursor time.Time, cursorID int64, limit int32) ([]knownRouteRow, error) {
+	if iata != strings.TrimRight(iata, " ") {
+		return []knownRouteRow{}, nil
+	}
+	var cursorTS pgtype.Timestamptz
+	if !cursor.IsZero() {
+		cursorTS = pgtype.Timestamptz{Time: cursor, Valid: true}
+	}
+	switch {
+	case iata == "" && hopCount == 0:
+		return routeRows(s.q.ListKnownRoutesGlobal(ctx, sqlc.ListKnownRoutesGlobalParams{CursorTs: cursorTS, CursorID: cursorID, PageLimit: limit}))
+	case iata == "":
+		return routeRows(s.q.ListKnownRoutesGlobalHop(ctx, sqlc.ListKnownRoutesGlobalHopParams{HopCount: hopCount, CursorTs: cursorTS, CursorID: cursorID, PageLimit: limit}))
+	case hopCount == 0:
+		return routeRows(s.q.ListKnownRoutesByIATA(ctx, sqlc.ListKnownRoutesByIATAParams{Iata: iata, CursorTs: cursorTS, CursorID: cursorID, PageLimit: limit}))
+	default:
+		return routeRows(s.q.ListKnownRoutesByIATAHop(ctx, sqlc.ListKnownRoutesByIATAHopParams{Iata: iata, HopCount: hopCount, CursorTs: cursorTS, CursorID: cursorID, PageLimit: limit}))
+	}
+}
+
+// routeRows converts any /routes statement's rows; all four share knownRouteRow's fields.
+func routeRows[T sqlc.ListKnownRoutesGlobalRow | sqlc.ListKnownRoutesGlobalHopRow | sqlc.ListKnownRoutesByIATARow | sqlc.ListKnownRoutesByIATAHopRow](in []T, err error) ([]knownRouteRow, error) {
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]knownRouteRow, len(in))
+	for i, r := range in {
+		rows[i] = knownRouteRow(r)
+	}
+	return rows, nil
 }
 
 // Work bounds for one route search; the query count is fixed, these cap row volume.
@@ -465,54 +489,6 @@ func resolvedOrID(n *api.ResolvedNode, id uuid.UUID) api.ResolvedNode {
 		return api.ResolvedNode{ID: id}
 	}
 	return *n
-}
-
-// AmbiguousPrefixes is the per-IATA set of hop prefixes that resolve to more than one node.
-type AmbiguousPrefixes struct {
-	IATAs    []string
-	Lens     []int32
-	Prefixes [][]byte
-}
-
-func (s *Store) AmbiguousPrefixes(ctx context.Context) (AmbiguousPrefixes, error) {
-	rows, err := s.q.AmbiguousPrefixes(ctx)
-	if err != nil {
-		return AmbiguousPrefixes{}, err
-	}
-	amb := AmbiguousPrefixes{IATAs: make([]string, 0, len(rows)), Lens: make([]int32, 0, len(rows)), Prefixes: make([][]byte, 0, len(rows))}
-	for _, r := range rows {
-		amb.IATAs = append(amb.IATAs, r.Iata)
-		amb.Lens = append(amb.Lens, r.Len)
-		amb.Prefixes = append(amb.Prefixes, r.Prefix)
-	}
-	return amb, nil
-}
-
-// ReconfirmRoutes checks the batchSize least-recently-reconfirmed routes,
-// deleting stale or ambiguous ones and stamping the survivors.
-func (s *Store) ReconfirmRoutes(ctx context.Context, batchSize int32, before time.Time, amb AmbiguousPrefixes) (int64, error) {
-	return s.q.ReconfirmRoutes(ctx, sqlc.ReconfirmRoutesParams{
-		BatchSize: batchSize,
-		Before:    pgtype.Timestamptz{Time: before, Valid: true},
-		AmbIata:   amb.IATAs,
-		AmbLen:    amb.Lens,
-		AmbPrefix: amb.Prefixes,
-	})
-}
-
-const routeDeleteBatch = 10000
-
-// DeleteOldRoutes prunes routes per the retention rule: unconditionally past
-// retentionCutoff, and past graceCutoff when observed fewer than minObservations times.
-func (s *Store) DeleteOldRoutes(ctx context.Context, retentionCutoff time.Time, minObservations int64, graceCutoff time.Time) error {
-	return deleteInBatches(ctx, routeDeleteBatch, func(ctx context.Context, n int32) (int64, error) {
-		return s.q.DeleteOldRoutes(ctx, sqlc.DeleteOldRoutesParams{
-			RetentionCutoff: pgtype.Timestamptz{Time: retentionCutoff, Valid: true},
-			GraceCutoff:     pgtype.Timestamptz{Time: graceCutoff, Valid: true},
-			MinObservations: minObservations,
-			BatchSize:       n,
-		})
-	})
 }
 
 // knownRouteRow normalizes the per-query sqlc row structs (identical

@@ -1,0 +1,15 @@
+[
+ "Limit",
+ "  Sort",
+ "    Aggregate partial=Simple {Sorted}",
+ "      Incremental Sort",
+ "        Merge Join (Left)",
+ "          Merge Join (Left)",
+ "            Index Scan on observers o using observers_pkey scan=Backward",
+ "            Sort",
+ "              Nested Loop (Left)",
+ "                Seq Scan on observer_scopes os",
+ "                Index Scan on transport_scopes ts using transport_scopes_pkey scan=Forward",
+ "          Sort",
+ "            Seq Scan on observer_brokers ob"
+]

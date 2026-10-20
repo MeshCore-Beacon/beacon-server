@@ -1,0 +1,55 @@
+# Copyright 2026 Beacon Contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# The runner's integration corpus: route readers, a maintenance DML statement, a sleeping harness statement and
+# resolvers that return nothing or fail.
+defaults:
+  big_tables: [known_routes]
+  executions: 2
+  timeout_s: 30
+tiers:
+  local: {}
+statements:
+  ListKnownRoutesByIATA: {sqlc: ListKnownRoutesByIATA, plan: custom}
+  ListKnownRoutesGlobalHop: {sqlc: ListKnownRoutesGlobalHop, plan: custom}
+  DeleteExpiredRoutes: {sqlc: DeleteExpiredRoutes, plan: maint, kind: dml}
+  Sleep: {file: sql/harness/H.sql, plan: harness}
+  # A data-modifying CTE. The read-only test relabels it kind select, as a mislabelled statement would be, and
+  # expects the READ ONLY transaction to refuse it.
+  DeleteAll: {file: sql/harness/WriteCTE.sql, plan: harness, kind: dml}
+resolvers:
+  no_region: SELECT iata FROM known_routes WHERE iata = 'ZZZ' LIMIT 1
+  broken: SELECT (1 / 0)::text
+  busy_region: SELECT iata FROM known_routes GROUP BY iata ORDER BY count(*) DESC, iata LIMIT 1
+entries:
+  - id: sleep.timeout
+    stmt: Sleep
+    params: [3]
+    modes: [custom]
+    timeout_s: 1
+  - id: routes.byiata
+    stmt: ListKnownRoutesByIATA
+    params: [SEA, null, 0, 50]
+    modes: [custom, generic]
+    expect:
+      driver:
+        - relation: known_routes
+          index_cond: ["iata >="]
+  - id: routes.globalhop
+    stmt: ListKnownRoutesGlobalHop
+    params: [2, null, 0, 50]
+  - id: routes.delete_expired
+    stmt: DeleteExpiredRoutes
+    params: ["-infinity", 0, "2027-01-01T00:00:00Z", "2027-01-01T00:00:00Z", 1000]
+  - id: harness.delete_all
+    stmt: DeleteAll
+    modes: [custom]
+  - id: routes.byiata.no_region
+    stmt: ListKnownRoutesByIATA
+    params: [{r: no_region}, null, 0, 50]
+  - id: routes.byiata.broken
+    stmt: ListKnownRoutesByIATA
+    params: [{r: broken}, null, 0, 50]
+  - id: routes.byiata.busy
+    stmt: ListKnownRoutesByIATA
+    params: [{r: busy_region}, null, 0, 50]

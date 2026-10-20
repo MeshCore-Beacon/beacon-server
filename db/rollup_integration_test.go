@@ -246,7 +246,7 @@ func revision(t *testing.T, ctx context.Context, s *Store) int64 {
 func TestRollupHourPostgres(t *testing.T) {
 	ctx, pool := schemaPool(t)
 	h0 := rollupFixture(t, ctx, pool)
-	store := New(pool, 0, 0)
+	store := New(pool, pool, 0, 0)
 
 	r, ok, err := store.BeginRollup(ctx)
 	if err != nil || !ok {
@@ -345,7 +345,7 @@ func TestRollupHourPostgres(t *testing.T) {
 func TestRollupPartialHoursPostgres(t *testing.T) {
 	ctx, pool := schemaPool(t)
 	h0 := rollupFixture(t, ctx, pool)
-	store := New(pool, 0, 0)
+	store := New(pool, pool, 0, 0)
 	r, ok, err := store.BeginRollup(ctx)
 	if err != nil || !ok {
 		t.Fatalf("BeginRollup: ok=%v err=%v", ok, err)
@@ -392,7 +392,7 @@ func TestRollupPartialHoursPostgres(t *testing.T) {
 func TestRollupInterruptedHourPostgres(t *testing.T) {
 	ctx, pool := schemaPool(t)
 	h0 := rollupFixture(t, ctx, pool)
-	store := New(pool, 0, 0)
+	store := New(pool, pool, 0, 0)
 	r, ok, err := store.BeginRollup(ctx)
 	if err != nil || !ok {
 		t.Fatalf("BeginRollup: ok=%v err=%v", ok, err)
@@ -430,7 +430,7 @@ func TestRollupInterruptedHourPostgres(t *testing.T) {
 func TestRollupBackfillDuringFirstRollPostgres(t *testing.T) {
 	ctx, pool := schemaPool(t)
 	h0 := rollupFixture(t, ctx, pool)
-	store := New(pool, 0, 0)
+	store := New(pool, pool, 0, 0)
 	r, ok, err := store.BeginRollup(ctx)
 	if err != nil || !ok {
 		t.Fatalf("BeginRollup: ok=%v err=%v", ok, err)
@@ -484,7 +484,7 @@ func TestRollupRegisterEmptyDatabasePostgres(t *testing.T) {
 	if err := RunMigrations(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
-	r, ok, err := New(pool, 0, 0).BeginRollup(ctx)
+	r, ok, err := New(pool, pool, 0, 0).BeginRollup(ctx)
 	if err != nil || !ok {
 		t.Fatalf("BeginRollup: ok=%v err=%v", ok, err)
 	}
@@ -503,7 +503,7 @@ func TestRollupRegisterEmptyDatabasePostgres(t *testing.T) {
 func TestRollupPartialBoundaryPostgres(t *testing.T) {
 	ctx, pool := schemaPool(t)
 	h0 := rollupFixture(t, ctx, pool)
-	r, ok, err := New(pool, 0, 0).BeginRollup(ctx)
+	r, ok, err := New(pool, pool, 0, 0).BeginRollup(ctx)
 	if err != nil || !ok {
 		t.Fatalf("BeginRollup: ok=%v err=%v", ok, err)
 	}
@@ -520,5 +520,50 @@ func TestRollupPartialBoundaryPostgres(t *testing.T) {
 	}
 	if outcome, _, err := r.RollHour(ctx, h1.Add(time.Hour)); err != nil || outcome != RollComplete {
 		t.Errorf("next hour: outcome %d err %v, want complete", outcome, err)
+	}
+}
+
+// The roll raises work_mem for its own transaction only.
+func TestRollHourSetsWorkMemPostgres(t *testing.T) {
+	ctx, pool := schemaPool(t)
+	h0 := rollupFixture(t, ctx, pool)
+	c, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Release()
+	tx, err := c.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `INSERT INTO analytics_rollup_hours (hour, status) VALUES ($1, 'missing')
+		ON CONFLICT (hour) DO NOTHING`, h0); err != nil {
+		t.Fatal(err)
+	}
+	var before, during, after string
+	if err := tx.QueryRow(ctx, "SHOW work_mem").Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	if before == "256MB" {
+		t.Fatalf("work_mem already 256MB before the roll")
+	}
+	if outcome, _, err := rollHour(ctx, tx, h0); err != nil || outcome != RollComplete {
+		t.Fatalf("roll h0: outcome %d err %v", outcome, err)
+	}
+	if err := tx.QueryRow(ctx, "SHOW work_mem").Scan(&during); err != nil {
+		t.Fatal(err)
+	}
+	if during != "256MB" {
+		t.Errorf("work_mem in the roll's transaction %q, want 256MB", during)
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.QueryRow(ctx, "SHOW work_mem").Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Errorf("work_mem after the transaction %q, want %q", after, before)
 	}
 }
