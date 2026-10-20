@@ -245,14 +245,16 @@ resolvers:
   ps_sparse_site: "SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata) r ORDER BY n, iata LIMIT 1"
   ps_stale_site: "SELECT iata FROM packet_sites WHERE iata = 'NEW' LIMIT 1"
   ps_zero_scope: "SELECT ARRAY[ts.name] FROM transport_scopes ts WHERE NOT EXISTS (SELECT 1 FROM packet_sites ps WHERE ps.iata = (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r) AND ps.scope_id = ts.id) ORDER BY ts.name LIMIT 1"
-  # Observer comparison roles, picked among the newest 200,000 observation ids (a pkey range): the two busiest
-  # observers, the two quietest that heard anything, the busiest one's latest site, and windows that end at the
-  # newest reception (a max on idx_observations_heard).
+  # Observer comparison roles, picked among the observers in the newest 200,000 observation ids (a pkey range): the
+  # two busiest, the busiest one's latest site, and the two that heard least (but something) in the 7 d window, each
+  # counted on idx_observations_observer up to 1,000. cmp_unknown is a fixed non-zero id that matches no observer.
+  # Windows end at the newest reception (a max on idx_observations_heard).
   cmp_busy1: "SELECT observer_id FROM packet_observations WHERE id > (SELECT max(id) FROM packet_observations) - 200000 GROUP BY 1 ORDER BY count(*) DESC, observer_id LIMIT 1"
   cmp_busy2: "SELECT observer_id FROM packet_observations WHERE id > (SELECT max(id) FROM packet_observations) - 200000 GROUP BY 1 ORDER BY count(*) DESC, observer_id OFFSET 1 LIMIT 1"
-  cmp_quiet1: "SELECT observer_id FROM packet_observations WHERE id > (SELECT max(id) FROM packet_observations) - 200000 GROUP BY 1 ORDER BY count(*), observer_id LIMIT 1"
-  cmp_quiet2: "SELECT observer_id FROM packet_observations WHERE id > (SELECT max(id) FROM packet_observations) - 200000 GROUP BY 1 ORDER BY count(*), observer_id OFFSET 1 LIMIT 1"
+  cmp_quiet1_7d: "WITH t AS (SELECT max(heard_at) hi FROM packet_observations), c AS (SELECT DISTINCT observer_id FROM packet_observations WHERE id > (SELECT max(id) FROM packet_observations) - 200000) SELECT c.observer_id FROM c CROSS JOIN t CROSS JOIN LATERAL (SELECT count(*) n FROM (SELECT 1 FROM packet_observations x WHERE x.observer_id = c.observer_id AND x.heard_at >= t.hi - interval '7 days' AND x.heard_at < t.hi LIMIT 1000) s) k WHERE k.n > 0 ORDER BY k.n, c.observer_id LIMIT 1"
+  cmp_quiet2_7d: "WITH t AS (SELECT max(heard_at) hi FROM packet_observations), c AS (SELECT DISTINCT observer_id FROM packet_observations WHERE id > (SELECT max(id) FROM packet_observations) - 200000) SELECT c.observer_id FROM c CROSS JOIN t CROSS JOIN LATERAL (SELECT count(*) n FROM (SELECT 1 FROM packet_observations x WHERE x.observer_id = c.observer_id AND x.heard_at >= t.hi - interval '7 days' AND x.heard_at < t.hi LIMIT 1000) s) k WHERE k.n > 0 ORDER BY k.n, c.observer_id OFFSET 1 LIMIT 1"
   cmp_busy1_site: "SELECT iata FROM packet_observations WHERE id > (SELECT max(id) FROM packet_observations) - 200000 AND observer_id = (SELECT observer_id FROM packet_observations WHERE id > (SELECT max(id) FROM packet_observations) - 200000 GROUP BY 1 ORDER BY count(*) DESC, observer_id LIMIT 1) ORDER BY id DESC LIMIT 1"
+  cmp_unknown: "SELECT md5('observer comparison: no such observer')::uuid WHERE NOT EXISTS (SELECT 1 FROM observers WHERE id = md5('observer comparison: no such observer')::uuid)"
   cmp_until: "SELECT max(heard_at) FROM packet_observations"
   cmp_since_1d: "SELECT max(heard_at) - interval '1 day' FROM packet_observations"
   cmp_since_7d: "SELECT max(heard_at) - interval '7 days' FROM packet_observations"
@@ -2423,73 +2425,73 @@ entries:
     shape: "the two busiest observers, 24 h, every site"
     params: [{r: cmp_busy1}, {r: cmp_busy2}, {r: cmp_since_1d}, {r: cmp_until}, null]
     expect:
-      driver: [{relation: packet_observations, index: idx_observations_observer, nodes: ["Bitmap Heap Scan", "Index Scan"]},
-               {relation: packets, index: packets_pkey, nodes: ["Index Scan"]}]
+      driver: [{relation: packet_observations, index: idx_observations_observer, nodes: ["Bitmap Heap Scan", "Index Scan"], index_cond: ["observer_id ="]},
+               {relation: packets, index: packets_pkey, nodes: ["Index Scan"], index_cond: ["packet_hash = COALESCE"]}]
       budget: {buffers: 196341, planning_ms: 10}
-    note: "measured: 130894 B on the local copy (custom; the statement it replaced: 130231 B); budget: 1.5x measured"
+    note: "measured: 130894 B on the local copy (t_end, custom; the statement it replaced: 130894 B); budget: 1.5x measured"
   - id: obscmp.busy_7d_all
     stmt: GetObserverComparison
     shape: "the two busiest observers, 7 d, every site"
     params: [{r: cmp_busy1}, {r: cmp_busy2}, {r: cmp_since_7d}, {r: cmp_until}, null]
     expect:
-      driver: [{relation: packet_observations, index: idx_observations_observer, nodes: ["Bitmap Heap Scan", "Index Scan"]},
-               {relation: packets, index: packets_pkey, nodes: ["Index Scan"]}]
+      driver: [{relation: packet_observations, index: idx_observations_observer, nodes: ["Bitmap Heap Scan", "Index Scan"], index_cond: ["observer_id ="]},
+               {relation: packets, index: packets_pkey, nodes: ["Index Scan"], index_cond: ["packet_hash = COALESCE"]}]
       budget: {buffers: 558295, planning_ms: 10}
-    note: "measured: 372197 B on the local copy (custom; the statement it replaced: 370407 B); budget: 1.5x measured"
+    note: "measured: 372197 B on the local copy (t_end, custom; the statement it replaced: 370407 B); budget: 1.5x measured"
   - id: obscmp.busy_24h_site
     stmt: GetObserverComparison
     shape: "the two busiest observers, 24 h, the busiest one's site"
     params: [{r: cmp_busy1}, {r: cmp_busy2}, {r: cmp_since_1d}, {r: cmp_until}, [{r: cmp_busy1_site}]]
     expect:
-      driver: [{relation: packet_observations, index: idx_observations_observer, nodes: ["Bitmap Heap Scan", "Index Scan"]},
-               {relation: packets, index: packets_pkey, nodes: ["Index Scan"]}]
+      driver: [{relation: packet_observations, index: idx_observations_observer, nodes: ["Bitmap Heap Scan", "Index Scan"], index_cond: ["observer_id ="]},
+               {relation: packets, index: packets_pkey, nodes: ["Index Scan"], index_cond: ["packet_hash = COALESCE"]}]
       budget: {buffers: 91743, planning_ms: 10}
-    note: "measured: 61162 B on the local copy (custom; the statement it replaced: 60499 B); budget: 1.5x measured"
+    note: "measured: 61162 B on the local copy (t_end, custom; the statement it replaced: 61162 B); budget: 1.5x measured"
   - id: obscmp.busy_7d_region
     stmt: GetObserverComparison
     shape: "the two busiest observers, 7 d, the seven busiest sites"
     params: [{r: cmp_busy1}, {r: cmp_busy2}, {r: cmp_since_7d}, {r: cmp_until}, {r: ps_busy_sites7}]
     expect:
-      driver: [{relation: packet_observations, index: idx_observations_observer, nodes: ["Bitmap Heap Scan", "Index Scan"]},
-               {relation: packets, index: packets_pkey, nodes: ["Index Scan"]}]
+      driver: [{relation: packet_observations, index: idx_observations_observer, nodes: ["Bitmap Heap Scan", "Index Scan"], index_cond: ["observer_id ="]},
+               {relation: packets, index: packets_pkey, nodes: ["Index Scan"], index_cond: ["packet_hash = COALESCE"]}]
       budget: {buffers: 258049, planning_ms: 10}
-    note: "measured: 172033 B on the local copy (custom; the statement it replaced: 170243 B); budget: 1.5x measured"
+    note: "measured: 172033 B on the local copy (t_end, custom; the statement it replaced: 170243 B); budget: 1.5x measured"
   - id: obscmp.busy_7d_empty_region
     stmt: GetObserverComparison
     shape: "the two busiest observers, 7 d, a region with no sites"
     params: [{r: cmp_busy1}, {r: cmp_busy2}, {r: cmp_since_7d}, {r: cmp_until}, [""]]
     expect:
-      driver: [{relation: packet_observations, index: idx_observations_observer, nodes: ["Bitmap Heap Scan", "Index Scan"]},
-               {relation: packets, index: packets_pkey, nodes: ["Index Scan"]}]
+      driver: [{relation: packet_observations, index: idx_observations_observer, nodes: ["Bitmap Heap Scan", "Index Scan"], index_cond: ["observer_id ="]},
+               {relation: packets, index: packets_pkey, nodes: ["Index Scan"], index_cond: ["packet_hash = COALESCE"]}]
       budget: {buffers: 101311, planning_ms: 10}
-    note: "measured: 67541 B on the local copy (custom; the statement it replaced: 65751 B); budget: 1.5x measured"
+    note: "measured: 67541 B on the local copy (t_end, custom; the statement it replaced: 65751 B); budget: 1.5x measured"
   - id: obscmp.quiet_7d_all
     stmt: GetObserverComparison
     shape: "the two quietest observers, 7 d, every site"
-    params: [{r: cmp_quiet1}, {r: cmp_quiet2}, {r: cmp_since_7d}, {r: cmp_until}, null]
+    params: [{r: cmp_quiet1_7d}, {r: cmp_quiet2_7d}, {r: cmp_since_7d}, {r: cmp_until}, null]
     expect:
-      driver: [{relation: packet_observations, index: idx_observations_observer, nodes: ["Bitmap Heap Scan", "Index Scan"]},
-               {relation: packets, index: packets_pkey, nodes: ["Index Scan"]}]
-      budget: {buffers: 70450, planning_ms: 10}
-    note: "measured: 46967 B on the local copy (custom; the statement it replaced: 46967 B); budget: 1.5x measured"
+      driver: [{relation: packet_observations, index: idx_observations_observer, nodes: ["Bitmap Heap Scan", "Index Scan"], index_cond: ["observer_id ="]},
+               {relation: packets, index: packets_pkey, nodes: ["Index Scan"], index_cond: ["packet_hash = COALESCE"]}]
+      budget: {buffers: 261, planning_ms: 10}
+    note: "measured: 174 B on the local copy (t_end, custom; the statement it replaced: 174 B); budget: 1.5x measured"
   - id: obscmp.mixed_7d_all
     stmt: GetObserverComparison
     shape: "the busiest and the quietest observer, 7 d, every site"
-    params: [{r: cmp_busy1}, {r: cmp_quiet1}, {r: cmp_since_7d}, {r: cmp_until}, null]
+    params: [{r: cmp_busy1}, {r: cmp_quiet1_7d}, {r: cmp_since_7d}, {r: cmp_until}, null]
     expect:
-      driver: [{relation: packet_observations, index: idx_observations_observer, nodes: ["Bitmap Heap Scan", "Index Scan"]},
-               {relation: packets, index: packets_pkey, nodes: ["Index Scan"]}]
-      budget: {buffers: 257317, planning_ms: 10}
-    note: "measured: 171545 B on the local copy (custom; the statement it replaced: 171545 B); budget: 1.5x measured"
+      driver: [{relation: packet_observations, index: idx_observations_observer, nodes: ["Bitmap Heap Scan", "Index Scan"], index_cond: ["observer_id ="]},
+               {relation: packets, index: packets_pkey, nodes: ["Index Scan"], index_cond: ["packet_hash = COALESCE"]}]
+      budget: {buffers: 195237, planning_ms: 10}
+    note: "measured: 130158 B on the local copy (t_end, custom; the statement it replaced: 130158 B); budget: 1.5x measured"
   - id: obscmp.unknown_7d
     stmt: GetObserverComparison
     shape: "the busiest observer and an unknown id, 7 d"
-    params: [{r: cmp_busy1}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}, {r: cmp_since_7d}, {r: cmp_until}, null]
+    params: [{r: cmp_busy1}, {r: cmp_unknown}, {r: cmp_since_7d}, {r: cmp_until}, null]
     expect:
-      driver: [{relation: packet_observations, index: idx_observations_observer, nodes: ["Bitmap Heap Scan", "Index Scan"]},
-               {relation: packets, index: packets_pkey, nodes: ["Index Scan"]}]
+      driver: [{relation: packet_observations, index: idx_observations_observer, nodes: ["Bitmap Heap Scan", "Index Scan"], index_cond: ["observer_id ="]},
+               {relation: packets, index: packets_pkey, nodes: ["Index Scan"], index_cond: ["packet_hash = COALESCE"]}]
       budget: {buffers: 195123, planning_ms: 10}
-    note: "measured: 130082 B on the local copy (custom; the statement it replaced: 130082 B); budget: 1.5x measured"
+    note: "measured: 130082 B on the local copy (t_end, custom; the statement it replaced: 130082 B); budget: 1.5x measured"
   # ---- small tables: nodes, observers, channels, node types, clock drift ----
   - id: sm.nodes.global
     stmt: ListNodes

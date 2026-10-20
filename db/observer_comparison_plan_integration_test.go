@@ -44,7 +44,8 @@ var comparisonBase = time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 
 // comparisonFixture: 2,000 packets of every route type, one every five minutes from comparisonBase (about seven
 // days), heard by eight observers with skewed rates (90 % down to 2 %) at a per-observer offset of whole seconds, so
-// many receptions share an instant. Observer 1 hears at YVR and sometimes YYJ, observer 4 alternates YVR and YYZ,
+// many receptions share an instant. 100,000 older packets that nobody heard make reading all of packets cost what it
+// does at size. Observer 1 hears at YVR and sometimes YYJ, observer 4 alternates YVR and YYZ,
 // observers 5-8 hear at YOW. Observer 9 is known and never hears anything.
 var comparisonFixture = []string{`
 INSERT INTO observers (id, public_key)
@@ -54,6 +55,10 @@ INSERT INTO packets (packet_hash, payload_type, payload_version, route_type, raw
 SELECT decode(md5('cmp-' || i), 'hex'), i % 12, 0, (ARRAY[0, 1, 1, 0, 2, 1, 3, 0])[i % 8 + 1], '\x00', '\x00',
        $1::timestamptz + i * interval '5 minutes', $1::timestamptz + i * interval '5 minutes'
 FROM generate_series(1, 2000) i`, `
+INSERT INTO packets (packet_hash, payload_type, payload_version, route_type, raw_payload, raw_header, first_heard_at, last_heard_at)
+SELECT decode(md5('cmp-unheard-' || i), 'hex'), i % 12, 0, i % 4, '\x00', '\x00',
+       $1::timestamptz - interval '30 days' + i * interval '1 second', $1::timestamptz - interval '30 days' + i * interval '1 second'
+FROM generate_series(1, 100000) i`, `
 INSERT INTO packet_observations (packet_hash, observer_id, iata, heard_at, path_length_byte, hash_size, hop_count, source_broker)
 SELECT decode(md5('cmp-' || i), 'hex'),
        ('00000000-0000-0000-0000-' || lpad(o::text, 12, '0'))::uuid,
@@ -140,7 +145,8 @@ func TestObserverComparisonMatchesTodayPostgres(t *testing.T) {
 		t.Fatalf("only %d of %d parameter sets counted packets; the grid is too sparse to compare", nonEmpty, compared)
 	}
 
-	// Plans: every observation scan is a range of idx_observations_observer, never a walk of the window.
+	// Plans: every observation scan is one observer's range of idx_observations_observer, never a walk of the window,
+	// and packets is only probed through packets_pkey once per heard packet, never scanned whole.
 	capture := &statementCapture{Tx: tx, name: "GetObserverComparison"}
 	if _, err := sqlc.New(capture).GetObserverComparison(ctx, sqlc.GetObserverComparisonParams{ObserverA: obs(1), ObserverB: obs(2)}); err != nil {
 		t.Fatal(err)
@@ -163,29 +169,37 @@ func TestObserverComparisonMatchesTodayPostgres(t *testing.T) {
 			if err := json.Unmarshal(raw, &plans); err != nil || len(plans) != 1 {
 				t.Fatalf("EXPLAIN JSON did not parse (%v): %s", err, raw)
 			}
-			var scans []map[string]any
-			var walk func(map[string]any)
-			walk = func(n map[string]any) {
+			var scans, packetScans []map[string]any
+			var packetParents []any
+			var walk func(n, parent map[string]any)
+			walk = func(n, parent map[string]any) {
 				index, _ := n["Index Name"].(string)
-				if n["Relation Name"] == "packet_observations" ||
-					(n["Node Type"] == "Bitmap Index Scan" && (strings.HasPrefix(index, "idx_observations") || strings.HasPrefix(index, "packet_observations"))) {
+				bitmap := n["Node Type"] == "Bitmap Index Scan"
+				switch {
+				case n["Relation Name"] == "packet_observations" ||
+					(bitmap && (strings.HasPrefix(index, "idx_observations") || strings.HasPrefix(index, "packet_observations"))):
 					scans = append(scans, n)
+				case n["Relation Name"] == "packets" || (bitmap && (strings.HasPrefix(index, "idx_packets") || index == "packets_pkey")):
+					packetScans = append(packetScans, n)
+					packetParents = append(packetParents, parent["Node Type"])
 				}
 				if children, ok := n["Plans"].([]any); ok {
 					for _, c := range children {
-						walk(c.(map[string]any))
+						walk(c.(map[string]any), n)
 					}
 				}
 			}
-			walk(plans[0].Plan)
+			walk(plans[0].Plan, nil)
 			indexScans := 0
 			for _, s := range scans {
 				switch s["Node Type"] {
 				case "Bitmap Heap Scan":
 					continue // its Bitmap Index Scan child names the index
 				case "Index Scan", "Index Only Scan", "Bitmap Index Scan":
-					if s["Index Name"] != "idx_observations_observer" {
-						t.Errorf("%s %v: observations read through %v, not idx_observations_observer: %s", mode, pair, s["Index Name"], raw)
+					cond, _ := s["Index Cond"].(string)
+					if s["Index Name"] != "idx_observations_observer" || !strings.Contains(cond, "observer_id =") {
+						t.Errorf("%s %v: observations read through %v (%s), not one observer's idx_observations_observer range: %s",
+							mode, pair, s["Index Name"], cond, raw)
 					}
 					indexScans++
 				default:
@@ -194,6 +208,17 @@ func TestObserverComparisonMatchesTodayPostgres(t *testing.T) {
 			}
 			if indexScans != 2 {
 				t.Errorf("%s %v: %d observation index scans, want one per observer: %s", mode, pair, indexScans, raw)
+			}
+			if len(packetScans) != 1 {
+				t.Errorf("%s %v: %d scans of packets, want one probe: %s", mode, pair, len(packetScans), raw)
+			}
+			for i, s := range packetScans {
+				cond, _ := s["Index Cond"].(string)
+				if s["Node Type"] != "Index Scan" || s["Index Name"] != "packets_pkey" ||
+					!strings.Contains(cond, "packet_hash = COALESCE") || packetParents[i] != "Nested Loop" {
+					t.Errorf("%s %v: packets read by %v on %v (%s) under %v, not a packets_pkey probe per heard packet: %s",
+						mode, pair, s["Node Type"], s["Index Name"], cond, packetParents[i], raw)
+				}
 			}
 		}
 	}
