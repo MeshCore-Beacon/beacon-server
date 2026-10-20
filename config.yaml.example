@@ -52,8 +52,8 @@ ratelimit:
   # A 429 returns error.code=rate_limited and Retry-After (1 or 60 seconds).
   burst: 600
 
-# Database pools. custom_all (default) opens api_custom 8, api_slow 2, ingest 6, maint 4 connections
-# (20); split opens 24 (api_custom 7, api_cached 5, api_slow 2); single opens 18 (api_legacy 8, ingest, maint).
+# Database pools. custom_all (default) opens api_custom 8, api_slow 8, ingest 6, maint 4 connections
+# (26); split opens 30 (api_custom 7, api_cached 5, api_slow 8); single opens 18 (api_legacy 8, ingest, maint).
 # api_slow runs only the region and message statements that may walk whole site histories, each limited to 120 s.
 # ingest grows to one connection per CPU on hosts with more than 6 CPUs, adding to each total.
 # Keep max_connections well above that.
@@ -63,11 +63,10 @@ ratelimit:
 #  #   generic plans on api_cached; every other API statement keeps custom plans.
 #  # single: rollback. One API pool on today's settings; every guard family observes.
 #  api_plan_layout: custom_all
-#  # api_slow's connections under custom_all and split (default 2, at least 1). It also runs the pages a
-#  # read model serves while that model is not trusted (first fill, repair); 8 gives them the capacity of
-#  # the old api_legacy pool. Raise it if many region or message requests answer 503 with Retry-After 5
+#  # api_slow's connections under custom_all and split (default 8, at least 1). Set it only to override
+#  # the default: raise it if many region or message requests answer 503 with Retry-After 5
 #  # (beacon_api_unavailable_total). Count it in max_connections.
-#  slow_pool_size: 2
+#  slow_pool_size: 8
 
 # Cost guards on the public /api/v1 group (not /admin, not /ws). Every family observes by default:
 # nothing is refused, only beacon_guard_would_refuse_total counts. Listed families enforce:

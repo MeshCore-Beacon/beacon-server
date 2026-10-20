@@ -642,7 +642,7 @@ type cappedConn struct {
 
 func (c *cappedConn) Release() { c.routerConn.Release(); c.free() }
 
-// Two slow statements hold both api_slow connections: a third fails fast with ErrSlowPoolBusy, never touching
+// Two slow statements hold both connections of a two-connection api_slow: a third fails fast with ErrSlowPoolBusy, never touching
 // api_custom, while class C statements keep running on api_custom; once a slot frees, slow statements run again.
 func TestPlanRouterSlowPoolCannotStarveOthers(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {

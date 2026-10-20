@@ -47,12 +47,14 @@ var poolSpecs = []poolSpec{
 		},
 	},
 	{
-		// The statements that may walk whole site histories (planpolicy.Slow). Two connections, so they can never
-		// hold more of the server than that; a statement limit, so none runs unbounded; no parallel workers, whose
-		// plans for these walks ran several times longer (measured: a sparse filter over every site, 26 s without
-		// workers, 4 min with). Otherwise the server's own planner settings, as api_legacy.
+		// The statements that may walk whole site histories (planpolicy.Slow) and, while a read model is not trusted,
+		// the previous statements that serve its pages. Eight connections by default, the size api_legacy had
+		// (database.slow_pool_size overrides it), so they never hold more of the server than that; a statement limit,
+		// so none runs unbounded; no parallel workers, whose plans for these walks ran several times longer
+		// (measured: a sparse filter over every site, 26 s without workers, 4 min with). Otherwise the server's own
+		// planner settings, as api_legacy.
 		name: PoolAPISlow,
-		size: map[planpolicy.Layout]int32{planpolicy.CustomAll: 2, planpolicy.Split: 2},
+		size: map[planpolicy.Layout]int32{planpolicy.CustomAll: 8, planpolicy.Split: 8},
 		params: map[string]string{
 			"application_name":                "beacon-api_slow",
 			"statement_timeout":               "120s",
@@ -105,9 +107,8 @@ var poolSpecs = []poolSpec{
 	},
 }
 
-// SlowPoolSize returns an OpenPools tune that sizes api_slow to n connections (database.slow_pool_size). The
-// default of 2 keeps the slow statements to a small share of the server. The read-model fallbacks run there too;
-// 8 gives them the capacity they had on api_legacy.
+// SlowPoolSize returns an OpenPools tune that sizes api_slow to n connections (database.slow_pool_size), whatever
+// the layout's default.
 func SlowPoolSize(n int32) func(pool string, cfg *pgxpool.Config) {
 	return func(pool string, cfg *pgxpool.Config) {
 		if pool == PoolAPISlow && n > 0 {

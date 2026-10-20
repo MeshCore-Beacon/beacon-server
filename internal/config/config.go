@@ -79,7 +79,7 @@ type PlanguardConfig struct {
 type DatabaseConfig struct {
 	// APIPlanLayout is custom_all (default), split or single.
 	APIPlanLayout string `yaml:"api_plan_layout"`
-	// SlowPoolSize is api_slow's connection count under custom_all and split; nil means 2.
+	// SlowPoolSize is api_slow's connection count under custom_all and split; nil means 8.
 	SlowPoolSize *int `yaml:"slow_pool_size"`
 }
 
@@ -190,7 +190,7 @@ type ResolvedConfig struct {
 
 	// APIPlanLayout selects the API pool layout; defaults to custom_all.
 	APIPlanLayout planpolicy.Layout
-	// SlowPoolSize is api_slow's connection count; defaults to 2.
+	// SlowPoolSize is api_slow's connection count; defaults to 8.
 	SlowPoolSize int32
 	// GuardsEnforce lists the enforcing guard families; empty (never nil) when unset.
 	GuardsEnforce []string
@@ -741,7 +741,7 @@ func Resolve(cfg *Config) ResolvedConfig {
 	if r.APIPlanLayout == "" {
 		r.APIPlanLayout = planpolicy.CustomAll
 	}
-	r.SlowPoolSize = 2
+	r.SlowPoolSize = 8
 	if n := cfg.Database.SlowPoolSize; n != nil && *n >= 1 {
 		r.SlowPoolSize = int32(min(*n, 1000))
 	}

@@ -460,7 +460,7 @@ func TestLoad_DatabaseGuardsValidation(t *testing.T) {
 
 // database.slow_pool_size sizes api_slow: 2 when absent, any positive value as given.
 func TestSlowPoolSize(t *testing.T) {
-	for yml, want := range map[string]int32{"": 2, "database:\n  api_plan_layout: split\n": 2, "database:\n  slow_pool_size: 8\n": 8, "database:\n  slow_pool_size: 1\n": 1} {
+	for yml, want := range map[string]int32{"": 8, "database:\n  api_plan_layout: split\n": 8, "database:\n  slow_pool_size: 8\n": 8, "database:\n  slow_pool_size: 1\n": 1} {
 		path := filepath.Join(t.TempDir(), "config.yaml")
 		if err := os.WriteFile(path, []byte(yml), 0600); err != nil {
 			t.Fatal(err)

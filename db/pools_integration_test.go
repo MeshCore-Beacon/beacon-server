@@ -55,8 +55,8 @@ func TestOpenPoolsSettingsPostgres(t *testing.T) {
 		want   map[string]int32
 		total  int32
 	}{
-		{planpolicy.CustomAll, map[string]int32{"api_slow": 2, "api_custom": 8, "maint": 4}, 0},
-		{planpolicy.Split, map[string]int32{"api_slow": 2, "api_custom": 7, "api_cached": 5, "maint": 4}, 0},
+		{planpolicy.CustomAll, map[string]int32{"api_slow": 8, "api_custom": 8, "maint": 4}, 0},
+		{planpolicy.Split, map[string]int32{"api_slow": 8, "api_custom": 7, "api_cached": 5, "maint": 4}, 0},
 		{planpolicy.Single, map[string]int32{"api_legacy": 8, "maint": 4}, 0},
 	} {
 		// The ingest pool follows the host: at least 6, and one per CPU.
@@ -135,8 +135,8 @@ func TestOpenPoolsSettingsPostgres(t *testing.T) {
 			if got := p.Total(); got != tc.total {
 				t.Errorf("Total() = %d, want %d", got, tc.total)
 			}
-			// Without ingest (6 on up to 6 CPUs): custom_all 20 in all, split 24, single 18.
-			if rest := tc.total - tc.want["ingest"]; rest != map[planpolicy.Layout]int32{planpolicy.CustomAll: 14, planpolicy.Split: 18, planpolicy.Single: 12}[tc.layout] {
+			// Without ingest (6 on up to 6 CPUs): custom_all 26 in all, split 30, single 18.
+			if rest := tc.total - tc.want["ingest"]; rest != map[planpolicy.Layout]int32{planpolicy.CustomAll: 20, planpolicy.Split: 24, planpolicy.Single: 12}[tc.layout] {
 				t.Errorf("%s: %d connections besides ingest", tc.layout, rest)
 			}
 		})
@@ -223,7 +223,7 @@ func TestReadOnlyPoolsRejectWritesPostgres(t *testing.T) {
 	}
 }
 
-// With both api_slow connections busy, a slow statement waits at most its acquire limit and fails with
+// With every api_slow connection busy, a slow statement waits at most its acquire limit and fails with
 // ErrSlowPoolBusy; it never takes an api_custom connection, and class C statements keep running there.
 func TestSlowPoolIsolationPostgres(t *testing.T) {
 	dsn := os.Getenv("BEACON_TEST_POSTGRES_DSN")
@@ -248,7 +248,7 @@ func TestSlowPoolIsolationPostgres(t *testing.T) {
 		t.Fatalf("slow statement ran on %q, %v; want beacon-api_slow", app, err)
 	}
 	var held []*pgxpool.Conn
-	for range 2 {
+	for range int(p.APISlow.Config().MaxConns) {
 		c, err := p.APISlow.Acquire(ctx)
 		if err != nil {
 			t.Fatal(err)
