@@ -401,3 +401,24 @@ func TestPacketSitesAuditPostgres(t *testing.T) {
 		t.Fatalf("short audit fills %v", s.fills)
 	}
 }
+
+// A lost row whose packet was heard at the site again in a later slice comes back from the audit of the older slice
+// at the newest hearing, not at the slice's own.
+func TestPacketSitesAuditTakesNewestHearingPostgres(t *testing.T) {
+	f := newPsFixture(t)
+	p := f.psPacket(1)
+	f.sited(psObs(p, 1, "AAA", psT0.Add(time.Second)))
+	f.exec("SELECT setval('packet_observations_id_seq', 3000600000)")
+	f.sited(psObs(p, 2, "AAA", psT0.Add(5*time.Second)))
+	f.sited(psObs(f.psPacket(2), 3, "BBB", psT0.Add(6*time.Second)))
+	s := f.begin()
+	if _, err := s.Init(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	f.exec("DELETE FROM packet_sites WHERE packet_hash = $1", p)
+	n, err := s.Audit(f.ctx, func(lo, _ int64) int64 { return lo })
+	if err != nil || n != 1 {
+		t.Fatalf("audit repaired %d, %v; want 1", n, err)
+	}
+	f.psSiteRow("audited", p, "AAA")
+}

@@ -133,6 +133,7 @@ statements:
   FilterKnownSites: {sqlc: FilterKnownSites, group: packet_sites, plan: custom}
   SweepPacketSitesFronts: {sqlc: SweepPacketSitesFronts, group: packet_sites, plan: maint}
   FillPacketSitesSlice: {sqlc: FillPacketSitesSlice, kind: dml, group: packet_sites, plan: maint}
+  FillPacketSitesAudit: {sqlc: FillPacketSitesAudit, kind: dml, group: packet_sites, plan: maint}
   InsertObservation: {sqlc: InsertObservation, kind: dml, group: packet_sites, plan: ingest}
   # Channel message pages, one statement per filter shape; the site and scope shapes read channel_message_iatas
   # while the server trusts it. The scoped, since and scope-only shapes are planned with their values. Sites with a
@@ -3295,12 +3296,12 @@ entries:
     expect:
       driver: [{relation: packet_observations, alias: po, index: packet_observations_pkey, nodes: ["Index Scan"], index_cond: ["id >"]}]
   - id: ps.maint.fill_audit
-    stmt: FillPacketSitesSlice
-    shape: "the audit: one 500,000-id slice below the reconcile range (plain EXPLAIN)"
+    stmt: FillPacketSitesAudit
+    shape: "the audit: one 500,000-id slice below the reconcile range, each pair over all its observations (plain EXPLAIN)"
     tiers: [local, prod]
     params: [{r: ps_audit_lo}, {r: ps_fill_lo}]
     expect:
-      driver: [{relation: packet_observations, alias: po, index: packet_observations_pkey, nodes: ["Index Scan"], index_cond: ["id >"]}]
+      driver: [{relation: packet_observations, alias: s, index: packet_observations_pkey, nodes: ["Index Scan"], index_cond: ["id >"]}]
   - id: ps.ingest.insert_observation
     stmt: InsertObservation
     shape: "the newest stored observation re-sent (plain EXPLAIN)"

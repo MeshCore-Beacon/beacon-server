@@ -84,6 +84,9 @@ type Querier interface {
 	// The site of every group-text observation in (after_id, through_id] whose packet has a message.
 	// An untyped observation is checked too: older rows may have no payload type.
 	FillChannelMessageIATAsByObservations(ctx context.Context, arg FillChannelMessageIATAsByObservationsParams) (int64, error)
+	// The audit's fill: each (packet, site) of the observations in (after_id, through_id], at its latest hearing there
+	// among all of the packet's observations, so a pair heard again in a later slice comes back at that hearing.
+	FillPacketSitesAudit(ctx context.Context, arg FillPacketSitesAuditParams) (int64, error)
 	// Copyright 2026 Beacon Contributors
 	// SPDX-License-Identifier: AGPL-3.0-or-later
 	// Each (packet, site) of the observations in (after_id, through_id], at its latest hearing there.

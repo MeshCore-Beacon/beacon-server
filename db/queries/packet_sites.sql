@@ -18,6 +18,24 @@ WHERE NOT EXISTS (SELECT 1 FROM packet_sites x
 ON CONFLICT (packet_hash, iata) DO UPDATE SET site_heard_at = EXCLUDED.site_heard_at
   WHERE packet_sites.site_heard_at < EXCLUDED.site_heard_at;
 
+-- name: FillPacketSitesAudit :execrows
+-- The audit's fill: each (packet, site) of the observations in (after_id, through_id], at its latest hearing there
+-- among all of the packet's observations, so a pair heard again in a later slice comes back at that hearing.
+INSERT INTO packet_sites (packet_hash, iata, site_heard_at, first_heard_at, payload_type, route_type, scope_id)
+SELECT g.packet_hash, g.iata, g.mx, p.first_heard_at, p.payload_type, p.route_type, p.scope_id
+FROM (
+  SELECT po.packet_hash, po.iata, max(po.heard_at) AS mx
+  FROM (SELECT DISTINCT s.packet_hash, s.iata FROM packet_observations s
+        WHERE s.id > @after_id::bigint AND s.id <= @through_id::bigint) t
+  JOIN packet_observations po ON po.packet_hash = t.packet_hash AND po.iata = t.iata
+  GROUP BY po.packet_hash, po.iata
+) g
+JOIN packets p ON p.packet_hash = g.packet_hash
+WHERE NOT EXISTS (SELECT 1 FROM packet_sites x
+                  WHERE x.packet_hash = g.packet_hash AND x.iata = g.iata AND x.site_heard_at >= g.mx)
+ON CONFLICT (packet_hash, iata) DO UPDATE SET site_heard_at = EXCLUDED.site_heard_at
+  WHERE packet_sites.site_heard_at < EXCLUDED.site_heard_at;
+
 -- name: MinObservationID :one
 SELECT COALESCE(min(id), 0)::bigint AS id FROM packet_observations;
 

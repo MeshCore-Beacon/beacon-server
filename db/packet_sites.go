@@ -128,11 +128,16 @@ func (p *PacketSitesSession) Init(ctx context.Context) (PacketSitesState, error)
 // fill runs one idempotent fill of (after, through], retrying only when a packet was cascaded away between the
 // statement's snapshot and its foreign key check (SQLSTATE 23503).
 func (p *PacketSitesSession) fill(ctx context.Context, after, through int64) (int64, error) {
+	return p.fillWith(ctx, after, through, p.fillStmt)
+}
+
+// fillWith runs stmt as fill runs FillPacketSitesSlice.
+func (p *PacketSitesSession) fillWith(ctx context.Context, after, through int64, stmt func(ctx context.Context, after, through int64) (int64, error)) (int64, error) {
 	p.fills = append(p.fills, [2]int64{after, through})
 	var err error
 	for attempt := 1; attempt <= packetSitesFillAttempts; attempt++ {
 		var n int64
-		if n, err = p.fillStmt(ctx, after, through); err == nil {
+		if n, err = stmt(ctx, after, through); err == nil {
 			return n, nil
 		}
 		var pgErr *pgconn.PgError
@@ -218,8 +223,8 @@ func (p *PacketSitesSession) Reconcile(ctx context.Context) (int64, error) {
 	return rows, p.save(ctx)
 }
 
-// Audit refills one slice of packetSitesSlice ids below ReconPrevHi, the ids no reconcile will see again; start
-// picks its lower bound in [lo, hi]. It returns the rows written: anything above zero was missed by every writer
+// Audit refills one slice of packetSitesSlice ids below ReconPrevHi, the ids no reconcile will see again, each
+// pair at its latest hearing among all the packet's observations; start picks its lower bound in [lo, hi]. It returns the rows written: anything above zero was missed by every writer
 // and reconcile.
 func (p *PacketSitesSession) Audit(ctx context.Context, start func(lo, hi int64) int64) (int64, error) {
 	lo, err := p.q.MinObservationID(ctx)
@@ -230,11 +235,14 @@ func (p *PacketSitesSession) Audit(ctx context.Context, start func(lo, hi int64)
 	if lo == 0 || top < lo {
 		return 0, nil
 	}
-	if top-(lo-1) <= packetSitesSlice {
-		return p.fill(ctx, lo-1, top)
+	after, through := lo-1, top
+	if top-(lo-1) > packetSitesSlice {
+		after = min(max(start(lo-1, top-packetSitesSlice), lo-1), top-packetSitesSlice)
+		through = after + packetSitesSlice
 	}
-	a := min(max(start(lo-1, top-packetSitesSlice), lo-1), top-packetSitesSlice)
-	return p.fill(ctx, a, a+packetSitesSlice)
+	return p.fillWith(ctx, after, through, func(ctx context.Context, after, through int64) (int64, error) {
+		return p.q.FillPacketSitesAudit(ctx, sqlc.FillPacketSitesAuditParams{AfterID: after, ThroughID: through})
+	})
 }
 
 const (

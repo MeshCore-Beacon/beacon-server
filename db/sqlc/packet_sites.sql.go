@@ -57,6 +57,38 @@ func (q *Queries) CheckPacketSitesSlice(ctx context.Context, arg CheckPacketSite
 	return i, err
 }
 
+const fillPacketSitesAudit = `-- name: FillPacketSitesAudit :execrows
+INSERT INTO packet_sites (packet_hash, iata, site_heard_at, first_heard_at, payload_type, route_type, scope_id)
+SELECT g.packet_hash, g.iata, g.mx, p.first_heard_at, p.payload_type, p.route_type, p.scope_id
+FROM (
+  SELECT po.packet_hash, po.iata, max(po.heard_at) AS mx
+  FROM (SELECT DISTINCT s.packet_hash, s.iata FROM packet_observations s
+        WHERE s.id > $1::bigint AND s.id <= $2::bigint) t
+  JOIN packet_observations po ON po.packet_hash = t.packet_hash AND po.iata = t.iata
+  GROUP BY po.packet_hash, po.iata
+) g
+JOIN packets p ON p.packet_hash = g.packet_hash
+WHERE NOT EXISTS (SELECT 1 FROM packet_sites x
+                  WHERE x.packet_hash = g.packet_hash AND x.iata = g.iata AND x.site_heard_at >= g.mx)
+ON CONFLICT (packet_hash, iata) DO UPDATE SET site_heard_at = EXCLUDED.site_heard_at
+  WHERE packet_sites.site_heard_at < EXCLUDED.site_heard_at
+`
+
+type FillPacketSitesAuditParams struct {
+	AfterID   int64 `json:"after_id"`
+	ThroughID int64 `json:"through_id"`
+}
+
+// The audit's fill: each (packet, site) of the observations in (after_id, through_id], at its latest hearing there
+// among all of the packet's observations, so a pair heard again in a later slice comes back at that hearing.
+func (q *Queries) FillPacketSitesAudit(ctx context.Context, arg FillPacketSitesAuditParams) (int64, error) {
+	result, err := q.db.Exec(ctx, fillPacketSitesAudit, arg.AfterID, arg.ThroughID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const fillPacketSitesSlice = `-- name: FillPacketSitesSlice :execrows
 
 INSERT INTO packet_sites (packet_hash, iata, site_heard_at, first_heard_at, payload_type, route_type, scope_id)
