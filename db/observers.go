@@ -440,6 +440,12 @@ func (s *Store) ListObserverAdverts(ctx context.Context, observerID uuid.UUID, c
 		slog.Error("api: ListObserverAdverts failed", "component", "db", "error", err)
 		return api.Page[api.AdvertObservation]{}, err
 	}
+	return AdvertPage(rows, limit), nil
+}
+
+// AdvertPage is the adverts page for up to limit+1 rows in id order: the first limit rows, and the last one's id as
+// the next cursor when there are more.
+func AdvertPage(rows []sqlc.ListObserverAdvertsRow, limit int32) api.Page[api.AdvertObservation] {
 	hasMore := len(rows) > int(limit)
 	if hasMore {
 		rows = rows[:limit]
@@ -471,7 +477,7 @@ func (s *Store) ListObserverAdverts(ctx context.Context, observerID uuid.UUID, c
 		Items:      items,
 		NextCursor: nextCursor,
 		HasMore:    hasMore,
-	}, nil
+	}
 }
 
 func (s *Store) UpdateObserverStatus(ctx context.Context, p ingest.UpdateObserverStatusParams) (uuid.UUID, error) {
