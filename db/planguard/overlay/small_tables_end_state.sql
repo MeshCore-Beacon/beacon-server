@@ -1,6 +1,7 @@
 -- Copyright 2026 Beacon Contributors
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
+-- Superseded by end_state.sql for the local tier; kept as the evidence of its change and for its diff cases.
 -- Overlay for the local-copy runs of the lookup-table entries, built in the schema t_s10 from public: the six lookup
 -- tables whose cold index the migrations drop (channel_iatas, node_neighbors, transport_scopes,
 -- meshmapper_channel_members, region_iatas, trace_tags), each with the indexes it keeps and none of the dropped ones.

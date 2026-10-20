@@ -8,7 +8,7 @@
  "  Hash Join (Left)",
  "    Nested Loop (Left)",
  "      CTE Scan",
- "      Index Scan on nodes n using idx_nodes_pubkey scan=Forward",
+ "      Index Scan on nodes n using nodes_public_key_key scan=Forward",
  "    Hash",
  "      Subquery Scan",
  "        Aggregate partial=Simple [Subquery] {Sorted}",

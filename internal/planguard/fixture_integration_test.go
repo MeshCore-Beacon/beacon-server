@@ -315,3 +315,33 @@ WHERE n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')`).Scan(&
 		})
 	}
 }
+
+// A database built through the migrations holds none of the corpus's retired indexes, so the retired list and the
+// drop migrations cannot drift apart.
+func TestRetiredIndexesDroppedPostgres(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	if os.Getenv("BEACON_TEST_POSTGRES_DSN") == "" {
+		t.Skip("set BEACON_TEST_POSTGRES_DSN for PostgreSQL tests")
+	}
+	c, err := planguard.LoadCorpus(pgdata.Files, "corpus.yaml", repoSQLC(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Defaults.RetiredIndexes) == 0 {
+		t.Fatal("defaults.retired_indexes is empty")
+	}
+	pool := throwawayDB(t, ctx, "planguard_retired_test")
+	if err := db.RunMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	for _, ix := range c.Defaults.RetiredIndexes {
+		var present bool
+		if err := pool.QueryRow(ctx, "SELECT to_regclass($1) IS NOT NULL", ix).Scan(&present); err != nil {
+			t.Fatal(err)
+		}
+		if present {
+			t.Errorf("retired index %s survives the migrations", ix)
+		}
+	}
+}

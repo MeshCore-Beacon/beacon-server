@@ -4,5 +4,5 @@
  "    Nested Loop",
  "      Index Scan on packet_observations po using packet_observations_pkey scan=Forward",
  "      Index Scan on packets p using packets_pkey scan=Forward",
- "    Index Scan on nodes n using idx_nodes_pubkey scan=Forward"
+ "    Index Scan on nodes n using nodes_public_key_key scan=Forward"
 ]
