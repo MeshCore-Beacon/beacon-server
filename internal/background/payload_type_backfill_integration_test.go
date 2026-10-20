@@ -5,7 +5,9 @@ package background
 
 import (
 	"context"
+	"errors"
 	"maps"
+	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -376,9 +378,39 @@ FROM packets p WHERE p.packet_hash = po.packet_hash AND po.payload_type IS DISTI
 			rec.names = nil
 			return out
 		}
-		before := pages(t, "ListObserverAdvertsJoinFilter")
-		if len(before) < 5 {
-			t.Fatalf("fixture: %d adverts pages", len(before))
+		// Before the state says done the page is not ready and runs no adverts statement.
+		if _, err := apiStore.ListObserverAdverts(ctx, observer, 0, 97); !errors.Is(err, api.ErrPagesNotReady) || len(rec.names) != 0 {
+			t.Fatalf("before the probe: err %v, statements %v", err, rec.names)
+		}
+		// The oracle: the statement that filtered on the packet's payload type, which served these pages until every
+		// observation carried its own (frozen in the plan corpus), paged the same way.
+		frozen, err := os.ReadFile("../../db/planguard/sql/planted/ListObserverAdvertsJoinFilter_16fb706.sql")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var want []api.Page[api.AdvertObservation]
+		for cursor := int64(0); ; {
+			rows, err := pool.Query(ctx, string(frozen), observer, cursor, 98)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rs, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (sqlc.ListObserverAdvertsRow, error) {
+				var v sqlc.ListObserverAdvertsRow
+				err := r.Scan(&v.ID, &v.PacketHashHex, &v.PayloadType, &v.Iata, &v.HeardAt, &v.Rssi, &v.Snr, &v.HopCount, &v.NodeName, &v.NodePublicKey)
+				return v, err
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := db.AdvertPage(rs, 97)
+			want = append(want, p)
+			if !p.HasMore {
+				break
+			}
+			cursor = *p.NextCursor
+		}
+		if len(want) < 5 {
+			t.Fatalf("fixture: %d adverts pages", len(want))
 		}
 
 		backfill := &backfillFromRecorder{Store: store}
@@ -394,8 +426,8 @@ FROM packets p WHERE p.packet_hash = po.packet_hash AND po.payload_type IS DISTI
 		if got := count(`SELECT sum(xmin::text::bigint) FROM packet_observations`); got != xmins {
 			t.Fatal("the probe rewrote observations")
 		}
-		if after := pages(t, "ListObserverAdverts"); !reflect.DeepEqual(after, before) {
-			t.Fatalf("adverts pages changed after the switch:\n%+v\n%+v", after, before)
+		if got := pages(t, "ListObserverAdverts"); !reflect.DeepEqual(got, want) {
+			t.Fatalf("adverts pages after the probe differ from the packet-typed statement's:\n%+v\n%+v", got, want)
 		}
 	})
 

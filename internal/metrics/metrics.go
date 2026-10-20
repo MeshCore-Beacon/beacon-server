@@ -121,7 +121,7 @@ var (
 	// that bypassed the model.
 	APIUnavailable = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "beacon_api_unavailable_total",
-		Help: "503s a page answered because the slow pool was busy (reason slow_pool_busy), by the model the page reads.",
+		Help: "503s a page answered because its data was not ready (reason not_ready) or the slow pool was busy (reason slow_pool_busy), by the model the page reads.",
 	}, []string{"reason", "model"})
 	ReadModelRepaired = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "beacon_readmodel_repaired_rows_total",
@@ -131,7 +131,7 @@ var (
 	// ReadModelTrusted is 1 while this process serves pages from a read model, by model.
 	ReadModelTrusted = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "beacon_readmodel_trusted",
-		Help: "1 while this process serves pages from the read model, 0 while it serves the original statements.",
+		Help: "1 while this process serves pages from the read model, 0 while those pages answer 503 (filling, repairing, unverified or turned off).",
 	}, []string{"model"})
 )
 

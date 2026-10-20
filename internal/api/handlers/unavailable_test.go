@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 // unavailableCase is one page whose reader fails with err; the handler must answer 503 with Retry-After.
@@ -89,6 +91,22 @@ func TestOtherReaderErrorsStay500(t *testing.T) {
 		c.mount(failingReader(fmt.Errorf("boom"))).ServeHTTP(rec, httptest.NewRequest("GET", c.path, nil))
 		if rec.Code != http.StatusInternalServerError || rec.Header().Get("Retry-After") != "" {
 			t.Errorf("%s: status %d, Retry-After %q", c.name, rec.Code, rec.Header().Get("Retry-After"))
+		}
+	}
+}
+
+// A page whose read model is not ready answers 503 with Retry-After, in the guards' error shape, and is counted as
+// not_ready for the model it reads.
+func TestPagesNotReadyAnswers503(t *testing.T) {
+	models := map[string]string{"region packets": "packet_sites", "messages across channels": "cmi", "channel messages": "cmi", "observer adverts": "observation_payload_types"}
+	before := map[string]float64{}
+	for _, m := range models {
+		before[m] = testutil.ToFloat64(metrics.APIUnavailable.WithLabelValues("not_ready", m))
+	}
+	checkUnavailable(t, api.ErrPagesNotReady, "30", "service_unavailable")
+	for m, n := range map[string]float64{"packet_sites": 1, "cmi": 2, "observation_payload_types": 1} {
+		if got := testutil.ToFloat64(metrics.APIUnavailable.WithLabelValues("not_ready", m)) - before[m]; got != n {
+			t.Errorf("not_ready %s counted %v, want %v", m, got, n)
 		}
 	}
 }

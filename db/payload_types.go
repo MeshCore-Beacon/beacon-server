@@ -25,8 +25,8 @@ type ObservationPayloadTypeState struct {
 // payloadTypeWarnEvery spaces the Warn logged when the gate cannot read the backfill state.
 const payloadTypeWarnEvery = time.Minute
 
-// WithPayloadTypeGate makes ListObserverAdverts read the backfill state and switch to the
-// observation-typed statement once it reports done.
+// WithPayloadTypeGate makes ListObserverAdverts read the backfill state and answer api.ErrPagesNotReady until it
+// reports done. A store without the gate (never the API store) serves adverts at once.
 func WithPayloadTypeGate() Option {
 	return func(s *Store) { s.payloadTypeGate = true }
 }

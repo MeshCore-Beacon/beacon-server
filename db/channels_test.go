@@ -250,7 +250,7 @@ func TestListChannelMessages_AllChannels(t *testing.T) {
 		ListAllChannelMessages(gomock.Any(), sqlc.ListAllChannelMessagesParams{
 			Column1: pgtype.Timestamptz{},
 			Column2: []string{"YVR"},
-			Column3: "",
+			Column3: "#bc",
 			Column4: int64(0),
 			Limit:   3,
 		}).
@@ -285,7 +285,8 @@ func TestListChannelMessages_AllChannels(t *testing.T) {
 		}, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListChannelMessages(context.Background(), nil, time.Time{}, 2, []string{"YVR"}, "", 0)
+	// Sites with a scope across every channel: the original statement, trusted or not.
+	page, err := store.ListChannelMessages(context.Background(), nil, time.Time{}, 2, []string{"YVR"}, "#bc", 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -300,46 +301,15 @@ func TestListChannelMessages_AllChannels(t *testing.T) {
 	}
 }
 
-func TestListChannelMessages_ByChannelID(t *testing.T) {
+// A channel's region page while the read model is not trusted answers ErrPagesNotReady and runs no statement: the
+// per-channel original statement is the verification's alone.
+func TestListChannelMessages_ByChannelIDNotReady(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	mock := mockdb.NewMockQuerier(ctrl)
-
+	store := &Store{q: mockdb.NewMockQuerier(ctrl)}
 	channelID := int32(1)
-	sentAt := pgtype.Timestamptz{Time: time.UnixMilli(1700000000000), Valid: true}
-	senderName := "Bob"
-	content := "world"
-
-	mock.EXPECT().
-		ListChannelMessages(gomock.Any(), sqlc.ListChannelMessagesParams{
-			ChannelID: channelID,
-			Column2:   pgtype.Timestamptz{},
-			Column3:   []string{"YVR"},
-			Column4:   "",
-			Column5:   int64(0),
-			Limit:     3,
-		}).
-		Return([]sqlc.ListChannelMessagesRow{
-			{
-				ID:               1,
-				PacketHashHex:    "deadbeef",
-				ChannelHash:      []byte{0xab},
-				SenderName:       &senderName,
-				Content:          &content,
-				SentAt:           sentAt,
-				ObservationCount: 1,
-			},
-		}, nil)
-
-	store := &Store{q: mock}
 	page, err := store.ListChannelMessages(context.Background(), &channelID, time.Time{}, 2, []string{"YVR"}, "", 0)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(page.Items) != 1 {
-		t.Errorf("expected 1 item, got %d", len(page.Items))
-	}
-	if page.HasMore {
-		t.Error("expected HasMore false")
+	if !errors.Is(err, api.ErrPagesNotReady) || page.Items != nil {
+		t.Fatalf("page %+v, err %v; want ErrPagesNotReady", page, err)
 	}
 }
 
@@ -779,7 +749,8 @@ func TestListChannelMessagesDispatch(t *testing.T) {
 		})
 	}
 
-	// Every shape that reads cmi runs today's statement, with today's params, when cmi is not trusted.
+	// Every shape that reads cmi answers ErrPagesNotReady with no statement when cmi is not trusted; sites with a
+	// scope or a since across every channel run the original all-channel statement, trusted or not.
 	disabled := NewTrust("cmi_dispatch_disabled", false, CmiTrustPolicy)
 	disabled.Earn()
 	dropped := NewTrust("cmi_dispatch_dropped", true, CmiTrustPolicy)
@@ -806,13 +777,13 @@ func TestListChannelMessagesDispatch(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			m := mockdb.NewMockQuerier(ctrl)
 			legacyTS := pgtype.Timestamptz{Time: sh.since, Valid: !sh.since.IsZero()}
-			if sh.channel != nil {
-				m.EXPECT().ListChannelMessages(gomock.Any(), sqlc.ListChannelMessagesParams{ChannelID: 7, Column2: legacyTS, Column3: sh.iatas, Column4: sh.scope, Column5: 0, Limit: 51}).Return(nil, nil)
-			} else {
+			allFiltered := sh.channel == nil && len(sh.iatas) > 0 && (sh.scope != "" || !sh.since.IsZero())
+			if allFiltered {
 				m.EXPECT().ListAllChannelMessages(gomock.Any(), sqlc.ListAllChannelMessagesParams{Column1: legacyTS, Column2: sh.iatas, Column3: sh.scope, Column4: 0, Limit: 51}).Return(nil, nil)
 			}
 			s := &Store{q: m, readModels: rm}
-			if _, err := s.ListChannelMessages(context.Background(), sh.channel, sh.since, 50, sh.iatas, sh.scope, 0); err != nil {
+			_, err := s.ListChannelMessages(context.Background(), sh.channel, sh.since, 50, sh.iatas, sh.scope, 0)
+			if allFiltered && err != nil || !allFiltered && !errors.Is(err, api.ErrPagesNotReady) {
 				t.Fatalf("%s shape %d: %v", name, i, err)
 			}
 			ctrl.Finish()

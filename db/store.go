@@ -31,7 +31,7 @@ type Store struct {
 	payloadTypeGate     bool            // see WithPayloadTypeGate
 	payloadTypesDone    atomic.Bool     // the payload-type backfill state has read done
 	payloadTypeWarnAt   atomic.Int64    // unix ns of the last state-read Warn; see payloadTypesReady
-	readModels          *ReadModels     // see WithReadModels; nil serves every page from the original statements
+	readModels          *ReadModels     // see WithReadModels; nil: the read-model pages answer api.ErrPagesNotReady
 	packetSitesVacuums  atomic.Int32    // VACUUM (ANALYZE) runs of packet_sites by the first-time verification
 }
 

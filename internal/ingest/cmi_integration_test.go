@@ -139,8 +139,12 @@ SELECT (SELECT count(*) FROM (SELECT * FROM def EXCEPT SELECT * FROM have) m), (
 	if missing != 0 || extra != 0 {
 		t.Fatalf("missing %d, extra %d", missing, extra)
 	}
+	// The exact check above just passed, so a reader trusting the read model serves the site page from it.
+	trust := db.NewTrust("cmi_decrypt_failure_test", true, db.CmiTrustPolicy)
+	trust.Earn()
+	reader := db.New(pool, pool, 0, 0, db.WithReadModels(&db.ReadModels{Cmi: trust}))
 	channelID := int32(created.ChannelID)
-	page, err := store.ListChannelMessages(ctx, &channelID, time.Time{}, 50, []string{"YOW"}, "", 0)
+	page, err := reader.ListChannelMessages(ctx, &channelID, time.Time{}, 50, []string{"YOW"}, "", 0)
 	if err != nil || len(page.Items) != 1 || page.Items[0].ID != m {
 		t.Fatalf("YOW page = %+v, %v", page, err)
 	}

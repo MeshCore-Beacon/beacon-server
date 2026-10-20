@@ -417,25 +417,16 @@ func (s *Store) GetObserverActivity(ctx context.Context, observerID uuid.UUID, w
 }
 
 func (s *Store) ListObserverAdverts(ctx context.Context, observerID uuid.UUID, cursor int64, limit int32) (api.Page[api.AdvertObservation], error) {
-	var rows []sqlc.ListObserverAdvertsRow
-	var err error
-	if s.payloadTypesReady(ctx) {
-		rows, err = s.q.ListObserverAdverts(ctx, sqlc.ListObserverAdvertsParams{
-			ObserverID: observerID,
-			CursorID:   cursor,
-			RowLimit:   limit + 1, // fetch one extra to detect hasMore
-		})
-	} else {
-		var rs []sqlc.ListObserverAdvertsJoinFilterRow
-		rs, err = s.q.ListObserverAdvertsJoinFilter(ctx, sqlc.ListObserverAdvertsJoinFilterParams{
-			ObserverID: observerID,
-			Column2:    cursor,
-			Limit:      limit + 1,
-		})
-		for _, r := range rs {
-			rows = append(rows, sqlc.ListObserverAdvertsRow(r))
-		}
+	// The statement filters on each observation's own payload type, so it serves only once every observation
+	// carries one; until then the page is not ready.
+	if s.payloadTypeGate && !s.payloadTypesReady(ctx) {
+		return api.Page[api.AdvertObservation]{}, fmt.Errorf("observer adverts: %w", api.ErrPagesNotReady)
 	}
+	rows, err := s.q.ListObserverAdverts(ctx, sqlc.ListObserverAdvertsParams{
+		ObserverID: observerID,
+		CursorID:   cursor,
+		RowLimit:   limit + 1, // fetch one extra to detect hasMore
+	})
 	if err != nil {
 		slog.Error("api: ListObserverAdverts failed", "component", "db", "error", err)
 		return api.Page[api.AdvertObservation]{}, err

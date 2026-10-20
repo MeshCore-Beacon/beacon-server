@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"slices"
@@ -528,7 +529,7 @@ func TestPacketsBySitesSaturatedPagesFullPostgres(t *testing.T) {
 	}
 	legacy := New(f.pool, nil, 0, 0)
 	trusted := New(f.pool, nil, 0, 0, WithReadModels(earnedPacketSites()))
-	lp, err := legacy.ListPackets(f.ctx, nil, nil, []string{"EEE"}, nil, time.Time{}, time.Time{}, 0, nil, 3)
+	lp, err := regionPageToday(f.ctx, legacy, nil, nil, []string{"EEE"}, nil, time.Time{}, time.Time{}, 0, 3)
 	if err != nil || len(lp.Items) != 2 || !lp.HasMore {
 		t.Fatalf("legacy page %+v, %v", lp, err)
 	}
@@ -566,7 +567,7 @@ func TestPacketsBySitesMatchesLegacyPostgres(t *testing.T) {
 	} {
 		for _, cursor := range []int64{0, psT0.Add(3 * time.Hour).UnixMilli()} {
 			// The limit covers every observation, so today's scan never saturates.
-			lp, err := legacy.ListPackets(f.ctx, r.pt, r.rt, r.sites, r.scopes, r.since, r.until, cursor, nil, 5000)
+			lp, err := regionPageToday(f.ctx, legacy, r.pt, r.rt, r.sites, r.scopes, r.since, r.until, cursor, 5000)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -610,7 +611,8 @@ func TestPacketsBySitesMatchesLegacyPostgres(t *testing.T) {
 	}
 }
 
-// Trust decides the statement at every step; a walk that crosses a trust drop goes on from the same place.
+// Trust decides at every step whether region pages are served; untrusted, they answer ErrPagesNotReady with no
+// statement, and a walk that crosses a trust drop goes on from the same place once trust is back.
 func TestPacketSitesTrustLifecyclePostgres(t *testing.T) {
 	f := newSiteFixture(t)
 	rec := &recordingDBTX{DBTX: f.pool}
@@ -619,7 +621,14 @@ func TestPacketSitesTrustLifecyclePostgres(t *testing.T) {
 	step := func(label, want string) {
 		t.Helper()
 		rec.names = nil
-		if _, err := s.ListPackets(f.ctx, nil, nil, []string{"AAA"}, nil, time.Time{}, time.Time{}, 0, nil, 10); err != nil {
+		_, err := s.ListPackets(f.ctx, nil, nil, []string{"AAA"}, nil, time.Time{}, time.Time{}, 0, nil, 10)
+		if want == "" {
+			if !errors.Is(err, api.ErrPagesNotReady) || len(rec.names) != 0 {
+				t.Fatalf("%s: err %v, ran %v; want ErrPagesNotReady and nothing", label, err, rec.names)
+			}
+			return
+		}
+		if err != nil {
 			t.Fatal(err)
 		}
 		if len(rec.names) == 0 || rec.names[0] != want {
@@ -631,43 +640,45 @@ func TestPacketSitesTrustLifecyclePostgres(t *testing.T) {
 		tr.ObserveRun(n)
 		tr.Repaired(gen)
 	}
-	step("not earned", "ListPacketsByIATAs")
+	step("not earned", "")
 	tr.Earn()
 	step("earned", "ListPacketsBySite")
 	tr.Invalidate("test")
-	step("invalidated", "ListPacketsByIATAs")
+	step("invalidated", "")
 	run(0)
 	step("a clean run after it", "ListPacketsBySite")
 	run(1)
-	step("a repairing run", "ListPacketsByIATAs")
+	step("a repairing run", "")
 	run(0)
-	step("one clean run", "ListPacketsByIATAs")
+	step("one clean run", "")
 	run(0)
 	step("two clean runs", "ListPacketsBySite")
 	disabled := NewTrust("packet_sites_lifecycle_disabled", false, PacketSitesTrustPolicy)
 	disabled.Earn()
-	if p, err := New(rec, nil, 0, 0, WithReadModels(&ReadModels{PacketSites: disabled})).ListPackets(f.ctx, nil, nil, []string{"AAA"}, nil, time.Time{}, time.Time{}, 0, nil, 10); err != nil || p.NextPageCursor != nil {
-		t.Fatalf("disabled: %+v, %v", p, err)
+	if _, err := New(rec, nil, 0, 0, WithReadModels(&ReadModels{PacketSites: disabled})).ListPackets(f.ctx, nil, nil, []string{"AAA"}, nil, time.Time{}, time.Time{}, 0, nil, 10); !errors.Is(err, api.ErrPagesNotReady) {
+		t.Fatalf("disabled: %v, want ErrPagesNotReady", err)
 	}
 
-	// A walk: page 1 trusted, then trust drops; page 2 by both cursors or the page cursor alone is today's page.
+	// A walk: page 1 trusted; while trust is down page 2 is not ready; once it is back, page 2 by its page cursor is
+	// the page a walk that never saw the drop gets.
 	r := siteReq{sites: []string{"AAA", "BBB"}}
 	p1, _ := f.page(s, r, 0, nil, 20)
 	if p1.NextCursor == nil || p1.NextPageCursor == nil {
 		t.Fatalf("page 1 cursors %+v", p1)
 	}
-	tr.Invalidate("test")
 	pc, _ := api.ParsePacketCursor(*p1.NextPageCursor)
-	want, err := New(f.pool, nil, 0, 0).ListPackets(f.ctx, nil, nil, r.sites, nil, time.Time{}, time.Time{}, *p1.NextCursor, nil, 20)
-	if err != nil {
-		t.Fatal(err)
+	want, _ := f.page(s, r, *p1.NextCursor, pc, 20)
+	tr.Invalidate("test")
+	if _, err := s.ListPackets(f.ctx, nil, nil, r.sites, nil, time.Time{}, time.Time{}, *p1.NextCursor, pc, 20); !errors.Is(err, api.ErrPagesNotReady) {
+		t.Fatalf("page 2 while untrusted: %v, want ErrPagesNotReady", err)
 	}
+	run(0)
 	for _, c := range []int64{*p1.NextCursor, 0} {
-		got, _ := f.page(s, r, c, pc, 20)
+		got, err := s.ListPackets(f.ctx, nil, nil, r.sites, nil, time.Time{}, time.Time{}, c, pc, 20)
 		gj, _ := json.Marshal(got)
 		wj, _ := json.Marshal(want)
-		if string(gj) != string(wj) || got.NextPageCursor != nil {
-			t.Fatalf("cursor %d: page 2 after the drop differs from today's:\n%s\n%s", c, gj, wj)
+		if err != nil || string(gj) != string(wj) {
+			t.Fatalf("cursor %d: page 2 after trust returned differs (%v):\n%s\n%s", c, err, gj, wj)
 		}
 	}
 }

@@ -315,7 +315,7 @@ func (c *CmiSession) Verify(ctx context.Context) (CmiVerification, error) {
 		return v, err
 	}
 	if !v.OK() {
-		slog.Error("cmi verification failed; pages stay on the original statements", "component", "readmodel",
+		slog.Error("cmi verification failed; region and scope message pages answer 503 until a later pass succeeds", "component", "readmodel",
 			"missing", v.Missing, "extra", v.Extra, "pages", v.PagesCompared, "diffs", len(v.PageDiffs), "first", v.PageDiffs[:min(len(v.PageDiffs), 3)])
 		return v, nil
 	}
@@ -336,7 +336,7 @@ const (
 	cmiVerifyLimit  = 50
 )
 
-// comparePages compares today's statement with the read model's on the busiest sites and scopes among messages
+// comparePages compares the original statements with the read model's on the busiest sites and scopes among messages
 // above after: channel and all-channel pages, from cursor 0 and from page 1's 26th id.
 func comparePages(ctx context.Context, q sqlc.Querier, after int64, v *CmiVerification) error {
 	type request struct {
@@ -363,7 +363,7 @@ func comparePages(ctx context.Context, q sqlc.Querier, after int64, v *CmiVerifi
 		cursors := []int64{0}
 		for i, cursor := 0, int64(0); i < len(cursors); i++ {
 			cursor = cursors[i]
-			legacy, err := listChannelMessages(ctx, q, false, r.channel, time.Time{}, cmiVerifyLimit, r.iatas, r.scope, cursor)
+			legacy, err := listChannelMessagesLegacy(ctx, q, r.channel, time.Time{}, cmiVerifyLimit, r.iatas, r.scope, cursor)
 			if err != nil {
 				return err
 			}

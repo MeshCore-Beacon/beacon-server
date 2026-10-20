@@ -41,9 +41,8 @@ func PayloadTypeBackfillTask(store payloadTypeBackfiller, interval time.Duration
 // Before its first batch, a task value asks once whether any observation up to the max lacks a
 // payload type. When none does it saves done at once instead of walking the whole id range. That
 // answer stays true: ingest writes payload_type on every observation it stores, so no untyped row
-// can appear later, and the walk would have typed nothing. Done only switches the adverts reader to
-// the statement that filters on the observation's own type, which returns the same rows once every
-// observation carries one; it just switches sooner. When the probe finds an untyped row, or fails
+// can appear later, and the walk would have typed nothing. Done turns on the observer advert pages, whose
+// statement filters on the observation's own type; until then they answer 503. When the probe finds an untyped row, or fails
 // (logged once), the task walks as before and never probes again.
 func payloadTypeBackfillTask(store payloadTypeBackfiller, interval time.Duration, span int64, maxRows int32, batches int) Task {
 	probed := false
@@ -81,7 +80,8 @@ func payloadTypeBackfillTask(store payloadTypeBackfiller, interval time.Duration
 			var rows int64
 			defer func() {
 				metrics.JobRows.WithLabelValues("payload_type_backfill").Add(float64(rows))
-				slog.Debug("observation payload type backfill", "component", "background", "next_id", next, "rows", rows)
+				slog.Info("observation payload type backfill progress: observer advert pages answer 503 until it is done",
+					"component", "background", "next_id", next, "max_id", maxID, "rows", rows)
 			}()
 			for range batches {
 				if maxID == 0 || next > maxID {

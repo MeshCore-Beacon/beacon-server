@@ -510,16 +510,16 @@ func TestListObserverAdverts_Pagination(t *testing.T) {
 	observerID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	heardAt := pgtype.Timestamptz{Time: time.UnixMilli(1700000000000), Valid: true}
 
-	rows := make([]sqlc.ListObserverAdvertsJoinFilterRow, 3)
+	rows := make([]sqlc.ListObserverAdvertsRow, 3)
 	for i := range rows {
-		rows[i] = sqlc.ListObserverAdvertsJoinFilterRow{
+		rows[i] = sqlc.ListObserverAdvertsRow{
 			ID:      int64(i + 1),
 			HeardAt: heardAt,
 		}
 	}
 
 	mock.EXPECT().
-		ListObserverAdvertsJoinFilter(gomock.Any(), gomock.Any()).
+		ListObserverAdverts(gomock.Any(), gomock.Any()).
 		Return(rows, nil)
 
 	store := &Store{q: mock}
@@ -545,7 +545,7 @@ func TestListObserverAdverts_DBError(t *testing.T) {
 	observerID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
 	mock.EXPECT().
-		ListObserverAdvertsJoinFilter(gomock.Any(), gomock.Any()).
+		ListObserverAdverts(gomock.Any(), gomock.Any()).
 		Return(nil, errors.New("db error"))
 
 	store := &Store{q: mock}

@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"reflect"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -74,16 +74,44 @@ func advertsPool(t *testing.T) (context.Context, *pgxpool.Pool) {
 	return ctx, pool
 }
 
+// joinFilterAdvertsSQL is the adverts statement that filtered on the packet's payload type, served until every
+// observation carried its own (frozen as db/planguard/sql/planted/ListObserverAdvertsJoinFilter_16fb706.sql). It is
+// the oracle: the observation-typed statement must return its rows.
+const joinFilterAdvertsSQL = `-- name: ListObserverAdvertsJoinFilter :many
+SELECT 
+  po.id,
+  encode(po.packet_hash, 'hex') AS packet_hash_hex,
+  p.payload_type,
+  po.iata,
+  po.heard_at,
+  po.rssi,
+  po.snr,
+  po.hop_count,
+  n.name AS node_name,
+  COALESCE(encode(p.origin_pubkey, 'hex'), '')::text AS node_public_key
+FROM packet_observations po
+JOIN packets p ON p.packet_hash = po.packet_hash
+LEFT JOIN nodes n ON n.public_key = p.origin_pubkey
+WHERE po.observer_id = $1
+  AND p.payload_type = 4
+  AND ($2::bigint = 0 OR po.id > $2::bigint)
+ORDER BY po.id ASC
+LIMIT $3`
+
 // joinFilterAdverts is the packet-typed statement's rows, in the observation-typed row type.
-func joinFilterAdverts(t *testing.T, ctx context.Context, q *sqlc.Queries, obs uuid.UUID, cursor int64, limit int32) []sqlc.ListObserverAdvertsRow {
+func joinFilterAdverts(t *testing.T, ctx context.Context, q sqlc.DBTX, obs uuid.UUID, cursor int64, limit int32) []sqlc.ListObserverAdvertsRow {
 	t.Helper()
-	rows, err := q.ListObserverAdvertsJoinFilter(ctx, sqlc.ListObserverAdvertsJoinFilterParams{ObserverID: obs, Column2: cursor, Limit: limit})
+	rows, err := q.Query(ctx, joinFilterAdvertsSQL, obs, cursor, limit)
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := make([]sqlc.ListObserverAdvertsRow, len(rows))
-	for i, r := range rows {
-		out[i] = sqlc.ListObserverAdvertsRow(r)
+	out, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (sqlc.ListObserverAdvertsRow, error) {
+		var i sqlc.ListObserverAdvertsRow
+		err := r.Scan(&i.ID, &i.PacketHashHex, &i.PayloadType, &i.Iata, &i.HeardAt, &i.Rssi, &i.Snr, &i.HopCount, &i.NodeName, &i.NodePublicKey)
+		return i, err
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	return out
 }
@@ -176,7 +204,7 @@ func TestObserverAdvertsPartialIndexPostgres(t *testing.T) {
 	}
 
 	q := sqlc.New(pool)
-	all := joinFilterAdverts(t, ctx, q, advertsObserverA, 0, math.MaxInt32)
+	all := joinFilterAdverts(t, ctx, pool, advertsObserverA, 0, math.MaxInt32)
 	if len(all) < 150 || all[len(all)-1].ID <= math.MaxInt32+1 {
 		t.Fatalf("fixture: A has %d adverts, last %d", len(all), all[len(all)-1].ID)
 	}
@@ -194,7 +222,7 @@ func TestObserverAdvertsPartialIndexPostgres(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if want := joinFilterAdverts(t, ctx, q, obs, cursor, limit); !sameRows(got, want) {
+					if want := joinFilterAdverts(t, ctx, pool, obs, cursor, limit); !sameRows(got, want) {
 						t.Fatalf("observer %s cursor %d limit %d:\ngot  %v\nwant %v", obs, cursor, limit, advertIDs(got), advertIDs(want))
 					}
 				}
@@ -304,7 +332,7 @@ WHERE po.id = a.id AND ((a.rn % 10 = 3 AND a.rn <= 150) OR a.rn > a.n - 5)`)
 		t.Fatalf("untyped %d adverts, %d above 2^31", tag.RowsAffected(), high)
 	}
 
-	want := advertIDs(joinFilterAdverts(t, ctx, sqlc.New(pool), advertsObserverA, 0, math.MaxInt32))
+	want := advertIDs(joinFilterAdverts(t, ctx, pool, advertsObserverA, 0, math.MaxInt32))
 	rec := &statementRecorder{DBTX: pool}
 	store := New(rec, nil, 0, 0, WithPayloadTypeGate())
 	h := handlers.ObserversRouter(store)
@@ -320,20 +348,31 @@ WHERE po.id = a.id AND ((a.rn % 10 = 3 AND a.rn <= 150) OR a.rn > a.n - 5)`)
 		return pages
 	}
 
-	before := walk(t, "ListObserverAdvertsJoinFilter")
+	// Until the backfill state says done (no state, then a state not done), the page answers 503 with Retry-After
+	// and runs no adverts statement.
+	notReady := func(t *testing.T) {
+		t.Helper()
+		rec2 := httptest.NewRecorder()
+		h.ServeHTTP(rec2, httptest.NewRequest("GET", fmt.Sprintf("/%s/adverts?limit=50", advertsObserverA), nil).WithContext(ctx))
+		if rec2.Code != http.StatusServiceUnavailable || rec2.Header().Get("Retry-After") == "" {
+			t.Fatalf("before the backfill: status %d, Retry-After %q", rec2.Code, rec2.Header().Get("Retry-After"))
+		}
+		if got := rec.advertStatements(); len(got) != 0 {
+			t.Fatalf("statements %v ran before the backfill", got)
+		}
+	}
+	notReady(t)
 	if err := store.SaveState(ctx, ObservationPayloadTypeKey, ObservationPayloadTypeState{NextID: 1}); err != nil {
 		t.Fatal(err)
 	}
-	walk(t, "ListObserverAdvertsJoinFilter")
+	notReady(t)
 
 	if _, err := pool.Exec(ctx, `UPDATE packet_observations po SET payload_type = p.payload_type
 FROM packets p WHERE p.packet_hash = po.packet_hash AND po.payload_type IS NULL`); err != nil {
 		t.Fatal(err)
 	}
 	saveDone(t, ctx, store, pool, true)
-	if after := walk(t, "ListObserverAdverts"); !reflect.DeepEqual(after, before) {
-		t.Fatalf("pages changed after the switch:\n%+v\n%+v", after, before)
-	}
+	walk(t, "ListObserverAdverts")
 
 	saveDone(t, ctx, store, pool, false)
 	walk(t, "ListObserverAdverts")

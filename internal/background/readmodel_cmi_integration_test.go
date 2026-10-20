@@ -177,7 +177,7 @@ func TestCmiBootRepairPostgres(t *testing.T) {
 		t.Fatalf("the older binary left %d pairs missing, want 10", missing)
 	}
 
-	// The next boot: untrusted until its repair finishes, then every page equals today's statement.
+	// The next boot: not ready until its repair finishes, then every page equals the original statement's.
 	tr2 := db.NewTrust("cmi", true, db.CmiTrustPolicy)
 	before := repairedRows("cmi")
 	if tr2.Trusted() {
@@ -192,19 +192,19 @@ func TestCmiBootRepairPostgres(t *testing.T) {
 		t.Fatalf("%d pairs still missing", n)
 	}
 	served := db.New(pool, nil, 0, 0, db.WithReadModels(&db.ReadModels{Cmi: tr2}))
-	today := db.New(pool, nil, 0, 0)
+	original := db.New(pool, nil, 0, 0)
 	for _, sites := range [][]string{{"YUL"}, {"YOW"}, {"YYZ"}, {"YUL", "YOW", "YYZ"}} {
 		for _, chID := range []*int32{&ch, nil} {
 			got, err := served.ListChannelMessages(ctx, chID, time.Time{}, 50, sites, "", 0)
 			if err != nil {
 				t.Fatal(err)
 			}
-			want, err := today.ListChannelMessages(ctx, chID, time.Time{}, 50, sites, "", 0)
+			want, err := original.OriginalChannelMessages(ctx, chID, time.Time{}, 50, sites, "", 0)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if !reflect.DeepEqual(got, want) || len(got.Items) == 0 {
-				t.Fatalf("%v: %+v, today %+v", sites, got, want)
+				t.Fatalf("%v: %+v, the original statements %+v", sites, got, want)
 			}
 		}
 	}

@@ -20,6 +20,10 @@ import (
 // the guards' refusals, and reports whether it did.
 func respondUnavailable(w http.ResponseWriter, err error) bool {
 	switch {
+	case errors.Is(err, api.ErrPagesNotReady):
+		guards.WriteRefusal(w, &guards.Refusal{Guard: "not_ready", Status: http.StatusServiceUnavailable, RetryAfter: 30,
+			Code: "service_unavailable", Message: "This page is not available yet. Retry later."})
+		return true
 	case errors.Is(err, api.ErrSlowPoolBusy):
 		warnSlowPoolBusy()
 		guards.WriteRefusal(w, &guards.Refusal{Guard: "slow_pool", Status: http.StatusServiceUnavailable, RetryAfter: 5,

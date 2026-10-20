@@ -47,14 +47,13 @@ var poolSpecs = []poolSpec{
 		},
 	},
 	{
-		// The statements that may walk whole site histories (planpolicy.Slow) and, while a read model is not trusted,
-		// the previous statements that serve its pages. Eight connections by default, the size api_legacy had
+		// The statements that may walk whole site histories (planpolicy.Slow). Two connections by default
 		// (database.slow_pool_size overrides it), so they never hold more of the server than that; a statement limit,
 		// so none runs unbounded; no parallel workers, whose plans for these walks ran several times longer
 		// (measured: a sparse filter over every site, 26 s without workers, 4 min with). Otherwise the server's own
 		// planner settings, as api_legacy.
 		name: PoolAPISlow,
-		size: map[planpolicy.Layout]int32{planpolicy.CustomAll: 8, planpolicy.Split: 8},
+		size: map[planpolicy.Layout]int32{planpolicy.CustomAll: 2, planpolicy.Split: 2},
 		params: map[string]string{
 			"application_name":                "beacon-api_slow",
 			"statement_timeout":               "120s",

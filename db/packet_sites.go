@@ -319,7 +319,7 @@ func (p *PacketSitesSession) Verify(ctx context.Context) (PacketSitesVerificatio
 		return v, err
 	}
 	if !v.OK() {
-		slog.Error("packet_sites verification failed; region pages stay on the original statement", "component", "readmodel",
+		slog.Error("packet_sites verification failed; region packet pages answer 503 until a later pass succeeds", "component", "readmodel",
 			"missing", v.Missing, "wrong", v.Wrong, "extra", v.Extra, "pages", v.PagesCompared, "diffs", len(v.PageDiffs),
 			"first", v.PageDiffs[:min(len(v.PageDiffs), 3)])
 		return v, nil

@@ -10,8 +10,25 @@ import (
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/jackc/pgx/v5"
 )
+
+// regionPageToday is a region page from the original region statement, by millisecond cursor: the statement the
+// slow pool answers with when the site read model's bounded reads run out of budget. Fixtures that do not fill
+// packet_sites read region pages through it.
+func regionPageToday(ctx context.Context, s *Store, pt, rt []int16, sites, scopes []string, since, until time.Time, cursor int64, limit int32) (api.PacketPage, error) {
+	p, err := s.listPacketsByIATAs(ctx, pt, rt, sites, scopes, since, until, cursor, limit)
+	return api.PacketPage{Page: p}, err
+}
+
+// listPacketsAnyPath lists through the global path, or through regionPageToday for sites.
+func listPacketsAnyPath(ctx context.Context, s *Store, sites []string, limit int32) (api.PacketPage, error) {
+	if len(sites) == 0 {
+		return s.ListPackets(ctx, nil, nil, nil, nil, time.Time{}, time.Time{}, 0, nil, limit)
+	}
+	return regionPageToday(ctx, s, nil, nil, sites, nil, time.Time{}, time.Time{}, 0, limit)
+}
 
 // The packet and its observation are separate ingest writes. A list request
 // between them must return the packet without inventing an observer or failing.
@@ -62,7 +79,7 @@ UPDATE packets SET observation_count = 1 WHERE packet_hash = '\x01';`)
 		t.Fatal(err)
 	}
 	for _, iatas := range [][]string{nil, {"YVR"}} {
-		page, err := store.ListPackets(ctx, nil, nil, iatas, nil, time.Time{}, time.Time{}, 0, nil, 50)
+		page, err := listPacketsAnyPath(ctx, store, iatas, 50)
 		if err != nil {
 			t.Fatal(err)
 		}

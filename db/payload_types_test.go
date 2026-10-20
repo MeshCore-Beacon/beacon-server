@@ -8,40 +8,40 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"reflect"
 	"testing"
-	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	mockdb "github.com/MeshCore-Beacon/beacon-server/db/sqlc/mock"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"go.uber.org/mock/gomock"
 )
 
 func TestListObserverAdverts_Dispatch(t *testing.T) {
 	ctx := context.Background()
 	obs := uuid.MustParse("00000000-0000-0000-0000-000000000001")
-	joinParams := sqlc.ListObserverAdvertsJoinFilterParams{ObserverID: obs, Column2: 7, Limit: 3}
 	typedParams := sqlc.ListObserverAdvertsParams{ObserverID: obs, CursorID: 7, RowLimit: 3}
 	gated := func(m sqlc.Querier) *Store {
 		s := &Store{q: m}
 		WithPayloadTypeGate()(s)
 		return s
 	}
-	page := func(t *testing.T, s *Store) {
+	page := func(t *testing.T, s *Store) error {
 		t.Helper()
-		if _, err := s.ListObserverAdverts(ctx, obs, 7, 2); err != nil {
-			t.Fatal(err)
-		}
+		_, err := s.ListObserverAdverts(ctx, obs, 7, 2)
+		return err
 	}
 
+	// A store without the gate (never the API store) serves the observation-typed statement at once.
 	t.Run("no gate", func(t *testing.T) {
 		m := mockdb.NewMockQuerier(gomock.NewController(t))
-		m.EXPECT().ListObserverAdvertsJoinFilter(gomock.Any(), joinParams).Return(nil, nil).Times(1)
-		page(t, &Store{q: m})
+		m.EXPECT().ListObserverAdverts(gomock.Any(), typedParams).Return(nil, nil).Times(1)
+		if err := page(t, &Store{q: m}); err != nil {
+			t.Fatal(err)
+		}
 	})
+	// Until the backfill state reads done, the page is not ready and no adverts statement runs.
 	for name, state := range map[string]struct {
 		raw json.RawMessage
 		err error
@@ -59,10 +59,12 @@ func TestListObserverAdverts_Dispatch(t *testing.T) {
 			}
 			m := mockdb.NewMockQuerier(gomock.NewController(t))
 			m.EXPECT().GetBackgroundState(gomock.Any(), "observation_payload_type").Return(state.raw, state.err).Times(2)
-			m.EXPECT().ListObserverAdvertsJoinFilter(gomock.Any(), joinParams).Return(nil, nil).Times(2)
 			s := gated(m)
-			page(t, s)
-			page(t, s)
+			for range 2 {
+				if err := page(t, s); !errors.Is(err, api.ErrPagesNotReady) {
+					t.Fatalf("err = %v, want ErrPagesNotReady", err)
+				}
+			}
 		})
 	}
 	t.Run("done", func(t *testing.T) {
@@ -70,38 +72,10 @@ func TestListObserverAdverts_Dispatch(t *testing.T) {
 		m.EXPECT().GetBackgroundState(gomock.Any(), "observation_payload_type").Return(json.RawMessage(`{"next_id":5,"done":true}`), nil).Times(1)
 		m.EXPECT().ListObserverAdverts(gomock.Any(), typedParams).Return(nil, nil).Times(2)
 		s := gated(m)
-		page(t, s)
-		page(t, s)
-	})
-
-	t.Run("same page from either statement", func(t *testing.T) {
-		name, key, rssi, snr := "Node", "aa", int16(-90), float32(5.5)
-		at := pgtype.Timestamptz{Time: time.UnixMilli(1700000000000), Valid: true}
-		rows := []sqlc.ListObserverAdvertsRow{
-			{ID: 11, PacketHashHex: "01", PayloadType: 4, Iata: "YOW", HeardAt: at, Rssi: &rssi, Snr: &snr, HopCount: 2, NodeName: &name, NodePublicKey: key},
-			{ID: 2147483650, PacketHashHex: "02", PayloadType: 4, Iata: "YVR", HeardAt: at, HopCount: 0},
-		}
-		joinRows := make([]sqlc.ListObserverAdvertsJoinFilterRow, len(rows))
-		for i, r := range rows {
-			joinRows[i] = sqlc.ListObserverAdvertsJoinFilterRow(r)
-		}
-		m := mockdb.NewMockQuerier(gomock.NewController(t))
-		m.EXPECT().ListObserverAdvertsJoinFilter(gomock.Any(), gomock.Any()).Return(joinRows, nil)
-		m.EXPECT().GetBackgroundState(gomock.Any(), gomock.Any()).Return(json.RawMessage(`{"next_id":5,"done":true}`), nil)
-		m.EXPECT().ListObserverAdverts(gomock.Any(), gomock.Any()).Return(rows, nil)
-		before, err := (&Store{q: m}).ListObserverAdverts(ctx, obs, 0, 1)
-		if err != nil {
-			t.Fatal(err)
-		}
-		after, err := gated(m).ListObserverAdverts(ctx, obs, 0, 1)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !reflect.DeepEqual(before, after) {
-			t.Fatalf("pages differ:\n%+v\n%+v", before, after)
-		}
-		if !after.HasMore || after.NextCursor == nil || *after.NextCursor != 11 || len(after.Items) != 1 || after.Items[0].ID != 11 {
-			t.Fatalf("page %+v", after)
+		for range 2 {
+			if err := page(t, s); err != nil {
+				t.Fatal(err)
+			}
 		}
 	})
 }
