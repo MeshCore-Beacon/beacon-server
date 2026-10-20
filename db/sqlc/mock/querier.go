@@ -145,6 +145,21 @@ func (mr *MockQuerierMockRecorder) CheckChannelMessageIATAs(ctx, arg any) *gomoc
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckChannelMessageIATAs", reflect.TypeOf((*MockQuerier)(nil).CheckChannelMessageIATAs), ctx, arg)
 }
 
+// CheckPacketSitesSlice mocks base method.
+func (m *MockQuerier) CheckPacketSitesSlice(ctx context.Context, arg db.CheckPacketSitesSliceParams) (db.CheckPacketSitesSliceRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CheckPacketSitesSlice", ctx, arg)
+	ret0, _ := ret[0].(db.CheckPacketSitesSliceRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CheckPacketSitesSlice indicates an expected call of CheckPacketSitesSlice.
+func (mr *MockQuerierMockRecorder) CheckPacketSitesSlice(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckPacketSitesSlice", reflect.TypeOf((*MockQuerier)(nil).CheckPacketSitesSlice), ctx, arg)
+}
+
 // ClearRepeaters mocks base method.
 func (m *MockQuerier) ClearRepeaters(ctx context.Context) (int64, error) {
 	m.ctrl.T.Helper()
@@ -460,6 +475,21 @@ func (m *MockQuerier) FillChannelMessageIATAsByObservations(ctx context.Context,
 func (mr *MockQuerierMockRecorder) FillChannelMessageIATAsByObservations(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FillChannelMessageIATAsByObservations", reflect.TypeOf((*MockQuerier)(nil).FillChannelMessageIATAsByObservations), ctx, arg)
+}
+
+// FillPacketSitesSlice mocks base method.
+func (m *MockQuerier) FillPacketSitesSlice(ctx context.Context, arg db.FillPacketSitesSliceParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FillPacketSitesSlice", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FillPacketSitesSlice indicates an expected call of FillPacketSitesSlice.
+func (mr *MockQuerierMockRecorder) FillPacketSitesSlice(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FillPacketSitesSlice", reflect.TypeOf((*MockQuerier)(nil).FillPacketSitesSlice), ctx, arg)
 }
 
 // FillReconfirmAmb mocks base method.
@@ -2346,6 +2376,21 @@ func (m *MockQuerier) MaxObservationID(ctx context.Context) (int64, error) {
 func (mr *MockQuerierMockRecorder) MaxObservationID(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MaxObservationID", reflect.TypeOf((*MockQuerier)(nil).MaxObservationID), ctx)
+}
+
+// MinObservationID mocks base method.
+func (m *MockQuerier) MinObservationID(ctx context.Context) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MinObservationID", ctx)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// MinObservationID indicates an expected call of MinObservationID.
+func (mr *MockQuerierMockRecorder) MinObservationID(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MinObservationID", reflect.TypeOf((*MockQuerier)(nil).MinObservationID), ctx)
 }
 
 // NextChannelMessageID mocks base method.

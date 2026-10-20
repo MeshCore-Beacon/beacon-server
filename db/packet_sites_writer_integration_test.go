@@ -434,6 +434,33 @@ func TestPacketSitesRaceMaxMergePostgres(t *testing.T) {
 	}
 	f.psSiteRow("earlier waits on later", p, "AAA")
 
+	fill := func(db sqlc.DBTX, p []byte) error {
+		_, err := sqlc.New(db).FillPacketSitesSlice(f.ctx, sqlc.FillPacketSitesSliceParams{AfterID: 0, ThroughID: 1 << 62})
+		return err
+	}
+	p = packet() // R4 a fill over the packet's ids open, a later hearing waits, the fill commits
+	f.unsited(psObs(p, 1, "AAA", t1))
+	l1.begin()
+	if err := fill(l1.tx, p); err != nil {
+		t.Fatal(err)
+	}
+	wait = l2.insertWaiting(psObs(p, 2, "AAA", t2))
+	l1.end(true)
+	if err := wait(); err != nil {
+		t.Fatal(err)
+	}
+	f.psSiteRow("later waits on a fill", p, "AAA")
+
+	p = packet() // R5 a later hearing open, a fill over the packet's ids waits, the hearing commits
+	f.unsited(psObs(p, 1, "AAA", t1))
+	l2.open(psObs(p, 2, "AAA", t2))
+	wait = l1.waiting(func(db sqlc.DBTX) error { return fill(db, p) })
+	l2.end(true)
+	if err := wait(); err != nil {
+		t.Fatal(err)
+	}
+	f.psSiteRow("fill waits on a later hearing", p, "AAA")
+
 	p = packet() // R6 two observers at one site in the same microsecond
 	l1.open(psObs(p, 1, "AAA", t2))
 	wait = l2.insertWaiting(psObs(p, 2, "AAA", t2))

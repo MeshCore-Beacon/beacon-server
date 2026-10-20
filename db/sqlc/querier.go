@@ -30,6 +30,9 @@ type Querier interface {
 	// Exact check of messages in (after_id, through_id]: pairs the definition has and the table lacks (counting
 	// observations up to obs_through only), and table pairs no stored observation backs.
 	CheckChannelMessageIATAs(ctx context.Context, arg CheckChannelMessageIATAsParams) (CheckChannelMessageIATAsRow, error)
+	// Exact check of every packet with an observation in (after_id, through_id]: site rows the observations imply
+	// and the table lacks, rows whose hearing time or packet columns differ, and rows no observation backs.
+	CheckPacketSitesSlice(ctx context.Context, arg CheckPacketSitesSliceParams) (CheckPacketSitesSliceRow, error)
 	// Keeps fetch timing so re-enabling still respects backoff; the ETag goes with the rows.
 	ClearRepeaters(ctx context.Context) (int64, error)
 	CreateAccount(ctx context.Context, name string) (Account, error)
@@ -81,6 +84,11 @@ type Querier interface {
 	// The site of every group-text observation in (after_id, through_id] whose packet has a message.
 	// An untyped observation is checked too: older rows may have no payload type.
 	FillChannelMessageIATAsByObservations(ctx context.Context, arg FillChannelMessageIATAsByObservationsParams) (int64, error)
+	// Copyright 2026 Beacon Contributors
+	// SPDX-License-Identifier: AGPL-3.0-or-later
+	// Each (packet, site) of the observations in (after_id, through_id], at its latest hearing there.
+	// Pairs already at or past that hearing are skipped before the insert, so a clean slice writes nothing.
+	FillPacketSitesSlice(ctx context.Context, arg FillPacketSitesSliceParams) (int64, error)
 	// Hop prefixes that match >1 node in an IATA, per width, into the sweep's temp table.
 	FillReconfirmAmb(ctx context.Context) error
 	FillRollupObs(ctx context.Context, dollar_1 pgtype.Timestamptz) error
@@ -380,6 +388,7 @@ type Querier interface {
 	MarkPartialRollupHours(ctx context.Context) error
 	MaxChannelMessageID(ctx context.Context) (int64, error)
 	MaxObservationID(ctx context.Context) (int64, error)
+	MinObservationID(ctx context.Context) (int64, error)
 	// The first message id above after_id, or 0 when there is none.
 	NextChannelMessageID(ctx context.Context, afterID int64) (int64, error)
 	OldestMissingRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
