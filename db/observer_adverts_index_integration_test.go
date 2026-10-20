@@ -247,10 +247,10 @@ func TestObserverAdvertsPartialIndexPostgres(t *testing.T) {
 	})
 
 	t.Run("plan", func(t *testing.T) {
-		// The unfiltered index on the same key must exist, or choosing the partial one proves nothing.
-		var other *string
-		if err := pool.QueryRow(ctx, "SELECT to_regclass('idx_observations_observer_id')::text").Scan(&other); err != nil || other == nil {
-			t.Fatalf("idx_observations_observer_id missing: %v", err)
+		// The unfiltered index on the same key must exist, or choosing the partial one proves nothing. The
+		// migrations drop it once advert pages no longer need it, so rebuild it as a database between the two holds it.
+		if _, err := pool.Exec(ctx, "CREATE INDEX idx_observations_observer_id ON packet_observations (observer_id, id); ANALYZE packet_observations"); err != nil {
+			t.Fatal(err)
 		}
 		for _, c := range []struct {
 			cursor int64
