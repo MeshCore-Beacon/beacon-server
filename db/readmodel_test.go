@@ -259,12 +259,14 @@ func TestInsertObservationSiteFallbackDropsTrust(t *testing.T) {
 				cancel()
 			}
 			mock.EXPECT().InsertObservation(gomock.Any(), gomock.Any()).Return(sqlc.InsertObservationRow{}, tc.err)
+			var genAtFallback uint64
 			if tc.fallback {
 				mock.EXPECT().InsertObservationUnsited(gomock.Any(), gomock.Any()).DoAndReturn(
 					func(context.Context, sqlc.InsertObservationUnsitedParams) (sqlc.InsertObservationUnsitedRow, error) {
 						if tr.Trusted() {
 							t.Error("trust still on when the unsited insert ran")
 						}
+						genAtFallback = tr.Generation()
 						if tc.fallbackOK {
 							return sqlc.InsertObservationUnsitedRow{Inserted: true, ObservationCount: 4}, nil
 						}
@@ -281,6 +283,11 @@ func TestInsertObservationSiteFallbackDropsTrust(t *testing.T) {
 			}
 			if tr.Trusted() {
 				t.Fatal("trust survived a failed site write")
+			}
+			// A reconcile that began between the first invalidation and the fallback's commit must not restore
+			// trust: the writer invalidates again once the fallback returned.
+			if tc.fallback && tr.Generation() <= genAtFallback {
+				t.Fatalf("generation %d after the fallback, %d during it: no invalidation after the unsited write", tr.Generation(), genAtFallback)
 			}
 		})
 	}

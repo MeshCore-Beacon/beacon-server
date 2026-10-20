@@ -689,6 +689,9 @@ func (s *Store) InsertObservation(ctx context.Context, o ingest.InsertObservatio
 	slog.Warn("observation site row failed; storing the observation without it", "component", "db",
 		"packet_hash", hex.EncodeToString(o.PacketHash), "iata", o.IATA, "error", err)
 	fallback, err := s.q.InsertObservationUnsited(ctx, sqlc.InsertObservationUnsitedParams(params))
+	// Again once the fallback has returned: a reconcile that took its snapshot before this commit must not be the
+	// one that restores trust.
+	s.readModels.invalidatePacketSites("an observation was stored without its site row")
 	if err != nil {
 		return false, 0, err
 	}
