@@ -144,7 +144,7 @@ func main() {
 	dsn := getEnv("POSTGRES_DSN")
 	layout := resolved.APIPlanLayout
 	mode := bootModeFor(resolved.ReadOnly)
-	var tune []func(string, *pgxpool.Config)
+	tune := []func(string, *pgxpool.Config){db.SlowPoolSize(resolved.SlowPoolSize)}
 	if resolved.ReadOnly {
 		slog.Warn(readOnlyWarning, "component", "startup")
 		tune = append(tune, readOnlyTune)

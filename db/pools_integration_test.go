@@ -277,3 +277,27 @@ func TestSlowPoolIsolationPostgres(t *testing.T) {
 		t.Errorf("slow statement after release: %v", err)
 	}
 }
+
+// SlowPoolSize resizes api_slow, and only api_slow; the single layout opens no api_slow to resize.
+func TestSlowPoolSizePostgres(t *testing.T) {
+	dsn := os.Getenv("BEACON_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set BEACON_TEST_POSTGRES_DSN")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	for _, layout := range []planpolicy.Layout{planpolicy.CustomAll, planpolicy.Split, planpolicy.Single} {
+		p, err := OpenPools(ctx, dsn, layout, SlowPoolSize(8))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if layout == planpolicy.Single {
+			if p.APISlow != nil || p.APILegacy.Config().MaxConns != 8 {
+				t.Errorf("single: api_slow %v, api_legacy %d", p.APISlow, p.APILegacy.Config().MaxConns)
+			}
+		} else if got := p.APISlow.Config().MaxConns; got != 8 || p.APICustom.Config().MaxConns > 8 {
+			t.Errorf("%s: api_slow MaxConns = %d, want 8; api_custom %d", layout, got, p.APICustom.Config().MaxConns)
+		}
+		p.Close()
+	}
+}

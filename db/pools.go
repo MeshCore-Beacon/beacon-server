@@ -105,6 +105,17 @@ var poolSpecs = []poolSpec{
 	},
 }
 
+// SlowPoolSize returns an OpenPools tune that sizes api_slow to n connections (database.slow_pool_size). The
+// default of 2 keeps the slow statements to a small share of the server; a larger pool gives them the capacity the
+// old fallbacks had (api_legacy's 8) if the change that removed those fallbacks is ever reverted.
+func SlowPoolSize(n int32) func(pool string, cfg *pgxpool.Config) {
+	return func(pool string, cfg *pgxpool.Config) {
+		if pool == PoolAPISlow && n > 0 {
+			cfg.MaxConns = n
+		}
+	}
+}
+
 // ingestPoolSize is at least 6 and at least one connection per CPU, so ingest never has fewer
 // connections than the single shared pool gave it before the pools split.
 func ingestPoolSize() int32 {

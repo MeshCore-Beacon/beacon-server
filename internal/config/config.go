@@ -79,6 +79,8 @@ type PlanguardConfig struct {
 type DatabaseConfig struct {
 	// APIPlanLayout is custom_all (default), split or single.
 	APIPlanLayout string `yaml:"api_plan_layout"`
+	// SlowPoolSize is api_slow's connection count under custom_all and split; nil means 2.
+	SlowPoolSize *int `yaml:"slow_pool_size"`
 }
 
 // GuardsConfig controls the cost guards on the public API.
@@ -188,6 +190,8 @@ type ResolvedConfig struct {
 
 	// APIPlanLayout selects the API pool layout; defaults to custom_all.
 	APIPlanLayout planpolicy.Layout
+	// SlowPoolSize is api_slow's connection count; defaults to 2.
+	SlowPoolSize int32
 	// GuardsEnforce lists the enforcing guard families; empty (never nil) when unset.
 	GuardsEnforce []string
 	// GuardsBudget is the per-client DB-time budget mode; always "shadow".
@@ -580,6 +584,12 @@ func (c *Config) validateDatabaseGuards() error {
 	if _, err := planpolicy.ParseLayout(c.Database.APIPlanLayout); err != nil {
 		return err
 	}
+	if n := c.Database.SlowPoolSize; n != nil && (*n < 1 || *n > 1000) {
+		if *n < 1 {
+			return fmt.Errorf("database.slow_pool_size must be at least 1")
+		}
+		return fmt.Errorf("database.slow_pool_size must be at most 1000")
+	}
 	for i, family := range c.Guards.Enforce {
 		if !slices.Contains(guardFamilies, family) {
 			return fmt.Errorf("guards.enforce[%d]: unknown family %q (%s)", i, family, strings.Join(guardFamilies, ", "))
@@ -731,6 +741,10 @@ func Resolve(cfg *Config) ResolvedConfig {
 	if r.APIPlanLayout == "" {
 		r.APIPlanLayout = planpolicy.CustomAll
 	}
+	r.SlowPoolSize = 2
+	if n := cfg.Database.SlowPoolSize; n != nil && *n >= 1 {
+		r.SlowPoolSize = int32(min(*n, 1000))
+	}
 	if r.GuardsBudget == "" {
 		r.GuardsBudget = "shadow"
 	}
@@ -799,12 +813,12 @@ func Resolve(cfg *Config) ResolvedConfig {
 
 func (r ResolvedConfig) String() string {
 	return fmt.Sprintf(
-		"telemetryResolution=%s telemetryRetention=%s rollupRetention=%s packetRetention=%s routeRetention=%s routeGrace=%s routeMinObs=%d routeReconfirmRowsPerHour=%d maxConnsPerIP=%d maxConnectsPerMinute=%d viewRefresh=%s reconfirm=%s cleanup=%s presenceFlush=%s presencePacketTTL=%s clockDriftThreshold=%s nodeStaleThreshold=%s nodeDeleteAfter=%s observerDeleteAfter=%s rateLimitEnabled=%t requestsPerMinute=%d burst=%d apiPlanLayout=%s guardsEnforce=%v guardsBudget=%s adminListen=%q readOnly=%t planguardDailyCheck=%t readModelCmi=%t readModelPacketSites=%t",
+		"telemetryResolution=%s telemetryRetention=%s rollupRetention=%s packetRetention=%s routeRetention=%s routeGrace=%s routeMinObs=%d routeReconfirmRowsPerHour=%d maxConnsPerIP=%d maxConnectsPerMinute=%d viewRefresh=%s reconfirm=%s cleanup=%s presenceFlush=%s presencePacketTTL=%s clockDriftThreshold=%s nodeStaleThreshold=%s nodeDeleteAfter=%s observerDeleteAfter=%s rateLimitEnabled=%t requestsPerMinute=%d burst=%d apiPlanLayout=%s slowPoolSize=%d guardsEnforce=%v guardsBudget=%s adminListen=%q readOnly=%t planguardDailyCheck=%t readModelCmi=%t readModelPacketSites=%t",
 		r.TelemetryResolution, r.TelemetryRetention, r.RollupRetention, r.PacketRetention, r.RouteRetention, r.RouteGrace, r.RouteMinObservations, r.RouteReconfirmRowsPerHour,
 		r.MaxConnsPerIP, r.MaxConnectsPerMinute, r.ViewRefreshInterval, r.ReconfirmInterval, r.CleanupInterval,
 		r.PresenceFlushInterval, r.PresencePacketTTL, r.ClockDriftThreshold,
 		r.NodeStaleThreshold, r.NodeDeleteAfter, r.ObserverDeleteAfter,
 		r.RateLimit.Enabled, r.RateLimit.RequestsPerMinute, r.RateLimit.Burst,
-		r.APIPlanLayout, r.GuardsEnforce, r.GuardsBudget, r.AdminListen, r.ReadOnly, r.PlanguardDailyCheck, r.ReadModelCmiEnabled, r.ReadModelPacketSitesEnabled,
+		r.APIPlanLayout, r.SlowPoolSize, r.GuardsEnforce, r.GuardsBudget, r.AdminListen, r.ReadOnly, r.PlanguardDailyCheck, r.ReadModelCmiEnabled, r.ReadModelPacketSitesEnabled,
 	)
 }
