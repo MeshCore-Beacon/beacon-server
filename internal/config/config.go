@@ -56,10 +56,50 @@ type Config struct {
 	ReadModels  ReadModelsConfig      `yaml:"readmodels"`
 }
 
-// ReadModelsConfig switches serving pages from each read model.
+// ReadModelsConfig switches serving pages from each read model and paces their one-off backfills.
 type ReadModelsConfig struct {
 	Cmi         ReadModelConfig `yaml:"cmi"`
 	PacketSites ReadModelConfig `yaml:"packet_sites"`
+	Fill        FillConfig      `yaml:"fill"`
+}
+
+// FillConfig paces the one-off backfills (packet_sites, cmi and observation payload types). After each slice or
+// batch a fill sleeps max(min_pause, elapsed × (1 − duty) / duty), where elapsed is that slice's run time, so it is
+// busy at most duty of the time and a slow disk stretches the pauses on its own. Unset fields take the defaults.
+type FillConfig struct {
+	Duty             *float64  `yaml:"duty"`               // 0.01 to 1; default 0.5
+	MinPause         *duration `yaml:"min_pause"`          // 0 to 1m; default 100ms
+	PacketSitesSlice *int64    `yaml:"packet_sites_slice"` // observation ids per packet_sites slice; default 500000
+	CmiBatch         *int64    `yaml:"cmi_batch"`          // message ids per cmi batch; default 10000
+}
+
+// Fill pacing defaults and limits.
+const (
+	defaultFillDuty             = 0.5
+	minFillDuty                 = 0.01 // db.MinFillDuty: 1 % busy
+	defaultFillMinPause         = 100 * time.Millisecond
+	defaultFillPacketSitesSlice = 500_000
+	defaultFillCmiBatch         = 10_000
+	maxFillMinPause             = time.Minute
+	maxFillPacketSitesSlice     = 10_000_000
+	maxFillCmiBatch             = 1_000_000
+)
+
+// validate checks each set value's range.
+func (f FillConfig) validate() error {
+	if d := f.Duty; d != nil && !(*d >= minFillDuty && *d <= 1) { // also rejects NaN
+		return fmt.Errorf("readmodels.fill.duty must be between %v and 1, got %v", minFillDuty, *d)
+	}
+	if d := f.MinPause; d != nil && (d.Duration < 0 || d.Duration > maxFillMinPause) {
+		return fmt.Errorf("readmodels.fill.min_pause must be between 0s and %s, got %s", maxFillMinPause, d.Duration)
+	}
+	if n := f.PacketSitesSlice; n != nil && (*n < 1 || *n > maxFillPacketSitesSlice) {
+		return fmt.Errorf("readmodels.fill.packet_sites_slice must be between 1 and %d, got %d", maxFillPacketSitesSlice, *n)
+	}
+	if n := f.CmiBatch; n != nil && (*n < 1 || *n > maxFillCmiBatch) {
+		return fmt.Errorf("readmodels.fill.cmi_batch must be between 1 and %d, got %d", maxFillCmiBatch, *n)
+	}
+	return nil
 }
 
 // ReadModelConfig controls one read model. Enabled false turns the pages it serves off (they answer 503 with
@@ -208,6 +248,11 @@ type ResolvedConfig struct {
 	// ReadModelPacketSitesEnabled serves region packet pages from packet_sites once trusted; false turns those pages
 	// off (503). Default true.
 	ReadModelPacketSitesEnabled bool
+	// FillDuty, FillMinPause, FillPacketSitesSlice and FillCmiBatch pace the one-off backfills; see FillConfig.
+	FillDuty             float64
+	FillMinPause         time.Duration
+	FillPacketSitesSlice int64
+	FillCmiBatch         int64
 }
 
 // RateLimitConfig controls the per-client REST API request budget.
@@ -567,6 +612,9 @@ func Load(path string) (*Config, error) {
 	if err := cfg.validateDatabaseGuards(); err != nil {
 		return nil, err
 	}
+	if err := cfg.ReadModels.Fill.validate(); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
 
@@ -810,17 +858,36 @@ func Resolve(cfg *Config) ResolvedConfig {
 	if r.NodeDeleteAfter == 0 {
 		r.NodeDeleteAfter = 30 * 24 * time.Hour
 	}
+	// Load has validated the fill values; an unvalidated config falls back to the defaults.
+	fill := cfg.ReadModels.Fill
+	r.FillDuty, r.FillMinPause = defaultFillDuty, defaultFillMinPause
+	r.FillPacketSitesSlice, r.FillCmiBatch = defaultFillPacketSitesSlice, defaultFillCmiBatch
+	if fill.validate() == nil {
+		if fill.Duty != nil {
+			r.FillDuty = *fill.Duty
+		}
+		if fill.MinPause != nil {
+			r.FillMinPause = fill.MinPause.Duration
+		}
+		if fill.PacketSitesSlice != nil {
+			r.FillPacketSitesSlice = *fill.PacketSitesSlice
+		}
+		if fill.CmiBatch != nil {
+			r.FillCmiBatch = *fill.CmiBatch
+		}
+	}
 	return r
 }
 
 func (r ResolvedConfig) String() string {
 	return fmt.Sprintf(
-		"telemetryResolution=%s telemetryRetention=%s rollupRetention=%s packetRetention=%s routeRetention=%s routeGrace=%s routeMinObs=%d routeReconfirmRowsPerHour=%d maxConnsPerIP=%d maxConnectsPerMinute=%d viewRefresh=%s reconfirm=%s cleanup=%s presenceFlush=%s presencePacketTTL=%s clockDriftThreshold=%s nodeStaleThreshold=%s nodeDeleteAfter=%s observerDeleteAfter=%s rateLimitEnabled=%t requestsPerMinute=%d burst=%d apiPlanLayout=%s slowPoolSize=%d guardsEnforce=%v guardsBudget=%s adminListen=%q readOnly=%t planguardDailyCheck=%t readModelCmi=%t readModelPacketSites=%t",
+		"telemetryResolution=%s telemetryRetention=%s rollupRetention=%s packetRetention=%s routeRetention=%s routeGrace=%s routeMinObs=%d routeReconfirmRowsPerHour=%d maxConnsPerIP=%d maxConnectsPerMinute=%d viewRefresh=%s reconfirm=%s cleanup=%s presenceFlush=%s presencePacketTTL=%s clockDriftThreshold=%s nodeStaleThreshold=%s nodeDeleteAfter=%s observerDeleteAfter=%s rateLimitEnabled=%t requestsPerMinute=%d burst=%d apiPlanLayout=%s slowPoolSize=%d guardsEnforce=%v guardsBudget=%s adminListen=%q readOnly=%t planguardDailyCheck=%t readModelCmi=%t readModelPacketSites=%t fillDuty=%g fillMinPause=%s fillPacketSitesSlice=%d fillCmiBatch=%d",
 		r.TelemetryResolution, r.TelemetryRetention, r.RollupRetention, r.PacketRetention, r.RouteRetention, r.RouteGrace, r.RouteMinObservations, r.RouteReconfirmRowsPerHour,
 		r.MaxConnsPerIP, r.MaxConnectsPerMinute, r.ViewRefreshInterval, r.ReconfirmInterval, r.CleanupInterval,
 		r.PresenceFlushInterval, r.PresencePacketTTL, r.ClockDriftThreshold,
 		r.NodeStaleThreshold, r.NodeDeleteAfter, r.ObserverDeleteAfter,
 		r.RateLimit.Enabled, r.RateLimit.RequestsPerMinute, r.RateLimit.Burst,
 		r.APIPlanLayout, r.SlowPoolSize, r.GuardsEnforce, r.GuardsBudget, r.AdminListen, r.ReadOnly, r.PlanguardDailyCheck, r.ReadModelCmiEnabled, r.ReadModelPacketSitesEnabled,
+		r.FillDuty, r.FillMinPause, r.FillPacketSitesSlice, r.FillCmiBatch,
 	)
 }

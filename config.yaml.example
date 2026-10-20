@@ -93,6 +93,15 @@ ratelimit:
 #    # Serve region packet pages (iatas, region) from packet_sites once this process has repaired and verified
 #    # it; until then they answer 503. false turns them off (503); the table is still maintained and swept.
 #    enabled: true
+#  # Pacing of the one-off backfills (packet_sites, cmi and observation payload types). After each slice or batch a
+#  # fill sleeps max(min_pause, elapsed x (1 - duty) / duty), where elapsed is that slice's run time, so it is busy at
+#  # most duty of the time and a slow disk stretches the pauses on its own. Pacing changes only when the fills run,
+#  # not what they write. The resolved values are logged at boot in the "config: loaded" line.
+#  fill:
+#    duty: 0.5                  # share of time a fill may be busy, 0.01 to 1; 0.25 on a slow (rotational) disk
+#    min_pause: 100ms           # shortest pause after a slice or batch, 0s to 1m
+#    packet_sites_slice: 500000 # observation ids per packet_sites backfill slice, 1 to 10000000
+#    cmi_batch: 10000           # message ids per cmi backfill batch, 1 to 1000000
 
 # MeshMapper integrations (optional, require a regional or grouped-region API key).
 # Your local MeshMapper regional or grouped-region admin can generate the key.

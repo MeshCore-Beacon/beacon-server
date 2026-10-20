@@ -33,6 +33,9 @@ type Store struct {
 	payloadTypeWarnAt   atomic.Int64    // unix ns of the last state-read Warn; see payloadTypesReady
 	readModels          *ReadModels     // see WithReadModels; nil: the read-model pages answer api.ErrPagesNotReady
 	packetSitesVacuums  atomic.Int32    // VACUUM (ANALYZE) runs of packet_sites by the first-time verification
+	fill                *FillPacing     // see WithFillPacing; nil: DefaultFillPacing
+	packetSitesProgress FillProgress    // the packet_sites backfill's progress log, across sessions
+	cmiProgress         FillProgress    // the cmi backfill's progress log, across sessions
 }
 
 // New creates a Store whose statements run on dbtx (a pool, or a PlanRouter for the API).
