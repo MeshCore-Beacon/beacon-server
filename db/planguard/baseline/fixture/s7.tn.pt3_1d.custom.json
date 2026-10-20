@@ -1,0 +1,21 @@
+[
+ "Nested Loop (Left)",
+ "  Limit",
+ "    Sort",
+ "      Aggregate partial=Simple {Hashed}",
+ "        Nested Loop",
+ "          Result [InitPlan]",
+ "            Limit [InitPlan]",
+ "              Index Only Scan on analytics_hourly_advert_hearings using analytics_hourly_advert_hearings_pkey scan=Forward",
+ "          Result [InitPlan]",
+ "            Limit [InitPlan]",
+ "              Index Only Scan on analytics_hourly_advert_hearings analytics_hourly_advert_hearings_1 using analytics_hourly_advert_hearings_pkey scan=Backward",
+ "          Unique",
+ "            Sort",
+ "              ProjectSet",
+ "                Result",
+ "          Nested Loop",
+ "            Function Scan",
+ "            Index Scan on analytics_hourly_advert_hearings x using analytics_hourly_advert_hearings_pkey scan=Forward",
+ "  Index Scan on nodes n using nodes_public_key_key scan=Forward"
+]

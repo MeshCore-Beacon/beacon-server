@@ -7,6 +7,9 @@ import (
 )
 
 func TestTraceFormat(t *testing.T) {
+	if q := Assess(make([]byte, 9), 0, 2, 0); q.Status != "supported" {
+		t.Fatalf("zero-hop trace header must remain inspectable: %+v", q)
+	}
 	for flags := byte(0); flags < 4; flags++ {
 		raw := make([]byte, 9)
 		raw[8] = flags

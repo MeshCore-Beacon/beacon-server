@@ -1,0 +1,13 @@
+# Copyright 2026 Beacon Contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# A derived statement: the read-only part of a DML, frozen as a file and checked against today's sqlc text.
+statements:
+  DeleteExpiredRoutes: {sqlc: DeleteExpiredRoutes, plan: maint, kind: dml}
+  DeleteExpiredRoutesSelect:
+    file: sql/derived/DeleteExpiredRoutesSelect.sql
+    derived_from: DeleteExpiredRoutes
+    plan: maint
+entries:
+  - {id: expired.plain, stmt: DeleteExpiredRoutes}
+  - {id: expired.select, stmt: DeleteExpiredRoutesSelect}

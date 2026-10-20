@@ -34,17 +34,65 @@ server:
   # With additional proxy hops, first configure their trust at the edge proxy
   # and pass its validated client address rather than a client-supplied header.
   trusted_proxies: []
+  # Address of the admin listener serving Prometheus /metrics, e.g. 127.0.0.1:9090. Off when empty.
+  # It has no authentication: bind it to a private interface.
+  admin_listen: ""
+  # read_only: true boots a server that never writes: no migrations, no ingest, no background jobs, no
+  # MeshMapper imports, and every database session is read-only. Used to compare two builds on one database.
+  read_only: false
 
 # Applies to /api/v1/* only. Both counters are local to this Beacon instance.
 # Set trusted_proxies correctly before using a reverse proxy, or clients share
 # the proxy's budget. IPv6 clients share a /64 budget to prevent address rotation.
 ratelimit:
   enabled: true
-  requests_per_minute: 300
+  requests_per_minute: 600
   # Maximum requests in a one-second sliding window, not token-bucket capacity.
   # Omitted/zero defaults to requests_per_minute. Negative limits prevent startup.
   # A 429 returns error.code=rate_limited and Retry-After (1 or 60 seconds).
-  burst: 300
+  burst: 600
+
+# Database pools. custom_all (default) opens api_custom 8, api_slow 2, ingest 6, maint 4 connections
+# (20); split opens 24 (api_custom 7, api_cached 5, api_slow 2); single opens 18 (api_legacy 8, ingest, maint).
+# api_slow runs only the region and message statements that may walk whole site histories, each limited to 120 s.
+# ingest grows to one connection per CPU on hosts with more than 6 CPUs, adding to each total.
+# Keep max_connections well above that.
+#database:
+#  # custom_all (default): every API statement gets a custom plan.
+#  # split: statements admitted to the generic-plan class (db/planpolicy/cached_gen.go) run on cached
+#  #   generic plans on api_cached; every other API statement keeps custom plans.
+#  # single: rollback. One API pool on today's settings; every guard family observes.
+#  api_plan_layout: custom_all
+#  # api_slow's connections under custom_all and split (default 2, at least 1). Set it only to override
+#  # the default: raise it if many region or message requests answer 503 with Retry-After 5
+#  # (beacon_api_unavailable_total). Count it in max_connections.
+#  slow_pool_size: 2
+
+# Cost guards on the public /api/v1 group (not /admin, not /ws). Every family observes by default:
+# nothing is refused, only beacon_guard_would_refuse_total counts. Listed families enforce:
+# 429 (4 concurrent DB requests per client, 5 s wait), 503 (pool busy 5 s; class deadline 5/10/30 s).
+# Families: routes, channel_messages, packets_global, packets_region, packets_window,
+#           packet_detail, stats, other. PUT /api/v1/admin/config changes the list at runtime.
+#guards:
+#  enforce: []
+#  budget: shadow   # the per-client DB-time budget only records; enforcement is not available
+
+# Daily read-only plan regression check (GET /api/v1/admin/db/planguard, beacon_planguard_* metrics).
+# Enable on large deployments; plan expectations assume production-sized tables.
+#planguard:
+#  daily_check: false
+
+# Read models. Serve region and scope channel message pages from channel_message_iatas once this process has
+# repaired and verified it; until then, and whenever it is not trusted, those pages answer 503 with Retry-After.
+# false is the kill switch: those pages stay off (503). The table is still maintained, so turning it back on needs
+# only a restart.
+#readmodels:
+#  cmi:
+#    enabled: true
+#  packet_sites:
+#    # Serve region packet pages (iatas, region) from packet_sites once this process has repaired and verified
+#    # it; until then they answer 503. false turns them off (503); the table is still maintained and swept.
+#    enabled: true
 
 # MeshMapper integrations (optional, require a regional or grouped-region API key).
 # Your local MeshMapper regional or grouped-region admin can generate the key.
@@ -253,6 +301,9 @@ routes:
   # count never resets, so once a route crosses this bar it stays in the
   # retention tier for good.
   min_observations: 3
+  # Routes the reconfirm sweep checks per hour for departed or now-ambiguous hops,
+  # run in 5-minute slices. 0 or omitted means 81000.
+  reconfirm_rows_per_hour: 81000
 
 websocket:
   max_connections_per_ip: 5 # default: 5
@@ -333,7 +384,7 @@ cache:
 # flowing. Back off to 1h or more once stable.
 #background:
 #  view_refresh: 1h   # rebuilds radio presets; default: 1h
-#  reconfirm: 1h      # default: 1h
+#  reconfirm: 1h      # route retention and neighbor cleanup; default: 1h
 #  cleanup: 1h        # default: 1h
 
 # Minimum client versions, served at GET /api/v1/info. Older clients show

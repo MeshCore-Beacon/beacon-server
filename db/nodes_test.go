@@ -6,11 +6,13 @@ package db
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	mockdb "github.com/MeshCore-Beacon/beacon-server/db/sqlc/mock"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -197,7 +199,7 @@ func TestListNodes_Pagination(t *testing.T) {
 		Return(rows, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListNodes(context.Background(), 0, []string{"YVR"}, nil, nil, nil, "", "", "", 0, 2, false)
+	page, err := store.ListNodes(context.Background(), 0, []string{"YVR"}, nil, nil, nil, "", "", "", 0, nil, 2, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -230,7 +232,7 @@ func TestListNodes_IATAsUnmarshal(t *testing.T) {
 		}, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, 10, false)
+	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, nil, 10, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -259,7 +261,7 @@ func TestListNodes_Stale(t *testing.T) {
 		}, nil)
 
 	store := &Store{q: mock, staleThreshold: 24 * time.Hour}
-	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, 10, false)
+	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, nil, 10, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -300,7 +302,7 @@ func TestListNodes_RadioStringFormatting(t *testing.T) {
 		}, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, 10, false)
+	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, nil, 10, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -644,8 +646,8 @@ func TestListNodes_IncludeNeighbors_PassesFlagAndMapsIDs(t *testing.T) {
 	mock.EXPECT().
 		ListNodes(gomock.Any(), gomock.Eq(sqlc.ListNodesParams{
 			Column1: int16(0), Column2: nil, Column3: "any", Column4: "any",
-			Column5: nil, Column6: "", Column7: pgtype.Timestamptz{},
-			Limit: 11, Column9: "", Column10: true,
+			Column5: nil, Column6: "", Column7: pgtype.Timestamptz{InfinityModifier: pgtype.Infinity, Valid: true},
+			Limit: 11, Column9: "", Column12: uuid.Nil, Column10: true,
 		})).
 		Return([]sqlc.ListNodesRow{
 			{
@@ -656,7 +658,7 @@ func TestListNodes_IncludeNeighbors_PassesFlagAndMapsIDs(t *testing.T) {
 		}, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, 10, true)
+	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, nil, 10, true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -674,15 +676,15 @@ func TestListNodes_ExcludeNeighbors_LeavesIDsNil(t *testing.T) {
 	mock.EXPECT().
 		ListNodes(gomock.Any(), gomock.Eq(sqlc.ListNodesParams{
 			Column1: int16(0), Column2: nil, Column3: "any", Column4: "any",
-			Column5: nil, Column6: "", Column7: pgtype.Timestamptz{},
-			Limit: 11, Column9: "", Column10: false,
+			Column5: nil, Column6: "", Column7: pgtype.Timestamptz{InfinityModifier: pgtype.Infinity, Valid: true},
+			Limit: 11, Column9: "", Column12: uuid.Nil, Column10: false,
 		})).
 		Return([]sqlc.ListNodesRow{
 			{ID: nodeID, PublicKey: []byte{0x01}, NeighborIds: nil},
 		}, nil)
 
 	store := &Store{q: mock}
-	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, 10, false)
+	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, nil, 10, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -707,13 +709,87 @@ func TestDeleteOldNodes(t *testing.T) {
 	}
 }
 
+// Page 1 starts at infinity, a numeric cursor pairs its millisecond with the nil uuid, and a pageCursor sends its
+// exact pair, winning over a numeric cursor sent alongside.
+func TestListNodes_CursorParams(t *testing.T) {
+	const legacy = int64(1792442625019)
+	pc := &api.NodeCursor{LastSeen: time.UnixMicro(1792442625019123).UTC(), ID: uuid.MustParse("0b0b0b0b-0000-0000-0000-000000000001")}
+	for _, tc := range []struct {
+		name   string
+		cursor int64
+		pc     *api.NodeCursor
+		ts     pgtype.Timestamptz
+		id     uuid.UUID
+	}{
+		{"page 1", 0, nil, pgtype.Timestamptz{InfinityModifier: pgtype.Infinity, Valid: true}, uuid.Nil},
+		{"negative cursor", -5, nil, pgtype.Timestamptz{InfinityModifier: pgtype.Infinity, Valid: true}, uuid.Nil},
+		{"legacy cursor", legacy, nil, pgtype.Timestamptz{Time: time.UnixMilli(legacy), Valid: true}, uuid.Nil},
+		{"pageCursor", 0, pc, pgtype.Timestamptz{Time: pc.LastSeen, Valid: true}, pc.ID},
+		{"pageCursor wins", legacy, pc, pgtype.Timestamptz{Time: pc.LastSeen, Valid: true}, pc.ID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			mock := mockdb.NewMockQuerier(ctrl)
+			mock.EXPECT().
+				ListNodes(gomock.Any(), gomock.Eq(sqlc.ListNodesParams{
+					Column1: int16(2), Column2: []string{"YVR"}, Column3: "true", Column4: "any",
+					Column5: []byte{0x01}, Column6: "n", Column7: tc.ts,
+					Limit: 6, Column9: "#test", Column10: true, Column11: "ab", Column12: tc.id,
+				})).
+				Return(nil, nil)
+			yes := true
+			store := &Store{q: mock}
+			page, err := store.ListNodes(context.Background(), 2, []string{"YVR"}, &yes, nil, []byte{0x01}, "ab", "n", "#test", tc.cursor, tc.pc, 5, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if page.Items == nil || page.HasMore || page.NextCursor != nil || page.NextPageCursor != nil {
+				t.Fatalf("empty page: %+v", page)
+			}
+		})
+	}
+}
+
+func TestListNodes_NextPageCursor(t *testing.T) {
+	rows := make([]sqlc.ListNodesRow, 3)
+	for i := range rows {
+		rows[i] = sqlc.ListNodesRow{
+			ID:        uuid.MustParse(fmt.Sprintf("00000000-0000-0000-0000-00000000000%d", i+1)),
+			PublicKey: []byte{byte(i)},
+			LastSeen:  pgtype.Timestamptz{Time: time.UnixMicro(1792442625019123 - int64(i)).UTC(), Valid: true},
+		}
+	}
+	for _, limit := range []int32{2, 3} {
+		ctrl := gomock.NewController(t)
+		mock := mockdb.NewMockQuerier(ctrl)
+		mock.EXPECT().ListNodes(gomock.Any(), gomock.Any()).Return(rows, nil)
+		store := &Store{q: mock}
+		page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, nil, limit, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if limit == 3 {
+			if page.HasMore || page.NextCursor != nil || page.NextPageCursor != nil {
+				t.Fatalf("last page carries a cursor: %+v", page)
+			}
+			continue
+		}
+		last := rows[1]
+		want := api.NodeCursor{LastSeen: last.LastSeen.Time, ID: last.ID}.String()
+		if !page.HasMore || page.NextCursor == nil || *page.NextCursor != last.LastSeen.Time.UnixMilli() ||
+			page.NextPageCursor == nil || *page.NextPageCursor != want {
+			t.Fatalf("limit 2: hasMore=%t nextCursor=%v nextPageCursor=%v, want %s", page.HasMore, page.NextCursor, page.NextPageCursor, want)
+		}
+	}
+}
+
 func TestListNodes_DefaultScopePreservesCaseAndMissingValue(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mock := mockdb.NewMockQuerier(ctrl)
 	scope := "#YOW"
 	mock.EXPECT().ListNodes(gomock.Any(), gomock.Any()).Return([]sqlc.ListNodesRow{{DefaultScopeName: &scope}, {}}, nil)
 	store := &Store{q: mock}
-	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, 10, false)
+	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, nil, 10, false)
 	if err != nil || len(page.Items) != 2 || page.Items[0].DefaultScope == nil || *page.Items[0].DefaultScope != scope || page.Items[1].DefaultScope != nil {
 		t.Fatalf("scope metadata lost or invented: %+v %v", page, err)
 	}

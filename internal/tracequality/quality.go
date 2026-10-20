@@ -38,7 +38,7 @@ func Assess(raw []byte, version, route, pathLength int) Quality {
 	if route >= 0 && route != 2 && route != 3 {
 		q.Add("non_direct_trace")
 	}
-	if len(raw) < 10 {
+	if len(raw) < 9 {
 		q.Add("incomplete_payload")
 		return q
 	}

@@ -90,12 +90,32 @@ func (s *Store) SetNodeDefaultScope(ctx context.Context, nodeID uuid.UUID, scope
 	})
 }
 
-func (s *Store) ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, limit int32, includeNeighbors bool) (api.Page[api.NodeSummary], error) {
-	var cursorTS pgtype.Timestamptz
-	if cursor > 0 {
-		cursorTS = pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}
+// uuidKeysetCursor maps the cursors of a (last_seen DESC, id DESC) list to the
+// statement's row-cursor pair. A pageCursor (at, id) wins. A numeric cursor
+// pairs its millisecond with the nil uuid, which sorts below every id, so the
+// row comparison keeps today's "last_seen < ms". Page 1 starts at infinity.
+func uuidKeysetCursor(cursor int64, at *time.Time, id uuid.UUID) (pgtype.Timestamptz, uuid.UUID) {
+	switch {
+	case at != nil:
+		return pgtype.Timestamptz{Time: *at, Valid: true}, id
+	case cursor > 0:
+		return pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}, uuid.Nil
+	default:
+		return pgtype.Timestamptz{InfinityModifier: pgtype.Infinity, Valid: true}, uuid.Nil
 	}
-	rows, err := s.q.ListNodes(ctx, sqlc.ListNodesParams{
+}
+
+// listNodesParams builds the statement's arguments for one ListNodes request.
+func listNodesParams(nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) sqlc.ListNodesParams {
+	var (
+		at *time.Time
+		id uuid.UUID
+	)
+	if pageCursor != nil {
+		at, id = &pageCursor.LastSeen, pageCursor.ID
+	}
+	cursorTS, cursorID := uuidKeysetCursor(cursor, at, id)
+	return sqlc.ListNodesParams{
 		Column1:  nodeType,
 		Column2:  iatas,
 		Column3:  tristate(supportsMultibytePaths),
@@ -107,9 +127,14 @@ func (s *Store) ListNodes(ctx context.Context, nodeType int16, iatas []string, s
 		Column9:  scope,
 		Column10: includeNeighbors,
 		Column11: pubkeyPrefix,
-	})
+		Column12: cursorID,
+	}
+}
+
+func (s *Store) ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
+	rows, err := s.q.ListNodes(ctx, listNodesParams(nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, cursor, pageCursor, limit, includeNeighbors))
 	if err != nil {
-		return api.Page[api.NodeSummary]{}, err
+		return api.NodePage{}, err
 	}
 	hasMore := len(rows) > int(limit)
 	if hasMore {
@@ -144,16 +169,15 @@ func (s *Store) ListNodes(ctx context.Context, nodeType int16, iatas []string, s
 		}
 		items = append(items, node)
 	}
-	var nextCursor *int64
-	if hasMore && len(items) > 0 {
-		ms := rows[len(rows)-1].LastSeen.Time.UnixMilli()
-		nextCursor = &ms
+	page := api.NodePage{Page: api.Page[api.NodeSummary]{Items: items, HasMore: hasMore}}
+	if hasMore && len(rows) > 0 {
+		last := rows[len(rows)-1]
+		ms := last.LastSeen.Time.UnixMilli()
+		next := api.NodeCursor{LastSeen: last.LastSeen.Time, ID: last.ID}.String()
+		page.NextCursor = &ms
+		page.NextPageCursor = &next
 	}
-	return api.Page[api.NodeSummary]{
-		Items:      items,
-		NextCursor: nextCursor,
-		HasMore:    hasMore,
-	}, nil
+	return page, nil
 }
 
 func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error) {

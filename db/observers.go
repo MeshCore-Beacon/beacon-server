@@ -32,12 +32,17 @@ func (s *Store) UpsertObserver(ctx context.Context, pubkey []byte, iata string) 
 	return row.ID, displayName, err
 }
 
-func (s *Store) ListObservers(ctx context.Context, iatas []string, observerType, broker, status, name, scope string, cursor int64, limit int32) (api.Page[api.ObserverSummary], error) {
-	var cursorTS pgtype.Timestamptz
-	if cursor > 0 {
-		cursorTS = pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}
+// listObserversParams builds the statement's arguments for one ListObservers request.
+func listObserversParams(iatas []string, observerType, broker, status, name, scope string, cursor int64, pageCursor *api.ObserverCursor, limit int32) sqlc.ListObserversParams {
+	var (
+		at *time.Time
+		id uuid.UUID
+	)
+	if pageCursor != nil {
+		at, id = &pageCursor.LastSeen, pageCursor.ID
 	}
-	params := sqlc.ListObserversParams{
+	cursorTS, cursorID := uuidKeysetCursor(cursor, at, id)
+	return sqlc.ListObserversParams{
 		Column1: iatas,
 		Column2: observerType,
 		Column3: broker,
@@ -46,10 +51,15 @@ func (s *Store) ListObservers(ctx context.Context, iatas []string, observerType,
 		Column6: cursorTS,
 		Limit:   limit + 1,
 		Column8: scope,
+		Column9: cursorID,
 	}
+}
+
+func (s *Store) ListObservers(ctx context.Context, iatas []string, observerType, broker, status, name, scope string, cursor int64, pageCursor *api.ObserverCursor, limit int32) (api.ObserverPage, error) {
+	params := listObserversParams(iatas, observerType, broker, status, name, scope, cursor, pageCursor, limit)
 	rows, err := s.q.ListObservers(ctx, params)
 	if err != nil {
-		return api.Page[api.ObserverSummary]{}, err
+		return api.ObserverPage{}, err
 	}
 	hasMore := len(rows) > int(limit)
 	if hasMore {
@@ -75,19 +85,16 @@ func (s *Store) ListObservers(ctx context.Context, iatas []string, observerType,
 		}
 		items = append(items, observer)
 	}
-	var nextCursor *int64
-	if hasMore {
-		// observers use UUID so encode last_seen as cursor
-		if rows[len(rows)-1].LastStatusAt.Valid {
-			ms := rows[len(rows)-1].LastStatusAt.Time.UnixMilli()
-			nextCursor = &ms
-		}
+	page := api.ObserverPage{Page: api.Page[api.ObserverSummary]{Items: items, HasMore: hasMore}}
+	if hasMore && len(rows) > 0 {
+		// Both cursors follow the ORDER BY column, last_seen.
+		last := rows[len(rows)-1]
+		ms := last.LastSeen.Time.UnixMilli()
+		next := api.ObserverCursor{LastSeen: last.LastSeen.Time, ID: last.ID}.String()
+		page.NextCursor = &ms
+		page.NextPageCursor = &next
 	}
-	return api.Page[api.ObserverSummary]{
-		Items:      items,
-		NextCursor: nextCursor,
-		HasMore:    hasMore,
-	}, nil
+	return page, nil
 }
 
 func (s *Store) GetObserver(ctx context.Context, observerID uuid.UUID) (*api.Observer, error) {
@@ -170,15 +177,35 @@ func (s *Store) InsertObserverTelemetry(ctx context.Context, observerID uuid.UUI
 	})
 }
 
+// GetObserverTelemetry reads a start with no end, the shape the API sends, through the since-only statement; every
+// other shape takes the catch-all. Both return the same rows: ids start at 1, so id > afterID equals the catch-all's
+// afterID = 0 escape for every afterID <= 0.
 func (s *Store) GetObserverTelemetry(ctx context.Context, observerID uuid.UUID, since, until time.Time, afterID int64) (*api.ObserverTelemetry, error) {
-	rows, err := s.q.GetObserverTelemetry(ctx, sqlc.GetObserverTelemetryParams{
-		ObserverID: observerID,
-		Column2:    pgtype.Timestamptz{Time: since, Valid: !since.IsZero()},
-		Column3:    pgtype.Timestamptz{Time: until, Valid: !until.IsZero()},
-		Column4:    afterID,
-	})
-	if err != nil {
-		return nil, err
+	var rows []sqlc.GetObserverTelemetryRow
+	if !since.IsZero() && until.IsZero() {
+		sinceRows, err := s.q.GetObserverTelemetrySince(ctx, sqlc.GetObserverTelemetrySinceParams{
+			ObserverID: observerID,
+			Since:      pgtype.Timestamptz{Time: since, Valid: true},
+			AfterID:    afterID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		rows = make([]sqlc.GetObserverTelemetryRow, len(sinceRows))
+		for i, r := range sinceRows {
+			rows[i] = sqlc.GetObserverTelemetryRow(r)
+		}
+	} else {
+		var err error
+		rows, err = s.q.GetObserverTelemetry(ctx, sqlc.GetObserverTelemetryParams{
+			ObserverID: observerID,
+			Column2:    pgtype.Timestamptz{Time: since, Valid: !since.IsZero()},
+			Column3:    pgtype.Timestamptz{Time: until, Valid: !until.IsZero()},
+			Column4:    afterID,
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 	points := make([]api.ObserverTelemetryPoint, 0, len(rows))
 	for _, v := range rows {
@@ -390,15 +417,26 @@ func (s *Store) GetObserverActivity(ctx context.Context, observerID uuid.UUID, w
 }
 
 func (s *Store) ListObserverAdverts(ctx context.Context, observerID uuid.UUID, cursor int64, limit int32) (api.Page[api.AdvertObservation], error) {
+	// The statement filters on each observation's own payload type, so it serves only once every observation
+	// carries one; until then the page is not ready.
+	if s.payloadTypeGate && !s.payloadTypesReady(ctx) {
+		return api.Page[api.AdvertObservation]{}, fmt.Errorf("observer adverts: %w", api.ErrPagesNotReady)
+	}
 	rows, err := s.q.ListObserverAdverts(ctx, sqlc.ListObserverAdvertsParams{
 		ObserverID: observerID,
-		Column2:    cursor,
-		Limit:      limit + 1, // fetch one extra to detect hasMore
+		CursorID:   cursor,
+		RowLimit:   limit + 1, // fetch one extra to detect hasMore
 	})
 	if err != nil {
 		slog.Error("api: ListObserverAdverts failed", "component", "db", "error", err)
 		return api.Page[api.AdvertObservation]{}, err
 	}
+	return AdvertPage(rows, limit), nil
+}
+
+// AdvertPage is the adverts page for up to limit+1 rows in id order: the first limit rows, and the last one's id as
+// the next cursor when there are more.
+func AdvertPage(rows []sqlc.ListObserverAdvertsRow, limit int32) api.Page[api.AdvertObservation] {
 	hasMore := len(rows) > int(limit)
 	if hasMore {
 		rows = rows[:limit]
@@ -430,7 +468,7 @@ func (s *Store) ListObserverAdverts(ctx context.Context, observerID uuid.UUID, c
 		Items:      items,
 		NextCursor: nextCursor,
 		HasMore:    hasMore,
-	}, nil
+	}
 }
 
 func (s *Store) UpdateObserverStatus(ctx context.Context, p ingest.UpdateObserverStatusParams) (uuid.UUID, error) {

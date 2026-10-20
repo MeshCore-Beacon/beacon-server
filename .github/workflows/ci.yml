@@ -4,7 +4,7 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, dev1]
   pull_request:
 
 jobs:
@@ -22,6 +22,17 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      # The fixture tier's baselines were written on PostgreSQL 16.15 under C collation: keep both fixed here.
+      planguard-postgres:
+        image: postgres:16.15-alpine
+        env:
+          POSTGRES_PASSWORD: planguard-ci-only
+          POSTGRES_DB: planguard
+          POSTGRES_INITDB_ARGS: --locale=C --encoding=UTF8
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -48,17 +59,41 @@ jobs:
         run: go test ./...
 
       - name: Verify scope refresh concurrency
-        run: go test -race ./internal/meshmapper ./internal/scopestore
+        run: go test -race ./internal/meshmapper ./internal/scopestore && go test -race ./db -run '^TestChannelIDCache'
 
-      - name: Verify backup startup against PostgreSQL 16
+      - name: Verify backup startup and the read-only boot against PostgreSQL 16
         env:
           BEACON_TEST_POSTGRES_DSN: postgres://postgres:backup-ci-only@127.0.0.1:5432/postgres?sslmode=disable
-        run: go test ./cmd/beacon -run '^TestBackupConfigurationPostgres$' -count=1 -v
+        run: go test ./cmd/beacon -run '^Test(BackupConfiguration|ReadOnlyBootWritesNothing)Postgres$' -count=1 -v
 
       - name: Verify stats and endpoint queries against PostgreSQL 16
         env:
           BEACON_TEST_POSTGRES_DSN: postgres://postgres:backup-ci-only@127.0.0.1:5432/postgres?sslmode=disable
-        run: go test ./db -run '^Test(BigintCursors|SearchPacketsByHashPrefix|MeshMapperRepeaters|TopAdvertisersSort|Signal|Paths|PacketSummaries|PacketEndpointsResolveLive|ObserverMetrics|RouteEvidence|RouteEvidenceIndex|AnalyticsRetention|AnalyticsRetentionConcurrent|DeleteOldPacketsBatches|MeshMapperCatalogue|ChannelMessageScopes|NodeLocationReset|RunMigrations[A-Za-z]*|Reconfirm[A-Za-z]*)Postgres$' -count=1 -v
+        run: go test ./db -run '^Test(SearchPacketsByHashPrefix|MeshMapperRepeaters|TopAdvertisersSort|TraceQuality|TopologyLinks|Signal|Paths|PacketSummaries|PacketEndpointsResolveLive|ObserverMetrics|RouteEvidence|RouteEvidenceIndex|AnalyticsRetention|AnalyticsRetentionConcurrent|DeleteOldPacketsBatches|MeshMapperCatalogue|ChannelMessageScopes|NodeLocationReset|RunMigrations[A-Za-z]*|KnownRoutesIndexSet|PacketsDomainChecks|Reconfirm[A-Za-z]*|BigintCursors|RouteSearchHopOrder|StatsNodeTypesSplit|ListKnownRoutes|ListKnownRoutesMatchesLegacy|KnownRoutesCursorTies|KnownRoutesUnanalyzedRegion|KnownRoutesHopStatementsStayCustom|KnownRoutePaginationTies|RouteRetentionCutoffsExact|DeleteExpiredRoutes|DeleteGraceRoutesSlice|GraceWatermarkHeldByLockedRow|OpenPoolsSettings|PlanRouterClassCUnnamed|APIStoreHopStatementsUnnamed|PgStatStatementsMigrationGuarded|DBStatements|DBStatementsNoExtension|PgStatStatementsMigrationNoCreatableSchema|IndexHealthBaselineOnReindex|UnusedIndexes|PgActivity|RollHourSetsWorkMem|SmallTableIndexSet|NodeReadersAfterIndexDrops|ObserverChannelReadersAfterIndexDrops|UpsertChannelWriteThrough|UpsertChannelHashOnlyWriteThrough|ReadOnlyPoolsRejectWrites|ListPacketsGlobalMatchesLegacy|PacketsGlobalCursorTies|ListPacketsWindowInvertedRows|PacketsLatestObserverTie|NodesLegacyCursorMatchesToday|NodesPageCursorTies|ObserversLegacyCursorMatchesToday|ObserversNextCursorFromLastSeen|ObserverAdvertsPartialIndex|AdvertsWaitForPayloadTypeBackfill|StatsProbeMatchesToday|TraceTagsKeysetMatchesToday|TelemetrySinceMatchesCatchAll|TraceTagPagination|TraceTagPaginationTies|TraceSummarySurvivesMissedHearing|CmiMigrationsIndexSet|InsertChannelMessageSeed[A-Za-z]*|AddChannelMessageIATA|CmiSeedAndAddRace|CmiInitAndBackfill|CmiMessageRangeReconcile|CmiObservationRangeReconcile|CmiBackfillRetries23503|WaitForPreBootWriters|ChannelMessagesByIATAsMatchesLegacy|ChannelMessagesZeroHitRegion|CmiTrustLifecycle|CmiFirstVerification|PacketSitesMigrationsIndexSet|InsertObservationMaintainsPacketSites|InsertObservationResendWritesNothing|PacketSitesRaceMaxMerge|InsertObservationSiteFallback|PacketSitesInitAndBackfill|FillPacketSitesSliceIdempotent|FillPacketSitesSliceRetries23503|PacketSitesReconcile|PacketSitesAudit|PacketSitesAuditTakesNewestHearing|PacketsBySitesMatchesTruth|PacketsBySitesCursorTies|PacketsBySitesManyBogusSites|PacketsBySitesSaturatedPagesFull|PacketsBySitesMatchesLegacy|PacketSitesTrustLifecycle|PacketsBySitesBounded|PacketsBySitesFallbackKeepsPageCursor|SweepPacketSitesFrontsPlan|IndexHealthPacketSitesFreshBaseline|PacketSitesFirstVerification|HygieneIndexSet|HygieneReadersAfterIndexDrops|KnownRoutesColumns|SequenceUse|SlowPoolIsolation|SlowPoolSize|SequenceUseMixedCaseSchema|ObservationsIndexSet|ReadersAfterIndexDrops|BackfillWriteBounds|CmiBackfillShrinks|PacketSitesBackfillShrinks)Postgres$' -count=1 -v
+
+      - name: Verify the channel message site rule against PostgreSQL 16
+        env:
+          BEACON_TEST_POSTGRES_DSN: postgres://postgres:backup-ci-only@127.0.0.1:5432/postgres?sslmode=disable
+        run: go test ./internal/ingest -run '^Test(CmiAddOnDecryptFailure|CmiCleanIngestReconcilesNothing)Postgres$' -count=1 -v
+
+      - name: Verify route retention task against PostgreSQL 16
+        env:
+          BEACON_TEST_POSTGRES_DSN: postgres://postgres:backup-ci-only@127.0.0.1:5432/postgres?sslmode=disable
+        run: go test ./internal/background -run '^Test(RouteRetentionTask|PayloadTypeBackfill|PayloadTypeBackfillProbe|CmiBootRepair|CmiReadOnlyTrust|PacketSitesRollbackRollForward|PacketSitesTrustDropsOnBypass|PacketSitesReadOnlyTrust)Postgres$' -count=1 -v
+
+      # Builds the fixture once; the planguard tests below reuse it (PLANGUARD_FIXTURE_DSN) after checking that its
+      # marker records a build of the same files.
+      - name: Planguard fixture tier (plain EXPLAIN on a migrated, skewed fixture)
+        run: go run ./cmd/planguard run --tier fixture --dsn 'postgres://postgres:planguard-ci-only@127.0.0.1:5433/planguard?sslmode=disable' --out "$RUNNER_TEMP/planguard"
+
+      - name: Verify planguard against PostgreSQL 16
+        env:
+          BEACON_TEST_POSTGRES_DSN: postgres://postgres:backup-ci-only@127.0.0.1:5432/postgres?sslmode=disable
+          PLANGUARD_FIXTURE_DSN: postgres://postgres:planguard-ci-only@127.0.0.1:5433/planguard?sslmode=disable
+        run: go test ./internal/planguard -timeout 20m -run '^Test(RunnerReadOnly|RunnerRecoversAfterError|UnresolvedParamsSkip|GenericModeShowsParams|CorpusStatementsPrepareClean|BuildFixtureThroughMigrations|BuildFixtureRefusesRealDatabase|BuildFixtureRebuildsStaleInputs|RunDiffSnapshot|RunDiffFindsReadmodelsSkip|StatementScannerMatches|PlanguardProdTier|PlanguardProdCancel|RequiresIndexSkips|RetiredIndexesDropped)Postgres$' -count=1 -v
+
+      - name: Plan policy up to date
+        run: go run ./cmd/planguard gen-policy && git diff --exit-code db/planpolicy
 
       - name: Verify backup command against PostgreSQL 16
         run: |

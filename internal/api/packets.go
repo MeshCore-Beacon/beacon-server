@@ -29,6 +29,12 @@ type PacketLatestObserver struct {
 	ResolvedDestination *ResolvedHop      `json:"resolvedDestination,omitempty"`
 }
 
+// PacketPage adds the exact cursor while keeping the numeric one for older clients.
+type PacketPage struct {
+	Page[PacketSummary]
+	NextPageCursor *string `json:"nextPageCursor,omitempty"`
+}
+
 // PacketSummary is the minimal packet representation used in list responses.
 // Includes the latest observation rolled in for display purposes.
 type PacketSummary struct {

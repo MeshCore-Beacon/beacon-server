@@ -1,0 +1,8 @@
+[
+ "Sort",
+ "  Aggregate partial=Simple {Sorted}",
+ "    Sort",
+ "      Result",
+ "        Subquery Scan",
+ "          Seq Scan on analytics_hourly_paths [Subquery]"
+]

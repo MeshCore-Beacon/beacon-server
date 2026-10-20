@@ -1,0 +1,206 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+package db
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"runtime"
+	"strings"
+
+	"github.com/MeshCore-Beacon/beacon-server/db/planpolicy"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// Pool names. Each is also the pool's metric label and, prefixed with "beacon-", its application_name.
+const (
+	PoolAPILegacy = "api_legacy"
+	PoolAPISlow   = "api_slow"
+	PoolAPICustom = "api_custom"
+	PoolAPICached = "api_cached"
+	PoolIngest    = "ingest"
+	PoolMaint     = "maint"
+)
+
+// Pools holds one pgx pool per workload. A pool is nil when the layout does not open it.
+type Pools struct {
+	APILegacy, APISlow, APICustom, APICached, Ingest, Maint *pgxpool.Pool
+}
+
+type poolSpec struct {
+	name   string
+	size   map[planpolicy.Layout]int32 // a layout absent here does not open the pool
+	params map[string]string
+}
+
+// poolSpecs is the fixed size and session settings of each pool.
+var poolSpecs = []poolSpec{
+	{
+		// The rollback layout's only API pool: automatic plan caching and the server's own settings, as before the
+		// pools split.
+		name: PoolAPILegacy,
+		size: map[planpolicy.Layout]int32{planpolicy.Single: 8},
+		params: map[string]string{
+			"application_name": "beacon-api_legacy",
+		},
+	},
+	{
+		// The statements that may walk whole site histories (planpolicy.Slow). Two connections by default
+		// (database.slow_pool_size overrides it), so they never hold more of the server than that; a statement limit,
+		// so none runs unbounded; no parallel workers, whose plans for these walks ran several times longer
+		// (measured: a sparse filter over every site, 26 s without workers, 4 min with). Otherwise the server's own
+		// planner settings, as api_legacy.
+		name: PoolAPISlow,
+		size: map[planpolicy.Layout]int32{planpolicy.CustomAll: 2, planpolicy.Split: 2},
+		params: map[string]string{
+			"application_name":                "beacon-api_slow",
+			"statement_timeout":               "120s",
+			"max_parallel_workers_per_gather": "0",
+		},
+	},
+	{
+		name: PoolAPICustom,
+		size: map[planpolicy.Layout]int32{planpolicy.CustomAll: 8, planpolicy.Split: 7},
+		params: map[string]string{
+			"application_name":                    "beacon-api_custom",
+			"plan_cache_mode":                     "force_custom_plan",
+			"jit":                                 "off",
+			"max_parallel_workers_per_gather":     "0",
+			"statement_timeout":                   "35s",
+			"idle_in_transaction_session_timeout": "30s",
+		},
+	},
+	{
+		name: PoolAPICached,
+		size: map[planpolicy.Layout]int32{planpolicy.Split: 5},
+		params: map[string]string{
+			"application_name":                    "beacon-api_cached",
+			"plan_cache_mode":                     "force_generic_plan",
+			"jit":                                 "off",
+			"max_parallel_workers_per_gather":     "0",
+			"statement_timeout":                   "35s",
+			"idle_in_transaction_session_timeout": "30s",
+		},
+	},
+	{
+		name: PoolIngest,
+		size: map[planpolicy.Layout]int32{planpolicy.CustomAll: ingestPoolSize(), planpolicy.Split: ingestPoolSize(), planpolicy.Single: ingestPoolSize()},
+		// No statement_timeout: a failed ingest write drops its packet, so a write waits out a lock instead.
+		params: map[string]string{
+			"application_name": "beacon-ingest",
+			"plan_cache_mode":  "auto",
+			"jit":              "off",
+		},
+	},
+	{
+		name: PoolMaint,
+		size: map[planpolicy.Layout]int32{planpolicy.CustomAll: 4, planpolicy.Split: 4, planpolicy.Single: 4},
+		params: map[string]string{
+			"application_name":                "beacon-maint",
+			"plan_cache_mode":                 "force_custom_plan",
+			"jit":                             "off",
+			"max_parallel_workers_per_gather": "0",
+		},
+	},
+}
+
+// SlowPoolSize returns an OpenPools tune that sizes api_slow to n connections (database.slow_pool_size), whatever
+// the layout's default.
+func SlowPoolSize(n int32) func(pool string, cfg *pgxpool.Config) {
+	return func(pool string, cfg *pgxpool.Config) {
+		if pool == PoolAPISlow && n > 0 {
+			cfg.MaxConns = n
+		}
+	}
+}
+
+// ingestPoolSize is at least 6 and at least one connection per CPU, so ingest never has fewer
+// connections than the single shared pool gave it before the pools split.
+func ingestPoolSize() int32 {
+	return int32(max(6, runtime.NumCPU()))
+}
+
+func (p *Pools) slot(name string) **pgxpool.Pool {
+	switch name {
+	case PoolAPILegacy:
+		return &p.APILegacy
+	case PoolAPISlow:
+		return &p.APISlow
+	case PoolAPICustom:
+		return &p.APICustom
+	case PoolAPICached:
+		return &p.APICached
+	case PoolIngest:
+		return &p.Ingest
+	case PoolMaint:
+		return &p.Maint
+	}
+	panic("db: unknown pool " + name)
+}
+
+// OpenPools opens the pools the layout uses, each with its fixed size and session settings
+// merged over the DSN's own parameters. A pool_max_conns in the DSN is overridden by the layout's
+// sizes. The settings are sent as startup parameters, so behind PgBouncer its
+// ignore_startup_parameters must list them. Each tune func may adjust a pool's config before it
+// opens. On error it closes the pools it already opened. Errors name the pool but never include
+// the DSN, since parse errors can embed its password.
+func OpenPools(ctx context.Context, dsn string, layout planpolicy.Layout, tune ...func(pool string, cfg *pgxpool.Config)) (*Pools, error) {
+	switch layout {
+	case planpolicy.CustomAll, planpolicy.Split, planpolicy.Single:
+	default:
+		return nil, fmt.Errorf("unknown API plan layout %q", layout)
+	}
+	if strings.Contains(dsn, "pool_max_conns") {
+		slog.Info("POSTGRES_DSN sets pool_max_conns; the database pool sizes override it", "component", "db", "layout", layout)
+	}
+	p := &Pools{}
+	for _, spec := range poolSpecs {
+		size, ok := spec.size[layout]
+		if !ok {
+			continue
+		}
+		cfg, err := pgxpool.ParseConfig(dsn)
+		if err != nil {
+			p.Close()
+			return nil, fmt.Errorf("pool %s: invalid PostgreSQL connection configuration", spec.name)
+		}
+		cfg.MaxConns = size
+		for k, v := range spec.params {
+			cfg.ConnConfig.RuntimeParams[k] = v
+		}
+		cfg.ConnConfig.Tracer = newTracer(spec.name)
+		for _, f := range tune {
+			f(spec.name, cfg)
+		}
+		pool, err := pgxpool.NewWithConfig(ctx, cfg)
+		if err != nil {
+			p.Close()
+			return nil, fmt.Errorf("pool %s: %w", spec.name, err)
+		}
+		*p.slot(spec.name) = pool
+	}
+	return p, nil
+}
+
+// Close closes every opened pool.
+func (p *Pools) Close() {
+	for _, spec := range poolSpecs {
+		if s := p.slot(spec.name); *s != nil {
+			(*s).Close()
+			*s = nil
+		}
+	}
+}
+
+// Total is the sum of MaxConns over the opened pools.
+func (p *Pools) Total() int32 {
+	var n int32
+	for _, spec := range poolSpecs {
+		if pool := *p.slot(spec.name); pool != nil {
+			n += pool.Config().MaxConns
+		}
+	}
+	return n
+}

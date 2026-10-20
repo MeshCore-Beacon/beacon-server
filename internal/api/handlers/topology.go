@@ -31,10 +31,15 @@ func getTopologyLinks(reader api.Reader) http.HandlerFunc {
 			respondError(w, http.StatusBadRequest, "window must be 15m, 1h or 24h")
 			return
 		}
+		iatas, err := routeIATAs(r)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		until := time.Now().UTC().Truncate(time.Minute).Add(time.Minute)
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
-		links, err := reader.GetTopologyLinks(ctx, parseIATAs(r), until.Add(-duration), until)
+		links, err := reader.GetTopologyLinks(ctx, iatas, until.Add(-duration), until)
 		if err != nil {
 			respondError(w, http.StatusServiceUnavailable, "route snapshot unavailable; try again shortly")
 			return

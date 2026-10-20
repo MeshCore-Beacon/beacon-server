@@ -8,6 +8,8 @@ import (
 	"context"
 	"log/slog"
 	"time"
+
+	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
 )
 
 // Task is a named unit of work that runs on a fixed interval.
@@ -37,7 +39,10 @@ func (s *Scheduler) Start(ctx context.Context) {
 				select {
 				case <-ticker.C:
 					slog.Debug("task running", "component", "background", "task", t.Name)
-					if err := t.Run(ctx); err != nil {
+					start := time.Now()
+					err := t.Run(ctx)
+					metrics.JobDuration.WithLabelValues(t.Name).Observe(time.Since(start).Seconds())
+					if err != nil {
 						slog.Error("task failed", "component", "background", "task", t.Name, "error", err)
 					} else {
 						slog.Debug("task complete", "component", "background", "task", t.Name)
