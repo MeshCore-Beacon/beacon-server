@@ -47,8 +47,8 @@ func PacketsRouter(reader api.Reader) http.Handler {
 //	@Param		region			query		string	false	"Filter by region slug, expands to member IATAs"
 //	@Param		since			query		int		false	"Filter by first_heard_at >= since (epoch ms)"
 //	@Param		until			query		int		false	"Filter by first_heard_at <= until (epoch ms)"
-//	@Param		cursor			query		int		false	"epoch ms of the last item; last_heard_at, or site-local heard_at when iatas is set. Prefer pageCursor where nextPageCursor is returned"
-//	@Param		pageCursor		query		string	false	"Opaque nextPageCursor from a previous response; keeps millisecond ties. Wins over cursor when both are sent. Ignored with hashPrefix or an IATA or region filter, which page by cursor"
+//	@Param		cursor			query		int		false	"epoch ms of the last item; last_heard_at, or site-local heard_at when iatas, iata, region or regionId is set. Prefer pageCursor where nextPageCursor is returned"
+//	@Param		pageCursor		query		string	false	"Opaque nextPageCursor from a previous response; keeps millisecond ties. Wins over cursor when both are sent. Ignored with hashPrefix, which pages by cursor"
 //	@Param		limit			query		int		false	"Max results (default 50); must be positive, values above 200 are clamped" minimum(1) maximum(200)
 //	@Param		hashPrefix		query		string	false	"Match packets whose hash starts with this hex prefix (4-16 chars). Ordering and cursor use global last_heard_at even when iatas is set"
 //	@Success	200				{object}	api.PacketPage

@@ -3326,13 +3326,14 @@ paths:
         name: until
         type: integer
       - description: epoch ms of the last item; last_heard_at, or site-local heard_at
-          when iatas is set. Prefer pageCursor where nextPageCursor is returned
+          when iatas, iata, region or regionId is set. Prefer pageCursor where nextPageCursor
+          is returned
         in: query
         name: cursor
         type: integer
       - description: Opaque nextPageCursor from a previous response; keeps millisecond
-          ties. Wins over cursor when both are sent. Ignored with hashPrefix or an
-          IATA or region filter, which page by cursor
+          ties. Wins over cursor when both are sent. Ignored with hashPrefix, which
+          pages by cursor
         in: query
         name: pageCursor
         type: string
