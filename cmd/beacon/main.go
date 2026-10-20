@@ -184,7 +184,8 @@ func main() {
 	// Ingest and maintenance share one channel id cache; the API never writes channels.
 	channelIDs := db.NewChannelIDCache()
 	ingestStore := db.New(pools.Ingest, pools.Ingest, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold, db.WithChannelIDs(channelIDs), db.WithReadModels(readModels))
-	maintStore := db.New(pools.Maint, pools.Maint, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold, db.WithChannelIDs(channelIDs), db.WithReadModels(readModels))
+	fillPacing := db.FillPacing{Duty: resolved.FillDuty, MinPause: resolved.FillMinPause, PacketSitesSlice: resolved.FillPacketSitesSlice, CmiBatch: resolved.FillCmiBatch}
+	maintStore := db.New(pools.Maint, pools.Maint, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold, db.WithChannelIDs(channelIDs), db.WithReadModels(readModels), db.WithFillPacing(fillPacing))
 	apiStore := db.NewAPIStore(pools, layout, guard, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold, db.WithReadModels(readModels))
 	if err := maintStore.PreloadChannelIDs(ctx); err != nil {
 		slog.Warn("channel id preload failed; known channels upsert until cached", "component", "startup", "error", err)

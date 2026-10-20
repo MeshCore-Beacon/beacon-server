@@ -22,12 +22,11 @@ import (
 
 const (
 	packetSitesStateKey = "packet_sites"
-	// packetSitesSlice is the observation ids one fill covers, in the backfill, the reconcile and the audit.
+	// packetSitesSlice is the observation ids one fill covers in the reconcile and the audit, and the backfill's
+	// default slice (readmodels.fill.packet_sites_slice).
 	packetSitesSlice int64 = 500_000
 	// packetSitesFillAttempts bounds the retries of a fill that lost a packet to a concurrent cascade (23503).
 	packetSitesFillAttempts = 3
-	// packetSitesBackfillPause separates backfill slices, so the one-off backfill leaves room for other work.
-	packetSitesBackfillPause = 100 * time.Millisecond
 )
 
 // PacketSitesState is background_state['packet_sites']: the one-off backfill's progress (newest first, from
@@ -50,7 +49,14 @@ type PacketSitesSession struct {
 	q     *sqlc.Queries
 	state PacketSitesState
 	found bool // the state existed when the lock was taken
-	pause time.Duration
+
+	// The backfill's pacing (see FillPacing): pause is the shortest wait after a slice, duty the share of time it may
+	// be busy, slice the observation ids one slice covers. progress logs it once a minute; nil logs nothing.
+	pause    time.Duration
+	duty     float64
+	slice    int64
+	progress *FillProgress
+	sliced   bool // this session's Backfill has filled a slice
 
 	// fillStmt runs one fill; tests replace it. fills lists the (after, through] ranges filled, and retries counts
 	// 23503 retries, for tests.
@@ -78,7 +84,14 @@ func (s *Store) BeginPacketSites(ctx context.Context) (*PacketSitesSession, bool
 		conn.Release()
 		return nil, false, nil
 	}
-	p := &PacketSitesSession{store: s, conn: conn, q: sqlc.New(conn), pause: packetSitesBackfillPause}
+	if _, err := conn.Exec(ctx, fillPlanMode); err != nil {
+		_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock($1, hashtext(current_schema()))", packetSitesReconcileLockKey)
+		conn.Release()
+		return nil, false, err
+	}
+	pace := s.FillPacing()
+	p := &PacketSitesSession{store: s, conn: conn, q: sqlc.New(conn),
+		pause: pace.MinPause, duty: pace.Duty, slice: pace.PacketSitesSlice, progress: &s.packetSitesProgress}
 	p.fillStmt = func(ctx context.Context, after, through int64) (int64, error) {
 		return p.q.FillPacketSitesSlice(ctx, sqlc.FillPacketSitesSliceParams{AfterID: after, ThroughID: through})
 	}
@@ -86,6 +99,7 @@ func (s *Store) BeginPacketSites(ctx context.Context) (*PacketSitesSession, bool
 		p.Close(ctx)
 		return nil, false, fmt.Errorf("packet_sites state: %w", err)
 	}
+	analyzeAtStart(ctx, conn, "packet_sites")
 	return p, true, nil
 }
 
@@ -94,7 +108,8 @@ func (p *PacketSitesSession) Close(ctx context.Context) {
 	if p.conn == nil {
 		return
 	}
-	if _, err := p.conn.Exec(ctx, "SELECT pg_advisory_unlock($1, hashtext(current_schema()))", packetSitesReconcileLockKey); err != nil {
+	_, resetErr := p.conn.Exec(ctx, "RESET plan_cache_mode")
+	if _, err := p.conn.Exec(ctx, "SELECT pg_advisory_unlock($1, hashtext(current_schema()))", packetSitesReconcileLockKey); err != nil || resetErr != nil {
 		_ = p.conn.Conn().Close(ctx)
 	}
 	p.conn.Release()
@@ -123,6 +138,9 @@ func (p *PacketSitesSession) Init(ctx context.Context) (PacketSitesState, error)
 		return PacketSitesState{}, err
 	}
 	p.state = PacketSitesState{WriterFromID: hi, BackfilledDownToID: hi, Complete: hi == 0, ReconPrevHi: hi, ReconHi: hi}
+	if p.progress != nil {
+		p.progress.Reset() // a new fill (first install or rebuild) times itself from its own start
+	}
 	return p.state, p.save(ctx)
 }
 
@@ -150,15 +168,21 @@ func (p *PacketSitesSession) fillWith(ctx context.Context, after, through int64,
 	return 0, err
 }
 
-// Backfill fills packet_sites from WriterFromID down, one slice of packetSitesSlice observation ids at a time,
-// newest first, until it passes the oldest observation (then Complete) or budget is spent. Progress is saved after
-// every slice, and a failed slice is retried from the same place on the next call.
+// Backfill fills packet_sites from WriterFromID down, one slice of observation ids at a time (the session's slice,
+// packetSitesSlice by default), newest first, until it passes the oldest observation (then Complete) or budget is
+// spent. Progress is saved after every slice, and a failed slice is retried from the same place on the next call.
+// After each slice it waits as FillPacing.Wait does, so it is busy at most duty of the time.
 func (p *PacketSitesSession) Backfill(ctx context.Context, budget time.Duration) (PacketSitesState, error) {
 	deadline := time.Now().Add(budget)
+	slice := p.slice
+	if slice <= 0 {
+		slice = packetSitesSlice
+	}
 	for !p.state.Complete && time.Now().Before(deadline) {
 		if err := ctx.Err(); err != nil {
 			return p.state, err
 		}
+		began := time.Now()
 		lo, err := p.q.MinObservationID(ctx)
 		if err != nil {
 			return p.state, err
@@ -169,9 +193,15 @@ func (p *PacketSitesSession) Backfill(ctx context.Context, budget time.Duration)
 				return p.state, err
 			}
 			slog.Info("packet_sites backfill complete", "component", "readmodel", "writer_from_id", p.state.WriterFromID)
+			if p.progress != nil {
+				p.progress.Reset()
+			}
 			break
 		}
-		from := max(p.state.BackfilledDownToID-packetSitesSlice, lo-1)
+		if p.progress != nil {
+			p.progress.Start(p.state.WriterFromID - p.state.BackfilledDownToID)
+		}
+		from := max(p.state.BackfilledDownToID-slice, lo-1)
 		if _, err := p.fill(ctx, from, p.state.BackfilledDownToID); err != nil {
 			return p.state, fmt.Errorf("packet_sites backfill (%d, %d]: %w", from, p.state.BackfilledDownToID, err)
 		}
@@ -179,7 +209,17 @@ func (p *PacketSitesSession) Backfill(ctx context.Context, budget time.Duration)
 		if err := p.save(ctx); err != nil {
 			return p.state, err
 		}
-		if p.pause > 0 && !sleepCtx(ctx, p.pause) {
+		if !p.sliced {
+			// A new table now holds a slice's rows; plan the next slices on them.
+			analyzeAfterFirstSlice(ctx, p.conn, "packet_sites")
+			p.sliced = true
+		}
+		if p.progress != nil && p.progress.Due() {
+			p.progress.Log("packet_sites backfill progress", p.state.WriterFromID-from, p.state.WriterFromID-from, from-(lo-1),
+				"backfilled_down_to_id", from, "writer_from_id", p.state.WriterFromID)
+		}
+		pace := FillPacing{Duty: p.duty, MinPause: p.pause}
+		if !pace.Wait(ctx, time.Since(began)) {
 			return p.state, ctx.Err()
 		}
 	}

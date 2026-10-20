@@ -133,7 +133,6 @@ func (j *PacketSitesJobs) bootOnce(ctx context.Context) (bool, error) {
 		if st, err = s.Backfill(ctx, packetSitesBackfillStep); err != nil {
 			return false, err
 		}
-		slog.Info("packet_sites backfill progress", "component", "readmodel", "backfilled_down_to_id", st.BackfilledDownToID, "writer_from_id", st.WriterFromID)
 	}
 	j.booted.Store(true)
 	if st.FirstVerifiedAt == nil {
