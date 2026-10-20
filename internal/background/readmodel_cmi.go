@@ -61,6 +61,8 @@ func sleep(ctx context.Context, d time.Duration) bool {
 // done (trust earned, or a failed first verification left to the periodic task) or ctx ends; main runs it in a
 // goroutine.
 func (j *CmiJobs) Boot(ctx context.Context) {
+	// Until the first reconcile finishes, the watermark age counts from boot, so a boot that never finishes shows.
+	metrics.SetReadModelWatermark(cmiModel, time.Now())
 	for {
 		err := j.Wait(ctx)
 		if err == nil {
@@ -80,7 +82,13 @@ func (j *CmiJobs) Boot(ctx context.Context) {
 	}
 	for {
 		done, err := j.bootOnce(ctx)
-		if done || ctx.Err() != nil {
+		if done {
+			if err != nil {
+				slog.Error("cmi boot verification failed; the periodic task retries it", "component", "readmodel", "error", err)
+			}
+			return
+		}
+		if ctx.Err() != nil {
 			return
 		}
 		if err != nil {
@@ -186,6 +194,12 @@ func (j *CmiJobs) Task() Task {
 			if err != nil {
 				return err
 			}
+			if !st.Complete || st.FirstVerifiedAt == nil {
+				// Rebuilt or never verified since this process earned trust: serve today's statements until this
+				// run (or a later one) completes and verifies it.
+				j.Trust.Invalidate("the read model state is incomplete or unverified")
+				gen = j.Trust.Generation()
+			}
 			n, err := j.reconcile(ctx, s)
 			if err != nil {
 				return err
@@ -211,16 +225,27 @@ func (j *CmiJobs) Task() Task {
 	}
 }
 
-// CmiReadOnlyTrust earns trust on a read-only server when the persisted state is complete and verified and the
-// exact check over the newest messages is clean, and drops it otherwise. It writes nothing.
-func CmiReadOnlyTrust(ctx context.Context, check func(context.Context) (db.CmiState, db.CmiVerification, error), trust *db.Trust) {
+// cmiReadOnlyMaxAge is how old the writer's saved state may be before a read-only server stops trusting the
+// table: two reconcile intervals. A writer that was rolled back, stopped or keeps failing stops saving it.
+const cmiReadOnlyMaxAge = 2 * CmiInterval
+
+// CmiReadOnlyTrust earns trust on a read-only server when the persisted state is complete and verified, its writer
+// saved it within two reconcile intervals, and the exact check over the newest messages is clean; otherwise it drops
+// trust. It publishes the writer's watermark age and writes nothing.
+func CmiReadOnlyTrust(ctx context.Context, check func(context.Context) (db.CmiReadOnlyCheck, error), trust *db.Trust) {
 	gen := trust.Generation()
-	st, v, err := check(ctx)
+	c, err := check(ctx)
+	if err == nil && c.Found {
+		metrics.SetReadModelWatermark(cmiModel, time.Now().Add(-c.Age))
+	}
+	st, v := c.State, c.Verification
 	switch {
 	case err != nil:
 		slog.Error("cmi read-only check failed", "component", "readmodel", "error", err)
 	case !st.Complete || st.FirstVerifiedAt == nil:
 		slog.Info("cmi not trusted on this read-only server: backfill or first verification not done", "component", "readmodel", "complete", st.Complete)
+	case c.Age > cmiReadOnlyMaxAge:
+		slog.Warn("cmi not trusted on this read-only server: the writer has not saved its state recently", "component", "readmodel", "age", c.Age.Round(time.Second))
 	case !v.OK():
 		slog.Warn("cmi not trusted on this read-only server: the newest messages fail the exact check", "component", "readmodel", "missing", v.Missing, "extra", v.Extra)
 	default:
@@ -235,7 +260,7 @@ func CmiReadOnlyTrust(ctx context.Context, check func(context.Context) (db.CmiSt
 }
 
 // CmiReadOnlyWatch runs CmiReadOnlyTrust now and every interval until ctx ends.
-func CmiReadOnlyWatch(ctx context.Context, check func(context.Context) (db.CmiState, db.CmiVerification, error), trust *db.Trust, interval time.Duration) {
+func CmiReadOnlyWatch(ctx context.Context, check func(context.Context) (db.CmiReadOnlyCheck, error), trust *db.Trust, interval time.Duration) {
 	for {
 		CmiReadOnlyTrust(ctx, check, trust)
 		if !sleep(ctx, interval) {

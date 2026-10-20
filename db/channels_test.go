@@ -743,11 +743,13 @@ func TestListChannelMessagesDispatch(t *testing.T) {
 		{"all by sites", nil, time.Time{}, []string{"YUL"}, "", true, []call{func(m *mockdb.MockQuerier) {
 			m.EXPECT().ListAllChannelMessagesByIATAs(gomock.Any(), sqlc.ListAllChannelMessagesByIATAsParams{Iatas: []string{"YUL"}, CursorID: maxCursor, PageLimit: 51}).Return(nil, nil)
 		}}},
-		{"all by sites and scope", nil, time.Time{}, []string{"YUL"}, "#fr", true, []call{scopeLookup, func(m *mockdb.MockQuerier) {
-			m.EXPECT().ListAllChannelMessagesByIATAsScoped(gomock.Any(), sqlc.ListAllChannelMessagesByIATAsScopedParams{Iatas: []string{"YUL"}, ScopeID: 3, CursorID: maxCursor, PageLimit: 51}).Return(nil, nil)
+		// Sites with a scope or a since across every channel: each site's range has no bound on the scope or since,
+		// so these run today's statement, trusted or not.
+		{"all by sites and scope", nil, time.Time{}, []string{"YUL"}, "#fr", true, []call{func(m *mockdb.MockQuerier) {
+			m.EXPECT().ListAllChannelMessages(gomock.Any(), sqlc.ListAllChannelMessagesParams{Column1: pgtype.Timestamptz{}, Column2: []string{"YUL"}, Column3: "#fr", Column4: 0, Limit: 51}).Return(nil, nil)
 		}}},
 		{"all by sites since", nil, since, []string{"YUL"}, "", true, []call{func(m *mockdb.MockQuerier) {
-			m.EXPECT().ListAllChannelMessagesByIATAsSince(gomock.Any(), sqlc.ListAllChannelMessagesByIATAsSinceParams{Iatas: []string{"YUL"}, Since: ts, CursorID: maxCursor, PageLimit: 51}).Return(nil, nil)
+			m.EXPECT().ListAllChannelMessages(gomock.Any(), sqlc.ListAllChannelMessagesParams{Column1: ts, Column2: []string{"YUL"}, Column3: "", Column4: 0, Limit: 51}).Return(nil, nil)
 		}}},
 		{"all since scoped untrusted reads no cmi", nil, since, nil, "#fr", false, []call{scopeLookup, func(m *mockdb.MockQuerier) {
 			m.EXPECT().ListAllChannelMessagesSince(gomock.Any(), sqlc.ListAllChannelMessagesSinceParams{Since: ts, ScopeID: &scope, CursorID: maxCursor, PageLimit: 51}).Return(nil, nil)

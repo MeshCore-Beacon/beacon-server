@@ -89,6 +89,8 @@ type Querier interface {
 	// Both counters only grow, so their sum changes whenever rolled content or coverage does.
 	GetAnalyticsRevision(ctx context.Context) (int64, error)
 	GetBackgroundState(ctx context.Context, key string) (json.RawMessage, error)
+	// A state with its age on the database clock: how long since its writer last saved it.
+	GetBackgroundStateAge(ctx context.Context, key string) (GetBackgroundStateAgeRow, error)
 	GetChannelByID(ctx context.Context, id int32) (Channel, error)
 	GetEarliestCompleteRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
 	// ============================================================
@@ -233,10 +235,6 @@ type Querier interface {
 	ListAllChannelMessages(ctx context.Context, arg ListAllChannelMessagesParams) ([]ListAllChannelMessagesRow, error)
 	// Every channel filtered by sites: each site's newest message ids from the read model, merged.
 	ListAllChannelMessagesByIATAs(ctx context.Context, arg ListAllChannelMessagesByIATAsParams) ([]ListAllChannelMessagesByIATAsRow, error)
-	// Every channel filtered by sites and scope.
-	ListAllChannelMessagesByIATAsScoped(ctx context.Context, arg ListAllChannelMessagesByIATAsScopedParams) ([]ListAllChannelMessagesByIATAsScopedRow, error)
-	// Every channel filtered by sites and since, optionally by scope.
-	ListAllChannelMessagesByIATAsSince(ctx context.Context, arg ListAllChannelMessagesByIATAsSinceParams) ([]ListAllChannelMessagesByIATAsSinceRow, error)
 	// Every channel, unfiltered: a walk by id; a message counts once it has a stored observation.
 	ListAllChannelMessagesPlain(ctx context.Context, arg ListAllChannelMessagesPlainParams) ([]ListAllChannelMessagesPlainRow, error)
 	// Every channel filtered by scope alone: the scope's newest message ids from the read model.

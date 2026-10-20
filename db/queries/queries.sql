@@ -1215,6 +1215,10 @@ SELECT (SELECT count(*) FROM cand) AS candidates,
 -- name: GetBackgroundState :one
 SELECT value FROM background_state WHERE key = @key;
 
+-- name: GetBackgroundStateAge :one
+-- A state with its age on the database clock: how long since its writer last saved it.
+SELECT value, extract(epoch FROM statement_timestamp() - updated_at)::float8 AS age_seconds FROM background_state WHERE key = @key;
+
 -- name: UpsertBackgroundState :exec
 INSERT INTO background_state (key, value, updated_at) VALUES (@key, @value, now())
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();

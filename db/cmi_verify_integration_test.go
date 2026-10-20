@@ -87,8 +87,12 @@ func TestCmiFirstVerificationPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ro.Close()
-	st, rv, err := New(ro, ro, 0, 0).CheckCmiReadOnly(f.ctx)
-	if err != nil || !rv.OK() || !st.Complete || st.FirstVerifiedAt == nil {
-		t.Fatalf("CheckCmiReadOnly = %+v, %+v, %v", st, rv, err)
+	rc, err := New(ro, ro, 0, 0).CheckCmiReadOnly(f.ctx)
+	if err != nil || !rc.Found || !rc.Verification.OK() || !rc.State.Complete || rc.State.FirstVerifiedAt == nil || rc.Age < 0 || rc.Age > time.Minute {
+		t.Fatalf("CheckCmiReadOnly = %+v, %v", rc, err)
+	}
+	f.exec("UPDATE background_state SET updated_at = now() - interval '11 minutes' WHERE key = 'cmi'")
+	if rc, err = New(ro, ro, 0, 0).CheckCmiReadOnly(f.ctx); err != nil || rc.Age < 11*time.Minute || rc.Age > 12*time.Minute {
+		t.Fatalf("age after 11 minutes = %v, %v", rc.Age, err)
 	}
 }

@@ -1,8 +1,8 @@
 [
  "Sort",
  "  Limit [InitPlan]",
- "    Group",
- "      Sort",
+ "    Sort",
+ "      Aggregate partial=Simple {Hashed}",
  "        Nested Loop",
  "          Function Scan",
  "          Limit",

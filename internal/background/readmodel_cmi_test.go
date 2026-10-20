@@ -7,7 +7,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -251,23 +253,74 @@ func TestCmiJobsTaskPolicy(t *testing.T) {
 func TestCmiReadOnlyTrust(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
+	fresh := time.Minute
 	for _, c := range []struct {
 		name string
 		st   db.CmiState
 		v    db.CmiVerification
+		age  time.Duration
 		err  error
 		want bool
 	}{
-		{"clean", db.CmiState{Complete: true, FirstVerifiedAt: &now}, db.CmiVerification{}, nil, true},
-		{"never verified", db.CmiState{Complete: true}, db.CmiVerification{}, nil, false},
-		{"incomplete", db.CmiState{FirstVerifiedAt: &now}, db.CmiVerification{}, nil, false},
-		{"missing pair", db.CmiState{Complete: true, FirstVerifiedAt: &now}, db.CmiVerification{Missing: 1}, nil, false},
-		{"check error", db.CmiState{Complete: true, FirstVerifiedAt: &now}, db.CmiVerification{}, errors.New("boom"), false},
+		{"clean", db.CmiState{Complete: true, FirstVerifiedAt: &now}, db.CmiVerification{}, fresh, nil, true},
+		{"two intervals old", db.CmiState{Complete: true, FirstVerifiedAt: &now}, db.CmiVerification{}, 2 * CmiInterval, nil, true},
+		{"stale writer", db.CmiState{Complete: true, FirstVerifiedAt: &now}, db.CmiVerification{}, 2*CmiInterval + time.Second, nil, false},
+		{"never verified", db.CmiState{Complete: true}, db.CmiVerification{}, fresh, nil, false},
+		{"incomplete", db.CmiState{FirstVerifiedAt: &now}, db.CmiVerification{}, fresh, nil, false},
+		{"missing pair", db.CmiState{Complete: true, FirstVerifiedAt: &now}, db.CmiVerification{Missing: 1}, fresh, nil, false},
+		{"check error", db.CmiState{Complete: true, FirstVerifiedAt: &now}, db.CmiVerification{}, fresh, errors.New("boom"), false},
 	} {
 		tr := db.NewTrust("cmi", true, db.CmiTrustPolicy)
-		CmiReadOnlyTrust(ctx, func(context.Context) (db.CmiState, db.CmiVerification, error) { return c.st, c.v, c.err }, tr)
+		tr.Earn() // a trusted read-only server whose next check fails drops trust
+		check := func(context.Context) (db.CmiReadOnlyCheck, error) {
+			return db.CmiReadOnlyCheck{Found: true, State: c.st, Verification: c.v, Age: c.age}, c.err
+		}
+		CmiReadOnlyTrust(ctx, check, tr)
 		if tr.Trusted() != c.want {
 			t.Errorf("%s: trusted %v, want %v", c.name, tr.Trusted(), c.want)
 		}
+	}
+	// The read-only server publishes the writer's watermark age.
+	CmiReadOnlyTrust(ctx, func(context.Context) (db.CmiReadOnlyCheck, error) {
+		return db.CmiReadOnlyCheck{Found: true, State: db.CmiState{Complete: true, FirstVerifiedAt: &now}, Age: 90 * time.Second}, nil
+	}, db.NewTrust("cmi", true, db.CmiTrustPolicy))
+	if age := watermarkAge(t, "cmi"); age < 90 || age > 120 {
+		t.Fatalf("watermark age %v, want about 90", age)
+	}
+}
+
+// watermarkAge scrapes beacon_readmodel_watermark_age_seconds{model}.
+func watermarkAge(t *testing.T, model string) float64 {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	for _, line := range strings.Split(rec.Body.String(), "\n") {
+		if v, ok := strings.CutPrefix(line, `beacon_readmodel_watermark_age_seconds{model="`+model+`"} `); ok {
+			f, _ := strconv.ParseFloat(v, 64)
+			return f
+		}
+	}
+	return -1
+}
+
+// A task run that finds the state incomplete or unverified (a rebuild without a restart) drops trust; a boot that
+// has not finished its first reconcile still shows a growing watermark age.
+func TestCmiJobsTaskDropsOnIncompleteState(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	f := &fakeCmi{state: db.CmiState{Complete: true, FirstVerifiedAt: &now}}
+	tr := db.NewTrust("cmi", true, db.CmiTrustPolicy)
+	j := f.jobs(tr)
+	j.Boot(ctx)
+	if !tr.Trusted() {
+		t.Fatal("not trusted after boot")
+	}
+	f.state = db.CmiState{BackfillMaxID: 9}
+	f.backfills = 1 << 20
+	if err := j.Task().Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if tr.Trusted() {
+		t.Fatal("trusted while the state is incomplete")
 	}
 }

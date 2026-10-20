@@ -280,4 +280,17 @@ func TestCmiReadOnlyTrustPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("a missing pair among the newest", false)
+	// Repaired: trusted again while the writer's state is fresh.
+	if _, err := pool.Exec(ctx, `INSERT INTO channel_message_iatas (message_id, iata, channel_id, scope_id)
+SELECT max(id), 'YOW', 7, NULL FROM channel_messages`); err != nil {
+		t.Fatal(err)
+	}
+	check("repaired", true)
+
+	// A writer that stopped saving its state (rolled back, or its reconcile failing): the read-only server stops
+	// trusting the table once the state is two intervals old.
+	if _, err := pool.Exec(ctx, "UPDATE background_state SET updated_at = now() - interval '11 minutes' WHERE key = 'cmi'"); err != nil {
+		t.Fatal(err)
+	}
+	check("the writer's state is 11 minutes old", false)
 }

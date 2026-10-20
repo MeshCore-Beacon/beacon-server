@@ -228,6 +228,11 @@ func (s *Store) InsertChannelMessage(ctx context.Context, m ingest.InsertChannel
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil // duplicate
 	}
+	if err != nil {
+		// Whatever happens next, a page may miss this packet's sites until the reconcile: the fallback stores the
+		// message without them, and a failed insert's Add finds no message while another lane's is in flight.
+		s.readModels.invalidateCmi("a channel message insert failed")
+	}
 	if err != nil && ctx.Err() == nil {
 		slog.Warn("channel message site seed failed; storing the message without it", "component", "db", "packet_hash", hex.EncodeToString(m.PacketHash), "error", err)
 		unseeded, uerr := s.q.InsertChannelMessageUnseeded(ctx, sqlc.InsertChannelMessageUnseededParams(params))
@@ -237,7 +242,6 @@ func (s *Store) InsertChannelMessage(ctx context.Context, m ingest.InsertChannel
 		if uerr != nil {
 			return nil, uerr
 		}
-		s.readModels.invalidateCmi("a message was stored without its sites")
 		row, err = sqlc.InsertChannelMessageRow(unseeded), nil
 	}
 	if err != nil {
@@ -266,7 +270,10 @@ func (s *Store) ListChannelMessages(ctx context.Context, channelID *int32, since
 // channel_message_iatas; without useReadModel they run today's statement unchanged. The others never read it.
 func listChannelMessages(ctx context.Context, q sqlc.Querier, useReadModel bool, channelID *int32, since time.Time, limit int32, iatas []string, scope string, cursor int64) (api.Page[api.ChannelMessage], error) {
 	hasSince, hasSites, hasScope := !since.IsZero(), len(iatas) > 0, scope != ""
-	if (hasSites || (hasScope && !hasSince)) && !useReadModel {
+	// Sites with a since or a scope across every channel have no index that bounds both: each site's range would
+	// be walked until enough rows pass the filter, so today's statement serves them, trusted or not.
+	allChannelsFiltered := channelID == nil && hasSites && (hasSince || hasScope)
+	if allChannelsFiltered || ((hasSites || (hasScope && !hasSince)) && !useReadModel) {
 		return listChannelMessagesLegacy(ctx, q, channelID, since, limit, iatas, scope, cursor)
 	}
 	var scopeID *int32
@@ -301,10 +308,6 @@ func listChannelMessages(ctx context.Context, q sqlc.Querier, useReadModel bool,
 		rows, err = convertRows(q.ListChannelMessagesPlainScoped(ctx, sqlc.ListChannelMessagesPlainScopedParams{ChannelID: *channelID, ScopeID: *scopeID, CursorID: cursorID, PageLimit: pageLimit}))
 	case channelID != nil:
 		rows, err = convertRows(q.ListChannelMessagesPlain(ctx, sqlc.ListChannelMessagesPlainParams{ChannelID: *channelID, CursorID: cursorID, PageLimit: pageLimit}))
-	case hasSites && hasSince:
-		rows, err = convertRows(q.ListAllChannelMessagesByIATAsSince(ctx, sqlc.ListAllChannelMessagesByIATAsSinceParams{Iatas: sites, Since: ts, ScopeID: scopeID, CursorID: cursorID, PageLimit: pageLimit}))
-	case hasSites && hasScope:
-		rows, err = convertRows(q.ListAllChannelMessagesByIATAsScoped(ctx, sqlc.ListAllChannelMessagesByIATAsScopedParams{Iatas: sites, ScopeID: *scopeID, CursorID: cursorID, PageLimit: pageLimit}))
 	case hasSites:
 		rows, err = convertRows(q.ListAllChannelMessagesByIATAs(ctx, sqlc.ListAllChannelMessagesByIATAsParams{Iatas: sites, CursorID: cursorID, PageLimit: pageLimit}))
 	case hasSince:
@@ -350,7 +353,7 @@ func dedupeSites(iatas []string) []string {
 type messageRow interface {
 	sqlc.ListChannelMessagesByIATAsRow | sqlc.ListChannelMessagesByIATAsScopedRow | sqlc.ListChannelMessagesPlainRow |
 		sqlc.ListChannelMessagesPlainScopedRow | sqlc.ListChannelMessagesSinceWalkRow | sqlc.ListAllChannelMessagesByIATAsRow |
-		sqlc.ListAllChannelMessagesByIATAsScopedRow | sqlc.ListAllChannelMessagesByIATAsSinceRow | sqlc.ListAllChannelMessagesPlainRow |
+		sqlc.ListAllChannelMessagesPlainRow |
 		sqlc.ListAllChannelMessagesPlainScopedRow | sqlc.ListAllChannelMessagesSinceRow
 }
 

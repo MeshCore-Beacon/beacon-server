@@ -5,6 +5,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -28,6 +29,8 @@ const (
 	cmiFillAttempts = 3
 	// cmiVerifyMessages is the width of each message range the verification checks exactly.
 	cmiVerifyMessages int64 = 2_000
+	// cmiBatchPause separates backfill batches.
+	cmiBatchPause = 100 * time.Millisecond
 )
 
 // CmiState is background_state['cmi']: the one-off backfill's progress and the reconcile watermarks. Nothing in it
@@ -50,6 +53,17 @@ type CmiSession struct {
 	state CmiState
 	// fills and retries count fill statements and 23503 retries, for tests.
 	fills, retries int
+	pause          time.Duration // between backfill batches; 0 = cmiBatchPause, < 0 = none
+}
+
+func (c *CmiSession) batchPause() time.Duration {
+	switch {
+	case c.pause < 0:
+		return 0
+	case c.pause == 0:
+		return cmiBatchPause
+	}
+	return c.pause
 }
 
 // BeginCmi takes the cmi lock for this schema on a dedicated connection. ok is false when another session holds it.
@@ -175,6 +189,12 @@ func (c *CmiSession) Backfill(ctx context.Context, budget time.Duration) (CmiSta
 		c.state.BackfilledToID = hi
 		if err := c.save(ctx); err != nil {
 			return c.state, err
+		}
+		// A short pause between batches leaves room for ingest's writes and WAL on large deployments.
+		select {
+		case <-ctx.Done():
+			return c.state, ctx.Err()
+		case <-time.After(c.batchPause()):
 		}
 	}
 	return c.state, nil
@@ -372,15 +392,29 @@ func comparePages(ctx context.Context, q sqlc.Querier, after int64, v *CmiVerifi
 	return nil
 }
 
-// CheckCmiReadOnly reads the persisted cmi state and runs the exact check over the newest messages. It writes
-// nothing, so a read-only server can decide whether to trust the table another process maintains.
-func (s *Store) CheckCmiReadOnly(ctx context.Context) (CmiState, CmiVerification, error) {
-	var st CmiState
-	found, err := loadState(ctx, s.q, cmiStateKey, &st)
-	if err != nil || !found {
-		return st, CmiVerification{}, err
+// CmiReadOnlyCheck is what a read-only server reads to decide whether to trust the table another process maintains.
+type CmiReadOnlyCheck struct {
+	State        CmiState
+	Verification CmiVerification // the exact check over the newest messages
+	Age          time.Duration   // since the writer last saved the state, on the database clock
+	Found        bool            // the state exists
+}
+
+// CheckCmiReadOnly reads the persisted cmi state, its age, and runs the exact check over the newest messages. It
+// writes nothing, so a read-only server can decide whether to trust the table another process maintains.
+func (s *Store) CheckCmiReadOnly(ctx context.Context) (CmiReadOnlyCheck, error) {
+	row, err := s.q.GetBackgroundStateAge(ctx, cmiStateKey)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return CmiReadOnlyCheck{}, nil
 	}
-	c := &CmiSession{state: st}
-	v, err := c.checkRanges(ctx, s.q, [][2]int64{{max(st.MsgHi-cmiVerifyMessages, 0), st.MsgHi}})
-	return st, v, err
+	if err != nil {
+		return CmiReadOnlyCheck{}, err
+	}
+	out := CmiReadOnlyCheck{Found: true, Age: time.Duration(row.AgeSeconds * float64(time.Second))}
+	if err := json.Unmarshal(row.Value, &out.State); err != nil {
+		return out, fmt.Errorf("cmi state: %w", err)
+	}
+	c := &CmiSession{state: out.State}
+	out.Verification, err = c.checkRanges(ctx, s.q, [][2]int64{{max(out.State.MsgHi-cmiVerifyMessages, 0), out.State.MsgHi}})
+	return out, err
 }

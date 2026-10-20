@@ -112,7 +112,12 @@ func TestCmiWriterFailuresDropTrust(t *testing.T) {
 	tr.Repaired(tr.Generation())
 
 	mock.EXPECT().InsertChannelMessage(gomock.Any(), gomock.Any()).Return(sqlc.InsertChannelMessageRow{}, errors.New("seed failed"))
-	mock.EXPECT().InsertChannelMessageUnseeded(gomock.Any(), gomock.Any()).Return(sqlc.InsertChannelMessageUnseededRow{ID: 9}, nil)
+	mock.EXPECT().InsertChannelMessageUnseeded(gomock.Any(), gomock.Any()).DoAndReturn(func(context.Context, sqlc.InsertChannelMessageUnseededParams) (sqlc.InsertChannelMessageUnseededRow, error) {
+		if tr.Trusted() {
+			t.Error("the unseeded insert ran while cmi was still trusted: a page could miss the message")
+		}
+		return sqlc.InsertChannelMessageUnseededRow{ID: 9}, nil
+	})
 	if m, err := s.InsertChannelMessage(context.Background(), ingest.InsertChannelMessageParams{ChannelID: 1, PacketHash: []byte{2}}); err != nil || m == nil || m.ID != 9 {
 		t.Fatalf("fallback = %+v, %v", m, err)
 	}
@@ -121,11 +126,22 @@ func TestCmiWriterFailuresDropTrust(t *testing.T) {
 	}
 	tr.Repaired(tr.Generation())
 
-	// The fallback finding a duplicate stored nothing: trust stays.
+	// Both statements failing: the message is not stored here, but another lane's message may be in flight, and the
+	// Add after a failed insert can find none. Trust drops until the next reconcile.
 	mock.EXPECT().InsertChannelMessage(gomock.Any(), gomock.Any()).Return(sqlc.InsertChannelMessageRow{}, errors.New("seed failed"))
-	mock.EXPECT().InsertChannelMessageUnseeded(gomock.Any(), gomock.Any()).Return(sqlc.InsertChannelMessageUnseededRow{}, pgx.ErrNoRows)
+	mock.EXPECT().InsertChannelMessageUnseeded(gomock.Any(), gomock.Any()).Return(sqlc.InsertChannelMessageUnseededRow{}, errors.New("insert failed"))
+	if _, err := s.InsertChannelMessage(context.Background(), ingest.InsertChannelMessageParams{ChannelID: 1, PacketHash: []byte{2}}); err == nil {
+		t.Fatal("error not returned")
+	}
+	if tr.Trusted() {
+		t.Fatal("a failed insert left cmi trusted")
+	}
+	tr.Repaired(tr.Generation())
+
+	// A plain duplicate stores nothing and changes nothing.
+	mock.EXPECT().InsertChannelMessage(gomock.Any(), gomock.Any()).Return(sqlc.InsertChannelMessageRow{}, pgx.ErrNoRows)
 	if m, err := s.InsertChannelMessage(context.Background(), ingest.InsertChannelMessageParams{ChannelID: 1, PacketHash: []byte{2}}); err != nil || m != nil {
-		t.Fatalf("duplicate fallback = %+v, %v", m, err)
+		t.Fatalf("duplicate = %+v, %v", m, err)
 	}
 	if !tr.Trusted() {
 		t.Fatal("a duplicate dropped trust")

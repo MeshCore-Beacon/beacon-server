@@ -523,6 +523,23 @@ func (q *Queries) GetBackgroundState(ctx context.Context, key string) (json.RawM
 	return value, err
 }
 
+const getBackgroundStateAge = `-- name: GetBackgroundStateAge :one
+SELECT value, extract(epoch FROM statement_timestamp() - updated_at)::float8 AS age_seconds FROM background_state WHERE key = $1
+`
+
+type GetBackgroundStateAgeRow struct {
+	Value      json.RawMessage `json:"value"`
+	AgeSeconds float64         `json:"age_seconds"`
+}
+
+// A state with its age on the database clock: how long since its writer last saved it.
+func (q *Queries) GetBackgroundStateAge(ctx context.Context, key string) (GetBackgroundStateAgeRow, error) {
+	row := q.db.QueryRow(ctx, getBackgroundStateAge, key)
+	var i GetBackgroundStateAgeRow
+	err := row.Scan(&i.Value, &i.AgeSeconds)
+	return i, err
+}
+
 const getChannelByID = `-- name: GetChannelByID :one
 SELECT id, channel_hash, key_fingerprint, name, hashtag, is_hashtag, is_public, key_known, first_seen, last_seen, message_count FROM channels WHERE id = $1
 `
