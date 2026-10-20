@@ -5,13 +5,18 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -230,4 +235,175 @@ func (p *PacketSitesSession) Audit(ctx context.Context, start func(lo, hi int64)
 	}
 	a := min(max(start(lo-1, top-packetSitesSlice), lo-1), top-packetSitesSlice)
 	return p.fill(ctx, a, a+packetSitesSlice)
+}
+
+const (
+	// packetSitesVerifySites is how many of the busiest recent sites the verification pages.
+	packetSitesVerifySites = 5
+	// packetSitesVerifyLimit is the verification's page size.
+	packetSitesVerifyLimit = 50
+	// packetSitesReadOnlyCheckIDs is how many of the newest observation ids a read-only server checks exactly.
+	packetSitesReadOnlyCheckIDs int64 = 20_000
+)
+
+// PacketSitesVerification is the outcome of one verification pass.
+type PacketSitesVerification struct {
+	Missing, Wrong, Extra int64 // CheckPacketSitesSlice over the sampled slices
+	PagesCompared         int
+	PageDiffs             []string // "sites [AAA BBB] page 2: row 7 has <hash>@<ts>, the observations give <hash>@<ts>"
+}
+
+// OK reports a clean pass.
+func (v PacketSitesVerification) OK() bool {
+	return v.Missing == 0 && v.Wrong == 0 && v.Extra == 0 && len(v.PageDiffs) == 0
+}
+
+func (v *PacketSitesVerification) add(c sqlc.CheckPacketSitesSliceRow) {
+	v.Missing += c.Missing
+	v.Wrong += c.Wrong
+	v.Extra += c.Extra
+}
+
+// Verify is the first-time verification: it reconciles, VACUUMs and ANALYZEs the table (index-only scans need its
+// visibility map), then in one read-only snapshot runs the exact check over the newest slice of observation ids and
+// one random slice below it, and compares region pages of the busiest recent sites with pages read straight from the
+// observations. The first pass is persisted as FirstVerifiedAt. The caller retries a failed pass every interval.
+func (p *PacketSitesSession) Verify(ctx context.Context) (PacketSitesVerification, error) {
+	if _, err := p.Reconcile(ctx); err != nil {
+		return PacketSitesVerification{}, err
+	}
+	if _, err := p.conn.Exec(ctx, "VACUUM (ANALYZE) packet_sites"); err != nil {
+		return PacketSitesVerification{}, fmt.Errorf("packet_sites vacuum: %w", err)
+	}
+	tx, err := p.conn.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return PacketSitesVerification{}, err
+	}
+	defer tx.Rollback(context.Background()) //nolint:errcheck // read-only
+	q := sqlc.New(tx)
+	hi := p.state.ReconHi
+	lo, err := q.MinObservationID(ctx)
+	if err != nil {
+		return PacketSitesVerification{}, err
+	}
+	ranges := [][2]int64{{max(hi-packetSitesSlice, 0), hi}}
+	if below := hi - packetSitesSlice - (lo - 1); lo > 0 && below > packetSitesSlice {
+		start := lo - 1 + rand.Int64N(below-packetSitesSlice)
+		ranges = append(ranges, [2]int64{start, start + packetSitesSlice})
+	}
+	var v PacketSitesVerification
+	for _, r := range ranges {
+		c, err := q.CheckPacketSitesSlice(ctx, sqlc.CheckPacketSitesSliceParams{AfterID: r[0], ThroughID: r[1]})
+		if err != nil {
+			return v, err
+		}
+		v.add(c)
+	}
+	if err := comparePacketSitePages(ctx, q, max(hi-packetSitesSlice, 0), &v); err != nil {
+		return v, err
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		return v, err
+	}
+	if !v.OK() {
+		slog.Error("packet_sites verification failed; region pages stay on the original statement", "component", "readmodel",
+			"missing", v.Missing, "wrong", v.Wrong, "extra", v.Extra, "pages", v.PagesCompared, "diffs", len(v.PageDiffs),
+			"first", v.PageDiffs[:min(len(v.PageDiffs), 3)])
+		return v, nil
+	}
+	if p.state.FirstVerifiedAt == nil {
+		now := time.Now().UTC()
+		p.state.FirstVerifiedAt = &now
+		if err := p.save(ctx); err != nil {
+			return v, err
+		}
+		slog.Info("packet_sites first-time verification passed", "component", "readmodel", "pages", v.PagesCompared)
+	}
+	return v, nil
+}
+
+// comparePacketSitePages pages the busiest sites among observations above after (each alone, and the top three
+// together), from the first row and from page 1's 26th row, and compares each page's keys with the keys read from
+// the observations down to the page's last key.
+func comparePacketSitePages(ctx context.Context, q sqlc.Querier, after int64, v *PacketSitesVerification) error {
+	samples, err := q.ListPacketSiteSamples(ctx, sqlc.ListPacketSiteSamplesParams{AfterID: after, RowLimit: packetSitesVerifySites})
+	if err != nil {
+		return err
+	}
+	var lists [][]string
+	for _, s := range samples {
+		lists = append(lists, []string{s.Iata})
+	}
+	if len(samples) >= 3 {
+		lists = append(lists, []string{samples[0].Iata, samples[1].Iata, samples[2].Iata})
+	}
+	for _, sites := range lists {
+		var cursor *api.PacketCursor
+		for page := 1; page <= 2; page++ {
+			f, _ := newPacketFilter(nil, nil, nil, time.Time{}, time.Time{}, 0, cursor, packetSitesVerifyLimit)
+			rows, _, err := listSiteRows(ctx, q, f, sites)
+			if err != nil {
+				return err
+			}
+			floor := pgtype.Timestamptz{InfinityModifier: pgtype.NegativeInfinity, Valid: true}
+			if len(rows) == int(f.pageLimit) {
+				floor = rows[len(rows)-1].SiteHeardAt
+			}
+			truth, err := q.TruthPacketsBySitesPage(ctx, sqlc.TruthPacketsBySitesPageParams{
+				Iatas: sites, FloorTs: floor, CursorTs: f.cursorTS, CursorHash: f.cursorHash, PageLimit: f.pageLimit,
+			})
+			if err != nil {
+				return err
+			}
+			v.PagesCompared++
+			for i := range max(len(rows), len(truth)) {
+				var got, want string
+				if i < len(rows) {
+					got = fmt.Sprintf("%x@%s", rows[i].PacketHash, rows[i].SiteHeardAt.Time.UTC().Format(time.RFC3339Nano))
+				}
+				if i < len(truth) {
+					want = fmt.Sprintf("%x@%s", truth[i].PacketHash, truth[i].SiteHeardAt.Time.UTC().Format(time.RFC3339Nano))
+				}
+				if got != want {
+					v.PageDiffs = append(v.PageDiffs, fmt.Sprintf("sites %v page %d: row %d has %s, the observations give %s", sites, page, i+1, got, want))
+					break
+				}
+			}
+			if len(rows) <= packetSitesVerifyLimit/2 {
+				break
+			}
+			r := rows[packetSitesVerifyLimit/2]
+			cursor = &api.PacketCursor{At: r.SiteHeardAt.Time, Hash: r.PacketHash}
+		}
+	}
+	return nil
+}
+
+// PacketSitesReadOnlyCheck is what a read-only server reads to decide whether to trust the table another process
+// maintains.
+type PacketSitesReadOnlyCheck struct {
+	State        PacketSitesState
+	Verification PacketSitesVerification // the exact check over the newest observation ids
+	Age          time.Duration           // since the writer last saved the state, on the database clock
+	Found        bool                    // the state exists
+}
+
+// CheckPacketSitesReadOnly reads the persisted packet_sites state and its age, and runs the exact check over the
+// newest packetSitesReadOnlyCheckIDs observation ids below the writer's watermark. It writes nothing.
+func (s *Store) CheckPacketSitesReadOnly(ctx context.Context) (PacketSitesReadOnlyCheck, error) {
+	row, err := s.q.GetBackgroundStateAge(ctx, packetSitesStateKey)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return PacketSitesReadOnlyCheck{}, nil
+	}
+	if err != nil {
+		return PacketSitesReadOnlyCheck{}, err
+	}
+	out := PacketSitesReadOnlyCheck{Found: true, Age: time.Duration(row.AgeSeconds * float64(time.Second))}
+	if err := json.Unmarshal(row.Value, &out.State); err != nil {
+		return out, fmt.Errorf("packet_sites state: %w", err)
+	}
+	hi := out.State.ReconHi
+	c, err := s.q.CheckPacketSitesSlice(ctx, sqlc.CheckPacketSitesSliceParams{AfterID: max(hi-packetSitesReadOnlyCheckIDs, 0), ThroughID: hi})
+	out.Verification.add(c)
+	return out, err
 }

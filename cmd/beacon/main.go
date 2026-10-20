@@ -172,7 +172,10 @@ func main() {
 		os.Exit(1)
 	}
 	// Trust in each read model is per process: earned by this boot's repair, dropped by any writer's failure.
-	readModels := &db.ReadModels{Cmi: db.NewTrust("cmi", resolved.ReadModelCmiEnabled, db.CmiTrustPolicy)}
+	readModels := &db.ReadModels{
+		Cmi:         db.NewTrust("cmi", resolved.ReadModelCmiEnabled, db.CmiTrustPolicy),
+		PacketSites: db.NewTrust("packet_sites", resolved.ReadModelPacketSitesEnabled, db.PacketSitesTrustPolicy),
+	}
 
 	// Three stores: ingest writes, background and operator work, and API reads. The API store
 	// routes each statement by plan class through the guards; it never runs background jobs.
@@ -505,10 +508,30 @@ func main() {
 		Trust:    readModels.Cmi,
 		Interval: background.CmiInterval,
 	}
+	psJobs := &background.PacketSitesJobs{
+		Begin: func(ctx context.Context) (background.PacketSitesSession, bool, error) {
+			s, ok, err := maintStore.BeginPacketSites(ctx)
+			if s == nil {
+				return nil, ok, err
+			}
+			return s, ok, err
+		},
+		Wait: func(ctx context.Context) error {
+			return db.WaitForPreBootWriters(ctx, pools.Maint, bootTS, time.Minute)
+		},
+		Trust:    readModels.PacketSites,
+		Interval: background.PacketSitesInterval,
+		Sweep: func(ctx context.Context) (db.SweepResult, error) {
+			return maintStore.SweepPacketSitesFronts(ctx, background.PacketSitesSweepLookback)
+		},
+		SweepPlan: maintStore.PacketSitesSweepPlanOK,
+		Bytes:     maintStore.PacketSitesTotalBytes,
+	}
 	if mode.Jobs {
-		tasks = append(tasks, cmiJobs.Task())
+		tasks = append(tasks, cmiJobs.Task(), psJobs.Task(), psJobs.AuditTask(), psJobs.SweepTask())
 	} else {
 		go background.CmiReadOnlyWatch(ctx, maintStore.CheckCmiReadOnly, readModels.Cmi, background.CmiInterval)
+		go background.PacketSitesReadOnlyWatch(ctx, maintStore.CheckPacketSitesReadOnly, readModels.PacketSites, background.PacketSitesInterval)
 	}
 	pgSource, pgTask := planguardWiring(ctx, resolved.PlanguardDailyCheck, mode.Jobs, pools.Maint)
 	if pgTask != nil {
@@ -523,6 +546,7 @@ func main() {
 		scheduler := background.New(tasks)
 		go scheduler.Start(ctx)
 		go cmiJobs.Boot(ctx)
+		go psJobs.Boot(ctx)
 	}
 
 	// ── HTTP server ──────────────────────────────────────────────────────────

@@ -552,3 +552,31 @@ func TestLoad_ReadModelsCmi(t *testing.T) {
 		}
 	}
 }
+
+func TestLoad_ReadModelsPacketSites(t *testing.T) {
+	for _, c := range []struct {
+		yaml string
+		want bool
+	}{
+		{"", true},
+		{"readmodels:\n  packet_sites:\n    enabled: false\n", false},
+		{"readmodels:\n  packet_sites:\n    enabled: true\n", true},
+		{"readmodels:\n  cmi:\n    enabled: false\n", true},
+	} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte(c.yaml), 0600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := Resolve(cfg)
+		if r.ReadModelPacketSitesEnabled != c.want {
+			t.Errorf("%q: ReadModelPacketSitesEnabled = %v, want %v", c.yaml, r.ReadModelPacketSitesEnabled, c.want)
+		}
+		if !strings.Contains(r.String(), fmt.Sprintf("readModelPacketSites=%t", c.want)) {
+			t.Errorf("%q: resolved line %q", c.yaml, r.String())
+		}
+	}
+}

@@ -327,6 +327,8 @@ type Querier interface {
 	ListObserverDirectory(ctx context.Context, arg ListObserverDirectoryParams) (string, error)
 	// Observers newest last_seen first; the cursor is the (last_seen, id) of the last row.
 	ListObservers(ctx context.Context, arg ListObserversParams) ([]ListObserversRow, error)
+	// The sites with the most packets among observations above after_id; the first-time verification pages them.
+	ListPacketSiteSamples(ctx context.Context, arg ListPacketSiteSamplesParams) ([]ListPacketSiteSamplesRow, error)
 	// Returns packets with observations after the given observation ID, ordered oldest first.
 	// Used for WS reconnect backfill. Pass afterObservationId=0 to start from the beginning.
 	ListPacketsAfterID(ctx context.Context, arg ListPacketsAfterIDParams) ([]ListPacketsAfterIDRow, error)
@@ -531,6 +533,9 @@ type Querier interface {
 	// from regressing a newer write-through (e.g. a status update).
 	TouchObservers(ctx context.Context, arg TouchObserversParams) error
 	TouchPackets(ctx context.Context, arg TouchPacketsParams) error
+	// Page keys straight from the observations, independent of packet_sites. floor_ts bounds the read: keys at or
+	// above it are exact, because a packet's newest requested-site hearing is unchanged by dropping older ones.
+	TruthPacketsBySitesPage(ctx context.Context, arg TruthPacketsBySitesPageParams) ([]TruthPacketsBySitesPageRow, error)
 	// ============================================================
 	// HOURLY ANALYTICS ROLLUPS
 	// An hour [H, H+1h) is eligible once now() >= H + 95 min (ingest clamps heard_at to ±30 min).

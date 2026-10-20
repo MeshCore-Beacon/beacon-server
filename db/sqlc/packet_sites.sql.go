@@ -105,6 +105,46 @@ func (q *Queries) FilterKnownSites(ctx context.Context, iatas []string) ([]strin
 	return iatas_2, err
 }
 
+const listPacketSiteSamples = `-- name: ListPacketSiteSamples :many
+SELECT po.iata, count(DISTINCT po.packet_hash)::bigint AS n
+FROM packet_observations po
+WHERE po.id > $1::bigint
+GROUP BY po.iata
+ORDER BY n DESC, po.iata
+LIMIT $2
+`
+
+type ListPacketSiteSamplesParams struct {
+	AfterID  int64 `json:"after_id"`
+	RowLimit int32 `json:"row_limit"`
+}
+
+type ListPacketSiteSamplesRow struct {
+	Iata string `json:"iata"`
+	N    int64  `json:"n"`
+}
+
+// The sites with the most packets among observations above after_id; the first-time verification pages them.
+func (q *Queries) ListPacketSiteSamples(ctx context.Context, arg ListPacketSiteSamplesParams) ([]ListPacketSiteSamplesRow, error) {
+	rows, err := q.db.Query(ctx, listPacketSiteSamples, arg.AfterID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPacketSiteSamplesRow{}
+	for rows.Next() {
+		var i ListPacketSiteSamplesRow
+		if err := rows.Scan(&i.Iata, &i.N); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPacketsBySite = `-- name: ListPacketsBySite :many
 WITH page AS MATERIALIZED (
   SELECT ps.packet_hash, ps.site_heard_at AS k
@@ -1117,4 +1157,58 @@ func (q *Queries) SweepPacketSitesFronts(ctx context.Context, lookback pgtype.In
 	var i SweepPacketSitesFrontsRow
 	err := row.Scan(&i.SiteLive, &i.TypeLive, &i.ScopeLive)
 	return i, err
+}
+
+const truthPacketsBySitesPage = `-- name: TruthPacketsBySitesPage :many
+WITH page AS MATERIALIZED (
+  SELECT po.packet_hash, max(po.heard_at) AS k
+  FROM packet_observations po
+  WHERE po.iata = ANY($1::bpchar[]) AND po.heard_at >= $2::timestamptz
+  GROUP BY po.packet_hash
+  HAVING (max(po.heard_at), po.packet_hash) < ($3::timestamptz, $4::bytea)
+  ORDER BY max(po.heard_at) DESC, po.packet_hash DESC
+  LIMIT $5
+)
+SELECT pg.packet_hash, pg.k::timestamptz AS site_heard_at FROM page pg ORDER BY pg.k DESC, pg.packet_hash DESC
+`
+
+type TruthPacketsBySitesPageParams struct {
+	Iatas      []string           `json:"iatas"`
+	FloorTs    pgtype.Timestamptz `json:"floor_ts"`
+	CursorTs   pgtype.Timestamptz `json:"cursor_ts"`
+	CursorHash []byte             `json:"cursor_hash"`
+	PageLimit  int32              `json:"page_limit"`
+}
+
+type TruthPacketsBySitesPageRow struct {
+	PacketHash  []byte             `json:"packet_hash"`
+	SiteHeardAt pgtype.Timestamptz `json:"site_heard_at"`
+}
+
+// Page keys straight from the observations, independent of packet_sites. floor_ts bounds the read: keys at or
+// above it are exact, because a packet's newest requested-site hearing is unchanged by dropping older ones.
+func (q *Queries) TruthPacketsBySitesPage(ctx context.Context, arg TruthPacketsBySitesPageParams) ([]TruthPacketsBySitesPageRow, error) {
+	rows, err := q.db.Query(ctx, truthPacketsBySitesPage,
+		arg.Iatas,
+		arg.FloorTs,
+		arg.CursorTs,
+		arg.CursorHash,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TruthPacketsBySitesPageRow{}
+	for rows.Next() {
+		var i TruthPacketsBySitesPageRow
+		if err := rows.Scan(&i.PacketHash, &i.SiteHeardAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

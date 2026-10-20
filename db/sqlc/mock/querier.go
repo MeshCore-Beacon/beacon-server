@@ -2064,6 +2064,21 @@ func (mr *MockQuerierMockRecorder) ListObservers(ctx, arg any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListObservers", reflect.TypeOf((*MockQuerier)(nil).ListObservers), ctx, arg)
 }
 
+// ListPacketSiteSamples mocks base method.
+func (m *MockQuerier) ListPacketSiteSamples(ctx context.Context, arg db.ListPacketSiteSamplesParams) ([]db.ListPacketSiteSamplesRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListPacketSiteSamples", ctx, arg)
+	ret0, _ := ret[0].([]db.ListPacketSiteSamplesRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListPacketSiteSamples indicates an expected call of ListPacketSiteSamples.
+func (mr *MockQuerierMockRecorder) ListPacketSiteSamples(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPacketSiteSamples", reflect.TypeOf((*MockQuerier)(nil).ListPacketSiteSamples), ctx, arg)
+}
+
 // ListPacketsAfterID mocks base method.
 func (m *MockQuerier) ListPacketsAfterID(ctx context.Context, arg db.ListPacketsAfterIDParams) ([]db.ListPacketsAfterIDRow, error) {
 	m.ctrl.T.Helper()
@@ -3319,6 +3334,21 @@ func (m *MockQuerier) TouchPackets(ctx context.Context, arg db.TouchPacketsParam
 func (mr *MockQuerierMockRecorder) TouchPackets(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TouchPackets", reflect.TypeOf((*MockQuerier)(nil).TouchPackets), ctx, arg)
+}
+
+// TruthPacketsBySitesPage mocks base method.
+func (m *MockQuerier) TruthPacketsBySitesPage(ctx context.Context, arg db.TruthPacketsBySitesPageParams) ([]db.TruthPacketsBySitesPageRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TruthPacketsBySitesPage", ctx, arg)
+	ret0, _ := ret[0].([]db.TruthPacketsBySitesPageRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// TruthPacketsBySitesPage indicates an expected call of TruthPacketsBySitesPage.
+func (mr *MockQuerierMockRecorder) TruthPacketsBySitesPage(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TruthPacketsBySitesPage", reflect.TypeOf((*MockQuerier)(nil).TruthPacketsBySitesPage), ctx, arg)
 }
 
 // TryRollupLock mocks base method.

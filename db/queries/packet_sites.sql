@@ -478,3 +478,26 @@ SELECT (SELECT count(*) FROM site) AS site_live, (SELECT n FROM typ) AS type_liv
 
 -- name: PacketSitesTotalBytes :one
 SELECT pg_total_relation_size('packet_sites'::regclass)::bigint AS bytes;
+
+-- name: ListPacketSiteSamples :many
+-- The sites with the most packets among observations above after_id; the first-time verification pages them.
+SELECT po.iata, count(DISTINCT po.packet_hash)::bigint AS n
+FROM packet_observations po
+WHERE po.id > @after_id::bigint
+GROUP BY po.iata
+ORDER BY n DESC, po.iata
+LIMIT @row_limit;
+
+-- name: TruthPacketsBySitesPage :many
+-- Page keys straight from the observations, independent of packet_sites. floor_ts bounds the read: keys at or
+-- above it are exact, because a packet's newest requested-site hearing is unchanged by dropping older ones.
+WITH page AS MATERIALIZED (
+  SELECT po.packet_hash, max(po.heard_at) AS k
+  FROM packet_observations po
+  WHERE po.iata = ANY(@iatas::bpchar[]) AND po.heard_at >= @floor_ts::timestamptz
+  GROUP BY po.packet_hash
+  HAVING (max(po.heard_at), po.packet_hash) < (@cursor_ts::timestamptz, @cursor_hash::bytea)
+  ORDER BY max(po.heard_at) DESC, po.packet_hash DESC
+  LIMIT @page_limit
+)
+SELECT pg.packet_hash, pg.k::timestamptz AS site_heard_at FROM page pg ORDER BY pg.k DESC, pg.packet_hash DESC;
