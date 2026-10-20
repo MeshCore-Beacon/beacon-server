@@ -120,15 +120,23 @@ func TestPacketSitesInitAndBackfillPostgres(t *testing.T) {
 	if err != nil || !st.Complete {
 		t.Fatalf("Backfill = %+v, %v", st, err)
 	}
-	// 1.2M ids from the oldest: three slices, none below the oldest observation.
-	if fmt.Sprint(p.fills) != "[[3000700000 3001200000] [3000200000 3000700000] [3000000000 3000200000]]" {
-		t.Fatalf("fills %v", p.fills)
+	// The entire interval is covered once in smaller, contiguous boot slices.
+	end := hi
+	for _, r := range p.fills {
+		if r[1] != end || r[0] >= r[1] || r[1]-r[0] > packetSitesBootSlice {
+			t.Fatalf("unbounded or noncontiguous fills %v", p.fills)
+		}
+		end = r[0]
+	}
+	if end != 3_000_000_000 {
+		t.Fatalf("backfill stopped at %d", end)
 	}
 	f.wantClean("after backfill")
 	if n, err := sqlc.New(f.pool).FillPacketSitesSlice(f.ctx, sqlc.FillPacketSitesSliceParams{AfterID: 0, ThroughID: f.maxID()}); err != nil || n != 0 {
 		t.Fatalf("a second fill wrote %d, %v", n, err)
 	}
-	if st, err := p.Backfill(f.ctx, time.Minute); err != nil || len(p.fills) != 3 || !st.Complete {
+	fills := len(p.fills)
+	if st, err := p.Backfill(f.ctx, time.Minute); err != nil || len(p.fills) != fills || !st.Complete {
 		t.Fatalf("a complete backfill ran again: %+v, %v, %v", st, err, p.fills)
 	}
 

@@ -21,8 +21,10 @@ import (
 
 const (
 	cmiStateKey = "cmi"
-	// cmiBackfillBatch is the message ids one fill covers, in the backfill and the reconcile's message part.
+	// cmiBackfillBatch is the message ids one fill of reconciliation covers.
 	cmiBackfillBatch int64 = 10_000
+	// Boot starts with smaller writes than steady-state reconciliation.
+	cmiBootBatch int64 = 1_000
 	// cmiObsSlice is the observation ids one fill of the reconcile's observation part covers.
 	cmiObsSlice int64 = 500_000
 	// cmiFillAttempts bounds the retries of a fill that lost a message to a concurrent cascade (23503).
@@ -54,6 +56,8 @@ type CmiSession struct {
 	// fills and retries count fill statements and 23503 retries, for tests.
 	fills, retries int
 	pause          time.Duration // between backfill batches; 0 = cmiBatchPause, < 0 = none
+	backfillSpan   int64
+	backfillLimit  time.Duration
 }
 
 func (c *CmiSession) batchPause() time.Duration {
@@ -162,10 +166,14 @@ func (c *CmiSession) fillMessages(ctx context.Context, after, through int64) (in
 	})
 }
 
-// Backfill fills cmi oldest to newest in batches of cmiBackfillBatch message ids, jumping id gaps, until it
-// reaches BackfillMaxID (then Complete) or budget is spent. Progress is saved after every batch.
+// Backfill fills cmi oldest to newest, jumping id gaps, until it reaches BackfillMaxID (then Complete) or budget is
+// spent. Boot writes start at cmiBootBatch and halve after a statement timeout. Progress is saved only after a
+// committed batch; retrying a failed or interrupted range is idempotent.
 func (c *CmiSession) Backfill(ctx context.Context, budget time.Duration) (CmiState, error) {
 	deadline := time.Now().Add(budget)
+	if c.backfillSpan <= 0 {
+		c.backfillSpan = cmiBootBatch
+	}
 	for !c.state.Complete && time.Now().Before(deadline) {
 		if err := ctx.Err(); err != nil {
 			return c.state, err
@@ -182,8 +190,17 @@ func (c *CmiSession) Backfill(ctx context.Context, budget time.Duration) (CmiSta
 			slog.Info("cmi backfill complete", "component", "readmodel", "max_id", c.state.BackfillMaxID)
 			break
 		}
-		hi := min(next-1+cmiBackfillBatch, c.state.BackfillMaxID)
-		if _, err := c.fillMessages(ctx, next-1, hi); err != nil {
+		hi := min(next-1+c.backfillSpan, c.state.BackfillMaxID)
+		_, err = c.fill(ctx, func() (int64, error) {
+			return backfillWrite(ctx, c.conn, backfillTimeout(c.backfillLimit, deadline), func() (int64, error) {
+				return c.q.FillChannelMessageIATAsByMessages(ctx, sqlc.FillChannelMessageIATAsByMessagesParams{AfterID: next - 1, ThroughID: hi})
+			})
+		})
+		if err != nil {
+			if backfillTimedOut(ctx, err) && hi-(next-1) > 1 {
+				c.backfillSpan = max(1, (hi-(next-1))/2)
+				continue
+			}
 			return c.state, fmt.Errorf("cmi backfill (%d, %d]: %w", next-1, hi, err)
 		}
 		c.state.BackfilledToID = hi
