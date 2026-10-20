@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/meshcore-go/meshcore-go"
 )
@@ -645,8 +647,9 @@ func (s *Store) UpsertIATA(ctx context.Context, iata string) error {
 	return s.q.UpsertIATA(ctx, iata)
 }
 
-func (s *Store) InsertObservation(ctx context.Context, o ingest.InsertObservationParams) (bool, int64, error) {
-	params := sqlc.InsertObservationParams{
+// observationParams maps an observation to the statement's parameters.
+func observationParams(o ingest.InsertObservationParams) sqlc.InsertObservationParams {
+	return sqlc.InsertObservationParams{
 		PacketHash:        o.PacketHash,
 		ObserverID:        o.ObserverID,
 		Iata:              o.IATA,
@@ -666,11 +669,31 @@ func (s *Store) InsertObservation(ctx context.Context, o ingest.InsertObservatio
 		PayloadType:       &o.PayloadType,
 		AirtimeMs:         o.AirtimeMs,
 	}
+}
+
+func (s *Store) InsertObservation(ctx context.Context, o ingest.InsertObservationParams) (bool, int64, error) {
+	params := observationParams(o)
 	row, err := s.q.InsertObservation(ctx, params)
+	if err == nil {
+		return row.Inserted, row.ObservationCount, nil
+	}
+	// Whatever failed, region pages stop reading packet_sites before anything else is written, until a reconcile
+	// that begins after this has repaired it.
+	s.readModels.invalidatePacketSites("an observation insert with its site row failed")
+	// A cancelled request and a packet that is gone (23503, which today's statement hits too) are returned as
+	// they are. Any other failure stores the observation without its site row and leaves the row to the
+	// reconcile.
+	var pgErr *pgconn.PgError
+	if ctx.Err() != nil || (errors.As(err, &pgErr) && pgErr.Code == "23503") {
+		return false, 0, err
+	}
+	slog.Warn("observation site row failed; storing the observation without it", "component", "db",
+		"packet_hash", hex.EncodeToString(o.PacketHash), "iata", o.IATA, "error", err)
+	fallback, err := s.q.InsertObservationUnsited(ctx, sqlc.InsertObservationUnsitedParams(params))
 	if err != nil {
 		return false, 0, err
 	}
-	return row.Inserted, row.ObservationCount, nil
+	return fallback.Inserted, fallback.ObservationCount, nil
 }
 
 func (s *Store) ListNodeObservations(ctx context.Context, nodeID uuid.UUID, cursor int64, limit int32) (api.Page[api.PacketObservationSummary], error) {

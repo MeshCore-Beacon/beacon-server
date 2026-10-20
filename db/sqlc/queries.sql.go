@@ -2873,11 +2873,18 @@ INSERT INTO packet_observations (
   $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
 )
 ON CONFLICT (packet_hash, observer_id) DO NOTHING
-RETURNING packet_hash
+RETURNING packet_hash, iata, heard_at
 ), bump AS (
   UPDATE packets p SET observation_count = p.observation_count + 1
   FROM ins WHERE p.packet_hash = ins.packet_hash
-  RETURNING p.observation_count
+  RETURNING p.packet_hash, p.observation_count, p.payload_type, p.route_type, p.scope_id, p.first_heard_at
+), site AS (
+  -- The packet's row at this site moves only forward in time; a re-send changes nothing.
+  INSERT INTO packet_sites (packet_hash, iata, site_heard_at, first_heard_at, payload_type, route_type, scope_id)
+  SELECT b.packet_hash, i.iata, i.heard_at, b.first_heard_at, b.payload_type, b.route_type, b.scope_id
+  FROM ins i JOIN bump b USING (packet_hash)
+  ON CONFLICT (packet_hash, iata) DO UPDATE SET site_heard_at = EXCLUDED.site_heard_at
+     WHERE packet_sites.site_heard_at < EXCLUDED.site_heard_at
 )
 SELECT EXISTS (SELECT 1 FROM ins) AS inserted,
        COALESCE((SELECT b.observation_count FROM bump b),
@@ -2913,7 +2920,8 @@ type InsertObservationRow struct {
 // ============================================================
 // PACKET OBSERVATIONS
 // ============================================================
-// Bumps packets.observation_count only for a new row; a duplicate returns the current count.
+// Bumps packets.observation_count and moves the packet's site row forward only for a new row; a duplicate
+// returns the current count and writes nothing.
 func (q *Queries) InsertObservation(ctx context.Context, arg InsertObservationParams) (InsertObservationRow, error) {
 	row := q.db.QueryRow(ctx, insertObservation,
 		arg.PacketHash,
@@ -2936,6 +2944,96 @@ func (q *Queries) InsertObservation(ctx context.Context, arg InsertObservationPa
 		arg.AirtimeMs,
 	)
 	var i InsertObservationRow
+	err := row.Scan(&i.Inserted, &i.ObservationCount)
+	return i, err
+}
+
+const insertObservationUnsited = `-- name: InsertObservationUnsited :one
+WITH ins AS (
+INSERT INTO packet_observations (
+  packet_hash,
+  observer_id,
+  iata,
+  heard_at,
+  path_length_byte,
+  hash_size,
+  hop_count,
+  path_bytes,
+  rssi,
+  snr,
+  propagation_time_ms,
+  radio_freq_mhz,
+  spread_factor,
+  bandwidth_khz,
+  coding_rate,
+  source_broker,
+  payload_type,
+  airtime_ms
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+)
+ON CONFLICT (packet_hash, observer_id) DO NOTHING
+RETURNING packet_hash
+), bump AS (
+  UPDATE packets p SET observation_count = p.observation_count + 1
+  FROM ins WHERE p.packet_hash = ins.packet_hash
+  RETURNING p.observation_count
+)
+SELECT EXISTS (SELECT 1 FROM ins) AS inserted,
+       COALESCE((SELECT b.observation_count FROM bump b),
+                (SELECT pk.observation_count FROM packets pk WHERE pk.packet_hash = $1), 0)::bigint AS observation_count
+`
+
+type InsertObservationUnsitedParams struct {
+	PacketHash        []byte             `json:"packet_hash"`
+	ObserverID        uuid.UUID          `json:"observer_id"`
+	Iata              string             `json:"iata"`
+	HeardAt           pgtype.Timestamptz `json:"heard_at"`
+	PathLengthByte    int16              `json:"path_length_byte"`
+	HashSize          int16              `json:"hash_size"`
+	HopCount          int16              `json:"hop_count"`
+	PathBytes         []byte             `json:"path_bytes"`
+	Rssi              *int16             `json:"rssi"`
+	Snr               *float32           `json:"snr"`
+	PropagationTimeMs *int32             `json:"propagation_time_ms"`
+	RadioFreqMhz      *float32           `json:"radio_freq_mhz"`
+	SpreadFactor      *int16             `json:"spread_factor"`
+	BandwidthKhz      *float32           `json:"bandwidth_khz"`
+	CodingRate        *int16             `json:"coding_rate"`
+	SourceBroker      *string            `json:"source_broker"`
+	PayloadType       *int16             `json:"payload_type"`
+	AirtimeMs         *float32           `json:"airtime_ms"`
+}
+
+type InsertObservationUnsitedRow struct {
+	Inserted         bool  `json:"inserted"`
+	ObservationCount int64 `json:"observation_count"`
+}
+
+// InsertObservation without the site row: the fallback when that statement fails. The caller marks the site
+// read model untrusted; its reconcile adds the row.
+func (q *Queries) InsertObservationUnsited(ctx context.Context, arg InsertObservationUnsitedParams) (InsertObservationUnsitedRow, error) {
+	row := q.db.QueryRow(ctx, insertObservationUnsited,
+		arg.PacketHash,
+		arg.ObserverID,
+		arg.Iata,
+		arg.HeardAt,
+		arg.PathLengthByte,
+		arg.HashSize,
+		arg.HopCount,
+		arg.PathBytes,
+		arg.Rssi,
+		arg.Snr,
+		arg.PropagationTimeMs,
+		arg.RadioFreqMhz,
+		arg.SpreadFactor,
+		arg.BandwidthKhz,
+		arg.CodingRate,
+		arg.SourceBroker,
+		arg.PayloadType,
+		arg.AirtimeMs,
+	)
+	var i InsertObservationUnsitedRow
 	err := row.Scan(&i.Inserted, &i.ObservationCount)
 	return i, err
 }

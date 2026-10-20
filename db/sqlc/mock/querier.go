@@ -1465,6 +1465,21 @@ func (mr *MockQuerierMockRecorder) InsertObservation(ctx, arg any) *gomock.Call 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertObservation", reflect.TypeOf((*MockQuerier)(nil).InsertObservation), ctx, arg)
 }
 
+// InsertObservationUnsited mocks base method.
+func (m *MockQuerier) InsertObservationUnsited(ctx context.Context, arg db.InsertObservationUnsitedParams) (db.InsertObservationUnsitedRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InsertObservationUnsited", ctx, arg)
+	ret0, _ := ret[0].(db.InsertObservationUnsitedRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// InsertObservationUnsited indicates an expected call of InsertObservationUnsited.
+func (mr *MockQuerierMockRecorder) InsertObservationUnsited(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertObservationUnsited", reflect.TypeOf((*MockQuerier)(nil).InsertObservationUnsited), ctx, arg)
+}
+
 // InsertObserverTelemetry mocks base method.
 func (m *MockQuerier) InsertObserverTelemetry(ctx context.Context, arg db.InsertObserverTelemetryParams) error {
 	m.ctrl.T.Helper()

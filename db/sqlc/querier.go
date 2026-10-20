@@ -224,8 +224,12 @@ type Querier interface {
 	// ============================================================
 	// PACKET OBSERVATIONS
 	// ============================================================
-	// Bumps packets.observation_count only for a new row; a duplicate returns the current count.
+	// Bumps packets.observation_count and moves the packet's site row forward only for a new row; a duplicate
+	// returns the current count and writes nothing.
 	InsertObservation(ctx context.Context, arg InsertObservationParams) (InsertObservationRow, error)
+	// InsertObservation without the site row: the fallback when that statement fails. The caller marks the site
+	// read model untrusted; its reconcile adds the row.
+	InsertObservationUnsited(ctx context.Context, arg InsertObservationUnsitedParams) (InsertObservationUnsitedRow, error)
 	// Inserts a telemetry snapshot for an observer. The reported_at timestamp should
 	// be truncated to the configured resolution before calling to ensure deduplication.
 	InsertObserverTelemetry(ctx context.Context, arg InsertObserverTelemetryParams) error
