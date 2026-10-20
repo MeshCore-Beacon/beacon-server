@@ -63,3 +63,28 @@ func TestParseLayout(t *testing.T) {
 		}
 	}
 }
+
+// The channel message statements: the four whose plan is stable under every layout are generic-safe; the scoped,
+// since and scope-only ones are planned with their values; today's two statements stay on the legacy pool.
+func TestCmiPlanClasses(t *testing.T) {
+	for name, want := range map[string]planpolicy.Class{
+		"ListChannelMessagesByIATAs":          planpolicy.ClassG,
+		"ListChannelMessagesPlain":            planpolicy.ClassG,
+		"ListAllChannelMessagesByIATAs":       planpolicy.ClassG,
+		"ListAllChannelMessagesPlain":         planpolicy.ClassG,
+		"ListChannelMessagesByIATAsScoped":    planpolicy.ClassC,
+		"ListChannelMessagesPlainScoped":      planpolicy.ClassC,
+		"ListChannelMessagesSinceWalk":        planpolicy.ClassC,
+		"ListAllChannelMessagesByIATAsScoped": planpolicy.ClassC,
+		"ListAllChannelMessagesByIATAsSince":  planpolicy.ClassC,
+		"ListAllChannelMessagesPlainScoped":   planpolicy.ClassC,
+		"ListAllChannelMessagesSince":         planpolicy.ClassC,
+		"GetTransportScopeByName":             planpolicy.ClassC,
+		"ListChannelMessages":                 planpolicy.ClassLegacy,
+		"ListAllChannelMessages":              planpolicy.ClassLegacy,
+	} {
+		if got := planpolicy.ClassOf(name); got != want {
+			t.Errorf("ClassOf(%s) = %v, want %v", name, got, want)
+		}
+	}
+}

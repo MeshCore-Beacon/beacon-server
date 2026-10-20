@@ -1,0 +1,21 @@
+[
+ "Sort",
+ "  Limit [InitPlan]",
+ "    Group",
+ "      Sort",
+ "        Nested Loop",
+ "          Function Scan",
+ "          Limit",
+ "            Sort",
+ "              Bitmap Heap Scan on channel_message_iatas i",
+ "                Bitmap Index Scan using idx_cmi_site",
+ "  Nested Loop (Left)",
+ "    Nested Loop",
+ "      Nested Loop",
+ "        Nested Loop",
+ "          CTE Scan",
+ "          Index Scan on channel_messages cm using channel_messages_pkey scan=Forward",
+ "        Index Scan on channels c using channels_pkey scan=Forward",
+ "      Index Scan on packets p using packets_pkey scan=Forward",
+ "    Index Scan on transport_scopes ts using transport_scopes_pkey scan=Forward"
+]

@@ -1,0 +1,6 @@
+[
+ "ModifyTable on channel_message_iatas",
+ "  Nested Loop",
+ "    Index Scan on channel_messages cm using channel_messages_packet_hash_key scan=Forward",
+ "    Index Scan on packets p using packets_pkey scan=Forward"
+]

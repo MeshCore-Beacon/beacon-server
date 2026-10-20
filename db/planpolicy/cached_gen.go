@@ -7,11 +7,15 @@ package planpolicy
 
 // Cached lists class G statements: those admitted to the generic-plan class.
 var Cached = map[string]bool{
-	"GetNodeByID":               true,
-	"GetObserverTelemetrySince": true,
-	"ListKnownRoutesByIATA":     true,
-	"ListKnownRoutesGlobal":     true,
-	"ListObserverAdverts":       true,
-	"ListPacketsByTypes":        true,
-	"ListPacketsPage":           true,
+	"GetNodeByID":                   true,
+	"GetObserverTelemetrySince":     true,
+	"ListAllChannelMessagesByIATAs": true,
+	"ListAllChannelMessagesPlain":   true,
+	"ListChannelMessagesByIATAs":    true,
+	"ListChannelMessagesPlain":      true,
+	"ListKnownRoutesByIATA":         true,
+	"ListKnownRoutesGlobal":         true,
+	"ListObserverAdverts":           true,
+	"ListPacketsByTypes":            true,
+	"ListPacketsPage":               true,
 }

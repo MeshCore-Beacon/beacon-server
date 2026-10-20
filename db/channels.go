@@ -9,7 +9,6 @@ import (
 	"errors"
 	"log/slog"
 	"math"
-	"slices"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
@@ -281,12 +280,7 @@ func listChannelMessages(ctx context.Context, q sqlc.Querier, useReadModel bool,
 		}
 		scopeID = &id
 	}
-	sites := make([]string, 0, len(iatas))
-	for _, iata := range iatas {
-		if !slices.Contains(sites, iata) {
-			sites = append(sites, iata)
-		}
-	}
+	sites := dedupeSites(iatas)
 	cursorID := cursor
 	if cursor == 0 {
 		cursorID = math.MaxInt64
@@ -337,6 +331,19 @@ func listChannelMessages(ctx context.Context, q sqlc.Querier, useReadModel bool,
 		nextCursor = &last
 	}
 	return api.Page[api.ChannelMessage]{Items: messages, NextCursor: nextCursor, HasMore: hasMore}, nil
+}
+
+// dedupeSites drops repeated codes in one pass, keeping first-occurrence order; never nil.
+func dedupeSites(iatas []string) []string {
+	sites := make([]string, 0, len(iatas))
+	seen := make(map[string]struct{}, len(iatas))
+	for _, iata := range iatas {
+		if _, dup := seen[iata]; !dup {
+			seen[iata] = struct{}{}
+			sites = append(sites, iata)
+		}
+	}
+	return sites
 }
 
 // messageRow is every list statement's row: the columns of sqlc.ListChannelMessagesRow.

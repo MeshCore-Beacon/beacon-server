@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -862,5 +863,25 @@ func TestListChannelMessagesDispatch(t *testing.T) {
 	page, err := (&Store{q: m}).ListChannelMessages(context.Background(), &ch, time.Time{}, 50, nil, "", 0)
 	if err != nil || len(page.Items) != 50 || !page.HasMore || page.NextCursor == nil || *page.NextCursor != 51 {
 		t.Fatalf("page of 51 = %d items, hasMore %v, next %v, %v", len(page.Items), page.HasMore, page.NextCursor, err)
+	}
+}
+
+// Site lists come from the request with no cap: the dedupe is one pass, keeps first-occurrence order and is never nil.
+func TestDedupeSitesLargeList(t *testing.T) {
+	in := make([]string, 200_000)
+	for i := range in {
+		in[i] = []string{"YUL", "YOW", "YYZ"}[i%3]
+	}
+	in[199_999] = "ZZZ"
+	start := time.Now()
+	got := dedupeSites(in)
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("200K codes took %s", d)
+	}
+	if strings.Join(got, ",") != "YUL,YOW,YYZ,ZZZ" {
+		t.Fatalf("dedupe = %v", got)
+	}
+	if empty := dedupeSites(nil); empty == nil || len(empty) != 0 {
+		t.Fatalf("nil input gave %#v", empty)
 	}
 }

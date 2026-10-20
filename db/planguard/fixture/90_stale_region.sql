@@ -32,3 +32,13 @@ FROM planguard_src.new0 n JOIN planguard_src.new_paths p ON p.rid = n.rid
 ORDER BY decode(md5('new-route' || n.rid), 'hex');
 SELECT setval('known_routes_new_id_seq', (SELECT max(id) FROM known_routes));
 DROP TABLE planguard_src.new0, planguard_src.new_paths;
+
+-- The stale site for channel messages: NEW heard every 20th of the newest 4,000 messages after the last ANALYZE,
+-- so channel_message_iatas' statistics still estimate it at one row.
+ALTER TABLE channel_message_iatas SET (autovacuum_enabled = false);
+INSERT INTO channel_message_iatas (message_id, iata, channel_id, scope_id)
+SELECT cm.id, 'NEW', cm.channel_id, p.scope_id
+FROM (SELECT id, channel_id, packet_hash, row_number() OVER (ORDER BY id DESC) rn FROM channel_messages ORDER BY id DESC LIMIT 4000) cm
+JOIN packets p ON p.packet_hash = cm.packet_hash
+WHERE cm.rn % 20 = 0
+ORDER BY cm.id;

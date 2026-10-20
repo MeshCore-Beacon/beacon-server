@@ -1,0 +1,116 @@
+# Copyright 2026 Beacon Contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Channel message pages: two read-only servers on one database, walked page by page with the cursor a client
+# follows and compared as whole JSON. Old is the build before the read model; new is this build, which trusts the
+# overlay's table on a read-only server (its state is complete and verified, and the newest messages check clean).
+# Both run with search_path "t_s4a, public" on the overlay overlay/channel_message_iatas.sql:
+#
+#   planguard storediff --old http://127.0.0.1:8481 --new http://127.0.0.1:8482 \
+#     --cases db/planguard/storediff/channel_message_iatas.yaml --walk 1,2,3,web
+#
+# No class is allowed: every page must be identical. Channels are the most recently heard one and the 50th
+# (/api/v1/channels); sites are fixed codes, one with no message (ZZZ). Scope shapes are compared statement by
+# statement in diff/channel_message_iatas.yaml, where scopes are picked by role. since is epoch milliseconds,
+# 10.2 hours before the copy's snapshot time T0 = 2026-10-18 17:00 UTC.
+cases:
+  - id: ch_first
+    path: /api/v1/channels/{ch}/messages
+    vars:
+      ch: {path: /api/v1/channels, from: first.id}
+    follow: &cursor
+      - {param: cursor, from: nextCursor}
+  - id: ch_first_yul
+    path: /api/v1/channels/{ch}/messages
+    query: {iatas: "YUL"}
+    vars:
+      ch: {path: /api/v1/channels, from: first.id}
+    follow: *cursor
+  - id: ch_first_sea
+    path: /api/v1/channels/{ch}/messages
+    query: {iatas: "SEA"}
+    vars:
+      ch: {path: /api/v1/channels, from: first.id}
+    follow: *cursor
+  - id: ch_first_pnw
+    path: /api/v1/channels/{ch}/messages
+    query: {iatas: "SEA,PDX,YVR,BLI"}
+    vars:
+      ch: {path: /api/v1/channels, from: first.id}
+    follow: *cursor
+  - id: ch_first_gdw_yeg
+    path: /api/v1/channels/{ch}/messages
+    query: {iatas: "GDW,YEG"}
+    vars:
+      ch: {path: /api/v1/channels, from: first.id}
+    follow: *cursor
+  - id: ch_first_zzz
+    path: /api/v1/channels/{ch}/messages
+    query: {iatas: "ZZZ"}
+    vars:
+      ch: {path: /api/v1/channels, from: first.id}
+    follow: *cursor
+  - id: ch_last
+    path: /api/v1/channels/{ch}/messages
+    vars:
+      ch: {path: /api/v1/channels, from: last.id}
+    follow: *cursor
+  - id: ch_last_yul
+    path: /api/v1/channels/{ch}/messages
+    query: {iatas: "YUL"}
+    vars:
+      ch: {path: /api/v1/channels, from: last.id}
+    follow: *cursor
+  - id: ch_last_sea
+    path: /api/v1/channels/{ch}/messages
+    query: {iatas: "SEA"}
+    vars:
+      ch: {path: /api/v1/channels, from: last.id}
+    follow: *cursor
+  - id: ch_last_pnw
+    path: /api/v1/channels/{ch}/messages
+    query: {iatas: "SEA,PDX,YVR,BLI"}
+    vars:
+      ch: {path: /api/v1/channels, from: last.id}
+    follow: *cursor
+  - id: ch_last_gdw_yeg
+    path: /api/v1/channels/{ch}/messages
+    query: {iatas: "GDW,YEG"}
+    vars:
+      ch: {path: /api/v1/channels, from: last.id}
+    follow: *cursor
+  - id: ch_last_zzz
+    path: /api/v1/channels/{ch}/messages
+    query: {iatas: "ZZZ"}
+    vars:
+      ch: {path: /api/v1/channels, from: last.id}
+    follow: *cursor
+  - id: messages_all
+    path: /api/v1/messages
+    follow: *cursor
+  - id: messages_yul
+    path: /api/v1/messages
+    query: {iatas: "YUL"}
+    follow: *cursor
+  - id: messages_rno
+    path: /api/v1/messages
+    query: {iatas: "RNO"}
+    follow: *cursor
+  - id: messages_sea
+    path: /api/v1/messages
+    query: {iatas: "SEA"}
+    follow: *cursor
+  - id: messages_zzz
+    path: /api/v1/messages
+    query: {iatas: "ZZZ"}
+    follow: *cursor
+  - id: messages_since
+    path: /api/v1/messages
+    query: {since: "1792306080000"}
+    web_limit: 200
+    follow: *cursor
+  - id: messages_since_pnw
+    path: /api/v1/messages
+    query: {since: "1792306080000", iatas: "SEA,PDX,YVR,BLI"}
+    web_limit: 200
+    follow: *cursor
