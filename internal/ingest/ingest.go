@@ -136,6 +136,10 @@ type DB interface {
 	// InsertChannelMessage stores a decrypted group text message. Returns the inserted message, nil for a duplicate, and an error.
 	InsertChannelMessage(ctx context.Context, m InsertChannelMessageParams) (*InsertedChannelMessage, error)
 
+	// AddChannelMessageIATA records iata as a site of the packet's message; a no-op when the packet has none.
+	// found says whether the packet has a committed message (its site is then recorded).
+	AddChannelMessageIATA(ctx context.Context, packetHash []byte, iata string) (found bool, err error)
+
 	// UpdateObserverStatus updates the observer row from a /status message. Returns the OberserID
 	// and any error.
 	UpdateObserverStatus(ctx context.Context, p UpdateObserverStatusParams) (uuid.UUID, error)
@@ -158,6 +162,7 @@ type DB interface {
 
 	// ResolvePathHashes returns a list of node UUIDs for the given path hash prefixes and IATA.
 	ResolvePathHashes(ctx context.Context, iata string, hashes [][]byte) (map[string][]api.ResolvedPathEntry, error)
+	ResolveTracePathHashes(ctx context.Context, iata string, hashes [][]byte) (map[string][]api.ResolvedPathEntry, error)
 
 	// ResolveEndpointHashes matches one-byte logical endpoints, including companions.
 	ResolveEndpointHashes(ctx context.Context, iata string, hashes [][]byte) (map[string][]api.ResolvedPathEntry, error)

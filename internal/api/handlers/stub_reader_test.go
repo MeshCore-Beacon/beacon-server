@@ -31,19 +31,19 @@ type stubReader struct {
 	listChannelMessages          func(ctx context.Context, channelID *int32, since time.Time, limit int32, iatas []string, scope string, cursor int64) (api.Page[api.ChannelMessage], error)
 	listChannelMessagesByHash    func(ctx context.Context, hash []byte, since time.Time, limit int32, iatas []string, scope string, cursor int64) (api.Page[api.ChannelMessage], error)
 	listMessagesAfterID          func(ctx context.Context, afterID int64, iatas []string, scope string, limit int32) ([]api.ChannelMessage, error)
-	listObservers                func(ctx context.Context, iatas []string, observerType, broker, status, name, scope string, cursor int64, limit int32) (api.Page[api.ObserverSummary], error)
+	listObservers                func(ctx context.Context, iatas []string, observerType, broker, status, name, scope string, cursor int64, pageCursor *api.ObserverCursor, limit int32) (api.ObserverPage, error)
 	getObserver                  func(ctx context.Context, observerID uuid.UUID) (*api.Observer, error)
 	getObserverTelemetry         func(ctx context.Context, observerID uuid.UUID, since, until time.Time, afterID int64) (*api.ObserverTelemetry, error)
 	getObserverTelemetryBucketed func(ctx context.Context, observerID uuid.UUID, since, until time.Time, bucketHours int32) ([]api.ObserverTelemetryPoint, error)
 	getObserverActivity          func(ctx context.Context, observerID uuid.UUID, window, interval time.Duration, until time.Time) (*api.ObserverActivity, error)
 	getObserverScopes            func(ctx context.Context, observerID uuid.UUID) ([]string, error)
 	listObserverAdverts          func(ctx context.Context, observerID uuid.UUID, cursor int64, limit int32) (api.Page[api.AdvertObservation], error)
-	listNodes                    func(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, limit int32, includeNeighbors bool) (api.Page[api.NodeSummary], error)
+	listNodes                    func(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (api.NodePage, error)
 	getNode                      func(ctx context.Context, nodeID uuid.UUID) (*api.Node, error)
 	getNodeNeighbors             func(ctx context.Context, nodeID uuid.UUID) ([]api.NodeNeighbor, error)
 	listNodeObservations         func(ctx context.Context, nodeID uuid.UUID, cursor int64, limit int32) (api.Page[api.PacketObservationSummary], error)
 	searchPacketsByHashPrefix    func(ctx context.Context, lo, hi []byte, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error)
-	listPackets                  func(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error)
+	listPackets                  func(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, pageCursor *api.PacketCursor, limit int32) (api.PacketPage, error)
 	listPacketsAfterID           func(ctx context.Context, afterObservationID int64, payloadType, routeType int16, iatas []string, scope string, limit int32) ([]api.PacketSummary, error)
 	getPacket                    func(ctx context.Context, packetHash []byte) (*api.Packet, error)
 	getRadioPresets              func(ctx context.Context, preset string, iatas []string) ([]api.RadioPreset, error)
@@ -166,11 +166,11 @@ func (s stubReader) ListMessagesAfterID(ctx context.Context, afterID int64, iata
 	return nil, nil
 }
 
-func (s stubReader) ListObservers(ctx context.Context, iatas []string, observerType, broker, status, name, scope string, cursor int64, limit int32) (api.Page[api.ObserverSummary], error) {
+func (s stubReader) ListObservers(ctx context.Context, iatas []string, observerType, broker, status, name, scope string, cursor int64, pageCursor *api.ObserverCursor, limit int32) (api.ObserverPage, error) {
 	if s.listObservers != nil {
-		return s.listObservers(ctx, iatas, observerType, broker, status, name, scope, cursor, limit)
+		return s.listObservers(ctx, iatas, observerType, broker, status, name, scope, cursor, pageCursor, limit)
 	}
-	return api.Page[api.ObserverSummary]{}, nil
+	return api.ObserverPage{}, nil
 }
 
 func (s stubReader) GetObserver(ctx context.Context, observerID uuid.UUID) (*api.Observer, error) {
@@ -215,11 +215,11 @@ func (s stubReader) ListObserverAdverts(ctx context.Context, observerID uuid.UUI
 	return api.Page[api.AdvertObservation]{}, nil
 }
 
-func (s stubReader) ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, limit int32, includeNeighbors bool) (api.Page[api.NodeSummary], error) {
+func (s stubReader) ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
 	if s.listNodes != nil {
-		return s.listNodes(ctx, nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, cursor, limit, includeNeighbors)
+		return s.listNodes(ctx, nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, cursor, pageCursor, limit, includeNeighbors)
 	}
-	return api.Page[api.NodeSummary]{}, nil
+	return api.NodePage{}, nil
 }
 
 func (s stubReader) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error) {
@@ -243,11 +243,11 @@ func (s stubReader) ListNodeObservations(ctx context.Context, nodeID uuid.UUID, 
 	return api.Page[api.PacketObservationSummary]{}, nil
 }
 
-func (s stubReader) ListPackets(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
+func (s stubReader) ListPackets(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, pageCursor *api.PacketCursor, limit int32) (api.PacketPage, error) {
 	if s.listPackets != nil {
-		return s.listPackets(ctx, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
+		return s.listPackets(ctx, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, pageCursor, limit)
 	}
-	return api.Page[api.PacketSummary]{}, nil
+	return api.PacketPage{}, nil
 }
 
 func (s stubReader) SearchPacketsByHashPrefix(ctx context.Context, lo, hi []byte, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
@@ -409,6 +409,10 @@ func (s stubReader) GetRouteEvidence(ctx context.Context, iata, key string, q ap
 		return s.getRouteEvidence(ctx, iata, key, q)
 	}
 	return nil, nil
+}
+
+func (s stubReader) GetTopologyLinks(_ context.Context, _ []string, _ time.Time, _ time.Time) (*api.TopologyLinks, error) {
+	return &api.TopologyLinks{}, nil
 }
 
 func (s stubReader) ListObserverDirectory(ctx context.Context, q api.ObserverDirectoryQuery) (*api.ObserverDirectory, error) {

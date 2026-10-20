@@ -1,5 +1,6 @@
 -- name: GetRouteEvidenceRoute :one
-SELECT * FROM known_routes
+SELECT id, path_key, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
+FROM known_routes
 WHERE iata = @iata::bpchar AND path_key = @path_key::bytea;
 
 -- name: ListRouteEvidence :many

@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -16,7 +17,9 @@ import (
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
+	"github.com/MeshCore-Beacon/beacon-server/internal/tracequality"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/meshcore-go/meshcore-go"
 )
@@ -83,38 +86,96 @@ func buildLatestObserverPath(pathLengthByte, hashSize, hopCount *int16, pathByte
 	return pathLength, pathBytesHex
 }
 
-func (s *Store) ListPackets(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
+// packetRow is the shared row of the six global packets statements; the other five Row types convert to it.
+type packetRow = sqlc.ListPacketsPageRow
+
+// ListPackets serves the packet list. Region (iatas) requests page by site-local recency (listPacketsByRegion).
+// Every other request is normalised and sent to the one statement for its filter shape. pageCursor wins over
+// cursor wherever a page can return nextPageCursor.
+func (s *Store) ListPackets(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, pageCursor *api.PacketCursor, limit int32) (api.PacketPage, error) {
 	if len(iatas) > 0 {
-		return s.listPacketsByIATAs(ctx, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
+		return s.listPacketsByRegion(ctx, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, pageCursor, limit)
 	}
-	var cursorTS pgtype.Timestamptz
-	if cursor > 0 {
-		cursorTS = pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}
+	f, ok := newPacketFilter(payloadTypes, routeTypes, scopes, since, until, cursor, pageCursor, limit)
+	if !ok {
+		return api.PacketPage{Page: api.Page[api.PacketSummary]{Items: []api.PacketSummary{}}}, nil
 	}
-	var sinceTS pgtype.Timestamptz
-	if !since.IsZero() {
-		sinceTS = pgtype.Timestamptz{Time: since, Valid: true}
-	}
-	var untilTS pgtype.Timestamptz
-	if !until.IsZero() {
-		untilTS = pgtype.Timestamptz{Time: until, Valid: true}
-	}
-	rows, err := s.q.ListPackets(ctx, sqlc.ListPacketsParams{
-		Column1: payloadTypes,
-		Column2: routeTypes,
-		Column3: sinceTS,
-		Column4: untilTS,
-		Column5: cursorTS,
-		Limit:   limit + 1,
-		Column7: scopes,
-	})
+	rows, err := s.listPacketRows(ctx, f)
 	if err != nil {
-		return api.Page[api.PacketSummary]{}, err
+		return api.PacketPage{}, err
 	}
 	hasMore := len(rows) > int(limit)
 	if hasMore {
 		rows = rows[:limit]
 	}
+	page := api.PacketPage{Page: api.Page[api.PacketSummary]{
+		Items:   s.packetSummaries(ctx, rows),
+		HasMore: hasMore,
+	}}
+	if hasMore && len(rows) > 0 {
+		last := rows[len(rows)-1]
+		ms := last.LastHeardAt.Time.UnixMilli()
+		next := api.PacketCursor{At: last.LastHeardAt.Time, Hash: last.PacketHash}.String()
+		page.NextCursor = &ms
+		page.NextPageCursor = &next
+	}
+	return page, nil
+}
+
+// listPacketRows runs the statement for f's filter shape and returns up to f.pageLimit rows in
+// (last_heard_at DESC, packet_hash DESC) order.
+func (s *Store) listPacketRows(ctx context.Context, f packetFilter) ([]packetRow, error) {
+	switch {
+	case f.windowed && len(f.scopes) > 0:
+		rows, err := s.q.ListPacketsWindowScoped(ctx, sqlc.ListPacketsWindowScopedParams{
+			SinceTs: f.since, CursorTs: f.cursorTS, CursorHash: f.cursorHash, UntilTs: f.until,
+			PayloadTypes: f.payloadTypes, RouteTypes: f.routeTypes, PageLimit: f.pageLimit, ScopeNames: f.scopes,
+		})
+		return convertPacketRows(rows, err, func(r sqlc.ListPacketsWindowScopedRow) packetRow { return packetRow(r) })
+	case f.windowed:
+		rows, err := s.q.ListPacketsWindow(ctx, sqlc.ListPacketsWindowParams{
+			SinceTs: f.since, CursorTs: f.cursorTS, CursorHash: f.cursorHash, UntilTs: f.until,
+			PayloadTypes: f.payloadTypes, RouteTypes: f.routeTypes, PageLimit: f.pageLimit,
+		})
+		return convertPacketRows(rows, err, func(r sqlc.ListPacketsWindowRow) packetRow { return packetRow(r) })
+	case len(f.scopes) > 0 && f.typed:
+		rows, err := s.q.ListPacketsByScopesTypes(ctx, sqlc.ListPacketsByScopesTypesParams{
+			CursorTs: f.cursorTS, CursorHash: f.cursorHash, PayloadTypes: f.payloadTypes, RouteTypes: f.routeTypes,
+			PageLimit: f.pageLimit, ScopeNames: f.scopes,
+		})
+		return convertPacketRows(rows, err, func(r sqlc.ListPacketsByScopesTypesRow) packetRow { return packetRow(r) })
+	case len(f.scopes) > 0:
+		rows, err := s.q.ListPacketsByScopes(ctx, sqlc.ListPacketsByScopesParams{
+			CursorTs: f.cursorTS, CursorHash: f.cursorHash, PageLimit: f.pageLimit, ScopeNames: f.scopes,
+		})
+		return convertPacketRows(rows, err, func(r sqlc.ListPacketsByScopesRow) packetRow { return packetRow(r) })
+	case f.typed:
+		rows, err := s.q.ListPacketsByTypes(ctx, sqlc.ListPacketsByTypesParams{
+			PayloadTypes: f.payloadTypes, RouteTypes: f.routeTypes, CursorTs: f.cursorTS, CursorHash: f.cursorHash,
+			PageLimit: f.pageLimit,
+		})
+		return convertPacketRows(rows, err, func(r sqlc.ListPacketsByTypesRow) packetRow { return packetRow(r) })
+	}
+	return s.q.ListPacketsPage(ctx, sqlc.ListPacketsPageParams{
+		CursorTs: f.cursorTS, CursorHash: f.cursorHash, PageLimit: f.pageLimit,
+	})
+}
+
+// convertPacketRows converts one statement's rows to packetRow with conv, a plain Go conversion (the Row types
+// share every field name and type).
+func convertPacketRows[R any](rows []R, err error, conv func(R) packetRow) ([]packetRow, error) {
+	if err != nil {
+		return nil, err
+	}
+	out := make([]packetRow, len(rows))
+	for i, r := range rows {
+		out[i] = conv(r)
+	}
+	return out, nil
+}
+
+// packetSummaries builds the API items for global packet rows and resolves their endpoints.
+func (s *Store) packetSummaries(ctx context.Context, rows []packetRow) []api.PacketSummary {
 	items := make([]api.PacketSummary, 0, len(rows))
 	lookups := make([]endpointLookup, 0, len(rows))
 	for _, v := range rows {
@@ -148,16 +209,7 @@ func (s *Store) ListPackets(ctx context.Context, payloadTypes, routeTypes []int1
 		lookups = append(lookups, lookup)
 	}
 	s.fillLatestEndpoints(ctx, items, lookups)
-	var nextCursor *int64
-	if hasMore && len(items) > 0 {
-		last := items[len(items)-1].LastHeardAt
-		nextCursor = &last
-	}
-	return api.Page[api.PacketSummary]{
-		Items:      items,
-		NextCursor: nextCursor,
-		HasMore:    hasMore,
-	}, nil
+	return items
 }
 
 func (s *Store) listPacketsByIATAs(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
@@ -489,7 +541,15 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 	// compute it once rather than per observation.
 	var traceRawHashes [][]byte
 	if row.PayloadType == int16(meshcore.PayloadTypeTrace) {
-		if trace, err := meshcore.TraceFromBytes(row.RawPayload); err == nil {
+		quality := tracequality.Assess(row.RawPayload, int(row.PayloadVersion), int(row.RouteType), -1)
+		for _, obs := range obsRows {
+			q := tracequality.Assess(row.RawPayload, int(row.PayloadVersion), int(row.RouteType), int(obs.PathLengthByte))
+			for _, reason := range q.Reasons {
+				quality.Add(reason)
+			}
+		}
+		p.TraceQuality = &quality
+		if trace, err := meshcore.TraceFromBytes(row.RawPayload); err == nil && quality.Status == "supported" {
 			hashSize := int(trace.PathHashSize())
 			for i := 0; i+hashSize <= len(trace.PathHashes); i += hashSize {
 				traceRawHashes = append(traceRawHashes, trace.PathHashes[i:i+hashSize])
@@ -525,8 +585,11 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 		obs.PropagationTimeMs = &prop
 		resolvedPath := []api.ResolvedHop{}
 		if row.PayloadType == int16(meshcore.PayloadTypeTrace) {
+			rawPath := hex.EncodeToString(v.PathBytes)
+			obs.WirePathBytes = &rawPath
+			obs.TraceQuality = p.TraceQuality
 			if len(traceRawHashes) > 0 {
-				resolved, err := s.ResolvePathHashes(ctx, v.Iata, traceRawHashes)
+				resolved, err := s.ResolveTracePathHashes(ctx, v.Iata, traceRawHashes)
 				if err != nil {
 					slog.Error(fmt.Sprintf("store: path resolution failed for observation %d", v.ID), "component", "db", "error", err)
 				} else {
@@ -574,7 +637,7 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 		}
 		p.Observations = append(p.Observations, obs)
 	}
-	if row.PayloadType == 9 && len(obsRows) > 0 {
+	if row.PayloadType == 9 && len(obsRows) > 0 && p.TraceQuality.Status == "supported" {
 		iatas := make([]string, 0, len(obsRows))
 		seen := make(map[string]struct{})
 		for _, v := range obsRows {
@@ -586,6 +649,11 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 		var parsed tracePayload
 		if err := json.Unmarshal(row.ParsedPayload, &parsed); err == nil {
 			p.ResolvedRoute = s.resolveTraceRoute(ctx, &parsed, iatas)
+			for _, hop := range p.ResolvedRoute {
+				if hop.Confidence == "ambiguous" {
+					p.TraceQuality.Add("ambiguous_prefix")
+				}
+			}
 		}
 	}
 	return p, nil
@@ -595,8 +663,9 @@ func (s *Store) UpsertIATA(ctx context.Context, iata string) error {
 	return s.q.UpsertIATA(ctx, iata)
 }
 
-func (s *Store) InsertObservation(ctx context.Context, o ingest.InsertObservationParams) (bool, int64, error) {
-	params := sqlc.InsertObservationParams{
+// observationParams maps an observation to the statement's parameters.
+func observationParams(o ingest.InsertObservationParams) sqlc.InsertObservationParams {
+	return sqlc.InsertObservationParams{
 		PacketHash:        o.PacketHash,
 		ObserverID:        o.ObserverID,
 		Iata:              o.IATA,
@@ -616,11 +685,34 @@ func (s *Store) InsertObservation(ctx context.Context, o ingest.InsertObservatio
 		PayloadType:       &o.PayloadType,
 		AirtimeMs:         o.AirtimeMs,
 	}
+}
+
+func (s *Store) InsertObservation(ctx context.Context, o ingest.InsertObservationParams) (bool, int64, error) {
+	params := observationParams(o)
 	row, err := s.q.InsertObservation(ctx, params)
+	if err == nil {
+		return row.Inserted, row.ObservationCount, nil
+	}
+	// Whatever failed, region pages stop reading packet_sites before anything else is written, until a reconcile
+	// that begins after this has repaired it.
+	s.readModels.invalidatePacketSites("an observation insert with its site row failed")
+	// A cancelled request and a packet that is gone (23503, which today's statement hits too) are returned as
+	// they are. Any other failure stores the observation without its site row and leaves the row to the
+	// reconcile.
+	var pgErr *pgconn.PgError
+	if ctx.Err() != nil || (errors.As(err, &pgErr) && pgErr.Code == "23503") {
+		return false, 0, err
+	}
+	slog.Warn("observation site row failed; storing the observation without it", "component", "db",
+		"packet_hash", hex.EncodeToString(o.PacketHash), "iata", o.IATA, "error", err)
+	fallback, err := s.q.InsertObservationUnsited(ctx, sqlc.InsertObservationUnsitedParams(params))
+	// Again once the fallback has returned: a reconcile that took its snapshot before this commit must not be the
+	// one that restores trust.
+	s.readModels.invalidatePacketSites("an observation was stored without its site row")
 	if err != nil {
 		return false, 0, err
 	}
-	return row.Inserted, row.ObservationCount, nil
+	return fallback.Inserted, fallback.ObservationCount, nil
 }
 
 func (s *Store) ListNodeObservations(ctx context.Context, nodeID uuid.UUID, cursor int64, limit int32) (api.Page[api.PacketObservationSummary], error) {

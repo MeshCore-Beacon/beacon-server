@@ -9,11 +9,13 @@ import (
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api/handlers"
 	"github.com/MeshCore-Beacon/beacon-server/internal/config"
+	"github.com/MeshCore-Beacon/beacon-server/internal/guards"
 )
 
 // Options names the startup settings used by the router. Adding an optional
 // route does not change New's signature or require unrelated callers to change.
 type Options struct {
+	ScopeCatalogues      handlers.ScopeCatalogueSource
 	MaxConnsPerIP        int
 	MaxConnectsPerMinute int
 	WSAllowedOrigins     []string
@@ -30,4 +32,8 @@ type Options struct {
 	// "/accounts". Each feature owns its dependencies, methods and handlers.
 	// The router applies authentication to every path and method in this group.
 	AdminRoutes map[string]http.Handler
+	// Guards guards the public API group; nil runs it unguarded and reports no guards.
+	Guards *guards.Guard
+	// APIPlanLayout is reported in the admin config's guards view.
+	APIPlanLayout string
 }

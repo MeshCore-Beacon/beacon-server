@@ -34,7 +34,7 @@ SELECT (SELECT count(*) FROM po),
 func TestStatsSeriesPostgres(t *testing.T) {
 	ctx, pool := schemaPool(t)
 	h0 := rollupFixture(t, ctx, pool)
-	store := New(pool, 0, 0)
+	store := New(pool, pool, 0, 0)
 	r, ok, err := store.BeginRollup(ctx)
 	if err != nil || !ok {
 		t.Fatalf("BeginRollup: ok=%v err=%v", ok, err)

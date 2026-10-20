@@ -47,12 +47,14 @@ func PacketsRouter(reader api.Reader) http.Handler {
 //	@Param		region			query		string	false	"Filter by region slug, expands to member IATAs"
 //	@Param		since			query		int		false	"Filter by first_heard_at >= since (epoch ms)"
 //	@Param		until			query		int		false	"Filter by first_heard_at <= until (epoch ms)"
-//	@Param		cursor			query		int		false	"epoch ms of last item for pagination; last_heard_at, or site-local heard_at when iatas is set"
+//	@Param		cursor			query		int		false	"epoch ms of the last item: its last_heard_at, or its site-local heard_at when iatas, iata, region or regionId is set (with hashPrefix always last_heard_at). Prefer pageCursor where nextPageCursor is returned"
+//	@Param		pageCursor		query		string	false	"Opaque nextPageCursor from a previous response; keeps millisecond ties and wins over cursor when both are sent. A region page served without nextPageCursor pages by cursor: there cursor wins, and a pageCursor sent alone pages by its millisecond. Ignored with hashPrefix, which pages by cursor"
 //	@Param		limit			query		int		false	"Max results (default 50); must be positive, values above 200 are clamped" minimum(1) maximum(200)
 //	@Param		hashPrefix		query		string	false	"Match packets whose hash starts with this hex prefix (4-16 chars). Ordering and cursor use global last_heard_at even when iatas is set"
-//	@Success	200				{object}	object
+//	@Success	200				{object}	api.PacketPage
 //	@Failure	400				{object}	handlers.APIError
 //	@Failure	500				{object}	handlers.APIError
+//	@Failure	503				{object}	handlers.APIError	"Not available yet, or the server is busy: retry after Retry-After seconds"
 //	@Router		/packets [get]
 func listPackets(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -97,6 +99,15 @@ func listPackets(reader api.Reader) http.HandlerFunc {
 			}
 			cursor = c
 		}
+		var pageCursor *api.PacketCursor
+		if raw := r.URL.Query().Get("pageCursor"); raw != "" {
+			pc, err := api.ParsePacketCursor(raw)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "invalid pageCursor")
+				return
+			}
+			pageCursor = pc
+		}
 		limit, err := parseLimit(r, 50)
 		if err != nil {
 			respondError(w, http.StatusBadRequest, err.Error())
@@ -112,19 +123,23 @@ func listPackets(reader api.Reader) http.HandlerFunc {
 			iatas = append(iatas, regionIATAs...)
 		}
 		scopes := parseCSVOrSingle(r, "scopes", "scope")
-		var packets api.Page[api.PacketSummary]
+		var packets api.PacketPage
 		if p := r.URL.Query().Get("hashPrefix"); p != "" {
 			lo, hi, err := hashPrefixRange(p)
 			if err != nil {
 				respondError(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			packets, err = reader.SearchPacketsByHashPrefix(r.Context(), lo, hi, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
+			var page api.Page[api.PacketSummary]
+			page, err = reader.SearchPacketsByHashPrefix(r.Context(), lo, hi, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
+			packets = api.PacketPage{Page: page}
 		} else {
-			packets, err = reader.ListPackets(r.Context(), payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
+			packets, err = reader.ListPackets(r.Context(), payloadTypes, routeTypes, iatas, scopes, since, until, cursor, pageCursor, limit)
 		}
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			if !respondUnavailableFor(w, err, modelPacketSites) {
+				respondError(w, http.StatusInternalServerError, "internal server error")
+			}
 			return
 		}
 		respond(w, http.StatusOK, packets)

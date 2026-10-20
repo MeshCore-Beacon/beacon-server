@@ -1,0 +1,7 @@
+# Copyright 2026 Beacon Contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+statements:
+  W: {file: sql/harness/WriteCTE.sql, plan: harness}
+entries:
+  - {id: a, stmt: W}

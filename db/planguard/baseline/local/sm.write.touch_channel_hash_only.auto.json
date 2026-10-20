@@ -1,0 +1,4 @@
+[
+ "ModifyTable on channels",
+ "  Index Scan on channels using idx_channels_hash_no_key scan=Forward"
+]

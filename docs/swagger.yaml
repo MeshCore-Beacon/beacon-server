@@ -50,12 +50,34 @@ definitions:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminAuthConfig'
       cors:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminCORSConfig'
+      guards:
+        allOf:
+        - $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminGuardsConfig'
+        description: absent when database guards are not configured
       ingest:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminIngestConfig'
       mobile:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminMobileConfig'
       web:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdminWebConfig'
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.AdminGuardsConfig:
+    properties:
+      api_plan_layout:
+        description: custom_all, split or single
+        type: string
+      budget:
+        description: always "shadow"
+        type: string
+      enforce:
+        description: families currently enforced; the configuration file is the boot
+          default
+        items:
+          type: string
+        type: array
+      observe_only:
+        description: the single plan layout makes every family observe
+        type: boolean
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.AdminIngestConfig:
     properties:
@@ -268,6 +290,34 @@ definitions:
         type: array
       totalHops:
         type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.DBStatement:
+    properties:
+      calls:
+        type: integer
+      exec_ms:
+        type: number
+      name:
+        description: sqlc statement name; "(unnamed)" aggregates the rest
+        type: string
+      plan_ms:
+        description: 0 unless pg_stat_statements.track_planning is on
+        type: number
+      rows:
+        type: integer
+      shared_hit:
+        type: integer
+      shared_read:
+        type: integer
+      wal_bytes:
+        type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.DBStatementsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.DBStatement'
+        type: array
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.IATA:
     properties:
@@ -538,6 +588,19 @@ definitions:
         type: string
       snr:
         type: number
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.NodePage:
+    properties:
+      hasMore:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeSummary'
+        type: array
+      nextCursor:
+        type: integer
+      nextPageCursor:
+        type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.NodeSummary:
     properties:
@@ -877,6 +940,19 @@ definitions:
         description: '"online" or "offline" derived from last_status_at'
         type: string
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverPage:
+    properties:
+      hasMore:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverSummary'
+        type: array
+      nextCursor:
+        type: integer
+      nextPageCursor:
+        type: string
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverSummary:
     properties:
       displayName:
@@ -978,6 +1054,8 @@ definitions:
       scope:
         description: matched transport scope name e.g. "#bc"
         type: string
+      traceQuality:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality'
       transportCodes:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PacketTransportCodes'
     type: object
@@ -1077,6 +1155,11 @@ definitions:
         type: number
       sourceBroker:
         type: string
+      traceQuality:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality'
+      wirePathBytes:
+        description: Exact on-air TRACE SNR bytes, before the display path substitution.
+        type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.PacketObservationSummary:
     properties:
@@ -1101,6 +1184,19 @@ definitions:
         type: integer
       snr:
         type: number
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.PacketPage:
+    properties:
+      hasMore:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PacketSummary'
+        type: array
+      nextCursor:
+        type: integer
+      nextPageCursor:
+        type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.PacketPathLength:
     properties:
@@ -1169,28 +1265,6 @@ definitions:
       items:
         items:
           $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AdvertObservation'
-        type: array
-      nextCursor:
-        type: integer
-    type: object
-  github_com_MeshCore-Beacon_beacon-server_internal_api.Page-github_com_MeshCore-Beacon_beacon-server_internal_api_NodeSummary:
-    properties:
-      hasMore:
-        type: boolean
-      items:
-        items:
-          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeSummary'
-        type: array
-      nextCursor:
-        type: integer
-    type: object
-  github_com_MeshCore-Beacon_beacon-server_internal_api.Page-github_com_MeshCore-Beacon_beacon-server_internal_api_ObserverSummary:
-    properties:
-      hasMore:
-        type: boolean
-      items:
-        items:
-          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverSummary'
         type: array
       nextCursor:
         type: integer
@@ -1279,6 +1353,59 @@ definitions:
       payloadType:
         type: integer
       payloadTypeName:
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.PlanguardReport:
+    properties:
+      clean:
+        description: no FALSE_POSITIVE, MISSED or ERROR
+        type: boolean
+      counts:
+        additionalProperties:
+          type: integer
+        description: verdict → runs
+        type: object
+      duration_ms:
+        type: number
+      failures:
+        description: never null
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PlanguardRun'
+        type: array
+      runs:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PlanguardRun'
+        type: array
+      started_at:
+        type: string
+      tier:
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.PlanguardRun:
+    properties:
+      drivers:
+        description: relation:node:index of each driving scan
+        items:
+          type: string
+        type: array
+      entry:
+        type: string
+      failures:
+        description: the plan rules the run broke
+        items:
+          type: string
+        type: array
+      mode:
+        description: custom or generic
+        type: string
+      skip:
+        description: why the run was not made
+        type: string
+      stmt:
+        type: string
+      verdict:
+        description: ok, DETECTED, MISSED, FALSE_POSITIVE, RETIRED_INDEX, KNOWN_ISSUE,
+          SKIP or ERROR
         type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.RadioPreset:
@@ -1698,6 +1825,21 @@ definitions:
       senderName:
         type: string
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.TopologyLinks:
+    properties:
+      capped:
+        type: boolean
+      links:
+        items:
+          items:
+            type: string
+          type: array
+        type: array
+      since:
+        type: integer
+      until:
+        type: integer
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.TraceDetail:
     properties:
       packets:
@@ -1720,6 +1862,8 @@ definitions:
       packetHash:
         description: hex-encoded packet hash
         type: string
+      quality:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality'
       rawPath:
         description: hops as received in the packet
         items:
@@ -1759,6 +1903,8 @@ definitions:
         items:
           type: string
         type: array
+      quality:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality'
       snrValues:
         description: SNR per hop from the most complete observation
         items:
@@ -1784,8 +1930,8 @@ definitions:
     properties:
       cors:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateAdminCORSRequest'
-    required:
-    - cors
+      guards:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateAdminGuardsRequest'
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateAdminConfigResponse:
     properties:
@@ -1795,6 +1941,61 @@ definitions:
         type: boolean
       requires_restart:
         type: boolean
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateAdminGuardsRequest:
+    properties:
+      enforce:
+        items:
+          type: string
+        type: array
+    required:
+    - enforce
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.CatalogueScope:
+    properties:
+      default:
+        type: integer
+      monitored:
+        type: boolean
+      name:
+        type: string
+      repeaters:
+        type: integer
+      wardriving:
+        type: boolean
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.PublicScopeCatalogue:
+    properties:
+      checkedAt:
+        type: integer
+      freshUntil:
+        type: integer
+      generatedAt:
+        type: integer
+      iata:
+        type: string
+      lastError:
+        type: string
+      repeaters:
+        type: integer
+      scoped:
+        type: integer
+      scopes:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.CatalogueScope'
+        type: array
+      url:
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality:
+    properties:
+      reasons:
+        items:
+          type: string
+        type: array
+      status:
+        description: supported, suspect, or ambiguous; supported is not authenticated
+        type: string
     type: object
   internal_api_handlers.APIError:
     properties:
@@ -1819,13 +2020,14 @@ info:
     url: https://github.com/MeshCore-Beacon/beacon-server
   description: |-
     MeshCore network observation backend. Ingests LoRa packets from MQTT brokers, stores in PostgreSQL, and streams live events via WebSocket.
-    REST requests share a configurable per-client rate limit (default 300/minute and a 300-request one-second burst cap). Exceeded limits return HTTP 429 with error.code=rate_limited and a Retry-After header in seconds. CORS preflights and WebSocket upgrades do not consume this API budget.
+    REST requests share a configurable per-client rate limit (default 600/minute and a 600-request one-second burst cap). Exceeded limits return HTTP 429 with error.code=rate_limited and a Retry-After header in seconds. CORS preflights and WebSocket upgrades do not consume this API budget.
     WebSocket upgrade attempts at /ws have a configurable per-client limit (default 10/minute, including failed handshakes). Rate exhaustion returns HTTP 429 with Retry-After before upgrade. An accepted socket exceeding the concurrent cap closes with code 1013 before hello; established connections remain open.
+    Database cost guards: a guarded family returns 429 (rate_limited, Retry-After 1) above 4 concurrent database requests per client, or 503 with Retry-After (deadline_exceeded, 5 s; service_unavailable, 2 s). Families observe by default and refuse nothing until an operator enforces them.
   license:
     name: AGPL-3-or-later
   termsOfService: https://github.com/MeshCore-Beacon/beacon-server
   title: MeshCore Beacon API
-  version: 2.0.7
+  version: 2.1.0
 paths:
   /admin/accounts:
     get:
@@ -2101,9 +2303,11 @@ paths:
       - Admin
   /admin/config:
     get:
-      description: Returns current CORS options, auth configuration status and configured
-        broker count. Credential fields and other configuration are excluded. Runtime
-        origin updates are lost on restart.
+      description: Returns current CORS options, auth configuration status, configured
+        broker count and, when database guards are configured, their state. Credential
+        fields and other configuration are excluded. Runtime origin updates are lost
+        on restart. PUT also replaces guards.enforce at runtime; the configuration
+        file is the boot default.
       produces:
       - application/json
       responses:
@@ -2131,14 +2335,17 @@ paths:
     put:
       consumes:
       - application/json
-      description: Replaces only cors.allowed_origins immediately. Updates are serialized;
+      description: Replaces cors.allowed_origins, guards.enforce or both immediately;
+        at least one is required. Both are validated before either is applied. An
+        empty guards.enforce list makes every family observe. Updates are serialized;
         concurrent valid updates are applied one at a time. Already-running requests
         may finish with the previous policy. Nothing is persisted; restart reloads
         saved configuration.
       parameters:
-      - description: 1-32 ASCII HTTP(S) origins, at most 512 bytes each; one hostname
-          wildcard is supported, or a sole *. Empty/null lists and unsupported fields
-          are rejected. Body at most 16 KiB.
+      - description: 'cors.allowed_origins: 1-32 ASCII HTTP(S) origins, at most 512
+          bytes each; one hostname wildcard is supported, or a sole *. Empty/null
+          lists and unsupported fields are rejected. guards.enforce: guard family
+          names, possibly empty. Body at most 16 KiB.'
         in: body
         name: config
         required: true
@@ -2183,7 +2390,98 @@ paths:
             type: object
       security:
       - AdminKey: []
-      summary: Update runtime CORS origins
+      summary: Update runtime CORS origins and enforced guard families
+      tags:
+      - Admin
+  /admin/db/planguard:
+    get:
+      description: Plans every corpus statement in custom and generic mode against
+        this database, read-only and without executing it (plain EXPLAIN, 5 s per
+        plan, 1 s lock timeout), and checks each plan against the corpus. Off unless
+        planguard.daily_check is set (404 "planguard daily check is disabled"); when
+        on, the check runs about an hour after boot and then daily, and until its
+        first run this returns 404. fresh=true runs it now, shared with any run in
+        progress and cancelled at server shutdown; within 5 minutes of the last run's
+        end it starts nothing and returns the last successful report (started_at gives
+        its age), or 500 when no run has succeeded yet. A read-only server cannot
+        enable the check (configuration refuses planguard.daily_check with server.read_only),
+        so there this returns 404 "planguard daily check is disabled".
+      parameters:
+      - description: Run the check now instead of returning the last report
+        in: query
+        name: fresh
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PlanguardReport'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - AdminKey: []
+      summary: Last daily plan regression check
+      tags:
+      - Admin
+  /admin/db/statements:
+    get:
+      description: Sums pg_stat_statements for this database by sqlc statement name,
+        highest total execution time first. Statements without a name are summed as
+        "(unnamed)". Times are milliseconds rounded to microseconds; plan_ms stays
+        0 unless pg_stat_statements.track_planning is on. Counters run from the last
+        pg_stat_statements reset.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.DBStatementsResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - AdminKey: []
+      summary: Statement statistics by sqlc name
       tags:
       - Admin
   /brokers:
@@ -2343,6 +2641,11 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'Not available yet, or the server is busy: retry after Retry-After
+            seconds'
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List messages for a channel
       tags:
       - Channels
@@ -2491,6 +2794,11 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'Not available yet, or the server is busy: retry after Retry-After
+            seconds'
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List channel messages
       tags:
       - Messages
@@ -2605,6 +2913,11 @@ paths:
         in: query
         name: cursor
         type: integer
+      - description: Opaque nextPageCursor from a previous response; keeps millisecond
+          ties. Wins over cursor when both are sent
+        in: query
+        name: pageCursor
+        type: string
       - description: Max results (default 50); must be positive, values above 200
           are clamped
         in: query
@@ -2618,7 +2931,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.Page-github_com_MeshCore-Beacon_beacon-server_internal_api_NodeSummary'
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodePage'
         "400":
           description: Bad Request
           schema:
@@ -2764,10 +3077,15 @@ paths:
         in: query
         name: scope
         type: string
-      - description: last_seen epoch ms of last item for pagination
+      - description: last_seen epoch ms of the last item
         in: query
         name: cursor
         type: integer
+      - description: Opaque nextPageCursor from a previous response; keeps millisecond
+          ties. Wins over cursor when both are sent
+        in: query
+        name: pageCursor
+        type: string
       - description: Max results (default 50); must be positive, values above 200
           are clamped
         in: query
@@ -2781,7 +3099,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.Page-github_com_MeshCore-Beacon_beacon-server_internal_api_ObserverSummary'
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ObserverPage'
         "400":
           description: Bad Request
           schema:
@@ -2901,6 +3219,11 @@ paths:
             $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'Not available yet, or the server is busy: retry after Retry-After
+            seconds'
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List advert packets heard by an observer
@@ -3089,11 +3412,20 @@ paths:
         in: query
         name: until
         type: integer
-      - description: epoch ms of last item for pagination; last_heard_at, or site-local
-          heard_at when iatas is set
+      - description: 'epoch ms of the last item: its last_heard_at, or its site-local
+          heard_at when iatas, iata, region or regionId is set (with hashPrefix always
+          last_heard_at). Prefer pageCursor where nextPageCursor is returned'
         in: query
         name: cursor
         type: integer
+      - description: 'Opaque nextPageCursor from a previous response; keeps millisecond
+          ties and wins over cursor when both are sent. A region page served without
+          nextPageCursor pages by cursor: there cursor wins, and a pageCursor sent
+          alone pages by its millisecond. Ignored with hashPrefix, which pages by
+          cursor'
+        in: query
+        name: pageCursor
+        type: string
       - description: Max results (default 50); must be positive, values above 200
           are clamped
         in: query
@@ -3112,13 +3444,18 @@ paths:
         "200":
           description: OK
           schema:
-            type: object
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PacketPage'
         "400":
           description: Bad Request
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'Not available yet, or the server is busy: retry after Retry-After
+            seconds'
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List packets
@@ -3479,6 +3816,58 @@ paths:
       summary: Search known routes by source and destination hash
       tags:
       - Routes
+  /routes/topology:
+    get:
+      description: Returns up to 100000 undirected node-ID pairs, deduplicated across
+        known routes. Minute-aligned window includes the current minute. Existing
+        rate limits apply; no per-node lookup or route pagination is needed. Capped
+        is true when more links exist.
+      parameters:
+      - description: 'History window: 15m (default), 1h, or 24h'
+        in: query
+        name: window
+        type: string
+      - description: Comma-separated reception IATA codes
+        in: query
+        name: iatas
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TopologyLinks'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+      summary: Unique adjacent route links for a topology snapshot
+      tags:
+      - Routes
+  /scope-catalogues:
+    get:
+      description: Discovered sources only. Counts describe the source region, not
+        individual nodes or links. No upstream request is made. An empty list means
+        no configured importer; checkedAt=0 means no successful check. lastError or
+        a past freshUntil marks stale metadata. Manual Beacon scopes and packet evidence
+        are separate.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.PublicScopeCatalogue'
+            type: array
+      summary: Cached MeshMapper regional scope catalogues
+      tags:
+      - Scopes
   /scopes:
     get:
       description: Without filters, lists every stored scope name, including imported
