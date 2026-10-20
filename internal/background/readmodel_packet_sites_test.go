@@ -380,3 +380,32 @@ func TestPacketSitesReadOnlyTrust(t *testing.T) {
 		t.Fatalf("watermark age %v, want the writer's", age)
 	}
 }
+
+// A read-only server whose writer never saved the state still publishes a watermark age, counted from its start, so
+// the stale-watermark alert can fire.
+func TestPacketSitesReadOnlyWatermarkBeforeState(t *testing.T) {
+	metrics.SetReadModelWatermark("packet_sites", time.Now().Add(time.Hour))
+	PacketSitesReadOnlyTrust(context.Background(), func(context.Context) (db.PacketSitesReadOnlyCheck, error) {
+		return db.PacketSitesReadOnlyCheck{}, nil
+	}, db.NewTrust("packet_sites", true, db.PacketSitesTrustPolicy))
+	if age := watermarkAge(t, "packet_sites"); age < 0 {
+		t.Fatalf("watermark age %v with no saved state, want counted from the process start", age)
+	}
+}
+
+// The audit waits while the saved state is incomplete: not-yet-backfilled slices are not misses.
+func TestPacketSitesAuditSkipsIncompleteState(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	f := &fakeSites{state: db.PacketSitesState{Complete: true, FirstVerifiedAt: &now}}
+	j := f.jobs(db.NewTrust("packet_sites", true, db.PacketSitesTrustPolicy))
+	j.Boot(ctx)
+	f.state = db.PacketSitesState{}
+	f.audits = []int64{4}
+	if err := j.AuditTask().Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(f.seq(), "audit") {
+		t.Fatalf("audit ran on an incomplete state: %s", f.seq())
+	}
+}

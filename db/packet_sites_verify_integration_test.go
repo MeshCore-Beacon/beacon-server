@@ -30,7 +30,13 @@ func TestPacketSitesFirstVerificationPostgres(t *testing.T) {
 	if _, err := p.Backfill(f.ctx, time.Minute); err != nil {
 		t.Fatal(err)
 	}
+	// An observation after the caller's reconcile: Verify must leave it to the next run's overlap.
+	f.sited(psObs(psHash(10_000), 14, "AAA", psT0.Add(7*time.Hour)))
+	before := p.State()
 	v, err := p.Verify(f.ctx)
+	if after := p.State(); after.ReconPrevHi != before.ReconPrevHi || after.ReconHi != before.ReconHi {
+		t.Fatalf("Verify moved the reconcile watermarks: %+v -> %+v", before, after)
+	}
 	if err != nil || !v.OK() || v.PagesCompared < 10 {
 		t.Fatalf("Verify = %+v, %v", v, err)
 	}
@@ -55,6 +61,9 @@ WHERE (packet_hash, iata) = (SELECT packet_hash, iata FROM packet_sites WHERE ia
 	if !p.State().FirstVerifiedAt.Equal(*first) {
 		t.Fatal("FirstVerifiedAt moved")
 	}
+	if n := f.store.packetSitesVacuums.Load(); n != 1 {
+		t.Fatalf("VACUUM ran %d times in two verifications, want once", n)
+	}
 
 	// A read-only server checks the newest observations and writes nothing.
 	check := func() PacketSitesReadOnlyCheck {
@@ -76,6 +85,11 @@ WHERE (packet_hash, iata) = (SELECT packet_hash, iata FROM packet_sites WHERE ia
 WHERE site_heard_at < (SELECT max(heard_at) FROM packet_observations po WHERE po.packet_hash = packet_sites.packet_hash AND po.iata = packet_sites.iata)`)
 	if c := check(); !c.Verification.OK() {
 		t.Fatalf("read-only check of the repaired table %+v", c)
+	}
+	// An observation stored without its row above the writer's watermark: the next check sees it.
+	f.unsited(psObs(psHash(10_001), 15, "BBB", psT0.Add(8*time.Hour)))
+	if c := check(); c.Verification.Missing != 1 {
+		t.Fatalf("read-only check after a bypassing write %+v", c)
 	}
 	if c, err := New(empty.pool, nil, 0, 0).CheckPacketSitesReadOnly(f.ctx); err != nil || !c.Found {
 		t.Fatalf("empty: %+v, %v", c, err)

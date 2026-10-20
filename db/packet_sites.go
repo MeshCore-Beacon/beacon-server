@@ -45,6 +45,7 @@ type PacketSitesState struct {
 // PacketSitesSession holds the packet_sites lock on one maintenance connection and the state it read after taking
 // the lock; every statement and state write goes through it.
 type PacketSitesSession struct {
+	store *Store
 	conn  *pgxpool.Conn
 	q     *sqlc.Queries
 	state PacketSitesState
@@ -77,7 +78,7 @@ func (s *Store) BeginPacketSites(ctx context.Context) (*PacketSitesSession, bool
 		conn.Release()
 		return nil, false, nil
 	}
-	p := &PacketSitesSession{conn: conn, q: sqlc.New(conn), pause: packetSitesBackfillPause}
+	p := &PacketSitesSession{store: s, conn: conn, q: sqlc.New(conn), pause: packetSitesBackfillPause}
 	p.fillStmt = func(ctx context.Context, after, through int64) (int64, error) {
 		return p.q.FillPacketSitesSlice(ctx, sqlc.FillPacketSitesSliceParams{AfterID: after, ThroughID: through})
 	}
@@ -272,16 +273,20 @@ func (v *PacketSitesVerification) add(c sqlc.CheckPacketSitesSliceRow) {
 	v.Extra += c.Extra
 }
 
-// Verify is the first-time verification: it reconciles, VACUUMs and ANALYZEs the table (index-only scans need its
-// visibility map), then in one read-only snapshot runs the exact check over the newest slice of observation ids and
-// one random slice below it, and compares region pages of the busiest recent sites with pages read straight from the
-// observations. The first pass is persisted as FirstVerifiedAt. The caller retries a failed pass every interval.
+// Verify is the first-time verification. The caller has just reconciled (Verify does not reconcile again, which
+// would shrink the next run's overlap). It VACUUMs and ANALYZEs the table once per process (index-only scans need
+// its visibility map; a retry every interval does not repeat it), then in one read-only snapshot runs the exact check
+// over the newest slice of observation ids and one random slice below it, and compares region pages of the busiest
+// recent sites with pages read straight from the observations. The first pass is persisted as FirstVerifiedAt. The
+// caller retries a failed pass every interval.
 func (p *PacketSitesSession) Verify(ctx context.Context) (PacketSitesVerification, error) {
-	if _, err := p.Reconcile(ctx); err != nil {
-		return PacketSitesVerification{}, err
-	}
-	if _, err := p.conn.Exec(ctx, "VACUUM (ANALYZE) packet_sites"); err != nil {
-		return PacketSitesVerification{}, fmt.Errorf("packet_sites vacuum: %w", err)
+	if p.store == nil || p.store.packetSitesVacuums.Load() == 0 {
+		if _, err := p.conn.Exec(ctx, "VACUUM (ANALYZE) packet_sites"); err != nil {
+			return PacketSitesVerification{}, fmt.Errorf("packet_sites vacuum: %w", err)
+		}
+		if p.store != nil {
+			p.store.packetSitesVacuums.Add(1)
+		}
 	}
 	tx, err := p.conn.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
@@ -397,7 +402,7 @@ type PacketSitesReadOnlyCheck struct {
 }
 
 // CheckPacketSitesReadOnly reads the persisted packet_sites state and its age, and runs the exact check over the
-// newest packetSitesReadOnlyCheckIDs observation ids below the writer's watermark. It writes nothing.
+// newest packetSitesReadOnlyCheckIDs observation ids. It writes nothing.
 func (s *Store) CheckPacketSitesReadOnly(ctx context.Context) (PacketSitesReadOnlyCheck, error) {
 	row, err := s.q.GetBackgroundStateAge(ctx, packetSitesStateKey)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -410,7 +415,13 @@ func (s *Store) CheckPacketSitesReadOnly(ctx context.Context) (PacketSitesReadOn
 	if err := json.Unmarshal(row.Value, &out.State); err != nil {
 		return out, fmt.Errorf("packet_sites state: %w", err)
 	}
-	hi := out.State.ReconHi
+	// Up to the newest observation, not the writer's last watermark: a writer that bypasses the read model (an older
+	// binary after a partial rollback) shows here at the next check.
+	hi, err := s.q.MaxObservationID(ctx)
+	if err != nil {
+		return out, err
+	}
+	hi = max(hi, out.State.ReconHi)
 	c, err := s.q.CheckPacketSitesSlice(ctx, sqlc.CheckPacketSitesSliceParams{AfterID: max(hi-packetSitesReadOnlyCheckIDs, 0), ThroughID: hi})
 	out.Verification.add(c)
 	return out, err

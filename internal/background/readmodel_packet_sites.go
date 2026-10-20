@@ -37,6 +37,10 @@ const (
 	packetSitesReadOnlyMaxAge = 2 * PacketSitesInterval
 )
 
+// processStart is when this process started; a read-only server counts the watermark age from it until a writer
+// has saved the packet_sites state.
+var processStart = time.Now()
+
 // PacketSitesSession is the part of db.PacketSitesSession the jobs use.
 type PacketSitesSession interface {
 	State() db.PacketSitesState
@@ -275,8 +279,12 @@ func (j *PacketSitesJobs) AuditTask() Task {
 				return err
 			}
 			defer s.Close(context.Background())
-			if _, err := s.Init(ctx); err != nil {
+			st, err := s.Init(ctx)
+			if err != nil {
 				return err
+			}
+			if !st.Complete {
+				return nil // a rebuild is backfilling: its missing slices are not misses
 			}
 			n, err := s.Audit(ctx, func(lo, hi int64) int64 { return lo + rand.Int64N(hi-lo+1) })
 			if err != nil {
@@ -343,8 +351,12 @@ func (j *PacketSitesJobs) SweepTask() Task {
 func PacketSitesReadOnlyTrust(ctx context.Context, check func(context.Context) (db.PacketSitesReadOnlyCheck, error), trust *db.Trust) {
 	gen := trust.Generation()
 	c, err := check(ctx)
-	if err == nil && c.Found {
+	switch {
+	case err == nil && c.Found:
 		metrics.SetReadModelWatermark(packetSitesModel, time.Now().Add(-c.Age))
+	case err == nil:
+		// No writer has saved the state yet: the age counts from this process's start.
+		metrics.SetReadModelWatermark(packetSitesModel, processStart)
 	}
 	st, v := c.State, c.Verification
 	switch {

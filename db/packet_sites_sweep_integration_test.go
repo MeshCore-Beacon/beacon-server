@@ -50,6 +50,10 @@ func TestSweepPacketSitesFrontsPlanPostgres(t *testing.T) {
 	if err != nil || ok || !strings.Contains(detail, "idx_packet_sites_site_type") {
 		t.Fatalf("without the type index: ok %v, %q, %v", ok, detail, err)
 	}
+	var jit string
+	if err := tx.QueryRow(f.ctx, "SHOW jit").Scan(&jit); err != nil || jit != "off" {
+		t.Fatalf("jit in the sweep's settings = %q, %v; want off", jit, err)
+	}
 	_ = tx.Rollback(f.ctx)
 
 	// A row moved forward seconds ago: after a sweep its old entry in idx_packet_sites_site is marked dead.

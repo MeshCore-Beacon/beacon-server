@@ -24,8 +24,9 @@ var packetSitesSweepIndexes = []string{"idx_packet_sites_site", "idx_packet_site
 // SweepResult is the entries the front sweep visited on each index.
 type SweepResult struct{ SiteLive, TypeLive, ScopeLive int64 }
 
-// sweepSettings run the sweep with plain index scans only: a bitmap scan never sets a dead-entry hint.
-const sweepSettings = "SET LOCAL enable_bitmapscan = off; SET LOCAL enable_seqscan = off; " +
+// sweepSettings run the sweep with plain index scans only: a bitmap scan never sets a dead-entry hint. JIT is off:
+// with scans disabled a plan's cost can pass the JIT thresholds, and the sweep runs every 30 seconds.
+const sweepSettings = "SET LOCAL enable_bitmapscan = off; SET LOCAL enable_seqscan = off; SET LOCAL jit = off; " +
 	"SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '1s'"
 
 func sweepLookback(d time.Duration) pgtype.Interval {
