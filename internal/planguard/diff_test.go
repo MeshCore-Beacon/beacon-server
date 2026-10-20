@@ -149,9 +149,25 @@ func TestDiffTieOrder(t *testing.T) {
 	if o := planguard.Compare(tieRef(), swapped, pair("tie_order"), nil, nil); o.Verdict != "different" {
 		t.Errorf("tie run with another row: %+v, want different", o)
 	}
-	// With tie_cut, the last run may keep another member of the tie: both pages end inside it.
-	if o := planguard.Compare(tieRef(), swapped, pair("tie_order", "tie_cut"), nil, nil); o.Verdict != "allowed" || !reflect.DeepEqual(o.Classes, []string{"tie_order(2)", "tie_cut(1)"}) {
+	// With tie_cut, the last run may keep another member of the tie: both pages end inside it at the page limit
+	// (ref param 1 holds the limit) and the members differ in identity.
+	cut := pair("tie_order", "tie_cut")
+	cut.TieCutIdentity, cut.TieCutLimit = "id", 1
+	if o := planguard.Compare(tieRef(), swapped, cut, []string{"3"}, nil); o.Verdict != "allowed" || !reflect.DeepEqual(o.Classes, []string{"tie_order(2)", "tie_cut(1)"}) {
 		t.Errorf("last run cut by the limit with tie_cut: %+v, want allowed [tie_order(2) tie_cut(1)]", o)
+	}
+	// Not at the limit: not a cut.
+	if o := planguard.Compare(tieRef(), swapped, cut, []string{"5"}, nil); o.Verdict != "different" {
+		t.Errorf("a short page with another member: %+v, want different", o)
+	}
+	// The same packet with another value in the last run is a value difference, not another member.
+	wrong := rows(tieCols,
+		[]string{"1", "30", "a"},
+		[]string{"3", "20", "c"},
+		[]string{"2", "20", "x"},
+	)
+	if o := planguard.Compare(tieRef(), wrong, cut, []string{"3"}, nil); o.Verdict != "different" {
+		t.Errorf("a wrong value in the last run: %+v, want different", o)
 	}
 	// A run before the last one must still be a permutation.
 	early := rows(tieCols,
@@ -159,11 +175,14 @@ func TestDiffTieOrder(t *testing.T) {
 		[]string{"2", "20", "b"},
 		[]string{"3", "20", "c"},
 	)
-	if o := planguard.Compare(tieRef(), early, pair("tie_order", "tie_cut"), nil, nil); o.Verdict != "different" {
+	if o := planguard.Compare(tieRef(), early, cut, []string{"3"}, nil); o.Verdict != "different" {
 		t.Errorf("an earlier run with another row: %+v, want different", o)
 	}
 	if err := pair("tie_cut").Validate(); err == nil {
 		t.Error("tie_cut without tie_order: Validate() = nil")
+	}
+	if err := pair("tie_order", "tie_cut").Validate(); err == nil {
+		t.Error("tie_cut without an identity and a limit param: Validate() = nil")
 	}
 }
 
