@@ -60,9 +60,14 @@ type TieCursor struct {
 // Every ref column is compared. Each relaxation is a named class that must be listed in Allowed:
 //   - tie_order: within each run of equal Key, cand rows are a permutation of ref rows (same count, keys equal
 //     position by position);
+//   - tie_cut: with tie_order, the last run may hold different members when both pages end inside it (the page
+//     limit cut one group of tied rows, which each statement orders its own way);
 //   - saturated_suffix: when ref row 1 has Saturated.Flag = t, ref rows whose Key[0] is below Saturated.Floor may
 //     be missing from or differ in cand; the only class that relaxes the row count, and only by those rows. The
 //     cand rows in their place must be below the floor too, keep the descending key order, and repeat no row;
+//   - saturated_full: when ref row 1 is saturated, cand may hold more rows than ref after every ref row (a short
+//     saturated page the cand fills); those rows must be below the floor, keep the descending key order, and
+//     repeat no row. Needs saturated;
 //   - latest_observer_tie: the Omit columns may differ; each such row is listed;
 //   - pagecursor_tie_rows: cand may start with k rows ref lacks whose Key[0], truncated to the millisecond, equals
 //     the millisecond of ref param TieBoundary, and which sort at or below the cand's own cursor (TieCursor:
@@ -71,18 +76,22 @@ type TieCursor struct {
 // Require lists classes that must fire for every cand: a case that exists to show a class shows it, or fails.
 // Param indexes (TieBoundary, TieCursor, Walk.LimitParam, Walk.Cursor[].Param) are 1-based, like $n.
 type DiffPair struct {
-	ID          string            `yaml:"id"`
-	Ref         Call              `yaml:"ref"`
-	Cands       []Call            `yaml:"cands"`
-	Key         []string          `yaml:"key"`
-	Allowed     []string          `yaml:"allowed"`
-	Omit        []string          `yaml:"omit"`
-	Saturated   *SaturatedSpec    `yaml:"saturated"`
-	TieBoundary *int              `yaml:"tie_boundary"`
-	TieCursor   *TieCursor        `yaml:"tie_cursor"`
-	Require     []string          `yaml:"require"`
-	Walk        *WalkSpec         `yaml:"walk"`
-	Expect      map[string]string `yaml:"expect"` // cand alias → identical | allowed | same | different; default same
+	ID          string         `yaml:"id"`
+	Ref         Call           `yaml:"ref"`
+	Cands       []Call         `yaml:"cands"`
+	Key         []string       `yaml:"key"`
+	Allowed     []string       `yaml:"allowed"`
+	Omit        []string       `yaml:"omit"`
+	Saturated   *SaturatedSpec `yaml:"saturated"`
+	TieBoundary *int           `yaml:"tie_boundary"`
+	TieCursor   *TieCursor     `yaml:"tie_cursor"`
+	// tie_cut: the column naming a row's identity (a member of the cut run must be absent from the other page) and
+	// the ref param (1-based) holding the page limit both pages must have reached.
+	TieCutIdentity string            `yaml:"tie_cut_identity"`
+	TieCutLimit    int               `yaml:"tie_cut_limit"`
+	Require        []string          `yaml:"require"`
+	Walk           *WalkSpec         `yaml:"walk"`
+	Expect         map[string]string `yaml:"expect"` // cand alias → identical | allowed | same | different; default same
 }
 
 // Outcome is the comparison of one ref result with one cand result.
@@ -100,13 +109,15 @@ const (
 	DiffSkip      = "skip" // a {sql: …} param found no value on this snapshot; the pair did not run
 
 	ClassTieOrder          = "tie_order"
+	ClassTieCut            = "tie_cut"
 	ClassSaturatedSuffix   = "saturated_suffix"
+	ClassSaturatedFull     = "saturated_full"
 	ClassLatestObserverTie = "latest_observer_tie"
 	ClassPageCursorTieRows = "pagecursor_tie_rows"
 )
 
 // classOrder is the order classes are reported in.
-var classOrder = []string{ClassPageCursorTieRows, ClassSaturatedSuffix, ClassTieOrder, ClassLatestObserverTie}
+var classOrder = []string{ClassPageCursorTieRows, ClassSaturatedSuffix, ClassSaturatedFull, ClassTieOrder, ClassTieCut, ClassLatestObserverTie}
 
 var (
 	aliasRe       = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
@@ -258,6 +269,12 @@ func (p DiffPair) Validate() error {
 	if slices.Contains(p.Key, "") {
 		return fail("empty key column")
 	}
+	if allowed[ClassTieCut] && !allowed[ClassTieOrder] {
+		return fail("tie_cut needs tie_order")
+	}
+	if allowed[ClassTieCut] != (p.TieCutIdentity != "" && p.TieCutLimit > 0) {
+		return fail("tie_cut, tie_cut_identity and tie_cut_limit go together")
+	}
 	if allowed[ClassTieOrder] && len(p.Key) == 0 {
 		return fail("tie_order needs key")
 	}
@@ -271,6 +288,9 @@ func (p DiffPair) Validate() error {
 	}
 	if (p.Saturated != nil) != allowed[ClassSaturatedSuffix] {
 		return fail("saturated and the class saturated_suffix go together")
+	}
+	if allowed[ClassSaturatedFull] && p.Saturated == nil {
+		return fail("saturated_full needs saturated")
 	}
 	if p.Saturated != nil && (p.Saturated.Flag == "" || p.Saturated.Floor == "" || len(p.Key) == 0) {
 		return fail("saturated needs flag, floor and a key")
@@ -649,12 +669,26 @@ func Compare(ref, cand RowSet, p DiffPair, refParams, candParams []string) Outco
 		}
 	}
 
+	// A saturated ref page that stopped short: the cand may fill it with rows below the floor, after every ref row.
+	if allowed[ClassSaturatedFull] && c1-c0 > r1-r0 {
+		if _, floor, floorT, ok := saturatedCut(ref, cp, p, r0, r1); ok {
+			from := c0 + (r1 - r0)
+			if msg := relaxedTail(cand, ct, cp, c0, from, c1, floorT); msg != "" {
+				return diff("saturated_full: %s (floor %s)", msg, floor)
+			}
+			counts[ClassSaturatedFull] = c1 - from
+			notes = append(notes, fmt.Sprintf("saturated_full: cand rows %d..%d fill the short page below the floor %s", from+1, c1, floor))
+			c1 = from
+		}
+	}
+
 	if r1-r0 != c1-c0 {
 		return diff("row count: ref %d, cand %d%s", r1-r0, c1-c0, membership(ref, cand, rt[r0:r1], ct[c0:c1], cp, r0, c0))
 	}
 
 	// Pair ref rows with cand rows: by position, or within tie runs when the order differs only there.
 	pairs := make([]int, r1-r0)
+	var cut map[int]bool // ref positions paired with another member of a tie the page limit cut
 	first := -1
 	for i := range pairs {
 		pairs[i] = c0 + i
@@ -665,7 +699,7 @@ func Compare(ref, cand RowSet, p DiffPair, refParams, candParams []string) Outco
 	if first >= 0 {
 		moved, ok := 0, false
 		if allowed[ClassTieOrder] {
-			moved, ok = tiePairs(ref, cand, rt, ct, cp, r0, c0, pairs)
+			moved, cut, ok = tiePairs(ref, cand, rt, ct, cp, r0, c0, pairs, tieCutCheck(ref, cand, p, allowed, refParams, r0, r1, c0, c1))
 		}
 		if !ok {
 			return diff("first difference at row %d %s: %s%s", r0+first+1, cp.rowLabel(ref.Rows[r0+first], true),
@@ -673,11 +707,18 @@ func Compare(ref, cand RowSet, p DiffPair, refParams, candParams []string) Outco
 		}
 		counts[ClassTieOrder] = moved
 		notes = append(notes, fmt.Sprintf("tie_order: %d rows hold another position within their run of equal %s", moved, strings.Join(p.Key, ", ")))
+		if len(cut) > 0 {
+			counts[ClassTieCut] = len(cut)
+			notes = append(notes, fmt.Sprintf("tie_cut: the pages end inside one run of equal %s and keep %d different member(s) of it", strings.Join(p.Key, ", "), len(cut)))
+		}
 	}
 
 	if len(cp.omit) > 0 {
 		var listed []string
 		for i, j := range pairs {
+			if cut[i] {
+				continue
+			}
 			rr, cr := ref.Rows[r0+i], cand.Rows[j]
 			var cols []string
 			for n, c := range cp.omit {
@@ -807,14 +848,15 @@ func saturatedCut(ref RowSet, cp *colPlan, p DiffPair, r0, r1 int) (int, string,
 
 // tiePairs checks that the keys are equal position by position and that each run of equal keys holds the same
 // rows; it fills pairs (ref position → cand row) and returns how many rows moved.
-func tiePairs(ref, cand RowSet, rt, ct []string, cp *colPlan, r0, c0 int, pairs []int) (int, bool) {
+func tiePairs(ref, cand RowSet, rt, ct []string, cp *colPlan, r0, c0 int, pairs []int, lastCut func(refRow, candRow int) bool) (int, map[int]bool, bool) {
 	n := len(pairs)
 	for i := 0; i < n; i++ {
 		if tuple(ref.Rows[r0+i], cp.keyRef) != tuple(cand.Rows[c0+i], cp.keyCand) {
-			return 0, false
+			return 0, nil, false
 		}
 	}
 	moved := 0
+	cut := map[int]bool{}
 	for start := 0; start < n; {
 		end := start + 1
 		k := tuple(ref.Rows[r0+start], cp.keyRef)
@@ -825,12 +867,19 @@ func tiePairs(ref, cand RowSet, rt, ct []string, cp *colPlan, r0, c0 int, pairs 
 		for j := start; j < end; j++ {
 			free[ct[c0+j]] = append(free[ct[c0+j]], c0+j)
 		}
+		var unmatched []int
 		for i := start; i < end; i++ {
 			// Prefer the cand row in the same position, then the first unused equal one.
 			t := rt[r0+i]
 			js := free[t]
 			if len(js) == 0 {
-				return 0, false
+				if end < n || lastCut == nil {
+					return 0, nil, false
+				}
+				// The last run may be cut by the page limit: both pages end inside one run of equal keys and
+				// hold different members of it.
+				unmatched = append(unmatched, i)
+				continue
 			}
 			pick := 0
 			if x := slices.Index(js, c0+i); x >= 0 {
@@ -841,9 +890,49 @@ func tiePairs(ref, cand RowSet, rt, ct []string, cp *colPlan, r0, c0 int, pairs 
 			pairs[i] = js[pick]
 			free[t] = slices.Delete(js, pick, pick+1)
 		}
+		var left []int
+		for _, js := range free {
+			left = append(left, js...)
+		}
+		slices.Sort(left)
+		for x, i := range unmatched {
+			if !lastCut(r0+i, left[x]) {
+				return 0, nil, false
+			}
+			pairs[i] = left[x]
+			cut[i] = true
+			moved++
+		}
 		start = end
 	}
-	return moved, true
+	return moved, cut, true
+}
+
+// tieCutCheck returns the test a member of a cut last run must pass, or nil when tie_cut does not apply: both pages
+// hold exactly the page limit, and each member's identity is absent from the other page (the same identity with
+// other values is a value difference, not another member).
+func tieCutCheck(ref, cand RowSet, p DiffPair, allowed map[string]bool, refParams []string, r0, r1, c0, c1 int) func(int, int) bool {
+	if !allowed[ClassTieCut] || p.TieCutLimit > len(refParams) {
+		return nil
+	}
+	limit, err := strconv.Atoi(refParams[p.TieCutLimit-1])
+	if err != nil || r1-r0 != limit || c1-c0 != limit {
+		return nil
+	}
+	ri, ci := slices.Index(ref.Columns, p.TieCutIdentity), slices.Index(cand.Columns, p.TieCutIdentity)
+	if ri < 0 || ci < 0 {
+		return nil
+	}
+	refIDs, candIDs := map[string]bool{}, map[string]bool{}
+	for i := r0; i < r1; i++ {
+		refIDs[cell(ref.Rows[i][ri])] = true
+	}
+	for j := c0; j < c1; j++ {
+		candIDs[cell(cand.Rows[j][ci])] = true
+	}
+	return func(refRow, candRow int) bool {
+		return !candIDs[cell(ref.Rows[refRow][ri])] && !refIDs[cell(cand.Rows[candRow][ci])]
+	}
 }
 
 // columnDiffs names the compared columns that differ between two rows, with both values.

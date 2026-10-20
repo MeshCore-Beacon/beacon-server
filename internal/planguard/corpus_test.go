@@ -4,6 +4,7 @@
 package planguard_test
 
 import (
+	"bytes"
 	"io/fs"
 	"os"
 	"reflect"
@@ -244,5 +245,36 @@ func TestCorpusResolversReadBeaconTablesOnly(t *testing.T) {
 	_, err := planguard.LoadCorpus(os.DirFS("testdata/corpus"), "bad_resolver_schema.yaml", testSQLC)
 	if err == nil || !strings.Contains(err.Error(), "hop_case") {
 		t.Fatalf("err = %v, want one naming resolver hop_case", err)
+	}
+}
+
+// An entry's settings are SET LOCAL after the tier's; only planner settings are accepted.
+func TestCorpusEntrySettings(t *testing.T) {
+	const body = `
+defaults: {big_tables: [nodes]}
+tiers: {prod: {}, local: {settings: {random_page_cost: "1.1"}}}
+statements:
+  Q: {sqlc: Q, plan: maint}
+entries:
+  - {id: q.sweep, stmt: Q, settings: {enable_bitmapscan: "off", enable_seqscan: "off"}}
+`
+	c, err := planguard.LoadCorpus(mapFS(map[string]string{"c.yaml": body}), "c.yaml", testSQLC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := planguard.EmitPlans(&out, c, planguard.RunOptions{Tier: "local"}, map[string]*string{}, "0123456789abcdef"); err != nil {
+		t.Fatal(err)
+	}
+	s := out.String()
+	tier, bitmap := strings.Index(s, "SET LOCAL random_page_cost = '1.1'"), strings.Index(s, "SET LOCAL enable_bitmapscan = 'off'")
+	if tier < 0 || bitmap < tier || !strings.Contains(s, "SET LOCAL enable_seqscan = 'off'") {
+		t.Fatalf("settings not set after the tier's:\n%s", s)
+	}
+	for _, bad := range []string{`{statement_timeout: "1"}`, `{search_path: "x"}`, `{enable_seqscan: "off; DROP TABLE x"}`} {
+		b := strings.Replace(body, `{enable_bitmapscan: "off", enable_seqscan: "off"}`, bad, 1)
+		if _, err := planguard.LoadCorpus(mapFS(map[string]string{"c.yaml": b}), "c.yaml", testSQLC); err == nil {
+			t.Errorf("settings %s accepted", bad)
+		}
 	}
 }

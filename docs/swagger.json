@@ -2014,13 +2014,13 @@
                     },
                     {
                         "type": "integer",
-                        "description": "epoch ms of the last item; last_heard_at, or site-local heard_at when iatas is set. Prefer pageCursor where nextPageCursor is returned",
+                        "description": "epoch ms of the last item: its last_heard_at, or its site-local heard_at when iatas, iata, region or regionId is set (with hashPrefix always last_heard_at). Prefer pageCursor where nextPageCursor is returned",
                         "name": "cursor",
                         "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "Opaque nextPageCursor from a previous response; keeps millisecond ties. Wins over cursor when both are sent. Ignored with hashPrefix or an IATA or region filter, which page by cursor",
+                        "description": "Opaque nextPageCursor from a previous response; keeps millisecond ties and wins over cursor when both are sent. A region page served without nextPageCursor pages by cursor: there cursor wins, and a pageCursor sent alone pages by its millisecond. Ignored with hashPrefix, which pages by cursor",
                         "name": "pageCursor",
                         "in": "query"
                     },

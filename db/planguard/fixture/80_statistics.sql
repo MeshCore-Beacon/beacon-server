@@ -13,6 +13,9 @@ ALTER TABLE known_routes ALTER COLUMN path_key SET STATISTICS 10000;
 ALTER TABLE known_routes ALTER COLUMN iata SET STATISTICS 1000;
 ALTER TABLE packets ALTER COLUMN raw_payload SET STATISTICS 10000;
 ALTER TABLE packet_observations ALTER COLUMN airtime_ms SET STATISTICS 10000;
+-- Every packet_sites column is read by some statement; route_type has four values, so a full sample leaves its
+-- statistics as they would be anyway.
+ALTER TABLE packet_sites ALTER COLUMN route_type SET STATISTICS 10000;
 ALTER TABLE analytics_hourly_iata_observations ALTER COLUMN observation_count SET STATISTICS 10000;
 ALTER TABLE analytics_hourly_packet_sets ALTER COLUMN packets SET STATISTICS 10000;
 ALTER TABLE analytics_hourly_observer_identity ALTER COLUMN display_name SET STATISTICS 10000;

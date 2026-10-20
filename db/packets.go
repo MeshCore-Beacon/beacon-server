@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/meshcore-go/meshcore-go"
 )
@@ -86,13 +88,12 @@ func buildLatestObserverPath(pathLengthByte, hashSize, hopCount *int16, pathByte
 // packetRow is the shared row of the six global packets statements; the other five Row types convert to it.
 type packetRow = sqlc.ListPacketsPageRow
 
-// ListPackets serves the packet list. Region (iatas) requests keep their site-local statement and cursor and ignore
-// pageCursor. Every other request is normalised and sent to the one statement for its filter shape; pageCursor wins
-// over cursor there.
+// ListPackets serves the packet list. Region (iatas) requests page by site-local recency (listPacketsByRegion).
+// Every other request is normalised and sent to the one statement for its filter shape. pageCursor wins over
+// cursor wherever a page can return nextPageCursor.
 func (s *Store) ListPackets(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, pageCursor *api.PacketCursor, limit int32) (api.PacketPage, error) {
 	if len(iatas) > 0 {
-		p, err := s.listPacketsByIATAs(ctx, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
-		return api.PacketPage{Page: p}, err
+		return s.listPacketsByRegion(ctx, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, pageCursor, limit)
 	}
 	f, ok := newPacketFilter(payloadTypes, routeTypes, scopes, since, until, cursor, pageCursor, limit)
 	if !ok {
@@ -645,8 +646,9 @@ func (s *Store) UpsertIATA(ctx context.Context, iata string) error {
 	return s.q.UpsertIATA(ctx, iata)
 }
 
-func (s *Store) InsertObservation(ctx context.Context, o ingest.InsertObservationParams) (bool, int64, error) {
-	params := sqlc.InsertObservationParams{
+// observationParams maps an observation to the statement's parameters.
+func observationParams(o ingest.InsertObservationParams) sqlc.InsertObservationParams {
+	return sqlc.InsertObservationParams{
 		PacketHash:        o.PacketHash,
 		ObserverID:        o.ObserverID,
 		Iata:              o.IATA,
@@ -666,11 +668,34 @@ func (s *Store) InsertObservation(ctx context.Context, o ingest.InsertObservatio
 		PayloadType:       &o.PayloadType,
 		AirtimeMs:         o.AirtimeMs,
 	}
+}
+
+func (s *Store) InsertObservation(ctx context.Context, o ingest.InsertObservationParams) (bool, int64, error) {
+	params := observationParams(o)
 	row, err := s.q.InsertObservation(ctx, params)
+	if err == nil {
+		return row.Inserted, row.ObservationCount, nil
+	}
+	// Whatever failed, region pages stop reading packet_sites before anything else is written, until a reconcile
+	// that begins after this has repaired it.
+	s.readModels.invalidatePacketSites("an observation insert with its site row failed")
+	// A cancelled request and a packet that is gone (23503, which today's statement hits too) are returned as
+	// they are. Any other failure stores the observation without its site row and leaves the row to the
+	// reconcile.
+	var pgErr *pgconn.PgError
+	if ctx.Err() != nil || (errors.As(err, &pgErr) && pgErr.Code == "23503") {
+		return false, 0, err
+	}
+	slog.Warn("observation site row failed; storing the observation without it", "component", "db",
+		"packet_hash", hex.EncodeToString(o.PacketHash), "iata", o.IATA, "error", err)
+	fallback, err := s.q.InsertObservationUnsited(ctx, sqlc.InsertObservationUnsitedParams(params))
+	// Again once the fallback has returned: a reconcile that took its snapshot before this commit must not be the
+	// one that restores trust.
+	s.readModels.invalidatePacketSites("an observation was stored without its site row")
 	if err != nil {
 		return false, 0, err
 	}
-	return row.Inserted, row.ObservationCount, nil
+	return fallback.Inserted, fallback.ObservationCount, nil
 }
 
 func (s *Store) ListNodeObservations(ctx context.Context, nodeID uuid.UUID, cursor int64, limit int32) (api.Page[api.PacketObservationSummary], error) {

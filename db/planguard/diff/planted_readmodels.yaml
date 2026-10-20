@@ -21,7 +21,7 @@ batches:
     statements:
       old: "old:ListPacketsByIATAs"
       rm: "file:sql/planted/ListPacketsBySitesReadmodels.sql"
-      end: "file:sql/pending/ListPacketsBySites.sql"
+      end: "new:ListPacketsBySites"
       oracle: "file:sql/oracle/OracleBySites.sql"
     pairs:
       # Every page boundary from the first page: ref = the oracle (packet_observations, independent of

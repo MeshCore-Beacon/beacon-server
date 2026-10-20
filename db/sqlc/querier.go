@@ -30,6 +30,9 @@ type Querier interface {
 	// Exact check of messages in (after_id, through_id]: pairs the definition has and the table lacks (counting
 	// observations up to obs_through only), and table pairs no stored observation backs.
 	CheckChannelMessageIATAs(ctx context.Context, arg CheckChannelMessageIATAsParams) (CheckChannelMessageIATAsRow, error)
+	// Exact check of every packet with an observation in (after_id, through_id]: site rows the observations imply
+	// and the table lacks, rows whose hearing time or packet columns differ, and rows no observation backs.
+	CheckPacketSitesSlice(ctx context.Context, arg CheckPacketSitesSliceParams) (CheckPacketSitesSliceRow, error)
 	// Keeps fetch timing so re-enabling still respects backoff; the ETag goes with the rows.
 	ClearRepeaters(ctx context.Context) (int64, error)
 	CreateAccount(ctx context.Context, name string) (Account, error)
@@ -81,9 +84,19 @@ type Querier interface {
 	// The site of every group-text observation in (after_id, through_id] whose packet has a message.
 	// An untyped observation is checked too: older rows may have no payload type.
 	FillChannelMessageIATAsByObservations(ctx context.Context, arg FillChannelMessageIATAsByObservationsParams) (int64, error)
+	// The audit's fill: each (packet, site) of the observations in (after_id, through_id], at its latest hearing there
+	// among all of the packet's observations, so a pair heard again in a later slice comes back at that hearing.
+	FillPacketSitesAudit(ctx context.Context, arg FillPacketSitesAuditParams) (int64, error)
+	// Copyright 2026 Beacon Contributors
+	// SPDX-License-Identifier: AGPL-3.0-or-later
+	// Each (packet, site) of the observations in (after_id, through_id], at its latest hearing there.
+	// Pairs already at or past that hearing are skipped before the insert, so a clean slice writes nothing.
+	FillPacketSitesSlice(ctx context.Context, arg FillPacketSitesSliceParams) (int64, error)
 	// Hop prefixes that match >1 node in an IATA, per width, into the sweep's temp table.
 	FillReconfirmAmb(ctx context.Context) error
 	FillRollupObs(ctx context.Context, dollar_1 pgtype.Timestamptz) error
+	// The requested sites that have at least one row: a site with none adds no row to any site page.
+	FilterKnownSites(ctx context.Context, iatas []string) ([]string, error)
 	// Marks the hour complete and bumps the revision only when its content changed.
 	FinishRollupHour(ctx context.Context, arg FinishRollupHourParams) (bool, error)
 	GetAccount(ctx context.Context, id uuid.UUID) (Account, error)
@@ -224,8 +237,12 @@ type Querier interface {
 	// ============================================================
 	// PACKET OBSERVATIONS
 	// ============================================================
-	// Bumps packets.observation_count only for a new row; a duplicate returns the current count.
+	// Bumps packets.observation_count and moves the packet's site row forward only for a new row; a duplicate
+	// returns the current count and writes nothing.
 	InsertObservation(ctx context.Context, arg InsertObservationParams) (InsertObservationRow, error)
+	// InsertObservation without the site row: the fallback when that statement fails. The caller marks the site
+	// read model untrusted; its reconcile adds the row.
+	InsertObservationUnsited(ctx context.Context, arg InsertObservationUnsitedParams) (InsertObservationUnsitedRow, error)
 	// Inserts a telemetry snapshot for an observer. The reported_at timestamp should
 	// be truncated to the configured resolution before calling to ensure deduplication.
 	InsertObserverTelemetry(ctx context.Context, arg InsertObserverTelemetryParams) error
@@ -313,6 +330,8 @@ type Querier interface {
 	ListObserverDirectory(ctx context.Context, arg ListObserverDirectoryParams) (string, error)
 	// Observers newest last_seen first; the cursor is the (last_seen, id) of the last row.
 	ListObservers(ctx context.Context, arg ListObserversParams) ([]ListObserversRow, error)
+	// The sites with the most packets among observations above after_id; the first-time verification pages them.
+	ListPacketSiteSamples(ctx context.Context, arg ListPacketSiteSamplesParams) ([]ListPacketSiteSamplesRow, error)
 	// Returns packets with observations after the given observation ID, ordered oldest first.
 	// Used for WS reconnect backfill. Pass afterObservationId=0 to start from the beginning.
 	ListPacketsAfterID(ctx context.Context, arg ListPacketsAfterIDParams) ([]ListPacketsAfterIDRow, error)
@@ -330,10 +349,37 @@ type Querier interface {
 	// A site that filled scan_depth still has unread history below its floor.
 	// The newest such floor is the point above which every site is covered.
 	ListPacketsByIATAs(ctx context.Context, arg ListPacketsByIATAsParams) ([]ListPacketsByIATAsRow, error)
+	// ListPacketsByIATAs from an exact (site_heard_at, packet_hash) position instead of a millisecond: a region page
+	// cursor's continuation when the site read model's bounded reads ran out of budget. The scan includes the cursor's
+	// microsecond, the page keeps the keys below the position, and ties come out packet_hash DESC.
+	// A site that filled scan_depth still has unread history below its floor.
+	// The newest such floor is the point above which every site is covered.
+	ListPacketsByIATAsAfter(ctx context.Context, arg ListPacketsByIATAsAfterParams) ([]ListPacketsByIATAsAfterRow, error)
 	// One range per named scope; a zero-hit scope costs a single index probe.
 	ListPacketsByScopes(ctx context.Context, arg ListPacketsByScopesParams) ([]ListPacketsByScopesRow, error)
 	// ListPacketsByScopes with the type tests inside each scope range (index-only through the included columns).
 	ListPacketsByScopesTypes(ctx context.Context, arg ListPacketsByScopesTypesParams) ([]ListPacketsByScopesTypesRow, error)
+	// One site: one range of its (site_heard_at, packet_hash) index.
+	ListPacketsBySite(ctx context.Context, arg ListPacketsBySiteParams) ([]ListPacketsBySiteRow, error)
+	// The page rows for keys from ListPacketsBySitesSince or ListPacketsBySitesScoped, in the given order.
+	ListPacketsBySiteKeys(ctx context.Context, arg ListPacketsBySiteKeysParams) ([]ListPacketsBySiteKeysRow, error)
+	// Two or more sites with a cursor: one range per site; a packet whose newest requested-site row is at or above
+	// the cursor was already returned, so the in-range re-check drops it.
+	ListPacketsBySites(ctx context.Context, arg ListPacketsBySitesParams) ([]ListPacketsBySitesRow, error)
+	// ListPacketsBySites for the first page or one site, where the re-check cannot match.
+	ListPacketsBySitesFirst(ctx context.Context, arg ListPacketsBySitesFirstParams) ([]ListPacketsBySitesFirstRow, error)
+	// ListPacketsBySitesSince with one range per (site, named scope).
+	ListPacketsBySitesScoped(ctx context.Context, arg ListPacketsBySitesScopedParams) ([]ListPacketsBySitesScopedRow, error)
+	// Page keys for a first_heard_at window or many type pairs (absent window sides are -infinity and infinity).
+	// Each site range is read to at most scan_depth entries, as deep as the observation statement reads, and the
+	// window and type tests filter what was read; the last row (is_floor) is the floor below which this page is
+	// incomplete, when a range filled scan_depth. Rows below the floor are left to the next page.
+	ListPacketsBySitesSince(ctx context.Context, arg ListPacketsBySitesSinceParams) ([]ListPacketsBySitesSinceRow, error)
+	// One range per (site, payload type, route type); Go passes each type list deduplicated and sends only a few
+	// type pairs here.
+	ListPacketsBySitesTyped(ctx context.Context, arg ListPacketsBySitesTypedParams) ([]ListPacketsBySitesTypedRow, error)
+	// ListPacketsBySitesTyped for the first page or one site.
+	ListPacketsBySitesTypedFirst(ctx context.Context, arg ListPacketsBySitesTypedFirstParams) ([]ListPacketsBySitesTypedFirstRow, error)
 	// One range per (payload type, route type) pair; DISTINCT keeps a repeated type from returning rows twice.
 	ListPacketsByTypes(ctx context.Context, arg ListPacketsByTypesParams) ([]ListPacketsByTypesRow, error)
 	// Unfiltered packet page: newest (last_heard_at, packet_hash) first.
@@ -376,9 +422,11 @@ type Querier interface {
 	MarkPartialRollupHours(ctx context.Context) error
 	MaxChannelMessageID(ctx context.Context) (int64, error)
 	MaxObservationID(ctx context.Context) (int64, error)
+	MinObservationID(ctx context.Context) (int64, error)
 	// The first message id above after_id, or 0 when there is none.
 	NextChannelMessageID(ctx context.Context, afterID int64) (int64, error)
 	OldestMissingRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
+	PacketSitesTotalBytes(ctx context.Context) (int64, error)
 	PruneImportedRegions(ctx context.Context, keep []string) ([]string, error)
 	// Drops imports for IATAs no longer configured, so their manual border returns.
 	PruneZoneBoundaries(ctx context.Context, keep []string) ([]string, error)
@@ -477,6 +525,13 @@ type Querier interface {
 	SetNodeMultibyteTraces(ctx context.Context, id uuid.UUID) error
 	SetPacketDecrypted(ctx context.Context, packetHash []byte) error
 	SetRollupHourPartial(ctx context.Context, hour pgtype.Timestamptz) error
+	// Read-only. Visits, through each time-ordered packet_sites index, every entry whose key was written in the last
+	// lookback (2 minutes). An index scan that reaches an entry whose heap tuple is dead to every snapshot sets the
+	// entry's LP_DEAD hint; when that leaf later fills, the inserting backend deletes hinted entries instead of splitting
+	// (nbtree simple deletion). Keeps the three indexes at about 2x a fresh build instead of 4-9x. Changes no row.
+	// The ORDER BY ... LIMIT keeps every lateral a per-front index range scan (never flattened into a join).
+	// The cap is far above any front's 2-minute volume (the busiest site: about 150 entries) and only bounds the gauge.
+	SweepPacketSitesFronts(ctx context.Context, lookback pgtype.Interval) (SweepPacketSitesFrontsRow, error)
 	// Write-through for a cached keyed channel: the UpsertChannel conflict update, by id.
 	// No row (deleted or re-keyed since cached) sends the caller back to UpsertChannel.
 	TouchChannel(ctx context.Context, arg TouchChannelParams) (int32, error)
@@ -487,6 +542,9 @@ type Querier interface {
 	// from regressing a newer write-through (e.g. a status update).
 	TouchObservers(ctx context.Context, arg TouchObserversParams) error
 	TouchPackets(ctx context.Context, arg TouchPacketsParams) error
+	// Page keys straight from the observations, independent of packet_sites. floor_ts bounds the read: keys at or
+	// above it are exact, because a packet's newest requested-site hearing is unchanged by dropping older ones.
+	TruthPacketsBySitesPage(ctx context.Context, arg TruthPacketsBySitesPageParams) ([]TruthPacketsBySitesPageRow, error)
 	// ============================================================
 	// HOURLY ANALYTICS ROLLUPS
 	// An hour [H, H+1h) is eligible once now() >= H + 95 min (ingest clamps heard_at to ±30 min).

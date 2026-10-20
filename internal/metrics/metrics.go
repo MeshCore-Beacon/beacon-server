@@ -227,6 +227,44 @@ func SetReadModelWatermark(model string, at time.Time) {
 	watermarks.mu.Unlock()
 }
 
+var (
+	// PacketSitesFrontLive is the entries the last front sweep visited, by packet_sites index.
+	PacketSitesFrontLive = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "beacon_packet_sites_front_live",
+		Help: "Index entries written in the last two minutes that the last packet_sites front sweep visited, by index.",
+	}, []string{"index"})
+	// PacketSitesSweepPlanOK is 1 while the front sweep's plan uses the three time-ordered indexes with plain index
+	// scans (the only scans that set dead-entry hints), 0 otherwise.
+	PacketSitesSweepPlanOK = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "beacon_packet_sites_sweep_plan_ok",
+		Help: "1 while the packet_sites front sweep plans as index scans on its three indexes, 0 otherwise.",
+	})
+	// PacketSitesBytes is packet_sites' heap and indexes.
+	PacketSitesBytes = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "beacon_packet_sites_bytes",
+		Help: "Total size of packet_sites, heap and indexes, in bytes.",
+	})
+)
+
+var sweepAgeDesc = prometheus.NewDesc("beacon_packet_sites_sweep_age_seconds",
+	"Seconds since the last successful packet_sites front sweep.", nil, nil)
+
+// sweepAgeCollector emits the age of the last successful front sweep at scrape time, nothing before the first.
+type sweepAgeCollector struct{ at atomic.Int64 }
+
+func (c *sweepAgeCollector) Describe(ch chan<- *prometheus.Desc) { ch <- sweepAgeDesc }
+
+func (c *sweepAgeCollector) Collect(ch chan<- prometheus.Metric) {
+	if at := c.at.Load(); at != 0 {
+		ch <- prometheus.MustNewConstMetric(sweepAgeDesc, prometheus.GaugeValue, time.Since(time.Unix(0, at)).Seconds())
+	}
+}
+
+var sweepAge = &sweepAgeCollector{}
+
+// MarkPacketSitesSwept records a successful front sweep.
+func MarkPacketSitesSwept(at time.Time) { sweepAge.at.Store(at.UnixNano()) }
+
 func init() {
 	Registry.MustRegister(
 		collectors.NewGoCollector(),
@@ -234,6 +272,7 @@ func init() {
 		GuardWouldRefuse, GuardRefused, GuardDB, DBTime, HTTPRequest, PoolAcquire,
 		IngestQueueDepth, IngestDropped, JobDuration, JobRows, IndexBytes, IndexBloat,
 		PlanguardFailures, setGauge{PlanguardLastRun, &planguardEnabled}, pgActivity, ReadModelRepaired, ReadModelTrusted, watermarks,
+		PacketSitesFrontLive, PacketSitesSweepPlanOK, PacketSitesBytes, sweepAge,
 	)
 }
 

@@ -83,6 +83,10 @@ ratelimit:
 #readmodels:
 #  cmi:
 #    enabled: true
+#  packet_sites:
+#    # Serve region packet pages (iatas, region) from packet_sites once this process has repaired and verified
+#    # it. false serves them from the original statement; the table is still maintained and swept.
+#    enabled: true
 
 # MeshMapper integrations (optional, require a regional or grouped-region API key).
 # Your local MeshMapper regional or grouped-region admin can generate the key.

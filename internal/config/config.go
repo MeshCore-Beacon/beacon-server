@@ -58,7 +58,8 @@ type Config struct {
 
 // ReadModelsConfig switches serving pages from each read model.
 type ReadModelsConfig struct {
-	Cmi ReadModelConfig `yaml:"cmi"`
+	Cmi         ReadModelConfig `yaml:"cmi"`
+	PacketSites ReadModelConfig `yaml:"packet_sites"`
 }
 
 // ReadModelConfig controls one read model. Enabled false serves every page from the original statements; the
@@ -199,6 +200,8 @@ type ResolvedConfig struct {
 	PlanguardDailyCheck bool
 	// ReadModelCmiEnabled serves region and scope message pages from channel_message_iatas once trusted; default true.
 	ReadModelCmiEnabled bool
+	// ReadModelPacketSitesEnabled serves region packet pages from packet_sites once trusted; default true.
+	ReadModelPacketSitesEnabled bool
 }
 
 // RateLimitConfig controls the per-client REST API request budget.
@@ -719,8 +722,9 @@ func Resolve(cfg *Config) ResolvedConfig {
 		AdminListen:   cfg.Server.AdminListen,
 		ReadOnly:      cfg.Server.ReadOnly,
 
-		PlanguardDailyCheck: cfg.Planguard.DailyCheck,
-		ReadModelCmiEnabled: cfg.ReadModels.Cmi.Enabled == nil || *cfg.ReadModels.Cmi.Enabled,
+		PlanguardDailyCheck:         cfg.Planguard.DailyCheck,
+		ReadModelCmiEnabled:         cfg.ReadModels.Cmi.Enabled == nil || *cfg.ReadModels.Cmi.Enabled,
+		ReadModelPacketSitesEnabled: cfg.ReadModels.PacketSites.Enabled == nil || *cfg.ReadModels.PacketSites.Enabled,
 	}
 	// Load has validated the layout; an unvalidated config falls back to the default.
 	r.APIPlanLayout, _ = planpolicy.ParseLayout(cfg.Database.APIPlanLayout)
@@ -795,12 +799,12 @@ func Resolve(cfg *Config) ResolvedConfig {
 
 func (r ResolvedConfig) String() string {
 	return fmt.Sprintf(
-		"telemetryResolution=%s telemetryRetention=%s rollupRetention=%s packetRetention=%s routeRetention=%s routeGrace=%s routeMinObs=%d routeReconfirmRowsPerHour=%d maxConnsPerIP=%d maxConnectsPerMinute=%d viewRefresh=%s reconfirm=%s cleanup=%s presenceFlush=%s presencePacketTTL=%s clockDriftThreshold=%s nodeStaleThreshold=%s nodeDeleteAfter=%s observerDeleteAfter=%s rateLimitEnabled=%t requestsPerMinute=%d burst=%d apiPlanLayout=%s guardsEnforce=%v guardsBudget=%s adminListen=%q readOnly=%t planguardDailyCheck=%t readModelCmi=%t",
+		"telemetryResolution=%s telemetryRetention=%s rollupRetention=%s packetRetention=%s routeRetention=%s routeGrace=%s routeMinObs=%d routeReconfirmRowsPerHour=%d maxConnsPerIP=%d maxConnectsPerMinute=%d viewRefresh=%s reconfirm=%s cleanup=%s presenceFlush=%s presencePacketTTL=%s clockDriftThreshold=%s nodeStaleThreshold=%s nodeDeleteAfter=%s observerDeleteAfter=%s rateLimitEnabled=%t requestsPerMinute=%d burst=%d apiPlanLayout=%s guardsEnforce=%v guardsBudget=%s adminListen=%q readOnly=%t planguardDailyCheck=%t readModelCmi=%t readModelPacketSites=%t",
 		r.TelemetryResolution, r.TelemetryRetention, r.RollupRetention, r.PacketRetention, r.RouteRetention, r.RouteGrace, r.RouteMinObservations, r.RouteReconfirmRowsPerHour,
 		r.MaxConnsPerIP, r.MaxConnectsPerMinute, r.ViewRefreshInterval, r.ReconfirmInterval, r.CleanupInterval,
 		r.PresenceFlushInterval, r.PresencePacketTTL, r.ClockDriftThreshold,
 		r.NodeStaleThreshold, r.NodeDeleteAfter, r.ObserverDeleteAfter,
 		r.RateLimit.Enabled, r.RateLimit.RequestsPerMinute, r.RateLimit.Burst,
-		r.APIPlanLayout, r.GuardsEnforce, r.GuardsBudget, r.AdminListen, r.ReadOnly, r.PlanguardDailyCheck, r.ReadModelCmiEnabled,
+		r.APIPlanLayout, r.GuardsEnforce, r.GuardsBudget, r.AdminListen, r.ReadOnly, r.PlanguardDailyCheck, r.ReadModelCmiEnabled, r.ReadModelPacketSitesEnabled,
 	)
 }

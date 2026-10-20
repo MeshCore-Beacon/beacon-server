@@ -236,6 +236,9 @@ func (s *Store) InsertChannelMessage(ctx context.Context, m ingest.InsertChannel
 	if err != nil && ctx.Err() == nil {
 		slog.Warn("channel message site seed failed; storing the message without it", "component", "db", "packet_hash", hex.EncodeToString(m.PacketHash), "error", err)
 		unseeded, uerr := s.q.InsertChannelMessageUnseeded(ctx, sqlc.InsertChannelMessageUnseededParams(params))
+		// Again once the fallback has returned: a reconcile that took its snapshot before this commit must not be
+		// the one that restores trust.
+		s.readModels.invalidateCmi("a channel message was stored without its sites")
 		if errors.Is(uerr, pgx.ErrNoRows) {
 			return nil, nil // duplicate
 		}

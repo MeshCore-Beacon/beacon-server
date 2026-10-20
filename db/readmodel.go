@@ -19,9 +19,8 @@ import (
 const (
 	// Advisory lock classes, taken as pg_try_advisory_lock(class, hashtext(current_schema())), so instances sharing a
 	// schema serialise and schemas (tests) do not. Distinct from the migration key and the rollup lock (25189, 1).
-	cmiReconcileLockKey int32 = 0x636d69 // "cmi"
-	// Reserved for the packet_sites read model.
-	packetSitesReconcileLockKey int32 = 0x7073 // "ps"
+	cmiReconcileLockKey         int32 = 0x636d69 // "cmi"
+	packetSitesReconcileLockKey int32 = 0x7073   // "ps"
 )
 
 // ErrPreBootWriters means a transaction that began before boot still holds an xid: rows it writes may bypass the
@@ -67,6 +66,10 @@ type TrustPolicy struct{ DropAfterDirty, RestoreAfterClean int }
 
 // CmiTrustPolicy: an in-flight Add can make one run repair a pair, so one run never flips trust.
 var CmiTrustPolicy = TrustPolicy{DropAfterDirty: 3, RestoreAfterClean: 2}
+
+// PacketSitesTrustPolicy: the observation writer maintains packet_sites in its own statement, so any repairing run
+// means a writer bypassed it.
+var PacketSitesTrustPolicy = TrustPolicy{DropAfterDirty: 1, RestoreAfterClean: 2}
 
 // Trust says whether this process may serve pages from a read model. It is false until Earn, false whenever the
 // operator disabled the model, false after DropAfterDirty repairing runs in a row until RestoreAfterClean clean
@@ -221,5 +224,15 @@ func (rm *ReadModels) cmiTrusted() bool { return rm != nil && rm.Cmi.Trusted() }
 func (rm *ReadModels) invalidateCmi(reason string) {
 	if rm != nil {
 		rm.Cmi.Invalidate(reason)
+	}
+}
+
+// packetSitesTrusted is nil-safe: a nil *ReadModels is untrusted.
+func (rm *ReadModels) packetSitesTrusted() bool { return rm != nil && rm.PacketSites.Trusted() }
+
+// invalidatePacketSites is nil-safe.
+func (rm *ReadModels) invalidatePacketSites(reason string) {
+	if rm != nil {
+		rm.PacketSites.Invalidate(reason)
 	}
 }
