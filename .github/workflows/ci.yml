@@ -8,6 +8,14 @@ on:
   pull_request:
 
 jobs:
+  runtime-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and check the unprivileged runtime
+        run: |
+          docker build --pull -f .build/Dockerfile --build-arg SOURCE_REVISION="$GITHUB_SHA" --build-arg BUILD_VERSION=candidate -t beacon-core-ci .
+          docker run --rm --entrypoint sh beacon-core-ci -c 'test "$(id -u)" = 65532 && pg_dump --version && test -r /etc/ssl/certs/ca-certificates.crt'
   build:
     runs-on: ubuntu-latest
     services:
