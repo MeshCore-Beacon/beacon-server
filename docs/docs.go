@@ -4040,6 +4040,10 @@ const docTemplate = `{
         "github_com_MeshCore-Beacon_beacon-server_internal_api.Info": {
             "type": "object",
             "properties": {
+                "collectedNodeTelemetry": {
+                    "description": "True when companion telemetry intake/read routes are configured, not a health assertion.",
+                    "type": "boolean"
+                },
                 "minAppVersion": {
                     "description": "MinAppVersion is the oldest allowed app version (X.Y.Z); null means no requirement.",
                     "type": "string",
