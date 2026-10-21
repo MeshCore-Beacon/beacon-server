@@ -4364,6 +4364,10 @@ const docTemplate = `{
                 "buildVersion": {
                     "type": "string"
                 },
+                "collectedNodeTelemetry": {
+                    "description": "True when companion telemetry intake/read routes are configured, not a health assertion.",
+                    "type": "boolean"
+                },
                 "minAppVersion": {
                     "description": "MinAppVersion is the oldest allowed app version (X.Y.Z); null means no requirement.",
                     "type": "string",

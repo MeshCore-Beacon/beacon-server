@@ -24,6 +24,8 @@ type Info struct {
 	ServerVersion string  `json:"serverVersion" example:"2.0.2"`
 	BuildVersion  string  `json:"buildVersion,omitempty"`
 	BuildRevision string  `json:"buildRevision,omitempty"`
+	// True when companion telemetry intake/read routes are configured, not a health assertion.
+	CollectedNodeTelemetry bool `json:"collectedNodeTelemetry,omitempty"`
 }
 
 // HigherVersion returns the newer of two X.Y.Z versions; empty sorts oldest.
