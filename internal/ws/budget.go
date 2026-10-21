@@ -57,3 +57,21 @@ func writeFrame(ctx context.Context, conn *websocket.Conn, body []byte) error {
 	defer cancel()
 	return conn.Write(writeCtx, websocket.MessageText, body)
 }
+
+func boundedIATAs(current, added []string, limit int) ([]string, bool) {
+	seen := make(map[string]struct{})
+	var result []string
+	for _, values := range [][]string{current, added} {
+		for _, value := range values {
+			if _, ok := seen[value]; ok {
+				continue
+			}
+			if len(result) >= limit {
+				return nil, false
+			}
+			seen[value] = struct{}{}
+			result = append(result, value)
+		}
+	}
+	return result, true
+}
