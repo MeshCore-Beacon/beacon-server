@@ -120,7 +120,7 @@ func getOrSet[T any](ctx context.Context, c *Client, key string, ttl time.Durati
 	} else {
 		slog.DebugContext(ctx, "cache miss", "component", "cache")
 	}
-	raw, err = fetchShared(ctx, c, key, ttl, func(ctx context.Context) (any, error) { return fetch(ctx) })
+	raw, err = fetchShared(ctx, c, key, ttl, fetch)
 	if err != nil {
 		return zero, err
 	}
@@ -137,10 +137,18 @@ const sharedFetchTimeout = 30 * time.Second
 // fetchShared runs one fetch per key across concurrent misses and returns its JSON. The fetch
 // gets its own bounded context so one caller disconnecting can't fail the others, and each
 // caller still stops waiting when its own context ends.
-func fetchShared(ctx context.Context, c *Client, key string, ttl time.Duration, fetch func(context.Context) (any, error)) ([]byte, error) {
+func fetchShared[T any](ctx context.Context, c *Client, key string, ttl time.Duration, fetch func(context.Context) (T, error)) ([]byte, error) {
 	ch := c.sf.DoChan(key, func() (any, error) {
 		fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sharedFetchTimeout)
 		defer cancel()
+		// A previous flight may have filled the key after this caller's miss.
+		// Recheck inside the group so late callers do not start another DB read.
+		if data, err := c.rdb.Get(fctx, key).Bytes(); err == nil {
+			var cached T
+			if json.Unmarshal(data, &cached) == nil {
+				return data, nil
+			}
+		}
 		val, err := fetch(fctx)
 		if err != nil {
 			return nil, err
