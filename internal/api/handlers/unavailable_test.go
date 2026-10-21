@@ -6,6 +6,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
@@ -107,6 +109,27 @@ func TestPagesNotReadyAnswers503(t *testing.T) {
 	for m, n := range map[string]float64{"packet_sites": 1, "cmi": 2, "observation_payload_types": 1} {
 		if got := testutil.ToFloat64(metrics.APIUnavailable.WithLabelValues("not_ready", m)) - before[m]; got != n {
 			t.Errorf("not_ready %s counted %v, want %v", m, got, n)
+		}
+	}
+}
+
+// A statement timeout or deadline answers 503 with Retry-After and counts as timeout.
+func TestQueryTimeoutAnswers503(t *testing.T) {
+	models := map[string]string{"region packets": "packet_sites", "messages across channels": "cmi", "channel messages": "cmi", "observer adverts": "observation_payload_types"}
+	before := map[string]float64{}
+	for _, m := range models {
+		before[m] = testutil.ToFloat64(metrics.APIUnavailable.WithLabelValues("timeout", m))
+	}
+	checkUnavailable(t, &pgconn.PgError{Code: "57014", Message: "canceling statement due to statement timeout"}, "10", "deadline_exceeded")
+	checkUnavailable(t, context.DeadlineExceeded, "10", "deadline_exceeded")
+	for m, n := range map[string]float64{"packet_sites": 2, "cmi": 4, "observation_payload_types": 2} {
+		if got := testutil.ToFloat64(metrics.APIUnavailable.WithLabelValues("timeout", m)) - before[m]; got != n {
+			t.Errorf("timeout %s counted %v, want %v", m, got, n)
+		}
+	}
+	for _, err := range []error{nil, context.Canceled, fmt.Errorf("query: %w", context.Canceled), errors.New("boom"), &pgconn.PgError{Code: "23505"}} {
+		if isQueryTimeout(err) {
+			t.Errorf("isQueryTimeout(%v) = true", err)
 		}
 	}
 }

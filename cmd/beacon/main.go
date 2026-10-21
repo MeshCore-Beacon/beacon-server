@@ -257,8 +257,9 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	// Read-only servers restore too: region scope lists need the catalogues, and the restore only reads.
 	var scopeImporter *meshmapper.Importer
-	if mode.MeshMapper && cfg.MeshMapper.Scopes.Enabled {
+	if cfg.MeshMapper.Scopes.Enabled {
 		restoreCtx, cancelRestore := context.WithTimeout(ctx, 10*time.Second)
 		scopeImporter, err = meshmapper.New(restoreCtx, cfg.MeshMapper.Scopes, maintStore, directory, scopes, scopeEntries)
 		cancelRestore()
@@ -483,7 +484,7 @@ func main() {
 		}
 		tasks = append(tasks, background.ObserverCleanupTask(coalescer, resolved.ObserverDeleteAfter, resolved.CleanupInterval, onDelete))
 	}
-	if scopeImporter != nil {
+	if mode.MeshMapper && scopeImporter != nil {
 		tasks = append(tasks, background.Task{Name: "meshmapper.scopes", Interval: meshmapper.PollInterval, Run: scopeImporter.Refresh})
 	}
 	if mode.MeshMapper && cfg.MeshMapper.Zones.Enabled {
