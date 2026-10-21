@@ -332,6 +332,10 @@ definitions:
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.Info:
     properties:
+      buildRevision:
+        type: string
+      buildVersion:
+        type: string
       minAppVersion:
         description: MinAppVersion is the oldest allowed app version (X.Y.Z); null
           means no requirement.
@@ -3844,6 +3848,10 @@ paths:
             $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TopologyLinks'
         "400":
           description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "500":
+          description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
         "503":
