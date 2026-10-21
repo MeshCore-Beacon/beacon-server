@@ -224,26 +224,43 @@ func handleClientMessage(ctx context.Context, client *hub.Client, reader api.Rea
 			return
 		}
 		iatas := msg.Scope.IATAs
+		remaining := maxScopeValues - len(msg.Scope.ObserverIDs) - len(msg.Scope.ChannelHashes) - len(msg.Scope.PayloadTypes) - len(msg.Scope.RouteTypes) - len(msg.Scope.Events)
+		mergeRegion := func(added []string) bool {
+			var ok bool
+			iatas, ok = boundedIATAs(iatas, added, remaining)
+			if !ok {
+				_ = conn.Close(websocket.StatusPolicyViolation, "expanded scope limit exceeded")
+			}
+			return ok
+		}
 		for _, ridStr := range msg.Scope.RegionIDs {
 			rid, err := strconv.ParseInt(ridStr, 10, 32)
 			if err != nil {
-				slog.Warn(fmt.Sprintf("ws[%s]: invalid regionId %q, skipping", connID, ridStr), "component", "ws")
-				continue
+				_ = conn.Close(websocket.StatusPolicyViolation, "invalid region")
+				return
 			}
 			region, err := reader.GetRegion(ctx, int32(rid))
 			if err != nil {
-				slog.Warn(fmt.Sprintf("ws[%s]: region %d not found, skipping", connID, rid), "component", "ws", "error", err)
-				continue
+				_ = conn.Close(websocket.StatusTryAgainLater, "region unavailable")
+				return
 			}
-			iatas = append(iatas, region.IATAs...)
+			if !mergeRegion(region.IATAs) {
+				return
+			}
 		}
 		for _, slug := range msg.Scope.RegionSlugs {
 			region, err := reader.GetRegionBySlug(ctx, slug)
 			if err != nil {
-				slog.Warn(fmt.Sprintf("ws[%s]: region slug %q not found, skipping", connID, slug), "component", "ws", "error", err)
-				continue
+				_ = conn.Close(websocket.StatusTryAgainLater, "region unavailable")
+				return
 			}
-			iatas = append(iatas, region.IATAs...)
+			if !mergeRegion(region.IATAs) {
+				return
+			}
+		}
+		if len(iatas) == 0 && len(msg.Scope.RegionIDs)+len(msg.Scope.RegionSlugs) > 0 {
+			_ = conn.Close(websocket.StatusPolicyViolation, "region has no sites")
+			return
 		}
 		scope := hub.Scope{
 			IATAs:         iatas,

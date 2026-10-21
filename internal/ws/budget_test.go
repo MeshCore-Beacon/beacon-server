@@ -39,3 +39,13 @@ func TestControlBudgetBoundsWorkAndRecovers(t *testing.T) {
 		t.Fatal("unbounded filter expansion")
 	}
 }
+
+func TestExpandedRegionScopeRemainsBounded(t *testing.T) {
+	got, ok := boundedIATAs([]string{"YKF", "YOW"}, []string{"YKF", "YYZ"}, 3)
+	if !ok || len(got) != 3 {
+		t.Fatal("overlapping regions were not deduplicated")
+	}
+	if _, ok = boundedIATAs(got, []string{"YVR"}, 3); ok {
+		t.Fatal("region expansion bypassed filter cap")
+	}
+}
