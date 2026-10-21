@@ -25,6 +25,8 @@ import (
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/db"
+	"github.com/MeshCore-Beacon/beacon-server/internal/meshmapper"
+	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -51,7 +53,16 @@ regions:
 channel_keys:
   hashtags:
     - readonlytest
+%s`
+
+// readOnlyScopesConfig enables the scope import on the read-only boot only, so the control never reaches the network.
+const readOnlyScopesConfig = `meshmapper:
+  scopes:
+    enabled: true
 `
+
+// readOnlyCatalogueScope is the only scope in the saved SEA catalogue.
+const readOnlyCatalogueScope = "#rocatalogue"
 
 // readOnlyRequests is the request mix a read-only server serves. GETs must not fail with a
 // server error; writes must fail and never succeed.
@@ -161,7 +172,8 @@ func TestReadOnlyBootWritesNothingPostgres(t *testing.T) {
 		t.Fatal("a normal boot changed no table, so the check cannot see a write")
 	}
 
-	before = after
+	seedScopeCatalogue(t, ctx, cfg)
+	before = snapshotTables(t, ctx, statsConn(), name)
 	log := bootAndServe(t, ctx, poolDSN(t, dsn, name), true)
 	after = snapshotTables(t, ctx, statsConn(), name)
 	for _, table := range slices.Sorted(maps.Keys(after)) {
@@ -193,6 +205,26 @@ func TestReadOnlyBootWritesNothingPostgres(t *testing.T) {
 	}
 }
 
+// seedScopeCatalogue saves a validated MeshMapper scope catalogue for SEA, as the writer's importer would.
+func seedScopeCatalogue(t *testing.T, ctx context.Context, cfg *pgxpool.Config) {
+	t.Helper()
+	pool, err := pgxpool.NewWithConfig(ctx, cfg.Copy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	now := time.Now().UTC().Truncate(time.Second)
+	payload := fmt.Sprintf(`{"generated_at":%q,"region":"SEA","zones":["SEA"],"repeaters":1,"scoped":1,`+
+		`"scopes":[{"name":%q,"repeaters":1,"default":0,"monitored":false,"wardriving":false}]}`,
+		now.Format(time.RFC3339), strings.TrimPrefix(readOnlyCatalogueScope, "#"))
+	cache := meshmapper.Cache{Payload: []byte(payload), CheckedAt: now, AttemptedAt: now, NextAttempt: now.Add(time.Hour)}
+	store := db.New(pool, pool, 0, 0)
+	if err := store.SaveScopeCatalogue(ctx, "SEA", "https://sea.example/get_scopes.php", cache,
+		[]scopestore.Entry{scopestore.FromName(readOnlyCatalogueScope)}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // poolDSN points dsn at the named database.
 func poolDSN(t *testing.T, dsn, name string) string {
 	t.Helper()
@@ -216,7 +248,11 @@ func bootAndServe(t *testing.T, ctx context.Context, dsn string, readOnly bool) 
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(path, []byte(fmt.Sprintf(readOnlyBootConfig, readOnly)), 0600); err != nil {
+	extra := ""
+	if readOnly {
+		extra = readOnlyScopesConfig
+	}
+	if err := os.WriteFile(path, []byte(fmt.Sprintf(readOnlyBootConfig, readOnly, extra)), 0600); err != nil {
 		t.Fatal(err)
 	}
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -298,6 +334,16 @@ func bootAndServe(t *testing.T, ctx context.Context, dsn string, readOnly bool) 
 			case !r.write && resp.StatusCode >= 500:
 				t.Errorf("%s %s: %d %s", r.method, r.path, resp.StatusCode, body)
 			}
+		}
+		// Region scope lists come from the restored catalogue membership.
+		resp, err := client.Get(base + "/api/v1/scopes?region=pnw")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), readOnlyCatalogueScope) {
+			t.Errorf("GET /api/v1/scopes?region=pnw: %d %s, want %s from the saved catalogue", resp.StatusCode, body, readOnlyCatalogueScope)
 		}
 	} else {
 		// Give the boot-time jobs a moment to write before the control stops.

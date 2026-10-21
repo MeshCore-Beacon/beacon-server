@@ -22,7 +22,7 @@ type bootMode struct {
 	Coalescer bool
 	// Jobs runs the rollup catch-up and the background scheduler.
 	Jobs bool
-	// MeshMapper restores and runs the MeshMapper importers; their restores can prune or clear rows.
+	// MeshMapper runs the MeshMapper importers and the restores that can prune or clear rows.
 	MeshMapper bool
 }
 

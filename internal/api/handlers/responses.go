@@ -5,6 +5,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/guards"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // respondUnavailable answers a reader error the client should retry with 503 and Retry-After, in the same shape as
@@ -29,8 +31,21 @@ func respondUnavailable(w http.ResponseWriter, err error) bool {
 		guards.WriteRefusal(w, &guards.Refusal{Guard: "slow_pool", Status: http.StatusServiceUnavailable, RetryAfter: 5,
 			Code: "service_unavailable", Message: "The server is busy with other slow requests. Retry later."})
 		return true
+	case isQueryTimeout(err):
+		guards.WriteRefusal(w, &guards.Refusal{Guard: "timeout", Status: http.StatusServiceUnavailable, RetryAfter: 10,
+			Code: "deadline_exceeded", Message: "This page took too long to load. Retry later, or ask for a shorter time range."})
+		return true
 	}
 	return false
+}
+
+// isQueryTimeout reports a statement_timeout (57014) or deadline; a client that went away is not one.
+func isQueryTimeout(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "57014" || errors.Is(err, context.DeadlineExceeded)
 }
 
 // APIError is the standard error response shape for all Beacon API endpoints.
