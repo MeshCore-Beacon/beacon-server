@@ -48,6 +48,7 @@ import (
 // version is set at build time via -ldflags "-X main.version=vX.Y.Z".
 // Falls back to "dev" when built without the flag.
 var version = "dev"
+var revision = ""
 
 //	@title			MeshCore Beacon API
 //	@version		2.1.0
@@ -257,8 +258,9 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	// Read-only servers restore too: region scope lists need the catalogues, and the restore only reads.
 	var scopeImporter *meshmapper.Importer
-	if mode.MeshMapper && cfg.MeshMapper.Scopes.Enabled {
+	if cfg.MeshMapper.Scopes.Enabled {
 		restoreCtx, cancelRestore := context.WithTimeout(ctx, 10*time.Second)
 		scopeImporter, err = meshmapper.New(restoreCtx, cfg.MeshMapper.Scopes, maintStore, directory, scopes, scopeEntries)
 		cancelRestore()
@@ -370,33 +372,9 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	if channelImporter != nil && mode.Backfill {
-		channelImporter.OnNewKeys(func(hashes [][]byte) {
-			// Off the refresh tick: a backfill can outlast it, and history isn't urgent.
-			go func() {
-				backfillCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-				defer cancel()
-				if n, err := ingest.BackfillChannelHashes(backfillCtx, maintStore, keys, hashes); err != nil {
-					slog.Error("MeshMapper channel backfill failed", "component", "meshmapper.channels", "error", err)
-				} else if n > 0 {
-					slog.Info(fmt.Sprintf("backfilled %d channel message(s) for imported keys", n), "component", "meshmapper.channels")
-				}
-			}()
-		})
-	}
-
-	// ── Backfill channel messages ────────────────────────────────────────────
-	// Packets whose channel key wasn't yet configured at ingest time were stored as
-	// hash-only channels and never decrypted. Retry them now against the keystore we just
-	// built, so adding a channel key to the config surfaces its history on the next boot
-	// instead of leaving it stranded in the DB indefinitely.
-	if mode.Backfill {
-		if n, err := ingest.BackfillChannelMessages(ctx, maintStore, keys); err != nil {
-			slog.Error("config: channel message backfill failed", "component", "startup", "error", err)
-		} else if n > 0 {
-			slog.Info(fmt.Sprintf("config: backfilled %d previously-undecrypted channel message(s)", n), "component", "startup")
-		}
-	}
+	// Historical decryption is a resumable background job. It must never delay
+	// the HTTP listener or MQTT subscription, including after a key import.
+	history := ingest.NewChannelHistory(maintStore, keys)
 
 	// ── Build geographic ingest filter ───────────────────────────────────────────────────────────
 	allowedIATAs := iatadb.BuildAllowedSet(cfg.Ingest.AllowCountries, cfg.Ingest.AllowContinents)
@@ -476,6 +454,9 @@ func main() {
 		background.PayloadTypeBackfillTask(maintStore, time.Minute),
 		background.PgStatsTask(maintStore, time.Minute),
 	}
+	if mode.Backfill {
+		tasks = append(tasks, background.Task{Name: "channel_history", Interval: time.Second, Run: history.Run})
+	}
 	if resolved.ObserverDeleteAfter > 0 {
 		var onDelete func(context.Context, uuid.UUID)
 		if cr, ok := reader.(*cache.CachedReader); ok {
@@ -483,7 +464,7 @@ func main() {
 		}
 		tasks = append(tasks, background.ObserverCleanupTask(coalescer, resolved.ObserverDeleteAfter, resolved.CleanupInterval, onDelete))
 	}
-	if scopeImporter != nil {
+	if mode.MeshMapper && scopeImporter != nil {
 		tasks = append(tasks, background.Task{Name: "meshmapper.scopes", Interval: meshmapper.PollInterval, Run: scopeImporter.Refresh})
 	}
 	if mode.MeshMapper && cfg.MeshMapper.Zones.Enabled {
@@ -570,6 +551,8 @@ func main() {
 		MinAppVersion: api.HigherVersion(api.MinAppVersion, cfg.Mobile.MinAppVersion),
 		MinWebVersion: api.HigherVersion(api.MinWebVersion, cfg.Web.MinWebVersion),
 		ServerVersion: docs.SwaggerInfo.Version,
+		BuildVersion:  version,
+		BuildRevision: revision,
 		AdminRoutes: map[string]http.Handler{
 			"/accounts": handlers.AccountsRouter(maintStore),
 			"/backup":   handlers.BackupRouter(backupOpts, ctx),

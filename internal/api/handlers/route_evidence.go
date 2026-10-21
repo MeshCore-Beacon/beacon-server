@@ -104,6 +104,7 @@ func routeEvidenceQuery(r *http.Request, iata, key string, now time.Time) (api.R
 // @Failure 400 {object} handlers.APIError
 // @Failure 404 {object} handlers.APIError
 // @Failure 500 {object} handlers.APIError
+// @Failure 503 {object} handlers.APIError "The lookup took too long: retry after Retry-After seconds"
 // @Router /routes/{iata}/{pathKey}/observations [get]
 func getRouteEvidence(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -123,6 +124,7 @@ func getRouteEvidence(reader api.Reader) http.HandlerFunc {
 			respondError(w, 404, "saved route not found")
 		case errors.Is(err, api.ErrRouteEvidenceInput):
 			respondError(w, 400, "invalid route evidence request")
+		case respondUnavailable(w, err):
 		case err != nil:
 			respondError(w, 500, "internal server error")
 		default:

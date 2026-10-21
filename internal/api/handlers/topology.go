@@ -19,6 +19,7 @@ import (
 // @Success 200 {object} api.TopologyLinks
 // @Failure 400 {object} handlers.APIError
 // @Failure 503 {object} handlers.APIError
+// @Failure 500 {object} handlers.APIError
 // @Router /routes/topology [get]
 func getTopologyLinks(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -41,7 +42,10 @@ func getTopologyLinks(reader api.Reader) http.HandlerFunc {
 		defer cancel()
 		links, err := reader.GetTopologyLinks(ctx, iatas, until.Add(-duration), until)
 		if err != nil {
-			respondError(w, http.StatusServiceUnavailable, "route snapshot unavailable; try again shortly")
+			if respondUnavailable(w, err) {
+				return
+			}
+			respondError(w, http.StatusInternalServerError, "route snapshot unavailable")
 			return
 		}
 		respond(w, http.StatusOK, links)

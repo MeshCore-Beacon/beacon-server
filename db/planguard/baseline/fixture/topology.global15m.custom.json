@@ -1,0 +1,8 @@
+[
+ "Limit",
+ "  Group",
+ "    Sort",
+ "      Nested Loop",
+ "        Index Scan on known_routes r using idx_known_routes_keyset scan=Forward",
+ "        Function Scan"
+]

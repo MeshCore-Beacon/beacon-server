@@ -1,33 +1,24 @@
 package db
 
 import (
-	"context"
 	"encoding/hex"
-	"os"
 	"testing"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
-	"github.com/jackc/pgx/v5"
 )
 
 func TestTraceQualityPostgres(t *testing.T) {
-	dsn := os.Getenv("BEACON_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set BEACON_TEST_POSTGRES_DSN")
-	}
-	ctx := context.Background()
-	conn, err := pgx.Connect(ctx, dsn)
-	if err != nil {
+	ctx, pool := schemaPool(t)
+	if err := RunMigrations(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close(ctx)
-	tx, err := conn.Begin(ctx)
+	tx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
 	for _, name := range []string{"nodes", "node_short_ids"} {
-		if _, err := tx.Exec(ctx, "CREATE TEMP TABLE "+name+" (LIKE public."+name+" INCLUDING ALL) ON COMMIT DROP"); err != nil {
+		if _, err := tx.Exec(ctx, "CREATE TEMP TABLE "+name+" (LIKE "+name+" INCLUDING ALL) ON COMMIT DROP"); err != nil {
 			t.Fatal(err)
 		}
 	}

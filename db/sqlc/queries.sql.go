@@ -3286,6 +3286,45 @@ func (q *Queries) ListChannelCatalogues(ctx context.Context) ([]MeshmapperChanne
 	return items, nil
 }
 
+const listChannelHistoryPage = `-- name: ListChannelHistoryPage :many
+SELECT packet_hash,
+  (CASE WHEN payload_type=5 AND decrypted IS NOT TRUE THEN raw_payload ELSE NULL END)::bytea AS raw_payload
+FROM packets WHERE packet_hash > $1::bytea
+ORDER BY packet_hash LIMIT $2::int
+`
+
+type ListChannelHistoryPageParams struct {
+	AfterHash []byte `json:"after_hash"`
+	PageLimit int32  `json:"page_limit"`
+}
+
+type ListChannelHistoryPageRow struct {
+	PacketHash []byte `json:"packet_hash"`
+	RawPayload []byte `json:"raw_payload"`
+}
+
+// Bound scanned candidates, not just undecrypted matches: the primary key
+// advances even through pages with no decryptable history. No startup index build.
+func (q *Queries) ListChannelHistoryPage(ctx context.Context, arg ListChannelHistoryPageParams) ([]ListChannelHistoryPageRow, error) {
+	rows, err := q.db.Query(ctx, listChannelHistoryPage, arg.AfterHash, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChannelHistoryPageRow{}
+	for rows.Next() {
+		var i ListChannelHistoryPageRow
+		if err := rows.Scan(&i.PacketHash, &i.RawPayload); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChannelIDs = `-- name: ListChannelIDs :many
 SELECT id, channel_hash, key_fingerprint FROM channels
 `

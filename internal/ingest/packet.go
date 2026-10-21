@@ -57,8 +57,8 @@ type InsertObservationParams struct {
 	HashSize          uint8
 	HopCount          uint8
 	PathBytes         []byte
-	RSSI              int16
-	SNR               float32
+	RSSI              *int16
+	SNR               *float32
 	PropagationTimeMs int32
 	RadioFreqMHz      float32
 	SpreadFactor      int16
@@ -98,13 +98,13 @@ type packetObservationEvent struct {
 		ObserverID   string `json:"observerId"`
 		ObserverName string `json:"observerName"`
 		// Only set for clients that sent includeObserverKey.
-		ObserverPublicKey string  `json:"observerPublicKey,omitempty"`
-		IATA              string  `json:"iata"`
-		HeardAt           int64   `json:"heardAt"`
-		RSSI              int16   `json:"rssi"`
-		SNR               float32 `json:"snr"`
-		SourceBroker      string  `json:"sourceBroker"`
-		PathBytes         string  `json:"pathBytes"`
+		ObserverPublicKey string   `json:"observerPublicKey,omitempty"`
+		IATA              string   `json:"iata"`
+		HeardAt           int64    `json:"heardAt"`
+		RSSI              *int16   `json:"rssi,omitempty"`
+		SNR               *float32 `json:"snr,omitempty"`
+		SourceBroker      string   `json:"sourceBroker"`
+		PathBytes         string   `json:"pathBytes"`
 		PathLength        struct {
 			Raw      string `json:"raw"`
 			HashSize uint8  `json:"hashSize"`
@@ -682,8 +682,8 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 						responderNodeID, rErr := w.db.GetNodeByPubkey(ctx, resp.PubKey)
 						// don't insert our own node as a neighbor
 						if oErr == nil && rErr == nil && observerNodeID != responderNodeID {
-							rxSNR := float32(parseNumber(envelope.SNR))
-							if err := w.db.UpsertNodeNeighbor(ctx, observerNodeID, responderNodeID, iata, &rxSNR, nil); err != nil {
+							rxSNR := signalSNR(envelope.SNR)
+							if err := w.db.UpsertNodeNeighbor(ctx, observerNodeID, responderNodeID, iata, rxSNR, nil); err != nil {
 								w.log.Error("failed to upsert observer-discover neighbor", "error", err)
 							}
 						}
@@ -778,8 +778,8 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		HashSize:          packet.PathHashSize(),
 		HopCount:          packet.PathHashCount(),
 		PathBytes:         packet.Path,
-		RSSI:              int16(parseNumber(envelope.RSSI)),
-		SNR:               float32(parseNumber(envelope.SNR)),
+		RSSI:              signalRSSI(envelope.RSSI),
+		SNR:               signalSNR(envelope.SNR),
 		PropagationTimeMs: 0, // TODO: figure out how to calculate this
 		RadioFreqMHz:      radio.FreqMHz,
 		SpreadFactor:      radio.SF,
@@ -900,7 +900,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 
 	if inserted || repeat {
 		if inserted {
-			w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio, scopeID, matchedScope, pubkeyBytes, float32(parseNumber(envelope.SNR)), siteRecorded)
+			w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio, scopeID, matchedScope, pubkeyBytes, signalSNR(envelope.SNR), siteRecorded)
 		}
 		// Resolve after advert updates; suppressed copies need no endpoint lookup.
 		var resolvedSource, resolvedDestination *api.ResolvedHop

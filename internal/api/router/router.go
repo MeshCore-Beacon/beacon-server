@@ -74,7 +74,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 		Mobile: api.AdminMobileConfig{MinAppVersion: opts.MinAppVersion},
 		Web:    api.AdminWebConfig{MinWebVersion: opts.MinWebVersion},
 	}
-	info := api.Info{ServerVersion: opts.ServerVersion, CollectedNodeTelemetry: opts.NodeTelemetry != nil}
+	info := api.Info{ServerVersion: opts.ServerVersion, BuildVersion: opts.BuildVersion, BuildRevision: opts.BuildRevision, CollectedNodeTelemetry: opts.NodeTelemetry != nil}
 	if opts.MinAppVersion != "" {
 		info.MinAppVersion = &opts.MinAppVersion
 	}

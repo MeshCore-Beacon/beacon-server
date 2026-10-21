@@ -56,7 +56,7 @@ func TestForeignNodeUpdates(t *testing.T) {
 				data = binary.LittleEndian.AppendUint32(data, uint32(tc.lat))
 				data = binary.LittleEndian.AppendUint32(data, uint32(tc.lng))
 			}
-			w.handlePayloadTypeSideEffects(ctx, buildAdvertPacketWithData(t, data, false), "AAA", []byte{1}, RadioSettings{}, nil, nil, nil, 0, false)
+			w.handlePayloadTypeSideEffects(ctx, buildAdvertPacketWithData(t, data, false), "AAA", []byte{1}, RadioSettings{}, nil, nil, nil, snrTestValue(0), false)
 			for {
 				select {
 				case event := <-client.Send:

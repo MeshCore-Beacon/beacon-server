@@ -4,8 +4,11 @@
 package db
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -314,5 +317,40 @@ func TestCmiUnseededFallbackInvalidatesAfter(t *testing.T) {
 	}
 	if tr.Generation() <= during {
 		t.Fatalf("generation %d after the unseeded insert, %d during it: no invalidation after the fallback", tr.Generation(), during)
+	}
+}
+
+// Restores after a drop and policy drops are logged; the first trust is not.
+func TestTrustLogsRestoresAndPolicyDrops(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	count := func(msg string) int {
+		return strings.Count(logs.String(), `msg="`+msg+`" component=readmodel model=trust_log_test`)
+	}
+	const again, dropped = "read model trusted again: its pages are served from it", "read model untrusted: repair runs fixed rows the writers missed"
+
+	tr := NewTrust("trust_log_test", true, PacketSitesTrustPolicy)
+	tr.Earn()
+	tr.Repaired(tr.Generation())
+	if count(again) != 0 {
+		t.Fatalf("first trust logged as a restore:\n%s", logs.String())
+	}
+	tr.Invalidate("failed insert")
+	tr.Repaired(tr.Generation())
+	if count(again) != 1 {
+		t.Fatalf("restore after an invalidation logged %d times:\n%s", count(again), logs.String())
+	}
+	tr.ObserveRun(3)
+	tr.ObserveRun(2)
+	if count(dropped) != 1 || tr.Trusted() {
+		t.Fatalf("policy drop logged %d times, trusted %v:\n%s", count(dropped), tr.Trusted(), logs.String())
+	}
+	tr.ObserveRun(0)
+	tr.ObserveRun(0)
+	tr.ObserveRun(0)
+	if count(again) != 2 || !tr.Trusted() {
+		t.Fatalf("restore after clean runs logged %d restores in total, trusted %v:\n%s", count(again), tr.Trusted(), logs.String())
 	}
 }

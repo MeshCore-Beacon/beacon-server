@@ -13,6 +13,7 @@ import (
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 const evidenceKey = "f097439148601d9f3291c474f82fa64c"
@@ -66,6 +67,8 @@ func TestRouteEvidenceHandler(t *testing.T) {
 		{"/LONG/" + evidenceKey + "/observations", nil, 400},
 		{"/YOW/" + evidenceKey + "/observations", pgx.ErrNoRows, 404},
 		{"/YOW/" + evidenceKey + "/observations", errors.New("database unavailable"), 500},
+		{"/YOW/" + evidenceKey + "/observations", fmt.Errorf("list: %w", &pgconn.PgError{Code: "57014"}), 503},
+		{"/YOW/" + evidenceKey + "/observations", fmt.Errorf("list: %w", context.Canceled), 500},
 	} {
 		called := false
 		router := RoutesRouter(stubReader{getRouteEvidence: func(_ context.Context, iata, key string, q api.RouteEvidenceQuery) (*api.RouteEvidence, error) {
@@ -79,6 +82,9 @@ func TestRouteEvidenceHandler(t *testing.T) {
 		router.ServeHTTP(w, httptest.NewRequest("GET", tc.path, nil))
 		if w.Code != tc.status {
 			t.Fatalf("%s: %d %s", tc.path, w.Code, w.Body.String())
+		}
+		if (tc.status == 503) != (w.Header().Get("Retry-After") != "") {
+			t.Fatalf("%v: status %d with Retry-After %q", tc.err, w.Code, w.Header().Get("Retry-After"))
 		}
 		if tc.status == 400 && called {
 			t.Fatal("invalid request reached database")

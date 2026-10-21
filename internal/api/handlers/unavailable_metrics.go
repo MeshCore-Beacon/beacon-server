@@ -27,8 +27,11 @@ func respondUnavailableFor(w http.ResponseWriter, err error, model string) bool 
 		return false
 	}
 	reason := "not_ready"
-	if errors.Is(err, api.ErrSlowPoolBusy) {
+	switch {
+	case errors.Is(err, api.ErrSlowPoolBusy):
 		reason = "slow_pool_busy"
+	case isQueryTimeout(err):
+		reason = "timeout"
 	}
 	metrics.APIUnavailable.WithLabelValues(reason, model).Inc()
 	return true

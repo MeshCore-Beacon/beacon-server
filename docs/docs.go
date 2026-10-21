@@ -2549,6 +2549,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
                     },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
@@ -2651,6 +2657,12 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "503": {
+                        "description": "The lookup took too long: retry after Retry-After seconds",
                         "schema": {
                             "$ref": "#/definitions/internal_api_handlers.APIError"
                         }
@@ -4360,6 +4372,12 @@ const docTemplate = `{
         "github_com_MeshCore-Beacon_beacon-server_internal_api.Info": {
             "type": "object",
             "properties": {
+                "buildRevision": {
+                    "type": "string"
+                },
+                "buildVersion": {
+                    "type": "string"
+                },
                 "collectedNodeTelemetry": {
                     "description": "True when companion telemetry intake/read routes are configured, not a health assertion.",
                     "type": "boolean"

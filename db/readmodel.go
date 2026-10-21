@@ -82,6 +82,7 @@ type Trust struct {
 
 	mu              sync.Mutex
 	earned, dropped bool
+	everTrusted     bool // the boot jobs log the first trust
 	dirty, clean    int
 	gen             uint64 // writer invalidations so far
 	repairedGen     uint64 // gen covered by the last finished reconcile
@@ -154,8 +155,10 @@ func (t *Trust) ObserveRun(repaired int64) {
 	}
 	if repaired > 0 {
 		t.dirty, t.clean = t.dirty+1, 0
-		if t.dirty >= t.policy.DropAfterDirty {
+		if t.dirty >= t.policy.DropAfterDirty && !t.dropped {
 			t.dropped = true
+			slog.Warn("read model untrusted: repair runs fixed rows the writers missed", "component", "readmodel", "model", t.model,
+				"repairing_runs", t.dirty, "repaired", repaired)
 		}
 	} else {
 		t.dirty, t.clean = 0, t.clean+1
@@ -200,6 +203,10 @@ func (t *Trust) Repaired(gen uint64) {
 func (t *Trust) update() {
 	e := t.expiry.Load()
 	on := t.enabled && t.earned && !t.dropped && t.repairedGen >= t.gen && (e == 0 || time.Now().UnixNano() < e)
+	if on && !t.trusted.Load() && t.everTrusted {
+		slog.Info("read model trusted again: its pages are served from it", "component", "readmodel", "model", t.model)
+	}
+	t.everTrusted = t.everTrusted || on
 	t.trusted.Store(on)
 	v := 0.0
 	if on {

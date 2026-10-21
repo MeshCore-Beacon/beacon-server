@@ -1575,6 +1575,14 @@ RETURNING id;
 SELECT packet_hash, raw_payload FROM packets
 WHERE payload_type = 5 AND decrypted IS NOT TRUE;
 
+-- name: ListChannelHistoryPage :many
+-- Bound scanned candidates, not just undecrypted matches: the primary key
+-- advances even through pages with no decryptable history. No startup index build.
+SELECT packet_hash,
+  (CASE WHEN payload_type=5 AND decrypted IS NOT TRUE THEN raw_payload ELSE NULL END)::bytea AS raw_payload
+FROM packets WHERE packet_hash > @after_hash::bytea
+ORDER BY packet_hash LIMIT @page_limit::int;
+
 -- name: ListUndecryptedGroupTextPacketsByHash :many
 -- Like ListUndecryptedGroupTextPackets, limited to channels that just gained a key.
 SELECT packet_hash, raw_payload FROM packets
