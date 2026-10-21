@@ -74,7 +74,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 		Mobile: api.AdminMobileConfig{MinAppVersion: opts.MinAppVersion},
 		Web:    api.AdminWebConfig{MinWebVersion: opts.MinWebVersion},
 	}
-	info := api.Info{ServerVersion: opts.ServerVersion}
+	info := api.Info{ServerVersion: opts.ServerVersion, CollectedNodeTelemetry: opts.NodeTelemetry != nil}
 	if opts.MinAppVersion != "" {
 		info.MinAppVersion = &opts.MinAppVersion
 	}
@@ -133,6 +133,9 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 			r.Get("/scope-catalogues", handlers.ScopeCatalogues(opts.ScopeCatalogues))
 			r.Mount("/traces", handlers.TracesRouter(reader))
 			r.Mount("/info", handlers.InfoRouter(info))
+			if opts.NodeTelemetry != nil {
+				r.Mount("/node-telemetry", http.StripPrefix("/api/v1/node-telemetry", opts.NodeTelemetry))
+			}
 		})
 
 		// Protect the entire subtree, including its root and unknown paths.

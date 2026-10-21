@@ -28,6 +28,7 @@ type Options struct {
 	MinAppVersion        string                   // empty means no mobile app requirement
 	MinWebVersion        string                   // empty means no Beacon Web requirement
 	ServerVersion        string
+	NodeTelemetry        http.Handler // optional validating intake; nil keeps routes disabled
 	// AdminRoutes mounts operator-only subrouters at literal paths such as
 	// "/accounts". Each feature owns its dependencies, methods and handlers.
 	// The router applies authentication to every path and method in this group.

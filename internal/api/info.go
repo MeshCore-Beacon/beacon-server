@@ -22,6 +22,8 @@ type Info struct {
 	// MinWebVersion is the oldest allowed Beacon Web version (X.Y.Z); null means no requirement.
 	MinWebVersion *string `json:"minWebVersion" example:"2.0.3"`
 	ServerVersion string  `json:"serverVersion" example:"2.0.2"`
+	// True when companion telemetry intake/read routes are configured, not a health assertion.
+	CollectedNodeTelemetry bool `json:"collectedNodeTelemetry,omitempty"`
 }
 
 // HigherVersion returns the newer of two X.Y.Z versions; empty sorts oldest.
