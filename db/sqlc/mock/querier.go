@@ -1674,6 +1674,21 @@ func (mr *MockQuerierMockRecorder) ListChannelCatalogues(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChannelCatalogues", reflect.TypeOf((*MockQuerier)(nil).ListChannelCatalogues), ctx)
 }
 
+// ListChannelHistoryPage mocks base method.
+func (m *MockQuerier) ListChannelHistoryPage(ctx context.Context, arg db.ListChannelHistoryPageParams) ([]db.ListChannelHistoryPageRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListChannelHistoryPage", ctx, arg)
+	ret0, _ := ret[0].([]db.ListChannelHistoryPageRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListChannelHistoryPage indicates an expected call of ListChannelHistoryPage.
+func (mr *MockQuerierMockRecorder) ListChannelHistoryPage(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChannelHistoryPage", reflect.TypeOf((*MockQuerier)(nil).ListChannelHistoryPage), ctx, arg)
+}
+
 // ListChannelIDs mocks base method.
 func (m *MockQuerier) ListChannelIDs(ctx context.Context) ([]db.ListChannelIDsRow, error) {
 	m.ctrl.T.Helper()

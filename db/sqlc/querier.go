@@ -272,6 +272,9 @@ type Querier interface {
 	// Every channel with since, optionally by scope (no sites): a walk by id.
 	ListAllChannelMessagesSince(ctx context.Context, arg ListAllChannelMessagesSinceParams) ([]ListAllChannelMessagesSinceRow, error)
 	ListChannelCatalogues(ctx context.Context) ([]MeshmapperChannelCatalogue, error)
+	// Bound scanned candidates, not just undecrypted matches: the primary key
+	// advances even through pages with no decryptable history. No startup index build.
+	ListChannelHistoryPage(ctx context.Context, arg ListChannelHistoryPageParams) ([]ListChannelHistoryPageRow, error)
 	// Every channel key and its id, preloaded at boot for the ingest write-through.
 	ListChannelIDs(ctx context.Context) ([]ListChannelIDsRow, error)
 	// The busiest (channel, site) pairs among recent messages; the first-time verification compares their pages.

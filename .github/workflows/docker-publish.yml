@@ -56,5 +56,8 @@ jobs:
           context: .
           file: .build/Dockerfile
           push: true
+          build-args: |
+            SOURCE_REVISION=${{ github.sha }}
+            BUILD_VERSION=${{ github.ref_name }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

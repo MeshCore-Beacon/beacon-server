@@ -20,7 +20,7 @@ func TestTopologyLinksPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(context.Background())
-	if _, err = tx.Exec(ctx, "CREATE TEMP TABLE known_routes (LIKE public.known_routes INCLUDING ALL) ON COMMIT DROP"); err != nil {
+	if _, err = tx.Exec(ctx, "CREATE TEMP TABLE known_routes (LIKE known_routes INCLUDING ALL) ON COMMIT DROP"); err != nil {
 		t.Fatal(err)
 	}
 	ids := []uuid.UUID{uuid.New(), uuid.New(), uuid.New()}

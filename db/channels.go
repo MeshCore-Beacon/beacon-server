@@ -109,6 +109,21 @@ func (s *Store) ListUndecryptedGroupTextPackets(ctx context.Context) ([]ingest.U
 	return packets, nil
 }
 
+func (s *Store) ListChannelHistoryPage(ctx context.Context, after []byte, limit int32) ([]ingest.UndecryptedPacket, error) {
+	if after == nil {
+		after = []byte{}
+	}
+	rows, err := s.q.ListChannelHistoryPage(ctx, sqlc.ListChannelHistoryPageParams{AfterHash: after, PageLimit: min(max(limit, 1), 500)})
+	if err != nil {
+		return nil, err
+	}
+	packets := make([]ingest.UndecryptedPacket, 0, len(rows))
+	for _, row := range rows {
+		packets = append(packets, ingest.UndecryptedPacket{PacketHash: row.PacketHash, RawPayload: row.RawPayload})
+	}
+	return packets, nil
+}
+
 // ListUndecryptedGroupTextPacketsByHash limits the boot backfill to channels that just gained a key.
 func (s *Store) ListUndecryptedGroupTextPacketsByHash(ctx context.Context, hashes [][]byte) ([]ingest.UndecryptedPacket, error) {
 	rows, err := s.q.ListUndecryptedGroupTextPacketsByHash(ctx, hashes)
