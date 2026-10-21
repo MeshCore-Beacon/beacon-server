@@ -16,6 +16,7 @@ import (
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
+	"github.com/MeshCore-Beacon/beacon-server/internal/tracequality"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -89,7 +90,7 @@ func TestTraceTagPaginationPostgres(t *testing.T) {
 	paths := map[string][]string{"a": {"aa", "bb", "cc"}, "b": {"bb", "11", "22", "33"}, "c": {"cc"}, "d": {"dd"}}
 	snrs := map[string][]float32{"a": {1, 2, 3}, "b": {2, 3, 4, 5}, "c": {3}, "d": {4}}
 	summary := func(tag string, first, last int, count, iatas int64, kind string) api.TraceTagSummary {
-		return api.TraceTagSummary{TraceTag: strings.Repeat(tag, 8), FirstHeardAt: at(first).UnixMilli(), LastHeardAt: at(last).UnixMilli(), PacketCount: count, IATACount: iatas, TraceType: kind, PathHashes: paths[tag], SNRValues: snrs[tag]}
+		return api.TraceTagSummary{Quality: tracequality.Quality{Status: "suspect", Reasons: []string{"non_direct_trace"}}, TraceTag: strings.Repeat(tag, 8), FirstHeardAt: at(first).UnixMilli(), LastHeardAt: at(last).UnixMilli(), PacketCount: count, IATACount: iatas, TraceType: kind, PathHashes: paths[tag], SNRValues: snrs[tag]}
 	}
 	a, b, c, d := summary("a", 1, 40, 3, 2, "TRACE"), summary("b", 4, 30, 2, 1, "TRACE"), summary("c", 6, 20, 1, 1, "TRACE"), summary("d", 7, 15, 1, 1, "PING")
 	for _, tc := range []struct {
