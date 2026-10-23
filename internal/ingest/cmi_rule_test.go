@@ -70,21 +70,21 @@ func TestGroupTextAddErrorStillBroadcasts(t *testing.T) {
 	packet := &meshcore.Packet{Header: meshcore.MakeHeader(meshcore.RouteTypeFlood, meshcore.PayloadTypeGrpTxt, 0), Payload: encryptedGroupText(t, 0x11, psk, "Fixture", "test")}
 
 	// No key: the Add fails, the hash-only channel is still recorded.
-	w.handlePayloadTypeSideEffects(ctx, packet, "YOW", []byte{1}, RadioSettings{}, nil, nil, nil, 0, false)
+	w.handlePayloadTypeSideEffects(ctx, packet, "YOW", []byte{1}, RadioSettings{}, nil, nil, nil, snrTestValue(0), false)
 	if db.upsertChannelHashOnlyCalls != 1 || len(db.addCalls) != 1 {
 		t.Fatalf("hash-only upserts %d, adds %d", db.upsertChannelHashOnlyCalls, len(db.addCalls))
 	}
 
 	// A duplicate with a key: the Add fails, nothing is broadcast, nothing panics.
 	w.keys = &mapKeys{entries: map[byte][]keystore.Entry{0x11: {{Key: psk, Fingerprint: []byte{1}, Name: "fixture"}}}}
-	w.handlePayloadTypeSideEffects(ctx, packet, "YUL", []byte{2}, RadioSettings{}, nil, nil, nil, 0, false)
+	w.handlePayloadTypeSideEffects(ctx, packet, "YUL", []byte{2}, RadioSettings{}, nil, nil, nil, snrTestValue(0), false)
 	if len(db.addCalls) != 2 {
 		t.Fatalf("adds = %v", db.addCalls)
 	}
 
 	// A new message: no Add, and the event is broadcast.
 	db.insertChannelMessageResult = true
-	w.handlePayloadTypeSideEffects(ctx, packet, "YYZ", []byte{3}, RadioSettings{}, nil, nil, nil, 0, false)
+	w.handlePayloadTypeSideEffects(ctx, packet, "YYZ", []byte{3}, RadioSettings{}, nil, nil, nil, snrTestValue(0), false)
 	select {
 	case event := <-client.Send:
 		var got channelMessageEvent

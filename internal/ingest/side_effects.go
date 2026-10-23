@@ -48,6 +48,7 @@ type InsertedChannelMessage struct {
 
 // channelMessageEvent is the JSON payload for a channelMessage WS event.
 type channelMessageEvent struct {
+	IsPublic    bool                   `json:"isPublic"` // True only when decryption used the documented default Public key, never inferred from a one-byte channel hash.
 	ID          int64                  `json:"id"`
 	ChannelID   int                    `json:"channelId"`
 	ChannelHash string                 `json:"channelHash"` // hex-encoded single byte
@@ -84,7 +85,7 @@ type nodeUpdateEvent struct {
 //   - PayloadTypeGrpTxt (0x05): decrypt and store channel message if key is known
 //
 // siteRecorded says an earlier Add for this hearing found the stored message, so its site is already recorded.
-func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshcore.Packet, iata string, packetHash []byte, radio RadioSettings, scopeID *int32, matchedScope *string, observerPubkey []byte, rxSNR float32, siteRecorded bool) {
+func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshcore.Packet, iata string, packetHash []byte, radio RadioSettings, scopeID *int32, matchedScope *string, observerPubkey []byte, rxSNR *float32, siteRecorded bool) {
 	if packet.PayloadType() == meshcore.PayloadTypeAdvert {
 		advert, err := meshcore.AdvertFromBytes(packet.Payload)
 		if err != nil {
@@ -151,7 +152,7 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 			observerNodeID, oErr := w.db.GetNodeByPubkey(ctx, observerPubkey)
 			if oErr == nil && observerNodeID != nodeID {
 				snr := rxSNR
-				if err := w.db.UpsertNodeNeighbor(ctx, observerNodeID, nodeID, iata, &snr, nil); err != nil {
+				if err := w.db.UpsertNodeNeighbor(ctx, observerNodeID, nodeID, iata, snr, nil); err != nil {
 					w.log.Error("failed to upsert observer-advert neighbor", "error", err)
 				}
 			}
@@ -223,6 +224,7 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 
 		if result.Message != nil {
 			evt := channelMessageEvent{
+				IsPublic:    hex.EncodeToString(result.Entry.Key) == "8b3387e9c5cdea6ac9e5edbaa115cd72",
 				ID:          result.Message.ID,
 				Scope:       result.Message.Scope,
 				ScopeStatus: result.Message.ScopeStatus,
