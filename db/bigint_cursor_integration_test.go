@@ -24,7 +24,7 @@ import (
 
 // The four statements before the ::bigint casts, verbatim from origin/dev.
 const (
-	legacyListObserverAdverts = `SELECT 
+	legacyListObserverAdverts = `SELECT
   po.id,
   encode(po.packet_hash, 'hex') AS packet_hash_hex,
   p.payload_type,

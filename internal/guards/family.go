@@ -83,7 +83,7 @@ func Classify(r *http.Request) (Family, Class) {
 		switch {
 		case n == 1:
 			return Routes, List
-		case n == 2 && (segs[1] == "cross" || segs[1] == "search"):
+		case n == 2 && (segs[1] == "cross" || segs[1] == "search" || segs[1] == "topology"):
 			return Routes, Aggregation
 		case n == 4 && segs[3] == "observations":
 			return Routes, Entity

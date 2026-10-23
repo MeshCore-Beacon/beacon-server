@@ -227,6 +227,9 @@ type Querier interface {
 	// The hours walked stay inside the table's own [min(hour), max(hour)]; an empty table walks none
 	// (a NULL start makes generate_series return no rows).
 	GetTopNodesProbe(ctx context.Context, arg GetTopNodesProbeParams) ([]GetTopNodesProbeRow, error)
+	// Reduce route history to unique adjacent pairs before transferring it to a browser.
+	// Keep the exact window while using the surviving millisecond keyset indexes.
+	GetTopologyLinks(ctx context.Context, arg GetTopologyLinksParams) ([]GetTopologyLinksRow, error)
 	GetTransportScopeByName(ctx context.Context, name string) (int32, error)
 	GetTransportScopes(ctx context.Context) ([]GetTransportScopesRow, error)
 	// Whether any observation up to @max_id lacks a payload type. A full scan, run at most once per
@@ -269,6 +272,9 @@ type Querier interface {
 	// Every channel with since, optionally by scope (no sites): a walk by id.
 	ListAllChannelMessagesSince(ctx context.Context, arg ListAllChannelMessagesSinceParams) ([]ListAllChannelMessagesSinceRow, error)
 	ListChannelCatalogues(ctx context.Context) ([]MeshmapperChannelCatalogue, error)
+	// Bound scanned candidates, not just undecrypted matches: the primary key
+	// advances even through pages with no decryptable history. No startup index build.
+	ListChannelHistoryPage(ctx context.Context, arg ListChannelHistoryPageParams) ([]ListChannelHistoryPageRow, error)
 	// Every channel key and its id, preloaded at boot for the ingest write-through.
 	ListChannelIDs(ctx context.Context) ([]ListChannelIDsRow, error)
 	// The busiest (channel, site) pairs among recent messages; the first-time verification compares their pages.
@@ -481,6 +487,9 @@ type Querier interface {
 	ResolveRelayHashPairsP3(ctx context.Context, arg ResolveRelayHashPairsP3Params) ([]ResolveRelayHashPairsP3Row, error)
 	// Batch form of ResolvePathHashesP4 across IATAs; callers check uniqueness per IATA.
 	ResolveRelayHashPairsP4(ctx context.Context, arg ResolveRelayHashPairsP4Params) ([]ResolveRelayHashPairsP4Row, error)
+	// TRACE can terminate at companions. Preserve the full prefix (including eight
+	// bytes), and return every candidate across heard regions instead of picking one.
+	ResolveTraceHashes(ctx context.Context, arg ResolveTraceHashesParams) ([]ResolveTraceHashesRow, error)
 	RollAdvertHearings(ctx context.Context, hour pgtype.Timestamptz) error
 	// Each distinct ADVERT packet counts once, under the exact set of IATAs that heard it this hour.
 	RollAdvertSets(ctx context.Context, hour pgtype.Timestamptz) error
