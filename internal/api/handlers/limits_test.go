@@ -39,30 +39,30 @@ func TestListLimits(t *testing.T) {
 			got = limit
 			return nil, nil
 		},
-		listObservers: func(ctx context.Context, iatas []string, observerType, broker, status, name, scope string, cursor int64, limit int32) (api.Page[api.ObserverSummary], error) {
+		listObservers: func(ctx context.Context, iatas []string, observerType, broker, status, name, scope string, cursor int64, pageCursor *api.ObserverCursor, limit int32) (api.ObserverPage, error) {
 			calls++
 			got = limit
-			return api.Page[api.ObserverSummary]{}, nil
+			return api.ObserverPage{}, nil
 		},
 		listObserverAdverts: func(ctx context.Context, observerID uuid.UUID, cursor int64, limit int32) (api.Page[api.AdvertObservation], error) {
 			calls++
 			got = limit
 			return api.Page[api.AdvertObservation]{}, nil
 		},
-		listNodes: func(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, limit int32, includeNeighbors bool) (api.Page[api.NodeSummary], error) {
+		listNodes: func(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
 			calls++
 			got = limit
-			return api.Page[api.NodeSummary]{}, nil
+			return api.NodePage{}, nil
 		},
 		listNodeObservations: func(ctx context.Context, nodeID uuid.UUID, cursor int64, limit int32) (api.Page[api.PacketObservationSummary], error) {
 			calls++
 			got = limit
 			return api.Page[api.PacketObservationSummary]{}, nil
 		},
-		listPackets: func(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
+		listPackets: func(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, pageCursor *api.PacketCursor, limit int32) (api.PacketPage, error) {
 			calls++
 			got = limit
-			return api.Page[api.PacketSummary]{}, nil
+			return api.PacketPage{Page: api.Page[api.PacketSummary]{}}, nil
 		},
 		listPacketsAfterID: func(ctx context.Context, afterObservationID int64, payloadType, routeType int16, iatas []string, scope string, limit int32) ([]api.PacketSummary, error) {
 			calls++

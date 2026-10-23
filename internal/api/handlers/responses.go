@@ -5,12 +5,48 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/MeshCore-Beacon/beacon-server/internal/guards"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// respondUnavailable answers a reader error the client should retry with 503 and Retry-After, in the same shape as
+// the guards' refusals, and reports whether it did.
+func respondUnavailable(w http.ResponseWriter, err error) bool {
+	switch {
+	case errors.Is(err, api.ErrPagesNotReady):
+		guards.WriteRefusal(w, &guards.Refusal{Guard: "not_ready", Status: http.StatusServiceUnavailable, RetryAfter: 30,
+			Code: "service_unavailable", Message: "This page is not available yet. Retry later."})
+		return true
+	case errors.Is(err, api.ErrSlowPoolBusy):
+		warnSlowPoolBusy()
+		guards.WriteRefusal(w, &guards.Refusal{Guard: "slow_pool", Status: http.StatusServiceUnavailable, RetryAfter: 5,
+			Code: "service_unavailable", Message: "The server is busy with other slow requests. Retry later."})
+		return true
+	case isQueryTimeout(err):
+		guards.WriteRefusal(w, &guards.Refusal{Guard: "timeout", Status: http.StatusServiceUnavailable, RetryAfter: 10,
+			Code: "deadline_exceeded", Message: "This page took too long to load. Retry later, or ask for a shorter time range."})
+		return true
+	}
+	return false
+}
+
+// isQueryTimeout reports a statement_timeout (57014) or deadline; a client that went away is not one.
+func isQueryTimeout(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "57014" || errors.Is(err, context.DeadlineExceeded)
+}
 
 // APIError is the standard error response shape for all Beacon API endpoints.
 // Code is a stable snake_case identifier derived from the HTTP status text,
@@ -20,13 +56,19 @@ type APIError struct {
 	Message string `json:"message"` // e.g. "channel not found"
 }
 
-// respond writes a JSON response with the given status code and data.
-// Logs if encoding fails since the header is already written at that point.
+// respond encodes before committing the status, so an unsupported value cannot
+// turn a serialization error into an empty success response.
 func respond(w http.ResponseWriter, status int, data any) {
+	body, err := json.Marshal(data)
+	if err != nil {
+		slog.Error("api: failed to encode response", "component", "api", "error", err)
+		status = http.StatusInternalServerError
+		body = []byte(`{"error":{"code":"internal_server_error","message":"Unable to return this response."}}`)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		slog.Error("api: failed to encode response", "component", "api", "error", err)
+	if _, err := w.Write(append(body, '\n')); err != nil {
+		slog.Error("api: failed to write response", "component", "api", "error", err)
 	}
 }
 

@@ -129,8 +129,8 @@ func TestListNodes_OK(t *testing.T) {
 	nodeID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	r := chi.NewRouter()
 	r.Get("/nodes", listNodes(stubReader{
-		listNodes: func(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ int32, _ bool) (api.Page[api.NodeSummary], error) {
-			return api.Page[api.NodeSummary]{Items: []api.NodeSummary{{ID: nodeID}}}, nil
+		listNodes: func(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
+			return api.NodePage{Page: api.Page[api.NodeSummary]{Items: []api.NodeSummary{{ID: nodeID}}}}, nil
 		},
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/nodes", nil)
@@ -147,9 +147,9 @@ func TestListNodes_NeighborsParam_PassedThrough(t *testing.T) {
 	var gotIncludeNeighbors bool
 	r := chi.NewRouter()
 	r.Get("/nodes", listNodes(stubReader{
-		listNodes: func(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ int32, includeNeighbors bool) (api.Page[api.NodeSummary], error) {
+		listNodes: func(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, includeNeighbors bool) (api.NodePage, error) {
 			gotIncludeNeighbors = includeNeighbors
-			return api.Page[api.NodeSummary]{Items: []api.NodeSummary{{ID: nodeID, NeighborIDs: []uuid.UUID{neighborID}}}}, nil
+			return api.NodePage{Page: api.Page[api.NodeSummary]{Items: []api.NodeSummary{{ID: nodeID, NeighborIDs: []uuid.UUID{neighborID}}}}}, nil
 		},
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/nodes?neighbors=true", nil)
@@ -181,9 +181,9 @@ func TestListNodes_NeighborsParam_BareFlagMeansTrue(t *testing.T) {
 	var gotIncludeNeighbors bool
 	r := chi.NewRouter()
 	r.Get("/nodes", listNodes(stubReader{
-		listNodes: func(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ int32, includeNeighbors bool) (api.Page[api.NodeSummary], error) {
+		listNodes: func(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, includeNeighbors bool) (api.NodePage, error) {
 			gotIncludeNeighbors = includeNeighbors
-			return api.Page[api.NodeSummary]{}, nil
+			return api.NodePage{}, nil
 		},
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/nodes?neighbors", nil)
@@ -201,9 +201,9 @@ func TestListNodes_PubkeyPrefixParam_PassedThrough(t *testing.T) {
 	var gotPubkeyPrefix string
 	r := chi.NewRouter()
 	r.Get("/nodes", listNodes(stubReader{
-		listNodes: func(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, pubkeyPrefix, _, _ string, _ int64, _ int32, _ bool) (api.Page[api.NodeSummary], error) {
+		listNodes: func(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, pubkeyPrefix, _, _ string, _ int64, _ *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
 			gotPubkeyPrefix = pubkeyPrefix
-			return api.Page[api.NodeSummary]{}, nil
+			return api.NodePage{}, nil
 		},
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/nodes?pubkeyPrefix=AB12", nil)
@@ -324,4 +324,47 @@ func TestListNodeObservations_OK(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
+}
+
+func TestNodesCursorPrecedence(t *testing.T) {
+	const valid = "v1:1792442625019123:0b7e2c4a-5f1d-4c3e-9a2b-8d6f1e0c3a57"
+	var called bool
+	var gotCursor int64
+	var gotPage *api.NodeCursor
+	next := "v1:1:0b7e2c4a-5f1d-4c3e-9a2b-8d6f1e0c3a57"
+	reader := stubReader{
+		listNodes: func(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, cursor int64, pageCursor *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
+			called, gotCursor, gotPage = true, cursor, pageCursor
+			return api.NodePage{Page: api.Page[api.NodeSummary]{Items: []api.NodeSummary{}}, NextPageCursor: &next}, nil
+		},
+	}
+	serve := func(url string) *httptest.ResponseRecorder {
+		called, gotCursor, gotPage = false, 0, nil
+		r := chi.NewRouter()
+		r.Get("/nodes", listNodes(reader))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, url, nil))
+		return w
+	}
+
+	w := serve("/nodes?pageCursor=" + valid + "&cursor=1792442625000")
+	if w.Code != http.StatusOK || !called || gotCursor != 1792442625000 || gotPage == nil || gotPage.String() != valid {
+		t.Fatalf("both sent: status %d, cursor %d, pageCursor %v", w.Code, gotCursor, gotPage)
+	}
+	if !strings.Contains(w.Body.String(), `"nextPageCursor":"`+next+`"`) {
+		t.Fatalf("body lacks nextPageCursor: %s", w.Body.String())
+	}
+
+	w = serve("/nodes?pageCursor=" + next)
+	if w.Code != http.StatusOK || gotPage == nil || gotPage.LastSeen.UnixMicro() != 1 || gotPage.ID != uuid.MustParse("0b7e2c4a-5f1d-4c3e-9a2b-8d6f1e0c3a57") {
+		t.Fatalf("v1:1:<uuid>: status %d, pageCursor %v", w.Code, gotPage)
+	}
+
+	for _, url := range []string{"/nodes?pageCursor=garbage", "/nodes?pageCursor=v1:1:ab01", "/nodes?pageCursor=garbage&region=bc"} {
+		wantError(t, serve(url), http.StatusBadRequest, "invalid pageCursor")
+		if called {
+			t.Fatalf("%s: reader called", url)
+		}
+	}
+	wantError(t, serve("/nodes?cursor=abc&pageCursor="+valid), http.StatusBadRequest, "cursor must be an integer")
 }

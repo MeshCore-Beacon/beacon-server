@@ -15,6 +15,7 @@ import (
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -70,7 +71,8 @@ ANALYZE nodes; ANALYZE node_iatas; ANALYZE node_neighbors; ANALYZE observers; AN
 		t.Fatal(err)
 	}
 	query := sqlc.New(tx)
-	base := sqlc.ListNodesParams{Column1: int16(0), Column3: "any", Column4: "any", Column6: "", Limit: 51}
+	page1 := pgtype.Timestamptz{InfinityModifier: pgtype.Infinity, Valid: true}
+	base := sqlc.ListNodesParams{Column1: int16(0), Column3: "any", Column4: "any", Column6: "", Column7: page1, Limit: 51, Column12: uuid.Nil}
 	for _, tc := range []struct {
 		name   string
 		change func(*sqlc.ListNodesParams)
@@ -154,7 +156,7 @@ ANALYZE nodes; ANALYZE node_iatas; ANALYZE node_neighbors; ANALYZE observers; AN
 	sql := strings.Split(strings.Split(queries, "-- name: ListNodes :many\n")[1], "\n-- name:")[0]
 	var planJSON []byte
 	err = tx.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "+sql,
-		int16(0), []string(nil), "any", "any", []byte(nil), "", nil, int32(51), "", false, "").Scan(&planJSON)
+		int16(0), []string(nil), "any", "any", []byte(nil), "", page1, int32(51), "", false, "", uuid.Nil).Scan(&planJSON)
 	if err != nil {
 		t.Fatal(err)
 	}

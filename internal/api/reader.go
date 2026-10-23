@@ -87,7 +87,8 @@ type Reader interface {
 	// All filter params are optional — pass empty string or nil to skip a filter.
 	// status is "online" or "offline" derived from last_status_at recency.
 	// cursor is last_seen epoch ms of the last observer; pass 0 to start from the beginning.
-	ListObservers(ctx context.Context, iatas []string, observerType, broker, status, name, scope string, cursor int64, limit int32) (Page[ObserverSummary], error)
+	// pageCursor wins over cursor.
+	ListObservers(ctx context.Context, iatas []string, observerType, broker, status, name, scope string, cursor int64, pageCursor *ObserverCursor, limit int32) (ObserverPage, error)
 
 	// GetObserver returns full detail for a single observer by UUID.
 	// Returns nil, pgx.ErrNoRows if the observer is not found.
@@ -117,7 +118,8 @@ type Reader interface {
 	// When includeNeighbors is true, each NodeSummary's NeighborIDs field is
 	// populated with the distinct set of neighbor node IDs (across all
 	// IATAs); otherwise it's left nil to avoid the extra aggregation.
-	ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, limit int32, includeNeighbors bool) (Page[NodeSummary], error)
+	// cursor is last_seen epoch ms of the last node; pageCursor wins over it.
+	ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *NodeCursor, limit int32, includeNeighbors bool) (NodePage, error)
 
 	// GetNode returns full detail for a single node by UUID.
 	// Returns nil, pgx.ErrNoRows if the node is not found.
@@ -138,7 +140,8 @@ type Reader interface {
 	// cursor is epoch ms in either case; pass 0 to start from the beginning.
 	// payloadTypes/routeTypes/scopes are OR'd within each filter, ANDed across filters; pass
 	// nil/empty to skip a filter.
-	ListPackets(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (Page[PacketSummary], error)
+	// pageCursor wins over cursor on the global path; the IATA path ignores it.
+	ListPackets(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, pageCursor *PacketCursor, limit int32) (PacketPage, error)
 
 	// SearchPacketsByHashPrefix lists packets whose hash is in [lo, hi) (nil hi is unbounded),
 	// newest last_heard_at first. Other filters behave as in ListPackets; iatas only
@@ -230,6 +233,8 @@ type Reader interface {
 
 	// GetTraceByTag returns all packets for a given trace tag with resolved routes.
 	GetTraceByTag(ctx context.Context, tag string) (*TraceDetail, error)
+
+	GetTopologyLinks(ctx context.Context, iatas []string, since, until time.Time) (*TopologyLinks, error)
 
 	// ListKnownRoutes returns known routes filtered by IATA and optional hop count.
 	// A nonzero cursorID breaks ties within the cursor's millisecond.

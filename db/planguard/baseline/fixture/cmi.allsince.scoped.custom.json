@@ -1,0 +1,16 @@
+[
+ "Limit",
+ "  Sort",
+ "    Nested Loop (Semi)",
+ "      Nested Loop (Left)",
+ "        Nested Loop",
+ "          Hash Join",
+ "            Bitmap Heap Scan on packets p",
+ "              Bitmap Index Scan using idx_packets_scope",
+ "            Hash",
+ "              Seq Scan on channel_messages cm",
+ "          Index Scan on channels c using channels_pkey scan=Forward",
+ "        Materialize",
+ "          Index Scan on transport_scopes ts using transport_scopes_pkey scan=Forward",
+ "      Index Only Scan on packet_observations po using idx_observations_packet scan=Forward"
+]

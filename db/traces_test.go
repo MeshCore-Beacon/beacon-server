@@ -99,7 +99,7 @@ func TestGetTraceByTag_WithPacket(t *testing.T) {
 	firstHeard := pgtype.Timestamptz{Time: time.UnixMilli(1700000000000), Valid: true}
 	lastHeard := pgtype.Timestamptz{Time: time.UnixMilli(1700000001000), Valid: true}
 	// aabbccdd is valid hex for the packet hash
-	parsedPayload := []byte(`{"pathHashes":["aabb"],"snrValues":[15.0],"flags":0}`)
+	parsedPayload := []byte(`{"pathHashes":["aabb"],"snrValues":[15.0],"flags":1}`)
 
 	scopeName := "default"
 	mock.EXPECT().
@@ -107,7 +107,8 @@ func TestGetTraceByTag_WithPacket(t *testing.T) {
 		Return([]sqlc.GetPacketsByTraceTagRow{
 			{
 				PacketHashHex: "aabbccdd",
-				RouteType:     1,
+				RouteType:     2,
+				RawPayload:    []byte{0, 0, 0, 0, 0, 0, 0, 0, 1, 0xaa, 0xbb},
 				ScopeName:     &scopeName,
 				FirstHeardAt:  firstHeard,
 				LastHeardAt:   lastHeard,
@@ -117,11 +118,11 @@ func TestGetTraceByTag_WithPacket(t *testing.T) {
 		}, nil)
 
 	mock.EXPECT().
-		ResolvePathHashesP2(gomock.Any(), sqlc.ResolvePathHashesP2Params{
-			Iata:    "YVR",
-			Column2: [][]byte{{0xaa, 0xbb}},
+		ResolveTraceHashes(gomock.Any(), sqlc.ResolveTraceHashesParams{
+			Iatas:  []string{"YVR"},
+			Hashes: [][]byte{{0xaa, 0xbb}},
 		}).
-		Return([]sqlc.ResolvePathHashesP2Row{}, nil)
+		Return([]sqlc.ResolveTraceHashesRow{}, nil)
 
 	store := &Store{q: mock}
 	detail, err := store.GetTraceByTag(context.Background(), "trace-001")
