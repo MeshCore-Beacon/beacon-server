@@ -2680,13 +2680,14 @@ func (q *Queries) GetTopNodesProbe(ctx context.Context, arg GetTopNodesProbePara
 
 const getTopologyLinks = `-- name: GetTopologyLinks :many
 WITH pairs AS (
- SELECT h.node_id AS a, r.node_ids[(h.ord+1)::int] AS b
- FROM known_routes r CROSS JOIN LATERAL unnest(r.node_ids) WITH ORDINALITY h(node_id,ord)
+ SELECT h.a, h.b
+ FROM known_routes r CROSS JOIN LATERAL
+   ROWS FROM (unnest(r.node_ids),unnest(r.node_ids[array_lower(r.node_ids,1)+1:])) h(a,b)
  WHERE date_trunc('milliseconds',r.last_seen,'UTC') >= date_trunc('milliseconds',$2::timestamptz,'UTC')
    AND date_trunc('milliseconds',r.last_seen,'UTC') <= date_trunc('milliseconds',$3::timestamptz,'UTC')
    AND r.last_seen >= $2::timestamptz AND r.last_seen < $3::timestamptz
    AND (COALESCE(cardinality($4::bpchar[]),0)=0 OR r.iata=ANY($4::bpchar[]))
-   AND h.ord < cardinality(r.node_ids)
+   AND cardinality(r.node_ids)>1
 )
 SELECT LEAST(a,b)::uuid AS from_id, GREATEST(a,b)::uuid AS to_id
 FROM pairs WHERE a IS NOT NULL AND b IS NOT NULL AND a<>b
