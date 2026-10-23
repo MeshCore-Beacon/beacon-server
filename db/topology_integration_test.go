@@ -4,6 +4,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	"github.com/google/uuid"
 	"testing"
@@ -73,5 +74,28 @@ func TestTopologyLinksPostgres(t *testing.T) {
 	}
 	if exact.Links[0] != want {
 		t.Fatalf("boundary widened: %v, want %v", exact.Links[0], want)
+	}
+	// Adjacent values follow array storage order, not an assumed lower bound.
+	// A NULL in a non-one-based array must never manufacture a bridge.
+	for _, tc := range []struct {
+		path string
+		want int
+	}{
+		{fmt.Sprintf("[0:2]={%s,%s,%s}", ids[0], ids[1], ids[2]), 2},
+		{fmt.Sprintf("[5:7]={%s,%s,%s}", ids[0], ids[1], ids[2]), 2},
+		{fmt.Sprintf("[0:2]={%s,NULL,%s}", ids[0], ids[2]), 0},
+	} {
+		if _, err := tx.Exec(ctx, "TRUNCATE pg_temp.known_routes"); err != nil {
+			t.Fatal(err)
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO known_routes(path_key,node_ids,hash_prefix,iata,hop_count,first_seen,last_seen)
+		 VALUES ('\xaa',$1::uuid[],ARRAY['\xaa'::bytea],'YKF',3,$2,$2)`, tc.path, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := store.GetTopologyLinks(ctx, nil, now, now.Add(time.Minute))
+		if err != nil || len(got.Links) != tc.want {
+			t.Fatalf("non-default array bound: %+v, want %d links, error %v", got, tc.want, err)
+		}
 	}
 }
