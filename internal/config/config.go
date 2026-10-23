@@ -26,34 +26,35 @@ import (
 
 // Config is the top-level structure of the Beacon config file.
 type Config struct {
-	Auth        AuthConfig            `yaml:"auth"`
-	Backup      BackupConfig          `yaml:"backup"`
-	Log         LogConfig             `yaml:"log"`
-	Server      ServerConfig          `yaml:"server"`
-	IATAs       map[string]IATAConfig `yaml:"iatas"`
-	Regions     []RegionConfig        `yaml:"regions"`
-	ChannelKeys ChannelKeysConfig     `yaml:"channel_keys"`
-	Telemetry   TelemetryConfig       `yaml:"telemetry"`
-	WebSocket   WebSocketConfig       `yaml:"websocket"`
-	Packets     PacketsConfig         `yaml:"packets"`
-	Routes      RoutesConfig          `yaml:"routes"`
-	Ingest      IngestFilterConfig    `yaml:"ingest"`
-	Scopes      []ScopeConfig         `yaml:"scopes"`
-	MeshMapper  MeshMapperConfig      `yaml:"meshmapper"`
-	Cache       CacheConfig           `yaml:"cache"`
-	CORS        CORSConfig            `yaml:"cors"`
-	RateLimit   RateLimitConfig       `yaml:"ratelimit"`
-	Background  BackgroundConfig      `yaml:"background"`
-	Presence    PresenceConfig        `yaml:"presence"`
-	Nodes       NodesConfig           `yaml:"nodes"`
-	Observers   ObserversConfig       `yaml:"observers"`
-	Analytics   AnalyticsConfig       `yaml:"analytics"`
-	Mobile      MobileConfig          `yaml:"mobile"`
-	Web         WebConfig             `yaml:"web"`
-	Database    DatabaseConfig        `yaml:"database"`
-	Guards      GuardsConfig          `yaml:"guards"`
-	Planguard   PlanguardConfig       `yaml:"planguard"`
-	ReadModels  ReadModelsConfig      `yaml:"readmodels"`
+	Auth          AuthConfig            `yaml:"auth"`
+	Backup        BackupConfig          `yaml:"backup"`
+	Log           LogConfig             `yaml:"log"`
+	Server        ServerConfig          `yaml:"server"`
+	IATAs         map[string]IATAConfig `yaml:"iatas"`
+	Regions       []RegionConfig        `yaml:"regions"`
+	ChannelKeys   ChannelKeysConfig     `yaml:"channel_keys"`
+	Telemetry     TelemetryConfig       `yaml:"telemetry"`
+	WebSocket     WebSocketConfig       `yaml:"websocket"`
+	Packets       PacketsConfig         `yaml:"packets"`
+	Routes        RoutesConfig          `yaml:"routes"`
+	Ingest        IngestFilterConfig    `yaml:"ingest"`
+	Scopes        []ScopeConfig         `yaml:"scopes"`
+	MeshMapper    MeshMapperConfig      `yaml:"meshmapper"`
+	Cache         CacheConfig           `yaml:"cache"`
+	CORS          CORSConfig            `yaml:"cors"`
+	RateLimit     RateLimitConfig       `yaml:"ratelimit"`
+	Background    BackgroundConfig      `yaml:"background"`
+	Presence      PresenceConfig        `yaml:"presence"`
+	Nodes         NodesConfig           `yaml:"nodes"`
+	Observers     ObserversConfig       `yaml:"observers"`
+	Analytics     AnalyticsConfig       `yaml:"analytics"`
+	Mobile        MobileConfig          `yaml:"mobile"`
+	Web           WebConfig             `yaml:"web"`
+	Database      DatabaseConfig        `yaml:"database"`
+	Guards        GuardsConfig          `yaml:"guards"`
+	Planguard     PlanguardConfig       `yaml:"planguard"`
+	ReadModels    ReadModelsConfig      `yaml:"readmodels"`
+	NodeTelemetry NodeTelemetryConfig   `yaml:"node_telemetry"`
 }
 
 // ReadModelsConfig switches serving pages from each read model and paces their one-off backfills.
@@ -557,6 +558,9 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	if err := cfg.validateDurations(); err != nil {
+		return nil, err
+	}
+	if _, err := ParseNodeTelemetryURL(cfg.NodeTelemetry.GatewayURL); err != nil {
 		return nil, err
 	}
 	for i, prefix := range cfg.Server.TrustedProxies {

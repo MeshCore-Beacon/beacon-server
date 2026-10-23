@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -377,6 +378,18 @@ func (cr *CachedReader) SearchCrossIATARoutes(ctx context.Context, q api.CrossRo
 // ListTraceTags implements [api.Reader].
 func (cr *CachedReader) ListTraceTags(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, cursorTag string, limit int32) ([]api.TraceTagSummary, error) {
 	return cr.inner.ListTraceTags(ctx, iatas, scope, traceType, since, until, cursor, cursorTag, limit)
+}
+
+func (cr *CachedReader) GetTopologyLinks(ctx context.Context, iatas []string, since, until time.Time) (*api.TopologyLinks, error) {
+	regions := append([]string{}, iatas...)
+	sort.Strings(regions)
+	regions = slices.Compact(regions)
+	key := fmt.Sprintf("beacon:topology:v2:%s:%d:%d", strings.Join(regions, ","), since.UnixNano(), until.UnixNano())
+	// API windows already change every minute. Expiring earlier repeats the same
+	// expensive aggregation without advancing its window.
+	return getOrSet(ctx, cr.c, key, time.Minute, func(ctx context.Context) (*api.TopologyLinks, error) {
+		return cr.inner.GetTopologyLinks(ctx, iatas, since, until)
+	})
 }
 
 func (cr *CachedReader) ListObserverDirectory(ctx context.Context, query api.ObserverDirectoryQuery) (*api.ObserverDirectory, error) {
