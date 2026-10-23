@@ -51,8 +51,9 @@ func NodesRouter(reader api.Reader) http.Handler {
 //	@Param		supportsMultibyteTraces	query		bool	false	"Filter by multibyte trace support (true/false); omit for no filter"
 //	@Param		neighbors				query		bool	false	"Include each node's known neighbor IDs (neighborIds field). Bare ?neighbors or ?neighbors=true enables it; omit/false for none"
 //	@Param		cursor					query		int		false	"last_seen epoch ms of last item for pagination"
+//	@Param		pageCursor				query		string	false	"Opaque nextPageCursor from a previous response; keeps millisecond ties. Wins over cursor when both are sent"
 //	@Param		limit					query		int		false	"Max results (default 50); must be positive, values above 200 are clamped" minimum(1) maximum(200)
-//	@Success	200						{object}	api.Page[api.NodeSummary]
+//	@Success	200						{object}	api.NodePage
 //	@Failure	400						{object}	handlers.APIError
 //	@Failure	500						{object}	handlers.APIError
 //	@Router		/nodes [get]
@@ -82,6 +83,15 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 				return
 			}
 			cursor = c
+		}
+		var pageCursor *api.NodeCursor
+		if raw := r.URL.Query().Get("pageCursor"); raw != "" {
+			pc, err := api.ParseNodeCursor(raw)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "invalid pageCursor")
+				return
+			}
+			pageCursor = pc
 		}
 		var pubkey []byte
 		if pubkeyParam := strings.ToLower(r.URL.Query().Get("pubkey")); pubkeyParam != "" {
@@ -140,7 +150,7 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 				includeNeighbors = b
 			}
 		}
-		nodes, err := reader.ListNodes(r.Context(), nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, cursor, limit, includeNeighbors)
+		nodes, err := reader.ListNodes(r.Context(), nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, cursor, pageCursor, limit, includeNeighbors)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "internal server error")
 			return

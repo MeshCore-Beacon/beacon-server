@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -320,8 +321,8 @@ func (cr *CachedReader) ListMessagesAfterID(ctx context.Context, afterID int64, 
 }
 
 // ListNodes implements [api.Reader].
-func (cr *CachedReader) ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, limit int32, includeNeighbors bool) (api.Page[api.NodeSummary], error) {
-	return cr.inner.ListNodes(ctx, nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, cursor, limit, includeNeighbors)
+func (cr *CachedReader) ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
+	return cr.inner.ListNodes(ctx, nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, cursor, pageCursor, limit, includeNeighbors)
 }
 
 // ListNodeObservations implements [api.Reader].
@@ -330,8 +331,8 @@ func (cr *CachedReader) ListNodeObservations(ctx context.Context, nodeID uuid.UU
 }
 
 // ListObservers implements [api.Reader].
-func (cr *CachedReader) ListObservers(ctx context.Context, iatas []string, observerType, broker, status, name, scope string, cursor int64, limit int32) (api.Page[api.ObserverSummary], error) {
-	return cr.inner.ListObservers(ctx, iatas, observerType, broker, status, name, scope, cursor, limit)
+func (cr *CachedReader) ListObservers(ctx context.Context, iatas []string, observerType, broker, status, name, scope string, cursor int64, pageCursor *api.ObserverCursor, limit int32) (api.ObserverPage, error) {
+	return cr.inner.ListObservers(ctx, iatas, observerType, broker, status, name, scope, cursor, pageCursor, limit)
 }
 
 // ListObserverAdverts implements [api.Reader].
@@ -345,8 +346,8 @@ func (cr *CachedReader) SearchPacketsByHashPrefix(ctx context.Context, lo, hi []
 }
 
 // ListPackets implements [api.Reader].
-func (cr *CachedReader) ListPackets(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
-	return cr.inner.ListPackets(ctx, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
+func (cr *CachedReader) ListPackets(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, pageCursor *api.PacketCursor, limit int32) (api.PacketPage, error) {
+	return cr.inner.ListPackets(ctx, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, pageCursor, limit)
 }
 
 // ListPacketsAfterID implements [api.Reader].
@@ -377,6 +378,18 @@ func (cr *CachedReader) SearchCrossIATARoutes(ctx context.Context, q api.CrossRo
 // ListTraceTags implements [api.Reader].
 func (cr *CachedReader) ListTraceTags(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, cursorTag string, limit int32) ([]api.TraceTagSummary, error) {
 	return cr.inner.ListTraceTags(ctx, iatas, scope, traceType, since, until, cursor, cursorTag, limit)
+}
+
+func (cr *CachedReader) GetTopologyLinks(ctx context.Context, iatas []string, since, until time.Time) (*api.TopologyLinks, error) {
+	regions := append([]string{}, iatas...)
+	sort.Strings(regions)
+	regions = slices.Compact(regions)
+	key := fmt.Sprintf("beacon:topology:v2:%s:%d:%d", strings.Join(regions, ","), since.UnixNano(), until.UnixNano())
+	// API windows already change every minute. Expiring earlier repeats the same
+	// expensive aggregation without advancing its window.
+	return getOrSet(ctx, cr.c, key, time.Minute, func(ctx context.Context) (*api.TopologyLinks, error) {
+		return cr.inner.GetTopologyLinks(ctx, iatas, since, until)
+	})
 }
 
 func (cr *CachedReader) ListObserverDirectory(ctx context.Context, query api.ObserverDirectoryQuery) (*api.ObserverDirectory, error) {

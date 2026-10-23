@@ -1,0 +1,1082 @@
+# Copyright 2026 Beacon Contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Global /packets pages: the single ListPackets statement the server ran before (old:) against the per-shape
+# statements that replace it (new:), one pair per corpus case of the packets_global group (same ids without "pk.").
+# The ref gets the params the server used to send for the request (raw type and scope lists, NULL for an absent
+# filter, the millisecond cursor, limit+1); the cand gets the params it sends now (normalised lists, -infinity and
+# infinity for absent bounds, the cursor as a timestamp and an empty hash, or the exact page cursor).
+#
+# Needs the overlay overlay/packets_global.sql (schema t_s5a). Run it with walks:
+#   planguard diff --old-ref origin/dev --cases db/planguard/diff/packets_global.yaml --walk 1,2,3,web --dsn ...
+# then DROP SCHEMA t_s5a CASCADE.
+#
+# Only the named classes may differ: rows tied on last_heard_at come out in packet_hash order (tie_order), the
+# latest observer of a packet whose newest observations share heard_at is the highest id (latest_observer_tie),
+# and a page cursor returns the rows of its own millisecond that the legacy cursor skips (pagecursor_tie_rows).
+#
+# The walk pairs page through the new statements with their exact cursor at 1, 2, 3 and web_limit rows a page
+# and compare every page with an oracle: the old statement's filter in the exact (last_heard_at, packet_hash)
+# order, read as one page of max_rows. A walk must return the oracle's rows, each once, in its order.
+#
+# The cases use fixed times from a 2026-10-18 snapshot (T0 17:00 UTC): they mean something only on a copy that
+# holds data around those times.
+batches:
+  - name: packets_global
+    search_path: "t_s5a, public"
+    statements:
+      old: "old:ListPackets"
+      page: "new:ListPacketsPage"
+      types: "new:ListPacketsByTypes"
+      scopes: "new:ListPacketsByScopes"
+      scopes_types: "new:ListPacketsByScopesTypes"
+      window: "new:ListPacketsWindow"
+      window_scoped: "new:ListPacketsWindowScoped"
+      oracle_page: "file:sql/oracle/OraclePacketsPage.sql"
+      oracle_types: "file:sql/oracle/OraclePacketsByTypes.sql"
+      oracle_scopes_types: "file:sql/oracle/OraclePacketsByScopesTypes.sql"
+      oracle_window: "file:sql/oracle/OraclePacketsWindow.sql"
+    pairs:
+      # [pt - rt - scopes 0 since - until - cursor_ms 1792342797721 limit 50]
+      - id: e_at_tied
+        ref: {stmt: old, params: [null, null, null, null, "2026-10-18 16:59:57.721+00", 51, null]}
+        cands:
+          - {stmt: page, params: ["2026-10-18 16:59:57.721+00", "\\x", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: &latest [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte,
+          latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        expect: {page: identical}
+      # cursor 1ms [pt - rt - scopes 0 since - until - cursor_ms 1 limit 50]
+      - id: e_c1
+        ref: {stmt: old, params: [null, null, null, null, "1970-01-01 00:00:00.001+00", 51, null]}
+        cands:
+          - {stmt: page, params: ["1970-01-01 00:00:00.001+00", "\\x", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {page: identical}
+      # cursor year 9999 [pt - rt - scopes 0 since - until - cursor_ms 253402300799999 limit 50]
+      - id: e_c9999
+        ref: {stmt: old, params: [null, null, null, null, "9999-12-31 23:59:59.999+00", 51, null]}
+        cands:
+          - {stmt: page, params: ["9999-12-31 23:59:59.999008+00", "\\x", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {page: identical}
+      # cursor<0 [pt - rt - scopes 0 since - until - cursor_ms -5 limit 50]
+      - id: e_cneg
+        ref: {stmt: old, params: [null, null, null, null, null, 51, null]}
+        cands:
+          - {stmt: page, params: [infinity, "\\x", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {page: identical}
+      # [pt - rt - scopes 0 since - until - cursor_ms 1792170000000 limit 50]
+      - id: e_deep
+        ref: {stmt: old, params: [null, null, null, null, "2026-10-16 17:00:00+00", 51, null]}
+        cands:
+          - {stmt: page, params: ["2026-10-16 17:00:00+00", "\\x", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {page: allowed}
+      # [pt - rt - scopes 0 since - until - cursor_ms 1792170000000 limit 200]
+      - id: e_deep200
+        ref: {stmt: old, params: [null, null, null, null, "2026-10-16 17:00:00+00", 201, null]}
+        cands:
+          - {stmt: page, params: ["2026-10-16 17:00:00+00", "\\x", 201]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {page: allowed}
+      # [pt - rt - scopes 0 since - until - cursor_ms 0 limit 1]
+      - id: e_l1
+        ref: {stmt: old, params: [null, null, null, null, null, 2, null]}
+        cands:
+          - {stmt: page, params: [infinity, "\\x", 2]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {page: identical}
+      # [pt - rt - scopes 0 since - until - cursor_ms 0 limit 200]
+      - id: e_l200
+        ref: {stmt: old, params: [null, null, null, null, null, 201, null]}
+        cands:
+          - {stmt: page, params: [infinity, "\\x", 201]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {page: allowed}
+      # [pt - rt - scopes 0 since - until - cursor_ms 0 limit 50]
+      - id: e_l50
+        ref: {stmt: old, params: [null, null, null, null, null, 51, null]}
+        cands:
+          - {stmt: page, params: [infinity, "\\x", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {page: identical}
+      # tail [pt - rt - scopes 0 since - until - cursor_ms 1792083600050 limit 50]
+      - id: e_tail
+        ref: {stmt: old, params: [null, null, null, null, "2026-10-15 17:00:00.05+00", 51, null]}
+        cands:
+          - {stmt: page, params: ["2026-10-15 17:00:00.05+00", "\\x", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {page: identical}
+      # tied ms on top [pt - rt - scopes 0 since - until - cursor_ms 1792342797722 limit 1]
+      - id: e_tiedms_l1
+        ref: {stmt: old, params: [null, null, null, null, "2026-10-18 16:59:57.722+00", 2, null]}
+        cands:
+          - {stmt: page, params: ["2026-10-18 16:59:57.722+00", "\\x", 2]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {page: identical}
+      # [pt - rt - scopes 0 since - until - cursor_ms 1792342797722 limit 2]
+      - id: e_tiedms_l2
+        ref: {stmt: old, params: [null, null, null, null, "2026-10-18 16:59:57.722+00", 3, null]}
+        cands:
+          - {stmt: page, params: ["2026-10-18 16:59:57.722+00", "\\x", 3]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {page: identical}
+      # us tie [pt - rt - scopes 0 since - until - cursor_ms 1792341411653 limit 1]
+      - id: e_ustie_l1
+        ref: {stmt: old, params: [null, null, null, null, "2026-10-18 16:36:51.653+00", 2, null]}
+        cands:
+          - {stmt: page, params: ["2026-10-18 16:36:51.653+00", "\\x", 2]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {page: identical}
+      # [pt - rt - scopes 0 since - until - cursor_ms 1792341411653 limit 2]
+      - id: e_ustie_l2
+        ref: {stmt: old, params: [null, null, null, null, "2026-10-18 16:36:51.653+00", 3, null]}
+        cands:
+          - {stmt: page, params: ["2026-10-18 16:36:51.653+00", "\\x", 3]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {page: identical}
+      # inverted pt11 rt2 [pt - rt - scopes 0 since 2026-10-18 10:19:12.796+00 until 2026-10-18 10:24:12.796+00 cursor_ms 0 limit 50]
+      - id: inv_all_5m
+        ref: {stmt: old, params: [null, null, "2026-10-18 10:19:12.796+00", "2026-10-18 10:24:12.796+00", null, 51, null]}
+        cands:
+          - {stmt: window, params: ["2026-10-18 10:19:12.796+00", infinity, "\\x", "2026-10-18 10:24:12.796+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window: identical}
+      # inverted pt1 rt2 [pt {1} rt - scopes 0 since 2026-10-18 05:59:27.384+00 until 2026-10-18 06:09:27.384+00 cursor_ms 0 limit 50]
+      - id: inv_pt1_10m
+        ref: {stmt: old, params: ["{1}", null, "2026-10-18 05:59:27.384+00", "2026-10-18 06:09:27.384+00", null, 51, null]}
+        cands:
+          - {stmt: window, params: ["2026-10-18 05:59:27.384+00", infinity, "\\x", "2026-10-18 06:09:27.384+00", "{1}", "{0,1,2,3}", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window: identical}
+      # inverted pt4 rt2, deep [pt {4} rt {2} scopes 0 since 2026-10-16 20:36:52.971+00 until 2026-10-16 21:36:52.971+00 cursor_ms 0 limit 50]
+      - id: inv_pt4rt2_1h
+        ref: {stmt: old, params: ["{4}", "{2}", "2026-10-16 20:36:52.971+00", "2026-10-16 21:36:52.971+00", null, 51, null]}
+        cands:
+          - {stmt: window, params: ["2026-10-16 20:36:52.971+00", infinity, "\\x", "2026-10-16 21:36:52.971+00", "{4}", "{2}", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window: identical}
+      # inverted pt5 rt0 row k<since [pt - rt {0} scopes 0 since 2026-10-17 17:23:53.466+00 until 2026-10-17 17:55:53.466+00 cursor_ms 0 limit 200]
+      - id: inv_rt0_32m
+        ref: {stmt: old, params: [null, "{0}", "2026-10-17 17:23:53.466+00", "2026-10-17 17:55:53.466+00", null, 201, null]}
+        cands:
+          - {stmt: window, params: ["2026-10-17 17:23:53.466+00", infinity, "\\x", "2026-10-17 17:55:53.466+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0}", 201]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window: identical}
+      # cursor = since: only the inverted row [pt - rt {0} scopes 0 since 2026-10-17 17:23:53.466+00 until 2026-10-17 17:55:53.466+00 cursor_ms 1792257833466 limit 200]
+      - id: inv_rt0_cur
+        ref: {stmt: old, params: [null, "{0}", "2026-10-17 17:23:53.466+00", "2026-10-17 17:55:53.466+00", "2026-10-17 17:23:53.466+00", 201, null]}
+        cands:
+          - {stmt: window, params: ["2026-10-17 17:23:53.466+00", "2026-10-17 17:23:53.466+00", "\\x", "2026-10-17 17:55:53.466+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0}", 201]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window: identical}
+      # scoped window at an inverted ms (row has no scope) [pt - rt - scopes 1 since 2026-10-17 06:10:14.61+00 until 2026-10-17 07:10:14.61+00 cursor_ms 0 limit 50]
+      - id: inv_scoped_none
+        ref: {stmt: old, params: [null, null, "2026-10-17 06:10:14.61+00", "2026-10-17 07:10:14.61+00", null, 51, "{#nl}"]}
+        cands:
+          - {stmt: window_scoped, params: ["2026-10-17 06:10:14.61+00", infinity, "\\x", "2026-10-17 07:10:14.61+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", 51, {sql: "SELECT array_agg(DISTINCT v) FROM unnest('{#nl}'::text[]) v"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window_scoped: allowed}
+      # inverted pt11 rt2, since only [pt {11} rt - scopes 0 since 2026-10-17 06:58:12.751+00 until - cursor_ms 0 limit 50]
+      - id: inv_since_only
+        ref: {stmt: old, params: ["{11}", null, "2026-10-17 06:58:12.751+00", null, null, 51, null]}
+        cands:
+          - {stmt: window, params: ["2026-10-17 06:58:12.751+00", infinity, "\\x", infinity, "{11}", "{0,1,2,3}", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window: allowed}
+      # [pt - rt - scopes 1491 since - until - cursor_ms 0 limit 50]
+      - id: s_all
+        ref: {stmt: old, params: [null, null, null, null, null, 51, {sql: "SELECT array_agg(DISTINCT name) FROM transport_scopes"}]}
+        cands:
+          - {stmt: scopes, params: [infinity, "\\x", 51, {sql: "SELECT array_agg(DISTINCT name) FROM transport_scopes"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes: identical}
+      # rare type all scopes [pt {14} rt - scopes 1491 since - until - cursor_ms 0 limit 50]
+      - id: s_all_pt14
+        ref: {stmt: old, params: ["{14}", null, null, null, null, 51, {sql: "SELECT array_agg(DISTINCT name) FROM transport_scopes"}]}
+        cands:
+          - {stmt: scopes_types, params: [infinity, "\\x", "{14}", "{0,1,2,3}", 51, {sql: "SELECT array_agg(DISTINCT name) FROM transport_scopes"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes_types: identical}
+      # [pt {4} rt - scopes 1491 since - until - cursor_ms 0 limit 50]
+      - id: s_all_pt4
+        ref: {stmt: old, params: ["{4}", null, null, null, null, 51, {sql: "SELECT array_agg(DISTINCT name) FROM transport_scopes"}]}
+        cands:
+          - {stmt: scopes_types, params: [infinity, "\\x", "{4}", "{0,1,2,3}", 51, {sql: "SELECT array_agg(DISTINCT name) FROM transport_scopes"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes_types: identical}
+      # [pt {9} rt - scopes 1491 since - until - cursor_ms 0 limit 50]
+      - id: s_all_pt9
+        ref: {stmt: old, params: ["{9}", null, null, null, null, 51, {sql: "SELECT array_agg(DISTINCT name) FROM transport_scopes"}]}
+        cands:
+          - {stmt: scopes_types, params: [infinity, "\\x", "{9}", "{0,1,2,3}", 51, {sql: "SELECT array_agg(DISTINCT name) FROM transport_scopes"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes_types: identical}
+      # [pt - rt {3} scopes 1491 since - until - cursor_ms 0 limit 50]
+      - id: s_all_rt3
+        ref: {stmt: old, params: [null, "{3}", null, null, null, 51, {sql: "SELECT array_agg(DISTINCT name) FROM transport_scopes"}]}
+        cands:
+          - {stmt: scopes_types, params: [infinity, "\\x", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{3}", 51, {sql: "SELECT array_agg(DISTINCT name) FROM transport_scopes"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes_types: identical}
+      # real 1258 list [pt - rt - scopes 1258 since - until - cursor_ms 0 limit 50]
+      - id: s_big0
+        ref: {stmt: old, params: [null, null, null, null, null, 51, {sql: "SELECT array_agg(DISTINCT name) FROM (SELECT name FROM transport_scopes ORDER BY name LIMIT 1258) s"}]}
+        cands:
+          - {stmt: scopes, params: [infinity, "\\x", 51, {sql: "SELECT array_agg(DISTINCT name) FROM (SELECT name FROM transport_scopes ORDER BY name LIMIT 1258) s"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes: identical}
+      # [pt {12} rt {2} scopes 1258 since - until - cursor_ms 0 limit 50]
+      - id: s_big0_pt12rt2
+        ref: {stmt: old, params: ["{12}", "{2}", null, null, null, 51, {sql: "SELECT array_agg(DISTINCT name) FROM (SELECT name FROM transport_scopes ORDER BY name LIMIT 1258) s"}]}
+        cands:
+          - {stmt: scopes_types, params: [infinity, "\\x", "{12}", "{2}", 51, {sql: "SELECT array_agg(DISTINCT name) FROM (SELECT name FROM transport_scopes ORDER BY name LIMIT 1258) s"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes_types: identical}
+      # real list + rare type [pt {14} rt - scopes 1258 since - until - cursor_ms 0 limit 50]
+      - id: s_big0_pt14
+        ref: {stmt: old, params: ["{14}", null, null, null, null, 51, {sql: "SELECT array_agg(DISTINCT name) FROM (SELECT name FROM transport_scopes ORDER BY name LIMIT 1258) s"}]}
+        cands:
+          - {stmt: scopes_types, params: [infinity, "\\x", "{14}", "{0,1,2,3}", 51, {sql: "SELECT array_agg(DISTINCT name) FROM (SELECT name FROM transport_scopes ORDER BY name LIMIT 1258) s"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes_types: identical}
+      # real 1365 list [pt - rt - scopes 1365 since - until - cursor_ms 0 limit 50]
+      - id: s_big1
+        ref: {stmt: old, params: [null, null, null, null, null, 51, {sql: "SELECT array_agg(DISTINCT name) FROM (SELECT name FROM transport_scopes ORDER BY name LIMIT 1365) s"}]}
+        cands:
+          - {stmt: scopes, params: [infinity, "\\x", 51, {sql: "SELECT array_agg(DISTINCT name) FROM (SELECT name FROM transport_scopes ORDER BY name LIMIT 1365) s"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes: identical}
+      # [pt - rt - scopes 3 since - until - cursor_ms 0 limit 50]
+      - id: s_case
+        ref: {stmt: old, params: [null, null, null, null, null, 51, "{#PNW,#SEA,#sea}"]}
+        cands:
+          - {stmt: scopes, params: [infinity, "\\x", 51, {sql: "SELECT array_agg(DISTINCT v) FROM unnest('{#PNW,#SEA,#sea}'::text[]) v"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes: identical}
+      # [pt - rt - scopes 8 since - until - cursor_ms 0 limit 50]
+      - id: s_dash
+        ref: {stmt: old, params: [null, null, null, null, null, 51, "{#pnw,#wa,#w-wa,#thurston,#pierce,#oly,#rainier,#tumwater}"]}
+        cands:
+          - {stmt: scopes, params: [infinity, "\\x", 51, {sql: "SELECT array_agg(DISTINCT v) FROM unnest('{#pnw,#wa,#w-wa,#thurston,#pierce,#oly,#rainier,#tumwater}'::text[]) v"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes: identical}
+      # [pt {14} rt - scopes 8 since - until - cursor_ms 0 limit 50]
+      - id: s_dash_pt14
+        ref: {stmt: old, params: ["{14}", null, null, null, null, 51, "{#pnw,#wa,#w-wa,#thurston,#pierce,#oly,#rainier,#tumwater}"]}
+        cands:
+          - {stmt: scopes_types, params: [infinity, "\\x", "{14}", "{0,1,2,3}", 51, {sql: "SELECT array_agg(DISTINCT v) FROM unnest('{#pnw,#wa,#w-wa,#thurston,#pierce,#oly,#rainier,#tumwater}'::text[]) v"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes_types: identical}
+      # real dashboard [pt {4} rt - scopes 8 since - until - cursor_ms 0 limit 50]
+      - id: s_dash_pt4
+        ref: {stmt: old, params: ["{4}", null, null, null, null, 51, "{#pnw,#wa,#w-wa,#thurston,#pierce,#oly,#rainier,#tumwater}"]}
+        cands:
+          - {stmt: scopes_types, params: [infinity, "\\x", "{4}", "{0,1,2,3}", 51, {sql: "SELECT array_agg(DISTINCT v) FROM unnest('{#pnw,#wa,#w-wa,#thurston,#pierce,#oly,#rainier,#tumwater}'::text[]) v"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes_types: identical}
+      # [pt {4} rt - scopes 8 since - until - cursor_ms 1792256400000 limit 50]
+      - id: s_dash_pt4_cur
+        ref: {stmt: old, params: ["{4}", null, null, null, "2026-10-17 17:00:00+00", 51, "{#pnw,#wa,#w-wa,#thurston,#pierce,#oly,#rainier,#tumwater}"]}
+        cands:
+          - {stmt: scopes_types, params: ["2026-10-17 17:00:00+00", "\\x", "{4}", "{0,1,2,3}", 51, {sql: "SELECT array_agg(DISTINCT v) FROM unnest('{#pnw,#wa,#w-wa,#thurston,#pierce,#oly,#rainier,#tumwater}'::text[]) v"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes_types: identical}
+      # [pt - rt {1} scopes 8 since - until - cursor_ms 0 limit 50]
+      - id: s_dash_rt1
+        ref: {stmt: old, params: [null, "{1}", null, null, null, 51, "{#pnw,#wa,#w-wa,#thurston,#pierce,#oly,#rainier,#tumwater}"]}
+        cands:
+          - {stmt: scopes_types, params: [infinity, "\\x", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{1}", 51, {sql: "SELECT array_agg(DISTINCT v) FROM unnest('{#pnw,#wa,#w-wa,#thurston,#pierce,#oly,#rainier,#tumwater}'::text[]) v"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes_types: identical}
+      # [pt - rt - scopes 5 since - until - cursor_ms 0 limit 50]
+      - id: s_dups
+        ref: {stmt: old, params: [null, null, null, null, null, 51, "{#pnw,#pnw,#wa,#wa,#wa}"]}
+        cands:
+          - {stmt: scopes, params: [infinity, "\\x", 51, {sql: "SELECT array_agg(DISTINCT v) FROM unnest('{#pnw,#pnw,#wa,#wa,#wa}'::text[]) v"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes: identical}
+      # scopes=, (empty slice) [pt - rt - scopes 0 since - until - cursor_ms 0 limit 50]
+      - id: s_emptyslice
+        ref: {stmt: old, params: [null, null, null, null, null, 51, "{}"]}
+        cands:
+          - {stmt: page, params: [infinity, "\\x", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {page: identical}
+      # 0 packets [pt - rt - scopes 1 since - until - cursor_ms 0 limit 50]
+      - id: s_grr
+        ref: {stmt: old, params: [null, null, null, null, null, 51, "{#GRR}"]}
+        cands:
+          - {stmt: scopes, params: [infinity, "\\x", 51, {sql: "SELECT array_agg(DISTINCT v) FROM unnest('{#GRR}'::text[]) v"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes: identical}
+      # [pt - rt - scopes 1 since - until - cursor_ms 0 limit 50]
+      - id: s_nl
+        ref: {stmt: old, params: [null, null, null, null, null, 51, "{#nl}"]}
+        cands:
+          - {stmt: scopes, params: [infinity, "\\x", 51, {sql: "SELECT array_agg(DISTINCT v) FROM unnest('{#nl}'::text[]) v"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes: identical}
+      # [pt - rt - scopes 1 since - until - cursor_ms 1792256400000 limit 200]
+      - id: s_nl_deep200
+        ref: {stmt: old, params: [null, null, null, null, "2026-10-17 17:00:00+00", 201, "{#nl}"]}
+        cands:
+          - {stmt: scopes, params: ["2026-10-17 17:00:00+00", "\\x", 201, {sql: "SELECT array_agg(DISTINCT v) FROM unnest('{#nl}'::text[]) v"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes: allowed}
+      # [pt - rt - scopes 1 since - until - cursor_ms 0 limit 1]
+      - id: s_nl_l1_tie
+        ref: {stmt: old, params: [null, null, null, null, null, 2, "{#nl}"]}
+        cands:
+          - {stmt: scopes, params: [infinity, "\\x", 2, {sql: "SELECT array_agg(DISTINCT v) FROM unnest('{#nl}'::text[]) v"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes: identical}
+      # [pt {14} rt - scopes 1 since - until - cursor_ms 0 limit 50]
+      - id: s_nl_pt14
+        ref: {stmt: old, params: ["{14}", null, null, null, null, 51, "{#nl}"]}
+        cands:
+          - {stmt: scopes_types, params: [infinity, "\\x", "{14}", "{0,1,2,3}", 51, {sql: "SELECT array_agg(DISTINCT v) FROM unnest('{#nl}'::text[]) v"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes_types: identical}
+      # [pt {4} rt {1} scopes 1 since - until - cursor_ms 0 limit 50]
+      - id: s_nl_pt4rt1
+        ref: {stmt: old, params: ["{4}", "{1}", null, null, null, 51, "{#nl}"]}
+        cands:
+          - {stmt: scopes_types, params: [infinity, "\\x", "{4}", "{1}", 51, {sql: "SELECT array_agg(DISTINCT v) FROM unnest('{#nl}'::text[]) v"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes_types: identical}
+      # [pt - rt {3} scopes 1 since - until - cursor_ms 0 limit 50]
+      - id: s_nl_rt3
+        ref: {stmt: old, params: [null, "{3}", null, null, null, 51, "{#nl}"]}
+        cands:
+          - {stmt: scopes_types, params: [infinity, "\\x", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{3}", 51, {sql: "SELECT array_agg(DISTINCT v) FROM unnest('{#nl}'::text[]) v"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes_types: identical}
+      # [pt - rt - scopes 1 since - until - cursor_ms 0 limit 50]
+      - id: s_unknown
+        ref: {stmt: old, params: [null, null, null, null, null, 51, "{#nope}"]}
+        cands:
+          - {stmt: scopes, params: [infinity, "\\x", 51, {sql: "SELECT array_agg(DISTINCT v) FROM unnest('{#nope}'::text[]) v"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes: identical}
+      # singular scope untrimmed [pt - rt - scopes 1 since - until - cursor_ms 0 limit 50]
+      - id: s_ws
+        ref: {stmt: old, params: [null, null, null, null, null, 51, "{\" #pnw\"}"]}
+        cands:
+          - {stmt: scopes, params: [infinity, "\\x", 51, {sql: "SELECT array_agg(DISTINCT v) FROM unnest('{\" #pnw\"}'::text[]) v"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes: identical}
+      # explicit full domain [pt {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15} rt {0,1,2,3} scopes 0 since - until - cursor_ms 0 limit 50]
+      - id: t_all16_rt
+        ref: {stmt: old, params: ["{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", null, null, null, 51, null]}
+        cands:
+          - {stmt: types, params: ["{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", infinity, "\\x", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {types: identical}
+      # dup + cursor [pt {4,4,4,13,13} rt {1,1,2} scopes 0 since - until - cursor_ms 1792324800000 limit 200]
+      - id: t_dupmix
+        ref: {stmt: old, params: ["{4,4,4,13,13}", "{1,1,2}", null, null, "2026-10-18 12:00:00+00", 201, null]}
+        cands:
+          - {stmt: types, params: ["{4,4,4,13,13}", "{1,1,2}", "2026-10-18 12:00:00+00", "\\x", 201]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {types: allowed}
+      # [pt {0,5,4} rt - scopes 0 since - until - cursor_ms 0 limit 50]
+      - id: t_pt054
+        ref: {stmt: old, params: ["{0,5,4}", null, null, null, null, 51, null]}
+        cands:
+          - {stmt: types, params: ["{0,5,4}", "{0,1,2,3}", infinity, "\\x", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {types: identical}
+      # rare combo [pt {12} rt {2} scopes 0 since - until - cursor_ms 0 limit 200]
+      - id: t_pt12_rt2
+        ref: {stmt: old, params: ["{12}", "{2}", null, null, null, 201, null]}
+        cands:
+          - {stmt: types, params: ["{12}", "{2}", infinity, "\\x", 201]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {types: identical}
+      # [pt {13} rt - scopes 0 since - until - cursor_ms 0 limit 200]
+      - id: t_pt13_l200
+        ref: {stmt: old, params: ["{13}", null, null, null, null, 201, null]}
+        cands:
+          - {stmt: types, params: ["{13}", "{0,1,2,3}", infinity, "\\x", 201]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {types: identical}
+      # rare [pt {14} rt - scopes 0 since - until - cursor_ms 0 limit 50]
+      - id: t_pt14
+        ref: {stmt: old, params: ["{14}", null, null, null, null, 51, null]}
+        cands:
+          - {stmt: types, params: ["{14}", "{0,1,2,3}", infinity, "\\x", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {types: identical}
+      # [pt {2} rt {2,3} scopes 0 since - until - cursor_ms 0 limit 50]
+      - id: t_pt2_rt23
+        ref: {stmt: old, params: ["{2}", "{2,3}", null, null, null, 51, null]}
+        cands:
+          - {stmt: types, params: ["{2}", "{2,3}", infinity, "\\x", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {types: identical}
+      # [pt {4} rt - scopes 0 since - until - cursor_ms 0 limit 50]
+      - id: t_pt4
+        ref: {stmt: old, params: ["{4}", null, null, null, null, 51, null]}
+        cands:
+          - {stmt: types, params: ["{4}", "{0,1,2,3}", infinity, "\\x", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {types: identical}
+      # dup [pt {4,4} rt - scopes 0 since - until - cursor_ms 0 limit 200]
+      - id: t_pt44
+        ref: {stmt: old, params: ["{4,4}", null, null, null, null, 201, null]}
+        cands:
+          - {stmt: types, params: ["{4,4}", "{0,1,2,3}", infinity, "\\x", 201]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {types: allowed}
+      # [pt {5} rt {0,1} scopes 0 since - until - cursor_ms 1792341411653 limit 1]
+      - id: t_pt5_ustie_l1
+        ref: {stmt: old, params: ["{5}", "{0,1}", null, null, "2026-10-18 16:36:51.653+00", 2, null]}
+        cands:
+          - {stmt: types, params: ["{5}", "{0,1}", "2026-10-18 16:36:51.653+00", "\\x", 2]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {types: identical}
+      # [pt {5} rt {0,1} scopes 0 since - until - cursor_ms 1792341411653 limit 2]
+      - id: t_pt5_ustie_l2
+        ref: {stmt: old, params: ["{5}", "{0,1}", null, null, "2026-10-18 16:36:51.653+00", 3, null]}
+        cands:
+          - {stmt: types, params: ["{5}", "{0,1}", "2026-10-18 16:36:51.653+00", "\\x", 3]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {types: identical}
+      # [pt {99,4} rt - scopes 0 since - until - cursor_ms 0 limit 50]
+      - id: t_pt99_4
+        ref: {stmt: old, params: ["{99,4}", null, null, null, null, 51, null]}
+        cands:
+          - {stmt: types, params: ["{4}", "{0,1,2,3}", infinity, "\\x", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {types: identical}
+      # payloadTypes=, (empty slice) [pt {} rt - scopes 0 since - until - cursor_ms 0 limit 50]
+      - id: t_ptempty
+        ref: {stmt: old, params: ["{}", null, null, null, null, 51, null]}
+        cands:
+          - {stmt: page, params: [infinity, "\\x", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {page: identical}
+      # [pt {} rt {3} scopes 0 since - until - cursor_ms 0 limit 50]
+      - id: t_ptempty_rt3
+        ref: {stmt: old, params: ["{}", "{3}", null, null, null, 51, null]}
+        cands:
+          - {stmt: types, params: ["{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{3}", infinity, "\\x", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {types: identical}
+      # dup [pt - rt {0,0} scopes 0 since - until - cursor_ms 0 limit 200]
+      - id: t_rt00
+        ref: {stmt: old, params: [null, "{0,0}", null, null, null, 201, null]}
+        cands:
+          - {stmt: types, params: ["{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,0}", infinity, "\\x", 201]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {types: allowed}
+      # [pt - rt {3} scopes 0 since - until - cursor_ms 0 limit 200]
+      - id: t_rt3_l200
+        ref: {stmt: old, params: [null, "{3}", null, null, null, 201, null]}
+        cands:
+          - {stmt: types, params: ["{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{3}", infinity, "\\x", 201]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {types: identical}
+      # [pt - rt {3,7} scopes 0 since - until - cursor_ms 0 limit 50]
+      - id: t_rt37
+        ref: {stmt: old, params: [null, "{3,7}", null, null, null, 51, null]}
+        cands:
+          - {stmt: types, params: ["{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{3}", infinity, "\\x", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {types: identical}
+      # [pt {0,1,2,3,4,5,6,7,8,9,10,11,15} rt - scopes 0 since - until - cursor_ms 1792317600000 limit 50]
+      - id: t_web13
+        ref: {stmt: old, params: ["{0,1,2,3,4,5,6,7,8,9,10,11,15}", null, null, null, "2026-10-18 10:00:00+00", 51, null]}
+        cands:
+          - {stmt: types, params: ["{0,1,2,3,4,5,6,7,8,9,10,11,15}", "{0,1,2,3}", "2026-10-18 10:00:00+00", "\\x", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {types: allowed}
+      # extreme [pt - rt - scopes 0 since 1970-01-01 00:00:00+00 until 9999-12-31 23:59:59.999008+00 cursor_ms 0 limit 50]
+      - id: w_epoch
+        ref: {stmt: old, params: [null, null, "1970-01-01 00:00:00+00", "9999-12-31 23:59:59.999008+00", null, 51, null]}
+        cands:
+          - {stmt: window, params: ["1970-01-01 00:00:00+00", infinity, "\\x", "9999-12-31 23:59:59.999008+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window: identical}
+      # tiny [pt - rt - scopes 0 since 2026-10-18 12:00:00.021+00 until 2026-10-18 12:00:00.022+00 cursor_ms 0 limit 50]
+      - id: w_eq
+        ref: {stmt: old, params: [null, null, "2026-10-18 12:00:00.021+00", "2026-10-18 12:00:00.022+00", null, 51, null]}
+        cands:
+          - {stmt: window, params: ["2026-10-18 12:00:00.021+00", infinity, "\\x", "2026-10-18 12:00:00.022+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window: identical}
+      # long-lived [pt - rt - scopes 0 since 2026-10-02 00:00:00+00 until 2026-10-12 00:00:00+00 cursor_ms 0 limit 50]
+      - id: w_long
+        ref: {stmt: old, params: [null, null, "2026-10-02 00:00:00+00", "2026-10-12 00:00:00+00", null, 51, null]}
+        cands:
+          - {stmt: window, params: ["2026-10-02 00:00:00+00", infinity, "\\x", "2026-10-12 00:00:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window: allowed}
+      # [pt - rt - scopes 0 since 1969-12-31 23:59:59+00 until - cursor_ms 0 limit 50]
+      - id: w_negsince
+        ref: {stmt: old, params: [null, null, "1969-12-31 23:59:59+00", null, null, 51, null]}
+        cands:
+          - {stmt: window, params: ["1969-12-31 23:59:59+00", infinity, "\\x", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window: identical}
+      # [pt - rt {0} scopes 0 since 2026-10-18 16:28:00+00 until 2026-10-18 17:00:00+00 cursor_ms 0 limit 200]
+      - id: w_pf_32m
+        ref: {stmt: old, params: [null, "{0}", "2026-10-18 16:28:00+00", "2026-10-18 17:00:00+00", null, 201, null]}
+        cands:
+          - {stmt: window, params: ["2026-10-18 16:28:00+00", infinity, "\\x", "2026-10-18 17:00:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0}", 201]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window: allowed}
+      # pathfinder 32 min (log shape) [pt - rt {0} scopes 0 since 2026-10-18 16:28:00+00 until 2026-10-18 17:00:00+00 cursor_ms 0 limit 200]
+      - id: w_pf_32m_real
+        ref: {stmt: old, params: [null, "{0}", "2026-10-18 16:28:00+00", "2026-10-18 17:00:00+00", null, 201, null]}
+        cands:
+          - {stmt: window, params: ["2026-10-18 16:28:00+00", infinity, "\\x", "2026-10-18 17:00:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0}", 201]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window: allowed}
+      # 5-min window, < 3x201 matches [pt - rt {0} scopes 0 since 2026-10-18 16:55:00+00 until 2026-10-18 17:00:00+00 cursor_ms 0 limit 200]
+      - id: w_pf_5m
+        ref: {stmt: old, params: [null, "{0}", "2026-10-18 16:55:00+00", "2026-10-18 17:00:00+00", null, 201, null]}
+        cands:
+          - {stmt: window, params: ["2026-10-18 16:55:00+00", infinity, "\\x", "2026-10-18 17:00:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0}", 201]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window: allowed}
+      # pathfinder 5 min mid-day [pt - rt {0} scopes 0 since 2026-10-18 12:00:00+00 until 2026-10-18 12:05:00+00 cursor_ms 0 limit 200]
+      - id: w_pf_5m_b
+        ref: {stmt: old, params: [null, "{0}", "2026-10-18 12:00:00+00", "2026-10-18 12:05:00+00", null, 201, null]}
+        cands:
+          - {stmt: window, params: ["2026-10-18 12:00:00+00", infinity, "\\x", "2026-10-18 12:05:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0}", 201]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window: allowed}
+      # pathfinder real [pt - rt {0} scopes 0 since 2026-10-18 10:30:00+00 until 2026-10-18 17:00:00+00 cursor_ms 0 limit 200]
+      - id: w_pf_6h
+        ref: {stmt: old, params: [null, "{0}", "2026-10-18 10:30:00+00", "2026-10-18 17:00:00+00", null, 201, null]}
+        cands:
+          - {stmt: window, params: ["2026-10-18 10:30:00+00", infinity, "\\x", "2026-10-18 17:00:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0}", 201]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window: allowed}
+      # 2nd-last page [pt - rt {0} scopes 0 since 2026-10-18 10:30:00+00 until 2026-10-18 17:00:00+00 cursor_ms 1792319629827 limit 200]
+      - id: w_pf_6h_2ndlast
+        ref: {stmt: old, params: [null, "{0}", "2026-10-18 10:30:00+00", "2026-10-18 17:00:00+00", "2026-10-18 10:33:49.827+00", 201, null]}
+        cands:
+          - {stmt: window, params: ["2026-10-18 10:30:00+00", "2026-10-18 10:33:49.827+00", "\\x", "2026-10-18 17:00:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0}", 201]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window: allowed}
+      # [pt - rt {0} scopes 0 since 2026-10-18 10:30:00+00 until 2026-10-18 17:00:00+00 cursor_ms 1792339200000 limit 200]
+      - id: w_pf_6h_cur
+        ref: {stmt: old, params: [null, "{0}", "2026-10-18 10:30:00+00", "2026-10-18 17:00:00+00", "2026-10-18 16:00:00+00", 201, null]}
+        cands:
+          - {stmt: window, params: ["2026-10-18 10:30:00+00", "2026-10-18 16:00:00+00", "\\x", "2026-10-18 17:00:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0}", 201]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window: allowed}
+      # last page of 6.5h chain [pt - rt {0} scopes 0 since 2026-10-18 10:30:00+00 until 2026-10-18 17:00:00+00 cursor_ms 1792319480893 limit 200]
+      - id: w_pf_6h_last
+        ref: {stmt: old, params: [null, "{0}", "2026-10-18 10:30:00+00", "2026-10-18 17:00:00+00", "2026-10-18 10:31:20.893+00", 201, null]}
+        cands:
+          - {stmt: window, params: ["2026-10-18 10:30:00+00", "2026-10-18 10:31:20.893+00", "\\x", "2026-10-18 17:00:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0}", 201]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window: allowed}
+      # rare type window [pt {14} rt - scopes 0 since 2026-10-15 17:00:00+00 until 2026-10-18 17:00:00+00 cursor_ms 0 limit 50]
+      - id: w_pt14_3d
+        ref: {stmt: old, params: ["{14}", null, "2026-10-15 17:00:00+00", "2026-10-18 17:00:00+00", null, 51, null]}
+        cands:
+          - {stmt: window, params: ["2026-10-15 17:00:00+00", infinity, "\\x", "2026-10-18 17:00:00+00", "{14}", "{0,1,2,3}", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window: identical}
+      # [pt {4} rt {1} scopes 0 since 2026-10-18 00:00:00+00 until - cursor_ms 1792342797722 limit 50]
+      - id: w_pt4rt1_tied
+        ref: {stmt: old, params: ["{4}", "{1}", "2026-10-18 00:00:00+00", null, "2026-10-18 16:59:57.722+00", 51, null]}
+        cands:
+          - {stmt: window, params: ["2026-10-18 00:00:00+00", "2026-10-18 16:59:57.722+00", "\\x", infinity, "{4}", "{1}", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window: identical}
+      # [pt - rt - scopes 0 since 2026-10-18 15:45:00+00 until - cursor_ms 0 limit 50]
+      - id: w_since75
+        ref: {stmt: old, params: [null, null, "2026-10-18 15:45:00+00", null, null, 51, null]}
+        cands:
+          - {stmt: window, params: ["2026-10-18 15:45:00+00", infinity, "\\x", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window: identical}
+      # [pt {4} rt - scopes 0 since 2026-10-18 15:45:00+00 until - cursor_ms 0 limit 50]
+      - id: w_since75_pt4
+        ref: {stmt: old, params: ["{4}", null, "2026-10-18 15:45:00+00", null, null, 51, null]}
+        cands:
+          - {stmt: window, params: ["2026-10-18 15:45:00+00", infinity, "\\x", infinity, "{4}", "{0,1,2,3}", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window: identical}
+      # [pt - rt - scopes 0 since - until 2026-10-16 17:00:00+00 cursor_ms 0 limit 50]
+      - id: w_until_deep
+        ref: {stmt: old, params: [null, null, null, "2026-10-16 17:00:00+00", null, 51, null]}
+        cands:
+          - {stmt: window, params: [-infinity, infinity, "\\x", "2026-10-16 17:00:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window: allowed}
+      # until only (zero traffic) [pt - rt {0} scopes 0 since - until 2026-10-18 06:00:00+00 cursor_ms 0 limit 200]
+      - id: w_until_only_rt0
+        ref: {stmt: old, params: [null, "{0}", null, "2026-10-18 06:00:00+00", null, 201, null]}
+        cands:
+          - {stmt: window, params: [-infinity, infinity, "\\x", "2026-10-18 06:00:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0}", 201]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window: allowed}
+      # [pt - rt - scopes 1491 since 2026-10-17 17:00:00+00 until 2026-10-18 17:00:00+00 cursor_ms 0 limit 50]
+      - id: ws_all_1d
+        ref: {stmt: old, params: [null, null, "2026-10-17 17:00:00+00", "2026-10-18 17:00:00+00", null, 51, {sql: "SELECT array_agg(DISTINCT name) FROM transport_scopes"}]}
+        cands:
+          - {stmt: window_scoped, params: ["2026-10-17 17:00:00+00", infinity, "\\x", "2026-10-18 17:00:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", 51, {sql: "SELECT array_agg(DISTINCT name) FROM transport_scopes"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window_scoped: identical}
+      # [pt - rt - scopes 1491 since - until 2026-10-16 17:00:00+00 cursor_ms 0 limit 50]
+      - id: ws_all_until_deep
+        ref: {stmt: old, params: [null, null, null, "2026-10-16 17:00:00+00", null, 51, {sql: "SELECT array_agg(DISTINCT name) FROM transport_scopes"}]}
+        cands:
+          - {stmt: window_scoped, params: [-infinity, infinity, "\\x", "2026-10-16 17:00:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", 51, {sql: "SELECT array_agg(DISTINCT name) FROM transport_scopes"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window_scoped: identical}
+      # dashboard scopes + pt4 1 day [pt {4} rt - scopes 8 since 2026-10-17 17:00:00+00 until 2026-10-18 17:00:00+00 cursor_ms 0 limit 50]
+      - id: ws_chain_dash
+        ref: {stmt: old, params: ["{4}", null, "2026-10-17 17:00:00+00", "2026-10-18 17:00:00+00", null, 51, "{#pnw,#wa,#w-wa,#thurston,#pierce,#oly,#rainier,#tumwater}"]}
+        cands:
+          - {stmt: window_scoped, params: ["2026-10-17 17:00:00+00", infinity, "\\x", "2026-10-18 17:00:00+00", "{4}", "{0,1,2,3}", 51, {sql: "SELECT array_agg(DISTINCT v) FROM unnest('{#pnw,#wa,#w-wa,#thurston,#pierce,#oly,#rainier,#tumwater}'::text[]) v"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window_scoped: identical}
+      # scoped window chain [pt - rt - scopes 1 since 2026-10-18 15:00:00+00 until 2026-10-18 16:00:00+00 cursor_ms 0 limit 50]
+      - id: ws_chain_nl_1h
+        ref: {stmt: old, params: [null, null, "2026-10-18 15:00:00+00", "2026-10-18 16:00:00+00", null, 51, "{#nl}"]}
+        cands:
+          - {stmt: window_scoped, params: ["2026-10-18 15:00:00+00", infinity, "\\x", "2026-10-18 16:00:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", 51, {sql: "SELECT array_agg(DISTINCT v) FROM unnest('{#nl}'::text[]) v"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window_scoped: identical}
+      # scoped window chain, limit 2 [pt - rt - scopes 1 since 2026-10-14 17:00:00+00 until 2026-10-18 17:00:00+00 cursor_ms 0 limit 2]
+      - id: ws_chain_sea4d
+        ref: {stmt: old, params: [null, null, "2026-10-14 17:00:00+00", "2026-10-18 17:00:00+00", null, 3, "{#SEA}"]}
+        cands:
+          - {stmt: window_scoped, params: ["2026-10-14 17:00:00+00", infinity, "\\x", "2026-10-18 17:00:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", 3, {sql: "SELECT array_agg(DISTINCT v) FROM unnest('{#SEA}'::text[]) v"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window_scoped: identical}
+      # [pt {4} rt - scopes 8 since 2026-10-17 17:00:00+00 until - cursor_ms 1792303200000 limit 50]
+      - id: ws_dash_pt4_cur
+        ref: {stmt: old, params: ["{4}", null, "2026-10-17 17:00:00+00", null, "2026-10-18 06:00:00+00", 51, "{#pnw,#wa,#w-wa,#thurston,#pierce,#oly,#rainier,#tumwater}"]}
+        cands:
+          - {stmt: window_scoped, params: ["2026-10-17 17:00:00+00", "2026-10-18 06:00:00+00", "\\x", infinity, "{4}", "{0,1,2,3}", 51, {sql: "SELECT array_agg(DISTINCT v) FROM unnest('{#pnw,#wa,#w-wa,#thurston,#pierce,#oly,#rainier,#tumwater}'::text[]) v"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window_scoped: identical}
+      # scopes=, with window [pt - rt - scopes 0 since 2026-10-18 16:00:00+00 until - cursor_ms 0 limit 50]
+      - id: ws_emptyslice
+        ref: {stmt: old, params: [null, null, "2026-10-18 16:00:00+00", null, null, 51, "{}"]}
+        cands:
+          - {stmt: window, params: ["2026-10-18 16:00:00+00", infinity, "\\x", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", 51]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window: identical}
+      # [pt {4} rt - scopes 1 since 2026-10-17 17:00:00+00 until 2026-10-18 17:00:00+00 cursor_ms 0 limit 50]
+      - id: ws_nl_pt4
+        ref: {stmt: old, params: ["{4}", null, "2026-10-17 17:00:00+00", "2026-10-18 17:00:00+00", null, 51, "{#nl}"]}
+        cands:
+          - {stmt: window_scoped, params: ["2026-10-17 17:00:00+00", infinity, "\\x", "2026-10-18 17:00:00+00", "{4}", "{0,1,2,3}", 51, {sql: "SELECT array_agg(DISTINCT v) FROM unnest('{#nl}'::text[]) v"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window_scoped: identical}
+      # [pt - rt - scopes 1 since 2026-10-17 17:00:00+00 until 2026-10-18 17:00:00+00 cursor_ms 0 limit 50]
+      - id: ws_sea_1d
+        ref: {stmt: old, params: [null, null, "2026-10-17 17:00:00+00", "2026-10-18 17:00:00+00", null, 51, "{#sea}"]}
+        cands:
+          - {stmt: window_scoped, params: ["2026-10-17 17:00:00+00", infinity, "\\x", "2026-10-18 17:00:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", 51, {sql: "SELECT array_agg(DISTINCT v) FROM unnest('{#sea}'::text[]) v"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window_scoped: identical}
+      # [pt - rt - scopes 1 since 2026-10-14 17:00:00+00 until 2026-10-18 17:00:00+00 cursor_ms 0 limit 200]
+      - id: ws_SEA_4d
+        ref: {stmt: old, params: [null, null, "2026-10-14 17:00:00+00", "2026-10-18 17:00:00+00", null, 201, "{#SEA}"]}
+        cands:
+          - {stmt: window_scoped, params: ["2026-10-14 17:00:00+00", infinity, "\\x", "2026-10-18 17:00:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", 201, {sql: "SELECT array_agg(DISTINCT v) FROM unnest('{#SEA}'::text[]) v"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window_scoped: identical}
+      # [pt - rt - scopes 1 since 2026-10-17 17:00:00+00 until - cursor_ms 0 limit 50]
+      - id: ws_unknown
+        ref: {stmt: old, params: [null, null, "2026-10-17 17:00:00+00", null, null, 51, "{#nope}"]}
+        cands:
+          - {stmt: window_scoped, params: ["2026-10-17 17:00:00+00", infinity, "\\x", infinity, "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", 51, {sql: "SELECT array_agg(DISTINCT v) FROM unnest('{#nope}'::text[]) v"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window_scoped: identical}
+      # 5,000 bogus scope names [pt - rt - scopes 5000 since - until - cursor_ms - limit 50]
+      - id: s_bogus5000
+        ref: {stmt: old, params: [null, null, null, null, null, 51, {sql: "SELECT array_agg('#zz-bogus-' || g ORDER BY g) FROM generate_series(1, 5000) g"}]}
+        cands:
+          - {stmt: scopes, params: [infinity, "\\x", 51, {sql: "SELECT array_agg('#zz-bogus-' || g ORDER BY g) FROM generate_series(1, 5000) g"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes: identical}
+      # 5,000 bogus names + payloadTypes=4 [pt - rt - scopes 5000 since - until - cursor_ms - limit 50]
+      - id: s_bogus5000_pt4
+        ref: {stmt: old, params: ["{4}", null, null, null, null, 51, {sql: "SELECT array_agg('#zz-bogus-' || g ORDER BY g) FROM generate_series(1, 5000) g"}]}
+        cands:
+          - {stmt: scopes_types, params: [infinity, "\\x", "{4}", "{0,1,2,3}", 51, {sql: "SELECT array_agg('#zz-bogus-' || g ORDER BY g) FROM generate_series(1, 5000) g"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes_types: identical}
+      # all 1,491 real names + 5,000 bogus [pt - rt - scopes 6491 since - until - cursor_ms - limit 50]
+      - id: s_allbogus6491
+        ref: {stmt: old, params: [null, null, null, null, null, 51, {sql: "SELECT array_agg(v ORDER BY v) FROM (SELECT name v FROM transport_scopes UNION ALL SELECT '#zz-bogus-' || g FROM generate_series(1, 5000) g) s"}]}
+        cands:
+          - {stmt: scopes, params: [infinity, "\\x", 51, {sql: "SELECT array_agg(v ORDER BY v) FROM (SELECT name v FROM transport_scopes UNION ALL SELECT '#zz-bogus-' || g FROM generate_series(1, 5000) g) s"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {scopes: identical}
+      # 5,000 bogus names, 1-day window [pt - rt - scopes 5000 since 2026-10-17 17:00:00+00 until 2026-10-18 17:00:00+00 cursor_ms - limit 50]
+      - id: ws_bogus5000_1d
+        ref: {stmt: old, params: [null, null, "2026-10-17 17:00:00+00", "2026-10-18 17:00:00+00", null, 51, {sql: "SELECT array_agg('#zz-bogus-' || g ORDER BY g) FROM generate_series(1, 5000) g"}]}
+        cands:
+          - {stmt: window_scoped, params: ["2026-10-17 17:00:00+00", infinity, "\\x", "2026-10-18 17:00:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", 51, {sql: "SELECT array_agg('#zz-bogus-' || g ORDER BY g) FROM generate_series(1, 5000) g"}]}
+        key: [last_heard_at]
+        allowed: [tie_order, latest_observer_tie]
+        omit: *latest
+        expect: {window_scoped: identical}
+      # pageCursor = the newest microsecond-tie pair's top row, limit 1 [pt - rt - scopes 0 since - until - cursor_ms - limit 1]
+      - id: e_pc_ustie_l1
+        ref: {stmt: old, params: [null, null, null, null, {sql: "SELECT date_trunc('milliseconds', (SELECT last_heard_at FROM packets GROUP BY last_heard_at HAVING count(*) > 1 ORDER BY last_heard_at DESC LIMIT 1))"}, 2, null]}
+        cands:
+          - {stmt: page, params: [{sql: "SELECT last_heard_at FROM packets GROUP BY last_heard_at HAVING count(*) > 1 ORDER BY last_heard_at DESC LIMIT 1"}, {sql: "SELECT packet_hash FROM packets WHERE last_heard_at = (SELECT last_heard_at FROM packets GROUP BY last_heard_at HAVING count(*) > 1 ORDER BY last_heard_at DESC LIMIT 1) ORDER BY packet_hash DESC LIMIT 1"}, 2]}
+        key: [last_heard_at]
+        allowed: [pagecursor_tie_rows, tie_order, latest_observer_tie]
+        require: [pagecursor_tie_rows]
+        tie_boundary: 5
+        tie_cursor: {ts: 1, hash: 2, hash_column: packet_hash}
+        omit: *latest
+        expect: {page: allowed}
+      # same, limit 2 [pt - rt - scopes 0 since - until - cursor_ms - limit 2]
+      - id: e_pc_ustie_l2
+        ref: {stmt: old, params: [null, null, null, null, {sql: "SELECT date_trunc('milliseconds', (SELECT last_heard_at FROM packets GROUP BY last_heard_at HAVING count(*) > 1 ORDER BY last_heard_at DESC LIMIT 1))"}, 3, null]}
+        cands:
+          - {stmt: page, params: [{sql: "SELECT last_heard_at FROM packets GROUP BY last_heard_at HAVING count(*) > 1 ORDER BY last_heard_at DESC LIMIT 1"}, {sql: "SELECT packet_hash FROM packets WHERE last_heard_at = (SELECT last_heard_at FROM packets GROUP BY last_heard_at HAVING count(*) > 1 ORDER BY last_heard_at DESC LIMIT 1) ORDER BY packet_hash DESC LIMIT 1"}, 3]}
+        key: [last_heard_at]
+        allowed: [pagecursor_tie_rows, tie_order, latest_observer_tie]
+        require: [pagecursor_tie_rows]
+        tie_boundary: 5
+        tie_cursor: {ts: 1, hash: 2, hash_column: packet_hash}
+        omit: *latest
+        expect: {page: allowed}
+      # payloadTypes=4, pageCursor 100,000 packets deep (prototype) [pt - rt - scopes 0 since - until - cursor_ms - limit 200]
+      - id: t_pt4_pc_deep
+        ref: {stmt: old, params: ["{4}", null, null, null, {sql: "SELECT date_trunc('milliseconds', (SELECT last_heard_at FROM packets ORDER BY last_heard_at DESC, packet_hash DESC OFFSET 100000 LIMIT 1))"}, 201, null]}
+        cands:
+          - {stmt: types, params: ["{4}", "{0,1,2,3}", {sql: "SELECT last_heard_at FROM packets ORDER BY last_heard_at DESC, packet_hash DESC OFFSET 100000 LIMIT 1"}, {sql: "SELECT packet_hash FROM packets ORDER BY last_heard_at DESC, packet_hash DESC OFFSET 100000 LIMIT 1"}, 201]}
+        key: [last_heard_at]
+        allowed: [pagecursor_tie_rows, tie_order, latest_observer_tie]
+        tie_boundary: 5
+        tie_cursor: {ts: 3, hash: 4, hash_column: packet_hash}
+        omit: *latest
+        expect: {types: allowed}
+      # pageCursor 100,000 packets deep (prototype) [pt - rt - scopes 0 since - until - cursor_ms - limit 200]
+      - id: e_pc_deep
+        ref: {stmt: old, params: [null, null, null, null, {sql: "SELECT date_trunc('milliseconds', (SELECT last_heard_at FROM packets ORDER BY last_heard_at DESC, packet_hash DESC OFFSET 100000 LIMIT 1))"}, 201, null]}
+        cands:
+          - {stmt: page, params: [{sql: "SELECT last_heard_at FROM packets ORDER BY last_heard_at DESC, packet_hash DESC OFFSET 100000 LIMIT 1"}, {sql: "SELECT packet_hash FROM packets ORDER BY last_heard_at DESC, packet_hash DESC OFFSET 100000 LIMIT 1"}, 201]}
+        key: [last_heard_at]
+        allowed: [pagecursor_tie_rows, tie_order, latest_observer_tie]
+        tie_boundary: 5
+        tie_cursor: {ts: 1, hash: 2, hash_column: packet_hash}
+        omit: *latest
+        expect: {page: allowed}
+
+      # Walks: the oracle as one page of max_rows rows, each cand walked with its exact cursor.
+      # every packet
+      - id: walk.page
+        ref: {stmt: oracle_page, params: [infinity, "\\x", 51, null, null, null, null, null]}
+        cands:
+          - {stmt: page, params: [infinity, "\\x", 51]}
+        walk:
+          limit_param: 3
+          fetch_extra: 1
+          cursor: [{param: 1, column: last_heard_at}, {param: 2, column: packet_hash}]
+          first: [infinity, '\x']
+          web_limit: 50
+          max_rows: 2000
+          oracle: true
+        expect: {page: identical}
+      # payloadTypes=4
+      - id: walk.types_pt4
+        ref: {stmt: oracle_types, params: ["{4}", null, infinity, "\\x", 51, null, null, null]}
+        cands:
+          - {stmt: types, params: ["{4}", "{0,1,2,3}", infinity, "\\x", 51]}
+        walk:
+          limit_param: 5
+          fetch_extra: 1
+          cursor: [{param: 3, column: last_heard_at}, {param: 4, column: packet_hash}]
+          first: [infinity, '\x']
+          web_limit: 50
+          max_rows: 2000
+          oracle: true
+        expect: {types: identical}
+      # scopes=#nl
+      - id: walk.scopes_nl
+        ref: {stmt: oracle_page, params: [infinity, "\\x", 51, "{#nl}", null, null, null, null]}
+        cands:
+          - {stmt: scopes, params: [infinity, "\\x", 51, "{#nl}"]}
+        walk:
+          limit_param: 3
+          fetch_extra: 1
+          cursor: [{param: 1, column: last_heard_at}, {param: 2, column: packet_hash}]
+          first: [infinity, '\x']
+          web_limit: 50
+          max_rows: 2000
+          oracle: true
+        expect: {scopes: identical}
+      # the dashboard: 8 scopes and payloadTypes=4
+      - id: walk.scopes_dash_pt4
+        ref: {stmt: oracle_scopes_types, params: [infinity, "\\x", "{4}", null, 51, "{#pnw,#wa,#w-wa,#thurston,#pierce,#oly,#rainier,#tumwater}", null, null]}
+        cands:
+          - {stmt: scopes_types, params: [infinity, "\\x", "{4}", "{0,1,2,3}", 51, "{#pnw,#wa,#w-wa,#thurston,#pierce,#oly,#rainier,#tumwater}"]}
+        walk:
+          limit_param: 5
+          fetch_extra: 1
+          cursor: [{param: 1, column: last_heard_at}, {param: 2, column: packet_hash}]
+          first: [infinity, '\x']
+          web_limit: 50
+          max_rows: 2000
+          oracle: true
+        expect: {scopes_types: identical}
+      # routeTypes=0, a 32-minute window
+      - id: walk.window_pf_32m
+        ref: {stmt: oracle_window, params: ["2026-10-18 16:28:00+00", infinity, "\\x", "2026-10-18 17:00:00+00", null, "{0}", 201, null]}
+        cands:
+          - {stmt: window, params: ["2026-10-18 16:28:00+00", infinity, "\\x", "2026-10-18 17:00:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0}", 201]}
+        walk:
+          limit_param: 7
+          fetch_extra: 1
+          cursor: [{param: 2, column: last_heard_at}, {param: 3, column: packet_hash}]
+          first: [infinity, '\x']
+          web_limit: 50
+          max_rows: 2000
+          oracle: true
+        expect: {window: identical}
+      # payloadTypes=11, a 10-minute window that holds a row heard last before since
+      - id: walk.window_inv_pt11_10m
+        ref: {stmt: oracle_window, params: ["2026-10-17 06:58:12.751+00", infinity, "\\x", "2026-10-17 07:08:12.751+00", "{11}", null, 51, null]}
+        cands:
+          - {stmt: window, params: ["2026-10-17 06:58:12.751+00", infinity, "\\x", "2026-10-17 07:08:12.751+00", "{11}", "{0,1,2,3}", 51]}
+        walk:
+          limit_param: 7
+          fetch_extra: 1
+          cursor: [{param: 2, column: last_heard_at}, {param: 3, column: packet_hash}]
+          first: [infinity, '\x']
+          web_limit: 50
+          max_rows: 2000
+          oracle: true
+        expect: {window: identical}
+      # scopes=#nl, a one-hour window
+      - id: walk.window_scoped_nl_1h
+        ref: {stmt: oracle_window, params: ["2026-10-18 15:00:00+00", infinity, "\\x", "2026-10-18 16:00:00+00", null, null, 51, "{#nl}"]}
+        cands:
+          - {stmt: window_scoped, params: ["2026-10-18 15:00:00+00", infinity, "\\x", "2026-10-18 16:00:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", 51, "{#nl}"]}
+        walk:
+          limit_param: 7
+          fetch_extra: 1
+          cursor: [{param: 2, column: last_heard_at}, {param: 3, column: packet_hash}]
+          first: [infinity, '\x']
+          web_limit: 50
+          max_rows: 2000
+          oracle: true
+        expect: {window_scoped: identical}
+      # scopes=#SEA, a four-day window
+      - id: walk.window_scoped_sea_4d
+        ref: {stmt: oracle_window, params: ["2026-10-14 17:00:00+00", infinity, "\\x", "2026-10-18 17:00:00+00", null, null, 51, "{#SEA}"]}
+        cands:
+          - {stmt: window_scoped, params: ["2026-10-14 17:00:00+00", infinity, "\\x", "2026-10-18 17:00:00+00", "{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}", "{0,1,2,3}", 51, "{#SEA}"]}
+        walk:
+          limit_param: 7
+          fetch_extra: 1
+          cursor: [{param: 2, column: last_heard_at}, {param: 3, column: packet_hash}]
+          first: [infinity, '\x']
+          web_limit: 50
+          max_rows: 2000
+          oracle: true
+        expect: {window_scoped: identical}

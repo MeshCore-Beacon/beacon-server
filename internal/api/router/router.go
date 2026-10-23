@@ -15,6 +15,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api/handlers"
 	mw "github.com/MeshCore-Beacon/beacon-server/internal/api/middleware"
+	"github.com/MeshCore-Beacon/beacon-server/internal/guards"
 	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ws"
@@ -73,7 +74,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 		Mobile: api.AdminMobileConfig{MinAppVersion: opts.MinAppVersion},
 		Web:    api.AdminWebConfig{MinWebVersion: opts.MinWebVersion},
 	}
-	info := api.Info{ServerVersion: opts.ServerVersion}
+	info := api.Info{ServerVersion: opts.ServerVersion, BuildVersion: opts.BuildVersion, BuildRevision: opts.BuildRevision, CollectedNodeTelemetry: opts.NodeTelemetry != nil}
 	if opts.MinAppVersion != "" {
 		info.MinAppVersion = &opts.MinAppVersion
 	}
@@ -81,6 +82,11 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 		info.MinWebVersion = &opts.MinWebVersion
 	}
 	runtimeConfig := mw.NewRuntimeConfig(adminConfig, []string{"Retry-After"})
+	if opts.Guards != nil {
+		runtimeConfig.BindGuards(opts.Guards, api.AdminGuardsConfig{
+			ObserveOnly: opts.Guards.ForceObserve(), Budget: "shadow", APIPlanLayout: opts.APIPlanLayout,
+		})
+	}
 	r.Use(runtimeConfig.CORS)
 
 	// ── Global middleware ────────────────────────────────────────────────────
@@ -106,8 +112,13 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 	// ── Public REST API (v1) ─────────────────────────────────────────────────
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(mw.RateLimit(opts.RateLimit))
-		// Public group — no authentication required.
+		r.Use(mw.LimitListParams)
+		// Public group — no authentication required. Guards run here only, after TrustedProxyIP,
+		// so /ws and the admin subtree never carry guard state.
 		r.Group(func(r chi.Router) {
+			if opts.Guards != nil {
+				r.Use(guards.Middleware(opts.Guards))
+			}
 			r.Mount("/packets", handlers.PacketsRouter(reader))
 			r.Mount("/nodes", handlers.NodesRouter(reader))
 			r.Mount("/brokers", handlers.BrokersRouter(workers))
@@ -119,8 +130,12 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 			r.Mount("/routes", handlers.RoutesRouter(reader))
 			r.Mount("/scopes", handlers.ScopesRouter(reader, opts.Scopes))
 			r.Mount("/stats", handlers.StatsRouter(reader, handlers.StatsOptions{Scopes: opts.Scopes, SeriesWindow: opts.RollupRetention}))
+			r.Get("/scope-catalogues", handlers.ScopeCatalogues(opts.ScopeCatalogues))
 			r.Mount("/traces", handlers.TracesRouter(reader))
 			r.Mount("/info", handlers.InfoRouter(info))
+			if opts.NodeTelemetry != nil {
+				r.Mount("/node-telemetry", http.StripPrefix("/api/v1/node-telemetry", opts.NodeTelemetry))
+			}
 		})
 
 		// Protect the entire subtree, including its root and unknown paths.

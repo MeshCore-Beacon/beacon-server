@@ -1,0 +1,4 @@
+[
+ "Limit",
+ "  Index Scan on channels c using idx_channels_last_seen_id scan=Forward"
+]

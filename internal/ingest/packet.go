@@ -18,6 +18,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/lora"
 	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
+	"github.com/MeshCore-Beacon/beacon-server/internal/tracequality"
 	"github.com/google/uuid"
 	"github.com/meshcore-go/meshcore-go"
 )
@@ -56,8 +57,8 @@ type InsertObservationParams struct {
 	HashSize          uint8
 	HopCount          uint8
 	PathBytes         []byte
-	RSSI              int16
-	SNR               float32
+	RSSI              *int16
+	SNR               *float32
 	PropagationTimeMs int32
 	RadioFreqMHz      float32
 	SpreadFactor      int16
@@ -97,13 +98,13 @@ type packetObservationEvent struct {
 		ObserverID   string `json:"observerId"`
 		ObserverName string `json:"observerName"`
 		// Only set for clients that sent includeObserverKey.
-		ObserverPublicKey string  `json:"observerPublicKey,omitempty"`
-		IATA              string  `json:"iata"`
-		HeardAt           int64   `json:"heardAt"`
-		RSSI              int16   `json:"rssi"`
-		SNR               float32 `json:"snr"`
-		SourceBroker      string  `json:"sourceBroker"`
-		PathBytes         string  `json:"pathBytes"`
+		ObserverPublicKey string   `json:"observerPublicKey,omitempty"`
+		IATA              string   `json:"iata"`
+		HeardAt           int64    `json:"heardAt"`
+		RSSI              *int16   `json:"rssi,omitempty"`
+		SNR               *float32 `json:"snr,omitempty"`
+		SourceBroker      string   `json:"sourceBroker"`
+		PathBytes         string   `json:"pathBytes"`
 		PathLength        struct {
 			Raw      string `json:"raw"`
 			HashSize uint8  `json:"hashSize"`
@@ -202,13 +203,14 @@ type parsedGroupEnvelope struct {
 // is the accumulated per-hop SNR sequence carried in the packet header's
 // path field (a protocol-level repurposing distinct from the payload).
 type parsedTrace struct {
-	Raw        string    `json:"raw"`
-	Type       string    `json:"type"`
-	TraceTag   string    `json:"traceTag"`
-	AuthCode   uint32    `json:"authCode"`
-	Flags      byte      `json:"flags"`
-	PathHashes []string  `json:"pathHashes"`
-	SNRValues  []float32 `json:"snrValues"`
+	Quality    tracequality.Quality `json:"quality"`
+	Raw        string               `json:"raw"`
+	Type       string               `json:"type"`
+	TraceTag   string               `json:"traceTag"`
+	AuthCode   uint32               `json:"authCode"`
+	Flags      byte                 `json:"flags"`
+	PathHashes []string             `json:"pathHashes"`
+	SNRValues  []float32            `json:"snrValues"`
 }
 
 // parsedAck is the parsed form of an ACK payload (§2.12). Checksum is the
@@ -557,7 +559,10 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 				hashes = append(hashes, hex.EncodeToString(h))
 				rawHashes = append(rawHashes, h)
 			}
-			traceRawHashes = rawHashes
+			quality := tracequality.Assess(packet.Payload, int(packet.PayloadVer()), int(packet.RouteType()), int(packet.PathLength))
+			if quality.Status == "supported" {
+				traceRawHashes = rawHashes
+			}
 			// SNR values are in packet.Path, one signed int8 per consumed hop
 			snrValues := make([]float32, 0, len(packet.Path))
 			for _, b := range packet.Path {
@@ -568,6 +573,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 				traceType = "PING"
 			}
 			pt := parsedTrace{
+				Quality:    quality,
 				Raw:        hex.EncodeToString(packet.Payload),
 				Type:       traceType,
 				TraceTag:   hex.EncodeToString(uint32ToBytes(trace.Tag)),
@@ -585,8 +591,8 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 			// originator isn't in PathHashes) and is skipped. Either side
 			// resolving ambiguously (>1 candidate) or not at all (0
 			// candidates) skips that specific pair.
-			if len(rawHashes) >= 2 {
-				resolved, rErr := w.db.ResolvePathHashes(ctx, iata, rawHashes)
+			if quality.Status == "supported" && len(rawHashes) >= 2 {
+				resolved, rErr := w.db.ResolveTracePathHashes(ctx, iata, rawHashes)
 				if rErr == nil {
 					for i := 1; i < len(rawHashes); i++ {
 						if i >= len(snrValues) {
@@ -676,8 +682,8 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 						responderNodeID, rErr := w.db.GetNodeByPubkey(ctx, resp.PubKey)
 						// don't insert our own node as a neighbor
 						if oErr == nil && rErr == nil && observerNodeID != responderNodeID {
-							rxSNR := float32(parseNumber(envelope.SNR))
-							if err := w.db.UpsertNodeNeighbor(ctx, observerNodeID, responderNodeID, iata, &rxSNR, nil); err != nil {
+							rxSNR := signalSNR(envelope.SNR)
+							if err := w.db.UpsertNodeNeighbor(ctx, observerNodeID, responderNodeID, iata, rxSNR, nil); err != nil {
 								w.log.Error("failed to upsert observer-discover neighbor", "error", err)
 							}
 						}
@@ -772,8 +778,8 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		HashSize:          packet.PathHashSize(),
 		HopCount:          packet.PathHashCount(),
 		PathBytes:         packet.Path,
-		RSSI:              int16(parseNumber(envelope.RSSI)),
-		SNR:               float32(parseNumber(envelope.SNR)),
+		RSSI:              signalRSSI(envelope.RSSI),
+		SNR:               signalSNR(envelope.SNR),
 		PropagationTimeMs: 0, // TODO: figure out how to calculate this
 		RadioFreqMHz:      radio.FreqMHz,
 		SpreadFactor:      radio.SF,
@@ -793,6 +799,18 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	pathNew := packet.PayloadType() != meshcore.PayloadTypeTrace && w.hub.MarkSent(packetHash[:], id[:], packet.Path)
 	// A duplicate is streamed, never stored, to includeRepeats clients when its path is new.
 	repeat := !inserted && pathNew && w.hub.RepeatsWanted()
+
+	// A hearing of a stored message records its site next, before any other DB work, so region pages see it at
+	// once. When no committed message was found, the group-text side effects add it again after their insert
+	// attempt, which covers a message another hearing is still creating.
+	siteRecorded := false
+	if inserted && packet.PayloadType() == meshcore.PayloadTypeGrpTxt {
+		found, err := w.db.AddChannelMessageIATA(ctx, packetHash[:], iata)
+		if err != nil {
+			w.log.Error(fmt.Sprintf("db: record channel message site failed from %s/%s", iata, pubkeyHex), "error", err)
+		}
+		siteRecorded = found && err == nil
+	}
 
 	if scopeID != nil && inserted {
 		if err := w.db.UpsertObserverScope(ctx, id, *scopeID); err != nil {
@@ -822,12 +840,20 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	if packet.PayloadType() == meshcore.PayloadTypeTrace {
 		hashes = traceRawHashes
 	}
-	resolved, err := w.db.ResolvePathHashes(ctx, iata, hashes)
+	var resolved map[string][]api.ResolvedPathEntry
+	if packet.PayloadType() == meshcore.PayloadTypeTrace {
+		resolved, err = w.db.ResolveTracePathHashes(ctx, iata, hashes)
+	} else {
+		resolved, err = w.db.ResolvePathHashes(ctx, iata, hashes)
+	}
 	if err != nil {
 		w.log.Error("path resolution failed", "error", err)
 	}
 	var resolvedIDs []uuid.UUID
 	for _, entries := range resolved {
+		if len(entries) != 1 {
+			continue
+		}
 		for _, e := range entries {
 			resolvedIDs = append(resolvedIDs, e.NodeID)
 		}
@@ -846,17 +872,35 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 			nodeIDs = append(nodeIDs, entries[0].NodeID)
 			hashPrefixes = append(hashPrefixes, hash)
 		}
-		if allHigh && len(nodeIDs) > 1 {
+		if allHigh && len(nodeIDs) > 1 && packet.PayloadType() != meshcore.PayloadTypeTrace {
 			if err := w.db.UpsertKnownRoute(ctx, nodeIDs, hashPrefixes, iata, int32(len(nodeIDs))); err != nil {
 				w.log.Error("failed to upsert known route", "error", err)
 			}
 		}
 	}
-	w.runCapabilityDetection(ctx, packet.PayloadType(), packet.PathHashSize(), resolvedIDs)
+	hashSize := packet.PathHashSize()
+	if packet.PayloadType() == meshcore.PayloadTypeTrace {
+		hashSize = 1
+		if len(traceRawHashes) > 0 {
+			hashSize = uint8(len(traceRawHashes[0]))
+		}
+		// Only consumed, uniquely resolved hops demonstrate trace capability.
+		resolvedIDs = nil
+		for i, hash := range traceRawHashes {
+			if i >= len(packet.Path) {
+				break
+			}
+			entries := resolved[hex.EncodeToString(hash)]
+			if len(entries) == 1 {
+				resolvedIDs = append(resolvedIDs, entries[0].NodeID)
+			}
+		}
+	}
+	w.runCapabilityDetection(ctx, packet.PayloadType(), hashSize, resolvedIDs)
 
 	if inserted || repeat {
 		if inserted {
-			w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio, scopeID, matchedScope, pubkeyBytes, float32(parseNumber(envelope.SNR)))
+			w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio, scopeID, matchedScope, pubkeyBytes, signalSNR(envelope.SNR), siteRecorded)
 		}
 		// Resolve after advert updates; suppressed copies need no endpoint lookup.
 		var resolvedSource, resolvedDestination *api.ResolvedHop

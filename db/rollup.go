@@ -129,6 +129,10 @@ func rollHour(ctx context.Context, tx pgx.Tx, hour time.Time) (RollOutcome, bool
 	if status == "partial" {
 		return RollPartial, false, q.SetRollupHourPartial(ctx, h)
 	}
+	// Same plans as at 16 MB, without spilling; LOCAL ends with the transaction.
+	if _, err := tx.Exec(ctx, "SET LOCAL work_mem = '256MB'"); err != nil {
+		return RollSkipped, false, err
+	}
 	if _, err := tx.Exec(ctx, createRollupObs); err != nil {
 		return RollSkipped, false, err
 	}
