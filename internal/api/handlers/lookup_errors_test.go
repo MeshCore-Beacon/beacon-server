@@ -57,7 +57,7 @@ func TestLookupErrors(t *testing.T) {
 			want int
 		}{
 			{pgx.ErrNoRows, tc.missing},
-			{context.DeadlineExceeded, http.StatusInternalServerError},
+			{context.DeadlineExceeded, http.StatusServiceUnavailable},
 		} {
 			t.Run(tc.name+"/"+c.err.Error(), func(t *testing.T) {
 				w := httptest.NewRecorder()
@@ -81,7 +81,7 @@ func TestRegionFilterErrors(t *testing.T) {
 		want int
 	}{
 		{pgx.ErrNoRows, http.StatusBadRequest},
-		{context.DeadlineExceeded, http.StatusInternalServerError},
+		{context.DeadlineExceeded, http.StatusServiceUnavailable},
 	} {
 		reader := stubReader{getRegionBySlug: func(context.Context, string) (*api.Region, error) { return nil, tc.err }}
 		for name, h := range map[string]http.Handler{

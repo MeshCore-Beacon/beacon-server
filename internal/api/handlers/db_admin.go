@@ -103,8 +103,7 @@ func getDBStatements(reader DBStatementsReader) http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			slog.Error("api: read statement statistics", "component", "api", "error", err)
-			respondError(w, http.StatusInternalServerError, "cannot read statement statistics")
+			respondReaderError(w, err, "cannot read statement statistics")
 			return
 		}
 		if items == nil {
