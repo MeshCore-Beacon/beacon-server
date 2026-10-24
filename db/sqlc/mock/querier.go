@@ -3514,6 +3514,21 @@ func (mr *MockQuerierMockRecorder) UpsertChannelHashOnly(ctx, channelHash any) *
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertChannelHashOnly", reflect.TypeOf((*MockQuerier)(nil).UpsertChannelHashOnly), ctx, channelHash)
 }
 
+// UpsertChannelHashOnlyNamed mocks base method.
+func (m *MockQuerier) UpsertChannelHashOnlyNamed(ctx context.Context, arg db.UpsertChannelHashOnlyNamedParams) (int32, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpsertChannelHashOnlyNamed", ctx, arg)
+	ret0, _ := ret[0].(int32)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpsertChannelHashOnlyNamed indicates an expected call of UpsertChannelHashOnlyNamed.
+func (mr *MockQuerierMockRecorder) UpsertChannelHashOnlyNamed(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertChannelHashOnlyNamed", reflect.TypeOf((*MockQuerier)(nil).UpsertChannelHashOnlyNamed), ctx, arg)
+}
+
 // UpsertChannelIATA mocks base method.
 func (m *MockQuerier) UpsertChannelIATA(ctx context.Context, arg db.UpsertChannelIATAParams) error {
 	m.ctrl.T.Helper()

@@ -456,8 +456,13 @@ func TestUpsertChannelNilFingerprintBypassesCache(t *testing.T) {
 	cache := NewChannelIDCache()
 	store := &Store{q: mock, channelIDs: cache}
 
-	mock.EXPECT().UpsertChannel(gomock.Any(), upsertParams([]byte{0x11}, nil, "pub", "")).
-		Return(sqlc.Channel{ID: 5}, nil).Times(2)
+	// A name or hashtag goes to the hash-only conflict target on every hearing, keeping the name; the keyed statement,
+	// whose (hash, fingerprint) target never matches a NULL fingerprint, is never used.
+	pub := "pub"
+	isHashtag := false
+	mock.EXPECT().UpsertChannelHashOnlyNamed(gomock.Any(), sqlc.UpsertChannelHashOnlyNamedParams{
+		ChannelHash: []byte{0x11}, Name: &pub, IsHashtag: &isHashtag}).Return(int32(5), nil).Times(2)
+	mock.EXPECT().UpsertChannel(gomock.Any(), gomock.Any()).Times(0)
 	mock.EXPECT().TouchChannel(gomock.Any(), gomock.Any()).Times(0)
 	mock.EXPECT().TouchChannelHashOnly(gomock.Any(), gomock.Any()).Times(0)
 
@@ -469,6 +474,22 @@ func TestUpsertChannelNilFingerprintBypassesCache(t *testing.T) {
 	}
 	if cache.Len() != 0 {
 		t.Fatalf("cache.Len() = %d, want 0", cache.Len())
+	}
+}
+
+// Without a name or hashtag, a nil fingerprint is a hash-only hearing: the hash-only upsert, then its write-through.
+func TestUpsertChannelNilFingerprintIsHashOnly(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mock := mockdb.NewMockQuerier(ctrl)
+	store := &Store{q: mock, channelIDs: NewChannelIDCache()}
+	mock.EXPECT().UpsertChannelHashOnly(gomock.Any(), []byte{0x12}).Return(int32(8), nil).Times(1)
+	mock.EXPECT().TouchChannelHashOnly(gomock.Any(), sqlc.TouchChannelHashOnlyParams{ID: 8, ChannelHash: []byte{0x12}}).
+		Return(int32(8), nil).Times(1)
+	mock.EXPECT().UpsertChannel(gomock.Any(), gomock.Any()).Times(0)
+	for i := 0; i < 2; i++ {
+		if id, err := store.UpsertChannel(context.Background(), []byte{0x12}, nil, "", ""); err != nil || id != 8 {
+			t.Fatalf("call %d: %d, %v; want 8", i, id, err)
+		}
 	}
 }
 

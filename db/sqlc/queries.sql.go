@@ -7610,8 +7610,8 @@ type UpsertChannelParams struct {
 // ============================================================
 // CHANNELS
 // ============================================================
-// Upsert a channel by (hash, key_fingerprint). Pass NULL fingerprint for
-// hash-only records (key unknown). Returns the channel row.
+// Upsert a keyed channel by (hash, key_fingerprint). Returns the channel row. A NULL fingerprint never matches that key,
+// so the store sends hash-only records (key unknown) to UpsertChannelHashOnly or UpsertChannelHashOnlyNamed.
 func (q *Queries) UpsertChannel(ctx context.Context, arg UpsertChannelParams) (Channel, error) {
 	row := q.db.QueryRow(ctx, upsertChannel,
 		arg.ChannelHash,
@@ -7647,6 +7647,36 @@ RETURNING id
 
 func (q *Queries) UpsertChannelHashOnly(ctx context.Context, channelHash []byte) (int32, error) {
 	row := q.db.QueryRow(ctx, upsertChannelHashOnly, channelHash)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
+}
+
+const upsertChannelHashOnlyNamed = `-- name: UpsertChannelHashOnlyNamed :one
+INSERT INTO channels (channel_hash, name, hashtag, is_hashtag, key_known, last_seen)
+VALUES ($1, $2, $3, $4, false, NOW())
+ON CONFLICT (channel_hash) WHERE key_fingerprint IS NULL DO UPDATE SET
+  last_seen = NOW(),
+  name      = COALESCE(EXCLUDED.name, channels.name)
+RETURNING id
+`
+
+type UpsertChannelHashOnlyNamedParams struct {
+	ChannelHash []byte  `json:"channel_hash"`
+	Name        *string `json:"name"`
+	Hashtag     *string `json:"hashtag"`
+	IsHashtag   *bool   `json:"is_hashtag"`
+}
+
+// UpsertChannel for a hash-only channel heard with a name or hashtag: the hash-only conflict target, and
+// UpsertChannel's insert and conflict update.
+func (q *Queries) UpsertChannelHashOnlyNamed(ctx context.Context, arg UpsertChannelHashOnlyNamedParams) (int32, error) {
+	row := q.db.QueryRow(ctx, upsertChannelHashOnlyNamed,
+		arg.ChannelHash,
+		arg.Name,
+		arg.Hashtag,
+		arg.IsHashtag,
+	)
 	var id int32
 	err := row.Scan(&id)
 	return id, err
