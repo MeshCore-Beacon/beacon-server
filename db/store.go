@@ -35,6 +35,7 @@ type Store struct {
 	packetSitesVacuums  atomic.Int32    // VACUUM (ANALYZE) runs of packet_sites by the first-time verification
 	fill                *FillPacing     // see WithFillPacing; nil: DefaultFillPacing
 	packetSitesProgress FillProgress    // the packet_sites backfill's progress log, across sessions
+	packetSitesIDs      idHistogram     // the id statistics that progress counts in, read when it started
 	cmiProgress         FillProgress    // the cmi backfill's progress log, across sessions
 }
 

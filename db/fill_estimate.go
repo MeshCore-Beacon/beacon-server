@@ -52,7 +52,8 @@ func (h idHistogram) below(x int64) float64 {
 	return (float64(i) + within) / float64(n)
 }
 
-// estimate is the estimated number of rows with ids in (after, through]; ok is false without statistics.
+// estimate is the estimated number of rows with ids in (after, through]; ok is false without statistics. Ids above
+// the histogram's last bound arrived since the last ANALYZE and are new, so dense: each counts as one row.
 func (h idHistogram) estimate(after, through int64) (int64, bool) {
 	if len(h.bounds) < 2 || h.rows <= 0 {
 		return 0, false
@@ -60,7 +61,9 @@ func (h idHistogram) estimate(after, through int64) (int64, bool) {
 	if through <= after {
 		return 0, true
 	}
-	return int64(h.rows * (h.below(through) - h.below(after))), true
+	last := h.bounds[len(h.bounds)-1]
+	in := h.rows * (h.below(min(through, last)) - h.below(min(after, last)))
+	return int64(in) + max(through-max(after, last), 0), true
 }
 
 // rowsOrIDs is estimate, or the id count when there are no statistics.

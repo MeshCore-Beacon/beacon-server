@@ -22,8 +22,8 @@ import (
 
 const (
 	packetSitesStateKey = "packet_sites"
-	// packetSitesSlice is the observation ids one fill covers in the reconcile and the audit, and the backfill's
-	// default slice (readmodels.fill.packet_sites_slice).
+	// packetSitesSlice is the observation ids one fill covers in the reconcile and the audit, and the observations
+	// in the backfill's default slice (readmodels.fill.packet_sites_slice).
 	packetSitesSlice int64 = 500_000
 	// packetSitesFillAttempts bounds the retries of a fill that lost a packet to a concurrent cascade (23503).
 	packetSitesFillAttempts = 3
@@ -56,8 +56,8 @@ type PacketSitesSession struct {
 	duty     float64
 	slice    int64
 	progress *FillProgress
-	sliced   bool        // this session's Backfill has filled a slice
-	ids      idHistogram // observation id statistics for progress, loaded at the start and with each progress log
+	sliced   bool         // this session's Backfill has filled a slice
+	ids      *idHistogram // the statistics progress counts in, kept for the whole fill so its units never change
 
 	// fillStmt runs one fill; tests replace it. fills lists the (after, through] ranges filled, and retries counts
 	// 23503 retries, for tests.
@@ -92,7 +92,8 @@ func (s *Store) BeginPacketSites(ctx context.Context) (*PacketSitesSession, bool
 	}
 	pace := s.FillPacing()
 	p := &PacketSitesSession{store: s, conn: conn, q: sqlc.New(conn),
-		pause: pace.MinPause, duty: pace.Duty, slice: pace.PacketSitesSlice, progress: &s.packetSitesProgress}
+		pause: pace.MinPause, duty: pace.Duty, slice: pace.PacketSitesSlice, progress: &s.packetSitesProgress,
+		ids: &s.packetSitesIDs}
 	p.fillStmt = func(ctx context.Context, after, through int64) (int64, error) {
 		return p.q.FillPacketSitesSlice(ctx, sqlc.FillPacketSitesSliceParams{AfterID: after, ThroughID: through})
 	}
@@ -225,7 +226,6 @@ func (p *PacketSitesSession) Backfill(ctx context.Context, budget time.Duration)
 			p.sliced = true
 		}
 		if p.progress != nil && p.progress.Due() {
-			p.loadIDs(ctx)
 			done, left := p.ids.rowsOrIDs(from, p.state.WriterFromID), p.ids.rowsOrIDs(lo-1, from)
 			p.progress.LogLeft("packet_sites backfill progress", done, left,
 				"ids_done", p.state.WriterFromID-from, "ids_remaining", from-(lo-1),
@@ -240,15 +240,15 @@ func (p *PacketSitesSession) Backfill(ctx context.Context, budget time.Duration)
 	return p.state, nil
 }
 
-// loadIDs refreshes the observation id statistics the progress log counts with; a failure keeps the last ones (or
-// none: progress then counts ids).
+// loadIDs reads the observation id statistics the progress log counts in, when its clock starts; without them
+// (a failed read, or no ANALYZE yet) progress counts ids.
 func (p *PacketSitesSession) loadIDs(ctx context.Context) {
 	h, err := loadObservationIDHistogram(ctx, p.conn)
 	if err != nil {
 		slog.Warn("packet_sites backfill: cannot read observation statistics; progress counts ids", "component", "readmodel", "error", err)
-		return
+		h = idHistogram{}
 	}
-	p.ids = h
+	*p.ids = h
 }
 
 // sleepCtx waits d or until ctx ends; it reports whether ctx is still live.
