@@ -154,7 +154,7 @@ func (r *PlanRouter) begin(ctx context.Context, sql string, args []any) (*stmt, 
 	s := &stmt{conn: conn, ctx: sctx, args: args, ticket: t, cancel: cancel}
 	if n := planpolicy.ParallelWorkers[sqlcName(sql)]; n > 0 && pool != r.legacy {
 		// The pool's max_parallel_workers_per_gather is 0; raise it for this statement only. ROLLBACK in end
-		// restores it, and a connection left in a transaction is never reused: pgxpool closes it on release.
+		// restores it, and a connection left in a transaction is never reused: pgxpool destroys it on release.
 		s.inTx = true
 		if _, err := conn.Exec(sctx, fmt.Sprintf("BEGIN READ ONLY; SET LOCAL max_parallel_workers_per_gather = %d", n),
 			pgx.QueryExecModeSimpleProtocol); err != nil {
