@@ -43,6 +43,8 @@ func TestSiteStatement(t *testing.T) {
 		{siteWindow, 1, false, "ListPacketsBySitesWindow"},
 		{siteWindow, 3, true, "ListPacketsBySitesWindow"},
 		{siteScoped, 3, true, "ListPacketsBySitesScopedWindow"},
+		{siteWindowTyped, 2, false, "ListPacketsBySitesTypedWindow"},
+		{siteScopedTyped, 1, true, "ListPacketsBySitesScopedTypedWindow"},
 	} {
 		if got := siteStatement(tc.fam, tc.sites, tc.hasCursor); got != tc.want {
 			t.Errorf("siteStatement(%d, %d, %v) = %s, want %s", tc.fam, tc.sites, tc.hasCursor, got, tc.want)
@@ -62,9 +64,12 @@ func TestSiteStatement(t *testing.T) {
 		{"eight type pairs", []int16{4, 5}, nil, nil, time.Time{}, siteTyped},
 		{"many type pairs", []int16{4, 5, 6}, []int16{0, 1, 2}, nil, time.Time{}, siteMany},
 		{"route types only", nil, []int16{3}, nil, time.Time{}, siteMany}, // 16 payload types x 1
-		{"since and types", []int16{4}, nil, nil, since, siteWindow},
+		{"since and types", []int16{4}, nil, nil, since, siteWindowTyped},
+		{"since and every type", nil, []int16{0, 1, 2, 3}, nil, since, siteWindow},
 		{"since", nil, nil, nil, since, siteWindow},
-		{"scopes, since and types", []int16{4}, nil, []string{"#a"}, since, siteScoped},
+		{"scopes, since and types", []int16{4}, nil, []string{"#a"}, since, siteScopedTyped},
+		{"scopes and types", nil, []int16{3}, []string{"#a"}, time.Time{}, siteScopedTyped},
+		{"scopes", nil, nil, []string{"#a"}, time.Time{}, siteScoped},
 	} {
 		f, ok := newPacketFilter(tc.pt, tc.rt, tc.scopes, tc.since, time.Time{}, 0, nil, 50)
 		if !ok || siteFamilyOf(f) != tc.want {
@@ -147,6 +152,18 @@ func TestListPacketsRegionDispatch(t *testing.T) {
 			known(m, []string{"AAA"}, []string{"AAA"})
 			m.EXPECT().ListPacketsBySitesScopedWindow(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsBySitesScopedWindowParams) bool {
 				return slices.Equal(p.ScopeNames, []string{"#a"}) && !p.Recheck && p.CursorHash != nil && p.LoTs.Time.Equal(since.Add(-30*time.Minute))
+			})).Return(nil, nil)
+		}},
+		{name: "since and a type", iatas: []string{"AAA"}, pt: []int16{4}, since: since, expect: func(m *mockdb.MockQuerier) {
+			known(m, []string{"AAA"}, []string{"AAA"})
+			m.EXPECT().ListPacketsBySitesTypedWindow(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsBySitesTypedWindowParams) bool {
+				return slices.Equal(p.PayloadTypes, []int16{4}) && slices.Equal(p.RouteTypes, allRouteTypes) && p.LoTs.Time.Equal(since.Add(-30*time.Minute))
+			})).Return(nil, nil)
+		}},
+		{name: "scopes and a route type", iatas: []string{"AAA", "BBB"}, rt: []int16{3}, scopes: []string{"#a"}, cursor: cursor, expect: func(m *mockdb.MockQuerier) {
+			known(m, []string{"AAA", "BBB"}, []string{"AAA", "BBB"})
+			m.EXPECT().ListPacketsBySitesScopedTypedWindow(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsBySitesScopedTypedWindowParams) bool {
+				return p.Recheck && slices.Equal(p.RouteTypes, []int16{3}) && len(p.PayloadTypes) == 16 && slices.Equal(p.ScopeNames, []string{"#a"})
 			})).Return(nil, nil)
 		}},
 		{name: "scopes alone", iatas: []string{"AAA", "BBB"}, scopes: []string{"#a"}, cursor: cursor, expect: func(m *mockdb.MockQuerier) {

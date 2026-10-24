@@ -34,11 +34,13 @@ func siteToPacketRow(r siteRow) packetRow {
 type siteFamily int
 
 const (
-	sitePlain  siteFamily = iota // no filter: one exact range per site
-	siteTyped                    // a few (payload type, route type) pairs: one exact range per site and pair
-	siteMany                     // many type pairs: bounded reads of each site range, filtered, then the pairs' ranges
-	siteWindow                   // a first-heard window: each site range from the page start down to the window
-	siteScoped                   // named scopes: each (site, scope) range, as siteWindow
+	sitePlain       siteFamily = iota // no filter: one exact range per site
+	siteTyped                         // a few (payload type, route type) pairs: one exact range per site and pair
+	siteMany                          // many type pairs: bounded reads of each site range, filtered, then the pairs' ranges
+	siteWindow                        // a first-heard window: each site range from the page start down to the window
+	siteWindowTyped                   // a window and types: each (site, type pair) range, as siteWindow
+	siteScoped                        // named scopes: each (site, scope) range, as siteWindow
+	siteScopedTyped                   // named scopes and types: each (site, scope, type pair) range, as siteWindow
 )
 
 // siteTypedPairs is the most (payload type, route type) pairs the typed statement walks as separate ranges on the
@@ -62,11 +64,17 @@ const siteSkew = 30 * time.Minute
 // maxCursorHashBytes is a hash longer than any stored one: (t, that) sorts above every key at t.
 const maxCursorHashBytes = 64
 
-// siteFamilyOf picks the family: scopes, then a window, then types.
+// siteFamilyOf picks the family: scopes, then a window, then types. A type list that names all 64 pairs filters
+// nothing, so it counts as no type filter.
 func siteFamilyOf(f packetFilter) siteFamily {
+	typed := f.typed && len(f.payloadTypes)*len(f.routeTypes) < payloadTypeCount*routeTypeCount
 	switch {
+	case len(f.scopes) > 0 && typed:
+		return siteScopedTyped
 	case len(f.scopes) > 0:
 		return siteScoped
+	case f.windowed && typed:
+		return siteWindowTyped
 	case f.windowed:
 		return siteWindow
 	case f.typed && len(f.payloadTypes)*len(f.routeTypes) > siteTypedPairs:
@@ -91,8 +99,12 @@ func siteStatement(fam siteFamily, sites int, hasCursor bool) string {
 		return "ListPacketsBySitesSince"
 	case siteWindow:
 		return "ListPacketsBySitesWindow"
+	case siteWindowTyped:
+		return "ListPacketsBySitesTypedWindow"
 	case siteScoped:
 		return "ListPacketsBySitesScopedWindow"
+	case siteScopedTyped:
+		return "ListPacketsBySitesScopedTypedWindow"
 	}
 	switch {
 	case sites == 1:
@@ -115,9 +127,10 @@ var errSiteBudget = errors.New("bounded region reads exhausted their budget")
 // listSiteRows pre-filters unknown sites (every family but plain), dispatches and returns up to f.pageLimit rows in
 // (site_heard_at DESC, packet_hash DESC) order, and how many keys the page holds (hasMore is keys > limit). rows is
 // nil when the pre-filter leaves no site. Every family reads a bounded part of the table: plain and typed one
-// range per site (and pair), window and scoped each range from the page start down to the window, many-pair the
-// bounded reads and then, if they run out of budget, the pairs' ranges. Shared by the store and the first-time
-// verification.
+// range per site (and pair) to at most a page; window and scoped each range (with types, each type pair's range) from
+// the page start down to the window and at most a page; many-pair the bounded reads and then, if they run out of
+// budget, the pairs' ranges. A filter therefore never makes a range read past what the page and its window need.
+// Shared by the store and the first-time verification.
 func listSiteRows(ctx context.Context, q sqlc.Querier, f packetFilter, sites []string) (rows []siteRow, keys int, err error) {
 	fam := siteFamilyOf(f)
 	if fam != sitePlain {
@@ -224,13 +237,36 @@ func windowBounds(f packetFilter) (lo, hi, mainTS pgtype.Timestamptz, mainHash [
 	return lo, hi, mainTS, mainHash
 }
 
-// windowSiteRows runs the window or scoped family: the page keys, then their rows.
+// windowSiteRows runs the window and scoped families: the page keys, then their rows.
 func windowSiteRows(ctx context.Context, q sqlc.Querier, fam siteFamily, f packetFilter, sites []string, hasCursor bool) ([]siteRow, int, error) {
 	lo, hi, mainTS, mainHash := windowBounds(f)
 	recheck := hasCursor && len(sites) > 1
 	var hashes [][]byte
 	var ats []pgtype.Timestamptz
-	if fam == siteScoped {
+	switch fam {
+	case siteScopedTyped:
+		keys, err := q.ListPacketsBySitesScopedTypedWindow(ctx, sqlc.ListPacketsBySitesScopedTypedWindowParams{
+			Iatas: sites, ScopeNames: f.scopes, MainTs: mainTS, MainHash: mainHash, LoTs: lo, HiTs: hi, SinceTs: f.since, UntilTs: f.until,
+			PayloadTypes: f.payloadTypes, RouteTypes: f.routeTypes, Recheck: recheck, CursorTs: f.cursorTS, CursorHash: f.cursorHash, PageLimit: f.pageLimit,
+		})
+		if err != nil {
+			return nil, 0, err
+		}
+		for _, k := range keys {
+			hashes, ats = append(hashes, k.PacketHash), append(ats, k.SiteHeardAt)
+		}
+	case siteWindowTyped:
+		keys, err := q.ListPacketsBySitesTypedWindow(ctx, sqlc.ListPacketsBySitesTypedWindowParams{
+			Iatas: sites, MainTs: mainTS, MainHash: mainHash, LoTs: lo, HiTs: hi, SinceTs: f.since, UntilTs: f.until,
+			PayloadTypes: f.payloadTypes, RouteTypes: f.routeTypes, Recheck: recheck, CursorTs: f.cursorTS, CursorHash: f.cursorHash, PageLimit: f.pageLimit,
+		})
+		if err != nil {
+			return nil, 0, err
+		}
+		for _, k := range keys {
+			hashes, ats = append(hashes, k.PacketHash), append(ats, k.SiteHeardAt)
+		}
+	case siteScoped:
 		keys, err := q.ListPacketsBySitesScopedWindow(ctx, sqlc.ListPacketsBySitesScopedWindowParams{
 			Iatas: sites, ScopeNames: f.scopes, MainTs: mainTS, MainHash: mainHash, LoTs: lo, HiTs: hi, SinceTs: f.since, UntilTs: f.until,
 			PayloadTypes: f.payloadTypes, RouteTypes: f.routeTypes, Recheck: recheck, CursorTs: f.cursorTS, CursorHash: f.cursorHash, PageLimit: f.pageLimit,
@@ -241,7 +277,7 @@ func windowSiteRows(ctx context.Context, q sqlc.Querier, fam siteFamily, f packe
 		for _, k := range keys {
 			hashes, ats = append(hashes, k.PacketHash), append(ats, k.SiteHeardAt)
 		}
-	} else {
+	default:
 		keys, err := q.ListPacketsBySitesWindow(ctx, sqlc.ListPacketsBySitesWindowParams{
 			Iatas: sites, MainTs: mainTS, MainHash: mainHash, LoTs: lo, HiTs: hi, SinceTs: f.since, UntilTs: f.until,
 			PayloadTypes: f.payloadTypes, RouteTypes: f.routeTypes, Recheck: recheck, CursorTs: f.cursorTS, CursorHash: f.cursorHash, PageLimit: f.pageLimit,

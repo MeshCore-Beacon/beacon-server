@@ -364,8 +364,7 @@ type ListPacketsBySiteKeysRow struct {
 	OriginPubkey                 []byte             `json:"origin_pubkey"`
 }
 
-// The page rows for keys from ListPacketsBySitesSince, ListPacketsBySitesWindow or ListPacketsBySitesScopedWindow,
-// in the given order.
+// The page rows for keys from ListPacketsBySitesSince and the window statements, in the given order.
 func (q *Queries) ListPacketsBySiteKeys(ctx context.Context, arg ListPacketsBySiteKeysParams) ([]ListPacketsBySiteKeysRow, error) {
 	rows, err := q.db.Query(ctx, listPacketsBySiteKeys, arg.PacketHashes, arg.SiteHeardAts)
 	if err != nil {
@@ -652,6 +651,138 @@ func (q *Queries) ListPacketsBySitesFirst(ctx context.Context, arg ListPacketsBy
 			&i.RawPayload,
 			&i.OriginPubkey,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPacketsBySitesScopedTypedWindow = `-- name: ListPacketsBySitesScopedTypedWindow :many
+WITH page AS MATERIALIZED (
+  SELECT s.packet_hash, max(s.site_heard_at) AS k
+  FROM (
+    -- idx_packet_sites_site_scope_type: one range per pair, from the page start down to lo_ts.
+    SELECT m.packet_hash, m.site_heard_at
+    FROM unnest($1::bpchar[]) AS req(iata)
+    CROSS JOIN (SELECT id FROM transport_scopes WHERE name = ANY($2::text[])) sc
+    CROSS JOIN unnest($3::smallint[]) AS pt(t)
+    CROSS JOIN unnest($4::smallint[]) AS rt(t)
+    CROSS JOIN LATERAL (
+      SELECT ps.packet_hash, ps.site_heard_at
+      FROM packet_sites ps
+      WHERE ps.iata = req.iata AND ps.scope_id = sc.id AND ps.payload_type = pt.t AND ps.route_type = rt.t
+        AND (ps.site_heard_at, ps.packet_hash) < ($5::timestamptz, $6::bytea)
+        AND ps.site_heard_at >= $7::timestamptz
+        AND ps.first_heard_at >= $8::timestamptz AND ps.first_heard_at <= $9::timestamptz
+        AND (NOT $10::boolean OR NOT EXISTS (SELECT 1 FROM packet_sites x
+              WHERE x.packet_hash = ps.packet_hash AND x.iata = ANY($1::bpchar[])
+                AND (x.site_heard_at, x.packet_hash) >= ($11::timestamptz, $12::bytea)
+              OFFSET 0))   -- a per-row SubPlan in both plan modes, never an anti join
+      ORDER BY ps.site_heard_at DESC, ps.packet_hash DESC
+      LIMIT $13) m
+    UNION ALL
+    SELECT x.packet_hash, x.site_heard_at
+    FROM unnest($1::bpchar[]) AS req(iata)
+    CROSS JOIN (SELECT id FROM transport_scopes WHERE name = ANY($2::text[])) sc
+    CROSS JOIN LATERAL (
+      -- idx_packet_sites_late: entries above hi_ts heard there over 30 minutes after first heard, a small share of
+      -- the window above until. The fence leaves the subquery only conditions the type index does not bound.
+      (SELECT l.packet_hash, l.site_heard_at
+       FROM (SELECT ps.packet_hash, ps.site_heard_at, ps.first_heard_at, ps.payload_type, ps.route_type, ps.scope_id
+             FROM packet_sites ps
+             WHERE $14::timestamptz <> 'infinity'::timestamptz
+               AND ps.iata = req.iata AND (ps.site_heard_at - ps.first_heard_at) > '00:30:00'::interval
+               AND (ps.site_heard_at, ps.packet_hash) < ($11::timestamptz, $12::bytea)
+               AND ps.site_heard_at > $14::timestamptz
+             OFFSET 0) l
+       WHERE l.first_heard_at >= $8::timestamptz AND l.first_heard_at <= $9::timestamptz
+         AND l.scope_id = sc.id
+         AND l.payload_type = ANY($3::smallint[]) AND l.route_type = ANY($4::smallint[])
+         AND (NOT $10::boolean OR NOT EXISTS (SELECT 1 FROM packet_sites x
+               WHERE x.packet_hash = l.packet_hash AND x.iata = ANY($1::bpchar[])
+                 AND (x.site_heard_at, x.packet_hash) >= ($11::timestamptz, $12::bytea)
+               OFFSET 0))   -- a per-row SubPlan in both plan modes, never an anti join
+       ORDER BY l.site_heard_at DESC, l.packet_hash DESC
+       LIMIT $13)
+      UNION ALL
+      -- idx_packet_sites_early: entries below lo_ts heard there over 30 minutes before first heard (about empty).
+      (SELECT e.packet_hash, e.site_heard_at
+       FROM (SELECT ps.packet_hash, ps.site_heard_at, ps.payload_type, ps.route_type, ps.scope_id
+             FROM packet_sites ps
+             WHERE $7::timestamptz <> '-infinity'::timestamptz
+               AND ps.iata = req.iata AND (ps.first_heard_at - ps.site_heard_at) > '00:30:00'::interval
+               AND ps.first_heard_at >= $8::timestamptz AND ps.first_heard_at <= $9::timestamptz
+             OFFSET 0) e
+       WHERE e.site_heard_at < $7::timestamptz
+         AND e.scope_id = sc.id
+         AND e.payload_type = ANY($3::smallint[]) AND e.route_type = ANY($4::smallint[])
+         AND (e.site_heard_at, e.packet_hash) < ($11::timestamptz, $12::bytea)
+         AND (NOT $10::boolean OR NOT EXISTS (SELECT 1 FROM packet_sites x
+               WHERE x.packet_hash = e.packet_hash AND x.iata = ANY($1::bpchar[])
+                 AND (x.site_heard_at, x.packet_hash) >= ($11::timestamptz, $12::bytea)
+               OFFSET 0))   -- a per-row SubPlan in both plan modes, never an anti join
+      )
+    ) x
+  ) s
+  GROUP BY s.packet_hash
+  ORDER BY max(s.site_heard_at) DESC, s.packet_hash DESC
+  LIMIT $13
+)
+SELECT pg.packet_hash, pg.k::timestamptz AS site_heard_at FROM page pg ORDER BY pg.k DESC, pg.packet_hash DESC
+`
+
+type ListPacketsBySitesScopedTypedWindowParams struct {
+	Iatas        []string           `json:"iatas"`
+	ScopeNames   []string           `json:"scope_names"`
+	PayloadTypes []int16            `json:"payload_types"`
+	RouteTypes   []int16            `json:"route_types"`
+	MainTs       pgtype.Timestamptz `json:"main_ts"`
+	MainHash     []byte             `json:"main_hash"`
+	LoTs         pgtype.Timestamptz `json:"lo_ts"`
+	SinceTs      pgtype.Timestamptz `json:"since_ts"`
+	UntilTs      pgtype.Timestamptz `json:"until_ts"`
+	Recheck      bool               `json:"recheck"`
+	CursorTs     pgtype.Timestamptz `json:"cursor_ts"`
+	CursorHash   []byte             `json:"cursor_hash"`
+	PageLimit    int32              `json:"page_limit"`
+	HiTs         pgtype.Timestamptz `json:"hi_ts"`
+}
+
+type ListPacketsBySitesScopedTypedWindowRow struct {
+	PacketHash  []byte             `json:"packet_hash"`
+	SiteHeardAt pgtype.Timestamptz `json:"site_heard_at"`
+}
+
+// ListPacketsBySitesScopedWindow with a type filter: one range per (site, scope, payload type, route type).
+func (q *Queries) ListPacketsBySitesScopedTypedWindow(ctx context.Context, arg ListPacketsBySitesScopedTypedWindowParams) ([]ListPacketsBySitesScopedTypedWindowRow, error) {
+	rows, err := q.db.Query(ctx, listPacketsBySitesScopedTypedWindow,
+		arg.Iatas,
+		arg.ScopeNames,
+		arg.PayloadTypes,
+		arg.RouteTypes,
+		arg.MainTs,
+		arg.MainHash,
+		arg.LoTs,
+		arg.SinceTs,
+		arg.UntilTs,
+		arg.Recheck,
+		arg.CursorTs,
+		arg.CursorHash,
+		arg.PageLimit,
+		arg.HiTs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPacketsBySitesScopedTypedWindowRow{}
+	for rows.Next() {
+		var i ListPacketsBySitesScopedTypedWindowRow
+		if err := rows.Scan(&i.PacketHash, &i.SiteHeardAt); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1148,6 +1279,134 @@ func (q *Queries) ListPacketsBySitesTypedFirst(ctx context.Context, arg ListPack
 			&i.RawPayload,
 			&i.OriginPubkey,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPacketsBySitesTypedWindow = `-- name: ListPacketsBySitesTypedWindow :many
+WITH page AS MATERIALIZED (
+  SELECT s.packet_hash, max(s.site_heard_at) AS k
+  FROM (
+    -- idx_packet_sites_site_type: one range per pair, from the page start down to lo_ts.
+    SELECT m.packet_hash, m.site_heard_at
+    FROM unnest($1::bpchar[]) AS req(iata)
+    CROSS JOIN unnest($2::smallint[]) AS pt(t)
+    CROSS JOIN unnest($3::smallint[]) AS rt(t)
+    CROSS JOIN LATERAL (
+      SELECT ps.packet_hash, ps.site_heard_at
+      FROM packet_sites ps
+      WHERE ps.iata = req.iata AND ps.payload_type = pt.t AND ps.route_type = rt.t
+        AND (ps.site_heard_at, ps.packet_hash) < ($4::timestamptz, $5::bytea)
+        AND ps.site_heard_at >= $6::timestamptz
+        AND ps.first_heard_at >= $7::timestamptz AND ps.first_heard_at <= $8::timestamptz
+        AND (NOT $9::boolean OR NOT EXISTS (SELECT 1 FROM packet_sites x
+              WHERE x.packet_hash = ps.packet_hash AND x.iata = ANY($1::bpchar[])
+                AND (x.site_heard_at, x.packet_hash) >= ($10::timestamptz, $11::bytea)
+              OFFSET 0))   -- a per-row SubPlan in both plan modes, never an anti join
+      ORDER BY ps.site_heard_at DESC, ps.packet_hash DESC
+      LIMIT $12) m
+    UNION ALL
+    SELECT x.packet_hash, x.site_heard_at
+    FROM unnest($1::bpchar[]) AS req(iata)
+    CROSS JOIN LATERAL (
+      -- idx_packet_sites_late: entries above hi_ts heard there over 30 minutes after first heard, a small share of
+      -- the window above until. The fence leaves the subquery only conditions the type index does not bound.
+      (SELECT l.packet_hash, l.site_heard_at
+       FROM (SELECT ps.packet_hash, ps.site_heard_at, ps.first_heard_at, ps.payload_type, ps.route_type, ps.scope_id
+             FROM packet_sites ps
+             WHERE $13::timestamptz <> 'infinity'::timestamptz
+               AND ps.iata = req.iata AND (ps.site_heard_at - ps.first_heard_at) > '00:30:00'::interval
+               AND (ps.site_heard_at, ps.packet_hash) < ($10::timestamptz, $11::bytea)
+               AND ps.site_heard_at > $13::timestamptz
+             OFFSET 0) l
+       WHERE l.first_heard_at >= $7::timestamptz AND l.first_heard_at <= $8::timestamptz
+         AND l.payload_type = ANY($2::smallint[]) AND l.route_type = ANY($3::smallint[])
+         AND (NOT $9::boolean OR NOT EXISTS (SELECT 1 FROM packet_sites x
+               WHERE x.packet_hash = l.packet_hash AND x.iata = ANY($1::bpchar[])
+                 AND (x.site_heard_at, x.packet_hash) >= ($10::timestamptz, $11::bytea)
+               OFFSET 0))   -- a per-row SubPlan in both plan modes, never an anti join
+       ORDER BY l.site_heard_at DESC, l.packet_hash DESC
+       LIMIT $12)
+      UNION ALL
+      -- idx_packet_sites_early: entries below lo_ts heard there over 30 minutes before first heard (about empty).
+      (SELECT e.packet_hash, e.site_heard_at
+       FROM (SELECT ps.packet_hash, ps.site_heard_at, ps.payload_type, ps.route_type, ps.scope_id
+             FROM packet_sites ps
+             WHERE $6::timestamptz <> '-infinity'::timestamptz
+               AND ps.iata = req.iata AND (ps.first_heard_at - ps.site_heard_at) > '00:30:00'::interval
+               AND ps.first_heard_at >= $7::timestamptz AND ps.first_heard_at <= $8::timestamptz
+             OFFSET 0) e
+       WHERE e.site_heard_at < $6::timestamptz
+         AND e.payload_type = ANY($2::smallint[]) AND e.route_type = ANY($3::smallint[])
+         AND (e.site_heard_at, e.packet_hash) < ($10::timestamptz, $11::bytea)
+         AND (NOT $9::boolean OR NOT EXISTS (SELECT 1 FROM packet_sites x
+               WHERE x.packet_hash = e.packet_hash AND x.iata = ANY($1::bpchar[])
+                 AND (x.site_heard_at, x.packet_hash) >= ($10::timestamptz, $11::bytea)
+               OFFSET 0))   -- a per-row SubPlan in both plan modes, never an anti join
+      )
+    ) x
+  ) s
+  GROUP BY s.packet_hash
+  ORDER BY max(s.site_heard_at) DESC, s.packet_hash DESC
+  LIMIT $12
+)
+SELECT pg.packet_hash, pg.k::timestamptz AS site_heard_at FROM page pg ORDER BY pg.k DESC, pg.packet_hash DESC
+`
+
+type ListPacketsBySitesTypedWindowParams struct {
+	Iatas        []string           `json:"iatas"`
+	PayloadTypes []int16            `json:"payload_types"`
+	RouteTypes   []int16            `json:"route_types"`
+	MainTs       pgtype.Timestamptz `json:"main_ts"`
+	MainHash     []byte             `json:"main_hash"`
+	LoTs         pgtype.Timestamptz `json:"lo_ts"`
+	SinceTs      pgtype.Timestamptz `json:"since_ts"`
+	UntilTs      pgtype.Timestamptz `json:"until_ts"`
+	Recheck      bool               `json:"recheck"`
+	CursorTs     pgtype.Timestamptz `json:"cursor_ts"`
+	CursorHash   []byte             `json:"cursor_hash"`
+	PageLimit    int32              `json:"page_limit"`
+	HiTs         pgtype.Timestamptz `json:"hi_ts"`
+}
+
+type ListPacketsBySitesTypedWindowRow struct {
+	PacketHash  []byte             `json:"packet_hash"`
+	SiteHeardAt pgtype.Timestamptz `json:"site_heard_at"`
+}
+
+// ListPacketsBySitesWindow with a type filter: one range per (site, payload type, route type) instead of each site's
+// range, so a rare type reads at most page_limit entries per pair. Go sends only lists below the 64 pairs that mean
+// every type.
+func (q *Queries) ListPacketsBySitesTypedWindow(ctx context.Context, arg ListPacketsBySitesTypedWindowParams) ([]ListPacketsBySitesTypedWindowRow, error) {
+	rows, err := q.db.Query(ctx, listPacketsBySitesTypedWindow,
+		arg.Iatas,
+		arg.PayloadTypes,
+		arg.RouteTypes,
+		arg.MainTs,
+		arg.MainHash,
+		arg.LoTs,
+		arg.SinceTs,
+		arg.UntilTs,
+		arg.Recheck,
+		arg.CursorTs,
+		arg.CursorHash,
+		arg.PageLimit,
+		arg.HiTs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPacketsBySitesTypedWindowRow{}
+	for rows.Next() {
+		var i ListPacketsBySitesTypedWindowRow
+		if err := rows.Scan(&i.PacketHash, &i.SiteHeardAt); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

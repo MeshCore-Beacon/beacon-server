@@ -356,8 +356,9 @@ type ListAllChannelMessagesByIATAsSinceRow struct {
 	ObservationCount      int64              `json:"observation_count"`
 }
 
-// Every channel filtered by sites with since, optionally by scope, when few messages were sent since then: those
-// messages' ids (idx_channel_messages_sent), each kept when it has a row at one of the sites, newest first.
+// Every channel filtered by sites with since, optionally by scope: the messages sent since then (idx_channel_messages_sent),
+// each kept when it has a row at one of the sites, newest first. It reads every message sent since then, so it costs
+// what the request asked for: the caller first tries the newest ids when many were sent.
 func (q *Queries) ListAllChannelMessagesByIATAsSince(ctx context.Context, arg ListAllChannelMessagesByIATAsSinceParams) ([]ListAllChannelMessagesByIATAsSinceRow, error) {
 	rows, err := q.db.Query(ctx, listAllChannelMessagesByIATAsSince,
 		arg.Since,
@@ -398,24 +399,35 @@ func (q *Queries) ListAllChannelMessagesByIATAsSince(ctx context.Context, arg Li
 }
 
 const listAllChannelMessagesByIATAsSinceWalk = `-- name: ListAllChannelMessagesByIATAsSinceWalk :many
+WITH recent AS MATERIALIZED (
+  SELECT r.id, r.packet_hash, r.sent_at FROM channel_messages r
+  WHERE r.id < $1::bigint
+  ORDER BY r.id DESC
+  LIMIT $2::int
+), hits AS MATERIALIZED (
+  SELECT s.id FROM recent s
+  WHERE s.sent_at >= $3::timestamptz
+    AND EXISTS (SELECT 1 FROM channel_message_iatas i WHERE i.message_id = s.id AND i.iata = ANY($4::bpchar[]))
+    AND ($5::int IS NULL
+         OR EXISTS (SELECT 1 FROM packets g WHERE g.packet_hash = s.packet_hash AND g.scope_id = $5::int))
+  ORDER BY s.id DESC
+  LIMIT $6
+)
 SELECT cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at,
        encode(cm.packet_hash, 'hex') AS packet_hash_hex, c.channel_hash, ts.name AS scope_name,
        p.transport_codes_present, p.observation_count AS observation_count
-FROM channel_messages cm
+FROM hits h
+JOIN channel_messages cm ON cm.id = h.id
 JOIN channels c ON c.id = cm.channel_id
 JOIN packets p ON p.packet_hash = cm.packet_hash
 LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
-WHERE cm.sent_at >= $1::timestamptz
-  AND cm.id < $2::bigint
-  AND EXISTS (SELECT 1 FROM channel_message_iatas i WHERE i.message_id = cm.id AND i.iata = ANY($3::bpchar[]))
-  AND ($4::int IS NULL OR p.scope_id = $4::int)
 ORDER BY cm.id DESC
-LIMIT $5
 `
 
 type ListAllChannelMessagesByIATAsSinceWalkParams struct {
-	Since     pgtype.Timestamptz `json:"since"`
 	CursorID  int64              `json:"cursor_id"`
+	ScanRows  int32              `json:"scan_rows"`
+	Since     pgtype.Timestamptz `json:"since"`
 	Iatas     []string           `json:"iatas"`
 	ScopeID   *int32             `json:"scope_id"`
 	PageLimit int32              `json:"page_limit"`
@@ -436,12 +448,14 @@ type ListAllChannelMessagesByIATAsSinceWalkRow struct {
 	ObservationCount      int64              `json:"observation_count"`
 }
 
-// ListAllChannelMessagesByIATAsSince when many messages were sent since then: the newest ids down (or each site's
-// newest message ids, whichever the estimates find cheaper), keeping those sent since then.
+// ListAllChannelMessagesByIATAsSince when many messages were sent since then: the newest scan_rows message ids below
+// the cursor, keeping those sent since then with a row at one of the sites. Exact when it fills the page (every newer
+// id was read); otherwise the caller reads the messages sent since then instead.
 func (q *Queries) ListAllChannelMessagesByIATAsSinceWalk(ctx context.Context, arg ListAllChannelMessagesByIATAsSinceWalkParams) ([]ListAllChannelMessagesByIATAsSinceWalkRow, error) {
 	rows, err := q.db.Query(ctx, listAllChannelMessagesByIATAsSinceWalk,
-		arg.Since,
 		arg.CursorID,
+		arg.ScanRows,
+		arg.Since,
 		arg.Iatas,
 		arg.ScopeID,
 		arg.PageLimit,

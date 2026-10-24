@@ -342,23 +342,28 @@ func listChannelMessages(ctx context.Context, q sqlc.Querier, useReadModel bool,
 	return api.Page[api.ChannelMessage]{Items: messages, NextCursor: nextCursor, HasMore: hasMore}, nil
 }
 
-// messagesSinceWindowRows is the most messages sent since a page's since that it reads one by one: up to this many,
-// sites with since across every channel read exactly those messages; more, and they walk the newest ids down, which
-// meets enough of them quickly.
+// messagesSinceWindowRows is how many messages sent since a page's since it reads one by one before trying the newest
+// ids first, and how many of the newest ids that try reads.
 var messagesSinceWindowRows int64 = 5000 // a var only so tests can take the walk
 
-// listAllMessagesSitesSince serves sites with since across every channel: the messages sent since then when there
-// are few, else a walk from the newest id. Sender clocks put sent_at anywhere, so neither the id order nor a site's
-// range bounds since by itself; the count (an index range of at most messagesSinceWindowRows + 1 entries) picks.
+// listAllMessagesSitesSince serves sites with since across every channel. Sender clocks put sent_at anywhere, so
+// neither the id order nor a site's range bounds since by itself. When at most messagesSinceWindowRows messages were
+// sent since then (a count that reads at most one more index entry), it reads exactly those. Otherwise it reads the
+// newest messagesSinceWindowRows ids first, which fills a page for sites heard often; a page that try leaves short is
+// read from the messages sent since then after all. Either way a page reads at most what it asked for.
 func listAllMessagesSitesSince(ctx context.Context, q sqlc.Querier, since pgtype.Timestamptz, sites []string, scopeID *int32, cursorID int64, pageLimit int32) ([]sqlc.ListChannelMessagesRow, error) {
 	n, err := q.CountChannelMessagesSentSince(ctx, sqlc.CountChannelMessagesSentSinceParams{Since: since, RowLimit: messagesSinceWindowRows + 1})
 	if err != nil {
 		return nil, err
 	}
-	if n <= messagesSinceWindowRows {
-		return convertRows(q.ListAllChannelMessagesByIATAsSince(ctx, sqlc.ListAllChannelMessagesByIATAsSinceParams{Since: since, Iatas: sites, ScopeID: scopeID, CursorID: cursorID, PageLimit: pageLimit}))
+	if n > messagesSinceWindowRows {
+		rows, err := convertRows(q.ListAllChannelMessagesByIATAsSinceWalk(ctx, sqlc.ListAllChannelMessagesByIATAsSinceWalkParams{
+			Since: since, Iatas: sites, ScopeID: scopeID, CursorID: cursorID, ScanRows: int32(messagesSinceWindowRows), PageLimit: pageLimit}))
+		if err != nil || len(rows) == int(pageLimit) {
+			return rows, err
+		}
 	}
-	return convertRows(q.ListAllChannelMessagesByIATAsSinceWalk(ctx, sqlc.ListAllChannelMessagesByIATAsSinceWalkParams{Since: since, Iatas: sites, ScopeID: scopeID, CursorID: cursorID, PageLimit: pageLimit}))
+	return convertRows(q.ListAllChannelMessagesByIATAsSince(ctx, sqlc.ListAllChannelMessagesByIATAsSinceParams{Since: since, Iatas: sites, ScopeID: scopeID, CursorID: cursorID, PageLimit: pageLimit}))
 }
 
 // dedupeSites drops repeated codes in one pass, keeping first-occurrence order; never nil.

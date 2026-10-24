@@ -2274,6 +2274,21 @@ func (mr *MockQuerierMockRecorder) ListPacketsBySitesFirst(ctx, arg any) *gomock
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPacketsBySitesFirst", reflect.TypeOf((*MockQuerier)(nil).ListPacketsBySitesFirst), ctx, arg)
 }
 
+// ListPacketsBySitesScopedTypedWindow mocks base method.
+func (m *MockQuerier) ListPacketsBySitesScopedTypedWindow(ctx context.Context, arg db.ListPacketsBySitesScopedTypedWindowParams) ([]db.ListPacketsBySitesScopedTypedWindowRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListPacketsBySitesScopedTypedWindow", ctx, arg)
+	ret0, _ := ret[0].([]db.ListPacketsBySitesScopedTypedWindowRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListPacketsBySitesScopedTypedWindow indicates an expected call of ListPacketsBySitesScopedTypedWindow.
+func (mr *MockQuerierMockRecorder) ListPacketsBySitesScopedTypedWindow(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPacketsBySitesScopedTypedWindow", reflect.TypeOf((*MockQuerier)(nil).ListPacketsBySitesScopedTypedWindow), ctx, arg)
+}
+
 // ListPacketsBySitesScopedWindow mocks base method.
 func (m *MockQuerier) ListPacketsBySitesScopedWindow(ctx context.Context, arg db.ListPacketsBySitesScopedWindowParams) ([]db.ListPacketsBySitesScopedWindowRow, error) {
 	m.ctrl.T.Helper()
@@ -2332,6 +2347,21 @@ func (m *MockQuerier) ListPacketsBySitesTypedFirst(ctx context.Context, arg db.L
 func (mr *MockQuerierMockRecorder) ListPacketsBySitesTypedFirst(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPacketsBySitesTypedFirst", reflect.TypeOf((*MockQuerier)(nil).ListPacketsBySitesTypedFirst), ctx, arg)
+}
+
+// ListPacketsBySitesTypedWindow mocks base method.
+func (m *MockQuerier) ListPacketsBySitesTypedWindow(ctx context.Context, arg db.ListPacketsBySitesTypedWindowParams) ([]db.ListPacketsBySitesTypedWindowRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListPacketsBySitesTypedWindow", ctx, arg)
+	ret0, _ := ret[0].([]db.ListPacketsBySitesTypedWindowRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListPacketsBySitesTypedWindow indicates an expected call of ListPacketsBySitesTypedWindow.
+func (mr *MockQuerierMockRecorder) ListPacketsBySitesTypedWindow(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPacketsBySitesTypedWindow", reflect.TypeOf((*MockQuerier)(nil).ListPacketsBySitesTypedWindow), ctx, arg)
 }
 
 // ListPacketsBySitesWindow mocks base method.

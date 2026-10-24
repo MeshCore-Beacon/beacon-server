@@ -140,6 +140,8 @@ statements:
   ListPacketsBySitesSince: {sqlc: ListPacketsBySitesSince, group: packet_sites, plan: custom}
   ListPacketsBySitesWindow: {sqlc: ListPacketsBySitesWindow, group: packet_sites, plan: custom}
   ListPacketsBySitesScopedWindow: {sqlc: ListPacketsBySitesScopedWindow, group: packet_sites, plan: custom}
+  ListPacketsBySitesTypedWindow: {sqlc: ListPacketsBySitesTypedWindow, group: packet_sites, plan: custom}
+  ListPacketsBySitesScopedTypedWindow: {sqlc: ListPacketsBySitesScopedTypedWindow, group: packet_sites, plan: custom}
   ListPacketsBySiteKeys: {sqlc: ListPacketsBySiteKeys, group: packet_sites, plan: custom}
   FilterKnownSites: {sqlc: FilterKnownSites, group: packet_sites, plan: custom}
   SweepPacketSitesFronts: {sqlc: SweepPacketSitesFronts, group: packet_sites, plan: maint}
@@ -182,8 +184,8 @@ sort_exempt_sets:
     - {relation: packet_sites, index: idx_packet_sites_early, reason: "the rows heard at a site over 30 minutes before their first hearing: ingest clamps hearing times to 30 minutes of its clock, so the index stays about empty"}
     - {relation: packet_sites, index_cond: "packet_hash = e.packet_hash", reason: "the re-check of an early row probes one packet's sites"}
     - {relation: packet_sites, index_cond: "packet_hash = ps_", reason: "the re-check of a late row probes one packet's sites"}
-  window_rare_type:
-    - {relation: packet_sites, index: idx_packet_sites_site_type, sort: Sort, reason: "a rare type: the planner sorts that type's entries below the page start, bounded by how many the type has at the site"}
+  window_typed_late:
+    - {relation: packet_sites, index: idx_packet_sites_late, sort: Sort, reason: "the late rows above hi that carry the requested types: a small share of the window above until"}
   window_branches:
     - {relation: packets, index: idx_packets_heard_inverted, reason: "branch 2 reads only the inverted rows (partial index)"}
     - {relation: packets, index: idx_packets_type_last_heard, index_cond: "payload_type = ANY", reason: "branch 1's type range is bounded by last_heard_at >= since"}
@@ -304,6 +306,8 @@ resolvers:
   cmi_busy1: "SELECT ARRAY[(SELECT iata FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 1)]::bpchar[]"
   cm_since1h: "SELECT sent_at - interval '1 hour' FROM channel_messages ORDER BY id DESC LIMIT 1"
   cm_since0: "SELECT sent_at FROM channel_messages ORDER BY id DESC LIMIT 1"
+  cm_since_edge: "SELECT percentile_disc(0.01) WITHIN GROUP (ORDER BY sent_at) FROM channel_messages"
+  cmi_quiet1: "SELECT ARRAY[iata]::bpchar[] FROM (SELECT iata FROM channel_message_iatas GROUP BY 1 ORDER BY count(*), 1 LIMIT 1) s"
   cmi_bogus5000: "SELECT array_agg(c ORDER BY c)::bpchar[] FROM (SELECT c FROM (SELECT chr(65 + a) || chr(65 + b) || chr(65 + d) c FROM generate_series(0, 25) a, generate_series(0, 25) b, generate_series(0, 25) d) g WHERE c NOT IN (SELECT iata FROM iata_codes) ORDER BY c LIMIT 5000) s"
   cmi_ch: "SELECT (SELECT channel_id FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 1)"
   cmi_ch_empty: "SELECT ARRAY[ic.iata]::bpchar[] FROM iata_codes ic WHERE NOT EXISTS (SELECT 1 FROM channel_message_iatas i WHERE i.channel_id = (SELECT channel_id FROM channel_message_iatas WHERE message_id > (SELECT coalesce((SELECT message_id FROM channel_message_iatas ORDER BY message_id DESC OFFSET 20000 LIMIT 1), 0)) GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 1) AND i.iata = ic.iata) ORDER BY ic.iata LIMIT 1"
@@ -1596,32 +1600,56 @@ entries:
     note: "measured: 3903 B on the local copy; budget 1.5x"
   - id: am.site_since_walk.busy1_3d
     stmt: ListAllChannelMessagesByIATAsSinceWalk
-    shape: "all channels, the busiest recent site, since 3 days before the newest message"
-    params: [{r: cm_since3d}, 9223372036854775807, {r: cmi_busy1}, null, 51]
+    shape: "all channels, the busiest recent site, since 3 days back, the newest 5,000 ids"
+    params: [9223372036854775807, 5000, {r: cm_since3d}, {r: cmi_busy1}, null, 51]
     expect:
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      driver: [{relation: channel_messages, alias: r, index: channel_messages_pkey}]
       sort_exempt: [since_messages]
-      budget: {buffers: 1874, planning_ms: 10}
-    note: "measured: 1249 B on the local copy; budget 1.5x"
+      budget: {buffers: 7134, planning_ms: 10}
+    note: "measured: 4756 B on the local copy; budget 1.5x"
   - id: am.site_since_walk.list13_scope_3d
     stmt: ListAllChannelMessagesByIATAsSinceWalk
-    shape: "all channels, the 13 busiest recent sites, the busiest scope, since 3 days before the newest message"
-    tiers: [local]  # the fixture's few messages plan a scan of channel_messages for this shape
-    params: [{r: cm_since3d}, 9223372036854775807, {r: cmi_list13}, {r: cmi_scope}, 51]
+    shape: "all channels, the 13 busiest recent sites, the busiest scope, since 3 days back, the newest 5,000 ids"
+    params: [9223372036854775807, 5000, {r: cm_since3d}, {r: cmi_list13}, {r: cmi_scope}, 51]
     expect:
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      driver: [{relation: channel_messages, alias: r, index: channel_messages_pkey}]
       sort_exempt: [since_messages]
-      budget: {buffers: 3716, planning_ms: 10}
-    note: "measured: 2477 B on the local copy; budget 1.5x"
+      budget: {buffers: 7907, planning_ms: 10}
+    note: "measured: 5271 B on the local copy; budget 1.5x"
   - id: am.site_since_walk.busy1_3d_deep
     stmt: ListAllChannelMessagesByIATAsSinceWalk
-    shape: "all channels, the busiest recent site, since 3 days back, a cursor in the middle of the newest 20,000 messages"
-    params: [{r: cm_since3d}, {r: cm_deep}, {r: cmi_busy1}, null, 51]
+    shape: "all channels, the busiest recent site, since 3 days back, 5,000 ids below a cursor in the middle of the newest 20,000"
+    params: [{r: cm_deep}, 5000, {r: cm_since3d}, {r: cmi_busy1}, null, 51]
     expect:
-      forbid: [{node: "Seq Scan", relations: [channel_messages, channel_message_iatas]}]
+      driver: [{relation: channel_messages, alias: r, index: channel_messages_pkey}]
       sort_exempt: [since_messages]
-      budget: {buffers: 2123, planning_ms: 10}
-    note: "measured: 1415 B on the local copy; budget 1.5x"
+      budget: {buffers: 7217, planning_ms: 10}
+    note: "measured: 4811 B on the local copy; budget 1.5x"
+  - id: am.site_since_walk.quiet_edge
+    stmt: ListAllChannelMessagesByIATAsSinceWalk
+    shape: "all channels, the quietest site, since the oldest messages, the newest 5,000 ids (leaves the page short)"
+    params: [9223372036854775807, 5000, {r: cm_since_edge}, {r: cmi_quiet1}, null, 51]
+    expect:
+      driver: [{relation: channel_messages, alias: r, index: channel_messages_pkey}]
+      sort_exempt: [since_messages]
+      budget: {buffers: 6033, planning_ms: 10}
+    note: "measured: 4022 B on the local copy; budget 1.5x"
+  - id: am.site_since.quiet_edge
+    stmt: ListAllChannelMessagesByIATAsSince
+    shape: "all channels, the quietest site, every message sent since the oldest ones (the worst case: the whole sent window)"
+    params: [{r: cm_since_edge}, 9223372036854775807, {r: cmi_quiet1}, null, 51]
+    expect:
+      sort_exempt: [since_messages]
+      budget: {buffers: 4361, planning_ms: 10}
+    note: "the window is about the whole table here, so the plan may scan channel_messages (not a big table); measured: 2907 B on the local copy; budget 1.5x"
+  - id: am.site_since.list13_scope_edge
+    stmt: ListAllChannelMessagesByIATAsSince
+    shape: "all channels, the 13 busiest recent sites, the busiest scope, every message sent since the oldest ones"
+    params: [{r: cm_since_edge}, 9223372036854775807, {r: cmi_list13}, {r: cmi_scope}, 51]
+    expect:
+      sort_exempt: [since_messages]
+      budget: {buffers: 6114, planning_ms: 10}
+    note: "the window is about the whole table here, so the plan may scan channel_messages (not a big table); measured: 4076 B on the local copy; budget 1.5x"
   - id: am.site_scope.busy
     stmt: ListAllChannelMessagesByIATAsScoped
     shape: "all channels, the busiest recent (site, scope) pair, page 1"
@@ -3587,15 +3615,6 @@ entries:
       sort_exempt: [sites_recheck, window_skew]
       budget: {buffers: 12090, planning_ms: 10}
     note: "measured: 8060 B on the local copy (max over modes); budget 1.5x"
-  - id: ps.window.busy13.rare_until1d
-    stmt: ListPacketsBySitesWindow
-    shape: "the 13 busiest recent sites, one rare payload type, until a day below their newest row"
-    params: [{r: ps_busy_sites13}, {r: ps_busy13_1d_hi}, {r: ps_max_hash}, "-infinity", "-infinity", {r: ps_busy13_1d}, "{15}", "{0,1,2,3}", "false", "infinity", "\\x", 51, {r: ps_busy13_1d_hi}]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "payload_type = ANY"]}]
-      sort_exempt: [sites_recheck, window_skew, window_rare_type]
-      budget: {buffers: 1101, planning_ms: 10}
-    note: "measured: 734 B on the local copy (max over modes); budget 1.5x"
   - id: ps.window.sparse.until1d
     stmt: ListPacketsBySitesWindow
     shape: "the busiest and the sparsest recent site, until a day below the busiest one's newest row"
@@ -3632,15 +3651,6 @@ entries:
       sort_exempt: [sites_recheck, window_skew]
       budget: {buffers: 30, planning_ms: 10}
     note: "measured: 6 B on the local copy (max over modes); budget 1.5x"
-  - id: ps.scopedw.busy13.since
-    stmt: ListPacketsBySitesScopedWindow
-    shape: "the 13 busiest recent sites, the busiest scope, the last 75 minutes, adverts"
-    params: [{r: ps_busy_sites13}, {r: ps_busy_scope1}, "infinity", "\\x", {r: ps_busy13_75m_lo}, {r: ps_busy13_75m}, "infinity", "{4}", "{0,1,2,3}", "false", "infinity", "\\x", 51, "infinity"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck, window_skew]
-      budget: {buffers: 104, planning_ms: 10}
-    note: "measured: 69 B on the local copy (max over modes); budget 1.5x"
   - id: ps.scopedw.busy13.until1d
     stmt: ListPacketsBySitesScopedWindow
     shape: "the 13 busiest recent sites, the busiest scope, until a day below their newest row"
@@ -3650,23 +3660,6 @@ entries:
       sort_exempt: [sites_recheck, window_skew]
       budget: {buffers: 134, planning_ms: 10}
     note: "measured: 89 B on the local copy (max over modes); budget 1.5x"
-  - id: ps.scopedw.busy13.rare
-    stmt: ListPacketsBySitesScopedWindow
-    shape: "the 13 busiest recent sites, the busiest scope, one rare payload type, no window"
-    params: [{r: ps_busy_sites13}, {r: ps_busy_scope1}, "infinity", "\\x", "-infinity", "-infinity", "infinity", "{15}", "{0,1,2,3}", "false", "infinity", "\\x", 51, "infinity"]
-    expect:
-      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
-      sort_exempt: [sites_recheck, window_skew]
-      budget: {buffers: 89, planning_ms: 10}
-    note: "a rare type in a scope with no window reads the (site, scope) ranges until the page fills; measured: 59 B on the local copy; budget 1.5x"
-  - id: ps.window.busy13.midtype_until1d
-    stmt: ListPacketsBySitesWindow
-    shape: "the 13 busiest recent sites, text messages (payload type 2), until a day below their newest row"
-    params: [{r: ps_busy_sites13}, {r: ps_busy13_1d_hi}, {r: ps_max_hash}, "-infinity", "-infinity", {r: ps_busy13_1d}, "{2}", "{0,1,2,3}", "false", "infinity", "\\x", 51, {r: ps_busy13_1d_hi}]
-    expect:
-      sort_exempt: [sites_recheck, window_skew, window_rare_type]
-      budget: {buffers: 653, planning_ms: 10}
-    note: "measured: 435 B on the local copy; budget 1.5x"
   - id: ps.typedfirst.busy13.pairs60
     stmt: ListPacketsBySitesTypedFirst
     shape: "the 13 busiest recent sites, 15 payload types x 4 route types (the many-pair fallback), page 1"
@@ -3676,6 +3669,105 @@ entries:
       driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t"]}]
       budget: {buffers: 6648, planning_ms: 10}
     note: "measured: 4432 B on the local copy (max over modes); budget 1.5x"
+  - id: ps.windowt.busy13.rare_until1d
+    stmt: ListPacketsBySitesTypedWindow
+    shape: "the 13 busiest recent sites, one rare payload type, until a day below their newest row"
+    params: [{r: ps_busy_sites13}, "{15}", "{0,1,2,3}", {r: ps_busy13_1d_hi}, {r: ps_max_hash}, "-infinity", "-infinity", {r: ps_busy13_1d}, "false", "infinity", "\\x", 51, {r: ps_busy13_1d_hi}]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "route_type = rt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, window_skew, window_typed_late]
+      budget: {buffers: 929, planning_ms: 10}
+    note: "measured: 619 B on the local copy; budget 1.5x"
+  - id: ps.windowt.busy13.midtype_until1d
+    stmt: ListPacketsBySitesTypedWindow
+    shape: "the 13 busiest recent sites, text messages (payload type 2), until a day below their newest row"
+    params: [{r: ps_busy_sites13}, "{2}", "{0,1,2,3}", {r: ps_busy13_1d_hi}, {r: ps_max_hash}, "-infinity", "-infinity", {r: ps_busy13_1d}, "false", "infinity", "\\x", 51, {r: ps_busy13_1d_hi}]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "route_type = rt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, window_skew, window_typed_late]
+      budget: {buffers: 3543, planning_ms: 10}
+    note: "measured: 2362 B on the local copy; budget 1.5x"
+  - id: ps.windowt.busy13.zero_pair_until1d
+    stmt: ListPacketsBySitesTypedWindow
+    shape: "the 13 busiest recent sites, a rare type pair (path, transport flood), until a day back"
+    params: [{r: ps_busy_sites13}, "{8}", "{0}", {r: ps_busy13_1d_hi}, {r: ps_max_hash}, "-infinity", "-infinity", {r: ps_busy13_1d}, "false", "infinity", "\\x", 51, {r: ps_busy13_1d_hi}]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "route_type = rt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, window_skew, window_typed_late]
+      budget: {buffers: 842, planning_ms: 10}
+    note: "measured: 561 B on the local copy; budget 1.5x"
+  - id: ps.windowt.busy1.rare_since1h
+    stmt: ListPacketsBySitesTypedWindow
+    shape: "the busiest recent site, one rare payload type, the last 75 minutes"
+    params: [{r: ps_busy1_list}, "{15}", "{0,1,2,3}", "infinity", "\\x", {r: ps_busy13_75m_lo}, {r: ps_busy13_75m}, "infinity", "false", "infinity", "\\x", 51, "infinity"]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "route_type = rt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, window_skew, window_typed_late]
+      budget: {buffers: 30, planning_ms: 10}
+    note: "measured: 18 B on the local copy; budget 1.5x"
+  - id: ps.windowt.sparse.rare_until1d
+    stmt: ListPacketsBySitesTypedWindow
+    shape: "the busiest and the sparsest recent site, one rare payload type, until a day back"
+    params: [{r: ps_busy1_sparse}, "{15}", "{0,1,2,3}", {r: ps_busy1_1d_hi}, {r: ps_max_hash}, "-infinity", "-infinity", {r: ps_busy1_1d}, "false", "infinity", "\\x", 51, {r: ps_busy1_1d_hi}]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "route_type = rt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, window_skew, window_typed_late]
+      budget: {buffers: 80, planning_ms: 10}
+    note: "measured: 53 B on the local copy; budget 1.5x"
+  - id: ps.windowt.busy13.pairs39_until1d
+    stmt: ListPacketsBySitesTypedWindow
+    shape: "the 13 busiest recent sites, 13 payload types x 3 route types, until a day back"
+    params: [{r: ps_busy_sites13}, "{0,1,2,3,4,5,6,7,8,9,10,11,12}", "{0,1,2}", {r: ps_busy13_1d_hi}, {r: ps_max_hash}, "-infinity", "-infinity", {r: ps_busy13_1d}, "false", "infinity", "\\x", 51, {r: ps_busy13_1d_hi}]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["payload_type = pt.t", "route_type = rt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, window_skew, window_typed_late]
+      budget: {buffers: 30522, planning_ms: 10}
+    note: "measured: 20348 B on the local copy; budget 1.5x"
+  - id: ps.scopedt.busy13.adverts_since
+    stmt: ListPacketsBySitesScopedTypedWindow
+    shape: "the 13 busiest recent sites, the busiest scope, the last 75 minutes, adverts"
+    params: [{r: ps_busy_sites13}, {r: ps_busy_scope1}, "{4}", "{0,1,2,3}", "infinity", "\\x", {r: ps_busy13_75m_lo}, {r: ps_busy13_75m}, "infinity", "false", "infinity", "\\x", 51, "infinity"]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, window_skew, window_typed_late]
+      budget: {buffers: 282, planning_ms: 10}
+    note: "measured: 188 B on the local copy; budget 1.5x"
+  - id: ps.scopedt.busy13.rare
+    stmt: ListPacketsBySitesScopedTypedWindow
+    shape: "the 13 busiest recent sites, the busiest scope, one rare payload type, no window"
+    params: [{r: ps_busy_sites13}, {r: ps_busy_scope1}, "{15}", "{0,1,2,3}", "infinity", "\\x", "-infinity", "-infinity", "infinity", "false", "infinity", "\\x", 51, "infinity"]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, window_skew, window_typed_late]
+      budget: {buffers: 243, planning_ms: 10}
+    note: "measured: 162 B on the local copy; budget 1.5x"
+  - id: ps.scopedt.busy13.rare_scope_rare_type
+    stmt: ListPacketsBySitesScopedTypedWindow
+    shape: "the 13 busiest recent sites, the 8 busiest scopes rarest last, one rare payload type, no window"
+    params: [{r: ps_busy_sites13}, {r: ps_busy_scopes8}, "{15}", "{3}", "infinity", "\\x", "-infinity", "-infinity", "infinity", "false", "infinity", "\\x", 51, "infinity"]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, window_skew, window_typed_late]
+      budget: {buffers: 525, planning_ms: 10}
+    note: "measured: 350 B on the local copy; budget 1.5x"
+  - id: ps.scopedt.busy1.zero_scope
+    stmt: ListPacketsBySitesScopedTypedWindow
+    shape: "the busiest recent site, a scope it never heard, adverts"
+    params: [{r: ps_busy1_list}, {r: ps_zero_scope}, "{4}", "{0,1,2,3}", "infinity", "\\x", "-infinity", "-infinity", "infinity", "false", "infinity", "\\x", 51, "infinity"]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, window_skew, window_typed_late]
+      budget: {buffers: 30, planning_ms: 10}
+    note: "measured: 18 B on the local copy; budget 1.5x"
+  - id: ps.scopedt.busy13.rare_until1d
+    stmt: ListPacketsBySitesScopedTypedWindow
+    shape: "the 13 busiest recent sites, the busiest scope, one rare payload type, until a day back"
+    params: [{r: ps_busy_sites13}, {r: ps_busy_scope1}, "{15}", "{0,1,2,3}", {r: ps_busy13_1d_hi}, {r: ps_max_hash}, "-infinity", "-infinity", {r: ps_busy13_1d}, "false", "infinity", "\\x", 51, {r: ps_busy13_1d_hi}]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, window_skew, window_typed_late]
+      budget: {buffers: 543, planning_ms: 10}
+    note: "measured: 362 B on the local copy; budget 1.5x"
   - id: ps.keys.busy1
     stmt: ListPacketsBySiteKeys
     shape: "the rows for the busiest site newest 50 keys"

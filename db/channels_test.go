@@ -717,9 +717,16 @@ func TestListChannelMessagesDispatch(t *testing.T) {
 			m.EXPECT().CountChannelMessagesSentSince(gomock.Any(), sqlc.CountChannelMessagesSentSinceParams{Since: ts, RowLimit: 5001}).Return(int64(5000), nil)
 			m.EXPECT().ListAllChannelMessagesByIATAsSince(gomock.Any(), sqlc.ListAllChannelMessagesByIATAsSinceParams{Since: ts, Iatas: []string{"YUL"}, CursorID: maxCursor, PageLimit: 51}).Return(nil, nil)
 		}}},
-		{"all by sites since scoped, many sent since", nil, since, []string{"YUL"}, "#fr", true, []call{scopeLookup, func(m *mockdb.MockQuerier) {
+		{"all by sites since scoped, many sent since, newest ids fill the page", nil, since, []string{"YUL"}, "#fr", true, []call{scopeLookup, func(m *mockdb.MockQuerier) {
 			m.EXPECT().CountChannelMessagesSentSince(gomock.Any(), sqlc.CountChannelMessagesSentSinceParams{Since: ts, RowLimit: 5001}).Return(int64(5001), nil)
-			m.EXPECT().ListAllChannelMessagesByIATAsSinceWalk(gomock.Any(), sqlc.ListAllChannelMessagesByIATAsSinceWalkParams{Since: ts, Iatas: []string{"YUL"}, ScopeID: &scope, CursorID: maxCursor, PageLimit: 51}).Return(nil, nil)
+			m.EXPECT().ListAllChannelMessagesByIATAsSinceWalk(gomock.Any(), sqlc.ListAllChannelMessagesByIATAsSinceWalkParams{Since: ts, Iatas: []string{"YUL"}, ScopeID: &scope, CursorID: maxCursor, ScanRows: 5000, PageLimit: 51}).
+				Return(make([]sqlc.ListAllChannelMessagesByIATAsSinceWalkRow, 51), nil)
+		}}},
+		{"all by sites since, many sent since, newest ids leave the page short", nil, since, []string{"YUL"}, "", true, []call{func(m *mockdb.MockQuerier) {
+			m.EXPECT().CountChannelMessagesSentSince(gomock.Any(), sqlc.CountChannelMessagesSentSinceParams{Since: ts, RowLimit: 5001}).Return(int64(9000), nil)
+			m.EXPECT().ListAllChannelMessagesByIATAsSinceWalk(gomock.Any(), sqlc.ListAllChannelMessagesByIATAsSinceWalkParams{Since: ts, Iatas: []string{"YUL"}, CursorID: maxCursor, ScanRows: 5000, PageLimit: 51}).
+				Return(make([]sqlc.ListAllChannelMessagesByIATAsSinceWalkRow, 3), nil)
+			m.EXPECT().ListAllChannelMessagesByIATAsSince(gomock.Any(), sqlc.ListAllChannelMessagesByIATAsSinceParams{Since: ts, Iatas: []string{"YUL"}, CursorID: maxCursor, PageLimit: 51}).Return(nil, nil)
 		}}},
 		{"all since scoped untrusted reads no cmi", nil, since, nil, "#fr", false, []call{scopeLookup, func(m *mockdb.MockQuerier) {
 			m.EXPECT().ListAllChannelMessagesSince(gomock.Any(), sqlc.ListAllChannelMessagesSinceParams{Since: ts, ScopeID: &scope, CursorID: maxCursor, PageLimit: 51}).Return(nil, nil)

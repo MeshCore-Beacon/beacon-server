@@ -19,6 +19,7 @@ var packetSitesMigrations = []string{
 	"045_packet_sites_site_scope.sql",
 	"054_packet_sites_late.sql",
 	"055_packet_sites_early.sql",
+	"059_packet_sites_site_scope_type.sql",
 }
 
 // The migrations leave packet_sites with exactly these indexes, all usable, its column types, statistics target
@@ -34,12 +35,13 @@ func TestPacketSitesMigrationsIndexSetPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]string{
-		"packet_sites_pkey":           "CREATE UNIQUE INDEX packet_sites_pkey ON public.packet_sites USING btree (packet_hash, iata) INCLUDE (site_heard_at)",
-		"idx_packet_sites_site":       "CREATE INDEX idx_packet_sites_site ON public.packet_sites USING btree (iata, site_heard_at DESC, packet_hash DESC) INCLUDE (payload_type, route_type, first_heard_at)",
-		"idx_packet_sites_site_type":  "CREATE INDEX idx_packet_sites_site_type ON public.packet_sites USING btree (iata, payload_type, route_type, site_heard_at DESC, packet_hash DESC)",
-		"idx_packet_sites_site_scope": "CREATE INDEX idx_packet_sites_site_scope ON public.packet_sites USING btree (iata, scope_id, site_heard_at DESC, packet_hash DESC) INCLUDE (payload_type, route_type, first_heard_at) WHERE (scope_id IS NOT NULL)",
-		"idx_packet_sites_late":       "CREATE INDEX idx_packet_sites_late ON public.packet_sites USING btree (iata, site_heard_at DESC, packet_hash DESC) INCLUDE (first_heard_at, payload_type, route_type, scope_id) WHERE ((site_heard_at - first_heard_at) > '00:30:00'::interval)",
-		"idx_packet_sites_early":      "CREATE INDEX idx_packet_sites_early ON public.packet_sites USING btree (iata, first_heard_at) INCLUDE (site_heard_at, packet_hash, payload_type, route_type, scope_id) WHERE ((first_heard_at - site_heard_at) > '00:30:00'::interval)",
+		"packet_sites_pkey":                "CREATE UNIQUE INDEX packet_sites_pkey ON public.packet_sites USING btree (packet_hash, iata) INCLUDE (site_heard_at)",
+		"idx_packet_sites_site":            "CREATE INDEX idx_packet_sites_site ON public.packet_sites USING btree (iata, site_heard_at DESC, packet_hash DESC) INCLUDE (payload_type, route_type, first_heard_at)",
+		"idx_packet_sites_site_type":       "CREATE INDEX idx_packet_sites_site_type ON public.packet_sites USING btree (iata, payload_type, route_type, site_heard_at DESC, packet_hash DESC)",
+		"idx_packet_sites_site_scope":      "CREATE INDEX idx_packet_sites_site_scope ON public.packet_sites USING btree (iata, scope_id, site_heard_at DESC, packet_hash DESC) INCLUDE (payload_type, route_type, first_heard_at) WHERE (scope_id IS NOT NULL)",
+		"idx_packet_sites_late":            "CREATE INDEX idx_packet_sites_late ON public.packet_sites USING btree (iata, site_heard_at DESC, packet_hash DESC) INCLUDE (first_heard_at, payload_type, route_type, scope_id) WHERE ((site_heard_at - first_heard_at) > '00:30:00'::interval)",
+		"idx_packet_sites_early":           "CREATE INDEX idx_packet_sites_early ON public.packet_sites USING btree (iata, first_heard_at) INCLUDE (site_heard_at, packet_hash, payload_type, route_type, scope_id) WHERE ((first_heard_at - site_heard_at) > '00:30:00'::interval)",
+		"idx_packet_sites_site_scope_type": "CREATE INDEX idx_packet_sites_site_scope_type ON public.packet_sites USING btree (iata, scope_id, payload_type, route_type, site_heard_at DESC, packet_hash DESC) INCLUDE (first_heard_at) WHERE (scope_id IS NOT NULL)",
 	}
 	rows, err := pool.Query(ctx, `SELECT i.indexname, i.indexdef, x.indisvalid AND x.indisready
 FROM pg_indexes i JOIN pg_index x ON x.indexrelid = format('%I.%I', i.schemaname, i.indexname)::regclass

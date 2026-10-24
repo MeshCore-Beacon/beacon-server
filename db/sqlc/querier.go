@@ -272,11 +272,13 @@ type Querier interface {
 	ListAllChannelMessagesByIATAs(ctx context.Context, arg ListAllChannelMessagesByIATAsParams) ([]ListAllChannelMessagesByIATAsRow, error)
 	// Every channel filtered by sites and a scope: each (site, scope) range's newest message ids, merged.
 	ListAllChannelMessagesByIATAsScoped(ctx context.Context, arg ListAllChannelMessagesByIATAsScopedParams) ([]ListAllChannelMessagesByIATAsScopedRow, error)
-	// Every channel filtered by sites with since, optionally by scope, when few messages were sent since then: those
-	// messages' ids (idx_channel_messages_sent), each kept when it has a row at one of the sites, newest first.
+	// Every channel filtered by sites with since, optionally by scope: the messages sent since then (idx_channel_messages_sent),
+	// each kept when it has a row at one of the sites, newest first. It reads every message sent since then, so it costs
+	// what the request asked for: the caller first tries the newest ids when many were sent.
 	ListAllChannelMessagesByIATAsSince(ctx context.Context, arg ListAllChannelMessagesByIATAsSinceParams) ([]ListAllChannelMessagesByIATAsSinceRow, error)
-	// ListAllChannelMessagesByIATAsSince when many messages were sent since then: the newest ids down (or each site's
-	// newest message ids, whichever the estimates find cheaper), keeping those sent since then.
+	// ListAllChannelMessagesByIATAsSince when many messages were sent since then: the newest scan_rows message ids below
+	// the cursor, keeping those sent since then with a row at one of the sites. Exact when it fills the page (every newer
+	// id was read); otherwise the caller reads the messages sent since then instead.
 	ListAllChannelMessagesByIATAsSinceWalk(ctx context.Context, arg ListAllChannelMessagesByIATAsSinceWalkParams) ([]ListAllChannelMessagesByIATAsSinceWalkRow, error)
 	// Every channel, unfiltered: a walk by id; a message counts once it has a stored observation.
 	ListAllChannelMessagesPlain(ctx context.Context, arg ListAllChannelMessagesPlainParams) ([]ListAllChannelMessagesPlainRow, error)
@@ -376,14 +378,15 @@ type Querier interface {
 	ListPacketsByScopesTypes(ctx context.Context, arg ListPacketsByScopesTypesParams) ([]ListPacketsByScopesTypesRow, error)
 	// One site: one range of its (site_heard_at, packet_hash) index.
 	ListPacketsBySite(ctx context.Context, arg ListPacketsBySiteParams) ([]ListPacketsBySiteRow, error)
-	// The page rows for keys from ListPacketsBySitesSince, ListPacketsBySitesWindow or ListPacketsBySitesScopedWindow,
-	// in the given order.
+	// The page rows for keys from ListPacketsBySitesSince and the window statements, in the given order.
 	ListPacketsBySiteKeys(ctx context.Context, arg ListPacketsBySiteKeysParams) ([]ListPacketsBySiteKeysRow, error)
 	// Two or more sites with a cursor: one range per site; a packet whose newest requested-site row is at or above
 	// the cursor was already returned, so the in-range re-check drops it.
 	ListPacketsBySites(ctx context.Context, arg ListPacketsBySitesParams) ([]ListPacketsBySitesRow, error)
 	// ListPacketsBySites for the first page or one site, where the re-check cannot match.
 	ListPacketsBySitesFirst(ctx context.Context, arg ListPacketsBySitesFirstParams) ([]ListPacketsBySitesFirstRow, error)
+	// ListPacketsBySitesScopedWindow with a type filter: one range per (site, scope, payload type, route type).
+	ListPacketsBySitesScopedTypedWindow(ctx context.Context, arg ListPacketsBySitesScopedTypedWindowParams) ([]ListPacketsBySitesScopedTypedWindowRow, error)
 	// ListPacketsBySitesWindow with one range per (site, named scope).
 	ListPacketsBySitesScopedWindow(ctx context.Context, arg ListPacketsBySitesScopedWindowParams) ([]ListPacketsBySitesScopedWindowRow, error)
 	// Page keys for many type pairs (Go sends no window: since and until are -infinity and infinity; the window tests
@@ -396,6 +399,10 @@ type Querier interface {
 	ListPacketsBySitesTyped(ctx context.Context, arg ListPacketsBySitesTypedParams) ([]ListPacketsBySitesTypedRow, error)
 	// ListPacketsBySitesTyped for the first page or one site.
 	ListPacketsBySitesTypedFirst(ctx context.Context, arg ListPacketsBySitesTypedFirstParams) ([]ListPacketsBySitesTypedFirstRow, error)
+	// ListPacketsBySitesWindow with a type filter: one range per (site, payload type, route type) instead of each site's
+	// range, so a rare type reads at most page_limit entries per pair. Go sends only lists below the 64 pairs that mean
+	// every type.
+	ListPacketsBySitesTypedWindow(ctx context.Context, arg ListPacketsBySitesTypedWindowParams) ([]ListPacketsBySitesTypedWindowRow, error)
 	// Page keys for a first_heard_at window (absent sides are -infinity and infinity), filtered by types. The caller
 	// passes lo_ts = since - 30 minutes and hi_ts = until + 30 minutes (-infinity / infinity without that side), and
 	// main_ts/main_hash = the cursor, lowered to (hi_ts, a hash above every stored one) when the cursor is above hi_ts.

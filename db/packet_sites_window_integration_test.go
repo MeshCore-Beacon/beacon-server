@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 )
 
@@ -157,6 +158,21 @@ func TestPacketsBySitesFarWindowPostgres(t *testing.T) {
 	if n := windowRowsRead(t, f.pool, []string{"AAA"}, fl); n > 200 {
 		t.Fatalf("a deep until page read %d packet_sites rows", n)
 	}
+	// A type pair no packet at AAA carries (payload type 0 only comes with route type 0 in the fixture): the typed forms
+	// probe each pair's range, where reading each site's or scope's range and filtering would walk all of it.
+	for _, tc := range []struct {
+		scopes []string
+		until  time.Time
+	}{{until: psT0.Add(2 * day)}, {scopes: []string{"#a"}}, {scopes: []string{"#a"}, until: psT0.Add(2 * day)}} {
+		fl, _ := newPacketFilter([]int16{0}, []int16{1}, tc.scopes, time.Time{}, tc.until, 0, nil, 50)
+		if n := typedWindowRowsRead(t, f.pool, []string{"AAA"}, fl); n > 10 {
+			t.Fatalf("scopes %v until %v: a type pair with no packet read %d packet_sites rows", tc.scopes, tc.until, n)
+		}
+		page, _ := f.page(s, siteReq{sites: []string{"AAA"}, pt: []int16{0}, rt: []int16{1}, scopes: tc.scopes, until: tc.until}, 0, nil, 50)
+		if len(page.Items) != 0 || page.HasMore {
+			t.Fatalf("scopes %v: %+v", tc.scopes, page)
+		}
+	}
 	// A since window ends each site at since - 30 minutes: a sparse filter reads the window, not the history below.
 	fl, _ = newPacketFilter([]int16{15}, nil, nil, psT0.Add(2*day+12*time.Hour), time.Time{}, 0, nil, 50)
 	var window int64
@@ -166,4 +182,20 @@ func TestPacketsBySitesFarWindowPostgres(t *testing.T) {
 	if n := windowRowsRead(t, f.pool, []string{"AAA"}, fl); n > window+60 {
 		t.Fatalf("a sparse since page read %d packet_sites rows, its window holds %d", n, window)
 	}
+}
+
+// typedWindowRowsRead is packetSitesRowsRead for the typed window statement on fl (the scoped one with scopes), without
+// the re-check.
+func typedWindowRowsRead(t *testing.T, db sqlc.DBTX, sites []string, fl packetFilter) int64 {
+	t.Helper()
+	var text string
+	lo, hi, mainTS, mainHash := windowBounds(fl)
+	if len(fl.scopes) > 0 {
+		_, _ = sqlc.New(&queryRecorder{text: &text}).ListPacketsBySitesScopedTypedWindow(context.Background(), sqlc.ListPacketsBySitesScopedTypedWindowParams{})
+		return packetSitesRowsRead(t, db, text, sites, fl.scopes, fl.payloadTypes, fl.routeTypes, mainTS, mainHash, lo, fl.since, fl.until, false,
+			fl.cursorTS, fl.cursorHash, fl.pageLimit, hi)
+	}
+	_, _ = sqlc.New(&queryRecorder{text: &text}).ListPacketsBySitesTypedWindow(context.Background(), sqlc.ListPacketsBySitesTypedWindowParams{})
+	return packetSitesRowsRead(t, db, text, sites, fl.payloadTypes, fl.routeTypes, mainTS, mainHash, lo, fl.since, fl.until, false,
+		fl.cursorTS, fl.cursorHash, fl.pageLimit, hi)
 }

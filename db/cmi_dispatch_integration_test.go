@@ -188,21 +188,23 @@ func TestChannelMessagesByIATAsMatchesLegacyPostgres(t *testing.T) {
 			t.Fatalf("channel %s iatas %d %q scope %q since %v cursor %d limit %d:\n got %+v\nwant %+v", chs, len(iatas), iatas[:min(len(iatas), 3)], scope, since, cursor, limit, got, want)
 		}
 	}
-	// Sites with since across every channel, again with every page taking the walk instead of the messages sent since.
-	defer func(n int64) { messagesSinceWindowRows = n }(messagesSinceWindowRows)
-	messagesSinceWindowRows = 0
-	for _, sites := range siteLists[2:] {
-		for _, scope := range scopes {
-			for _, since := range sinces[1:] {
-				for _, cursor := range cursors {
-					for _, limit := range limits {
-						compare(nil, sites, scope, since, cursor, limit)
+	// Sites with since across every channel, again with every page trying the newest 2 ids first: pages that fill
+	// from them and pages that fall back to the messages sent since.
+	func() {
+		defer func(n int64) { messagesSinceWindowRows = n }(messagesSinceWindowRows)
+		messagesSinceWindowRows = 2
+		for _, sites := range siteLists[2:] {
+			for _, scope := range scopes {
+				for _, since := range sinces[1:] {
+					for _, cursor := range cursors {
+						for _, limit := range limits {
+							compare(nil, sites, scope, since, cursor, limit)
+						}
 					}
 				}
 			}
 		}
-	}
-	messagesSinceWindowRows = 5000
+	}()
 	for _, ch := range channels {
 		for _, sites := range siteLists {
 			for _, scope := range scopes {

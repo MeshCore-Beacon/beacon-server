@@ -373,13 +373,14 @@ const (
 )
 
 // comparePages compares the original statements with the read model's on the busiest sites and scopes among messages
-// above after: channel and all-channel pages, and all-channel pages for the sampled sites with each scope, from cursor 0
-// and from page 1's 26th id.
+// above after: channel and all-channel pages, from cursor 0 and from page 1's 26th id, and the first all-channel page
+// for the sampled sites with the busiest scope (one page: the original statement reads every observation for it).
 func comparePages(ctx context.Context, q sqlc.Querier, after int64, v *CmiVerification) error {
 	type request struct {
-		channel *int32
-		iatas   []string
-		scope   string
+		channel   *int32
+		iatas     []string
+		scope     string
+		firstPage bool
 	}
 	var requests []request
 	sites, err := q.ListChannelMessageIATASamples(ctx, sqlc.ListChannelMessageIATASamplesParams{AfterID: after, RowLimit: cmiVerifySites})
@@ -399,9 +400,9 @@ func comparePages(ctx context.Context, q sqlc.Querier, after int64, v *CmiVerifi
 	}
 	for _, s := range scopes {
 		requests = append(requests, request{channel: &s.ChannelID, scope: s.Name}, request{scope: s.Name})
-		if len(sampled) > 0 {
-			requests = append(requests, request{iatas: sampled, scope: s.Name})
-		}
+	}
+	if len(sampled) > 0 && len(scopes) > 0 {
+		requests = append(requests, request{iatas: sampled, scope: scopes[0].Name, firstPage: true})
 	}
 	for _, r := range requests {
 		cursors := []int64{0}
@@ -428,7 +429,7 @@ func comparePages(ctx context.Context, q sqlc.Querier, after int64, v *CmiVerifi
 				v.PageDiffs = append(v.PageDiffs, fmt.Sprintf("%s iatas %v scope %q cursor %d: legacy %d rows, cmi %d rows, first difference at %d",
 					where, r.iatas, r.scope, cursor, len(legacy.Items), len(model.Items), at))
 			}
-			if cursor == 0 && len(legacy.Items) > cmiVerifyLimit/2 {
+			if cursor == 0 && !r.firstPage && len(legacy.Items) > cmiVerifyLimit/2 {
 				cursors = append(cursors, legacy.Items[cmiVerifyLimit/2].ID)
 			}
 		}
