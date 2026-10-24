@@ -229,7 +229,7 @@ func (c *Coalescer) DeleteOldObservers(ctx context.Context, cutoff time.Time) ([
 	clear(c.knownBrokers)
 	c.mu.Unlock()
 	// The bumps left the coalescer above, so flush them on a context a shutdown does not cancel.
-	flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownFlushTimeout)
+	flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), max(c.flushInterval, shutdownFlushTimeout))
 	err := c.flushObservers(flushCtx, observers)
 	cancel()
 	if err != nil {

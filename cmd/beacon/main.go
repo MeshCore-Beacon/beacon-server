@@ -449,7 +449,7 @@ func main() {
 	rollup := background.NewRollup(maintStore, resolved.PacketRetention, resolved.RollupRetention)
 	if mode.Jobs {
 		backgroundJobs.Go(func() {
-			if err := rollup.CatchUp(ctx); err != nil {
+			if err := rollup.CatchUp(ctx); err != nil && ctx.Err() == nil {
 				slog.Error("analytics rollup catch-up failed", "component", "background", "error", err)
 			}
 		})
