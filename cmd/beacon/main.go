@@ -443,13 +443,16 @@ func main() {
 		ingestWorkers.Go(func() { broker2.Start(ctx) })
 	}
 
+	// Every background goroutine that writes through a pool joins backgroundJobs, so shutdown waits for it before
+	// the pools close.
+	var backgroundJobs sync.WaitGroup
 	rollup := background.NewRollup(maintStore, resolved.PacketRetention, resolved.RollupRetention)
 	if mode.Jobs {
-		go func() {
+		backgroundJobs.Go(func() {
 			if err := rollup.CatchUp(ctx); err != nil {
 				slog.Error("analytics rollup catch-up failed", "component", "background", "error", err)
 			}
-		}()
+		})
 	}
 	tasks := []background.Task{
 		rollup.Task(),
@@ -522,8 +525,12 @@ func main() {
 	if mode.Jobs {
 		tasks = append(tasks, cmiJobs.Task(), psJobs.Task(), psJobs.AuditTask(), psJobs.SweepTask())
 	} else {
-		go background.CmiReadOnlyWatch(ctx, maintStore.CheckCmiReadOnly, readModels.Cmi, background.CmiInterval)
-		go background.PacketSitesReadOnlyWatch(ctx, maintStore.CheckPacketSitesReadOnly, readModels.PacketSites, background.PacketSitesInterval)
+		backgroundJobs.Go(func() {
+			background.CmiReadOnlyWatch(ctx, maintStore.CheckCmiReadOnly, readModels.Cmi, background.CmiInterval)
+		})
+		backgroundJobs.Go(func() {
+			background.PacketSitesReadOnlyWatch(ctx, maintStore.CheckPacketSitesReadOnly, readModels.PacketSites, background.PacketSitesInterval)
+		})
 	}
 	pgSource, pgTask := planguardWiring(ctx, resolved.PlanguardDailyCheck, mode.Jobs, pools.Maint)
 	if pgTask != nil {
@@ -536,9 +543,9 @@ func main() {
 	}
 	if mode.Jobs {
 		scheduler := background.New(tasks)
-		go scheduler.Start(ctx)
-		go cmiJobs.Boot(ctx)
-		go psJobs.Boot(ctx)
+		backgroundJobs.Go(func() { scheduler.Start(ctx) })
+		backgroundJobs.Go(func() { cmiJobs.Boot(ctx) })
+		backgroundJobs.Go(func() { psJobs.Boot(ctx) })
 	}
 
 	// ── HTTP server ──────────────────────────────────────────────────────────
@@ -572,7 +579,6 @@ func main() {
 		}
 	}()
 
-	var backgroundJobs sync.WaitGroup
 	if decryptBackfill != nil {
 		decryptBackfill.RequestAll()
 		backgroundJobs.Go(func() { decryptBackfill.Run(ctx) })
@@ -609,9 +615,34 @@ func main() {
 		}
 	}
 	ingestWorkers.Wait()
-	backgroundJobs.Wait()
-	// Run's final flush, then one for the bumps written after it, both before the deferred pools.Close.
-	finishPresence(shutdownCtx)
+	waitAtMost(&backgroundJobs, backgroundStopWait, "background jobs")
+	// Run's final flush, then one for the bumps written after it, both before the deferred pools.Close. Its own
+	// budget: the HTTP shutdown and the drain may have used up shutdownCtx.
+	presenceCtx, presenceCancel := context.WithTimeout(context.Background(), presenceStopWait)
+	defer presenceCancel()
+	finishPresence(presenceCtx)
+}
+
+// Shutdown budgets after the HTTP shutdown (30 s) and the ingest drain: the background jobs, which stop on their
+// cancelled context, and the last presence flushes (Run's final flush is bounded at 10 s inside it). Docker's
+// stop_grace_period must cover the sum; see docs/operations.md.
+const (
+	backgroundStopWait = 15 * time.Second
+	presenceStopWait   = 15 * time.Second
+)
+
+// waitAtMost waits for wg up to d, then logs and returns: shutdown goes on rather than hang on a stuck job.
+func waitAtMost(wg *sync.WaitGroup, d time.Duration, what string) {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(d):
+		slog.Warn(fmt.Sprintf("shutdown: %s still running after %s; closing anyway", what, d), "component", "startup")
+	}
 }
 
 // proxyLimitWarning explains why per-IP limits go site-wide behind an unlisted reverse proxy.
