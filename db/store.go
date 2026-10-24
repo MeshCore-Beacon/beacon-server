@@ -37,6 +37,7 @@ type Store struct {
 	packetSitesProgress FillProgress    // the packet_sites backfill's progress log, across sessions
 	packetSitesIDs      idHistogram     // the id statistics that progress counts in, read when it started
 	cmiProgress         FillProgress    // the cmi backfill's progress log, across sessions
+	hopStats            hopStatsCache   // known_routes hop statistics for the global hop page; see hopGroupSmall
 }
 
 // New creates a Store whose statements run on dbtx (a pool, or a PlanRouter for the API).

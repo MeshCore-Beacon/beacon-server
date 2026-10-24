@@ -2154,14 +2154,47 @@ WHERE (date_trunc('milliseconds', last_seen, 'UTC'), id)
 ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC
 LIMIT @page_limit;
 
+-- name: GetKnownRoutesHopStats :one
+-- The statistics the planner holds for known_routes.hop_count, read so the store can tell a small hop group from a
+-- large one (see ListKnownRoutesGlobalHop). The columns are NULL before the table is first analyzed.
+SELECT c.reltuples::float8 AS reltuples, (s.attname IS NOT NULL)::bool AS has_stats,
+       s.most_common_vals::text::int[] AS hop_values, s.most_common_freqs::float8[] AS hop_freqs,
+       COALESCE(s.null_frac, 0)::float8 AS null_frac, COALESCE(s.n_distinct, 0)::float8 AS n_distinct
+FROM pg_catalog.pg_class c
+JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+LEFT JOIN pg_catalog.pg_stats s
+  ON s.schemaname = n.nspname AND s.tablename = c.relname AND s.attname = 'hop_count' AND NOT s.inherited
+WHERE c.oid = 'known_routes'::regclass;
+
 -- name: ListKnownRoutesGlobalHop :many
--- Custom plans only (class C: PlanRouter runs it unnamed): the generic plan walks the whole keyset index for an absent hop.
-SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
-FROM known_routes
-WHERE hop_count = @hop_count
-  AND (date_trunc('milliseconds', last_seen, 'UTC'), id)
-        < (COALESCE(sqlc.narg('cursor_ts')::timestamptz, 'infinity'::timestamptz), @cursor_id::bigint)
-ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC
+-- Custom plans only (class C: PlanRouter runs it unnamed), so the planner drops the branch @read_group turns off.
+-- The planner's own break-even between reading the whole hop group from the hop index and walking the keyset index
+-- sits far below the real one, so a mid-size group could flip, by ANALYZE sample, to a walk ten times dearer. The
+-- store sets @read_group for a group whose estimate is under the real break-even (see hopGroupIsSmall): that branch
+-- (kh) reads the group and sorts it. Otherwise today's statement runs (kk). Each branch returns rows in keyset order.
+SELECT h.id, h.node_ids, h.hash_prefix, h.iata, h.hop_count, h.first_seen, h.last_seen, h.observation_count
+FROM (
+  (SELECT r.id, r.node_ids, r.hash_prefix, r.iata, r.hop_count, r.first_seen, r.last_seen, r.observation_count
+   FROM (SELECT kh.id, kh.node_ids, kh.hash_prefix, kh.iata, kh.hop_count, kh.first_seen, kh.last_seen, kh.observation_count
+         FROM known_routes kh
+         WHERE kh.hop_count = @hop_count
+           AND (date_trunc('milliseconds', kh.last_seen, 'UTC'), kh.id)
+                 < (COALESCE(sqlc.narg('cursor_ts')::timestamptz, 'infinity'::timestamptz), @cursor_id::bigint)
+           AND @read_group::bool
+         OFFSET 0) r
+   ORDER BY date_trunc('milliseconds', r.last_seen, 'UTC') DESC, r.id DESC
+   LIMIT @page_limit)
+  UNION ALL
+  (SELECT kk.id, kk.node_ids, kk.hash_prefix, kk.iata, kk.hop_count, kk.first_seen, kk.last_seen, kk.observation_count
+   FROM known_routes kk
+   WHERE kk.hop_count = @hop_count
+     AND (date_trunc('milliseconds', kk.last_seen, 'UTC'), kk.id)
+           < (COALESCE(sqlc.narg('cursor_ts')::timestamptz, 'infinity'::timestamptz), @cursor_id::bigint)
+     AND NOT @read_group::bool
+   ORDER BY date_trunc('milliseconds', kk.last_seen, 'UTC') DESC, kk.id DESC
+   LIMIT @page_limit)
+) h
+ORDER BY date_trunc('milliseconds', h.last_seen, 'UTC') DESC, h.id DESC
 LIMIT @page_limit;
 
 -- name: GetKnownRoutesByNodes :many

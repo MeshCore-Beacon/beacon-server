@@ -122,6 +122,9 @@ type Querier interface {
 	// drives the node_ids GIN index; the indexed check keeps LIMIT counting real matches.
 	// hop_count + 0: no hop_count-led index may supply this order (a LIMIT walk would check the GIN conditions row by row).
 	GetKnownRoutesByNodes(ctx context.Context, arg GetKnownRoutesByNodesParams) ([]GetKnownRoutesByNodesRow, error)
+	// The statistics the planner holds for known_routes.hop_count, read so the store can tell a small hop group from a
+	// large one (see ListKnownRoutesGlobalHop). The columns are NULL before the table is first analyzed.
+	GetKnownRoutesHopStats(ctx context.Context) (GetKnownRoutesHopStatsRow, error)
 	GetLatestCompleteRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
 	// Neighbor rows between @a_nodes and @b_nodes in either orientation: ingest writes
 	// adverts as (sender, forwarder) but traces as (receiver, sender). Callers normalise.
@@ -333,7 +336,11 @@ type Querier interface {
 	// The = form prices the Sort correctly; the range form under-costs it when a hop index exists.
 	ListKnownRoutesByIATAHop(ctx context.Context, arg ListKnownRoutesByIATAHopParams) ([]ListKnownRoutesByIATAHopRow, error)
 	ListKnownRoutesGlobal(ctx context.Context, arg ListKnownRoutesGlobalParams) ([]ListKnownRoutesGlobalRow, error)
-	// Custom plans only (class C: PlanRouter runs it unnamed): the generic plan walks the whole keyset index for an absent hop.
+	// Custom plans only (class C: PlanRouter runs it unnamed), so the planner drops the branch @read_group turns off.
+	// The planner's own break-even between reading the whole hop group from the hop index and walking the keyset index
+	// sits far below the real one, so a mid-size group could flip, by ANALYZE sample, to a walk ten times dearer. The
+	// store sets @read_group for a group whose estimate is under the real break-even (see hopGroupIsSmall): that branch
+	// (kh) reads the group and sorts it. Otherwise today's statement runs (kk). Each branch returns rows in keyset order.
 	ListKnownRoutesGlobalHop(ctx context.Context, arg ListKnownRoutesGlobalHopParams) ([]ListKnownRoutesGlobalHopRow, error)
 	// Returns messages after the given message ID, ordered oldest first.
 	// Used for WS reconnect backfill.

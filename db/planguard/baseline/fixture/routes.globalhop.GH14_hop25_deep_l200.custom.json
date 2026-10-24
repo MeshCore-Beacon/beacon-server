@@ -1,0 +1,18 @@
+[
+ "Limit",
+ "  Sort",
+ "    Result",
+ "      Append",
+ "        Subquery Scan",
+ "          Limit [Subquery]",
+ "            Sort",
+ "              Subquery Scan",
+ "                Bitmap Heap Scan on known_routes kh [Subquery]",
+ "                  BitmapAnd",
+ "                    Bitmap Index Scan using idx_known_routes_hop_iata",
+ "                    Bitmap Index Scan using idx_known_routes_keyset",
+ "        Subquery Scan",
+ "          Limit [Subquery]",
+ "            Sort",
+ "              Result"
+]

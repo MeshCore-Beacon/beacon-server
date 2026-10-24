@@ -700,6 +700,42 @@ func (q *Queries) GetKnownRoutesByNodes(ctx context.Context, arg GetKnownRoutesB
 	return items, nil
 }
 
+const getKnownRoutesHopStats = `-- name: GetKnownRoutesHopStats :one
+SELECT c.reltuples::float8 AS reltuples, (s.attname IS NOT NULL)::bool AS has_stats,
+       s.most_common_vals::text::int[] AS hop_values, s.most_common_freqs::float8[] AS hop_freqs,
+       COALESCE(s.null_frac, 0)::float8 AS null_frac, COALESCE(s.n_distinct, 0)::float8 AS n_distinct
+FROM pg_catalog.pg_class c
+JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+LEFT JOIN pg_catalog.pg_stats s
+  ON s.schemaname = n.nspname AND s.tablename = c.relname AND s.attname = 'hop_count' AND NOT s.inherited
+WHERE c.oid = 'known_routes'::regclass
+`
+
+type GetKnownRoutesHopStatsRow struct {
+	Reltuples float64   `json:"reltuples"`
+	HasStats  bool      `json:"has_stats"`
+	HopValues []int32   `json:"hop_values"`
+	HopFreqs  []float64 `json:"hop_freqs"`
+	NullFrac  float64   `json:"null_frac"`
+	NDistinct float64   `json:"n_distinct"`
+}
+
+// The statistics the planner holds for known_routes.hop_count, read so the store can tell a small hop group from a
+// large one (see ListKnownRoutesGlobalHop). The columns are NULL before the table is first analyzed.
+func (q *Queries) GetKnownRoutesHopStats(ctx context.Context) (GetKnownRoutesHopStatsRow, error) {
+	row := q.db.QueryRow(ctx, getKnownRoutesHopStats)
+	var i GetKnownRoutesHopStatsRow
+	err := row.Scan(
+		&i.Reltuples,
+		&i.HasStats,
+		&i.HopValues,
+		&i.HopFreqs,
+		&i.NullFrac,
+		&i.NDistinct,
+	)
+	return i, err
+}
+
 const getNeighborLinks = `-- name: GetNeighborLinks :many
 SELECT node_id, neighbor_id, last_seen
 FROM node_neighbors
@@ -3856,19 +3892,37 @@ func (q *Queries) ListKnownRoutesGlobal(ctx context.Context, arg ListKnownRoutes
 }
 
 const listKnownRoutesGlobalHop = `-- name: ListKnownRoutesGlobalHop :many
-SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
-FROM known_routes
-WHERE hop_count = $1
-  AND (date_trunc('milliseconds', last_seen, 'UTC'), id)
-        < (COALESCE($2::timestamptz, 'infinity'::timestamptz), $3::bigint)
-ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC
-LIMIT $4
+SELECT h.id, h.node_ids, h.hash_prefix, h.iata, h.hop_count, h.first_seen, h.last_seen, h.observation_count
+FROM (
+  (SELECT r.id, r.node_ids, r.hash_prefix, r.iata, r.hop_count, r.first_seen, r.last_seen, r.observation_count
+   FROM (SELECT kh.id, kh.node_ids, kh.hash_prefix, kh.iata, kh.hop_count, kh.first_seen, kh.last_seen, kh.observation_count
+         FROM known_routes kh
+         WHERE kh.hop_count = $1
+           AND (date_trunc('milliseconds', kh.last_seen, 'UTC'), kh.id)
+                 < (COALESCE($2::timestamptz, 'infinity'::timestamptz), $3::bigint)
+           AND $4::bool
+         OFFSET 0) r
+   ORDER BY date_trunc('milliseconds', r.last_seen, 'UTC') DESC, r.id DESC
+   LIMIT $5)
+  UNION ALL
+  (SELECT kk.id, kk.node_ids, kk.hash_prefix, kk.iata, kk.hop_count, kk.first_seen, kk.last_seen, kk.observation_count
+   FROM known_routes kk
+   WHERE kk.hop_count = $1
+     AND (date_trunc('milliseconds', kk.last_seen, 'UTC'), kk.id)
+           < (COALESCE($2::timestamptz, 'infinity'::timestamptz), $3::bigint)
+     AND NOT $4::bool
+   ORDER BY date_trunc('milliseconds', kk.last_seen, 'UTC') DESC, kk.id DESC
+   LIMIT $5)
+) h
+ORDER BY date_trunc('milliseconds', h.last_seen, 'UTC') DESC, h.id DESC
+LIMIT $5
 `
 
 type ListKnownRoutesGlobalHopParams struct {
 	HopCount  int32              `json:"hop_count"`
 	CursorTs  pgtype.Timestamptz `json:"cursor_ts"`
 	CursorID  int64              `json:"cursor_id"`
+	ReadGroup bool               `json:"read_group"`
 	PageLimit int32              `json:"page_limit"`
 }
 
@@ -3883,12 +3937,17 @@ type ListKnownRoutesGlobalHopRow struct {
 	ObservationCount int64              `json:"observation_count"`
 }
 
-// Custom plans only (class C: PlanRouter runs it unnamed): the generic plan walks the whole keyset index for an absent hop.
+// Custom plans only (class C: PlanRouter runs it unnamed), so the planner drops the branch @read_group turns off.
+// The planner's own break-even between reading the whole hop group from the hop index and walking the keyset index
+// sits far below the real one, so a mid-size group could flip, by ANALYZE sample, to a walk ten times dearer. The
+// store sets @read_group for a group whose estimate is under the real break-even (see hopGroupIsSmall): that branch
+// (kh) reads the group and sorts it. Otherwise today's statement runs (kk). Each branch returns rows in keyset order.
 func (q *Queries) ListKnownRoutesGlobalHop(ctx context.Context, arg ListKnownRoutesGlobalHopParams) ([]ListKnownRoutesGlobalHopRow, error) {
 	rows, err := q.db.Query(ctx, listKnownRoutesGlobalHop,
 		arg.HopCount,
 		arg.CursorTs,
 		arg.CursorID,
+		arg.ReadGroup,
 		arg.PageLimit,
 	)
 	if err != nil {
