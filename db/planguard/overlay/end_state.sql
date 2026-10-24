@@ -5,7 +5,7 @@
 -- them, built in the schema t_end from public. It holds
 --   packets                with its migrated index set and the statistics object;
 --   nodes, node_iatas, observers
---                          with the index set and fillfactor of migrations 011-024, for a copy taken before them;
+--                          with the index set and fillfactor of migrations 011-024 and 058, for a copy taken before them;
 --   known_routes           with the index set of migrations 004-009 and without the column 053 drops;
 --   channel_iatas, node_neighbors, transport_scopes, meshmapper_channel_members, region_iatas, trace_tags
 --                          with the indexes they keep after migrations 047-052;

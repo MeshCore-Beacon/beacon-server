@@ -2555,22 +2555,22 @@ entries:
     shape: "ListNodes global_deep_cursor200"
     params: [{raw: "0"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "'2026-10-10 00:00+00'::timestamptz"}, {raw: "200"}, {raw: "''"}, {raw: "false"}, {raw: "''"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}]
     expect:
-      budget: {buffers: 5829, planning_ms: 10}
-    note: "measured: 3886 / 8415 B (custom / generic); budget: 1.5x measured"
+      budget: {buffers: 8081, planning_ms: 10}
+    note: "measured: 5387 B on the full local copy with nodes at fillfactor 50 (migration 058; 5829 B budget before); budget: 1.5x measured"
   - id: sm.nodes.SEA
     stmt: ListNodes
     shape: "ListNodes SEA"
     params: [{raw: "0"}, {raw: "'{SEA}'::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "'infinity'::timestamptz"}, {raw: "50"}, {raw: "''"}, {raw: "false"}, {raw: "''"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}]
     expect:
-      budget: {buffers: 8009, planning_ms: 10}
-    note: "measured: 5339 / 9253 B (custom / generic); budget: 1.5x measured"
+      budget: {buffers: 10338, planning_ms: 10}
+    note: "measured: 6892 B on the full local copy with nodes at fillfactor 50 (migration 058; 8009 B budget before); budget: 1.5x measured"
   - id: sm.nodes.SEA_type2
     stmt: ListNodes
     shape: "ListNodes SEA_type2"
     params: [{raw: "2"}, {raw: "'{SEA}'::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "'infinity'::timestamptz"}, {raw: "50"}, {raw: "''"}, {raw: "false"}, {raw: "''"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}]
     expect:
-      budget: {buffers: 7974, planning_ms: 10}
-    note: "measured: 5316 / 9017 B (custom / generic); budget: 1.5x measured"
+      budget: {buffers: 10307, planning_ms: 10}
+    note: "measured: 6871 B on the full local copy with nodes at fillfactor 50 (migration 058; 7974 B budget before); budget: 1.5x measured"
   - id: sm.nodes.name_a
     stmt: ListNodes
     shape: "ListNodes name_a"
@@ -2632,8 +2632,8 @@ entries:
     shape: "GetStatsNodeTypes SEA -> ByIATAs (measured: today's text)"
     params: [{raw: "'{SEA}'::bpchar[]"}]
     expect:
-      budget: {buffers: 5904, planning_ms: 10}
-    note: "measured: 3936 / 5263 B (custom / generic); budget: 1.5x measured"
+      budget: {buffers: 8130, planning_ms: 10}
+    note: "measured: 5420 B on the full local copy with nodes at fillfactor 50 (migration 058; 5904 B budget before); budget: 1.5x measured"
   - id: sm.trc.first_l200
     stmt: ListTraceTags
     shape: "ListTraceTags first_l200 (perf_small)"
