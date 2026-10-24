@@ -1746,6 +1746,13 @@ entries:
     expect:
       budget: {buffers: 21869, planning_ms: 10}
     note: "measured: 14579 / 14579 B (custom / generic); budget: 1.5x measured"
+  - id: s7.tn.pnw13_7d
+    stmt: GetTopNodesProbe
+    shape: "tn probe pnw13_7d"
+    params: [{raw: "'2026-10-11 17:00+00'::timestamptz"}, {raw: "ARRAY['BLI','CVO','KLS','LMT','MFR','MMV','ONP','PAE','PDX','RDM','SEA','SLE','TTD']::bpchar[]"}, {raw: "10"}]
+    expect:
+      budget: {buffers: 16400, planning_ms: 10}
+    note: "measured: 10875 B (custom); budget: 1.5x measured. The local copy stores its rollup rows in key order, as the rollup now writes them; the same rows in hash order read 116K B"
   - id: s7.tn.top50_7d
     stmt: GetTopNodesProbe
     shape: "tn probe top50_7d"

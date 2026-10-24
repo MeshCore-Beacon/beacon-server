@@ -567,3 +567,88 @@ func TestRollHourSetsWorkMemPostgres(t *testing.T) {
 		t.Errorf("work_mem after the transaction %q, want %q", after, before)
 	}
 }
+
+// TestRollupWritesKeyOrderPostgres checks that each family table stores a rolled hour in its primary-key order, so
+// the per-(hour, IATA) probes read a few adjacent heap pages instead of one page per row.
+func TestRollupWritesKeyOrderPostgres(t *testing.T) {
+	ctx, pool := schemaPool(t)
+	if err := RunMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	var h0 time.Time
+	if err := pool.QueryRow(ctx, "SELECT date_trunc('hour', now(), 'UTC') - INTERVAL '4 hours'").Scan(&h0); err != nil {
+		t.Fatal(err)
+	}
+	// 40 IATAs, 8 observers, 3 scopes and 300 advertising nodes, 6000 observations spread so that no family's
+	// grouping comes out in key order by accident.
+	_, err := pool.Exec(ctx, `
+INSERT INTO iata_codes (iata) SELECT 'Q' || chr(65 + i / 26) || chr(65 + i % 26) FROM generate_series(0, 39) i;
+INSERT INTO transport_scopes (id, name, transport_key, key_fingerprint)
+SELECT i, 'scope-' || i, decode(repeat(lpad(to_hex(i), 2, '0'), 16), 'hex'), decode(repeat(lpad(to_hex(i), 2, '0'), 8), 'hex')
+FROM generate_series(1, 3) i;
+INSERT INTO observers (id, public_key, display_name)
+SELECT ('00000000-0000-0000-0000-0000000000' || lpad(to_hex(i), 2, '0'))::uuid, decode(lpad(to_hex(i), 2, '0'), 'hex'), 'obs ' || i
+FROM generate_series(1, 8) i;
+INSERT INTO nodes (public_key, node_type, name)
+SELECT decode(md5('node' || i), 'hex'), 2, 'node ' || i FROM generate_series(0, 299) i WHERE i % 3 = 0;
+INSERT INTO packets (packet_hash, payload_type, payload_version, route_type, origin_pubkey, scope_id, raw_payload, raw_header, first_heard_at, last_heard_at)
+SELECT decode(md5('pkt' || i), 'hex'), CASE WHEN i % 4 = 0 THEN 5 ELSE 4 END, 0, 1 + i % 2,
+       CASE WHEN i % 4 = 0 THEN NULL ELSE decode(md5('node' || (i * 13) % 300), 'hex') END,
+       NULLIF(i % 4, 0), '\x00', '\x00', $1::timestamptz, $1::timestamptz
+FROM generate_series(0, 1999) i;
+INSERT INTO packet_observations (id, packet_hash, observer_id, iata, heard_at, path_length_byte, hash_size, hop_count, rssi, snr, payload_type)
+SELECT o, decode(md5('pkt' || o % 2000), 'hex'), ('00000000-0000-0000-0000-0000000000' || lpad(to_hex(1 + (o + o / 2000) % 8), 2, '0'))::uuid,
+       'Q' || chr(65 + ((o * 7) % 40) / 26) || chr(65 + ((o * 7) % 40) % 26),
+       $1::timestamptz + (o % 3600) * INTERVAL '1 second', 0, 1, 0, -60 - (o % 70)::smallint, (o % 25) - 12,
+       CASE WHEN (o % 2000) % 4 = 0 THEN 5 ELSE 4 END
+FROM generate_series(1, 6000) o;
+INSERT INTO channels (id, channel_hash) VALUES (1, '\x11');
+INSERT INTO channel_messages (id, channel_id, packet_hash, sender_name, sent_at)
+SELECT i / 4, 1, decode(md5('pkt' || i), 'hex'), 'sender ' || (i * 7) % 50, $1::timestamptz + i * INTERVAL '1 second'
+FROM generate_series(0, 1999, 4) i;`, pgx.QueryExecModeSimpleProtocol, h0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := New(pool, pool, 0, 0)
+	r, ok, err := store.BeginRollup(ctx)
+	if err != nil || !ok {
+		t.Fatalf("BeginRollup: ok=%v err=%v", ok, err)
+	}
+	defer r.Close(ctx)
+	if err := r.RegisterHours(ctx, h0); err != nil {
+		t.Fatal(err)
+	}
+	rollAll(t, ctx, r)
+
+	rows, err := pool.Query(ctx, `
+SELECT c.conrelid::regclass::text, string_agg(quote_ident(a.attname), ', ' ORDER BY k.ord)
+FROM pg_constraint c
+CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY k(attnum, ord)
+JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+WHERE c.contype = 'p' AND c.conrelid::regclass::text LIKE 'analytics\_hourly\_%'
+GROUP BY 1 ORDER BY 1`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys, err := pgx.CollectRows(rows, pgx.RowToStructByPos[struct{ Table, Key string }])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 13 {
+		t.Fatalf("found %d hourly family tables, want 13", len(keys))
+	}
+	for _, k := range keys {
+		var n, outOfOrder int
+		if err := pool.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE by_ctid <> by_key) FROM (
+			SELECT row_number() OVER (ORDER BY ctid) AS by_ctid, row_number() OVER (ORDER BY `+k.Key+`) AS by_key
+			FROM `+k.Table+` WHERE hour = $1) s`, h0).Scan(&n, &outOfOrder); err != nil {
+			t.Fatal(err)
+		}
+		if n < 2 {
+			t.Errorf("%s: %d rows for the hour, want several", k.Table, n)
+		}
+		if outOfOrder != 0 {
+			t.Errorf("%s: %d of %d rows stored out of (%s) order", k.Table, outOfOrder, n, k.Key)
+		}
+	}
+}
