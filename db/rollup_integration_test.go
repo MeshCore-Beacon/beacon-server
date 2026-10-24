@@ -601,7 +601,11 @@ SELECT o, decode(md5('pkt' || o % 2000), 'hex'), ('00000000-0000-0000-0000-00000
        'Q' || chr(65 + ((o * 7) % 40) / 26) || chr(65 + ((o * 7) % 40) % 26),
        $1::timestamptz + (o % 3600) * INTERVAL '1 second', 0, 1, 0, -60 - (o % 70)::smallint, (o % 25) - 12,
        CASE WHEN (o % 2000) % 4 = 0 THEN 5 ELSE 4 END
-FROM generate_series(1, 6000) o;`, pgx.QueryExecModeSimpleProtocol, h0)
+FROM generate_series(1, 6000) o;
+INSERT INTO channels (id, channel_hash) VALUES (1, '\x11');
+INSERT INTO channel_messages (id, channel_id, packet_hash, sender_name, sent_at)
+SELECT i / 4, 1, decode(md5('pkt' || i), 'hex'), 'sender ' || (i * 7) % 50, $1::timestamptz + i * INTERVAL '1 second'
+FROM generate_series(0, 1999, 4) i;`, pgx.QueryExecModeSimpleProtocol, h0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -640,7 +644,7 @@ GROUP BY 1 ORDER BY 1`)
 			FROM `+k.Table+` WHERE hour = $1) s`, h0).Scan(&n, &outOfOrder); err != nil {
 			t.Fatal(err)
 		}
-		if n < 2 && k.Table != "analytics_hourly_talker_sets" {
+		if n < 2 {
 			t.Errorf("%s: %d rows for the hour, want several", k.Table, n)
 		}
 		if outOfOrder != 0 {
