@@ -20,7 +20,7 @@ import (
 type FillPacing struct {
 	Duty             float64       // the share of time a fill may be busy, in (0, 1]
 	MinPause         time.Duration // the shortest pause after a slice or batch
-	PacketSitesSlice int64         // observation ids one packet_sites backfill slice covers
+	PacketSitesSlice int64         // observations one packet_sites backfill slice covers
 	CmiBatch         int64         // message ids one cmi backfill batch covers
 }
 
@@ -103,6 +103,13 @@ func (p *FillProgress) Start(pos int64) {
 	}
 }
 
+// Started reports whether the clock is running.
+func (p *FillProgress) Started() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return !p.started.IsZero()
+}
+
 // Reset forgets the clock, for a fill that starts over (a rebuild) or has completed.
 func (p *FillProgress) Reset() {
 	p.mu.Lock()
@@ -135,12 +142,17 @@ func (p *FillProgress) eta(now time.Time, pos, remaining int64) (time.Duration, 
 // Log logs msg with the ids done and remaining and, once the position moved, the ETA. It returns the ETA and
 // whether there was one.
 func (p *FillProgress) Log(msg string, pos, done, remaining int64, attrs ...any) (time.Duration, bool) {
+	return p.LogLeft(msg, pos, remaining, append(attrs, "ids_done", done, "ids_remaining", remaining)...)
+}
+
+// LogLeft logs msg with attrs and, once the position moved, the ETA to cover left more units of the position.
+func (p *FillProgress) LogLeft(msg string, pos, left int64, attrs ...any) (time.Duration, bool) {
 	p.mu.Lock()
 	now := p.clock()
 	p.lastLogged = now
-	eta, ok := p.eta(now, pos, remaining)
+	eta, ok := p.eta(now, pos, left)
 	p.mu.Unlock()
-	attrs = append(attrs, "component", "readmodel", "ids_done", done, "ids_remaining", remaining)
+	attrs = append([]any{"component", "readmodel"}, attrs...)
 	if ok {
 		attrs = append(attrs, "eta", eta.Round(time.Second).String())
 	}
