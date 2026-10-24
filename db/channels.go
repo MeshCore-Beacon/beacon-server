@@ -30,6 +30,21 @@ func (s *Store) UpsertChannel(ctx context.Context, channelHash []byte, keyFinger
 	if hashtag != "" {
 		hashtagPtr = &hashtag
 	}
+	if keyFingerprint == nil {
+		// The keyed statement's (hash, fingerprint) conflict target never matches a NULL fingerprint, so a second
+		// hearing would hit the hash-only unique index; use the hash-only statements.
+		if namePtr == nil && hashtagPtr == nil {
+			return s.UpsertChannelHashOnly(ctx, channelHash)
+		}
+		isHashtag := hashtag != ""
+		id, err := s.q.UpsertChannelHashOnlyNamed(ctx, sqlc.UpsertChannelHashOnlyNamedParams{
+			ChannelHash: channelHash, Name: namePtr, Hashtag: hashtagPtr, IsHashtag: &isHashtag,
+		})
+		if err != nil {
+			return 0, err
+		}
+		return int(id), nil
+	}
 	cached := s.channelIDs != nil && keyFingerprint != nil
 	key := channelKey{hash: string(channelHash), fp: string(keyFingerprint)}
 	if cached {
