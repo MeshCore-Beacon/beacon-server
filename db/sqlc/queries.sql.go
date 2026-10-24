@@ -6009,10 +6009,10 @@ type ListUndecryptedGroupTextPacketsRow struct {
 	RawPayload []byte `json:"raw_payload"`
 }
 
-// Returns GRP_TXT packets (payload_type=5) never successfully decrypted. Used at boot to
+// Returns GRP_TXT packets (payload_type=5) never successfully decrypted. Used after boot to
 // retry decryption against the current keystore for packets whose channel key was only added
 // to the config after they'd already been ingested -- see
-// internal/ingest.BackfillChannelMessages.
+// internal/ingest.DecryptBackfill.
 func (q *Queries) ListUndecryptedGroupTextPackets(ctx context.Context) ([]ListUndecryptedGroupTextPacketsRow, error) {
 	rows, err := q.db.Query(ctx, listUndecryptedGroupTextPackets)
 	if err != nil {

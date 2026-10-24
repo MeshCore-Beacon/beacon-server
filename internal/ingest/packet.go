@@ -868,7 +868,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 
 	if inserted || repeat {
 		if inserted {
-			w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio, scopeID, matchedScope, pubkeyBytes, float32(parseNumber(envelope.SNR)), siteRecorded)
+			w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio, scopeID, matchedScope, pubkeyBytes, float32(parseNumber(envelope.SNR)), siteRecorded, !isNew)
 		}
 		// Resolve after advert updates; suppressed copies need no endpoint lookup.
 		var resolvedSource, resolvedDestination *api.ResolvedHop
