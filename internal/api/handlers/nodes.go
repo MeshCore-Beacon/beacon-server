@@ -56,6 +56,7 @@ func NodesRouter(reader api.Reader) http.Handler {
 //	@Success	200						{object}	api.NodePage
 //	@Failure	400						{object}	handlers.APIError
 //	@Failure	500						{object}	handlers.APIError
+//	@Failure	503						{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/nodes [get]
 func listNodes(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -152,7 +153,7 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 		}
 		nodes, err := reader.ListNodes(r.Context(), nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, cursor, pageCursor, limit, includeNeighbors)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, nodes)
@@ -169,6 +170,7 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 //	@Failure	400		{object}	handlers.APIError
 //	@Failure	404		{object}	handlers.APIError
 //	@Failure	500		{object}	handlers.APIError
+//	@Failure	503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/nodes/{nodeId} [get]
 func getNode(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -183,7 +185,7 @@ func getNode(reader api.Reader) http.HandlerFunc {
 			respondError(w, http.StatusNotFound, "node not found")
 			return
 		case err != nil:
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, node)
@@ -201,6 +203,7 @@ func getNode(reader api.Reader) http.HandlerFunc {
 //	@Success	200		{object}	api.Page[api.PacketObservationSummary]
 //	@Failure	400		{object}	handlers.APIError
 //	@Failure	500		{object}	handlers.APIError
+//	@Failure	503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/nodes/{nodeId}/observations [get]
 func listNodeObservations(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -225,7 +228,7 @@ func listNodeObservations(reader api.Reader) http.HandlerFunc {
 		}
 		observations, err := reader.ListNodeObservations(r.Context(), nodeID, cursor, limit)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, observations)
@@ -241,6 +244,7 @@ func listNodeObservations(reader api.Reader) http.HandlerFunc {
 //	@Success	200		{object}	[]api.NodeNeighbor
 //	@Failure	400		{object}	handlers.APIError
 //	@Failure	500		{object}	handlers.APIError
+//	@Failure	503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/nodes/{nodeId}/neighbors [get]
 func listNodeNeighbors(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -251,7 +255,7 @@ func listNodeNeighbors(reader api.Reader) http.HandlerFunc {
 		}
 		neighbors, err := reader.GetNodeNeighbors(r.Context(), nodeID)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, neighbors)

@@ -43,6 +43,7 @@ func RoutesRouter(reader api.Reader) http.Handler {
 //	@Failure	400			{object}	handlers.APIError
 //	@Success	200			{object}	[]api.KnownRoute
 //	@Failure	500			{object}	handlers.APIError
+//	@Failure	503			{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/routes [get]
 func listKnownRoutes(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -80,7 +81,7 @@ func listKnownRoutes(reader api.Reader) http.HandlerFunc {
 		}
 		routes, err := reader.ListKnownRoutes(r.Context(), iata, hopCount, cursor, cursorID, limit)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, routes)
@@ -215,12 +216,12 @@ func respondRouteSearchError(w http.ResponseWriter, ctx context.Context, err err
 		return false
 	case errors.Is(err, api.ErrRouteSearchTooBroad):
 		respondError(w, http.StatusBadRequest, err.Error())
-	case errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded):
-		respondError(w, http.StatusServiceUnavailable, "route search timed out; use a longer hash or fewer iatas")
+	case isQueryTimeout(err) || errors.Is(ctx.Err(), context.DeadlineExceeded):
+		respondTimeout(w, "route search timed out; use a longer hash or fewer iatas")
 	case errors.Is(err, context.Canceled):
 		// client went away; nothing to write
 	default:
-		respondError(w, http.StatusInternalServerError, "internal server error")
+		respondReaderError(w, err, "internal server error")
 	}
 	return true
 }

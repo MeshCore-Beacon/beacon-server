@@ -6,7 +6,6 @@ package handlers
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -64,8 +63,7 @@ func getPlanguard(pg PlanguardSource) http.HandlerFunc {
 				return
 			}
 			if err != nil {
-				slog.Error("api: plan check", "component", "api", "error", err)
-				respondError(w, http.StatusInternalServerError, "cannot run the plan check")
+				respondReaderError(w, err, "cannot run the plan check")
 				return
 			}
 			respond(w, http.StatusOK, rep)
@@ -77,8 +75,7 @@ func getPlanguard(pg PlanguardSource) http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			slog.Error("api: read plan check", "component", "api", "error", err)
-			respondError(w, http.StatusInternalServerError, "cannot read the plan check")
+			respondReaderError(w, err, "cannot read the plan check")
 			return
 		}
 		respond(w, http.StatusOK, rep)
@@ -103,8 +100,7 @@ func getDBStatements(reader DBStatementsReader) http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			slog.Error("api: read statement statistics", "component", "api", "error", err)
-			respondError(w, http.StatusInternalServerError, "cannot read statement statistics")
+			respondReaderError(w, err, "cannot read statement statistics")
 			return
 		}
 		if items == nil {

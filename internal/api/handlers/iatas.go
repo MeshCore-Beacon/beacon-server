@@ -48,12 +48,13 @@ func pathIATA(r *http.Request) (string, bool) {
 //	@Produce	json
 //	@Success	200	{array}		api.IATA
 //	@Failure	500	{object}	handlers.APIError
+//	@Failure	503	{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/iatas [get]
 func listIATAs(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		iatas, err := reader.ListIATAs(r.Context())
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		if iatas == nil {
@@ -72,6 +73,7 @@ func listIATAs(reader api.Reader) http.HandlerFunc {
 //	@Success	200		{object}	api.IATA
 //	@Failure	404		{object}	handlers.APIError
 //	@Failure	500		{object}	handlers.APIError
+//	@Failure	503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/iatas/{iata} [get]
 func getIATA(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -86,7 +88,7 @@ func getIATA(reader api.Reader) http.HandlerFunc {
 			respondError(w, http.StatusNotFound, "IATA not found")
 			return
 		case err != nil:
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, result)
@@ -103,6 +105,7 @@ func getIATA(reader api.Reader) http.HandlerFunc {
 //	@Success	204		"IATA exists but has no border configured"
 //	@Failure	404		{object}	handlers.APIError
 //	@Failure	500		{object}	handlers.APIError
+//	@Failure	503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/iatas/{iata}/border [get]
 func getIATABorder(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -117,7 +120,7 @@ func getIATABorder(reader api.Reader) http.HandlerFunc {
 			respondError(w, http.StatusNotFound, "IATA not found")
 			return
 		case err != nil:
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		// A cache round-trip re-encodes a nil json.RawMessage as the literal 4-byte JSON

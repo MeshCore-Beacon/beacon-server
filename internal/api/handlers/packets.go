@@ -163,6 +163,7 @@ func listPackets(reader api.Reader) http.HandlerFunc {
 //	@Success	200					{object}	[]api.PacketSummary
 //	@Failure	400					{object}	handlers.APIError
 //	@Failure	500					{object}	handlers.APIError
+//	@Failure	503					{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/packets/backfill [get]
 func listPacketsBackfill(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -209,7 +210,7 @@ func listPacketsBackfill(reader api.Reader) http.HandlerFunc {
 		scope := r.URL.Query().Get("scope")
 		packets, err := reader.ListPacketsAfterID(r.Context(), afterID, payloadType, routeType, iatas, scope, limit)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, packets)
@@ -226,6 +227,7 @@ func listPacketsBackfill(reader api.Reader) http.HandlerFunc {
 //	@Failure	400			{object}	handlers.APIError
 //	@Failure	404			{object}	handlers.APIError
 //	@Failure	500			{object}	handlers.APIError
+//	@Failure	503			{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/packets/{packetHash} [get]
 func getPacket(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -241,7 +243,7 @@ func getPacket(reader api.Reader) http.HandlerFunc {
 			respondError(w, http.StatusNotFound, "packet not found")
 			return
 		case err != nil:
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, packet)
