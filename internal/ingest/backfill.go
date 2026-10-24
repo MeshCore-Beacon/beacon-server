@@ -120,19 +120,21 @@ type Pacer interface {
 // backfill tries packets in batches of decryptBackfillBatch; pace, when set, waits after each batch. It stops
 // between packets when ctx ends, leaving the rest undecrypted for the next run. A packet it has started finishes
 // whatever ctx does: a cancelled message insert would drop the cmi read model's trust, and a message stored without
-// its packet marked decrypted would be listed again on every run.
+// its packet marked decrypted would be listed again on every run. decryptPacketTimeout still caps a packet stuck on
+// a lock, so it cannot hold up shutdown indefinitely.
 func backfill(ctx context.Context, db DB, keys ChannelKeyStore, packets []UndecryptedPacket, pace Pacer) int {
 	decrypted := 0
-	packetCtx := context.WithoutCancel(ctx)
 	for start := 0; start < len(packets) && ctx.Err() == nil; start += decryptBackfillBatch {
 		began := time.Now()
 		for _, p := range packets[start:min(start+decryptBackfillBatch, len(packets))] {
 			if ctx.Err() != nil {
 				return decrypted
 			}
+			packetCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), decryptPacketTimeout)
 			result, err := DecryptGroupText(packetCtx, db, keys, p.PacketHash, p.RawPayload, true)
 			if err != nil {
 				slog.Error(fmt.Sprintf("ingest: backfill: decrypt failed for packet %s", hex.EncodeToString(p.PacketHash)), "component", "ingest", "error", err)
+				cancel()
 				continue
 			}
 			switch {
@@ -145,6 +147,7 @@ func backfill(ctx context.Context, db DB, keys ChannelKeyStore, packets []Undecr
 					slog.Error(fmt.Sprintf("ingest: backfill: failed to set packet decrypted for %s", hex.EncodeToString(p.PacketHash)), "component", "ingest", "error", err)
 				}
 			}
+			cancel()
 		}
 		if pace != nil && start+decryptBackfillBatch < len(packets) && !pace.Wait(ctx, time.Since(began)) {
 			return decrypted
@@ -152,6 +155,9 @@ func backfill(ctx context.Context, db DB, keys ChannelKeyStore, packets []Undecr
 	}
 	return decrypted
 }
+
+// decryptPacketTimeout bounds one packet's statements in a backfill.
+const decryptPacketTimeout = 30 * time.Second
 
 // decryptBackfillTimeout bounds one run; what it does not reach waits for the next run (the next boot or key import).
 const decryptBackfillTimeout = 30 * time.Minute
