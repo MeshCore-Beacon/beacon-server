@@ -98,6 +98,7 @@ func TestPacketsBySitesFarWindowPostgres(t *testing.T) {
 	shapes := []shape{
 		{sites: []string{"AAA"}}, {sites: []string{"AAA", "BBB"}}, {sites: []string{"BBB", "CCC", "ZZZ"}},
 		{sites: []string{"AAA", "BBB"}, pt: []int16{4, 5}}, {sites: []string{"AAA", "BBB"}, scopes: []string{"#a"}},
+		{sites: []string{"AAA", "BBB"}, pt: []int16{4, 5, 11}, scopes: []string{"#a", "#b"}},
 		{sites: []string{"CCC"}},
 	}
 	rows := 0

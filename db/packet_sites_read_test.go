@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -308,6 +309,24 @@ func TestListPacketsRegionBoundedFallsBackToPairs(t *testing.T) {
 		page, err := s.ListPackets(context.Background(), manyPT, manyRT, []string{"AAA", "BBB"}, nil, time.Time{}, time.Time{}, 0, pc, 5)
 		check(t, page, err)
 	})
+	t.Run("more pairs' ranges than the cap", func(t *testing.T) {
+		mock := mockdb.NewMockQuerier(gomock.NewController(t))
+		many := make([]string, siteTypedRanges/9+1)
+		for i := range many {
+			many[i] = fmt.Sprintf("%03d", i)
+		}
+		exhausted(mock, many)
+		mock.EXPECT().ListPacketsBySitesWindow(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsBySitesWindowParams) bool {
+			return len(p.Iatas) == len(many) && slices.Equal(p.PayloadTypes, manyPT) && p.LoTs.InfinityModifier == pgtype.NegativeInfinity &&
+				p.HiTs.InfinityModifier == pgtype.Infinity
+		})).Return(nil, nil)
+		s := &Store{q: mock}
+		WithReadModels(earnedPacketSites())(s)
+		page, err := s.ListPackets(context.Background(), manyPT, manyRT, many, nil, time.Time{}, time.Time{}, 0, nil, 5)
+		if err != nil || len(page.Items) != 0 || page.HasMore {
+			t.Fatalf("page %+v, %v", page, err)
+		}
+	})
 	t.Run("page 1", func(t *testing.T) {
 		mock := mockdb.NewMockQuerier(gomock.NewController(t))
 		exhausted(mock, []string{"AAA", "BBB"})
@@ -435,6 +454,35 @@ func TestWindowBounds(t *testing.T) {
 		}
 		if lowered := len(mainHash) == maxCursorHashBytes; lowered != tc.lowered {
 			t.Errorf("%s: start lowered to hi = %v, want %v", tc.name, lowered, tc.lowered)
+		}
+	}
+}
+
+// Typed window families walk per-pair ranges only up to siteTypedRanges ranges; above that they read each site (or site
+// and scope) range with the types as a filter.
+func TestCapTypedRanges(t *testing.T) {
+	since := time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC)
+	scopes := make([]string, 70)
+	for i := range scopes {
+		scopes[i] = fmt.Sprintf("#s%d", i)
+	}
+	for _, tc := range []struct {
+		name   string
+		pt     []int16
+		scopes []string
+		sites  int
+		want   siteFamily
+	}{
+		{"a region, one type", []int16{4}, nil, 22, siteWindowTyped},
+		{"every site, 13 types", []int16{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}, nil, 625, siteWindow},
+		{"at the cap", []int16{4}, nil, siteTypedRanges / 4, siteWindowTyped},
+		{"one past the cap", []int16{4}, nil, siteTypedRanges/4 + 1, siteWindow},
+		{"a region, scopes and a type", []int16{4}, []string{"#a", "#b"}, 22, siteScopedTyped},
+		{"many scopes and sites", []int16{4}, scopes, 22, siteScoped},
+	} {
+		f, _ := newPacketFilter(tc.pt, nil, tc.scopes, since, time.Time{}, 0, nil, 50)
+		if got := capTypedRanges(siteFamilyOf(f), f, tc.sites); got != tc.want {
+			t.Errorf("%s: family %d, want %d", tc.name, got, tc.want)
 		}
 	}
 }

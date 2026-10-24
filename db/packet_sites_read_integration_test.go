@@ -304,6 +304,7 @@ func TestPacketsBySitesMatchesTruthPostgres(t *testing.T) {
 		for _, r := range []siteReq{
 			{sites: siteSets[1]}, {sites: siteSets[2], until: until}, {sites: siteSets[1], pt: []int16{4}},
 			{sites: siteSets[2], scopes: []string{"#a"}, since: since},
+			{sites: siteSets[2], pt: []int16{4, 11}, until: until}, {sites: siteSets[1], pt: []int16{4}, scopes: []string{"#a"}, since: since},
 		} {
 			rows += f.walk(s, tx, r, 3)
 			f.legacyWalk(s, tx, r, 50)

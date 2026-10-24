@@ -85,6 +85,24 @@ func siteFamilyOf(f packetFilter) siteFamily {
 	return sitePlain
 }
 
+// siteTypedRanges is the most (site, scope, type pair) ranges the typed window statements walk: each reads at most a
+// page, so a request reads at most siteTypedRanges pages' worth. Above it the window statements read each site (or
+// site and scope) range with the types as a filter, the fan-out of an untyped request: cheap while the filter is
+// dense, and only requests naming thousands of combinations get there.
+const siteTypedRanges = 4096
+
+// capTypedRanges turns a typed window family into its untyped form when its ranges would pass siteTypedRanges.
+func capTypedRanges(fam siteFamily, f packetFilter, sites int) siteFamily {
+	ranges := sites * max(len(f.scopes), 1) * len(f.payloadTypes) * len(f.routeTypes)
+	switch {
+	case fam == siteWindowTyped && ranges > siteTypedRanges:
+		return siteWindow
+	case fam == siteScopedTyped && ranges > siteTypedRanges:
+		return siteScoped
+	}
+	return fam
+}
+
 // siteStatement names the first statement for a family after the pre-filter: the re-check form only with a cursor
 // and two or more sites.
 func siteStatement(fam siteFamily, sites int, hasCursor bool) string {
@@ -138,6 +156,7 @@ func listSiteRows(ctx context.Context, q sqlc.Querier, f packetFilter, sites []s
 			return nil, 0, err
 		}
 	}
+	fam = capTypedRanges(fam, f, len(sites))
 	hasCursor := f.cursorTS.InfinityModifier != pgtype.Infinity
 	switch siteStatement(fam, len(sites), hasCursor) {
 	case "ListPacketsBySite":
@@ -157,7 +176,11 @@ func listSiteRows(ctx context.Context, q sqlc.Querier, f packetFilter, sites []s
 		if !errors.Is(err, errSiteBudget) {
 			return rows, keys, err
 		}
-		// Every pair's range from the cursor, each to at most a page: exact, and bounded by the pair count.
+		if len(sites)*len(f.payloadTypes)*len(f.routeTypes) > siteTypedRanges {
+			// Too many pairs' ranges: each site's range with the types as a filter, as an untyped request reads it.
+			return windowSiteRows(ctx, q, siteWindow, f, sites, hasCursor)
+		}
+		// Every pair's range from the cursor, each to at most a page: exact, and bounded by siteTypedRanges.
 		rows, err = typedSiteRows(ctx, q, f, sites, hasCursor)
 	default:
 		return windowSiteRows(ctx, q, fam, f, sites, hasCursor)

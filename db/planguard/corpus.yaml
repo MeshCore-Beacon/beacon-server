@@ -188,6 +188,8 @@ sort_exempt_sets:
     - {relation: packet_sites, index: idx_packet_sites_early, reason: "the rows heard at a site over 30 minutes before their first hearing: ingest clamps hearing times to 30 minutes of its clock, so the index stays about empty"}
     - {relation: packet_sites, index_cond: "packet_hash = e.packet_hash", reason: "the re-check of an early row probes one packet's sites"}
     - {relation: packet_sites, index_cond: "packet_hash = ps_", reason: "the re-check of a late row probes one packet's sites"}
+  window_rare_type:
+    - {relation: packet_sites, index: idx_packet_sites_site_type, sort: Sort, reason: "a rare type above the typed cap: the planner may sort that type's entries below the page start, bounded by how many the type has at the site"}
   window_typed_late:
     - {relation: packet_sites, index: idx_packet_sites_late, sort: Sort, reason: "the late rows above hi that carry the requested types: a small share of the window above until"}
   window_branches:
@@ -232,6 +234,7 @@ resolvers:
   ps_busy1_1d_hi: "SELECT (SELECT max(site_heard_at) FROM packet_sites WHERE iata = (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r)) - interval '1 day' + interval '30 minutes'"
   ps_busy1_future_lo: "SELECT (SELECT max(site_heard_at) FROM packet_sites WHERE iata = (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r)) + interval '1 day' - interval '30 minutes'"
   ps_max_hash: "SELECT decode(repeat('ff', 64), 'hex')"
+  ps_all_scope_names: "SELECT array_agg(name ORDER BY name) FROM transport_scopes"
   ps_busy13_tie_hash: "SELECT packet_hash FROM packet_sites WHERE iata = ANY(ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r)) AND site_heard_at = (SELECT site_heard_at FROM packet_sites WHERE iata = ANY(ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r)) AND site_heard_at > (SELECT max((SELECT max(site_heard_at) FROM packet_sites ps WHERE ps.iata = r.iata)) FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r) - interval '6 hours' GROUP BY 1 HAVING count(DISTINCT packet_hash) > 1 ORDER BY 1 DESC LIMIT 1) ORDER BY packet_hash DESC LIMIT 1"
   ps_busy13_tie_ts: "SELECT site_heard_at FROM packet_sites WHERE iata = ANY(ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r)) AND site_heard_at > (SELECT max((SELECT max(site_heard_at) FROM packet_sites ps WHERE ps.iata = r.iata)) FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r) - interval '6 hours' GROUP BY 1 HAVING count(DISTINCT packet_hash) > 1 ORDER BY 1 DESC LIMIT 1"
   ps_busy1_1d: "SELECT (SELECT max(site_heard_at) FROM packet_sites WHERE iata = (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r)) - interval '1 day'"
@@ -3864,6 +3867,60 @@ entries:
       sort_exempt: [sites_recheck, window_skew, window_typed_late]
       budget: {buffers: 543, planning_ms: 10}
     note: "measured: 362 B on the local copy; budget 1.5x"
+  - id: ps.window.all.pairs39_until1d
+    stmt: ListPacketsBySitesWindow
+    shape: "every site with rows, 13 payload types x 3 route types (above the typed cap), until a day back"
+    params: [{r: ps_all_sites}, {r: ps_busy13_1d_hi}, {r: ps_max_hash}, "-infinity", "-infinity", {r: ps_busy13_1d}, "{0,1,2,3,4,5,6,7,8,9,10,11,12}", "{0,1,2}", "false", "infinity", "\\x", 51, {r: ps_busy13_1d_hi}]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, window_skew]
+      budget: {buffers: 8586, planning_ms: 50}
+    note: "measured: 5724 B on the local copy; budget 1.5x"
+  - id: ps.window.all.rare_nowin
+    stmt: ListPacketsBySitesWindow
+    shape: "every site with rows, one rare payload type, no window: the many-pair fallback above the typed cap"
+    tiers: [local]
+    executions: 1
+    timeout_s: 120
+    params: [{r: ps_all_sites}, "infinity", "\\x", "-infinity", "-infinity", "infinity", "{15}", "{0,1,2,3}", "false", "infinity", "\\x", 51, "infinity"]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, any_index: [idx_packet_sites_site, idx_packet_sites_site_type], nodes: ["Index Only Scan", "Index Scan"], index_cond: ["iata ="]}]
+      sort_exempt: [sites_recheck, window_skew, window_rare_type]
+      budget: {buffers: 19665, planning_ms: 50}
+    note: "above the typed cap a sparse filter reads each site range down to the window; measured: 13110 B on the local copy; budget 1.5x"
+  - id: ps.scopedt.busy13.scopes8.pairs39
+    stmt: ListPacketsBySitesScopedTypedWindow
+    shape: "the 13 busiest recent sites, the 8 busiest scopes, 13 x 3 type pairs (4,056 ranges, under the cap), no window"
+    params: [{r: ps_busy_sites13}, {r: ps_busy_scopes8}, "{0,1,2,3,4,5,6,7,8,9,10,11,12}", "{0,1,2}", "infinity", "\\x", "-infinity", "-infinity", "infinity", "false", "infinity", "\\x", 51, "infinity"]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope_type, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "payload_type = pt.t", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, window_skew, window_typed_late]
+      budget: {buffers: 18354, planning_ms: 50}
+    note: "measured: 12236 B on the local copy; budget 1.5x"
+  - id: ps.scopedw.all.all_scopes.rare_nowin
+    stmt: ListPacketsBySitesScopedWindow
+    shape: "every site with rows, every scope, one rare payload type, no window (above the cap; the worst case)"
+    tiers: [local]
+    executions: 1
+    timeout_s: 120
+    params: [{r: ps_all_sites}, {r: ps_all_scope_names}, "infinity", "\\x", "-infinity", "-infinity", "infinity", "{15}", "{0,1,2,3}", "false", "infinity", "\\x", 51, "infinity"]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, window_skew]
+      budget: {buffers: 3784503, planning_ms: 50}
+    note: "every (site, scope) pair is one range: about 838,000 mostly empty probes; measured: 2523002 B on the local copy; budget 1.5x"
+  - id: ps.scopedw.all.all_scopes.rare_until1d
+    stmt: ListPacketsBySitesScopedWindow
+    shape: "every site with rows, every scope, one rare payload type, until a day back (above the cap; the worst case)"
+    tiers: [local]
+    executions: 1
+    timeout_s: 120
+    params: [{r: ps_all_sites}, {r: ps_all_scope_names}, {r: ps_busy13_1d_hi}, {r: ps_max_hash}, "-infinity", "-infinity", {r: ps_busy13_1d}, "{15}", "{0,1,2,3}", "false", "infinity", "\\x", 51, {r: ps_busy13_1d_hi}]
+    expect:
+      driver: [{scope: "CTE page", relation: packet_sites, alias: ps, index: idx_packet_sites_site_scope, nodes: ["Index Only Scan", "Index Scan"], index_cond: ["scope_id =", "ROW(site_heard_at, packet_hash) <"]}]
+      sort_exempt: [sites_recheck, window_skew]
+      budget: {buffers: 7547963, planning_ms: 50}
+    note: "every (site, scope) pair is one range, plus its late range: about 838,000 mostly empty probes each; measured: 5031975 B on the local copy; budget 1.5x"
   - id: ps.keys.busy1
     stmt: ListPacketsBySiteKeys
     shape: "the rows for the busiest site newest 50 keys"
