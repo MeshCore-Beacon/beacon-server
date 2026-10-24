@@ -260,3 +260,37 @@ func (s *ctxStore) TouchObservers(ctx context.Context, ids []uuid.UUID, seen []t
 	}
 	return err
 }
+
+// The observer cleanup takes the dirty observers out of the coalescer, so a shutdown mid-cleanup must not cancel their
+// flush: it runs on its own context and writes them.
+func TestObserverCleanupFlushSurvivesShutdown(t *testing.T) {
+	var flushErr atomic.Value
+	var flushed atomic.Int32
+	store := &retentionStore{id: uuid.New()}
+	store.touch = func(ctx context.Context, _ []uuid.UUID, _ []time.Time, counts []int32, _ []string, _ []time.Time) error {
+		if ctx.Err() != nil {
+			flushErr.Store(ctx.Err())
+			return ctx.Err()
+		}
+		for _, n := range counts {
+			flushed.Add(n)
+		}
+		return nil
+	}
+	store.prune = func(ctx context.Context, _ time.Time) ([]uuid.UUID, error) { return nil, ctx.Err() }
+	c := New(store, time.Hour, time.Hour)
+	for range 2 {
+		if _, _, err := c.UpsertObserver(context.Background(), []byte("fixture"), "YVR"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _ = c.DeleteOldObservers(ctx, time.Now())
+	if err, _ := flushErr.Load().(error); err != nil {
+		t.Errorf("cleanup flush ran on a cancelled context: %v", err)
+	}
+	if n := flushed.Load(); n != 1 {
+		t.Errorf("cleanup flushed %d observations, want 1", n)
+	}
+}

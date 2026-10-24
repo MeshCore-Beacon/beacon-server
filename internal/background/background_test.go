@@ -6,6 +6,7 @@ package background
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -160,4 +161,34 @@ func TestSchedulerRecordsJobDuration(t *testing.T) {
 		cancel()
 		synctest.Wait()
 	})
+}
+
+// Start returns only once a task that was running when ctx ended has returned, so shutdown can wait for it.
+func TestStartWaitsForRunningTask(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	s := New([]Task{{Name: "slow", Interval: time.Millisecond, Run: func(context.Context) error {
+		once.Do(func() { close(started) })
+		<-release
+		return nil
+	}}})
+	ctx, cancel := context.WithCancel(context.Background())
+	returned := make(chan struct{})
+	go func() {
+		s.Start(ctx)
+		close(returned)
+	}()
+	<-started
+	cancel()
+	select {
+	case <-returned:
+		t.Fatal("Start returned while a task was still running")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-returned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Start did not return after the task finished")
+	}
 }
