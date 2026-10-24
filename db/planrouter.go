@@ -122,7 +122,11 @@ type stmt struct {
 	once   sync.Once
 	ticket guards.Ticket
 	cancel context.CancelFunc
+	inTx   bool // the statement runs in a transaction begun for its planpolicy.ParallelWorkers setting
 }
+
+// endTxTimeout bounds the ROLLBACK that ends a statement's own transaction.
+const endTxTimeout = 5 * time.Second
 
 // begin admits the statement, acquires its connection and starts its context. On error,
 // everything it took is already given back.
@@ -147,8 +151,20 @@ func (r *PlanRouter) begin(ctx context.Context, sql string, args []any) (*stmt, 
 		return nil, err
 	}
 	sctx, cancel := t.Start(ctx)
+	s := &stmt{conn: conn, ctx: sctx, args: args, ticket: t, cancel: cancel}
+	if n := planpolicy.ParallelWorkers[sqlcName(sql)]; n > 0 && pool != r.legacy {
+		// The pool's max_parallel_workers_per_gather is 0; raise it for this statement only. ROLLBACK in end
+		// restores it, and a connection left in a transaction is never reused: pgxpool destroys it on release.
+		s.inTx = true
+		if _, err := conn.Exec(sctx, fmt.Sprintf("BEGIN READ ONLY; SET LOCAL max_parallel_workers_per_gather = %d", n),
+			pgx.QueryExecModeSimpleProtocol); err != nil {
+			ok = true
+			s.end(nil)
+			return nil, err
+		}
+	}
 	ok = true
-	return &stmt{conn: conn, ctx: sctx, args: args, ticket: t, cancel: cancel}, nil
+	return s, nil
 }
 
 // acquire waits at most the ticket's acquire timeout, else at most wait; 0 for both means only ctx bounds the wait.
@@ -180,6 +196,11 @@ func (s *stmt) end(rows pgx.Rows) {
 		defer s.ticket.Finish()
 		if rows != nil {
 			rows.Close()
+		}
+		if s.inTx {
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(s.ctx), endTxTimeout)
+			defer cancel()
+			_, _ = s.conn.Exec(ctx, "ROLLBACK", pgx.QueryExecModeSimpleProtocol)
 		}
 	})
 }

@@ -91,23 +91,38 @@ func (s *Store) GetStatsPayloadBreakdown(ctx context.Context, iatas []string, si
 	return items, nil
 }
 
-func (s *Store) GetStatsTopNodes(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopNode, error) {
-	from := rollupSince(since, 7*24*time.Hour)
-	var rows []sqlc.GetTopNodesRow
-	if useStatsProbe(iatas, from.Time) {
-		probeRows, err := s.q.GetTopNodesProbe(ctx, sqlc.GetTopNodesProbeParams{Since: from, Iatas: iatas, RowLimit: limit})
+// topNodesRows picks the top-nodes statement: GetTopNodesAll for every IATA, the probe for 1 to 32 distinct IATAs on
+// an hour boundary, otherwise GetTopNodes. All three return the same rows.
+func topNodesRows(ctx context.Context, q sqlc.Querier, iatas []string, from pgtype.Timestamptz, limit int32) ([]sqlc.GetTopNodesRow, error) {
+	switch {
+	case len(iatas) == 0:
+		rows, err := q.GetTopNodesAll(ctx, sqlc.GetTopNodesAllParams{Since: from, RowLimit: limit})
 		if err != nil {
 			return nil, err
 		}
-		rows = make([]sqlc.GetTopNodesRow, len(probeRows))
-		for i, r := range probeRows {
-			rows[i] = sqlc.GetTopNodesRow(r)
+		out := make([]sqlc.GetTopNodesRow, len(rows))
+		for i, r := range rows {
+			out[i] = sqlc.GetTopNodesRow(r)
 		}
-	} else {
-		var err error
-		if rows, err = s.q.GetTopNodes(ctx, sqlc.GetTopNodesParams{Since: from, Iatas: iatas, RowLimit: limit}); err != nil {
+		return out, nil
+	case useStatsProbe(iatas, from.Time):
+		rows, err := q.GetTopNodesProbe(ctx, sqlc.GetTopNodesProbeParams{Since: from, Iatas: iatas, RowLimit: limit})
+		if err != nil {
 			return nil, err
 		}
+		out := make([]sqlc.GetTopNodesRow, len(rows))
+		for i, r := range rows {
+			out[i] = sqlc.GetTopNodesRow(r)
+		}
+		return out, nil
+	}
+	return q.GetTopNodes(ctx, sqlc.GetTopNodesParams{Since: from, Iatas: iatas, RowLimit: limit})
+}
+
+func (s *Store) GetStatsTopNodes(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopNode, error) {
+	rows, err := topNodesRows(ctx, s.q, iatas, rollupSince(since, 7*24*time.Hour), limit)
+	if err != nil {
+		return nil, err
 	}
 	items := make([]api.TopNode, 0, len(rows))
 	for _, v := range rows {

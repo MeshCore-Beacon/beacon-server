@@ -717,3 +717,57 @@ func TestPlanRouterRefusesVerificationOnly(t *testing.T) {
 		}
 	}
 }
+
+// A planpolicy.ParallelWorkers statement runs on its API pool inside its own transaction that raises the worker
+// setting, and the transaction ends before the connection goes back; every other statement, and the rollback
+// layout's api_legacy (the server's own settings), runs bare.
+func TestPlanRouterParallelWorkers(t *testing.T) {
+	const begin = "BEGIN READ ONLY; SET LOCAL max_parallel_workers_per_gather = 2"
+	for _, layout := range []planpolicy.Layout{planpolicy.CustomAll, planpolicy.Split, planpolicy.Single} {
+		for _, stmt := range []string{"GetTopNodesAll", "GetTopNodesProbe"} {
+			for _, method := range routerMethods {
+				t.Run(fmt.Sprintf("%s/%s/%s", layout, stmt, method), func(t *testing.T) {
+					f := newRouterFixture(layout, nil) // the real policy
+					sql := "-- name: " + stmt + " :many\nSELECT $1"
+					if err := runVia(context.Background(), f.r, method, sql, 7); err != nil {
+						t.Fatal(err)
+					}
+					pool := PoolAPICustom
+					if layout == planpolicy.Single {
+						pool = PoolAPILegacy
+					}
+					calls, acquires, releases := f.pool(pool).snapshot()
+					var got []string
+					for _, c := range calls {
+						got = append(got, c.sql)
+					}
+					want := []string{sql}
+					if stmt == "GetTopNodesAll" && layout != planpolicy.Single {
+						want = []string{begin, sql, "ROLLBACK"}
+					}
+					if !reflect.DeepEqual(got, want) {
+						t.Errorf("%s ran %q, want %q", pool, got, want)
+					}
+					if acquires != 1 || releases != 1 {
+						t.Errorf("acquires %d releases %d, want 1 and 1", acquires, releases)
+					}
+				})
+			}
+		}
+	}
+
+	// BEGIN fails: the statement does not run, its error comes back, and the ticket and connection are given back once.
+	f := newRouterFixture(planpolicy.CustomAll, nil)
+	f.custom.execErr = errors.New("begin failed")
+	sql := "-- name: GetTopNodesAll :many\nSELECT $1"
+	if err := runVia(context.Background(), f.r, "Query", sql, 7); err == nil || err.Error() != "begin failed" {
+		t.Fatalf("err = %v, want begin failed", err)
+	}
+	calls, acquires, releases := f.custom.snapshot()
+	if len(calls) != 2 || calls[0].sql != begin || calls[1].sql != "ROLLBACK" || acquires != 1 || releases != 1 {
+		t.Errorf("calls %+v acquires %d releases %d, want BEGIN, ROLLBACK, 1, 1", calls, acquires, releases)
+	}
+	if len(f.gate.tickets) != 1 || f.gate.tickets[0].finishes != 1 {
+		t.Errorf("tickets %d, want one finished once", len(f.gate.tickets))
+	}
+}

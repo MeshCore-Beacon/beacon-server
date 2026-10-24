@@ -141,13 +141,10 @@ VALUES ($3, 'P00', decode(repeat('10', 32), 'hex'), 500, $3::timestamptz + inter
 		if err != nil {
 			t.Fatal(err)
 		}
-		probe, err := q.GetTopNodesProbe(ctx, sqlc.GetTopNodesProbeParams{Since: tstz(since), Iatas: iatas, RowLimit: limit})
+		// The store's own pick: GetTopNodesAll for every IATA, else the probe.
+		got, err := topNodesRows(ctx, q, iatas, tstz(since), limit)
 		if err != nil {
 			t.Fatalf("top nodes probe %s limit %d: %v", name, limit, err)
-		}
-		got := make([]sqlc.GetTopNodesRow, len(probe))
-		for i, r := range probe {
-			got[i] = sqlc.GetTopNodesRow(r)
 		}
 		if !sameRows(got, want) {
 			t.Errorf("top nodes %s limit %d:\nprobe %+v\ntoday %+v", name, limit, got, want)
