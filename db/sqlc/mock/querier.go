@@ -1420,6 +1420,21 @@ func (mr *MockQuerierMockRecorder) GetTopNodes(ctx, arg any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTopNodes", reflect.TypeOf((*MockQuerier)(nil).GetTopNodes), ctx, arg)
 }
 
+// GetTopNodesAll mocks base method.
+func (m *MockQuerier) GetTopNodesAll(ctx context.Context, arg db.GetTopNodesAllParams) ([]db.GetTopNodesAllRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetTopNodesAll", ctx, arg)
+	ret0, _ := ret[0].([]db.GetTopNodesAllRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetTopNodesAll indicates an expected call of GetTopNodesAll.
+func (mr *MockQuerierMockRecorder) GetTopNodesAll(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTopNodesAll", reflect.TypeOf((*MockQuerier)(nil).GetTopNodesAll), ctx, arg)
+}
+
 // GetTopNodesProbe mocks base method.
 func (m *MockQuerier) GetTopNodesProbe(ctx context.Context, arg db.GetTopNodesProbeParams) ([]db.GetTopNodesProbeRow, error) {
 	m.ctrl.T.Helper()

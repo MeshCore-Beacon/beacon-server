@@ -215,3 +215,63 @@ func TestPlanRouterClassCUnnamedPostgres(t *testing.T) {
 		})
 	}
 }
+
+// The ParallelWorkers statement sees its raised setting, and the one connection it ran on goes back to the pool idle,
+// outside any transaction, at the pool's 0; a failing statement leaves it the same.
+func TestPlanRouterParallelWorkersPostgres(t *testing.T) {
+	dsn := schemaDSN(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	for _, layout := range []planpolicy.Layout{planpolicy.CustomAll, planpolicy.Split} {
+		t.Run(string(layout), func(t *testing.T) {
+			p, err := OpenPools(ctx, dsn, layout, func(_ string, cfg *pgxpool.Config) { cfg.MaxConns = 1 })
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer p.Close()
+			r := NewPlanRouter(p, layout, nil)
+			var pid int32 // the pool's one connection: a statement that left it in a transaction would get it destroyed
+			workers := func(name string) string {
+				t.Helper()
+				var w string
+				var p int32
+				if err := r.QueryRow(ctx, "-- name: "+name+" :one\nSELECT current_setting('max_parallel_workers_per_gather'), pg_backend_pid()").Scan(&w, &p); err != nil {
+					t.Fatal(err)
+				}
+				if pid == 0 {
+					pid = p
+				} else if p != pid {
+					t.Errorf("%s ran on backend %d, want the same connection %d", name, p, pid)
+				}
+				return w
+			}
+			clean := func(when string) {
+				t.Helper()
+				c, err := p.APICustom.Acquire(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer c.Release()
+				var w string
+				var p int32
+				if err := c.QueryRow(ctx, "SELECT current_setting('max_parallel_workers_per_gather'), pg_backend_pid()").Scan(&w, &p); err != nil {
+					t.Fatal(err)
+				}
+				if st := c.Conn().PgConn().TxStatus(); st != 'I' || w != "0" || p != pid {
+					t.Errorf("%s: backend %d tx status %q, workers %s; want backend %d, idle and 0", when, p, st, w, pid)
+				}
+			}
+			if w := workers("GetTopNodesAll"); w != "2" {
+				t.Errorf("GetTopNodesAll ran with %s workers, want 2", w)
+			}
+			clean("after GetTopNodesAll")
+			if w := workers("GetTopNodesProbe"); w != "0" {
+				t.Errorf("GetTopNodesProbe ran with %s workers, want 0", w)
+			}
+			if _, err := r.Exec(ctx, "-- name: GetTopNodesAll :many\nSELECT 1/0"); err == nil {
+				t.Fatal("division by zero succeeded")
+			}
+			clean("after a failed GetTopNodesAll")
+		})
+	}
+}

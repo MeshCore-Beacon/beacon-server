@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MeshCore-Beacon/beacon-server/db/planpolicy"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -534,7 +535,12 @@ func (c *Corpus) spec(o RunOptions, e *Entry, mode string, res map[string]*strin
 	}
 	switch st.Plan {
 	case "cached", "custom", "maint":
-		sp.setup = append(sp.setup, line("SET LOCAL max_parallel_workers_per_gather = 0"))
+		// The API pools run with no parallel workers, except the statements the plan router raises it for.
+		workers := 0
+		if st.Plan != "maint" {
+			workers = planpolicy.ParallelWorkers[st.SQLC]
+		}
+		sp.setup = append(sp.setup, line(fmt.Sprintf("SET LOCAL max_parallel_workers_per_gather = %d", workers)))
 	}
 	if ts := c.Tiers[o.Tier].Settings; len(ts) > 0 {
 		var sets []string

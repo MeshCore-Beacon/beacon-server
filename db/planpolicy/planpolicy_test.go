@@ -30,6 +30,16 @@ func TestPlanPolicyNamesExist(t *testing.T) {
 			t.Errorf("%s is class %d, want C or G", name, c)
 		}
 	}
+	// Only the all-region top-nodes statement may use parallel workers; it is class C, so the router runs it on
+	// api_custom (api_legacy in the rollback layout).
+	if want := map[string]int{"GetTopNodesAll": 2}; !reflect.DeepEqual(planpolicy.ParallelWorkers, want) {
+		t.Errorf("ParallelWorkers = %v, want %v", planpolicy.ParallelWorkers, want)
+	}
+	for name := range planpolicy.ParallelWorkers {
+		if _, ok := q.MethodByName(name); !ok || planpolicy.ClassOf(name) != planpolicy.ClassC {
+			t.Errorf("%s: a sqlc statement %v, class %d; want a class C statement", name, ok, planpolicy.ClassOf(name))
+		}
+	}
 	if planpolicy.ClassOf("GetTopNodesProbe") != planpolicy.ClassC {
 		t.Error("GetTopNodesProbe must be class C")
 	}
