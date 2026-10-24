@@ -22,8 +22,8 @@ import (
 
 const (
 	packetSitesStateKey = "packet_sites"
-	// packetSitesSlice is the observation ids one fill covers in the reconcile and the audit, and the backfill's
-	// default slice (readmodels.fill.packet_sites_slice).
+	// packetSitesSlice is the observation ids one fill covers in the reconcile and the audit, and the observations
+	// in the backfill's default slice (readmodels.fill.packet_sites_slice).
 	packetSitesSlice int64 = 500_000
 	// packetSitesFillAttempts bounds the retries of a fill that lost a packet to a concurrent cascade (23503).
 	packetSitesFillAttempts = 3
@@ -56,7 +56,8 @@ type PacketSitesSession struct {
 	duty     float64
 	slice    int64
 	progress *FillProgress
-	sliced   bool // this session's Backfill has filled a slice
+	sliced   bool         // this session's Backfill has filled a slice
+	ids      *idHistogram // the statistics progress counts in, kept for the whole fill so its units never change
 
 	// fillStmt runs one fill; tests replace it. fills lists the (after, through] ranges filled, and retries counts
 	// 23503 retries, for tests.
@@ -91,7 +92,8 @@ func (s *Store) BeginPacketSites(ctx context.Context) (*PacketSitesSession, bool
 	}
 	pace := s.FillPacing()
 	p := &PacketSitesSession{store: s, conn: conn, q: sqlc.New(conn),
-		pause: pace.MinPause, duty: pace.Duty, slice: pace.PacketSitesSlice, progress: &s.packetSitesProgress}
+		pause: pace.MinPause, duty: pace.Duty, slice: pace.PacketSitesSlice, progress: &s.packetSitesProgress,
+		ids: &s.packetSitesIDs}
 	p.fillStmt = func(ctx context.Context, after, through int64) (int64, error) {
 		return p.q.FillPacketSitesSlice(ctx, sqlc.FillPacketSitesSliceParams{AfterID: after, ThroughID: through})
 	}
@@ -168,10 +170,12 @@ func (p *PacketSitesSession) fillWith(ctx context.Context, after, through int64,
 	return 0, err
 }
 
-// Backfill fills packet_sites from WriterFromID down, one slice of observation ids at a time (the session's slice,
+// Backfill fills packet_sites from WriterFromID down, one slice of observations at a time (the session's slice,
 // packetSitesSlice by default), newest first, until it passes the oldest observation (then Complete) or budget is
-// spent. Progress is saved after every slice, and a failed slice is retried from the same place on the next call.
-// After each slice it waits as FillPacing.Wait does, so it is busy at most duty of the time.
+// spent. A slice is the next slice observations by id, so a long, sparse id range costs what its rows cost. Progress
+// is saved after every slice, and a failed slice is retried from the same place on the next call. After each slice
+// it waits as FillPacing.Wait does, so it is busy at most duty of the time. Its progress log and ETA count
+// estimated observations, not ids.
 func (p *PacketSitesSession) Backfill(ctx context.Context, budget time.Duration) (PacketSitesState, error) {
 	deadline := time.Now().Add(budget)
 	slice := p.slice
@@ -198,10 +202,17 @@ func (p *PacketSitesSession) Backfill(ctx context.Context, budget time.Duration)
 			}
 			break
 		}
-		if p.progress != nil {
-			p.progress.Start(p.state.WriterFromID - p.state.BackfilledDownToID)
+		if p.progress != nil && !p.progress.Started() {
+			p.loadIDs(ctx)
+			p.progress.Start(p.ids.rowsOrIDs(p.state.BackfilledDownToID, p.state.WriterFromID))
 		}
-		from := max(p.state.BackfilledDownToID-slice, lo-1)
+		// A slice holds slice observations, however far apart their ids are: retention leaves a few old observations
+		// spread over a long id range, which would otherwise take a paced slice per slice ids.
+		from, err := p.q.ObservationIDBelow(ctx, sqlc.ObservationIDBelowParams{ThroughID: p.state.BackfilledDownToID, N: slice})
+		if err != nil {
+			return p.state, err
+		}
+		from = max(from, lo-1)
 		if _, err := p.fill(ctx, from, p.state.BackfilledDownToID); err != nil {
 			return p.state, fmt.Errorf("packet_sites backfill (%d, %d]: %w", from, p.state.BackfilledDownToID, err)
 		}
@@ -215,7 +226,10 @@ func (p *PacketSitesSession) Backfill(ctx context.Context, budget time.Duration)
 			p.sliced = true
 		}
 		if p.progress != nil && p.progress.Due() {
-			p.progress.Log("packet_sites backfill progress", p.state.WriterFromID-from, p.state.WriterFromID-from, from-(lo-1),
+			done, left := p.ids.rowsOrIDs(from, p.state.WriterFromID), p.ids.rowsOrIDs(lo-1, from)
+			p.progress.LogLeft("packet_sites backfill progress", done, left,
+				"ids_done", p.state.WriterFromID-from, "ids_remaining", from-(lo-1),
+				"observations_done", done, "observations_remaining", left,
 				"backfilled_down_to_id", from, "writer_from_id", p.state.WriterFromID)
 		}
 		pace := FillPacing{Duty: p.duty, MinPause: p.pause}
@@ -224,6 +238,17 @@ func (p *PacketSitesSession) Backfill(ctx context.Context, budget time.Duration)
 		}
 	}
 	return p.state, nil
+}
+
+// loadIDs reads the observation id statistics the progress log counts in, when its clock starts; without them
+// (a failed read, or no ANALYZE yet) progress counts ids.
+func (p *PacketSitesSession) loadIDs(ctx context.Context) {
+	h, err := loadObservationIDHistogram(ctx, p.conn)
+	if err != nil {
+		slog.Warn("packet_sites backfill: cannot read observation statistics; progress counts ids", "component", "readmodel", "error", err)
+		h = idHistogram{}
+	}
+	*p.ids = h
 }
 
 // sleepCtx waits d or until ctx ends; it reports whether ctx is still live.

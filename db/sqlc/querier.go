@@ -438,6 +438,9 @@ type Querier interface {
 	MinObservationID(ctx context.Context) (int64, error)
 	// The first message id above after_id, or 0 when there is none.
 	NextChannelMessageID(ctx context.Context, afterID int64) (int64, error)
+	// The id that bounds the newest n observations at or below through_id from below: (id, through_id] holds exactly n
+	// of them. 0 when fewer than n + 1 remain.
+	ObservationIDBelow(ctx context.Context, arg ObservationIDBelowParams) (int64, error)
 	OldestMissingRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
 	PacketSitesTotalBytes(ctx context.Context) (int64, error)
 	PruneImportedRegions(ctx context.Context, keep []string) ([]string, error)

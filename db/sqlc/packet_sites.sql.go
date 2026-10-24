@@ -1142,6 +1142,25 @@ func (q *Queries) MinObservationID(ctx context.Context) (int64, error) {
 	return id, err
 }
 
+const observationIDBelow = `-- name: ObservationIDBelow :one
+SELECT COALESCE((SELECT po.id FROM packet_observations po WHERE po.id <= $1::bigint
+                 ORDER BY po.id DESC OFFSET $2::bigint LIMIT 1), 0)::bigint AS id
+`
+
+type ObservationIDBelowParams struct {
+	ThroughID int64 `json:"through_id"`
+	N         int64 `json:"n"`
+}
+
+// The id that bounds the newest n observations at or below through_id from below: (id, through_id] holds exactly n
+// of them. 0 when fewer than n + 1 remain.
+func (q *Queries) ObservationIDBelow(ctx context.Context, arg ObservationIDBelowParams) (int64, error) {
+	row := q.db.QueryRow(ctx, observationIDBelow, arg.ThroughID, arg.N)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const packetSitesTotalBytes = `-- name: PacketSitesTotalBytes :one
 SELECT pg_total_relation_size('packet_sites'::regclass)::bigint AS bytes
 `
