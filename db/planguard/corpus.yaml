@@ -101,6 +101,7 @@ statements:
   DeleteGraceRoutesSliceCand: {file: sql/derived/DeleteGraceRoutesSliceCand.sql, derived_from: DeleteGraceRoutesSlice, plan: maint}
   DeleteOldPacketsVictims: {file: sql/derived/DeleteOldPacketsVictims.sql, derived_from: DeleteOldPackets, plan: maint}
   # Stats readers: per (hour, IATA) rollup probes for at most 32 distinct IATAs, today's statements above that.
+  GetTopNodesAll: {sqlc: GetTopNodesAll, group: stats_adverts, plan: custom}
   GetTopNodesProbe: {sqlc: GetTopNodesProbe, group: stats_adverts, plan: custom}
   GetStatsTopAdvertisersProbe: {sqlc: GetStatsTopAdvertisersProbe, group: stats_adverts, plan: custom}
   GetPathStatsProbe: {sqlc: GetPathStatsProbe, group: stats_adverts, plan: custom}
@@ -1599,6 +1600,20 @@ entries:
       driver: [{relation: packet_observations, alias: po, index: packet_observations_pkey, index_cond: ["id >"]}]
 
   # ---- stats, adverts, traces and telemetry (legacy readers and pending rewrites) ----
+  - id: s7.tn.all_1d
+    stmt: GetTopNodesAll
+    shape: "tn all IATAs 1d: one pass over the window, 2 parallel workers"
+    params: [{raw: "'2026-10-17 17:00+00'::timestamptz"}, {raw: "10"}]
+    expect:
+      budget: {buffers: 9963, planning_ms: 10}
+    note: "measured: 6642 B (custom); budget: 1.5x measured"
+  - id: s7.tn.all_7d
+    stmt: GetTopNodesAll
+    shape: "tn all IATAs 7d: one pass over the window, 2 parallel workers"
+    params: [{raw: "'2026-10-11 17:00+00'::timestamptz"}, {raw: "10"}]
+    expect:
+      budget: {buffers: 43416, planning_ms: 10}
+    note: "measured: 28944 B (custom); budget: 1.5x measured"
   - id: s7.tn.LIS_1d
     stmt: GetTopNodesProbe
     shape: "tn probe LIS_1d"

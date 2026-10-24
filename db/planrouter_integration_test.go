@@ -215,3 +215,55 @@ func TestPlanRouterClassCUnnamedPostgres(t *testing.T) {
 		})
 	}
 }
+
+// The ParallelWorkers statement sees its raised setting, and the one connection it ran on goes back to the pool idle,
+// outside any transaction, at the pool's 0; a failing statement leaves it the same.
+func TestPlanRouterParallelWorkersPostgres(t *testing.T) {
+	dsn := schemaDSN(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	for _, layout := range []planpolicy.Layout{planpolicy.CustomAll, planpolicy.Split} {
+		t.Run(string(layout), func(t *testing.T) {
+			p, err := OpenPools(ctx, dsn, layout, func(_ string, cfg *pgxpool.Config) { cfg.MaxConns = 1 })
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer p.Close()
+			r := NewPlanRouter(p, layout, nil)
+			workers := func(name string) string {
+				t.Helper()
+				var w string
+				if err := r.QueryRow(ctx, "-- name: "+name+" :one\nSELECT current_setting('max_parallel_workers_per_gather')").Scan(&w); err != nil {
+					t.Fatal(err)
+				}
+				return w
+			}
+			clean := func(when string) {
+				t.Helper()
+				c, err := p.APICustom.Acquire(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer c.Release()
+				var w string
+				if err := c.QueryRow(ctx, "SHOW max_parallel_workers_per_gather").Scan(&w); err != nil {
+					t.Fatal(err)
+				}
+				if st := c.Conn().PgConn().TxStatus(); st != 'I' || w != "0" {
+					t.Errorf("%s: connection tx status %q, workers %s; want idle and 0", when, st, w)
+				}
+			}
+			if w := workers("GetTopNodesAll"); w != "2" {
+				t.Errorf("GetTopNodesAll ran with %s workers, want 2", w)
+			}
+			clean("after GetTopNodesAll")
+			if w := workers("GetTopNodesProbe"); w != "0" {
+				t.Errorf("GetTopNodesProbe ran with %s workers, want 0", w)
+			}
+			if _, err := r.Exec(ctx, "-- name: GetTopNodesAll :many\nSELECT 1/0"); err == nil {
+				t.Fatal("division by zero succeeded")
+			}
+			clean("after a failed GetTopNodesAll")
+		})
+	}
+}

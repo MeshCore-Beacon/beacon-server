@@ -1821,22 +1821,37 @@ FROM ranked r
 LEFT JOIN nodes n ON n.public_key = r.origin_pubkey
 ORDER BY r.observation_count DESC, r.origin_pubkey;
 
+-- name: GetTopNodesAll :many
+-- GetTopNodes for every IATA: one pass over the hours since @since. The plan router lets it use parallel
+-- workers (planpolicy.ParallelWorkers).
+WITH ranked AS (
+  SELECT origin_pubkey, SUM(observations)::bigint AS observation_count, MAX(last_heard) AS last_heard,
+         MAX(iata) AS iata, MAX(name) AS name, MAX(node_type) AS node_type
+  FROM analytics_hourly_advert_hearings
+  WHERE hour >= @since::timestamptz
+  GROUP BY origin_pubkey
+  ORDER BY observation_count DESC, origin_pubkey
+  LIMIT @row_limit
+)
+SELECT n.id AS node_id, encode(r.origin_pubkey, 'hex') AS public_key,
+       COALESCE(n.name, r.name, '')::text AS name, COALESCE(n.node_type, r.node_type, 0)::smallint AS node_type,
+       r.iata::bpchar AS iata, r.observation_count, r.last_heard::timestamptz AS last_heard
+FROM ranked r
+LEFT JOIN nodes n ON n.public_key = r.origin_pubkey
+ORDER BY r.observation_count DESC, r.origin_pubkey;
+
 -- name: GetTopNodesProbe :many
--- GetTopNodes for at most 32 distinct IATAs: one rollup probe per (hour, IATA). @since is a UTC hour.
+-- GetTopNodes for 1 to 32 distinct IATAs: one rollup probe per (hour, IATA). @since is a UTC hour. An empty
+-- @iatas matches nothing (every IATA is GetTopNodesAll).
 -- The hours walked stay inside the table's own [min(hour), max(hour)]; an empty table walks none
 -- (a NULL start makes generate_series return no rows).
 WITH src AS (
-  SELECT origin_pubkey, observations, last_heard, iata, name, node_type
-  FROM analytics_hourly_advert_hearings
-  WHERE hour >= @since::timestamptz AND COALESCE(cardinality(@iatas::bpchar[]), 0) = 0
-  UNION ALL
   SELECT a.origin_pubkey, a.observations, a.last_heard, a.iata, a.name, a.node_type
   FROM generate_series((SELECT CASE WHEN min(hour) IS NOT NULL THEN GREATEST(@since::timestamptz, min(hour)) END FROM analytics_hourly_advert_hearings),
                        (SELECT LEAST(date_trunc('hour', now(), 'UTC'), max(hour)) FROM analytics_hourly_advert_hearings), interval '1 hour') g(h)
   CROSS JOIN (SELECT DISTINCT unnest(@iatas::bpchar[]) AS iata) i
   CROSS JOIN LATERAL (SELECT x.origin_pubkey, x.observations, x.last_heard, x.iata, x.name, x.node_type
                       FROM analytics_hourly_advert_hearings x WHERE x.hour = g.h AND x.iata = i.iata OFFSET 0) a
-  WHERE cardinality(@iatas::bpchar[]) > 0
 ), ranked AS (
   SELECT origin_pubkey, SUM(observations)::bigint AS observation_count, MAX(last_heard) AS last_heard,
          MAX(iata) AS iata, MAX(name) AS name, MAX(node_type) AS node_type

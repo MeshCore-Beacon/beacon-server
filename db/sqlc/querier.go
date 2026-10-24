@@ -223,7 +223,11 @@ type Querier interface {
 	// Nodes by ADVERT hearings since the given hour. Live names win over the rolled snapshot;
 	// node_id is NULL once the node row is gone. iata is a representative one.
 	GetTopNodes(ctx context.Context, arg GetTopNodesParams) ([]GetTopNodesRow, error)
-	// GetTopNodes for at most 32 distinct IATAs: one rollup probe per (hour, IATA). @since is a UTC hour.
+	// GetTopNodes for every IATA: one pass over the hours since @since. The plan router lets it use parallel
+	// workers (planpolicy.ParallelWorkers).
+	GetTopNodesAll(ctx context.Context, arg GetTopNodesAllParams) ([]GetTopNodesAllRow, error)
+	// GetTopNodes for 1 to 32 distinct IATAs: one rollup probe per (hour, IATA). @since is a UTC hour. An empty
+	// @iatas matches nothing (every IATA is GetTopNodesAll).
 	// The hours walked stay inside the table's own [min(hour), max(hour)]; an empty table walks none
 	// (a NULL start makes generate_series return no rows).
 	GetTopNodesProbe(ctx context.Context, arg GetTopNodesProbeParams) ([]GetTopNodesProbeRow, error)
