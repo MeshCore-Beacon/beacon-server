@@ -5,7 +5,9 @@ package background
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"maps"
 	"os"
 	"reflect"
@@ -467,4 +469,50 @@ WHERE po.payload_type IS DISTINCT FROM p.payload_type`); n != 1 {
 			t.Fatalf("%d rows differ from their packet, want only the fixture's mismatch", n)
 		}
 	})
+}
+
+// The progress line counts observations from the planner's statistics: 200 untyped observations split by 10
+// million unused ids report about 150 left after the first 50, not 10 million ids.
+func TestPayloadTypeBackfillProgressCountsRowsPostgres(t *testing.T) {
+	ctx, pool := migratedPool(t)
+	if _, err := pool.Exec(ctx, `
+INSERT INTO iata_codes(iata) VALUES ('YOW');
+INSERT INTO observers(id,public_key) VALUES ('00000000-0000-0000-0000-0000000000a1','\xa1');
+INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,first_heard_at,last_heard_at)
+SELECT int4send(i),4,0,1,'\x00','\x00',now(),now() FROM generate_series(1,200) i;
+INSERT INTO packet_observations(packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count)
+SELECT int4send(i),'00000000-0000-0000-0000-0000000000a1','YOW',now(),0,1,0 FROM generate_series(1,100) i ORDER BY i;
+SELECT setval('packet_observations_id_seq', (SELECT max(id) FROM packet_observations) + 10000000);
+INSERT INTO packet_observations(packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count)
+SELECT int4send(i),'00000000-0000-0000-0000-0000000000a1','YOW',now(),0,1,0 FROM generate_series(101,200) i ORDER BY i;
+ANALYZE packet_observations;`); err != nil {
+		t.Fatal(err)
+	}
+	var logs strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	task := payloadTypeBackfillTask(db.New(pool, pool, 0, 0, db.WithFillPacing(db.FillPacing{Duty: 1})), time.Minute, 50, 1000, 1)
+	if err := task.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var line struct {
+		Msg                   string `json:"msg"`
+		IDsRemaining          int64  `json:"ids_remaining"`
+		ObservationsDone      int64  `json:"observations_done"`
+		ObservationsRemaining int64  `json:"observations_remaining"`
+	}
+	for _, l := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+		if strings.Contains(l, "payload type backfill progress") {
+			if err := json.Unmarshal([]byte(l), &line); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if line.Msg == "" || line.IDsRemaining < 10_000_000 {
+		t.Fatalf("progress line %+v in %s", line, logs.String())
+	}
+	if line.ObservationsDone < 40 || line.ObservationsDone > 60 || line.ObservationsRemaining < 135 || line.ObservationsRemaining > 165 {
+		t.Fatalf("observations done %d, remaining %d; want about 50 and 150", line.ObservationsDone, line.ObservationsRemaining)
+	}
 }

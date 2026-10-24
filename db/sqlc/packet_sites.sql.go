@@ -1142,6 +1142,24 @@ func (q *Queries) MinObservationID(ctx context.Context) (int64, error) {
 	return id, err
 }
 
+const observationIDAbove = `-- name: ObservationIDAbove :one
+SELECT COALESCE((SELECT po.id FROM packet_observations po WHERE po.id > $1::bigint
+                 ORDER BY po.id OFFSET $2::bigint LIMIT 1), 0)::bigint AS id
+`
+
+type ObservationIDAboveParams struct {
+	AfterID int64 `json:"after_id"`
+	Skip    int64 `json:"skip"`
+}
+
+// The id skip + 1 observations above after_id: (after_id, id] holds exactly skip + 1 of them. 0 when fewer remain.
+func (q *Queries) ObservationIDAbove(ctx context.Context, arg ObservationIDAboveParams) (int64, error) {
+	row := q.db.QueryRow(ctx, observationIDAbove, arg.AfterID, arg.Skip)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const observationIDBelow = `-- name: ObservationIDBelow :one
 SELECT COALESCE((SELECT po.id FROM packet_observations po WHERE po.id <= $1::bigint
                  ORDER BY po.id DESC OFFSET $2::bigint LIMIT 1), 0)::bigint AS id

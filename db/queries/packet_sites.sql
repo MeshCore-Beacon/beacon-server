@@ -45,6 +45,11 @@ SELECT COALESCE(min(id), 0)::bigint AS id FROM packet_observations;
 SELECT COALESCE((SELECT po.id FROM packet_observations po WHERE po.id <= @through_id::bigint
                  ORDER BY po.id DESC OFFSET @n::bigint LIMIT 1), 0)::bigint AS id;
 
+-- name: ObservationIDAbove :one
+-- The id skip + 1 observations above after_id: (after_id, id] holds exactly skip + 1 of them. 0 when fewer remain.
+SELECT COALESCE((SELECT po.id FROM packet_observations po WHERE po.id > @after_id::bigint
+                 ORDER BY po.id OFFSET @skip::bigint LIMIT 1), 0)::bigint AS id;
+
 -- name: CheckPacketSitesSlice :one
 -- Exact check of every packet with an observation in (after_id, through_id]: site rows the observations imply
 -- and the table lacks, rows whose hearing time or packet columns differ, and rows no observation backs.
