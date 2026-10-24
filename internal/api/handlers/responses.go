@@ -26,11 +26,6 @@ func respondUnavailable(w http.ResponseWriter, err error) bool {
 		guards.WriteRefusal(w, &guards.Refusal{Guard: "not_ready", Status: http.StatusServiceUnavailable, RetryAfter: 30,
 			Code: "service_unavailable", Message: "This page is not available yet. Retry later."})
 		return true
-	case errors.Is(err, api.ErrSlowPoolBusy):
-		warnSlowPoolBusy()
-		guards.WriteRefusal(w, &guards.Refusal{Guard: "slow_pool", Status: http.StatusServiceUnavailable, RetryAfter: 5,
-			Code: "service_unavailable", Message: "The server is busy with other slow requests. Retry later."})
-		return true
 	case isQueryTimeout(err):
 		respondTimeout(w, "This page took too long to load. Retry later, or ask for a shorter time range.")
 		return true

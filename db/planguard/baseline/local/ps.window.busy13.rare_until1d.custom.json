@@ -1,0 +1,17 @@
+[
+ "Sort",
+ "  Limit [InitPlan]",
+ "    Sort",
+ "      Aggregate partial=Simple {Sorted}",
+ "        Sort",
+ "          Nested Loop",
+ "            Function Scan",
+ "            Append",
+ "              Limit",
+ "                Sort",
+ "                  Index Scan on packet_sites ps using idx_packet_sites_site_type scan=Forward",
+ "              Limit",
+ "                Sort",
+ "                  Index Scan on packet_sites ps_1 using idx_packet_sites_site_type scan=Forward",
+ "  CTE Scan"
+]

@@ -275,12 +275,6 @@ func (s *Store) ListChannelMessages(ctx context.Context, channelID *int32, since
 // channel_message_iatas; without useReadModel they answer api.ErrPagesNotReady. The others never read it.
 func listChannelMessages(ctx context.Context, q sqlc.Querier, useReadModel bool, channelID *int32, since time.Time, limit int32, iatas []string, scope string, cursor int64) (api.Page[api.ChannelMessage], error) {
 	hasSince, hasSites, hasScope := !since.IsZero(), len(iatas) > 0, scope != ""
-	// Sites with a since or a scope across every channel have no index that bounds both: each site's range would
-	// be walked until enough rows pass the filter, so the original all-channel statement serves them (on the slow
-	// pool), trusted or not.
-	if channelID == nil && hasSites && (hasSince || hasScope) {
-		return listChannelMessagesLegacy(ctx, q, nil, since, limit, iatas, scope, cursor)
-	}
 	if (hasSites || (hasScope && !hasSince)) && !useReadModel {
 		return api.Page[api.ChannelMessage]{}, fmt.Errorf("channel messages: %w", api.ErrPagesNotReady)
 	}
@@ -316,6 +310,10 @@ func listChannelMessages(ctx context.Context, q sqlc.Querier, useReadModel bool,
 		rows, err = convertRows(q.ListChannelMessagesPlainScoped(ctx, sqlc.ListChannelMessagesPlainScopedParams{ChannelID: *channelID, ScopeID: *scopeID, CursorID: cursorID, PageLimit: pageLimit}))
 	case channelID != nil:
 		rows, err = convertRows(q.ListChannelMessagesPlain(ctx, sqlc.ListChannelMessagesPlainParams{ChannelID: *channelID, CursorID: cursorID, PageLimit: pageLimit}))
+	case hasSites && hasSince:
+		rows, err = listAllMessagesSitesSince(ctx, q, ts, sites, scopeID, cursorID, pageLimit)
+	case hasSites && hasScope:
+		rows, err = convertRows(q.ListAllChannelMessagesByIATAsScoped(ctx, sqlc.ListAllChannelMessagesByIATAsScopedParams{Iatas: sites, ScopeID: *scopeID, CursorID: cursorID, PageLimit: pageLimit}))
 	case hasSites:
 		rows, err = convertRows(q.ListAllChannelMessagesByIATAs(ctx, sqlc.ListAllChannelMessagesByIATAsParams{Iatas: sites, CursorID: cursorID, PageLimit: pageLimit}))
 	case hasSince:
@@ -344,6 +342,25 @@ func listChannelMessages(ctx context.Context, q sqlc.Querier, useReadModel bool,
 	return api.Page[api.ChannelMessage]{Items: messages, NextCursor: nextCursor, HasMore: hasMore}, nil
 }
 
+// messagesSinceWindowRows is the most messages sent since a page's since that it reads one by one: up to this many,
+// sites with since across every channel read exactly those messages; more, and they walk the newest ids down, which
+// meets enough of them quickly.
+var messagesSinceWindowRows int64 = 5000 // a var only so tests can take the walk
+
+// listAllMessagesSitesSince serves sites with since across every channel: the messages sent since then when there
+// are few, else a walk from the newest id. Sender clocks put sent_at anywhere, so neither the id order nor a site's
+// range bounds since by itself; the count (an index range of at most messagesSinceWindowRows + 1 entries) picks.
+func listAllMessagesSitesSince(ctx context.Context, q sqlc.Querier, since pgtype.Timestamptz, sites []string, scopeID *int32, cursorID int64, pageLimit int32) ([]sqlc.ListChannelMessagesRow, error) {
+	n, err := q.CountChannelMessagesSentSince(ctx, sqlc.CountChannelMessagesSentSinceParams{Since: since, RowLimit: messagesSinceWindowRows + 1})
+	if err != nil {
+		return nil, err
+	}
+	if n <= messagesSinceWindowRows {
+		return convertRows(q.ListAllChannelMessagesByIATAsSince(ctx, sqlc.ListAllChannelMessagesByIATAsSinceParams{Since: since, Iatas: sites, ScopeID: scopeID, CursorID: cursorID, PageLimit: pageLimit}))
+	}
+	return convertRows(q.ListAllChannelMessagesByIATAsSinceWalk(ctx, sqlc.ListAllChannelMessagesByIATAsSinceWalkParams{Since: since, Iatas: sites, ScopeID: scopeID, CursorID: cursorID, PageLimit: pageLimit}))
+}
+
 // dedupeSites drops repeated codes in one pass, keeping first-occurrence order; never nil.
 func dedupeSites(iatas []string) []string {
 	sites := make([]string, 0, len(iatas))
@@ -361,6 +378,7 @@ func dedupeSites(iatas []string) []string {
 type messageRow interface {
 	sqlc.ListChannelMessagesByIATAsRow | sqlc.ListChannelMessagesByIATAsScopedRow | sqlc.ListChannelMessagesPlainRow |
 		sqlc.ListChannelMessagesPlainScopedRow | sqlc.ListChannelMessagesSinceWalkRow | sqlc.ListAllChannelMessagesByIATAsRow |
+		sqlc.ListAllChannelMessagesByIATAsScopedRow | sqlc.ListAllChannelMessagesByIATAsSinceRow | sqlc.ListAllChannelMessagesByIATAsSinceWalkRow |
 		sqlc.ListAllChannelMessagesPlainRow |
 		sqlc.ListAllChannelMessagesPlainScopedRow | sqlc.ListAllChannelMessagesSinceRow
 }
@@ -376,9 +394,9 @@ func convertRows[R messageRow](rows []R, err error) ([]sqlc.ListChannelMessagesR
 	return out, nil
 }
 
-// listChannelMessagesLegacy is the original statement pair: one join over every observation, filtered in place.
-// The all-channel one serves sites with a since or a scope; the per-channel one (ListChannelMessages) is only the
-// first-time verification's oracle and is never routed to an API pool.
+// listChannelMessagesLegacy is the original statement pair (ListAllChannelMessages, ListChannelMessages): one join
+// over every observation, filtered in place. Only the first-time verification runs them, as the read model's
+// oracle; the API router refuses both.
 func listChannelMessagesLegacy(ctx context.Context, q sqlc.Querier, channelID *int32, since time.Time, limit int32, iatas []string, scope string, cursor int64) (api.Page[api.ChannelMessage], error) {
 	ts := pgtype.Timestamptz{Time: since, Valid: !since.IsZero()}
 	var messages []api.ChannelMessage

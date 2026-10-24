@@ -81,11 +81,6 @@ func checkUnavailable(t *testing.T, err error, retryAfter, code string) {
 	}
 }
 
-// A busy slow pool answers 503 with a short Retry-After, in the guards' error shape.
-func TestSlowPoolBusyAnswers503(t *testing.T) {
-	checkUnavailable(t, api.ErrSlowPoolBusy, "5", "service_unavailable")
-}
-
 // Any other reader error stays a 500.
 func TestOtherReaderErrorsStay500(t *testing.T) {
 	for _, c := range unavailablePages {

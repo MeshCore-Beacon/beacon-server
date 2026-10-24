@@ -189,6 +189,75 @@ JOIN packets p ON p.packet_hash = cm.packet_hash
 LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 ORDER BY cm.id DESC;
 
+-- name: ListAllChannelMessagesByIATAsScoped :many
+-- Every channel filtered by sites and a scope: each (site, scope) range's newest message ids, merged.
+WITH hits AS MATERIALIZED (
+  SELECT m.message_id
+  FROM unnest(@iatas::bpchar[]) AS req(iata)
+  CROSS JOIN LATERAL (
+    SELECT i.message_id FROM channel_message_iatas i
+    WHERE i.iata = req.iata AND i.scope_id = @scope_id::int AND i.message_id < @cursor_id::bigint
+    ORDER BY i.message_id DESC
+    LIMIT @page_limit) m
+  GROUP BY m.message_id
+  ORDER BY m.message_id DESC
+  LIMIT @page_limit)
+SELECT cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at,
+       encode(cm.packet_hash, 'hex') AS packet_hash_hex, c.channel_hash, ts.name AS scope_name,
+       p.transport_codes_present, p.observation_count AS observation_count
+FROM hits h
+JOIN channel_messages cm ON cm.id = h.message_id
+JOIN channels c ON c.id = cm.channel_id
+JOIN packets p ON p.packet_hash = cm.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+ORDER BY cm.id DESC;
+
+-- name: CountChannelMessagesSentSince :one
+-- How many messages were sent at or after since, counted to at most row_limit: idx_channel_messages_sent alone.
+SELECT count(*)::bigint AS n
+FROM (SELECT 1 FROM channel_messages cm WHERE cm.sent_at >= @since::timestamptz LIMIT @row_limit::bigint) w;
+
+-- name: ListAllChannelMessagesByIATAsSince :many
+-- Every channel filtered by sites with since, optionally by scope, when few messages were sent since then: those
+-- messages' ids (idx_channel_messages_sent), each kept when it has a row at one of the sites, newest first.
+WITH sent AS MATERIALIZED (
+  SELECT w.id, w.packet_hash FROM channel_messages w
+  WHERE w.sent_at >= @since::timestamptz AND w.id < @cursor_id::bigint
+), hits AS MATERIALIZED (
+  SELECT s.id FROM sent s
+  WHERE EXISTS (SELECT 1 FROM channel_message_iatas i WHERE i.message_id = s.id AND i.iata = ANY(@iatas::bpchar[]))
+    AND (sqlc.narg('scope_id')::int IS NULL
+         OR EXISTS (SELECT 1 FROM packets g WHERE g.packet_hash = s.packet_hash AND g.scope_id = sqlc.narg('scope_id')::int))
+  ORDER BY s.id DESC
+  LIMIT @page_limit
+)
+SELECT cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at,
+       encode(cm.packet_hash, 'hex') AS packet_hash_hex, c.channel_hash, ts.name AS scope_name,
+       p.transport_codes_present, p.observation_count AS observation_count
+FROM hits h
+JOIN channel_messages cm ON cm.id = h.id
+JOIN channels c ON c.id = cm.channel_id
+JOIN packets p ON p.packet_hash = cm.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+ORDER BY cm.id DESC;
+
+-- name: ListAllChannelMessagesByIATAsSinceWalk :many
+-- ListAllChannelMessagesByIATAsSince when many messages were sent since then: the newest ids down (or each site's
+-- newest message ids, whichever the estimates find cheaper), keeping those sent since then.
+SELECT cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at,
+       encode(cm.packet_hash, 'hex') AS packet_hash_hex, c.channel_hash, ts.name AS scope_name,
+       p.transport_codes_present, p.observation_count AS observation_count
+FROM channel_messages cm
+JOIN channels c ON c.id = cm.channel_id
+JOIN packets p ON p.packet_hash = cm.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+WHERE cm.sent_at >= @since::timestamptz
+  AND cm.id < @cursor_id::bigint
+  AND EXISTS (SELECT 1 FROM channel_message_iatas i WHERE i.message_id = cm.id AND i.iata = ANY(@iatas::bpchar[]))
+  AND (sqlc.narg('scope_id')::int IS NULL OR p.scope_id = sqlc.narg('scope_id')::int)
+ORDER BY cm.id DESC
+LIMIT @page_limit;
+
 -- name: ListAllChannelMessagesPlainScoped :many
 -- Every channel filtered by scope alone: the scope's newest message ids from the read model.
 WITH hits AS MATERIALIZED (

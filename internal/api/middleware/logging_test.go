@@ -142,7 +142,7 @@ func TestSingleLineLogValue(t *testing.T) {
 	}
 }
 
-// A 503 that carries Retry-After is an expected, self-healing refusal (read model not ready, slow pool busy, guard
+// A 503 that carries Retry-After is an expected, self-healing refusal (read model not ready, statement timeout, guard
 // admission) and logs at WARN; every other 5xx, a bare 503 included, stays at ERROR.
 func TestRequestLogLevelByStatus(t *testing.T) {
 	for _, tc := range []struct {

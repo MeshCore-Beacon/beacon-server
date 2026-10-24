@@ -1,0 +1,13 @@
+[
+ "Limit",
+ "  Nested Loop (Left)",
+ "    Nested Loop",
+ "      Nested Loop",
+ "        Merge Join (Semi)",
+ "          Index Scan on channel_messages cm using channel_messages_pkey scan=Backward",
+ "          Index Only Scan on channel_message_iatas i using channel_message_iatas_pkey scan=Backward",
+ "        Index Scan on packets p using packets_pkey scan=Forward",
+ "      Index Scan on channels c using channels_pkey scan=Forward",
+ "    Materialize",
+ "      Index Scan on transport_scopes ts using transport_scopes_pkey scan=Forward"
+]

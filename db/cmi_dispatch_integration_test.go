@@ -35,7 +35,8 @@ type cmiMessages struct {
 }
 
 // buildCmiMessages fills f with 120 messages: multi-site packets, repeat hearings at one site, untyped hearings,
-// a #fr share, equal sent_at on every tenth message, and one message whose packet has no observation.
+// a #fr share, equal sent_at on every tenth message, three whose sender clocks put them in 2099 or 1970, and one
+// message whose packet has no observation.
 func buildCmiMessages(f *cmiFixture) cmiMessages {
 	f.t.Helper()
 	f.exec("INSERT INTO iata_codes (iata) VALUES ('YHZ') ON CONFLICT DO NOTHING")
@@ -90,8 +91,13 @@ func buildCmiMessages(f *cmiFixture) cmiMessages {
 			hear(site, 0)
 		}
 		sent := base.Add(-time.Duration(i) * time.Minute)
-		if i%10 == 0 {
+		switch {
+		case i%10 == 0:
 			sent = out.tiedAt
+		case i == 33 || i == 97:
+			sent = time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC) // an old id sent "after" every since
+		case i == 61:
+			sent = time.Date(1970, 1, 1, 0, 0, 3, 0, time.UTC)
 		}
 		m, err := f.store.InsertChannelMessage(f.ctx, ingest.InsertChannelMessageParams{ChannelID: int(channel), PacketHash: hash, SenderName: "s", Content: fmt.Sprint(i), SentAt: sent})
 		if err != nil || m == nil {
@@ -182,6 +188,21 @@ func TestChannelMessagesByIATAsMatchesLegacyPostgres(t *testing.T) {
 			t.Fatalf("channel %s iatas %d %q scope %q since %v cursor %d limit %d:\n got %+v\nwant %+v", chs, len(iatas), iatas[:min(len(iatas), 3)], scope, since, cursor, limit, got, want)
 		}
 	}
+	// Sites with since across every channel, again with every page taking the walk instead of the messages sent since.
+	defer func(n int64) { messagesSinceWindowRows = n }(messagesSinceWindowRows)
+	messagesSinceWindowRows = 0
+	for _, sites := range siteLists[2:] {
+		for _, scope := range scopes {
+			for _, since := range sinces[1:] {
+				for _, cursor := range cursors {
+					for _, limit := range limits {
+						compare(nil, sites, scope, since, cursor, limit)
+					}
+				}
+			}
+		}
+	}
+	messagesSinceWindowRows = 5000
 	for _, ch := range channels {
 		for _, sites := range siteLists {
 			for _, scope := range scopes {
@@ -218,6 +239,8 @@ func TestChannelMessagesByIATAsMatchesLegacyPostgres(t *testing.T) {
 	}{
 		{&ch7, []string{"YUL"}, "", time.Time{}}, {&ch7, []string{"YUL", "YOW"}, "#fr", time.Time{}}, {&ch7, nil, "#fr", time.Time{}},
 		{nil, []string{"YUL"}, "", time.Time{}}, {nil, nil, "#fr", time.Time{}}, {nil, nil, "", fx.tiedAt},
+		{nil, []string{"YUL", "YOW"}, "#fr", time.Time{}}, {nil, []string{"YUL", "YOW", "YVR"}, "", fx.tiedAt},
+		{nil, cmiSites, "#fr", fx.tiedAt}, {nil, []string{"YOW"}, "", time.Date(2098, 1, 1, 0, 0, 0, 0, time.UTC)},
 	}
 	walk := func(page func(cursor int64) (api.Page[api.ChannelMessage], error)) []int64 {
 		t.Helper()
