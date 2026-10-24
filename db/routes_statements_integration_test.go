@@ -148,9 +148,9 @@ ANALYZE known_routes;`)
 	}
 }
 
-// The global hop page picks its branch by the statistics' estimate of the hop group: a group estimated under the bound
-// reads and sorts the group (kh), any other runs today's statement (kk), and so does every group before the table has
-// statistics. Both return today's rows, in order, on every page of a cursor walk, with rows tied on the millisecond.
+// The store picks the global hop page's branch from the statistics' estimate of the hop group: a group estimated under
+// the bound reads and sorts the group (kh), any other runs today's statement (kk), and so does every group before the
+// table has statistics. Both return today's rows, in order, on every page of a cursor walk, with rows tied on the millisecond.
 func TestGlobalHopBranchesMatchTodayPostgres(t *testing.T) {
 	ctx, pool := schemaPool(t)
 	if err := RunMigrations(ctx, pool); err != nil {
@@ -181,8 +181,8 @@ FROM generate_series(1, 3000) i;`); err != nil {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kh, kk := branchRan(notx, 7); kh != 0 || kk != 1 {
-		t.Errorf("unanalyzed hop 7: kh ran %d, kk %d times; want 0 and 1", kh, kk)
+	if kh, kk := branchRan(notx, 7); kh > 0 || kk != 1 {
+		t.Errorf("unanalyzed hop 7: kh ran %d, kk %d times (-1: planned away); want kh not run and kk once", kh, kk)
 	}
 	_ = notx.Rollback(ctx)
 	if _, err := pool.Exec(ctx, "ANALYZE known_routes"); err != nil {
@@ -235,11 +235,11 @@ FROM generate_series(1, 3000) i;`); err != nil {
 	}
 
 	// Which branch ran: hop 3 (estimated over the bound) runs today's statement (kk), hop 7 reads its group (kh).
-	if kh, kk := branchRan(tx, 3); kh != 0 || kk != 1 {
-		t.Errorf("hop 3: kh ran %d, kk %d times; want 0 and 1", kh, kk)
+	if kh, kk := branchRan(tx, 3); kh > 0 || kk != 1 {
+		t.Errorf("hop 3: kh ran %d, kk %d times (-1: planned away); want kh not run and kk once", kh, kk)
 	}
-	if kh, kk := branchRan(tx, 7); kh != 1 || kk != 0 {
-		t.Errorf("hop 7: kh ran %d, kk %d times; want 1 and 0", kh, kk)
+	if kh, kk := branchRan(tx, 7); kh != 1 || kk > 0 {
+		t.Errorf("hop 7: kh ran %d, kk %d times (-1: planned away); want kh once and kk not run", kh, kk)
 	}
 }
 

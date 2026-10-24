@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -73,7 +74,10 @@ func TestListKnownRoutes_Dispatch(t *testing.T) {
 	store := &Store{q: q}
 	cursor := time.UnixMilli(1_760_000_000_000)
 	q.EXPECT().ListKnownRoutesGlobal(gomock.Any(), sqlc.ListKnownRoutesGlobalParams{CursorTs: pgtype.Timestamptz{Time: cursor, Valid: true}, CursorID: 7, PageLimit: 50}).Return(nil, nil)
-	q.EXPECT().ListKnownRoutesGlobalHop(gomock.Any(), sqlc.ListKnownRoutesGlobalHopParams{HopCount: 3, PageLimit: 50}).Return(nil, nil)
+	// 3000 analyzed routes, hop 3 a 10 % group: under the 1000-row floor, so the page reads the group.
+	q.EXPECT().GetKnownRoutesHopStats(gomock.Any()).Return(sqlc.GetKnownRoutesHopStatsRow{Reltuples: 3000, HasStats: true,
+		HopValues: []int32{2, 3}, HopFreqs: []float64{0.9, 0.1}, NDistinct: 2}, nil)
+	q.EXPECT().ListKnownRoutesGlobalHop(gomock.Any(), sqlc.ListKnownRoutesGlobalHopParams{HopCount: 3, ReadGroup: true, PageLimit: 50}).Return(nil, nil)
 	q.EXPECT().ListKnownRoutesByIATA(gomock.Any(), sqlc.ListKnownRoutesByIATAParams{Iata: "SEA", PageLimit: 50}).Return(nil, nil)
 	q.EXPECT().ListKnownRoutesByIATAHop(gomock.Any(), sqlc.ListKnownRoutesByIATAHopParams{Iata: "SEA", HopCount: 3, PageLimit: 50}).Return(nil, nil)
 	q.EXPECT().GetNodesByIDs(gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
@@ -219,5 +223,61 @@ func TestReconfirmCursorDecode(t *testing.T) {
 		if iata != c.wantIATA || !bytes.Equal(key, c.wantKey) {
 			t.Errorf("%s: position = (%q, %x), want (%q, %x)", c.raw, iata, key, c.wantIATA, c.wantKey)
 		}
+	}
+}
+
+func TestHopGroupIsSmall(t *testing.T) {
+	// 10.5M routes, limit 200: the bound is 0.7 * sqrt(200 * 10.5M), about 32K routes.
+	st := sqlc.GetKnownRoutesHopStatsRow{Reltuples: 10_500_000, HasStats: true,
+		HopValues: []int32{6, 21, 22, 25}, HopFreqs: []float64{0.14, 0.0038, 0.002, 0.001}, NullFrac: 0, NDistinct: 40}
+	for _, c := range []struct {
+		name  string
+		st    sqlc.GetKnownRoutesHopStatsRow
+		hop   int32
+		limit int32
+		want  bool
+	}{
+		{"dense hop", st, 6, 200, false},
+		{"over the bound", st, 21, 200, false},
+		{"under the bound", st, 22, 200, true},
+		{"rare hop", st, 25, 200, true},
+		{"limit 50 halves the bound", st, 22, 50, false},
+		// 1 - 0.1458 spread over the 36 values outside the list: about 249K routes each.
+		{"value outside the list", st, 9, 200, false},
+		{"absent from a complete list", sqlc.GetKnownRoutesHopStatsRow{Reltuples: 10_500_000, HasStats: true,
+			HopValues: []int32{6, 7}, HopFreqs: []float64{0.5, 0.5}, NDistinct: 2}, 1, 200, true},
+		{"negative n_distinct scales with the rows", sqlc.GetKnownRoutesHopStatsRow{Reltuples: 10_500_000, HasStats: true,
+			HopValues: []int32{6}, HopFreqs: []float64{0.5}, NDistinct: -0.00001}, 9, 200, false},
+		{"no statistics", sqlc.GetKnownRoutesHopStatsRow{Reltuples: 10_500_000}, 25, 200, false},
+		{"never counted", sqlc.GetKnownRoutesHopStatsRow{Reltuples: -1, HasStats: true}, 25, 200, false},
+	} {
+		if got := hopGroupIsSmall(c.st, c.hop, c.limit); got != c.want {
+			t.Errorf("%s: hop %d limit %d = %v, want %v", c.name, c.hop, c.limit, got, c.want)
+		}
+	}
+}
+
+// The statistics are read once per TTL, and a failed read is retried soon while the last statistics stay in use.
+func TestHopGroupSmallCaches(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	q := mockdb.NewMockQuerier(ctrl)
+	store := &Store{q: q}
+	st := sqlc.GetKnownRoutesHopStatsRow{Reltuples: 3000, HasStats: true, HopValues: []int32{3}, HopFreqs: []float64{0.1}, NDistinct: 1}
+	q.EXPECT().GetKnownRoutesHopStats(gomock.Any()).Return(st, nil).Times(1)
+	for range 3 {
+		if !store.hopGroupSmall(context.Background(), 3, 50) {
+			t.Fatal("hop 3 not small")
+		}
+	}
+	// Expired: the read fails, the old statistics still answer, and the next read waits for hopStatsRetry.
+	store.hopStats.at = time.Now().Add(-hopStatsTTL)
+	q.EXPECT().GetKnownRoutesHopStats(gomock.Any()).Return(sqlc.GetKnownRoutesHopStatsRow{}, errors.New("down")).Times(1)
+	for range 3 {
+		if !store.hopGroupSmall(context.Background(), 3, 50) {
+			t.Fatal("hop 3 not small after a failed refresh")
+		}
+	}
+	if wait := time.Until(store.hopStats.at.Add(hopStatsTTL)); wait > hopStatsRetry || wait < hopStatsRetry-time.Minute {
+		t.Errorf("next read in %s, want about %s", wait, hopStatsRetry)
 	}
 }
