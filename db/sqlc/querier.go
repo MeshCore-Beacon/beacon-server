@@ -319,7 +319,12 @@ type Querier interface {
 	// The = form prices the Sort correctly; the range form under-costs it when a hop index exists.
 	ListKnownRoutesByIATAHop(ctx context.Context, arg ListKnownRoutesByIATAHopParams) ([]ListKnownRoutesByIATAHopRow, error)
 	ListKnownRoutesGlobal(ctx context.Context, arg ListKnownRoutesGlobalParams) ([]ListKnownRoutesGlobalRow, error)
-	// Custom plans only (class C: PlanRouter runs it unnamed): the generic plan walks the whole keyset index for an absent hop.
+	// Custom plans only (class C: PlanRouter runs it unnamed). The planner's own break-even between reading the whole
+	// hop group from the hop index and walking the keyset index sits far below the real one, so a mid-size group could
+	// flip, by ANALYZE sample, to a walk ten times dearer. A group whose estimate (the same statistics the planner uses)
+	// is under 0.7 * sqrt(page_limit * reltuples) routes reads the group and sorts it (kh): at most that many rows. Any
+	// other group runs today's statement (kk), whose plans are right there. Near the bound both cost about the same, so
+	// an estimate that lands either side of it costs little. Exactly one branch returns rows, each in keyset order.
 	ListKnownRoutesGlobalHop(ctx context.Context, arg ListKnownRoutesGlobalHopParams) ([]ListKnownRoutesGlobalHopRow, error)
 	// Returns messages after the given message ID, ordered oldest first.
 	// Used for WS reconnect backfill.
