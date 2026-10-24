@@ -66,7 +66,7 @@ CREATE INDEX idx_packets_first_heard_brin ON t_end.packets USING brin (first_hea
 CREATE STATISTICS t_end.packets_heard_inverted_stat ON ((first_heard_at > last_heard_at)) FROM t_end.packets;
 
 -- nodes, node_iatas and observers: every public index and key except the ones migrations 011-024 drop, node_iatas'
--- (iata) index in place of (iata, last_heard DESC), and observers at fillfactor 50.
+-- (iata) index in place of (iata, last_heard DESC), and nodes and observers at fillfactor 50 (migrations 058 and 024).
 DO $$
 DECLARE
   t record; ix record; c record;
@@ -74,7 +74,7 @@ DECLARE
     'idx_nodes_multibyte_paths', 'idx_nodes_multibyte_traces', 'idx_observers_last_seen', 'idx_observers_pubkey',
     'idx_observers_type', 'idx_node_iatas_iata'];
 BEGIN
-  FOR t IN SELECT * FROM (VALUES ('nodes', 100), ('node_iatas', 100), ('observers', 50)) v(name, ff) LOOP
+  FOR t IN SELECT * FROM (VALUES ('nodes', 50), ('node_iatas', 100), ('observers', 50)) v(name, ff) LOOP
     EXECUTE format('CREATE UNLOGGED TABLE t_end.%I (LIKE public.%I INCLUDING DEFAULTS INCLUDING CONSTRAINTS) '
                    'WITH (fillfactor = %s, autovacuum_enabled = false)', t.name, t.name, t.ff);
     EXECUTE format('INSERT INTO t_end.%I SELECT * FROM public.%I', t.name, t.name);
