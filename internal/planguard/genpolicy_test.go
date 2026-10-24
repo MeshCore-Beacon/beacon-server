@@ -44,7 +44,7 @@ func TestGenPolicyRejectsCachedWithoutAdversarialShapes(t *testing.T) {
 		{"genpolicy_hop.yaml", nil, []string{"ListKnownRoutesGlobalHop", "rare_hop", "absent_hop"}},
 		{"genpolicy_hop_skip.yaml", nil, []string{"ListKnownRoutesGlobalHop", "entry gh.rare skips generic", "entry gh.absent skips generic"}},
 		{"genpolicy_region_no_stale.yaml", nil, []string{"ListKnownRoutesByIATA", "stale_region"}},
-		{"genpolicy_legacy_pending.yaml", map[string]bool{"GetNodeByID": true}, []string{"GetNodeByID", "planpolicy.Slow"}},
+		{"genpolicy_legacy_pending.yaml", map[string]bool{"GetNodeByID": true}, []string{"GetNodeByID", "planpolicy.VerificationOnly"}},
 		{"genpolicy_refuse_mode_known_issue_generic.yaml", nil, []string{"GetNodeByID", "entry node.miss has a known_issue in generic"}},
 		{"genpolicy_refuse_mode_known_issue_auto.yaml", nil, []string{"GetNodeByID", "entry node.miss has a known_issue in auto"}},
 		{"genpolicy_refuse_entry_known_issue.yaml", nil, []string{"GetNodeByID", "entry node.miss has a known_issue"}},
@@ -104,7 +104,7 @@ func TestGenPolicyMatchesCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	src, err := planguard.GenPolicy(c, planpolicy.Slow)
+	src, err := planguard.GenPolicy(c, planpolicy.VerificationOnly)
 	if err != nil {
 		t.Fatal(err)
 	}

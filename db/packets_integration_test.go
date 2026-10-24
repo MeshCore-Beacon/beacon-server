@@ -14,9 +14,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// regionPageToday is a region page from the original region statement, by millisecond cursor: the statement the
-// slow pool answers with when the site read model's bounded reads run out of budget. Fixtures that do not fill
-// packet_sites read region pages through it.
+// regionPageToday is a region page from the original region statement, by millisecond cursor (the statement served
+// before the site read model). Fixtures that do not fill packet_sites read region pages through it.
 func regionPageToday(ctx context.Context, s *Store, pt, rt []int16, sites, scopes []string, since, until time.Time, cursor int64, limit int32) (api.PacketPage, error) {
 	p, err := s.listPacketsByIATAs(ctx, pt, rt, sites, scopes, since, until, cursor, limit)
 	return api.PacketPage{Page: p}, err

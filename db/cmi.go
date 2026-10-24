@@ -14,6 +14,7 @@ import (
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -286,6 +287,7 @@ func (c *CmiSession) Reconcile(ctx context.Context) (int64, error) {
 type CmiVerification struct {
 	Missing, Extra int64 // the exact check over the sampled message ranges
 	PagesCompared  int
+	PagesSkipped   int      // site and scope pages whose original statement ran past cmiVerifyPageTimeout
 	PageDiffs      []string // "channel 7 iatas [YUL] cursor 0: legacy 51 rows, cmi 50 rows, first difference at 12"
 }
 
@@ -347,12 +349,15 @@ func (c *CmiSession) Verify(ctx context.Context) (CmiVerification, error) {
 	if err := comparePages(ctx, q, max(c.state.MsgHi-cmiVerifyMessages, 0), &v); err != nil {
 		return v, err
 	}
+	if err := compareSiteScopePages(ctx, tx, max(c.state.MsgHi-cmiVerifyMessages, 0), &v); err != nil {
+		return v, err
+	}
 	if err := tx.Rollback(ctx); err != nil {
 		return v, err
 	}
 	if !v.OK() {
 		slog.Error("cmi verification failed; region and scope message pages answer 503 until a later pass succeeds", "component", "readmodel",
-			"missing", v.Missing, "extra", v.Extra, "pages", v.PagesCompared, "diffs", len(v.PageDiffs), "first", v.PageDiffs[:min(len(v.PageDiffs), 3)])
+			"missing", v.Missing, "extra", v.Extra, "pages", v.PagesCompared, "skipped", v.PagesSkipped, "diffs", len(v.PageDiffs), "first", v.PageDiffs[:min(len(v.PageDiffs), 3)])
 		return v, nil
 	}
 	if c.state.FirstVerifiedAt == nil {
@@ -361,7 +366,7 @@ func (c *CmiSession) Verify(ctx context.Context) (CmiVerification, error) {
 		if err := c.save(ctx); err != nil {
 			return v, err
 		}
-		slog.Info("cmi first-time verification passed", "component", "readmodel", "pages", v.PagesCompared)
+		slog.Info("cmi first-time verification passed", "component", "readmodel", "pages", v.PagesCompared, "skipped", v.PagesSkipped)
 	}
 	return v, nil
 }
@@ -370,62 +375,121 @@ const (
 	cmiVerifySites  = 5
 	cmiVerifyScopes = 3
 	cmiVerifyLimit  = 50
+	// cmiVerifySiteScopes is how many of the busiest scopes get a first all-channel page for the sampled sites, each
+	// under cmiVerifyPageTimeout: the original statement reads every observation for them.
+	cmiVerifySiteScopes  = 8
+	cmiVerifyPageTimeout = "30s"
 )
+
+type cmiRequest struct {
+	channel *int32
+	iatas   []string
+	scope   string
+}
 
 // comparePages compares the original statements with the read model's on the busiest sites and scopes among messages
 // above after: channel and all-channel pages, from cursor 0 and from page 1's 26th id.
 func comparePages(ctx context.Context, q sqlc.Querier, after int64, v *CmiVerification) error {
-	type request struct {
-		channel *int32
-		iatas   []string
-		scope   string
-	}
-	var requests []request
+	var requests []cmiRequest
 	sites, err := q.ListChannelMessageIATASamples(ctx, sqlc.ListChannelMessageIATASamplesParams{AfterID: after, RowLimit: cmiVerifySites})
 	if err != nil {
 		return err
 	}
 	for _, s := range sites {
-		requests = append(requests, request{channel: &s.ChannelID, iatas: []string{s.Iata}}, request{iatas: []string{s.Iata}})
+		requests = append(requests, cmiRequest{channel: &s.ChannelID, iatas: []string{s.Iata}}, cmiRequest{iatas: []string{s.Iata}})
 	}
 	scopes, err := q.ListChannelMessageScopeSamples(ctx, sqlc.ListChannelMessageScopeSamplesParams{AfterID: after, RowLimit: cmiVerifyScopes})
 	if err != nil {
 		return err
 	}
 	for _, s := range scopes {
-		requests = append(requests, request{channel: &s.ChannelID, scope: s.Name}, request{scope: s.Name})
+		requests = append(requests, cmiRequest{channel: &s.ChannelID, scope: s.Name}, cmiRequest{scope: s.Name})
 	}
 	for _, r := range requests {
 		cursors := []int64{0}
-		for i, cursor := 0, int64(0); i < len(cursors); i++ {
-			cursor = cursors[i]
-			legacy, err := listChannelMessagesLegacy(ctx, q, r.channel, time.Time{}, cmiVerifyLimit, r.iatas, r.scope, cursor)
+		for i := 0; i < len(cursors); i++ {
+			legacy, err := comparePage(ctx, q, r, cursors[i], v)
 			if err != nil {
 				return err
 			}
-			model, err := listChannelMessages(ctx, q, true, r.channel, time.Time{}, cmiVerifyLimit, r.iatas, r.scope, cursor)
-			if err != nil {
-				return err
-			}
-			v.PagesCompared++
-			if !reflect.DeepEqual(legacy, model) {
-				at := 0
-				for at < min(len(legacy.Items), len(model.Items)) && reflect.DeepEqual(legacy.Items[at], model.Items[at]) {
-					at++
-				}
-				where := "all channels"
-				if r.channel != nil {
-					where = fmt.Sprintf("channel %d", *r.channel)
-				}
-				v.PageDiffs = append(v.PageDiffs, fmt.Sprintf("%s iatas %v scope %q cursor %d: legacy %d rows, cmi %d rows, first difference at %d",
-					where, r.iatas, r.scope, cursor, len(legacy.Items), len(model.Items), at))
-			}
-			if cursor == 0 && len(legacy.Items) > cmiVerifyLimit/2 {
+			if cursors[i] == 0 && len(legacy.Items) > cmiVerifyLimit/2 {
 				cursors = append(cursors, legacy.Items[cmiVerifyLimit/2].ID)
 			}
 		}
 	}
 	return nil
+}
+
+// compareSiteScopePages compares the first all-channel page for the sampled sites with each of the busiest scopes.
+// Each page runs in its own savepoint under cmiVerifyPageTimeout, so a slow original statement skips its page instead
+// of aborting the snapshot or holding it for long.
+func compareSiteScopePages(ctx context.Context, tx pgx.Tx, after int64, v *CmiVerification) error {
+	q := sqlc.New(tx)
+	sites, err := q.ListChannelMessageIATASamples(ctx, sqlc.ListChannelMessageIATASamplesParams{AfterID: after, RowLimit: cmiVerifySites})
+	if err != nil || len(sites) == 0 {
+		return err
+	}
+	scopes, err := q.ListChannelMessageScopeSamples(ctx, sqlc.ListChannelMessageScopeSamplesParams{AfterID: after, RowLimit: cmiVerifySiteScopes})
+	if err != nil {
+		return err
+	}
+	iatas := make([]string, len(sites))
+	for i, s := range sites {
+		iatas[i] = s.Iata
+	}
+	seen := map[string]bool{}
+	for _, s := range scopes {
+		if seen[s.Name] {
+			continue
+		}
+		seen[s.Name] = true
+		sp, err := tx.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		if _, err = sp.Exec(ctx, "SET LOCAL statement_timeout = '"+cmiVerifyPageTimeout+"'"); err == nil {
+			_, err = comparePage(ctx, sqlc.New(sp), cmiRequest{iatas: iatas, scope: s.Name}, 0, v)
+		}
+		// The rollback also restores the statement timeout; the page compared nothing to keep.
+		if rbErr := sp.Rollback(ctx); rbErr != nil && err == nil {
+			err = rbErr
+		}
+		if isStatementTimeout(err) {
+			v.PagesSkipped++
+			continue
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// comparePage compares one page of the original statement with the read model's, records a difference in v, and
+// returns the original page.
+func comparePage(ctx context.Context, q sqlc.Querier, r cmiRequest, cursor int64, v *CmiVerification) (api.Page[api.ChannelMessage], error) {
+	legacy, err := listChannelMessagesLegacy(ctx, q, r.channel, time.Time{}, cmiVerifyLimit, r.iatas, r.scope, cursor)
+	if err != nil {
+		return legacy, err
+	}
+	model, err := listChannelMessages(ctx, q, true, r.channel, time.Time{}, cmiVerifyLimit, r.iatas, r.scope, cursor)
+	if err != nil {
+		return legacy, err
+	}
+	v.PagesCompared++
+	if !reflect.DeepEqual(legacy, model) {
+		at := 0
+		for at < min(len(legacy.Items), len(model.Items)) && reflect.DeepEqual(legacy.Items[at], model.Items[at]) {
+			at++
+		}
+		where := "all channels"
+		if r.channel != nil {
+			where = fmt.Sprintf("channel %d", *r.channel)
+		}
+		v.PageDiffs = append(v.PageDiffs, fmt.Sprintf("%s iatas %v scope %q cursor %d: legacy %d rows, cmi %d rows, first difference at %d",
+			where, r.iatas, r.scope, cursor, len(legacy.Items), len(model.Items), at))
+	}
+	return legacy, nil
 }
 
 // CmiReadOnlyCheck is what a read-only server reads to decide whether to trust the table another process maintains.

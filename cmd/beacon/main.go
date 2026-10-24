@@ -120,6 +120,9 @@ func main() {
 	if msg := proxyLimitWarning(resolved, len(cfg.Server.TrustedProxies)); msg != "" {
 		slog.Warn(msg, "component", "startup")
 	}
+	for _, key := range cfg.IgnoredKeys() {
+		slog.Warn("config: "+key+" is no longer used and is ignored; remove it", "component", "startup")
+	}
 	borderFiles, err := config.LoadLocalBorders(cfg)
 	if err != nil {
 		slog.Error("invalid local border configuration", "component", "startup", "error", err)
@@ -144,7 +147,7 @@ func main() {
 	dsn := getEnv("POSTGRES_DSN")
 	layout := resolved.APIPlanLayout
 	mode := bootModeFor(resolved.ReadOnly)
-	tune := []func(string, *pgxpool.Config){db.SlowPoolSize(resolved.SlowPoolSize)}
+	var tune []func(string, *pgxpool.Config)
 	if resolved.ReadOnly {
 		slog.Warn(readOnlyWarning, "component", "startup")
 		tune = append(tune, readOnlyTune)

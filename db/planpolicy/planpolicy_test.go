@@ -11,16 +11,16 @@ import (
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 )
 
-// Every Slow/Cached name is a statement in db/sqlc, so a stale entry fails CI; the two sets are disjoint.
+// Every VerificationOnly/Cached name is a statement in db/sqlc, so a stale entry fails CI; the two sets are disjoint.
 func TestPlanPolicyNamesExist(t *testing.T) {
 	q := reflect.TypeOf((*sqlc.Querier)(nil)).Elem()
-	for _, set := range []map[string]bool{planpolicy.Slow, planpolicy.Cached} {
+	for _, set := range []map[string]bool{planpolicy.VerificationOnly, planpolicy.Cached} {
 		for name := range set {
 			if _, ok := q.MethodByName(name); !ok {
 				t.Errorf("%s is not a sqlc statement", name)
 			}
-			if planpolicy.Slow[name] && planpolicy.Cached[name] {
-				t.Errorf("%s is both Slow and Cached", name)
+			if planpolicy.VerificationOnly[name] && planpolicy.Cached[name] {
+				t.Errorf("%s is both VerificationOnly and Cached", name)
 			}
 		}
 	}
@@ -43,12 +43,7 @@ func TestPlanPolicyNamesExist(t *testing.T) {
 	if planpolicy.ClassOf("GetTopNodesProbe") != planpolicy.ClassC {
 		t.Error("GetTopNodesProbe must be class C")
 	}
-	// Exactly the statements that may walk whole site histories run on the slow pool.
-	if want := map[string]bool{"ListPacketsByIATAs": true, "ListPacketsByIATAsAfter": true, "ListAllChannelMessages": true}; !reflect.DeepEqual(planpolicy.Slow, want) {
-		t.Errorf("Slow = %v, want %v", planpolicy.Slow, want)
-	}
-	if planpolicy.ClassOf("ListPacketsByIATAs") != planpolicy.ClassSlow ||
-		planpolicy.ClassOf("ListKnownRoutesGlobalHop") != planpolicy.ClassC || planpolicy.ClassOf("GetNodeByID") != planpolicy.ClassG ||
+	if planpolicy.ClassOf("ListKnownRoutesGlobalHop") != planpolicy.ClassC || planpolicy.ClassOf("GetNodeByID") != planpolicy.ClassG ||
 		planpolicy.ClassOf("") != planpolicy.ClassC {
 		t.Fatal("ClassOf")
 	}
@@ -78,22 +73,21 @@ func TestParseLayout(t *testing.T) {
 }
 
 // The channel message statements: the four whose plan is stable under every layout are generic-safe; the scoped,
-// since and scope-only ones are planned with their values; the all-channel statement for sites with a since or scope
-// and the per-channel one (verification-only today) route to the slow pool.
+// since and scope-only ones, and the all-channel ones for sites with a since or a scope, are planned with their values.
 func TestCmiPlanClasses(t *testing.T) {
 	for name, want := range map[string]planpolicy.Class{
-		"ListChannelMessagesByIATAs":        planpolicy.ClassG,
-		"ListChannelMessagesPlain":          planpolicy.ClassG,
-		"ListAllChannelMessagesByIATAs":     planpolicy.ClassG,
-		"ListAllChannelMessagesPlain":       planpolicy.ClassG,
-		"ListChannelMessagesByIATAsScoped":  planpolicy.ClassC,
-		"ListChannelMessagesPlainScoped":    planpolicy.ClassC,
-		"ListChannelMessagesSinceWalk":      planpolicy.ClassC,
-		"ListAllChannelMessagesPlainScoped": planpolicy.ClassC,
-		"ListAllChannelMessagesSince":       planpolicy.ClassC,
-		"GetTransportScopeByName":           planpolicy.ClassC,
-		"ListChannelMessages":               planpolicy.ClassSlow,
-		"ListAllChannelMessages":            planpolicy.ClassSlow,
+		"ListChannelMessagesByIATAs":          planpolicy.ClassG,
+		"ListChannelMessagesPlain":            planpolicy.ClassG,
+		"ListAllChannelMessagesByIATAs":       planpolicy.ClassG,
+		"ListAllChannelMessagesPlain":         planpolicy.ClassG,
+		"ListChannelMessagesByIATAsScoped":    planpolicy.ClassC,
+		"ListChannelMessagesPlainScoped":      planpolicy.ClassC,
+		"ListChannelMessagesSinceWalk":        planpolicy.ClassC,
+		"ListAllChannelMessagesPlainScoped":   planpolicy.ClassC,
+		"ListAllChannelMessagesSince":         planpolicy.ClassC,
+		"ListAllChannelMessagesByIATAsSince":  planpolicy.ClassC,
+		"ListAllChannelMessagesByIATAsScoped": planpolicy.ClassC,
+		"GetTransportScopeByName":             planpolicy.ClassC,
 	} {
 		if got := planpolicy.ClassOf(name); got != want {
 			t.Errorf("ClassOf(%s) = %v, want %v", name, got, want)
@@ -103,17 +97,16 @@ func TestCmiPlanClasses(t *testing.T) {
 
 func TestPacketSitesPlanClasses(t *testing.T) {
 	for name, want := range map[string]planpolicy.Class{
-		"ListPacketsBySite":            planpolicy.ClassG,
-		"ListPacketsBySites":           planpolicy.ClassG,
-		"ListPacketsBySitesFirst":      planpolicy.ClassG,
-		"ListPacketsBySitesTyped":      planpolicy.ClassG,
-		"ListPacketsBySitesTypedFirst": planpolicy.ClassG,
-		"ListPacketsBySitesSince":      planpolicy.ClassC,
-		"ListPacketsBySitesScoped":     planpolicy.ClassC,
-		"ListPacketsBySiteKeys":        planpolicy.ClassC,
-		"FilterKnownSites":             planpolicy.ClassC,
-		"ListPacketsByIATAs":           planpolicy.ClassSlow,
-		"ListPacketsByIATAsAfter":      planpolicy.ClassSlow,
+		"ListPacketsBySite":              planpolicy.ClassG,
+		"ListPacketsBySites":             planpolicy.ClassG,
+		"ListPacketsBySitesFirst":        planpolicy.ClassG,
+		"ListPacketsBySitesTyped":        planpolicy.ClassG,
+		"ListPacketsBySitesTypedFirst":   planpolicy.ClassG,
+		"ListPacketsBySitesSince":        planpolicy.ClassC,
+		"ListPacketsBySitesWindow":       planpolicy.ClassC,
+		"ListPacketsBySitesScopedWindow": planpolicy.ClassC,
+		"ListPacketsBySiteKeys":          planpolicy.ClassC,
+		"FilterKnownSites":               planpolicy.ClassC,
 	} {
 		if got := planpolicy.ClassOf(name); got != want {
 			t.Errorf("ClassOf(%s) = %v, want %v", name, got, want)
@@ -121,14 +114,10 @@ func TestPacketSitesPlanClasses(t *testing.T) {
 	}
 }
 
-// The per-channel original message statement is verification-only, and nothing else is.
+// The original message and region statements are verification-only, and nothing else is.
 func TestVerificationOnly(t *testing.T) {
-	if want := map[string]bool{"ListChannelMessages": true}; !reflect.DeepEqual(planpolicy.VerificationOnly, want) {
+	want := map[string]bool{"ListChannelMessages": true, "ListAllChannelMessages": true, "ListPacketsByIATAs": true}
+	if !reflect.DeepEqual(planpolicy.VerificationOnly, want) {
 		t.Errorf("VerificationOnly = %v, want %v", planpolicy.VerificationOnly, want)
-	}
-	for name := range planpolicy.VerificationOnly {
-		if planpolicy.Slow[name] || planpolicy.Cached[name] {
-			t.Errorf("%s is verification-only and also routed", name)
-		}
 	}
 }

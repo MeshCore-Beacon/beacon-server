@@ -246,15 +246,12 @@ func TestListChannelMessages_AllChannels(t *testing.T) {
 	senderName := "Alice"
 	content := "hello"
 
+	mock.EXPECT().GetTransportScopeByName(gomock.Any(), "#bc").Return(int32(4), nil)
 	mock.EXPECT().
-		ListAllChannelMessages(gomock.Any(), sqlc.ListAllChannelMessagesParams{
-			Column1: pgtype.Timestamptz{},
-			Column2: []string{"YVR"},
-			Column3: "#bc",
-			Column4: int64(0),
-			Limit:   3,
+		ListAllChannelMessagesByIATAsScoped(gomock.Any(), sqlc.ListAllChannelMessagesByIATAsScopedParams{
+			Iatas: []string{"YVR"}, ScopeID: 4, CursorID: math.MaxInt64, PageLimit: 3,
 		}).
-		Return([]sqlc.ListAllChannelMessagesRow{
+		Return([]sqlc.ListAllChannelMessagesByIATAsScopedRow{
 			{
 				ID:               1,
 				PacketHashHex:    "deadbeef",
@@ -284,8 +281,8 @@ func TestListChannelMessages_AllChannels(t *testing.T) {
 			},
 		}, nil)
 
-	store := &Store{q: mock}
-	// Sites with a scope across every channel: the original statement, trusted or not.
+	store := &Store{q: mock, readModels: earnedCmi()}
+	// Sites with a scope across every channel: each (site, scope) range of the read model.
 	page, err := store.ListChannelMessages(context.Background(), nil, time.Time{}, 2, []string{"YVR"}, "#bc", 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -734,13 +731,23 @@ func TestListChannelMessagesDispatch(t *testing.T) {
 		{"all by sites", nil, time.Time{}, []string{"YUL"}, "", true, []call{func(m *mockdb.MockQuerier) {
 			m.EXPECT().ListAllChannelMessagesByIATAs(gomock.Any(), sqlc.ListAllChannelMessagesByIATAsParams{Iatas: []string{"YUL"}, CursorID: maxCursor, PageLimit: 51}).Return(nil, nil)
 		}}},
-		// Sites with a scope or a since across every channel: each site's range has no bound on the scope or since,
-		// so these run today's statement, trusted or not.
-		{"all by sites and scope", nil, time.Time{}, []string{"YUL"}, "#fr", true, []call{func(m *mockdb.MockQuerier) {
-			m.EXPECT().ListAllChannelMessages(gomock.Any(), sqlc.ListAllChannelMessagesParams{Column1: pgtype.Timestamptz{}, Column2: []string{"YUL"}, Column3: "#fr", Column4: 0, Limit: 51}).Return(nil, nil)
+		{"all by sites and scope", nil, time.Time{}, []string{"YUL", "YUL"}, "#fr", true, []call{scopeLookup, func(m *mockdb.MockQuerier) {
+			m.EXPECT().ListAllChannelMessagesByIATAsScoped(gomock.Any(), sqlc.ListAllChannelMessagesByIATAsScopedParams{Iatas: []string{"YUL"}, ScopeID: 3, CursorID: maxCursor, PageLimit: 51}).Return(nil, nil)
 		}}},
-		{"all by sites since", nil, since, []string{"YUL"}, "", true, []call{func(m *mockdb.MockQuerier) {
-			m.EXPECT().ListAllChannelMessages(gomock.Any(), sqlc.ListAllChannelMessagesParams{Column1: ts, Column2: []string{"YUL"}, Column3: "", Column4: 0, Limit: 51}).Return(nil, nil)
+		{"all by sites since, few sent since", nil, since, []string{"YUL"}, "", true, []call{func(m *mockdb.MockQuerier) {
+			m.EXPECT().CountChannelMessagesSentSince(gomock.Any(), sqlc.CountChannelMessagesSentSinceParams{Since: ts, RowLimit: 5001}).Return(int64(5000), nil)
+			m.EXPECT().ListAllChannelMessagesByIATAsSince(gomock.Any(), sqlc.ListAllChannelMessagesByIATAsSinceParams{Since: ts, Iatas: []string{"YUL"}, CursorID: maxCursor, PageLimit: 51}).Return(nil, nil)
+		}}},
+		{"all by sites since scoped, many sent since, newest ids fill the page", nil, since, []string{"YUL"}, "#fr", true, []call{scopeLookup, func(m *mockdb.MockQuerier) {
+			m.EXPECT().CountChannelMessagesSentSince(gomock.Any(), sqlc.CountChannelMessagesSentSinceParams{Since: ts, RowLimit: 5001}).Return(int64(5001), nil)
+			m.EXPECT().ListAllChannelMessagesByIATAsSinceWalk(gomock.Any(), sqlc.ListAllChannelMessagesByIATAsSinceWalkParams{Since: ts, Iatas: []string{"YUL"}, ScopeID: &scope, CursorID: maxCursor, ScanRows: 5000, PageLimit: 51}).
+				Return(make([]sqlc.ListAllChannelMessagesByIATAsSinceWalkRow, 51), nil)
+		}}},
+		{"all by sites since, many sent since, newest ids leave the page short", nil, since, []string{"YUL"}, "", true, []call{func(m *mockdb.MockQuerier) {
+			m.EXPECT().CountChannelMessagesSentSince(gomock.Any(), sqlc.CountChannelMessagesSentSinceParams{Since: ts, RowLimit: 5001}).Return(int64(9000), nil)
+			m.EXPECT().ListAllChannelMessagesByIATAsSinceWalk(gomock.Any(), sqlc.ListAllChannelMessagesByIATAsSinceWalkParams{Since: ts, Iatas: []string{"YUL"}, CursorID: maxCursor, ScanRows: 5000, PageLimit: 51}).
+				Return(make([]sqlc.ListAllChannelMessagesByIATAsSinceWalkRow, 3), nil)
+			m.EXPECT().ListAllChannelMessagesByIATAsSince(gomock.Any(), sqlc.ListAllChannelMessagesByIATAsSinceParams{Since: ts, Iatas: []string{"YUL"}, CursorID: maxCursor, PageLimit: 51}).Return(nil, nil)
 		}}},
 		{"all since scoped untrusted reads no cmi", nil, since, nil, "#fr", false, []call{scopeLookup, func(m *mockdb.MockQuerier) {
 			m.EXPECT().ListAllChannelMessagesSince(gomock.Any(), sqlc.ListAllChannelMessagesSinceParams{Since: ts, ScopeID: &scope, CursorID: maxCursor, PageLimit: 51}).Return(nil, nil)
@@ -770,8 +777,8 @@ func TestListChannelMessagesDispatch(t *testing.T) {
 		})
 	}
 
-	// Every shape that reads cmi answers ErrPagesNotReady with no statement when cmi is not trusted; sites with a
-	// scope or a since across every channel run the original all-channel statement, trusted or not.
+	// Every shape that reads cmi answers ErrPagesNotReady with no statement when cmi is not trusted, sites with a
+	// scope or a since across every channel included.
 	disabled := NewTrust("cmi_dispatch_disabled", false, CmiTrustPolicy)
 	disabled.Earn()
 	dropped := NewTrust("cmi_dispatch_dropped", true, CmiTrustPolicy)
@@ -791,20 +798,15 @@ func TestListChannelMessagesDispatch(t *testing.T) {
 	}{
 		{&ch, time.Time{}, []string{"YUL"}, ""}, {&ch, time.Time{}, []string{"YUL"}, "#fr"}, {&ch, time.Time{}, nil, "#fr"},
 		{&ch, since, []string{"YUL"}, ""}, {nil, time.Time{}, []string{"YUL"}, ""}, {nil, time.Time{}, []string{"YUL"}, "#fr"},
-		{nil, since, []string{"YUL"}, "#fr"}, {nil, time.Time{}, nil, "#fr"},
+		{nil, since, []string{"YUL"}, "#fr"}, {nil, since, []string{"YUL"}, ""}, {nil, time.Time{}, nil, "#fr"},
 	}
 	for name, rm := range untrusted {
 		for i, sh := range shapes {
 			ctrl := gomock.NewController(t)
 			m := mockdb.NewMockQuerier(ctrl)
-			legacyTS := pgtype.Timestamptz{Time: sh.since, Valid: !sh.since.IsZero()}
-			allFiltered := sh.channel == nil && len(sh.iatas) > 0 && (sh.scope != "" || !sh.since.IsZero())
-			if allFiltered {
-				m.EXPECT().ListAllChannelMessages(gomock.Any(), sqlc.ListAllChannelMessagesParams{Column1: legacyTS, Column2: sh.iatas, Column3: sh.scope, Column4: 0, Limit: 51}).Return(nil, nil)
-			}
 			s := &Store{q: m, readModels: rm}
 			_, err := s.ListChannelMessages(context.Background(), sh.channel, sh.since, 50, sh.iatas, sh.scope, 0)
-			if allFiltered && err != nil || !allFiltered && !errors.Is(err, api.ErrPagesNotReady) {
+			if !errors.Is(err, api.ErrPagesNotReady) {
 				t.Fatalf("%s shape %d: %v", name, i, err)
 			}
 			ctrl.Finish()
