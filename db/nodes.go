@@ -23,9 +23,9 @@ func (s *Store) UpsertNode(ctx context.Context, n ingest.UpsertNodeParams, radio
 	// advert.Timestamp is only meaningful when the advert actually decoded (AdvertTimestamp
 	// is left at its zero value otherwise); a zero epoch timestamp would misreport as ~55
 	// years of drift, so only compute/store a delta when it's non-zero.
-	var driftSeconds *int32
+	var driftSeconds *int64
 	if n.AdvertTimestamp != 0 {
-		d := int32(int64(n.AdvertTimestamp) - time.Now().Unix())
+		d := int64(n.AdvertTimestamp) - time.Now().Unix()
 		driftSeconds = &d
 	}
 	params := sqlc.UpsertNodeParams{
@@ -249,12 +249,10 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 	return node, nil
 }
 
-// abs returns the absolute value of an int32 without overflowing on math.MinInt32.
-func abs(n int32) int32 {
+// abs returns the absolute value of a drift. A drift comes from a uint32 timestamp minus now, so it is far inside int64
+// and its negation never overflows.
+func abs(n int64) int64 {
 	if n < 0 {
-		if n == -2147483648 { // math.MinInt32; -n would overflow
-			return 2147483647
-		}
 		return -n
 	}
 	return n

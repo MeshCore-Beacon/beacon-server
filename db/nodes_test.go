@@ -412,7 +412,7 @@ func TestGetNode_ClockDrift_OutOfSync(t *testing.T) {
 	mock := mockdb.NewMockQuerier(ctrl)
 
 	nodeID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
-	drift := int32(-600) // 10 minutes behind, beyond a 5m threshold
+	drift := int64(-600) // 10 minutes behind, beyond a 5m threshold
 
 	mock.EXPECT().
 		GetNodeByID(gomock.Any(), nodeID).
@@ -451,7 +451,7 @@ func TestGetNode_ClockDrift_InSync(t *testing.T) {
 	mock := mockdb.NewMockQuerier(ctrl)
 
 	nodeID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
-	drift := int32(30) // well within a 5m threshold
+	drift := int64(30) // well within a 5m threshold
 
 	mock.EXPECT().
 		GetNodeByID(gomock.Any(), nodeID).
@@ -484,7 +484,7 @@ func TestGetNode_ClockDrift_OmittedForCompanion(t *testing.T) {
 	mock := mockdb.NewMockQuerier(ctrl)
 
 	nodeID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
-	drift := int32(-600)
+	drift := int64(-600)
 
 	mock.EXPECT().
 		GetNodeByID(gomock.Any(), nodeID).
