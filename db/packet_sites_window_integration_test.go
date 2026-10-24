@@ -159,14 +159,22 @@ func TestPacketsBySitesFarWindowPostgres(t *testing.T) {
 		t.Fatalf("a deep until page read %d packet_sites rows", n)
 	}
 	// A type pair no packet at AAA carries (payload type 0 only comes with route type 0 in the fixture): the typed forms
-	// probe each pair's range, where reading each site's or scope's range and filtering would walk all of it.
+	// probe each pair's range, where reading each site's or scope's range and filtering would walk all of it. Beyond
+	// that they read only the rows heard over 30 minutes late above until + 30 minutes.
 	for _, tc := range []struct {
 		scopes []string
 		until  time.Time
 	}{{until: psT0.Add(2 * day)}, {scopes: []string{"#a"}}, {scopes: []string{"#a"}, until: psT0.Add(2 * day)}} {
 		fl, _ := newPacketFilter([]int16{0}, []int16{1}, tc.scopes, time.Time{}, tc.until, 0, nil, 50)
-		if n := typedWindowRowsRead(t, f.pool, []string{"AAA"}, fl); n > 10 {
-			t.Fatalf("scopes %v until %v: a type pair with no packet read %d packet_sites rows", tc.scopes, tc.until, n)
+		var late int64
+		if !tc.until.IsZero() {
+			if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM packet_sites WHERE iata = 'AAA' AND site_heard_at > $1
+  AND site_heard_at - first_heard_at > interval '30 minutes'`, tc.until.Add(siteSkew)).Scan(&late); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if n := typedWindowRowsRead(t, f.pool, []string{"AAA"}, fl); n > late+10 {
+			t.Fatalf("scopes %v until %v: a type pair with no packet read %d packet_sites rows (%d late above until)", tc.scopes, tc.until, n, late)
 		}
 		page, _ := f.page(s, siteReq{sites: []string{"AAA"}, pt: []int16{0}, rt: []int16{1}, scopes: tc.scopes, until: tc.until}, 0, nil, 50)
 		if len(page.Items) != 0 || page.HasMore {
