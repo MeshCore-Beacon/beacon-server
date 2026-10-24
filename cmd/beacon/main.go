@@ -371,31 +371,20 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	if channelImporter != nil && mode.Backfill {
-		channelImporter.OnNewKeys(func(hashes [][]byte) {
-			// Off the refresh tick: a backfill can outlast it, and history isn't urgent.
-			go func() {
-				backfillCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-				defer cancel()
-				if n, err := ingest.BackfillChannelHashes(backfillCtx, maintStore, keys, hashes); err != nil {
-					slog.Error("MeshMapper channel backfill failed", "component", "meshmapper.channels", "error", err)
-				} else if n > 0 {
-					slog.Info(fmt.Sprintf("backfilled %d channel message(s) for imported keys", n), "component", "meshmapper.channels")
-				}
-			}()
-		})
-	}
-
 	// ── Backfill channel messages ────────────────────────────────────────────
 	// Packets whose channel key wasn't yet configured at ingest time were stored as
-	// hash-only channels and never decrypted. Retry them now against the keystore we just
-	// built, so adding a channel key to the config surfaces its history on the next boot
-	// instead of leaving it stranded in the DB indefinitely.
+	// hash-only channels and never decrypted. Retry them against the keystore we just
+	// built, so adding a channel key to the config surfaces its history after the next boot
+	// instead of leaving it stranded in the DB indefinitely. It runs in the background once
+	// the server listens (reading every undecrypted packet takes a while on a slow disk);
+	// imported keys queue their channels on the same job, off the refresh tick.
+	var decryptBackfill *ingest.DecryptBackfill
 	if mode.Backfill {
-		if n, err := ingest.BackfillChannelMessages(ctx, maintStore, keys); err != nil {
-			slog.Error("config: channel message backfill failed", "component", "startup", "error", err)
-		} else if n > 0 {
-			slog.Info(fmt.Sprintf("config: backfilled %d previously-undecrypted channel message(s)", n), "component", "startup")
+		// Paced by duty alone: most packets fail to decrypt, which costs CPU, not the database, so a fixed
+		// pause per batch would only stretch the run.
+		decryptBackfill = ingest.NewDecryptBackfill(maintStore, keys, db.FillPacing{Duty: resolved.FillDuty})
+		if channelImporter != nil {
+			channelImporter.OnNewKeys(decryptBackfill.RequestHashes)
 		}
 	}
 
@@ -582,6 +571,12 @@ func main() {
 		}
 	}()
 
+	var backgroundJobs sync.WaitGroup
+	if decryptBackfill != nil {
+		decryptBackfill.RequestAll()
+		backgroundJobs.Go(func() { decryptBackfill.Run(ctx) })
+	}
+
 	// The admin listener serves only /metrics; keep it off the public network.
 	var adminSrv *http.Server
 	if resolved.AdminListen != "" {
@@ -613,6 +608,7 @@ func main() {
 		}
 	}
 	ingestWorkers.Wait()
+	backgroundJobs.Wait()
 	if mode.Coalescer {
 		coalescer.Flush(shutdownCtx)
 	}

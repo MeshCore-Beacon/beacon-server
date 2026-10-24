@@ -1566,10 +1566,10 @@ WHERE id = sqlc.arg(id) AND channel_hash = sqlc.arg(channel_hash) AND key_finger
 RETURNING id;
 
 -- name: ListUndecryptedGroupTextPackets :many
--- Returns GRP_TXT packets (payload_type=5) never successfully decrypted. Used at boot to
+-- Returns GRP_TXT packets (payload_type=5) never successfully decrypted. Used after boot to
 -- retry decryption against the current keystore for packets whose channel key was only added
 -- to the config after they'd already been ingested -- see
--- internal/ingest.BackfillChannelMessages.
+-- internal/ingest.DecryptBackfill.
 SELECT packet_hash, raw_payload FROM packets
 WHERE payload_type = 5 AND decrypted IS NOT TRUE;
 

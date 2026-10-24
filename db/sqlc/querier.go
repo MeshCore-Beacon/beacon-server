@@ -410,10 +410,10 @@ type Querier interface {
 	// ============================================================
 	// Tags, most recent first. Filters match the tag summary (see RecordTrace).
 	ListTraceTags(ctx context.Context, arg ListTraceTagsParams) ([]ListTraceTagsRow, error)
-	// Returns GRP_TXT packets (payload_type=5) never successfully decrypted. Used at boot to
+	// Returns GRP_TXT packets (payload_type=5) never successfully decrypted. Used after boot to
 	// retry decryption against the current keystore for packets whose channel key was only added
 	// to the config after they'd already been ingested -- see
-	// internal/ingest.BackfillChannelMessages.
+	// internal/ingest.DecryptBackfill.
 	ListUndecryptedGroupTextPackets(ctx context.Context) ([]ListUndecryptedGroupTextPacketsRow, error)
 	// Like ListUndecryptedGroupTextPackets, limited to channels that just gained a key.
 	ListUndecryptedGroupTextPacketsByHash(ctx context.Context, hashes [][]byte) ([]ListUndecryptedGroupTextPacketsByHashRow, error)

@@ -74,7 +74,7 @@ jobs:
       - name: Verify the channel message site rule against PostgreSQL 16
         env:
           BEACON_TEST_POSTGRES_DSN: postgres://postgres:backup-ci-only@127.0.0.1:5432/postgres?sslmode=disable
-        run: go test ./internal/ingest -run '^Test(CmiAddOnDecryptFailure|CmiCleanIngestReconcilesNothing)Postgres$' -count=1 -v
+        run: go test ./internal/ingest -run '^Test(CmiAddOnDecryptFailure|CmiCleanIngestReconcilesNothing|DecryptBackfillRacesLiveHearings)Postgres$' -count=1 -v
 
       - name: Verify route retention task against PostgreSQL 16
         env:
