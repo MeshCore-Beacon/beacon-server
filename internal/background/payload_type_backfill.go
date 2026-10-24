@@ -27,6 +27,12 @@ type payloadTypeBackfiller interface {
 	SaveState(context.Context, string, any) error
 }
 
+// observationRows is a store that estimates observations by id range from the planner's statistics (db.Store
+// does); without it progress counts ids.
+type observationRows interface {
+	ObservationRows(context.Context) db.ObservationRows
+}
+
 // fillPacer is a store that carries the backfills' pacing (db.Store does); a store without it is paced with
 // db.DefaultFillPacing.
 type fillPacer interface {
@@ -59,6 +65,7 @@ func payloadTypeBackfillTask(store payloadTypeBackfiller, interval time.Duration
 		pace = p.FillPacing()
 	}
 	var progress db.FillProgress
+	var rows db.ObservationRows // read when progress starts, so its units stay the same for the whole walk
 	return Task{
 		Name:     "payload_type_backfill",
 		Interval: interval,
@@ -90,14 +97,23 @@ func payloadTypeBackfillTask(store payloadTypeBackfiller, interval time.Duration
 				}
 			}
 			next := max(st.NextID, minID)
-			progress.Start(next) // the ETA uses the rate next moves at and each run's own remaining count
-			var rows int64
+			if !progress.Started() {
+				if r, ok := store.(observationRows); ok {
+					rows = r.ObservationRows(ctx)
+				}
+			}
+			// The ETA uses the rate the observations below next grow at and each run's own remaining count, both
+			// estimated from the statistics, so a long, sparse old id range counts for what it holds.
+			progress.Start(rows.In(minID-1, next-1))
+			var typed int64
 			defer func() {
-				metrics.JobRows.WithLabelValues("payload_type_backfill").Add(float64(rows))
+				metrics.JobRows.WithLabelValues("payload_type_backfill").Add(float64(typed))
 				remaining := max(maxID+1-next, 0)
-				attrs := []any{"component", "background", "next_id", next, "max_id", maxID, "rows", rows,
-					"ids_done", max(next-minID, 0), "ids_remaining", remaining}
-				if eta, ok := progress.ETA(next, remaining); ok {
+				done, left := rows.In(minID-1, next-1), rows.In(next-1, maxID)
+				attrs := []any{"component", "background", "next_id", next, "max_id", maxID, "rows", typed,
+					"ids_done", max(next-minID, 0), "ids_remaining", remaining,
+					"observations_done", done, "observations_remaining", left}
+				if eta, ok := progress.ETA(done, left); ok {
 					attrs = append(attrs, "eta", eta.Round(time.Second).String())
 				}
 				slog.Info("observation payload type backfill progress: observer advert pages answer 503 until it is done", attrs...)
@@ -115,7 +131,7 @@ func payloadTypeBackfillTask(store payloadTypeBackfiller, interval time.Duration
 				if err != nil {
 					return fmt.Errorf("payload type backfill: %w", err)
 				}
-				rows += n
+				typed += n
 				next = to
 				if err := store.SaveState(ctx, db.ObservationPayloadTypeKey, db.ObservationPayloadTypeState{NextID: next}); err != nil {
 					return fmt.Errorf("payload type backfill: %w", err)

@@ -64,3 +64,31 @@ func TestIDHistogramETAFollowsRows(t *testing.T) {
 		t.Fatalf("ETA in ids %v; the test's ids should make it about 155 h", eta)
 	}
 }
+
+// A sampled slice starts at a uniformly random row: a sparse old id range holding 10 % of the rows over 90 % of
+// the ids gets about 10 % of the samples, where picking by id would give it about 90 %.
+func TestSliceStartSamplesRowsProportionally(t *testing.T) {
+	// 100 rows a bucket: 1 bucket over ids (0, 9,000,000], 9 buckets over (9,000,000, 10,000,000].
+	bounds := []int64{1, 9_000_000}
+	for id := int64(9_111_111); id < 10_000_000; id += 111_111 {
+		bounds = append(bounds, id)
+	}
+	bounds = append(bounds, 10_000_000)
+	h := idHistogram{bounds: bounds, rows: float64(len(bounds)-1) * 100}
+	const draws = 10_000
+	sparse := 0
+	for i := range draws {
+		if h.sliceStart(0, 10_000_000, 10, float64(i)/draws) < 9_000_000 {
+			sparse++
+		}
+	}
+	if share := float64(sparse) / draws; share < 0.08 || share > 0.12 {
+		t.Fatalf("sparse range got %.1f %% of the samples, want about 10 %%", 100*share)
+	}
+	if got := h.sliceStart(0, 10_000_000, 2000, 0.5); got != 0 {
+		t.Fatalf("a range holding fewer rows than the slice starts at %d, want its start", got)
+	}
+	if got := (idHistogram{}).sliceStart(100, 200, 10, 0.5); got != 145 {
+		t.Fatalf("without statistics the start is %d, want 145 (by ids)", got)
+	}
+}

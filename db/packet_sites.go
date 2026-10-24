@@ -22,8 +22,8 @@ import (
 
 const (
 	packetSitesStateKey = "packet_sites"
-	// packetSitesSlice is the observation ids one fill covers in the reconcile and the audit, and the observations
-	// in the backfill's default slice (readmodels.fill.packet_sites_slice).
+	// packetSitesSlice is the observation ids one fill covers in the reconcile, and the observations in the backfill's
+	// default slice (readmodels.fill.packet_sites_slice) and in the audit's and verification's sampled slice.
 	packetSitesSlice int64 = 500_000
 	// packetSitesFillAttempts bounds the retries of a fill that lost a packet to a concurrent cascade (23503).
 	packetSitesFillAttempts = 3
@@ -58,11 +58,13 @@ type PacketSitesSession struct {
 	progress *FillProgress
 	sliced   bool         // this session's Backfill has filled a slice
 	ids      *idHistogram // the statistics progress counts in, kept for the whole fill so its units never change
+	sample   int64        // observations in the audit's and verification's sampled slice; tests shrink it
 
 	// fillStmt runs one fill; tests replace it. fills lists the (after, through] ranges filled, and retries counts
 	// 23503 retries, for tests.
 	fillStmt func(ctx context.Context, after, through int64) (int64, error)
 	fills    [][2]int64
+	checks   [][2]int64 // the (after, through] ranges Verify checked, for tests
 	retries  int
 }
 
@@ -93,7 +95,7 @@ func (s *Store) BeginPacketSites(ctx context.Context) (*PacketSitesSession, bool
 	pace := s.FillPacing()
 	p := &PacketSitesSession{store: s, conn: conn, q: sqlc.New(conn),
 		pause: pace.MinPause, duty: pace.Duty, slice: pace.PacketSitesSlice, progress: &s.packetSitesProgress,
-		ids: &s.packetSitesIDs}
+		ids: &s.packetSitesIDs, sample: packetSitesSlice}
 	p.fillStmt = func(ctx context.Context, after, through int64) (int64, error) {
 		return p.q.FillPacketSitesSlice(ctx, sqlc.FillPacketSitesSliceParams{AfterID: after, ThroughID: through})
 	}
@@ -240,6 +242,27 @@ func (p *PacketSitesSession) Backfill(ctx context.Context, budget time.Duration)
 	return p.state, nil
 }
 
+// sampleSlice picks a slice of p.sample observations in (after, through], starting u of the way through the
+// range by row (see idHistogram.sliceStart); a range holding fewer observations is sampled whole.
+func (p *PacketSitesSession) sampleSlice(ctx context.Context, q sqlc.Querier, stats interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, after, through int64, u float64) (int64, int64, error) {
+	ids, err := loadObservationIDHistogram(ctx, stats)
+	if err != nil {
+		slog.Warn("packet_sites: cannot read observation statistics; the sampled slice is picked by ids", "component", "readmodel", "error", err)
+		ids = idHistogram{}
+	}
+	from := ids.sliceStart(after, through, p.sample, u)
+	to, err := q.ObservationIDAbove(ctx, sqlc.ObservationIDAboveParams{AfterID: from, Skip: p.sample - 1})
+	if err != nil {
+		return 0, 0, err
+	}
+	if to == 0 || to > through {
+		to = through
+	}
+	return from, to, nil
+}
+
 // loadIDs reads the observation id statistics the progress log counts in, when its clock starts; without them
 // (a failed read, or no ANALYZE yet) progress counts ids.
 func (p *PacketSitesSession) loadIDs(ctx context.Context) {
@@ -289,10 +312,11 @@ func (p *PacketSitesSession) Reconcile(ctx context.Context) (int64, error) {
 	return rows, p.save(ctx)
 }
 
-// Audit refills one slice of packetSitesSlice ids below ReconPrevHi, the ids no reconcile will see again, each
-// pair at its latest hearing among all the packet's observations; start picks its lower bound in [lo, hi]. It returns the rows written: anything above zero was missed by every writer
-// and reconcile.
-func (p *PacketSitesSession) Audit(ctx context.Context, start func(lo, hi int64) int64) (int64, error) {
+// Audit refills one sampled slice (packetSitesSlice observations) at or below ReconPrevHi, the ids no reconcile will see
+// again, each pair at its latest hearing among all the packet's observations. The slice starts u (in [0, 1)) of the
+// way through those observations by row, so every observation is as likely to be audited however sparse its ids
+// are. It returns the rows written: anything above zero was missed by every writer and reconcile.
+func (p *PacketSitesSession) Audit(ctx context.Context, u float64) (int64, error) {
 	lo, err := p.q.MinObservationID(ctx)
 	if err != nil {
 		return 0, err
@@ -301,10 +325,9 @@ func (p *PacketSitesSession) Audit(ctx context.Context, start func(lo, hi int64)
 	if lo == 0 || top < lo {
 		return 0, nil
 	}
-	after, through := lo-1, top
-	if top-(lo-1) > packetSitesSlice {
-		after = min(max(start(lo-1, top-packetSitesSlice), lo-1), top-packetSitesSlice)
-		through = after + packetSitesSlice
+	after, through, err := p.sampleSlice(ctx, p.q, p.conn, lo-1, top, u)
+	if err != nil {
+		return 0, err
 	}
 	return p.fillWith(ctx, after, through, func(ctx context.Context, after, through int64) (int64, error) {
 		return p.q.FillPacketSitesAudit(ctx, sqlc.FillPacketSitesAuditParams{AfterID: after, ThroughID: through})
@@ -341,7 +364,7 @@ func (v *PacketSitesVerification) add(c sqlc.CheckPacketSitesSliceRow) {
 // Verify is the first-time verification. The caller has just reconciled (Verify does not reconcile again, which
 // would shrink the next run's overlap). It VACUUMs and ANALYZEs the table once per process (index-only scans need
 // its visibility map; a retry every interval does not repeat it), then in one read-only snapshot runs the exact check
-// over the newest slice of observation ids and one random slice below it, and compares region pages of the busiest
+// over the newest slice of observation ids and a random slice of the observations below it, picked by row, and compares region pages of the busiest
 // recent sites with pages read straight from the observations. The first pass is persisted as FirstVerifiedAt. The
 // caller retries a failed pass every interval.
 func (p *PacketSitesSession) Verify(ctx context.Context) (PacketSitesVerification, error) {
@@ -365,11 +388,17 @@ func (p *PacketSitesSession) Verify(ctx context.Context) (PacketSitesVerificatio
 		return PacketSitesVerification{}, err
 	}
 	ranges := [][2]int64{{max(hi-packetSitesSlice, 0), hi}}
-	if below := hi - packetSitesSlice - (lo - 1); lo > 0 && below > packetSitesSlice {
-		start := lo - 1 + rand.Int64N(below-packetSitesSlice)
-		ranges = append(ranges, [2]int64{start, start + packetSitesSlice})
+	if lo > 0 && hi-packetSitesSlice >= lo {
+		// A random slice of the observations below, picked by row: in a long, sparse old id range a slice of ids
+		// would hold almost nothing.
+		after, through, err := p.sampleSlice(ctx, q, tx, lo-1, hi-packetSitesSlice, rand.Float64())
+		if err != nil {
+			return PacketSitesVerification{}, err
+		}
+		ranges = append(ranges, [2]int64{after, through})
 	}
 	var v PacketSitesVerification
+	p.checks = append(p.checks, ranges...)
 	for _, r := range ranges {
 		c, err := q.CheckPacketSitesSlice(ctx, sqlc.CheckPacketSitesSliceParams{AfterID: r[0], ThroughID: r[1]})
 		if err != nil {
