@@ -95,8 +95,10 @@ jobs:
       - name: Plan policy up to date
         run: go run ./cmd/planguard gen-policy && git diff --exit-code db/planpolicy
 
+      # The backup tests run inside the runtime image, so its pg_dump is the one checked.
       - name: Verify backup command against PostgreSQL 16
         run: |
+          docker build -q -f .build/Dockerfile -t beacon-runtime .
           CGO_ENABLED=0 go build -o "$RUNNER_TEMP/beacon-backup" ./cmd/beacon-backup
           CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/backup.test" ./internal/backup
           CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/backup-http.test" ./internal/api/router
@@ -106,12 +108,12 @@ jobs:
             -e BEACON_BACKUP_TEST_POSTGRES=1 -e BEACON_BACKUP_TEST_BINARY=/beacon-backup \
             -v "$RUNNER_TEMP/beacon-backup:/beacon-backup:ro" \
             -v "$RUNNER_TEMP/backup.test:/backup.test:ro" \
-            postgres:16-alpine /backup.test -test.run '^TestExportPostgres$' -test.v
+            beacon-runtime /backup.test -test.run '^TestExportPostgres$' -test.v
           docker run --rm --network host \
             -e PGHOST=127.0.0.1 -e PGUSER=postgres -e PGDATABASE=postgres \
             -e PGPASSWORD=backup-ci-only -e PGSSLMODE=disable -e BEACON_BACKUP_TEST_POSTGRES=1 \
             -v "$RUNNER_TEMP/backup-http.test:/backup-http.test:ro" \
-            postgres:16-alpine /backup-http.test -test.run '^TestBackupDownloadPostgres$' -test.v
+            beacon-runtime /backup-http.test -test.run '^TestBackupDownloadPostgres$' -test.v
 
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
