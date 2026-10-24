@@ -13,8 +13,10 @@ import (
 	"testing"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 // readerRoutes mounts every reader-backed router the way the API does.
@@ -116,5 +118,54 @@ func TestReaderErrorsAnswerTimeoutAs503(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// timeouts reads beacon_api_unavailable_total{reason="timeout"} for every model a page reads.
+func timeouts() map[string]float64 {
+	out := map[string]float64{}
+	for _, m := range []string{"none", "cmi", "packet_sites", "observation_payload_types"} {
+		out[m] = testutil.ToFloat64(metrics.APIUnavailable.WithLabelValues("timeout", m))
+	}
+	return out
+}
+
+// Every timeout 503 is counted once in beacon_api_unavailable_total: under its read model on a page that reads one,
+// under none on every other page; a 500 is not counted.
+func TestReaderTimeoutsAreCounted(t *testing.T) {
+	readModelPages := map[string]float64{"cmi": 2, "packet_sites": 1, "observation_payload_types": 1} // see readerErrorPaths
+	for _, c := range []struct {
+		err     error
+		timeout bool
+	}{
+		{&pgconn.PgError{Code: "57014"}, true},
+		{errors.New("boom"), false},
+	} {
+		handler := readerRoutes(errReader{err: fmt.Errorf("wrapped: %w", c.err)})
+		before := timeouts()
+		for _, path := range readerErrorPaths {
+			handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", path, nil))
+		}
+		after := timeouts()
+		want := map[string]float64{"none": 0, "cmi": 0, "packet_sites": 0, "observation_payload_types": 0}
+		if c.timeout {
+			want["none"] = float64(len(readerErrorPaths))
+			for m, n := range readModelPages {
+				want[m] = n
+				want["none"] -= n
+			}
+		}
+		for m, n := range want {
+			if got := after[m] - before[m]; got != n {
+				t.Errorf("%v: model %s counted %v timeouts, want %v", c.err, m, got, n)
+			}
+		}
+	}
+	// A handler's own time limit (the heavy stats and route searches) counts as a timeout on a page with no model.
+	before := timeouts()
+	rec := httptest.NewRecorder()
+	respondTimeout(rec, "comparison timed out; try a shorter time period")
+	if after := timeouts(); rec.Code != http.StatusServiceUnavailable || after["none"]-before["none"] != 1 {
+		t.Errorf("respondTimeout: status %d, counted under none %v", rec.Code, after["none"]-before["none"])
 	}
 }

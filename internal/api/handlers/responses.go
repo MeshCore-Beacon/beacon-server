@@ -15,6 +15,7 @@ import (
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/guards"
+	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -27,22 +28,29 @@ func respondUnavailable(w http.ResponseWriter, err error) bool {
 			Code: "service_unavailable", Message: "This page is not available yet. Retry later."})
 		return true
 	case isQueryTimeout(err):
-		respondTimeout(w, "This page took too long to load. Retry later, or ask for a shorter time range.")
+		writeTimeout(w, "This page took too long to load. Retry later, or ask for a shorter time range.")
 		return true
 	}
 	return false
 }
 
-// respondTimeout answers a read that ran out of time with 503 deadline_exceeded and Retry-After.
+// respondTimeout answers a read that ran out of time on a page that reads no read model with 503 deadline_exceeded
+// and Retry-After, and counts it.
 func respondTimeout(w http.ResponseWriter, message string) {
+	writeTimeout(w, message)
+	metrics.APIUnavailable.WithLabelValues("timeout", modelNone).Inc()
+}
+
+func writeTimeout(w http.ResponseWriter, message string) {
 	guards.WriteRefusal(w, &guards.Refusal{Guard: "timeout", Status: http.StatusServiceUnavailable, RetryAfter: 10,
 		Code: "deadline_exceeded", Message: message})
 }
 
-// respondReaderError answers a failed read: a retryable error is the 503 respondUnavailable writes, anything else a
-// 500 with message that logs err.
+// respondReaderError answers a failed read: a retryable error is the 503 respondUnavailable writes, counted with
+// model none, anything else a 500 with message that logs err. A read-model page calls it only after
+// respondUnavailableFor found the error not retryable, so it writes the 500 and counts nothing.
 func respondReaderError(w http.ResponseWriter, err error, message string) {
-	if respondUnavailable(w, err) {
+	if respondUnavailableFor(w, err, modelNone) {
 		return
 	}
 	slog.Error(fmt.Sprintf("api: error %d: %s", http.StatusInternalServerError, message), "component", "api", "error", err)
