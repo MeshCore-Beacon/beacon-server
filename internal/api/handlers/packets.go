@@ -138,7 +138,7 @@ func listPackets(reader api.Reader) http.HandlerFunc {
 		}
 		if err != nil {
 			if !respondUnavailableFor(w, err, modelPacketSites) {
-				respondError(w, http.StatusInternalServerError, "internal server error")
+				respondReaderError(w, err, "internal server error")
 			}
 			return
 		}

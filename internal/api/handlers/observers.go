@@ -175,7 +175,7 @@ func listObserverAdverts(reader api.Reader) http.HandlerFunc {
 		adverts, err := reader.ListObserverAdverts(r.Context(), observerID, cursor, limit)
 		if err != nil {
 			if !respondUnavailableFor(w, err, modelPayloadTypes) {
-				respondError(w, http.StatusInternalServerError, "internal server error")
+				respondReaderError(w, err, "internal server error")
 			}
 			return
 		}

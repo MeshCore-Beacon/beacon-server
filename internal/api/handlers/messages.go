@@ -106,7 +106,7 @@ func listMessages(reader api.Reader) http.HandlerFunc {
 		}
 		if err != nil {
 			if !respondUnavailableFor(w, err, modelCmi) {
-				respondError(w, http.StatusInternalServerError, "internal server error")
+				respondReaderError(w, err, "internal server error")
 			}
 			return
 		}

@@ -205,7 +205,7 @@ func listChannelMessages(reader api.Reader) http.HandlerFunc {
 		messages, err := reader.ListChannelMessages(r.Context(), &chanID, since, limit, iatas, scope, cursor)
 		if err != nil {
 			if !respondUnavailableFor(w, err, modelCmi) {
-				respondError(w, http.StatusInternalServerError, "internal server error")
+				respondReaderError(w, err, "internal server error")
 			}
 			return
 		}
