@@ -162,3 +162,82 @@ func TestPacketSitesProgressCountsRowsPostgres(t *testing.T) {
 	}
 
 }
+
+// The audit samples observations, not ids: over three equal clusters 100,000 ids apart each cluster gets about a
+// third of the audited slices, and every slice holds a full sample, where slices of ids would mostly land in the
+// empty ranges between them.
+func TestPacketSitesAuditSamplesRowsPostgres(t *testing.T) {
+	f := newPsFixture(t)
+	f.sparseObservations()
+	f.exec("ANALYZE packet_observations")
+	ids := f.observationIDs()
+	p := f.begin()
+	p.slice = 50
+	if _, err := p.Init(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Backfill(f.ctx, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	p.sample = 20
+	third := len(ids) / 3
+	clusters := [3]int{}
+	const draws = 60
+	for i := range draws {
+		p.fills = nil
+		if n, err := p.Audit(f.ctx, float64(i)/draws); err != nil || n != 0 {
+			t.Fatalf("audit %d: %d, %v", i, n, err)
+		}
+		r := p.fills[0]
+		held := 0
+		for k, id := range ids {
+			if id > r[0] && id <= r[1] {
+				held++
+				clusters[min(k/third, 2)]++
+			}
+		}
+		if held != 20 {
+			t.Fatalf("audit %d slice %v holds %d observations, want 20", i, r, held)
+		}
+	}
+	for c, n := range clusters {
+		if share := float64(n) / (draws * 20); share < 0.2 || share > 0.47 {
+			t.Fatalf("cluster %d got %.0f %% of the audited observations %v, want about a third", c, 100*share, clusters)
+		}
+	}
+}
+
+// The verification's random slice below the newest is a sample of observations too: it holds a full sample even
+// when the ids below are mostly empty.
+func TestPacketSitesVerifySamplesRowsPostgres(t *testing.T) {
+	f := newPsFixture(t)
+	f.sparseObservations()
+	f.exec("ANALYZE packet_observations")
+	ids := f.observationIDs()
+	p := f.begin()
+	p.slice, p.sample = 50, 20
+	if _, err := p.Init(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Backfill(f.ctx, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	// Raise the watermark far above the observations, so the newest 500,000-id slice is empty and everything is
+	// below it.
+	p.state.ReconHi = ids[len(ids)-1] + packetSitesSlice + 1
+	for range 10 {
+		if v, err := p.Verify(f.ctx); err != nil || !v.OK() {
+			t.Fatalf("Verify = %+v, %v", v, err)
+		}
+		r := p.checks[len(p.checks)-1]
+		held := 0
+		for _, id := range ids {
+			if id > r[0] && id <= r[1] {
+				held++
+			}
+		}
+		if held != 20 {
+			t.Fatalf("sampled range %v holds %d observations, want 20", r, held)
+		}
+	}
+}

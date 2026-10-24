@@ -76,9 +76,9 @@ func (f *fakeSites) Backfill(_ context.Context, budget time.Duration) (db.Packet
 	}
 	return f.state, nil
 }
-func (f *fakeSites) Audit(_ context.Context, start func(lo, hi int64) int64) (int64, error) {
+func (f *fakeSites) Audit(_ context.Context, u float64) (int64, error) {
 	f.log("audit")
-	if a := start(10, 20); a < 10 || a > 20 {
+	if u < 0 || u >= 1 {
 		f.log("bad-start")
 	}
 	if len(f.audits) == 0 {

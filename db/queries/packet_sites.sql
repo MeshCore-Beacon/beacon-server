@@ -45,6 +45,11 @@ SELECT COALESCE(min(id), 0)::bigint AS id FROM packet_observations;
 SELECT COALESCE((SELECT po.id FROM packet_observations po WHERE po.id <= @through_id::bigint
                  ORDER BY po.id DESC OFFSET @n::bigint LIMIT 1), 0)::bigint AS id;
 
+-- name: ObservationIDAbove :one
+-- The id skip + 1 observations above after_id: (after_id, id] holds exactly skip + 1 of them. 0 when fewer remain.
+SELECT COALESCE((SELECT po.id FROM packet_observations po WHERE po.id > @after_id::bigint
+                 ORDER BY po.id OFFSET @skip::bigint LIMIT 1), 0)::bigint AS id;
+
 -- name: CheckPacketSitesSlice :one
 -- Exact check of every packet with an observation in (after_id, through_id]: site rows the observations imply
 -- and the table lacks, rows whose hearing time or packet columns differ, and rows no observation backs.
@@ -338,8 +343,8 @@ LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
 ORDER BY pg.k DESC, pg.packet_hash DESC;
 
 -- name: ListPacketsBySitesSince :many
--- Page keys for a first_heard_at window or many type pairs (absent window sides are -infinity and infinity).
--- Each site range is read to at most scan_depth entries, as deep as the observation statement reads, and the
+-- Page keys for many type pairs (Go sends no window: since and until are -infinity and infinity; the window tests
+-- stay so the statement keeps its meaning for any window). Each site range is read to at most scan_depth entries, as deep as the observation statement reads, and the
 -- window and type tests filter what was read; the last row (is_floor) is the floor below which this page is
 -- incomplete, when a range filled scan_depth. Rows below the floor are left to the next page.
 WITH scanned AS MATERIALIZED (
@@ -387,56 +392,295 @@ UNION ALL
 SELECT true, f.packet_hash, f.site_heard_at FROM floor f
 ORDER BY 1, 3 DESC, 2 DESC;
 
--- name: ListPacketsBySitesScoped :many
--- ListPacketsBySitesSince with one range per (site, named scope).
-WITH scanned AS MATERIALIZED (
-  SELECT w.*
-  FROM unnest(@iatas::bpchar[]) AS req(iata)
-  CROSS JOIN (SELECT id FROM transport_scopes WHERE name = ANY(@scope_names::text[])) sc
-  CROSS JOIN LATERAL (
-    SELECT ps.iata, ps.scope_id, ps.packet_hash, ps.site_heard_at, ps.first_heard_at, ps.payload_type, ps.route_type
-    FROM packet_sites ps
-    WHERE ps.iata = req.iata AND ps.scope_id = sc.id
-      AND (ps.site_heard_at, ps.packet_hash) < (@cursor_ts::timestamptz, @cursor_hash::bytea)
-    ORDER BY ps.site_heard_at DESC, ps.packet_hash DESC
-    LIMIT @scan_depth) w
-  -- No packet was first heard at or after since: nothing can match, so no range is read. A packet's last_heard_at
-  -- is at or after its first_heard_at, except the rows idx_packets_heard_inverted holds.
-  -- Both maxima are one index probe each.
-  WHERE (SELECT max(g.last_heard_at) FROM packets g) >= @since_ts::timestamptz
-     OR (SELECT max(g.first_heard_at) FROM packets g WHERE (g.first_heard_at > g.last_heard_at) IS TRUE) >= @since_ts::timestamptz
-), floor AS (
-  -- Every range that filled scan_depth has unread entries below its last one; the highest such entry bounds
-  -- what this page knows exactly.
-  SELECT f.site_heard_at, f.packet_hash
-  FROM (SELECT DISTINCT ON (w.iata, w.scope_id) w.site_heard_at, w.packet_hash
-        FROM scanned w
-        WHERE (w.iata, w.scope_id) IN (SELECT w.iata, w.scope_id FROM scanned w GROUP BY w.iata, w.scope_id HAVING count(*) >= @scan_depth)
-        ORDER BY w.iata, w.scope_id, w.site_heard_at, w.packet_hash) f
-  ORDER BY f.site_heard_at DESC, f.packet_hash DESC
-  LIMIT 1
-), page AS (
+-- name: ListPacketsBySitesWindow :many
+-- Page keys for a first_heard_at window (absent sides are -infinity and infinity), filtered by types. The caller
+-- passes lo_ts = since - 30 minutes and hi_ts = until + 30 minutes (-infinity / infinity without that side), and
+-- main_ts/main_hash = the cursor, lowered to (hi_ts, a hash above every stored one) when the cursor is above hi_ts.
+-- An entry first heard in the window and heard at the site within 30 minutes of that lies in [lo_ts, hi_ts], so
+-- each site is read only from the page start down to lo_ts; the two partial indexes add the entries heard there
+-- more than 30 minutes later or earlier. Each part stops at page_limit matching entries. Go passes each type list
+-- deduplicated within its domain, so 64 pairs is every type: then the type test folds away and cannot steer a part
+-- to the type index.
+WITH page AS MATERIALIZED (
   SELECT s.packet_hash, max(s.site_heard_at) AS k
-  FROM scanned s
-  WHERE s.first_heard_at >= @since_ts::timestamptz AND s.first_heard_at <= @until_ts::timestamptz
-    AND s.payload_type = ANY(@payload_types::smallint[]) AND s.route_type = ANY(@route_types::smallint[])
+  FROM unnest(@iatas::bpchar[]) AS req(iata)
+  CROSS JOIN LATERAL (
+    -- idx_packet_sites_site: every entry from the page start down to lo_ts.
+    (SELECT ps.packet_hash, ps.site_heard_at
+     FROM packet_sites ps
+     WHERE ps.iata = req.iata
+       AND (ps.site_heard_at, ps.packet_hash) < (@main_ts::timestamptz, @main_hash::bytea)
+       AND ps.site_heard_at >= @lo_ts::timestamptz
+       AND ps.first_heard_at >= @since_ts::timestamptz AND ps.first_heard_at <= @until_ts::timestamptz
+       AND (cardinality(@payload_types::smallint[]) * cardinality(@route_types::smallint[]) = 64
+            OR (ps.payload_type = ANY(@payload_types::smallint[]) AND ps.route_type = ANY(@route_types::smallint[])))
+       AND (NOT @recheck::boolean OR NOT EXISTS (SELECT 1 FROM packet_sites x
+             WHERE x.packet_hash = ps.packet_hash AND x.iata = ANY(@iatas::bpchar[])
+               AND (x.site_heard_at, x.packet_hash) >= (@cursor_ts::timestamptz, @cursor_hash::bytea)
+             OFFSET 0))   -- a per-row SubPlan in both plan modes, never an anti join
+     ORDER BY ps.site_heard_at DESC, ps.packet_hash DESC
+     LIMIT @page_limit)
+    UNION ALL
+    -- idx_packet_sites_late: entries above hi_ts can only match when heard there over 30 minutes after first heard.
+    (SELECT ps.packet_hash, ps.site_heard_at
+     FROM packet_sites ps
+     WHERE @hi_ts::timestamptz <> 'infinity'::timestamptz
+       AND ps.iata = req.iata AND (ps.site_heard_at - ps.first_heard_at) > '00:30:00'::interval
+       AND (ps.site_heard_at, ps.packet_hash) < (@cursor_ts::timestamptz, @cursor_hash::bytea)
+       AND ps.site_heard_at > @hi_ts::timestamptz
+       AND ps.first_heard_at >= @since_ts::timestamptz AND ps.first_heard_at <= @until_ts::timestamptz
+       AND (cardinality(@payload_types::smallint[]) * cardinality(@route_types::smallint[]) = 64
+            OR (ps.payload_type = ANY(@payload_types::smallint[]) AND ps.route_type = ANY(@route_types::smallint[])))
+       AND (NOT @recheck::boolean OR NOT EXISTS (SELECT 1 FROM packet_sites x
+             WHERE x.packet_hash = ps.packet_hash AND x.iata = ANY(@iatas::bpchar[])
+               AND (x.site_heard_at, x.packet_hash) >= (@cursor_ts::timestamptz, @cursor_hash::bytea)
+             OFFSET 0))   -- a per-row SubPlan in both plan modes, never an anti join
+     ORDER BY ps.site_heard_at DESC, ps.packet_hash DESC
+     LIMIT @page_limit)
+    UNION ALL
+    -- idx_packet_sites_early: entries below lo_ts can only match when heard there over 30 minutes before first
+    -- heard. That index is about empty; the fence leaves the subquery only conditions no other index bounds, so no
+    -- site, type or scope range is read for it.
+    (SELECT e.packet_hash, e.site_heard_at
+     FROM (SELECT ps.packet_hash, ps.site_heard_at, ps.payload_type, ps.route_type, ps.scope_id
+           FROM packet_sites ps
+           WHERE @lo_ts::timestamptz <> '-infinity'::timestamptz
+             AND ps.iata = req.iata AND (ps.first_heard_at - ps.site_heard_at) > '00:30:00'::interval
+             AND ps.first_heard_at >= @since_ts::timestamptz AND ps.first_heard_at <= @until_ts::timestamptz
+           OFFSET 0) e
+     WHERE e.site_heard_at < @lo_ts::timestamptz
+       AND (cardinality(@payload_types::smallint[]) * cardinality(@route_types::smallint[]) = 64
+            OR (e.payload_type = ANY(@payload_types::smallint[]) AND e.route_type = ANY(@route_types::smallint[])))
+       AND (e.site_heard_at, e.packet_hash) < (@cursor_ts::timestamptz, @cursor_hash::bytea)
+       AND (NOT @recheck::boolean OR NOT EXISTS (SELECT 1 FROM packet_sites x
+             WHERE x.packet_hash = e.packet_hash AND x.iata = ANY(@iatas::bpchar[])
+               AND (x.site_heard_at, x.packet_hash) >= (@cursor_ts::timestamptz, @cursor_hash::bytea)
+             OFFSET 0))   -- a per-row SubPlan in both plan modes, never an anti join
+    )
+  ) s
   GROUP BY s.packet_hash
-  HAVING NOT EXISTS (SELECT 1 FROM floor f WHERE (max(s.site_heard_at), s.packet_hash) < (f.site_heard_at, f.packet_hash))
-    AND (NOT @recheck::boolean OR NOT EXISTS (
-      SELECT 1 FROM packet_sites x
-      WHERE x.packet_hash = s.packet_hash
-        AND x.iata = ANY(@iatas::bpchar[])
-        AND (x.site_heard_at, x.packet_hash) >= (@cursor_ts::timestamptz, @cursor_hash::bytea)))
   ORDER BY max(s.site_heard_at) DESC, s.packet_hash DESC
   LIMIT @page_limit
 )
-SELECT false AS is_floor, pg.packet_hash, pg.k::timestamptz AS site_heard_at FROM page pg
-UNION ALL
-SELECT true, f.packet_hash, f.site_heard_at FROM floor f
-ORDER BY 1, 3 DESC, 2 DESC;
+SELECT pg.packet_hash, pg.k::timestamptz AS site_heard_at FROM page pg ORDER BY pg.k DESC, pg.packet_hash DESC;
+
+-- name: ListPacketsBySitesScopedWindow :many
+-- ListPacketsBySitesWindow with one range per (site, named scope).
+WITH page AS MATERIALIZED (
+  SELECT s.packet_hash, max(s.site_heard_at) AS k
+  FROM unnest(@iatas::bpchar[]) AS req(iata)
+  CROSS JOIN (SELECT id FROM transport_scopes WHERE name = ANY(@scope_names::text[])) sc
+  CROSS JOIN LATERAL (
+    -- idx_packet_sites_site_scope: every entry from the page start down to lo_ts.
+    (SELECT ps.packet_hash, ps.site_heard_at
+     FROM packet_sites ps
+     WHERE ps.iata = req.iata
+       AND ps.scope_id = sc.id
+       AND (ps.site_heard_at, ps.packet_hash) < (@main_ts::timestamptz, @main_hash::bytea)
+       AND ps.site_heard_at >= @lo_ts::timestamptz
+       AND ps.first_heard_at >= @since_ts::timestamptz AND ps.first_heard_at <= @until_ts::timestamptz
+       AND (cardinality(@payload_types::smallint[]) * cardinality(@route_types::smallint[]) = 64
+            OR (ps.payload_type = ANY(@payload_types::smallint[]) AND ps.route_type = ANY(@route_types::smallint[])))
+       AND (NOT @recheck::boolean OR NOT EXISTS (SELECT 1 FROM packet_sites x
+             WHERE x.packet_hash = ps.packet_hash AND x.iata = ANY(@iatas::bpchar[])
+               AND (x.site_heard_at, x.packet_hash) >= (@cursor_ts::timestamptz, @cursor_hash::bytea)
+             OFFSET 0))   -- a per-row SubPlan in both plan modes, never an anti join
+     ORDER BY ps.site_heard_at DESC, ps.packet_hash DESC
+     LIMIT @page_limit)
+    UNION ALL
+    -- idx_packet_sites_late: entries above hi_ts can only match when heard there over 30 minutes after first heard.
+    (SELECT ps.packet_hash, ps.site_heard_at
+     FROM packet_sites ps
+     WHERE @hi_ts::timestamptz <> 'infinity'::timestamptz
+       AND ps.iata = req.iata AND (ps.site_heard_at - ps.first_heard_at) > '00:30:00'::interval
+       AND ps.scope_id = sc.id
+       AND (ps.site_heard_at, ps.packet_hash) < (@cursor_ts::timestamptz, @cursor_hash::bytea)
+       AND ps.site_heard_at > @hi_ts::timestamptz
+       AND ps.first_heard_at >= @since_ts::timestamptz AND ps.first_heard_at <= @until_ts::timestamptz
+       AND (cardinality(@payload_types::smallint[]) * cardinality(@route_types::smallint[]) = 64
+            OR (ps.payload_type = ANY(@payload_types::smallint[]) AND ps.route_type = ANY(@route_types::smallint[])))
+       AND (NOT @recheck::boolean OR NOT EXISTS (SELECT 1 FROM packet_sites x
+             WHERE x.packet_hash = ps.packet_hash AND x.iata = ANY(@iatas::bpchar[])
+               AND (x.site_heard_at, x.packet_hash) >= (@cursor_ts::timestamptz, @cursor_hash::bytea)
+             OFFSET 0))   -- a per-row SubPlan in both plan modes, never an anti join
+     ORDER BY ps.site_heard_at DESC, ps.packet_hash DESC
+     LIMIT @page_limit)
+    UNION ALL
+    -- idx_packet_sites_early: entries below lo_ts can only match when heard there over 30 minutes before first
+    -- heard. That index is about empty; the fence leaves the subquery only conditions no other index bounds, so no
+    -- site, type or scope range is read for it.
+    (SELECT e.packet_hash, e.site_heard_at
+     FROM (SELECT ps.packet_hash, ps.site_heard_at, ps.payload_type, ps.route_type, ps.scope_id
+           FROM packet_sites ps
+           WHERE @lo_ts::timestamptz <> '-infinity'::timestamptz
+             AND ps.iata = req.iata AND (ps.first_heard_at - ps.site_heard_at) > '00:30:00'::interval
+             AND ps.first_heard_at >= @since_ts::timestamptz AND ps.first_heard_at <= @until_ts::timestamptz
+           OFFSET 0) e
+     WHERE e.site_heard_at < @lo_ts::timestamptz
+       AND e.scope_id = sc.id
+       AND (cardinality(@payload_types::smallint[]) * cardinality(@route_types::smallint[]) = 64
+            OR (e.payload_type = ANY(@payload_types::smallint[]) AND e.route_type = ANY(@route_types::smallint[])))
+       AND (e.site_heard_at, e.packet_hash) < (@cursor_ts::timestamptz, @cursor_hash::bytea)
+       AND (NOT @recheck::boolean OR NOT EXISTS (SELECT 1 FROM packet_sites x
+             WHERE x.packet_hash = e.packet_hash AND x.iata = ANY(@iatas::bpchar[])
+               AND (x.site_heard_at, x.packet_hash) >= (@cursor_ts::timestamptz, @cursor_hash::bytea)
+             OFFSET 0))   -- a per-row SubPlan in both plan modes, never an anti join
+    )
+  ) s
+  GROUP BY s.packet_hash
+  ORDER BY max(s.site_heard_at) DESC, s.packet_hash DESC
+  LIMIT @page_limit
+)
+SELECT pg.packet_hash, pg.k::timestamptz AS site_heard_at FROM page pg ORDER BY pg.k DESC, pg.packet_hash DESC;
+
+-- name: ListPacketsBySitesTypedWindow :many
+-- ListPacketsBySitesWindow with a type filter: one range per (site, payload type, route type) instead of each site's
+-- range, so a rare type reads at most page_limit entries per pair. Go sends only lists below the 64 pairs that mean
+-- every type.
+WITH page AS MATERIALIZED (
+  SELECT s.packet_hash, max(s.site_heard_at) AS k
+  FROM (
+    -- idx_packet_sites_site_type: one range per pair, from the page start down to lo_ts.
+    SELECT m.packet_hash, m.site_heard_at
+    FROM unnest(@iatas::bpchar[]) AS req(iata)
+    CROSS JOIN unnest(@payload_types::smallint[]) AS pt(t)
+    CROSS JOIN unnest(@route_types::smallint[]) AS rt(t)
+    CROSS JOIN LATERAL (
+      SELECT ps.packet_hash, ps.site_heard_at
+      FROM packet_sites ps
+      WHERE ps.iata = req.iata AND ps.payload_type = pt.t AND ps.route_type = rt.t
+        AND (ps.site_heard_at, ps.packet_hash) < (@main_ts::timestamptz, @main_hash::bytea)
+        AND ps.site_heard_at >= @lo_ts::timestamptz
+        AND ps.first_heard_at >= @since_ts::timestamptz AND ps.first_heard_at <= @until_ts::timestamptz
+        AND (NOT @recheck::boolean OR NOT EXISTS (SELECT 1 FROM packet_sites x
+              WHERE x.packet_hash = ps.packet_hash AND x.iata = ANY(@iatas::bpchar[])
+                AND (x.site_heard_at, x.packet_hash) >= (@cursor_ts::timestamptz, @cursor_hash::bytea)
+              OFFSET 0))   -- a per-row SubPlan in both plan modes, never an anti join
+      ORDER BY ps.site_heard_at DESC, ps.packet_hash DESC
+      LIMIT @page_limit) m
+    UNION ALL
+    SELECT x.packet_hash, x.site_heard_at
+    FROM unnest(@iatas::bpchar[]) AS req(iata)
+    CROSS JOIN LATERAL (
+      -- idx_packet_sites_late: entries above hi_ts heard there over 30 minutes after first heard, a small share of
+      -- the window above until. The fence leaves the subquery only conditions the type index does not bound.
+      (SELECT l.packet_hash, l.site_heard_at
+       FROM (SELECT ps.packet_hash, ps.site_heard_at, ps.first_heard_at, ps.payload_type, ps.route_type, ps.scope_id
+             FROM packet_sites ps
+             WHERE @hi_ts::timestamptz <> 'infinity'::timestamptz
+               AND ps.iata = req.iata AND (ps.site_heard_at - ps.first_heard_at) > '00:30:00'::interval
+               AND (ps.site_heard_at, ps.packet_hash) < (@cursor_ts::timestamptz, @cursor_hash::bytea)
+               AND ps.site_heard_at > @hi_ts::timestamptz
+             OFFSET 0) l
+       WHERE l.first_heard_at >= @since_ts::timestamptz AND l.first_heard_at <= @until_ts::timestamptz
+         AND l.payload_type = ANY(@payload_types::smallint[]) AND l.route_type = ANY(@route_types::smallint[])
+         AND (NOT @recheck::boolean OR NOT EXISTS (SELECT 1 FROM packet_sites x
+               WHERE x.packet_hash = l.packet_hash AND x.iata = ANY(@iatas::bpchar[])
+                 AND (x.site_heard_at, x.packet_hash) >= (@cursor_ts::timestamptz, @cursor_hash::bytea)
+               OFFSET 0))   -- a per-row SubPlan in both plan modes, never an anti join
+       ORDER BY l.site_heard_at DESC, l.packet_hash DESC
+       LIMIT @page_limit)
+      UNION ALL
+      -- idx_packet_sites_early: entries below lo_ts heard there over 30 minutes before first heard (about empty).
+      (SELECT e.packet_hash, e.site_heard_at
+       FROM (SELECT ps.packet_hash, ps.site_heard_at, ps.payload_type, ps.route_type, ps.scope_id
+             FROM packet_sites ps
+             WHERE @lo_ts::timestamptz <> '-infinity'::timestamptz
+               AND ps.iata = req.iata AND (ps.first_heard_at - ps.site_heard_at) > '00:30:00'::interval
+               AND ps.first_heard_at >= @since_ts::timestamptz AND ps.first_heard_at <= @until_ts::timestamptz
+             OFFSET 0) e
+       WHERE e.site_heard_at < @lo_ts::timestamptz
+         AND e.payload_type = ANY(@payload_types::smallint[]) AND e.route_type = ANY(@route_types::smallint[])
+         AND (e.site_heard_at, e.packet_hash) < (@cursor_ts::timestamptz, @cursor_hash::bytea)
+         AND (NOT @recheck::boolean OR NOT EXISTS (SELECT 1 FROM packet_sites x
+               WHERE x.packet_hash = e.packet_hash AND x.iata = ANY(@iatas::bpchar[])
+                 AND (x.site_heard_at, x.packet_hash) >= (@cursor_ts::timestamptz, @cursor_hash::bytea)
+               OFFSET 0))   -- a per-row SubPlan in both plan modes, never an anti join
+      )
+    ) x
+  ) s
+  GROUP BY s.packet_hash
+  ORDER BY max(s.site_heard_at) DESC, s.packet_hash DESC
+  LIMIT @page_limit
+)
+SELECT pg.packet_hash, pg.k::timestamptz AS site_heard_at FROM page pg ORDER BY pg.k DESC, pg.packet_hash DESC;
+
+-- name: ListPacketsBySitesScopedTypedWindow :many
+-- ListPacketsBySitesScopedWindow with a type filter: one range per (site, scope, payload type, route type).
+WITH page AS MATERIALIZED (
+  SELECT s.packet_hash, max(s.site_heard_at) AS k
+  FROM (
+    -- idx_packet_sites_site_scope_type: one range per pair, from the page start down to lo_ts.
+    SELECT m.packet_hash, m.site_heard_at
+    FROM unnest(@iatas::bpchar[]) AS req(iata)
+    CROSS JOIN (SELECT id FROM transport_scopes WHERE name = ANY(@scope_names::text[])) sc
+    CROSS JOIN unnest(@payload_types::smallint[]) AS pt(t)
+    CROSS JOIN unnest(@route_types::smallint[]) AS rt(t)
+    CROSS JOIN LATERAL (
+      SELECT ps.packet_hash, ps.site_heard_at
+      FROM packet_sites ps
+      WHERE ps.iata = req.iata AND ps.scope_id = sc.id AND ps.payload_type = pt.t AND ps.route_type = rt.t
+        AND (ps.site_heard_at, ps.packet_hash) < (@main_ts::timestamptz, @main_hash::bytea)
+        AND ps.site_heard_at >= @lo_ts::timestamptz
+        AND ps.first_heard_at >= @since_ts::timestamptz AND ps.first_heard_at <= @until_ts::timestamptz
+        AND (NOT @recheck::boolean OR NOT EXISTS (SELECT 1 FROM packet_sites x
+              WHERE x.packet_hash = ps.packet_hash AND x.iata = ANY(@iatas::bpchar[])
+                AND (x.site_heard_at, x.packet_hash) >= (@cursor_ts::timestamptz, @cursor_hash::bytea)
+              OFFSET 0))   -- a per-row SubPlan in both plan modes, never an anti join
+      ORDER BY ps.site_heard_at DESC, ps.packet_hash DESC
+      LIMIT @page_limit) m
+    UNION ALL
+    SELECT x.packet_hash, x.site_heard_at
+    FROM unnest(@iatas::bpchar[]) AS req(iata)
+    CROSS JOIN (SELECT id FROM transport_scopes WHERE name = ANY(@scope_names::text[])) sc
+    CROSS JOIN LATERAL (
+      -- idx_packet_sites_late: entries above hi_ts heard there over 30 minutes after first heard, a small share of
+      -- the window above until. The fence leaves the subquery only conditions the type index does not bound.
+      (SELECT l.packet_hash, l.site_heard_at
+       FROM (SELECT ps.packet_hash, ps.site_heard_at, ps.first_heard_at, ps.payload_type, ps.route_type, ps.scope_id
+             FROM packet_sites ps
+             WHERE @hi_ts::timestamptz <> 'infinity'::timestamptz
+               AND ps.iata = req.iata AND (ps.site_heard_at - ps.first_heard_at) > '00:30:00'::interval
+               AND (ps.site_heard_at, ps.packet_hash) < (@cursor_ts::timestamptz, @cursor_hash::bytea)
+               AND ps.site_heard_at > @hi_ts::timestamptz
+             OFFSET 0) l
+       WHERE l.first_heard_at >= @since_ts::timestamptz AND l.first_heard_at <= @until_ts::timestamptz
+         AND l.scope_id = sc.id
+         AND l.payload_type = ANY(@payload_types::smallint[]) AND l.route_type = ANY(@route_types::smallint[])
+         AND (NOT @recheck::boolean OR NOT EXISTS (SELECT 1 FROM packet_sites x
+               WHERE x.packet_hash = l.packet_hash AND x.iata = ANY(@iatas::bpchar[])
+                 AND (x.site_heard_at, x.packet_hash) >= (@cursor_ts::timestamptz, @cursor_hash::bytea)
+               OFFSET 0))   -- a per-row SubPlan in both plan modes, never an anti join
+       ORDER BY l.site_heard_at DESC, l.packet_hash DESC
+       LIMIT @page_limit)
+      UNION ALL
+      -- idx_packet_sites_early: entries below lo_ts heard there over 30 minutes before first heard (about empty).
+      (SELECT e.packet_hash, e.site_heard_at
+       FROM (SELECT ps.packet_hash, ps.site_heard_at, ps.payload_type, ps.route_type, ps.scope_id
+             FROM packet_sites ps
+             WHERE @lo_ts::timestamptz <> '-infinity'::timestamptz
+               AND ps.iata = req.iata AND (ps.first_heard_at - ps.site_heard_at) > '00:30:00'::interval
+               AND ps.first_heard_at >= @since_ts::timestamptz AND ps.first_heard_at <= @until_ts::timestamptz
+             OFFSET 0) e
+       WHERE e.site_heard_at < @lo_ts::timestamptz
+         AND e.scope_id = sc.id
+         AND e.payload_type = ANY(@payload_types::smallint[]) AND e.route_type = ANY(@route_types::smallint[])
+         AND (e.site_heard_at, e.packet_hash) < (@cursor_ts::timestamptz, @cursor_hash::bytea)
+         AND (NOT @recheck::boolean OR NOT EXISTS (SELECT 1 FROM packet_sites x
+               WHERE x.packet_hash = e.packet_hash AND x.iata = ANY(@iatas::bpchar[])
+                 AND (x.site_heard_at, x.packet_hash) >= (@cursor_ts::timestamptz, @cursor_hash::bytea)
+               OFFSET 0))   -- a per-row SubPlan in both plan modes, never an anti join
+      )
+    ) x
+  ) s
+  GROUP BY s.packet_hash
+  ORDER BY max(s.site_heard_at) DESC, s.packet_hash DESC
+  LIMIT @page_limit
+)
+SELECT pg.packet_hash, pg.k::timestamptz AS site_heard_at FROM page pg ORDER BY pg.k DESC, pg.packet_hash DESC;
 
 -- name: ListPacketsBySiteKeys :many
--- The page rows for keys from ListPacketsBySitesSince or ListPacketsBySitesScoped, in the given order.
+-- The page rows for keys from ListPacketsBySitesSince and the window statements, in the given order.
 WITH page AS MATERIALIZED (
   SELECT h.packet_hash, t.k, h.ord
   FROM unnest(@packet_hashes::bytea[]) WITH ORDINALITY AS h(packet_hash, ord)

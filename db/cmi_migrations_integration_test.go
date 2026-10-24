@@ -17,6 +17,8 @@ var cmiMigrations = []string{
 	"039_cmi_channel_scope.sql",
 	"040_cmi_scope.sql",
 	"041_channel_messages_channel_id.sql",
+	"056_cmi_site_scope.sql",
+	"057_channel_messages_sent.sql",
 }
 
 // The migrations leave channel_message_iatas and channel_messages with exactly these indexes, all usable, and a
@@ -38,6 +40,8 @@ func TestCmiMigrationsIndexSetPostgres(t *testing.T) {
 		"idx_cmi_channel_site_scope":       "CREATE INDEX idx_cmi_channel_site_scope ON public.channel_message_iatas USING btree (channel_id, iata, scope_id, message_id DESC) WHERE (scope_id IS NOT NULL)",
 		"idx_cmi_channel_scope":            "CREATE INDEX idx_cmi_channel_scope ON public.channel_message_iatas USING btree (channel_id, scope_id, message_id DESC) WHERE (scope_id IS NOT NULL)",
 		"idx_cmi_scope":                    "CREATE INDEX idx_cmi_scope ON public.channel_message_iatas USING btree (scope_id, message_id DESC) WHERE (scope_id IS NOT NULL)",
+		"idx_cmi_site_scope":               "CREATE INDEX idx_cmi_site_scope ON public.channel_message_iatas USING btree (iata, scope_id, message_id DESC) WHERE (scope_id IS NOT NULL)",
+		"idx_channel_messages_sent":        "CREATE INDEX idx_channel_messages_sent ON public.channel_messages USING btree (sent_at)",
 		"channel_messages_pkey":            "CREATE UNIQUE INDEX channel_messages_pkey ON public.channel_messages USING btree (id)",
 		"channel_messages_packet_hash_key": "CREATE UNIQUE INDEX channel_messages_packet_hash_key ON public.channel_messages USING btree (packet_hash)",
 		"idx_channel_messages_channel_id":  "CREATE INDEX idx_channel_messages_channel_id ON public.channel_messages USING btree (channel_id, id DESC)",

@@ -7,6 +7,6 @@ statements:
 admission_profiles:
   global_page: [page1, deep, tie]
 entries:
-  - {id: gh.page1, stmt: ListKnownRoutesGlobalHop, shapes: [page1], params: [6, null, 0, 50]}
-  - {id: gh.deep, stmt: ListKnownRoutesGlobalHop, shapes: [deep], params: [6, "2026-01-01 00:00:00+00", 0, 50]}
-  - {id: gh.tie, stmt: ListKnownRoutesGlobalHop, shapes: [tie], params: [6, "2026-01-01 00:00:00+00", 10, 50]}
+  - {id: gh.page1, stmt: ListKnownRoutesGlobalHop, shapes: [page1], params: [6, null, 0, false, 50]}
+  - {id: gh.deep, stmt: ListKnownRoutesGlobalHop, shapes: [deep], params: [6, "2026-01-01 00:00:00+00", 0, false, 50]}
+  - {id: gh.tie, stmt: ListKnownRoutesGlobalHop, shapes: [tie], params: [6, "2026-01-01 00:00:00+00", 10, false, 50]}

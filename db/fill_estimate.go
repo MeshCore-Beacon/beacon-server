@@ -5,6 +5,7 @@ package db
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -72,4 +73,50 @@ func (h idHistogram) rowsOrIDs(after, through int64) int64 {
 		return n
 	}
 	return max(through-after, 0)
+}
+
+// idAtRows is the lowest id x in [after, through] with rowsOrIDs(after, x) >= k: the id about k rows above after.
+func (h idHistogram) idAtRows(after, through, k int64) int64 {
+	lo, hi := after, through
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		if h.rowsOrIDs(after, mid) >= k {
+			hi = mid
+		} else {
+			lo = mid + 1
+		}
+	}
+	return lo
+}
+
+// sliceStart picks the lower bound of a sampled slice in (after, through]: the id u of the way (u in [0, 1))
+// through the range's estimated rows, leaving room for slice rows above it, so each row is as likely to be sampled
+// as any other however sparse its ids are (except the range's first slice rows, which only a start near after
+// covers). Without statistics it picks by ids, as rows and ids then coincide.
+func (h idHistogram) sliceStart(after, through, slice int64, u float64) int64 {
+	room := h.rowsOrIDs(after, through) - slice
+	if room <= 0 {
+		return after
+	}
+	return h.idAtRows(after, through, int64(u*float64(room)))
+}
+
+// ObservationRows estimates the observations in an id range from the planner's statistics on packet_observations,
+// counting ids where there are none. Progress logs use it, so long empty id ranges count for what they cost.
+type ObservationRows struct{ h idHistogram }
+
+// In is the estimated number of observations with ids in (after, through].
+func (r ObservationRows) In(after, through int64) int64 { return r.h.rowsOrIDs(after, through) }
+
+// ObservationRows reads the statistics for an estimate; a failed read is logged and estimates by ids.
+func (s *Store) ObservationRows(ctx context.Context) ObservationRows {
+	if s.pool == nil {
+		return ObservationRows{}
+	}
+	h, err := loadObservationIDHistogram(ctx, s.pool)
+	if err != nil {
+		slog.Warn("cannot read observation statistics; progress counts ids", "component", "db", "error", err)
+		return ObservationRows{}
+	}
+	return ObservationRows{h}
 }

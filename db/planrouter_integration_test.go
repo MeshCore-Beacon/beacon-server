@@ -95,8 +95,8 @@ func newPlanRouterFromPools(p *Pools, layout planpolicy.Layout, gate guards.Gate
 		}
 		return planpolicy.ClassOf(name)
 	}
-	return newPlanRouter(wrapPool(p.APILegacy, PoolAPILegacy), wrapPool(p.APISlow, PoolAPISlow), wrapPool(p.APICustom, PoolAPICustom),
-		wrapPool(p.APICached, PoolAPICached), layout, gate, classOf)
+	return newPlanRouter(wrapPool(p.APILegacy, PoolAPILegacy), wrapPool(p.APICustom, PoolAPICustom), wrapPool(p.APICached, PoolAPICached),
+		layout, gate, classOf)
 }
 
 // A class C statement run 7 times on one pooled connection never becomes a named prepared

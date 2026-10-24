@@ -116,7 +116,7 @@ func genPolicyCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "planguard:", err)
 		return 1
 	}
-	src, err := planguard.GenPolicy(c, planpolicy.Slow)
+	src, err := planguard.GenPolicy(c, planpolicy.VerificationOnly)
 	if err != nil {
 		fmt.Fprintln(stderr, "planguard gen-policy:", err)
 		return 1
