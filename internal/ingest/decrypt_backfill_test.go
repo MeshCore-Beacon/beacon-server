@@ -23,11 +23,15 @@ type resumableDB struct {
 	decrypted map[string]bool
 	stored    map[string]int
 	lists     int
+	entered   chan struct{} // when set, each list says it has started, before it waits for release
 	release   chan struct{} // when set, each list waits for it
 	onInsert  func()        // when set, runs at the start of each message insert
 }
 
 func (d *resumableDB) ListUndecryptedGroupTextPackets(context.Context) ([]UndecryptedPacket, error) {
+	if d.entered != nil {
+		d.entered <- struct{}{}
+	}
 	if d.release != nil {
 		<-d.release
 	}
@@ -159,23 +163,21 @@ func TestDecryptBackfillMarksPacketsWithStoredMessages(t *testing.T) {
 // every channel covers one for some.
 func TestDecryptBackfillMergesRequests(t *testing.T) {
 	d, keys := newResumableDB(t, 3)
-	d.release = make(chan struct{})
+	d.entered, d.release = make(chan struct{}), make(chan struct{})
 	b := NewDecryptBackfill(d, keys, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { b.Run(ctx); close(done) }()
 	b.RequestAll() // returns at once: the caller (boot) never waits for the database
-	d.release <- struct{}{}
+	<-d.entered    // the boot run is listing, and holds no request any more
 	b.RequestHashes([][]byte{{0x44}})
 	b.RequestAll()
 	b.RequestAll()
-	d.release <- struct{}{}
-	deadline := time.Now().Add(5 * time.Second)
-	for d.listed() < 2 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
+	d.release <- struct{}{} // the boot run finishes; the three requests are one more run, over every channel
+	<-d.entered
+	d.release <- struct{}{} // the merged run has listed (an unbuffered hand-off), so it counts below
 	cancel()
-	<-done
+	<-done // Run returns only after the run in progress, and no request is left for a third
 	if d.listed() != 2 || d.backfillHashes != nil {
 		t.Fatalf("%d full runs and hash runs %x; want the boot run and one merged run", d.listed(), d.backfillHashes)
 	}
