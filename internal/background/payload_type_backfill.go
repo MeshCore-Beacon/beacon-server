@@ -104,7 +104,7 @@ func payloadTypeBackfillTask(store payloadTypeBackfiller, interval time.Duration
 			}
 			// The ETA uses the rate the observations below next grow at and each run's own remaining count, both
 			// estimated from the statistics, so a long, sparse old id range counts for what it holds.
-			progress.Start(rows.In(minID-1, next-1))
+			progress.Start(rows.In(0, next-1)) // from id 0: retention raising minID must not move the position back
 			var typed int64
 			defer func() {
 				metrics.JobRows.WithLabelValues("payload_type_backfill").Add(float64(typed))
@@ -113,7 +113,7 @@ func payloadTypeBackfillTask(store payloadTypeBackfiller, interval time.Duration
 				attrs := []any{"component", "background", "next_id", next, "max_id", maxID, "rows", typed,
 					"ids_done", max(next-minID, 0), "ids_remaining", remaining,
 					"observations_done", done, "observations_remaining", left}
-				if eta, ok := progress.ETA(done, left); ok {
+				if eta, ok := progress.ETA(rows.In(0, next-1), left); ok {
 					attrs = append(attrs, "eta", eta.Round(time.Second).String())
 				}
 				slog.Info("observation payload type backfill progress: observer advert pages answer 503 until it is done", attrs...)

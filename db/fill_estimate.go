@@ -91,7 +91,8 @@ func (h idHistogram) idAtRows(after, through, k int64) int64 {
 
 // sliceStart picks the lower bound of a sampled slice in (after, through]: the id u of the way (u in [0, 1))
 // through the range's estimated rows, leaving room for slice rows above it, so each row is as likely to be sampled
-// as any other however sparse its ids are. Without statistics it picks by ids, as rows and ids then coincide.
+// as any other however sparse its ids are (except the range's first slice rows, which only a start near after
+// covers). Without statistics it picks by ids, as rows and ids then coincide.
 func (h idHistogram) sliceStart(after, through, slice int64, u float64) int64 {
 	room := h.rowsOrIDs(after, through) - slice
 	if room <= 0 {

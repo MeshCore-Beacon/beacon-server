@@ -242,16 +242,20 @@ func (p *PacketSitesSession) Backfill(ctx context.Context, budget time.Duration)
 	return p.state, nil
 }
 
-// sampleSlice picks a slice of p.sample observations in (after, through], starting u of the way through the
-// range by row (see idHistogram.sliceStart); a range holding fewer observations is sampled whole.
-func (p *PacketSitesSession) sampleSlice(ctx context.Context, q sqlc.Querier, stats interface {
-	QueryRow(context.Context, string, ...any) pgx.Row
-}, after, through int64, u float64) (int64, int64, error) {
-	ids, err := loadObservationIDHistogram(ctx, stats)
+// loadSampleIDs reads the statistics a sampled slice is picked with, outside any transaction, so a failed read
+// only falls back to picking by ids.
+func (p *PacketSitesSession) loadSampleIDs(ctx context.Context) idHistogram {
+	ids, err := loadObservationIDHistogram(ctx, p.conn)
 	if err != nil {
 		slog.Warn("packet_sites: cannot read observation statistics; the sampled slice is picked by ids", "component", "readmodel", "error", err)
-		ids = idHistogram{}
+		return idHistogram{}
 	}
+	return ids
+}
+
+// sampleSlice picks a slice of p.sample observations in (after, through], starting u of the way through the
+// range by row (see idHistogram.sliceStart); a range holding fewer observations is sampled whole.
+func (p *PacketSitesSession) sampleSlice(ctx context.Context, q sqlc.Querier, ids idHistogram, after, through int64, u float64) (int64, int64, error) {
 	from := ids.sliceStart(after, through, p.sample, u)
 	to, err := q.ObservationIDAbove(ctx, sqlc.ObservationIDAboveParams{AfterID: from, Skip: p.sample - 1})
 	if err != nil {
@@ -325,7 +329,7 @@ func (p *PacketSitesSession) Audit(ctx context.Context, u float64) (int64, error
 	if lo == 0 || top < lo {
 		return 0, nil
 	}
-	after, through, err := p.sampleSlice(ctx, p.q, p.conn, lo-1, top, u)
+	after, through, err := p.sampleSlice(ctx, p.q, p.loadSampleIDs(ctx), lo-1, top, u)
 	if err != nil {
 		return 0, err
 	}
@@ -376,6 +380,7 @@ func (p *PacketSitesSession) Verify(ctx context.Context) (PacketSitesVerificatio
 			p.store.packetSitesVacuums.Add(1)
 		}
 	}
+	ids := p.loadSampleIDs(ctx)
 	tx, err := p.conn.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return PacketSitesVerification{}, err
@@ -391,7 +396,7 @@ func (p *PacketSitesSession) Verify(ctx context.Context) (PacketSitesVerificatio
 	if lo > 0 && hi-packetSitesSlice >= lo {
 		// A random slice of the observations below, picked by row: in a long, sparse old id range a slice of ids
 		// would hold almost nothing.
-		after, through, err := p.sampleSlice(ctx, q, tx, lo-1, hi-packetSitesSlice, rand.Float64())
+		after, through, err := p.sampleSlice(ctx, q, ids, lo-1, hi-packetSitesSlice, rand.Float64())
 		if err != nil {
 			return PacketSitesVerification{}, err
 		}
