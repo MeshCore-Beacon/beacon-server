@@ -374,19 +374,19 @@ func TestPacketSitesAuditPostgres(t *testing.T) {
 	if _, err := p.Backfill(f.ctx, time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	lowest := func(lo, _ int64) int64 { return lo }
-	if n, err := p.Audit(f.ctx, lowest); err != nil || n != 0 || fmt.Sprint(p.fills[len(p.fills)-1]) != "[3000000000 3000500000]" {
+	// 600 observations, fewer than a sampled slice: the audit covers all of them.
+	if n, err := p.Audit(f.ctx, 0); err != nil || n != 0 || fmt.Sprint(p.fills[len(p.fills)-1]) != "[3000000000 3001200000]" {
 		t.Fatalf("clean audit %d, %v, %v", n, err, p.fills)
 	}
 	// A row lost below the watermark (manual SQL) comes back from the audit of its slice.
 	f.exec(`DELETE FROM packet_sites WHERE (packet_hash, iata) = (
   SELECT packet_hash, iata FROM packet_observations WHERE id = 3000000001)`)
-	if n, err := p.Audit(f.ctx, lowest); err != nil || n != 1 {
+	if n, err := p.Audit(f.ctx, 0); err != nil || n != 1 {
 		t.Fatalf("audit repaired %d, %v; want 1", n, err)
 	}
 	f.wantClean("audited")
 
-	// Less than one slice below the watermark: the audit covers (min - 1, ReconPrevHi].
+	// Fewer observations than a slice below the watermark: the audit covers (min - 1, ReconPrevHi] wherever u points.
 	g := newPsFixture(t)
 	g.sited(g.packets(20)...)
 	s := g.begin()
@@ -394,7 +394,7 @@ func TestPacketSitesAuditPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Audit(g.ctx, func(int64, int64) int64 { t.Fatal("start called for a short range"); return 0 }); err != nil {
+	if _, err := s.Audit(g.ctx, 0.99); err != nil {
 		t.Fatal(err)
 	}
 	if fmt.Sprint(s.fills) != fmt.Sprint([][2]int64{{3_000_000_000, st.ReconPrevHi}}) {
@@ -416,7 +416,7 @@ func TestPacketSitesAuditTakesNewestHearingPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.exec("DELETE FROM packet_sites WHERE packet_hash = $1", p)
-	n, err := s.Audit(f.ctx, func(lo, _ int64) int64 { return lo })
+	n, err := s.Audit(f.ctx, 0)
 	if err != nil || n != 1 {
 		t.Fatalf("audit repaired %d, %v; want 1", n, err)
 	}

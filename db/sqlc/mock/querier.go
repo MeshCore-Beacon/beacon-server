@@ -2678,6 +2678,21 @@ func (mr *MockQuerierMockRecorder) NextChannelMessageID(ctx, afterID any) *gomoc
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NextChannelMessageID", reflect.TypeOf((*MockQuerier)(nil).NextChannelMessageID), ctx, afterID)
 }
 
+// ObservationIDAbove mocks base method.
+func (m *MockQuerier) ObservationIDAbove(ctx context.Context, arg db.ObservationIDAboveParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ObservationIDAbove", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ObservationIDAbove indicates an expected call of ObservationIDAbove.
+func (mr *MockQuerierMockRecorder) ObservationIDAbove(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ObservationIDAbove", reflect.TypeOf((*MockQuerier)(nil).ObservationIDAbove), ctx, arg)
+}
+
 // ObservationIDBelow mocks base method.
 func (m *MockQuerier) ObservationIDBelow(ctx context.Context, arg db.ObservationIDBelowParams) (int64, error) {
 	m.ctrl.T.Helper()
