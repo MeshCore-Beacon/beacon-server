@@ -121,42 +121,51 @@ func TestReaderErrorsAnswerTimeoutAs503(t *testing.T) {
 	}
 }
 
-// timeoutsCounted sums beacon_api_unavailable_total{reason="timeout"} over every model a page reads.
-func timeoutsCounted() float64 {
-	var n float64
+// timeouts reads beacon_api_unavailable_total{reason="timeout"} for every model a page reads.
+func timeouts() map[string]float64 {
+	out := map[string]float64{}
 	for _, m := range []string{"none", "cmi", "packet_sites", "observation_payload_types"} {
-		n += testutil.ToFloat64(metrics.APIUnavailable.WithLabelValues("timeout", m))
+		out[m] = testutil.ToFloat64(metrics.APIUnavailable.WithLabelValues("timeout", m))
 	}
-	return n
+	return out
 }
 
 // Every timeout 503 is counted once in beacon_api_unavailable_total: under its read model on a page that reads one,
 // under none on every other page; a 500 is not counted.
 func TestReaderTimeoutsAreCounted(t *testing.T) {
+	readModelPages := map[string]float64{"cmi": 2, "packet_sites": 1, "observation_payload_types": 1} // see readerErrorPaths
 	for _, c := range []struct {
-		err  error
-		want float64
+		err     error
+		timeout bool
 	}{
-		{&pgconn.PgError{Code: "57014"}, float64(len(readerErrorPaths))},
-		{errors.New("boom"), 0},
+		{&pgconn.PgError{Code: "57014"}, true},
+		{errors.New("boom"), false},
 	} {
 		handler := readerRoutes(errReader{err: fmt.Errorf("wrapped: %w", c.err)})
-		before, none := timeoutsCounted(), testutil.ToFloat64(metrics.APIUnavailable.WithLabelValues("timeout", "none"))
+		before := timeouts()
 		for _, path := range readerErrorPaths {
 			handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", path, nil))
 		}
-		if got := timeoutsCounted() - before; got != c.want {
-			t.Errorf("%v: %v timeouts counted over %d paths, want %v", c.err, got, len(readerErrorPaths), c.want)
+		after := timeouts()
+		want := map[string]float64{"none": 0, "cmi": 0, "packet_sites": 0, "observation_payload_types": 0}
+		if c.timeout {
+			want["none"] = float64(len(readerErrorPaths))
+			for m, n := range readModelPages {
+				want[m] = n
+				want["none"] -= n
+			}
 		}
-		if c.want > 0 && testutil.ToFloat64(metrics.APIUnavailable.WithLabelValues("timeout", "none"))-none < c.want-4 {
-			t.Errorf("%v: pages that read no read model were not counted under none", c.err)
+		for m, n := range want {
+			if got := after[m] - before[m]; got != n {
+				t.Errorf("%v: model %s counted %v timeouts, want %v", c.err, m, got, n)
+			}
 		}
 	}
-	// A handler's own time limit (the heavy stats and route searches) counts as a timeout too.
-	before := timeoutsCounted()
+	// A handler's own time limit (the heavy stats and route searches) counts as a timeout on a page with no model.
+	before := timeouts()
 	rec := httptest.NewRecorder()
 	respondTimeout(rec, "comparison timed out; try a shorter time period")
-	if rec.Code != http.StatusServiceUnavailable || timeoutsCounted()-before != 1 {
-		t.Errorf("respondTimeout: status %d, counted %v", rec.Code, timeoutsCounted()-before)
+	if after := timeouts(); rec.Code != http.StatusServiceUnavailable || after["none"]-before["none"] != 1 {
+		t.Errorf("respondTimeout: status %d, counted under none %v", rec.Code, after["none"]-before["none"])
 	}
 }

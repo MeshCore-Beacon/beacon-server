@@ -51,8 +51,9 @@ func writeTimeout(w http.ResponseWriter, message string) {
 		Code: "deadline_exceeded", Message: message})
 }
 
-// respondReaderError answers a failed read on a page that reads no read model: a retryable error is the 503
-// respondUnavailable writes, counted with model none, anything else a 500 with message that logs err.
+// respondReaderError answers a failed read: a retryable error is the 503 respondUnavailable writes, counted with
+// model none, anything else a 500 with message that logs err. A read-model page calls it only after
+// respondUnavailableFor found the error not retryable, so it writes the 500 and counts nothing.
 func respondReaderError(w http.ResponseWriter, err error, message string) {
 	if respondUnavailableFor(w, err, modelNone) {
 		return
