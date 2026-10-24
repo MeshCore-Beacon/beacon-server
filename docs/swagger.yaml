@@ -2481,6 +2481,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List channels
       tags:
       - Channels
@@ -2509,6 +2513,10 @@ paths:
             $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get channel detail
@@ -2592,6 +2600,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List all IATA codes
       tags:
       - IATAs
@@ -2616,6 +2628,10 @@ paths:
             $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get a single IATA code
@@ -2644,6 +2660,10 @@ paths:
             $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get an IATA's GeoJSON border, if configured
@@ -2778,6 +2798,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Backfill messages after a given message ID
       tags:
       - Messages
@@ -2868,6 +2892,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List nodes
       tags:
       - Nodes
@@ -2898,6 +2926,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get node detail
       tags:
       - Nodes
@@ -2924,6 +2956,10 @@ paths:
             $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List neighbors for a node
@@ -2961,6 +2997,10 @@ paths:
             $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List packet observations originating from a node
@@ -3036,6 +3076,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List observers
       tags:
       - Observers
@@ -3064,6 +3108,10 @@ paths:
             $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get observer detail
@@ -3110,6 +3158,10 @@ paths:
             $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get observer heard-activity history
@@ -3190,6 +3242,10 @@ paths:
             $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get observer telemetry history
@@ -3278,6 +3334,10 @@ paths:
             $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List observers with windowed traffic counts
@@ -3416,6 +3476,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get full packet detail. For trace packets (payloadType=9), includes
         resolvedRoute
       tags:
@@ -3481,6 +3545,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Backfill packets after a given observation ID
       tags:
       - Packets
@@ -3497,6 +3565,10 @@ paths:
             type: array
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List all regions
@@ -3527,6 +3599,10 @@ paths:
             $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get a single region
@@ -3574,6 +3650,10 @@ paths:
             $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List known routes
@@ -3785,6 +3865,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List transport scopes
       tags:
       - Scopes
@@ -3812,6 +3896,10 @@ paths:
             $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get scope detail by name
@@ -3852,6 +3940,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Repeaters/room servers whose clock has drifted beyond the configured
         threshold, worst first
       tags:
@@ -3882,6 +3974,10 @@ paths:
             type: array
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Node type breakdown
@@ -3919,6 +4015,10 @@ paths:
             type: array
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Hourly observation counts per IATA
@@ -4018,6 +4118,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Network overview stats (last 24 rolled hours)
       tags:
       - Stats
@@ -4110,6 +4214,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Observation counts by payload type (last 24h by default)
       tags:
       - Stats
@@ -4143,6 +4251,10 @@ paths:
             type: array
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Radio preset usage by IATA
@@ -4197,6 +4309,10 @@ paths:
             $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Scope statistics
@@ -4369,6 +4485,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Top N nodes by distinct flood or direct ADVERT packet count (last 24h
         by default)
       tags:
@@ -4415,6 +4535,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Top N nodes by advert hearings (last 7 days by default)
       tags:
       - Stats
@@ -4457,6 +4581,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Top N observers by observation count (last 24h by default)
       tags:
       - Stats
@@ -4497,6 +4625,10 @@ paths:
             type: array
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Top N companion names by decrypted channel message count (last 24h
@@ -4568,6 +4700,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List trace tags
       tags:
       - Traces
@@ -4592,6 +4728,10 @@ paths:
             $ref: '#/definitions/internal_api_handlers.APIError'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get full trace detail by tag

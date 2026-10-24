@@ -32,11 +32,26 @@ func respondUnavailable(w http.ResponseWriter, err error) bool {
 			Code: "service_unavailable", Message: "The server is busy with other slow requests. Retry later."})
 		return true
 	case isQueryTimeout(err):
-		guards.WriteRefusal(w, &guards.Refusal{Guard: "timeout", Status: http.StatusServiceUnavailable, RetryAfter: 10,
-			Code: "deadline_exceeded", Message: "This page took too long to load. Retry later, or ask for a shorter time range."})
+		respondTimeout(w, "This page took too long to load. Retry later, or ask for a shorter time range.")
 		return true
 	}
 	return false
+}
+
+// respondTimeout answers a read that ran out of time with 503 deadline_exceeded and Retry-After.
+func respondTimeout(w http.ResponseWriter, message string) {
+	guards.WriteRefusal(w, &guards.Refusal{Guard: "timeout", Status: http.StatusServiceUnavailable, RetryAfter: 10,
+		Code: "deadline_exceeded", Message: message})
+}
+
+// respondReaderError answers a failed read: a retryable error is the 503 respondUnavailable writes, anything else a
+// 500 with message that logs err.
+func respondReaderError(w http.ResponseWriter, err error, message string) {
+	if respondUnavailable(w, err) {
+		return
+	}
+	slog.Error(fmt.Sprintf("api: error %d: %s", http.StatusInternalServerError, message), "component", "api", "error", err)
+	writeError(w, http.StatusInternalServerError, message)
 }
 
 // isQueryTimeout reports a statement_timeout (57014) or deadline; a client that went away is not one.
@@ -72,6 +87,10 @@ func respondError(w http.ResponseWriter, status int, message string) {
 	if status >= 500 {
 		slog.Error(fmt.Sprintf("api: error %d: %s", status, message), "component", "api")
 	}
+	writeError(w, status, message)
+}
+
+func writeError(w http.ResponseWriter, status int, message string) {
 	code := strings.ToLower(strings.ReplaceAll(http.StatusText(status), " ", "_"))
 	respond(w, status, map[string]APIError{"error": {Code: code, Message: message}})
 }

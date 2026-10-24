@@ -487,6 +487,8 @@ type Querier interface {
 	RollAdvertHearings(ctx context.Context, hour pgtype.Timestamptz) error
 	// Each distinct ADVERT packet counts once, under the exact set of IATAs that heard it this hour.
 	RollAdvertSets(ctx context.Context, hour pgtype.Timestamptz) error
+	// Every Roll statement inserts in its table's primary-key order, so an hour's rows for one IATA share a few
+	// adjacent heap pages; the per-(hour, IATA) stats probes then read those pages instead of one page per row.
 	RollIATAObservations(ctx context.Context, hour pgtype.Timestamptz) error
 	RollObserverActivity(ctx context.Context, hour pgtype.Timestamptz) error
 	RollObserverIdentity(ctx context.Context, hour pgtype.Timestamptz) error
