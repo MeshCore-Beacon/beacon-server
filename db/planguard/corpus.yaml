@@ -83,6 +83,7 @@ statements:
   DeleteExpiredRoutes: {sqlc: DeleteExpiredRoutes, kind: dml, plan: maint}
   DeleteGraceRoutesSlice: {sqlc: DeleteGraceRoutesSlice, kind: dml, plan: maint}
   UpsertChannel: {sqlc: UpsertChannel, kind: dml, plan: ingest}
+  UpsertChannelHashOnlyNamed: {sqlc: UpsertChannelHashOnlyNamed, kind: dml, plan: ingest}
   UpsertNodeIATA: {sqlc: UpsertNodeIATA, kind: dml, plan: ingest}
   TouchChannel: {sqlc: TouchChannel, kind: dml, plan: ingest}
   TouchChannelHashOnly: {sqlc: TouchChannelHashOnly, kind: dml, plan: ingest}
@@ -3090,6 +3091,10 @@ entries:
     stmt: UpsertChannel
     shape: "UpsertChannel fallback for an unknown key (plain EXPLAIN; ingest)"
     params: ["\\x0102", null, x, null, false]
+  - id: sm.write.upsert_channel_hash_only_named
+    stmt: UpsertChannelHashOnlyNamed
+    shape: "UpsertChannel for a hash-only channel heard with a name (plain EXPLAIN; ingest)"
+    params: ["\\x0102", x, null, false]
   - id: sm.write.upsert_node_iata
     stmt: UpsertNodeIATA
     shape: "UpsertNodeIATA on the swapped node_iatas index set (plain EXPLAIN; ingest)"

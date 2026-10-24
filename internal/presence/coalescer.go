@@ -228,11 +228,19 @@ func (c *Coalescer) DeleteOldObservers(ctx context.Context, cutoff time.Time) ([
 	clear(c.identities)
 	clear(c.knownBrokers)
 	c.mu.Unlock()
-	if err := c.flushObservers(ctx, observers); err != nil {
+	// The bumps left the coalescer above, so flush them on a context a shutdown does not cancel.
+	flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), max(c.flushInterval, shutdownFlushTimeout))
+	err := c.flushObservers(flushCtx, observers)
+	cancel()
+	if err != nil {
 		return nil, err
 	}
 	return c.Store.DeleteOldObservers(ctx, cutoff)
 }
+
+// shutdownFlushTimeout bounds a flush that must not be cut short by a shutdown: Run's final flush, and the flushes a
+// shutdown would otherwise cancel halfway (a ticker flush, the observer cleanup's).
+const shutdownFlushTimeout = 10 * time.Second
 
 // Start runs Run in the background until ctx ends. The returned finish waits for Run's final flush to end, then
 // flushes the bumps written since. Call it once, after every writer has stopped and before the store's connections
@@ -260,11 +268,11 @@ func (c *Coalescer) Run(ctx context.Context) {
 			if ctx.Err() != nil {
 				continue // both ready: take the final flush
 			}
-			flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), max(c.flushInterval, 10*time.Second))
+			flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), max(c.flushInterval, shutdownFlushTimeout))
 			c.Flush(flushCtx)
 			cancel()
 		case <-ctx.Done():
-			flushCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			flushCtx, cancel := context.WithTimeout(context.Background(), shutdownFlushTimeout)
 			c.Flush(flushCtx)
 			cancel()
 			return

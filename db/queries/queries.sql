@@ -1433,8 +1433,8 @@ ON CONFLICT (node_id, iata) DO NOTHING;
 -- ============================================================
 
 -- name: UpsertChannel :one
--- Upsert a channel by (hash, key_fingerprint). Pass NULL fingerprint for
--- hash-only records (key unknown). Returns the channel row.
+-- Upsert a keyed channel by (hash, key_fingerprint). Returns the channel row. A NULL fingerprint never matches that key,
+-- so the store sends hash-only records (key unknown) to UpsertChannelHashOnly or UpsertChannelHashOnlyNamed.
 INSERT INTO channels (channel_hash, key_fingerprint, name, hashtag, is_hashtag, key_known, last_seen)
 VALUES ($1, $2::bytea, $3, $4, $5, ($2 IS NOT NULL), NOW())
 ON CONFLICT (channel_hash, key_fingerprint) DO UPDATE SET
@@ -1447,6 +1447,16 @@ INSERT INTO channels (channel_hash, last_seen)
 VALUES ($1, NOW())
 ON CONFLICT (channel_hash) WHERE key_fingerprint IS NULL DO UPDATE SET
   last_seen = NOW()
+RETURNING id;
+
+-- name: UpsertChannelHashOnlyNamed :one
+-- UpsertChannel for a hash-only channel heard with a name or hashtag: the hash-only conflict target, and
+-- UpsertChannel's insert and conflict update.
+INSERT INTO channels (channel_hash, name, hashtag, is_hashtag, key_known, last_seen)
+VALUES (sqlc.arg(channel_hash), sqlc.narg(name), sqlc.narg(hashtag), sqlc.arg(is_hashtag), false, NOW())
+ON CONFLICT (channel_hash) WHERE key_fingerprint IS NULL DO UPDATE SET
+  last_seen = NOW(),
+  name      = COALESCE(EXCLUDED.name, channels.name)
 RETURNING id;
 
 -- name: ListChannelIDs :many

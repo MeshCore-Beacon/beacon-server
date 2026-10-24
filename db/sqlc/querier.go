@@ -605,10 +605,13 @@ type Querier interface {
 	// ============================================================
 	// CHANNELS
 	// ============================================================
-	// Upsert a channel by (hash, key_fingerprint). Pass NULL fingerprint for
-	// hash-only records (key unknown). Returns the channel row.
+	// Upsert a keyed channel by (hash, key_fingerprint). Returns the channel row. A NULL fingerprint never matches that key,
+	// so the store sends hash-only records (key unknown) to UpsertChannelHashOnly or UpsertChannelHashOnlyNamed.
 	UpsertChannel(ctx context.Context, arg UpsertChannelParams) (Channel, error)
 	UpsertChannelHashOnly(ctx context.Context, channelHash []byte) (int32, error)
+	// UpsertChannel for a hash-only channel heard with a name or hashtag: the hash-only conflict target, and
+	// UpsertChannel's insert and conflict update.
+	UpsertChannelHashOnlyNamed(ctx context.Context, arg UpsertChannelHashOnlyNamedParams) (int32, error)
 	// Refreshes at most hourly so repeat hears don't churn the row.
 	UpsertChannelIATA(ctx context.Context, arg UpsertChannelIATAParams) error
 	// Copyright 2026 Beacon Contributors
