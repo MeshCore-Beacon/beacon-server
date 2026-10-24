@@ -812,7 +812,7 @@ type GetNodeByIDRow struct {
 	RadioSf                 *int16             `json:"radio_sf"`
 	RadioBwKhz              *float32           `json:"radio_bw_khz"`
 	Metadata                []byte             `json:"metadata"`
-	DeviceClockDriftSeconds *int32             `json:"device_clock_drift_seconds"`
+	DeviceClockDriftSeconds *int64             `json:"device_clock_drift_seconds"`
 	DefaultScopeName        *string            `json:"default_scope_name"`
 	IsObserver              bool               `json:"is_observer"`
 	ObserverID              uuid.UUID          `json:"observer_id"`
@@ -2131,7 +2131,7 @@ type GetStatsClockDriftRow struct {
 	ID                      uuid.UUID          `json:"id"`
 	Name                    *string            `json:"name"`
 	NodeType                int16              `json:"node_type"`
-	DeviceClockDriftSeconds *int32             `json:"device_clock_drift_seconds"`
+	DeviceClockDriftSeconds *int64             `json:"device_clock_drift_seconds"`
 	LastAdvertAt            pgtype.Timestamptz `json:"last_advert_at"`
 	Iatas                   []byte             `json:"iatas"`
 }
@@ -7648,7 +7648,7 @@ type UpsertNodeParams struct {
 	RadioFreqMhz            *float32 `json:"radio_freq_mhz"`
 	RadioSf                 *int16   `json:"radio_sf"`
 	RadioBwKhz              *float32 `json:"radio_bw_khz"`
-	DeviceClockDriftSeconds *int32   `json:"device_clock_drift_seconds"`
+	DeviceClockDriftSeconds *int64   `json:"device_clock_drift_seconds"`
 	ClearLocation           bool     `json:"clear_location"`
 }
 

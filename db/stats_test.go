@@ -177,7 +177,7 @@ func TestGetStatsClockDrift_Mapping(t *testing.T) {
 
 	nodeID := uuid.MustParse("00000000-0000-0000-0000-000000000004")
 	name := "drifty-repeater"
-	drift := int32(-600)
+	drift := int64(-600)
 	checkedAt := pgtype.Timestamptz{Time: time.Now(), Valid: true}
 	iatasJSON := []byte(`[{"iata":"YVR","lastHeard":1700000000000}]`)
 

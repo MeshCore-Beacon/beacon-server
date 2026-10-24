@@ -199,8 +199,9 @@ func main() {
 	// ── Presence write coalescing ────────────────────────────────────────────
 	// Ingest writes go through the coalescer; reads use the API store.
 	coalescer := presence.New(ingestStore, resolved.PresenceFlushInterval, resolved.PresencePacketTTL)
+	finishPresence := func(context.Context) {}
 	if mode.Coalescer {
-		go coalescer.Run(ctx)
+		finishPresence = coalescer.Start(ctx)
 	}
 
 	// ── Redis cache layer ────────────────────────────────────────────────────
@@ -612,9 +613,8 @@ func main() {
 	}
 	ingestWorkers.Wait()
 	backgroundJobs.Wait()
-	if mode.Coalescer {
-		coalescer.Flush(shutdownCtx)
-	}
+	// Run's final flush, then one for the bumps written after it, both before the deferred pools.Close.
+	finishPresence(shutdownCtx)
 }
 
 // proxyLimitWarning explains why per-IP limits go site-wide behind an unlisted reverse proxy.
