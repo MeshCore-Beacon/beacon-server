@@ -431,10 +431,10 @@ type Querier interface {
 	// ============================================================
 	// Tags, most recent first. Filters match the tag summary (see RecordTrace).
 	ListTraceTags(ctx context.Context, arg ListTraceTagsParams) ([]ListTraceTagsRow, error)
-	// Returns GRP_TXT packets (payload_type=5) never successfully decrypted. Used at boot to
+	// Returns GRP_TXT packets (payload_type=5) never successfully decrypted. Used after boot to
 	// retry decryption against the current keystore for packets whose channel key was only added
 	// to the config after they'd already been ingested -- see
-	// internal/ingest.BackfillChannelMessages.
+	// internal/ingest.DecryptBackfill.
 	ListUndecryptedGroupTextPackets(ctx context.Context) ([]ListUndecryptedGroupTextPacketsRow, error)
 	// Like ListUndecryptedGroupTextPackets, limited to channels that just gained a key.
 	ListUndecryptedGroupTextPacketsByHash(ctx context.Context, hashes [][]byte) ([]ListUndecryptedGroupTextPacketsByHashRow, error)
@@ -450,6 +450,9 @@ type Querier interface {
 	MinObservationID(ctx context.Context) (int64, error)
 	// The first message id above after_id, or 0 when there is none.
 	NextChannelMessageID(ctx context.Context, afterID int64) (int64, error)
+	// The id that bounds the newest n observations at or below through_id from below: (id, through_id] holds exactly n
+	// of them. 0 when fewer than n + 1 remain.
+	ObservationIDBelow(ctx context.Context, arg ObservationIDBelowParams) (int64, error)
 	OldestMissingRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
 	PacketSitesTotalBytes(ctx context.Context) (int64, error)
 	PruneImportedRegions(ctx context.Context, keep []string) ([]string, error)

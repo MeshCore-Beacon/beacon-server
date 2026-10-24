@@ -92,8 +92,8 @@ func (s *Store) UpsertChannelHashOnly(ctx context.Context, channelHash []byte) (
 }
 
 // ListUndecryptedGroupTextPackets returns GRP_TXT packets never successfully decrypted --
-// see internal/ingest.BackfillChannelMessages, which retries these against the current
-// keystore at boot.
+// see internal/ingest.DecryptBackfill, which retries these against the current
+// keystore after boot.
 func (s *Store) ListUndecryptedGroupTextPackets(ctx context.Context) ([]ingest.UndecryptedPacket, error) {
 	rows, err := s.q.ListUndecryptedGroupTextPackets(ctx)
 	if err != nil {

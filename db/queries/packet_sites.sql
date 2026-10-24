@@ -39,6 +39,12 @@ ON CONFLICT (packet_hash, iata) DO UPDATE SET site_heard_at = EXCLUDED.site_hear
 -- name: MinObservationID :one
 SELECT COALESCE(min(id), 0)::bigint AS id FROM packet_observations;
 
+-- name: ObservationIDBelow :one
+-- The id that bounds the newest n observations at or below through_id from below: (id, through_id] holds exactly n
+-- of them. 0 when fewer than n + 1 remain.
+SELECT COALESCE((SELECT po.id FROM packet_observations po WHERE po.id <= @through_id::bigint
+                 ORDER BY po.id DESC OFFSET @n::bigint LIMIT 1), 0)::bigint AS id;
+
 -- name: CheckPacketSitesSlice :one
 -- Exact check of every packet with an observation in (after_id, through_id]: site rows the observations imply
 -- and the table lacks, rows whose hearing time or packet columns differ, and rows no observation backs.

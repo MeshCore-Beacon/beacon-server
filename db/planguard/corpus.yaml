@@ -2632,99 +2632,99 @@ entries:
     shape: "ListNodes global"
     params: [{raw: "0"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "'infinity'::timestamptz"}, {raw: "50"}, {raw: "''"}, {raw: "false"}, {raw: "''"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}]
     expect:
-      budget: {buffers: 3030, planning_ms: 10}
-    note: "measured: 2020 / 40650 B (custom / generic); budget: 1.5x measured"
+      budget: {buffers: 5217, planning_ms: 10}
+    note: "measured: 3478 B on the full local copy with nodes at fillfactor 50 (migration 058; 3030 B budget before); budget: 1.5x measured"
   - id: sm.nodes.type2
     stmt: ListNodes
     shape: "ListNodes type2"
     params: [{raw: "2"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "'infinity'::timestamptz"}, {raw: "50"}, {raw: "''"}, {raw: "false"}, {raw: "''"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}]
     expect:
-      budget: {buffers: 3132, planning_ms: 10}
-    note: "measured: 2088 / 29731 B (custom / generic); budget: 1.5x measured"
+      budget: {buffers: 5477, planning_ms: 10}
+    note: "measured: 3651 B on the full local copy with nodes at fillfactor 50 (migration 058; 3132 B budget before); budget: 1.5x measured"
   - id: sm.nodes.type1
     stmt: ListNodes
     shape: "ListNodes type1"
     params: [{raw: "1"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "'infinity'::timestamptz"}, {raw: "50"}, {raw: "''"}, {raw: "false"}, {raw: "''"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}]
     expect:
-      budget: {buffers: 2874, planning_ms: 10}
-    note: "measured: 1916 / 11712 B (custom / generic); budget: 1.5x measured"
+      budget: {buffers: 5214, planning_ms: 10}
+    note: "measured: 3476 B on the full local copy with nodes at fillfactor 50 (migration 058; 2874 B budget before); budget: 1.5x measured"
   - id: sm.nodes.type3
     stmt: ListNodes
     shape: "ListNodes type3"
     params: [{raw: "3"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "'infinity'::timestamptz"}, {raw: "50"}, {raw: "''"}, {raw: "false"}, {raw: "''"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}]
     expect:
-      budget: {buffers: 3446, planning_ms: 10}
-    note: "measured: 2297 / 3676 B (custom / generic); budget: 1.5x measured"
+      budget: {buffers: 5793, planning_ms: 10}
+    note: "measured: 3862 B on the full local copy with nodes at fillfactor 50 (migration 058; 3446 B budget before); budget: 1.5x measured"
   - id: sm.nodes.type2_deep_cursor
     stmt: ListNodes
     shape: "ListNodes type2_deep_cursor"
     params: [{raw: "2"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "'2026-10-10 00:00+00'::timestamptz"}, {raw: "50"}, {raw: "''"}, {raw: "false"}, {raw: "''"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}]
     expect:
-      budget: {buffers: 3209, planning_ms: 10}
-    note: "measured: 2139 / 3734 B (custom / generic); budget: 1.5x measured"
+      budget: {buffers: 5558, planning_ms: 10}
+    note: "measured: 3705 B on the full local copy with nodes at fillfactor 50 (migration 058; 3209 B budget before); budget: 1.5x measured"
   - id: sm.nodes.global_deep_cursor200
     stmt: ListNodes
     shape: "ListNodes global_deep_cursor200"
     params: [{raw: "0"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "'2026-10-10 00:00+00'::timestamptz"}, {raw: "200"}, {raw: "''"}, {raw: "false"}, {raw: "''"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}]
     expect:
-      budget: {buffers: 5829, planning_ms: 10}
-    note: "measured: 3886 / 8415 B (custom / generic); budget: 1.5x measured"
+      budget: {buffers: 8081, planning_ms: 10}
+    note: "measured: 5387 B on the full local copy with nodes at fillfactor 50 (migration 058; 5829 B budget before); budget: 1.5x measured"
   - id: sm.nodes.SEA
     stmt: ListNodes
     shape: "ListNodes SEA"
     params: [{raw: "0"}, {raw: "'{SEA}'::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "'infinity'::timestamptz"}, {raw: "50"}, {raw: "''"}, {raw: "false"}, {raw: "''"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}]
     expect:
-      budget: {buffers: 8009, planning_ms: 10}
-    note: "measured: 5339 / 9253 B (custom / generic); budget: 1.5x measured"
+      budget: {buffers: 10338, planning_ms: 10}
+    note: "measured: 6892 B on the full local copy with nodes at fillfactor 50 (migration 058; 8009 B budget before); budget: 1.5x measured"
   - id: sm.nodes.SEA_type2
     stmt: ListNodes
     shape: "ListNodes SEA_type2"
     params: [{raw: "2"}, {raw: "'{SEA}'::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "'infinity'::timestamptz"}, {raw: "50"}, {raw: "''"}, {raw: "false"}, {raw: "''"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}]
     expect:
-      budget: {buffers: 7974, planning_ms: 10}
-    note: "measured: 5316 / 9017 B (custom / generic); budget: 1.5x measured"
+      budget: {buffers: 10307, planning_ms: 10}
+    note: "measured: 6871 B on the full local copy with nodes at fillfactor 50 (migration 058; 7974 B budget before); budget: 1.5x measured"
   - id: sm.nodes.name_a
     stmt: ListNodes
     shape: "ListNodes name_a"
     params: [{raw: "0"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "'a'"}, {raw: "'infinity'::timestamptz"}, {raw: "50"}, {raw: "''"}, {raw: "false"}, {raw: "''"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}]
     expect:
-      budget: {buffers: 2876, planning_ms: 10}
-    note: "measured: 1917 / 23166 B (custom / generic); budget: 1.5x measured"
+      budget: {buffers: 5217, planning_ms: 10}
+    note: "measured: 3478 B on the full local copy with nodes at fillfactor 50 (migration 058; 2876 B budget before); budget: 1.5x measured"
   - id: sm.nodes.multibyte_true
     stmt: ListNodes
     shape: "ListNodes multibyte_true"
     params: [{raw: "0"}, {raw: "NULL::bpchar[]"}, {raw: "'true'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "'infinity'::timestamptz"}, {raw: "50"}, {raw: "''"}, {raw: "false"}, {raw: "''"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}]
     expect:
-      budget: {buffers: 3413, planning_ms: 10}
-    note: "measured: 2275 / 28864 B (custom / generic); budget: 1.5x measured"
+      budget: {buffers: 5766, planning_ms: 10}
+    note: "measured: 3844 B on the full local copy with nodes at fillfactor 50 (migration 058; 3413 B budget before); budget: 1.5x measured"
   - id: sm.nodes.traces_true
     stmt: ListNodes
     shape: "ListNodes traces_true"
     params: [{raw: "0"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'true'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "'infinity'::timestamptz"}, {raw: "50"}, {raw: "''"}, {raw: "false"}, {raw: "''"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}]
     expect:
-      budget: {buffers: 3728, planning_ms: 10}
-    note: "measured: 2485 / 19023 B (custom / generic); budget: 1.5x measured"
+      budget: {buffers: 6089, planning_ms: 10}
+    note: "measured: 4059 B on the full local copy with nodes at fillfactor 50 (migration 058; 3728 B budget before); budget: 1.5x measured"
   - id: sm.nodes.pubkey_prefix
     stmt: ListNodes
     shape: "ListNodes pubkey_prefix"
     params: [{raw: "0"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "'infinity'::timestamptz"}, {raw: "50"}, {raw: "''"}, {raw: "false"}, {raw: "'1a'"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}]
     expect:
-      budget: {buffers: 3458, planning_ms: 10}
-    note: "measured: 2305 / 2490 B (custom / generic); budget: 1.5x measured"
+      budget: {buffers: 5805, planning_ms: 10}
+    note: "measured: 3870 B on the full local copy with nodes at fillfactor 50 (migration 058; 3458 B budget before); budget: 1.5x measured"
   - id: sm.nodes.type9_empty
     stmt: ListNodes
     shape: "ListNodes type9_empty"
     params: [{raw: "9"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "'infinity'::timestamptz"}, {raw: "50"}, {raw: "''"}, {raw: "false"}, {raw: "''"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}]
     expect:
-      budget: {buffers: 2189, planning_ms: 10}
-    note: "measured: 1459 / 1467 B (custom / generic); budget: 1.5x measured"
+      budget: {buffers: 4440, planning_ms: 10}
+    note: "measured: 2960 B on the full local copy with nodes at fillfactor 50 (migration 058; 2189 B budget before); budget: 1.5x measured"
   - id: sm.drift.all
     stmt: GetStatsClockDrift
     shape: "GetStatsClockDrift all"
     params: [{raw: "60::int"}, {raw: "NULL::bpchar[]"}, {raw: "50"}]
     expect:
-      budget: {buffers: 2852, planning_ms: 10}
-    note: "measured: 1901 / 1908 B (custom / generic); budget: 1.5x measured"
+      budget: {buffers: 5103, planning_ms: 10}
+    note: "measured: 3402 B on the full local copy with nodes at fillfactor 50 (migration 058; 2852 B budget before); budget: 1.5x measured"
   - id: sm.drift.SEA_t0_500
     stmt: GetStatsClockDrift
     shape: "GetStatsClockDrift SEA_t0_500"
@@ -2737,15 +2737,15 @@ entries:
     shape: "GetStatsNodeTypes, no filter -> All"
     params: []
     expect:
-      budget: {buffers: 2189, planning_ms: 10}
-    note: "measured 1,459 B on the end-state index set; budget 1.5x"
+      budget: {buffers: 4440, planning_ms: 10}
+    note: "measured: 2960 B on the full local copy with nodes at fillfactor 50 (migration 058; 2189 B budget before); budget: 1.5x measured"
   - id: sm.ntypes.SEA
     stmt: GetStatsNodeTypesByIATAs
     shape: "GetStatsNodeTypes SEA -> ByIATAs (measured: today's text)"
     params: [{raw: "'{SEA}'::bpchar[]"}]
     expect:
-      budget: {buffers: 5904, planning_ms: 10}
-    note: "measured: 3936 / 5263 B (custom / generic); budget: 1.5x measured"
+      budget: {buffers: 8130, planning_ms: 10}
+    note: "measured: 5420 B on the full local copy with nodes at fillfactor 50 (migration 058; 5904 B budget before); budget: 1.5x measured"
   - id: sm.trc.first_l200
     stmt: ListTraceTags
     shape: "ListTraceTags first_l200 (perf_small)"
@@ -2939,8 +2939,8 @@ entries:
     tiers: [fixture, local]
     expect:
       forbid: [{node: Seq Scan, relations: [analytics_hourly_scope_sets], reason: "the kept scope index serves both lookups"}]
-      budget: {buffers: 2400, planning_ms: 10}
-    note: "measured: 1583 B, of which 3 + 3 B are the two scope-index lookups and 1504 B the node count; without the index the two lookups scan the table; budget: 1.5x measured"
+      budget: {buffers: 4559, planning_ms: 10}
+    note: "measured: 3039 B on the full local copy with nodes at fillfactor 50 (migration 058; 2400 B budget before); budget: 1.5x measured"
   - id: sm.write.touch_channel
     stmt: TouchChannel
     shape: "TouchChannel write-through (plain EXPLAIN)"

@@ -69,7 +69,7 @@ type ReadModelsConfig struct {
 type FillConfig struct {
 	Duty             *float64  `yaml:"duty"`               // 0.01 to 1; default 0.5
 	MinPause         *duration `yaml:"min_pause"`          // 0 to 1m; default 100ms
-	PacketSitesSlice *int64    `yaml:"packet_sites_slice"` // observation ids per packet_sites slice; default 500000
+	PacketSitesSlice *int64    `yaml:"packet_sites_slice"` // observations per packet_sites slice; default 500000
 	CmiBatch         *int64    `yaml:"cmi_batch"`          // message ids per cmi batch; default 10000
 }
 
