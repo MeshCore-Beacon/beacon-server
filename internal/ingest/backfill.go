@@ -118,22 +118,32 @@ type Pacer interface {
 }
 
 // backfill tries packets in batches of decryptBackfillBatch; pace, when set, waits after each batch. It stops
-// early when ctx ends, leaving the rest undecrypted for the next run.
+// between packets when ctx ends, leaving the rest undecrypted for the next run. A packet it has started finishes
+// whatever ctx does: a cancelled message insert would drop the cmi read model's trust, and a message stored without
+// its packet marked decrypted would be listed again on every run.
 func backfill(ctx context.Context, db DB, keys ChannelKeyStore, packets []UndecryptedPacket, pace Pacer) int {
 	decrypted := 0
+	packetCtx := context.WithoutCancel(ctx)
 	for start := 0; start < len(packets) && ctx.Err() == nil; start += decryptBackfillBatch {
 		began := time.Now()
 		for _, p := range packets[start:min(start+decryptBackfillBatch, len(packets))] {
-			result, err := DecryptGroupText(ctx, db, keys, p.PacketHash, p.RawPayload, true)
+			if ctx.Err() != nil {
+				return decrypted
+			}
+			result, err := DecryptGroupText(packetCtx, db, keys, p.PacketHash, p.RawPayload, true)
 			if err != nil {
-				if ctx.Err() != nil {
-					return decrypted
-				}
 				slog.Error(fmt.Sprintf("ingest: backfill: decrypt failed for packet %s", hex.EncodeToString(p.PacketHash)), "component", "ingest", "error", err)
 				continue
 			}
-			if result != nil && result.Message != nil {
+			switch {
+			case result != nil && result.Message != nil:
 				decrypted++
+			case result != nil:
+				// Its message is already stored (a live hearing stored it, or an earlier run stopped before marking
+				// it): mark it, so it is not listed again.
+				if err := db.SetPacketDecrypted(packetCtx, p.PacketHash); err != nil {
+					slog.Error(fmt.Sprintf("ingest: backfill: failed to set packet decrypted for %s", hex.EncodeToString(p.PacketHash)), "component", "ingest", "error", err)
+				}
 			}
 		}
 		if pace != nil && start+decryptBackfillBatch < len(packets) && !pace.Wait(ctx, time.Since(began)) {
@@ -178,7 +188,8 @@ func (b *DecryptBackfill) RequestAll() {
 	b.poke()
 }
 
-// RequestHashes queues a run over the undecrypted packets of the given one-byte channel hashes.
+// RequestHashes queues a run over the undecrypted packets of the given channel hashes. Group text carries a
+// one-byte channel hash, so longer ones match no packet and are ignored.
 func (b *DecryptBackfill) RequestHashes(hashes [][]byte) {
 	b.mu.Lock()
 	for _, h := range hashes {
@@ -252,8 +263,10 @@ func (b *DecryptBackfill) run(ctx context.Context, all bool, hashes [][]byte) in
 		slog.Warn(fmt.Sprintf("channel message backfill stopped after %s; the rest runs again after the next boot", decryptBackfillTimeout), attrs...)
 		return n
 	}
-	if ctx.Err() == nil {
-		slog.Info(fmt.Sprintf("channel message backfill done: %d previously-undecrypted channel message(s)", n), attrs...)
+	if ctx.Err() != nil {
+		slog.Info("channel message backfill stopped by shutdown; the rest runs again after the next boot", attrs...)
+		return n
 	}
+	slog.Info(fmt.Sprintf("channel message backfill done: %d previously-undecrypted channel message(s)", n), attrs...)
 	return n
 }

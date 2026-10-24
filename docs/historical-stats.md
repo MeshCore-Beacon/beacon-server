@@ -34,8 +34,9 @@ use a completed whole-hour rollup.
   lost raw rows before it was rolled. It is marked `partial` and never rolled; readers
   report it without values, except the observer directory, which counts any retained raw
   observations in the requested slice.
-- **Re-rolls.** Hours are not re-rolled periodically. A message stored by channel backfill (at
-  startup, and when keys are imported at runtime) queues every hour its packet was heard in
+- **Re-rolls.** Hours are not re-rolled periodically. A message stored by channel backfill (in
+  the background after startup, and when keys are imported at runtime), or by a live hearing of
+  a packet stored before it, queues every hour its packet was heard in
   `analytics_dirty_hours`, in the same statement as the message insert. Each pass re-rolls a
   few complete ones while their raw rows remain. A queued hour still waiting for its first roll
   keeps its entry unless that roll's snapshot already included it.

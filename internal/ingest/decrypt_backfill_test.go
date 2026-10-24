@@ -24,6 +24,7 @@ type resumableDB struct {
 	stored    map[string]int
 	lists     int
 	release   chan struct{} // when set, each list waits for it
+	onInsert  func()        // when set, runs at the start of each message insert
 }
 
 func (d *resumableDB) ListUndecryptedGroupTextPackets(context.Context) ([]UndecryptedPacket, error) {
@@ -42,7 +43,13 @@ func (d *resumableDB) ListUndecryptedGroupTextPackets(context.Context) ([]Undecr
 	return out, nil
 }
 
-func (d *resumableDB) InsertChannelMessage(_ context.Context, m InsertChannelMessageParams) (*InsertedChannelMessage, error) {
+func (d *resumableDB) InsertChannelMessage(ctx context.Context, m InsertChannelMessageParams) (*InsertedChannelMessage, error) {
+	if d.onInsert != nil {
+		d.onInsert()
+	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err() // a cancelled statement stores nothing
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.stored[string(m.PacketHash)]++
@@ -52,7 +59,10 @@ func (d *resumableDB) InsertChannelMessage(_ context.Context, m InsertChannelMes
 	return &InsertedChannelMessage{ID: int64(len(d.stored)), ScopeStatus: "unavailable"}, nil
 }
 
-func (d *resumableDB) SetPacketDecrypted(_ context.Context, hash []byte) error {
+func (d *resumableDB) SetPacketDecrypted(ctx context.Context, hash []byte) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.decrypted[string(hash)] = true
@@ -111,6 +121,37 @@ func TestDecryptBackfillStopsAndResumes(t *testing.T) {
 		if d.stored[string(p.PacketHash)] != 1 {
 			t.Fatalf("packet %x stored %d times", p.PacketHash, d.stored[string(p.PacketHash)])
 		}
+	}
+}
+
+// A shutdown or deadline during a packet's statements does not cut them short: the message is stored and its
+// packet marked decrypted, and the run stops before the next packet.
+func TestDecryptBackfillFinishesThePacketItStarted(t *testing.T) {
+	d, keys := newResumableDB(t, 3)
+	ctx, cancel := context.WithCancel(context.Background())
+	d.onInsert = cancel
+	if n := NewDecryptBackfill(d, keys, nil).run(ctx, true, nil); n != 1 {
+		t.Fatalf("decrypted %d, want the one packet it had started", n)
+	}
+	if !d.decrypted[string(d.packets[0].PacketHash)] || len(d.stored) != 1 {
+		t.Fatalf("first packet decrypted %v, %d messages stored; want it marked and one message", d.decrypted[string(d.packets[0].PacketHash)], len(d.stored))
+	}
+}
+
+// A packet whose message is already stored but which is not marked decrypted (a live hearing stored it, or a run
+// stopped before marking it) is marked, so later runs stop listing it.
+func TestDecryptBackfillMarksPacketsWithStoredMessages(t *testing.T) {
+	d, keys := newResumableDB(t, 2)
+	d.stored[string(d.packets[0].PacketHash)] = 1
+	b := NewDecryptBackfill(d, keys, nil)
+	if n := b.run(context.Background(), true, nil); n != 1 {
+		t.Fatalf("decrypted %d, want only the packet without a message", n)
+	}
+	if !d.decrypted[string(d.packets[0].PacketHash)] {
+		t.Fatal("the packet with a stored message was left unmarked")
+	}
+	if left, _ := d.ListUndecryptedGroupTextPackets(context.Background()); len(left) != 0 {
+		t.Fatalf("%d packets still listed", len(left))
 	}
 }
 
