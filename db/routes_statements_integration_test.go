@@ -4,11 +4,13 @@
 package db
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -144,4 +146,151 @@ ANALYZE known_routes;`)
 			t.Fatalf("7th absent-hop %s page read %d tuples; want ≤ 10", c.statement, after-before)
 		}
 	}
+}
+
+// The store picks the global hop page's branch from the statistics' estimate of the hop group: a group estimated under
+// the bound reads and sorts the group (kh), any other runs today's statement (kk), and so does every group before the
+// table has statistics. Both return today's rows, in order, on every page of a cursor walk, with rows tied on the millisecond.
+func TestGlobalHopBranchesMatchTodayPostgres(t *testing.T) {
+	ctx, pool := schemaPool(t)
+	if err := RunMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	// 3000 routes: hop 3 holds 2400 (over the 1000 floor of the bound), hop 7 500, hop 9 60; three routes share each ms.
+	if _, err := pool.Exec(ctx, `
+INSERT INTO iata_codes (iata) VALUES ('YYZ'), ('YOW');
+INSERT INTO known_routes (id, path_key, node_ids, hash_prefix, iata, hop_count, last_seen)
+SELECT i, int8send(i), '{}', '{}', (ARRAY['YYZ','YOW'])[1 + i % 2],
+       CASE WHEN i % 50 < 40 THEN 3 WHEN i % 50 < 49 THEN 7 ELSE 9 END,
+       '2026-01-10'::timestamptz - (i / 3) * interval '1 millisecond' - (i % 3) * interval '100 microseconds'
+FROM generate_series(1, 3000) i;`); err != nil {
+		t.Fatal(err)
+	}
+	branchRan := func(tx pgx.Tx, hop int32) (kh, kk int) {
+		t.Helper()
+		capture := &statementCapture{Tx: tx, name: "ListKnownRoutesGlobalHop"}
+		cs := &Store{q: sqlc.New(unnamedDBTX{capture})}
+		if _, err := cs.listKnownRouteRows(ctx, "", hop, time.Time{}, 0, 50); err != nil {
+			t.Fatal(err)
+		}
+		plan := explainJSON(t, ctx, tx, capture.statement, capture.args...)
+		return aliasLoops(t, plan, "kh"), aliasLoops(t, plan, "kk")
+	}
+	// No statistics yet: today's statement, even for the small group.
+	notx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kh, kk := branchRan(notx, 7); kh > 0 || kk != 1 {
+		t.Errorf("unanalyzed hop 7: kh ran %d, kk %d times (-1: planned away); want kh not run and kk once", kh, kk)
+	}
+	_ = notx.Rollback(ctx)
+	if _, err := pool.Exec(ctx, "ANALYZE known_routes"); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	s := routeStore(tx)
+	for _, hop := range []int32{3, 7, 9, 12} {
+		all := legacyRows[knownRouteRow](t, ctx, tx, legacyListKnownRoutes, "", hop, pgtype.Timestamptz{}, int32(5000), int64(0))
+		for _, limit := range []int32{1, 7, 50, 200} {
+			// cursor + cursorId: the pages together are every row once, in order.
+			var walked []knownRouteRow
+			cursor, cursorID := time.Time{}, int64(0)
+			for range len(all)/int(limit) + 2 {
+				page, err := s.listKnownRouteRows(ctx, "", hop, cursor, cursorID, limit)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var cts pgtype.Timestamptz
+				if !cursor.IsZero() {
+					cts = pgtype.Timestamptz{Time: cursor, Valid: true}
+				}
+				if want := legacyRows[knownRouteRow](t, ctx, tx, legacyListKnownRoutes, "", hop, cts, limit, cursorID); !sameRows(page, want) {
+					t.Fatalf("hop %d limit %d cursor %v/%d: got %v, want %v", hop, limit, cursor, cursorID, ids(page), ids(want))
+				}
+				if len(page) == 0 {
+					break
+				}
+				walked = append(walked, page...)
+				last := page[len(page)-1]
+				cursor, cursorID = time.UnixMilli(last.LastSeen.Time.UnixMilli()), last.ID
+			}
+			if !sameRows(walked, all) {
+				t.Fatalf("hop %d limit %d walk: %d rows, want %d", hop, limit, len(walked), len(all))
+			}
+			// A cursor without an id skips the rest of its millisecond, as today.
+			if len(all) > 4 {
+				at := time.UnixMilli(all[4].LastSeen.Time.UnixMilli())
+				want := legacyRows[knownRouteRow](t, ctx, tx, legacyListKnownRoutes, "", hop, pgtype.Timestamptz{Time: at, Valid: true}, limit, int64(0))
+				got, err := s.listKnownRouteRows(ctx, "", hop, at, 0, limit)
+				if err != nil || !sameRows(got, want) {
+					t.Fatalf("hop %d limit %d cursor without id: got %v, want %v (%v)", hop, limit, ids(got), ids(want), err)
+				}
+			}
+		}
+	}
+
+	// Either branch, whatever the store would pick, returns today's rows: first pages and a mid cursor, per limit.
+	q := sqlc.New(unnamedDBTX{tx})
+	for _, hop := range []int32{3, 7, 9, 12} {
+		all := legacyRows[knownRouteRow](t, ctx, tx, legacyListKnownRoutes, "", hop, pgtype.Timestamptz{}, int32(5000), int64(0))
+		cursors := []struct {
+			at pgtype.Timestamptz
+			id int64
+		}{{}}
+		if len(all) > 20 {
+			mid := all[len(all)/2]
+			cursors = append(cursors, struct {
+				at pgtype.Timestamptz
+				id int64
+			}{pgtype.Timestamptz{Time: time.UnixMilli(mid.LastSeen.Time.UnixMilli()), Valid: true}, mid.ID})
+		}
+		for _, c := range cursors {
+			for _, limit := range []int32{1, 50, 200} {
+				want := legacyRows[knownRouteRow](t, ctx, tx, legacyListKnownRoutes, "", hop, c.at, limit, c.id)
+				for _, readGroup := range []bool{true, false} {
+					got, err := routeRows(q.ListKnownRoutesGlobalHop(ctx, sqlc.ListKnownRoutesGlobalHopParams{
+						HopCount: hop, CursorTs: c.at, CursorID: c.id, ReadGroup: readGroup, PageLimit: limit}))
+					if err != nil || !sameRows(got, want) {
+						t.Fatalf("hop %d read_group %v cursor %v/%d limit %d: got %v, want %v (%v)", hop, readGroup, c.at.Time, c.id, limit, ids(got), ids(want), err)
+					}
+				}
+			}
+		}
+	}
+
+	// Which branch ran: hop 3 (estimated over the bound) runs today's statement (kk), hop 7 reads its group (kh).
+	if kh, kk := branchRan(tx, 3); kh > 0 || kk != 1 {
+		t.Errorf("hop 3: kh ran %d, kk %d times (-1: planned away); want kh not run and kk once", kh, kk)
+	}
+	if kh, kk := branchRan(tx, 7); kh != 1 || kk > 0 {
+		t.Errorf("hop 7: kh ran %d, kk %d times (-1: planned away); want kh once and kk not run", kh, kk)
+	}
+}
+
+// aliasLoops returns the Actual Loops of the plan node scanning alias, -1 if there is none.
+func aliasLoops(t *testing.T, plan, alias string) int {
+	t.Helper()
+	var root []struct{ Plan map[string]any }
+	if err := json.Unmarshal([]byte(plan), &root); err != nil || len(root) != 1 {
+		t.Fatalf("plan json: %v", err)
+	}
+	var find func(n map[string]any) int
+	find = func(n map[string]any) int {
+		if n["Alias"] == alias {
+			return int(n["Actual Loops"].(float64))
+		}
+		kids, _ := n["Plans"].([]any)
+		for _, k := range kids {
+			if l := find(k.(map[string]any)); l >= 0 {
+				return l
+			}
+		}
+		return -1
+	}
+	return find(root[0].Plan)
 }

@@ -715,6 +715,21 @@ func (mr *MockQuerierMockRecorder) GetKnownRoutesByNodes(ctx, arg any) *gomock.C
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetKnownRoutesByNodes", reflect.TypeOf((*MockQuerier)(nil).GetKnownRoutesByNodes), ctx, arg)
 }
 
+// GetKnownRoutesHopStats mocks base method.
+func (m *MockQuerier) GetKnownRoutesHopStats(ctx context.Context) (db.GetKnownRoutesHopStatsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetKnownRoutesHopStats", ctx)
+	ret0, _ := ret[0].(db.GetKnownRoutesHopStatsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetKnownRoutesHopStats indicates an expected call of GetKnownRoutesHopStats.
+func (mr *MockQuerierMockRecorder) GetKnownRoutesHopStats(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetKnownRoutesHopStats", reflect.TypeOf((*MockQuerier)(nil).GetKnownRoutesHopStats), ctx)
+}
+
 // GetLatestCompleteRollupHour mocks base method.
 func (m *MockQuerier) GetLatestCompleteRollupHour(ctx context.Context) (pgtype.Timestamptz, error) {
 	m.ctrl.T.Helper()

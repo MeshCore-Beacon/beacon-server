@@ -167,6 +167,10 @@ statements:
 sort_exempt_sets:
   hop_group:
     - {relation: known_routes, index: idx_known_routes_hop_iata, index_cond: "hop_count =", reason: "a hop page sorts one (hop, region) group, bounded by the group size"}
+  hop_gate:
+    - {relation: known_routes, index_cond: "hop_count =", reason: "a global hop page reads and sorts its hop group when the store estimates the group under the bound"}
+  hop_tail:
+    - {relation: known_routes, index_cond: "hop_count =", reason: "below a deep cursor today's global hop statement sorts the rest of the hop group (a bitmap AND of the keyset and hop indexes)"}
   latest_observation:
     - {relation: packet_observations, index_cond: "packet_hash = p.packet_hash", reason: "the latest-observation LATERAL sorts one packet's observations (a few hundred at most)"}
   route_search_top_n:
@@ -710,93 +714,185 @@ entries:
   - id: routes.globalhop.GH01_hop6_dense_l50
     stmt: ListKnownRoutesGlobalHop
     shape: "no region + dense hop 6, limit 50"
-    params: [6, null, 0, 50]
+    params: [6, null, 0, false, 50]
+    requires_indexes: [idx_known_routes_hop_iata]
     expect:
-      driver: [{relation: known_routes, index: idx_known_routes_keyset, index_cond: ["id) < ROW("]}]
+      driver:
+        - {relation: known_routes, alias: kk, index: idx_known_routes_keyset, index_cond: ["id) < ROW("]}
       budget: {buffers: 588, planning_ms: 10}
     note: "measured: 392 B on the full local copy (max over modes)"
   - id: routes.globalhop.GH02_hop6_dense_l200
     stmt: ListKnownRoutesGlobalHop
     shape: "no region + dense hop 6, limit 200"
-    params: [6, null, 0, 200]
+    params: [6, null, 0, false, 200]
+    requires_indexes: [idx_known_routes_hop_iata]
     expect:
-      driver: [{relation: known_routes, index: idx_known_routes_keyset, index_cond: ["id) < ROW("]}]
+      driver:
+        - {relation: known_routes, alias: kk, index: idx_known_routes_keyset, index_cond: ["id) < ROW("]}
       budget: {buffers: 2316, planning_ms: 10}
     note: "measured: 1544 B on the full local copy (max over modes)"
   - id: routes.globalhop.GH03_hop15_l200
     stmt: ListKnownRoutesGlobalHop
     shape: "no region + mid hop 15"
-    params: [15, null, 0, 200]
+    params: [15, null, 0, false, 200]
+    requires_indexes: [idx_known_routes_hop_iata]
     expect:
-      driver: [{relation: known_routes, index: idx_known_routes_keyset, index_cond: ["id) < ROW("]}]
+      driver:
+        - {relation: known_routes, alias: kk, index: idx_known_routes_keyset, index_cond: ["id) < ROW("]}
       budget: {buffers: 26771, planning_ms: 10}
     note: "measured: 17847 B on the full local copy (max over modes)"
   - id: routes.globalhop.GH04_hop20_l200
     stmt: ListKnownRoutesGlobalHop
     shape: "no region + hop 20 (keyset + Filter, same as today)"
-    params: [20, null, 0, 200]
+    params: [20, null, 0, false, 200]
+    requires_indexes: [idx_known_routes_hop_iata]
     expect:
-      driver: [{relation: known_routes, index: idx_known_routes_keyset, index_cond: ["id) < ROW("]}]
+      driver:
+        - {relation: known_routes, alias: kk, index: idx_known_routes_keyset, index_cond: ["id) < ROW("]}
       budget: {buffers: 60861, planning_ms: 10}
     note: "measured: 40574 B on the full local copy (max over modes)"
   - id: routes.globalhop.GH05_hop25_l200
     stmt: ListKnownRoutesGlobalHop
     shape: "no region + rare hop 25"
-    params: [25, null, 0, 200]
+    params: [25, null, 0, true, 200]
     requires_indexes: [idx_known_routes_hop_iata]
     expect:
-      driver: [{relation: known_routes, index: idx_known_routes_hop_iata, index_cond: ["hop_count ="]}]
-      sort_exempt: [hop_group]
+      driver:
+        - {relation: known_routes, alias: kh, nodes: [Index Scan, Bitmap Heap Scan], index_cond: ["hop_count ="]}
+      sort_exempt: [hop_gate]
       budget: {buffers: 15002, planning_ms: 10}
     note: "measured: 10001 B on the full local copy with the end-state hop index (this copy lacks it)"
   - id: routes.globalhop.GH06_hop32_l50
     stmt: ListKnownRoutesGlobalHop
     shape: "no region + very rare hop 32"
-    params: [32, null, 0, 50]
+    params: [32, null, 0, true, 50]
     requires_indexes: [idx_known_routes_hop_iata]
     expect:
-      driver: [{relation: known_routes, index: idx_known_routes_hop_iata, index_cond: ["hop_count ="]}]
-      sort_exempt: [hop_group]
+      driver:
+        - {relation: known_routes, alias: kh, nodes: [Index Scan, Bitmap Heap Scan], index_cond: ["hop_count ="]}
+      sort_exempt: [hop_gate]
       budget: {buffers: 3633, planning_ms: 10}
     note: "measured: 2422 B on the full local copy with the end-state hop index (this copy lacks it)"
   - id: routes.globalhop.GH07_hop42_single_l50
     stmt: ListKnownRoutesGlobalHop
     shape: "no region + single-row hop 42"
-    params: [42, null, 0, 50]
+    params: [42, null, 0, true, 50]
     requires_indexes: [idx_known_routes_hop_iata]
     expect:
-      driver: [{relation: known_routes, index: idx_known_routes_hop_iata, index_cond: ["hop_count ="]}]
-      sort_exempt: [hop_group]
+      driver:
+        - {relation: known_routes, alias: kh, nodes: [Index Scan, Bitmap Heap Scan], index_cond: ["hop_count ="]}
+      sort_exempt: [hop_gate]
       budget: {buffers: 10, planning_ms: 10}
     note: "passes within 10 B on the full local copy with the end-state hop index (this copy lacks it)"
   - id: routes.globalhop.GH08_hop1_absent_l50
     stmt: ListKnownRoutesGlobalHop
     shape: "no region + absent hop 1"
-    params: [1, null, 0, 50]
+    params: [1, null, 0, true, 50]
     requires_indexes: [idx_known_routes_hop_iata]
     expect:
-      driver: [{relation: known_routes, index: idx_known_routes_hop_iata, index_cond: ["hop_count ="]}]
-      sort_exempt: [hop_group]
+      driver:
+        - {relation: known_routes, alias: kh, nodes: [Index Scan, Bitmap Heap Scan], index_cond: ["hop_count ="]}
+      sort_exempt: [hop_gate]
       budget: {buffers: 10, planning_ms: 10}
     note: "passes within 10 B on the full local copy with the end-state hop index (this copy lacks it)"
   - id: routes.globalhop.GH09_hop1_absent_cur_l50
     stmt: ListKnownRoutesGlobalHop
     shape: "no region + absent hop 1, with cursor + cursorId"
-    params: [1, {r: g50_ts}, {r: g50_id}, 50]
+    params: [1, {r: g50_ts}, {r: g50_id}, true, 50]
     requires_indexes: [idx_known_routes_hop_iata]
     expect:
-      driver: [{relation: known_routes, index: idx_known_routes_hop_iata, index_cond: ["hop_count ="]}]
-      sort_exempt: [hop_group]
+      driver:
+        - {relation: known_routes, alias: kh, nodes: [Index Scan, Bitmap Heap Scan], index_cond: ["hop_count ="]}
+      sort_exempt: [hop_gate]
       budget: {buffers: 10, planning_ms: 10}
     note: "passes within 10 B on the full local copy with the end-state hop index (this copy lacks it)"
   - id: routes.globalhop.GH10_hop6_deep_l200
     stmt: ListKnownRoutesGlobalHop
     shape: "no region + dense hop 6, deep cursor-only"
-    params: [6, "2026-10-05 19:00:00+00", 0, 200]
+    params: [6, "2026-10-05 19:00:00+00", 0, false, 200]
+    requires_indexes: [idx_known_routes_hop_iata]
     expect:
-      driver: [{relation: known_routes, index: idx_known_routes_keyset, index_cond: ["id) < ROW("]}]
+      driver:
+        - {relation: known_routes, alias: kk, index: idx_known_routes_keyset, index_cond: ["id) < ROW("]}
       budget: {buffers: 1605, planning_ms: 10}
     note: "measured: 1070 B on the full local copy (max over modes)"
+  - id: routes.globalhop.GH11_hop22_l200
+    stmt: ListKnownRoutesGlobalHop
+    shape: "no region + hop 22, estimated under the bound: reads the group (today walks the keyset)"
+    params: [22, null, 0, true, 200]
+    requires_indexes: [idx_known_routes_hop_iata]
+    expect:
+      driver:
+        - {relation: known_routes, alias: kh, nodes: [Index Scan, Bitmap Heap Scan], index_cond: ["hop_count ="]}
+      sort_exempt: [hop_gate]
+      budget: {buffers: 29481, planning_ms: 10}
+    note: "measured: 19654 B on the full local copy (today's statement read 61772 B); budget: 1.5x measured"
+  - id: routes.globalhop.GH12_hop21_l200
+    stmt: ListKnownRoutesGlobalHop
+    shape: "no region + hop 21, estimated over the bound: today's keyset walk"
+    params: [21, null, 0, false, 200]
+    requires_indexes: [idx_known_routes_hop_iata]
+    expect:
+      driver:
+        - {relation: known_routes, alias: kk, nodes: [Index Scan, Bitmap Heap Scan]}
+      sort_exempt: [hop_group]
+      budget: {buffers: 61472, planning_ms: 10}
+    note: "measured: 40981 B on the full local copy (today's statement read 40981 B); budget: 1.5x measured"
+  - id: routes.globalhop.GH13_hop25_l50
+    stmt: ListKnownRoutesGlobalHop
+    shape: "no region + rare hop 25, limit 50 (the bound halves; today walks the keyset)"
+    params: [25, null, 0, true, 50]
+    requires_indexes: [idx_known_routes_hop_iata]
+    expect:
+      driver:
+        - {relation: known_routes, alias: kh, nodes: [Index Scan, Bitmap Heap Scan], index_cond: ["hop_count ="]}
+      sort_exempt: [hop_gate]
+      budget: {buffers: 15002, planning_ms: 10}
+    note: "measured: 10001 B on the full local copy (today's statement read 42759 B); budget: 1.5x measured"
+  - id: routes.globalhop.GH14_hop25_deep_l200
+    stmt: ListKnownRoutesGlobalHop
+    shape: "no region + rare hop 25, deep cursor-only"
+    params: [25, "2026-10-05 19:00:00+00", 0, true, 200]
+    requires_indexes: [idx_known_routes_hop_iata]
+    expect:
+      driver:
+        - {relation: known_routes, alias: kh, nodes: [Index Scan, Bitmap Heap Scan], index_cond: ["hop_count ="]}
+      sort_exempt: [hop_gate]
+      budget: {buffers: 1326, planning_ms: 10}
+    note: "measured: 884 B on the full local copy (today's statement read 890 B); budget: 1.5x measured"
+  - id: routes.globalhop.GH15_hop21_tail_l200
+    stmt: ListKnownRoutesGlobalHop
+    shape: "no region + hop 21 over the bound, cursor at its 11th-oldest route: today's bitmap AND"
+    params: [21, "2026-10-04 19:03:11.835+00", 12429512, false, 200]
+    requires_indexes: [idx_known_routes_hop_iata]
+    expect:
+      driver:
+        - {relation: known_routes, alias: kk, nodes: [Index Scan, Bitmap Heap Scan]}
+      sort_exempt: [hop_group, hop_tail]
+      budget: {buffers: 126, planning_ms: 10}
+    note: "measured: 84 B on the full local copy (today's statement read 90 B); budget: 1.5x measured"
+  - id: routes.globalhop.GH16_hop25_kk_l200
+    stmt: ListKnownRoutesGlobalHop
+    shape: "no region + rare hop 25 on today's statement (the store's choice before its first statistics read)"
+    params: [25, null, 0, false, 200]
+    requires_indexes: [idx_known_routes_hop_iata]
+    expect:
+      driver:
+        - {relation: known_routes, alias: kk, nodes: [Index Scan, Bitmap Heap Scan]}
+      sort_exempt: [hop_group]
+      budget: {buffers: 15002, planning_ms: 10}
+    note: "measured: 10001 B on the full local copy (today's statement on this copy's statistics reads the group too); budget: 1.5x measured"
+  - id: routes.globalhop.GH17_hop21_kh_l200
+    stmt: ListKnownRoutesGlobalHop
+    shape: "no region + hop 21 read as a group (the store's choice if the statistics put it under the bound)"
+    params: [21, null, 0, true, 200]
+    requires_indexes: [idx_known_routes_hop_iata]
+    expect:
+      driver:
+        - {relation: known_routes, alias: kh, nodes: [Index Scan, Bitmap Heap Scan], index_cond: ["hop_count ="]}
+      sort_exempt: [hop_gate]
+      budget: {buffers: 52190, planning_ms: 10}
+    note: "measured: 34793 B on the full local copy (today's statement walks the keyset at 40981 B); budget: 1.5x measured"
   - id: routes.search.s_14_3d_all
     stmt: SearchKnownRoutesByNodes
     shape: "route search s_14_3d_all"

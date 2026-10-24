@@ -70,7 +70,8 @@ func (s *Store) listKnownRouteRows(ctx context.Context, iata string, hopCount in
 	case iata == "" && hopCount == 0:
 		return routeRows(s.q.ListKnownRoutesGlobal(ctx, sqlc.ListKnownRoutesGlobalParams{CursorTs: cursorTS, CursorID: cursorID, PageLimit: limit}))
 	case iata == "":
-		return routeRows(s.q.ListKnownRoutesGlobalHop(ctx, sqlc.ListKnownRoutesGlobalHopParams{HopCount: hopCount, CursorTs: cursorTS, CursorID: cursorID, PageLimit: limit}))
+		return routeRows(s.q.ListKnownRoutesGlobalHop(ctx, sqlc.ListKnownRoutesGlobalHopParams{HopCount: hopCount, CursorTs: cursorTS, CursorID: cursorID,
+			ReadGroup: s.hopGroupSmall(ctx, hopCount, limit), PageLimit: limit}))
 	case hopCount == 0:
 		return routeRows(s.q.ListKnownRoutesByIATA(ctx, sqlc.ListKnownRoutesByIATAParams{Iata: iata, CursorTs: cursorTS, CursorID: cursorID, PageLimit: limit}))
 	default:
