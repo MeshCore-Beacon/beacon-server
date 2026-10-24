@@ -100,7 +100,7 @@ ratelimit:
 #  fill:
 #    duty: 0.5                  # share of time a fill may be busy, 0.01 to 1; 0.25 on a slow (rotational) disk
 #    min_pause: 100ms           # shortest pause after a slice or batch, 0s to 1m
-#    packet_sites_slice: 500000 # observation ids per packet_sites backfill slice, 1 to 10000000
+#    packet_sites_slice: 500000 # observations per packet_sites backfill slice, 1 to 10000000
 #    cmi_batch: 10000           # message ids per cmi backfill batch, 1 to 1000000
 
 # MeshMapper integrations (optional, require a regional or grouped-region API key).

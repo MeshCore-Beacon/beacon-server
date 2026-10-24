@@ -120,15 +120,15 @@ func TestPacketSitesInitAndBackfillPostgres(t *testing.T) {
 	if err != nil || !st.Complete {
 		t.Fatalf("Backfill = %+v, %v", st, err)
 	}
-	// 1.2M ids from the oldest: three slices, none below the oldest observation.
-	if fmt.Sprint(p.fills) != "[[3000700000 3001200000] [3000200000 3000700000] [3000000000 3000200000]]" {
+	// 1.2M ids from the oldest but 600 observations: one slice, not below the oldest observation.
+	if fmt.Sprint(p.fills) != "[[3000000000 3001200000]]" {
 		t.Fatalf("fills %v", p.fills)
 	}
 	f.wantClean("after backfill")
 	if n, err := sqlc.New(f.pool).FillPacketSitesSlice(f.ctx, sqlc.FillPacketSitesSliceParams{AfterID: 0, ThroughID: f.maxID()}); err != nil || n != 0 {
 		t.Fatalf("a second fill wrote %d, %v", n, err)
 	}
-	if st, err := p.Backfill(f.ctx, time.Minute); err != nil || len(p.fills) != 3 || !st.Complete {
+	if st, err := p.Backfill(f.ctx, time.Minute); err != nil || len(p.fills) != 1 || !st.Complete {
 		t.Fatalf("a complete backfill ran again: %+v, %v, %v", st, err, p.fills)
 	}
 
