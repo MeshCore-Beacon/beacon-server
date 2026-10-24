@@ -188,6 +188,9 @@ func TestCoalescerShutdownFlushesBeforePoolClose(t *testing.T) {
 	for store.flushes.Load() == 0 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
+	if store.flushes.Load() == 0 {
+		t.Fatal("Run's final flush never started")
+	}
 	bump() // a writer that stopped late
 
 	finished := make(chan struct{})
@@ -211,4 +214,49 @@ func TestCoalescerShutdownFlushesBeforePoolClose(t *testing.T) {
 	if n := store.counts.Load(); n != 2 {
 		t.Errorf("flushed %d observations, want 2 (Run's final flush and the late one)", n)
 	}
+}
+
+// A ticker flush in flight when shutdown starts finishes on its own context: its rows are written, not dropped.
+func TestCoalescerTickerFlushSurvivesShutdown(t *testing.T) {
+	store := &shutdownStore{retentionStore: retentionStore{id: uuid.New()}, release: make(chan struct{}), t: t}
+	var ctxErr atomic.Value
+	c := New(&ctxStore{shutdownStore: store, ctxErr: &ctxErr}, 20*time.Millisecond, time.Hour)
+	for range 2 {
+		if _, _, err := c.UpsertObserver(context.Background(), []byte("fixture"), "YVR"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	finish := c.Start(ctx)
+	deadline := time.Now().Add(5 * time.Second)
+	for store.flushes.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if store.flushes.Load() == 0 {
+		t.Fatal("no ticker flush started")
+	}
+	cancel() // shutdown while the ticker flush is blocked
+	time.Sleep(20 * time.Millisecond)
+	close(store.release)
+	finish(context.Background())
+	if err, _ := ctxErr.Load().(error); err != nil {
+		t.Errorf("ticker flush saw a cancelled context: %v", err)
+	}
+	if n := store.counts.Load(); n != 1 {
+		t.Errorf("flushed %d observations, want 1", n)
+	}
+}
+
+// ctxStore records whether the first observer flush's context was cancelled by the time it wrote.
+type ctxStore struct {
+	*shutdownStore
+	ctxErr *atomic.Value
+}
+
+func (s *ctxStore) TouchObservers(ctx context.Context, ids []uuid.UUID, seen []time.Time, counts []int32, iatas []string, iataAts []time.Time) error {
+	err := s.shutdownStore.TouchObservers(ctx, ids, seen, counts, iatas, iataAts)
+	if ctx.Err() != nil {
+		s.ctxErr.CompareAndSwap(nil, ctx.Err())
+	}
+	return err
 }
