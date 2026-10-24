@@ -19,6 +19,7 @@ const (
 	modelPacketSites  = "packet_sites"
 	modelCmi          = "cmi"
 	modelPayloadTypes = "observation_payload_types"
+	modelNone         = "none" // a page that reads no read model
 )
 
 // respondUnavailableFor is respondUnavailable for a page that reads model; it counts each 503 it writes.
