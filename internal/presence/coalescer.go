@@ -234,15 +234,35 @@ func (c *Coalescer) DeleteOldObservers(ctx context.Context, cutoff time.Time) ([
 	return c.Store.DeleteOldObservers(ctx, cutoff)
 }
 
-// Run flushes on the configured interval until ctx is cancelled, then does a
-// final flush so a clean shutdown loses nothing.
+// Start runs Run in the background until ctx ends. The returned finish waits for Run's final flush to end, then
+// flushes the bumps written since. Call it once, after every writer has stopped and before the store's connections
+// close: when it returns, no flush is left running.
+func (c *Coalescer) Start(ctx context.Context) (finish func(context.Context)) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c.Run(ctx)
+	}()
+	return func(fctx context.Context) {
+		<-done // Run's final flush is bounded by its own timeout
+		c.Flush(fctx)
+	}
+}
+
+// Run flushes every flush interval until ctx ends, then flushes once more and returns. A flush runs on its own
+// context, so a shutdown that starts mid-flush lets it finish instead of dropping its rows.
 func (c *Coalescer) Run(ctx context.Context) {
 	ticker := time.NewTicker(c.flushInterval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
-			c.Flush(ctx)
+			if ctx.Err() != nil {
+				continue // both ready: take the final flush
+			}
+			flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), max(c.flushInterval, 10*time.Second))
+			c.Flush(flushCtx)
+			cancel()
 		case <-ctx.Done():
 			flushCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			c.Flush(flushCtx)
