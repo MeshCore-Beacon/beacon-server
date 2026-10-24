@@ -47,7 +47,7 @@ type PacketSitesSession interface {
 	Init(ctx context.Context) (db.PacketSitesState, error)
 	Reconcile(ctx context.Context) (int64, error)
 	Backfill(ctx context.Context, budget time.Duration) (db.PacketSitesState, error)
-	Audit(ctx context.Context, start func(lo, hi int64) int64) (int64, error)
+	Audit(ctx context.Context, u float64) (int64, error)
 	Verify(ctx context.Context) (db.PacketSitesVerification, error)
 	Close(ctx context.Context)
 }
@@ -286,7 +286,7 @@ func (j *PacketSitesJobs) AuditTask() Task {
 			if !st.Complete {
 				return nil // a rebuild is backfilling: its missing slices are not misses
 			}
-			n, err := s.Audit(ctx, func(lo, hi int64) int64 { return lo + rand.Int64N(hi-lo+1) })
+			n, err := s.Audit(ctx, rand.Float64())
 			if err != nil {
 				return err
 			}

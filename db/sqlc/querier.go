@@ -440,6 +440,8 @@ type Querier interface {
 	MinObservationID(ctx context.Context) (int64, error)
 	// The first message id above after_id, or 0 when there is none.
 	NextChannelMessageID(ctx context.Context, afterID int64) (int64, error)
+	// The id skip + 1 observations above after_id: (after_id, id] holds exactly skip + 1 of them. 0 when fewer remain.
+	ObservationIDAbove(ctx context.Context, arg ObservationIDAboveParams) (int64, error)
 	// The id that bounds the newest n observations at or below through_id from below: (id, through_id] holds exactly n
 	// of them. 0 when fewer than n + 1 remain.
 	ObservationIDBelow(ctx context.Context, arg ObservationIDBelowParams) (int64, error)
