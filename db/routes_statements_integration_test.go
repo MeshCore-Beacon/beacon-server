@@ -234,6 +234,35 @@ FROM generate_series(1, 3000) i;`); err != nil {
 		}
 	}
 
+	// Either branch, whatever the store would pick, returns today's rows: first pages and a mid cursor, per limit.
+	q := sqlc.New(unnamedDBTX{tx})
+	for _, hop := range []int32{3, 7, 9, 12} {
+		all := legacyRows[knownRouteRow](t, ctx, tx, legacyListKnownRoutes, "", hop, pgtype.Timestamptz{}, int32(5000), int64(0))
+		cursors := []struct {
+			at pgtype.Timestamptz
+			id int64
+		}{{}}
+		if len(all) > 20 {
+			mid := all[len(all)/2]
+			cursors = append(cursors, struct {
+				at pgtype.Timestamptz
+				id int64
+			}{pgtype.Timestamptz{Time: time.UnixMilli(mid.LastSeen.Time.UnixMilli()), Valid: true}, mid.ID})
+		}
+		for _, c := range cursors {
+			for _, limit := range []int32{1, 50, 200} {
+				want := legacyRows[knownRouteRow](t, ctx, tx, legacyListKnownRoutes, "", hop, c.at, limit, c.id)
+				for _, readGroup := range []bool{true, false} {
+					got, err := routeRows(q.ListKnownRoutesGlobalHop(ctx, sqlc.ListKnownRoutesGlobalHopParams{
+						HopCount: hop, CursorTs: c.at, CursorID: c.id, ReadGroup: readGroup, PageLimit: limit}))
+					if err != nil || !sameRows(got, want) {
+						t.Fatalf("hop %d read_group %v cursor %v/%d limit %d: got %v, want %v (%v)", hop, readGroup, c.at.Time, c.id, limit, ids(got), ids(want), err)
+					}
+				}
+			}
+		}
+	}
+
 	// Which branch ran: hop 3 (estimated over the bound) runs today's statement (kk), hop 7 reads its group (kh).
 	if kh, kk := branchRan(tx, 3); kh > 0 || kk != 1 {
 		t.Errorf("hop 3: kh ran %d, kk %d times (-1: planned away); want kh not run and kk once", kh, kk)

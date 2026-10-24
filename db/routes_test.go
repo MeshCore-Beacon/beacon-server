@@ -242,8 +242,11 @@ func TestHopGroupIsSmall(t *testing.T) {
 		{"under the bound", st, 22, 200, true},
 		{"rare hop", st, 25, 200, true},
 		{"limit 50 halves the bound", st, 22, 50, false},
-		// 1 - 0.1458 spread over the 36 values outside the list: about 249K routes each.
-		{"value outside the list", st, 9, 200, false},
+		// 1 - 0.1458 spread over the 36 values outside the list, capped at the least common listed value (0.001):
+		// 10.5K routes, as the planner estimates it.
+		{"value outside the list", st, 9, 200, true},
+		{"value outside a list of common values", sqlc.GetKnownRoutesHopStatsRow{Reltuples: 10_500_000, HasStats: true,
+			HopValues: []int32{6, 7}, HopFreqs: []float64{0.3, 0.2}, NDistinct: 4}, 9, 200, false},
 		{"absent from a complete list", sqlc.GetKnownRoutesHopStatsRow{Reltuples: 10_500_000, HasStats: true,
 			HopValues: []int32{6, 7}, HopFreqs: []float64{0.5, 0.5}, NDistinct: 2}, 1, 200, true},
 		{"negative n_distinct scales with the rows", sqlc.GetKnownRoutesHopStatsRow{Reltuples: 10_500_000, HasStats: true,
@@ -279,5 +282,26 @@ func TestHopGroupSmallCaches(t *testing.T) {
 	}
 	if wait := time.Until(store.hopStats.at.Add(hopStatsTTL)); wait > hopStatsRetry || wait < hopStatsRetry-time.Minute {
 		t.Errorf("next read in %s, want about %s", wait, hopStatsRetry)
+	}
+}
+
+// A request that goes away while it refreshes the statistics does not fail the read.
+func TestHopGroupSmallReadOutlivesRequest(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	q := mockdb.NewMockQuerier(ctrl)
+	store := &Store{q: q}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	q.EXPECT().GetKnownRoutesHopStats(gomock.Any()).DoAndReturn(func(rctx context.Context) (sqlc.GetKnownRoutesHopStatsRow, error) {
+		if rctx.Err() != nil {
+			return sqlc.GetKnownRoutesHopStatsRow{}, rctx.Err()
+		}
+		if _, ok := rctx.Deadline(); !ok {
+			t.Error("statistics read has no deadline")
+		}
+		return sqlc.GetKnownRoutesHopStatsRow{Reltuples: 3000, HasStats: true, HopValues: []int32{3}, HopFreqs: []float64{0.1}, NDistinct: 1}, nil
+	}).Times(1)
+	if !store.hopGroupSmall(ctx, 3, 50) {
+		t.Fatal("hop 3 not small: the read failed with the request's context")
 	}
 }
