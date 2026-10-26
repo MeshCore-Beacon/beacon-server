@@ -56,9 +56,10 @@ const (
 // Handler returns an http.HandlerFunc that requires the hub to be injected.
 // Wire it via router.New(h) so the hub is available at startup.
 func Handler(h *hub.Hub, reader api.Reader, maxConnsPerIP, maxConnectsPerMinute int, allowedOrigins []string) http.HandlerFunc {
-	var acceptOpts *websocket.AcceptOptions
-	if len(allowedOrigins) > 0 {
-		acceptOpts = &websocket.AcceptOptions{OriginPatterns: allowedOrigins}
+	acceptOpts := &websocket.AcceptOptions{
+		OriginPatterns: allowedOrigins,
+		// The live feed is repetitive JSON; a shared window cuts its bytes ~3x for ~1.2 MB per socket.
+		CompressionMode: websocket.CompressionContextTakeover,
 	}
 	limiter := newIPLimiter(maxConnsPerIP)
 	attempts := httprate.NewRateLimiter(maxConnectsPerMinute, time.Minute,
