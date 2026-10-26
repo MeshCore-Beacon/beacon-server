@@ -2020,9 +2020,12 @@ ORDER BY ts.name;
 -- ============================================================
 
 -- name: ListRegions :many
-SELECT id, slug, name
-FROM regions
-ORDER BY display_order, name;
+-- Each region with its detail and member IATAs, so clients resolve every region in one call.
+SELECT r.id, r.slug, r.name, r.description, r.center_lat, r.center_lng, r.zoom_level,
+       COALESCE((SELECT array_agg(ri.iata::text ORDER BY ri.iata) FROM region_iatas ri WHERE ri.region_id = r.id),
+                '{}')::text[] AS iatas
+FROM regions r
+ORDER BY r.display_order, r.name;
 
 -- name: GetRegion :one
 SELECT id, slug, name, description, center_lat, center_lng, zoom_level

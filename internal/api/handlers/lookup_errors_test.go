@@ -28,7 +28,7 @@ func TestLookupErrors(t *testing.T) {
 			return RegionsRouter(stubReader{getRegion: func(context.Context, int32) (*api.Region, error) { return nil, err }})
 		}, "/1", http.StatusNotFound},
 		{"regions", func(err error) http.Handler {
-			return RegionsRouter(stubReader{listRegions: func(context.Context) ([]api.RegionSummary, error) { return nil, err }})
+			return RegionsRouter(stubReader{listRegions: func(context.Context) ([]api.Region, error) { return nil, err }})
 		}, "/", http.StatusInternalServerError},
 		{"iata", func(err error) http.Handler {
 			return IATAsRouter(stubReader{getIATA: func(context.Context, string) (*api.IATA, error) { return nil, err }})

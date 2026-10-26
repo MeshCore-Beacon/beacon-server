@@ -71,8 +71,8 @@ func (s *stubReader) GetIATA(_ context.Context, _ string) (*api.IATA, error) { r
 func (s *stubReader) GetIATABorder(_ context.Context, _ string) (json.RawMessage, error) {
 	return nil, nil
 }
-func (s *stubReader) ListRegions(_ context.Context) ([]api.RegionSummary, error) { return nil, nil }
-func (s *stubReader) GetRegion(_ context.Context, _ int32) (*api.Region, error)  { return nil, nil }
+func (s *stubReader) ListRegions(_ context.Context) ([]api.Region, error)       { return nil, nil }
+func (s *stubReader) GetRegion(_ context.Context, _ int32) (*api.Region, error) { return nil, nil }
 func (s *stubReader) GetRegionBySlug(_ context.Context, _ string) (*api.Region, error) {
 	return nil, nil
 }

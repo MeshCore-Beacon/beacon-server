@@ -5682,20 +5682,28 @@ func (q *Queries) ListRegionState(ctx context.Context) ([]ListRegionStateRow, er
 
 const listRegions = `-- name: ListRegions :many
 
-SELECT id, slug, name
-FROM regions
-ORDER BY display_order, name
+SELECT r.id, r.slug, r.name, r.description, r.center_lat, r.center_lng, r.zoom_level,
+       COALESCE((SELECT array_agg(ri.iata::text ORDER BY ri.iata) FROM region_iatas ri WHERE ri.region_id = r.id),
+                '{}')::text[] AS iatas
+FROM regions r
+ORDER BY r.display_order, r.name
 `
 
 type ListRegionsRow struct {
-	ID   int32  `json:"id"`
-	Slug string `json:"slug"`
-	Name string `json:"name"`
+	ID          int32    `json:"id"`
+	Slug        string   `json:"slug"`
+	Name        string   `json:"name"`
+	Description *string  `json:"description"`
+	CenterLat   *float64 `json:"center_lat"`
+	CenterLng   *float64 `json:"center_lng"`
+	ZoomLevel   *int32   `json:"zoom_level"`
+	Iatas       []string `json:"iatas"`
 }
 
 // ============================================================
 // REGIONS
 // ============================================================
+// Each region with its detail and member IATAs, so clients resolve every region in one call.
 func (q *Queries) ListRegions(ctx context.Context) ([]ListRegionsRow, error) {
 	rows, err := q.db.Query(ctx, listRegions)
 	if err != nil {
@@ -5705,7 +5713,16 @@ func (q *Queries) ListRegions(ctx context.Context) ([]ListRegionsRow, error) {
 	items := []ListRegionsRow{}
 	for rows.Next() {
 		var i ListRegionsRow
-		if err := rows.Scan(&i.ID, &i.Slug, &i.Name); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.Slug,
+			&i.Name,
+			&i.Description,
+			&i.CenterLat,
+			&i.CenterLng,
+			&i.ZoomLevel,
+			&i.Iatas,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

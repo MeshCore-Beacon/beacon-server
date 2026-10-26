@@ -35,7 +35,7 @@ func (e errReader) GetIATABorder(ctx context.Context, iata string) (v json.RawMe
 	return v, e.err
 }
 
-func (e errReader) ListRegions(ctx context.Context) (v []api.RegionSummary, err error) {
+func (e errReader) ListRegions(ctx context.Context) (v []api.Region, err error) {
 	return v, e.err
 }
 

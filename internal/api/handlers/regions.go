@@ -33,13 +33,14 @@ func RegionsRouter(reader api.Reader) http.Handler {
 
 // listRegions godoc
 //
-//	@Summary	List all regions
-//	@Tags		Regions
-//	@Produce	json
-//	@Success	200	{array}		api.RegionSummary
-//	@Failure	500	{object}	handlers.APIError
-//	@Failure	503	{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
-//	@Router		/regions [get]
+//	@Summary		List all regions
+//	@Description	Each region carries its detail and member IATAs, the same as GET /regions/{regionId}.
+//	@Tags			Regions
+//	@Produce		json
+//	@Success		200	{array}		api.Region
+//	@Failure		500	{object}	handlers.APIError
+//	@Failure		503	{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
+//	@Router			/regions [get]
 func listRegions(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		regions, err := reader.ListRegions(r.Context())
@@ -48,7 +49,7 @@ func listRegions(reader api.Reader) http.HandlerFunc {
 			return
 		}
 		if regions == nil {
-			regions = []api.RegionSummary{}
+			regions = []api.Region{}
 		}
 		respond(w, http.StatusOK, regions)
 	}

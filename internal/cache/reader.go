@@ -19,7 +19,7 @@ const (
 	keyIATAs                   = "beacon:iatas"
 	keyIATAPrefix              = "beacon:iata:"
 	keyIATABorderPrefix        = "beacon:iata:border:"
-	keyRegions                 = "beacon:regions"
+	keyRegions                 = "beacon:regions:detail" // renamed when items gained detail, so no old summary list is read
 	keyRegionPrefix            = "beacon:region:"
 	keyRegionSlugPrefix        = "beacon:region:slug:"
 	keyScopeNames              = "beacon:scope:names"
@@ -147,8 +147,8 @@ func (cr *CachedReader) GetIATABorder(ctx context.Context, iata string) (json.Ra
 }
 
 // ListRegions implements [api.Reader].
-func (cr *CachedReader) ListRegions(ctx context.Context) ([]api.RegionSummary, error) {
-	return getOrSet(ctx, cr.c, keyRegions, cr.ttl.Reference, func(ctx context.Context) ([]api.RegionSummary, error) {
+func (cr *CachedReader) ListRegions(ctx context.Context) ([]api.Region, error) {
+	return getOrSet(ctx, cr.c, keyRegions, cr.ttl.Reference, func(ctx context.Context) ([]api.Region, error) {
 		return cr.inner.ListRegions(ctx)
 	})
 }

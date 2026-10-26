@@ -2330,6 +2330,7 @@ const docTemplate = `{
         },
         "/regions": {
             "get": {
+                "description": "Each region carries its detail and member IATAs, the same as GET /regions/{regionId}.",
                 "produces": [
                     "application/json"
                 ],
@@ -2343,7 +2344,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.RegionSummary"
+                                "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.Region"
                             }
                         }
                     },
@@ -6061,21 +6062,6 @@ const docTemplate = `{
                 "zoomLevel": {
                     "description": "suggested map zoom level",
                     "type": "integer"
-                }
-            }
-        },
-        "github_com_MeshCore-Beacon_beacon-server_internal_api.RegionSummary": {
-            "type": "object",
-            "properties": {
-                "id": {
-                    "type": "integer"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "slug": {
-                    "description": "URL-safe identifier e.g. \"western-canada\"",
-                    "type": "string"
                 }
             }
         },

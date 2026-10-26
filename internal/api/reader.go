@@ -39,9 +39,9 @@ type Reader interface {
 	// that as "nothing to draw", not an error. Returns an error if the IATA itself is unknown.
 	GetIATABorder(ctx context.Context, iata string) (json.RawMessage, error)
 
-	// ListRegions returns a summary list of all regions ordered by display_order then name.
-	// Use GetRegion for full detail including associated IATAs.
-	ListRegions(ctx context.Context) ([]RegionSummary, error)
+	// ListRegions returns every region with its detail and member IATAs, ordered by display_order
+	// then name.
+	ListRegions(ctx context.Context) ([]Region, error)
 
 	// GetRegion returns full detail for a single region including its associated IATA codes.
 	// Returns nil, pgx.ErrNoRows if the region is not found.

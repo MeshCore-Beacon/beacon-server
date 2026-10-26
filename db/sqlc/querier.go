@@ -433,6 +433,7 @@ type Querier interface {
 	// ============================================================
 	// REGIONS
 	// ============================================================
+	// Each region with its detail and member IATAs, so clients resolve every region in one call.
 	ListRegions(ctx context.Context) ([]ListRegionsRow, error)
 	ListRepeaterSources(ctx context.Context) ([]MeshmapperRepeaterSource, error)
 	// Leading index equalities and the time/ID boundary bound both custom and generic plans.

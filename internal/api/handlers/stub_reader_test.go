@@ -23,7 +23,7 @@ type stubReader struct {
 	listIATAs                    func(ctx context.Context) ([]api.IATA, error)
 	getIATA                      func(ctx context.Context, iata string) (*api.IATA, error)
 	getIATABorder                func(ctx context.Context, iata string) (json.RawMessage, error)
-	listRegions                  func(ctx context.Context) ([]api.RegionSummary, error)
+	listRegions                  func(ctx context.Context) ([]api.Region, error)
 	getRegion                    func(ctx context.Context, regionID int32) (*api.Region, error)
 	getRegionBySlug              func(ctx context.Context, slug string) (*api.Region, error)
 	listChannels                 func(ctx context.Context, limit int32, hash []byte, iatas []string, keyKnown *bool, cursor int64, pageCursor *api.ChannelCursor) (api.ChannelPage, error)
@@ -110,7 +110,7 @@ func (s stubReader) GetIATABorder(ctx context.Context, iata string) (json.RawMes
 	return nil, nil
 }
 
-func (s stubReader) ListRegions(ctx context.Context) ([]api.RegionSummary, error) {
+func (s stubReader) ListRegions(ctx context.Context) ([]api.Region, error) {
 	if s.listRegions != nil {
 		return s.listRegions(ctx)
 	}
