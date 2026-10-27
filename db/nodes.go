@@ -213,6 +213,7 @@ func (s *Store) nodeSummary(v sqlc.ListNodesRow) api.NodeSummary {
 		Longitude:          v.Longitude,
 		IsObserver:         v.IsObserver,
 		ObserverID:         nullableUUID(v.ObserverID),
+		DefaultScope:       v.DefaultScopeName,
 		KnownNeighborCount: v.KnownNeighborCount,
 		NeighborIDs:        v.NeighborIds,
 		Stale:              v.LastSeen.Valid && v.LastSeen.Time.Before(time.Now().Add(-s.staleThreshold)),

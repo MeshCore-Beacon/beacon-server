@@ -782,3 +782,32 @@ func TestListNodes_NextPageCursor(t *testing.T) {
 		}
 	}
 }
+
+// List rows carry the node's scope, as node detail does: clients filter and show it.
+func TestNodeListsCarryDefaultScope(t *testing.T) {
+	scope := "#bc"
+	row := sqlc.ListNodesRow{ID: uuid.New(), PublicKey: []byte{1}, DefaultScopeName: &scope}
+	sorted := sqlc.ListNodesSortedRow{ID: uuid.New(), PublicKey: []byte{2}, DefaultScopeName: &scope}
+	ctrl := gomock.NewController(t)
+	mock := mockdb.NewMockQuerier(ctrl)
+	mock.EXPECT().ListNodes(gomock.Any(), gomock.Any()).Return([]sqlc.ListNodesRow{row, {ID: uuid.New(), PublicKey: []byte{3}}}, nil)
+	mock.EXPECT().ListNodesSorted(gomock.Any(), gomock.Any()).Return([]sqlc.ListNodesSortedRow{sorted}, nil)
+	store := &Store{q: mock}
+	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, nil, 50, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := page.Items[0].DefaultScope; got == nil || *got != scope {
+		t.Fatalf("list row scope %v, want %s", got, scope)
+	}
+	if page.Items[1].DefaultScope != nil {
+		t.Fatalf("a node without a scope got %q", *page.Items[1].DefaultScope)
+	}
+	sortedPage, err := store.ListNodesSorted(context.Background(), 0, nil, nil, nil, nil, "", "", "", api.NodeSort{By: api.NodeSortName}, nil, 50, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sortedPage.Items[0].DefaultScope; got == nil || *got != scope {
+		t.Fatalf("sorted row scope %v, want %s", got, scope)
+	}
+}
