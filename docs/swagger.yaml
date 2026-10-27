@@ -601,6 +601,21 @@ definitions:
         type: integer
       nextPageCursor:
         type: string
+      order:
+        enum:
+        - asc
+        - desc
+        type: string
+      sort:
+        description: |-
+          Sort and Order name the order the items are in ("lastSeen" "desc" unless a sort was asked
+          for), so a client can tell this server sorted; older servers leave them out.
+        enum:
+        - lastSeen
+        - name
+        - type
+        - neighbors
+        type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.NodeSummary:
     properties:
@@ -2859,6 +2874,24 @@ paths:
           ties. Wins over cursor when both are sent
         in: query
         name: pageCursor
+        type: string
+      - description: 'Order: lastSeen (default, newest first), name, type or neighbors.
+          Unnamed nodes come last in either name order; ties go newest first. Page
+          a sorted list with pageCursor only'
+        enum:
+        - lastSeen
+        - name
+        - type
+        - neighbors
+        in: query
+        name: sort
+        type: string
+      - description: asc (default) or desc; lastSeen is desc only
+        enum:
+        - asc
+        - desc
+        in: query
+        name: order
         type: string
       - description: Max results (default 50); must be positive, values above 2000
           are clamped

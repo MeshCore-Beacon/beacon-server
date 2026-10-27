@@ -1401,6 +1401,77 @@ SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_
 FROM page n
 ORDER BY n.last_seen DESC, n.id DESC;
 
+-- name: ListNodesSorted :many
+-- ListNodes by name, type or neighbour count, keyset-paged, in the web table's order: unnamed nodes
+-- last, unknown types after sensor, ties newest first.
+WITH counts AS MATERIALIZED (
+  SELECT nn.node_id, count(DISTINCT nn.neighbor_id)::bigint AS k
+  FROM node_neighbors nn
+  WHERE @sort::text = 'neighbors'
+  GROUP BY nn.node_id
+), keyed AS (
+SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen,
+  n.radio_freq_mhz, n.radio_sf, n.radio_bw_khz, ts.name AS default_scope_name,
+  (CASE WHEN @sort::text = 'name' AND coalesce(n.name, '') = '' THEN 1 ELSE 0 END)::int AS k_null,
+  (CASE WHEN @sort::text = 'name' THEN coalesce(n.name, '') ELSE '' END)::text COLLATE natural_text AS k_text,
+  (CASE @sort::text
+     WHEN 'type' THEN CASE WHEN n.node_type BETWEEN 1 AND 4 THEN n.node_type ELSE 5 END::bigint
+     WHEN 'neighbors' THEN coalesce(c.k, 0)
+     ELSE 0 END
+   * CASE WHEN @descending::bool THEN -1 ELSE 1 END)::bigint AS k_num,
+  (-(extract(epoch FROM n.last_seen) * 1000000))::bigint AS k_seen
+FROM nodes n
+LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id
+LEFT JOIN counts c ON c.node_id = n.id
+WHERE
+  (@node_type::smallint = 0 OR n.node_type = @node_type::smallint)
+  AND (COALESCE(cardinality(@iatas::bpchar[]), 0) = 0 OR n.id IN (SELECT node_id FROM node_iatas WHERE iata = ANY(@iatas::bpchar[])))
+  AND (
+    @multibyte_paths::text = 'any'
+    OR (@multibyte_paths::text = 'true' AND n.supports_multibyte_paths = TRUE)
+    OR (@multibyte_paths::text = 'false' AND n.supports_multibyte_paths = FALSE)
+  )
+  AND (
+    @multibyte_traces::text = 'any'
+    OR (@multibyte_traces::text = 'true' AND n.supports_multibyte_traces = TRUE)
+    OR (@multibyte_traces::text = 'false' AND n.supports_multibyte_traces = FALSE)
+  )
+  AND (sqlc.narg(pubkey)::bytea IS NULL OR n.public_key = sqlc.narg(pubkey)::bytea)
+  AND (@name::text = '' OR n.name ILIKE '%' || @name::text || '%')
+  AND (@scope::text = '' OR ts.name = @scope::text)
+  AND (@pubkey_prefix::text = '' OR encode(n.public_key, 'hex') ILIKE @pubkey_prefix::text || '%')
+), page AS (
+SELECT * FROM keyed
+WHERE NOT @has_cursor::bool
+  OR k_null > @cursor_null::int
+  OR (k_null = @cursor_null::int AND (
+    (@descending::bool AND k_text < @cursor_text::text)
+    OR (NOT @descending::bool AND k_text > @cursor_text::text)
+    OR (k_text = @cursor_text::text AND (
+      k_num > @cursor_num::bigint OR (k_num = @cursor_num::bigint AND (
+        k_seen > @cursor_seen::bigint OR (k_seen = @cursor_seen::bigint AND id > @cursor_id::uuid)))))))
+ORDER BY k_null,
+  CASE WHEN NOT @descending::bool THEN k_text END,
+  CASE WHEN @descending::bool THEN k_text END DESC,
+  k_num, k_seen, id
+LIMIT @row_limit
+)
+SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen,
+  n.radio_freq_mhz, n.radio_sf, n.radio_bw_khz, n.default_scope_name, n.k_null, n.k_text::text AS k_text, n.k_num, n.k_seen,
+  (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
+   FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas,
+  EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
+  (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
+  (SELECT COUNT(DISTINCT nn.neighbor_id) FROM node_neighbors nn WHERE nn.node_id = n.id)::bigint AS known_neighbor_count,
+  (CASE WHEN @include_neighbors::bool THEN
+    (SELECT COALESCE(array_agg(DISTINCT nn.neighbor_id), '{}'::uuid[]) FROM node_neighbors nn WHERE nn.node_id = n.id)
+  ELSE NULL END)::uuid[] AS neighbor_ids
+FROM page n
+ORDER BY n.k_null,
+  CASE WHEN NOT @descending::bool THEN n.k_text END,
+  CASE WHEN @descending::bool THEN n.k_text END DESC,
+  n.k_num, n.k_seen, n.id;
+
 -- name: ListNodeObservations :many
 SELECT po.id, encode(po.packet_hash, 'hex') AS packet_hash_hex,
   p.payload_type, po.iata, po.heard_at, po.rssi, po.snr, po.hop_count

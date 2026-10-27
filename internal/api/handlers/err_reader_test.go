@@ -98,6 +98,9 @@ func (e errReader) ListObserverAdverts(ctx context.Context, observerID uuid.UUID
 func (e errReader) ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (v api.NodePage, err error) {
 	return v, e.err
 }
+func (e errReader) ListNodesSorted(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, sort api.NodeSort, pageCursor *api.NodeSortCursor, limit int32, includeNeighbors bool) (v api.NodePage, err error) {
+	return v, e.err
+}
 
 func (e errReader) GetNode(ctx context.Context, nodeID uuid.UUID) (v *api.Node, err error) {
 	return v, e.err

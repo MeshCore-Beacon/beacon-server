@@ -324,6 +324,11 @@ func (cr *CachedReader) ListNodes(ctx context.Context, nodeType int16, iatas []s
 	return cr.inner.ListNodes(ctx, nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, cursor, pageCursor, limit, includeNeighbors)
 }
 
+// ListNodesSorted implements [api.Reader].
+func (cr *CachedReader) ListNodesSorted(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, sort api.NodeSort, pageCursor *api.NodeSortCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
+	return cr.inner.ListNodesSorted(ctx, nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, sort, pageCursor, limit, includeNeighbors)
+}
+
 // ListNodeObservations implements [api.Reader].
 func (cr *CachedReader) ListNodeObservations(ctx context.Context, nodeID uuid.UUID, cursor int64, limit int32) (api.Page[api.PacketObservationSummary], error) {
 	return cr.inner.ListNodeObservations(ctx, nodeID, cursor, limit)

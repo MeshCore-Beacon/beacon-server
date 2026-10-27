@@ -95,6 +95,7 @@ statements:
   ListPacketsWindow: {sqlc: ListPacketsWindow, group: packets_global, plan: custom}
   ListPacketsWindowScoped: {sqlc: ListPacketsWindowScoped, group: packets_global, plan: custom}
   ListNodes: {sqlc: ListNodes, group: packets_global, plan: custom}
+  ListNodesSorted: {sqlc: ListNodesSorted, group: packets_global, plan: custom}
   ListObservers: {sqlc: ListObservers, group: packets_global, plan: custom}
   # Read-only parts of maint DML, cut from today's sqlc text (lock clause removed); a drift test keeps them in step.
   DeleteExpiredRoutesSelect: {file: sql/derived/DeleteExpiredRoutesSelect.sql, derived_from: DeleteExpiredRoutes, plan: maint}
@@ -2979,6 +2980,30 @@ entries:
     expect:
       budget: {buffers: 15000, planning_ms: 60}
     note: "measured: - / - B (custom / generic); budget: class budget"
+  - id: sm.nodes_sorted.name
+    stmt: ListNodesSorted
+    shape: "ListNodesSorted name"
+    params: [{raw: "false"}, {raw: "false"}, {raw: "'name'"}, {raw: "0"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "''"}, {raw: "''"}, {raw: "false"}, {raw: "0"}, {raw: "''"}, {raw: "0"}, {raw: "0"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}, {raw: "200"}]
+    tiers: [fixture, prod]
+    note: "the local copy's overlay predates migration 061 (natural_text); about 40 ms (name, type) and 100 ms (neighbours) on the full copy with und-x-icu standing in"
+  - id: sm.nodes_sorted.name_desc_cursor
+    stmt: ListNodesSorted
+    shape: "ListNodesSorted name desc, mid-list cursor"
+    params: [{raw: "false"}, {raw: "true"}, {raw: "'name'"}, {raw: "0"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "''"}, {raw: "''"}, {raw: "true"}, {raw: "0"}, {raw: "'M'"}, {raw: "0"}, {raw: "-1767225600000000"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}, {raw: "200"}]
+    tiers: [fixture, prod]
+    note: "fixture and prod only, as sm.nodes_sorted.name"
+  - id: sm.nodes_sorted.type_SEA
+    stmt: ListNodesSorted
+    shape: "ListNodesSorted type in SEA"
+    params: [{raw: "false"}, {raw: "false"}, {raw: "'type'"}, {raw: "0"}, {raw: "'{SEA}'::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "''"}, {raw: "''"}, {raw: "false"}, {raw: "0"}, {raw: "''"}, {raw: "0"}, {raw: "0"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}, {raw: "200"}]
+    tiers: [fixture, prod]
+    note: "fixture and prod only, as sm.nodes_sorted.name"
+  - id: sm.nodes_sorted.neighbors_desc
+    stmt: ListNodesSorted
+    shape: "ListNodesSorted neighbours desc"
+    params: [{raw: "true"}, {raw: "true"}, {raw: "'neighbors'"}, {raw: "0"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "''"}, {raw: "''"}, {raw: "false"}, {raw: "0"}, {raw: "''"}, {raw: "0"}, {raw: "0"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}, {raw: "200"}]
+    tiers: [fixture, prod]
+    note: "fixture and prod only, as sm.nodes_sorted.name"
   - id: sm.drift.bogus5000
     stmt: GetStatsClockDrift
     shape: "clock drift, 5,000 bogus IATAs"

@@ -150,3 +150,32 @@ func TestPageCursorJSON(t *testing.T) {
 		t.Errorf("packet page with cursor = %s", b)
 	}
 }
+
+func TestNodeSortCursor(t *testing.T) {
+	id := uuid.MustParse("01234567-89ab-cdef-0123-456789abcdef")
+	for _, c := range []NodeSortCursor{
+		{Sort: NodeSort{By: NodeSortName}, Text: "🏔️ Peak: 9/10", Seen: -1767225600000000, ID: id},
+		{Sort: NodeSort{By: NodeSortName, Descending: true}, Null: 1, Seen: -1, ID: id},
+		{Sort: NodeSort{By: NodeSortNeighbors, Descending: true}, Num: -42, Seen: -1767225600123456, ID: id},
+		{Sort: NodeSort{By: NodeSortType}, Num: 5, ID: id},
+	} {
+		got, err := ParseNodeSortCursor(c.String())
+		if err != nil || *got != c {
+			t.Fatalf("%s: %+v, %v", c.String(), got, err)
+		}
+	}
+	valid := NodeSortCursor{Sort: NodeSort{By: NodeSortName}, Text: "x", ID: id}.String()
+	for _, raw := range []string{
+		"", "v1:1:" + id.String(), valid + ":", strings.Replace(valid, "s1:", "s2:", 1),
+		strings.Replace(valid, ":name:", ":radio:", 1), strings.Replace(valid, ":a:", ":x:", 1),
+		"s1:name:a:2:0:0:" + id.String() + ":eA", // null is 0 or 1
+		"s1:name:a:0:01:0:" + id.String() + ":eA", "s1:name:a:0:0:+1:" + id.String() + ":eA",
+		"s1:name:a:0:0:0:" + strings.ReplaceAll(id.String(), "-", "") + ":eA",
+		"s1:name:a:0:0:0:" + id.String() + ":eA==", "s1:name:a:0:0:0:" + id.String() + ":e+A",
+		"s1:name:a:0:0:0:" + id.String() + ":" + strings.Repeat("eA", 300),
+	} {
+		if _, err := ParseNodeSortCursor(raw); err == nil {
+			t.Fatalf("accepted %q", raw)
+		}
+	}
+}

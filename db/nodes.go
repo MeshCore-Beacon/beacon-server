@@ -142,31 +142,7 @@ func (s *Store) ListNodes(ctx context.Context, nodeType int16, iatas []string, s
 	}
 	items := make([]api.NodeSummary, 0, len(rows))
 	for _, v := range rows {
-		node := api.NodeSummary{
-			ID:                 v.ID,
-			PublicKey:          hex.EncodeToString(v.PublicKey),
-			NodeType:           v.NodeType,
-			NodeTypeName:       api.NodeTypeName(v.NodeType),
-			Name:               v.Name,
-			Latitude:           v.Latitude,
-			Longitude:          v.Longitude,
-			IsObserver:         v.IsObserver,
-			ObserverID:         nullableUUID(v.ObserverID),
-			KnownNeighborCount: v.KnownNeighborCount,
-			NeighborIDs:        v.NeighborIds,
-			Stale:              v.LastSeen.Valid && v.LastSeen.Time.Before(time.Now().Add(-s.staleThreshold)),
-		}
-		if len(v.Iatas) > 0 {
-			if err := json.Unmarshal(v.Iatas, &node.IATAs); err != nil {
-				slog.Error("store: failed to unmarshal node iatas", "component", "db", "error", err)
-				node.IATAs = []api.NodeIATA{}
-			}
-		}
-		if v.RadioFreqMhz != nil && v.RadioSf != nil && v.RadioBwKhz != nil {
-			s := fmt.Sprintf("%g,%g,%d", *v.RadioFreqMhz, *v.RadioBwKhz, *v.RadioSf)
-			node.Radio = &s
-		}
-		items = append(items, node)
+		items = append(items, s.nodeSummary(v))
 	}
 	page := api.NodePage{Page: api.Page[api.NodeSummary]{Items: items, HasMore: hasMore}}
 	if hasMore && len(rows) > 0 {
@@ -177,6 +153,81 @@ func (s *Store) ListNodes(ctx context.Context, nodeType int16, iatas []string, s
 		page.NextPageCursor = &next
 	}
 	return page, nil
+}
+
+func (s *Store) ListNodesSorted(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, sort api.NodeSort, pageCursor *api.NodeSortCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
+	params := sqlc.ListNodesSortedParams{
+		IncludeNeighbors: includeNeighbors,
+		Descending:       sort.Descending,
+		Sort:             sort.By,
+		NodeType:         nodeType,
+		Iatas:            iatas,
+		MultibytePaths:   tristate(supportsMultibytePaths),
+		MultibyteTraces:  tristate(supportsMultibyteTraces),
+		Pubkey:           pubkey,
+		Name:             name,
+		Scope:            scope,
+		PubkeyPrefix:     pubkeyPrefix,
+		RowLimit:         limit + 1,
+	}
+	if pageCursor != nil {
+		params.HasCursor = true
+		params.CursorNull, params.CursorText, params.CursorNum = pageCursor.Null, pageCursor.Text, pageCursor.Num
+		params.CursorSeen, params.CursorID = pageCursor.Seen, pageCursor.ID
+	}
+	rows, err := s.q.ListNodesSorted(ctx, params)
+	if err != nil {
+		return api.NodePage{}, err
+	}
+	hasMore := len(rows) > int(limit)
+	if hasMore {
+		rows = rows[:limit]
+	}
+	items := make([]api.NodeSummary, 0, len(rows))
+	for _, v := range rows {
+		items = append(items, s.nodeSummary(sqlc.ListNodesRow{
+			ID: v.ID, PublicKey: v.PublicKey, NodeType: v.NodeType, Name: v.Name, Latitude: v.Latitude,
+			Longitude: v.Longitude, LastSeen: v.LastSeen, RadioFreqMhz: v.RadioFreqMhz, RadioSf: v.RadioSf,
+			RadioBwKhz: v.RadioBwKhz, DefaultScopeName: v.DefaultScopeName, Iatas: v.Iatas, IsObserver: v.IsObserver,
+			ObserverID: v.ObserverID, KnownNeighborCount: v.KnownNeighborCount, NeighborIds: v.NeighborIds,
+		}))
+	}
+	page := api.NodePage{Page: api.Page[api.NodeSummary]{Items: items, HasMore: hasMore}}
+	if hasMore && len(rows) > 0 {
+		last := rows[len(rows)-1]
+		next := api.NodeSortCursor{Sort: sort, Null: last.KNull, Text: last.KText, Num: last.KNum, Seen: last.KSeen, ID: last.ID}.String()
+		page.NextPageCursor = &next
+	}
+	return page, nil
+}
+
+// nodeSummary maps one node list row.
+func (s *Store) nodeSummary(v sqlc.ListNodesRow) api.NodeSummary {
+	node := api.NodeSummary{
+		ID:                 v.ID,
+		PublicKey:          hex.EncodeToString(v.PublicKey),
+		NodeType:           v.NodeType,
+		NodeTypeName:       api.NodeTypeName(v.NodeType),
+		Name:               v.Name,
+		Latitude:           v.Latitude,
+		Longitude:          v.Longitude,
+		IsObserver:         v.IsObserver,
+		ObserverID:         nullableUUID(v.ObserverID),
+		KnownNeighborCount: v.KnownNeighborCount,
+		NeighborIDs:        v.NeighborIds,
+		Stale:              v.LastSeen.Valid && v.LastSeen.Time.Before(time.Now().Add(-s.staleThreshold)),
+	}
+	if len(v.Iatas) > 0 {
+		if err := json.Unmarshal(v.Iatas, &node.IATAs); err != nil {
+			slog.Error("store: failed to unmarshal node iatas", "component", "db", "error", err)
+			node.IATAs = []api.NodeIATA{}
+		}
+	}
+	if v.RadioFreqMhz != nil && v.RadioSf != nil && v.RadioBwKhz != nil {
+		s := fmt.Sprintf("%g,%g,%d", *v.RadioFreqMhz, *v.RadioBwKhz, *v.RadioSf)
+		node.Radio = &s
+	}
+	return node
 }
 
 func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error) {

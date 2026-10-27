@@ -349,6 +349,9 @@ type Querier interface {
 	ListNodeObservations(ctx context.Context, arg ListNodeObservationsParams) ([]ListNodeObservationsRow, error)
 	// Limit the filtered node page before enriching IATA membership and neighbours.
 	ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNodesRow, error)
+	// ListNodes by name, type or neighbour count, keyset-paged, in the web table's order: unnamed nodes
+	// last, unknown types after sensor, ties newest first.
+	ListNodesSorted(ctx context.Context, arg ListNodesSortedParams) ([]ListNodesSortedRow, error)
 	ListObservationsForPacket(ctx context.Context, packetHash []byte) ([]ListObservationsForPacketRow, error)
 	// Advert observations (payload_type 4) heard by one observer, oldest id first, after @cursor_id
 	// (0 starts at the beginning). Reads idx_observations_adverts; needs payload_type on every observation.

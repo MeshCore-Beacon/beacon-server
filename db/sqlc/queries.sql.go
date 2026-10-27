@@ -4238,6 +4238,182 @@ func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNod
 	return items, nil
 }
 
+const listNodesSorted = `-- name: ListNodesSorted :many
+WITH counts AS MATERIALIZED (
+  SELECT nn.node_id, count(DISTINCT nn.neighbor_id)::bigint AS k
+  FROM node_neighbors nn
+  WHERE $3::text = 'neighbors'
+  GROUP BY nn.node_id
+), keyed AS (
+SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen,
+  n.radio_freq_mhz, n.radio_sf, n.radio_bw_khz, ts.name AS default_scope_name,
+  (CASE WHEN $3::text = 'name' AND coalesce(n.name, '') = '' THEN 1 ELSE 0 END)::int AS k_null,
+  (CASE WHEN $3::text = 'name' THEN coalesce(n.name, '') ELSE '' END)::text COLLATE natural_text AS k_text,
+  (CASE $3::text
+     WHEN 'type' THEN CASE WHEN n.node_type BETWEEN 1 AND 4 THEN n.node_type ELSE 5 END::bigint
+     WHEN 'neighbors' THEN coalesce(c.k, 0)
+     ELSE 0 END
+   * CASE WHEN $2::bool THEN -1 ELSE 1 END)::bigint AS k_num,
+  (-(extract(epoch FROM n.last_seen) * 1000000))::bigint AS k_seen
+FROM nodes n
+LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id
+LEFT JOIN counts c ON c.node_id = n.id
+WHERE
+  ($4::smallint = 0 OR n.node_type = $4::smallint)
+  AND (COALESCE(cardinality($5::bpchar[]), 0) = 0 OR n.id IN (SELECT node_id FROM node_iatas WHERE iata = ANY($5::bpchar[])))
+  AND (
+    $6::text = 'any'
+    OR ($6::text = 'true' AND n.supports_multibyte_paths = TRUE)
+    OR ($6::text = 'false' AND n.supports_multibyte_paths = FALSE)
+  )
+  AND (
+    $7::text = 'any'
+    OR ($7::text = 'true' AND n.supports_multibyte_traces = TRUE)
+    OR ($7::text = 'false' AND n.supports_multibyte_traces = FALSE)
+  )
+  AND ($8::bytea IS NULL OR n.public_key = $8::bytea)
+  AND ($9::text = '' OR n.name ILIKE '%' || $9::text || '%')
+  AND ($10::text = '' OR ts.name = $10::text)
+  AND ($11::text = '' OR encode(n.public_key, 'hex') ILIKE $11::text || '%')
+), page AS (
+SELECT id, public_key, node_type, name, latitude, longitude, last_seen, radio_freq_mhz, radio_sf, radio_bw_khz, default_scope_name, k_null, k_text, k_num, k_seen FROM keyed
+WHERE NOT $12::bool
+  OR k_null > $13::int
+  OR (k_null = $13::int AND (
+    ($2::bool AND k_text < $14::text)
+    OR (NOT $2::bool AND k_text > $14::text)
+    OR (k_text = $14::text AND (
+      k_num > $15::bigint OR (k_num = $15::bigint AND (
+        k_seen > $16::bigint OR (k_seen = $16::bigint AND id > $17::uuid)))))))
+ORDER BY k_null,
+  CASE WHEN NOT $2::bool THEN k_text END,
+  CASE WHEN $2::bool THEN k_text END DESC,
+  k_num, k_seen, id
+LIMIT $18
+)
+SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen,
+  n.radio_freq_mhz, n.radio_sf, n.radio_bw_khz, n.default_scope_name, n.k_null, n.k_text::text AS k_text, n.k_num, n.k_seen,
+  (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
+   FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas,
+  EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
+  (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
+  (SELECT COUNT(DISTINCT nn.neighbor_id) FROM node_neighbors nn WHERE nn.node_id = n.id)::bigint AS known_neighbor_count,
+  (CASE WHEN $1::bool THEN
+    (SELECT COALESCE(array_agg(DISTINCT nn.neighbor_id), '{}'::uuid[]) FROM node_neighbors nn WHERE nn.node_id = n.id)
+  ELSE NULL END)::uuid[] AS neighbor_ids
+FROM page n
+ORDER BY n.k_null,
+  CASE WHEN NOT $2::bool THEN n.k_text END,
+  CASE WHEN $2::bool THEN n.k_text END DESC,
+  n.k_num, n.k_seen, n.id
+`
+
+type ListNodesSortedParams struct {
+	IncludeNeighbors bool      `json:"include_neighbors"`
+	Descending       bool      `json:"descending"`
+	Sort             string    `json:"sort"`
+	NodeType         int16     `json:"node_type"`
+	Iatas            []string  `json:"iatas"`
+	MultibytePaths   string    `json:"multibyte_paths"`
+	MultibyteTraces  string    `json:"multibyte_traces"`
+	Pubkey           []byte    `json:"pubkey"`
+	Name             string    `json:"name"`
+	Scope            string    `json:"scope"`
+	PubkeyPrefix     string    `json:"pubkey_prefix"`
+	HasCursor        bool      `json:"has_cursor"`
+	CursorNull       int32     `json:"cursor_null"`
+	CursorText       string    `json:"cursor_text"`
+	CursorNum        int64     `json:"cursor_num"`
+	CursorSeen       int64     `json:"cursor_seen"`
+	CursorID         uuid.UUID `json:"cursor_id"`
+	RowLimit         int32     `json:"row_limit"`
+}
+
+type ListNodesSortedRow struct {
+	ID                 uuid.UUID          `json:"id"`
+	PublicKey          []byte             `json:"public_key"`
+	NodeType           int16              `json:"node_type"`
+	Name               *string            `json:"name"`
+	Latitude           *float64           `json:"latitude"`
+	Longitude          *float64           `json:"longitude"`
+	LastSeen           pgtype.Timestamptz `json:"last_seen"`
+	RadioFreqMhz       *float32           `json:"radio_freq_mhz"`
+	RadioSf            *int16             `json:"radio_sf"`
+	RadioBwKhz         *float32           `json:"radio_bw_khz"`
+	DefaultScopeName   *string            `json:"default_scope_name"`
+	KNull              int32              `json:"k_null"`
+	KText              string             `json:"k_text"`
+	KNum               int64              `json:"k_num"`
+	KSeen              int64              `json:"k_seen"`
+	Iatas              []byte             `json:"iatas"`
+	IsObserver         bool               `json:"is_observer"`
+	ObserverID         uuid.UUID          `json:"observer_id"`
+	KnownNeighborCount int64              `json:"known_neighbor_count"`
+	NeighborIds        []uuid.UUID        `json:"neighbor_ids"`
+}
+
+// ListNodes by name, type or neighbour count, keyset-paged, in the web table's order: unnamed nodes
+// last, unknown types after sensor, ties newest first.
+func (q *Queries) ListNodesSorted(ctx context.Context, arg ListNodesSortedParams) ([]ListNodesSortedRow, error) {
+	rows, err := q.db.Query(ctx, listNodesSorted,
+		arg.IncludeNeighbors,
+		arg.Descending,
+		arg.Sort,
+		arg.NodeType,
+		arg.Iatas,
+		arg.MultibytePaths,
+		arg.MultibyteTraces,
+		arg.Pubkey,
+		arg.Name,
+		arg.Scope,
+		arg.PubkeyPrefix,
+		arg.HasCursor,
+		arg.CursorNull,
+		arg.CursorText,
+		arg.CursorNum,
+		arg.CursorSeen,
+		arg.CursorID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListNodesSortedRow{}
+	for rows.Next() {
+		var i ListNodesSortedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicKey,
+			&i.NodeType,
+			&i.Name,
+			&i.Latitude,
+			&i.Longitude,
+			&i.LastSeen,
+			&i.RadioFreqMhz,
+			&i.RadioSf,
+			&i.RadioBwKhz,
+			&i.DefaultScopeName,
+			&i.KNull,
+			&i.KText,
+			&i.KNum,
+			&i.KSeen,
+			&i.Iatas,
+			&i.IsObserver,
+			&i.ObserverID,
+			&i.KnownNeighborCount,
+			&i.NeighborIds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listObservationsForPacket = `-- name: ListObservationsForPacket :many
 SELECT po.id, po.packet_hash, po.observer_id, po.iata, po.heard_at, po.path_length_byte, po.hash_size, po.hop_count, po.path_bytes, po.rssi, po.snr, po.propagation_time_ms, po.radio_freq_mhz, po.spread_factor, po.bandwidth_khz, po.coding_rate, po.source_broker, po.payload_type, po.airtime_ms, o.display_name AS observer_name
 FROM packet_observations po

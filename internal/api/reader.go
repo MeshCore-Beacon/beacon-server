@@ -121,6 +121,10 @@ type Reader interface {
 	// cursor is last_seen epoch ms of the last node; pageCursor wins over it.
 	ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *NodeCursor, limit int32, includeNeighbors bool) (NodePage, error)
 
+	// ListNodesSorted is ListNodes in sort's order, paged by the previous page's cursor (nil for
+	// the first page). Unnamed nodes come last in either name order; ties go newest first.
+	ListNodesSorted(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, sort NodeSort, pageCursor *NodeSortCursor, limit int32, includeNeighbors bool) (NodePage, error)
+
 	// GetNode returns full detail for a single node by UUID.
 	// Returns nil, pgx.ErrNoRows if the node is not found.
 	GetNode(ctx context.Context, nodeID uuid.UUID) (*Node, error)

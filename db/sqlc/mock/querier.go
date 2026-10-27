@@ -2094,6 +2094,21 @@ func (mr *MockQuerierMockRecorder) ListNodes(ctx, arg any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListNodes", reflect.TypeOf((*MockQuerier)(nil).ListNodes), ctx, arg)
 }
 
+// ListNodesSorted mocks base method.
+func (m *MockQuerier) ListNodesSorted(ctx context.Context, arg db.ListNodesSortedParams) ([]db.ListNodesSortedRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListNodesSorted", ctx, arg)
+	ret0, _ := ret[0].([]db.ListNodesSortedRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListNodesSorted indicates an expected call of ListNodesSorted.
+func (mr *MockQuerierMockRecorder) ListNodesSorted(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListNodesSorted", reflect.TypeOf((*MockQuerier)(nil).ListNodesSorted), ctx, arg)
+}
+
 // ListObservationsForPacket mocks base method.
 func (m *MockQuerier) ListObservationsForPacket(ctx context.Context, packetHash []byte) ([]db.ListObservationsForPacketRow, error) {
 	m.ctrl.T.Helper()

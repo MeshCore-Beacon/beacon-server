@@ -1351,6 +1351,28 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "enum": [
+                            "lastSeen",
+                            "name",
+                            "type",
+                            "neighbors"
+                        ],
+                        "type": "string",
+                        "description": "Order: lastSeen (default, newest first), name, type or neighbors. Unnamed nodes come last in either name order; ties go newest first. Page a sorted list with pageCursor only",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "asc",
+                            "desc"
+                        ],
+                        "type": "string",
+                        "description": "asc (default) or desc; lastSeen is desc only",
+                        "name": "order",
+                        "in": "query"
+                    },
+                    {
                         "maximum": 2000,
                         "minimum": 1,
                         "type": "integer",
@@ -4857,6 +4879,23 @@ const docTemplate = `{
                 },
                 "nextPageCursor": {
                     "type": "string"
+                },
+                "order": {
+                    "type": "string",
+                    "enum": [
+                        "asc",
+                        "desc"
+                    ]
+                },
+                "sort": {
+                    "description": "Sort and Order name the order the items are in (\"lastSeen\" \"desc\" unless a sort was asked\nfor), so a client can tell this server sorted; older servers leave them out.",
+                    "type": "string",
+                    "enum": [
+                        "lastSeen",
+                        "name",
+                        "type",
+                        "neighbors"
+                    ]
                 }
             }
         },

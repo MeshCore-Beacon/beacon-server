@@ -180,6 +180,10 @@ func (s *stubReader) ListNodes(_ context.Context, _ int16, _ []string, _, _ *boo
 	return api.NodePage{}, nil
 }
 
+func (s *stubReader) ListNodesSorted(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ api.NodeSort, _ *api.NodeSortCursor, _ int32, _ bool) (api.NodePage, error) {
+	return api.NodePage{}, nil
+}
+
 func (s *stubReader) ListNodeObservations(_ context.Context, _ uuid.UUID, _ int64, _ int32) (api.Page[api.PacketObservationSummary], error) {
 	return api.Page[api.PacketObservationSummary]{}, nil
 }
