@@ -26,6 +26,13 @@ use a completed whole-hour rollup.
   an hour turns partial; `analytics_raw_state.coverage` increases when retention deletes
   rollup hours. Cache keys for rollup-backed endpoints include their sum (each counter only
   grows), read through a 10 s memo.
+- **Warming.** With Redis on, the `stats_warm` task (every minute) re-requests the web's
+  default Analytics views for all regions (7-day range) through the stats handler whenever
+  their key changes: a new revision, the hour turning, or the rolled window moving at :35.
+  All-regions reads take seconds on a large deployment and few visitors ask for them, so
+  without it nearly every one missed. Keep `defaultStatsViews`
+  (`internal/background/stats_warm.go`) in step with beacon-web's stats hooks; its test
+  replays the web's requests and fails if one misses the warmed keys.
 - **Raw deletion.** Cleanup deletes packets older than `packets.retention`, but holds the
   cutoff 35 minutes behind the oldest `missing` hour, for at most 24 hours (it logs a
   warning past 6). Each batch advances `analytics_raw_state.raw_deleted_before` to the

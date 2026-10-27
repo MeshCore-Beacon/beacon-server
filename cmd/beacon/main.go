@@ -473,6 +473,11 @@ func main() {
 		background.PayloadTypeBackfillTask(maintStore, time.Minute),
 		background.PgStatsTask(maintStore, time.Minute),
 	}
+	// The all-regions default Analytics views stay cached across rolls; without Redis there's nothing to fill.
+	if cr, ok := reader.(*cache.CachedReader); ok {
+		stats := handlers.StatsRouter(cr, handlers.StatsOptions{Scopes: scopes, SeriesWindow: resolved.RollupRetention})
+		tasks = append(tasks, background.NewStatsWarm(stats, cr.StatsRevision).Task())
+	}
 	if resolved.ObserverDeleteAfter > 0 {
 		var onDelete func(context.Context, uuid.UUID)
 		if cr, ok := reader.(*cache.CachedReader); ok {
