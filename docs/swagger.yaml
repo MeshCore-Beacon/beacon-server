@@ -3635,8 +3635,15 @@ paths:
       - Regions
   /routes:
     get:
+      description: |-
+        Newest first. iatas filters by several IATA codes and takes precedence over the single iata, which
+        is matched exactly as given. With neither, every IATA's routes are listed.
       parameters:
-      - description: Filter by IATA code
+      - description: Comma-separated IATA codes (max 100)
+        in: query
+        name: iatas
+        type: string
+      - description: Single IATA code (when iatas is omitted)
         in: query
         name: iata
         type: string

@@ -68,6 +68,8 @@ statements:
   ListKnownRoutesGlobal: {sqlc: ListKnownRoutesGlobal, plan: cached, admission: global_page}
   ListKnownRoutesByIATAHop: {sqlc: ListKnownRoutesByIATAHop, plan: custom}
   ListKnownRoutesGlobalHop: {sqlc: ListKnownRoutesGlobalHop, plan: custom}
+  ListKnownRoutesByIATAs: {sqlc: ListKnownRoutesByIATAs, plan: custom}
+  ListKnownRoutesByIATAsHop: {sqlc: ListKnownRoutesByIATAsHop, plan: custom}
   SearchKnownRoutesByNodes: {sqlc: SearchKnownRoutesByNodes, plan: custom}
   GetKnownRoutesByNodes: {sqlc: GetKnownRoutesByNodes, plan: custom}
   GetNodeByID: {sqlc: GetNodeByID, plan: cached, admission: by_id}
@@ -387,6 +389,9 @@ resolvers:
   s_sea_prefix_2525: "SELECT array_agg(ns.node_id ORDER BY ns.node_id) FROM node_short_ids ns JOIN nodes n ON n.id = ns.node_id AND n.node_type IN (2, 3) WHERE ns.iata = 'SEA' AND ns.prefix_2 = '\\x2525'"
   s_sea_prefix_fade: "SELECT array_agg(ns.node_id ORDER BY ns.node_id) FROM node_short_ids ns JOIN nodes n ON n.id = ns.node_id AND n.node_type IN (2, 3) WHERE ns.iata = 'SEA' AND ns.prefix_2 = '\\xfade'"
   s_sea_rare_t: "WITH recent AS MATERIALIZED (SELECT u.n, count(*) c FROM (SELECT kr.node_ids FROM known_routes kr WHERE kr.iata >= 'SEA' AND kr.iata <= 'SEA' ORDER BY kr.iata, date_trunc('milliseconds', kr.last_seen, 'UTC') DESC, kr.id DESC LIMIT 5000) r, unnest(r.node_ids) u(n) GROUP BY u.n HAVING count(*) >= 2), cand AS MATERIALIZED (SELECT c.n, c.c FROM recent c JOIN node_short_ids ns ON ns.node_id = c.n AND ns.iata = 'SEA' WHERE (SELECT count(*) FROM node_short_ids x JOIN nodes nn ON nn.id = x.node_id AND nn.node_type IN (2, 3) WHERE x.iata = 'SEA' AND x.prefix_2 = ns.prefix_2) = 1 ORDER BY c.c, c.n LIMIT 50) SELECT ARRAY[cand.n] FROM cand WHERE (SELECT count(*) FILTER (WHERE t.iata = 'SEA') FROM (SELECT k.iata FROM known_routes k WHERE k.node_ids @> ARRAY[cand.n] LIMIT 500) t) BETWEEN 20 AND 80 ORDER BY cand.c, cand.n LIMIT 1"
+  # The 50th route of a 13-IATA region (SEA and KLS hold its routes), merged from each IATA's newest 50.
+  pnw50_id: "SELECT id FROM (SELECT date_trunc('milliseconds', r.last_seen, 'UTC') ts, r.id FROM unnest('{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}'::bpchar[]) i(iata) CROSS JOIN LATERAL (SELECT k.last_seen, k.id FROM known_routes k WHERE k.iata = i.iata ORDER BY date_trunc('milliseconds', k.last_seen, 'UTC') DESC, k.id DESC LIMIT 50) r ORDER BY 1 DESC, 2 DESC OFFSET 49 LIMIT 1) x"
+  pnw50_ts: "SELECT ts FROM (SELECT date_trunc('milliseconds', r.last_seen, 'UTC') ts, r.id FROM unnest('{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}'::bpchar[]) i(iata) CROSS JOIN LATERAL (SELECT k.last_seen, k.id FROM known_routes k WHERE k.iata = i.iata ORDER BY date_trunc('milliseconds', k.last_seen, 'UTC') DESC, k.id DESC LIMIT 50) r ORDER BY 1 DESC, 2 DESC OFFSET 49 LIMIT 1) x"
   sea50_id: "SELECT id FROM known_routes WHERE iata = 'SEA' ORDER BY iata, date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC OFFSET 49 LIMIT 1"
   sea50_ts: "SELECT date_trunc('milliseconds', last_seen, 'UTC') FROM known_routes WHERE iata = 'SEA' ORDER BY iata, date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC OFFSET 49 LIMIT 1"
   # Deep cursors a tenth of the way from the oldest route to the newest (SEA's here, all routes' in routes_deep_ts),
@@ -729,6 +734,112 @@ entries:
       sort_exempt: [hop_group]
       budget: {buffers: 10, planning_ms: 10}
     note: "measured: 3 B on the full local copy (max over modes)"
+  # Region pages: each listed IATA's own page, merged. Every IATA reads at most the page from its region keyset (or,
+  # with a hop, its (hop, region) group), so a list costs at most its length times the page.
+  - id: routes.byiatas.L01_pnw_first_l50
+    stmt: ListKnownRoutesByIATAs
+    shape: "13-IATA region (two hold routes), page 1, limit 50"
+    params: ["{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}", null, 0, 50]
+    expect:
+      driver: [{relation: known_routes, alias: kr, index: idx_known_routes_iata_keyset, index_cond: ["iata =", "id) < ROW("]}]
+      budget: {buffers: 228, planning_ms: 10}
+    note: "measured: 152 B on the full local copy (max over modes)"
+  - id: routes.byiatas.L02_pnw_page2_l50
+    stmt: ListKnownRoutesByIATAs
+    shape: "13-IATA region, page 2 (cursor + cursorId)"
+    params: ["{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}", {r: pnw50_ts}, {r: pnw50_id}, 50]
+    expect:
+      driver: [{relation: known_routes, alias: kr, index: idx_known_routes_iata_keyset, index_cond: ["iata =", "id) < ROW("]}]
+      budget: {buffers: 227, planning_ms: 10}
+    note: "measured: 151 B on the full local copy (max over modes)"
+  - id: routes.byiatas.L03_pnw_deep_l200
+    stmt: ListKnownRoutesByIATAs
+    shape: "13-IATA region, deep cursor-only (legacy), a tenth of the way from SEA's oldest route to its newest"
+    params: ["{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}", {r: sea_deep_ts}, 0, 200]
+    expect:
+      driver: [{relation: known_routes, alias: kr, index: idx_known_routes_iata_keyset, index_cond: ["iata =", "id) < ROW("]}]
+      budget: {buffers: 677, planning_ms: 10}
+    note: "measured: 451 B on the full local copy (max over modes)"
+  - id: routes.byiatas.L04_pnw_tie_l50
+    stmt: ListKnownRoutesByIATAs
+    shape: "13-IATA region, cursor inside a tied millisecond"
+    params: ["{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}", {r: sea_tie_ts}, {r: sea_tie_id}, 50]
+    expect:
+      driver: [{relation: known_routes, alias: kr, index: idx_known_routes_iata_keyset, index_cond: ["iata =", "id) < ROW("]}]
+      budget: {buffers: 227, planning_ms: 10}
+    note: "measured: 151 B on the full local copy (max over modes)"
+  - id: routes.byiatas.L05_busy40_first_l200
+    stmt: ListKnownRoutesByIATAs
+    shape: "the 40 busiest IATAs, page 1, limit 200 (the worst case: every IATA fills its page)"
+    params: ["{SEA,AMS,PRG,CGN,DEN,SYD,RTM,MOW,BRQ,DUS,BWE,PSC,YOW,LIS,ANR,KLS,MCE,SOF,TGN,DRS,OSL,HEL,NPL,LOZ,FLO,BYU,SBP,HAD,MDT,OSR,MSP,LRU,TWF,NYC,NSN,MAD,PUB,BHM,MAN,SCE}", null, 0, 200]
+    expect:
+      driver: [{relation: known_routes, alias: kr, index: idx_known_routes_iata_keyset, index_cond: ["iata =", "id) < ROW("]}]
+      budget: {buffers: 10763, planning_ms: 10}
+    note: "measured: 7175 B on the full local copy (max over modes)"
+  - id: routes.byiatas.L06_sparse22_first_l50
+    stmt: ListKnownRoutesByIATAs
+    shape: "22 sparse IATAs, page 1, limit 50"
+    params: ["{BHX,BLK,BOH,BRS,CAX,CEG,DSA,EMA,EXT,HUY,LCY,LON,LPL,MAN,MME,NQT,NQY,NWI,ORM,PLH,PME,VLY}", null, 0, 50]
+    expect:
+      driver: [{relation: known_routes, alias: kr, index: idx_known_routes_iata_keyset, index_cond: ["iata =", "id) < ROW("]}]
+      budget: {buffers: 537, planning_ms: 10}
+    note: "measured: 358 B on the full local copy (max over modes)"
+  - id: routes.byiatas.L07_empty7_first_l50
+    stmt: ListKnownRoutesByIATAs
+    shape: "7 IATAs without routes"
+    params: ["{AAL,AAR,BLL,CPH,ODE,RNN,SGD}", null, 0, 50]
+    expect:
+      driver: [{relation: known_routes, alias: kr, index: idx_known_routes_iata_keyset, index_cond: ["iata =", "id) < ROW("]}]
+      budget: {buffers: 42, planning_ms: 10}
+    note: "measured: 28 B on the full local copy (max over modes)"
+  # LH01 and LH05 are not on the fixture: at 1/50 an IATA's dense-hop group is small enough that sorting it is
+  # cheaper than walking the IATA's keyset, as for H02.
+  - id: routes.byiatashop.LH01_pnw_hop6_dense_l200
+    stmt: ListKnownRoutesByIATAsHop
+    shape: "13-IATA region + dense hop 6"
+    params: ["{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}", 6, null, 0, 200]
+    tiers: [local, prod]
+    expect:
+      driver: [{relation: known_routes, alias: kr, index: idx_known_routes_iata_keyset, index_cond: ["iata =", "id) < ROW("]}]
+      budget: {buffers: 4302, planning_ms: 10}
+    note: "measured: 2868 B on the full local copy (max over modes)"
+  - id: routes.byiatashop.LH02_pnw_hop25_rare_l200
+    stmt: ListKnownRoutesByIATAsHop
+    shape: "13-IATA region + rare hop 25"
+    params: ["{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}", 25, null, 0, 200]
+    requires_indexes: [idx_known_routes_hop_iata]
+    expect:
+      driver: [{relation: known_routes, alias: kr, index: idx_known_routes_hop_iata, index_cond: ["hop_count =", "iata ="]}]
+      sort_exempt: [hop_group]
+      budget: {buffers: 656, planning_ms: 10}
+    note: "measured: 437 B on the full local copy (max over modes)"
+  - id: routes.byiatashop.LH03_pnw_hop1_absent_l50
+    stmt: ListKnownRoutesByIATAsHop
+    shape: "13-IATA region + absent hop 1"
+    params: ["{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}", 1, null, 0, 50]
+    requires_indexes: [idx_known_routes_hop_iata]
+    expect:
+      driver: [{relation: known_routes, alias: kr, index: idx_known_routes_hop_iata, index_cond: ["hop_count =", "iata ="]}]
+      sort_exempt: [hop_group]
+      budget: {buffers: 59, planning_ms: 10}
+    note: "measured: 39 B on the full local copy (max over modes)"
+  - id: routes.byiatashop.LH04_pnw_hop6_deep_l200
+    stmt: ListKnownRoutesByIATAsHop
+    shape: "13-IATA region + dense hop 6, deep cursor-only"
+    params: ["{BLI,CVO,KLS,LMT,MFR,MMV,ONP,PAE,PDX,RDM,SEA,SLE,TTD}", 6, {r: sea_deep_ts}, 0, 200]
+    expect:
+      driver: [{relation: known_routes, alias: kr, index: idx_known_routes_iata_keyset, index_cond: ["iata =", "id) < ROW("]}]
+      budget: {buffers: 3933, planning_ms: 10}
+    note: "measured: 2622 B on the full local copy (max over modes)"
+  - id: routes.byiatashop.LH05_busy40_hop6_dense_l200
+    stmt: ListKnownRoutesByIATAsHop
+    shape: "the 40 busiest IATAs + dense hop 6, limit 200"
+    params: ["{SEA,AMS,PRG,CGN,DEN,SYD,RTM,MOW,BRQ,DUS,BWE,PSC,YOW,LIS,ANR,KLS,MCE,SOF,TGN,DRS,OSL,HEL,NPL,LOZ,FLO,BYU,SBP,HAD,MDT,OSR,MSP,LRU,TWF,NYC,NSN,MAD,PUB,BHM,MAN,SCE}", 6, null, 0, 200]
+    tiers: [local, prod]
+    expect:
+      driver: [{relation: known_routes, alias: kr, index: idx_known_routes_iata_keyset, index_cond: ["iata =", "id) < ROW("]}]
+      budget: {buffers: 80070, planning_ms: 10}
+    note: "measured: 53380 B on the full local copy (max over modes)"
   - id: routes.globalhop.GH01_hop6_dense_l50
     stmt: ListKnownRoutesGlobalHop
     shape: "no region + dense hop 6, limit 50"

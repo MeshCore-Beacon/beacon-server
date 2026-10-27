@@ -204,7 +204,7 @@ func (e errReader) GetTraceByTag(ctx context.Context, tag string) (v *api.TraceD
 	return v, e.err
 }
 
-func (e errReader) ListKnownRoutes(ctx context.Context, iata string, hopCount int32, cursor time.Time, cursorID int64, limit int32) (v []api.KnownRoute, err error) {
+func (e errReader) ListKnownRoutes(ctx context.Context, iatas []string, hopCount int32, cursor time.Time, cursorID int64, limit int32) (v []api.KnownRoute, err error) {
 	return v, e.err
 }
 

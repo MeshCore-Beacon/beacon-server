@@ -2230,6 +2230,40 @@ WHERE iata = @iata::bpchar
 ORDER BY date_trunc('milliseconds', last_seen, 'UTC') DESC, id DESC
 LIMIT @page_limit;
 
+-- name: ListKnownRoutesByIATAs :many
+-- Several IATAs' page: each IATA's own page from idx_known_routes_iata_keyset, merged. A list costs at most its
+-- length times the page however sparse its IATAs are, where filtering the global keyset walks past every other IATA.
+SELECT r.id, r.node_ids, r.hash_prefix, r.iata, r.hop_count, r.first_seen, r.last_seen, r.observation_count
+FROM (SELECT DISTINCT unnest(@iatas::bpchar[]) AS iata) i
+CROSS JOIN LATERAL (
+  SELECT kr.id, kr.node_ids, kr.hash_prefix, kr.iata, kr.hop_count, kr.first_seen, kr.last_seen, kr.observation_count
+  FROM known_routes kr
+  WHERE kr.iata = i.iata
+    AND (date_trunc('milliseconds', kr.last_seen, 'UTC'), kr.id)
+          < (COALESCE(sqlc.narg('cursor_ts')::timestamptz, 'infinity'::timestamptz), @cursor_id::bigint)
+  ORDER BY date_trunc('milliseconds', kr.last_seen, 'UTC') DESC, kr.id DESC
+  LIMIT @page_limit
+) r
+ORDER BY date_trunc('milliseconds', r.last_seen, 'UTC') DESC, r.id DESC
+LIMIT @page_limit;
+
+-- name: ListKnownRoutesByIATAsHop :many
+-- ListKnownRoutesByIATAs with a hop filter; each IATA's page is ListKnownRoutesByIATAHop's.
+SELECT r.id, r.node_ids, r.hash_prefix, r.iata, r.hop_count, r.first_seen, r.last_seen, r.observation_count
+FROM (SELECT DISTINCT unnest(@iatas::bpchar[]) AS iata) i
+CROSS JOIN LATERAL (
+  SELECT kr.id, kr.node_ids, kr.hash_prefix, kr.iata, kr.hop_count, kr.first_seen, kr.last_seen, kr.observation_count
+  FROM known_routes kr
+  WHERE kr.iata = i.iata
+    AND kr.hop_count = @hop_count
+    AND (date_trunc('milliseconds', kr.last_seen, 'UTC'), kr.id)
+          < (COALESCE(sqlc.narg('cursor_ts')::timestamptz, 'infinity'::timestamptz), @cursor_id::bigint)
+  ORDER BY date_trunc('milliseconds', kr.last_seen, 'UTC') DESC, kr.id DESC
+  LIMIT @page_limit
+) r
+ORDER BY date_trunc('milliseconds', r.last_seen, 'UTC') DESC, r.id DESC
+LIMIT @page_limit;
+
 -- name: ListKnownRoutesGlobal :many
 SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
 FROM known_routes

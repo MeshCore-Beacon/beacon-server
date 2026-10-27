@@ -335,6 +335,11 @@ type Querier interface {
 	// Custom plans only (class C: PlanRouter runs it unnamed): a generic plan walks the whole region for a rare hop.
 	// The = form prices the Sort correctly; the range form under-costs it when a hop index exists.
 	ListKnownRoutesByIATAHop(ctx context.Context, arg ListKnownRoutesByIATAHopParams) ([]ListKnownRoutesByIATAHopRow, error)
+	// Several IATAs' page: each IATA's own page from idx_known_routes_iata_keyset, merged. A list costs at most its
+	// length times the page however sparse its IATAs are, where filtering the global keyset walks past every other IATA.
+	ListKnownRoutesByIATAs(ctx context.Context, arg ListKnownRoutesByIATAsParams) ([]ListKnownRoutesByIATAsRow, error)
+	// ListKnownRoutesByIATAs with a hop filter; each IATA's page is ListKnownRoutesByIATAHop's.
+	ListKnownRoutesByIATAsHop(ctx context.Context, arg ListKnownRoutesByIATAsHopParams) ([]ListKnownRoutesByIATAsHopRow, error)
 	ListKnownRoutesGlobal(ctx context.Context, arg ListKnownRoutesGlobalParams) ([]ListKnownRoutesGlobalRow, error)
 	// Custom plans only (class C: PlanRouter runs it unnamed), so the planner drops the branch @read_group turns off.
 	// The planner's own break-even between reading the whole hop group from the hop index and walking the keyset index

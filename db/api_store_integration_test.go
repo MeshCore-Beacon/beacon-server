@@ -35,10 +35,10 @@ func TestAPIStoreHopStatementsUnnamedPostgres(t *testing.T) {
 			store := NewAPIStore(pools, layout, guard, time.Hour, time.Hour)
 
 			for range 7 {
-				if _, err := store.ListKnownRoutes(ctx, "", 2, time.Time{}, 0, 50); err != nil {
+				if _, err := store.ListKnownRoutes(ctx, nil, 2, time.Time{}, 0, 50); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := store.ListKnownRoutes(ctx, "YYZ", 2, time.Time{}, 0, 50); err != nil {
+				if _, err := store.ListKnownRoutes(ctx, []string{"YYZ"}, 2, time.Time{}, 0, 50); err != nil {
 					t.Fatal(err)
 				}
 			}

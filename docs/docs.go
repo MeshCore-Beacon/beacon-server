@@ -2439,6 +2439,7 @@ const docTemplate = `{
         },
         "/routes": {
             "get": {
+                "description": "Newest first. iatas filters by several IATA codes and takes precedence over the single iata, which\nis matched exactly as given. With neither, every IATA's routes are listed.",
                 "produces": [
                     "application/json"
                 ],
@@ -2449,7 +2450,13 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Filter by IATA code",
+                        "description": "Comma-separated IATA codes (max 100)",
+                        "name": "iatas",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Single IATA code (when iatas is omitted)",
                         "name": "iata",
                         "in": "query"
                     },

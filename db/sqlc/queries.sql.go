@@ -3836,6 +3836,148 @@ func (q *Queries) ListKnownRoutesByIATAHop(ctx context.Context, arg ListKnownRou
 	return items, nil
 }
 
+const listKnownRoutesByIATAs = `-- name: ListKnownRoutesByIATAs :many
+SELECT r.id, r.node_ids, r.hash_prefix, r.iata, r.hop_count, r.first_seen, r.last_seen, r.observation_count
+FROM (SELECT DISTINCT unnest($1::bpchar[]) AS iata) i
+CROSS JOIN LATERAL (
+  SELECT kr.id, kr.node_ids, kr.hash_prefix, kr.iata, kr.hop_count, kr.first_seen, kr.last_seen, kr.observation_count
+  FROM known_routes kr
+  WHERE kr.iata = i.iata
+    AND (date_trunc('milliseconds', kr.last_seen, 'UTC'), kr.id)
+          < (COALESCE($2::timestamptz, 'infinity'::timestamptz), $3::bigint)
+  ORDER BY date_trunc('milliseconds', kr.last_seen, 'UTC') DESC, kr.id DESC
+  LIMIT $4
+) r
+ORDER BY date_trunc('milliseconds', r.last_seen, 'UTC') DESC, r.id DESC
+LIMIT $4
+`
+
+type ListKnownRoutesByIATAsParams struct {
+	Iatas     []string           `json:"iatas"`
+	CursorTs  pgtype.Timestamptz `json:"cursor_ts"`
+	CursorID  int64              `json:"cursor_id"`
+	PageLimit int32              `json:"page_limit"`
+}
+
+type ListKnownRoutesByIATAsRow struct {
+	ID               int64              `json:"id"`
+	NodeIds          []uuid.UUID        `json:"node_ids"`
+	HashPrefix       [][]byte           `json:"hash_prefix"`
+	Iata             string             `json:"iata"`
+	HopCount         int32              `json:"hop_count"`
+	FirstSeen        pgtype.Timestamptz `json:"first_seen"`
+	LastSeen         pgtype.Timestamptz `json:"last_seen"`
+	ObservationCount int64              `json:"observation_count"`
+}
+
+// Several IATAs' page: each IATA's own page from idx_known_routes_iata_keyset, merged. A list costs at most its
+// length times the page however sparse its IATAs are, where filtering the global keyset walks past every other IATA.
+func (q *Queries) ListKnownRoutesByIATAs(ctx context.Context, arg ListKnownRoutesByIATAsParams) ([]ListKnownRoutesByIATAsRow, error) {
+	rows, err := q.db.Query(ctx, listKnownRoutesByIATAs,
+		arg.Iatas,
+		arg.CursorTs,
+		arg.CursorID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListKnownRoutesByIATAsRow{}
+	for rows.Next() {
+		var i ListKnownRoutesByIATAsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.NodeIds,
+			&i.HashPrefix,
+			&i.Iata,
+			&i.HopCount,
+			&i.FirstSeen,
+			&i.LastSeen,
+			&i.ObservationCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listKnownRoutesByIATAsHop = `-- name: ListKnownRoutesByIATAsHop :many
+SELECT r.id, r.node_ids, r.hash_prefix, r.iata, r.hop_count, r.first_seen, r.last_seen, r.observation_count
+FROM (SELECT DISTINCT unnest($1::bpchar[]) AS iata) i
+CROSS JOIN LATERAL (
+  SELECT kr.id, kr.node_ids, kr.hash_prefix, kr.iata, kr.hop_count, kr.first_seen, kr.last_seen, kr.observation_count
+  FROM known_routes kr
+  WHERE kr.iata = i.iata
+    AND kr.hop_count = $2
+    AND (date_trunc('milliseconds', kr.last_seen, 'UTC'), kr.id)
+          < (COALESCE($3::timestamptz, 'infinity'::timestamptz), $4::bigint)
+  ORDER BY date_trunc('milliseconds', kr.last_seen, 'UTC') DESC, kr.id DESC
+  LIMIT $5
+) r
+ORDER BY date_trunc('milliseconds', r.last_seen, 'UTC') DESC, r.id DESC
+LIMIT $5
+`
+
+type ListKnownRoutesByIATAsHopParams struct {
+	Iatas     []string           `json:"iatas"`
+	HopCount  int32              `json:"hop_count"`
+	CursorTs  pgtype.Timestamptz `json:"cursor_ts"`
+	CursorID  int64              `json:"cursor_id"`
+	PageLimit int32              `json:"page_limit"`
+}
+
+type ListKnownRoutesByIATAsHopRow struct {
+	ID               int64              `json:"id"`
+	NodeIds          []uuid.UUID        `json:"node_ids"`
+	HashPrefix       [][]byte           `json:"hash_prefix"`
+	Iata             string             `json:"iata"`
+	HopCount         int32              `json:"hop_count"`
+	FirstSeen        pgtype.Timestamptz `json:"first_seen"`
+	LastSeen         pgtype.Timestamptz `json:"last_seen"`
+	ObservationCount int64              `json:"observation_count"`
+}
+
+// ListKnownRoutesByIATAs with a hop filter; each IATA's page is ListKnownRoutesByIATAHop's.
+func (q *Queries) ListKnownRoutesByIATAsHop(ctx context.Context, arg ListKnownRoutesByIATAsHopParams) ([]ListKnownRoutesByIATAsHopRow, error) {
+	rows, err := q.db.Query(ctx, listKnownRoutesByIATAsHop,
+		arg.Iatas,
+		arg.HopCount,
+		arg.CursorTs,
+		arg.CursorID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListKnownRoutesByIATAsHopRow{}
+	for rows.Next() {
+		var i ListKnownRoutesByIATAsHopRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.NodeIds,
+			&i.HashPrefix,
+			&i.Iata,
+			&i.HopCount,
+			&i.FirstSeen,
+			&i.LastSeen,
+			&i.ObservationCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listKnownRoutesGlobal = `-- name: ListKnownRoutesGlobal :many
 SELECT id, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
 FROM known_routes

@@ -53,16 +53,19 @@ func TestUpsertKnownRoute_ComputesPathKey(t *testing.T) {
 	}
 }
 
-// A value ending in a blank matches no character(3) code; no statement runs, and it encodes as [].
+// A value ending in a blank matches no character(3) code, nor does an empty one in a list; no statement runs, and
+// the page encodes as [].
 func TestListKnownRoutesTrailingBlankIATA(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mock := mockdb.NewMockQuerier(ctrl) // no EXPECT: any call fails the test
 	store := &Store{q: mock}
-	for _, iata := range []string{"SEA ", "SEA  ", "   ", " ", "SE\x00 "} {
-		routes, err := store.ListKnownRoutes(context.Background(), iata, 0, time.Time{}, 0, 50)
-		b, _ := json.Marshal(routes)
-		if err != nil || routes == nil || string(b) != "[]" {
-			t.Fatalf("%q: %v %s", iata, err, b)
+	for _, iatas := range [][]string{{"SEA "}, {"SEA  "}, {"   "}, {" "}, {"SE\x00 "}, {""}, {"SEA ", "", " "}} {
+		for _, hop := range []int32{0, 3} {
+			routes, err := store.ListKnownRoutes(context.Background(), iatas, hop, time.Time{}, 0, 50)
+			b, _ := json.Marshal(routes)
+			if err != nil || routes == nil || string(b) != "[]" {
+				t.Fatalf("%q hop %d: %v %s", iatas, hop, err, b)
+			}
 		}
 	}
 }
@@ -80,14 +83,24 @@ func TestListKnownRoutes_Dispatch(t *testing.T) {
 	q.EXPECT().ListKnownRoutesGlobalHop(gomock.Any(), sqlc.ListKnownRoutesGlobalHopParams{HopCount: 3, ReadGroup: true, PageLimit: 50}).Return(nil, nil)
 	q.EXPECT().ListKnownRoutesByIATA(gomock.Any(), sqlc.ListKnownRoutesByIATAParams{Iata: "SEA", PageLimit: 50}).Return(nil, nil)
 	q.EXPECT().ListKnownRoutesByIATAHop(gomock.Any(), sqlc.ListKnownRoutesByIATAHopParams{Iata: "SEA", HopCount: 3, PageLimit: 50}).Return(nil, nil)
+	// A list that comes down to one code runs that IATA's statement; duplicates and blank-ended codes drop out.
+	q.EXPECT().ListKnownRoutesByIATA(gomock.Any(), sqlc.ListKnownRoutesByIATAParams{Iata: "KLS", PageLimit: 50}).Return(nil, nil)
+	q.EXPECT().ListKnownRoutesByIATAHop(gomock.Any(), sqlc.ListKnownRoutesByIATAHopParams{Iata: "KLS", HopCount: 3, PageLimit: 50}).Return(nil, nil)
+	q.EXPECT().ListKnownRoutesByIATAs(gomock.Any(), sqlc.ListKnownRoutesByIATAsParams{Iatas: []string{"SEA", "KLS"},
+		CursorTs: pgtype.Timestamptz{Time: cursor, Valid: true}, CursorID: 7, PageLimit: 50}).Return(nil, nil)
+	q.EXPECT().ListKnownRoutesByIATAsHop(gomock.Any(), sqlc.ListKnownRoutesByIATAsHopParams{Iatas: []string{"SEA", "KLS"}, HopCount: 3, PageLimit: 50}).Return(nil, nil)
 	q.EXPECT().GetNodesByIDs(gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
 	for _, c := range []struct {
-		iata   string
+		iatas  []string
 		hop    int32
 		cursor time.Time
 		id     int64
-	}{{"", 0, cursor, 7}, {"", 3, time.Time{}, 0}, {"SEA", 0, time.Time{}, 0}, {"SEA", 3, time.Time{}, 0}} {
-		routes, err := store.ListKnownRoutes(context.Background(), c.iata, c.hop, c.cursor, c.id, 50)
+	}{
+		{nil, 0, cursor, 7}, {[]string{}, 3, time.Time{}, 0}, {[]string{"SEA"}, 0, time.Time{}, 0}, {[]string{"SEA"}, 3, time.Time{}, 0},
+		{[]string{"KLS", "KLS", "SEA "}, 0, time.Time{}, 0}, {[]string{"KLS", ""}, 3, time.Time{}, 0},
+		{[]string{"SEA", "KLS", "SEA"}, 0, cursor, 7}, {[]string{"SEA", "KLS"}, 3, time.Time{}, 0},
+	} {
+		routes, err := store.ListKnownRoutes(context.Background(), c.iatas, c.hop, c.cursor, c.id, 50)
 		if err != nil || routes == nil || len(routes) != 0 {
 			t.Fatalf("%+v: %v %v", c, routes, err)
 		}
