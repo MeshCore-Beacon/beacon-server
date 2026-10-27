@@ -580,6 +580,9 @@ func (s *Store) InsertObservation(ctx context.Context, o ingest.InsertObservatio
 	params := observationParams(o)
 	row, err := s.q.InsertObservation(ctx, params)
 	if err == nil {
+		if row.Inserted {
+			s.obsCounts.Add(o.HeardAt, o.ObserverID, o.IATA)
+		}
 		return row.Inserted, row.ObservationCount, nil
 	}
 	// Whatever failed, region pages stop reading packet_sites before anything else is written, until a reconcile
@@ -600,6 +603,9 @@ func (s *Store) InsertObservation(ctx context.Context, o ingest.InsertObservatio
 	s.readModels.invalidatePacketSites("an observation was stored without its site row")
 	if err != nil {
 		return false, 0, err
+	}
+	if fallback.Inserted {
+		s.obsCounts.Add(o.HeardAt, o.ObserverID, o.IATA)
 	}
 	return fallback.Inserted, fallback.ObservationCount, nil
 }

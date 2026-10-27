@@ -78,6 +78,15 @@ raw observations for every other hour and the exact boundary slices. These sourc
 overlap. Completed whole-hour history survives raw retention; a sliced boundary whose raw
 rows have expired cannot be reconstructed from its whole-hour total.
 
+Reading every raw observation of the unrolled hours is the slow part on a large deployment
+(new rows land wherever cleanup freed space, so it costs about a heap page per row). The
+process that ingests therefore also counts each stored observation in memory, per minute,
+observer and IATA (`internal/obscount`, kept 4 hours). An unrolled hour that starts after
+counting began (plus the 30-minute ingest clamp), is not partial and is past cleanup's cutoff
+takes its counts from there, and only its last partial minute is read raw. The results are the
+same either way (`TestObserverDirectoryLiveCountsMatchRawPostgres`); a process that doesn't
+ingest, and any other hour, reads raw rows as before.
+
 Every observer receives a numeric `observationCount`, including zero. `maxObservationCount`
 is the maximum across all matching observers, independent of pagination, and is zero when
 none match. Incomplete history never suppresses these counts or changes `effectiveSort`:

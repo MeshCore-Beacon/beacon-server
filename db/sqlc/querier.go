@@ -356,6 +356,8 @@ type Querier interface {
 	ListObserverAdverts(ctx context.Context, arg ListObserverAdvertsParams) ([]ListObserverAdvertsRow, error)
 	// Copyright 2026 Beacon Contributors
 	// SPDX-License-Identifier: AGPL-3.0-or-later
+	// $13..$18 are the ingest process's live counts (obscount): for an hour from $13 on, the whole
+	// minutes before $14 come from the counts and only [$14, slice end) is read raw.
 	ListObserverDirectory(ctx context.Context, arg ListObserverDirectoryParams) (string, error)
 	// Observers newest last_seen first; the cursor is the (last_seen, id) of the last row.
 	ListObservers(ctx context.Context, arg ListObserversParams) ([]ListObserversRow, error)

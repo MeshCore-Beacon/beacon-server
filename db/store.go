@@ -14,6 +14,7 @@ import (
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/MeshCore-Beacon/beacon-server/internal/obscount"
 	"github.com/google/uuid"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -38,6 +39,8 @@ type Store struct {
 	packetSitesIDs      idHistogram     // the id statistics that progress counts in, read when it started
 	cmiProgress         FillProgress    // the cmi backfill's progress log, across sessions
 	hopStats            hopStatsCache   // known_routes hop statistics for the global hop page; see hopGroupSmall
+
+	obsCounts *obscount.Counts // see WithObservationCounts; nil: the directory reads raw rows
 }
 
 // New creates a Store whose statements run on dbtx (a pool, or a PlanRouter for the API).
