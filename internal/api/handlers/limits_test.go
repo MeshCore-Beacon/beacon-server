@@ -7,6 +7,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -117,25 +118,26 @@ func TestListLimits(t *testing.T) {
 	for _, endpoint := range []struct {
 		path         string
 		defaultLimit int32
+		max          int32
 	}{
-		{"/nodes", 50},
-		{"/nodes/00000000-0000-0000-0000-000000000001/observations", 50},
-		{"/observers", 50},
-		{"/observers/00000000-0000-0000-0000-000000000001/adverts", 50},
-		{"/packets", 50},
-		{"/packets/backfill?afterObservationId=1", 100},
-		{"/channels", 50},
-		{"/channels/1/messages", 50},
-		{"/messages", 50},
-		{"/messages?channelHash=11", 50},
-		{"/messages/backfill?afterId=1", 100},
-		{"/routes", 50},
-		{"/traces", 50},
-		{"/stats/top-nodes", 10},
-		{"/stats/top-observers", 10},
-		{"/stats/top-advertisers?sort=flood", 10},
-		{"/stats/clock-drift", 10},
-		{"/stats/top-talkers", 10},
+		{"/nodes", 50, 2000},
+		{"/nodes/00000000-0000-0000-0000-000000000001/observations", 50, 200},
+		{"/observers", 50, 200},
+		{"/observers/00000000-0000-0000-0000-000000000001/adverts", 50, 200},
+		{"/packets", 50, 200},
+		{"/packets/backfill?afterObservationId=1", 100, 200},
+		{"/channels", 50, 200},
+		{"/channels/1/messages", 50, 200},
+		{"/messages", 50, 200},
+		{"/messages?channelHash=11", 50, 200},
+		{"/messages/backfill?afterId=1", 100, 200},
+		{"/routes", 50, 200},
+		{"/traces", 50, 200},
+		{"/stats/top-nodes", 10, 200},
+		{"/stats/top-observers", 10, 200},
+		{"/stats/top-advertisers?sort=flood", 10, 200},
+		{"/stats/clock-drift", 10, 200},
+		{"/stats/top-talkers", 10, 200},
 	} {
 		t.Run(endpoint.path, func(t *testing.T) {
 			for _, tc := range []struct {
@@ -144,7 +146,8 @@ func TestListLimits(t *testing.T) {
 				status int
 			}{
 				{"", endpoint.defaultLimit, 200}, {"1", 1, 200}, {"200", 200, 200},
-				{"201", 200, 200}, {"1000000", 200, 200}, {"2147483647", 200, 200},
+				{strconv.Itoa(int(endpoint.max)), endpoint.max, 200}, {strconv.Itoa(int(endpoint.max) + 1), endpoint.max, 200},
+				{"1000000", endpoint.max, 200}, {"2147483647", endpoint.max, 200},
 				{"0", 0, 400}, {"-1", 0, 400}, {"bad", 0, 400}, {"1.5", 0, 400},
 				{"2147483648", 0, 400},
 			} {

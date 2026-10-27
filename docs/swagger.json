@@ -1349,10 +1349,10 @@
                         "in": "query"
                     },
                     {
-                        "maximum": 200,
+                        "maximum": 2000,
                         "minimum": 1,
                         "type": "integer",
-                        "description": "Max results (default 50); must be positive, values above 200 are clamped",
+                        "description": "Max results (default 50); must be positive, values above 2000 are clamped",
                         "name": "limit",
                         "in": "query"
                     }

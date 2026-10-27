@@ -2860,10 +2860,10 @@ paths:
         in: query
         name: pageCursor
         type: string
-      - description: Max results (default 50); must be positive, values above 200
+      - description: Max results (default 50); must be positive, values above 2000
           are clamped
         in: query
-        maximum: 200
+        maximum: 2000
         minimum: 1
         name: limit
         type: integer

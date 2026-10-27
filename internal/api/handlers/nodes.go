@@ -52,7 +52,7 @@ func NodesRouter(reader api.Reader) http.Handler {
 //	@Param		neighbors				query		bool	false	"Include each node's known neighbor IDs (neighborIds field). Bare ?neighbors or ?neighbors=true enables it; omit/false for none"
 //	@Param		cursor					query		int		false	"last_seen epoch ms of last item for pagination"
 //	@Param		pageCursor				query		string	false	"Opaque nextPageCursor from a previous response; keeps millisecond ties. Wins over cursor when both are sent"
-//	@Param		limit					query		int		false	"Max results (default 50); must be positive, values above 200 are clamped" minimum(1) maximum(200)
+//	@Param		limit					query		int		false	"Max results (default 50); must be positive, values above 2000 are clamped" minimum(1) maximum(2000)
 //	@Success	200						{object}	api.NodePage
 //	@Failure	400						{object}	handlers.APIError
 //	@Failure	500						{object}	handlers.APIError
@@ -71,7 +71,7 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 		} else if typeName := r.URL.Query().Get("typeName"); typeName != "" {
 			nodeType = api.NodeTypeFromString(typeName)
 		}
-		limit, err := parseLimit(r, 50)
+		limit, err := parseLimitUpTo(r, 50, maxNodeListLimit)
 		if err != nil {
 			respondError(w, http.StatusBadRequest, err.Error())
 			return
