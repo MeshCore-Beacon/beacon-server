@@ -176,3 +176,29 @@ func TestStatsWarmWaitsForARevision(t *testing.T) {
 		t.Fatalf("task name %q", w.Task().Name)
 	}
 }
+
+// The revision lookup and the views run under the cached reader's shared locks, so a stalled read
+// must give up rather than hold them: every warm call carries a deadline.
+func TestStatsWarmCallsHaveDeadlines(t *testing.T) {
+	var revisionDeadline, viewDeadline bool
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, viewDeadline = r.Context().Deadline()
+		<-r.Context().Done() // a view that never answers
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+	w := NewStatsWarm(handler, func(ctx context.Context) (int64, bool) {
+		_, revisionDeadline = ctx.Deadline()
+		return 1, true
+	})
+	w.viewTimeout = 20 * time.Millisecond
+	start := time.Now()
+	if err := w.Run(context.Background()); err == nil {
+		t.Fatal("stalled views reported no error")
+	}
+	if !revisionDeadline || !viewDeadline {
+		t.Fatalf("deadlines: revision=%v view=%v", revisionDeadline, viewDeadline)
+	}
+	if took := time.Since(start); took > 2*time.Second {
+		t.Fatalf("a run of stalled views took %v", took)
+	}
+}

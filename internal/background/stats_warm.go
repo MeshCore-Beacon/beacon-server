@@ -15,6 +15,13 @@ import (
 
 const statsWarmInterval = time.Minute
 
+// The revision lookup and the views take the cached reader's shared locks, so a stalled read gives
+// up instead of holding them; a view's limit is well past the slowest cold view (~10 s on prod).
+const (
+	statsWarmRevisionTimeout = 10 * time.Second
+	statsWarmViewTimeout     = time.Minute
+)
+
 // StatsWarm keeps the all-regions default Analytics views cached. Their keys change when an hour
 // is rolled or re-rolled (the revision) and as their windows move, and few visitors look at all
 // regions, so nearly every one used to wait seconds on a week of rollups. Each run re-requests,
@@ -24,12 +31,15 @@ type StatsWarm struct {
 	revision func(context.Context) (int64, bool)
 	now      func() time.Time
 	warmed   map[string]int64 // view -> revision it was last filled at
+
+	revisionTimeout, viewTimeout time.Duration
 }
 
 // NewStatsWarm warms through stats (the /stats router over the cached reader); revision is the
 // revision the cache keys currently carry.
 func NewStatsWarm(stats http.Handler, revision func(context.Context) (int64, bool)) *StatsWarm {
-	return &StatsWarm{stats: stats, revision: revision, now: time.Now}
+	return &StatsWarm{stats: stats, revision: revision, now: time.Now,
+		revisionTimeout: statsWarmRevisionTimeout, viewTimeout: statsWarmViewTimeout}
 }
 
 // Task checks every minute; a run with nothing changed makes no request.
@@ -39,7 +49,9 @@ func (w *StatsWarm) Task() Task {
 
 // Run fills the views whose key changed, one at a time. A view that fails is retried next run.
 func (w *StatsWarm) Run(ctx context.Context) error {
-	rev, ok := w.revision(ctx)
+	rctx, cancel := context.WithTimeout(ctx, w.revisionTimeout)
+	rev, ok := w.revision(rctx)
+	cancel()
 	if !ok {
 		return nil
 	}
@@ -54,12 +66,15 @@ func (w *StatsWarm) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			break
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, view, nil)
+		vctx, cancel := context.WithTimeout(ctx, w.viewTimeout)
+		req, err := http.NewRequestWithContext(vctx, http.MethodGet, view, nil)
 		if err != nil {
+			cancel()
 			return err
 		}
 		res := &statusWriter{}
 		w.stats.ServeHTTP(res, req)
+		cancel()
 		if res.status() != http.StatusOK {
 			errs = append(errs, fmt.Errorf("warm %s: status %d", view, res.status()))
 			continue
