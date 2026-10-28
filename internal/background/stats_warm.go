@@ -22,10 +22,14 @@ const (
 	statsWarmViewTimeout     = time.Minute
 )
 
+// A view whose key hadn't moved yet took this long had lost its entry (a scope catalogue change clears the
+// scope stats) and was refilled; a cache hit answers in tens of milliseconds.
+const statsWarmRefillTook = 500 * time.Millisecond
+
 // StatsWarm keeps the all-regions default Analytics views cached. Their keys change when an hour
 // is rolled or re-rolled (the revision) and as their windows move, and few visitors look at all
-// regions, so nearly every one used to wait seconds on a week of rollups. Each run re-requests,
-// through the stats handler itself, only the views whose key changed since the last run.
+// regions, so nearly every one used to wait seconds on a week of rollups. Each run requests every
+// view through the stats handler itself: a cached one answers from Redis, a missing one is refilled.
 type StatsWarm struct {
 	stats    http.Handler
 	revision func(context.Context) (int64, bool)
@@ -42,12 +46,13 @@ func NewStatsWarm(stats http.Handler, revision func(context.Context) (int64, boo
 		revisionTimeout: statsWarmRevisionTimeout, viewTimeout: statsWarmViewTimeout}
 }
 
-// Task checks every minute; a run with nothing changed makes no request.
+// Task runs every minute.
 func (w *StatsWarm) Task() Task {
 	return Task{Name: "stats_warm", Interval: statsWarmInterval, Run: w.Run}
 }
 
-// Run fills the views whose key changed, one at a time. A view that fails is retried next run.
+// Run requests every default view, one at a time, refilling any whose key moved or whose entry was
+// cleared. A view that fails is retried next run.
 func (w *StatsWarm) Run(ctx context.Context) error {
 	rctx, cancel := context.WithTimeout(ctx, w.revisionTimeout)
 	rev, ok := w.revision(rctx)
@@ -56,16 +61,13 @@ func (w *StatsWarm) Run(ctx context.Context) error {
 		return nil
 	}
 	var errs []error
-	start, filled := time.Now(), 0
+	start, moved, refilled := time.Now(), 0, 0
 	warmed := make(map[string]int64)
 	for _, view := range defaultStatsViews(w.now()) {
-		if r, done := w.warmed[view]; done && r == rev {
-			warmed[view] = rev
-			continue
-		}
 		if ctx.Err() != nil {
 			break
 		}
+		viewStart := time.Now()
 		vctx, cancel := context.WithTimeout(ctx, w.viewTimeout)
 		req, err := http.NewRequestWithContext(vctx, http.MethodGet, view, nil)
 		if err != nil {
@@ -79,12 +81,16 @@ func (w *StatsWarm) Run(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("warm %s: status %d", view, res.status()))
 			continue
 		}
+		if r, done := w.warmed[view]; !done || r != rev {
+			moved++
+		} else if time.Since(viewStart) >= statsWarmRefillTook {
+			refilled++
+		}
 		warmed[view] = rev
-		filled++
 	}
 	w.warmed = warmed
-	if filled > 0 {
-		slog.Info("stats warm: refreshed default views", "component", "background", "views", filled, "revision", rev, "took", time.Since(start).Round(time.Millisecond))
+	if moved+refilled > 0 {
+		slog.Info("stats warm: refreshed default views", "component", "background", "views", moved, "refilled", refilled, "revision", rev, "took", time.Since(start).Round(time.Millisecond))
 	}
 	return errors.Join(errs...)
 }

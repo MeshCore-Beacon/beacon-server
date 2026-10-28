@@ -23,7 +23,7 @@ import (
 // countingStats answers every rollup-backed stats read and counts the reads that reach it.
 type countingStats struct {
 	api.Reader
-	calls atomic.Int64
+	calls, scopeCalls atomic.Int64
 }
 
 func (s *countingStats) AnalyticsRevision(context.Context) (int64, error) { return 7, nil }
@@ -65,6 +65,7 @@ func (s *countingStats) GetStatsTopTalkers(context.Context, []string, time.Time,
 }
 func (s *countingStats) GetScopeStats(context.Context, []string, time.Time) ([]api.ScopeStats, error) {
 	s.calls.Add(1)
+	s.scopeCalls.Add(1)
 	return []api.ScopeStats{}, nil
 }
 
@@ -121,7 +122,7 @@ func TestStatsWarmFillsTheKeysTheWebAsksFor(t *testing.T) {
 	}
 }
 
-func TestStatsWarmRefreshesOnlyWhatChanged(t *testing.T) {
+func TestStatsWarmRequestsEveryViewEachRun(t *testing.T) {
 	var hits []string
 	fail := ""
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -136,32 +137,58 @@ func TestStatsWarmRefreshesOnlyWhatChanged(t *testing.T) {
 	w := NewStatsWarm(handler, func(context.Context) (int64, bool) { return rev, true })
 	at := time.Date(2026, 10, 27, 12, 10, 0, 0, time.UTC)
 	w.now = func() time.Time { return at }
-	run := func(want int, label string) {
-		t.Helper()
-		hits = nil
+	for _, step := range []struct {
+		label   string
+		advance time.Duration
+		fail    string
+	}{
+		{"first run", 0, ""},
+		{"nothing changed", 0, ""},
+		{"a new hour", time.Hour, ""},
+		{"a view fails", 0, "/top-talkers"},
+		{"and is asked again", 0, ""},
+	} {
+		at, fail, hits = at.Add(step.advance), step.fail, nil
 		err := w.Run(context.Background())
-		if fail == "" && err != nil {
-			t.Fatalf("%s: %v", label, err)
+		if (err != nil) != (step.fail != "") {
+			t.Fatalf("%s: err %v", step.label, err)
 		}
-		if len(hits) != want {
-			t.Fatalf("%s: %d requests %v, want %d", label, len(hits), hits, want)
+		if len(hits) != 11 {
+			t.Fatalf("%s: %d requests %v, want every view", step.label, len(hits), hits)
 		}
 	}
-	run(11, "first run")
-	run(0, "nothing changed")
-	at = at.Add(20 * time.Minute) // 12:30, same hour and rolled window
-	run(0, "same hour")
-	at = at.Add(6 * time.Minute) // 12:36: the rolled windows moved
-	run(3, "rolled windows moved")
-	at = at.Add(25 * time.Minute) // 13:01: the since-based windows moved
-	run(8, "new hour")
-	rev++
-	fail = "/top-talkers"
-	run(11, "new revision")
-	fail = ""
-	run(1, "the failed view is retried")
-	if hits[0] != "/top-talkers" {
-		t.Fatalf("retried %v", hits)
+}
+
+// A scope catalogue change clears the scope stats; the next run fills them again, so the next
+// visitor still gets them from the cache.
+func TestStatsWarmRefillsAClearedView(t *testing.T) {
+	mr := miniredis.RunT(t)
+	inner := &countingStats{}
+	cr := cache.NewCachedReader(inner, cache.NewClient(mr.Addr(), "", 0), cache.CacheTTLs{Stats: time.Hour}).(*cache.CachedReader)
+	stats := handlers.StatsRouter(cr, handlers.StatsOptions{SeriesWindow: 90 * 24 * time.Hour})
+	at := time.Date(2026, 10, 27, 12, 10, 0, 0, time.UTC)
+	w := NewStatsWarm(stats, cr.StatsRevision)
+	w.now = func() time.Time { return at }
+	if err := w.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	calls, scopeCalls := inner.calls.Load(), inner.scopeCalls.Load()
+	cr.InvalidateScopeNames(context.Background())
+	if err := w.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := inner.scopeCalls.Load() - scopeCalls; got != 1 {
+		t.Fatalf("scope stats read %d times after the clear, want one refill", got)
+	}
+	if got := inner.calls.Load() - calls; got != 1 {
+		t.Fatalf("%d reads after the clear, want only the scope refill", got)
+	}
+	for _, u := range webDefaultViews(at.Add(5 * time.Minute)) {
+		rec := httptest.NewRecorder()
+		stats.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, u, nil))
+	}
+	if got := inner.calls.Load() - calls; got != 1 {
+		t.Fatalf("a visitor missed %d views after the refill", got-1)
 	}
 }
 
