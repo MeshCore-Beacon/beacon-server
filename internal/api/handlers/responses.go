@@ -74,13 +74,19 @@ type APIError struct {
 	Message string `json:"message"` // e.g. "channel not found"
 }
 
-// respond writes a JSON response with the given status code and data.
-// Logs if encoding fails since the header is already written at that point.
+// respond encodes before committing the status, so an unsupported value cannot
+// turn a serialization error into an empty success response.
 func respond(w http.ResponseWriter, status int, data any) {
+	body, err := json.Marshal(data)
+	if err != nil {
+		slog.Error("api: failed to encode response", "component", "api", "error", err)
+		status = http.StatusInternalServerError
+		body = []byte(`{"error":{"code":"internal_server_error","message":"Unable to return this response."}}`)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		slog.Error("api: failed to encode response", "component", "api", "error", err)
+	if _, err := w.Write(append(body, '\n')); err != nil {
+		slog.Error("api: failed to write response", "component", "api", "error", err)
 	}
 }
 
