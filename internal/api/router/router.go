@@ -74,7 +74,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 		Mobile: api.AdminMobileConfig{MinAppVersion: opts.MinAppVersion},
 		Web:    api.AdminWebConfig{MinWebVersion: opts.MinWebVersion},
 	}
-	info := api.Info{ServerVersion: opts.ServerVersion}
+	info := api.Info{ServerVersion: opts.ServerVersion, BuildVersion: opts.BuildVersion, BuildRevision: opts.BuildRevision}
 	if opts.MinAppVersion != "" {
 		info.MinAppVersion = &opts.MinAppVersion
 	}
@@ -130,6 +130,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 			r.Mount("/routes", handlers.RoutesRouter(reader))
 			r.Mount("/scopes", handlers.ScopesRouter(reader, opts.Scopes))
 			r.Mount("/stats", handlers.StatsRouter(reader, handlers.StatsOptions{Scopes: opts.Scopes, SeriesWindow: opts.RollupRetention}))
+			r.Get("/scope-catalogues", handlers.ScopeCatalogues(opts.ScopeCatalogues))
 			r.Mount("/traces", handlers.TracesRouter(reader))
 			r.Mount("/info", handlers.InfoRouter(info))
 		})
