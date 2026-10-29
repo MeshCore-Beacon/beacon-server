@@ -1,0 +1,10 @@
+[
+ "ModifyTable on packet_sites",
+ "  Nested Loop (Anti)",
+ "    Aggregate partial=Simple {Hashed}",
+ "      Nested Loop",
+ "        Index Scan on packet_observations po using packet_observations_pkey scan=Forward",
+ "        Memoize",
+ "          Index Scan on packets p using packets_pkey scan=Forward",
+ "    Index Only Scan on packet_sites x using packet_sites_pkey scan=Forward"
+]

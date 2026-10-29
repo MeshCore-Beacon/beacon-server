@@ -51,10 +51,14 @@ func NodesRouter(reader api.Reader) http.Handler {
 //	@Param		supportsMultibyteTraces	query		bool	false	"Filter by multibyte trace support (true/false); omit for no filter"
 //	@Param		neighbors				query		bool	false	"Include each node's known neighbor IDs (neighborIds field). Bare ?neighbors or ?neighbors=true enables it; omit/false for none"
 //	@Param		cursor					query		int		false	"last_seen epoch ms of last item for pagination"
-//	@Param		limit					query		int		false	"Max results (default 50); must be positive, values above 200 are clamped" minimum(1) maximum(200)
-//	@Success	200						{object}	api.Page[api.NodeSummary]
+//	@Param		pageCursor				query		string	false	"Opaque nextPageCursor from a previous response; keeps millisecond ties. Wins over cursor when both are sent"
+//	@Param		sort					query		string	false	"Order: lastSeen (default, newest first), name, type or neighbors. Unnamed nodes come last in either name order; ties go newest first. Page a sorted list with pageCursor only"	Enums(lastSeen, name, type, neighbors)
+//	@Param		order					query		string	false	"asc (default) or desc; lastSeen is desc only"	Enums(asc, desc)
+//	@Param		limit					query		int		false	"Max results (default 50); must be positive, values above 2000 are clamped" minimum(1) maximum(2000)
+//	@Success	200						{object}	api.NodePage
 //	@Failure	400						{object}	handlers.APIError
 //	@Failure	500						{object}	handlers.APIError
+//	@Failure	503						{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/nodes [get]
 func listNodes(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -69,7 +73,7 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 		} else if typeName := r.URL.Query().Get("typeName"); typeName != "" {
 			nodeType = api.NodeTypeFromString(typeName)
 		}
-		limit, err := parseLimit(r, 50)
+		limit, err := parseLimitUpTo(r, 50, maxNodeListLimit)
 		if err != nil {
 			respondError(w, http.StatusBadRequest, err.Error())
 			return
@@ -82,6 +86,32 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 				return
 			}
 			cursor = c
+		}
+		sort, sorted, err := parseNodeSort(r)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		var pageCursor *api.NodeCursor
+		var sortCursor *api.NodeSortCursor
+		if raw := r.URL.Query().Get("pageCursor"); raw != "" && sorted {
+			sc, err := api.ParseNodeSortCursor(raw)
+			if err != nil || sc.Sort != sort {
+				respondError(w, http.StatusBadRequest, "invalid pageCursor for this sort")
+				return
+			}
+			sortCursor = sc
+		} else if raw != "" {
+			pc, err := api.ParseNodeCursor(raw)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "invalid pageCursor")
+				return
+			}
+			pageCursor = pc
+		}
+		if sorted && cursor != 0 {
+			respondError(w, http.StatusBadRequest, "cursor works only with sort=lastSeen; page with pageCursor")
+			return
 		}
 		var pubkey []byte
 		if pubkeyParam := strings.ToLower(r.URL.Query().Get("pubkey")); pubkeyParam != "" {
@@ -140,12 +170,41 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 				includeNeighbors = b
 			}
 		}
-		nodes, err := reader.ListNodes(r.Context(), nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, cursor, limit, includeNeighbors)
+		var nodes api.NodePage
+		if sorted {
+			nodes, err = reader.ListNodesSorted(r.Context(), nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, sort, sortCursor, limit, includeNeighbors)
+			nodes.Sort, nodes.Order = sort.By, "asc"
+			if sort.Descending {
+				nodes.Order = "desc"
+			}
+		} else {
+			nodes, err = reader.ListNodes(r.Context(), nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, cursor, pageCursor, limit, includeNeighbors)
+			nodes.Sort, nodes.Order = "lastSeen", "desc"
+		}
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, nodes)
+	}
+}
+
+// parseNodeSort reads sort and order; sorted is false for the default last-seen order.
+func parseNodeSort(r *http.Request) (sort api.NodeSort, sorted bool, err error) {
+	by, order := r.URL.Query().Get("sort"), r.URL.Query().Get("order")
+	if order != "" && order != "asc" && order != "desc" {
+		return sort, false, errors.New("order must be asc or desc")
+	}
+	switch {
+	case by == "" || by == "lastSeen":
+		if order == "asc" {
+			return sort, false, errors.New("sort=lastSeen supports order=desc only")
+		}
+		return sort, false, nil
+	case api.ValidNodeSort(by):
+		return api.NodeSort{By: by, Descending: order == "desc"}, true, nil
+	default:
+		return sort, false, errors.New("sort must be lastSeen, name, type or neighbors")
 	}
 }
 
@@ -159,6 +218,7 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 //	@Failure	400		{object}	handlers.APIError
 //	@Failure	404		{object}	handlers.APIError
 //	@Failure	500		{object}	handlers.APIError
+//	@Failure	503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/nodes/{nodeId} [get]
 func getNode(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -173,7 +233,7 @@ func getNode(reader api.Reader) http.HandlerFunc {
 			respondError(w, http.StatusNotFound, "node not found")
 			return
 		case err != nil:
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, node)
@@ -191,6 +251,7 @@ func getNode(reader api.Reader) http.HandlerFunc {
 //	@Success	200		{object}	api.Page[api.PacketObservationSummary]
 //	@Failure	400		{object}	handlers.APIError
 //	@Failure	500		{object}	handlers.APIError
+//	@Failure	503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/nodes/{nodeId}/observations [get]
 func listNodeObservations(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -215,7 +276,7 @@ func listNodeObservations(reader api.Reader) http.HandlerFunc {
 		}
 		observations, err := reader.ListNodeObservations(r.Context(), nodeID, cursor, limit)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, observations)
@@ -231,6 +292,7 @@ func listNodeObservations(reader api.Reader) http.HandlerFunc {
 //	@Success	200		{object}	[]api.NodeNeighbor
 //	@Failure	400		{object}	handlers.APIError
 //	@Failure	500		{object}	handlers.APIError
+//	@Failure	503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/nodes/{nodeId}/neighbors [get]
 func listNodeNeighbors(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -241,7 +303,7 @@ func listNodeNeighbors(reader api.Reader) http.HandlerFunc {
 		}
 		neighbors, err := reader.GetNodeNeighbors(r.Context(), nodeID)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, neighbors)

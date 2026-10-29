@@ -141,3 +141,58 @@ func TestSingleLineLogValue(t *testing.T) {
 		}
 	}
 }
+
+// A 503 that carries Retry-After is an expected, self-healing refusal (read model not ready, statement timeout, guard
+// admission) and logs at WARN; every other 5xx, a bare 503 included, stays at ERROR.
+func TestRequestLogLevelByStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		status     int
+		retryAfter string
+		want       string
+	}{
+		{"503 with Retry-After", http.StatusServiceUnavailable, "30", "WARN"},
+		{"503 without Retry-After", http.StatusServiceUnavailable, "", "ERROR"},
+		{"500", http.StatusInternalServerError, "", "ERROR"},
+		{"500 with Retry-After", http.StatusInternalServerError, "5", "ERROR"},
+		{"502", http.StatusBadGateway, "", "ERROR"},
+		{"504", http.StatusGatewayTimeout, "", "ERROR"},
+		{"504 with Retry-After", http.StatusGatewayTimeout, "5", "ERROR"},
+		{"429 with Retry-After", http.StatusTooManyRequests, "1", "WARN"},
+		{"404", http.StatusNotFound, "", "WARN"},
+		{"200", http.StatusOK, "", "INFO"},
+		{"200 with Retry-After", http.StatusOK, "1", "INFO"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&out, &slog.HandlerOptions{Level: slog.LevelDebug})))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+			r := chi.NewRouter()
+			r.Use(chimw.RequestID, RequestLogger)
+			r.Get("/items/{id}", func(w http.ResponseWriter, _ *http.Request) {
+				if tc.retryAfter != "" {
+					w.Header().Set("Retry-After", tc.retryAfter)
+				}
+				w.WriteHeader(tc.status)
+			})
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/items/1", nil))
+			if w.Code != tc.status {
+				t.Fatalf("status=%d", w.Code)
+			}
+			lines := bytes.Split(bytes.TrimSpace(out.Bytes()), []byte("\n"))
+			if len(lines) != 1 {
+				t.Fatalf("want one log line, got %q", out.String())
+			}
+			var record map[string]any
+			if err := json.Unmarshal(lines[0], &record); err != nil {
+				t.Fatal(err)
+			}
+			if record["msg"] != "request complete" || record["level"] != tc.want || record["status"] != float64(tc.status) ||
+				record["component"] != "http" || record["path"] != "/items/{id}" || record["bytes"] == nil || record["duration_ms"] == nil {
+				t.Fatalf("want level %s, got %v", tc.want, record)
+			}
+		})
+	}
+}

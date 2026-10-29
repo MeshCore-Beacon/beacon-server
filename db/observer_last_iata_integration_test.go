@@ -114,7 +114,7 @@ FROM observers o`)
 		t.Errorf("GetObserverLastIATA(no packets) = %q, %v; want empty", got, err)
 	}
 
-	page, err := store.ListObservers(ctx, []string{"YYJ", "YYZ"}, "", "", "", "", "", 0, 10)
+	page, err := store.ListObservers(ctx, []string{"YYJ", "YYZ"}, "", "", "", "", "", 0, nil, 10)
 	if err != nil {
 		t.Fatal(err)
 	}

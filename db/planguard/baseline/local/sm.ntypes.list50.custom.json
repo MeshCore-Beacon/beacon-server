@@ -1,0 +1,9 @@
+[
+ "Sort",
+ "  Aggregate partial=Simple {Hashed}",
+ "    Hash Join",
+ "      Seq Scan on nodes n",
+ "      Hash",
+ "        Aggregate partial=Simple {Hashed}",
+ "          Index Scan on node_iatas ni using idx_node_iatas_iata scan=Forward"
+]

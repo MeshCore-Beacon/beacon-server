@@ -23,13 +23,13 @@ import (
 
 func TestDefaultAPIRateLimit(t *testing.T) {
 	handler := New(nil, nil, nil, Options{MaxConnsPerIP: 5, MaxConnectsPerMinute: 1000, RateLimit: config.Resolve(&config.Config{}).RateLimit})
-	for i := 0; i <= 300; i++ {
+	for i := 0; i <= 600; i++ {
 		request := httptest.NewRequest(http.MethodGet, "/api/v1/brokers", nil)
 		request.RemoteAddr = "198.51.100.1:1234"
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
 		want := http.StatusOK
-		if i == 300 {
+		if i == 600 {
 			want = http.StatusTooManyRequests
 		}
 		if response.Code != want {

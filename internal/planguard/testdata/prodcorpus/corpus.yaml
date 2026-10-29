@@ -1,0 +1,46 @@
+# Copyright 2026 Beacon Contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# The prod checker's integration corpus: route readers in every mode, a literal empty region, a resolver that
+# returns nothing, a maintenance DML statement, an ingest statement (auto only) and a pending statement.
+defaults:
+  big_tables: [known_routes]
+  executions: 2
+  timeout_s: 30
+tiers:
+  prod: {}
+statements:
+  ListKnownRoutesByIATA: {sqlc: ListKnownRoutesByIATA, plan: custom}
+  ListKnownRoutesGlobalHop: {sqlc: ListKnownRoutesGlobalHop, plan: custom}
+  ListKnownRoutesGlobal: {sqlc: ListKnownRoutesGlobal, plan: custom, pending: later}
+  DeleteExpiredRoutes: {sqlc: DeleteExpiredRoutes, plan: maint, kind: dml}
+  UpsertChannel: {sqlc: UpsertChannel, plan: ingest, kind: dml}
+resolvers:
+  no_region: SELECT iata FROM known_routes WHERE iata = 'ZZZ' LIMIT 1
+entries:
+  - id: routes.byiata
+    stmt: ListKnownRoutesByIATA
+    params: [SEA, null, 0, 50]
+    modes: [custom, generic, auto]
+    expect:
+      driver:
+        - relation: known_routes
+          index_cond: ["iata >="]
+  - id: routes.byiata.empty_region
+    stmt: ListKnownRoutesByIATA
+    params: [ZZZ, null, 0, 50]
+  - id: routes.byiata.no_region
+    stmt: ListKnownRoutesByIATA
+    params: [{r: no_region}, null, 0, 50]
+  - id: routes.globalhop
+    stmt: ListKnownRoutesGlobalHop
+    params: [2, null, 0, false, 50]
+  - id: routes.global.pending
+    stmt: ListKnownRoutesGlobal
+    params: [null, 0, 50]
+  - id: routes.delete_expired
+    stmt: DeleteExpiredRoutes
+    params: ["-infinity", 0, "2027-01-01T00:00:00Z", "2027-01-01T00:00:00Z", 1000]
+  - id: channels.upsert
+    stmt: UpsertChannel
+    params: ["01", null, null, null, false]

@@ -6,7 +6,6 @@ package handlers
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -64,14 +63,13 @@ func getStatsSeries(reader api.Reader, maxWindow time.Duration) http.HandlerFunc
 		}
 		series, err := reader.GetStatsSeries(ctx, since, until, iatas)
 		switch {
-		case errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded):
-			respondError(w, http.StatusServiceUnavailable, "series query timed out; try a shorter time period")
+		case isQueryTimeout(err) || errors.Is(ctx.Err(), context.DeadlineExceeded):
+			respondTimeout(w, "series query timed out; try a shorter time period")
 		case err != nil:
 			if r.Context().Err() != nil {
 				return
 			}
-			slog.Error("stats series failed", "error", err)
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 		default:
 			respond(w, http.StatusOK, series)
 		}
