@@ -60,6 +60,7 @@ var readerErrorPaths = []string{
 	"/observers/" + someID + "/telemetry",
 	"/observers/" + someID + "/activity",
 	"/packets",
+	"/packets?hashPrefix=abcd",
 	"/packets/backfill?afterObservationId=1",
 	"/packets/0123456789abcdef",
 	"/regions",

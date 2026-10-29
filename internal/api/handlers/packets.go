@@ -130,8 +130,12 @@ func listPackets(reader api.Reader) http.HandlerFunc {
 				respondError(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			var page api.Page[api.PacketSummary]
-			page, err = reader.SearchPacketsByHashPrefix(r.Context(), lo, hi, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
+			page, err := reader.SearchPacketsByHashPrefix(r.Context(), lo, hi, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
+			if err != nil {
+				// This err shadows the outer one, so answer here; a hash search reads no read model.
+				respondReaderError(w, err, "internal server error")
+				return
+			}
 			packets = api.PacketPage{Page: page}
 		} else {
 			packets, err = reader.ListPackets(r.Context(), payloadTypes, routeTypes, iatas, scopes, since, until, cursor, pageCursor, limit)
