@@ -8,6 +8,7 @@ package db
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -16,9 +17,13 @@ const listObserverDirectory = `-- name: ListObserverDirectory :one
 WITH hours AS MATERIALIZED (
  SELECT g.h, coalesce(r.status, 'missing') AS status,
         coalesce(r.status = 'complete', false) AND g.h >= $1::timestamptz
-          AND g.h + interval '1 hour' <= $2::timestamptz AS use_rollup
+          AND g.h + interval '1 hour' <= $2::timestamptz AS use_rollup,
+        -- never an hour cleanup may have thinned: those count only the raw rows still retained
+        coalesce(g.h >= $13::timestamptz AND g.h >= $1::timestamptz AND r.status IS DISTINCT FROM 'partial'
+                 AND (rs.raw_deleted_before IS NULL OR g.h > rs.raw_deleted_before + interval '30 minutes'), false) AS live
  FROM generate_series(date_trunc('hour', $1::timestamptz, 'UTC'), $2::timestamptz, interval '1 hour') g(h)
  LEFT JOIN analytics_rollup_hours r ON r.hour = g.h
+ LEFT JOIN LATERAL (SELECT raw_deleted_before FROM analytics_raw_state LIMIT 1) rs ON true
  WHERE g.h < $2::timestamptz
 ), candidates AS MATERIALIZED (
  SELECT o.id, o.display_name, o.observer_type,
@@ -41,19 +46,28 @@ WITH hours AS MATERIALIZED (
  CROSS JOIN LATERAL (
    SELECT o.observer_id, count(*)::bigint AS observations
    FROM packet_observations o
-   WHERE o.heard_at >= greatest(h.h, $1::timestamptz)
+   WHERE o.heard_at >= CASE WHEN h.live THEN greatest(h.h, $14::timestamptz) ELSE greatest(h.h, $1::timestamptz) END
      AND o.heard_at < least(h.h + interval '1 hour', $2::timestamptz)
      AND (coalesce(cardinality($3::bpchar[]), 0) = 0 OR o.iata = ANY($3::bpchar[]))
    GROUP BY o.observer_id
  ) r
  JOIN candidates c ON c.id = r.observer_id
  WHERE NOT h.use_rollup
+), live_traffic AS MATERIALIZED (
+ SELECT l.h, l.observer_id, sum(l.observations)::bigint AS observations
+ FROM (SELECT unnest($15::timestamptz[]) AS h, unnest($16::uuid[]) AS observer_id,
+              unnest($17::text[]) AS iata, unnest($18::bigint[]) AS observations) l
+ JOIN hours h ON h.h = l.h AND h.live AND NOT h.use_rollup
+ JOIN candidates c ON c.id = l.observer_id
+ WHERE l.h < $14::timestamptz
+   AND (coalesce(cardinality($3::bpchar[]), 0) = 0 OR l.iata::bpchar = ANY($3::bpchar[]))
+ GROUP BY l.h, l.observer_id
 ), coverage AS (
  SELECT count(*)::integer AS expected,
         count(*) FILTER (WHERE h.use_rollup)::integer AS complete,
         count(*) FILTER (WHERE NOT h.use_rollup AND (h.status IN ('complete', 'partial') OR r.h IS NOT NULL))::integer AS partial,
         count(*) FILTER (WHERE NOT h.use_rollup AND h.status = 'missing' AND r.h IS NULL)::integer AS missing
- FROM hours h LEFT JOIN (SELECT DISTINCT h FROM raw_traffic) r ON r.h = h.h
+ FROM hours h LEFT JOIN (SELECT h FROM raw_traffic UNION SELECT h FROM live_traffic) r ON r.h = h.h
 ), traffic AS (
  SELECT observer_id, sum(observations)::bigint AS observations
  FROM (
@@ -64,6 +78,8 @@ WITH hours AS MATERIALIZED (
    WHERE (coalesce(cardinality($3::bpchar[]), 0) = 0 OR a.iata = ANY($3::bpchar[]))
    UNION ALL
    SELECT observer_id, observations FROM raw_traffic
+   UNION ALL
+   SELECT observer_id, observations FROM live_traffic
  ) counts
  GROUP BY observer_id
 ), listed AS (
@@ -103,22 +119,30 @@ FROM packed p CROSS JOIN coverage v CROSS JOIN totals t
 `
 
 type ListObserverDirectoryParams struct {
-	Column1  pgtype.Timestamptz `json:"column_1"`
-	Column2  pgtype.Timestamptz `json:"column_2"`
-	Column3  []string           `json:"column_3"`
-	Column4  string             `json:"column_4"`
-	Column5  string             `json:"column_5"`
-	Column6  string             `json:"column_6"`
-	Column7  string             `json:"column_7"`
-	Column8  string             `json:"column_8"`
-	Column9  string             `json:"column_9"`
-	Column10 int64              `json:"column_10"`
-	Column11 int32              `json:"column_11"`
-	Column12 bool               `json:"column_12"`
+	Column1  pgtype.Timestamptz   `json:"column_1"`
+	Column2  pgtype.Timestamptz   `json:"column_2"`
+	Column3  []string             `json:"column_3"`
+	Column4  string               `json:"column_4"`
+	Column5  string               `json:"column_5"`
+	Column6  string               `json:"column_6"`
+	Column7  string               `json:"column_7"`
+	Column8  string               `json:"column_8"`
+	Column9  string               `json:"column_9"`
+	Column10 int64                `json:"column_10"`
+	Column11 int32                `json:"column_11"`
+	Column12 bool                 `json:"column_12"`
+	Column13 pgtype.Timestamptz   `json:"column_13"`
+	Column14 pgtype.Timestamptz   `json:"column_14"`
+	Column15 []pgtype.Timestamptz `json:"column_15"`
+	Column16 []uuid.UUID          `json:"column_16"`
+	Column17 []string             `json:"column_17"`
+	Column18 []int64              `json:"column_18"`
 }
 
 // Copyright 2026 Beacon Contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
+// $13..$18 are the ingest process's live counts (obscount): for an hour from $13 on, the whole
+// minutes before $14 come from the counts and only [$14, slice end) is read raw.
 func (q *Queries) ListObserverDirectory(ctx context.Context, arg ListObserverDirectoryParams) (string, error) {
 	row := q.db.QueryRow(ctx, listObserverDirectory,
 		arg.Column1,
@@ -133,6 +157,12 @@ func (q *Queries) ListObserverDirectory(ctx context.Context, arg ListObserverDir
 		arg.Column10,
 		arg.Column11,
 		arg.Column12,
+		arg.Column13,
+		arg.Column14,
+		arg.Column15,
+		arg.Column16,
+		arg.Column17,
+		arg.Column18,
 	)
 	var page string
 	err := row.Scan(&page)

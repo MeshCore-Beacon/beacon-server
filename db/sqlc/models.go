@@ -153,6 +153,12 @@ type AnalyticsState struct {
 	Revision  int64 `json:"revision"`
 }
 
+type BackgroundState struct {
+	Key       string             `json:"key"`
+	Value     json.RawMessage    `json:"value"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Channel struct {
 	ID             int32              `json:"id"`
 	ChannelHash    []byte             `json:"channel_hash"`
@@ -196,6 +202,13 @@ type ChannelMessage struct {
 	SentAt       pgtype.Timestamptz `json:"sent_at"`
 }
 
+type ChannelMessageIata struct {
+	MessageID int64  `json:"message_id"`
+	Iata      string `json:"iata"`
+	ChannelID int32  `json:"channel_id"`
+	ScopeID   *int32 `json:"scope_id"`
+}
+
 type IataCode struct {
 	Iata        string             `json:"iata"`
 	DisplayName *string            `json:"display_name"`
@@ -206,16 +219,15 @@ type IataCode struct {
 }
 
 type KnownRoute struct {
-	ID                int64              `json:"id"`
-	PathKey           []byte             `json:"path_key"`
-	NodeIds           []uuid.UUID        `json:"node_ids"`
-	HashPrefix        [][]byte           `json:"hash_prefix"`
-	Iata              string             `json:"iata"`
-	HopCount          int32              `json:"hop_count"`
-	FirstSeen         pgtype.Timestamptz `json:"first_seen"`
-	LastSeen          pgtype.Timestamptz `json:"last_seen"`
-	ObservationCount  int64              `json:"observation_count"`
-	LastReconfirmedAt pgtype.Timestamptz `json:"last_reconfirmed_at"`
+	ID               int64              `json:"id"`
+	PathKey          []byte             `json:"path_key"`
+	NodeIds          []uuid.UUID        `json:"node_ids"`
+	HashPrefix       [][]byte           `json:"hash_prefix"`
+	Iata             string             `json:"iata"`
+	HopCount         int32              `json:"hop_count"`
+	FirstSeen        pgtype.Timestamptz `json:"first_seen"`
+	LastSeen         pgtype.Timestamptz `json:"last_seen"`
+	ObservationCount int64              `json:"observation_count"`
 }
 
 type MeshmapperChannelCatalogue struct {
@@ -308,7 +320,7 @@ type Node struct {
 	RadioSf                 *int16             `json:"radio_sf"`
 	RadioBwKhz              *float32           `json:"radio_bw_khz"`
 	Metadata                []byte             `json:"metadata"`
-	DeviceClockDriftSeconds *int32             `json:"device_clock_drift_seconds"`
+	DeviceClockDriftSeconds *int64             `json:"device_clock_drift_seconds"`
 }
 
 type NodeIata struct {
@@ -456,6 +468,22 @@ type PacketObservation struct {
 	SourceBroker      *string            `json:"source_broker"`
 	PayloadType       *int16             `json:"payload_type"`
 	AirtimeMs         *float32           `json:"airtime_ms"`
+}
+
+type PacketSite struct {
+	PacketHash   []byte             `json:"packet_hash"`
+	Iata         string             `json:"iata"`
+	SiteHeardAt  pgtype.Timestamptz `json:"site_heard_at"`
+	FirstHeardAt pgtype.Timestamptz `json:"first_heard_at"`
+	PayloadType  int16              `json:"payload_type"`
+	RouteType    int16              `json:"route_type"`
+	ScopeID      *int32             `json:"scope_id"`
+}
+
+type ReconfirmAmb struct {
+	Iata   string `json:"iata"`
+	Len    int32  `json:"len"`
+	Prefix []byte `json:"prefix"`
 }
 
 type Region struct {

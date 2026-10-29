@@ -32,21 +32,29 @@ func RoutesRouter(reader api.Reader) http.Handler {
 
 // listKnownRoutes godoc
 //
-//	@Summary	List known routes
-//	@Tags		Routes
-//	@Produce	json
-//	@Param		iata		query		string	false	"Filter by IATA code"
-//	@Param		hopCount	query		int		false	"Filter by exact hop count"
-//	@Param		cursor		query		int		false	"Epoch ms timestamp of last item for pagination"
-//	@Param		cursorId	query		int		false	"id of the last item; with cursor, also returns later routes sharing that millisecond"
-//	@Param		limit		query		int		false	"Max results (default 50); must be positive, values above 200 are clamped" minimum(1) maximum(200)
-//	@Failure	400			{object}	handlers.APIError
-//	@Success	200			{object}	[]api.KnownRoute
-//	@Failure	500			{object}	handlers.APIError
-//	@Router		/routes [get]
+//	@Summary		List known routes
+//	@Description	Newest first. iatas filters by several IATA codes and takes precedence over the single iata, which
+//	@Description	is matched exactly as given. With neither, every IATA's routes are listed.
+//	@Tags			Routes
+//	@Produce		json
+//	@Param			iatas		query		string	false	"Comma-separated IATA codes (max 100)"
+//	@Param			iata		query		string	false	"Single IATA code (when iatas is omitted)"
+//	@Param			hopCount	query		int		false	"Filter by exact hop count"
+//	@Param			cursor		query		int		false	"Epoch ms timestamp of last item for pagination"
+//	@Param			cursorId	query		int		false	"id of the last item; with cursor, also returns later routes sharing that millisecond"
+//	@Param			limit		query		int		false	"Max results (default 50); must be positive, values above 200 are clamped" minimum(1) maximum(200)
+//	@Failure		400			{object}	handlers.APIError
+//	@Success		200			{object}	[]api.KnownRoute
+//	@Failure		500			{object}	handlers.APIError
+//	@Failure		503			{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
+//	@Router			/routes [get]
 func listKnownRoutes(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		iata := r.URL.Query().Get("iata")
+		iatas, err := knownRouteIATAs(r)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		var hopCount int32
 		if v := r.URL.Query().Get("hopCount"); v != "" {
 			if h, err := strconv.ParseInt(v, 10, 32); err == nil {
@@ -78,13 +86,30 @@ func listKnownRoutes(reader api.Reader) http.HandlerFunc {
 			respondError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		routes, err := reader.ListKnownRoutes(r.Context(), iata, hopCount, cursor, cursorID, limit)
+		routes, err := reader.ListKnownRoutes(r.Context(), iatas, hopCount, cursor, cursorID, limit)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, routes)
 	}
+}
+
+// knownRouteIATAs reads /routes' filter: iatas parsed like routeIATAs, else the single iata exactly as given (as
+// before iatas existed), else nil for every IATA.
+func knownRouteIATAs(r *http.Request) ([]string, error) {
+	q := r.URL.Query()
+	if q.Get("iatas") == "" {
+		if iata := q.Get("iata"); iata != "" {
+			return []string{iata}, nil
+		}
+		return nil, nil
+	}
+	iatas, err := routeIATAs(r)
+	if err == nil && len(iatas) == 0 {
+		err = fmt.Errorf("iatas must list 1-%d codes", maxRouteSearchIATAs)
+	}
+	return iatas, err
 }
 
 // maxRouteSearchIATAs bounds the iatas list; the searches themselves are bounded by row limits.
@@ -215,12 +240,12 @@ func respondRouteSearchError(w http.ResponseWriter, ctx context.Context, err err
 		return false
 	case errors.Is(err, api.ErrRouteSearchTooBroad):
 		respondError(w, http.StatusBadRequest, err.Error())
-	case errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded):
-		respondError(w, http.StatusServiceUnavailable, "route search timed out; use a longer hash or fewer iatas")
+	case isQueryTimeout(err) || errors.Is(ctx.Err(), context.DeadlineExceeded):
+		respondTimeout(w, "route search timed out; use a longer hash or fewer iatas")
 	case errors.Is(err, context.Canceled):
 		// client went away; nothing to write
 	default:
-		respondError(w, http.StatusInternalServerError, "internal server error")
+		respondReaderError(w, err, "internal server error")
 	}
 	return true
 }

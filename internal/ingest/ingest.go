@@ -136,6 +136,10 @@ type DB interface {
 	// InsertChannelMessage stores a decrypted group text message. Returns the inserted message, nil for a duplicate, and an error.
 	InsertChannelMessage(ctx context.Context, m InsertChannelMessageParams) (*InsertedChannelMessage, error)
 
+	// AddChannelMessageIATA records iata as a site of the packet's message; a no-op when the packet has none.
+	// found says whether the packet has a committed message (its site is then recorded).
+	AddChannelMessageIATA(ctx context.Context, packetHash []byte, iata string) (found bool, err error)
+
 	// UpdateObserverStatus updates the observer row from a /status message. Returns the OberserID
 	// and any error.
 	UpdateObserverStatus(ctx context.Context, p UpdateObserverStatusParams) (uuid.UUID, error)
@@ -173,7 +177,7 @@ type DB interface {
 	UpsertChannelHashOnly(ctx context.Context, channelHash []byte) (int, error)
 
 	// ListUndecryptedGroupTextPackets returns GRP_TXT packets never successfully decrypted --
-	// used by BackfillChannelMessages to retry them against the current keystore at boot.
+	// used by DecryptBackfill to retry them against the current keystore after boot.
 	ListUndecryptedGroupTextPackets(ctx context.Context) ([]UndecryptedPacket, error)
 
 	// ListUndecryptedGroupTextPacketsByHash limits that scan to channels that just gained a key.

@@ -1,0 +1,8 @@
+# Copyright 2026 Beacon Contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# A cached statement with no entries proves nothing.
+statements:
+  GetNodeByID: {sqlc: GetNodeByID, plan: cached, admission: by_id}
+admission_profiles:
+  by_id: [hit, miss]

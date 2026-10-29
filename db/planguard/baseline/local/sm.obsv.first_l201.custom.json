@@ -1,0 +1,16 @@
+[
+ "Limit",
+ "  Sort",
+ "    Aggregate partial=Simple {Sorted}",
+ "      Sort",
+ "        Hash Join (Left)",
+ "          Hash Join (Right)",
+ "            Seq Scan on observer_scopes os",
+ "            Hash",
+ "              Hash Join (Right)",
+ "                Seq Scan on observer_brokers ob",
+ "                Hash",
+ "                  Seq Scan on observers o",
+ "          Hash",
+ "            Seq Scan on transport_scopes ts"
+]

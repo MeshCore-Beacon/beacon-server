@@ -7,6 +7,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -39,30 +40,30 @@ func TestListLimits(t *testing.T) {
 			got = limit
 			return nil, nil
 		},
-		listObservers: func(ctx context.Context, iatas []string, observerType, broker, status, name, scope string, cursor int64, limit int32) (api.Page[api.ObserverSummary], error) {
+		listObservers: func(ctx context.Context, iatas []string, observerType, broker, status, name, scope string, cursor int64, pageCursor *api.ObserverCursor, limit int32) (api.ObserverPage, error) {
 			calls++
 			got = limit
-			return api.Page[api.ObserverSummary]{}, nil
+			return api.ObserverPage{}, nil
 		},
 		listObserverAdverts: func(ctx context.Context, observerID uuid.UUID, cursor int64, limit int32) (api.Page[api.AdvertObservation], error) {
 			calls++
 			got = limit
 			return api.Page[api.AdvertObservation]{}, nil
 		},
-		listNodes: func(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, limit int32, includeNeighbors bool) (api.Page[api.NodeSummary], error) {
+		listNodes: func(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
 			calls++
 			got = limit
-			return api.Page[api.NodeSummary]{}, nil
+			return api.NodePage{}, nil
 		},
 		listNodeObservations: func(ctx context.Context, nodeID uuid.UUID, cursor int64, limit int32) (api.Page[api.PacketObservationSummary], error) {
 			calls++
 			got = limit
 			return api.Page[api.PacketObservationSummary]{}, nil
 		},
-		listPackets: func(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
+		listPackets: func(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, pageCursor *api.PacketCursor, limit int32) (api.PacketPage, error) {
 			calls++
 			got = limit
-			return api.Page[api.PacketSummary]{}, nil
+			return api.PacketPage{Page: api.Page[api.PacketSummary]{}}, nil
 		},
 		listPacketsAfterID: func(ctx context.Context, afterObservationID int64, payloadType, routeType int16, iatas []string, scope string, limit int32) ([]api.PacketSummary, error) {
 			calls++
@@ -99,7 +100,7 @@ func TestListLimits(t *testing.T) {
 			got = limit
 			return nil, nil
 		},
-		listKnownRoutes: func(ctx context.Context, iata string, hopCount int32, cursor time.Time, _ int64, limit int32) ([]api.KnownRoute, error) {
+		listKnownRoutes: func(ctx context.Context, iatas []string, hopCount int32, cursor time.Time, _ int64, limit int32) ([]api.KnownRoute, error) {
 			calls++
 			got = limit
 			return nil, nil
@@ -117,25 +118,26 @@ func TestListLimits(t *testing.T) {
 	for _, endpoint := range []struct {
 		path         string
 		defaultLimit int32
+		max          int32
 	}{
-		{"/nodes", 50},
-		{"/nodes/00000000-0000-0000-0000-000000000001/observations", 50},
-		{"/observers", 50},
-		{"/observers/00000000-0000-0000-0000-000000000001/adverts", 50},
-		{"/packets", 50},
-		{"/packets/backfill?afterObservationId=1", 100},
-		{"/channels", 50},
-		{"/channels/1/messages", 50},
-		{"/messages", 50},
-		{"/messages?channelHash=11", 50},
-		{"/messages/backfill?afterId=1", 100},
-		{"/routes", 50},
-		{"/traces", 50},
-		{"/stats/top-nodes", 10},
-		{"/stats/top-observers", 10},
-		{"/stats/top-advertisers?sort=flood", 10},
-		{"/stats/clock-drift", 10},
-		{"/stats/top-talkers", 10},
+		{"/nodes", 50, 2000},
+		{"/nodes/00000000-0000-0000-0000-000000000001/observations", 50, 200},
+		{"/observers", 50, 200},
+		{"/observers/00000000-0000-0000-0000-000000000001/adverts", 50, 200},
+		{"/packets", 50, 200},
+		{"/packets/backfill?afterObservationId=1", 100, 200},
+		{"/channels", 50, 200},
+		{"/channels/1/messages", 50, 200},
+		{"/messages", 50, 200},
+		{"/messages?channelHash=11", 50, 200},
+		{"/messages/backfill?afterId=1", 100, 200},
+		{"/routes", 50, 200},
+		{"/traces", 50, 200},
+		{"/stats/top-nodes", 10, 200},
+		{"/stats/top-observers", 10, 200},
+		{"/stats/top-advertisers?sort=flood", 10, 200},
+		{"/stats/clock-drift", 10, 200},
+		{"/stats/top-talkers", 10, 200},
 	} {
 		t.Run(endpoint.path, func(t *testing.T) {
 			for _, tc := range []struct {
@@ -144,7 +146,8 @@ func TestListLimits(t *testing.T) {
 				status int
 			}{
 				{"", endpoint.defaultLimit, 200}, {"1", 1, 200}, {"200", 200, 200},
-				{"201", 200, 200}, {"1000000", 200, 200}, {"2147483647", 200, 200},
+				{strconv.Itoa(int(endpoint.max)), endpoint.max, 200}, {strconv.Itoa(int(endpoint.max) + 1), endpoint.max, 200},
+				{"1000000", endpoint.max, 200}, {"2147483647", endpoint.max, 200},
 				{"0", 0, 400}, {"-1", 0, 400}, {"bad", 0, 400}, {"1.5", 0, 400},
 				{"2147483648", 0, 400},
 			} {

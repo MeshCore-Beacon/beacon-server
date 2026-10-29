@@ -76,3 +76,75 @@ func (q *Queries) GetPathStats(ctx context.Context, arg GetPathStatsParams) ([]G
 	}
 	return items, nil
 }
+
+const getPathStatsProbe = `-- name: GetPathStatsProbe :many
+WITH readings AS (
+    SELECT iata, hour, category, hash_bytes, entries, receptions FROM analytics_hourly_paths
+    WHERE hour >= $1::timestamptz AND hour < $2::timestamptz
+      AND COALESCE(cardinality($3::bpchar[]), 0) = 0
+    UNION ALL
+    SELECT p.iata, p.hour, p.category, p.hash_bytes, p.entries, p.receptions
+    FROM generate_series((SELECT CASE WHEN min(hour) IS NOT NULL THEN GREATEST($1::timestamptz, min(hour)) END FROM analytics_hourly_paths),
+                         (SELECT LEAST($2::timestamptz, max(hour)) FROM analytics_hourly_paths), interval '1 hour') g(h)
+    CROSS JOIN (SELECT DISTINCT unnest($3::bpchar[]) AS iata) i
+    CROSS JOIN LATERAL (SELECT x.iata, x.hour, x.category, x.hash_bytes, x.entries, x.receptions
+                        FROM analytics_hourly_paths x WHERE x.hour = g.h AND x.iata = i.iata OFFSET 0) p
+    WHERE g.h < $2::timestamptz AND cardinality($3::bpchar[]) > 0
+)
+SELECT (grouping(hour) = 0)::boolean AS is_hourly,
+       COALESCE(hour, 'epoch'::timestamptz)::timestamptz AS hour,
+       category, hash_bytes, COALESCE(entries, 0)::integer AS entries,
+       sum(receptions)::bigint AS receptions,
+       -- Non-routed categories store entries = 0, so an hour of only empty paths gives 0.
+       COALESCE(max(entries) FILTER (WHERE receptions > 0), 0)::integer AS max_entries
+FROM readings
+GROUP BY GROUPING SETS ((category, hash_bytes, entries), (hour, category, hash_bytes))
+ORDER BY is_hourly, hour, category, hash_bytes, entries
+`
+
+type GetPathStatsProbeParams struct {
+	Since pgtype.Timestamptz `json:"since"`
+	Until pgtype.Timestamptz `json:"until"`
+	Iatas []string           `json:"iatas"`
+}
+
+type GetPathStatsProbeRow struct {
+	IsHourly   bool               `json:"is_hourly"`
+	Hour       pgtype.Timestamptz `json:"hour"`
+	Category   int32              `json:"category"`
+	HashBytes  int32              `json:"hash_bytes"`
+	Entries    int32              `json:"entries"`
+	Receptions int64              `json:"receptions"`
+	MaxEntries int32              `json:"max_entries"`
+}
+
+// GetPathStats for at most 32 distinct IATAs: one rollup probe per (hour, IATA). @since and @until are UTC hours.
+// The hours walked stay inside the table's own [min(hour), max(hour)]; an empty table walks none
+// (a NULL start makes generate_series return no rows).
+func (q *Queries) GetPathStatsProbe(ctx context.Context, arg GetPathStatsProbeParams) ([]GetPathStatsProbeRow, error) {
+	rows, err := q.db.Query(ctx, getPathStatsProbe, arg.Since, arg.Until, arg.Iatas)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetPathStatsProbeRow{}
+	for rows.Next() {
+		var i GetPathStatsProbeRow
+		if err := rows.Scan(
+			&i.IsHourly,
+			&i.Hour,
+			&i.Category,
+			&i.HashBytes,
+			&i.Entries,
+			&i.Receptions,
+			&i.MaxEntries,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

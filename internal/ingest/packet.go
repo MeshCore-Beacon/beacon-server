@@ -794,6 +794,18 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	// A duplicate is streamed, never stored, to includeRepeats clients when its path is new.
 	repeat := !inserted && pathNew && w.hub.RepeatsWanted()
 
+	// A hearing of a stored message records its site next, before any other DB work, so region pages see it at
+	// once. When no committed message was found, the group-text side effects add it again after their insert
+	// attempt, which covers a message another hearing is still creating.
+	siteRecorded := false
+	if inserted && packet.PayloadType() == meshcore.PayloadTypeGrpTxt {
+		found, err := w.db.AddChannelMessageIATA(ctx, packetHash[:], iata)
+		if err != nil {
+			w.log.Error(fmt.Sprintf("db: record channel message site failed from %s/%s", iata, pubkeyHex), "error", err)
+		}
+		siteRecorded = found && err == nil
+	}
+
 	if scopeID != nil && inserted {
 		if err := w.db.UpsertObserverScope(ctx, id, *scopeID); err != nil {
 			w.log.Error(fmt.Sprintf("failed to upsert observer scope for %s", id), "error", err)
@@ -856,7 +868,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 
 	if inserted || repeat {
 		if inserted {
-			w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio, scopeID, matchedScope, pubkeyBytes, float32(parseNumber(envelope.SNR)))
+			w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio, scopeID, matchedScope, pubkeyBytes, float32(parseNumber(envelope.SNR)), siteRecorded, !isNew)
 		}
 		// Resolve after advert updates; suppressed copies need no endpoint lookup.
 		var resolvedSource, resolvedDestination *api.ResolvedHop

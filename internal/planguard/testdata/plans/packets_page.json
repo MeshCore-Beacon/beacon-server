@@ -1,0 +1,239 @@
+[
+ {
+  "Plan": {
+   "Node Type": "Sort",
+   "Parallel Aware": false,
+   "Total Cost": 3907.53,
+   "Plan Rows": 51,
+   "Actual Rows": 51,
+   "Actual Loops": 1,
+   "Sort Key": [
+    "pg.k DESC",
+    "p.packet_hash DESC"
+   ],
+   "Shared Hit Blocks": 760,
+   "Shared Read Blocks": 0,
+   "Plans": [
+    {
+     "Node Type": "Limit",
+     "Parent Relationship": "InitPlan",
+     "Subplan Name": "CTE page",
+     "Parallel Aware": false,
+     "Total Cost": 1.6,
+     "Plan Rows": 51,
+     "Actual Rows": 51,
+     "Actual Loops": 1,
+     "Shared Hit Blocks": 5,
+     "Shared Read Blocks": 0,
+     "Plans": [
+      {
+       "Node Type": "Index Only Scan",
+       "Parent Relationship": "Outer",
+       "Parallel Aware": false,
+       "Scan Direction": "Forward",
+       "Index Name": "idx_packets_last_heard_hash",
+       "Relation Name": "packets",
+       "Alias": "p_1",
+       "Total Cost": 69933.35,
+       "Plan Rows": 3048658,
+       "Actual Rows": 51,
+       "Actual Loops": 1,
+       "Index Cond": "(ROW(last_heard_at, packet_hash) < ROW('infinity'::timestamp with time zone, '\\x'::bytea))",
+       "Shared Hit Blocks": 5,
+       "Shared Read Blocks": 0
+      }
+     ]
+    },
+    {
+     "Node Type": "Nested Loop",
+     "Parent Relationship": "Outer",
+     "Parallel Aware": false,
+     "Join Type": "Left",
+     "Total Cost": 3904.36,
+     "Plan Rows": 51,
+     "Actual Rows": 51,
+     "Actual Loops": 1,
+     "Shared Hit Blocks": 760,
+     "Shared Read Blocks": 0,
+     "Plans": [
+      {
+       "Node Type": "Nested Loop",
+       "Parent Relationship": "Outer",
+       "Parallel Aware": false,
+       "Join Type": "Left",
+       "Total Cost": 3885.62,
+       "Plan Rows": 51,
+       "Actual Rows": 51,
+       "Actual Loops": 1,
+       "Shared Hit Blocks": 748,
+       "Shared Read Blocks": 0,
+       "Plans": [
+        {
+         "Node Type": "Nested Loop",
+         "Parent Relationship": "Outer",
+         "Parallel Aware": false,
+         "Join Type": "Left",
+         "Total Cost": 3879.39,
+         "Plan Rows": 51,
+         "Actual Rows": 51,
+         "Actual Loops": 1,
+         "Shared Hit Blocks": 622,
+         "Shared Read Blocks": 0,
+         "Plans": [
+          {
+           "Node Type": "Nested Loop",
+           "Parent Relationship": "Outer",
+           "Parallel Aware": false,
+           "Join Type": "Inner",
+           "Total Cost": 136.04,
+           "Plan Rows": 51,
+           "Actual Rows": 51,
+           "Actual Loops": 1,
+           "Shared Hit Blocks": 209,
+           "Shared Read Blocks": 0,
+           "Plans": [
+            {
+             "Node Type": "CTE Scan",
+             "Parent Relationship": "Outer",
+             "Parallel Aware": false,
+             "CTE Name": "page",
+             "Alias": "pg",
+             "Total Cost": 1.02,
+             "Plan Rows": 51,
+             "Actual Rows": 51,
+             "Actual Loops": 1,
+             "Shared Hit Blocks": 5,
+             "Shared Read Blocks": 0
+            },
+            {
+             "Node Type": "Index Scan",
+             "Parent Relationship": "Inner",
+             "Parallel Aware": false,
+             "Scan Direction": "Forward",
+             "Index Name": "packets_pkey",
+             "Relation Name": "packets",
+             "Alias": "p",
+             "Total Cost": 2.65,
+             "Plan Rows": 1,
+             "Actual Rows": 1,
+             "Actual Loops": 51,
+             "Index Cond": "(packet_hash = pg.packet_hash)",
+             "Shared Hit Blocks": 204,
+             "Shared Read Blocks": 0
+            }
+           ]
+          },
+          {
+           "Node Type": "Limit",
+           "Parent Relationship": "Inner",
+           "Parallel Aware": false,
+           "Total Cost": 73.38,
+           "Plan Rows": 1,
+           "Actual Rows": 1,
+           "Actual Loops": 51,
+           "Shared Hit Blocks": 413,
+           "Shared Read Blocks": 0,
+           "Plans": [
+            {
+             "Node Type": "Sort",
+             "Parent Relationship": "Outer",
+             "Parallel Aware": false,
+             "Total Cost": 73.54,
+             "Plan Rows": 64,
+             "Actual Rows": 1,
+             "Actual Loops": 51,
+             "Sort Key": [
+              "packet_observations.heard_at DESC",
+              "packet_observations.id DESC"
+             ],
+             "Shared Hit Blocks": 413,
+             "Shared Read Blocks": 0,
+             "Plans": [
+              {
+               "Node Type": "Index Scan",
+               "Parent Relationship": "Outer",
+               "Parallel Aware": false,
+               "Scan Direction": "Forward",
+               "Index Name": "idx_observations_packet",
+               "Relation Name": "packet_observations",
+               "Alias": "packet_observations",
+               "Total Cost": 73.06,
+               "Plan Rows": 64,
+               "Actual Rows": 8,
+               "Actual Loops": 51,
+               "Index Cond": "(packet_hash = p.packet_hash)",
+               "Shared Hit Blocks": 413,
+               "Shared Read Blocks": 0
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        {
+         "Node Type": "Memoize",
+         "Parent Relationship": "Inner",
+         "Parallel Aware": false,
+         "Total Cost": 2.51,
+         "Plan Rows": 1,
+         "Actual Rows": 1,
+         "Actual Loops": 51,
+         "Cache Key": "packet_observations.observer_id",
+         "Cache Mode": "logical",
+         "Cache Hits": 9,
+         "Cache Misses": 42,
+         "Cache Evictions": 0,
+         "Cache Overflows": 0,
+         "Peak Memory Usage": 6,
+         "Shared Hit Blocks": 126,
+         "Shared Read Blocks": 0,
+         "Plans": [
+          {
+           "Node Type": "Index Scan",
+           "Parent Relationship": "Outer",
+           "Parallel Aware": false,
+           "Scan Direction": "Forward",
+           "Index Name": "observers_pkey",
+           "Relation Name": "observers",
+           "Alias": "o",
+           "Total Cost": 2.5,
+           "Plan Rows": 1,
+           "Actual Rows": 1,
+           "Actual Loops": 42,
+           "Index Cond": "(id = packet_observations.observer_id)",
+           "Shared Hit Blocks": 126,
+           "Shared Read Blocks": 0
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "Node Type": "Index Scan",
+       "Parent Relationship": "Inner",
+       "Parallel Aware": false,
+       "Scan Direction": "Forward",
+       "Index Name": "transport_scopes_pkey",
+       "Relation Name": "transport_scopes",
+       "Alias": "ts",
+       "Total Cost": 0.3,
+       "Plan Rows": 1,
+       "Actual Rows": 0,
+       "Actual Loops": 51,
+       "Index Cond": "(id = p.scope_id)",
+       "Shared Hit Blocks": 12,
+       "Shared Read Blocks": 0
+      }
+     ]
+    }
+   ]
+  },
+  "Planning": {
+   "Shared Hit Blocks": 19,
+   "Shared Read Blocks": 0
+  },
+  "Planning Time": 0.211,
+  "Execution Time": 0.328
+ }
+]

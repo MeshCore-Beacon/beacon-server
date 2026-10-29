@@ -47,7 +47,7 @@ func TestChannelMessageScopeLive(t *testing.T) {
 			waitForSummarySubscriber(t, ctx, w.hub, client)
 			packet := &meshcore.Packet{Header: meshcore.MakeHeader(meshcore.RouteTypeTransportFlood, meshcore.PayloadTypeGrpTxt, 0), Payload: encryptedGroupText(t, 0x11, psk, "Fixture", "test")}
 			latest := "#different-later-reception"
-			w.handlePayloadTypeSideEffects(ctx, packet, "YOW", []byte{1}, RadioSettings{}, nil, &latest, nil, 0)
+			w.handlePayloadTypeSideEffects(ctx, packet, "YOW", []byte{1}, RadioSettings{}, nil, &latest, nil, 0, false, false)
 			select {
 			case event := <-client.Send:
 				var got channelMessageEvent
@@ -60,7 +60,7 @@ func TestChannelMessageScopeLive(t *testing.T) {
 			case <-ctx.Done():
 				t.Fatal("no live message")
 			}
-			w.handlePayloadTypeSideEffects(ctx, packet, "YOW", []byte{1}, RadioSettings{}, nil, &latest, nil, 0)
+			w.handlePayloadTypeSideEffects(ctx, packet, "YOW", []byte{1}, RadioSettings{}, nil, &latest, nil, 0, false, false)
 			w.hub.Broadcast(hub.Event{Type: hub.EventObserverStatus})
 			select {
 			case event := <-client.Send:

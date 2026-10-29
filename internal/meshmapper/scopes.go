@@ -249,6 +249,8 @@ func (i *Importer) refresh(ctx context.Context, s *source, now time.Time) error 
 		s.cache.NextAttempt = update.NextAttempt
 		return fmt.Errorf("persist scope catalogue %s: %w", s.iata, err)
 	}
+	// MeshMapper regenerates a catalogue on request, so a new payload usually holds the same names.
+	renamed := len(update.Payload) > 0 && !sameNames(s.entries, entries)
 	if len(update.Payload) > 0 {
 		s.cache.Payload = update.Payload
 		s.entries = entries
@@ -263,7 +265,7 @@ func (i *Importer) refresh(ctx context.Context, s *source, now time.Time) error 
 	s.cache.LastError = update.LastError
 	if len(update.Payload) > 0 {
 		i.publish()
-		if i.onChange != nil {
+		if renamed && i.onChange != nil {
 			i.onChange(ctx)
 		}
 	}
@@ -311,6 +313,23 @@ func (i *Importer) log(s source, action string) {
 	}
 	slog.Log(context.Background(), level, "MeshMapper scopes "+action, "component", "meshmapper.scopes", "iata", s.iata, "source", s.url,
 		"names", len(s.entries), "generated_at", s.generated, "checked_at", s.cache.CheckedAt, "next_attempt", s.cache.NextAttempt, "last_error", s.cache.LastError)
+}
+
+// sameNames reports whether two catalogues list the same scope names, in any order.
+func sameNames(a, b []scopestore.Entry) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	names := make(map[string]bool, len(a))
+	for _, e := range a {
+		names[e.Name] = true
+	}
+	for _, e := range b {
+		if !names[e.Name] {
+			return false
+		}
+	}
+	return true
 }
 
 func scopesEndpoint(site string) (string, bool) { return siteEndpoint(site, "get_scopes.php") }

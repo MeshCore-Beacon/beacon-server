@@ -19,7 +19,7 @@ const (
 	keyIATAs                   = "beacon:iatas"
 	keyIATAPrefix              = "beacon:iata:"
 	keyIATABorderPrefix        = "beacon:iata:border:"
-	keyRegions                 = "beacon:regions"
+	keyRegions                 = "beacon:regions:detail" // renamed when items gained detail, so no old summary list is read
 	keyRegionPrefix            = "beacon:region:"
 	keyRegionSlugPrefix        = "beacon:region:slug:"
 	keyScopeNames              = "beacon:scope:names"
@@ -147,8 +147,8 @@ func (cr *CachedReader) GetIATABorder(ctx context.Context, iata string) (json.Ra
 }
 
 // ListRegions implements [api.Reader].
-func (cr *CachedReader) ListRegions(ctx context.Context) ([]api.RegionSummary, error) {
-	return getOrSet(ctx, cr.c, keyRegions, cr.ttl.Reference, func(ctx context.Context) ([]api.RegionSummary, error) {
+func (cr *CachedReader) ListRegions(ctx context.Context) ([]api.Region, error) {
+	return getOrSet(ctx, cr.c, keyRegions, cr.ttl.Reference, func(ctx context.Context) ([]api.Region, error) {
 		return cr.inner.ListRegions(ctx)
 	})
 }
@@ -320,8 +320,13 @@ func (cr *CachedReader) ListMessagesAfterID(ctx context.Context, afterID int64, 
 }
 
 // ListNodes implements [api.Reader].
-func (cr *CachedReader) ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, limit int32, includeNeighbors bool) (api.Page[api.NodeSummary], error) {
-	return cr.inner.ListNodes(ctx, nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, cursor, limit, includeNeighbors)
+func (cr *CachedReader) ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
+	return cr.inner.ListNodes(ctx, nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, cursor, pageCursor, limit, includeNeighbors)
+}
+
+// ListNodesSorted implements [api.Reader].
+func (cr *CachedReader) ListNodesSorted(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, sort api.NodeSort, pageCursor *api.NodeSortCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
+	return cr.inner.ListNodesSorted(ctx, nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, sort, pageCursor, limit, includeNeighbors)
 }
 
 // ListNodeObservations implements [api.Reader].
@@ -330,8 +335,8 @@ func (cr *CachedReader) ListNodeObservations(ctx context.Context, nodeID uuid.UU
 }
 
 // ListObservers implements [api.Reader].
-func (cr *CachedReader) ListObservers(ctx context.Context, iatas []string, observerType, broker, status, name, scope string, cursor int64, limit int32) (api.Page[api.ObserverSummary], error) {
-	return cr.inner.ListObservers(ctx, iatas, observerType, broker, status, name, scope, cursor, limit)
+func (cr *CachedReader) ListObservers(ctx context.Context, iatas []string, observerType, broker, status, name, scope string, cursor int64, pageCursor *api.ObserverCursor, limit int32) (api.ObserverPage, error) {
+	return cr.inner.ListObservers(ctx, iatas, observerType, broker, status, name, scope, cursor, pageCursor, limit)
 }
 
 // ListObserverAdverts implements [api.Reader].
@@ -345,8 +350,8 @@ func (cr *CachedReader) SearchPacketsByHashPrefix(ctx context.Context, lo, hi []
 }
 
 // ListPackets implements [api.Reader].
-func (cr *CachedReader) ListPackets(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error) {
-	return cr.inner.ListPackets(ctx, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
+func (cr *CachedReader) ListPackets(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, pageCursor *api.PacketCursor, limit int32) (api.PacketPage, error) {
+	return cr.inner.ListPackets(ctx, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, pageCursor, limit)
 }
 
 // ListPacketsAfterID implements [api.Reader].
@@ -355,8 +360,8 @@ func (cr *CachedReader) ListPacketsAfterID(ctx context.Context, afterObservation
 }
 
 // ListKnownRoutes implements [api.Reader].
-func (cr *CachedReader) ListKnownRoutes(ctx context.Context, iata string, hopCount int32, cursor time.Time, cursorID int64, limit int32) ([]api.KnownRoute, error) {
-	return cr.inner.ListKnownRoutes(ctx, iata, hopCount, cursor, cursorID, limit)
+func (cr *CachedReader) ListKnownRoutes(ctx context.Context, iatas []string, hopCount int32, cursor time.Time, cursorID int64, limit int32) ([]api.KnownRoute, error) {
+	return cr.inner.ListKnownRoutes(ctx, iatas, hopCount, cursor, cursorID, limit)
 }
 
 // SearchKnownRoutes implements [api.Reader].

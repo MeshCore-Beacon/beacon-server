@@ -1,0 +1,10 @@
+[
+ "Sort",
+ "  Aggregate partial=Simple {Hashed}",
+ "    Hash Join",
+ "      Seq Scan on nodes n",
+ "      Hash",
+ "        Aggregate partial=Simple {Hashed}",
+ "          Bitmap Heap Scan on node_iatas ni",
+ "            Bitmap Index Scan using idx_node_iatas_iata"
+]
