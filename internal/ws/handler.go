@@ -246,7 +246,8 @@ func handleClientMessage(ctx context.Context, client *hub.Client, reader api.Rea
 			"v": 1, "type": "subscribed", "id": msg.ID, "subscriptionId": subID,
 		})
 		if slog.Default().Enabled(context.Background(), slog.LevelDebug) {
-			slog.Debug(fmt.Sprintf("ws[%s]: subscribed %s → %s", connID, msg.ID, subID), "component", "ws")
+			// Debug lines log only server-made IDs; client-sent values stay out of the logs.
+			slog.Debug(fmt.Sprintf("ws[%s]: subscribed %s", connID, subID), "component", "ws")
 		}
 		err := conn.Write(ctx, websocket.MessageText, reply)
 		if err != nil {
@@ -262,7 +263,7 @@ func handleClientMessage(ctx context.Context, client *hub.Client, reader api.Rea
 			"v": 1, "type": "unsubscribed", "id": msg.ID, "subscriptionId": msg.SubscriptionID,
 		})
 		if slog.Default().Enabled(context.Background(), slog.LevelDebug) {
-			slog.Debug(fmt.Sprintf("ws[%s]: unsubscribed %s", connID, msg.SubscriptionID), "component", "ws")
+			slog.Debug(fmt.Sprintf("ws[%s]: unsubscribed", connID), "component", "ws")
 		}
 		if err := conn.Write(ctx, websocket.MessageText, reply); err != nil {
 			slog.Warn("failed to send unsubscribed reply", "component", "ws", "connection_id", connID, "error", err)
@@ -275,7 +276,7 @@ func handleClientMessage(ctx context.Context, client *hub.Client, reader api.Rea
 			"resolvePath": msg.ResolvePath, "includeObserverKey": msg.IncludeObserverKey, "includeRepeats": msg.IncludeRepeats,
 		})
 		if slog.Default().Enabled(context.Background(), slog.LevelDebug) {
-			slog.Debug(fmt.Sprintf("ws[%s]: configured resolvePath=%t includeObserverKey=%t includeRepeats=%t", connID, msg.ResolvePath, msg.IncludeObserverKey, msg.IncludeRepeats), "component", "ws")
+			slog.Debug(fmt.Sprintf("ws[%s]: configured", connID), "component", "ws")
 		}
 		if err := conn.Write(ctx, websocket.MessageText, reply); err != nil {
 			slog.Warn(fmt.Sprintf("ws[%s]: failed to send configured reply", connID), "component", "ws", "error", err)
