@@ -261,6 +261,7 @@ FROM (SELECT iata, origin_pubkey, count(*) AS n, max(heard_at) AS last_heard
       WHERE payload_type = 4 AND origin_pubkey IS NOT NULL
       GROUP BY iata, origin_pubkey) r
 LEFT JOIN nodes n ON n.public_key = r.origin_pubkey
+ORDER BY r.iata, r.origin_pubkey
 `
 
 func (q *Queries) RollAdvertHearings(ctx context.Context, hour pgtype.Timestamptz) error {
@@ -278,6 +279,7 @@ FROM (SELECT origin_pubkey, route_type, array_agg(DISTINCT iata ORDER BY iata) A
       WHERE payload_type = 4 AND origin_pubkey IS NOT NULL
       GROUP BY packet_hash, origin_pubkey, route_type) p
 GROUP BY origin_pubkey, iatas
+ORDER BY origin_pubkey, iatas
 `
 
 // Each distinct ADVERT packet counts once, under the exact set of IATAs that heard it this hour.
@@ -289,8 +291,11 @@ func (q *Queries) RollAdvertSets(ctx context.Context, hour pgtype.Timestamptz) e
 const rollIATAObservations = `-- name: RollIATAObservations :exec
 INSERT INTO analytics_hourly_iata_observations (hour, iata, observation_count)
 SELECT $1::timestamptz, iata, count(*) FROM rollup_obs GROUP BY iata
+ORDER BY iata
 `
 
+// Every Roll statement inserts in its table's primary-key order, so an hour's rows for one IATA share a few
+// adjacent heap pages; the per-(hour, IATA) stats probes then read those pages instead of one page per row.
 func (q *Queries) RollIATAObservations(ctx context.Context, hour pgtype.Timestamptz) error {
 	_, err := q.db.Exec(ctx, rollIATAObservations, hour)
 	return err
@@ -308,6 +313,7 @@ SELECT $1::timestamptz, observer_id, COALESCE(payload_type, -1)::smallint,
        count(rssi) FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0))
 FROM rollup_obs
 GROUP BY observer_id, COALESCE(payload_type, -1)
+ORDER BY observer_id, COALESCE(payload_type, -1)
 `
 
 func (q *Queries) RollObserverActivity(ctx context.Context, hour pgtype.Timestamptz) error {
@@ -320,6 +326,7 @@ INSERT INTO analytics_hourly_observer_identity (hour, iata, observer_id, observa
 SELECT $1::timestamptz, r.iata, r.observer_id, r.n, o.display_name, o.observer_type
 FROM (SELECT iata, observer_id, count(*) AS n FROM rollup_obs GROUP BY iata, observer_id) r
 LEFT JOIN observers o ON o.id = r.observer_id
+ORDER BY r.iata, r.observer_id
 `
 
 func (q *Queries) RollObserverIdentity(ctx context.Context, hour pgtype.Timestamptz) error {
@@ -332,6 +339,7 @@ INSERT INTO analytics_hourly_packet_sets (hour, iatas, packets)
 SELECT $1::timestamptz, iatas, count(*)
 FROM (SELECT array_agg(DISTINCT iata ORDER BY iata) AS iatas FROM rollup_obs GROUP BY packet_hash) p
 GROUP BY iatas
+ORDER BY iatas
 `
 
 func (q *Queries) RollPacketSets(ctx context.Context, hour pgtype.Timestamptz) error {
@@ -363,6 +371,7 @@ FROM (
   ) k
 ) c
 GROUP BY c.iata, c.category, c.hash_bytes, c.entries
+ORDER BY c.iata, c.category, c.hash_bytes, c.entries
 `
 
 // category: 0 = routed, 1 = zero-hop, 2 = TRACE, 3 = invalid (meshcore-go IsValidPathLen).
@@ -376,6 +385,7 @@ INSERT INTO analytics_hourly_payload_breakdown (hour, iata, payload_type, count)
 SELECT $1::timestamptz, iata, payload_type, count(*)
 FROM rollup_obs WHERE payload_type IS NOT NULL
 GROUP BY iata, payload_type
+ORDER BY iata, payload_type
 `
 
 func (q *Queries) RollPayloadBreakdown(ctx context.Context, hour pgtype.Timestamptz) error {
@@ -387,6 +397,7 @@ const rollScopeNodes = `-- name: RollScopeNodes :exec
 INSERT INTO analytics_hourly_scope_nodes (hour, iata, scope_id, origin_pubkey)
 SELECT DISTINCT $1::timestamptz, iata, scope_id, origin_pubkey
 FROM rollup_obs WHERE payload_type = 4 AND origin_pubkey IS NOT NULL AND scope_id IS NOT NULL
+ORDER BY scope_id, iata, origin_pubkey
 `
 
 func (q *Queries) RollScopeNodes(ctx context.Context, hour pgtype.Timestamptz) error {
@@ -398,6 +409,7 @@ const rollScopeObservers = `-- name: RollScopeObservers :exec
 INSERT INTO analytics_hourly_scope_observers (hour, iata, scope_id, observer_id)
 SELECT DISTINCT $1::timestamptz, iata, scope_id, observer_id
 FROM rollup_obs WHERE scope_id IS NOT NULL
+ORDER BY scope_id, iata, observer_id
 `
 
 func (q *Queries) RollScopeObservers(ctx context.Context, hour pgtype.Timestamptz) error {
@@ -412,6 +424,7 @@ FROM (SELECT scope_id, array_agg(DISTINCT iata ORDER BY iata) AS iatas
       FROM rollup_obs WHERE scope_id IS NOT NULL
       GROUP BY packet_hash, scope_id) p
 GROUP BY iatas, scope_id
+ORDER BY iatas, scope_id
 `
 
 func (q *Queries) RollScopeSets(ctx context.Context, hour pgtype.Timestamptz) error {
@@ -440,6 +453,7 @@ FROM (
     ) s
 ) b
 GROUP BY GROUPING SETS ((b.iata), (b.iata, b.snr_bin), (b.iata, b.rssi_bin))
+ORDER BY 2, 3, 4, 5
 `
 
 // kind = grouping(snr_bin, rssi_bin): 3 = per IATA totals, 1 = per SNR bin, 2 = per RSSI bin.
@@ -458,6 +472,7 @@ FROM (SELECT cm.sender_name, max(cm.sent_at) AS sent_at, array_agg(DISTINCT ro.i
       WHERE cm.sender_name IS NOT NULL
       GROUP BY cm.id, cm.sender_name) m
 GROUP BY sender_name, iatas
+ORDER BY sender_name, iatas
 `
 
 func (q *Queries) RollTalkerSets(ctx context.Context, hour pgtype.Timestamptz) error {

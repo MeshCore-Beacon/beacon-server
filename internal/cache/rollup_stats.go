@@ -53,6 +53,11 @@ func (m *revisionMemo) get(ctx context.Context, inner api.Reader) (rev int64, ok
 	return rev, true
 }
 
+// StatsRevision is the analytics revision the stats cache keys carry right now.
+func (cr *CachedReader) StatsRevision(ctx context.Context) (int64, bool) {
+	return cr.rev.get(ctx, cr.inner)
+}
+
 // rollupKey builds a stats key that changes with the rollup revision. [] and [""] stay
 // distinct (all IATAs vs an empty region).
 func (cr *CachedReader) rollupKey(ctx context.Context, prefix string, iatas []string, parts ...any) (string, bool) {

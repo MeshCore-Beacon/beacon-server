@@ -51,7 +51,7 @@ SELECT md5(i::text)::uuid,iata FROM (VALUES (1,'YVR'),(1,'YYJ'),(2,'YVR'),(3,'YY
 `, pgx.QueryExecModeSimpleProtocol, h); err != nil {
 		t.Fatal(err)
 	}
-	store := New(pool, 0, 0)
+	store := New(pool, pool, 0, 0)
 	r, ok, err := store.BeginRollup(ctx)
 	if err != nil || !ok {
 		t.Fatalf("BeginRollup: ok=%v err=%v", ok, err)

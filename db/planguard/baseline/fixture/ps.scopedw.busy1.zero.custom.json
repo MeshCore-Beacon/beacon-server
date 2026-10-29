@@ -1,0 +1,18 @@
+[
+ "Sort",
+ "  Limit [InitPlan]",
+ "    Sort",
+ "      Aggregate partial=Simple {Sorted}",
+ "        Sort",
+ "          Nested Loop",
+ "            Index Scan on transport_scopes using transport_scopes_name_key scan=Forward",
+ "            Nested Loop",
+ "              Function Scan",
+ "              Append",
+ "                Limit",
+ "                  Index Only Scan on packet_sites ps using idx_packet_sites_site_scope scan=Forward",
+ "                Limit",
+ "                  Sort",
+ "                    Result",
+ "  CTE Scan"
+]

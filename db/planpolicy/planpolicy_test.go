@@ -1,0 +1,123 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+package planpolicy_test
+
+import (
+	"reflect"
+	"testing"
+
+	"github.com/MeshCore-Beacon/beacon-server/db/planpolicy"
+	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
+)
+
+// Every VerificationOnly/Cached name is a statement in db/sqlc, so a stale entry fails CI; the two sets are disjoint.
+func TestPlanPolicyNamesExist(t *testing.T) {
+	q := reflect.TypeOf((*sqlc.Querier)(nil)).Elem()
+	for _, set := range []map[string]bool{planpolicy.VerificationOnly, planpolicy.Cached} {
+		for name := range set {
+			if _, ok := q.MethodByName(name); !ok {
+				t.Errorf("%s is not a sqlc statement", name)
+			}
+			if planpolicy.VerificationOnly[name] && planpolicy.Cached[name] {
+				t.Errorf("%s is both VerificationOnly and Cached", name)
+			}
+		}
+	}
+	// The rewritten stats, adverts and traces readers are C or G.
+	for _, name := range []string{"GetStatsSeries", "GetPathStats", "GetTopNodes", "GetStatsTopAdvertisers", "ListObserverAdverts", "ListTraceTags"} {
+		if c := planpolicy.ClassOf(name); c != planpolicy.ClassC && c != planpolicy.ClassG {
+			t.Errorf("%s is class %d, want C or G", name, c)
+		}
+	}
+	// Only the all-region top-nodes statement may use parallel workers; it is class C, so the router runs it on
+	// api_custom (api_legacy in the rollback layout).
+	if want := map[string]int{"GetTopNodesAll": 2}; !reflect.DeepEqual(planpolicy.ParallelWorkers, want) {
+		t.Errorf("ParallelWorkers = %v, want %v", planpolicy.ParallelWorkers, want)
+	}
+	for name := range planpolicy.ParallelWorkers {
+		if _, ok := q.MethodByName(name); !ok || planpolicy.ClassOf(name) != planpolicy.ClassC {
+			t.Errorf("%s: a sqlc statement %v, class %d; want a class C statement", name, ok, planpolicy.ClassOf(name))
+		}
+	}
+	if planpolicy.ClassOf("GetTopNodesProbe") != planpolicy.ClassC {
+		t.Error("GetTopNodesProbe must be class C")
+	}
+	if planpolicy.ClassOf("ListKnownRoutesGlobalHop") != planpolicy.ClassC || planpolicy.ClassOf("GetNodeByID") != planpolicy.ClassG ||
+		planpolicy.ClassOf("") != planpolicy.ClassC {
+		t.Fatal("ClassOf")
+	}
+}
+
+func TestParseLayout(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want planpolicy.Layout
+	}{
+		{"", planpolicy.CustomAll},
+		{"custom_all", planpolicy.CustomAll},
+		{"split", planpolicy.Split},
+		{"single", planpolicy.Single},
+	} {
+		got, err := planpolicy.ParseLayout(tc.in)
+		if err != nil || got != tc.want {
+			t.Errorf("ParseLayout(%q) = %q, %v; want %q", tc.in, got, err, tc.want)
+		}
+	}
+	for _, in := range []string{"Split", "x"} {
+		_, err := planpolicy.ParseLayout(in)
+		if err == nil || err.Error() != "database.api_plan_layout must be custom_all, split or single" {
+			t.Errorf("ParseLayout(%q) error = %v", in, err)
+		}
+	}
+}
+
+// The channel message statements: the four whose plan is stable under every layout are generic-safe; the scoped,
+// since and scope-only ones, and the all-channel ones for sites with a since or a scope, are planned with their values.
+func TestCmiPlanClasses(t *testing.T) {
+	for name, want := range map[string]planpolicy.Class{
+		"ListChannelMessagesByIATAs":          planpolicy.ClassG,
+		"ListChannelMessagesPlain":            planpolicy.ClassG,
+		"ListAllChannelMessagesByIATAs":       planpolicy.ClassG,
+		"ListAllChannelMessagesPlain":         planpolicy.ClassG,
+		"ListChannelMessagesByIATAsScoped":    planpolicy.ClassC,
+		"ListChannelMessagesPlainScoped":      planpolicy.ClassC,
+		"ListChannelMessagesSinceWalk":        planpolicy.ClassC,
+		"ListAllChannelMessagesPlainScoped":   planpolicy.ClassC,
+		"ListAllChannelMessagesSince":         planpolicy.ClassC,
+		"ListAllChannelMessagesByIATAsSince":  planpolicy.ClassC,
+		"ListAllChannelMessagesByIATAsScoped": planpolicy.ClassC,
+		"GetTransportScopeByName":             planpolicy.ClassC,
+	} {
+		if got := planpolicy.ClassOf(name); got != want {
+			t.Errorf("ClassOf(%s) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+func TestPacketSitesPlanClasses(t *testing.T) {
+	for name, want := range map[string]planpolicy.Class{
+		"ListPacketsBySite":              planpolicy.ClassG,
+		"ListPacketsBySites":             planpolicy.ClassG,
+		"ListPacketsBySitesFirst":        planpolicy.ClassG,
+		"ListPacketsBySitesTyped":        planpolicy.ClassG,
+		"ListPacketsBySitesTypedFirst":   planpolicy.ClassG,
+		"ListPacketsBySitesSince":        planpolicy.ClassC,
+		"ListPacketsBySitesWindow":       planpolicy.ClassC,
+		"ListPacketsBySitesScopedWindow": planpolicy.ClassC,
+		"ListPacketsBySiteKeys":          planpolicy.ClassC,
+		"FilterKnownSites":               planpolicy.ClassC,
+	} {
+		if got := planpolicy.ClassOf(name); got != want {
+			t.Errorf("ClassOf(%s) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+// The original message and region statements are verification-only, and nothing else is.
+func TestVerificationOnly(t *testing.T) {
+	want := map[string]bool{"ListChannelMessages": true, "ListAllChannelMessages": true, "ListPacketsByIATAs": true}
+	if !reflect.DeepEqual(planpolicy.VerificationOnly, want) {
+		t.Errorf("VerificationOnly = %v, want %v", planpolicy.VerificationOnly, want)
+	}
+}

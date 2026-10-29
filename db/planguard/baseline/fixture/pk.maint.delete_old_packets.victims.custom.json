@@ -1,0 +1,4 @@
+[
+ "Limit",
+ "  Index Only Scan on packets vp using idx_packets_last_heard_hash scan=Backward"
+]

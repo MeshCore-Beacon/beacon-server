@@ -1,0 +1,4 @@
+[
+ "ModifyTable on channels",
+ "  Index Scan on channels using channels_pkey scan=Forward"
+]

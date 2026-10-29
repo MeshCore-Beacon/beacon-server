@@ -1,0 +1,14 @@
+[
+ "Limit",
+ "  Sort",
+ "    Result",
+ "      Append",
+ "        Subquery Scan",
+ "          Limit [Subquery]",
+ "            Sort",
+ "              Result",
+ "        Subquery Scan",
+ "          Limit [Subquery]",
+ "            Sort",
+ "              Index Scan on known_routes kk using idx_known_routes_hop_iata scan=Forward"
+]

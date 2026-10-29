@@ -197,3 +197,54 @@ func TestConfigureIncludeRepeats(t *testing.T) {
 		t.Fatalf("client still received a repeat after opting out: %s", got)
 	}
 }
+
+func TestCompressionNegotiated(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		allowed []string
+		mode    websocket.CompressionMode
+		wantExt string
+	}{
+		{"context takeover", nil, websocket.CompressionContextTakeover, "permessage-deflate"},
+		{"context takeover with origins configured", []string{"https://example.com"}, websocket.CompressionContextTakeover, "permessage-deflate"},
+		{"client asks for no context takeover", nil, websocket.CompressionNoContextTakeover, "permessage-deflate; client_no_context_takeover; server_no_context_takeover"},
+		{"client without compression", nil, websocket.CompressionDisabled, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := hub.New()
+			go h.Run()
+			server := httptest.NewServer(Handler(h, nil, 5, 100, tc.allowed))
+			t.Cleanup(server.Close)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			conn, resp, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), &websocket.DialOptions{CompressionMode: tc.mode})
+			if err != nil {
+				t.Fatalf("dial: %v", err)
+			}
+			t.Cleanup(func() { conn.CloseNow() })
+			if got := resp.Header.Get("Sec-WebSocket-Extensions"); got != tc.wantExt {
+				t.Fatalf("Sec-WebSocket-Extensions = %q, want %q", got, tc.wantExt)
+			}
+			if _, data, err := conn.Read(ctx); err != nil || !strings.Contains(string(data), `"hello"`) {
+				t.Fatalf("hello: %q, %v", data, err)
+			}
+			if err := conn.Write(ctx, websocket.MessageText, []byte(`{"v":1,"type":"subscribe","id":"s","scope":{}}`)); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := conn.Read(ctx); err != nil { // subscribed
+				t.Fatal(err)
+			}
+			time.Sleep(20 * time.Millisecond) // let the hub apply the subscription
+			payload := `{"packetHash":"` + strings.Repeat("ab", 400) + `"}`
+			h.Broadcast(hub.Event{Type: hub.EventPacketObservation, Payload: json.RawMessage(payload)})
+			_, data, err := conn.Read(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var msg map[string]json.RawMessage
+			if err := json.Unmarshal(data, &msg); err != nil || string(msg["data"]) != payload {
+				t.Fatalf("event data = %s, %v", msg["data"], err)
+			}
+		})
+	}
+}

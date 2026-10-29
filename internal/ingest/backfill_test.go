@@ -106,7 +106,7 @@ func TestDecryptGroupText_MalformedPayload(t *testing.T) {
 	}
 }
 
-func TestBackfillChannelMessages_DecryptsAndCounts(t *testing.T) {
+func TestDecryptBackfill_DecryptsAndCounts(t *testing.T) {
 	psk := make([]byte, 16)
 	channelHash := byte(0x44)
 	decryptable := encryptedGroupText(t, channelHash, psk, "ded", "hi")
@@ -123,7 +123,7 @@ func TestBackfillChannelMessages_DecryptsAndCounts(t *testing.T) {
 		channelHash: {{Key: psk, Fingerprint: []byte{0xAA}, Name: "Public"}},
 	}}
 
-	n, err := BackfillChannelMessages(context.Background(), db, keys)
+	n, err := NewDecryptBackfill(db, keys, nil).run(context.Background(), true, nil), error(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestBackfillChannelMessages_DecryptsAndCounts(t *testing.T) {
 	}
 }
 
-func TestBackfillChannelHashes_OnlyScansNewHashes(t *testing.T) {
+func TestDecryptBackfill_OnlyScansNewHashes(t *testing.T) {
 	psk := make([]byte, 16)
 	db := &stubDB{
 		insertChannelMessageResult: true,
@@ -143,7 +143,7 @@ func TestBackfillChannelHashes_OnlyScansNewHashes(t *testing.T) {
 		undecryptedPackets:         []UndecryptedPacket{{PacketHash: []byte{0x02}, RawPayload: encryptedGroupText(t, 0x44, psk, "x", "y")}},
 	}
 	keys := &mapKeys{entries: map[byte][]keystore.Entry{0x44: {{Key: psk, Fingerprint: []byte{0xAA}}}}}
-	n, err := BackfillChannelHashes(context.Background(), db, keys, [][]byte{{0x44}})
+	n, err := NewDecryptBackfill(db, keys, nil).run(context.Background(), false, [][]byte{{0x44}}), error(nil)
 	if err != nil || n != 1 {
 		t.Fatalf("n=%d err=%v", n, err)
 	}
@@ -152,10 +152,10 @@ func TestBackfillChannelHashes_OnlyScansNewHashes(t *testing.T) {
 	}
 }
 
-func TestBackfillChannelMessages_NoUndecryptedPackets(t *testing.T) {
+func TestDecryptBackfill_NoUndecryptedPackets(t *testing.T) {
 	db := &stubDB{}
 	keys := &mapKeys{}
-	n, err := BackfillChannelMessages(context.Background(), db, keys)
+	n, err := NewDecryptBackfill(db, keys, nil).run(context.Background(), true, nil), error(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestBackfillMarksMessagesHistorical(t *testing.T) {
 		undecryptedPackets:         []UndecryptedPacket{{PacketHash: []byte{0x01}, RawPayload: encryptedGroupText(t, 0x44, psk, "ded", "hi")}},
 	}
 	keys := &mapKeys{entries: map[byte][]keystore.Entry{0x44: {{Key: psk, Fingerprint: []byte{0xAA}}}}}
-	if n, err := BackfillChannelMessages(context.Background(), db, keys); err != nil || n != 1 {
+	if n, err := NewDecryptBackfill(db, keys, nil).run(context.Background(), true, nil), error(nil); err != nil || n != 1 {
 		t.Fatalf("n=%d err=%v", n, err)
 	}
 	if len(db.channelMessages) != 1 || !db.channelMessages[0].Historical {
