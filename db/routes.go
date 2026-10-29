@@ -39,20 +39,48 @@ func (s *Store) UpsertKnownRoute(ctx context.Context, nodeIDs []uuid.UUID, hashP
 	})
 }
 
-func (s *Store) ListKnownRoutes(ctx context.Context, iata string, hopCount int32, cursor time.Time, cursorID int64, limit int32) ([]api.KnownRoute, error) {
-	// No character(3) code ends in a blank, but bpchar comparison ignores trailing blanks.
-	if iata != strings.TrimRight(iata, " ") {
-		return []api.KnownRoute{}, nil
-	}
-	rows, err := s.listKnownRouteRows(ctx, iata, hopCount, cursor, cursorID, limit)
+// ListKnownRoutes pages the routes of iatas, or of every IATA when iatas is empty.
+func (s *Store) ListKnownRoutes(ctx context.Context, iatas []string, hopCount int32, cursor time.Time, cursorID int64, limit int32) ([]api.KnownRoute, error) {
+	rows, err := s.listIATAsRouteRows(ctx, iatas, hopCount, cursor, cursorID, limit)
 	if err != nil {
 		return nil, err
+	}
+	if len(rows) == 0 {
+		return []api.KnownRoute{}, nil
 	}
 	nodes, err := s.GetNodesByIDs(ctx, collectNodeIDs(rows))
 	if err != nil {
 		return nil, err
 	}
 	return toKnownRoutes(rows, nodes), nil
+}
+
+// listIATAsRouteRows runs the one-IATA statements for a single code and the merged pair for several.
+func (s *Store) listIATAsRouteRows(ctx context.Context, iatas []string, hopCount int32, cursor time.Time, cursorID int64, limit int32) ([]knownRouteRow, error) {
+	if len(iatas) == 0 {
+		return s.listKnownRouteRows(ctx, "", hopCount, cursor, cursorID, limit)
+	}
+	// No character(3) code is empty or ends in a blank, but bpchar comparison ignores trailing blanks.
+	codes := make([]string, 0, len(iatas))
+	for _, c := range iatas {
+		if c != "" && c == strings.TrimRight(c, " ") && !slices.Contains(codes, c) {
+			codes = append(codes, c)
+		}
+	}
+	switch len(codes) {
+	case 0:
+		return []knownRouteRow{}, nil
+	case 1:
+		return s.listKnownRouteRows(ctx, codes[0], hopCount, cursor, cursorID, limit)
+	}
+	var cursorTS pgtype.Timestamptz
+	if !cursor.IsZero() {
+		cursorTS = pgtype.Timestamptz{Time: cursor, Valid: true}
+	}
+	if hopCount == 0 {
+		return routeRows(s.q.ListKnownRoutesByIATAs(ctx, sqlc.ListKnownRoutesByIATAsParams{Iatas: codes, CursorTs: cursorTS, CursorID: cursorID, PageLimit: limit}))
+	}
+	return routeRows(s.q.ListKnownRoutesByIATAsHop(ctx, sqlc.ListKnownRoutesByIATAsHopParams{Iatas: codes, HopCount: hopCount, CursorTs: cursorTS, CursorID: cursorID, PageLimit: limit}))
 }
 
 // listKnownRouteRows runs the statement for the filter shape. The hop pair is class C, so the
@@ -70,7 +98,8 @@ func (s *Store) listKnownRouteRows(ctx context.Context, iata string, hopCount in
 	case iata == "" && hopCount == 0:
 		return routeRows(s.q.ListKnownRoutesGlobal(ctx, sqlc.ListKnownRoutesGlobalParams{CursorTs: cursorTS, CursorID: cursorID, PageLimit: limit}))
 	case iata == "":
-		return routeRows(s.q.ListKnownRoutesGlobalHop(ctx, sqlc.ListKnownRoutesGlobalHopParams{HopCount: hopCount, CursorTs: cursorTS, CursorID: cursorID, PageLimit: limit}))
+		return routeRows(s.q.ListKnownRoutesGlobalHop(ctx, sqlc.ListKnownRoutesGlobalHopParams{HopCount: hopCount, CursorTs: cursorTS, CursorID: cursorID,
+			ReadGroup: s.hopGroupSmall(ctx, hopCount, limit), PageLimit: limit}))
 	case hopCount == 0:
 		return routeRows(s.q.ListKnownRoutesByIATA(ctx, sqlc.ListKnownRoutesByIATAParams{Iata: iata, CursorTs: cursorTS, CursorID: cursorID, PageLimit: limit}))
 	default:
@@ -78,8 +107,9 @@ func (s *Store) listKnownRouteRows(ctx context.Context, iata string, hopCount in
 	}
 }
 
-// routeRows converts any /routes statement's rows; all four share knownRouteRow's fields.
-func routeRows[T sqlc.ListKnownRoutesGlobalRow | sqlc.ListKnownRoutesGlobalHopRow | sqlc.ListKnownRoutesByIATARow | sqlc.ListKnownRoutesByIATAHopRow](in []T, err error) ([]knownRouteRow, error) {
+// routeRows converts any /routes statement's rows; all of them share knownRouteRow's fields.
+func routeRows[T sqlc.ListKnownRoutesGlobalRow | sqlc.ListKnownRoutesGlobalHopRow | sqlc.ListKnownRoutesByIATARow | sqlc.ListKnownRoutesByIATAHopRow |
+	sqlc.ListKnownRoutesByIATAsRow | sqlc.ListKnownRoutesByIATAsHopRow](in []T, err error) ([]knownRouteRow, error) {
 	if err != nil {
 		return nil, err
 	}

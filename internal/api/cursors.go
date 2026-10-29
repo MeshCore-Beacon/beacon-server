@@ -4,6 +4,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -66,6 +67,69 @@ func ParseNodeCursor(raw string) (*NodeCursor, error) {
 		return nil, err
 	}
 	return &NodeCursor{LastSeen: at, ID: id}, nil
+}
+
+// maxNodeSortCursorLen bounds a NodeSortCursor, which carries a node name.
+const maxNodeSortCursorLen = 512
+
+// NodeSortCursor is a boundary in a NodeSort order: the last row's sort keys.
+type NodeSortCursor struct {
+	Sort NodeSort
+	Null int32  // 1 for an unnamed node in name order
+	Text string // the name, in name order
+	Num  int64  // the type or neighbour count, negated when descending
+	Seen int64  // last_seen in negated unix micros
+	ID   uuid.UUID
+}
+
+func (c NodeSortCursor) String() string {
+	order := "a"
+	if c.Sort.Descending {
+		order = "d"
+	}
+	return fmt.Sprintf("s1:%s:%s:%d:%d:%d:%s:%s", c.Sort.By, order, c.Null, c.Num, c.Seen, c.ID,
+		base64.RawURLEncoding.EncodeToString([]byte(c.Text)))
+}
+
+// ParseNodeSortCursor parses the opaque cursor a sorted NodePage returns.
+func ParseNodeSortCursor(raw string) (*NodeSortCursor, error) {
+	if len(raw) > maxNodeSortCursorLen {
+		return nil, errPageCursor
+	}
+	parts := strings.Split(raw, ":")
+	if len(parts) != 8 || parts[0] != "s1" || !ValidNodeSort(parts[1]) || (parts[2] != "a" && parts[2] != "d") {
+		return nil, errPageCursor
+	}
+	if parts[3] != "0" && parts[3] != "1" {
+		return nil, errPageCursor
+	}
+	var null int32
+	if parts[3] == "1" {
+		null = 1
+	}
+	var nums [2]int64
+	for i, part := range parts[4:6] {
+		n, err := strconv.ParseInt(part, 10, 64)
+		if err != nil || strconv.FormatInt(n, 10) != part {
+			return nil, errPageCursor
+		}
+		nums[i] = n
+	}
+	if len(parts[6]) != 36 {
+		return nil, errPageCursor
+	}
+	id, err := uuid.Parse(parts[6])
+	if err != nil {
+		return nil, errPageCursor
+	}
+	text, err := base64.RawURLEncoding.Strict().DecodeString(parts[7])
+	if err != nil {
+		return nil, errPageCursor
+	}
+	return &NodeSortCursor{
+		Sort: NodeSort{By: parts[1], Descending: parts[2] == "d"},
+		Null: null, Num: nums[0], Seen: nums[1], ID: id, Text: string(text),
+	}, nil
 }
 
 // ObserverCursor is a boundary in (last_seen DESC, id DESC) order.

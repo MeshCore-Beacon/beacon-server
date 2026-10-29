@@ -175,6 +175,21 @@ func (mr *MockQuerierMockRecorder) ClearRepeaters(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ClearRepeaters", reflect.TypeOf((*MockQuerier)(nil).ClearRepeaters), ctx)
 }
 
+// CountChannelMessagesSentSince mocks base method.
+func (m *MockQuerier) CountChannelMessagesSentSince(ctx context.Context, arg db.CountChannelMessagesSentSinceParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CountChannelMessagesSentSince", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CountChannelMessagesSentSince indicates an expected call of CountChannelMessagesSentSince.
+func (mr *MockQuerierMockRecorder) CountChannelMessagesSentSince(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountChannelMessagesSentSince", reflect.TypeOf((*MockQuerier)(nil).CountChannelMessagesSentSince), ctx, arg)
+}
+
 // CreateAccount mocks base method.
 func (m *MockQuerier) CreateAccount(ctx context.Context, name string) (db.Account, error) {
 	m.ctrl.T.Helper()
@@ -715,6 +730,21 @@ func (mr *MockQuerierMockRecorder) GetKnownRoutesByNodes(ctx, arg any) *gomock.C
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetKnownRoutesByNodes", reflect.TypeOf((*MockQuerier)(nil).GetKnownRoutesByNodes), ctx, arg)
 }
 
+// GetKnownRoutesHopStats mocks base method.
+func (m *MockQuerier) GetKnownRoutesHopStats(ctx context.Context) (db.GetKnownRoutesHopStatsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetKnownRoutesHopStats", ctx)
+	ret0, _ := ret[0].(db.GetKnownRoutesHopStatsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetKnownRoutesHopStats indicates an expected call of GetKnownRoutesHopStats.
+func (mr *MockQuerierMockRecorder) GetKnownRoutesHopStats(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetKnownRoutesHopStats", reflect.TypeOf((*MockQuerier)(nil).GetKnownRoutesHopStats), ctx)
+}
+
 // GetLatestCompleteRollupHour mocks base method.
 func (m *MockQuerier) GetLatestCompleteRollupHour(ctx context.Context) (pgtype.Timestamptz, error) {
 	m.ctrl.T.Helper()
@@ -893,21 +923,6 @@ func (m *MockQuerier) GetObserverActivityRaw(ctx context.Context, arg db.GetObse
 func (mr *MockQuerierMockRecorder) GetObserverActivityRaw(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetObserverActivityRaw", reflect.TypeOf((*MockQuerier)(nil).GetObserverActivityRaw), ctx, arg)
-}
-
-// GetObserverActivityRawPayloadTypes mocks base method.
-func (m *MockQuerier) GetObserverActivityRawPayloadTypes(ctx context.Context, arg db.GetObserverActivityRawPayloadTypesParams) ([]db.GetObserverActivityRawPayloadTypesRow, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetObserverActivityRawPayloadTypes", ctx, arg)
-	ret0, _ := ret[0].([]db.GetObserverActivityRawPayloadTypesRow)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// GetObserverActivityRawPayloadTypes indicates an expected call of GetObserverActivityRawPayloadTypes.
-func (mr *MockQuerierMockRecorder) GetObserverActivityRawPayloadTypes(ctx, arg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetObserverActivityRawPayloadTypes", reflect.TypeOf((*MockQuerier)(nil).GetObserverActivityRawPayloadTypes), ctx, arg)
 }
 
 // GetObserverBrokers mocks base method.
@@ -1118,6 +1133,21 @@ func (m *MockQuerier) GetRadioPresets(ctx context.Context, arg db.GetRadioPreset
 func (mr *MockQuerierMockRecorder) GetRadioPresets(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRadioPresets", reflect.TypeOf((*MockQuerier)(nil).GetRadioPresets), ctx, arg)
+}
+
+// GetRawDeletedBefore mocks base method.
+func (m *MockQuerier) GetRawDeletedBefore(ctx context.Context) (pgtype.Timestamptz, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetRawDeletedBefore", ctx)
+	ret0, _ := ret[0].(pgtype.Timestamptz)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetRawDeletedBefore indicates an expected call of GetRawDeletedBefore.
+func (mr *MockQuerierMockRecorder) GetRawDeletedBefore(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRawDeletedBefore", reflect.TypeOf((*MockQuerier)(nil).GetRawDeletedBefore), ctx)
 }
 
 // GetRegion mocks base method.
@@ -1420,6 +1450,21 @@ func (mr *MockQuerierMockRecorder) GetTopNodes(ctx, arg any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTopNodes", reflect.TypeOf((*MockQuerier)(nil).GetTopNodes), ctx, arg)
 }
 
+// GetTopNodesAll mocks base method.
+func (m *MockQuerier) GetTopNodesAll(ctx context.Context, arg db.GetTopNodesAllParams) ([]db.GetTopNodesAllRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetTopNodesAll", ctx, arg)
+	ret0, _ := ret[0].([]db.GetTopNodesAllRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetTopNodesAll indicates an expected call of GetTopNodesAll.
+func (mr *MockQuerierMockRecorder) GetTopNodesAll(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTopNodesAll", reflect.TypeOf((*MockQuerier)(nil).GetTopNodesAll), ctx, arg)
+}
+
 // GetTopNodesProbe mocks base method.
 func (m *MockQuerier) GetTopNodesProbe(ctx context.Context, arg db.GetTopNodesProbeParams) ([]db.GetTopNodesProbeRow, error) {
 	m.ctrl.T.Helper()
@@ -1614,6 +1659,51 @@ func (mr *MockQuerierMockRecorder) ListAllChannelMessagesByIATAs(ctx, arg any) *
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListAllChannelMessagesByIATAs", reflect.TypeOf((*MockQuerier)(nil).ListAllChannelMessagesByIATAs), ctx, arg)
 }
 
+// ListAllChannelMessagesByIATAsScoped mocks base method.
+func (m *MockQuerier) ListAllChannelMessagesByIATAsScoped(ctx context.Context, arg db.ListAllChannelMessagesByIATAsScopedParams) ([]db.ListAllChannelMessagesByIATAsScopedRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListAllChannelMessagesByIATAsScoped", ctx, arg)
+	ret0, _ := ret[0].([]db.ListAllChannelMessagesByIATAsScopedRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListAllChannelMessagesByIATAsScoped indicates an expected call of ListAllChannelMessagesByIATAsScoped.
+func (mr *MockQuerierMockRecorder) ListAllChannelMessagesByIATAsScoped(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListAllChannelMessagesByIATAsScoped", reflect.TypeOf((*MockQuerier)(nil).ListAllChannelMessagesByIATAsScoped), ctx, arg)
+}
+
+// ListAllChannelMessagesByIATAsSince mocks base method.
+func (m *MockQuerier) ListAllChannelMessagesByIATAsSince(ctx context.Context, arg db.ListAllChannelMessagesByIATAsSinceParams) ([]db.ListAllChannelMessagesByIATAsSinceRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListAllChannelMessagesByIATAsSince", ctx, arg)
+	ret0, _ := ret[0].([]db.ListAllChannelMessagesByIATAsSinceRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListAllChannelMessagesByIATAsSince indicates an expected call of ListAllChannelMessagesByIATAsSince.
+func (mr *MockQuerierMockRecorder) ListAllChannelMessagesByIATAsSince(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListAllChannelMessagesByIATAsSince", reflect.TypeOf((*MockQuerier)(nil).ListAllChannelMessagesByIATAsSince), ctx, arg)
+}
+
+// ListAllChannelMessagesByIATAsSinceWalk mocks base method.
+func (m *MockQuerier) ListAllChannelMessagesByIATAsSinceWalk(ctx context.Context, arg db.ListAllChannelMessagesByIATAsSinceWalkParams) ([]db.ListAllChannelMessagesByIATAsSinceWalkRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListAllChannelMessagesByIATAsSinceWalk", ctx, arg)
+	ret0, _ := ret[0].([]db.ListAllChannelMessagesByIATAsSinceWalkRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListAllChannelMessagesByIATAsSinceWalk indicates an expected call of ListAllChannelMessagesByIATAsSinceWalk.
+func (mr *MockQuerierMockRecorder) ListAllChannelMessagesByIATAsSinceWalk(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListAllChannelMessagesByIATAsSinceWalk", reflect.TypeOf((*MockQuerier)(nil).ListAllChannelMessagesByIATAsSinceWalk), ctx, arg)
+}
+
 // ListAllChannelMessagesPlain mocks base method.
 func (m *MockQuerier) ListAllChannelMessagesPlain(ctx context.Context, arg db.ListAllChannelMessagesPlainParams) ([]db.ListAllChannelMessagesPlainRow, error) {
 	m.ctrl.T.Helper()
@@ -1672,21 +1762,6 @@ func (m *MockQuerier) ListChannelCatalogues(ctx context.Context) ([]db.Meshmappe
 func (mr *MockQuerierMockRecorder) ListChannelCatalogues(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChannelCatalogues", reflect.TypeOf((*MockQuerier)(nil).ListChannelCatalogues), ctx)
-}
-
-// ListChannelHistoryPage mocks base method.
-func (m *MockQuerier) ListChannelHistoryPage(ctx context.Context, arg db.ListChannelHistoryPageParams) ([]db.ListChannelHistoryPageRow, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListChannelHistoryPage", ctx, arg)
-	ret0, _ := ret[0].([]db.ListChannelHistoryPageRow)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// ListChannelHistoryPage indicates an expected call of ListChannelHistoryPage.
-func (mr *MockQuerierMockRecorder) ListChannelHistoryPage(ctx, arg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListChannelHistoryPage", reflect.TypeOf((*MockQuerier)(nil).ListChannelHistoryPage), ctx, arg)
 }
 
 // ListChannelIDs mocks base method.
@@ -1944,6 +2019,36 @@ func (mr *MockQuerierMockRecorder) ListKnownRoutesByIATAHop(ctx, arg any) *gomoc
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListKnownRoutesByIATAHop", reflect.TypeOf((*MockQuerier)(nil).ListKnownRoutesByIATAHop), ctx, arg)
 }
 
+// ListKnownRoutesByIATAs mocks base method.
+func (m *MockQuerier) ListKnownRoutesByIATAs(ctx context.Context, arg db.ListKnownRoutesByIATAsParams) ([]db.ListKnownRoutesByIATAsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListKnownRoutesByIATAs", ctx, arg)
+	ret0, _ := ret[0].([]db.ListKnownRoutesByIATAsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListKnownRoutesByIATAs indicates an expected call of ListKnownRoutesByIATAs.
+func (mr *MockQuerierMockRecorder) ListKnownRoutesByIATAs(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListKnownRoutesByIATAs", reflect.TypeOf((*MockQuerier)(nil).ListKnownRoutesByIATAs), ctx, arg)
+}
+
+// ListKnownRoutesByIATAsHop mocks base method.
+func (m *MockQuerier) ListKnownRoutesByIATAsHop(ctx context.Context, arg db.ListKnownRoutesByIATAsHopParams) ([]db.ListKnownRoutesByIATAsHopRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListKnownRoutesByIATAsHop", ctx, arg)
+	ret0, _ := ret[0].([]db.ListKnownRoutesByIATAsHopRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListKnownRoutesByIATAsHop indicates an expected call of ListKnownRoutesByIATAsHop.
+func (mr *MockQuerierMockRecorder) ListKnownRoutesByIATAsHop(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListKnownRoutesByIATAsHop", reflect.TypeOf((*MockQuerier)(nil).ListKnownRoutesByIATAsHop), ctx, arg)
+}
+
 // ListKnownRoutesGlobal mocks base method.
 func (m *MockQuerier) ListKnownRoutesGlobal(ctx context.Context, arg db.ListKnownRoutesGlobalParams) ([]db.ListKnownRoutesGlobalRow, error) {
 	m.ctrl.T.Helper()
@@ -2032,6 +2137,21 @@ func (m *MockQuerier) ListNodes(ctx context.Context, arg db.ListNodesParams) ([]
 func (mr *MockQuerierMockRecorder) ListNodes(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListNodes", reflect.TypeOf((*MockQuerier)(nil).ListNodes), ctx, arg)
+}
+
+// ListNodesSorted mocks base method.
+func (m *MockQuerier) ListNodesSorted(ctx context.Context, arg db.ListNodesSortedParams) ([]db.ListNodesSortedRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListNodesSorted", ctx, arg)
+	ret0, _ := ret[0].([]db.ListNodesSortedRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListNodesSorted indicates an expected call of ListNodesSorted.
+func (mr *MockQuerierMockRecorder) ListNodesSorted(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListNodesSorted", reflect.TypeOf((*MockQuerier)(nil).ListNodesSorted), ctx, arg)
 }
 
 // ListObservationsForPacket mocks base method.
@@ -2139,21 +2259,6 @@ func (mr *MockQuerierMockRecorder) ListPacketsByIATAs(ctx, arg any) *gomock.Call
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPacketsByIATAs", reflect.TypeOf((*MockQuerier)(nil).ListPacketsByIATAs), ctx, arg)
 }
 
-// ListPacketsByIATAsAfter mocks base method.
-func (m *MockQuerier) ListPacketsByIATAsAfter(ctx context.Context, arg db.ListPacketsByIATAsAfterParams) ([]db.ListPacketsByIATAsAfterRow, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListPacketsByIATAsAfter", ctx, arg)
-	ret0, _ := ret[0].([]db.ListPacketsByIATAsAfterRow)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// ListPacketsByIATAsAfter indicates an expected call of ListPacketsByIATAsAfter.
-func (mr *MockQuerierMockRecorder) ListPacketsByIATAsAfter(ctx, arg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPacketsByIATAsAfter", reflect.TypeOf((*MockQuerier)(nil).ListPacketsByIATAsAfter), ctx, arg)
-}
-
 // ListPacketsByScopes mocks base method.
 func (m *MockQuerier) ListPacketsByScopes(ctx context.Context, arg db.ListPacketsByScopesParams) ([]db.ListPacketsByScopesRow, error) {
 	m.ctrl.T.Helper()
@@ -2244,19 +2349,34 @@ func (mr *MockQuerierMockRecorder) ListPacketsBySitesFirst(ctx, arg any) *gomock
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPacketsBySitesFirst", reflect.TypeOf((*MockQuerier)(nil).ListPacketsBySitesFirst), ctx, arg)
 }
 
-// ListPacketsBySitesScoped mocks base method.
-func (m *MockQuerier) ListPacketsBySitesScoped(ctx context.Context, arg db.ListPacketsBySitesScopedParams) ([]db.ListPacketsBySitesScopedRow, error) {
+// ListPacketsBySitesScopedTypedWindow mocks base method.
+func (m *MockQuerier) ListPacketsBySitesScopedTypedWindow(ctx context.Context, arg db.ListPacketsBySitesScopedTypedWindowParams) ([]db.ListPacketsBySitesScopedTypedWindowRow, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListPacketsBySitesScoped", ctx, arg)
-	ret0, _ := ret[0].([]db.ListPacketsBySitesScopedRow)
+	ret := m.ctrl.Call(m, "ListPacketsBySitesScopedTypedWindow", ctx, arg)
+	ret0, _ := ret[0].([]db.ListPacketsBySitesScopedTypedWindowRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// ListPacketsBySitesScoped indicates an expected call of ListPacketsBySitesScoped.
-func (mr *MockQuerierMockRecorder) ListPacketsBySitesScoped(ctx, arg any) *gomock.Call {
+// ListPacketsBySitesScopedTypedWindow indicates an expected call of ListPacketsBySitesScopedTypedWindow.
+func (mr *MockQuerierMockRecorder) ListPacketsBySitesScopedTypedWindow(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPacketsBySitesScoped", reflect.TypeOf((*MockQuerier)(nil).ListPacketsBySitesScoped), ctx, arg)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPacketsBySitesScopedTypedWindow", reflect.TypeOf((*MockQuerier)(nil).ListPacketsBySitesScopedTypedWindow), ctx, arg)
+}
+
+// ListPacketsBySitesScopedWindow mocks base method.
+func (m *MockQuerier) ListPacketsBySitesScopedWindow(ctx context.Context, arg db.ListPacketsBySitesScopedWindowParams) ([]db.ListPacketsBySitesScopedWindowRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListPacketsBySitesScopedWindow", ctx, arg)
+	ret0, _ := ret[0].([]db.ListPacketsBySitesScopedWindowRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListPacketsBySitesScopedWindow indicates an expected call of ListPacketsBySitesScopedWindow.
+func (mr *MockQuerierMockRecorder) ListPacketsBySitesScopedWindow(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPacketsBySitesScopedWindow", reflect.TypeOf((*MockQuerier)(nil).ListPacketsBySitesScopedWindow), ctx, arg)
 }
 
 // ListPacketsBySitesSince mocks base method.
@@ -2302,6 +2422,36 @@ func (m *MockQuerier) ListPacketsBySitesTypedFirst(ctx context.Context, arg db.L
 func (mr *MockQuerierMockRecorder) ListPacketsBySitesTypedFirst(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPacketsBySitesTypedFirst", reflect.TypeOf((*MockQuerier)(nil).ListPacketsBySitesTypedFirst), ctx, arg)
+}
+
+// ListPacketsBySitesTypedWindow mocks base method.
+func (m *MockQuerier) ListPacketsBySitesTypedWindow(ctx context.Context, arg db.ListPacketsBySitesTypedWindowParams) ([]db.ListPacketsBySitesTypedWindowRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListPacketsBySitesTypedWindow", ctx, arg)
+	ret0, _ := ret[0].([]db.ListPacketsBySitesTypedWindowRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListPacketsBySitesTypedWindow indicates an expected call of ListPacketsBySitesTypedWindow.
+func (mr *MockQuerierMockRecorder) ListPacketsBySitesTypedWindow(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPacketsBySitesTypedWindow", reflect.TypeOf((*MockQuerier)(nil).ListPacketsBySitesTypedWindow), ctx, arg)
+}
+
+// ListPacketsBySitesWindow mocks base method.
+func (m *MockQuerier) ListPacketsBySitesWindow(ctx context.Context, arg db.ListPacketsBySitesWindowParams) ([]db.ListPacketsBySitesWindowRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListPacketsBySitesWindow", ctx, arg)
+	ret0, _ := ret[0].([]db.ListPacketsBySitesWindowRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListPacketsBySitesWindow indicates an expected call of ListPacketsBySitesWindow.
+func (mr *MockQuerierMockRecorder) ListPacketsBySitesWindow(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPacketsBySitesWindow", reflect.TypeOf((*MockQuerier)(nil).ListPacketsBySitesWindow), ctx, arg)
 }
 
 // ListPacketsByTypes mocks base method.
@@ -2601,6 +2751,36 @@ func (m *MockQuerier) NextChannelMessageID(ctx context.Context, afterID int64) (
 func (mr *MockQuerierMockRecorder) NextChannelMessageID(ctx, afterID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NextChannelMessageID", reflect.TypeOf((*MockQuerier)(nil).NextChannelMessageID), ctx, afterID)
+}
+
+// ObservationIDAbove mocks base method.
+func (m *MockQuerier) ObservationIDAbove(ctx context.Context, arg db.ObservationIDAboveParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ObservationIDAbove", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ObservationIDAbove indicates an expected call of ObservationIDAbove.
+func (mr *MockQuerierMockRecorder) ObservationIDAbove(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ObservationIDAbove", reflect.TypeOf((*MockQuerier)(nil).ObservationIDAbove), ctx, arg)
+}
+
+// ObservationIDBelow mocks base method.
+func (m *MockQuerier) ObservationIDBelow(ctx context.Context, arg db.ObservationIDBelowParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ObservationIDBelow", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ObservationIDBelow indicates an expected call of ObservationIDBelow.
+func (mr *MockQuerierMockRecorder) ObservationIDBelow(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ObservationIDBelow", reflect.TypeOf((*MockQuerier)(nil).ObservationIDBelow), ctx, arg)
 }
 
 // OldestMissingRollupHour mocks base method.
@@ -3497,6 +3677,21 @@ func (m *MockQuerier) UpsertChannelHashOnly(ctx context.Context, channelHash []b
 func (mr *MockQuerierMockRecorder) UpsertChannelHashOnly(ctx, channelHash any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertChannelHashOnly", reflect.TypeOf((*MockQuerier)(nil).UpsertChannelHashOnly), ctx, channelHash)
+}
+
+// UpsertChannelHashOnlyNamed mocks base method.
+func (m *MockQuerier) UpsertChannelHashOnlyNamed(ctx context.Context, arg db.UpsertChannelHashOnlyNamedParams) (int32, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpsertChannelHashOnlyNamed", ctx, arg)
+	ret0, _ := ret[0].(int32)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpsertChannelHashOnlyNamed indicates an expected call of UpsertChannelHashOnlyNamed.
+func (mr *MockQuerierMockRecorder) UpsertChannelHashOnlyNamed(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertChannelHashOnlyNamed", reflect.TypeOf((*MockQuerier)(nil).UpsertChannelHashOnlyNamed), ctx, arg)
 }
 
 // UpsertChannelIATA mocks base method.

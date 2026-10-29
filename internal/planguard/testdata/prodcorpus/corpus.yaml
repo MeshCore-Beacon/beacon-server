@@ -34,7 +34,7 @@ entries:
     params: [{r: no_region}, null, 0, 50]
   - id: routes.globalhop
     stmt: ListKnownRoutesGlobalHop
-    params: [2, null, 0, 50]
+    params: [2, null, 0, false, 50]
   - id: routes.global.pending
     stmt: ListKnownRoutesGlobal
     params: [null, 0, 50]

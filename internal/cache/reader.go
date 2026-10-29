@@ -20,7 +20,7 @@ const (
 	keyIATAs                   = "beacon:iatas"
 	keyIATAPrefix              = "beacon:iata:"
 	keyIATABorderPrefix        = "beacon:iata:border:"
-	keyRegions                 = "beacon:regions"
+	keyRegions                 = "beacon:regions:detail" // renamed when items gained detail, so no old summary list is read
 	keyRegionPrefix            = "beacon:region:"
 	keyRegionSlugPrefix        = "beacon:region:slug:"
 	keyScopeNames              = "beacon:scope:names"
@@ -148,8 +148,8 @@ func (cr *CachedReader) GetIATABorder(ctx context.Context, iata string) (json.Ra
 }
 
 // ListRegions implements [api.Reader].
-func (cr *CachedReader) ListRegions(ctx context.Context) ([]api.RegionSummary, error) {
-	return getOrSet(ctx, cr.c, keyRegions, cr.ttl.Reference, func(ctx context.Context) ([]api.RegionSummary, error) {
+func (cr *CachedReader) ListRegions(ctx context.Context) ([]api.Region, error) {
+	return getOrSet(ctx, cr.c, keyRegions, cr.ttl.Reference, func(ctx context.Context) ([]api.Region, error) {
 		return cr.inner.ListRegions(ctx)
 	})
 }
@@ -325,6 +325,11 @@ func (cr *CachedReader) ListNodes(ctx context.Context, nodeType int16, iatas []s
 	return cr.inner.ListNodes(ctx, nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, cursor, pageCursor, limit, includeNeighbors)
 }
 
+// ListNodesSorted implements [api.Reader].
+func (cr *CachedReader) ListNodesSorted(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, sort api.NodeSort, pageCursor *api.NodeSortCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
+	return cr.inner.ListNodesSorted(ctx, nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, sort, pageCursor, limit, includeNeighbors)
+}
+
 // ListNodeObservations implements [api.Reader].
 func (cr *CachedReader) ListNodeObservations(ctx context.Context, nodeID uuid.UUID, cursor int64, limit int32) (api.Page[api.PacketObservationSummary], error) {
 	return cr.inner.ListNodeObservations(ctx, nodeID, cursor, limit)
@@ -356,8 +361,8 @@ func (cr *CachedReader) ListPacketsAfterID(ctx context.Context, afterObservation
 }
 
 // ListKnownRoutes implements [api.Reader].
-func (cr *CachedReader) ListKnownRoutes(ctx context.Context, iata string, hopCount int32, cursor time.Time, cursorID int64, limit int32) ([]api.KnownRoute, error) {
-	return cr.inner.ListKnownRoutes(ctx, iata, hopCount, cursor, cursorID, limit)
+func (cr *CachedReader) ListKnownRoutes(ctx context.Context, iatas []string, hopCount int32, cursor time.Time, cursorID int64, limit int32) ([]api.KnownRoute, error) {
+	return cr.inner.ListKnownRoutes(ctx, iatas, hopCount, cursor, cursorID, limit)
 }
 
 // SearchKnownRoutes implements [api.Reader].

@@ -106,7 +106,7 @@ func listMessages(reader api.Reader) http.HandlerFunc {
 		}
 		if err != nil {
 			if !respondUnavailableFor(w, err, modelCmi) {
-				respondError(w, http.StatusInternalServerError, "internal server error")
+				respondReaderError(w, err, "internal server error")
 			}
 			return
 		}
@@ -128,6 +128,7 @@ func listMessages(reader api.Reader) http.HandlerFunc {
 //	@Success	200			{object}	[]api.ChannelMessage
 //	@Failure	400			{object}	handlers.APIError
 //	@Failure	500			{object}	handlers.APIError
+//	@Failure	503			{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/messages/backfill [get]
 func listMessagesBackfill(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -158,7 +159,7 @@ func listMessagesBackfill(reader api.Reader) http.HandlerFunc {
 		scope := r.URL.Query().Get("scope")
 		messages, err := reader.ListMessagesAfterID(r.Context(), afterID, iatas, scope, limit)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, messages)

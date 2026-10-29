@@ -81,6 +81,24 @@ func (q *Queries) CheckChannelMessageIATAs(ctx context.Context, arg CheckChannel
 	return i, err
 }
 
+const countChannelMessagesSentSince = `-- name: CountChannelMessagesSentSince :one
+SELECT count(*)::bigint AS n
+FROM (SELECT 1 FROM channel_messages cm WHERE cm.sent_at >= $1::timestamptz LIMIT $2::bigint) w
+`
+
+type CountChannelMessagesSentSinceParams struct {
+	Since    pgtype.Timestamptz `json:"since"`
+	RowLimit int64              `json:"row_limit"`
+}
+
+// How many messages were sent at or after since, counted to at most row_limit: idx_channel_messages_sent alone.
+func (q *Queries) CountChannelMessagesSentSince(ctx context.Context, arg CountChannelMessagesSentSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countChannelMessagesSentSince, arg.Since, arg.RowLimit)
+	var n int64
+	err := row.Scan(&n)
+	return n, err
+}
+
 const fillChannelMessageIATAsByMessages = `-- name: FillChannelMessageIATAsByMessages :execrows
 INSERT INTO channel_message_iatas (message_id, iata, channel_id, scope_id)
 SELECT DISTINCT cm.id, po.iata, cm.channel_id, p.scope_id
@@ -184,6 +202,271 @@ func (q *Queries) ListAllChannelMessagesByIATAs(ctx context.Context, arg ListAll
 	items := []ListAllChannelMessagesByIATAsRow{}
 	for rows.Next() {
 		var i ListAllChannelMessagesByIATAsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChannelID,
+			&i.PacketHash,
+			&i.SenderName,
+			&i.SenderPubkey,
+			&i.Content,
+			&i.SentAt,
+			&i.PacketHashHex,
+			&i.ChannelHash,
+			&i.ScopeName,
+			&i.TransportCodesPresent,
+			&i.ObservationCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllChannelMessagesByIATAsScoped = `-- name: ListAllChannelMessagesByIATAsScoped :many
+WITH hits AS MATERIALIZED (
+  SELECT m.message_id
+  FROM unnest($1::bpchar[]) AS req(iata)
+  CROSS JOIN LATERAL (
+    SELECT i.message_id FROM channel_message_iatas i
+    WHERE i.iata = req.iata AND i.scope_id = $2::int AND i.message_id < $3::bigint
+    ORDER BY i.message_id DESC
+    LIMIT $4) m
+  GROUP BY m.message_id
+  ORDER BY m.message_id DESC
+  LIMIT $4)
+SELECT cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at,
+       encode(cm.packet_hash, 'hex') AS packet_hash_hex, c.channel_hash, ts.name AS scope_name,
+       p.transport_codes_present, p.observation_count AS observation_count
+FROM hits h
+JOIN channel_messages cm ON cm.id = h.message_id
+JOIN channels c ON c.id = cm.channel_id
+JOIN packets p ON p.packet_hash = cm.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+ORDER BY cm.id DESC
+`
+
+type ListAllChannelMessagesByIATAsScopedParams struct {
+	Iatas     []string `json:"iatas"`
+	ScopeID   int32    `json:"scope_id"`
+	CursorID  int64    `json:"cursor_id"`
+	PageLimit int32    `json:"page_limit"`
+}
+
+type ListAllChannelMessagesByIATAsScopedRow struct {
+	ID                    int64              `json:"id"`
+	ChannelID             int32              `json:"channel_id"`
+	PacketHash            []byte             `json:"packet_hash"`
+	SenderName            *string            `json:"sender_name"`
+	SenderPubkey          []byte             `json:"sender_pubkey"`
+	Content               *string            `json:"content"`
+	SentAt                pgtype.Timestamptz `json:"sent_at"`
+	PacketHashHex         string             `json:"packet_hash_hex"`
+	ChannelHash           []byte             `json:"channel_hash"`
+	ScopeName             *string            `json:"scope_name"`
+	TransportCodesPresent *bool              `json:"transport_codes_present"`
+	ObservationCount      int64              `json:"observation_count"`
+}
+
+// Every channel filtered by sites and a scope: each (site, scope) range's newest message ids, merged.
+func (q *Queries) ListAllChannelMessagesByIATAsScoped(ctx context.Context, arg ListAllChannelMessagesByIATAsScopedParams) ([]ListAllChannelMessagesByIATAsScopedRow, error) {
+	rows, err := q.db.Query(ctx, listAllChannelMessagesByIATAsScoped,
+		arg.Iatas,
+		arg.ScopeID,
+		arg.CursorID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllChannelMessagesByIATAsScopedRow{}
+	for rows.Next() {
+		var i ListAllChannelMessagesByIATAsScopedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChannelID,
+			&i.PacketHash,
+			&i.SenderName,
+			&i.SenderPubkey,
+			&i.Content,
+			&i.SentAt,
+			&i.PacketHashHex,
+			&i.ChannelHash,
+			&i.ScopeName,
+			&i.TransportCodesPresent,
+			&i.ObservationCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllChannelMessagesByIATAsSince = `-- name: ListAllChannelMessagesByIATAsSince :many
+WITH sent AS MATERIALIZED (
+  SELECT w.id, w.packet_hash FROM channel_messages w
+  WHERE w.sent_at >= $1::timestamptz AND w.id < $2::bigint
+), hits AS MATERIALIZED (
+  SELECT s.id FROM sent s
+  WHERE EXISTS (SELECT 1 FROM channel_message_iatas i WHERE i.message_id = s.id AND i.iata = ANY($3::bpchar[]))
+    AND ($4::int IS NULL
+         OR EXISTS (SELECT 1 FROM packets g WHERE g.packet_hash = s.packet_hash AND g.scope_id = $4::int))
+  ORDER BY s.id DESC
+  LIMIT $5
+)
+SELECT cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at,
+       encode(cm.packet_hash, 'hex') AS packet_hash_hex, c.channel_hash, ts.name AS scope_name,
+       p.transport_codes_present, p.observation_count AS observation_count
+FROM hits h
+JOIN channel_messages cm ON cm.id = h.id
+JOIN channels c ON c.id = cm.channel_id
+JOIN packets p ON p.packet_hash = cm.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+ORDER BY cm.id DESC
+`
+
+type ListAllChannelMessagesByIATAsSinceParams struct {
+	Since     pgtype.Timestamptz `json:"since"`
+	CursorID  int64              `json:"cursor_id"`
+	Iatas     []string           `json:"iatas"`
+	ScopeID   *int32             `json:"scope_id"`
+	PageLimit int32              `json:"page_limit"`
+}
+
+type ListAllChannelMessagesByIATAsSinceRow struct {
+	ID                    int64              `json:"id"`
+	ChannelID             int32              `json:"channel_id"`
+	PacketHash            []byte             `json:"packet_hash"`
+	SenderName            *string            `json:"sender_name"`
+	SenderPubkey          []byte             `json:"sender_pubkey"`
+	Content               *string            `json:"content"`
+	SentAt                pgtype.Timestamptz `json:"sent_at"`
+	PacketHashHex         string             `json:"packet_hash_hex"`
+	ChannelHash           []byte             `json:"channel_hash"`
+	ScopeName             *string            `json:"scope_name"`
+	TransportCodesPresent *bool              `json:"transport_codes_present"`
+	ObservationCount      int64              `json:"observation_count"`
+}
+
+// Every channel filtered by sites with since, optionally by scope: the messages sent since then (idx_channel_messages_sent),
+// each kept when it has a row at one of the sites, newest first. It reads every message sent since then, so it costs
+// what the request asked for: the caller first tries the newest ids when many were sent.
+func (q *Queries) ListAllChannelMessagesByIATAsSince(ctx context.Context, arg ListAllChannelMessagesByIATAsSinceParams) ([]ListAllChannelMessagesByIATAsSinceRow, error) {
+	rows, err := q.db.Query(ctx, listAllChannelMessagesByIATAsSince,
+		arg.Since,
+		arg.CursorID,
+		arg.Iatas,
+		arg.ScopeID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllChannelMessagesByIATAsSinceRow{}
+	for rows.Next() {
+		var i ListAllChannelMessagesByIATAsSinceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChannelID,
+			&i.PacketHash,
+			&i.SenderName,
+			&i.SenderPubkey,
+			&i.Content,
+			&i.SentAt,
+			&i.PacketHashHex,
+			&i.ChannelHash,
+			&i.ScopeName,
+			&i.TransportCodesPresent,
+			&i.ObservationCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllChannelMessagesByIATAsSinceWalk = `-- name: ListAllChannelMessagesByIATAsSinceWalk :many
+WITH recent AS MATERIALIZED (
+  SELECT r.id, r.packet_hash, r.sent_at FROM channel_messages r
+  WHERE r.id < $1::bigint
+  ORDER BY r.id DESC
+  LIMIT $2::int
+), hits AS MATERIALIZED (
+  SELECT s.id FROM recent s
+  WHERE s.sent_at >= $3::timestamptz
+    AND EXISTS (SELECT 1 FROM channel_message_iatas i WHERE i.message_id = s.id AND i.iata = ANY($4::bpchar[]))
+    AND ($5::int IS NULL
+         OR EXISTS (SELECT 1 FROM packets g WHERE g.packet_hash = s.packet_hash AND g.scope_id = $5::int))
+  ORDER BY s.id DESC
+  LIMIT $6
+)
+SELECT cm.id, cm.channel_id, cm.packet_hash, cm.sender_name, cm.sender_pubkey, cm.content, cm.sent_at,
+       encode(cm.packet_hash, 'hex') AS packet_hash_hex, c.channel_hash, ts.name AS scope_name,
+       p.transport_codes_present, p.observation_count AS observation_count
+FROM hits h
+JOIN channel_messages cm ON cm.id = h.id
+JOIN channels c ON c.id = cm.channel_id
+JOIN packets p ON p.packet_hash = cm.packet_hash
+LEFT JOIN transport_scopes ts ON ts.id = p.scope_id
+ORDER BY cm.id DESC
+`
+
+type ListAllChannelMessagesByIATAsSinceWalkParams struct {
+	CursorID  int64              `json:"cursor_id"`
+	ScanRows  int32              `json:"scan_rows"`
+	Since     pgtype.Timestamptz `json:"since"`
+	Iatas     []string           `json:"iatas"`
+	ScopeID   *int32             `json:"scope_id"`
+	PageLimit int32              `json:"page_limit"`
+}
+
+type ListAllChannelMessagesByIATAsSinceWalkRow struct {
+	ID                    int64              `json:"id"`
+	ChannelID             int32              `json:"channel_id"`
+	PacketHash            []byte             `json:"packet_hash"`
+	SenderName            *string            `json:"sender_name"`
+	SenderPubkey          []byte             `json:"sender_pubkey"`
+	Content               *string            `json:"content"`
+	SentAt                pgtype.Timestamptz `json:"sent_at"`
+	PacketHashHex         string             `json:"packet_hash_hex"`
+	ChannelHash           []byte             `json:"channel_hash"`
+	ScopeName             *string            `json:"scope_name"`
+	TransportCodesPresent *bool              `json:"transport_codes_present"`
+	ObservationCount      int64              `json:"observation_count"`
+}
+
+// ListAllChannelMessagesByIATAsSince when many messages were sent since then: the newest scan_rows message ids below
+// the cursor, keeping those sent since then with a row at one of the sites. Exact when it fills the page (every newer
+// id was read); otherwise the caller reads the messages sent since then instead.
+func (q *Queries) ListAllChannelMessagesByIATAsSinceWalk(ctx context.Context, arg ListAllChannelMessagesByIATAsSinceWalkParams) ([]ListAllChannelMessagesByIATAsSinceWalkRow, error) {
+	rows, err := q.db.Query(ctx, listAllChannelMessagesByIATAsSinceWalk,
+		arg.CursorID,
+		arg.ScanRows,
+		arg.Since,
+		arg.Iatas,
+		arg.ScopeID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllChannelMessagesByIATAsSinceWalkRow{}
+	for rows.Next() {
+		var i ListAllChannelMessagesByIATAsSinceWalkRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ChannelID,

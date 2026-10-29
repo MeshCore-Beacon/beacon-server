@@ -121,7 +121,7 @@ var (
 	// that bypassed the model.
 	APIUnavailable = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "beacon_api_unavailable_total",
-		Help: "503s a page answered because its data was not ready (reason not_ready) or the slow pool was busy (reason slow_pool_busy), by the model the page reads.",
+		Help: "503s a page answered because its data was not ready (reason not_ready) or its statement ran out of time (reason timeout), by the read model the page reads (none for a page that reads none).",
 	}, []string{"reason", "model"})
 	ReadModelRepaired = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "beacon_readmodel_repaired_rows_total",

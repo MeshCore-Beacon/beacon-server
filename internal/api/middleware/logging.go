@@ -54,7 +54,7 @@ func (e *requestLogEntry) Write(status, bytes int, header http.Header, elapsed t
 }
 
 // requestLogLevel is INFO below 400, WARN for 4xx and ERROR for 5xx. A 503 with Retry-After is a refusal the client
-// is told to retry (read model not ready, slow pool busy, guard admission); it heals itself and is already counted
+// is told to retry (read model not ready, statement timeout, guard admission); it heals itself and is already counted
 // in metrics, so it logs at WARN. A 503 without Retry-After is unexpected and stays at ERROR.
 func requestLogLevel(status int, header http.Header) slog.Level {
 	switch {

@@ -37,6 +37,7 @@ var smallTableMigrations = []string{
 	"022_drop_observers_type.sql",
 	"023_drop_channels_last_seen_id.sql",
 	"024_observers_channels_fillfactor.sql",
+	"058_nodes_fillfactor.sql",
 }
 
 // sortTieRuns returns rows with each maximal run of equal key sorted by id; the order
@@ -69,7 +70,7 @@ var smallTableIndexSets = []struct {
 	indexes    []string
 	reloptions []string
 }{
-	{"nodes", []string{"nodes_pkey", "nodes_public_key_key"}, []string{"autovacuum_vacuum_scale_factor=0.05"}},
+	{"nodes", []string{"nodes_pkey", "nodes_public_key_key"}, []string{"autovacuum_vacuum_scale_factor=0.05", "fillfactor=50"}},
 	{"node_iatas", []string{"idx_node_iatas_iata", "node_iatas_pkey"}, []string{"autovacuum_vacuum_scale_factor=0.05"}},
 	{"observers", []string{"idx_observers_last_iata", "observers_pkey", "observers_public_key_key"}, []string{"fillfactor=50"}},
 	{"channels", []string{"channels_channel_hash_key_fingerprint_key", "channels_hashtag_key", "channels_pkey",

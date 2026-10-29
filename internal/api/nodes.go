@@ -36,6 +36,28 @@ type NodeIATA struct {
 type NodePage struct {
 	Page[NodeSummary]
 	NextPageCursor *string `json:"nextPageCursor,omitempty"`
+	// Sort and Order name the order the items are in ("lastSeen" "desc" unless a sort was asked
+	// for), so a client can tell this server sorted; older servers leave them out.
+	Sort  string `json:"sort,omitempty" enums:"lastSeen,name,type,neighbors"`
+	Order string `json:"order,omitempty" enums:"asc,desc"`
+}
+
+// Node list orders besides the default, last seen newest first.
+const (
+	NodeSortName      = "name"
+	NodeSortType      = "type"
+	NodeSortNeighbors = "neighbors"
+)
+
+// NodeSort orders a node list by name, type or neighbour count.
+type NodeSort struct {
+	By         string
+	Descending bool
+}
+
+// ValidNodeSort reports whether by is a NodeSort order.
+func ValidNodeSort(by string) bool {
+	return by == NodeSortName || by == NodeSortType || by == NodeSortNeighbors
 }
 
 // NodeSummary is the minimal node representation used in list responses.

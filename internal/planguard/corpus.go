@@ -62,7 +62,7 @@ type Statement struct {
 	DerivedFrom string `yaml:"derived_from"` // sqlc name whose text must contain File's body (read-only part of a DML)
 	Kind        string `yaml:"kind"`         // select (default) | dml
 	Group       string `yaml:"group"`
-	Plan        string `yaml:"plan"`      // cached | custom | maint | ingest | slow | harness
+	Plan        string `yaml:"plan"`      // cached | custom | maint | ingest | harness
 	Admission   string `yaml:"admission"` // admission profile; required when plan is cached
 	Pending     string `yaml:"pending"`   // feature name; the statement is not merged yet
 	SQL         string `yaml:"-"`
@@ -193,7 +193,6 @@ var (
 		"custom":  {ModeCustom},                        // sent unnamed; no layout plans it generic
 		"maint":   {ModeCustom},                        // maint is force_custom_plan
 		"ingest":  {ModeAuto},                          // ingest stays auto
-		"slow":    {ModeCustom},                        // planpolicy.Slow: sent unnamed on api_slow
 		"harness": {ModeCustom, ModeGeneric, ModeAuto}, // planted regressions
 	}
 
@@ -350,10 +349,10 @@ func (c *Corpus) loadStatement(fsys fs.FS, dir string, st *Statement, sqlcText m
 		return fmt.Errorf("unknown kind %q (want select or dml)", st.Kind)
 	}
 	if _, ok := classModes[st.Plan]; !ok {
-		return fmt.Errorf("unknown plan %q (want cached, custom, maint, ingest, slow or harness)", st.Plan)
+		return fmt.Errorf("unknown plan %q (want cached, custom, maint, ingest or harness)", st.Plan)
 	}
-	if st.SQLC != "" && planpolicy.Slow[st.SQLC] && st.Plan != "slow" {
-		return fmt.Errorf("sqlc statement %q is in planpolicy.Slow, so its plan is slow, not %q", st.SQLC, st.Plan)
+	if st.SQLC != "" && planpolicy.VerificationOnly[st.SQLC] && st.Plan != "maint" {
+		return fmt.Errorf("sqlc statement %q is in planpolicy.VerificationOnly, so its plan is maint, not %q", st.SQLC, st.Plan)
 	}
 	if st.Plan == "cached" {
 		if st.Admission == "" {

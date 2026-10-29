@@ -37,7 +37,7 @@ entries:
           index_cond: ["iata >="]
   - id: routes.globalhop
     stmt: ListKnownRoutesGlobalHop
-    params: [2, null, 0, 50]
+    params: [2, null, 0, false, 50]
   - id: routes.delete_expired
     stmt: DeleteExpiredRoutes
     params: ["-infinity", 0, "2027-01-01T00:00:00Z", "2027-01-01T00:00:00Z", 1000]

@@ -6,6 +6,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -55,7 +56,8 @@ func TestGetScope_Errors(t *testing.T) {
 	}{
 		{"no rows", nil, pgx.ErrNoRows, http.StatusNotFound},
 		{"nil scope", nil, nil, http.StatusNotFound},
-		{"database failure", nil, context.DeadlineExceeded, http.StatusInternalServerError},
+		{"database failure", nil, errors.New("database unavailable"), http.StatusInternalServerError},
+		{"statement timeout", nil, context.DeadlineExceeded, http.StatusServiceUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := chi.NewRouter()

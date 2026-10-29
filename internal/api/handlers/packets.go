@@ -130,15 +130,19 @@ func listPackets(reader api.Reader) http.HandlerFunc {
 				respondError(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			var page api.Page[api.PacketSummary]
-			page, err = reader.SearchPacketsByHashPrefix(r.Context(), lo, hi, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
+			page, err := reader.SearchPacketsByHashPrefix(r.Context(), lo, hi, payloadTypes, routeTypes, iatas, scopes, since, until, cursor, limit)
+			if err != nil {
+				// This err shadows the outer one, so answer here; a hash search reads no read model.
+				respondReaderError(w, err, "internal server error")
+				return
+			}
 			packets = api.PacketPage{Page: page}
 		} else {
 			packets, err = reader.ListPackets(r.Context(), payloadTypes, routeTypes, iatas, scopes, since, until, cursor, pageCursor, limit)
 		}
 		if err != nil {
 			if !respondUnavailableFor(w, err, modelPacketSites) {
-				respondError(w, http.StatusInternalServerError, "internal server error")
+				respondReaderError(w, err, "internal server error")
 			}
 			return
 		}
@@ -163,6 +167,7 @@ func listPackets(reader api.Reader) http.HandlerFunc {
 //	@Success	200					{object}	[]api.PacketSummary
 //	@Failure	400					{object}	handlers.APIError
 //	@Failure	500					{object}	handlers.APIError
+//	@Failure	503					{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/packets/backfill [get]
 func listPacketsBackfill(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -209,7 +214,7 @@ func listPacketsBackfill(reader api.Reader) http.HandlerFunc {
 		scope := r.URL.Query().Get("scope")
 		packets, err := reader.ListPacketsAfterID(r.Context(), afterID, payloadType, routeType, iatas, scope, limit)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, packets)
@@ -226,6 +231,7 @@ func listPacketsBackfill(reader api.Reader) http.HandlerFunc {
 //	@Failure	400			{object}	handlers.APIError
 //	@Failure	404			{object}	handlers.APIError
 //	@Failure	500			{object}	handlers.APIError
+//	@Failure	503			{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/packets/{packetHash} [get]
 func getPacket(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -241,7 +247,7 @@ func getPacket(reader api.Reader) http.HandlerFunc {
 			respondError(w, http.StatusNotFound, "packet not found")
 			return
 		case err != nil:
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, packet)

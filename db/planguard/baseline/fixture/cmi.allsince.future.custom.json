@@ -5,7 +5,7 @@
  "      Nested Loop",
  "        Nested Loop (Semi)",
  "          Nested Loop",
- "            Index Scan on channel_messages cm using idx_channel_messages_channel scan=Forward",
+ "            Index Scan on channel_messages cm using idx_channel_messages_sent scan=Forward",
  "            Index Scan on channels c using channels_pkey scan=Forward",
  "          Index Only Scan on packet_observations po using idx_observations_packet scan=Forward",
  "        Index Scan on packets p using packets_pkey scan=Forward",

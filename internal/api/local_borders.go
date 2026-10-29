@@ -31,12 +31,24 @@ func (r *localBorderReader) ListNodes(ctx context.Context, nodeType int16, iatas
 	if err != nil {
 		return page, err
 	}
+	return r.markForeign(page), nil
+}
+
+func (r *localBorderReader) ListNodesSorted(ctx context.Context, nodeType int16, iatas []string, paths, traces *bool, pubkey []byte, prefix, name, scope string, sort NodeSort, pageCursor *NodeSortCursor, limit int32, neighbors bool) (NodePage, error) {
+	page, err := r.Reader.ListNodesSorted(ctx, nodeType, iatas, paths, traces, pubkey, prefix, name, scope, sort, pageCursor, limit, neighbors)
+	if err != nil {
+		return page, err
+	}
+	return r.markForeign(page), nil
+}
+
+func (r *localBorderReader) markForeign(page NodePage) NodePage {
 	page.Items = slices.Clone(page.Items)
 	for i := range page.Items {
 		node := &page.Items[i]
 		node.PossiblyForeign = r.local.PossiblyForeign(node.NodeType, node.Latitude, node.Longitude)
 	}
-	return page, nil
+	return page
 }
 
 func (r *localBorderReader) GetNode(ctx context.Context, id uuid.UUID) (*Node, error) {

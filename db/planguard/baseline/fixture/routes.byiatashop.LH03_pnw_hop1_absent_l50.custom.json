@@ -1,0 +1,11 @@
+[
+ "Limit",
+ "  Sort",
+ "    Nested Loop",
+ "      Aggregate partial=Simple {Hashed}",
+ "        ProjectSet",
+ "          Result",
+ "      Limit",
+ "        Sort",
+ "          Index Scan on known_routes kr using idx_known_routes_hop_iata scan=Forward"
+]

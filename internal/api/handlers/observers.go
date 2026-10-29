@@ -55,6 +55,7 @@ func ObserversRouter(reader api.Reader) http.Handler {
 //	@Success	200		{object}	api.ObserverPage
 //	@Failure	400		{object}	handlers.APIError
 //	@Failure	500		{object}	handlers.APIError
+//	@Failure	503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/observers [get]
 func listObservers(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -97,7 +98,7 @@ func listObservers(reader api.Reader) http.HandlerFunc {
 		}
 		observers, err := reader.ListObservers(r.Context(), iatas, observerType, broker, status, name, scope, cursor, pageCursor, limit)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "failed to get list of observers")
+			respondReaderError(w, err, "failed to get list of observers")
 			return
 		}
 		respond(w, http.StatusOK, observers)
@@ -114,6 +115,7 @@ func listObservers(reader api.Reader) http.HandlerFunc {
 //	@Failure	400			{object}	handlers.APIError
 //	@Failure	404			{object}	handlers.APIError
 //	@Failure	500			{object}	handlers.APIError
+//	@Failure	503			{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/observers/{observerId} [get]
 func getObserver(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -129,7 +131,7 @@ func getObserver(reader api.Reader) http.HandlerFunc {
 			respondError(w, http.StatusNotFound, "observer not found")
 			return
 		case err != nil:
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, obs)
@@ -173,7 +175,7 @@ func listObserverAdverts(reader api.Reader) http.HandlerFunc {
 		adverts, err := reader.ListObserverAdverts(r.Context(), observerID, cursor, limit)
 		if err != nil {
 			if !respondUnavailableFor(w, err, modelPayloadTypes) {
-				respondError(w, http.StatusInternalServerError, "internal server error")
+				respondReaderError(w, err, "internal server error")
 			}
 			return
 		}
@@ -193,6 +195,7 @@ func listObserverAdverts(reader api.Reader) http.HandlerFunc {
 //	@Success	200			{object}	api.ObserverTelemetry
 //	@Failure	400			{object}	handlers.APIError
 //	@Failure	500			{object}	handlers.APIError
+//	@Failure	503			{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/observers/{observerId}/telemetry [get]
 func getObserverTelemetry(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -248,7 +251,7 @@ func getObserverTelemetry(reader api.Reader) http.HandlerFunc {
 			}
 		}
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		telemetry.Range = rangeParam
@@ -280,6 +283,7 @@ var activityIntervals = map[string]time.Duration{
 //	@Failure	400			{object}	handlers.APIError
 //	@Failure	404			{object}	handlers.APIError
 //	@Failure	500			{object}	handlers.APIError
+//	@Failure	503			{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/observers/{observerId}/activity [get]
 func getObserverActivity(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -331,7 +335,7 @@ func getObserverActivity(reader api.Reader) http.HandlerFunc {
 				respondError(w, http.StatusNotFound, "observer not found")
 				return
 			}
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		activity.Range = rangeParam

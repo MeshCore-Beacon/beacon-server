@@ -10,7 +10,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${BUILD_VERSION} -X main.revision=${SOURCE_REVISION}" -o beacon ./cmd/beacon
 
-FROM alpine:3.22.6
+FROM alpine:3.24
 ARG POSTGRES_CLIENT_MAJOR=16
 RUN apk add --no-cache ca-certificates tzdata postgresql${POSTGRES_CLIENT_MAJOR}-client
 RUN addgroup -g 65532 beacon && adduser -D -u 65532 -G beacon beacon && mkdir /app && chown 65532:65532 /app

@@ -29,7 +29,7 @@ statements:
   C: {sqlc: C, plan: custom}
   M: {sqlc: M, plan: maint, kind: dml}
   I: {sqlc: I, plan: ingest, kind: dml}
-  L: {sqlc: L, plan: slow}
+  L: {sqlc: L, plan: maint}
   H: {file: sql/harness/H.sql, plan: harness}
   P: {sqlc: NotMergedYet, plan: custom, pending: some_feature}
 sort_exempt_sets:
@@ -85,6 +85,6 @@ entries:
   - {id: c.modes, stmt: C, modes: [custom, generic]}
   - {id: m.one, stmt: M, analyze: false}
   - {id: i.one, stmt: I, executions: 1, timeout_s: 5}
-  - {id: l.one, stmt: L, baseline: "unstable: row estimate moves", note: slow reader}
+  - {id: l.one, stmt: L, baseline: "unstable: row estimate moves", note: maint reader}
   - {id: h.one, stmt: H, expect_fail: true, known_issue: planted}
   - {id: p.one, stmt: P}
