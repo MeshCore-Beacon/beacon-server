@@ -108,7 +108,7 @@ INSERT INTO observers (id, public_key) VALUES ('00000000-0000-0000-0000-00000000
 
 	k1 := keys{0x11: {{Key: psk, Fingerprint: []byte{1}, Name: "fixture"}}}
 	observe("00000000-0000-0000-0000-000000000001", "YUL")
-	created, err := ingest.StoreGroupText(ctx, store, k1, hash, payload, "YUL", false)
+	created, err := ingest.StoreGroupText(ctx, store, k1, hash, payload, "YUL", false, false)
 	if err != nil || created == nil || created.Message == nil {
 		t.Fatalf("first hearing: %+v, %v", created, err)
 	}
@@ -116,7 +116,7 @@ INSERT INTO observers (id, public_key) VALUES ('00000000-0000-0000-0000-00000000
 
 	// The key is gone; the next hearing cannot decrypt.
 	observe("00000000-0000-0000-0000-000000000002", "YOW")
-	result, err := ingest.StoreGroupText(ctx, store, keys{}, hash, payload, "YOW", false)
+	result, err := ingest.StoreGroupText(ctx, store, keys{}, hash, payload, "YOW", false, false)
 	if result != nil || err != nil {
 		t.Fatalf("keyless hearing: %+v, %v", result, err)
 	}
@@ -258,5 +258,97 @@ SELECT (SELECT count(*) FROM channel_messages), (SELECT count(*) FROM (SELECT * 
 	}
 	if messages == 0 || missing != 0 || extra != 0 {
 		t.Fatalf("%d messages, missing %d, extra %d", messages, missing, extra)
+	}
+}
+
+// The background decrypt backfill and live hearings of the same stored packets race: each packet still gets one
+// message, its sites are exact (the seed and the live hearing's Add cover each other), and the packets' hours are
+// queued for a re-roll whichever side stored the message.
+func TestDecryptBackfillRacesLiveHearingsPostgres(t *testing.T) {
+	ctx, pool := migratedPool(t)
+	store := db.New(pool, pool, 0, 0)
+	psk := make([]byte, 16)
+	if _, err := pool.Exec(ctx, `
+INSERT INTO iata_codes (iata) VALUES ('YUL'), ('YOW') ON CONFLICT DO NOTHING;
+INSERT INTO observers (id, public_key) VALUES ('00000000-0000-0000-0000-000000000001', '\x01'), ('00000000-0000-0000-0000-000000000002', '\x02')`); err != nil {
+		t.Fatal(err)
+	}
+	const n = 60
+	type stored struct{ hash, payload []byte }
+	var packets []stored
+	for i := range n {
+		grpTxt, err := (&meshcore.GroupTextPayload{Timestamp: uint32(1000 + i), Sender: "Fixture", Text: fmt.Sprint("message ", i)}).Encrypt(0x11, psk)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, err := grpTxt.ToBytes()
+		if err != nil {
+			t.Fatal(err)
+		}
+		hash := []byte(fmt.Sprintf("race-%02d", i))
+		if _, err := store.UpsertPacket(ctx, ingest.UpsertPacketParams{PacketHash: hash, PayloadType: 5, RouteType: 1, RawHeader: []byte{0x15}, RawPayload: payload, ChannelHash: []byte{0x11}}); err != nil {
+			t.Fatal(err)
+		}
+		// Stored before the key was known: hash-only, undecrypted, heard at YUL two hours ago.
+		if _, _, err := store.InsertObservation(ctx, ingest.InsertObservationParams{PacketHash: hash, ObserverID: uuid.MustParse("00000000-0000-0000-0000-000000000001"), IATA: "YUL", HeardAt: time.Now().Add(-2 * time.Hour), HashSize: 1, PayloadType: 5}); err != nil {
+			t.Fatal(err)
+		}
+		packets = append(packets, stored{hash, payload})
+	}
+	k := keys{0x11: {{Key: psk, Fingerprint: []byte{1}, Name: "fixture"}}}
+
+	runCtx, stop := context.WithCancel(ctx)
+	backfill := ingest.NewDecryptBackfill(store, k, nil)
+	done := make(chan struct{})
+	go func() { backfill.Run(runCtx); close(done) }()
+	backfill.RequestAll()
+	var live sync.WaitGroup
+	live.Go(func() {
+		for _, p := range packets {
+			if _, _, err := store.InsertObservation(ctx, ingest.InsertObservationParams{PacketHash: p.hash, ObserverID: uuid.MustParse("00000000-0000-0000-0000-000000000002"), IATA: "YOW", HeardAt: time.Now(), HashSize: 1, PayloadType: 5}); err != nil {
+				t.Error(err)
+				return
+			}
+			if _, err := ingest.StoreGroupText(ctx, store, k, p.hash, p.payload, "YOW", false, true); err != nil {
+				t.Error(err)
+				return
+			}
+		}
+	})
+	live.Wait()
+	deadline := time.Now().Add(time.Minute)
+	for {
+		var left int
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM packets WHERE decrypted IS NOT TRUE").Scan(&left); err != nil {
+			t.Fatal(err)
+		}
+		if left == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d packets still undecrypted", left)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	stop()
+	<-done
+
+	var messages, distinct, dirty int
+	if err := pool.QueryRow(ctx, "SELECT count(*), count(DISTINCT packet_hash), (SELECT count(*) FROM analytics_dirty_hours WHERE hour = date_trunc('hour', now() - interval '2 hours', 'UTC')) FROM channel_messages").Scan(&messages, &distinct, &dirty); err != nil {
+		t.Fatal(err)
+	}
+	if messages != n || distinct != n || dirty != 1 {
+		t.Fatalf("%d messages for %d packets (want %d each), early hour queued %d times (want 1)", messages, distinct, n, dirty)
+	}
+	var missing, extra int64
+	if err := pool.QueryRow(ctx, `WITH def AS (
+  SELECT DISTINCT cm.id AS message_id, po.iata, cm.channel_id, p.scope_id
+  FROM channel_messages cm JOIN packets p ON p.packet_hash = cm.packet_hash JOIN packet_observations po ON po.packet_hash = cm.packet_hash
+), have AS (SELECT message_id, iata, channel_id, scope_id FROM channel_message_iatas)
+SELECT (SELECT count(*) FROM (SELECT * FROM def EXCEPT SELECT * FROM have) m), (SELECT count(*) FROM (SELECT * FROM have EXCEPT SELECT * FROM def) x)`).Scan(&missing, &extra); err != nil {
+		t.Fatal(err)
+	}
+	if missing != 0 || extra != 0 {
+		t.Fatalf("channel message sites: missing %d, extra %d", missing, extra)
 	}
 }

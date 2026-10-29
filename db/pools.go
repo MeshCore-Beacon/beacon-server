@@ -17,7 +17,6 @@ import (
 // Pool names. Each is also the pool's metric label and, prefixed with "beacon-", its application_name.
 const (
 	PoolAPILegacy = "api_legacy"
-	PoolAPISlow   = "api_slow"
 	PoolAPICustom = "api_custom"
 	PoolAPICached = "api_cached"
 	PoolIngest    = "ingest"
@@ -26,7 +25,7 @@ const (
 
 // Pools holds one pgx pool per workload. A pool is nil when the layout does not open it.
 type Pools struct {
-	APILegacy, APISlow, APICustom, APICached, Ingest, Maint *pgxpool.Pool
+	APILegacy, APICustom, APICached, Ingest, Maint *pgxpool.Pool
 }
 
 type poolSpec struct {
@@ -44,20 +43,6 @@ var poolSpecs = []poolSpec{
 		size: map[planpolicy.Layout]int32{planpolicy.Single: 8},
 		params: map[string]string{
 			"application_name": "beacon-api_legacy",
-		},
-	},
-	{
-		// The statements that may walk whole site histories (planpolicy.Slow). Two connections by default
-		// (database.slow_pool_size overrides it), so they never hold more of the server than that; a statement limit,
-		// so none runs unbounded; no parallel workers, whose plans for these walks ran several times longer
-		// (measured: a sparse filter over every site, 26 s without workers, 4 min with). Otherwise the server's own
-		// planner settings, as api_legacy.
-		name: PoolAPISlow,
-		size: map[planpolicy.Layout]int32{planpolicy.CustomAll: 2, planpolicy.Split: 2},
-		params: map[string]string{
-			"application_name":                "beacon-api_slow",
-			"statement_timeout":               "120s",
-			"max_parallel_workers_per_gather": "0",
 		},
 	},
 	{
@@ -106,16 +91,6 @@ var poolSpecs = []poolSpec{
 	},
 }
 
-// SlowPoolSize returns an OpenPools tune that sizes api_slow to n connections (database.slow_pool_size), whatever
-// the layout's default.
-func SlowPoolSize(n int32) func(pool string, cfg *pgxpool.Config) {
-	return func(pool string, cfg *pgxpool.Config) {
-		if pool == PoolAPISlow && n > 0 {
-			cfg.MaxConns = n
-		}
-	}
-}
-
 // ingestPoolSize is at least 6 and at least one connection per CPU, so ingest never has fewer
 // connections than the single shared pool gave it before the pools split.
 func ingestPoolSize() int32 {
@@ -126,8 +101,6 @@ func (p *Pools) slot(name string) **pgxpool.Pool {
 	switch name {
 	case PoolAPILegacy:
 		return &p.APILegacy
-	case PoolAPISlow:
-		return &p.APISlow
 	case PoolAPICustom:
 		return &p.APICustom
 	case PoolAPICached:

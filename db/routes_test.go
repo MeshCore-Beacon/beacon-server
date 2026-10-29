@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -52,16 +53,19 @@ func TestUpsertKnownRoute_ComputesPathKey(t *testing.T) {
 	}
 }
 
-// A value ending in a blank matches no character(3) code; no statement runs, and it encodes as [].
+// A value ending in a blank matches no character(3) code, nor does an empty one in a list; no statement runs, and
+// the page encodes as [].
 func TestListKnownRoutesTrailingBlankIATA(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mock := mockdb.NewMockQuerier(ctrl) // no EXPECT: any call fails the test
 	store := &Store{q: mock}
-	for _, iata := range []string{"SEA ", "SEA  ", "   ", " ", "SE\x00 "} {
-		routes, err := store.ListKnownRoutes(context.Background(), iata, 0, time.Time{}, 0, 50)
-		b, _ := json.Marshal(routes)
-		if err != nil || routes == nil || string(b) != "[]" {
-			t.Fatalf("%q: %v %s", iata, err, b)
+	for _, iatas := range [][]string{{"SEA "}, {"SEA  "}, {"   "}, {" "}, {"SE\x00 "}, {""}, {"SEA ", "", " "}} {
+		for _, hop := range []int32{0, 3} {
+			routes, err := store.ListKnownRoutes(context.Background(), iatas, hop, time.Time{}, 0, 50)
+			b, _ := json.Marshal(routes)
+			if err != nil || routes == nil || string(b) != "[]" {
+				t.Fatalf("%q hop %d: %v %s", iatas, hop, err, b)
+			}
 		}
 	}
 }
@@ -73,17 +77,30 @@ func TestListKnownRoutes_Dispatch(t *testing.T) {
 	store := &Store{q: q}
 	cursor := time.UnixMilli(1_760_000_000_000)
 	q.EXPECT().ListKnownRoutesGlobal(gomock.Any(), sqlc.ListKnownRoutesGlobalParams{CursorTs: pgtype.Timestamptz{Time: cursor, Valid: true}, CursorID: 7, PageLimit: 50}).Return(nil, nil)
-	q.EXPECT().ListKnownRoutesGlobalHop(gomock.Any(), sqlc.ListKnownRoutesGlobalHopParams{HopCount: 3, PageLimit: 50}).Return(nil, nil)
+	// 3000 analyzed routes, hop 3 a 10 % group: under the 1000-row floor, so the page reads the group.
+	q.EXPECT().GetKnownRoutesHopStats(gomock.Any()).Return(sqlc.GetKnownRoutesHopStatsRow{Reltuples: 3000, HasStats: true,
+		HopValues: []int32{2, 3}, HopFreqs: []float64{0.9, 0.1}, NDistinct: 2}, nil)
+	q.EXPECT().ListKnownRoutesGlobalHop(gomock.Any(), sqlc.ListKnownRoutesGlobalHopParams{HopCount: 3, ReadGroup: true, PageLimit: 50}).Return(nil, nil)
 	q.EXPECT().ListKnownRoutesByIATA(gomock.Any(), sqlc.ListKnownRoutesByIATAParams{Iata: "SEA", PageLimit: 50}).Return(nil, nil)
 	q.EXPECT().ListKnownRoutesByIATAHop(gomock.Any(), sqlc.ListKnownRoutesByIATAHopParams{Iata: "SEA", HopCount: 3, PageLimit: 50}).Return(nil, nil)
+	// A list that comes down to one code runs that IATA's statement; duplicates and blank-ended codes drop out.
+	q.EXPECT().ListKnownRoutesByIATA(gomock.Any(), sqlc.ListKnownRoutesByIATAParams{Iata: "KLS", PageLimit: 50}).Return(nil, nil)
+	q.EXPECT().ListKnownRoutesByIATAHop(gomock.Any(), sqlc.ListKnownRoutesByIATAHopParams{Iata: "KLS", HopCount: 3, PageLimit: 50}).Return(nil, nil)
+	q.EXPECT().ListKnownRoutesByIATAs(gomock.Any(), sqlc.ListKnownRoutesByIATAsParams{Iatas: []string{"SEA", "KLS"},
+		CursorTs: pgtype.Timestamptz{Time: cursor, Valid: true}, CursorID: 7, PageLimit: 50}).Return(nil, nil)
+	q.EXPECT().ListKnownRoutesByIATAsHop(gomock.Any(), sqlc.ListKnownRoutesByIATAsHopParams{Iatas: []string{"SEA", "KLS"}, HopCount: 3, PageLimit: 50}).Return(nil, nil)
 	q.EXPECT().GetNodesByIDs(gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
 	for _, c := range []struct {
-		iata   string
+		iatas  []string
 		hop    int32
 		cursor time.Time
 		id     int64
-	}{{"", 0, cursor, 7}, {"", 3, time.Time{}, 0}, {"SEA", 0, time.Time{}, 0}, {"SEA", 3, time.Time{}, 0}} {
-		routes, err := store.ListKnownRoutes(context.Background(), c.iata, c.hop, c.cursor, c.id, 50)
+	}{
+		{nil, 0, cursor, 7}, {[]string{}, 3, time.Time{}, 0}, {[]string{"SEA"}, 0, time.Time{}, 0}, {[]string{"SEA"}, 3, time.Time{}, 0},
+		{[]string{"KLS", "KLS", "SEA "}, 0, time.Time{}, 0}, {[]string{"KLS", ""}, 3, time.Time{}, 0},
+		{[]string{"SEA", "KLS", "SEA"}, 0, cursor, 7}, {[]string{"SEA", "KLS"}, 3, time.Time{}, 0},
+	} {
+		routes, err := store.ListKnownRoutes(context.Background(), c.iatas, c.hop, c.cursor, c.id, 50)
 		if err != nil || routes == nil || len(routes) != 0 {
 			t.Fatalf("%+v: %v %v", c, routes, err)
 		}
@@ -219,5 +236,85 @@ func TestReconfirmCursorDecode(t *testing.T) {
 		if iata != c.wantIATA || !bytes.Equal(key, c.wantKey) {
 			t.Errorf("%s: position = (%q, %x), want (%q, %x)", c.raw, iata, key, c.wantIATA, c.wantKey)
 		}
+	}
+}
+
+func TestHopGroupIsSmall(t *testing.T) {
+	// 10.5M routes, limit 200: the bound is 0.7 * sqrt(200 * 10.5M), about 32K routes.
+	st := sqlc.GetKnownRoutesHopStatsRow{Reltuples: 10_500_000, HasStats: true,
+		HopValues: []int32{6, 21, 22, 25}, HopFreqs: []float64{0.14, 0.0038, 0.002, 0.001}, NullFrac: 0, NDistinct: 40}
+	for _, c := range []struct {
+		name  string
+		st    sqlc.GetKnownRoutesHopStatsRow
+		hop   int32
+		limit int32
+		want  bool
+	}{
+		{"dense hop", st, 6, 200, false},
+		{"over the bound", st, 21, 200, false},
+		{"under the bound", st, 22, 200, true},
+		{"rare hop", st, 25, 200, true},
+		{"limit 50 halves the bound", st, 22, 50, false},
+		// 1 - 0.1458 spread over the 36 values outside the list, capped at the least common listed value (0.001):
+		// 10.5K routes, as the planner estimates it.
+		{"value outside the list", st, 9, 200, true},
+		{"value outside a list of common values", sqlc.GetKnownRoutesHopStatsRow{Reltuples: 10_500_000, HasStats: true,
+			HopValues: []int32{6, 7}, HopFreqs: []float64{0.3, 0.2}, NDistinct: 4}, 9, 200, false},
+		{"absent from a complete list", sqlc.GetKnownRoutesHopStatsRow{Reltuples: 10_500_000, HasStats: true,
+			HopValues: []int32{6, 7}, HopFreqs: []float64{0.5, 0.5}, NDistinct: 2}, 1, 200, true},
+		{"negative n_distinct scales with the rows", sqlc.GetKnownRoutesHopStatsRow{Reltuples: 10_500_000, HasStats: true,
+			HopValues: []int32{6}, HopFreqs: []float64{0.5}, NDistinct: -0.00001}, 9, 200, false},
+		{"no statistics", sqlc.GetKnownRoutesHopStatsRow{Reltuples: 10_500_000}, 25, 200, false},
+		{"never counted", sqlc.GetKnownRoutesHopStatsRow{Reltuples: -1, HasStats: true}, 25, 200, false},
+	} {
+		if got := hopGroupIsSmall(c.st, c.hop, c.limit); got != c.want {
+			t.Errorf("%s: hop %d limit %d = %v, want %v", c.name, c.hop, c.limit, got, c.want)
+		}
+	}
+}
+
+// The statistics are read once per TTL, and a failed read is retried soon while the last statistics stay in use.
+func TestHopGroupSmallCaches(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	q := mockdb.NewMockQuerier(ctrl)
+	store := &Store{q: q}
+	st := sqlc.GetKnownRoutesHopStatsRow{Reltuples: 3000, HasStats: true, HopValues: []int32{3}, HopFreqs: []float64{0.1}, NDistinct: 1}
+	q.EXPECT().GetKnownRoutesHopStats(gomock.Any()).Return(st, nil).Times(1)
+	for range 3 {
+		if !store.hopGroupSmall(context.Background(), 3, 50) {
+			t.Fatal("hop 3 not small")
+		}
+	}
+	// Expired: the read fails, the old statistics still answer, and the next read waits for hopStatsRetry.
+	store.hopStats.at = time.Now().Add(-hopStatsTTL)
+	q.EXPECT().GetKnownRoutesHopStats(gomock.Any()).Return(sqlc.GetKnownRoutesHopStatsRow{}, errors.New("down")).Times(1)
+	for range 3 {
+		if !store.hopGroupSmall(context.Background(), 3, 50) {
+			t.Fatal("hop 3 not small after a failed refresh")
+		}
+	}
+	if wait := time.Until(store.hopStats.at.Add(hopStatsTTL)); wait > hopStatsRetry || wait < hopStatsRetry-time.Minute {
+		t.Errorf("next read in %s, want about %s", wait, hopStatsRetry)
+	}
+}
+
+// A request that goes away while it refreshes the statistics does not fail the read.
+func TestHopGroupSmallReadOutlivesRequest(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	q := mockdb.NewMockQuerier(ctrl)
+	store := &Store{q: q}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	q.EXPECT().GetKnownRoutesHopStats(gomock.Any()).DoAndReturn(func(rctx context.Context) (sqlc.GetKnownRoutesHopStatsRow, error) {
+		if rctx.Err() != nil {
+			return sqlc.GetKnownRoutesHopStatsRow{}, rctx.Err()
+		}
+		if _, ok := rctx.Deadline(); !ok {
+			t.Error("statistics read has no deadline")
+		}
+		return sqlc.GetKnownRoutesHopStatsRow{Reltuples: 3000, HasStats: true, HopValues: []int32{3}, HopFreqs: []float64{0.1}, NDistinct: 1}, nil
+	}).Times(1)
+	if !store.hopGroupSmall(ctx, 3, 50) {
+		t.Fatal("hop 3 not small: the read failed with the request's context")
 	}
 }

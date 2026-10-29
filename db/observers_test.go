@@ -793,17 +793,16 @@ func TestGetObserverActivity_RawPath(t *testing.T) {
 	mock.EXPECT().GetObserverActivityRaw(gomock.Any(), gomock.Any()).
 		Return([]sqlc.GetObserverActivityRawRow{{
 			Bucket:       pgtype.Timestamptz{Time: time.UnixMilli(1700000000000), Valid: true},
+			PayloadType:  i16(1),
 			Observations: 5,
-			AirtimeMs:    50,
+			AirtimeSum:   50,
 			AirtimeN:     5,
-			SnrAvg:       4.25,
+			SnrSum:       8.5,
 			SnrMin:       1.5,
 			SnrN:         2,
-			RssiAvg:      -95.5,
+			RssiSum:      -191,
 			RssiN:        0,
 		}}, nil)
-	mock.EXPECT().GetObserverActivityRawPayloadTypes(gomock.Any(), gomock.Any()).
-		Return([]sqlc.GetObserverActivityRawPayloadTypesRow{{PayloadType: i16(1), Count: 5}}, nil)
 
 	store := &Store{q: mock}
 	got, err := store.GetObserverActivity(context.Background(), observerID, 6*time.Hour, 15*time.Minute, time.Time{})
@@ -843,16 +842,7 @@ func TestGetObserverActivity_RawFoldNoSignal(t *testing.T) {
 		Return([]sqlc.GetObserverActivityRawRow{{
 			Bucket:       pgtype.Timestamptz{Time: time.UnixMilli(1700000000000), Valid: true},
 			Observations: 7,
-			AirtimeMs:    0,
-			AirtimeN:     0,
-			SnrAvg:       0,
-			SnrMin:       0,
-			SnrN:         0,
-			RssiAvg:      0,
-			RssiN:        0,
 		}}, nil)
-	mock.EXPECT().GetObserverActivityRawPayloadTypes(gomock.Any(), gomock.Any()).
-		Return([]sqlc.GetObserverActivityRawPayloadTypesRow{}, nil)
 
 	store := &Store{q: mock}
 	got, err := store.GetObserverActivity(context.Background(), observerID, 6*time.Hour, 15*time.Minute, time.Time{})
@@ -884,8 +874,6 @@ func TestGetObserverActivity_RawPathEmpty(t *testing.T) {
 		Return(activityObserver(i16(10), i16(5), f32(62.5), nil), nil)
 	mock.EXPECT().GetObserverActivityRaw(gomock.Any(), gomock.Any()).
 		Return([]sqlc.GetObserverActivityRawRow{}, nil)
-	mock.EXPECT().GetObserverActivityRawPayloadTypes(gomock.Any(), gomock.Any()).
-		Return([]sqlc.GetObserverActivityRawPayloadTypesRow{}, nil)
 
 	store := &Store{q: mock}
 	got, err := store.GetObserverActivity(context.Background(), observerID, 6*time.Hour, 15*time.Minute, time.Time{})

@@ -77,7 +77,13 @@ func TestStatsWideIATAListUsesTodayStatement(t *testing.T) {
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
 				mock := mockdb.NewMockQuerier(gomock.NewController(t))
-				if tc.probe {
+				if len(tc.iatas) == 0 {
+					allRows := make([]sqlc.GetTopNodesAllRow, len(rows))
+					for i, r := range rows {
+						allRows[i] = sqlc.GetTopNodesAllRow(r)
+					}
+					mock.EXPECT().GetTopNodesAll(gomock.Any(), sqlc.GetTopNodesAllParams{Since: hour, RowLimit: 5}).Return(allRows, nil)
+				} else if tc.probe {
 					probeRows := make([]sqlc.GetTopNodesProbeRow, len(rows))
 					for i, r := range rows {
 						probeRows[i] = sqlc.GetTopNodesProbeRow(r)

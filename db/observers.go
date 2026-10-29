@@ -4,19 +4,25 @@
 package db
 
 import (
+	"cmp"
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math"
+	"slices"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
 	"github.com/MeshCore-Beacon/beacon-server/internal/lora"
+	"github.com/MeshCore-Beacon/beacon-server/internal/obscount"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -361,59 +367,132 @@ func (s *Store) GetObserverActivity(ctx context.Context, observerID uuid.UUID, w
 		return activity, nil
 	}
 
+	// Sub-hour buckets: the slots the in-memory counts cover come from them, the rest from raw rows in one pass.
+	headUntil, tailFrom := until, until
+	var counted obscount.ActivityWindow
+	if interval == obscount.ActivitySlot {
+		if counted, err = s.activityWindow(ctx, observerID, since, until); err != nil {
+			return nil, err
+		}
+		if counted.Live() {
+			headUntil, tailFrom = counted.From, counted.Until
+		}
+	}
 	rows, err := s.q.GetObserverActivityRaw(ctx, sqlc.GetObserverActivityRawParams{
+		Bin:        binWidth,
 		ObserverID: observerID,
-		Column2:    sinceTS,
-		Column3:    binWidth,
+		Since:      sinceTS,
+		HeadUntil:  pgtype.Timestamptz{Time: headUntil, Valid: true},
+		TailFrom:   pgtype.Timestamptz{Time: tailFrom, Valid: true},
 		Until:      pgtype.Timestamptz{Time: until, Valid: true},
 	})
 	if err != nil {
 		return nil, err
 	}
-	activity.Points = make([]api.ObserverActivityPoint, 0, len(rows))
+	buckets := map[time.Time]*activitySums{}
+	types := map[int16]int64{}
+	add := func(t time.Time, part activitySums) {
+		b := buckets[t]
+		if b == nil {
+			b = &activitySums{}
+			buckets[t] = b
+		}
+		b.merge(part)
+	}
 	for _, r := range rows {
-		p := api.ObserverActivityPoint{T: r.Bucket.Time.UnixMilli(), Observations: r.Observations}
-		activity.Summary.RecordedPackets += r.Observations
-		if r.AirtimeN > 0 {
-			airtime := r.AirtimeMs
-			p.AirtimeMs = &airtime
-		}
-		if r.SnrN > 0 {
-			avg, min := r.SnrAvg, r.SnrMin
-			if !math.IsNaN(float64(avg)) && !math.IsInf(float64(avg), 0) {
-				p.SNRAvg = &avg
-			}
-			if !math.IsNaN(float64(min)) && !math.IsInf(float64(min), 0) {
-				p.SNRMin = &min
-			}
-		}
-		if r.RssiN > 0 {
-			avg := r.RssiAvg
-			p.RSSIAvg = &avg
-		}
-		activity.Points = append(activity.Points, p)
-	}
-	typeRows, err := s.q.GetObserverActivityRawPayloadTypes(ctx, sqlc.GetObserverActivityRawPayloadTypesParams{
-		ObserverID: observerID,
-		Column2:    sinceTS,
-		Until:      pgtype.Timestamptz{Time: until, Valid: true},
-	})
-	if err != nil {
-		return nil, err
-	}
-	activity.PayloadTypes = make([]api.PayloadBreakdownItem, 0, len(typeRows))
-	for _, v := range typeRows {
+		add(r.Bucket.Time, activitySums{observations: r.Observations, airtimeSum: r.AirtimeSum, airtimeN: r.AirtimeN,
+			snrSum: r.SnrSum, snrMin: r.SnrMin, snrN: r.SnrN, rssiSum: r.RssiSum, rssiN: r.RssiN})
 		payloadType := int16(-1)
-		if v.PayloadType != nil {
-			payloadType = *v.PayloadType
+		if r.PayloadType != nil {
+			payloadType = *r.PayloadType
 		}
+		types[payloadType] += r.Observations
+	}
+	for t, b := range counted.Buckets {
+		add(t, activitySums{observations: b.Observations, airtimeSum: b.AirtimeSum, airtimeN: b.AirtimeN,
+			snrSum: b.SNRSum, snrMin: b.SNRMin, snrN: b.SNRN, rssiSum: b.RSSISum, rssiN: b.RSSIN})
+		for payloadType, n := range b.Types {
+			types[payloadType] += n
+		}
+	}
+	activity.Points = make([]api.ObserverActivityPoint, 0, len(buckets))
+	for _, t := range slices.SortedFunc(maps.Keys(buckets), time.Time.Compare) {
+		b := buckets[t]
+		activity.Points = append(activity.Points, b.point(t))
+		activity.Summary.RecordedPackets += b.observations
+	}
+	activity.PayloadTypes = make([]api.PayloadBreakdownItem, 0, len(types))
+	for payloadType, n := range types {
 		activity.PayloadTypes = append(activity.PayloadTypes, api.PayloadBreakdownItem{
 			PayloadType:     payloadType,
 			PayloadTypeName: api.PayloadTypeName(payloadType),
-			Count:           v.Count,
+			Count:           n,
 		})
 	}
+	slices.SortFunc(activity.PayloadTypes, func(a, b api.PayloadBreakdownItem) int {
+		return cmp.Or(cmp.Compare(b.Count, a.Count), cmp.Compare(a.PayloadType, b.PayloadType))
+	})
 	return activity, nil
+}
+
+// activityWindow is the part of [since, until) the in-memory counts cover, after any time retention may already
+// have thinned: observations heard more than 30 minutes after the newest deleted packet are all still stored.
+func (s *Store) activityWindow(ctx context.Context, observerID uuid.UUID, since, until time.Time) (obscount.ActivityWindow, error) {
+	w := s.obsActivity.Window(observerID, since, until)
+	if !w.Live() {
+		return w, nil
+	}
+	deleted, err := s.q.GetRawDeletedBefore(ctx)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return obscount.ActivityWindow{}, err
+	}
+	if floor := deleted.Time.Add(30*time.Minute + time.Microsecond); deleted.Valid && w.From.Before(floor) {
+		w = s.obsActivity.Window(observerID, floor, until)
+	}
+	return w, nil
+}
+
+// activitySums adds up a bucket's observations from raw rows and counted slots; its point is computed the same
+// way from either.
+type activitySums struct {
+	observations, airtimeN, snrN, rssiN, rssiSum int64
+	airtimeSum, snrSum                           float64
+	snrMin                                       float32
+}
+
+func (b *activitySums) merge(p activitySums) {
+	if p.snrN > 0 && (b.snrN == 0 || p.snrMin < b.snrMin) {
+		b.snrMin = p.snrMin
+	}
+	b.observations += p.observations
+	b.airtimeSum += p.airtimeSum
+	b.airtimeN += p.airtimeN
+	b.snrSum += p.snrSum
+	b.snrN += p.snrN
+	b.rssiSum += p.rssiSum
+	b.rssiN += p.rssiN
+}
+
+func (b *activitySums) point(t time.Time) api.ObserverActivityPoint {
+	p := api.ObserverActivityPoint{T: t.UnixMilli(), Observations: b.observations}
+	if b.airtimeN > 0 {
+		airtime := float32(b.airtimeSum)
+		p.AirtimeMs = &airtime
+	}
+	if b.snrN > 0 {
+		avg, min := float32(b.snrSum/float64(b.snrN)), b.snrMin
+		if !math.IsNaN(float64(avg)) && !math.IsInf(float64(avg), 0) {
+			p.SNRAvg = &avg
+		}
+		if !math.IsNaN(float64(min)) && !math.IsInf(float64(min), 0) {
+			p.SNRMin = &min
+		}
+	}
+	if b.rssiN > 0 {
+		avg := float32(float64(b.rssiSum) / float64(b.rssiN))
+		p.RSSIAvg = &avg
+	}
+	return p
 }
 
 func (s *Store) ListObserverAdverts(ctx context.Context, observerID uuid.UUID, cursor int64, limit int32) (api.Page[api.AdvertObservation], error) {

@@ -368,3 +368,63 @@ func TestNodesCursorPrecedence(t *testing.T) {
 	}
 	wantError(t, serve("/nodes?cursor=abc&pageCursor="+valid), http.StatusBadRequest, "cursor must be an integer")
 }
+
+func TestListNodes_Sort(t *testing.T) {
+	var gotSort api.NodeSort
+	var gotCursor *api.NodeSortCursor
+	var defaultCalls int
+	reader := stubReader{
+		listNodes: func(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
+			defaultCalls++
+			return api.NodePage{}, nil
+		},
+		listNodesSorted: func(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, sort api.NodeSort, cursor *api.NodeSortCursor, _ int32, _ bool) (api.NodePage, error) {
+			gotSort, gotCursor = sort, cursor
+			return api.NodePage{}, nil
+		},
+	}
+	nameCursor := api.NodeSortCursor{Sort: api.NodeSort{By: "name", Descending: true}, Text: "Peak: 9", Seen: -5, ID: uuid.New()}
+	for _, tc := range []struct {
+		query     string
+		code      int
+		body      string // a fragment of the response
+		sorted    *api.NodeSort
+		cursorSet bool
+	}{
+		{"", http.StatusOK, `"sort":"lastSeen","order":"desc"`, nil, false},
+		{"sort=lastSeen&order=desc&cursor=5", http.StatusOK, `"sort":"lastSeen","order":"desc"`, nil, false},
+		{"sort=name", http.StatusOK, `"sort":"name","order":"asc"`, &api.NodeSort{By: "name"}, false},
+		{"sort=neighbors&order=desc", http.StatusOK, `"sort":"neighbors","order":"desc"`, &api.NodeSort{By: "neighbors", Descending: true}, false},
+		{"sort=name&order=desc&pageCursor=" + nameCursor.String(), http.StatusOK, `"order":"desc"`, &nameCursor.Sort, true},
+		{"sort=name&pageCursor=" + nameCursor.String(), http.StatusBadRequest, "pageCursor", nil, false}, // the cursor is for desc
+		{"sort=type&order=desc&pageCursor=" + nameCursor.String(), http.StatusBadRequest, "pageCursor", nil, false},
+		{"sort=name&pageCursor=v1:1:" + uuid.Nil.String(), http.StatusBadRequest, "pageCursor", nil, false}, // a last-seen cursor
+		{"pageCursor=" + nameCursor.String(), http.StatusBadRequest, "pageCursor", nil, false},              // a sorted cursor without its sort
+		{"sort=type&cursor=5", http.StatusBadRequest, "cursor", nil, false},
+		{"sort=lastSeen&order=asc", http.StatusBadRequest, "lastSeen", nil, false},
+		{"sort=radio", http.StatusBadRequest, "sort", nil, false},
+		{"sort=name&order=up", http.StatusBadRequest, "order", nil, false},
+	} {
+		gotSort, gotCursor, defaultCalls = api.NodeSort{}, nil, 0
+		w := httptest.NewRecorder()
+		listNodes(reader).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/nodes?"+tc.query, nil))
+		if w.Code != tc.code || !strings.Contains(w.Body.String(), tc.body) {
+			t.Fatalf("%s: %d %s, want %d with %q", tc.query, w.Code, w.Body.String(), tc.code, tc.body)
+		}
+		if tc.code != http.StatusOK {
+			continue
+		}
+		if tc.sorted == nil {
+			if defaultCalls != 1 {
+				t.Fatalf("%s: default list not used", tc.query)
+			}
+			continue
+		}
+		if gotSort != *tc.sorted || (gotCursor != nil) != tc.cursorSet {
+			t.Fatalf("%s: sort %+v cursor %+v", tc.query, gotSort, gotCursor)
+		}
+		if tc.cursorSet && *gotCursor != nameCursor {
+			t.Fatalf("%s: cursor %+v, want %+v", tc.query, *gotCursor, nameCursor)
+		}
+	}
+}

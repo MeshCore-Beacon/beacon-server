@@ -40,34 +40,21 @@ const (
 	ClassC Class = iota
 	// ClassG is admitted as generic-safe and runs on a cached generic plan under Split.
 	ClassG
-	// ClassSlow is a statement that may read whole site histories in one call: it runs on api_slow, ungated, under
-	// that pool's own statement limit.
-	ClassSlow
 )
 
-// Slow lists the statements that may walk a large part of the observations in one call, so they run on their own
-// small pool and cannot hold the API pool's connections: the region page statement that answers when the site read
-// model's bounded reads run out of budget (both cursor forms), and the all-channel message statement for sites with a
-// since or a scope, which no read-model statement serves.
-var Slow = map[string]bool{
-	"ListPacketsByIATAs":      true,
-	"ListPacketsByIATAsAfter": true,
-	"ListAllChannelMessages":  true,
-}
-
-// VerificationOnly lists statements that only a read model's first-time verification runs, on its maintenance
-// connection; the API router refuses them, so no page can reach them. ListChannelMessages is the original
-// per-channel message statement, kept as the channel read model's oracle.
+// VerificationOnly lists statements no page runs; the API router refuses them. ListChannelMessages and
+// ListAllChannelMessages are the original message statements, kept as the channel read model's first-time
+// verification oracle (run on its maintenance connection); ListPacketsByIATAs is the original region statement,
+// kept so tests can compare region pages with it.
 var VerificationOnly = map[string]bool{
-	"ListChannelMessages": true,
+	"ListChannelMessages":    true,
+	"ListAllChannelMessages": true,
+	"ListPacketsByIATAs":     true,
 }
 
 // ClassOf returns the plan class for a sqlc statement name.
 func ClassOf(name string) Class {
-	switch {
-	case Slow[name], ReadModelFallbacks[name]:
-		return ClassSlow
-	case Cached[name]:
+	if Cached[name] {
 		return ClassG
 	}
 	return ClassC

@@ -7,14 +7,14 @@ statements:
 admission_profiles:
   global_page: [page1, deep, tie]
 entries:
-  - {id: gh.page1, stmt: ListKnownRoutesGlobalHop, shapes: [page1, deep, tie], params: [6, null, 0, 50]}
+  - {id: gh.page1, stmt: ListKnownRoutesGlobalHop, shapes: [page1, deep, tie], params: [6, null, 0, false, 50]}
   - id: gh.rare
     stmt: ListKnownRoutesGlobalHop
     shapes: [rare_hop]
-    params: [25, null, 0, 50]
+    params: [25, null, 0, false, 50]
     mode: {generic: {skip: generic plans read the whole hop group}}
   - id: gh.absent
     stmt: ListKnownRoutesGlobalHop
     shapes: [absent_hop]
-    params: [1, null, 0, 50]
+    params: [1, null, 0, false, 50]
     mode: {generic: {skip: generic plans read the whole hop group}}

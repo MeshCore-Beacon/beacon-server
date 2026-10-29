@@ -1,4 +1,0 @@
-[
- "Limit",
- "  Index Scan on packets using packets_pkey scan=Forward"
-]

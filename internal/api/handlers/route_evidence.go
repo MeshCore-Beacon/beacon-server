@@ -124,9 +124,8 @@ func getRouteEvidence(reader api.Reader) http.HandlerFunc {
 			respondError(w, 404, "saved route not found")
 		case errors.Is(err, api.ErrRouteEvidenceInput):
 			respondError(w, 400, "invalid route evidence request")
-		case respondUnavailable(w, err):
 		case err != nil:
-			respondError(w, 500, "internal server error")
+			respondReaderError(w, err, "internal server error")
 		default:
 			respond(w, 200, result)
 		}
