@@ -46,6 +46,7 @@ func ChannelsRouter(reader api.Reader) http.Handler {
 //	@Success	200		{object}	api.ChannelPage
 //	@Failure	400		{object}	handlers.APIError
 //	@Failure	500		{object}	handlers.APIError
+//	@Failure	503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/channels [get]
 func listChannels(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -103,7 +104,7 @@ func listChannels(reader api.Reader) http.HandlerFunc {
 		}
 		channels, err := reader.ListChannels(r.Context(), limit, hashHex, iatas, keyKnown, cursor, pageCursor)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, channels)
@@ -120,6 +121,7 @@ func listChannels(reader api.Reader) http.HandlerFunc {
 //	@Failure	400			{object}	handlers.APIError
 //	@Failure	404			{object}	handlers.APIError
 //	@Failure	500			{object}	handlers.APIError
+//	@Failure	503			{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/channels/{channelID} [get]
 func getChannel(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -138,7 +140,7 @@ func getChannel(reader api.Reader) http.HandlerFunc {
 			respondError(w, http.StatusNotFound, "channel not found")
 			return
 		case err != nil:
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, channel)
@@ -203,7 +205,7 @@ func listChannelMessages(reader api.Reader) http.HandlerFunc {
 		messages, err := reader.ListChannelMessages(r.Context(), &chanID, since, limit, iatas, scope, cursor)
 		if err != nil {
 			if !respondUnavailableFor(w, err, modelCmi) {
-				respondError(w, http.StatusInternalServerError, "internal server error")
+				respondReaderError(w, err, "internal server error")
 			}
 			return
 		}

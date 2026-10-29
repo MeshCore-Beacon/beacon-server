@@ -23,7 +23,7 @@ type stubReader struct {
 	listIATAs                    func(ctx context.Context) ([]api.IATA, error)
 	getIATA                      func(ctx context.Context, iata string) (*api.IATA, error)
 	getIATABorder                func(ctx context.Context, iata string) (json.RawMessage, error)
-	listRegions                  func(ctx context.Context) ([]api.RegionSummary, error)
+	listRegions                  func(ctx context.Context) ([]api.Region, error)
 	getRegion                    func(ctx context.Context, regionID int32) (*api.Region, error)
 	getRegionBySlug              func(ctx context.Context, slug string) (*api.Region, error)
 	listChannels                 func(ctx context.Context, limit int32, hash []byte, iatas []string, keyKnown *bool, cursor int64, pageCursor *api.ChannelCursor) (api.ChannelPage, error)
@@ -39,6 +39,7 @@ type stubReader struct {
 	getObserverScopes            func(ctx context.Context, observerID uuid.UUID) ([]string, error)
 	listObserverAdverts          func(ctx context.Context, observerID uuid.UUID, cursor int64, limit int32) (api.Page[api.AdvertObservation], error)
 	listNodes                    func(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (api.NodePage, error)
+	listNodesSorted              func(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, sort api.NodeSort, pageCursor *api.NodeSortCursor, limit int32, includeNeighbors bool) (api.NodePage, error)
 	getNode                      func(ctx context.Context, nodeID uuid.UUID) (*api.Node, error)
 	getNodeNeighbors             func(ctx context.Context, nodeID uuid.UUID) ([]api.NodeNeighbor, error)
 	listNodeObservations         func(ctx context.Context, nodeID uuid.UUID, cursor int64, limit int32) (api.Page[api.PacketObservationSummary], error)
@@ -61,7 +62,7 @@ type stubReader struct {
 	getScopeByName               func(ctx context.Context, name string) (*api.ScopeDetail, error)
 	listTraceTags                func(ctx context.Context, iatas []string, scope, traceType string, since, until time.Time, cursor time.Time, cursorTag string, limit int32) ([]api.TraceTagSummary, error)
 	getTraceByTag                func(ctx context.Context, tag string) (*api.TraceDetail, error)
-	listKnownRoutes              func(ctx context.Context, iata string, hopCount int32, cursor time.Time, cursorID int64, limit int32) ([]api.KnownRoute, error)
+	listKnownRoutes              func(ctx context.Context, iatas []string, hopCount int32, cursor time.Time, cursorID int64, limit int32) ([]api.KnownRoute, error)
 	searchKnownRoutes            func(ctx context.Context, iatas []string, fromHash, toHash string) ([]api.KnownRoute, error)
 	searchCrossIATARoutes        func(ctx context.Context, q api.CrossRouteSearch) ([]api.CrossIATARoute, error)
 	getNodesByIDs                func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*api.ResolvedNode, error)
@@ -110,7 +111,7 @@ func (s stubReader) GetIATABorder(ctx context.Context, iata string) (json.RawMes
 	return nil, nil
 }
 
-func (s stubReader) ListRegions(ctx context.Context) ([]api.RegionSummary, error) {
+func (s stubReader) ListRegions(ctx context.Context) ([]api.Region, error) {
 	if s.listRegions != nil {
 		return s.listRegions(ctx)
 	}
@@ -218,6 +219,13 @@ func (s stubReader) ListObserverAdverts(ctx context.Context, observerID uuid.UUI
 func (s stubReader) ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
 	if s.listNodes != nil {
 		return s.listNodes(ctx, nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, cursor, pageCursor, limit, includeNeighbors)
+	}
+	return api.NodePage{}, nil
+}
+
+func (s stubReader) ListNodesSorted(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, sort api.NodeSort, pageCursor *api.NodeSortCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
+	if s.listNodesSorted != nil {
+		return s.listNodesSorted(ctx, nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, sort, pageCursor, limit, includeNeighbors)
 	}
 	return api.NodePage{}, nil
 }
@@ -376,9 +384,9 @@ func (s stubReader) GetTraceByTag(ctx context.Context, tag string) (*api.TraceDe
 	return nil, nil
 }
 
-func (s stubReader) ListKnownRoutes(ctx context.Context, iata string, hopCount int32, cursor time.Time, cursorID int64, limit int32) ([]api.KnownRoute, error) {
+func (s stubReader) ListKnownRoutes(ctx context.Context, iatas []string, hopCount int32, cursor time.Time, cursorID int64, limit int32) ([]api.KnownRoute, error) {
 	if s.listKnownRoutes != nil {
-		return s.listKnownRoutes(ctx, iata, hopCount, cursor, cursorID, limit)
+		return s.listKnownRoutes(ctx, iatas, hopCount, cursor, cursorID, limit)
 	}
 	return nil, nil
 }

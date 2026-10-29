@@ -15,6 +15,7 @@ import (
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/guards"
+	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -26,17 +27,34 @@ func respondUnavailable(w http.ResponseWriter, err error) bool {
 		guards.WriteRefusal(w, &guards.Refusal{Guard: "not_ready", Status: http.StatusServiceUnavailable, RetryAfter: 30,
 			Code: "service_unavailable", Message: "This page is not available yet. Retry later."})
 		return true
-	case errors.Is(err, api.ErrSlowPoolBusy):
-		warnSlowPoolBusy()
-		guards.WriteRefusal(w, &guards.Refusal{Guard: "slow_pool", Status: http.StatusServiceUnavailable, RetryAfter: 5,
-			Code: "service_unavailable", Message: "The server is busy with other slow requests. Retry later."})
-		return true
 	case isQueryTimeout(err):
-		guards.WriteRefusal(w, &guards.Refusal{Guard: "timeout", Status: http.StatusServiceUnavailable, RetryAfter: 10,
-			Code: "deadline_exceeded", Message: "This page took too long to load. Retry later, or ask for a shorter time range."})
+		writeTimeout(w, "This page took too long to load. Retry later, or ask for a shorter time range.")
 		return true
 	}
 	return false
+}
+
+// respondTimeout answers a read that ran out of time on a page that reads no read model with 503 deadline_exceeded
+// and Retry-After, and counts it.
+func respondTimeout(w http.ResponseWriter, message string) {
+	writeTimeout(w, message)
+	metrics.APIUnavailable.WithLabelValues("timeout", modelNone).Inc()
+}
+
+func writeTimeout(w http.ResponseWriter, message string) {
+	guards.WriteRefusal(w, &guards.Refusal{Guard: "timeout", Status: http.StatusServiceUnavailable, RetryAfter: 10,
+		Code: "deadline_exceeded", Message: message})
+}
+
+// respondReaderError answers a failed read: a retryable error is the 503 respondUnavailable writes, counted with
+// model none, anything else a 500 with message that logs err. A read-model page calls it only after
+// respondUnavailableFor found the error not retryable, so it writes the 500 and counts nothing.
+func respondReaderError(w http.ResponseWriter, err error, message string) {
+	if respondUnavailableFor(w, err, modelNone) {
+		return
+	}
+	slog.Error(fmt.Sprintf("api: error %d: %s", http.StatusInternalServerError, message), "component", "api", "error", err)
+	writeError(w, http.StatusInternalServerError, message)
 }
 
 // isQueryTimeout reports a statement_timeout (57014) or deadline; a client that went away is not one.
@@ -78,6 +96,10 @@ func respondError(w http.ResponseWriter, status int, message string) {
 	if status >= 500 {
 		slog.Error(fmt.Sprintf("api: error %d: %s", status, message), "component", "api")
 	}
+	writeError(w, status, message)
+}
+
+func writeError(w http.ResponseWriter, status int, message string) {
 	code := strings.ToLower(strings.ReplaceAll(http.StatusText(status), " ", "_"))
 	respond(w, status, map[string]APIError{"error": {Code: code, Message: message}})
 }

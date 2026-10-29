@@ -1,4 +1,13 @@
 [
  "Limit",
- "  Index Scan on known_routes using idx_known_routes_keyset scan=Forward"
+ "  Sort",
+ "    Result",
+ "      Append",
+ "        Subquery Scan",
+ "          Limit [Subquery]",
+ "            Sort",
+ "              Result",
+ "        Subquery Scan",
+ "          Limit [Subquery]",
+ "            Index Scan on known_routes kk using idx_known_routes_keyset scan=Forward"
 ]

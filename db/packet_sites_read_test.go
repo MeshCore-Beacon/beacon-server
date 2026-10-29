@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -38,9 +39,13 @@ func TestSiteStatement(t *testing.T) {
 		{siteTyped, 1, true, "ListPacketsBySitesTypedFirst"},
 		{siteTyped, 3, false, "ListPacketsBySitesTypedFirst"},
 		{siteTyped, 3, true, "ListPacketsBySitesTyped"},
-		{siteSince, 1, false, "ListPacketsBySitesSince"},
-		{siteSince, 3, true, "ListPacketsBySitesSince"},
-		{siteScoped, 3, true, "ListPacketsBySitesScoped"},
+		{siteMany, 1, false, "ListPacketsBySitesSince"},
+		{siteMany, 3, true, "ListPacketsBySitesSince"},
+		{siteWindow, 1, false, "ListPacketsBySitesWindow"},
+		{siteWindow, 3, true, "ListPacketsBySitesWindow"},
+		{siteScoped, 3, true, "ListPacketsBySitesScopedWindow"},
+		{siteWindowTyped, 2, false, "ListPacketsBySitesTypedWindow"},
+		{siteScopedTyped, 1, true, "ListPacketsBySitesScopedTypedWindow"},
 	} {
 		if got := siteStatement(tc.fam, tc.sites, tc.hasCursor); got != tc.want {
 			t.Errorf("siteStatement(%d, %d, %v) = %s, want %s", tc.fam, tc.sites, tc.hasCursor, got, tc.want)
@@ -58,10 +63,14 @@ func TestSiteStatement(t *testing.T) {
 		{"types only", []int16{4}, nil, nil, time.Time{}, siteTyped},
 		{"four type pairs", []int16{4, 5}, []int16{0, 1}, nil, time.Time{}, siteTyped},
 		{"eight type pairs", []int16{4, 5}, nil, nil, time.Time{}, siteTyped},
-		{"many type pairs", []int16{4, 5, 6}, []int16{0, 1, 2}, nil, time.Time{}, siteSince},
-		{"route types only", nil, []int16{3}, nil, time.Time{}, siteSince}, // 16 payload types x 1
-		{"since and types", []int16{4}, nil, nil, since, siteSince},
-		{"scopes, since and types", []int16{4}, nil, []string{"#a"}, since, siteScoped},
+		{"many type pairs", []int16{4, 5, 6}, []int16{0, 1, 2}, nil, time.Time{}, siteMany},
+		{"route types only", nil, []int16{3}, nil, time.Time{}, siteMany}, // 16 payload types x 1
+		{"since and types", []int16{4}, nil, nil, since, siteWindowTyped},
+		{"since and every type", nil, []int16{0, 1, 2, 3}, nil, since, siteWindow},
+		{"since", nil, nil, nil, since, siteWindow},
+		{"scopes, since and types", []int16{4}, nil, []string{"#a"}, since, siteScopedTyped},
+		{"scopes and types", nil, []int16{3}, []string{"#a"}, time.Time{}, siteScopedTyped},
+		{"scopes", nil, nil, []string{"#a"}, time.Time{}, siteScoped},
 	} {
 		f, ok := newPacketFilter(tc.pt, tc.rt, tc.scopes, tc.since, time.Time{}, 0, nil, 50)
 		if !ok || siteFamilyOf(f) != tc.want {
@@ -124,16 +133,45 @@ func TestListPacketsRegionDispatch(t *testing.T) {
 		}},
 		{name: "since", iatas: []string{"AAA", "BBB"}, since: since, cursor: cursor, expect: func(m *mockdb.MockQuerier) {
 			known(m, []string{"AAA", "BBB"}, []string{"AAA", "BBB"})
-			m.EXPECT().ListPacketsBySitesSince(gomock.Any(), sqlc.ListPacketsBySitesSinceParams{
-				Iatas: []string{"AAA", "BBB"}, CursorTs: pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}, CursorHash: []byte{},
-				ScanDepth: 51 * 8, SinceTs: pgtype.Timestamptz{Time: since, Valid: true}, UntilTs: infinityTS,
-				PayloadTypes: allPayloadTypes, RouteTypes: allRouteTypes, Recheck: true, PageLimit: 51,
+			cur := pgtype.Timestamptz{Time: time.UnixMilli(cursor), Valid: true}
+			m.EXPECT().ListPacketsBySitesWindow(gomock.Any(), sqlc.ListPacketsBySitesWindowParams{
+				Iatas: []string{"AAA", "BBB"}, MainTs: cur, MainHash: []byte{}, LoTs: pgtype.Timestamptz{Time: since.Add(-30 * time.Minute), Valid: true},
+				HiTs: infinityTS, SinceTs: pgtype.Timestamptz{Time: since, Valid: true}, UntilTs: infinityTS,
+				PayloadTypes: allPayloadTypes, RouteTypes: allRouteTypes, Recheck: true, CursorTs: cur, CursorHash: []byte{}, PageLimit: 51,
+			}).Return(nil, nil)
+		}},
+		{name: "until", iatas: []string{"AAA"}, until: since, expect: func(m *mockdb.MockQuerier) {
+			known(m, []string{"AAA"}, []string{"AAA"})
+			hi := pgtype.Timestamptz{Time: since.Add(30 * time.Minute), Valid: true}
+			m.EXPECT().ListPacketsBySitesWindow(gomock.Any(), sqlc.ListPacketsBySitesWindowParams{
+				Iatas: []string{"AAA"}, MainTs: hi, MainHash: bytes.Repeat([]byte{0xff}, 64), LoTs: pgtype.Timestamptz{InfinityModifier: pgtype.NegativeInfinity, Valid: true},
+				HiTs: hi, SinceTs: pgtype.Timestamptz{InfinityModifier: pgtype.NegativeInfinity, Valid: true}, UntilTs: pgtype.Timestamptz{Time: since, Valid: true},
+				PayloadTypes: allPayloadTypes, RouteTypes: allRouteTypes, CursorTs: infinityTS, CursorHash: []byte{}, PageLimit: 51,
 			}).Return(nil, nil)
 		}},
 		{name: "scopes and since", iatas: []string{"AAA"}, scopes: []string{"#a"}, since: since, expect: func(m *mockdb.MockQuerier) {
 			known(m, []string{"AAA"}, []string{"AAA"})
-			m.EXPECT().ListPacketsBySitesScoped(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsBySitesScopedParams) bool {
-				return slices.Equal(p.ScopeNames, []string{"#a"}) && !p.Recheck && p.ScanDepth == 408 && p.CursorHash != nil
+			m.EXPECT().ListPacketsBySitesScopedWindow(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsBySitesScopedWindowParams) bool {
+				return slices.Equal(p.ScopeNames, []string{"#a"}) && !p.Recheck && p.CursorHash != nil && p.LoTs.Time.Equal(since.Add(-30*time.Minute))
+			})).Return(nil, nil)
+		}},
+		{name: "since and a type", iatas: []string{"AAA"}, pt: []int16{4}, since: since, expect: func(m *mockdb.MockQuerier) {
+			known(m, []string{"AAA"}, []string{"AAA"})
+			m.EXPECT().ListPacketsBySitesTypedWindow(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsBySitesTypedWindowParams) bool {
+				return slices.Equal(p.PayloadTypes, []int16{4}) && slices.Equal(p.RouteTypes, allRouteTypes) && p.LoTs.Time.Equal(since.Add(-30*time.Minute))
+			})).Return(nil, nil)
+		}},
+		{name: "scopes and a route type", iatas: []string{"AAA", "BBB"}, rt: []int16{3}, scopes: []string{"#a"}, cursor: cursor, expect: func(m *mockdb.MockQuerier) {
+			known(m, []string{"AAA", "BBB"}, []string{"AAA", "BBB"})
+			m.EXPECT().ListPacketsBySitesScopedTypedWindow(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsBySitesScopedTypedWindowParams) bool {
+				return p.Recheck && slices.Equal(p.RouteTypes, []int16{3}) && len(p.PayloadTypes) == 16 && slices.Equal(p.ScopeNames, []string{"#a"})
+			})).Return(nil, nil)
+		}},
+		{name: "scopes alone", iatas: []string{"AAA", "BBB"}, scopes: []string{"#a"}, cursor: cursor, expect: func(m *mockdb.MockQuerier) {
+			known(m, []string{"AAA", "BBB"}, []string{"AAA", "BBB"})
+			m.EXPECT().ListPacketsBySitesScopedWindow(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsBySitesScopedWindowParams) bool {
+				return p.Recheck && p.LoTs.InfinityModifier == pgtype.NegativeInfinity && p.HiTs.InfinityModifier == pgtype.Infinity &&
+					p.MainTs.Time.Equal(time.UnixMilli(cursor))
 			})).Return(nil, nil)
 		}},
 		{name: "pre-filter leaves nothing", iatas: []string{"QQQ"}, pt: []int16{4}, expect: func(m *mockdb.MockQuerier) {
@@ -196,6 +234,9 @@ func sinceFloor(at time.Time, hash byte) sqlc.ListPacketsBySitesSinceRow {
 	return r
 }
 
+// manyPT x manyRT is nine type pairs: the many-pair family.
+var manyPT, manyRT = []int16{4, 5, 6}, []int16{0, 1, 2}
+
 // A bounded read that stopped above the end of a range before the page was full reads on from its floor in the
 // same request, with the re-check, until the page is full: no short page with more.
 func TestListPacketsRegionBoundedContinues(t *testing.T) {
@@ -218,7 +259,7 @@ func TestListPacketsRegionBoundedContinues(t *testing.T) {
 	}, nil)
 	s := &Store{q: mock}
 	WithReadModels(earnedPacketSites())(s)
-	page, err := s.ListPackets(context.Background(), nil, nil, []string{"AAA", "BBB"}, nil, t0.Add(-time.Hour), time.Time{}, 0, nil, 2)
+	page, err := s.ListPackets(context.Background(), manyPT, manyRT, []string{"AAA", "BBB"}, nil, time.Time{}, time.Time{}, 0, nil, 2)
 	if err != nil || len(page.Items) != 2 || !page.HasMore || page.NextPageCursor == nil {
 		t.Fatalf("page %+v, %v", page, err)
 	}
@@ -227,14 +268,13 @@ func TestListPacketsRegionBoundedContinues(t *testing.T) {
 	}
 }
 
-// When the bounded reads of one request run out of their budget before the page is full, today's statement answers:
-// from the page cursor's exact position when the request carried one (or from the top on page 1), with the exact
-// next cursor; with a millisecond cursor alone, exactly as today.
-func TestListPacketsRegionBoundedFallsBack(t *testing.T) {
+// When the bounded reads of a many-pair request run out of their budget before the page is full, every pair's range
+// answers it from the same cursor, with the re-check only with a cursor and two or more sites.
+func TestListPacketsRegionBoundedFallsBackToPairs(t *testing.T) {
 	t0 := time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC)
 	pc := &api.PacketCursor{At: t0.Add(-time.Hour + 123*time.Microsecond), Hash: []byte{1}}
-	exhausted := func(mock *mockdb.MockQuerier) {
-		mock.EXPECT().FilterKnownSites(gomock.Any(), gomock.Any()).Return([]string{"AAA"}, nil)
+	exhausted := func(mock *mockdb.MockQuerier, sites []string) {
+		mock.EXPECT().FilterKnownSites(gomock.Any(), gomock.Any()).Return(sites, nil)
 		calls := 0
 		mock.EXPECT().ListPacketsBySitesSince(gomock.Any(), gomock.Any()).Times(siteBoundedRounds).DoAndReturn(
 			func(_ context.Context, p sqlc.ListPacketsBySitesSinceParams) ([]sqlc.ListPacketsBySitesSinceRow, error) {
@@ -242,52 +282,61 @@ func TestListPacketsRegionBoundedFallsBack(t *testing.T) {
 				return []sqlc.ListPacketsBySitesSinceRow{sinceFloor(t0.Add(-time.Duration(calls)*24*time.Hour), byte(calls))}, nil
 			})
 	}
-	row := func(at time.Time, h byte) sqlc.ListPacketsByIATAsAfterRow {
-		return sqlc.ListPacketsByIATAsAfterRow{PacketHash: []byte{h}, SiteHeardAt: pgtype.Timestamptz{Time: at, Valid: true}}
+	rows := make([]siteRow, 6)
+	for i := range rows {
+		rows[i] = siteRowAt(t0.Add(-time.Duration(i+2)*time.Hour), byte(6-i))
 	}
-	for _, tc := range []struct {
-		name   string
-		pc     *api.PacketCursor
-		wantTS pgtype.Timestamptz
-		wantH  []byte
-	}{
-		{"page cursor", pc, pgtype.Timestamptz{Time: pc.At, Valid: true}, pc.Hash},
-		{"page 1", nil, infinityTS, []byte{}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			mock := mockdb.NewMockQuerier(ctrl)
-			exhausted(mock)
-			mock.EXPECT().ListPacketsByIATAsAfter(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsByIATAsAfterParams) bool {
-				return p.CursorTs == tc.wantTS && bytes.Equal(p.CursorHash, tc.wantH) && p.ScanDepth == 6*8 && p.PageLimit == 6 &&
-					slices.Equal(p.PayloadTypes, []int16{4, 5}) && p.SinceTs.Valid
-			})).Return([]sqlc.ListPacketsByIATAsAfterRow{
-				row(t0.Add(-2*time.Hour), 6), row(t0.Add(-3*time.Hour), 5), row(t0.Add(-4*time.Hour), 4),
-				row(t0.Add(-5*time.Hour), 3), row(t0.Add(-6*time.Hour), 2), row(t0.Add(-7*time.Hour), 1),
-			}, nil)
-			s := &Store{q: mock}
-			WithReadModels(earnedPacketSites())(s)
-			page, err := s.ListPackets(context.Background(), []int16{4, 5}, nil, []string{"AAA"}, nil, t0.Add(-48*time.Hour), time.Time{}, 0, tc.pc, 5)
-			want := api.PacketCursor{At: t0.Add(-6 * time.Hour), Hash: []byte{2}}.String()
-			if err != nil || len(page.Items) != 5 || !page.HasMore || page.NextPageCursor == nil || *page.NextPageCursor != want {
-				t.Fatalf("fallback page %+v, %v", page, err)
-			}
-		})
+	typed := make([]sqlc.ListPacketsBySitesTypedRow, len(rows))
+	first := make([]sqlc.ListPacketsBySitesTypedFirstRow, len(rows))
+	for i, r := range rows {
+		typed[i], first[i] = sqlc.ListPacketsBySitesTypedRow(r), sqlc.ListPacketsBySitesTypedFirstRow(r)
 	}
-	t.Run("millisecond cursor", func(t *testing.T) {
-		ctrl := gomock.NewController(t)
-		mock := mockdb.NewMockQuerier(ctrl)
-		exhausted(mock)
-		const cursor = int64(1792442625019)
-		mock.EXPECT().ListPacketsByIATAs(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsByIATAsParams) bool {
-			return p.CursorTs.Time.Equal(time.UnixMilli(cursor)) && p.ScanDepth == 6*8 && p.PageLimit == 6
-		})).Return([]sqlc.ListPacketsByIATAsRow{{PacketHash: []byte{2}, SiteHeardAt: pgtype.Timestamptz{Time: t0.Add(-2 * time.Hour), Valid: true}}}, nil)
+	want := api.PacketCursor{At: t0.Add(-6 * time.Hour), Hash: []byte{2}}.String()
+	check := func(t *testing.T, page api.PacketPage, err error) {
+		t.Helper()
+		if err != nil || len(page.Items) != 5 || !page.HasMore || page.NextPageCursor == nil || *page.NextPageCursor != want {
+			t.Fatalf("page %+v, %v", page, err)
+		}
+	}
+	t.Run("page cursor, two sites", func(t *testing.T) {
+		mock := mockdb.NewMockQuerier(gomock.NewController(t))
+		exhausted(mock, []string{"AAA", "BBB"})
+		mock.EXPECT().ListPacketsBySitesTyped(gomock.Any(), sqlc.ListPacketsBySitesTypedParams{
+			Iatas: []string{"AAA", "BBB"}, PayloadTypes: manyPT, RouteTypes: manyRT, CursorTs: pgtype.Timestamptz{Time: pc.At, Valid: true}, CursorHash: pc.Hash, PageLimit: 6,
+		}).Return(typed, nil)
 		s := &Store{q: mock}
 		WithReadModels(earnedPacketSites())(s)
-		page, err := s.ListPackets(context.Background(), []int16{4, 5}, nil, []string{"AAA"}, nil, t0.Add(-48*time.Hour), time.Time{}, cursor, nil, 5)
-		if err != nil || len(page.Items) != 1 || page.HasMore || page.NextPageCursor != nil {
-			t.Fatalf("fallback page %+v, %v", page, err)
+		page, err := s.ListPackets(context.Background(), manyPT, manyRT, []string{"AAA", "BBB"}, nil, time.Time{}, time.Time{}, 0, pc, 5)
+		check(t, page, err)
+	})
+	t.Run("more pairs' ranges than the cap", func(t *testing.T) {
+		mock := mockdb.NewMockQuerier(gomock.NewController(t))
+		many := make([]string, siteTypedRanges/9+1)
+		for i := range many {
+			many[i] = fmt.Sprintf("%03d", i)
 		}
+		exhausted(mock, many)
+		mock.EXPECT().ListPacketsBySitesWindow(gomock.Any(), gomock.Cond(func(p sqlc.ListPacketsBySitesWindowParams) bool {
+			return len(p.Iatas) == len(many) && slices.Equal(p.PayloadTypes, manyPT) && p.LoTs.InfinityModifier == pgtype.NegativeInfinity &&
+				p.HiTs.InfinityModifier == pgtype.Infinity
+		})).Return(nil, nil)
+		s := &Store{q: mock}
+		WithReadModels(earnedPacketSites())(s)
+		page, err := s.ListPackets(context.Background(), manyPT, manyRT, many, nil, time.Time{}, time.Time{}, 0, nil, 5)
+		if err != nil || len(page.Items) != 0 || page.HasMore {
+			t.Fatalf("page %+v, %v", page, err)
+		}
+	})
+	t.Run("page 1", func(t *testing.T) {
+		mock := mockdb.NewMockQuerier(gomock.NewController(t))
+		exhausted(mock, []string{"AAA", "BBB"})
+		mock.EXPECT().ListPacketsBySitesTypedFirst(gomock.Any(), sqlc.ListPacketsBySitesTypedFirstParams{
+			Iatas: []string{"AAA", "BBB"}, PayloadTypes: manyPT, RouteTypes: manyRT, CursorTs: infinityTS, CursorHash: []byte{}, PageLimit: 6,
+		}).Return(first, nil)
+		s := &Store{q: mock}
+		WithReadModels(earnedPacketSites())(s)
+		page, err := s.ListPackets(context.Background(), manyPT, manyRT, []string{"AAA", "BBB"}, nil, time.Time{}, time.Time{}, 0, nil, 5)
+		check(t, page, err)
 	})
 }
 
@@ -297,8 +346,11 @@ func TestListPacketsRegionHasMoreFromKeys(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mock := mockdb.NewMockQuerier(ctrl)
 	mock.EXPECT().FilterKnownSites(gomock.Any(), gomock.Any()).Return([]string{"AAA"}, nil)
-	mock.EXPECT().ListPacketsBySitesSince(gomock.Any(), gomock.Any()).Return([]sqlc.ListPacketsBySitesSinceRow{
-		sinceKey(t0, 3), sinceKey(t0.Add(-time.Second), 2), sinceKey(t0.Add(-2*time.Second), 1),
+	key := func(at time.Time, h byte) sqlc.ListPacketsBySitesWindowRow {
+		return sqlc.ListPacketsBySitesWindowRow{PacketHash: []byte{h}, SiteHeardAt: pgtype.Timestamptz{Time: at, Valid: true}}
+	}
+	mock.EXPECT().ListPacketsBySitesWindow(gomock.Any(), gomock.Any()).Return([]sqlc.ListPacketsBySitesWindowRow{
+		key(t0, 3), key(t0.Add(-time.Second), 2), key(t0.Add(-2*time.Second), 1),
 	}, nil)
 	mock.EXPECT().ListPacketsBySiteKeys(gomock.Any(), gomock.Any()).Return([]sqlc.ListPacketsBySiteKeysRow{
 		sqlc.ListPacketsBySiteKeysRow(siteRowAt(t0, 3)), sqlc.ListPacketsBySiteKeysRow(siteRowAt(t0.Add(-2*time.Second), 1)),
@@ -351,5 +403,86 @@ func TestListPacketsRegionUntrustedNotReady(t *testing.T) {
 				ctrl.Finish()
 			}
 		})
+	}
+}
+
+// windowBounds lowers the page start to hi only for an infinite cursor or one above hi, and keeps every unbounded
+// value for times outside years 1-9999.
+func TestWindowBounds(t *testing.T) {
+	until := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	hi := until.Add(siteSkew)
+	for _, tc := range []struct {
+		name         string
+		since, until time.Time
+		pc           *api.PacketCursor
+		wantLo       string
+		wantHi       string
+		wantMain     string
+		lowered      bool
+	}{
+		{name: "no window", wantLo: "-infinity", wantHi: "infinity", wantMain: "infinity"},
+		{name: "since", since: until, wantLo: until.Add(-siteSkew).Format(time.RFC3339Nano), wantHi: "infinity", wantMain: "infinity"},
+		{name: "until, page 1", until: until, wantLo: "-infinity", wantHi: hi.Format(time.RFC3339Nano), wantMain: hi.Format(time.RFC3339Nano), lowered: true},
+		{name: "until, cursor above hi", until: until, pc: &api.PacketCursor{At: hi.Add(time.Microsecond), Hash: []byte{1}},
+			wantLo: "-infinity", wantHi: hi.Format(time.RFC3339Nano), wantMain: hi.Format(time.RFC3339Nano), lowered: true},
+		{name: "until, cursor at hi", until: until, pc: &api.PacketCursor{At: hi, Hash: []byte{1}},
+			wantLo: "-infinity", wantHi: hi.Format(time.RFC3339Nano), wantMain: hi.Format(time.RFC3339Nano)},
+		{name: "until, cursor below", until: until, pc: &api.PacketCursor{At: until, Hash: []byte{1}},
+			wantLo: "-infinity", wantHi: hi.Format(time.RFC3339Nano), wantMain: until.Format(time.RFC3339Nano)},
+		{name: "until past year 9999", until: time.Date(12000, 1, 1, 0, 0, 0, 0, time.UTC), wantLo: "-infinity", wantHi: "infinity", wantMain: "infinity"},
+		{name: "since before year 1", since: time.Date(0, 6, 1, 0, 0, 0, 0, time.UTC), wantLo: "-infinity", wantHi: "infinity", wantMain: "infinity"},
+		{name: "cursor past year 9999", until: until, pc: &api.PacketCursor{At: time.Date(12000, 1, 1, 0, 0, 0, 0, time.UTC), Hash: []byte{1}},
+			wantLo: "-infinity", wantHi: hi.Format(time.RFC3339Nano), wantMain: "12000-01-01T00:00:00Z"},
+	} {
+		f, _ := newPacketFilter(nil, nil, nil, tc.since, tc.until, 0, tc.pc, 50)
+		lo, h, main, mainHash := windowBounds(f)
+		str := func(ts pgtype.Timestamptz) string {
+			switch ts.InfinityModifier {
+			case pgtype.Infinity:
+				return "infinity"
+			case pgtype.NegativeInfinity:
+				return "-infinity"
+			}
+			return ts.Time.UTC().Format(time.RFC3339Nano)
+		}
+		got := []string{str(lo), str(h), str(main)}
+		want := []string{tc.wantLo, tc.wantHi, tc.wantMain}
+		for i := range got {
+			if got[i] != want[i] {
+				t.Errorf("%s: bound %d = %s, want %s", tc.name, i, got[i], want[i])
+			}
+		}
+		if lowered := len(mainHash) == maxCursorHashBytes; lowered != tc.lowered {
+			t.Errorf("%s: start lowered to hi = %v, want %v", tc.name, lowered, tc.lowered)
+		}
+	}
+}
+
+// Typed window families walk per-pair ranges only up to siteTypedRanges ranges; above that they read each site (or site
+// and scope) range with the types as a filter.
+func TestCapTypedRanges(t *testing.T) {
+	since := time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC)
+	scopes := make([]string, 70)
+	for i := range scopes {
+		scopes[i] = fmt.Sprintf("#s%d", i)
+	}
+	for _, tc := range []struct {
+		name   string
+		pt     []int16
+		scopes []string
+		sites  int
+		want   siteFamily
+	}{
+		{"a region, one type", []int16{4}, nil, 22, siteWindowTyped},
+		{"every site, 13 types", []int16{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}, nil, 625, siteWindow},
+		{"at the cap", []int16{4}, nil, siteTypedRanges / 4, siteWindowTyped},
+		{"one past the cap", []int16{4}, nil, siteTypedRanges/4 + 1, siteWindow},
+		{"a region, scopes and a type", []int16{4}, []string{"#a", "#b"}, 22, siteScopedTyped},
+		{"many scopes and sites", []int16{4}, scopes, 22, siteScoped},
+	} {
+		f, _ := newPacketFilter(tc.pt, nil, tc.scopes, since, time.Time{}, 0, nil, 50)
+		if got := capTypedRanges(siteFamilyOf(f), f, tc.sites); got != tc.want {
+			t.Errorf("%s: family %d, want %d", tc.name, got, tc.want)
+		}
 	}
 }

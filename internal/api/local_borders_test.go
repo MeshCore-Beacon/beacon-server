@@ -35,6 +35,10 @@ func (r *borderReader) ListNodes(_ context.Context, _ int16, _ []string, _, _ *b
 	r.listCalls++
 	return r.page, r.err
 }
+func (r *borderReader) ListNodesSorted(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ api.NodeSort, _ *api.NodeSortCursor, _ int32, _ bool) (api.NodePage, error) {
+	r.listCalls++
+	return r.page, r.err
+}
 
 func TestLocalBordersAfterCache(t *testing.T) {
 	ctx := context.Background()
@@ -75,12 +79,19 @@ func TestLocalBordersAfterCache(t *testing.T) {
 		if !page.HasMore || *page.NextCursor != 123 || page.NextPageCursor == nil || *page.NextPageCursor != *base.page.NextPageCursor || page.Items[0].PossiblyForeign == nil || *page.Items[0].PossiblyForeign != tc.want {
 			t.Fatalf("page: %+v", page)
 		}
+		sorted, err := tc.reader.ListNodesSorted(ctx, 2, nil, nil, nil, nil, "", "", "", api.NodeSort{By: api.NodeSortName}, nil, 50, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sorted.Items[0].PossiblyForeign == nil || *sorted.Items[0].PossiblyForeign != tc.want {
+			t.Fatalf("sorted page: %+v", sorted)
+		}
 		data, _ := json.Marshal(got)
 		if !strings.Contains(string(data), `"possiblyForeign":`) {
 			t.Fatal("known false was omitted")
 		}
 	}
-	if base.getCalls != 1 || base.listCalls != 2 {
+	if base.getCalls != 1 || base.listCalls != 4 {
 		t.Fatalf("extra reads: get=%d list=%d", base.getCalls, base.listCalls)
 	}
 	if node.PossiblyForeign != nil || base.page.Items[0].PossiblyForeign != nil {

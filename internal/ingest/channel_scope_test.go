@@ -48,7 +48,7 @@ func TestChannelMessageScopeLive(t *testing.T) {
 			waitForSummarySubscriber(t, ctx, w.hub, client)
 			packet := &meshcore.Packet{Header: meshcore.MakeHeader(meshcore.RouteTypeTransportFlood, meshcore.PayloadTypeGrpTxt, 0), Payload: encryptedGroupText(t, 0x11, psk, "Fixture", "test")}
 			latest := "#different-later-reception"
-			w.handlePayloadTypeSideEffects(ctx, packet, "YOW", []byte{1}, RadioSettings{}, nil, &latest, nil, snrTestValue(0), false)
+			w.handlePayloadTypeSideEffects(ctx, packet, "YOW", []byte{1}, RadioSettings{}, nil, &latest, nil, snrTestValue(0), false, false)
 			select {
 			case event := <-client.Send:
 				var got channelMessageEvent
@@ -61,7 +61,7 @@ func TestChannelMessageScopeLive(t *testing.T) {
 			case <-ctx.Done():
 				t.Fatal("no live message")
 			}
-			w.handlePayloadTypeSideEffects(ctx, packet, "YOW", []byte{1}, RadioSettings{}, nil, &latest, nil, snrTestValue(0), false)
+			w.handlePayloadTypeSideEffects(ctx, packet, "YOW", []byte{1}, RadioSettings{}, nil, &latest, nil, snrTestValue(0), false, false)
 			w.hub.Broadcast(hub.Event{Type: hub.EventObserverStatus})
 			select {
 			case event := <-client.Send:
@@ -92,7 +92,7 @@ func TestChannelPublicMarkerUsesDecryptionKey(t *testing.T) {
 		w.hub.AddScope(client, "public-marker", hub.Scope{Events: []hub.EventType{hub.EventChannelMessage, hub.EventObserverStatus}})
 		waitForSummarySubscriber(t, ctx, w.hub, client)
 		packet := &meshcore.Packet{Header: meshcore.MakeHeader(meshcore.RouteTypeFlood, meshcore.PayloadTypeGrpTxt, 0), Payload: encryptedGroupText(t, 0x11, key, "Fixture", "test")}
-		w.handlePayloadTypeSideEffects(ctx, packet, "YKF", []byte{1}, RadioSettings{}, nil, nil, nil, snrTestValue(0), false)
+		w.handlePayloadTypeSideEffects(ctx, packet, "YKF", []byte{1}, RadioSettings{}, nil, nil, nil, snrTestValue(0), false, false)
 		select {
 		case event := <-client.Send:
 			var got channelMessageEvent

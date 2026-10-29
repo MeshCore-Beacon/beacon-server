@@ -177,7 +177,7 @@ type DB interface {
 	UpsertChannelHashOnly(ctx context.Context, channelHash []byte) (int, error)
 
 	// ListUndecryptedGroupTextPackets returns GRP_TXT packets never successfully decrypted --
-	// used by BackfillChannelMessages to retry them against the current keystore at boot.
+	// used by DecryptBackfill to retry them against the current keystore after boot.
 	ListUndecryptedGroupTextPackets(ctx context.Context) ([]UndecryptedPacket, error)
 
 	// ListUndecryptedGroupTextPacketsByHash limits that scan to channels that just gained a key.

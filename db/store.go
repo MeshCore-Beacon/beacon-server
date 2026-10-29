@@ -14,6 +14,7 @@ import (
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/MeshCore-Beacon/beacon-server/internal/obscount"
 	"github.com/google/uuid"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -35,7 +36,13 @@ type Store struct {
 	packetSitesVacuums  atomic.Int32    // VACUUM (ANALYZE) runs of packet_sites by the first-time verification
 	fill                *FillPacing     // see WithFillPacing; nil: DefaultFillPacing
 	packetSitesProgress FillProgress    // the packet_sites backfill's progress log, across sessions
+	packetSitesIDs      idHistogram     // the id statistics that progress counts in, read when it started
 	cmiProgress         FillProgress    // the cmi backfill's progress log, across sessions
+	hopStats            hopStatsCache   // known_routes hop statistics for the global hop page; see hopGroupSmall
+
+	obsCounts *obscount.Counts // see WithObservationCounts; nil: the directory reads raw rows
+
+	obsActivity *obscount.Activity // see WithObservationActivity; nil: activity reads raw rows
 }
 
 // New creates a Store whose statements run on dbtx (a pool, or a PlanRouter for the API).

@@ -4,7 +4,7 @@
  "    Merge Append",
  "      Limit",
  "        Sort",
- "          Index Scan on packets p_1 using idx_packets_type_last_heard scan=Forward",
+ "          Index Scan on packets p_1 using idx_packets_payload_type scan=Forward",
  "      Sort",
  "        Index Only Scan on packets p_2 using idx_packets_heard_inverted scan=Forward",
  "  Nested Loop (Left)",

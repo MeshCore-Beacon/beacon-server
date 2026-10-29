@@ -36,6 +36,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/logging"
 	"github.com/MeshCore-Beacon/beacon-server/internal/meshmapper"
 	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
+	"github.com/MeshCore-Beacon/beacon-server/internal/obscount"
 	"github.com/MeshCore-Beacon/beacon-server/internal/planguard"
 	"github.com/MeshCore-Beacon/beacon-server/internal/presence"
 	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
@@ -121,6 +122,9 @@ func main() {
 	if msg := proxyLimitWarning(resolved, len(cfg.Server.TrustedProxies)); msg != "" {
 		slog.Warn(msg, "component", "startup")
 	}
+	for _, key := range cfg.IgnoredKeys() {
+		slog.Warn("config: "+key+" is no longer used and is ignored; remove it", "component", "startup")
+	}
 	borderFiles, err := config.LoadLocalBorders(cfg)
 	if err != nil {
 		slog.Error("invalid local border configuration", "component", "startup", "error", err)
@@ -145,7 +149,7 @@ func main() {
 	dsn := getEnv("POSTGRES_DSN")
 	layout := resolved.APIPlanLayout
 	mode := bootModeFor(resolved.ReadOnly)
-	tune := []func(string, *pgxpool.Config){db.SlowPoolSize(resolved.SlowPoolSize)}
+	var tune []func(string, *pgxpool.Config)
 	if resolved.ReadOnly {
 		slog.Warn(readOnlyWarning, "component", "startup")
 		tune = append(tune, readOnlyTune)
@@ -184,10 +188,18 @@ func main() {
 	guard := guards.New(guards.Options{Enforce: enforce, ForceObserve: layout == planpolicy.Single, Budget: resolved.GuardsBudget})
 	// Ingest and maintenance share one channel id cache; the API never writes channels.
 	channelIDs := db.NewChannelIDCache()
-	ingestStore := db.New(pools.Ingest, pools.Ingest, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold, db.WithChannelIDs(channelIDs), db.WithReadModels(readModels))
+	// The ingesting process counts what it stores, so its observer directory skips re-reading the unrolled hours
+	// and its observer activity chart the recent 15-minute slots.
+	var obsCounts *obscount.Counts
+	var obsActivity *obscount.Activity
+	if mode.Ingest {
+		obsCounts = obscount.New(time.Now)
+		obsActivity = obscount.NewActivity(time.Now)
+	}
+	ingestStore := db.New(pools.Ingest, pools.Ingest, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold, db.WithChannelIDs(channelIDs), db.WithReadModels(readModels), db.WithObservationCounts(obsCounts), db.WithObservationActivity(obsActivity))
 	fillPacing := db.FillPacing{Duty: resolved.FillDuty, MinPause: resolved.FillMinPause, PacketSitesSlice: resolved.FillPacketSitesSlice, CmiBatch: resolved.FillCmiBatch}
 	maintStore := db.New(pools.Maint, pools.Maint, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold, db.WithChannelIDs(channelIDs), db.WithReadModels(readModels), db.WithFillPacing(fillPacing))
-	apiStore := db.NewAPIStore(pools, layout, guard, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold, db.WithReadModels(readModels))
+	apiStore := db.NewAPIStore(pools, layout, guard, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold, db.WithReadModels(readModels), db.WithObservationCounts(obsCounts), db.WithObservationActivity(obsActivity))
 	if err := maintStore.PreloadChannelIDs(ctx); err != nil {
 		slog.Warn("channel id preload failed; known channels upsert until cached", "component", "startup", "error", err)
 	} else {
@@ -197,8 +209,9 @@ func main() {
 	// ── Presence write coalescing ────────────────────────────────────────────
 	// Ingest writes go through the coalescer; reads use the API store.
 	coalescer := presence.New(ingestStore, resolved.PresenceFlushInterval, resolved.PresencePacketTTL)
+	finishPresence := func(context.Context) {}
 	if mode.Coalescer {
-		go coalescer.Run(ctx)
+		finishPresence = coalescer.Start(ctx)
 	}
 
 	// ── Redis cache layer ────────────────────────────────────────────────────
@@ -372,9 +385,22 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	// Historical decryption is a resumable background job. It must never delay
-	// the HTTP listener or MQTT subscription, including after a key import.
-	history := ingest.NewChannelHistory(maintStore, keys)
+	// ── Backfill channel messages ────────────────────────────────────────────
+	// Packets whose channel key wasn't yet configured at ingest time were stored as
+	// hash-only channels and never decrypted. Retry them against the keystore we just
+	// built, so adding a channel key to the config surfaces its history after the next boot
+	// instead of leaving it stranded in the DB indefinitely. It runs in the background once
+	// the server listens (reading every undecrypted packet takes a while on a slow disk);
+	// imported keys queue their channels on the same job, off the refresh tick.
+	var decryptBackfill *ingest.DecryptBackfill
+	if mode.Backfill {
+		// Paced by duty alone: most packets fail to decrypt, which costs CPU, not the database, so a fixed
+		// pause per batch would only stretch the run.
+		decryptBackfill = ingest.NewDecryptBackfill(maintStore, keys, db.FillPacing{Duty: resolved.FillDuty})
+		if channelImporter != nil {
+			channelImporter.OnNewKeys(decryptBackfill.RequestHashes)
+		}
+	}
 
 	// ── Build geographic ingest filter ───────────────────────────────────────────────────────────
 	allowedIATAs := iatadb.BuildAllowedSet(cfg.Ingest.AllowCountries, cfg.Ingest.AllowContinents)
@@ -430,13 +456,16 @@ func main() {
 		ingestWorkers.Go(func() { broker2.Start(ctx) })
 	}
 
+	// Every background goroutine that writes through a pool joins backgroundJobs, so shutdown waits for it before
+	// the pools close.
+	var backgroundJobs sync.WaitGroup
 	rollup := background.NewRollup(maintStore, resolved.PacketRetention, resolved.RollupRetention)
 	if mode.Jobs {
-		go func() {
-			if err := rollup.CatchUp(ctx); err != nil {
+		backgroundJobs.Go(func() {
+			if err := rollup.CatchUp(ctx); err != nil && ctx.Err() == nil {
 				slog.Error("analytics rollup catch-up failed", "component", "background", "error", err)
 			}
-		}()
+		})
 	}
 	tasks := []background.Task{
 		rollup.Task(),
@@ -454,8 +483,10 @@ func main() {
 		background.PayloadTypeBackfillTask(maintStore, time.Minute),
 		background.PgStatsTask(maintStore, time.Minute),
 	}
-	if mode.Backfill {
-		tasks = append(tasks, background.Task{Name: "channel_history", Interval: time.Second, Run: history.Run})
+	// The all-regions default Analytics views stay cached across rolls; without Redis there's nothing to fill.
+	if cr, ok := reader.(*cache.CachedReader); ok {
+		stats := handlers.StatsRouter(cr, handlers.StatsOptions{Scopes: scopes, SeriesWindow: resolved.RollupRetention})
+		tasks = append(tasks, background.NewStatsWarm(stats, cr.StatsRevision).Task())
 	}
 	if resolved.ObserverDeleteAfter > 0 {
 		var onDelete func(context.Context, uuid.UUID)
@@ -512,8 +543,12 @@ func main() {
 	if mode.Jobs {
 		tasks = append(tasks, cmiJobs.Task(), psJobs.Task(), psJobs.AuditTask(), psJobs.SweepTask())
 	} else {
-		go background.CmiReadOnlyWatch(ctx, maintStore.CheckCmiReadOnly, readModels.Cmi, background.CmiInterval)
-		go background.PacketSitesReadOnlyWatch(ctx, maintStore.CheckPacketSitesReadOnly, readModels.PacketSites, background.PacketSitesInterval)
+		backgroundJobs.Go(func() {
+			background.CmiReadOnlyWatch(ctx, maintStore.CheckCmiReadOnly, readModels.Cmi, background.CmiInterval)
+		})
+		backgroundJobs.Go(func() {
+			background.PacketSitesReadOnlyWatch(ctx, maintStore.CheckPacketSitesReadOnly, readModels.PacketSites, background.PacketSitesInterval)
+		})
 	}
 	pgSource, pgTask := planguardWiring(ctx, resolved.PlanguardDailyCheck, mode.Jobs, pools.Maint)
 	if pgTask != nil {
@@ -526,9 +561,9 @@ func main() {
 	}
 	if mode.Jobs {
 		scheduler := background.New(tasks)
-		go scheduler.Start(ctx)
-		go cmiJobs.Boot(ctx)
-		go psJobs.Boot(ctx)
+		backgroundJobs.Go(func() { scheduler.Start(ctx) })
+		backgroundJobs.Go(func() { cmiJobs.Boot(ctx) })
+		backgroundJobs.Go(func() { psJobs.Boot(ctx) })
 	}
 
 	// ── HTTP server ──────────────────────────────────────────────────────────
@@ -571,6 +606,11 @@ func main() {
 		}
 	}()
 
+	if decryptBackfill != nil {
+		decryptBackfill.RequestAll()
+		backgroundJobs.Go(func() { decryptBackfill.Run(ctx) })
+	}
+
 	// The admin listener serves only /metrics; keep it off the public network.
 	var adminSrv *http.Server
 	if resolved.AdminListen != "" {
@@ -602,8 +642,33 @@ func main() {
 		}
 	}
 	ingestWorkers.Wait()
-	if mode.Coalescer {
-		coalescer.Flush(shutdownCtx)
+	waitAtMost(&backgroundJobs, backgroundStopWait, "background jobs")
+	// Run's final flush, then one for the bumps written after it, both before the deferred pools.Close. Its own
+	// budget: the HTTP shutdown and the drain may have used up shutdownCtx.
+	presenceCtx, presenceCancel := context.WithTimeout(context.Background(), presenceStopWait)
+	defer presenceCancel()
+	finishPresence(presenceCtx)
+}
+
+// Shutdown budgets after the HTTP shutdown (30 s) and the ingest drain: the background jobs, which stop on their
+// cancelled context, and the last presence flushes (Run's final flush is bounded at 10 s inside it). Docker's
+// stop_grace_period must cover the sum; see docs/operations.md.
+const (
+	backgroundStopWait = 15 * time.Second
+	presenceStopWait   = 15 * time.Second
+)
+
+// waitAtMost waits for wg up to d, then logs and returns: shutdown goes on rather than hang on a stuck job.
+func waitAtMost(wg *sync.WaitGroup, d time.Duration, what string) {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(d):
+		slog.Warn(fmt.Sprintf("shutdown: %s still running after %s; closing anyway", what, d), "component", "startup")
 	}
 }
 

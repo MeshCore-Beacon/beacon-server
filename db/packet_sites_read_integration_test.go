@@ -304,6 +304,7 @@ func TestPacketsBySitesMatchesTruthPostgres(t *testing.T) {
 		for _, r := range []siteReq{
 			{sites: siteSets[1]}, {sites: siteSets[2], until: until}, {sites: siteSets[1], pt: []int16{4}},
 			{sites: siteSets[2], scopes: []string{"#a"}, since: since},
+			{sites: siteSets[2], pt: []int16{4, 11}, until: until}, {sites: siteSets[1], pt: []int16{4}, scopes: []string{"#a"}, since: since},
 		} {
 			rows += f.walk(s, tx, r, 3)
 			f.legacyWalk(s, tx, r, 50)
@@ -683,9 +684,9 @@ func TestPacketSitesTrustLifecyclePostgres(t *testing.T) {
 	}
 }
 
-// A window, or many type pairs, reads each site range at most scan depth entries deep per read and reads on from the
-// floor within the request until the page is full; when its budget of reads runs out, today's statement answers.
-// No page is short with more. A window that starts after every packet's first hearing reads no range at all.
+// Many type pairs read each site range at most scan depth entries deep per read and read on from the floor within the
+// request until the page is full; when the budget of reads runs out, every pair's range answers. No page is short with
+// more. A window that starts after every packet's first hearing reads no packet_sites row.
 func TestPacketsBySitesBoundedPostgres(t *testing.T) {
 	f := newSiteFixture(t)
 	var aaa int
@@ -705,13 +706,13 @@ func TestPacketsBySitesBoundedPostgres(t *testing.T) {
 		t.Fatalf("fixture AAA holds %d rows; the test needs it between the two budgets", aaa)
 	}
 	names, page := run(50)
-	if len(page.Items) != 0 || page.HasMore || slices.Contains(names, "ListPacketsByIATAs") || strings.Count(strings.Join(names, ","), "ListPacketsBySitesSince") < 2 {
+	if len(page.Items) != 0 || page.HasMore || slices.Contains(names, "ListPacketsBySitesTypedFirst") || strings.Count(strings.Join(names, ","), "ListPacketsBySitesSince") < 2 {
 		t.Fatalf("limit 50: %+v, statements %v", page, names)
 	}
-	// limit 5: 8 reads of 48 entries do not reach AAA's end: today's statement answers page 1 from the top (an empty
+	// limit 5: 8 reads of 48 entries do not reach AAA's end: the pairs' ranges answer page 1 from the top (an empty
 	// page, no more).
 	names, page = run(5)
-	if len(page.Items) != 0 || page.HasMore || page.NextPageCursor != nil || !slices.Contains(names, "ListPacketsByIATAsAfter") ||
+	if len(page.Items) != 0 || page.HasMore || page.NextPageCursor != nil || names[len(names)-1] != "ListPacketsBySitesTypedFirst" ||
 		strings.Count(strings.Join(names, ","), "ListPacketsBySitesSince") != siteBoundedRounds {
 		t.Fatalf("limit 5: %+v, statements %v", page, names)
 	}
@@ -727,45 +728,57 @@ func TestPacketsBySitesBoundedPostgres(t *testing.T) {
 	if page, _ := f.page(s, future, 0, nil, limit); len(page.Items) != 0 || page.HasMore {
 		t.Fatalf("a window after every packet: %+v", page)
 	}
-	read := func(fl packetFilter) int64 {
-		t.Helper()
-		var plan []byte
-		if err := f.pool.QueryRow(f.ctx, "EXPLAIN (ANALYZE, FORMAT JSON) "+listPacketsBySitesSinceSQL(),
-			[]string{"AAA", "BBB"}, fl.cursorTS, fl.cursorHash, int32(depth), fl.since, fl.until, fl.payloadTypes, fl.routeTypes, false, fl.pageLimit).Scan(&plan); err != nil {
-			t.Fatal(err)
-		}
-		var scanned func(any) int64
-		scanned = func(n any) int64 {
-			var total int64
-			switch v := n.(type) {
-			case map[string]any:
-				if v["Relation Name"] == "packet_sites" {
-					rows, _ := v["Actual Rows"].(float64)
-					loops, _ := v["Actual Loops"].(float64)
-					total += int64(rows * loops)
-				}
-				for _, c := range v {
-					total += scanned(c)
-				}
-			case []any:
-				for _, c := range v {
-					total += scanned(c)
-				}
-			}
-			return total
-		}
-		var doc any
-		_ = json.Unmarshal(plan, &doc)
-		return scanned(doc)
-	}
 	fl, _ := newPacketFilter(none.pt, none.rt, nil, time.Time{}, time.Time{}, 0, nil, limit)
-	if n := read(fl); n == 0 || n > int64(depth*2) {
+	if n := packetSitesRowsRead(t, f.pool, listPacketsBySitesSinceSQL(), []string{"AAA", "BBB"}, fl.cursorTS, fl.cursorHash, int32(depth),
+		fl.since, fl.until, fl.payloadTypes, fl.routeTypes, false, fl.pageLimit); n == 0 || n > int64(depth*2) {
 		t.Fatalf("a filter that matches nothing read %d packet_sites rows, want 1..%d", n, depth*2)
 	}
 	fl, _ = newPacketFilter(nil, nil, nil, future.since, time.Time{}, 0, nil, limit)
-	if n := read(fl); n != 0 {
+	if n := windowRowsRead(t, f.pool, []string{"AAA", "BBB"}, fl); n != 0 {
 		t.Fatalf("a window after every packet read %d packet_sites rows", n)
 	}
+}
+
+// packetSitesRowsRead runs sql under EXPLAIN ANALYZE and returns how many packet_sites rows its scans returned.
+func packetSitesRowsRead(t *testing.T, db sqlc.DBTX, sql string, args ...any) int64 {
+	t.Helper()
+	var plan []byte
+	if err := db.QueryRow(context.Background(), "EXPLAIN (ANALYZE, FORMAT JSON) "+sql, args...).Scan(&plan); err != nil {
+		t.Fatal(err)
+	}
+	var scanned func(any) int64
+	scanned = func(n any) int64 {
+		var total int64
+		switch v := n.(type) {
+		case map[string]any:
+			if v["Relation Name"] == "packet_sites" {
+				rows, _ := v["Actual Rows"].(float64)
+				loops, _ := v["Actual Loops"].(float64)
+				total += int64(rows * loops)
+			}
+			for _, c := range v {
+				total += scanned(c)
+			}
+		case []any:
+			for _, c := range v {
+				total += scanned(c)
+			}
+		}
+		return total
+	}
+	var doc any
+	_ = json.Unmarshal(plan, &doc)
+	return scanned(doc)
+}
+
+// windowRowsRead is packetSitesRowsRead for the window statement on fl, without the re-check.
+func windowRowsRead(t *testing.T, db sqlc.DBTX, sites []string, fl packetFilter) int64 {
+	t.Helper()
+	var text string
+	_, _ = sqlc.New(&queryRecorder{text: &text}).ListPacketsBySitesWindow(context.Background(), sqlc.ListPacketsBySitesWindowParams{})
+	lo, hi, mainTS, mainHash := windowBounds(fl)
+	return packetSitesRowsRead(t, db, text, sites, mainTS, mainHash, lo, fl.since, fl.until, fl.payloadTypes, fl.routeTypes, false,
+		fl.cursorTS, fl.cursorHash, fl.pageLimit, hi)
 }
 
 func listPacketsBySitesSinceSQL() string {
@@ -785,13 +798,13 @@ func (r *queryRecorder) Query(_ context.Context, sql string, _ ...any) (pgx.Rows
 }
 
 // A walk by pageCursor whose read budget runs out on some pages, with matching rows several to a millisecond: the
-// pages today's statement answers continue from the page cursor's exact position, so every truth row comes back
+// pages the pairs' ranges answer continue from the page cursor's exact position, so every truth row comes back
 // exactly once and in order.
 func TestPacketsBySitesFallbackKeepsPageCursorPostgres(t *testing.T) {
 	f := &siteFixture{psFixture: newPsFixture(t), usTie: map[string]bool{}}
 	f.exec("INSERT INTO iata_codes (iata) VALUES ('TTT'), ('TTU') ON CONFLICT DO NOTHING")
 	// 60 groups: three matching packets (payload 5, route 3) in one millisecond, then nine that do not match. At TTU
-	// each matching packet is heard by six observers, so today's scan saturates and pages end at its floor.
+	// each matching packet is heard by six observers.
 	for g := range 60 {
 		base := psT0.Add(time.Duration(g) * time.Second)
 		for k := range 12 {
@@ -818,7 +831,7 @@ VALUES ($1, $2, 0, $3, '\x00', '\x11', $4, $4, 0)`, h, pt, rt, at)
 	rec := &recordingDBTX{DBTX: f.pool}
 	s := f.trusted(rec)
 	for _, sites := range [][]string{{"TTT"}, {"TTU"}, {"TTT", "TTU"}} {
-		// Nine type pairs: the bounded form, which with a one-read budget often hands the page to today's statement.
+		// Nine type pairs: the bounded form, which with a one-read budget often hands the page to the pairs' ranges.
 		r := siteReq{sites: sites, pt: []int16{0, 1, 2, 3, 4, 5, 6, 7, 8}, rt: []int16{3}}
 		all := f.truth(f.pool, r, time.Time{}, nil, 100_000)
 		if len(all) != 180 {
@@ -848,7 +861,7 @@ VALUES ($1, $2, 0, $3, '\x00', '\x11', $4, $4, 0)`, h, pt, rt, at)
 					pc, cursor = nil, *page.NextCursor
 				}
 			}
-			if !slices.Contains(rec.names, "ListPacketsByIATAs") && !slices.Contains(rec.names, "ListPacketsByIATAsAfter") {
+			if !slices.Contains(rec.names, "ListPacketsBySitesTyped") && !slices.Contains(rec.names, "ListPacketsBySitesTypedFirst") {
 				t.Fatalf("%v limit %d: the budget never ran out", sites, limit)
 			}
 			want := make([]string, len(all))

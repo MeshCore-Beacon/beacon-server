@@ -6,7 +6,7 @@
  "        Nested Loop",
  "          Function Scan",
  "          Limit",
- "            Index Only Scan on channel_message_iatas i using idx_cmi_channel_site_scope scan=Forward",
+ "            Index Scan on channel_message_iatas i using idx_cmi_site_scope scan=Forward",
  "  Nested Loop (Left)",
  "    Nested Loop",
  "      Nested Loop",

@@ -85,7 +85,8 @@ type nodeUpdateEvent struct {
 //   - PayloadTypeGrpTxt (0x05): decrypt and store channel message if key is known
 //
 // siteRecorded says an earlier Add for this hearing found the stored message, so its site is already recorded.
-func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshcore.Packet, iata string, packetHash []byte, radio RadioSettings, scopeID *int32, matchedScope *string, observerPubkey []byte, rxSNR *float32, siteRecorded bool) {
+// packetKnown says the packet was stored before this hearing.
+func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshcore.Packet, iata string, packetHash []byte, radio RadioSettings, scopeID *int32, matchedScope *string, observerPubkey []byte, rxSNR *float32, siteRecorded, packetKnown bool) {
 	if packet.PayloadType() == meshcore.PayloadTypeAdvert {
 		advert, err := meshcore.AdvertFromBytes(packet.Payload)
 		if err != nil {
@@ -203,7 +204,10 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 		return
 	}
 	if packet.PayloadType() == meshcore.PayloadTypeGrpTxt {
-		result, err := StoreGroupText(ctx, w.db, w.keys, packetHash, packet.Payload, iata, siteRecorded)
+		// A packet stored before this hearing that decrypts only now (its key arrived since, or the background
+		// backfill has not reached it yet) has earlier hearings in hours that may already be rolled up: store its
+		// message as historical, as the backfill would, so those hours are re-rolled.
+		result, err := StoreGroupText(ctx, w.db, w.keys, packetHash, packet.Payload, iata, siteRecorded, packetKnown)
 		if err != nil {
 			if _, decodeErr := meshcore.GroupTextFromBytes(packet.Payload); decodeErr != nil {
 				w.log.Warn("error decoding group text payload", "error", decodeErr)
@@ -215,8 +219,8 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 		if result == nil {
 			// none of the known keys worked for this hash (or none are known at all);
 			// record a hash-only row so the channel is still visible. If a matching key
-			// gets added to the config later, BackfillChannelMessages retries this packet
-			// at the next boot.
+			// gets added to the config later, the decrypt backfill retries this packet
+			// after the next boot.
 			grpTxt, _ := meshcore.GroupTextFromBytes(packet.Payload) // decoded inside StoreGroupText
 			_, _ = w.db.UpsertChannelHashOnly(ctx, []byte{grpTxt.ChannelHash})
 			return

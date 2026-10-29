@@ -28,6 +28,7 @@ batches:
     statements:
       old_tn: "old:GetTopNodes"
       new_tn: "new:GetTopNodesProbe"
+      new_all: "new:GetTopNodesAll"
       old_ta: "old:GetStatsTopAdvertisers"
       new_ta: "new:GetStatsTopAdvertisersProbe"
       old_pa: "old:GetPathStats"
@@ -36,33 +37,33 @@ batches:
       - id: tn.000.none_1d_l10
         ref: {stmt: old_tn, params: [{raw: "'2026-10-17 17:00+00'::timestamptz"}, {raw: "NULL::bpchar[]"}, {raw: "10"}]}
         cands:
-          - {stmt: new_tn, params: [{raw: "'2026-10-17 17:00+00'::timestamptz"}, {raw: "NULL::bpchar[]"}, {raw: "10"}]}
-        expect: {new_tn: identical}
+          - {stmt: new_all, params: [{raw: "'2026-10-17 17:00+00'::timestamptz"}, {raw: "10"}]}
+        expect: {new_all: identical}
       - id: tn.001.none_7d_l10
         ref: {stmt: old_tn, params: [{raw: "'2026-10-11 17:00+00'::timestamptz"}, {raw: "NULL::bpchar[]"}, {raw: "10"}]}
         cands:
-          - {stmt: new_tn, params: [{raw: "'2026-10-11 17:00+00'::timestamptz"}, {raw: "NULL::bpchar[]"}, {raw: "10"}]}
-        expect: {new_tn: identical}
+          - {stmt: new_all, params: [{raw: "'2026-10-11 17:00+00'::timestamptz"}, {raw: "10"}]}
+        expect: {new_all: identical}
       - id: tn.002.none_14d_l10
         ref: {stmt: old_tn, params: [{raw: "'2026-10-04 17:00+00'::timestamptz"}, {raw: "NULL::bpchar[]"}, {raw: "10"}]}
         cands:
-          - {stmt: new_tn, params: [{raw: "'2026-10-04 17:00+00'::timestamptz"}, {raw: "NULL::bpchar[]"}, {raw: "10"}]}
-        expect: {new_tn: identical}
+          - {stmt: new_all, params: [{raw: "'2026-10-04 17:00+00'::timestamptz"}, {raw: "10"}]}
+        expect: {new_all: identical}
       - id: tn.003.empty_1d_l10
         ref: {stmt: old_tn, params: [{raw: "'2026-10-17 17:00+00'::timestamptz"}, {raw: "'{}'::bpchar[]"}, {raw: "10"}]}
         cands:
-          - {stmt: new_tn, params: [{raw: "'2026-10-17 17:00+00'::timestamptz"}, {raw: "'{}'::bpchar[]"}, {raw: "10"}]}
-        expect: {new_tn: identical}
+          - {stmt: new_all, params: [{raw: "'2026-10-17 17:00+00'::timestamptz"}, {raw: "10"}]}
+        expect: {new_all: identical}
       - id: tn.004.empty_7d_l10
         ref: {stmt: old_tn, params: [{raw: "'2026-10-11 17:00+00'::timestamptz"}, {raw: "'{}'::bpchar[]"}, {raw: "10"}]}
         cands:
-          - {stmt: new_tn, params: [{raw: "'2026-10-11 17:00+00'::timestamptz"}, {raw: "'{}'::bpchar[]"}, {raw: "10"}]}
-        expect: {new_tn: identical}
+          - {stmt: new_all, params: [{raw: "'2026-10-11 17:00+00'::timestamptz"}, {raw: "10"}]}
+        expect: {new_all: identical}
       - id: tn.005.empty_14d_l10
         ref: {stmt: old_tn, params: [{raw: "'2026-10-04 17:00+00'::timestamptz"}, {raw: "'{}'::bpchar[]"}, {raw: "10"}]}
         cands:
-          - {stmt: new_tn, params: [{raw: "'2026-10-04 17:00+00'::timestamptz"}, {raw: "'{}'::bpchar[]"}, {raw: "10"}]}
-        expect: {new_tn: identical}
+          - {stmt: new_all, params: [{raw: "'2026-10-04 17:00+00'::timestamptz"}, {raw: "10"}]}
+        expect: {new_all: identical}
       - id: tn.006.SEA_1d_l10
         ref: {stmt: old_tn, params: [{raw: "'2026-10-17 17:00+00'::timestamptz"}, {raw: "ARRAY['SEA']::bpchar[]"}, {raw: "10"}]}
         cands:
@@ -366,13 +367,13 @@ batches:
       - id: tn.067.none_7d_l200
         ref: {stmt: old_tn, params: [{raw: "'2026-10-11 17:00+00'::timestamptz"}, {raw: "NULL::bpchar[]"}, {raw: "200"}]}
         cands:
-          - {stmt: new_tn, params: [{raw: "'2026-10-11 17:00+00'::timestamptz"}, {raw: "NULL::bpchar[]"}, {raw: "200"}]}
-        expect: {new_tn: identical}
+          - {stmt: new_all, params: [{raw: "'2026-10-11 17:00+00'::timestamptz"}, {raw: "200"}]}
+        expect: {new_all: identical}
       - id: tn.068.none_7d_l1
         ref: {stmt: old_tn, params: [{raw: "'2026-10-11 17:00+00'::timestamptz"}, {raw: "NULL::bpchar[]"}, {raw: "1"}]}
         cands:
-          - {stmt: new_tn, params: [{raw: "'2026-10-11 17:00+00'::timestamptz"}, {raw: "NULL::bpchar[]"}, {raw: "1"}]}
-        expect: {new_tn: identical}
+          - {stmt: new_all, params: [{raw: "'2026-10-11 17:00+00'::timestamptz"}, {raw: "1"}]}
+        expect: {new_all: identical}
       - id: tn.069.SEA_7d_l200
         ref: {stmt: old_tn, params: [{raw: "'2026-10-11 17:00+00'::timestamptz"}, {raw: "ARRAY['SEA']::bpchar[]"}, {raw: "200"}]}
         cands:
@@ -411,8 +412,8 @@ batches:
       - id: tn.076.none_epoch_l10
         ref: {stmt: old_tn, params: [{raw: "'1970-01-01 00:00+00'::timestamptz"}, {raw: "NULL::bpchar[]"}, {raw: "10"}]}
         cands:
-          - {stmt: new_tn, params: [{raw: "'1970-01-01 00:00+00'::timestamptz"}, {raw: "NULL::bpchar[]"}, {raw: "10"}]}
-        expect: {new_tn: identical}
+          - {stmt: new_all, params: [{raw: "'1970-01-01 00:00+00'::timestamptz"}, {raw: "10"}]}
+        expect: {new_all: identical}
       - id: tn.077.pt3_maxhour_l10
         ref: {stmt: old_tn, params: [{raw: "'2026-10-18 16:00+00'::timestamptz"}, {raw: "ARRAY['FAO','LIS','OPO']::bpchar[]"}, {raw: "10"}]}
         cands:
@@ -421,8 +422,8 @@ batches:
       - id: tn.078.none_maxhour_l10
         ref: {stmt: old_tn, params: [{raw: "'2026-10-18 16:00+00'::timestamptz"}, {raw: "NULL::bpchar[]"}, {raw: "10"}]}
         cands:
-          - {stmt: new_tn, params: [{raw: "'2026-10-18 16:00+00'::timestamptz"}, {raw: "NULL::bpchar[]"}, {raw: "10"}]}
-        expect: {new_tn: identical}
+          - {stmt: new_all, params: [{raw: "'2026-10-18 16:00+00'::timestamptz"}, {raw: "10"}]}
+        expect: {new_all: identical}
       - id: tn.079.pt3_T0_l10
         ref: {stmt: old_tn, params: [{raw: "'2026-10-18 17:00+00'::timestamptz"}, {raw: "ARRAY['FAO','LIS','OPO']::bpchar[]"}, {raw: "10"}]}
         cands:
@@ -431,8 +432,8 @@ batches:
       - id: tn.080.none_T0_l10
         ref: {stmt: old_tn, params: [{raw: "'2026-10-18 17:00+00'::timestamptz"}, {raw: "NULL::bpchar[]"}, {raw: "10"}]}
         cands:
-          - {stmt: new_tn, params: [{raw: "'2026-10-18 17:00+00'::timestamptz"}, {raw: "NULL::bpchar[]"}, {raw: "10"}]}
-        expect: {new_tn: identical}
+          - {stmt: new_all, params: [{raw: "'2026-10-18 17:00+00'::timestamptz"}, {raw: "10"}]}
+        expect: {new_all: identical}
       - id: tn.081.pt3_future_l10
         ref: {stmt: old_tn, params: [{sql: "SELECT date_trunc('hour', now() + interval '1 day', 'UTC')"}, {raw: "ARRAY['FAO','LIS','OPO']::bpchar[]"}, {raw: "10"}]}
         cands:
@@ -441,8 +442,8 @@ batches:
       - id: tn.082.none_future_l10
         ref: {stmt: old_tn, params: [{sql: "SELECT date_trunc('hour', now() + interval '1 day', 'UTC')"}, {raw: "NULL::bpchar[]"}, {raw: "10"}]}
         cands:
-          - {stmt: new_tn, params: [{sql: "SELECT date_trunc('hour', now() + interval '1 day', 'UTC')"}, {raw: "NULL::bpchar[]"}, {raw: "10"}]}
-        expect: {new_tn: identical}
+          - {stmt: new_all, params: [{sql: "SELECT date_trunc('hour', now() + interval '1 day', 'UTC')"}, {raw: "10"}]}
+        expect: {new_all: identical}
       - id: tn.083.pt3_now7d_l10
         ref: {stmt: old_tn, params: [{sql: "SELECT date_trunc('hour', now() - interval '7 days', 'UTC')"}, {raw: "ARRAY['FAO','LIS','OPO']::bpchar[]"}, {raw: "10"}]}
         cands:
@@ -451,8 +452,8 @@ batches:
       - id: tn.084.none_now7d_l10
         ref: {stmt: old_tn, params: [{sql: "SELECT date_trunc('hour', now() - interval '7 days', 'UTC')"}, {raw: "NULL::bpchar[]"}, {raw: "10"}]}
         cands:
-          - {stmt: new_tn, params: [{sql: "SELECT date_trunc('hour', now() - interval '7 days', 'UTC')"}, {raw: "NULL::bpchar[]"}, {raw: "10"}]}
-        expect: {new_tn: identical}
+          - {stmt: new_all, params: [{sql: "SELECT date_trunc('hour', now() - interval '7 days', 'UTC')"}, {raw: "10"}]}
+        expect: {new_all: identical}
       - id: ta.000.none_1d_l10_flood
         ref: {stmt: old_ta, params: [{raw: "'flood'"}, {raw: "'2026-10-17 17:00+00'::timestamptz"}, {raw: "NULL::bpchar[]"}, {raw: "10"}]}
         cands:

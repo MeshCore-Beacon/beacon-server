@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/db/planpolicy"
-	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/guards"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -221,25 +220,24 @@ func (t *countingTicket) Finish() {
 }
 
 type routerFixture struct {
-	legacy, slow, custom, cached *fakePool
-	gate                         *countingGate
-	r                            *PlanRouter
+	legacy, custom, cached *fakePool
+	gate                   *countingGate
+	r                      *PlanRouter
 }
 
 func newRouterFixture(layout planpolicy.Layout, classOf func(string) planpolicy.Class) *routerFixture {
 	f := &routerFixture{
 		legacy: &fakePool{n: PoolAPILegacy, rowCount: 1},
-		slow:   &fakePool{n: PoolAPISlow, rowCount: 1},
 		custom: &fakePool{n: PoolAPICustom, rowCount: 1},
 		cached: &fakePool{n: PoolAPICached, rowCount: 1},
 		gate:   &countingGate{},
 	}
-	f.r = newPlanRouter(f.legacy, f.slow, f.custom, f.cached, layout, f.gate, classOf)
+	f.r = newPlanRouter(f.legacy, f.custom, f.cached, layout, f.gate, classOf)
 	return f
 }
 
 func (f *routerFixture) pool(name string) *fakePool {
-	return map[string]*fakePool{PoolAPILegacy: f.legacy, PoolAPISlow: f.slow, PoolAPICustom: f.custom, PoolAPICached: f.cached}[name]
+	return map[string]*fakePool{PoolAPILegacy: f.legacy, PoolAPICustom: f.custom, PoolAPICached: f.cached}[name]
 }
 
 var routerMethods = []string{"Query", "QueryRow", "Exec"}
@@ -272,7 +270,7 @@ func runVia(ctx context.Context, r *PlanRouter, method, sql string, args ...any)
 
 func TestPlanRouterRoutesByClass(t *testing.T) {
 	classOf := func(name string) planpolicy.Class {
-		return map[string]planpolicy.Class{"ListPacketsByIATAs": planpolicy.ClassSlow, "ProbeG": planpolicy.ClassG}[name] // else ClassC
+		return map[string]planpolicy.Class{"ProbeG": planpolicy.ClassG}[name] // else ClassC
 	}
 	for _, c := range []struct {
 		layout     planpolicy.Layout
@@ -280,13 +278,10 @@ func TestPlanRouterRoutesByClass(t *testing.T) {
 		describe   bool
 		admits     int
 	}{
-		{planpolicy.CustomAll, "ListPacketsByIATAs", PoolAPISlow, true, 0},
 		{planpolicy.CustomAll, "ProbeG", PoolAPICustom, false, 1},
 		{planpolicy.CustomAll, "ProbeC", PoolAPICustom, true, 1},
-		{planpolicy.Split, "ListPacketsByIATAs", PoolAPISlow, true, 0},
 		{planpolicy.Split, "ProbeG", PoolAPICached, false, 1},
 		{planpolicy.Split, "ProbeC", PoolAPICustom, true, 1},
-		{planpolicy.Single, "ListPacketsByIATAs", PoolAPILegacy, true, 0},
 		{planpolicy.Single, "ProbeG", PoolAPILegacy, false, 1},
 		{planpolicy.Single, "ProbeC", PoolAPILegacy, true, 1},
 	} {
@@ -297,7 +292,7 @@ func TestPlanRouterRoutesByClass(t *testing.T) {
 				if err := runVia(context.Background(), f.r, method, sql, 7); err != nil {
 					t.Fatal(err)
 				}
-				for _, name := range []string{PoolAPILegacy, PoolAPISlow, PoolAPICustom, PoolAPICached} {
+				for _, name := range []string{PoolAPILegacy, PoolAPICustom, PoolAPICached} {
 					calls, _, _ := f.pool(name).snapshot()
 					if name != c.pool {
 						if len(calls) != 0 {
@@ -326,7 +321,7 @@ func TestPlanRouterRoutesByClass(t *testing.T) {
 	// A class C statement never reaches api_cached, and nothing does outside split.
 	for _, layout := range []planpolicy.Layout{planpolicy.CustomAll, planpolicy.Split, planpolicy.Single} {
 		f := newRouterFixture(layout, nil) // the real policy
-		for _, stmt := range []string{"ListPacketsByIATAs", "ListChannels", "ListKnownRoutesByIATAHop", "ListKnownRoutesGlobalHop", ""} {
+		for _, stmt := range []string{"ListPacketsBySitesWindow", "ListChannels", "ListKnownRoutesByIATAHop", "ListKnownRoutesGlobalHop", ""} {
 			sql := "SELECT 1"
 			if stmt != "" {
 				sql = "-- name: " + stmt + " :one\nSELECT 1"
@@ -401,11 +396,11 @@ func TestPlanRouterRoutesByClass(t *testing.T) {
 		layout planpolicy.Layout
 		pools  *Pools
 	}{
-		{planpolicy.CustomAll, &Pools{APISlow: unconnected(), APICustom: unconnected()}},
+		{planpolicy.CustomAll, &Pools{APICustom: unconnected()}},
 		{planpolicy.Single, &Pools{APILegacy: unconnected()}},
 	} {
 		r := NewPlanRouter(tc.pools, tc.layout, nil)
-		for _, stmt := range []string{"ListPacketsByIATAs", "GetNodeByID"} {
+		for _, stmt := range []string{"ListPacketsBySitesWindow", "GetNodeByID"} {
 			for _, method := range routerMethods {
 				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 				err := runVia(ctx, r, method, "-- name: "+stmt+" :one\nSELECT 1")
@@ -536,41 +531,6 @@ func TestPlanRouterReleasesConnections(t *testing.T) {
 	}
 }
 
-// A slow-pool statement is never cut by a guard deadline: only api_slow's statement limit bounds it.
-func TestSlowStatementNeverCut(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		g := guards.New(guards.Options{Enforce: guards.Families, Budget: "shadow"})
-		ctx, finish := g.Begin(context.Background(), "k", guards.PacketDetail, guards.Entity) // 5 s
-		defer finish()
-		slow := &fakePool{n: PoolAPISlow, rowCount: 1, block: 8 * time.Second}
-		custom := &fakePool{n: PoolAPICustom, rowCount: 1, block: 8 * time.Second}
-		r := newPlanRouter(nil, slow, custom, nil, planpolicy.CustomAll, g, nil)
-
-		start := time.Now()
-		if err := runVia(ctx, r, "Query", "-- name: ListPacketsByIATAs :many\nSELECT 1"); err != nil {
-			t.Fatalf("slow statement: %v", err)
-		}
-		if d := time.Since(start); d != 8*time.Second {
-			t.Errorf("slow statement took %v, want 8s", d)
-		}
-		if slow.stmtErrs[0] != nil {
-			t.Errorf("slow statement ctx.Err() = %v, want nil", slow.stmtErrs[0])
-		}
-
-		start = time.Now()
-		err := runVia(ctx, r, "Query", "-- name: ProbeC :many\nSELECT 1")
-		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("class C statement err = %v, want context.DeadlineExceeded", err)
-		}
-		if d := time.Since(start); d != 5*time.Second {
-			t.Errorf("class C statement cut after %v, want 5s", d)
-		}
-		if _, acquires, releases := custom.snapshot(); acquires != 1 || releases != 1 {
-			t.Errorf("custom acquires = %d, releases = %d", acquires, releases)
-		}
-	})
-}
-
 // guardSeries is every beacon_guard_ series line in the metrics scrape.
 func guardSeries(t *testing.T) string {
 	var lines []string
@@ -586,7 +546,7 @@ func TestPlanRouterWithoutRequestState(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		g := guards.New(guards.Options{Enforce: guards.Families, Budget: "shadow"})
 		custom := &fakePool{n: PoolAPICustom, rowCount: 1, block: 40 * time.Second}
-		r := newPlanRouter(nil, &fakePool{n: PoolAPISlow}, custom, nil, planpolicy.CustomAll, g, nil)
+		r := newPlanRouter(nil, custom, nil, planpolicy.CustomAll, g, nil)
 		before := guardSeries(t)
 		start := time.Now()
 		for _, method := range routerMethods {
@@ -611,103 +571,19 @@ func TestPlanRouterWithoutRequestState(t *testing.T) {
 	})
 }
 
-// cappedPool hands out at most cap connections at once; a further acquire waits for one or for its ctx.
-type cappedPool struct {
-	*fakePool
-	slots chan struct{}
-}
-
-func newCappedPool(name string, n int, block time.Duration) *cappedPool {
-	return &cappedPool{fakePool: &fakePool{n: name, rowCount: 1, block: block}, slots: make(chan struct{}, n)}
-}
-
-func (p *cappedPool) acquire(ctx context.Context) (routerConn, error) {
-	select {
-	case p.slots <- struct{}{}:
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-	c, err := p.fakePool.acquire(ctx)
-	if err != nil {
-		<-p.slots
-		return nil, err
-	}
-	return &cappedConn{routerConn: c, free: func() { <-p.slots }}, nil
-}
-
-type cappedConn struct {
-	routerConn
-	free func()
-}
-
-func (c *cappedConn) Release() { c.routerConn.Release(); c.free() }
-
-// Two slow statements hold both connections of a two-connection api_slow: a third fails fast with ErrSlowPoolBusy, never touching
-// api_custom, while class C statements keep running on api_custom; once a slot frees, slow statements run again.
-func TestPlanRouterSlowPoolCannotStarveOthers(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		old := slowAcquireWait
-		slowAcquireWait = 5 * time.Second
-		t.Cleanup(func() { slowAcquireWait = old })
-		slow := newCappedPool(PoolAPISlow, 2, 100*time.Second)
-		custom := &fakePool{n: PoolAPICustom, rowCount: 1}
-		r := newPlanRouter(nil, slow, custom, nil, planpolicy.CustomAll, nil, nil)
-		const slowSQL = "-- name: ListPacketsByIATAs :many\nSELECT 1"
-
-		var wg sync.WaitGroup
-		for range 2 {
-			wg.Go(func() {
-				if err := runVia(context.Background(), r, "Query", slowSQL); err != nil {
-					t.Errorf("holding statement: %v", err)
-				}
-			})
-		}
-		synctest.Wait()
-
-		start := time.Now()
-		err := runVia(context.Background(), r, "Query", slowSQL)
-		if !errors.Is(err, api.ErrSlowPoolBusy) {
-			t.Fatalf("third slow statement err = %v, want ErrSlowPoolBusy", err)
-		}
-		if d := time.Since(start); d != 5*time.Second {
-			t.Errorf("third slow statement failed after %v, want 5s", d)
-		}
-		// A request that ends first gets its own error, not ErrSlowPoolBusy.
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		err = runVia(ctx, r, "Query", slowSQL)
-		cancel()
-		if errors.Is(err, api.ErrSlowPoolBusy) || !errors.Is(err, context.DeadlineExceeded) {
-			t.Errorf("slow statement under a shorter request deadline: err = %v", err)
-		}
-		for range 3 {
-			if err := runVia(context.Background(), r, "Query", "-- name: ProbeC :many\nSELECT 1"); err != nil {
-				t.Fatalf("class C statement while api_slow is full: %v", err)
-			}
-		}
-		if calls, acquires, _ := custom.snapshot(); acquires != 3 || len(calls) != 3 {
-			t.Errorf("api_custom ran %d statements in %d acquires, want 3 class C statements only", len(calls), acquires)
-		}
-		wg.Wait()
-		if err := runVia(context.Background(), r, "Query", slowSQL); err != nil {
-			t.Errorf("slow statement after the pool freed: %v", err)
-		}
-		if _, acquires, releases := slow.snapshot(); acquires != 3 || releases != 3 {
-			t.Errorf("api_slow acquires = %d, releases = %d, want 3 and 3", acquires, releases)
-		}
-	})
-}
-
 // A verification-only statement never reaches an API pool: the router refuses it before admission or acquire.
 func TestPlanRouterRefusesVerificationOnly(t *testing.T) {
 	for _, layout := range []planpolicy.Layout{planpolicy.CustomAll, planpolicy.Split, planpolicy.Single} {
 		f := newRouterFixture(layout, nil)
-		for _, method := range routerMethods {
-			err := runVia(context.Background(), f.r, method, "-- name: ListChannelMessages :many\nSELECT 1")
-			if err == nil || !strings.Contains(err.Error(), "verification") {
-				t.Errorf("%s %s: err = %v, want a refusal", layout, method, err)
+		for name := range planpolicy.VerificationOnly {
+			for _, method := range routerMethods {
+				err := runVia(context.Background(), f.r, method, "-- name: "+name+" :many\nSELECT 1")
+				if err == nil || !strings.Contains(err.Error(), "verification") {
+					t.Errorf("%s %s %s: err = %v, want a refusal", layout, name, method, err)
+				}
 			}
 		}
-		for _, p := range []*fakePool{f.legacy, f.slow, f.custom, f.cached} {
+		for _, p := range []*fakePool{f.legacy, f.custom, f.cached} {
 			if _, acquires, _ := p.snapshot(); acquires != 0 {
 				t.Errorf("%s: %s acquired %d connections", layout, p.n, acquires)
 			}
@@ -715,5 +591,59 @@ func TestPlanRouterRefusesVerificationOnly(t *testing.T) {
 		if f.gate.admits != 0 {
 			t.Errorf("%s: gate admitted %d", layout, f.gate.admits)
 		}
+	}
+}
+
+// A planpolicy.ParallelWorkers statement runs on its API pool inside its own transaction that raises the worker
+// setting, and the transaction ends before the connection goes back; every other statement, and the rollback
+// layout's api_legacy (the server's own settings), runs bare.
+func TestPlanRouterParallelWorkers(t *testing.T) {
+	const begin = "BEGIN READ ONLY; SET LOCAL max_parallel_workers_per_gather = 2"
+	for _, layout := range []planpolicy.Layout{planpolicy.CustomAll, planpolicy.Split, planpolicy.Single} {
+		for _, stmt := range []string{"GetTopNodesAll", "GetTopNodesProbe"} {
+			for _, method := range routerMethods {
+				t.Run(fmt.Sprintf("%s/%s/%s", layout, stmt, method), func(t *testing.T) {
+					f := newRouterFixture(layout, nil) // the real policy
+					sql := "-- name: " + stmt + " :many\nSELECT $1"
+					if err := runVia(context.Background(), f.r, method, sql, 7); err != nil {
+						t.Fatal(err)
+					}
+					pool := PoolAPICustom
+					if layout == planpolicy.Single {
+						pool = PoolAPILegacy
+					}
+					calls, acquires, releases := f.pool(pool).snapshot()
+					var got []string
+					for _, c := range calls {
+						got = append(got, c.sql)
+					}
+					want := []string{sql}
+					if stmt == "GetTopNodesAll" && layout != planpolicy.Single {
+						want = []string{begin, sql, "ROLLBACK"}
+					}
+					if !reflect.DeepEqual(got, want) {
+						t.Errorf("%s ran %q, want %q", pool, got, want)
+					}
+					if acquires != 1 || releases != 1 {
+						t.Errorf("acquires %d releases %d, want 1 and 1", acquires, releases)
+					}
+				})
+			}
+		}
+	}
+
+	// BEGIN fails: the statement does not run, its error comes back, and the ticket and connection are given back once.
+	f := newRouterFixture(planpolicy.CustomAll, nil)
+	f.custom.execErr = errors.New("begin failed")
+	sql := "-- name: GetTopNodesAll :many\nSELECT $1"
+	if err := runVia(context.Background(), f.r, "Query", sql, 7); err == nil || err.Error() != "begin failed" {
+		t.Fatalf("err = %v, want begin failed", err)
+	}
+	calls, acquires, releases := f.custom.snapshot()
+	if len(calls) != 2 || calls[0].sql != begin || calls[1].sql != "ROLLBACK" || acquires != 1 || releases != 1 {
+		t.Errorf("calls %+v acquires %d releases %d, want BEGIN, ROLLBACK, 1, 1", calls, acquires, releases)
+	}
+	if len(f.gate.tickets) != 1 || f.gate.tickets[0].finishes != 1 {
+		t.Errorf("tickets %d, want one finished once", len(f.gate.tickets))
 	}
 }

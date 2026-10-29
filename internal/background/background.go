@@ -7,6 +7,7 @@ package background
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
@@ -29,10 +30,13 @@ func New(tasks []Task) *Scheduler {
 	return &Scheduler{tasks: tasks}
 }
 
-// Start launches each task in its own goroutine. Blocks until ctx is cancelled.
+// Start runs each task in its own goroutine until ctx is cancelled, and returns once every task has returned: a task
+// running when ctx ends finishes (or stops on its cancelled context) before Start returns.
 func (s *Scheduler) Start(ctx context.Context) {
+	var wg sync.WaitGroup
+	defer wg.Wait()
 	for _, t := range s.tasks {
-		go func() {
+		wg.Go(func() {
 			ticker := time.NewTicker(t.Interval)
 			defer ticker.Stop()
 			for {
@@ -51,6 +55,6 @@ func (s *Scheduler) Start(ctx context.Context) {
 					return
 				}
 			}
-		}()
+		})
 	}
 }

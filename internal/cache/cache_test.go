@@ -90,8 +90,8 @@ func (s *stubReader) GetIATA(_ context.Context, _ string) (*api.IATA, error) { r
 func (s *stubReader) GetIATABorder(_ context.Context, _ string) (json.RawMessage, error) {
 	return nil, nil
 }
-func (s *stubReader) ListRegions(_ context.Context) ([]api.RegionSummary, error) { return nil, nil }
-func (s *stubReader) GetRegion(_ context.Context, _ int32) (*api.Region, error)  { return nil, nil }
+func (s *stubReader) ListRegions(_ context.Context) ([]api.Region, error)       { return nil, nil }
+func (s *stubReader) GetRegion(_ context.Context, _ int32) (*api.Region, error) { return nil, nil }
 func (s *stubReader) GetRegionBySlug(_ context.Context, _ string) (*api.Region, error) {
 	return nil, nil
 }
@@ -199,6 +199,10 @@ func (s *stubReader) ListNodes(_ context.Context, _ int16, _ []string, _, _ *boo
 	return api.NodePage{}, nil
 }
 
+func (s *stubReader) ListNodesSorted(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ api.NodeSort, _ *api.NodeSortCursor, _ int32, _ bool) (api.NodePage, error) {
+	return api.NodePage{}, nil
+}
+
 func (s *stubReader) ListNodeObservations(_ context.Context, _ uuid.UUID, _ int64, _ int32) (api.Page[api.PacketObservationSummary], error) {
 	return api.Page[api.PacketObservationSummary]{}, nil
 }
@@ -223,7 +227,7 @@ func (s *stubReader) ListPacketsAfterID(_ context.Context, _ int64, _, _ int16, 
 	return nil, nil
 }
 
-func (s *stubReader) ListKnownRoutes(_ context.Context, _ string, _ int32, _ time.Time, _ int64, _ int32) ([]api.KnownRoute, error) {
+func (s *stubReader) ListKnownRoutes(_ context.Context, _ []string, _ int32, _ time.Time, _ int64, _ int32) ([]api.KnownRoute, error) {
 	return nil, nil
 }
 
