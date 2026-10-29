@@ -169,6 +169,7 @@ func TestNodeSortCursor(t *testing.T) {
 		"", "v1:1:" + id.String(), valid + ":", strings.Replace(valid, "s1:", "s2:", 1),
 		strings.Replace(valid, ":name:", ":radio:", 1), strings.Replace(valid, ":a:", ":x:", 1),
 		"s1:name:a:2:0:0:" + id.String() + ":eA", // null is 0 or 1
+		"s1:name:a:01:0:0:" + id.String() + ":eA", "s1:name:a:-0:0:0:" + id.String() + ":eA",
 		"s1:name:a:0:01:0:" + id.String() + ":eA", "s1:name:a:0:0:+1:" + id.String() + ":eA",
 		"s1:name:a:0:0:0:" + strings.ReplaceAll(id.String(), "-", "") + ":eA",
 		"s1:name:a:0:0:0:" + id.String() + ":eA==", "s1:name:a:0:0:0:" + id.String() + ":e+A",

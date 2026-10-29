@@ -100,16 +100,20 @@ func ParseNodeSortCursor(raw string) (*NodeSortCursor, error) {
 	if len(parts) != 8 || parts[0] != "s1" || !ValidNodeSort(parts[1]) || (parts[2] != "a" && parts[2] != "d") {
 		return nil, errPageCursor
 	}
-	var nums [3]int64
-	for i, part := range parts[3:6] {
+	if parts[3] != "0" && parts[3] != "1" {
+		return nil, errPageCursor
+	}
+	var null int32
+	if parts[3] == "1" {
+		null = 1
+	}
+	var nums [2]int64
+	for i, part := range parts[4:6] {
 		n, err := strconv.ParseInt(part, 10, 64)
 		if err != nil || strconv.FormatInt(n, 10) != part {
 			return nil, errPageCursor
 		}
 		nums[i] = n
-	}
-	if nums[0] != 0 && nums[0] != 1 {
-		return nil, errPageCursor
 	}
 	if len(parts[6]) != 36 {
 		return nil, errPageCursor
@@ -124,7 +128,7 @@ func ParseNodeSortCursor(raw string) (*NodeSortCursor, error) {
 	}
 	return &NodeSortCursor{
 		Sort: NodeSort{By: parts[1], Descending: parts[2] == "d"},
-		Null: int32(nums[0]), Num: nums[1], Seen: nums[2], ID: id, Text: string(text),
+		Null: null, Num: nums[0], Seen: nums[1], ID: id, Text: string(text),
 	}, nil
 }
 
