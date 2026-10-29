@@ -187,15 +187,18 @@ func main() {
 	guard := guards.New(guards.Options{Enforce: enforce, ForceObserve: layout == planpolicy.Single, Budget: resolved.GuardsBudget})
 	// Ingest and maintenance share one channel id cache; the API never writes channels.
 	channelIDs := db.NewChannelIDCache()
-	// The ingesting process counts what it stores, so its observer directory skips re-reading the unrolled hours.
+	// The ingesting process counts what it stores, so its observer directory skips re-reading the unrolled hours
+	// and its observer activity chart the recent 15-minute slots.
 	var obsCounts *obscount.Counts
+	var obsActivity *obscount.Activity
 	if mode.Ingest {
 		obsCounts = obscount.New(time.Now)
+		obsActivity = obscount.NewActivity(time.Now)
 	}
-	ingestStore := db.New(pools.Ingest, pools.Ingest, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold, db.WithChannelIDs(channelIDs), db.WithReadModels(readModels), db.WithObservationCounts(obsCounts))
+	ingestStore := db.New(pools.Ingest, pools.Ingest, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold, db.WithChannelIDs(channelIDs), db.WithReadModels(readModels), db.WithObservationCounts(obsCounts), db.WithObservationActivity(obsActivity))
 	fillPacing := db.FillPacing{Duty: resolved.FillDuty, MinPause: resolved.FillMinPause, PacketSitesSlice: resolved.FillPacketSitesSlice, CmiBatch: resolved.FillCmiBatch}
 	maintStore := db.New(pools.Maint, pools.Maint, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold, db.WithChannelIDs(channelIDs), db.WithReadModels(readModels), db.WithFillPacing(fillPacing))
-	apiStore := db.NewAPIStore(pools, layout, guard, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold, db.WithReadModels(readModels), db.WithObservationCounts(obsCounts))
+	apiStore := db.NewAPIStore(pools, layout, guard, resolved.ClockDriftThreshold, resolved.NodeStaleThreshold, db.WithReadModels(readModels), db.WithObservationCounts(obsCounts), db.WithObservationActivity(obsActivity))
 	if err := maintStore.PreloadChannelIDs(ctx); err != nil {
 		slog.Warn("channel id preload failed; known channels upsert until cached", "component", "startup", "error", err)
 	} else {

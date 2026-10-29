@@ -249,30 +249,30 @@ WHERE observer_id = @observer_id
 ORDER BY reported_at ASC;
 
 -- name: GetObserverActivityRaw :many
--- Sub-hour activity buckets straight off idx_observations_observer; no join to packets.
--- Aggregates are COALESCEd and paired with a count column: sqlc types a cast expression as
--- NOT NULL, so the counts are what tell the store a bucket had no costed or no signal rows.
+-- Sub-hour activity in one pass over idx_observations_observer: per bucket and payload type, the sums the store
+-- turns into the buckets and the type mix. Two ranges: [since, head_until) and [tail_from, until); the store
+-- fills the middle from its in-memory counts when it has them. Signal aggregates skip rows whose RSSI and SNR
+-- are both zero or missing.
 SELECT
-  date_bin($3::interval, heard_at, TIMESTAMPTZ 'epoch')::timestamptz AS bucket,
+  date_bin(@bin::interval, heard_at, TIMESTAMPTZ 'epoch')::timestamptz AS bucket,
+  payload_type,
   COUNT(*)::bigint AS observations,
-  COALESCE(SUM(airtime_ms), 0)::real AS airtime_ms,
+  COALESCE(SUM(airtime_ms::float8), 0)::float8 AS airtime_sum,
   COUNT(airtime_ms)::bigint AS airtime_n,
-  COALESCE(AVG(snr)  FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)), 0)::real AS snr_avg,
-  COALESCE(MIN(snr)  FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)), 0)::real AS snr_min,
-  COUNT(snr)         FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0))::bigint AS snr_n,
-  COALESCE(AVG(rssi) FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)), 0)::real AS rssi_avg,
-  COUNT(rssi)        FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0))::bigint AS rssi_n
+  COALESCE(SUM(snr::float8) FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)), 0)::float8 AS snr_sum,
+  COALESCE(MIN(snr)         FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)), 0)::real AS snr_min,
+  COUNT(snr)                FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0))::bigint AS snr_n,
+  COALESCE(SUM(rssi)        FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)), 0)::bigint AS rssi_sum,
+  COUNT(rssi)               FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0))::bigint AS rssi_n
 FROM packet_observations
-WHERE observer_id = $1 AND heard_at >= $2::timestamptz AND heard_at < @until::timestamptz
-GROUP BY bucket
-ORDER BY bucket;
+WHERE observer_id = @observer_id
+  AND ((heard_at >= @since::timestamptz AND heard_at < @head_until::timestamptz)
+    OR (heard_at >= @tail_from::timestamptz AND heard_at < @until::timestamptz))
+GROUP BY bucket, payload_type;
 
--- name: GetObserverActivityRawPayloadTypes :many
-SELECT payload_type, COUNT(*)::bigint AS count
-FROM packet_observations
-WHERE observer_id = $1 AND heard_at >= $2::timestamptz AND heard_at < @until::timestamptz
-GROUP BY payload_type
-ORDER BY count DESC;
+-- name: GetRawDeletedBefore :one
+-- The newest packet time retention has deleted; observations heard after it plus 30 minutes are all still stored.
+SELECT raw_deleted_before FROM analytics_raw_state LIMIT 1;
 
 -- name: GetObserverActivityHourly :many
 -- Hour-or-coarser buckets summed from the hourly rollup; same COALESCE-plus-count shape as the raw query.

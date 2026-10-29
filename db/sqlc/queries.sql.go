@@ -1200,48 +1200,56 @@ func (q *Queries) GetObserverActivityLiveSummary(ctx context.Context, arg GetObs
 
 const getObserverActivityRaw = `-- name: GetObserverActivityRaw :many
 SELECT
-  date_bin($3::interval, heard_at, TIMESTAMPTZ 'epoch')::timestamptz AS bucket,
+  date_bin($1::interval, heard_at, TIMESTAMPTZ 'epoch')::timestamptz AS bucket,
+  payload_type,
   COUNT(*)::bigint AS observations,
-  COALESCE(SUM(airtime_ms), 0)::real AS airtime_ms,
+  COALESCE(SUM(airtime_ms::float8), 0)::float8 AS airtime_sum,
   COUNT(airtime_ms)::bigint AS airtime_n,
-  COALESCE(AVG(snr)  FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)), 0)::real AS snr_avg,
-  COALESCE(MIN(snr)  FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)), 0)::real AS snr_min,
-  COUNT(snr)         FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0))::bigint AS snr_n,
-  COALESCE(AVG(rssi) FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)), 0)::real AS rssi_avg,
-  COUNT(rssi)        FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0))::bigint AS rssi_n
+  COALESCE(SUM(snr::float8) FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)), 0)::float8 AS snr_sum,
+  COALESCE(MIN(snr)         FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)), 0)::real AS snr_min,
+  COUNT(snr)                FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0))::bigint AS snr_n,
+  COALESCE(SUM(rssi)        FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)), 0)::bigint AS rssi_sum,
+  COUNT(rssi)               FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0))::bigint AS rssi_n
 FROM packet_observations
-WHERE observer_id = $1 AND heard_at >= $2::timestamptz AND heard_at < $4::timestamptz
-GROUP BY bucket
-ORDER BY bucket
+WHERE observer_id = $2
+  AND ((heard_at >= $3::timestamptz AND heard_at < $4::timestamptz)
+    OR (heard_at >= $5::timestamptz AND heard_at < $6::timestamptz))
+GROUP BY bucket, payload_type
 `
 
 type GetObserverActivityRawParams struct {
+	Bin        pgtype.Interval    `json:"bin"`
 	ObserverID uuid.UUID          `json:"observer_id"`
-	Column2    pgtype.Timestamptz `json:"column_2"`
-	Column3    pgtype.Interval    `json:"column_3"`
+	Since      pgtype.Timestamptz `json:"since"`
+	HeadUntil  pgtype.Timestamptz `json:"head_until"`
+	TailFrom   pgtype.Timestamptz `json:"tail_from"`
 	Until      pgtype.Timestamptz `json:"until"`
 }
 
 type GetObserverActivityRawRow struct {
 	Bucket       pgtype.Timestamptz `json:"bucket"`
+	PayloadType  *int16             `json:"payload_type"`
 	Observations int64              `json:"observations"`
-	AirtimeMs    float32            `json:"airtime_ms"`
+	AirtimeSum   float64            `json:"airtime_sum"`
 	AirtimeN     int64              `json:"airtime_n"`
-	SnrAvg       float32            `json:"snr_avg"`
+	SnrSum       float64            `json:"snr_sum"`
 	SnrMin       float32            `json:"snr_min"`
 	SnrN         int64              `json:"snr_n"`
-	RssiAvg      float32            `json:"rssi_avg"`
+	RssiSum      int64              `json:"rssi_sum"`
 	RssiN        int64              `json:"rssi_n"`
 }
 
-// Sub-hour activity buckets straight off idx_observations_observer; no join to packets.
-// Aggregates are COALESCEd and paired with a count column: sqlc types a cast expression as
-// NOT NULL, so the counts are what tell the store a bucket had no costed or no signal rows.
+// Sub-hour activity in one pass over idx_observations_observer: per bucket and payload type, the sums the store
+// turns into the buckets and the type mix. Two ranges: [since, head_until) and [tail_from, until); the store
+// fills the middle from its in-memory counts when it has them. Signal aggregates skip rows whose RSSI and SNR
+// are both zero or missing.
 func (q *Queries) GetObserverActivityRaw(ctx context.Context, arg GetObserverActivityRawParams) ([]GetObserverActivityRawRow, error) {
 	rows, err := q.db.Query(ctx, getObserverActivityRaw,
+		arg.Bin,
 		arg.ObserverID,
-		arg.Column2,
-		arg.Column3,
+		arg.Since,
+		arg.HeadUntil,
+		arg.TailFrom,
 		arg.Until,
 	)
 	if err != nil {
@@ -1253,54 +1261,16 @@ func (q *Queries) GetObserverActivityRaw(ctx context.Context, arg GetObserverAct
 		var i GetObserverActivityRawRow
 		if err := rows.Scan(
 			&i.Bucket,
+			&i.PayloadType,
 			&i.Observations,
-			&i.AirtimeMs,
+			&i.AirtimeSum,
 			&i.AirtimeN,
-			&i.SnrAvg,
+			&i.SnrSum,
 			&i.SnrMin,
 			&i.SnrN,
-			&i.RssiAvg,
+			&i.RssiSum,
 			&i.RssiN,
 		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const getObserverActivityRawPayloadTypes = `-- name: GetObserverActivityRawPayloadTypes :many
-SELECT payload_type, COUNT(*)::bigint AS count
-FROM packet_observations
-WHERE observer_id = $1 AND heard_at >= $2::timestamptz AND heard_at < $3::timestamptz
-GROUP BY payload_type
-ORDER BY count DESC
-`
-
-type GetObserverActivityRawPayloadTypesParams struct {
-	ObserverID uuid.UUID          `json:"observer_id"`
-	Column2    pgtype.Timestamptz `json:"column_2"`
-	Until      pgtype.Timestamptz `json:"until"`
-}
-
-type GetObserverActivityRawPayloadTypesRow struct {
-	PayloadType *int16 `json:"payload_type"`
-	Count       int64  `json:"count"`
-}
-
-func (q *Queries) GetObserverActivityRawPayloadTypes(ctx context.Context, arg GetObserverActivityRawPayloadTypesParams) ([]GetObserverActivityRawPayloadTypesRow, error) {
-	rows, err := q.db.Query(ctx, getObserverActivityRawPayloadTypes, arg.ObserverID, arg.Column2, arg.Until)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []GetObserverActivityRawPayloadTypesRow{}
-	for rows.Next() {
-		var i GetObserverActivityRawPayloadTypesRow
-		if err := rows.Scan(&i.PayloadType, &i.Count); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1770,6 +1740,18 @@ func (q *Queries) GetRadioPresets(ctx context.Context, arg GetRadioPresetsParams
 		return nil, err
 	}
 	return items, nil
+}
+
+const getRawDeletedBefore = `-- name: GetRawDeletedBefore :one
+SELECT raw_deleted_before FROM analytics_raw_state LIMIT 1
+`
+
+// The newest packet time retention has deleted; observations heard after it plus 30 minutes are all still stored.
+func (q *Queries) GetRawDeletedBefore(ctx context.Context) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getRawDeletedBefore)
+	var raw_deleted_before pgtype.Timestamptz
+	err := row.Scan(&raw_deleted_before)
+	return raw_deleted_before, err
 }
 
 const getRegion = `-- name: GetRegion :one

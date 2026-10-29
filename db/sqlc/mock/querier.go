@@ -925,21 +925,6 @@ func (mr *MockQuerierMockRecorder) GetObserverActivityRaw(ctx, arg any) *gomock.
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetObserverActivityRaw", reflect.TypeOf((*MockQuerier)(nil).GetObserverActivityRaw), ctx, arg)
 }
 
-// GetObserverActivityRawPayloadTypes mocks base method.
-func (m *MockQuerier) GetObserverActivityRawPayloadTypes(ctx context.Context, arg db.GetObserverActivityRawPayloadTypesParams) ([]db.GetObserverActivityRawPayloadTypesRow, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetObserverActivityRawPayloadTypes", ctx, arg)
-	ret0, _ := ret[0].([]db.GetObserverActivityRawPayloadTypesRow)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// GetObserverActivityRawPayloadTypes indicates an expected call of GetObserverActivityRawPayloadTypes.
-func (mr *MockQuerierMockRecorder) GetObserverActivityRawPayloadTypes(ctx, arg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetObserverActivityRawPayloadTypes", reflect.TypeOf((*MockQuerier)(nil).GetObserverActivityRawPayloadTypes), ctx, arg)
-}
-
 // GetObserverBrokers mocks base method.
 func (m *MockQuerier) GetObserverBrokers(ctx context.Context, observerID uuid.UUID) ([]db.GetObserverBrokersRow, error) {
 	m.ctrl.T.Helper()
@@ -1148,6 +1133,21 @@ func (m *MockQuerier) GetRadioPresets(ctx context.Context, arg db.GetRadioPreset
 func (mr *MockQuerierMockRecorder) GetRadioPresets(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRadioPresets", reflect.TypeOf((*MockQuerier)(nil).GetRadioPresets), ctx, arg)
+}
+
+// GetRawDeletedBefore mocks base method.
+func (m *MockQuerier) GetRawDeletedBefore(ctx context.Context) (pgtype.Timestamptz, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetRawDeletedBefore", ctx)
+	ret0, _ := ret[0].(pgtype.Timestamptz)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetRawDeletedBefore indicates an expected call of GetRawDeletedBefore.
+func (mr *MockQuerierMockRecorder) GetRawDeletedBefore(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRawDeletedBefore", reflect.TypeOf((*MockQuerier)(nil).GetRawDeletedBefore), ctx)
 }
 
 // GetRegion mocks base method.

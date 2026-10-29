@@ -143,11 +143,11 @@ type Querier interface {
 	GetObserverActivityHourlyPayloadTypes(ctx context.Context, arg GetObserverActivityHourlyPayloadTypesParams) ([]GetObserverActivityHourlyPayloadTypesRow, error)
 	// Two indexed ranges, bounded to one observer; no legacy presence counters.
 	GetObserverActivityLiveSummary(ctx context.Context, arg GetObserverActivityLiveSummaryParams) (GetObserverActivityLiveSummaryRow, error)
-	// Sub-hour activity buckets straight off idx_observations_observer; no join to packets.
-	// Aggregates are COALESCEd and paired with a count column: sqlc types a cast expression as
-	// NOT NULL, so the counts are what tell the store a bucket had no costed or no signal rows.
+	// Sub-hour activity in one pass over idx_observations_observer: per bucket and payload type, the sums the store
+	// turns into the buckets and the type mix. Two ranges: [since, head_until) and [tail_from, until); the store
+	// fills the middle from its in-memory counts when it has them. Signal aggregates skip rows whose RSSI and SNR
+	// are both zero or missing.
 	GetObserverActivityRaw(ctx context.Context, arg GetObserverActivityRawParams) ([]GetObserverActivityRawRow, error)
-	GetObserverActivityRawPayloadTypes(ctx context.Context, arg GetObserverActivityRawPayloadTypesParams) ([]GetObserverActivityRawPayloadTypesRow, error)
 	GetObserverBrokers(ctx context.Context, observerID uuid.UUID) ([]GetObserverBrokersRow, error)
 	GetObserverByID(ctx context.Context, id uuid.UUID) (Observer, error)
 	GetObserverByPubkey(ctx context.Context, publicKey []byte) (Observer, error)
@@ -180,6 +180,8 @@ type Querier interface {
 	// (a NULL start makes generate_series return no rows).
 	GetPathStatsProbe(ctx context.Context, arg GetPathStatsProbeParams) ([]GetPathStatsProbeRow, error)
 	GetRadioPresets(ctx context.Context, arg GetRadioPresetsParams) ([]MvRadioPreset, error)
+	// The newest packet time retention has deleted; observations heard after it plus 30 minutes are all still stored.
+	GetRawDeletedBefore(ctx context.Context) (pgtype.Timestamptz, error)
 	GetRegion(ctx context.Context, id int32) (GetRegionRow, error)
 	GetRegionBySlug(ctx context.Context, slug string) (GetRegionBySlugRow, error)
 	GetRegionIATAs(ctx context.Context, regionID int32) ([]string, error)

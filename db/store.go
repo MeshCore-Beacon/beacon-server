@@ -41,6 +41,8 @@ type Store struct {
 	hopStats            hopStatsCache   // known_routes hop statistics for the global hop page; see hopGroupSmall
 
 	obsCounts *obscount.Counts // see WithObservationCounts; nil: the directory reads raw rows
+
+	obsActivity *obscount.Activity // see WithObservationActivity; nil: activity reads raw rows
 }
 
 // New creates a Store whose statements run on dbtx (a pool, or a PlanRouter for the API).

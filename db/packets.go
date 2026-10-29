@@ -582,6 +582,7 @@ func (s *Store) InsertObservation(ctx context.Context, o ingest.InsertObservatio
 	if err == nil {
 		if row.Inserted {
 			s.obsCounts.Add(o.HeardAt, o.ObserverID, o.IATA)
+			s.obsActivity.Add(o.HeardAt, o.ObserverID, o.PayloadType, o.RSSI, o.SNR, o.AirtimeMs)
 		}
 		return row.Inserted, row.ObservationCount, nil
 	}
@@ -606,6 +607,7 @@ func (s *Store) InsertObservation(ctx context.Context, o ingest.InsertObservatio
 	}
 	if fallback.Inserted {
 		s.obsCounts.Add(o.HeardAt, o.ObserverID, o.IATA)
+		s.obsActivity.Add(o.HeardAt, o.ObserverID, o.PayloadType, o.RSSI, o.SNR, o.AirtimeMs)
 	}
 	return fallback.Inserted, fallback.ObservationCount, nil
 }

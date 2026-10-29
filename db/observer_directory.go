@@ -21,6 +21,12 @@ func WithObservationCounts(c *obscount.Counts) Option {
 	return func(s *Store) { s.obsCounts = c }
 }
 
+// WithObservationActivity has InsertObservation add each new observation to a and observer activity read
+// the slots a covers from it. Pass it only in the process that ingests (nil disables it).
+func WithObservationActivity(a *obscount.Activity) Option {
+	return func(s *Store) { s.obsActivity = a }
+}
+
 func (s *Store) ListObserverDirectory(ctx context.Context, query api.ObserverDirectoryQuery) (*api.ObserverDirectory, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

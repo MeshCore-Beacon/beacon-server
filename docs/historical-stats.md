@@ -119,7 +119,11 @@ region or all IATAs.
 ## Raw or current, by design
 
 - Packet, trace and route detail, the packet list, observer comparison, and observer
-  activity below one hour. Hourly observer activity reads raw rows for the hours after the
+  activity below one hour. Sub-hour activity reads its raw rows in one pass; at 15 minutes the
+  process that ingests serves the slots it has counted in memory (`obscount.Activity`, kept 25
+  hours, the same coverage and cleanup rules as the directory's counts) and reads raw rows only
+  before them and for the slot still filling (`TestObserverActivityLiveCountsMatchRawPostgres`).
+  Hourly observer activity reads raw rows for the hours after the
   newest complete one (at most the last 24 hours, the raw holdback), so the unrolled tail isn't
   shown as zero. `rolledUntil` and `rawFrom` in the response mark any hours still uncovered.
 - Current memberships: scope observer and node counts, node types, clock drift, radio presets.

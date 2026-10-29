@@ -4,8 +4,8 @@
 // Package obscount counts stored observations per minute, observer and IATA for the recent hours
 // the analytics rollup hasn't covered yet. The observer directory adds these up instead of
 // re-reading every raw observation of those hours, which on a large deployment means a heap page
-// per row. It is exact only in the one process that ingests: every insert of a new observation
-// row goes through Add.
+// per row. Activity does the same for an observer's 15-minute activity chart. Both are exact only
+// in the one process that ingests: every insert of a new observation row goes through Add.
 package obscount
 
 import (
