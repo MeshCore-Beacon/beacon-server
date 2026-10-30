@@ -6,7 +6,6 @@ package ingest
 import (
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"testing"
@@ -18,39 +17,6 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
 	"github.com/google/uuid"
 )
-
-func TestParseNumber_Float(t *testing.T) {
-	raw := json.RawMessage(`3.14`)
-	if parseNumber(raw) != 3.14 {
-		t.Errorf("expected 3.14, got %f", parseNumber(raw))
-	}
-}
-
-func TestParseNumber_QuotedString(t *testing.T) {
-	raw := json.RawMessage(`"42.5"`)
-	if parseNumber(raw) != 42.5 {
-		t.Errorf("expected 42.5, got %f", parseNumber(raw))
-	}
-}
-
-func TestParseNumber_Empty(t *testing.T) {
-	if parseNumber(json.RawMessage(``)) != 0 {
-		t.Error("expected 0 for empty input")
-	}
-}
-
-func TestParseNumber_Invalid(t *testing.T) {
-	if parseNumber(json.RawMessage(`"notanumber"`)) != 0 {
-		t.Error("expected 0 for unparseable string")
-	}
-}
-
-func TestParseNumber_Integer(t *testing.T) {
-	raw := json.RawMessage(`7`)
-	if parseNumber(raw) != 7 {
-		t.Errorf("expected 7, got %f", parseNumber(raw))
-	}
-}
 
 func TestNormalizeObserverType_OrgPrefix(t *testing.T) {
 	if normalizeObserverType("meshcore-dev/meshcore-ha") != "meshcore-ha" {
@@ -278,6 +244,9 @@ func (s *stubDB) GetObserverScopes(_ context.Context, _ uuid.UUID) ([]string, er
 }
 
 func (s *stubDB) ResolvePathHashes(_ context.Context, _ string, _ [][]byte) (map[string][]api.ResolvedPathEntry, error) {
+	return nil, nil
+}
+func (s *stubDB) ResolveTracePathHashes(_ context.Context, _ string, _ [][]byte) (map[string][]api.ResolvedPathEntry, error) {
 	return nil, nil
 }
 

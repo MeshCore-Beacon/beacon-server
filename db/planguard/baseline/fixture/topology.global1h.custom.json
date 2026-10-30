@@ -1,0 +1,9 @@
+[
+ "Limit",
+ "  Group",
+ "    Sort",
+ "      Nested Loop",
+ "        Bitmap Heap Scan on known_routes r",
+ "          Bitmap Index Scan using idx_known_routes_keyset",
+ "        Function Scan"
+]
