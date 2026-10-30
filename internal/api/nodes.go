@@ -47,9 +47,11 @@ const (
 	NodeSortName      = "name"
 	NodeSortType      = "type"
 	NodeSortNeighbors = "neighbors"
+	// NodeSortLastSeen reaches the sorted list only oldest first; newest first is the default list.
+	NodeSortLastSeen = "lastSeen"
 )
 
-// NodeSort orders a node list by name, type or neighbour count.
+// NodeSort orders a node list by name, type, neighbour count or last seen.
 type NodeSort struct {
 	By         string
 	Descending bool
@@ -57,7 +59,7 @@ type NodeSort struct {
 
 // ValidNodeSort reports whether by is a NodeSort order.
 func ValidNodeSort(by string) bool {
-	return by == NodeSortName || by == NodeSortType || by == NodeSortNeighbors
+	return by == NodeSortName || by == NodeSortType || by == NodeSortNeighbors || by == NodeSortLastSeen
 }
 
 // NodeSummary is the minimal node representation used in list responses.

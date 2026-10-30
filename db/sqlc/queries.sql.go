@@ -4376,6 +4376,7 @@ SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_
   (CASE $3::text
      WHEN 'type' THEN CASE WHEN n.node_type BETWEEN 1 AND 4 THEN n.node_type ELSE 5 END::bigint
      WHEN 'neighbors' THEN coalesce(c.k, 0)
+     WHEN 'lastSeen' THEN (extract(epoch FROM n.last_seen) * 1000000)::bigint
      ELSE 0 END
    * CASE WHEN $2::bool THEN -1 ELSE 1 END)::bigint AS k_num,
   (-(extract(epoch FROM n.last_seen) * 1000000))::bigint AS k_seen
@@ -4476,8 +4477,8 @@ type ListNodesSortedRow struct {
 	NeighborIds        []uuid.UUID        `json:"neighbor_ids"`
 }
 
-// ListNodes by name, type or neighbour count, keyset-paged, in the web table's order: unnamed nodes
-// last, unknown types after sensor, ties newest first.
+// ListNodes by name, type, neighbour count or last seen, keyset-paged, in the web table's order: unnamed
+// nodes last, unknown types after sensor, ties newest first (last seen ties by id).
 func (q *Queries) ListNodesSorted(ctx context.Context, arg ListNodesSortedParams) ([]ListNodesSortedRow, error) {
 	rows, err := q.db.Query(ctx, listNodesSorted,
 		arg.IncludeNeighbors,

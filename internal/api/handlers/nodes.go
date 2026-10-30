@@ -52,8 +52,8 @@ func NodesRouter(reader api.Reader) http.Handler {
 //	@Param		neighbors				query		bool	false	"Include each node's known neighbor IDs (neighborIds field). Bare ?neighbors or ?neighbors=true enables it; omit/false for none"
 //	@Param		cursor					query		int		false	"last_seen epoch ms of last item for pagination"
 //	@Param		pageCursor				query		string	false	"Opaque nextPageCursor from a previous response; keeps millisecond ties. Wins over cursor when both are sent"
-//	@Param		sort					query		string	false	"Order: lastSeen (default, newest first), name, type or neighbors. Unnamed nodes come last in either name order; ties go newest first. Page a sorted list with pageCursor only"	Enums(lastSeen, name, type, neighbors)
-//	@Param		order					query		string	false	"asc (default) or desc; lastSeen is desc only"	Enums(asc, desc)
+//	@Param		sort					query		string	false	"Order: lastSeen (default), name, type or neighbors. Unnamed nodes come last in either name order; other ties go newest first, lastSeen ties by id. Page any order but lastSeen desc with pageCursor only"	Enums(lastSeen, name, type, neighbors)
+//	@Param		order					query		string	false	"asc or desc. Defaults to asc, but to desc (newest first) for lastSeen; lastSeen asc lists the oldest heard first"	Enums(asc, desc)
 //	@Param		limit					query		int		false	"Max results (default 50); must be positive, values above 2000 are clamped" minimum(1) maximum(2000)
 //	@Success	200						{object}	api.NodePage
 //	@Failure	400						{object}	handlers.APIError
@@ -110,7 +110,7 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 			pageCursor = pc
 		}
 		if sorted && cursor != 0 {
-			respondError(w, http.StatusBadRequest, "cursor works only with sort=lastSeen; page with pageCursor")
+			respondError(w, http.StatusBadRequest, "cursor works only with the default newest-first order; page with pageCursor")
 			return
 		}
 		var pubkey []byte
@@ -189,16 +189,17 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 	}
 }
 
-// parseNodeSort reads sort and order; sorted is false for the default last-seen order.
+// parseNodeSort reads sort and order; sorted is false for the default order, last seen newest first.
 func parseNodeSort(r *http.Request) (sort api.NodeSort, sorted bool, err error) {
 	by, order := r.URL.Query().Get("sort"), r.URL.Query().Get("order")
 	if order != "" && order != "asc" && order != "desc" {
 		return sort, false, errors.New("order must be asc or desc")
 	}
 	switch {
-	case by == "" || by == "lastSeen":
+	case by == "" || by == api.NodeSortLastSeen:
+		// Newest first stays on the legacy path so the numeric cursor keeps working.
 		if order == "asc" {
-			return sort, false, errors.New("sort=lastSeen supports order=desc only")
+			return api.NodeSort{By: api.NodeSortLastSeen}, true, nil
 		}
 		return sort, false, nil
 	case api.ValidNodeSort(by):

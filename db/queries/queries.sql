@@ -1402,8 +1402,8 @@ FROM page n
 ORDER BY n.last_seen DESC, n.id DESC;
 
 -- name: ListNodesSorted :many
--- ListNodes by name, type or neighbour count, keyset-paged, in the web table's order: unnamed nodes
--- last, unknown types after sensor, ties newest first.
+-- ListNodes by name, type, neighbour count or last seen, keyset-paged, in the web table's order: unnamed
+-- nodes last, unknown types after sensor, ties newest first (last seen ties by id).
 WITH counts AS MATERIALIZED (
   SELECT nn.node_id, count(DISTINCT nn.neighbor_id)::bigint AS k
   FROM node_neighbors nn
@@ -1417,6 +1417,7 @@ SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_
   (CASE @sort::text
      WHEN 'type' THEN CASE WHEN n.node_type BETWEEN 1 AND 4 THEN n.node_type ELSE 5 END::bigint
      WHEN 'neighbors' THEN coalesce(c.k, 0)
+     WHEN 'lastSeen' THEN (extract(epoch FROM n.last_seen) * 1000000)::bigint
      ELSE 0 END
    * CASE WHEN @descending::bool THEN -1 ELSE 1 END)::bigint AS k_num,
   (-(extract(epoch FROM n.last_seen) * 1000000))::bigint AS k_seen

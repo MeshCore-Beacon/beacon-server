@@ -389,6 +389,9 @@ func TestListNodes_Sort(t *testing.T) {
 		},
 	}
 	nameCursor := api.NodeSortCursor{Sort: api.NodeSort{By: "name", Descending: true}, Text: "Peak: 9", Seen: -5, ID: uuid.New()}
+	seenCursor := api.NodeSortCursor{Sort: api.NodeSort{By: "lastSeen"}, Num: 1792442625019123, Seen: -1792442625019123, ID: uuid.New()}
+	seenDesc := seenCursor
+	seenDesc.Sort.Descending = true
 	for _, tc := range []struct {
 		query     string
 		code      int
@@ -406,7 +409,15 @@ func TestListNodes_Sort(t *testing.T) {
 		{"sort=name&pageCursor=v1:1:" + uuid.Nil.String(), http.StatusBadRequest, "pageCursor", nil, false}, // a last-seen cursor
 		{"pageCursor=" + nameCursor.String(), http.StatusBadRequest, "pageCursor", nil, false},              // a sorted cursor without its sort
 		{"sort=type&cursor=5", http.StatusBadRequest, "cursor", nil, false},
-		{"sort=lastSeen&order=asc", http.StatusBadRequest, "lastSeen", nil, false},
+		{"sort=lastSeen&order=asc", http.StatusOK, `"sort":"lastSeen","order":"asc"`, &api.NodeSort{By: "lastSeen"}, false},
+		{"order=asc", http.StatusOK, `"sort":"lastSeen","order":"asc"`, &api.NodeSort{By: "lastSeen"}, false}, // lastSeen is the default sort
+		{"sort=lastSeen&order=asc&pageCursor=" + seenCursor.String(), http.StatusOK, `"order":"asc"`, &seenCursor.Sort, true},
+		{"sort=lastSeen&order=asc&cursor=5", http.StatusBadRequest, "newest-first", nil, false},
+		{"sort=lastSeen&order=asc&pageCursor=" + nameCursor.String(), http.StatusBadRequest, "pageCursor", nil, false},
+		{"sort=lastSeen&order=asc&pageCursor=" + seenDesc.String(), http.StatusBadRequest, "pageCursor", nil, false},
+		{"sort=lastSeen&order=asc&pageCursor=v1:1:" + uuid.Nil.String(), http.StatusBadRequest, "pageCursor", nil, false}, // a newest-first cursor
+		{"sort=lastSeen&pageCursor=" + seenCursor.String(), http.StatusBadRequest, "pageCursor", nil, false},              // an oldest-first cursor on the default order
+		{"sort=name&pageCursor=" + seenCursor.String(), http.StatusBadRequest, "pageCursor", nil, false},
 		{"sort=radio", http.StatusBadRequest, "sort", nil, false},
 		{"sort=name&order=up", http.StatusBadRequest, "order", nil, false},
 	} {
@@ -428,8 +439,13 @@ func TestListNodes_Sort(t *testing.T) {
 		if gotSort != *tc.sorted || (gotCursor != nil) != tc.cursorSet {
 			t.Fatalf("%s: sort %+v cursor %+v", tc.query, gotSort, gotCursor)
 		}
-		if tc.cursorSet && *gotCursor != nameCursor {
-			t.Fatalf("%s: cursor %+v, want %+v", tc.query, *gotCursor, nameCursor)
+		if want := nameCursor; tc.cursorSet {
+			if gotSort.By == "lastSeen" {
+				want = seenCursor
+			}
+			if *gotCursor != want {
+				t.Fatalf("%s: cursor %+v, want %+v", tc.query, *gotCursor, want)
+			}
 		}
 	}
 }
