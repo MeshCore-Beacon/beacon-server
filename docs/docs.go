@@ -4930,6 +4930,10 @@ const docTemplate = `{
                 "knownNeighborCount": {
                     "type": "integer"
                 },
+                "lastSeen": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
                 "lat": {
                     "description": "decimal degrees, from advert AppData",
                     "type": "number"

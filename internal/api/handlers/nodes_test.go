@@ -247,7 +247,7 @@ func TestGetNode_OK(t *testing.T) {
 	r := chi.NewRouter()
 	r.Get("/nodes/{nodeId}", getNode(stubReader{
 		getNode: func(_ context.Context, id uuid.UUID) (*api.Node, error) {
-			return &api.Node{NodeSummary: api.NodeSummary{ID: id}}, nil
+			return &api.Node{NodeSummary: api.NodeSummary{ID: id, LastSeen: 1792442625019}, FirstSeen: 1792442600000}, nil
 		},
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/nodes/"+nodeID.String(), nil)
@@ -258,6 +258,11 @@ func TestGetNode_OK(t *testing.T) {
 	}
 	if strings.Contains(w.Body.String(), `"meshmapper"`) {
 		t.Error("meshmapper should be omitted when MeshMapper doesn't list the node")
+	}
+	// lastSeen moved into the embedded summary: detail still sends it once.
+	if body := w.Body.String(); strings.Count(body, `"lastSeen":`) != 1 || !strings.Contains(body, `"lastSeen":1792442625019`) ||
+		!strings.Contains(body, `"firstSeen":1792442600000`) {
+		t.Errorf("node detail times: %s", body)
 	}
 }
 

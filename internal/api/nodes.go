@@ -76,6 +76,7 @@ type NodeSummary struct {
 	DefaultScope       *string     `json:"defaultScope,omitempty"` // most recently matched transport scope name e.g. "#bc"
 	KnownNeighborCount int64       `json:"knownNeighborCount"`
 	NeighborIDs        []uuid.UUID `json:"neighborIds,omitempty"` // only populated when the list request opts in; see ?neighbors=true
+	LastSeen           int64       `json:"lastSeen"`              // epoch ms
 	// Stale is true when the node hasn't been seen (last_seen) within the configured
 	// staleness window (default 24h; internal/config.ResolvedConfig.NodeStaleThreshold).
 	// Applies to every node type, unlike ClockDriftSeconds/ClockOutOfSync on Node, which
@@ -96,7 +97,6 @@ type Node struct {
 	SupportsMultibyteTraces bool           `json:"supportsMultibyteTraces"`      // firmware >= 1.11.0; detected via trace hash size
 	MinFirmwareVersion      *string        `json:"minFirmwareVersion,omitempty"` // derived from capability flags
 	FirstSeen               int64          `json:"firstSeen"`                    // epoch ms
-	LastSeen                int64          `json:"lastSeen"`                     // epoch ms
 	Metadata                any            `json:"metadata,omitempty"`           // raw JSONB metadata
 	Neighbors               []NodeNeighbor `json:"neighbors"`
 	// Clock drift, repeaters/room servers only (nodeType 2/3); omitted entirely for other
