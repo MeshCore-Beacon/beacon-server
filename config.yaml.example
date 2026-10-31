@@ -319,11 +319,11 @@ websocket:
   # before hello, allowing browsers to back off without evicting existing clients.
   max_connects_per_minute: 10
   # Live-event bytes each connection may receive, counted before compression;
-  # zero/omitted defaults to 131072 (128 KiB/s) with a 2097152 (2 MiB) burst.
+  # zero/omitted defaults to 1048576 (1 MiB/s) with an 8388608 (8 MiB) burst.
   # Events past it are dropped, and a lagged notice, at most every 30 s, tells
   # the client to refresh over REST. Negative values prevent startup.
-  max_send_bytes_per_second: 131072
-  send_burst_bytes: 2097152
+  max_send_bytes_per_second: 1048576
+  send_burst_bytes: 8388608
   # Other sites allowed to open /ws. Exact scheme://host[:port], or
   # scheme://*.domain[:port] for every subdomain of domain at any depth. The
   # wildcard never matches the apex itself, and scheme and port stay exact.
