@@ -1,0 +1,18 @@
+[
+ "Sort",
+ "  Limit [InitPlan]",
+ "    Sort",
+ "      Aggregate partial=Simple {Sorted}",
+ "        Sort",
+ "          Nested Loop",
+ "            Function Scan",
+ "            Append",
+ "              Limit",
+ "                Index Only Scan on packet_sites ps using idx_packet_sites_site scan=Forward",
+ "              Limit",
+ "                Sort",
+ "                  Result",
+ "              Subquery Scan",
+ "                Index Only Scan on packet_sites ps_1 using idx_packet_sites_early scan=Forward [Subquery]",
+ "  CTE Scan"
+]

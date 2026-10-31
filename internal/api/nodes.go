@@ -32,6 +32,36 @@ type NodeIATA struct {
 	LastHeard int64  `json:"lastHeard"` // epoch ms
 }
 
+// NodePage adds the exact cursor while keeping the numeric one for older clients.
+type NodePage struct {
+	Page[NodeSummary]
+	NextPageCursor *string `json:"nextPageCursor,omitempty"`
+	// Sort and Order name the order the items are in ("lastSeen" "desc" unless a sort was asked
+	// for), so a client can tell this server sorted; older servers leave them out.
+	Sort  string `json:"sort,omitempty" enums:"lastSeen,name,type,neighbors"`
+	Order string `json:"order,omitempty" enums:"asc,desc"`
+}
+
+// Node list orders besides the default, last seen newest first.
+const (
+	NodeSortName      = "name"
+	NodeSortType      = "type"
+	NodeSortNeighbors = "neighbors"
+	// NodeSortLastSeen reaches the sorted list only oldest first; newest first is the default list.
+	NodeSortLastSeen = "lastSeen"
+)
+
+// NodeSort orders a node list by name, type, neighbour count or last seen.
+type NodeSort struct {
+	By         string
+	Descending bool
+}
+
+// ValidNodeSort reports whether by is a NodeSort order.
+func ValidNodeSort(by string) bool {
+	return by == NodeSortName || by == NodeSortType || by == NodeSortNeighbors || by == NodeSortLastSeen
+}
+
 // NodeSummary is the minimal node representation used in list responses.
 type NodeSummary struct {
 	ID                 uuid.UUID   `json:"id"`
@@ -48,6 +78,7 @@ type NodeSummary struct {
 	DefaultScope       *string     `json:"defaultScope,omitempty"` // most recently matched transport scope name e.g. "#bc"
 	KnownNeighborCount int64       `json:"knownNeighborCount"`
 	NeighborIDs        []uuid.UUID `json:"neighborIds,omitempty"` // only populated when the list request opts in; see ?neighbors=true
+	LastSeen           int64       `json:"lastSeen"`              // epoch ms
 	// Stale is true when the node hasn't been seen (last_seen) within the configured
 	// staleness window (default 24h; internal/config.ResolvedConfig.NodeStaleThreshold).
 	// Applies to every node type, unlike ClockDriftSeconds/ClockOutOfSync on Node, which
@@ -68,7 +99,6 @@ type Node struct {
 	SupportsMultibyteTraces bool           `json:"supportsMultibyteTraces"`      // firmware >= 1.11.0; detected via trace hash size
 	MinFirmwareVersion      *string        `json:"minFirmwareVersion,omitempty"` // derived from capability flags
 	FirstSeen               int64          `json:"firstSeen"`                    // epoch ms
-	LastSeen                int64          `json:"lastSeen"`                     // epoch ms
 	Metadata                any            `json:"metadata,omitempty"`           // raw JSONB metadata
 	Neighbors               []NodeNeighbor `json:"neighbors"`
 	// Clock drift, repeaters/room servers only (nodeType 2/3); omitted entirely for other

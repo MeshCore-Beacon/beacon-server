@@ -92,18 +92,25 @@ func (s *Store) UpsertRegion(ctx context.Context, slug, name, description string
 	})
 }
 
-func (s *Store) ListRegions(ctx context.Context) ([]api.RegionSummary, error) {
+func (s *Store) ListRegions(ctx context.Context) ([]api.Region, error) {
 	rows, err := s.q.ListRegions(ctx)
 	if err != nil {
 		return nil, err
 	}
-	regions := make([]api.RegionSummary, 0, len(rows))
+	regions := make([]api.Region, 0, len(rows))
 	for _, v := range rows {
-		regions = append(regions, api.RegionSummary{
-			ID:   int(v.ID),
-			Slug: v.Slug,
-			Name: v.Name,
-		})
+		region := api.Region{
+			RegionSummary: api.RegionSummary{ID: int(v.ID), Slug: v.Slug, Name: v.Name},
+			Description:   v.Description,
+			CenterLat:     v.CenterLat,
+			CenterLng:     v.CenterLng,
+			IATAs:         v.Iatas,
+		}
+		if v.ZoomLevel != nil {
+			z := int(*v.ZoomLevel)
+			region.ZoomLevel = &z
+		}
+		regions = append(regions, region)
 	}
 	return regions, nil
 }

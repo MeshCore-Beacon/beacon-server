@@ -1,0 +1,20 @@
+# Copyright 2026 Beacon Contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# The hop statement with rare and absent hop entries, but those skip the generic mode.
+statements:
+  ListKnownRoutesGlobalHop: {sqlc: ListKnownRoutesGlobalHop, plan: cached, admission: global_page}
+admission_profiles:
+  global_page: [page1, deep, tie]
+entries:
+  - {id: gh.page1, stmt: ListKnownRoutesGlobalHop, shapes: [page1, deep, tie], params: [6, null, 0, false, 50]}
+  - id: gh.rare
+    stmt: ListKnownRoutesGlobalHop
+    shapes: [rare_hop]
+    params: [25, null, 0, false, 50]
+    mode: {generic: {skip: generic plans read the whole hop group}}
+  - id: gh.absent
+    stmt: ListKnownRoutesGlobalHop
+    shapes: [absent_hop]
+    params: [1, null, 0, false, 50]
+    mode: {generic: {skip: generic plans read the whole hop group}}

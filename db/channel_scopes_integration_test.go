@@ -46,7 +46,7 @@ func TestChannelMessageScopesPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(context.Background())
-	for _, table := range []string{"transport_scopes", "packets", "packet_observations", "channels", "channel_messages"} {
+	for _, table := range []string{"transport_scopes", "packets", "packet_observations", "channels", "channel_messages", "channel_message_iatas"} {
 		if _, err := tx.Exec(ctx, "CREATE TEMP TABLE "+table+" (LIKE public."+table+" INCLUDING ALL) ON COMMIT DROP"); err != nil {
 			t.Fatal(err)
 		}
@@ -113,7 +113,8 @@ UPDATE packets SET observation_count=2;
 	}
 	ch := int32(123)
 	for _, id := range []*int32{nil, &ch} {
-		p, err := s.ListChannelMessages(ctx, id, time.Time{}, 20, []string{"YOW"}, "", 0)
+		// The original statements: these rows carry no read-model sites.
+		p, err := listChannelMessagesLegacy(ctx, s.q, id, time.Time{}, 20, []string{"YOW"}, "", 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -154,7 +155,7 @@ UPDATE packets SET observation_count=2;
 			check(body.Items)
 		}
 	}
-	filtered, err := s.ListChannelMessages(ctx, &ch, time.Time{}, 20, []string{"YOW"}, "#yow", 0)
+	filtered, err := listChannelMessagesLegacy(ctx, s.q, &ch, time.Time{}, 20, []string{"YOW"}, "#yow", 0)
 	if err != nil || len(filtered.Items) != 1 || filtered.Items[0].Scope == nil || *filtered.Items[0].Scope != "#yow" {
 		t.Fatal(filtered, err)
 	}
@@ -162,7 +163,7 @@ UPDATE packets SET observation_count=2;
 	if err != nil || len(catchup) != 1 {
 		t.Fatal(catchup, err)
 	}
-	other, err := s.ListChannelMessages(ctx, &ch, time.Time{}, 20, []string{"YVR"}, "", 0)
+	other, err := listChannelMessagesLegacy(ctx, s.q, &ch, time.Time{}, 20, []string{"YVR"}, "", 0)
 	if err != nil || len(other.Items) != 0 {
 		t.Fatal("region escaped", other, err)
 	}

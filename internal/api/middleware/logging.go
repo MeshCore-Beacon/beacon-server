@@ -42,20 +42,30 @@ func singleLineLogValue(value string) string {
 	return strings.ReplaceAll(value, "\n", "")
 }
 
-func (e *requestLogEntry) Write(status, bytes int, _ http.Header, elapsed time.Duration, _ any) {
+func (e *requestLogEntry) Write(status, bytes int, header http.Header, elapsed time.Duration, _ any) {
 	if status == 0 {
 		status = http.StatusOK
 	}
-	level := slog.LevelInfo
-	if status >= 500 {
-		level = slog.LevelError
-	} else if status >= 400 {
-		level = slog.LevelWarn
-	}
+	level := requestLogLevel(status, header)
 	if !slog.Default().Enabled(e.request.Context(), level) {
 		return
 	}
 	e.logger().Log(e.request.Context(), level, "request complete", "status", status, "bytes", bytes, "duration_ms", float64(elapsed)/float64(time.Millisecond))
+}
+
+// requestLogLevel is INFO below 400, WARN for 4xx and ERROR for 5xx. A 503 with Retry-After is a refusal the client
+// is told to retry (read model not ready, statement timeout, guard admission); it heals itself and is already counted
+// in metrics, so it logs at WARN. A 503 without Retry-After is unexpected and stays at ERROR.
+func requestLogLevel(status int, header http.Header) slog.Level {
+	switch {
+	case status == http.StatusServiceUnavailable && header.Get("Retry-After") != "":
+		return slog.LevelWarn
+	case status >= 500:
+		return slog.LevelError
+	case status >= 400:
+		return slog.LevelWarn
+	}
+	return slog.LevelInfo
 }
 
 func (e *requestLogEntry) Panic(value any, stack []byte) {

@@ -9,6 +9,12 @@ import (
 	"github.com/google/uuid"
 )
 
+// ObserverPage adds the exact cursor while keeping the numeric one for older clients.
+type ObserverPage struct {
+	Page[ObserverSummary]
+	NextPageCursor *string `json:"nextPageCursor,omitempty"`
+}
+
 // ObserverSummary is the minimal observer representation used in list responses.
 type ObserverSummary struct {
 	ID           uuid.UUID `json:"id"`
