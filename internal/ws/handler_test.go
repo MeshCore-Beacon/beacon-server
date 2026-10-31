@@ -201,16 +201,20 @@ func TestConfigureIncludeRepeats(t *testing.T) {
 }
 
 func TestCompressionNegotiated(t *testing.T) {
+	const chrome = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+	const iPhone = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
 	for _, tc := range []struct {
-		name    string
-		allowed []string
-		mode    websocket.CompressionMode
-		wantExt string
+		name      string
+		allowed   []string
+		userAgent string
+		mode      websocket.CompressionMode
+		wantExt   string
 	}{
-		{"context takeover", nil, websocket.CompressionContextTakeover, "permessage-deflate"},
-		{"context takeover with origins configured", []string{"https://example.com"}, websocket.CompressionContextTakeover, "permessage-deflate"},
-		{"client asks for no context takeover", nil, websocket.CompressionNoContextTakeover, "permessage-deflate; client_no_context_takeover; server_no_context_takeover"},
-		{"client without compression", nil, websocket.CompressionDisabled, ""},
+		{"context takeover", nil, chrome, websocket.CompressionContextTakeover, "permessage-deflate"},
+		{"context takeover with origins configured", []string{"https://example.com"}, chrome, websocket.CompressionContextTakeover, "permessage-deflate"},
+		{"client asks for no context takeover", nil, chrome, websocket.CompressionNoContextTakeover, "permessage-deflate; client_no_context_takeover; server_no_context_takeover"},
+		{"client without compression", nil, chrome, websocket.CompressionDisabled, ""},
+		{"iPhone offering deflate gets plain frames", nil, iPhone, websocket.CompressionContextTakeover, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := hub.New()
@@ -219,7 +223,7 @@ func TestCompressionNegotiated(t *testing.T) {
 			t.Cleanup(server.Close)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			conn, resp, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), &websocket.DialOptions{CompressionMode: tc.mode})
+			conn, resp, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), &websocket.DialOptions{CompressionMode: tc.mode, HTTPHeader: http.Header{"User-Agent": {tc.userAgent}}})
 			if err != nil {
 				t.Fatalf("dial: %v", err)
 			}

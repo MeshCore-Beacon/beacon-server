@@ -87,6 +87,7 @@ func Handler(h *hub.Hub, reader api.Reader, limits Limits, access Access) http.H
 		// The live feed is repetitive JSON; a shared window cuts its bytes ~3x for ~1.2 MB per socket.
 		CompressionMode: websocket.CompressionContextTakeover,
 	}
+	plainOpts := &websocket.AcceptOptions{OriginPatterns: access.AllowedOrigins, CompressionMode: websocket.CompressionDisabled}
 	limiter := newIPLimiter(limits.MaxConnsPerIP)
 	attempts := httprate.NewRateLimiter(limits.MaxConnectsPerMinute, time.Minute,
 		httprate.WithResponseHeaders(httprate.ResponseHeaders{RetryAfter: "Retry-After"}))
@@ -106,7 +107,11 @@ func Handler(h *hub.Hub, reader api.Reader, limits Limits, access Access) http.H
 			http.Error(w, "an Origin or a ticket is required", http.StatusForbidden)
 			return
 		}
-		conn, err := websocket.Accept(w, r, acceptOpts)
+		opts := plainOpts
+		if compressesFor(r.UserAgent()) {
+			opts = acceptOpts
+		}
+		conn, err := websocket.Accept(w, r, opts)
 		if err != nil {
 			slog.Warn("ws: failed to accept connection", "component", "ws", "error", err)
 			return
