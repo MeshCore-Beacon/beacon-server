@@ -24,10 +24,10 @@ func scopeRepeatNodes(packet *meshcore.Packet, matched *string, resolved map[str
 	switch packet.RouteType() {
 	case meshcore.RouteTypeFlood:
 	case meshcore.RouteTypeTransportFlood:
-		if matched == nil {
-			return "", nil
+		scope = "?" // scoped on the wire, but its name cannot be resolved
+		if matched != nil {
+			scope = *matched
 		}
-		scope = *matched
 	default:
 		return "", nil
 	}
