@@ -2662,6 +2662,58 @@ const docTemplate = `{
                 }
             }
         },
+        "/routes/topology": {
+            "get": {
+                "description": "Returns up to 100000 undirected node-ID pairs, deduplicated across known routes. Minute-aligned window includes the current minute. Existing rate limits apply; no per-node lookup or route pagination is needed. Capped is true when more links exist.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Routes"
+                ],
+                "summary": "Unique adjacent route links for a topology snapshot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "History window: 15m (default), 1h, or 24h",
+                        "name": "window",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated reception IATA codes",
+                        "name": "iatas",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TopologyLinks"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
         "/routes/{iata}/{pathKey}/observations": {
             "get": {
                 "description": "Matches the saved IATA, complete path bytes and hash width. Excludes TRACE and unclassified reports; other widths and search-result subsegments are not included. Byte matches do not prove hop identities or delivery. The route and its historical counter can outlive raw evidence. Cursors retain full timestamp precision and pin route/window scope.",
@@ -2749,6 +2801,29 @@ const docTemplate = `{
                         "description": "The lookup took too long: retry after Retry-After seconds",
                         "schema": {
                             "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
+        "/scope-catalogues": {
+            "get": {
+                "description": "Discovered sources only. Counts describe the source region, not individual nodes or links. No upstream request is made. An empty list means no configured importer; checkedAt=0 means no successful check. lastError or a past freshUntil marks stale metadata. Manual Beacon scopes and packet evidence are separate.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Scopes"
+                ],
+                "summary": "Cached MeshMapper regional scope catalogues",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.PublicScopeCatalogue"
+                            }
                         }
                     }
                 }
@@ -4523,6 +4598,12 @@ const docTemplate = `{
         "github_com_MeshCore-Beacon_beacon-server_internal_api.Info": {
             "type": "object",
             "properties": {
+                "buildRevision": {
+                    "type": "string"
+                },
+                "buildVersion": {
+                    "type": "string"
+                },
                 "minAppVersion": {
                     "description": "MinAppVersion is the oldest allowed app version (X.Y.Z); null means no requirement.",
                     "type": "string",
@@ -5546,6 +5627,9 @@ const docTemplate = `{
                     "description": "matched transport scope name e.g. \"#bc\"",
                     "type": "string"
                 },
+                "traceQuality": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality"
+                },
                 "transportCodes": {
                     "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PacketTransportCodes"
                 }
@@ -5676,6 +5760,13 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "sourceBroker": {
+                    "type": "string"
+                },
+                "traceQuality": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality"
+                },
+                "wirePathBytes": {
+                    "description": "Exact on-air TRACE SNR bytes, before the display path substitution.",
                     "type": "string"
                 }
             }
@@ -6641,6 +6732,29 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.TopologyLinks": {
+            "type": "object",
+            "properties": {
+                "capped": {
+                    "type": "boolean"
+                },
+                "links": {
+                    "type": "array",
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "since": {
+                    "type": "integer"
+                },
+                "until": {
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_MeshCore-Beacon_beacon-server_internal_api.TraceDetail": {
             "type": "object",
             "properties": {
@@ -6671,6 +6785,9 @@ const docTemplate = `{
                 "packetHash": {
                     "description": "hex-encoded packet hash",
                     "type": "string"
+                },
+                "quality": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality"
                 },
                 "rawPath": {
                     "description": "hops as received in the packet",
@@ -6725,6 +6842,9 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "quality": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality"
                 },
                 "snrValues": {
                     "description": "SNR per hop from the most complete observation",
@@ -6793,6 +6913,76 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.CatalogueScope": {
+            "type": "object",
+            "properties": {
+                "default": {
+                    "type": "integer"
+                },
+                "monitored": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "repeaters": {
+                    "type": "integer"
+                },
+                "wardriving": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.PublicScopeCatalogue": {
+            "type": "object",
+            "properties": {
+                "checkedAt": {
+                    "type": "integer"
+                },
+                "freshUntil": {
+                    "type": "integer"
+                },
+                "generatedAt": {
+                    "type": "integer"
+                },
+                "iata": {
+                    "type": "string"
+                },
+                "lastError": {
+                    "type": "string"
+                },
+                "repeaters": {
+                    "type": "integer"
+                },
+                "scoped": {
+                    "type": "integer"
+                },
+                "scopes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_meshmapper.CatalogueScope"
+                    }
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality": {
+            "type": "object",
+            "properties": {
+                "reasons": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "status": {
+                    "description": "supported, suspect, or ambiguous; supported is not authenticated",
+                    "type": "string"
                 }
             }
         },

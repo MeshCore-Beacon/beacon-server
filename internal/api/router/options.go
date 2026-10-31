@@ -15,6 +15,7 @@ import (
 // Options names the startup settings used by the router. Adding an optional
 // route does not change New's signature or require unrelated callers to change.
 type Options struct {
+	ScopeCatalogues      handlers.ScopeCatalogueSource
 	MaxConnsPerIP        int
 	MaxConnectsPerMinute int
 	WSAllowedOrigins     []string
@@ -27,6 +28,8 @@ type Options struct {
 	MinAppVersion        string                   // empty means no mobile app requirement
 	MinWebVersion        string                   // empty means no Beacon Web requirement
 	ServerVersion        string
+	BuildVersion         string
+	BuildRevision        string
 	// AdminRoutes mounts operator-only subrouters at literal paths such as
 	// "/accounts". Each feature owns its dependencies, methods and handlers.
 	// The router applies authentication to every path and method in this group.
