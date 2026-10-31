@@ -1973,7 +1973,7 @@ info:
     name: AGPL-3-or-later
   termsOfService: https://github.com/MeshCore-Beacon/beacon-server
   title: MeshCore Beacon API
-  version: 2.1.0
+  version: 2.1.1
 paths:
   /admin/accounts:
     get:
