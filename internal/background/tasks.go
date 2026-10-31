@@ -32,6 +32,7 @@ func ViewRefreshTask(store viewRefresher, interval time.Duration) Task {
 }
 
 type cleanupStore interface {
+	DeleteOldScopeRepeats(ctx context.Context, cutoff time.Time) error
 	DeleteOldTelemetry(ctx context.Context, cutoff time.Time) error
 	OldestMissingRollupHour(ctx context.Context) (time.Time, bool, error)
 	DeleteOldPackets(ctx context.Context, cutoff time.Time) error
@@ -70,6 +71,9 @@ func cleanupTask(store cleanupStore, cfg CleanupConfig, now func() time.Time) Ta
 		Interval: cfg.Interval,
 		Run: func(ctx context.Context) error {
 			t := now()
+			if err := store.DeleteOldScopeRepeats(ctx, t.Add(-48*time.Hour)); err != nil {
+				return err
+			}
 			if err := store.DeleteOldTelemetry(ctx, t.Add(-cfg.TelemetryRetention)); err != nil {
 				return err
 			}

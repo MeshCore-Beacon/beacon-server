@@ -4317,6 +4317,14 @@ const docTemplate = `{
                     "description": "shorthand: \"freqMhz,bwKhz,sf\" e.g. \"910.525,62.5,7\"",
                     "type": "string"
                 },
+                "scopeEvidence": {
+                    "description": "populated for repeater details and neighbors=true lists",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeScopeEvidence"
+                        }
+                    ]
+                },
                 "stale": {
                     "description": "Stale is true when the node hasn't been seen (last_seen) within the configured\nstaleness window (default 24h; internal/config.ResolvedConfig.NodeStaleThreshold).\nApplies to every node type, unlike ClockDriftSeconds/ClockOutOfSync on Node, which\nare repeater/room-server only.",
                     "type": "boolean"
@@ -4386,6 +4394,60 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.NodeScope": {
+            "type": "object",
+            "properties": {
+                "heardAt": {
+                    "description": "receiver heard this scope; not evidence that it repeated it",
+                    "type": "integer"
+                },
+                "minHashBytes": {
+                    "description": "regional path-prefix resolution, not hardware attestation",
+                    "type": "integer"
+                },
+                "name": {
+                    "description": "* is unscoped/wildcard; ? is unnamed scoped traffic, never a guessed scope name.",
+                    "type": "string"
+                },
+                "repeatObservations": {
+                    "description": "accepted hearings; several observers may hear the same RF transmission",
+                    "type": "integer"
+                },
+                "repeatedAt": {
+                    "type": "integer"
+                },
+                "reported": {
+                    "type": "boolean"
+                },
+                "reportedAt": {
+                    "description": "omitted for legacy reports whose scope time was not recorded",
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.NodeScopeEvidence": {
+            "type": "object",
+            "properties": {
+                "conflictingReports": {
+                    "type": "boolean"
+                },
+                "reportedEmpty": {
+                    "type": "boolean"
+                },
+                "scopes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeScope"
+                    }
+                },
+                "since": {
+                    "type": "integer"
+                },
+                "until": {
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_MeshCore-Beacon_beacon-server_internal_api.NodeSummary": {
             "type": "object",
             "properties": {
@@ -4450,6 +4512,14 @@ const docTemplate = `{
                 "radio": {
                     "description": "shorthand: \"freqMhz,bwKhz,sf\" e.g. \"910.525,62.5,7\"",
                     "type": "string"
+                },
+                "scopeEvidence": {
+                    "description": "populated for repeater details and neighbors=true lists",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeScopeEvidence"
+                        }
+                    ]
                 },
                 "stale": {
                     "description": "Stale is true when the node hasn't been seen (last_seen) within the configured\nstaleness window (default 24h; internal/config.ResolvedConfig.NodeStaleThreshold).\nApplies to every node type, unlike ClockDriftSeconds/ClockOutOfSync on Node, which\nare repeater/room-server only.",
