@@ -78,3 +78,33 @@ func TestWebSocketAllowedOrigins(t *testing.T) {
 		})
 	}
 }
+
+func TestWebSocketSendBudgetConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name, yaml        string
+		wantRate, wantBur int
+		wantError         bool
+	}{
+		{"omitted", "{}", 131072, 2097152, false},
+		{"custom", "websocket: {max_send_bytes_per_second: 65536, send_burst_bytes: 1048576}", 65536, 1048576, false},
+		{"negative rate", "websocket: {max_send_bytes_per_second: -1}", 0, 0, true},
+		{"negative burst", "websocket: {send_burst_bytes: -1}", 0, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tc.yaml), 0600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(path)
+			if (err != nil) != tc.wantError {
+				t.Fatalf("Load error = %v, want error = %v", err, tc.wantError)
+			}
+			if err != nil {
+				return
+			}
+			if r := Resolve(cfg); r.WSSendBytesPerSecond != tc.wantRate || r.WSSendBurstBytes != tc.wantBur {
+				t.Fatalf("unexpected resolved send budget: %+v", r)
+			}
+		})
+	}
+}

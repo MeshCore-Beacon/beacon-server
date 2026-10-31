@@ -17,7 +17,10 @@ import (
 type Options struct {
 	MaxConnsPerIP        int
 	MaxConnectsPerMinute int
+	WSSendBytesPerSecond int
+	WSSendBurstBytes     int
 	WSAllowedOrigins     []string
+	WSRequireOrigin      bool
 	CORS                 config.CORSConfig
 	Server               config.ServerConfig
 	Auth                 config.AuthConfig

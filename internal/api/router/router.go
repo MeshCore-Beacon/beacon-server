@@ -19,6 +19,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ws"
+	"github.com/MeshCore-Beacon/beacon-server/internal/wsticket"
 	httpSwagger "github.com/swaggo/http-swagger"
 )
 
@@ -29,6 +30,7 @@ import (
 //	/ws                → WebSocket (public in v1)
 //	/api/v1/           → public group
 //	  /info            → server info and minimum client versions
+//	  /ws-ticket       → ticket that opens /ws without an Origin
 //	  /packets         → packets subrouter
 //	  /nodes           → nodes subrouter
 //	  /brokers         → brokers subrouter
@@ -107,7 +109,13 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 	))
 
 	// ── WebSocket ────────────────────────────────────────────────────────────
-	r.Get("/ws", ws.Handler(h, reader, opts.MaxConnsPerIP, opts.MaxConnectsPerMinute, opts.WSAllowedOrigins))
+	tickets := wsticket.New()
+	r.Get("/ws", ws.Handler(h, reader, ws.Limits{
+		MaxConnsPerIP:        opts.MaxConnsPerIP,
+		MaxConnectsPerMinute: opts.MaxConnectsPerMinute,
+		SendBytesPerSecond:   opts.WSSendBytesPerSecond,
+		SendBurstBytes:       opts.WSSendBurstBytes,
+	}, ws.Access{AllowedOrigins: opts.WSAllowedOrigins, RequireOrigin: opts.WSRequireOrigin, Tickets: tickets}))
 
 	// ── Public REST API (v1) ─────────────────────────────────────────────────
 	r.Route("/api/v1", func(r chi.Router) {
@@ -132,6 +140,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 			r.Mount("/stats", handlers.StatsRouter(reader, handlers.StatsOptions{Scopes: opts.Scopes, SeriesWindow: opts.RollupRetention}))
 			r.Mount("/traces", handlers.TracesRouter(reader))
 			r.Mount("/info", handlers.InfoRouter(info))
+			r.Mount("/ws-ticket", handlers.WSTicketRouter(tickets))
 		})
 
 		// Protect the entire subtree, including its root and unknown paths.
