@@ -159,7 +159,17 @@ func (s *Store) enrichNodeScopes(ctx context.Context, nodes []api.NodeSummary, h
 			}
 		}
 	}
-	if len(history) > 0 && history[0] && len(ids) == 1 {
+	includeHistory := len(history) > 0 && history[0] && len(ids) == 1
+	if includeHistory {
+		includeHistory = false
+		for _, scope := range values[ids[0]] {
+			if scope.RepeatObservations > 0 {
+				includeHistory = true
+				break
+			}
+		}
+	}
+	if includeHistory {
 		hours, err := s.q.GetNodeScopeHistory(ctx, sqlc.GetNodeScopeHistoryParams{NodeID: ids[0], Since: pgtype.Timestamptz{Time: since, Valid: true}, Until: pgtype.Timestamptz{Time: until, Valid: true}})
 		if err != nil {
 			return err
