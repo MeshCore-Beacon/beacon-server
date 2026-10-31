@@ -78,7 +78,7 @@ func TestNodeScopeEvidencePostgres(t *testing.T) {
 	if err = tx.QueryRow(ctx, "SELECT region_scope_checked_at FROM node_neighbors").Scan(&preserved); err != nil || !checked.Equal(preserved) {
 		t.Fatal("timeout rewrote scope time", err)
 	}
-	for _, scope := range []string{"#on", "#on", "#ykf", "*"} {
+	for _, scope := range []string{"#on", "#on", "#ykf", "*", "?"} {
 		if err = store.RecordScopeRepeats(ctx, []uuid.UUID{node, node, companion}, scope, at, 2); err != nil {
 			t.Fatal(err)
 		}
@@ -98,7 +98,7 @@ func TestNodeScopeEvidencePostgres(t *testing.T) {
 	for _, s := range e.Scopes {
 		found[s.Name] = s
 	}
-	if len(found) != 4 || found["#on"].RepeatObservations != 2 || found["*"].RepeatObservations != 1 || !found["*"].Reported || found["#ON"].RepeatObservations != 0 {
+	if len(found) != 5 || found["#on"].RepeatObservations != 2 || found["*"].RepeatObservations != 1 || found["?"].RepeatObservations != 1 || !found["*"].Reported || found["#ON"].RepeatObservations != 0 {
 		t.Fatalf("wrong scopes: %#v", e)
 	}
 	if e.Scopes[0].Name != "#on" {

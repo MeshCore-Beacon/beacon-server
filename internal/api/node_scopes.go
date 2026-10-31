@@ -14,7 +14,7 @@ type NodeScopeEvidence struct {
 }
 
 type NodeScope struct {
-	Name               string `json:"name"`               // * denotes observed unscoped repeats or an explicitly reported wildcard.
+	Name               string `json:"name"`               // * is unscoped/wildcard; ? is unnamed scoped traffic, never a guessed scope name.
 	RepeatObservations int64  `json:"repeatObservations"` // accepted hearings; several observers may hear the same RF transmission
 	RepeatedAt         *int64 `json:"repeatedAt,omitempty"`
 	MinHashBytes       int16  `json:"minHashBytes,omitempty"` // regional path-prefix resolution, not hardware attestation

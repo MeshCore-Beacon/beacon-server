@@ -32,8 +32,8 @@ func TestScopeRepeatEvidence(t *testing.T) {
 			t.Fatal("ambiguous prefix voted")
 		}
 		resolved[hex.EncodeToString(hash)] = resolved[hex.EncodeToString(hash)][:1]
-		if _, ids = scopeRepeatNodes(p, nil, resolved); len(ids) != 0 {
-			t.Fatal("unmatched transport became wildcard")
+		if name, ids = scopeRepeatNodes(p, nil, resolved); name != "?" || len(ids) != 1 {
+			t.Fatal("unmatched scoped evidence was lost or became wildcard")
 		}
 		for _, route := range []uint8{meshcore.RouteTypeDirect, meshcore.RouteTypeTransportDirect} {
 			p.Header = byte(meshcore.PayloadTypeGrpTxt<<2 | route)

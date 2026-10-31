@@ -4406,7 +4406,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "name": {
-                    "description": "* denotes observed unscoped repeats or an explicitly reported wildcard.",
+                    "description": "* is unscoped/wildcard; ? is unnamed scoped traffic, never a guessed scope name.",
                     "type": "string"
                 },
                 "repeatObservations": {
