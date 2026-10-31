@@ -97,3 +97,8 @@ jobs:
             exit 1
           fi
           rm docs/swagger.json.bak
+
+      - name: Verify node scope evidence against PostgreSQL
+        env:
+          BEACON_TEST_POSTGRES_DSN: postgres://postgres:backup-ci-only@127.0.0.1:5432/postgres?sslmode=disable
+        run: go test ./db -run "^TestNodeScopeEvidencePostgres$" -count=1 -v

@@ -488,6 +488,10 @@ definitions:
       radio:
         description: 'shorthand: "freqMhz,bwKhz,sf" e.g. "910.525,62.5,7"'
         type: string
+      scopeEvidence:
+        allOf:
+        - $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeScopeEvidence'
+        description: populated for repeater details and neighbors=true lists
       stale:
         description: |-
           Stale is true when the node hasn't been seen (last_seen) within the configured
@@ -539,6 +543,44 @@ definitions:
       snr:
         type: number
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.NodeScope:
+    properties:
+      heardAt:
+        description: receiver heard this scope; not evidence that it repeated it
+        type: integer
+      minHashBytes:
+        description: regional path-prefix resolution, not hardware attestation
+        type: integer
+      name:
+        description: '* denotes observed unscoped repeats or an explicitly reported
+          wildcard.'
+        type: string
+      repeatObservations:
+        description: accepted hearings; several observers may hear the same RF transmission
+        type: integer
+      repeatedAt:
+        type: integer
+      reported:
+        type: boolean
+      reportedAt:
+        description: omitted for legacy reports whose scope time was not recorded
+        type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.NodeScopeEvidence:
+    properties:
+      conflictingReports:
+        type: boolean
+      reportedEmpty:
+        type: boolean
+      scopes:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeScope'
+        type: array
+      since:
+        type: integer
+      until:
+        type: integer
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.NodeSummary:
     properties:
       defaultScope:
@@ -588,6 +630,10 @@ definitions:
       radio:
         description: 'shorthand: "freqMhz,bwKhz,sf" e.g. "910.525,62.5,7"'
         type: string
+      scopeEvidence:
+        allOf:
+        - $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeScopeEvidence'
+        description: populated for repeater details and neighbors=true lists
       stale:
         description: |-
           Stale is true when the node hasn't been seen (last_seen) within the configured

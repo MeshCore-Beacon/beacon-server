@@ -320,14 +320,25 @@ type NodeIata struct {
 }
 
 type NodeNeighbor struct {
-	NodeID           uuid.UUID          `json:"node_id"`
-	NeighborID       uuid.UUID          `json:"neighbor_id"`
-	Iata             string             `json:"iata"`
-	FirstSeen        pgtype.Timestamptz `json:"first_seen"`
-	LastSeen         pgtype.Timestamptz `json:"last_seen"`
-	ObservationCount int64              `json:"observation_count"`
-	Snr              *float32           `json:"snr"`
-	RegionScope      *string            `json:"region_scope"`
+	NodeID               uuid.UUID          `json:"node_id"`
+	NeighborID           uuid.UUID          `json:"neighbor_id"`
+	Iata                 string             `json:"iata"`
+	FirstSeen            pgtype.Timestamptz `json:"first_seen"`
+	LastSeen             pgtype.Timestamptz `json:"last_seen"`
+	ObservationCount     int64              `json:"observation_count"`
+	Snr                  *float32           `json:"snr"`
+	RegionScope          *string            `json:"region_scope"`
+	RegionScopeCheckedAt pgtype.Timestamptz `json:"region_scope_checked_at"`
+}
+
+type NodeScopeHourly struct {
+	NodeID       uuid.UUID          `json:"node_id"`
+	ScopeName    string             `json:"scope_name"`
+	Hour         pgtype.Timestamptz `json:"hour"`
+	Observations int64              `json:"observations"`
+	FirstSeen    pgtype.Timestamptz `json:"first_seen"`
+	LastSeen     pgtype.Timestamptz `json:"last_seen"`
+	MinHashBytes int16              `json:"min_hash_bytes"`
 }
 
 type NodeShortID struct {
@@ -340,29 +351,30 @@ type NodeShortID struct {
 }
 
 type Observer struct {
-	ID               uuid.UUID          `json:"id"`
-	PublicKey        []byte             `json:"public_key"`
-	DisplayName      *string            `json:"display_name"`
-	ObserverType     *string            `json:"observer_type"`
-	SoftwareVersion  *string            `json:"software_version"`
-	HardwareModel    *string            `json:"hardware_model"`
-	FirmwareVersion  *string            `json:"firmware_version"`
-	FirmwareBuild    *string            `json:"firmware_build"`
-	RadioFreqMhz     *float32           `json:"radio_freq_mhz"`
-	RadioSf          *int16             `json:"radio_sf"`
-	RadioBwKhz       *float32           `json:"radio_bw_khz"`
-	RadioCr          *int16             `json:"radio_cr"`
-	BatteryLevel     *float32           `json:"battery_level"`
-	UptimeSeconds    *int64             `json:"uptime_seconds"`
-	StatusMetadata   []byte             `json:"status_metadata"`
-	LastStatusAt     pgtype.Timestamptz `json:"last_status_at"`
-	FirstSeen        pgtype.Timestamptz `json:"first_seen"`
-	LastSeen         pgtype.Timestamptz `json:"last_seen"`
-	ObservationCount *int64             `json:"observation_count"`
-	Metadata         []byte             `json:"metadata"`
-	RegionScope      *string            `json:"region_scope"`
-	LastIata         *string            `json:"last_iata"`
-	LastIataAt       pgtype.Timestamptz `json:"last_iata_at"`
+	ID                   uuid.UUID          `json:"id"`
+	PublicKey            []byte             `json:"public_key"`
+	DisplayName          *string            `json:"display_name"`
+	ObserverType         *string            `json:"observer_type"`
+	SoftwareVersion      *string            `json:"software_version"`
+	HardwareModel        *string            `json:"hardware_model"`
+	FirmwareVersion      *string            `json:"firmware_version"`
+	FirmwareBuild        *string            `json:"firmware_build"`
+	RadioFreqMhz         *float32           `json:"radio_freq_mhz"`
+	RadioSf              *int16             `json:"radio_sf"`
+	RadioBwKhz           *float32           `json:"radio_bw_khz"`
+	RadioCr              *int16             `json:"radio_cr"`
+	BatteryLevel         *float32           `json:"battery_level"`
+	UptimeSeconds        *int64             `json:"uptime_seconds"`
+	StatusMetadata       []byte             `json:"status_metadata"`
+	LastStatusAt         pgtype.Timestamptz `json:"last_status_at"`
+	FirstSeen            pgtype.Timestamptz `json:"first_seen"`
+	LastSeen             pgtype.Timestamptz `json:"last_seen"`
+	ObservationCount     *int64             `json:"observation_count"`
+	Metadata             []byte             `json:"metadata"`
+	RegionScope          *string            `json:"region_scope"`
+	LastIata             *string            `json:"last_iata"`
+	LastIataAt           pgtype.Timestamptz `json:"last_iata_at"`
+	RegionScopeCheckedAt pgtype.Timestamptz `json:"region_scope_checked_at"`
 }
 
 type ObserverBroker struct {

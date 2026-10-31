@@ -50,6 +50,7 @@ type Querier interface {
 	// One batch of routes past retention, or past grace with too few observations.
 	// GREATEST keeps the scan on idx_known_routes_last_seen.
 	DeleteOldRoutes(ctx context.Context, arg DeleteOldRoutesParams) (int64, error)
+	DeleteOldScopeRepeats(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error)
 	// Deletes telemetry rows older than the given cutoff. Called by the cleanup goroutine.
 	DeleteOldTelemetry(ctx context.Context, reportedAt pgtype.Timestamptz) error
 	// Keeps the trace IATA filter in step with packet retention.
@@ -88,6 +89,8 @@ type Querier interface {
 	GetNodeByPubkey(ctx context.Context, publicKey []byte) (uuid.UUID, error)
 	// Returns the neighbors of a node with details, ordered by most recently seen.
 	GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]GetNodeNeighborsRow, error)
+	// Page IDs keep work bounded; no packet-history scan or external lookup.
+	GetNodeScopeEvidence(ctx context.Context, arg GetNodeScopeEvidenceParams) ([]GetNodeScopeEvidenceRow, error)
 	GetNodesByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]GetNodesByIDsRow, error)
 	GetNodesByPubkeys(ctx context.Context, pubkeys [][]byte) ([]GetNodesByPubkeysRow, error)
 	// Hour-or-coarser buckets summed from the hourly rollup; same COALESCE-plus-count shape as the raw query.
@@ -297,6 +300,9 @@ type Querier interface {
 	// 1/2/3/4-byte hop prefixes check prefix_1/2/3/4; ambiguity set supplied by AmbiguousPrefixes),
 	// and stamps the survivors.
 	ReconfirmRoutes(ctx context.Context, arg ReconfirmRoutesParams) (int64, error)
+	// One accepted MQTT hearing, one vote per distinct resolved repeater. These are
+	// repeat observations, NOT unique RF transmissions or configuration claims.
+	RecordScopeRepeats(ctx context.Context, arg RecordScopeRepeatsParams) error
 	// One hearing of a TRACE packet: trace_iatas refreshes at most hourly and the tag's heard
 	// window widens (the first hearing replaces the packet's provisional times). Packet counts
 	// and payloads come from UpsertPacket.

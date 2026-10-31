@@ -86,6 +86,7 @@ type Config struct {
 // DB is the minimal database interface the ingest pipeline depends on.
 // Wire in your real *pgxpool.Pool implementation here.
 type DB interface {
+	RecordScopeRepeats(ctx context.Context, ids []uuid.UUID, scope string, at time.Time, hashBytes uint8) error
 	// UpsertObserver upserts the observers row keyed on pubkey, and returns
 	// the Observer ID, Display Name and an error if any.
 	UpsertObserver(ctx context.Context, pubkey []byte, iata string) (uuid.UUID, string, error)
