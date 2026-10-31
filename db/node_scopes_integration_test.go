@@ -64,6 +64,9 @@ func TestNodeScopeEvidencePostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A timeout/ordinary advert must not erase the configured list or advance its scope time.
+	if _, err = tx.Exec(ctx, "UPDATE node_neighbors SET region_scope_checked_at=$1", at.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
 	var checked time.Time
 	if err = tx.QueryRow(ctx, "SELECT region_scope_checked_at FROM node_neighbors").Scan(&checked); err != nil {
 		t.Fatal(err)
