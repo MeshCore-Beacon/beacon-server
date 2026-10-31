@@ -85,7 +85,7 @@ func TestWebSocketSendBudgetConfig(t *testing.T) {
 		wantRate, wantBur int
 		wantError         bool
 	}{
-		{"omitted", "{}", 131072, 2097152, false},
+		{"omitted", "{}", 1048576, 8388608, false},
 		{"custom", "websocket: {max_send_bytes_per_second: 65536, send_burst_bytes: 1048576}", 65536, 1048576, false},
 		{"negative rate", "websocket: {max_send_bytes_per_second: -1}", 0, 0, true},
 		{"negative burst", "websocket: {send_burst_bytes: -1}", 0, 0, true},

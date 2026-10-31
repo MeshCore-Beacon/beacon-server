@@ -397,9 +397,9 @@ type WebSocketConfig struct {
 	// Zero/omitted defaults to 10; IPv6 addresses share a /64 attempt budget.
 	MaxConnectsPerMinute int `yaml:"max_connects_per_minute"`
 	// MaxSendBytesPerSecond caps each connection's live events, counted before compression.
-	// Zero/omitted defaults to 131072 (128 KiB/s); events over it are dropped and noticed as lagged.
+	// Zero/omitted defaults to 1048576 (1 MiB/s); events over it are dropped and noticed as lagged.
 	MaxSendBytesPerSecond int `yaml:"max_send_bytes_per_second"`
-	// SendBurstBytes is how far a connection may run ahead of that rate. Zero/omitted defaults to 2 MiB.
+	// SendBurstBytes is how far a connection may run ahead of that rate. Zero/omitted defaults to 8 MiB.
 	SendBurstBytes int `yaml:"send_burst_bytes"`
 	// AllowedOrigins are extra origins allowed to open /ws: exact, or scheme://*.domain[:port]
 	// for every subdomain of domain (never the apex). Defaults to same-host only.
@@ -848,10 +848,10 @@ func Resolve(cfg *Config) ResolvedConfig {
 		r.MaxConnectsPerMinute = 10
 	}
 	if r.WSSendBytesPerSecond == 0 {
-		r.WSSendBytesPerSecond = 128 << 10
+		r.WSSendBytesPerSecond = 1 << 20
 	}
 	if r.WSSendBurstBytes == 0 {
-		r.WSSendBurstBytes = 2 << 20
+		r.WSSendBurstBytes = 8 << 20
 	}
 	if r.ViewRefreshInterval == 0 {
 		r.ViewRefreshInterval = time.Hour
