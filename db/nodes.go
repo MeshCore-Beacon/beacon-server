@@ -216,6 +216,7 @@ func (s *Store) nodeSummary(v sqlc.ListNodesRow) api.NodeSummary {
 		DefaultScope:       v.DefaultScopeName,
 		KnownNeighborCount: v.KnownNeighborCount,
 		NeighborIDs:        v.NeighborIds,
+		LastSeen:           v.LastSeen.Time.UnixMilli(),
 		Stale:              v.LastSeen.Valid && v.LastSeen.Time.Before(time.Now().Add(-s.staleThreshold)),
 	}
 	if len(v.Iatas) > 0 {
@@ -249,6 +250,7 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 			ObserverID:         nullableUUID(row.ObserverID),
 			DefaultScope:       row.DefaultScopeName,
 			KnownNeighborCount: row.KnownNeighborCount,
+			LastSeen:           row.LastSeen.Time.UnixMilli(),
 			Stale:              row.LastSeen.Valid && row.LastSeen.Time.Before(time.Now().Add(-s.staleThreshold)),
 		},
 		LocationSource:          row.LocationSource,
@@ -256,7 +258,6 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 		SupportsMultibyteTraces: row.SupportsMultibyteTraces,
 		MinFirmwareVersion:      row.MinFirmwareVersion,
 		FirstSeen:               row.FirstSeen.Time.UnixMilli(),
-		LastSeen:                row.LastSeen.Time.UnixMilli(),
 		Metadata:                row.Metadata,
 	}
 	neighbors, err := s.GetNodeNeighbors(ctx, nodeID)

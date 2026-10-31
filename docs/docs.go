@@ -1358,7 +1358,7 @@ const docTemplate = `{
                             "neighbors"
                         ],
                         "type": "string",
-                        "description": "Order: lastSeen (default, newest first), name, type or neighbors. Unnamed nodes come last in either name order; ties go newest first. Page a sorted list with pageCursor only",
+                        "description": "Order: lastSeen (default), name, type or neighbors. Unnamed nodes come last in either name order; other ties go newest first, lastSeen ties by id. Page any order but lastSeen desc with pageCursor only",
                         "name": "sort",
                         "in": "query"
                     },
@@ -1368,7 +1368,7 @@ const docTemplate = `{
                             "desc"
                         ],
                         "type": "string",
-                        "description": "asc (default) or desc; lastSeen is desc only",
+                        "description": "asc or desc. Defaults to asc, but to desc (newest first) for lastSeen; lastSeen asc lists the oldest heard first",
                         "name": "order",
                         "in": "query"
                     },
@@ -5027,6 +5027,10 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "knownNeighborCount": {
+                    "type": "integer"
+                },
+                "lastSeen": {
+                    "description": "epoch ms",
                     "type": "integer"
                 },
                 "lat": {
