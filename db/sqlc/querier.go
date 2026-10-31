@@ -71,7 +71,9 @@ type Querier interface {
 	DeleteOldPackets(ctx context.Context, arg DeleteOldPacketsParams) (int64, error)
 	// Bumps coverage when hours go, so cached responses that included them are not reused.
 	DeleteOldRollups(ctx context.Context, cutoff pgtype.Timestamptz) error
+	DeleteOldScopeReceivers(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error)
 	DeleteOldScopeRepeats(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error)
+	DeleteOldScopeSamples(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error)
 	// Deletes telemetry rows older than the given cutoff. Called by the cleanup goroutine.
 	DeleteOldTelemetry(ctx context.Context, reportedAt pgtype.Timestamptz) error
 	// Keeps the trace IATA filter in step with packet retention.
@@ -136,6 +138,7 @@ type Querier interface {
 	GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]GetNodeNeighborsRow, error)
 	// Page IDs keep work bounded; no packet-history scan or external lookup.
 	GetNodeScopeEvidence(ctx context.Context, arg GetNodeScopeEvidenceParams) ([]GetNodeScopeEvidenceRow, error)
+	GetNodeScopeHistory(ctx context.Context, arg GetNodeScopeHistoryParams) ([]GetNodeScopeHistoryRow, error)
 	GetNodesByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]GetNodesByIDsRow, error)
 	GetNodesByPubkeys(ctx context.Context, pubkeys [][]byte) ([]GetNodesByPubkeysRow, error)
 	GetObservationIDRange(ctx context.Context) (GetObservationIDRangeRow, error)
@@ -194,6 +197,8 @@ type Querier interface {
 	GetScopeByName(ctx context.Context, name string) (GetScopeByNameRow, error)
 	GetScopeCatalogue(ctx context.Context, arg GetScopeCatalogueParams) (MeshmapperScopeCatalogue, error)
 	GetScopeNames(ctx context.Context) ([]string, error)
+	GetScopeReceiverActivity(ctx context.Context, arg GetScopeReceiverActivityParams) ([]GetScopeReceiverActivityRow, error)
+	GetScopeRepeaterActivity(ctx context.Context, arg GetScopeRepeaterActivityParams) ([]GetScopeRepeaterActivityRow, error)
 	// Packets since the given hour come from the IATA-set rollup (counted once per hour heard).
 	// Observer and node counts are current memberships; observers filter by their latest IATA.
 	GetScopeStats(ctx context.Context, arg GetScopeStatsParams) ([]GetScopeStatsRow, error)
@@ -502,6 +507,7 @@ type Querier interface {
 	ReconfirmRoutesBatch(ctx context.Context, arg ReconfirmRoutesBatchParams) (ReconfirmRoutesBatchRow, error)
 	// Key of the last route in a slice that timed out: the caller passes the slice's row count - 1.
 	ReconfirmSliceEnd(ctx context.Context, arg ReconfirmSliceEndParams) (ReconfirmSliceEndRow, error)
+	RecordScopeObservation(ctx context.Context, arg RecordScopeObservationParams) error
 	// One accepted MQTT hearing, one vote per distinct resolved repeater. These are
 	// repeat observations, NOT unique RF transmissions or configuration claims.
 	RecordScopeRepeats(ctx context.Context, arg RecordScopeRepeatsParams) error

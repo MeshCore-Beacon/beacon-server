@@ -31,6 +31,7 @@ func scopeNamesFor(scopes ScopeMembership, iatas []string) []string {
 func ScopesRouter(reader api.Reader, scopes ScopeMembership) http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", listScopes(reader, scopes))
+	r.Get("/activity", getScopeActivity(reader))
 	r.Get("/{name}", getScope(reader))
 	return r
 }

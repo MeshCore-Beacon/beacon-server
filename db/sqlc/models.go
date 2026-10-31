@@ -344,13 +344,15 @@ type NodeNeighbor struct {
 }
 
 type NodeScopeHourly struct {
-	NodeID       uuid.UUID          `json:"node_id"`
-	ScopeName    string             `json:"scope_name"`
-	Hour         pgtype.Timestamptz `json:"hour"`
-	Observations int64              `json:"observations"`
-	FirstSeen    pgtype.Timestamptz `json:"first_seen"`
-	LastSeen     pgtype.Timestamptz `json:"last_seen"`
-	MinHashBytes int16              `json:"min_hash_bytes"`
+	NodeID          uuid.UUID          `json:"node_id"`
+	ScopeName       string             `json:"scope_name"`
+	Hour            pgtype.Timestamptz `json:"hour"`
+	Observations    int64              `json:"observations"`
+	FirstSeen       pgtype.Timestamptz `json:"first_seen"`
+	LastSeen        pgtype.Timestamptz `json:"last_seen"`
+	MinHashBytes    int16              `json:"min_hash_bytes"`
+	UniqueSamples   int64              `json:"unique_samples"`
+	UniqueFirstSeen pgtype.Timestamptz `json:"unique_first_seen"`
 }
 
 type NodeShortID struct {
@@ -534,6 +536,26 @@ type RollupOb struct {
 	RouteType      int16              `json:"route_type"`
 	OriginPubkey   []byte             `json:"origin_pubkey"`
 	ScopeID        *int32             `json:"scope_id"`
+}
+
+type ScopeReceiverHourly struct {
+	Hour           pgtype.Timestamptz `json:"hour"`
+	Iata           string             `json:"iata"`
+	ScopeName      string             `json:"scope_name"`
+	ObserverID     uuid.UUID          `json:"observer_id"`
+	Reports        int64              `json:"reports"`
+	UniqueSamples  int64              `json:"unique_samples"`
+	UnresolvedHops int64              `json:"unresolved_hops"`
+	AmbiguousHops  int64              `json:"ambiguous_hops"`
+	FirstSeen      pgtype.Timestamptz `json:"first_seen"`
+	LastSeen       pgtype.Timestamptz `json:"last_seen"`
+}
+
+type ScopeSeenPath struct {
+	Hour      pgtype.Timestamptz `json:"hour"`
+	Iata      string             `json:"iata"`
+	ScopeName string             `json:"scope_name"`
+	PathKey   []byte             `json:"path_key"`
 }
 
 type TraceIata struct {

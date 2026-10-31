@@ -146,4 +146,4 @@ jobs:
       - name: Verify node scope evidence against PostgreSQL
         env:
           BEACON_TEST_POSTGRES_DSN: postgres://postgres:backup-ci-only@127.0.0.1:5432/postgres?sslmode=disable
-        run: go test ./db -run "^TestNodeScopeEvidencePostgres$" -count=1 -v
+        run: go test ./db -run "^Test(NodeScopeEvidence|ScopeActivity)Postgres$" -count=1 -v

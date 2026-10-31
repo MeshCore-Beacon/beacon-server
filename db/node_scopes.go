@@ -24,15 +24,27 @@ func (s *Store) RecordScopeRepeats(ctx context.Context, ids []uuid.UUID, scope s
 }
 
 func (s *Store) DeleteOldScopeRepeats(ctx context.Context, cutoff time.Time) error {
-	for {
-		n, err := s.q.DeleteOldScopeRepeats(ctx, pgtype.Timestamptz{Time: cutoff, Valid: true})
-		if err != nil || n < 10000 {
-			return err
-		}
-		if err = ctx.Err(); err != nil {
-			return err
+	for _, work := range []struct {
+		remove func(context.Context, pgtype.Timestamptz) (int64, error)
+		before time.Time
+	}{
+		{s.q.DeleteOldScopeRepeats, cutoff}, {s.q.DeleteOldScopeReceivers, cutoff},
+		{s.q.DeleteOldScopeSamples, time.Now().UTC().Truncate(time.Hour).Add(-time.Hour)},
+	} {
+		for {
+			n, err := work.remove(ctx, pgtype.Timestamptz{Time: work.before, Valid: true})
+			if err != nil {
+				return err
+			}
+			if n < 10000 {
+				break
+			}
+			if err = ctx.Err(); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 // reportScopes parses the firmware's comma-separated list. Preserve case and
@@ -67,7 +79,7 @@ func reportScopes(raw string) []string {
 
 // enrichNodeScopes is one indexed, batched query for a map page (neighbors=true)
 // or a repeater detail. It never runs once per node or scans raw packet history.
-func (s *Store) enrichNodeScopes(ctx context.Context, nodes []api.NodeSummary) error {
+func (s *Store) enrichNodeScopes(ctx context.Context, nodes []api.NodeSummary, history ...bool) error {
 	ids := make([]uuid.UUID, 0, len(nodes))
 	byID := map[uuid.UUID]int{}
 	for i, n := range nodes {
@@ -123,6 +135,18 @@ func (s *Store) enrichNodeScopes(ctx context.Context, nodes []api.NodeSummary) e
 			switch r.Source {
 			case "repeat":
 				v.RepeatObservations = r.Observations
+				one, six := r.OneHour, r.SixHours
+				v.RepeatObservations1h = &one
+				v.RepeatObservations6h = &six
+				if r.FirstSeen.Valid {
+					ms := r.FirstSeen.Time.UnixMilli()
+					v.FirstRepeatedAt = &ms
+				}
+				v.UniqueSamples = r.UniqueSamples
+				if r.UniqueSince.Valid {
+					ms := r.UniqueSince.Time.UnixMilli()
+					v.UniqueSince = &ms
+				}
 				v.RepeatedAt = at
 				v.MinHashBytes = r.HashBytes
 			case "reported", "self":
@@ -133,6 +157,15 @@ func (s *Store) enrichNodeScopes(ctx context.Context, nodes []api.NodeSummary) e
 			case "heard":
 				v.HeardAt = at
 			}
+		}
+	}
+	if len(history) > 0 && history[0] && len(ids) == 1 {
+		hours, err := s.q.GetNodeScopeHistory(ctx, sqlc.GetNodeScopeHistoryParams{NodeID: ids[0], Since: pgtype.Timestamptz{Time: since, Valid: true}, Until: pgtype.Timestamptz{Time: until, Valid: true}})
+		if err != nil {
+			return err
+		}
+		for _, h := range hours {
+			nodes[byID[ids[0]]].ScopeEvidence.Hourly = append(nodes[byID[ids[0]]].ScopeEvidence.Hourly, api.NodeScopeHour{Name: h.ScopeName, Hour: h.Hour.Time.UnixMilli(), Reports: h.Observations, UniqueSamples: h.UniqueSamples, FirstSeen: h.FirstSeen.Time.UnixMilli(), LastSeen: h.LastSeen.Time.UnixMilli()})
 		}
 	}
 	for id, scopes := range values {

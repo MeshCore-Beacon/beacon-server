@@ -24,6 +24,7 @@ import (
 func NodesRouter(reader api.Reader) http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", listNodes(reader))
+	r.Post("/scopes", nodeScopeBatch(reader))
 	r.Route("/{nodeId}", func(r chi.Router) {
 		r.Get("/", getNode(reader))
 		r.Get("/observations", listNodeObservations(reader))
@@ -184,6 +185,27 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 		if err != nil {
 			respondReaderError(w, err, "internal server error")
 			return
+		}
+		if r.URL.Query().Get("scopeEvidence") == "true" && !includeNeighbors {
+			nodes.Items = append([]api.NodeSummary(nil), nodes.Items...)
+			ids := []uuid.UUID{}
+			for _, n := range nodes.Items {
+				if n.NodeType == 2 {
+					ids = append(ids, n.ID)
+				}
+			}
+			if len(ids) > 0 {
+				evidence, err := reader.GetNodeScopeEvidence(r.Context(), ids)
+				if err != nil {
+					respondReaderError(w, err, "failed to load scope evidence")
+					return
+				}
+				for i := range nodes.Items {
+					if v, ok := evidence[nodes.Items[i].ID.String()]; ok {
+						nodes.Items[i].ScopeEvidence = &v
+					}
+				}
+			}
 		}
 		respond(w, http.StatusOK, nodes)
 	}

@@ -378,6 +378,6 @@ func TestRunCapabilityDetection_NoNodes_DoesNothing(t *testing.T) {
 	}
 }
 
-func (s *stubDB) RecordScopeRepeats(context.Context, []uuid.UUID, string, time.Time, uint8) error {
+func (s *stubDB) RecordScopeObservation(context.Context, ScopeObservation) error {
 	return nil
 }

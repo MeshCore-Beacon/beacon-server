@@ -631,6 +631,8 @@ definitions:
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.NodeScope:
     properties:
+      firstRepeatedAt:
+        type: integer
       heardAt:
         description: receiver heard this scope; not evidence that it repeated it
         type: integer
@@ -644,6 +646,10 @@ definitions:
       repeatObservations:
         description: accepted hearings; several observers may hear the same RF transmission
         type: integer
+      repeatObservations1h:
+        type: integer
+      repeatObservations6h:
+        type: integer
       repeatedAt:
         type: integer
       reported:
@@ -651,11 +657,20 @@ definitions:
       reportedAt:
         description: omitted for legacy reports whose scope time was not recorded
         type: integer
+      uniqueSamples:
+        type: integer
+      uniqueSince:
+        type: integer
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.NodeScopeEvidence:
     properties:
       conflictingReports:
         type: boolean
+      hourly:
+        description: detail only; absent hours have no evidence
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeScopeHour'
+        type: array
       reportedEmpty:
         type: boolean
       scopes:
@@ -665,6 +680,21 @@ definitions:
       since:
         type: integer
       until:
+        type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.NodeScopeHour:
+    properties:
+      firstSeen:
+        type: integer
+      hour:
+        type: integer
+      lastSeen:
+        type: integer
+      name:
+        type: string
+      reports:
+        type: integer
+      uniqueSamples:
         type: integer
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.NodeSummary:
@@ -1616,6 +1646,80 @@ definitions:
       snr:
         type: number
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.ScopeActivity:
+    properties:
+      countries:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ScopeCountryActivity'
+        type: array
+      firstSeen:
+        type: integer
+      lastSeen:
+        type: integer
+      observers:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ScopeObserverActivity'
+        type: array
+      scopes:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ScopeActivityRow'
+        type: array
+      since:
+        type: integer
+      truncated:
+        type: boolean
+      until:
+        type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.ScopeActivityHour:
+    properties:
+      hour:
+        type: integer
+      receiverReports:
+        type: integer
+      repeatReports:
+        type: integer
+      uniqueSamples:
+        type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.ScopeActivityRow:
+    properties:
+      activeRepeaters:
+        type: integer
+      ambiguousHops:
+        type: integer
+      hourly:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ScopeActivityHour'
+        type: array
+      name:
+        type: string
+      receiverReports:
+        type: integer
+      receivingObservers:
+        type: integer
+      repeatReports:
+        description: repeater appearances, not packets
+        type: integer
+      uniqueSamples:
+        description: packet/path/receiving-area/hour; not unique RF transmissions
+        type: integer
+      unresolvedHops:
+        type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.ScopeCountryActivity:
+    properties:
+      country:
+        type: string
+      observers:
+        type: integer
+      reports:
+        type: integer
+      scope:
+        type: string
+      uniqueSamples:
+        type: integer
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.ScopeDetail:
     properties:
       iataCount:
@@ -1646,6 +1750,24 @@ definitions:
         type: integer
       packets:
         type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.ScopeObserverActivity:
+    properties:
+      country:
+        description: country of the declared MQTT receiving area
+        type: string
+      iata:
+        type: string
+      lastSeen:
+        type: integer
+      name:
+        type: string
+      observerId:
+        type: string
+      reports:
+        type: integer
+      scope:
+        type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.ScopeStats:
     properties:
@@ -2074,6 +2196,13 @@ definitions:
         type: boolean
       name:
         type: string
+    type: object
+  internal_api_handlers.NodeScopeBatchRequest:
+    properties:
+      nodeIds:
+        items:
+          type: string
+        type: array
     type: object
 host: localhost:8080
 info:
@@ -3159,6 +3288,39 @@ paths:
       summary: List packet observations originating from a node
       tags:
       - Nodes
+  /nodes/scopes:
+    post:
+      consumes:
+      - application/json
+      description: Read-only POST avoids long URLs. Accepts at most 1000 IDs and 64
+        KiB. Does not poll radios or change server state.
+      parameters:
+      - description: Node IDs
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_api_handlers.NodeScopeBatchRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeScopeEvidence'
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+      summary: Read scope evidence for a bounded node batch
+      tags:
+      - Nodes
   /observers:
     get:
       parameters:
@@ -4136,6 +4298,45 @@ paths:
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: Get scope detail by name
+      tags:
+      - Scopes
+  /scopes/activity:
+    get:
+      description: Window is the current partial hour plus prior hourly buckets. uniqueSamples
+        deduplicates equal packet/path/receiving-area/hour samples across observers,
+        not RF transmissions. Missing hours have no evidence. Country is the MQTT
+        receiving area's country, not origin or border direction. Existing ingest
+        geographic restrictions apply.
+      parameters:
+      - description: Hourly window
+        enum:
+        - 1
+        - 6
+        - 24
+        in: query
+        name: hours
+        type: integer
+      - description: Comma-separated receiving IATAs; repeater counts use nodes heard
+          in those IATAs
+        in: query
+        name: iatas
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ScopeActivity'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+      summary: Recent scope evidence, receiver areas and repeat activity
       tags:
       - Scopes
   /stats/clock-drift:
