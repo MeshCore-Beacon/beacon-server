@@ -20,7 +20,7 @@ import (
 
 func connectTestServer(t *testing.T, maxConns, maxConnects int) (*httptest.Server, <-chan struct{}) {
 	t.Helper()
-	handler := Handler(hub.New(), nil, Limits{MaxConnsPerIP: maxConns, MaxConnectsPerMinute: maxConnects}, nil)
+	handler := Handler(hub.New(), nil, Limits{MaxConnsPerIP: maxConns, MaxConnectsPerMinute: maxConnects}, Access{})
 	done := make(chan struct{}, 64)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handler(w, r)
@@ -57,7 +57,7 @@ func TestFailedHandshakeDoesNotUseConnectionSlot(t *testing.T) {
 
 func TestConnectAttemptBudgetAndRecovery(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		handler := Handler(nil, nil, Limits{MaxConnsPerIP: 1, MaxConnectsPerMinute: 2}, nil)
+		handler := Handler(nil, nil, Limits{MaxConnsPerIP: 1, MaxConnectsPerMinute: 2}, Access{})
 		attempt := func() *httptest.ResponseRecorder {
 			request := httptest.NewRequest(http.MethodGet, "/ws", nil)
 			request.RemoteAddr = "198.51.100.1:1234"
@@ -176,7 +176,7 @@ func TestConnectChurnLimited(t *testing.T) {
 func TestConnectionCapSharesAnIPv6Slash64(t *testing.T) {
 	h := hub.New()
 	go h.Run()
-	handler := Handler(h, nil, Limits{MaxConnsPerIP: 1, MaxConnectsPerMinute: 100}, nil)
+	handler := Handler(h, nil, Limits{MaxConnsPerIP: 1, MaxConnectsPerMinute: 100}, Access{})
 	var remote atomic.Value
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.RemoteAddr = remote.Load().(string)

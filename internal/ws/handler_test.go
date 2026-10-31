@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
+	"github.com/MeshCore-Beacon/beacon-server/internal/wsticket"
 	"github.com/coder/websocket"
 )
 
@@ -45,7 +46,7 @@ func TestAllowedOrigins(t *testing.T) {
 		{"apex and wildcard, subdomain", apexAndWildcard, "https://sub.example.com", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			server := httptest.NewServer(Handler(hub.New(), nil, Limits{MaxConnsPerIP: 5, MaxConnectsPerMinute: 100}, tc.allowed))
+			server := httptest.NewServer(Handler(hub.New(), nil, Limits{MaxConnsPerIP: 5, MaxConnectsPerMinute: 100}, Access{AllowedOrigins: tc.allowed}))
 			t.Cleanup(server.Close)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -75,7 +76,7 @@ func TestAllowedOrigins(t *testing.T) {
 func TestConfigureIncludeObserverKey(t *testing.T) {
 	h := hub.New()
 	go h.Run()
-	server := httptest.NewServer(Handler(h, nil, Limits{MaxConnsPerIP: 5, MaxConnectsPerMinute: 100}, nil))
+	server := httptest.NewServer(Handler(h, nil, Limits{MaxConnsPerIP: 5, MaxConnectsPerMinute: 100}, Access{}))
 	t.Cleanup(server.Close)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -137,7 +138,7 @@ func TestConfigureIncludeObserverKey(t *testing.T) {
 func TestConfigureIncludeRepeats(t *testing.T) {
 	h := hub.New()
 	go h.Run()
-	server := httptest.NewServer(Handler(h, nil, Limits{MaxConnsPerIP: 5, MaxConnectsPerMinute: 100}, nil))
+	server := httptest.NewServer(Handler(h, nil, Limits{MaxConnsPerIP: 5, MaxConnectsPerMinute: 100}, Access{}))
 	t.Cleanup(server.Close)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -214,7 +215,7 @@ func TestCompressionNegotiated(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h := hub.New()
 			go h.Run()
-			server := httptest.NewServer(Handler(h, nil, Limits{MaxConnsPerIP: 5, MaxConnectsPerMinute: 100}, tc.allowed))
+			server := httptest.NewServer(Handler(h, nil, Limits{MaxConnsPerIP: 5, MaxConnectsPerMinute: 100}, Access{AllowedOrigins: tc.allowed}))
 			t.Cleanup(server.Close)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -256,7 +257,7 @@ func TestSendBudgetDropsEventsAndNoticesThem(t *testing.T) {
 	t.Cleanup(func() { budgetNoticeInterval = old })
 	h := hub.New()
 	go h.Run()
-	server := httptest.NewServer(Handler(h, nil, Limits{MaxConnsPerIP: 5, MaxConnectsPerMinute: 100, SendBytesPerSecond: 1, SendBurstBytes: 1}, nil))
+	server := httptest.NewServer(Handler(h, nil, Limits{MaxConnsPerIP: 5, MaxConnectsPerMinute: 100, SendBytesPerSecond: 1, SendBurstBytes: 1}, Access{}))
 	t.Cleanup(server.Close)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -305,5 +306,63 @@ func TestSendBudgetDropsEventsAndNoticesThem(t *testing.T) {
 	}
 	if len(notices) > 2 || (len(notices) == 2 && notices[1].Sub(notices[0]) < 150*time.Millisecond) {
 		t.Fatalf("lagged notices not spaced out: %v", notices)
+	}
+}
+
+func TestRequireOriginAcceptsBrowsersAndTickets(t *testing.T) {
+	h := hub.New()
+	go h.Run()
+	tickets := wsticket.New()
+	server := httptest.NewServer(Handler(h, nil, Limits{MaxConnsPerIP: 5, MaxConnectsPerMinute: 100}, Access{RequireOrigin: true, Tickets: tickets}))
+	t.Cleanup(server.Close)
+	own, _ := tickets.Issue("127.0.0.1")
+	other, _ := tickets.Issue("198.51.100.7")
+	for _, tc := range []struct {
+		name   string
+		header http.Header
+		ok     bool
+	}{
+		{"no origin, no ticket", http.Header{}, false},
+		{"no origin, ticket for this address", http.Header{wsticket.Header: {own}}, true},
+		{"no origin, ticket for another address", http.Header{wsticket.Header: {other}}, false},
+		{"no origin, forged ticket", http.Header{wsticket.Header: {"forged"}}, false},
+		{"same-host browser origin", http.Header{"Origin": {server.URL}}, true},
+		{"foreign origin with a ticket", http.Header{"Origin": {"https://example.org"}, wsticket.Header: {own}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			conn, resp, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), &websocket.DialOptions{HTTPHeader: tc.header})
+			if !tc.ok {
+				if err == nil || resp == nil || resp.StatusCode != http.StatusForbidden {
+					t.Fatalf("want 403, got err=%v resp=%v", err, resp)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.CloseNow()
+			if _, _, err := conn.Read(ctx); err != nil {
+				t.Fatalf("no hello: %v", err)
+			}
+		})
+	}
+}
+
+func TestOriginNotRequiredByDefault(t *testing.T) {
+	h := hub.New()
+	go h.Run()
+	server := httptest.NewServer(Handler(h, nil, Limits{MaxConnsPerIP: 5, MaxConnectsPerMinute: 100}, Access{}))
+	t.Cleanup(server.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	if _, _, err := conn.Read(ctx); err != nil {
+		t.Fatalf("no hello: %v", err)
 	}
 }

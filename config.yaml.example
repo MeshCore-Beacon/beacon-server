@@ -330,6 +330,12 @@ websocket:
   #allowed_origins:
   #  - https://example.com
   #  - https://*.example.com
+  # Browsers always send an Origin; scripts and BEACON Mobile send none. When true, an
+  # upgrade with no Origin gets 403 unless it carries a ticket from GET /api/v1/ws-ticket
+  # in X-Beacon-Ticket. It also raises the minimum app version to the first release that
+  # sends tickets. Tickets are signed per server process, so run one process per public
+  # host. Default false.
+  #require_origin: false
 
 # Node staleness, deletion, and clock-drift thresholds.
 #nodes:

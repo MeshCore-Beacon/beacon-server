@@ -20,6 +20,7 @@ type Options struct {
 	WSSendBytesPerSecond int
 	WSSendBurstBytes     int
 	WSAllowedOrigins     []string
+	WSRequireOrigin      bool
 	CORS                 config.CORSConfig
 	Server               config.ServerConfig
 	Auth                 config.AuthConfig

@@ -4032,6 +4032,26 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/ws-ticket": {
+            "get": {
+                "description": "For clients that send no Origin header, such as BEACON Mobile. Send the ticket in the\nX-Beacon-Ticket header of the /ws upgrade. It works for 60 seconds, from the same client\naddress (IPv6: the same /64), and only on this server process. Required only when\nwebsocket.require_origin is on; browsers never need one.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Info"
+                ],
+                "summary": "Ticket for opening /ws without an Origin",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.WSTicket"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -6793,6 +6813,20 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.WSTicket": {
+            "type": "object",
+            "properties": {
+                "expiresAt": {
+                    "description": "ExpiresAt is when the ticket stops opening /ws, in epoch ms.",
+                    "type": "integer",
+                    "example": 1793470167000
+                },
+                "ticket": {
+                    "type": "string",
+                    "example": "AAABmZ1s4CgLBvU1n1yN3v8hQm9YtVq2"
                 }
             }
         },

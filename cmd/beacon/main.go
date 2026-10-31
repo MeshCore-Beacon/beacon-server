@@ -575,9 +575,10 @@ func main() {
 		WSSendBytesPerSecond: resolved.WSSendBytesPerSecond,
 		WSSendBurstBytes:     resolved.WSSendBurstBytes,
 		WSAllowedOrigins:     cfg.WebSocket.AllowedOrigins,
+		WSRequireOrigin:      cfg.WebSocket.RequireOrigin,
 		CORS:                 cfg.CORS, Server: cfg.Server, Auth: cfg.Auth, RateLimit: resolved.RateLimit,
 		Scopes: scopes, RollupRetention: resolved.RollupRetention,
-		MinAppVersion: api.HigherVersion(api.MinAppVersion, cfg.Mobile.MinAppVersion),
+		MinAppVersion: api.AppFloor(cfg.Mobile.MinAppVersion, cfg.WebSocket.RequireOrigin),
 		MinWebVersion: api.HigherVersion(api.MinWebVersion, cfg.Web.MinWebVersion),
 		ServerVersion: docs.SwaggerInfo.Version,
 		AdminRoutes: map[string]http.Handler{

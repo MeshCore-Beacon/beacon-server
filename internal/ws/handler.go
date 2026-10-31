@@ -29,6 +29,9 @@
 //	lagged also reports events dropped by the per-connection send budget,
 //	at most once per budgetNoticeInterval.
 //
+//	With websocket.require_origin on, an upgrade without an Origin needs a ticket from
+//	GET /api/v1/ws-ticket in the X-Beacon-Ticket header, or it gets 403.
+//
 //	Idle connections (no ping) closed after 90s.
 //	Client should ping every 30s.
 package ws
@@ -49,6 +52,7 @@ import (
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
+	"github.com/MeshCore-Beacon/beacon-server/internal/wsticket"
 )
 
 const (
@@ -67,11 +71,19 @@ type Limits struct {
 	SendBurstBytes       int
 }
 
+// Access decides who may open /ws. A browser always sends an Origin; RequireOrigin makes every
+// other client show a ticket instead.
+type Access struct {
+	AllowedOrigins []string
+	RequireOrigin  bool
+	Tickets        *wsticket.Issuer
+}
+
 // Handler returns an http.HandlerFunc that requires the hub to be injected.
 // Wire it via router.New(h) so the hub is available at startup.
-func Handler(h *hub.Hub, reader api.Reader, limits Limits, allowedOrigins []string) http.HandlerFunc {
+func Handler(h *hub.Hub, reader api.Reader, limits Limits, access Access) http.HandlerFunc {
 	acceptOpts := &websocket.AcceptOptions{
-		OriginPatterns: allowedOrigins,
+		OriginPatterns: access.AllowedOrigins,
 		// The live feed is repetitive JSON; a shared window cuts its bytes ~3x for ~1.2 MB per socket.
 		CompressionMode: websocket.CompressionContextTakeover,
 	}
@@ -86,8 +98,12 @@ func Handler(h *hub.Hub, reader api.Reader, limits Limits, allowedOrigins []stri
 		// Count attempts before Accept, including failed handshakes. RemoteAddr
 		// was already resolved by TrustedProxyIP; never read forwarding headers here.
 		// Both limits share an IPv6 /64, so rotating addresses inside one doesn't add sockets.
-		key := httprate.CanonicalizeIP(ip)
+		key := wsticket.ClientKey(r)
 		if attempts.RespondOnLimit(w, r, key) {
+			return
+		}
+		if access.RequireOrigin && r.Header.Get("Origin") == "" && !access.Tickets.Valid(r.Header.Get(wsticket.Header), key) {
+			http.Error(w, "an Origin or a ticket is required", http.StatusForbidden)
 			return
 		}
 		conn, err := websocket.Accept(w, r, acceptOpts)

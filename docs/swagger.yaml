@@ -1933,6 +1933,16 @@ definitions:
     required:
     - enforce
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.WSTicket:
+    properties:
+      expiresAt:
+        description: ExpiresAt is when the ticket stops opening /ws, in epoch ms.
+        example: 1793470167000
+        type: integer
+      ticket:
+        example: AAABmZ1s4CgLBvU1n1yN3v8hQm9YtVq2
+        type: string
+    type: object
   internal_api_handlers.APIError:
     properties:
       code:
@@ -4773,6 +4783,23 @@ paths:
       summary: Get full trace detail by tag
       tags:
       - Traces
+  /ws-ticket:
+    get:
+      description: |-
+        For clients that send no Origin header, such as BEACON Mobile. Send the ticket in the
+        X-Beacon-Ticket header of the /ws upgrade. It works for 60 seconds, from the same client
+        address (IPv6: the same /64), and only on this server process. Required only when
+        websocket.require_origin is on; browsers never need one.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.WSTicket'
+      summary: Ticket for opening /ws without an Origin
+      tags:
+      - Info
 schemes:
 - http
 - https

@@ -404,6 +404,9 @@ type WebSocketConfig struct {
 	// AllowedOrigins are extra origins allowed to open /ws: exact, or scheme://*.domain[:port]
 	// for every subdomain of domain (never the apex). Defaults to same-host only.
 	AllowedOrigins []string `yaml:"allowed_origins"`
+	// RequireOrigin refuses an upgrade with no Origin unless it carries a /ws-ticket. It also
+	// raises the minimum app version to api.TicketAppVersion. Default false.
+	RequireOrigin bool `yaml:"require_origin"`
 }
 
 // PacketsConfig controls packet retention behaviour.
