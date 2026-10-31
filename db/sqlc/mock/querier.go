@@ -364,6 +364,21 @@ func (mr *MockQuerierMockRecorder) DeleteOldRollups(ctx, cutoff any) *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldRollups", reflect.TypeOf((*MockQuerier)(nil).DeleteOldRollups), ctx, cutoff)
 }
 
+// DeleteOldScopeReceivers mocks base method.
+func (m *MockQuerier) DeleteOldScopeReceivers(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteOldScopeReceivers", ctx, cutoff)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteOldScopeReceivers indicates an expected call of DeleteOldScopeReceivers.
+func (mr *MockQuerierMockRecorder) DeleteOldScopeReceivers(ctx, cutoff any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldScopeReceivers", reflect.TypeOf((*MockQuerier)(nil).DeleteOldScopeReceivers), ctx, cutoff)
+}
+
 // DeleteOldScopeRepeats mocks base method.
 func (m *MockQuerier) DeleteOldScopeRepeats(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error) {
 	m.ctrl.T.Helper()
@@ -377,6 +392,21 @@ func (m *MockQuerier) DeleteOldScopeRepeats(ctx context.Context, cutoff pgtype.T
 func (mr *MockQuerierMockRecorder) DeleteOldScopeRepeats(ctx, cutoff any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldScopeRepeats", reflect.TypeOf((*MockQuerier)(nil).DeleteOldScopeRepeats), ctx, cutoff)
+}
+
+// DeleteOldScopeSamples mocks base method.
+func (m *MockQuerier) DeleteOldScopeSamples(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteOldScopeSamples", ctx, cutoff)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteOldScopeSamples indicates an expected call of DeleteOldScopeSamples.
+func (mr *MockQuerierMockRecorder) DeleteOldScopeSamples(ctx, cutoff any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldScopeSamples", reflect.TypeOf((*MockQuerier)(nil).DeleteOldScopeSamples), ctx, cutoff)
 }
 
 // DeleteOldTelemetry mocks base method.
@@ -850,6 +880,21 @@ func (mr *MockQuerierMockRecorder) GetNodeScopeEvidence(ctx, arg any) *gomock.Ca
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNodeScopeEvidence", reflect.TypeOf((*MockQuerier)(nil).GetNodeScopeEvidence), ctx, arg)
 }
 
+// GetNodeScopeHistory mocks base method.
+func (m *MockQuerier) GetNodeScopeHistory(ctx context.Context, arg db.GetNodeScopeHistoryParams) ([]db.GetNodeScopeHistoryRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetNodeScopeHistory", ctx, arg)
+	ret0, _ := ret[0].([]db.GetNodeScopeHistoryRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetNodeScopeHistory indicates an expected call of GetNodeScopeHistory.
+func (mr *MockQuerierMockRecorder) GetNodeScopeHistory(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNodeScopeHistory", reflect.TypeOf((*MockQuerier)(nil).GetNodeScopeHistory), ctx, arg)
+}
+
 // GetNodesByIDs mocks base method.
 func (m *MockQuerier) GetNodesByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]db.GetNodesByIDsRow, error) {
 	m.ctrl.T.Helper()
@@ -1283,6 +1328,36 @@ func (m *MockQuerier) GetScopeNames(ctx context.Context) ([]string, error) {
 func (mr *MockQuerierMockRecorder) GetScopeNames(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetScopeNames", reflect.TypeOf((*MockQuerier)(nil).GetScopeNames), ctx)
+}
+
+// GetScopeReceiverActivity mocks base method.
+func (m *MockQuerier) GetScopeReceiverActivity(ctx context.Context, arg db.GetScopeReceiverActivityParams) ([]db.GetScopeReceiverActivityRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetScopeReceiverActivity", ctx, arg)
+	ret0, _ := ret[0].([]db.GetScopeReceiverActivityRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetScopeReceiverActivity indicates an expected call of GetScopeReceiverActivity.
+func (mr *MockQuerierMockRecorder) GetScopeReceiverActivity(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetScopeReceiverActivity", reflect.TypeOf((*MockQuerier)(nil).GetScopeReceiverActivity), ctx, arg)
+}
+
+// GetScopeRepeaterActivity mocks base method.
+func (m *MockQuerier) GetScopeRepeaterActivity(ctx context.Context, arg db.GetScopeRepeaterActivityParams) ([]db.GetScopeRepeaterActivityRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetScopeRepeaterActivity", ctx, arg)
+	ret0, _ := ret[0].([]db.GetScopeRepeaterActivityRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetScopeRepeaterActivity indicates an expected call of GetScopeRepeaterActivity.
+func (mr *MockQuerierMockRecorder) GetScopeRepeaterActivity(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetScopeRepeaterActivity", reflect.TypeOf((*MockQuerier)(nil).GetScopeRepeaterActivity), ctx, arg)
 }
 
 // GetScopeStats mocks base method.
@@ -2915,6 +2990,20 @@ func (m *MockQuerier) ReconfirmSliceEnd(ctx context.Context, arg db.ReconfirmSli
 func (mr *MockQuerierMockRecorder) ReconfirmSliceEnd(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReconfirmSliceEnd", reflect.TypeOf((*MockQuerier)(nil).ReconfirmSliceEnd), ctx, arg)
+}
+
+// RecordScopeObservation mocks base method.
+func (m *MockQuerier) RecordScopeObservation(ctx context.Context, arg db.RecordScopeObservationParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RecordScopeObservation", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RecordScopeObservation indicates an expected call of RecordScopeObservation.
+func (mr *MockQuerierMockRecorder) RecordScopeObservation(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecordScopeObservation", reflect.TypeOf((*MockQuerier)(nil).RecordScopeObservation), ctx, arg)
 }
 
 // RecordScopeRepeats mocks base method.

@@ -5,6 +5,7 @@ package ingest
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"time"
 
@@ -48,12 +49,42 @@ func scopeRepeatNodes(packet *meshcore.Packet, matched *string, resolved map[str
 	return scope, ids
 }
 
-func (w *Worker) recordScopeRepeats(ctx context.Context, packet *meshcore.Packet, matched *string, resolved map[string][]api.ResolvedPathEntry, heardAt time.Time) {
+type ScopeObservation struct {
+	NodeIDs                       []uuid.UUID
+	ObserverID                    uuid.UUID
+	IATA, Scope                   string
+	HeardAt                       time.Time
+	HashBytes                     uint8
+	PathKey                       []byte
+	UnresolvedHops, AmbiguousHops int64
+}
+
+func (w *Worker) recordScopeRepeats(ctx context.Context, packet *meshcore.Packet, matched *string, resolved map[string][]api.ResolvedPathEntry, heardAt time.Time, observerID uuid.UUID, iata string) {
 	scope, ids := scopeRepeatNodes(packet, matched, resolved)
-	if len(ids) == 0 {
+	if scope == "" {
 		return
 	}
-	if err := w.db.RecordScopeRepeats(ctx, ids, scope, heardAt, packet.PathHashSize()); err != nil {
+	p := ScopeObservation{NodeIDs: ids, ObserverID: observerID, IATA: iata, Scope: scope, HeardAt: heardAt, HashBytes: packet.PathHashSize()}
+	digest := sha256.New()
+	hash := packet.PacketHash()
+	digest.Write(hash[:])
+	digest.Write([]byte{packet.PathHashSize()})
+	digest.Write(packet.Path)
+	// Full resolved identities are part of the sample key: equal short prefixes in
+	// different resolution contexts must never be collapsed into one claimed route.
+	for _, id := range ids {
+		digest.Write(id[:])
+	}
+	p.PathKey = digest.Sum(nil)
+	for _, hash := range packet.PathHashes() {
+		entries := resolved[hex.EncodeToString(hash)]
+		if len(entries) == 0 {
+			p.UnresolvedHops++
+		} else if len(entries) > 1 {
+			p.AmbiguousHops++
+		}
+	}
+	if err := w.db.RecordScopeObservation(ctx, p); err != nil {
 		w.log.Error("scope repeat evidence write failed", "error", err)
 	}
 }

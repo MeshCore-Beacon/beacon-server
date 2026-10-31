@@ -23,6 +23,8 @@ type Page[T any] struct {
 }
 
 type Reader interface {
+	GetScopeActivity(context.Context, []string, int) (*ScopeActivity, error)
+	GetNodeScopeEvidence(context.Context, []uuid.UUID) (map[string]NodeScopeEvidence, error)
 	ListObserverDirectory(context.Context, ObserverDirectoryQuery) (*ObserverDirectory, error)
 	// GetRouteEvidence returns the full saved route and exact-prefix retained ordinary reports.
 	GetRouteEvidence(ctx context.Context, iata, pathKey string, query RouteEvidenceQuery) (*RouteEvidence, error)

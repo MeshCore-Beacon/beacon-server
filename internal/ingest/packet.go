@@ -897,7 +897,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		}
 	}
 	if inserted {
-		w.recordScopeRepeats(ctx, packet, matchedScope, resolved, heardAt)
+		w.recordScopeRepeats(ctx, packet, matchedScope, resolved, heardAt, id, iata)
 	}
 	w.runCapabilityDetection(ctx, packet.PayloadType(), hashSize, resolvedIDs)
 

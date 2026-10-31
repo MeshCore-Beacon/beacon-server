@@ -32,45 +32,55 @@ func (q *Queries) DeleteOldScopeRepeats(ctx context.Context, cutoff pgtype.Times
 const getNodeScopeEvidence = `-- name: GetNodeScopeEvidence :many
 SELECT s.node_id, 'repeat'::text AS source, s.scope_name AS scope,
        SUM(s.observations)::bigint AS observations, MAX(s.last_seen)::timestamptz AS checked_at,
-       MIN(s.min_hash_bytes)::smallint AS hash_bytes
+       MIN(s.min_hash_bytes)::smallint AS hash_bytes,
+       COALESCE(SUM(s.observations) FILTER(WHERE s.hour>=date_trunc('hour',$1::timestamptz,'UTC')-interval '1 hour'),0)::bigint AS one_hour,
+       COALESCE(SUM(s.observations) FILTER(WHERE s.hour>=date_trunc('hour',$1::timestamptz,'UTC')-interval '6 hours'),0)::bigint AS six_hours,
+       MIN(s.first_seen)::timestamptz AS first_seen,
+       SUM(s.unique_samples)::bigint AS unique_samples,
+       MIN(s.unique_first_seen)::timestamptz AS unique_since
 FROM node_scope_hourly s
-WHERE s.node_id = ANY($1::uuid[])
-  AND s.hour >= date_trunc('hour', $2::timestamptz)
-  AND s.hour < $3::timestamptz
+WHERE s.node_id = ANY($2::uuid[])
+  AND s.hour >= date_trunc('hour', $3::timestamptz, 'UTC')
+  AND s.hour < $1::timestamptz
 GROUP BY s.node_id,s.scope_name
 UNION ALL
-SELECT nn.neighbor_id, 'reported', nn.region_scope, 0::bigint, nn.region_scope_checked_at, 0::smallint
+SELECT nn.neighbor_id, 'reported', nn.region_scope, 0::bigint, nn.region_scope_checked_at, 0::smallint, 0::bigint, 0::bigint, NULL::timestamptz, 0::bigint, NULL::timestamptz
 FROM node_neighbors nn
-WHERE nn.neighbor_id = ANY($1::uuid[]) AND nn.region_scope IS NOT NULL
+WHERE nn.neighbor_id = ANY($2::uuid[]) AND nn.region_scope IS NOT NULL
 UNION ALL
-SELECT n.id, 'self', o.region_scope, 0::bigint, o.region_scope_checked_at, 0::smallint
+SELECT n.id, 'self', o.region_scope, 0::bigint, o.region_scope_checked_at, 0::smallint, 0::bigint, 0::bigint, NULL::timestamptz, 0::bigint, NULL::timestamptz
 FROM nodes n JOIN observers o ON o.public_key=n.public_key
-WHERE n.id = ANY($1::uuid[]) AND o.region_scope IS NOT NULL
+WHERE n.id = ANY($2::uuid[]) AND o.region_scope IS NOT NULL
 UNION ALL
-SELECT n.id, 'heard', ts.name, 0::bigint, os.last_seen, 0::smallint
+SELECT n.id, 'heard', ts.name, 0::bigint, os.last_seen, 0::smallint, 0::bigint, 0::bigint, NULL::timestamptz, 0::bigint, NULL::timestamptz
 FROM nodes n JOIN observers o ON o.public_key=n.public_key
 JOIN observer_scopes os ON os.observer_id=o.id JOIN transport_scopes ts ON ts.id=os.scope_id
-WHERE n.id = ANY($1::uuid[])
+WHERE n.id = ANY($2::uuid[])
 `
 
 type GetNodeScopeEvidenceParams struct {
+	Until   pgtype.Timestamptz `json:"until"`
 	NodeIds []uuid.UUID        `json:"node_ids"`
 	Since   pgtype.Timestamptz `json:"since"`
-	Until   pgtype.Timestamptz `json:"until"`
 }
 
 type GetNodeScopeEvidenceRow struct {
-	NodeID       uuid.UUID          `json:"node_id"`
-	Source       string             `json:"source"`
-	Scope        string             `json:"scope"`
-	Observations int64              `json:"observations"`
-	CheckedAt    pgtype.Timestamptz `json:"checked_at"`
-	HashBytes    int16              `json:"hash_bytes"`
+	NodeID        uuid.UUID          `json:"node_id"`
+	Source        string             `json:"source"`
+	Scope         string             `json:"scope"`
+	Observations  int64              `json:"observations"`
+	CheckedAt     pgtype.Timestamptz `json:"checked_at"`
+	HashBytes     int16              `json:"hash_bytes"`
+	OneHour       int64              `json:"one_hour"`
+	SixHours      int64              `json:"six_hours"`
+	FirstSeen     pgtype.Timestamptz `json:"first_seen"`
+	UniqueSamples int64              `json:"unique_samples"`
+	UniqueSince   pgtype.Timestamptz `json:"unique_since"`
 }
 
 // Page IDs keep work bounded; no packet-history scan or external lookup.
 func (q *Queries) GetNodeScopeEvidence(ctx context.Context, arg GetNodeScopeEvidenceParams) ([]GetNodeScopeEvidenceRow, error) {
-	rows, err := q.db.Query(ctx, getNodeScopeEvidence, arg.NodeIds, arg.Since, arg.Until)
+	rows, err := q.db.Query(ctx, getNodeScopeEvidence, arg.Until, arg.NodeIds, arg.Since)
 	if err != nil {
 		return nil, err
 	}
@@ -85,6 +95,11 @@ func (q *Queries) GetNodeScopeEvidence(ctx context.Context, arg GetNodeScopeEvid
 			&i.Observations,
 			&i.CheckedAt,
 			&i.HashBytes,
+			&i.OneHour,
+			&i.SixHours,
+			&i.FirstSeen,
+			&i.UniqueSamples,
+			&i.UniqueSince,
 		); err != nil {
 			return nil, err
 		}
@@ -98,7 +113,7 @@ func (q *Queries) GetNodeScopeEvidence(ctx context.Context, arg GetNodeScopeEvid
 
 const recordScopeRepeats = `-- name: RecordScopeRepeats :exec
 INSERT INTO node_scope_hourly (node_id, scope_name, hour, observations, first_seen, last_seen, min_hash_bytes)
-SELECT n.id, $1::text, date_trunc('hour', $2::timestamptz), 1,
+SELECT n.id, $1::text, date_trunc('hour', $2::timestamptz, 'UTC'), 1,
        $2::timestamptz, $2::timestamptz, $3::smallint
 FROM nodes n WHERE n.id = ANY($4::uuid[]) AND n.node_type = 2
 ORDER BY n.id

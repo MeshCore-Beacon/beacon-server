@@ -310,7 +310,7 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 		node.ClockOutOfSync = &outOfSync
 	}
 	summaries := []api.NodeSummary{node.NodeSummary}
-	if err := s.enrichNodeScopes(ctx, summaries); err != nil {
+	if err := s.enrichNodeScopes(ctx, summaries, true); err != nil {
 		return nil, err
 	}
 	node.ScopeEvidence = summaries[0].ScopeEvidence
