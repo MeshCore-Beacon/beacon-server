@@ -20,7 +20,7 @@ SELECT s.node_id, 'repeat'::text AS source, s.scope_name AS scope,
 FROM node_scope_hourly s
 WHERE s.node_id = ANY(@node_ids::uuid[])
   AND s.hour >= date_trunc('hour', @since::timestamptz)
-  AND s.hour < date_trunc('hour', @until::timestamptz) + interval '1 hour'
+  AND s.hour < @until::timestamptz
 GROUP BY s.node_id,s.scope_name
 UNION ALL
 SELECT nn.neighbor_id, 'reported', nn.region_scope, 0::bigint, nn.region_scope_checked_at, 0::smallint

@@ -79,8 +79,8 @@ func (s *Store) enrichNodeScopes(ctx context.Context, nodes []api.NodeSummary) e
 	if len(ids) == 0 {
 		return nil
 	}
-	until := time.Now().UTC()
-	since := until.Truncate(time.Hour).Add(-23 * time.Hour)
+	until := time.Now().UTC().Truncate(time.Hour).Add(time.Hour)
+	since := until.Add(-24 * time.Hour)
 	rows, err := s.q.GetNodeScopeEvidence(ctx, sqlc.GetNodeScopeEvidenceParams{NodeIds: ids, Since: pgtype.Timestamptz{Time: since, Valid: true}, Until: pgtype.Timestamptz{Time: until, Valid: true}})
 	if err != nil {
 		return err
