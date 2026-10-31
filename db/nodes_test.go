@@ -170,7 +170,7 @@ func TestSetNodeCapability_NeitherSet(t *testing.T) {
 
 	nodeID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
-	// no EXPECT — neither sqlc method should be called
+	// no EXPECT â€” neither sqlc method should be called
 	store := &Store{q: mock}
 	err := store.SetNodeCapability(context.Background(), nodeID, false, false)
 	if err != nil {
@@ -785,7 +785,7 @@ func TestListNodes_NextPageCursor(t *testing.T) {
 
 // List rows carry the node's scope, as node detail does: clients filter and show it.
 func TestNodeListsCarryDefaultScope(t *testing.T) {
-	scope := "#bc"
+	scope := "#YOW"
 	row := sqlc.ListNodesRow{ID: uuid.New(), PublicKey: []byte{1}, DefaultScopeName: &scope}
 	sorted := sqlc.ListNodesSortedRow{ID: uuid.New(), PublicKey: []byte{2}, DefaultScopeName: &scope}
 	ctrl := gomock.NewController(t)

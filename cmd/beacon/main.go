@@ -49,6 +49,7 @@ import (
 // version is set at build time via -ldflags "-X main.version=vX.Y.Z".
 // Falls back to "dev" when built without the flag.
 var version = "dev"
+var revision = ""
 
 //	@title			MeshCore Beacon API
 //	@version		2.1.0
@@ -569,7 +570,14 @@ func main() {
 	// Wrap after wiring cache invalidators and cleanup callbacks to the actual
 	// CachedReader. Only response projections receive the geographic annotation.
 	reader = api.WithLocalBorders(reader, localBorders)
+	telemetryGateway, err := handlers.NewNodeTelemetryGateway(cfg.NodeTelemetry.GatewayURL)
+	if err != nil {
+		slog.Error("invalid telemetry gateway configuration", "component", "startup", "error", err)
+		os.Exit(1)
+	}
 	r := router.New(h, reader, []*ingest.Worker{broker1, broker2}, router.Options{
+		ScopeCatalogues:      scopeImporter,
+		NodeTelemetry:        telemetryGateway,
 		MaxConnsPerIP:        resolved.MaxConnsPerIP,
 		MaxConnectsPerMinute: resolved.MaxConnectsPerMinute,
 		WSAllowedOrigins:     cfg.WebSocket.AllowedOrigins,
@@ -578,6 +586,8 @@ func main() {
 		MinAppVersion: api.HigherVersion(api.MinAppVersion, cfg.Mobile.MinAppVersion),
 		MinWebVersion: api.HigherVersion(api.MinWebVersion, cfg.Web.MinWebVersion),
 		ServerVersion: docs.SwaggerInfo.Version,
+		BuildVersion:  version,
+		BuildRevision: revision,
 		AdminRoutes: map[string]http.Handler{
 			"/accounts": handlers.AccountsRouter(maintStore),
 			"/backup":   handlers.BackupRouter(backupOpts, ctx),
