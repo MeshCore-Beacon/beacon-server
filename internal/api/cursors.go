@@ -77,7 +77,7 @@ type NodeSortCursor struct {
 	Sort NodeSort
 	Null int32  // 1 for an unnamed node in name order
 	Text string // the name, in name order
-	Num  int64  // the type or neighbour count, negated when descending
+	Num  int64  // the type, neighbour count or last_seen in unix micros, negated when descending
 	Seen int64  // last_seen in negated unix micros
 	ID   uuid.UUID
 }
