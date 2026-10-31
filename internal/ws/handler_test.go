@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -44,7 +45,7 @@ func TestAllowedOrigins(t *testing.T) {
 		{"apex and wildcard, subdomain", apexAndWildcard, "https://sub.example.com", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			server := httptest.NewServer(Handler(hub.New(), nil, 5, 100, tc.allowed))
+			server := httptest.NewServer(Handler(hub.New(), nil, Limits{MaxConnsPerIP: 5, MaxConnectsPerMinute: 100}, tc.allowed))
 			t.Cleanup(server.Close)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -74,7 +75,7 @@ func TestAllowedOrigins(t *testing.T) {
 func TestConfigureIncludeObserverKey(t *testing.T) {
 	h := hub.New()
 	go h.Run()
-	server := httptest.NewServer(Handler(h, nil, 5, 100, nil))
+	server := httptest.NewServer(Handler(h, nil, Limits{MaxConnsPerIP: 5, MaxConnectsPerMinute: 100}, nil))
 	t.Cleanup(server.Close)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -136,7 +137,7 @@ func TestConfigureIncludeObserverKey(t *testing.T) {
 func TestConfigureIncludeRepeats(t *testing.T) {
 	h := hub.New()
 	go h.Run()
-	server := httptest.NewServer(Handler(h, nil, 5, 100, nil))
+	server := httptest.NewServer(Handler(h, nil, Limits{MaxConnsPerIP: 5, MaxConnectsPerMinute: 100}, nil))
 	t.Cleanup(server.Close)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -213,7 +214,7 @@ func TestCompressionNegotiated(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h := hub.New()
 			go h.Run()
-			server := httptest.NewServer(Handler(h, nil, 5, 100, tc.allowed))
+			server := httptest.NewServer(Handler(h, nil, Limits{MaxConnsPerIP: 5, MaxConnectsPerMinute: 100}, tc.allowed))
 			t.Cleanup(server.Close)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -246,5 +247,63 @@ func TestCompressionNegotiated(t *testing.T) {
 				t.Fatalf("event data = %s, %v", msg["data"], err)
 			}
 		})
+	}
+}
+
+func TestSendBudgetDropsEventsAndNoticesThem(t *testing.T) {
+	old := budgetNoticeInterval
+	budgetNoticeInterval = 200 * time.Millisecond
+	t.Cleanup(func() { budgetNoticeInterval = old })
+	h := hub.New()
+	go h.Run()
+	server := httptest.NewServer(Handler(h, nil, Limits{MaxConnsPerIP: 5, MaxConnectsPerMinute: 100, SendBytesPerSecond: 1, SendBurstBytes: 1}, nil))
+	t.Cleanup(server.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.CloseNow() })
+	read := func() map[string]json.RawMessage {
+		t.Helper()
+		_, data, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var msg map[string]json.RawMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			t.Fatal(err)
+		}
+		return msg
+	}
+	read() // hello
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"v":1,"type":"subscribe","id":"s","scope":{}}`)); err != nil {
+		t.Fatal(err)
+	}
+	read() // subscribed
+	time.Sleep(20 * time.Millisecond)
+	for i := range 5 {
+		h.Broadcast(hub.Event{Type: hub.EventPacketObservation, Payload: json.RawMessage(strconv.Itoa(i))})
+	}
+
+	var events, dropped int
+	var notices []time.Time
+	for dropped < 4 {
+		msg := read()
+		switch string(msg["type"]) {
+		case `"event"`:
+			events++
+		case `"lagged"`:
+			n, _ := strconv.Atoi(string(msg["droppedCount"]))
+			dropped += n
+			notices = append(notices, time.Now())
+		}
+	}
+	if events != 1 || dropped != 4 {
+		t.Fatalf("events=%d dropped=%d, want the first event through and four dropped", events, dropped)
+	}
+	if len(notices) > 2 || (len(notices) == 2 && notices[1].Sub(notices[0]) < 150*time.Millisecond) {
+		t.Fatalf("lagged notices not spaced out: %v", notices)
 	}
 }

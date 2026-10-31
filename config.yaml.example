@@ -312,11 +312,18 @@ routes:
 websocket:
   max_connections_per_ip: 5 # default: 5
   # Upgrade attempts, including failed handshakes; zero/omitted defaults to 10.
-  # IPv6 clients share a /64 attempt budget. Negative values prevent startup.
+  # IPv6 clients in one /64 share this budget and the connection cap. Negative
+  # values prevent startup.
   # Rate exhaustion rejects the handshake with 429 and Retry-After: 60.
   # Within this rate budget, a full concurrent cap accepts then closes with 1013
   # before hello, allowing browsers to back off without evicting existing clients.
   max_connects_per_minute: 10
+  # Live-event bytes each connection may receive, counted before compression;
+  # zero/omitted defaults to 131072 (128 KiB/s) with a 2097152 (2 MiB) burst.
+  # Events past it are dropped, and a lagged notice, at most every 30 s, tells
+  # the client to refresh over REST. Negative values prevent startup.
+  max_send_bytes_per_second: 131072
+  send_burst_bytes: 2097152
   # Other sites allowed to open /ws. Exact scheme://host[:port], or
   # scheme://*.domain[:port] for every subdomain of domain at any depth. The
   # wildcard never matches the apex itself, and scheme and port stay exact.

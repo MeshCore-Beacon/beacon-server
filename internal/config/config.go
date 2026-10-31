@@ -220,6 +220,8 @@ type ResolvedConfig struct {
 	RouteReconfirmRowsPerHour int
 	MaxConnsPerIP             int
 	MaxConnectsPerMinute      int
+	WSSendBytesPerSecond      int
+	WSSendBurstBytes          int
 	ViewRefreshInterval       time.Duration
 	ReconfirmInterval         time.Duration
 	CleanupInterval           time.Duration
@@ -389,11 +391,16 @@ type TelemetryConfig struct {
 // Settings here apply to the /ws endpoint only.
 type WebSocketConfig struct {
 	// MaxConnectionsPerIP is the maximum number of concurrent WebSocket
-	// connections allowed from a single IP address. Defaults to 5 if not set.
+	// connections allowed from a single IP address (IPv6: per /64). Defaults to 5 if not set.
 	MaxConnectionsPerIP int `yaml:"max_connections_per_ip"`
 	// MaxConnectsPerMinute limits upgrade attempts, including failed handshakes.
 	// Zero/omitted defaults to 10; IPv6 addresses share a /64 attempt budget.
 	MaxConnectsPerMinute int `yaml:"max_connects_per_minute"`
+	// MaxSendBytesPerSecond caps each connection's live events, counted before compression.
+	// Zero/omitted defaults to 131072 (128 KiB/s); events over it are dropped and noticed as lagged.
+	MaxSendBytesPerSecond int `yaml:"max_send_bytes_per_second"`
+	// SendBurstBytes is how far a connection may run ahead of that rate. Zero/omitted defaults to 2 MiB.
+	SendBurstBytes int `yaml:"send_burst_bytes"`
 	// AllowedOrigins are extra origins allowed to open /ws: exact, or scheme://*.domain[:port]
 	// for every subdomain of domain (never the apex). Defaults to same-host only.
 	AllowedOrigins []string `yaml:"allowed_origins"`
@@ -581,6 +588,9 @@ func Load(path string) (*Config, error) {
 	if cfg.WebSocket.MaxConnectsPerMinute < 0 {
 		return nil, fmt.Errorf("websocket.max_connects_per_minute must be positive or zero for the default")
 	}
+	if cfg.WebSocket.MaxSendBytesPerSecond < 0 || cfg.WebSocket.SendBurstBytes < 0 {
+		return nil, fmt.Errorf("websocket.max_send_bytes_per_second and websocket.send_burst_bytes must be positive or zero for defaults")
+	}
 	for i, origin := range cfg.WebSocket.AllowedOrigins {
 		if err := validateOrigin(origin); err != nil {
 			return nil, fmt.Errorf("websocket.allowed_origins[%d]: %w", i, err)
@@ -767,6 +777,8 @@ func Resolve(cfg *Config) ResolvedConfig {
 		RouteReconfirmRowsPerHour: cfg.Routes.ReconfirmRowsPerHour,
 		MaxConnsPerIP:             cfg.WebSocket.MaxConnectionsPerIP,
 		MaxConnectsPerMinute:      cfg.WebSocket.MaxConnectsPerMinute,
+		WSSendBytesPerSecond:      cfg.WebSocket.MaxSendBytesPerSecond,
+		WSSendBurstBytes:          cfg.WebSocket.SendBurstBytes,
 		ViewRefreshInterval:       cfg.Background.ViewRefresh.Duration,
 		ReconfirmInterval:         cfg.Background.Reconfirm.Duration,
 		CleanupInterval:           cfg.Background.Cleanup.Duration,
@@ -832,6 +844,12 @@ func Resolve(cfg *Config) ResolvedConfig {
 	if r.MaxConnectsPerMinute == 0 {
 		r.MaxConnectsPerMinute = 10
 	}
+	if r.WSSendBytesPerSecond == 0 {
+		r.WSSendBytesPerSecond = 128 << 10
+	}
+	if r.WSSendBurstBytes == 0 {
+		r.WSSendBurstBytes = 2 << 20
+	}
 	if r.ViewRefreshInterval == 0 {
 		r.ViewRefreshInterval = time.Hour
 	}
@@ -879,9 +897,9 @@ func Resolve(cfg *Config) ResolvedConfig {
 
 func (r ResolvedConfig) String() string {
 	return fmt.Sprintf(
-		"telemetryResolution=%s telemetryRetention=%s rollupRetention=%s packetRetention=%s routeRetention=%s routeGrace=%s routeMinObs=%d routeReconfirmRowsPerHour=%d maxConnsPerIP=%d maxConnectsPerMinute=%d viewRefresh=%s reconfirm=%s cleanup=%s presenceFlush=%s presencePacketTTL=%s clockDriftThreshold=%s nodeStaleThreshold=%s nodeDeleteAfter=%s observerDeleteAfter=%s rateLimitEnabled=%t requestsPerMinute=%d burst=%d apiPlanLayout=%s guardsEnforce=%v guardsBudget=%s adminListen=%q readOnly=%t planguardDailyCheck=%t readModelCmi=%t readModelPacketSites=%t fillDuty=%g fillMinPause=%s fillPacketSitesSlice=%d fillCmiBatch=%d",
+		"telemetryResolution=%s telemetryRetention=%s rollupRetention=%s packetRetention=%s routeRetention=%s routeGrace=%s routeMinObs=%d routeReconfirmRowsPerHour=%d maxConnsPerIP=%d maxConnectsPerMinute=%d wsSendBytesPerSecond=%d wsSendBurstBytes=%d viewRefresh=%s reconfirm=%s cleanup=%s presenceFlush=%s presencePacketTTL=%s clockDriftThreshold=%s nodeStaleThreshold=%s nodeDeleteAfter=%s observerDeleteAfter=%s rateLimitEnabled=%t requestsPerMinute=%d burst=%d apiPlanLayout=%s guardsEnforce=%v guardsBudget=%s adminListen=%q readOnly=%t planguardDailyCheck=%t readModelCmi=%t readModelPacketSites=%t fillDuty=%g fillMinPause=%s fillPacketSitesSlice=%d fillCmiBatch=%d",
 		r.TelemetryResolution, r.TelemetryRetention, r.RollupRetention, r.PacketRetention, r.RouteRetention, r.RouteGrace, r.RouteMinObservations, r.RouteReconfirmRowsPerHour,
-		r.MaxConnsPerIP, r.MaxConnectsPerMinute, r.ViewRefreshInterval, r.ReconfirmInterval, r.CleanupInterval,
+		r.MaxConnsPerIP, r.MaxConnectsPerMinute, r.WSSendBytesPerSecond, r.WSSendBurstBytes, r.ViewRefreshInterval, r.ReconfirmInterval, r.CleanupInterval,
 		r.PresenceFlushInterval, r.PresencePacketTTL, r.ClockDriftThreshold,
 		r.NodeStaleThreshold, r.NodeDeleteAfter, r.ObserverDeleteAfter,
 		r.RateLimit.Enabled, r.RateLimit.RequestsPerMinute, r.RateLimit.Burst,
