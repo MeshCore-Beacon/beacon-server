@@ -64,21 +64,22 @@ func ValidNodeSort(by string) bool {
 
 // NodeSummary is the minimal node representation used in list responses.
 type NodeSummary struct {
-	ID                 uuid.UUID   `json:"id"`
-	PublicKey          string      `json:"publicKey"` // hex-encoded Ed25519 public key
-	NodeType           int16       `json:"nodeType"`  // 1=companion, 2=repeater, 3=room_server, 4=sensor
-	NodeTypeName       string      `json:"nodeTypeName"`
-	Name               *string     `json:"name,omitempty"`
-	IsObserver         bool        `json:"isObserver"`             // true if this node is also a known observer
-	ObserverID         *uuid.UUID  `json:"observerId,omitempty"`   // UUID of the associated observer row, if any
-	Latitude           *float64    `json:"lat,omitempty"`          // decimal degrees, from advert AppData
-	Longitude          *float64    `json:"lng,omitempty"`          // decimal degrees, from advert AppData
-	Radio              *string     `json:"radio,omitempty"`        // shorthand: "freqMhz,bwKhz,sf" e.g. "910.525,62.5,7"
-	IATAs              []NodeIATA  `json:"iatas"`                  // IATAs where this node has been heard, with last heard timestamps
-	DefaultScope       *string     `json:"defaultScope,omitempty"` // most recently matched transport scope name e.g. "#bc"
-	KnownNeighborCount int64       `json:"knownNeighborCount"`
-	NeighborIDs        []uuid.UUID `json:"neighborIds,omitempty"` // only populated when the list request opts in; see ?neighbors=true
-	LastSeen           int64       `json:"lastSeen"`              // epoch ms
+	ScopeEvidence      *NodeScopeEvidence `json:"scopeEvidence,omitempty"` // repeater details and neighbors=true lists
+	ID                 uuid.UUID          `json:"id"`
+	PublicKey          string             `json:"publicKey"` // hex-encoded Ed25519 public key
+	NodeType           int16              `json:"nodeType"`  // 1=companion, 2=repeater, 3=room_server, 4=sensor
+	NodeTypeName       string             `json:"nodeTypeName"`
+	Name               *string            `json:"name,omitempty"`
+	IsObserver         bool               `json:"isObserver"`             // true if this node is also a known observer
+	ObserverID         *uuid.UUID         `json:"observerId,omitempty"`   // UUID of the associated observer row, if any
+	Latitude           *float64           `json:"lat,omitempty"`          // decimal degrees, from advert AppData
+	Longitude          *float64           `json:"lng,omitempty"`          // decimal degrees, from advert AppData
+	Radio              *string            `json:"radio,omitempty"`        // shorthand: "freqMhz,bwKhz,sf" e.g. "910.525,62.5,7"
+	IATAs              []NodeIATA         `json:"iatas"`                  // IATAs where this node has been heard, with last heard timestamps
+	DefaultScope       *string            `json:"defaultScope,omitempty"` // most recently matched transport scope name e.g. "#bc"
+	KnownNeighborCount int64              `json:"knownNeighborCount"`
+	NeighborIDs        []uuid.UUID        `json:"neighborIds,omitempty"` // only populated when the list request opts in; see ?neighbors=true
+	LastSeen           int64              `json:"lastSeen"`              // epoch ms
 	// Stale is true when the node hasn't been seen (last_seen) within the configured
 	// staleness window (default 24h; internal/config.ResolvedConfig.NodeStaleThreshold).
 	// Applies to every node type, unlike ClockDriftSeconds/ClockOutOfSync on Node, which

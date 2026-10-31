@@ -2360,19 +2360,20 @@ LIMIT @row_limit;
 -- so a failed/timed-out query doesn't erase a previously known scope.
 -- On conflict, snr and region_scope are only overwritten when a new
 -- non-null value is supplied.
-INSERT INTO node_neighbors (node_id, neighbor_id, iata, observation_count, snr, region_scope)
-VALUES ($1, $2, $3, 1, $4, $5)
+INSERT INTO node_neighbors (node_id, neighbor_id, iata, observation_count, snr, region_scope, region_scope_checked_at)
+VALUES ($1, $2, $3, 1, $4, $5, CASE WHEN $5::text IS NOT NULL THEN now() ELSE NULL END)
 ON CONFLICT (node_id, neighbor_id, iata) DO UPDATE SET
   last_seen         = NOW(),
   observation_count = node_neighbors.observation_count + 1,
   snr               = COALESCE(EXCLUDED.snr, node_neighbors.snr),
-  region_scope      = COALESCE(EXCLUDED.region_scope, node_neighbors.region_scope);
+  region_scope      = COALESCE(EXCLUDED.region_scope, node_neighbors.region_scope),
+  region_scope_checked_at = COALESCE(EXCLUDED.region_scope_checked_at, node_neighbors.region_scope_checked_at);
 
 -- name: UpdateObserverRegionScope :exec
 -- Records the observer's own OTA-reported region scope, from the "self"
 -- field of a /neighbors report. Always known (not queried OTA), so this
 -- unconditionally overwrites, unlike the neighbor-side region_scope.
-UPDATE observers SET region_scope = $2 WHERE id = $1;
+UPDATE observers SET region_scope = $2, region_scope_checked_at = now() WHERE id = $1;
 
 -- name: GetNodeNeighbors :many
 -- Returns the neighbors of a node with details, ordered by most recently seen.

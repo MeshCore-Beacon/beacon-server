@@ -144,6 +144,11 @@ func (s *Store) ListNodes(ctx context.Context, nodeType int16, iatas []string, s
 	for _, v := range rows {
 		items = append(items, s.nodeSummary(v))
 	}
+	if includeNeighbors {
+		if err := s.enrichNodeScopes(ctx, items); err != nil {
+			return api.NodePage{}, err
+		}
+	}
 	page := api.NodePage{Page: api.Page[api.NodeSummary]{Items: items, HasMore: hasMore}}
 	if hasMore && len(rows) > 0 {
 		last := rows[len(rows)-1]
@@ -191,6 +196,11 @@ func (s *Store) ListNodesSorted(ctx context.Context, nodeType int16, iatas []str
 			RadioBwKhz: v.RadioBwKhz, DefaultScopeName: v.DefaultScopeName, Iatas: v.Iatas, IsObserver: v.IsObserver,
 			ObserverID: v.ObserverID, KnownNeighborCount: v.KnownNeighborCount, NeighborIds: v.NeighborIds,
 		}))
+	}
+	if includeNeighbors {
+		if err := s.enrichNodeScopes(ctx, items); err != nil {
+			return api.NodePage{}, err
+		}
 	}
 	page := api.NodePage{Page: api.Page[api.NodeSummary]{Items: items, HasMore: hasMore}}
 	if hasMore && len(rows) > 0 {
@@ -299,6 +309,11 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 		outOfSync := time.Duration(abs(*row.DeviceClockDriftSeconds))*time.Second > s.clockDriftThreshold
 		node.ClockOutOfSync = &outOfSync
 	}
+	summaries := []api.NodeSummary{node.NodeSummary}
+	if err := s.enrichNodeScopes(ctx, summaries); err != nil {
+		return nil, err
+	}
+	node.ScopeEvidence = summaries[0].ScopeEvidence
 	return node, nil
 }
 

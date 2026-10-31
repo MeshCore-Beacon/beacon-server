@@ -71,6 +71,7 @@ type Querier interface {
 	DeleteOldPackets(ctx context.Context, arg DeleteOldPacketsParams) (int64, error)
 	// Bumps coverage when hours go, so cached responses that included them are not reused.
 	DeleteOldRollups(ctx context.Context, cutoff pgtype.Timestamptz) error
+	DeleteOldScopeRepeats(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error)
 	// Deletes telemetry rows older than the given cutoff. Called by the cleanup goroutine.
 	DeleteOldTelemetry(ctx context.Context, reportedAt pgtype.Timestamptz) error
 	// Keeps the trace IATA filter in step with packet retention.
@@ -133,6 +134,8 @@ type Querier interface {
 	GetNodeByPubkey(ctx context.Context, publicKey []byte) (uuid.UUID, error)
 	// Returns the neighbors of a node with details, ordered by most recently seen.
 	GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]GetNodeNeighborsRow, error)
+	// Page IDs keep work bounded; no packet-history scan or external lookup.
+	GetNodeScopeEvidence(ctx context.Context, arg GetNodeScopeEvidenceParams) ([]GetNodeScopeEvidenceRow, error)
 	GetNodesByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]GetNodesByIDsRow, error)
 	GetNodesByPubkeys(ctx context.Context, pubkeys [][]byte) ([]GetNodesByPubkeysRow, error)
 	GetObservationIDRange(ctx context.Context) (GetObservationIDRangeRow, error)
@@ -499,6 +502,9 @@ type Querier interface {
 	ReconfirmRoutesBatch(ctx context.Context, arg ReconfirmRoutesBatchParams) (ReconfirmRoutesBatchRow, error)
 	// Key of the last route in a slice that timed out: the caller passes the slice's row count - 1.
 	ReconfirmSliceEnd(ctx context.Context, arg ReconfirmSliceEndParams) (ReconfirmSliceEndRow, error)
+	// One accepted MQTT hearing, one vote per distinct resolved repeater. These are
+	// repeat observations, NOT unique RF transmissions or configuration claims.
+	RecordScopeRepeats(ctx context.Context, arg RecordScopeRepeatsParams) error
 	// One hearing of a TRACE packet: trace_iatas refreshes at most hourly and the tag's heard
 	// window widens (the first hearing replaces the packet's provisional times). Packet counts
 	// and payloads come from UpsertPacket.

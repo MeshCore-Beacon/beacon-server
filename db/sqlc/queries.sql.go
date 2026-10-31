@@ -1315,7 +1315,7 @@ func (q *Queries) GetObserverBrokers(ctx context.Context, observerID uuid.UUID) 
 }
 
 const getObserverByID = `-- name: GetObserverByID :one
-SELECT id, public_key, display_name, observer_type, software_version, hardware_model, firmware_version, firmware_build, radio_freq_mhz, radio_sf, radio_bw_khz, radio_cr, battery_level, uptime_seconds, status_metadata, last_status_at, first_seen, last_seen, observation_count, metadata, region_scope, last_iata, last_iata_at FROM observers WHERE id = $1
+SELECT id, public_key, display_name, observer_type, software_version, hardware_model, firmware_version, firmware_build, radio_freq_mhz, radio_sf, radio_bw_khz, radio_cr, battery_level, uptime_seconds, status_metadata, last_status_at, first_seen, last_seen, observation_count, metadata, region_scope, last_iata, last_iata_at, region_scope_checked_at FROM observers WHERE id = $1
 `
 
 func (q *Queries) GetObserverByID(ctx context.Context, id uuid.UUID) (Observer, error) {
@@ -1345,12 +1345,13 @@ func (q *Queries) GetObserverByID(ctx context.Context, id uuid.UUID) (Observer, 
 		&i.RegionScope,
 		&i.LastIata,
 		&i.LastIataAt,
+		&i.RegionScopeCheckedAt,
 	)
 	return i, err
 }
 
 const getObserverByPubkey = `-- name: GetObserverByPubkey :one
-SELECT id, public_key, display_name, observer_type, software_version, hardware_model, firmware_version, firmware_build, radio_freq_mhz, radio_sf, radio_bw_khz, radio_cr, battery_level, uptime_seconds, status_metadata, last_status_at, first_seen, last_seen, observation_count, metadata, region_scope, last_iata, last_iata_at FROM observers WHERE public_key = $1
+SELECT id, public_key, display_name, observer_type, software_version, hardware_model, firmware_version, firmware_build, radio_freq_mhz, radio_sf, radio_bw_khz, radio_cr, battery_level, uptime_seconds, status_metadata, last_status_at, first_seen, last_seen, observation_count, metadata, region_scope, last_iata, last_iata_at, region_scope_checked_at FROM observers WHERE public_key = $1
 `
 
 func (q *Queries) GetObserverByPubkey(ctx context.Context, publicKey []byte) (Observer, error) {
@@ -1380,6 +1381,7 @@ func (q *Queries) GetObserverByPubkey(ctx context.Context, publicKey []byte) (Ob
 		&i.RegionScope,
 		&i.LastIata,
 		&i.LastIataAt,
+		&i.RegionScopeCheckedAt,
 	)
 	return i, err
 }
@@ -7764,7 +7766,7 @@ func (q *Queries) TouchPackets(ctx context.Context, arg TouchPacketsParams) erro
 }
 
 const updateObserverRegionScope = `-- name: UpdateObserverRegionScope :exec
-UPDATE observers SET region_scope = $2 WHERE id = $1
+UPDATE observers SET region_scope = $2, region_scope_checked_at = now() WHERE id = $1
 `
 
 type UpdateObserverRegionScopeParams struct {
@@ -8199,13 +8201,14 @@ func (q *Queries) UpsertNodeIATA(ctx context.Context, arg UpsertNodeIATAParams) 
 
 const upsertNodeNeighbor = `-- name: UpsertNodeNeighbor :exec
 
-INSERT INTO node_neighbors (node_id, neighbor_id, iata, observation_count, snr, region_scope)
-VALUES ($1, $2, $3, 1, $4, $5)
+INSERT INTO node_neighbors (node_id, neighbor_id, iata, observation_count, snr, region_scope, region_scope_checked_at)
+VALUES ($1, $2, $3, 1, $4, $5, CASE WHEN $5::text IS NOT NULL THEN now() ELSE NULL END)
 ON CONFLICT (node_id, neighbor_id, iata) DO UPDATE SET
   last_seen         = NOW(),
   observation_count = node_neighbors.observation_count + 1,
   snr               = COALESCE(EXCLUDED.snr, node_neighbors.snr),
-  region_scope      = COALESCE(EXCLUDED.region_scope, node_neighbors.region_scope)
+  region_scope      = COALESCE(EXCLUDED.region_scope, node_neighbors.region_scope),
+  region_scope_checked_at = COALESCE(EXCLUDED.region_scope_checked_at, node_neighbors.region_scope_checked_at)
 `
 
 type UpsertNodeNeighborParams struct {
@@ -8267,7 +8270,7 @@ ON CONFLICT (public_key) DO UPDATE SET
                             AND (observers.last_iata_at IS NULL OR EXCLUDED.last_iata_at > observers.last_iata_at)
                            THEN EXCLUDED.last_iata ELSE observers.last_iata END,
   last_iata_at      = GREATEST(observers.last_iata_at, EXCLUDED.last_iata_at)
-RETURNING id, public_key, display_name, observer_type, software_version, hardware_model, firmware_version, firmware_build, radio_freq_mhz, radio_sf, radio_bw_khz, radio_cr, battery_level, uptime_seconds, status_metadata, last_status_at, first_seen, last_seen, observation_count, metadata, region_scope, last_iata, last_iata_at
+RETURNING id, public_key, display_name, observer_type, software_version, hardware_model, firmware_version, firmware_build, radio_freq_mhz, radio_sf, radio_bw_khz, radio_cr, battery_level, uptime_seconds, status_metadata, last_status_at, first_seen, last_seen, observation_count, metadata, region_scope, last_iata, last_iata_at, region_scope_checked_at
 `
 
 type UpsertObserverParams struct {
@@ -8307,6 +8310,7 @@ func (q *Queries) UpsertObserver(ctx context.Context, arg UpsertObserverParams) 
 		&i.RegionScope,
 		&i.LastIata,
 		&i.LastIataAt,
+		&i.RegionScopeCheckedAt,
 	)
 	return i, err
 }
