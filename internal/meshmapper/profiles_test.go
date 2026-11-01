@@ -44,6 +44,15 @@ func TestProfileRevocationAndAccessChange(t *testing.T) {
 		if len(s.repeaters["YOW"]) != 0 {
 			t.Fatalf("HTTP %d kept revoked profiles", status)
 		}
+		if !s.rows["YOW"].cache.CheckedAt.IsZero() || s.rows["YOW"].cache.ETag != "" {
+			t.Fatal("revocation retained a cache validator")
+		}
+		f.status = 200
+		h.due("YOW")
+		h.refreshN(t, 1)
+		if len(s.repeaters["YOW"]) != 1 || f.ifNoneMatch[len(f.ifNoneMatch)-1] != "" {
+			t.Fatal("restored access reused a revoked validator")
+		}
 	}
 	f := newRepeaterSite(t)
 	s := newRepeaterMemoryStore("YOW")

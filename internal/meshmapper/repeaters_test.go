@@ -164,7 +164,7 @@ func (s *repeaterMemoryStore) SaveRepeaterSource(_ context.Context, key, url str
 	if repeaters != nil {
 		s.repeaters[key] = repeaters
 	}
-	if next.CheckedAt.IsZero() {
+	if next.CheckedAt.IsZero() && repeaters == nil {
 		old := s.rows[key]
 		next.CheckedAt, next.ETag = old.cache.CheckedAt, old.cache.ETag
 		if old.url != url {

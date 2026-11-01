@@ -1343,7 +1343,7 @@ SELECT n.*, ts.name AS default_scope_name,
   -- The most recently checked source wins when group sites list the same repeater.
   (SELECT m.data || jsonb_build_object('fetchedAt', (extract(epoch from s.checked_at) * 1000)::bigint, 'refreshFailed', s.last_error <> '')
    FROM meshmapper_repeaters m JOIN meshmapper_repeater_sources s ON s.source = m.source
-   WHERE m.public_key = n.public_key AND n.node_type = 2 AND s.checked_at IS NOT NULL
+   WHERE m.public_key = n.public_key AND s.checked_at IS NOT NULL
    ORDER BY s.checked_at DESC LIMIT 1)::jsonb AS meshmapper
 FROM nodes n
 LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id
@@ -2669,9 +2669,9 @@ INSERT INTO meshmapper_repeater_sources (source, url, etag, checked_at, attempte
 VALUES (@source, @url, sqlc.narg(etag)::text, sqlc.narg(checked_at)::timestamptz, @attempted_at, @next_attempt, @last_error)
 ON CONFLICT (source) DO UPDATE SET
     url = EXCLUDED.url,
-    etag = CASE WHEN meshmapper_repeater_sources.url = EXCLUDED.url
+    etag = CASE WHEN @clear_cached::boolean THEN NULL WHEN meshmapper_repeater_sources.url = EXCLUDED.url
         THEN COALESCE(EXCLUDED.etag, meshmapper_repeater_sources.etag) ELSE EXCLUDED.etag END,
-    checked_at = COALESCE(EXCLUDED.checked_at, meshmapper_repeater_sources.checked_at),
+    checked_at = CASE WHEN @clear_cached::boolean THEN NULL ELSE COALESCE(EXCLUDED.checked_at, meshmapper_repeater_sources.checked_at) END,
     attempted_at = EXCLUDED.attempted_at,
     next_attempt = EXCLUDED.next_attempt,
     last_error = EXCLUDED.last_error;
