@@ -145,6 +145,11 @@ status, backbone traffic share, advert width, radio presets and an uploaded
 neighbour table. `fetchedAt` is when Beacon fetched the list, not when the owner
 edited it. `refreshFailed` marks a failed subsequent refresh; absent fields remain
 unknown. The provider link points back to the cached record's region/group map.
+Some regions return `created_at` as a timezone-free SQL date string instead of
+documented epoch seconds. Beacon keeps the rest of that profile and omits the
+ambiguous registration instant. Incompatible optional metadata cannot discard
+valid site details; a nonempty response with no valid identities is a failed
+refresh, not an authoritative empty region.
 
 These fields do not overwrite Beacon's name/location, radio/clock measurements,
 scope repeat counters, topology, or telemetry. Uploaded neighbour entries are

@@ -9,6 +9,28 @@ import (
 	"time"
 )
 
+func TestProfileLegacyDateAndOptionalMetadata(t *testing.T) {
+	for _, suffix := range []string{
+		`,"created_at":"2026-01-01 12:34:56","enabled":1`,
+		`,"radios":"legacy metadata","created_at":1770000000`,
+		`,"enabled":"not a number"`,
+	} {
+		body := `[{"hex_id":"` + repeaterKey + `","hardware":"Site board","power":"1W"` + suffix + `}]`
+		rows, skipped, err := decodeRepeaters([]byte(body))
+		if err != nil || skipped != 0 || len(rows) != 1 || rows[0].Data.Site.Hardware == nil || *rows[0].Data.Site.Hardware != "Site board" || rows[0].Data.FirstSeen != nil {
+			t.Fatal("optional metadata discarded a valid site or invented an instant", rows, skipped, err)
+		}
+	}
+	for _, stamp := range []string{`1770000000`, `"1770000000"`, `"2026-02-02T02:40:00Z"`} {
+		if profileCreatedAt([]byte(stamp)) == nil {
+			t.Fatalf("unambiguous timestamp rejected: %s", stamp)
+		}
+	}
+	if _, _, err := decodeRepeaters([]byte(`[{"hex_id":"short"}]`)); err == nil {
+		t.Fatal("all-invalid response was accepted as an empty region")
+	}
+}
+
 func TestProfileEvidenceAndBounds(t *testing.T) {
 	rows, _, err := decodeRepeaters([]byte(repeaterDocExample))
 	if err != nil {
