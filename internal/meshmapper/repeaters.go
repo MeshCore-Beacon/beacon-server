@@ -350,27 +350,27 @@ func (r *Repeaters) log(s repeaterSource, action string, count, skipped int) {
 func repeatersEndpoint(site string) (string, bool) { return siteEndpoint(site, "get_repeaters.php") }
 
 type rawRepeater struct {
-	ID            string   `json:"id"`
-	Lat           *float64 `json:"lat"`
-	Lon           *float64 `json:"lon"`
-	HexID         string   `json:"hex_id"`
-	IATA          string   `json:"iata"`
-	Power         *string  `json:"power"`
-	Hardware      *string  `json:"hardware"`
-	Antenna       *string  `json:"antenna"`
-	HeightM       *float64 `json:"height_m"`
-	HeightASLM    *float64 `json:"height_asl_m"`
-	PowerSource   *string  `json:"power_source"`
-	SiteNotes     *string  `json:"site_notes"`
-	IsCarpeater   *int     `json:"is_carpeater"`
-	Admins        []string `json:"admins"`
-	Enabled       *int     `json:"enabled"`
-	CreatedAt     *int64   `json:"created_at"`
-	LastHeard     *int64   `json:"last_heard"`
-	AdvertBytes   *int     `json:"advert_bytes"`
-	Backbone      *int     `json:"backbone"`
-	BackboneShare *float64 `json:"backbone_share"`
-	PresetCurrent *string  `json:"preset_current"`
+	ID            string          `json:"id"`
+	Lat           *float64        `json:"lat"`
+	Lon           *float64        `json:"lon"`
+	HexID         string          `json:"hex_id"`
+	IATA          string          `json:"iata"`
+	Power         *string         `json:"power"`
+	Hardware      *string         `json:"hardware"`
+	Antenna       *string         `json:"antenna"`
+	HeightM       *float64        `json:"height_m"`
+	HeightASLM    *float64        `json:"height_asl_m"`
+	PowerSource   *string         `json:"power_source"`
+	SiteNotes     *string         `json:"site_notes"`
+	IsCarpeater   *int            `json:"is_carpeater"`
+	Admins        []string        `json:"admins"`
+	Enabled       *int            `json:"enabled"`
+	CreatedAt     json.RawMessage `json:"created_at"`
+	LastHeard     *int64          `json:"last_heard"`
+	AdvertBytes   *int            `json:"advert_bytes"`
+	Backbone      *int            `json:"backbone"`
+	BackboneShare *float64        `json:"backbone_share"`
+	PresetCurrent *string         `json:"preset_current"`
 	Radios        []struct {
 		Preset    string `json:"preset"`
 		LastSeen  *int64 `json:"last_seen"`
@@ -414,7 +414,25 @@ func decodeRepeaters(body []byte) (out []Repeater, skipped int, err error) {
 	seen := map[string]bool{}
 	for _, row := range rows {
 		var raw rawRepeater
-		if json.Unmarshal(row, &raw) != nil || len(raw.HexID) != 64 {
+		if err := json.Unmarshal(row, &raw); err != nil {
+			// Optional provider metadata evolves independently of the site profile.
+			// An incompatible extension must not discard otherwise valid site details.
+			var fields map[string]json.RawMessage
+			if json.Unmarshal(row, &fields) != nil || fields == nil {
+				skipped++
+				continue
+			}
+			for _, name := range []string{"id", "lat", "lon", "enabled", "created_at", "last_heard", "advert_bytes", "backbone", "backbone_share", "preset_current", "radios", "proven_neighbours"} {
+				delete(fields, name)
+			}
+			core, _ := json.Marshal(fields)
+			raw = rawRepeater{}
+			if json.Unmarshal(core, &raw) != nil {
+				skipped++
+				continue
+			}
+		}
+		if len(raw.HexID) != 64 {
 			skipped++
 			continue
 		}
@@ -434,7 +452,32 @@ func decodeRepeaters(body []byte) (out []Repeater, skipped int, err error) {
 		}
 		out = append(out, repeater)
 	}
+	if len(rows) > 0 && len(out) == 0 && skipped > 0 {
+		return nil, skipped, fmt.Errorf("repeater response has no valid full-key profiles")
+	}
 	return out, skipped, nil
+}
+
+// The API documents epoch seconds, but some regions return a SQL datetime string
+// without a timezone. Keep the profile and omit that ambiguous instant; never
+// pretend it was UTC. Explicit-offset timestamps and epoch values are usable.
+func profileCreatedAt(value json.RawMessage) *int64 {
+	var seconds int64
+	if json.Unmarshal(value, &seconds) == nil {
+		return millis(&seconds)
+	}
+	var stamp string
+	if json.Unmarshal(value, &stamp) != nil {
+		return nil
+	}
+	if seconds, err := strconv.ParseInt(stamp, 10, 64); err == nil {
+		return millis(&seconds)
+	}
+	if instant, err := time.Parse(time.RFC3339, stamp); err == nil {
+		seconds = instant.Unix()
+		return millis(&seconds)
+	}
+	return nil
 }
 
 func (raw rawRepeater) normalize() api.MeshMapperRepeater {
@@ -452,7 +495,7 @@ func (raw rawRepeater) normalize() api.MeshMapperRepeater {
 		Admins:          []string{},
 		Scopes:          []api.MeshMapperScope{},
 		ScopesCheckedAt: millis(raw.ScopesCheckedAt),
-		FirstSeen:       millis(raw.CreatedAt), LastHeard: millis(raw.LastHeard),
+		FirstSeen:       profileCreatedAt(raw.CreatedAt), LastHeard: millis(raw.LastHeard),
 		BackboneShare: within(raw.BackboneShare, 0, 1),
 	}
 	if raw.Enabled != nil && *raw.Enabled >= 0 && *raw.Enabled <= 3 {
