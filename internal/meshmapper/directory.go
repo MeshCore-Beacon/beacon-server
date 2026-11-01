@@ -6,6 +6,7 @@ package meshmapper
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -56,16 +57,17 @@ type DirectoryStore interface {
 
 // Directory caches MeshMapper's per-country zone lists, shared by the zones and scopes imports.
 type Directory struct {
-	mu      sync.Mutex
-	store   DirectoryStore
-	client  *http.Client
-	listURL string
-	lists   map[string]*zoneList
-	version int // bumped whenever a list is replaced
+	mu                sync.Mutex
+	store             DirectoryStore
+	client            *http.Client
+	listURL           string
+	lists             map[string]*zoneList
+	version           int      // bumped whenever a list is replaced
+	accessFingerprint [32]byte // private binding for profile caches; never logged or returned
 }
 
 func NewDirectory(store DirectoryStore, apiKey string) *Directory {
-	return &Directory{store: store, listURL: ZonesURL, lists: map[string]*zoneList{}, client: newClient(apiKey)}
+	return &Directory{store: store, listURL: ZonesURL, lists: map[string]*zoneList{}, client: newClient(apiKey), accessFingerprint: sha256.Sum256([]byte(apiKey))}
 }
 
 // Restore loads saved lists so a restart doesn't spend each country's daily request.

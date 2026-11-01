@@ -1,0 +1,17 @@
+[
+ "Sort",
+ "  Limit [InitPlan]",
+ "    Index Only Scan on packets p_1 using idx_packets_last_heard_hash scan=Forward",
+ "  Nested Loop (Left)",
+ "    Nested Loop (Left)",
+ "      Nested Loop (Left)",
+ "        Nested Loop",
+ "          CTE Scan",
+ "          Index Scan on packets p using packets_pkey scan=Forward",
+ "        Limit",
+ "          Sort",
+ "            Index Scan on packet_observations using idx_observations_packet scan=Forward",
+ "      Memoize",
+ "        Index Scan on observers o using observers_pkey scan=Forward",
+ "    Index Scan on transport_scopes ts using transport_scopes_pkey scan=Forward"
+]

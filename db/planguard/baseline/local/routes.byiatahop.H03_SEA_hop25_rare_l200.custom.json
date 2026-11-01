@@ -1,0 +1,5 @@
+[
+ "Limit",
+ "  Sort",
+ "    Index Scan on known_routes using idx_known_routes_hop_iata scan=Forward"
+]

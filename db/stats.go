@@ -91,8 +91,36 @@ func (s *Store) GetStatsPayloadBreakdown(ctx context.Context, iatas []string, si
 	return items, nil
 }
 
+// topNodesRows picks the top-nodes statement: GetTopNodesAll for every IATA, the probe for 1 to 32 distinct IATAs on
+// an hour boundary, otherwise GetTopNodes. All three return the same rows.
+func topNodesRows(ctx context.Context, q sqlc.Querier, iatas []string, from pgtype.Timestamptz, limit int32) ([]sqlc.GetTopNodesRow, error) {
+	switch {
+	case len(iatas) == 0:
+		rows, err := q.GetTopNodesAll(ctx, sqlc.GetTopNodesAllParams{Since: from, RowLimit: limit})
+		if err != nil {
+			return nil, err
+		}
+		out := make([]sqlc.GetTopNodesRow, len(rows))
+		for i, r := range rows {
+			out[i] = sqlc.GetTopNodesRow(r)
+		}
+		return out, nil
+	case useStatsProbe(iatas, from.Time):
+		rows, err := q.GetTopNodesProbe(ctx, sqlc.GetTopNodesProbeParams{Since: from, Iatas: iatas, RowLimit: limit})
+		if err != nil {
+			return nil, err
+		}
+		out := make([]sqlc.GetTopNodesRow, len(rows))
+		for i, r := range rows {
+			out[i] = sqlc.GetTopNodesRow(r)
+		}
+		return out, nil
+	}
+	return q.GetTopNodes(ctx, sqlc.GetTopNodesParams{Since: from, Iatas: iatas, RowLimit: limit})
+}
+
 func (s *Store) GetStatsTopNodes(ctx context.Context, iatas []string, since time.Time, limit int32) ([]api.TopNode, error) {
-	rows, err := s.q.GetTopNodes(ctx, sqlc.GetTopNodesParams{Since: rollupSince(since, 7*24*time.Hour), Iatas: iatas, RowLimit: limit})
+	rows, err := topNodesRows(ctx, s.q, iatas, rollupSince(since, 7*24*time.Hour), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -131,9 +159,22 @@ func (s *Store) GetStatsTopObservers(ctx context.Context, iatas []string, since 
 }
 
 func (s *Store) GetStatsTopAdvertisers(ctx context.Context, iatas []string, since time.Time, limit int32, sort api.AdvertiserSort) ([]api.TopAdvertiser, error) {
-	rows, err := s.q.GetStatsTopAdvertisers(ctx, sqlc.GetStatsTopAdvertisersParams{Sort: string(sort), Since: rollupSince(since, 24*time.Hour), Iatas: iatas, RowLimit: limit})
-	if err != nil {
-		return nil, err
+	from := rollupSince(since, 24*time.Hour)
+	var rows []sqlc.GetStatsTopAdvertisersRow
+	if useStatsProbe(iatas, from.Time) {
+		probeRows, err := s.q.GetStatsTopAdvertisersProbe(ctx, sqlc.GetStatsTopAdvertisersProbeParams{Sort: string(sort), Since: from, Iatas: iatas, RowLimit: limit})
+		if err != nil {
+			return nil, err
+		}
+		rows = make([]sqlc.GetStatsTopAdvertisersRow, len(probeRows))
+		for i, r := range probeRows {
+			rows[i] = sqlc.GetStatsTopAdvertisersRow(r)
+		}
+	} else {
+		var err error
+		if rows, err = s.q.GetStatsTopAdvertisers(ctx, sqlc.GetStatsTopAdvertisersParams{Sort: string(sort), Since: from, Iatas: iatas, RowLimit: limit}); err != nil {
+			return nil, err
+		}
 	}
 	items := make([]api.TopAdvertiser, 0, len(rows))
 	for _, v := range rows {
@@ -256,10 +297,24 @@ func (s *Store) GetScopeStats(ctx context.Context, iatas []string, since time.Ti
 	return items, nil
 }
 
+// GetStatsNodeTypes reads node_iatas only when filtering, so the unfiltered page never joins it.
 func (s *Store) GetStatsNodeTypes(ctx context.Context, iatas []string) ([]api.NodeTypeCount, error) {
-	rows, err := s.q.GetStatsNodeTypes(ctx, iatas)
-	if err != nil {
-		return nil, err
+	var rows []sqlc.GetStatsNodeTypesAllRow
+	if len(iatas) == 0 {
+		all, err := s.q.GetStatsNodeTypesAll(ctx)
+		if err != nil {
+			return nil, err
+		}
+		rows = all
+	} else {
+		filtered, err := s.q.GetStatsNodeTypesByIATAs(ctx, iatas)
+		if err != nil {
+			return nil, err
+		}
+		rows = make([]sqlc.GetStatsNodeTypesAllRow, 0, len(filtered))
+		for _, r := range filtered {
+			rows = append(rows, sqlc.GetStatsNodeTypesAllRow(r))
+		}
 	}
 	result := make([]api.NodeTypeCount, 0, len(rows))
 	for _, r := range rows {

@@ -78,7 +78,7 @@ func TestListKnownRoutes_CursorID(t *testing.T) {
 	var gotID int64
 	r := chi.NewRouter()
 	r.Get("/routes", listKnownRoutes(stubReader{
-		listKnownRoutes: func(_ context.Context, _ string, _ int32, cursor time.Time, cursorID int64, _ int32) ([]api.KnownRoute, error) {
+		listKnownRoutes: func(_ context.Context, _ []string, _ int32, cursor time.Time, cursorID int64, _ int32) ([]api.KnownRoute, error) {
 			gotCursor, gotID = cursor, cursorID
 			return nil, nil
 		},
@@ -110,7 +110,7 @@ func TestListKnownRoutes_CursorID(t *testing.T) {
 func TestListKnownRoutes_OK(t *testing.T) {
 	r := chi.NewRouter()
 	r.Get("/routes", listKnownRoutes(stubReader{
-		listKnownRoutes: func(_ context.Context, _ string, _ int32, _ time.Time, _ int64, _ int32) ([]api.KnownRoute, error) {
+		listKnownRoutes: func(_ context.Context, _ []string, _ int32, _ time.Time, _ int64, _ int32) ([]api.KnownRoute, error) {
 			return []api.KnownRoute{{IATA: "YVR"}}, nil
 		},
 	}))
@@ -119,6 +119,69 @@ func TestListKnownRoutes_OK(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+// iatas takes precedence and is parsed like /routes/search's; a lone iata reaches the store exactly as sent.
+func TestListKnownRoutes_IATAs(t *testing.T) {
+	var got []string
+	var gotHop, gotLimit int32
+	calls := 0
+	r := chi.NewRouter()
+	r.Get("/routes", listKnownRoutes(stubReader{
+		listKnownRoutes: func(_ context.Context, iatas []string, hop int32, _ time.Time, _ int64, limit int32) ([]api.KnownRoute, error) {
+			calls++
+			got, gotHop, gotLimit = iatas, hop, limit
+			return []api.KnownRoute{}, nil
+		},
+	}))
+	hundred := manyIATAs(maxRouteSearchIATAs)
+	for _, tt := range []struct {
+		query     string
+		code      int
+		want      []string
+		hop, limt int32
+	}{
+		{"", http.StatusOK, nil, 0, 50},
+		{"iata=SEA", http.StatusOK, []string{"SEA"}, 0, 50},
+		{"iata=sea", http.StatusOK, []string{"sea"}, 0, 50},
+		{"iata=SEAX", http.StatusOK, []string{"SEAX"}, 0, 50},
+		{"iatas=sea,KLS,%20pdx%20,SEA,", http.StatusOK, []string{"SEA", "KLS", "PDX"}, 0, 50},
+		{"iatas=KLS", http.StatusOK, []string{"KLS"}, 0, 50},
+		{"iatas=KLS,SEA&iata=YVR", http.StatusOK, []string{"KLS", "SEA"}, 0, 50},
+		{"iatas=&iata=YVR", http.StatusOK, []string{"YVR"}, 0, 50},
+		{"iatas=SEA,KLS&hopCount=3&limit=500", http.StatusOK, []string{"SEA", "KLS"}, 3, 200},
+		{"iatas=" + hundred, http.StatusOK, strings.Split(hundred, ","), 0, 50},
+		{"iatas=" + hundred + ",AAA", http.StatusOK, strings.Split(hundred, ","), 0, 50},
+		{"iatas=SEAX", http.StatusBadRequest, nil, 0, 0},
+		{"iatas=SEA,SE", http.StatusBadRequest, nil, 0, 0},
+		{"iatas=SEAX&iata=SEA", http.StatusBadRequest, nil, 0, 0},
+		{"iatas=,", http.StatusBadRequest, nil, 0, 0},
+		{"iatas=%20,%20", http.StatusBadRequest, nil, 0, 0},
+		{"iatas=" + manyIATAs(maxRouteSearchIATAs+1), http.StatusBadRequest, nil, 0, 0},
+		{"iatas=" + manyIATAs(200000), http.StatusBadRequest, nil, 0, 0},
+		{"iatas=SEA,KLS&limit=0", http.StatusBadRequest, nil, 0, 0},
+	} {
+		calls, got, gotHop, gotLimit = 0, nil, 0, 0
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/routes?"+tt.query, nil))
+		name := tt.query
+		if len(name) > 60 {
+			name = name[:60] + "..."
+		}
+		if w.Code != tt.code {
+			t.Errorf("%s: code %d, want %d (%s)", name, w.Code, tt.code, w.Body.String())
+			continue
+		}
+		if tt.code != http.StatusOK {
+			if calls != 0 {
+				t.Errorf("%s: the store ran on a 400", name)
+			}
+			continue
+		}
+		if calls != 1 || !slices.Equal(got, tt.want) || gotHop != tt.hop || gotLimit != tt.limt {
+			t.Errorf("%s: calls %d, iatas %v hop %d limit %d; want %v hop %d limit %d", name, calls, got, gotHop, gotLimit, tt.want, tt.hop, tt.limt)
+		}
 	}
 }
 

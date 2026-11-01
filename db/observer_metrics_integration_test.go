@@ -111,6 +111,10 @@ func TestObserverActivityRollupBacklogPostgres(t *testing.T) {
 func TestObserverMetricsPostgres(t *testing.T) {
 	ctx, tx := retentionTx(t)
 	applyBaseline(t, ctx, tx)
+	// The isolated legacy baseline must match the current generated observer row.
+	if _, err := tx.Exec(ctx, "ALTER TABLE observers ADD COLUMN region_scope_checked_at timestamptz"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := tx.Exec(ctx, `
  INSERT INTO observers (id,public_key) VALUES ('00000000-0000-0000-0000-000000000001','\x01');
  INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,last_heard_at,first_heard_at) SELECT int4send(i),4,0,1,'\x00','\x00',NOW()-interval '5 days',NOW()-interval '5 days' FROM generate_series(1,3) i;

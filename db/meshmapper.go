@@ -297,6 +297,7 @@ func (s *Store) SaveRepeaterSource(ctx context.Context, source, url string, cach
 	}
 	params := sqlc.SaveRepeaterSourceParams{
 		Source: source, Url: url, LastError: cache.LastError,
+		ClearCached: repeaters != nil && cache.CheckedAt.IsZero(),
 		CheckedAt:   pgtype.Timestamptz{Time: cache.CheckedAt, Valid: !cache.CheckedAt.IsZero()},
 		AttemptedAt: pgtype.Timestamptz{Time: cache.AttemptedAt, Valid: true},
 		NextAttempt: pgtype.Timestamptz{Time: cache.NextAttempt, Valid: true},

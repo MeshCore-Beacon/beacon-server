@@ -9,6 +9,7 @@ projects that make this possible:
   decoding
 - [paho.mqtt.golang](https://github.com/eclipse/paho.mqtt.golang): MQTT client
 - [pgx](https://github.com/jackc/pgx): PostgreSQL driver and connection pool
+- [prometheus/client_golang](https://github.com/prometheus/client_golang): Prometheus metrics on the admin listener
 - [sqlc](https://sqlc.dev): Type-safe SQL code generation
 - [chi](https://github.com/go-chi/chi): HTTP router
 - [go-chi/cors](https://github.com/go-chi/cors): CORS middleware for chi

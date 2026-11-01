@@ -6,14 +6,17 @@ package meshmapper
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -40,12 +43,14 @@ var repeaterIATA = regexp.MustCompile(`^[A-Z0-9]{3,8}$`)
 
 // Repeater is one imported repeater, keyed by its full public key.
 type Repeater struct {
-	Key  []byte
-	Data api.MeshMapperRepeater
+	Key     []byte
+	Data    api.MeshMapperRepeater
+	locator string
 }
 
 // RepeaterStore keys sources by group code, or by IATA for a region outside a group.
 type RepeaterStore interface {
+	PrepareRepeaterAccess(ctx context.Context, fingerprint string) (bool, error)
 	ListKnownIATAs(ctx context.Context) ([]string, error)
 	ListRepeaterSources(ctx context.Context) ([]Catalogue, error)
 	// SaveRepeaterSource records a fetch; non-nil repeaters also replace the source's list.
@@ -75,13 +80,14 @@ type Repeaters struct {
 	sources      map[string]*repeaterSource
 	pausedUntil  time.Time            // a 429 spends the key's shared budget, so every source waits
 	warned       map[string]time.Time // invalid site URL, logged once per interval
+	iatas        []string
 }
 
 // NewRepeaters restores fetch state without HTTP requests. Disabled, it drops every
 // imported repeater. onChange runs whenever node detail may have changed.
 func NewRepeaters(ctx context.Context, cfg config.MeshMapperRepeatersConfig, store RepeaterStore, dir *Directory, onChange func(context.Context)) (*Repeaters, error) {
 	r := &Repeaters{store: store, dir: dir, repeatersURL: repeatersEndpoint, interval: cfg.Interval(), onChange: onChange,
-		seen: map[string]bool{}, sources: map[string]*repeaterSource{}, warned: map[string]time.Time{}, client: dir.client}
+		seen: map[string]bool{}, sources: map[string]*repeaterSource{}, warned: map[string]time.Time{}, client: dir.client, iatas: slices.Clone(cfg.IATAs)}
 	if !cfg.Enabled {
 		cleared, err := store.ClearRepeaters(ctx)
 		if err != nil {
@@ -92,11 +98,25 @@ func NewRepeaters(ctx context.Context, cfg config.MeshMapperRepeatersConfig, sto
 		}
 		return r, nil
 	}
+	slices.Sort(r.iatas)
+	r.iatas = slices.Compact(r.iatas)
+	access := sha256.Sum256([]byte(fmt.Sprintf("%x:%s", dir.accessFingerprint, strings.Join(r.iatas, ","))))
+	changed, err := store.PrepareRepeaterAccess(ctx, fmt.Sprintf("%x", access))
+	if err != nil {
+		return nil, fmt.Errorf("prepare MeshMapper profile access: %w", err)
+	}
+	if changed {
+		r.changed(ctx)
+	}
 	saved, err := store.ListRepeaterSources(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("restore repeater sources: %w", err)
 	}
 	for _, cat := range saved {
+		// An interrupted/failed replacement cannot safely validate a retained list.
+		if cat.LastError != "" {
+			cat.ETag = ""
+		}
 		s := &repeaterSource{key: cat.IATA, url: cat.URL, cache: cat.Cache}
 		r.sources[s.key] = s
 		r.log(*s, "restored", -1, 0)
@@ -110,6 +130,9 @@ func NewRepeaters(ctx context.Context, cfg config.MeshMapperRepeatersConfig, sto
 }
 
 func (r *Repeaters) track(iatas []string) {
+	if len(r.iatas) > 0 {
+		iatas = r.iatas
+	}
 	for _, iata := range iatas {
 		if r.seen[iata] {
 			continue
@@ -233,12 +256,29 @@ func (r *Repeaters) refresh(ctx context.Context, s *repeaterSource, now time.Tim
 		if repeaters, skipped, err = decodeRepeaters(body); err != nil {
 			update.LastError = "invalid response"
 		}
+		if len(r.iatas) > 0 {
+			repeaters = slices.DeleteFunc(repeaters, func(row Repeater) bool { return !slices.Contains(r.iatas, row.Data.IATA) })
+		}
+		for i := range repeaters {
+			// The URL is derived only from the validated provider endpoint and full-key record.
+			if u, err := url.Parse(s.url); err == nil && trustedEndpoint(u) {
+				u.Path, u.RawQuery = "/", ""
+				if repeaters[i].locator != "" {
+					u.RawQuery = url.Values{"repeater": {repeaters[i].locator}, "preset": {"all"}}.Encode()
+				}
+				repeaters[i].Data.ProfileURL = u.String()
+			}
+		}
 	case status == http.StatusNotModified:
 		if s.cache.CheckedAt.IsZero() {
 			update.LastError = "304 without cached list"
 		}
 	default:
 		update.LastError = statusProblem(status, header, now, &retryAt)
+		if status == http.StatusUnauthorized || status == http.StatusForbidden {
+			repeaters = []Repeater{} // revoked access must not continue serving an old profile
+			s.cache.CheckedAt, s.cache.ETag = time.Time{}, ""
+		}
 	}
 	if update.LastError == "" {
 		etag := header.Get("ETag")
@@ -256,7 +296,7 @@ func (r *Repeaters) refresh(ctx context.Context, s *repeaterSource, now time.Tim
 		if retryAt.After(update.NextAttempt) {
 			update.NextAttempt = retryAt
 		}
-		if status == http.StatusTooManyRequests {
+		if status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable && !retryAt.IsZero() {
 			r.pausedUntil = update.NextAttempt
 		}
 	}
@@ -273,8 +313,8 @@ func (r *Repeaters) refresh(ctx context.Context, s *repeaterSource, now time.Tim
 	count := -1
 	if repeaters != nil {
 		count = len(repeaters)
-		r.changed(ctx)
 	}
+	r.changed(ctx) // fetch status and freshness can change even when the payload did not
 	r.log(*s, "checked", count, skipped)
 	return nil
 }
@@ -310,18 +350,39 @@ func (r *Repeaters) log(s repeaterSource, action string, count, skipped int) {
 func repeatersEndpoint(site string) (string, bool) { return siteEndpoint(site, "get_repeaters.php") }
 
 type rawRepeater struct {
-	HexID       string   `json:"hex_id"`
-	IATA        string   `json:"iata"`
-	Power       *string  `json:"power"`
-	Hardware    *string  `json:"hardware"`
-	Antenna     *string  `json:"antenna"`
-	HeightM     *float64 `json:"height_m"`
-	HeightASLM  *float64 `json:"height_asl_m"`
-	PowerSource *string  `json:"power_source"`
-	SiteNotes   *string  `json:"site_notes"`
-	IsCarpeater *int     `json:"is_carpeater"`
-	Admins      []string `json:"admins"`
-	Scopes      []struct {
+	ID            string          `json:"id"`
+	Lat           *float64        `json:"lat"`
+	Lon           *float64        `json:"lon"`
+	HexID         string          `json:"hex_id"`
+	IATA          string          `json:"iata"`
+	Power         *string         `json:"power"`
+	Hardware      *string         `json:"hardware"`
+	Antenna       *string         `json:"antenna"`
+	HeightM       *float64        `json:"height_m"`
+	HeightASLM    *float64        `json:"height_asl_m"`
+	PowerSource   *string         `json:"power_source"`
+	SiteNotes     *string         `json:"site_notes"`
+	IsCarpeater   *int            `json:"is_carpeater"`
+	Admins        []string        `json:"admins"`
+	Enabled       *int            `json:"enabled"`
+	CreatedAt     json.RawMessage `json:"created_at"`
+	LastHeard     *int64          `json:"last_heard"`
+	AdvertBytes   *int            `json:"advert_bytes"`
+	Backbone      *int            `json:"backbone"`
+	BackboneShare *float64        `json:"backbone_share"`
+	PresetCurrent *string         `json:"preset_current"`
+	Radios        []struct {
+		Preset    string `json:"preset"`
+		LastSeen  *int64 `json:"last_seen"`
+		Witnesses *int   `json:"witnesses"`
+	} `json:"radios"`
+	Neighbors []struct {
+		Key      string   `json:"key"`
+		Resolved *int     `json:"resolved"`
+		SNR      *float64 `json:"snr"`
+		HeardAt  *int64   `json:"heard_at"`
+	} `json:"proven_neighbours"`
+	Scopes []struct {
 		Scope        string  `json:"scope"`
 		ObservedAt   *int64  `json:"observed_at"`
 		ObservedPkts *int64  `json:"observed_pkts"`
@@ -353,7 +414,25 @@ func decodeRepeaters(body []byte) (out []Repeater, skipped int, err error) {
 	seen := map[string]bool{}
 	for _, row := range rows {
 		var raw rawRepeater
-		if json.Unmarshal(row, &raw) != nil || len(raw.HexID) != 64 {
+		if err := json.Unmarshal(row, &raw); err != nil {
+			// Optional provider metadata evolves independently of the site profile.
+			// An incompatible extension must not discard otherwise valid site details.
+			var fields map[string]json.RawMessage
+			if json.Unmarshal(row, &fields) != nil || fields == nil {
+				skipped++
+				continue
+			}
+			for _, name := range []string{"id", "lat", "lon", "enabled", "created_at", "last_heard", "advert_bytes", "backbone", "backbone_share", "preset_current", "radios", "proven_neighbours"} {
+				delete(fields, name)
+			}
+			core, _ := json.Marshal(fields)
+			raw = rawRepeater{}
+			if json.Unmarshal(core, &raw) != nil {
+				skipped++
+				continue
+			}
+		}
+		if len(raw.HexID) != 64 {
 			skipped++
 			continue
 		}
@@ -363,9 +442,42 @@ func decodeRepeaters(body []byte) (out []Repeater, skipped int, err error) {
 			continue
 		}
 		seen[string(key)] = true
-		out = append(out, Repeater{Key: key, Data: raw.normalize()})
+		repeater := Repeater{Key: key, Data: raw.normalize()}
+		if lat, lon := within(raw.Lat, -90, 90), within(raw.Lon, -180, 180); lat != nil && lon != nil && (*lat != 0 || *lon != 0) {
+			short := strings.ToUpper(raw.ID)
+			if (len(short) != 2 && len(short) != 4 && len(short) != 6) || !strings.HasPrefix(strings.ToUpper(raw.HexID), short) {
+				short = strings.ToUpper(raw.HexID[:6])
+			}
+			repeater.locator = fmt.Sprintf("%s,%.5f,%.5f", short, *lat, *lon)
+		}
+		out = append(out, repeater)
+	}
+	if len(rows) > 0 && len(out) == 0 && skipped > 0 {
+		return nil, skipped, fmt.Errorf("repeater response has no valid full-key profiles")
 	}
 	return out, skipped, nil
+}
+
+// The API documents epoch seconds, but some regions return a SQL datetime string
+// without a timezone. Keep the profile and omit that ambiguous instant; never
+// pretend it was UTC. Explicit-offset timestamps and epoch values are usable.
+func profileCreatedAt(value json.RawMessage) *int64 {
+	var seconds int64
+	if json.Unmarshal(value, &seconds) == nil {
+		return millis(&seconds)
+	}
+	var stamp string
+	if json.Unmarshal(value, &stamp) != nil {
+		return nil
+	}
+	if seconds, err := strconv.ParseInt(stamp, 10, 64); err == nil {
+		return millis(&seconds)
+	}
+	if instant, err := time.Parse(time.RFC3339, stamp); err == nil {
+		seconds = instant.Unix()
+		return millis(&seconds)
+	}
+	return nil
 }
 
 func (raw rawRepeater) normalize() api.MeshMapperRepeater {
@@ -383,6 +495,41 @@ func (raw rawRepeater) normalize() api.MeshMapperRepeater {
 		Admins:          []string{},
 		Scopes:          []api.MeshMapperScope{},
 		ScopesCheckedAt: millis(raw.ScopesCheckedAt),
+		FirstSeen:       profileCreatedAt(raw.CreatedAt), LastHeard: millis(raw.LastHeard),
+		BackboneShare: within(raw.BackboneShare, 0, 1),
+	}
+	if raw.Enabled != nil && *raw.Enabled >= 0 && *raw.Enabled <= 3 {
+		r.Status = []string{"disabled", "active", "ambiguous", "inactive"}[*raw.Enabled]
+	}
+	if raw.AdvertBytes != nil && *raw.AdvertBytes >= 1 && *raw.AdvertBytes <= 3 {
+		r.AdvertBytes = raw.AdvertBytes
+	}
+	if raw.Backbone != nil && (*raw.Backbone == 0 || *raw.Backbone == 1) {
+		v := *raw.Backbone == 1
+		r.Backbone = &v
+	}
+	if raw.PresetCurrent != nil && validPreset(*raw.PresetCurrent) {
+		r.CurrentPreset = raw.PresetCurrent
+	}
+	for _, radio := range raw.Radios {
+		if len(r.Radios) >= 16 || !validPreset(radio.Preset) || slices.ContainsFunc(r.Radios, func(v api.MeshMapperRadio) bool { return v.Preset == radio.Preset }) {
+			continue
+		}
+		v := api.MeshMapperRadio{Preset: radio.Preset, LastSeen: millis(radio.LastSeen)}
+		if radio.Witnesses != nil && *radio.Witnesses >= 0 && *radio.Witnesses <= 16 {
+			v.Witnesses = radio.Witnesses
+		}
+		r.Radios = append(r.Radios, v)
+	}
+	for _, neighbor := range raw.Neighbors {
+		key := strings.ToUpper(neighbor.Key)
+		if len(r.Neighbors) >= 128 || (len(key) != 16 && len(key) != 64) || slices.ContainsFunc(r.Neighbors, func(v api.MeshMapperNeighbor) bool { return v.Key == key }) {
+			continue
+		}
+		if _, err := hex.DecodeString(key); err != nil {
+			continue
+		}
+		r.Neighbors = append(r.Neighbors, api.MeshMapperNeighbor{Key: key, Resolved: len(key) == 64 && neighbor.Resolved != nil && *neighbor.Resolved == 1, SNR: within(neighbor.SNR, -40, 40), HeardAt: millis(neighbor.HeardAt)})
 	}
 	if repeaterIATA.MatchString(raw.IATA) {
 		r.IATA = raw.IATA
@@ -413,6 +560,20 @@ func (raw rawRepeater) normalize() api.MeshMapperRepeater {
 		}
 	}
 	return r
+}
+
+func validPreset(preset string) bool {
+	if len(preset) > 48 {
+		return false
+	}
+	parts := strings.Split(preset, ",")
+	if len(parts) != 3 {
+		return false
+	}
+	freq, e1 := strconv.ParseFloat(parts[0], 64)
+	bw, e2 := strconv.ParseFloat(parts[1], 64)
+	sf, e3 := strconv.Atoi(parts[2])
+	return e1 == nil && e2 == nil && e3 == nil && freq >= 100 && freq <= 3000 && bw > 0 && bw <= 1000 && sf >= 5 && sf <= 12
 }
 
 // text trims admin-entered text and drops it when empty, over-long or carrying control
