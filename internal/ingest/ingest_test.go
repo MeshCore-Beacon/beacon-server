@@ -6,7 +6,6 @@ package ingest
 import (
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"testing"
@@ -18,39 +17,6 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
 	"github.com/google/uuid"
 )
-
-func TestParseNumber_Float(t *testing.T) {
-	raw := json.RawMessage(`3.14`)
-	if parseNumber(raw) != 3.14 {
-		t.Errorf("expected 3.14, got %f", parseNumber(raw))
-	}
-}
-
-func TestParseNumber_QuotedString(t *testing.T) {
-	raw := json.RawMessage(`"42.5"`)
-	if parseNumber(raw) != 42.5 {
-		t.Errorf("expected 42.5, got %f", parseNumber(raw))
-	}
-}
-
-func TestParseNumber_Empty(t *testing.T) {
-	if parseNumber(json.RawMessage(``)) != 0 {
-		t.Error("expected 0 for empty input")
-	}
-}
-
-func TestParseNumber_Invalid(t *testing.T) {
-	if parseNumber(json.RawMessage(`"notanumber"`)) != 0 {
-		t.Error("expected 0 for unparseable string")
-	}
-}
-
-func TestParseNumber_Integer(t *testing.T) {
-	raw := json.RawMessage(`7`)
-	if parseNumber(raw) != 7 {
-		t.Errorf("expected 7, got %f", parseNumber(raw))
-	}
-}
 
 func TestNormalizeObserverType_OrgPrefix(t *testing.T) {
 	if normalizeObserverType("meshcore-dev/meshcore-ha") != "meshcore-ha" {
@@ -190,6 +156,20 @@ type stubDB struct {
 	undecryptedByHash          []UndecryptedPacket
 	backfillHashes             [][]byte
 	dbHook                     func() // runs in UpsertChannelIATA, the first DB call after InsertObservation
+	upsertChannelErr           error
+	addCalls                   []addCall
+	addErr                     error
+}
+
+// addCall is one AddChannelMessageIATA call.
+type addCall struct {
+	hash string
+	iata string
+}
+
+func (s *stubDB) AddChannelMessageIATA(_ context.Context, packetHash []byte, iata string) (bool, error) {
+	s.addCalls = append(s.addCalls, addCall{string(packetHash), iata})
+	return false, s.addErr
 }
 
 type setCapabilityCall struct {
@@ -266,6 +246,9 @@ func (s *stubDB) GetObserverScopes(_ context.Context, _ uuid.UUID) ([]string, er
 func (s *stubDB) ResolvePathHashes(_ context.Context, _ string, _ [][]byte) (map[string][]api.ResolvedPathEntry, error) {
 	return nil, nil
 }
+func (s *stubDB) ResolveTracePathHashes(_ context.Context, _ string, _ [][]byte) (map[string][]api.ResolvedPathEntry, error) {
+	return nil, nil
+}
 
 func (s *stubDB) ResolveEndpointHashes(_ context.Context, _ string, _ [][]byte) (map[string][]api.ResolvedPathEntry, error) {
 	return nil, nil
@@ -273,7 +256,7 @@ func (s *stubDB) ResolveEndpointHashes(_ context.Context, _ string, _ [][]byte) 
 
 func (s *stubDB) UpsertChannel(_ context.Context, _ []byte, _ []byte, _, _ string) (int, error) {
 	s.upsertChannelCalls++
-	return 0, nil
+	return 0, s.upsertChannelErr
 }
 
 func (s *stubDB) UpsertChannelHashOnly(_ context.Context, _ []byte) (int, error) {
@@ -393,4 +376,8 @@ func TestRunCapabilityDetection_NoNodes_DoesNothing(t *testing.T) {
 	if len(db.setCapabilityCalls) != 0 {
 		t.Errorf("expected no capability calls for empty node list, got %d", len(db.setCapabilityCalls))
 	}
+}
+
+func (s *stubDB) RecordScopeObservation(context.Context, ScopeObservation) error {
+	return nil
 }

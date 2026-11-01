@@ -33,21 +33,23 @@ func RegionsRouter(reader api.Reader) http.Handler {
 
 // listRegions godoc
 //
-//	@Summary	List all regions
-//	@Tags		Regions
-//	@Produce	json
-//	@Success	200	{array}		api.RegionSummary
-//	@Failure	500	{object}	handlers.APIError
-//	@Router		/regions [get]
+//	@Summary		List all regions
+//	@Description	Each region carries its detail and member IATAs, the same as GET /regions/{regionId}.
+//	@Tags			Regions
+//	@Produce		json
+//	@Success		200	{array}		api.Region
+//	@Failure		500	{object}	handlers.APIError
+//	@Failure		503	{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
+//	@Router			/regions [get]
 func listRegions(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		regions, err := reader.ListRegions(r.Context())
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		if regions == nil {
-			regions = []api.RegionSummary{}
+			regions = []api.Region{}
 		}
 		respond(w, http.StatusOK, regions)
 	}
@@ -63,6 +65,7 @@ func listRegions(reader api.Reader) http.HandlerFunc {
 //	@Failure	400			{object}	handlers.APIError
 //	@Failure	404			{object}	handlers.APIError
 //	@Failure	500			{object}	handlers.APIError
+//	@Failure	503			{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/regions/{regionId} [get]
 func getRegion(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -78,7 +81,7 @@ func getRegion(reader api.Reader) http.HandlerFunc {
 			respondError(w, http.StatusNotFound, "region not found")
 			return
 		case err != nil:
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, region)
@@ -203,11 +206,11 @@ func resolveRegionIATAs(ctx context.Context, regionID, regionSlug string, reader
 }
 
 // respondRegionError reports an unknown or malformed region filter as 400 and a
-// failed lookup as a retryable 500.
+// failed lookup through respondReaderError.
 func respondRegionError(w http.ResponseWriter, err error) {
 	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, strconv.ErrSyntax) || errors.Is(err, strconv.ErrRange) {
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	respondError(w, http.StatusInternalServerError, "internal server error")
+	respondReaderError(w, err, "internal server error")
 }

@@ -43,7 +43,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -86,6 +85,7 @@ type Config struct {
 // DB is the minimal database interface the ingest pipeline depends on.
 // Wire in your real *pgxpool.Pool implementation here.
 type DB interface {
+	RecordScopeObservation(ctx context.Context, observation ScopeObservation) error
 	// UpsertObserver upserts the observers row keyed on pubkey, and returns
 	// the Observer ID, Display Name and an error if any.
 	UpsertObserver(ctx context.Context, pubkey []byte, iata string) (uuid.UUID, string, error)
@@ -136,6 +136,10 @@ type DB interface {
 	// InsertChannelMessage stores a decrypted group text message. Returns the inserted message, nil for a duplicate, and an error.
 	InsertChannelMessage(ctx context.Context, m InsertChannelMessageParams) (*InsertedChannelMessage, error)
 
+	// AddChannelMessageIATA records iata as a site of the packet's message; a no-op when the packet has none.
+	// found says whether the packet has a committed message (its site is then recorded).
+	AddChannelMessageIATA(ctx context.Context, packetHash []byte, iata string) (found bool, err error)
+
 	// UpdateObserverStatus updates the observer row from a /status message. Returns the OberserID
 	// and any error.
 	UpdateObserverStatus(ctx context.Context, p UpdateObserverStatusParams) (uuid.UUID, error)
@@ -158,6 +162,7 @@ type DB interface {
 
 	// ResolvePathHashes returns a list of node UUIDs for the given path hash prefixes and IATA.
 	ResolvePathHashes(ctx context.Context, iata string, hashes [][]byte) (map[string][]api.ResolvedPathEntry, error)
+	ResolveTracePathHashes(ctx context.Context, iata string, hashes [][]byte) (map[string][]api.ResolvedPathEntry, error)
 
 	// ResolveEndpointHashes matches one-byte logical endpoints, including companions.
 	ResolveEndpointHashes(ctx context.Context, iata string, hashes [][]byte) (map[string][]api.ResolvedPathEntry, error)
@@ -173,7 +178,7 @@ type DB interface {
 	UpsertChannelHashOnly(ctx context.Context, channelHash []byte) (int, error)
 
 	// ListUndecryptedGroupTextPackets returns GRP_TXT packets never successfully decrypted --
-	// used by BackfillChannelMessages to retry them against the current keystore at boot.
+	// used by DecryptBackfill to retry them against the current keystore after boot.
 	ListUndecryptedGroupTextPackets(ctx context.Context) ([]UndecryptedPacket, error)
 
 	// ListUndecryptedGroupTextPacketsByHash limits that scan to channels that just gained a key.
@@ -478,27 +483,6 @@ func (w *Worker) broadcastPacketObservation(iata string, payloadType uint8, evt 
 		return
 	}
 	w.hub.Broadcast(out)
-}
-
-// parseNumber handles RSSI and SNR fields that different observer types send as
-// either a bare JSON number (e.g. -108) or a quoted string (e.g. "-108").
-// Returns 0 if the value is missing or unparseable.
-func parseNumber(raw json.RawMessage) float64 {
-	if len(raw) == 0 {
-		return 0
-	}
-	// try unquoted number first
-	var f float64
-	if err := json.Unmarshal(raw, &f); err == nil {
-		return f
-	}
-	// try quoted string
-	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
-		f, _ = strconv.ParseFloat(s, 64)
-		return f
-	}
-	return 0
 }
 
 func inferObserverType(source, clientVersion string) string {

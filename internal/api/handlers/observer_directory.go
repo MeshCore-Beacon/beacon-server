@@ -36,6 +36,7 @@ import (
 // @Success 200 {object} api.ObserverDirectory
 // @Failure 400 {object} handlers.APIError
 // @Failure 500 {object} handlers.APIError
+// @Failure 503 {object} handlers.APIError "The read took too long: retry after Retry-After seconds"
 // @Router /observers/directory [get]
 func listObserverDirectory(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -132,7 +133,7 @@ func listObserverDirectory(reader api.Reader) http.HandlerFunc {
 		page, err := reader.ListObserverDirectory(r.Context(), q)
 		w.Header().Set("Cache-Control", "no-store")
 		if err != nil {
-			respondError(w, 500, "failed to get observer directory")
+			respondReaderError(w, err, "failed to get observer directory")
 			return
 		}
 		respond(w, 200, page)

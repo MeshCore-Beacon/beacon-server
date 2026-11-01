@@ -49,11 +49,15 @@ FROM generate_series(1,9) i;`); err != nil {
 	store := &Store{q: sqlc.New(tx)}
 	for _, iata := range []string{"", "YYZ"} {
 		t.Run("iata="+iata, func(t *testing.T) {
+			var iatas []string
+			if iata != "" {
+				iatas = []string{iata}
+			}
 			var got []int64
 			var cursor time.Time
 			var cursorID int64
 			for page := 0; page < 10; page++ {
-				routes, err := store.ListKnownRoutes(ctx, iata, 0, cursor, cursorID, 3)
+				routes, err := store.ListKnownRoutes(ctx, iatas, 0, cursor, cursorID, 3)
 				if err != nil {
 					t.Fatal(err)
 				}

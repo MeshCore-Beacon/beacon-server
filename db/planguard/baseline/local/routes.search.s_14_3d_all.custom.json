@@ -1,0 +1,6 @@
+[
+ "Limit",
+ "  Sort",
+ "    Bitmap Heap Scan on known_routes kr",
+ "      Bitmap Index Scan using idx_known_routes_node_ids"
+]
