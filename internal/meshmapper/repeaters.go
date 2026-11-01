@@ -113,6 +113,10 @@ func NewRepeaters(ctx context.Context, cfg config.MeshMapperRepeatersConfig, sto
 		return nil, fmt.Errorf("restore repeater sources: %w", err)
 	}
 	for _, cat := range saved {
+		// An interrupted/failed replacement cannot safely validate a retained list.
+		if cat.LastError != "" {
+			cat.ETag = ""
+		}
 		s := &repeaterSource{key: cat.IATA, url: cat.URL, cache: cat.Cache}
 		r.sources[s.key] = s
 		r.log(*s, "restored", -1, 0)
@@ -273,6 +277,7 @@ func (r *Repeaters) refresh(ctx context.Context, s *repeaterSource, now time.Tim
 		update.LastError = statusProblem(status, header, now, &retryAt)
 		if status == http.StatusUnauthorized || status == http.StatusForbidden {
 			repeaters = []Repeater{} // revoked access must not continue serving an old profile
+			s.cache.CheckedAt, s.cache.ETag = time.Time{}, ""
 		}
 	}
 	if update.LastError == "" {

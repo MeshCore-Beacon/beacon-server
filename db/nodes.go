@@ -282,7 +282,7 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 			node.IATAs = []api.NodeIATA{}
 		}
 	}
-	if len(row.Meshmapper) > 0 {
+	if row.NodeType == 2 && len(row.Meshmapper) > 0 {
 		var mm api.MeshMapperRepeater
 		if err := json.Unmarshal(row.Meshmapper, &mm); err != nil {
 			slog.Error("store: failed to unmarshal MeshMapper repeater", "component", "db", "error", err)

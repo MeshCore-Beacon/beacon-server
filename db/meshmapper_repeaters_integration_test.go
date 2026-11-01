@@ -134,6 +134,16 @@ func TestMeshMapperRepeatersPostgres(t *testing.T) {
 	}
 
 	save("YOW", now.Add(4*time.Minute), []meshmapper.Repeater{{Key: keyB, Data: api.MeshMapperRepeater{Admins: []string{}, Scopes: []api.MeshMapperScope{}}}})
+	if err := store.SaveRepeaterSource(ctx, "YOW", "https://yow.meshmapper.net/get_repeaters.php", meshmapper.Cache{AttemptedAt: now, NextAttempt: now.Add(time.Hour), LastError: "permission denied (HTTP 403)"}, []meshmapper.Repeater{}); err != nil {
+		t.Fatal(err)
+	}
+	denied, _ := store.ListRepeaterSources(ctx)
+	for _, source := range denied {
+		if source.IATA == "YOW" && (!source.CheckedAt.IsZero() || source.ETag != "" || source.NextAttempt.IsZero()) {
+			t.Fatal("revoked profile retained validator or lost cooldown")
+		}
+	}
+	save("YOW", now.Add(4*time.Minute), []meshmapper.Repeater{{Key: keyB, Data: api.MeshMapperRepeater{Admins: []string{}, Scopes: []api.MeshMapperScope{}}}})
 	if cleared, err := store.ClearRepeaters(ctx); err != nil || !cleared || rows() != 0 {
 		t.Fatal("clear", cleared, err)
 	}
