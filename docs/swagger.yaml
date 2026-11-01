@@ -387,23 +387,67 @@ definitions:
       updatedAt:
         type: integer
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperNeighbor:
+    properties:
+      heardAt:
+        type: integer
+      key:
+        type: string
+      resolved:
+        type: boolean
+      snr:
+        type: number
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperRadio:
+    properties:
+      lastSeen:
+        type: integer
+      preset:
+        type: string
+      witnesses:
+        type: integer
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperRepeater:
     properties:
       admins:
         items:
           type: string
         type: array
+      advertBytes:
+        type: integer
+      backbone:
+        type: boolean
+      backboneShare:
+        type: number
       carpeater:
         description: 'mobile repeater: its position moves'
         type: boolean
+      currentPreset:
+        type: string
       defaultScope:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperDefaultScope'
       fetchedAt:
         description: when Beacon last fetched this list
         type: integer
+      firstSeen:
+        type: integer
       iata:
         description: region of its latest advert, per MeshMapper
         type: string
+      lastHeard:
+        type: integer
+      neighbors:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperNeighbor'
+        type: array
+      profileUrl:
+        type: string
+      radios:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperRadio'
+        type: array
+      refreshFailed:
+        type: boolean
       scopes:
         items:
           $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperScope'
@@ -413,6 +457,8 @@ definitions:
         type: integer
       site:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperSite'
+      status:
+        type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperScope:
     properties:

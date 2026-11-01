@@ -784,9 +784,9 @@ SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.locat
    FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas,
   (SELECT COUNT(DISTINCT nn.neighbor_id) FROM node_neighbors nn WHERE nn.node_id = n.id)::bigint AS known_neighbor_count,
   -- The most recently checked source wins when group sites list the same repeater.
-  (SELECT m.data || jsonb_build_object('fetchedAt', (extract(epoch from s.checked_at) * 1000)::bigint)
+  (SELECT m.data || jsonb_build_object('fetchedAt', (extract(epoch from s.checked_at) * 1000)::bigint, 'refreshFailed', s.last_error <> '')
    FROM meshmapper_repeaters m JOIN meshmapper_repeater_sources s ON s.source = m.source
-   WHERE m.public_key = n.public_key AND s.checked_at IS NOT NULL
+   WHERE m.public_key = n.public_key AND n.node_type = 2 AND s.checked_at IS NOT NULL
    ORDER BY s.checked_at DESC LIMIT 1)::jsonb AS meshmapper
 FROM nodes n
 LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id

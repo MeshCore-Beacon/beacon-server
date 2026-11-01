@@ -85,10 +85,12 @@ Requests are restricted to those HTTPS MeshMapper endpoints and never follow
 redirects. Coverage consumers keep their separate keys, scopes, quotas, and
 supported `?key=` authentication; this client does not call `coverage.php`.
 
-Missing keys are reported as unconfigured without stopping Beacon or deleting
-cached imports. Failed refreshes record `last_error`, retain the last successful
-data and freshness timestamp, and report 401 as an authentication failure or
-403 as a permission failure. Inspect the `meshmapper.zones`, `meshmapper.scopes`,
+Missing keys are reported as unconfigured without stopping Beacon. Repeater
+profiles are bound to the credential and selected import areas: changing either
+discards the old profiles and ETags while preserving request cooldowns. A 401/403
+also removes that source's profiles. Temporary failures retain the last successful
+profiles with a failed-refresh indicator. Other imports retain their existing cache
+policy. Inspect the `meshmapper.zones`, `meshmapper.scopes`,
 `meshmapper.channels`, and `meshmapper.repeaters` logs for freshness and the next attempt. No anonymous
 fallback occurs. Existing refresh limits still apply, including longer
 `Retry-After` delays on 429/503.
@@ -106,6 +108,56 @@ authentication before the app rollout; repeater enforcement waits for app 1.4.1
 and its forced update. Key issuance, permissions, quotas, and enforcement switches
 remain MeshMapper Server work, tracked in
 [MeshMapper_Server#431](https://github.com/MeshMapper/MeshMapper_Server/issues/431).
+
+### Repeater profiles in node details
+
+Ask the regional or group MeshMapper administrator for a dedicated **integration
+key** assigned to the IATAs your Beacon serves. In MeshMapper's admin panel,
+**User Settings → API Access** creates a key with a project description; the
+administrator should grant the region-directory and repeater read endpoints.
+See the current [key instructions](https://wiki.meshmapper.net/api-keys/) and
+[repeater API contract](https://wiki.meshmapper.net/repeaters-api/). Group exports
+are still filtered by the integration key's authorized members. Beacon cannot
+grant or widen those permissions.
+
+Put the credential in the private `MESHMAPPER_API_KEY` environment setting, then
+enable this optional import in the server configuration:
+
+```yaml
+meshmapper:
+  repeaters:
+    enabled: true
+    refresh_interval: 6h
+    iatas: [YKF] # optional: omit to discover all known, key-authorized IATAs
+```
+
+The IATA list limits both source discovery and imported profile rows, including
+group responses. It is independent of packet ingestion geography. No browser
+request calls MeshMapper, and no RF polling is added. Opening a node reads the
+cached profile by its **full public key**; legacy prefixes are never guessed.
+Changing access can leave profiles unavailable until existing cooldowns expire.
+The initial import needs the directory and repeater fetches to complete.
+
+`GET /nodes/{id}` includes optional `meshmapper` data for repeaters when available:
+owner/admin-entered hardware, power, antenna, heights, power source and public
+notes; administrator display names; separately sourced scope evidence; provider
+status, backbone traffic share, advert width, radio presets and an uploaded
+neighbour table. `fetchedAt` is when Beacon fetched the list, not when the owner
+edited it. `refreshFailed` marks a failed subsequent refresh; absent fields remain
+unknown. The provider link points back to the cached record's region/group map.
+
+These fields do not overwrite Beacon's name/location, radio/clock measurements,
+scope repeat counters, topology, or telemetry. Uploaded neighbour entries are
+displayed as evidence only, including unresolved prefixes; they never create
+Beacon routes. Provider traffic share is not Beacon traffic share. Missing API
+fields, including coverage/range plots, are not fabricated.
+
+Schedule all enabled imports within the key's shared read budget (currently a
+default 1,000 reads/day and 30/minute; administrators can assign different limits).
+Conditional requests also count. Respect `Retry-After` on 429/503; repeater imports
+pause all their sources when a shared-budget response specifies a retry time.
+Keep credentials and their private cache-binding fingerprints out of public
+diagnostics, screenshots, source and client bundles.
 
 To run the web frontend against it, see
 [Running the full stack locally](https://github.com/MeshCore-Beacon/beacon-docs/blob/main/CONTRIBUTING.md#running-the-full-stack-locally).
