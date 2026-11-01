@@ -42,7 +42,7 @@ func TestNodeScopeEvidencePostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(context.Background())
-	for _, table := range []string{"nodes", "observers", "node_neighbors", "observer_scopes", "transport_scopes", "node_scope_hourly"} {
+	for _, table := range []string{"nodes", "observers", "node_neighbors", "observer_scopes", "transport_scopes", "node_scope_hourly", "scope_seen_paths", "scope_receiver_hourly"} {
 		if _, err = tx.Exec(ctx, "CREATE TEMP TABLE "+table+" (LIKE public."+table+" INCLUDING ALL) ON COMMIT DROP"); err != nil {
 			t.Fatal(err)
 		}

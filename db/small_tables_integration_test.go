@@ -277,7 +277,7 @@ ANALYZE nodes, node_iatas, node_neighbors, observers;`
 func TestNodeReadersAfterIndexDropsPostgres(t *testing.T) {
 	ctx, tx := retentionTx(t)
 	applyBaseline(t, ctx, tx)
-	applyMigrationsTx(t, ctx, tx, "003_meshmapper_repeaters.sql") // GetNode reads the MeshMapper tables
+	applyMigrationsTx(t, ctx, tx, "003_meshmapper_repeaters.sql", "062_node_scope_evidence.sql", "063_scope_activity.sql") // GetNode reads the MeshMapper tables
 	mustExec(t, ctx, tx, smallTableReaderFixture)
 	store := &Store{q: sqlc.New(tx)}
 

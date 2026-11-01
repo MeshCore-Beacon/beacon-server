@@ -2941,7 +2941,7 @@ const docTemplate = `{
         },
         "/scopes/activity": {
             "get": {
-                "description": "Window is the current partial hour plus prior hourly buckets. uniqueSamples deduplicates equal packet/path/receiving-area/hour samples across observers, not RF transmissions. Missing hours have no evidence. Country is the MQTT receiving area's country, not origin or border direction. Existing ingest geographic restrictions apply.",
+                "description": "Counts cover non-TRACE FLOOD/TRANSPORT_FLOOD observations; direct traffic and traces are excluded. Window is the current partial hour plus prior hourly buckets. uniqueSamples deduplicates equal packet/path/receiving-area/hour samples across observers, not RF transmissions. Missing hours have no evidence. Country is the MQTT receiving area's country, not origin or border direction. Existing ingest geographic restrictions apply.",
                 "produces": [
                     "application/json"
                 ],
