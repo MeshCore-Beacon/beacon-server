@@ -4792,6 +4792,37 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperNeighbor": {
+            "type": "object",
+            "properties": {
+                "heardAt": {
+                    "type": "integer"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "resolved": {
+                    "type": "boolean"
+                },
+                "snr": {
+                    "type": "number"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperRadio": {
+            "type": "object",
+            "properties": {
+                "lastSeen": {
+                    "type": "integer"
+                },
+                "preset": {
+                    "type": "string"
+                },
+                "witnesses": {
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperRepeater": {
             "type": "object",
             "properties": {
@@ -4801,9 +4832,21 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "advertBytes": {
+                    "type": "integer"
+                },
+                "backbone": {
+                    "type": "boolean"
+                },
+                "backboneShare": {
+                    "type": "number"
+                },
                 "carpeater": {
                     "description": "mobile repeater: its position moves",
                     "type": "boolean"
+                },
+                "currentPreset": {
+                    "type": "string"
                 },
                 "defaultScope": {
                     "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperDefaultScope"
@@ -4812,9 +4855,33 @@ const docTemplate = `{
                     "description": "when Beacon last fetched this list",
                     "type": "integer"
                 },
+                "firstSeen": {
+                    "type": "integer"
+                },
                 "iata": {
                     "description": "region of its latest advert, per MeshMapper",
                     "type": "string"
+                },
+                "lastHeard": {
+                    "type": "integer"
+                },
+                "neighbors": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperNeighbor"
+                    }
+                },
+                "profileUrl": {
+                    "type": "string"
+                },
+                "radios": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperRadio"
+                    }
+                },
+                "refreshFailed": {
+                    "type": "boolean"
                 },
                 "scopes": {
                     "type": "array",
@@ -4828,6 +4895,9 @@ const docTemplate = `{
                 },
                 "site": {
                     "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperSite"
+                },
+                "status": {
+                    "type": "string"
                 }
             }
         },

@@ -127,6 +127,32 @@ type MeshMapperRepeater struct {
 	Scopes          []MeshMapperScope       `json:"scopes"`
 	ScopesCheckedAt *int64                  `json:"scopesCheckedAt,omitempty"` // set (with empty scopes) when it answered with none
 	DefaultScope    *MeshMapperDefaultScope `json:"defaultScope,omitempty"`
+	ProfileURL      string                  `json:"profileUrl,omitempty"`
+	RefreshFailed   bool                    `json:"refreshFailed,omitempty"`
+	Status          string                  `json:"status,omitempty"`
+	FirstSeen       *int64                  `json:"firstSeen,omitempty"`
+	LastHeard       *int64                  `json:"lastHeard,omitempty"`
+	AdvertBytes     *int                    `json:"advertBytes,omitempty"`
+	Backbone        *bool                   `json:"backbone,omitempty"`
+	BackboneShare   *float64                `json:"backboneShare,omitempty"`
+	CurrentPreset   *string                 `json:"currentPreset,omitempty"`
+	Radios          []MeshMapperRadio       `json:"radios,omitempty"`
+	Neighbors       []MeshMapperNeighbor    `json:"neighbors,omitempty"`
+}
+
+// MeshMapperRadio is provider-observed radio evidence, not Beacon's current radio setting.
+type MeshMapperRadio struct {
+	Preset    string `json:"preset"`
+	LastSeen  *int64 `json:"lastSeen,omitempty"`
+	Witnesses *int   `json:"witnesses,omitempty"`
+}
+
+// MeshMapperNeighbor is an uploaded neighbour-table entry; it never creates a Beacon route.
+type MeshMapperNeighbor struct {
+	Key      string   `json:"key"`
+	Resolved bool     `json:"resolved"`
+	SNR      *float64 `json:"snr,omitempty"`
+	HeardAt  *int64   `json:"heardAt,omitempty"`
 }
 
 // MeshMapperSite holds admin-entered site details; each field is omitted when unset.

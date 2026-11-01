@@ -252,6 +252,11 @@ type MeshmapperRepeater struct {
 	Data      json.RawMessage `json:"data"`
 }
 
+type MeshmapperRepeaterAccess struct {
+	Singleton   bool   `json:"singleton"`
+	Fingerprint string `json:"fingerprint"`
+}
+
 type MeshmapperRepeaterSource struct {
 	Source      string             `json:"source"`
 	Url         string             `json:"url"`
