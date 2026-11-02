@@ -19,6 +19,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ws"
+	"github.com/MeshCore-Beacon/beacon-server/internal/wsticket"
 	httpSwagger "github.com/swaggo/http-swagger"
 )
 
@@ -26,23 +27,24 @@ import (
 //
 // Route shape:
 //
-//	/ws                → WebSocket (public in v1)
-//	/api/v1/           → public group
-//	  /info            → server info and minimum client versions
-//	  /packets         → packets subrouter
-//	  /nodes           → nodes subrouter
-//	  /brokers         → brokers subrouter
-//	  /observers       → observers subrouter
-//	  /channels        → channels subrouter
-//	  /iatas           → iatas subrouter
-//	  /regions         → regions subrouter
-//	  /stats           → stats subrouter
+//	/ws                â†’ WebSocket (public in v1)
+//	/api/v1/           â†’ public group
+//	  /info            â†’ server info and minimum client versions
+//	  /ws-ticket       â†’ ticket that opens /ws without an Origin
+//	  /packets         â†’ packets subrouter
+//	  /nodes           â†’ nodes subrouter
+//	  /brokers         â†’ brokers subrouter
+//	  /observers       â†’ observers subrouter
+//	  /channels        â†’ channels subrouter
+//	  /iatas           â†’ iatas subrouter
+//	  /regions         â†’ regions subrouter
+//	  /stats           â†’ stats subrouter
 //
 // Admin endpoints require a configured bearer key.
 func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) http.Handler {
 	r := chi.NewRouter()
 
-	// ── CORS ─────────────────────────────────────────────────────────────────
+	// â”€â”€ CORS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	allowedOrigins := opts.CORS.AllowedOrigins
 	if len(allowedOrigins) == 0 {
 		allowedOrigins = []string{"*"}
@@ -89,7 +91,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 	}
 	r.Use(runtimeConfig.CORS)
 
-	// ── Global middleware ────────────────────────────────────────────────────
+	// â”€â”€ Global middleware â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	r.Use(middleware.RequestID)
 	r.Use(mw.TrustedProxyIP(opts.Server.TrustedProxies))
 	r.Use(mw.RequestLogger)
@@ -97,7 +99,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 	r.Use(middleware.CleanPath)
 	r.Use(middleware.StripSlashes)
 
-	// ── Swagger UI ──────────────────────────────────────────────────────────
+	// â”€â”€ Swagger UI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	r.Get("/swagger", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/swagger/index.html", http.StatusMovedPermanently)
 	})
@@ -106,14 +108,20 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 		httpSwagger.URL("/swagger/doc.json"),
 	))
 
-	// ── WebSocket ────────────────────────────────────────────────────────────
-	r.Get("/ws", ws.Handler(h, reader, opts.MaxConnsPerIP, opts.MaxConnectsPerMinute, opts.WSAllowedOrigins))
+	// â”€â”€ WebSocket â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+	tickets := wsticket.New()
+	r.Get("/ws", ws.Handler(h, reader, ws.Limits{
+		MaxConnsPerIP:        opts.MaxConnsPerIP,
+		MaxConnectsPerMinute: opts.MaxConnectsPerMinute,
+		SendBytesPerSecond:   opts.WSSendBytesPerSecond,
+		SendBurstBytes:       opts.WSSendBurstBytes,
+	}, ws.Access{AllowedOrigins: opts.WSAllowedOrigins, RequireOrigin: opts.WSRequireOrigin, Tickets: tickets}))
 
-	// ── Public REST API (v1) ─────────────────────────────────────────────────
+	// â”€â”€ Public REST API (v1) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(mw.RateLimit(opts.RateLimit))
 		r.Use(mw.LimitListParams)
-		// Public group — no authentication required. Guards run here only, after TrustedProxyIP,
+		// Public group â€” no authentication required. Guards run here only, after TrustedProxyIP,
 		// so /ws and the admin subtree never carry guard state.
 		r.Group(func(r chi.Router) {
 			if opts.Guards != nil {
@@ -136,6 +144,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 			if opts.NodeTelemetry != nil {
 				r.Mount("/node-telemetry", http.StripPrefix("/api/v1/node-telemetry", opts.NodeTelemetry))
 			}
+			r.Mount("/ws-ticket", handlers.WSTicketRouter(tickets))
 		})
 
 		// Protect the entire subtree, including its root and unknown paths.

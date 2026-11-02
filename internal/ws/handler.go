@@ -7,12 +7,12 @@
 //
 //	On connect: server sends hello { v:1, type:"hello", serverTime:<ms>, connectionId:"uuid" }
 //
-//	Client → Server:
-//	  subscribe   { v, type, id, scope }         → server replies subscribed { v, type, id, subscriptionId }
-//	  unsubscribe { v, type, id, subscriptionId } → server replies unsubscribed { v, type, id, subscriptionId }
+//	Client â†’ Server:
+//	  subscribe   { v, type, id, scope }         â†’ server replies subscribed { v, type, id, subscriptionId }
+//	  unsubscribe { v, type, id, subscriptionId } â†’ server replies unsubscribed { v, type, id, subscriptionId }
 //	  configure   { v, type, id, resolvePath, includeObserverKey, includeRepeats }
-//	              → server replies configured { v, type, id, resolvePath, includeObserverKey, includeRepeats }
-//	  ping        { v, type, id }                → server replies pong { v, type, id }
+//	              â†’ server replies configured { v, type, id, resolvePath, includeObserverKey, includeRepeats }
+//	  ping        { v, type, id }                â†’ server replies pong { v, type, id }
 //
 //	configure's flags are connection-wide settings, not per-subscription.
 //	resolvePath adds per-hop resolvedPath data to packetObservation events,
@@ -22,9 +22,15 @@
 //	observationCount 0. Each configure sets all three to exactly the values
 //	sent, so an omitted flag turns off. All default false.
 //
-//	Server → Client events (unsolicited):
+//	Server â†’ Client events (unsolicited):
 //	  packetObservation, observerStatus, nodeUpdate, channelMessage
 //	  lagged { v, type, droppedCount, since }
+//
+//	lagged also reports events dropped by the per-connection send budget,
+//	at most once per budgetNoticeInterval.
+//
+//	With websocket.require_origin on, an upgrade without an Origin needs a ticket from
+//	GET /api/v1/ws-ticket in the X-Beacon-Ticket header, or it gets 403.
 //
 //	Idle connections (no ping) closed after 90s.
 //	Client should ping every 30s.
@@ -46,6 +52,7 @@ import (
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
+	"github.com/MeshCore-Beacon/beacon-server/internal/wsticket"
 )
 
 const (
@@ -53,16 +60,36 @@ const (
 	writeTimeout = 10 * time.Second
 )
 
+// budgetNoticeInterval spaces out send-budget lagged notices, since each one makes the client refetch.
+var budgetNoticeInterval = 30 * time.Second
+
+// Limits bounds what one address and one connection may use. A zero send rate means no send budget.
+type Limits struct {
+	MaxConnsPerIP        int
+	MaxConnectsPerMinute int
+	SendBytesPerSecond   int
+	SendBurstBytes       int
+}
+
+// Access decides who may open /ws. A browser always sends an Origin; RequireOrigin makes every
+// other client show a ticket instead.
+type Access struct {
+	AllowedOrigins []string
+	RequireOrigin  bool
+	Tickets        *wsticket.Issuer
+}
+
 // Handler returns an http.HandlerFunc that requires the hub to be injected.
 // Wire it via router.New(h) so the hub is available at startup.
-func Handler(h *hub.Hub, reader api.Reader, maxConnsPerIP, maxConnectsPerMinute int, allowedOrigins []string) http.HandlerFunc {
+func Handler(h *hub.Hub, reader api.Reader, limits Limits, access Access) http.HandlerFunc {
 	acceptOpts := &websocket.AcceptOptions{
-		OriginPatterns: allowedOrigins,
+		OriginPatterns: access.AllowedOrigins,
 		// The live feed is repetitive JSON; a shared window cuts its bytes ~3x for ~1.2 MB per socket.
 		CompressionMode: websocket.CompressionContextTakeover,
 	}
-	limiter := newIPLimiter(maxConnsPerIP)
-	attempts := httprate.NewRateLimiter(maxConnectsPerMinute, time.Minute,
+	plainOpts := &websocket.AcceptOptions{OriginPatterns: access.AllowedOrigins, CompressionMode: websocket.CompressionDisabled}
+	limiter := newIPLimiter(limits.MaxConnsPerIP)
+	attempts := httprate.NewRateLimiter(limits.MaxConnectsPerMinute, time.Minute,
 		httprate.WithResponseHeaders(httprate.ResponseHeaders{RetryAfter: "Retry-After"}))
 	return func(w http.ResponseWriter, r *http.Request) {
 		ip := r.RemoteAddr
@@ -71,24 +98,34 @@ func Handler(h *hub.Hub, reader api.Reader, maxConnsPerIP, maxConnectsPerMinute 
 		}
 		// Count attempts before Accept, including failed handshakes. RemoteAddr
 		// was already resolved by TrustedProxyIP; never read forwarding headers here.
-		if attempts.RespondOnLimit(w, r, httprate.CanonicalizeIP(ip)) {
+		// Both limits share an IPv6 /64, so rotating addresses inside one doesn't add sockets.
+		key := wsticket.ClientKey(r)
+		if attempts.RespondOnLimit(w, r, key) {
 			return
 		}
-		conn, err := websocket.Accept(w, r, acceptOpts)
+		if access.RequireOrigin && r.Header.Get("Origin") == "" && !access.Tickets.Valid(r.Header.Get(wsticket.Header), key) {
+			http.Error(w, "an Origin or a ticket is required", http.StatusForbidden)
+			return
+		}
+		opts := plainOpts
+		if compressesFor(r.UserAgent()) {
+			opts = acceptOpts
+		}
+		conn, err := websocket.Accept(w, r, opts)
 		if err != nil {
 			slog.Warn("ws: failed to accept connection", "component", "ws", "error", err)
 			return
 		}
 		defer conn.CloseNow()
 		conn.SetReadLimit(16 << 10)
-		if !limiter.acquire(ip) {
+		if !limiter.acquire(key) {
 			// This attempt passed the rate budget. Give the accepted socket a
 			// browser-visible backoff signal before allocating a hub client.
 			slog.Warn("ws: connection limit reached", "component", "ws", "client_ip", ip)
 			_ = conn.Close(websocket.StatusTryAgainLater, "connection limit reached")
 			return
 		}
-		defer limiter.release(ip)
+		defer limiter.release(key)
 
 		connID := uuid.NewString()
 		client := h.NewClient()
@@ -114,6 +151,20 @@ func Handler(h *hub.Hub, reader api.Reader, maxConnsPerIP, maxConnectsPerMinute 
 
 		// Write pump: forward hub events to the WS connection.
 		go func() {
+			budget := newSendBudget(limits.SendBytesPerSecond, limits.SendBurstBytes, time.Now())
+			budgetDropped := 0
+			var lastNotice time.Time
+			var noticeDue <-chan time.Time
+			writeLagged := func(dropped int) error {
+				lagged := map[string]any{
+					"v":            1,
+					"type":         "lagged",
+					"droppedCount": dropped,
+					"since":        time.Now().UnixMilli(),
+				}
+				lagBytes, _ := json.Marshal(lagged)
+				return writeFrame(ctx, conn, lagBytes)
+			}
 			for {
 				select {
 				case evt, ok := <-client.Send:
@@ -127,6 +178,13 @@ func Handler(h *hub.Hub, reader api.Reader, maxConnsPerIP, maxConnectsPerMinute 
 						"data":  json.RawMessage(evt.Payload),
 					}
 					msgBytes, _ := json.Marshal(msg)
+					if !budget.allow(len(msgBytes), time.Now()) {
+						budgetDropped++
+						if noticeDue == nil {
+							noticeDue = time.After(time.Until(lastNotice.Add(budgetNoticeInterval)))
+						}
+						continue
+					}
 					err = writeFrame(ctx, conn, msgBytes)
 					if err != nil {
 						slog.Warn(fmt.Sprintf("ws[%s]: failed to write hub event", connID), "component", "ws", "error", err)
@@ -134,18 +192,22 @@ func Handler(h *hub.Hub, reader api.Reader, maxConnsPerIP, maxConnectsPerMinute 
 						return
 					}
 
+				case <-noticeDue:
+					noticeDue = nil
+					slog.Warn(fmt.Sprintf("ws[%s]: send budget exceeded, dropped events", connID), "component", "ws", "client_ip", ip, "dropped", budgetDropped)
+					if err := writeLagged(budgetDropped); err != nil {
+						slog.Warn(fmt.Sprintf("ws[%s]: failed to write lagged notice", connID), "component", "ws", "error", err)
+						cancel()
+						return
+					}
+					budgetDropped = 0
+					lastNotice = time.Now()
+
 				case lag, ok := <-client.LaggedCH():
 					if !ok {
 						return
 					}
-					lagged := map[string]any{
-						"v":            1,
-						"type":         "lagged",
-						"droppedCount": lag.DroppedCount,
-						"since":        time.Now().UnixMilli(),
-					}
-					lagBytes, _ := json.Marshal(lagged)
-					if err := writeFrame(ctx, conn, lagBytes); err != nil {
+					if err := writeLagged(lag.DroppedCount); err != nil {
 						slog.Warn(fmt.Sprintf("ws[%s]: failed to write lagged notice", connID), "component", "ws", "error", err)
 						cancel()
 						return
@@ -174,7 +236,7 @@ func Handler(h *hub.Hub, reader api.Reader, maxConnsPerIP, maxConnectsPerMinute 
 	}
 }
 
-// clientMessage is the shape of every client → server message.
+// clientMessage is the shape of every client â†’ server message.
 type clientMessage struct {
 	V              int             `json:"v"`
 	Type           string          `json:"type"`

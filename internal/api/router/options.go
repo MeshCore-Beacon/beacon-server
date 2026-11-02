@@ -18,7 +18,10 @@ type Options struct {
 	ScopeCatalogues      handlers.ScopeCatalogueSource
 	MaxConnsPerIP        int
 	MaxConnectsPerMinute int
+	WSSendBytesPerSecond int
+	WSSendBurstBytes     int
 	WSAllowedOrigins     []string
+	WSRequireOrigin      bool
 	CORS                 config.CORSConfig
 	Server               config.ServerConfig
 	Auth                 config.AuthConfig

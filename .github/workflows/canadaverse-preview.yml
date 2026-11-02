@@ -1,0 +1,47 @@
+name: Build Canadaverse preview binary
+
+on:
+  pull_request:
+    branches: [n30nex-test]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.repository == 'n30nex/beacon-server-contributions'
+    runs-on: ubuntu-latest
+    env:
+      PREVIEW_VERSION: 2.7.1-n30nex.1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build exact preview source
+        run: |
+          mkdir preview-output
+          revision=$(git rev-parse HEAD)
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -buildvcs=true -trimpath -ldflags="-s -w -X main.version=v${PREVIEW_VERSION} -X main.revision=${revision}" -o preview-output/beacon-server-linux-arm64 ./cmd/beacon
+          git archive --format=tar HEAD -o preview-output/server-source.tar
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, subprocess
+          out = pathlib.Path('preview-output')
+          result = {
+              'revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'tree': subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip(),
+              'version': os.environ['PREVIEW_VERSION'],
+              'go': subprocess.check_output(['go', 'version'], text=True).strip(),
+              'artifacts': {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in out.iterdir() if p.is_file()},
+          }
+          (out / 'artifact.json').write_text(json.dumps(result, indent=2) + '\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: canadaverse-preview-${{ github.event.pull_request.head.sha || github.sha }}
+          path: preview-output/
+          if-no-files-found: error
+          retention-days: 14

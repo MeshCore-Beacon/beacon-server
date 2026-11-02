@@ -33,3 +33,20 @@ func TestClientFloorsAreValid(t *testing.T) {
 		}
 	}
 }
+
+func TestAppFloor(t *testing.T) {
+	for _, tc := range []struct {
+		configured    string
+		requireOrigin bool
+		want          string
+	}{
+		{"", false, MinAppVersion},
+		{"", true, TicketAppVersion},
+		{"9.0.0", true, "9.0.0"},
+		{"9.0.0", false, "9.0.0"},
+	} {
+		if got := AppFloor(tc.configured, tc.requireOrigin); got != tc.want {
+			t.Errorf("AppFloor(%q, %t) = %q, want %q", tc.configured, tc.requireOrigin, got, tc.want)
+		}
+	}
+}
