@@ -52,7 +52,7 @@ var version = "dev"
 var revision = ""
 
 //	@title			MeshCore Beacon API
-//	@version		2.1.0
+//	@version		2.1.1
 //	@description	MeshCore network observation backend. Ingests LoRa packets from MQTT brokers, stores in PostgreSQL, and streams live events via WebSocket.
 //	@description	REST requests share a configurable per-client rate limit (default 600/minute and a 600-request one-second burst cap). Exceeded limits return HTTP 429 with error.code=rate_limited and a Retry-After header in seconds. CORS preflights and WebSocket upgrades do not consume this API budget.
 //	@description	WebSocket upgrade attempts at /ws have a configurable per-client limit (default 10/minute, including failed handshakes). Rate exhaustion returns HTTP 429 with Retry-After before upgrade. An accepted socket exceeding the concurrent cap closes with code 1013 before hello; established connections remain open.
@@ -574,10 +574,13 @@ func main() {
 		ScopeCatalogues:      scopeImporter,
 		MaxConnsPerIP:        resolved.MaxConnsPerIP,
 		MaxConnectsPerMinute: resolved.MaxConnectsPerMinute,
+		WSSendBytesPerSecond: resolved.WSSendBytesPerSecond,
+		WSSendBurstBytes:     resolved.WSSendBurstBytes,
 		WSAllowedOrigins:     cfg.WebSocket.AllowedOrigins,
+		WSRequireOrigin:      cfg.WebSocket.RequireOrigin,
 		CORS:                 cfg.CORS, Server: cfg.Server, Auth: cfg.Auth, RateLimit: resolved.RateLimit,
 		Scopes: scopes, RollupRetention: resolved.RollupRetention,
-		MinAppVersion: api.HigherVersion(api.MinAppVersion, cfg.Mobile.MinAppVersion),
+		MinAppVersion: api.AppFloor(cfg.Mobile.MinAppVersion, cfg.WebSocket.RequireOrigin),
 		MinWebVersion: api.HigherVersion(api.MinWebVersion, cfg.Web.MinWebVersion),
 		ServerVersion: docs.SwaggerInfo.Version,
 		BuildVersion:  version,

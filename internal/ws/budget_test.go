@@ -1,51 +1,61 @@
 // Copyright 2026 Beacon Contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
+
 package ws
 
 import (
-	"fmt"
 	"testing"
 	"time"
 )
 
-func TestControlBudgetBoundsWorkAndRecovers(t *testing.T) {
-	b := newControlBudget()
-	now := b.at
-	for range 60 {
-		if !b.allow(clientMessage{Type: "ping"}, now) {
-			t.Fatal("initial budget rejected")
+func TestSendBudgetBurstAndRefill(t *testing.T) {
+	start := time.Unix(0, 0)
+	b := newSendBudget(100, 300, start)
+	for i := range 3 {
+		if !b.allow(100, start) {
+			t.Fatalf("message %d inside the burst refused", i)
 		}
 	}
-	if b.allow(clientMessage{Type: "ping"}, now) {
-		t.Fatal("unbounded controls")
+	if b.allow(1, start) {
+		t.Fatal("message past the burst allowed")
 	}
-	if !b.allow(clientMessage{Type: "ping"}, now.Add(time.Second)) {
-		t.Fatal("budget never recovers")
+	if !b.allow(100, start.Add(time.Second)) {
+		t.Fatal("a second's refill not applied")
 	}
-	b = newControlBudget()
-	for i := range maxSubscriptions {
-		b.active[fmt.Sprint(i)] = struct{}{}
+	if b.allow(1, start.Add(time.Second)) {
+		t.Fatal("refill over-credited")
 	}
-	msg := clientMessage{Type: "subscribe", Scope: &subscribeScope{IATAs: []string{"YKF"}}}
-	if b.allow(msg, b.at) {
-		t.Fatal("unbounded subscriptions")
+	later := start.Add(time.Hour)
+	for i := range 3 {
+		if !b.allow(100, later) {
+			t.Fatalf("message %d after an idle hour refused", i)
+		}
 	}
-	delete(b.active, "0")
-	if !b.allow(msg, b.at) {
-		t.Fatal("unsubscribe did not free capacity")
-	}
-	msg.Scope.IATAs = make([]string, maxScopeValues+1)
-	if b.allow(msg, b.at) {
-		t.Fatal("unbounded filter expansion")
+	if b.allow(1, later) {
+		t.Fatal("idle refill passed the burst")
 	}
 }
 
-func TestExpandedRegionScopeRemainsBounded(t *testing.T) {
-	got, ok := boundedIATAs([]string{"YKF", "YOW"}, []string{"YKF", "YYZ"}, 3)
-	if !ok || len(got) != 3 {
-		t.Fatal("overlapping regions were not deduplicated")
+func TestSendBudgetOversizeMessage(t *testing.T) {
+	start := time.Unix(0, 0)
+	b := newSendBudget(100, 50, start)
+	if !b.allow(1000, start) {
+		t.Fatal("a message bigger than the burst could never go out")
 	}
-	if _, ok = boundedIATAs(got, []string{"YVR"}, 3); ok {
-		t.Fatal("region expansion bypassed filter cap")
+	if b.allow(1, start.Add(5*time.Second)) {
+		t.Fatal("the oversize message was not charged")
+	}
+	if !b.allow(1, start.Add(10*time.Second)) {
+		t.Fatal("the debt was never paid off")
+	}
+}
+
+func TestSendBudgetUnlimited(t *testing.T) {
+	b := newSendBudget(0, 0, time.Now())
+	if b != nil {
+		t.Fatal("a zero rate should mean no budget")
+	}
+	if !b.allow(1<<30, time.Now()) {
+		t.Fatal("a nil budget refused a message")
 	}
 }
