@@ -13,7 +13,18 @@ import (
 const (
 	MinAppVersion = "2.1.0" // BEACON Mobile: exact page cursors and waiting out busy-server 503s
 	MinWebVersion = "2.1.0" // Beacon Web: exact page cursors and waiting out read-model 503s
+	// BEACON Mobile: the first release that sends a /ws ticket, required while websocket.require_origin is on
+	TicketAppVersion = "2.1.1"
 )
+
+// AppFloor is the oldest BEACON Mobile release this server accepts, given its config.
+func AppFloor(configured string, requireOrigin bool) string {
+	floor := HigherVersion(MinAppVersion, configured)
+	if requireOrigin {
+		floor = HigherVersion(floor, TicketAppVersion)
+	}
+	return floor
+}
 
 // Info is the public server description clients check before using a server.
 type Info struct {
@@ -24,6 +35,13 @@ type Info struct {
 	ServerVersion string  `json:"serverVersion" example:"2.0.2"`
 	BuildVersion  string  `json:"buildVersion,omitempty"`
 	BuildRevision string  `json:"buildRevision,omitempty"`
+}
+
+// WSTicket lets a client that sends no Origin open /ws, in the X-Beacon-Ticket header.
+type WSTicket struct {
+	Ticket string `json:"ticket" example:"AAABmZ1s4CgLBvU1n1yN3v8hQm9YtVq2"`
+	// ExpiresAt is when the ticket stops opening /ws, in epoch ms.
+	ExpiresAt int64 `json:"expiresAt" example:"1793470167000"`
 }
 
 // HigherVersion returns the newer of two X.Y.Z versions; empty sorts oldest.

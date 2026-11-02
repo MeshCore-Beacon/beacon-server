@@ -4,12 +4,15 @@
 package router
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"testing"
 
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/config"
+	"github.com/MeshCore-Beacon/beacon-server/internal/wsticket"
 )
 
 func TestWebSocketAttemptClientIdentity(t *testing.T) {
@@ -49,5 +52,36 @@ func TestWebSocketAttemptClientIdentity(t *testing.T) {
 				t.Fatalf("second handshake status %d; shared budget=%v", second, tc.shared)
 			}
 		})
+	}
+}
+
+func TestWSTicketOpensSocketWhenOriginRequired(t *testing.T) {
+	cfg := config.ServerConfig{TrustedProxies: []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}}
+	handler := New(nil, nil, nil, Options{MaxConnsPerIP: 5, MaxConnectsPerMinute: 100, Server: cfg, WSRequireOrigin: true})
+	send := func(path, client, ticket string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.RemoteAddr = "127.0.0.1:1"
+		request.Header.Set("X-Real-IP", client)
+		if ticket != "" {
+			request.Header.Set(wsticket.Header, ticket)
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	issued := send("/api/v1/ws-ticket", "198.51.100.1", "")
+	var body api.WSTicket
+	if issued.Code != http.StatusOK || json.Unmarshal(issued.Body.Bytes(), &body) != nil || body.Ticket == "" {
+		t.Fatalf("ticket endpoint: %d %s", issued.Code, issued.Body)
+	}
+	if code := send("/ws", "198.51.100.1", "").Code; code != http.StatusForbidden {
+		t.Fatalf("no-Origin upgrade without a ticket: %d, want 403", code)
+	}
+	if code := send("/ws", "198.51.100.2", body.Ticket).Code; code != http.StatusForbidden {
+		t.Fatalf("ticket from another client: %d, want 403", code)
+	}
+	// Past the gate, a recorder can't upgrade, so Accept answers 426.
+	if code := send("/ws", "198.51.100.1", body.Ticket).Code; code == http.StatusForbidden {
+		t.Fatal("the caller's own ticket was refused")
 	}
 }

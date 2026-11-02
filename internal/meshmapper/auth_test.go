@@ -241,6 +241,8 @@ func newAuthSite(t *testing.T, key string, iatas []string) *authSite {
 			_, _ = w.Write(bytes.ReplaceAll(catalogue(strings.ToLower(iata)), []byte("YOW"), []byte(iata)))
 		case "/get_channels.php":
 			_, _ = w.Write(channelList(iata, "#"+strings.ToLower(iata)))
+		case "/get_repeaters.php":
+			_, _ = w.Write([]byte(repeaterDocExample))
 		default:
 			t.Error("unexpected endpoint")
 		}
@@ -333,6 +335,31 @@ func TestAuthenticatedImportersDeploymentScopes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// MeshMapper refuses a keyless get_repeaters.php from a script once it enforces its scrape block.
+func TestAuthenticatedRepeatersSendKey(t *testing.T) {
+	const key = "repeaters-operator-test-key"
+	f := newAuthSite(t, key, []string{"YOW"})
+	dir := NewDirectory(newZoneListMemory(), key)
+	routeClient(t, dir.client, f.URL)
+	ctx := context.Background()
+	if err := dir.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	store := newRepeaterMemoryStore("YOW")
+	r, err := NewRepeaters(ctx, config.MeshMapperRepeatersConfig{Enabled: true}, store, dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := r.Refresh(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if f.calls["/get_repeaters.php"] != 1 || len(store.repeaters["YOW"]) != 1 {
+		t.Fatal("repeaters not imported through the keyed client", f.calls, store.repeaters)
 	}
 }
 
