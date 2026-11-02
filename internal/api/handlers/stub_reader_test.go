@@ -419,6 +419,10 @@ func (s stubReader) GetRouteEvidence(ctx context.Context, iata, key string, q ap
 	return nil, nil
 }
 
+func (s stubReader) GetTopologyLinks(_ context.Context, _ []string, _ time.Time, _ time.Time) (*api.TopologyLinks, error) {
+	return &api.TopologyLinks{}, nil
+}
+
 func (s stubReader) ListObserverDirectory(ctx context.Context, q api.ObserverDirectoryQuery) (*api.ObserverDirectory, error) {
 	if s.listObserverDirectory != nil {
 		return s.listObserverDirectory(ctx, q)

@@ -19,6 +19,29 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+// Keep the upstream pagination oracle's original seven-column contract. Dev1's
+// extra quality metadata is covered separately by the TRACE quality regressions.
+type legacyTraceTagRow struct {
+	TraceTag     string
+	FirstHeardAt pgtype.Timestamptz
+	LastHeardAt  pgtype.Timestamptz
+	PacketCount  int64
+	IataCount    int64
+	TraceType    string
+	BestPayload  []byte
+}
+
+func traceLegacyProjection(rows []sqlc.ListTraceTagsRow) []legacyTraceTagRow {
+	result := make([]legacyTraceTagRow, len(rows))
+	for i, row := range rows {
+		result[i] = legacyTraceTagRow{
+			TraceTag: row.TraceTag, FirstHeardAt: row.FirstHeardAt, LastHeardAt: row.LastHeardAt,
+			PacketCount: row.PacketCount, IataCount: row.IataCount, TraceType: row.TraceType, BestPayload: row.BestPayload,
+		}
+	}
+	return result
+}
+
 // legacyListTraceTags is the trace list before the row-comparison keyset, verbatim from the generated
 // db/sqlc/queries.sql.go. The statement changed in place, so no sqlc statement keeps this text.
 const legacyListTraceTags = `-- name: ListTraceTags :many
@@ -176,11 +199,11 @@ func TestTraceTagsKeysetMatchesTodayPostgres(t *testing.T) {
 								if err != nil {
 									t.Fatal(err)
 								}
-								want := legacyRows[sqlc.ListTraceTagsRow](t, ctx, tx, legacyListTraceTags,
+								want := legacyRows[legacyTraceTagRow](t, ctx, tx, legacyListTraceTags,
 									iatas, scope, w.since, w.until, cursor, limit, traceType, tag)
-								if !sameRows(got, want) {
-									t.Fatalf("ListTraceTags(%+v) = %d rows %v, today %d rows %v",
-										p, len(got), traceTags(got), len(want), traceTags(want))
+								if !sameRows(traceLegacyProjection(got), want) {
+									t.Fatalf("ListTraceTags(%+v) = %d rows %v, legacy projection %d rows %v",
+										p, len(got), traceTags(got), len(want), want)
 								}
 								compared++
 								if len(got) > 0 {
