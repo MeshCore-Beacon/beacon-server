@@ -811,3 +811,38 @@ func TestNodeListsCarryDefaultScope(t *testing.T) {
 		t.Fatalf("sorted row scope %v, want %s", got, scope)
 	}
 }
+
+// List rows carry last_seen in epoch ms, as node detail does.
+func TestNodeListsCarryLastSeen(t *testing.T) {
+	const ms = int64(1792442625019)
+	seen := pgtype.Timestamptz{Time: time.UnixMicro(ms*1000 + 123).UTC(), Valid: true}
+	id := uuid.New()
+	ctrl := gomock.NewController(t)
+	mock := mockdb.NewMockQuerier(ctrl)
+	mock.EXPECT().ListNodes(gomock.Any(), gomock.Any()).Return([]sqlc.ListNodesRow{{ID: uuid.New(), PublicKey: []byte{1}, LastSeen: seen}}, nil)
+	mock.EXPECT().ListNodesSorted(gomock.Any(), gomock.Any()).Return([]sqlc.ListNodesSortedRow{{ID: uuid.New(), PublicKey: []byte{2}, LastSeen: seen}}, nil)
+	mock.EXPECT().GetNodeByID(gomock.Any(), id).Return(sqlc.GetNodeByIDRow{ID: id, PublicKey: []byte{3}, LastSeen: seen}, nil)
+	mock.EXPECT().GetNodeNeighbors(gomock.Any(), id).Return([]sqlc.GetNodeNeighborsRow{}, nil)
+	store := &Store{q: mock}
+	page, err := store.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, nil, 50, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := page.Items[0].LastSeen; got != ms {
+		t.Fatalf("list lastSeen %d, want %d", got, ms)
+	}
+	sortedPage, err := store.ListNodesSorted(context.Background(), 0, nil, nil, nil, nil, "", "", "", api.NodeSort{By: api.NodeSortName}, nil, 50, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sortedPage.Items[0].LastSeen; got != ms {
+		t.Fatalf("sorted lastSeen %d, want %d", got, ms)
+	}
+	node, err := store.GetNode(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node.LastSeen != ms {
+		t.Fatalf("detail lastSeen %d, want %d", node.LastSeen, ms)
+	}
+}

@@ -3123,6 +3123,18 @@ entries:
     params: [{raw: "true"}, {raw: "true"}, {raw: "'neighbors'"}, {raw: "0"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "''"}, {raw: "''"}, {raw: "false"}, {raw: "0"}, {raw: "''"}, {raw: "0"}, {raw: "0"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}, {raw: "200"}]
     tiers: [fixture, prod]
     note: "fixture and prod only, as sm.nodes_sorted.name"
+  - id: sm.nodes_sorted.last_seen
+    stmt: ListNodesSorted
+    shape: "ListNodesSorted last seen, oldest first"
+    params: [{raw: "false"}, {raw: "false"}, {raw: "'lastSeen'"}, {raw: "0"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "''"}, {raw: "''"}, {raw: "false"}, {raw: "0"}, {raw: "''"}, {raw: "0"}, {raw: "0"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}, {raw: "200"}]
+    tiers: [fixture, prod]
+    note: "fixture and prod only, as sm.nodes_sorted.name"
+  - id: sm.nodes_sorted.last_seen_cursor
+    stmt: ListNodesSorted
+    shape: "ListNodesSorted last seen, oldest first, mid-list cursor"
+    params: [{raw: "false"}, {raw: "false"}, {raw: "'lastSeen'"}, {raw: "0"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "''"}, {raw: "''"}, {raw: "true"}, {raw: "0"}, {raw: "''"}, {raw: "1791590400000000"}, {raw: "-1791590400000000"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}, {raw: "200"}]
+    tiers: [fixture, prod]
+    note: "fixture and prod only, as sm.nodes_sorted.name"
   - id: sm.drift.bogus5000
     stmt: GetStatsClockDrift
     shape: "clock drift, 5,000 bogus IATAs"

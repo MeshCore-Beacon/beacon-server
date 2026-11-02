@@ -158,6 +158,7 @@ func TestNodeSortCursor(t *testing.T) {
 		{Sort: NodeSort{By: NodeSortName, Descending: true}, Null: 1, Seen: -1, ID: id},
 		{Sort: NodeSort{By: NodeSortNeighbors, Descending: true}, Num: -42, Seen: -1767225600123456, ID: id},
 		{Sort: NodeSort{By: NodeSortType}, Num: 5, ID: id},
+		{Sort: NodeSort{By: NodeSortLastSeen}, Num: 1767225600123456, Seen: -1767225600123456, ID: id},
 	} {
 		got, err := ParseNodeSortCursor(c.String())
 		if err != nil || *got != c {

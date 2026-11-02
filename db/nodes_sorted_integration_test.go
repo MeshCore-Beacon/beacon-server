@@ -19,7 +19,7 @@ import (
 )
 
 // Every sorted walk, at any page size, must give the order a plain ORDER BY gives, and that order
-// must be the web table's: natural names, unnamed last, types by name, ties newest first.
+// must be the web table's: natural names, unnamed last, types by name, ties newest first (last seen ties by id).
 func TestListNodesSortedPostgres(t *testing.T) {
 	dsn := os.Getenv("BEACON_TEST_POSTGRES_DSN")
 	if dsn == "" {
@@ -112,6 +112,7 @@ func TestListNodesSortedPostgres(t *testing.T) {
 			api.NodeSortName:      "(coalesce(n.name, '') = ''), coalesce(n.name, '') COLLATE natural_text " + dir,
 			api.NodeSortType:      "CASE WHEN n.node_type BETWEEN 1 AND 4 THEN n.node_type ELSE 5 END " + dir,
 			api.NodeSortNeighbors: "(SELECT count(DISTINCT neighbor_id) FROM node_neighbors WHERE node_id = n.id) " + dir,
+			api.NodeSortLastSeen:  "n.last_seen " + dir,
 		}[sort.By]
 		rows, err := tx.Query(ctx, `SELECT n.id FROM nodes n LEFT JOIN transport_scopes ts ON ts.id = n.default_scope_id
 WHERE ($1::smallint = 0 OR n.node_type = $1) AND (coalesce(cardinality($2::text[]), 0) = 0 OR n.id IN (SELECT node_id FROM node_iatas WHERE iata = ANY($2)))
@@ -149,7 +150,7 @@ ORDER BY `+key+`, n.last_seen DESC, n.id`, nodeType, iatas, scope)
 			}
 		}
 	}
-	for _, by := range []string{api.NodeSortName, api.NodeSortType, api.NodeSortNeighbors} {
+	for _, by := range []string{api.NodeSortName, api.NodeSortType, api.NodeSortNeighbors, api.NodeSortLastSeen} {
 		for _, desc := range []bool{false, true} {
 			sort := api.NodeSort{By: by, Descending: desc}
 			for _, f := range []struct {
