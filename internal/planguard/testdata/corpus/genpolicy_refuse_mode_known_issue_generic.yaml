@@ -1,0 +1,15 @@
+# Copyright 2026 Beacon Contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# GetNodeByID covers its admission profile, but node.miss blocks admission: the generic mode carries a known issue.
+statements:
+  GetNodeByID: {sqlc: GetNodeByID, plan: cached, admission: by_id}
+admission_profiles:
+  by_id: [hit, miss]
+entries:
+  - {id: node.hit, stmt: GetNodeByID, shapes: [hit], params: ["00000000-0000-0000-0000-000000000001"]}
+  - id: node.miss
+    stmt: GetNodeByID
+    shapes: [miss]
+    params: ["00000000-0000-0000-0000-000000000000"]
+    mode: {generic: {known_issue: generic plan reads too much}}

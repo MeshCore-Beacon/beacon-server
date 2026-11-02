@@ -1,0 +1,10 @@
+[
+ "Sort",
+ "  Subquery Scan",
+ "    Limit [Subquery]",
+ "      Sort",
+ "        Seq Scan on nodes n_1",
+ "    Aggregate partial=Simple [SubPlan]",
+ "      Sort",
+ "        Index Scan on node_iatas ni using node_iatas_pkey scan=Forward"
+]

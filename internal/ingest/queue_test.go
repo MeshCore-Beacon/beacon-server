@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 type queuedTestMessage struct {
@@ -118,11 +120,56 @@ func TestQueueBoundsPayloadMemory(t *testing.T) {
 		_ = q.close(ctx)
 	})
 	m := queuedTestMessage{malformedTopicMessage{"meshcore/SEA/a/packets"}, make([]byte, 65)}
+	dropped := testutil.ToFloat64(metrics.IngestDropped)
 	if q.enqueue(m) {
 		t.Fatal("accepted oversized payload")
 	}
+	if got := testutil.ToFloat64(metrics.IngestDropped) - dropped; got != 1 {
+		t.Errorf("dropped metric +%v, want +1", got)
+	}
 	if q.takeDropped() != 1 {
 		t.Fatal("memory overflow was not counted")
+	}
+}
+
+func TestMessageQueueMetrics(t *testing.T) {
+	entered, release := make(chan struct{}), make(chan struct{})
+	q := newMessageQueue(1, 1, 4096, func(ctx context.Context, m mqtt.Message) {
+		if string(m.Payload()) == "1" {
+			close(entered)
+			<-release
+		}
+	})
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = q.close(ctx)
+	})
+	depth, dropped := testutil.ToFloat64(metrics.IngestQueueDepth), testutil.ToFloat64(metrics.IngestDropped)
+	if !q.enqueue(queueMessage("a", "packets", 1)) {
+		t.Fatal("message 1 rejected")
+	}
+	<-entered // the lane holds message 1, so message 2 fits in the buffer
+	if !q.enqueue(queueMessage("a", "packets", 2)) {
+		t.Fatal("message 2 rejected")
+	}
+	if got := testutil.ToFloat64(metrics.IngestQueueDepth) - depth; got != 2 {
+		t.Errorf("depth +%v with one held and one buffered, want +2", got)
+	}
+	if q.enqueue(queueMessage("a", "packets", 3)) {
+		t.Fatal("message 3 accepted beyond capacity")
+	}
+	if got := testutil.ToFloat64(metrics.IngestDropped) - dropped; got != 1 {
+		t.Errorf("dropped +%v, want +1", got)
+	}
+	close(release)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := q.close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := testutil.ToFloat64(metrics.IngestQueueDepth); got != depth {
+		t.Errorf("depth %v after draining, want %v", got, depth)
 	}
 }
 

@@ -1,0 +1,14 @@
+[
+ "Limit",
+ "  Nested Loop (Left)",
+ "    Nested Loop",
+ "      Nested Loop (Semi)",
+ "        Nested Loop",
+ "          Index Scan on channel_messages cm using channel_messages_pkey scan=Backward",
+ "          Memoize",
+ "            Index Scan on channels c using channels_pkey scan=Forward",
+ "        Index Only Scan on packet_observations po using idx_observations_packet scan=Forward",
+ "      Index Scan on packets p using packets_pkey scan=Forward",
+ "    Memoize",
+ "      Index Scan on transport_scopes ts using transport_scopes_pkey scan=Forward"
+]

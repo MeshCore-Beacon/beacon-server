@@ -17,7 +17,7 @@ import (
 func TestPacketCleanupRollupHandoffPostgres(t *testing.T) {
 	ctx, pool := schemaPool(t)
 	h0 := rollupFixture(t, ctx, pool)
-	store := New(pool, 0, 0)
+	store := New(pool, pool, 0, 0)
 	old := h0.Add(-3 * time.Hour).Add(10 * time.Minute)
 	if _, err := pool.Exec(ctx, `
 INSERT INTO packets (packet_hash, payload_type, payload_version, route_type, raw_payload, raw_header, first_heard_at, last_heard_at)
@@ -139,7 +139,7 @@ VALUES ('\x01', '00000000-0000-0000-0000-000000000001', 'YVR', now() - INTERVAL 
 func TestRollupRetentionCyclePostgres(t *testing.T) {
 	ctx, pool := schemaPool(t)
 	h0 := rollupFixture(t, ctx, pool)
-	store := New(pool, 0, 0)
+	store := New(pool, pool, 0, 0)
 	r, ok, err := store.BeginRollup(ctx)
 	if err != nil || !ok {
 		t.Fatalf("BeginRollup: ok=%v err=%v", ok, err)
@@ -171,7 +171,7 @@ func TestRollupRetentionCyclePostgres(t *testing.T) {
 func TestRollupCoverageMovesRevisionPostgres(t *testing.T) {
 	ctx, pool := schemaPool(t)
 	h0 := rollupFixture(t, ctx, pool)
-	store := New(pool, 0, 0)
+	store := New(pool, pool, 0, 0)
 	r, ok, err := store.BeginRollup(ctx)
 	if err != nil || !ok {
 		t.Fatalf("BeginRollup: ok=%v err=%v", ok, err)

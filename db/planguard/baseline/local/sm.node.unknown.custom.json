@@ -1,0 +1,18 @@
+[
+ "Nested Loop (Left)",
+ "  Index Scan on nodes n using nodes_pkey scan=Forward",
+ "  Index Scan on transport_scopes ts using transport_scopes_pkey scan=Forward",
+ "  Index Only Scan on observers o using observers_public_key_key scan=Forward [SubPlan]",
+ "  Limit [SubPlan]",
+ "    Index Scan on observers o_1 using observers_public_key_key scan=Forward",
+ "  Aggregate partial=Simple [SubPlan]",
+ "    Sort",
+ "      Index Scan on node_iatas ni using node_iatas_pkey scan=Forward",
+ "  Aggregate partial=Simple [SubPlan]",
+ "    Index Only Scan on node_neighbors nn using node_neighbors_pkey scan=Forward",
+ "  Limit [SubPlan]",
+ "    Sort",
+ "      Nested Loop",
+ "        Index Scan on meshmapper_repeaters m using idx_meshmapper_repeaters_public_key scan=Forward",
+ "        Index Scan on meshmapper_repeater_sources s using meshmapper_repeater_sources_pkey scan=Forward"
+]

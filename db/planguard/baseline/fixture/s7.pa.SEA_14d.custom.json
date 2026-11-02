@@ -1,0 +1,18 @@
+[
+ "Sort",
+ "  Aggregate partial=Simple {Hashed}",
+ "    Subquery Scan",
+ "      Nested Loop [Subquery]",
+ "        Result [InitPlan]",
+ "          Limit [InitPlan]",
+ "            Index Only Scan on analytics_hourly_paths using analytics_hourly_paths_pkey scan=Forward",
+ "        Result [InitPlan]",
+ "          Limit [InitPlan]",
+ "            Index Only Scan on analytics_hourly_paths analytics_hourly_paths_1 using analytics_hourly_paths_pkey scan=Backward",
+ "        Aggregate partial=Simple {Hashed}",
+ "          ProjectSet",
+ "            Result",
+ "        Nested Loop",
+ "          Function Scan",
+ "          Index Scan on analytics_hourly_paths x using analytics_hourly_paths_pkey scan=Forward"
+]

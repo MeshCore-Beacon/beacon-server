@@ -48,6 +48,7 @@ type InsertedChannelMessage struct {
 
 // channelMessageEvent is the JSON payload for a channelMessage WS event.
 type channelMessageEvent struct {
+	IsPublic    bool                   `json:"isPublic"` // True only when decryption used the documented default Public key, never inferred from a one-byte channel hash.
 	ID          int64                  `json:"id"`
 	ChannelID   int                    `json:"channelId"`
 	ChannelHash string                 `json:"channelHash"` // hex-encoded single byte
@@ -82,7 +83,10 @@ type nodeUpdateEvent struct {
 // new observation is confirmed inserted. Currently handles:
 //   - PayloadTypeAdvert (0x04): upsert node and node_iatas
 //   - PayloadTypeGrpTxt (0x05): decrypt and store channel message if key is known
-func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshcore.Packet, iata string, packetHash []byte, radio RadioSettings, scopeID *int32, matchedScope *string, observerPubkey []byte, rxSNR float32) {
+//
+// siteRecorded says an earlier Add for this hearing found the stored message, so its site is already recorded.
+// packetKnown says the packet was stored before this hearing.
+func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshcore.Packet, iata string, packetHash []byte, radio RadioSettings, scopeID *int32, matchedScope *string, observerPubkey []byte, rxSNR *float32, siteRecorded, packetKnown bool) {
 	if packet.PayloadType() == meshcore.PayloadTypeAdvert {
 		advert, err := meshcore.AdvertFromBytes(packet.Payload)
 		if err != nil {
@@ -149,7 +153,7 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 			observerNodeID, oErr := w.db.GetNodeByPubkey(ctx, observerPubkey)
 			if oErr == nil && observerNodeID != nodeID {
 				snr := rxSNR
-				if err := w.db.UpsertNodeNeighbor(ctx, observerNodeID, nodeID, iata, &snr, nil); err != nil {
+				if err := w.db.UpsertNodeNeighbor(ctx, observerNodeID, nodeID, iata, snr, nil); err != nil {
 					w.log.Error("failed to upsert observer-advert neighbor", "error", err)
 				}
 			}
@@ -200,40 +204,42 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 		return
 	}
 	if packet.PayloadType() == meshcore.PayloadTypeGrpTxt {
-		grpTxt, err := meshcore.GroupTextFromBytes(packet.Payload)
+		// A packet stored before this hearing that decrypts only now (its key arrived since, or the background
+		// backfill has not reached it yet) has earlier hearings in hours that may already be rolled up: store its
+		// message as historical, as the backfill would, so those hours are re-rolled.
+		result, err := StoreGroupText(ctx, w.db, w.keys, packetHash, packet.Payload, iata, siteRecorded, packetKnown)
 		if err != nil {
-			w.log.Warn("error decoding group text payload", "error", err)
-			return
-		}
-		channelHashBytes := []byte{grpTxt.ChannelHash}
-
-		result, err := DecryptGroupText(ctx, w.db, w.keys, packetHash, packet.Payload, false)
-		if err != nil {
-			w.log.Error("decrypt group text failed", "error", err)
+			if _, decodeErr := meshcore.GroupTextFromBytes(packet.Payload); decodeErr != nil {
+				w.log.Warn("error decoding group text payload", "error", decodeErr)
+			} else {
+				w.log.Error("decrypt group text failed", "error", err)
+			}
 			return
 		}
 		if result == nil {
 			// none of the known keys worked for this hash (or none are known at all);
 			// record a hash-only row so the channel is still visible. If a matching key
-			// gets added to the config later, BackfillChannelMessages retries this packet
-			// at the next boot.
-			_, _ = w.db.UpsertChannelHashOnly(ctx, channelHashBytes)
+			// gets added to the config later, the decrypt backfill retries this packet
+			// after the next boot.
+			grpTxt, _ := meshcore.GroupTextFromBytes(packet.Payload) // decoded inside StoreGroupText
+			_, _ = w.db.UpsertChannelHashOnly(ctx, []byte{grpTxt.ChannelHash})
 			return
 		}
 
 		if result.Message != nil {
 			evt := channelMessageEvent{
+				IsPublic:    hex.EncodeToString(result.Entry.Key) == "8b3387e9c5cdea6ac9e5edbaa115cd72",
 				ID:          result.Message.ID,
 				Scope:       result.Message.Scope,
 				ScopeStatus: result.Message.ScopeStatus,
 				ChannelID:   result.ChannelID,
-				ChannelHash: hex.EncodeToString(channelHashBytes),
+				ChannelHash: hex.EncodeToString(result.ChannelHash),
 				PacketHash:  hex.EncodeToString(packetHash),
 				SenderName:  cleanText(result.Payload.Sender),
 				Content:     cleanText(result.Payload.Text),
 				SentAt:      time.Unix(int64(result.Payload.Timestamp), 0).UnixMilli(),
 			}
-			w.broadcast(hub.EventChannelMessage, iata, 0, fmt.Sprintf("%02x", grpTxt.ChannelHash), evt)
+			w.broadcast(hub.EventChannelMessage, iata, 0, fmt.Sprintf("%02x", result.ChannelHash[0]), evt)
 		}
 		return
 	}

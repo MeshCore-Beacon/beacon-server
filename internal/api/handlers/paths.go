@@ -6,7 +6,6 @@ package handlers
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -53,14 +52,13 @@ func getPathStats(reader api.Reader) http.HandlerFunc {
 		}
 		stats, err := reader.GetPathStats(ctx, since, until, iatas)
 		switch {
-		case errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded):
-			respondError(w, http.StatusServiceUnavailable, "path query timed out; try a shorter time period")
+		case isQueryTimeout(err) || errors.Is(ctx.Err(), context.DeadlineExceeded):
+			respondTimeout(w, "path query timed out; try a shorter time period")
 		case err != nil:
 			if r.Context().Err() != nil {
 				return
 			}
-			slog.Error("path stats failed", "error", err)
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 		default:
 			respond(w, http.StatusOK, stats)
 		}

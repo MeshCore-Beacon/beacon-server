@@ -1,0 +1,3 @@
+[
+ "Index Scan on observer_telemetry using idx_telemetry_observer_recent scan=Backward"
+]

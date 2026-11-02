@@ -1,0 +1,18 @@
+[
+ "Result",
+ "  Limit [InitPlan]",
+ "    LockRows",
+ "      Index Scan on known_routes r using idx_known_routes_keyset scan=Backward",
+ "  ModifyTable on known_routes kr [InitPlan]",
+ "    Nested Loop",
+ "      CTE Scan",
+ "      Index Scan on known_routes kr using known_routes_pkey scan=Forward",
+ "  Aggregate partial=Simple [InitPlan]",
+ "    CTE Scan",
+ "  Limit [InitPlan]",
+ "    Sort",
+ "      CTE Scan",
+ "  Limit [InitPlan]",
+ "    Sort",
+ "      CTE Scan"
+]

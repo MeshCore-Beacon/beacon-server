@@ -47,6 +47,7 @@ func ScopesRouter(reader api.Reader, scopes ScopeMembership) http.Handler {
 //	@Success	200			{array}		string
 //	@Failure	400			{object}	handlers.APIError
 //	@Failure	500			{object}	handlers.APIError
+//	@Failure	503			{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/scopes [get]
 func listScopes(reader api.Reader, scopes ScopeMembership) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -62,7 +63,7 @@ func listScopes(reader api.Reader, scopes ScopeMembership) http.HandlerFunc {
 		} else if len(iatas) == 0 {
 			names, err := reader.GetScopeNames(r.Context())
 			if err != nil {
-				respondError(w, http.StatusInternalServerError, "internal server error")
+				respondReaderError(w, err, "internal server error")
 				return
 			}
 			respond(w, http.StatusOK, names)
@@ -82,6 +83,7 @@ func listScopes(reader api.Reader, scopes ScopeMembership) http.HandlerFunc {
 //	@Success	200		{object}	api.ScopeDetail
 //	@Failure	404		{object}	handlers.APIError
 //	@Failure	500		{object}	handlers.APIError
+//	@Failure	503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/scopes/{name} [get]
 func getScope(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -92,7 +94,7 @@ func getScope(reader api.Reader) http.HandlerFunc {
 			respondError(w, http.StatusNotFound, "scope not found")
 			return
 		case err != nil:
-			respondError(w, http.StatusInternalServerError, "failed to load scope")
+			respondReaderError(w, err, "failed to load scope")
 			return
 		}
 		respond(w, http.StatusOK, scope)

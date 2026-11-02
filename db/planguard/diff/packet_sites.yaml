@@ -1,0 +1,409 @@
+# Copyright 2026 Beacon Contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Region packet pages on the overlay overlay/packet_sites.sql (schema t_s6a):
+#   - truth walks: the oracle (packet_observations, independent of packet_sites) fetched as one page of 2,000 rows
+#     against the one-site and several-site statements walked by (site_heard_at, packet_hash) at --walk 1,2,3,web;
+#   - old vs new single pages: today's ListPacketsByIATAs (millisecond cursor, a per-site scan of (limit+1)*8
+#     observations, the latest observer without a tie-break) against the statement the server now runs, at the same
+#     millisecond: the named classes (tie order, a saturated short page that is a prefix of the full one, the latest
+#     observer on tied hearings, a short saturated page the new statement fills, and different members of a group
+#     of tied rows the page limit cuts) are the only differences
+#     allowed.
+# The bounded window, scope and many-type forms are two statements (keys, then rows) and are compared page by page
+# with the observations by the store tests and storediff/packet_sites.yaml.
+# Sites are picked by role among the newest 200,000 observation ids; cursors count back from the list's newest row.
+#   psql "$DSN" -v ON_ERROR_STOP=1 -f db/planguard/overlay/packet_sites.sql
+#   planguard diff --old-ref <base> --cases db/planguard/diff/packet_sites.yaml --walk 1,2,3,web --dsn ...
+# then DROP SCHEMA t_s6a CASCADE.
+batches:
+  - name: packet_sites
+    search_path: "t_s6a, public"
+    statements:
+      old: "old:ListPacketsByIATAs"
+      oracle: "file:sql/oracle/OracleBySites.sql"
+      site: "new:ListPacketsBySite"
+      sites: "new:ListPacketsBySites"
+      first: "new:ListPacketsBySitesFirst"
+      typedfirst: "new:ListPacketsBySitesTypedFirst"
+    pairs:
+      - id: ps.walk.busy1.p1
+        ref: {stmt: oracle, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r))::bpchar[]"}, "infinity", "\\x", 2]}
+        cands:
+          - {stmt: site, params: [{sql: "SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r"}, "infinity", "\\x", 2]}
+        key: [site_heard_at]
+        walk:
+          limit_param: 4
+          fetch_extra: 1
+          cursor: [{param: 2, column: site_heard_at}, {param: 3, column: packet_hash}]
+          first: ["infinity", "\\x"]
+          web_limit: 50
+          oracle: true
+      - id: ps.walk.busy13.p1
+        ref: {stmt: oracle, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r))::bpchar[]"}, "infinity", "\\x", 2]}
+        cands:
+          - {stmt: sites, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r))::bpchar[]"}, "infinity", "\\x", 2]}
+        key: [site_heard_at]
+        walk:
+          limit_param: 4
+          fetch_extra: 1
+          cursor: [{param: 2, column: site_heard_at}, {param: 3, column: packet_hash}]
+          first: ["infinity", "\\x"]
+          web_limit: 50
+          oracle: true
+      - id: ps.walk.busy7.p1
+        ref: {stmt: oracle, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[]"}, "infinity", "\\x", 2]}
+        cands:
+          - {stmt: sites, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[]"}, "infinity", "\\x", 2]}
+        key: [site_heard_at]
+        walk:
+          limit_param: 4
+          fetch_extra: 1
+          cursor: [{param: 2, column: site_heard_at}, {param: 3, column: packet_hash}]
+          first: ["infinity", "\\x"]
+          web_limit: 50
+          oracle: true
+      - id: ps.walk.mid.p1
+        ref: {stmt: oracle, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata OFFSET 19 LIMIT 10) r))::bpchar[]"}, "infinity", "\\x", 2]}
+        cands:
+          - {stmt: sites, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata OFFSET 19 LIMIT 10) r))::bpchar[]"}, "infinity", "\\x", 2]}
+        key: [site_heard_at]
+        walk:
+          limit_param: 4
+          fetch_extra: 1
+          cursor: [{param: 2, column: site_heard_at}, {param: 3, column: packet_hash}]
+          first: ["infinity", "\\x"]
+          web_limit: 50
+          oracle: true
+      - id: ps.walk.sparse.p1
+        ref: {stmt: oracle, params: [{sql: "SELECT (SELECT ARRAY[(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r), (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata) r ORDER BY n, iata LIMIT 1)])::bpchar[]"}, "infinity", "\\x", 2]}
+        cands:
+          - {stmt: sites, params: [{sql: "SELECT (SELECT ARRAY[(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r), (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata) r ORDER BY n, iata LIMIT 1)])::bpchar[]"}, "infinity", "\\x", 2]}
+        key: [site_heard_at]
+        walk:
+          limit_param: 4
+          fetch_extra: 1
+          cursor: [{param: 2, column: site_heard_at}, {param: 3, column: packet_hash}]
+          first: ["infinity", "\\x"]
+          web_limit: 50
+          oracle: true
+      - id: ps.old.busy1.p1.l50
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r))::bpchar[]"}, null, null, null, null, null, null, 408, 51]}
+        cands:
+          - {stmt: site, params: [{sql: "SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r"}, "infinity", "\\x", 51]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.busy1.p1.l200
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r))::bpchar[]"}, null, null, null, null, null, null, 1608, 201]}
+        cands:
+          - {stmt: site, params: [{sql: "SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r"}, "infinity", "\\x", 201]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.busy1.1day.l50
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r))::bpchar[])) - interval '1 day')"}, null, null, null, null, null, 408, 51]}
+        cands:
+          - {stmt: site, params: [{sql: "SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r))::bpchar[])) - interval '1 day')"}, "\\x", 51]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.busy1.1day.l200
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r))::bpchar[])) - interval '1 day')"}, null, null, null, null, null, 1608, 201]}
+        cands:
+          - {stmt: site, params: [{sql: "SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r))::bpchar[])) - interval '1 day')"}, "\\x", 201]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.busy1.60hours.l50
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r))::bpchar[])) - interval '60 hours')"}, null, null, null, null, null, 408, 51]}
+        cands:
+          - {stmt: site, params: [{sql: "SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r))::bpchar[])) - interval '60 hours')"}, "\\x", 51]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.busy1.60hours.l200
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r))::bpchar[])) - interval '60 hours')"}, null, null, null, null, null, 1608, 201]}
+        cands:
+          - {stmt: site, params: [{sql: "SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r))::bpchar[])) - interval '60 hours')"}, "\\x", 201]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.busy13.p1.l50
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r))::bpchar[]"}, null, null, null, null, null, null, 408, 51]}
+        cands:
+          - {stmt: first, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r))::bpchar[]"}, "infinity", "\\x", 51]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.busy13.p1.l200
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r))::bpchar[]"}, null, null, null, null, null, null, 1608, 201]}
+        cands:
+          - {stmt: first, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r))::bpchar[]"}, "infinity", "\\x", 201]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.busy13.1day.l50
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r))::bpchar[])) - interval '1 day')"}, null, null, null, null, null, 408, 51]}
+        cands:
+          - {stmt: sites, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r))::bpchar[])) - interval '1 day')"}, "\\x", 51]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.busy13.1day.l200
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r))::bpchar[])) - interval '1 day')"}, null, null, null, null, null, 1608, 201]}
+        cands:
+          - {stmt: sites, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r))::bpchar[])) - interval '1 day')"}, "\\x", 201]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.busy13.60hours.l50
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r))::bpchar[])) - interval '60 hours')"}, null, null, null, null, null, 408, 51]}
+        cands:
+          - {stmt: sites, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r))::bpchar[])) - interval '60 hours')"}, "\\x", 51]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.busy13.60hours.l200
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r))::bpchar[])) - interval '60 hours')"}, null, null, null, null, null, 1608, 201]}
+        cands:
+          - {stmt: sites, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 13) r))::bpchar[])) - interval '60 hours')"}, "\\x", 201]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.busy7.p1.l50
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[]"}, null, null, null, null, null, null, 408, 51]}
+        cands:
+          - {stmt: first, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[]"}, "infinity", "\\x", 51]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.busy7.p1.l200
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[]"}, null, null, null, null, null, null, 1608, 201]}
+        cands:
+          - {stmt: first, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[]"}, "infinity", "\\x", 201]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.busy7.1day.l50
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[])) - interval '1 day')"}, null, null, null, null, null, 408, 51]}
+        cands:
+          - {stmt: sites, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[])) - interval '1 day')"}, "\\x", 51]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.busy7.1day.l200
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[])) - interval '1 day')"}, null, null, null, null, null, 1608, 201]}
+        cands:
+          - {stmt: sites, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[])) - interval '1 day')"}, "\\x", 201]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.busy7.60hours.l50
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[])) - interval '60 hours')"}, null, null, null, null, null, 408, 51]}
+        cands:
+          - {stmt: sites, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[])) - interval '60 hours')"}, "\\x", 51]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.busy7.60hours.l200
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[])) - interval '60 hours')"}, null, null, null, null, null, 1608, 201]}
+        cands:
+          - {stmt: sites, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[])) - interval '60 hours')"}, "\\x", 201]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.mid.p1.l50
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata OFFSET 19 LIMIT 10) r))::bpchar[]"}, null, null, null, null, null, null, 408, 51]}
+        cands:
+          - {stmt: first, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata OFFSET 19 LIMIT 10) r))::bpchar[]"}, "infinity", "\\x", 51]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.mid.p1.l200
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata OFFSET 19 LIMIT 10) r))::bpchar[]"}, null, null, null, null, null, null, 1608, 201]}
+        cands:
+          - {stmt: first, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata OFFSET 19 LIMIT 10) r))::bpchar[]"}, "infinity", "\\x", 201]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.mid.1day.l50
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata OFFSET 19 LIMIT 10) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata OFFSET 19 LIMIT 10) r))::bpchar[])) - interval '1 day')"}, null, null, null, null, null, 408, 51]}
+        cands:
+          - {stmt: sites, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata OFFSET 19 LIMIT 10) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata OFFSET 19 LIMIT 10) r))::bpchar[])) - interval '1 day')"}, "\\x", 51]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.mid.1day.l200
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata OFFSET 19 LIMIT 10) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata OFFSET 19 LIMIT 10) r))::bpchar[])) - interval '1 day')"}, null, null, null, null, null, 1608, 201]}
+        cands:
+          - {stmt: sites, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata OFFSET 19 LIMIT 10) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata OFFSET 19 LIMIT 10) r))::bpchar[])) - interval '1 day')"}, "\\x", 201]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.mid.60hours.l50
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata OFFSET 19 LIMIT 10) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata OFFSET 19 LIMIT 10) r))::bpchar[])) - interval '60 hours')"}, null, null, null, null, null, 408, 51]}
+        cands:
+          - {stmt: sites, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata OFFSET 19 LIMIT 10) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata OFFSET 19 LIMIT 10) r))::bpchar[])) - interval '60 hours')"}, "\\x", 51]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.mid.60hours.l200
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata OFFSET 19 LIMIT 10) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata OFFSET 19 LIMIT 10) r))::bpchar[])) - interval '60 hours')"}, null, null, null, null, null, 1608, 201]}
+        cands:
+          - {stmt: sites, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata OFFSET 19 LIMIT 10) r))::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata OFFSET 19 LIMIT 10) r))::bpchar[])) - interval '60 hours')"}, "\\x", 201]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.sparse.p1.l50
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY[(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r), (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata) r ORDER BY n, iata LIMIT 1)])::bpchar[]"}, null, null, null, null, null, null, 408, 51]}
+        cands:
+          - {stmt: first, params: [{sql: "SELECT (SELECT ARRAY[(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r), (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata) r ORDER BY n, iata LIMIT 1)])::bpchar[]"}, "infinity", "\\x", 51]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.sparse.p1.l200
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY[(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r), (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata) r ORDER BY n, iata LIMIT 1)])::bpchar[]"}, null, null, null, null, null, null, 1608, 201]}
+        cands:
+          - {stmt: first, params: [{sql: "SELECT (SELECT ARRAY[(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r), (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata) r ORDER BY n, iata LIMIT 1)])::bpchar[]"}, "infinity", "\\x", 201]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.sparse.1day.l50
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY[(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r), (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata) r ORDER BY n, iata LIMIT 1)])::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY[(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r), (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata) r ORDER BY n, iata LIMIT 1)])::bpchar[])) - interval '1 day')"}, null, null, null, null, null, 408, 51]}
+        cands:
+          - {stmt: sites, params: [{sql: "SELECT (SELECT ARRAY[(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r), (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata) r ORDER BY n, iata LIMIT 1)])::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY[(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r), (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata) r ORDER BY n, iata LIMIT 1)])::bpchar[])) - interval '1 day')"}, "\\x", 51]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.sparse.1day.l200
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY[(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r), (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata) r ORDER BY n, iata LIMIT 1)])::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY[(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r), (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata) r ORDER BY n, iata LIMIT 1)])::bpchar[])) - interval '1 day')"}, null, null, null, null, null, 1608, 201]}
+        cands:
+          - {stmt: sites, params: [{sql: "SELECT (SELECT ARRAY[(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r), (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata) r ORDER BY n, iata LIMIT 1)])::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY[(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r), (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata) r ORDER BY n, iata LIMIT 1)])::bpchar[])) - interval '1 day')"}, "\\x", 201]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.sparse.60hours.l50
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY[(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r), (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata) r ORDER BY n, iata LIMIT 1)])::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY[(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r), (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata) r ORDER BY n, iata LIMIT 1)])::bpchar[])) - interval '60 hours')"}, null, null, null, null, null, 408, 51]}
+        cands:
+          - {stmt: sites, params: [{sql: "SELECT (SELECT ARRAY[(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r), (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata) r ORDER BY n, iata LIMIT 1)])::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY[(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r), (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata) r ORDER BY n, iata LIMIT 1)])::bpchar[])) - interval '60 hours')"}, "\\x", 51]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.sparse.60hours.l200
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY[(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r), (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata) r ORDER BY n, iata LIMIT 1)])::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY[(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r), (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata) r ORDER BY n, iata LIMIT 1)])::bpchar[])) - interval '60 hours')"}, null, null, null, null, null, 1608, 201]}
+        cands:
+          - {stmt: sites, params: [{sql: "SELECT (SELECT ARRAY[(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r), (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata) r ORDER BY n, iata LIMIT 1)])::bpchar[]"}, {sql: "SELECT date_trunc('milliseconds', (SELECT max(ps.site_heard_at) FROM packet_sites ps WHERE ps.iata = ANY((SELECT ARRAY[(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 1) r), (SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata) r ORDER BY n, iata LIMIT 1)])::bpchar[])) - interval '60 hours')"}, "\\x", 201]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.busy7.adverts.l50
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[]"}, null, "{4}", null, null, null, null, 408, 51]}
+        cands:
+          - {stmt: typedfirst, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[]"}, "{4}", "{0,1,2,3}", "infinity", "\\x", 51]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}
+      - id: ps.old.busy7.adverts.l200
+        ref: {stmt: old, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[]"}, null, "{4}", null, null, null, null, 1608, 201]}
+        cands:
+          - {stmt: typedfirst, params: [{sql: "SELECT (SELECT ARRAY(SELECT iata FROM (SELECT po.iata, count(*) n FROM packet_observations po WHERE po.id > (SELECT max(id) - 200000 FROM packet_observations) GROUP BY po.iata ORDER BY n DESC, po.iata LIMIT 7) r))::bpchar[]"}, "{4}", "{0,1,2,3}", "infinity", "\\x", 201]}
+        key: [site_heard_at]
+        allowed: [tie_order, tie_cut, saturated_suffix, saturated_full, latest_observer_tie]
+        tie_cut_identity: packet_hash
+        tie_cut_limit: 9
+        omit: [latest_observer_id, latest_observer_name, latest_observer_iata, latest_observer_path_length_byte, latest_observer_hash_size, latest_observer_hop_count, latest_observer_path_bytes]
+        saturated: {flag: scan_saturated, floor: scan_floor}

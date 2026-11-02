@@ -1,0 +1,21 @@
+[
+ "Result",
+ "  Nested Loop [InitPlan]",
+ "    Index Only Scan on iata_codes c using iata_codes_pkey scan=Forward",
+ "    Limit",
+ "      Index Scan on packet_sites p using idx_packet_sites_site scan=Forward",
+ "  Aggregate partial=Simple [InitPlan]",
+ "    CTE Scan",
+ "  Aggregate partial=Simple [InitPlan]",
+ "    Nested Loop",
+ "      Aggregate partial=Simple {Hashed}",
+ "        CTE Scan",
+ "      Limit",
+ "        Index Only Scan on packet_sites p_1 using idx_packet_sites_site_type scan=Forward",
+ "  Aggregate partial=Simple [InitPlan]",
+ "    Nested Loop",
+ "      Aggregate partial=Simple {Hashed}",
+ "        CTE Scan",
+ "      Limit",
+ "        Index Only Scan on packet_sites p_2 using idx_packet_sites_site_scope scan=Forward"
+]

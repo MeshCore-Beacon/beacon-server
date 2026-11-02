@@ -1,0 +1,18 @@
+[
+ "Sort",
+ "  Limit [InitPlan]",
+ "    Sort",
+ "      Aggregate partial=Simple {Hashed}",
+ "        Seq Scan on analytics_hourly_advert_sets",
+ "  Merge Join (Left)",
+ "    Sort",
+ "      Nested Loop (Left)",
+ "        CTE Scan",
+ "        Index Scan on nodes n using nodes_public_key_key scan=Forward",
+ "    Aggregate partial=Simple {Sorted}",
+ "      Sort",
+ "        Hash Join (Semi)",
+ "          Seq Scan on analytics_hourly_advert_hearings h",
+ "          Hash",
+ "            CTE Scan"
+]

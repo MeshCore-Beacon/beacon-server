@@ -24,6 +24,25 @@ func newTestClient(t *testing.T) (*Client, *miniredis.Miniredis) {
 	return c, mr
 }
 
+func TestSharedFetchRechecksCacheAfterLateMiss(t *testing.T) {
+	c, _ := newTestClient(t)
+	ctx := context.Background()
+	// A caller saw a miss, then another flight populated the key before it
+	// entered the group. That late caller must reuse the completed result.
+	if err := c.rdb.Set(ctx, "late-miss", `{"revision":7}`, time.Hour).Err(); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	raw, err := fetchShared(ctx, c, "late-miss", time.Hour, func(context.Context) (any, error) {
+		calls++
+		return &api.StatsSeries{Revision: 99}, nil
+	})
+	var got api.StatsSeries
+	if err != nil || json.Unmarshal(raw, &got) != nil || got.Revision != 7 || calls != 0 {
+		t.Fatalf("late miss refetched: revision=%d calls=%d err=%v", got.Revision, calls, err)
+	}
+}
+
 // stubReader is a minimal api.Reader that returns preset values.
 type stubReader struct {
 	iatas []api.IATA
@@ -71,8 +90,8 @@ func (s *stubReader) GetIATA(_ context.Context, _ string) (*api.IATA, error) { r
 func (s *stubReader) GetIATABorder(_ context.Context, _ string) (json.RawMessage, error) {
 	return nil, nil
 }
-func (s *stubReader) ListRegions(_ context.Context) ([]api.RegionSummary, error) { return nil, nil }
-func (s *stubReader) GetRegion(_ context.Context, _ int32) (*api.Region, error)  { return nil, nil }
+func (s *stubReader) ListRegions(_ context.Context) ([]api.Region, error)       { return nil, nil }
+func (s *stubReader) GetRegion(_ context.Context, _ int32) (*api.Region, error) { return nil, nil }
 func (s *stubReader) GetRegionBySlug(_ context.Context, _ string) (*api.Region, error) {
 	return nil, nil
 }
@@ -176,16 +195,20 @@ func (s *stubReader) ListMessagesAfterID(_ context.Context, _ int64, _ []string,
 	return nil, nil
 }
 
-func (s *stubReader) ListNodes(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ int32, _ bool) (api.Page[api.NodeSummary], error) {
-	return api.Page[api.NodeSummary]{}, nil
+func (s *stubReader) ListNodes(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
+	return api.NodePage{}, nil
+}
+
+func (s *stubReader) ListNodesSorted(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ api.NodeSort, _ *api.NodeSortCursor, _ int32, _ bool) (api.NodePage, error) {
+	return api.NodePage{}, nil
 }
 
 func (s *stubReader) ListNodeObservations(_ context.Context, _ uuid.UUID, _ int64, _ int32) (api.Page[api.PacketObservationSummary], error) {
 	return api.Page[api.PacketObservationSummary]{}, nil
 }
 
-func (s *stubReader) ListObservers(_ context.Context, _ []string, _, _, _, _, _ string, _ int64, _ int32) (api.Page[api.ObserverSummary], error) {
-	return api.Page[api.ObserverSummary]{}, nil
+func (s *stubReader) ListObservers(_ context.Context, _ []string, _, _, _, _, _ string, _ int64, _ *api.ObserverCursor, _ int32) (api.ObserverPage, error) {
+	return api.ObserverPage{}, nil
 }
 
 func (s *stubReader) ListObserverAdverts(_ context.Context, _ uuid.UUID, _ int64, _ int32) (api.Page[api.AdvertObservation], error) {
@@ -196,15 +219,15 @@ func (s *stubReader) SearchPacketsByHashPrefix(_ context.Context, _, _ []byte, _
 	return api.Page[api.PacketSummary]{}, nil
 }
 
-func (s *stubReader) ListPackets(_ context.Context, _, _ []int16, _ []string, _ []string, _, _ time.Time, _ int64, _ int32) (api.Page[api.PacketSummary], error) {
-	return api.Page[api.PacketSummary]{}, nil
+func (s *stubReader) ListPackets(_ context.Context, _, _ []int16, _ []string, _ []string, _, _ time.Time, _ int64, _ *api.PacketCursor, _ int32) (api.PacketPage, error) {
+	return api.PacketPage{}, nil
 }
 
 func (s *stubReader) ListPacketsAfterID(_ context.Context, _ int64, _, _ int16, _ []string, _ string, _ int32) ([]api.PacketSummary, error) {
 	return nil, nil
 }
 
-func (s *stubReader) ListKnownRoutes(_ context.Context, _ string, _ int32, _ time.Time, _ int64, _ int32) ([]api.KnownRoute, error) {
+func (s *stubReader) ListKnownRoutes(_ context.Context, _ []string, _ int32, _ time.Time, _ int64, _ int32) ([]api.KnownRoute, error) {
 	return nil, nil
 }
 
@@ -453,6 +476,10 @@ func TestCachedReader_InvalidateObserver(t *testing.T) {
 
 func (s *stubReader) GetRouteEvidence(_ context.Context, _, _ string, _ api.RouteEvidenceQuery) (*api.RouteEvidence, error) {
 	return nil, nil
+}
+
+func (s *stubReader) GetTopologyLinks(_ context.Context, _ []string, _ time.Time, _ time.Time) (*api.TopologyLinks, error) {
+	return &api.TopologyLinks{}, nil
 }
 
 func (s *stubReader) ListObserverDirectory(context.Context, api.ObserverDirectoryQuery) (*api.ObserverDirectory, error) {

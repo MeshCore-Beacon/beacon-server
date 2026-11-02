@@ -15,11 +15,11 @@ func TestRateLimitConfig(t *testing.T) {
 		want       ResolvedRateLimitConfig
 		wantError  bool
 	}{
-		{"omitted", "{}", ResolvedRateLimitConfig{true, 300, 300}, false},
-		{"disabled", "ratelimit: {enabled: false}", ResolvedRateLimitConfig{false, 300, 300}, false},
+		{"omitted", "{}", ResolvedRateLimitConfig{true, 600, 600}, false},
+		{"disabled", "ratelimit: {enabled: false}", ResolvedRateLimitConfig{false, 600, 600}, false},
 		{"custom", "ratelimit: {enabled: true, requests_per_minute: 900, burst: 100}", ResolvedRateLimitConfig{true, 900, 100}, false},
-		{"burst default follows budget", "ratelimit: {requests_per_minute: 600}", ResolvedRateLimitConfig{true, 600, 600}, false},
-		{"zero defaults", "ratelimit: {requests_per_minute: 0, burst: 0}", ResolvedRateLimitConfig{true, 300, 300}, false},
+		{"burst default follows budget", "ratelimit: {requests_per_minute: 1200}", ResolvedRateLimitConfig{true, 1200, 1200}, false},
+		{"zero defaults", "ratelimit: {requests_per_minute: 0, burst: 0}", ResolvedRateLimitConfig{true, 600, 600}, false},
 		{"negative minute", "ratelimit: {requests_per_minute: -1}", ResolvedRateLimitConfig{}, true},
 		{"negative burst", "ratelimit: {burst: -1}", ResolvedRateLimitConfig{}, true},
 		{"invalid disabled config", "ratelimit: {enabled: false, burst: -1}", ResolvedRateLimitConfig{}, true},
@@ -39,7 +39,7 @@ func TestRateLimitConfig(t *testing.T) {
 		})
 	}
 	cfg, err := Load(filepath.Join(t.TempDir(), "missing.yaml"))
-	if err != nil || Resolve(cfg).RateLimit != (ResolvedRateLimitConfig{true, 300, 300}) {
+	if err != nil || Resolve(cfg).RateLimit != (ResolvedRateLimitConfig{true, 600, 600}) {
 		t.Fatalf("missing config did not enable defaults: %v", err)
 	}
 }

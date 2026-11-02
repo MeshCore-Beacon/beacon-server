@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -112,5 +113,126 @@ func TestApplyMigrationRecoversInvalidIndexPostgres(t *testing.T) {
 	plain := "CREATE INDEX " + index + " ON " + table + " (v)"
 	if err := applyMigration(ctx, conn, plain); !isDuplicateRelation(err) {
 		t.Fatalf("plain duplicate index must surface 42P07, got %v", err)
+	}
+}
+
+const drop004 = "004_drop_known_routes_iata_last_seen.sql"
+
+// Every index the migrations leave must be usable, and 004 must also apply where an operator already dropped it by hand.
+func TestRunMigrationsIndexesValidPostgres(t *testing.T) {
+	ctx, pool := schemaPool(t)
+	if err := RunMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	var total int
+	var bad []string
+	if err := pool.QueryRow(ctx, `SELECT count(*), coalesce(array_agg(c.relname::text) FILTER (WHERE NOT (i.indisvalid AND i.indisready)), '{}')
+FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relnamespace = current_schema()::regnamespace`).Scan(&total, &bad); err != nil {
+		t.Fatal(err)
+	}
+	if total == 0 || len(bad) != 0 {
+		t.Fatalf("%d indexes, not valid and ready: %v", total, bad)
+	}
+	var gone bool
+	if err := pool.QueryRow(ctx, "SELECT to_regclass('idx_known_routes_iata_last_seen') IS NULL").Scan(&gone); err != nil || !gone {
+		t.Fatalf("idx_known_routes_iata_last_seen survived migrations: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "DELETE FROM schema_migrations WHERE filename = '"+drop004+"'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := RunMigrations(ctx, pool); err != nil {
+		t.Fatalf("004 after a manual drop: %v", err)
+	}
+	var recorded bool
+	if err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE filename = $1)", drop004).Scan(&recorded); err != nil || !recorded {
+		t.Fatalf("004 not recorded after a manual drop: %v", err)
+	}
+}
+
+const hopIndex006 = "006_known_routes_hop_iata.sql"
+
+// An operator may pre-build the hop index; the migration must record it, not fail or rebuild it.
+func TestRunMigrationsHopIndexPrebuiltPostgres(t *testing.T) {
+	ctx, pool := schemaPool(t)
+	if err := RunMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	var def string
+	if err := pool.QueryRow(ctx, "SELECT pg_get_indexdef('idx_known_routes_hop_iata'::regclass)").Scan(&def); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(def, "USING btree (hop_count, iata)") {
+		t.Fatalf("hop index = %q", def)
+	}
+	var stateTable bool
+	if err := pool.QueryRow(ctx, "SELECT to_regclass('background_state') IS NOT NULL").Scan(&stateTable); err != nil || !stateTable {
+		t.Fatalf("background_state missing: %v", err)
+	}
+	// An operator pre-built the index by hand under the migration's exact name, then the binary boots.
+	if _, err := pool.Exec(ctx, "DELETE FROM schema_migrations WHERE filename = '"+hopIndex006+"'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := RunMigrations(ctx, pool); err != nil {
+		t.Fatalf("006 over a pre-built index: %v", err)
+	}
+	var recorded bool
+	if err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE filename = $1)", hopIndex006).Scan(&recorded); err != nil || !recorded {
+		t.Fatalf("006 not recorded: %v", err)
+	}
+}
+
+// The migrations leave known_routes with exactly the indexes some statement reads, all usable.
+func TestKnownRoutesIndexSetPostgres(t *testing.T) {
+	ctx, pool := schemaPool(t)
+	if err := RunMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	var got, bad []string
+	if err := pool.QueryRow(ctx, `SELECT coalesce(array_agg(indexrelid::regclass::text ORDER BY indexrelid::regclass::text), '{}'),
+       coalesce(array_agg(indexrelid::regclass::text) FILTER (WHERE NOT (indisvalid AND indisready)), '{}')
+FROM pg_index WHERE indrelid = 'known_routes'::regclass`).Scan(&got, &bad); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"idx_known_routes_hop_iata", "idx_known_routes_iata_keyset", "idx_known_routes_keyset", "idx_known_routes_node_ids", "known_routes_pkey"}
+	if strings.Join(got, ",") != strings.Join(want, ",") || len(bad) != 0 {
+		t.Fatalf("known_routes indexes = %v, want %v; not valid and ready: %v", got, want, bad)
+	}
+}
+
+// The operator pre-builds the four packet indexes; the migrations record them, not fail or rebuild them.
+func TestRunMigrationsPacketsIndexesPrebuiltPostgres(t *testing.T) {
+	ctx, pool := schemaPool(t)
+	if err := RunMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	oids := map[string]uint32{}
+	for _, idx := range packetsEndStateIndexes {
+		var oid uint32
+		if err := pool.QueryRow(ctx, "SELECT $1::regclass::oid", idx).Scan(&oid); err != nil {
+			t.Fatalf("%s: %v", idx, err)
+		}
+		oids[idx] = oid
+	}
+	files := []string{
+		"029_packets_last_heard_hash.sql",
+		"030_packets_type_last_heard.sql",
+		"031_packets_scope_last_heard.sql",
+		"032_packets_heard_inverted.sql",
+	}
+	if _, err := pool.Exec(ctx, "DELETE FROM schema_migrations WHERE filename = ANY($1)", files); err != nil {
+		t.Fatal(err)
+	}
+	if err := RunMigrations(ctx, pool); err != nil {
+		t.Fatalf("029-032 over pre-built indexes: %v", err)
+	}
+	checkRecorded(t, ctx, pool, files...)
+	for idx, before := range oids {
+		var after uint32
+		if err := pool.QueryRow(ctx, "SELECT $1::regclass::oid", idx).Scan(&after); err != nil {
+			t.Fatalf("%s: %v", idx, err)
+		}
+		if after != before {
+			t.Errorf("%s rebuilt: oid %d -> %d", idx, before, after)
+		}
 	}
 }

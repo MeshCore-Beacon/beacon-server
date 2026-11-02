@@ -25,7 +25,6 @@ func TestObserverActivityLiveAndFixedWindow(t *testing.T) {
 				mock.EXPECT().GetObserverActivityLiveSummary(gomock.Any(), gomock.Any()).Return(sqlc.GetObserverActivityLiveSummaryRow{}, nil)
 				if interval < time.Hour {
 					mock.EXPECT().GetObserverActivityRaw(gomock.Any(), gomock.Any()).Return(nil, nil)
-					mock.EXPECT().GetObserverActivityRawPayloadTypes(gomock.Any(), gomock.Any()).Return(nil, nil)
 				} else {
 					mock.EXPECT().GetLatestCompleteRollupHour(gomock.Any()).Return(pgtype.Timestamptz{}, nil)
 					mock.EXPECT().GetObserverActivityHourly(gomock.Any(), gomock.Any()).Return(nil, nil)

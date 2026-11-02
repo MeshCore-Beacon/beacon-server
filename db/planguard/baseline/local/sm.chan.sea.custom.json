@@ -1,0 +1,9 @@
+[
+ "Limit",
+ "  Index Scan on channels c using idx_channels_last_seen_id scan=Forward",
+ "    Seq Scan on meshmapper_channel_members m [SubPlan]",
+ "    Seq Scan on channel_config_scopes s [SubPlan]",
+ "      Nested Loop [SubPlan]",
+ "        Index Only Scan on region_iatas ri using region_iatas_pkey scan=Forward",
+ "        Seq Scan on regions r"
+]

@@ -1,0 +1,5 @@
+[
+ "Aggregate partial=Simple",
+ "  Limit",
+ "    Index Only Scan on channel_messages cm using idx_channel_messages_sent scan=Forward"
+]

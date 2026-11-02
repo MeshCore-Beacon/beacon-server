@@ -78,7 +78,7 @@ FROM packets p WHERE p.packet_hash = $1`, hash).Scan(&stored, &raw); err != nil 
 		t.Errorf("packets.observation_count = %d, raw count = %d; want 2", stored, raw)
 	}
 
-	page, err := store.ListPackets(ctx, nil, nil, nil, nil, time.Time{}, time.Time{}, 0, 10)
+	page, err := store.ListPackets(ctx, nil, nil, nil, nil, time.Time{}, time.Time{}, 0, nil, 10)
 	if err != nil {
 		t.Fatal(err)
 	}

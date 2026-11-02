@@ -21,6 +21,10 @@ func (q pathBucketQuerier) GetPathStats(context.Context, sqlc.GetPathStatsParams
 	return []sqlc.GetPathStatsRow{q.row}, nil
 }
 
+func (q pathBucketQuerier) GetPathStatsProbe(context.Context, sqlc.GetPathStatsProbeParams) ([]sqlc.GetPathStatsProbeRow, error) {
+	return []sqlc.GetPathStatsProbeRow{sqlc.GetPathStatsProbeRow(q.row)}, nil
+}
+
 func TestPathStatsRejectsInvalidDatabaseBucket(t *testing.T) {
 	for _, row := range []sqlc.GetPathStatsRow{
 		{HashBytes: 0}, {HashBytes: 4}, {HashBytes: 1, Entries: -1}, {HashBytes: 1, Entries: 64},
@@ -40,6 +44,14 @@ type pathRowsQuerier struct {
 
 func (q pathRowsQuerier) GetPathStats(context.Context, sqlc.GetPathStatsParams) ([]sqlc.GetPathStatsRow, error) {
 	return q.rows, nil
+}
+
+func (q pathRowsQuerier) GetPathStatsProbe(context.Context, sqlc.GetPathStatsProbeParams) ([]sqlc.GetPathStatsProbeRow, error) {
+	out := make([]sqlc.GetPathStatsProbeRow, len(q.rows))
+	for i, r := range q.rows {
+		out[i] = sqlc.GetPathStatsProbeRow(r)
+	}
+	return out, nil
 }
 
 // An hour's maxEntries is the largest across its category/width rows, not the last one seen.

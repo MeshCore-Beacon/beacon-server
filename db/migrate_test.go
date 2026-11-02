@@ -96,3 +96,23 @@ func TestConcurrentMigrationsAvoidIfNotExists(t *testing.T) {
 		}
 	}
 }
+
+func TestIsLockTimeout(t *testing.T) {
+	timeout := &pgconn.PgError{Code: "55P03"}
+	for name, tc := range map[string]struct {
+		err  error
+		want bool
+	}{
+		"55P03":          {timeout, true},
+		"wrapped 55P03":  {fmt.Errorf("apply: %w", timeout), true},
+		"other sqlstate": {&pgconn.PgError{Code: "42P07"}, false},
+		"plain error":    {errors.New("boom"), false},
+		"nil":            {nil, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := isLockTimeout(tc.err); got != tc.want {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

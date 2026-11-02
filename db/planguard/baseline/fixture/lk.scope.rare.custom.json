@@ -1,0 +1,17 @@
+[
+ "Nested Loop",
+ "  Index Scan on transport_scopes ts using transport_scopes_name_key scan=Forward",
+ "  Aggregate partial=Simple",
+ "    Sort",
+ "      Nested Loop",
+ "        Bitmap Heap Scan on analytics_hourly_scope_sets s",
+ "          Bitmap Index Scan using idx_analytics_scope_sets_scope",
+ "        Function Scan",
+ "  Aggregate partial=Simple [SubPlan]",
+ "    Bitmap Heap Scan on analytics_hourly_scope_sets s_1",
+ "      Bitmap Index Scan using idx_analytics_scope_sets_scope",
+ "  Aggregate partial=Simple [SubPlan]",
+ "    Seq Scan on observer_scopes os",
+ "  Aggregate partial=Simple [SubPlan]",
+ "    Seq Scan on nodes n"
+]

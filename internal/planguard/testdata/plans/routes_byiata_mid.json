@@ -1,0 +1,38 @@
+[
+ {
+  "Plan": {
+   "Node Type": "Limit",
+   "Parallel Aware": false,
+   "Total Cost": 166.52,
+   "Plan Rows": 201,
+   "Actual Rows": 201,
+   "Actual Loops": 1,
+   "Shared Hit Blocks": 205,
+   "Shared Read Blocks": 0,
+   "Plans": [
+    {
+     "Node Type": "Index Scan",
+     "Parent Relationship": "Outer",
+     "Parallel Aware": false,
+     "Scan Direction": "Forward",
+     "Index Name": "idx_known_routes_iata_keyset",
+     "Relation Name": "known_routes",
+     "Alias": "known_routes",
+     "Total Cost": 257865.44,
+     "Plan Rows": 312301,
+     "Actual Rows": 201,
+     "Actual Loops": 1,
+     "Index Cond": "((iata >= 'BWE'::bpchar) AND (iata <= 'BWE'::bpchar) AND (ROW(date_trunc('milliseconds'::text, last_seen, 'UTC'::text), id) < ROW('infinity'::timestamp with time zone, '0'::bigint)))",
+     "Shared Hit Blocks": 205,
+     "Shared Read Blocks": 0
+    }
+   ]
+  },
+  "Planning": {
+   "Shared Hit Blocks": 4,
+   "Shared Read Blocks": 0
+  },
+  "Planning Time": 0.051,
+  "Execution Time": 0.078
+ }
+]

@@ -1,0 +1,14 @@
+[
+ "Limit",
+ "  Result",
+ "    Sort",
+ "      Seq Scan on trace_tags t",
+ "        Aggregate partial=Simple [SubPlan]",
+ "          Seq Scan on trace_iatas ti",
+ "        Seq Scan on trace_iatas ti_1 [SubPlan]",
+ "    Index Scan on packets p using idx_packets_trace_tag scan=Forward [SubPlan]",
+ "    Index Scan on packets p_1 using idx_packets_trace_tag scan=Forward [SubPlan]",
+ "    Nested Loop [SubPlan]",
+ "      Index Scan on packets p_2 using idx_packets_trace_tag scan=Forward",
+ "      Index Scan on packet_observations po using idx_observations_packet scan=Forward"
+]

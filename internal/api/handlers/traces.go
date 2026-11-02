@@ -43,6 +43,7 @@ func TracesRouter(reader api.Reader) http.Handler {
 //	@Failure	400			{object}	handlers.APIError
 //	@Success	200			{object}	[]api.TraceTagSummary
 //	@Failure	500			{object}	handlers.APIError
+//	@Failure	503			{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/traces [get]
 func listTraceTags(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -92,7 +93,7 @@ func listTraceTags(reader api.Reader) http.HandlerFunc {
 		traceType := strings.ToUpper(r.URL.Query().Get("type"))
 		tags, err := reader.ListTraceTags(r.Context(), iatas, scope, traceType, since, until, cursor, cursorTag, limit)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, tags)
@@ -108,13 +109,14 @@ func listTraceTags(reader api.Reader) http.HandlerFunc {
 //	@Success	200	{object}	api.TraceDetail
 //	@Failure	404	{object}	handlers.APIError
 //	@Failure	500	{object}	handlers.APIError
+//	@Failure	503	{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/traces/{tag} [get]
 func getTrace(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tag := chi.URLParam(r, "tag")
 		trace, err := reader.GetTraceByTag(r.Context(), tag)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		if trace == nil {

@@ -1,0 +1,5 @@
+[
+ "Sort",
+ "  Aggregate partial=Simple {Hashed}",
+ "    Seq Scan on nodes n"
+]

@@ -14,9 +14,22 @@ import (
 )
 
 func (s *Store) GetPathStats(ctx context.Context, since, until time.Time, iatas []string) (*api.PathStats, error) {
-	rows, err := s.q.GetPathStats(ctx, sqlc.GetPathStatsParams{Since: pgtype.Timestamptz{Time: since, Valid: true}, Until: pgtype.Timestamptz{Time: until, Valid: true}, Iatas: iatas})
-	if err != nil {
-		return nil, err
+	from, to := pgtype.Timestamptz{Time: since, Valid: true}, pgtype.Timestamptz{Time: until, Valid: true}
+	var rows []sqlc.GetPathStatsRow
+	if useStatsProbe(iatas, since, until) {
+		probeRows, err := s.q.GetPathStatsProbe(ctx, sqlc.GetPathStatsProbeParams{Since: from, Until: to, Iatas: iatas})
+		if err != nil {
+			return nil, err
+		}
+		rows = make([]sqlc.GetPathStatsRow, len(probeRows))
+		for i, r := range probeRows {
+			rows[i] = sqlc.GetPathStatsRow(r)
+		}
+	} else {
+		var err error
+		if rows, err = s.q.GetPathStats(ctx, sqlc.GetPathStatsParams{Since: from, Until: to, Iatas: iatas}); err != nil {
+			return nil, err
+		}
 	}
 	stats := &api.PathStats{Since: since.UnixMilli(), Until: until.UnixMilli(), HashWidths: []api.PathHashWidth{{Bytes: 1}, {Bytes: 2}, {Bytes: 3}}, PathLengths: []api.PathLengthBin{}, Hourly: []api.PathHour{}}
 	var lengths [64]int64

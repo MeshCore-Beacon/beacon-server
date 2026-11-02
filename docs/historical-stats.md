@@ -26,6 +26,13 @@ use a completed whole-hour rollup.
   an hour turns partial; `analytics_raw_state.coverage` increases when retention deletes
   rollup hours. Cache keys for rollup-backed endpoints include their sum (each counter only
   grows), read through a 10 s memo.
+- **Warming.** With Redis on, the `stats_warm` task (every minute) re-requests the web's
+  default Analytics views for all regions (7-day range) through the stats handler whenever
+  their key changes: a new revision, the hour turning, or the rolled window moving at :35.
+  All-regions reads take seconds on a large deployment and few visitors ask for them, so
+  without it nearly every one missed. Keep `defaultStatsViews`
+  (`internal/background/stats_warm.go`) in step with beacon-web's stats hooks; its test
+  replays the web's requests and fails if one misses the warmed keys.
 - **Raw deletion.** Cleanup deletes packets older than `packets.retention`, but holds the
   cutoff 35 minutes behind the oldest `missing` hour, for at most 24 hours (it logs a
   warning past 6). Each batch advances `analytics_raw_state.raw_deleted_before` to the
@@ -34,8 +41,9 @@ use a completed whole-hour rollup.
   lost raw rows before it was rolled. It is marked `partial` and never rolled; readers
   report it without values, except the observer directory, which counts any retained raw
   observations in the requested slice.
-- **Re-rolls.** Hours are not re-rolled periodically. A message stored by channel backfill (at
-  startup, and when keys are imported at runtime) queues every hour its packet was heard in
+- **Re-rolls.** Hours are not re-rolled periodically. A message stored by channel backfill (in
+  the background after startup, and when keys are imported at runtime), or by a live hearing of
+  a packet stored before it, queues every hour its packet was heard in
   `analytics_dirty_hours`, in the same statement as the message insert. Each pass re-rolls a
   few complete ones while their raw rows remain. A queued hour still waiting for its first roll
   keeps its entry unless that roll's snapshot already included it.
@@ -70,6 +78,15 @@ raw observations for every other hour and the exact boundary slices. These sourc
 overlap. Completed whole-hour history survives raw retention; a sliced boundary whose raw
 rows have expired cannot be reconstructed from its whole-hour total.
 
+Reading every raw observation of the unrolled hours is the slow part on a large deployment
+(new rows land wherever cleanup freed space, so it costs about a heap page per row). The
+process that ingests therefore also counts each stored observation in memory, per minute,
+observer and IATA (`internal/obscount`, kept 4 hours). An unrolled hour that starts after
+counting began (plus the 30-minute ingest clamp), is not partial and is past cleanup's cutoff
+takes its counts from there, and only its last partial minute is read raw. The results are the
+same either way (`TestObserverDirectoryLiveCountsMatchRawPostgres`); a process that doesn't
+ingest, and any other hour, reads raw rows as before.
+
 Every observer receives a numeric `observationCount`, including zero. `maxObservationCount`
 is the maximum across all matching observers, independent of pagination, and is zero when
 none match. Incomplete history never suppresses these counts or changes `effectiveSort`:
@@ -102,7 +119,11 @@ region or all IATAs.
 ## Raw or current, by design
 
 - Packet, trace and route detail, the packet list, observer comparison, and observer
-  activity below one hour. Hourly observer activity reads raw rows for the hours after the
+  activity below one hour. Sub-hour activity reads its raw rows in one pass; at 15 minutes the
+  process that ingests serves the slots it has counted in memory (`obscount.Activity`, kept 25
+  hours, the same coverage and cleanup rules as the directory's counts) and reads raw rows only
+  before them and for the slot still filling (`TestObserverActivityLiveCountsMatchRawPostgres`).
+  Hourly observer activity reads raw rows for the hours after the
   newest complete one (at most the last 24 hours, the raw holdback), so the unrolled tail isn't
   shown as zero. `rolledUntil` and `rawFrom` in the response mark any hours still uncovered.
 - Current memberships: scope observer and node counts, node types, clock drift, radio presets.

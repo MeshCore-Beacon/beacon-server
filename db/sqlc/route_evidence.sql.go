@@ -13,7 +13,8 @@ import (
 )
 
 const getRouteEvidenceRoute = `-- name: GetRouteEvidenceRoute :one
-SELECT id, path_key, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count, last_reconfirmed_at FROM known_routes
+SELECT id, path_key, node_ids, hash_prefix, iata, hop_count, first_seen, last_seen, observation_count
+FROM known_routes
 WHERE iata = $1::bpchar AND path_key = $2::bytea
 `
 
@@ -35,7 +36,6 @@ func (q *Queries) GetRouteEvidenceRoute(ctx context.Context, arg GetRouteEvidenc
 		&i.FirstSeen,
 		&i.LastSeen,
 		&i.ObservationCount,
-		&i.LastReconfirmedAt,
 	)
 	return i, err
 }

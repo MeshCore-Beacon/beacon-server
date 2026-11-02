@@ -6,8 +6,10 @@ package handlers
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -128,8 +130,8 @@ func TestListPacketsBackfill_InvalidLimit(t *testing.T) {
 func TestListPackets_OK(t *testing.T) {
 	r := chi.NewRouter()
 	r.Get("/packets", listPackets(stubReader{
-		listPackets: func(_ context.Context, _, _ []int16, _ []string, _ []string, _, _ time.Time, _ int64, _ int32) (api.Page[api.PacketSummary], error) {
-			return api.Page[api.PacketSummary]{Items: []api.PacketSummary{{PacketHash: "deadbeef"}}}, nil
+		listPackets: func(_ context.Context, _, _ []int16, _ []string, _ []string, _, _ time.Time, _ int64, _ *api.PacketCursor, _ int32) (api.PacketPage, error) {
+			return api.PacketPage{Page: api.Page[api.PacketSummary]{Items: []api.PacketSummary{{PacketHash: "deadbeef"}}}}, nil
 		},
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/packets", nil)
@@ -145,11 +147,11 @@ func TestListPackets_PluralParams_PassedThrough(t *testing.T) {
 	var gotScopes []string
 	r := chi.NewRouter()
 	r.Get("/packets", listPackets(stubReader{
-		listPackets: func(_ context.Context, payloadTypes, routeTypes []int16, _ []string, scopes []string, _, _ time.Time, _ int64, _ int32) (api.Page[api.PacketSummary], error) {
+		listPackets: func(_ context.Context, payloadTypes, routeTypes []int16, _ []string, scopes []string, _, _ time.Time, _ int64, _ *api.PacketCursor, _ int32) (api.PacketPage, error) {
 			gotPayloadTypes = payloadTypes
 			gotRouteTypes = routeTypes
 			gotScopes = scopes
-			return api.Page[api.PacketSummary]{}, nil
+			return api.PacketPage{Page: api.Page[api.PacketSummary]{}}, nil
 		},
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/packets?payloadTypes=2,4&routeTypes=0,1&scopes=%23bc,%23west", nil)
@@ -174,11 +176,11 @@ func TestListPackets_SingularParams_StillWork(t *testing.T) {
 	var gotScopes []string
 	r := chi.NewRouter()
 	r.Get("/packets", listPackets(stubReader{
-		listPackets: func(_ context.Context, payloadTypes, routeTypes []int16, _ []string, scopes []string, _, _ time.Time, _ int64, _ int32) (api.Page[api.PacketSummary], error) {
+		listPackets: func(_ context.Context, payloadTypes, routeTypes []int16, _ []string, scopes []string, _, _ time.Time, _ int64, _ *api.PacketCursor, _ int32) (api.PacketPage, error) {
 			gotPayloadTypes = payloadTypes
 			gotRouteTypes = routeTypes
 			gotScopes = scopes
-			return api.Page[api.PacketSummary]{}, nil
+			return api.PacketPage{Page: api.Page[api.PacketSummary]{}}, nil
 		},
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/packets?payloadType=4&routeType=1&scope=%23bc", nil)
@@ -204,9 +206,9 @@ func TestListPackets_PluralParams_TakePrecedenceOverSingular(t *testing.T) {
 	var gotPayloadTypes []int16
 	r := chi.NewRouter()
 	r.Get("/packets", listPackets(stubReader{
-		listPackets: func(_ context.Context, payloadTypes, _ []int16, _ []string, _ []string, _, _ time.Time, _ int64, _ int32) (api.Page[api.PacketSummary], error) {
+		listPackets: func(_ context.Context, payloadTypes, _ []int16, _ []string, _ []string, _, _ time.Time, _ int64, _ *api.PacketCursor, _ int32) (api.PacketPage, error) {
 			gotPayloadTypes = payloadTypes
-			return api.Page[api.PacketSummary]{}, nil
+			return api.PacketPage{Page: api.Page[api.PacketSummary]{}}, nil
 		},
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/packets?payloadType=9&payloadTypes=2,4", nil)
@@ -310,9 +312,9 @@ func TestListPackets_HashPrefix(t *testing.T) {
 	var gotIATAs []string
 	r := chi.NewRouter()
 	r.Get("/packets", listPackets(stubReader{
-		listPackets: func(_ context.Context, _, _ []int16, _ []string, _ []string, _, _ time.Time, _ int64, _ int32) (api.Page[api.PacketSummary], error) {
+		listPackets: func(_ context.Context, _, _ []int16, _ []string, _ []string, _, _ time.Time, _ int64, _ *api.PacketCursor, _ int32) (api.PacketPage, error) {
 			t.Error("ListPackets called for a hashPrefix search")
-			return api.Page[api.PacketSummary]{}, nil
+			return api.PacketPage{Page: api.Page[api.PacketSummary]{}}, nil
 		},
 		searchPacketsByHashPrefix: func(_ context.Context, lo, hi []byte, _, _ []int16, iatas []string, _ []string, _, _ time.Time, _ int64, _ int32) (api.Page[api.PacketSummary], error) {
 			gotLo, gotHi, gotIATAs = lo, hi, iatas
@@ -343,5 +345,114 @@ func TestListPackets_HashPrefixInvalid(t *testing.T) {
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("%s: expected 400, got %d", q, w.Code)
 		}
+	}
+}
+
+// wantError fails unless the response is status with exactly this error body.
+func wantError(t *testing.T, w *httptest.ResponseRecorder, status int, message string) {
+	t.Helper()
+	if w.Code != status {
+		t.Fatalf("status = %d, want %d; body %s", w.Code, status, w.Body.String())
+	}
+	var body map[string]APIError
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode %q: %v", w.Body.String(), err)
+	}
+	if got := body["error"].Message; got != message {
+		t.Fatalf("message = %q, want %q", got, message)
+	}
+}
+
+func TestPacketsCursorPrecedence(t *testing.T) {
+	const valid = "v1:1792442625019123:ab01"
+	type call struct {
+		listed, searched bool
+		cursor           int64
+		pageCursor       *api.PacketCursor
+	}
+	var got call
+	next := "v1:1792442625019000:cd02"
+	var withNext bool
+	reader := stubReader{
+		listPackets: func(_ context.Context, _, _ []int16, _, _ []string, _, _ time.Time, cursor int64, pageCursor *api.PacketCursor, _ int32) (api.PacketPage, error) {
+			got = call{listed: true, cursor: cursor, pageCursor: pageCursor}
+			page := api.PacketPage{Page: api.Page[api.PacketSummary]{Items: []api.PacketSummary{}}}
+			if withNext {
+				page.NextPageCursor = &next
+			}
+			return page, nil
+		},
+		searchPacketsByHashPrefix: func(_ context.Context, _, _ []byte, _, _ []int16, _, _ []string, _, _ time.Time, cursor int64, _ int32) (api.Page[api.PacketSummary], error) {
+			got = call{searched: true, cursor: cursor}
+			return api.Page[api.PacketSummary]{Items: []api.PacketSummary{}}, nil
+		},
+	}
+	serve := func(url string) *httptest.ResponseRecorder {
+		got = call{}
+		r := chi.NewRouter()
+		r.Get("/packets", listPackets(reader))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, url, nil))
+		return w
+	}
+
+	w := serve("/packets?pageCursor=" + valid + "&cursor=1792442625000")
+	if w.Code != http.StatusOK {
+		t.Fatalf("both sent: status %d, body %s", w.Code, w.Body.String())
+	}
+	if !got.listed || got.cursor != 1792442625000 || got.pageCursor == nil || got.pageCursor.String() != valid {
+		t.Fatalf("both sent: reader got %+v", got)
+	}
+
+	for _, url := range []string{
+		"/packets?pageCursor=garbage",
+		"/packets?pageCursor=garbage&hashPrefix=abcd",
+		"/packets?pageCursor=garbage&iatas=YVR",
+		"/packets?pageCursor=garbage&region=bc",
+		"/packets?pageCursor=garbage&regionId=1",
+		"/packets?pageCursor=v1:1:",
+		"/packets?pageCursor=garbage&cursor=5",
+	} {
+		w := serve(url)
+		wantError(t, w, http.StatusBadRequest, "invalid pageCursor")
+		if got.listed || got.searched {
+			t.Fatalf("%s: reader called", url)
+		}
+	}
+
+	w = serve("/packets?hashPrefix=abcd&pageCursor=" + valid + "&cursor=5")
+	if w.Code != http.StatusOK || !got.searched || got.cursor != 5 {
+		t.Fatalf("hashPrefix: status %d, reader got %+v", w.Code, got)
+	}
+	if strings.Contains(w.Body.String(), "nextPageCursor") {
+		t.Fatalf("hashPrefix body has nextPageCursor: %s", w.Body.String())
+	}
+
+	wantError(t, serve("/packets?cursor=abc&pageCursor="+valid), http.StatusBadRequest, "cursor must be an integer")
+
+	for _, url := range []string{
+		"/packets?cursor=9223372036854775807",
+		"/packets?cursor=-5",
+		"/packets?payloadTypes=,",
+		"/packets?scopes=%20",
+		"/packets?pageCursor=",
+	} {
+		if w := serve(url); w.Code != http.StatusOK {
+			t.Fatalf("%s: status %d, body %s", url, w.Code, w.Body.String())
+		}
+		if got.pageCursor != nil {
+			t.Fatalf("%s: pageCursor %v, want nil", url, got.pageCursor)
+		}
+	}
+
+	withNext = true
+	w = serve("/packets")
+	if !strings.Contains(w.Body.String(), `"nextPageCursor":"`+next+`"`) {
+		t.Fatalf("body lacks nextPageCursor: %s", w.Body.String())
+	}
+	withNext = false
+	w = serve("/packets")
+	if strings.Contains(w.Body.String(), "nextPageCursor") {
+		t.Fatalf("body has nextPageCursor without one: %s", w.Body.String())
 	}
 }

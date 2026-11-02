@@ -20,7 +20,7 @@ import (
 
 func connectTestServer(t *testing.T, maxConns, maxConnects int) (*httptest.Server, <-chan struct{}) {
 	t.Helper()
-	handler := Handler(hub.New(), nil, maxConns, maxConnects, nil)
+	handler := Handler(hub.New(), nil, Limits{MaxConnsPerIP: maxConns, MaxConnectsPerMinute: maxConnects}, Access{})
 	done := make(chan struct{}, 64)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handler(w, r)
@@ -57,7 +57,7 @@ func TestFailedHandshakeDoesNotUseConnectionSlot(t *testing.T) {
 
 func TestConnectAttemptBudgetAndRecovery(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		handler := Handler(nil, nil, 1, 2, nil)
+		handler := Handler(nil, nil, Limits{MaxConnsPerIP: 1, MaxConnectsPerMinute: 2}, Access{})
 		attempt := func() *httptest.ResponseRecorder {
 			request := httptest.NewRequest(http.MethodGet, "/ws", nil)
 			request.RemoteAddr = "198.51.100.1:1234"
@@ -170,5 +170,39 @@ func TestConnectChurnLimited(t *testing.T) {
 	}
 	if response.Header.Get("Retry-After") != "60" {
 		t.Fatal("missing upgrade retry guidance")
+	}
+}
+
+func TestConnectionCapSharesAnIPv6Slash64(t *testing.T) {
+	h := hub.New()
+	go h.Run()
+	handler := Handler(h, nil, Limits{MaxConnsPerIP: 1, MaxConnectsPerMinute: 100}, Access{})
+	var remote atomic.Value
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.RemoteAddr = remote.Load().(string)
+		handler(w, r)
+	}))
+	t.Cleanup(server.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	dial := func(addr string) error {
+		t.Helper()
+		remote.Store(addr)
+		conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { conn.CloseNow() })
+		_, _, err = conn.Read(ctx)
+		return err
+	}
+	if err := dial("[2001:db8::1]:1000"); err != nil {
+		t.Fatalf("first connection refused: %v", err)
+	}
+	if err := dial("[2001:db8::2]:1000"); websocket.CloseStatus(err) != websocket.StatusTryAgainLater {
+		t.Fatalf("a second address in the same /64 got past the cap: %v", err)
+	}
+	if err := dial("[2001:db8:0:1::1]:1000"); err != nil {
+		t.Fatalf("another /64 was refused: %v", err)
 	}
 }

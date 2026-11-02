@@ -7,7 +7,10 @@ package background
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
+
+	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
 )
 
 // Task is a named unit of work that runs on a fixed interval.
@@ -27,17 +30,23 @@ func New(tasks []Task) *Scheduler {
 	return &Scheduler{tasks: tasks}
 }
 
-// Start launches each task in its own goroutine. Blocks until ctx is cancelled.
+// Start runs each task in its own goroutine until ctx is cancelled, and returns once every task has returned: a task
+// running when ctx ends finishes (or stops on its cancelled context) before Start returns.
 func (s *Scheduler) Start(ctx context.Context) {
+	var wg sync.WaitGroup
+	defer wg.Wait()
 	for _, t := range s.tasks {
-		go func() {
+		wg.Go(func() {
 			ticker := time.NewTicker(t.Interval)
 			defer ticker.Stop()
 			for {
 				select {
 				case <-ticker.C:
 					slog.Debug("task running", "component", "background", "task", t.Name)
-					if err := t.Run(ctx); err != nil {
+					start := time.Now()
+					err := t.Run(ctx)
+					metrics.JobDuration.WithLabelValues(t.Name).Observe(time.Since(start).Seconds())
+					if err != nil {
 						slog.Error("task failed", "component", "background", "task", t.Name, "error", err)
 					} else {
 						slog.Debug("task complete", "component", "background", "task", t.Name)
@@ -46,6 +55,6 @@ func (s *Scheduler) Start(ctx context.Context) {
 					return
 				}
 			}
-		}()
+		})
 	}
 }

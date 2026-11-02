@@ -1,0 +1,4 @@
+[
+ "Sort",
+ "  Index Scan on observer_telemetry using observer_telemetry_pkey scan=Forward"
+]

@@ -28,7 +28,7 @@ func TestLookupErrors(t *testing.T) {
 			return RegionsRouter(stubReader{getRegion: func(context.Context, int32) (*api.Region, error) { return nil, err }})
 		}, "/1", http.StatusNotFound},
 		{"regions", func(err error) http.Handler {
-			return RegionsRouter(stubReader{listRegions: func(context.Context) ([]api.RegionSummary, error) { return nil, err }})
+			return RegionsRouter(stubReader{listRegions: func(context.Context) ([]api.Region, error) { return nil, err }})
 		}, "/", http.StatusInternalServerError},
 		{"iata", func(err error) http.Handler {
 			return IATAsRouter(stubReader{getIATA: func(context.Context, string) (*api.IATA, error) { return nil, err }})
@@ -57,7 +57,7 @@ func TestLookupErrors(t *testing.T) {
 			want int
 		}{
 			{pgx.ErrNoRows, tc.missing},
-			{context.DeadlineExceeded, http.StatusInternalServerError},
+			{context.DeadlineExceeded, http.StatusServiceUnavailable},
 		} {
 			t.Run(tc.name+"/"+c.err.Error(), func(t *testing.T) {
 				w := httptest.NewRecorder()
@@ -81,7 +81,7 @@ func TestRegionFilterErrors(t *testing.T) {
 		want int
 	}{
 		{pgx.ErrNoRows, http.StatusBadRequest},
-		{context.DeadlineExceeded, http.StatusInternalServerError},
+		{context.DeadlineExceeded, http.StatusServiceUnavailable},
 	} {
 		reader := stubReader{getRegionBySlug: func(context.Context, string) (*api.Region, error) { return nil, tc.err }}
 		for name, h := range map[string]http.Handler{

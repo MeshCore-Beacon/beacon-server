@@ -44,9 +44,9 @@ INSERT INTO nodes(public_key,node_type,name) VALUES (decode(repeat('01',32),'hex
 INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,origin_pubkey,raw_payload,raw_header,first_heard_at,last_heard_at) VALUES
  (decode(repeat('a1',32),'hex'),4,0,1,NULL,'\x00','\x00',now(),now()),
  (decode(repeat('b2',32),'hex'),4,0,1,decode(repeat('01',32),'hex'),'\x00','\x00',now(),now());
-INSERT INTO packet_observations(id,packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count) VALUES
- (1,decode(repeat('a1',32),'hex'),'00000000-0000-0000-0000-000000000106','YOW',now(),0,1,0),
- (2,decode(repeat('b2',32),'hex'),'00000000-0000-0000-0000-000000000106','YOW',now(),0,1,0);`)
+INSERT INTO packet_observations(id,packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count,payload_type) VALUES
+ (1,decode(repeat('a1',32),'hex'),'00000000-0000-0000-0000-000000000106','YOW',now(),0,1,0,4),
+ (2,decode(repeat('b2',32),'hex'),'00000000-0000-0000-0000-000000000106','YOW',now(),0,1,0,4);`)
 	if err != nil {
 		t.Fatal(err)
 	}

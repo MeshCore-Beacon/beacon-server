@@ -1,0 +1,109 @@
+# Copyright 2026 Beacon Contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Global /packets pages and the /nodes and /observers keysets: two read-only servers on one database (the build
+# before the per-shape packets statements as old, this build as new), walked page by page with the numeric cursor
+# a client of either build follows, and compared as whole JSON.
+#
+#   planguard storediff --old http://127.0.0.1:8481 --new http://127.0.0.1:8482 \
+#     --cases db/planguard/storediff/packets_global.yaml --walk 1,2,3,web
+#
+# Both servers read public (not the overlay: its packets have no parsed_payload, so summary would differ).
+#
+# Allowed differences, each a named class: nextPageCursor is new on every page (additive_keys); rows tied on their
+# sort key come out in a fixed order (tie_order, keyed by the item's time field); the latest observer of a packet
+# whose newest observations share heard_at is the highest observation id (latest_observer_tie). Node and observer
+# items carry no time field, so their ties cannot be keyed and any reorder reads as a difference.
+#
+# /observers: nextCursor now comes from last_seen, the order column, and is present whenever hasMore; it came from
+# last_status_at and was absent when that was NULL. So page 1 differs at $.nextCursor by design and the case
+# compares page 1 only: its one expected difference is "page 1: $.nextCursor".
+#
+# since and until are epoch milliseconds around the copy's snapshot time T0 = 2026-10-18 17:00 UTC.
+cases:
+  - id: packets
+    path: /api/v1/packets
+    follow: &cursor
+      - {param: cursor, from: nextCursor}
+    allowed: &packets [tie_order, additive_keys, latest_observer_tie]
+    key: &heard [lastHeardAt]
+    omit: &observer [latestObserver]
+  - id: packets_pt4
+    path: /api/v1/packets
+    query: {payloadTypes: "4"}
+    follow: *cursor
+    allowed: *packets
+    key: *heard
+    omit: *observer
+  - id: packets_rt0_window
+    # The pathfinder's request: route type 0 over the 32 minutes before T0.
+    path: /api/v1/packets
+    query: {routeTypes: "0", since: "1792340880000", until: "1792342800000"}
+    follow: *cursor
+    allowed: *packets
+    key: *heard
+    omit: *observer
+  - id: packets_scope_nl
+    path: /api/v1/packets
+    query: {scopes: "#nl"}
+    follow: *cursor
+    allowed: *packets
+    key: *heard
+    omit: *observer
+  - id: packets_dashboard
+    path: /api/v1/packets
+    query: {scopes: "#pnw,#wa,#w-wa,#thurston,#pierce,#oly,#rainier,#tumwater", payloadTypes: "4"}
+    follow: *cursor
+    allowed: *packets
+    key: *heard
+    omit: *observer
+  - id: packets_scope_grr
+    # A scope no packet carries: an empty page.
+    path: /api/v1/packets
+    query: {scope: "#GRR"}
+    follow: *cursor
+    allowed: *packets
+    key: *heard
+    omit: *observer
+  - id: packets_iata_sea
+    # The region path: unchanged, and it emits no nextPageCursor.
+    path: /api/v1/packets
+    query: {iatas: SEA}
+    follow: *cursor
+    allowed: *packets
+    key: *heard
+    omit: *observer
+  - id: packets_hash_prefix
+    # The hash prefix search: unchanged, and it emits no nextPageCursor.
+    path: /api/v1/packets
+    query: {hashPrefix: ab12}
+    follow: *cursor
+    allowed: *packets
+    key: *heard
+    omit: *observer
+  - id: nodes
+    path: /api/v1/nodes
+    web_limit: 200
+    follow: *cursor
+    allowed: &additive [additive_keys]
+  - id: nodes_iata_sea
+    path: /api/v1/nodes
+    query: {iatas: SEA}
+    web_limit: 200
+    follow: *cursor
+    allowed: *additive
+  - id: nodes_type2
+    path: /api/v1/nodes
+    query: {type: "2"}
+    web_limit: 200
+    follow: *cursor
+    allowed: *additive
+  - id: observers
+    path: /api/v1/observers
+    pages: 1
+    allowed: *additive
+  - id: observers_online
+    path: /api/v1/observers
+    query: {status: online}
+    pages: 1
+    allowed: *additive

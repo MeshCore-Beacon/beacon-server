@@ -66,12 +66,12 @@ func TestGetStatsTopNodes_MissingNodeRow(t *testing.T) {
 	since := time.Date(2026, 1, 1, 12, 34, 0, 0, time.UTC)
 
 	mock.EXPECT().
-		GetTopNodes(gomock.Any(), sqlc.GetTopNodesParams{
+		GetTopNodesProbe(gomock.Any(), sqlc.GetTopNodesProbeParams{
 			Since:    pgtype.Timestamptz{Time: since.Truncate(time.Hour), Valid: true},
 			Iatas:    []string{"YVR"},
 			RowLimit: 5,
 		}).
-		Return([]sqlc.GetTopNodesRow{
+		Return([]sqlc.GetTopNodesProbeRow{
 			{NodeID: pgtype.UUID{Bytes: nodeID, Valid: true}, PublicKey: "aa", Name: "test-node", NodeType: 1, Iata: "YVR", ObservationCount: 9, LastHeard: lastHeard},
 			{PublicKey: "bb", Iata: "YVR", ObservationCount: 3, LastHeard: lastHeard},
 		}, nil)
@@ -134,8 +134,8 @@ func TestGetStatsTopAdvertisers_FloodDirectSplit(t *testing.T) {
 	heardAt := pgtype.Timestamptz{Time: time.Now(), Valid: true}
 
 	mock.EXPECT().
-		GetStatsTopAdvertisers(gomock.Any(), gomock.Cond(func(p sqlc.GetStatsTopAdvertisersParams) bool { return p.Sort == "direct" })).
-		Return([]sqlc.GetStatsTopAdvertisersRow{
+		GetStatsTopAdvertisersProbe(gomock.Any(), gomock.Cond(func(p sqlc.GetStatsTopAdvertisersProbeParams) bool { return p.Sort == "direct" })).
+		Return([]sqlc.GetStatsTopAdvertisersProbeRow{
 			{
 				NodeID:            pgtype.UUID{Bytes: nodeID, Valid: true},
 				PublicKey:         "cc",
@@ -177,7 +177,7 @@ func TestGetStatsClockDrift_Mapping(t *testing.T) {
 
 	nodeID := uuid.MustParse("00000000-0000-0000-0000-000000000004")
 	name := "drifty-repeater"
-	drift := int32(-600)
+	drift := int64(-600)
 	checkedAt := pgtype.Timestamptz{Time: time.Now(), Valid: true}
 	iatasJSON := []byte(`[{"iata":"YVR","lastHeard":1700000000000}]`)
 
@@ -215,8 +215,8 @@ func TestGetStatsNodeTypes_Mapping(t *testing.T) {
 	mock := mockdb.NewMockQuerier(ctrl)
 
 	mock.EXPECT().
-		GetStatsNodeTypes(gomock.Any(), []string{"YVR"}).
-		Return([]sqlc.GetStatsNodeTypesRow{
+		GetStatsNodeTypesByIATAs(gomock.Any(), []string{"YVR"}).
+		Return([]sqlc.GetStatsNodeTypesByIATAsRow{
 			{NodeType: 1, Count: 10},
 			{NodeType: 2, Count: 5},
 		}, nil)
@@ -231,6 +231,33 @@ func TestGetStatsNodeTypes_Mapping(t *testing.T) {
 	}
 	if result[0].NodeTypeName == "" {
 		t.Error("expected NodeTypeName to be set")
+	}
+}
+
+// Only a filtered request may read node_iatas; the empty-region sentinel {""} still filters.
+func TestGetStatsNodeTypes_Dispatch(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		iatas []string
+		all   bool
+	}{
+		{"nil", nil, true},
+		{"empty", []string{}, true},
+		{"empty region sentinel", []string{""}, false},
+		{"one IATA", []string{"YVR"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := mockdb.NewMockQuerier(gomock.NewController(t))
+			if tc.all {
+				mock.EXPECT().GetStatsNodeTypesAll(gomock.Any()).Return([]sqlc.GetStatsNodeTypesAllRow{{NodeType: 2, Count: 3}}, nil)
+			} else {
+				mock.EXPECT().GetStatsNodeTypesByIATAs(gomock.Any(), tc.iatas).Return([]sqlc.GetStatsNodeTypesByIATAsRow{{NodeType: 2, Count: 3}}, nil)
+			}
+			got, err := (&Store{q: mock}).GetStatsNodeTypes(context.Background(), tc.iatas)
+			if err != nil || len(got) != 1 || got[0].NodeType != 2 || got[0].Count != 3 || got[0].NodeTypeName == "" {
+				t.Fatalf("got %+v, %v", got, err)
+			}
+		})
 	}
 }
 

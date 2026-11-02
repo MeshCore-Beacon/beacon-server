@@ -1,0 +1,18 @@
+[
+ "Sort",
+ "  Index Scan on channel_messages w using idx_channel_messages_sent scan=Forward [InitPlan]",
+ "  Limit [InitPlan]",
+ "    Sort",
+ "      Nested Loop (Semi)",
+ "        CTE Scan",
+ "        Index Only Scan on channel_message_iatas i using channel_message_iatas_pkey scan=Forward",
+ "  Nested Loop (Left)",
+ "    Nested Loop",
+ "      Nested Loop",
+ "        Nested Loop",
+ "          CTE Scan",
+ "          Index Scan on channel_messages cm using channel_messages_pkey scan=Forward",
+ "        Index Scan on channels c using channels_pkey scan=Forward",
+ "      Index Scan on packets p using packets_pkey scan=Forward",
+ "    Index Scan on transport_scopes ts using transport_scopes_pkey scan=Forward"
+]

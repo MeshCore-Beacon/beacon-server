@@ -1,0 +1,7 @@
+# Copyright 2026 Beacon Contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+statements:
+  Q: {sqlc: Q, plan: custom}
+entries:
+  - {id: a, stmt: Q, params: [{sql: "SELECT from_nodes FROM t_fix_routes_hop.search_cases LIMIT 1"}]}

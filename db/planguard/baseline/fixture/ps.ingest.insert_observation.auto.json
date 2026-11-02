@@ -1,0 +1,16 @@
+[
+ "Result",
+ "  ModifyTable on packet_observations [InitPlan]",
+ "    Result",
+ "  ModifyTable on packets p [InitPlan]",
+ "    Nested Loop",
+ "      CTE Scan",
+ "      Index Scan on packets p using packets_pkey scan=Forward",
+ "  ModifyTable on packet_sites [InitPlan]",
+ "    Nested Loop",
+ "      CTE Scan",
+ "      CTE Scan",
+ "  CTE Scan [InitPlan]",
+ "  CTE Scan [InitPlan]",
+ "  Index Scan on packets pk using packets_pkey scan=Forward [InitPlan]"
+]

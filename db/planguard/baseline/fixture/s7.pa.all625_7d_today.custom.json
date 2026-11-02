@@ -1,0 +1,6 @@
+[
+ "Sort",
+ "  Aggregate partial=Simple {Hashed}",
+ "    Subquery Scan",
+ "      Index Scan on analytics_hourly_paths using analytics_hourly_paths_pkey scan=Forward [Subquery]"
+]

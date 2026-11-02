@@ -40,6 +40,70 @@ var (
 // migrationLockKey serialises RunMigrations across instances sharing a database.
 const migrationLockKey int64 = 0x6265_6163_6f6e // "beacon"
 
+// Migrations run before the API and ingest start, so a lock wait must end in a logged exit, not a hang.
+var (
+	migrationLockTimeout = 30 * time.Second
+	migrationLockBackoff = []time.Duration{10 * time.Second, 20 * time.Second}
+	blockerPollInterval  = time.Second
+)
+
+// isLockTimeout reports SQLSTATE 55P03 (lock_not_available), which lock_timeout raises.
+func isLockTimeout(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "55P03"
+}
+
+const blockersSQL = `SELECT coalesce(string_agg(format('pid=%s state=%s xact_start=%s query=%s',
+  b.pid, b.state, b.xact_start, left(b.query, 200)), '; ' ORDER BY b.pid), '')
+FROM pg_stat_activity b WHERE b.pid = ANY(pg_blocking_pids($1))`
+
+// watchBlockers polls the sessions blocking pid until stop, which returns the last non-empty sample.
+func watchBlockers(ctx context.Context, q execQuerier, pid int32) (stop func() string) {
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	var last string
+	go func() {
+		defer close(done)
+		tick := time.NewTicker(blockerPollInterval)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+				var s string
+				if q.QueryRow(ctx, blockersSQL, pid).Scan(&s) == nil && s != "" {
+					last = s
+				}
+			}
+		}
+	}()
+	return func() string { cancel(); <-done; return last }
+}
+
+// applyWithLockRetry applies a migration on conn, retrying lock timeouts after each backoff.
+// Retrying is safe: transactional files roll back whole, a CIC cut short leaves an invalid
+// index that applyMigration drops and rebuilds, and DROP ... IF EXISTS finishes a cancelled DIC.
+func applyWithLockRetry(ctx context.Context, conn, watch execQuerier, pid int32, name, sql string) error {
+	for attempt := 1; ; attempt++ {
+		stop := watchBlockers(ctx, watch, pid)
+		err := applyAndRecord(ctx, conn, name, sql)
+		blockers := stop()
+		if !isLockTimeout(err) {
+			return err
+		}
+		slog.Warn("migration lock wait timed out", "component", "db", "migration", name, "attempt", attempt, "blockers", blockers)
+		if attempt > len(migrationLockBackoff) {
+			return fmt.Errorf("lock wait over %s on %d attempts, blocked by [%s]: %w", migrationLockTimeout, attempt, blockers, err)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(migrationLockBackoff[attempt-1]):
+		}
+	}
+}
+
 // concurrentIndexName returns the index a CREATE INDEX CONCURRENTLY migration builds.
 func concurrentIndexName(sql string) (string, bool) {
 	m := concurrentIndexRe.FindStringSubmatch(lineCommentRe.ReplaceAllString(sql, ""))
@@ -148,15 +212,20 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 		}
 	}
 	defer func() {
-		// A session lock outlives Release; drop the connection if unlock fails.
-		if _, err := conn.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", migrationLockKey); err != nil {
+		// Session settings and locks outlive Release; drop the connection if either cleanup fails.
+		_, resetErr := conn.Exec(context.Background(), "RESET lock_timeout")
+		_, unlockErr := conn.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", migrationLockKey)
+		if resetErr != nil || unlockErr != nil {
 			_ = conn.Conn().Close(context.Background())
 		}
 	}()
-	return runMigrations(ctx, conn)
+	if _, err := conn.Exec(ctx, fmt.Sprintf("SET lock_timeout = %d", migrationLockTimeout.Milliseconds())); err != nil {
+		return fmt.Errorf("failed to set migration lock_timeout: %w", err)
+	}
+	return runMigrations(ctx, conn, pool)
 }
 
-func runMigrations(ctx context.Context, pool execQuerier) error {
+func runMigrations(ctx context.Context, pool, watch execQuerier) error {
 	_, err := pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			filename TEXT PRIMARY KEY,
@@ -169,6 +238,11 @@ func runMigrations(ctx context.Context, pool execQuerier) error {
 
 	if err := checkBaseline(ctx, pool); err != nil {
 		return err
+	}
+
+	var pid int32
+	if err := pool.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&pid); err != nil {
+		return fmt.Errorf("failed to read migration backend pid: %w", err)
 	}
 
 	entries, err := fs.ReadDir(migrationFiles, "migrations")
@@ -202,7 +276,7 @@ func runMigrations(ctx context.Context, pool execQuerier) error {
 			return fmt.Errorf("failed to read migration %s: %w", entry.Name(), err)
 		}
 
-		if err := applyAndRecord(ctx, pool, entry.Name(), string(sql)); err != nil {
+		if err := applyWithLockRetry(ctx, pool, watch, pid, entry.Name(), string(sql)); err != nil {
 			return fmt.Errorf("failed to apply migration %s: %w", entry.Name(), err)
 		}
 

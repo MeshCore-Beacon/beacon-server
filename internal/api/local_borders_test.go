@@ -22,7 +22,7 @@ import (
 type borderReader struct {
 	api.Reader
 	node                *api.Node
-	page                api.Page[api.NodeSummary]
+	page                api.NodePage
 	getCalls, listCalls int
 	err                 error
 }
@@ -31,7 +31,11 @@ func (r *borderReader) GetNode(context.Context, uuid.UUID) (*api.Node, error) {
 	r.getCalls++
 	return r.node, r.err
 }
-func (r *borderReader) ListNodes(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ int32, _ bool) (api.Page[api.NodeSummary], error) {
+func (r *borderReader) ListNodes(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
+	r.listCalls++
+	return r.page, r.err
+}
+func (r *borderReader) ListNodesSorted(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ api.NodeSort, _ *api.NodeSortCursor, _ int32, _ bool) (api.NodePage, error) {
 	r.listCalls++
 	return r.page, r.err
 }
@@ -47,7 +51,7 @@ func TestLocalBordersAfterCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	node := &api.Node{NodeSummary: api.NodeSummary{ID: uuid.New(), NodeType: 2, Latitude: new(15.0), Longitude: new(15.0), IATAs: []api.NodeIATA{{IATA: "ZZZ", LastHeard: 1}}}}
-	base := &borderReader{node: node, page: api.Page[api.NodeSummary]{Items: []api.NodeSummary{node.NodeSummary}, HasMore: true, NextCursor: new(int64(123))}}
+	base := &borderReader{node: node, page: api.NodePage{Page: api.Page[api.NodeSummary]{Items: []api.NodeSummary{node.NodeSummary}, HasMore: true, NextCursor: new(int64(123))}, NextPageCursor: new("v1:123000:" + node.ID.String())}}
 	mr := miniredis.RunT(t)
 	client := cache.NewClient(mr.Addr(), "", 0)
 	t.Cleanup(func() { client.Close() })
@@ -68,19 +72,26 @@ func TestLocalBordersAfterCache(t *testing.T) {
 		if got.PossiblyForeign == nil || *got.PossiblyForeign != tc.want || got.IATAs[0].IATA != "ZZZ" {
 			t.Fatalf("detail: %+v", got)
 		}
-		page, err := tc.reader.ListNodes(ctx, 2, []string{"ZZZ"}, nil, nil, nil, "", "", "", 0, 50, false)
+		page, err := tc.reader.ListNodes(ctx, 2, []string{"ZZZ"}, nil, nil, nil, "", "", "", 0, nil, 50, false)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !page.HasMore || *page.NextCursor != 123 || page.Items[0].PossiblyForeign == nil || *page.Items[0].PossiblyForeign != tc.want {
+		if !page.HasMore || *page.NextCursor != 123 || page.NextPageCursor == nil || *page.NextPageCursor != *base.page.NextPageCursor || page.Items[0].PossiblyForeign == nil || *page.Items[0].PossiblyForeign != tc.want {
 			t.Fatalf("page: %+v", page)
+		}
+		sorted, err := tc.reader.ListNodesSorted(ctx, 2, nil, nil, nil, nil, "", "", "", api.NodeSort{By: api.NodeSortName}, nil, 50, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sorted.Items[0].PossiblyForeign == nil || *sorted.Items[0].PossiblyForeign != tc.want {
+			t.Fatalf("sorted page: %+v", sorted)
 		}
 		data, _ := json.Marshal(got)
 		if !strings.Contains(string(data), `"possiblyForeign":`) {
 			t.Fatal("known false was omitted")
 		}
 	}
-	if base.getCalls != 1 || base.listCalls != 2 {
+	if base.getCalls != 1 || base.listCalls != 4 {
 		t.Fatalf("extra reads: get=%d list=%d", base.getCalls, base.listCalls)
 	}
 	if node.PossiblyForeign != nil || base.page.Items[0].PossiblyForeign != nil {
@@ -114,7 +125,7 @@ func TestLocalBordersPreserveReaderErrors(t *testing.T) {
 	if _, err := reader.GetNode(context.Background(), uuid.New()); !errors.Is(err, want) {
 		t.Fatal(err)
 	}
-	if _, err := reader.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, 1, false); !errors.Is(err, want) {
+	if _, err := reader.ListNodes(context.Background(), 0, nil, nil, nil, nil, "", "", "", 0, nil, 1, false); !errors.Is(err, want) {
 		t.Fatal(err)
 	}
 	base.err = nil

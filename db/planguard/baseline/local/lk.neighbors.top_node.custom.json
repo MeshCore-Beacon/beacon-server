@@ -1,0 +1,6 @@
+[
+ "Sort",
+ "  Nested Loop",
+ "    Index Scan on node_neighbors nn using node_neighbors_pkey scan=Forward",
+ "    Index Scan on nodes n using nodes_pkey scan=Forward"
+]

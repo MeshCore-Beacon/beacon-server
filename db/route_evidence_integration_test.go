@@ -3,7 +3,6 @@
 package db
 
 import (
-	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -17,20 +16,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-type evidenceCapture struct {
-	pgx.Tx
-	statement string
-	args      []any
-}
-
-func (c *evidenceCapture) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
-	if strings.Contains(sql, "-- name: ListRouteEvidence") {
-		c.statement = sql
-		c.args = args
-	}
-	return c.Tx.Query(ctx, sql, args...)
-}
-
 func TestRouteEvidencePostgres(t *testing.T) {
 	ctx, tx := retentionTx(t)
 	applyBaseline(t, ctx, tx)
@@ -42,7 +27,7 @@ func TestRouteEvidencePostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	capture := &evidenceCapture{Tx: tx}
+	capture := &statementCapture{Tx: tx, name: "ListRouteEvidence"}
 	store := &Store{q: sqlc.New(capture)}
 	ids := []uuid.UUID{uuid.MustParse("00000000-0000-0000-0000-000000000001"), uuid.MustParse("00000000-0000-0000-0000-000000000002")}
 	if err := store.UpsertKnownRoute(ctx, ids, [][]byte{{0xaa}, {0xbb}}, "YOW", 2); err != nil {

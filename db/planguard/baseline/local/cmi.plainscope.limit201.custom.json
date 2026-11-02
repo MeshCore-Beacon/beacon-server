@@ -1,0 +1,18 @@
+[
+ "Sort",
+ "  Limit [InitPlan]",
+ "    Result",
+ "      Unique",
+ "        Index Only Scan on channel_message_iatas i using idx_cmi_channel_scope scan=Forward",
+ "  Hash Join (Left)",
+ "    Nested Loop",
+ "      Hash Join",
+ "        Nested Loop",
+ "          CTE Scan",
+ "          Index Scan on channel_messages cm using channel_messages_pkey scan=Forward",
+ "        Hash",
+ "          Seq Scan on channels c",
+ "      Index Scan on packets p using packets_pkey scan=Forward",
+ "    Hash",
+ "      Seq Scan on transport_scopes ts"
+]

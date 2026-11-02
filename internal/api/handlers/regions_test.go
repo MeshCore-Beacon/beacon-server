@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
@@ -70,10 +71,14 @@ func TestParseIATAs_Uppercase(t *testing.T) {
 }
 
 func TestListRegions_OK(t *testing.T) {
+	lat, zoom := 49.2, 7
 	r := chi.NewRouter()
 	r.Get("/regions", listRegions(stubReader{
-		listRegions: func(_ context.Context) ([]api.RegionSummary, error) {
-			return []api.RegionSummary{{ID: 1, Slug: "bc", Name: "British Columbia"}}, nil
+		listRegions: func(_ context.Context) ([]api.Region, error) {
+			return []api.Region{
+				{RegionSummary: api.RegionSummary{ID: 1, Slug: "bc", Name: "British Columbia"}, CenterLat: &lat, ZoomLevel: &zoom, IATAs: []string{"YVR", "YYJ"}},
+				{RegionSummary: api.RegionSummary{ID: 2, Slug: "empty", Name: "Empty"}, IATAs: []string{}},
+			}, nil
 		},
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/regions", nil)
@@ -81,6 +86,11 @@ func TestListRegions_OK(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
+	}
+	want := `[{"id":1,"slug":"bc","name":"British Columbia","centerLat":49.2,"zoomLevel":7,"iatas":["YVR","YYJ"]},` +
+		`{"id":2,"slug":"empty","name":"Empty","iatas":[]}]`
+	if got := strings.TrimSpace(w.Body.String()); got != want {
+		t.Errorf("body = %s\nwant %s", got, want)
 	}
 }
 

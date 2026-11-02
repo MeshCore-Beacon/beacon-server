@@ -53,7 +53,7 @@ func TestAccountsPostgres(t *testing.T) {
 	if err := RunMigrations(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
-	store := New(pool, 0, 0)
+	store := New(pool, pool, 0, 0)
 	items, err := store.ListAccounts(ctx)
 	if err != nil || items == nil || len(items) != 0 {
 		t.Fatal("empty list", err)

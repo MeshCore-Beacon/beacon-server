@@ -484,3 +484,45 @@ func TestScopesFailureDoesNotStallThePass(t *testing.T) {
 		t.Fatalf("failed source not retried early: %+v", s.cache)
 	}
 }
+
+// MeshMapper regenerates a catalogue on request, so most refreshes return a new payload with the same names.
+// Only a change in names may clear the scope caches; otherwise the scope stats never stay cached.
+func TestCatalogueInvalidatesOnlyWhenNamesChange(t *testing.T) {
+	ctx := context.Background()
+	var body []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(body) // no ETag: every refresh is a fresh 200
+	}))
+	defer server.Close()
+	imp := newImporter(t, config.MeshMapperScopesConfig{Enabled: true}, newMemoryStore("YOW"), server.URL, scopestore.New())
+	invalidations := 0
+	imp.SetCacheInvalidator(func(context.Context) { invalidations++ })
+	now := time.Now().UTC()
+	refresh := func(generated string, names ...string) {
+		t.Helper()
+		var doc map[string]any
+		_ = json.Unmarshal(catalogue(names...), &doc)
+		doc["generated_at"] = generated
+		body, _ = json.Marshal(doc)
+		now = now.Add(time.Minute)
+		if err := imp.refresh(ctx, &imp.sources[0], now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, step := range []struct {
+		generated string
+		names     []string
+		want      int
+	}{
+		{"2026-10-28T20:00:00Z", []string{"yow", "ott"}, 1}, // first catalogue
+		{"2026-10-28T20:01:00Z", []string{"yow", "ott"}, 1}, // regenerated, same names
+		{"2026-10-28T20:02:00Z", []string{"ott", "yow"}, 1}, // same names, another order
+		{"2026-10-28T20:03:00Z", []string{"yow", "ott", "gat"}, 2},
+		{"2026-10-28T20:04:00Z", []string{"yow", "gat"}, 3},
+	} {
+		refresh(step.generated, step.names...)
+		if invalidations != step.want {
+			t.Fatalf("after %v at %s: %d invalidations, want %d", step.names, step.generated, invalidations, step.want)
+		}
+	}
+}

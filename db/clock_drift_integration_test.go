@@ -99,7 +99,7 @@ INSERT INTO node_iatas (node_id,iata,last_heard) VALUES
 				if row.DeviceClockDriftSeconds == nil {
 					t.Fatal("null drift returned")
 				}
-				wantDrift := map[int]int32{1: 120, 2: -240, 6: 60, 7: -60, 8: 180}[number]
+				wantDrift := map[int]int64{1: 120, 2: -240, 6: 60, 7: -60, 8: 180}[number]
 				if *row.DeviceClockDriftSeconds != wantDrift || (row.NodeType != 2 && row.NodeType != 3) {
 					t.Fatal("drift sign or role changed")
 				}

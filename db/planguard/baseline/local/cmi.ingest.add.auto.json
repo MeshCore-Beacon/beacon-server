@@ -1,0 +1,9 @@
+[
+ "Result",
+ "  Nested Loop [InitPlan]",
+ "    Index Scan on channel_messages cm using channel_messages_packet_hash_key scan=Forward",
+ "    Index Scan on packets p using packets_pkey scan=Forward",
+ "  ModifyTable on channel_message_iatas [InitPlan]",
+ "    CTE Scan",
+ "  CTE Scan [InitPlan]"
+]

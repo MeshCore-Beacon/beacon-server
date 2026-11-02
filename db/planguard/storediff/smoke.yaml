@@ -1,0 +1,78 @@
+# Copyright 2026 Beacon Contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Smoke cases: two read-only servers on one database, walked page by page and compared as whole JSON.
+#
+#   planguard storediff --old http://127.0.0.1:8481 --new http://127.0.0.1:8482 \
+#     --cases db/planguard/storediff/smoke.yaml --walk 1,2,3,web
+#
+# /routes answers a bare array: it has more while a page is full, and the next page starts at the last route's
+# lastSeen and id.
+#
+# /packets, /nodes and /observers add nextPageCursor to every page (additive_keys). /packets also orders rows tied on
+# lastHeardAt by hash (tie_order) and picks the highest observation id as the latest observer on a heard_at tie
+# (latest_observer_tie). /observers takes nextCursor from last_seen now, so its first page differs at $.nextCursor
+# by design; storediff/packets_global.yaml holds the full set of these cases. The nodes_type cases filter, so their
+# walks reach the last page at the web limits 50 and 3.
+cases:
+  - id: routes_sea
+    path: /api/v1/routes
+    query: {iata: SEA}
+    follow:
+      - {param: cursor, from: last.lastSeen}
+      - {param: cursorId, from: last.id}
+  - id: routes_global
+    path: /api/v1/routes
+    follow:
+      - {param: cursor, from: last.lastSeen}
+      - {param: cursorId, from: last.id}
+  - id: nodes
+    path: /api/v1/nodes
+    follow:
+      - {param: cursor, from: nextCursor}
+    allowed: [additive_keys]
+  - id: nodes_type1
+    path: /api/v1/nodes
+    query: {type: "1"}
+    pages: 500
+    follow:
+      - {param: cursor, from: nextCursor}
+    allowed: [additive_keys]
+  - id: nodes_type3
+    path: /api/v1/nodes
+    query: {type: "3"}
+    pages: 100
+    follow:
+      - {param: cursor, from: nextCursor}
+    allowed: [additive_keys]
+  - id: nodes_type3_l3
+    path: /api/v1/nodes
+    query: {type: "3"}
+    web_limit: 3
+    pages: 1200
+    follow:
+      - {param: cursor, from: nextCursor}
+    allowed: [additive_keys]
+  - id: observers
+    path: /api/v1/observers
+    follow:
+      - {param: cursor, from: nextCursor}
+    allowed: [additive_keys]
+  - id: packets
+    path: /api/v1/packets
+    follow:
+      - {param: cursor, from: nextCursor}
+    allowed: [tie_order, additive_keys, latest_observer_tie]
+    key: [lastHeardAt]
+    omit: [latestObserver]
+  - id: channel_messages
+    # The channel heard most recently: /channels is ordered by last seen.
+    path: /api/v1/channels/{channel}/messages
+    vars:
+      channel: {path: /api/v1/channels, query: {limit: "1"}, from: first.id}
+    follow:
+      - {param: cursor, from: nextCursor}
+  - id: messages
+    path: /api/v1/messages
+    follow:
+      - {param: cursor, from: nextCursor}

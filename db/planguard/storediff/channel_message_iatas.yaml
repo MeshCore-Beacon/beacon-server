@@ -1,0 +1,125 @@
+# Copyright 2026 Beacon Contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Channel message pages: two read-only servers on one database, walked page by page with the cursor a client
+# follows and compared as whole JSON. Old is the build before the read model; new is this build, which trusts the
+# overlay's table on a read-only server (its state is complete, verified and fresh, and the newest messages check
+# clean). Both run with search_path "t_s4a, public" on the overlay overlay/channel_message_iatas.sql:
+#
+#   planguard storediff --old http://127.0.0.1:8481 --new http://127.0.0.1:8482 \
+#     --cases db/planguard/storediff/channel_message_iatas.yaml --walk 1,2,3,web
+#
+# No class is allowed: every page must be identical. Everything is read from the data: channels are the most recently
+# heard one and the 50th (/api/v1/channels), sites are those of the most and the 50th most recently seen observer
+# (/api/v1/observers), since is 10.2 hours before the newest message's sentAt. ZZZ is a code no site uses. Scope
+# shapes are compared statement by statement in diff/channel_message_iatas.yaml, where scopes are picked by role.
+cases:
+  - id: ch_first
+    path: /api/v1/channels/{ch}/messages
+    vars:
+      ch: {path: /api/v1/channels, from: first.id}
+    follow: &cursor
+      - {param: cursor, from: nextCursor}
+  - id: ch_first_site_a
+    path: /api/v1/channels/{ch}/messages
+    query: {iatas: "{a}"}
+    vars:
+      ch: {path: /api/v1/channels, from: first.id}
+      a: {path: /api/v1/observers, from: first.iata}
+    follow: *cursor
+  - id: ch_first_site_b
+    path: /api/v1/channels/{ch}/messages
+    query: {iatas: "{b}"}
+    vars:
+      ch: {path: /api/v1/channels, from: first.id}
+      b: {path: /api/v1/observers, from: last.iata}
+    follow: *cursor
+  - id: ch_first_sites_ab
+    path: /api/v1/channels/{ch}/messages
+    query: {iatas: "{a},{b}"}
+    vars:
+      ch: {path: /api/v1/channels, from: first.id}
+      a: {path: /api/v1/observers, from: first.iata}
+      b: {path: /api/v1/observers, from: last.iata}
+    follow: *cursor
+  - id: ch_first_zzz
+    path: /api/v1/channels/{ch}/messages
+    query: {iatas: "ZZZ"}
+    vars:
+      ch: {path: /api/v1/channels, from: first.id}
+    follow: *cursor
+  - id: ch_last
+    path: /api/v1/channels/{ch}/messages
+    vars:
+      ch: {path: /api/v1/channels, from: last.id}
+    follow: *cursor
+  - id: ch_last_site_a
+    path: /api/v1/channels/{ch}/messages
+    query: {iatas: "{a}"}
+    vars:
+      ch: {path: /api/v1/channels, from: last.id}
+      a: {path: /api/v1/observers, from: first.iata}
+    follow: *cursor
+  - id: ch_last_site_b
+    path: /api/v1/channels/{ch}/messages
+    query: {iatas: "{b}"}
+    vars:
+      ch: {path: /api/v1/channels, from: last.id}
+      b: {path: /api/v1/observers, from: last.iata}
+    follow: *cursor
+  - id: ch_last_sites_ab
+    path: /api/v1/channels/{ch}/messages
+    query: {iatas: "{a},{b}"}
+    vars:
+      ch: {path: /api/v1/channels, from: last.id}
+      a: {path: /api/v1/observers, from: first.iata}
+      b: {path: /api/v1/observers, from: last.iata}
+    follow: *cursor
+  - id: ch_last_zzz
+    path: /api/v1/channels/{ch}/messages
+    query: {iatas: "ZZZ"}
+    vars:
+      ch: {path: /api/v1/channels, from: last.id}
+    follow: *cursor
+  - id: messages_all
+    path: /api/v1/messages
+    follow: *cursor
+  - id: messages_site_a
+    path: /api/v1/messages
+    query: {iatas: "{a}"}
+    vars:
+      a: {path: /api/v1/observers, from: first.iata}
+    follow: *cursor
+  - id: messages_site_b
+    path: /api/v1/messages
+    query: {iatas: "{b}"}
+    vars:
+      b: {path: /api/v1/observers, from: last.iata}
+    follow: *cursor
+  - id: messages_sites_ab
+    path: /api/v1/messages
+    query: {iatas: "{a},{b}"}
+    vars:
+      a: {path: /api/v1/observers, from: first.iata}
+      b: {path: /api/v1/observers, from: last.iata}
+    follow: *cursor
+  - id: messages_zzz
+    path: /api/v1/messages
+    query: {iatas: "ZZZ"}
+    follow: *cursor
+  - id: messages_since
+    path: /api/v1/messages
+    query: {since: "{t}"}
+    web_limit: 200
+    vars:
+      t: {path: /api/v1/messages, from: first.sentAt, add: -36720000}
+    follow: *cursor
+  - id: messages_since_sites
+    path: /api/v1/messages
+    query: {since: "{t}", iatas: "{a},{b}"}
+    web_limit: 200
+    vars:
+      a: {path: /api/v1/observers, from: first.iata}
+      b: {path: /api/v1/observers, from: last.iata}
+      t: {path: /api/v1/messages, from: first.sentAt, add: -36720000}
+    follow: *cursor

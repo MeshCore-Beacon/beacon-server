@@ -5,7 +5,6 @@ package handlers
 
 import (
 	"errors"
-	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
@@ -79,6 +78,7 @@ func StatsRouter(reader api.Reader, opts StatsOptions) http.Handler {
 //	@Param		region		query	string	false	"Filter by region slug, expands to member IATAs"
 //	@Success	200		{object}	api.StatsOverview
 //	@Failure	500		{object}	handlers.APIError
+//	@Failure	503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/stats/overview [get]
 func getStatsOverview(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -96,8 +96,7 @@ func getStatsOverview(reader api.Reader) http.HandlerFunc {
 		}
 		overview, err := reader.GetStatsOverview(r.Context(), iatas)
 		if err != nil {
-			slog.Error("api: GetStatsOverview failed", "component", "api", "error", err)
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, overview)
@@ -116,6 +115,7 @@ func getStatsOverview(reader api.Reader) http.HandlerFunc {
 //	@Param		since	query		int		false	"Start of window epoch ms (default 7 days ago)"
 //	@Success	200		{array}		api.ObservationPoint
 //	@Failure	500		{object}	handlers.APIError
+//	@Failure	503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/stats/observations [get]
 func getStatsObservations(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -138,8 +138,7 @@ func getStatsObservations(reader api.Reader) http.HandlerFunc {
 		}
 		points, err := reader.GetStatsObservations(r.Context(), iatas, since)
 		if err != nil {
-			slog.Error("api: GetStatsObservations failed", "component", "api", "error", err)
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, points)
@@ -157,6 +156,7 @@ func getStatsObservations(reader api.Reader) http.HandlerFunc {
 //	@Param		since	query		int		false	"Start of window epoch ms (default last 24h)"
 //	@Success	200		{array}		api.PayloadBreakdownItem
 //	@Failure	500		{object}	handlers.APIError
+//	@Failure	503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/stats/payload-breakdown [get]
 func getStatsPayloadBreakdown(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -179,8 +179,7 @@ func getStatsPayloadBreakdown(reader api.Reader) http.HandlerFunc {
 		}
 		breakdown, err := reader.GetStatsPayloadBreakdown(r.Context(), iatas, since)
 		if err != nil {
-			slog.Error("api: GetStatsPayloadBreakdown failed", "component", "api", "error", err)
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, breakdown)
@@ -200,6 +199,7 @@ func getStatsPayloadBreakdown(reader api.Reader) http.HandlerFunc {
 //	@Param		limit	query		int		false	"Max results (default 10); must be positive, values above 200 are clamped" minimum(1) maximum(200)
 //	@Success	200		{array}		api.TopNode
 //	@Failure	500		{object}	handlers.APIError
+//	@Failure	503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/stats/top-nodes [get]
 func getStatsTopNodes(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -227,8 +227,7 @@ func getStatsTopNodes(reader api.Reader) http.HandlerFunc {
 		}
 		nodes, err := reader.GetStatsTopNodes(r.Context(), iatas, since, limit)
 		if err != nil {
-			slog.Error("api: GetStatsTopNodes failed", "component", "api", "error", err)
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, nodes)
@@ -247,6 +246,7 @@ func getStatsTopNodes(reader api.Reader) http.HandlerFunc {
 //	@Param		limit	query		int		false	"Max results (default 10); must be positive, values above 200 are clamped" minimum(1) maximum(200)
 //	@Success	200		{array}		api.TopObserver
 //	@Failure	500		{object}	handlers.APIError
+//	@Failure	503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/stats/top-observers [get]
 func getStatsTopObservers(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -274,8 +274,7 @@ func getStatsTopObservers(reader api.Reader) http.HandlerFunc {
 		}
 		observers, err := reader.GetStatsTopObservers(r.Context(), iatas, since, limit)
 		if err != nil {
-			slog.Error("api: GetStatsTopObservers failed", "component", "api", "error", err)
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, observers)
@@ -297,6 +296,7 @@ func getStatsTopObservers(reader api.Reader) http.HandlerFunc {
 //	@Success	200		{array}		api.TopAdvertiser
 //	@Failure	400		{object}	handlers.APIError
 //	@Failure	500		{object}	handlers.APIError
+//	@Failure	503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/stats/top-advertisers [get]
 func getStatsTopAdvertisers(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -329,8 +329,7 @@ func getStatsTopAdvertisers(reader api.Reader) http.HandlerFunc {
 		}
 		advertisers, err := reader.GetStatsTopAdvertisers(r.Context(), iatas, since, limit, sort)
 		if err != nil {
-			slog.Error("api: GetStatsTopAdvertisers failed", "component", "api", "error", err)
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, advertisers)
@@ -348,6 +347,7 @@ func getStatsTopAdvertisers(reader api.Reader) http.HandlerFunc {
 //	@Param		limit	query		int		false	"Max results (default 10); must be positive, values above 200 are clamped" minimum(1) maximum(200)
 //	@Success	200		{array}		api.ClockDriftEntry
 //	@Failure	500		{object}	handlers.APIError
+//	@Failure	503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/stats/clock-drift [get]
 func getStatsClockDrift(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -370,8 +370,7 @@ func getStatsClockDrift(reader api.Reader) http.HandlerFunc {
 		}
 		entries, err := reader.GetStatsClockDrift(r.Context(), iatas, limit)
 		if err != nil {
-			slog.Error("api: GetStatsClockDrift failed", "component", "api", "error", err)
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, entries)
@@ -390,6 +389,7 @@ func getStatsClockDrift(reader api.Reader) http.HandlerFunc {
 //	@Param		limit	query		int		false	"Max results (default 10); must be positive, values above 200 are clamped" minimum(1) maximum(200)
 //	@Success	200		{array}		api.TopTalker
 //	@Failure	500		{object}	handlers.APIError
+//	@Failure	503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/stats/top-talkers [get]
 func getStatsTopTalkers(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -417,8 +417,7 @@ func getStatsTopTalkers(reader api.Reader) http.HandlerFunc {
 		}
 		talkers, err := reader.GetStatsTopTalkers(r.Context(), iatas, since, limit)
 		if err != nil {
-			slog.Error("api: GetStatsTopTalkers failed", "component", "api", "error", err)
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, talkers)
@@ -436,6 +435,7 @@ func getStatsTopTalkers(reader api.Reader) http.HandlerFunc {
 //	@Param		region		query	string	false	"Filter by region slug, expands to member IATAs"
 //	@Success	200		{object}	[]api.RadioPreset
 //	@Failure	500		{object}	handlers.APIError
+//	@Failure	503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/stats/radio-presets [get]
 func getStatsRadioPresets(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -454,7 +454,7 @@ func getStatsRadioPresets(reader api.Reader) http.HandlerFunc {
 		}
 		presets, err := reader.GetRadioPresets(r.Context(), preset, iatas)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		respond(w, http.StatusOK, presets)
@@ -475,6 +475,7 @@ func getStatsRadioPresets(reader api.Reader) http.HandlerFunc {
 //	@Success	200	{object}	[]api.ScopeStats
 //	@Failure	400	{object}	handlers.APIError
 //	@Failure	500	{object}	handlers.APIError
+//	@Failure	503	{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/stats/scopes [get]
 func getStatsScopes(reader api.Reader, scopes ScopeMembership) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -498,7 +499,7 @@ func getStatsScopes(reader api.Reader, scopes ScopeMembership) http.HandlerFunc 
 		}
 		stats, err := reader.GetScopeStats(r.Context(), iatas, since)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 			return
 		}
 		if len(iatas) > 0 {
@@ -522,6 +523,7 @@ func getStatsScopes(reader api.Reader, scopes ScopeMembership) http.HandlerFunc 
 //	@Param		region		query		string	false	"Filter by region slug, expands to member IATAs"
 //	@Success	200			{array}		api.NodeTypeCount
 //	@Failure	500			{object}	handlers.APIError
+//	@Failure	503			{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
 //	@Router		/stats/node-types [get]
 func getStatsNodeTypes(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -539,7 +541,7 @@ func getStatsNodeTypes(reader api.Reader) http.HandlerFunc {
 		}
 		result, err := reader.GetStatsNodeTypes(r.Context(), iatas)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "failed to get node type stats")
+			respondReaderError(w, err, "failed to get node type stats")
 			return
 		}
 		respond(w, http.StatusOK, result)

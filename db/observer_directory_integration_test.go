@@ -117,7 +117,7 @@ func TestObserverDirectoryFiltersAndCoveragePostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := New(pool, 0, 0)
+	store := New(pool, pool, 0, 0)
 	base := api.ObserverDirectoryQuery{IATAs: []string{"YVR"}, Sort: "traffic", Since: 1767225600000, Until: 1767229200000, Limit: 1}
 	cases := []struct {
 		name  string
@@ -156,7 +156,7 @@ func TestObserverDirectoryFiltersAndCoveragePostgres(t *testing.T) {
 					break
 				}
 				q.Cursor = *page.NextCursor
-				page, err = New(pool, 0, 0).ListObserverDirectory(ctx, q)
+				page, err = New(pool, pool, 0, 0).ListObserverDirectory(ctx, q)
 				if err != nil {
 					t.Fatal(err)
 				}

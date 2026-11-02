@@ -1,0 +1,8 @@
+[
+ "Limit",
+ "  Index Scan on trace_tags t using idx_trace_tags_keyset scan=Forward",
+ "    Aggregate partial=Simple [SubPlan]",
+ "      Index Only Scan on trace_iatas ti using trace_iatas_pkey scan=Forward",
+ "    Bitmap Heap Scan on trace_iatas ti_1 [SubPlan]",
+ "      Bitmap Index Scan using idx_trace_iatas_iata"
+]

@@ -1,0 +1,9 @@
+# Copyright 2026 Beacon Contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+statements:
+  Q: {sqlc: Q, plan: custom}
+resolvers:
+  top: SELECT public_key FROM nodes LIMIT 1
+entries:
+  - {id: a, stmt: Q, params: [{r: top}, [x, {r: nope}]]}

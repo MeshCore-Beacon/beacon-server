@@ -1,0 +1,18 @@
+[
+ "Aggregate partial=Simple",
+ "  Limit [InitPlan]",
+ "    LockRows",
+ "      Incremental Sort",
+ "        Index Scan on packets vp using idx_packets_last_heard scan=Backward",
+ "  ModifyTable on packets dp [InitPlan]",
+ "    Nested Loop",
+ "      CTE Scan",
+ "      Index Scan on packets dp using packets_pkey scan=Forward",
+ "  ModifyTable on analytics_raw_state [InitPlan]",
+ "    Aggregate partial=Simple [InitPlan]",
+ "      CTE Scan",
+ "    CTE Scan [InitPlan]",
+ "    Result",
+ "      Seq Scan on analytics_raw_state",
+ "  CTE Scan"
+]

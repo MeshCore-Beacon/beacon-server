@@ -1,0 +1,7 @@
+[
+ "Aggregate partial=Simple",
+ "  Sort",
+ "    Nested Loop (Semi)",
+ "      Function Scan",
+ "      Index Only Scan on packet_sites ps using idx_packet_sites_site_type scan=Forward"
+]

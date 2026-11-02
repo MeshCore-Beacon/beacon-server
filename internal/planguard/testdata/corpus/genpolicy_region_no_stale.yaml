@@ -1,0 +1,12 @@
+# Copyright 2026 Beacon Contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# A region page statement without a stale_region entry.
+statements:
+  ListKnownRoutesByIATA: {sqlc: ListKnownRoutesByIATA, plan: cached, admission: region_page}
+admission_profiles:
+  region_page: [dense, sparse, empty_region, stale_region, page1, deep, tie]
+entries:
+  - {id: r.dense, stmt: ListKnownRoutesByIATA, shapes: [dense, page1], params: [SEA, null, 0, 50]}
+  - {id: r.sparse, stmt: ListKnownRoutesByIATA, shapes: [sparse, deep], params: [MAD, "2026-01-01 00:00:00+00", 0, 50]}
+  - {id: r.empty, stmt: ListKnownRoutesByIATA, shapes: [empty_region, tie], params: [ZZZ, null, 0, 50]}

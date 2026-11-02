@@ -1,0 +1,13 @@
+[
+ "Aggregate partial=Simple",
+ "  Index Only Scan on observers using observers_pkey scan=Forward [InitPlan]",
+ "  Index Only Scan on observers observers_1 using observers_pkey scan=Forward [InitPlan]",
+ "  Result [InitPlan]",
+ "  Result [InitPlan]",
+ "  Nested Loop",
+ "    Hash Join (Full)",
+ "      Index Scan on packet_observations po using idx_observations_observer scan=Forward",
+ "      Hash",
+ "        Index Scan on packet_observations po_1 using idx_observations_observer scan=Forward",
+ "    Index Scan on packets p using packets_pkey scan=Forward"
+]

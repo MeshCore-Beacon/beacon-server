@@ -6,7 +6,6 @@ package handlers
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -77,14 +76,13 @@ func getObserverComparison(reader api.Reader) http.HandlerFunc {
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 			respondError(w, http.StatusNotFound, "observer not found")
-		case errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded):
-			respondError(w, http.StatusServiceUnavailable, "comparison timed out; try a shorter time period")
+		case isQueryTimeout(err) || errors.Is(ctx.Err(), context.DeadlineExceeded):
+			respondTimeout(w, "comparison timed out; try a shorter time period")
 		case err != nil:
 			if r.Context().Err() != nil {
 				return
 			}
-			slog.Error("observer comparison failed", "error", err)
-			respondError(w, http.StatusInternalServerError, "internal server error")
+			respondReaderError(w, err, "internal server error")
 		default:
 			respond(w, http.StatusOK, comparison)
 		}

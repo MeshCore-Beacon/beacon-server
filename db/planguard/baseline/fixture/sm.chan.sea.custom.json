@@ -1,0 +1,10 @@
+[
+ "Limit",
+ "  Sort",
+ "    Seq Scan on channels c",
+ "      Seq Scan on meshmapper_channel_members m [SubPlan]",
+ "      Seq Scan on channel_config_scopes s [SubPlan]",
+ "        Nested Loop [SubPlan]",
+ "          Seq Scan on regions r",
+ "          Seq Scan on region_iatas ri"
+]
