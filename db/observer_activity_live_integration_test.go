@@ -21,6 +21,9 @@ import (
 // The ingest process's activity counts must give the observer chart exactly what re-reading the raw rows gives.
 func TestObserverActivityLiveCountsMatchRawPostgres(t *testing.T) {
 	ctx, tx, raw := directoryFixture(t)
+	if _, err := tx.Exec(ctx, "ALTER TABLE observers ADD COLUMN region_scope_checked_at timestamptz"); err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now().UTC()
 	start := now.Add(-26 * time.Hour) // the counter covers slots from start + 31 minutes
 	clock := start
