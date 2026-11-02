@@ -36,14 +36,21 @@ func TestObserverActivityLiveCountsMatchRawPostgres(t *testing.T) {
 		if rng.IntN(10) == 0 {
 			rssi, snr = 0, 0 // no signal reported
 		}
+		rssiValue, snrValue := &rssi, &snr
+		if rng.IntN(5) == 0 {
+			rssiValue = nil
+		}
+		if rng.IntN(5) == 0 {
+			snrValue = nil
+		}
 		var airtime *float32
 		if rng.IntN(4) != 0 {
 			a := float32(rng.Float64() * 1500)
 			airtime = &a
 		}
-		activityObservation(t, ctx, tx, observer, at, payloadType, rssi, snr, airtime)
+		activityObservation(t, ctx, tx, observer, at, payloadType, rssiValue, snrValue, airtime)
 		if counted {
-			counts.Add(at, observer, payloadType, rssi, snr, airtime)
+			counts.Add(at, observer, payloadType, rssiValue, snrValue, airtime)
 		}
 	}
 	slot := obscount.ActivitySlot
@@ -137,7 +144,7 @@ func TestObserverActivityLiveCountsMatchRawPostgres(t *testing.T) {
 	cases("after retention")
 }
 
-func activityObservation(t *testing.T, ctx context.Context, tx pgx.Tx, observer uuid.UUID, at time.Time, payloadType, rssi int16, snr float32, airtime *float32) {
+func activityObservation(t *testing.T, ctx context.Context, tx pgx.Tx, observer uuid.UUID, at time.Time, payloadType int16, rssi *int16, snr *float32, airtime *float32) {
 	t.Helper()
 	_, err := tx.Exec(ctx, `WITH packet AS (
  INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,first_heard_at,last_heard_at)

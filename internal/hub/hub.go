@@ -22,6 +22,8 @@ import (
 	"slices"
 	"sync/atomic"
 	"time"
+
+	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
 )
 
 // EventType identifies the kind of server-push event. These match the
@@ -164,6 +166,8 @@ type Hub struct {
 	unsubscribe chan unsubscribeMsg
 	remove      chan *Client
 	broadcast   chan Event
+	gapNotify   chan struct{}
+	pendingGap  atomic.Int64
 
 	// observerKeyClients counts registered clients with IncludeObserverKey set.
 	observerKeyClients atomic.Int64
@@ -205,6 +209,7 @@ func New() *Hub {
 		unsubscribe: make(chan unsubscribeMsg, 64),
 		remove:      make(chan *Client, 64),
 		broadcast:   make(chan Event, 512),
+		gapNotify:   make(chan struct{}, 1),
 		sent:        newSentPaths(sentPathsTTL, sentPathsMax),
 	}
 }
@@ -269,7 +274,12 @@ func (h *Hub) Broadcast(e Event) {
 	select {
 	case h.broadcast <- e:
 	default:
-		slog.Warn("hub: broadcast channel full, dropping event", "component", "hub")
+		metrics.StreamDropped.WithLabelValues("global").Inc()
+		h.pendingGap.Add(1)
+		select {
+		case h.gapNotify <- struct{}{}:
+		default:
+		}
 	}
 }
 
@@ -290,6 +300,7 @@ func (h *Hub) BroadcastRepeat(e Event) {
 
 // dropRepeat counts a dropped repeat and logs the running total at most once a minute.
 func (h *Hub) dropRepeat() {
+	metrics.StreamDropped.WithLabelValues("repeat").Inc()
 	total := h.repeatDrops.Add(1)
 	now := time.Now().UnixNano()
 	last := h.repeatDropLogAt.Load()
@@ -363,6 +374,14 @@ func (h *Hub) Run() {
 				close(c.laggedCH)
 			}
 
+		case <-h.gapNotify:
+			dropped := int(h.pendingGap.Swap(0))
+			for c := range clients {
+				select {
+				case c.laggedCH <- LaggedNotification{DroppedCount: dropped}:
+				default:
+				}
+			}
 		case evt := <-h.broadcast:
 			for c := range clients {
 				if (evt.Repeat && !c.IncludeRepeats) || !c.matches(evt) {
@@ -389,6 +408,7 @@ func (h *Hub) Run() {
 					default:
 						// laggedCh itself full; write pump will catch up on next drain
 					}
+					metrics.StreamDropped.WithLabelValues("client").Add(float64(dropped))
 					slog.Warn(fmt.Sprintf("hub: client send buffer full, dropped event type=%s", evt.Type), "component", "hub")
 				}
 			}

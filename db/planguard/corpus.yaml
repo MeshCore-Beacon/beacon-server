@@ -63,6 +63,7 @@ groups:
   small_tables_end_state: {}
 
 statements:
+  GetTopologyLinks: {sqlc: GetTopologyLinks, plan: custom}
   # Merged statements, text from db/sqlc.
   ListKnownRoutesByIATA: {sqlc: ListKnownRoutesByIATA, plan: cached, admission: region_page}
   ListKnownRoutesGlobal: {sqlc: ListKnownRoutesGlobal, plan: cached, admission: global_page}
@@ -173,6 +174,9 @@ statements:
   FillChannelMessageIATAsByObservations: {sqlc: FillChannelMessageIATAsByObservations, kind: dml, group: channel_message_iatas, plan: maint}
 
 sort_exempt_sets:
+  topology_window:
+    - {relation: known_routes, index: idx_known_routes_keyset, index_cond: "date_trunc", reason: "deduplicating adjacent links requires a sort of the indexed time window; the handler has a 15s deadline"}
+    - {relation: known_routes, index: idx_known_routes_iata_keyset, index_cond: "date_trunc", reason: "regional adjacency sorts its indexed region/time range, not arbitrary route history"}
   hop_group:
     - {relation: known_routes, index: idx_known_routes_hop_iata, index_cond: "hop_count =", reason: "a hop page sorts one (hop, region) group, bounded by the group size"}
   hop_gate:
@@ -220,6 +224,10 @@ admission_profiles:
   observer_page: [hit, miss, page1, deep, past_end]
 
 resolvers:
+  topology_until: "SELECT date_trunc('milliseconds',last_seen,'UTC') + interval '1 minute' FROM known_routes ORDER BY date_trunc('milliseconds',last_seen,'UTC') DESC,id DESC LIMIT 1"
+  topology_24h: "SELECT date_trunc('milliseconds',last_seen,'UTC') - interval '24 hours' FROM known_routes ORDER BY date_trunc('milliseconds',last_seen,'UTC') DESC,id DESC LIMIT 1"
+  topology_1h: "SELECT date_trunc('milliseconds',last_seen,'UTC') - interval '1 hour' FROM known_routes ORDER BY date_trunc('milliseconds',last_seen,'UTC') DESC,id DESC LIMIT 1"
+  topology_15m: "SELECT date_trunc('milliseconds',last_seen,'UTC') - interval '15 minutes' FROM known_routes ORDER BY date_trunc('milliseconds',last_seen,'UTC') DESC,id DESC LIMIT 1"
   # packet_sites roles (see the packet_sites entries).
   obs_newest_heard_at: "SELECT heard_at FROM packet_observations ORDER BY id DESC LIMIT 1"
   obs_newest_iata: "SELECT iata FROM packet_observations ORDER BY id DESC LIMIT 1"
@@ -5411,3 +5419,51 @@ entries:
       sort_exempt: [hop_group]
       budget: {buffers: 1700, planning_ms: 10}
     expect_fail: true
+
+  - id: topology.global24h
+    stmt: GetTopologyLinks
+    shape: "bounded 24h adjacency snapshot, all regions"
+    params: [100001, {r: topology_24h}, {r: topology_until}, []]
+    expect:
+      driver: [{relation: known_routes, any_index: [idx_known_routes_keyset, idx_known_routes_iata_keyset], nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["date_trunc"]}]
+      sort_exempt: [topology_window]
+
+  - id: topology.global1h
+    stmt: GetTopologyLinks
+    shape: "bounded 1h adjacency snapshot, all regions"
+    params: [100001, {r: topology_1h}, {r: topology_until}, []]
+    expect:
+      driver: [{relation: known_routes, any_index: [idx_known_routes_keyset, idx_known_routes_iata_keyset], nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["date_trunc"]}]
+      sort_exempt: [topology_window]
+
+  - id: topology.global15m
+    stmt: GetTopologyLinks
+    shape: "bounded 15m adjacency snapshot, all regions"
+    params: [100001, {r: topology_15m}, {r: topology_until}, []]
+    expect:
+      driver: [{relation: known_routes, any_index: [idx_known_routes_keyset, idx_known_routes_iata_keyset], nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["date_trunc"]}]
+      sort_exempt: [topology_window]
+
+  - id: topology.SEA24h
+    stmt: GetTopologyLinks
+    shape: "bounded 24h adjacency snapshot, SEA"
+    params: [100001, {r: topology_24h}, {r: topology_until}, [SEA]]
+    expect:
+      driver: [{relation: known_routes, index: idx_known_routes_iata_keyset, nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["date_trunc"]}]
+      sort_exempt: [topology_window]
+
+  - id: topology.MAD24h
+    stmt: GetTopologyLinks
+    shape: "bounded 24h adjacency snapshot, MAD"
+    params: [100001, {r: topology_24h}, {r: topology_until}, [MAD]]
+    expect:
+      driver: [{relation: known_routes, index: idx_known_routes_iata_keyset, nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["date_trunc"]}]
+      sort_exempt: [topology_window]
+
+  - id: topology.ZZZ24h
+    stmt: GetTopologyLinks
+    shape: "bounded 24h adjacency snapshot, ZZZ"
+    params: [100001, {r: topology_24h}, {r: topology_until}, [ZZZ]]
+    expect:
+      driver: [{relation: known_routes, index: idx_known_routes_iata_keyset, nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["date_trunc"]}]
+      sort_exempt: [topology_window]
