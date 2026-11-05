@@ -144,6 +144,11 @@ func (s *Store) ListNodes(ctx context.Context, nodeType int16, iatas []string, s
 	for _, v := range rows {
 		items = append(items, s.nodeSummary(v))
 	}
+	if includeNeighbors {
+		if err := s.enrichNodeScopes(ctx, items); err != nil {
+			return api.NodePage{}, err
+		}
+	}
 	page := api.NodePage{Page: api.Page[api.NodeSummary]{Items: items, HasMore: hasMore}}
 	if hasMore && len(rows) > 0 {
 		last := rows[len(rows)-1]
@@ -191,6 +196,11 @@ func (s *Store) ListNodesSorted(ctx context.Context, nodeType int16, iatas []str
 			RadioBwKhz: v.RadioBwKhz, DefaultScopeName: v.DefaultScopeName, Iatas: v.Iatas, IsObserver: v.IsObserver,
 			ObserverID: v.ObserverID, KnownNeighborCount: v.KnownNeighborCount, NeighborIds: v.NeighborIds,
 		}))
+	}
+	if includeNeighbors {
+		if err := s.enrichNodeScopes(ctx, items); err != nil {
+			return api.NodePage{}, err
+		}
 	}
 	page := api.NodePage{Page: api.Page[api.NodeSummary]{Items: items, HasMore: hasMore}}
 	if hasMore && len(rows) > 0 {
@@ -272,7 +282,7 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 			node.IATAs = []api.NodeIATA{}
 		}
 	}
-	if len(row.Meshmapper) > 0 {
+	if row.NodeType == 2 && len(row.Meshmapper) > 0 {
 		var mm api.MeshMapperRepeater
 		if err := json.Unmarshal(row.Meshmapper, &mm); err != nil {
 			slog.Error("store: failed to unmarshal MeshMapper repeater", "component", "db", "error", err)
@@ -299,6 +309,11 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 		outOfSync := time.Duration(abs(*row.DeviceClockDriftSeconds))*time.Second > s.clockDriftThreshold
 		node.ClockOutOfSync = &outOfSync
 	}
+	summaries := []api.NodeSummary{node.NodeSummary}
+	if err := s.enrichNodeScopes(ctx, summaries, true); err != nil {
+		return nil, err
+	}
+	node.ScopeEvidence = summaries[0].ScopeEvidence
 	return node, nil
 }
 

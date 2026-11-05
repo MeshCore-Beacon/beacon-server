@@ -23,6 +23,8 @@ type Page[T any] struct {
 }
 
 type Reader interface {
+	GetScopeActivity(context.Context, []string, int) (*ScopeActivity, error)
+	GetNodeScopeEvidence(context.Context, []uuid.UUID) (map[string]NodeScopeEvidence, error)
 	ListObserverDirectory(context.Context, ObserverDirectoryQuery) (*ObserverDirectory, error)
 	// GetRouteEvidence returns the full saved route and exact-prefix retained ordinary reports.
 	GetRouteEvidence(ctx context.Context, iata, pathKey string, query RouteEvidenceQuery) (*RouteEvidence, error)
@@ -237,6 +239,8 @@ type Reader interface {
 
 	// GetTraceByTag returns all packets for a given trace tag with resolved routes.
 	GetTraceByTag(ctx context.Context, tag string) (*TraceDetail, error)
+
+	GetTopologyLinks(ctx context.Context, iatas []string, since, until time.Time) (*TopologyLinks, error)
 
 	// ListKnownRoutes returns known routes in any of iatas (empty means all), with an optional hop count.
 	// A nonzero cursorID breaks ties within the cursor's millisecond.

@@ -59,6 +59,10 @@ func handleSafely(ctx context.Context, m mqtt.Message, handle func(context.Conte
 }
 
 func (q *messageQueue) enqueue(m mqtt.Message) bool {
+	if len(m.Topic()) > 256 || len(m.Payload()) > maxEnvelopeBytes {
+		metrics.IngestRejected.WithLabelValues("envelope_size").Inc()
+		return false
+	}
 	// Keep status and packets from each observer in arrival order.
 	parts := strings.SplitN(m.Topic(), "/", 4)
 	key := m.Topic()

@@ -129,6 +129,8 @@ func TestMeshMapperRepeatersConfig(t *testing.T) {
 		valid + "    refresh_interval: 24h\n": false,
 		valid + "    refresh_interval: 59m\n": true,
 		valid + "    refresh_interval: 25h\n": true,
+		valid + "    iatas: [ykf, YKF]\n":     false,
+		valid + "    iatas: ['../bad']\n":     true,
 	} {
 		if _, err := loadText(t, text); (err != nil) != bad {
 			t.Errorf("%q: error=%v", text, err)
@@ -136,5 +138,9 @@ func TestMeshMapperRepeatersConfig(t *testing.T) {
 	}
 	if (MeshMapperRepeatersConfig{}).Interval() != 6*time.Hour {
 		t.Fatal("wrong default")
+	}
+	cfg, err := loadText(t, valid+"    iatas: [ykf, YKF]\n")
+	if err != nil || len(cfg.MeshMapper.Repeaters.IATAs) != 1 || cfg.MeshMapper.Repeaters.IATAs[0] != "YKF" {
+		t.Fatal("IATA limit normalization", err)
 	}
 }

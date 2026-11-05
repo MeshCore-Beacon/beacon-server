@@ -410,7 +410,7 @@ func (s *Store) GetObserverActivity(ctx context.Context, observerID uuid.UUID, w
 	}
 	for t, b := range counted.Buckets {
 		add(t, activitySums{observations: b.Observations, airtimeSum: b.AirtimeSum, airtimeN: b.AirtimeN,
-			snrSum: b.SNRSum, snrMin: b.SNRMin, snrN: b.SignalN, rssiSum: b.RSSISum, rssiN: b.SignalN})
+			snrSum: b.SNRSum, snrMin: b.SNRMin, snrN: b.SNRN, rssiSum: b.RSSISum, rssiN: b.RSSIN})
 		for payloadType, n := range b.Types {
 			types[payloadType] += n
 		}

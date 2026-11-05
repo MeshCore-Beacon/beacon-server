@@ -20,7 +20,8 @@ const ActivityKeep = 25 * time.Hour
 const slotMicros = int64(ActivitySlot / time.Microsecond)
 
 // Bucket sums one observer's stored observations in one slot the way the activity query sums raw rows.
-// Signal sums and SignalN cover rows whose RSSI and SNR are not both zero.
+// Signal sums preserve independent field presence, with the same legacy
+// zero/zero exclusion as the raw SQL activity query.
 type Bucket struct {
 	Observations int64
 	AirtimeSum   float64
@@ -28,7 +29,8 @@ type Bucket struct {
 	SNRSum       float64
 	SNRMin       float32
 	RSSISum      int64
-	SignalN      int64
+	SNRN         int64
+	RSSIN        int64
 	Types        map[int16]int64
 }
 
@@ -58,7 +60,7 @@ func NewActivity(now func() time.Time) *Activity {
 }
 
 // Add counts one newly stored observation with the values it was stored with.
-func (a *Activity) Add(heardAt time.Time, observer uuid.UUID, payloadType, rssi int16, snr float32, airtimeMs *float32) {
+func (a *Activity) Add(heardAt time.Time, observer uuid.UUID, payloadType int16, rssi *int16, snr *float32, airtimeMs *float32) {
 	if a == nil {
 		return
 	}
@@ -87,13 +89,18 @@ func (a *Activity) Add(heardAt time.Time, observer uuid.UUID, payloadType, rssi 
 		b.AirtimeSum += float64(*airtimeMs)
 		b.AirtimeN++
 	}
-	if rssi != 0 || snr != 0 {
-		if b.SignalN == 0 || snr < b.SNRMin {
-			b.SNRMin = snr
+	if (rssi != nil && *rssi != 0) || (snr != nil && *snr != 0) {
+		if snr != nil {
+			if b.SNRN == 0 || *snr < b.SNRMin {
+				b.SNRMin = *snr
+			}
+			b.SNRSum += float64(*snr)
+			b.SNRN++
 		}
-		b.SNRSum += float64(snr)
-		b.RSSISum += int64(rssi)
-		b.SignalN++
+		if rssi != nil {
+			b.RSSISum += int64(*rssi)
+			b.RSSIN++
+		}
 	}
 	b.Types[payloadType]++
 }

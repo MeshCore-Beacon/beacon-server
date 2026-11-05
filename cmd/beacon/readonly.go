@@ -14,7 +14,7 @@ type bootMode struct {
 	Migrate bool
 	// Seed writes the configured IATAs, regions and scopes.
 	Seed bool
-	// Backfill decrypts stored channel messages at boot and for newly imported keys.
+	// Backfill enables the resumable channel history job after startup and key changes.
 	Backfill bool
 	// Ingest starts the MQTT ingest workers.
 	Ingest bool

@@ -46,7 +46,7 @@ func TestMeshMapperRepeatersPostgres(t *testing.T) {
 	}
 	defer tx.Rollback(context.Background())
 	for _, table := range []string{"nodes", "transport_scopes", "observers", "node_iatas", "node_neighbors",
-		"meshmapper_repeater_sources", "meshmapper_repeaters"} {
+		"meshmapper_repeater_sources", "meshmapper_repeaters", "meshmapper_repeater_access"} {
 		if _, err := tx.Exec(ctx, "CREATE TEMP TABLE "+table+" (LIKE public."+table+" INCLUDING ALL) ON COMMIT DROP"); err != nil {
 			t.Fatal(err)
 		}
@@ -134,6 +134,16 @@ func TestMeshMapperRepeatersPostgres(t *testing.T) {
 	}
 
 	save("YOW", now.Add(4*time.Minute), []meshmapper.Repeater{{Key: keyB, Data: api.MeshMapperRepeater{Admins: []string{}, Scopes: []api.MeshMapperScope{}}}})
+	if err := store.SaveRepeaterSource(ctx, "YOW", "https://yow.meshmapper.net/get_repeaters.php", meshmapper.Cache{AttemptedAt: now, NextAttempt: now.Add(time.Hour), LastError: "permission denied (HTTP 403)"}, []meshmapper.Repeater{}); err != nil {
+		t.Fatal(err)
+	}
+	denied, _ := store.ListRepeaterSources(ctx)
+	for _, source := range denied {
+		if source.IATA == "YOW" && (!source.CheckedAt.IsZero() || source.ETag != "" || source.NextAttempt.IsZero()) {
+			t.Fatal("revoked profile retained validator or lost cooldown")
+		}
+	}
+	save("YOW", now.Add(4*time.Minute), []meshmapper.Repeater{{Key: keyB, Data: api.MeshMapperRepeater{Admins: []string{}, Scopes: []api.MeshMapperScope{}}}})
 	if cleared, err := store.ClearRepeaters(ctx); err != nil || !cleared || rows() != 0 {
 		t.Fatal("clear", cleared, err)
 	}
@@ -143,5 +153,22 @@ func TestMeshMapperRepeatersPostgres(t *testing.T) {
 	}
 	if cleared, err := store.ClearRepeaters(ctx); err != nil || cleared {
 		t.Fatal("second clear reported a change", cleared, err)
+	}
+	if _, err := prepareRepeaterAccess(ctx, tx, "test-access-one"); err != nil {
+		t.Fatal(err)
+	}
+	save("YOW", now.Add(5*time.Minute), []meshmapper.Repeater{{Key: keyB, Data: api.MeshMapperRepeater{Admins: []string{}, Scopes: []api.MeshMapperScope{}}}})
+	before, _ := store.ListRepeaterSources(ctx)
+	if changed, err := prepareRepeaterAccess(ctx, tx, "test-access-one"); err != nil || changed || rows() != 1 {
+		t.Fatal("same access invalidated cache", changed, err)
+	}
+	if changed, err := prepareRepeaterAccess(ctx, tx, "test-access-two"); err != nil || !changed || rows() != 0 {
+		t.Fatal("changed access retained cache", changed, err)
+	}
+	after, _ := store.ListRepeaterSources(ctx)
+	for i := range after {
+		if after[i].ETag != "" || !after[i].CheckedAt.IsZero() || !after[i].NextAttempt.Equal(before[i].NextAttempt) {
+			t.Fatal("cache binding reset cooldown or retained validators")
+		}
 	}
 }

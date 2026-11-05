@@ -6,6 +6,9 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"regexp"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -17,6 +20,8 @@ const (
 	MinChannelsRefresh  = 24 * time.Hour // get_channels.php: one per region per 23.5h
 	MinRepeatersRefresh = time.Hour      // get_repeaters.php only has the shared daily key budget
 )
+
+var meshMapperIATA = regexp.MustCompile(`^[A-Z0-9]{3,8}$`)
 
 type MeshMapperConfig struct {
 	APIKey    string                    `yaml:"api_key" json:"-"`
@@ -30,6 +35,7 @@ type MeshMapperConfig struct {
 type MeshMapperRepeatersConfig struct {
 	Enabled         bool     `yaml:"enabled"`
 	RefreshInterval duration `yaml:"refresh_interval"`
+	IATAs           []string `yaml:"iatas"` // optional import limit; the key's provider permissions still apply
 }
 
 func (c MeshMapperRepeatersConfig) Interval() time.Duration {
@@ -82,6 +88,18 @@ func (c MeshMapperScopesConfig) Interval() time.Duration {
 }
 
 func (c *Config) validateMeshMapper() error {
+	if len(c.MeshMapper.Repeaters.IATAs) > 1000 {
+		return fmt.Errorf("meshmapper.repeaters.iatas exceeds 1000 regions")
+	}
+	for i, code := range c.MeshMapper.Repeaters.IATAs {
+		code = strings.ToUpper(strings.TrimSpace(code))
+		if !meshMapperIATA.MatchString(code) {
+			return fmt.Errorf("meshmapper.repeaters.iatas must contain 3-8 character region codes")
+		}
+		c.MeshMapper.Repeaters.IATAs[i] = code
+	}
+	slices.Sort(c.MeshMapper.Repeaters.IATAs)
+	c.MeshMapper.Repeaters.IATAs = slices.Compact(c.MeshMapper.Repeaters.IATAs)
 	if z := c.MeshMapper.Zones; z.ImportGroups && !z.Enabled {
 		return fmt.Errorf("meshmapper.zones.import_groups requires meshmapper.zones.enabled")
 	}

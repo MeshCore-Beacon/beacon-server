@@ -24,7 +24,8 @@ const (
 	packetSitesStateKey = "packet_sites"
 	// packetSitesSlice is the observation ids one fill covers in the reconcile, and the observations in the backfill's
 	// default slice (readmodels.fill.packet_sites_slice) and in the audit's and verification's sampled slice.
-	packetSitesSlice int64 = 500_000
+	packetSitesSlice     int64 = 500_000
+	packetSitesBootSlice int64 = 50_000
 	// packetSitesFillAttempts bounds the retries of a fill that lost a packet to a concurrent cascade (23503).
 	packetSitesFillAttempts = 3
 )
@@ -51,7 +52,7 @@ type PacketSitesSession struct {
 	found bool // the state existed when the lock was taken
 
 	// The backfill's pacing (see FillPacing): pause is the shortest wait after a slice, duty the share of time it may
-	// be busy, slice the observation ids one slice covers. progress logs it once a minute; nil logs nothing.
+	// be busy, slice the observations one slice covers. progress logs it once a minute; nil logs nothing.
 	pause    time.Duration
 	duty     float64
 	slice    int64
@@ -62,10 +63,12 @@ type PacketSitesSession struct {
 
 	// fillStmt runs one fill; tests replace it. fills lists the (after, through] ranges filled, and retries counts
 	// 23503 retries, for tests.
-	fillStmt func(ctx context.Context, after, through int64) (int64, error)
-	fills    [][2]int64
-	checks   [][2]int64 // the (after, through] ranges Verify checked, for tests
-	retries  int
+	fillStmt      func(ctx context.Context, after, through int64) (int64, error)
+	fills         [][2]int64
+	checks        [][2]int64 // the (after, through] ranges Verify checked, for tests
+	retries       int
+	backfillSpan  int64 // observations per boot write, independent of ID gaps
+	backfillLimit time.Duration
 }
 
 // BeginPacketSites takes the packet_sites lock for this schema on a dedicated connection and reads the persisted
@@ -180,9 +183,11 @@ func (p *PacketSitesSession) fillWith(ctx context.Context, after, through int64,
 // estimated observations, not ids.
 func (p *PacketSitesSession) Backfill(ctx context.Context, budget time.Duration) (PacketSitesState, error) {
 	deadline := time.Now().Add(budget)
-	slice := p.slice
-	if slice <= 0 {
-		slice = packetSitesSlice
+	if p.backfillSpan <= 0 {
+		p.backfillSpan = packetSitesBootSlice
+		if p.slice > 0 {
+			p.backfillSpan = min(p.backfillSpan, p.slice)
+		}
 	}
 	for !p.state.Complete && time.Now().Before(deadline) {
 		if err := ctx.Err(); err != nil {
@@ -210,12 +215,23 @@ func (p *PacketSitesSession) Backfill(ctx context.Context, budget time.Duration)
 		}
 		// A slice holds slice observations, however far apart their ids are: retention leaves a few old observations
 		// spread over a long id range, which would otherwise take a paced slice per slice ids.
-		from, err := p.q.ObservationIDBelow(ctx, sqlc.ObservationIDBelowParams{ThroughID: p.state.BackfilledDownToID, N: slice})
+		from, err := p.q.ObservationIDBelow(ctx, sqlc.ObservationIDBelowParams{ThroughID: p.state.BackfilledDownToID, N: p.backfillSpan})
 		if err != nil {
 			return p.state, err
 		}
 		from = max(from, lo-1)
-		if _, err := p.fill(ctx, from, p.state.BackfilledDownToID); err != nil {
+		timeout := backfillTimeout(p.backfillLimit, deadline)
+		_, err = p.fillWith(ctx, from, p.state.BackfilledDownToID, func(ctx context.Context, after, through int64) (int64, error) {
+			return backfillWrite(ctx, p.conn, timeout, func() (int64, error) { return p.fillStmt(ctx, after, through) })
+		})
+		if err != nil {
+			if backfillTimedOut(ctx, err) && timeout < backfillMaxTimeout(p.backfillLimit) {
+				return p.state, nil
+			}
+			if backfillTimedOut(ctx, err) && p.backfillSpan > 1 {
+				p.backfillSpan = max(1, p.backfillSpan/2)
+				continue
+			}
 			return p.state, fmt.Errorf("packet_sites backfill (%d, %d]: %w", from, p.state.BackfilledDownToID, err)
 		}
 		p.state.BackfilledDownToID = from

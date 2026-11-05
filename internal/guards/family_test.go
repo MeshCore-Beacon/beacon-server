@@ -30,6 +30,8 @@ func TestGuardFamilyClassify(t *testing.T) {
 		{"/api/v1/packets/ab12", PacketDetail, Entity},
 		{"/api/v1/routes?iata=YVR", Routes, List}, {"/api/v1/routes/search?hash=ab", Routes, Aggregation},
 		{"/api/v1/routes/cross", Routes, Aggregation}, {"/api/v1/routes/YVR/abcd/observations", Routes, Entity},
+		{"/api/v1/routes/topology?window=24h", Routes, Aggregation},
+		{"/routes/topology?iatas=YKF", Routes, Aggregation},
 		{"/api/v1/channels/3/messages", ChannelMessages, List}, {"/api/v1/messages?since=1", ChannelMessages, List},
 		{"/api/v1/messages/backfill", ChannelMessages, List},
 		{"/api/v1/stats/series", Stats, Aggregation}, {"/api/v1/stats/node-types", Stats, Aggregation},

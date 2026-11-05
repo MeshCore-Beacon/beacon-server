@@ -71,6 +71,9 @@ type Querier interface {
 	DeleteOldPackets(ctx context.Context, arg DeleteOldPacketsParams) (int64, error)
 	// Bumps coverage when hours go, so cached responses that included them are not reused.
 	DeleteOldRollups(ctx context.Context, cutoff pgtype.Timestamptz) error
+	DeleteOldScopeReceivers(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error)
+	DeleteOldScopeRepeats(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error)
+	DeleteOldScopeSamples(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error)
 	// Deletes telemetry rows older than the given cutoff. Called by the cleanup goroutine.
 	DeleteOldTelemetry(ctx context.Context, reportedAt pgtype.Timestamptz) error
 	// Keeps the trace IATA filter in step with packet retention.
@@ -133,6 +136,9 @@ type Querier interface {
 	GetNodeByPubkey(ctx context.Context, publicKey []byte) (uuid.UUID, error)
 	// Returns the neighbors of a node with details, ordered by most recently seen.
 	GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]GetNodeNeighborsRow, error)
+	// Page IDs keep work bounded; no packet-history scan or external lookup.
+	GetNodeScopeEvidence(ctx context.Context, arg GetNodeScopeEvidenceParams) ([]GetNodeScopeEvidenceRow, error)
+	GetNodeScopeHistory(ctx context.Context, arg GetNodeScopeHistoryParams) ([]GetNodeScopeHistoryRow, error)
 	GetNodesByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]GetNodesByIDsRow, error)
 	GetNodesByPubkeys(ctx context.Context, pubkeys [][]byte) ([]GetNodesByPubkeysRow, error)
 	GetObservationIDRange(ctx context.Context) (GetObservationIDRangeRow, error)
@@ -191,6 +197,8 @@ type Querier interface {
 	GetScopeByName(ctx context.Context, name string) (GetScopeByNameRow, error)
 	GetScopeCatalogue(ctx context.Context, arg GetScopeCatalogueParams) (MeshmapperScopeCatalogue, error)
 	GetScopeNames(ctx context.Context) ([]string, error)
+	GetScopeReceiverActivity(ctx context.Context, arg GetScopeReceiverActivityParams) ([]GetScopeReceiverActivityRow, error)
+	GetScopeRepeaterActivity(ctx context.Context, arg GetScopeRepeaterActivityParams) ([]GetScopeRepeaterActivityRow, error)
 	// Packets since the given hour come from the IATA-set rollup (counted once per hour heard).
 	// Observer and node counts are current memberships; observers filter by their latest IATA.
 	GetScopeStats(ctx context.Context, arg GetScopeStatsParams) ([]GetScopeStatsRow, error)
@@ -238,6 +246,9 @@ type Querier interface {
 	// The hours walked stay inside the table's own [min(hour), max(hour)]; an empty table walks none
 	// (a NULL start makes generate_series return no rows).
 	GetTopNodesProbe(ctx context.Context, arg GetTopNodesProbeParams) ([]GetTopNodesProbeRow, error)
+	// Reduce route history to unique adjacent pairs before transferring it to a browser.
+	// Keep the exact window while using the surviving millisecond keyset indexes.
+	GetTopologyLinks(ctx context.Context, arg GetTopologyLinksParams) ([]GetTopologyLinksRow, error)
 	GetTransportScopeByName(ctx context.Context, name string) (int32, error)
 	GetTransportScopes(ctx context.Context) ([]GetTransportScopesRow, error)
 	// Whether any observation up to @max_id lacks a payload type. A full scan, run at most once per
@@ -496,6 +507,10 @@ type Querier interface {
 	ReconfirmRoutesBatch(ctx context.Context, arg ReconfirmRoutesBatchParams) (ReconfirmRoutesBatchRow, error)
 	// Key of the last route in a slice that timed out: the caller passes the slice's row count - 1.
 	ReconfirmSliceEnd(ctx context.Context, arg ReconfirmSliceEndParams) (ReconfirmSliceEndRow, error)
+	RecordScopeObservation(ctx context.Context, arg RecordScopeObservationParams) error
+	// One accepted MQTT hearing, one vote per distinct resolved repeater. These are
+	// repeat observations, NOT unique RF transmissions or configuration claims.
+	RecordScopeRepeats(ctx context.Context, arg RecordScopeRepeatsParams) error
 	// One hearing of a TRACE packet: trace_iatas refreshes at most hourly and the tag's heard
 	// window widens (the first hearing replaces the packet's provisional times). Packet counts
 	// and payloads come from UpsertPacket.
@@ -534,6 +549,9 @@ type Querier interface {
 	ResolveRelayHashPairsP3(ctx context.Context, arg ResolveRelayHashPairsP3Params) ([]ResolveRelayHashPairsP3Row, error)
 	// Batch form of ResolvePathHashesP4 across IATAs; callers check uniqueness per IATA.
 	ResolveRelayHashPairsP4(ctx context.Context, arg ResolveRelayHashPairsP4Params) ([]ResolveRelayHashPairsP4Row, error)
+	// TRACE can terminate at companions. Preserve the full prefix (including eight
+	// bytes), and return every candidate across heard regions instead of picking one.
+	ResolveTraceHashes(ctx context.Context, arg ResolveTraceHashesParams) ([]ResolveTraceHashesRow, error)
 	RollAdvertHearings(ctx context.Context, hour pgtype.Timestamptz) error
 	// Each distinct ADVERT packet counts once, under the exact set of IATAs that heard it this hour.
 	RollAdvertSets(ctx context.Context, hour pgtype.Timestamptz) error
