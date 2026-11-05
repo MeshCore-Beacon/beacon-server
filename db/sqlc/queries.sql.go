@@ -1315,7 +1315,7 @@ func (q *Queries) GetObserverBrokers(ctx context.Context, observerID uuid.UUID) 
 }
 
 const getObserverByID = `-- name: GetObserverByID :one
-SELECT id, public_key, display_name, observer_type, software_version, hardware_model, firmware_version, firmware_build, radio_freq_mhz, radio_sf, radio_bw_khz, radio_cr, battery_level, uptime_seconds, status_metadata, last_status_at, first_seen, last_seen, observation_count, metadata, region_scope, last_iata, last_iata_at FROM observers WHERE id = $1
+SELECT id, public_key, display_name, observer_type, software_version, hardware_model, firmware_version, firmware_build, radio_freq_mhz, radio_sf, radio_bw_khz, radio_cr, battery_level, uptime_seconds, status_metadata, last_status_at, first_seen, last_seen, observation_count, metadata, region_scope, last_iata, last_iata_at, region_scope_checked_at FROM observers WHERE id = $1
 `
 
 func (q *Queries) GetObserverByID(ctx context.Context, id uuid.UUID) (Observer, error) {
@@ -1345,12 +1345,13 @@ func (q *Queries) GetObserverByID(ctx context.Context, id uuid.UUID) (Observer, 
 		&i.RegionScope,
 		&i.LastIata,
 		&i.LastIataAt,
+		&i.RegionScopeCheckedAt,
 	)
 	return i, err
 }
 
 const getObserverByPubkey = `-- name: GetObserverByPubkey :one
-SELECT id, public_key, display_name, observer_type, software_version, hardware_model, firmware_version, firmware_build, radio_freq_mhz, radio_sf, radio_bw_khz, radio_cr, battery_level, uptime_seconds, status_metadata, last_status_at, first_seen, last_seen, observation_count, metadata, region_scope, last_iata, last_iata_at FROM observers WHERE public_key = $1
+SELECT id, public_key, display_name, observer_type, software_version, hardware_model, firmware_version, firmware_build, radio_freq_mhz, radio_sf, radio_bw_khz, radio_cr, battery_level, uptime_seconds, status_metadata, last_status_at, first_seen, last_seen, observation_count, metadata, region_scope, last_iata, last_iata_at, region_scope_checked_at FROM observers WHERE public_key = $1
 `
 
 func (q *Queries) GetObserverByPubkey(ctx context.Context, publicKey []byte) (Observer, error) {
@@ -1380,6 +1381,7 @@ func (q *Queries) GetObserverByPubkey(ctx context.Context, publicKey []byte) (Ob
 		&i.RegionScope,
 		&i.LastIata,
 		&i.LastIataAt,
+		&i.RegionScopeCheckedAt,
 	)
 	return i, err
 }
@@ -1643,6 +1645,8 @@ func (q *Queries) GetPacketByHash(ctx context.Context, packetHash []byte) (GetPa
 
 const getPacketsByTraceTag = `-- name: GetPacketsByTraceTag :many
 SELECT encode(p.packet_hash, 'hex') AS packet_hash_hex,
+    p.raw_payload, p.payload_version,
+    EXISTS(SELECT 1 FROM packet_observations po WHERE po.packet_hash=p.packet_hash AND po.path_length_byte>=64) AS invalid_snr_path,
     p.route_type,
     p.first_heard_at,
     p.last_heard_at,
@@ -1663,14 +1667,17 @@ ORDER BY p.first_heard_at ASC
 `
 
 type GetPacketsByTraceTagRow struct {
-	PacketHashHex string             `json:"packet_hash_hex"`
-	RouteType     int16              `json:"route_type"`
-	FirstHeardAt  pgtype.Timestamptz `json:"first_heard_at"`
-	LastHeardAt   pgtype.Timestamptz `json:"last_heard_at"`
-	ParsedPayload []byte             `json:"parsed_payload"`
-	ScopeID       *int32             `json:"scope_id"`
-	ScopeName     *string            `json:"scope_name"`
-	Iatas         []string           `json:"iatas"`
+	PacketHashHex  string             `json:"packet_hash_hex"`
+	RawPayload     []byte             `json:"raw_payload"`
+	PayloadVersion int16              `json:"payload_version"`
+	InvalidSnrPath bool               `json:"invalid_snr_path"`
+	RouteType      int16              `json:"route_type"`
+	FirstHeardAt   pgtype.Timestamptz `json:"first_heard_at"`
+	LastHeardAt    pgtype.Timestamptz `json:"last_heard_at"`
+	ParsedPayload  []byte             `json:"parsed_payload"`
+	ScopeID        *int32             `json:"scope_id"`
+	ScopeName      *string            `json:"scope_name"`
+	Iatas          []string           `json:"iatas"`
 }
 
 // Return distinct observation IATAs in first-heard order for path resolution,
@@ -1686,6 +1693,9 @@ func (q *Queries) GetPacketsByTraceTag(ctx context.Context, decode string) ([]Ge
 		var i GetPacketsByTraceTagRow
 		if err := rows.Scan(
 			&i.PacketHashHex,
+			&i.RawPayload,
+			&i.PayloadVersion,
+			&i.InvalidSnrPath,
 			&i.RouteType,
 			&i.FirstHeardAt,
 			&i.LastHeardAt,
@@ -2737,6 +2747,63 @@ func (q *Queries) GetTopNodesProbe(ctx context.Context, arg GetTopNodesProbePara
 			&i.ObservationCount,
 			&i.LastHeard,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getTopologyLinks = `-- name: GetTopologyLinks :many
+WITH pairs AS (
+ SELECT h.a, h.b
+ FROM known_routes r CROSS JOIN LATERAL
+   ROWS FROM (unnest(r.node_ids),unnest(r.node_ids[array_lower(r.node_ids,1)+1:])) h(a,b)
+ WHERE date_trunc('milliseconds',r.last_seen,'UTC') >= date_trunc('milliseconds',$2::timestamptz,'UTC')
+   AND date_trunc('milliseconds',r.last_seen,'UTC') <= date_trunc('milliseconds',$3::timestamptz,'UTC')
+   AND r.last_seen >= $2::timestamptz AND r.last_seen < $3::timestamptz
+   AND (COALESCE(cardinality($4::bpchar[]),0)=0 OR r.iata=ANY($4::bpchar[]))
+   AND cardinality(r.node_ids)>1
+)
+SELECT LEAST(a,b)::uuid AS from_id, GREATEST(a,b)::uuid AS to_id
+FROM pairs WHERE a IS NOT NULL AND b IS NOT NULL AND a<>b
+GROUP BY LEAST(a,b), GREATEST(a,b)
+ORDER BY LEAST(a,b), GREATEST(a,b)
+LIMIT $1::int
+`
+
+type GetTopologyLinksParams struct {
+	LinkLimit int32              `json:"link_limit"`
+	Since     pgtype.Timestamptz `json:"since"`
+	Until     pgtype.Timestamptz `json:"until"`
+	Iatas     []string           `json:"iatas"`
+}
+
+type GetTopologyLinksRow struct {
+	FromID uuid.UUID `json:"from_id"`
+	ToID   uuid.UUID `json:"to_id"`
+}
+
+// Reduce route history to unique adjacent pairs before transferring it to a browser.
+// Keep the exact window while using the surviving millisecond keyset indexes.
+func (q *Queries) GetTopologyLinks(ctx context.Context, arg GetTopologyLinksParams) ([]GetTopologyLinksRow, error) {
+	rows, err := q.db.Query(ctx, getTopologyLinks,
+		arg.LinkLimit,
+		arg.Since,
+		arg.Until,
+		arg.Iatas,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetTopologyLinksRow{}
+	for rows.Next() {
+		var i GetTopologyLinksRow
+		if err := rows.Scan(&i.FromID, &i.ToID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -6111,7 +6178,11 @@ SELECT
      WHERE ti.trace_tag = t.trace_tag
        AND (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR ti.iata = ANY($1::bpchar[]))) AS iata_count,
     COALESCE(t.trace_type, '')::text AS trace_type,
-    t.best_payload
+    t.best_payload,
+    ARRAY(SELECT ti.iata FROM trace_iatas ti WHERE ti.trace_tag=t.trace_tag)::bpchar[] AS iatas,
+    EXISTS(SELECT 1 FROM packets p WHERE p.trace_tag=t.trace_tag AND p.payload_version<>0) AS unsupported_version,
+    EXISTS(SELECT 1 FROM packets p WHERE p.trace_tag=t.trace_tag AND p.route_type NOT IN (2,3)) AS non_direct,
+    EXISTS(SELECT 1 FROM packets p JOIN packet_observations po ON po.packet_hash=p.packet_hash WHERE p.trace_tag=t.trace_tag AND po.path_length_byte>=64) AS invalid_snr_path
 FROM trace_tags t
 WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR EXISTS (
         SELECT 1 FROM trace_iatas ti WHERE ti.trace_tag = t.trace_tag AND ti.iata = ANY($1::bpchar[])))
@@ -6140,13 +6211,17 @@ type ListTraceTagsParams struct {
 }
 
 type ListTraceTagsRow struct {
-	TraceTag     string             `json:"trace_tag"`
-	FirstHeardAt pgtype.Timestamptz `json:"first_heard_at"`
-	LastHeardAt  pgtype.Timestamptz `json:"last_heard_at"`
-	PacketCount  int64              `json:"packet_count"`
-	IataCount    int64              `json:"iata_count"`
-	TraceType    string             `json:"trace_type"`
-	BestPayload  []byte             `json:"best_payload"`
+	TraceTag           string             `json:"trace_tag"`
+	FirstHeardAt       pgtype.Timestamptz `json:"first_heard_at"`
+	LastHeardAt        pgtype.Timestamptz `json:"last_heard_at"`
+	PacketCount        int64              `json:"packet_count"`
+	IataCount          int64              `json:"iata_count"`
+	TraceType          string             `json:"trace_type"`
+	BestPayload        []byte             `json:"best_payload"`
+	Iatas              []string           `json:"iatas"`
+	UnsupportedVersion bool               `json:"unsupported_version"`
+	NonDirect          bool               `json:"non_direct"`
+	InvalidSnrPath     bool               `json:"invalid_snr_path"`
 }
 
 // ============================================================
@@ -6179,6 +6254,10 @@ func (q *Queries) ListTraceTags(ctx context.Context, arg ListTraceTagsParams) ([
 			&i.IataCount,
 			&i.TraceType,
 			&i.BestPayload,
+			&i.Iatas,
+			&i.UnsupportedVersion,
+			&i.NonDirect,
+			&i.InvalidSnrPath,
 		); err != nil {
 			return nil, err
 		}
@@ -7027,6 +7106,63 @@ func (q *Queries) ResolveRelayHashPairsP4(ctx context.Context, arg ResolveRelayH
 	return items, nil
 }
 
+const resolveTraceHashes = `-- name: ResolveTraceHashes :many
+SELECT h.hash::bytea AS hash, si.iata, n.id AS node_id, n.name, n.latitude, n.longitude, n.public_key
+FROM unnest($1::bytea[]) AS h(hash)
+JOIN node_short_ids si ON si.iata = ANY($2::bpchar[]) AND
+ ((octet_length(h.hash)=1 AND si.prefix_1=h.hash) OR
+  (octet_length(h.hash)=2 AND si.prefix_2=h.hash) OR
+  (octet_length(h.hash) IN (4,8) AND si.prefix_4=substring(h.hash FROM 1 FOR 4)))
+JOIN nodes n ON n.id=si.node_id
+WHERE substring(n.public_key FROM 1 FOR octet_length(h.hash))=h.hash
+ORDER BY si.iata, h.hash, n.id
+`
+
+type ResolveTraceHashesParams struct {
+	Hashes [][]byte `json:"hashes"`
+	Iatas  []string `json:"iatas"`
+}
+
+type ResolveTraceHashesRow struct {
+	Hash      []byte    `json:"hash"`
+	Iata      string    `json:"iata"`
+	NodeID    uuid.UUID `json:"node_id"`
+	Name      *string   `json:"name"`
+	Latitude  *float64  `json:"latitude"`
+	Longitude *float64  `json:"longitude"`
+	PublicKey []byte    `json:"public_key"`
+}
+
+// TRACE can terminate at companions. Preserve the full prefix (including eight
+// bytes), and return every candidate across heard regions instead of picking one.
+func (q *Queries) ResolveTraceHashes(ctx context.Context, arg ResolveTraceHashesParams) ([]ResolveTraceHashesRow, error) {
+	rows, err := q.db.Query(ctx, resolveTraceHashes, arg.Hashes, arg.Iatas)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ResolveTraceHashesRow{}
+	for rows.Next() {
+		var i ResolveTraceHashesRow
+		if err := rows.Scan(
+			&i.Hash,
+			&i.Iata,
+			&i.NodeID,
+			&i.Name,
+			&i.Latitude,
+			&i.Longitude,
+			&i.PublicKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const saveChannelCatalogue = `-- name: SaveChannelCatalogue :exec
 INSERT INTO meshmapper_channel_catalogues (iata, url, payload, etag, checked_at, attempted_at, next_attempt, last_error)
 VALUES ($1, $2, $3::jsonb, $4::text,
@@ -7630,7 +7766,7 @@ func (q *Queries) TouchPackets(ctx context.Context, arg TouchPacketsParams) erro
 }
 
 const updateObserverRegionScope = `-- name: UpdateObserverRegionScope :exec
-UPDATE observers SET region_scope = $2 WHERE id = $1
+UPDATE observers SET region_scope = $2, region_scope_checked_at = now() WHERE id = $1
 `
 
 type UpdateObserverRegionScopeParams struct {
@@ -8065,13 +8201,14 @@ func (q *Queries) UpsertNodeIATA(ctx context.Context, arg UpsertNodeIATAParams) 
 
 const upsertNodeNeighbor = `-- name: UpsertNodeNeighbor :exec
 
-INSERT INTO node_neighbors (node_id, neighbor_id, iata, observation_count, snr, region_scope)
-VALUES ($1, $2, $3, 1, $4, $5)
+INSERT INTO node_neighbors (node_id, neighbor_id, iata, observation_count, snr, region_scope, region_scope_checked_at)
+VALUES ($1, $2, $3, 1, $4, $5, CASE WHEN $5::text IS NOT NULL THEN now() ELSE NULL END)
 ON CONFLICT (node_id, neighbor_id, iata) DO UPDATE SET
   last_seen         = NOW(),
   observation_count = node_neighbors.observation_count + 1,
   snr               = COALESCE(EXCLUDED.snr, node_neighbors.snr),
-  region_scope      = COALESCE(EXCLUDED.region_scope, node_neighbors.region_scope)
+  region_scope      = COALESCE(EXCLUDED.region_scope, node_neighbors.region_scope),
+  region_scope_checked_at = COALESCE(EXCLUDED.region_scope_checked_at, node_neighbors.region_scope_checked_at)
 `
 
 type UpsertNodeNeighborParams struct {
@@ -8133,7 +8270,7 @@ ON CONFLICT (public_key) DO UPDATE SET
                             AND (observers.last_iata_at IS NULL OR EXCLUDED.last_iata_at > observers.last_iata_at)
                            THEN EXCLUDED.last_iata ELSE observers.last_iata END,
   last_iata_at      = GREATEST(observers.last_iata_at, EXCLUDED.last_iata_at)
-RETURNING id, public_key, display_name, observer_type, software_version, hardware_model, firmware_version, firmware_build, radio_freq_mhz, radio_sf, radio_bw_khz, radio_cr, battery_level, uptime_seconds, status_metadata, last_status_at, first_seen, last_seen, observation_count, metadata, region_scope, last_iata, last_iata_at
+RETURNING id, public_key, display_name, observer_type, software_version, hardware_model, firmware_version, firmware_build, radio_freq_mhz, radio_sf, radio_bw_khz, radio_cr, battery_level, uptime_seconds, status_metadata, last_status_at, first_seen, last_seen, observation_count, metadata, region_scope, last_iata, last_iata_at, region_scope_checked_at
 `
 
 type UpsertObserverParams struct {
@@ -8173,6 +8310,7 @@ func (q *Queries) UpsertObserver(ctx context.Context, arg UpsertObserverParams) 
 		&i.RegionScope,
 		&i.LastIata,
 		&i.LastIataAt,
+		&i.RegionScopeCheckedAt,
 	)
 	return i, err
 }

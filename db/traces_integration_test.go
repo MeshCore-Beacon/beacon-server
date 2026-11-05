@@ -59,7 +59,7 @@ INSERT INTO node_short_ids (node_id,iata,prefix_4) VALUES
  ('00000000-0000-0000-0000-000000000001','YVR','\xaa000000'),
  ('00000000-0000-0000-0000-000000000002','YYJ','\xaa010000');
 INSERT INTO packets (packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,trace_tag,parsed_payload,first_heard_at,last_heard_at)
-SELECT decode(lpad(to_hex(i),64,'0'),'hex'),9,0,1,'\x00','\x00','\x01020304',
+SELECT decode(lpad(to_hex(i),64,'0'),'hex'),9,0,2,'\x010203040000000000aa','\x26','\x01020304',
  CASE WHEN i=100 THEN '{}'::jsonb ELSE '{"flags":0,"pathHashes":["aa"],"snrValues":[12.5]}'::jsonb END,
  '2026-01-01 00:00:00+00'::timestamptz+i*interval '1 second', '2026-01-01 00:00:00+00'::timestamptz+i*interval '1 second'+interval '1 second'
 FROM generate_series(1,100) i;
@@ -89,7 +89,7 @@ ANALYZE packets; ANALYZE packet_observations; ANALYZE nodes; ANALYZE node_short_
 	anchor := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	for i, p := range detail.Packets {
 		number := i + 1
-		if p.PacketHash != fmt.Sprintf("%064x", number) || p.RouteType != 1 || p.FirstHeardAt != anchor.Add(time.Duration(number)*time.Second).UnixMilli() || p.LastHeardAt != p.FirstHeardAt+1000 {
+		if p.PacketHash != fmt.Sprintf("%064x", number) || p.RouteType != 2 || p.FirstHeardAt != anchor.Add(time.Duration(number)*time.Second).UnixMilli() || p.LastHeardAt != p.FirstHeardAt+1000 {
 			t.Fatalf("wrong packet fields or order at %d", number)
 		}
 		if number == 100 {
@@ -109,7 +109,10 @@ ANALYZE packets; ANALYZE packet_observations; ANALYZE nodes; ANALYZE node_short_
 		}
 		want := "YVR relay"
 		if number == 1 {
-			want = "YYJ relay"
+			if len(p.ResolvedRoute) != 1 || p.ResolvedRoute[0].Confidence != "ambiguous" || len(p.ResolvedRoute[0].Nodes) != 2 || p.Quality.Status != "ambiguous" {
+				t.Fatal("conflicting regions must retain both candidates")
+			}
+			continue
 		}
 		if len(p.ResolvedRoute) != 1 || p.ResolvedRoute[0].Confidence != "high" || len(p.ResolvedRoute[0].Nodes) != 1 || p.ResolvedRoute[0].Nodes[0].Name == nil || *p.ResolvedRoute[0].Nodes[0].Name != want {
 			t.Fatalf("wrong region precedence/resolution at %d", number)
@@ -122,8 +125,8 @@ ANALYZE packets; ANALYZE packet_observations; ANALYZE nodes; ANALYZE node_short_
 	if counter.observations != 0 {
 		t.Errorf("extra observation queries: %d; want 0", counter.observations)
 	}
-	if counter.queries != 100 {
-		t.Errorf("got %d queries; want one packet query and 99 unchanged path-resolution queries", counter.queries)
+	if counter.queries != 99 {
+		t.Errorf("got %d queries; want one packet query and 98 batched path-resolution queries", counter.queries)
 	}
 	counter.queries, counter.observations = 0, 0
 	missing, err := store.GetTraceByTag(ctx, "00000000")

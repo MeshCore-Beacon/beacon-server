@@ -33,6 +33,8 @@ type Info struct {
 	// MinWebVersion is the oldest allowed Beacon Web version (X.Y.Z); null means no requirement.
 	MinWebVersion *string `json:"minWebVersion" example:"2.0.3"`
 	ServerVersion string  `json:"serverVersion" example:"2.0.2"`
+	BuildVersion  string  `json:"buildVersion,omitempty"`
+	BuildRevision string  `json:"buildRevision,omitempty"`
 }
 
 // WSTicket lets a client that sends no Origin open /ws, in the X-Beacon-Ticket header.

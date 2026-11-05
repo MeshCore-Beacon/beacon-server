@@ -410,6 +410,7 @@ func TestGetNode_Stale(t *testing.T) {
 func TestGetNode_ClockDrift_OutOfSync(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mock := mockdb.NewMockQuerier(ctrl)
+	mock.EXPECT().GetNodeScopeEvidence(gomock.Any(), gomock.Any()).Return([]sqlc.GetNodeScopeEvidenceRow{}, nil).AnyTimes()
 
 	nodeID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	drift := int64(-600) // 10 minutes behind, beyond a 5m threshold
@@ -515,6 +516,7 @@ func TestGetNode_ClockDrift_OmittedForCompanion(t *testing.T) {
 func TestGetNode_ClockDrift_OmittedWhenUnmeasured(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mock := mockdb.NewMockQuerier(ctrl)
+	mock.EXPECT().GetNodeScopeEvidence(gomock.Any(), gomock.Any()).Return([]sqlc.GetNodeScopeEvidenceRow{}, nil).AnyTimes()
 
 	nodeID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 

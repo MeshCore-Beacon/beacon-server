@@ -17,6 +17,17 @@ type errReader struct{ err error }
 
 var _ api.Reader = errReader{}
 
+func (e errReader) GetScopeActivity(context.Context, []string, int) (*api.ScopeActivity, error) {
+	return nil, e.err
+}
+func (e errReader) GetNodeScopeEvidence(context.Context, []uuid.UUID) (map[string]api.NodeScopeEvidence, error) {
+	return nil, e.err
+}
+
+func (e errReader) GetTopologyLinks(context.Context, []string, time.Time, time.Time) (*api.TopologyLinks, error) {
+	return nil, e.err
+}
+
 func (e errReader) ListObserverDirectory(context.Context, api.ObserverDirectoryQuery) (v *api.ObserverDirectory, err error) {
 	return v, e.err
 }

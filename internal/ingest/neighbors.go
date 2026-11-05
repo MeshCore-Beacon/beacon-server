@@ -8,21 +8,23 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
+	"math"
 )
 
 // neighborReportEntry is one entry in the "neighbors" array of a /neighbors report.
 type neighborReportEntry struct {
-	PubKey       string  `json:"pubkey"`
-	SNR          float32 `json:"snr"`
-	HeardSecsAgo int64   `json:"heard_secs_ago"`
-	Scopes       string  `json:"scopes"`
-	Status       string  `json:"status"` // "responded" or "timeout"
+	PubKey       string   `json:"pubkey"`
+	SNR          *float32 `json:"snr"`
+	HeardSecsAgo int64    `json:"heard_secs_ago"`
+	Scopes       *string  `json:"scopes"`
+	Status       string   `json:"status"` // "responded" or "timeout"
 }
 
 // neighborReport is the JSON payload for an observer /neighbors message.
 type neighborReport struct {
 	Self struct {
-		Scopes string `json:"scopes"`
+		Scopes *string `json:"scopes"`
 	} `json:"self"`
 	Neighbors []neighborReportEntry `json:"neighbors"`
 }
@@ -31,10 +33,24 @@ type neighborReport struct {
 // region scope, plus a snapshot of its zero-hop neighbors and (best-effort) their
 // OTA-queried region scopes. See the package doc comment for the full pipeline.
 func (w *Worker) handleNeighbors(ctx context.Context, iata, pubkeyHex string, raw []byte) {
+	if len(raw) > maxEnvelopeBytes {
+		metrics.IngestRejected.WithLabelValues("envelope_size").Inc()
+		return
+	}
 	var report neighborReport
 	if err := json.Unmarshal(raw, &report); err != nil {
 		w.log.Warn(fmt.Sprintf("malformed neighbors envelope from %s", pubkeyHex), "error", err)
 		return
+	}
+	if len(report.Neighbors) > maxNeighbors || (report.Self.Scopes != nil && len(*report.Self.Scopes) > 256) {
+		metrics.IngestRejected.WithLabelValues("neighbor_shape").Inc()
+		return
+	}
+	for _, n := range report.Neighbors {
+		if len(n.PubKey) != 64 || (n.Scopes != nil && len(*n.Scopes) > 256) || len(n.Status) > 32 {
+			metrics.IngestRejected.WithLabelValues("neighbor_shape").Inc()
+			return
+		}
 	}
 
 	pubkey, err := hex.DecodeString(pubkeyHex)
@@ -52,11 +68,12 @@ func (w *Worker) handleNeighbors(ctx context.Context, iata, pubkeyHex string, ra
 		w.log.Error(fmt.Sprintf("db: upsert observer broker failed in neighbors from %s", pubkeyHex), "error", err)
 	}
 
-	// self.scopes is always known (it's the observer's own config, not an OTA
-	// query), so this is an unconditional write -- unlike the per-neighbor
-	// scopes below, there's no "query failed" case to protect against here.
-	if err := w.db.UpdateObserverRegionScope(ctx, observerID, cleanText(report.Self.Scopes)); err != nil {
-		w.log.Error(fmt.Sprintf("db: update observer region scope failed for %s", pubkeyHex), "error", err)
+	// Only an explicitly supplied self.scopes replaces its prior list. Missing/null
+	// means no report; an explicit empty string means a successful empty reply.
+	if report.Self.Scopes != nil {
+		if err := w.db.UpdateObserverRegionScope(ctx, observerID, cleanText(*report.Self.Scopes)); err != nil {
+			w.log.Error(fmt.Sprintf("db: update observer region scope failed for %s", pubkeyHex), "error", err)
+		}
 	}
 
 	// The observer's own node row (as opposed to its observers row above) is
@@ -86,6 +103,9 @@ func (w *Worker) handleNeighbors(ctx context.Context, iata, pubkeyHex string, ra
 		}
 
 		snr := n.SNR
+		if snr != nil && (math.IsNaN(float64(*snr)) || math.IsInf(float64(*snr), 0) || *snr < -50 || *snr > 50) {
+			snr = nil
+		}
 
 		// OTA region scope queries are unreliable (per the firmware author, even
 		// the mobile app sees this) -- only "responded" is a trustworthy read.
@@ -93,12 +113,12 @@ func (w *Worker) handleNeighbors(ctx context.Context, iata, pubkeyHex string, ra
 		// we pass nil and let UpsertNodeNeighbor's COALESCE preserve whatever
 		// was last known.
 		var regionScope *string
-		if n.Status == "responded" {
-			scope := cleanText(n.Scopes)
+		if n.Status == "responded" && n.Scopes != nil {
+			scope := cleanText(*n.Scopes)
 			regionScope = &scope
 		}
 
-		if err := w.db.UpsertNodeNeighbor(ctx, observerNodeID, neighborNodeID, iata, &snr, regionScope); err != nil {
+		if err := w.db.UpsertNodeNeighbor(ctx, observerNodeID, neighborNodeID, iata, snr, regionScope); err != nil {
 			w.log.Error(fmt.Sprintf("db: upsert neighbor failed for %s -> %s", pubkeyHex, n.PubKey), "error", err)
 		}
 	}
