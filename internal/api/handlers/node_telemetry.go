@@ -40,7 +40,7 @@ func NewNodeTelemetryGateway(endpoint string) (http.Handler, error) {
 		w.Header().Set("Cache-Control", "no-store")
 		method := ""
 		switch r.URL.Path {
-		case "/challenge", "/enroll", "/reports":
+		case "/challenge", "/enroll", "/reports", "/polls/permit", "/polls/expect", "/polls/heard":
 			method = http.MethodPost
 		case "/availability":
 			method = http.MethodGet

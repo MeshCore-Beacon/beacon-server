@@ -410,9 +410,20 @@ func main() {
 		slog.Info("config: ingest filter inactive — accepting all IATAs", "component", "startup")
 	}
 
+	var replyRelay *ingest.TelemetryRelay
+	var replyHearing func(string, []byte, []byte)
+	if mode.Ingest && cfg.NodeTelemetry.ObserverReplies {
+		replyRelay, err = ingest.NewTelemetryRelay(cfg.NodeTelemetry.GatewayURL, getEnv("BEACON_TELEMETRY_RELAY_TOKEN"))
+		if err != nil {
+			slog.Error("invalid observer reply relay configuration")
+			os.Exit(1)
+		}
+		replyHearing = replyRelay.Observe
+	}
 	broker1 := ingest.New(
 		ingest.Config{
 			BrokerName:          "mqtt1",
+			ReplyHearing:        replyHearing,
 			LocalBorders:        localBorders,
 			URL:                 getEnv("MQTT_BROKER_1_URL"),
 			Username:            getEnv("MQTT_BROKER_1_USERNAME"),
@@ -429,6 +440,7 @@ func main() {
 	broker2 := ingest.New(
 		ingest.Config{
 			BrokerName:          "mqtt2",
+			ReplyHearing:        replyHearing,
 			LocalBorders:        localBorders,
 			URL:                 getEnv("MQTT_BROKER_2_URL"),
 			Username:            getEnv("MQTT_BROKER_2_USERNAME"),
@@ -452,6 +464,9 @@ func main() {
 
 	var ingestWorkers sync.WaitGroup
 	if mode.Ingest {
+		if replyRelay != nil {
+			ingestWorkers.Go(func() { replyRelay.Run(ctx) })
+		}
 		ingestWorkers.Go(func() { broker1.Start(ctx) })
 		ingestWorkers.Go(func() { broker2.Start(ctx) })
 	}

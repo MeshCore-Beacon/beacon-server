@@ -59,6 +59,7 @@ func TestNodeTelemetryGatewayRejectsPathsAndOversizedReportsBeforeForwarding(t *
 		status             int
 	}{
 		{"POST", "/admin", `{}`, 404}, {"GET", "/challenge", "", 405},
+		{"GET", "/internal/interests", "", 404}, {"POST", "/internal/replies", `{}`, 404},
 		{"GET", "/abc", "", 404}, {"GET", "/availability?url=https://other.test", "", 400},
 		{"POST", "/reports", strings.Repeat("x", 12001), 413},
 		{"POST", "/enroll", "{broken", 400},

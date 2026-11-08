@@ -13,6 +13,9 @@ import (
 // It does not enable RF collection or authorize individual participants.
 type NodeTelemetryConfig struct {
 	GatewayURL string `yaml:"gateway_url" json:"-"`
+	// Opt in only for brokers that authenticate observers and bind publish topics
+	// to their full keys. This reuses their packet feed; it never polls radios.
+	ObserverReplies bool `yaml:"observer_replies" json:"observerReplies"`
 }
 
 func ParseNodeTelemetryURL(value string) (*url.URL, error) {

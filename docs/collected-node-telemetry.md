@@ -55,3 +55,14 @@ The upstream collector worker is not required on the phone. The independent
 intake remains a deployment prerequisite, and MQTT sharing needs separately
 scoped credentials, ACLs and persistence receipts. No broker password is embedded
 in the mobile app. This change introduces no core database migrations.
+
+## Coordinated polling and shared replies
+
+The optional proxy also supports POST `/polls/permit`, `/polls/expect` and
+`/polls/heard`. The private `/internal/*` relay routes are never publicly forwarded.
+Enable `node_telemetry.observer_replies` only for authenticated, topic-bound MQTT
+brokers and set the private `BEACON_TELEMETRY_RELAY_TOKEN` to match the intake.
+Existing reports and reads remain compatible; the new client requires a pre-RF
+permit and retains its 1–72-hour limits and local budgets.
+
+See the [complete coordination and observer-adapter contract](https://github.com/MeshCore-Beacon/beacon-docs/blob/codex/release-telemetry-20261021/docs/telemetry-coordination.md).

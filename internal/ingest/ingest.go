@@ -80,6 +80,8 @@ type Config struct {
 	// Status messages within the same window are deduplicated via ON CONFLICT.
 	// Defaults to 1 hour if zero.
 	TelemetryResolution time.Duration
+	// ReplyHearing must be nonblocking. Only validated RESPONSE packets use it.
+	ReplyHearing func(observer string, raw, payload []byte)
 }
 
 // DB is the minimal database interface the ingest pipeline depends on.
