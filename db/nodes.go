@@ -10,12 +10,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -309,6 +311,103 @@ func abs(n int64) int64 {
 		return -n
 	}
 	return n
+}
+
+// nodeActivityPacketLead bounds how long before the raw tail its packets were first heard: heard_at is clamped to
+// 30 minutes either side of the server time a packet is stored at, and the rest allows for late repeats.
+const nodeActivityPacketLead = 6 * time.Hour
+
+// GetNodeActivity returns hourly heard-activity for the packets a node originated: the hourly rollup plus raw
+// rows for the unrolled tail. Range is left empty for the handler to fill.
+func (s *Store) GetNodeActivity(ctx context.Context, nodeID uuid.UUID, window time.Duration) (*api.NodeActivity, error) {
+	pubkey, err := s.q.GetNodePublicKey(ctx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	until := now
+	since := until.Add(-window)
+	if !since.Equal(since.Truncate(time.Hour)) {
+		since = since.Truncate(time.Hour).Add(time.Hour)
+	}
+	activity := &api.NodeActivity{WindowStart: since.UnixMilli(), WindowEnd: until.UnixMilli(), GeneratedAt: now.UnixMilli()}
+	// Unrolled hours read raw rows from the rollup watermark, at most activityRawTail back.
+	watermark, err := s.q.GetLatestCompleteRollupHour(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tailStart := until.Add(-activityRawTail)
+	if watermark.Valid {
+		rolledUntil := watermark.Time.Add(time.Hour)
+		activity.RolledUntil = new(rolledUntil.UnixMilli())
+		if rolledUntil.After(tailStart) {
+			tailStart = rolledUntil
+		}
+	}
+	activity.RawFrom = new(tailStart.UnixMilli())
+	rawFrom := tailStart
+	if since.After(rawFrom) {
+		rawFrom = since
+	}
+	rows, err := s.q.GetNodeActivityHourly(ctx, sqlc.GetNodeActivityHourlyParams{
+		OriginPubkey: pubkey,
+		Since:        ts(since),
+		Until:        ts(until),
+		TailStart:    ts(tailStart),
+		PacketFrom:   ts(rawFrom.Add(-nodeActivityPacketLead)),
+		PacketUntil:  ts(until.Add(30 * time.Minute)),
+	})
+	if err != nil {
+		return nil, err
+	}
+	var total nodeActivitySums
+	activity.Points = make([]api.NodeActivityPoint, 0, len(rows))
+	for _, r := range rows {
+		b := nodeActivitySums{r.Observations, r.SnrN, r.RssiSum, r.RssiN, r.HopSum, r.HopN, r.SnrSum}
+		p := api.NodeActivityPoint{T: r.Bucket.Time.UnixMilli(), Observations: b.observations}
+		p.SNRAvg, p.RSSIAvg, p.HopAvg = b.averages()
+		activity.Points = append(activity.Points, p)
+		total.observations += b.observations
+		total.snrSum += b.snrSum
+		total.snrN += b.snrN
+		total.rssiSum += b.rssiSum
+		total.rssiN += b.rssiN
+		total.hopSum += b.hopSum
+		total.hopN += b.hopN
+	}
+	activity.Summary.Observations = total.observations
+	activity.Summary.SNRAvg, activity.Summary.RSSIAvg, activity.Summary.HopAvg = total.averages()
+	latest, err := s.q.GetNodeLatestPacket(ctx, pubkey)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+	case err != nil:
+		return nil, err
+	default:
+		activity.Latest = &api.NodeActivityLatest{PacketHash: latest.PacketHashHex, HeardAt: latest.HeardAt.Time.UnixMilli()}
+	}
+	return activity, nil
+}
+
+// nodeActivitySums holds the sums and sample counts behind one hour's, or the window's, averages.
+type nodeActivitySums struct {
+	observations, snrN, rssiSum, rssiN, hopSum, hopN int64
+	snrSum                                           float64
+}
+
+func (b nodeActivitySums) averages() (snr, rssi, hop *float64) {
+	if b.snrN > 0 {
+		// A non-finite SNR sample would not encode as JSON.
+		if avg := b.snrSum / float64(b.snrN); !math.IsNaN(avg) && !math.IsInf(avg, 0) {
+			snr = &avg
+		}
+	}
+	if b.rssiN > 0 {
+		rssi = new(float64(b.rssiSum) / float64(b.rssiN))
+	}
+	if b.hopN > 0 {
+		hop = new(float64(b.hopSum) / float64(b.hopN))
+	}
+	return snr, rssi, hop
 }
 
 func (s *Store) GetNodesByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*api.ResolvedNode, error) {

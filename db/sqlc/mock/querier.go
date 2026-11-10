@@ -775,6 +775,21 @@ func (mr *MockQuerierMockRecorder) GetNeighborLinks(ctx, arg any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNeighborLinks", reflect.TypeOf((*MockQuerier)(nil).GetNeighborLinks), ctx, arg)
 }
 
+// GetNodeActivityHourly mocks base method.
+func (m *MockQuerier) GetNodeActivityHourly(ctx context.Context, arg db.GetNodeActivityHourlyParams) ([]db.GetNodeActivityHourlyRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetNodeActivityHourly", ctx, arg)
+	ret0, _ := ret[0].([]db.GetNodeActivityHourlyRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetNodeActivityHourly indicates an expected call of GetNodeActivityHourly.
+func (mr *MockQuerierMockRecorder) GetNodeActivityHourly(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNodeActivityHourly", reflect.TypeOf((*MockQuerier)(nil).GetNodeActivityHourly), ctx, arg)
+}
+
 // GetNodeByID mocks base method.
 func (m *MockQuerier) GetNodeByID(ctx context.Context, id uuid.UUID) (db.GetNodeByIDRow, error) {
 	m.ctrl.T.Helper()
@@ -805,6 +820,21 @@ func (mr *MockQuerierMockRecorder) GetNodeByPubkey(ctx, publicKey any) *gomock.C
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNodeByPubkey", reflect.TypeOf((*MockQuerier)(nil).GetNodeByPubkey), ctx, publicKey)
 }
 
+// GetNodeLatestPacket mocks base method.
+func (m *MockQuerier) GetNodeLatestPacket(ctx context.Context, originPubkey []byte) (db.GetNodeLatestPacketRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetNodeLatestPacket", ctx, originPubkey)
+	ret0, _ := ret[0].(db.GetNodeLatestPacketRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetNodeLatestPacket indicates an expected call of GetNodeLatestPacket.
+func (mr *MockQuerierMockRecorder) GetNodeLatestPacket(ctx, originPubkey any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNodeLatestPacket", reflect.TypeOf((*MockQuerier)(nil).GetNodeLatestPacket), ctx, originPubkey)
+}
+
 // GetNodeNeighbors mocks base method.
 func (m *MockQuerier) GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]db.GetNodeNeighborsRow, error) {
 	m.ctrl.T.Helper()
@@ -818,6 +848,21 @@ func (m *MockQuerier) GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([
 func (mr *MockQuerierMockRecorder) GetNodeNeighbors(ctx, nodeID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNodeNeighbors", reflect.TypeOf((*MockQuerier)(nil).GetNodeNeighbors), ctx, nodeID)
+}
+
+// GetNodePublicKey mocks base method.
+func (m *MockQuerier) GetNodePublicKey(ctx context.Context, id uuid.UUID) ([]byte, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetNodePublicKey", ctx, id)
+	ret0, _ := ret[0].([]byte)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetNodePublicKey indicates an expected call of GetNodePublicKey.
+func (mr *MockQuerierMockRecorder) GetNodePublicKey(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNodePublicKey", reflect.TypeOf((*MockQuerier)(nil).GetNodePublicKey), ctx, id)
 }
 
 // GetNodesByIDs mocks base method.
@@ -3118,6 +3163,20 @@ func (m *MockQuerier) RollIATAObservations(ctx context.Context, hour pgtype.Time
 func (mr *MockQuerierMockRecorder) RollIATAObservations(ctx, hour any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RollIATAObservations", reflect.TypeOf((*MockQuerier)(nil).RollIATAObservations), ctx, hour)
+}
+
+// RollNodeActivity mocks base method.
+func (m *MockQuerier) RollNodeActivity(ctx context.Context, hour pgtype.Timestamptz) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RollNodeActivity", ctx, hour)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RollNodeActivity indicates an expected call of RollNodeActivity.
+func (mr *MockQuerierMockRecorder) RollNodeActivity(ctx, hour any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RollNodeActivity", reflect.TypeOf((*MockQuerier)(nil).RollNodeActivity), ctx, hour)
 }
 
 // RollObserverActivity mocks base method.

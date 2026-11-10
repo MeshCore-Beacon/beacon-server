@@ -26,6 +26,45 @@ type NodeNeighbor struct {
 	SNR              *float32  `json:"snr,omitempty"`
 }
 
+// NodeActivityPoint is one hour of hearings of a node's packets; an average is null without samples.
+type NodeActivityPoint struct {
+	T            int64    `json:"t"` // hour start, epoch ms
+	Observations int64    `json:"observations"`
+	SNRAvg       *float64 `json:"snrAvg"`
+	RSSIAvg      *float64 `json:"rssiAvg"`
+	HopAvg       *float64 `json:"hopAvg"`
+}
+
+// NodeActivitySummary covers the whole window: each average is its sum over its samples.
+type NodeActivitySummary struct {
+	Observations int64    `json:"observations"`
+	SNRAvg       *float64 `json:"snrAvg"`
+	RSSIAvg      *float64 `json:"rssiAvg"`
+	HopAvg       *float64 `json:"hopAvg"`
+}
+
+// NodeActivityLatest is the node's most recently heard packet.
+type NodeActivityLatest struct {
+	PacketHash string `json:"packetHash"` // hex
+	HeardAt    int64  `json:"heardAt"`    // epoch ms
+}
+
+// NodeActivity is the hourly heard-activity of the packets a node originated.
+type NodeActivity struct {
+	WindowStart int64 `json:"windowStart"` // inclusive, epoch ms, on the hour
+	WindowEnd   int64 `json:"windowEnd"`   // exclusive, epoch ms; the last hour is still filling
+	GeneratedAt int64 `json:"generatedAt"`
+	// Hours before rolledUntil come from rollups and from rawFrom on from raw rows; when rawFrom is later, the
+	// hours between are uncovered, not quiet.
+	RolledUntil *int64 `json:"rolledUntil,omitempty"` // end of the newest complete rollup hour, epoch ms
+	RawFrom     *int64 `json:"rawFrom,omitempty"`     // start of the raw tail, epoch ms
+
+	Range   string              `json:"range"`
+	Summary NodeActivitySummary `json:"summary"`
+	Points  []NodeActivityPoint `json:"points"` // ascending, only hours with observations
+	Latest  *NodeActivityLatest `json:"latest"`
+}
+
 // NodeIATA represents a single IATA code and the last time the node was heard there.
 type NodeIATA struct {
 	IATA      string `json:"iata"`

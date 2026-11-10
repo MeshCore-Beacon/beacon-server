@@ -26,6 +26,7 @@ WITH a AS (DELETE FROM analytics_hourly_iata_observations ta WHERE ta.hour < $1:
      l AS (DELETE FROM analytics_dirty_hours tl WHERE tl.hour < $1::timestamptz),
      n AS (DELETE FROM analytics_hourly_scope_observers tn WHERE tn.hour < $1::timestamptz),
      o AS (DELETE FROM analytics_hourly_scope_nodes tob WHERE tob.hour < $1::timestamptz),
+     p AS (DELETE FROM analytics_hourly_node_activity tp WHERE tp.hour < $1::timestamptz),
      m AS (DELETE FROM analytics_rollup_hours tm WHERE tm.hour < $1::timestamptz RETURNING 1)
 UPDATE analytics_raw_state SET coverage = coverage + 1 WHERE EXISTS (SELECT 1 FROM m)
 `
@@ -48,7 +49,8 @@ WITH a AS (DELETE FROM analytics_hourly_iata_observations ta WHERE ta.hour = $1:
      i AS (DELETE FROM analytics_hourly_talker_sets ti WHERE ti.hour = $1::timestamptz),
      j AS (DELETE FROM analytics_hourly_packet_sets tj WHERE tj.hour = $1::timestamptz),
      k AS (DELETE FROM analytics_hourly_scope_sets tk WHERE tk.hour = $1::timestamptz),
-     l AS (DELETE FROM analytics_hourly_scope_observers tl WHERE tl.hour = $1::timestamptz)
+     l AS (DELETE FROM analytics_hourly_scope_observers tl WHERE tl.hour = $1::timestamptz),
+     n AS (DELETE FROM analytics_hourly_node_activity tn WHERE tn.hour = $1::timestamptz)
 DELETE FROM analytics_hourly_scope_nodes tm WHERE tm.hour = $1::timestamptz
 `
 
@@ -301,6 +303,25 @@ func (q *Queries) RollIATAObservations(ctx context.Context, hour pgtype.Timestam
 	return err
 }
 
+const rollNodeActivity = `-- name: RollNodeActivity :exec
+INSERT INTO analytics_hourly_node_activity (hour, origin_pubkey, observations, snr_sum, snr_n, rssi_sum, rssi_n, hop_sum, hop_n)
+SELECT $1::timestamptz, origin_pubkey, count(*),
+       sum(snr::double precision) FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)),
+       count(snr)  FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)),
+       sum(rssi)   FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0))::bigint,
+       count(rssi) FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0)),
+       sum(hop_count)::bigint, count(hop_count)
+FROM rollup_obs
+WHERE origin_pubkey IS NOT NULL
+GROUP BY origin_pubkey
+ORDER BY origin_pubkey
+`
+
+func (q *Queries) RollNodeActivity(ctx context.Context, hour pgtype.Timestamptz) error {
+	_, err := q.db.Exec(ctx, rollNodeActivity, hour)
+	return err
+}
+
 const rollObserverActivity = `-- name: RollObserverActivity :exec
 INSERT INTO analytics_hourly_observer_activity (hour, observer_id, payload_type, observations, airtime_ms, airtime_n,
                                                 snr_sum, snr_n, snr_min, rssi_sum, rssi_n)
@@ -494,7 +515,8 @@ SELECT md5(concat_ws('|',
   (SELECT string_agg(t::text, ',' ORDER BY t::text) FROM analytics_hourly_packet_sets t WHERE t.hour = $1::timestamptz),
   (SELECT string_agg(t::text, ',' ORDER BY t::text) FROM analytics_hourly_scope_sets t WHERE t.hour = $1::timestamptz),
   (SELECT string_agg(t::text, ',' ORDER BY t::text) FROM analytics_hourly_scope_observers t WHERE t.hour = $1::timestamptz),
-  (SELECT string_agg(t::text, ',' ORDER BY t::text) FROM analytics_hourly_scope_nodes t WHERE t.hour = $1::timestamptz)
+  (SELECT string_agg(t::text, ',' ORDER BY t::text) FROM analytics_hourly_scope_nodes t WHERE t.hour = $1::timestamptz),
+  (SELECT string_agg(t::text, ',' ORDER BY t::text) FROM analytics_hourly_node_activity t WHERE t.hour = $1::timestamptz)
 ))::text AS content_hash
 `
 

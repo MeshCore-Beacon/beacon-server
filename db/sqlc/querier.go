@@ -129,10 +129,16 @@ type Querier interface {
 	// Neighbor rows between @a_nodes and @b_nodes in either orientation: ingest writes
 	// adverts as (sender, forwarder) but traces as (receiver, sender). Callers normalise.
 	GetNeighborLinks(ctx context.Context, arg GetNeighborLinksParams) ([]GetNeighborLinksRow, error)
+	// Hours before @tail_start come from the rollup; later ones aren't rolled yet and read raw rows, found through
+	// the node's packets first heard in [@packet_from, @packet_until).
+	GetNodeActivityHourly(ctx context.Context, arg GetNodeActivityHourlyParams) ([]GetNodeActivityHourlyRow, error)
 	GetNodeByID(ctx context.Context, id uuid.UUID) (GetNodeByIDRow, error)
 	GetNodeByPubkey(ctx context.Context, publicKey []byte) (uuid.UUID, error)
+	// The node's most recently first-heard packet, one probe of idx_packets_origin.
+	GetNodeLatestPacket(ctx context.Context, originPubkey []byte) (GetNodeLatestPacketRow, error)
 	// Returns the neighbors of a node with details, ordered by most recently seen.
 	GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]GetNodeNeighborsRow, error)
+	GetNodePublicKey(ctx context.Context, id uuid.UUID) ([]byte, error)
 	GetNodesByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]GetNodesByIDsRow, error)
 	GetNodesByPubkeys(ctx context.Context, pubkeys [][]byte) ([]GetNodesByPubkeysRow, error)
 	GetObservationIDRange(ctx context.Context) (GetObservationIDRangeRow, error)
@@ -540,6 +546,7 @@ type Querier interface {
 	// Every Roll statement inserts in its table's primary-key order, so an hour's rows for one IATA share a few
 	// adjacent heap pages; the per-(hour, IATA) stats probes then read those pages instead of one page per row.
 	RollIATAObservations(ctx context.Context, hour pgtype.Timestamptz) error
+	RollNodeActivity(ctx context.Context, hour pgtype.Timestamptz) error
 	RollObserverActivity(ctx context.Context, hour pgtype.Timestamptz) error
 	RollObserverIdentity(ctx context.Context, hour pgtype.Timestamptz) error
 	RollPacketSets(ctx context.Context, hour pgtype.Timestamptz) error

@@ -132,6 +132,10 @@ type Reader interface {
 	// GetNodesByIDs returns a map of node ID to resolved node details for the given IDs.
 	GetNodesByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*ResolvedNode, error)
 
+	// GetNodeActivity returns hourly heard-activity for the packets a node originated over the trailing window.
+	// Returns pgx.ErrNoRows for an unknown node. Range is left empty for the handler to fill.
+	GetNodeActivity(ctx context.Context, nodeID uuid.UUID, window time.Duration) (*NodeActivity, error)
+
 	// ListNodeObservations returns a paginated list of packet observations originating from a node.
 	// Pass cursor=0 to start from the beginning.
 	ListNodeObservations(ctx context.Context, nodeID uuid.UUID, cursor int64, limit int32) (Page[PacketObservationSummary], error)

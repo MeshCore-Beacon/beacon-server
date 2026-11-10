@@ -152,6 +152,10 @@ func (s *stubReader) GetObserverActivity(_ context.Context, _ uuid.UUID, _, _ ti
 	return nil, nil
 }
 
+func (s *stubReader) GetNodeActivity(_ context.Context, _ uuid.UUID, _ time.Duration) (*api.NodeActivity, error) {
+	return nil, nil
+}
+
 func (s *stubReader) GetPacket(_ context.Context, _ []byte) (*api.Packet, error) { return nil, nil }
 
 func (s *stubReader) GetChannel(_ context.Context, _ int32) (*api.Channel, error) { return nil, nil }

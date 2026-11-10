@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/go-chi/chi/v5"
@@ -21,12 +22,14 @@ import (
 // GET  /nodes                       → listNodes
 // GET  /nodes/{nodeId}              → getNode
 // GET  /nodes/{nodeId}/observations → listNodeObservations
+// GET  /nodes/{nodeId}/activity     → getNodeActivity
 func NodesRouter(reader api.Reader) http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", listNodes(reader))
 	r.Route("/{nodeId}", func(r chi.Router) {
 		r.Get("/", getNode(reader))
 		r.Get("/observations", listNodeObservations(reader))
+		r.Get("/activity", getNodeActivity(reader))
 		r.Get("/neighbors", listNodeNeighbors(reader))
 	})
 	return r
@@ -281,6 +284,49 @@ func listNodeObservations(reader api.Reader) http.HandlerFunc {
 			return
 		}
 		respond(w, http.StatusOK, observations)
+	}
+}
+
+// getNodeActivity godoc
+//
+//	@Summary	Get hourly heard-activity for the packets a node originated
+//	@Tags		Nodes
+//	@Produce	json
+//	@Param		nodeId	path		string	true	"Node UUID"
+//	@Param		range	query		string	false	"Trailing window as a Go duration, max 720h (default 24h)"
+//	@Success	200		{object}	api.NodeActivity
+//	@Failure	400		{object}	handlers.APIError
+//	@Failure	404		{object}	handlers.APIError
+//	@Failure	500		{object}	handlers.APIError
+//	@Failure	503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
+//	@Router		/nodes/{nodeId}/activity [get]
+func getNodeActivity(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		nodeID, err := uuid.Parse(chi.URLParam(r, "nodeId"))
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "invalid node ID")
+			return
+		}
+		rangeParam := r.URL.Query().Get("range")
+		if rangeParam == "" {
+			rangeParam = "24h"
+		}
+		window, err := time.ParseDuration(rangeParam)
+		if err != nil || window <= 0 || window > 720*time.Hour {
+			respondError(w, http.StatusBadRequest, "invalid range, use a duration up to 720h e.g. 24h, 168h, 720h")
+			return
+		}
+		activity, err := reader.GetNodeActivity(r.Context(), nodeID, window)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows), err == nil && activity == nil:
+			respondError(w, http.StatusNotFound, "node not found")
+			return
+		case err != nil:
+			respondReaderError(w, err, "internal server error")
+			return
+		}
+		activity.Range = rangeParam
+		respond(w, http.StatusOK, activity)
 	}
 }
 

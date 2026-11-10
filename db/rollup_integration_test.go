@@ -125,6 +125,16 @@ var rollupOracles = map[string][2]string{
 		  SUM(rssi)  FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0))::bigint,
 		  COUNT(rssi) FILTER (WHERE NOT (COALESCE(rssi, 0) = 0 AND COALESCE(snr, 0) = 0))::bigint
 		FROM packet_observations GROUP BY 1, 2, 3`},
+	"node activity": {
+		`SELECT hour, origin_pubkey, observations, snr_sum, snr_n, rssi_sum, rssi_n, hop_sum, hop_n FROM analytics_hourly_node_activity`,
+		`SELECT date_trunc('hour', po.heard_at, 'UTC'), p.origin_pubkey, COUNT(*)::bigint,
+		  SUM(po.snr::double precision) FILTER (WHERE NOT (COALESCE(po.rssi, 0) = 0 AND COALESCE(po.snr, 0) = 0)),
+		  COUNT(po.snr) FILTER (WHERE NOT (COALESCE(po.rssi, 0) = 0 AND COALESCE(po.snr, 0) = 0))::bigint,
+		  SUM(po.rssi)  FILTER (WHERE NOT (COALESCE(po.rssi, 0) = 0 AND COALESCE(po.snr, 0) = 0))::bigint,
+		  COUNT(po.rssi) FILTER (WHERE NOT (COALESCE(po.rssi, 0) = 0 AND COALESCE(po.snr, 0) = 0))::bigint,
+		  SUM(po.hop_count)::bigint, COUNT(*)::bigint
+		FROM packet_observations po JOIN packets p ON p.packet_hash = po.packet_hash
+		WHERE p.origin_pubkey IS NOT NULL GROUP BY 1, 2`},
 	"observer identity": {
 		`SELECT hour, iata, observer_id, observation_count, display_name, observer_type FROM analytics_hourly_observer_identity`,
 		`SELECT date_trunc('hour', po.heard_at, 'UTC'), po.iata, po.observer_id, count(*), o.display_name, o.observer_type
@@ -634,8 +644,8 @@ GROUP BY 1 ORDER BY 1`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(keys) != 13 {
-		t.Fatalf("found %d hourly family tables, want 13", len(keys))
+	if len(keys) != 14 {
+		t.Fatalf("found %d hourly family tables, want 14", len(keys))
 	}
 	for _, k := range keys {
 		var n, outOfOrder int

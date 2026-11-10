@@ -42,6 +42,7 @@ type stubReader struct {
 	listNodesSorted              func(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, sort api.NodeSort, pageCursor *api.NodeSortCursor, limit int32, includeNeighbors bool) (api.NodePage, error)
 	getNode                      func(ctx context.Context, nodeID uuid.UUID) (*api.Node, error)
 	getNodeNeighbors             func(ctx context.Context, nodeID uuid.UUID) ([]api.NodeNeighbor, error)
+	getNodeActivity              func(ctx context.Context, nodeID uuid.UUID, window time.Duration) (*api.NodeActivity, error)
 	listNodeObservations         func(ctx context.Context, nodeID uuid.UUID, cursor int64, limit int32) (api.Page[api.PacketObservationSummary], error)
 	searchPacketsByHashPrefix    func(ctx context.Context, lo, hi []byte, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, limit int32) (api.Page[api.PacketSummary], error)
 	listPackets                  func(ctx context.Context, payloadTypes, routeTypes []int16, iatas []string, scopes []string, since, until time.Time, cursor int64, pageCursor *api.PacketCursor, limit int32) (api.PacketPage, error)
@@ -240,6 +241,13 @@ func (s stubReader) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, e
 func (s stubReader) GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]api.NodeNeighbor, error) {
 	if s.getNodeNeighbors != nil {
 		return s.getNodeNeighbors(ctx, nodeID)
+	}
+	return nil, nil
+}
+
+func (s stubReader) GetNodeActivity(ctx context.Context, nodeID uuid.UUID, window time.Duration) (*api.NodeActivity, error) {
+	if s.getNodeActivity != nil {
+		return s.getNodeActivity(ctx, nodeID, window)
 	}
 	return nil, nil
 }

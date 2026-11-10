@@ -48,6 +48,18 @@ type AnalyticsHourlyIataObservation struct {
 	ObservationCount int64              `json:"observation_count"`
 }
 
+type AnalyticsHourlyNodeActivity struct {
+	Hour         pgtype.Timestamptz `json:"hour"`
+	OriginPubkey []byte             `json:"origin_pubkey"`
+	Observations int64              `json:"observations"`
+	SnrSum       *float64           `json:"snr_sum"`
+	SnrN         int64              `json:"snr_n"`
+	RssiSum      *int64             `json:"rssi_sum"`
+	RssiN        int64              `json:"rssi_n"`
+	HopSum       int64              `json:"hop_sum"`
+	HopN         int64              `json:"hop_n"`
+}
+
 type AnalyticsHourlyObserverActivity struct {
 	Hour         pgtype.Timestamptz `json:"hour"`
 	ObserverID   uuid.UUID          `json:"observer_id"`

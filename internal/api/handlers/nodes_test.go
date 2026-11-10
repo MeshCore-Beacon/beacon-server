@@ -5,14 +5,17 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestGetNode_InvalidUUID(t *testing.T) {
@@ -447,5 +450,116 @@ func TestListNodes_Sort(t *testing.T) {
 				t.Fatalf("%s: cursor %+v, want %+v", tc.query, *gotCursor, want)
 			}
 		}
+	}
+}
+
+func TestGetNodeActivity_BadRequests(t *testing.T) {
+	called := false
+	r := chi.NewRouter()
+	r.Get("/nodes/{nodeId}/activity", getNodeActivity(stubReader{
+		getNodeActivity: func(_ context.Context, _ uuid.UUID, _ time.Duration) (*api.NodeActivity, error) {
+			called = true
+			return &api.NodeActivity{}, nil
+		},
+	}))
+	const id = "00000000-0000-0000-0000-000000000001"
+	for _, path := range []string{
+		"/nodes/bad/activity",
+		"/nodes/" + id + "/activity?range=week",
+		"/nodes/" + id + "/activity?range=0h",
+		"/nodes/" + id + "/activity?range=-1h",
+		"/nodes/" + id + "/activity?range=721h",
+	} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("%s: expected 400, got %d", path, w.Code)
+		}
+	}
+	if called {
+		t.Error("reader called for an invalid request")
+	}
+}
+
+func TestGetNodeActivity_NotFound(t *testing.T) {
+	r := chi.NewRouter()
+	r.Get("/nodes/{nodeId}/activity", getNodeActivity(stubReader{
+		getNodeActivity: func(_ context.Context, _ uuid.UUID, _ time.Duration) (*api.NodeActivity, error) {
+			return nil, pgx.ErrNoRows
+		},
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/nodes/00000000-0000-0000-0000-000000000001/activity", nil))
+	if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "node not found") {
+		t.Fatalf("expected 404 node not found, got %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetNodeActivity_ReaderError(t *testing.T) {
+	r := chi.NewRouter()
+	r.Get("/nodes/{nodeId}/activity", getNodeActivity(stubReader{
+		getNodeActivity: func(_ context.Context, _ uuid.UUID, _ time.Duration) (*api.NodeActivity, error) {
+			return nil, errors.New("boom")
+		},
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/nodes/00000000-0000-0000-0000-000000000001/activity", nil))
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", w.Code)
+	}
+}
+
+func TestGetNodeActivity_Shape(t *testing.T) {
+	nodeID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	var windows []time.Duration
+	full := true
+	r := chi.NewRouter()
+	r.Get("/nodes/{nodeId}/activity", getNodeActivity(stubReader{
+		getNodeActivity: func(_ context.Context, id uuid.UUID, window time.Duration) (*api.NodeActivity, error) {
+			if id != nodeID {
+				t.Errorf("node id %s", id)
+			}
+			windows = append(windows, window)
+			if !full {
+				return &api.NodeActivity{WindowStart: 1, WindowEnd: 2, GeneratedAt: 3, Points: []api.NodeActivityPoint{}}, nil
+			}
+			snr, rssi, hop := 5.5, -90.25, 1.5
+			rolled, raw := int64(7200000), int64(7200000)
+			return &api.NodeActivity{
+				WindowStart: 3600000, WindowEnd: 9000000, GeneratedAt: 9000001, RolledUntil: &rolled, RawFrom: &raw,
+				Summary: api.NodeActivitySummary{Observations: 4, SNRAvg: &snr, RSSIAvg: &rssi, HopAvg: &hop},
+				Points: []api.NodeActivityPoint{
+					{T: 3600000, Observations: 3, SNRAvg: &snr, RSSIAvg: &rssi, HopAvg: &hop},
+					{T: 7200000, Observations: 1},
+				},
+				Latest: &api.NodeActivityLatest{PacketHash: "ab01", HeardAt: 8999000},
+			}, nil
+		},
+	}))
+	get := func(query string) string {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/nodes/"+nodeID.String()+"/activity"+query, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d %s", w.Code, w.Body.String())
+		}
+		return strings.TrimSpace(w.Body.String())
+	}
+	const want = `{"windowStart":3600000,"windowEnd":9000000,"generatedAt":9000001,"rolledUntil":7200000,"rawFrom":7200000,` +
+		`"range":"168h","summary":{"observations":4,"snrAvg":5.5,"rssiAvg":-90.25,"hopAvg":1.5},` +
+		`"points":[{"t":3600000,"observations":3,"snrAvg":5.5,"rssiAvg":-90.25,"hopAvg":1.5},` +
+		`{"t":7200000,"observations":1,"snrAvg":null,"rssiAvg":null,"hopAvg":null}],` +
+		`"latest":{"packetHash":"ab01","heardAt":8999000}}`
+	if got := get("?range=168h"); got != want {
+		t.Errorf("body\n%s\nwant\n%s", got, want)
+	}
+	full = false
+	const wantEmpty = `{"windowStart":1,"windowEnd":2,"generatedAt":3,"range":"24h",` +
+		`"summary":{"observations":0,"snrAvg":null,"rssiAvg":null,"hopAvg":null},"points":[],"latest":null}`
+	if got := get(""); got != wantEmpty {
+		t.Errorf("empty body\n%s\nwant\n%s", got, wantEmpty)
+	}
+	if len(windows) != 2 || windows[0] != 168*time.Hour || windows[1] != 24*time.Hour {
+		t.Errorf("windows %v, want 168h then the 24h default", windows)
 	}
 }
