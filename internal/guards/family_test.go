@@ -38,6 +38,7 @@ func TestGuardFamilyClassify(t *testing.T) {
 		{"/api/v1/observers/x/telemetry", Other, Entity}, {"/api/v1/observers/x", Other, Entity},
 		{"/api/v1/observers", Other, List}, {"/api/v1/nodes", Other, List},
 		{"/api/v1/nodes/x/observations", Other, List}, {"/api/v1/nodes/x/neighbors", Other, Entity},
+		{"/api/v1/nodes/x/activity", Other, Aggregation},
 		{"/api/v1/nodes/x", Other, Entity}, {"/api/v1/channels", Other, List}, {"/api/v1/channels/3", Other, Entity},
 		{"/api/v1/traces", Other, List}, {"/api/v1/traces/x", Other, Entity}, {"/api/v1/iatas", Other, Entity},
 		{"/api/v1/regions/x", Other, Entity}, {"/api/v1/scopes", Other, Entity}, {"/api/v1/brokers", Other, Entity},
