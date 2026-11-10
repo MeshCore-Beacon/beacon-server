@@ -1570,6 +1570,7 @@ const docTemplate = `{
         },
         "/nodes/{nodeId}/observations": {
             "get": {
+                "description": "Newest packet first (by first hearing), then that packet's newest observation; observation ids do not descend across packets.",
                 "produces": [
                     "application/json"
                 ],
@@ -1587,7 +1588,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "Observation ID of last item for pagination",
+                        "description": "nextCursor of the previous page (its last observation ID). A cursor whose observation has been deleted returns an empty last page",
                         "name": "cursor",
                         "in": "query"
                     },

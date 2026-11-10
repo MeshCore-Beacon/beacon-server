@@ -137,6 +137,7 @@ type Reader interface {
 	GetNodeActivity(ctx context.Context, nodeID uuid.UUID, window time.Duration) (*NodeActivity, error)
 
 	// ListNodeObservations returns a paginated list of packet observations originating from a node.
+	// Newest packet first, then its newest observation; cursor is the previous page's last observation ID.
 	// Pass cursor=0 to start from the beginning.
 	ListNodeObservations(ctx context.Context, nodeID uuid.UUID, cursor int64, limit int32) (Page[PacketObservationSummary], error)
 

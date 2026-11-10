@@ -612,11 +612,13 @@ func (s *Store) InsertObservation(ctx context.Context, o ingest.InsertObservatio
 	return fallback.Inserted, fallback.ObservationCount, nil
 }
 
+// ListNodeObservations pages a node's observations newest packet first, then newest observation within it.
+// cursor is the previous page's last observation id; one that no longer exists returns an empty last page.
 func (s *Store) ListNodeObservations(ctx context.Context, nodeID uuid.UUID, cursor int64, limit int32) (api.Page[api.PacketObservationSummary], error) {
 	rows, err := s.q.ListNodeObservations(ctx, sqlc.ListNodeObservationsParams{
-		ID:      nodeID,
-		Column2: cursor,
-		Limit:   limit + 1,
+		NodeID:   nodeID,
+		Cursor:   cursor,
+		RowLimit: limit + 1, // one extra to detect hasMore
 	})
 	if err != nil {
 		return api.Page[api.PacketObservationSummary]{}, err

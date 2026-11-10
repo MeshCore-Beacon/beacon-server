@@ -359,6 +359,10 @@ type Querier interface {
 	// Used for WS reconnect backfill.
 	ListMessagesAfterID(ctx context.Context, arg ListMessagesAfterIDParams) ([]ListMessagesAfterIDRow, error)
 	ListMissingRollupHours(ctx context.Context, limit int32) ([]pgtype.Timestamptz, error)
+	// Newest packet first (first_heard_at, then hash), then its newest observation: walks idx_packets_origin and
+	// probes each packet's observations, so a page costs its own rows, not the node's history.
+	// @cursor is the previous page's last observation id (0 starts at the top); its packet gives its place in this
+	// order. A cursor whose observation is gone matches nothing, which ends the list.
 	ListNodeObservations(ctx context.Context, arg ListNodeObservationsParams) ([]ListNodeObservationsRow, error)
 	// Limit the filtered node page before enriching IATA membership and neighbours.
 	ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNodesRow, error)

@@ -246,17 +246,18 @@ func getNode(reader api.Reader) http.HandlerFunc {
 
 // listNodeObservations godoc
 //
-//	@Summary	List packet observations originating from a node
-//	@Tags		Nodes
-//	@Produce	json
-//	@Param		nodeId	path		string	true	"Node UUID"
-//	@Param		cursor	query		int		false	"Observation ID of last item for pagination"
-//	@Param		limit	query		int		false	"Max results (default 50); must be positive, values above 200 are clamped" minimum(1) maximum(200)
-//	@Success	200		{object}	api.Page[api.PacketObservationSummary]
-//	@Failure	400		{object}	handlers.APIError
-//	@Failure	500		{object}	handlers.APIError
-//	@Failure	503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
-//	@Router		/nodes/{nodeId}/observations [get]
+//	@Summary		List packet observations originating from a node
+//	@Description	Newest packet first (by first hearing), then that packet's newest observation; observation ids do not descend across packets.
+//	@Tags			Nodes
+//	@Produce		json
+//	@Param			nodeId	path		string	true	"Node UUID"
+//	@Param			cursor	query		int		false	"nextCursor of the previous page (its last observation ID). A cursor whose observation has been deleted returns an empty last page"
+//	@Param			limit	query		int		false	"Max results (default 50); must be positive, values above 200 are clamped" minimum(1) maximum(200)
+//	@Success		200		{object}	api.Page[api.PacketObservationSummary]
+//	@Failure		400		{object}	handlers.APIError
+//	@Failure		500		{object}	handlers.APIError
+//	@Failure		503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
+//	@Router			/nodes/{nodeId}/observations [get]
 func listNodeObservations(reader api.Reader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		nodeID, err := uuid.Parse(chi.URLParam(r, "nodeId"))

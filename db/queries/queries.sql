@@ -1474,15 +1474,29 @@ ORDER BY n.k_null,
   n.k_num, n.k_seen, n.id;
 
 -- name: ListNodeObservations :many
+-- Newest packet first (first_heard_at, then hash), then its newest observation: walks idx_packets_origin and
+-- probes each packet's observations, so a page costs its own rows, not the node's history.
+-- @cursor is the previous page's last observation id (0 starts at the top); its packet gives its place in this
+-- order. A cursor whose observation is gone matches nothing, which ends the list.
+WITH cur AS (
+  SELECT cp.first_heard_at, cp.packet_hash
+  FROM packet_observations co
+  JOIN packets cp ON cp.packet_hash = co.packet_hash
+  WHERE co.id = @cursor::bigint
+)
 SELECT po.id, encode(po.packet_hash, 'hex') AS packet_hash_hex,
   p.payload_type, po.iata, po.heard_at, po.rssi, po.snr, po.hop_count
-FROM packet_observations po
-JOIN packets p ON p.packet_hash = po.packet_hash
-JOIN nodes n ON n.public_key = p.origin_pubkey
-WHERE n.id = $1
-  AND ($2::bigint = 0 OR po.id < $2::bigint)
-ORDER BY po.id DESC
-LIMIT $3;
+FROM packets p
+JOIN packet_observations po ON po.packet_hash = p.packet_hash
+WHERE p.origin_pubkey = (SELECT n.public_key FROM nodes n WHERE n.id = @node_id)
+  AND p.first_heard_at <= CASE WHEN @cursor::bigint = 0 THEN 'infinity'::timestamptz
+                               ELSE (SELECT c.first_heard_at FROM cur c) END
+  AND (@cursor::bigint = 0
+       OR p.first_heard_at < (SELECT c.first_heard_at FROM cur c)
+       OR p.packet_hash < (SELECT c.packet_hash FROM cur c)
+       OR (p.packet_hash = (SELECT c.packet_hash FROM cur c) AND po.id < @cursor::bigint))
+ORDER BY p.first_heard_at DESC, p.packet_hash DESC, po.id DESC
+LIMIT @row_limit;
 
 -- name: GetNodePublicKey :one
 SELECT public_key FROM nodes WHERE id = $1;
