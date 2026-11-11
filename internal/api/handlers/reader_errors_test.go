@@ -53,6 +53,7 @@ var readerErrorPaths = []string{
 	"/nodes/" + someID,
 	"/nodes/" + someID + "/observations",
 	"/nodes/" + someID + "/neighbors",
+	"/nodes/" + someID + "/activity",
 	"/observers",
 	"/observers/directory",
 	"/observers/" + someID,

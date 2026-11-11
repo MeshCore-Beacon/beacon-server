@@ -55,6 +55,14 @@ func applyBaseline(t *testing.T, ctx context.Context, tx pgx.Tx) {
 	if _, err := tx.Exec(ctx, string(sites)); err != nil {
 		t.Fatal(err)
 	}
+	// and the node activity family the rollup fills
+	nodeActivity, err := migrationFiles.ReadFile("migrations/062_analytics_hourly_node_activity.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, string(nodeActivity)); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := tx.Exec(ctx, "INSERT INTO iata_codes (iata) VALUES ('YVR'),('YYJ'),('YYZ'),('YOW')"); err != nil {
 		t.Fatal(err)
 	}

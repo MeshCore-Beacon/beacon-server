@@ -776,6 +776,95 @@ func (q *Queries) GetNeighborLinks(ctx context.Context, arg GetNeighborLinksPara
 	return items, nil
 }
 
+const getNodeActivityHourly = `-- name: GetNodeActivityHourly :many
+WITH src AS (
+  SELECT a.hour AS t, a.observations, a.snr_sum, a.snr_n, a.rssi_sum, a.rssi_n, a.hop_sum, a.hop_n
+  FROM analytics_hourly_node_activity a
+  WHERE a.origin_pubkey = $1::bytea
+    AND a.hour >= $2::timestamptz AND a.hour < LEAST($3::timestamptz, $4::timestamptz)
+  UNION ALL
+  SELECT po.heard_at, 1::bigint, s.snr::double precision, (s.snr IS NOT NULL)::int::bigint,
+         s.rssi::bigint, (s.rssi IS NOT NULL)::int::bigint, po.hop_count::bigint, 1::bigint
+  FROM packets p
+  JOIN packet_observations po ON po.packet_hash = p.packet_hash
+  CROSS JOIN LATERAL (SELECT CASE WHEN NOT (COALESCE(po.rssi, 0) = 0 AND COALESCE(po.snr, 0) = 0) THEN po.snr END AS snr,
+                             CASE WHEN NOT (COALESCE(po.rssi, 0) = 0 AND COALESCE(po.snr, 0) = 0) THEN po.rssi END AS rssi) s
+  WHERE p.origin_pubkey = $1::bytea
+    AND p.first_heard_at >= $5::timestamptz AND p.first_heard_at < $6::timestamptz
+    AND po.heard_at >= GREATEST($2::timestamptz, $4::timestamptz) AND po.heard_at < $3::timestamptz
+)
+SELECT
+  date_trunc('hour', t, 'UTC')::timestamptz AS bucket,
+  SUM(observations)::bigint AS observations,
+  COALESCE(SUM(snr_sum), 0)::double precision AS snr_sum,
+  SUM(snr_n)::bigint AS snr_n,
+  COALESCE(SUM(rssi_sum), 0)::bigint AS rssi_sum,
+  SUM(rssi_n)::bigint AS rssi_n,
+  SUM(hop_sum)::bigint AS hop_sum,
+  SUM(hop_n)::bigint AS hop_n
+FROM src
+GROUP BY 1
+ORDER BY 1
+`
+
+type GetNodeActivityHourlyParams struct {
+	OriginPubkey []byte             `json:"origin_pubkey"`
+	Since        pgtype.Timestamptz `json:"since"`
+	Until        pgtype.Timestamptz `json:"until"`
+	TailStart    pgtype.Timestamptz `json:"tail_start"`
+	PacketFrom   pgtype.Timestamptz `json:"packet_from"`
+	PacketUntil  pgtype.Timestamptz `json:"packet_until"`
+}
+
+type GetNodeActivityHourlyRow struct {
+	Bucket       pgtype.Timestamptz `json:"bucket"`
+	Observations int64              `json:"observations"`
+	SnrSum       float64            `json:"snr_sum"`
+	SnrN         int64              `json:"snr_n"`
+	RssiSum      int64              `json:"rssi_sum"`
+	RssiN        int64              `json:"rssi_n"`
+	HopSum       int64              `json:"hop_sum"`
+	HopN         int64              `json:"hop_n"`
+}
+
+// Hours before @tail_start come from the rollup; later ones aren't rolled yet and read raw rows, found through
+// the node's packets first heard in [@packet_from, @packet_until).
+func (q *Queries) GetNodeActivityHourly(ctx context.Context, arg GetNodeActivityHourlyParams) ([]GetNodeActivityHourlyRow, error) {
+	rows, err := q.db.Query(ctx, getNodeActivityHourly,
+		arg.OriginPubkey,
+		arg.Since,
+		arg.Until,
+		arg.TailStart,
+		arg.PacketFrom,
+		arg.PacketUntil,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetNodeActivityHourlyRow{}
+	for rows.Next() {
+		var i GetNodeActivityHourlyRow
+		if err := rows.Scan(
+			&i.Bucket,
+			&i.Observations,
+			&i.SnrSum,
+			&i.SnrN,
+			&i.RssiSum,
+			&i.RssiN,
+			&i.HopSum,
+			&i.HopN,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getNodeByID = `-- name: GetNodeByID :one
 SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.location_source, n.last_advert_at, n.supports_multibyte_paths, n.supports_multibyte_traces, n.default_scope_id, n.min_firmware_version, n.first_seen, n.last_seen, n.radio_freq_mhz, n.radio_sf, n.radio_bw_khz, n.metadata, n.device_clock_drift_seconds, ts.name AS default_scope_name,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
@@ -865,6 +954,27 @@ func (q *Queries) GetNodeByPubkey(ctx context.Context, publicKey []byte) (uuid.U
 	return id, err
 }
 
+const getNodeLatestPacket = `-- name: GetNodeLatestPacket :one
+SELECT encode(p.packet_hash, 'hex') AS packet_hash_hex, GREATEST(p.first_heard_at, p.last_heard_at)::timestamptz AS heard_at
+FROM packets p
+WHERE p.origin_pubkey = $1::bytea
+ORDER BY p.first_heard_at DESC
+LIMIT 1
+`
+
+type GetNodeLatestPacketRow struct {
+	PacketHashHex string             `json:"packet_hash_hex"`
+	HeardAt       pgtype.Timestamptz `json:"heard_at"`
+}
+
+// The node's most recently first-heard packet, one probe of idx_packets_origin.
+func (q *Queries) GetNodeLatestPacket(ctx context.Context, originPubkey []byte) (GetNodeLatestPacketRow, error) {
+	row := q.db.QueryRow(ctx, getNodeLatestPacket, originPubkey)
+	var i GetNodeLatestPacketRow
+	err := row.Scan(&i.PacketHashHex, &i.HeardAt)
+	return i, err
+}
+
 const getNodeNeighbors = `-- name: GetNodeNeighbors :many
 SELECT
     n.id, n.public_key, n.name, n.node_type, n.latitude, n.longitude,
@@ -920,6 +1030,17 @@ func (q *Queries) GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]Get
 		return nil, err
 	}
 	return items, nil
+}
+
+const getNodePublicKey = `-- name: GetNodePublicKey :one
+SELECT public_key FROM nodes WHERE id = $1
+`
+
+func (q *Queries) GetNodePublicKey(ctx context.Context, id uuid.UUID) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getNodePublicKey, id)
+	var public_key []byte
+	err := row.Scan(&public_key)
+	return public_key, err
 }
 
 const getNodesByIDs = `-- name: GetNodesByIDs :many
@@ -4179,21 +4300,31 @@ func (q *Queries) ListMessagesAfterID(ctx context.Context, arg ListMessagesAfter
 }
 
 const listNodeObservations = `-- name: ListNodeObservations :many
+WITH cur AS (
+  SELECT cp.first_heard_at, cp.packet_hash
+  FROM packet_observations co
+  JOIN packets cp ON cp.packet_hash = co.packet_hash
+  WHERE co.id = $2::bigint
+)
 SELECT po.id, encode(po.packet_hash, 'hex') AS packet_hash_hex,
   p.payload_type, po.iata, po.heard_at, po.rssi, po.snr, po.hop_count
-FROM packet_observations po
-JOIN packets p ON p.packet_hash = po.packet_hash
-JOIN nodes n ON n.public_key = p.origin_pubkey
-WHERE n.id = $1
-  AND ($2::bigint = 0 OR po.id < $2::bigint)
-ORDER BY po.id DESC
+FROM packets p
+JOIN packet_observations po ON po.packet_hash = p.packet_hash
+WHERE p.origin_pubkey = (SELECT n.public_key FROM nodes n WHERE n.id = $1)
+  AND p.first_heard_at <= CASE WHEN $2::bigint = 0 THEN 'infinity'::timestamptz
+                               ELSE (SELECT c.first_heard_at FROM cur c) END
+  AND ($2::bigint = 0
+       OR p.first_heard_at < (SELECT c.first_heard_at FROM cur c)
+       OR p.packet_hash < (SELECT c.packet_hash FROM cur c)
+       OR (p.packet_hash = (SELECT c.packet_hash FROM cur c) AND po.id < $2::bigint))
+ORDER BY p.first_heard_at DESC, p.packet_hash DESC, po.id DESC
 LIMIT $3
 `
 
 type ListNodeObservationsParams struct {
-	ID      uuid.UUID `json:"id"`
-	Column2 int64     `json:"column_2"`
-	Limit   int32     `json:"limit"`
+	NodeID   uuid.UUID `json:"node_id"`
+	Cursor   int64     `json:"cursor"`
+	RowLimit int32     `json:"row_limit"`
 }
 
 type ListNodeObservationsRow struct {
@@ -4207,8 +4338,12 @@ type ListNodeObservationsRow struct {
 	HopCount      int16              `json:"hop_count"`
 }
 
+// Newest packet first (first_heard_at, then hash), then its newest observation: walks idx_packets_origin and
+// probes each packet's observations, so a page costs its own rows, not the node's history.
+// @cursor is the previous page's last observation id (0 starts at the top); its packet gives its place in this
+// order. A cursor whose observation is gone matches nothing, which ends the list.
 func (q *Queries) ListNodeObservations(ctx context.Context, arg ListNodeObservationsParams) ([]ListNodeObservationsRow, error) {
-	rows, err := q.db.Query(ctx, listNodeObservations, arg.ID, arg.Column2, arg.Limit)
+	rows, err := q.db.Query(ctx, listNodeObservations, arg.NodeID, arg.Cursor, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}

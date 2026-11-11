@@ -1474,15 +1474,72 @@ ORDER BY n.k_null,
   n.k_num, n.k_seen, n.id;
 
 -- name: ListNodeObservations :many
+-- Newest packet first (first_heard_at, then hash), then its newest observation: walks idx_packets_origin and
+-- probes each packet's observations, so a page costs its own rows, not the node's history.
+-- @cursor is the previous page's last observation id (0 starts at the top); its packet gives its place in this
+-- order. A cursor whose observation is gone matches nothing, which ends the list.
+WITH cur AS (
+  SELECT cp.first_heard_at, cp.packet_hash
+  FROM packet_observations co
+  JOIN packets cp ON cp.packet_hash = co.packet_hash
+  WHERE co.id = @cursor::bigint
+)
 SELECT po.id, encode(po.packet_hash, 'hex') AS packet_hash_hex,
   p.payload_type, po.iata, po.heard_at, po.rssi, po.snr, po.hop_count
-FROM packet_observations po
-JOIN packets p ON p.packet_hash = po.packet_hash
-JOIN nodes n ON n.public_key = p.origin_pubkey
-WHERE n.id = $1
-  AND ($2::bigint = 0 OR po.id < $2::bigint)
-ORDER BY po.id DESC
-LIMIT $3;
+FROM packets p
+JOIN packet_observations po ON po.packet_hash = p.packet_hash
+WHERE p.origin_pubkey = (SELECT n.public_key FROM nodes n WHERE n.id = @node_id)
+  AND p.first_heard_at <= CASE WHEN @cursor::bigint = 0 THEN 'infinity'::timestamptz
+                               ELSE (SELECT c.first_heard_at FROM cur c) END
+  AND (@cursor::bigint = 0
+       OR p.first_heard_at < (SELECT c.first_heard_at FROM cur c)
+       OR p.packet_hash < (SELECT c.packet_hash FROM cur c)
+       OR (p.packet_hash = (SELECT c.packet_hash FROM cur c) AND po.id < @cursor::bigint))
+ORDER BY p.first_heard_at DESC, p.packet_hash DESC, po.id DESC
+LIMIT @row_limit;
+
+-- name: GetNodePublicKey :one
+SELECT public_key FROM nodes WHERE id = $1;
+
+-- name: GetNodeActivityHourly :many
+-- Hours before @tail_start come from the rollup; later ones aren't rolled yet and read raw rows, found through
+-- the node's packets first heard in [@packet_from, @packet_until).
+WITH src AS (
+  SELECT a.hour AS t, a.observations, a.snr_sum, a.snr_n, a.rssi_sum, a.rssi_n, a.hop_sum, a.hop_n
+  FROM analytics_hourly_node_activity a
+  WHERE a.origin_pubkey = @origin_pubkey::bytea
+    AND a.hour >= @since::timestamptz AND a.hour < LEAST(@until::timestamptz, @tail_start::timestamptz)
+  UNION ALL
+  SELECT po.heard_at, 1::bigint, s.snr::double precision, (s.snr IS NOT NULL)::int::bigint,
+         s.rssi::bigint, (s.rssi IS NOT NULL)::int::bigint, po.hop_count::bigint, 1::bigint
+  FROM packets p
+  JOIN packet_observations po ON po.packet_hash = p.packet_hash
+  CROSS JOIN LATERAL (SELECT CASE WHEN NOT (COALESCE(po.rssi, 0) = 0 AND COALESCE(po.snr, 0) = 0) THEN po.snr END AS snr,
+                             CASE WHEN NOT (COALESCE(po.rssi, 0) = 0 AND COALESCE(po.snr, 0) = 0) THEN po.rssi END AS rssi) s
+  WHERE p.origin_pubkey = @origin_pubkey::bytea
+    AND p.first_heard_at >= @packet_from::timestamptz AND p.first_heard_at < @packet_until::timestamptz
+    AND po.heard_at >= GREATEST(@since::timestamptz, @tail_start::timestamptz) AND po.heard_at < @until::timestamptz
+)
+SELECT
+  date_trunc('hour', t, 'UTC')::timestamptz AS bucket,
+  SUM(observations)::bigint AS observations,
+  COALESCE(SUM(snr_sum), 0)::double precision AS snr_sum,
+  SUM(snr_n)::bigint AS snr_n,
+  COALESCE(SUM(rssi_sum), 0)::bigint AS rssi_sum,
+  SUM(rssi_n)::bigint AS rssi_n,
+  SUM(hop_sum)::bigint AS hop_sum,
+  SUM(hop_n)::bigint AS hop_n
+FROM src
+GROUP BY 1
+ORDER BY 1;
+
+-- name: GetNodeLatestPacket :one
+-- The node's most recently first-heard packet, one probe of idx_packets_origin.
+SELECT encode(p.packet_hash, 'hex') AS packet_hash_hex, GREATEST(p.first_heard_at, p.last_heard_at)::timestamptz AS heard_at
+FROM packets p
+WHERE p.origin_pubkey = @origin_pubkey::bytea
+ORDER BY p.first_heard_at DESC
+LIMIT 1;
 
 -- ============================================================
 -- NODE IATAS

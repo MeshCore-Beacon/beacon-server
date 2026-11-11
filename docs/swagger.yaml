@@ -552,6 +552,70 @@ definitions:
         description: firmware >= 1.11.0; detected via trace hash size
         type: boolean
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.NodeActivity:
+    properties:
+      generatedAt:
+        type: integer
+      latest:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeActivityLatest'
+      points:
+        description: ascending, only hours with observations
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeActivityPoint'
+        type: array
+      range:
+        type: string
+      rawFrom:
+        description: start of the raw tail, epoch ms
+        type: integer
+      rolledUntil:
+        description: |-
+          Hours before rolledUntil come from rollups and from rawFrom on from raw rows; when rawFrom is later, the
+          hours between are uncovered, not quiet.
+        type: integer
+      summary:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeActivitySummary'
+      windowEnd:
+        description: exclusive, epoch ms; the last hour is still filling
+        type: integer
+      windowStart:
+        description: inclusive, epoch ms, on the hour
+        type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.NodeActivityLatest:
+    properties:
+      heardAt:
+        description: epoch ms
+        type: integer
+      packetHash:
+        description: hex
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.NodeActivityPoint:
+    properties:
+      hopAvg:
+        type: number
+      observations:
+        type: integer
+      rssiAvg:
+        type: number
+      snrAvg:
+        type: number
+      t:
+        description: hour start, epoch ms
+        type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.NodeActivitySummary:
+    properties:
+      hopAvg:
+        type: number
+      observations:
+        type: integer
+      rssiAvg:
+        type: number
+      snrAvg:
+        type: number
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.NodeIATA:
     properties:
       iata:
@@ -1973,7 +2037,7 @@ info:
     name: AGPL-3-or-later
   termsOfService: https://github.com/MeshCore-Beacon/beacon-server
   title: MeshCore Beacon API
-  version: 2.1.1
+  version: 2.2.0
 paths:
   /admin/accounts:
     get:
@@ -2970,6 +3034,44 @@ paths:
       summary: Get node detail
       tags:
       - Nodes
+  /nodes/{nodeId}/activity:
+    get:
+      parameters:
+      - description: Node UUID
+        in: path
+        name: nodeId
+        required: true
+        type: string
+      - description: Trailing window as a Go duration, max 720h (default 24h)
+        in: query
+        name: range
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeActivity'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+      summary: Get hourly heard-activity for the packets a node originated
+      tags:
+      - Nodes
   /nodes/{nodeId}/neighbors:
     get:
       parameters:
@@ -3004,13 +3106,16 @@ paths:
       - Nodes
   /nodes/{nodeId}/observations:
     get:
+      description: Newest packet first (by first hearing), then that packet's newest
+        observation; observation ids do not descend across packets.
       parameters:
       - description: Node UUID
         in: path
         name: nodeId
         required: true
         type: string
-      - description: Observation ID of last item for pagination
+      - description: nextCursor of the previous page (its last observation ID). A
+          cursor whose observation has been deleted returns an empty last page
         in: query
         name: cursor
         type: integer

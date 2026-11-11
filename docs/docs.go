@@ -1461,6 +1461,64 @@ const docTemplate = `{
                 }
             }
         },
+        "/nodes/{nodeId}/activity": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Nodes"
+                ],
+                "summary": "Get hourly heard-activity for the packets a node originated",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Node UUID",
+                        "name": "nodeId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Trailing window as a Go duration, max 720h (default 24h)",
+                        "name": "range",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeActivity"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "503": {
+                        "description": "The read took too long: retry after Retry-After seconds",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
         "/nodes/{nodeId}/neighbors": {
             "get": {
                 "produces": [
@@ -1512,6 +1570,7 @@ const docTemplate = `{
         },
         "/nodes/{nodeId}/observations": {
             "get": {
+                "description": "Newest packet first (by first hearing), then that packet's newest observation; observation ids do not descend across packets.",
                 "produces": [
                     "application/json"
                 ],
@@ -1529,7 +1588,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "Observation ID of last item for pagination",
+                        "description": "nextCursor of the previous page (its last observation ID). A cursor whose observation has been deleted returns an empty last page",
                         "name": "cursor",
                         "in": "query"
                     },
@@ -4834,6 +4893,97 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.NodeActivity": {
+            "type": "object",
+            "properties": {
+                "generatedAt": {
+                    "type": "integer"
+                },
+                "latest": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeActivityLatest"
+                },
+                "points": {
+                    "description": "ascending, only hours with observations",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeActivityPoint"
+                    }
+                },
+                "range": {
+                    "type": "string"
+                },
+                "rawFrom": {
+                    "description": "start of the raw tail, epoch ms",
+                    "type": "integer"
+                },
+                "rolledUntil": {
+                    "description": "Hours before rolledUntil come from rollups and from rawFrom on from raw rows; when rawFrom is later, the\nhours between are uncovered, not quiet.",
+                    "type": "integer"
+                },
+                "summary": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeActivitySummary"
+                },
+                "windowEnd": {
+                    "description": "exclusive, epoch ms; the last hour is still filling",
+                    "type": "integer"
+                },
+                "windowStart": {
+                    "description": "inclusive, epoch ms, on the hour",
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.NodeActivityLatest": {
+            "type": "object",
+            "properties": {
+                "heardAt": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "packetHash": {
+                    "description": "hex",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.NodeActivityPoint": {
+            "type": "object",
+            "properties": {
+                "hopAvg": {
+                    "type": "number"
+                },
+                "observations": {
+                    "type": "integer"
+                },
+                "rssiAvg": {
+                    "type": "number"
+                },
+                "snrAvg": {
+                    "type": "number"
+                },
+                "t": {
+                    "description": "hour start, epoch ms",
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.NodeActivitySummary": {
+            "type": "object",
+            "properties": {
+                "hopAvg": {
+                    "type": "number"
+                },
+                "observations": {
+                    "type": "integer"
+                },
+                "rssiAvg": {
+                    "type": "number"
+                },
+                "snrAvg": {
+                    "type": "number"
+                }
+            }
+        },
         "github_com_MeshCore-Beacon_beacon-server_internal_api.NodeIATA": {
             "type": "object",
             "properties": {
@@ -6909,7 +7059,7 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "2.1.1",
+	Version:          "2.2.0",
 	Host:             "localhost:8080",
 	BasePath:         "/api/v1",
 	Schemes:          []string{"http", "https"},

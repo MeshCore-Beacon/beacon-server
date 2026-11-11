@@ -152,6 +152,7 @@ func rollHour(ctx context.Context, tx pgx.Tx, hour time.Time) (RollOutcome, bool
 		"paths":             q.RollPaths,
 		"observer activity": q.RollObserverActivity,
 		"observer identity": q.RollObserverIdentity,
+		"node activity":     q.RollNodeActivity,
 		"advert hearings":   q.RollAdvertHearings,
 		"advert sets":       q.RollAdvertSets,
 		"talker sets":       q.RollTalkerSets,

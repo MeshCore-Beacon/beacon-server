@@ -109,6 +109,8 @@ func Classify(r *http.Request) (Family, Class) {
 		switch {
 		case n == 1, n == 3 && segs[2] == "observations":
 			return Other, List
+		case n == 3 && segs[2] == "activity":
+			return Other, Aggregation
 		case n == 2, n == 3 && segs[2] == "neighbors":
 			return Other, Entity
 		}

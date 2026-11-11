@@ -4,8 +4,8 @@
 
 Historical stats read hourly rollup tables filled once per closed hour by one background
 task. Raw rows are read for per-entity drill-downs (a packet, a trace, a route), observer
-comparison, sub-hour observer activity, and bounded observer-directory slices that cannot
-use a completed whole-hour rollup.
+comparison, sub-hour observer activity, the unrolled tail of hourly observer and node
+activity, and bounded observer-directory slices that cannot use a completed whole-hour rollup.
 
 ## Rollup contract
 
@@ -59,7 +59,7 @@ use a completed whole-hour rollup.
 | Active observers, IATAs, scopes | Distinct across the window |
 | Active scope observers and nodes (per scope, per hour) | Distinct within the hour, across the requested IATAs |
 | Max path entries | Max |
-| SNR / RSSI averages | Σ sum / Σ samples, never an average of averages |
+| SNR / RSSI / hop averages | Σ sum / Σ samples, never an average of averages |
 
 Historical stats windows snap to UTC hours on the server, and responses report the
 effective window. The observer directory preserves exact millisecond bounds instead.
@@ -126,6 +126,11 @@ region or all IATAs.
   Hourly observer activity reads raw rows for the hours after the
   newest complete one (at most the last 24 hours, the raw holdback), so the unrolled tail isn't
   shown as zero. `rolledUntil` and `rawFrom` in the response mark any hours still uncovered.
+  Hourly node activity (`GET /nodes/{nodeId}/activity`, the `analytics_hourly_node_activity`
+  family: hearings of the packets a node originated, with SNR, RSSI and hop sums) does the same.
+  Its tail finds the node's packets first, bounded by `first_heard_at`, then their observations.
+  Hours rolled before the family existed have no rows; the migration that added it queued the
+  last 72 complete hours for a re-roll.
 - Current memberships: scope observer and node counts, node types, clock drift, radio presets.
 - `/traces` reads `trace_tags`, a per-tag summary kept at ingest, not a rollup. A new packet
   adds its count, type and payload in the statement that stores it; hearings set the times.

@@ -22,7 +22,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// The four statements before the ::bigint casts, verbatim from origin/dev.
+// The four statements before the ::bigint casts. The fixture's packets share a first hearing and their hashes rise
+// with their observation ids, so node observations still page in the same order.
 const (
 	legacyListObserverAdverts = `SELECT 
   po.id,
@@ -233,7 +234,7 @@ func TestBigintCursorsPostgres(t *testing.T) {
 		obs, node := uuid.MustParse(cursorObserver), uuid.MustParse(cursorNode)
 		for _, c := range []int32{-1, 0, 1, 2, 3, 2147483646, math.MaxInt32} {
 			for _, n := range []int32{1, 2, 50} {
-				nodeObs, err := q.ListNodeObservations(ctx, sqlc.ListNodeObservationsParams{ID: node, Column2: int64(c), Limit: n})
+				nodeObs, err := q.ListNodeObservations(ctx, sqlc.ListNodeObservationsParams{NodeID: node, Cursor: int64(c), RowLimit: n})
 				if err != nil || !sameRows(nodeObs, legacyRows[sqlc.ListNodeObservationsRow](t, ctx, tx, legacyListNodeObservations, node, c, n)) {
 					t.Fatalf("node observations cursor %d limit %d differ: %v", c, n, err)
 				}

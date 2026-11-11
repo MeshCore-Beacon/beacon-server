@@ -40,6 +40,7 @@ const (
 	keyRadioPresetsPrefix      = "beacon:radio-presets:"
 	keyNodePrefix              = "beacon:node:"
 	keyNodeNeighborsPrefix     = "beacon:node:neighbors:"
+	keyNodeActivityPrefix      = "beacon:node:activity:"
 	keyNodesByIDsPrefix        = "beacon:nodes:ids:"
 	keyObserverPrefix          = "beacon:observer:"
 	keyObserverScopesPrefix    = "beacon:observer:scopes:"
@@ -233,6 +234,14 @@ func (cr *CachedReader) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Nod
 func (cr *CachedReader) GetNodeNeighbors(ctx context.Context, nodeID uuid.UUID) ([]api.NodeNeighbor, error) {
 	return getOrSet(ctx, cr.c, keyNodeNeighborsPrefix+nodeID.String(), cr.ttl.Nodes, func(ctx context.Context) ([]api.NodeNeighbor, error) {
 		return cr.inner.GetNodeNeighbors(ctx, nodeID)
+	})
+}
+
+// GetNodeActivity implements [api.Reader]. Its live tail keeps it on the short activity TTL.
+func (cr *CachedReader) GetNodeActivity(ctx context.Context, nodeID uuid.UUID, window time.Duration) (*api.NodeActivity, error) {
+	key := keyNodeActivityPrefix + nodeID.String() + ":" + window.String()
+	return getOrSet(ctx, cr.c, key, observerActivityTTL, func(ctx context.Context) (*api.NodeActivity, error) {
+		return cr.inner.GetNodeActivity(ctx, nodeID, window)
 	})
 }
 

@@ -87,6 +87,10 @@ func (e errReader) GetObserverActivity(ctx context.Context, observerID uuid.UUID
 	return v, e.err
 }
 
+func (e errReader) GetNodeActivity(ctx context.Context, nodeID uuid.UUID, window time.Duration) (v *api.NodeActivity, err error) {
+	return v, e.err
+}
+
 func (e errReader) GetObserverScopes(ctx context.Context, observerID uuid.UUID) (v []string, err error) {
 	return v, e.err
 }
