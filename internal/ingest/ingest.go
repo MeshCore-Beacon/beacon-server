@@ -43,7 +43,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -81,6 +80,8 @@ type Config struct {
 	// Status messages within the same window are deduplicated via ON CONFLICT.
 	// Defaults to 1 hour if zero.
 	TelemetryResolution time.Duration
+	// ReplyHearing must be nonblocking. Only validated RESPONSE packets use it.
+	ReplyHearing func(observer string, raw, payload []byte)
 }
 
 // DB is the minimal database interface the ingest pipeline depends on.
@@ -162,6 +163,7 @@ type DB interface {
 
 	// ResolvePathHashes returns a list of node UUIDs for the given path hash prefixes and IATA.
 	ResolvePathHashes(ctx context.Context, iata string, hashes [][]byte) (map[string][]api.ResolvedPathEntry, error)
+	ResolveTracePathHashes(ctx context.Context, iata string, hashes [][]byte) (map[string][]api.ResolvedPathEntry, error)
 
 	// ResolveEndpointHashes matches one-byte logical endpoints, including companions.
 	ResolveEndpointHashes(ctx context.Context, iata string, hashes [][]byte) (map[string][]api.ResolvedPathEntry, error)
@@ -482,27 +484,6 @@ func (w *Worker) broadcastPacketObservation(iata string, payloadType uint8, evt 
 		return
 	}
 	w.hub.Broadcast(out)
-}
-
-// parseNumber handles RSSI and SNR fields that different observer types send as
-// either a bare JSON number (e.g. -108) or a quoted string (e.g. "-108").
-// Returns 0 if the value is missing or unparseable.
-func parseNumber(raw json.RawMessage) float64 {
-	if len(raw) == 0 {
-		return 0
-	}
-	// try unquoted number first
-	var f float64
-	if err := json.Unmarshal(raw, &f); err == nil {
-		return f
-	}
-	// try quoted string
-	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
-		f, _ = strconv.ParseFloat(s, 64)
-		return f
-	}
-	return 0
 }
 
 func inferObserverType(source, clientVersion string) string {

@@ -5,10 +5,30 @@ package handlers
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 )
+
+func TestRespond_EncodingFailureIsJSONError(t *testing.T) {
+	for name, value := range map[string]any{
+		"nonfinite signal": map[string]float64{"snr": math.NaN()},
+		"unsupported type": make(chan int),
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			respond(w, http.StatusOK, value)
+			if w.Code != http.StatusInternalServerError || w.Header().Get("Content-Type") != "application/json" {
+				t.Fatalf("status %d, headers %v", w.Code, w.Header())
+			}
+			var body map[string]APIError
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || body["error"].Code != "internal_server_error" {
+				t.Fatalf("invalid error response %q: %v", w.Body.String(), err)
+			}
+		})
+	}
+}
 
 func TestRespond_StatusAndContentType(t *testing.T) {
 	w := httptest.NewRecorder()

@@ -25,7 +25,7 @@ import (
 // The four statements before the ::bigint casts. The fixture's packets share a first hearing and their hashes rise
 // with their observation ids, so node observations still page in the same order.
 const (
-	legacyListObserverAdverts = `SELECT 
+	legacyListObserverAdverts = `SELECT
   po.id,
   encode(po.packet_hash, 'hex') AS packet_hash_hex,
   p.payload_type,

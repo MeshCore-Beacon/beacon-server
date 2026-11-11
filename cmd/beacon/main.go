@@ -49,6 +49,7 @@ import (
 // version is set at build time via -ldflags "-X main.version=vX.Y.Z".
 // Falls back to "dev" when built without the flag.
 var version = "dev"
+var revision = ""
 
 //	@title			MeshCore Beacon API
 //	@version		2.2.0
@@ -409,9 +410,20 @@ func main() {
 		slog.Info("config: ingest filter inactive — accepting all IATAs", "component", "startup")
 	}
 
+	var replyRelay *ingest.TelemetryRelay
+	var replyHearing func(string, []byte, []byte)
+	if mode.Ingest && cfg.NodeTelemetry.ObserverReplies {
+		replyRelay, err = ingest.NewTelemetryRelay(cfg.NodeTelemetry.GatewayURL, getEnv("BEACON_TELEMETRY_RELAY_TOKEN"))
+		if err != nil {
+			slog.Error("invalid observer reply relay configuration")
+			os.Exit(1)
+		}
+		replyHearing = replyRelay.Observe
+	}
 	broker1 := ingest.New(
 		ingest.Config{
 			BrokerName:          "mqtt1",
+			ReplyHearing:        replyHearing,
 			LocalBorders:        localBorders,
 			URL:                 getEnv("MQTT_BROKER_1_URL"),
 			Username:            getEnv("MQTT_BROKER_1_USERNAME"),
@@ -428,6 +440,7 @@ func main() {
 	broker2 := ingest.New(
 		ingest.Config{
 			BrokerName:          "mqtt2",
+			ReplyHearing:        replyHearing,
 			LocalBorders:        localBorders,
 			URL:                 getEnv("MQTT_BROKER_2_URL"),
 			Username:            getEnv("MQTT_BROKER_2_USERNAME"),
@@ -451,6 +464,9 @@ func main() {
 
 	var ingestWorkers sync.WaitGroup
 	if mode.Ingest {
+		if replyRelay != nil {
+			ingestWorkers.Go(func() { replyRelay.Run(ctx) })
+		}
 		ingestWorkers.Go(func() { broker1.Start(ctx) })
 		ingestWorkers.Go(func() { broker2.Start(ctx) })
 	}
@@ -569,7 +585,14 @@ func main() {
 	// Wrap after wiring cache invalidators and cleanup callbacks to the actual
 	// CachedReader. Only response projections receive the geographic annotation.
 	reader = api.WithLocalBorders(reader, localBorders)
+	telemetryGateway, err := handlers.NewNodeTelemetryGateway(cfg.NodeTelemetry.GatewayURL)
+	if err != nil {
+		slog.Error("invalid telemetry gateway configuration", "component", "startup", "error", err)
+		os.Exit(1)
+	}
 	r := router.New(h, reader, []*ingest.Worker{broker1, broker2}, router.Options{
+		ScopeCatalogues:      scopeImporter,
+		NodeTelemetry:        telemetryGateway,
 		MaxConnsPerIP:        resolved.MaxConnsPerIP,
 		MaxConnectsPerMinute: resolved.MaxConnectsPerMinute,
 		WSSendBytesPerSecond: resolved.WSSendBytesPerSecond,
@@ -581,6 +604,8 @@ func main() {
 		MinAppVersion: api.AppFloor(cfg.Mobile.MinAppVersion, cfg.WebSocket.RequireOrigin),
 		MinWebVersion: api.HigherVersion(api.MinWebVersion, cfg.Web.MinWebVersion),
 		ServerVersion: docs.SwaggerInfo.Version,
+		BuildVersion:  version,
+		BuildRevision: revision,
 		AdminRoutes: map[string]http.Handler{
 			"/accounts": handlers.AccountsRouter(maintStore),
 			"/backup":   handlers.BackupRouter(backupOpts, ctx),

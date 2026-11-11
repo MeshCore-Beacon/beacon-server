@@ -93,10 +93,11 @@ VALUES ($1, $2, 0, $3, $4, '\x00', '\x11', $5, $5, 0)`, psHash(i), int16(i*7%16)
 
 // psObs is one observation of the generated stream.
 func psObs(hash []byte, observer int, site string, at time.Time) ingest.InsertObservationParams {
+	rssi, snr := int16(-90), float32(5)
 	return ingest.InsertObservationParams{
 		PacketHash: hash, ObserverID: psObserver(observer), IATA: site, HeardAt: at,
 		PathLengthByte: 1, HashSize: 1, HopCount: 1, PathBytes: []byte{byte(observer)},
-		RSSI: -90, SNR: 5, SourceBroker: "test", PayloadType: 4,
+		RSSI: &rssi, SNR: &snr, SourceBroker: "test", PayloadType: 4,
 	}
 }
 
