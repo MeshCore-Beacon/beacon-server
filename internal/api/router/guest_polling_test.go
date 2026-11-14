@@ -100,3 +100,20 @@ func TestQueryStringNotLogged(t *testing.T) {
 		t.Fatalf("query string leaked into logs: %s", logs.String())
 	}
 }
+
+func TestKeyRoutesAlways404(t *testing.T) {
+	h := New(nil, nil, nil, Options{})
+	for range 241 {
+		firmwareRequest(h, http.MethodGet, "/api/guest-polling/policy", "198.51.100.9:1")
+	}
+	if rec := firmwareRequest(h, http.MethodGet, "/api/guest-polling/policy", "198.51.100.9:1"); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("limiter not exhausted: %d", rec.Code)
+	}
+	for _, c := range [][2]string{{http.MethodPost, "/api/guest-keys"}, {http.MethodGet, "/api/shared-guest/key"}} {
+		for range 3 {
+			if rec := firmwareRequest(h, c[0], c[1], "198.51.100.9:1"); rec.Code != 404 {
+				t.Fatalf("%s %s: %d", c[0], c[1], rec.Code)
+			}
+		}
+	}
+}

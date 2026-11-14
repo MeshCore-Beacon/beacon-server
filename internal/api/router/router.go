@@ -126,9 +126,10 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 	r.Group(func(r chi.Router) {
 		r.Use(mw.RateLimit(config.ResolvedRateLimitConfig{Enabled: true, RequestsPerMinute: 240, Burst: 240}))
 		r.Mount("/api/guest-polling", handlers.GuestPollingRouter(opts.GuestPolling))
-		r.Post("/api/guest-keys", handlers.GuestKeysGone())
-		r.Get("/api/shared-guest/key", handlers.GuestKeysGone())
 	})
+	// The retired key routes always answer 404: they do no work and never read the body, so they need no limiter.
+	r.Post("/api/guest-keys", handlers.GuestKeysGone())
+	r.Get("/api/shared-guest/key", handlers.GuestKeysGone())
 
 	// ── Public REST API (v1) ─────────────────────────────────────────────────
 	r.Route("/api/v1", func(r chi.Router) {
