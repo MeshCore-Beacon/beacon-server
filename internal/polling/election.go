@@ -38,9 +38,14 @@ func eligible(c Candidate) bool {
 	return !c.Blocked && c.State != "admin_stop" && c.State != "not_direct"
 }
 
-// better reports whether a ranks ahead of b: evidence first, then claimed SNR
-// for those without, with the key bytes as the final tie-break.
+func failingCand(c Candidate) bool { return c.Misses >= MissLimit }
+
+// better reports whether a ranks ahead of b: healthy before failing, then
+// evidence, then claimed SNR for those without, with the key bytes last.
 func better(a, b Candidate) bool {
+	if failingCand(a) != failingCand(b) {
+		return !failingCand(a)
+	}
 	switch {
 	case a.EvidenceSNR != nil && b.EvidenceSNR == nil:
 		return true
@@ -85,15 +90,11 @@ func Elect(cands []Candidate, currentPoller []byte) []Assignment {
 				break
 			}
 		}
-		if ci >= 0 {
-			if !displaced(ranked[ci], bestOther(ranked, ci)) {
-				cur := ranked[ci]
-				copy(ranked[1:ci+1], ranked[:ci])
-				ranked[0] = cur
-			} else if ci == 0 {
-				// A failing poller that still ranks first drops behind the challenger.
-				ranked[0], ranked[1] = ranked[1], ranked[0]
-			}
+		// A failing current poller gets no stability, it just sits in the lower tier.
+		if ci >= 0 && !failingCand(ranked[ci]) && !displaced(ranked[ci], bestOther(ranked, ci)) {
+			cur := ranked[ci]
+			copy(ranked[1:ci+1], ranked[:ci])
+			ranked[0] = cur
 		}
 	}
 
@@ -112,11 +113,9 @@ func bestOther(ranked []Candidate, ci int) Candidate {
 	return ranked[0]
 }
 
+// displaced reports whether the best other candidate takes a healthy current's slot.
 func displaced(cur, best Candidate) bool {
-	if cur.Misses >= MissLimit {
-		return true
-	}
-	if best.EvidenceSNR == nil {
+	if failingCand(best) || best.EvidenceSNR == nil {
 		return false
 	}
 	if cur.EvidenceSNR == nil {

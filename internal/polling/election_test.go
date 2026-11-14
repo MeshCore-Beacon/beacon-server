@@ -169,3 +169,38 @@ func TestElectIgnoresInputOrderAndDoesNotMutate(t *testing.T) {
 		}
 	}
 }
+
+func failing(c Candidate, misses int) Candidate {
+	c.Misses = misses
+	return c
+}
+
+func TestElectFailingPollerDoesNotFlip(t *testing.T) {
+	cs := []Candidate{failing(cand('A', f64(10), 1), 3), cand('B', f64(2), 1)}
+	wantOrder(t, Elect(cs, []byte{'A'}), "BA")
+	wantOrder(t, Elect(cs, []byte{'B'}), "BA")
+}
+
+func TestElectRecoveredPollerWinsByHysteresis(t *testing.T) {
+	cs := []Candidate{cand('A', f64(10), 1), cand('B', f64(2), 1)}
+	wantOrder(t, Elect(cs, []byte{'B'}), "AB")
+}
+
+func TestElectAllFailingRankedAmongThemselves(t *testing.T) {
+	cs := []Candidate{failing(cand('B', f64(2), 1), 5), failing(cand('A', f64(10), 1), 3)}
+	wantOrder(t, Elect(cs, nil), "AB")
+	wantOrder(t, Elect(cs, []byte{'B'}), "AB")
+}
+
+func TestElectFailingNoEvidenceBelowHealthyNoEvidence(t *testing.T) {
+	a := failing(cand('A', nil, 0), 3)
+	a.ClaimedSNR = f32(20)
+	b := cand('B', nil, 0)
+	b.ClaimedSNR = f32(1)
+	wantOrder(t, Elect([]Candidate{a, b}, nil), "BA")
+}
+
+func TestElectFailingNeverDisplacesHealthyCurrent(t *testing.T) {
+	cs := []Candidate{cand('A', f64(1), 1), failing(cand('B', f64(30), 1), 3)}
+	wantOrder(t, Elect(cs, []byte{'A'}), "AB")
+}
