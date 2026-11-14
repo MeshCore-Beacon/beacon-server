@@ -1,13 +1,15 @@
 -- name: UpsertPollingClaim :execrows
--- Only a newer claim replaces the stored one; zero rows means it was ignored.
+-- Applies only a claim newer than the stored one and received at least the claim interval after it, checked in
+-- this statement so concurrent claims cannot both pass. Zero rows means it was ignored.
 INSERT INTO polling_claims (observer_public_key, observer_id, origin, client, policy_version, community, accepts_requests, request_slots, claimed_at, received_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+VALUES (sqlc.arg(observer_public_key), sqlc.arg(observer_id), sqlc.arg(origin), sqlc.arg(client), sqlc.arg(policy_version),
+        sqlc.arg(community), sqlc.arg(accepts_requests), sqlc.arg(request_slots), sqlc.arg(claimed_at), sqlc.arg(received_at))
 ON CONFLICT (observer_public_key) DO UPDATE SET
     observer_id = EXCLUDED.observer_id, origin = EXCLUDED.origin, client = EXCLUDED.client,
     policy_version = EXCLUDED.policy_version, community = EXCLUDED.community,
     accepts_requests = EXCLUDED.accepts_requests, request_slots = EXCLUDED.request_slots,
     claimed_at = EXCLUDED.claimed_at, received_at = EXCLUDED.received_at
-WHERE EXCLUDED.claimed_at > polling_claims.claimed_at;
+WHERE EXCLUDED.claimed_at > polling_claims.claimed_at AND polling_claims.received_at <= sqlc.arg(previous_received_by);
 
 -- name: PollingClaimReceivedAt :one
 SELECT received_at FROM polling_claims WHERE observer_public_key = $1;
@@ -21,7 +23,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (observer_public_key, target_public_key) DO NOTHING;
 
 -- name: InsertRepeaterReading :execrows
--- Inserts nothing when this observer stored a reading of the target by the same method received after recent_after.
+-- Run under LockPollingObserver. Inserts nothing when this observer stored a reading of the target by the same
+-- method received after recent_after, or budget readings of any target received after budget_after.
 INSERT INTO repeater_readings (
     target_public_key, observer_public_key, observer_id, sampled_at, received_at, method, tag,
     battery_mv, temperature_c, poll_snr,
@@ -41,7 +44,10 @@ WHERE NOT EXISTS (
     SELECT 1 FROM repeater_readings x
     WHERE x.target_public_key = sqlc.arg(target_public_key) AND x.observer_public_key = sqlc.arg(observer_public_key)
       AND x.method = sqlc.arg(method) AND x.received_at > sqlc.arg(recent_after)
-)
+) AND (
+    SELECT count(*) FROM repeater_readings b
+    WHERE b.observer_public_key = sqlc.arg(observer_public_key) AND b.received_at > sqlc.arg(budget_after)
+) < sqlc.arg(budget)::bigint
 ON CONFLICT (target_public_key, observer_public_key, tag, method) DO NOTHING;
 
 -- name: HasLivePollingCandidate :one
@@ -82,9 +88,14 @@ WHERE c.target_public_key = $1 AND cl.received_at > $2
 ORDER BY c.observer_public_key;
 
 -- name: LockPollingTarget :exec
--- Serializes elections of one target until the transaction ends. The one-bigint key space is separate from the
--- (25189, n) two-key locks the rollup and election jobs hold.
-SELECT pg_advisory_xact_lock(hashtextextended(encode(sqlc.arg(target_public_key)::bytea, 'hex'), 25190));
+-- Serializes elections of one target until the transaction ends. Class 25190 in the two-key space, which never
+-- meets the one-key migration lock; the schema keeps instances in other schemas apart.
+SELECT pg_advisory_xact_lock(25190, hashtext(current_schema() || encode(sqlc.arg(target_public_key)::bytea, 'hex')));
+
+-- name: LockPollingObserver :exec
+-- Serializes one observer's reading inserts until the transaction ends, so its rate and budget checks see each
+-- other. Class 25191, beside the target class and the (25189, n) job locks.
+SELECT pg_advisory_xact_lock(25191, hashtext(current_schema() || encode(sqlc.arg(observer_public_key)::bytea, 'hex')));
 
 -- name: CurrentPollingPoller :one
 SELECT observer_public_key FROM polling_assignments WHERE target_public_key = $1 AND rank = 0;
@@ -155,9 +166,19 @@ FROM todo t WHERE r.id = t.id;
 -- name: DeleteExpiredPollingClaims :exec
 DELETE FROM polling_claims WHERE received_at < $1;
 
--- name: DeleteOrphanPollingAssignments :exec
-DELETE FROM polling_assignments a
+-- name: ListOrphanPollingTargets :many
+-- Targets with an assignment whose candidate is gone.
+SELECT DISTINCT a.target_public_key FROM polling_assignments a
 WHERE NOT EXISTS (
+    SELECT 1 FROM polling_candidates c
+    WHERE c.target_public_key = a.target_public_key AND c.observer_public_key = a.observer_public_key
+)
+ORDER BY a.target_public_key;
+
+-- name: DeleteOrphanPollingAssignments :exec
+-- Run under LockPollingTarget, so it cannot interleave with an election of the target.
+DELETE FROM polling_assignments a
+WHERE a.target_public_key = $1 AND NOT EXISTS (
     SELECT 1 FROM polling_candidates c
     WHERE c.target_public_key = a.target_public_key AND c.observer_public_key = a.observer_public_key
 );

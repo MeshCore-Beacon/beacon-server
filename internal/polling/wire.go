@@ -18,11 +18,12 @@ import (
 )
 
 const (
-	maxClaimBytes = 16384
-	maxClaimNodes = 32 // firmware sends at most 8; the reference plugin can send more
-	maxReadings   = 8  // firmware sends exactly 1
-	maxLPPBytes   = 160
-	maxSlots      = 8
+	maxClaimBytes  = 16384
+	maxClaimNodes  = 32 // firmware sends at most 8; the reference plugin can send more
+	maxReadings    = 8  // firmware sends exactly 1
+	maxLPPBytes    = 160
+	maxSlots       = 8
+	packetHashSize = 8 // the firmware's reply packet hash
 )
 
 type Claim struct {
@@ -342,9 +343,10 @@ func parseReading(rw readingWire, ver int, obs []byte, client string) (Reading, 
 		Version: ver, Observer: obs, Client: client, Target: target,
 		Method: rw.Method, SampledAt: at, Tag: rw.Tag, PollSNR: finite(rw.SNR),
 	}
-	if rw.PacketHash != "" {
-		if r.PacketHash, err = hex.DecodeString(rw.PacketHash); err != nil {
-			return Reading{}, fmt.Errorf("packet_hash: %w", err)
+	// The firmware's hash is 8 bytes; anything else cannot match a packet, so it is dropped, not the reading.
+	if len(rw.PacketHash) == 2*packetHashSize {
+		if h, err := hex.DecodeString(rw.PacketHash); err == nil {
+			r.PacketHash = h
 		}
 	}
 	if len(rw.LPP) > maxLPPBytes*2 {

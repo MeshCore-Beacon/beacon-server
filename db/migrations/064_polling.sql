@@ -51,7 +51,7 @@ CREATE TABLE repeater_readings (
     observer_id uuid REFERENCES observers(id) ON DELETE SET NULL,
     sampled_at timestamp with time zone NOT NULL,
     received_at timestamp with time zone NOT NULL,
-    method text NOT NULL,
+    method text NOT NULL CHECK (method IN ('status', 'telemetry')),
     tag bigint NOT NULL,
     battery_mv integer,
     temperature_c real,
@@ -73,15 +73,17 @@ CREATE TABLE repeater_readings (
     direct_dups integer,
     err_events integer,
     last_snr real,
-    lpp bytea,
-    packet_hash bytea,
+    lpp bytea CHECK (lpp IS NULL OR octet_length(lpp) <= 160),
+    packet_hash bytea CHECK (packet_hash IS NULL OR octet_length(packet_hash) = 8),
     corroborated smallint,
-    client text NOT NULL DEFAULT '',
+    client text NOT NULL DEFAULT '' CHECK (octet_length(client) <= 128),
     UNIQUE (target_public_key, observer_public_key, tag, method)
 );
 CREATE INDEX idx_repeater_readings_target ON repeater_readings USING btree (target_public_key, sampled_at DESC);
 CREATE INDEX idx_repeater_readings_received_brin ON repeater_readings USING brin (received_at);
 CREATE INDEX idx_repeater_readings_observer ON repeater_readings USING btree (observer_id) WHERE observer_id IS NOT NULL;
+-- The per-observer rate and budget checks look up recent readings by observer key and receive time.
+CREATE INDEX idx_repeater_readings_observer_received ON repeater_readings USING btree (observer_public_key, received_at);
 
 CREATE TABLE polling_observers (
     observer_public_key bytea PRIMARY KEY,

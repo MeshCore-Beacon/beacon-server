@@ -76,14 +76,15 @@ func (q *Queries) DeleteExpiredRepeaterReadings(ctx context.Context, receivedAt 
 
 const deleteOrphanPollingAssignments = `-- name: DeleteOrphanPollingAssignments :exec
 DELETE FROM polling_assignments a
-WHERE NOT EXISTS (
+WHERE a.target_public_key = $1 AND NOT EXISTS (
     SELECT 1 FROM polling_candidates c
     WHERE c.target_public_key = a.target_public_key AND c.observer_public_key = a.observer_public_key
 )
 `
 
-func (q *Queries) DeleteOrphanPollingAssignments(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, deleteOrphanPollingAssignments)
+// Run under LockPollingTarget, so it cannot interleave with an election of the target.
+func (q *Queries) DeleteOrphanPollingAssignments(ctx context.Context, targetPublicKey []byte) error {
+	_, err := q.db.Exec(ctx, deleteOrphanPollingAssignments, targetPublicKey)
 	return err
 }
 
@@ -222,7 +223,10 @@ WHERE NOT EXISTS (
     SELECT 1 FROM repeater_readings x
     WHERE x.target_public_key = $1 AND x.observer_public_key = $2
       AND x.method = $6 AND x.received_at > $31
-)
+) AND (
+    SELECT count(*) FROM repeater_readings b
+    WHERE b.observer_public_key = $2 AND b.received_at > $32
+) < $33::bigint
 ON CONFLICT (target_public_key, observer_public_key, tag, method) DO NOTHING
 `
 
@@ -258,9 +262,12 @@ type InsertRepeaterReadingParams struct {
 	PacketHash        []byte             `json:"packet_hash"`
 	Client            string             `json:"client"`
 	RecentAfter       pgtype.Timestamptz `json:"recent_after"`
+	BudgetAfter       pgtype.Timestamptz `json:"budget_after"`
+	Budget            int64              `json:"budget"`
 }
 
-// Inserts nothing when this observer stored a reading of the target by the same method received after recent_after.
+// Run under LockPollingObserver. Inserts nothing when this observer stored a reading of the target by the same
+// method received after recent_after, or budget readings of any target received after budget_after.
 func (q *Queries) InsertRepeaterReading(ctx context.Context, arg InsertRepeaterReadingParams) (int64, error) {
 	result, err := q.db.Exec(ctx, insertRepeaterReading,
 		arg.TargetPublicKey,
@@ -294,11 +301,43 @@ func (q *Queries) InsertRepeaterReading(ctx context.Context, arg InsertRepeaterR
 		arg.PacketHash,
 		arg.Client,
 		arg.RecentAfter,
+		arg.BudgetAfter,
+		arg.Budget,
 	)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const listOrphanPollingTargets = `-- name: ListOrphanPollingTargets :many
+SELECT DISTINCT a.target_public_key FROM polling_assignments a
+WHERE NOT EXISTS (
+    SELECT 1 FROM polling_candidates c
+    WHERE c.target_public_key = a.target_public_key AND c.observer_public_key = a.observer_public_key
+)
+ORDER BY a.target_public_key
+`
+
+// Targets with an assignment whose candidate is gone.
+func (q *Queries) ListOrphanPollingTargets(ctx context.Context) ([][]byte, error) {
+	rows, err := q.db.Query(ctx, listOrphanPollingTargets)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := [][]byte{}
+	for rows.Next() {
+		var target_public_key []byte
+		if err := rows.Scan(&target_public_key); err != nil {
+			return nil, err
+		}
+		items = append(items, target_public_key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listPollingCandidates = `-- name: ListPollingCandidates :many
@@ -428,12 +467,23 @@ func (q *Queries) ListPollingTargets(ctx context.Context, receivedAt pgtype.Time
 	return items, nil
 }
 
-const lockPollingTarget = `-- name: LockPollingTarget :exec
-SELECT pg_advisory_xact_lock(hashtextextended(encode($1::bytea, 'hex'), 25190))
+const lockPollingObserver = `-- name: LockPollingObserver :exec
+SELECT pg_advisory_xact_lock(25191, hashtext(current_schema() || encode($1::bytea, 'hex')))
 `
 
-// Serializes elections of one target until the transaction ends. The one-bigint key space is separate from the
-// (25189, n) two-key locks the rollup and election jobs hold.
+// Serializes one observer's reading inserts until the transaction ends, so its rate and budget checks see each
+// other. Class 25191, beside the target class and the (25189, n) job locks.
+func (q *Queries) LockPollingObserver(ctx context.Context, observerPublicKey []byte) error {
+	_, err := q.db.Exec(ctx, lockPollingObserver, observerPublicKey)
+	return err
+}
+
+const lockPollingTarget = `-- name: LockPollingTarget :exec
+SELECT pg_advisory_xact_lock(25190, hashtext(current_schema() || encode($1::bytea, 'hex')))
+`
+
+// Serializes elections of one target until the transaction ends. Class 25190 in the two-key space, which never
+// meets the one-key migration lock; the schema keeps instances in other schemas apart.
 func (q *Queries) LockPollingTarget(ctx context.Context, targetPublicKey []byte) error {
 	_, err := q.db.Exec(ctx, lockPollingTarget, targetPublicKey)
 	return err
@@ -711,29 +761,32 @@ func (q *Queries) TryPollingElectionLock(ctx context.Context) (bool, error) {
 
 const upsertPollingClaim = `-- name: UpsertPollingClaim :execrows
 INSERT INTO polling_claims (observer_public_key, observer_id, origin, client, policy_version, community, accepts_requests, request_slots, claimed_at, received_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+VALUES ($1, $2, $3, $4, $5,
+        $6, $7, $8, $9, $10)
 ON CONFLICT (observer_public_key) DO UPDATE SET
     observer_id = EXCLUDED.observer_id, origin = EXCLUDED.origin, client = EXCLUDED.client,
     policy_version = EXCLUDED.policy_version, community = EXCLUDED.community,
     accepts_requests = EXCLUDED.accepts_requests, request_slots = EXCLUDED.request_slots,
     claimed_at = EXCLUDED.claimed_at, received_at = EXCLUDED.received_at
-WHERE EXCLUDED.claimed_at > polling_claims.claimed_at
+WHERE EXCLUDED.claimed_at > polling_claims.claimed_at AND polling_claims.received_at <= $11
 `
 
 type UpsertPollingClaimParams struct {
-	ObserverPublicKey []byte             `json:"observer_public_key"`
-	ObserverID        uuid.UUID          `json:"observer_id"`
-	Origin            string             `json:"origin"`
-	Client            string             `json:"client"`
-	PolicyVersion     string             `json:"policy_version"`
-	Community         bool               `json:"community"`
-	AcceptsRequests   bool               `json:"accepts_requests"`
-	RequestSlots      int16              `json:"request_slots"`
-	ClaimedAt         pgtype.Timestamptz `json:"claimed_at"`
-	ReceivedAt        pgtype.Timestamptz `json:"received_at"`
+	ObserverPublicKey  []byte             `json:"observer_public_key"`
+	ObserverID         uuid.UUID          `json:"observer_id"`
+	Origin             string             `json:"origin"`
+	Client             string             `json:"client"`
+	PolicyVersion      string             `json:"policy_version"`
+	Community          bool               `json:"community"`
+	AcceptsRequests    bool               `json:"accepts_requests"`
+	RequestSlots       int16              `json:"request_slots"`
+	ClaimedAt          pgtype.Timestamptz `json:"claimed_at"`
+	ReceivedAt         pgtype.Timestamptz `json:"received_at"`
+	PreviousReceivedBy pgtype.Timestamptz `json:"previous_received_by"`
 }
 
-// Only a newer claim replaces the stored one; zero rows means it was ignored.
+// Applies only a claim newer than the stored one and received at least the claim interval after it, checked in
+// this statement so concurrent claims cannot both pass. Zero rows means it was ignored.
 func (q *Queries) UpsertPollingClaim(ctx context.Context, arg UpsertPollingClaimParams) (int64, error) {
 	result, err := q.db.Exec(ctx, upsertPollingClaim,
 		arg.ObserverPublicKey,
@@ -746,6 +799,7 @@ func (q *Queries) UpsertPollingClaim(ctx context.Context, arg UpsertPollingClaim
 		arg.RequestSlots,
 		arg.ClaimedAt,
 		arg.ReceivedAt,
+		arg.PreviousReceivedBy,
 	)
 	if err != nil {
 		return 0, err

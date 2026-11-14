@@ -465,17 +465,17 @@ func (mr *MockQuerierMockRecorder) DeleteOldTraceTags(ctx, lastHeardAt any) *gom
 }
 
 // DeleteOrphanPollingAssignments mocks base method.
-func (m *MockQuerier) DeleteOrphanPollingAssignments(ctx context.Context) error {
+func (m *MockQuerier) DeleteOrphanPollingAssignments(ctx context.Context, targetPublicKey []byte) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteOrphanPollingAssignments", ctx)
+	ret := m.ctrl.Call(m, "DeleteOrphanPollingAssignments", ctx, targetPublicKey)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // DeleteOrphanPollingAssignments indicates an expected call of DeleteOrphanPollingAssignments.
-func (mr *MockQuerierMockRecorder) DeleteOrphanPollingAssignments(ctx any) *gomock.Call {
+func (mr *MockQuerierMockRecorder) DeleteOrphanPollingAssignments(ctx, targetPublicKey any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOrphanPollingAssignments", reflect.TypeOf((*MockQuerier)(nil).DeleteOrphanPollingAssignments), ctx)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOrphanPollingAssignments", reflect.TypeOf((*MockQuerier)(nil).DeleteOrphanPollingAssignments), ctx, targetPublicKey)
 }
 
 // DeletePollingAssignments mocks base method.
@@ -2417,6 +2417,21 @@ func (mr *MockQuerierMockRecorder) ListObservers(ctx, arg any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListObservers", reflect.TypeOf((*MockQuerier)(nil).ListObservers), ctx, arg)
 }
 
+// ListOrphanPollingTargets mocks base method.
+func (m *MockQuerier) ListOrphanPollingTargets(ctx context.Context) ([][]byte, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListOrphanPollingTargets", ctx)
+	ret0, _ := ret[0].([][]byte)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListOrphanPollingTargets indicates an expected call of ListOrphanPollingTargets.
+func (mr *MockQuerierMockRecorder) ListOrphanPollingTargets(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListOrphanPollingTargets", reflect.TypeOf((*MockQuerier)(nil).ListOrphanPollingTargets), ctx)
+}
+
 // ListPacketSiteSamples mocks base method.
 func (m *MockQuerier) ListPacketSiteSamples(ctx context.Context, arg db.ListPacketSiteSamplesParams) ([]db.ListPacketSiteSamplesRow, error) {
 	m.ctrl.T.Helper()
@@ -2910,6 +2925,20 @@ func (m *MockQuerier) ListZoneLists(ctx context.Context) ([]db.MeshmapperZoneLis
 func (mr *MockQuerierMockRecorder) ListZoneLists(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListZoneLists", reflect.TypeOf((*MockQuerier)(nil).ListZoneLists), ctx)
+}
+
+// LockPollingObserver mocks base method.
+func (m *MockQuerier) LockPollingObserver(ctx context.Context, observerPublicKey []byte) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LockPollingObserver", ctx, observerPublicKey)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// LockPollingObserver indicates an expected call of LockPollingObserver.
+func (mr *MockQuerierMockRecorder) LockPollingObserver(ctx, observerPublicKey any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockPollingObserver", reflect.TypeOf((*MockQuerier)(nil).LockPollingObserver), ctx, observerPublicKey)
 }
 
 // LockPollingTarget mocks base method.

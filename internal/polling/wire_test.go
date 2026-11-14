@@ -294,7 +294,6 @@ func TestParseReadingRejects(t *testing.T) {
 		"version 3":          strings.Replace(good, `"v":2`, `"v":3`, 1),
 		"zero readings":      `{"v":2,"origin_id":"` + obs + `","readings":[]}`,
 		"no readings":        `{"v":2,"origin_id":"` + obs + `"}`,
-		"packet_hash bad":    strings.Replace(good, "0123456789ABCDEF", "xyz", 1),
 		"lpp bad hex":        strings.Replace(good, `"tag"`, `"lpp":"zz","tag"`, 1),
 		"not json":           "[",
 	}
@@ -459,4 +458,28 @@ func TestParseClaimHugeIntsAreAbsent(t *testing.T) {
 		t.Fatal(err)
 	}
 	eq(t, "Misses for 2^31", c.Nodes[0].Misses, 255)
+}
+
+func TestParseReadingPacketHashMustBeEightBytes(t *testing.T) {
+	good := string(readFile(t, "v2_status.json"))
+	for name, h := range map[string]string{
+		"7000 bytes": strings.Repeat("ab", 7000),
+		"9 bytes":    strings.Repeat("ab", 9),
+		"7 bytes":    strings.Repeat("ab", 7),
+		"not hex":    "xyz",
+		"odd length": "0123456789ABCDE",
+	} {
+		rs, err := ParseReadings([]byte(strings.Replace(good, "0123456789ABCDEF", h, 1)))
+		if err != nil {
+			t.Errorf("%s: reading rejected: %v", name, err)
+			continue
+		}
+		if rs[0].PacketHash != nil {
+			t.Errorf("%s: packet hash kept (%d bytes)", name, len(rs[0].PacketHash))
+		}
+	}
+	rs, err := ParseReadings([]byte(good))
+	if err != nil || len(rs[0].PacketHash) != 8 {
+		t.Fatal("8-byte hash lost", err)
+	}
 }

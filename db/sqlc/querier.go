@@ -84,7 +84,8 @@ type Querier interface {
 	// Keeps the trace IATA filter in step with packet retention.
 	DeleteOldTraceIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error
 	DeleteOldTraceTags(ctx context.Context, lastHeardAt pgtype.Timestamptz) error
-	DeleteOrphanPollingAssignments(ctx context.Context) error
+	// Run under LockPollingTarget, so it cannot interleave with an election of the target.
+	DeleteOrphanPollingAssignments(ctx context.Context, targetPublicKey []byte) error
 	DeletePollingAssignments(ctx context.Context, targetPublicKey []byte) error
 	DeletePollingCandidates(ctx context.Context, observerPublicKey []byte) error
 	DeleteRegionIATAsNotIn(ctx context.Context, arg DeleteRegionIATAsNotInParams) error
@@ -287,7 +288,8 @@ type Querier interface {
 	InsertObserverTelemetry(ctx context.Context, arg InsertObserverTelemetryParams) error
 	InsertPollingAssignment(ctx context.Context, arg InsertPollingAssignmentParams) error
 	InsertPollingCandidate(ctx context.Context, arg InsertPollingCandidateParams) error
-	// Inserts nothing when this observer stored a reading of the target by the same method received after recent_after.
+	// Run under LockPollingObserver. Inserts nothing when this observer stored a reading of the target by the same
+	// method received after recent_after, or budget readings of any target received after budget_after.
 	InsertRepeaterReading(ctx context.Context, arg InsertRepeaterReadingParams) (int64, error)
 	ListAccounts(ctx context.Context) ([]Account, error)
 	// The original all-channel message statement, before the channel read model: no page runs it
@@ -398,6 +400,8 @@ type Querier interface {
 	ListObserverDirectory(ctx context.Context, arg ListObserverDirectoryParams) (string, error)
 	// Observers newest last_seen first; the cursor is the (last_seen, id) of the last row.
 	ListObservers(ctx context.Context, arg ListObserversParams) ([]ListObserversRow, error)
+	// Targets with an assignment whose candidate is gone.
+	ListOrphanPollingTargets(ctx context.Context) ([][]byte, error)
 	// The sites with the most packets among observations above after_id; the first-time verification pages them.
 	ListPacketSiteSamples(ctx context.Context, arg ListPacketSiteSamplesParams) ([]ListPacketSiteSamplesRow, error)
 	// Returns packets with observations after the given observation ID, ordered oldest first.
@@ -499,8 +503,11 @@ type Querier interface {
 	ListUndecryptedGroupTextPacketsByHash(ctx context.Context, hashes [][]byte) ([]ListUndecryptedGroupTextPacketsByHashRow, error)
 	ListZoneBoundaries(ctx context.Context) ([]MeshmapperZoneBoundary, error)
 	ListZoneLists(ctx context.Context) ([]MeshmapperZoneList, error)
-	// Serializes elections of one target until the transaction ends. The one-bigint key space is separate from the
-	// (25189, n) two-key locks the rollup and election jobs hold.
+	// Serializes one observer's reading inserts until the transaction ends, so its rate and budget checks see each
+	// other. Class 25191, beside the target class and the (25189, n) job locks.
+	LockPollingObserver(ctx context.Context, observerPublicKey []byte) error
+	// Serializes elections of one target until the transaction ends. Class 25190 in the two-key space, which never
+	// meets the one-key migration lock; the schema keeps instances in other schemas apart.
 	LockPollingTarget(ctx context.Context, targetPublicKey []byte) error
 	// Returns the hour's status, or 'partial' if raw deletion has reached it since registration.
 	LockRollupHour(ctx context.Context, hour pgtype.Timestamptz) (string, error)
@@ -734,7 +741,8 @@ type Querier interface {
 	// A new TRACE packet adds itself to its tag summary in the same statement, so the summary
 	// can't miss a stored packet. 'TRACE' > 'PING'; the longest path keeps the best payload.
 	UpsertPacket(ctx context.Context, arg UpsertPacketParams) (UpsertPacketRow, error)
-	// Only a newer claim replaces the stored one; zero rows means it was ignored.
+	// Applies only a claim newer than the stored one and received at least the claim interval after it, checked in
+	// this statement so concurrent claims cannot both pass. Zero rows means it was ignored.
 	UpsertPollingClaim(ctx context.Context, arg UpsertPollingClaimParams) (int64, error)
 	UpsertRegion(ctx context.Context, arg UpsertRegionParams) (int32, error)
 	// ============================================================

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	"github.com/MeshCore-Beacon/beacon-server/internal/config"
 	"github.com/MeshCore-Beacon/beacon-server/internal/polling"
 	"github.com/google/uuid"
@@ -94,7 +95,7 @@ func TestPollingClaimReplaceIsSnapshotPostgres(t *testing.T) {
 	if ok, err := s.ReplacePollingClaim(ctx, pollClaim(o, T, 0xA, 0xB), id, T); err != nil || !ok {
 		t.Fatal(ok, err)
 	}
-	if ok, err := s.ReplacePollingClaim(ctx, pollClaim(o, T.Add(60*time.Second), 0xB, 0xC), id, T); err != nil || !ok {
+	if ok, err := s.ReplacePollingClaim(ctx, pollClaim(o, T.Add(60*time.Second), 0xB, 0xC), id, T.Add(polling.ClaimMinInterval)); err != nil || !ok {
 		t.Fatal(ok, err)
 	}
 	if got := targetSet(t, ctx, s, T.Add(-time.Hour)); !sameInts(got, []int{0xB, 0xC}) {
@@ -602,7 +603,7 @@ func TestPollingElectionLockPostgres(t *testing.T) {
 
 func TestPollingObserverIndexesPostgres(t *testing.T) {
 	ctx, pool, _ := pollStore(t)
-	for _, name := range []string{"idx_polling_claims_observer", "idx_repeater_readings_observer"} {
+	for _, name := range []string{"idx_polling_claims_observer", "idx_repeater_readings_observer", "idx_repeater_readings_observer_received"} {
 		var ok bool
 		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = $1)`, name).Scan(&ok); err != nil || !ok {
 			t.Fatal(name, ok, err)
@@ -968,5 +969,265 @@ func TestPollingApprovedAuthorityPostgres(t *testing.T) {
 	}
 	if e := pollEntry(t, ctx, svc, best, x); e.Role != "polling" || !e.Mine || e.LatestTS == nil {
 		t.Fatalf("after approval: %+v", e)
+	}
+}
+
+func TestPollingClaimIntervalPostgres(t *testing.T) {
+	ctx, _, s := pollStore(t)
+	o := pollKey(1)
+	id := pollObserver(t, ctx, s, o)
+	now := time.Now().UTC().Truncate(time.Second)
+	for i, c := range []struct {
+		recv time.Duration
+		want bool
+	}{
+		{0, true},
+		{polling.ClaimMinInterval - time.Second, false},
+		{polling.ClaimMinInterval, true},
+	} {
+		ok, err := s.ReplacePollingClaim(ctx, pollClaim(o, now.Add(time.Duration(i)*time.Second), 0xA), id, now.Add(c.recv))
+		if err != nil || ok != c.want {
+			t.Fatal(i, ok, err)
+		}
+	}
+}
+
+// Distinct claims for one observer racing inside one interval: exactly one applies, with or without a stored claim.
+func TestPollingClaimIntervalConcurrentPostgres(t *testing.T) {
+	ctx, pool, s := pollStore(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	for _, stored := range []bool{false, true} {
+		o := pollKey(1)
+		if stored {
+			o = pollKey(2)
+		}
+		id := pollObserver(t, ctx, s, o)
+		if stored {
+			if ok, err := s.ReplacePollingClaim(ctx, pollClaim(o, now.Add(-time.Hour), 0xA), id, now.Add(-time.Hour)); err != nil || !ok {
+				t.Fatal(ok, err)
+			}
+		}
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		applied := 0
+		start := make(chan struct{})
+		for i := range 20 {
+			wg.Go(func() {
+				<-start
+				ok, err := s.ReplacePollingClaim(ctx, pollClaim(o, now.Add(time.Duration(i)*time.Second), byte(0x10+i)), id,
+					now.Add(time.Duration(i)*time.Millisecond))
+				if err != nil {
+					t.Error(err)
+				}
+				if ok {
+					mu.Lock()
+					applied++
+					mu.Unlock()
+				}
+			})
+		}
+		close(start)
+		wg.Wait()
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM polling_candidates WHERE observer_public_key = $1`, o).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if applied != 1 || n != 1 {
+			t.Fatalf("stored=%v: %d claims applied, %d candidates", stored, applied, n)
+		}
+	}
+}
+
+func TestRepeaterReadingRateLimitConcurrentPostgres(t *testing.T) {
+	ctx, pool, s := pollStore(t)
+	o := pollKey(1)
+	id := pollObserver(t, ctx, s, o)
+	now := time.Now().UTC().Truncate(time.Second)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := range 40 {
+		wg.Go(func() {
+			tag := uint32(i + 1)
+			<-start
+			if _, err := s.InsertRepeaterReading(ctx, pollReading(o, 0xA, "status", now, &tag), id, now); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	close(start)
+	wg.Wait()
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM repeater_readings`).Scan(&n); err != nil || n != 1 {
+		t.Fatal("rows", n, err)
+	}
+}
+
+func TestRepeaterReadingObserverBudgetPostgres(t *testing.T) {
+	ctx, pool, s := pollStore(t)
+	o := pollKey(1)
+	id := pollObserver(t, ctx, s, o)
+	now := time.Now().UTC().Truncate(time.Second)
+	insert := func(target byte, recv time.Time) bool {
+		t.Helper()
+		ok, err := s.InsertRepeaterReading(ctx, pollReading(o, target, "status", now, nil), id, recv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+	// Each reading names a new target, so only the observer-wide budget can stop them.
+	for i := range polling.ReadingsPerObserverPerHour {
+		if !insert(byte(i+1), now.Add(time.Duration(i)*time.Second)) {
+			t.Fatalf("reading %d dropped under the budget", i+1)
+		}
+	}
+	if insert(byte(polling.ReadingsPerObserverPerHour+1), now.Add(30*time.Minute)) {
+		t.Fatal("reading over the hourly budget stored")
+	}
+	// Another observer has its own budget.
+	o2 := pollKey(2)
+	if ok, err := s.InsertRepeaterReading(ctx, pollReading(o2, 0xFE, "status", now, nil), pollObserver(t, ctx, s, o2), now.Add(30*time.Minute)); err != nil || !ok {
+		t.Fatal("other observer throttled", ok, err)
+	}
+	// An hour after the first ones were received there is room again.
+	if !insert(0xFF, now.Add(time.Hour+time.Second)) {
+		t.Fatal("budget did not roll")
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM repeater_readings WHERE observer_public_key = $1`, o).Scan(&n); err != nil || n != polling.ReadingsPerObserverPerHour+1 {
+		t.Fatal(n, err)
+	}
+}
+
+func TestRepeaterReadingConstraintsPostgres(t *testing.T) {
+	ctx, pool, _ := pollStore(t)
+	for name, c := range map[string]struct {
+		method, client  string
+		lpp, packetHash []byte
+	}{
+		"hash 7 bytes":    {"status", "", nil, make([]byte, 7)},
+		"hash 7000 bytes": {"status", "", nil, make([]byte, 7000)},
+		"lpp 161 bytes":   {"status", "", make([]byte, 161), nil},
+		"method":          {"history", "", nil, nil},
+		"client":          {"status", string(bytes.Repeat([]byte("c"), 129)), nil, nil},
+	} {
+		_, err := pool.Exec(ctx, `INSERT INTO repeater_readings (target_public_key, observer_public_key, sampled_at, received_at, method, tag, lpp, packet_hash, client)
+VALUES ($1, $2, now(), now(), $3, 1, $4, $5, $6)`, pollKey(0xA), pollKey(1), c.method, c.lpp, c.packetHash, c.client)
+		if err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO repeater_readings (target_public_key, observer_public_key, sampled_at, received_at, method, tag, lpp, packet_hash, client)
+VALUES ($1, $2, now(), now(), 'telemetry', 1, $3, $4, $5)`, pollKey(0xA), pollKey(1), make([]byte, 160), make([]byte, 8), string(bytes.Repeat([]byte("c"), 128))); err != nil {
+		t.Fatal("limits themselves rejected", err)
+	}
+}
+
+// A reading whose insert transaction is still open holds back a racing one from the same observer until it commits.
+func TestRepeaterReadingWaitsForOpenInsertPostgres(t *testing.T) {
+	ctx, pool, s := pollStore(t)
+	o := pollKey(1)
+	id := pollObserver(t, ctx, s, o)
+	now := time.Now().UTC().Truncate(time.Second)
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	tag1, tag2 := uint32(1), uint32(2)
+	if ok, err := insertRepeaterReading(ctx, sqlc.New(tx), pollReading(o, 0xA, "status", now, &tag1), id, now); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	done := make(chan bool, 1)
+	go func() {
+		ok, err := s.InsertRepeaterReading(ctx, pollReading(o, 0xA, "status", now, &tag2), id, now)
+		if err != nil {
+			t.Error(err)
+		}
+		done <- ok
+	}()
+	select {
+	case ok := <-done:
+		t.Fatalf("second insert did not wait for the first (stored=%v)", ok)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if <-done {
+		t.Fatal("second reading stored inside the window")
+	}
+}
+
+// Orphan cleanup takes the target's election lock, so it waits for an election in progress.
+func TestPollingOrphanCleanupWaitsForElectionPostgres(t *testing.T) {
+	ctx, pool, s := pollStore(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := s.ReplacePollingAssignments(ctx, pollKey(0xA), []polling.Assignment{{Observer: pollKey(9), Rank: 0}}, now); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if err := sqlc.New(tx).LockPollingTarget(ctx, pollKey(0xA)); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- s.DeleteExpiredPolling(ctx, now.Add(-time.Hour), now.Add(-time.Hour)) }()
+	select {
+	case err := <-done:
+		t.Fatal("cleanup did not wait for the election lock", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM polling_assignments`).Scan(&n); err != nil || n != 0 {
+		t.Fatal("orphan kept", n, err)
+	}
+}
+
+// The target and observer locks are separate classes and scoped to the schema: only the same lock in the same
+// schema waits.
+func TestPollingLockKeysPostgres(t *testing.T) {
+	ctx, poolA, _ := pollStore(t)
+	_, poolB, _ := pollStore(t)
+	k := pollKey(0xA)
+	held, err := poolA.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Rollback(ctx)
+	if err := sqlc.New(held).LockPollingTarget(ctx, k); err != nil {
+		t.Fatal(err)
+	}
+	try := func(pool *pgxpool.Pool, lock func(q *sqlc.Queries) error) error {
+		t.Helper()
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(ctx)
+		if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '200ms'`); err != nil {
+			t.Fatal(err)
+		}
+		return lock(sqlc.New(tx))
+	}
+	target := func(q *sqlc.Queries) error { return q.LockPollingTarget(ctx, k) }
+	observer := func(q *sqlc.Queries) error { return q.LockPollingObserver(ctx, k) }
+	if err := try(poolA, target); err == nil {
+		t.Fatal("same target lock in the same schema did not wait")
+	}
+	if err := try(poolA, observer); err != nil {
+		t.Fatal("observer lock collided with the target lock", err)
+	}
+	if err := try(poolB, target); err != nil {
+		t.Fatal("another schema waited for this schema's lock", err)
 	}
 }

@@ -22,6 +22,8 @@ const (
 	// Firmware claims at most once a minute and polls at most every 30 minutes.
 	ClaimMinInterval   = 30 * time.Second
 	ReadingMinInterval = 5 * time.Minute
+	// 8 targets, two methods and 3 poll starts per 30-minute window stay under 100 an hour.
+	ReadingsPerObserverPerHour = 120
 
 	readingFutureMax = time.Minute
 )

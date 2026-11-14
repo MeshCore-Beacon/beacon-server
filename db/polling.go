@@ -71,7 +71,7 @@ func (s *Store) pollTx(ctx context.Context, fn func(q *sqlc.Queries) error) erro
 }
 
 // ReplacePollingClaim stores the claim as the observer's whole candidate list. A claim that is not newer than the
-// stored one changes nothing and reports applied=false.
+// stored one, or arrives within polling.ClaimMinInterval of it, changes nothing and reports applied=false.
 func (s *Store) ReplacePollingClaim(ctx context.Context, c polling.Claim, observerID uuid.UUID, receivedAt time.Time) (bool, error) {
 	applied := false
 	err := s.pollTx(ctx, func(q *sqlc.Queries) error {
@@ -80,6 +80,7 @@ func (s *Store) ReplacePollingClaim(ctx context.Context, c polling.Claim, observ
 			Origin: clipText(c.Origin, 128), Client: clipText(c.Client, 128), PolicyVersion: clipText(c.PolicyVersion, 32),
 			Community: c.Community, AcceptsRequests: c.AcceptsRequests, RequestSlots: int16(c.RequestSlots),
 			ClaimedAt: ts(c.Timestamp), ReceivedAt: ts(receivedAt),
+			PreviousReceivedBy: ts(receivedAt.Add(-polling.ClaimMinInterval)),
 		})
 		if err != nil || n == 0 {
 			return err
@@ -114,9 +115,23 @@ func (s *Store) PollingClaimReceivedAt(ctx context.Context, observer []byte) (*t
 	return &t.Time, nil
 }
 
-// InsertRepeaterReading stores one reading; inserted=false means it was already there, or the observer stored one
-// of the same target and method less than polling.ReadingMinInterval before receivedAt.
+// InsertRepeaterReading stores one reading; inserted=false means it was already there, the observer stored one of
+// the same target and method less than polling.ReadingMinInterval before receivedAt, or it is over its hourly budget.
 func (s *Store) InsertRepeaterReading(ctx context.Context, r polling.Reading, observerID uuid.UUID, receivedAt time.Time) (bool, error) {
+	inserted := false
+	err := s.pollTx(ctx, func(q *sqlc.Queries) error {
+		var err error
+		inserted, err = insertRepeaterReading(ctx, q, r, observerID, receivedAt)
+		return err
+	})
+	return inserted, err
+}
+
+// insertRepeaterReading takes the observer's lock first, so concurrent inserts cannot both pass the checks.
+func insertRepeaterReading(ctx context.Context, q *sqlc.Queries, r polling.Reading, observerID uuid.UUID, receivedAt time.Time) (bool, error) {
+	if err := q.LockPollingObserver(ctx, r.Observer); err != nil {
+		return false, err
+	}
 	tag := r.SampledAt.Unix()
 	if r.Tag != nil {
 		tag = int64(*r.Tag)
@@ -124,7 +139,7 @@ func (s *Store) InsertRepeaterReading(ctx context.Context, r polling.Reading, ob
 	st := r.Stats
 	i32 := func(v int) int32 { return int32(v) }
 	f32 := func(v float64) float32 { return float32(v) }
-	n, err := s.q.InsertRepeaterReading(ctx, sqlc.InsertRepeaterReadingParams{
+	n, err := q.InsertRepeaterReading(ctx, sqlc.InsertRepeaterReadingParams{
 		TargetPublicKey: r.Target, ObserverPublicKey: r.Observer, ObserverID: pgtype.UUID{Bytes: observerID, Valid: true},
 		SampledAt: ts(r.SampledAt), ReceivedAt: ts(receivedAt),
 		Method: r.Method, Tag: tag,
@@ -137,6 +152,7 @@ func (s *Store) InsertRepeaterReading(ctx context.Context, r polling.Reading, ob
 		LastSnr: ptrConv(st.LastSNR, f32),
 		Lpp:     r.LPP, PacketHash: r.PacketHash, Client: clipText(r.Client, 128),
 		RecentAfter: ts(receivedAt.Add(-polling.ReadingMinInterval)),
+		BudgetAfter: ts(receivedAt.Add(-time.Hour)), Budget: polling.ReadingsPerObserverPerHour,
 	})
 	return n > 0, err
 }
@@ -188,9 +204,15 @@ func currentPoller(ctx context.Context, q sqlc.Querier, target []byte) ([]byte, 
 	return k, err
 }
 
-// ReplacePollingAssignments swaps the target's whole order in one transaction; nil or empty clears it.
+// ReplacePollingAssignments swaps the target's whole order in one transaction under the target's election lock;
+// nil or empty clears it.
 func (s *Store) ReplacePollingAssignments(ctx context.Context, target []byte, a []polling.Assignment, at time.Time) error {
-	return s.pollTx(ctx, func(q *sqlc.Queries) error { return replaceAssignments(ctx, q, target, a, at) })
+	return s.pollTx(ctx, func(q *sqlc.Queries) error {
+		if err := q.LockPollingTarget(ctx, target); err != nil {
+			return err
+		}
+		return replaceAssignments(ctx, q, target, a, at)
+	})
 }
 
 func replaceAssignments(ctx context.Context, q *sqlc.Queries, target []byte, a []polling.Assignment, at time.Time) error {
@@ -292,8 +314,20 @@ func (s *Store) DeleteExpiredPolling(ctx context.Context, claimsBefore, readings
 	if err := s.q.DeleteExpiredPollingClaims(ctx, ts(claimsBefore)); err != nil {
 		return err
 	}
-	if err := s.q.DeleteOrphanPollingAssignments(ctx); err != nil {
+	orphans, err := s.q.ListOrphanPollingTargets(ctx)
+	if err != nil {
 		return err
+	}
+	// One target at a time under its election lock, so cleanup and an election never delete in opposite orders.
+	for _, t := range orphans {
+		if err := s.pollTx(ctx, func(q *sqlc.Queries) error {
+			if err := q.LockPollingTarget(ctx, t); err != nil {
+				return err
+			}
+			return q.DeleteOrphanPollingAssignments(ctx, t)
+		}); err != nil {
+			return err
+		}
 	}
 	return s.q.DeleteExpiredRepeaterReadings(ctx, ts(readingsBefore))
 }
