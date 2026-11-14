@@ -104,8 +104,9 @@ func (p PollingConfig) Resolve() (ResolvedPolling, error) {
 	if r.MaxRequests < 1 || r.MaxRequests > 3 {
 		return ResolvedPolling{}, fmt.Errorf("polling.max_requests must be between 1 and 3")
 	}
-	if r.ReadingRetention < 0 {
-		return ResolvedPolling{}, fmt.Errorf("polling.reading_retention must not be negative")
+	// The per-observer hourly budget is counted from stored readings, so they must outlive an hour.
+	if r.ReadingRetention < time.Hour {
+		return ResolvedPolling{}, fmt.Errorf("polling.reading_retention must be at least 1h")
 	}
 	if r.MinClientVersion != "" && !pollingVersionRe.MatchString(r.MinClientVersion) {
 		return ResolvedPolling{}, fmt.Errorf("polling.min_client_version must be X.Y.Z or empty")

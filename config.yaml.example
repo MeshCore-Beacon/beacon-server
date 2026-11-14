@@ -421,7 +421,7 @@ cache:
 #  direct_window: 1h           # 30m to 24h; default: 1h
 #  grace: 30m                  # 10m to 2h; default: 30m
 #  max_requests: 2             # 1 to 3; default: 2
-#  reading_retention: 744h     # default: 744h (31 days)
+#  reading_retention: 744h     # at least 1h; default: 744h (31 days)
 #  min_client_version: ""      # X.Y.Z or empty; older observer firmware gets version_ok false
 #  excluded_nodes: []          # up to 16 public keys, 64 hex characters each
 #  paused: false

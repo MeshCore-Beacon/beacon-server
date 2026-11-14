@@ -99,3 +99,18 @@ func TestPollingExcludedNodesDecoded(t *testing.T) {
 		t.Fatalf("got %v", r.ExcludedNodes)
 	}
 }
+
+func TestPollingReadingRetentionMinimum(t *testing.T) {
+	_, err := PollingConfig{ReadingRetention: duration{59 * time.Minute}}.Resolve()
+	if err == nil || !strings.Contains(err.Error(), "polling.reading_retention") || !strings.Contains(err.Error(), "1h") {
+		t.Fatalf("59m must be rejected naming key and minimum, got %v", err)
+	}
+	r, err := PollingConfig{ReadingRetention: duration{time.Hour}}.Resolve()
+	if err != nil || r.ReadingRetention != time.Hour {
+		t.Fatalf("1h must be accepted: %+v %v", r, err)
+	}
+	r, err = PollingConfig{}.Resolve()
+	if err != nil || r.ReadingRetention != 744*time.Hour {
+		t.Fatalf("unset must resolve to 744h: %+v %v", r, err)
+	}
+}
