@@ -418,6 +418,17 @@ func (q *Queries) ListPollingTargets(ctx context.Context, receivedAt pgtype.Time
 	return items, nil
 }
 
+const lockPollingTarget = `-- name: LockPollingTarget :exec
+SELECT pg_advisory_xact_lock(hashtextextended(encode($1::bytea, 'hex'), 25190))
+`
+
+// Serializes elections of one target until the transaction ends. The one-bigint key space is separate from the
+// (25189, n) two-key locks the rollup and election jobs hold.
+func (q *Queries) LockPollingTarget(ctx context.Context, targetPublicKey []byte) error {
+	_, err := q.db.Exec(ctx, lockPollingTarget, targetPublicKey)
+	return err
+}
+
 const pollingElectionUnlock = `-- name: PollingElectionUnlock :exec
 SELECT pg_advisory_unlock(25189, 2)
 `
@@ -445,7 +456,10 @@ func (q *Queries) PollingObserverFlags(ctx context.Context, observerPublicKey []
 
 const pollingOwnerRows = `-- name: PollingOwnerRows :many
 SELECT c.target_public_key, COALESCE(a.rank, -1)::int AS rank,
-       (SELECT r.sampled_at FROM repeater_readings r WHERE r.target_public_key = c.target_public_key
+       (SELECT count(*) FROM polling_assignments x WHERE x.target_public_key = c.target_public_key)::int AS assigned,
+       (SELECT r.sampled_at FROM repeater_readings r
+        JOIN polling_assignments t ON t.target_public_key = r.target_public_key AND t.observer_public_key = r.observer_public_key
+        WHERE r.target_public_key = c.target_public_key AND (t.rank = 0 OR t.evidence_count > 0)
         ORDER BY r.sampled_at DESC LIMIT 1)::timestamptz AS latest_ts
 FROM polling_candidates c
 JOIN polling_claims cl ON cl.observer_public_key = c.observer_public_key
@@ -462,9 +476,12 @@ type PollingOwnerRowsParams struct {
 type PollingOwnerRowsRow struct {
 	TargetPublicKey []byte             `json:"target_public_key"`
 	Rank            int32              `json:"rank"`
+	Assigned        int32              `json:"assigned"`
 	LatestTs        pgtype.Timestamptz `json:"latest_ts"`
 }
 
+// assigned counts the target's assignment rows. latest_ts only trusts readings from an assigned observer that is
+// rank 0 or has advert evidence, so a bystander's readings cannot stand the real pollers down.
 func (q *Queries) PollingOwnerRows(ctx context.Context, arg PollingOwnerRowsParams) ([]PollingOwnerRowsRow, error) {
 	rows, err := q.db.Query(ctx, pollingOwnerRows, arg.ObserverPublicKey, arg.ReceivedAt)
 	if err != nil {
@@ -474,7 +491,12 @@ func (q *Queries) PollingOwnerRows(ctx context.Context, arg PollingOwnerRowsPara
 	items := []PollingOwnerRowsRow{}
 	for rows.Next() {
 		var i PollingOwnerRowsRow
-		if err := rows.Scan(&i.TargetPublicKey, &i.Rank, &i.LatestTs); err != nil {
+		if err := rows.Scan(
+			&i.TargetPublicKey,
+			&i.Rank,
+			&i.Assigned,
+			&i.LatestTs,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

@@ -2912,6 +2912,20 @@ func (mr *MockQuerierMockRecorder) ListZoneLists(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListZoneLists", reflect.TypeOf((*MockQuerier)(nil).ListZoneLists), ctx)
 }
 
+// LockPollingTarget mocks base method.
+func (m *MockQuerier) LockPollingTarget(ctx context.Context, targetPublicKey []byte) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LockPollingTarget", ctx, targetPublicKey)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// LockPollingTarget indicates an expected call of LockPollingTarget.
+func (mr *MockQuerierMockRecorder) LockPollingTarget(ctx, targetPublicKey any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockPollingTarget", reflect.TypeOf((*MockQuerier)(nil).LockPollingTarget), ctx, targetPublicKey)
+}
+
 // LockRollupHour mocks base method.
 func (m *MockQuerier) LockRollupHour(ctx context.Context, hour pgtype.Timestamptz) (string, error) {
 	m.ctrl.T.Helper()

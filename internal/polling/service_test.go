@@ -138,9 +138,7 @@ func (f *fakeStore) ListPollingTargets(_ context.Context, after time.Time) ([][]
 	return out, nil
 }
 
-func (f *fakeStore) ListPollingCandidates(_ context.Context, target []byte, after, _ time.Time) ([]Candidate, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+func (f *fakeStore) candidates(target []byte, after time.Time) []Candidate {
 	var out []Candidate
 	for obs := range f.claims {
 		if !f.live(obs, hx(target), after) {
@@ -154,26 +152,23 @@ func (f *fakeStore) ListPollingCandidates(_ context.Context, target []byte, afte
 		}
 		out = append(out, cand)
 	}
-	return out, nil
+	return out
 }
 
-func (f *fakeStore) CurrentPoller(_ context.Context, target []byte) ([]byte, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for _, a := range f.assigns[hx(target)] {
-		if a.Rank == 0 {
-			return a.Observer, nil
-		}
-	}
-	return nil, nil
-}
-
-func (f *fakeStore) ReplacePollingAssignments(_ context.Context, target []byte, a []Assignment, _ time.Time) error {
+func (f *fakeStore) ElectPollingTarget(_ context.Context, target []byte, after, _, _ time.Time,
+	decide func([]Candidate, []byte) []Assignment) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.targetsFail[hx(target)] {
 		return fmt.Errorf("boom")
 	}
+	var cur []byte
+	for _, a := range f.assigns[hx(target)] {
+		if a.Rank == 0 {
+			cur = a.Observer
+		}
+	}
+	a := decide(f.candidates(target, after), cur)
 	f.electCalls[hx(target)]++
 	if len(a) == 0 {
 		delete(f.assigns, hx(target))
@@ -193,14 +188,16 @@ func (f *fakeStore) PollingOwnerRows(_ context.Context, obs []byte, after time.T
 	var out []OwnerRow
 	for t := range c.nodes {
 		tb, _ := hex.DecodeString(t)
-		row := OwnerRow{Target: tb, Rank: -1}
+		row := OwnerRow{Target: tb, Rank: -1, Assigned: len(f.assigns[t])}
+		trusted := map[string]bool{}
 		for _, a := range f.assigns[t] {
 			if bytes.Equal(a.Observer, obs) {
 				row.Rank = a.Rank
 			}
+			trusted[hx(a.Observer)] = a.Rank == 0 || a.EvidenceCount > 0
 		}
 		for _, r := range f.readings {
-			if r.target == t && (row.LatestTS == nil || r.sampled.After(*row.LatestTS)) {
+			if r.target == t && trusted[r.observer] && (row.LatestTS == nil || r.sampled.After(*row.LatestTS)) {
 				s := r.sampled
 				row.LatestTS = &s
 			}
@@ -498,6 +495,29 @@ func TestOwnersBeforeFirstElection(t *testing.T) {
 	e := s.Owners(context.Background(), Caller{Observer: o}).Nodes[hx(x)]
 	if e.Role != "polling" || !e.Mine {
 		t.Fatalf("entry = %+v", e)
+	}
+}
+
+func TestOwnersUnassignedCandidateIsLastStandby(t *testing.T) {
+	s, st, _ := newSvc(t, true)
+	o1, o2, o3, x := k32(1), k32(2), k32(3), k32(0xa)
+	ctx := context.Background()
+	s.HandleClaim(ctx, hx(o1), claimJSON(o1, t0, x))
+	s.HandleClaim(ctx, hx(o2), claimJSON(o2, t0, x))
+	// A live claim the election has not placed yet, or left out (admin_stop, not_direct, blocked).
+	st.claims[hx(o3)] = &fakeClaim{ts: t0, recv: t0, nodes: map[string]ClaimNode{hx(x): {Target: x}}}
+	e := s.Owners(ctx, Caller{Observer: o3}).Nodes[hx(x)]
+	if e.Role != "standby" || e.Mine || e.StandbyRank != 2 {
+		t.Fatalf("entry = %+v", e)
+	}
+	polling := 0
+	for _, o := range [][]byte{o1, o2, o3} {
+		if e := s.Owners(ctx, Caller{Observer: o}).Nodes[hx(x)]; e.Role == "polling" && e.Mine {
+			polling++
+		}
+	}
+	if polling != 1 {
+		t.Fatalf("%d observers told they poll", polling)
 	}
 }
 

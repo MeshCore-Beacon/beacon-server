@@ -191,6 +191,7 @@ func parseSemver(s string) ([3]int, bool) {
 type OwnerRow struct {
 	Target     []byte
 	Rank       int // 0 = poller, 1.. = standby; -1 = no assignment yet
+	Assigned   int // assignment rows the target has, from any observer
 	PollerHops int
 	LatestTS   *time.Time
 	Excluded   bool

@@ -498,6 +498,9 @@ type Querier interface {
 	ListUndecryptedGroupTextPacketsByHash(ctx context.Context, hashes [][]byte) ([]ListUndecryptedGroupTextPacketsByHashRow, error)
 	ListZoneBoundaries(ctx context.Context) ([]MeshmapperZoneBoundary, error)
 	ListZoneLists(ctx context.Context) ([]MeshmapperZoneList, error)
+	// Serializes elections of one target until the transaction ends. The one-bigint key space is separate from the
+	// (25189, n) two-key locks the rollup and election jobs hold.
+	LockPollingTarget(ctx context.Context, targetPublicKey []byte) error
 	// Returns the hour's status, or 'partial' if raw deletion has reached it since registration.
 	LockRollupHour(ctx context.Context, hour pgtype.Timestamptz) (string, error)
 	// Hours whose raw rows cleanup already started deleting can never be rolled completely.
@@ -517,6 +520,8 @@ type Querier interface {
 	PacketSitesTotalBytes(ctx context.Context) (int64, error)
 	PollingElectionUnlock(ctx context.Context) error
 	PollingObserverFlags(ctx context.Context, observerPublicKey []byte) (PollingObserverFlagsRow, error)
+	// assigned counts the target's assignment rows. latest_ts only trusts readings from an assigned observer that is
+	// rank 0 or has advert evidence, so a bystander's readings cannot stand the real pollers down.
 	PollingOwnerRows(ctx context.Context, arg PollingOwnerRowsParams) ([]PollingOwnerRowsRow, error)
 	PruneImportedRegions(ctx context.Context, keep []string) ([]string, error)
 	// Drops imports for IATAs no longer configured, so their manual border returns.

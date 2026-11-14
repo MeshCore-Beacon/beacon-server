@@ -31,9 +31,10 @@ type Store interface {
 	InsertRepeaterReading(ctx context.Context, r Reading, observerID uuid.UUID, receivedAt time.Time) (bool, error)
 	HasLivePollingCandidate(ctx context.Context, observer, target []byte, receivedAfter time.Time) (bool, error)
 	ListPollingTargets(ctx context.Context, receivedAfter time.Time) ([][]byte, error)
-	ListPollingCandidates(ctx context.Context, target []byte, receivedAfter, evidenceSince time.Time) ([]Candidate, error)
-	CurrentPoller(ctx context.Context, target []byte) ([]byte, error)
-	ReplacePollingAssignments(ctx context.Context, target []byte, a []Assignment, at time.Time) error
+	// ElectPollingTarget runs decide on the target's live candidates and current poller and stores the result,
+	// atomically per target.
+	ElectPollingTarget(ctx context.Context, target []byte, receivedAfter, evidenceSince, at time.Time,
+		decide func(cands []Candidate, current []byte) []Assignment) error
 	PollingOwnerRows(ctx context.Context, observer []byte, receivedAfter time.Time) ([]OwnerRow, error)
 	PollingObserverFlags(ctx context.Context, observer []byte) (blocked, approved bool, err error)
 	PollingState(ctx context.Context) (paused bool, pausedUntil *time.Time, excluded [][]byte, err error)
@@ -231,6 +232,10 @@ func (s *Service) Owners(ctx context.Context, c Caller) OwnersAnswer {
 	}
 	for i := range rows {
 		rows[i].Excluded = excluded[hex.EncodeToString(rows[i].Target)]
+		// No row of our own while the target has a poller: wait last in line. Only a target nobody holds fails open.
+		if rows[i].Rank < 0 && rows[i].Assigned > 0 {
+			rows[i].Rank = rows[i].Assigned
+		}
 	}
 	return BuildOwners(rows, p)
 }
@@ -238,15 +243,7 @@ func (s *Service) Owners(ctx context.Context, c Caller) OwnersAnswer {
 // ElectTarget recomputes the order of observers for one repeater. No candidates clears it.
 func (s *Service) ElectTarget(ctx context.Context, target []byte) error {
 	now := s.now()
-	cands, err := s.store.ListPollingCandidates(ctx, target, now.Add(-ClaimTTL), now.Add(-EvidenceWindow))
-	if err != nil {
-		return err
-	}
-	cur, err := s.store.CurrentPoller(ctx, target)
-	if err != nil {
-		return err
-	}
-	return s.store.ReplacePollingAssignments(ctx, target, Elect(cands, cur), now)
+	return s.store.ElectPollingTarget(ctx, target, now.Add(-ClaimTTL), now.Add(-EvidenceWindow), now, Elect)
 }
 
 // ElectAll re-elects every known target. One failure does not stop the rest; the first error is returned.

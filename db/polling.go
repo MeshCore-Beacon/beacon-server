@@ -139,7 +139,11 @@ func (s *Store) ListPollingTargets(ctx context.Context, receivedAfter time.Time)
 }
 
 func (s *Store) ListPollingCandidates(ctx context.Context, target []byte, receivedAfter, evidenceSince time.Time) ([]polling.Candidate, error) {
-	rows, err := s.q.ListPollingCandidates(ctx, sqlc.ListPollingCandidatesParams{
+	return listPollingCandidates(ctx, s.q, target, receivedAfter, evidenceSince)
+}
+
+func listPollingCandidates(ctx context.Context, q sqlc.Querier, target []byte, receivedAfter, evidenceSince time.Time) ([]polling.Candidate, error) {
+	rows, err := q.ListPollingCandidates(ctx, sqlc.ListPollingCandidatesParams{
 		TargetPublicKey: target, ReceivedAt: ts(receivedAfter), FirstHeardAt: ts(evidenceSince)})
 	if err != nil {
 		return nil, err
@@ -159,7 +163,11 @@ func (s *Store) ListPollingCandidates(ctx context.Context, target []byte, receiv
 
 // CurrentPoller returns the rank-0 observer key for the target, nil when there is none.
 func (s *Store) CurrentPoller(ctx context.Context, target []byte) ([]byte, error) {
-	k, err := s.q.CurrentPollingPoller(ctx, target)
+	return currentPoller(ctx, s.q, target)
+}
+
+func currentPoller(ctx context.Context, q sqlc.Querier, target []byte) ([]byte, error) {
+	k, err := q.CurrentPollingPoller(ctx, target)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -168,21 +176,43 @@ func (s *Store) CurrentPoller(ctx context.Context, target []byte) ([]byte, error
 
 // ReplacePollingAssignments swaps the target's whole order in one transaction; nil or empty clears it.
 func (s *Store) ReplacePollingAssignments(ctx context.Context, target []byte, a []polling.Assignment, at time.Time) error {
+	return s.pollTx(ctx, func(q *sqlc.Queries) error { return replaceAssignments(ctx, q, target, a, at) })
+}
+
+func replaceAssignments(ctx context.Context, q *sqlc.Queries, target []byte, a []polling.Assignment, at time.Time) error {
+	if err := q.DeletePollingAssignments(ctx, target); err != nil {
+		return err
+	}
+	for _, x := range a {
+		err := q.InsertPollingAssignment(ctx, sqlc.InsertPollingAssignmentParams{
+			TargetPublicKey: target, ObserverPublicKey: x.Observer, Rank: int16(x.Rank),
+			EvidenceSnr:   ptrConv(x.EvidenceSNR, func(v float64) float32 { return float32(v) }),
+			EvidenceCount: int32(x.EvidenceCount), AssignedAt: ts(at),
+		})
+		if err != nil {
+			return fmt.Errorf("assign %x: %w", x.Observer, err)
+		}
+	}
+	return nil
+}
+
+// ElectPollingTarget locks the target, reads its candidates and current poller, and stores decide's order, all in
+// one transaction, so two elections of one target cannot interleave.
+func (s *Store) ElectPollingTarget(ctx context.Context, target []byte, receivedAfter, evidenceSince, at time.Time,
+	decide func(cands []polling.Candidate, current []byte) []polling.Assignment) error {
 	return s.pollTx(ctx, func(q *sqlc.Queries) error {
-		if err := q.DeletePollingAssignments(ctx, target); err != nil {
+		if err := q.LockPollingTarget(ctx, target); err != nil {
 			return err
 		}
-		for _, x := range a {
-			err := q.InsertPollingAssignment(ctx, sqlc.InsertPollingAssignmentParams{
-				TargetPublicKey: target, ObserverPublicKey: x.Observer, Rank: int16(x.Rank),
-				EvidenceSnr:   ptrConv(x.EvidenceSNR, func(v float64) float32 { return float32(v) }),
-				EvidenceCount: int32(x.EvidenceCount), AssignedAt: ts(at),
-			})
-			if err != nil {
-				return fmt.Errorf("assign %x: %w", x.Observer, err)
-			}
+		cands, err := listPollingCandidates(ctx, q, target, receivedAfter, evidenceSince)
+		if err != nil {
+			return err
 		}
-		return nil
+		cur, err := currentPoller(ctx, q, target)
+		if err != nil {
+			return err
+		}
+		return replaceAssignments(ctx, q, target, decide(cands, cur), at)
 	})
 }
 
@@ -193,7 +223,7 @@ func (s *Store) PollingOwnerRows(ctx context.Context, observer []byte, receivedA
 	}
 	out := make([]polling.OwnerRow, 0, len(rows))
 	for _, r := range rows {
-		row := polling.OwnerRow{Target: r.TargetPublicKey, Rank: int(r.Rank)}
+		row := polling.OwnerRow{Target: r.TargetPublicKey, Rank: int(r.Rank), Assigned: int(r.Assigned)}
 		if r.LatestTs.Valid {
 			t := r.LatestTs.Time
 			row.LatestTS = &t

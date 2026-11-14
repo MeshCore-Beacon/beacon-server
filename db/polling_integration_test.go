@@ -7,10 +7,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"log/slog"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/MeshCore-Beacon/beacon-server/internal/config"
 	"github.com/MeshCore-Beacon/beacon-server/internal/polling"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -603,5 +606,124 @@ func TestPollingObserverIndexesPostgres(t *testing.T) {
 		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = $1)`, name).Scan(&ok); err != nil || !ok {
 			t.Fatal(name, ok, err)
 		}
+	}
+}
+
+func TestPollingElectionConcurrentPostgres(t *testing.T) {
+	ctx, pool, s := pollStore(t)
+	svc := polling.NewService(s, config.ResolvedPolling{Enabled: true}, time.Now, slog.New(slog.DiscardHandler))
+	x := pollKey(0xA)
+	now := time.Now().UTC().Truncate(time.Second)
+	claim := func(b byte) error {
+		o := pollKey(b)
+		id, err := s.ObserverID(ctx, o)
+		if err != nil {
+			return err
+		}
+		_, err = s.ReplacePollingClaim(ctx, pollClaim(o, now, 0xA), id, now)
+		return err
+	}
+	for b := byte(1); b <= 4; b++ {
+		if err := claim(b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 200)
+	for range 6 {
+		wg.Go(func() {
+			for range 15 {
+				if err := svc.ElectTarget(ctx, x); err != nil {
+					errs <- err
+				}
+			}
+		})
+	}
+	for g := range 2 {
+		wg.Go(func() {
+			for i := range 4 {
+				if err := claim(byte(10 + g*4 + i)); err != nil {
+					errs <- err
+					continue
+				}
+				if err := svc.ElectTarget(ctx, x); err != nil {
+					errs <- err
+				}
+			}
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	rows, err := pool.Query(ctx, `SELECT rank FROM polling_assignments WHERE target_public_key = $1 ORDER BY rank`, x)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ranks []int
+	for rows.Next() {
+		var r int
+		if err := rows.Scan(&r); err != nil {
+			t.Fatal(err)
+		}
+		ranks = append(ranks, r)
+	}
+	if len(ranks) != 12 {
+		t.Fatalf("want a row for each of 12 candidates, got ranks %v", ranks)
+	}
+	for i, r := range ranks {
+		if r != i {
+			t.Fatalf("ranks not consecutive from 0: %v", ranks)
+		}
+	}
+}
+
+func TestPollingOwnerRowsTrustedLatestPostgres(t *testing.T) {
+	ctx, _, s := pollStore(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	keys := [][]byte{pollKey(1), pollKey(2), pollKey(3), pollKey(4)}
+	ids := make([]uuid.UUID, len(keys))
+	for i, k := range keys {
+		ids[i] = pollObserver(t, ctx, s, k)
+		if _, err := s.ReplacePollingClaim(ctx, pollClaim(k, now, 0xA), ids[i], now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 1 polls, 2 stands by without evidence, 3 stands by with evidence, 4 has no row.
+	if err := s.ReplacePollingAssignments(ctx, pollKey(0xA), []polling.Assignment{
+		{Observer: keys[0], Rank: 0}, {Observer: keys[1], Rank: 1}, {Observer: keys[2], Rank: 2, EvidenceCount: 3},
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	latest := func(obs int) (*time.Time, polling.OwnerRow) {
+		t.Helper()
+		rows, err := s.PollingOwnerRows(ctx, keys[obs], now.Add(-time.Hour))
+		if err != nil || len(rows) != 1 {
+			t.Fatal(len(rows), err)
+		}
+		return rows[0].LatestTS, rows[0]
+	}
+	read := func(obs int, at time.Time) {
+		t.Helper()
+		if ok, err := s.InsertRepeaterReading(ctx, pollReading(keys[obs], 0xA, "status", at, nil), ids[obs], now); err != nil || !ok {
+			t.Fatal(ok, err)
+		}
+	}
+	read(1, now.Add(-time.Minute))
+	read(3, now.Add(-30*time.Second))
+	if got, _ := latest(0); got != nil {
+		t.Fatal("untrusted readings moved latest_ts", got)
+	}
+	read(0, now.Add(-20*time.Minute))
+	if got, _ := latest(0); got == nil || !got.Equal(now.Add(-20*time.Minute)) {
+		t.Fatal("poller's reading did not count", got)
+	}
+	read(2, now.Add(-10*time.Minute))
+	if got, _ := latest(0); got == nil || !got.Equal(now.Add(-10*time.Minute)) {
+		t.Fatal("standby with evidence did not count", got)
+	}
+	if _, r := latest(3); r.Rank != -1 || r.Assigned != 3 {
+		t.Fatal("unassigned row", r.Rank, r.Assigned)
 	}
 }

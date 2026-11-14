@@ -72,6 +72,11 @@ LEFT JOIN LATERAL (
 WHERE c.target_public_key = $1 AND cl.received_at > $2
 ORDER BY c.observer_public_key;
 
+-- name: LockPollingTarget :exec
+-- Serializes elections of one target until the transaction ends. The one-bigint key space is separate from the
+-- (25189, n) two-key locks the rollup and election jobs hold.
+SELECT pg_advisory_xact_lock(hashtextextended(encode(sqlc.arg(target_public_key)::bytea, 'hex'), 25190));
+
 -- name: CurrentPollingPoller :one
 SELECT observer_public_key FROM polling_assignments WHERE target_public_key = $1 AND rank = 0;
 
@@ -83,8 +88,13 @@ INSERT INTO polling_assignments (target_public_key, observer_public_key, rank, e
 VALUES ($1, $2, $3, $4, $5, $6);
 
 -- name: PollingOwnerRows :many
+-- assigned counts the target's assignment rows. latest_ts only trusts readings from an assigned observer that is
+-- rank 0 or has advert evidence, so a bystander's readings cannot stand the real pollers down.
 SELECT c.target_public_key, COALESCE(a.rank, -1)::int AS rank,
-       (SELECT r.sampled_at FROM repeater_readings r WHERE r.target_public_key = c.target_public_key
+       (SELECT count(*) FROM polling_assignments x WHERE x.target_public_key = c.target_public_key)::int AS assigned,
+       (SELECT r.sampled_at FROM repeater_readings r
+        JOIN polling_assignments t ON t.target_public_key = r.target_public_key AND t.observer_public_key = r.observer_public_key
+        WHERE r.target_public_key = c.target_public_key AND (t.rank = 0 OR t.evidence_count > 0)
         ORDER BY r.sampled_at DESC LIMIT 1)::timestamptz AS latest_ts
 FROM polling_candidates c
 JOIN polling_claims cl ON cl.observer_public_key = c.observer_public_key
