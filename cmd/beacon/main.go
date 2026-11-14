@@ -38,6 +38,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
 	"github.com/MeshCore-Beacon/beacon-server/internal/obscount"
 	"github.com/MeshCore-Beacon/beacon-server/internal/planguard"
+	"github.com/MeshCore-Beacon/beacon-server/internal/polling"
 	"github.com/MeshCore-Beacon/beacon-server/internal/presence"
 	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
 
@@ -441,6 +442,29 @@ func main() {
 		scopes,
 	)
 
+	// ── Repeater polling ─────────────────────────────────────────────────────
+	// config.Load already validated the section. The write-side service sits on the ingest store, which has a
+	// pool for the claim and election transactions, and is not wrapped by the presence coalescer.
+	resolvedPolling, err := cfg.Polling.Resolve()
+	if err != nil {
+		slog.Error("invalid polling configuration", "component", "startup", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("repeater polling", "component", "startup", "enabled", resolvedPolling.Enabled, "mqtt_hosts", len(resolvedPolling.MQTTHosts), "hosts", resolvedPolling.MQTTHosts)
+	var pollingSvc *polling.Service
+	var guestPolling handlers.GuestPolling // stays an untyped nil unless polling is on
+	if resolvedPolling.Enabled {
+		if mode.Ingest {
+			pollingSvc = polling.NewService(ingestStore, resolvedPolling, time.Now, slog.Default())
+			broker1.SetPolling(pollingSvc)
+			broker2.SetPolling(pollingSvc)
+			guestPolling = pollingSvc
+		} else {
+			// Read-only: only Policy and Owners are asked, so the read-routed API store is enough.
+			guestPolling = polling.NewService(apiStore, resolvedPolling, time.Now, slog.Default())
+		}
+	}
+
 	if cr, ok := reader.(*cache.CachedReader); ok {
 		if scopeImporter != nil {
 			scopeImporter.SetCacheInvalidator(cr.InvalidateScopeNames)
@@ -553,6 +577,9 @@ func main() {
 	if pgTask != nil {
 		tasks = append(tasks, *pgTask)
 	}
+	if pollingSvc != nil && mode.Jobs {
+		tasks = append(tasks, background.PollingTasks(pollingSvc, background.NewPollingMaint(maintStore), resolvedPolling)...)
+	}
 	profiles := configureProfiling(ctx, pools.Maint)
 	defer profiles.Stop()
 	for i := range tasks {
@@ -569,6 +596,10 @@ func main() {
 	// Wrap after wiring cache invalidators and cleanup callbacks to the actual
 	// CachedReader. Only response projections receive the geographic annotation.
 	reader = api.WithLocalBorders(reader, localBorders)
+	var pollingAdmin handlers.PollingAdminStore // nil answers 503
+	if resolvedPolling.Enabled && !resolved.ReadOnly {
+		pollingAdmin = maintStore
+	}
 	r := router.New(h, reader, []*ingest.Worker{broker1, broker2}, router.Options{
 		MaxConnsPerIP:        resolved.MaxConnsPerIP,
 		MaxConnectsPerMinute: resolved.MaxConnectsPerMinute,
@@ -585,7 +616,9 @@ func main() {
 			"/accounts": handlers.AccountsRouter(maintStore),
 			"/backup":   handlers.BackupRouter(backupOpts, ctx),
 			"/db":       handlers.DBAdminRouter(maintStore, pgSource),
+			"/polling":  handlers.PollingAdminRouter(pollingAdmin),
 		},
+		GuestPolling:  guestPolling,
 		Guards:        guard,
 		APIPlanLayout: string(layout),
 	})

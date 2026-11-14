@@ -467,6 +467,7 @@ type Querier interface {
 	ListPacketsWindowScoped(ctx context.Context, arg ListPacketsWindowScopedParams) ([]ListPacketsWindowScopedRow, error)
 	// Evidence: zero-hop adverts of the target this observer heard since $3, with missing signal (0/0) left out. mean_snr is 0 when n is 0.
 	ListPollingCandidates(ctx context.Context, arg ListPollingCandidatesParams) ([]ListPollingCandidatesRow, error)
+	ListPollingObservers(ctx context.Context) ([]PollingObserver, error)
 	// A target with only expired claims is still listed while it has assignment rows, so the caller can clear them.
 	ListPollingTargets(ctx context.Context, receivedAt pgtype.Timestamptz) ([][]byte, error)
 	// Every region with its members, for reconciling imported MeshMapper groups.
@@ -513,6 +514,7 @@ type Querier interface {
 	ObservationIDBelow(ctx context.Context, arg ObservationIDBelowParams) (int64, error)
 	OldestMissingRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
 	PacketSitesTotalBytes(ctx context.Context) (int64, error)
+	PollingElectionUnlock(ctx context.Context) error
 	PollingObserverFlags(ctx context.Context, observerPublicKey []byte) (PollingObserverFlagsRow, error)
 	PollingOwnerRows(ctx context.Context, arg PollingOwnerRowsParams) ([]PollingOwnerRowsRow, error)
 	PruneImportedRegions(ctx context.Context, keep []string) ([]string, error)
@@ -638,6 +640,7 @@ type Querier interface {
 	// Page keys straight from the observations, independent of packet_sites. floor_ts bounds the read: keys at or
 	// above it are exact, because a packet's newest requested-site hearing is unchanged by dropping older ones.
 	TruthPacketsBySitesPage(ctx context.Context, arg TruthPacketsBySitesPageParams) ([]TruthPacketsBySitesPageRow, error)
+	TryPollingElectionLock(ctx context.Context) (bool, error)
 	// ============================================================
 	// HOURLY ANALYTICS ROLLUPS
 	// An hour [H, H+1h) is eligible once now() >= H + 95 min (ingest clamps heard_at to ±30 min).

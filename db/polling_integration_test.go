@@ -6,6 +6,7 @@ package db
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"sort"
 	"testing"
 	"time"
@@ -479,4 +480,82 @@ func TestPollingDeleteExpiredAndFlagsPostgres(t *testing.T) {
 	if err != nil || !paused || pu == nil || !pu.Equal(until) || len(ex) != 1 || !bytes.Equal(ex[0], pollKey(5)) {
 		t.Fatal(paused, pu, ex, err)
 	}
+}
+
+func TestCorroborateReadingsNewestFirstPostgres(t *testing.T) {
+	ctx, pool, s := pollStore(t)
+	o1, o2 := pollKey(1), pollKey(2)
+	id1, id2 := pollObserver(t, ctx, s, o1), pollObserver(t, ctx, s, o2)
+	now := time.Now().UTC().Truncate(time.Second)
+	hash := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	if _, err := pool.Exec(ctx, `INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,first_heard_at,last_heard_at)
+VALUES ($1,1,0,1,'\x00','\x00',$2,$2)`, hash, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO packet_observations(packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count)
+VALUES ($1,$2,'YVR',$3,0,1,0)`, hash, id2, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, tgt := range []byte{0xA, 0xB} { // older first, so the newer reading has the larger id
+		r := pollReading(o1, tgt, "status", now, nil)
+		r.PacketHash = hash
+		if _, err := s.InsertRepeaterReading(ctx, r, id1, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, err := s.CorroborateReadings(ctx, now.Add(-time.Hour), 1); err != nil || n != 1 {
+		t.Fatal(n, err)
+	}
+	var older, newer *int16
+	if err := pool.QueryRow(ctx, `SELECT (SELECT corroborated FROM repeater_readings ORDER BY id LIMIT 1),
+(SELECT corroborated FROM repeater_readings ORDER BY id DESC LIMIT 1)`).Scan(&older, &newer); err != nil {
+		t.Fatal(err)
+	}
+	if newer == nil || older != nil {
+		t.Fatal("limit 1 should update the newer reading", older, newer)
+	}
+}
+
+func TestListPollingObserversPostgres(t *testing.T) {
+	ctx, _, s := pollStore(t)
+	if got, err := s.ListPollingObservers(ctx); err != nil || len(got) != 0 {
+		t.Fatal(got, err)
+	}
+	if err := s.SetPollingObserver(ctx, pollKey(2), true, false, "noisy"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPollingObserver(ctx, pollKey(1), false, true, ""); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ListPollingObservers(ctx)
+	if err != nil || len(got) != 2 {
+		t.Fatal(got, err)
+	}
+	if got[0].PublicKey != hex.EncodeToString(pollKey(1)) || !got[0].Approved || got[0].Blocked {
+		t.Fatal("first row wrong", got[0])
+	}
+	if got[1].PublicKey != hex.EncodeToString(pollKey(2)) || !got[1].Blocked || got[1].Note != "noisy" {
+		t.Fatal("second row wrong", got[1])
+	}
+}
+
+func TestPollingElectionLockPostgres(t *testing.T) {
+	ctx, pool, _ := pollStore(t)
+	s := New(pool, pool, 0, 0)
+	l, ok, err := s.BeginPollingElection(ctx)
+	if err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if other, ok, err := s.BeginPollingElection(ctx); err != nil || ok {
+		if other != nil {
+			other.Close(ctx)
+		}
+		t.Fatal("second lock should be refused", ok, err)
+	}
+	l.Close(ctx)
+	l2, ok, err := s.BeginPollingElection(ctx)
+	if err != nil || !ok {
+		t.Fatal("lock not released", ok, err)
+	}
+	l2.Close(ctx)
 }

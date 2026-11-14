@@ -5,6 +5,7 @@ package db
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,10 +13,12 @@ import (
 	"unicode/utf8"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/polling"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ObserverID returns the observer's row id, creating the row when it is new.
@@ -248,4 +251,50 @@ func (s *Store) DeleteExpiredPolling(ctx context.Context, claimsBefore, readings
 		return err
 	}
 	return s.q.DeleteExpiredRepeaterReadings(ctx, ts(readingsBefore))
+}
+
+// ListPollingObservers returns every operator-set row, ordered by key.
+func (s *Store) ListPollingObservers(ctx context.Context) ([]api.PollingObserver, error) {
+	rows, err := s.q.ListPollingObservers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]api.PollingObserver, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, api.PollingObserver{PublicKey: hex.EncodeToString(r.ObserverPublicKey), Blocked: r.Blocked, Approved: r.Approved, Note: r.Note})
+	}
+	return out, nil
+}
+
+// PollingElectionLock holds the election advisory lock on one dedicated connection.
+type PollingElectionLock struct {
+	conn *pgxpool.Conn
+	q    *sqlc.Queries
+}
+
+// BeginPollingElection takes the election lock. ok is false when another process holds it.
+func (s *Store) BeginPollingElection(ctx context.Context) (*PollingElectionLock, bool, error) {
+	if s.pool == nil {
+		return nil, false, errors.New("polling: store has no connection pool")
+	}
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	q := sqlc.New(conn)
+	ok, err := q.TryPollingElectionLock(ctx)
+	if err != nil || !ok {
+		conn.Release()
+		return nil, false, err
+	}
+	return &PollingElectionLock{conn: conn, q: q}, true, nil
+}
+
+// Close releases the lock; if unlocking fails the connection is closed so the lock can't leak.
+func (l *PollingElectionLock) Close(ctx context.Context) {
+	if err := l.q.PollingElectionUnlock(ctx); err != nil {
+		_ = l.conn.Hijack().Close(context.Background())
+		return
+	}
+	l.conn.Release()
 }

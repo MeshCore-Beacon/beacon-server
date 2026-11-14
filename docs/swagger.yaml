@@ -1483,6 +1483,55 @@ definitions:
           SKIP or ERROR
         type: string
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.PollingAdminState:
+    properties:
+      excludedNodes:
+        items:
+          type: string
+        type: array
+      observers:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PollingObserver'
+        type: array
+      paused:
+        type: boolean
+      pausedUntil:
+        description: epoch ms; null when not set
+        type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.PollingObserver:
+    properties:
+      approved:
+        type: boolean
+      blocked:
+        type: boolean
+      note:
+        type: string
+      publicKey:
+        description: 64 lowercase hex
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.PollingObserverRequest:
+    properties:
+      approved:
+        type: boolean
+      blocked:
+        type: boolean
+      note:
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.PollingStateRequest:
+    properties:
+      excludedNodes:
+        items:
+          type: string
+        type: array
+      paused:
+        type: boolean
+      pausedUntil:
+        description: epoch ms in the future, or null
+        type: integer
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.RadioPreset:
     properties:
       count:
@@ -2492,6 +2541,156 @@ paths:
       security:
       - AdminKey: []
       summary: Statement statistics by sqlc name
+      tags:
+      - Admin
+  /admin/polling:
+    get:
+      description: Pause state, excluded repeaters and every observer the operator
+        has blocked or approved.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PollingAdminState'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - AdminKey: []
+      summary: Get the repeater polling settings
+      tags:
+      - Admin
+  /admin/polling/observers/{publicKey}:
+    put:
+      consumes:
+      - application/json
+      description: Replaces the observer's flags. The key is 64 hex characters in
+        either case; the note is at most 200 characters. Body at most 4 KiB.
+      parameters:
+      - description: Observer public key, 64 hex characters
+        in: path
+        name: publicKey
+        required: true
+        type: string
+      - description: New flags
+        in: body
+        name: observer
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PollingObserverRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PollingObserver'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "415":
+          description: Unsupported Media Type
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - AdminKey: []
+      summary: Block or approve a polling observer
+      tags:
+      - Admin
+  /admin/polling/state:
+    put:
+      consumes:
+      - application/json
+      description: Replaces the whole state. At most 16 excluded repeaters, each 64
+        hex characters; pausedUntil is epoch ms in the future or null. Body at most
+        4 KiB.
+      parameters:
+      - description: New state
+        in: body
+        name: state
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PollingStateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PollingAdminState'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "415":
+          description: Unsupported Media Type
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - AdminKey: []
+      summary: Replace the polling pause and exclusions
       tags:
       - Admin
   /brokers:

@@ -95,6 +95,15 @@ ORDER BY c.target_public_key;
 -- name: PollingObserverFlags :one
 SELECT blocked, approved FROM polling_observers WHERE observer_public_key = $1;
 
+-- name: ListPollingObservers :many
+SELECT observer_public_key, blocked, approved, note FROM polling_observers ORDER BY observer_public_key;
+
+-- name: TryPollingElectionLock :one
+SELECT pg_try_advisory_lock(25189, 2);
+
+-- name: PollingElectionUnlock :exec
+SELECT pg_advisory_unlock(25189, 2);
+
 -- name: SetPollingObserver :exec
 INSERT INTO polling_observers (observer_public_key, blocked, approved, note) VALUES ($1, $2, $3, $4)
 ON CONFLICT (observer_public_key) DO UPDATE SET blocked = EXCLUDED.blocked, approved = EXCLUDED.approved, note = EXCLUDED.note;
@@ -112,7 +121,7 @@ UPDATE polling_state SET paused = $1, paused_until = $2, excluded_nodes = $3 WHE
 WITH todo AS (
     SELECT x.id, x.packet_hash, x.observer_id, x.sampled_at FROM repeater_readings x
     WHERE x.packet_hash IS NOT NULL AND x.received_at >= $1
-    ORDER BY x.id LIMIT $2
+    ORDER BY x.id DESC LIMIT $2
 )
 UPDATE repeater_readings r SET corroborated = (
     SELECT count(DISTINCT po.observer_id) FROM packet_observations po

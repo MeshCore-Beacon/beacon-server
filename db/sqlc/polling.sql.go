@@ -16,7 +16,7 @@ const corroborateReadings = `-- name: CorroborateReadings :execrows
 WITH todo AS (
     SELECT x.id, x.packet_hash, x.observer_id, x.sampled_at FROM repeater_readings x
     WHERE x.packet_hash IS NOT NULL AND x.received_at >= $1
-    ORDER BY x.id LIMIT $2
+    ORDER BY x.id DESC LIMIT $2
 )
 UPDATE repeater_readings r SET corroborated = (
     SELECT count(DISTINCT po.observer_id) FROM packet_observations po
@@ -354,6 +354,35 @@ func (q *Queries) ListPollingCandidates(ctx context.Context, arg ListPollingCand
 	return items, nil
 }
 
+const listPollingObservers = `-- name: ListPollingObservers :many
+SELECT observer_public_key, blocked, approved, note FROM polling_observers ORDER BY observer_public_key
+`
+
+func (q *Queries) ListPollingObservers(ctx context.Context) ([]PollingObserver, error) {
+	rows, err := q.db.Query(ctx, listPollingObservers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PollingObserver{}
+	for rows.Next() {
+		var i PollingObserver
+		if err := rows.Scan(
+			&i.ObserverPublicKey,
+			&i.Blocked,
+			&i.Approved,
+			&i.Note,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPollingTargets = `-- name: ListPollingTargets :many
 SELECT target_public_key::bytea AS target_public_key FROM (
     SELECT c.target_public_key FROM polling_candidates c
@@ -384,6 +413,15 @@ func (q *Queries) ListPollingTargets(ctx context.Context, receivedAt pgtype.Time
 		return nil, err
 	}
 	return items, nil
+}
+
+const pollingElectionUnlock = `-- name: PollingElectionUnlock :exec
+SELECT pg_advisory_unlock(25189, 2)
+`
+
+func (q *Queries) PollingElectionUnlock(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, pollingElectionUnlock)
+	return err
 }
 
 const pollingObserverFlags = `-- name: PollingObserverFlags :one
@@ -479,6 +517,17 @@ type SetPollingStateParams struct {
 func (q *Queries) SetPollingState(ctx context.Context, arg SetPollingStateParams) error {
 	_, err := q.db.Exec(ctx, setPollingState, arg.Paused, arg.PausedUntil, arg.ExcludedNodes)
 	return err
+}
+
+const tryPollingElectionLock = `-- name: TryPollingElectionLock :one
+SELECT pg_try_advisory_lock(25189, 2)
+`
+
+func (q *Queries) TryPollingElectionLock(ctx context.Context) (bool, error) {
+	row := q.db.QueryRow(ctx, tryPollingElectionLock)
+	var pg_try_advisory_lock bool
+	err := row.Scan(&pg_try_advisory_lock)
+	return pg_try_advisory_lock, err
 }
 
 const upsertPollingClaim = `-- name: UpsertPollingClaim :execrows

@@ -2732,6 +2732,21 @@ func (mr *MockQuerierMockRecorder) ListPollingCandidates(ctx, arg any) *gomock.C
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPollingCandidates", reflect.TypeOf((*MockQuerier)(nil).ListPollingCandidates), ctx, arg)
 }
 
+// ListPollingObservers mocks base method.
+func (m *MockQuerier) ListPollingObservers(ctx context.Context) ([]db.PollingObserver, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListPollingObservers", ctx)
+	ret0, _ := ret[0].([]db.PollingObserver)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListPollingObservers indicates an expected call of ListPollingObservers.
+func (mr *MockQuerierMockRecorder) ListPollingObservers(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPollingObservers", reflect.TypeOf((*MockQuerier)(nil).ListPollingObservers), ctx)
+}
+
 // ListPollingTargets mocks base method.
 func (m *MockQuerier) ListPollingTargets(ctx context.Context, receivedAt pgtype.Timestamptz) ([][]byte, error) {
 	m.ctrl.T.Helper()
@@ -3044,6 +3059,20 @@ func (m *MockQuerier) PacketSitesTotalBytes(ctx context.Context) (int64, error) 
 func (mr *MockQuerierMockRecorder) PacketSitesTotalBytes(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PacketSitesTotalBytes", reflect.TypeOf((*MockQuerier)(nil).PacketSitesTotalBytes), ctx)
+}
+
+// PollingElectionUnlock mocks base method.
+func (m *MockQuerier) PollingElectionUnlock(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PollingElectionUnlock", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// PollingElectionUnlock indicates an expected call of PollingElectionUnlock.
+func (mr *MockQuerierMockRecorder) PollingElectionUnlock(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PollingElectionUnlock", reflect.TypeOf((*MockQuerier)(nil).PollingElectionUnlock), ctx)
 }
 
 // PollingObserverFlags mocks base method.
@@ -3879,6 +3908,21 @@ func (m *MockQuerier) TruthPacketsBySitesPage(ctx context.Context, arg db.TruthP
 func (mr *MockQuerierMockRecorder) TruthPacketsBySitesPage(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TruthPacketsBySitesPage", reflect.TypeOf((*MockQuerier)(nil).TruthPacketsBySitesPage), ctx, arg)
+}
+
+// TryPollingElectionLock mocks base method.
+func (m *MockQuerier) TryPollingElectionLock(ctx context.Context) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TryPollingElectionLock", ctx)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// TryPollingElectionLock indicates an expected call of TryPollingElectionLock.
+func (mr *MockQuerierMockRecorder) TryPollingElectionLock(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TryPollingElectionLock", reflect.TypeOf((*MockQuerier)(nil).TryPollingElectionLock), ctx)
 }
 
 // TryRollupLock mocks base method.
