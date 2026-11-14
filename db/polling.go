@@ -112,7 +112,8 @@ func (s *Store) InsertRepeaterReading(ctx context.Context, r polling.Reading, ob
 	i32 := func(v int) int32 { return int32(v) }
 	f32 := func(v float64) float32 { return float32(v) }
 	n, err := s.q.InsertRepeaterReading(ctx, sqlc.InsertRepeaterReadingParams{
-		TargetPublicKey: r.Target, ObserverID: observerID, SampledAt: ts(r.SampledAt), ReceivedAt: ts(receivedAt),
+		TargetPublicKey: r.Target, ObserverPublicKey: r.Observer, ObserverID: pgtype.UUID{Bytes: observerID, Valid: true},
+		SampledAt: ts(r.SampledAt), ReceivedAt: ts(receivedAt),
 		Method: r.Method, Tag: tag,
 		BatteryMv: ptrConv(r.BatteryMV, i32), TemperatureC: ptrConv(r.TemperatureC, f32), PollSnr: ptrConv(r.PollSNR, f32),
 		UptimeSecs: st.UptimeSecs, PacketsRecv: st.PacketsRecv, PacketsSent: st.PacketsSent,

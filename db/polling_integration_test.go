@@ -173,22 +173,58 @@ func TestRepeaterReadingWithoutTagUsesSampledAtPostgres(t *testing.T) {
 	if _, err := s.InsertRepeaterReading(ctx, pollReading(o, 0xA, "status", at, nil), id, at); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO nodes (public_key, node_type) VALUES ($1, 2)`, pollKey(0xB)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.InsertRepeaterReading(ctx, pollReading(o, 0xB, "status", at, nil), id, at); err != nil {
-		t.Fatal(err)
-	}
 	var tag int64
-	var nodeA, nodeB *uuid.UUID
-	if err := pool.QueryRow(ctx, `SELECT tag, node_id FROM repeater_readings WHERE target_public_key = $1`, pollKey(0xA)).Scan(&tag, &nodeA); err != nil {
+	var obs []byte
+	if err := pool.QueryRow(ctx, `SELECT tag, observer_public_key FROM repeater_readings WHERE target_public_key = $1`, pollKey(0xA)).Scan(&tag, &obs); err != nil {
 		t.Fatal(err)
 	}
-	if tag != at.Unix() || nodeA != nil {
-		t.Fatal(tag, nodeA)
+	if tag != at.Unix() || !bytes.Equal(obs, o) {
+		t.Fatal(tag, obs)
 	}
-	if err := pool.QueryRow(ctx, `SELECT node_id FROM repeater_readings WHERE target_public_key = $1`, pollKey(0xB)).Scan(&nodeB); err != nil || nodeB == nil {
-		t.Fatal("node_id not linked", nodeB, err)
+}
+
+func TestRepeaterReadingOutlivesObserverPostgres(t *testing.T) {
+	ctx, pool, s := pollStore(t)
+	o1, o2 := pollKey(1), pollKey(2)
+	id1, id2 := pollObserver(t, ctx, s, o1), pollObserver(t, ctx, s, o2)
+	now := time.Now().UTC().Truncate(time.Second)
+	hash := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	if _, err := pool.Exec(ctx, `INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,first_heard_at,last_heard_at)
+VALUES ($1,1,0,1,'\x00','\x00',$2,$2)`, hash, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO packet_observations(packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count)
+VALUES ($1,$2,'YVR',$3,0,1,0)`, hash, id2, now); err != nil {
+		t.Fatal(err)
+	}
+	r := pollReading(o1, 0xA, "status", now, nil)
+	r.PacketHash = hash
+	if _, err := s.InsertRepeaterReading(ctx, r, id1, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM observers WHERE id = $1`, id1); err != nil {
+		t.Fatal(err)
+	}
+	var obs []byte
+	var oid *uuid.UUID
+	if err := pool.QueryRow(ctx, `SELECT observer_public_key, observer_id FROM repeater_readings`).Scan(&obs, &oid); err != nil {
+		t.Fatal("reading gone with its observer", err)
+	}
+	if !bytes.Equal(obs, o1) || oid != nil {
+		t.Fatal(obs, oid)
+	}
+	// The same tag again from the same key is still a duplicate.
+	id1b := pollObserver(t, ctx, s, o1)
+	if ok, err := s.InsertRepeaterReading(ctx, r, id1b, now); err != nil || ok {
+		t.Fatal("duplicate after observer re-created", ok, err)
+	}
+	// With no observer id to exclude, every observer that heard the reply counts.
+	if n, err := s.CorroborateReadings(ctx, now.Add(-time.Hour), 100); err != nil || n != 1 {
+		t.Fatal(n, err)
+	}
+	var c *int16
+	if err := pool.QueryRow(ctx, `SELECT corroborated FROM repeater_readings`).Scan(&c); err != nil || c == nil || *c != 1 {
+		t.Fatal(c, err)
 	}
 }
 
@@ -558,4 +594,14 @@ func TestPollingElectionLockPostgres(t *testing.T) {
 		t.Fatal("lock not released", ok, err)
 	}
 	l2.Close(ctx)
+}
+
+func TestPollingObserverIndexesPostgres(t *testing.T) {
+	ctx, pool, _ := pollStore(t)
+	for _, name := range []string{"idx_polling_claims_observer", "idx_repeater_readings_observer"} {
+		var ok bool
+		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = $1)`, name).Scan(&ok); err != nil || !ok {
+			t.Fatal(name, ok, err)
+		}
+	}
 }

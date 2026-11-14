@@ -28,7 +28,6 @@ type fakeClaim struct {
 type fakeReading struct {
 	target, observer string
 	sampled          time.Time
-	hasNodeRow       bool
 }
 
 type fakeStore struct {
@@ -438,7 +437,7 @@ func TestHandleReadingMultipleCallsObserverIDOnce(t *testing.T) {
 }
 
 func TestHandleReadingTargetWithoutNodeRow(t *testing.T) {
-	// The store keeps node_id NULL when the repeater is not in nodes; the service must still accept it.
+	// Readings are keyed by public key, so a repeater with no node row is still accepted.
 	s, st, _ := newSvc(t, true)
 	o, x := k32(1), k32(0xee)
 	ctx := context.Background()

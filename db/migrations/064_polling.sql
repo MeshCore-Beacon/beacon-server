@@ -15,6 +15,7 @@ CREATE TABLE polling_claims (
     claimed_at timestamp with time zone NOT NULL,
     received_at timestamp with time zone NOT NULL
 );
+CREATE INDEX idx_polling_claims_observer ON polling_claims USING btree (observer_id);
 
 CREATE TABLE polling_candidates (
     observer_public_key bytea NOT NULL REFERENCES polling_claims(observer_public_key) ON DELETE CASCADE,
@@ -45,8 +46,9 @@ CREATE UNIQUE INDEX idx_polling_assignments_poller ON polling_assignments USING 
 CREATE TABLE repeater_readings (
     id bigserial PRIMARY KEY,
     target_public_key bytea NOT NULL,
-    node_id uuid REFERENCES nodes(id) ON DELETE SET NULL,
-    observer_id uuid NOT NULL REFERENCES observers(id) ON DELETE CASCADE,
+    -- The key is the observer's identity; the row id goes NULL if the observer row is deleted, keeping the history.
+    observer_public_key bytea NOT NULL CHECK (octet_length(observer_public_key) = 32),
+    observer_id uuid REFERENCES observers(id) ON DELETE SET NULL,
     sampled_at timestamp with time zone NOT NULL,
     received_at timestamp with time zone NOT NULL,
     method text NOT NULL,
@@ -75,10 +77,11 @@ CREATE TABLE repeater_readings (
     packet_hash bytea,
     corroborated smallint,
     client text NOT NULL DEFAULT '',
-    UNIQUE (target_public_key, observer_id, tag, method)
+    UNIQUE (target_public_key, observer_public_key, tag, method)
 );
 CREATE INDEX idx_repeater_readings_target ON repeater_readings USING btree (target_public_key, sampled_at DESC);
 CREATE INDEX idx_repeater_readings_received_brin ON repeater_readings USING brin (received_at);
+CREATE INDEX idx_repeater_readings_observer ON repeater_readings USING btree (observer_id) WHERE observer_id IS NOT NULL;
 
 CREATE TABLE polling_observers (
     observer_public_key bytea PRIMARY KEY,

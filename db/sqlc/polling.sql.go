@@ -21,7 +21,7 @@ WITH todo AS (
 UPDATE repeater_readings r SET corroborated = (
     SELECT count(DISTINCT po.observer_id) FROM packet_observations po
     JOIN packets p ON p.packet_hash = po.packet_hash
-    WHERE po.packet_hash = t.packet_hash AND po.observer_id <> t.observer_id
+    WHERE po.packet_hash = t.packet_hash AND po.observer_id IS DISTINCT FROM t.observer_id
       AND p.payload_type IN (1, 8)
       AND po.heard_at BETWEEN t.sampled_at - interval '10 minutes' AND t.sampled_at + interval '10 minutes'
 )::smallint
@@ -36,6 +36,7 @@ type CorroborateReadingsParams struct {
 // Recomputed each pass. Counts other observers that heard a RESPONSE (1) or PATH (8) packet with the reading's
 // 8-byte hash within 10 minutes of sampled_at. packets and packet_observations keep no source hash, so the
 // sender is not checked; packet_observations.payload_type is not always filled, so the type comes from packets.
+// A reading whose observer row was deleted counts every observer.
 func (q *Queries) CorroborateReadings(ctx context.Context, arg CorroborateReadingsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, corroborateReadings, arg.ReceivedAt, arg.Limit)
 	if err != nil {
@@ -203,58 +204,60 @@ func (q *Queries) InsertPollingCandidate(ctx context.Context, arg InsertPollingC
 
 const insertRepeaterReading = `-- name: InsertRepeaterReading :execrows
 INSERT INTO repeater_readings (
-    target_public_key, node_id, observer_id, sampled_at, received_at, method, tag,
+    target_public_key, observer_public_key, observer_id, sampled_at, received_at, method, tag,
     battery_mv, temperature_c, poll_snr,
     uptime_secs, packets_recv, packets_sent, recv_flood, recv_direct, sent_flood, sent_direct,
     tx_air_secs, rx_air_secs, recv_errors, noise_floor, last_rssi, tx_queue, flood_dups, direct_dups, err_events, last_snr,
     lpp, packet_hash, client)
 VALUES (
-    $1, (SELECT n.id FROM nodes n WHERE n.public_key = $1),
-    $2, $3, $4, $5, $6,
-    $7, $8, $9,
-    $10, $11, $12, $13, $14,
-    $15, $16, $17, $18, $19,
-    $20, $21, $22, $23, $24,
-    $25, $26,
-    $27, $28, $29)
-ON CONFLICT (target_public_key, observer_id, tag, method) DO NOTHING
+    $1, $2,
+    $3, $4, $5, $6, $7,
+    $8, $9, $10,
+    $11, $12, $13, $14, $15,
+    $16, $17, $18, $19, $20,
+    $21, $22, $23, $24, $25,
+    $26, $27,
+    $28, $29, $30)
+ON CONFLICT (target_public_key, observer_public_key, tag, method) DO NOTHING
 `
 
 type InsertRepeaterReadingParams struct {
-	TargetPublicKey []byte             `json:"target_public_key"`
-	ObserverID      uuid.UUID          `json:"observer_id"`
-	SampledAt       pgtype.Timestamptz `json:"sampled_at"`
-	ReceivedAt      pgtype.Timestamptz `json:"received_at"`
-	Method          string             `json:"method"`
-	Tag             int64              `json:"tag"`
-	BatteryMv       *int32             `json:"battery_mv"`
-	TemperatureC    *float32           `json:"temperature_c"`
-	PollSnr         *float32           `json:"poll_snr"`
-	UptimeSecs      *int64             `json:"uptime_secs"`
-	PacketsRecv     *int64             `json:"packets_recv"`
-	PacketsSent     *int64             `json:"packets_sent"`
-	RecvFlood       *int64             `json:"recv_flood"`
-	RecvDirect      *int64             `json:"recv_direct"`
-	SentFlood       *int64             `json:"sent_flood"`
-	SentDirect      *int64             `json:"sent_direct"`
-	TxAirSecs       *int64             `json:"tx_air_secs"`
-	RxAirSecs       *int64             `json:"rx_air_secs"`
-	RecvErrors      *int64             `json:"recv_errors"`
-	NoiseFloor      *int32             `json:"noise_floor"`
-	LastRssi        *int32             `json:"last_rssi"`
-	TxQueue         *int32             `json:"tx_queue"`
-	FloodDups       *int32             `json:"flood_dups"`
-	DirectDups      *int32             `json:"direct_dups"`
-	ErrEvents       *int32             `json:"err_events"`
-	LastSnr         *float32           `json:"last_snr"`
-	Lpp             []byte             `json:"lpp"`
-	PacketHash      []byte             `json:"packet_hash"`
-	Client          string             `json:"client"`
+	TargetPublicKey   []byte             `json:"target_public_key"`
+	ObserverPublicKey []byte             `json:"observer_public_key"`
+	ObserverID        pgtype.UUID        `json:"observer_id"`
+	SampledAt         pgtype.Timestamptz `json:"sampled_at"`
+	ReceivedAt        pgtype.Timestamptz `json:"received_at"`
+	Method            string             `json:"method"`
+	Tag               int64              `json:"tag"`
+	BatteryMv         *int32             `json:"battery_mv"`
+	TemperatureC      *float32           `json:"temperature_c"`
+	PollSnr           *float32           `json:"poll_snr"`
+	UptimeSecs        *int64             `json:"uptime_secs"`
+	PacketsRecv       *int64             `json:"packets_recv"`
+	PacketsSent       *int64             `json:"packets_sent"`
+	RecvFlood         *int64             `json:"recv_flood"`
+	RecvDirect        *int64             `json:"recv_direct"`
+	SentFlood         *int64             `json:"sent_flood"`
+	SentDirect        *int64             `json:"sent_direct"`
+	TxAirSecs         *int64             `json:"tx_air_secs"`
+	RxAirSecs         *int64             `json:"rx_air_secs"`
+	RecvErrors        *int64             `json:"recv_errors"`
+	NoiseFloor        *int32             `json:"noise_floor"`
+	LastRssi          *int32             `json:"last_rssi"`
+	TxQueue           *int32             `json:"tx_queue"`
+	FloodDups         *int32             `json:"flood_dups"`
+	DirectDups        *int32             `json:"direct_dups"`
+	ErrEvents         *int32             `json:"err_events"`
+	LastSnr           *float32           `json:"last_snr"`
+	Lpp               []byte             `json:"lpp"`
+	PacketHash        []byte             `json:"packet_hash"`
+	Client            string             `json:"client"`
 }
 
 func (q *Queries) InsertRepeaterReading(ctx context.Context, arg InsertRepeaterReadingParams) (int64, error) {
 	result, err := q.db.Exec(ctx, insertRepeaterReading,
 		arg.TargetPublicKey,
+		arg.ObserverPublicKey,
 		arg.ObserverID,
 		arg.SampledAt,
 		arg.ReceivedAt,
