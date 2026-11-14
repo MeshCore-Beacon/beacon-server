@@ -43,6 +43,7 @@ type fakeStore struct {
 	stateErr    error
 	flagsErr    error
 	recvErr     error
+	ownersErr   error
 	claimCalls  int
 	electCalls  map[string]int // target hex -> ReplacePollingAssignments calls
 	idCalls     int
@@ -196,6 +197,9 @@ func (f *fakeStore) ElectPollingTarget(_ context.Context, target []byte, after, 
 func (f *fakeStore) PollingOwnerRows(_ context.Context, obs []byte, after time.Time) ([]OwnerRow, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.ownersErr != nil {
+		return nil, f.ownersErr
+	}
 	c := f.claims[hx(obs)]
 	if c == nil || !c.recv.After(after) {
 		return nil, nil
@@ -265,6 +269,24 @@ func newSvc(t *testing.T, enabled bool) (*Service, *fakeStore, *clock) {
 }
 
 func k32(b byte) []byte { return bytes.Repeat([]byte{b}, 32) }
+
+func mustOwners(t *testing.T, s *Service, c Caller) OwnersAnswer {
+	t.Helper()
+	a, err := s.Owners(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a
+}
+
+func mustPolicy(t *testing.T, s *Service, c Caller) Policy {
+	t.Helper()
+	p, err := s.Policy(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
 
 func claimJSON(obs []byte, ts time.Time, targets ...[]byte) []byte {
 	nodes := []map[string]any{}
@@ -393,12 +415,12 @@ func TestHandleReadingDuplicate(t *testing.T) {
 	s.HandleClaim(ctx, hx(o), claimJSON(o, t0, x))
 	at := t0.Add(-10 * time.Minute)
 	s.HandleReading(ctx, hx(o), readingJSON(o, x, at))
-	first := s.Owners(ctx, Caller{Observer: o}).Nodes[hx(x)].LatestTS
+	first := mustOwners(t, s, Caller{Observer: o}).Nodes[hx(x)].LatestTS
 	s.HandleReading(ctx, hx(o), readingJSON(o, x, at))
 	if st.readingCount() != 1 {
 		t.Fatalf("rows = %d", st.readingCount())
 	}
-	second := s.Owners(ctx, Caller{Observer: o}).Nodes[hx(x)].LatestTS
+	second := mustOwners(t, s, Caller{Observer: o}).Nodes[hx(x)].LatestTS
 	if first == nil || second == nil || *first != *second {
 		t.Fatalf("latest ts changed: %v %v", first, second)
 	}
@@ -489,7 +511,7 @@ func TestHandleReadingTargetWithoutNodeRow(t *testing.T) {
 func TestOwnersUnknownObserver(t *testing.T) {
 	s, _, _ := newSvc(t, true)
 	for _, c := range []Caller{{}, {Observer: k32(9)}} {
-		a := s.Owners(context.Background(), c)
+		a := mustOwners(t, s, c)
 		if a.Nodes == nil || len(a.Nodes) != 0 {
 			t.Fatalf("nodes = %v", a.Nodes)
 		}
@@ -505,7 +527,7 @@ func TestOwnersBlockedObserver(t *testing.T) {
 	ctx := context.Background()
 	s.HandleClaim(ctx, hx(o), claimJSON(o, t0, x))
 	st.blocked[hx(o)] = true
-	a := s.Owners(ctx, Caller{Observer: o})
+	a := mustOwners(t, s, Caller{Observer: o})
 	if !a.Policy.ObserverBlocked || a.Nodes == nil || len(a.Nodes) != 0 {
 		t.Fatalf("answer = %+v", a)
 	}
@@ -519,8 +541,8 @@ func TestOwnersReflectsElection(t *testing.T) {
 	st.evidence[hx(o2)] = 2
 	s.HandleClaim(ctx, hx(o2), claimJSON(o2, t0, x))
 	s.HandleClaim(ctx, hx(o1), claimJSON(o1, t0, x))
-	e1 := s.Owners(ctx, Caller{Observer: o1}).Nodes[hx(x)]
-	e2 := s.Owners(ctx, Caller{Observer: o2}).Nodes[hx(x)]
+	e1 := mustOwners(t, s, Caller{Observer: o1}).Nodes[hx(x)]
+	e2 := mustOwners(t, s, Caller{Observer: o2}).Nodes[hx(x)]
 	if e1.Role != "polling" || !e1.Mine {
 		t.Fatalf("o1 = %+v", e1)
 	}
@@ -533,7 +555,7 @@ func TestOwnersBeforeFirstElection(t *testing.T) {
 	s, st, _ := newSvc(t, true)
 	o, x := k32(1), k32(0xa)
 	st.claims[hx(o)] = &fakeClaim{ts: t0, recv: t0, nodes: map[string]ClaimNode{hx(x): {Target: x}}}
-	e := s.Owners(context.Background(), Caller{Observer: o}).Nodes[hx(x)]
+	e := mustOwners(t, s, Caller{Observer: o}).Nodes[hx(x)]
 	if e.Role != "polling" || !e.Mine {
 		t.Fatalf("entry = %+v", e)
 	}
@@ -547,13 +569,13 @@ func TestOwnersUnassignedCandidateIsLastStandby(t *testing.T) {
 	s.HandleClaim(ctx, hx(o2), claimJSON(o2, t0, x))
 	// A live claim the election has not placed yet, or left out (admin_stop, not_direct, blocked).
 	st.claims[hx(o3)] = &fakeClaim{ts: t0, recv: t0, nodes: map[string]ClaimNode{hx(x): {Target: x}}}
-	e := s.Owners(ctx, Caller{Observer: o3}).Nodes[hx(x)]
+	e := mustOwners(t, s, Caller{Observer: o3}).Nodes[hx(x)]
 	if e.Role != "standby" || e.Mine || e.StandbyRank != 2 {
 		t.Fatalf("entry = %+v", e)
 	}
 	polling := 0
 	for _, o := range [][]byte{o1, o2, o3} {
-		if e := s.Owners(ctx, Caller{Observer: o}).Nodes[hx(x)]; e.Role == "polling" && e.Mine {
+		if e := mustOwners(t, s, Caller{Observer: o}).Nodes[hx(x)]; e.Role == "polling" && e.Mine {
 			polling++
 		}
 	}
@@ -568,18 +590,37 @@ func TestOwnersExcludedTarget(t *testing.T) {
 	ctx := context.Background()
 	s.HandleClaim(ctx, hx(o), claimJSON(o, t0, x))
 	st.excluded = [][]byte{x}
-	e := s.Owners(ctx, Caller{Observer: o}).Nodes[hx(x)]
+	e := mustOwners(t, s, Caller{Observer: o}).Nodes[hx(x)]
 	if e.Role != "excluded" || !e.Excluded {
 		t.Fatalf("entry = %+v", e)
 	}
 }
 
-func TestOwnersStateErrorStillAnswers(t *testing.T) {
+func TestPolicyAndOwnersReturnStoreErrors(t *testing.T) {
+	o, x := k32(1), k32(0xa)
+	ctx := context.Background()
+	for name, set := range map[string]func(*fakeStore){
+		"state":  func(st *fakeStore) { st.stateErr = fmt.Errorf("db down") },
+		"flags":  func(st *fakeStore) { st.flagsErr = fmt.Errorf("db down") },
+		"owners": func(st *fakeStore) { st.ownersErr = fmt.Errorf("db down") },
+	} {
+		s, st, _ := newSvc(t, true)
+		s.HandleClaim(ctx, hx(o), claimJSON(o, t0, x))
+		set(st)
+		_, perr := s.Policy(ctx, Caller{Observer: o})
+		_, oerr := s.Owners(ctx, Caller{Observer: o})
+		if oerr == nil {
+			t.Errorf("%s: owners answered without an error", name)
+		}
+		if (perr == nil) != (name == "owners") {
+			t.Errorf("%s: policy err = %v", name, perr)
+		}
+	}
+	// Without an observer only the runtime state is read.
 	s, st, _ := newSvc(t, true)
-	st.stateErr = fmt.Errorf("db down")
-	a := s.Owners(context.Background(), Caller{Observer: k32(1)})
-	if a.Policy.Paused || a.Policy.ObserverBlocked || a.Nodes == nil {
-		t.Fatalf("answer = %+v", a)
+	st.flagsErr = fmt.Errorf("db down")
+	if _, err := s.Policy(ctx, Caller{}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -593,10 +634,10 @@ func TestServiceDisabled(t *testing.T) {
 		t.Fatal("disabled service stored data")
 	}
 	want := DisabledPolicy()
-	if got := s.Policy(ctx, Caller{Observer: o}); got.Version != want.Version || !got.Paused {
+	if got := mustPolicy(t, s, Caller{Observer: o}); got.Version != want.Version || !got.Paused {
 		t.Fatalf("policy = %+v", got)
 	}
-	a := s.Owners(ctx, Caller{Observer: o})
+	a := mustOwners(t, s, Caller{Observer: o})
 	if a.Nodes == nil || len(a.Nodes) != 0 || a.Policy.Version != want.Version {
 		t.Fatalf("owners = %+v", a)
 	}
@@ -660,11 +701,11 @@ func TestBlockedObserverReadingDropped(t *testing.T) {
 	s.HandleClaim(ctx, hx(good), claimJSON(good, t0, x))
 	s.HandleClaim(ctx, hx(bad), claimJSON(bad, t0, x))
 	s.HandleReading(ctx, hx(good), readingJSON(good, x, t0.Add(-time.Hour)))
-	before := s.Owners(ctx, Caller{Observer: good}).Nodes[hx(x)].LatestTS
+	before := mustOwners(t, s, Caller{Observer: good}).Nodes[hx(x)].LatestTS
 	st.blocked[hx(bad)] = true
 	ids := st.idCalls
 	s.HandleReading(ctx, hx(bad), readingJSON(bad, x, t0))
-	after := s.Owners(ctx, Caller{Observer: good}).Nodes[hx(x)].LatestTS
+	after := mustOwners(t, s, Caller{Observer: good}).Nodes[hx(x)].LatestTS
 	if st.readingCount() != 1 || st.idCalls != ids || before == nil || after == nil || *before != *after {
 		t.Fatalf("blocked reading was stored: rows=%d before=%v after=%v", st.readingCount(), before, after)
 	}

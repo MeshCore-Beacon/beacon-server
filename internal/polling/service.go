@@ -202,45 +202,43 @@ func (s *Service) HandleReading(ctx context.Context, topicPubkeyHex string, raw 
 	}
 }
 
-// policyFor builds the policy; a store error falls back to not paused and not blocked so the firmware always gets an answer.
-func (s *Service) policyFor(ctx context.Context, c Caller) Policy {
+// Policy answers the firmware's policy question. It returns an error when the runtime state or the caller's flags
+// cannot be read: the firmware keeps its saved policy on a non-200 answer, which is safer than a made-up one.
+func (s *Service) Policy(ctx context.Context, c Caller) (Policy, error) {
 	if !s.cfg.Enabled {
-		return DisabledPolicy()
+		return DisabledPolicy(), nil
 	}
-	var rt RuntimeState
 	paused, until, excluded, err := s.store.PollingState(ctx)
 	if err != nil {
 		s.log.Warn("polling state", "err", err)
-	} else {
-		rt = RuntimeState{Paused: paused, PausedUntil: until, Excluded: excluded}
+		return Policy{}, err
 	}
+	rt := RuntimeState{Paused: paused, PausedUntil: until, Excluded: excluded}
 	c.Blocked = false
 	if c.Observer != nil {
 		blocked, _, err := s.store.PollingObserverFlags(ctx, c.Observer)
 		if err != nil {
 			s.log.Warn("polling observer flags", "observer", short(c.Observer), "err", err)
-		} else {
-			c.Blocked = blocked
+			return Policy{}, err
 		}
+		c.Blocked = blocked
 	}
-	return BuildPolicy(s.cfg, rt, c, s.now())
-}
-
-// Policy answers the firmware's policy question.
-func (s *Service) Policy(ctx context.Context, c Caller) Policy {
-	return s.policyFor(ctx, c)
+	return BuildPolicy(s.cfg, rt, c, s.now()), nil
 }
 
 // Owners answers the firmware's owners question: the policy plus the caller's role for each claimed repeater.
-func (s *Service) Owners(ctx context.Context, c Caller) OwnersAnswer {
-	p := s.policyFor(ctx, c)
+func (s *Service) Owners(ctx context.Context, c Caller) (OwnersAnswer, error) {
+	p, err := s.Policy(ctx, c)
+	if err != nil {
+		return OwnersAnswer{}, err
+	}
 	if !s.cfg.Enabled || c.Observer == nil || p.ObserverBlocked {
-		return OwnersAnswer{Nodes: map[string]OwnerEntry{}, Policy: p}
+		return OwnersAnswer{Nodes: map[string]OwnerEntry{}, Policy: p}, nil
 	}
 	rows, err := s.store.PollingOwnerRows(ctx, c.Observer, s.now().Add(-ClaimTTL))
 	if err != nil {
 		s.log.Warn("polling owner rows", "observer", short(c.Observer), "err", err)
-		return OwnersAnswer{Nodes: map[string]OwnerEntry{}, Policy: p}
+		return OwnersAnswer{}, err
 	}
 	excluded := make(map[string]bool, len(p.ExcludedNodes))
 	for _, e := range p.ExcludedNodes {
@@ -253,7 +251,7 @@ func (s *Service) Owners(ctx context.Context, c Caller) OwnersAnswer {
 			rows[i].Rank = rows[i].Assigned
 		}
 	}
-	return BuildOwners(rows, p)
+	return BuildOwners(rows, p), nil
 }
 
 // ElectTarget recomputes the order of observers for one repeater. No candidates clears it.

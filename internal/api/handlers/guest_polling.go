@@ -21,10 +21,11 @@ const (
 	maxClientVersionLen = 23
 )
 
-// GuestPolling answers the observer firmware's policy and owners requests.
+// GuestPolling answers the observer firmware's policy and owners requests. An error means the state could not
+// be read.
 type GuestPolling interface {
-	Policy(ctx context.Context, c polling.Caller) polling.Policy
-	Owners(ctx context.Context, c polling.Caller) polling.OwnersAnswer
+	Policy(ctx context.Context, c polling.Caller) (polling.Policy, error)
+	Owners(ctx context.Context, c polling.Caller) (polling.OwnersAnswer, error)
 }
 
 // GuestPollingRouter serves /owners and /policy. A nil svc answers the disabled policy.
@@ -36,7 +37,12 @@ func GuestPollingRouter(svc GuestPolling) http.Handler {
 			writeFirmwareJSON(w, polling.DisabledPolicy())
 			return
 		}
-		writeFirmwareJSON(w, svc.Policy(r.Context(), c))
+		p, err := svc.Policy(r.Context(), c)
+		if err != nil {
+			firmwareUnavailable(w)
+			return
+		}
+		writeFirmwareJSON(w, p)
 	})
 	r.Get("/owners", func(w http.ResponseWriter, r *http.Request) {
 		c := callerFromQuery(r)
@@ -44,7 +50,12 @@ func GuestPollingRouter(svc GuestPolling) http.Handler {
 			writeFirmwareJSON(w, polling.OwnersAnswer{Nodes: map[string]polling.OwnerEntry{}, Policy: polling.DisabledPolicy()})
 			return
 		}
-		writeFirmwareJSON(w, svc.Owners(r.Context(), c))
+		a, err := svc.Owners(r.Context(), c)
+		if err != nil {
+			firmwareUnavailable(w)
+			return
+		}
+		writeFirmwareJSON(w, a)
 	})
 	return r
 }
@@ -80,6 +91,17 @@ func capString(s string, n int) string {
 
 // writeFirmwareJSON marshals first so Content-Length is exact and the body goes out in one write.
 func writeFirmwareJSON(w http.ResponseWriter, v any) {
+	writeFirmware(w, http.StatusOK, v)
+}
+
+// firmwareUnavailable answers 503: the firmware keeps its saved policy and roles on any non-200 but a 404.
+func firmwareUnavailable(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "60")
+	writeFirmware(w, http.StatusServiceUnavailable,
+		map[string]APIError{"error": {Code: "service_unavailable", Message: "polling state is unavailable"}})
+}
+
+func writeFirmware(w http.ResponseWriter, status int, v any) {
 	body, err := json.Marshal(v)
 	if err != nil {
 		slog.Error("api: failed to encode firmware response", "component", "api", "error", err)
@@ -90,6 +112,6 @@ func writeFirmwareJSON(w http.ResponseWriter, v any) {
 	h.Set("Content-Type", "application/json")
 	h.Set("Content-Length", strconv.Itoa(len(body)))
 	h.Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(status)
 	_, _ = w.Write(body)
 }

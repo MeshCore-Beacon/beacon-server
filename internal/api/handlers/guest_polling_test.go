@@ -7,9 +7,11 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -19,16 +21,17 @@ import (
 type fakeGuestPolling struct {
 	got    polling.Caller
 	policy polling.Policy
+	err    error
 }
 
-func (f *fakeGuestPolling) Policy(_ context.Context, c polling.Caller) polling.Policy {
+func (f *fakeGuestPolling) Policy(_ context.Context, c polling.Caller) (polling.Policy, error) {
 	f.got = c
-	return f.policy
+	return f.policy, f.err
 }
 
-func (f *fakeGuestPolling) Owners(_ context.Context, c polling.Caller) polling.OwnersAnswer {
+func (f *fakeGuestPolling) Owners(_ context.Context, c polling.Caller) (polling.OwnersAnswer, error) {
 	f.got = c
-	return polling.OwnersAnswer{Nodes: map[string]polling.OwnerEntry{}, Policy: f.policy}
+	return polling.OwnersAnswer{Nodes: map[string]polling.OwnerEntry{}, Policy: f.policy}, f.err
 }
 
 func guestGet(h http.Handler, target string) *httptest.ResponseRecorder {
@@ -101,6 +104,27 @@ func TestOwnersRouteNilService(t *testing.T) {
 	want, _ := json.Marshal(polling.OwnersAnswer{Nodes: map[string]polling.OwnerEntry{}, Policy: polling.DisabledPolicy()})
 	if rec.Code != 200 || rec.Body.String() != string(want) {
 		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestFirmwareRoutesStoreError(t *testing.T) {
+	svc := &fakeGuestPolling{policy: polling.DisabledPolicy(), err: errors.New("db down")}
+	for _, path := range []string{"/policy", "/owners", "/owners?observer=" + strings.Repeat("01", 32)} {
+		rec := guestGet(GuestPollingRouter(svc), path)
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("%s: got %d, want 503", path, rec.Code)
+		}
+		h := rec.Header()
+		if h.Get("Retry-After") != "60" || h.Get("Content-Length") != strconv.Itoa(rec.Body.Len()) || h.Get("Content-Type") != "application/json" {
+			t.Fatalf("%s: headers %v", path, h)
+		}
+		var body map[string]APIError
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body["error"].Code != "service_unavailable" {
+			t.Fatalf("%s: body %s", path, rec.Body)
+		}
+		if strings.Contains(rec.Body.String(), "paused") || strings.Contains(rec.Body.String(), "db down") {
+			t.Fatalf("%s: body leaks a policy or the error: %s", path, rec.Body)
+		}
 	}
 }
 
