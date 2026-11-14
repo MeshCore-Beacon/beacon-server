@@ -9,6 +9,9 @@ ON CONFLICT (observer_public_key) DO UPDATE SET
     claimed_at = EXCLUDED.claimed_at, received_at = EXCLUDED.received_at
 WHERE EXCLUDED.claimed_at > polling_claims.claimed_at;
 
+-- name: PollingClaimReceivedAt :one
+SELECT received_at FROM polling_claims WHERE observer_public_key = $1;
+
 -- name: DeletePollingCandidates :exec
 DELETE FROM polling_candidates WHERE observer_public_key = $1;
 
@@ -18,13 +21,14 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (observer_public_key, target_public_key) DO NOTHING;
 
 -- name: InsertRepeaterReading :execrows
+-- Inserts nothing when this observer stored a reading of the target by the same method received after recent_after.
 INSERT INTO repeater_readings (
     target_public_key, observer_public_key, observer_id, sampled_at, received_at, method, tag,
     battery_mv, temperature_c, poll_snr,
     uptime_secs, packets_recv, packets_sent, recv_flood, recv_direct, sent_flood, sent_direct,
     tx_air_secs, rx_air_secs, recv_errors, noise_floor, last_rssi, tx_queue, flood_dups, direct_dups, err_events, last_snr,
     lpp, packet_hash, client)
-VALUES (
+SELECT
     sqlc.arg(target_public_key), sqlc.arg(observer_public_key),
     sqlc.arg(observer_id), sqlc.arg(sampled_at), sqlc.arg(received_at), sqlc.arg(method), sqlc.arg(tag),
     sqlc.narg(battery_mv), sqlc.narg(temperature_c), sqlc.narg(poll_snr),
@@ -32,7 +36,12 @@ VALUES (
     sqlc.narg(sent_flood), sqlc.narg(sent_direct), sqlc.narg(tx_air_secs), sqlc.narg(rx_air_secs), sqlc.narg(recv_errors),
     sqlc.narg(noise_floor), sqlc.narg(last_rssi), sqlc.narg(tx_queue), sqlc.narg(flood_dups), sqlc.narg(direct_dups),
     sqlc.narg(err_events), sqlc.narg(last_snr),
-    sqlc.narg(lpp), sqlc.narg(packet_hash), sqlc.arg(client))
+    sqlc.narg(lpp), sqlc.narg(packet_hash), sqlc.arg(client)
+WHERE NOT EXISTS (
+    SELECT 1 FROM repeater_readings x
+    WHERE x.target_public_key = sqlc.arg(target_public_key) AND x.observer_public_key = sqlc.arg(observer_public_key)
+      AND x.method = sqlc.arg(method) AND x.received_at > sqlc.arg(recent_after)
+)
 ON CONFLICT (target_public_key, observer_public_key, tag, method) DO NOTHING;
 
 -- name: HasLivePollingCandidate :one

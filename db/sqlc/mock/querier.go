@@ -3075,6 +3075,21 @@ func (mr *MockQuerierMockRecorder) PacketSitesTotalBytes(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PacketSitesTotalBytes", reflect.TypeOf((*MockQuerier)(nil).PacketSitesTotalBytes), ctx)
 }
 
+// PollingClaimReceivedAt mocks base method.
+func (m *MockQuerier) PollingClaimReceivedAt(ctx context.Context, observerPublicKey []byte) (pgtype.Timestamptz, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PollingClaimReceivedAt", ctx, observerPublicKey)
+	ret0, _ := ret[0].(pgtype.Timestamptz)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PollingClaimReceivedAt indicates an expected call of PollingClaimReceivedAt.
+func (mr *MockQuerierMockRecorder) PollingClaimReceivedAt(ctx, observerPublicKey any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PollingClaimReceivedAt", reflect.TypeOf((*MockQuerier)(nil).PollingClaimReceivedAt), ctx, observerPublicKey)
+}
+
 // PollingElectionUnlock mocks base method.
 func (m *MockQuerier) PollingElectionUnlock(ctx context.Context) error {
 	m.ctrl.T.Helper()

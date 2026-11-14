@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -18,8 +19,8 @@ import (
 
 const (
 	maxClaimBytes = 16384
-	maxClaimNodes = 64
-	maxReadings   = 64
+	maxClaimNodes = 32 // firmware sends at most 8; the reference plugin can send more
+	maxReadings   = 8  // firmware sends exactly 1
 	maxLPPBytes   = 160
 	maxSlots      = 8
 )
@@ -80,7 +81,7 @@ type claimWire struct {
 	PolicyVersion   string          `json:"policy_version"`
 	Community       bool            `json:"community"`
 	AcceptsRequests bool            `json:"accepts_requests"`
-	RequestSlots    *int            `json:"request_slots"`
+	RequestSlots    wireInt         `json:"request_slots"`
 	Nodes           []claimNodeWire `json:"nodes"`
 }
 
@@ -91,7 +92,7 @@ type claimNodeWire struct {
 	SNR         *float32 `json:"snr"`
 	Requested   bool     `json:"requested"`
 	State       string   `json:"state"`
-	Misses      *int     `json:"misses"`
+	Misses      wireInt  `json:"misses"`
 	LastAttempt *string  `json:"last_attempt"`
 	LastOK      *string  `json:"last_ok"`
 }
@@ -105,7 +106,7 @@ type readingsWire struct {
 
 type readingWire struct {
 	NodeID       string     `json:"node_id"`
-	BatteryMV    *int       `json:"battery_mv"`
+	BatteryMV    wireInt    `json:"battery_mv"`
 	Method       string     `json:"method"`
 	SampledAt    string     `json:"sampled_at"`
 	SNR          *float64   `json:"snr"`
@@ -117,23 +118,59 @@ type readingWire struct {
 }
 
 type statsWire struct {
-	UptimeSecs  *int64   `json:"uptime_secs"`
-	NoiseFloor  *int     `json:"noise_floor"`
-	LastRSSI    *int     `json:"last_rssi"`
+	UptimeSecs  wireInt  `json:"uptime_secs"`
+	NoiseFloor  wireInt  `json:"noise_floor"`
+	LastRSSI    wireInt  `json:"last_rssi"`
 	LastSNR     *float64 `json:"last_snr"`
-	TxQueue     *int     `json:"tx_queue"`
-	PacketsRecv *int64   `json:"packets_recv"`
-	PacketsSent *int64   `json:"packets_sent"`
-	RecvFlood   *int64   `json:"recv_flood"`
-	RecvDirect  *int64   `json:"recv_direct"`
-	SentFlood   *int64   `json:"sent_flood"`
-	SentDirect  *int64   `json:"sent_direct"`
-	TxAirSecs   *int64   `json:"tx_air_secs"`
-	RxAirSecs   *int64   `json:"rx_air_secs"`
-	FloodDups   *int     `json:"flood_dups"`
-	DirectDups  *int     `json:"direct_dups"`
-	RecvErrors  *int64   `json:"recv_errors"`
-	ErrEvents   *int     `json:"err_events"`
+	TxQueue     wireInt  `json:"tx_queue"`
+	PacketsRecv wireInt  `json:"packets_recv"`
+	PacketsSent wireInt  `json:"packets_sent"`
+	RecvFlood   wireInt  `json:"recv_flood"`
+	RecvDirect  wireInt  `json:"recv_direct"`
+	SentFlood   wireInt  `json:"sent_flood"`
+	SentDirect  wireInt  `json:"sent_direct"`
+	TxAirSecs   wireInt  `json:"tx_air_secs"`
+	RxAirSecs   wireInt  `json:"rx_air_secs"`
+	FloodDups   wireInt  `json:"flood_dups"`
+	DirectDups  wireInt  `json:"direct_dups"`
+	RecvErrors  wireInt  `json:"recv_errors"`
+	ErrEvents   wireInt  `json:"err_events"`
+}
+
+// wireInt is an optional JSON integer. One outside int64 is absent rather than an error, so a
+// counter that overflowed on the device does not cost the whole message.
+type wireInt struct{ v *int64 }
+
+func (w *wireInt) UnmarshalJSON(b []byte) error {
+	if string(b) == "null" {
+		return nil
+	}
+	n, err := strconv.ParseInt(string(b), 10, 64)
+	if errors.Is(err, strconv.ErrRange) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("not an integer: %w", err)
+	}
+	w.v = &n
+	return nil
+}
+
+// i32 returns the value when it fits an integer column, nil otherwise.
+func (w wireInt) i32() *int {
+	if w.v == nil || *w.v < math.MinInt32 || *w.v > math.MaxInt32 {
+		return nil
+	}
+	n := int(*w.v)
+	return &n
+}
+
+// clamp bounds a present value to [lo, hi]; ok is false when it is absent.
+func (w wireInt) clamp(lo, hi int64) (int, bool) {
+	if w.v == nil {
+		return 0, false
+	}
+	return int(min(max(*w.v, lo), hi)), true
 }
 
 // cleanText drops NULs and invalid UTF-8, as the ingest package does for its strings.
@@ -217,9 +254,7 @@ func ParseClaim(raw []byte) (Claim, error) {
 		AcceptsRequests: w.AcceptsRequests,
 		Nodes:           make([]ClaimNode, 0, len(w.Nodes)),
 	}
-	if w.RequestSlots != nil {
-		c.RequestSlots = min(max(*w.RequestSlots, 0), maxSlots)
-	}
+	c.RequestSlots, _ = w.RequestSlots.clamp(0, maxSlots)
 	for _, nw := range w.Nodes {
 		n, err := parseClaimNode(nw)
 		if err != nil {
@@ -246,9 +281,7 @@ func parseClaimNode(nw claimNodeWire) (ClaimNode, error) {
 		}
 		n.ClaimedSNR = nw.SNR
 	}
-	if nw.Misses != nil {
-		n.Misses = min(max(*nw.Misses, 0), 255)
-	}
+	n.Misses, _ = nw.Misses.clamp(0, 255)
 	if n.LastAttempt, err = optTime("last_attempt", nw.LastAttempt); err != nil {
 		return ClaimNode{}, err
 	}
@@ -323,8 +356,8 @@ func parseReading(rw readingWire, ver int, obs []byte, client string) (Reading, 
 		}
 	}
 	// Zero means "no voltage" on the wire (v1 always sends the field).
-	if rw.BatteryMV != nil && *rw.BatteryMV > 0 && *rw.BatteryMV <= 65535 {
-		r.BatteryMV = rw.BatteryMV
+	if mv := rw.BatteryMV.i32(); mv != nil && *mv > 0 && *mv <= 65535 {
+		r.BatteryMV = mv
 	}
 	if t := finite(rw.TemperatureC); t != nil && *t >= lppTempMin/10 && *t <= lppTempMax/10 {
 		r.TemperatureC = t
@@ -353,11 +386,11 @@ func finite(f *float64) *float64 {
 
 func convertStats(s *statsWire) Stats {
 	return Stats{
-		UptimeSecs: s.UptimeSecs, PacketsRecv: s.PacketsRecv, PacketsSent: s.PacketsSent,
-		RecvFlood: s.RecvFlood, RecvDirect: s.RecvDirect, SentFlood: s.SentFlood,
-		SentDirect: s.SentDirect, TxAirSecs: s.TxAirSecs, RxAirSecs: s.RxAirSecs,
-		RecvErrors: s.RecvErrors, NoiseFloor: s.NoiseFloor, LastRSSI: s.LastRSSI,
-		TxQueue: s.TxQueue, FloodDups: s.FloodDups, DirectDups: s.DirectDups,
-		ErrEvents: s.ErrEvents, LastSNR: finite(s.LastSNR),
+		UptimeSecs: s.UptimeSecs.v, PacketsRecv: s.PacketsRecv.v, PacketsSent: s.PacketsSent.v,
+		RecvFlood: s.RecvFlood.v, RecvDirect: s.RecvDirect.v, SentFlood: s.SentFlood.v,
+		SentDirect: s.SentDirect.v, TxAirSecs: s.TxAirSecs.v, RxAirSecs: s.RxAirSecs.v,
+		RecvErrors: s.RecvErrors.v, NoiseFloor: s.NoiseFloor.i32(), LastRSSI: s.LastRSSI.i32(),
+		TxQueue: s.TxQueue.i32(), FloodDups: s.FloodDups.i32(), DirectDups: s.DirectDups.i32(),
+		ErrEvents: s.ErrEvents.i32(), LastSNR: finite(s.LastSNR),
 	}
 }

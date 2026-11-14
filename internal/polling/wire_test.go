@@ -129,11 +129,11 @@ func TestParseClaimRejects(t *testing.T) {
 	if _, err := ParseClaim(nodes(9)); err != nil {
 		t.Errorf("9 nodes should be accepted: %v", err)
 	}
-	if _, err := ParseClaim(nodes(64)); err != nil {
-		t.Errorf("64 nodes should be accepted: %v", err)
+	if _, err := ParseClaim(nodes(32)); err != nil {
+		t.Errorf("32 nodes should be accepted: %v", err)
 	}
-	if _, err := ParseClaim(nodes(65)); err == nil {
-		t.Error("65 nodes should be rejected")
+	if _, err := ParseClaim(nodes(33)); err == nil {
+		t.Error("33 nodes should be rejected")
 	}
 	big := append([]byte(good), bytes.Repeat([]byte(" "), 16384)...)
 	if _, err := ParseClaim(big); err == nil {
@@ -405,4 +405,58 @@ func TestParseClaimClampsMisses(t *testing.T) {
 		}
 		eq(t, "Misses for "+in, c.Nodes[0].Misses, want)
 	}
+}
+
+func TestParseReadingsCapsEntries(t *testing.T) {
+	obs := "000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F"
+	one := `{"node_id":"` + strings.Repeat("22", 32) + `","method":"status","sampled_at":"2023-11-14T22:13:20Z"}`
+	doc := func(n int) []byte {
+		return []byte(`{"v":2,"origin_id":"` + obs + `","readings":[` + strings.TrimSuffix(strings.Repeat(one+",", n), ",") + `]}`)
+	}
+	if _, err := ParseReadings(doc(8)); err != nil {
+		t.Errorf("8 readings should be accepted: %v", err)
+	}
+	if _, err := ParseReadings(doc(9)); err == nil {
+		t.Error("9 readings should be rejected")
+	}
+}
+
+func TestParseReadingOutOfRangeIntsAreAbsent(t *testing.T) {
+	const (
+		i32Over  = "2147483648"
+		i32Under = "-2147483649"
+		i64Over  = "9223372036854775808"
+		i64Under = "-9223372036854775809"
+	)
+	stats := `"stats":{"uptime_secs":` + i64Over + `,"packets_recv":9223372036854775807,"recv_errors":` + i64Under +
+		`,"noise_floor":` + i32Over + `,"last_rssi":2147483647,"tx_queue":` + i32Under + `,"err_events":` + i64Over + `},"x":{`
+	doc := strings.Replace(string(readFile(t, "v2_status.json")), `"stats":{`, stats, 1)
+	doc = strings.Replace(doc, `"battery_mv":4038`, `"battery_mv":`+i64Over, 1)
+	rs, err := ParseReadings([]byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := rs[0]
+	s := r.Stats
+	if s.UptimeSecs != nil || s.RecvErrors != nil || s.NoiseFloor != nil || s.TxQueue != nil || s.ErrEvents != nil || r.BatteryMV != nil {
+		t.Errorf("out of range values should be absent: %+v battery=%v", s, r.BatteryMV)
+	}
+	eq(t, "PacketsRecv", *s.PacketsRecv, int64(9223372036854775807))
+	eq(t, "LastRSSI", *s.LastRSSI, 2147483647)
+}
+
+func TestParseClaimHugeIntsAreAbsent(t *testing.T) {
+	doc := strings.Replace(string(readFile(t, "claim_extended.json")), `"misses": 2`, `"misses": 9223372036854775808`, 1)
+	doc = strings.Replace(doc, `"request_slots": 3`, `"request_slots": -9223372036854775809`, 1)
+	c, err := ParseClaim([]byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	eq(t, "Misses", c.Nodes[0].Misses, 0)
+	eq(t, "RequestSlots", c.RequestSlots, 0)
+	doc = strings.Replace(string(readFile(t, "claim_extended.json")), `"misses": 2`, `"misses": 2147483648`, 1)
+	if c, err = ParseClaim([]byte(doc)); err != nil {
+		t.Fatal(err)
+	}
+	eq(t, "Misses for 2^31", c.Nodes[0].Misses, 255)
 }

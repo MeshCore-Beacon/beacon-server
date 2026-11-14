@@ -102,7 +102,20 @@ func (s *Store) ReplacePollingClaim(ctx context.Context, c polling.Claim, observ
 	return applied, err
 }
 
-// InsertRepeaterReading stores one reading; inserted=false means it was already there.
+// PollingClaimReceivedAt returns when Beacon received the observer's stored claim, nil when it has none.
+func (s *Store) PollingClaimReceivedAt(ctx context.Context, observer []byte) (*time.Time, error) {
+	t, err := s.q.PollingClaimReceivedAt(ctx, observer)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &t.Time, nil
+}
+
+// InsertRepeaterReading stores one reading; inserted=false means it was already there, or the observer stored one
+// of the same target and method less than polling.ReadingMinInterval before receivedAt.
 func (s *Store) InsertRepeaterReading(ctx context.Context, r polling.Reading, observerID uuid.UUID, receivedAt time.Time) (bool, error) {
 	tag := r.SampledAt.Unix()
 	if r.Tag != nil {
@@ -123,6 +136,7 @@ func (s *Store) InsertRepeaterReading(ctx context.Context, r polling.Reading, ob
 		FloodDups: ptrConv(st.FloodDups, i32), DirectDups: ptrConv(st.DirectDups, i32), ErrEvents: ptrConv(st.ErrEvents, i32),
 		LastSnr: ptrConv(st.LastSNR, f32),
 		Lpp:     r.LPP, PacketHash: r.PacketHash, Client: clipText(r.Client, 128),
+		RecentAfter: ts(receivedAt.Add(-polling.ReadingMinInterval)),
 	})
 	return n > 0, err
 }

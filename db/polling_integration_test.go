@@ -727,3 +727,49 @@ func TestPollingOwnerRowsTrustedLatestPostgres(t *testing.T) {
 		t.Fatal("unassigned row", r.Rank, r.Assigned)
 	}
 }
+
+func TestRepeaterReadingRateLimitPostgres(t *testing.T) {
+	ctx, _, s := pollStore(t)
+	o1, o2 := pollKey(1), pollKey(2)
+	id1, id2 := pollObserver(t, ctx, s, o1), pollObserver(t, ctx, s, o2)
+	now := time.Now().UTC().Truncate(time.Second)
+	tag := func(n uint32) *uint32 { return &n }
+	for i, c := range []struct {
+		obs    []byte
+		id     uuid.UUID
+		target byte
+		method string
+		tag    uint32
+		recv   time.Duration
+		want   bool
+	}{
+		{o1, id1, 0xA, "status", 1, 0, true},
+		{o1, id1, 0xA, "status", 2, 4 * time.Minute, false}, // inside the window
+		{o1, id1, 0xA, "status", 1, time.Minute, false},     // duplicate
+		{o1, id1, 0xA, "telemetry", 1, time.Minute, true},   // other method
+		{o2, id2, 0xA, "status", 1, time.Minute, true},      // other observer
+		{o1, id1, 0xB, "status", 1, time.Minute, true},      // other target
+		{o1, id1, 0xA, "status", 3, polling.ReadingMinInterval + time.Second, true},
+	} {
+		r := pollReading(c.obs, c.target, c.method, now, tag(c.tag))
+		if got, err := s.InsertRepeaterReading(ctx, r, c.id, now.Add(c.recv)); err != nil || got != c.want {
+			t.Fatal(i, got, err)
+		}
+	}
+}
+
+func TestPollingClaimReceivedAtPostgres(t *testing.T) {
+	ctx, _, s := pollStore(t)
+	o := pollKey(1)
+	id := pollObserver(t, ctx, s, o)
+	if got, err := s.PollingClaimReceivedAt(ctx, o); err != nil || got != nil {
+		t.Fatal(got, err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	if _, err := s.ReplacePollingClaim(ctx, pollClaim(o, now.Add(-time.Hour), 0xA), id, now); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.PollingClaimReceivedAt(ctx, o); err != nil || got == nil || !got.Equal(now) {
+		t.Fatal(got, err)
+	}
+}

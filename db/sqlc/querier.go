@@ -287,6 +287,7 @@ type Querier interface {
 	InsertObserverTelemetry(ctx context.Context, arg InsertObserverTelemetryParams) error
 	InsertPollingAssignment(ctx context.Context, arg InsertPollingAssignmentParams) error
 	InsertPollingCandidate(ctx context.Context, arg InsertPollingCandidateParams) error
+	// Inserts nothing when this observer stored a reading of the target by the same method received after recent_after.
 	InsertRepeaterReading(ctx context.Context, arg InsertRepeaterReadingParams) (int64, error)
 	ListAccounts(ctx context.Context) ([]Account, error)
 	// The original all-channel message statement, before the channel read model: no page runs it
@@ -518,6 +519,7 @@ type Querier interface {
 	ObservationIDBelow(ctx context.Context, arg ObservationIDBelowParams) (int64, error)
 	OldestMissingRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
 	PacketSitesTotalBytes(ctx context.Context) (int64, error)
+	PollingClaimReceivedAt(ctx context.Context, observerPublicKey []byte) (pgtype.Timestamptz, error)
 	PollingElectionUnlock(ctx context.Context) error
 	PollingObserverFlags(ctx context.Context, observerPublicKey []byte) (PollingObserverFlagsRow, error)
 	// assigned counts the target's assignment rows. latest_ts only trusts readings from an assigned observer that is

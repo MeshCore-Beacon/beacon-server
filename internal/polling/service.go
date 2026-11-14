@@ -19,6 +19,9 @@ const (
 	ClaimFutureMax = 10 * time.Minute
 	ReadingMaxAge  = 2 * time.Hour
 	EvidenceWindow = 24 * time.Hour
+	// Firmware claims at most once a minute and polls at most every 30 minutes.
+	ClaimMinInterval   = 30 * time.Second
+	ReadingMinInterval = 5 * time.Minute
 
 	readingFutureMax = time.Minute
 )
@@ -28,6 +31,10 @@ const (
 type Store interface {
 	ObserverID(ctx context.Context, pubkey []byte) (uuid.UUID, error)
 	ReplacePollingClaim(ctx context.Context, c Claim, observerID uuid.UUID, receivedAt time.Time) (bool, error)
+	// PollingClaimReceivedAt is nil when the observer has no stored claim.
+	PollingClaimReceivedAt(ctx context.Context, observer []byte) (*time.Time, error)
+	// InsertRepeaterReading stores nothing when the same observer stored a reading of the target by the same
+	// method within ReadingMinInterval of receivedAt.
 	InsertRepeaterReading(ctx context.Context, r Reading, observerID uuid.UUID, receivedAt time.Time) (bool, error)
 	HasLivePollingCandidate(ctx context.Context, observer, target []byte, receivedAfter time.Time) (bool, error)
 	ListPollingTargets(ctx context.Context, receivedAfter time.Time) ([][]byte, error)
@@ -107,6 +114,15 @@ func (s *Service) HandleClaim(ctx context.Context, topicPubkeyHex string, raw []
 	}
 	obs := short(c.Observer)
 	if s.blocked(ctx, c.Observer) {
+		return
+	}
+	last, err := s.store.PollingClaimReceivedAt(ctx, c.Observer)
+	if err != nil {
+		s.log.Warn("polling last claim", "observer", obs, "err", err)
+		return
+	}
+	if last != nil && now.Sub(*last) < ClaimMinInterval {
+		s.log.Debug("polling claim too soon", "observer", obs)
 		return
 	}
 

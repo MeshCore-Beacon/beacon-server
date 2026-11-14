@@ -42,6 +42,7 @@ type fakeStore struct {
 	excluded    [][]byte
 	stateErr    error
 	flagsErr    error
+	recvErr     error
 	claimCalls  int
 	electCalls  map[string]int // target hex -> ReplacePollingAssignments calls
 	idCalls     int
@@ -84,6 +85,20 @@ func (f *fakeStore) ReplacePollingClaim(_ context.Context, c Claim, _ uuid.UUID,
 	}
 	f.claims[hx(c.Observer)] = fc
 	return true, nil
+}
+
+func (f *fakeStore) PollingClaimReceivedAt(_ context.Context, obs []byte) (*time.Time, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.recvErr != nil {
+		return nil, f.recvErr
+	}
+	c := f.claims[hx(obs)]
+	if c == nil {
+		return nil, nil
+	}
+	t := c.recv
+	return &t, nil
 }
 
 func (f *fakeStore) live(obs, target string, after time.Time) bool {
@@ -314,10 +329,11 @@ func TestHandleClaimFutureTimestamp(t *testing.T) {
 }
 
 func TestHandleClaimStaleIsIgnored(t *testing.T) {
-	s, st, _ := newSvc(t, true)
+	s, st, ck := newSvc(t, true)
 	a, b, o := k32(0xa), k32(0xb), k32(1)
 	s.HandleClaim(context.Background(), hx(o), claimJSON(o, t0, b))
 	elA := st.electCalls[hx(a)]
+	ck.t = t0.Add(ClaimMinInterval)
 	s.HandleClaim(context.Background(), hx(o), claimJSON(o, t0.Add(-time.Minute), a, b))
 	if st.claimCalls != 2 {
 		t.Fatalf("claim calls = %d", st.claimCalls)
@@ -331,17 +347,42 @@ func TestHandleClaimStaleIsIgnored(t *testing.T) {
 }
 
 func TestHandleClaimRemovedTargetIsReElected(t *testing.T) {
-	s, st, _ := newSvc(t, true)
+	s, st, ck := newSvc(t, true)
 	a, b, o1, o2 := k32(0xa), k32(0xb), k32(1), k32(2)
 	s.HandleClaim(context.Background(), hx(o2), claimJSON(o2, t0, a))
 	s.HandleClaim(context.Background(), hx(o1), claimJSON(o1, t0, a, b))
 	before := st.electCalls[hx(a)]
+	ck.t = t0.Add(time.Minute)
 	s.HandleClaim(context.Background(), hx(o1), claimJSON(o1, t0.Add(time.Second), b))
 	if st.electCalls[hx(a)] != before+1 {
 		t.Fatalf("a not re-elected once: %d -> %d", before, st.electCalls[hx(a)])
 	}
 	if got := st.assigns[hx(a)]; len(got) != 1 || !bytes.Equal(got[0].Observer, o2) {
 		t.Fatalf("assigns = %v", got)
+	}
+}
+
+func TestHandleClaimRateLimited(t *testing.T) {
+	s, st, ck := newSvc(t, true)
+	a, b, o := k32(0xa), k32(0xb), k32(1)
+	ctx := context.Background()
+	s.HandleClaim(ctx, hx(o), claimJSON(o, t0, a))
+	ids, elect := st.idCalls, st.electCalls[hx(b)]
+	ck.t = t0.Add(ClaimMinInterval - time.Second)
+	s.HandleClaim(ctx, hx(o), claimJSON(o, ck.t, b))
+	if st.claimCalls != 1 || st.idCalls != ids || st.electCalls[hx(b)] != elect {
+		t.Fatal("claim inside the interval caused writes")
+	}
+	ck.t = t0.Add(ClaimMinInterval)
+	s.HandleClaim(ctx, hx(o), claimJSON(o, ck.t, b))
+	if st.claimCalls != 2 || st.electCalls[hx(b)] != elect+1 {
+		t.Fatal("claim after the interval dropped")
+	}
+	st.recvErr = fmt.Errorf("db down")
+	ck.t = t0.Add(time.Hour)
+	s.HandleClaim(ctx, hx(o), claimJSON(o, ck.t, a))
+	if st.claimCalls != 2 {
+		t.Fatal("claim accepted while the last receive time could not be read")
 	}
 }
 

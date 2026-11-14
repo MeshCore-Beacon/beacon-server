@@ -209,7 +209,7 @@ INSERT INTO repeater_readings (
     uptime_secs, packets_recv, packets_sent, recv_flood, recv_direct, sent_flood, sent_direct,
     tx_air_secs, rx_air_secs, recv_errors, noise_floor, last_rssi, tx_queue, flood_dups, direct_dups, err_events, last_snr,
     lpp, packet_hash, client)
-VALUES (
+SELECT
     $1, $2,
     $3, $4, $5, $6, $7,
     $8, $9, $10,
@@ -217,7 +217,12 @@ VALUES (
     $16, $17, $18, $19, $20,
     $21, $22, $23, $24, $25,
     $26, $27,
-    $28, $29, $30)
+    $28, $29, $30
+WHERE NOT EXISTS (
+    SELECT 1 FROM repeater_readings x
+    WHERE x.target_public_key = $1 AND x.observer_public_key = $2
+      AND x.method = $6 AND x.received_at > $31
+)
 ON CONFLICT (target_public_key, observer_public_key, tag, method) DO NOTHING
 `
 
@@ -252,8 +257,10 @@ type InsertRepeaterReadingParams struct {
 	Lpp               []byte             `json:"lpp"`
 	PacketHash        []byte             `json:"packet_hash"`
 	Client            string             `json:"client"`
+	RecentAfter       pgtype.Timestamptz `json:"recent_after"`
 }
 
+// Inserts nothing when this observer stored a reading of the target by the same method received after recent_after.
 func (q *Queries) InsertRepeaterReading(ctx context.Context, arg InsertRepeaterReadingParams) (int64, error) {
 	result, err := q.db.Exec(ctx, insertRepeaterReading,
 		arg.TargetPublicKey,
@@ -286,6 +293,7 @@ func (q *Queries) InsertRepeaterReading(ctx context.Context, arg InsertRepeaterR
 		arg.Lpp,
 		arg.PacketHash,
 		arg.Client,
+		arg.RecentAfter,
 	)
 	if err != nil {
 		return 0, err
@@ -427,6 +435,17 @@ SELECT pg_advisory_xact_lock(hashtextextended(encode($1::bytea, 'hex'), 25190))
 func (q *Queries) LockPollingTarget(ctx context.Context, targetPublicKey []byte) error {
 	_, err := q.db.Exec(ctx, lockPollingTarget, targetPublicKey)
 	return err
+}
+
+const pollingClaimReceivedAt = `-- name: PollingClaimReceivedAt :one
+SELECT received_at FROM polling_claims WHERE observer_public_key = $1
+`
+
+func (q *Queries) PollingClaimReceivedAt(ctx context.Context, observerPublicKey []byte) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, pollingClaimReceivedAt, observerPublicKey)
+	var received_at pgtype.Timestamptz
+	err := row.Scan(&received_at)
+	return received_at, err
 }
 
 const pollingElectionUnlock = `-- name: PollingElectionUnlock :exec
