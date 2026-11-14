@@ -42,6 +42,7 @@ type fakeStore struct {
 	paused      bool
 	excluded    [][]byte
 	stateErr    error
+	flagsErr    error
 	claimCalls  int
 	electCalls  map[string]int // target hex -> ReplacePollingAssignments calls
 	idCalls     int
@@ -213,6 +214,9 @@ func (f *fakeStore) PollingOwnerRows(_ context.Context, obs []byte, after time.T
 func (f *fakeStore) PollingObserverFlags(_ context.Context, obs []byte) (bool, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.flagsErr != nil {
+		return false, false, f.flagsErr
+	}
 	if f.stateErr != nil {
 		return false, false, f.stateErr
 	}
@@ -576,5 +580,69 @@ func TestMalformedPayloadsDoNotPanic(t *testing.T) {
 	}
 	if st.claimCalls != 0 || st.readingCount() != 0 {
 		t.Fatal("garbage stored")
+	}
+}
+
+func TestBlockedObserverClaimDropped(t *testing.T) {
+	s, st, _ := newSvc(t, true)
+	o, x := k32(1), k32(0xa)
+	st.blocked[hx(o)] = true
+	s.HandleClaim(context.Background(), hx(o), claimJSON(o, t0, x))
+	if st.claimCalls != 0 || st.idCalls != 0 || len(st.electCalls) != 0 {
+		t.Fatalf("blocked claim caused writes: %d %d %v", st.claimCalls, st.idCalls, st.electCalls)
+	}
+}
+
+func TestBlockedObserverReadingDropped(t *testing.T) {
+	s, st, _ := newSvc(t, true)
+	good, bad, x := k32(1), k32(2), k32(0xa)
+	ctx := context.Background()
+	s.HandleClaim(ctx, hx(good), claimJSON(good, t0, x))
+	s.HandleClaim(ctx, hx(bad), claimJSON(bad, t0, x))
+	s.HandleReading(ctx, hx(good), readingJSON(good, x, t0.Add(-time.Hour)))
+	before := s.Owners(ctx, Caller{Observer: good}).Nodes[hx(x)].LatestTS
+	st.blocked[hx(bad)] = true
+	ids := st.idCalls
+	s.HandleReading(ctx, hx(bad), readingJSON(bad, x, t0))
+	after := s.Owners(ctx, Caller{Observer: good}).Nodes[hx(x)].LatestTS
+	if st.readingCount() != 1 || st.idCalls != ids || before == nil || after == nil || *before != *after {
+		t.Fatalf("blocked reading was stored: rows=%d before=%v after=%v", st.readingCount(), before, after)
+	}
+}
+
+func TestFlagsErrorDropsMessages(t *testing.T) {
+	s, st, _ := newSvc(t, true)
+	o, x := k32(1), k32(0xa)
+	ctx := context.Background()
+	s.HandleClaim(ctx, hx(o), claimJSON(o, t0, x))
+	calls, ids := st.claimCalls, st.idCalls
+	st.flagsErr = fmt.Errorf("db down")
+	s.HandleClaim(ctx, hx(o), claimJSON(o, t0.Add(time.Second), x))
+	s.HandleReading(ctx, hx(o), readingJSON(o, x, t0))
+	if st.claimCalls != calls || st.readingCount() != 0 || st.idCalls != ids {
+		t.Fatal("message accepted while flags lookup failed")
+	}
+	st.flagsErr = nil
+	s.HandleReading(ctx, hx(o), readingJSON(o, x, t0))
+	if st.readingCount() != 1 {
+		t.Fatal("unblocked observer affected")
+	}
+}
+
+func TestParseErrorLogHasNoPayload(t *testing.T) {
+	s, _, _ := newSvc(t, true)
+	var buf bytes.Buffer
+	s.log = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	o := k32(1)
+	junk := "JUNKSECRET99"
+	claim := fmt.Sprintf(`{"v":2,"origin_id":%q,"timestamp":%q,"nodes":[]}`, hx(o), junk)
+	reading := fmt.Sprintf(`{"v":2,"origin_id":%q,"readings":[{"node_id":%q,"method":"status","sampled_at":%q}]}`, hx(o), hx(o), junk)
+	s.HandleClaim(context.Background(), hx(o), []byte(claim))
+	s.HandleReading(context.Background(), hx(o), []byte(reading))
+	if buf.Len() == 0 {
+		t.Fatal("expected a debug log")
+	}
+	if strings.Contains(buf.String(), junk) {
+		t.Fatalf("payload leaked into log: %s", buf.String())
 	}
 }

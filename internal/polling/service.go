@@ -60,6 +60,26 @@ func short(key []byte) string {
 	return h
 }
 
+func topicPrefix(topicHex string) string {
+	if len(topicHex) > 8 {
+		return topicHex[:8]
+	}
+	return topicHex
+}
+
+// blocked fails closed: a flags error counts as blocked, since this guards writes.
+func (s *Service) blocked(ctx context.Context, observer []byte) bool {
+	b, _, err := s.store.PollingObserverFlags(ctx, observer)
+	if err != nil {
+		s.log.Warn("polling observer flags", "observer", short(observer), "err", err)
+		return true
+	}
+	if b {
+		s.log.Debug("polling message from blocked observer", "observer", short(observer))
+	}
+	return b
+}
+
 func topicMatches(topicHex string, observer []byte) bool {
 	return strings.EqualFold(topicHex, hex.EncodeToString(observer))
 }
@@ -71,7 +91,8 @@ func (s *Service) HandleClaim(ctx context.Context, topicPubkeyHex string, raw []
 	}
 	c, err := ParseClaim(raw)
 	if err != nil {
-		s.log.Debug("polling claim rejected", "err", err)
+		// Parse errors can quote payload text, so only the topic prefix is logged.
+		s.log.Debug("polling claim rejected", "observer", topicPrefix(topicPubkeyHex))
 		return
 	}
 	if !topicMatches(topicPubkeyHex, c.Observer) {
@@ -84,6 +105,9 @@ func (s *Service) HandleClaim(ctx context.Context, topicPubkeyHex string, raw []
 		return
 	}
 	obs := short(c.Observer)
+	if s.blocked(ctx, c.Observer) {
+		return
+	}
 
 	// Read the old targets first: they may need a new owner once the claim is replaced.
 	targets := map[string][]byte{}
@@ -125,7 +149,7 @@ func (s *Service) HandleReading(ctx context.Context, topicPubkeyHex string, raw 
 	}
 	rs, err := ParseReadings(raw)
 	if err != nil {
-		s.log.Debug("polling reading rejected", "err", err)
+		s.log.Debug("polling reading rejected", "observer", topicPrefix(topicPubkeyHex))
 		return
 	}
 	if len(rs) == 0 || !topicMatches(topicPubkeyHex, rs[0].Observer) {
@@ -134,6 +158,9 @@ func (s *Service) HandleReading(ctx context.Context, topicPubkeyHex string, raw 
 	}
 	observer := rs[0].Observer
 	obs := short(observer)
+	if s.blocked(ctx, observer) {
+		return
+	}
 	now := s.now()
 	id, err := s.store.ObserverID(ctx, observer)
 	if err != nil {
