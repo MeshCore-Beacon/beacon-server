@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/MeshCore-Beacon/beacon-server/internal/polling"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -24,16 +25,20 @@ type PollingAdminStore interface {
 	SetPollingState(ctx context.Context, paused bool, pausedUntil *time.Time, excluded [][]byte) error
 	ListPollingObservers(ctx context.Context) ([]api.PollingObserver, error)
 	SetPollingObserver(ctx context.Context, observer []byte, blocked, approved bool, note string) error
+	PollingTargetsAdmin(ctx context.Context, receivedAfter time.Time, limit int) ([]api.PollingTarget, error)
 }
 
-// PollingAdminRouter must be mounted inside the authenticated admin subtree.
-func PollingAdminRouter(store PollingAdminStore) http.Handler {
+// PollingAdminRouter must be mounted inside the authenticated admin subtree. configPaused is polling.paused
+// from config.
+func PollingAdminRouter(store PollingAdminStore, configPaused bool) http.Handler {
 	if store == nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { respondError(w, 503, "polling is unavailable") })
 	}
+	a := pollingAdmin{store: store, configPaused: configPaused}
 	r := chi.NewRouter()
-	r.Get("/", getPollingAdmin(store))
-	r.Put("/state", putPollingState(store))
+	r.Get("/", a.get)
+	r.Get("/targets", getPollingTargets(store))
+	r.Put("/state", a.putState)
 	r.Put("/observers/{publicKey}", putPollingObserver(store))
 	return r
 }
@@ -64,19 +69,27 @@ func decodePollingBody(w http.ResponseWriter, r *http.Request, dst any) bool {
 	return true
 }
 
-func pollingState(ctx context.Context, store PollingAdminStore) (api.PollingAdminState, error) {
-	paused, until, excluded, err := store.PollingState(ctx)
+type pollingAdmin struct {
+	store        PollingAdminStore
+	configPaused bool
+}
+
+func (a pollingAdmin) state(ctx context.Context) (api.PollingAdminState, error) {
+	paused, until, excluded, err := a.store.PollingState(ctx)
 	if err != nil {
 		return api.PollingAdminState{}, err
 	}
-	observers, err := store.ListPollingObservers(ctx)
+	observers, err := a.store.ListPollingObservers(ctx)
 	if err != nil {
 		return api.PollingAdminState{}, err
 	}
 	if observers == nil {
 		observers = []api.PollingObserver{}
 	}
-	out := api.PollingAdminState{Paused: paused, ExcludedNodes: make([]string, 0, len(excluded)), Observers: observers}
+	// A pause whose end has passed no longer pauses anything, as the policy answer already treats it.
+	effective := paused && (until == nil || until.After(time.Now()))
+	out := api.PollingAdminState{Paused: effective, ConfigPaused: a.configPaused,
+		ExcludedNodes: make([]string, 0, len(excluded)), Observers: observers}
 	if until != nil {
 		ms := until.UnixMilli()
 		out.PausedUntil = &ms
@@ -94,27 +107,48 @@ func pollingFailed(w http.ResponseWriter, err error) {
 
 // getPollingAdmin godoc
 // @Summary Get the repeater polling settings
-// @Description Pause state, excluded repeaters and every observer the operator has blocked or approved.
+// @Description Pause state, excluded repeaters and every observer the operator has blocked or approved. paused is false once pausedUntil has passed; configPaused is polling.paused from config.
 // @Tags Admin
 // @Produce json
 // @Security AdminKey
 // @Success 200 {object} api.PollingAdminState
 // @Failure 401,503,500 {object} map[string]APIError
 // @Router /admin/polling [get]
-func getPollingAdmin(store PollingAdminStore) http.HandlerFunc {
+func (a pollingAdmin) get(w http.ResponseWriter, r *http.Request) {
+	st, err := a.state(r.Context())
+	if err != nil {
+		pollingFailed(w, err)
+		return
+	}
+	respond(w, 200, st)
+}
+
+// getPollingTargets godoc
+// @Summary List polled repeaters and their observers
+// @Description Every repeater with a live claim or an assignment, newest claim first, at most 500. Each lists its live candidates and assigned observers; rank is null for an unassigned candidate. latestTrustedReading counts only readings from the poller or an assigned observer with advert evidence.
+// @Tags Admin
+// @Produce json
+// @Security AdminKey
+// @Success 200 {object} api.PollingTargetList
+// @Failure 401,503,500 {object} map[string]APIError
+// @Router /admin/polling/targets [get]
+func getPollingTargets(store PollingAdminStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		st, err := pollingState(r.Context(), store)
+		targets, err := store.PollingTargetsAdmin(r.Context(), time.Now().Add(-polling.ClaimTTL), api.MaxPollingTargets)
 		if err != nil {
 			pollingFailed(w, err)
 			return
 		}
-		respond(w, 200, st)
+		if targets == nil {
+			targets = []api.PollingTarget{}
+		}
+		respond(w, 200, api.PollingTargetList{Targets: targets})
 	}
 }
 
 // putPollingState godoc
 // @Summary Replace the polling pause and exclusions
-// @Description Replaces the whole state. At most 16 excluded repeaters, each 64 hex characters; pausedUntil is epoch ms in the future or null. Body at most 4 KiB.
+// @Description Replaces the whole state. At most 16 distinct excluded repeaters, each 64 hex characters; pausedUntil is epoch ms in the future or null. Body at most 4 KiB.
 // @Tags Admin
 // @Accept json
 // @Produce json
@@ -123,28 +157,26 @@ func getPollingAdmin(store PollingAdminStore) http.HandlerFunc {
 // @Success 200 {object} api.PollingAdminState
 // @Failure 400,401,415,503,500 {object} map[string]APIError
 // @Router /admin/polling/state [put]
-func putPollingState(store PollingAdminStore) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req api.PollingStateRequest
-		if !decodePollingBody(w, r, &req) {
-			return
-		}
-		until, nodes, err := req.Parse(time.Now())
-		if err != nil {
-			respondError(w, 400, err.Error())
-			return
-		}
-		if err := store.SetPollingState(r.Context(), req.Paused, until, nodes); err != nil {
-			pollingFailed(w, err)
-			return
-		}
-		st, err := pollingState(r.Context(), store)
-		if err != nil {
-			pollingFailed(w, err)
-			return
-		}
-		respond(w, 200, st)
+func (a pollingAdmin) putState(w http.ResponseWriter, r *http.Request) {
+	var req api.PollingStateRequest
+	if !decodePollingBody(w, r, &req) {
+		return
 	}
+	until, nodes, err := req.Parse(time.Now())
+	if err != nil {
+		respondError(w, 400, err.Error())
+		return
+	}
+	if err := a.store.SetPollingState(r.Context(), req.Paused, until, nodes); err != nil {
+		pollingFailed(w, err)
+		return
+	}
+	st, err := a.state(r.Context())
+	if err != nil {
+		pollingFailed(w, err)
+		return
+	}
+	respond(w, 200, st)
 }
 
 // putPollingObserver godoc

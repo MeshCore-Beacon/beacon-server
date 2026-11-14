@@ -773,3 +773,65 @@ func TestPollingClaimReceivedAtPostgres(t *testing.T) {
 		t.Fatal(got, err)
 	}
 }
+
+func TestPollingTargetsAdminPostgres(t *testing.T) {
+	ctx, _, s := pollStore(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	claim := func(b byte, recv time.Time, targets ...byte) uuid.UUID {
+		t.Helper()
+		id := pollObserver(t, ctx, s, pollKey(b))
+		if _, err := s.ReplacePollingClaim(ctx, pollClaim(pollKey(b), recv, targets...), id, recv); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	id1 := claim(1, now.Add(-5*time.Minute), 0xA)
+	id2 := claim(2, now, 0xA)
+	claim(3, now.Add(-10*time.Minute), 0xB)
+	claim(4, now.Add(-2*time.Hour), 0xB) // expired: not listed
+	snr := 7.5
+	if err := s.ReplacePollingAssignments(ctx, pollKey(0xA), []polling.Assignment{{Observer: pollKey(1), Rank: 0, EvidenceSNR: &snr, EvidenceCount: 4}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReplacePollingAssignments(ctx, pollKey(0xC), []polling.Assignment{{Observer: pollKey(9), Rank: 0}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.InsertRepeaterReading(ctx, pollReading(pollKey(1), 0xA, "status", now.Add(-10*time.Minute), nil), id1, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.InsertRepeaterReading(ctx, pollReading(pollKey(2), 0xA, "status", now.Add(-time.Minute), nil), id2, now); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.PollingTargetsAdmin(ctx, now.Add(-time.Hour), 500)
+	if err != nil || len(got) != 3 {
+		t.Fatal(len(got), err)
+	}
+	if got[0].PublicKey != hex.EncodeToString(pollKey(0xA)) || got[1].PublicKey != hex.EncodeToString(pollKey(0xB)) || got[2].PublicKey != hex.EncodeToString(pollKey(0xC)) {
+		t.Fatal("order", got[0].PublicKey[:2], got[1].PublicKey[:2], got[2].PublicKey[:2])
+	}
+	a := got[0]
+	if a.LatestTrustedReading == nil || *a.LatestTrustedReading != now.Add(-10*time.Minute).UnixMilli() ||
+		a.LatestReading == nil || *a.LatestReading != now.Add(-time.Minute).UnixMilli() {
+		t.Fatal("A reading times", a.LatestTrustedReading, a.LatestReading)
+	}
+	if len(a.Candidates) != 2 {
+		t.Fatal("A candidates", a.Candidates)
+	}
+	c0, c1 := a.Candidates[0], a.Candidates[1]
+	if c0.ObserverPublicKey != hex.EncodeToString(pollKey(1)) || c0.Rank == nil || *c0.Rank != 0 || c0.EvidenceSnr == nil ||
+		*c0.EvidenceSnr != 7.5 || c0.EvidenceCount != 4 || c0.KeyMode != "own" {
+		t.Fatalf("A poller %+v", c0)
+	}
+	if c1.ObserverPublicKey != hex.EncodeToString(pollKey(2)) || c1.Rank != nil || c1.EvidenceSnr != nil {
+		t.Fatalf("A unassigned %+v", c1)
+	}
+	if b := got[1]; len(b.Candidates) != 1 || b.Candidates[0].ObserverPublicKey != hex.EncodeToString(pollKey(3)) || b.LatestReading != nil {
+		t.Fatalf("B %+v", b)
+	}
+	if c := got[2]; len(c.Candidates) != 1 || c.Candidates[0].Rank == nil || c.Candidates[0].KeyMode != "" {
+		t.Fatalf("C %+v", c)
+	}
+	if got, err := s.PollingTargetsAdmin(ctx, now.Add(-time.Hour), 2); err != nil || len(got) != 2 || got[1].PublicKey != hex.EncodeToString(pollKey(0xB)) {
+		t.Fatal("limit", len(got), err)
+	}
+}

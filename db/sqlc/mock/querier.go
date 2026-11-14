@@ -3075,6 +3075,36 @@ func (mr *MockQuerierMockRecorder) PacketSitesTotalBytes(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PacketSitesTotalBytes", reflect.TypeOf((*MockQuerier)(nil).PacketSitesTotalBytes), ctx)
 }
 
+// PollingAdminTargetRows mocks base method.
+func (m *MockQuerier) PollingAdminTargetRows(ctx context.Context, arg db.PollingAdminTargetRowsParams) ([]db.PollingAdminTargetRowsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PollingAdminTargetRows", ctx, arg)
+	ret0, _ := ret[0].([]db.PollingAdminTargetRowsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PollingAdminTargetRows indicates an expected call of PollingAdminTargetRows.
+func (mr *MockQuerierMockRecorder) PollingAdminTargetRows(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PollingAdminTargetRows", reflect.TypeOf((*MockQuerier)(nil).PollingAdminTargetRows), ctx, arg)
+}
+
+// PollingAdminTargets mocks base method.
+func (m *MockQuerier) PollingAdminTargets(ctx context.Context, arg db.PollingAdminTargetsParams) ([]db.PollingAdminTargetsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PollingAdminTargets", ctx, arg)
+	ret0, _ := ret[0].([]db.PollingAdminTargetsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PollingAdminTargets indicates an expected call of PollingAdminTargets.
+func (mr *MockQuerierMockRecorder) PollingAdminTargets(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PollingAdminTargets", reflect.TypeOf((*MockQuerier)(nil).PollingAdminTargets), ctx, arg)
+}
+
 // PollingClaimReceivedAt mocks base method.
 func (m *MockQuerier) PollingClaimReceivedAt(ctx context.Context, observerPublicKey []byte) (pgtype.Timestamptz, error) {
 	m.ctrl.T.Helper()

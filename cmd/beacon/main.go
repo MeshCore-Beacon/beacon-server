@@ -616,7 +616,7 @@ func main() {
 			"/accounts": handlers.AccountsRouter(maintStore),
 			"/backup":   handlers.BackupRouter(backupOpts, ctx),
 			"/db":       handlers.DBAdminRouter(maintStore, pgSource),
-			"/polling":  handlers.PollingAdminRouter(pollingAdmin),
+			"/polling":  handlers.PollingAdminRouter(pollingAdmin, resolvedPolling.Paused),
 		},
 		GuestPolling:  guestPolling,
 		Guards:        guard,

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -25,6 +26,14 @@ type pollAdminStub struct {
 	writes    int
 	obsKey    []byte
 	obs       api.PollingObserverRequest
+	targets   []api.PollingTarget
+	tAfter    time.Time
+	tLimit    int
+}
+
+func (s *pollAdminStub) PollingTargetsAdmin(_ context.Context, after time.Time, limit int) ([]api.PollingTarget, error) {
+	s.tAfter, s.tLimit = after, limit
+	return s.targets, s.err
 }
 
 func (s *pollAdminStub) PollingState(context.Context) (bool, *time.Time, [][]byte, error) {
@@ -60,7 +69,7 @@ func TestPollingAdminGet(t *testing.T) {
 	until := time.Now().Add(time.Hour).Truncate(time.Millisecond)
 	st := &pollAdminStub{paused: true, until: &until, excluded: [][]byte{make([]byte, 32)},
 		observers: []api.PollingObserver{{PublicKey: hexKey("a"), Blocked: true, Note: "n"}}}
-	rec := pollAdminDo(PollingAdminRouter(st), "GET", "/", "", "")
+	rec := pollAdminDo(PollingAdminRouter(st, false), "GET", "/", "", "")
 	if rec.Code != 200 {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
@@ -73,11 +82,11 @@ func TestPollingAdminGet(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 	// Empty state encodes null pausedUntil and empty arrays, not null arrays.
-	rec = pollAdminDo(PollingAdminRouter(&pollAdminStub{}), "GET", "/", "", "")
+	rec = pollAdminDo(PollingAdminRouter(&pollAdminStub{}, false), "GET", "/", "", "")
 	if !strings.Contains(rec.Body.String(), `"pausedUntil":null`) || !strings.Contains(rec.Body.String(), `"excludedNodes":[]`) || !strings.Contains(rec.Body.String(), `"observers":[]`) {
 		t.Fatal(rec.Body.String())
 	}
-	if rec := pollAdminDo(PollingAdminRouter(&pollAdminStub{err: errors.New("x")}), "GET", "/", "", ""); rec.Code != 500 {
+	if rec := pollAdminDo(PollingAdminRouter(&pollAdminStub{err: errors.New("x")}, false), "GET", "/", "", ""); rec.Code != 500 {
 		t.Fatal(rec.Code)
 	}
 }
@@ -85,12 +94,12 @@ func TestPollingAdminGet(t *testing.T) {
 func TestPollingAdminPutState(t *testing.T) {
 	const ct = "application/json"
 	st := &pollAdminStub{}
-	h := PollingAdminRouter(st)
+	h := PollingAdminRouter(st, false)
 	future := time.Now().Add(time.Hour).UnixMilli()
 	nodes := func(n int) string {
 		var out []string
 		for i := 0; i < n; i++ {
-			out = append(out, `"`+hexKey("b")+`"`)
+			out = append(out, fmt.Sprintf(`"%064x"`, i+1))
 		}
 		return strings.Join(out, ",")
 	}
@@ -128,7 +137,7 @@ func itoa(n int64) string { b, _ := json.Marshal(n); return string(b) }
 func TestPollingAdminPutObserver(t *testing.T) {
 	const ct = "application/json"
 	st := &pollAdminStub{}
-	h := PollingAdminRouter(st)
+	h := PollingAdminRouter(st, false)
 	for _, k := range []string{"abc", hexKey("g"), hexKey("a") + "0"} {
 		if rec := pollAdminDo(h, "PUT", "/observers/"+k, `{"blocked":true}`, ct); rec.Code != 400 {
 			t.Errorf("%q: %d", k, rec.Code)
@@ -150,9 +159,75 @@ func TestPollingAdminPutObserver(t *testing.T) {
 }
 
 func TestPollingAdminNilStore(t *testing.T) {
-	for _, c := range [][2]string{{"GET", "/"}, {"PUT", "/state"}, {"PUT", "/observers/" + hexKey("a")}} {
-		if rec := pollAdminDo(PollingAdminRouter(nil), c[0], c[1], `{}`, "application/json"); rec.Code != 503 {
+	for _, c := range [][2]string{{"GET", "/"}, {"GET", "/targets"}, {"PUT", "/state"}, {"PUT", "/observers/" + hexKey("a")}} {
+		if rec := pollAdminDo(PollingAdminRouter(nil, false), c[0], c[1], `{}`, "application/json"); rec.Code != 503 {
 			t.Errorf("%v: %d", c, rec.Code)
 		}
+	}
+}
+
+func TestPollingAdminEffectivePause(t *testing.T) {
+	past := time.Now().Add(-time.Minute)
+	for name, c := range map[string]struct {
+		st         *pollAdminStub
+		cfg        bool
+		paused     bool
+		cfgPaused  bool
+		untilShown bool
+	}{
+		"pause lapsed":   {&pollAdminStub{paused: true, until: &past}, false, false, false, true},
+		"open pause":     {&pollAdminStub{paused: true}, false, true, false, false},
+		"config pause":   {&pollAdminStub{}, true, false, true, false},
+		"nothing paused": {&pollAdminStub{}, false, false, false, false},
+	} {
+		rec := pollAdminDo(PollingAdminRouter(c.st, c.cfg), "GET", "/", "", "")
+		var got api.PollingAdminState
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != 200 {
+			t.Fatal(name, rec.Code, err)
+		}
+		if got.Paused != c.paused || got.ConfigPaused != c.cfgPaused || (got.PausedUntil != nil) != c.untilShown {
+			t.Errorf("%s: %s", name, rec.Body.String())
+		}
+	}
+}
+
+func TestPollingAdminPutStateDedupesNodes(t *testing.T) {
+	st := &pollAdminStub{}
+	var nodes []string
+	for range 20 {
+		nodes = append(nodes, `"`+hexKey("b")+`"`, `"`+strings.ToUpper(hexKey("b"))+`"`)
+	}
+	nodes = append(nodes, `"`+hexKey("c")+`"`)
+	rec := pollAdminDo(PollingAdminRouter(st, false), "PUT", "/state", `{"paused":false,"excludedNodes":[`+strings.Join(nodes, ",")+`]}`, "application/json")
+	if rec.Code != 200 || len(st.excluded) != 2 || st.excluded[0][0] != 0xbb || st.excluded[1][0] != 0xcc {
+		t.Fatal(rec.Code, rec.Body.String(), st.excluded)
+	}
+}
+
+func TestPollingAdminTargets(t *testing.T) {
+	rank, ms := 0, int64(1700000000000)
+	st := &pollAdminStub{targets: []api.PollingTarget{{PublicKey: hexKey("a"), LatestReading: &ms,
+		Candidates: []api.PollingTargetCandidate{{ObserverPublicKey: hexKey("1"), Rank: &rank, KeyMode: "own"}, {ObserverPublicKey: hexKey("2")}}}}}
+	before := time.Now()
+	rec := pollAdminDo(PollingAdminRouter(st, false), "GET", "/targets", "", "")
+	after := time.Now()
+	if rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	if st.tLimit != 500 || st.tAfter.Before(before.Add(-3900*time.Second)) || st.tAfter.After(after.Add(-3900*time.Second)) {
+		t.Fatal("bad store args", st.tAfter, st.tLimit)
+	}
+	for _, want := range []string{`"targets":[{"publicKey":"` + hexKey("a"), `"latestTrustedReading":null`, `"latestReading":1700000000000`,
+		`"rank":0`, `"rank":null`, `"keyMode":"own"`, `"lastOk":null`, `"evidenceSnr":null`} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("missing %s in %s", want, rec.Body.String())
+		}
+	}
+	rec = pollAdminDo(PollingAdminRouter(&pollAdminStub{}, false), "GET", "/targets", "", "")
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"targets":[]`) {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	if rec := pollAdminDo(PollingAdminRouter(&pollAdminStub{err: errors.New("x")}, false), "GET", "/targets", "", ""); rec.Code != 500 {
+		t.Fatal(rec.Code)
 	}
 }

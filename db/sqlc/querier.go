@@ -519,6 +519,10 @@ type Querier interface {
 	ObservationIDBelow(ctx context.Context, arg ObservationIDBelowParams) (int64, error)
 	OldestMissingRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
 	PacketSitesTotalBytes(ctx context.Context) (int64, error)
+	// Each live candidate and each assigned observer of the given targets. rank is -1 for an unassigned candidate.
+	PollingAdminTargetRows(ctx context.Context, arg PollingAdminTargetRowsParams) ([]PollingAdminTargetRowsRow, error)
+	// Targets with a live candidate or any assignment row, newest claim first. latest_trusted uses the owners rule.
+	PollingAdminTargets(ctx context.Context, arg PollingAdminTargetsParams) ([]PollingAdminTargetsRow, error)
 	PollingClaimReceivedAt(ctx context.Context, observerPublicKey []byte) (pgtype.Timestamptz, error)
 	PollingElectionUnlock(ctx context.Context) error
 	PollingObserverFlags(ctx context.Context, observerPublicKey []byte) (PollingObserverFlagsRow, error)

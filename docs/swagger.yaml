@@ -1485,6 +1485,9 @@ definitions:
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.PollingAdminState:
     properties:
+      configPaused:
+        description: polling.paused in config, which pauses regardless
+        type: boolean
       excludedNodes:
         items:
           type: string
@@ -1494,6 +1497,7 @@ definitions:
           $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PollingObserver'
         type: array
       paused:
+        description: the stored pause, false once pausedUntil has passed
         type: boolean
       pausedUntil:
         description: epoch ms; null when not set
@@ -1531,6 +1535,53 @@ definitions:
       pausedUntil:
         description: epoch ms in the future, or null
         type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.PollingTarget:
+    properties:
+      candidates:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PollingTargetCandidate'
+        type: array
+      latestReading:
+        description: epoch ms, from any observer
+        type: integer
+      latestTrustedReading:
+        description: epoch ms; only readings from the poller or an assigned observer
+          with advert evidence
+        type: integer
+      publicKey:
+        description: 64 lowercase hex
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.PollingTargetCandidate:
+    properties:
+      evidenceCount:
+        type: integer
+      evidenceSnr:
+        description: mean zero-hop advert SNR at the last election
+        type: number
+      keyMode:
+        type: string
+      lastOk:
+        description: epoch ms; null when never
+        type: integer
+      misses:
+        type: integer
+      observerPublicKey:
+        description: 64 lowercase hex
+        type: string
+      rank:
+        description: 0 polls; null when unassigned
+        type: integer
+      state:
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.PollingTargetList:
+    properties:
+      targets:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PollingTarget'
+        type: array
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.RadioPreset:
     properties:
@@ -2546,7 +2597,8 @@ paths:
   /admin/polling:
     get:
       description: Pause state, excluded repeaters and every observer the operator
-        has blocked or approved.
+        has blocked or approved. paused is false once pausedUntil has passed; configPaused
+        is polling.paused from config.
       produces:
       - application/json
       responses:
@@ -2641,9 +2693,9 @@ paths:
     put:
       consumes:
       - application/json
-      description: Replaces the whole state. At most 16 excluded repeaters, each 64
-        hex characters; pausedUntil is epoch ms in the future or null. Body at most
-        4 KiB.
+      description: Replaces the whole state. At most 16 distinct excluded repeaters,
+        each 64 hex characters; pausedUntil is epoch ms in the future or null. Body
+        at most 4 KiB.
       parameters:
       - description: New state
         in: body
@@ -2691,6 +2743,42 @@ paths:
       security:
       - AdminKey: []
       summary: Replace the polling pause and exclusions
+      tags:
+      - Admin
+  /admin/polling/targets:
+    get:
+      description: Every repeater with a live claim or an assignment, newest claim
+        first, at most 500. Each lists its live candidates and assigned observers;
+        rank is null for an unassigned candidate. latestTrustedReading counts only
+        readings from the poller or an assigned observer with advert evidence.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PollingTargetList'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - AdminKey: []
+      summary: List polled repeaters and their observers
       tags:
       - Admin
   /brokers:

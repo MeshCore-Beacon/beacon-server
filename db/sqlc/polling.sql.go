@@ -437,6 +437,130 @@ func (q *Queries) LockPollingTarget(ctx context.Context, targetPublicKey []byte)
 	return err
 }
 
+const pollingAdminTargetRows = `-- name: PollingAdminTargetRows :many
+SELECT k.target_public_key::bytea AS target_public_key, k.observer_public_key::bytea AS observer_public_key,
+       COALESCE(a.rank, -1)::int AS rank, a.evidence_snr, COALESCE(a.evidence_count, 0)::int AS evidence_count,
+       COALESCE(c.key_mode, '')::text AS key_mode, COALESCE(c.state, '')::text AS state,
+       COALESCE(c.misses, 0)::int AS misses, c.last_ok
+FROM (
+    SELECT c.target_public_key, c.observer_public_key FROM polling_candidates c
+    JOIN polling_claims cl ON cl.observer_public_key = c.observer_public_key
+    WHERE c.target_public_key = ANY($1::bytea[]) AND cl.received_at > $2
+    UNION
+    SELECT a.target_public_key, a.observer_public_key FROM polling_assignments a
+    WHERE a.target_public_key = ANY($1::bytea[])
+) k
+LEFT JOIN polling_candidates c ON c.target_public_key = k.target_public_key AND c.observer_public_key = k.observer_public_key
+LEFT JOIN polling_assignments a ON a.target_public_key = k.target_public_key AND a.observer_public_key = k.observer_public_key
+ORDER BY k.target_public_key, COALESCE(a.rank, 32767), k.observer_public_key
+`
+
+type PollingAdminTargetRowsParams struct {
+	Targets       [][]byte           `json:"targets"`
+	ReceivedAfter pgtype.Timestamptz `json:"received_after"`
+}
+
+type PollingAdminTargetRowsRow struct {
+	TargetPublicKey   []byte             `json:"target_public_key"`
+	ObserverPublicKey []byte             `json:"observer_public_key"`
+	Rank              int32              `json:"rank"`
+	EvidenceSnr       *float32           `json:"evidence_snr"`
+	EvidenceCount     int32              `json:"evidence_count"`
+	KeyMode           string             `json:"key_mode"`
+	State             string             `json:"state"`
+	Misses            int32              `json:"misses"`
+	LastOk            pgtype.Timestamptz `json:"last_ok"`
+}
+
+// Each live candidate and each assigned observer of the given targets. rank is -1 for an unassigned candidate.
+func (q *Queries) PollingAdminTargetRows(ctx context.Context, arg PollingAdminTargetRowsParams) ([]PollingAdminTargetRowsRow, error) {
+	rows, err := q.db.Query(ctx, pollingAdminTargetRows, arg.Targets, arg.ReceivedAfter)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PollingAdminTargetRowsRow{}
+	for rows.Next() {
+		var i PollingAdminTargetRowsRow
+		if err := rows.Scan(
+			&i.TargetPublicKey,
+			&i.ObserverPublicKey,
+			&i.Rank,
+			&i.EvidenceSnr,
+			&i.EvidenceCount,
+			&i.KeyMode,
+			&i.State,
+			&i.Misses,
+			&i.LastOk,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const pollingAdminTargets = `-- name: PollingAdminTargets :many
+WITH t AS (
+    SELECT c.target_public_key, max(cl.received_at) AS newest_claim
+    FROM polling_candidates c
+    JOIN polling_claims cl ON cl.observer_public_key = c.observer_public_key
+    WHERE cl.received_at > $1
+    GROUP BY c.target_public_key
+    UNION ALL
+    SELECT a.target_public_key, NULL::timestamptz FROM polling_assignments a GROUP BY a.target_public_key
+), picked AS (
+    SELECT t.target_public_key, max(t.newest_claim) AS newest_claim FROM t
+    GROUP BY t.target_public_key
+    ORDER BY max(t.newest_claim) DESC NULLS LAST, t.target_public_key
+    LIMIT $2
+)
+SELECT p.target_public_key::bytea AS target_public_key,
+       (SELECT r.sampled_at FROM repeater_readings r
+        JOIN polling_assignments x ON x.target_public_key = r.target_public_key AND x.observer_public_key = r.observer_public_key
+        WHERE r.target_public_key = p.target_public_key AND (x.rank = 0 OR x.evidence_count > 0)
+        ORDER BY r.sampled_at DESC LIMIT 1)::timestamptz AS latest_trusted,
+       (SELECT r.sampled_at FROM repeater_readings r WHERE r.target_public_key = p.target_public_key
+        ORDER BY r.sampled_at DESC LIMIT 1)::timestamptz AS latest_any
+FROM picked p
+ORDER BY p.newest_claim DESC NULLS LAST, p.target_public_key
+`
+
+type PollingAdminTargetsParams struct {
+	ReceivedAfter pgtype.Timestamptz `json:"received_after"`
+	RowLimit      int32              `json:"row_limit"`
+}
+
+type PollingAdminTargetsRow struct {
+	TargetPublicKey []byte             `json:"target_public_key"`
+	LatestTrusted   pgtype.Timestamptz `json:"latest_trusted"`
+	LatestAny       pgtype.Timestamptz `json:"latest_any"`
+}
+
+// Targets with a live candidate or any assignment row, newest claim first. latest_trusted uses the owners rule.
+func (q *Queries) PollingAdminTargets(ctx context.Context, arg PollingAdminTargetsParams) ([]PollingAdminTargetsRow, error) {
+	rows, err := q.db.Query(ctx, pollingAdminTargets, arg.ReceivedAfter, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PollingAdminTargetsRow{}
+	for rows.Next() {
+		var i PollingAdminTargetsRow
+		if err := rows.Scan(&i.TargetPublicKey, &i.LatestTrusted, &i.LatestAny); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const pollingClaimReceivedAt = `-- name: PollingClaimReceivedAt :one
 SELECT received_at FROM polling_claims WHERE observer_public_key = $1
 `

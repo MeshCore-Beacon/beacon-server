@@ -164,3 +164,47 @@ WHERE NOT EXISTS (
 
 -- name: DeleteExpiredRepeaterReadings :exec
 DELETE FROM repeater_readings WHERE received_at < $1;
+
+-- name: PollingAdminTargets :many
+-- Targets with a live candidate or any assignment row, newest claim first. latest_trusted uses the owners rule.
+WITH t AS (
+    SELECT c.target_public_key, max(cl.received_at) AS newest_claim
+    FROM polling_candidates c
+    JOIN polling_claims cl ON cl.observer_public_key = c.observer_public_key
+    WHERE cl.received_at > sqlc.arg(received_after)
+    GROUP BY c.target_public_key
+    UNION ALL
+    SELECT a.target_public_key, NULL::timestamptz FROM polling_assignments a GROUP BY a.target_public_key
+), picked AS (
+    SELECT t.target_public_key, max(t.newest_claim) AS newest_claim FROM t
+    GROUP BY t.target_public_key
+    ORDER BY max(t.newest_claim) DESC NULLS LAST, t.target_public_key
+    LIMIT sqlc.arg(row_limit)
+)
+SELECT p.target_public_key::bytea AS target_public_key,
+       (SELECT r.sampled_at FROM repeater_readings r
+        JOIN polling_assignments x ON x.target_public_key = r.target_public_key AND x.observer_public_key = r.observer_public_key
+        WHERE r.target_public_key = p.target_public_key AND (x.rank = 0 OR x.evidence_count > 0)
+        ORDER BY r.sampled_at DESC LIMIT 1)::timestamptz AS latest_trusted,
+       (SELECT r.sampled_at FROM repeater_readings r WHERE r.target_public_key = p.target_public_key
+        ORDER BY r.sampled_at DESC LIMIT 1)::timestamptz AS latest_any
+FROM picked p
+ORDER BY p.newest_claim DESC NULLS LAST, p.target_public_key;
+
+-- name: PollingAdminTargetRows :many
+-- Each live candidate and each assigned observer of the given targets. rank is -1 for an unassigned candidate.
+SELECT k.target_public_key::bytea AS target_public_key, k.observer_public_key::bytea AS observer_public_key,
+       COALESCE(a.rank, -1)::int AS rank, a.evidence_snr, COALESCE(a.evidence_count, 0)::int AS evidence_count,
+       COALESCE(c.key_mode, '')::text AS key_mode, COALESCE(c.state, '')::text AS state,
+       COALESCE(c.misses, 0)::int AS misses, c.last_ok
+FROM (
+    SELECT c.target_public_key, c.observer_public_key FROM polling_candidates c
+    JOIN polling_claims cl ON cl.observer_public_key = c.observer_public_key
+    WHERE c.target_public_key = ANY(sqlc.arg(targets)::bytea[]) AND cl.received_at > sqlc.arg(received_after)
+    UNION
+    SELECT a.target_public_key, a.observer_public_key FROM polling_assignments a
+    WHERE a.target_public_key = ANY(sqlc.arg(targets)::bytea[])
+) k
+LEFT JOIN polling_candidates c ON c.target_public_key = k.target_public_key AND c.observer_public_key = k.observer_public_key
+LEFT JOIN polling_assignments a ON a.target_public_key = k.target_public_key AND a.observer_public_key = k.observer_public_key
+ORDER BY k.target_public_key, COALESCE(a.rank, 32767), k.observer_public_key;

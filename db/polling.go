@@ -311,6 +311,55 @@ func (s *Store) ListPollingObservers(ctx context.Context) ([]api.PollingObserver
 	return out, nil
 }
 
+// PollingTargetsAdmin lists up to limit targets with a live candidate or an assignment, newest claim first,
+// each with its candidates and assigned observers.
+func (s *Store) PollingTargetsAdmin(ctx context.Context, receivedAfter time.Time, limit int) ([]api.PollingTarget, error) {
+	ts0 := ts(receivedAfter)
+	trows, err := s.q.PollingAdminTargets(ctx, sqlc.PollingAdminTargetsParams{ReceivedAfter: ts0, RowLimit: int32(limit)})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]api.PollingTarget, len(trows))
+	keys := make([][]byte, len(trows))
+	index := make(map[string]int, len(trows))
+	for i, r := range trows {
+		keys[i] = r.TargetPublicKey
+		index[string(r.TargetPublicKey)] = i
+		out[i] = api.PollingTarget{PublicKey: hex.EncodeToString(r.TargetPublicKey), Candidates: []api.PollingTargetCandidate{},
+			LatestTrustedReading: epochMs(r.LatestTrusted), LatestReading: epochMs(r.LatestAny)}
+	}
+	if len(keys) == 0 {
+		return out, nil
+	}
+	crows, err := s.q.PollingAdminTargetRows(ctx, sqlc.PollingAdminTargetRowsParams{Targets: keys, ReceivedAfter: ts0})
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range crows {
+		i, ok := index[string(r.TargetPublicKey)]
+		if !ok {
+			continue
+		}
+		c := api.PollingTargetCandidate{ObserverPublicKey: hex.EncodeToString(r.ObserverPublicKey),
+			EvidenceSnr: ptrConv(r.EvidenceSnr, func(v float32) float64 { return float64(v) }), EvidenceCount: int(r.EvidenceCount),
+			KeyMode: r.KeyMode, State: r.State, Misses: int(r.Misses), LastOk: epochMs(r.LastOk)}
+		if r.Rank >= 0 {
+			rank := int(r.Rank)
+			c.Rank = &rank
+		}
+		out[i].Candidates = append(out[i].Candidates, c)
+	}
+	return out, nil
+}
+
+func epochMs(t pgtype.Timestamptz) *int64 {
+	if !t.Valid {
+		return nil
+	}
+	ms := t.Time.UnixMilli()
+	return &ms
+}
+
 // PollingElectionLock holds the election advisory lock on one dedicated connection.
 type PollingElectionLock struct {
 	conn *pgxpool.Conn
