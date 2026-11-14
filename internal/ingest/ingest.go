@@ -236,6 +236,7 @@ type Worker struct {
 	capabilities     capabilityCache
 	onNodeUpsert     func(ctx context.Context, nodeID uuid.UUID)
 	onObserverUpsert func(ctx context.Context, observerID uuid.UUID)
+	polling          PollingSink // nil when repeater polling is off
 }
 
 // New creates an ingest Worker. Call Start() to connect and begin processing.
@@ -419,6 +420,14 @@ func (w *Worker) handleMessageContext(parent context.Context, msg mqtt.Message) 
 		w.handleStatus(ctx, pubkeyHex, msg.Payload())
 	case "neighbors":
 		w.handleNeighbors(ctx, iata, pubkeyHex, msg.Payload())
+	case "polling":
+		if w.polling != nil {
+			w.polling.HandleClaim(ctx, pubkeyHex, msg.Payload())
+		}
+	case "telemetry", "battery":
+		if w.polling != nil {
+			w.polling.HandleReading(ctx, pubkeyHex, msg.Payload())
+		}
 		// "internal" is intentionally not handled (Role 2 access)
 	}
 }
