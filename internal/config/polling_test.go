@@ -29,6 +29,18 @@ func TestPollingDefaults(t *testing.T) {
 	if r.Enabled {
 		t.Fatal("polling must default to disabled")
 	}
+	if r.Authority != PollingAuthorityEvidence {
+		t.Fatalf("authority = %q", r.Authority)
+	}
+}
+
+func TestPollingAcceptsAuthority(t *testing.T) {
+	for _, a := range []string{PollingAuthorityEvidence, PollingAuthorityApproved} {
+		r, err := PollingConfig{Authority: a}.Resolve()
+		if err != nil || r.Authority != a {
+			t.Errorf("%q: %q %v", a, r.Authority, err)
+		}
+	}
 }
 
 func TestPollingRejects(t *testing.T) {
@@ -51,6 +63,8 @@ func TestPollingRejects(t *testing.T) {
 		"version suffix":    {MinClientVersion: "1.18.0-dev"},
 		"version junk":      {MinClientVersion: "junk"},
 		"version spaced":    {MinClientVersion: " 1.18.0"},
+		"authority unknown": {Authority: "open"},
+		"authority case":    {Authority: "Approved"},
 	} {
 		if _, err := c.Resolve(); err == nil {
 			t.Errorf("%s: expected error", name)

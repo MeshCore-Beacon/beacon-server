@@ -44,12 +44,13 @@ type PollingTargetCandidate struct {
 	State             string   `json:"state"`
 	Misses            int      `json:"misses"`
 	LastOk            *int64   `json:"lastOk"` // epoch ms; null when never
+	Approved          bool     `json:"approved"`
 }
 
 // PollingTarget is one repeater with a live claim or an assignment.
 type PollingTarget struct {
 	PublicKey            string                   `json:"publicKey"`            // 64 lowercase hex
-	LatestTrustedReading *int64                   `json:"latestTrustedReading"` // epoch ms; only readings from the poller or an assigned observer with advert evidence
+	LatestTrustedReading *int64                   `json:"latestTrustedReading"` // epoch ms; only readings from an assigned observer with advert evidence
 	LatestReading        *int64                   `json:"latestReading"`        // epoch ms, from any observer
 	Candidates           []PollingTargetCandidate `json:"candidates"`
 }

@@ -23,6 +23,7 @@ type PollingConfig struct {
 	MinClientVersion string   `yaml:"min_client_version"`
 	ExcludedNodes    []string `yaml:"excluded_nodes"` // 64 hex each
 	Paused           bool     `yaml:"paused"`
+	Authority        string   `yaml:"authority"` // evidence (default) or approved
 }
 
 // ResolvedPolling is PollingConfig with defaults applied and values parsed.
@@ -36,7 +37,15 @@ type ResolvedPolling struct {
 	MinClientVersion string
 	ExcludedNodes    [][]byte
 	Paused           bool
+	Authority        string
 }
+
+// Who may be elected poller: anyone with a live claim, ranked on advert evidence, or only operator-approved
+// observers. Evidence is reported by the observer itself, so approval is the setting that keeps strangers out.
+const (
+	PollingAuthorityEvidence = "evidence"
+	PollingAuthorityApproved = "approved"
+)
 
 const (
 	maxPollingHosts         = 4
@@ -55,6 +64,10 @@ func (p PollingConfig) Resolve() (ResolvedPolling, error) {
 		ReadingRetention: p.ReadingRetention.Duration,
 		MinClientVersion: p.MinClientVersion,
 		Paused:           p.Paused,
+		Authority:        p.Authority,
+	}
+	if r.Authority == "" {
+		r.Authority = PollingAuthorityEvidence
 	}
 	if r.DirectWindow == 0 {
 		r.DirectWindow = time.Hour
@@ -96,6 +109,9 @@ func (p PollingConfig) Resolve() (ResolvedPolling, error) {
 	}
 	if r.MinClientVersion != "" && !pollingVersionRe.MatchString(r.MinClientVersion) {
 		return ResolvedPolling{}, fmt.Errorf("polling.min_client_version must be X.Y.Z or empty")
+	}
+	if r.Authority != PollingAuthorityEvidence && r.Authority != PollingAuthorityApproved {
+		return ResolvedPolling{}, fmt.Errorf("polling.authority must be evidence or approved")
 	}
 	if len(p.ExcludedNodes) > maxPollingExcludedNodes {
 		return ResolvedPolling{}, fmt.Errorf("polling.excluded_nodes: at most %d entries", maxPollingExcludedNodes)

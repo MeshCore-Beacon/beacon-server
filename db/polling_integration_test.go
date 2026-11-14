@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"sort"
 	"sync"
@@ -323,7 +324,7 @@ func TestPollingOwnerRowsLatestTsPostgres(t *testing.T) {
 	if _, err := s.ReplacePollingClaim(ctx, pollClaim(o2, now, 0xA), id2, now); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ReplacePollingAssignments(ctx, pollKey(0xA), []polling.Assignment{{Observer: o2, Rank: 0}, {Observer: o1, Rank: 1}}, now); err != nil {
+	if err := s.ReplacePollingAssignments(ctx, pollKey(0xA), []polling.Assignment{{Observer: o2, Rank: 0, EvidenceCount: 1}, {Observer: o1, Rank: 1}}, now); err != nil {
 		t.Fatal(err)
 	}
 	older, newer := now.Add(-20*time.Minute), now.Add(-5*time.Minute)
@@ -710,14 +711,12 @@ func TestPollingOwnerRowsTrustedLatestPostgres(t *testing.T) {
 			t.Fatal(ok, err)
 		}
 	}
+	// Without evidence even the poller's readings hold nobody back.
 	read(1, now.Add(-time.Minute))
 	read(3, now.Add(-30*time.Second))
-	if got, _ := latest(0); got != nil {
-		t.Fatal("untrusted readings moved latest_ts", got)
-	}
 	read(0, now.Add(-20*time.Minute))
-	if got, _ := latest(0); got == nil || !got.Equal(now.Add(-20*time.Minute)) {
-		t.Fatal("poller's reading did not count", got)
+	if got, _ := latest(0); got != nil {
+		t.Fatal("readings without evidence moved latest_ts", got)
 	}
 	read(2, now.Add(-10*time.Minute))
 	if got, _ := latest(0); got == nil || !got.Equal(now.Add(-10*time.Minute)) {
@@ -793,7 +792,11 @@ func TestPollingTargetsAdminPostgres(t *testing.T) {
 	if err := s.ReplacePollingAssignments(ctx, pollKey(0xA), []polling.Assignment{{Observer: pollKey(1), Rank: 0, EvidenceSNR: &snr, EvidenceCount: 4}}, now); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ReplacePollingAssignments(ctx, pollKey(0xC), []polling.Assignment{{Observer: pollKey(9), Rank: 0}}, now); err != nil {
+	claim(5, now.Add(-2*time.Hour), 0xC) // expired, but its candidate row is kept until cleanup
+	if err := s.ReplacePollingAssignments(ctx, pollKey(0xC), []polling.Assignment{{Observer: pollKey(9), Rank: 0}, {Observer: pollKey(5), Rank: 1}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPollingObserver(ctx, pollKey(1), false, true, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.InsertRepeaterReading(ctx, pollReading(pollKey(1), 0xA, "status", now.Add(-10*time.Minute), nil), id1, now); err != nil {
@@ -819,17 +822,21 @@ func TestPollingTargetsAdminPostgres(t *testing.T) {
 	}
 	c0, c1 := a.Candidates[0], a.Candidates[1]
 	if c0.ObserverPublicKey != hex.EncodeToString(pollKey(1)) || c0.Rank == nil || *c0.Rank != 0 || c0.EvidenceSnr == nil ||
-		*c0.EvidenceSnr != 7.5 || c0.EvidenceCount != 4 || c0.KeyMode != "own" {
+		*c0.EvidenceSnr != 7.5 || c0.EvidenceCount != 4 || c0.KeyMode != "own" || !c0.Approved {
 		t.Fatalf("A poller %+v", c0)
 	}
-	if c1.ObserverPublicKey != hex.EncodeToString(pollKey(2)) || c1.Rank != nil || c1.EvidenceSnr != nil {
+	if c1.ObserverPublicKey != hex.EncodeToString(pollKey(2)) || c1.Rank != nil || c1.EvidenceSnr != nil || c1.Approved {
 		t.Fatalf("A unassigned %+v", c1)
 	}
 	if b := got[1]; len(b.Candidates) != 1 || b.Candidates[0].ObserverPublicKey != hex.EncodeToString(pollKey(3)) || b.LatestReading != nil {
 		t.Fatalf("B %+v", b)
 	}
-	if c := got[2]; len(c.Candidates) != 1 || c.Candidates[0].Rank == nil || c.Candidates[0].KeyMode != "" {
+	if c := got[2]; len(c.Candidates) != 2 || c.Candidates[0].Rank == nil || c.Candidates[0].KeyMode != "" {
 		t.Fatalf("C %+v", c)
+	}
+	// An expired claim's state is not shown as current.
+	if c := got[2].Candidates[1]; c.ObserverPublicKey != hex.EncodeToString(pollKey(5)) || c.KeyMode != "" || c.State != "" {
+		t.Fatalf("C expired claimant %+v", c)
 	}
 	if got, err := s.PollingTargetsAdmin(ctx, now.Add(-time.Hour), 2); err != nil || len(got) != 2 || got[1].PublicKey != hex.EncodeToString(pollKey(0xB)) {
 		t.Fatal("limit", len(got), err)
@@ -862,5 +869,104 @@ SELECT packet_hash,$3,'YVR',$2,0,1,0,4,-90,$4 FROM p`, pollKey(0xA), c.at, id, c
 	}
 	if cs[0].EvidenceCount != 1 || cs[0].EvidenceSNR == nil || *cs[0].EvidenceSNR != 4 {
 		t.Fatal("old advert counted", cs[0].EvidenceCount, cs[0].EvidenceSNR)
+	}
+}
+
+// pollHearAdvert records a zero-hop advert of target heard by the observer, which is election evidence.
+func pollHearAdvert(t *testing.T, ctx context.Context, pool *pgxpool.Pool, target []byte, observer uuid.UUID, at time.Time, snr float32) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `WITH p AS (
+INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,origin_pubkey,raw_payload,raw_header,first_heard_at,last_heard_at)
+VALUES (decode(md5(gen_random_uuid()::text),'hex'),4,0,1,$1,'\x00','\x00',$2,$2) RETURNING packet_hash)
+INSERT INTO packet_observations(packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count,payload_type,rssi,snr)
+SELECT packet_hash,$3,'YVR',$2,0,1,0,4,-90,$4 FROM p`, target, at, observer, snr); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func pollClaimJSON(obs, target []byte, at time.Time, misses int) []byte {
+	return fmt.Appendf(nil, `{"v":2,"origin":"o","origin_id":%q,"timestamp":%q,"plugin":"fw","nodes":[{"node_id":%q,"key":"own","misses":%d}]}`,
+		hex.EncodeToString(obs), at.Format(time.RFC3339), hex.EncodeToString(target), misses)
+}
+
+func pollReadingJSON(obs, target []byte, at time.Time, tag int) []byte {
+	return fmt.Appendf(nil, `{"v":2,"origin_id":%q,"plugin":"fw","readings":[{"node_id":%q,"method":"status","sampled_at":%q,"tag":%d}]}`,
+		hex.EncodeToString(obs), hex.EncodeToString(target), at.Format(time.RFC3339), tag)
+}
+
+func pollEntry(t *testing.T, ctx context.Context, svc *polling.Service, obs, target []byte) polling.OwnerEntry {
+	t.Helper()
+	a, err := svc.Owners(ctx, polling.Caller{Observer: obs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a.Nodes[hex.EncodeToString(target)]
+}
+
+func TestPollingEvidenceOutranksHealthyStrangerPostgres(t *testing.T) {
+	ctx, pool, s := pollStore(t)
+	svc := polling.NewService(s, config.ResolvedPolling{Enabled: true}, time.Now, slog.New(slog.DiscardHandler))
+	real, stranger, x := pollKey(1), pollKey(2), pollKey(0xA)
+	now := time.Now().UTC().Truncate(time.Second)
+	pollHearAdvert(t, ctx, pool, x, pollObserver(t, ctx, s, real), now.Add(-time.Hour), 3)
+	svc.HandleClaim(ctx, hex.EncodeToString(real), pollClaimJSON(real, x, now, 3))
+	svc.HandleClaim(ctx, hex.EncodeToString(stranger), pollClaimJSON(stranger, x, now, 0))
+	if e := pollEntry(t, ctx, svc, real, x); e.Role != "polling" || !e.Mine {
+		t.Fatalf("evidenced observer with misses: %+v", e)
+	}
+	if e := pollEntry(t, ctx, svc, stranger, x); e.Role != "standby" || e.StandbyRank != 1 {
+		t.Fatalf("stranger: %+v", e)
+	}
+	svc.HandleReading(ctx, hex.EncodeToString(stranger), pollReadingJSON(stranger, x, now, 1))
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM repeater_readings`).Scan(&n); err != nil || n != 1 {
+		t.Fatal("stranger's reading not stored", n, err)
+	}
+	if e := pollEntry(t, ctx, svc, real, x); e.LatestTS != nil {
+		t.Fatal("stranger's reading moved latest_ts", *e.LatestTS)
+	}
+}
+
+func TestPollingApprovedAuthorityPostgres(t *testing.T) {
+	ctx, pool, s := pollStore(t)
+	svc := polling.NewService(s, config.ResolvedPolling{Enabled: true, Authority: config.PollingAuthorityApproved},
+		time.Now, slog.New(slog.DiscardHandler))
+	good, best, x := pollKey(1), pollKey(2), pollKey(0xA)
+	now := time.Now().UTC().Truncate(time.Second)
+	pollHearAdvert(t, ctx, pool, x, pollObserver(t, ctx, s, good), now.Add(-time.Hour), 2)
+	pollHearAdvert(t, ctx, pool, x, pollObserver(t, ctx, s, best), now.Add(-time.Hour), 12)
+	if err := s.SetPollingObserver(ctx, good, false, true, ""); err != nil {
+		t.Fatal(err)
+	}
+	svc.HandleClaim(ctx, hex.EncodeToString(good), pollClaimJSON(good, x, now, 0))
+	svc.HandleClaim(ctx, hex.EncodeToString(best), pollClaimJSON(best, x, now, 0))
+	if e := pollEntry(t, ctx, svc, good, x); e.Role != "polling" || !e.Mine {
+		t.Fatalf("approved: %+v", e)
+	}
+	if e := pollEntry(t, ctx, svc, best, x); e.Role != "standby" || e.Mine || e.StandbyRank != 1 {
+		t.Fatalf("unapproved: %+v", e)
+	}
+	cands, err := s.ListPollingCandidates(ctx, x, now.Add(-time.Hour), now.Add(-24*time.Hour))
+	if err != nil || len(cands) != 2 {
+		t.Fatal(len(cands), err)
+	}
+	for _, c := range cands {
+		if c.Approved != bytes.Equal(c.Observer, good) {
+			t.Fatalf("approved flag for %x: %v", c.Observer[0], c.Approved)
+		}
+	}
+	svc.HandleReading(ctx, hex.EncodeToString(best), pollReadingJSON(best, x, now, 1))
+	if e := pollEntry(t, ctx, svc, good, x); e.LatestTS != nil {
+		t.Fatal("unapproved reading moved latest_ts", *e.LatestTS)
+	}
+	// Approval makes it eligible at the next election, where its evidence wins.
+	if err := s.SetPollingObserver(ctx, best, false, true, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ElectTarget(ctx, x); err != nil {
+		t.Fatal(err)
+	}
+	if e := pollEntry(t, ctx, svc, best, x); e.Role != "polling" || !e.Mine || e.LatestTS == nil {
+		t.Fatalf("after approval: %+v", e)
 	}
 }

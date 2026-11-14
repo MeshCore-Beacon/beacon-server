@@ -165,7 +165,7 @@ func listPollingCandidates(ctx context.Context, q sqlc.Querier, target []byte, r
 	out := make([]polling.Candidate, 0, len(rows))
 	for _, r := range rows {
 		c := polling.Candidate{Observer: r.ObserverPublicKey, EvidenceCount: int(r.EvidenceCount),
-			ClaimedSNR: r.ClaimedSnr, State: r.State, Misses: int(r.Misses), Blocked: r.Blocked}
+			ClaimedSNR: r.ClaimedSnr, State: r.State, Misses: int(r.Misses), Blocked: r.Blocked, Approved: r.Approved}
 		if r.EvidenceCount > 0 {
 			v := r.EvidenceSnr
 			c.EvidenceSNR = &v
@@ -342,7 +342,7 @@ func (s *Store) PollingTargetsAdmin(ctx context.Context, receivedAfter time.Time
 		}
 		c := api.PollingTargetCandidate{ObserverPublicKey: hex.EncodeToString(r.ObserverPublicKey),
 			EvidenceSnr: ptrConv(r.EvidenceSnr, func(v float32) float64 { return float64(v) }), EvidenceCount: int(r.EvidenceCount),
-			KeyMode: r.KeyMode, State: r.State, Misses: int(r.Misses), LastOk: epochMs(r.LastOk)}
+			KeyMode: r.KeyMode, State: r.State, Misses: int(r.Misses), LastOk: epochMs(r.LastOk), Approved: r.Approved}
 		if r.Rank >= 0 {
 			rank := int(r.Rank)
 			c.Rank = &rank

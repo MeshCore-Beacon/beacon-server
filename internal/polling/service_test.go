@@ -38,6 +38,7 @@ type fakeStore struct {
 	assigns     map[string][]Assignment
 	evidence    map[string]float64 // observer hex -> SNR
 	blocked     map[string]bool
+	approved    map[string]bool
 	paused      bool
 	excluded    [][]byte
 	stateErr    error
@@ -54,6 +55,7 @@ func newFakeStore() *fakeStore {
 	return &fakeStore{
 		ids: map[string]uuid.UUID{}, claims: map[string]*fakeClaim{}, readings: map[string]fakeReading{},
 		assigns: map[string][]Assignment{}, evidence: map[string]float64{}, blocked: map[string]bool{},
+		approved:   map[string]bool{},
 		electCalls: map[string]int{}, targetsFail: map[string]bool{},
 	}
 }
@@ -161,7 +163,9 @@ func (f *fakeStore) candidates(target []byte, after time.Time) []Candidate {
 			continue
 		}
 		b, _ := hex.DecodeString(obs)
-		cand := Candidate{Observer: b, Blocked: f.blocked[obs]}
+		n := f.claims[obs].nodes[hx(target)]
+		cand := Candidate{Observer: b, Blocked: f.blocked[obs], Approved: f.approved[obs],
+			ClaimedSNR: n.ClaimedSNR, State: n.State, Misses: n.Misses}
 		if v, ok := f.evidence[obs]; ok {
 			cand.EvidenceSNR = &v
 			cand.EvidenceCount = 5
@@ -213,7 +217,7 @@ func (f *fakeStore) PollingOwnerRows(_ context.Context, obs []byte, after time.T
 			if bytes.Equal(a.Observer, obs) {
 				row.Rank = a.Rank
 			}
-			trusted[hx(a.Observer)] = a.Rank == 0 || a.EvidenceCount > 0
+			trusted[hx(a.Observer)] = a.EvidenceCount > 0
 		}
 		for _, r := range f.readings {
 			if r.target == t && trusted[r.observer] && (row.LatestTS == nil || r.sampled.After(*row.LatestTS)) {
@@ -235,7 +239,7 @@ func (f *fakeStore) PollingObserverFlags(_ context.Context, obs []byte) (bool, b
 	if f.stateErr != nil {
 		return false, false, f.stateErr
 	}
-	return f.blocked[hx(obs)], false, nil
+	return f.blocked[hx(obs)], f.approved[hx(obs)], nil
 }
 
 func (f *fakeStore) PollingState(context.Context) (bool, *time.Time, [][]byte, error) {
@@ -268,6 +272,13 @@ func newSvc(t *testing.T, enabled bool) (*Service, *fakeStore, *clock) {
 	return NewService(st, cfg, ck.now, slog.New(slog.NewTextHandler(io.Discard, nil))), st, ck
 }
 
+func newSvcAuthority(t *testing.T, authority string) (*Service, *fakeStore, *clock) {
+	t.Helper()
+	s, st, ck := newSvc(t, true)
+	s.cfg.Authority = authority
+	return s, st, ck
+}
+
 func k32(b byte) []byte { return bytes.Repeat([]byte{b}, 32) }
 
 func mustOwners(t *testing.T, s *Service, c Caller) OwnersAnswer {
@@ -295,6 +306,13 @@ func claimJSON(obs []byte, ts time.Time, targets ...[]byte) []byte {
 	}
 	b, _ := json.Marshal(map[string]any{"v": 2, "origin": "obs", "origin_id": hx(obs),
 		"timestamp": ts.Format(time.RFC3339), "plugin": "fw", "nodes": nodes})
+	return b
+}
+
+func claimMissesJSON(obs []byte, ts time.Time, target []byte, misses int) []byte {
+	b, _ := json.Marshal(map[string]any{"v": 2, "origin": "obs", "origin_id": hx(obs),
+		"timestamp": ts.Format(time.RFC3339), "plugin": "fw",
+		"nodes": []map[string]any{{"node_id": hx(target), "key": "own", "misses": misses}}})
 	return b
 }
 
@@ -412,6 +430,7 @@ func TestHandleReadingDuplicate(t *testing.T) {
 	s, st, _ := newSvc(t, true)
 	o, x := k32(1), k32(0xa)
 	ctx := context.Background()
+	st.evidence[hx(o)] = 5 // only an evidenced poller's readings set latest_ts
 	s.HandleClaim(ctx, hx(o), claimJSON(o, t0, x))
 	at := t0.Add(-10 * time.Minute)
 	s.HandleReading(ctx, hx(o), readingJSON(o, x, at))
@@ -698,6 +717,7 @@ func TestBlockedObserverReadingDropped(t *testing.T) {
 	s, st, _ := newSvc(t, true)
 	good, bad, x := k32(1), k32(2), k32(0xa)
 	ctx := context.Background()
+	st.evidence[hx(good)] = 5
 	s.HandleClaim(ctx, hx(good), claimJSON(good, t0, x))
 	s.HandleClaim(ctx, hx(bad), claimJSON(bad, t0, x))
 	s.HandleReading(ctx, hx(good), readingJSON(good, x, t0.Add(-time.Hour)))
@@ -745,5 +765,110 @@ func TestParseErrorLogHasNoPayload(t *testing.T) {
 	}
 	if strings.Contains(buf.String(), junk) {
 		t.Fatalf("payload leaked into log: %s", buf.String())
+	}
+}
+
+func TestEvidencedFailingPollerOutranksHealthyStranger(t *testing.T) {
+	s, st, _ := newSvc(t, true)
+	real, stranger, x := k32(1), k32(2), k32(0xa)
+	ctx := context.Background()
+	st.evidence[hx(real)] = 4
+	s.HandleClaim(ctx, hx(real), claimMissesJSON(real, t0, x, MissLimit))
+	s.HandleClaim(ctx, hx(stranger), claimMissesJSON(stranger, t0, x, 0))
+	if e := mustOwners(t, s, Caller{Observer: real}).Nodes[hx(x)]; e.Role != "polling" || !e.Mine {
+		t.Fatalf("evidenced observer = %+v", e)
+	}
+	if e := mustOwners(t, s, Caller{Observer: stranger}).Nodes[hx(x)]; e.Role != "standby" || e.StandbyRank != 1 {
+		t.Fatalf("stranger = %+v", e)
+	}
+	s.HandleReading(ctx, hx(stranger), readingJSON(stranger, x, t0))
+	if st.readingCount() != 1 {
+		t.Fatal("stranger's reading not stored")
+	}
+	for _, o := range [][]byte{real, stranger} {
+		if got := mustOwners(t, s, Caller{Observer: o}).Nodes[hx(x)].LatestTS; got != nil {
+			t.Fatalf("reading without evidence moved latest_ts to %s", *got)
+		}
+	}
+}
+
+func TestSoleUnevidencedPollerHoldsNobodyBack(t *testing.T) {
+	s, st, ck := newSvc(t, true)
+	o1, o2, x := k32(1), k32(2), k32(0xa)
+	ctx := context.Background()
+	s.HandleClaim(ctx, hx(o1), claimJSON(o1, t0, x))
+	if e := mustOwners(t, s, Caller{Observer: o1}).Nodes[hx(x)]; e.Role != "polling" || !e.Mine {
+		t.Fatalf("sole observer = %+v", e)
+	}
+	s.HandleReading(ctx, hx(o1), readingJSON(o1, x, t0))
+	ck.t = t0.Add(time.Minute)
+	s.HandleClaim(ctx, hx(o2), claimJSON(o2, ck.t, x))
+	if st.readingCount() != 1 {
+		t.Fatal("reading not stored")
+	}
+	for _, o := range [][]byte{o1, o2} {
+		if got := mustOwners(t, s, Caller{Observer: o}).Nodes[hx(x)].LatestTS; got != nil {
+			t.Fatalf("latest_ts = %s", *got)
+		}
+	}
+}
+
+func TestApprovedAuthority(t *testing.T) {
+	good, best, x := k32(1), k32(2), k32(0xa)
+	ctx := context.Background()
+	setup := func(authority string) (*Service, *fakeStore, *clock) {
+		s, st, ck := newSvcAuthority(t, authority)
+		st.evidence[hx(good)] = 2
+		st.evidence[hx(best)] = 9
+		st.approved[hx(good)] = true
+		s.HandleClaim(ctx, hx(good), claimJSON(good, t0, x))
+		s.HandleClaim(ctx, hx(best), claimJSON(best, t0, x))
+		return s, st, ck
+	}
+
+	// Evidence mode is unchanged: the best evidence polls whatever its approval.
+	s, _, _ := setup(config.PollingAuthorityEvidence)
+	if e := mustOwners(t, s, Caller{Observer: best}).Nodes[hx(x)]; e.Role != "polling" || !e.Mine {
+		t.Fatalf("evidence mode: best = %+v", e)
+	}
+
+	s, st, ck := setup(config.PollingAuthorityApproved)
+	if a := st.assigns[hx(x)]; len(a) != 1 || !bytes.Equal(a[0].Observer, good) {
+		t.Fatalf("assigns = %v", a)
+	}
+	if e := mustOwners(t, s, Caller{Observer: good}).Nodes[hx(x)]; e.Role != "polling" || !e.Mine {
+		t.Fatalf("approved = %+v", e)
+	}
+	if e := mustOwners(t, s, Caller{Observer: best}).Nodes[hx(x)]; e.Role != "standby" || e.Mine || e.StandbyRank != 1 {
+		t.Fatalf("unapproved = %+v", e)
+	}
+	s.HandleReading(ctx, hx(best), readingJSON(best, x, t0))
+	if got := mustOwners(t, s, Caller{Observer: good}).Nodes[hx(x)].LatestTS; got != nil || st.readingCount() != 1 {
+		t.Fatalf("unapproved reading: latest_ts %v, rows %d", got, st.readingCount())
+	}
+
+	// Approval makes it eligible at the next election, where its evidence wins.
+	st.approved[hx(best)] = true
+	ck.t = t0.Add(time.Minute)
+	if err := s.ElectTarget(ctx, x); err != nil {
+		t.Fatal(err)
+	}
+	if e := mustOwners(t, s, Caller{Observer: best}).Nodes[hx(x)]; e.Role != "polling" || !e.Mine {
+		t.Fatalf("after approval = %+v", e)
+	}
+	if got := mustOwners(t, s, Caller{Observer: good}).Nodes[hx(x)].LatestTS; got == nil || *got != t0.Format(time.RFC3339) {
+		t.Fatal("approved poller's reading did not count", got)
+	}
+}
+
+func TestApprovedAuthorityNobodyApprovedFailsOpen(t *testing.T) {
+	s, st, _ := newSvcAuthority(t, config.PollingAuthorityApproved)
+	o, x := k32(1), k32(0xa)
+	s.HandleClaim(context.Background(), hx(o), claimJSON(o, t0, x))
+	if len(st.assigns[hx(x)]) != 0 {
+		t.Fatal("unapproved observer was assigned")
+	}
+	if e := mustOwners(t, s, Caller{Observer: o}).Nodes[hx(x)]; e.Role != "polling" || !e.Mine {
+		t.Fatalf("entry = %+v", e)
 	}
 }

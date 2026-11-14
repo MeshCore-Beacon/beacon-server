@@ -24,6 +24,7 @@ type Candidate struct {
 	State         string
 	Misses        int
 	Blocked       bool
+	Approved      bool // set by the operator; only matters with polling.authority = approved
 }
 
 // Assignment is one observer's place in the order for a repeater. Rank 0 polls.
@@ -38,27 +39,39 @@ func eligible(c Candidate) bool {
 	return !c.Blocked && c.State != "admin_stop" && c.State != "not_direct"
 }
 
+// approvedOnly returns the candidates the operator approved, for polling.authority = approved.
+func approvedOnly(cands []Candidate) []Candidate {
+	out := make([]Candidate, 0, len(cands))
+	for _, c := range cands {
+		if c.Approved {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 func failingCand(c Candidate) bool { return c.Misses >= MissLimit }
 
-// better reports whether a ranks ahead of b: healthy before failing, then
-// evidence, then claimed SNR for those without, with the key bytes last.
+func hasEvidence(c Candidate) bool { return c.EvidenceSNR != nil }
+
+// better reports whether a ranks ahead of b: evidence before none, then healthy before failing, then evidence SNR
+// and count, or claimed SNR for those without, with the key bytes last. Evidence leads so an observer Beacon has
+// never heard the repeater through cannot outrank one it has.
 func better(a, b Candidate) bool {
+	if hasEvidence(a) != hasEvidence(b) {
+		return hasEvidence(a)
+	}
 	if failingCand(a) != failingCand(b) {
 		return !failingCand(a)
 	}
-	switch {
-	case a.EvidenceSNR != nil && b.EvidenceSNR == nil:
-		return true
-	case a.EvidenceSNR == nil && b.EvidenceSNR != nil:
-		return false
-	case a.EvidenceSNR != nil:
+	if hasEvidence(a) {
 		if *a.EvidenceSNR != *b.EvidenceSNR {
 			return *a.EvidenceSNR > *b.EvidenceSNR
 		}
 		if a.EvidenceCount != b.EvidenceCount {
 			return a.EvidenceCount > b.EvidenceCount
 		}
-	default:
+	} else {
 		switch {
 		case a.ClaimedSNR != nil && b.ClaimedSNR == nil:
 			return true
@@ -113,13 +126,16 @@ func bestOther(ranked []Candidate, ci int) Candidate {
 	return ranked[0]
 }
 
-// displaced reports whether the best other candidate takes a healthy current's slot.
+// displaced reports whether the best other candidate takes a healthy current's slot. Evidence beats no evidence
+// even when failing; within the evidence group a failing challenger never displaces and hysteresis applies.
 func displaced(cur, best Candidate) bool {
-	if failingCand(best) || best.EvidenceSNR == nil {
+	switch {
+	case !hasEvidence(best):
 		return false
-	}
-	if cur.EvidenceSNR == nil {
+	case !hasEvidence(cur):
 		return true
+	case failingCand(best):
+		return false
 	}
 	return *best.EvidenceSNR-*cur.EvidenceSNR >= HysteresisDB
 }

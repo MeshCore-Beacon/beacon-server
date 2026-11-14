@@ -65,7 +65,7 @@ ORDER BY target_public_key;
 -- name: ListPollingCandidates :many
 -- Evidence: zero-hop adverts of the target this observer heard since $3, with missing signal (0/0) left out. mean_snr is 0 when n is 0.
 SELECT c.observer_public_key, c.claimed_snr, c.state, c.misses,
-       COALESCE(po.blocked, false) AS blocked,
+       COALESCE(po.blocked, false) AS blocked, COALESCE(po.approved, false) AS approved,
        ev.n AS evidence_count, ev.mean_snr AS evidence_snr
 FROM polling_candidates c
 JOIN polling_claims cl ON cl.observer_public_key = c.observer_public_key
@@ -97,13 +97,13 @@ INSERT INTO polling_assignments (target_public_key, observer_public_key, rank, e
 VALUES ($1, $2, $3, $4, $5, $6);
 
 -- name: PollingOwnerRows :many
--- assigned counts the target's assignment rows. latest_ts only trusts readings from an assigned observer that is
--- rank 0 or has advert evidence, so a bystander's readings cannot stand the real pollers down.
+-- assigned counts the target's assignment rows. latest_ts only trusts readings from an assigned observer with
+-- advert evidence, so an observer Beacon has never heard the repeater through cannot stand others down.
 SELECT c.target_public_key, COALESCE(a.rank, -1)::int AS rank,
        (SELECT count(*) FROM polling_assignments x WHERE x.target_public_key = c.target_public_key)::int AS assigned,
        (SELECT r.sampled_at FROM repeater_readings r
         JOIN polling_assignments t ON t.target_public_key = r.target_public_key AND t.observer_public_key = r.observer_public_key
-        WHERE r.target_public_key = c.target_public_key AND (t.rank = 0 OR t.evidence_count > 0)
+        WHERE r.target_public_key = c.target_public_key AND t.evidence_count > 0
         ORDER BY r.sampled_at DESC LIMIT 1)::timestamptz AS latest_ts
 FROM polling_candidates c
 JOIN polling_claims cl ON cl.observer_public_key = c.observer_public_key
@@ -184,7 +184,7 @@ WITH t AS (
 SELECT p.target_public_key::bytea AS target_public_key,
        (SELECT r.sampled_at FROM repeater_readings r
         JOIN polling_assignments x ON x.target_public_key = r.target_public_key AND x.observer_public_key = r.observer_public_key
-        WHERE r.target_public_key = p.target_public_key AND (x.rank = 0 OR x.evidence_count > 0)
+        WHERE r.target_public_key = p.target_public_key AND x.evidence_count > 0
         ORDER BY r.sampled_at DESC LIMIT 1)::timestamptz AS latest_trusted,
        (SELECT r.sampled_at FROM repeater_readings r WHERE r.target_public_key = p.target_public_key
         ORDER BY r.sampled_at DESC LIMIT 1)::timestamptz AS latest_any
@@ -193,10 +193,11 @@ ORDER BY p.newest_claim DESC NULLS LAST, p.target_public_key;
 
 -- name: PollingAdminTargetRows :many
 -- Each live candidate and each assigned observer of the given targets. rank is -1 for an unassigned candidate.
+-- Claim fields come only from a live claim, so an assignment left over from an expired one shows them empty.
 SELECT k.target_public_key::bytea AS target_public_key, k.observer_public_key::bytea AS observer_public_key,
        COALESCE(a.rank, -1)::int AS rank, a.evidence_snr, COALESCE(a.evidence_count, 0)::int AS evidence_count,
        COALESCE(c.key_mode, '')::text AS key_mode, COALESCE(c.state, '')::text AS state,
-       COALESCE(c.misses, 0)::int AS misses, c.last_ok
+       COALESCE(c.misses, 0)::int AS misses, c.last_ok, COALESCE(po.approved, false) AS approved
 FROM (
     SELECT c.target_public_key, c.observer_public_key FROM polling_candidates c
     JOIN polling_claims cl ON cl.observer_public_key = c.observer_public_key
@@ -205,6 +206,12 @@ FROM (
     SELECT a.target_public_key, a.observer_public_key FROM polling_assignments a
     WHERE a.target_public_key = ANY(sqlc.arg(targets)::bytea[])
 ) k
-LEFT JOIN polling_candidates c ON c.target_public_key = k.target_public_key AND c.observer_public_key = k.observer_public_key
+LEFT JOIN (
+    SELECT lc.target_public_key, lc.observer_public_key, lc.key_mode, lc.state, lc.misses, lc.last_ok
+    FROM polling_candidates lc
+    JOIN polling_claims lcl ON lcl.observer_public_key = lc.observer_public_key
+    WHERE lc.target_public_key = ANY(sqlc.arg(targets)::bytea[]) AND lcl.received_at > sqlc.arg(received_after)
+) c ON c.target_public_key = k.target_public_key AND c.observer_public_key = k.observer_public_key
 LEFT JOIN polling_assignments a ON a.target_public_key = k.target_public_key AND a.observer_public_key = k.observer_public_key
+LEFT JOIN polling_observers po ON po.observer_public_key = k.observer_public_key
 ORDER BY k.target_public_key, COALESCE(a.rank, 32767), k.observer_public_key;

@@ -6587,7 +6587,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "latestTrustedReading": {
-                    "description": "epoch ms; only readings from the poller or an assigned observer with advert evidence",
+                    "description": "epoch ms; only readings from an assigned observer with advert evidence",
                     "type": "integer"
                 },
                 "publicKey": {
@@ -6599,6 +6599,9 @@ const docTemplate = `{
         "github_com_MeshCore-Beacon_beacon-server_internal_api.PollingTargetCandidate": {
             "type": "object",
             "properties": {
+                "approved": {
+                    "type": "boolean"
+                },
                 "evidenceCount": {
                     "type": "integer"
                 },

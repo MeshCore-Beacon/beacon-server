@@ -156,8 +156,9 @@ func TestElectIgnoresInputOrderAndDoesNotMutate(t *testing.T) {
 	}
 	base[4].ClaimedSNR = f32(7)
 	want := order(Elect(base, []byte{'A'}))
-	if string(want[len(want)-3:]) != "GIH" {
-		t.Fatalf("failing candidates should rank last, got %q", want)
+	// Evidence first (healthy, then failing), then no evidence (healthy, then failing).
+	if string(want) != "ACBFGIEDH" {
+		t.Fatalf("order = %q", want)
 	}
 	rng := rand.New(rand.NewSource(1))
 	for i := 0; i < 50; i++ {
@@ -207,4 +208,36 @@ func TestElectFailingNoEvidenceBelowHealthyNoEvidence(t *testing.T) {
 func TestElectFailingNeverDisplacesHealthyCurrent(t *testing.T) {
 	cs := []Candidate{cand('A', f64(1), 1), failing(cand('B', f64(30), 1), 3)}
 	wantOrder(t, Elect(cs, []byte{'A'}), "AB")
+}
+
+func TestElectEvidenceBeforeHealth(t *testing.T) {
+	// A has been heard through and missed three times; B has no evidence and claims no misses.
+	a := failing(cand('A', f64(2), 4), MissLimit)
+	b := cand('B', nil, 0)
+	b.ClaimedSNR = f32(20)
+	for _, cur := range [][]byte{nil, {'A'}, {'B'}} {
+		wantOrder(t, Elect([]Candidate{b, a}, cur), "AB")
+	}
+}
+
+func TestElectNoEvidenceCurrentLosesToFailingEvidence(t *testing.T) {
+	cs := []Candidate{cand('A', nil, 0), failing(cand('B', f64(-10), 1), MissLimit+1)}
+	wantOrder(t, Elect(cs, []byte{'A'}), "BA")
+}
+
+func TestElectSoleNoEvidenceStillPolls(t *testing.T) {
+	wantOrder(t, Elect([]Candidate{cand('B', nil, 0)}, nil), "B")
+	wantOrder(t, Elect([]Candidate{failing(cand('B', nil, 0), MissLimit)}, []byte{'B'}), "B")
+}
+
+func TestApprovedOnly(t *testing.T) {
+	a, b := cand('A', f64(9), 3), cand('B', f64(1), 1)
+	b.Approved = true
+	in := []Candidate{a, b}
+	if got := approvedOnly(in); len(got) != 1 || got[0].Observer[0] != 'B' {
+		t.Fatalf("got %v", got)
+	}
+	if !reflect.DeepEqual(in, []Candidate{a, b}) {
+		t.Fatal("input modified")
+	}
 }

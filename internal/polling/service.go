@@ -257,7 +257,15 @@ func (s *Service) Owners(ctx context.Context, c Caller) (OwnersAnswer, error) {
 // ElectTarget recomputes the order of observers for one repeater. No candidates clears it.
 func (s *Service) ElectTarget(ctx context.Context, target []byte) error {
 	now := s.now()
-	return s.store.ElectPollingTarget(ctx, target, now.Add(-ClaimTTL), now.Add(-EvidenceWindow), now, Elect)
+	return s.store.ElectPollingTarget(ctx, target, now.Add(-ClaimTTL), now.Add(-EvidenceWindow), now, s.decide)
+}
+
+// decide is Elect, limited to operator-approved observers when polling.authority is approved.
+func (s *Service) decide(cands []Candidate, current []byte) []Assignment {
+	if s.cfg.Authority == config.PollingAuthorityApproved {
+		cands = approvedOnly(cands)
+	}
+	return Elect(cands, current)
 }
 
 // ElectAll re-elects every known target. One failure does not stop the rest; the first error is returned.
