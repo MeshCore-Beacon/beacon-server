@@ -35,15 +35,20 @@ type Querier interface {
 	CheckPacketSitesSlice(ctx context.Context, arg CheckPacketSitesSliceParams) (CheckPacketSitesSliceRow, error)
 	// Keeps fetch timing so re-enabling still respects backoff; the ETag goes with the rows.
 	ClearRepeaters(ctx context.Context) (int64, error)
+	// packet_hash is 8 bytes on both sides (SHA-256 truncated by the meshcore library), so it matches by equality.
+	CorroborateReadings(ctx context.Context, arg CorroborateReadingsParams) (int64, error)
 	// How many messages were sent at or after since, counted to at most row_limit: idx_channel_messages_sent alone.
 	CountChannelMessagesSentSince(ctx context.Context, arg CountChannelMessagesSentSinceParams) (int64, error)
 	CreateAccount(ctx context.Context, name string) (Account, error)
+	CurrentPollingPoller(ctx context.Context, targetPublicKey []byte) ([]byte, error)
 	// Lock the current row before deciding the outcome, including when another
 	// deactivation commits while this statement is waiting for its row lock.
 	DeactivateAccount(ctx context.Context, id uuid.UUID) (DeactivateAccountRow, error)
 	DeleteAllChannelMembers(ctx context.Context) error
 	DeleteChannelConfigScopes(ctx context.Context) error
 	DeleteChannelMembersNotIn(ctx context.Context, arg DeleteChannelMembersNotInParams) error
+	DeleteExpiredPollingClaims(ctx context.Context, claimedAt pgtype.Timestamptz) error
+	DeleteExpiredRepeaterReadings(ctx context.Context, sampledAt pgtype.Timestamptz) error
 	// One batch past retention, keyset after the per-run cursor (the first call passes -infinity, 0).
 	// The truncated bound (ms ceiling of the cutoff) drives idx_known_routes_keyset; the exact
 	// residual decides membership. + interval 0 keeps the exact cutoff a Filter, so the planner
@@ -76,6 +81,9 @@ type Querier interface {
 	// Keeps the trace IATA filter in step with packet retention.
 	DeleteOldTraceIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error
 	DeleteOldTraceTags(ctx context.Context, lastHeardAt pgtype.Timestamptz) error
+	DeleteOrphanPollingAssignments(ctx context.Context) error
+	DeletePollingAssignments(ctx context.Context, targetPublicKey []byte) error
+	DeletePollingCandidates(ctx context.Context, observerPublicKey []byte) error
 	DeleteRegionIATAsNotIn(ctx context.Context, arg DeleteRegionIATAsNotInParams) error
 	DeleteRepeaterSource(ctx context.Context, source string) error
 	DeleteRollupHour(ctx context.Context, hour pgtype.Timestamptz) error
@@ -185,6 +193,7 @@ type Querier interface {
 	// The hours walked stay inside the table's own [min(hour), max(hour)]; an empty table walks none
 	// (a NULL start makes generate_series return no rows).
 	GetPathStatsProbe(ctx context.Context, arg GetPathStatsProbeParams) ([]GetPathStatsProbeRow, error)
+	GetPollingState(ctx context.Context) (GetPollingStateRow, error)
 	GetRadioPresets(ctx context.Context, arg GetRadioPresetsParams) ([]MvRadioPreset, error)
 	// The newest packet time retention has deleted; observations heard after it plus 30 minutes are all still stored.
 	GetRawDeletedBefore(ctx context.Context) (pgtype.Timestamptz, error)
@@ -246,6 +255,7 @@ type Querier interface {
 	GetTopNodesProbe(ctx context.Context, arg GetTopNodesProbeParams) ([]GetTopNodesProbeRow, error)
 	GetTransportScopeByName(ctx context.Context, name string) (int32, error)
 	GetTransportScopes(ctx context.Context) ([]GetTransportScopesRow, error)
+	HasLivePollingCandidate(ctx context.Context, arg HasLivePollingCandidateParams) (bool, error)
 	// Whether any observation up to @max_id lacks a payload type. A full scan, run at most once per
 	// process by the payload-type backfill.
 	HasUntypedObservations(ctx context.Context, maxID int64) (bool, error)
@@ -272,6 +282,9 @@ type Querier interface {
 	// Inserts a telemetry snapshot for an observer. The reported_at timestamp should
 	// be truncated to the configured resolution before calling to ensure deduplication.
 	InsertObserverTelemetry(ctx context.Context, arg InsertObserverTelemetryParams) error
+	InsertPollingAssignment(ctx context.Context, arg InsertPollingAssignmentParams) error
+	InsertPollingCandidate(ctx context.Context, arg InsertPollingCandidateParams) error
+	InsertRepeaterReading(ctx context.Context, arg InsertRepeaterReadingParams) (int64, error)
 	ListAccounts(ctx context.Context) ([]Account, error)
 	// The original all-channel message statement, before the channel read model: no page runs it
 	// (planpolicy.VerificationOnly); tests compare message pages with it.
@@ -450,6 +463,10 @@ type Querier interface {
 	ListPacketsWindow(ctx context.Context, arg ListPacketsWindowParams) ([]ListPacketsWindowRow, error)
 	// ListPacketsWindow with branch 1 run once per named scope and branch 2 limited to those scopes.
 	ListPacketsWindowScoped(ctx context.Context, arg ListPacketsWindowScopedParams) ([]ListPacketsWindowScopedRow, error)
+	// Evidence: zero-hop adverts of the target this observer heard since $3, with missing signal (0/0) left out. mean_snr is 0 when n is 0.
+	ListPollingCandidates(ctx context.Context, arg ListPollingCandidatesParams) ([]ListPollingCandidatesRow, error)
+	// A target with only expired claims is still listed while it has assignment rows, so the caller can clear them.
+	ListPollingTargets(ctx context.Context, claimedAt pgtype.Timestamptz) ([][]byte, error)
 	// Every region with its members, for reconciling imported MeshMapper groups.
 	ListRegionState(ctx context.Context) ([]ListRegionStateRow, error)
 	// ============================================================
@@ -494,6 +511,8 @@ type Querier interface {
 	ObservationIDBelow(ctx context.Context, arg ObservationIDBelowParams) (int64, error)
 	OldestMissingRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
 	PacketSitesTotalBytes(ctx context.Context) (int64, error)
+	PollingObserverFlags(ctx context.Context, observerPublicKey []byte) (PollingObserverFlagsRow, error)
+	PollingOwnerRows(ctx context.Context, arg PollingOwnerRowsParams) ([]PollingOwnerRowsRow, error)
 	PruneImportedRegions(ctx context.Context, keep []string) ([]string, error)
 	// Drops imports for IATAs no longer configured, so their manual border returns.
 	PruneZoneBoundaries(ctx context.Context, keep []string) ([]string, error)
@@ -594,6 +613,8 @@ type Querier interface {
 	SetNodeMultibytePaths(ctx context.Context, id uuid.UUID) error
 	SetNodeMultibyteTraces(ctx context.Context, id uuid.UUID) error
 	SetPacketDecrypted(ctx context.Context, packetHash []byte) error
+	SetPollingObserver(ctx context.Context, arg SetPollingObserverParams) error
+	SetPollingState(ctx context.Context, arg SetPollingStateParams) error
 	SetRollupHourPartial(ctx context.Context, hour pgtype.Timestamptz) error
 	// Read-only. Visits, through each time-ordered packet_sites index, every entry whose key was written in the last
 	// lookback (2 minutes). An index scan that reaches an entry whose heap tuple is dead to every snapshot sets the
@@ -695,6 +716,8 @@ type Querier interface {
 	// A new TRACE packet adds itself to its tag summary in the same statement, so the summary
 	// can't miss a stored packet. 'TRACE' > 'PING'; the longest path keeps the best payload.
 	UpsertPacket(ctx context.Context, arg UpsertPacketParams) (UpsertPacketRow, error)
+	// Only a newer claim replaces the stored one; zero rows means it was ignored.
+	UpsertPollingClaim(ctx context.Context, arg UpsertPollingClaimParams) (int64, error)
 	UpsertRegion(ctx context.Context, arg UpsertRegionParams) (int32, error)
 	// ============================================================
 	// TRANSPORT CODES

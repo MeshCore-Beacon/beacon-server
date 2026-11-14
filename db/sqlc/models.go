@@ -492,6 +492,54 @@ type PacketSite struct {
 	ScopeID      *int32             `json:"scope_id"`
 }
 
+type PollingAssignment struct {
+	TargetPublicKey   []byte             `json:"target_public_key"`
+	ObserverPublicKey []byte             `json:"observer_public_key"`
+	Rank              int16              `json:"rank"`
+	EvidenceSnr       *float32           `json:"evidence_snr"`
+	EvidenceCount     int32              `json:"evidence_count"`
+	AssignedAt        pgtype.Timestamptz `json:"assigned_at"`
+}
+
+type PollingCandidate struct {
+	ObserverPublicKey []byte             `json:"observer_public_key"`
+	TargetPublicKey   []byte             `json:"target_public_key"`
+	KeyMode           string             `json:"key_mode"`
+	ClaimedSnr        *float32           `json:"claimed_snr"`
+	Requested         bool               `json:"requested"`
+	State             string             `json:"state"`
+	Misses            int16              `json:"misses"`
+	LastAttempt       pgtype.Timestamptz `json:"last_attempt"`
+	LastOk            pgtype.Timestamptz `json:"last_ok"`
+}
+
+type PollingClaim struct {
+	ObserverPublicKey []byte             `json:"observer_public_key"`
+	ObserverID        uuid.UUID          `json:"observer_id"`
+	Origin            string             `json:"origin"`
+	Client            string             `json:"client"`
+	PolicyVersion     string             `json:"policy_version"`
+	Community         bool               `json:"community"`
+	AcceptsRequests   bool               `json:"accepts_requests"`
+	RequestSlots      int16              `json:"request_slots"`
+	ClaimedAt         pgtype.Timestamptz `json:"claimed_at"`
+	ReceivedAt        pgtype.Timestamptz `json:"received_at"`
+}
+
+type PollingObserver struct {
+	ObserverPublicKey []byte `json:"observer_public_key"`
+	Blocked           bool   `json:"blocked"`
+	Approved          bool   `json:"approved"`
+	Note              string `json:"note"`
+}
+
+type PollingState struct {
+	ID            bool               `json:"id"`
+	Paused        bool               `json:"paused"`
+	PausedUntil   pgtype.Timestamptz `json:"paused_until"`
+	ExcludedNodes [][]byte           `json:"excluded_nodes"`
+}
+
 type ReconfirmAmb struct {
 	Iata   string `json:"iata"`
 	Len    int32  `json:"len"`
@@ -516,6 +564,41 @@ type RegionIata struct {
 	RegionID int32              `json:"region_id"`
 	Iata     string             `json:"iata"`
 	AddedAt  pgtype.Timestamptz `json:"added_at"`
+}
+
+type RepeaterReading struct {
+	ID              int64              `json:"id"`
+	TargetPublicKey []byte             `json:"target_public_key"`
+	NodeID          pgtype.UUID        `json:"node_id"`
+	ObserverID      uuid.UUID          `json:"observer_id"`
+	SampledAt       pgtype.Timestamptz `json:"sampled_at"`
+	ReceivedAt      pgtype.Timestamptz `json:"received_at"`
+	Method          string             `json:"method"`
+	Tag             int64              `json:"tag"`
+	BatteryMv       *int32             `json:"battery_mv"`
+	TemperatureC    *float32           `json:"temperature_c"`
+	PollSnr         *float32           `json:"poll_snr"`
+	UptimeSecs      *int64             `json:"uptime_secs"`
+	PacketsRecv     *int64             `json:"packets_recv"`
+	PacketsSent     *int64             `json:"packets_sent"`
+	RecvFlood       *int64             `json:"recv_flood"`
+	RecvDirect      *int64             `json:"recv_direct"`
+	SentFlood       *int64             `json:"sent_flood"`
+	SentDirect      *int64             `json:"sent_direct"`
+	TxAirSecs       *int64             `json:"tx_air_secs"`
+	RxAirSecs       *int64             `json:"rx_air_secs"`
+	RecvErrors      *int64             `json:"recv_errors"`
+	NoiseFloor      *int32             `json:"noise_floor"`
+	LastRssi        *int32             `json:"last_rssi"`
+	TxQueue         *int32             `json:"tx_queue"`
+	FloodDups       *int32             `json:"flood_dups"`
+	DirectDups      *int32             `json:"direct_dups"`
+	ErrEvents       *int32             `json:"err_events"`
+	LastSnr         *float32           `json:"last_snr"`
+	Lpp             []byte             `json:"lpp"`
+	PacketHash      []byte             `json:"packet_hash"`
+	Corroborated    *int16             `json:"corroborated"`
+	Client          string             `json:"client"`
 }
 
 type RollupOb struct {
