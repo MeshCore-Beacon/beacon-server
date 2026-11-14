@@ -425,3 +425,4 @@ cache:
 #  min_client_version: ""      # X.Y.Z or empty; older observer firmware gets version_ok false
 #  excluded_nodes: []          # up to 16 public keys, 64 hex characters each
 #  paused: false
+#  authority: evidence         # evidence or approved; approved elects only observers you approve
