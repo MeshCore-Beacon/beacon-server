@@ -872,3 +872,26 @@ func TestApprovedAuthorityNobodyApprovedFailsOpen(t *testing.T) {
 		t.Fatalf("entry = %+v", e)
 	}
 }
+
+func TestPolicyExclusionOverflowIsLogged(t *testing.T) {
+	s, st, _ := newSvc(t, true)
+	var buf bytes.Buffer
+	s.log = slog.New(slog.NewTextHandler(&buf, nil))
+	for i := range 16 {
+		s.cfg.ExcludedNodes = append(s.cfg.ExcludedNodes, k32(byte(i+1)))
+	}
+	st.excluded = [][]byte{k32(1), k32(0xee)}
+	p := mustPolicy(t, s, Caller{})
+	if len(p.ExcludedNodes) != 16 || p.ExcludedNodes[15] != hx(k32(16)) {
+		t.Fatalf("excluded = %v", p.ExcludedNodes)
+	}
+	if !strings.Contains(buf.String(), "level=ERROR") {
+		t.Fatalf("overflow not logged: %q", buf.String())
+	}
+	buf.Reset()
+	st.excluded = [][]byte{k32(1)}
+	mustPolicy(t, s, Caller{})
+	if buf.Len() != 0 {
+		t.Fatalf("logged without overflow: %q", buf.String())
+	}
+}

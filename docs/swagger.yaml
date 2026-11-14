@@ -1485,6 +1485,15 @@ definitions:
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.PollingAdminState:
     properties:
+      authority:
+        description: 'polling.authority: evidence or approved.'
+        type: string
+      configExcludedNodes:
+        description: polling.excluded_nodes in config; the policy excludes the union
+          of both lists, at most 16 distinct.
+        items:
+          type: string
+        type: array
       configPaused:
         description: polling.paused in config, which pauses regardless
         type: boolean
@@ -2599,8 +2608,9 @@ paths:
   /admin/polling:
     get:
       description: Pause state, excluded repeaters and every observer the operator
-        has blocked or approved. paused is false once pausedUntil has passed; configPaused
-        is polling.paused from config.
+        has blocked or approved. paused is false once pausedUntil has passed; configPaused,
+        configExcludedNodes and authority come from config. The policy excludes the
+        union of excludedNodes and configExcludedNodes.
       produces:
       - application/json
       responses:
@@ -2695,9 +2705,10 @@ paths:
     put:
       consumes:
       - application/json
-      description: Replaces the whole state. At most 16 distinct excluded repeaters,
-        each 64 hex characters; pausedUntil is epoch ms in the future or null. Body
-        at most 4 KiB.
+      description: Replaces the whole state. Excluded repeaters are 64 hex characters
+        each; together with polling.excluded_nodes from config they may name at most
+        16 distinct repeaters, otherwise 400 and nothing changes. pausedUntil is epoch
+        ms in the future or null. Body at most 4 KiB.
       parameters:
       - description: New state
         in: body
@@ -2752,7 +2763,8 @@ paths:
       description: Every repeater with a live claim or an assignment, newest claim
         first, at most 500. Each lists its live candidates and assigned observers;
         rank is null for an unassigned candidate. latestTrustedReading counts only
-        readings from the poller or an assigned observer with advert evidence.
+        readings from an assigned observer with advert evidence; approved is the operator's
+        approval of the observer.
       produces:
       - application/json
       responses:

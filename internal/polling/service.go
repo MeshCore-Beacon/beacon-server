@@ -215,6 +215,9 @@ func (s *Service) Policy(ctx context.Context, c Caller) (Policy, error) {
 		s.log.Warn("polling state", "err", err)
 		return Policy{}, err
 	}
+	if n := len(distinctExcluded(s.cfg.ExcludedNodes, excluded)); n > maxExcluded {
+		s.log.Error("polling exclusions do not fit the policy; extra ones are not sent", "distinct", n, "max", maxExcluded)
+	}
 	rt := RuntimeState{Paused: paused, PausedUntil: until, Excluded: excluded}
 	c.Blocked = false
 	if c.Observer != nil {

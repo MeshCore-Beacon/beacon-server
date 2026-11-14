@@ -27,11 +27,15 @@ type PollingObserver struct {
 
 // PollingAdminState is the operator view of repeater polling.
 type PollingAdminState struct {
-	Paused        bool              `json:"paused"`       // the stored pause, false once pausedUntil has passed
-	ConfigPaused  bool              `json:"configPaused"` // polling.paused in config, which pauses regardless
-	PausedUntil   *int64            `json:"pausedUntil"`  // epoch ms; null when not set
-	ExcludedNodes []string          `json:"excludedNodes"`
-	Observers     []PollingObserver `json:"observers"`
+	Paused        bool     `json:"paused"`       // the stored pause, false once pausedUntil has passed
+	ConfigPaused  bool     `json:"configPaused"` // polling.paused in config, which pauses regardless
+	PausedUntil   *int64   `json:"pausedUntil"`  // epoch ms; null when not set
+	ExcludedNodes []string `json:"excludedNodes"`
+	// polling.excluded_nodes in config; the policy excludes the union of both lists, at most 16 distinct.
+	ConfigExcludedNodes []string `json:"configExcludedNodes"`
+	// polling.authority: evidence or approved.
+	Authority string            `json:"authority"`
+	Observers []PollingObserver `json:"observers"`
 }
 
 // PollingTargetCandidate is one observer's place for a repeater: a live candidate, an assigned observer, or both.

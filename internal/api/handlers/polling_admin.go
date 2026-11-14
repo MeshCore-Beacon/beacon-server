@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime"
@@ -28,13 +29,19 @@ type PollingAdminStore interface {
 	PollingTargetsAdmin(ctx context.Context, receivedAfter time.Time, limit int) ([]api.PollingTarget, error)
 }
 
-// PollingAdminRouter must be mounted inside the authenticated admin subtree. configPaused is polling.paused
-// from config.
-func PollingAdminRouter(store PollingAdminStore, configPaused bool) http.Handler {
+// PollingAdminConfig is what the admin routes show and check from the polling config.
+type PollingAdminConfig struct {
+	Paused        bool     // polling.paused
+	Authority     string   // polling.authority
+	ExcludedNodes [][]byte // polling.excluded_nodes
+}
+
+// PollingAdminRouter must be mounted inside the authenticated admin subtree.
+func PollingAdminRouter(store PollingAdminStore, cfg PollingAdminConfig) http.Handler {
 	if store == nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { respondError(w, 503, "polling is unavailable") })
 	}
-	a := pollingAdmin{store: store, configPaused: configPaused}
+	a := pollingAdmin{store: store, cfg: cfg}
 	r := chi.NewRouter()
 	r.Get("/", a.get)
 	r.Get("/targets", getPollingTargets(store))
@@ -70,8 +77,8 @@ func decodePollingBody(w http.ResponseWriter, r *http.Request, dst any) bool {
 }
 
 type pollingAdmin struct {
-	store        PollingAdminStore
-	configPaused bool
+	store PollingAdminStore
+	cfg   PollingAdminConfig
 }
 
 func (a pollingAdmin) state(ctx context.Context) (api.PollingAdminState, error) {
@@ -88,8 +95,12 @@ func (a pollingAdmin) state(ctx context.Context) (api.PollingAdminState, error) 
 	}
 	// A pause whose end has passed no longer pauses anything, as the policy answer already treats it.
 	effective := paused && (until == nil || until.After(time.Now()))
-	out := api.PollingAdminState{Paused: effective, ConfigPaused: a.configPaused,
-		ExcludedNodes: make([]string, 0, len(excluded)), Observers: observers}
+	out := api.PollingAdminState{Paused: effective, ConfigPaused: a.cfg.Paused, Authority: a.cfg.Authority,
+		ExcludedNodes: make([]string, 0, len(excluded)), ConfigExcludedNodes: make([]string, 0, len(a.cfg.ExcludedNodes)),
+		Observers: observers}
+	for _, k := range a.cfg.ExcludedNodes {
+		out.ConfigExcludedNodes = append(out.ConfigExcludedNodes, hex.EncodeToString(k))
+	}
 	if until != nil {
 		ms := until.UnixMilli()
 		out.PausedUntil = &ms
@@ -107,7 +118,7 @@ func pollingFailed(w http.ResponseWriter, err error) {
 
 // getPollingAdmin godoc
 // @Summary Get the repeater polling settings
-// @Description Pause state, excluded repeaters and every observer the operator has blocked or approved. paused is false once pausedUntil has passed; configPaused is polling.paused from config.
+// @Description Pause state, excluded repeaters and every observer the operator has blocked or approved. paused is false once pausedUntil has passed; configPaused, configExcludedNodes and authority come from config. The policy excludes the union of excludedNodes and configExcludedNodes.
 // @Tags Admin
 // @Produce json
 // @Security AdminKey
@@ -125,7 +136,7 @@ func (a pollingAdmin) get(w http.ResponseWriter, r *http.Request) {
 
 // getPollingTargets godoc
 // @Summary List polled repeaters and their observers
-// @Description Every repeater with a live claim or an assignment, newest claim first, at most 500. Each lists its live candidates and assigned observers; rank is null for an unassigned candidate. latestTrustedReading counts only readings from the poller or an assigned observer with advert evidence.
+// @Description Every repeater with a live claim or an assignment, newest claim first, at most 500. Each lists its live candidates and assigned observers; rank is null for an unassigned candidate. latestTrustedReading counts only readings from an assigned observer with advert evidence; approved is the operator's approval of the observer.
 // @Tags Admin
 // @Produce json
 // @Security AdminKey
@@ -148,7 +159,7 @@ func getPollingTargets(store PollingAdminStore) http.HandlerFunc {
 
 // putPollingState godoc
 // @Summary Replace the polling pause and exclusions
-// @Description Replaces the whole state. At most 16 distinct excluded repeaters, each 64 hex characters; pausedUntil is epoch ms in the future or null. Body at most 4 KiB.
+// @Description Replaces the whole state. Excluded repeaters are 64 hex characters each; together with polling.excluded_nodes from config they may name at most 16 distinct repeaters, otherwise 400 and nothing changes. pausedUntil is epoch ms in the future or null. Body at most 4 KiB.
 // @Tags Admin
 // @Accept json
 // @Produce json
@@ -165,6 +176,19 @@ func (a pollingAdmin) putState(w http.ResponseWriter, r *http.Request) {
 	until, nodes, err := req.Parse(time.Now())
 	if err != nil {
 		respondError(w, 400, err.Error())
+		return
+	}
+	// The policy carries the union of both lists; refuse what would not fit rather than drop it there.
+	union := map[string]bool{}
+	for _, k := range a.cfg.ExcludedNodes {
+		union[string(k)] = true
+	}
+	for _, k := range nodes {
+		union[string(k)] = true
+	}
+	if len(union) > api.MaxPollingExcludedNodes {
+		respondError(w, 400, fmt.Sprintf("excludedNodes: %d keys with the %d in config make %d distinct; at most %d in total",
+			len(nodes), len(a.cfg.ExcludedNodes), len(union), api.MaxPollingExcludedNodes))
 		return
 	}
 	if err := a.store.SetPollingState(r.Context(), req.Paused, until, nodes); err != nil {

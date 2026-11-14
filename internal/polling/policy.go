@@ -125,17 +125,23 @@ func DisabledPolicy() Policy {
 	return p
 }
 
+// mergeExcluded keeps the first maxExcluded distinct keys so the policy fits the firmware. Config and admin
+// validation keep the union within that; Service.Policy logs if it ever is not.
 func mergeExcluded(lists ...[][]byte) []string {
+	out := distinctExcluded(lists...)
+	return out[:min(len(out), maxExcluded)]
+}
+
+func distinctExcluded(lists ...[][]byte) []string {
 	out := []string{}
 	seen := map[string]bool{}
 	for _, l := range lists {
 		for _, b := range l {
 			h := strings.ToLower(hex.EncodeToString(b))
-			if seen[h] || len(out) >= maxExcluded {
-				continue
+			if !seen[h] {
+				seen[h] = true
+				out = append(out, h)
 			}
-			seen[h] = true
-			out = append(out, h)
 		}
 	}
 	return out
