@@ -39,7 +39,7 @@ ON CONFLICT (target_public_key, observer_id, tag, method) DO NOTHING;
 SELECT EXISTS (
     SELECT 1 FROM polling_candidates c
     JOIN polling_claims cl ON cl.observer_public_key = c.observer_public_key
-    WHERE c.observer_public_key = $1 AND c.target_public_key = $2 AND cl.claimed_at > $3
+    WHERE c.observer_public_key = $1 AND c.target_public_key = $2 AND cl.received_at > $3
 );
 
 -- name: ListPollingTargets :many
@@ -47,7 +47,7 @@ SELECT EXISTS (
 SELECT target_public_key::bytea AS target_public_key FROM (
     SELECT c.target_public_key FROM polling_candidates c
     JOIN polling_claims cl ON cl.observer_public_key = c.observer_public_key
-    WHERE cl.claimed_at > $1
+    WHERE cl.received_at > $1
     UNION
     SELECT a.target_public_key FROM polling_assignments a
 ) t
@@ -69,7 +69,7 @@ LEFT JOIN LATERAL (
       AND o.observer_id = cl.observer_id AND o.hop_count = 0
       AND p.first_heard_at >= $3 AND NOT (o.snr = 0 AND o.rssi = 0)
 ) ev ON true
-WHERE c.target_public_key = $1 AND cl.claimed_at > $2
+WHERE c.target_public_key = $1 AND cl.received_at > $2
 ORDER BY c.observer_public_key;
 
 -- name: CurrentPollingPoller :one
@@ -89,7 +89,7 @@ SELECT c.target_public_key, COALESCE(a.rank, -1)::int AS rank,
 FROM polling_candidates c
 JOIN polling_claims cl ON cl.observer_public_key = c.observer_public_key
 LEFT JOIN polling_assignments a ON a.target_public_key = c.target_public_key AND a.observer_public_key = c.observer_public_key
-WHERE c.observer_public_key = $1 AND cl.claimed_at > $2
+WHERE c.observer_public_key = $1 AND cl.received_at > $2
 ORDER BY c.target_public_key;
 
 -- name: PollingObserverFlags :one
@@ -106,20 +106,25 @@ SELECT paused, paused_until, excluded_nodes FROM polling_state WHERE id;
 UPDATE polling_state SET paused = $1, paused_until = $2, excluded_nodes = $3 WHERE id;
 
 -- name: CorroborateReadings :execrows
--- packet_hash is 8 bytes on both sides (SHA-256 truncated by the meshcore library), so it matches by equality.
+-- Recomputed each pass. Counts other observers that heard a RESPONSE (1) or PATH (8) packet with the reading's
+-- 8-byte hash within 10 minutes of sampled_at. packets and packet_observations keep no source hash, so the
+-- sender is not checked; packet_observations.payload_type is not always filled, so the type comes from packets.
 WITH todo AS (
-    SELECT x.id, x.packet_hash, x.observer_id FROM repeater_readings x
-    WHERE x.corroborated IS NULL AND x.packet_hash IS NOT NULL AND x.received_at >= $1
+    SELECT x.id, x.packet_hash, x.observer_id, x.sampled_at FROM repeater_readings x
+    WHERE x.packet_hash IS NOT NULL AND x.received_at >= $1
     ORDER BY x.id LIMIT $2
 )
 UPDATE repeater_readings r SET corroborated = (
     SELECT count(DISTINCT po.observer_id) FROM packet_observations po
+    JOIN packets p ON p.packet_hash = po.packet_hash
     WHERE po.packet_hash = t.packet_hash AND po.observer_id <> t.observer_id
+      AND p.payload_type IN (1, 8)
+      AND po.heard_at BETWEEN t.sampled_at - interval '10 minutes' AND t.sampled_at + interval '10 minutes'
 )::smallint
 FROM todo t WHERE r.id = t.id;
 
 -- name: DeleteExpiredPollingClaims :exec
-DELETE FROM polling_claims WHERE claimed_at < $1;
+DELETE FROM polling_claims WHERE received_at < $1;
 
 -- name: DeleteOrphanPollingAssignments :exec
 DELETE FROM polling_assignments a
@@ -129,4 +134,4 @@ WHERE NOT EXISTS (
 );
 
 -- name: DeleteExpiredRepeaterReadings :exec
-DELETE FROM repeater_readings WHERE sampled_at < $1;
+DELETE FROM repeater_readings WHERE received_at < $1;

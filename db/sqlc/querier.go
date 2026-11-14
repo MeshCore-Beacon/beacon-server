@@ -35,7 +35,9 @@ type Querier interface {
 	CheckPacketSitesSlice(ctx context.Context, arg CheckPacketSitesSliceParams) (CheckPacketSitesSliceRow, error)
 	// Keeps fetch timing so re-enabling still respects backoff; the ETag goes with the rows.
 	ClearRepeaters(ctx context.Context) (int64, error)
-	// packet_hash is 8 bytes on both sides (SHA-256 truncated by the meshcore library), so it matches by equality.
+	// Recomputed each pass. Counts other observers that heard a RESPONSE (1) or PATH (8) packet with the reading's
+	// 8-byte hash within 10 minutes of sampled_at. packets and packet_observations keep no source hash, so the
+	// sender is not checked; packet_observations.payload_type is not always filled, so the type comes from packets.
 	CorroborateReadings(ctx context.Context, arg CorroborateReadingsParams) (int64, error)
 	// How many messages were sent at or after since, counted to at most row_limit: idx_channel_messages_sent alone.
 	CountChannelMessagesSentSince(ctx context.Context, arg CountChannelMessagesSentSinceParams) (int64, error)
@@ -47,8 +49,8 @@ type Querier interface {
 	DeleteAllChannelMembers(ctx context.Context) error
 	DeleteChannelConfigScopes(ctx context.Context) error
 	DeleteChannelMembersNotIn(ctx context.Context, arg DeleteChannelMembersNotInParams) error
-	DeleteExpiredPollingClaims(ctx context.Context, claimedAt pgtype.Timestamptz) error
-	DeleteExpiredRepeaterReadings(ctx context.Context, sampledAt pgtype.Timestamptz) error
+	DeleteExpiredPollingClaims(ctx context.Context, receivedAt pgtype.Timestamptz) error
+	DeleteExpiredRepeaterReadings(ctx context.Context, receivedAt pgtype.Timestamptz) error
 	// One batch past retention, keyset after the per-run cursor (the first call passes -infinity, 0).
 	// The truncated bound (ms ceiling of the cutoff) drives idx_known_routes_keyset; the exact
 	// residual decides membership. + interval 0 keeps the exact cutoff a Filter, so the planner
@@ -466,7 +468,7 @@ type Querier interface {
 	// Evidence: zero-hop adverts of the target this observer heard since $3, with missing signal (0/0) left out. mean_snr is 0 when n is 0.
 	ListPollingCandidates(ctx context.Context, arg ListPollingCandidatesParams) ([]ListPollingCandidatesRow, error)
 	// A target with only expired claims is still listed while it has assignment rows, so the caller can clear them.
-	ListPollingTargets(ctx context.Context, claimedAt pgtype.Timestamptz) ([][]byte, error)
+	ListPollingTargets(ctx context.Context, receivedAt pgtype.Timestamptz) ([][]byte, error)
 	// Every region with its members, for reconciling imported MeshMapper groups.
 	ListRegionState(ctx context.Context) ([]ListRegionStateRow, error)
 	// ============================================================

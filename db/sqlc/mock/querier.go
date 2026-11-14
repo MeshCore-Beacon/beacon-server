@@ -293,31 +293,31 @@ func (mr *MockQuerierMockRecorder) DeleteChannelMembersNotIn(ctx, arg any) *gomo
 }
 
 // DeleteExpiredPollingClaims mocks base method.
-func (m *MockQuerier) DeleteExpiredPollingClaims(ctx context.Context, claimedAt pgtype.Timestamptz) error {
+func (m *MockQuerier) DeleteExpiredPollingClaims(ctx context.Context, receivedAt pgtype.Timestamptz) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteExpiredPollingClaims", ctx, claimedAt)
+	ret := m.ctrl.Call(m, "DeleteExpiredPollingClaims", ctx, receivedAt)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // DeleteExpiredPollingClaims indicates an expected call of DeleteExpiredPollingClaims.
-func (mr *MockQuerierMockRecorder) DeleteExpiredPollingClaims(ctx, claimedAt any) *gomock.Call {
+func (mr *MockQuerierMockRecorder) DeleteExpiredPollingClaims(ctx, receivedAt any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteExpiredPollingClaims", reflect.TypeOf((*MockQuerier)(nil).DeleteExpiredPollingClaims), ctx, claimedAt)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteExpiredPollingClaims", reflect.TypeOf((*MockQuerier)(nil).DeleteExpiredPollingClaims), ctx, receivedAt)
 }
 
 // DeleteExpiredRepeaterReadings mocks base method.
-func (m *MockQuerier) DeleteExpiredRepeaterReadings(ctx context.Context, sampledAt pgtype.Timestamptz) error {
+func (m *MockQuerier) DeleteExpiredRepeaterReadings(ctx context.Context, receivedAt pgtype.Timestamptz) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteExpiredRepeaterReadings", ctx, sampledAt)
+	ret := m.ctrl.Call(m, "DeleteExpiredRepeaterReadings", ctx, receivedAt)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // DeleteExpiredRepeaterReadings indicates an expected call of DeleteExpiredRepeaterReadings.
-func (mr *MockQuerierMockRecorder) DeleteExpiredRepeaterReadings(ctx, sampledAt any) *gomock.Call {
+func (mr *MockQuerierMockRecorder) DeleteExpiredRepeaterReadings(ctx, receivedAt any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteExpiredRepeaterReadings", reflect.TypeOf((*MockQuerier)(nil).DeleteExpiredRepeaterReadings), ctx, sampledAt)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteExpiredRepeaterReadings", reflect.TypeOf((*MockQuerier)(nil).DeleteExpiredRepeaterReadings), ctx, receivedAt)
 }
 
 // DeleteExpiredRoutes mocks base method.
@@ -2733,18 +2733,18 @@ func (mr *MockQuerierMockRecorder) ListPollingCandidates(ctx, arg any) *gomock.C
 }
 
 // ListPollingTargets mocks base method.
-func (m *MockQuerier) ListPollingTargets(ctx context.Context, claimedAt pgtype.Timestamptz) ([][]byte, error) {
+func (m *MockQuerier) ListPollingTargets(ctx context.Context, receivedAt pgtype.Timestamptz) ([][]byte, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListPollingTargets", ctx, claimedAt)
+	ret := m.ctrl.Call(m, "ListPollingTargets", ctx, receivedAt)
 	ret0, _ := ret[0].([][]byte)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ListPollingTargets indicates an expected call of ListPollingTargets.
-func (mr *MockQuerierMockRecorder) ListPollingTargets(ctx, claimedAt any) *gomock.Call {
+func (mr *MockQuerierMockRecorder) ListPollingTargets(ctx, receivedAt any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPollingTargets", reflect.TypeOf((*MockQuerier)(nil).ListPollingTargets), ctx, claimedAt)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPollingTargets", reflect.TypeOf((*MockQuerier)(nil).ListPollingTargets), ctx, receivedAt)
 }
 
 // ListRegionState mocks base method.

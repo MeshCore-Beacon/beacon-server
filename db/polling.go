@@ -123,20 +123,20 @@ func (s *Store) InsertRepeaterReading(ctx context.Context, r polling.Reading, ob
 	return n > 0, err
 }
 
-func (s *Store) HasLivePollingCandidate(ctx context.Context, observer, target []byte, claimedAfter time.Time) (bool, error) {
+func (s *Store) HasLivePollingCandidate(ctx context.Context, observer, target []byte, receivedAfter time.Time) (bool, error) {
 	return s.q.HasLivePollingCandidate(ctx, sqlc.HasLivePollingCandidateParams{
-		ObserverPublicKey: observer, TargetPublicKey: target, ClaimedAt: ts(claimedAfter)})
+		ObserverPublicKey: observer, TargetPublicKey: target, ReceivedAt: ts(receivedAfter)})
 }
 
 // ListPollingTargets lists targets with a live candidate or any assignment row, so assignments of
 // targets whose claims all expired are still reachable to be cleared.
-func (s *Store) ListPollingTargets(ctx context.Context, claimedAfter time.Time) ([][]byte, error) {
-	return s.q.ListPollingTargets(ctx, ts(claimedAfter))
+func (s *Store) ListPollingTargets(ctx context.Context, receivedAfter time.Time) ([][]byte, error) {
+	return s.q.ListPollingTargets(ctx, ts(receivedAfter))
 }
 
-func (s *Store) ListPollingCandidates(ctx context.Context, target []byte, claimedAfter, evidenceSince time.Time) ([]polling.Candidate, error) {
+func (s *Store) ListPollingCandidates(ctx context.Context, target []byte, receivedAfter, evidenceSince time.Time) ([]polling.Candidate, error) {
 	rows, err := s.q.ListPollingCandidates(ctx, sqlc.ListPollingCandidatesParams{
-		TargetPublicKey: target, ClaimedAt: ts(claimedAfter), FirstHeardAt: ts(evidenceSince)})
+		TargetPublicKey: target, ReceivedAt: ts(receivedAfter), FirstHeardAt: ts(evidenceSince)})
 	if err != nil {
 		return nil, err
 	}
@@ -182,8 +182,8 @@ func (s *Store) ReplacePollingAssignments(ctx context.Context, target []byte, a 
 	})
 }
 
-func (s *Store) PollingOwnerRows(ctx context.Context, observer []byte, claimedAfter time.Time) ([]polling.OwnerRow, error) {
-	rows, err := s.q.PollingOwnerRows(ctx, sqlc.PollingOwnerRowsParams{ObserverPublicKey: observer, ClaimedAt: ts(claimedAfter)})
+func (s *Store) PollingOwnerRows(ctx context.Context, observer []byte, receivedAfter time.Time) ([]polling.OwnerRow, error) {
+	rows, err := s.q.PollingOwnerRows(ctx, sqlc.PollingOwnerRowsParams{ObserverPublicKey: observer, ReceivedAt: ts(receivedAfter)})
 	if err != nil {
 		return nil, err
 	}
@@ -231,15 +231,15 @@ func (s *Store) SetPollingState(ctx context.Context, paused bool, pausedUntil *t
 	return s.q.SetPollingState(ctx, sqlc.SetPollingStateParams{Paused: paused, PausedUntil: optTime(pausedUntil), ExcludedNodes: excluded})
 }
 
-// CorroborateReadings counts, for readings with a packet hash and no count yet, the other observers that heard
-// the reply. Both hashes are 8 bytes, so they match by equality. It returns how many readings it updated.
+// CorroborateReadings recomputes, for readings received since receivedSince that carry a packet hash, how many
+// other observers heard a matching reply packet near sampled_at. It returns how many readings it updated.
 func (s *Store) CorroborateReadings(ctx context.Context, receivedSince time.Time, limit int) (int, error) {
 	n, err := s.q.CorroborateReadings(ctx, sqlc.CorroborateReadingsParams{ReceivedAt: ts(receivedSince), Limit: int32(limit)})
 	return int(n), err
 }
 
 // DeleteExpiredPolling drops expired claims (their candidates cascade), assignments whose candidate is gone,
-// and old readings.
+// and readings received before readingsBefore. Expiry runs on receive time, not the observer's clock.
 func (s *Store) DeleteExpiredPolling(ctx context.Context, claimsBefore, readingsBefore time.Time) error {
 	if err := s.q.DeleteExpiredPollingClaims(ctx, ts(claimsBefore)); err != nil {
 		return err

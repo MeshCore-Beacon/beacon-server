@@ -313,32 +313,119 @@ func TestPollingOwnerRowsLatestTsPostgres(t *testing.T) {
 
 func TestCorroborateReadingsPostgres(t *testing.T) {
 	ctx, pool, s := pollStore(t)
-	o1, o2, o3 := pollKey(1), pollKey(2), pollKey(3)
-	id1, id2, id3 := pollObserver(t, ctx, s, o1), pollObserver(t, ctx, s, o2), pollObserver(t, ctx, s, o3)
+	o1, o2, o3, o4 := pollKey(1), pollKey(2), pollKey(3), pollKey(4)
+	id1, id2, id3, id4 := pollObserver(t, ctx, s, o1), pollObserver(t, ctx, s, o2), pollObserver(t, ctx, s, o3), pollObserver(t, ctx, s, o4)
 	now := time.Now().UTC().Truncate(time.Second)
 	hash := []byte{1, 2, 3, 4, 5, 6, 7, 8}
-	if _, err := pool.Exec(ctx, `INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,first_heard_at,last_heard_at)
-VALUES ($1,1,0,1,'\x00','\x00',$2,$2)`, hash, now); err != nil {
-		t.Fatal(err)
-	}
-	for _, id := range []uuid.UUID{id1, id2, id3} {
-		if _, err := pool.Exec(ctx, `INSERT INTO packet_observations(packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count)
-VALUES ($1,$2,'YVR',$3,0,1,0)`, hash, id, now); err != nil {
+	other := []byte{9, 9, 9, 9, 9, 9, 9, 9}
+	for _, p := range []struct {
+		h []byte
+		t int
+	}{{hash, 1}, {other, 2}} {
+		if _, err := pool.Exec(ctx, `INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,first_heard_at,last_heard_at)
+VALUES ($1,$2,0,1,'\x00','\x00',$3,$3)`, p.h, p.t, now); err != nil {
 			t.Fatal(err)
 		}
 	}
+	hear := func(h []byte, id uuid.UUID, at time.Time) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `INSERT INTO packet_observations(packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count)
+VALUES ($1,$2,'YVR',$3,0,1,0)`, h, id, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hear(hash, id1, now) // the reading's own observer: never counted
+	hear(hash, id2, now.Add(5*time.Minute))
+	hear(other, id3, now) // other hash: not counted
 	r := pollReading(o1, 0xA, "status", now, nil)
 	r.PacketHash = hash
 	if _, err := s.InsertRepeaterReading(ctx, r, id1, now); err != nil {
 		t.Fatal(err)
 	}
-	n, err := s.CorroborateReadings(ctx, now.Add(-time.Hour), 100)
-	if err != nil || n != 1 {
-		t.Fatal(n, err)
+	get := func() int16 {
+		t.Helper()
+		var c *int16
+		if err := pool.QueryRow(ctx, `SELECT corroborated FROM repeater_readings`).Scan(&c); err != nil || c == nil {
+			t.Fatal(c, err)
+		}
+		return *c
 	}
-	var c *int16
-	if err := pool.QueryRow(ctx, `SELECT corroborated FROM repeater_readings`).Scan(&c); err != nil || c == nil || *c != 2 {
-		t.Fatal(c, err)
+	run := func() {
+		t.Helper()
+		if n, err := s.CorroborateReadings(ctx, now.Add(-time.Hour), 100); err != nil || n != 1 {
+			t.Fatal(n, err)
+		}
+	}
+	run()
+	if c := get(); c != 1 {
+		t.Fatal("want 1, got", c)
+	}
+	// 11 minutes away is outside the window.
+	hear(hash, id3, now.Add(11*time.Minute))
+	run()
+	if c := get(); c != 1 {
+		t.Fatal("late hearing counted", c)
+	}
+	// A third observer inside the window raises the count on the next pass.
+	hear(hash, id4, now.Add(-9*time.Minute))
+	run()
+	if c := get(); c != 2 {
+		t.Fatal("recompute missed the new observer", c)
+	}
+	// The same hash on a packet of another payload type does not count.
+	if _, err := pool.Exec(ctx, `UPDATE packets SET payload_type = 4 WHERE packet_hash = $1`, hash); err != nil {
+		t.Fatal(err)
+	}
+	run()
+	if c := get(); c != 0 {
+		t.Fatal("non-reply payload counted", c)
+	}
+}
+
+func TestPollingLivenessUsesReceiveTimePostgres(t *testing.T) {
+	ctx, _, s := pollStore(t)
+	oFuture, oOld := pollKey(1), pollKey(2)
+	idF, idO := pollObserver(t, ctx, s, oFuture), pollObserver(t, ctx, s, oOld)
+	now := time.Now().UTC().Truncate(time.Second)
+	after := now.Add(-time.Hour)
+	// Claimed an hour ahead by a fast clock but received 3 hours ago.
+	if _, err := s.ReplacePollingClaim(ctx, pollClaim(oFuture, now.Add(time.Hour), 0xA), idF, now.Add(-3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	// Claimed 3 hours ago by a slow clock but received just now.
+	if _, err := s.ReplacePollingClaim(ctx, pollClaim(oOld, now.Add(-3*time.Hour), 0xB), idO, now); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.HasLivePollingCandidate(ctx, oFuture, pollKey(0xA), after); err != nil || ok {
+		t.Fatal("future-claimed stale claim is live", ok, err)
+	}
+	if ok, err := s.HasLivePollingCandidate(ctx, oOld, pollKey(0xB), after); err != nil || !ok {
+		t.Fatal("fresh claim not live", ok, err)
+	}
+	if got := targetSet(t, ctx, s, after); !sameInts(got, []int{0xB}) {
+		t.Fatal("targets", got)
+	}
+	if n := candidateTargets(t, ctx, s, after, 0xA); n != 0 {
+		t.Fatal("candidates for A", n)
+	}
+	if n := candidateTargets(t, ctx, s, after, 0xB); n != 1 {
+		t.Fatal("candidates for B", n)
+	}
+	if rows, err := s.PollingOwnerRows(ctx, oFuture, after); err != nil || len(rows) != 0 {
+		t.Fatal("owner rows for stale", len(rows), err)
+	}
+	if rows, err := s.PollingOwnerRows(ctx, oOld, after); err != nil || len(rows) != 1 {
+		t.Fatal("owner rows for fresh", len(rows), err)
+	}
+	// Expiry follows receive time too.
+	if err := s.DeleteExpiredPolling(ctx, after, after); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := s.HasLivePollingCandidate(ctx, oOld, pollKey(0xB), after.Add(-24*time.Hour)); !ok {
+		t.Fatal("fresh claim deleted")
+	}
+	if ok, _ := s.HasLivePollingCandidate(ctx, oFuture, pollKey(0xA), after.Add(-24*time.Hour)); ok {
+		t.Fatal("stale claim kept")
 	}
 }
 

@@ -14,13 +14,16 @@ import (
 
 const corroborateReadings = `-- name: CorroborateReadings :execrows
 WITH todo AS (
-    SELECT x.id, x.packet_hash, x.observer_id FROM repeater_readings x
-    WHERE x.corroborated IS NULL AND x.packet_hash IS NOT NULL AND x.received_at >= $1
+    SELECT x.id, x.packet_hash, x.observer_id, x.sampled_at FROM repeater_readings x
+    WHERE x.packet_hash IS NOT NULL AND x.received_at >= $1
     ORDER BY x.id LIMIT $2
 )
 UPDATE repeater_readings r SET corroborated = (
     SELECT count(DISTINCT po.observer_id) FROM packet_observations po
+    JOIN packets p ON p.packet_hash = po.packet_hash
     WHERE po.packet_hash = t.packet_hash AND po.observer_id <> t.observer_id
+      AND p.payload_type IN (1, 8)
+      AND po.heard_at BETWEEN t.sampled_at - interval '10 minutes' AND t.sampled_at + interval '10 minutes'
 )::smallint
 FROM todo t WHERE r.id = t.id
 `
@@ -30,7 +33,9 @@ type CorroborateReadingsParams struct {
 	Limit      int32              `json:"limit"`
 }
 
-// packet_hash is 8 bytes on both sides (SHA-256 truncated by the meshcore library), so it matches by equality.
+// Recomputed each pass. Counts other observers that heard a RESPONSE (1) or PATH (8) packet with the reading's
+// 8-byte hash within 10 minutes of sampled_at. packets and packet_observations keep no source hash, so the
+// sender is not checked; packet_observations.payload_type is not always filled, so the type comes from packets.
 func (q *Queries) CorroborateReadings(ctx context.Context, arg CorroborateReadingsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, corroborateReadings, arg.ReceivedAt, arg.Limit)
 	if err != nil {
@@ -51,20 +56,20 @@ func (q *Queries) CurrentPollingPoller(ctx context.Context, targetPublicKey []by
 }
 
 const deleteExpiredPollingClaims = `-- name: DeleteExpiredPollingClaims :exec
-DELETE FROM polling_claims WHERE claimed_at < $1
+DELETE FROM polling_claims WHERE received_at < $1
 `
 
-func (q *Queries) DeleteExpiredPollingClaims(ctx context.Context, claimedAt pgtype.Timestamptz) error {
-	_, err := q.db.Exec(ctx, deleteExpiredPollingClaims, claimedAt)
+func (q *Queries) DeleteExpiredPollingClaims(ctx context.Context, receivedAt pgtype.Timestamptz) error {
+	_, err := q.db.Exec(ctx, deleteExpiredPollingClaims, receivedAt)
 	return err
 }
 
 const deleteExpiredRepeaterReadings = `-- name: DeleteExpiredRepeaterReadings :exec
-DELETE FROM repeater_readings WHERE sampled_at < $1
+DELETE FROM repeater_readings WHERE received_at < $1
 `
 
-func (q *Queries) DeleteExpiredRepeaterReadings(ctx context.Context, sampledAt pgtype.Timestamptz) error {
-	_, err := q.db.Exec(ctx, deleteExpiredRepeaterReadings, sampledAt)
+func (q *Queries) DeleteExpiredRepeaterReadings(ctx context.Context, receivedAt pgtype.Timestamptz) error {
+	_, err := q.db.Exec(ctx, deleteExpiredRepeaterReadings, receivedAt)
 	return err
 }
 
@@ -120,18 +125,18 @@ const hasLivePollingCandidate = `-- name: HasLivePollingCandidate :one
 SELECT EXISTS (
     SELECT 1 FROM polling_candidates c
     JOIN polling_claims cl ON cl.observer_public_key = c.observer_public_key
-    WHERE c.observer_public_key = $1 AND c.target_public_key = $2 AND cl.claimed_at > $3
+    WHERE c.observer_public_key = $1 AND c.target_public_key = $2 AND cl.received_at > $3
 )
 `
 
 type HasLivePollingCandidateParams struct {
 	ObserverPublicKey []byte             `json:"observer_public_key"`
 	TargetPublicKey   []byte             `json:"target_public_key"`
-	ClaimedAt         pgtype.Timestamptz `json:"claimed_at"`
+	ReceivedAt        pgtype.Timestamptz `json:"received_at"`
 }
 
 func (q *Queries) HasLivePollingCandidate(ctx context.Context, arg HasLivePollingCandidateParams) (bool, error) {
-	row := q.db.QueryRow(ctx, hasLivePollingCandidate, arg.ObserverPublicKey, arg.TargetPublicKey, arg.ClaimedAt)
+	row := q.db.QueryRow(ctx, hasLivePollingCandidate, arg.ObserverPublicKey, arg.TargetPublicKey, arg.ReceivedAt)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
@@ -300,13 +305,13 @@ LEFT JOIN LATERAL (
       AND o.observer_id = cl.observer_id AND o.hop_count = 0
       AND p.first_heard_at >= $3 AND NOT (o.snr = 0 AND o.rssi = 0)
 ) ev ON true
-WHERE c.target_public_key = $1 AND cl.claimed_at > $2
+WHERE c.target_public_key = $1 AND cl.received_at > $2
 ORDER BY c.observer_public_key
 `
 
 type ListPollingCandidatesParams struct {
 	TargetPublicKey []byte             `json:"target_public_key"`
-	ClaimedAt       pgtype.Timestamptz `json:"claimed_at"`
+	ReceivedAt      pgtype.Timestamptz `json:"received_at"`
 	FirstHeardAt    pgtype.Timestamptz `json:"first_heard_at"`
 }
 
@@ -322,7 +327,7 @@ type ListPollingCandidatesRow struct {
 
 // Evidence: zero-hop adverts of the target this observer heard since $3, with missing signal (0/0) left out. mean_snr is 0 when n is 0.
 func (q *Queries) ListPollingCandidates(ctx context.Context, arg ListPollingCandidatesParams) ([]ListPollingCandidatesRow, error) {
-	rows, err := q.db.Query(ctx, listPollingCandidates, arg.TargetPublicKey, arg.ClaimedAt, arg.FirstHeardAt)
+	rows, err := q.db.Query(ctx, listPollingCandidates, arg.TargetPublicKey, arg.ReceivedAt, arg.FirstHeardAt)
 	if err != nil {
 		return nil, err
 	}
@@ -353,7 +358,7 @@ const listPollingTargets = `-- name: ListPollingTargets :many
 SELECT target_public_key::bytea AS target_public_key FROM (
     SELECT c.target_public_key FROM polling_candidates c
     JOIN polling_claims cl ON cl.observer_public_key = c.observer_public_key
-    WHERE cl.claimed_at > $1
+    WHERE cl.received_at > $1
     UNION
     SELECT a.target_public_key FROM polling_assignments a
 ) t
@@ -361,8 +366,8 @@ ORDER BY target_public_key
 `
 
 // A target with only expired claims is still listed while it has assignment rows, so the caller can clear them.
-func (q *Queries) ListPollingTargets(ctx context.Context, claimedAt pgtype.Timestamptz) ([][]byte, error) {
-	rows, err := q.db.Query(ctx, listPollingTargets, claimedAt)
+func (q *Queries) ListPollingTargets(ctx context.Context, receivedAt pgtype.Timestamptz) ([][]byte, error) {
+	rows, err := q.db.Query(ctx, listPollingTargets, receivedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -404,13 +409,13 @@ SELECT c.target_public_key, COALESCE(a.rank, -1)::int AS rank,
 FROM polling_candidates c
 JOIN polling_claims cl ON cl.observer_public_key = c.observer_public_key
 LEFT JOIN polling_assignments a ON a.target_public_key = c.target_public_key AND a.observer_public_key = c.observer_public_key
-WHERE c.observer_public_key = $1 AND cl.claimed_at > $2
+WHERE c.observer_public_key = $1 AND cl.received_at > $2
 ORDER BY c.target_public_key
 `
 
 type PollingOwnerRowsParams struct {
 	ObserverPublicKey []byte             `json:"observer_public_key"`
-	ClaimedAt         pgtype.Timestamptz `json:"claimed_at"`
+	ReceivedAt        pgtype.Timestamptz `json:"received_at"`
 }
 
 type PollingOwnerRowsRow struct {
@@ -420,7 +425,7 @@ type PollingOwnerRowsRow struct {
 }
 
 func (q *Queries) PollingOwnerRows(ctx context.Context, arg PollingOwnerRowsParams) ([]PollingOwnerRowsRow, error) {
-	rows, err := q.db.Query(ctx, pollingOwnerRows, arg.ObserverPublicKey, arg.ClaimedAt)
+	rows, err := q.db.Query(ctx, pollingOwnerRows, arg.ObserverPublicKey, arg.ReceivedAt)
 	if err != nil {
 		return nil, err
 	}

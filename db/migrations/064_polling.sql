@@ -78,7 +78,7 @@ CREATE TABLE repeater_readings (
     UNIQUE (target_public_key, observer_id, tag, method)
 );
 CREATE INDEX idx_repeater_readings_target ON repeater_readings USING btree (target_public_key, sampled_at DESC);
-CREATE INDEX idx_repeater_readings_sampled_brin ON repeater_readings USING brin (sampled_at);
+CREATE INDEX idx_repeater_readings_received_brin ON repeater_readings USING brin (received_at);
 
 CREATE TABLE polling_observers (
     observer_public_key bytea PRIMARY KEY,
