@@ -15,6 +15,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api/handlers"
 	mw "github.com/MeshCore-Beacon/beacon-server/internal/api/middleware"
+	"github.com/MeshCore-Beacon/beacon-server/internal/config"
 	"github.com/MeshCore-Beacon/beacon-server/internal/guards"
 	"github.com/MeshCore-Beacon/beacon-server/internal/hub"
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
@@ -28,6 +29,8 @@ import (
 // Route shape:
 //
 //	/ws                → WebSocket (public in v1)
+//	/api/guest-polling → observer firmware policy and owners (GET)
+//	/api/guest-keys, /api/shared-guest/key → retired, 404
 //	/api/v1/           → public group
 //	  /info            → server info and minimum client versions
 //	  /ws-ticket       → ticket that opens /ws without an Origin
@@ -116,6 +119,16 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 		SendBytesPerSecond:   opts.WSSendBytesPerSecond,
 		SendBurstBytes:       opts.WSSendBurstBytes,
 	}, ws.Access{AllowedOrigins: opts.WSAllowedOrigins, RequireOrigin: opts.WSRequireOrigin, Tickets: tickets}))
+
+	// ── Observer firmware routes ─────────────────────────────────────────────
+	// Literal paths the firmware calls, on every instance whatever the config. They sit outside
+	// /api/v1 with their own limiter: 240/min covers well over a thousand devices behind one address.
+	r.Group(func(r chi.Router) {
+		r.Use(mw.RateLimit(config.ResolvedRateLimitConfig{Enabled: true, RequestsPerMinute: 240, Burst: 240}))
+		r.Mount("/api/guest-polling", handlers.GuestPollingRouter(opts.GuestPolling))
+		r.Post("/api/guest-keys", handlers.GuestKeysGone())
+		r.Get("/api/shared-guest/key", handlers.GuestKeysGone())
+	})
 
 	// ── Public REST API (v1) ─────────────────────────────────────────────────
 	r.Route("/api/v1", func(r chi.Router) {
