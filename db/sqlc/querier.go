@@ -38,7 +38,8 @@ type Querier interface {
 	// Recomputed each pass. Counts other observers that heard a RESPONSE (1) or PATH (8) packet with the reading's
 	// 8-byte hash within 10 minutes of sampled_at. packets and packet_observations keep no source hash, so the
 	// sender is not checked; packet_observations.payload_type is not always filled, so the type comes from packets.
-	// A reading whose observer row was deleted counts every observer.
+	// A reading whose observer row was deleted counts every observer. Never-counted readings go first, oldest first,
+	// then counted ones newest first, so every reading is reached however many arrive.
 	CorroborateReadings(ctx context.Context, arg CorroborateReadingsParams) (int64, error)
 	// How many messages were sent at or after since, counted to at most row_limit: idx_channel_messages_sent alone.
 	CountChannelMessagesSentSince(ctx context.Context, arg CountChannelMessagesSentSinceParams) (int64, error)

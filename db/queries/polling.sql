@@ -148,11 +148,12 @@ UPDATE polling_state SET paused = $1, paused_until = $2, excluded_nodes = $3 WHE
 -- Recomputed each pass. Counts other observers that heard a RESPONSE (1) or PATH (8) packet with the reading's
 -- 8-byte hash within 10 minutes of sampled_at. packets and packet_observations keep no source hash, so the
 -- sender is not checked; packet_observations.payload_type is not always filled, so the type comes from packets.
--- A reading whose observer row was deleted counts every observer.
+-- A reading whose observer row was deleted counts every observer. Never-counted readings go first, oldest first,
+-- then counted ones newest first, so every reading is reached however many arrive.
 WITH todo AS (
     SELECT x.id, x.packet_hash, x.observer_id, x.sampled_at FROM repeater_readings x
     WHERE x.packet_hash IS NOT NULL AND x.received_at >= $1
-    ORDER BY x.id DESC LIMIT $2
+    ORDER BY x.corroborated IS NOT NULL, CASE WHEN x.corroborated IS NULL THEN x.id ELSE -x.id END LIMIT $2
 )
 UPDATE repeater_readings r SET corroborated = (
     SELECT count(DISTINCT po.observer_id) FROM packet_observations po

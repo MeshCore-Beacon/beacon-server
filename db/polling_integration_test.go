@@ -523,7 +523,7 @@ func TestPollingDeleteExpiredAndFlagsPostgres(t *testing.T) {
 	}
 }
 
-func TestCorroborateReadingsNewestFirstPostgres(t *testing.T) {
+func TestCorroborateReadingsUncountedFirstPostgres(t *testing.T) {
 	ctx, pool, s := pollStore(t)
 	o1, o2 := pollKey(1), pollKey(2)
 	id1, id2 := pollObserver(t, ctx, s, o1), pollObserver(t, ctx, s, o2)
@@ -537,23 +537,59 @@ VALUES ($1,1,0,1,'\x00','\x00',$2,$2)`, hash, now); err != nil {
 VALUES ($1,$2,'YVR',$3,0,1,0)`, hash, id2, now); err != nil {
 		t.Fatal(err)
 	}
-	for _, tgt := range []byte{0xA, 0xB} { // older first, so the newer reading has the larger id
+	for _, tgt := range []byte{0xA, 0xB, 0xC} { // in id order
 		r := pollReading(o1, tgt, "status", now, nil)
 		r.PacketHash = hash
 		if _, err := s.InsertRepeaterReading(ctx, r, id1, now); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if n, err := s.CorroborateReadings(ctx, now.Add(-time.Hour), 1); err != nil || n != 1 {
-		t.Fatal(n, err)
+	counted := func() string {
+		t.Helper()
+		var out string
+		if err := pool.QueryRow(ctx, `SELECT string_agg(COALESCE(corroborated::text, '-'), '' ORDER BY id) FROM repeater_readings`).Scan(&out); err != nil {
+			t.Fatal(err)
+		}
+		return out
 	}
-	var older, newer *int16
-	if err := pool.QueryRow(ctx, `SELECT (SELECT corroborated FROM repeater_readings ORDER BY id LIMIT 1),
-(SELECT corroborated FROM repeater_readings ORDER BY id DESC LIMIT 1)`).Scan(&older, &newer); err != nil {
+	pass := func() {
+		t.Helper()
+		if n, err := s.CorroborateReadings(ctx, now.Add(-time.Hour), 1); err != nil || n != 1 {
+			t.Fatal(n, err)
+		}
+	}
+	// Never-counted readings go first, oldest first.
+	for _, want := range []string{"1--", "11-", "111"} {
+		pass()
+		if got := counted(); got != want {
+			t.Fatalf("got %q, want %q", got, want)
+		}
+	}
+	// Once all are counted, the newest is recounted first.
+	if _, err := pool.Exec(ctx, `UPDATE repeater_readings SET corroborated = 9`); err != nil {
 		t.Fatal(err)
 	}
-	if newer == nil || older != nil {
-		t.Fatal("limit 1 should update the newer reading", older, newer)
+	pass()
+	if got := counted(); got != "991" {
+		t.Fatalf("recount order %q", got)
+	}
+}
+
+func TestCorroborateReadingsReachesEveryReadingPostgres(t *testing.T) {
+	ctx, pool, s := pollStore(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	if _, err := pool.Exec(ctx, `INSERT INTO repeater_readings (target_public_key, observer_public_key, sampled_at, received_at, method, tag, packet_hash)
+SELECT $1, $2, $3, $3, 'status', g, '\x0102030405060708' FROM generate_series(1, 501) g`, pollKey(0xA), pollKey(1), now); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err := s.CorroborateReadings(ctx, now.Add(-time.Hour), 500); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var left int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM repeater_readings WHERE corroborated IS NULL`).Scan(&left); err != nil || left != 0 {
+		t.Fatal("readings never counted", left, err)
 	}
 }
 
