@@ -113,9 +113,6 @@ func TestParseClaimRejects(t *testing.T) {
 		"timestamp no zone": strings.Replace(good, `"2023-11-14T22:13:20Z"`, `"2023-11-14T22:13:20"`, 1),
 		"v is 1":            strings.Replace(good, `"v": 2`, `"v": 1`, 1),
 		"reply_hops 2":      strings.Replace(good, `"reply_hops": 0`, `"reply_hops": 2`, 1),
-		"unknown key":       strings.Replace(good, `"key": "own"`, `"key": "other"`, 1),
-		"unknown state":     strings.Replace(good, `"state": "ok"`, `"state": "weird"`, 1),
-		"slots over 8":      strings.Replace(good, `"request_slots": 3`, `"request_slots": 9`, 1),
 		"not json":          "{",
 	}
 	for name, doc := range cases {
@@ -365,4 +362,47 @@ func deref(p *int) any {
 		return nil
 	}
 	return *p
+}
+
+func TestParseClaimUnknownStateAndKeyKept(t *testing.T) {
+	doc := strings.Replace(string(readFile(t, "claim_extended.json")), `"state": "ok"`, `"state": "paused_by_owner"`, 1)
+	doc = strings.Replace(doc, `"key": "own"`, `"key": "delegated"`, 1)
+	c, err := ParseClaim([]byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	eq(t, "State", c.Nodes[0].State, "paused_by_owner")
+	eq(t, "KeyMode", c.Nodes[0].KeyMode, "delegated")
+}
+
+func TestParseClaimLongStateCut(t *testing.T) {
+	long := strings.Repeat("a", 40)
+	doc := strings.Replace(string(readFile(t, "claim_extended.json")), `"state": "ok"`, `"state": "`+long+`"`, 1)
+	c, err := ParseClaim([]byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	eq(t, "State", c.Nodes[0].State, long[:32])
+}
+
+func TestParseClaimClampsSlots(t *testing.T) {
+	for in, want := range map[string]int{"9": 8, "1000": 8, "-2": 0} {
+		doc := strings.Replace(string(readFile(t, "claim_extended.json")), `"request_slots": 3`, `"request_slots": `+in, 1)
+		c, err := ParseClaim([]byte(doc))
+		if err != nil {
+			t.Fatal(err)
+		}
+		eq(t, "RequestSlots for "+in, c.RequestSlots, want)
+	}
+}
+
+func TestParseClaimClampsMisses(t *testing.T) {
+	for in, want := range map[string]int{"-1": 0, "256": 255, "100000": 255, "7": 7} {
+		doc := strings.Replace(string(readFile(t, "claim_extended.json")), `"misses": 2`, `"misses": `+in, 1)
+		c, err := ParseClaim([]byte(doc))
+		if err != nil {
+			t.Fatal(err)
+		}
+		eq(t, "Misses for "+in, c.Nodes[0].Misses, want)
+	}
 }

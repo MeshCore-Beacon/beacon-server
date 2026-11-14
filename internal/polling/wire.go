@@ -13,6 +13,7 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -170,12 +171,17 @@ func optTime(name string, s *string) (*time.Time, error) {
 	return &t, nil
 }
 
-func validState(s string) bool {
-	switch s {
-	case "", "pending", "ok", "no_reply", "login_failed", "admin_stop", "not_direct":
-		return true
+// shortText cleans s and cuts it to 32 bytes without splitting a rune.
+func shortText(s string) string {
+	s = cleanText(s)
+	if len(s) <= 32 {
+		return s
 	}
-	return false
+	s = s[:32]
+	for !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s
 }
 
 // ParseClaim validates a /polling message.
@@ -212,10 +218,7 @@ func ParseClaim(raw []byte) (Claim, error) {
 		Nodes:           make([]ClaimNode, 0, len(w.Nodes)),
 	}
 	if w.RequestSlots != nil {
-		if *w.RequestSlots < 0 || *w.RequestSlots > maxSlots {
-			return Claim{}, errors.New("claim: request_slots out of range")
-		}
-		c.RequestSlots = *w.RequestSlots
+		c.RequestSlots = min(max(*w.RequestSlots, 0), maxSlots)
 	}
 	for _, nw := range w.Nodes {
 		n, err := parseClaimNode(nw)
@@ -235,15 +238,8 @@ func parseClaimNode(nw claimNodeWire) (ClaimNode, error) {
 	if nw.ReplyHops != nil && *nw.ReplyHops != 0 && *nw.ReplyHops != 1 {
 		return ClaimNode{}, errors.New("claim: reply_hops must be 0 or 1")
 	}
-	switch nw.Key {
-	case "own", "password", "shared":
-	default:
-		return ClaimNode{}, errors.New("claim: unknown key mode")
-	}
-	if !validState(nw.State) {
-		return ClaimNode{}, errors.New("claim: unknown state")
-	}
-	n := ClaimNode{Target: target, KeyMode: nw.Key, Requested: nw.Requested, State: nw.State}
+	// Newer firmware may add key modes and states; keep them as received.
+	n := ClaimNode{Target: target, KeyMode: shortText(nw.Key), Requested: nw.Requested, State: shortText(nw.State)}
 	if nw.SNR != nil {
 		if math.IsNaN(float64(*nw.SNR)) || math.IsInf(float64(*nw.SNR), 0) {
 			return ClaimNode{}, errors.New("claim: bad snr")
@@ -251,10 +247,7 @@ func parseClaimNode(nw claimNodeWire) (ClaimNode, error) {
 		n.ClaimedSNR = nw.SNR
 	}
 	if nw.Misses != nil {
-		if *nw.Misses < 0 {
-			return ClaimNode{}, errors.New("claim: negative misses")
-		}
-		n.Misses = *nw.Misses
+		n.Misses = min(max(*nw.Misses, 0), 255)
 	}
 	if n.LastAttempt, err = optTime("last_attempt", nw.LastAttempt); err != nil {
 		return ClaimNode{}, err
