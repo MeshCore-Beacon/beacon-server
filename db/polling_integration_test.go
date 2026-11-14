@@ -835,3 +835,32 @@ func TestPollingTargetsAdminPostgres(t *testing.T) {
 		t.Fatal("limit", len(got), err)
 	}
 }
+
+func TestPollingCandidatesEvidenceSincePostgres(t *testing.T) {
+	ctx, pool, s := pollStore(t)
+	o := pollKey(1)
+	id := pollObserver(t, ctx, s, o)
+	now := time.Now().UTC().Truncate(time.Second)
+	if _, err := s.ReplacePollingClaim(ctx, pollClaim(o, now, 0xA), id, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		at  time.Time
+		snr float32
+	}{{now.Add(-25 * time.Hour), 20}, {now.Add(-time.Hour), 4}} {
+		if _, err := pool.Exec(ctx, `WITH p AS (
+INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,origin_pubkey,raw_payload,raw_header,first_heard_at,last_heard_at)
+VALUES (decode(md5(gen_random_uuid()::text),'hex'),4,0,1,$1,'\x00','\x00',$2,$2) RETURNING packet_hash)
+INSERT INTO packet_observations(packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count,payload_type,rssi,snr)
+SELECT packet_hash,$3,'YVR',$2,0,1,0,4,-90,$4 FROM p`, pollKey(0xA), c.at, id, c.snr); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cs, err := s.ListPollingCandidates(ctx, pollKey(0xA), now.Add(-time.Hour), now.Add(-24*time.Hour))
+	if err != nil || len(cs) != 1 {
+		t.Fatal(len(cs), err)
+	}
+	if cs[0].EvidenceCount != 1 || cs[0].EvidenceSNR == nil || *cs[0].EvidenceSNR != 4 {
+		t.Fatal("old advert counted", cs[0].EvidenceCount, cs[0].EvidenceSNR)
+	}
+}

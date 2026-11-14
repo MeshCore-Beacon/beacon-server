@@ -413,6 +413,7 @@ func (w *Worker) handleMessageContext(parent context.Context, msg mqtt.Message) 
 	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
 
+	// "internal" is intentionally not handled (Role 2 access).
 	switch subtopic {
 	case "packets":
 		w.handlePacket(ctx, iata, pubkeyHex, msg.Payload())
@@ -428,7 +429,6 @@ func (w *Worker) handleMessageContext(parent context.Context, msg mqtt.Message) 
 		if w.polling != nil {
 			w.polling.HandleReading(ctx, pubkeyHex, msg.Payload())
 		}
-		// "internal" is intentionally not handled (Role 2 access)
 	}
 }
 

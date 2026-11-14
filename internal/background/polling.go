@@ -42,6 +42,7 @@ func NewPollingMaint(s *db.Store) PollingMaintStore { return pollingMaint{s} }
 
 func (m pollingMaint) BeginPollingElection(ctx context.Context) (PollingLock, bool, error) {
 	l, ok, err := m.Store.BeginPollingElection(ctx)
+	// Return a plain nil, not a nil *PollingElectionLock wrapped in a non-nil interface.
 	if l == nil {
 		return nil, ok, err
 	}

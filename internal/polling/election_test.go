@@ -152,9 +152,13 @@ func TestElectIgnoresInputOrderAndDoesNotMutate(t *testing.T) {
 	base := []Candidate{
 		cand('A', f64(6), 3), cand('B', f64(8.9), 2), cand('C', f64(8.9), 4),
 		cand('D', nil, 0), cand('E', nil, 0), cand('F', f64(1), 9),
+		failing(cand('G', f64(12), 5), MissLimit), failing(cand('H', nil, 0), MissLimit+2), failing(cand('I', f64(12), 5), 9),
 	}
 	base[4].ClaimedSNR = f32(7)
 	want := order(Elect(base, []byte{'A'}))
+	if string(want[len(want)-3:]) != "GIH" {
+		t.Fatalf("failing candidates should rank last, got %q", want)
+	}
 	rng := rand.New(rand.NewSource(1))
 	for i := 0; i < 50; i++ {
 		cs := append([]Candidate(nil), base...)

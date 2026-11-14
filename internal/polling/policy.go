@@ -149,7 +149,7 @@ func versionOK(minVer string, c Caller) bool {
 	}
 	want, ok := parseSemver(minVer)
 	if !ok {
-		return true // a bad config value must not lock every observer out
+		return false // config load rejects this; never fail open
 	}
 	have, ok := parseSemver(c.ClientVersion)
 	if !ok {

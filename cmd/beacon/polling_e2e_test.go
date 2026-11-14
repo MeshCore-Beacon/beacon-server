@@ -114,12 +114,13 @@ func TestPollingEndToEndPostgres(t *testing.T) {
 		}
 		return rec.Code, rec.Body.Bytes()
 	}
-	policy := func() {
+	policy := func() string {
 		t.Helper()
 		code, body := get("/api/guest-polling/policy")
 		if code != 200 || !strings.Contains(string(body), `"reading_format":"telemetry"`) {
 			t.Fatalf("policy: %d %s", code, body)
 		}
+		return string(body)
 	}
 	owners := func(obs string) polling.OwnersAnswer {
 		t.Helper()
@@ -166,7 +167,9 @@ func TestPollingEndToEndPostgres(t *testing.T) {
 	}
 
 	// 1. Policy before any data, and the key routes always answer 404.
-	policy()
+	if body := policy(); !strings.Contains(body, `"paused":false`) {
+		t.Fatalf("enabled polling starts paused: %s", body)
+	}
 	for _, c := range [][2]string{{http.MethodPost, "/api/guest-keys"}, {http.MethodGet, "/api/shared-guest/key"}} {
 		req := httptest.NewRequest(c[0], c[1], nil)
 		req.RemoteAddr = "198.51.100.1:1"

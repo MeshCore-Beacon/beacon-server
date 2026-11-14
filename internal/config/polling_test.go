@@ -46,9 +46,22 @@ func TestPollingRejects(t *testing.T) {
 		"bad excluded node": {ExcludedNodes: []string{"abc"}},
 		"17 excluded":       {ExcludedNodes: make17ValidKeys()},
 		"enabled, no hosts": {Enabled: true},
+		"version two parts": {MinClientVersion: "1.18"},
+		"version with v":    {MinClientVersion: "v1.18.0"},
+		"version suffix":    {MinClientVersion: "1.18.0-dev"},
+		"version junk":      {MinClientVersion: "junk"},
+		"version spaced":    {MinClientVersion: " 1.18.0"},
 	} {
 		if _, err := c.Resolve(); err == nil {
 			t.Errorf("%s: expected error", name)
+		}
+	}
+}
+
+func TestPollingAcceptsMinClientVersion(t *testing.T) {
+	for _, v := range []string{"", "1.18.0", "10.0.12"} {
+		if _, err := (PollingConfig{MinClientVersion: v}).Resolve(); err != nil {
+			t.Errorf("%q: %v", v, err)
 		}
 	}
 }

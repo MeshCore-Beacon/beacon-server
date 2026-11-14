@@ -6,6 +6,7 @@ package config
 import (
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -41,6 +42,8 @@ const (
 	maxPollingHosts         = 4
 	maxPollingExcludedNodes = 16
 )
+
+var pollingVersionRe = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 
 // Resolve applies defaults (zero means unset), validates bounds and parses values.
 func (p PollingConfig) Resolve() (ResolvedPolling, error) {
@@ -90,6 +93,9 @@ func (p PollingConfig) Resolve() (ResolvedPolling, error) {
 	}
 	if r.ReadingRetention < 0 {
 		return ResolvedPolling{}, fmt.Errorf("polling.reading_retention must not be negative")
+	}
+	if r.MinClientVersion != "" && !pollingVersionRe.MatchString(r.MinClientVersion) {
+		return ResolvedPolling{}, fmt.Errorf("polling.min_client_version must be X.Y.Z or empty")
 	}
 	if len(p.ExcludedNodes) > maxPollingExcludedNodes {
 		return ResolvedPolling{}, fmt.Errorf("polling.excluded_nodes: at most %d entries", maxPollingExcludedNodes)

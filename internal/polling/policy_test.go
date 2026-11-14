@@ -138,6 +138,10 @@ func TestPolicyVersionGate(t *testing.T) {
 	if !ok("1.18.0", "other", "0.1.0") || !ok("1.18.0", "", "") {
 		t.Fatal("other clients are not gated")
 	}
+	// Config rejects a bad minimum at load; should one get through, it no longer opens the gate.
+	if ok("junk", fwClient, "1.18.0") {
+		t.Fatal("bad configured minimum passed")
+	}
 }
 
 func TestPolicyBlockedCaller(t *testing.T) {
