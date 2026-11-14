@@ -54,6 +54,7 @@ type Config struct {
 	Guards      GuardsConfig          `yaml:"guards"`
 	Planguard   PlanguardConfig       `yaml:"planguard"`
 	ReadModels  ReadModelsConfig      `yaml:"readmodels"`
+	Polling     PollingConfig         `yaml:"polling"`
 }
 
 // ReadModelsConfig switches serving pages from each read model and paces their one-off backfills.
@@ -634,6 +635,9 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	if err := cfg.ReadModels.Fill.validate(); err != nil {
+		return nil, err
+	}
+	if _, err := cfg.Polling.Resolve(); err != nil {
 		return nil, err
 	}
 	return cfg, nil

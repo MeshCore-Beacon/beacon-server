@@ -412,3 +412,16 @@ cache:
 #  min_app_version: "0.1.1"   # BEACON Mobile
 #web:
 #  min_web_version: "2.0.3"   # Beacon Web
+
+# Repeater polling: asks repeaters for telemetry over MQTT. Disabled by default.
+# Bounds follow the firmware clamps. Zero or omitted values use the defaults.
+#polling:
+#  enabled: false
+#  mqtt_hosts: []              # up to 4 plain hostnames, no port; required when enabled
+#  direct_window: 1h           # 30m to 24h; default: 1h
+#  grace: 30m                  # 10m to 2h; default: 30m
+#  max_requests: 2             # 1 to 3; default: 2
+#  reading_retention: 744h     # default: 744h (31 days)
+#  min_client_version: ""
+#  excluded_nodes: []          # up to 16 public keys, 64 hex characters each
+#  paused: false
