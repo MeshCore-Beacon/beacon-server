@@ -1,0 +1,580 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+package polling
+
+import (
+	"bytes"
+	"context"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/MeshCore-Beacon/beacon-server/internal/config"
+	"github.com/google/uuid"
+)
+
+type fakeClaim struct {
+	ts, recv time.Time
+	nodes    map[string]ClaimNode
+}
+
+type fakeReading struct {
+	target, observer string
+	sampled          time.Time
+	hasNodeRow       bool
+}
+
+type fakeStore struct {
+	mu          sync.Mutex
+	ids         map[string]uuid.UUID
+	claims      map[string]*fakeClaim
+	readings    map[string]fakeReading
+	assigns     map[string][]Assignment
+	evidence    map[string]float64 // observer hex -> SNR
+	blocked     map[string]bool
+	paused      bool
+	excluded    [][]byte
+	stateErr    error
+	claimCalls  int
+	electCalls  map[string]int // target hex -> ReplacePollingAssignments calls
+	idCalls     int
+	targetsFail map[string]bool
+}
+
+func newFakeStore() *fakeStore {
+	return &fakeStore{
+		ids: map[string]uuid.UUID{}, claims: map[string]*fakeClaim{}, readings: map[string]fakeReading{},
+		assigns: map[string][]Assignment{}, evidence: map[string]float64{}, blocked: map[string]bool{},
+		electCalls: map[string]int{}, targetsFail: map[string]bool{},
+	}
+}
+
+func hx(b []byte) string { return hex.EncodeToString(b) }
+
+func (f *fakeStore) ObserverID(_ context.Context, pk []byte) (uuid.UUID, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.idCalls++
+	id, ok := f.ids[hx(pk)]
+	if !ok {
+		id = uuid.New()
+		f.ids[hx(pk)] = id
+	}
+	return id, nil
+}
+
+func (f *fakeStore) ReplacePollingClaim(_ context.Context, c Claim, _ uuid.UUID, at time.Time) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.claimCalls++
+	old := f.claims[hx(c.Observer)]
+	if old != nil && !c.Timestamp.After(old.ts) {
+		return false, nil
+	}
+	fc := &fakeClaim{ts: c.Timestamp, recv: at, nodes: map[string]ClaimNode{}}
+	for _, n := range c.Nodes {
+		fc.nodes[hx(n.Target)] = n
+	}
+	f.claims[hx(c.Observer)] = fc
+	return true, nil
+}
+
+func (f *fakeStore) live(obs, target string, after time.Time) bool {
+	c := f.claims[obs]
+	if c == nil || !c.recv.After(after) {
+		return false
+	}
+	_, ok := c.nodes[target]
+	return ok
+}
+
+func (f *fakeStore) InsertRepeaterReading(_ context.Context, r Reading, _ uuid.UUID, _ time.Time) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	tag := r.SampledAt.Unix()
+	if r.Tag != nil {
+		tag = int64(*r.Tag)
+	}
+	key := fmt.Sprintf("%x|%x|%d|%s", r.Target, r.Observer, tag, r.Method)
+	if _, dup := f.readings[key]; dup {
+		return false, nil
+	}
+	f.readings[key] = fakeReading{target: hx(r.Target), observer: hx(r.Observer), sampled: r.SampledAt}
+	return true, nil
+}
+
+func (f *fakeStore) HasLivePollingCandidate(_ context.Context, o, t []byte, after time.Time) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.live(hx(o), hx(t), after), nil
+}
+
+func (f *fakeStore) ListPollingTargets(_ context.Context, after time.Time) ([][]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	seen := map[string]bool{}
+	for t := range f.assigns {
+		seen[t] = true
+	}
+	for _, c := range f.claims {
+		if c.recv.After(after) {
+			for t := range c.nodes {
+				seen[t] = true
+			}
+		}
+	}
+	var out [][]byte
+	for t := range seen {
+		b, _ := hex.DecodeString(t)
+		out = append(out, b)
+	}
+	return out, nil
+}
+
+func (f *fakeStore) ListPollingCandidates(_ context.Context, target []byte, after, _ time.Time) ([]Candidate, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []Candidate
+	for obs := range f.claims {
+		if !f.live(obs, hx(target), after) {
+			continue
+		}
+		b, _ := hex.DecodeString(obs)
+		cand := Candidate{Observer: b, Blocked: f.blocked[obs]}
+		if v, ok := f.evidence[obs]; ok {
+			cand.EvidenceSNR = &v
+			cand.EvidenceCount = 5
+		}
+		out = append(out, cand)
+	}
+	return out, nil
+}
+
+func (f *fakeStore) CurrentPoller(_ context.Context, target []byte) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, a := range f.assigns[hx(target)] {
+		if a.Rank == 0 {
+			return a.Observer, nil
+		}
+	}
+	return nil, nil
+}
+
+func (f *fakeStore) ReplacePollingAssignments(_ context.Context, target []byte, a []Assignment, _ time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.targetsFail[hx(target)] {
+		return fmt.Errorf("boom")
+	}
+	f.electCalls[hx(target)]++
+	if len(a) == 0 {
+		delete(f.assigns, hx(target))
+		return nil
+	}
+	f.assigns[hx(target)] = a
+	return nil
+}
+
+func (f *fakeStore) PollingOwnerRows(_ context.Context, obs []byte, after time.Time) ([]OwnerRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c := f.claims[hx(obs)]
+	if c == nil || !c.recv.After(after) {
+		return nil, nil
+	}
+	var out []OwnerRow
+	for t := range c.nodes {
+		tb, _ := hex.DecodeString(t)
+		row := OwnerRow{Target: tb, Rank: -1}
+		for _, a := range f.assigns[t] {
+			if bytes.Equal(a.Observer, obs) {
+				row.Rank = a.Rank
+			}
+		}
+		for _, r := range f.readings {
+			if r.target == t && (row.LatestTS == nil || r.sampled.After(*row.LatestTS)) {
+				s := r.sampled
+				row.LatestTS = &s
+			}
+		}
+		out = append(out, row)
+	}
+	return out, nil
+}
+
+func (f *fakeStore) PollingObserverFlags(_ context.Context, obs []byte) (bool, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.stateErr != nil {
+		return false, false, f.stateErr
+	}
+	return f.blocked[hx(obs)], false, nil
+}
+
+func (f *fakeStore) PollingState(context.Context) (bool, *time.Time, [][]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.stateErr != nil {
+		return false, nil, nil, f.stateErr
+	}
+	return f.paused, nil, f.excluded, nil
+}
+
+func (f *fakeStore) readingCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.readings)
+}
+
+var t0 = time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
+
+type clock struct{ t time.Time }
+
+func (c *clock) now() time.Time { return c.t }
+
+func newSvc(t *testing.T, enabled bool) (*Service, *fakeStore, *clock) {
+	t.Helper()
+	st := newFakeStore()
+	ck := &clock{t: t0}
+	cfg := config.ResolvedPolling{Enabled: enabled, MQTTHosts: []string{"mqtt.example"},
+		DirectWindow: time.Hour, Grace: 30 * time.Minute, MaxRequests: 2}
+	return NewService(st, cfg, ck.now, slog.New(slog.NewTextHandler(io.Discard, nil))), st, ck
+}
+
+func k32(b byte) []byte { return bytes.Repeat([]byte{b}, 32) }
+
+func claimJSON(obs []byte, ts time.Time, targets ...[]byte) []byte {
+	nodes := []map[string]any{}
+	for _, tg := range targets {
+		nodes = append(nodes, map[string]any{"node_id": hx(tg), "key": "own"})
+	}
+	b, _ := json.Marshal(map[string]any{"v": 2, "origin": "obs", "origin_id": hx(obs),
+		"timestamp": ts.Format(time.RFC3339), "plugin": "fw", "nodes": nodes})
+	return b
+}
+
+func readingJSON(obs, target []byte, sampled time.Time, extra ...int) []byte {
+	tag := 1
+	if len(extra) > 0 {
+		tag = extra[0]
+	}
+	b, _ := json.Marshal(map[string]any{"v": 2, "origin_id": hx(obs), "plugin": "fw",
+		"readings": []map[string]any{{"node_id": hx(target), "method": "status",
+			"sampled_at": sampled.Format(time.RFC3339), "tag": tag, "battery_mv": 4000}}})
+	return b
+}
+
+func TestHandleClaimStoresAndElects(t *testing.T) {
+	s, st, _ := newSvc(t, true)
+	a, b, o := k32(0xa), k32(0xb), k32(1)
+	s.HandleClaim(context.Background(), hx(o), claimJSON(o, t0, a, b))
+	if st.claimCalls != 1 {
+		t.Fatalf("claim calls = %d", st.claimCalls)
+	}
+	if st.electCalls[hx(a)] != 1 || st.electCalls[hx(b)] != 1 {
+		t.Fatalf("elect calls = %v", st.electCalls)
+	}
+	if len(st.assigns[hx(a)]) != 1 || st.assigns[hx(a)][0].Rank != 0 {
+		t.Fatalf("assigns = %v", st.assigns[hx(a)])
+	}
+}
+
+func TestHandleClaimTopicMismatch(t *testing.T) {
+	s, st, _ := newSvc(t, true)
+	o := k32(1)
+	s.HandleClaim(context.Background(), hx(k32(2)), claimJSON(o, t0, k32(0xa)))
+	if st.claimCalls != 0 || st.idCalls != 0 {
+		t.Fatal("mismatched claim was stored")
+	}
+	s.HandleClaim(context.Background(), strings.ToUpper(hx(o)), claimJSON(o, t0, k32(0xa)))
+	if st.claimCalls != 1 {
+		t.Fatal("upper-case topic key should match")
+	}
+}
+
+func TestHandleClaimFutureTimestamp(t *testing.T) {
+	s, st, _ := newSvc(t, true)
+	o := k32(1)
+	s.HandleClaim(context.Background(), hx(o), claimJSON(o, t0.Add(11*time.Minute), k32(0xa)))
+	if st.claimCalls != 0 {
+		t.Fatal("future claim stored")
+	}
+	s.HandleClaim(context.Background(), hx(o), claimJSON(o, t0.Add(9*time.Minute), k32(0xa)))
+	if st.claimCalls != 1 {
+		t.Fatal("near-future claim dropped")
+	}
+}
+
+func TestHandleClaimStaleIsIgnored(t *testing.T) {
+	s, st, _ := newSvc(t, true)
+	a, b, o := k32(0xa), k32(0xb), k32(1)
+	s.HandleClaim(context.Background(), hx(o), claimJSON(o, t0, b))
+	elA := st.electCalls[hx(a)]
+	s.HandleClaim(context.Background(), hx(o), claimJSON(o, t0.Add(-time.Minute), a, b))
+	if st.claimCalls != 2 {
+		t.Fatalf("claim calls = %d", st.claimCalls)
+	}
+	if st.electCalls[hx(a)] != elA {
+		t.Fatal("election ran for a stale claim")
+	}
+	if _, ok := st.claims[hx(o)].nodes[hx(a)]; ok {
+		t.Fatal("stale claim replaced candidates")
+	}
+}
+
+func TestHandleClaimRemovedTargetIsReElected(t *testing.T) {
+	s, st, _ := newSvc(t, true)
+	a, b, o1, o2 := k32(0xa), k32(0xb), k32(1), k32(2)
+	s.HandleClaim(context.Background(), hx(o2), claimJSON(o2, t0, a))
+	s.HandleClaim(context.Background(), hx(o1), claimJSON(o1, t0, a, b))
+	before := st.electCalls[hx(a)]
+	s.HandleClaim(context.Background(), hx(o1), claimJSON(o1, t0.Add(time.Second), b))
+	if st.electCalls[hx(a)] != before+1 {
+		t.Fatalf("a not re-elected once: %d -> %d", before, st.electCalls[hx(a)])
+	}
+	if got := st.assigns[hx(a)]; len(got) != 1 || !bytes.Equal(got[0].Observer, o2) {
+		t.Fatalf("assigns = %v", got)
+	}
+}
+
+func TestHandleReadingDuplicate(t *testing.T) {
+	s, st, _ := newSvc(t, true)
+	o, x := k32(1), k32(0xa)
+	ctx := context.Background()
+	s.HandleClaim(ctx, hx(o), claimJSON(o, t0, x))
+	at := t0.Add(-10 * time.Minute)
+	s.HandleReading(ctx, hx(o), readingJSON(o, x, at))
+	first := s.Owners(ctx, Caller{Observer: o}).Nodes[hx(x)].LatestTS
+	s.HandleReading(ctx, hx(o), readingJSON(o, x, at))
+	if st.readingCount() != 1 {
+		t.Fatalf("rows = %d", st.readingCount())
+	}
+	second := s.Owners(ctx, Caller{Observer: o}).Nodes[hx(x)].LatestTS
+	if first == nil || second == nil || *first != *second {
+		t.Fatalf("latest ts changed: %v %v", first, second)
+	}
+}
+
+func TestHandleReadingNeedsLiveClaim(t *testing.T) {
+	s, st, ck := newSvc(t, true)
+	o, x, y := k32(1), k32(0xa), k32(0xb)
+	ctx := context.Background()
+	s.HandleReading(ctx, hx(o), readingJSON(o, x, t0))
+	if st.readingCount() != 0 {
+		t.Fatal("stored without claim")
+	}
+	s.HandleClaim(ctx, hx(o), claimJSON(o, t0, x))
+	s.HandleReading(ctx, hx(o), readingJSON(o, y, t0))
+	if st.readingCount() != 0 {
+		t.Fatal("stored for an unclaimed target")
+	}
+	s.HandleReading(ctx, hx(o), readingJSON(o, x, t0, 2))
+	if st.readingCount() != 1 {
+		t.Fatal("claimed target dropped")
+	}
+	ck.t = t0.Add(ClaimTTL + time.Second)
+	s.HandleReading(ctx, hx(o), readingJSON(o, x, ck.t, 3))
+	if st.readingCount() != 1 {
+		t.Fatal("stored against an expired claim")
+	}
+}
+
+func TestHandleReadingTimeBounds(t *testing.T) {
+	s, st, _ := newSvc(t, true)
+	o, x := k32(1), k32(0xa)
+	ctx := context.Background()
+	s.HandleClaim(ctx, hx(o), claimJSON(o, t0, x))
+	s.HandleReading(ctx, hx(o), readingJSON(o, x, t0.Add(61*time.Second), 1))
+	s.HandleReading(ctx, hx(o), readingJSON(o, x, t0.Add(-2*time.Hour-time.Minute), 2))
+	if st.readingCount() != 0 {
+		t.Fatal("out of bounds reading stored")
+	}
+	s.HandleReading(ctx, hx(o), readingJSON(o, x, t0.Add(30*time.Second), 3))
+	s.HandleReading(ctx, hx(o), readingJSON(o, x, t0.Add(-time.Hour-59*time.Minute), 4))
+	s.HandleReading(ctx, hx(o), readingJSON(o, x, t0, 5))
+	if st.readingCount() != 3 {
+		t.Fatalf("rows = %d, want 3", st.readingCount())
+	}
+}
+
+func TestHandleReadingTopicMismatch(t *testing.T) {
+	s, st, _ := newSvc(t, true)
+	o, x := k32(1), k32(0xa)
+	ctx := context.Background()
+	s.HandleClaim(ctx, hx(o), claimJSON(o, t0, x))
+	ids := st.idCalls
+	s.HandleReading(ctx, hx(k32(2)), readingJSON(o, x, t0))
+	if st.readingCount() != 0 || st.idCalls != ids {
+		t.Fatal("mismatched reading was handled")
+	}
+}
+
+func TestHandleReadingMultipleCallsObserverIDOnce(t *testing.T) {
+	s, st, _ := newSvc(t, true)
+	o, x := k32(1), k32(0xa)
+	ctx := context.Background()
+	s.HandleClaim(ctx, hx(o), claimJSON(o, t0, x))
+	ids := st.idCalls
+	raw, _ := json.Marshal(map[string]any{"v": 2, "origin_id": hx(o), "readings": []map[string]any{
+		{"node_id": hx(x), "method": "status", "sampled_at": t0.Format(time.RFC3339), "tag": 1},
+		{"node_id": hx(x), "method": "status", "sampled_at": t0.Format(time.RFC3339), "tag": 2},
+	}})
+	s.HandleReading(ctx, hx(o), raw)
+	if st.readingCount() != 2 || st.idCalls != ids+1 {
+		t.Fatalf("rows=%d idCalls=%d", st.readingCount(), st.idCalls-ids)
+	}
+}
+
+func TestHandleReadingTargetWithoutNodeRow(t *testing.T) {
+	// The store keeps node_id NULL when the repeater is not in nodes; the service must still accept it.
+	s, st, _ := newSvc(t, true)
+	o, x := k32(1), k32(0xee)
+	ctx := context.Background()
+	s.HandleClaim(ctx, hx(o), claimJSON(o, t0, x))
+	s.HandleReading(ctx, hx(o), readingJSON(o, x, t0))
+	if st.readingCount() != 1 {
+		t.Fatal("reading for an unknown node dropped")
+	}
+}
+
+func TestOwnersUnknownObserver(t *testing.T) {
+	s, _, _ := newSvc(t, true)
+	for _, c := range []Caller{{}, {Observer: k32(9)}} {
+		a := s.Owners(context.Background(), c)
+		if a.Nodes == nil || len(a.Nodes) != 0 {
+			t.Fatalf("nodes = %v", a.Nodes)
+		}
+		if a.Policy.Paused || len(a.Policy.MQTTHosts) != 1 {
+			t.Fatalf("policy = %+v", a.Policy)
+		}
+	}
+}
+
+func TestOwnersBlockedObserver(t *testing.T) {
+	s, st, _ := newSvc(t, true)
+	o, x := k32(1), k32(0xa)
+	ctx := context.Background()
+	s.HandleClaim(ctx, hx(o), claimJSON(o, t0, x))
+	st.blocked[hx(o)] = true
+	a := s.Owners(ctx, Caller{Observer: o})
+	if !a.Policy.ObserverBlocked || a.Nodes == nil || len(a.Nodes) != 0 {
+		t.Fatalf("answer = %+v", a)
+	}
+}
+
+func TestOwnersReflectsElection(t *testing.T) {
+	s, st, _ := newSvc(t, true)
+	o1, o2, x := k32(1), k32(2), k32(0xa)
+	ctx := context.Background()
+	st.evidence[hx(o1)] = 9
+	st.evidence[hx(o2)] = 2
+	s.HandleClaim(ctx, hx(o2), claimJSON(o2, t0, x))
+	s.HandleClaim(ctx, hx(o1), claimJSON(o1, t0, x))
+	e1 := s.Owners(ctx, Caller{Observer: o1}).Nodes[hx(x)]
+	e2 := s.Owners(ctx, Caller{Observer: o2}).Nodes[hx(x)]
+	if e1.Role != "polling" || !e1.Mine {
+		t.Fatalf("o1 = %+v", e1)
+	}
+	if e2.Role != "standby" || e2.StandbyRank != 1 {
+		t.Fatalf("o2 = %+v", e2)
+	}
+}
+
+func TestOwnersBeforeFirstElection(t *testing.T) {
+	s, st, _ := newSvc(t, true)
+	o, x := k32(1), k32(0xa)
+	st.claims[hx(o)] = &fakeClaim{ts: t0, recv: t0, nodes: map[string]ClaimNode{hx(x): {Target: x}}}
+	e := s.Owners(context.Background(), Caller{Observer: o}).Nodes[hx(x)]
+	if e.Role != "polling" || !e.Mine {
+		t.Fatalf("entry = %+v", e)
+	}
+}
+
+func TestOwnersExcludedTarget(t *testing.T) {
+	s, st, _ := newSvc(t, true)
+	o, x := k32(1), k32(0xa)
+	ctx := context.Background()
+	s.HandleClaim(ctx, hx(o), claimJSON(o, t0, x))
+	st.excluded = [][]byte{x}
+	e := s.Owners(ctx, Caller{Observer: o}).Nodes[hx(x)]
+	if e.Role != "excluded" || !e.Excluded {
+		t.Fatalf("entry = %+v", e)
+	}
+}
+
+func TestOwnersStateErrorStillAnswers(t *testing.T) {
+	s, st, _ := newSvc(t, true)
+	st.stateErr = fmt.Errorf("db down")
+	a := s.Owners(context.Background(), Caller{Observer: k32(1)})
+	if a.Policy.Paused || a.Policy.ObserverBlocked || a.Nodes == nil {
+		t.Fatalf("answer = %+v", a)
+	}
+}
+
+func TestServiceDisabled(t *testing.T) {
+	s, st, _ := newSvc(t, false)
+	o, x := k32(1), k32(0xa)
+	ctx := context.Background()
+	s.HandleClaim(ctx, hx(o), claimJSON(o, t0, x))
+	s.HandleReading(ctx, hx(o), readingJSON(o, x, t0))
+	if st.claimCalls != 0 || st.readingCount() != 0 {
+		t.Fatal("disabled service stored data")
+	}
+	want := DisabledPolicy()
+	if got := s.Policy(ctx, Caller{Observer: o}); got.Version != want.Version || !got.Paused {
+		t.Fatalf("policy = %+v", got)
+	}
+	a := s.Owners(ctx, Caller{Observer: o})
+	if a.Nodes == nil || len(a.Nodes) != 0 || a.Policy.Version != want.Version {
+		t.Fatalf("owners = %+v", a)
+	}
+}
+
+func TestElectAllContinuesAfterFailure(t *testing.T) {
+	s, st, _ := newSvc(t, true)
+	o, a, b := k32(1), k32(0xa), k32(0xb)
+	ctx := context.Background()
+	s.HandleClaim(ctx, hx(o), claimJSON(o, t0, a, b))
+	st.electCalls = map[string]int{}
+	st.targetsFail[hx(a)] = true
+	if err := s.ElectAll(ctx); err == nil {
+		t.Fatal("want first error")
+	}
+	if st.electCalls[hx(b)] != 1 {
+		t.Fatal("b not elected after a failed")
+	}
+}
+
+func TestElectTargetClearsWithoutCandidates(t *testing.T) {
+	s, st, ck := newSvc(t, true)
+	o, x := k32(1), k32(0xa)
+	ctx := context.Background()
+	s.HandleClaim(ctx, hx(o), claimJSON(o, t0, x))
+	ck.t = t0.Add(ClaimTTL + time.Minute)
+	if err := s.ElectTarget(ctx, x); err != nil {
+		t.Fatal(err)
+	}
+	if len(st.assigns[hx(x)]) != 0 {
+		t.Fatal("assignments not cleared")
+	}
+}
+
+func TestMalformedPayloadsDoNotPanic(t *testing.T) {
+	s, st, _ := newSvc(t, true)
+	o := hx(k32(1))
+	for _, raw := range [][]byte{nil, []byte("{"), []byte("[]"), []byte("null"), []byte("1"), bytes.Repeat([]byte{'a'}, 1<<20)} {
+		s.HandleClaim(context.Background(), o, raw)
+		s.HandleReading(context.Background(), o, raw)
+	}
+	if st.claimCalls != 0 || st.readingCount() != 0 {
+		t.Fatal("garbage stored")
+	}
+}
