@@ -64,7 +64,7 @@ jobs:
       - name: Verify backup startup and the read-only boot against PostgreSQL 16
         env:
           BEACON_TEST_POSTGRES_DSN: postgres://postgres:backup-ci-only@127.0.0.1:5432/postgres?sslmode=disable
-        run: go test ./cmd/beacon -run '^Test(BackupConfiguration|ReadOnlyBootWritesNothing)Postgres$' -count=1 -v
+        run: go test ./cmd/beacon -run '^Test(BackupConfiguration|ReadOnlyBootWritesNothing|PollingEndToEnd)Postgres$' -count=1 -v
 
       - name: Verify stats and endpoint queries against PostgreSQL 16
         env:
