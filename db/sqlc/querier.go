@@ -335,7 +335,6 @@ type Querier interface {
 	GetTopNodesProbe(ctx context.Context, arg GetTopNodesProbeParams) ([]GetTopNodesProbeRow, error)
 	GetTransportScopeByName(ctx context.Context, name string) (int32, error)
 	GetTransportScopes(ctx context.Context) ([]GetTransportScopesRow, error)
-	GetUserAtlas(ctx context.Context, userID uuid.UUID) (GetUserAtlasRow, error)
 	HasLivePollingCandidate(ctx context.Context, arg HasLivePollingCandidateParams) (bool, error)
 	// Whether any observation up to @max_id lacks a payload type. A full scan, run at most once per
 	// process by the payload-type backfill.
@@ -679,6 +678,8 @@ type Querier interface {
 	PruneImportedRegions(ctx context.Context, keep []string) ([]string, error)
 	// Drops imports for IATAs no longer configured, so their manual border returns.
 	PruneZoneBoundaries(ctx context.Context, keep []string) ([]string, error)
+	// The header and the pins in one statement, so they come from one snapshot. A user with no Atlas gets no rows.
+	ReadUserAtlas(ctx context.Context, userID uuid.UUID) ([]ReadUserAtlasRow, error)
 	// Delete node_neighbors where the neighbor has departed from node_short_ids
 	// for that IATA, or where its prefix_4 is now ambiguous.
 	ReconfirmNeighbors(ctx context.Context) error

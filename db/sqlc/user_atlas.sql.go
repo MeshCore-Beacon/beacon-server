@@ -46,22 +46,6 @@ func (q *Queries) EnsureUserAtlas(ctx context.Context, userID uuid.UUID) error {
 	return err
 }
 
-const getUserAtlas = `-- name: GetUserAtlas :one
-SELECT range, revision FROM user_atlas WHERE user_id = $1
-`
-
-type GetUserAtlasRow struct {
-	Range    string `json:"range"`
-	Revision int64  `json:"revision"`
-}
-
-func (q *Queries) GetUserAtlas(ctx context.Context, userID uuid.UUID) (GetUserAtlasRow, error) {
-	row := q.db.QueryRow(ctx, getUserAtlas, userID)
-	var i GetUserAtlasRow
-	err := row.Scan(&i.Range, &i.Revision)
-	return i, err
-}
-
 const insertUserAtlasPin = `-- name: InsertUserAtlasPin :exec
 INSERT INTO user_atlas_pins (user_id, position, kind, public_key, name, tiles, view)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -223,6 +207,54 @@ func (q *Queries) ObserverKeysByIDs(ctx context.Context, dollar_1 []uuid.UUID) (
 	for rows.Next() {
 		var i ObserverKeysByIDsRow
 		if err := rows.Scan(&i.ID, &i.PublicKey); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const readUserAtlas = `-- name: ReadUserAtlas :many
+SELECT a.range, a.revision, p.position, p.kind, p.public_key, p.name, p.tiles, p.view
+FROM user_atlas a LEFT JOIN user_atlas_pins p ON p.user_id = a.user_id
+WHERE a.user_id = $1
+ORDER BY p.position
+`
+
+type ReadUserAtlasRow struct {
+	Range     string   `json:"range"`
+	Revision  int64    `json:"revision"`
+	Position  *int16   `json:"position"`
+	Kind      *string  `json:"kind"`
+	PublicKey []byte   `json:"public_key"`
+	Name      *string  `json:"name"`
+	Tiles     []string `json:"tiles"`
+	View      *string  `json:"view"`
+}
+
+// The header and the pins in one statement, so they come from one snapshot. A user with no Atlas gets no rows.
+func (q *Queries) ReadUserAtlas(ctx context.Context, userID uuid.UUID) ([]ReadUserAtlasRow, error) {
+	rows, err := q.db.Query(ctx, readUserAtlas, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReadUserAtlasRow{}
+	for rows.Next() {
+		var i ReadUserAtlasRow
+		if err := rows.Scan(
+			&i.Range,
+			&i.Revision,
+			&i.Position,
+			&i.Kind,
+			&i.PublicKey,
+			&i.Name,
+			&i.Tiles,
+			&i.View,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

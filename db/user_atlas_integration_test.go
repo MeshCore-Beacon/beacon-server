@@ -4,13 +4,16 @@
 package db
 
 import (
+	"context"
 	"encoding/hex"
 	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/users"
 	"github.com/google/uuid"
@@ -146,5 +149,55 @@ func TestUserAtlasConcurrentWritersPostgres(t *testing.T) {
 	}
 	if a, _ := s.UserAtlas(ctx, u.ID); a.Revision != 1 || len(a.Pins) != 1 {
 		t.Fatalf("after race: %+v", a)
+	}
+}
+
+// atlasGap pauses an Atlas read after its header and pins statement.
+type atlasGap struct {
+	sqlc.Querier
+	arrived chan struct{}
+	release chan struct{}
+}
+
+func (g atlasGap) ReadUserAtlas(ctx context.Context, id uuid.UUID) ([]sqlc.ReadUserAtlasRow, error) {
+	r, err := g.Querier.ReadUserAtlas(ctx, id)
+	g.arrived <- struct{}{}
+	<-g.release
+	return r, err
+}
+
+// A write that lands in the middle of a read must not give the reader one revision with the other's pins.
+func TestUserAtlasReadIsOneSnapshotPostgres(t *testing.T) {
+	ctx, _, s := userStore(t)
+	u := newUser(t, ctx, s, "snap")
+	if _, ok, err := s.ReplaceUserAtlas(ctx, u.ID, 0, "24h", []api.StoredPin{{Kind: "node", Key: atlasKey(1), Name: "old"}}); err != nil || !ok {
+		t.Fatalf("%v %v", ok, err)
+	}
+	g := atlasGap{Querier: s.q, arrived: make(chan struct{}, 1), release: make(chan struct{})}
+	s.q = g
+	type res struct {
+		a   api.Atlas
+		err error
+	}
+	done := make(chan res, 1)
+	go func() {
+		a, err := s.UserAtlas(ctx, u.ID)
+		done <- res{a, err}
+	}()
+	select {
+	case <-g.arrived:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the read never reached the gap")
+	}
+	if _, ok, err := s.ReplaceUserAtlas(ctx, u.ID, 1, "3d", []api.StoredPin{{Kind: "node", Key: atlasKey(2), Name: "new"}}); err != nil || !ok {
+		t.Fatalf("%v %v", ok, err)
+	}
+	close(g.release)
+	r := <-done
+	if r.err != nil || len(r.a.Pins) != 1 {
+		t.Fatalf("%+v %v", r.a, r.err)
+	}
+	if got, want := r.a.Pins[0].Name, map[int64]string{1: "old", 2: "new"}[r.a.Revision]; got != want || (r.a.Revision == 1) != (r.a.Range == "24h") {
+		t.Fatalf("revision %d range %s with pin %q", r.a.Revision, r.a.Range, got)
 	}
 }

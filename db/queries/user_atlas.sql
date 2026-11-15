@@ -5,8 +5,12 @@ INSERT INTO user_atlas (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING;
 -- name: LockUserAtlas :one
 SELECT range, revision FROM user_atlas WHERE user_id = $1 FOR UPDATE;
 
--- name: GetUserAtlas :one
-SELECT range, revision FROM user_atlas WHERE user_id = $1;
+-- name: ReadUserAtlas :many
+-- The header and the pins in one statement, so they come from one snapshot. A user with no Atlas gets no rows.
+SELECT a.range, a.revision, p.position, p.kind, p.public_key, p.name, p.tiles, p.view
+FROM user_atlas a LEFT JOIN user_atlas_pins p ON p.user_id = a.user_id
+WHERE a.user_id = $1
+ORDER BY p.position;
 
 -- name: ListUserAtlasPins :many
 SELECT position, kind, public_key, name, tiles, view FROM user_atlas_pins WHERE user_id = $1 ORDER BY position;

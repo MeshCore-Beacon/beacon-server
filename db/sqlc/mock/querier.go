@@ -2413,21 +2413,6 @@ func (mr *MockQuerierMockRecorder) GetTransportScopes(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTransportScopes", reflect.TypeOf((*MockQuerier)(nil).GetTransportScopes), ctx)
 }
 
-// GetUserAtlas mocks base method.
-func (m *MockQuerier) GetUserAtlas(ctx context.Context, userID uuid.UUID) (db.GetUserAtlasRow, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetUserAtlas", ctx, userID)
-	ret0, _ := ret[0].(db.GetUserAtlasRow)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// GetUserAtlas indicates an expected call of GetUserAtlas.
-func (mr *MockQuerierMockRecorder) GetUserAtlas(ctx, userID any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUserAtlas", reflect.TypeOf((*MockQuerier)(nil).GetUserAtlas), ctx, userID)
-}
-
 // HasLivePollingCandidate mocks base method.
 func (m *MockQuerier) HasLivePollingCandidate(ctx context.Context, arg db.HasLivePollingCandidateParams) (bool, error) {
 	m.ctrl.T.Helper()
@@ -4529,6 +4514,21 @@ func (m *MockQuerier) PruneZoneBoundaries(ctx context.Context, keep []string) ([
 func (mr *MockQuerierMockRecorder) PruneZoneBoundaries(ctx, keep any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PruneZoneBoundaries", reflect.TypeOf((*MockQuerier)(nil).PruneZoneBoundaries), ctx, keep)
+}
+
+// ReadUserAtlas mocks base method.
+func (m *MockQuerier) ReadUserAtlas(ctx context.Context, userID uuid.UUID) ([]db.ReadUserAtlasRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReadUserAtlas", ctx, userID)
+	ret0, _ := ret[0].([]db.ReadUserAtlasRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ReadUserAtlas indicates an expected call of ReadUserAtlas.
+func (mr *MockQuerierMockRecorder) ReadUserAtlas(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReadUserAtlas", reflect.TypeOf((*MockQuerier)(nil).ReadUserAtlas), ctx, userID)
 }
 
 // ReconfirmNeighbors mocks base method.

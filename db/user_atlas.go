@@ -12,7 +12,6 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/users"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -21,25 +20,23 @@ const foreignKeyViolation = "23503"
 // UserAtlas reads the user's Atlas with ids resolved now. A user with none reads as revision 0, 24h, no pins.
 func (s *Store) UserAtlas(ctx context.Context, userID uuid.UUID) (api.Atlas, error) {
 	rng, rev := "24h", int64(0)
-	head, err := s.q.GetUserAtlas(ctx, userID)
-	switch {
-	case err == nil:
-		rng, rev = head.Range, head.Revision
-	case !errors.Is(err, pgx.ErrNoRows):
-		return api.Atlas{}, err
-	}
-	rows, err := s.q.ListUserAtlasPins(ctx, userID)
+	rows, err := s.q.ReadUserAtlas(ctx, userID)
 	if err != nil {
 		return api.Atlas{}, err
 	}
-	stored := make([]api.StoredPin, len(rows))
-	keys := make([][]byte, len(rows))
-	for i, r := range rows {
-		stored[i] = api.StoredPin{Kind: r.Kind, Key: r.PublicKey, Name: r.Name, Tiles: r.Tiles}
-		if r.View != nil {
-			stored[i].View = *r.View
+	var stored []api.StoredPin
+	var keys [][]byte
+	for _, r := range rows {
+		rng, rev = r.Range, r.Revision
+		if r.Kind == nil { // the header row of an Atlas with no pins
+			continue
 		}
-		keys[i] = r.PublicKey
+		p := api.StoredPin{Kind: *r.Kind, Key: r.PublicKey, Name: *r.Name, Tiles: r.Tiles}
+		if r.View != nil {
+			p.View = *r.View
+		}
+		stored = append(stored, p)
+		keys = append(keys, r.PublicKey)
 	}
 	nodeIDs, observerIDs := map[string]uuid.UUID{}, map[string]uuid.UUID{}
 	if len(keys) > 0 {
