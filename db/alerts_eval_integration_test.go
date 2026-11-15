@@ -548,3 +548,40 @@ func (p *flakyPush) Send(_ context.Context, m alerts.PushMessage) error {
 	p.tokens = append(p.tokens, m.Token)
 	return p.fail[m.Token]
 }
+
+// All notices one user got in one pass go in one mail, even when the group would cross the end of a send batch.
+func TestAlertEmailGroupsAreNotSplitPostgres(t *testing.T) {
+	ctx, _, s := userStore(t)
+	var ids []uuid.UUID
+	for _, name := range []string{"a1", "b2", "c3", "d4"} {
+		u := newUser(t, ctx, s, name)
+		if err := s.SetUserEmailVerified(ctx, u.ID, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, u.ID)
+	}
+	for _, id := range ids {
+		pass := uuid.New()
+		for range 80 {
+			queueNotice(t, ctx, s, id, pass, "rebooted", "Hilltop", time.Now())
+		}
+	}
+	pu, _ := url.Parse("https://beacon.example.org")
+	m := &recMail{}
+	sender := alerts.NewSender(AlertEval{s}, "email", m, nil, pu, nil)
+	for range 2 {
+		if err := sender.Run(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	perUser := map[string]int{}
+	for _, got := range m.got {
+		perUser[strings.SplitN(got, "|", 2)[0]]++
+		if !strings.Contains(got, "|Beacon: 80 alerts|") {
+			t.Fatalf("a message holds part of a pass: %.80q", got)
+		}
+	}
+	if len(m.got) != 4 || len(perUser) != 4 {
+		t.Fatalf("%d mails to %v", len(m.got), perUser)
+	}
+}

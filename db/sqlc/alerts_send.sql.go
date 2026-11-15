@@ -169,23 +169,31 @@ func (q *Queries) MarkAlertsDelivered(ctx context.Context, arg MarkAlertsDeliver
 }
 
 const pendingAlerts = `-- name: PendingAlerts :many
-SELECT o.id, o.user_id, o.pass_id, o.target_kind, o.target_public_key, o.name, o.alert_kind, COALESCE(o.value, 0)::bigint AS value,
-       o.detail, o.attempts, u.email, (u.email_verified_at IS NOT NULL)::boolean AS email_verified,
-       COALESCE(CASE WHEN o.target_kind = 'observer' THEN ob.id ELSE n.id END, '00000000-0000-0000-0000-000000000000'::uuid)::uuid AS target_id
-FROM alert_outbox o
-JOIN users u ON u.id = o.user_id AND u.disabled_at IS NULL
-LEFT JOIN nodes n ON o.target_kind = 'node' AND n.public_key = o.target_public_key
-LEFT JOIN observers ob ON o.target_kind = 'observer' AND ob.public_key = o.target_public_key
-WHERE o.delivered_at IS NULL AND o.created_at >= $1
-  AND (o.next_attempt_at IS NULL OR o.next_attempt_at <= $2)
-ORDER BY o.user_id, o.pass_id, o.id
-LIMIT $3
+WITH p AS (
+    SELECT o.id, o.user_id, o.pass_id, o.target_kind, o.target_public_key, o.name, o.alert_kind, COALESCE(o.value, 0)::bigint AS value,
+           o.detail, o.attempts, u.email, (u.email_verified_at IS NOT NULL)::boolean AS email_verified,
+           COALESCE(CASE WHEN o.target_kind = 'observer' THEN ob.id ELSE n.id END, '00000000-0000-0000-0000-000000000000'::uuid)::uuid AS target_id
+    FROM alert_outbox o
+    JOIN users u ON u.id = o.user_id AND u.disabled_at IS NULL
+    LEFT JOIN nodes n ON o.target_kind = 'node' AND n.public_key = o.target_public_key
+    LEFT JOIN observers ob ON o.target_kind = 'observer' AND ob.public_key = o.target_public_key
+    WHERE o.delivered_at IS NULL AND o.created_at >= $2
+      AND (o.next_attempt_at IS NULL OR o.next_attempt_at <= $3)
+), g AS (
+    SELECT user_id, pass_id, count(*) AS n, sum(count(*)) OVER (ORDER BY user_id, pass_id) AS running
+    FROM p GROUP BY user_id, pass_id
+)
+SELECT p.id, p.user_id, p.pass_id, p.target_kind, p.target_public_key, p.name, p.alert_kind, p.value,
+       p.detail, p.attempts, p.email, p.email_verified, p.target_id
+FROM p JOIN g ON g.user_id = p.user_id AND g.pass_id = p.pass_id
+WHERE g.running <= $1::bigint OR g.running = g.n
+ORDER BY p.user_id, p.pass_id, p.id
 `
 
 type PendingAlertsParams struct {
+	RowLimit  int64              `json:"row_limit"`
 	NotBefore pgtype.Timestamptz `json:"not_before"`
 	Now       pgtype.Timestamptz `json:"now"`
-	RowLimit  int32              `json:"row_limit"`
 }
 
 type PendingAlertsRow struct {
@@ -204,8 +212,10 @@ type PendingAlertsRow struct {
 	TargetID        uuid.UUID `json:"target_id"`
 }
 
+// Whole user and pass groups only, so one pass's notices for a user stay in one mail: groups are taken in order
+// while the running total stays within row_limit, and the first group is taken whatever its size.
 func (q *Queries) PendingAlerts(ctx context.Context, arg PendingAlertsParams) ([]PendingAlertsRow, error) {
-	rows, err := q.db.Query(ctx, pendingAlerts, arg.NotBefore, arg.Now, arg.RowLimit)
+	rows, err := q.db.Query(ctx, pendingAlerts, arg.RowLimit, arg.NotBefore, arg.Now)
 	if err != nil {
 		return nil, err
 	}

@@ -675,6 +675,8 @@ type Querier interface {
 	PacketSitesTotalBytes(ctx context.Context) (int64, error)
 	// Who a live token belongs to, without using it.
 	PeekUserToken(ctx context.Context, arg PeekUserTokenParams) (uuid.UUID, error)
+	// Whole user and pass groups only, so one pass's notices for a user stay in one mail: groups are taken in order
+	// while the running total stays within row_limit, and the first group is taken whatever its size.
 	PendingAlerts(ctx context.Context, arg PendingAlertsParams) ([]PendingAlertsRow, error)
 	PollingAdminRequestCounts(ctx context.Context, targets [][]byte) ([]PollingAdminRequestCountsRow, error)
 	// Each live candidate and each assigned observer of the given targets. rank is -1 for an unassigned candidate.

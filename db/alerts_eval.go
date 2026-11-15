@@ -314,7 +314,7 @@ func (a AlertEval) Expire(ctx context.Context, undeliveredBefore, deliveredBefor
 }
 
 func (a AlertEval) Pending(ctx context.Context, notBefore, now time.Time, limit int) ([]alerts.OutboxRow, error) {
-	rows, err := a.q.PendingAlerts(ctx, sqlc.PendingAlertsParams{NotBefore: ts(notBefore), Now: ts(now), RowLimit: int32(limit)})
+	rows, err := a.q.PendingAlerts(ctx, sqlc.PendingAlertsParams{NotBefore: ts(notBefore), Now: ts(now), RowLimit: int64(limit)})
 	if err != nil {
 		return nil, err
 	}
