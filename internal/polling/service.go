@@ -255,7 +255,8 @@ func (s *Service) Policy(ctx context.Context, c Caller) (Policy, error) {
 	return BuildPolicy(s.cfg, rt, c, s.now()), nil
 }
 
-// Owners answers the firmware's owners question: the policy plus the caller's role for each claimed repeater.
+// Owners answers the firmware's owners question: the policy plus the caller's role for each claimed repeater. The
+// answer reflects what is stored or is an error (503): a read that fails never leaves a requested entry out.
 func (s *Service) Owners(ctx context.Context, c Caller) (OwnersAnswer, error) {
 	p, err := s.Policy(ctx, c)
 	if err != nil {
