@@ -75,6 +75,8 @@ var (
 	ErrRegistrationClosed = errors.New("users: registration closed")
 	ErrWeakPassword       = errors.New("users: weak password")
 	ErrInvalidInput       = errors.New("users: invalid input")
+	// ErrBusy: every password-hashing slot stayed taken for too long; the caller may retry.
+	ErrBusy = errors.New("users: busy")
 )
 
 // TooManyAttemptsError matches ErrTooManyAttempts and says how long until the account may be tried again.
@@ -96,6 +98,10 @@ const (
 	appHardTTL    = 365 * 24 * time.Hour
 	touchInterval = 5 * time.Minute
 	maxAppSession = 10
+
+	// maxHashing argon2 runs at once, each holding 19 MiB; a request waits at most hashWait for its turn.
+	maxHashing = 4
+	hashWait   = 5 * time.Second
 
 	kindWeb = "web"
 	kindApp = "app"
@@ -125,6 +131,10 @@ type Service struct {
 	mailq chan queuedMail
 	// dummyHash is compared against when the user is unknown, so both paths cost one argon2 run.
 	dummyHash string
+	// slots caps concurrent argon2 runs (hashing and verifying, the dummy comparison included); slotWait is how
+	// long a request waits for one before ErrBusy.
+	slots    chan struct{}
+	slotWait time.Duration
 }
 
 func NewService(store Store, m mailer.Sender, cfg config.ResolvedAccounts, now func() time.Time, log *slog.Logger) *Service {
@@ -139,7 +149,8 @@ func NewService(store Store, m mailer.Sender, cfg config.ResolvedAccounts, now f
 	if err != nil {
 		panic("users: dummy hash: " + err.Error())
 	}
-	return &Service{store: store, mailer: m, cfg: cfg, now: now, log: log, throttle: newThrottle(), mailq: make(chan queuedMail, mailQueueSize), verifyPW: VerifyPassword, dummyHash: dummy}
+	return &Service{store: store, mailer: m, cfg: cfg, now: now, log: log, throttle: newThrottle(), mailq: make(chan queuedMail, mailQueueSize), verifyPW: VerifyPassword, dummyHash: dummy,
+		slots: make(chan struct{}, maxHashing), slotWait: hashWait}
 }
 
 // ---- input rules ----
@@ -195,6 +206,50 @@ func cleanLabel(s string) string {
 		return defaultDevLabel
 	}
 	return s
+}
+
+// ---- password work ----
+
+// slot waits for one of the argon2 slots; the caller defers the returned release. It fails with ErrBusy after
+// slotWait and with the context's error when the request goes away first.
+func (s *Service) slot(ctx context.Context) (func(), error) {
+	release := func() { <-s.slots }
+	select {
+	case s.slots <- struct{}{}:
+		return release, nil
+	default:
+	}
+	timer := time.NewTimer(s.slotWait)
+	defer timer.Stop()
+	select {
+	case s.slots <- struct{}{}:
+		return release, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-timer.C:
+		return nil, ErrBusy
+	}
+}
+
+// hash is HashPassword under a slot.
+func (s *Service) hash(ctx context.Context, password string) (string, error) {
+	release, err := s.slot(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+	return HashPassword(password)
+}
+
+// verify is the password comparison under a slot; ok and rehash are as VerifyPassword's.
+func (s *Service) verify(ctx context.Context, hash, password string) (ok, rehash bool, err error) {
+	release, err := s.slot(ctx)
+	if err != nil {
+		return false, false, err
+	}
+	defer release()
+	ok, rehash = s.verifyPW(hash, password)
+	return ok, rehash, nil
 }
 
 // ---- mail ----
@@ -350,7 +405,7 @@ func (s *Service) Register(ctx context.Context, username, email, password string
 		return err
 	}
 	// Hashed before touching the database so a taken address costs the same as a new one.
-	hash, err := HashPassword(password)
+	hash, err := s.hash(ctx, password)
 	if err != nil {
 		return err
 	}
@@ -471,7 +526,7 @@ func (s *Service) ResendVerification(ctx context.Context, email string) error {
 // checkKeys verifies pw against hash behind the throttle entries for keys. Every key is read before any hashing,
 // so a throttled one costs nothing to hit, and any locked key refuses the attempt. A wrong password counts against
 // every key, a right one clears them all.
-func (s *Service) checkKeys(keys []string, hash, pw string) (needsRehash bool, err error) {
+func (s *Service) checkKeys(ctx context.Context, keys []string, hash, pw string) (needsRehash bool, err error) {
 	now := s.now()
 	var wait time.Duration
 	locked := false
@@ -486,7 +541,10 @@ func (s *Service) checkKeys(keys []string, hash, pw string) (needsRehash bool, e
 	if locked {
 		return false, &TooManyAttemptsError{RetryAfter: wait}
 	}
-	ok, re := s.verifyPW(hash, pw)
+	ok, re, verr := s.verify(ctx, hash, pw)
+	if verr != nil {
+		return false, verr // no verdict on the password, so it counts for nothing against the budget
+	}
 	if !ok {
 		full := false
 		for _, k := range keys {
@@ -508,8 +566,8 @@ func (s *Service) checkKeys(keys []string, hash, pw string) (needsRehash bool, e
 }
 
 // checkPassword is the check for a signed-in user's own actions, throttled per user id.
-func (s *Service) checkPassword(u User, pw string) (needsRehash bool, err error) {
-	return s.checkKeys([]string{userKey(u.ID)}, u.PassHash, pw)
+func (s *Service) checkPassword(ctx context.Context, u User, pw string) (needsRehash bool, err error) {
+	return s.checkKeys(ctx, []string{userKey(u.ID)}, u.PassHash, pw)
 }
 
 // ---- login and sessions ----
@@ -558,14 +616,16 @@ func (s *Service) Login(ctx context.Context, login, password string, meta Sessio
 		return "", Session{}, User{}, err
 	}
 	if err != nil || u.DisabledAt != nil {
-		s.verifyPW(s.dummyHash, password)
+		if _, _, verr := s.verify(ctx, s.dummyHash, password); verr != nil {
+			return "", Session{}, User{}, verr
+		}
 		if _, full := s.throttle.fail(key, s.now()); full {
 			return "", Session{}, User{}, &TooManyAttemptsError{RetryAfter: fullRetry}
 		}
 		return "", Session{}, User{}, ErrInvalidCredentials
 	}
 	// Aliases of one account (username, email) share one budget through the user key.
-	needsRehash, err := s.checkKeys([]string{key, userKey(u.ID)}, u.PassHash, password)
+	needsRehash, err := s.checkKeys(ctx, []string{key, userKey(u.ID)}, u.PassHash, password)
 	if err != nil {
 		s.log.Info("login refused", "user_id", u.ID, "reason", loginReason(err))
 		return "", Session{}, User{}, err
@@ -577,7 +637,7 @@ func (s *Service) Login(ctx context.Context, login, password string, meta Sessio
 	// between wins. A rehash is that hash's replacement, so it moves the expectation with it.
 	expect := u.PassHash
 	if needsRehash {
-		if h, herr := HashPassword(password); herr == nil {
+		if h, herr := s.hash(ctx, password); herr == nil {
 			switch done, werr := s.store.RehashPassword(ctx, u.ID, u.PassHash, h); {
 			case werr != nil:
 				s.log.Warn("password rehash not saved", "user_id", u.ID, "err", werr)
@@ -719,7 +779,7 @@ func (s *Service) ConfirmReset(ctx context.Context, token, newPassword string) e
 	if err := CheckPasswordPolicy(newPassword, u.Username, u.Email); err != nil {
 		return err
 	}
-	hash, err := HashPassword(newPassword)
+	hash, err := s.hash(ctx, newPassword)
 	if err != nil {
 		return err
 	}
@@ -745,13 +805,13 @@ func (s *Service) ConfirmReset(ctx context.Context, token, newPassword string) e
 // ---- profile ----
 
 func (s *Service) ChangePassword(ctx context.Context, u User, keepSession uuid.UUID, current, newPassword string) error {
-	if _, err := s.checkPassword(u, current); err != nil {
+	if _, err := s.checkPassword(ctx, u, current); err != nil {
 		return err
 	}
 	if err := CheckPasswordPolicy(newPassword, u.Username, u.Email); err != nil {
 		return err
 	}
-	hash, err := HashPassword(newPassword)
+	hash, err := s.hash(ctx, newPassword)
 	if err != nil {
 		return err
 	}
@@ -771,7 +831,7 @@ func (s *Service) ChangePassword(ctx context.Context, u User, keepSession uuid.U
 // ChangeEmail holds the new address as pending and mails a link to it. An address another user owns gets the same
 // treatment minus the mail, so the answer does not reveal who is registered.
 func (s *Service) ChangeEmail(ctx context.Context, u User, current, newEmail string) error {
-	if _, err := s.checkPassword(u, current); err != nil {
+	if _, err := s.checkPassword(ctx, u, current); err != nil {
 		return err
 	}
 	addr, err := normalizeEmail(newEmail)
@@ -825,7 +885,7 @@ func (s *Service) DeleteAccount(ctx context.Context, u User, confirm string) err
 		if c := strings.TrimSpace(confirm); c == "" || !strings.EqualFold(c, u.Username) {
 			return ErrInvalidInput
 		}
-	} else if _, err := s.checkPassword(u, confirm); err != nil {
+	} else if _, err := s.checkPassword(ctx, u, confirm); err != nil {
 		return err
 	}
 	if err := s.store.DeleteUserChecked(ctx, u.ID, u.PassHash); errors.Is(err, ErrNotFound) {

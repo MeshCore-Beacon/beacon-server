@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/url"
 	"regexp"
@@ -2098,4 +2099,70 @@ func TestLoginAcceptsEitherFormOfAPassword(t *testing.T) {
 			t.Fatalf("%q: %v", pw, err)
 		}
 	}
+}
+
+// At most four password computations run at once across the service, dummy verifications included.
+func TestPasswordWorkIsCappedAtFour(t *testing.T) {
+	e := newEnv(t)
+	var mu sync.Mutex
+	inFlight, peak := 0, 0
+	e.svc.verifyPW = func(string, string) (bool, bool) {
+		mu.Lock()
+		inFlight++
+		peak = max(peak, inFlight)
+		mu.Unlock()
+		time.Sleep(30 * time.Millisecond)
+		mu.Lock()
+		inFlight--
+		mu.Unlock()
+		return false, false
+	}
+	var wg sync.WaitGroup
+	for i := range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _, _, err := e.svc.Login(bg, fmt.Sprintf("nobody%d", i), "whatever-password", SessionMeta{})
+			if !errors.Is(err, ErrInvalidCredentials) {
+				t.Errorf("login %d: %v", i, err)
+			}
+		}()
+	}
+	wg.Wait()
+	if peak > 4 || peak == 0 {
+		t.Fatalf("%d password computations at once", peak)
+	}
+}
+
+// A request that waits too long for a slot fails with ErrBusy, and waiting respects the request context.
+func TestPasswordWorkBusyAndContext(t *testing.T) {
+	e := newEnv(t)
+	e.svc.slotWait = 50 * time.Millisecond
+	hold := make(chan struct{})
+	started := make(chan struct{}, 4)
+	e.svc.verifyPW = func(string, string) (bool, bool) {
+		started <- struct{}{}
+		<-hold
+		return false, false
+	}
+	for i := range 4 {
+		go e.svc.Login(bg, fmt.Sprintf("holder%d", i), "whatever-password", SessionMeta{})
+	}
+	for range 4 {
+		<-started
+	}
+	if _, _, _, err := e.svc.Login(bg, "late", "whatever-password", SessionMeta{}); !errors.Is(err, ErrBusy) {
+		t.Fatalf("waited out: %v", err)
+	}
+	if err := e.svc.Register(bg, "newbie", "newbie@example.org", goodPW); !errors.Is(err, ErrBusy) {
+		t.Fatalf("hashing while busy: %v", err)
+	}
+	e.svc.slotWait = time.Minute
+	ctx, cancel := context.WithTimeout(bg, 50*time.Millisecond)
+	defer cancel()
+	begin := time.Now()
+	if _, _, _, err := e.svc.Login(ctx, "cancelled", "whatever-password", SessionMeta{}); !errors.Is(err, context.DeadlineExceeded) || time.Since(begin) > 5*time.Second {
+		t.Fatalf("context: %v after %v", err, time.Since(begin))
+	}
+	close(hold)
 }

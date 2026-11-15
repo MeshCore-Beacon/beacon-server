@@ -156,6 +156,9 @@ func userError(w http.ResponseWriter, err error) {
 	case errors.Is(err, users.ErrTooManyAttempts):
 		w.Header().Set("Retry-After", "900")
 		respondCode(w, http.StatusTooManyRequests, "too_many_attempts", "Too many failed attempts. Try again later.")
+	case errors.Is(err, users.ErrBusy):
+		w.Header().Set("Retry-After", "5")
+		respondCode(w, http.StatusServiceUnavailable, "service_unavailable", "The server is busy. Try again in a moment.")
 	case errors.Is(err, users.ErrInvalidCredentials):
 		respondCode(w, http.StatusUnauthorized, "invalid_credentials", "Wrong username, email or password.")
 	case errors.Is(err, users.ErrEmailUnverified):
