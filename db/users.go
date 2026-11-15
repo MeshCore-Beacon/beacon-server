@@ -294,28 +294,53 @@ func (s *Store) ChangeCredentials(ctx context.Context, id uuid.UUID, hash string
 				return users.ErrNotFound
 			}
 		}
-		if err := affected(q.SetUserPassword(ctx, sqlc.SetUserPasswordParams{ID: id, PassHash: hash})); err != nil {
-			return err
-		}
-		if verifiedAt != nil {
-			if err := affected(q.SetUserEmailVerified(ctx, sqlc.SetUserEmailVerifiedParams{ID: id, EmailVerifiedAt: ts(*verifiedAt)})); err != nil {
-				return err
-			}
-		}
-		if keep == uuid.Nil {
-			if err := q.EndAllUserSessions(ctx, id); err != nil {
-				return err
-			}
-		} else if err := q.EndOtherUserSessions(ctx, sqlc.EndOtherUserSessionsParams{UserID: id, ID: keep}); err != nil {
-			return err
-		}
-		for _, k := range []users.TokenKind{users.TokenVerify, users.TokenReset, users.TokenEmailChange, users.TokenAppCode} {
-			if err := q.DeleteUserTokens(ctx, sqlc.DeleteUserTokensParams{UserID: id, Kind: string(k)}); err != nil {
-				return err
-			}
-		}
-		return affected(q.SetUserPendingEmail(ctx, sqlc.SetUserPendingEmailParams{ID: id}))
+		return applyCredentials(ctx, q, id, hash, verifiedAt, keep)
 	})
+}
+
+// ResetCredentials spends the reset token, still bound to the account's address, and replaces the credentials in
+// one transaction under the user's credential lock, so a change that completes first revokes the token (its
+// delete is seen once the lock is held) and two links cannot both win. It reports users.ErrNotFound for a token
+// that is unknown, used, expired, rebound or not the user's.
+func (s *Store) ResetCredentials(ctx context.Context, tokenHash []byte, id uuid.UUID, hash string, verifiedAt *time.Time, now time.Time) error {
+	return s.pollTx(ctx, func(q *sqlc.Queries) error {
+		if err := lockChecked(ctx, q, id, ""); err != nil {
+			return err
+		}
+		got, err := q.ConsumeResetToken(ctx, sqlc.ConsumeResetTokenParams{TokenHash: tokenHash, Now: ts(now)})
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && got != id) {
+			return users.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		return applyCredentials(ctx, q, id, hash, verifiedAt, uuid.Nil)
+	})
+}
+
+// applyCredentials is the body shared by the credential changes; the caller holds the user's lock.
+func applyCredentials(ctx context.Context, q *sqlc.Queries, id uuid.UUID, hash string, verifiedAt *time.Time, keep uuid.UUID) error {
+	if err := affected(q.SetUserPassword(ctx, sqlc.SetUserPasswordParams{ID: id, PassHash: hash})); err != nil {
+		return err
+	}
+	if verifiedAt != nil {
+		if err := affected(q.SetUserEmailVerified(ctx, sqlc.SetUserEmailVerifiedParams{ID: id, EmailVerifiedAt: ts(*verifiedAt)})); err != nil {
+			return err
+		}
+	}
+	if keep == uuid.Nil {
+		if err := q.EndAllUserSessions(ctx, id); err != nil {
+			return err
+		}
+	} else if err := q.EndOtherUserSessions(ctx, sqlc.EndOtherUserSessionsParams{UserID: id, ID: keep}); err != nil {
+		return err
+	}
+	for _, k := range []users.TokenKind{users.TokenVerify, users.TokenReset, users.TokenEmailChange, users.TokenAppCode} {
+		if err := q.DeleteUserTokens(ctx, sqlc.DeleteUserTokensParams{UserID: id, Kind: string(k)}); err != nil {
+			return err
+		}
+	}
+	return affected(q.SetUserPendingEmail(ctx, sqlc.SetUserPendingEmailParams{ID: id}))
 }
 
 // BeginEmailChange holds addr as the pending address and stores its confirmation token, replacing older ones, under
@@ -447,16 +472,6 @@ func (s *Store) ConsumeToken(ctx context.Context, kind users.TokenKind, hash []b
 		return uuid.Nil, nil, err
 	}
 	return r.UserID, r.Data, nil
-}
-
-// ConsumeResetToken spends a live reset token and returns its user, only while the token's address is still the
-// user's. It reports users.ErrNotFound for an unknown, used, expired or no longer matching token.
-func (s *Store) ConsumeResetToken(ctx context.Context, hash []byte, now time.Time) (uuid.UUID, error) {
-	id, err := s.q.ConsumeResetToken(ctx, sqlc.ConsumeResetTokenParams{TokenHash: hash, Now: ts(now)})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return uuid.Nil, users.ErrNotFound
-	}
-	return id, err
 }
 
 // PeekToken returns the user a live token of the kind belongs to without using it, or users.ErrNotFound.

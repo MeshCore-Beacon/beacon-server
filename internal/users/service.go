@@ -34,8 +34,9 @@ type Store interface {
 	ActivateUser(ctx context.Context, id uuid.UUID, username, hash string, at time.Time) error
 	// LatestToken is the newest unused token of the kind, expired or not (cleanup keeps it a week).
 	LatestToken(ctx context.Context, userID uuid.UUID, kind TokenKind) ([]byte, error)
-	// ConsumeResetToken spends a live reset token only while its address is still the account's.
-	ConsumeResetToken(ctx context.Context, hash []byte, now time.Time) (uuid.UUID, error)
+	// ResetCredentials spends a live reset token (only while its address is still the account's) and does what
+	// ChangeCredentials does with no expected hash, in one transaction under the user's credential lock.
+	ResetCredentials(ctx context.Context, tokenHash []byte, id uuid.UUID, hash string, verifiedAt *time.Time, now time.Time) error
 	PeekToken(ctx context.Context, kind TokenKind, hash []byte, now time.Time) (uuid.UUID, error)
 	ApplyPendingEmail(ctx context.Context, id uuid.UUID, expected string) error
 	TouchUserLogin(ctx context.Context, id uuid.UUID, at time.Time) error
@@ -753,17 +754,14 @@ func (s *Service) ConfirmReset(ctx context.Context, token, newPassword string) e
 	if err != nil {
 		return err
 	}
-	if cid, err := s.store.ConsumeResetToken(ctx, hashTok, s.now()); errors.Is(err, ErrNotFound) || (err == nil && cid != uid) {
-		return ErrTokenInvalid
-	} else if err != nil {
-		return err
-	}
 	var verifiedAt *time.Time
 	if u.EmailVerifiedAt == nil {
 		now := s.now()
 		verifiedAt = &now
 	}
-	if err := s.store.ChangeCredentials(ctx, uid, hash, verifiedAt, uuid.Nil, ""); err != nil {
+	if err := s.store.ResetCredentials(ctx, hashTok, uid, hash, verifiedAt, s.now()); errors.Is(err, ErrNotFound) {
+		return ErrTokenInvalid
+	} else if err != nil {
 		return err
 	}
 	s.throttle.clear(userKey(uid))

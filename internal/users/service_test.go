@@ -214,20 +214,22 @@ func (f *fakeStore) ActivateUser(_ context.Context, id uuid.UUID, username, hash
 	}
 	return nil
 }
-func (f *fakeStore) ConsumeResetToken(_ context.Context, hash []byte, now time.Time) (uuid.UUID, error) {
+func (f *fakeStore) ResetCredentials(ctx context.Context, hash []byte, id uuid.UUID, pass string, verifiedAt *time.Time, now time.Time) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	t, ok := f.tokens[string(hash)]
-	if !ok || t.kind != TokenReset || t.used || !now.Before(t.expires) {
-		return uuid.Nil, ErrNotFound
+	if !ok || t.kind != TokenReset || t.used || !now.Before(t.expires) || t.user != id {
+		f.mu.Unlock()
+		return ErrNotFound
 	}
 	var d tokenData
 	u, err := f.get(t.user)
 	if err != nil || json.Unmarshal(t.data, &d) != nil || d.Email != u.Email {
-		return uuid.Nil, ErrNotFound
+		f.mu.Unlock()
+		return ErrNotFound
 	}
 	t.used = true
-	return t.user, nil
+	f.mu.Unlock()
+	return f.ChangeCredentials(ctx, id, pass, verifiedAt, uuid.Nil, "")
 }
 func (f *fakeStore) LatestToken(_ context.Context, userID uuid.UUID, kind TokenKind) ([]byte, error) {
 	f.mu.Lock()

@@ -157,3 +157,59 @@ func TestUserDeleteAccountKeepsRequestsWhenAResetLandsInTheGapPostgres(t *testin
 		t.Fatal("delete reported success but the account is still there")
 	}
 }
+
+// A reset must not outlive a credential change that completes while it is in flight.
+func TestUserResetAfterAPasswordChangePostgres(t *testing.T) {
+	ctx, s, svc, g, u := serialEnvAt(t, "ResetCredentials")
+	keep := sessionFor(t, s, u)
+	plain, hash := users.NewToken()
+	if err := s.CreateToken(ctx, u.ID, users.TokenReset, hash, []byte(`{"email":"`+u.Email+`"}`), time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	g.armed.Store(true)
+	done := make(chan error, 1)
+	go func() { done <- svc.ConfirmReset(ctx, plain, resetPW) }()
+	<-g.arrived
+	g.armed.Store(false)
+	if err := svc.ChangePassword(ctx, u, keep.ID, serialPW, "mine-is-a-long-passphrase"); err != nil {
+		t.Fatal(err)
+	}
+	close(g.release)
+	if err := <-done; err == nil {
+		t.Fatal("a reset in flight overwrote a completed password change")
+	}
+	if _, _, _, err := svc.Login(ctx, "ridge", "mine-is-a-long-passphrase", users.SessionMeta{}); err != nil {
+		t.Fatalf("the changed password was overwritten: %v", err)
+	}
+}
+
+// Two links issued before either was used: once one reset succeeded the other must fail.
+func TestUserTwoResetLinksPostgres(t *testing.T) {
+	ctx, s, svc, g, u := serialEnvAt(t, "ResetCredentials")
+	var plains [2]string
+	for i := range plains {
+		p, hash := users.NewToken()
+		plains[i] = p
+		if err := s.CreateToken(ctx, u.ID, users.TokenReset, hash, []byte(`{"email":"`+u.Email+`"}`), time.Now().Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g.armed.Store(true)
+	done := make(chan error, 2)
+	for i, pw := range []string{resetPW, "third-long-passphrase"} {
+		go func() { done <- svc.ConfirmReset(ctx, plains[i], pw) }()
+	}
+	<-g.arrived
+	<-g.arrived
+	g.armed.Store(false)
+	close(g.release)
+	ok := 0
+	for range plains {
+		if err := <-done; err == nil {
+			ok++
+		}
+	}
+	if ok != 1 {
+		t.Fatalf("%d resets succeeded, want 1", ok)
+	}
+}
