@@ -2101,6 +2101,29 @@ func TestLoginAcceptsEitherFormOfAPassword(t *testing.T) {
 	}
 }
 
+// A wrong password costs one verification, for a known name and an unknown one alike.
+func TestWrongPasswordCostsOneVerification(t *testing.T) {
+	e := newEnv(t)
+	if err := e.svc.Register(bg, "ridge", "ridge@example.org", composed); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Verify(bg, tokenIn(t, e.last())); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	real := e.svc.verifyPW
+	e.svc.verifyPW = func(h, p string) (bool, bool) { calls++; return real(h, p) }
+	for _, name := range []string{"ridge", "nobody"} {
+		calls = 0
+		if _, _, _, err := e.svc.Login(bg, name, decomposed+"x", SessionMeta{}); !errors.Is(err, ErrInvalidCredentials) {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if calls != 1 {
+			t.Fatalf("%s: %d verifications, want 1", name, calls)
+		}
+	}
+}
+
 // At most four password computations run at once across the service, dummy verifications included.
 func TestPasswordWorkIsCappedAtFour(t *testing.T) {
 	e := newEnv(t)

@@ -93,21 +93,11 @@ func VerifyPassword(hash, password string) (ok bool, needsRehash bool) {
 	if err1 != nil || err2 != nil || len(salt) < minSaltOrKey || len(salt) > maxSaltOrKey || len(want) < minSaltOrKey || len(want) > maxSaltOrKey {
 		return false, false
 	}
-	rawPassword, password := password, normalize(password)
-	got := argon2.IDKey([]byte(password), salt, t, m, uint8(p), uint32(len(want)))
-	legacy := false
+	got := argon2.IDKey([]byte(normalize(password)), salt, t, m, uint8(p), uint32(len(want)))
 	if subtle.ConstantTimeCompare(got, want) != 1 {
-		// A hash made before passwords were normalised was taken from the bytes as typed.
-		if rawPassword == password {
-			return false, false
-		}
-		got = argon2.IDKey([]byte(rawPassword), salt, t, m, uint8(p), uint32(len(want)))
-		if subtle.ConstantTimeCompare(got, want) != 1 {
-			return false, false
-		}
-		legacy = true
+		return false, false
 	}
-	rehash := legacy || m != argonMemoryKiB || t != argonTime || p != argonThreads || len(salt) != argonSaltLen || len(want) != argonKeyLen
+	rehash := m != argonMemoryKiB || t != argonTime || p != argonThreads || len(salt) != argonSaltLen || len(want) != argonKeyLen
 	return true, rehash
 }
 

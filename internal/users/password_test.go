@@ -184,11 +184,11 @@ func TestPasswordsAreNormalisedToNFC(t *testing.T) {
 	if ok, re := VerifyPassword(h, composed); !ok || re {
 		t.Fatalf("composed against a decomposed hash: ok=%v rehash=%v", ok, re)
 	}
-	// A hash made before normalisation, from the raw decomposed bytes, still verifies and is marked for rehash.
+	// No fallback: a hash made from the raw decomposed bytes does not verify (no such account exists).
 	salt := []byte("0123456789abcdef")
 	old := phc(argonMemoryKiB, argonTime, argonThreads, salt, argon2.IDKey([]byte(decomposed), salt, argonTime, argonMemoryKiB, argonThreads, argonKeyLen))
-	if ok, re := VerifyPassword(old, decomposed); !ok || !re {
-		t.Fatalf("legacy hash: ok=%v rehash=%v", ok, re)
+	if ok, _ := VerifyPassword(old, decomposed); ok {
+		t.Fatal("an un-normalised hash verified: the fallback is back")
 	}
 	if ok, _ := VerifyPassword(old, "something else entirely"); ok {
 		t.Fatal("wrong password verified")
