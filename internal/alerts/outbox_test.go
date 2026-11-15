@@ -22,6 +22,8 @@ type fakeSend struct {
 	delivered []int64
 	retry     []int64
 	removed   []string
+	reached   map[int64]map[uuid.UUID]bool
+	marks     []DeviceMark
 	expired   int
 	expiredAt [2]time.Time
 	notBefore time.Time
@@ -48,6 +50,20 @@ func (f *fakeSend) Pending(_ context.Context, nb, _ time.Time, _ int) ([]OutboxR
 
 func (f *fakeSend) Devices(context.Context, []uuid.UUID) (map[uuid.UUID][]Device, error) {
 	return f.devices, nil
+}
+
+func (f *fakeSend) DeliveredDevices(context.Context, []int64) (map[int64]map[uuid.UUID]bool, error) {
+	return f.reached, nil
+}
+
+func (f *fakeSend) MarkDevicesDelivered(_ context.Context, m []DeviceMark, _ time.Time) error {
+	f.marks = append(f.marks, m...)
+	return nil
+}
+
+// dev is a device whose id follows its token.
+func dev(platform, token string) Device {
+	return Device{Session: uuid.NewSHA1(uuid.NameSpaceOID, []byte(token)), Platform: platform, Token: token}
 }
 
 func (f *fakeSend) Finish(_ context.Context, d, r []int64, _ time.Time, max int) error {
@@ -197,7 +213,7 @@ func TestEmailPassIsCapped(t *testing.T) {
 
 func TestPushMessagePerNoticePerDevice(t *testing.T) {
 	r := row(1, userA, passOne, KindBatteryLow, "Hill\ntop", 3400)
-	f := &fakeSend{rows: []OutboxRow{r}, devices: map[uuid.UUID][]Device{userA: {{"ios", "tok-1"}, {"android", "tok-2"}}}}
+	f := &fakeSend{rows: []OutboxRow{r}, devices: map[uuid.UUID][]Device{userA: {dev("ios", "tok-1"), dev("android", "tok-2")}}}
 	p := &fakePush{}
 	if err := NewSender(f, "push", nil, p, nil, nil).Run(context.Background()); err != nil {
 		t.Fatal(err)
@@ -219,7 +235,7 @@ func TestPushCarriesTargetIDWhenKnown(t *testing.T) {
 	id := uuid.New()
 	known, unknown := row(1, userA, passOne, KindBatteryLow, "Hilltop", 3400), row(2, userA, passOne, KindBatteryLow, "Gone", 3400)
 	known.TargetID = id
-	f := &fakeSend{rows: []OutboxRow{known, unknown}, devices: map[uuid.UUID][]Device{userA: {{"ios", "tok-1"}}}}
+	f := &fakeSend{rows: []OutboxRow{known, unknown}, devices: map[uuid.UUID][]Device{userA: {dev("ios", "tok-1")}}}
 	p := &fakePush{}
 	_ = NewSender(f, "push", nil, p, nil, nil).Run(context.Background())
 	if len(p.sent) != 2 || p.sent[0].Data["id"] != id.String() || len(p.sent[0].Data) != 3 {
@@ -233,7 +249,7 @@ func TestPushCarriesTargetIDWhenKnown(t *testing.T) {
 func TestPushObserverTargetKind(t *testing.T) {
 	r := row(1, userA, passOne, KindObserverOff, "North", 120)
 	r.TargetKind = "observer"
-	f := &fakeSend{rows: []OutboxRow{r}, devices: map[uuid.UUID][]Device{userA: {{"ios", "tok-1"}}}}
+	f := &fakeSend{rows: []OutboxRow{r}, devices: map[uuid.UUID][]Device{userA: {dev("ios", "tok-1")}}}
 	p := &fakePush{}
 	_ = NewSender(f, "push", nil, p, nil, nil).Run(context.Background())
 	if p.sent[0].Data["targetKind"] != "observer" {
@@ -244,8 +260,8 @@ func TestPushObserverTargetKind(t *testing.T) {
 func TestPushUnregisteredTokenIsDeletedAndFailuresRetry(t *testing.T) {
 	f := &fakeSend{rows: []OutboxRow{row(1, userA, passOne, KindRebooted, "A", 1), row(2, userB, passOne, KindRebooted, "B", 1), row(3, uuid.New(), passOne, KindRebooted, "C", 1)},
 		devices: map[uuid.UUID][]Device{
-			userA: {{"ios", "dead"}, {"android", "alive"}},
-			userB: {{"ios", "down"}},
+			userA: {dev("ios", "dead"), dev("android", "alive")},
+			userB: {dev("ios", "down")},
 		}}
 	p := &fakePush{fail: map[string]error{"dead": ErrUnregistered, "down": errors.New("push service answered 500")}}
 	if err := NewSender(f, "push", nil, p, nil, nil).Run(context.Background()); err != nil {
@@ -259,7 +275,7 @@ func TestPushUnregisteredTokenIsDeletedAndFailuresRetry(t *testing.T) {
 		t.Fatalf("delivered %v retry %v", f.delivered, f.retry)
 	}
 	// A user whose only token is gone has nobody to tell either.
-	f2 := &fakeSend{rows: []OutboxRow{row(1, userA, passOne, KindRebooted, "A", 1)}, devices: map[uuid.UUID][]Device{userA: {{"ios", "dead"}}}}
+	f2 := &fakeSend{rows: []OutboxRow{row(1, userA, passOne, KindRebooted, "A", 1)}, devices: map[uuid.UUID][]Device{userA: {dev("ios", "dead")}}}
 	_ = NewSender(f2, "push", nil, &fakePush{fail: map[string]error{"dead": ErrUnregistered}}, nil, nil).Run(context.Background())
 	if len(f2.delivered) != 1 || len(f2.retry) != 0 {
 		t.Fatalf("delivered %v retry %v", f2.delivered, f2.retry)
@@ -307,5 +323,40 @@ func TestSentences(t *testing.T) {
 		if got := Sentence(tc.kind, "N", tc.value, tc.detail); got != tc.want {
 			t.Errorf("%s: %q, want %q", tc.kind, got, tc.want)
 		}
+	}
+}
+
+// One device took the notice and the other answered 503: the notice is not delivered, it is retried.
+func TestPushOneDeviceFailingKeepsTheNotice(t *testing.T) {
+	f := &fakeSend{rows: []OutboxRow{row(1, userA, passOne, KindRebooted, "A", 1)},
+		devices: map[uuid.UUID][]Device{userA: {dev("ios", "ok-tok"), dev("android", "down-tok")}}}
+	p := &fakePush{fail: map[string]error{"down-tok": errors.New("push service answered 503")}}
+	if err := NewSender(f, "push", nil, p, nil, nil).Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.delivered) != 0 || len(f.retry) != 1 || f.retry[0] != 1 {
+		t.Fatalf("delivered %v retry %v", f.delivered, f.retry)
+	}
+}
+
+// The retry goes only to the device that did not get the notice.
+func TestPushRetryOnlyReachesTheDevicesStillMissingIt(t *testing.T) {
+	ok, down := dev("ios", "ok-tok"), dev("android", "down-tok")
+	f := &fakeSend{rows: []OutboxRow{row(1, userA, passOne, KindRebooted, "A", 1)}, devices: map[uuid.UUID][]Device{userA: {ok, down}}}
+	p := &fakePush{fail: map[string]error{"down-tok": errors.New("push service answered 503")}}
+	if err := NewSender(f, "push", nil, p, nil, nil).Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.marks) != 1 || f.marks[0].Session != ok.Session || len(p.sent) != 1 {
+		t.Fatalf("marks %+v sent %d", f.marks, len(p.sent))
+	}
+	// Next run: the store reports the first device as reached; only the second is tried, and it works now.
+	f.reached = map[int64]map[uuid.UUID]bool{1: {ok.Session: true}}
+	f.marks, p.sent, p.fail = nil, nil, nil
+	if err := NewSender(f, "push", nil, p, nil, nil).Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.sent) != 1 || p.sent[0].Token != "down-tok" || len(f.delivered) != 1 || len(f.retry) != 0 {
+		t.Fatalf("sent %+v delivered %v retry %v", p.sent, f.delivered, f.retry)
 	}
 }

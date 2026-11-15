@@ -160,6 +160,7 @@ type Querier interface {
 	DeleteUserDevice(ctx context.Context, arg DeleteUserDeviceParams) error
 	DeleteUserIfHash(ctx context.Context, arg DeleteUserIfHashParams) (int64, error)
 	DeleteUserTokens(ctx context.Context, arg DeleteUserTokensParams) error
+	DeliveredAlertDevices(ctx context.Context, ids []int64) ([]DeliveredAlertDevicesRow, error)
 	// Telemetry requests that need attention and were not announced at this status, locked until the transaction ends.
 	DueRequestAttention(ctx context.Context) ([]DueRequestAttentionRow, error)
 	EndAllUserSessions(ctx context.Context, userID uuid.UUID) error
@@ -642,6 +643,7 @@ type Querier interface {
 	LockUserCredentials(ctx context.Context, id uuid.UUID) (LockUserCredentialsRow, error)
 	// Serializes one user's request creation (the limit) without blocking the foreign-key checks on their rows.
 	LockUserForRequests(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	MarkAlertDeviceDelivered(ctx context.Context, arg MarkAlertDeviceDeliveredParams) error
 	MarkAlertsDelivered(ctx context.Context, arg MarkAlertsDeliveredParams) error
 	// Hours whose raw rows cleanup already started deleting can never be rolled completely.
 	// Readers report the new status, so the revision moves too.

@@ -34,6 +34,12 @@ type AlertOutbox struct {
 	NextAttemptAt   pgtype.Timestamptz `json:"next_attempt_at"`
 }
 
+type AlertOutboxDevice struct {
+	OutboxID    int64              `json:"outbox_id"`
+	SessionID   uuid.UUID          `json:"session_id"`
+	DeliveredAt pgtype.Timestamptz `json:"delivered_at"`
+}
+
 type AnalyticsDirtyHour struct {
 	Hour       pgtype.Timestamptz `json:"hour"`
 	EnqueuedAt pgtype.Timestamptz `json:"enqueued_at"`

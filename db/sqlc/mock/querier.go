@@ -1219,6 +1219,21 @@ func (mr *MockQuerierMockRecorder) DeleteUserTokens(ctx, arg any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteUserTokens", reflect.TypeOf((*MockQuerier)(nil).DeleteUserTokens), ctx, arg)
 }
 
+// DeliveredAlertDevices mocks base method.
+func (m *MockQuerier) DeliveredAlertDevices(ctx context.Context, ids []int64) ([]db.DeliveredAlertDevicesRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeliveredAlertDevices", ctx, ids)
+	ret0, _ := ret[0].([]db.DeliveredAlertDevicesRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeliveredAlertDevices indicates an expected call of DeliveredAlertDevices.
+func (mr *MockQuerierMockRecorder) DeliveredAlertDevices(ctx, ids any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeliveredAlertDevices", reflect.TypeOf((*MockQuerier)(nil).DeliveredAlertDevices), ctx, ids)
+}
+
 // DueRequestAttention mocks base method.
 func (m *MockQuerier) DueRequestAttention(ctx context.Context) ([]db.DueRequestAttentionRow, error) {
 	m.ctrl.T.Helper()
@@ -4155,6 +4170,20 @@ func (m *MockQuerier) LockUserForRequests(ctx context.Context, id uuid.UUID) (uu
 func (mr *MockQuerierMockRecorder) LockUserForRequests(ctx, id any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockUserForRequests", reflect.TypeOf((*MockQuerier)(nil).LockUserForRequests), ctx, id)
+}
+
+// MarkAlertDeviceDelivered mocks base method.
+func (m *MockQuerier) MarkAlertDeviceDelivered(ctx context.Context, arg db.MarkAlertDeviceDeliveredParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MarkAlertDeviceDelivered", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// MarkAlertDeviceDelivered indicates an expected call of MarkAlertDeviceDelivered.
+func (mr *MockQuerierMockRecorder) MarkAlertDeviceDelivered(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkAlertDeviceDelivered", reflect.TypeOf((*MockQuerier)(nil).MarkAlertDeviceDelivered), ctx, arg)
 }
 
 // MarkAlertsDelivered mocks base method.

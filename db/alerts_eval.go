@@ -333,9 +333,38 @@ func (a AlertEval) Devices(ctx context.Context, userIDs []uuid.UUID) (map[uuid.U
 	}
 	out := map[uuid.UUID][]alerts.Device{}
 	for _, r := range rows {
-		out[r.UserID] = append(out[r.UserID], alerts.Device{Platform: r.Platform, Token: r.PushToken})
+		out[r.UserID] = append(out[r.UserID], alerts.Device{Session: r.SessionID, Platform: r.Platform, Token: r.PushToken})
 	}
 	return out, nil
+}
+
+func (a AlertEval) DeliveredDevices(ctx context.Context, ids []int64) (map[int64]map[uuid.UUID]bool, error) {
+	rows, err := a.q.DeliveredAlertDevices(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := map[int64]map[uuid.UUID]bool{}
+	for _, r := range rows {
+		if out[r.OutboxID] == nil {
+			out[r.OutboxID] = map[uuid.UUID]bool{}
+		}
+		out[r.OutboxID][r.SessionID] = true
+	}
+	return out, nil
+}
+
+func (a AlertEval) MarkDevicesDelivered(ctx context.Context, marks []alerts.DeviceMark, now time.Time) error {
+	if len(marks) == 0 {
+		return nil
+	}
+	return a.pollTx(ctx, func(q *sqlc.Queries) error {
+		for _, m := range marks {
+			if err := q.MarkAlertDeviceDelivered(ctx, sqlc.MarkAlertDeviceDeliveredParams{OutboxID: m.OutboxID, SessionID: m.Session, DeliveredAt: ts(now)}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (a AlertEval) Finish(ctx context.Context, delivered, retry []int64, now time.Time, maxAttempts int) error {

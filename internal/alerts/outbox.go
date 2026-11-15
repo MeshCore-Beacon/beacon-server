@@ -43,8 +43,17 @@ type OutboxRow struct {
 	EmailVerified bool
 }
 
-// Device is a registered push token of a live app session.
-type Device struct{ Platform, Token string }
+// Device is a registered push token of a live app session; Session identifies the device.
+type Device struct {
+	Session         uuid.UUID
+	Platform, Token string
+}
+
+// DeviceMark records that a push notice reached one device.
+type DeviceMark struct {
+	OutboxID int64
+	Session  uuid.UUID
+}
 
 // SendStore is what the sender needs from the database.
 type SendStore interface {
@@ -56,6 +65,9 @@ type SendStore interface {
 	// after now, for live users, by user and pass.
 	Pending(ctx context.Context, notBefore, now time.Time, limit int) ([]OutboxRow, error)
 	Devices(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID][]Device, error)
+	// DeliveredDevices returns, for each notice, the devices (sessions) it already reached.
+	DeliveredDevices(ctx context.Context, ids []int64) (map[int64]map[uuid.UUID]bool, error)
+	MarkDevicesDelivered(ctx context.Context, marks []DeviceMark, now time.Time) error
 	// Finish marks the delivered rows, counts an attempt for the retried ones (holding them back with a growing
 	// delay) and drops the exhausted.
 	Finish(ctx context.Context, delivered, retry []int64, now time.Time, maxAttempts int) error
@@ -111,7 +123,7 @@ func (s *Sender) Run(ctx context.Context) error {
 	case "email":
 		delivered, retry = s.sendEmail(ctx, rows)
 	case "push":
-		delivered, retry, err = s.sendPush(ctx, rows)
+		delivered, retry, err = s.sendPush(ctx, rows, now)
 		if err != nil {
 			return err
 		}
@@ -168,12 +180,16 @@ func (s *Sender) sendEmail(ctx context.Context, rows []OutboxRow) (delivered, re
 	return delivered, retry
 }
 
-// sendPush sends each notice to each of the user's devices. A notice is delivered when at least one device took it
-// or the user has no device; it is retried when every device failed. An unregistered token is deleted.
-func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow) (delivered, retry []int64, err error) {
+// sendPush sends each notice to each of the user's live devices that has not got it yet, and records every device
+// it reached. A notice is delivered once every device has it (or the user has none); while any device failed it is
+// retried, and the retry goes only to the devices still missing it. An unregistered token is deleted and its device
+// no longer counts.
+func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow, now time.Time) (delivered, retry []int64, err error) {
 	seen := map[uuid.UUID]bool{}
 	var users []uuid.UUID
-	for _, r := range rows {
+	ids := make([]int64, len(rows))
+	for i, r := range rows {
+		ids[i] = r.ID
 		if !seen[r.UserID] {
 			seen[r.UserID] = true
 			users = append(users, r.UserID)
@@ -183,6 +199,11 @@ func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow) (delivered, ret
 	if err != nil {
 		return nil, nil, err
 	}
+	reached, err := s.store.DeliveredDevices(ctx, ids)
+	if err != nil {
+		return nil, nil, err
+	}
+	var marks []DeviceMark
 	gone := map[string]bool{}
 	for _, r := range rows {
 		if ctx.Err() != nil {
@@ -201,34 +222,34 @@ func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow) (delivered, ret
 		if r.TargetID != uuid.Nil {
 			msg.Data["id"] = r.TargetID.String()
 		}
-		ok := false
+		failed := false
 		for _, d := range devs {
-			if gone[d.Token] {
+			if gone[d.Token] || reached[r.ID][d.Session] {
 				continue
 			}
 			msg.Token = d.Token
 			switch err := s.push.Send(ctx, msg); {
 			case err == nil:
-				ok = true
+				marks = append(marks, DeviceMark{OutboxID: r.ID, Session: d.Session})
 			case errors.Is(err, ErrUnregistered):
 				gone[d.Token] = true
 				if derr := s.store.RemoveDeviceToken(ctx, d.Token); derr != nil {
 					slog.Warn("push token not removed", "component", "alerts", "user_id", r.UserID, "err", derr)
 				}
 			default:
+				failed = true
 				// err carries no token or credential, only a status.
 				slog.Warn("push not sent", "component", "alerts", "user_id", r.UserID, "err", err)
 			}
 		}
-		allGone := true
-		for _, d := range devs {
-			allGone = allGone && gone[d.Token]
-		}
-		if ok || allGone {
-			delivered = append(delivered, r.ID)
-		} else {
+		if failed {
 			retry = append(retry, r.ID)
+		} else {
+			delivered = append(delivered, r.ID)
 		}
+	}
+	if err := s.store.MarkDevicesDelivered(ctx, marks, now); err != nil {
+		return nil, nil, err
 	}
 	return delivered, retry, nil
 }

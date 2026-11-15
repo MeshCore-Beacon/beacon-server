@@ -49,6 +49,35 @@ func (q *Queries) DeleteExhaustedAlerts(ctx context.Context, maxAttempts int16) 
 	return result.RowsAffected(), nil
 }
 
+const deliveredAlertDevices = `-- name: DeliveredAlertDevices :many
+SELECT outbox_id, session_id FROM alert_outbox_devices WHERE outbox_id = ANY($1::bigint[])
+`
+
+type DeliveredAlertDevicesRow struct {
+	OutboxID  int64     `json:"outbox_id"`
+	SessionID uuid.UUID `json:"session_id"`
+}
+
+func (q *Queries) DeliveredAlertDevices(ctx context.Context, ids []int64) ([]DeliveredAlertDevicesRow, error) {
+	rows, err := q.db.Query(ctx, deliveredAlertDevices, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DeliveredAlertDevicesRow{}
+	for rows.Next() {
+		var i DeliveredAlertDevicesRow
+		if err := rows.Scan(&i.OutboxID, &i.SessionID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const expireAlertOutbox = `-- name: ExpireAlertOutbox :execrows
 DELETE FROM alert_outbox
 WHERE (delivered_at IS NULL AND created_at < $1)
@@ -70,13 +99,14 @@ func (q *Queries) ExpireAlertOutbox(ctx context.Context, arg ExpireAlertOutboxPa
 }
 
 const liveUserDevices = `-- name: LiveUserDevices :many
-SELECT d.user_id, d.platform, d.push_token
+SELECT d.session_id, d.user_id, d.platform, d.push_token
 FROM user_devices d JOIN user_sessions s ON s.id = d.session_id
 WHERE d.user_id = ANY($1::uuid[])
   AND s.ended_at IS NULL AND s.expires_at > now() AND (s.hard_expires_at IS NULL OR s.hard_expires_at > now())
 `
 
 type LiveUserDevicesRow struct {
+	SessionID uuid.UUID `json:"session_id"`
 	UserID    uuid.UUID `json:"user_id"`
 	Platform  string    `json:"platform"`
 	PushToken string    `json:"push_token"`
@@ -91,7 +121,12 @@ func (q *Queries) LiveUserDevices(ctx context.Context, userIds []uuid.UUID) ([]L
 	items := []LiveUserDevicesRow{}
 	for rows.Next() {
 		var i LiveUserDevicesRow
-		if err := rows.Scan(&i.UserID, &i.Platform, &i.PushToken); err != nil {
+		if err := rows.Scan(
+			&i.SessionID,
+			&i.UserID,
+			&i.Platform,
+			&i.PushToken,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -100,6 +135,23 @@ func (q *Queries) LiveUserDevices(ctx context.Context, userIds []uuid.UUID) ([]L
 		return nil, err
 	}
 	return items, nil
+}
+
+const markAlertDeviceDelivered = `-- name: MarkAlertDeviceDelivered :exec
+INSERT INTO alert_outbox_devices (outbox_id, session_id, delivered_at)
+VALUES ($1, $2, $3)
+ON CONFLICT (outbox_id, session_id) DO NOTHING
+`
+
+type MarkAlertDeviceDeliveredParams struct {
+	OutboxID    int64              `json:"outbox_id"`
+	SessionID   uuid.UUID          `json:"session_id"`
+	DeliveredAt pgtype.Timestamptz `json:"delivered_at"`
+}
+
+func (q *Queries) MarkAlertDeviceDelivered(ctx context.Context, arg MarkAlertDeviceDeliveredParams) error {
+	_, err := q.db.Exec(ctx, markAlertDeviceDelivered, arg.OutboxID, arg.SessionID, arg.DeliveredAt)
+	return err
 }
 
 const markAlertsDelivered = `-- name: MarkAlertsDelivered :exec

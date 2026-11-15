@@ -498,3 +498,53 @@ func TestAlertEmailStaysPendingUntilSentPostgres(t *testing.T) {
 		t.Fatalf("%d still pending after the server took it", p)
 	}
 }
+
+// A notice reaches every device of the user: the one that failed is retried alone, the one that got it is not
+// sent it again.
+func TestAlertPushPerDevicePostgres(t *testing.T) {
+	ctx, pool, s := userStore(t)
+	alice := newUser(t, ctx, s, "alice")
+	phone, tablet := newSession(t, ctx, s, alice, "app", 1), newSession(t, ctx, s, alice, "app", 2)
+	svc := alertSvc(s)
+	for _, d := range []struct {
+		id    uuid.UUID
+		token string
+	}{{phone.ID, "phone-token"}, {tablet.ID, "tablet-token"}} {
+		if err := svc.RegisterDevice(ctx, alice.ID, d.id, "ios", d.token); err != nil {
+			t.Fatal(err)
+		}
+	}
+	queueNotice(t, ctx, s, alice.ID, uuid.New(), "rebooted", "Hilltop", time.Now())
+	down := errors.New("push service answered 503")
+	p := &flakyPush{fail: map[string]error{"tablet-token": down}}
+	at := time.Now()
+	sender := alerts.NewSender(AlertEval{s}, "push", nil, p, nil, func() time.Time { return at })
+	if err := sender.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var pending, reached int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM alert_outbox WHERE delivered_at IS NULL`).Scan(&pending)
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM alert_outbox_devices WHERE session_id = $1`, phone.ID).Scan(&reached)
+	if pending != 1 || reached != 1 || len(p.tokens) != 2 {
+		t.Fatalf("pending %d, phone reached %d, sent to %v", pending, reached, p.tokens)
+	}
+	p.fail, p.tokens = nil, nil
+	at = at.Add(2 * time.Minute)
+	if err := sender.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM alert_outbox WHERE delivered_at IS NULL`).Scan(&pending)
+	if pending != 0 || len(p.tokens) != 1 || p.tokens[0] != "tablet-token" {
+		t.Fatalf("pending %d, retry went to %v", pending, p.tokens)
+	}
+}
+
+type flakyPush struct {
+	fail   map[string]error
+	tokens []string
+}
+
+func (p *flakyPush) Send(_ context.Context, m alerts.PushMessage) error {
+	p.tokens = append(p.tokens, m.Token)
+	return p.fail[m.Token]
+}

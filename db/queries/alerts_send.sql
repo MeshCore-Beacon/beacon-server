@@ -18,7 +18,7 @@ ORDER BY o.user_id, o.pass_id, o.id
 LIMIT sqlc.arg(row_limit);
 
 -- name: LiveUserDevices :many
-SELECT d.user_id, d.platform, d.push_token
+SELECT d.session_id, d.user_id, d.platform, d.push_token
 FROM user_devices d JOIN user_sessions s ON s.id = d.session_id
 WHERE d.user_id = ANY(sqlc.arg(user_ids)::uuid[])
   AND s.ended_at IS NULL AND s.expires_at > now() AND (s.hard_expires_at IS NULL OR s.hard_expires_at > now());
@@ -36,3 +36,11 @@ DELETE FROM alert_outbox WHERE delivered_at IS NULL AND attempts >= sqlc.arg(max
 
 -- name: DeleteDevicesByToken :exec
 DELETE FROM user_devices WHERE push_token = $1;
+
+-- name: DeliveredAlertDevices :many
+SELECT outbox_id, session_id FROM alert_outbox_devices WHERE outbox_id = ANY(sqlc.arg(ids)::bigint[]);
+
+-- name: MarkAlertDeviceDelivered :exec
+INSERT INTO alert_outbox_devices (outbox_id, session_id, delivered_at)
+VALUES ($1, $2, $3)
+ON CONFLICT (outbox_id, session_id) DO NOTHING;
