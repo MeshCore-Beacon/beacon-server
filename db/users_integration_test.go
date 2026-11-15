@@ -674,3 +674,28 @@ func TestUserActivateAndPeekTokenPostgres(t *testing.T) {
 		t.Fatal("verified user's session deleted")
 	}
 }
+
+func TestUserLatestTokenPostgres(t *testing.T) {
+	ctx, _, s := userStore(t)
+	now := time.Now()
+	u := newUser(t, ctx, s, "ridge")
+	if _, err := s.LatestToken(ctx, u.ID, users.TokenVerify, now); !errors.Is(err, users.ErrNotFound) {
+		t.Fatalf("none: %v", err)
+	}
+	_ = s.CreateToken(ctx, u.ID, users.TokenVerify, []byte("a"), []byte(`{"n":1}`), now.Add(time.Hour))
+	time.Sleep(5 * time.Millisecond)
+	_ = s.CreateToken(ctx, u.ID, users.TokenVerify, []byte("b"), []byte(`{"n":2}`), now.Add(time.Hour))
+	_ = s.CreateToken(ctx, u.ID, users.TokenReset, []byte("c"), []byte(`{"n":3}`), now.Add(time.Hour))
+	if d, err := s.LatestToken(ctx, u.ID, users.TokenVerify, now); err != nil || string(d) != `{"n": 2}` {
+		t.Fatalf("latest = %s, %v", d, err)
+	}
+	if _, _, err := s.ConsumeToken(ctx, users.TokenVerify, []byte("b"), now); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := s.LatestToken(ctx, u.ID, users.TokenVerify, now); string(d) != `{"n": 1}` {
+		t.Fatalf("after use = %s", d)
+	}
+	if _, err := s.LatestToken(ctx, u.ID, users.TokenVerify, now.Add(2*time.Hour)); !errors.Is(err, users.ErrNotFound) {
+		t.Fatalf("expired: %v", err)
+	}
+}

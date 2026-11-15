@@ -50,6 +50,7 @@ type tokRec struct {
 	data    []byte
 	expires time.Time
 	used    bool
+	seq     int
 }
 
 type fakeStore struct {
@@ -59,6 +60,7 @@ type fakeStore struct {
 	sessions    map[uuid.UUID]*sessRec
 	tokens      map[string]*tokRec
 	touchCalls  int
+	tokSeq      int
 	setPassHash int
 }
 
@@ -207,6 +209,20 @@ func (f *fakeStore) ActivateUser(_ context.Context, id uuid.UUID, username, hash
 	}
 	return nil
 }
+func (f *fakeStore) LatestToken(_ context.Context, userID uuid.UUID, kind TokenKind, now time.Time) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var best *tokRec
+	for _, t := range f.tokens {
+		if t.user == userID && t.kind == kind && !t.used && now.Before(t.expires) && (best == nil || t.seq > best.seq) {
+			best = t
+		}
+	}
+	if best == nil {
+		return nil, ErrNotFound
+	}
+	return best.data, nil
+}
 func (f *fakeStore) PeekToken(_ context.Context, kind TokenKind, hash []byte, now time.Time) (uuid.UUID, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -325,7 +341,8 @@ func (f *fakeStore) EndOldestAppSessions(_ context.Context, userID uuid.UUID, ke
 func (f *fakeStore) CreateToken(_ context.Context, userID uuid.UUID, kind TokenKind, hash, data []byte, expires time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.tokens[string(hash)] = &tokRec{kind: kind, user: userID, data: data, expires: expires}
+	f.tokSeq++
+	f.tokens[string(hash)] = &tokRec{kind: kind, user: userID, data: data, expires: expires, seq: f.tokSeq}
 	return nil
 }
 func (f *fakeStore) ConsumeToken(_ context.Context, kind TokenKind, hash []byte, now time.Time) (uuid.UUID, []byte, error) {
@@ -606,16 +623,68 @@ func TestPreRegistrationVictimFirstAttackerSecond(t *testing.T) {
 	}
 }
 
-func TestRegisteringAgainWithTheSameNameKeepsWorking(t *testing.T) {
+func TestUsernameAnswerDoesNotDependOnTheAddress(t *testing.T) {
 	e := newEnv(t)
-	_ = e.svc.Register(bg, "ridge", "ridge@example.org", goodPW)
-	if err := e.svc.Register(bg, "ridge", "ridge@example.org", goodPW); err != nil {
-		t.Fatalf("own pending sign-up refused: %v", err)
+	_ = e.svc.Register(bg, "ridge", "a@example.org", goodPW)
+	n := len(e.msgs())
+	// "ridge" is held by the pending row for a@; the same answer for that address, another address and a verified one.
+	e.user("other")
+	for _, addr := range []string{"a@example.org", "b@example.org", "other@example.org"} {
+		if err := e.svc.Register(bg, "Ridge", addr, "some distinct passphrase"); !errors.Is(err, ErrUsernameTaken) {
+			t.Fatalf("%s: %v", addr, err)
+		}
+	}
+	if len(e.msgs()) != n+1 { // only e.user's own verify mail
+		t.Fatal("mail sent for a refused sign-up")
+	}
+	if _, err := e.store.UserByEmail(bg, "b@example.org"); !errors.Is(err, ErrNotFound) {
+		t.Fatal("a row was created")
+	}
+	// The owner of the pending sign-up asks again with resend.
+	if err := e.svc.ResendVerification(bg, "a@example.org"); err != nil {
+		t.Fatal(err)
 	}
 	if err := e.svc.Verify(bg, tokenIn(t, e.last())); err != nil {
 		t.Fatal(err)
 	}
 	e.login("ridge")
+}
+
+func TestResendRepeatsTheNewestSignUpNotTheRow(t *testing.T) {
+	e := newEnv(t)
+	const p1, p2 = "attackers long passphrase", "the real owners passphrase"
+	_ = e.svc.Register(bg, "mallory", "victim@example.org", p1)
+	e.clk.Advance(time.Minute)
+	_ = e.svc.Register(bg, "victim", "victim@example.org", p2)
+	e.clk.Advance(time.Minute)
+	if err := e.svc.ResendVerification(bg, "victim@example.org"); err != nil {
+		t.Fatal(err)
+	}
+	msgs := e.msgs()
+	if len(msgs) != 3 || !strings.Contains(msgs[2].Text, "account named victim") {
+		t.Fatalf("resent mail: %+v", msgs)
+	}
+	if err := e.svc.Verify(bg, tokenIn(t, msgs[2])); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := e.svc.Login(bg, "victim@example.org", p1, SessionMeta{}); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("attacker's password signs in: %v", err)
+	}
+	if _, _, _, err := e.svc.Login(bg, "victim@example.org", p2, SessionMeta{}); err != nil {
+		t.Fatalf("victim: %v", err)
+	}
+}
+
+func TestResendSendsNothingWithoutALiveLink(t *testing.T) {
+	e := newEnv(t)
+	_ = e.svc.Register(bg, "ridge", "ridge@example.org", goodPW)
+	e.clk.Advance(25 * time.Hour)
+	if err := e.svc.ResendVerification(bg, "ridge@example.org"); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.msgs()) != 1 {
+		t.Fatal("a link was minted from the row")
+	}
 }
 
 func TestRegisterOverAnUnverifiedAddressStillHonoursUsernameUniqueness(t *testing.T) {
@@ -1754,52 +1823,90 @@ func TestThrottleGivesKnownAndUnknownNamesTheSameAnswer(t *testing.T) {
 	}
 }
 
-func TestThrottleTableIsBoundedAndFailsClosed(t *testing.T) {
-	th := newThrottle()
-	th.cap = 50
-	now := time.Now()
-	for i := 0; i < 10; i++ {
-		th.fail("victim", now)
-	}
-	for i := 0; i < 200; i++ {
-		k := uuid.NewString()
-		if _, locked := th.locked(k, now); !locked && th.size() < th.cap {
+func fillNames(th *throttle, n int, now time.Time, lock bool) {
+	for i := 0; i < n; i++ {
+		k := loginKey(uuid.NewString())
+		reps := 1
+		if lock {
+			reps = throttleMax
+		}
+		for j := 0; j < reps; j++ {
 			th.fail(k, now)
 		}
 	}
-	if th.size() > th.cap {
-		t.Fatalf("size %d over the cap", th.size())
+}
+
+func TestThrottleUnlockedJunkIsEvictedAndNothingReadsAsLocked(t *testing.T) {
+	th := newThrottle()
+	th.cap = 5
+	now := time.Now()
+	uk := userKey(uuid.New())
+	for i := 0; i < throttleMax; i++ {
+		th.fail(uk, now)
 	}
-	// Full: a key that cannot be recorded is refused for a short while, not let through uncounted.
-	wait, locked := th.locked("new-name", now)
-	if !locked || wait <= 0 || wait > time.Minute {
-		t.Fatalf("full table: locked=%v wait=%v", locked, wait)
+	fillNames(th, 5, now, false)
+	// A full table never makes an unknown key read as locked.
+	if _, locked := th.locked(loginKey("new-name"), now); locked {
+		t.Fatal("unknown name reads as locked")
 	}
-	// An existing lock survives the flood.
-	if _, locked := th.locked("victim", now); !locked {
-		t.Fatal("flood evicted a lock")
+	// A real account's lock still works, and a new name is still counted (the oldest junk makes room).
+	if _, locked := th.locked(uk, now); !locked {
+		t.Fatal("user lock lost")
 	}
-	// Entries expire and the table opens again.
-	if _, locked := th.locked("new-name", now.Add(31*time.Minute)); locked {
-		t.Fatal("still full after everything expired")
+	if _, full := th.fail(loginKey("new-name"), now); full {
+		t.Fatal("refused with room to evict")
+	}
+	for i := 0; i < throttleMax-1; i++ {
+		th.fail(loginKey("new-name"), now)
+	}
+	if _, locked := th.locked(loginKey("new-name"), now); !locked {
+		t.Fatal("new name was not counted")
+	}
+	if len(th.names) > th.cap {
+		t.Fatalf("%d names over the cap", len(th.names))
 	}
 }
 
-func TestLoginRefusedWhenTheThrottleTableIsFull(t *testing.T) {
+func TestThrottleUserEntriesAreNeverRefusedOrEvicted(t *testing.T) {
+	th := newThrottle()
+	th.cap = 2
+	now := time.Now()
+	fillNames(th, 2, now, true)
+	for i := 0; i < 50; i++ {
+		id := userKey(uuid.New())
+		if _, full := th.fail(id, now); full {
+			t.Fatal("user key refused for lack of space")
+		}
+	}
+	if len(th.users) != 50 {
+		t.Fatalf("%d user entries", len(th.users))
+	}
+}
+
+func TestThrottleLockedJunkMakesNewNamesFailClosedButNotKnownUsers(t *testing.T) {
 	e := newEnv(t)
 	e.user("ridge")
 	e.svc.throttle.cap = 3
-	now := e.clk.Now()
-	for _, k := range []string{"a", "b", "c"} {
-		e.svc.throttle.fail(k, now)
-	}
-	calls := 0
-	real := e.svc.verifyPW
-	e.svc.verifyPW = func(h, p string) (bool, bool) { calls++; return real(h, p) }
-	_, _, _, err := e.svc.Login(bg, "ridge", goodPW, SessionMeta{})
+	fillNames(e.svc.throttle, 3, e.clk.Now(), true)
+
+	// A new unknown name: refused with the short retry, no matter the password.
+	_, _, _, err := e.svc.Login(bg, "ghost", "wrong password here", SessionMeta{})
 	var te *TooManyAttemptsError
-	if !errors.As(err, &te) || te.RetryAfter > time.Minute || calls != 0 {
-		t.Fatalf("err = %v, comparisons = %d", err, calls)
+	if !errors.As(err, &te) || te.RetryAfter != fullRetry {
+		t.Fatalf("unknown name: %v", err)
+	}
+	// An existing user can still sign in with the right password.
+	e.login("ridge")
+	// With a wrong one the failure cannot be recorded under the typed name, so it is refused too.
+	if _, _, _, err := e.svc.Login(bg, "ridge", "wrong password here", SessionMeta{}); !errors.Is(err, ErrTooManyAttempts) {
+		t.Fatalf("known user, wrong password: %v", err)
+	}
+	// Their own key still locks them out after enough failures.
+	for i := 0; i < throttleMax; i++ {
+		e.svc.throttle.fail(userKey(e.store.userID("ridge")), e.clk.Now())
+	}
+	if _, _, _, err := e.svc.Login(bg, "ridge", goodPW, SessionMeta{}); !errors.Is(err, ErrTooManyAttempts) {
+		t.Fatalf("own lock: %v", err)
 	}
 }
 
@@ -1820,4 +1927,15 @@ func TestLoginAliasesShareOneBudget(t *testing.T) {
 	}
 	e.clk.Advance(15*time.Minute + time.Second)
 	e.login("ridge")
+}
+
+func (f *fakeStore) userID(name string) uuid.UUID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, u := range f.users {
+		if u.Username == name {
+			return u.ID
+		}
+	}
+	return uuid.Nil
 }

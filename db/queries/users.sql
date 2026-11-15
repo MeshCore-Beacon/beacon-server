@@ -129,6 +129,13 @@ RETURNING user_id, data;
 SELECT user_id FROM user_tokens
 WHERE token_hash = sqlc.arg(token_hash) AND kind = sqlc.arg(kind) AND used_at IS NULL AND expires_at > sqlc.arg(now);
 
+-- name: LatestUserToken :one
+-- The data of the user's newest live token of a kind, for repeating a mail without minting from anything else.
+SELECT data FROM user_tokens
+WHERE user_id = sqlc.arg(user_id) AND kind = sqlc.arg(kind) AND used_at IS NULL AND expires_at > sqlc.arg(now)
+ORDER BY created_at DESC, expires_at DESC
+LIMIT 1;
+
 -- name: DeleteUserTokens :exec
 DELETE FROM user_tokens WHERE user_id = $1 AND kind = $2;
 

@@ -34,6 +34,7 @@ type Store interface {
 	SetUserEmailVerified(ctx context.Context, id uuid.UUID, at time.Time) error
 	SetUserPendingEmail(ctx context.Context, id uuid.UUID, email *string) error
 	ActivateUser(ctx context.Context, id uuid.UUID, username, hash string, at time.Time) error
+	LatestToken(ctx context.Context, userID uuid.UUID, kind TokenKind, now time.Time) ([]byte, error)
 	PeekToken(ctx context.Context, kind TokenKind, hash []byte, now time.Time) (uuid.UUID, error)
 	ApplyPendingEmail(ctx context.Context, id uuid.UUID, expected string) error
 	TouchUserLogin(ctx context.Context, id uuid.UUID, at time.Time) error
@@ -336,33 +337,29 @@ func (s *Service) Register(ctx context.Context, username, email, password string
 	if err != nil {
 		return err
 	}
+	// The username answer never depends on the address: any row holding it, verified or pending, refuses.
+	if _, uerr := s.store.UserByLogin(ctx, username); uerr == nil {
+		return ErrUsernameTaken
+	} else if !errors.Is(uerr, ErrNotFound) {
+		return uerr
+	}
 	u, err := s.store.CreateUser(ctx, User{Username: username, DisplayName: username, Email: addr, PassHash: hash, Provider: "local"})
 	switch {
-	case errors.Is(err, ErrUsernameTaken) || errors.Is(err, ErrEmailTaken):
-		// Either index may be reported first, so look the address up: a pending sign-up may be the owner of both.
+	case errors.Is(err, ErrUsernameTaken):
+		return err // taken between the check and the insert
+	case errors.Is(err, ErrEmailTaken):
 		existing, gerr := s.store.UserByEmail(ctx, addr)
 		if errors.Is(gerr, ErrNotFound) {
-			if errors.Is(err, ErrUsernameTaken) {
-				return err
-			}
 			return nil
 		}
 		if gerr != nil {
 			return gerr
 		}
 		if existing.EmailVerifiedAt != nil || existing.DisabledAt != nil {
-			if errors.Is(err, ErrUsernameTaken) {
-				return err
-			}
 			return nil
 		}
 		// Nobody has proved they own this address yet. The row stays as the first sign-up left it; this sign-up
 		// gets its own link, and whichever link the owner opens decides the username and password.
-		if other, oerr := s.store.UserByLogin(ctx, username); oerr == nil && other.ID != existing.ID {
-			return ErrUsernameTaken
-		} else if oerr != nil && !errors.Is(oerr, ErrNotFound) {
-			return oerr
-		}
 		s.log.Info("pending registration added", "user_id", existing.ID)
 		return s.sendVerify(ctx, existing, username, hash)
 	case err != nil:
@@ -442,7 +439,19 @@ func (s *Service) ResendVerification(ctx context.Context, email string) error {
 	if u.EmailVerifiedAt != nil || u.DisabledAt != nil {
 		return nil
 	}
-	return s.sendVerify(ctx, u, u.Username, u.PassHash)
+	// Never mint a link from the row: its username and hash may be a stranger's. Repeat the newest live sign-up.
+	raw, err := s.store.LatestToken(ctx, u.ID, TokenVerify, s.now())
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var d tokenData
+	if json.Unmarshal(raw, &d) != nil || d.Email != u.Email || d.Username == "" || d.PassHash == "" {
+		return nil
+	}
+	return s.sendVerify(ctx, u, d.Username, d.PassHash)
 }
 
 // ---- password checks ----
@@ -467,10 +476,16 @@ func (s *Service) checkKeys(keys []string, hash, pw string) (needsRehash bool, e
 	}
 	ok, re := s.verifyPW(hash, pw)
 	if !ok {
+		full := false
 		for _, k := range keys {
-			if s.throttle.fail(k, now) {
+			l, f := s.throttle.fail(k, now)
+			if l {
 				s.log.Warn("password attempts throttled", "key_kind", strings.SplitN(k, ":", 2)[0])
 			}
+			full = full || f
+		}
+		if full {
+			return false, &TooManyAttemptsError{RetryAfter: fullRetry}
 		}
 		return false, ErrInvalidCredentials
 	}
@@ -526,7 +541,9 @@ func (s *Service) Login(ctx context.Context, login, password string, meta Sessio
 	}
 	if err != nil || u.DisabledAt != nil {
 		s.verifyPW(s.dummyHash, password)
-		s.throttle.fail(key, s.now())
+		if _, full := s.throttle.fail(key, s.now()); full {
+			return "", Session{}, User{}, &TooManyAttemptsError{RetryAfter: fullRetry}
+		}
 		return "", Session{}, User{}, ErrInvalidCredentials
 	}
 	// Aliases of one account (username, email) share one budget through the user key.

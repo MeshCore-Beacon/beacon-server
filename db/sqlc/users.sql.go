@@ -324,6 +324,27 @@ func (q *Queries) EndUserSession(ctx context.Context, arg EndUserSessionParams) 
 	return err
 }
 
+const latestUserToken = `-- name: LatestUserToken :one
+SELECT data FROM user_tokens
+WHERE user_id = $1 AND kind = $2 AND used_at IS NULL AND expires_at > $3
+ORDER BY created_at DESC, expires_at DESC
+LIMIT 1
+`
+
+type LatestUserTokenParams struct {
+	UserID uuid.UUID          `json:"user_id"`
+	Kind   string             `json:"kind"`
+	Now    pgtype.Timestamptz `json:"now"`
+}
+
+// The data of the user's newest live token of a kind, for repeating a mail without minting from anything else.
+func (q *Queries) LatestUserToken(ctx context.Context, arg LatestUserTokenParams) ([]byte, error) {
+	row := q.db.QueryRow(ctx, latestUserToken, arg.UserID, arg.Kind, arg.Now)
+	var data []byte
+	err := row.Scan(&data)
+	return data, err
+}
+
 const listUserSessions = `-- name: ListUserSessions :many
 SELECT id, user_id, kind, label, created_at, last_used_at, expires_at, hard_expires_at, ip, user_agent
 FROM user_sessions

@@ -2049,6 +2049,21 @@ func (mr *MockQuerierMockRecorder) LatestNodeStatusReadingBefore(ctx, arg any) *
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LatestNodeStatusReadingBefore", reflect.TypeOf((*MockQuerier)(nil).LatestNodeStatusReadingBefore), ctx, arg)
 }
 
+// LatestUserToken mocks base method.
+func (m *MockQuerier) LatestUserToken(ctx context.Context, arg db.LatestUserTokenParams) ([]byte, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LatestUserToken", ctx, arg)
+	ret0, _ := ret[0].([]byte)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// LatestUserToken indicates an expected call of LatestUserToken.
+func (mr *MockQuerierMockRecorder) LatestUserToken(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LatestUserToken", reflect.TypeOf((*MockQuerier)(nil).LatestUserToken), ctx, arg)
+}
+
 // ListAccounts mocks base method.
 func (m *MockQuerier) ListAccounts(ctx context.Context) ([]db.Account, error) {
 	m.ctrl.T.Helper()

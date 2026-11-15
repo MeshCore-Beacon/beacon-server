@@ -316,6 +316,8 @@ type Querier interface {
 	InsertRepeaterReading(ctx context.Context, arg InsertRepeaterReadingParams) (int64, error)
 	// The newest status reading before since: the baseline for the first counter increments in range.
 	LatestNodeStatusReadingBefore(ctx context.Context, arg LatestNodeStatusReadingBeforeParams) ([]LatestNodeStatusReadingBeforeRow, error)
+	// The data of the user's newest live token of a kind, for repeating a mail without minting from anything else.
+	LatestUserToken(ctx context.Context, arg LatestUserTokenParams) ([]byte, error)
 	ListAccounts(ctx context.Context) ([]Account, error)
 	// The original all-channel message statement, before the channel read model: no page runs it
 	// (planpolicy.VerificationOnly); tests compare message pages with it.

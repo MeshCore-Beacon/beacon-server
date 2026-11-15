@@ -299,6 +299,15 @@ func (s *Store) PeekToken(ctx context.Context, kind users.TokenKind, hash []byte
 	return id, err
 }
 
+// LatestToken returns the data of the user's newest live token of the kind, or users.ErrNotFound.
+func (s *Store) LatestToken(ctx context.Context, userID uuid.UUID, kind users.TokenKind, now time.Time) ([]byte, error) {
+	d, err := s.q.LatestUserToken(ctx, sqlc.LatestUserTokenParams{UserID: userID, Kind: string(kind), Now: ts(now)})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, users.ErrNotFound
+	}
+	return d, err
+}
+
 func (s *Store) DeleteUserTokens(ctx context.Context, userID uuid.UUID, kind users.TokenKind) error {
 	return s.q.DeleteUserTokens(ctx, sqlc.DeleteUserTokensParams{UserID: userID, Kind: string(kind)})
 }
