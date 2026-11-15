@@ -74,6 +74,13 @@ var version = "dev"
 // @name Authorization
 // @description Enter Bearer followed by the configured operator key. Use HTTPS.
 
+// @securityDefinitions.apikey UserSession
+// @in header
+// @name Authorization
+// @description Enter Bearer followed by an app session token from POST /auth/app/token. Web sessions use the beacon_session cookie and the X-Beacon-CSRF header instead.
+
+// @tag.name			Accounts
+// @tag.description	Sign-in, sessions and the signed-in user's profile; 404 accounts_disabled unless accounts.mode is local
 // @tag.name			IATAs
 // @tag.description	Airport/location codes that group observers and packets
 // @tag.name			Regions

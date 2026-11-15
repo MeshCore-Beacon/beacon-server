@@ -45,6 +45,11 @@ type Options struct {
 	AccountsMode string
 	// RegistrationOpen is reported as features.registration while accounts are local.
 	RegistrationOpen bool
+	// Accounts serves the sign-in and profile routes. Leave it an untyped nil when accounts are off: a nil
+	// *users.Service stored here is not == nil and would be called.
+	Accounts handlers.AccountsService
+	// AuthOptions configures those routes; with Enabled false they answer 404 accounts_disabled.
+	AuthOptions handlers.AuthOptions
 	// APIPlanLayout is reported in the admin config's guards view.
 	APIPlanLayout string
 }

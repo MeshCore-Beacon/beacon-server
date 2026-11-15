@@ -34,3 +34,16 @@ func RateLimit(cfg config.ResolvedRateLimitConfig) func(http.Handler) http.Handl
 		return minute(burst(next))
 	}
 }
+
+// RateLimitRoute limits one route (or a few that share the instance) to n requests per window for each client IP,
+// answering 429 rate_limited with Retry-After. TrustedProxyIP must run first.
+func RateLimitRoute(n int, window time.Duration) func(http.Handler) http.Handler {
+	return httprate.LimitBy(n, window, httprate.KeyByIP,
+		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"code":"rate_limited","message":"Too many requests. Retry later."}}`))
+		}),
+		httprate.WithResponseHeaders(httprate.ResponseHeaders{RetryAfter: "Retry-After"}),
+	)
+}

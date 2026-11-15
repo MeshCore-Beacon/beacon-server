@@ -128,6 +128,55 @@ definitions:
       snr:
         type: number
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.AppCodeRequest:
+    properties:
+      codeChallenge:
+        description: CodeChallenge is the base64url SHA-256 of the code verifier (S256
+          only).
+        type: string
+      deviceLabel:
+        type: string
+      state:
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.AppCodeResponse:
+    properties:
+      code:
+        type: string
+      redirectUri:
+        example: meshcorebeacon://auth
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.AppTokenRequest:
+    properties:
+      code:
+        type: string
+      codeVerifier:
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.AppTokenResponse:
+    properties:
+      expiresAt:
+        type: integer
+      token:
+        type: string
+      user:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.User'
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.ChangeEmailRequest:
+    properties:
+      currentPassword:
+        type: string
+      email:
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.ChangePasswordRequest:
+    properties:
+      currentPassword:
+        type: string
+      newPassword:
+        type: string
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.Channel:
     properties:
       channelHash:
@@ -319,6 +368,16 @@ definitions:
           $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.DBStatement'
         type: array
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.DeleteMeRequest:
+    properties:
+      currentPassword:
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.EmailRequest:
+    properties:
+      email:
+        type: string
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.IATA:
     properties:
       displayName:
@@ -393,6 +452,14 @@ definitions:
         type: integer
       pathKey:
         description: stable identity within this IATA; use for route evidence links
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.LoginRequest:
+    properties:
+      login:
+        description: Login is a username or an email address.
+        type: string
+      password:
         type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.MeshMapperDefaultScope:
@@ -1749,6 +1816,22 @@ definitions:
         description: suggested map zoom level
         type: integer
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.RegisterRequest:
+    properties:
+      email:
+        type: string
+      password:
+        type: string
+      username:
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.ResetConfirmRequest:
+    properties:
+      password:
+        type: string
+      token:
+        type: string
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.ResolvedHop:
     properties:
       confidence:
@@ -1886,6 +1969,13 @@ definitions:
       packetCount:
         description: distinct packets matched to this scope
         type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.SessionList:
+    properties:
+      sessions:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.UserSession'
+        type: array
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.SignalBin:
     properties:
@@ -2030,6 +2120,17 @@ definitions:
         type: number
       uniquePackets:
         type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.StatusResponse:
+    properties:
+      status:
+        example: check_email
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.TokenRequest:
+    properties:
+      token:
+        type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.TopAdvertiser:
     properties:
@@ -2213,6 +2314,65 @@ definitions:
         type: array
     required:
     - enforce
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateMeRequest:
+    properties:
+      displayName:
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.User:
+    properties:
+      createdAt:
+        description: CreatedAt is epoch milliseconds.
+        example: 1794700000000
+        type: integer
+      displayName:
+        example: Ridge Walker
+        type: string
+      email:
+        example: a@example.org
+        type: string
+      emailVerified:
+        example: true
+        type: boolean
+      id:
+        example: 3f2b8c1e-6a52-4d0e-9b57-0d3d2b6a1c11
+        type: string
+      pendingEmail:
+        example: new@example.org
+        type: string
+      provider:
+        example: local
+        type: string
+      username:
+        example: ridgewalker
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.UserResponse:
+    properties:
+      user:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.User'
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.UserSession:
+    properties:
+      createdAt:
+        type: integer
+      current:
+        type: boolean
+      expiresAt:
+        type: integer
+      id:
+        type: string
+      kind:
+        enum:
+        - web
+        - app
+        type: string
+      label:
+        example: Firefox on macOS
+        type: string
+      lastUsedAt:
+        type: integer
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.WSTicket:
     properties:
@@ -2901,6 +3061,532 @@ paths:
       summary: List polled repeaters and their observers
       tags:
       - Admin
+  /auth/app/code:
+    post:
+      consumes:
+      - application/json
+      description: Needs the web cookie session. The code lasts 5 minutes and is bound
+        to the PKCE challenge (S256). redirectUri is always meshcorebeacon://auth.
+      parameters:
+      - description: PKCE challenge, state and device label; body at most 4 KiB
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AppCodeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AppCodeResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "413":
+          description: Request Entity Too Large
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "415":
+          description: Unsupported Media Type
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      summary: Issue a one-time code for the app
+      tags:
+      - Accounts
+  /auth/app/token:
+    post:
+      consumes:
+      - application/json
+      description: 'The code is used up before the verifier is checked, so a wrong
+        verifier needs a new code. The token is for the Authorization: Bearer header.'
+      parameters:
+      - description: Code and PKCE verifier; body at most 4 KiB
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AppTokenRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AppTokenResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "413":
+          description: Request Entity Too Large
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "415":
+          description: Unsupported Media Type
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      summary: Exchange an app code for a session token
+      tags:
+      - Accounts
+  /auth/login:
+    post:
+      consumes:
+      - application/json
+      description: Sets the beacon_session cookie (HttpOnly, SameSite=Lax) and returns
+        the user. One generic invalid_credentials answer covers an unknown name and
+        a wrong password; email_unverified comes only after the password is right.
+      parameters:
+      - description: Username or email, and password; body at most 4 KiB
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.UserResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "413":
+          description: Request Entity Too Large
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "415":
+          description: Unsupported Media Type
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      summary: Sign in
+      tags:
+      - Accounts
+  /auth/logout:
+    post:
+      responses:
+        "204":
+          description: Signed out; the cookie is cleared
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - UserSession: []
+      summary: Sign out
+      tags:
+      - Accounts
+  /auth/register:
+    post:
+      consumes:
+      - application/json
+      description: Always answers 202 check_email for a well-formed request, whether
+        or not the address is already registered; a verify link is mailed.
+      parameters:
+      - description: Username 3-30 of A-Za-z0-9_.-, email, password 12-128 bytes;
+          body at most 4 KiB
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.RegisterRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.StatusResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "413":
+          description: Request Entity Too Large
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "415":
+          description: Unsupported Media Type
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      summary: Create an account
+      tags:
+      - Accounts
+  /auth/reset/confirm:
+    post:
+      consumes:
+      - application/json
+      description: Ends every session of the user. A refused password does not use
+        up the link.
+      parameters:
+      - description: Token from the link and the new password; body at most 4 KiB
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ResetConfirmRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.StatusResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "413":
+          description: Request Entity Too Large
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "415":
+          description: Unsupported Media Type
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      summary: Set a new password with a reset link
+      tags:
+      - Accounts
+  /auth/reset/request:
+    post:
+      consumes:
+      - application/json
+      description: Answers 202 check_email whether or not the address belongs to an
+        account.
+      parameters:
+      - description: Email address; body at most 4 KiB
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.EmailRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.StatusResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "413":
+          description: Request Entity Too Large
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "415":
+          description: Unsupported Media Type
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      summary: Ask for a password reset link
+      tags:
+      - Accounts
+  /auth/verify:
+    post:
+      consumes:
+      - application/json
+      description: Uses the one-time token from the mailed link. Also completes an
+        email change.
+      parameters:
+      - description: Token from the link; body at most 4 KiB
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TokenRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.StatusResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "413":
+          description: Request Entity Too Large
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "415":
+          description: Unsupported Media Type
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      summary: Confirm an email address
+      tags:
+      - Accounts
+  /auth/verify/resend:
+    post:
+      consumes:
+      - application/json
+      description: Answers 202 check_email whether or not the address belongs to an
+        unverified account.
+      parameters:
+      - description: Email address; body at most 4 KiB
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.EmailRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.StatusResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "413":
+          description: Request Entity Too Large
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "415":
+          description: Unsupported Media Type
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      summary: Send the verify link again
+      tags:
+      - Accounts
   /brokers:
     get:
       produces:
@@ -3173,6 +3859,400 @@ paths:
       summary: Server info and minimum client versions
       tags:
       - Info
+  /me:
+    delete:
+      consumes:
+      - application/json
+      description: Removes the user and everything it owns, and clears the cookie.
+      parameters:
+      - description: Current password; body at most 4 KiB
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.DeleteMeRequest'
+      responses:
+        "204":
+          description: Deleted
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "413":
+          description: Request Entity Too Large
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "415":
+          description: Unsupported Media Type
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - UserSession: []
+      summary: Delete the account
+      tags:
+      - Accounts
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.UserResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - UserSession: []
+      summary: The signed-in user
+      tags:
+      - Accounts
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 1-40 characters after trimming; body at most 4 KiB
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateMeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.UserResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "413":
+          description: Request Entity Too Large
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "415":
+          description: Unsupported Media Type
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - UserSession: []
+      summary: Change the display name
+      tags:
+      - Accounts
+  /me/email:
+    post:
+      consumes:
+      - application/json
+      description: The new address is held as pendingEmail until its mailed link is
+        used. Answers 202 check_email whether or not another user owns the address.
+      parameters:
+      - description: New address and current password; body at most 4 KiB
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ChangeEmailRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.StatusResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "413":
+          description: Request Entity Too Large
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "415":
+          description: Unsupported Media Type
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - UserSession: []
+      summary: Ask to change the email address
+      tags:
+      - Accounts
+  /me/password:
+    post:
+      consumes:
+      - application/json
+      description: Ends every other session of the user.
+      parameters:
+      - description: Current and new password; body at most 4 KiB
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.ChangePasswordRequest'
+      responses:
+        "204":
+          description: Changed
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "413":
+          description: Request Entity Too Large
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "415":
+          description: Unsupported Media Type
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - UserSession: []
+      summary: Change the password
+      tags:
+      - Accounts
+  /me/sessions:
+    delete:
+      responses:
+        "204":
+          description: Ended
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - UserSession: []
+      summary: End every session but this one
+      tags:
+      - Accounts
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.SessionList'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - UserSession: []
+      summary: List the user's sessions
+      tags:
+      - Accounts
+  /me/sessions/{id}:
+    delete:
+      description: Ending the current session signs out and clears the cookie. An
+        id that is not the user's is ignored.
+      parameters:
+      - description: Session UUID
+        format: uuid
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: Ended
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - UserSession: []
+      summary: End one session
+      tags:
+      - Accounts
   /messages:
     get:
       parameters:
@@ -5423,8 +6503,17 @@ securityDefinitions:
     in: header
     name: Authorization
     type: apiKey
+  UserSession:
+    description: Enter Bearer followed by an app session token from POST /auth/app/token.
+      Web sessions use the beacon_session cookie and the X-Beacon-CSRF header instead.
+    in: header
+    name: Authorization
+    type: apiKey
 swagger: "2.0"
 tags:
+- description: Sign-in, sessions and the signed-in user's profile; 404 accounts_disabled
+    unless accounts.mode is local
+  name: Accounts
 - description: Airport/location codes that group observers and packets
   name: IATAs
 - description: Super-regions grouping multiple IATAs

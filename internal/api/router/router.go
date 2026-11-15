@@ -42,6 +42,7 @@ import (
 //	  /iatas           → iatas subrouter
 //	  /regions         → regions subrouter
 //	  /stats           → stats subrouter
+//	  /auth, /me       → sign-in and profile (404 accounts_disabled unless accounts are on)
 //
 // Admin endpoints require a configured bearer key.
 func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) http.Handler {
@@ -139,6 +140,10 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(mw.RateLimit(opts.RateLimit))
 		r.Use(mw.LimitListParams)
+		// Attaches the signed-in user, when there is one, for the /auth and /me routes.
+		if opts.Accounts != nil && opts.AuthOptions.Enabled {
+			r.Use(mw.UserAuth(opts.Accounts, handlers.SessionCookie))
+		}
 		// Public group — no authentication required. Guards run here only, after TrustedProxyIP,
 		// so /ws and the admin subtree never carry guard state.
 		r.Group(func(r chi.Router) {
@@ -159,6 +164,8 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 			r.Mount("/traces", handlers.TracesRouter(reader))
 			r.Mount("/info", handlers.InfoRouter(info))
 			r.Mount("/ws-ticket", handlers.WSTicketRouter(tickets))
+			r.Mount("/auth", handlers.AuthRouter(opts.Accounts, opts.AuthOptions))
+			r.Mount("/me", handlers.MeRouter(opts.Accounts, opts.AuthOptions))
 		})
 
 		// Protect the entire subtree, including its root and unknown paths.
