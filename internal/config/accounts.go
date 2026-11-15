@@ -51,6 +51,8 @@ type ResolvedAccounts struct {
 	SMTPPassword     string
 	SMTPFrom         string
 	SMTPStartTLS     bool
+	// InstanceName is what mail calls this instance; main sets it from VITE_APP_NAME. Empty reads as "Beacon".
+	InstanceName string
 	// CookieSecure is false only for a plain-http localhost public URL, for local development.
 	CookieSecure bool
 }

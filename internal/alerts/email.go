@@ -17,12 +17,12 @@ type EmailNotice struct {
 // ComposeEmail builds one message for everything one evaluation pass produced for a user: the subject counts the
 // alerts, each alert is one plain line, and the last line links to the Atlas. Names are sanitised again here, so a
 // name can never add a header or a line.
-func ComposeEmail(notices []EmailNotice, atlasURL string) (subject, text string) {
+func ComposeEmail(name string, notices []EmailNotice, atlasURL string) (subject, text string) {
 	n := len(notices)
 	if n == 1 {
-		subject = "Beacon: 1 alert"
+		subject = name + ": 1 alert"
 	} else {
-		subject = fmt.Sprintf("Beacon: %d alerts", n)
+		subject = fmt.Sprintf("%s: %d alerts", name, n)
 	}
 	var b strings.Builder
 	for _, x := range notices {

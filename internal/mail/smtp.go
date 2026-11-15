@@ -39,6 +39,18 @@ func NewSMTP(host string, port int, username, password, from string, startTLS bo
 	return s
 }
 
+// WithDisplayName returns from with name as the display name when from is a bare address. An explicit display name
+// is kept. The result is built by net/mail, so a name with special characters is quoted or encoded and can never
+// carry a line break. An unparsable from is returned unchanged; NewSMTP reports it on send.
+func WithDisplayName(from, name string) string {
+	a, err := mail.ParseAddress(from)
+	if err != nil || a.Name != "" || name == "" {
+		return from
+	}
+	a.Name = name
+	return a.String()
+}
+
 func (s *smtpSender) Send(ctx context.Context, m Message) error {
 	if s.fromErr != nil {
 		return fmt.Errorf("mail: invalid from address: %w", s.fromErr)

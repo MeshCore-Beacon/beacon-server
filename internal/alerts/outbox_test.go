@@ -360,3 +360,20 @@ func TestPushRetryOnlyReachesTheDevicesStillMissingIt(t *testing.T) {
 		t.Fatalf("sent %+v delivered %v retry %v", p.sent, f.delivered, f.retry)
 	}
 }
+
+func TestEmailSubjectUsesInstanceName(t *testing.T) {
+	f := &fakeSend{rows: []OutboxRow{row(1, userA, passOne, KindRebooted, "Hilltop", 5)}}
+	m := &fakeMail{}
+	s := NewSender(f, "email", m, nil, publicURL, nil)
+	s.SetInstanceName("Beacon - Ottawa")
+	if err := s.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.got) != 1 || m.got[0].subject != "Beacon - Ottawa: 1 alert" {
+		t.Fatalf("%+v", m.got)
+	}
+	sub, _ := ComposeEmail("Réseau", []EmailNotice{{Kind: KindRebooted, Name: "A"}, {Kind: KindRebooted, Name: "B"}}, "u")
+	if sub != "Réseau: 2 alerts" {
+		t.Fatal(sub)
+	}
+}

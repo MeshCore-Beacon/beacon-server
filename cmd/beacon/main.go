@@ -459,11 +459,13 @@ func main() {
 		slog.Error("invalid accounts configuration", "component", "startup", "error", err)
 		os.Exit(1)
 	}
+	// The web's wordmark variable also names the instance in mail; the server container gets the same .env.
+	resolvedAccounts.InstanceName = config.InstanceName(os.Getenv("VITE_APP_NAME"))
 	accountsHost := ""
 	if resolvedAccounts.PublicURL != nil {
 		accountsHost = resolvedAccounts.PublicURL.Host
 	}
-	slog.Info("accounts", "component", "startup", "enabled", resolvedAccounts.Enabled, "public_host", accountsHost)
+	slog.Info("accounts", "component", "startup", "enabled", resolvedAccounts.Enabled, "public_host", accountsHost, "instance_name", resolvedAccounts.InstanceName)
 	accountsMode := "off"
 	// Left an untyped nil while accounts are off: a nil *users.Service stored in the interface would be called.
 	var accountsSvc handlers.AccountsService
@@ -478,7 +480,7 @@ func main() {
 		var sender mail.Sender = mail.Discard{} // portal users have no address, so nothing is mailed
 		if !resolvedAccounts.Portal {
 			sender = mail.NewSMTP(resolvedAccounts.SMTPHost, resolvedAccounts.SMTPPort, resolvedAccounts.SMTPUsername,
-				resolvedAccounts.SMTPPassword, resolvedAccounts.SMTPFrom, resolvedAccounts.SMTPStartTLS)
+				resolvedAccounts.SMTPPassword, mail.WithDisplayName(resolvedAccounts.SMTPFrom, resolvedAccounts.InstanceName), resolvedAccounts.SMTPStartTLS)
 		}
 		accountMailer = sender
 		usersService = users.NewService(maintStore, sender, resolvedAccounts, time.Now, slog.Default())
@@ -557,6 +559,9 @@ func main() {
 	}
 	slog.Info("alerts", "component", "startup", "delivery", resolvedAlerts.Delivery, "enabled", alertsSvc != nil)
 	alertSender, err := newAlertSender(alertDelivery, accountMailer, maintStore, resolvedAccounts.PublicURL, os.Getenv("BEACON_PUSH_CREDENTIALS"))
+	if alertSender != nil {
+		alertSender.SetInstanceName(resolvedAccounts.InstanceName)
+	}
 	if err != nil {
 		slog.Error("invalid alert delivery", "component", "startup", "error", err)
 		os.Exit(1)

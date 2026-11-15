@@ -265,6 +265,14 @@ func (s *Service) link(view, token string) string {
 
 func (s *Service) host() string { return s.cfg.PublicURL.Host }
 
+// name is the instance name mail carries; "Beacon" when none was set.
+func (s *Service) name() string {
+	if s.cfg.InstanceName == "" {
+		return "Beacon"
+	}
+	return s.cfg.InstanceName
+}
+
 const (
 	mailQueueSize   = 64
 	mailSendTimeout = 30 * time.Second
@@ -378,7 +386,7 @@ func (s *Service) sendVerify(ctx context.Context, u User, username, hash string)
 	if err != nil {
 		return err
 	}
-	subject, text := verifyMailText(s.host(), username, s.link("verify", tok))
+	subject, text := verifyMailText(s.name(), s.host(), username, s.link("verify", tok))
 	s.enqueue(u.ID, "verify", u.Email, subject, text)
 	return nil
 }
@@ -484,7 +492,7 @@ func (s *Service) Verify(ctx context.Context, token string) error {
 	s.log.Info("email changed", "user_id", uid)
 	// The previous mailbox is told, so a takeover cannot go unnoticed there.
 	if oldEmail != "" && oldEmail != newEmail {
-		subject, text := emailChangedMailText(s.host())
+		subject, text := emailChangedMailText(s.name(), s.host())
 		s.enqueue(uid, "email_changed", oldEmail, subject, text)
 	}
 	return nil
@@ -745,7 +753,7 @@ func (s *Service) RequestReset(ctx context.Context, email string) error {
 		return err
 	}
 	s.log.Info("password reset requested", "user_id", u.ID)
-	subject, text := resetMailText(s.host(), s.link("reset", tok))
+	subject, text := resetMailText(s.name(), s.host(), s.link("reset", tok))
 	s.enqueue(u.ID, "reset", u.Email, subject, text)
 	return nil
 }
@@ -797,7 +805,7 @@ func (s *Service) ConfirmReset(ctx context.Context, token, newPassword string) e
 	s.throttle.clear(loginKey(u.Username))
 	s.throttle.clear(loginKey(u.Email))
 	s.log.Info("password reset completed", "user_id", uid)
-	subject, text := passwordChangedMailText(s.host())
+	subject, text := passwordChangedMailText(s.name(), s.host())
 	s.enqueue(uid, "password_changed", u.Email, subject, text)
 	return nil
 }
@@ -823,7 +831,7 @@ func (s *Service) ChangePassword(ctx context.Context, u User, keepSession uuid.U
 		return err
 	}
 	s.log.Info("password changed", "user_id", u.ID)
-	subject, text := passwordChangedMailText(s.host())
+	subject, text := passwordChangedMailText(s.name(), s.host())
 	s.enqueue(u.ID, "password_changed", u.Email, subject, text)
 	return nil
 }
@@ -860,7 +868,7 @@ func (s *Service) ChangeEmail(ctx context.Context, u User, current, newEmail str
 	}
 	s.log.Info("email change requested", "user_id", u.ID)
 	if !owned {
-		subject, text := emailChangeMailText(s.host(), s.link("verify", tok))
+		subject, text := emailChangeMailText(s.name(), s.host(), s.link("verify", tok))
 		s.enqueue(u.ID, "email_change", addr, subject, text)
 	}
 	return nil
@@ -963,7 +971,7 @@ func (s *Service) ExchangeAppCode(ctx context.Context, code, codeVerifier string
 	}
 	s.log.Info("app sign-in", "user_id", uid, "session_id", sess.ID)
 	if u.Email != "" {
-		subject, text := appSignInMailText(s.host(), label, s.now())
+		subject, text := appSignInMailText(s.name(), s.host(), label, s.now())
 		s.enqueue(uid, "app_sign_in", u.Email, subject, text)
 	}
 	return tok, sess, u, nil

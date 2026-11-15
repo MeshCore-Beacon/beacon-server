@@ -86,6 +86,7 @@ type Sender struct {
 	mail     mailer.Sender
 	push     PushSender
 	atlasURL string
+	name     string // the instance name for mail subjects
 	now      func() time.Time
 }
 
@@ -94,7 +95,7 @@ func NewSender(store SendStore, delivery string, mail mailer.Sender, push PushSe
 	if now == nil {
 		now = time.Now
 	}
-	s := &Sender{store: store, delivery: delivery, mail: mail, push: push, now: now}
+	s := &Sender{store: store, delivery: delivery, mail: mail, push: push, name: "Beacon", now: now}
 	if publicURL != nil {
 		u := *publicURL
 		u.Path, u.RawQuery = "/", "tab=Atlas"
@@ -167,7 +168,7 @@ func (s *Sender) sendEmail(ctx context.Context, rows []OutboxRow) (delivered, re
 		if sent >= MaxMailsPerPass || ctx.Err() != nil {
 			continue
 		}
-		subject, text := ComposeEmail(g.notices, s.atlasURL)
+		subject, text := ComposeEmail(s.name, g.notices, s.atlasURL)
 		sctx, cancel := context.WithTimeout(ctx, MailSendTimeout)
 		err := s.mail.Send(sctx, mailer.Message{To: g.first.Email, Subject: subject, Text: text})
 		cancel()
@@ -180,6 +181,13 @@ func (s *Sender) sendEmail(ctx context.Context, rows []OutboxRow) (delivered, re
 		delivered = append(delivered, g.ids...)
 	}
 	return delivered, retry
+}
+
+// SetInstanceName sets the name alert mail subjects carry; blank keeps "Beacon".
+func (s *Sender) SetInstanceName(name string) {
+	if name != "" {
+		s.name = name
+	}
 }
 
 // sendPush sends each notice to each of the user's live devices that has not got it yet, and records every device

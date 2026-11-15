@@ -220,3 +220,40 @@ func TestSMTPHonoursContext(t *testing.T) {
 		t.Fatalf("send ignored the context: %v", time.Since(start))
 	}
 }
+
+func TestWithDisplayName(t *testing.T) {
+	cases := []struct{ from, name, want string }{
+		{"Beacon <no-reply@x.org>", "Mesh", "Beacon <no-reply@x.org>"},
+		{"no-reply@x.org", "Beacon - Ottawa", "\"Beacon - Ottawa\" <no-reply@x.org>"},
+		{"<no-reply@x.org>", "Mesh", "\"Mesh\" <no-reply@x.org>"},
+		{"no-reply@x.org", "A \"q\" (b), c", "\"A \\\"q\\\" (b), c\" <no-reply@x.org>"},
+		{"no-reply@x.org", "Réseau", "=?utf-8?q?R=C3=A9seau?= <no-reply@x.org>"},
+		{"not an address", "Mesh", "not an address"},
+	}
+	for _, c := range cases {
+		if got := WithDisplayName(c.from, c.name); got != c.want {
+			t.Errorf("WithDisplayName(%q,%q) = %q, want %q", c.from, c.name, got, c.want)
+		}
+	}
+	got := WithDisplayName("no-reply@x.org", "Mesh\r\nBcc: evil@x.org")
+	if strings.ContainsAny(got, "\r\n") {
+		t.Errorf("line break in %q", got)
+	}
+}
+
+func TestSMTPAccentedNameAndSubject(t *testing.T) {
+	port, done := fakeSMTP(t, false)
+	s := NewSMTP("127.0.0.1", port, "", "", WithDisplayName("no-reply@example.org", "Réseau Mesh"), false)
+	if err := s.Send(context.Background(), Message{To: "u@example.net", Subject: "Confirm your email address for Réseau Mesh", Text: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	got := <-done
+	for _, want := range []string{
+		"From: =?utf-8?q?R=C3=A9seau_Mesh?= <no-reply@example.org>\r\n",
+		"Subject: =?utf-8?q?Confirm_your_email_address_for_R=C3=A9seau_Mesh?=\r\n",
+	} {
+		if !strings.Contains(got.data, want) {
+			t.Errorf("lacks %q:\n%s", want, got.data)
+		}
+	}
+}
