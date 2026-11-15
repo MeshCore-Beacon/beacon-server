@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -202,8 +203,41 @@ type OwnerRow struct {
 	LatestTS   *time.Time
 	Excluded   bool
 	// Requested: the observer is assigned the target as a requested one. ClaimedRequested: its claim names it as
-	// one. PWOK: the claim accepts requests and has a free seat or already holds this target.
+	// one. PWOK: the entry may be offered (OfferSeats).
 	Requested, ClaimedRequested, PWOK bool
+	// The claim's own numbers, the same on every row.
+	AcceptsRequests bool
+	RequestSlots    int
+}
+
+// OfferSeats sets PWOK on the requested assignments the device can take in this answer. The firmware drops the
+// requested targets an answer leaves out before it adds new ones, so its free seats are the claim's request_slots
+// plus the held targets no longer assigned to it: the free-plus-held count the election gave seats from.
+func OfferSeats(rows []OwnerRow) {
+	free := 0
+	var added []int
+	for i := range rows {
+		r := &rows[i]
+		r.PWOK = r.AcceptsRequests && r.Requested && r.ClaimedRequested
+		if i == 0 {
+			free = min(max(r.RequestSlots, 0), MaxRequestSlots)
+		}
+		switch {
+		case r.ClaimedRequested && !r.Requested:
+			free++
+		case r.Requested && !r.ClaimedRequested && r.AcceptsRequests:
+			added = append(added, i)
+		}
+	}
+	// Pollers first, should the seats run short.
+	sort.SliceStable(added, func(a, b int) bool { return rows[added[a]].Rank < rows[added[b]].Rank })
+	for _, i := range added {
+		if free == 0 {
+			break
+		}
+		rows[i].PWOK = true
+		free--
+	}
 }
 
 type OwnerEntry struct {

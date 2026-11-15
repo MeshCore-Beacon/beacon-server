@@ -272,3 +272,27 @@ func TestOwnersApprovalReadErrorFailsAnswerPostgres(t *testing.T) {
 		t.Fatal("a successful read must still offer the target")
 	}
 }
+
+// A full device holding a younger target is handed the older one that took its seat, in the same answer.
+func TestPreemptionOffersReplacementAtZeroFreeSlotsPostgres(t *testing.T) {
+	w, o, old, _, alice, _ := seatWorld(t)
+	if err := w.svc.ElectTarget(w.ctx, pollKey(0xA1)); err != nil {
+		t.Fatal(err)
+	}
+	w.now = w.now.Add(time.Minute)
+	w.claim(o, 0, reqNode(pollKey(0xA1), true, "ok"))
+	if err := w.svc.ElectTarget(w.ctx, pollKey(0xA2)); err != nil {
+		t.Fatal(err)
+	}
+	a, err := w.svc.Owners(w.ctx, polling.Caller{Observer: o.pub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, ok := a.Nodes[fmt.Sprintf("%x", pollKey(0xA2))]
+	if len(a.Nodes) != 1 || !ok || e.PW == nil {
+		t.Fatalf("older target status=%s assignments=%v but owners=%+v", w.status(alice.ID, old.ID).Status, assignedTargets(t, w), a.Nodes)
+	}
+	if got := w.opens(o, 0xA2, e); got != "old" {
+		t.Fatalf("replacement carries %q", got)
+	}
+}

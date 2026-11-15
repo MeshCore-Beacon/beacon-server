@@ -6,6 +6,7 @@ package polling
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -230,5 +231,36 @@ func TestOwnersAnswerFitsFirmwareCap(t *testing.T) {
 	}
 	if len(b) >= 6144 {
 		t.Fatalf("answer is %d bytes", len(b))
+	}
+}
+
+func TestOfferSeatsCountsWithdrawnTargetsAsFree(t *testing.T) {
+	key := func(b byte) []byte { return []byte{b} }
+	rows := []OwnerRow{
+		{Target: key(1), Rank: 0, Requested: true, ClaimedRequested: true}, // held and still assigned
+		{Target: key(2), Rank: -1, ClaimedRequested: true},                 // held, withdrawn: its seat is free
+		{Target: key(3), Rank: 1, Requested: true},                         // new standby
+		{Target: key(4), Rank: 0, Requested: true},                         // new poller
+		{Target: key(5), Rank: 0},                                          // local
+	}
+	for i := range rows {
+		rows[i].AcceptsRequests = true
+	}
+	OfferSeats(rows)
+	got := []bool{rows[0].PWOK, rows[1].PWOK, rows[2].PWOK, rows[3].PWOK, rows[4].PWOK}
+	if want := []bool{true, false, false, true, false}; !slices.Equal(got, want) {
+		t.Fatalf("zero free slots: %v, want %v", got, want)
+	}
+	for i := range rows {
+		rows[i].RequestSlots = 1
+	}
+	if OfferSeats(rows); !rows[2].PWOK || !rows[3].PWOK {
+		t.Fatalf("one free slot and one withdrawn: %+v", rows)
+	}
+	for i := range rows {
+		rows[i].AcceptsRequests = false
+	}
+	if OfferSeats(rows); rows[0].PWOK || rows[3].PWOK {
+		t.Fatal("a claim that takes no requests is offered none")
 	}
 }

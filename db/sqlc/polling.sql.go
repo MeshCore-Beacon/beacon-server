@@ -1191,7 +1191,7 @@ SELECT m.target_public_key::bytea AS target_public_key, COALESCE(a.rank, -1)::in
         ORDER BY r.sampled_at DESC LIMIT 1)::timestamptz AS latest_ts,
        COALESCE(a.requested, false)::boolean AS requested,
        COALESCE(pc.requested, false)::boolean AS claimed_requested,
-       (cl.accepts_requests AND (cl.request_slots > 0 OR COALESCE(pc.requested, false)))::boolean AS pw_ok
+       cl.accepts_requests, cl.request_slots::int AS request_slots
 FROM mine m
 JOIN polling_claims cl ON cl.observer_public_key = $1
 LEFT JOIN polling_candidates pc ON pc.observer_public_key = cl.observer_public_key AND pc.target_public_key = m.target_public_key
@@ -1212,14 +1212,15 @@ type PollingOwnerRowsRow struct {
 	LatestTs         pgtype.Timestamptz `json:"latest_ts"`
 	Requested        bool               `json:"requested"`
 	ClaimedRequested bool               `json:"claimed_requested"`
-	PwOk             bool               `json:"pw_ok"`
+	AcceptsRequests  bool               `json:"accepts_requests"`
+	RequestSlots     int32              `json:"request_slots"`
 }
 
 // assigned counts the target's assignment rows. latest_ts only trusts readings from an assigned observer with
 // advert evidence, so an observer Beacon has never heard the repeater through cannot stand others down. A target the
 // observer was handed as a requested one is listed even before its claim names it (that is how it learns of it);
-// claimed_requested is true when the claim names it as requested. pw_ok: the claim accepts requests and has a seat
-// free or already holds this target.
+// claimed_requested is true when the claim names it as requested. accepts_requests and request_slots are the
+// claim's, for polling.OfferSeats.
 func (q *Queries) PollingOwnerRows(ctx context.Context, arg PollingOwnerRowsParams) ([]PollingOwnerRowsRow, error) {
 	rows, err := q.db.Query(ctx, pollingOwnerRows, arg.ObserverPublicKey, arg.ReceivedAt)
 	if err != nil {
@@ -1236,7 +1237,8 @@ func (q *Queries) PollingOwnerRows(ctx context.Context, arg PollingOwnerRowsPara
 			&i.LatestTs,
 			&i.Requested,
 			&i.ClaimedRequested,
-			&i.PwOk,
+			&i.AcceptsRequests,
+			&i.RequestSlots,
 		); err != nil {
 			return nil, err
 		}

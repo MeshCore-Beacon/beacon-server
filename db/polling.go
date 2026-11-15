@@ -503,7 +503,8 @@ func (s *Store) PollingOwnerRows(ctx context.Context, observer []byte, receivedA
 	out := make([]polling.OwnerRow, 0, len(rows))
 	for _, r := range rows {
 		row := polling.OwnerRow{Target: r.TargetPublicKey, Rank: int(r.Rank), Assigned: int(r.Assigned),
-			Requested: r.Requested, ClaimedRequested: r.ClaimedRequested, PWOK: r.PwOk}
+			Requested: r.Requested, ClaimedRequested: r.ClaimedRequested,
+			AcceptsRequests: r.AcceptsRequests, RequestSlots: int(r.RequestSlots)}
 		if r.LatestTs.Valid {
 			t := r.LatestTs.Time
 			row.LatestTS = &t

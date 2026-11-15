@@ -423,14 +423,17 @@ func TestPollingOwnerRowsRequestedPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows, err := s.PollingOwnerRows(ctx, o.pub, w.now.Add(-time.Hour))
-	if err != nil || len(rows) != 1 || !rows[0].Requested || rows[0].ClaimedRequested || !rows[0].PWOK || rows[0].Rank != 0 {
+	if err != nil || len(rows) != 1 || !rows[0].Requested || rows[0].ClaimedRequested || !rows[0].AcceptsRequests || rows[0].RequestSlots != 2 || rows[0].Rank != 0 {
 		t.Fatalf("%+v %v", rows, err)
 	}
 	// Once it holds the target its claim has no free seat left, and the envelope still goes out.
 	w.now = w.now.Add(time.Minute)
 	w.claim(o, 0, reqNode(pollKey(0xA1), true, "ok"))
-	if rows, _ = s.PollingOwnerRows(ctx, o.pub, w.now.Add(-time.Hour)); len(rows) != 1 || !rows[0].ClaimedRequested || !rows[0].PWOK || !rows[0].Requested {
+	if rows, _ = s.PollingOwnerRows(ctx, o.pub, w.now.Add(-time.Hour)); len(rows) != 1 || !rows[0].ClaimedRequested || rows[0].RequestSlots != 0 || !rows[0].Requested {
 		t.Fatalf("%+v", rows)
+	}
+	if e, ok := w.owners(o, 0xA1); !ok || e.PW == nil {
+		t.Fatalf("held target not offered: %+v", e)
 	}
 	// Full and not holding it: it loses the seat at the next election, and the target leaves its answer.
 	w.now = w.now.Add(time.Minute)

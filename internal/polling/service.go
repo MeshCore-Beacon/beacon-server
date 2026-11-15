@@ -280,6 +280,7 @@ func (s *Service) Owners(ctx context.Context, c Caller) (OwnersAnswer, error) {
 			rows[i].Rank = rows[i].Assigned
 		}
 	}
+	OfferSeats(rows)
 	// Approval can be withdrawn between elections; a password goes only to an observer approved right now.
 	if s.requestsNeedApproval() {
 		_, approved, err := s.store.PollingObserverFlags(ctx, c.Observer)
