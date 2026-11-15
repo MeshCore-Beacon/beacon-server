@@ -77,6 +77,16 @@ type TargetState struct {
 	UserRequests int
 	// Deleted lists requests removed from Requests, for the store to delete.
 	Deleted []uuid.UUID
+
+	// What a claim's report is judged against, loaded under the target's lock. Holders maps each observer handed the
+	// target as a requested one to its rank; AdminStops are the observers already recorded; OtherSeen is when each
+	// last showed a state other than login_failed.
+	Holders    map[string]int
+	AdminStops map[string]bool
+	OtherSeen  map[string]time.Time
+	// NewAdminStops and TouchedOther are what ApplyReport added, for the store to write.
+	NewAdminStops [][]byte
+	TouchedOther  map[string]time.Time
 }
 
 func (t *TargetState) find(id uuid.UUID) *Request {
@@ -315,4 +325,47 @@ func byAge(rs []Request) {
 		}
 		return rs[i].ID.String() < rs[j].ID.String()
 	})
+}
+
+// ApplyReport applies one claim's report of a requested target's state. Only an observer that was handed the target
+// is believed, and only the poller on login_failed: anyone else's report is ignored (false). admin_stop from an
+// observer already recorded changes nothing, so a repeat cannot strike the next password in use, which that
+// observer never tried. Any other state ends the login_failed grace for that observer.
+func (t *TargetState) ApplyReport(observer []byte, state string, now time.Time) bool {
+	rank, held := t.Holders[string(observer)]
+	if !held {
+		return false
+	}
+	switch state {
+	case "admin_stop":
+		if t.AdminStops[string(observer)] {
+			return true
+		}
+		if t.AdminStops == nil {
+			t.AdminStops = map[string]bool{}
+		}
+		t.AdminStops[string(observer)] = true
+		t.NewAdminStops = append(t.NewAdminStops, append([]byte(nil), observer...))
+		t.AdminStop(now)
+	case "login_failed":
+		if rank != 0 {
+			return false
+		}
+		var seen *time.Time
+		if at, ok := t.OtherSeen[string(observer)]; ok {
+			seen = &at
+		}
+		if LoginFailedCounts(now, t.VerChangedAt, seen) {
+			t.LoginFailed(now)
+		}
+	default:
+		if t.OtherSeen == nil {
+			t.OtherSeen = map[string]time.Time{}
+		}
+		if t.TouchedOther == nil {
+			t.TouchedOther = map[string]time.Time{}
+		}
+		t.OtherSeen[string(observer)], t.TouchedOther[string(observer)] = now, now
+	}
+	return true
 }

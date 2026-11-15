@@ -540,11 +540,15 @@ type Querier interface {
 	// seats_elsewhere counts this observer's requested assignments to other targets whose oldest request is older than
 	// this target's, so seats go to the oldest requests first.
 	ListRequestCandidates(ctx context.Context, arg ListRequestCandidatesParams) ([]ListRequestCandidatesRow, error)
+	// The observers handed this target as a requested one, with their rank (0 polls).
+	ListRequestedAssignees(ctx context.Context, targetPublicKey []byte) ([]ListRequestedAssigneesRow, error)
 	// Leading index equalities and the time/ID boundary bound both custom and generic plans.
 	// Full-byte equality is required even when the compact digest matches. TRACE path bytes
 	// carry readings; unclassified legacy observations cannot be safely called ordinary paths.
 	ListRouteEvidence(ctx context.Context, arg ListRouteEvidenceParams) ([]ListRouteEvidenceRow, error)
 	ListScopeCatalogues(ctx context.Context) ([]MeshmapperScopeCatalogue, error)
+	ListTargetAdminStops(ctx context.Context, targetPublicKey []byte) ([][]byte, error)
+	ListTargetOtherStates(ctx context.Context, targetPublicKey []byte) ([]ListTargetOtherStatesRow, error)
 	ListTargetRequests(ctx context.Context, targetPublicKey []byte) ([]ListTargetRequestsRow, error)
 	// ============================================================
 	// TRACES
@@ -616,7 +620,6 @@ type Querier interface {
 	PollingClaimReceivedAt(ctx context.Context, observerPublicKey []byte) (pgtype.Timestamptz, error)
 	PollingElectionUnlock(ctx context.Context) error
 	PollingObserverFlags(ctx context.Context, observerPublicKey []byte) (PollingObserverFlagsRow, error)
-	PollingOtherStateSeen(ctx context.Context, arg PollingOtherStateSeenParams) (pgtype.Timestamptz, error)
 	// assigned counts the target's assignment rows. latest_ts only trusts readings from an assigned observer with
 	// advert evidence, so an observer Beacon has never heard the repeater through cannot stand others down. A target the
 	// observer was handed as a requested one is listed even before its claim names it (that is how it learns of it);

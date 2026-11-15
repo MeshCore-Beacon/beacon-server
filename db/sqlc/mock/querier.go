@@ -3332,6 +3332,21 @@ func (mr *MockQuerierMockRecorder) ListRequestCandidates(ctx, arg any) *gomock.C
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListRequestCandidates", reflect.TypeOf((*MockQuerier)(nil).ListRequestCandidates), ctx, arg)
 }
 
+// ListRequestedAssignees mocks base method.
+func (m *MockQuerier) ListRequestedAssignees(ctx context.Context, targetPublicKey []byte) ([]db.ListRequestedAssigneesRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListRequestedAssignees", ctx, targetPublicKey)
+	ret0, _ := ret[0].([]db.ListRequestedAssigneesRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListRequestedAssignees indicates an expected call of ListRequestedAssignees.
+func (mr *MockQuerierMockRecorder) ListRequestedAssignees(ctx, targetPublicKey any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListRequestedAssignees", reflect.TypeOf((*MockQuerier)(nil).ListRequestedAssignees), ctx, targetPublicKey)
+}
+
 // ListRouteEvidence mocks base method.
 func (m *MockQuerier) ListRouteEvidence(ctx context.Context, arg db.ListRouteEvidenceParams) ([]db.ListRouteEvidenceRow, error) {
 	m.ctrl.T.Helper()
@@ -3360,6 +3375,36 @@ func (m *MockQuerier) ListScopeCatalogues(ctx context.Context) ([]db.MeshmapperS
 func (mr *MockQuerierMockRecorder) ListScopeCatalogues(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListScopeCatalogues", reflect.TypeOf((*MockQuerier)(nil).ListScopeCatalogues), ctx)
+}
+
+// ListTargetAdminStops mocks base method.
+func (m *MockQuerier) ListTargetAdminStops(ctx context.Context, targetPublicKey []byte) ([][]byte, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListTargetAdminStops", ctx, targetPublicKey)
+	ret0, _ := ret[0].([][]byte)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListTargetAdminStops indicates an expected call of ListTargetAdminStops.
+func (mr *MockQuerierMockRecorder) ListTargetAdminStops(ctx, targetPublicKey any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListTargetAdminStops", reflect.TypeOf((*MockQuerier)(nil).ListTargetAdminStops), ctx, targetPublicKey)
+}
+
+// ListTargetOtherStates mocks base method.
+func (m *MockQuerier) ListTargetOtherStates(ctx context.Context, targetPublicKey []byte) ([]db.ListTargetOtherStatesRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListTargetOtherStates", ctx, targetPublicKey)
+	ret0, _ := ret[0].([]db.ListTargetOtherStatesRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListTargetOtherStates indicates an expected call of ListTargetOtherStates.
+func (mr *MockQuerierMockRecorder) ListTargetOtherStates(ctx, targetPublicKey any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListTargetOtherStates", reflect.TypeOf((*MockQuerier)(nil).ListTargetOtherStates), ctx, targetPublicKey)
 }
 
 // ListTargetRequests mocks base method.
@@ -3941,21 +3986,6 @@ func (m *MockQuerier) PollingObserverFlags(ctx context.Context, observerPublicKe
 func (mr *MockQuerierMockRecorder) PollingObserverFlags(ctx, observerPublicKey any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PollingObserverFlags", reflect.TypeOf((*MockQuerier)(nil).PollingObserverFlags), ctx, observerPublicKey)
-}
-
-// PollingOtherStateSeen mocks base method.
-func (m *MockQuerier) PollingOtherStateSeen(ctx context.Context, arg db.PollingOtherStateSeenParams) (pgtype.Timestamptz, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PollingOtherStateSeen", ctx, arg)
-	ret0, _ := ret[0].(pgtype.Timestamptz)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// PollingOtherStateSeen indicates an expected call of PollingOtherStateSeen.
-func (mr *MockQuerierMockRecorder) PollingOtherStateSeen(ctx, arg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PollingOtherStateSeen", reflect.TypeOf((*MockQuerier)(nil).PollingOtherStateSeen), ctx, arg)
 }
 
 // PollingOwnerRows mocks base method.

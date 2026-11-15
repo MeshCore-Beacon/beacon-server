@@ -66,6 +66,9 @@ func newReqWorld(t *testing.T, mode string) *reqWorld {
 	if w.sealer, err = polling.NewSealer(bytes.Repeat([]byte{9}, 32)); err != nil {
 		t.Fatal(err)
 	}
+	if mode == "" {
+		mode = config.RequestObserversAll
+	}
 	cfg := config.ResolvedPolling{Enabled: true, RequestObservers: mode}
 	w.svc = polling.NewService(s, cfg, func() time.Time { return w.now }, slog.New(slog.DiscardHandler))
 	w.svc.SetRequests(s, w.sealer)
@@ -427,5 +430,66 @@ func TestPollingOwnerRowsRequestedPostgres(t *testing.T) {
 	w.claim(o, 0)
 	if rows, _ = s.PollingOwnerRows(ctx, o.pub, w.now.Add(-time.Hour)); len(rows) != 0 {
 		t.Fatalf("%+v", rows)
+	}
+}
+
+func TestRequestedReportsFromAnUnassignedObserverAreIgnoredPostgres(t *testing.T) {
+	w := newReqWorld(t, "")
+	ctx, s, pool := w.ctx, w.s, w.pool
+	alice := newUser(t, ctx, s, "alice")
+	holder, stranger := newReqDevice(1), newReqDevice(2)
+	node := w.node(0xA1)
+	pollHearAdvert(t, ctx, pool, pollKey(0xA1), pollObserver(t, ctx, s, holder.pub), w.now.Add(-time.Hour), 5)
+	pollObserver(t, ctx, s, stranger.pub)
+	w.claim(holder, 3)
+	r, err := w.reqs.Create(ctx, alice.ID, node, []byte("alicepw"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.now = w.now.Add(time.Hour)
+	// The stranger was never handed the repeater (no advert evidence) but claims an admin answer for it.
+	w.claim(stranger, 3, reqNode(pollKey(0xA1), true, "admin_stop"))
+	w.claim(stranger, 3, reqNode(pollKey(0xA1), true, "login_failed"))
+	var ct []byte
+	if err := pool.QueryRow(ctx, `SELECT password_ct FROM telemetry_requests WHERE id = $1`, r.ID).Scan(&ct); err != nil || ct == nil {
+		t.Fatalf("password gone: %v", err)
+	}
+	if got := w.status(alice.ID, r.ID); got.Status != polling.StatusActive || !got.HasPassword {
+		t.Fatalf("request touched: %+v", got)
+	}
+	if stops, _ := s.ListPollingAdminStops(ctx); len(stops) != 0 {
+		t.Fatalf("stop recorded: %+v", stops)
+	}
+	// The assigned observer's own report still counts.
+	w.now = w.now.Add(time.Minute)
+	w.claim(holder, 3, reqNode(pollKey(0xA1), true, "admin_stop"))
+	if got := w.status(alice.ID, r.ID); got.Status != polling.StatusAdminStopped || got.HasPassword {
+		t.Fatalf("holder's report: %+v", got)
+	}
+}
+
+func TestRequestedPasswordOnlyGoesToAnObserverApprovedNowPostgres(t *testing.T) {
+	w := newReqWorld(t, config.RequestObserversApproved)
+	ctx, s := w.ctx, w.s
+	alice := newUser(t, ctx, s, "alice")
+	o := newReqDevice(1)
+	node := w.node(0xA1)
+	pollHearAdvert(t, ctx, w.pool, pollKey(0xA1), pollObserver(t, ctx, s, o.pub), w.now.Add(-time.Hour), 5)
+	w.claim(o, 3)
+	if err := s.SetPollingObserver(ctx, o.pub, false, true, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.reqs.Create(ctx, alice.ID, node, []byte("pw")); err != nil {
+		t.Fatal(err)
+	}
+	if e, ok := w.owners(o, 0xA1); !ok || e.PW == nil {
+		t.Fatalf("approved observer: %+v", e)
+	}
+	// Approval withdrawn: nothing goes out even before the next election.
+	if err := s.SetPollingObserver(ctx, o.pub, false, false, ""); err != nil {
+		t.Fatal(err)
+	}
+	if e, ok := w.owners(o, 0xA1); ok {
+		t.Fatalf("a password went to an observer no longer approved: %+v", e)
 	}
 }

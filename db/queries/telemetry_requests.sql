@@ -92,8 +92,15 @@ SELECT EXISTS (SELECT 1 FROM polling_targets WHERE target_public_key = $1);
 INSERT INTO polling_other_states (target_public_key, observer_public_key, seen_at) VALUES ($1, $2, $3)
 ON CONFLICT (target_public_key, observer_public_key) DO UPDATE SET seen_at = EXCLUDED.seen_at;
 
--- name: PollingOtherStateSeen :one
-SELECT seen_at FROM polling_other_states WHERE target_public_key = $1 AND observer_public_key = $2;
+-- name: ListRequestedAssignees :many
+-- The observers handed this target as a requested one, with their rank (0 polls).
+SELECT observer_public_key, rank FROM polling_assignments WHERE target_public_key = $1 AND requested;
+
+-- name: ListTargetAdminStops :many
+SELECT observer_public_key FROM polling_admin_stops WHERE target_public_key = $1;
+
+-- name: ListTargetOtherStates :many
+SELECT observer_public_key, seen_at FROM polling_other_states WHERE target_public_key = $1;
 
 -- name: OfflineRequestTargets :many
 -- Requested targets whose node no observer has heard since cutoff and whose newest enabling is older than cutoff.

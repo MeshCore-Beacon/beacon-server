@@ -67,7 +67,7 @@ func (m *memRequests) MutateRequestTarget(_ context.Context, target []byte, user
 	for _, id := range cp.Deleted {
 		delete(m.owners, id)
 	}
-	cp.Deleted = nil
+	cp.Deleted, cp.NewAdminStops, cp.TouchedOther = nil, nil, nil
 	return nil
 }
 

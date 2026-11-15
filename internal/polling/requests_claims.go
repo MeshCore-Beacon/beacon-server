@@ -19,20 +19,16 @@ type RequestedPassword struct {
 	CT, Nonce []byte
 }
 
-// RequestedStore is what requested targets need besides the election: the password in use, the claim-driven state
-// changes and the poller lookup.
+// RequestedStore is what requested targets need besides the election: the password in use and the claim-driven
+// state changes, which run through MutateRequestTarget so they are judged under the target's lock.
 type RequestedStore interface {
 	RequestedPasswords(ctx context.Context, targets [][]byte) (map[string]RequestedPassword, error)
 	MutateRequestTarget(ctx context.Context, target []byte, userID uuid.UUID, fn func(*TargetState) error) error
-	// AddAdminStop reports false when the observer was already recorded for the target.
-	AddAdminStop(ctx context.Context, target, observer []byte, at time.Time) (bool, error)
-	TouchOtherState(ctx context.Context, target, observer []byte, at time.Time) error
-	OtherStateSeen(ctx context.Context, target, observer []byte) (*time.Time, error)
-	CurrentPoller(ctx context.Context, target []byte) ([]byte, error)
 }
 
 // handleRequestedStates applies what a stored claim says about the requested targets it holds: the poller's
-// login_failed, any observer's admin_stop, and any other state (which ends the grace after a password change).
+// login_failed, an admin_stop from any observer handed the target, and any other state (which ends the login_failed
+// grace). A report from an observer that was not handed the target is ignored and only counted in a debug line.
 // Nothing here can fail the claim; a failure is logged and the next claim repeats the report.
 func (s *Service) handleRequestedStates(ctx context.Context, c Claim, now time.Time) {
 	if s.reqs == nil {
@@ -43,48 +39,18 @@ func (s *Service) handleRequestedStates(ctx context.Context, c Claim, now time.T
 		if !n.Requested {
 			continue
 		}
-		var err error
-		switch n.State {
-		case "admin_stop":
-			err = s.requestedAdminStop(ctx, c.Observer, n.Target, now)
-		case "login_failed":
-			err = s.requestedLoginFailed(ctx, c.Observer, n.Target, now)
-		default:
-			err = s.reqs.TouchOtherState(ctx, n.Target, c.Observer, now)
+		accepted := false
+		err := s.reqs.MutateRequestTarget(ctx, n.Target, uuid.Nil, func(st *TargetState) error {
+			accepted = st.ApplyReport(c.Observer, n.State, now)
+			return nil
+		})
+		switch {
+		case err != nil:
+			s.log.Warn("requested target state", "observer", obs, "target", short(n.Target), "err", err)
+		case !accepted:
+			s.log.Debug("requested target report ignored", "observer", obs, "target", short(n.Target))
 		}
-		if err != nil {
-			s.log.Warn("requested target state", "observer", obs, "target", short(n.Target), "state", n.State, "err", err)
-		}
 	}
-}
-
-func (s *Service) requestedAdminStop(ctx context.Context, observer, target []byte, now time.Time) error {
-	added, err := s.reqs.AddAdminStop(ctx, target, observer, now)
-	// A repeat report must not strike the next password in use, which this observer never tried.
-	if err != nil || !added {
-		return err
-	}
-	return s.reqs.MutateRequestTarget(ctx, target, uuid.Nil, func(st *TargetState) error {
-		st.AdminStop(now)
-		return nil
-	})
-}
-
-func (s *Service) requestedLoginFailed(ctx context.Context, observer, target []byte, now time.Time) error {
-	cur, err := s.reqs.CurrentPoller(ctx, target)
-	if err != nil || string(cur) != string(observer) {
-		return err // only the poller's report counts
-	}
-	seen, err := s.reqs.OtherStateSeen(ctx, target, observer)
-	if err != nil {
-		return err
-	}
-	return s.reqs.MutateRequestTarget(ctx, target, uuid.Nil, func(st *TargetState) error {
-		if LoginFailedCounts(now, st.VerChangedAt, seen) {
-			st.LoginFailed(now)
-		}
-		return nil
-	})
 }
 
 // addEnvelopes seals the password in use to each observer that is assigned a requested target. A fresh envelope is

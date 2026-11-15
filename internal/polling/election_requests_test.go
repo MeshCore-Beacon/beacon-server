@@ -9,6 +9,8 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/config"
 )
 
+var allObservers = config.ResolvedPolling{RequestObservers: config.RequestObserversAll}
+
 func rcand(key byte, snr float64) Candidate {
 	return Candidate{Observer: []byte{key}, EvidenceSNR: f64(snr), EvidenceCount: 3, RequestSlots: 2}
 }
@@ -67,12 +69,12 @@ func TestDecideLocalClaimantKeepsTheTarget(t *testing.T) {
 	held := rcand('R', 9)
 	held.Requested = true
 	in := ElectionInput{Cands: []Candidate{local, held}, Requested: true, RequestCands: []Candidate{held, rcand('Q', 8)}}
-	el := Decide(in, config.ResolvedPolling{})
+	el := Decide(in, allObservers)
 	if string(order(el.Assignments)) != "L" || el.Assignments[0].Requested {
 		t.Fatalf("a local claimant must keep it as a local target: %+v", el.Assignments)
 	}
 	in.Cands = []Candidate{held}
-	el = Decide(in, config.ResolvedPolling{})
+	el = Decide(in, allObservers)
 	if string(order(el.Assignments)) != "RQ" && string(order(el.Assignments)) != "QR" {
 		t.Fatalf("no local claimant: %+v", el.Assignments)
 	}
@@ -83,7 +85,7 @@ func TestDecideLocalClaimantKeepsTheTarget(t *testing.T) {
 
 func TestDecideDropsRequestedClaimsOfAnUnrequestedTarget(t *testing.T) {
 	stale := Candidate{Observer: []byte{'S'}, Requested: true, EvidenceSNR: f64(5), EvidenceCount: 2}
-	if el := Decide(ElectionInput{Cands: []Candidate{stale}}, config.ResolvedPolling{}); len(el.Assignments) != 0 {
+	if el := Decide(ElectionInput{Cands: []Candidate{stale}}, allObservers); len(el.Assignments) != 0 {
 		t.Fatalf("%+v", el.Assignments)
 	}
 }
@@ -100,5 +102,26 @@ func TestDecideRequestObserversApproved(t *testing.T) {
 	local := Candidate{Observer: []byte{'L'}, EvidenceSNR: f64(1), EvidenceCount: 1}
 	if el := Decide(ElectionInput{Cands: []Candidate{local}}, cfg); string(order(el.Assignments)) != "L" {
 		t.Fatalf("%+v", el.Assignments)
+	}
+}
+
+func TestDecideRequestsGoOnlyToApprovedObserversByDefault(t *testing.T) {
+	ok := rcand('A', 1)
+	ok.Approved = true
+	in := ElectionInput{Requested: true, RequestCands: []Candidate{rcand('B', 9), ok}}
+	// The zero config and the resolved default both mean approved; only an explicit all lifts it.
+	for name, cfg := range map[string]config.ResolvedPolling{"unset": {}, "approved": {RequestObservers: config.RequestObserversApproved}} {
+		if got := string(order(Decide(in, cfg).Assignments)); got != "A" {
+			t.Errorf("%s: %q", name, got)
+		}
+	}
+	if got := string(order(Decide(in, allObservers).Assignments)); got != "BA" {
+		t.Errorf("all: %q", got)
+	}
+	// Evidence is still required with all.
+	noEv := rcand('C', 1)
+	noEv.EvidenceSNR, noEv.EvidenceCount = nil, 0
+	if got := Decide(ElectionInput{Requested: true, RequestCands: []Candidate{noEv}}, allObservers); len(got.Assignments) != 0 {
+		t.Errorf("no evidence: %+v", got.Assignments)
 	}
 }

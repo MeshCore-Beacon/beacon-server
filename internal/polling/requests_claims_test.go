@@ -21,19 +21,16 @@ import (
 	"github.com/google/uuid"
 )
 
-// claimStore adds the claim-side calls to the in-memory request store.
+// claimStore adds the password lookup to the in-memory request store.
 type claimStore struct {
 	*memRequests
-	stops    map[string]bool
-	seen     map[string]time.Time
-	poller   []byte
 	pwErr    error
 	pwCalls  int
 	passwrds map[string]RequestedPassword
 }
 
 func newClaimStore() *claimStore {
-	return &claimStore{memRequests: newMem(), stops: map[string]bool{}, seen: map[string]time.Time{}, passwrds: map[string]RequestedPassword{}}
+	return &claimStore{memRequests: newMem(), passwrds: map[string]RequestedPassword{}}
 }
 
 func (s *claimStore) RequestedPasswords(_ context.Context, targets [][]byte) (map[string]RequestedPassword, error) {
@@ -46,25 +43,15 @@ func (s *claimStore) RequestedPasswords(_ context.Context, targets [][]byte) (ma
 	}
 	return out, s.pwErr
 }
-func (s *claimStore) AddAdminStop(_ context.Context, t, o []byte, _ time.Time) (bool, error) {
-	k := string(t) + string(o)
-	if s.stops[k] {
-		return false, nil
+
+// hold records that the observer was handed the target as a requested one, at the rank.
+func (s *claimStore) hold(target, observer []byte, rank int) {
+	st := s.states[string(target)]
+	if st.Holders == nil {
+		st.Holders = map[string]int{}
 	}
-	s.stops[k] = true
-	return true, nil
+	st.Holders[string(observer)] = rank
 }
-func (s *claimStore) TouchOtherState(_ context.Context, t, o []byte, at time.Time) error {
-	s.seen[string(t)+string(o)] = at
-	return nil
-}
-func (s *claimStore) OtherStateSeen(_ context.Context, t, o []byte) (*time.Time, error) {
-	if at, ok := s.seen[string(t)+string(o)]; ok {
-		return &at, nil
-	}
-	return nil, nil
-}
-func (s *claimStore) CurrentPoller(context.Context, []byte) ([]byte, error) { return s.poller, nil }
 
 var claimNow = time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
 
@@ -113,7 +100,8 @@ func TestClaimLoginFailedOnlyCountsFromThePoller(t *testing.T) {
 	target, _ := requestedTarget(t, st, sealer, 1, "guest", 0)
 	poller, standby := bytes.Repeat([]byte{0xA}, 32), bytes.Repeat([]byte{0xB}, 32)
 	failed := ClaimNode{Target: target, Requested: true, State: "login_failed"}
-	st.poller = poller
+	st.hold(target, poller, 0)
+	st.hold(target, standby, 1)
 
 	// An hour after the password was set, so the grace is over.
 	hour := claimNow.Add(time.Hour)
@@ -136,7 +124,7 @@ func TestClaimLoginFailedGraceAfterAVerChange(t *testing.T) {
 		requestedTarget2(t, st, sealer, target, "pw"+string(rune('0'+i)), i)
 	}
 	poller := bytes.Repeat([]byte{0xA}, 32)
-	st.poller = poller
+	st.hold(target, poller, 0)
 	failed := ClaimNode{Target: target, Requested: true, State: "login_failed"}
 	ok := ClaimNode{Target: target, Requested: true, State: "ok"}
 
@@ -180,6 +168,8 @@ func TestClaimAdminStopDeletesThePasswordOnce(t *testing.T) {
 	requestedTarget2(t, st, sealer, target, "guest", 1)
 	a, b := bytes.Repeat([]byte{0xA}, 32), bytes.Repeat([]byte{0xB}, 32)
 	stop := ClaimNode{Target: target, Requested: true, State: "admin_stop"}
+	st.hold(target, b, 1)
+	st.hold(target, a, 2)
 
 	// Any observer's report counts, a standby's too.
 	svc.handleRequestedStates(ctx, claimOf(b, stop), claimNow)
@@ -187,7 +177,7 @@ func TestClaimAdminStopDeletesThePasswordOnce(t *testing.T) {
 	if r.Status != StatusAdminStopped || r.HasPassword || r.PasswordCT != nil {
 		t.Fatalf("admin password kept: %+v", r)
 	}
-	if !st.stops[string(target)+string(b)] {
+	if !st.states[string(target)].AdminStops[string(b)] {
 		t.Fatal("stop not recorded")
 	}
 	// The same observer repeating its report must not strike the next user's password.
@@ -206,6 +196,7 @@ func TestClaimAdminStopWithBlankLoginBlocksThem(t *testing.T) {
 	ctx := context.Background()
 	svc, st, sealer := claimService(t)
 	target, _ := requestedTarget(t, st, sealer, 1, "", 0)
+	st.hold(target, bytes.Repeat([]byte{0xA}, 32), 0)
 	svc.handleRequestedStates(ctx, claimOf(bytes.Repeat([]byte{0xA}, 32), ClaimNode{Target: target, Requested: true, State: "admin_stop"}), claimNow)
 	s := st.states[string(target)]
 	if !s.NoPasswordBlocked || s.Requests[0].Status != StatusAdminStopped {
@@ -218,11 +209,11 @@ func TestClaimIgnoresTargetsItDoesNotHoldAsRequested(t *testing.T) {
 	svc, st, sealer := claimService(t)
 	target, _ := requestedTarget(t, st, sealer, 1, "guest", 0)
 	o := bytes.Repeat([]byte{0xA}, 32)
-	st.poller = o
+	st.hold(target, o, 0)
 	// A local target of the same key (requested not set) must not touch the requests.
 	svc.handleRequestedStates(ctx, claimOf(o, ClaimNode{Target: target, State: "login_failed"}, ClaimNode{Target: target, State: "admin_stop"}), claimNow)
-	if got := statusOf(st, target, 0); got != StatusWaiting || len(st.stops) != 0 {
-		t.Fatalf("status %s stops %v", got, st.stops)
+	if got := statusOf(st, target, 0); got != StatusWaiting || len(st.states[string(target)].AdminStops) != 0 {
+		t.Fatalf("status %s", got)
 	}
 }
 
@@ -386,5 +377,40 @@ func TestOwnersAnswerWithEightEnvelopesFitsTheCap(t *testing.T) {
 	}
 	if len(b) >= 6144 {
 		t.Fatalf("answer is %d bytes", len(b))
+	}
+}
+
+func TestClaimReportsFromObserversNotHoldingTheTargetAreIgnored(t *testing.T) {
+	ctx := context.Background()
+	svc, st, sealer := claimService(t)
+	target, id := requestedTarget(t, st, sealer, 1, "guest", 0)
+	holder, stranger := bytes.Repeat([]byte{0xA}, 32), bytes.Repeat([]byte{0xB}, 32)
+	st.hold(target, holder, 0)
+	hour := claimNow.Add(time.Hour)
+	for _, state := range []string{"admin_stop", "login_failed", "no_reply", "not_direct", "ok"} {
+		svc.handleRequestedStates(ctx, claimOf(stranger, ClaimNode{Target: target, Requested: true, State: state}), hour)
+	}
+	s := st.states[string(target)]
+	r := s.Requests[0]
+	if r.ID != id || r.Status != StatusWaiting || !r.HasPassword || r.PasswordCT == nil || r.PasswordFailed {
+		t.Fatalf("an observer that was never handed the repeater changed the request: %+v", r)
+	}
+	if len(s.AdminStops) != 0 || len(s.OtherSeen) != 0 || s.NoPasswordBlocked || s.Ver != 1 {
+		t.Fatalf("state changed: %+v", s)
+	}
+	// The holder's report still lands.
+	svc.handleRequestedStates(ctx, claimOf(holder, ClaimNode{Target: target, Requested: true, State: "admin_stop"}), hour)
+	if st.states[string(target)].Requests[0].Status != StatusAdminStopped {
+		t.Fatal("the holder's admin_stop was ignored")
+	}
+}
+
+func TestRequestSeatClampsTheClaim(t *testing.T) {
+	huge := Candidate{RequestSlots: 1000, Held: 1000, SeatsElsewhere: 8}
+	if requestSeat(huge) {
+		t.Fatal("a claim cannot offer more than the firmware's 8 seats")
+	}
+	if !requestSeat(Candidate{RequestSlots: 1000, SeatsElsewhere: 7}) {
+		t.Fatal("8 seats less 7 held elsewhere leaves one")
 	}
 }

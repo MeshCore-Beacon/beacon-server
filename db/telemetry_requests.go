@@ -73,6 +73,9 @@ func mutateRequestTarget(ctx context.Context, q *sqlc.Queries, target []byte, us
 	if tr.VerChangedAt.Valid {
 		st.VerChangedAt = tr.VerChangedAt.Time
 	}
+	if err := loadReportContext(ctx, q, target, st); err != nil {
+		return err
+	}
 	rows, err := q.ListTargetRequests(ctx, target)
 	if err != nil {
 		return err
@@ -89,6 +92,18 @@ func mutateRequestTarget(ctx context.Context, q *sqlc.Queries, target []byte, us
 		return err
 	}
 
+	for _, o := range st.NewAdminStops {
+		if _, err := q.InsertPollingAdminStop(ctx, sqlc.InsertPollingAdminStopParams{
+			TargetPublicKey: target, ObserverPublicKey: o, ReportedAt: ts(time.Now())}); err != nil {
+			return err
+		}
+	}
+	for o, at := range st.TouchedOther {
+		if err := q.TouchPollingOtherState(ctx, sqlc.TouchPollingOtherStateParams{
+			TargetPublicKey: target, ObserverPublicKey: []byte(o), SeenAt: ts(at)}); err != nil {
+			return err
+		}
+	}
 	for _, id := range st.Deleted {
 		if err := q.DeleteTelemetryRequest(ctx, id); err != nil {
 			return err
@@ -126,6 +141,35 @@ func mutateRequestTarget(ctx context.Context, q *sqlc.Queries, target []byte, us
 		return q.UpdatePollingTarget(ctx, sqlc.UpdatePollingTargetParams{
 			TargetPublicKey: target, ActiveRequestID: active, Ver: st.Ver, VerChangedAt: verAt, NoPasswordBlocked: st.NoPasswordBlocked,
 		})
+	}
+	return nil
+}
+
+// loadReportContext reads what a claim's report is judged against, inside the target's lock.
+func loadReportContext(ctx context.Context, q *sqlc.Queries, target []byte, st *polling.TargetState) error {
+	holders, err := q.ListRequestedAssignees(ctx, target)
+	if err != nil {
+		return err
+	}
+	st.Holders = make(map[string]int, len(holders))
+	for _, h := range holders {
+		st.Holders[string(h.ObserverPublicKey)] = int(h.Rank)
+	}
+	stops, err := q.ListTargetAdminStops(ctx, target)
+	if err != nil {
+		return err
+	}
+	st.AdminStops = make(map[string]bool, len(stops))
+	for _, o := range stops {
+		st.AdminStops[string(o)] = true
+	}
+	seen, err := q.ListTargetOtherStates(ctx, target)
+	if err != nil {
+		return err
+	}
+	st.OtherSeen = make(map[string]time.Time, len(seen))
+	for _, r := range seen {
+		st.OtherSeen[string(r.ObserverPublicKey)] = r.SeenAt.Time
 	}
 	return nil
 }
@@ -215,32 +259,6 @@ func (s *Store) RequestedPasswords(ctx context.Context, targets [][]byte) (map[s
 		out[string(r.TargetPublicKey)] = polling.RequestedPassword{RequestID: r.RequestID, Ver: r.Ver, CT: r.PasswordCt, Nonce: r.PasswordNonce}
 	}
 	return out, nil
-}
-
-// AddAdminStop records that the observer's device was given admin access by the target. It reports false when the
-// observer was already recorded.
-func (s *Store) AddAdminStop(ctx context.Context, target, observer []byte, at time.Time) (bool, error) {
-	n, err := s.q.InsertPollingAdminStop(ctx, sqlc.InsertPollingAdminStopParams{
-		TargetPublicKey: target, ObserverPublicKey: observer, ReportedAt: ts(at)})
-	return n > 0, err
-}
-
-// TouchOtherState records that the observer's claim showed a state other than login_failed for the target.
-func (s *Store) TouchOtherState(ctx context.Context, target, observer []byte, at time.Time) error {
-	return s.q.TouchPollingOtherState(ctx, sqlc.TouchPollingOtherStateParams{
-		TargetPublicKey: target, ObserverPublicKey: observer, SeenAt: ts(at)})
-}
-
-// OtherStateSeen is nil when no such state was ever recorded.
-func (s *Store) OtherStateSeen(ctx context.Context, target, observer []byte) (*time.Time, error) {
-	t, err := s.q.PollingOtherStateSeen(ctx, sqlc.PollingOtherStateSeenParams{TargetPublicKey: target, ObserverPublicKey: observer})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &t.Time, nil
 }
 
 // DisableOfflineRequests disables the requests of every repeater no observer has heard since cutoff (and whose

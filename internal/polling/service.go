@@ -270,9 +270,22 @@ func (s *Service) Owners(ctx context.Context, c Caller) (OwnersAnswer, error) {
 			rows[i].Rank = rows[i].Assigned
 		}
 	}
+	// Approval can be withdrawn between elections; a password goes only to an observer approved right now.
+	if s.requestsNeedApproval() {
+		if _, approved, err := s.store.PollingObserverFlags(ctx, c.Observer); err != nil || !approved {
+			for i := range rows {
+				rows[i].PWOK = false
+			}
+		}
+	}
 	ans := BuildOwners(rows, p)
 	s.addEnvelopes(ctx, c.Observer, rows, ans.Nodes)
 	return ans, nil
+}
+
+// requestsNeedApproval is true unless the operator set polling.request_observers to all.
+func (s *Service) requestsNeedApproval() bool {
+	return s.cfg.Authority == config.PollingAuthorityApproved || s.cfg.RequestObservers != config.RequestObserversAll
 }
 
 // ElectTarget recomputes the order of observers for one repeater. No candidates clears it.

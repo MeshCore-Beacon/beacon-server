@@ -27,7 +27,7 @@ type PollingConfig struct {
 	// RequestsPerUser is how many telemetry requests one user may hold; unset is 3, 0 turns requests off.
 	RequestsPerUser    *int   `yaml:"requests_per_user"`
 	OfflineDisableDays int    `yaml:"offline_disable_days"` // default 7
-	RequestObservers   string `yaml:"request_observers"`    // all (default) or approved
+	RequestObservers   string `yaml:"request_observers"`    // approved (default) or all
 }
 
 // ResolvedPolling is PollingConfig with defaults applied and values parsed.
@@ -48,7 +48,9 @@ type ResolvedPolling struct {
 	RequestObservers   string
 }
 
-// Who may take a requested repeater: any observer that opted in, or only operator-approved ones.
+// Who may take a requested repeater and be sent its guest password: only operator-approved observers (the default),
+// or any observer that opted in and has advert evidence. Evidence comes from packets the observer uploads itself, so
+// it alone does not say the observer can be trusted with a password.
 const (
 	RequestObserversAll      = "all"
 	RequestObserversApproved = "approved"
@@ -99,7 +101,7 @@ func (p PollingConfig) Resolve() (ResolvedPolling, error) {
 	}
 	r.RequestObservers = p.RequestObservers
 	if r.RequestObservers == "" {
-		r.RequestObservers = RequestObserversAll
+		r.RequestObservers = RequestObserversApproved
 	}
 	if r.DirectWindow == 0 {
 		r.DirectWindow = time.Hour

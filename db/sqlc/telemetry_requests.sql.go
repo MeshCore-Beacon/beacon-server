@@ -198,6 +198,89 @@ func (q *Queries) ListPollingAdminStops(ctx context.Context) ([]PollingAdminStop
 	return items, nil
 }
 
+const listRequestedAssignees = `-- name: ListRequestedAssignees :many
+SELECT observer_public_key, rank FROM polling_assignments WHERE target_public_key = $1 AND requested
+`
+
+type ListRequestedAssigneesRow struct {
+	ObserverPublicKey []byte `json:"observer_public_key"`
+	Rank              int16  `json:"rank"`
+}
+
+// The observers handed this target as a requested one, with their rank (0 polls).
+func (q *Queries) ListRequestedAssignees(ctx context.Context, targetPublicKey []byte) ([]ListRequestedAssigneesRow, error) {
+	rows, err := q.db.Query(ctx, listRequestedAssignees, targetPublicKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRequestedAssigneesRow{}
+	for rows.Next() {
+		var i ListRequestedAssigneesRow
+		if err := rows.Scan(&i.ObserverPublicKey, &i.Rank); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTargetAdminStops = `-- name: ListTargetAdminStops :many
+SELECT observer_public_key FROM polling_admin_stops WHERE target_public_key = $1
+`
+
+func (q *Queries) ListTargetAdminStops(ctx context.Context, targetPublicKey []byte) ([][]byte, error) {
+	rows, err := q.db.Query(ctx, listTargetAdminStops, targetPublicKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := [][]byte{}
+	for rows.Next() {
+		var observer_public_key []byte
+		if err := rows.Scan(&observer_public_key); err != nil {
+			return nil, err
+		}
+		items = append(items, observer_public_key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTargetOtherStates = `-- name: ListTargetOtherStates :many
+SELECT observer_public_key, seen_at FROM polling_other_states WHERE target_public_key = $1
+`
+
+type ListTargetOtherStatesRow struct {
+	ObserverPublicKey []byte             `json:"observer_public_key"`
+	SeenAt            pgtype.Timestamptz `json:"seen_at"`
+}
+
+func (q *Queries) ListTargetOtherStates(ctx context.Context, targetPublicKey []byte) ([]ListTargetOtherStatesRow, error) {
+	rows, err := q.db.Query(ctx, listTargetOtherStates, targetPublicKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTargetOtherStatesRow{}
+	for rows.Next() {
+		var i ListTargetOtherStatesRow
+		if err := rows.Scan(&i.ObserverPublicKey, &i.SeenAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTargetRequests = `-- name: ListTargetRequests :many
 SELECT id, user_id, status, status_reason, password_ct, password_nonce, password_failed, created_at, updated_at, enabled_at
 FROM telemetry_requests WHERE target_public_key = $1 ORDER BY created_at, id
@@ -391,22 +474,6 @@ func (q *Queries) PollingAdminRequestCounts(ctx context.Context, targets [][]byt
 		return nil, err
 	}
 	return items, nil
-}
-
-const pollingOtherStateSeen = `-- name: PollingOtherStateSeen :one
-SELECT seen_at FROM polling_other_states WHERE target_public_key = $1 AND observer_public_key = $2
-`
-
-type PollingOtherStateSeenParams struct {
-	TargetPublicKey   []byte `json:"target_public_key"`
-	ObserverPublicKey []byte `json:"observer_public_key"`
-}
-
-func (q *Queries) PollingOtherStateSeen(ctx context.Context, arg PollingOtherStateSeenParams) (pgtype.Timestamptz, error) {
-	row := q.db.QueryRow(ctx, pollingOtherStateSeen, arg.TargetPublicKey, arg.ObserverPublicKey)
-	var seen_at pgtype.Timestamptz
-	err := row.Scan(&seen_at)
-	return seen_at, err
 }
 
 const pollingTargetExists = `-- name: PollingTargetExists :one

@@ -8,6 +8,9 @@ import "github.com/MeshCore-Beacon/beacon-server/internal/config"
 // MaxRequestedPollers is the poller and its standbys for a requested target.
 const MaxRequestedPollers = 3
 
+// MaxRequestSlots is the firmware's target limit, the most seats the server believes a claim has.
+const MaxRequestSlots = 8
+
 // ElectionInput is what one target's election works from.
 type ElectionInput struct {
 	// Cands are the observers whose claim names the target.
@@ -27,7 +30,11 @@ type Election struct {
 
 // requestSeat reports whether the observer has a seat for the target: its claim's free seats plus those it already
 // holds, less the older requested targets it is assigned.
-func requestSeat(c Candidate) bool { return c.RequestSlots+c.Held-c.SeatsElsewhere > 0 }
+// A claim is the observer's own word, so its numbers are held to the firmware's limit of 8 targets.
+func requestSeat(c Candidate) bool {
+	capacity := min(max(c.RequestSlots, 0), MaxRequestSlots) + min(max(c.Held, 0), MaxRequestSlots)
+	return min(capacity, MaxRequestSlots)-c.SeatsElsewhere > 0
+}
 
 // ElectRequested ranks the observers for a requested target. Only an observer with a live claim that accepts
 // requests, advert evidence for the target (RequestCands carry it), a free seat, no admin stop for the target, and,
@@ -85,7 +92,7 @@ func Decide(in ElectionInput, cfg config.ResolvedPolling) Election {
 			}
 		}
 		if !hasLocal {
-			out, wait := ElectRequested(in.RequestCands, in.Current, approved || cfg.RequestObservers == config.RequestObserversApproved)
+			out, wait := ElectRequested(in.RequestCands, in.Current, approved || cfg.RequestObservers != config.RequestObserversAll)
 			return Election{Assignments: out, WaitReason: wait}
 		}
 	}
