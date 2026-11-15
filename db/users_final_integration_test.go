@@ -110,3 +110,31 @@ func TestSupersededEmailVerificationPostgres(t *testing.T) {
 		t.Fatalf("superseded email confirmation succeeded: err=%v newAddressApplied=%v", err, got.Email == addr)
 	}
 }
+
+// An email-change link confirmed for a user the operator disabled meanwhile does not change the address.
+func TestEmailChangeAfterDisablePostgres(t *testing.T) {
+	ctx, s, svc, g, u := serialEnvAt(t, "ApplyEmailChange")
+	addr := "new@example.org"
+	plain, hash := users.NewToken()
+	if err := s.BeginEmailChange(ctx, u.ID, u.PassHash, addr, hash, []byte(`{"email":"`+addr+`"}`), time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	g.armed.Store(true)
+	done := make(chan error, 1)
+	go func() { done <- svc.Verify(ctx, plain) }()
+	<-g.arrived
+	g.armed.Store(false)
+	now := time.Now()
+	if err := s.SetUserDisabled(ctx, u.ID, &now); err != nil {
+		t.Fatal(err)
+	}
+	close(g.release)
+	err := <-done
+	got, readErr := s.UserByID(ctx, u.ID)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if err == nil || got.Email != u.Email {
+		t.Fatalf("disabled user's email changed: err=%v applied=%v", err, got.Email == addr)
+	}
+}

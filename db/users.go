@@ -246,7 +246,11 @@ func deleteLocked(ctx context.Context, q *sqlc.Queries, id uuid.UUID, expect str
 	if err := lockUserTargets(ctx, q, id); err != nil {
 		return err
 	}
-	if err := lockChecked(ctx, q, id, expect); err != nil {
+	lock := func() error { return lockChecked(ctx, q, id, expect) }
+	if expect == "" {
+		lock = func() error { return lockUser(ctx, q, id) } // an operator may delete a disabled user
+	}
+	if err := lock(); err != nil {
 		return err
 	}
 	if deleteGapHook != nil {
@@ -334,8 +338,8 @@ func (s *Store) IssueSession(ctx context.Context, sess users.Session, tokenHash 
 	return out, err
 }
 
-// lockChecked takes the user's credential lock and, when expectPassHash is set, refuses (users.ErrNotFound) a user
-// that is gone or disabled or whose hash is no longer the one the caller verified.
+// lockChecked takes the user's credential lock and refuses (users.ErrNotFound) a user that is gone or disabled and,
+// when expectPassHash is set, one whose hash is no longer the one the caller verified.
 func lockChecked(ctx context.Context, q *sqlc.Queries, id uuid.UUID, expectPassHash string) error {
 	cur, err := q.LockUserCredentials(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -344,10 +348,19 @@ func lockChecked(ctx context.Context, q *sqlc.Queries, id uuid.UUID, expectPassH
 	if err != nil {
 		return err
 	}
-	if expectPassHash != "" && (cur.DisabledAt.Valid || cur.PassHash != expectPassHash) {
+	if cur.DisabledAt.Valid || (expectPassHash != "" && cur.PassHash != expectPassHash) {
 		return users.ErrNotFound
 	}
 	return nil
+}
+
+// lockUser takes the lock for an operator action, which may act on a disabled user.
+func lockUser(ctx context.Context, q *sqlc.Queries, id uuid.UUID) error {
+	if _, err := q.LockUserCredentials(ctx, id); errors.Is(err, pgx.ErrNoRows) {
+		return users.ErrNotFound
+	} else {
+		return err
+	}
 }
 
 // ChangeCredentials sets a new password hash and, in the same transaction under the user's credential lock, ends
@@ -379,16 +392,9 @@ func (s *Store) ChangeCredentials(ctx context.Context, id uuid.UUID, hash string
 // that is unknown, used, expired, rebound or not the user's.
 func (s *Store) ResetCredentials(ctx context.Context, tokenHash []byte, id uuid.UUID, hash string, verifiedAt *time.Time, now time.Time) error {
 	return s.pollTx(ctx, func(q *sqlc.Queries) error {
-		cur, err := q.LockUserCredentials(ctx, id)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return users.ErrNotFound
-		}
-		if err != nil {
-			return err
-		}
 		// A disabled user keeps the credentials it had, whatever an earlier check saw.
-		if cur.DisabledAt.Valid {
-			return users.ErrNotFound
+		if err := lockChecked(ctx, q, id, ""); err != nil {
+			return err
 		}
 		got, err := q.ConsumeResetToken(ctx, sqlc.ConsumeResetTokenParams{TokenHash: tokenHash, Now: ts(now)})
 		if errors.Is(err, pgx.ErrNoRows) || (err == nil && got != id) {
