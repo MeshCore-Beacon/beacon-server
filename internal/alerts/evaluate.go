@@ -49,6 +49,12 @@ type Reading struct {
 	Uptime     *int64
 }
 
+// Drift is the clock drift (seconds) one advert carried.
+type Drift struct {
+	At  time.Time
+	Sec int64
+}
+
 // Data is what is known about the radio right now.
 type Data struct {
 	Now time.Time
@@ -68,11 +74,9 @@ type Data struct {
 	Uptimes []Reading
 	// DayAgo is the battery reading closest to 24 hours before the newest battery reading, within 3 hours of it.
 	DayAgo *Reading
-	// DriftSec is the repeater's clock drift from its newest advert, at AdvertAt.
-	DriftSec *int64
-	AdvertAt time.Time
-	// PrevDriftSec is the drift of the advert before that one; nil when there was none.
-	PrevDriftSec *int64
+	// Drifts are the clock drift of the repeater's kept adverts, oldest first: the one at or before a clock rule's
+	// cursor (the first half of a pair) and every advert after it.
+	Drifts []Drift
 	// SiblingRecoveredAt is when the radio's gone_quiet rule last went from firing to ok.
 	SiblingRecoveredAt time.Time
 	// SiblingEnabled: the radio has an enabled gone_quiet rule, which a back_online rule needs.
@@ -206,27 +210,35 @@ func Evaluate(r Rule, d Data) Outcome {
 		th := *r.Threshold
 		out = set(v[0] > th && v[1] > th || r.State == StateFiring && v[0] > th-noiseRecoverDB, int64(v[0]))
 	case KindClock:
-		if !d.Exists || d.DriftSec == nil || d.AdvertAt.IsZero() {
+		if !d.Exists || len(d.Drifts) == 0 {
 			return inactive()
 		}
-		if !d.AdvertAt.After(r.Cursor) || r.Threshold == nil {
+		newest := d.Drifts[len(d.Drifts)-1]
+		if !newest.At.After(r.Cursor) || r.Threshold == nil {
 			return keep()
 		}
-		o.Cursor = d.AdvertAt
+		o.Cursor = newest.At
 		o.Streak = 0
-		over := func(v int64) bool {
+		abs := func(v int64) int64 {
 			if v < 0 {
-				v = -v
+				return -v
 			}
-			return v > int64(*r.Threshold)
+			return v
 		}
-		// Two adverts in a row past the limit: the newest and the one before it, as the node row keeps them.
-		both := over(*d.DriftSec) && d.PrevDriftSec != nil && over(*d.PrevDriftSec)
-		drift := *d.DriftSec
-		if drift < 0 {
-			drift = -drift
+		over := func(v int64) bool { return abs(v) > int64(*r.Threshold) }
+		// A breach is two adverts in a row past the limit. Every pair since the cursor counts, so a breach that
+		// recovered between two passes still fires once.
+		var breach *Drift
+		for i := 1; i < len(d.Drifts); i++ {
+			if d.Drifts[i].At.After(r.Cursor) && over(d.Drifts[i].Sec) && over(d.Drifts[i-1].Sec) {
+				breach = &d.Drifts[i]
+			}
 		}
-		out = set(both, drift)
+		last := len(d.Drifts) - 1
+		out = set(last >= 1 && over(newest.Sec) && over(d.Drifts[last-1].Sec), abs(newest.Sec))
+		if breach != nil && out.State == StateOK && r.State != StateFiring {
+			out.Notify, out.Value = true, abs(breach.Sec)
+		}
 	case KindBackOnline:
 		// Never firing itself: it announces the moment the radio's gone_quiet rule recovered. Without an enabled
 		// gone_quiet partner there is nothing to announce.

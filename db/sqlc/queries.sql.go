@@ -6611,6 +6611,27 @@ func (q *Queries) ReconfirmSliceEnd(ctx context.Context, arg ReconfirmSliceEndPa
 	return i, err
 }
 
+const recordClockDrift = `-- name: RecordClockDrift :exec
+WITH ins AS (
+    INSERT INTO node_clock_drifts (node_id, advert_at, drift_seconds) VALUES ($1, now(), $2)
+    ON CONFLICT (node_id, advert_at) DO NOTHING
+)
+DELETE FROM node_clock_drifts x
+WHERE x.node_id = $1
+  AND x.advert_at < (SELECT d.advert_at FROM node_clock_drifts d WHERE d.node_id = $1 ORDER BY d.advert_at DESC OFFSET 15 LIMIT 1)
+`
+
+type RecordClockDriftParams struct {
+	NodeID       uuid.UUID `json:"node_id"`
+	DriftSeconds int64     `json:"drift_seconds"`
+}
+
+// Keeps the drift of the node's last 16 adverts: the new one in, the older ones beyond 15 out.
+func (q *Queries) RecordClockDrift(ctx context.Context, arg RecordClockDriftParams) error {
+	_, err := q.db.Exec(ctx, recordClockDrift, arg.NodeID, arg.DriftSeconds)
+	return err
+}
+
 const recordTrace = `-- name: RecordTrace :exec
 WITH iata AS (
   INSERT INTO trace_iatas (trace_tag, iata, last_heard)

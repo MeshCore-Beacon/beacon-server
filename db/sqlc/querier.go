@@ -31,6 +31,9 @@ type Querier interface {
 	AlertNodeCaps(ctx context.Context, arg AlertNodeCapsParams) ([]AlertNodeCapsRow, error)
 	// For each repeater, the battery reading closest to 24 hours before its newest one, within 3 hours of that mark.
 	AlertNodeDayAgo(ctx context.Context, arg AlertNodeDayAgoParams) ([]AlertNodeDayAgoRow, error)
+	// For each repeater and the oldest cursor of its clock rule: the advert drift at or before the cursor (the pair's
+	// first half), then every kept advert after it, oldest first. The table keeps at most 16 per node.
+	AlertNodeDrifts(ctx context.Context, arg AlertNodeDriftsParams) ([]AlertNodeDriftsRow, error)
 	// The newest trusted readings of each repeater within the window, at most 12 each.
 	AlertNodeReadings(ctx context.Context, arg AlertNodeReadingsParams) ([]AlertNodeReadingsRow, error)
 	// For each repeater and the cursor of its reboot rule: the newest trusted uptime reading at or before the cursor (the
@@ -720,6 +723,8 @@ type Querier interface {
 	ReconfirmRoutesBatch(ctx context.Context, arg ReconfirmRoutesBatchParams) (ReconfirmRoutesBatchRow, error)
 	// Key of the last route in a slice that timed out: the caller passes the slice's row count - 1.
 	ReconfirmSliceEnd(ctx context.Context, arg ReconfirmSliceEndParams) (ReconfirmSliceEndRow, error)
+	// Keeps the drift of the node's last 16 adverts: the new one in, the older ones beyond 15 out.
+	RecordClockDrift(ctx context.Context, arg RecordClockDriftParams) error
 	// Written on every owners answer that lists the target, so it only touches the row when the version changed or the
 	// last write is an hour old.
 	RecordServedVersion(ctx context.Context, arg RecordServedVersionParams) error

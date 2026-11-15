@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	"github.com/MeshCore-Beacon/beacon-server/internal/alerts"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
 	mailer "github.com/MeshCore-Beacon/beacon-server/internal/mail"
 	"github.com/MeshCore-Beacon/beacon-server/internal/users"
 	"github.com/google/uuid"
@@ -589,10 +589,10 @@ func TestAlertEmailGroupsAreNotSplitPostgres(t *testing.T) {
 	}
 }
 
+// advertWithDrift ingests an advert whose clock is drift seconds off, through the store as ingest does.
 func advertWithDrift(t *testing.T, ctx context.Context, s *Store, key []byte, drift int64) {
 	t.Helper()
-	name := "Hilltop"
-	if _, err := s.q.UpsertNode(ctx, sqlc.UpsertNodeParams{PublicKey: key, NodeType: 2, Name: &name, DeviceClockDriftSeconds: &drift}); err != nil {
+	if _, err := s.UpsertNode(ctx, ingest.UpsertNodeParams{PublicKey: key, NodeType: 2, Name: "Hilltop", AdvertTimestamp: uint32(time.Now().Unix() + drift)}, ingest.RadioSettings{}); err != nil {
 		t.Fatal(err)
 	}
 }

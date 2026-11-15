@@ -60,8 +60,18 @@ func TestUpsertNode_ComputesClockDrift(t *testing.T) {
 			captured = p
 			return sqlc.Node{ID: nodeID}, nil
 		})
+	var history sqlc.RecordClockDriftParams
+	mock.EXPECT().RecordClockDrift(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, p sqlc.RecordClockDriftParams) error {
+		history = p
+		return nil
+	})
 
 	store := &Store{q: mock}
+	defer func() {
+		if history.NodeID != nodeID || history.DriftSeconds > -595 || history.DriftSeconds < -605 {
+			t.Errorf("drift history not recorded for the node: %+v", history)
+		}
+	}()
 	_, err := store.UpsertNode(context.Background(), ingest.UpsertNodeParams{
 		PublicKey:       []byte{0x01},
 		NodeType:        2, // repeater

@@ -358,6 +358,12 @@ type Node struct {
 	PrevClockDriftSeconds   *int64             `json:"prev_clock_drift_seconds"`
 }
 
+type NodeClockDrift struct {
+	NodeID       uuid.UUID          `json:"node_id"`
+	AdvertAt     pgtype.Timestamptz `json:"advert_at"`
+	DriftSeconds int64              `json:"drift_seconds"`
+}
+
 type NodeIata struct {
 	NodeID           uuid.UUID          `json:"node_id"`
 	Iata             string             `json:"iata"`

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/alerts"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/google/uuid"
 )
 
@@ -41,5 +42,42 @@ func TestAlertRebootBeyondTwelveReadingsPostgres(t *testing.T) {
 	}
 	if n := len(outbox(t, ctx, s)); n != 1 {
 		t.Fatalf("%d notices for a reboot among thirteen unread readings, want 1", n)
+	}
+}
+
+// Two adverts past the limit in a row still count when a normal one follows before the next pass.
+func TestAlertClockBreachBetweenPassesPostgres(t *testing.T) {
+	ctx, pool, s := userStore(t)
+	svc := alertSvc(s)
+	u := newUser(t, ctx, s, "alice")
+	key := atlasKey(1)
+	advertWithDrift(t, ctx, s, key, 0)
+	pinAtlas(t, ctx, s, u, 0, api.StoredPin{Kind: "node", Key: key})
+	if _, err := svc.PutRule(ctx, u.ID, alerts.RuleInput{TargetKind: "node", PublicKey: key, Kind: "clock", Threshold: ipp(300), Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE user_alert_rules SET cursor_at = now() - interval '1 day', state = 'ok'`); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []int64{600, 600, 0} {
+		advertWithDrift(t, ctx, s, key, d)
+		time.Sleep(5 * time.Millisecond)
+	}
+	task := alerts.NewTask(AlertEval{s}, time.Now)
+	if err := task.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(outbox(t, ctx, s)); n != 1 {
+		t.Fatalf("600, 600, 0 since the last pass: %d notices, want 1", n)
+	}
+	if got := ruleStateOf(t, ctx, pool, "clock"); got != "ok" {
+		t.Fatalf("state after the recovery: %s", got)
+	}
+	// Nothing new: no second notice.
+	if err := task.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(outbox(t, ctx, s)); n != 1 {
+		t.Fatalf("the breach was announced again: %d notices", n)
 	}
 }

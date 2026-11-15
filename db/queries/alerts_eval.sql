@@ -75,6 +75,20 @@ CROSS JOIN LATERAL (
      ORDER BY a.sampled_at LIMIT sqlc.arg(page_size)::int)
 ) r;
 
+-- name: AlertNodeDrifts :many
+-- For each repeater and the oldest cursor of its clock rule: the advert drift at or before the cursor (the pair's
+-- first half), then every kept advert after it, oldest first. The table keeps at most 16 per node.
+SELECT t.k::bytea AS target_public_key, r.advert_at, r.drift_seconds
+FROM unnest(sqlc.arg(keys)::bytea[]) WITH ORDINALITY AS t(k, n)
+CROSS JOIN LATERAL (SELECT (sqlc.arg(cursors)::timestamptz[])[t.n] AS c) cur
+CROSS JOIN LATERAL (
+    (SELECT d.advert_at, d.drift_seconds FROM node_clock_drifts d JOIN nodes nn ON nn.id = d.node_id
+     WHERE nn.public_key = t.k AND d.advert_at <= cur.c ORDER BY d.advert_at DESC LIMIT 1)
+    UNION ALL
+    (SELECT d.advert_at, d.drift_seconds FROM node_clock_drifts d JOIN nodes nn ON nn.id = d.node_id
+     WHERE nn.public_key = t.k AND d.advert_at > cur.c ORDER BY d.advert_at)
+) r;
+
 -- name: AlertObserverUptimes :many
 -- The same for an observer's status telemetry.
 SELECT t.k::uuid AS observer_id, r.reported_at, r.uptime_seconds

@@ -17,7 +17,9 @@ func noise(at time.Duration, db int) Reading { return Reading{At: ago(at), Noise
 func temp(at time.Duration, t int) Reading   { return Reading{At: ago(at), TempTenths: &t} }
 func up(at time.Duration, s int64) Reading   { return Reading{At: ago(at), Uptime: &s} }
 
-func live(rs ...Reading) Data { return Data{Now: now, Exists: true, Polled: true, Readings: rs, Uptimes: rs} }
+func live(rs ...Reading) Data {
+	return Data{Now: now, Exists: true, Polled: true, Readings: rs, Uptimes: rs}
+}
 
 type step struct {
 	name   string
@@ -210,7 +212,11 @@ func TestEvaluateClock(t *testing.T) {
 	}
 	// drift is the newest advert's drift, prev the one before it (0 means a good one, nil none).
 	drift := func(s int64, prev *int64, at time.Duration) Data {
-		return Data{Now: now, Exists: true, DriftSec: &s, PrevDriftSec: prev, AdvertAt: ago(at)}
+		d := Data{Now: now, Exists: true, Drifts: []Drift{{At: ago(at), Sec: s}}}
+		if prev != nil {
+			d.Drifts = append([]Drift{{At: ago(at + time.Minute), Sec: *prev}}, d.Drifts...)
+		}
+		return d
 	}
 	v := func(s int64) *int64 { return &s }
 	run(t, []step{
@@ -227,6 +233,26 @@ func TestEvaluateClock(t *testing.T) {
 	o := Evaluate(r(StateOK, time.Hour), drift(900, v(10), 10*time.Minute))
 	if !o.Cursor.Equal(ago(10*time.Minute)) || o.Streak != 0 {
 		t.Fatalf("streak %d cursor %v", o.Streak, o.Cursor)
+	}
+}
+
+// Two adverts past the limit that recovered before the pass still fire once, and are not announced again.
+func TestEvaluateClockBreachRecoveredBetweenPasses(t *testing.T) {
+	d := Data{Now: now, Exists: true, Drifts: []Drift{{ago(5 * time.Hour), 0}, {ago(4 * time.Hour), 900}, {ago(3 * time.Hour), -900}, {ago(2 * time.Hour), 10}}}
+	r := Rule{Kind: KindClock, Threshold: ip(300), State: StateOK, Cursor: ago(5 * time.Hour)}
+	o := Evaluate(r, d)
+	if !o.Notify || o.State != StateOK || o.Value != 900 || !o.Cursor.Equal(ago(2*time.Hour)) {
+		t.Fatalf("%+v", o)
+	}
+	// Already firing: the recovery is silent.
+	r.State = StateFiring
+	if o := Evaluate(r, d); o.Notify || o.State != StateOK {
+		t.Fatalf("firing rule: %+v", o)
+	}
+	// The next pass finds nothing new.
+	r.State, r.Cursor = StateOK, ago(2*time.Hour)
+	if o := Evaluate(r, d); o.Notify {
+		t.Fatalf("announced twice: %+v", o)
 	}
 }
 

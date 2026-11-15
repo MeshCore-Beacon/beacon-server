@@ -1321,6 +1321,16 @@ ON CONFLICT (public_key) DO UPDATE SET
   device_clock_drift_seconds = EXCLUDED.device_clock_drift_seconds
 RETURNING *;
 
+-- name: RecordClockDrift :exec
+-- Keeps the drift of the node's last 16 adverts: the new one in, the older ones beyond 15 out.
+WITH ins AS (
+    INSERT INTO node_clock_drifts (node_id, advert_at, drift_seconds) VALUES (@node_id, now(), @drift_seconds)
+    ON CONFLICT (node_id, advert_at) DO NOTHING
+)
+DELETE FROM node_clock_drifts x
+WHERE x.node_id = @node_id
+  AND x.advert_at < (SELECT d.advert_at FROM node_clock_drifts d WHERE d.node_id = @node_id ORDER BY d.advert_at DESC OFFSET 15 LIMIT 1);
+
 -- name: SetNodeMultibytePaths :exec
 UPDATE nodes SET supports_multibyte_paths = TRUE
 WHERE id = $1 AND supports_multibyte_paths = FALSE;

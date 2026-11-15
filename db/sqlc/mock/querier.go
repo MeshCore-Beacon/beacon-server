@@ -160,6 +160,21 @@ func (mr *MockQuerierMockRecorder) AlertNodeDayAgo(ctx, arg any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AlertNodeDayAgo", reflect.TypeOf((*MockQuerier)(nil).AlertNodeDayAgo), ctx, arg)
 }
 
+// AlertNodeDrifts mocks base method.
+func (m *MockQuerier) AlertNodeDrifts(ctx context.Context, arg db.AlertNodeDriftsParams) ([]db.AlertNodeDriftsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AlertNodeDrifts", ctx, arg)
+	ret0, _ := ret[0].([]db.AlertNodeDriftsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// AlertNodeDrifts indicates an expected call of AlertNodeDrifts.
+func (mr *MockQuerierMockRecorder) AlertNodeDrifts(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AlertNodeDrifts", reflect.TypeOf((*MockQuerier)(nil).AlertNodeDrifts), ctx, arg)
+}
+
 // AlertNodeReadings mocks base method.
 func (m *MockQuerier) AlertNodeReadings(ctx context.Context, arg db.AlertNodeReadingsParams) ([]db.AlertNodeReadingsRow, error) {
 	m.ctrl.T.Helper()
@@ -4765,6 +4780,20 @@ func (m *MockQuerier) ReconfirmSliceEnd(ctx context.Context, arg db.ReconfirmSli
 func (mr *MockQuerierMockRecorder) ReconfirmSliceEnd(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReconfirmSliceEnd", reflect.TypeOf((*MockQuerier)(nil).ReconfirmSliceEnd), ctx, arg)
+}
+
+// RecordClockDrift mocks base method.
+func (m *MockQuerier) RecordClockDrift(ctx context.Context, arg db.RecordClockDriftParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RecordClockDrift", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RecordClockDrift indicates an expected call of RecordClockDrift.
+func (mr *MockQuerierMockRecorder) RecordClockDrift(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecordClockDrift", reflect.TypeOf((*MockQuerier)(nil).RecordClockDrift), ctx, arg)
 }
 
 // RecordServedVersion mocks base method.

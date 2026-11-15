@@ -60,6 +60,52 @@ func (q *Queries) AlertNodeDayAgo(ctx context.Context, arg AlertNodeDayAgoParams
 	return items, nil
 }
 
+const alertNodeDrifts = `-- name: AlertNodeDrifts :many
+SELECT t.k::bytea AS target_public_key, r.advert_at, r.drift_seconds
+FROM unnest($1::bytea[]) WITH ORDINALITY AS t(k, n)
+CROSS JOIN LATERAL (SELECT ($2::timestamptz[])[t.n] AS c) cur
+CROSS JOIN LATERAL (
+    (SELECT d.advert_at, d.drift_seconds FROM node_clock_drifts d JOIN nodes nn ON nn.id = d.node_id
+     WHERE nn.public_key = t.k AND d.advert_at <= cur.c ORDER BY d.advert_at DESC LIMIT 1)
+    UNION ALL
+    (SELECT d.advert_at, d.drift_seconds FROM node_clock_drifts d JOIN nodes nn ON nn.id = d.node_id
+     WHERE nn.public_key = t.k AND d.advert_at > cur.c ORDER BY d.advert_at)
+) r
+`
+
+type AlertNodeDriftsParams struct {
+	Keys    [][]byte             `json:"keys"`
+	Cursors []pgtype.Timestamptz `json:"cursors"`
+}
+
+type AlertNodeDriftsRow struct {
+	TargetPublicKey []byte             `json:"target_public_key"`
+	AdvertAt        pgtype.Timestamptz `json:"advert_at"`
+	DriftSeconds    int64              `json:"drift_seconds"`
+}
+
+// For each repeater and the oldest cursor of its clock rule: the advert drift at or before the cursor (the pair's
+// first half), then every kept advert after it, oldest first. The table keeps at most 16 per node.
+func (q *Queries) AlertNodeDrifts(ctx context.Context, arg AlertNodeDriftsParams) ([]AlertNodeDriftsRow, error) {
+	rows, err := q.db.Query(ctx, alertNodeDrifts, arg.Keys, arg.Cursors)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AlertNodeDriftsRow{}
+	for rows.Next() {
+		var i AlertNodeDriftsRow
+		if err := rows.Scan(&i.TargetPublicKey, &i.AdvertAt, &i.DriftSeconds); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const alertNodeReadings = `-- name: AlertNodeReadings :many
 SELECT t.k::bytea AS target_public_key, r.sampled_at, r.battery_mv, r.temperature_c, r.noise_floor, r.uptime_secs
 FROM unnest($1::bytea[]) AS t(k)

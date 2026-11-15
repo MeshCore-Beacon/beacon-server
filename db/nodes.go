@@ -48,6 +48,12 @@ func (s *Store) UpsertNode(ctx context.Context, n ingest.UpsertNodeParams, radio
 	if err != nil {
 		return uuid.Nil, err
 	}
+	if driftSeconds != nil {
+		// History for the clock alert; losing one entry is not worth failing the advert.
+		if err := s.q.RecordClockDrift(ctx, sqlc.RecordClockDriftParams{NodeID: row.ID, DriftSeconds: *driftSeconds}); err != nil {
+			slog.Warn("clock drift history not stored", "component", "db", "err", err)
+		}
+	}
 	return row.ID, nil
 }
 

@@ -108,7 +108,7 @@ func round(v float64) *int { n := int(math.Round(v)); return &n }
 // LoadTargets reads every radio the rules name with a fixed number of queries, however many rules there are.
 func (a AlertEval) LoadTargets(ctx context.Context, rules []alerts.RuleRow, now time.Time) (map[string]alerts.TargetData, error) {
 	var nodeKeys, obsKeys, nodeFalling, obsFalling [][]byte
-	nodeReboot, obsReboot := map[string]time.Time{}, map[string]time.Time{} // the oldest cursor of a reboot rule
+	nodeReboot, obsReboot, nodeClock := map[string]time.Time{}, map[string]time.Time{}, map[string]time.Time{} // the oldest cursor of a reboot rule
 	seenN, seenO, fallN, fallO := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, r := range rules {
 		k := string(r.Key)
@@ -119,6 +119,11 @@ func (a AlertEval) LoadTargets(ctx context.Context, rules []alerts.RuleRow, now 
 			}
 			if c, ok := m[k]; !ok || r.Cursor.Before(c) {
 				m[k] = r.Cursor
+			}
+		}
+		if r.Kind == alerts.KindClock && r.TargetKind != alerts.TargetObserver {
+			if c, ok := nodeClock[k]; !ok || r.Cursor.Before(c) {
+				nodeClock[k] = r.Cursor
 			}
 		}
 		if r.TargetKind == alerts.TargetObserver {
@@ -151,8 +156,7 @@ func (a AlertEval) LoadTargets(ctx context.Context, rules []alerts.RuleRow, now 
 		}
 		for _, n := range nodes {
 			td := alerts.TargetData{Name: n.Name}
-			td.Exists, td.Polled, td.LastHeard, td.AdvertAt = true, n.Polled, tsTime(n.LastSeen), tsTime(n.LastAdvertAt)
-			td.DriftSec, td.PrevDriftSec = n.DeviceClockDriftSeconds, n.PrevClockDriftSeconds
+			td.Exists, td.Polled, td.LastHeard = true, n.Polled, tsTime(n.LastSeen)
 			out[alerts.TargetID(alerts.TargetNode, n.PublicKey)] = td
 		}
 		reads, err := a.q.AlertNodeReadings(ctx, sqlc.AlertNodeReadingsParams{Keys: nodeKeys, Since: since})
@@ -186,6 +190,20 @@ func (a AlertEval) LoadTargets(ctx context.Context, rules []alerts.RuleRow, now 
 				id := alerts.TargetID(alerts.TargetNode, r.TargetPublicKey)
 				if td, ok := out[id]; ok {
 					td.Uptimes = append(td.Uptimes, alerts.Reading{At: tsTime(r.SampledAt), Uptime: r.UptimeSecs})
+					out[id] = td
+				}
+			}
+		}
+		if len(nodeClock) > 0 {
+			keys, cursors := rebootCursors(nodeClock, now)
+			ds, err := a.q.AlertNodeDrifts(ctx, sqlc.AlertNodeDriftsParams{Keys: keys, Cursors: cursors})
+			if err != nil {
+				return nil, err
+			}
+			for _, r := range ds { // oldest first, as the query returns them
+				id := alerts.TargetID(alerts.TargetNode, r.TargetPublicKey)
+				if td, ok := out[id]; ok {
+					td.Drifts = append(td.Drifts, alerts.Drift{At: tsTime(r.AdvertAt), Sec: r.DriftSeconds})
 					out[id] = td
 				}
 			}
