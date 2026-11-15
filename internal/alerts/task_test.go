@@ -34,7 +34,11 @@ type fakeEval struct {
 	lastPassIDs map[uuid.UUID]bool
 	cursor      uuid.UUID
 	loadFails   int // LoadTargets fails this many times first
+	begun, done int // passes begun and finished
 }
+
+func (f *fakeEval) BeginPass(context.Context, uuid.UUID) error  { f.begun++; return nil }
+func (f *fakeEval) FinishPass(context.Context, uuid.UUID) error { f.done++; return nil }
 
 func (f *fakeEval) BeginEvalLock(context.Context) (Unlocker, bool, error) {
 	if f.locked {
@@ -206,6 +210,8 @@ func (b *bigEval) BeginEvalLock(context.Context) (Unlocker, bool, error) {
 	return fakeLock{&closed}, true, nil
 }
 
+func (b *bigEval) BeginPass(context.Context, uuid.UUID) error  { return nil }
+func (b *bigEval) FinishPass(context.Context, uuid.UUID) error { return nil }
 func (b *bigEval) LoadCursor(context.Context) (uuid.UUID, error) { return b.cursor, nil }
 func (b *bigEval) SaveCursor(_ context.Context, id uuid.UUID) error {
 	b.cursor = id
@@ -264,5 +270,21 @@ func TestTaskCursorStaysBehindAFailedBatch(t *testing.T) {
 	}
 	if len(f.notes) != BatchSize+1 {
 		t.Fatalf("%d of %d rules evaluated after the failed batch", len(f.notes), BatchSize+1)
+	}
+}
+
+// A pass is marked finished however it ends, a failed one included: what it queued is complete for the sender.
+func TestTaskMarksThePassFinished(t *testing.T) {
+	f := &fakeEval{targets: map[string]TargetData{}, loadFails: 1, rules: []RuleRow{quietRule(1, 1)}}
+	task := NewTask(f, func() time.Time { return now })
+	_ = task.Run(context.Background())
+	_ = task.Run(context.Background())
+	if f.begun != 2 || f.done != 2 {
+		t.Fatalf("begun %d finished %d", f.begun, f.done)
+	}
+	locked := &fakeEval{locked: true}
+	_ = NewTask(locked, nil).Run(context.Background())
+	if locked.begun != 0 {
+		t.Fatal("a pass that did not run was recorded")
 	}
 }

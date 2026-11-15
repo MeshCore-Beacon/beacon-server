@@ -79,6 +79,10 @@ type EvalStore interface {
 	// uuid means start at the beginning.
 	LoadCursor(ctx context.Context) (uuid.UUID, error)
 	SaveCursor(ctx context.Context, after uuid.UUID) error
+	// BeginPass records that the pass has started and FinishPass that it has ended; the sender takes the notices of a
+	// finished pass only (see PassTimeout).
+	BeginPass(ctx context.Context, pass uuid.UUID) error
+	FinishPass(ctx context.Context, pass uuid.UUID) error
 	// RuleBatch returns up to limit enabled rules of live users with an id after the given one, by id.
 	RuleBatch(ctx context.Context, after uuid.UUID, limit int) ([]RuleRow, error)
 	// LoadTargets reads the data of every radio the rules name, in a fixed number of queries.
@@ -112,6 +116,15 @@ func (t *Task) Run(ctx context.Context) error {
 	}
 	defer lock.Close(ctx)
 	pass, now := uuid.New(), t.now()
+	if err := t.store.BeginPass(ctx, pass); err != nil {
+		return err
+	}
+	// Written however the pass ends, shutdown included: what it queued is then complete for the sender.
+	defer func() {
+		if err := t.store.FinishPass(context.WithoutCancel(ctx), pass); err != nil {
+			slog.Warn("alert pass not marked finished", "component", "alerts", "err", err)
+		}
+	}()
 	after, err := t.store.LoadCursor(ctx)
 	if err != nil {
 		return err

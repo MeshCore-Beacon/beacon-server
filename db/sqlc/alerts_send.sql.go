@@ -12,6 +12,15 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const beginAlertPass = `-- name: BeginAlertPass :exec
+INSERT INTO alert_passes (pass_id) VALUES ($1) ON CONFLICT DO NOTHING
+`
+
+func (q *Queries) BeginAlertPass(ctx context.Context, passID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, beginAlertPass, passID)
+	return err
+}
+
 const bumpAlertAttempts = `-- name: BumpAlertAttempts :exec
 UPDATE alert_outbox SET attempts = attempts + 1, next_attempt_at = $1::timestamptz + interval '1 minute' * power(2, attempts)
 WHERE id = ANY($2::bigint[])
@@ -47,6 +56,15 @@ func (q *Queries) DeleteExhaustedAlerts(ctx context.Context, maxAttempts int16) 
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const deleteOldAlertPasses = `-- name: DeleteOldAlertPasses :exec
+DELETE FROM alert_passes WHERE started_at < $1
+`
+
+func (q *Queries) DeleteOldAlertPasses(ctx context.Context, startedAt pgtype.Timestamptz) error {
+	_, err := q.db.Exec(ctx, deleteOldAlertPasses, startedAt)
+	return err
 }
 
 const deliveredAlertDevices = `-- name: DeliveredAlertDevices :many
@@ -96,6 +114,15 @@ func (q *Queries) ExpireAlertOutbox(ctx context.Context, arg ExpireAlertOutboxPa
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const finishAlertPass = `-- name: FinishAlertPass :exec
+UPDATE alert_passes SET finished_at = now() WHERE pass_id = $1
+`
+
+func (q *Queries) FinishAlertPass(ctx context.Context, passID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, finishAlertPass, passID)
+	return err
 }
 
 const liveUserDevices = `-- name: LiveUserDevices :many
@@ -177,8 +204,10 @@ WITH p AS (
     JOIN users u ON u.id = o.user_id AND u.disabled_at IS NULL
     LEFT JOIN nodes n ON o.target_kind = 'node' AND n.public_key = o.target_public_key
     LEFT JOIN observers ob ON o.target_kind = 'observer' AND ob.public_key = o.target_public_key
-    WHERE o.delivered_at IS NULL AND o.created_at >= $2
-      AND (o.next_attempt_at IS NULL OR o.next_attempt_at <= $3)
+    LEFT JOIN alert_passes ap ON ap.pass_id = o.pass_id
+    WHERE (ap.pass_id IS NULL OR ap.finished_at IS NOT NULL OR ap.started_at < $2)
+      AND o.delivered_at IS NULL AND o.created_at >= $3
+      AND (o.next_attempt_at IS NULL OR o.next_attempt_at <= $4)
 ), g AS (
     SELECT user_id, pass_id, count(*) AS n, sum(count(*)) OVER (ORDER BY user_id, pass_id) AS running
     FROM p GROUP BY user_id, pass_id
@@ -191,9 +220,10 @@ ORDER BY p.user_id, p.pass_id, p.id
 `
 
 type PendingAlertsParams struct {
-	RowLimit  int64              `json:"row_limit"`
-	NotBefore pgtype.Timestamptz `json:"not_before"`
-	Now       pgtype.Timestamptz `json:"now"`
+	RowLimit          int64              `json:"row_limit"`
+	PassTimeoutBefore pgtype.Timestamptz `json:"pass_timeout_before"`
+	NotBefore         pgtype.Timestamptz `json:"not_before"`
+	Now               pgtype.Timestamptz `json:"now"`
 }
 
 type PendingAlertsRow struct {
@@ -212,10 +242,16 @@ type PendingAlertsRow struct {
 	TargetID        uuid.UUID `json:"target_id"`
 }
 
-// Whole user and pass groups only, so one pass's notices for a user stay in one mail: groups are taken in order
+// Notices of a finished pass (or one that started before pass_timeout_before and never finished) only, and whole
+// user and pass groups only, so one pass's notices for a user stay in one mail: groups are taken in order
 // while the running total stays within row_limit, and the first group is taken whatever its size.
 func (q *Queries) PendingAlerts(ctx context.Context, arg PendingAlertsParams) ([]PendingAlertsRow, error) {
-	rows, err := q.db.Query(ctx, pendingAlerts, arg.RowLimit, arg.NotBefore, arg.Now)
+	rows, err := q.db.Query(ctx, pendingAlerts,
+		arg.RowLimit,
+		arg.PassTimeoutBefore,
+		arg.NotBefore,
+		arg.Now,
+	)
 	if err != nil {
 		return nil, err
 	}

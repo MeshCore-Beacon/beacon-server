@@ -407,12 +407,23 @@ func (a AlertEval) BeginSendLock(ctx context.Context) (alerts.Unlocker, bool, er
 		func(q *sqlc.Queries, c context.Context) error { return q.AlertsSendUnlock(c) })
 }
 
+func (a AlertEval) BeginPass(ctx context.Context, pass uuid.UUID) error {
+	return a.q.BeginAlertPass(ctx, pass)
+}
+
+func (a AlertEval) FinishPass(ctx context.Context, pass uuid.UUID) error {
+	return a.q.FinishAlertPass(ctx, pass)
+}
+
 func (a AlertEval) Expire(ctx context.Context, undeliveredBefore, deliveredBefore time.Time) (int64, error) {
+	if err := a.q.DeleteOldAlertPasses(ctx, ts(undeliveredBefore)); err != nil {
+		return 0, err
+	}
 	return a.q.ExpireAlertOutbox(ctx, sqlc.ExpireAlertOutboxParams{UndeliveredBefore: ts(undeliveredBefore), DeliveredBefore: ts(deliveredBefore)})
 }
 
 func (a AlertEval) Pending(ctx context.Context, notBefore, now time.Time, limit int) ([]alerts.OutboxRow, error) {
-	rows, err := a.q.PendingAlerts(ctx, sqlc.PendingAlertsParams{NotBefore: ts(notBefore), Now: ts(now), RowLimit: int64(limit)})
+	rows, err := a.q.PendingAlerts(ctx, sqlc.PendingAlertsParams{NotBefore: ts(notBefore), Now: ts(now), PassTimeoutBefore: ts(now.Add(-alerts.PassTimeout)), RowLimit: int64(limit)})
 	if err != nil {
 		return nil, err
 	}

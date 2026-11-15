@@ -40,6 +40,12 @@ type AlertOutboxDevice struct {
 	DeliveredAt pgtype.Timestamptz `json:"delivered_at"`
 }
 
+type AlertPass struct {
+	PassID     uuid.UUID          `json:"pass_id"`
+	StartedAt  pgtype.Timestamptz `json:"started_at"`
+	FinishedAt pgtype.Timestamptz `json:"finished_at"`
+}
+
 type AnalyticsDirtyHour struct {
 	Hour       pgtype.Timestamptz `json:"hour"`
 	EnqueuedAt pgtype.Timestamptz `json:"enqueued_at"`

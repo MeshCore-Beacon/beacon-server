@@ -4,6 +4,7 @@
 package db
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -118,5 +119,53 @@ func TestAlertTelemetryStopsWhenPollingIsOffPostgres(t *testing.T) {
 	}
 	if got := ruleStateOf(t, ctx, pool, "battery_low"); got != "inactive" {
 		t.Fatalf("rule with polling off: %s", got)
+	}
+}
+
+// The sender takes the notices of a finished pass only, so a pass that is still being evaluated is not split across
+// mails; one that never finished is released after the timeout.
+func TestAlertMailWaitsForTheFinishedPassPostgres(t *testing.T) {
+	ctx, pool, s := userStore(t)
+	u := newUser(t, ctx, s, "alice")
+	if err := s.SetUserEmailVerified(ctx, u.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	pass := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO alert_passes (pass_id) VALUES ($1)`, pass); err != nil {
+		t.Fatal(err)
+	}
+	m := &recMail{}
+	sender := alerts.NewSender(AlertEval{s}, "email", m, nil, nil, nil)
+	queueNotice(t, ctx, s, u.ID, pass, "battery_low", "Hill", time.Now())
+	if err := sender.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	queueNotice(t, ctx, s, u.ID, pass, "rebooted", "Hill", time.Now())
+	if err := sender.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.got) != 0 {
+		t.Fatalf("a pass still being evaluated was sent: %v", m.got)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE alert_passes SET finished_at = now() WHERE pass_id = $1`, pass); err != nil {
+		t.Fatal(err)
+	}
+	if err := sender.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.got) != 1 || !strings.Contains(m.got[0], "2 alerts") {
+		t.Fatalf("a finished pass should go out as one mail: %v", m.got)
+	}
+	// A pass the process never finished is released after the timeout.
+	stuck := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO alert_passes (pass_id, started_at) VALUES ($1, now() - interval '16 minutes')`, stuck); err != nil {
+		t.Fatal(err)
+	}
+	queueNotice(t, ctx, s, u.ID, stuck, "rebooted", "Hill", time.Now())
+	if err := sender.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.got) != 2 {
+		t.Fatalf("an interrupted pass was never released: %v", m.got)
 	}
 }

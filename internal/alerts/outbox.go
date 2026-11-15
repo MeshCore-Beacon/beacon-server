@@ -20,6 +20,8 @@ const (
 	SendInterval = time.Minute
 	// MaxAge: a notification not delivered within this long is dropped.
 	MaxAge = 2 * time.Hour
+	// PassTimeout: the notices of an evaluation pass that never finished (the process stopped) are sent after this.
+	PassTimeout = 15 * time.Minute
 	// MaxAttempts: a notification that failed this often is dropped.
 	MaxAttempts = 5
 	sendBatch   = 300

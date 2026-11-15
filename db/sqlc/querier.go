@@ -63,6 +63,7 @@ type Querier interface {
 	// in id order, that lack one. Rows that already carry a type are never touched. Returns how many
 	// untyped rows it picked, how many it typed, and the last picked id (0 when it picked none).
 	BackfillObservationPayloadTypes(ctx context.Context, arg BackfillObservationPayloadTypesParams) (BackfillObservationPayloadTypesRow, error)
+	BeginAlertPass(ctx context.Context, passID uuid.UUID) error
 	// Counts a failed attempt and holds the notice back for a minute, doubling with each earlier failure.
 	BumpAlertAttempts(ctx context.Context, arg BumpAlertAttemptsParams) error
 	BumpUserAtlas(ctx context.Context, arg BumpUserAtlasParams) (int64, error)
@@ -124,6 +125,7 @@ type Querier interface {
 	DeleteGraceRoutesSlice(ctx context.Context, arg DeleteGraceRoutesSliceParams) (DeleteGraceRoutesSliceRow, error)
 	// Run under LockPollingTarget. Returns the rank the row had, for RenumberTargetAssignments.
 	DeleteObserverTargetAssignment(ctx context.Context, arg DeleteObserverTargetAssignmentParams) (int16, error)
+	DeleteOldAlertPasses(ctx context.Context, startedAt pgtype.Timestamptz) error
 	// Keeps the channel IATA filter in step with packet retention.
 	DeleteOldChannelIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error
 	// Deletes nodes not seen since the given cutoff. node_iatas and node_neighbors cascade-
@@ -202,6 +204,7 @@ type Querier interface {
 	FillRollupObs(ctx context.Context, dollar_1 pgtype.Timestamptz) error
 	// The requested sites that have at least one row: a site with none adds no row to any site page.
 	FilterKnownSites(ctx context.Context, iatas []string) ([]string, error)
+	FinishAlertPass(ctx context.Context, passID uuid.UUID) error
 	// Marks the hour complete and bumps the revision only when its content changed.
 	FinishRollupHour(ctx context.Context, arg FinishRollupHourParams) (bool, error)
 	GetAccount(ctx context.Context, id uuid.UUID) (Account, error)
@@ -690,7 +693,8 @@ type Querier interface {
 	PacketSitesTotalBytes(ctx context.Context) (int64, error)
 	// Who a live token belongs to, without using it.
 	PeekUserToken(ctx context.Context, arg PeekUserTokenParams) (uuid.UUID, error)
-	// Whole user and pass groups only, so one pass's notices for a user stay in one mail: groups are taken in order
+	// Notices of a finished pass (or one that started before pass_timeout_before and never finished) only, and whole
+	// user and pass groups only, so one pass's notices for a user stay in one mail: groups are taken in order
 	// while the running total stays within row_limit, and the first group is taken whatever its size.
 	PendingAlerts(ctx context.Context, arg PendingAlertsParams) ([]PendingAlertsRow, error)
 	PollingAdminRequestCounts(ctx context.Context, targets [][]byte) ([]PollingAdminRequestCountsRow, error)

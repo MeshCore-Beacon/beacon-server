@@ -383,6 +383,20 @@ func (mr *MockQuerierMockRecorder) BackfillObservationPayloadTypes(ctx, arg any)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BackfillObservationPayloadTypes", reflect.TypeOf((*MockQuerier)(nil).BackfillObservationPayloadTypes), ctx, arg)
 }
 
+// BeginAlertPass mocks base method.
+func (m *MockQuerier) BeginAlertPass(ctx context.Context, passID uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "BeginAlertPass", ctx, passID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// BeginAlertPass indicates an expected call of BeginAlertPass.
+func (mr *MockQuerierMockRecorder) BeginAlertPass(ctx, passID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BeginAlertPass", reflect.TypeOf((*MockQuerier)(nil).BeginAlertPass), ctx, passID)
+}
+
 // BumpAlertAttempts mocks base method.
 func (m *MockQuerier) BumpAlertAttempts(ctx context.Context, arg db.BumpAlertAttemptsParams) error {
 	m.ctrl.T.Helper()
@@ -894,6 +908,20 @@ func (m *MockQuerier) DeleteObserverTargetAssignment(ctx context.Context, arg db
 func (mr *MockQuerierMockRecorder) DeleteObserverTargetAssignment(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteObserverTargetAssignment", reflect.TypeOf((*MockQuerier)(nil).DeleteObserverTargetAssignment), ctx, arg)
+}
+
+// DeleteOldAlertPasses mocks base method.
+func (m *MockQuerier) DeleteOldAlertPasses(ctx context.Context, startedAt pgtype.Timestamptz) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteOldAlertPasses", ctx, startedAt)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteOldAlertPasses indicates an expected call of DeleteOldAlertPasses.
+func (mr *MockQuerierMockRecorder) DeleteOldAlertPasses(ctx, startedAt any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldAlertPasses", reflect.TypeOf((*MockQuerier)(nil).DeleteOldAlertPasses), ctx, startedAt)
 }
 
 // DeleteOldChannelIATAs mocks base method.
@@ -1495,6 +1523,20 @@ func (m *MockQuerier) FilterKnownSites(ctx context.Context, iatas []string) ([]s
 func (mr *MockQuerierMockRecorder) FilterKnownSites(ctx, iatas any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FilterKnownSites", reflect.TypeOf((*MockQuerier)(nil).FilterKnownSites), ctx, iatas)
+}
+
+// FinishAlertPass mocks base method.
+func (m *MockQuerier) FinishAlertPass(ctx context.Context, passID uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FinishAlertPass", ctx, passID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// FinishAlertPass indicates an expected call of FinishAlertPass.
+func (mr *MockQuerierMockRecorder) FinishAlertPass(ctx, passID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FinishAlertPass", reflect.TypeOf((*MockQuerier)(nil).FinishAlertPass), ctx, passID)
 }
 
 // FinishRollupHour mocks base method.
