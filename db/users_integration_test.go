@@ -720,6 +720,10 @@ func TestUserDeleteStaleUnverifiedPostgres(t *testing.T) {
 	withLink := mk("withlink", old, false)
 	fresh := mk("fresh", now.Add(-time.Hour), false)
 	verified := mk("verified", old, true)
+	disabled := mk("disabled", old, false)
+	if _, err := pool.Exec(ctx, `UPDATE users SET disabled_at = now() WHERE id = $1`, disabled.ID); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.CreateToken(ctx, withLink.ID, users.TokenVerify, []byte("live"), []byte(`{}`), now.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
@@ -729,7 +733,7 @@ func TestUserDeleteStaleUnverifiedPostgres(t *testing.T) {
 	for name, c := range map[string]struct {
 		u    users.User
 		kept bool
-	}{"stale": {stale, false}, "withlink": {withLink, true}, "fresh": {fresh, true}, "verified": {verified, true}} {
+	}{"stale": {stale, false}, "withlink": {withLink, true}, "fresh": {fresh, true}, "verified": {verified, true}, "disabled": {disabled, true}} {
 		_, err := s.UserByID(ctx, c.u.ID)
 		if c.kept && err != nil || !c.kept && !errors.Is(err, users.ErrNotFound) {
 			t.Errorf("%s: kept=%v err=%v", name, c.kept, err)

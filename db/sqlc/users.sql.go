@@ -241,7 +241,7 @@ func (q *Queries) DeleteExpiredUserTokens(ctx context.Context, cutoff pgtype.Tim
 
 const deleteStaleUnverifiedUsers = `-- name: DeleteStaleUnverifiedUsers :exec
 DELETE FROM users u
-WHERE u.email_verified_at IS NULL AND u.provider = 'local' AND u.created_at < $1
+WHERE u.email_verified_at IS NULL AND u.disabled_at IS NULL AND u.provider = 'local' AND u.created_at < $1
   AND NOT EXISTS (
       SELECT 1 FROM user_tokens t
       WHERE t.user_id = u.id AND t.kind = 'verify' AND t.used_at IS NULL AND t.expires_at > $2
@@ -254,7 +254,7 @@ type DeleteStaleUnverifiedUsersParams struct {
 }
 
 // A sign-up nobody confirmed holds its username and address; once it is old and has no live verify link left it
-// is removed so both can be used again.
+// is removed so both can be used again. A disabled account is never removed here.
 func (q *Queries) DeleteStaleUnverifiedUsers(ctx context.Context, arg DeleteStaleUnverifiedUsersParams) error {
 	_, err := q.db.Exec(ctx, deleteStaleUnverifiedUsers, arg.Cutoff, arg.Now)
 	return err

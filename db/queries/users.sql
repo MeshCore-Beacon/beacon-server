@@ -148,9 +148,9 @@ DELETE FROM user_tokens WHERE used_at < sqlc.arg(cutoff) OR expires_at < sqlc.ar
 
 -- name: DeleteStaleUnverifiedUsers :exec
 -- A sign-up nobody confirmed holds its username and address; once it is old and has no live verify link left it
--- is removed so both can be used again.
+-- is removed so both can be used again. A disabled account is never removed here.
 DELETE FROM users u
-WHERE u.email_verified_at IS NULL AND u.provider = 'local' AND u.created_at < sqlc.arg(cutoff)
+WHERE u.email_verified_at IS NULL AND u.disabled_at IS NULL AND u.provider = 'local' AND u.created_at < sqlc.arg(cutoff)
   AND NOT EXISTS (
       SELECT 1 FROM user_tokens t
       WHERE t.user_id = u.id AND t.kind = 'verify' AND t.used_at IS NULL AND t.expires_at > sqlc.arg(now)
