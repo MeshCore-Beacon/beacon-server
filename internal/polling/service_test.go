@@ -211,7 +211,8 @@ func (f *fakeStore) PollingOwnerRows(_ context.Context, obs []byte, after time.T
 	var out []OwnerRow
 	for t := range c.nodes {
 		tb, _ := hex.DecodeString(t)
-		row := OwnerRow{Target: tb, Rank: -1, Assigned: len(f.assigns[t])}
+		row := OwnerRow{Target: tb, Rank: -1, Assigned: len(f.assigns[t]),
+			ObserverApproved: f.approved[hx(obs)], ObserverBlocked: f.blocked[hx(obs)]}
 		trusted := map[string]bool{}
 		for _, a := range f.assigns[t] {
 			if bytes.Equal(a.Observer, obs) {

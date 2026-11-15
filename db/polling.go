@@ -504,7 +504,11 @@ func (s *Store) PollingOwnerRows(ctx context.Context, observer []byte, receivedA
 	for _, r := range rows {
 		row := polling.OwnerRow{Target: r.TargetPublicKey, Rank: int(r.Rank), Assigned: int(r.Assigned),
 			Requested: r.Requested, ClaimedRequested: r.ClaimedRequested,
-			TargetRequested: r.TargetRequested, AcceptsRequests: r.AcceptsRequests, RequestSlots: int(r.RequestSlots)}
+			TargetRequested: r.TargetRequested, AcceptsRequests: r.AcceptsRequests, RequestSlots: int(r.RequestSlots),
+			ObserverApproved: r.ObserverApproved, ObserverBlocked: r.ObserverBlocked}
+		if r.RequestID.Valid && r.PasswordVer != nil {
+			row.Password = &polling.RequestedPassword{RequestID: r.RequestID.Bytes, Ver: *r.PasswordVer, CT: r.PasswordCt, Nonce: r.PasswordNonce}
+		}
 		if r.LatestTs.Valid {
 			t := r.LatestTs.Time
 			row.LatestTS = &t

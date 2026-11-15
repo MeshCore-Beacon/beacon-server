@@ -4967,21 +4967,6 @@ func (mr *MockQuerierMockRecorder) RequestNode(ctx, id any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RequestNode", reflect.TypeOf((*MockQuerier)(nil).RequestNode), ctx, id)
 }
 
-// RequestedPasswords mocks base method.
-func (m *MockQuerier) RequestedPasswords(ctx context.Context, targets [][]byte) ([]db.RequestedPasswordsRow, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "RequestedPasswords", ctx, targets)
-	ret0, _ := ret[0].([]db.RequestedPasswordsRow)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// RequestedPasswords indicates an expected call of RequestedPasswords.
-func (mr *MockQuerierMockRecorder) RequestedPasswords(ctx, targets any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RequestedPasswords", reflect.TypeOf((*MockQuerier)(nil).RequestedPasswords), ctx, targets)
-}
-
 // ResetRequestAttention mocks base method.
 func (m *MockQuerier) ResetRequestAttention(ctx context.Context) error {
 	m.ctrl.T.Helper()

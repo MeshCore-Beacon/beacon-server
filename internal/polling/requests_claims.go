@@ -19,10 +19,9 @@ type RequestedPassword struct {
 	CT, Nonce []byte
 }
 
-// RequestedStore is what requested targets need besides the election: the password in use and the claim-driven
-// state changes, which are judged under the target's lock.
+// RequestedStore is what requested targets need besides the election: the claim-driven state changes, which are
+// judged under the target's lock. The password in use arrives on the owner rows.
 type RequestedStore interface {
-	RequestedPasswords(ctx context.Context, targets [][]byte) (map[string]RequestedPassword, error)
 	MutateRequestTarget(ctx context.Context, target []byte, userID uuid.UUID, fn func(*TargetState) error) error
 	// ReplacePollingClaimReporting stores the claim and, in the same transaction, runs report on the state of each
 	// target it names as requested. Nothing is stored when a report cannot be.
@@ -44,36 +43,31 @@ func claimReport(c Claim, now time.Time, ignored *[][]byte) func(ClaimNode, *Tar
 	}
 }
 
-// addEnvelopes seals the password in use to each observer that is assigned a requested target. A fresh envelope is
-// built on every answer. An entry that cannot get its envelope is left out: an entry without pw tells the device to
+// addEnvelopes seals the password in use, read with the rows, to each observer that is assigned a requested target.
+// A fresh envelope is built on every answer. An entry that cannot get its envelope is left out: an entry without pw tells the device to
 // try a blank or hello login, which a repeater may answer with admin access, and a requested target missing from
 // an answer is dropped by the device and offered again on the next one.
 func (s *Service) addEnvelopes(ctx context.Context, observer []byte, rows []OwnerRow, nodes map[string]OwnerEntry) error {
-	var targets [][]byte
+	var given []OwnerRow
 	for _, r := range rows {
 		if r.Requested && r.PWOK && r.Rank >= 0 && !r.Excluded {
-			targets = append(targets, r.Target)
+			given = append(given, r)
 		}
 	}
-	if len(targets) == 0 {
+	if len(given) == 0 {
 		return nil
 	}
 	drop := func(t []byte) { delete(nodes, hex.EncodeToString(t)) }
 	if s.reqs == nil || s.sealer == nil {
-		for _, t := range targets {
-			drop(t)
+		for _, r := range given {
+			drop(r.Target)
 		}
 		return nil
 	}
-	pws, err := s.reqs.RequestedPasswords(ctx, targets)
-	if err != nil {
-		s.log.Warn("requested passwords", "observer", short(observer), "err", err)
-		return err // an omitted requested target reads as withdrawn, so the answer fails instead
-	}
 	served := map[string]int64{}
-	for _, t := range targets {
-		p, ok := pws[string(t)]
-		if !ok {
+	for _, r := range given {
+		t, p := r.Target, r.Password
+		if p == nil {
 			drop(t) // no longer requested
 			continue
 		}

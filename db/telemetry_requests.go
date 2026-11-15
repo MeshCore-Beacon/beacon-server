@@ -282,20 +282,6 @@ func removeUserRequestsTx(ctx context.Context, q *sqlc.Queries, id uuid.UUID, ta
 	return nil
 }
 
-// RequestedPasswords returns the sealed password in use for each of the targets that is requested. A target that is
-// not requested is absent.
-func (s *Store) RequestedPasswords(ctx context.Context, targets [][]byte) (map[string]polling.RequestedPassword, error) {
-	rows, err := s.q.RequestedPasswords(ctx, targets)
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]polling.RequestedPassword, len(rows))
-	for _, r := range rows {
-		out[string(r.TargetPublicKey)] = polling.RequestedPassword{RequestID: r.RequestID, Ver: r.Ver, CT: r.PasswordCt, Nonce: r.PasswordNonce}
-	}
-	return out, nil
-}
-
 // RecordServedVersions notes the password version each target's entry carried in an owners answer to the observer.
 func (s *Store) RecordServedVersions(ctx context.Context, observer []byte, vers map[string]int64, at time.Time) error {
 	for target, ver := range vers {

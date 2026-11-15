@@ -256,7 +256,8 @@ func (s *Service) Policy(ctx context.Context, c Caller) (Policy, error) {
 }
 
 // Owners answers the firmware's owners question: the policy plus the caller's role for each claimed repeater. The
-// answer reflects what is stored or is an error (503): a read that fails never leaves a requested entry out.
+// answer reflects what is stored or is an error (503): a read that fails never leaves a requested entry out. The
+// requested entries come from one statement, so they hold in a single snapshot.
 func (s *Service) Owners(ctx context.Context, c Caller) (OwnersAnswer, error) {
 	p, err := s.Policy(ctx, c)
 	if err != nil {
@@ -282,17 +283,12 @@ func (s *Service) Owners(ctx context.Context, c Caller) (OwnersAnswer, error) {
 		}
 	}
 	OfferSeats(rows)
-	// Approval can be withdrawn between elections; a password goes only to an observer approved right now.
-	if s.requestsNeedApproval() {
-		_, approved, err := s.store.PollingObserverFlags(ctx, c.Observer)
-		if err != nil {
-			s.log.Warn("polling observer flags", "observer", short(c.Observer), "err", err)
-			return OwnersAnswer{}, err // a missing requested entry reads as withdrawn
-		}
-		if !approved {
-			for i := range rows {
-				rows[i].PWOK = false
-			}
+	// Approval can be withdrawn between elections. The flags come from the same read as the password, so a password
+	// goes only to an observer that was allowed it when that password was in use.
+	needApproval := s.requestsNeedApproval()
+	for i := range rows {
+		if rows[i].ObserverBlocked || (needApproval && !rows[i].ObserverApproved) {
+			rows[i].PWOK = false
 		}
 	}
 	ans := BuildOwners(rows, p)

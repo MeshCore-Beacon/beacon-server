@@ -713,7 +713,9 @@ type Querier interface {
 	// advert evidence, so an observer Beacon has never heard the repeater through cannot stand others down. A target the
 	// observer was handed as a requested one is listed even before its claim names it (that is how it learns of it);
 	// claimed_requested is true when the claim names it as requested; target_requested when a request is in use for it.
-	// accepts_requests and request_slots are the claim's, for polling.OfferSeats.
+	// accepts_requests and request_slots are the claim's, for polling.OfferSeats. The observer's flags and the password
+	// in use come from the same statement, so an answer never pairs a password with an approval it did not exist under.
+	// The password is only read for a requested assignment of an unblocked observer whose claim accepts requests.
 	PollingOwnerRows(ctx context.Context, arg PollingOwnerRowsParams) ([]PollingOwnerRowsRow, error)
 	PollingTargetExists(ctx context.Context, targetPublicKey []byte) (bool, error)
 	PruneImportedRegions(ctx context.Context, keep []string) ([]string, error)
@@ -751,9 +753,6 @@ type Querier interface {
 	// fetchedAt comes from the source's checked_at when read.
 	ReplaceRepeaters(ctx context.Context, arg ReplaceRepeatersParams) error
 	RequestNode(ctx context.Context, id uuid.UUID) (RequestNodeRow, error)
-	// The password in use for each requested target among $1, sealed. A target whose option in use is the blank login
-	// has no ciphertext.
-	RequestedPasswords(ctx context.Context, targets [][]byte) ([]RequestedPasswordsRow, error)
 	// A request that is fine again can be announced again the next time it needs attention.
 	ResetRequestAttention(ctx context.Context) error
 	// Batch form of ResolveEndpointHashes for a page of packets. Matches the cross

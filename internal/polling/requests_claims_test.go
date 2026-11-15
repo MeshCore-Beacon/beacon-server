@@ -10,7 +10,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"strings"
@@ -21,11 +20,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// claimStore adds the password lookup to the in-memory request store.
+// claimStore adds the passwords in use to the in-memory request store; withPasswords puts them on owner rows the way
+// the store's owner read does.
 type claimStore struct {
 	*memRequests
-	pwErr    error
-	pwCalls  int
 	passwrds map[string]RequestedPassword
 }
 
@@ -33,15 +31,13 @@ func newClaimStore() *claimStore {
 	return &claimStore{memRequests: newMem(), passwrds: map[string]RequestedPassword{}}
 }
 
-func (s *claimStore) RequestedPasswords(_ context.Context, targets [][]byte) (map[string]RequestedPassword, error) {
-	s.pwCalls++
-	out := map[string]RequestedPassword{}
-	for _, t := range targets {
-		if p, ok := s.passwrds[string(t)]; ok {
-			out[string(t)] = p
+func (s *claimStore) withPasswords(rows []OwnerRow) []OwnerRow {
+	for i := range rows {
+		if p, ok := s.passwrds[string(rows[i].Target)]; ok && rows[i].Requested {
+			rows[i].Password = &p
 		}
 	}
-	return out, s.pwErr
+	return rows
 }
 
 func (s *claimStore) RecordServedVersions(_ context.Context, observer []byte, vers map[string]int64, _ time.Time) error {
@@ -269,6 +265,9 @@ func newDevice(t *testing.T) device {
 
 func ownersFor(t *testing.T, svc *Service, d device, rows []OwnerRow) map[string]OwnerEntry {
 	t.Helper()
+	if st, ok := svc.reqs.(*claimStore); ok {
+		rows = st.withPasswords(rows)
+	}
 	nodes := BuildOwners(rows, DisabledPolicy()).Nodes
 	if err := svc.addEnvelopes(context.Background(), d.pub, rows, nodes); err != nil {
 		t.Fatal(err)
@@ -357,14 +356,8 @@ func TestOwnersLeavesOutTargetsWhoseEnvelopeFails(t *testing.T) {
 	if _, ok := ownersFor(t, svc, d, rows)[hex.EncodeToString(target)]; ok {
 		t.Fatal("entry kept")
 	}
-	// A store failure fails the answer: dropping the entry would make the device forget the target.
-	st.passwrds[string(target)] = RequestedPassword{RequestID: id, Ver: 1, CT: ct, Nonce: nonce}
-	st.pwErr = errors.New("db down")
-	if err := svc.addEnvelopes(context.Background(), d.pub, rows, BuildOwners(rows, DisabledPolicy()).Nodes); err == nil {
-		t.Fatal("a store error answered 200")
-	}
 	// A bad observer key cannot be sealed to.
-	st.pwErr = nil
+	st.passwrds[string(target)] = RequestedPassword{RequestID: id, Ver: 1, CT: ct, Nonce: nonce}
 	bad := device{pub: bytes.Repeat([]byte{0}, 31)}
 	if _, ok := ownersFor(t, svc, bad, rows)[hex.EncodeToString(target)]; ok {
 		t.Fatal("entry kept for a bad key")
@@ -400,6 +393,7 @@ func TestOwnersAnswerWithEightEnvelopesFitsTheCap(t *testing.T) {
 		st.passwrds[string(target)] = RequestedPassword{RequestID: id, Ver: 4000000000, CT: ct, Nonce: nonce}
 		rows = append(rows, OwnerRow{Target: target, Rank: 2, LatestTS: &ts, Requested: true, PWOK: true})
 	}
+	rows = st.withPasswords(rows)
 	ans := BuildOwners(rows, BuildPolicy(c, RuntimeState{}, Caller{}, policyNow))
 	svc.addEnvelopes(context.Background(), d.pub, rows, ans.Nodes)
 	envs := 0

@@ -60,14 +60,6 @@ ORDER BY r.created_at, r.id;
 -- name: RequestNode :one
 SELECT public_key, node_type, COALESCE(name, '')::text AS name FROM nodes WHERE id = $1;
 
--- name: RequestedPasswords :many
--- The password in use for each requested target among $1, sealed. A target whose option in use is the blank login
--- has no ciphertext.
-SELECT t.target_public_key::bytea AS target_public_key, t.ver, r.id AS request_id, r.password_ct, r.password_nonce
-FROM polling_targets t
-JOIN telemetry_requests r ON r.id = t.active_request_id
-WHERE t.target_public_key = ANY(sqlc.arg(targets)::bytea[]);
-
 -- name: InsertPollingAdminStop :execrows
 INSERT INTO polling_admin_stops (target_public_key, observer_public_key, reported_at) VALUES ($1, $2, $3)
 ON CONFLICT (target_public_key, observer_public_key) DO NOTHING;

@@ -210,6 +210,10 @@ type OwnerRow struct {
 	// The claim's own numbers, the same on every row.
 	AcceptsRequests bool
 	RequestSlots    int
+	// The observer's flags and the password in use, read in the same statement as the rest of the row. Password is
+	// nil unless the row is a requested assignment of an unblocked observer whose claim accepts requests.
+	ObserverApproved, ObserverBlocked bool
+	Password                          *RequestedPassword
 }
 
 // OfferSeats sets PWOK on the requested assignments the device can take in this answer. The firmware drops the

@@ -234,17 +234,11 @@ func TestCleanupKeepsDenseRanksAndStatusPostgres(t *testing.T) {
 	}
 }
 
-type approvalReadError struct {
-	*Store
-	calls int
-}
+// approvalReadError fails the read that carries the observer's approval along with its owner rows.
+type approvalReadError struct{ *Store }
 
-func (s *approvalReadError) PollingObserverFlags(ctx context.Context, o []byte) (bool, bool, error) {
-	s.calls++
-	if s.calls == 2 {
-		return false, false, fmt.Errorf("transient approval read failure")
-	}
-	return s.Store.PollingObserverFlags(ctx, o)
+func (s *approvalReadError) PollingOwnerRows(context.Context, []byte, time.Time) ([]polling.OwnerRow, error) {
+	return nil, fmt.Errorf("transient approval read failure")
 }
 
 // A failed approval read fails the owners answer instead of withdrawing the requested entries.

@@ -568,49 +568,6 @@ func (q *Queries) RequestNode(ctx context.Context, id uuid.UUID) (RequestNodeRow
 	return i, err
 }
 
-const requestedPasswords = `-- name: RequestedPasswords :many
-SELECT t.target_public_key::bytea AS target_public_key, t.ver, r.id AS request_id, r.password_ct, r.password_nonce
-FROM polling_targets t
-JOIN telemetry_requests r ON r.id = t.active_request_id
-WHERE t.target_public_key = ANY($1::bytea[])
-`
-
-type RequestedPasswordsRow struct {
-	TargetPublicKey []byte    `json:"target_public_key"`
-	Ver             int64     `json:"ver"`
-	RequestID       uuid.UUID `json:"request_id"`
-	PasswordCt      []byte    `json:"password_ct"`
-	PasswordNonce   []byte    `json:"password_nonce"`
-}
-
-// The password in use for each requested target among $1, sealed. A target whose option in use is the blank login
-// has no ciphertext.
-func (q *Queries) RequestedPasswords(ctx context.Context, targets [][]byte) ([]RequestedPasswordsRow, error) {
-	rows, err := q.db.Query(ctx, requestedPasswords, targets)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []RequestedPasswordsRow{}
-	for rows.Next() {
-		var i RequestedPasswordsRow
-		if err := rows.Scan(
-			&i.TargetPublicKey,
-			&i.Ver,
-			&i.RequestID,
-			&i.PasswordCt,
-			&i.PasswordNonce,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const targetStillOffline = `-- name: TargetStillOffline :one
 SELECT EXISTS (
     SELECT 1

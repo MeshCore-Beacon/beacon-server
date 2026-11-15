@@ -1193,11 +1193,17 @@ SELECT m.target_public_key::bytea AS target_public_key, COALESCE(a.rank, -1)::in
        COALESCE(pc.requested, false)::boolean AS claimed_requested,
        EXISTS (SELECT 1 FROM polling_targets pt
                WHERE pt.target_public_key = m.target_public_key AND pt.active_request_id IS NOT NULL) AS target_requested,
-       cl.accepts_requests, cl.request_slots::int AS request_slots
+       cl.accepts_requests, cl.request_slots::int AS request_slots,
+       COALESCE(po.approved, false)::boolean AS observer_approved, COALESCE(po.blocked, false)::boolean AS observer_blocked,
+       pr.id AS request_id, pt.ver AS password_ver, pr.password_ct, pr.password_nonce
 FROM mine m
 JOIN polling_claims cl ON cl.observer_public_key = $1
+LEFT JOIN polling_observers po ON po.observer_public_key = cl.observer_public_key
 LEFT JOIN polling_candidates pc ON pc.observer_public_key = cl.observer_public_key AND pc.target_public_key = m.target_public_key
 LEFT JOIN polling_assignments a ON a.target_public_key = m.target_public_key AND a.observer_public_key = cl.observer_public_key
+LEFT JOIN polling_targets pt ON pt.target_public_key = m.target_public_key
+    AND a.requested AND cl.accepts_requests AND NOT COALESCE(po.blocked, false)
+LEFT JOIN telemetry_requests pr ON pr.id = pt.active_request_id
 WHERE cl.received_at > $2
 ORDER BY m.target_public_key
 `
@@ -1217,13 +1223,21 @@ type PollingOwnerRowsRow struct {
 	TargetRequested  bool               `json:"target_requested"`
 	AcceptsRequests  bool               `json:"accepts_requests"`
 	RequestSlots     int32              `json:"request_slots"`
+	ObserverApproved bool               `json:"observer_approved"`
+	ObserverBlocked  bool               `json:"observer_blocked"`
+	RequestID        pgtype.UUID        `json:"request_id"`
+	PasswordVer      *int64             `json:"password_ver"`
+	PasswordCt       []byte             `json:"password_ct"`
+	PasswordNonce    []byte             `json:"password_nonce"`
 }
 
 // assigned counts the target's assignment rows. latest_ts only trusts readings from an assigned observer with
 // advert evidence, so an observer Beacon has never heard the repeater through cannot stand others down. A target the
 // observer was handed as a requested one is listed even before its claim names it (that is how it learns of it);
 // claimed_requested is true when the claim names it as requested; target_requested when a request is in use for it.
-// accepts_requests and request_slots are the claim's, for polling.OfferSeats.
+// accepts_requests and request_slots are the claim's, for polling.OfferSeats. The observer's flags and the password
+// in use come from the same statement, so an answer never pairs a password with an approval it did not exist under.
+// The password is only read for a requested assignment of an unblocked observer whose claim accepts requests.
 func (q *Queries) PollingOwnerRows(ctx context.Context, arg PollingOwnerRowsParams) ([]PollingOwnerRowsRow, error) {
 	rows, err := q.db.Query(ctx, pollingOwnerRows, arg.ObserverPublicKey, arg.ReceivedAt)
 	if err != nil {
@@ -1243,6 +1257,12 @@ func (q *Queries) PollingOwnerRows(ctx context.Context, arg PollingOwnerRowsPara
 			&i.TargetRequested,
 			&i.AcceptsRequests,
 			&i.RequestSlots,
+			&i.ObserverApproved,
+			&i.ObserverBlocked,
+			&i.RequestID,
+			&i.PasswordVer,
+			&i.PasswordCt,
+			&i.PasswordNonce,
 		); err != nil {
 			return nil, err
 		}
