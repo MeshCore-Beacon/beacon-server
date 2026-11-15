@@ -479,7 +479,7 @@ func (l *PollingElectionLock) Close(ctx context.Context) {
 
 func nodeReading(r sqlc.ListNodeReadingsRow) api.NodeReading {
 	return api.NodeReading{
-		SampledAt: r.SampledAt.Time, Trusted: r.Trusted,
+		SampledAt: r.SampledAt.Time, Method: r.Method, Trusted: r.Trusted,
 		BatteryMV: r.BatteryMv, TemperatureC: r.TemperatureC, NoiseFloorDB: r.NoiseFloor, LastRSSIDB: r.LastRssi,
 		LastSNRDB: r.LastSnr, UptimeSeconds: r.UptimeSecs, QueueLength: r.TxQueue,
 		AirtimeTxSecs: r.TxAirSecs, AirtimeRxSecs: r.RxAirSecs, PacketsReceived: r.PacketsRecv,

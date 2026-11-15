@@ -602,7 +602,7 @@ func TestGetNodeTelemetry_Defaults(t *testing.T) {
 
 func TestGetNodeTelemetry_CounterSpanInJSON(t *testing.T) {
 	status := func(ago time.Duration, secs int64) api.NodeReading {
-		return api.NodeReading{SampledAt: time.Now().Add(-ago), Trusted: true, UptimeSeconds: ptrOf(1_000_000 + secs),
+		return api.NodeReading{SampledAt: time.Now().Add(-ago), Method: "status", Trusted: true, UptimeSeconds: ptrOf(1_000_000 + secs),
 			AirtimeTxSecs: ptrOf(secs / 20), AirtimeRxSecs: ptrOf(secs / 10), PacketsReceived: ptrOf(secs / 100),
 			PacketsSent: ptrOf(secs / 360), ReceiveErrors: ptrOf(secs / 3600)}
 	}

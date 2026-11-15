@@ -20,7 +20,10 @@ const nodeCounterMaxGap = 48 * time.Hour
 
 // NodeReading is one stored reading of a polled node, ascending by SampledAt.
 type NodeReading struct {
-	SampledAt       time.Time
+	SampledAt time.Time
+	// Method is how the reading was taken, "status" or "telemetry". Only consecutive status readings make counter
+	// pairs, whatever their counters hold.
+	Method          string
 	Trusted         bool
 	BatteryMV       *int32
 	TemperatureC    *float32
@@ -89,14 +92,9 @@ const (
 	ctrErrs
 )
 
-func isStatusReading(r *NodeReading) bool {
-	for _, c := range nodeCounters {
-		if c.get(r) != nil {
-			return true
-		}
-	}
-	return false
-}
+// isStatusReading goes by the reading's method, not its counters: a status reply too short to carry any is still the
+// status reading its neighbours pair with, which is also how the store picks the baseline before a range.
+func isStatusReading(r *NodeReading) bool { return r.Method == "status" }
 
 // counterPair is what one pair of consecutive status readings contributes.
 type counterPair struct {
@@ -121,6 +119,9 @@ func pairIncrements(prev, cur *NodeReading) (counterPair, bool) {
 		pv, cv := c.get(prev), c.get(cur)
 		if pv == nil || cv == nil {
 			continue
+		}
+		if *pv < 0 || *cv < 0 {
+			return p, false // a counter cannot be negative; whatever sent one is not to be believed
 		}
 		vals[i] = [2]int64{*pv, *cv}
 		p.has[i] = true

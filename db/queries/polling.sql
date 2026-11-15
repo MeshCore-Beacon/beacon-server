@@ -304,7 +304,7 @@ SELECT public_key FROM nodes WHERE id = $1;
 
 -- name: ListNodeReadings :many
 -- Readings of one target in [since, until) ascending; until is open when NULL. Untrusted ones only when asked for.
-SELECT sampled_at, trusted, battery_mv, temperature_c, noise_floor, last_rssi, last_snr, uptime_secs, tx_queue,
+SELECT sampled_at, method, trusted, battery_mv, temperature_c, noise_floor, last_rssi, last_snr, uptime_secs, tx_queue,
        tx_air_secs, rx_air_secs, packets_recv, packets_sent, recv_errors
 FROM repeater_readings
 WHERE target_public_key = @target_public_key
@@ -322,7 +322,7 @@ WHERE target_public_key = @target_public_key
 
 -- name: LatestNodeStatusReadingBefore :many
 -- The newest status reading before since: the baseline for the first counter increments in range.
-SELECT sampled_at, trusted, battery_mv, temperature_c, noise_floor, last_rssi, last_snr, uptime_secs, tx_queue,
+SELECT sampled_at, method, trusted, battery_mv, temperature_c, noise_floor, last_rssi, last_snr, uptime_secs, tx_queue,
        tx_air_secs, rx_air_secs, packets_recv, packets_sent, recv_errors
 FROM repeater_readings
 WHERE target_public_key = @target_public_key

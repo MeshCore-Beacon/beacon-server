@@ -17,7 +17,7 @@ func at(h float64) time.Time { return nodeBase.Add(time.Duration(h * float64(tim
 
 func statusReading(h float64, uptime, recv int64) NodeReading {
 	return NodeReading{
-		SampledAt: at(h), Trusted: true, UptimeSeconds: ptr(uptime), PacketsReceived: ptr(recv),
+		SampledAt: at(h), Method: "status", Trusted: true, UptimeSeconds: ptr(uptime), PacketsReceived: ptr(recv),
 		AirtimeTxSecs: ptr(int64(0)), AirtimeRxSecs: ptr(int64(0)), PacketsSent: ptr(int64(0)), ReceiveErrors: ptr(int64(0)),
 	}
 }
@@ -83,7 +83,7 @@ func TestBucketNodeReadingsCounterIncrements(t *testing.T) {
 
 func TestBucketNodeReadingsCounterReset(t *testing.T) {
 	prev := steady(1) // every counter above zero, so a restart makes them all drop
-	boot := NodeReading{SampledAt: at(7), UptimeSeconds: ptr(int64(40)), AirtimeTxSecs: ptr(int64(1)), AirtimeRxSecs: ptr(int64(2)),
+	boot := NodeReading{SampledAt: at(7), Method: "status", UptimeSeconds: ptr(int64(40)), AirtimeTxSecs: ptr(int64(1)), AirtimeRxSecs: ptr(int64(2)),
 		PacketsReceived: ptr(int64(30)), PacketsSent: ptr(int64(1)), ReceiveErrors: ptr(int64(0))}
 	got := BucketNodeReadings([]NodeReading{prev, boot}, nodeBase, 6*time.Hour)
 	if len(got) != 2 || *got[1].PacketsReceived != 30 {
@@ -167,9 +167,9 @@ func TestBucketNodeReadingsEmpty(t *testing.T) {
 
 // steady is a status reading of a repeater on air 10% of the time, h hours after nodeBase.
 func steady(h float64) NodeReading {
-	secs := int64(h * 3600)
+	secs := int64((h + 24) * 3600) // counters are never negative, so count from a day before the earliest reading
 	return NodeReading{
-		SampledAt: at(h), Trusted: true, UptimeSeconds: ptr(1_000_000 + secs),
+		SampledAt: at(h), Method: "status", Trusted: true, UptimeSeconds: ptr(1_000_000 + secs),
 		AirtimeTxSecs: ptr(secs / 20), AirtimeRxSecs: ptr(secs / 10),
 		PacketsReceived: ptr(secs / 100), PacketsSent: ptr(secs / 360), ReceiveErrors: ptr(secs / 3600),
 	}
@@ -235,7 +235,7 @@ func TestCounterSpanAfterReboot(t *testing.T) {
 
 func TestCounterSpanRestartCappedAtGap(t *testing.T) {
 	prev := steady(1)
-	boot := NodeReading{SampledAt: at(2), UptimeSeconds: ptr(int64(3000)), AirtimeTxSecs: ptr(int64(0)), AirtimeRxSecs: ptr(int64(0)),
+	boot := NodeReading{SampledAt: at(2), Method: "status", UptimeSeconds: ptr(int64(3000)), AirtimeTxSecs: ptr(int64(0)), AirtimeRxSecs: ptr(int64(0)),
 		PacketsReceived: ptr(int64(0)), PacketsSent: ptr(int64(0)), ReceiveErrors: ptr(int64(0))} // booted 3000s before a 3600s gap
 	got := BucketNodeReadings([]NodeReading{prev, boot}, nodeBase, time.Hour)
 	if last := got[len(got)-1]; last.CounterSpanSecs == nil || *last.CounterSpanSecs != 3000 {
@@ -252,8 +252,8 @@ func TestCounterSpanRestartCappedAtGap(t *testing.T) {
 func TestCounterSpanRebootWithSurvivingTotals(t *testing.T) {
 	// Review I2: rx grows 10000 -> 12160 over six hours (10%) and uptime falls to 3600, but the
 	// totals kept counting through the reboot, so the span is the whole gap.
-	a := NodeReading{SampledAt: at(0), UptimeSeconds: ptr(int64(1_000_000)), AirtimeRxSecs: ptr(int64(10000))}
-	b := NodeReading{SampledAt: at(6), UptimeSeconds: ptr(int64(3600)), AirtimeRxSecs: ptr(int64(12160))}
+	a := NodeReading{SampledAt: at(0), Method: "status", UptimeSeconds: ptr(int64(1_000_000)), AirtimeRxSecs: ptr(int64(10000))}
+	b := NodeReading{SampledAt: at(6), Method: "status", UptimeSeconds: ptr(int64(3600)), AirtimeRxSecs: ptr(int64(12160))}
 	got := BucketNodeReadings([]NodeReading{a, b}, at(1), 6*time.Hour)
 	if len(got) != 1 {
 		t.Fatalf("points = %+v", got)
@@ -266,8 +266,8 @@ func TestCounterSpanRebootWithSurvivingTotals(t *testing.T) {
 
 func TestCounterSpanMixedRebootIsInconsistent(t *testing.T) {
 	// One counter dropped and another grew across a reboot: nothing can be trusted.
-	a := NodeReading{SampledAt: at(0), UptimeSeconds: ptr(int64(1_000_000)), AirtimeRxSecs: ptr(int64(1000)), PacketsReceived: ptr(int64(100))}
-	b := NodeReading{SampledAt: at(6), UptimeSeconds: ptr(int64(60)), AirtimeRxSecs: ptr(int64(1100)), PacketsReceived: ptr(int64(5))}
+	a := NodeReading{SampledAt: at(0), Method: "status", UptimeSeconds: ptr(int64(1_000_000)), AirtimeRxSecs: ptr(int64(1000)), PacketsReceived: ptr(int64(100))}
+	b := NodeReading{SampledAt: at(6), Method: "status", UptimeSeconds: ptr(int64(60)), AirtimeRxSecs: ptr(int64(1100)), PacketsReceived: ptr(int64(5))}
 	got := BucketNodeReadings([]NodeReading{a, b}, at(1), 6*time.Hour)
 	if got[0].CounterSpanSecs != nil || got[0].AirtimeRxSecs != nil || got[0].PacketsReceived != nil {
 		t.Errorf("point %+v, want no counters", got[0])
@@ -275,8 +275,8 @@ func TestCounterSpanMixedRebootIsInconsistent(t *testing.T) {
 }
 
 func TestCounterDropWithoutRebootIsInconsistent(t *testing.T) {
-	a := NodeReading{SampledAt: at(0), UptimeSeconds: ptr(int64(1_000_000)), PacketsReceived: ptr(int64(100))}
-	b := NodeReading{SampledAt: at(6), UptimeSeconds: ptr(int64(1_021_600)), PacketsReceived: ptr(int64(50))}
+	a := NodeReading{SampledAt: at(0), Method: "status", UptimeSeconds: ptr(int64(1_000_000)), PacketsReceived: ptr(int64(100))}
+	b := NodeReading{SampledAt: at(6), Method: "status", UptimeSeconds: ptr(int64(1_021_600)), PacketsReceived: ptr(int64(50))}
 	got := BucketNodeReadings([]NodeReading{a, b}, at(1), 6*time.Hour)
 	if got[0].CounterSpanSecs != nil || got[0].PacketsReceived != nil {
 		t.Errorf("point %+v, want no counters", got[0])
@@ -285,8 +285,8 @@ func TestCounterDropWithoutRebootIsInconsistent(t *testing.T) {
 
 func TestCounterRateCapHasNoTolerance(t *testing.T) {
 	// 1.5 airtime seconds per second is over the cap of 1, however the old code rounded it.
-	a := NodeReading{SampledAt: at(0), AirtimeRxSecs: ptr(int64(0))}
-	b := NodeReading{SampledAt: at(1), AirtimeRxSecs: ptr(int64(5400))}
+	a := NodeReading{SampledAt: at(0), Method: "status", AirtimeRxSecs: ptr(int64(0))}
+	b := NodeReading{SampledAt: at(1), Method: "status", AirtimeRxSecs: ptr(int64(5400))}
 	got := BucketNodeReadings([]NodeReading{a, b}, at(0), 6*time.Hour)
 	if got[0].AirtimeRxSecs != nil {
 		t.Errorf("point %+v, want the pair rejected", got[0])
@@ -396,4 +396,45 @@ func TestCounterSameResultForAnyRange(t *testing.T) {
 		t.Fatalf("narrow points = %d, want 3", len(narrow))
 	}
 	wantRate(t, narrow[1], 21600)
+}
+
+// A status reading that carries no counters still stands between its neighbours: the pair is taken across real
+// consecutive status readings, so a wide range and a narrow one (whose baseline is that reading) agree.
+func TestCounterPairsUseRealConsecutiveStatusReadings(t *testing.T) {
+	bare := NodeReading{SampledAt: at(4), Method: "status", Trusted: true, BatteryMV: ptr(int32(4000))}
+	wide := []NodeReading{statusReading(0, 100000, 100), bare, statusReading(6, 106000, 150)}
+	narrow := []NodeReading{bare, statusReading(6, 106000, 150)}
+	w := BucketNodeReadings(wide, at(0), 12*time.Hour)
+	n := BucketNodeReadings(narrow, at(2), 12*time.Hour)
+	last := func(ps []NodeTelemetryPoint) NodeTelemetryPoint { return ps[len(ps)-1] }
+	if last(w).CounterSpanSecs != nil || last(w).PacketsReceived != nil {
+		t.Errorf("wide range bridged a counterless status reading: %+v", last(w))
+	}
+	if last(n).CounterSpanSecs != nil || last(n).PacketsReceived != nil {
+		t.Errorf("narrow range: %+v", last(n))
+	}
+	// A telemetry reading with a stray counter is not a status reading and breaks nothing.
+	tele := NodeReading{SampledAt: at(4), Method: "telemetry", Trusted: true, PacketsReceived: ptr(int64(7))}
+	p := last(BucketNodeReadings([]NodeReading{statusReading(0, 100000, 100), tele, statusReading(6, 106000, 150)}, at(0), 12*time.Hour))
+	if p.PacketsReceived == nil || *p.PacketsReceived != 50 || *p.CounterSpanSecs != 21600 {
+		t.Errorf("telemetry reading interfered: %+v", p)
+	}
+}
+
+func TestCounterPairsRejectNegativeOperands(t *testing.T) {
+	// Six hours apart: 100 -> -1 with the uptime restarted reads as a reboot whose increment is the current value.
+	only := func(h float64, uptime, recv int64) NodeReading {
+		return NodeReading{SampledAt: at(h), Method: "status", UptimeSeconds: ptr(uptime), PacketsReceived: ptr(recv)}
+	}
+	rs := []NodeReading{only(0, 20000, 100), only(6, 3600, -1)}
+	p := BucketNodeReadings(rs, at(0), 12*time.Hour)
+	if got := p[len(p)-1]; got.PacketsReceived != nil || got.CounterSpanSecs != nil {
+		t.Fatalf("a negative counter produced %+v", got)
+	}
+	// A negative earlier value is just as impossible.
+	rs = []NodeReading{statusReading(0, 20000, -5), statusReading(6, 30000, 10)}
+	p = BucketNodeReadings(rs, at(0), 12*time.Hour)
+	if got := p[len(p)-1]; got.PacketsReceived != nil {
+		t.Fatalf("a negative earlier counter produced %+v", got)
+	}
 }

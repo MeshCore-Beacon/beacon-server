@@ -16,6 +16,7 @@ import (
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/config"
 	"github.com/MeshCore-Beacon/beacon-server/internal/polling"
 	"github.com/google/uuid"
@@ -1522,5 +1523,45 @@ func TestNodePollingPostgres(t *testing.T) {
 	}
 	if _, err = s.GetNodePolling(ctx, uuid.New()); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("unknown node err = %v, want pgx.ErrNoRows", err)
+	}
+}
+
+func TestNodeReadingsKeepTheMethodPostgres(t *testing.T) {
+	ctx, pool, s := pollStore(t)
+	obs := pollKey(1)
+	oid := pollObserver(t, ctx, s, obs)
+	target := pollKey(0xA)
+	nodeID := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO nodes (id, public_key, node_type, name) VALUES ($1, $2, 2, 'rep')`, nodeID, target); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	add := func(at time.Time, method string, tag int, recv *int64) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `INSERT INTO repeater_readings (target_public_key, observer_public_key, observer_id, sampled_at, received_at, method, tag, packets_recv, trusted)
+			VALUES ($1, $2, $3, $4, $4, $5, $6, $7, true)`, target, obs, oid, at, method, tag, recv); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n := func(v int64) *int64 { return &v }
+	add(now.Add(-6*time.Hour), "status", 1, n(100))
+	add(now.Add(-2*time.Hour), "status", 2, nil) // a status reading whose reply carried no counters
+	add(now.Add(-time.Hour), "telemetry", 3, nil)
+	add(now.Add(-time.Minute), "status", 4, n(150))
+	for name, since := range map[string]time.Time{"wide": now.Add(-8 * time.Hour), "narrow": now.Add(-90 * time.Minute)} {
+		got, _, _, err := s.GetNodeReadings(ctx, nodeID, since, time.Time{}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range got {
+			if r.Method != "status" && r.Method != "telemetry" {
+				t.Fatalf("%s: method not carried: %+v", name, r)
+			}
+		}
+		pts := api.BucketNodeReadings(got, since, 24*time.Hour)
+		last := pts[len(pts)-1]
+		if last.PacketsReceived != nil || last.CounterSpanSecs != nil {
+			t.Errorf("%s: the counterless status reading was bridged: %+v", name, last)
+		}
 	}
 }

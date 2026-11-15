@@ -341,7 +341,7 @@ func (q *Queries) InsertRepeaterReading(ctx context.Context, arg InsertRepeaterR
 }
 
 const latestNodeStatusReadingBefore = `-- name: LatestNodeStatusReadingBefore :many
-SELECT sampled_at, trusted, battery_mv, temperature_c, noise_floor, last_rssi, last_snr, uptime_secs, tx_queue,
+SELECT sampled_at, method, trusted, battery_mv, temperature_c, noise_floor, last_rssi, last_snr, uptime_secs, tx_queue,
        tx_air_secs, rx_air_secs, packets_recv, packets_sent, recv_errors
 FROM repeater_readings
 WHERE target_public_key = $1
@@ -360,6 +360,7 @@ type LatestNodeStatusReadingBeforeParams struct {
 
 type LatestNodeStatusReadingBeforeRow struct {
 	SampledAt    pgtype.Timestamptz `json:"sampled_at"`
+	Method       string             `json:"method"`
 	Trusted      bool               `json:"trusted"`
 	BatteryMv    *int32             `json:"battery_mv"`
 	TemperatureC *float32           `json:"temperature_c"`
@@ -387,6 +388,7 @@ func (q *Queries) LatestNodeStatusReadingBefore(ctx context.Context, arg LatestN
 		var i LatestNodeStatusReadingBeforeRow
 		if err := rows.Scan(
 			&i.SampledAt,
+			&i.Method,
 			&i.Trusted,
 			&i.BatteryMv,
 			&i.TemperatureC,
@@ -412,7 +414,7 @@ func (q *Queries) LatestNodeStatusReadingBefore(ctx context.Context, arg LatestN
 }
 
 const listNodeReadings = `-- name: ListNodeReadings :many
-SELECT sampled_at, trusted, battery_mv, temperature_c, noise_floor, last_rssi, last_snr, uptime_secs, tx_queue,
+SELECT sampled_at, method, trusted, battery_mv, temperature_c, noise_floor, last_rssi, last_snr, uptime_secs, tx_queue,
        tx_air_secs, rx_air_secs, packets_recv, packets_sent, recv_errors
 FROM repeater_readings
 WHERE target_public_key = $1
@@ -431,6 +433,7 @@ type ListNodeReadingsParams struct {
 
 type ListNodeReadingsRow struct {
 	SampledAt    pgtype.Timestamptz `json:"sampled_at"`
+	Method       string             `json:"method"`
 	Trusted      bool               `json:"trusted"`
 	BatteryMv    *int32             `json:"battery_mv"`
 	TemperatureC *float32           `json:"temperature_c"`
@@ -463,6 +466,7 @@ func (q *Queries) ListNodeReadings(ctx context.Context, arg ListNodeReadingsPara
 		var i ListNodeReadingsRow
 		if err := rows.Scan(
 			&i.SampledAt,
+			&i.Method,
 			&i.Trusted,
 			&i.BatteryMv,
 			&i.TemperatureC,
