@@ -23,6 +23,8 @@ type Querier interface {
 	AddChannelMessageIATA(ctx context.Context, arg AddChannelMessageIATAParams) (bool, error)
 	AddIATAs(ctx context.Context, iatas []string) error
 	AddRegionIATAs(ctx context.Context, arg AddRegionIATAsParams) error
+	// The pending address was verified by the link that got us here, so the account counts as verified too.
+	ApplyPendingEmail(ctx context.Context, id uuid.UUID) (int64, error)
 	// Copies the packet's payload type onto the first @max_rows observations in [@from_id, @to_id),
 	// in id order, that lack one. Rows that already carry a type are never touched. Returns how many
 	// untyped rows it picked, how many it typed, and the last picked id (0 when it picked none).
@@ -35,6 +37,8 @@ type Querier interface {
 	CheckPacketSitesSlice(ctx context.Context, arg CheckPacketSitesSliceParams) (CheckPacketSitesSliceRow, error)
 	// Keeps fetch timing so re-enabling still respects backoff; the ETag goes with the rows.
 	ClearRepeaters(ctx context.Context) (int64, error)
+	// One statement, so two concurrent uses cannot both match used_at IS NULL.
+	ConsumeUserToken(ctx context.Context, arg ConsumeUserTokenParams) (ConsumeUserTokenRow, error)
 	// Recomputed each pass. Counts other observers that heard a RESPONSE (1) or PATH (8) packet with the reading's
 	// 8-byte hash within 10 minutes of sampled_at. packets and packet_observations keep no source hash, so the
 	// sender is not checked; packet_observations.payload_type is not always filled, so the type comes from packets.
@@ -45,6 +49,9 @@ type Querier interface {
 	CountChannelMessagesSentSince(ctx context.Context, arg CountChannelMessagesSentSinceParams) (int64, error)
 	CountUntrustedNodeReadings(ctx context.Context, arg CountUntrustedNodeReadingsParams) (int32, error)
 	CreateAccount(ctx context.Context, name string) (Account, error)
+	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	CreateUserSession(ctx context.Context, arg CreateUserSessionParams) (CreateUserSessionRow, error)
+	CreateUserToken(ctx context.Context, arg CreateUserTokenParams) error
 	CurrentPollingPoller(ctx context.Context, targetPublicKey []byte) ([]byte, error)
 	// Lock the current row before deciding the outcome, including when another
 	// deactivation commits while this statement is waiting for its row lock.
@@ -59,6 +66,8 @@ type Querier interface {
 	// residual decides membership. + interval 0 keeps the exact cutoff a Filter, so the planner
 	// cannot switch to a last_seen index on deployments that still have one.
 	DeleteExpiredRoutes(ctx context.Context, arg DeleteExpiredRoutesParams) (DeleteExpiredRoutesRow, error)
+	DeleteExpiredUserSessions(ctx context.Context, cutoff pgtype.Timestamptz) error
+	DeleteExpiredUserTokens(ctx context.Context, cutoff pgtype.Timestamptz) error
 	// One batch of rarely-seen routes after the cursor, inside a window of at most 6 h below the grace
 	// cutoff: candidates without locks, then lock SKIP LOCKED through the pkey (re-checked on the newest
 	// version) and delete. unresolved_ts is the earliest candidate left behind; window_end is the bound used.
@@ -95,6 +104,13 @@ type Querier interface {
 	DeleteRollupHour(ctx context.Context, hour pgtype.Timestamptz) error
 	// Dirty hours that can no longer be re-rolled.
 	DeleteStaleDirtyHours(ctx context.Context) error
+	DeleteUser(ctx context.Context, id uuid.UUID) (int64, error)
+	DeleteUserTokens(ctx context.Context, arg DeleteUserTokensParams) error
+	EndAllUserSessions(ctx context.Context, userID uuid.UUID) error
+	// Ends the live app sessions beyond the newest keep.
+	EndOldestAppSessions(ctx context.Context, arg EndOldestAppSessionsParams) error
+	EndOtherUserSessions(ctx context.Context, arg EndOtherUserSessionsParams) error
+	EndUserSession(ctx context.Context, arg EndUserSessionParams) error
 	// Every site of every message in (after_id, through_id]: the backfill and the reconcile's message part.
 	FillChannelMessageIATAsByMessages(ctx context.Context, arg FillChannelMessageIATAsByMessagesParams) (int64, error)
 	// The site of every group-text observation in (after_id, through_id] whose packet has a message.
@@ -507,6 +523,10 @@ type Querier interface {
 	ListUndecryptedGroupTextPackets(ctx context.Context) ([]ListUndecryptedGroupTextPacketsRow, error)
 	// Like ListUndecryptedGroupTextPackets, limited to channels that just gained a key.
 	ListUndecryptedGroupTextPacketsByHash(ctx context.Context, hashes [][]byte) ([]ListUndecryptedGroupTextPacketsByHashRow, error)
+	ListUserSessions(ctx context.Context, arg ListUserSessionsParams) ([]ListUserSessionsRow, error)
+	// search is a LIKE pattern with its wildcards already escaped, or empty for everyone. The cursor is the last row of
+	// the previous page; the first page passes a far-future time and the max uuid.
+	ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error)
 	ListZoneBoundaries(ctx context.Context) ([]MeshmapperZoneBoundary, error)
 	ListZoneLists(ctx context.Context) ([]MeshmapperZoneList, error)
 	// Serializes one observer's reading inserts until the transaction ends, so its rate and budget checks see each
@@ -651,6 +671,10 @@ type Querier interface {
 	SetPollingObserver(ctx context.Context, arg SetPollingObserverParams) error
 	SetPollingState(ctx context.Context, arg SetPollingStateParams) error
 	SetRollupHourPartial(ctx context.Context, hour pgtype.Timestamptz) error
+	SetUserDisabled(ctx context.Context, arg SetUserDisabledParams) (int64, error)
+	SetUserEmailVerified(ctx context.Context, arg SetUserEmailVerifiedParams) (int64, error)
+	SetUserPassword(ctx context.Context, arg SetUserPasswordParams) (int64, error)
+	SetUserPendingEmail(ctx context.Context, arg SetUserPendingEmailParams) (int64, error)
 	// Read-only. Visits, through each time-ordered packet_sites index, every entry whose key was written in the last
 	// lookback (2 minutes). An index scan that reaches an entry whose heap tuple is dead to every snapshot sets the
 	// entry's LP_DEAD hint; when that leaf later fills, the inserting backend deletes hinted entries instead of splitting
@@ -668,6 +692,8 @@ type Querier interface {
 	// from regressing a newer write-through (e.g. a status update).
 	TouchObservers(ctx context.Context, arg TouchObserversParams) error
 	TouchPackets(ctx context.Context, arg TouchPacketsParams) error
+	TouchUserLogin(ctx context.Context, arg TouchUserLoginParams) (int64, error)
+	TouchUserSession(ctx context.Context, arg TouchUserSessionParams) (int64, error)
 	// Page keys straight from the observations, independent of packet_sites. floor_ts bounds the read: keys at or
 	// above it are exact, because a packet's newest requested-site hearing is unchanged by dropping older ones.
 	TruthPacketsBySitesPage(ctx context.Context, arg TruthPacketsBySitesPageParams) ([]TruthPacketsBySitesPageRow, error)
@@ -682,6 +708,7 @@ type Querier interface {
 	// unconditionally overwrites, unlike the neighbor-side region_scope.
 	UpdateObserverRegionScope(ctx context.Context, arg UpdateObserverRegionScopeParams) error
 	UpdateObserverStatus(ctx context.Context, arg UpdateObserverStatusParams) (uuid.UUID, error)
+	UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) (int64, error)
 	UpsertBackgroundState(ctx context.Context, arg UpsertBackgroundStateParams) error
 	// ============================================================
 	// CHANNELS
@@ -760,6 +787,11 @@ type Querier interface {
 	// TRANSPORT CODES
 	// ============================================================
 	UpsertTransportScope(ctx context.Context, arg UpsertTransportScopeParams) error
+	UserByEmail(ctx context.Context, email string) (User, error)
+	UserByID(ctx context.Context, id uuid.UUID) (User, error)
+	UserByUsername(ctx context.Context, lower string) (User, error)
+	// A session is live when it is not ended, not past either expiry, and its user is not disabled.
+	UserSessionByTokenHash(ctx context.Context, arg UserSessionByTokenHashParams) (UserSessionByTokenHashRow, error)
 }
 
 var _ Querier = (*Queries)(nil)

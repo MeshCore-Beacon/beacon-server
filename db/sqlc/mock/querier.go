@@ -115,6 +115,21 @@ func (mr *MockQuerierMockRecorder) AddRegionIATAs(ctx, arg any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddRegionIATAs", reflect.TypeOf((*MockQuerier)(nil).AddRegionIATAs), ctx, arg)
 }
 
+// ApplyPendingEmail mocks base method.
+func (m *MockQuerier) ApplyPendingEmail(ctx context.Context, id uuid.UUID) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ApplyPendingEmail", ctx, id)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ApplyPendingEmail indicates an expected call of ApplyPendingEmail.
+func (mr *MockQuerierMockRecorder) ApplyPendingEmail(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ApplyPendingEmail", reflect.TypeOf((*MockQuerier)(nil).ApplyPendingEmail), ctx, id)
+}
+
 // BackfillObservationPayloadTypes mocks base method.
 func (m *MockQuerier) BackfillObservationPayloadTypes(ctx context.Context, arg db.BackfillObservationPayloadTypesParams) (db.BackfillObservationPayloadTypesRow, error) {
 	m.ctrl.T.Helper()
@@ -175,6 +190,21 @@ func (mr *MockQuerierMockRecorder) ClearRepeaters(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ClearRepeaters", reflect.TypeOf((*MockQuerier)(nil).ClearRepeaters), ctx)
 }
 
+// ConsumeUserToken mocks base method.
+func (m *MockQuerier) ConsumeUserToken(ctx context.Context, arg db.ConsumeUserTokenParams) (db.ConsumeUserTokenRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ConsumeUserToken", ctx, arg)
+	ret0, _ := ret[0].(db.ConsumeUserTokenRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ConsumeUserToken indicates an expected call of ConsumeUserToken.
+func (mr *MockQuerierMockRecorder) ConsumeUserToken(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ConsumeUserToken", reflect.TypeOf((*MockQuerier)(nil).ConsumeUserToken), ctx, arg)
+}
+
 // CorroborateReadings mocks base method.
 func (m *MockQuerier) CorroborateReadings(ctx context.Context, arg db.CorroborateReadingsParams) (int64, error) {
 	m.ctrl.T.Helper()
@@ -233,6 +263,50 @@ func (m *MockQuerier) CreateAccount(ctx context.Context, name string) (db.Accoun
 func (mr *MockQuerierMockRecorder) CreateAccount(ctx, name any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateAccount", reflect.TypeOf((*MockQuerier)(nil).CreateAccount), ctx, name)
+}
+
+// CreateUser mocks base method.
+func (m *MockQuerier) CreateUser(ctx context.Context, arg db.CreateUserParams) (db.User, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateUser", ctx, arg)
+	ret0, _ := ret[0].(db.User)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreateUser indicates an expected call of CreateUser.
+func (mr *MockQuerierMockRecorder) CreateUser(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateUser", reflect.TypeOf((*MockQuerier)(nil).CreateUser), ctx, arg)
+}
+
+// CreateUserSession mocks base method.
+func (m *MockQuerier) CreateUserSession(ctx context.Context, arg db.CreateUserSessionParams) (db.CreateUserSessionRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateUserSession", ctx, arg)
+	ret0, _ := ret[0].(db.CreateUserSessionRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreateUserSession indicates an expected call of CreateUserSession.
+func (mr *MockQuerierMockRecorder) CreateUserSession(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateUserSession", reflect.TypeOf((*MockQuerier)(nil).CreateUserSession), ctx, arg)
+}
+
+// CreateUserToken mocks base method.
+func (m *MockQuerier) CreateUserToken(ctx context.Context, arg db.CreateUserTokenParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateUserToken", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// CreateUserToken indicates an expected call of CreateUserToken.
+func (mr *MockQuerierMockRecorder) CreateUserToken(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateUserToken", reflect.TypeOf((*MockQuerier)(nil).CreateUserToken), ctx, arg)
 }
 
 // CurrentPollingPoller mocks base method.
@@ -348,6 +422,34 @@ func (m *MockQuerier) DeleteExpiredRoutes(ctx context.Context, arg db.DeleteExpi
 func (mr *MockQuerierMockRecorder) DeleteExpiredRoutes(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteExpiredRoutes", reflect.TypeOf((*MockQuerier)(nil).DeleteExpiredRoutes), ctx, arg)
+}
+
+// DeleteExpiredUserSessions mocks base method.
+func (m *MockQuerier) DeleteExpiredUserSessions(ctx context.Context, cutoff pgtype.Timestamptz) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteExpiredUserSessions", ctx, cutoff)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteExpiredUserSessions indicates an expected call of DeleteExpiredUserSessions.
+func (mr *MockQuerierMockRecorder) DeleteExpiredUserSessions(ctx, cutoff any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteExpiredUserSessions", reflect.TypeOf((*MockQuerier)(nil).DeleteExpiredUserSessions), ctx, cutoff)
+}
+
+// DeleteExpiredUserTokens mocks base method.
+func (m *MockQuerier) DeleteExpiredUserTokens(ctx context.Context, cutoff pgtype.Timestamptz) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteExpiredUserTokens", ctx, cutoff)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteExpiredUserTokens indicates an expected call of DeleteExpiredUserTokens.
+func (mr *MockQuerierMockRecorder) DeleteExpiredUserTokens(ctx, cutoff any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteExpiredUserTokens", reflect.TypeOf((*MockQuerier)(nil).DeleteExpiredUserTokens), ctx, cutoff)
 }
 
 // DeleteGraceRoutesSlice mocks base method.
@@ -575,6 +677,91 @@ func (m *MockQuerier) DeleteStaleDirtyHours(ctx context.Context) error {
 func (mr *MockQuerierMockRecorder) DeleteStaleDirtyHours(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteStaleDirtyHours", reflect.TypeOf((*MockQuerier)(nil).DeleteStaleDirtyHours), ctx)
+}
+
+// DeleteUser mocks base method.
+func (m *MockQuerier) DeleteUser(ctx context.Context, id uuid.UUID) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteUser", ctx, id)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteUser indicates an expected call of DeleteUser.
+func (mr *MockQuerierMockRecorder) DeleteUser(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteUser", reflect.TypeOf((*MockQuerier)(nil).DeleteUser), ctx, id)
+}
+
+// DeleteUserTokens mocks base method.
+func (m *MockQuerier) DeleteUserTokens(ctx context.Context, arg db.DeleteUserTokensParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteUserTokens", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteUserTokens indicates an expected call of DeleteUserTokens.
+func (mr *MockQuerierMockRecorder) DeleteUserTokens(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteUserTokens", reflect.TypeOf((*MockQuerier)(nil).DeleteUserTokens), ctx, arg)
+}
+
+// EndAllUserSessions mocks base method.
+func (m *MockQuerier) EndAllUserSessions(ctx context.Context, userID uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "EndAllUserSessions", ctx, userID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// EndAllUserSessions indicates an expected call of EndAllUserSessions.
+func (mr *MockQuerierMockRecorder) EndAllUserSessions(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EndAllUserSessions", reflect.TypeOf((*MockQuerier)(nil).EndAllUserSessions), ctx, userID)
+}
+
+// EndOldestAppSessions mocks base method.
+func (m *MockQuerier) EndOldestAppSessions(ctx context.Context, arg db.EndOldestAppSessionsParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "EndOldestAppSessions", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// EndOldestAppSessions indicates an expected call of EndOldestAppSessions.
+func (mr *MockQuerierMockRecorder) EndOldestAppSessions(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EndOldestAppSessions", reflect.TypeOf((*MockQuerier)(nil).EndOldestAppSessions), ctx, arg)
+}
+
+// EndOtherUserSessions mocks base method.
+func (m *MockQuerier) EndOtherUserSessions(ctx context.Context, arg db.EndOtherUserSessionsParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "EndOtherUserSessions", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// EndOtherUserSessions indicates an expected call of EndOtherUserSessions.
+func (mr *MockQuerierMockRecorder) EndOtherUserSessions(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EndOtherUserSessions", reflect.TypeOf((*MockQuerier)(nil).EndOtherUserSessions), ctx, arg)
+}
+
+// EndUserSession mocks base method.
+func (m *MockQuerier) EndUserSession(ctx context.Context, arg db.EndUserSessionParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "EndUserSession", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// EndUserSession indicates an expected call of EndUserSession.
+func (mr *MockQuerierMockRecorder) EndUserSession(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EndUserSession", reflect.TypeOf((*MockQuerier)(nil).EndUserSession), ctx, arg)
 }
 
 // FillChannelMessageIATAsByMessages mocks base method.
@@ -2942,6 +3129,36 @@ func (mr *MockQuerierMockRecorder) ListUndecryptedGroupTextPacketsByHash(ctx, ha
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListUndecryptedGroupTextPacketsByHash", reflect.TypeOf((*MockQuerier)(nil).ListUndecryptedGroupTextPacketsByHash), ctx, hashes)
 }
 
+// ListUserSessions mocks base method.
+func (m *MockQuerier) ListUserSessions(ctx context.Context, arg db.ListUserSessionsParams) ([]db.ListUserSessionsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListUserSessions", ctx, arg)
+	ret0, _ := ret[0].([]db.ListUserSessionsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListUserSessions indicates an expected call of ListUserSessions.
+func (mr *MockQuerierMockRecorder) ListUserSessions(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListUserSessions", reflect.TypeOf((*MockQuerier)(nil).ListUserSessions), ctx, arg)
+}
+
+// ListUsers mocks base method.
+func (m *MockQuerier) ListUsers(ctx context.Context, arg db.ListUsersParams) ([]db.User, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListUsers", ctx, arg)
+	ret0, _ := ret[0].([]db.User)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListUsers indicates an expected call of ListUsers.
+func (mr *MockQuerierMockRecorder) ListUsers(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListUsers", reflect.TypeOf((*MockQuerier)(nil).ListUsers), ctx, arg)
+}
+
 // ListZoneBoundaries mocks base method.
 func (m *MockQuerier) ListZoneBoundaries(ctx context.Context) ([]db.MeshmapperZoneBoundary, error) {
 	m.ctrl.T.Helper()
@@ -4001,6 +4218,66 @@ func (mr *MockQuerierMockRecorder) SetRollupHourPartial(ctx, hour any) *gomock.C
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetRollupHourPartial", reflect.TypeOf((*MockQuerier)(nil).SetRollupHourPartial), ctx, hour)
 }
 
+// SetUserDisabled mocks base method.
+func (m *MockQuerier) SetUserDisabled(ctx context.Context, arg db.SetUserDisabledParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetUserDisabled", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SetUserDisabled indicates an expected call of SetUserDisabled.
+func (mr *MockQuerierMockRecorder) SetUserDisabled(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetUserDisabled", reflect.TypeOf((*MockQuerier)(nil).SetUserDisabled), ctx, arg)
+}
+
+// SetUserEmailVerified mocks base method.
+func (m *MockQuerier) SetUserEmailVerified(ctx context.Context, arg db.SetUserEmailVerifiedParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetUserEmailVerified", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SetUserEmailVerified indicates an expected call of SetUserEmailVerified.
+func (mr *MockQuerierMockRecorder) SetUserEmailVerified(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetUserEmailVerified", reflect.TypeOf((*MockQuerier)(nil).SetUserEmailVerified), ctx, arg)
+}
+
+// SetUserPassword mocks base method.
+func (m *MockQuerier) SetUserPassword(ctx context.Context, arg db.SetUserPasswordParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetUserPassword", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SetUserPassword indicates an expected call of SetUserPassword.
+func (mr *MockQuerierMockRecorder) SetUserPassword(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetUserPassword", reflect.TypeOf((*MockQuerier)(nil).SetUserPassword), ctx, arg)
+}
+
+// SetUserPendingEmail mocks base method.
+func (m *MockQuerier) SetUserPendingEmail(ctx context.Context, arg db.SetUserPendingEmailParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetUserPendingEmail", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SetUserPendingEmail indicates an expected call of SetUserPendingEmail.
+func (mr *MockQuerierMockRecorder) SetUserPendingEmail(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetUserPendingEmail", reflect.TypeOf((*MockQuerier)(nil).SetUserPendingEmail), ctx, arg)
+}
+
 // SweepPacketSitesFronts mocks base method.
 func (m *MockQuerier) SweepPacketSitesFronts(ctx context.Context, lookback pgtype.Interval) (db.SweepPacketSitesFrontsRow, error) {
 	m.ctrl.T.Helper()
@@ -4088,6 +4365,36 @@ func (mr *MockQuerierMockRecorder) TouchPackets(ctx, arg any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TouchPackets", reflect.TypeOf((*MockQuerier)(nil).TouchPackets), ctx, arg)
 }
 
+// TouchUserLogin mocks base method.
+func (m *MockQuerier) TouchUserLogin(ctx context.Context, arg db.TouchUserLoginParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TouchUserLogin", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// TouchUserLogin indicates an expected call of TouchUserLogin.
+func (mr *MockQuerierMockRecorder) TouchUserLogin(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TouchUserLogin", reflect.TypeOf((*MockQuerier)(nil).TouchUserLogin), ctx, arg)
+}
+
+// TouchUserSession mocks base method.
+func (m *MockQuerier) TouchUserSession(ctx context.Context, arg db.TouchUserSessionParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TouchUserSession", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// TouchUserSession indicates an expected call of TouchUserSession.
+func (mr *MockQuerierMockRecorder) TouchUserSession(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TouchUserSession", reflect.TypeOf((*MockQuerier)(nil).TouchUserSession), ctx, arg)
+}
+
 // TruthPacketsBySitesPage mocks base method.
 func (m *MockQuerier) TruthPacketsBySitesPage(ctx context.Context, arg db.TruthPacketsBySitesPageParams) ([]db.TruthPacketsBySitesPageRow, error) {
 	m.ctrl.T.Helper()
@@ -4160,6 +4467,21 @@ func (m *MockQuerier) UpdateObserverStatus(ctx context.Context, arg db.UpdateObs
 func (mr *MockQuerierMockRecorder) UpdateObserverStatus(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateObserverStatus", reflect.TypeOf((*MockQuerier)(nil).UpdateObserverStatus), ctx, arg)
+}
+
+// UpdateUserDisplayName mocks base method.
+func (m *MockQuerier) UpdateUserDisplayName(ctx context.Context, arg db.UpdateUserDisplayNameParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateUserDisplayName", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpdateUserDisplayName indicates an expected call of UpdateUserDisplayName.
+func (mr *MockQuerierMockRecorder) UpdateUserDisplayName(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateUserDisplayName", reflect.TypeOf((*MockQuerier)(nil).UpdateUserDisplayName), ctx, arg)
 }
 
 // UpsertBackgroundState mocks base method.
@@ -4463,4 +4785,64 @@ func (m *MockQuerier) UpsertTransportScope(ctx context.Context, arg db.UpsertTra
 func (mr *MockQuerierMockRecorder) UpsertTransportScope(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertTransportScope", reflect.TypeOf((*MockQuerier)(nil).UpsertTransportScope), ctx, arg)
+}
+
+// UserByEmail mocks base method.
+func (m *MockQuerier) UserByEmail(ctx context.Context, email string) (db.User, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UserByEmail", ctx, email)
+	ret0, _ := ret[0].(db.User)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UserByEmail indicates an expected call of UserByEmail.
+func (mr *MockQuerierMockRecorder) UserByEmail(ctx, email any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UserByEmail", reflect.TypeOf((*MockQuerier)(nil).UserByEmail), ctx, email)
+}
+
+// UserByID mocks base method.
+func (m *MockQuerier) UserByID(ctx context.Context, id uuid.UUID) (db.User, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UserByID", ctx, id)
+	ret0, _ := ret[0].(db.User)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UserByID indicates an expected call of UserByID.
+func (mr *MockQuerierMockRecorder) UserByID(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UserByID", reflect.TypeOf((*MockQuerier)(nil).UserByID), ctx, id)
+}
+
+// UserByUsername mocks base method.
+func (m *MockQuerier) UserByUsername(ctx context.Context, lower string) (db.User, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UserByUsername", ctx, lower)
+	ret0, _ := ret[0].(db.User)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UserByUsername indicates an expected call of UserByUsername.
+func (mr *MockQuerierMockRecorder) UserByUsername(ctx, lower any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UserByUsername", reflect.TypeOf((*MockQuerier)(nil).UserByUsername), ctx, lower)
+}
+
+// UserSessionByTokenHash mocks base method.
+func (m *MockQuerier) UserSessionByTokenHash(ctx context.Context, arg db.UserSessionByTokenHashParams) (db.UserSessionByTokenHashRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UserSessionByTokenHash", ctx, arg)
+	ret0, _ := ret[0].(db.UserSessionByTokenHashRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UserSessionByTokenHash indicates an expected call of UserSessionByTokenHash.
+func (mr *MockQuerierMockRecorder) UserSessionByTokenHash(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UserSessionByTokenHash", reflect.TypeOf((*MockQuerier)(nil).UserSessionByTokenHash), ctx, arg)
 }

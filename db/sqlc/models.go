@@ -647,3 +647,43 @@ type TransportScope struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	ImportedOnly   bool               `json:"imported_only"`
 }
+
+type User struct {
+	ID              uuid.UUID          `json:"id"`
+	Username        string             `json:"username"`
+	DisplayName     string             `json:"display_name"`
+	Email           string             `json:"email"`
+	PendingEmail    *string            `json:"pending_email"`
+	PassHash        string             `json:"pass_hash"`
+	EmailVerifiedAt pgtype.Timestamptz `json:"email_verified_at"`
+	Provider        string             `json:"provider"`
+	ProviderSubject *string            `json:"provider_subject"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	LastLoginAt     pgtype.Timestamptz `json:"last_login_at"`
+	DisabledAt      pgtype.Timestamptz `json:"disabled_at"`
+}
+
+type UserSession struct {
+	ID            uuid.UUID          `json:"id"`
+	UserID        uuid.UUID          `json:"user_id"`
+	TokenHash     []byte             `json:"token_hash"`
+	Kind          string             `json:"kind"`
+	Label         string             `json:"label"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	LastUsedAt    pgtype.Timestamptz `json:"last_used_at"`
+	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	HardExpiresAt pgtype.Timestamptz `json:"hard_expires_at"`
+	EndedAt       pgtype.Timestamptz `json:"ended_at"`
+	Ip            string             `json:"ip"`
+	UserAgent     string             `json:"user_agent"`
+}
+
+type UserToken struct {
+	TokenHash []byte             `json:"token_hash"`
+	UserID    uuid.UUID          `json:"user_id"`
+	Kind      string             `json:"kind"`
+	Data      []byte             `json:"data"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	UsedAt    pgtype.Timestamptz `json:"used_at"`
+}
