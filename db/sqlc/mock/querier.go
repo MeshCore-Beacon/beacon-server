@@ -339,17 +339,17 @@ func (mr *MockQuerierMockRecorder) BackfillObservationPayloadTypes(ctx, arg any)
 }
 
 // BumpAlertAttempts mocks base method.
-func (m *MockQuerier) BumpAlertAttempts(ctx context.Context, ids []int64) error {
+func (m *MockQuerier) BumpAlertAttempts(ctx context.Context, arg db.BumpAlertAttemptsParams) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "BumpAlertAttempts", ctx, ids)
+	ret := m.ctrl.Call(m, "BumpAlertAttempts", ctx, arg)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // BumpAlertAttempts indicates an expected call of BumpAlertAttempts.
-func (mr *MockQuerierMockRecorder) BumpAlertAttempts(ctx, ids any) *gomock.Call {
+func (mr *MockQuerierMockRecorder) BumpAlertAttempts(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BumpAlertAttempts", reflect.TypeOf((*MockQuerier)(nil).BumpAlertAttempts), ctx, ids)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BumpAlertAttempts", reflect.TypeOf((*MockQuerier)(nil).BumpAlertAttempts), ctx, arg)
 }
 
 // BumpUserAtlas mocks base method.

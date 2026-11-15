@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	mailer "github.com/MeshCore-Beacon/beacon-server/internal/mail"
 	"github.com/google/uuid"
 )
 
@@ -40,7 +41,7 @@ func (f *fakeSend) Expire(_ context.Context, a, b time.Time) (int64, error) {
 	return 0, nil
 }
 
-func (f *fakeSend) Pending(_ context.Context, nb time.Time, _ int) ([]OutboxRow, error) {
+func (f *fakeSend) Pending(_ context.Context, nb, _ time.Time, _ int) ([]OutboxRow, error) {
 	f.notBefore = nb
 	return f.rows, nil
 }
@@ -62,19 +63,21 @@ func (f *fakeSend) RemoveDeviceToken(_ context.Context, tok string) error {
 	return nil
 }
 
-type queued struct{ to, subject, text, kind string }
+type queued struct{ to, subject, text string }
 
 type fakeMail struct {
-	full bool
-	got  []queued
+	fail  error // every send fails with it
+	calls int
+	got   []queued
 }
 
-func (m *fakeMail) TryEnqueue(_ uuid.UUID, kind, to, subject, text string) bool {
-	if m.full {
-		return false
+func (m *fakeMail) Send(_ context.Context, msg mailer.Message) error {
+	m.calls++
+	if m.fail != nil {
+		return m.fail
 	}
-	m.got = append(m.got, queued{to, subject, text, kind})
-	return true
+	m.got = append(m.got, queued{msg.To, msg.Subject, msg.Text})
+	return nil
 }
 
 type fakePush struct {
@@ -115,7 +118,7 @@ func TestEmailGroupsOnePassIntoOneMessage(t *testing.T) {
 		t.Fatalf("%d mails", len(m.got))
 	}
 	first := m.got[0]
-	if first.to != "a@example.org" || first.subject != "Beacon: 2 alerts" || first.kind != "alert" ||
+	if first.to != "a@example.org" || first.subject != "Beacon: 2 alerts" ||
 		!strings.Contains(first.text, "Hilltop has not been heard for 30 hours.\n") || !strings.Contains(first.text, "Hilltop battery is low: 3.40 V.\n") ||
 		!strings.HasSuffix(first.text, "https://beacon.example.org/?tab=Atlas\n") {
 		t.Fatalf("%+v", first)
@@ -152,7 +155,7 @@ func TestEmailNeverCarriesAnInjectedHeaderOrLine(t *testing.T) {
 	}
 }
 
-func TestEmailWithoutAVerifiedAddressDropsAndFullQueueRetries(t *testing.T) {
+func TestEmailWithoutAVerifiedAddressDropsAndAFailedSendRetries(t *testing.T) {
 	f := &fakeSend{rows: []OutboxRow{row(1, userA, passOne, KindRebooted, "A", 1), row(2, userB, passOne, KindRebooted, "B", 1)}}
 	f.rows[0].EmailVerified = false
 	f.rows[1].Email = ""
@@ -162,11 +165,21 @@ func TestEmailWithoutAVerifiedAddressDropsAndFullQueueRetries(t *testing.T) {
 		t.Fatalf("mails %d delivered %v", len(m.got), f.delivered)
 	}
 	f.rows = []OutboxRow{row(7, userA, passOne, KindRebooted, "A", 1)}
-	m.full = true
+	m.fail = errors.New("smtp: 451 try later")
 	_ = NewSender(f, "email", m, nil, publicURL, nil).Run(context.Background())
-	// A refused mail stays pending: no attempt is spent on it.
-	if len(f.retry) != 0 || len(f.delivered) != 0 {
+	// A mail the server refused is not delivered: it is retried, which counts an attempt and delays it.
+	if len(f.retry) != 1 || f.retry[0] != 7 || len(f.delivered) != 0 {
 		t.Fatalf("delivered %v retry %v", f.delivered, f.retry)
+	}
+}
+
+// One refusal ends the run: the others would meet the same server, so they stay pending without an attempt.
+func TestEmailFailureStopsThePassAndLeavesTheRestPending(t *testing.T) {
+	f := &fakeSend{rows: []OutboxRow{row(1, userA, passOne, KindRebooted, "A", 1), row(2, userB, passOne, KindRebooted, "B", 1)}}
+	m := &fakeMail{fail: errors.New("smtp down")}
+	_ = NewSender(f, "email", m, nil, publicURL, nil).Run(context.Background())
+	if m.calls != 1 || len(f.retry) != 1 || f.retry[0] != 1 || len(f.delivered) != 0 {
+		t.Fatalf("calls %d delivered %v retry %v", m.calls, f.delivered, f.retry)
 	}
 }
 

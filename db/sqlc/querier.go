@@ -53,7 +53,8 @@ type Querier interface {
 	// in id order, that lack one. Rows that already carry a type are never touched. Returns how many
 	// untyped rows it picked, how many it typed, and the last picked id (0 when it picked none).
 	BackfillObservationPayloadTypes(ctx context.Context, arg BackfillObservationPayloadTypesParams) (BackfillObservationPayloadTypesRow, error)
-	BumpAlertAttempts(ctx context.Context, ids []int64) error
+	// Counts a failed attempt and holds the notice back for a minute, doubling with each earlier failure.
+	BumpAlertAttempts(ctx context.Context, arg BumpAlertAttemptsParams) error
 	BumpUserAtlas(ctx context.Context, arg BumpUserAtlasParams) (int64, error)
 	// Exact check of messages in (after_id, through_id]: pairs the definition has and the table lacks (counting
 	// observations up to obs_through only), and table pairs no stored observation backs.

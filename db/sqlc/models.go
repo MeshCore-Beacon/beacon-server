@@ -31,6 +31,7 @@ type AlertOutbox struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	Attempts        int16              `json:"attempts"`
 	DeliveredAt     pgtype.Timestamptz `json:"delivered_at"`
+	NextAttemptAt   pgtype.Timestamptz `json:"next_attempt_at"`
 }
 
 type AnalyticsDirtyHour struct {

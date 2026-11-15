@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"time"
 
+	mailer "github.com/MeshCore-Beacon/beacon-server/internal/mail"
 	"github.com/google/uuid"
 )
 
@@ -23,6 +24,8 @@ const (
 	MaxAttempts = 5
 	sendBatch   = 300
 	keepSent    = 24 * time.Hour
+	// MailSendTimeout bounds one alert mail, so a slow SMTP server cannot hold the pass for long.
+	MailSendTimeout = 30 * time.Second
 )
 
 // OutboxRow is a queued notification with what delivery needs to know about its user.
@@ -49,34 +52,31 @@ type SendStore interface {
 	// Expire drops undelivered notifications created before undeliveredBefore and delivered ones from before
 	// deliveredBefore.
 	Expire(ctx context.Context, undeliveredBefore, deliveredBefore time.Time) (int64, error)
-	// Pending returns undelivered notifications created at or after notBefore for live users, by user and pass.
-	Pending(ctx context.Context, notBefore time.Time, limit int) ([]OutboxRow, error)
+	// Pending returns undelivered notifications created at or after notBefore, and not held back for a retry
+	// after now, for live users, by user and pass.
+	Pending(ctx context.Context, notBefore, now time.Time, limit int) ([]OutboxRow, error)
 	Devices(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID][]Device, error)
-	// Finish marks the delivered rows, counts an attempt for the retried ones and drops the exhausted.
+	// Finish marks the delivered rows, counts an attempt for the retried ones (holding them back with a growing
+	// delay) and drops the exhausted.
 	Finish(ctx context.Context, delivered, retry []int64, now time.Time, maxAttempts int) error
 	RemoveDeviceToken(ctx context.Context, token string) error
 }
 
-// MaxMailsPerPass caps the alert mails queued in one run, well under the share of the mail queue alerts may use.
+// MaxMailsPerPass caps the alert mails sent in one run.
 const MaxMailsPerPass = 16
-
-// MailQueue is the existing mail queue. TryEnqueue reports false when it is full and the mail was not queued.
-type MailQueue interface {
-	TryEnqueue(userID uuid.UUID, kind, to, subject, text string) bool
-}
 
 // Sender drains the outbox by email or by push. Evaluation never waits on it.
 type Sender struct {
 	store    SendStore
 	delivery string
-	mail     MailQueue
+	mail     mailer.Sender
 	push     PushSender
 	atlasURL string
 	now      func() time.Time
 }
 
 // NewSender builds the sender for one delivery mode. publicURL is the web app's address, for the Atlas link.
-func NewSender(store SendStore, delivery string, mail MailQueue, push PushSender, publicURL *url.URL, now func() time.Time) *Sender {
+func NewSender(store SendStore, delivery string, mail mailer.Sender, push PushSender, publicURL *url.URL, now func() time.Time) *Sender {
 	if now == nil {
 		now = time.Now
 	}
@@ -102,14 +102,14 @@ func (s *Sender) Run(ctx context.Context) error {
 	} else if n > 0 {
 		slog.Info("alert outbox cleaned", "component", "alerts", "dropped", n)
 	}
-	rows, err := s.store.Pending(ctx, now.Add(-MaxAge), sendBatch)
+	rows, err := s.store.Pending(ctx, now.Add(-MaxAge), now, sendBatch)
 	if err != nil || len(rows) == 0 {
 		return err
 	}
 	var delivered, retry []int64
 	switch s.delivery {
 	case "email":
-		delivered, retry = s.sendEmail(rows)
+		delivered, retry = s.sendEmail(ctx, rows)
 	case "push":
 		delivered, retry, err = s.sendPush(ctx, rows)
 		if err != nil {
@@ -121,9 +121,11 @@ func (s *Sender) Run(ctx context.Context) error {
 	return s.store.Finish(ctx, delivered, retry, now, MaxAttempts)
 }
 
-// sendEmail sends one message for each user and pass. A user with no verified address has nothing to send to and
-// the notices are dropped; a refused or capped mail leaves its notices pending for the next run.
-func (s *Sender) sendEmail(rows []OutboxRow) (delivered, retry []int64) {
+// sendEmail sends one message for each user and pass, straight through the mailer, and reports a notice delivered
+// only once the SMTP server accepted it. A user with no verified address has nothing to send to and the notices are
+// dropped. A failed send is retried later (with a delay and an attempt counted) and ends the run, since the rest
+// would meet the same server; the capped rest stays pending without an attempt.
+func (s *Sender) sendEmail(ctx context.Context, rows []OutboxRow) (delivered, retry []int64) {
 	type group struct {
 		first   OutboxRow
 		ids     []int64
@@ -142,21 +144,25 @@ func (s *Sender) sendEmail(rows []OutboxRow) (delivered, retry []int64) {
 		g.ids = append(g.ids, r.ID)
 		g.notices = append(g.notices, EmailNotice{Kind: r.Kind, Name: r.Name, Detail: r.Detail, Value: r.Value})
 	}
-	queued := 0
+	sent := 0
 	for _, g := range groups {
 		if g.first.Email == "" || !g.first.EmailVerified {
 			delivered = append(delivered, g.ids...)
 			continue
 		}
-		if queued >= MaxMailsPerPass {
+		if sent >= MaxMailsPerPass || ctx.Err() != nil {
 			continue
 		}
 		subject, text := ComposeEmail(g.notices, s.atlasURL)
-		if !s.mail.TryEnqueue(g.first.UserID, "alert", g.first.Email, subject, text) {
-			// The queue is at the alert share: leave the rest for the next pass without spending an attempt.
+		sctx, cancel := context.WithTimeout(ctx, MailSendTimeout)
+		err := s.mail.Send(sctx, mailer.Message{To: g.first.Email, Subject: subject, Text: text})
+		cancel()
+		if err != nil {
+			slog.Warn("alert mail not sent", "component", "alerts", "user_id", g.first.UserID, "err", err)
+			retry = append(retry, g.ids...)
 			break
 		}
-		queued++
+		sent++
 		delivered = append(delivered, g.ids...)
 	}
 	return delivered, retry

@@ -13,6 +13,7 @@ JOIN users u ON u.id = o.user_id AND u.disabled_at IS NULL
 LEFT JOIN nodes n ON o.target_kind = 'node' AND n.public_key = o.target_public_key
 LEFT JOIN observers ob ON o.target_kind = 'observer' AND ob.public_key = o.target_public_key
 WHERE o.delivered_at IS NULL AND o.created_at >= sqlc.arg(not_before)
+  AND (o.next_attempt_at IS NULL OR o.next_attempt_at <= sqlc.arg(now))
 ORDER BY o.user_id, o.pass_id, o.id
 LIMIT sqlc.arg(row_limit);
 
@@ -26,7 +27,9 @@ WHERE d.user_id = ANY(sqlc.arg(user_ids)::uuid[])
 UPDATE alert_outbox SET delivered_at = sqlc.arg(at) WHERE id = ANY(sqlc.arg(ids)::bigint[]);
 
 -- name: BumpAlertAttempts :exec
-UPDATE alert_outbox SET attempts = attempts + 1 WHERE id = ANY(sqlc.arg(ids)::bigint[]);
+-- Counts a failed attempt and holds the notice back for a minute, doubling with each earlier failure.
+UPDATE alert_outbox SET attempts = attempts + 1, next_attempt_at = sqlc.arg(at)::timestamptz + interval '1 minute' * power(2, attempts)
+WHERE id = ANY(sqlc.arg(ids)::bigint[]);
 
 -- name: DeleteExhaustedAlerts :execrows
 DELETE FROM alert_outbox WHERE delivered_at IS NULL AND attempts >= sqlc.arg(max_attempts);

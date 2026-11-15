@@ -468,6 +468,7 @@ func main() {
 	// Left an untyped nil while accounts are off: a nil *users.Service stored in the interface would be called.
 	var accountsSvc handlers.AccountsService
 	var usersService *users.Service
+	var accountMailer mail.Sender // nil while accounts are off
 	var authOptions handlers.AuthOptions
 	portalURL := ""
 	var meMounts []handlers.MeMount
@@ -479,6 +480,7 @@ func main() {
 			sender = mail.NewSMTP(resolvedAccounts.SMTPHost, resolvedAccounts.SMTPPort, resolvedAccounts.SMTPUsername,
 				resolvedAccounts.SMTPPassword, resolvedAccounts.SMTPFrom, resolvedAccounts.SMTPStartTLS)
 		}
+		accountMailer = sender
 		usersService = users.NewService(maintStore, sender, resolvedAccounts, time.Now, slog.Default())
 		accountsSvc = usersService
 		authOptions = handlers.AuthOptions{
@@ -553,7 +555,7 @@ func main() {
 		alertsSvc = alerts.NewService(maintStore, alertDelivery, time.Now)
 	}
 	slog.Info("alerts", "component", "startup", "delivery", resolvedAlerts.Delivery, "enabled", alertsSvc != nil)
-	alertSender, err := newAlertSender(alertDelivery, usersService, maintStore, resolvedAccounts.PublicURL, os.Getenv("BEACON_PUSH_CREDENTIALS"))
+	alertSender, err := newAlertSender(alertDelivery, accountMailer, maintStore, resolvedAccounts.PublicURL, os.Getenv("BEACON_PUSH_CREDENTIALS"))
 	if err != nil {
 		slog.Error("invalid alert delivery", "component", "startup", "error", err)
 		os.Exit(1)

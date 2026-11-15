@@ -14,6 +14,7 @@ import (
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/alerts"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	mailer "github.com/MeshCore-Beacon/beacon-server/internal/mail"
 	"github.com/MeshCore-Beacon/beacon-server/internal/users"
 	"github.com/google/uuid"
 )
@@ -254,11 +255,17 @@ func TestAlertApplySkipsEditedRulesPostgres(t *testing.T) {
 	}
 }
 
-type recMail struct{ got []string }
+type recMail struct {
+	got  []string
+	fail error
+}
 
-func (m *recMail) TryEnqueue(_ uuid.UUID, kind, to, subject, text string) bool {
-	m.got = append(m.got, to+"|"+subject+"|"+text)
-	return true
+func (m *recMail) Send(_ context.Context, msg mailer.Message) error {
+	if m.fail != nil {
+		return m.fail
+	}
+	m.got = append(m.got, msg.To+"|"+msg.Subject+"|"+msg.Text)
+	return nil
 }
 
 type recPush struct {
@@ -364,11 +371,14 @@ func TestAlertOutboxRetriesThenDropsPostgres(t *testing.T) {
 	}
 	queueNotice(t, ctx, s, alice.ID, uuid.New(), "rebooted", "Hilltop", time.Now())
 	p := &failPush{}
-	sender := alerts.NewSender(AlertEval{s}, "push", nil, p, nil, nil)
+	// Each failure holds the notice back, so the clock moves on between runs.
+	at := time.Now()
+	sender := alerts.NewSender(AlertEval{s}, "push", nil, p, nil, func() time.Time { return at })
 	for i := 0; i < alerts.MaxAttempts; i++ {
 		if err := sender.Run(ctx); err != nil {
 			t.Fatal(err)
 		}
+		at = at.Add(10 * time.Minute)
 	}
 	var n int
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM alert_outbox`).Scan(&n)
@@ -446,5 +456,45 @@ func TestAlertBackOnlineNeedsEnabledGoneQuietPostgres(t *testing.T) {
 	run()
 	if st := ruleState(t, ctx, s, alice.ID, rep, "back_online"); st != "inactive" {
 		t.Fatalf("partner deleted: %s", st)
+	}
+}
+
+// An email the SMTP server did not take stays in the outbox: pending, an attempt counted, held back for a delay,
+// and sent once the delay has passed and the server answers.
+func TestAlertEmailStaysPendingUntilSentPostgres(t *testing.T) {
+	ctx, pool, s := userStore(t)
+	alice := newUser(t, ctx, s, "alice")
+	if err := s.SetUserEmailVerified(ctx, alice.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	queueNotice(t, ctx, s, alice.ID, uuid.New(), "rebooted", "Hilltop", time.Now())
+	pu, _ := url.Parse("https://beacon.example.org")
+	m := &recMail{fail: errors.New("smtp: connection refused")}
+	at := time.Now()
+	sender := alerts.NewSender(AlertEval{s}, "email", m, nil, pu, func() time.Time { return at })
+	state := func() (pending, attempts int) {
+		t.Helper()
+		if err := pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE delivered_at IS NULL), COALESCE(max(attempts), 0) FROM alert_outbox`).Scan(&pending, &attempts); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if err := sender.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if p, a := state(); p != 1 || a != 1 {
+		t.Fatalf("after a failed send: %d pending, %d attempts", p, a)
+	}
+	// Still inside the delay: not tried again, even with the server back.
+	m.fail = nil
+	if err := sender.Run(ctx); err != nil || len(m.got) != 0 {
+		t.Fatalf("retried inside the delay: %v %d", err, len(m.got))
+	}
+	at = at.Add(2 * time.Minute)
+	if err := sender.Run(ctx); err != nil || len(m.got) != 1 {
+		t.Fatalf("not sent after the delay: %v %d", err, len(m.got))
+	}
+	if p, _ := state(); p != 0 {
+		t.Fatalf("%d still pending after the server took it", p)
 	}
 }

@@ -231,22 +231,6 @@ func (s *Service) enqueue(userID uuid.UUID, kind, to, subject, text string) {
 	}
 }
 
-// TryEnqueue queues alert mail for the one mail worker without waiting and reports whether it was queued. It only
-// succeeds while the queue is under half full, so the other half stays for account mail; false means try again
-// later.
-func (s *Service) TryEnqueue(userID uuid.UUID, kind, to, subject, text string) bool {
-	if len(s.mailq) >= mailQueueSize/2 {
-		return false
-	}
-	q := queuedMail{userID: userID, kind: kind, msg: mailer.Message{To: to, Subject: subject, Text: text}}
-	select {
-	case s.mailq <- q:
-		return true
-	default:
-		return false
-	}
-}
-
 // deliver sends one mail; a failure is logged with the user id, kind and recipient domain only.
 func (s *Service) deliver(q queuedMail) {
 	ctx, cancel := context.WithTimeout(context.Background(), mailSendTimeout)

@@ -313,8 +313,8 @@ func (a AlertEval) Expire(ctx context.Context, undeliveredBefore, deliveredBefor
 	return a.q.ExpireAlertOutbox(ctx, sqlc.ExpireAlertOutboxParams{UndeliveredBefore: ts(undeliveredBefore), DeliveredBefore: ts(deliveredBefore)})
 }
 
-func (a AlertEval) Pending(ctx context.Context, notBefore time.Time, limit int) ([]alerts.OutboxRow, error) {
-	rows, err := a.q.PendingAlerts(ctx, sqlc.PendingAlertsParams{NotBefore: ts(notBefore), RowLimit: int32(limit)})
+func (a AlertEval) Pending(ctx context.Context, notBefore, now time.Time, limit int) ([]alerts.OutboxRow, error) {
+	rows, err := a.q.PendingAlerts(ctx, sqlc.PendingAlertsParams{NotBefore: ts(notBefore), Now: ts(now), RowLimit: int32(limit)})
 	if err != nil {
 		return nil, err
 	}
@@ -346,7 +346,7 @@ func (a AlertEval) Finish(ctx context.Context, delivered, retry []int64, now tim
 			}
 		}
 		if len(retry) > 0 {
-			if err := q.BumpAlertAttempts(ctx, retry); err != nil {
+			if err := q.BumpAlertAttempts(ctx, sqlc.BumpAlertAttemptsParams{At: ts(now), Ids: retry}); err != nil {
 				return err
 			}
 			if _, err := q.DeleteExhaustedAlerts(ctx, int16(maxAttempts)); err != nil {

@@ -16,7 +16,6 @@ import (
 	"testing"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/background"
-	"github.com/MeshCore-Beacon/beacon-server/internal/users"
 )
 
 func TestAlertSenderNeedsSomethingToSendWith(t *testing.T) {
@@ -32,8 +31,8 @@ func TestAlertSenderNeedsSomethingToSendWith(t *testing.T) {
 	if s, err := newAlertSender("off", nil, nil, pu, ""); err != nil || s != nil {
 		t.Fatalf("off: %v %v", s, err)
 	}
-	if s, err := newAlertSender("email", (*users.Service)(nil), nil, pu, ""); err != nil || s != nil {
-		t.Fatalf("email without the account mail queue: %v %v", s, err)
+	if s, err := newAlertSender("email", nil, nil, pu, ""); err != nil || s != nil {
+		t.Fatalf("email without a mailer: %v %v", s, err)
 	}
 }
 

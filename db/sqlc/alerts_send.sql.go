@@ -13,11 +13,18 @@ import (
 )
 
 const bumpAlertAttempts = `-- name: BumpAlertAttempts :exec
-UPDATE alert_outbox SET attempts = attempts + 1 WHERE id = ANY($1::bigint[])
+UPDATE alert_outbox SET attempts = attempts + 1, next_attempt_at = $1::timestamptz + interval '1 minute' * power(2, attempts)
+WHERE id = ANY($2::bigint[])
 `
 
-func (q *Queries) BumpAlertAttempts(ctx context.Context, ids []int64) error {
-	_, err := q.db.Exec(ctx, bumpAlertAttempts, ids)
+type BumpAlertAttemptsParams struct {
+	At  pgtype.Timestamptz `json:"at"`
+	Ids []int64            `json:"ids"`
+}
+
+// Counts a failed attempt and holds the notice back for a minute, doubling with each earlier failure.
+func (q *Queries) BumpAlertAttempts(ctx context.Context, arg BumpAlertAttemptsParams) error {
+	_, err := q.db.Exec(ctx, bumpAlertAttempts, arg.At, arg.Ids)
 	return err
 }
 
@@ -118,12 +125,14 @@ JOIN users u ON u.id = o.user_id AND u.disabled_at IS NULL
 LEFT JOIN nodes n ON o.target_kind = 'node' AND n.public_key = o.target_public_key
 LEFT JOIN observers ob ON o.target_kind = 'observer' AND ob.public_key = o.target_public_key
 WHERE o.delivered_at IS NULL AND o.created_at >= $1
+  AND (o.next_attempt_at IS NULL OR o.next_attempt_at <= $2)
 ORDER BY o.user_id, o.pass_id, o.id
-LIMIT $2
+LIMIT $3
 `
 
 type PendingAlertsParams struct {
 	NotBefore pgtype.Timestamptz `json:"not_before"`
+	Now       pgtype.Timestamptz `json:"now"`
 	RowLimit  int32              `json:"row_limit"`
 }
 
@@ -144,7 +153,7 @@ type PendingAlertsRow struct {
 }
 
 func (q *Queries) PendingAlerts(ctx context.Context, arg PendingAlertsParams) ([]PendingAlertsRow, error) {
-	rows, err := q.db.Query(ctx, pendingAlerts, arg.NotBefore, arg.RowLimit)
+	rows, err := q.db.Query(ctx, pendingAlerts, arg.NotBefore, arg.Now, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
