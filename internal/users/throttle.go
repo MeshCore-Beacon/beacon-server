@@ -4,6 +4,7 @@
 package users
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -14,13 +15,21 @@ const (
 	throttleMax    = 10
 	throttleWindow = 15 * time.Minute
 	sweepEvery     = time.Minute
+	// throttleCap bounds the table so made-up login names cannot grow it without limit.
+	throttleCap = 20000
 )
 
-// throttle counts wrong passwords per user in memory (Beacon runs as a single writer). After throttleMax failures
-// inside the window the user is locked for throttleWindow. Expired entries are swept so the map stays small.
+// loginKey is the key for a typed login name: the same whether it names a user, an email or nobody.
+func loginKey(login string) string { return "login:" + strings.ToLower(strings.TrimSpace(login)) }
+
+// userKey is the key for actions of a signed-in user (change password, change email, delete).
+func userKey(id uuid.UUID) string { return "user:" + id.String() }
+
+// throttle counts wrong passwords per key (see loginKey, userKey) in memory (Beacon runs as a single writer). After throttleMax failures
+// inside the window the key is locked for throttleWindow. Expired entries are swept so the map stays small.
 type throttle struct {
 	mu        sync.Mutex
-	m         map[uuid.UUID]*attempt
+	m         map[string]*attempt
 	nextSweep time.Time
 }
 
@@ -30,7 +39,7 @@ type attempt struct {
 	lockedUntil time.Time
 }
 
-func newThrottle() *throttle { return &throttle{m: map[uuid.UUID]*attempt{}} }
+func newThrottle() *throttle { return &throttle{m: map[string]*attempt{}} }
 
 func (a *attempt) expired(now time.Time) bool {
 	return !now.Before(a.windowStart.Add(throttleWindow)) && !now.Before(a.lockedUntil)
@@ -50,7 +59,7 @@ func (t *throttle) sweep(now time.Time) {
 }
 
 // locked reports whether id may not be tried, and for how long still.
-func (t *throttle) locked(id uuid.UUID, now time.Time) (time.Duration, bool) {
+func (t *throttle) locked(id string, now time.Time) (time.Duration, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.sweep(now)
@@ -61,12 +70,20 @@ func (t *throttle) locked(id uuid.UUID, now time.Time) (time.Duration, bool) {
 }
 
 // fail records a wrong password and reports whether it locked the user.
-func (t *throttle) fail(id uuid.UUID, now time.Time) bool {
+func (t *throttle) fail(id string, now time.Time) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.sweep(now)
 	a := t.m[id]
 	if a == nil {
+		if len(t.m) >= throttleCap {
+			t.nextSweep = time.Time{}
+			t.sweep(now)
+			// Still full: do not record the new key, so a flood cannot evict a lock that is already set.
+			if len(t.m) >= throttleCap {
+				return false
+			}
+		}
 		a = &attempt{}
 		t.m[id] = a
 	}
@@ -81,7 +98,7 @@ func (t *throttle) fail(id uuid.UUID, now time.Time) bool {
 	return false
 }
 
-func (t *throttle) clear(id uuid.UUID) {
+func (t *throttle) clear(id string) {
 	t.mu.Lock()
 	delete(t.m, id)
 	t.mu.Unlock()

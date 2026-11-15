@@ -33,6 +33,8 @@ type Store interface {
 	SetUserPassword(ctx context.Context, id uuid.UUID, hash string) error
 	SetUserEmailVerified(ctx context.Context, id uuid.UUID, at time.Time) error
 	SetUserPendingEmail(ctx context.Context, id uuid.UUID, email *string) error
+	ReplaceUnverifiedUser(ctx context.Context, id uuid.UUID, username, hash string) error
+	PeekToken(ctx context.Context, kind TokenKind, hash []byte, now time.Time) (uuid.UUID, error)
 	ApplyPendingEmail(ctx context.Context, id uuid.UUID, expected string) error
 	TouchUserLogin(ctx context.Context, id uuid.UUID, at time.Time) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
@@ -103,6 +105,8 @@ type Service struct {
 	throttle *throttle
 	// verifyPW is injectable so a test can count password comparisons.
 	verifyPW func(hash, password string) (bool, bool)
+	// mailq feeds the one mail worker, see Start.
+	mailq chan queuedMail
 	// dummyHash is compared against when the user is unknown, so both paths cost one argon2 run.
 	dummyHash string
 }
@@ -119,7 +123,7 @@ func NewService(store Store, m mailer.Sender, cfg config.ResolvedAccounts, now f
 	if err != nil {
 		panic("users: dummy hash: " + err.Error())
 	}
-	return &Service{store: store, mailer: m, cfg: cfg, now: now, log: log, throttle: newThrottle(), verifyPW: VerifyPassword, dummyHash: dummy}
+	return &Service{store: store, mailer: m, cfg: cfg, now: now, log: log, throttle: newThrottle(), mailq: make(chan queuedMail, mailQueueSize), verifyPW: VerifyPassword, dummyHash: dummy}
 }
 
 // ---- input rules ----
@@ -188,13 +192,89 @@ func (s *Service) link(view, token string) string {
 
 func (s *Service) host() string { return s.cfg.PublicURL.Host }
 
-// send delivers a mail; a failure is logged (user id and kind only) and returned for callers that care.
-func (s *Service) send(ctx context.Context, userID uuid.UUID, kind, to, subject, text string) error {
-	if err := s.mailer.Send(ctx, mailer.Message{To: to, Subject: subject, Text: text}); err != nil {
-		s.log.Warn("mail not sent", "user_id", userID, "mail", kind, "to_domain", emailDomain(to), "err", err)
-		return err
+const (
+	mailQueueSize   = 64
+	mailSendTimeout = 30 * time.Second
+	mailDrainTime   = 10 * time.Second
+)
+
+type queuedMail struct {
+	userID  uuid.UUID
+	kind    string
+	msg     mailer.Message
+	barrier chan struct{} // set only by Flush
+}
+
+// enqueue hands a mail to the worker without ever waiting, so a request costs the same whether or not it sends one.
+// A full queue drops the mail and logs it.
+func (s *Service) enqueue(userID uuid.UUID, kind, to, subject, text string) {
+	q := queuedMail{userID: userID, kind: kind, msg: mailer.Message{To: to, Subject: subject, Text: text}}
+	select {
+	case s.mailq <- q:
+	default:
+		s.log.Warn("mail queue full, mail dropped", "user_id", userID, "mail", kind)
 	}
-	return nil
+}
+
+// deliver sends one mail; a failure is logged with the user id, kind and recipient domain only.
+func (s *Service) deliver(q queuedMail) {
+	ctx, cancel := context.WithTimeout(context.Background(), mailSendTimeout)
+	defer cancel()
+	if err := s.mailer.Send(ctx, q.msg); err != nil {
+		s.log.Warn("mail not sent", "user_id", q.userID, "mail", q.kind, "to_domain", emailDomain(q.msg.To), "err", err)
+	}
+}
+
+// Start runs the mail worker until ctx ends, then sends what is still queued (for a few seconds at most). The
+// returned channel closes when the worker has stopped.
+func (s *Service) Start(ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-ctx.Done():
+				deadline := time.After(mailDrainTime)
+				for {
+					select {
+					case q := <-s.mailq:
+						if q.barrier != nil {
+							close(q.barrier)
+						} else {
+							s.deliver(q)
+						}
+					case <-deadline:
+						return
+					default:
+						return
+					}
+				}
+			case q := <-s.mailq:
+				if q.barrier != nil {
+					close(q.barrier)
+					continue
+				}
+				s.deliver(q)
+			}
+		}
+	}()
+	return done
+}
+
+// Flush returns once every mail queued before the call has been handled. Tests and shutdown use it.
+func (s *Service) Flush(ctx context.Context) error {
+	b := make(chan struct{})
+	select {
+	case s.mailq <- queuedMail{barrier: b}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case <-b:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 type tokenData struct {
@@ -223,7 +303,7 @@ func (s *Service) sendVerify(ctx context.Context, u User) error {
 		return err
 	}
 	subject, text := verifyMailText(s.host(), s.link("verify", tok))
-	_ = s.send(ctx, u.ID, "verify", u.Email, subject, text)
+	s.enqueue(u.ID, "verify", u.Email, subject, text)
 	return nil
 }
 
@@ -265,10 +345,20 @@ func (s *Service) Register(ctx context.Context, username, email, password string
 		if gerr != nil {
 			return gerr
 		}
-		if existing.EmailVerifiedAt == nil && existing.DisabledAt == nil {
-			return s.sendVerify(ctx, existing)
+		if existing.EmailVerifiedAt != nil || existing.DisabledAt != nil {
+			return nil
 		}
-		return nil
+		// Nobody has proved they own this address, so the new sign-up replaces the pending account. Keeping the
+		// first password would let someone pre-register another person's address.
+		switch rerr := s.store.ReplaceUnverifiedUser(ctx, existing.ID, username, hash); {
+		case errors.Is(rerr, ErrNotFound):
+			return nil
+		case rerr != nil:
+			return rerr
+		}
+		existing.Username, existing.DisplayName = username, username
+		s.log.Info("pending registration replaced", "user_id", existing.ID)
+		return s.sendVerify(ctx, existing)
 	case err != nil:
 		return err
 	}
@@ -348,22 +438,27 @@ func (s *Service) ResendVerification(ctx context.Context, email string) error {
 
 // ---- password checks ----
 
-// checkPassword verifies pw against u behind the per-account throttle. The throttle is read before any hashing, so
-// a throttled account costs nothing to hit. Only a wrong password counts.
-func (s *Service) checkPassword(u User, pw string) (needsRehash bool, err error) {
+// checkKey verifies pw against hash behind the throttle entry for key. The throttle is read before any hashing, so
+// a throttled key costs nothing to hit. Only a wrong password counts.
+func (s *Service) checkKey(key, hash, pw string) (needsRehash bool, err error) {
 	now := s.now()
-	if wait, locked := s.throttle.locked(u.ID, now); locked {
+	if wait, locked := s.throttle.locked(key, now); locked {
 		return false, &TooManyAttemptsError{RetryAfter: wait}
 	}
-	ok, re := s.verifyPW(u.PassHash, pw)
+	ok, re := s.verifyPW(hash, pw)
 	if !ok {
-		if s.throttle.fail(u.ID, now) {
-			s.log.Warn("account throttled after repeated wrong passwords", "user_id", u.ID)
+		if s.throttle.fail(key, now) {
+			s.log.Warn("password attempts throttled", "key_kind", strings.SplitN(key, ":", 2)[0])
 		}
 		return false, ErrInvalidCredentials
 	}
-	s.throttle.clear(u.ID)
+	s.throttle.clear(key)
 	return re, nil
+}
+
+// checkPassword is the check for a signed-in user's own actions, throttled per user id.
+func (s *Service) checkPassword(u User, pw string) (needsRehash bool, err error) {
+	return s.checkKey(userKey(u.ID), u.PassHash, pw)
 }
 
 // ---- login and sessions ----
@@ -390,6 +485,11 @@ func (s *Service) Login(ctx context.Context, login, password string, meta Sessio
 	if strings.Contains(login, "@") {
 		login = strings.ToLower(login)
 	}
+	// The throttle is keyed on the typed name, so a known and an unknown name look the same from outside.
+	key := loginKey(login)
+	if wait, locked := s.throttle.locked(key, s.now()); locked {
+		return "", Session{}, User{}, &TooManyAttemptsError{RetryAfter: wait}
+	}
 	var u User
 	var err error
 	if login == "" || len(login) > maxEmailBytes {
@@ -402,9 +502,10 @@ func (s *Service) Login(ctx context.Context, login, password string, meta Sessio
 	}
 	if err != nil || u.DisabledAt != nil {
 		s.verifyPW(s.dummyHash, password)
+		s.throttle.fail(key, s.now())
 		return "", Session{}, User{}, ErrInvalidCredentials
 	}
-	needsRehash, err := s.checkPassword(u, password)
+	needsRehash, err := s.checkKey(key, u.PassHash, password)
 	if err != nil {
 		s.log.Info("login refused", "user_id", u.ID, "reason", loginReason(err))
 		return "", Session{}, User{}, err
@@ -515,7 +616,7 @@ func (s *Service) RequestReset(ctx context.Context, email string) error {
 	}
 	s.log.Info("password reset requested", "user_id", u.ID)
 	subject, text := resetMailText(s.host(), s.link("reset", tok))
-	_ = s.send(ctx, u.ID, "reset", u.Email, subject, text)
+	s.enqueue(u.ID, "reset", u.Email, subject, text)
 	return nil
 }
 
@@ -529,7 +630,9 @@ func (s *Service) ConfirmReset(ctx context.Context, token, newPassword string) e
 	if token == "" {
 		return ErrTokenInvalid
 	}
-	uid, _, err := s.store.ConsumeToken(ctx, TokenReset, HashToken(token), s.now())
+	// Peek first so a password the policy refuses does not spend the link.
+	hashTok := HashToken(token)
+	uid, err := s.store.PeekToken(ctx, TokenReset, hashTok, s.now())
 	if errors.Is(err, ErrNotFound) {
 		return ErrTokenInvalid
 	}
@@ -550,6 +653,11 @@ func (s *Service) ConfirmReset(ctx context.Context, token, newPassword string) e
 	if err != nil {
 		return err
 	}
+	if cid, _, err := s.store.ConsumeToken(ctx, TokenReset, hashTok, s.now()); errors.Is(err, ErrNotFound) || (err == nil && cid != uid) {
+		return ErrTokenInvalid
+	} else if err != nil {
+		return err
+	}
 	if err := s.store.SetUserPassword(ctx, uid, hash); err != nil {
 		return err
 	}
@@ -561,14 +669,25 @@ func (s *Service) ConfirmReset(ctx context.Context, token, newPassword string) e
 	if err := s.store.EndAllSessions(ctx, uid); err != nil {
 		return err
 	}
-	for _, k := range []TokenKind{TokenReset, TokenAppCode} {
-		if err := s.store.DeleteUserTokens(ctx, uid, k); err != nil {
+	if err := s.revokeOneTimeCredentials(ctx, uid); err != nil {
+		return err
+	}
+	s.throttle.clear(userKey(uid))
+	s.throttle.clear(loginKey(u.Username))
+	s.throttle.clear(loginKey(u.Email))
+	s.log.Info("password reset completed", "user_id", uid)
+	return nil
+}
+
+// revokeOneTimeCredentials leaves no link or code usable after a password change or reset: a pending email change
+// and every outstanding one-time token of the user goes.
+func (s *Service) revokeOneTimeCredentials(ctx context.Context, id uuid.UUID) error {
+	for _, k := range []TokenKind{TokenVerify, TokenReset, TokenEmailChange, TokenAppCode} {
+		if err := s.store.DeleteUserTokens(ctx, id, k); err != nil {
 			return err
 		}
 	}
-	s.throttle.clear(uid)
-	s.log.Info("password reset completed", "user_id", uid)
-	return nil
+	return s.store.SetUserPendingEmail(ctx, id, nil)
 }
 
 // ---- profile ----
@@ -590,7 +709,7 @@ func (s *Service) ChangePassword(ctx context.Context, u User, keepSession uuid.U
 	if err := s.store.EndOtherSessions(ctx, u.ID, keepSession); err != nil {
 		return err
 	}
-	if err := s.store.DeleteUserTokens(ctx, u.ID, TokenReset); err != nil {
+	if err := s.revokeOneTimeCredentials(ctx, u.ID); err != nil {
 		return err
 	}
 	s.log.Info("password changed", "user_id", u.ID)
@@ -629,7 +748,7 @@ func (s *Service) ChangeEmail(ctx context.Context, u User, current, newEmail str
 	s.log.Info("email change requested", "user_id", u.ID)
 	if !owned {
 		subject, text := emailChangeMailText(s.host(), s.link("verify", tok))
-		_ = s.send(ctx, u.ID, "email_change", addr, subject, text)
+		s.enqueue(u.ID, "email_change", addr, subject, text)
 	}
 	return nil
 }
@@ -718,7 +837,7 @@ func (s *Service) ExchangeAppCode(ctx context.Context, code, codeVerifier string
 	s.log.Info("app sign-in", "user_id", uid, "session_id", sess.ID)
 	if u.Email != "" {
 		subject, text := appSignInMailText(s.host(), label, s.now())
-		_ = s.send(ctx, uid, "app_sign_in", u.Email, subject, text)
+		s.enqueue(uid, "app_sign_in", u.Email, subject, text)
 	}
 	return tok, sess, u, nil
 }

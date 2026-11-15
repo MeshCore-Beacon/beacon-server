@@ -31,6 +31,20 @@ UPDATE users SET pending_email = sqlc.narg(pending_email) WHERE id = sqlc.arg(id
 UPDATE users SET email = pending_email, pending_email = NULL, email_verified_at = now()
 WHERE id = $1 AND pending_email = $2;
 
+-- name: ReplaceUnverifiedUser :one
+-- Re-registration of an address whose owner never verified it: new username and hash, and every old token and
+-- session of the account is deleted, in one statement. No row when the user is verified, disabled or gone.
+WITH replaced AS (
+    UPDATE users SET username = sqlc.arg(username), display_name = sqlc.arg(username), pass_hash = sqlc.arg(pass_hash), created_at = now()
+    WHERE users.id = sqlc.arg(user_id) AND email_verified_at IS NULL AND disabled_at IS NULL
+    RETURNING users.id
+), dropped_tokens AS (
+    DELETE FROM user_tokens WHERE user_id IN (SELECT id FROM replaced)
+), dropped_sessions AS (
+    DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM replaced)
+)
+SELECT id FROM replaced;
+
 -- name: TouchUserLogin :execrows
 UPDATE users SET last_login_at = $2 WHERE id = $1;
 
@@ -107,6 +121,11 @@ VALUES (sqlc.arg(token_hash), sqlc.arg(user_id), sqlc.arg(kind), sqlc.narg(data)
 UPDATE user_tokens SET used_at = sqlc.arg(now)
 WHERE token_hash = sqlc.arg(token_hash) AND kind = sqlc.arg(kind) AND used_at IS NULL AND expires_at > sqlc.arg(now)
 RETURNING user_id, data;
+
+-- name: PeekUserToken :one
+-- Who a live token belongs to, without using it.
+SELECT user_id FROM user_tokens
+WHERE token_hash = sqlc.arg(token_hash) AND kind = sqlc.arg(kind) AND used_at IS NULL AND expires_at > sqlc.arg(now);
 
 -- name: DeleteUserTokens :exec
 DELETE FROM user_tokens WHERE user_id = $1 AND kind = $2;

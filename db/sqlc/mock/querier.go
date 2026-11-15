@@ -3426,6 +3426,21 @@ func (mr *MockQuerierMockRecorder) PacketSitesTotalBytes(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PacketSitesTotalBytes", reflect.TypeOf((*MockQuerier)(nil).PacketSitesTotalBytes), ctx)
 }
 
+// PeekUserToken mocks base method.
+func (m *MockQuerier) PeekUserToken(ctx context.Context, arg db.PeekUserTokenParams) (uuid.UUID, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PeekUserToken", ctx, arg)
+	ret0, _ := ret[0].(uuid.UUID)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PeekUserToken indicates an expected call of PeekUserToken.
+func (mr *MockQuerierMockRecorder) PeekUserToken(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PeekUserToken", reflect.TypeOf((*MockQuerier)(nil).PeekUserToken), ctx, arg)
+}
+
 // PollingAdminTargetRows mocks base method.
 func (m *MockQuerier) PollingAdminTargetRows(ctx context.Context, arg db.PollingAdminTargetRowsParams) ([]db.PollingAdminTargetRowsRow, error) {
 	m.ctrl.T.Helper()
@@ -3643,6 +3658,21 @@ func (m *MockQuerier) ReplaceRepeaters(ctx context.Context, arg db.ReplaceRepeat
 func (mr *MockQuerierMockRecorder) ReplaceRepeaters(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReplaceRepeaters", reflect.TypeOf((*MockQuerier)(nil).ReplaceRepeaters), ctx, arg)
+}
+
+// ReplaceUnverifiedUser mocks base method.
+func (m *MockQuerier) ReplaceUnverifiedUser(ctx context.Context, arg db.ReplaceUnverifiedUserParams) (uuid.UUID, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ReplaceUnverifiedUser", ctx, arg)
+	ret0, _ := ret[0].(uuid.UUID)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ReplaceUnverifiedUser indicates an expected call of ReplaceUnverifiedUser.
+func (mr *MockQuerierMockRecorder) ReplaceUnverifiedUser(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReplaceUnverifiedUser", reflect.TypeOf((*MockQuerier)(nil).ReplaceUnverifiedUser), ctx, arg)
 }
 
 // ResolveEndpointHashPairs mocks base method.

@@ -182,6 +182,40 @@ func (f *fakeStore) ApplyPendingEmail(_ context.Context, id uuid.UUID, expected 
 	u.Email, u.PendingEmail, u.EmailVerifiedAt = *u.PendingEmail, nil, &now
 	return nil
 }
+func (f *fakeStore) ReplaceUnverifiedUser(_ context.Context, id uuid.UUID, username, hash string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	u, err := f.get(id)
+	if err != nil || u.EmailVerifiedAt != nil || u.DisabledAt != nil {
+		return ErrNotFound
+	}
+	for _, o := range f.users {
+		if o.ID != id && strings.EqualFold(o.Username, username) {
+			return ErrUsernameTaken
+		}
+	}
+	u.Username, u.DisplayName, u.PassHash = username, username, hash
+	for h, t := range f.tokens {
+		if t.user == id {
+			delete(f.tokens, h)
+		}
+	}
+	for _, s := range f.sessions {
+		if s.UserID == id {
+			s.ended = true
+		}
+	}
+	return nil
+}
+func (f *fakeStore) PeekToken(_ context.Context, kind TokenKind, hash []byte, now time.Time) (uuid.UUID, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	t, ok := f.tokens[string(hash)]
+	if !ok || t.kind != kind || t.used || !now.Before(t.expires) {
+		return uuid.Nil, ErrNotFound
+	}
+	return t.user, nil
+}
 func (f *fakeStore) TouchUserLogin(_ context.Context, id uuid.UUID, at time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -335,7 +369,19 @@ func newEnv(t *testing.T) *env {
 	e := &env{t: t, store: newFakeStore(clk), mail: &mail.Recorder{}, clk: clk, logs: &bytes.Buffer{}}
 	log := slog.New(slog.NewTextHandler(e.logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	e.svc = NewService(e.store, e.mail, config.ResolvedAccounts{Enabled: true, PublicURL: pu, RegistrationOpen: true}, clk.Now, log)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := e.svc.Start(ctx)
+	t.Cleanup(func() { cancel(); <-done })
 	return e
+}
+
+// msgs waits for the mail queue to drain, then returns what was sent.
+func (e *env) msgs() []mail.Message {
+	e.t.Helper()
+	if err := e.svc.Flush(context.Background()); err != nil {
+		e.t.Fatal(err)
+	}
+	return e.mail.Messages()
 }
 
 var tokenRe = regexp.MustCompile(`token=([A-Za-z0-9_-]+)`)
@@ -351,7 +397,7 @@ func tokenIn(t *testing.T, m mail.Message) string {
 
 func (e *env) last() mail.Message {
 	e.t.Helper()
-	m := e.mail.Messages()
+	m := e.msgs()
 	if len(m) == 0 {
 		e.t.Fatal("no mail sent")
 	}
@@ -397,7 +443,7 @@ func TestRegisterCreatesUnverifiedUserAndMailsLink(t *testing.T) {
 	if ok, _ := VerifyPassword(u.PassHash, goodPW); !ok {
 		t.Fatal("stored hash does not verify")
 	}
-	msgs := e.mail.Messages()
+	msgs := e.msgs()
 	if len(msgs) != 1 || msgs[0].To != "ridge@example.org" {
 		t.Fatalf("mail: %+v", msgs)
 	}
@@ -442,7 +488,7 @@ func TestRegisterValidation(t *testing.T) {
 			t.Errorf("%s: err = %v", c.name, err)
 		}
 	}
-	if len(e.mail.Messages()) != 0 || len(e.store.users) != 0 {
+	if len(e.msgs()) != 0 || len(e.store.users) != 0 {
 		t.Fatal("rejected registrations must leave nothing behind")
 	}
 }
@@ -460,26 +506,83 @@ func TestRegisterDuplicateEmailDoesNotReveal(t *testing.T) {
 	if err := e.svc.Register(bg, "first", "dup@example.org", goodPW); err != nil {
 		t.Fatal(err)
 	}
-	// Still unverified: a second try sends the verify mail again, returns nil.
+	// Still unverified: a second try replaces the pending account and sends a new verify mail.
 	if err := e.svc.Register(bg, "second", "dup@example.org", goodPW); err != nil {
 		t.Fatal(err)
 	}
-	msgs := e.mail.Messages()
+	msgs := e.msgs()
 	if len(msgs) != 2 || msgs[1].To != "dup@example.org" {
 		t.Fatalf("mail: %+v", msgs)
 	}
 	if err := e.svc.Verify(bg, tokenIn(t, msgs[1])); err != nil {
 		t.Fatal(err)
 	}
-	// Verified: nothing is sent, still nil.
-	if err := e.svc.Register(bg, "third", "dup@example.org", goodPW); err != nil {
+	// Verified: nothing is sent, nothing changes, still nil.
+	if err := e.svc.Register(bg, "third", "dup@example.org", "some other long passphrase"); err != nil {
 		t.Fatal(err)
 	}
-	if n := len(e.mail.Messages()); n != 2 {
+	if n := len(e.msgs()); n != 2 {
 		t.Fatalf("%d mails", n)
 	}
 	if len(e.store.users) != 1 {
 		t.Fatal("duplicate email created a user")
+	}
+	u, err := e.store.UserByEmail(bg, "dup@example.org")
+	if err != nil || u.Username != "second" {
+		t.Fatalf("verified account changed: %+v %v", u, err)
+	}
+	if ok, _ := VerifyPassword(u.PassHash, goodPW); !ok {
+		t.Fatal("verified account's password changed")
+	}
+}
+
+// The pre-registration attack: the attacker registers the victim's address first with a password of their own.
+func TestRegisterOverAnUnverifiedAddressReplacesThePendingAccount(t *testing.T) {
+	e := newEnv(t)
+	const p1, p2 = "attackers long passphrase", "the real owners passphrase"
+	if err := e.svc.Register(bg, "mallory", "victim@example.org", p1); err != nil {
+		t.Fatal(err)
+	}
+	oldTok := tokenIn(t, e.last())
+	pending, _ := e.store.UserByEmail(bg, "victim@example.org")
+	oldSess, _ := e.store.CreateSession(bg, Session{UserID: pending.ID, Kind: "web", ExpiresAt: e.clk.Now().Add(time.Hour)}, []byte("old"))
+
+	if err := e.svc.Register(bg, "victim", "victim@example.org", p2); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.store.users) != 1 {
+		t.Fatalf("%d users", len(e.store.users))
+	}
+	if err := e.svc.Verify(bg, oldTok); !errors.Is(err, ErrTokenInvalid) {
+		t.Fatalf("old verify link still works: %v", err)
+	}
+	if e.store.sessions[oldSess.ID].ended != true {
+		t.Fatal("old session not ended")
+	}
+	if err := e.svc.Verify(bg, tokenIn(t, e.last())); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := e.svc.Login(bg, "victim@example.org", p1, SessionMeta{}); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("attacker's password still signs in: %v", err)
+	}
+	if _, _, _, err := e.svc.Login(bg, "mallory", p1, SessionMeta{}); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("attacker's username still signs in: %v", err)
+	}
+	if _, _, u, err := e.svc.Login(bg, "victim@example.org", p2, SessionMeta{}); err != nil || u.Username != "victim" {
+		t.Fatalf("victim cannot sign in: %v", err)
+	}
+}
+
+func TestRegisterOverAnUnverifiedAddressStillHonoursUsernameUniqueness(t *testing.T) {
+	e := newEnv(t)
+	_ = e.svc.Register(bg, "pending", "p@example.org", goodPW)
+	e.user("taken")
+	if err := e.svc.Register(bg, "Taken", "p@example.org", "another long passphrase"); !errors.Is(err, ErrUsernameTaken) {
+		t.Fatalf("err = %v", err)
+	}
+	u, _ := e.store.UserByEmail(bg, "p@example.org")
+	if u.Username != "pending" {
+		t.Fatalf("pending account changed: %+v", u)
 	}
 }
 
@@ -497,6 +600,7 @@ func TestRegisterMailFailureIsSilentAndLogsNoToken(t *testing.T) {
 	if err := e.svc.Register(bg, "ridge", "ridge@example.org", goodPW); err != nil {
 		t.Fatalf("err = %v", err)
 	}
+	_ = e.msgs()
 	if !strings.Contains(e.logs.String(), "smtp down") {
 		t.Fatalf("failure not logged: %s", e.logs)
 	}
@@ -565,7 +669,7 @@ func TestResendVerification(t *testing.T) {
 	if err := e.svc.ResendVerification(bg, "RIDGE@example.org"); err != nil {
 		t.Fatal(err)
 	}
-	if len(e.mail.Messages()) != 2 {
+	if len(e.msgs()) != 2 {
 		t.Fatal("no resend")
 	}
 	if err := e.svc.Verify(bg, first); !errors.Is(err, ErrTokenInvalid) {
@@ -580,7 +684,7 @@ func TestResendVerification(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(e.mail.Messages()) != 2 {
+	if len(e.msgs()) != 2 {
 		t.Fatal("mail sent for verified or unknown address")
 	}
 	if err := e.svc.ResendVerification(bg, "not an email"); !errors.Is(err, ErrInvalidInput) {
@@ -706,13 +810,8 @@ func TestThrottle(t *testing.T) {
 	if !errors.As(err, &te) || te.RetryAfter <= 0 || te.RetryAfter > 15*time.Minute {
 		t.Fatalf("retry after: %+v", te)
 	}
-	// Another account and an unknown name are not affected.
+	// Another account is not affected.
 	e.login("other")
-	for i := 0; i < 20; i++ {
-		if _, _, _, err := e.svc.Login(bg, "nobody", goodPW, SessionMeta{}); !errors.Is(err, ErrInvalidCredentials) {
-			t.Fatalf("unknown user got %v", err)
-		}
-	}
 	e.clk.Advance(15*time.Minute + time.Second)
 	e.login("ridge")
 }
@@ -750,25 +849,15 @@ func TestThrottleWindowAndPruning(t *testing.T) {
 	th := newThrottle()
 	now := e.clk.Now()
 	for i := 0; i < 500; i++ {
-		th.fail(uuid.New(), now)
+		th.fail(uuid.NewString(), now)
 	}
 	if th.size() != 500 {
 		t.Fatalf("size %d", th.size())
 	}
 	later := now.Add(31 * time.Minute)
-	th.locked(uuid.New(), later)
+	th.locked(uuid.NewString(), later)
 	if th.size() != 0 {
 		t.Fatalf("not pruned: %d", th.size())
-	}
-}
-
-func TestThrottleOnlyCountsWrongPasswordsOfExistingUsers(t *testing.T) {
-	e := newEnv(t)
-	for i := 0; i < 30; i++ {
-		_, _, _, _ = e.svc.Login(bg, "ghost", goodPW, SessionMeta{})
-	}
-	if e.svc.throttle.size() != 0 {
-		t.Fatal("unknown users must not grow the table")
 	}
 }
 
@@ -934,7 +1023,7 @@ func TestSessionsAdministration(t *testing.T) {
 func TestResetUnknownDisabledAndMailFailureSendNothingAndReturnNil(t *testing.T) {
 	e := newEnv(t)
 	u := e.user("ridge")
-	before := len(e.mail.Messages())
+	before := len(e.msgs())
 	if err := e.svc.RequestReset(bg, "nobody@example.org"); err != nil {
 		t.Fatal(err)
 	}
@@ -943,7 +1032,7 @@ func TestResetUnknownDisabledAndMailFailureSendNothingAndReturnNil(t *testing.T)
 	if err := e.svc.RequestReset(bg, u.Email); err != nil {
 		t.Fatal(err)
 	}
-	if len(e.mail.Messages()) != before {
+	if len(e.msgs()) != before {
 		t.Fatal("mail sent")
 	}
 	e.store.users[u.ID].DisabledAt = nil
@@ -1122,11 +1211,11 @@ func TestChangeEmail(t *testing.T) {
 	if err := e.svc.ChangeEmail(bg, u, goodPW, "bad"); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("invalid: %v", err)
 	}
-	before := len(e.mail.Messages())
+	before := len(e.msgs())
 	if err := e.svc.ChangeEmail(bg, u, goodPW, " New@Example.org "); err != nil {
 		t.Fatal(err)
 	}
-	m := e.mail.Messages()
+	m := e.msgs()
 	if len(m) != before+1 || m[before].To != "new@example.org" {
 		t.Fatalf("mail %+v", m)
 	}
@@ -1147,11 +1236,11 @@ func TestChangeEmailToAnAddressAnotherUserOwnsLooksTheSame(t *testing.T) {
 	e := newEnv(t)
 	u := e.user("ridge")
 	e.user("bob")
-	before := len(e.mail.Messages())
+	before := len(e.msgs())
 	if err := e.svc.ChangeEmail(bg, u, goodPW, "bob@example.org"); err != nil {
 		t.Fatal(err)
 	}
-	if len(e.mail.Messages()) != before {
+	if len(e.msgs()) != before {
 		t.Fatal("mail sent to the owner of the address")
 	}
 	if p := e.store.users[u.ID].PendingEmail; p == nil || *p != "bob@example.org" {
@@ -1231,7 +1320,7 @@ const verifier = "a-verifier-that-is-long-enough-for-pkce-0123456789"
 func TestAppCodeFlow(t *testing.T) {
 	e := newEnv(t)
 	u := e.user("ridge")
-	before := len(e.mail.Messages())
+	before := len(e.msgs())
 	code, err := e.svc.IssueAppCode(bg, u, challengeFor(verifier), "Pixel 9\nInjected: header")
 	if err != nil || code == "" {
 		t.Fatalf("%q %v", code, err)
@@ -1246,7 +1335,7 @@ func TestAppCodeFlow(t *testing.T) {
 	if _, _, err := e.svc.Authenticate(bg, tok); err != nil {
 		t.Fatal(err)
 	}
-	m := e.mail.Messages()
+	m := e.msgs()
 	if len(m) != before+1 {
 		t.Fatalf("expected one notification, got %d", len(m)-before)
 	}
@@ -1268,6 +1357,7 @@ func TestAppCodeSignInMailFailureDoesNotFailSignIn(t *testing.T) {
 	if _, _, _, err := e.svc.ExchangeAppCode(bg, code, verifier, SessionMeta{}); err != nil {
 		t.Fatalf("err = %v", err)
 	}
+	_ = e.msgs()
 	if !strings.Contains(e.logs.String(), "smtp down") {
 		t.Fatal("failure not logged")
 	}
@@ -1324,12 +1414,12 @@ func TestAppSignInSkipsMailWhenUserHasNoEmail(t *testing.T) {
 	e := newEnv(t)
 	u := e.user("ridge")
 	e.store.users[u.ID].Email = ""
-	before := len(e.mail.Messages())
+	before := len(e.msgs())
 	code, _ := e.svc.IssueAppCode(bg, u, challengeFor(verifier), "Pixel")
 	if _, _, _, err := e.svc.ExchangeAppCode(bg, code, verifier, SessionMeta{}); err != nil {
 		t.Fatal(err)
 	}
-	if len(e.mail.Messages()) != before {
+	if len(e.msgs()) != before {
 		t.Fatal("mailed a user with no address")
 	}
 }
@@ -1411,4 +1501,217 @@ func phcFor(pw string, t, m uint32) string {
 	salt := []byte("0123456789abcdef")
 	key := argon2IDKey(pw, salt, t, m)
 	return phc(m, t, 1, salt, key)
+}
+
+// ---- mail queue ----
+
+type gateSender struct {
+	release chan struct{}
+	entered chan struct{}
+	mu      sync.Mutex
+	n       int
+}
+
+func (g *gateSender) Send(ctx context.Context, m mail.Message) error {
+	select {
+	case g.entered <- struct{}{}:
+	default:
+	}
+	select {
+	case <-g.release:
+	case <-ctx.Done():
+	}
+	g.mu.Lock()
+	g.n++
+	g.mu.Unlock()
+	return nil
+}
+
+func TestMailIsSentOffTheRequestPath(t *testing.T) {
+	e := newEnv(t)
+	g := &gateSender{release: make(chan struct{}), entered: make(chan struct{}, 1)}
+	e.svc.mailer = g
+	done := make(chan error, 1)
+	go func() { done <- e.svc.Register(bg, "ridge", "ridge@example.org", goodPW) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Register waited for the mail to be sent")
+	}
+	close(g.release)
+	if err := e.svc.Flush(bg); err != nil {
+		t.Fatal(err)
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.n != 1 {
+		t.Fatalf("%d mails sent", g.n)
+	}
+}
+
+func TestMailQueueIsBoundedAndNeverBlocksTheRequest(t *testing.T) {
+	e := newEnv(t)
+	g := &gateSender{release: make(chan struct{}), entered: make(chan struct{}, 1)}
+	e.svc.mailer = g
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < mailQueueSize*3; i++ {
+			e.svc.enqueue(uuid.New(), "verify", "a@example.org", "s", "t")
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("enqueue blocked on a full queue")
+	}
+	if !strings.Contains(e.logs.String(), "mail queue full") {
+		t.Fatalf("drop not logged: %s", e.logs)
+	}
+	close(g.release)
+}
+
+func TestMailFailureLogsNoAddress(t *testing.T) {
+	e := newEnv(t)
+	e.mail.FailWith(errors.New("smtp down"))
+	_ = e.svc.Register(bg, "ridge", "ridge@example.org", goodPW)
+	_ = e.msgs()
+	if !strings.Contains(e.logs.String(), "smtp down") || strings.Contains(e.logs.String(), "ridge@example.org") {
+		t.Fatalf("log: %s", e.logs)
+	}
+}
+
+func TestVerifyMailSaysToIgnoreIfYouDidNotSignUp(t *testing.T) {
+	e := newEnv(t)
+	_ = e.svc.Register(bg, "ridge", "ridge@example.org", goodPW)
+	if !strings.Contains(e.last().Text, "did not sign up") {
+		t.Fatalf("text: %q", e.last().Text)
+	}
+}
+
+// ---- reset and password change leave nothing usable behind ----
+
+func TestRefusedResetPasswordDoesNotBurnTheLink(t *testing.T) {
+	e := newEnv(t)
+	u := e.user("ridge")
+	_ = e.svc.RequestReset(bg, u.Email)
+	tok := tokenIn(t, e.last())
+	if err := e.svc.ConfirmReset(bg, tok, "my-ridge-pass-123"); !errors.Is(err, ErrWeakPassword) {
+		t.Fatalf("err = %v", err)
+	}
+	if err := e.svc.ConfirmReset(bg, tok, "a different long passphrase"); err != nil {
+		t.Fatalf("link was burned: %v", err)
+	}
+}
+
+// outstanding gives a user a pending email change and an app code, as a stolen session might.
+func outstanding(t *testing.T, e *env, u User) (changeTok, appCode string) {
+	t.Helper()
+	if err := e.svc.ChangeEmail(bg, u, goodPW, "attacker@example.org"); err != nil {
+		t.Fatal(err)
+	}
+	changeTok = tokenIn(t, e.last())
+	chal := sha256.Sum256([]byte("verifier"))
+	code, err := e.svc.IssueAppCode(bg, u, base64.RawURLEncoding.EncodeToString(chal[:]), "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return changeTok, code
+}
+
+func assertNothingOutstanding(t *testing.T, e *env, u User, changeTok, appCode string) {
+	t.Helper()
+	if err := e.svc.Verify(bg, changeTok); !errors.Is(err, ErrTokenInvalid) {
+		t.Fatalf("email change link still works: %v", err)
+	}
+	if _, _, _, err := e.svc.ExchangeAppCode(bg, appCode, "verifier", SessionMeta{}); !errors.Is(err, ErrTokenInvalid) {
+		t.Fatalf("app code still works: %v", err)
+	}
+	got, _ := e.store.UserByID(bg, u.ID)
+	if got.PendingEmail != nil || got.Email != u.Email {
+		t.Fatalf("pending email left: %+v", got)
+	}
+}
+
+func TestChangePasswordRevokesEveryOneTimeToken(t *testing.T) {
+	e := newEnv(t)
+	u := e.user("ridge")
+	_, s, _ := e.login("ridge")
+	ct, ac := outstanding(t, e, u)
+	_ = e.svc.RequestReset(bg, u.Email)
+	rt := tokenIn(t, e.last())
+	if err := e.svc.ChangePassword(bg, u, s.ID, goodPW, "a different long passphrase"); err != nil {
+		t.Fatal(err)
+	}
+	assertNothingOutstanding(t, e, u, ct, ac)
+	if err := e.svc.ConfirmReset(bg, rt, "yet another long passphrase"); !errors.Is(err, ErrTokenInvalid) {
+		t.Fatalf("reset link still works: %v", err)
+	}
+}
+
+func TestConfirmResetRevokesEveryOneTimeToken(t *testing.T) {
+	e := newEnv(t)
+	u := e.user("ridge")
+	ct, ac := outstanding(t, e, u)
+	_ = e.svc.RequestReset(bg, u.Email)
+	if err := e.svc.ConfirmReset(bg, tokenIn(t, e.last()), "a different long passphrase"); err != nil {
+		t.Fatal(err)
+	}
+	assertNothingOutstanding(t, e, u, ct, ac)
+}
+
+// ---- login throttle keyed on the name typed ----
+
+func TestThrottleGivesKnownAndUnknownNamesTheSameAnswer(t *testing.T) {
+	e := newEnv(t)
+	e.user("ridge")
+	answer := func(name string) (error, time.Duration) {
+		_, _, _, err := e.svc.Login(bg, name, "wrong password here", SessionMeta{})
+		var te *TooManyAttemptsError
+		if errors.As(err, &te) {
+			return err, te.RetryAfter
+		}
+		return err, 0
+	}
+	for i := 0; i < 10; i++ {
+		for _, n := range []string{"ridge", " GHOST "} {
+			if err, _ := answer(n); !errors.Is(err, ErrInvalidCredentials) {
+				t.Fatalf("%s attempt %d: %v", n, i, err)
+			}
+		}
+	}
+	ek, rk := answer("ridge")
+	eu, ru := answer("ghost")
+	if !errors.Is(ek, ErrTooManyAttempts) || !errors.Is(eu, ErrTooManyAttempts) || rk != ru || rk <= 0 {
+		t.Fatalf("known: %v %v, unknown: %v %v", ek, rk, eu, ru)
+	}
+	// Spelling does not dodge it.
+	if err, _ := answer("RIDGE "); !errors.Is(err, ErrTooManyAttempts) {
+		t.Fatalf("case variant: %v", err)
+	}
+}
+
+func TestThrottleTableIsBounded(t *testing.T) {
+	th := newThrottle()
+	now := time.Now()
+	for i := 0; i < throttleCap*2; i++ {
+		th.fail(uuid.NewString(), now)
+	}
+	if th.size() > throttleCap {
+		t.Fatalf("size %d over the cap", th.size())
+	}
+	// An existing lock survives the flood.
+	th2 := newThrottle()
+	for i := 0; i < throttleMax; i++ {
+		th2.fail("victim", now)
+	}
+	for i := 0; i < throttleCap*2; i++ {
+		th2.fail(uuid.NewString(), now)
+	}
+	if _, locked := th2.locked("victim", now); !locked {
+		t.Fatal("flood evicted a lock")
+	}
 }

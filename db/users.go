@@ -145,6 +145,17 @@ func (s *Store) ApplyPendingEmail(ctx context.Context, id uuid.UUID, expected st
 	return affected(s.q.ApplyPendingEmail(ctx, sqlc.ApplyPendingEmailParams{ID: id, PendingEmail: &e}))
 }
 
+// ReplaceUnverifiedUser gives an unverified account a new username and password hash and deletes its tokens and
+// sessions. It reports users.ErrNotFound when the user is verified, disabled or missing, and users.ErrUsernameTaken
+// when the username belongs to another account.
+func (s *Store) ReplaceUnverifiedUser(ctx context.Context, id uuid.UUID, username, hash string) error {
+	_, err := s.q.ReplaceUnverifiedUser(ctx, sqlc.ReplaceUnverifiedUserParams{UserID: id, Username: username, PassHash: hash})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return users.ErrNotFound
+	}
+	return userWriteErr(err)
+}
+
 func (s *Store) TouchUserLogin(ctx context.Context, id uuid.UUID, at time.Time) error {
 	return affected(s.q.TouchUserLogin(ctx, sqlc.TouchUserLoginParams{ID: id, LastLoginAt: ts(at)}))
 }
@@ -277,6 +288,15 @@ func (s *Store) ConsumeToken(ctx context.Context, kind users.TokenKind, hash []b
 		return uuid.Nil, nil, err
 	}
 	return r.UserID, r.Data, nil
+}
+
+// PeekToken returns the user a live token of the kind belongs to without using it, or users.ErrNotFound.
+func (s *Store) PeekToken(ctx context.Context, kind users.TokenKind, hash []byte, now time.Time) (uuid.UUID, error) {
+	id, err := s.q.PeekUserToken(ctx, sqlc.PeekUserTokenParams{TokenHash: hash, Kind: string(kind), Now: ts(now)})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, users.ErrNotFound
+	}
+	return id, err
 }
 
 func (s *Store) DeleteUserTokens(ctx context.Context, userID uuid.UUID, kind users.TokenKind) error {

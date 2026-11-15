@@ -558,6 +558,8 @@ type Querier interface {
 	ObservationIDBelow(ctx context.Context, arg ObservationIDBelowParams) (int64, error)
 	OldestMissingRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
 	PacketSitesTotalBytes(ctx context.Context) (int64, error)
+	// Who a live token belongs to, without using it.
+	PeekUserToken(ctx context.Context, arg PeekUserTokenParams) (uuid.UUID, error)
 	// Each live candidate and each assigned observer of the given targets. rank is -1 for an unassigned candidate.
 	// Claim fields come only from a live claim, so an assignment left over from an expired one shows them empty.
 	PollingAdminTargetRows(ctx context.Context, arg PollingAdminTargetRowsParams) ([]PollingAdminTargetRowsRow, error)
@@ -593,6 +595,9 @@ type Querier interface {
 	// rows is a JSON array of {"key": hex, "data": {...}}; unchanged rows are not rewritten.
 	// fetchedAt comes from the source's checked_at when read.
 	ReplaceRepeaters(ctx context.Context, arg ReplaceRepeatersParams) error
+	// Re-registration of an address whose owner never verified it: new username and hash, and every old token and
+	// session of the account is deleted, in one statement. No row when the user is verified, disabled or gone.
+	ReplaceUnverifiedUser(ctx context.Context, arg ReplaceUnverifiedUserParams) (uuid.UUID, error)
 	// Batch form of ResolveEndpointHashes for a page of packets. Matches the cross
 	// product of IATAs and hashes; callers pick out the pairs they asked for.
 	ResolveEndpointHashPairs(ctx context.Context, arg ResolveEndpointHashPairsParams) ([]ResolveEndpointHashPairsRow, error)

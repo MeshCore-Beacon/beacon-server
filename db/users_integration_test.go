@@ -611,3 +611,56 @@ func TestUserTextClippedPostgres(t *testing.T) {
 		t.Fatal("stored text differs from the returned text")
 	}
 }
+
+func TestUserReplaceUnverifiedAndPeekTokenPostgres(t *testing.T) {
+	ctx, _, s := userStore(t)
+	now := time.Now()
+	pending := newUser(t, ctx, s, "pending")
+	other := newUser(t, ctx, s, "other")
+	newSession(t, ctx, s, pending, "web", 1)
+	if err := s.CreateToken(ctx, pending.ID, users.TokenVerify, []byte("t1"), []byte(`{}`), now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if id, err := s.PeekToken(ctx, users.TokenVerify, []byte("t1"), now); err != nil || id != pending.ID {
+		t.Fatalf("peek = %v, %v", id, err)
+	}
+	// Peeking does not spend the token.
+	if _, _, err := s.ConsumeToken(ctx, users.TokenVerify, []byte("t1"), now); err != nil {
+		t.Fatalf("consume after peek: %v", err)
+	}
+	if _, err := s.PeekToken(ctx, users.TokenVerify, []byte("t1"), now); !errors.Is(err, users.ErrNotFound) {
+		t.Fatalf("peek of a used token: %v", err)
+	}
+	_ = s.CreateToken(ctx, pending.ID, users.TokenVerify, []byte("t2"), []byte(`{}`), now.Add(time.Hour))
+
+	if err := s.ReplaceUnverifiedUser(ctx, pending.ID, "Other", "h2"); !errors.Is(err, users.ErrUsernameTaken) {
+		t.Fatalf("taken username: %v", err)
+	}
+	if err := s.ReplaceUnverifiedUser(ctx, pending.ID, "fresh", "h2"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.UserByID(ctx, pending.ID)
+	if got.Username != "fresh" || got.DisplayName != "fresh" || got.PassHash != "h2" || got.Email != pending.Email {
+		t.Fatalf("user %+v", got)
+	}
+	if liveSessionCount(t, ctx, s, got) != 0 {
+		t.Fatal("sessions survived")
+	}
+	if _, err := s.PeekToken(ctx, users.TokenVerify, []byte("t2"), now); !errors.Is(err, users.ErrNotFound) {
+		t.Fatalf("token survived: %v", err)
+	}
+	// Verified users are never replaced, and nothing of theirs is deleted.
+	if err := s.SetUserEmailVerified(ctx, other.ID, now); err != nil {
+		t.Fatal(err)
+	}
+	newSession(t, ctx, s, other, "web", 2)
+	if err := s.ReplaceUnverifiedUser(ctx, other.ID, "hijack", "h3"); !errors.Is(err, users.ErrNotFound) {
+		t.Fatalf("verified: %v", err)
+	}
+	if o, _ := s.UserByID(ctx, other.ID); o.Username != "other" || o.PassHash != "hash" {
+		t.Fatalf("verified user changed: %+v", o)
+	}
+	if liveSessionCount(t, ctx, s, other) != 1 {
+		t.Fatal("verified user's session deleted")
+	}
+}
