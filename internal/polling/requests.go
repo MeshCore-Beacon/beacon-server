@@ -360,6 +360,20 @@ func (t *TargetState) SetAssigned(assigned bool, reason string) bool {
 	return changed
 }
 
+// FollowAssignments keeps waiting and active true to the target's assignments whatever changed them: a waiting
+// request becomes active while the target has one, and an active one with none left waits for an observer.
+func (t *TargetState) FollowAssignments(assigned bool) {
+	for i := range t.Requests {
+		r := &t.Requests[i]
+		switch {
+		case assigned && r.Status == StatusWaiting:
+			r.Status, r.Reason = StatusActive, ""
+		case !assigned && r.Status == StatusActive:
+			r.Status, r.Reason = StatusWaiting, ReasonNoObserver
+		}
+	}
+}
+
 // LoginFailedCounts says whether a login_failed report from the poller counts. After a ver change it is ignored
 // until the observer has shown another state since, or the grace has passed.
 func LoginFailedCounts(now, verChangedAt time.Time, otherStateSeenAt *time.Time) bool {

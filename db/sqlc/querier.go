@@ -77,6 +77,9 @@ type Querier interface {
 	ClearNoPasswordBlocked(ctx context.Context, targetPublicKey []byte) (int64, error)
 	// Keeps fetch timing so re-enabling still respects backoff; the ETag goes with the rows.
 	ClearRepeaters(ctx context.Context) (int64, error)
+	// Renumbers the target's ranks 0..n-1 in their current order, so after a delete the best survivor polls. Only the
+	// lowest rank can become 0, so the one-poller index holds row by row. Run under LockPollingTarget.
+	CompactTargetAssignments(ctx context.Context, targetPublicKey []byte) error
 	// One statement, so a state is used once; an expired one is deleted and reported as missing by the caller.
 	ConsumePortalState(ctx context.Context, cookieHash []byte) (ConsumePortalStateRow, error)
 	// Spends a live reset token only while the address it was mailed to is still the account's address, in one statement.
@@ -123,8 +126,8 @@ type Querier interface {
 	// cutoff: candidates without locks, then lock SKIP LOCKED through the pkey (re-checked on the newest
 	// version) and delete. unresolved_ts is the earliest candidate left behind; window_end is the bound used.
 	DeleteGraceRoutesSlice(ctx context.Context, arg DeleteGraceRoutesSliceParams) (DeleteGraceRoutesSliceRow, error)
-	// Run under LockPollingTarget. Returns the rank the row had, for RenumberTargetAssignments.
-	DeleteObserverTargetAssignment(ctx context.Context, arg DeleteObserverTargetAssignmentParams) (int16, error)
+	// Run under LockPollingTarget, then CompactTargetAssignments.
+	DeleteObserverTargetAssignment(ctx context.Context, arg DeleteObserverTargetAssignmentParams) (int64, error)
 	DeleteOldAlertPasses(ctx context.Context, startedAt pgtype.Timestamptz) error
 	// Keeps the channel IATA filter in step with packet retention.
 	DeleteOldChannelIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error
@@ -744,9 +747,6 @@ type Querier interface {
 	RegisterRollupHours(ctx context.Context, since pgtype.Timestamptz) error
 	// Stores the same password under a newer hash, only while the hash is still the one that was verified.
 	RehashUserPassword(ctx context.Context, arg RehashUserPasswordParams) (int64, error)
-	// Closes the gap a deleted assignment of the given rank left, so the best survivor is the poller. Run under
-	// LockPollingTarget.
-	RenumberTargetAssignments(ctx context.Context, arg RenumberTargetAssignmentsParams) error
 	// rows is a JSON array of {"key": hex, "data": {...}}; unchanged rows are not rewritten.
 	// fetchedAt comes from the source's checked_at when read.
 	ReplaceRepeaters(ctx context.Context, arg ReplaceRepeatersParams) error

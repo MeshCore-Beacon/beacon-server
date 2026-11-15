@@ -129,14 +129,19 @@ ORDER BY q.oldest, x.target_public_key;
 -- name: OldestTargetRequest :one
 SELECT min(created_at)::timestamptz AS oldest FROM telemetry_requests WHERE target_public_key = $1;
 
--- name: DeleteObserverTargetAssignment :one
--- Run under LockPollingTarget. Returns the rank the row had, for RenumberTargetAssignments.
-DELETE FROM polling_assignments WHERE target_public_key = $1 AND observer_public_key = $2 RETURNING rank;
+-- name: DeleteObserverTargetAssignment :execrows
+-- Run under LockPollingTarget, then CompactTargetAssignments.
+DELETE FROM polling_assignments WHERE target_public_key = $1 AND observer_public_key = $2;
 
--- name: RenumberTargetAssignments :exec
--- Closes the gap a deleted assignment of the given rank left, so the best survivor is the poller. Run under
--- LockPollingTarget.
-UPDATE polling_assignments SET rank = rank - 1 WHERE target_public_key = $1 AND rank > $2;
+-- name: CompactTargetAssignments :exec
+-- Renumbers the target's ranks 0..n-1 in their current order, so after a delete the best survivor polls. Only the
+-- lowest rank can become 0, so the one-poller index holds row by row. Run under LockPollingTarget.
+UPDATE polling_assignments a SET rank = r.new_rank
+FROM (
+    SELECT observer_public_key, (row_number() OVER (ORDER BY rank, observer_public_key) - 1)::smallint AS new_rank
+    FROM polling_assignments WHERE target_public_key = sqlc.arg(target_public_key)
+) r
+WHERE a.target_public_key = sqlc.arg(target_public_key) AND a.observer_public_key = r.observer_public_key AND a.rank <> r.new_rank;
 
 -- name: ListRequestedAssignedTargets :many
 -- The targets that hold a requested assignment of any of the observers: the ones a seat decision may take a seat

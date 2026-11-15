@@ -92,6 +92,11 @@ func mutateRequestTarget(ctx context.Context, q *sqlc.Queries, target []byte, us
 	if err := fn(st); err != nil {
 		return err
 	}
+	assigned, err := q.CountTargetAssignments(ctx, target)
+	if err != nil {
+		return err
+	}
+	st.FollowAssignments(assigned > 0)
 
 	for _, o := range st.NewAdminStops {
 		if _, err := q.InsertPollingAdminStop(ctx, sqlc.InsertPollingAdminStopParams{

@@ -195,3 +195,41 @@ func TestLocalAssignmentDoesNotPreemptRequestPostgres(t *testing.T) {
 		t.Fatalf("local target took the requested seat: status=%s reason=%q assignments=%v", st.Status, st.Reason, assignedTargets(t, w))
 	}
 }
+
+// Cleanup that removes the poller promotes the standby; with nobody left the request waits for an observer.
+func TestCleanupKeepsDenseRanksAndStatusPostgres(t *testing.T) {
+	for _, standby := range []bool{false, true} {
+		t.Run(fmt.Sprint("standby=", standby), func(t *testing.T) {
+			w := newReqWorld(t, "")
+			u := newUser(t, w.ctx, w.s, "alice")
+			n := w.node(0xA1)
+			a, b := newReqDevice(1), newReqDevice(2)
+			for i, d := range []reqDevice{a, b} {
+				if i == 1 && !standby {
+					continue
+				}
+				pollHearAdvert(t, w.ctx, w.pool, pollKey(0xA1), pollObserver(t, w.ctx, w.s, d.pub), w.now.Add(-time.Hour), float32(9-i*5))
+				w.claim(d, 1)
+			}
+			r, err := w.reqs.Create(w.ctx, u.ID, n, []byte("pw"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = w.pool.Exec(w.ctx, `UPDATE polling_claims SET received_at=$1 WHERE observer_public_key=$2`, w.now.Add(-25*time.Hour), a.pub); err != nil {
+				t.Fatal(err)
+			}
+			if err = w.s.DeleteExpiredPolling(w.ctx, w.now.Add(-24*time.Hour), w.now.Add(-31*24*time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+			st := w.status(u.ID, r.ID)
+			if standby {
+				e, ok := w.owners(b, 0xA1)
+				if !ok || e.Role != "polling" || st.PollerID == nil || st.Status != polling.StatusActive {
+					t.Fatalf("surviving owner=%+v; status=%s poller=%v", e, st.Status, st.PollerID)
+				}
+			} else if st.Status != polling.StatusWaiting || st.Reason != polling.ReasonNoObserver {
+				t.Fatalf("no assignments: status=%s reason=%q poller=%v", st.Status, st.Reason, st.PollerID)
+			}
+		})
+	}
+}

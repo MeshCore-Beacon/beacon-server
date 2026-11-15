@@ -12,6 +12,22 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const compactTargetAssignments = `-- name: CompactTargetAssignments :exec
+UPDATE polling_assignments a SET rank = r.new_rank
+FROM (
+    SELECT observer_public_key, (row_number() OVER (ORDER BY rank, observer_public_key) - 1)::smallint AS new_rank
+    FROM polling_assignments WHERE target_public_key = $1
+) r
+WHERE a.target_public_key = $1 AND a.observer_public_key = r.observer_public_key AND a.rank <> r.new_rank
+`
+
+// Renumbers the target's ranks 0..n-1 in their current order, so after a delete the best survivor polls. Only the
+// lowest rank can become 0, so the one-poller index holds row by row. Run under LockPollingTarget.
+func (q *Queries) CompactTargetAssignments(ctx context.Context, targetPublicKey []byte) error {
+	_, err := q.db.Exec(ctx, compactTargetAssignments, targetPublicKey)
+	return err
+}
+
 const corroborateReadings = `-- name: CorroborateReadings :execrows
 WITH todo AS (
     SELECT x.id, x.packet_hash, x.observer_id, x.sampled_at FROM repeater_readings x
@@ -107,8 +123,8 @@ func (q *Queries) DeleteExpiredRepeaterReadings(ctx context.Context, receivedAt 
 	return err
 }
 
-const deleteObserverTargetAssignment = `-- name: DeleteObserverTargetAssignment :one
-DELETE FROM polling_assignments WHERE target_public_key = $1 AND observer_public_key = $2 RETURNING rank
+const deleteObserverTargetAssignment = `-- name: DeleteObserverTargetAssignment :execrows
+DELETE FROM polling_assignments WHERE target_public_key = $1 AND observer_public_key = $2
 `
 
 type DeleteObserverTargetAssignmentParams struct {
@@ -116,12 +132,13 @@ type DeleteObserverTargetAssignmentParams struct {
 	ObserverPublicKey []byte `json:"observer_public_key"`
 }
 
-// Run under LockPollingTarget. Returns the rank the row had, for RenumberTargetAssignments.
-func (q *Queries) DeleteObserverTargetAssignment(ctx context.Context, arg DeleteObserverTargetAssignmentParams) (int16, error) {
-	row := q.db.QueryRow(ctx, deleteObserverTargetAssignment, arg.TargetPublicKey, arg.ObserverPublicKey)
-	var rank int16
-	err := row.Scan(&rank)
-	return rank, err
+// Run under LockPollingTarget, then CompactTargetAssignments.
+func (q *Queries) DeleteObserverTargetAssignment(ctx context.Context, arg DeleteObserverTargetAssignmentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteObserverTargetAssignment, arg.TargetPublicKey, arg.ObserverPublicKey)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteOrphanPollingAssignments = `-- name: DeleteOrphanPollingAssignments :exec
@@ -1229,22 +1246,6 @@ func (q *Queries) PollingOwnerRows(ctx context.Context, arg PollingOwnerRowsPara
 		return nil, err
 	}
 	return items, nil
-}
-
-const renumberTargetAssignments = `-- name: RenumberTargetAssignments :exec
-UPDATE polling_assignments SET rank = rank - 1 WHERE target_public_key = $1 AND rank > $2
-`
-
-type RenumberTargetAssignmentsParams struct {
-	TargetPublicKey []byte `json:"target_public_key"`
-	Rank            int16  `json:"rank"`
-}
-
-// Closes the gap a deleted assignment of the given rank left, so the best survivor is the poller. Run under
-// LockPollingTarget.
-func (q *Queries) RenumberTargetAssignments(ctx context.Context, arg RenumberTargetAssignmentsParams) error {
-	_, err := q.db.Exec(ctx, renumberTargetAssignments, arg.TargetPublicKey, arg.Rank)
-	return err
 }
 
 const setPollingObserver = `-- name: SetPollingObserver :exec

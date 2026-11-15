@@ -419,3 +419,24 @@ func TestAdminStopAppliesToTheVersionServed(t *testing.T) {
 		t.Fatal("a stop on the current version did not delete it")
 	}
 }
+
+func TestFollowAssignmentsKeepsStoppedRequests(t *testing.T) {
+	st := &TargetState{Requests: []Request{
+		{Status: StatusWaiting, Reason: ReasonNoSeat}, {Status: StatusActive},
+		{Status: StatusLoginFailed, Reason: ReasonLoginFailed}, {Status: StatusAdminStopped, Reason: ReasonAdminStopped},
+		{Status: StatusDisabled, Reason: ReasonOffline(7)},
+	}}
+	st.FollowAssignments(true)
+	if r := st.Requests[0]; r.Status != StatusActive || r.Reason != "" {
+		t.Fatalf("waiting with an assignment: %+v", r)
+	}
+	st.FollowAssignments(false)
+	for i, want := range []RequestStatus{StatusWaiting, StatusWaiting, StatusLoginFailed, StatusAdminStopped, StatusDisabled} {
+		if st.Requests[i].Status != want {
+			t.Fatalf("request %d: %s, want %s", i, st.Requests[i].Status, want)
+		}
+	}
+	if st.Requests[1].Reason != ReasonNoObserver || st.Requests[2].Reason != ReasonLoginFailed {
+		t.Fatalf("reasons: %+v", st.Requests)
+	}
+}

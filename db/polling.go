@@ -451,15 +451,14 @@ func preemptYoungerSeats(ctx context.Context, q *sqlc.Queries, target []byte, ch
 			continue
 		}
 		for _, y := range younger[room:] {
-			rank, err := q.DeleteObserverTargetAssignment(ctx, sqlc.DeleteObserverTargetAssignmentParams{TargetPublicKey: y, ObserverPublicKey: a.Observer})
-			if errors.Is(err, pgx.ErrNoRows) {
-				continue
-			}
+			n, err := q.DeleteObserverTargetAssignment(ctx, sqlc.DeleteObserverTargetAssignmentParams{TargetPublicKey: y, ObserverPublicKey: a.Observer})
 			if err != nil {
 				return err
 			}
-			// The survivors close the gap, so the best of them is the poller.
-			if err := q.RenumberTargetAssignments(ctx, sqlc.RenumberTargetAssignmentsParams{TargetPublicKey: y, Rank: rank}); err != nil {
+			if n == 0 {
+				continue
+			}
+			if err := q.CompactTargetAssignments(ctx, y); err != nil {
 				return err
 			}
 			left, err := q.CountTargetAssignments(ctx, y)
@@ -563,13 +562,24 @@ func (s *Store) DeleteExpiredPolling(ctx context.Context, claimsBefore, readings
 	if err != nil {
 		return err
 	}
-	// One target at a time under its election lock, so cleanup and an election never delete in opposite orders.
+	// One target at a time under its election lock, so cleanup and an election never delete in opposite orders. The
+	// survivors are renumbered and the target's requests follow what is left, in the same transaction.
 	for _, t := range orphans {
 		if err := s.pollTx(ctx, func(q *sqlc.Queries) error {
 			if err := q.LockPollingTarget(ctx, t); err != nil {
 				return err
 			}
-			return q.DeleteOrphanPollingAssignments(ctx, t)
+			if err := q.DeleteOrphanPollingAssignments(ctx, t); err != nil {
+				return err
+			}
+			if err := q.CompactTargetAssignments(ctx, t); err != nil {
+				return err
+			}
+			requested, err := q.PollingTargetExists(ctx, t)
+			if err != nil || !requested {
+				return err
+			}
+			return mutateRequestTarget(ctx, q, t, uuid.Nil, func(*polling.TargetState) error { return nil })
 		}); err != nil {
 			return err
 		}
