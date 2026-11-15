@@ -15,7 +15,7 @@ func TestInstanceName(t *testing.T) {
 		"BEACON":                       "Beacon",
 		"beacon":                       "Beacon",
 		" Beacon ":                     "Beacon",
-		"Beacon - Ottawa":          "Beacon - Ottawa",
+		"Beacon - Ottawa":              "Beacon - Ottawa",
 		"  Mesh \t  Net  ":             "Mesh Net",
 		"Mesh\r\nBcc: x@y.z":           "MeshBcc: x@y.z",
 		"\x00\x07\x1b":                 "Beacon",
