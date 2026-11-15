@@ -18,6 +18,21 @@ type Account struct {
 	DeactivatedAt pgtype.Timestamptz `json:"deactivated_at"`
 }
 
+type AlertOutbox struct {
+	ID              int64              `json:"id"`
+	UserID          uuid.UUID          `json:"user_id"`
+	PassID          uuid.UUID          `json:"pass_id"`
+	TargetKind      string             `json:"target_kind"`
+	TargetPublicKey []byte             `json:"target_public_key"`
+	Name            string             `json:"name"`
+	AlertKind       string             `json:"alert_kind"`
+	Value           *int64             `json:"value"`
+	Detail          string             `json:"detail"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	Attempts        int16              `json:"attempts"`
+	DeliveredAt     pgtype.Timestamptz `json:"delivered_at"`
+}
+
 type AnalyticsDirtyHour struct {
 	Hour       pgtype.Timestamptz `json:"hour"`
 	EnqueuedAt pgtype.Timestamptz `json:"enqueued_at"`
@@ -661,6 +676,7 @@ type TelemetryRequest struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 	EnabledAt       pgtype.Timestamptz `json:"enabled_at"`
+	AttentionStatus *string            `json:"attention_status"`
 }
 
 type TraceIata struct {
@@ -706,6 +722,25 @@ type User struct {
 	DisabledAt      pgtype.Timestamptz `json:"disabled_at"`
 }
 
+type UserAlertRule struct {
+	ID              uuid.UUID          `json:"id"`
+	UserID          uuid.UUID          `json:"user_id"`
+	TargetKind      string             `json:"target_kind"`
+	TargetPublicKey []byte             `json:"target_public_key"`
+	Kind            string             `json:"kind"`
+	Threshold       *int32             `json:"threshold"`
+	ThresholdHigh   *int32             `json:"threshold_high"`
+	Enabled         bool               `json:"enabled"`
+	State           string             `json:"state"`
+	StateChangedAt  pgtype.Timestamptz `json:"state_changed_at"`
+	LastSentAt      pgtype.Timestamptz `json:"last_sent_at"`
+	CursorAt        pgtype.Timestamptz `json:"cursor_at"`
+	Streak          int16              `json:"streak"`
+	RecoveredAt     pgtype.Timestamptz `json:"recovered_at"`
+	Version         int64              `json:"version"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
 type UserAtla struct {
 	UserID    uuid.UUID          `json:"user_id"`
 	Range     string             `json:"range"`
@@ -721,6 +756,14 @@ type UserAtlasPin struct {
 	Name      string    `json:"name"`
 	Tiles     []string  `json:"tiles"`
 	View      *string   `json:"view"`
+}
+
+type UserDevice struct {
+	SessionID uuid.UUID          `json:"session_id"`
+	UserID    uuid.UUID          `json:"user_id"`
+	Platform  string             `json:"platform"`
+	PushToken string             `json:"push_token"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 type UserSession struct {

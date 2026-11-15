@@ -452,3 +452,10 @@ cache:
 #  portal:
 #    url: ""                   # https base URL of the portal
 #    client_id: ""             # this instance's client id at the portal
+
+# Alerts on Atlas radios (gone quiet, low battery, reboots and more). Needs accounts. Off by default.
+#alerts:
+#  delivery: off               # off, push or email
+#                              # push: BEACON_PUSH_CREDENTIALS names the Google service-account JSON file of the app's
+#                              #   Firebase project; without it rules can be set but nothing is sent
+#                              # email: needs accounts.mode local and its smtp setup

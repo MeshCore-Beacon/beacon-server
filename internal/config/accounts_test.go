@@ -143,3 +143,18 @@ func TestAccountsPortalRejects(t *testing.T) {
 		t.Error("unknown mode accepted")
 	}
 }
+
+func TestAlertsDelivery(t *testing.T) {
+	for _, tc := range []struct {
+		delivery, mode, want string
+		err                  bool
+	}{
+		{"", "local", "off", false}, {"off", "off", "off", false}, {"push", "portal", "push", false}, {"push", "local", "push", false},
+		{"email", "local", "email", false}, {"email", "portal", "", true}, {"sms", "local", "", true},
+	} {
+		r, err := AlertsConfig{Delivery: tc.delivery}.Resolve(tc.mode)
+		if (err != nil) != tc.err || r.Delivery != tc.want {
+			t.Errorf("%+v: %q %v", tc, r.Delivery, err)
+		}
+	}
+}

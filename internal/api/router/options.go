@@ -47,6 +47,9 @@ type Options struct {
 	RegistrationOpen bool
 	// PortalURL is reported as features.portalUrl while accounts are in portal mode.
 	PortalURL string
+	// AlertDelivery is "push" or "email" when alerts are on, else empty; it is reported as features.alerts and
+	// features.alertDelivery.
+	AlertDelivery string
 	// Accounts serves the sign-in and profile routes. Leave it an untyped nil when accounts are off: a nil
 	// *users.Service stored here is not == nil and would be called.
 	Accounts handlers.AccountsService

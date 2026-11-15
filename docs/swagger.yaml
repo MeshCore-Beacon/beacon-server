@@ -177,6 +177,95 @@ definitions:
       snr:
         type: number
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.AlertRule:
+    properties:
+      enabled:
+        type: boolean
+      id:
+        type: string
+      kind:
+        enum:
+        - gone_quiet
+        - back_online
+        - clock
+        - battery_low
+        - battery_falling
+        - rebooted
+        - temperature
+        - noise_high
+        - observer_offline
+        type: string
+      lastSentAt:
+        example: 1794703600000
+        type: integer
+      state:
+        enum:
+        - ok
+        - firing
+        - inactive
+        - unknown
+        type: string
+      stateChangedAt:
+        example: 1794700000000
+        type: integer
+      threshold:
+        example: 3500
+        type: integer
+      thresholdHigh:
+        type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.AlertTarget:
+    properties:
+      available:
+        items:
+          type: string
+        type: array
+      kind:
+        enum:
+        - node
+        - observer
+        type: string
+      name:
+        example: Hilltop
+        type: string
+      publicKey:
+        type: string
+      rules:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AlertRule'
+        type: array
+      unavailable:
+        additionalProperties:
+          type: string
+        description: Unavailable maps a kind to the reason this radio cannot have
+          it.
+        type: object
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.AlertTargetRef:
+    properties:
+      kind:
+        enum:
+        - node
+        - observer
+        type: string
+      publicKey:
+        example: 0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.AlertsResponse:
+    properties:
+      delivery:
+        enum:
+        - push
+        - email
+        type: string
+      hasDevice:
+        type: boolean
+      targets:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AlertTarget'
+        type: array
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.AppCodeRequest:
     properties:
       codeChallenge:
@@ -558,6 +647,12 @@ definitions:
     properties:
       accounts:
         example: "off"
+        type: string
+      alertDelivery:
+        description: AlertDelivery is "push" or "email" while alerts is true.
+        enum:
+        - push
+        - email
         type: string
       alerts:
         example: false
@@ -1952,6 +2047,19 @@ definitions:
       noPasswordBlocked:
         type: boolean
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.PutAlertRuleRequest:
+    properties:
+      enabled:
+        type: boolean
+      kind:
+        type: string
+      target:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AlertTargetRef'
+      threshold:
+        type: integer
+      thresholdHigh:
+        type: integer
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.PutAtlasRequest:
     properties:
       baseRevision:
@@ -2015,6 +2123,16 @@ definitions:
       zoomLevel:
         description: suggested map zoom level
         type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.RegisterDeviceRequest:
+    properties:
+      platform:
+        enum:
+        - ios
+        - android
+        type: string
+      pushToken:
+        type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.RegisterRequest:
     properties:
@@ -4668,6 +4786,176 @@ paths:
       summary: Change the display name
       tags:
       - Accounts
+  /me/alerts:
+    get:
+      description: One target per Atlas pin, in Atlas order, with the kinds its radio
+        can have, the reason for each it cannot, and its rules. hasDevice says whether
+        an app session has a push token (push mode). 404 alerts_disabled when the
+        server has alerts off.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AlertsResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - UserSession: []
+      summary: The user's alerts
+      tags:
+      - Accounts
+  /me/alerts/rules:
+    put:
+      consumes:
+      - application/json
+      description: Upserts the rule for (target, kind). A change of thresholds, or
+        turning a rule on, starts its state again. Thresholds are in the kind's own
+        unit (see api.AlertRule). Answers 200 with the rule. back_online needs a gone_quiet
+        rule on the same radio.
+      parameters:
+      - description: Body at most 4 KiB
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PutAlertRuleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AlertRule'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "404":
+          description: alerts_disabled
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "409":
+          description: not_on_atlas
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "413":
+          description: Request Entity Too Large
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "415":
+          description: Unsupported Media Type
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "422":
+          description: invalid_input, kind_unavailable or invalid_threshold
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - UserSession: []
+      summary: Create or change an alert rule
+      tags:
+      - Accounts
+  /me/alerts/rules/{id}:
+    delete:
+      parameters:
+      - description: Rule UUID
+        format: uuid
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: Deleted
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - UserSession: []
+      summary: Delete an alert rule
+      tags:
+      - Accounts
   /me/atlas:
     get:
       description: 'Ids are resolved now: a node pin''s id is the node with that key,
@@ -4765,6 +5053,121 @@ paths:
       security:
       - UserSession: []
       summary: Replace the Atlas
+      tags:
+      - Accounts
+  /me/devices:
+    delete:
+      responses:
+        "204":
+          description: Removed, or there was none
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - UserSession: []
+      summary: Remove this session's push token
+      tags:
+      - Accounts
+    post:
+      consumes:
+      - application/json
+      description: Bearer sessions only (the app); a cookie session gets 403 app_session_required.
+        Replaces the token of this session, and a token another session held moves
+        here. Ending the session ends delivery to it.
+      parameters:
+      - description: Body at most 4 KiB
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.RegisterDeviceRequest'
+      responses:
+        "204":
+          description: Registered
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "404":
+          description: alerts_disabled
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "413":
+          description: Request Entity Too Large
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "415":
+          description: Unsupported Media Type
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "422":
+          description: invalid_input
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - UserSession: []
+      summary: Register this app session's push token
       tags:
       - Accounts
   /me/email:

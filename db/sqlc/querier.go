@@ -27,6 +27,9 @@ type Querier interface {
 	AddChannelMessageIATA(ctx context.Context, arg AddChannelMessageIATAParams) (bool, error)
 	AddIATAs(ctx context.Context, iatas []string) error
 	AddRegionIATAs(ctx context.Context, arg AddRegionIATAsParams) error
+	// What each of the nodes is and what a polled one reports, over the readings since the cutoff.
+	AlertNodeCaps(ctx context.Context, arg AlertNodeCapsParams) ([]AlertNodeCapsRow, error)
+	AlertObserverCaps(ctx context.Context, arg AlertObserverCapsParams) ([]AlertObserverCapsRow, error)
 	// Applies only the address the link was issued for ($2, lower case), so a later change of the pending address cannot ride on an old link.
 	// The pending address was verified by the link that got us here, so the account counts as verified too.
 	ApplyPendingEmail(ctx context.Context, arg ApplyPendingEmailParams) (int64, error)
@@ -70,9 +73,12 @@ type Querier interface {
 	// Lock the current row before deciding the outcome, including when another
 	// deactivation commits while this statement is waiting for its row lock.
 	DeactivateAccount(ctx context.Context, id uuid.UUID) (DeactivateAccountRow, error)
+	DeleteAlertRule(ctx context.Context, arg DeleteAlertRuleParams) (int64, error)
 	DeleteAllChannelMembers(ctx context.Context) error
 	DeleteChannelConfigScopes(ctx context.Context) error
 	DeleteChannelMembersNotIn(ctx context.Context, arg DeleteChannelMembersNotInParams) error
+	// A token belongs to one session: a device signing in again takes it over.
+	DeleteDevicesWithToken(ctx context.Context, arg DeleteDevicesWithTokenParams) error
 	DeleteExpiredPollingClaims(ctx context.Context, receivedAt pgtype.Timestamptz) error
 	DeleteExpiredPortalStates(ctx context.Context, cutoff pgtype.Timestamptz) error
 	DeleteExpiredRepeaterReadings(ctx context.Context, receivedAt pgtype.Timestamptz) error
@@ -124,8 +130,11 @@ type Querier interface {
 	// is removed so both can be used again. A disabled account is never removed here.
 	DeleteStaleUnverifiedUsers(ctx context.Context, arg DeleteStaleUnverifiedUsersParams) error
 	DeleteTelemetryRequest(ctx context.Context, id uuid.UUID) error
+	// Run in the Atlas write's transaction: a radio taken off the Atlas takes its rules with it.
+	DeleteUnpinnedAlertRules(ctx context.Context, userID uuid.UUID) error
 	DeleteUser(ctx context.Context, id uuid.UUID) (int64, error)
 	DeleteUserAtlasPins(ctx context.Context, userID uuid.UUID) error
+	DeleteUserDevice(ctx context.Context, arg DeleteUserDeviceParams) error
 	DeleteUserIfHash(ctx context.Context, arg DeleteUserIfHashParams) (int64, error)
 	DeleteUserTokens(ctx context.Context, arg DeleteUserTokensParams) error
 	EndAllUserSessions(ctx context.Context, userID uuid.UUID) error
@@ -570,6 +579,7 @@ type Querier interface {
 	ListUndecryptedGroupTextPackets(ctx context.Context) ([]ListUndecryptedGroupTextPacketsRow, error)
 	// Like ListUndecryptedGroupTextPackets, limited to channels that just gained a key.
 	ListUndecryptedGroupTextPacketsByHash(ctx context.Context, hashes [][]byte) ([]ListUndecryptedGroupTextPacketsByHashRow, error)
+	ListUserAlertRules(ctx context.Context, userID uuid.UUID) ([]ListUserAlertRulesRow, error)
 	ListUserAtlasPins(ctx context.Context, userID uuid.UUID) ([]ListUserAtlasPinsRow, error)
 	ListUserSessions(ctx context.Context, arg ListUserSessionsParams) ([]ListUserSessionsRow, error)
 	// A user's requests, oldest first, with the node's current id and name, the observer that polls the repeater and
@@ -790,6 +800,9 @@ type Querier interface {
 	UpdatePollingTarget(ctx context.Context, arg UpdatePollingTargetParams) error
 	UpdateTelemetryRequest(ctx context.Context, arg UpdateTelemetryRequestParams) error
 	UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) (int64, error)
+	// A change of thresholds, or turning a rule on, starts its state again: no stale notification, and the data the
+	// evaluator looks at starts now.
+	UpsertAlertRule(ctx context.Context, arg UpsertAlertRuleParams) (UpsertAlertRuleRow, error)
 	UpsertBackgroundState(ctx context.Context, arg UpsertBackgroundStateParams) error
 	// ============================================================
 	// CHANNELS
@@ -868,10 +881,14 @@ type Querier interface {
 	// TRANSPORT CODES
 	// ============================================================
 	UpsertTransportScope(ctx context.Context, arg UpsertTransportScopeParams) error
+	UpsertUserDevice(ctx context.Context, arg UpsertUserDeviceParams) error
+	UserAlertRuleKinds(ctx context.Context, arg UserAlertRuleKindsParams) ([]string, error)
 	UserByEmail(ctx context.Context, email string) (User, error)
 	UserByID(ctx context.Context, id uuid.UUID) (User, error)
 	UserByProviderSubject(ctx context.Context, arg UserByProviderSubjectParams) (User, error)
 	UserByUsername(ctx context.Context, lower string) (User, error)
+	UserHasAtlasPin(ctx context.Context, arg UserHasAtlasPinParams) (bool, error)
+	UserHasLiveDevice(ctx context.Context, userID uuid.UUID) (bool, error)
 	UserRequestTargets(ctx context.Context, userID uuid.UUID) ([][]byte, error)
 	// A session is live when it is not ended, not past either expiry, and its user is not disabled.
 	UserSessionByTokenHash(ctx context.Context, arg UserSessionByTokenHashParams) (UserSessionByTokenHashRow, error)

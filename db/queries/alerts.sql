@@ -1,0 +1,90 @@
+-- name: ListUserAlertRules :many
+SELECT id, target_kind, target_public_key, kind, threshold, threshold_high, enabled, state, state_changed_at, last_sent_at
+FROM user_alert_rules WHERE user_id = $1 ORDER BY created_at, id;
+
+-- name: UserAlertRuleKinds :many
+SELECT kind FROM user_alert_rules WHERE user_id = $1 AND target_public_key = $2;
+
+-- name: UserHasAtlasPin :one
+SELECT EXISTS (SELECT 1 FROM user_atlas_pins WHERE user_id = $1 AND public_key = $2);
+
+-- name: UpsertAlertRule :one
+-- A change of thresholds, or turning a rule on, starts its state again: no stale notification, and the data the
+-- evaluator looks at starts now.
+INSERT INTO user_alert_rules (user_id, target_kind, target_public_key, kind, threshold, threshold_high, enabled)
+VALUES (sqlc.arg(user_id), sqlc.arg(target_kind), sqlc.arg(target_public_key), sqlc.arg(kind), sqlc.narg(threshold),
+        sqlc.narg(threshold_high), sqlc.arg(enabled))
+ON CONFLICT (user_id, target_public_key, kind) DO UPDATE SET
+    target_kind = EXCLUDED.target_kind,
+    threshold = EXCLUDED.threshold,
+    threshold_high = EXCLUDED.threshold_high,
+    enabled = EXCLUDED.enabled,
+    version = user_alert_rules.version + 1,
+    state = CASE WHEN user_alert_rules.threshold IS DISTINCT FROM EXCLUDED.threshold
+                   OR user_alert_rules.threshold_high IS DISTINCT FROM EXCLUDED.threshold_high
+                   OR (EXCLUDED.enabled AND NOT user_alert_rules.enabled) THEN 'unknown' ELSE user_alert_rules.state END,
+    state_changed_at = CASE WHEN user_alert_rules.threshold IS DISTINCT FROM EXCLUDED.threshold
+                   OR user_alert_rules.threshold_high IS DISTINCT FROM EXCLUDED.threshold_high
+                   OR (EXCLUDED.enabled AND NOT user_alert_rules.enabled) THEN now() ELSE user_alert_rules.state_changed_at END,
+    cursor_at = CASE WHEN user_alert_rules.threshold IS DISTINCT FROM EXCLUDED.threshold
+                   OR user_alert_rules.threshold_high IS DISTINCT FROM EXCLUDED.threshold_high
+                   OR (EXCLUDED.enabled AND NOT user_alert_rules.enabled) THEN now() ELSE user_alert_rules.cursor_at END,
+    streak = CASE WHEN user_alert_rules.threshold IS DISTINCT FROM EXCLUDED.threshold
+                   OR user_alert_rules.threshold_high IS DISTINCT FROM EXCLUDED.threshold_high
+                   OR (EXCLUDED.enabled AND NOT user_alert_rules.enabled) THEN 0 ELSE user_alert_rules.streak END
+RETURNING id, target_kind, target_public_key, kind, threshold, threshold_high, enabled, state, state_changed_at, last_sent_at;
+
+-- name: DeleteAlertRule :execrows
+DELETE FROM user_alert_rules WHERE id = $1 AND user_id = $2;
+
+-- name: DeleteUnpinnedAlertRules :exec
+-- Run in the Atlas write's transaction: a radio taken off the Atlas takes its rules with it.
+DELETE FROM user_alert_rules r
+WHERE r.user_id = $1
+  AND NOT EXISTS (SELECT 1 FROM user_atlas_pins p WHERE p.user_id = r.user_id AND p.public_key = r.target_public_key);
+
+-- name: UpsertUserDevice :exec
+INSERT INTO user_devices (session_id, user_id, platform, push_token)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (session_id) DO UPDATE SET platform = EXCLUDED.platform, push_token = EXCLUDED.push_token, updated_at = now();
+
+-- name: DeleteDevicesWithToken :exec
+-- A token belongs to one session: a device signing in again takes it over.
+DELETE FROM user_devices WHERE push_token = $1 AND session_id <> $2;
+
+-- name: DeleteUserDevice :exec
+DELETE FROM user_devices WHERE session_id = $1 AND user_id = $2;
+
+-- name: UserHasLiveDevice :one
+SELECT EXISTS (
+    SELECT 1 FROM user_devices d JOIN user_sessions s ON s.id = d.session_id
+    WHERE d.user_id = $1 AND s.ended_at IS NULL AND s.expires_at > now() AND (s.hard_expires_at IS NULL OR s.hard_expires_at > now())
+);
+
+-- name: AlertNodeCaps :many
+-- What each of the nodes is and what a polled one reports, over the readings since the cutoff.
+SELECT n.public_key, n.node_type, COALESCE(n.name, '')::text AS name,
+       COALESCE(c.readings, 0)::int AS readings,
+       COALESCE(c.battery, false)::boolean AS has_battery, COALESCE(c.temperature, false)::boolean AS has_temperature,
+       COALESCE(c.noise, false)::boolean AS has_noise, COALESCE(c.uptime, false)::boolean AS has_uptime
+FROM nodes n
+LEFT JOIN LATERAL (
+    SELECT count(*) AS readings, bool_or(r.battery_mv IS NOT NULL) AS battery, bool_or(r.temperature_c IS NOT NULL) AS temperature,
+           bool_or(r.noise_floor IS NOT NULL) AS noise, bool_or(r.uptime_secs IS NOT NULL) AS uptime
+    FROM repeater_readings r
+    WHERE r.target_public_key = n.public_key AND r.trusted AND r.sampled_at >= sqlc.arg(since)
+) c ON true
+WHERE n.public_key = ANY(sqlc.arg(keys)::bytea[]);
+
+-- name: AlertObserverCaps :many
+SELECT o.public_key, COALESCE(o.display_name, '')::text AS name,
+       COALESCE(c.battery, false)::boolean AS has_battery, COALESCE(c.noise, false)::boolean AS has_noise,
+       COALESCE(c.uptime, false)::boolean AS has_uptime
+FROM observers o
+LEFT JOIN LATERAL (
+    SELECT bool_or(t.battery_voltage_mv IS NOT NULL) AS battery, bool_or(t.noise_floor_db IS NOT NULL) AS noise,
+           bool_or(t.uptime_seconds IS NOT NULL) AS uptime
+    FROM observer_telemetry t
+    WHERE t.observer_id = o.id AND t.reported_at >= sqlc.arg(since)
+) c ON true
+WHERE o.public_key = ANY(sqlc.arg(keys)::bytea[]);

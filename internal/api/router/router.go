@@ -87,6 +87,9 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 	case "portal":
 		features.Accounts, features.PortalURL = "portal", opts.PortalURL
 	}
+	if opts.AlertDelivery != "" {
+		features.Alerts, features.AlertDelivery = true, opts.AlertDelivery
+	}
 	info := api.Info{ServerVersion: opts.ServerVersion, Features: features}
 	if opts.MinAppVersion != "" {
 		info.MinAppVersion = &opts.MinAppVersion

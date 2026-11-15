@@ -130,6 +130,36 @@ func (mr *MockQuerierMockRecorder) AddRegionIATAs(ctx, arg any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddRegionIATAs", reflect.TypeOf((*MockQuerier)(nil).AddRegionIATAs), ctx, arg)
 }
 
+// AlertNodeCaps mocks base method.
+func (m *MockQuerier) AlertNodeCaps(ctx context.Context, arg db.AlertNodeCapsParams) ([]db.AlertNodeCapsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AlertNodeCaps", ctx, arg)
+	ret0, _ := ret[0].([]db.AlertNodeCapsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// AlertNodeCaps indicates an expected call of AlertNodeCaps.
+func (mr *MockQuerierMockRecorder) AlertNodeCaps(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AlertNodeCaps", reflect.TypeOf((*MockQuerier)(nil).AlertNodeCaps), ctx, arg)
+}
+
+// AlertObserverCaps mocks base method.
+func (m *MockQuerier) AlertObserverCaps(ctx context.Context, arg db.AlertObserverCapsParams) ([]db.AlertObserverCapsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AlertObserverCaps", ctx, arg)
+	ret0, _ := ret[0].([]db.AlertObserverCapsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// AlertObserverCaps indicates an expected call of AlertObserverCaps.
+func (mr *MockQuerierMockRecorder) AlertObserverCaps(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AlertObserverCaps", reflect.TypeOf((*MockQuerier)(nil).AlertObserverCaps), ctx, arg)
+}
+
 // ApplyPendingEmail mocks base method.
 func (m *MockQuerier) ApplyPendingEmail(ctx context.Context, arg db.ApplyPendingEmailParams) (int64, error) {
 	m.ctrl.T.Helper()
@@ -443,6 +473,21 @@ func (mr *MockQuerierMockRecorder) DeactivateAccount(ctx, id any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeactivateAccount", reflect.TypeOf((*MockQuerier)(nil).DeactivateAccount), ctx, id)
 }
 
+// DeleteAlertRule mocks base method.
+func (m *MockQuerier) DeleteAlertRule(ctx context.Context, arg db.DeleteAlertRuleParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteAlertRule", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteAlertRule indicates an expected call of DeleteAlertRule.
+func (mr *MockQuerierMockRecorder) DeleteAlertRule(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteAlertRule", reflect.TypeOf((*MockQuerier)(nil).DeleteAlertRule), ctx, arg)
+}
+
 // DeleteAllChannelMembers mocks base method.
 func (m *MockQuerier) DeleteAllChannelMembers(ctx context.Context) error {
 	m.ctrl.T.Helper()
@@ -483,6 +528,20 @@ func (m *MockQuerier) DeleteChannelMembersNotIn(ctx context.Context, arg db.Dele
 func (mr *MockQuerierMockRecorder) DeleteChannelMembersNotIn(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteChannelMembersNotIn", reflect.TypeOf((*MockQuerier)(nil).DeleteChannelMembersNotIn), ctx, arg)
+}
+
+// DeleteDevicesWithToken mocks base method.
+func (m *MockQuerier) DeleteDevicesWithToken(ctx context.Context, arg db.DeleteDevicesWithTokenParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteDevicesWithToken", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteDevicesWithToken indicates an expected call of DeleteDevicesWithToken.
+func (mr *MockQuerierMockRecorder) DeleteDevicesWithToken(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteDevicesWithToken", reflect.TypeOf((*MockQuerier)(nil).DeleteDevicesWithToken), ctx, arg)
 }
 
 // DeleteExpiredPollingClaims mocks base method.
@@ -840,6 +899,20 @@ func (mr *MockQuerierMockRecorder) DeleteTelemetryRequest(ctx, id any) *gomock.C
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteTelemetryRequest", reflect.TypeOf((*MockQuerier)(nil).DeleteTelemetryRequest), ctx, id)
 }
 
+// DeleteUnpinnedAlertRules mocks base method.
+func (m *MockQuerier) DeleteUnpinnedAlertRules(ctx context.Context, userID uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteUnpinnedAlertRules", ctx, userID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteUnpinnedAlertRules indicates an expected call of DeleteUnpinnedAlertRules.
+func (mr *MockQuerierMockRecorder) DeleteUnpinnedAlertRules(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteUnpinnedAlertRules", reflect.TypeOf((*MockQuerier)(nil).DeleteUnpinnedAlertRules), ctx, userID)
+}
+
 // DeleteUser mocks base method.
 func (m *MockQuerier) DeleteUser(ctx context.Context, id uuid.UUID) (int64, error) {
 	m.ctrl.T.Helper()
@@ -867,6 +940,20 @@ func (m *MockQuerier) DeleteUserAtlasPins(ctx context.Context, userID uuid.UUID)
 func (mr *MockQuerierMockRecorder) DeleteUserAtlasPins(ctx, userID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteUserAtlasPins", reflect.TypeOf((*MockQuerier)(nil).DeleteUserAtlasPins), ctx, userID)
+}
+
+// DeleteUserDevice mocks base method.
+func (m *MockQuerier) DeleteUserDevice(ctx context.Context, arg db.DeleteUserDeviceParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteUserDevice", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteUserDevice indicates an expected call of DeleteUserDevice.
+func (mr *MockQuerierMockRecorder) DeleteUserDevice(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteUserDevice", reflect.TypeOf((*MockQuerier)(nil).DeleteUserDevice), ctx, arg)
 }
 
 // DeleteUserIfHash mocks base method.
@@ -3540,6 +3627,21 @@ func (mr *MockQuerierMockRecorder) ListUndecryptedGroupTextPacketsByHash(ctx, ha
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListUndecryptedGroupTextPacketsByHash", reflect.TypeOf((*MockQuerier)(nil).ListUndecryptedGroupTextPacketsByHash), ctx, hashes)
 }
 
+// ListUserAlertRules mocks base method.
+func (m *MockQuerier) ListUserAlertRules(ctx context.Context, userID uuid.UUID) ([]db.ListUserAlertRulesRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListUserAlertRules", ctx, userID)
+	ret0, _ := ret[0].([]db.ListUserAlertRulesRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListUserAlertRules indicates an expected call of ListUserAlertRules.
+func (mr *MockQuerierMockRecorder) ListUserAlertRules(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListUserAlertRules", reflect.TypeOf((*MockQuerier)(nil).ListUserAlertRules), ctx, userID)
+}
+
 // ListUserAtlasPins mocks base method.
 func (m *MockQuerier) ListUserAtlasPins(ctx context.Context, userID uuid.UUID) ([]db.ListUserAtlasPinsRow, error) {
 	m.ctrl.T.Helper()
@@ -5192,6 +5294,21 @@ func (mr *MockQuerierMockRecorder) UpdateUserDisplayName(ctx, arg any) *gomock.C
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateUserDisplayName", reflect.TypeOf((*MockQuerier)(nil).UpdateUserDisplayName), ctx, arg)
 }
 
+// UpsertAlertRule mocks base method.
+func (m *MockQuerier) UpsertAlertRule(ctx context.Context, arg db.UpsertAlertRuleParams) (db.UpsertAlertRuleRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpsertAlertRule", ctx, arg)
+	ret0, _ := ret[0].(db.UpsertAlertRuleRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpsertAlertRule indicates an expected call of UpsertAlertRule.
+func (mr *MockQuerierMockRecorder) UpsertAlertRule(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertAlertRule", reflect.TypeOf((*MockQuerier)(nil).UpsertAlertRule), ctx, arg)
+}
+
 // UpsertBackgroundState mocks base method.
 func (m *MockQuerier) UpsertBackgroundState(ctx context.Context, arg db.UpsertBackgroundStateParams) error {
 	m.ctrl.T.Helper()
@@ -5495,6 +5612,35 @@ func (mr *MockQuerierMockRecorder) UpsertTransportScope(ctx, arg any) *gomock.Ca
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertTransportScope", reflect.TypeOf((*MockQuerier)(nil).UpsertTransportScope), ctx, arg)
 }
 
+// UpsertUserDevice mocks base method.
+func (m *MockQuerier) UpsertUserDevice(ctx context.Context, arg db.UpsertUserDeviceParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpsertUserDevice", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpsertUserDevice indicates an expected call of UpsertUserDevice.
+func (mr *MockQuerierMockRecorder) UpsertUserDevice(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertUserDevice", reflect.TypeOf((*MockQuerier)(nil).UpsertUserDevice), ctx, arg)
+}
+
+// UserAlertRuleKinds mocks base method.
+func (m *MockQuerier) UserAlertRuleKinds(ctx context.Context, arg db.UserAlertRuleKindsParams) ([]string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UserAlertRuleKinds", ctx, arg)
+	ret0, _ := ret[0].([]string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UserAlertRuleKinds indicates an expected call of UserAlertRuleKinds.
+func (mr *MockQuerierMockRecorder) UserAlertRuleKinds(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UserAlertRuleKinds", reflect.TypeOf((*MockQuerier)(nil).UserAlertRuleKinds), ctx, arg)
+}
+
 // UserByEmail mocks base method.
 func (m *MockQuerier) UserByEmail(ctx context.Context, email string) (db.User, error) {
 	m.ctrl.T.Helper()
@@ -5553,6 +5699,36 @@ func (m *MockQuerier) UserByUsername(ctx context.Context, lower string) (db.User
 func (mr *MockQuerierMockRecorder) UserByUsername(ctx, lower any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UserByUsername", reflect.TypeOf((*MockQuerier)(nil).UserByUsername), ctx, lower)
+}
+
+// UserHasAtlasPin mocks base method.
+func (m *MockQuerier) UserHasAtlasPin(ctx context.Context, arg db.UserHasAtlasPinParams) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UserHasAtlasPin", ctx, arg)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UserHasAtlasPin indicates an expected call of UserHasAtlasPin.
+func (mr *MockQuerierMockRecorder) UserHasAtlasPin(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UserHasAtlasPin", reflect.TypeOf((*MockQuerier)(nil).UserHasAtlasPin), ctx, arg)
+}
+
+// UserHasLiveDevice mocks base method.
+func (m *MockQuerier) UserHasLiveDevice(ctx context.Context, userID uuid.UUID) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UserHasLiveDevice", ctx, userID)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UserHasLiveDevice indicates an expected call of UserHasLiveDevice.
+func (mr *MockQuerierMockRecorder) UserHasLiveDevice(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UserHasLiveDevice", reflect.TypeOf((*MockQuerier)(nil).UserHasLiveDevice), ctx, userID)
 }
 
 // UserRequestTargets mocks base method.

@@ -1,0 +1,244 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+package db
+
+import (
+	"context"
+	"encoding/hex"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/MeshCore-Beacon/beacon-server/internal/alerts"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
+	"github.com/MeshCore-Beacon/beacon-server/internal/users"
+	"github.com/google/uuid"
+)
+
+func ipp(v int) *int { return &v }
+
+func alertSvc(s *Store) *alerts.Service { return alerts.NewService(s, "push", time.Now) }
+
+func pinAtlas(t *testing.T, ctx context.Context, s *Store, u users.User, base int64, pins ...api.StoredPin) {
+	t.Helper()
+	if _, ok, err := s.ReplaceUserAtlas(ctx, u.ID, base, "24h", pins); err != nil || !ok {
+		t.Fatalf("atlas: ok=%v %v", ok, err)
+	}
+}
+
+func insertNode(t *testing.T, ctx context.Context, s *Store, key []byte, nodeType int, name string) {
+	t.Helper()
+	if _, err := s.pool.Exec(ctx, `INSERT INTO nodes (public_key, node_type, name) VALUES ($1, $2, $3)`, key, nodeType, name); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func insertReading(t *testing.T, ctx context.Context, s *Store, target []byte, at time.Time, battery int, temp *float64) {
+	t.Helper()
+	obs := atlasKey(0xee)
+	if _, err := s.pool.Exec(ctx, `INSERT INTO repeater_readings (target_public_key, observer_public_key, sampled_at, received_at, method, tag, battery_mv, temperature_c, uptime_secs, noise_floor, trusted)
+		VALUES ($1, $2, $3, $3, 'status', $4, $5, $6, 1000, -100, true)`, target, obs, at, at.UnixNano(), battery, temp); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAlertRulesPostgres(t *testing.T) {
+	ctx, pool, s := userStore(t)
+	svc := alertSvc(s)
+	u := newUser(t, ctx, s, "alice")
+	other := newUser(t, ctx, s, "bob")
+	rep, comp, ghost := atlasKey(1), atlasKey(2), atlasKey(3)
+	insertNode(t, ctx, s, rep, 2, "Hilltop")
+	insertNode(t, ctx, s, comp, 1, "Phone")
+	insertReading(t, ctx, s, rep, time.Now().Add(-time.Hour), 3900, nil)
+	pinAtlas(t, ctx, s, u, 0,
+		api.StoredPin{Kind: "node", Key: rep, Name: "My hill"},
+		api.StoredPin{Kind: "node", Key: comp},
+		api.StoredPin{Kind: "observer", Key: ghost, Name: "Unknown"})
+
+	// Not on the Atlas.
+	_, err := svc.PutRule(ctx, u.ID, alerts.RuleInput{TargetKind: "node", PublicKey: atlasKey(9), Kind: "gone_quiet", Threshold: ipp(24), Enabled: true})
+	if !errors.Is(err, alerts.ErrNotOnAtlas) {
+		t.Fatalf("not on atlas: %v", err)
+	}
+	// Kind not available: a companion has no battery, a polled repeater has no temperature.
+	var na *alerts.KindUnavailable
+	if _, err = svc.PutRule(ctx, u.ID, alerts.RuleInput{TargetKind: "node", PublicKey: comp, Kind: "battery_low", Threshold: ipp(3500), Enabled: true}); !errors.As(err, &na) {
+		t.Fatalf("companion battery: %v", err)
+	}
+	if _, err = svc.PutRule(ctx, u.ID, alerts.RuleInput{TargetKind: "node", PublicKey: rep, Kind: "temperature", Threshold: ipp(0), Enabled: true}); !errors.As(err, &na) {
+		t.Fatalf("temperature: %v", err)
+	}
+	// back_online needs gone_quiet first.
+	if _, err = svc.PutRule(ctx, u.ID, alerts.RuleInput{TargetKind: "node", PublicKey: rep, Kind: "back_online", Enabled: true}); !errors.As(err, &na) {
+		t.Fatalf("back online alone: %v", err)
+	}
+	var bad *alerts.InvalidThreshold
+	if _, err = svc.PutRule(ctx, u.ID, alerts.RuleInput{TargetKind: "node", PublicKey: rep, Kind: "battery_low", Threshold: ipp(10), Enabled: true}); !errors.As(err, &bad) {
+		t.Fatalf("threshold: %v", err)
+	}
+
+	gq, err := svc.PutRule(ctx, u.ID, alerts.RuleInput{TargetKind: "node", PublicKey: rep, Kind: "gone_quiet", Threshold: ipp(6), Enabled: true})
+	if err != nil || gq.State != "unknown" || gq.Threshold == nil || *gq.Threshold != 6 {
+		t.Fatalf("gone quiet: %+v %v", gq, err)
+	}
+	if _, err = svc.PutRule(ctx, u.ID, alerts.RuleInput{TargetKind: "node", PublicKey: rep, Kind: "back_online", Enabled: true}); err != nil {
+		t.Fatalf("back online: %v", err)
+	}
+	if _, err = svc.PutRule(ctx, u.ID, alerts.RuleInput{TargetKind: "node", PublicKey: rep, Kind: "battery_low", Threshold: ipp(3500), Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	// One rule per (radio, kind): a second put is an update with the same id, and an unchanged put keeps the state.
+	if _, err := pool.Exec(ctx, `UPDATE user_alert_rules SET state = 'firing' WHERE id = $1`, gq.ID); err != nil {
+		t.Fatal(err)
+	}
+	same, err := svc.PutRule(ctx, u.ID, alerts.RuleInput{TargetKind: "node", PublicKey: rep, Kind: "gone_quiet", Threshold: ipp(6), Enabled: true})
+	if err != nil || same.ID != gq.ID || same.State != "firing" {
+		t.Fatalf("unchanged put: %+v %v", same, err)
+	}
+	changed, err := svc.PutRule(ctx, u.ID, alerts.RuleInput{TargetKind: "node", PublicKey: rep, Kind: "gone_quiet", Threshold: ipp(12), Enabled: true})
+	if err != nil || changed.ID != gq.ID || changed.State != "unknown" || *changed.Threshold != 12 {
+		t.Fatalf("changed put: %+v %v", changed, err)
+	}
+	// Off keeps the stored thresholds and the rule.
+	off, err := svc.PutRule(ctx, u.ID, alerts.RuleInput{TargetKind: "node", PublicKey: rep, Kind: "gone_quiet", Threshold: ipp(12), Enabled: false})
+	if err != nil || off.Enabled {
+		t.Fatalf("off: %+v %v", off, err)
+	}
+
+	ov, err := svc.Overview(ctx, u.ID)
+	if err != nil || ov.Delivery != "push" || ov.HasDevice || len(ov.Targets) != 3 {
+		t.Fatalf("overview: %+v %v", ov, err)
+	}
+	hill := ov.Targets[0]
+	if hill.PublicKey != hex.EncodeToString(rep) || hill.Name != "My hill" || hill.Kind != "node" || len(hill.Rules) != 3 {
+		t.Fatalf("first target: %+v", hill)
+	}
+	if hill.Unavailable["temperature"] == "" || !contains(hill.Available, "battery_low") || !contains(hill.Available, "clock") {
+		t.Fatalf("availability: %v %v", hill.Available, hill.Unavailable)
+	}
+	if ov.Targets[1].Name != "Phone" || ov.Targets[1].Unavailable["battery_low"] == "" || len(ov.Targets[1].Rules) != 0 {
+		t.Fatalf("companion target: %+v", ov.Targets[1])
+	}
+	if ov.Targets[2].Kind != "observer" || ov.Targets[2].Name != "Unknown" || contains(ov.Targets[2].Available, "clock") || !contains(ov.Targets[2].Available, "observer_offline") {
+		t.Fatalf("observer target: %+v", ov.Targets[2])
+	}
+
+	// Another user sees none of it and cannot delete it.
+	if bov, _ := svc.Overview(ctx, other.ID); len(bov.Targets) != 0 {
+		t.Fatalf("bob sees %d targets", len(bov.Targets))
+	}
+	if err := svc.DeleteRule(ctx, other.ID, gq.ID); !errors.Is(err, alerts.ErrRuleMissing) {
+		t.Fatalf("foreign delete: %v", err)
+	}
+
+	// Taking the radio off the Atlas deletes its rules; an unrelated pin keeps its own.
+	if _, err := svc.PutRule(ctx, u.ID, alerts.RuleInput{TargetKind: "node", PublicKey: comp, Kind: "gone_quiet", Threshold: ipp(24), Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	pinAtlas(t, ctx, s, u, 1, api.StoredPin{Kind: "node", Key: comp})
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM user_alert_rules WHERE user_id = $1`, u.ID).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("%d rules left, want 1: %v", n, err)
+	}
+
+	if err := svc.DeleteRule(ctx, u.ID, uuid.New()); !errors.Is(err, alerts.ErrRuleMissing) {
+		t.Fatalf("unknown delete: %v", err)
+	}
+	// Deleting the account removes the rest.
+	if err := s.DeleteUser(ctx, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM user_alert_rules`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("%d rules after account deletion", n)
+	}
+}
+
+func contains(l []string, s string) bool {
+	for _, v := range l {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+func TestAlertRulesRaceWithAtlasWritePostgres(t *testing.T) {
+	ctx, pool, s := userStore(t)
+	svc := alertSvc(s)
+	u := newUser(t, ctx, s, "alice")
+	key := atlasKey(1)
+	insertNode(t, ctx, s, key, 2, "Hilltop")
+	pinAtlas(t, ctx, s, u, 0, api.StoredPin{Kind: "node", Key: key})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 20; i++ {
+			_, _ = svc.PutRule(ctx, u.ID, alerts.RuleInput{TargetKind: "node", PublicKey: key, Kind: "gone_quiet", Threshold: ipp(24), Enabled: true})
+		}
+	}()
+	pinAtlas(t, ctx, s, u, 1) // empty Atlas
+	<-done
+	var pins, rules int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM user_atlas_pins WHERE user_id = $1`, u.ID).Scan(&pins)
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM user_alert_rules WHERE user_id = $1`, u.ID).Scan(&rules)
+	if pins != 0 || rules != 0 {
+		t.Fatalf("a rule outlived its pin: pins=%d rules=%d", pins, rules)
+	}
+}
+
+func TestUserDevicesPostgres(t *testing.T) {
+	ctx, pool, s := userStore(t)
+	svc := alertSvc(s)
+	u := newUser(t, ctx, s, "alice")
+	s1 := newSession(t, ctx, s, u, "app", 1)
+	s2 := newSession(t, ctx, s, u, "app", 2)
+
+	if err := svc.RegisterDevice(ctx, u.ID, s1.ID, "ios", "token-A"); err != nil {
+		t.Fatal(err)
+	}
+	if ov, _ := svc.Overview(ctx, u.ID); !ov.HasDevice {
+		t.Fatal("no device after registering")
+	}
+	// A new token for the same session replaces the old one; the same token on another session moves.
+	if err := svc.RegisterDevice(ctx, u.ID, s1.ID, "ios", "token-B"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RegisterDevice(ctx, u.ID, s2.ID, "android", "token-B"); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM user_devices WHERE user_id = $1`, u.ID).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("%d device rows, want 1: %v", n, err)
+	}
+	for _, bad := range [][2]string{{"windows", "x"}, {"ios", ""}, {"ios", "with space"}, {"ios", "a\nb"}} {
+		if err := svc.RegisterDevice(ctx, u.ID, s1.ID, bad[0], bad[1]); !errors.Is(err, alerts.ErrBadDevice) {
+			t.Errorf("%q: %v", bad, err)
+		}
+	}
+	// Ending the session ends delivery to it.
+	if err := s.EndSession(ctx, u.ID, s2.ID); err != nil {
+		t.Fatal(err)
+	}
+	if ov, _ := svc.Overview(ctx, u.ID); ov.HasDevice {
+		t.Fatal("an ended session still counts as a device")
+	}
+	// Removing is quiet when there is nothing to remove, and cascades with the session and the account.
+	if err := svc.RemoveDevice(ctx, u.ID, s1.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RemoveDevice(ctx, u.ID, s1.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RegisterDevice(ctx, u.ID, s1.ID, "ios", "token-C"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteUser(ctx, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM user_devices`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("%d devices after account deletion", n)
+	}
+}

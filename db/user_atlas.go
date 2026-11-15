@@ -104,6 +104,10 @@ func (s *Store) ReplaceUserAtlas(ctx context.Context, userID uuid.UUID, base int
 				return err
 			}
 		}
+		// A radio taken off the Atlas takes its alert rules with it.
+		if err := q.DeleteUnpinnedAlertRules(ctx, userID); err != nil {
+			return err
+		}
 		rev, err = q.BumpUserAtlas(ctx, sqlc.BumpUserAtlasParams{UserID: userID, Range: rng})
 		ok = err == nil
 		return err

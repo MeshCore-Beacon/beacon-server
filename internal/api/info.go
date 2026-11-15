@@ -45,6 +45,8 @@ type InfoFeatures struct {
 	Registration      bool `json:"registration" example:"false"`
 	TelemetryRequests bool `json:"telemetryRequests" example:"false"`
 	Alerts            bool `json:"alerts" example:"false"`
+	// AlertDelivery is "push" or "email" while alerts is true.
+	AlertDelivery string `json:"alertDelivery,omitempty" enums:"push,email"`
 	// PortalURL is the sign-in portal's base URL; set only when accounts is "portal".
 	PortalURL string `json:"portalUrl,omitempty" example:"https://portal.example.org"`
 }

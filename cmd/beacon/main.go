@@ -21,6 +21,7 @@ import (
 	pgdata "github.com/MeshCore-Beacon/beacon-server/db/planguard"
 	"github.com/MeshCore-Beacon/beacon-server/db/planpolicy"
 	"github.com/MeshCore-Beacon/beacon-server/docs"
+	"github.com/MeshCore-Beacon/beacon-server/internal/alerts"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api/handlers"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api/router"
@@ -539,8 +540,21 @@ func main() {
 	} else if requestsOff != "" {
 		slog.Info("telemetry requests are off", "component", "startup", "reason", requestsOff)
 	}
+	// Alerts need accounts: rules hang on a user's Atlas.
+	resolvedAlerts, err := cfg.Alerts.Resolve(cfg.Accounts.Mode)
+	if err != nil {
+		slog.Error("invalid alerts configuration", "component", "startup", "error", err)
+		os.Exit(1)
+	}
+	alertDelivery := ""
+	var alertsSvc handlers.AlertsService // an untyped nil answers 404 alerts_disabled
+	if resolvedAccounts.Enabled && resolvedAlerts.Delivery != "off" {
+		alertDelivery = resolvedAlerts.Delivery
+		alertsSvc = alerts.NewService(maintStore, alertDelivery, time.Now)
+	}
+	slog.Info("alerts", "component", "startup", "delivery", resolvedAlerts.Delivery, "enabled", alertsSvc != nil)
 	if resolvedAccounts.Enabled {
-		meMounts = append(meMounts, handlers.RequestRoutes(requestsSvc))
+		meMounts = append(meMounts, handlers.RequestRoutes(requestsSvc), handlers.AlertRoutes(alertsSvc))
 	}
 
 	if cr, ok := reader.(*cache.CachedReader); ok {
@@ -715,7 +729,7 @@ func main() {
 		},
 		GuestPolling:   guestPolling,
 		PollingEnabled: resolvedPolling.Enabled,
-		AccountsMode:   accountsMode, RegistrationOpen: resolvedAccounts.RegistrationOpen, PortalURL: portalURL,
+		AccountsMode:   accountsMode, RegistrationOpen: resolvedAccounts.RegistrationOpen, PortalURL: portalURL, AlertDelivery: alertDelivery,
 		Accounts: accountsSvc, AuthOptions: authOptions, MeMounts: meMounts, TelemetryRequests: requestsSvc != nil,
 		Guards:        guard,
 		APIPlanLayout: string(layout),

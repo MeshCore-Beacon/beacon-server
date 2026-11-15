@@ -184,3 +184,17 @@ func TestPortalModeReportsItsURL(t *testing.T) {
 		t.Fatalf("info: %s", w.Body)
 	}
 }
+
+func TestAlertFeatures(t *testing.T) {
+	for delivery, want := range map[string]string{"": `"alerts":false`, "push": `"alertDelivery":"push"`, "email": `"alertDelivery":"email"`} {
+		h := New(nil, nil, nil, Options{AlertDelivery: delivery})
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/info", nil))
+		if !strings.Contains(w.Body.String(), want) || (delivery != "" && !strings.Contains(w.Body.String(), `"alerts":true`)) {
+			t.Errorf("%q: %s", delivery, w.Body)
+		}
+		if delivery == "" && strings.Contains(w.Body.String(), "alertDelivery") {
+			t.Errorf("alertDelivery present while off: %s", w.Body)
+		}
+	}
+}

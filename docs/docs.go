@@ -2924,6 +2924,260 @@ const docTemplate = `{
                 }
             }
         },
+        "/me/alerts": {
+            "get": {
+                "security": [
+                    {
+                        "UserSession": []
+                    }
+                ],
+                "description": "One target per Atlas pin, in Atlas order, with the kinds its radio can have, the reason for each it cannot, and its rules. hasDevice says whether an app session has a push token (push mode). 404 alerts_disabled when the server has alerts off.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Accounts"
+                ],
+                "summary": "The user's alerts",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AlertsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/me/alerts/rules": {
+            "put": {
+                "security": [
+                    {
+                        "UserSession": []
+                    }
+                ],
+                "description": "Upserts the rule for (target, kind). A change of thresholds, or turning a rule on, starts its state again. Thresholds are in the kind's own unit (see api.AlertRule). Answers 200 with the rule. back_online needs a gone_quiet rule on the same radio.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Accounts"
+                ],
+                "summary": "Create or change an alert rule",
+                "parameters": [
+                    {
+                        "description": "Body at most 4 KiB",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PutAlertRuleRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AlertRule"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "alerts_disabled",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "not_on_atlas",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "415": {
+                        "description": "Unsupported Media Type",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "invalid_input, kind_unavailable or invalid_threshold",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/me/alerts/rules/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "UserSession": []
+                    }
+                ],
+                "tags": [
+                    "Accounts"
+                ],
+                "summary": "Delete an alert rule",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Rule UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Deleted"
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/me/atlas": {
             "get": {
                 "security": [
@@ -3045,6 +3299,181 @@ const docTemplate = `{
                     },
                     "422": {
                         "description": "Unprocessable Entity",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/me/devices": {
+            "post": {
+                "security": [
+                    {
+                        "UserSession": []
+                    }
+                ],
+                "description": "Bearer sessions only (the app); a cookie session gets 403 app_session_required. Replaces the token of this session, and a token another session held moves here. Ending the session ends delivery to it.",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Accounts"
+                ],
+                "summary": "Register this app session's push token",
+                "parameters": [
+                    {
+                        "description": "Body at most 4 KiB",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.RegisterDeviceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Registered"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "alerts_disabled",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "415": {
+                        "description": "Unsupported Media Type",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "invalid_input",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "UserSession": []
+                    }
+                ],
+                "tags": [
+                    "Accounts"
+                ],
+                "summary": "Remove this session's push token",
+                "responses": {
+                    "204": {
+                        "description": "Removed, or there was none"
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -7262,6 +7691,130 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.AlertRule": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "gone_quiet",
+                        "back_online",
+                        "clock",
+                        "battery_low",
+                        "battery_falling",
+                        "rebooted",
+                        "temperature",
+                        "noise_high",
+                        "observer_offline"
+                    ]
+                },
+                "lastSentAt": {
+                    "type": "integer",
+                    "example": 1794703600000
+                },
+                "state": {
+                    "type": "string",
+                    "enum": [
+                        "ok",
+                        "firing",
+                        "inactive",
+                        "unknown"
+                    ]
+                },
+                "stateChangedAt": {
+                    "type": "integer",
+                    "example": 1794700000000
+                },
+                "threshold": {
+                    "type": "integer",
+                    "example": 3500
+                },
+                "thresholdHigh": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.AlertTarget": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "node",
+                        "observer"
+                    ]
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Hilltop"
+                },
+                "publicKey": {
+                    "type": "string"
+                },
+                "rules": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AlertRule"
+                    }
+                },
+                "unavailable": {
+                    "description": "Unavailable maps a kind to the reason this radio cannot have it.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.AlertTargetRef": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "node",
+                        "observer"
+                    ]
+                },
+                "publicKey": {
+                    "type": "string",
+                    "example": "0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.AlertsResponse": {
+            "type": "object",
+            "properties": {
+                "delivery": {
+                    "type": "string",
+                    "enum": [
+                        "push",
+                        "email"
+                    ]
+                },
+                "hasDevice": {
+                    "type": "boolean"
+                },
+                "targets": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AlertTarget"
+                    }
+                }
+            }
+        },
         "github_com_MeshCore-Beacon_beacon-server_internal_api.AppCodeRequest": {
             "type": "object",
             "properties": {
@@ -7821,6 +8374,14 @@ const docTemplate = `{
                 "accounts": {
                     "type": "string",
                     "example": "off"
+                },
+                "alertDelivery": {
+                    "description": "AlertDelivery is \"push\" or \"email\" while alerts is true.",
+                    "type": "string",
+                    "enum": [
+                        "push",
+                        "email"
+                    ]
                 },
                 "alerts": {
                     "type": "boolean",
@@ -9779,6 +10340,26 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.PutAlertRuleRequest": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "target": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AlertTargetRef"
+                },
+                "threshold": {
+                    "type": "integer"
+                },
+                "thresholdHigh": {
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_MeshCore-Beacon_beacon-server_internal_api.PutAtlasRequest": {
             "type": "object",
             "properties": {
@@ -9868,6 +10449,21 @@ const docTemplate = `{
                 "zoomLevel": {
                     "description": "suggested map zoom level",
                     "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.RegisterDeviceRequest": {
+            "type": "object",
+            "properties": {
+                "platform": {
+                    "type": "string",
+                    "enum": [
+                        "ios",
+                        "android"
+                    ]
+                },
+                "pushToken": {
+                    "type": "string"
                 }
             }
         },
