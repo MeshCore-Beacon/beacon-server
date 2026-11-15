@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"sort"
 	"strings"
 	"testing"
@@ -32,6 +33,7 @@ type fakeEval struct {
 	unlocked    bool
 	lastPassIDs map[uuid.UUID]bool
 	cursor      uuid.UUID
+	loadFails   int // LoadTargets fails this many times first
 }
 
 func (f *fakeEval) BeginEvalLock(context.Context) (Unlocker, bool, error) {
@@ -60,6 +62,10 @@ func (f *fakeEval) RuleBatch(_ context.Context, after uuid.UUID, limit int) ([]R
 
 func (f *fakeEval) LoadTargets(context.Context, []RuleRow, time.Time) (map[string]TargetData, error) {
 	f.loads++
+	if f.loadFails > 0 {
+		f.loadFails--
+		return nil, errors.New("load failed")
+	}
 	return f.targets, nil
 }
 
@@ -238,5 +244,25 @@ func TestTaskPassesContinueWhereTheLastEnded(t *testing.T) {
 	}
 	if len(b.visited) != len(b.ids) {
 		t.Fatalf("%d of %d rules were reached in two passes", len(b.visited), len(b.ids))
+	}
+}
+
+// A batch whose load or store failed was not evaluated: the next pass must start at it, not after it.
+func TestTaskCursorStaysBehindAFailedBatch(t *testing.T) {
+	f := &fakeEval{targets: map[string]TargetData{}, loadFails: 1}
+	for i := 1; i <= BatchSize+1; i++ {
+		r := quietRule(i, byte(i))
+		f.rules = append(f.rules, r)
+		f.targets[TargetID(r.TargetKind, r.Key)] = TargetData{Name: "R", Data: Data{Exists: true, LastHeard: ago(72 * time.Hour)}}
+	}
+	task := NewTask(f, func() time.Time { return now })
+	if err := task.Run(context.Background()); err == nil {
+		t.Fatal("the failed load was not reported")
+	}
+	if err := task.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.notes) != BatchSize+1 {
+		t.Fatalf("%d of %d rules evaluated after the failed batch", len(f.notes), BatchSize+1)
 	}
 }

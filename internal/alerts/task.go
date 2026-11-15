@@ -132,7 +132,6 @@ func (t *Task) Run(ctx context.Context) error {
 			after = uuid.Nil // the end: the next pass starts over
 			break
 		}
-		after = rows[len(rows)-1].ID
 		targets, err := t.store.LoadTargets(ctx, rows, now)
 		if err != nil {
 			return err
@@ -141,6 +140,7 @@ func (t *Task) Run(ctx context.Context) error {
 		if err := t.store.Apply(ctx, pass, ups, notes); err != nil {
 			return err
 		}
+		after = rows[len(rows)-1].ID // only a batch that was evaluated and stored is passed
 		evaluated += len(rows)
 		fired += len(notes)
 		if len(rows) < BatchSize {
