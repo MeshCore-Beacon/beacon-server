@@ -12,7 +12,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/mail"
-	"net/url"
 	"strings"
 	"time"
 	"unicode"
@@ -203,7 +202,9 @@ func cleanLabel(s string) string {
 func (s *Service) link(view, token string) string {
 	u := *s.cfg.PublicURL
 	u.Path = "/"
-	u.RawQuery = "view=" + view + "&token=" + url.QueryEscape(token)
+	// The token rides in the fragment, which a browser never sends, so no proxy or access log sees a live token.
+	u.RawQuery = "view=" + view
+	u.Fragment = "token=" + token
 	return u.String()
 }
 

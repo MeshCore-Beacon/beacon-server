@@ -588,7 +588,7 @@ func TestRegisterCreatesUnverifiedUserAndMailsLink(t *testing.T) {
 	}
 	line := ""
 	for _, l := range strings.Split(msgs[0].Text, "\n") {
-		if strings.HasPrefix(l, "https://beacon.example.org/?view=verify&token=") {
+		if strings.HasPrefix(l, "https://beacon.example.org/?view=verify#token=") {
 			line = l
 		}
 	}
@@ -1323,7 +1323,7 @@ func TestResetFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := e.last()
-	if !strings.Contains(m.Text, "https://beacon.example.org/?view=reset&token=") {
+	if !strings.Contains(m.Text, "https://beacon.example.org/?view=reset#token=") {
 		t.Fatalf("link: %q", m.Text)
 	}
 	tok := tokenIn(t, m)
@@ -1491,6 +1491,9 @@ func TestChangeEmail(t *testing.T) {
 	cur := e.store.users[u.ID]
 	if cur.Email != "ridge@example.org" || cur.PendingEmail == nil || *cur.PendingEmail != "new@example.org" {
 		t.Fatalf("user %+v", cur)
+	}
+	if !strings.Contains(m[before].Text, "https://beacon.example.org/?view=verify#token=") {
+		t.Fatalf("email-change link: %q", m[before].Text)
 	}
 	if err := e.svc.Verify(bg, tokenIn(t, m[before])); err != nil {
 		t.Fatal(err)
