@@ -403,9 +403,9 @@ func main() {
 	}
 
 	// ── Build geographic ingest filter ───────────────────────────────────────────────────────────
-	allowedIATAs := iatadb.BuildAllowedSet(cfg.Ingest.AllowCountries, cfg.Ingest.AllowContinents)
+	allowedIATAs := iatadb.BuildAllowedSet(cfg.Ingest.AllowCountries, cfg.Ingest.AllowContinents, cfg.Ingest.AllowIATAs)
 	if allowedIATAs != nil {
-		slog.Info(fmt.Sprintf("config: ingest filter active — %d allowed IATAs (countries=%v continents=%v)", len(allowedIATAs), cfg.Ingest.AllowCountries, cfg.Ingest.AllowContinents), "component", "startup")
+		slog.Info(fmt.Sprintf("config: ingest filter active — %d allowed IATAs (countries=%v continents=%v iatas=%v)", len(allowedIATAs), cfg.Ingest.AllowCountries, cfg.Ingest.AllowContinents, cfg.Ingest.AllowIATAs), "component", "startup")
 	} else {
 		slog.Info("config: ingest filter inactive — accepting all IATAs", "component", "startup")
 	}

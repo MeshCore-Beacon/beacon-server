@@ -64,14 +64,14 @@ func TestContinentFor_Unknown(t *testing.T) {
 }
 
 func TestBuildAllowedSet_Empty(t *testing.T) {
-	result := iatadb.BuildAllowedSet(nil, nil)
+	result := iatadb.BuildAllowedSet(nil, nil, nil)
 	if result != nil {
 		t.Error("expected nil for empty filter")
 	}
 }
 
 func TestBuildAllowedSet_ByCountry(t *testing.T) {
-	allowed := iatadb.BuildAllowedSet([]string{"CA"}, nil)
+	allowed := iatadb.BuildAllowedSet([]string{"CA"}, nil, nil)
 	if allowed == nil {
 		t.Fatal("expected non-nil result")
 	}
@@ -84,7 +84,7 @@ func TestBuildAllowedSet_ByCountry(t *testing.T) {
 }
 
 func TestBuildAllowedSet_ByContinent(t *testing.T) {
-	allowed := iatadb.BuildAllowedSet(nil, []string{"NA"})
+	allowed := iatadb.BuildAllowedSet(nil, []string{"NA"}, nil)
 	if allowed == nil {
 		t.Fatal("expected non-nil result")
 	}
@@ -97,7 +97,7 @@ func TestBuildAllowedSet_ByContinent(t *testing.T) {
 }
 
 func TestBuildAllowedSet_ORSemantics(t *testing.T) {
-	allowed := iatadb.BuildAllowedSet([]string{"CA"}, []string{"EU"})
+	allowed := iatadb.BuildAllowedSet([]string{"CA"}, []string{"EU"}, nil)
 	if allowed == nil {
 		t.Fatal("expected non-nil result")
 	}
@@ -109,5 +109,36 @@ func TestBuildAllowedSet_ORSemantics(t *testing.T) {
 	}
 	if _, ok := allowed["GRU"]; ok {
 		t.Error("expected GRU (SA/BR) to be excluded")
+	}
+}
+
+func TestBuildAllowedSet_ByIATA(t *testing.T) {
+	allowed := iatadb.BuildAllowedSet([]string{"CA"}, nil, []string{"PAE"})
+	for _, want := range []string{"YVR", "PAE"} {
+		if _, ok := allowed[want]; !ok {
+			t.Errorf("expected %s to be allowed", want)
+		}
+	}
+	// One listed code does not let in the rest of its country.
+	if _, ok := allowed["SEA"]; ok {
+		t.Error("expected SEA to be excluded")
+	}
+}
+
+func TestBuildAllowedSet_IATAOnly(t *testing.T) {
+	allowed := iatadb.BuildAllowedSet(nil, nil, []string{"PAE"})
+	if len(allowed) != 1 {
+		t.Fatalf("expected exactly one allowed IATA, got %d", len(allowed))
+	}
+	if _, ok := allowed["PAE"]; !ok {
+		t.Error("expected PAE to be allowed")
+	}
+}
+
+func TestBuildAllowedSet_IATANotInDataset(t *testing.T) {
+	// A code the dataset does not know is still honoured: the operator named it.
+	allowed := iatadb.BuildAllowedSet(nil, nil, []string{"QQQ"})
+	if _, ok := allowed["QQQ"]; !ok {
+		t.Error("expected QQQ to be allowed")
 	}
 }

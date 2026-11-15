@@ -390,11 +390,14 @@ cache:
 # Country codes are ISO 3166-1 alpha-2 (e.g. CA, US, GB).
 # Continent codes: AF (Africa), AN (Antarctica), AS (Asia),
 #                  EU (Europe), NA (North America), OC (Oceania), SA (South America).
-# If both are set an IATA passes if it matches either (OR semantics).
+# allow_iatas adds single IATA codes on top, for example one region across a
+# border without letting in the rest of its country.
+# An IATA passes if it matches any of the three (OR semantics).
 # Omit this section entirely to accept packets from all IATAs (default).
 #ingest:
 #  allow_countries: [CA, US]
 #  allow_continents: [NA]
+#  allow_iatas: [PAE]
 
 # Background task intervals.
 # Shorter intervals are useful during initial deployment to confirm data is
