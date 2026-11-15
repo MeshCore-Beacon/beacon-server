@@ -29,7 +29,23 @@ type Querier interface {
 	AddRegionIATAs(ctx context.Context, arg AddRegionIATAsParams) error
 	// What each of the nodes is and what a polled one reports, over the readings since the cutoff.
 	AlertNodeCaps(ctx context.Context, arg AlertNodeCapsParams) ([]AlertNodeCapsRow, error)
+	// For each repeater, the battery reading closest to 24 hours before its newest one, within 3 hours of that mark.
+	AlertNodeDayAgo(ctx context.Context, arg AlertNodeDayAgoParams) ([]AlertNodeDayAgoRow, error)
+	// The newest trusted readings of each repeater within the window, at most 12 each.
+	AlertNodeReadings(ctx context.Context, arg AlertNodeReadingsParams) ([]AlertNodeReadingsRow, error)
+	AlertNodesData(ctx context.Context, keys [][]byte) ([]AlertNodesDataRow, error)
 	AlertObserverCaps(ctx context.Context, arg AlertObserverCapsParams) ([]AlertObserverCapsRow, error)
+	AlertObserverDayAgo(ctx context.Context, arg AlertObserverDayAgoParams) ([]AlertObserverDayAgoRow, error)
+	AlertObserverTelemetry(ctx context.Context, arg AlertObserverTelemetryParams) ([]AlertObserverTelemetryRow, error)
+	AlertObserversData(ctx context.Context, keys [][]byte) ([]AlertObserversDataRow, error)
+	// The next enabled rules of live users after the id, with the name the user gave the pin and, for a back_online
+	// rule, when the radio's gone_quiet rule last recovered.
+	AlertRuleBatch(ctx context.Context, arg AlertRuleBatchParams) ([]AlertRuleBatchRow, error)
+	AlertsEvalUnlock(ctx context.Context) error
+	AlertsSendUnlock(ctx context.Context) error
+	// Stores what the evaluation decided, only for rules not edited since they were read (same version). Returns the ids
+	// that were stored.
+	ApplyAlertUpdates(ctx context.Context, arg ApplyAlertUpdatesParams) ([]uuid.UUID, error)
 	// Applies only the address the link was issued for ($2, lower case), so a later change of the pending address cannot ride on an old link.
 	// The pending address was verified by the link that got us here, so the account counts as verified too.
 	ApplyPendingEmail(ctx context.Context, arg ApplyPendingEmailParams) (int64, error)
@@ -137,6 +153,8 @@ type Querier interface {
 	DeleteUserDevice(ctx context.Context, arg DeleteUserDeviceParams) error
 	DeleteUserIfHash(ctx context.Context, arg DeleteUserIfHashParams) (int64, error)
 	DeleteUserTokens(ctx context.Context, arg DeleteUserTokensParams) error
+	// Telemetry requests that need attention and were not announced at this status, locked until the transaction ends.
+	DueRequestAttention(ctx context.Context) ([]DueRequestAttentionRow, error)
 	EndAllUserSessions(ctx context.Context, userID uuid.UUID) error
 	// Ends the live app sessions beyond the newest keep.
 	EndOldestAppSessions(ctx context.Context, arg EndOldestAppSessionsParams) error
@@ -317,6 +335,7 @@ type Querier interface {
 	// Whether any observation up to @max_id lacks a payload type. A full scan, run at most once per
 	// process by the payload-type backfill.
 	HasUntypedObservations(ctx context.Context, maxID int64) (bool, error)
+	InsertAlertNotices(ctx context.Context, arg InsertAlertNoticesParams) error
 	// ============================================================
 	// CHANNEL MESSAGES
 	// ============================================================
@@ -607,6 +626,7 @@ type Querier interface {
 	// Hours whose raw rows cleanup already started deleting can never be rolled completely.
 	// Readers report the new status, so the revision moves too.
 	MarkPartialRollupHours(ctx context.Context) error
+	MarkRequestAttention(ctx context.Context, arg MarkRequestAttentionParams) error
 	MaxChannelMessageID(ctx context.Context) (int64, error)
 	MaxObservationID(ctx context.Context) (int64, error)
 	MinObservationID(ctx context.Context) (int64, error)
@@ -679,6 +699,8 @@ type Querier interface {
 	// The password in use for each requested target among $1, sealed. A target whose option in use is the blank login
 	// has no ciphertext.
 	RequestedPasswords(ctx context.Context, targets [][]byte) ([]RequestedPasswordsRow, error)
+	// A request that is fine again can be announced again the next time it needs attention.
+	ResetRequestAttention(ctx context.Context) error
 	// Batch form of ResolveEndpointHashes for a page of packets. Matches the cross
 	// product of IATAs and hashes; callers pick out the pairs they asked for.
 	ResolveEndpointHashPairs(ctx context.Context, arg ResolveEndpointHashPairsParams) ([]ResolveEndpointHashPairsRow, error)
@@ -786,6 +808,8 @@ type Querier interface {
 	// Page keys straight from the observations, independent of packet_sites. floor_ts bounds the read: keys at or
 	// above it are exact, because a packet's newest requested-site hearing is unchanged by dropping older ones.
 	TruthPacketsBySitesPage(ctx context.Context, arg TruthPacketsBySitesPageParams) ([]TruthPacketsBySitesPageRow, error)
+	TryAlertsEvalLock(ctx context.Context) (bool, error)
+	TryAlertsSendLock(ctx context.Context) (bool, error)
 	TryPollingElectionLock(ctx context.Context) (bool, error)
 	// ============================================================
 	// HOURLY ANALYTICS ROLLUPS

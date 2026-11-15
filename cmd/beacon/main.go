@@ -677,6 +677,9 @@ func main() {
 			tasks = append(tasks, background.UsersTasks(maintStore)...)
 		}
 	}
+	if alertsSvc != nil && mode.Jobs {
+		tasks = append(tasks, background.AlertTasks(db.AlertEval{Store: maintStore})...)
+	}
 	if pollingSvc != nil && mode.Jobs {
 		tasks = append(tasks, background.PollingTasks(pollingSvc, background.NewPollingMaint(maintStore), resolvedPolling)...)
 		if requestsSvc != nil {

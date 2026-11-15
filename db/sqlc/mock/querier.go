@@ -145,6 +145,51 @@ func (mr *MockQuerierMockRecorder) AlertNodeCaps(ctx, arg any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AlertNodeCaps", reflect.TypeOf((*MockQuerier)(nil).AlertNodeCaps), ctx, arg)
 }
 
+// AlertNodeDayAgo mocks base method.
+func (m *MockQuerier) AlertNodeDayAgo(ctx context.Context, arg db.AlertNodeDayAgoParams) ([]db.AlertNodeDayAgoRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AlertNodeDayAgo", ctx, arg)
+	ret0, _ := ret[0].([]db.AlertNodeDayAgoRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// AlertNodeDayAgo indicates an expected call of AlertNodeDayAgo.
+func (mr *MockQuerierMockRecorder) AlertNodeDayAgo(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AlertNodeDayAgo", reflect.TypeOf((*MockQuerier)(nil).AlertNodeDayAgo), ctx, arg)
+}
+
+// AlertNodeReadings mocks base method.
+func (m *MockQuerier) AlertNodeReadings(ctx context.Context, arg db.AlertNodeReadingsParams) ([]db.AlertNodeReadingsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AlertNodeReadings", ctx, arg)
+	ret0, _ := ret[0].([]db.AlertNodeReadingsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// AlertNodeReadings indicates an expected call of AlertNodeReadings.
+func (mr *MockQuerierMockRecorder) AlertNodeReadings(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AlertNodeReadings", reflect.TypeOf((*MockQuerier)(nil).AlertNodeReadings), ctx, arg)
+}
+
+// AlertNodesData mocks base method.
+func (m *MockQuerier) AlertNodesData(ctx context.Context, keys [][]byte) ([]db.AlertNodesDataRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AlertNodesData", ctx, keys)
+	ret0, _ := ret[0].([]db.AlertNodesDataRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// AlertNodesData indicates an expected call of AlertNodesData.
+func (mr *MockQuerierMockRecorder) AlertNodesData(ctx, keys any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AlertNodesData", reflect.TypeOf((*MockQuerier)(nil).AlertNodesData), ctx, keys)
+}
+
 // AlertObserverCaps mocks base method.
 func (m *MockQuerier) AlertObserverCaps(ctx context.Context, arg db.AlertObserverCapsParams) ([]db.AlertObserverCapsRow, error) {
 	m.ctrl.T.Helper()
@@ -158,6 +203,109 @@ func (m *MockQuerier) AlertObserverCaps(ctx context.Context, arg db.AlertObserve
 func (mr *MockQuerierMockRecorder) AlertObserverCaps(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AlertObserverCaps", reflect.TypeOf((*MockQuerier)(nil).AlertObserverCaps), ctx, arg)
+}
+
+// AlertObserverDayAgo mocks base method.
+func (m *MockQuerier) AlertObserverDayAgo(ctx context.Context, arg db.AlertObserverDayAgoParams) ([]db.AlertObserverDayAgoRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AlertObserverDayAgo", ctx, arg)
+	ret0, _ := ret[0].([]db.AlertObserverDayAgoRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// AlertObserverDayAgo indicates an expected call of AlertObserverDayAgo.
+func (mr *MockQuerierMockRecorder) AlertObserverDayAgo(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AlertObserverDayAgo", reflect.TypeOf((*MockQuerier)(nil).AlertObserverDayAgo), ctx, arg)
+}
+
+// AlertObserverTelemetry mocks base method.
+func (m *MockQuerier) AlertObserverTelemetry(ctx context.Context, arg db.AlertObserverTelemetryParams) ([]db.AlertObserverTelemetryRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AlertObserverTelemetry", ctx, arg)
+	ret0, _ := ret[0].([]db.AlertObserverTelemetryRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// AlertObserverTelemetry indicates an expected call of AlertObserverTelemetry.
+func (mr *MockQuerierMockRecorder) AlertObserverTelemetry(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AlertObserverTelemetry", reflect.TypeOf((*MockQuerier)(nil).AlertObserverTelemetry), ctx, arg)
+}
+
+// AlertObserversData mocks base method.
+func (m *MockQuerier) AlertObserversData(ctx context.Context, keys [][]byte) ([]db.AlertObserversDataRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AlertObserversData", ctx, keys)
+	ret0, _ := ret[0].([]db.AlertObserversDataRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// AlertObserversData indicates an expected call of AlertObserversData.
+func (mr *MockQuerierMockRecorder) AlertObserversData(ctx, keys any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AlertObserversData", reflect.TypeOf((*MockQuerier)(nil).AlertObserversData), ctx, keys)
+}
+
+// AlertRuleBatch mocks base method.
+func (m *MockQuerier) AlertRuleBatch(ctx context.Context, arg db.AlertRuleBatchParams) ([]db.AlertRuleBatchRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AlertRuleBatch", ctx, arg)
+	ret0, _ := ret[0].([]db.AlertRuleBatchRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// AlertRuleBatch indicates an expected call of AlertRuleBatch.
+func (mr *MockQuerierMockRecorder) AlertRuleBatch(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AlertRuleBatch", reflect.TypeOf((*MockQuerier)(nil).AlertRuleBatch), ctx, arg)
+}
+
+// AlertsEvalUnlock mocks base method.
+func (m *MockQuerier) AlertsEvalUnlock(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AlertsEvalUnlock", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// AlertsEvalUnlock indicates an expected call of AlertsEvalUnlock.
+func (mr *MockQuerierMockRecorder) AlertsEvalUnlock(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AlertsEvalUnlock", reflect.TypeOf((*MockQuerier)(nil).AlertsEvalUnlock), ctx)
+}
+
+// AlertsSendUnlock mocks base method.
+func (m *MockQuerier) AlertsSendUnlock(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AlertsSendUnlock", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// AlertsSendUnlock indicates an expected call of AlertsSendUnlock.
+func (mr *MockQuerierMockRecorder) AlertsSendUnlock(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AlertsSendUnlock", reflect.TypeOf((*MockQuerier)(nil).AlertsSendUnlock), ctx)
+}
+
+// ApplyAlertUpdates mocks base method.
+func (m *MockQuerier) ApplyAlertUpdates(ctx context.Context, arg db.ApplyAlertUpdatesParams) ([]uuid.UUID, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ApplyAlertUpdates", ctx, arg)
+	ret0, _ := ret[0].([]uuid.UUID)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ApplyAlertUpdates indicates an expected call of ApplyAlertUpdates.
+func (mr *MockQuerierMockRecorder) ApplyAlertUpdates(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ApplyAlertUpdates", reflect.TypeOf((*MockQuerier)(nil).ApplyAlertUpdates), ctx, arg)
 }
 
 // ApplyPendingEmail mocks base method.
@@ -983,6 +1131,21 @@ func (m *MockQuerier) DeleteUserTokens(ctx context.Context, arg db.DeleteUserTok
 func (mr *MockQuerierMockRecorder) DeleteUserTokens(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteUserTokens", reflect.TypeOf((*MockQuerier)(nil).DeleteUserTokens), ctx, arg)
+}
+
+// DueRequestAttention mocks base method.
+func (m *MockQuerier) DueRequestAttention(ctx context.Context) ([]db.DueRequestAttentionRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DueRequestAttention", ctx)
+	ret0, _ := ret[0].([]db.DueRequestAttentionRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DueRequestAttention indicates an expected call of DueRequestAttention.
+func (mr *MockQuerierMockRecorder) DueRequestAttention(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DueRequestAttention", reflect.TypeOf((*MockQuerier)(nil).DueRequestAttention), ctx)
 }
 
 // EndAllUserSessions mocks base method.
@@ -2235,6 +2398,20 @@ func (m *MockQuerier) HasUntypedObservations(ctx context.Context, maxID int64) (
 func (mr *MockQuerierMockRecorder) HasUntypedObservations(ctx, maxID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HasUntypedObservations", reflect.TypeOf((*MockQuerier)(nil).HasUntypedObservations), ctx, maxID)
+}
+
+// InsertAlertNotices mocks base method.
+func (m *MockQuerier) InsertAlertNotices(ctx context.Context, arg db.InsertAlertNoticesParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InsertAlertNotices", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// InsertAlertNotices indicates an expected call of InsertAlertNotices.
+func (mr *MockQuerierMockRecorder) InsertAlertNotices(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertAlertNotices", reflect.TypeOf((*MockQuerier)(nil).InsertAlertNotices), ctx, arg)
 }
 
 // InsertChannelMessage mocks base method.
@@ -3834,6 +4011,20 @@ func (mr *MockQuerierMockRecorder) MarkPartialRollupHours(ctx any) *gomock.Call 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkPartialRollupHours", reflect.TypeOf((*MockQuerier)(nil).MarkPartialRollupHours), ctx)
 }
 
+// MarkRequestAttention mocks base method.
+func (m *MockQuerier) MarkRequestAttention(ctx context.Context, arg db.MarkRequestAttentionParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MarkRequestAttention", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// MarkRequestAttention indicates an expected call of MarkRequestAttention.
+func (mr *MockQuerierMockRecorder) MarkRequestAttention(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkRequestAttention", reflect.TypeOf((*MockQuerier)(nil).MarkRequestAttention), ctx, arg)
+}
+
 // MaxChannelMessageID mocks base method.
 func (m *MockQuerier) MaxChannelMessageID(ctx context.Context) (int64, error) {
 	m.ctrl.T.Helper()
@@ -4396,6 +4587,20 @@ func (m *MockQuerier) RequestedPasswords(ctx context.Context, targets [][]byte) 
 func (mr *MockQuerierMockRecorder) RequestedPasswords(ctx, targets any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RequestedPasswords", reflect.TypeOf((*MockQuerier)(nil).RequestedPasswords), ctx, targets)
+}
+
+// ResetRequestAttention mocks base method.
+func (m *MockQuerier) ResetRequestAttention(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ResetRequestAttention", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ResetRequestAttention indicates an expected call of ResetRequestAttention.
+func (mr *MockQuerierMockRecorder) ResetRequestAttention(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResetRequestAttention", reflect.TypeOf((*MockQuerier)(nil).ResetRequestAttention), ctx)
 }
 
 // ResolveEndpointHashPairs mocks base method.
@@ -5190,6 +5395,36 @@ func (m *MockQuerier) TruthPacketsBySitesPage(ctx context.Context, arg db.TruthP
 func (mr *MockQuerierMockRecorder) TruthPacketsBySitesPage(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TruthPacketsBySitesPage", reflect.TypeOf((*MockQuerier)(nil).TruthPacketsBySitesPage), ctx, arg)
+}
+
+// TryAlertsEvalLock mocks base method.
+func (m *MockQuerier) TryAlertsEvalLock(ctx context.Context) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TryAlertsEvalLock", ctx)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// TryAlertsEvalLock indicates an expected call of TryAlertsEvalLock.
+func (mr *MockQuerierMockRecorder) TryAlertsEvalLock(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TryAlertsEvalLock", reflect.TypeOf((*MockQuerier)(nil).TryAlertsEvalLock), ctx)
+}
+
+// TryAlertsSendLock mocks base method.
+func (m *MockQuerier) TryAlertsSendLock(ctx context.Context) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TryAlertsSendLock", ctx)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// TryAlertsSendLock indicates an expected call of TryAlertsSendLock.
+func (mr *MockQuerierMockRecorder) TryAlertsSendLock(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TryAlertsSendLock", reflect.TypeOf((*MockQuerier)(nil).TryAlertsSendLock), ctx)
 }
 
 // TryPollingElectionLock mocks base method.
