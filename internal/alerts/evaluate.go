@@ -64,6 +64,8 @@ type Data struct {
 	// DriftSec is the repeater's clock drift from its newest advert, at AdvertAt.
 	DriftSec *int64
 	AdvertAt time.Time
+	// PrevDriftSec is the drift of the advert before that one; nil when there was none.
+	PrevDriftSec *int64
 	// SiblingRecoveredAt is when the radio's gone_quiet rule last went from firing to ok.
 	SiblingRecoveredAt time.Time
 	// SiblingEnabled: the radio has an enabled gone_quiet rule, which a back_online rule needs.
@@ -148,18 +150,29 @@ func Evaluate(r Rule, d Data) Outcome {
 		if !d.Exists || !d.Polled {
 			return inactive()
 		}
-		pair := firstN(d.Readings, 2, func(x Reading) bool { return x.Uptime != nil })
-		if len(pair) < 2 {
+		ups := firstN(d.Readings, len(d.Readings), func(x Reading) bool { return x.Uptime != nil })
+		if len(ups) < 2 {
 			return keep()
 		}
-		if !pair[0].At.After(r.Cursor) {
+		if !ups[0].At.After(r.Cursor) {
 			return keep() // already judged
 		}
-		o.Cursor = pair[0].At
-		rebooted := *pair[0].Uptime < *pair[1].Uptime
-		out = set(rebooted, *pair[0].Uptime)
+		o.Cursor = ups[0].At
+		// Every reading since the cursor is compared with the one before it (which may be older than the cursor),
+		// so a reboot between two passes is not lost behind later readings. The newest reboot gives the figure.
+		var reboot *Reading
+		for i := 0; i+1 < len(ups) && ups[i].At.After(r.Cursor); i++ {
+			if *ups[i].Uptime < *ups[i+1].Uptime {
+				reboot = &ups[i]
+				break
+			}
+		}
+		out = set(reboot != nil, 0)
 		// An event: notify on every new reboot, not only on the change into firing.
-		out.Notify, out.Value = rebooted, *pair[0].Uptime
+		out.Notify = reboot != nil
+		if reboot != nil {
+			out.Value = *reboot.Uptime
+		}
 	case KindTemperature:
 		if !d.Exists || !d.Polled {
 			return inactive()
@@ -193,23 +206,20 @@ func Evaluate(r Rule, d Data) Outcome {
 			return keep()
 		}
 		o.Cursor = d.AdvertAt
+		o.Streak = 0
+		over := func(v int64) bool {
+			if v < 0 {
+				v = -v
+			}
+			return v > int64(*r.Threshold)
+		}
+		// Two adverts in a row past the limit: the newest and the one before it, as the node row keeps them.
+		both := over(*d.DriftSec) && d.PrevDriftSec != nil && over(*d.PrevDriftSec)
 		drift := *d.DriftSec
 		if drift < 0 {
 			drift = -drift
 		}
-		if drift > int64(*r.Threshold) {
-			o.Streak++
-		} else {
-			o.Streak = 0
-		}
-		switch {
-		case o.Streak >= 2:
-			out = set(true, drift)
-		case o.Streak == 1 && r.State == StateFiring:
-			out = set(true, drift)
-		default:
-			out = set(false, 0)
-		}
+		out = set(both, drift)
 	case KindBackOnline:
 		// Never firing itself: it announces the moment the radio's gone_quiet rule recovered. Without an enabled
 		// gone_quiet partner there is nothing to announce.

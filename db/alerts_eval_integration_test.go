@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	"github.com/MeshCore-Beacon/beacon-server/internal/alerts"
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	mailer "github.com/MeshCore-Beacon/beacon-server/internal/mail"
@@ -583,5 +584,61 @@ func TestAlertEmailGroupsAreNotSplitPostgres(t *testing.T) {
 	}
 	if len(m.got) != 4 || len(perUser) != 4 {
 		t.Fatalf("%d mails to %v", len(m.got), perUser)
+	}
+}
+
+func advertWithDrift(t *testing.T, ctx context.Context, s *Store, key []byte, drift int64) {
+	t.Helper()
+	name := "Hilltop"
+	if _, err := s.q.UpsertNode(ctx, sqlc.UpsertNodeParams{PublicKey: key, NodeType: 2, Name: &name, DeviceClockDriftSeconds: &drift}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Two consecutive adverts past the limit are needed: high, normal, high between two passes is not that.
+func TestAlertClockNeedsConsecutiveAdvertsPostgres(t *testing.T) {
+	ctx, pool, s := userStore(t)
+	svc := alertSvc(s)
+	u := newUser(t, ctx, s, "alice")
+	key := atlasKey(1)
+	advertWithDrift(t, ctx, s, key, 0)
+	pinAtlas(t, ctx, s, u, 0, api.StoredPin{Kind: "node", Key: key})
+	if _, err := svc.PutRule(ctx, u.ID, alerts.RuleInput{TargetKind: "node", PublicKey: key, Kind: "clock", Threshold: ipp(3600), Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE user_alert_rules SET cursor_at = now() - interval '1 day'`); err != nil {
+		t.Fatal(err)
+	}
+	task := alerts.NewTask(AlertEval{s}, time.Now)
+	state := func() string {
+		t.Helper()
+		var st string
+		if err := pool.QueryRow(ctx, `SELECT state FROM user_alert_rules`).Scan(&st); err != nil {
+			t.Fatal(err)
+		}
+		return st
+	}
+	run := func(drifts ...int64) string {
+		t.Helper()
+		for _, d := range drifts {
+			advertWithDrift(t, ctx, s, key, d)
+			time.Sleep(5 * time.Millisecond)
+		}
+		if err := task.Run(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return state()
+	}
+	if got := run(7200); got == "firing" {
+		t.Fatalf("one advert past the limit fired: %s", got)
+	}
+	if got := run(0, 7200); got == "firing" {
+		t.Fatalf("high, normal, high fired: %s", got)
+	}
+	if got := run(7200); got != "firing" {
+		t.Fatalf("two adverts in a row past the limit: %s", got)
+	}
+	if got := run(0); got != "ok" {
+		t.Fatalf("a normal advert should recover: %s", got)
 	}
 }

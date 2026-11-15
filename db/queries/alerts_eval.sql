@@ -25,7 +25,7 @@ ORDER BY r.id
 LIMIT sqlc.arg(row_limit);
 
 -- name: AlertNodesData :many
-SELECT public_key, COALESCE(name, '')::text AS name, last_seen, last_advert_at, device_clock_drift_seconds
+SELECT public_key, COALESCE(name, '')::text AS name, last_seen, last_advert_at, device_clock_drift_seconds, prev_clock_drift_seconds
 FROM nodes WHERE public_key = ANY(sqlc.arg(keys)::bytea[]);
 
 -- name: AlertObserversData :many

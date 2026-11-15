@@ -115,7 +115,7 @@ func (q *Queries) AlertNodeReadings(ctx context.Context, arg AlertNodeReadingsPa
 }
 
 const alertNodesData = `-- name: AlertNodesData :many
-SELECT public_key, COALESCE(name, '')::text AS name, last_seen, last_advert_at, device_clock_drift_seconds
+SELECT public_key, COALESCE(name, '')::text AS name, last_seen, last_advert_at, device_clock_drift_seconds, prev_clock_drift_seconds
 FROM nodes WHERE public_key = ANY($1::bytea[])
 `
 
@@ -125,6 +125,7 @@ type AlertNodesDataRow struct {
 	LastSeen                pgtype.Timestamptz `json:"last_seen"`
 	LastAdvertAt            pgtype.Timestamptz `json:"last_advert_at"`
 	DeviceClockDriftSeconds *int64             `json:"device_clock_drift_seconds"`
+	PrevClockDriftSeconds   *int64             `json:"prev_clock_drift_seconds"`
 }
 
 func (q *Queries) AlertNodesData(ctx context.Context, keys [][]byte) ([]AlertNodesDataRow, error) {
@@ -142,6 +143,7 @@ func (q *Queries) AlertNodesData(ctx context.Context, keys [][]byte) ([]AlertNod
 			&i.LastSeen,
 			&i.LastAdvertAt,
 			&i.DeviceClockDriftSeconds,
+			&i.PrevClockDriftSeconds,
 		); err != nil {
 			return nil, err
 		}

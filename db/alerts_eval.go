@@ -128,7 +128,7 @@ func (a AlertEval) LoadTargets(ctx context.Context, rules []alerts.RuleRow, now 
 		for _, n := range nodes {
 			td := alerts.TargetData{Name: n.Name}
 			td.Exists, td.LastHeard, td.AdvertAt = true, tsTime(n.LastSeen), tsTime(n.LastAdvertAt)
-			td.DriftSec = n.DeviceClockDriftSeconds
+			td.DriftSec, td.PrevDriftSec = n.DeviceClockDriftSeconds, n.PrevClockDriftSeconds
 			out[alerts.TargetID(alerts.TargetNode, n.PublicKey)] = td
 		}
 		reads, err := a.q.AlertNodeReadings(ctx, sqlc.AlertNodeReadingsParams{Keys: nodeKeys, Since: since})

@@ -144,6 +144,32 @@ func TestEvaluateRebooted(t *testing.T) {
 	}
 }
 
+// A reboot between two passes is seen even when later readings show a steady uptime again.
+func TestEvaluateRebootedBetweenPasses(t *testing.T) {
+	r := Rule{Kind: KindRebooted, State: StateOK, Cursor: ago(5 * time.Hour)}
+	// Newest first: 20, 10, then the 10000 from before the reboot.
+	d := live(up(time.Hour, 20), up(2*time.Hour, 10), up(3*time.Hour, 10000))
+	o := Evaluate(r, d.withNow())
+	if !o.Notify || o.State != StateFiring || o.Value != 10 || !o.Cursor.Equal(ago(time.Hour)) {
+		t.Fatalf("%+v", o)
+	}
+	// The baseline may be older than the cursor: the reading after it is what is new.
+	r.Cursor = ago(150 * time.Minute)
+	if o := Evaluate(r, d.withNow()); !o.Notify || o.Value != 10 {
+		t.Fatalf("reboot right after the cursor: %+v", o)
+	}
+	// Nothing new since the cursor.
+	r.Cursor = ago(time.Hour)
+	if o := Evaluate(r, d.withNow()); o.Notify {
+		t.Fatalf("judged again: %+v", o)
+	}
+	// Several unseen readings, no drop: no reboot.
+	r.Cursor = ago(5 * time.Hour)
+	if o := Evaluate(r, live(up(time.Hour, 3000), up(2*time.Hour, 2000), up(3*time.Hour, 1000)).withNow()); o.Notify || o.State != StateOK {
+		t.Fatalf("steady uptime: %+v", o)
+	}
+}
+
 func TestEvaluateTemperature(t *testing.T) {
 	both := func(st State) Rule { return Rule{Kind: KindTemperature, Threshold: ip(0), High: ip(400), State: st} }
 	highOnly := func(st State) Rule { return Rule{Kind: KindTemperature, High: ip(400), State: st} }
@@ -179,28 +205,27 @@ func TestEvaluateNoiseHigh(t *testing.T) {
 }
 
 func TestEvaluateClock(t *testing.T) {
-	r := func(st State, streak int, cursor time.Duration) Rule {
-		return Rule{Kind: KindClock, Threshold: ip(300), State: st, Streak: streak, Cursor: ago(cursor)}
+	r := func(st State, cursor time.Duration) Rule {
+		return Rule{Kind: KindClock, Threshold: ip(300), State: st, Cursor: ago(cursor)}
 	}
-	drift := func(s int64, at time.Duration) Data {
-		return Data{Now: now, Exists: true, DriftSec: &s, AdvertAt: ago(at)}
+	// drift is the newest advert's drift, prev the one before it (0 means a good one, nil none).
+	drift := func(s int64, prev *int64, at time.Duration) Data {
+		return Data{Now: now, Exists: true, DriftSec: &s, PrevDriftSec: prev, AdvertAt: ago(at)}
 	}
+	v := func(s int64) *int64 { return &s }
 	run(t, []step{
-		{"no advert", r(StateOK, 0, time.Hour), Data{Now: now, Exists: true}, StateInactive, false, 0},
-		{"row gone", r(StateOK, 0, time.Hour), Data{Now: now}, StateInactive, false, 0},
-		{"same advert again", r(StateOK, 1, 10*time.Minute), drift(900, 10*time.Minute), StateOK, false, 0},
-		{"first breach waits", r(StateOK, 0, time.Hour), drift(900, 10*time.Minute), StateOK, false, 0},
-		{"second breach fires", r(StateOK, 1, time.Hour), drift(-900, 10*time.Minute), StateFiring, true, 900},
-		{"no refire", r(StateFiring, 2, time.Hour), drift(900, 10*time.Minute), StateFiring, false, 0},
-		{"one good advert recovers", r(StateFiring, 2, time.Hour), drift(10, 10*time.Minute), StateOK, false, 0},
-		{"limit", Rule{Kind: KindClock, Threshold: ip(300), State: StateOK, Streak: 1, Cursor: ago(time.Hour), LastSentAt: ago(time.Hour)}, drift(900, 10*time.Minute), StateFiring, false, 0},
+		{"no advert", r(StateOK, time.Hour), Data{Now: now, Exists: true}, StateInactive, false, 0},
+		{"row gone", r(StateOK, time.Hour), Data{Now: now}, StateInactive, false, 0},
+		{"same advert again", r(StateOK, 10*time.Minute), drift(900, v(900), 10*time.Minute), StateOK, false, 0},
+		{"first advert waits", r(StateOK, time.Hour), drift(900, nil, 10*time.Minute), StateOK, false, 0},
+		{"high after a good one waits", r(StateOK, time.Hour), drift(900, v(10), 10*time.Minute), StateOK, false, 0},
+		{"two in a row fires", r(StateOK, time.Hour), drift(-900, v(900), 10*time.Minute), StateFiring, true, 900},
+		{"no refire", r(StateFiring, time.Hour), drift(900, v(900), 10*time.Minute), StateFiring, false, 0},
+		{"one good advert recovers", r(StateFiring, time.Hour), drift(10, v(900), 10*time.Minute), StateOK, false, 0},
+		{"limit", Rule{Kind: KindClock, Threshold: ip(300), State: StateOK, Cursor: ago(time.Hour), LastSentAt: ago(time.Hour)}, drift(900, v(900), 10*time.Minute), StateFiring, false, 0},
 	})
-	o := Evaluate(r(StateOK, 1, time.Hour), drift(10, 10*time.Minute))
-	if o.Streak != 0 {
-		t.Fatalf("a good advert must reset the streak, got %d", o.Streak)
-	}
-	o = Evaluate(r(StateOK, 0, time.Hour), drift(900, 10*time.Minute))
-	if o.Streak != 1 || !o.Cursor.Equal(ago(10*time.Minute)) {
+	o := Evaluate(r(StateOK, time.Hour), drift(900, v(10), 10*time.Minute))
+	if !o.Cursor.Equal(ago(10*time.Minute)) || o.Streak != 0 {
 		t.Fatalf("streak %d cursor %v", o.Streak, o.Cursor)
 	}
 }

@@ -1317,6 +1317,7 @@ ON CONFLICT (public_key) DO UPDATE SET
   radio_freq_mhz  = EXCLUDED.radio_freq_mhz,
   radio_sf        = EXCLUDED.radio_sf,
   radio_bw_khz    = EXCLUDED.radio_bw_khz,
+  prev_clock_drift_seconds = nodes.device_clock_drift_seconds,
   device_clock_drift_seconds = EXCLUDED.device_clock_drift_seconds
 RETURNING *;
 
