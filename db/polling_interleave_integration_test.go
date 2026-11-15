@@ -80,6 +80,10 @@ func (d *simDevice) trim() {
 // target changes, and approval and blocking, with the seat, rank and status rules checked against the database after
 // every step and seat priority after every full election. BEACON_INTERLEAVE_SEED takes a seed or a range (1-200).
 func TestRequestedInterleavingsKeepInvariantsPostgres(t *testing.T) {
+	// Skip here, not only in the per-seed subtests: with those skipped the summary check below would fail.
+	if os.Getenv("BEACON_TEST_POSTGRES_DSN") == "" {
+		t.Skip("set BEACON_TEST_POSTGRES_DSN")
+	}
 	first, last, steps := uint64(1), uint64(5), 400
 	if s := os.Getenv("BEACON_INTERLEAVE_SEED"); s != "" {
 		lo, hi, _ := strings.Cut(s, "-")
