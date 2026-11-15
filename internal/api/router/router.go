@@ -90,7 +90,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 	if opts.AlertDelivery != "" {
 		features.Alerts, features.AlertDelivery = true, opts.AlertDelivery
 	}
-	info := api.Info{ServerVersion: opts.ServerVersion, Features: features}
+	info := api.Info{ServerVersion: opts.ServerVersion, Features: features, BuildVersion: opts.BuildVersion, BuildRevision: opts.BuildRevision}
 	if opts.MinAppVersion != "" {
 		info.MinAppVersion = &opts.MinAppVersion
 	}

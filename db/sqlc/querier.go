@@ -239,7 +239,7 @@ type Querier interface {
 	// adverts as (sender, forwarder) but traces as (receiver, sender). Callers normalise.
 	GetNeighborLinks(ctx context.Context, arg GetNeighborLinksParams) ([]GetNeighborLinksRow, error)
 	// Hours before @tail_start come from the rollup; later ones aren't rolled yet and read raw rows, found through
-	// the node's packets first heard in [@packet_from, @packet_until).
+	// the node's recent packets, including older packets heard again in the raw tail.
 	GetNodeActivityHourly(ctx context.Context, arg GetNodeActivityHourlyParams) ([]GetNodeActivityHourlyRow, error)
 	GetNodeByID(ctx context.Context, id uuid.UUID) (GetNodeByIDRow, error)
 	GetNodeByPubkey(ctx context.Context, publicKey []byte) (uuid.UUID, error)
@@ -677,6 +677,9 @@ type Querier interface {
 	MinObservationID(ctx context.Context) (int64, error)
 	// The first message id above after_id, or 0 when there is none.
 	NextChannelMessageID(ctx context.Context, afterID int64) (int64, error)
+	// A freshly added activity family is empty until the queued completed hours
+	// are rebuilt. Do not present that period as measured zero traffic.
+	NodeActivityPending(ctx context.Context, arg NodeActivityPendingParams) (bool, error)
 	NodeHasReadings(ctx context.Context, targetPublicKey []byte) (bool, error)
 	NodeIDsByKeys(ctx context.Context, dollar_1 [][]byte) ([]NodeIDsByKeysRow, error)
 	NodeLatestTrustedReadingAt(ctx context.Context, targetPublicKey []byte) (pgtype.Timestamptz, error)
@@ -734,7 +737,8 @@ type Querier interface {
 	ReconfirmRoutesBatch(ctx context.Context, arg ReconfirmRoutesBatchParams) (ReconfirmRoutesBatchRow, error)
 	// Key of the last route in a slice that timed out: the caller passes the slice's row count - 1.
 	ReconfirmSliceEnd(ctx context.Context, arg ReconfirmSliceEndParams) (ReconfirmSliceEndRow, error)
-	// Keeps the drift of the node's last 16 adverts: the new one in, the older ones beyond 15 out.
+	// Keep 16 adverts, including the INSERT's row. Sibling CTEs share a snapshot:
+	// the table scan alone cannot see the new row. A conflict returns no extra row.
 	RecordClockDrift(ctx context.Context, arg RecordClockDriftParams) error
 	// Written on every owners answer that lists the target, so it only touches the row when the version changed or the
 	// last write is an hour old.
@@ -783,6 +787,9 @@ type Querier interface {
 	ResolveRelayHashPairsP3(ctx context.Context, arg ResolveRelayHashPairsP3Params) ([]ResolveRelayHashPairsP3Row, error)
 	// Batch form of ResolvePathHashesP4 across IATAs; callers check uniqueness per IATA.
 	ResolveRelayHashPairsP4(ctx context.Context, arg ResolveRelayHashPairsP4Params) ([]ResolveRelayHashPairsP4Row, error)
+	// TRACE can terminate at companions. Preserve the full prefix (including eight
+	// bytes), and return every candidate across heard regions instead of picking one.
+	ResolveTraceHashes(ctx context.Context, arg ResolveTraceHashesParams) ([]ResolveTraceHashesRow, error)
 	RollAdvertHearings(ctx context.Context, hour pgtype.Timestamptz) error
 	// Each distinct ADVERT packet counts once, under the exact set of IATAs that heard it this hour.
 	RollAdvertSets(ctx context.Context, hour pgtype.Timestamptz) error

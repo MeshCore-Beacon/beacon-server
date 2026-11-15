@@ -502,6 +502,8 @@ WHERE p.packet_hash = $1;
 -- Return distinct observation IATAs in first-heard order for path resolution,
 -- without fetching full observations separately for every trace packet.
 SELECT encode(p.packet_hash, 'hex') AS packet_hash_hex,
+    p.raw_payload, p.payload_version,
+    EXISTS(SELECT 1 FROM packet_observations po WHERE po.packet_hash=p.packet_hash AND po.path_length_byte>=64) AS invalid_snr_path,
     p.route_type,
     p.first_heard_at,
     p.last_heard_at,
@@ -1322,14 +1324,19 @@ ON CONFLICT (public_key) DO UPDATE SET
 RETURNING *;
 
 -- name: RecordClockDrift :exec
--- Keeps the drift of the node's last 16 adverts: the new one in, the older ones beyond 15 out.
+-- Keep 16 adverts, including the INSERT's row. Sibling CTEs share a snapshot:
+-- the table scan alone cannot see the new row. A conflict returns no extra row.
 WITH ins AS (
     INSERT INTO node_clock_drifts (node_id, advert_at, drift_seconds) VALUES (@node_id, now(), @drift_seconds)
     ON CONFLICT (node_id, advert_at) DO NOTHING
+    RETURNING advert_at
+), recent AS (
+    SELECT advert_at FROM node_clock_drifts WHERE node_id = @node_id
+    UNION ALL SELECT advert_at FROM ins
 )
 DELETE FROM node_clock_drifts x
 WHERE x.node_id = @node_id
-  AND x.advert_at < (SELECT d.advert_at FROM node_clock_drifts d WHERE d.node_id = @node_id ORDER BY d.advert_at DESC OFFSET 15 LIMIT 1);
+  AND x.advert_at < (SELECT advert_at FROM recent ORDER BY advert_at DESC OFFSET 15 LIMIT 1);
 
 -- name: SetNodeMultibytePaths :exec
 UPDATE nodes SET supports_multibyte_paths = TRUE
@@ -1514,7 +1521,7 @@ SELECT public_key FROM nodes WHERE id = $1;
 
 -- name: GetNodeActivityHourly :many
 -- Hours before @tail_start come from the rollup; later ones aren't rolled yet and read raw rows, found through
--- the node's packets first heard in [@packet_from, @packet_until).
+-- the node's recent packets, including older packets heard again in the raw tail.
 WITH src AS (
   SELECT a.hour AS t, a.observations, a.snr_sum, a.snr_n, a.rssi_sum, a.rssi_n, a.hop_sum, a.hop_n
   FROM analytics_hourly_node_activity a
@@ -1528,7 +1535,9 @@ WITH src AS (
   CROSS JOIN LATERAL (SELECT CASE WHEN NOT (COALESCE(po.rssi, 0) = 0 AND COALESCE(po.snr, 0) = 0) THEN po.snr END AS snr,
                              CASE WHEN NOT (COALESCE(po.rssi, 0) = 0 AND COALESCE(po.snr, 0) = 0) THEN po.rssi END AS rssi) s
   WHERE p.origin_pubkey = @origin_pubkey::bytea
-    AND p.first_heard_at >= @packet_from::timestamptz AND p.first_heard_at < @packet_until::timestamptz
+    AND (p.first_heard_at >= @packet_from::timestamptz
+         OR p.last_heard_at >= GREATEST(@since::timestamptz, @tail_start::timestamptz))
+    AND p.first_heard_at < @packet_until::timestamptz
     AND po.heard_at >= GREATEST(@since::timestamptz, @tail_start::timestamptz) AND po.heard_at < @until::timestamptz
 )
 SELECT
@@ -1551,6 +1560,12 @@ FROM packets p
 WHERE p.origin_pubkey = @origin_pubkey::bytea
 ORDER BY p.first_heard_at DESC
 LIMIT 1;
+
+-- name: NodeActivityPending :one
+-- A freshly added activity family is empty until the queued completed hours
+-- are rebuilt. Do not present that period as measured zero traffic.
+SELECT EXISTS(SELECT 1 FROM analytics_dirty_hours
+ WHERE hour >= @since::timestamptz AND hour < @rolled_until::timestamptz)::boolean;
 
 -- ============================================================
 -- NODE IATAS
@@ -2245,7 +2260,11 @@ SELECT
      WHERE ti.trace_tag = t.trace_tag
        AND (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR ti.iata = ANY($1::bpchar[]))) AS iata_count,
     COALESCE(t.trace_type, '')::text AS trace_type,
-    t.best_payload
+    t.best_payload,
+    ARRAY(SELECT ti.iata FROM trace_iatas ti WHERE ti.trace_tag=t.trace_tag)::bpchar[] AS iatas,
+    EXISTS(SELECT 1 FROM packets p WHERE p.trace_tag=t.trace_tag AND p.payload_version<>0) AS unsupported_version,
+    EXISTS(SELECT 1 FROM packets p WHERE p.trace_tag=t.trace_tag AND p.route_type NOT IN (2,3)) AS non_direct,
+    EXISTS(SELECT 1 FROM packets p JOIN packet_observations po ON po.packet_hash=p.packet_hash WHERE p.trace_tag=t.trace_tag AND po.path_length_byte>=64) AS invalid_snr_path
 FROM trace_tags t
 WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR EXISTS (
         SELECT 1 FROM trace_iatas ti WHERE ti.trace_tag = t.trace_tag AND ti.iata = ANY($1::bpchar[])))
@@ -2797,3 +2816,16 @@ ON CONFLICT (country) DO UPDATE SET
 -- name: PruneZoneBoundaries :many
 -- Drops imports for IATAs no longer configured, so their manual border returns.
 DELETE FROM meshmapper_zone_boundaries WHERE NOT (iata = ANY(@keep::text[])) RETURNING iata;
+
+-- name: ResolveTraceHashes :many
+-- TRACE can terminate at companions. Preserve the full prefix (including eight
+-- bytes), and return every candidate across heard regions instead of picking one.
+SELECT h.hash::bytea AS hash, si.iata, n.id AS node_id, n.name, n.latitude, n.longitude, n.public_key
+FROM unnest(@hashes::bytea[]) AS h(hash)
+JOIN node_short_ids si ON si.iata = ANY(@iatas::bpchar[]) AND
+ ((octet_length(h.hash)=1 AND si.prefix_1=h.hash) OR
+  (octet_length(h.hash)=2 AND si.prefix_2=h.hash) OR
+  (octet_length(h.hash) IN (4,8) AND si.prefix_4=substring(h.hash FROM 1 FOR 4)))
+JOIN nodes n ON n.id=si.node_id
+WHERE substring(n.public_key FROM 1 FOR octet_length(h.hash))=h.hash
+ORDER BY si.iata, h.hash, n.id;

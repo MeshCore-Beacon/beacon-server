@@ -6042,7 +6042,7 @@ const docTemplate = `{
         },
         "/routes/{iata}/{pathKey}/observations": {
             "get": {
-                "description": "Matches the saved IATA, complete path bytes and hash width. Excludes TRACE and unclassified reports; other widths and search-result subsegments are not included. Byte matches do not prove hop identities or delivery. The route and its historical counter can outlive raw evidence. Cursors retain full timestamp precision and pin route/window scope.",
+                "description": "Matches one complete path representation in the saved IATA. Defaults to the latest processed prefixes; hashSize/pathBytes pin a prior response. Excludes TRACE and unclassified reports; widths are never combined. Pinned prefixes must match the saved node chain or its current metadata. Byte matches do not prove hop identities or delivery. The route counter can outlive raw evidence. New cursors pin path, route, window and full timestamp precision; legacy unpinned cursors remain supported.",
                 "produces": [
                     "application/json"
                 ],
@@ -6084,8 +6084,22 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "maximum": 3,
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Exact hash width (1–3); provide with pathBytes to pin a response's representation",
+                        "name": "hashSize",
+                        "in": "query"
+                    },
+                    {
                         "type": "string",
-                        "description": "Opaque precise cursor from nextPageCursor; window is pinned",
+                        "description": "Complete lower-case hex path from the response; provide with hashSize",
+                        "name": "pathBytes",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Opaque precise cursor from nextPageCursor; route, window and path are pinned",
                         "name": "pageCursor",
                         "in": "query"
                     },
@@ -8360,6 +8374,13 @@ const docTemplate = `{
         "github_com_MeshCore-Beacon_beacon-server_internal_api.Info": {
             "type": "object",
             "properties": {
+                "buildRevision": {
+                    "type": "string"
+                },
+                "buildVersion": {
+                    "description": "Optional artifact identity; the API compatibility version above is separate.",
+                    "type": "string"
+                },
                 "features": {
                     "description": "Features tells clients which optional parts of the API this server offers.",
                     "allOf": [
@@ -9651,6 +9672,9 @@ const docTemplate = `{
                     "description": "matched transport scope name e.g. \"#bc\"",
                     "type": "string"
                 },
+                "traceQuality": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality"
+                },
                 "transportCodes": {
                     "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PacketTransportCodes"
                 }
@@ -9781,6 +9805,13 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "sourceBroker": {
+                    "type": "string"
+                },
+                "traceQuality": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality"
+                },
+                "wirePathBytes": {
+                    "description": "Exact on-air TRACE SNR bytes, before the display path substitution.",
                     "type": "string"
                 }
             }
@@ -11200,6 +11231,9 @@ const docTemplate = `{
                     "description": "hex-encoded packet hash",
                     "type": "string"
                 },
+                "quality": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality"
+                },
                 "rawPath": {
                     "description": "hops as received in the packet",
                     "type": "array",
@@ -11253,6 +11287,9 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "quality": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality"
                 },
                 "snrValues": {
                     "description": "SNR per hop from the most complete observation",
@@ -11431,6 +11468,21 @@ const docTemplate = `{
                 "ticket": {
                     "type": "string",
                     "example": "AAABmZ1s4CgLBvU1n1yN3v8hQm9YtVq2"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality": {
+            "type": "object",
+            "properties": {
+                "reasons": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "status": {
+                    "description": "supported, suspect, or ambiguous; supported is not authenticated",
+                    "type": "string"
                 }
             }
         },

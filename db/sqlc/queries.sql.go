@@ -790,7 +790,9 @@ WITH src AS (
   CROSS JOIN LATERAL (SELECT CASE WHEN NOT (COALESCE(po.rssi, 0) = 0 AND COALESCE(po.snr, 0) = 0) THEN po.snr END AS snr,
                              CASE WHEN NOT (COALESCE(po.rssi, 0) = 0 AND COALESCE(po.snr, 0) = 0) THEN po.rssi END AS rssi) s
   WHERE p.origin_pubkey = $1::bytea
-    AND p.first_heard_at >= $5::timestamptz AND p.first_heard_at < $6::timestamptz
+    AND (p.first_heard_at >= $5::timestamptz
+         OR p.last_heard_at >= GREATEST($2::timestamptz, $4::timestamptz))
+    AND p.first_heard_at < $6::timestamptz
     AND po.heard_at >= GREATEST($2::timestamptz, $4::timestamptz) AND po.heard_at < $3::timestamptz
 )
 SELECT
@@ -828,7 +830,7 @@ type GetNodeActivityHourlyRow struct {
 }
 
 // Hours before @tail_start come from the rollup; later ones aren't rolled yet and read raw rows, found through
-// the node's packets first heard in [@packet_from, @packet_until).
+// the node's recent packets, including older packets heard again in the raw tail.
 func (q *Queries) GetNodeActivityHourly(ctx context.Context, arg GetNodeActivityHourlyParams) ([]GetNodeActivityHourlyRow, error) {
 	rows, err := q.db.Query(ctx, getNodeActivityHourly,
 		arg.OriginPubkey,
@@ -1766,6 +1768,8 @@ func (q *Queries) GetPacketByHash(ctx context.Context, packetHash []byte) (GetPa
 
 const getPacketsByTraceTag = `-- name: GetPacketsByTraceTag :many
 SELECT encode(p.packet_hash, 'hex') AS packet_hash_hex,
+    p.raw_payload, p.payload_version,
+    EXISTS(SELECT 1 FROM packet_observations po WHERE po.packet_hash=p.packet_hash AND po.path_length_byte>=64) AS invalid_snr_path,
     p.route_type,
     p.first_heard_at,
     p.last_heard_at,
@@ -1786,14 +1790,17 @@ ORDER BY p.first_heard_at ASC
 `
 
 type GetPacketsByTraceTagRow struct {
-	PacketHashHex string             `json:"packet_hash_hex"`
-	RouteType     int16              `json:"route_type"`
-	FirstHeardAt  pgtype.Timestamptz `json:"first_heard_at"`
-	LastHeardAt   pgtype.Timestamptz `json:"last_heard_at"`
-	ParsedPayload []byte             `json:"parsed_payload"`
-	ScopeID       *int32             `json:"scope_id"`
-	ScopeName     *string            `json:"scope_name"`
-	Iatas         []string           `json:"iatas"`
+	PacketHashHex  string             `json:"packet_hash_hex"`
+	RawPayload     []byte             `json:"raw_payload"`
+	PayloadVersion int16              `json:"payload_version"`
+	InvalidSnrPath bool               `json:"invalid_snr_path"`
+	RouteType      int16              `json:"route_type"`
+	FirstHeardAt   pgtype.Timestamptz `json:"first_heard_at"`
+	LastHeardAt    pgtype.Timestamptz `json:"last_heard_at"`
+	ParsedPayload  []byte             `json:"parsed_payload"`
+	ScopeID        *int32             `json:"scope_id"`
+	ScopeName      *string            `json:"scope_name"`
+	Iatas          []string           `json:"iatas"`
 }
 
 // Return distinct observation IATAs in first-heard order for path resolution,
@@ -1809,6 +1816,9 @@ func (q *Queries) GetPacketsByTraceTag(ctx context.Context, decode string) ([]Ge
 		var i GetPacketsByTraceTagRow
 		if err := rows.Scan(
 			&i.PacketHashHex,
+			&i.RawPayload,
+			&i.PayloadVersion,
+			&i.InvalidSnrPath,
 			&i.RouteType,
 			&i.FirstHeardAt,
 			&i.LastHeardAt,
@@ -6248,7 +6258,11 @@ SELECT
      WHERE ti.trace_tag = t.trace_tag
        AND (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR ti.iata = ANY($1::bpchar[]))) AS iata_count,
     COALESCE(t.trace_type, '')::text AS trace_type,
-    t.best_payload
+    t.best_payload,
+    ARRAY(SELECT ti.iata FROM trace_iatas ti WHERE ti.trace_tag=t.trace_tag)::bpchar[] AS iatas,
+    EXISTS(SELECT 1 FROM packets p WHERE p.trace_tag=t.trace_tag AND p.payload_version<>0) AS unsupported_version,
+    EXISTS(SELECT 1 FROM packets p WHERE p.trace_tag=t.trace_tag AND p.route_type NOT IN (2,3)) AS non_direct,
+    EXISTS(SELECT 1 FROM packets p JOIN packet_observations po ON po.packet_hash=p.packet_hash WHERE p.trace_tag=t.trace_tag AND po.path_length_byte>=64) AS invalid_snr_path
 FROM trace_tags t
 WHERE (COALESCE(cardinality($1::bpchar[]), 0) = 0 OR EXISTS (
         SELECT 1 FROM trace_iatas ti WHERE ti.trace_tag = t.trace_tag AND ti.iata = ANY($1::bpchar[])))
@@ -6277,13 +6291,17 @@ type ListTraceTagsParams struct {
 }
 
 type ListTraceTagsRow struct {
-	TraceTag     string             `json:"trace_tag"`
-	FirstHeardAt pgtype.Timestamptz `json:"first_heard_at"`
-	LastHeardAt  pgtype.Timestamptz `json:"last_heard_at"`
-	PacketCount  int64              `json:"packet_count"`
-	IataCount    int64              `json:"iata_count"`
-	TraceType    string             `json:"trace_type"`
-	BestPayload  []byte             `json:"best_payload"`
+	TraceTag           string             `json:"trace_tag"`
+	FirstHeardAt       pgtype.Timestamptz `json:"first_heard_at"`
+	LastHeardAt        pgtype.Timestamptz `json:"last_heard_at"`
+	PacketCount        int64              `json:"packet_count"`
+	IataCount          int64              `json:"iata_count"`
+	TraceType          string             `json:"trace_type"`
+	BestPayload        []byte             `json:"best_payload"`
+	Iatas              []string           `json:"iatas"`
+	UnsupportedVersion bool               `json:"unsupported_version"`
+	NonDirect          bool               `json:"non_direct"`
+	InvalidSnrPath     bool               `json:"invalid_snr_path"`
 }
 
 // ============================================================
@@ -6316,6 +6334,10 @@ func (q *Queries) ListTraceTags(ctx context.Context, arg ListTraceTagsParams) ([
 			&i.IataCount,
 			&i.TraceType,
 			&i.BestPayload,
+			&i.Iatas,
+			&i.UnsupportedVersion,
+			&i.NonDirect,
+			&i.InvalidSnrPath,
 		); err != nil {
 			return nil, err
 		}
@@ -6455,6 +6477,25 @@ func (q *Queries) ListZoneLists(ctx context.Context) ([]MeshmapperZoneList, erro
 		return nil, err
 	}
 	return items, nil
+}
+
+const nodeActivityPending = `-- name: NodeActivityPending :one
+SELECT EXISTS(SELECT 1 FROM analytics_dirty_hours
+ WHERE hour >= $1::timestamptz AND hour < $2::timestamptz)::boolean
+`
+
+type NodeActivityPendingParams struct {
+	Since       pgtype.Timestamptz `json:"since"`
+	RolledUntil pgtype.Timestamptz `json:"rolled_until"`
+}
+
+// A freshly added activity family is empty until the queued completed hours
+// are rebuilt. Do not present that period as measured zero traffic.
+func (q *Queries) NodeActivityPending(ctx context.Context, arg NodeActivityPendingParams) (bool, error) {
+	row := q.db.QueryRow(ctx, nodeActivityPending, arg.Since, arg.RolledUntil)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const pruneImportedRegions = `-- name: PruneImportedRegions :many
@@ -6615,10 +6656,14 @@ const recordClockDrift = `-- name: RecordClockDrift :exec
 WITH ins AS (
     INSERT INTO node_clock_drifts (node_id, advert_at, drift_seconds) VALUES ($1, now(), $2)
     ON CONFLICT (node_id, advert_at) DO NOTHING
+    RETURNING advert_at
+), recent AS (
+    SELECT advert_at FROM node_clock_drifts WHERE node_id = $1
+    UNION ALL SELECT advert_at FROM ins
 )
 DELETE FROM node_clock_drifts x
 WHERE x.node_id = $1
-  AND x.advert_at < (SELECT d.advert_at FROM node_clock_drifts d WHERE d.node_id = $1 ORDER BY d.advert_at DESC OFFSET 15 LIMIT 1)
+  AND x.advert_at < (SELECT advert_at FROM recent ORDER BY advert_at DESC OFFSET 15 LIMIT 1)
 `
 
 type RecordClockDriftParams struct {
@@ -6626,7 +6671,8 @@ type RecordClockDriftParams struct {
 	DriftSeconds int64     `json:"drift_seconds"`
 }
 
-// Keeps the drift of the node's last 16 adverts: the new one in, the older ones beyond 15 out.
+// Keep 16 adverts, including the INSERT's row. Sibling CTEs share a snapshot:
+// the table scan alone cannot see the new row. A conflict returns no extra row.
 func (q *Queries) RecordClockDrift(ctx context.Context, arg RecordClockDriftParams) error {
 	_, err := q.db.Exec(ctx, recordClockDrift, arg.NodeID, arg.DriftSeconds)
 	return err
@@ -7175,6 +7221,63 @@ func (q *Queries) ResolveRelayHashPairsP4(ctx context.Context, arg ResolveRelayH
 	for rows.Next() {
 		var i ResolveRelayHashPairsP4Row
 		if err := rows.Scan(&i.Iata, &i.Hash, &i.NodeID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const resolveTraceHashes = `-- name: ResolveTraceHashes :many
+SELECT h.hash::bytea AS hash, si.iata, n.id AS node_id, n.name, n.latitude, n.longitude, n.public_key
+FROM unnest($1::bytea[]) AS h(hash)
+JOIN node_short_ids si ON si.iata = ANY($2::bpchar[]) AND
+ ((octet_length(h.hash)=1 AND si.prefix_1=h.hash) OR
+  (octet_length(h.hash)=2 AND si.prefix_2=h.hash) OR
+  (octet_length(h.hash) IN (4,8) AND si.prefix_4=substring(h.hash FROM 1 FOR 4)))
+JOIN nodes n ON n.id=si.node_id
+WHERE substring(n.public_key FROM 1 FOR octet_length(h.hash))=h.hash
+ORDER BY si.iata, h.hash, n.id
+`
+
+type ResolveTraceHashesParams struct {
+	Hashes [][]byte `json:"hashes"`
+	Iatas  []string `json:"iatas"`
+}
+
+type ResolveTraceHashesRow struct {
+	Hash      []byte    `json:"hash"`
+	Iata      string    `json:"iata"`
+	NodeID    uuid.UUID `json:"node_id"`
+	Name      *string   `json:"name"`
+	Latitude  *float64  `json:"latitude"`
+	Longitude *float64  `json:"longitude"`
+	PublicKey []byte    `json:"public_key"`
+}
+
+// TRACE can terminate at companions. Preserve the full prefix (including eight
+// bytes), and return every candidate across heard regions instead of picking one.
+func (q *Queries) ResolveTraceHashes(ctx context.Context, arg ResolveTraceHashesParams) ([]ResolveTraceHashesRow, error) {
+	rows, err := q.db.Query(ctx, resolveTraceHashes, arg.Hashes, arg.Iatas)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ResolveTraceHashesRow{}
+	for rows.Next() {
+		var i ResolveTraceHashesRow
+		if err := rows.Scan(
+			&i.Hash,
+			&i.Iata,
+			&i.NodeID,
+			&i.Name,
+			&i.Latitude,
+			&i.Longitude,
+			&i.PublicKey,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

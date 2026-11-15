@@ -642,6 +642,12 @@ definitions:
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.Info:
     properties:
+      buildRevision:
+        type: string
+      buildVersion:
+        description: Optional artifact identity; the API compatibility version above
+          is separate.
+        type: string
       features:
         allOf:
         - $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.InfoFeatures'
@@ -1571,6 +1577,8 @@ definitions:
       scope:
         description: matched transport scope name e.g. "#bc"
         type: string
+      traceQuality:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality'
       transportCodes:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PacketTransportCodes'
     type: object
@@ -1669,6 +1677,11 @@ definitions:
       snr:
         type: number
       sourceBroker:
+        type: string
+      traceQuality:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality'
+      wirePathBytes:
+        description: Exact on-air TRACE SNR bytes, before the display path substitution.
         type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.PacketObservationSummary:
@@ -2646,6 +2659,8 @@ definitions:
       packetHash:
         description: hex-encoded packet hash
         type: string
+      quality:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality'
       rawPath:
         description: hops as received in the packet
         items:
@@ -2685,6 +2700,8 @@ definitions:
         items:
           type: string
         type: array
+      quality:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality'
       snrValues:
         description: SNR per hop from the most complete observation
         items:
@@ -2805,6 +2822,16 @@ definitions:
         type: integer
       ticket:
         example: AAABmZ1s4CgLBvU1n1yN3v8hQm9YtVq2
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality:
+    properties:
+      reasons:
+        items:
+          type: string
+        type: array
+      status:
+        description: supported, suspect, or ambiguous; supported is not authenticated
         type: string
     type: object
   internal_api_handlers.APIError:
@@ -6838,11 +6865,13 @@ paths:
       - Routes
   /routes/{iata}/{pathKey}/observations:
     get:
-      description: Matches the saved IATA, complete path bytes and hash width. Excludes
-        TRACE and unclassified reports; other widths and search-result subsegments
-        are not included. Byte matches do not prove hop identities or delivery. The
-        route and its historical counter can outlive raw evidence. Cursors retain
-        full timestamp precision and pin route/window scope.
+      description: Matches one complete path representation in the saved IATA. Defaults
+        to the latest processed prefixes; hashSize/pathBytes pin a prior response.
+        Excludes TRACE and unclassified reports; widths are never combined. Pinned
+        prefixes must match the saved node chain or its current metadata. Byte matches
+        do not prove hop identities or delivery. The route counter can outlive raw
+        evidence. New cursors pin path, route, window and full timestamp precision;
+        legacy unpinned cursors remain supported.
       parameters:
       - description: Three-character IATA code
         in: path
@@ -6868,7 +6897,20 @@ paths:
         in: query
         name: until
         type: integer
-      - description: Opaque precise cursor from nextPageCursor; window is pinned
+      - description: Exact hash width (1–3); provide with pathBytes to pin a response's
+          representation
+        in: query
+        maximum: 3
+        minimum: 1
+        name: hashSize
+        type: integer
+      - description: Complete lower-case hex path from the response; provide with
+          hashSize
+        in: query
+        name: pathBytes
+        type: string
+      - description: Opaque precise cursor from nextPageCursor; route, window and
+          path are pinned
         in: query
         name: pageCursor
         type: string
