@@ -39,10 +39,12 @@ type Info struct {
 
 // InfoFeatures lists the optional features a server offers. Clients hide what is off.
 type InfoFeatures struct {
-	Polling           bool   `json:"polling" example:"true"`
-	Accounts          string `json:"accounts" example:"off"`
-	TelemetryRequests bool   `json:"telemetryRequests" example:"false"`
-	Alerts            bool   `json:"alerts" example:"false"`
+	Polling  bool   `json:"polling" example:"true"`
+	Accounts string `json:"accounts" example:"off"`
+	// Registration is true when new sign-ups are open; only meaningful when accounts is "local".
+	Registration      bool `json:"registration" example:"false"`
+	TelemetryRequests bool `json:"telemetryRequests" example:"false"`
+	Alerts            bool `json:"alerts" example:"false"`
 }
 
 // WSTicket lets a client that sends no Origin open /ws, in the X-Beacon-Ticket header.

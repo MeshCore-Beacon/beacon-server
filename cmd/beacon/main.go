@@ -442,6 +442,23 @@ func main() {
 		scopes,
 	)
 
+	// ── Accounts ─────────────────────────────────────────────────────────────
+	// The SMTP password is read here and never logged; only on/off and the public host are.
+	resolvedAccounts, err := cfg.Accounts.Resolve(os.Getenv("BEACON_SMTP_PASSWORD"))
+	if err != nil {
+		slog.Error("invalid accounts configuration", "component", "startup", "error", err)
+		os.Exit(1)
+	}
+	accountsHost := ""
+	if resolvedAccounts.PublicURL != nil {
+		accountsHost = resolvedAccounts.PublicURL.Host
+	}
+	slog.Info("accounts", "component", "startup", "enabled", resolvedAccounts.Enabled, "public_host", accountsHost)
+	accountsMode := "off"
+	if resolvedAccounts.Enabled {
+		accountsMode = "local"
+	}
+
 	// ── Repeater polling ─────────────────────────────────────────────────────
 	// config.Load already validated the section. The write-side service sits on the ingest store, which has a
 	// pool for the claim and election transactions, and is not wrapped by the presence coalescer.
@@ -621,8 +638,9 @@ func main() {
 		},
 		GuestPolling:   guestPolling,
 		PollingEnabled: resolvedPolling.Enabled,
-		Guards:         guard,
-		APIPlanLayout:  string(layout),
+		AccountsMode:   accountsMode, RegistrationOpen: resolvedAccounts.RegistrationOpen,
+		Guards:        guard,
+		APIPlanLayout: string(layout),
 	})
 
 	srv := newHTTPServer(addr, r)

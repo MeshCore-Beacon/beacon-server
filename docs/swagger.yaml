@@ -362,6 +362,11 @@ definitions:
       polling:
         example: true
         type: boolean
+      registration:
+        description: Registration is true when new sign-ups are open; only meaningful
+          when accounts is "local".
+        example: false
+        type: boolean
       telemetryRequests:
         example: false
         type: boolean

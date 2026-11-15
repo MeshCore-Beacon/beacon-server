@@ -429,3 +429,16 @@ cache:
 #  excluded_nodes: []          # up to 16 public keys, 64 hex characters each
 #  paused: false
 #  authority: evidence         # evidence or approved; approved elects only observers you approve
+
+# User accounts: sign-in for the web app and the mobile app. Off by default; with it off
+# no account route is served. The SMTP password comes from BEACON_SMTP_PASSWORD.
+#accounts:
+#  mode: off                   # off or local
+#  public_url: ""              # https URL of the web app, no path; used in mailed links
+#  registration: open          # open or closed
+#  smtp:
+#    host: ""                  # required when mode is local
+#    port: 587                 # default: 587
+#    username: ""              # empty means no auth
+#    from: ""                  # required, e.g. "Beacon <no-reply@example.org>"
+#    starttls: true            # default: true; the send fails if the server lacks STARTTLS

@@ -5057,6 +5057,11 @@ const docTemplate = `{
                     "type": "boolean",
                     "example": true
                 },
+                "registration": {
+                    "description": "Registration is true when new sign-ups are open; only meaningful when accounts is \"local\".",
+                    "type": "boolean",
+                    "example": false
+                },
                 "telemetryRequests": {
                     "type": "boolean",
                     "example": false

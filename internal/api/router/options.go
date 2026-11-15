@@ -41,6 +41,10 @@ type Options struct {
 	GuestPolling handlers.GuestPolling
 	// PollingEnabled is reported as features.polling in /info.
 	PollingEnabled bool
+	// AccountsMode is reported as features.accounts: "local" or anything else for off.
+	AccountsMode string
+	// RegistrationOpen is reported as features.registration while accounts are local.
+	RegistrationOpen bool
 	// APIPlanLayout is reported in the admin config's guards view.
 	APIPlanLayout string
 }
