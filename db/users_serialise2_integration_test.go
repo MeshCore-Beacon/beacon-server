@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MeshCore-Beacon/beacon-server/internal/polling"
 	"github.com/MeshCore-Beacon/beacon-server/internal/users"
 )
 
@@ -112,4 +113,47 @@ func TestUserDeleteAccountAfterAResetPostgres(t *testing.T) {
 		t.Fatalf("account deleted: %v", err)
 	}
 	_ = time.Now
+}
+
+// A reset that lands after the delete's hash check must neither remove the account's requests nor leave the
+// account behind without them: the check and the delete are one locked transaction.
+func TestUserDeleteAccountKeepsRequestsWhenAResetLandsInTheGapPostgres(t *testing.T) {
+	ctx, s, svc, _, u := serialEnv(t)
+	target := reqKey(9)
+	err := s.MutateRequestTarget(ctx, target, u.ID, func(st *polling.TargetState) error {
+		return st.Create(newReq(u.ID, time.Now(), true), time.Now())
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The token exists before the delete starts; the reset itself runs in the gap and may find the user gone.
+	plain, hash := users.NewToken()
+	if err := s.CreateToken(ctx, u.ID, users.TokenReset, hash, []byte(`{"email":"`+u.Email+`"}`), time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	resetDone := make(chan struct{})
+	deleteGapHook = func() {
+		go func() {
+			defer close(resetDone)
+			_ = svc.ConfirmReset(ctx, plain, resetPW)
+		}()
+		select { // a locked delete makes the reset wait, so give up waiting
+		case <-resetDone:
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	t.Cleanup(func() { deleteGapHook = nil })
+	delErr := svc.DeleteAccount(ctx, u, serialPW)
+	<-resetDone
+	_, userErr := s.UserByID(ctx, u.ID)
+	var n int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM telemetry_requests WHERE user_id = $1`, u.ID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if userErr == nil && n == 0 {
+		t.Fatalf("account survived (delete: %v) but its requests were removed", delErr)
+	}
+	if userErr == nil && delErr == nil {
+		t.Fatal("delete reported success but the account is still there")
+	}
 }

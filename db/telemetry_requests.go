@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"sort"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
@@ -226,13 +227,34 @@ var _ polling.RequestStore = (*Store)(nil)
 // removeUserRequests deletes every request of the user through the state rules, so a repeater another user also
 // requested falls back to that user's option (and ver rises) instead of being left with no password in use.
 func (s *Store) removeUserRequests(ctx context.Context, id uuid.UUID) error {
-	targets, err := s.q.UserRequestTargets(ctx, id)
+	return s.pollTx(ctx, func(q *sqlc.Queries) error { return removeUserRequestsTx(ctx, q, id) })
+}
+
+// lockUserTargets takes the election lock of each repeater the user requested, in key order. Callers that go on to
+// take the user's lock do this first, the order request creation uses, so the two cannot deadlock.
+func lockUserTargets(ctx context.Context, q *sqlc.Queries, id uuid.UUID) error {
+	targets, err := q.UserRequestTargets(ctx, id)
+	if err != nil {
+		return err
+	}
+	sort.Slice(targets, func(i, j int) bool { return bytes.Compare(targets[i], targets[j]) < 0 })
+	for _, t := range targets {
+		if err := q.LockPollingTarget(ctx, t); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// removeUserRequestsTx is removeUserRequests inside the caller's transaction.
+func removeUserRequestsTx(ctx context.Context, q *sqlc.Queries, id uuid.UUID) error {
+	targets, err := q.UserRequestTargets(ctx, id)
 	if err != nil {
 		return err
 	}
 	now := time.Now()
 	for _, t := range targets {
-		err := s.MutateRequestTarget(ctx, t, id, func(st *polling.TargetState) error {
+		err := mutateRequestTarget(ctx, q, t, id, func(st *polling.TargetState) error {
 			for _, r := range append([]polling.Request(nil), st.Requests...) {
 				if r.UserID == id {
 					st.Remove(r.ID, now)

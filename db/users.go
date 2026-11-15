@@ -332,15 +332,26 @@ func (s *Store) BeginEmailChange(ctx context.Context, id uuid.UUID, expectPassHa
 }
 
 // DeleteUserChecked deletes the user only while the stored hash is still expectPassHash (users.ErrNotFound
-// otherwise). The user's requests go through the state rules first, once the hash has been checked.
+// otherwise). The hash check, the removal of the user's requests through the state rules and the delete all run in
+// one transaction under the user's credential lock, so a reset cannot land between them.
 func (s *Store) DeleteUserChecked(ctx context.Context, id uuid.UUID, expectPassHash string) error {
-	if err := s.pollTx(ctx, func(q *sqlc.Queries) error { return lockChecked(ctx, q, id, expectPassHash) }); err != nil {
-		return err
-	}
-	if err := s.removeUserRequests(ctx, id); err != nil {
-		return err
-	}
-	return affected(s.q.DeleteUserIfHash(ctx, sqlc.DeleteUserIfHashParams{ID: id, PassHash: expectPassHash}))
+	return s.pollTx(ctx, func(q *sqlc.Queries) error {
+		// Target locks come before the user lock, the order request creation takes them in.
+		if err := lockUserTargets(ctx, q, id); err != nil {
+			return err
+		}
+		if err := lockChecked(ctx, q, id, expectPassHash); err != nil {
+			return err
+		}
+		if deleteGapHook != nil {
+			deleteGapHook()
+		}
+		// No request can be created for the user now; one added since the first read is locked as it is reached.
+		if err := removeUserRequestsTx(ctx, q, id); err != nil {
+			return err
+		}
+		return affected(q.DeleteUserIfHash(ctx, sqlc.DeleteUserIfHashParams{ID: id, PassHash: expectPassHash}))
+	})
 }
 
 // RehashPassword stores newHash for the same password when the stored hash is still oldHash; false means it was
@@ -476,3 +487,6 @@ func (s *Store) DeleteExpiredAuth(ctx context.Context, now time.Time) error {
 	}
 	return s.q.DeleteStaleUnverifiedUsers(ctx, sqlc.DeleteStaleUnverifiedUsersParams{Cutoff: cutoff, Now: ts(now)})
 }
+
+// deleteGapHook runs in DeleteUserChecked after the hash check; tests use it to land a change in the gap.
+var deleteGapHook func()
