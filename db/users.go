@@ -157,6 +157,57 @@ func (s *Store) ApplyPendingEmail(ctx context.Context, id uuid.UUID, expected st
 	})
 }
 
+// ApplyEmailChange spends the email-change token and applies its address in one transaction under the user's
+// credential lock, serialised with BeginEmailChange, so a link replaced meanwhile fails. It returns the user, the
+// address it replaced and the new one, and reports users.ErrNotFound for a token that is unknown, used, expired,
+// replaced, or whose address is no longer the pending one, and users.ErrEmailTaken when another user owns it now.
+func (s *Store) ApplyEmailChange(ctx context.Context, tokenHash []byte, now time.Time) (uuid.UUID, string, string, error) {
+	var (
+		id       uuid.UUID
+		old, add string
+	)
+	err := s.pollTx(ctx, func(q *sqlc.Queries) error {
+		uid, err := q.PeekUserToken(ctx, sqlc.PeekUserTokenParams{TokenHash: tokenHash, Kind: string(users.TokenEmailChange), Now: ts(now)})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return users.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if err := lockChecked(ctx, q, uid, ""); err != nil {
+			return err
+		}
+		// The lock is held, so a replacement that committed first has deleted the token and this finds nothing.
+		r, err := q.ConsumeUserToken(ctx, sqlc.ConsumeUserTokenParams{TokenHash: tokenHash, Kind: string(users.TokenEmailChange), Now: ts(now)})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return users.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		var d struct {
+			Email string `json:"email"`
+		}
+		if json.Unmarshal(r.Data, &d) != nil || d.Email == "" {
+			return users.ErrNotFound
+		}
+		cur, err := q.UserByID(ctx, uid)
+		if err != nil {
+			return err
+		}
+		e := strings.ToLower(d.Email)
+		if err := affected(q.ApplyPendingEmail(ctx, sqlc.ApplyPendingEmailParams{ID: uid, PendingEmail: &e})); err != nil {
+			return err
+		}
+		if err := q.DeleteUserTokens(ctx, sqlc.DeleteUserTokensParams{UserID: uid, Kind: string(users.TokenReset)}); err != nil {
+			return err
+		}
+		id, old, add = uid, cur.Email, e
+		return nil
+	})
+	return id, old, add, err
+}
+
 // ActivateUser finishes a sign-up: it sets the username and password hash, marks the address verified and deletes
 // the account's verify tokens and sessions. It reports users.ErrNotFound when the user is already verified,
 // disabled or missing, and users.ErrUsernameTaken when another account has the username.
@@ -176,15 +227,39 @@ func (s *Store) SetUserDisabled(ctx context.Context, id uuid.UUID, at *time.Time
 	return affected(s.q.SetUserDisabled(ctx, sqlc.SetUserDisabledParams{ID: id, DisabledAt: optTime(at)}))
 }
 
-// DeleteUser relies on the ON DELETE CASCADE of every table that belongs to a user.
+// DeleteUser removes the user for an operator. It runs the same locked transaction as DeleteUserChecked, so a request
+// created meanwhile goes through the state rules too; only the authorisation differs. It relies on the ON DELETE
+// CASCADE of every table that belongs to a user.
 func (s *Store) DeleteUser(ctx context.Context, id uuid.UUID) error {
-	// Requests go through the state rules first, so a repeater other users requested keeps being polled.
-	if s.pool != nil {
-		if err := s.removeUserRequests(ctx, id); err != nil {
-			return err
-		}
+	if s.pool == nil {
+		return affected(s.q.DeleteUser(ctx, id))
 	}
-	return affected(s.q.DeleteUser(ctx, id))
+	return s.pollTx(ctx, func(q *sqlc.Queries) error {
+		return deleteLocked(ctx, q, id, "")
+	})
+}
+
+// deleteLocked is the body of both deletes: target locks, then the user lock (with the hash check when expect is
+// set), then the requests through the state rules, then the user.
+func deleteLocked(ctx context.Context, q *sqlc.Queries, id uuid.UUID, expect string) error {
+	// Target locks come before the user lock, the order request creation takes them in.
+	if err := lockUserTargets(ctx, q, id); err != nil {
+		return err
+	}
+	if err := lockChecked(ctx, q, id, expect); err != nil {
+		return err
+	}
+	if deleteGapHook != nil {
+		deleteGapHook()
+	}
+	// No request can be created for the user now; one added since the first read is locked as it is reached.
+	if err := removeUserRequestsTx(ctx, q, id); err != nil {
+		return err
+	}
+	if expect == "" {
+		return affected(q.DeleteUser(ctx, id))
+	}
+	return affected(q.DeleteUserIfHash(ctx, sqlc.DeleteUserIfHashParams{ID: id, PassHash: expect}))
 }
 
 // escapeLike makes s match literally inside a LIKE pattern.
@@ -304,8 +379,16 @@ func (s *Store) ChangeCredentials(ctx context.Context, id uuid.UUID, hash string
 // that is unknown, used, expired, rebound or not the user's.
 func (s *Store) ResetCredentials(ctx context.Context, tokenHash []byte, id uuid.UUID, hash string, verifiedAt *time.Time, now time.Time) error {
 	return s.pollTx(ctx, func(q *sqlc.Queries) error {
-		if err := lockChecked(ctx, q, id, ""); err != nil {
+		cur, err := q.LockUserCredentials(ctx, id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return users.ErrNotFound
+		}
+		if err != nil {
 			return err
+		}
+		// A disabled user keeps the credentials it had, whatever an earlier check saw.
+		if cur.DisabledAt.Valid {
+			return users.ErrNotFound
 		}
 		got, err := q.ConsumeResetToken(ctx, sqlc.ConsumeResetTokenParams{TokenHash: tokenHash, Now: ts(now)})
 		if errors.Is(err, pgx.ErrNoRows) || (err == nil && got != id) {
@@ -366,23 +449,7 @@ func (s *Store) BeginEmailChange(ctx context.Context, id uuid.UUID, expectPassHa
 // otherwise). The hash check, the removal of the user's requests through the state rules and the delete all run in
 // one transaction under the user's credential lock, so a reset cannot land between them.
 func (s *Store) DeleteUserChecked(ctx context.Context, id uuid.UUID, expectPassHash string) error {
-	return s.pollTx(ctx, func(q *sqlc.Queries) error {
-		// Target locks come before the user lock, the order request creation takes them in.
-		if err := lockUserTargets(ctx, q, id); err != nil {
-			return err
-		}
-		if err := lockChecked(ctx, q, id, expectPassHash); err != nil {
-			return err
-		}
-		if deleteGapHook != nil {
-			deleteGapHook()
-		}
-		// No request can be created for the user now; one added since the first read is locked as it is reached.
-		if err := removeUserRequestsTx(ctx, q, id); err != nil {
-			return err
-		}
-		return affected(q.DeleteUserIfHash(ctx, sqlc.DeleteUserIfHashParams{ID: id, PassHash: expectPassHash}))
-	})
+	return s.pollTx(ctx, func(q *sqlc.Queries) error { return deleteLocked(ctx, q, id, expectPassHash) })
 }
 
 // RehashPassword stores newHash for the same password when the stored hash is still oldHash; false means it was

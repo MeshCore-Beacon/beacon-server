@@ -75,6 +75,11 @@ func (s gatedStore) ResetCredentials(ctx context.Context, tokenHash []byte, id u
 	return s.Store.ResetCredentials(ctx, tokenHash, id, hash, verifiedAt, now)
 }
 
+func (s gatedStore) ApplyEmailChange(ctx context.Context, tokenHash []byte, now time.Time) (uuid.UUID, string, string, error) {
+	s.at("ApplyEmailChange")
+	return s.Store.ApplyEmailChange(ctx, tokenHash, now)
+}
+
 func (s gatedStore) DeleteUserChecked(ctx context.Context, id uuid.UUID, expect string) error {
 	s.at("DeleteUserChecked")
 	return s.Store.DeleteUserChecked(ctx, id, expect)

@@ -38,7 +38,9 @@ type Store interface {
 	// ChangeCredentials does with no expected hash, in one transaction under the user's credential lock.
 	ResetCredentials(ctx context.Context, tokenHash []byte, id uuid.UUID, hash string, verifiedAt *time.Time, now time.Time) error
 	PeekToken(ctx context.Context, kind TokenKind, hash []byte, now time.Time) (uuid.UUID, error)
-	ApplyPendingEmail(ctx context.Context, id uuid.UUID, expected string) error
+	// ApplyEmailChange spends the email-change token and applies its address in one transaction under the user's
+	// credential lock; it returns the user, the address replaced and the new one.
+	ApplyEmailChange(ctx context.Context, tokenHash []byte, now time.Time) (uuid.UUID, string, string, error)
 	TouchUserLogin(ctx context.Context, id uuid.UUID, at time.Time) error
 	// IssueSession stores a session only while the user is live and still has the password hash the caller verified,
 	// and for an app session first ends the oldest beyond maxApp-1; ErrNotFound when the user or the hash changed.
@@ -416,26 +418,8 @@ func (s *Service) Verify(ctx context.Context, token string) error {
 	if !errors.Is(err, ErrNotFound) {
 		return err
 	}
-	uid, raw, err = s.store.ConsumeToken(ctx, TokenEmailChange, hash, now)
-	if errors.Is(err, ErrNotFound) {
-		return ErrTokenInvalid
-	}
-	if err != nil {
-		return err
-	}
-	var d tokenData
-	if json.Unmarshal(raw, &d) != nil || d.Email == "" {
-		return ErrTokenInvalid
-	}
-	old, err := s.store.UserByID(ctx, uid)
-	if errors.Is(err, ErrNotFound) {
-		return ErrTokenInvalid
-	}
-	if err != nil {
-		return err
-	}
-	// The store applies the address only if it is still the one this link was sent to.
-	switch err := s.store.ApplyPendingEmail(ctx, uid, d.Email); {
+	uid, oldEmail, newEmail, err := s.store.ApplyEmailChange(ctx, hash, now)
+	switch {
 	case errors.Is(err, ErrNotFound), errors.Is(err, ErrEmailTaken):
 		return ErrTokenInvalid
 	case err != nil:
@@ -443,9 +427,9 @@ func (s *Service) Verify(ctx context.Context, token string) error {
 	}
 	s.log.Info("email changed", "user_id", uid)
 	// The previous mailbox is told, so a takeover cannot go unnoticed there.
-	if old.Email != "" && old.Email != d.Email {
+	if oldEmail != "" && oldEmail != newEmail {
 		subject, text := emailChangedMailText(s.host())
-		s.enqueue(uid, "email_changed", old.Email, subject, text)
+		s.enqueue(uid, "email_changed", oldEmail, subject, text)
 	}
 	return nil
 }

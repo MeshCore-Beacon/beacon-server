@@ -189,6 +189,30 @@ func (f *fakeStore) ApplyPendingEmail(_ context.Context, id uuid.UUID, expected 
 	}
 	return nil
 }
+func (f *fakeStore) ApplyEmailChange(ctx context.Context, hash []byte, now time.Time) (uuid.UUID, string, string, error) {
+	id, raw, err := f.ConsumeToken(ctx, TokenEmailChange, hash, now)
+	if err != nil {
+		return uuid.Nil, "", "", err
+	}
+	var d tokenData
+	if json.Unmarshal(raw, &d) != nil || d.Email == "" {
+		return uuid.Nil, "", "", ErrNotFound
+	}
+	f.mu.Lock()
+	u, gerr := f.get(id)
+	old := ""
+	if gerr == nil {
+		old = u.Email
+	}
+	f.mu.Unlock()
+	if gerr != nil {
+		return uuid.Nil, "", "", gerr
+	}
+	if err := f.ApplyPendingEmail(ctx, id, d.Email); err != nil {
+		return uuid.Nil, "", "", err
+	}
+	return id, old, strings.ToLower(d.Email), nil
+}
 func (f *fakeStore) ActivateUser(_ context.Context, id uuid.UUID, username, hash string, at time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
