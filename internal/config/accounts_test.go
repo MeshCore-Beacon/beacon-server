@@ -100,3 +100,46 @@ func TestAccountsOffIgnoresRest(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func portalAccounts() AccountsConfig {
+	return AccountsConfig{Mode: "portal", PublicURL: "https://beacon.example.org",
+		Portal: PortalConfig{URL: "https://portal.example.org/", ClientID: "beacon-analyzer"}}
+}
+
+func TestAccountsPortal(t *testing.T) {
+	r, err := portalAccounts().ResolveWithSecrets("", "sec")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Enabled || !r.Portal || r.RegistrationOpen || r.PortalURL.Host != "portal.example.org" || r.PortalClientID != "beacon-analyzer" || r.PortalSecret != "sec" {
+		t.Fatalf("%+v", r)
+	}
+	// Loading the config validates without the secret; startup demands it.
+	if _, err := portalAccounts().Resolve(""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := portalAccounts().ResolveWithSecrets("", ""); err == nil || !strings.Contains(err.Error(), "BEACON_PORTAL_SECRET") {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestAccountsPortalRejects(t *testing.T) {
+	for name, mut := range map[string]func(*AccountsConfig){
+		"http url":        func(c *AccountsConfig) { c.Portal.URL = "http://portal.example.org" },
+		"no url":          func(c *AccountsConfig) { c.Portal.URL = "" },
+		"credentials":     func(c *AccountsConfig) { c.Portal.URL = "https://a:b@portal.example.org" },
+		"query":           func(c *AccountsConfig) { c.Portal.URL = "https://portal.example.org/?a=b" },
+		"no client id":    func(c *AccountsConfig) { c.Portal.ClientID = "" },
+		"no public url":   func(c *AccountsConfig) { c.PublicURL = "" },
+		"http public url": func(c *AccountsConfig) { c.PublicURL = "http://beacon.example.org" },
+	} {
+		c := portalAccounts()
+		mut(&c)
+		if _, err := c.ResolveWithSecrets("", "sec"); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	if _, err := (AccountsConfig{Mode: "other"}).Resolve(""); err == nil {
+		t.Error("unknown mode accepted")
+	}
+}

@@ -64,6 +64,10 @@ func (f *fakeAccounts) Authenticate(_ context.Context, token string) (users.Sess
 		return testSess, testUser, nil
 	case "app-token":
 		return otherSess, testUser, nil
+	case "portal-token":
+		pu := testUser
+		pu.Provider, pu.Email, pu.Username = users.ProviderPortal, "", "ridge"
+		return testSess, pu, nil
 	}
 	return users.Session{}, users.User{}, users.ErrTokenInvalid
 }

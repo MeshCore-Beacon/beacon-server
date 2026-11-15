@@ -173,3 +173,14 @@ func TestRequestPasswordIsNotLogged(t *testing.T) {
 		t.Fatalf("%d log=%q body=%s", w.Code, out.String(), w.Body)
 	}
 }
+
+func TestPortalModeReportsItsURL(t *testing.T) {
+	h := New(nil, nil, nil, Options{AccountsMode: "portal", PortalURL: "https://portal.example.org",
+		Accounts: routedAccounts{}, AuthOptions: handlers.AuthOptions{Enabled: true, CookieSecure: true, PublicOrigin: "https://beacon.example.org"}})
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/info", nil))
+	if !strings.Contains(w.Body.String(), `"accounts":"portal"`) || !strings.Contains(w.Body.String(), `"portalUrl":"https://portal.example.org"`) ||
+		!strings.Contains(w.Body.String(), `"registration":false`) {
+		t.Fatalf("info: %s", w.Body)
+	}
+}

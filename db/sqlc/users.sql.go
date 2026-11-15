@@ -68,6 +68,31 @@ func (q *Queries) ApplyPendingEmail(ctx context.Context, arg ApplyPendingEmailPa
 	return result.RowsAffected(), nil
 }
 
+const consumePortalState = `-- name: ConsumePortalState :one
+DELETE FROM portal_states WHERE cookie_hash = $1
+RETURNING state_hash, verifier, return_path, expires_at
+`
+
+type ConsumePortalStateRow struct {
+	StateHash  []byte             `json:"state_hash"`
+	Verifier   string             `json:"verifier"`
+	ReturnPath string             `json:"return_path"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+}
+
+// One statement, so a state is used once; an expired one is deleted and reported as missing by the caller.
+func (q *Queries) ConsumePortalState(ctx context.Context, cookieHash []byte) (ConsumePortalStateRow, error) {
+	row := q.db.QueryRow(ctx, consumePortalState, cookieHash)
+	var i ConsumePortalStateRow
+	err := row.Scan(
+		&i.StateHash,
+		&i.Verifier,
+		&i.ReturnPath,
+		&i.ExpiresAt,
+	)
+	return i, err
+}
+
 const consumeResetToken = `-- name: ConsumeResetToken :one
 UPDATE user_tokens t SET used_at = $1 FROM users u
 WHERE t.token_hash = $2 AND t.kind = 'reset' AND t.used_at IS NULL AND t.expires_at > $1
@@ -111,6 +136,30 @@ func (q *Queries) ConsumeUserToken(ctx context.Context, arg ConsumeUserTokenPara
 	var i ConsumeUserTokenRow
 	err := row.Scan(&i.UserID, &i.Data)
 	return i, err
+}
+
+const createPortalState = `-- name: CreatePortalState :exec
+INSERT INTO portal_states (cookie_hash, state_hash, verifier, return_path, expires_at)
+VALUES ($1, $2, $3, $4, $5)
+`
+
+type CreatePortalStateParams struct {
+	CookieHash []byte             `json:"cookie_hash"`
+	StateHash  []byte             `json:"state_hash"`
+	Verifier   string             `json:"verifier"`
+	ReturnPath string             `json:"return_path"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+}
+
+func (q *Queries) CreatePortalState(ctx context.Context, arg CreatePortalStateParams) error {
+	_, err := q.db.Exec(ctx, createPortalState,
+		arg.CookieHash,
+		arg.StateHash,
+		arg.Verifier,
+		arg.ReturnPath,
+		arg.ExpiresAt,
+	)
+	return err
 }
 
 const createUser = `-- name: CreateUser :one
@@ -237,6 +286,15 @@ func (q *Queries) CreateUserToken(ctx context.Context, arg CreateUserTokenParams
 		arg.Data,
 		arg.ExpiresAt,
 	)
+	return err
+}
+
+const deleteExpiredPortalStates = `-- name: DeleteExpiredPortalStates :exec
+DELETE FROM portal_states WHERE expires_at < $1
+`
+
+func (q *Queries) DeleteExpiredPortalStates(ctx context.Context, cutoff pgtype.Timestamptz) error {
+	_, err := q.db.Exec(ctx, deleteExpiredPortalStates, cutoff)
 	return err
 }
 
@@ -552,6 +610,37 @@ func (q *Queries) PeekUserToken(ctx context.Context, arg PeekUserTokenParams) (u
 	return user_id, err
 }
 
+const refreshPortalUser = `-- name: RefreshPortalUser :one
+UPDATE users SET username = $1, display_name = $2
+WHERE id = $3 RETURNING id, username, display_name, email, pending_email, pass_hash, email_verified_at, provider, provider_subject, created_at, last_login_at, disabled_at
+`
+
+type RefreshPortalUserParams struct {
+	Username    string    `json:"username"`
+	DisplayName string    `json:"display_name"`
+	ID          uuid.UUID `json:"id"`
+}
+
+func (q *Queries) RefreshPortalUser(ctx context.Context, arg RefreshPortalUserParams) (User, error) {
+	row := q.db.QueryRow(ctx, refreshPortalUser, arg.Username, arg.DisplayName, arg.ID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.DisplayName,
+		&i.Email,
+		&i.PendingEmail,
+		&i.PassHash,
+		&i.EmailVerifiedAt,
+		&i.Provider,
+		&i.ProviderSubject,
+		&i.CreatedAt,
+		&i.LastLoginAt,
+		&i.DisabledAt,
+	)
+	return i, err
+}
+
 const rehashUserPassword = `-- name: RehashUserPassword :execrows
 UPDATE users SET pass_hash = $1 WHERE id = $2 AND pass_hash = $3
 `
@@ -692,7 +781,7 @@ func (q *Queries) UpdateUserDisplayName(ctx context.Context, arg UpdateUserDispl
 }
 
 const userByEmail = `-- name: UserByEmail :one
-SELECT id, username, display_name, email, pending_email, pass_hash, email_verified_at, provider, provider_subject, created_at, last_login_at, disabled_at FROM users WHERE email = $1
+SELECT id, username, display_name, email, pending_email, pass_hash, email_verified_at, provider, provider_subject, created_at, last_login_at, disabled_at FROM users WHERE email = $1 AND email <> ''
 `
 
 func (q *Queries) UserByEmail(ctx context.Context, email string) (User, error) {
@@ -721,6 +810,35 @@ SELECT id, username, display_name, email, pending_email, pass_hash, email_verifi
 
 func (q *Queries) UserByID(ctx context.Context, id uuid.UUID) (User, error) {
 	row := q.db.QueryRow(ctx, userByID, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.DisplayName,
+		&i.Email,
+		&i.PendingEmail,
+		&i.PassHash,
+		&i.EmailVerifiedAt,
+		&i.Provider,
+		&i.ProviderSubject,
+		&i.CreatedAt,
+		&i.LastLoginAt,
+		&i.DisabledAt,
+	)
+	return i, err
+}
+
+const userByProviderSubject = `-- name: UserByProviderSubject :one
+SELECT id, username, display_name, email, pending_email, pass_hash, email_verified_at, provider, provider_subject, created_at, last_login_at, disabled_at FROM users WHERE provider = $1 AND provider_subject = $2
+`
+
+type UserByProviderSubjectParams struct {
+	Provider        string  `json:"provider"`
+	ProviderSubject *string `json:"provider_subject"`
+}
+
+func (q *Queries) UserByProviderSubject(ctx context.Context, arg UserByProviderSubjectParams) (User, error) {
+	row := q.db.QueryRow(ctx, userByProviderSubject, arg.Provider, arg.ProviderSubject)
 	var i User
 	err := row.Scan(
 		&i.ID,

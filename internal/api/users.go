@@ -144,9 +144,10 @@ type ChangeEmailRequest struct {
 	CurrentPassword string `json:"currentPassword"`
 }
 
-// DeleteMeRequest confirms an account deletion. Portal mode will later accept a confirmUsername field here.
+// DeleteMeRequest confirms an account deletion: the password, or for a portal user (who has none) their username.
 type DeleteMeRequest struct {
 	CurrentPassword string `json:"currentPassword"`
+	ConfirmUsername string `json:"confirmUsername"`
 }
 
 // UserCursor is a boundary in (created_at DESC, id DESC) order for the operator's user list.

@@ -1740,6 +1740,110 @@ const docTemplate = `{
                 }
             }
         },
+        "/auth/portal/callback": {
+            "get": {
+                "description": "Portal mode only. Checks the state against the cookie (single use), trades the code with the portal, signs the user in and redirects to the return path. Any failure, including a callback without a code, redirects to /?view=signin\u0026error=portal.",
+                "tags": [
+                    "Accounts"
+                ],
+                "summary": "Finish a sign-in through the portal",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "One-time code from the portal",
+                        "name": "code",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "State from the start redirect",
+                        "name": "state",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Redirect into the web app, with the beacon_session cookie set"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/portal/start": {
+            "get": {
+                "description": "Portal mode only. Stores a state and a PKCE verifier for 10 minutes against the beacon_portal cookie and redirects (302) to the portal. return is a same-origin relative path; anything else becomes /.",
+                "tags": [
+                    "Accounts"
+                ],
+                "summary": "Start a sign-in through the portal",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Path and query to return to after sign-in",
+                        "name": "return",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Redirect to the portal"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/auth/register": {
             "post": {
                 "description": "Always answers 202 check_email for a well-formed request, whether or not the address is already registered; a verify link is mailed.",
@@ -2633,7 +2737,7 @@ const docTemplate = `{
                 "summary": "Delete the account",
                 "parameters": [
                     {
-                        "description": "Current password; body at most 4 KiB",
+                        "description": "currentPassword, or for a portal user confirmUsername; body at most 4 KiB",
                         "name": "body",
                         "in": "body",
                         "required": true,
@@ -7651,6 +7755,9 @@ const docTemplate = `{
         "github_com_MeshCore-Beacon_beacon-server_internal_api.DeleteMeRequest": {
             "type": "object",
             "properties": {
+                "confirmUsername": {
+                    "type": "string"
+                },
                 "currentPassword": {
                     "type": "string"
                 }
@@ -7722,6 +7829,11 @@ const docTemplate = `{
                 "polling": {
                     "type": "boolean",
                     "example": true
+                },
+                "portalUrl": {
+                    "description": "PortalURL is the sign-in portal's base URL; set only when accounts is \"portal\".",
+                    "type": "string",
+                    "example": "https://portal.example.org"
                 },
                 "registration": {
                     "description": "Registration is true when new sign-ups are open; only meaningful when accounts is \"local\".",

@@ -81,8 +81,11 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 		Web:    api.AdminWebConfig{MinWebVersion: opts.MinWebVersion},
 	}
 	features := api.InfoFeatures{Polling: opts.PollingEnabled, Accounts: "off", TelemetryRequests: opts.TelemetryRequests}
-	if opts.AccountsMode == "local" {
+	switch opts.AccountsMode {
+	case "local":
 		features.Accounts, features.Registration = "local", opts.RegistrationOpen
+	case "portal":
+		features.Accounts, features.PortalURL = "portal", opts.PortalURL
 	}
 	info := api.Info{ServerVersion: opts.ServerVersion, Features: features}
 	if opts.MinAppVersion != "" {

@@ -34,8 +34,8 @@ func TestMeRoutes(t *testing.T) {
 	if w.Code != 204 || f.pw != "pw" {
 		t.Fatalf("delete: %d %q", w.Code, f.pw)
 	}
-	// Only currentPassword is accepted for now.
-	if w := call(h, "DELETE", "/me", `{"currentPassword":"pw","confirmUsername":"ridge"}`, c...); w.Code != 400 {
+	// A local user's confirmUsername is ignored; other unknown fields are refused.
+	if w := call(h, "DELETE", "/me", `{"currentPassword":"pw","other":"ridge"}`, c...); w.Code != 400 {
 		t.Fatalf("unknown field: %d", w.Code)
 	}
 }

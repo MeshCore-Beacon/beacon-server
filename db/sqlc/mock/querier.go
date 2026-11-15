@@ -235,6 +235,21 @@ func (mr *MockQuerierMockRecorder) ClearRepeaters(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ClearRepeaters", reflect.TypeOf((*MockQuerier)(nil).ClearRepeaters), ctx)
 }
 
+// ConsumePortalState mocks base method.
+func (m *MockQuerier) ConsumePortalState(ctx context.Context, cookieHash []byte) (db.ConsumePortalStateRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ConsumePortalState", ctx, cookieHash)
+	ret0, _ := ret[0].(db.ConsumePortalStateRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ConsumePortalState indicates an expected call of ConsumePortalState.
+func (mr *MockQuerierMockRecorder) ConsumePortalState(ctx, cookieHash any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ConsumePortalState", reflect.TypeOf((*MockQuerier)(nil).ConsumePortalState), ctx, cookieHash)
+}
+
 // ConsumeResetToken mocks base method.
 func (m *MockQuerier) ConsumeResetToken(ctx context.Context, arg db.ConsumeResetTokenParams) (uuid.UUID, error) {
 	m.ctrl.T.Helper()
@@ -338,6 +353,20 @@ func (m *MockQuerier) CreateAccount(ctx context.Context, name string) (db.Accoun
 func (mr *MockQuerierMockRecorder) CreateAccount(ctx, name any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateAccount", reflect.TypeOf((*MockQuerier)(nil).CreateAccount), ctx, name)
+}
+
+// CreatePortalState mocks base method.
+func (m *MockQuerier) CreatePortalState(ctx context.Context, arg db.CreatePortalStateParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreatePortalState", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// CreatePortalState indicates an expected call of CreatePortalState.
+func (mr *MockQuerierMockRecorder) CreatePortalState(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreatePortalState", reflect.TypeOf((*MockQuerier)(nil).CreatePortalState), ctx, arg)
 }
 
 // CreateUser mocks base method.
@@ -468,6 +497,20 @@ func (m *MockQuerier) DeleteExpiredPollingClaims(ctx context.Context, receivedAt
 func (mr *MockQuerierMockRecorder) DeleteExpiredPollingClaims(ctx, receivedAt any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteExpiredPollingClaims", reflect.TypeOf((*MockQuerier)(nil).DeleteExpiredPollingClaims), ctx, receivedAt)
+}
+
+// DeleteExpiredPortalStates mocks base method.
+func (m *MockQuerier) DeleteExpiredPortalStates(ctx context.Context, cutoff pgtype.Timestamptz) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteExpiredPortalStates", ctx, cutoff)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteExpiredPortalStates indicates an expected call of DeleteExpiredPortalStates.
+func (mr *MockQuerierMockRecorder) DeleteExpiredPortalStates(ctx, cutoff any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteExpiredPortalStates", reflect.TypeOf((*MockQuerier)(nil).DeleteExpiredPortalStates), ctx, cutoff)
 }
 
 // DeleteExpiredRepeaterReadings mocks base method.
@@ -4151,6 +4194,21 @@ func (mr *MockQuerierMockRecorder) RecordTrace(ctx, arg any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecordTrace", reflect.TypeOf((*MockQuerier)(nil).RecordTrace), ctx, arg)
 }
 
+// RefreshPortalUser mocks base method.
+func (m *MockQuerier) RefreshPortalUser(ctx context.Context, arg db.RefreshPortalUserParams) (db.User, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RefreshPortalUser", ctx, arg)
+	ret0, _ := ret[0].(db.User)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RefreshPortalUser indicates an expected call of RefreshPortalUser.
+func (mr *MockQuerierMockRecorder) RefreshPortalUser(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RefreshPortalUser", reflect.TypeOf((*MockQuerier)(nil).RefreshPortalUser), ctx, arg)
+}
+
 // RefreshRadioPresets mocks base method.
 func (m *MockQuerier) RefreshRadioPresets(ctx context.Context) error {
 	m.ctrl.T.Helper()
@@ -5465,6 +5523,21 @@ func (m *MockQuerier) UserByID(ctx context.Context, id uuid.UUID) (db.User, erro
 func (mr *MockQuerierMockRecorder) UserByID(ctx, id any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UserByID", reflect.TypeOf((*MockQuerier)(nil).UserByID), ctx, id)
+}
+
+// UserByProviderSubject mocks base method.
+func (m *MockQuerier) UserByProviderSubject(ctx context.Context, arg db.UserByProviderSubjectParams) (db.User, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UserByProviderSubject", ctx, arg)
+	ret0, _ := ret[0].(db.User)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UserByProviderSubject indicates an expected call of UserByProviderSubject.
+func (mr *MockQuerierMockRecorder) UserByProviderSubject(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UserByProviderSubject", reflect.TypeOf((*MockQuerier)(nil).UserByProviderSubject), ctx, arg)
 }
 
 // UserByUsername mocks base method.

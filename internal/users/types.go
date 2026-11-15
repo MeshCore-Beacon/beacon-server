@@ -26,6 +26,13 @@ type User struct {
 	DisabledAt      *time.Time
 }
 
+// NoPassword is the pass_hash of a user who signs in elsewhere. It is not a valid password hash, so no password
+// matches it, and it is stable, so the credential checks that bind a session or an app code to the hash still work.
+const NoPassword = "!"
+
+// ProviderPortal marks a user who signs in through the MeshMapper portal.
+const ProviderPortal = "portal"
+
 type Session struct {
 	ID, UserID                       uuid.UUID
 	Kind, Label                      string

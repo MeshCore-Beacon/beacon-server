@@ -45,6 +45,8 @@ type Options struct {
 	AccountsMode string
 	// RegistrationOpen is reported as features.registration while accounts are local.
 	RegistrationOpen bool
+	// PortalURL is reported as features.portalUrl while accounts are in portal mode.
+	PortalURL string
 	// Accounts serves the sign-in and profile routes. Leave it an untyped nil when accounts are off: a nil
 	// *users.Service stored here is not == nil and would be called.
 	Accounts handlers.AccountsService

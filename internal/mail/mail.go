@@ -19,6 +19,11 @@ type Sender interface {
 	Send(ctx context.Context, m Message) error
 }
 
+// Discard is a Sender that drops every message, for an instance that has no mail setup.
+type Discard struct{}
+
+func (Discard) Send(context.Context, Message) error { return nil }
+
 // Recorder is a Sender for tests: it keeps what it was given and can be told to fail.
 // The zero value is ready and safe for concurrent use.
 type Recorder struct {

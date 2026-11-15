@@ -836,8 +836,13 @@ func (s *Service) SetDisplayName(ctx context.Context, u User, name string) (User
 	return u, nil
 }
 
-func (s *Service) DeleteAccount(ctx context.Context, u User, current string) error {
-	if _, err := s.checkPassword(u, current); err != nil {
+// DeleteAccount removes the account. A portal user has no password, so confirm is their own username instead.
+func (s *Service) DeleteAccount(ctx context.Context, u User, confirm string) error {
+	if u.Provider == ProviderPortal {
+		if c := strings.TrimSpace(confirm); c == "" || !strings.EqualFold(c, u.Username) {
+			return ErrInvalidInput
+		}
+	} else if _, err := s.checkPassword(u, confirm); err != nil {
 		return err
 	}
 	if err := s.store.DeleteUserChecked(ctx, u.ID, u.PassHash); errors.Is(err, ErrNotFound) {

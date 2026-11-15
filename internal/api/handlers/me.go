@@ -31,8 +31,13 @@ func MeRouter(svc AccountsService, opts AuthOptions, mounts ...MeMount) http.Han
 	writes := mw.RateLimitRoute(60, time.Minute) // one budget for every /me write
 	r.Get("/", getMe())
 	r.With(writes).Patch("/", patchMe(svc))
-	r.With(writes).Post("/password", changePassword(svc))
-	r.With(writes).Post("/email", changeEmail(svc))
+	if opts.Portal != nil {
+		r.Post("/password", portalManaged)
+		r.Post("/email", portalManaged)
+	} else {
+		r.With(writes).Post("/password", changePassword(svc))
+		r.With(writes).Post("/email", changeEmail(svc))
+	}
 	r.With(writes).Delete("/", deleteMe(svc, opts))
 	r.Get("/sessions", listSessions(svc))
 	r.With(writes).Delete("/sessions", endOtherSessions(svc))
@@ -143,7 +148,7 @@ func changeEmail(svc AccountsService) http.HandlerFunc {
 // @Tags Accounts
 // @Accept json
 // @Security UserSession
-// @Param body body api.DeleteMeRequest true "Current password; body at most 4 KiB"
+// @Param body body api.DeleteMeRequest true "currentPassword, or for a portal user confirmUsername; body at most 4 KiB"
 // @Success 204 "Deleted"
 // @Failure 400,401,403,413,415,429,503 {object} map[string]APIError
 // @Router /me [delete]
@@ -154,7 +159,11 @@ func deleteMe(svc AccountsService, opts AuthOptions) http.HandlerFunc {
 			return
 		}
 		u, _, _ := mw.UserFrom(r.Context())
-		if err := svc.DeleteAccount(r.Context(), u, in.CurrentPassword); err != nil {
+		confirm := in.CurrentPassword
+		if u.Provider == users.ProviderPortal {
+			confirm = in.ConfirmUsername
+		}
+		if err := svc.DeleteAccount(r.Context(), u, confirm); err != nil {
 			userError(w, err)
 			return
 		}

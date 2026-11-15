@@ -561,6 +561,14 @@ type PollingTarget struct {
 	NoPasswordBlocked bool               `json:"no_password_blocked"`
 }
 
+type PortalState struct {
+	CookieHash []byte             `json:"cookie_hash"`
+	StateHash  []byte             `json:"state_hash"`
+	Verifier   string             `json:"verifier"`
+	ReturnPath string             `json:"return_path"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+}
+
 type ReconfirmAmb struct {
 	Iata   string `json:"iata"`
 	Len    int32  `json:"len"`

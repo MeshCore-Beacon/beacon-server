@@ -45,6 +45,8 @@ type Querier interface {
 	ClearNoPasswordBlocked(ctx context.Context, targetPublicKey []byte) (int64, error)
 	// Keeps fetch timing so re-enabling still respects backoff; the ETag goes with the rows.
 	ClearRepeaters(ctx context.Context) (int64, error)
+	// One statement, so a state is used once; an expired one is deleted and reported as missing by the caller.
+	ConsumePortalState(ctx context.Context, cookieHash []byte) (ConsumePortalStateRow, error)
 	// Spends a live reset token only while the address it was mailed to is still the account's address, in one statement.
 	ConsumeResetToken(ctx context.Context, arg ConsumeResetTokenParams) (uuid.UUID, error)
 	// One statement, so two concurrent uses cannot both match used_at IS NULL.
@@ -60,6 +62,7 @@ type Querier interface {
 	CountUntrustedNodeReadings(ctx context.Context, arg CountUntrustedNodeReadingsParams) (int32, error)
 	CountUserRequests(ctx context.Context, userID uuid.UUID) (int32, error)
 	CreateAccount(ctx context.Context, name string) (Account, error)
+	CreatePortalState(ctx context.Context, arg CreatePortalStateParams) error
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	CreateUserSession(ctx context.Context, arg CreateUserSessionParams) (CreateUserSessionRow, error)
 	CreateUserToken(ctx context.Context, arg CreateUserTokenParams) error
@@ -71,6 +74,7 @@ type Querier interface {
 	DeleteChannelConfigScopes(ctx context.Context) error
 	DeleteChannelMembersNotIn(ctx context.Context, arg DeleteChannelMembersNotInParams) error
 	DeleteExpiredPollingClaims(ctx context.Context, receivedAt pgtype.Timestamptz) error
+	DeleteExpiredPortalStates(ctx context.Context, cutoff pgtype.Timestamptz) error
 	DeleteExpiredRepeaterReadings(ctx context.Context, receivedAt pgtype.Timestamptz) error
 	// One batch past retention, keyset after the per-run cursor (the first call passes -infinity, 0).
 	// The truncated bound (ms ceiling of the cutoff) drives idx_known_routes_keyset; the exact
@@ -650,6 +654,7 @@ type Querier interface {
 	// window widens (the first hearing replaces the packet's provisional times). Packet counts
 	// and payloads come from UpsertPacket.
 	RecordTrace(ctx context.Context, arg RecordTraceParams) error
+	RefreshPortalUser(ctx context.Context, arg RefreshPortalUserParams) (User, error)
 	RefreshRadioPresets(ctx context.Context) error
 	// Adds a 'missing' row for every eligible hour since the earliest retained observation
 	// (and not before @since), zero-observation hours included.
@@ -865,6 +870,7 @@ type Querier interface {
 	UpsertTransportScope(ctx context.Context, arg UpsertTransportScopeParams) error
 	UserByEmail(ctx context.Context, email string) (User, error)
 	UserByID(ctx context.Context, id uuid.UUID) (User, error)
+	UserByProviderSubject(ctx context.Context, arg UserByProviderSubjectParams) (User, error)
 	UserByUsername(ctx context.Context, lower string) (User, error)
 	UserRequestTargets(ctx context.Context, userID uuid.UUID) ([][]byte, error)
 	// A session is live when it is not ended, not past either expiry, and its user is not disabled.

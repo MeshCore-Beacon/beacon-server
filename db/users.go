@@ -31,7 +31,11 @@ const (
 	uniqueViolation = "23505"
 	usernameIndex   = "idx_users_username"
 	emailIndex      = "idx_users_email"
+	subjectIndex    = "idx_users_provider_subject"
 )
+
+// errSubjectTaken is a second user for one provider subject, a lost race between two first sign-ins.
+var errSubjectTaken = errors.New("db: provider subject taken")
 
 func userFromRow(r sqlc.User) users.User {
 	return users.User{
@@ -57,6 +61,8 @@ func userWriteErr(err error) error {
 			return users.ErrUsernameTaken
 		case emailIndex:
 			return users.ErrEmailTaken
+		case subjectIndex:
+			return errSubjectTaken
 		}
 	}
 	return err
@@ -483,6 +489,9 @@ func (s *Store) DeleteExpiredAuth(ctx context.Context, now time.Time) error {
 		return err
 	}
 	if err := s.q.DeleteExpiredUserTokens(ctx, cutoff); err != nil {
+		return err
+	}
+	if err := s.q.DeleteExpiredPortalStates(ctx, ts(now)); err != nil {
 		return err
 	}
 	return s.q.DeleteStaleUnverifiedUsers(ctx, sqlc.DeleteStaleUnverifiedUsersParams{Cutoff: cutoff, Now: ts(now)})

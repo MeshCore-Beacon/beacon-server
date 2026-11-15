@@ -45,6 +45,8 @@ type InfoFeatures struct {
 	Registration      bool `json:"registration" example:"false"`
 	TelemetryRequests bool `json:"telemetryRequests" example:"false"`
 	Alerts            bool `json:"alerts" example:"false"`
+	// PortalURL is the sign-in portal's base URL; set only when accounts is "portal".
+	PortalURL string `json:"portalUrl,omitempty" example:"https://portal.example.org"`
 }
 
 // WSTicket lets a client that sends no Origin open /ws, in the X-Beacon-Ticket header.

@@ -65,6 +65,9 @@ type AuthOptions struct {
 	AllowedOrigins []string
 	// ReadOnly makes every write route answer 503.
 	ReadOnly bool
+	// Portal is set in portal mode: the local sign-up and password routes answer 404 portal_managed and the portal
+	// routes are served.
+	Portal PortalAuth
 }
 
 func respondCode(w http.ResponseWriter, status int, code, message string) {
@@ -258,13 +261,21 @@ func AuthRouter(svc AccountsService, opts AuthOptions) http.Handler {
 	minute := time.Minute
 	five := 5 * time.Minute
 	other := mw.RateLimitRoute(60, minute) // shared by the session routes
-	r.With(mw.RateLimitRoute(5, five)).Post("/register", register(svc))
-	r.With(mw.RateLimitRoute(30, minute)).Post("/verify", verify(svc))
-	r.With(mw.RateLimitRoute(5, five)).Post("/verify/resend", resendVerify(svc))
-	r.With(mw.RateLimitRoute(10, minute)).Post("/login", login(svc, opts))
+	if opts.Portal != nil {
+		for _, p := range []string{"/register", "/verify", "/verify/resend", "/login", "/reset/request", "/reset/confirm"} {
+			r.Post(p, portalManaged)
+		}
+		r.With(mw.RateLimitRoute(20, minute)).Get("/portal/start", portalStart(opts))
+		r.With(mw.RateLimitRoute(20, minute)).Get("/portal/callback", portalCallback(opts))
+	} else {
+		r.With(mw.RateLimitRoute(5, five)).Post("/register", register(svc))
+		r.With(mw.RateLimitRoute(30, minute)).Post("/verify", verify(svc))
+		r.With(mw.RateLimitRoute(5, five)).Post("/verify/resend", resendVerify(svc))
+		r.With(mw.RateLimitRoute(10, minute)).Post("/login", login(svc, opts))
+		r.With(mw.RateLimitRoute(5, five)).Post("/reset/request", resetRequest(svc))
+		r.With(mw.RateLimitRoute(10, five)).Post("/reset/confirm", resetConfirm(svc))
+	}
 	r.With(other, mw.RequireUser).Post("/logout", logout(svc, opts))
-	r.With(mw.RateLimitRoute(5, five)).Post("/reset/request", resetRequest(svc))
-	r.With(mw.RateLimitRoute(10, five)).Post("/reset/confirm", resetConfirm(svc))
 	r.With(other, mw.RequireUser).Post("/app/code", appCode(svc))
 	r.With(mw.RateLimitRoute(10, minute)).Post("/app/token", appToken(svc))
 	return r

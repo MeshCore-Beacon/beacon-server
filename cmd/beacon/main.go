@@ -453,7 +453,7 @@ func main() {
 
 	// ── Accounts ─────────────────────────────────────────────────────────────
 	// The SMTP password is read here and never logged; only on/off and the public host are.
-	resolvedAccounts, err := cfg.Accounts.Resolve(os.Getenv("BEACON_SMTP_PASSWORD"))
+	resolvedAccounts, err := cfg.Accounts.ResolveWithSecrets(os.Getenv("BEACON_SMTP_PASSWORD"), os.Getenv("BEACON_PORTAL_SECRET"))
 	if err != nil {
 		slog.Error("invalid accounts configuration", "component", "startup", "error", err)
 		os.Exit(1)
@@ -468,18 +468,27 @@ func main() {
 	var accountsSvc handlers.AccountsService
 	var usersService *users.Service
 	var authOptions handlers.AuthOptions
+	portalURL := ""
 	var meMounts []handlers.MeMount
 	if resolvedAccounts.Enabled {
 		meMounts = append(meMounts, handlers.AtlasRoutes(maintStore))
 		accountsMode = "local"
-		sender := mail.NewSMTP(resolvedAccounts.SMTPHost, resolvedAccounts.SMTPPort, resolvedAccounts.SMTPUsername,
-			resolvedAccounts.SMTPPassword, resolvedAccounts.SMTPFrom, resolvedAccounts.SMTPStartTLS)
+		var sender mail.Sender = mail.Discard{} // portal users have no address, so nothing is mailed
+		if !resolvedAccounts.Portal {
+			sender = mail.NewSMTP(resolvedAccounts.SMTPHost, resolvedAccounts.SMTPPort, resolvedAccounts.SMTPUsername,
+				resolvedAccounts.SMTPPassword, resolvedAccounts.SMTPFrom, resolvedAccounts.SMTPStartTLS)
+		}
 		usersService = users.NewService(maintStore, sender, resolvedAccounts, time.Now, slog.Default())
 		accountsSvc = usersService
 		authOptions = handlers.AuthOptions{
 			Enabled: true, CookieSecure: resolvedAccounts.CookieSecure,
 			PublicOrigin:   resolvedAccounts.PublicURL.Scheme + "://" + resolvedAccounts.PublicURL.Host,
 			AllowedOrigins: cfg.CORS.AllowedOrigins, ReadOnly: resolved.ReadOnly,
+		}
+		if resolvedAccounts.Portal {
+			accountsMode = "portal"
+			portalURL = resolvedAccounts.PortalURL.String()
+			authOptions.Portal = users.NewPortal(usersService, maintStore, resolvedAccounts, nil)
 		}
 		slog.Info("accounts mode", "component", "startup", "mode", accountsMode, "registration_open", resolvedAccounts.RegistrationOpen)
 	}
@@ -706,7 +715,7 @@ func main() {
 		},
 		GuestPolling:   guestPolling,
 		PollingEnabled: resolvedPolling.Enabled,
-		AccountsMode:   accountsMode, RegistrationOpen: resolvedAccounts.RegistrationOpen,
+		AccountsMode:   accountsMode, RegistrationOpen: resolvedAccounts.RegistrationOpen, PortalURL: portalURL,
 		Accounts: accountsSvc, AuthOptions: authOptions, MeMounts: meMounts, TelemetryRequests: requestsSvc != nil,
 		Guards:        guard,
 		APIPlanLayout: string(layout),

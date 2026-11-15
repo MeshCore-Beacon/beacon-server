@@ -11,7 +11,7 @@ SELECT * FROM users WHERE id = $1;
 SELECT * FROM users WHERE lower(username) = lower($1);
 
 -- name: UserByEmail :one
-SELECT * FROM users WHERE email = $1;
+SELECT * FROM users WHERE email = $1 AND email <> '';
 
 -- name: UpdateUserDisplayName :execrows
 UPDATE users SET display_name = $2 WHERE id = $1;
@@ -182,3 +182,22 @@ SELECT EXISTS (
 
 -- name: DeleteUserIfHash :execrows
 DELETE FROM users WHERE id = sqlc.arg(id) AND pass_hash = sqlc.arg(pass_hash);
+
+-- name: UserByProviderSubject :one
+SELECT * FROM users WHERE provider = sqlc.arg(provider) AND provider_subject = sqlc.arg(provider_subject);
+
+-- name: RefreshPortalUser :one
+UPDATE users SET username = sqlc.arg(username), display_name = sqlc.arg(display_name)
+WHERE id = sqlc.arg(id) RETURNING *;
+
+-- name: CreatePortalState :exec
+INSERT INTO portal_states (cookie_hash, state_hash, verifier, return_path, expires_at)
+VALUES (sqlc.arg(cookie_hash), sqlc.arg(state_hash), sqlc.arg(verifier), sqlc.arg(return_path), sqlc.arg(expires_at));
+
+-- name: ConsumePortalState :one
+-- One statement, so a state is used once; an expired one is deleted and reported as missing by the caller.
+DELETE FROM portal_states WHERE cookie_hash = sqlc.arg(cookie_hash)
+RETURNING state_hash, verifier, return_path, expires_at;
+
+-- name: DeleteExpiredPortalStates :exec
+DELETE FROM portal_states WHERE expires_at < sqlc.arg(cutoff);
