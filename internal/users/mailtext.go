@@ -25,6 +25,16 @@ func resetMailText(host, link string) (subject, text string) {
 		fmt.Sprintf("Someone asked to reset the password of your Beacon account at %s.\n\nChoose a new password by opening this link within 1 hour:\n\n%s\n\nIf you did not ask for this, ignore this mail and your password stays as it is.\n", host, link)
 }
 
+func passwordChangedMailText(host string) (subject, text string) {
+	return "Your Beacon password was changed",
+		fmt.Sprintf("The password of your Beacon account at %s was just changed, and every other device was signed out.\n\nIf this was you, there is nothing to do. If it was not, reset your password now from the sign-in page.\n", host)
+}
+
+func emailChangedMailText(host string) (subject, text string) {
+	return "The email address of your Beacon account was changed",
+		fmt.Sprintf("The email address of your Beacon account at %s was just changed. This address no longer receives mail for it.\n\nIf this was you, there is nothing to do. If it was not, contact the operator of this server.\n", host)
+}
+
 func appSignInMailText(host, label string, at time.Time) (subject, text string) {
 	return "A new app signed in to your Beacon account",
 		fmt.Sprintf("A new app (%s) signed in to your Beacon account at %s on %s.\n\nIf this was you, there is nothing to do. If it was not, sign out that device under Profile, Devices, and change your password.\n",

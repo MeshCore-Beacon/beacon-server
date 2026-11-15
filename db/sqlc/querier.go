@@ -45,6 +45,8 @@ type Querier interface {
 	ClearNoPasswordBlocked(ctx context.Context, targetPublicKey []byte) (int64, error)
 	// Keeps fetch timing so re-enabling still respects backoff; the ETag goes with the rows.
 	ClearRepeaters(ctx context.Context) (int64, error)
+	// Spends a live reset token only while the address it was mailed to is still the account's address, in one statement.
+	ConsumeResetToken(ctx context.Context, arg ConsumeResetTokenParams) (uuid.UUID, error)
 	// One statement, so two concurrent uses cannot both match used_at IS NULL.
 	ConsumeUserToken(ctx context.Context, arg ConsumeUserTokenParams) (ConsumeUserTokenRow, error)
 	// Recomputed each pass. Counts other observers that heard a RESPONSE (1) or PATH (8) packet with the reading's
@@ -334,7 +336,8 @@ type Querier interface {
 	InsertUserAtlasPin(ctx context.Context, arg InsertUserAtlasPinParams) error
 	// The newest status reading before since: the baseline for the first counter increments in range.
 	LatestNodeStatusReadingBefore(ctx context.Context, arg LatestNodeStatusReadingBeforeParams) ([]LatestNodeStatusReadingBeforeRow, error)
-	// The data of the user's newest live token of a kind, for repeating a mail without minting from anything else.
+	// The data of the user's newest unused token of a kind, even if it has expired (cleanup keeps it for a week), for
+	// repeating a mail without minting from anything else.
 	LatestUserToken(ctx context.Context, arg LatestUserTokenParams) ([]byte, error)
 	ListAccounts(ctx context.Context) ([]Account, error)
 	// The original all-channel message statement, before the channel read model: no page runs it

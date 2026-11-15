@@ -182,6 +182,11 @@ func (f *fakeStore) ApplyPendingEmail(_ context.Context, id uuid.UUID, expected 
 	}
 	now := f.clk.Now()
 	u.Email, u.PendingEmail, u.EmailVerifiedAt = *u.PendingEmail, nil, &now
+	for h, t := range f.tokens {
+		if t.user == id && t.kind == TokenReset {
+			delete(f.tokens, h)
+		}
+	}
 	return nil
 }
 func (f *fakeStore) ActivateUser(_ context.Context, id uuid.UUID, username, hash string, at time.Time) error {
@@ -209,12 +214,27 @@ func (f *fakeStore) ActivateUser(_ context.Context, id uuid.UUID, username, hash
 	}
 	return nil
 }
-func (f *fakeStore) LatestToken(_ context.Context, userID uuid.UUID, kind TokenKind, now time.Time) ([]byte, error) {
+func (f *fakeStore) ConsumeResetToken(_ context.Context, hash []byte, now time.Time) (uuid.UUID, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	t, ok := f.tokens[string(hash)]
+	if !ok || t.kind != TokenReset || t.used || !now.Before(t.expires) {
+		return uuid.Nil, ErrNotFound
+	}
+	var d tokenData
+	u, err := f.get(t.user)
+	if err != nil || json.Unmarshal(t.data, &d) != nil || d.Email != u.Email {
+		return uuid.Nil, ErrNotFound
+	}
+	t.used = true
+	return t.user, nil
+}
+func (f *fakeStore) LatestToken(_ context.Context, userID uuid.UUID, kind TokenKind) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var best *tokRec
 	for _, t := range f.tokens {
-		if t.user == userID && t.kind == kind && !t.used && now.Before(t.expires) && (best == nil || t.seq > best.seq) {
+		if t.user == userID && t.kind == kind && !t.used && (best == nil || t.seq > best.seq) {
 			best = t
 		}
 	}
@@ -714,10 +734,28 @@ func TestResendRepeatsTheNewestSignUpNotTheRow(t *testing.T) {
 	}
 }
 
-func TestResendSendsNothingWithoutALiveLink(t *testing.T) {
+func TestResendRebuildsFromTheRetainedSignupWhenItsLinkExpired(t *testing.T) {
 	e := newEnv(t)
 	_ = e.svc.Register(bg, "ridge", "ridge@example.org", goodPW)
 	e.clk.Advance(25 * time.Hour)
+	if err := e.svc.ResendVerification(bg, "ridge@example.org"); err != nil {
+		t.Fatal(err)
+	}
+	msgs := e.msgs()
+	if len(msgs) != 2 || !strings.Contains(msgs[1].Text, "account named ridge") {
+		t.Fatalf("expired link not recovered: %+v", msgs)
+	}
+	if err := e.svc.Verify(bg, tokenIn(t, msgs[1])); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestResendSendsNothingWithoutAnyRetainedSignup(t *testing.T) {
+	e := newEnv(t)
+	_ = e.svc.Register(bg, "ridge", "ridge@example.org", goodPW)
+	e.store.mu.Lock()
+	e.store.tokens = map[string]*tokRec{} // cleanup removed it
+	e.store.mu.Unlock()
 	if err := e.svc.ResendVerification(bg, "ridge@example.org"); err != nil {
 		t.Fatal(err)
 	}

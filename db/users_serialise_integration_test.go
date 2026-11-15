@@ -7,8 +7,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"log/slog"
 	"net/url"
+	"regexp"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -159,5 +162,139 @@ func TestUserAppSessionCapSerialisedPostgres(t *testing.T) {
 	wg.Wait()
 	if n := liveSessionCount(t, ctx, s, u); n > 10 {
 		t.Fatalf("%d live app sessions, at most 10 allowed", n)
+	}
+}
+
+// clockEnv is serialEnv with a clock the test moves, a mail recorder and the mail worker running.
+func clockEnv(t *testing.T) (context.Context, *Store, *users.Service, *mail.Recorder, *time.Time) {
+	t.Helper()
+	ctx, _, s := userStore(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	rec := &mail.Recorder{}
+	pu, _ := url.Parse("https://beacon.example.org")
+	svc := users.NewService(s, rec, config.ResolvedAccounts{Enabled: true, PublicURL: pu, RegistrationOpen: true}, func() time.Time { return now }, slog.New(slog.DiscardHandler))
+	wctx, cancel := context.WithCancel(ctx)
+	done := svc.Start(wctx)
+	t.Cleanup(func() { cancel(); <-done })
+	return ctx, s, svc, rec, &now
+}
+
+var tokenInMail = regexp.MustCompile(`token=([A-Za-z0-9_%-]+)`)
+
+func mailTokens(t *testing.T, ctx context.Context, svc *users.Service, rec *mail.Recorder) []mail.Message {
+	t.Helper()
+	if err := svc.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return rec.Messages()
+}
+
+func lastToken(t *testing.T, m mail.Message) string {
+	t.Helper()
+	g := tokenInMail.FindStringSubmatch(m.Text)
+	if g == nil {
+		t.Fatalf("no link in %q", m.Text)
+	}
+	v, _ := url.QueryUnescape(g[1])
+	return v
+}
+
+func TestUserResetTokenBoundToItsAddressPostgres(t *testing.T) {
+	ctx, s, svc, rec, now := clockEnv(t)
+	hash, _ := users.HashPassword(serialPW)
+	verified := *now
+	u, err := s.CreateUser(ctx, users.User{Username: "ridge", DisplayName: "ridge", Email: "old@example.org", PassHash: hash, Provider: "local", EmailVerifiedAt: &verified})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RequestReset(ctx, "old@example.org"); err != nil {
+		t.Fatal(err)
+	}
+	oldLink := lastToken(t, mailTokens(t, ctx, svc, rec)[0])
+	// The account moves to a new address, confirmed from that mailbox.
+	if err := svc.ChangeEmail(ctx, u, serialPW, "new@example.org"); err != nil {
+		t.Fatal(err)
+	}
+	msgs := mailTokens(t, ctx, svc, rec)
+	if err := svc.Verify(ctx, lastToken(t, msgs[len(msgs)-1])); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ConfirmReset(ctx, oldLink, "another-long-passphrase"); !errors.Is(err, users.ErrTokenInvalid) {
+		t.Fatalf("a reset link mailed to the previous address still works: %v", err)
+	}
+	var n int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM user_tokens WHERE user_id = $1 AND kind = 'reset' AND used_at IS NULL`, u.ID).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("%d reset tokens left after the email change (%v)", n, err)
+	}
+	// A reset asked for the new address works, and the password does change.
+	// The previous mailbox was told the address changed.
+	msgs = mailTokens(t, ctx, svc, rec)
+	var told bool
+	for _, m := range msgs {
+		told = told || (m.To == "old@example.org" && m.Subject == "The email address of your Beacon account was changed")
+	}
+	if !told {
+		t.Fatalf("the old address was not told: %+v", msgs)
+	}
+	if err := svc.RequestReset(ctx, "new@example.org"); err != nil {
+		t.Fatal(err)
+	}
+	msgs = mailTokens(t, ctx, svc, rec)
+	if err := svc.ConfirmReset(ctx, lastToken(t, msgs[len(msgs)-1]), "another-long-passphrase"); err != nil {
+		t.Fatal(err)
+	}
+	msgs = mailTokens(t, ctx, svc, rec)
+	if m := msgs[len(msgs)-1]; m.To != "new@example.org" || m.Subject != "Your Beacon password was changed" {
+		t.Fatalf("no password-changed mail: %+v", m)
+	}
+}
+
+func TestUserResendRecoversAnExpiredLinkPostgres(t *testing.T) {
+	ctx, s, svc, rec, now := clockEnv(t)
+	if err := svc.Register(ctx, "newbie", "newbie@example.org", serialPW); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(mailTokens(t, ctx, svc, rec)); n != 1 {
+		t.Fatalf("%d mails", n)
+	}
+	*now = now.Add(25 * time.Hour) // the link has expired
+	if err := svc.ResendVerification(ctx, "newbie@example.org"); err != nil {
+		t.Fatal(err)
+	}
+	msgs := mailTokens(t, ctx, svc, rec)
+	if len(msgs) != 2 || msgs[1].To != "newbie@example.org" || !strings.Contains(msgs[1].Text, "newbie") {
+		t.Fatalf("resend sent %d mails", len(msgs))
+	}
+	if err := svc.Verify(ctx, lastToken(t, msgs[1])); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := svc.Login(ctx, "newbie", serialPW, users.SessionMeta{}); err != nil {
+		t.Fatalf("the recovered sign-up did not keep its username and password: %v", err)
+	}
+	_ = s
+}
+
+func TestUserPendingSignupKeptForSevenDaysPostgres(t *testing.T) {
+	ctx, s, svc, rec, now := clockEnv(t)
+	if err := svc.Register(ctx, "newbie", "newbie@example.org", serialPW); err != nil {
+		t.Fatal(err)
+	}
+	mailTokens(t, ctx, svc, rec)
+	*now = now.Add(6 * 24 * time.Hour) // link long expired, row inside its 7 days
+	if err := s.DeleteExpiredAuth(ctx, *now); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ResendVerification(ctx, "newbie@example.org"); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(mailTokens(t, ctx, svc, rec)); n != 2 {
+		t.Fatalf("a pending sign-up inside its 7 days could not resend: %d mails", n)
+	}
+	*now = now.Add(3 * 24 * time.Hour)
+	if err := s.DeleteExpiredAuth(ctx, *now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UserByEmail(ctx, "newbie@example.org"); !errors.Is(err, users.ErrNotFound) {
+		t.Fatalf("an abandoned sign-up outlived its link and its 7 days: %v", err)
 	}
 }

@@ -679,24 +679,28 @@ func TestUserLatestTokenPostgres(t *testing.T) {
 	ctx, _, s := userStore(t)
 	now := time.Now()
 	u := newUser(t, ctx, s, "ridge")
-	if _, err := s.LatestToken(ctx, u.ID, users.TokenVerify, now); !errors.Is(err, users.ErrNotFound) {
+	if _, err := s.LatestToken(ctx, u.ID, users.TokenVerify); !errors.Is(err, users.ErrNotFound) {
 		t.Fatalf("none: %v", err)
 	}
 	_ = s.CreateToken(ctx, u.ID, users.TokenVerify, []byte("a"), []byte(`{"n":1}`), now.Add(time.Hour))
 	time.Sleep(5 * time.Millisecond)
 	_ = s.CreateToken(ctx, u.ID, users.TokenVerify, []byte("b"), []byte(`{"n":2}`), now.Add(time.Hour))
 	_ = s.CreateToken(ctx, u.ID, users.TokenReset, []byte("c"), []byte(`{"n":3}`), now.Add(time.Hour))
-	if d, err := s.LatestToken(ctx, u.ID, users.TokenVerify, now); err != nil || string(d) != `{"n": 2}` {
+	if d, err := s.LatestToken(ctx, u.ID, users.TokenVerify); err != nil || string(d) != `{"n": 2}` {
 		t.Fatalf("latest = %s, %v", d, err)
 	}
 	if _, _, err := s.ConsumeToken(ctx, users.TokenVerify, []byte("b"), now); err != nil {
 		t.Fatal(err)
 	}
-	if d, _ := s.LatestToken(ctx, u.ID, users.TokenVerify, now); string(d) != `{"n": 1}` {
+	if d, _ := s.LatestToken(ctx, u.ID, users.TokenVerify); string(d) != `{"n": 1}` {
 		t.Fatalf("after use = %s", d)
 	}
-	if _, err := s.LatestToken(ctx, u.ID, users.TokenVerify, now.Add(2*time.Hour)); !errors.Is(err, users.ErrNotFound) {
-		t.Fatalf("expired: %v", err)
+	// An expired token is still the newest sign-up the user can resend.
+	if _, err := s.pool.Exec(ctx, `UPDATE user_tokens SET expires_at = $1`, now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if d, err := s.LatestToken(ctx, u.ID, users.TokenVerify); err != nil || string(d) != `{"n": 1}` {
+		t.Fatalf("expired: %s %v", d, err)
 	}
 }
 

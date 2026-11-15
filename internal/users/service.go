@@ -32,7 +32,10 @@ type Store interface {
 	UpdateUserDisplayName(ctx context.Context, id uuid.UUID, name string) error
 	SetUserPendingEmail(ctx context.Context, id uuid.UUID, email *string) error
 	ActivateUser(ctx context.Context, id uuid.UUID, username, hash string, at time.Time) error
-	LatestToken(ctx context.Context, userID uuid.UUID, kind TokenKind, now time.Time) ([]byte, error)
+	// LatestToken is the newest unused token of the kind, expired or not (cleanup keeps it a week).
+	LatestToken(ctx context.Context, userID uuid.UUID, kind TokenKind) ([]byte, error)
+	// ConsumeResetToken spends a live reset token only while its address is still the account's.
+	ConsumeResetToken(ctx context.Context, hash []byte, now time.Time) (uuid.UUID, error)
 	PeekToken(ctx context.Context, kind TokenKind, hash []byte, now time.Time) (uuid.UUID, error)
 	ApplyPendingEmail(ctx context.Context, id uuid.UUID, expected string) error
 	TouchUserLogin(ctx context.Context, id uuid.UUID, at time.Time) error
@@ -418,6 +421,13 @@ func (s *Service) Verify(ctx context.Context, token string) error {
 	if json.Unmarshal(raw, &d) != nil || d.Email == "" {
 		return ErrTokenInvalid
 	}
+	old, err := s.store.UserByID(ctx, uid)
+	if errors.Is(err, ErrNotFound) {
+		return ErrTokenInvalid
+	}
+	if err != nil {
+		return err
+	}
 	// The store applies the address only if it is still the one this link was sent to.
 	switch err := s.store.ApplyPendingEmail(ctx, uid, d.Email); {
 	case errors.Is(err, ErrNotFound), errors.Is(err, ErrEmailTaken):
@@ -426,6 +436,11 @@ func (s *Service) Verify(ctx context.Context, token string) error {
 		return err
 	}
 	s.log.Info("email changed", "user_id", uid)
+	// The previous mailbox is told, so a takeover cannot go unnoticed there.
+	if old.Email != "" && old.Email != d.Email {
+		subject, text := emailChangedMailText(s.host())
+		s.enqueue(uid, "email_changed", old.Email, subject, text)
+	}
 	return nil
 }
 
@@ -444,8 +459,9 @@ func (s *Service) ResendVerification(ctx context.Context, email string) error {
 	if u.EmailVerifiedAt != nil || u.DisabledAt != nil {
 		return nil
 	}
-	// Never mint a link from the row: its username and hash may be a stranger's. Repeat the newest live sign-up.
-	raw, err := s.store.LatestToken(ctx, u.ID, TokenVerify, s.now())
+	// Never mint a link from the row: its username and hash may be a stranger's. Repeat the newest retained sign-up,
+	// even when its link has expired: that is how its owner recovers it.
+	raw, err := s.store.LatestToken(ctx, u.ID, TokenVerify)
 	if errors.Is(err, ErrNotFound) {
 		return nil
 	}
@@ -672,7 +688,8 @@ func (s *Service) RequestReset(ctx context.Context, email string) error {
 	if err := s.store.DeleteUserTokens(ctx, u.ID, TokenReset); err != nil {
 		return err
 	}
-	tok, err := s.newToken(ctx, u.ID, TokenReset, tokenData{}, resetTTL)
+	// Bound to the address it is mailed to, so it dies with that address.
+	tok, err := s.newToken(ctx, u.ID, TokenReset, tokenData{Email: u.Email}, resetTTL)
 	if err != nil {
 		return err
 	}
@@ -715,7 +732,7 @@ func (s *Service) ConfirmReset(ctx context.Context, token, newPassword string) e
 	if err != nil {
 		return err
 	}
-	if cid, _, err := s.store.ConsumeToken(ctx, TokenReset, hashTok, s.now()); errors.Is(err, ErrNotFound) || (err == nil && cid != uid) {
+	if cid, err := s.store.ConsumeResetToken(ctx, hashTok, s.now()); errors.Is(err, ErrNotFound) || (err == nil && cid != uid) {
 		return ErrTokenInvalid
 	} else if err != nil {
 		return err
@@ -732,6 +749,8 @@ func (s *Service) ConfirmReset(ctx context.Context, token, newPassword string) e
 	s.throttle.clear(loginKey(u.Username))
 	s.throttle.clear(loginKey(u.Email))
 	s.log.Info("password reset completed", "user_id", uid)
+	subject, text := passwordChangedMailText(s.host())
+	s.enqueue(uid, "password_changed", u.Email, subject, text)
 	return nil
 }
 
@@ -752,6 +771,8 @@ func (s *Service) ChangePassword(ctx context.Context, u User, keepSession uuid.U
 		return err
 	}
 	s.log.Info("password changed", "user_id", u.ID)
+	subject, text := passwordChangedMailText(s.host())
+	s.enqueue(u.ID, "password_changed", u.Email, subject, text)
 	return nil
 }
 

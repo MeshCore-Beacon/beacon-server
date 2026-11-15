@@ -142,7 +142,13 @@ func (s *Store) SetUserPendingEmail(ctx context.Context, id uuid.UUID, email *st
 // another user owns the address now, and users.ErrNotFound when the pending address is not expected (or absent).
 func (s *Store) ApplyPendingEmail(ctx context.Context, id uuid.UUID, expected string) error {
 	e := strings.ToLower(expected)
-	return affected(s.q.ApplyPendingEmail(ctx, sqlc.ApplyPendingEmailParams{ID: id, PendingEmail: &e}))
+	// Reset links mailed to the previous address go with it, in the same transaction.
+	return s.pollTx(ctx, func(q *sqlc.Queries) error {
+		if err := affected(q.ApplyPendingEmail(ctx, sqlc.ApplyPendingEmailParams{ID: id, PendingEmail: &e})); err != nil {
+			return err
+		}
+		return q.DeleteUserTokens(ctx, sqlc.DeleteUserTokensParams{UserID: id, Kind: string(users.TokenReset)})
+	})
 }
 
 // ActivateUser finishes a sign-up: it sets the username and password hash, marks the address verified and deletes
@@ -371,6 +377,16 @@ func (s *Store) ConsumeToken(ctx context.Context, kind users.TokenKind, hash []b
 	return r.UserID, r.Data, nil
 }
 
+// ConsumeResetToken spends a live reset token and returns its user, only while the token's address is still the
+// user's. It reports users.ErrNotFound for an unknown, used, expired or no longer matching token.
+func (s *Store) ConsumeResetToken(ctx context.Context, hash []byte, now time.Time) (uuid.UUID, error) {
+	id, err := s.q.ConsumeResetToken(ctx, sqlc.ConsumeResetTokenParams{TokenHash: hash, Now: ts(now)})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, users.ErrNotFound
+	}
+	return id, err
+}
+
 // PeekToken returns the user a live token of the kind belongs to without using it, or users.ErrNotFound.
 func (s *Store) PeekToken(ctx context.Context, kind users.TokenKind, hash []byte, now time.Time) (uuid.UUID, error) {
 	id, err := s.q.PeekUserToken(ctx, sqlc.PeekUserTokenParams{TokenHash: hash, Kind: string(kind), Now: ts(now)})
@@ -380,9 +396,9 @@ func (s *Store) PeekToken(ctx context.Context, kind users.TokenKind, hash []byte
 	return id, err
 }
 
-// LatestToken returns the data of the user's newest live token of the kind, or users.ErrNotFound.
-func (s *Store) LatestToken(ctx context.Context, userID uuid.UUID, kind users.TokenKind, now time.Time) ([]byte, error) {
-	d, err := s.q.LatestUserToken(ctx, sqlc.LatestUserTokenParams{UserID: userID, Kind: string(kind), Now: ts(now)})
+// LatestToken returns the data of the user's newest unused token of the kind, expired or not, or users.ErrNotFound.
+func (s *Store) LatestToken(ctx context.Context, userID uuid.UUID, kind users.TokenKind) ([]byte, error) {
+	d, err := s.q.LatestUserToken(ctx, sqlc.LatestUserTokenParams{UserID: userID, Kind: string(kind)})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, users.ErrNotFound
 	}

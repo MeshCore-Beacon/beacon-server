@@ -68,6 +68,26 @@ func (q *Queries) ApplyPendingEmail(ctx context.Context, arg ApplyPendingEmailPa
 	return result.RowsAffected(), nil
 }
 
+const consumeResetToken = `-- name: ConsumeResetToken :one
+UPDATE user_tokens t SET used_at = $1 FROM users u
+WHERE t.token_hash = $2 AND t.kind = 'reset' AND t.used_at IS NULL AND t.expires_at > $1
+  AND u.id = t.user_id AND t.data->>'email' = u.email
+RETURNING t.user_id
+`
+
+type ConsumeResetTokenParams struct {
+	Now       pgtype.Timestamptz `json:"now"`
+	TokenHash []byte             `json:"token_hash"`
+}
+
+// Spends a live reset token only while the address it was mailed to is still the account's address, in one statement.
+func (q *Queries) ConsumeResetToken(ctx context.Context, arg ConsumeResetTokenParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, consumeResetToken, arg.Now, arg.TokenHash)
+	var user_id uuid.UUID
+	err := row.Scan(&user_id)
+	return user_id, err
+}
+
 const consumeUserToken = `-- name: ConsumeUserToken :one
 UPDATE user_tokens SET used_at = $1
 WHERE token_hash = $2 AND kind = $3 AND used_at IS NULL AND expires_at > $1
@@ -347,20 +367,20 @@ func (q *Queries) EndUserSession(ctx context.Context, arg EndUserSessionParams) 
 
 const latestUserToken = `-- name: LatestUserToken :one
 SELECT data FROM user_tokens
-WHERE user_id = $1 AND kind = $2 AND used_at IS NULL AND expires_at > $3
+WHERE user_id = $1 AND kind = $2 AND used_at IS NULL
 ORDER BY created_at DESC, expires_at DESC
 LIMIT 1
 `
 
 type LatestUserTokenParams struct {
-	UserID uuid.UUID          `json:"user_id"`
-	Kind   string             `json:"kind"`
-	Now    pgtype.Timestamptz `json:"now"`
+	UserID uuid.UUID `json:"user_id"`
+	Kind   string    `json:"kind"`
 }
 
-// The data of the user's newest live token of a kind, for repeating a mail without minting from anything else.
+// The data of the user's newest unused token of a kind, even if it has expired (cleanup keeps it for a week), for
+// repeating a mail without minting from anything else.
 func (q *Queries) LatestUserToken(ctx context.Context, arg LatestUserTokenParams) ([]byte, error) {
-	row := q.db.QueryRow(ctx, latestUserToken, arg.UserID, arg.Kind, arg.Now)
+	row := q.db.QueryRow(ctx, latestUserToken, arg.UserID, arg.Kind)
 	var data []byte
 	err := row.Scan(&data)
 	return data, err

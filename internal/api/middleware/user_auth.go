@@ -28,12 +28,14 @@ type userCtx struct {
 	user      users.User
 	session   users.Session
 	viaCookie bool
+	// failed: the session lookup itself failed, so nothing is known about the visitor.
+	failed bool
 }
 
 // UserFrom returns the signed-in user and session UserAuth attached.
 func UserFrom(ctx context.Context) (users.User, users.Session, bool) {
 	c, ok := ctx.Value(userCtxKey{}).(userCtx)
-	return c.user, c.session, ok
+	return c.user, c.session, ok && !c.failed
 }
 
 // SessionViaCookie reports whether the session in ctx came from the cookie rather than a bearer token.
@@ -55,6 +57,7 @@ func UserAuth(svc Authenticator, cookieName string) func(http.Handler) http.Hand
 					r = r.WithContext(context.WithValue(r.Context(), userCtxKey{}, userCtx{user: u, session: sess, viaCookie: viaCookie}))
 				case !errors.Is(err, users.ErrTokenInvalid):
 					slog.Error("session lookup failed", "component", "api", "error", err)
+					r = r.WithContext(context.WithValue(r.Context(), userCtxKey{}, userCtx{failed: true}))
 				}
 			}
 			next.ServeHTTP(w, r)
@@ -84,9 +87,15 @@ func writeUserError(w http.ResponseWriter, status int, code, message string) {
 	_, _ = io.WriteString(w, `{"error":{"code":"`+code+`","message":"`+message+`"}}`+"\n")
 }
 
-// RequireUser answers 401 not_signed_in unless UserAuth attached a user.
+// RequireUser answers 401 not_signed_in unless UserAuth attached a user, and 503 service_unavailable when the
+// session could not be looked up: a client that took that for an invalid session would drop a token that is good.
 func RequireUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if c, _ := r.Context().Value(userCtxKey{}).(userCtx); c.failed {
+			w.Header().Set("Retry-After", "5")
+			writeUserError(w, http.StatusServiceUnavailable, "service_unavailable", "Try again in a moment.")
+			return
+		}
 		if _, _, ok := UserFrom(r.Context()); !ok {
 			writeUserError(w, http.StatusUnauthorized, "not_signed_in", "Sign in to continue.")
 			return

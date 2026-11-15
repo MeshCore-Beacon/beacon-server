@@ -139,3 +139,19 @@ func TestRequireCSRF(t *testing.T) {
 		t.Fatalf("body %s", w.Body)
 	}
 }
+
+func TestRequireUserAnswers503WhenTheSessionLookupFails(t *testing.T) {
+	// A lookup failure is not an invalid session: a client that sees 401 drops a token that is still good.
+	w := do(probe(brokenAuth{}, RequireUser), "GET", nil, "good")
+	if w.Code != 503 || w.Header().Get("Retry-After") == "" || !strings.Contains(w.Body.String(), `"service_unavailable"`) || strings.Contains(w.Body.String(), "db down") {
+		t.Fatalf("%d %v %s", w.Code, w.Header(), w.Body)
+	}
+	// A route that does not need a user still serves the visitor signed out.
+	if w := do(probe(brokenAuth{}), "GET", nil, "good"); w.Code != 204 || w.Header().Get("X-User") != "" {
+		t.Fatalf("public route: %d %v", w.Code, w.Header())
+	}
+	// A token that is simply invalid stays 401.
+	if w := do(probe(fakeAuth{}, RequireUser), "GET", nil, "bad"); w.Code != 401 {
+		t.Fatalf("invalid token: %d", w.Code)
+	}
+}

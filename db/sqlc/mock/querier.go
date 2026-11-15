@@ -235,6 +235,21 @@ func (mr *MockQuerierMockRecorder) ClearRepeaters(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ClearRepeaters", reflect.TypeOf((*MockQuerier)(nil).ClearRepeaters), ctx)
 }
 
+// ConsumeResetToken mocks base method.
+func (m *MockQuerier) ConsumeResetToken(ctx context.Context, arg db.ConsumeResetTokenParams) (uuid.UUID, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ConsumeResetToken", ctx, arg)
+	ret0, _ := ret[0].(uuid.UUID)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ConsumeResetToken indicates an expected call of ConsumeResetToken.
+func (mr *MockQuerierMockRecorder) ConsumeResetToken(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ConsumeResetToken", reflect.TypeOf((*MockQuerier)(nil).ConsumeResetToken), ctx, arg)
+}
+
 // ConsumeUserToken mocks base method.
 func (m *MockQuerier) ConsumeUserToken(ctx context.Context, arg db.ConsumeUserTokenParams) (db.ConsumeUserTokenRow, error) {
 	m.ctrl.T.Helper()

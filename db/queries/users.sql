@@ -130,9 +130,10 @@ SELECT user_id FROM user_tokens
 WHERE token_hash = sqlc.arg(token_hash) AND kind = sqlc.arg(kind) AND used_at IS NULL AND expires_at > sqlc.arg(now);
 
 -- name: LatestUserToken :one
--- The data of the user's newest live token of a kind, for repeating a mail without minting from anything else.
+-- The data of the user's newest unused token of a kind, even if it has expired (cleanup keeps it for a week), for
+-- repeating a mail without minting from anything else.
 SELECT data FROM user_tokens
-WHERE user_id = sqlc.arg(user_id) AND kind = sqlc.arg(kind) AND used_at IS NULL AND expires_at > sqlc.arg(now)
+WHERE user_id = sqlc.arg(user_id) AND kind = sqlc.arg(kind) AND used_at IS NULL
 ORDER BY created_at DESC, expires_at DESC
 LIMIT 1;
 
@@ -155,6 +156,13 @@ WHERE u.email_verified_at IS NULL AND u.disabled_at IS NULL AND u.provider = 'lo
       SELECT 1 FROM user_tokens t
       WHERE t.user_id = u.id AND t.kind = 'verify' AND t.used_at IS NULL AND t.expires_at > sqlc.arg(now)
   );
+
+-- name: ConsumeResetToken :one
+-- Spends a live reset token only while the address it was mailed to is still the account's address, in one statement.
+UPDATE user_tokens t SET used_at = sqlc.arg(now) FROM users u
+WHERE t.token_hash = sqlc.arg(token_hash) AND t.kind = 'reset' AND t.used_at IS NULL AND t.expires_at > sqlc.arg(now)
+  AND u.id = t.user_id AND t.data->>'email' = u.email
+RETURNING t.user_id;
 
 -- name: LockUserCredentials :one
 -- Serializes session issuance and credential changes of one user until the transaction ends. NO KEY UPDATE keeps
