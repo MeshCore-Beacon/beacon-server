@@ -23,8 +23,9 @@ type Querier interface {
 	AddChannelMessageIATA(ctx context.Context, arg AddChannelMessageIATAParams) (bool, error)
 	AddIATAs(ctx context.Context, iatas []string) error
 	AddRegionIATAs(ctx context.Context, arg AddRegionIATAsParams) error
+	// Applies only the address the link was issued for ($2, lower case), so a later change of the pending address cannot ride on an old link.
 	// The pending address was verified by the link that got us here, so the account counts as verified too.
-	ApplyPendingEmail(ctx context.Context, id uuid.UUID) (int64, error)
+	ApplyPendingEmail(ctx context.Context, arg ApplyPendingEmailParams) (int64, error)
 	// Copies the packet's payload type onto the first @max_rows observations in [@from_id, @to_id),
 	// in id order, that lack one. Rows that already carry a type are never touched. Returns how many
 	// untyped rows it picked, how many it typed, and the last picked id (0 when it picked none).

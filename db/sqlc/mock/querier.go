@@ -116,18 +116,18 @@ func (mr *MockQuerierMockRecorder) AddRegionIATAs(ctx, arg any) *gomock.Call {
 }
 
 // ApplyPendingEmail mocks base method.
-func (m *MockQuerier) ApplyPendingEmail(ctx context.Context, id uuid.UUID) (int64, error) {
+func (m *MockQuerier) ApplyPendingEmail(ctx context.Context, arg db.ApplyPendingEmailParams) (int64, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ApplyPendingEmail", ctx, id)
+	ret := m.ctrl.Call(m, "ApplyPendingEmail", ctx, arg)
 	ret0, _ := ret[0].(int64)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ApplyPendingEmail indicates an expected call of ApplyPendingEmail.
-func (mr *MockQuerierMockRecorder) ApplyPendingEmail(ctx, id any) *gomock.Call {
+func (mr *MockQuerierMockRecorder) ApplyPendingEmail(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ApplyPendingEmail", reflect.TypeOf((*MockQuerier)(nil).ApplyPendingEmail), ctx, id)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ApplyPendingEmail", reflect.TypeOf((*MockQuerier)(nil).ApplyPendingEmail), ctx, arg)
 }
 
 // BackfillObservationPayloadTypes mocks base method.

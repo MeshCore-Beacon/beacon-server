@@ -139,9 +139,10 @@ func (s *Store) SetUserPendingEmail(ctx context.Context, id uuid.UUID, email *st
 }
 
 // ApplyPendingEmail makes the pending address the email and marks it verified. It reports users.ErrEmailTaken when
-// another user owns the address now, and users.ErrNotFound when nothing is pending.
-func (s *Store) ApplyPendingEmail(ctx context.Context, id uuid.UUID) error {
-	return affected(s.q.ApplyPendingEmail(ctx, id))
+// another user owns the address now, and users.ErrNotFound when the pending address is not expected (or absent).
+func (s *Store) ApplyPendingEmail(ctx context.Context, id uuid.UUID, expected string) error {
+	e := strings.ToLower(expected)
+	return affected(s.q.ApplyPendingEmail(ctx, sqlc.ApplyPendingEmailParams{ID: id, PendingEmail: &e}))
 }
 
 func (s *Store) TouchUserLogin(ctx context.Context, id uuid.UUID, at time.Time) error {

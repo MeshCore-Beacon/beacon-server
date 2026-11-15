@@ -37,6 +37,13 @@ type Session struct {
 // TokenKind says what a one-time token may be used for: "verify", "reset", "email_change" or "app_code".
 type TokenKind string
 
+const (
+	TokenVerify      TokenKind = "verify"
+	TokenReset       TokenKind = "reset"
+	TokenEmailChange TokenKind = "email_change"
+	TokenAppCode     TokenKind = "app_code"
+)
+
 var (
 	ErrNotFound      = errors.New("users: not found")
 	ErrUsernameTaken = errors.New("users: username taken")

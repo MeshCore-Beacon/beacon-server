@@ -14,12 +14,18 @@ import (
 
 const applyPendingEmail = `-- name: ApplyPendingEmail :execrows
 UPDATE users SET email = pending_email, pending_email = NULL, email_verified_at = now()
-WHERE id = $1 AND pending_email IS NOT NULL
+WHERE id = $1 AND pending_email = $2
 `
 
+type ApplyPendingEmailParams struct {
+	ID           uuid.UUID `json:"id"`
+	PendingEmail *string   `json:"pending_email"`
+}
+
+// Applies only the address the link was issued for ($2, lower case), so a later change of the pending address cannot ride on an old link.
 // The pending address was verified by the link that got us here, so the account counts as verified too.
-func (q *Queries) ApplyPendingEmail(ctx context.Context, id uuid.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, applyPendingEmail, id)
+func (q *Queries) ApplyPendingEmail(ctx context.Context, arg ApplyPendingEmailParams) (int64, error) {
+	result, err := q.db.Exec(ctx, applyPendingEmail, arg.ID, arg.PendingEmail)
 	if err != nil {
 		return 0, err
 	}

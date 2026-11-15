@@ -376,7 +376,7 @@ func TestUserEndOldestAppSessionsPostgres(t *testing.T) {
 func TestUserPendingEmailPostgres(t *testing.T) {
 	ctx, _, s := userStore(t)
 	a, b := newUser(t, ctx, s, "alice"), newUser(t, ctx, s, "bob")
-	if err := s.ApplyPendingEmail(ctx, a.ID); !errors.Is(err, users.ErrNotFound) {
+	if err := s.ApplyPendingEmail(ctx, a.ID, "new@example.org"); !errors.Is(err, users.ErrNotFound) {
 		t.Fatalf("nothing pending: %v", err)
 	}
 	free := "New@Example.org"
@@ -387,7 +387,22 @@ func TestUserPendingEmailPostgres(t *testing.T) {
 	if got.PendingEmail == nil || *got.PendingEmail != "new@example.org" || got.Email != "alice@example.org" {
 		t.Fatalf("pending %+v", got)
 	}
-	if err := s.ApplyPendingEmail(ctx, a.ID); err != nil {
+	// The pending address was changed after the link was issued: the old address must not apply.
+	other := "someone-else@example.org"
+	if err := s.SetUserPendingEmail(ctx, a.ID, &other); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ApplyPendingEmail(ctx, a.ID, "new@example.org"); !errors.Is(err, users.ErrNotFound) {
+		t.Fatalf("stale expected address: %v", err)
+	}
+	got, _ = s.UserByID(ctx, a.ID)
+	if got.Email != "alice@example.org" || got.PendingEmail == nil || *got.PendingEmail != other {
+		t.Fatalf("stale apply changed the user %+v", got)
+	}
+	if err := s.SetUserPendingEmail(ctx, a.ID, &free); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ApplyPendingEmail(ctx, a.ID, "NEW@example.org"); err != nil {
 		t.Fatal(err)
 	}
 	got, _ = s.UserByID(ctx, a.ID)
@@ -402,7 +417,7 @@ func TestUserPendingEmailPostgres(t *testing.T) {
 	if err := s.SetUserPendingEmail(ctx, a.ID, &taken); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ApplyPendingEmail(ctx, a.ID); !errors.Is(err, users.ErrEmailTaken) {
+	if err := s.ApplyPendingEmail(ctx, a.ID, taken); !errors.Is(err, users.ErrEmailTaken) {
 		t.Fatalf("taken: %v", err)
 	}
 	got, _ = s.UserByID(ctx, a.ID)

@@ -26,9 +26,10 @@ UPDATE users SET email_verified_at = $2 WHERE id = $1;
 UPDATE users SET pending_email = sqlc.narg(pending_email) WHERE id = sqlc.arg(id);
 
 -- name: ApplyPendingEmail :execrows
+-- Applies only the address the link was issued for ($2, lower case), so a later change of the pending address cannot ride on an old link.
 -- The pending address was verified by the link that got us here, so the account counts as verified too.
 UPDATE users SET email = pending_email, pending_email = NULL, email_verified_at = now()
-WHERE id = $1 AND pending_email IS NOT NULL;
+WHERE id = $1 AND pending_email = $2;
 
 -- name: TouchUserLogin :execrows
 UPDATE users SET last_login_at = $2 WHERE id = $1;
