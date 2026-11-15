@@ -526,6 +526,9 @@ type Querier interface {
 	// The first message id above after_id, or 0 when there is none.
 	NextChannelMessageID(ctx context.Context, afterID int64) (int64, error)
 	NodeHasReadings(ctx context.Context, targetPublicKey []byte) (bool, error)
+	NodeLatestTrustedReadingAt(ctx context.Context, targetPublicKey []byte) (pgtype.Timestamptz, error)
+	// Assigned observers of one target by rank. An assignment whose observer has no row is left out.
+	NodePollingAssignments(ctx context.Context, targetPublicKey []byte) ([]NodePollingAssignmentsRow, error)
 	NodePublicKey(ctx context.Context, id uuid.UUID) ([]byte, error)
 	// The id skip + 1 observations above after_id: (after_id, id] holds exactly skip + 1 of them. 0 when fewer remain.
 	ObservationIDAbove(ctx context.Context, arg ObservationIDAboveParams) (int64, error)

@@ -6,6 +6,8 @@ package api
 import (
 	"math"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Packets a radio can't beat per second; a higher claimed rate is a garbage reading.
@@ -190,4 +192,19 @@ func i64f(v *int64) *float64 {
 	}
 	f := float64(*v)
 	return &f
+}
+
+// NodePollingObserver is an observer assigned to poll a node. Rank is 0 for the poller (omitted) and 1+ for standbys.
+type NodePollingObserver struct {
+	ObserverID uuid.UUID `json:"observerId"`
+	Name       string    `json:"name"`
+	Rank       int       `json:"rank,omitempty"`
+}
+
+// NodePolling says who polls a node and when it last got a trusted reading.
+type NodePolling struct {
+	Polled          bool                  `json:"polled"`          // any reading has ever been stored for the node
+	LatestReadingAt *int64                `json:"latestReadingAt"` // newest trusted reading, epoch ms
+	Poller          *NodePollingObserver  `json:"poller"`          // null when nobody is assigned
+	Standbys        []NodePollingObserver `json:"standbys"`
 }

@@ -101,3 +101,18 @@ func TestInfoRoute(t *testing.T) {
 		t.Fatalf("info: %d %s", response.Code, response.Body.String())
 	}
 }
+
+func TestInfoFeatures(t *testing.T) {
+	for polling, want := range map[bool]string{
+		true:  `"features":{"polling":true,"accounts":"off","telemetryRequests":false,"alerts":false}`,
+		false: `"features":{"polling":false,"accounts":"off","telemetryRequests":false,"alerts":false}`,
+	} {
+		handler := New(nil, nil, nil, Options{ServerVersion: "2.0.2", PollingEnabled: polling})
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/info", nil))
+		if body := response.Body.String(); response.Code != http.StatusOK || !strings.Contains(body, want) ||
+			!strings.Contains(body, `"minAppVersion":null`) || !strings.Contains(body, `"serverVersion":"2.0.2"`) {
+			t.Errorf("polling=%v: %d %s", polling, response.Code, body)
+		}
+	}
+}

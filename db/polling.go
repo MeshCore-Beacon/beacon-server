@@ -482,3 +482,37 @@ func (s *Store) GetNodeReadings(ctx context.Context, nodeID uuid.UUID, since, un
 	}
 	return out, true, untrusted, nil
 }
+
+// GetNodePolling returns the node's assigned observers and its newest trusted reading time. An unknown node returns
+// pgx.ErrNoRows.
+func (s *Store) GetNodePolling(ctx context.Context, nodeID uuid.UUID) (*api.NodePolling, error) {
+	key, err := s.q.NodePublicKey(ctx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	out := &api.NodePolling{Standbys: []api.NodePollingObserver{}}
+	if out.Polled, err = s.q.NodeHasReadings(ctx, key); err != nil {
+		return nil, err
+	}
+	latest, err := s.q.NodeLatestTrustedReadingAt(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if latest.Valid {
+		ms := latest.Time.UnixMilli()
+		out.LatestReadingAt = &ms
+	}
+	rows, err := s.q.NodePollingAssignments(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		o := api.NodePollingObserver{ObserverID: r.ObserverID, Name: r.Name, Rank: int(r.Rank)}
+		if r.Rank == 0 {
+			out.Poller = &o
+		} else {
+			out.Standbys = append(out.Standbys, o)
+		}
+	}
+	return out, nil
+}

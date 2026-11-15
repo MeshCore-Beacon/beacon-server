@@ -3104,6 +3104,36 @@ func (mr *MockQuerierMockRecorder) NodeHasReadings(ctx, targetPublicKey any) *go
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NodeHasReadings", reflect.TypeOf((*MockQuerier)(nil).NodeHasReadings), ctx, targetPublicKey)
 }
 
+// NodeLatestTrustedReadingAt mocks base method.
+func (m *MockQuerier) NodeLatestTrustedReadingAt(ctx context.Context, targetPublicKey []byte) (pgtype.Timestamptz, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "NodeLatestTrustedReadingAt", ctx, targetPublicKey)
+	ret0, _ := ret[0].(pgtype.Timestamptz)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// NodeLatestTrustedReadingAt indicates an expected call of NodeLatestTrustedReadingAt.
+func (mr *MockQuerierMockRecorder) NodeLatestTrustedReadingAt(ctx, targetPublicKey any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NodeLatestTrustedReadingAt", reflect.TypeOf((*MockQuerier)(nil).NodeLatestTrustedReadingAt), ctx, targetPublicKey)
+}
+
+// NodePollingAssignments mocks base method.
+func (m *MockQuerier) NodePollingAssignments(ctx context.Context, targetPublicKey []byte) ([]db.NodePollingAssignmentsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "NodePollingAssignments", ctx, targetPublicKey)
+	ret0, _ := ret[0].([]db.NodePollingAssignmentsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// NodePollingAssignments indicates an expected call of NodePollingAssignments.
+func (mr *MockQuerierMockRecorder) NodePollingAssignments(ctx, targetPublicKey any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NodePollingAssignments", reflect.TypeOf((*MockQuerier)(nil).NodePollingAssignments), ctx, targetPublicKey)
+}
+
 // NodePublicKey mocks base method.
 func (m *MockQuerier) NodePublicKey(ctx context.Context, id uuid.UUID) ([]byte, error) {
 	m.ctrl.T.Helper()

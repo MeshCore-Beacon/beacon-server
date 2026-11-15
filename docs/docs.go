@@ -1908,6 +1908,59 @@ const docTemplate = `{
                 }
             }
         },
+        "/nodes/{nodeId}/polling": {
+            "get": {
+                "description": "The observer assigned to poll the node (null when nobody is), its standbys in rank order, and the time of the newest trusted reading. polled is true when the node has any reading at all. Answers as for an unpolled node when polling is off.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Nodes"
+                ],
+                "summary": "Get who polls a node",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Node UUID",
+                        "name": "nodeId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodePolling"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "503": {
+                        "description": "The read took too long: retry after Retry-After seconds",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
         "/nodes/{nodeId}/telemetry": {
             "get": {
                 "description": "Repeater readings bucketed into UTC windows. Counters are increments within the bucket, uptimeSeconds is the bucket maximum, the rest are averages; a field is omitted when no reading in the bucket carried it. Untrusted readings are left out unless include=untrusted, and counted in untrustedReadings. polled is true when the node has any reading at all.",
@@ -4965,6 +5018,14 @@ const docTemplate = `{
         "github_com_MeshCore-Beacon_beacon-server_internal_api.Info": {
             "type": "object",
             "properties": {
+                "features": {
+                    "description": "Features tells clients which optional parts of the API this server offers.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.InfoFeatures"
+                        }
+                    ]
+                },
                 "minAppVersion": {
                     "description": "MinAppVersion is the oldest allowed app version (X.Y.Z); null means no requirement.",
                     "type": "string",
@@ -4978,6 +5039,27 @@ const docTemplate = `{
                 "serverVersion": {
                     "type": "string",
                     "example": "2.0.2"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.InfoFeatures": {
+            "type": "object",
+            "properties": {
+                "accounts": {
+                    "type": "string",
+                    "example": "off"
+                },
+                "alerts": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "polling": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "telemetryRequests": {
+                    "type": "boolean",
+                    "example": false
                 }
             }
         },
@@ -5436,6 +5518,47 @@ const docTemplate = `{
                         "type",
                         "neighbors"
                     ]
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.NodePolling": {
+            "type": "object",
+            "properties": {
+                "latestReadingAt": {
+                    "description": "newest trusted reading, epoch ms",
+                    "type": "integer"
+                },
+                "polled": {
+                    "description": "any reading has ever been stored for the node",
+                    "type": "boolean"
+                },
+                "poller": {
+                    "description": "null when nobody is assigned",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodePollingObserver"
+                        }
+                    ]
+                },
+                "standbys": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodePollingObserver"
+                    }
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.NodePollingObserver": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "observerId": {
+                    "type": "string"
+                },
+                "rank": {
+                    "type": "integer"
                 }
             }
         },

@@ -24,6 +24,7 @@ import (
 // GET  /nodes/{nodeId}/observations → listNodeObservations
 // GET  /nodes/{nodeId}/activity     → getNodeActivity
 // GET  /nodes/{nodeId}/telemetry    → getNodeTelemetry
+// GET  /nodes/{nodeId}/polling      → getNodePolling
 func NodesRouter(reader api.Reader) http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", listNodes(reader))
@@ -32,6 +33,7 @@ func NodesRouter(reader api.Reader) http.Handler {
 		r.Get("/observations", listNodeObservations(reader))
 		r.Get("/activity", getNodeActivity(reader))
 		r.Get("/telemetry", getNodeTelemetry(reader))
+		r.Get("/polling", getNodePolling(reader))
 		r.Get("/neighbors", listNodeNeighbors(reader))
 	})
 	return r
@@ -443,5 +445,41 @@ func getNodeTelemetry(reader api.Reader) http.HandlerFunc {
 			UntrustedReadings: untrusted,
 			Points:            api.BucketNodeReadings(readings, since, size),
 		})
+	}
+}
+
+// getNodePolling godoc
+//
+//	@Summary		Get who polls a node
+//	@Description	The observer assigned to poll the node (null when nobody is), its standbys in rank order, and the time of the newest trusted reading. polled is true when the node has any reading at all. Answers as for an unpolled node when polling is off.
+//	@Tags			Nodes
+//	@Produce		json
+//	@Param			nodeId	path		string	true	"Node UUID"
+//	@Success		200		{object}	api.NodePolling
+//	@Failure		400		{object}	handlers.APIError
+//	@Failure		404		{object}	handlers.APIError
+//	@Failure		500		{object}	handlers.APIError
+//	@Failure		503		{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
+//	@Router			/nodes/{nodeId}/polling [get]
+func getNodePolling(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		nodeID, err := uuid.Parse(chi.URLParam(r, "nodeId"))
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "invalid node ID")
+			return
+		}
+		out, err := reader.GetNodePolling(r.Context(), nodeID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			respondError(w, http.StatusNotFound, "node not found")
+			return
+		}
+		if err != nil {
+			respondReaderError(w, err, "internal server error")
+			return
+		}
+		if out.Standbys == nil {
+			out.Standbys = []api.NodePollingObserver{}
+		}
+		respond(w, http.StatusOK, out)
 	}
 }

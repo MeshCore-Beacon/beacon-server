@@ -1425,3 +1425,81 @@ func TestNodeReadingsPostgres(t *testing.T) {
 		t.Fatalf("unknown node err = %v, want pgx.ErrNoRows", err)
 	}
 }
+
+func TestNodePollingPostgres(t *testing.T) {
+	ctx, pool, s := pollStore(t)
+	target := pollKey(0xA)
+	nodeID, bare := uuid.New(), uuid.New()
+	for id, k := range map[uuid.UUID][]byte{nodeID: target, bare: pollKey(0xB)} {
+		if _, err := pool.Exec(ctx, `INSERT INTO nodes (id, public_key, node_type, name) VALUES ($1, $2, 2, 'rep')`, id, k); err != nil {
+			t.Fatal(err)
+		}
+	}
+	o1, o2, o3, o4 := pollKey(1), pollKey(2), pollKey(3), pollKey(4)
+	id1, id2 := pollObserver(t, ctx, s, o1), pollObserver(t, ctx, s, o2)
+	id3 := pollObserver(t, ctx, s, o3)
+	if _, err := pool.Exec(ctx, `UPDATE observers SET display_name = 'HOWL V4.2' WHERE id = $1`, id1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE observers SET display_name = '' WHERE id = $1`, id3); err != nil {
+		t.Fatal(err)
+	}
+	// o2 keeps a NULL name; o4 has an assignment but no observers row.
+	now := time.Now().UTC().Truncate(time.Second)
+	for i, k := range [][]byte{o1, o2, o3, o4} {
+		rank := []int{0, 1, 2, 3}[i]
+		if _, err := pool.Exec(ctx, `INSERT INTO polling_assignments (target_public_key, observer_public_key, rank, assigned_at) VALUES ($1, $2, $3, $4)`,
+			target, k, rank, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add := func(at time.Time, tag int, trusted bool) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `INSERT INTO repeater_readings (target_public_key, observer_public_key, observer_id, sampled_at, received_at, method, tag, battery_mv, trusted)
+			VALUES ($1, $2, $3, $4, $4, 'status', $5, 4000, $6)`, target, o1, id1, at, tag, trusted); err != nil {
+			t.Fatal(err)
+		}
+	}
+	trustedAt := now.Add(-2 * time.Hour)
+	add(trustedAt, 1, true)
+	add(now.Add(-time.Hour), 2, false) // newer but untrusted
+
+	got, err := s.GetNodePolling(ctx, nodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Polled || got.LatestReadingAt == nil || *got.LatestReadingAt != trustedAt.UnixMilli() {
+		t.Errorf("polled=%v latest=%v, want the trusted reading %d", got.Polled, got.LatestReadingAt, trustedAt.UnixMilli())
+	}
+	if got.Poller == nil || got.Poller.ObserverID != id1 || got.Poller.Name != "HOWL V4.2" || got.Poller.Rank != 0 {
+		t.Errorf("poller = %+v", got.Poller)
+	}
+	if len(got.Standbys) != 2 || got.Standbys[0].ObserverID != id2 || got.Standbys[0].Rank != 1 || got.Standbys[0].Name != "02020202" ||
+		got.Standbys[1].ObserverID != id3 || got.Standbys[1].Rank != 2 || got.Standbys[1].Name != "03030303" {
+		t.Errorf("standbys = %+v (missing observer row must be left out, empty names fall back to key hex)", got.Standbys)
+	}
+
+	// Only untrusted readings: polled, but no latest reading.
+	if _, err := pool.Exec(ctx, `DELETE FROM repeater_readings WHERE tag = 1`); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = s.GetNodePolling(ctx, nodeID); err != nil || !got.Polled || got.LatestReadingAt != nil {
+		t.Errorf("untrusted only: %+v %v", got, err)
+	}
+
+	// A deleted poller row leaves the poller out.
+	if _, err := pool.Exec(ctx, `DELETE FROM observers WHERE id = $1`, id1); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = s.GetNodePolling(ctx, nodeID); err != nil || got.Poller != nil || len(got.Standbys) != 2 {
+		t.Errorf("deleted poller: %+v %v", got, err)
+	}
+
+	got, err = s.GetNodePolling(ctx, bare)
+	if err != nil || got.Polled || got.LatestReadingAt != nil || got.Poller != nil || got.Standbys == nil || len(got.Standbys) != 0 {
+		t.Fatalf("bare node: %+v %v", got, err)
+	}
+	if _, err = s.GetNodePolling(ctx, uuid.New()); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("unknown node err = %v, want pgx.ErrNoRows", err)
+	}
+}

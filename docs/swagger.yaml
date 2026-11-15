@@ -332,6 +332,11 @@ definitions:
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.Info:
     properties:
+      features:
+        allOf:
+        - $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.InfoFeatures'
+        description: Features tells clients which optional parts of the API this server
+          offers.
       minAppVersion:
         description: MinAppVersion is the oldest allowed app version (X.Y.Z); null
           means no requirement.
@@ -345,6 +350,21 @@ definitions:
       serverVersion:
         example: 2.0.2
         type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.InfoFeatures:
+    properties:
+      accounts:
+        example: "off"
+        type: string
+      alerts:
+        example: false
+        type: boolean
+      polling:
+        example: true
+        type: boolean
+      telemetryRequests:
+        example: false
+        type: boolean
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.KnownRoute:
     properties:
@@ -680,6 +700,32 @@ definitions:
         - type
         - neighbors
         type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.NodePolling:
+    properties:
+      latestReadingAt:
+        description: newest trusted reading, epoch ms
+        type: integer
+      polled:
+        description: any reading has ever been stored for the node
+        type: boolean
+      poller:
+        allOf:
+        - $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodePollingObserver'
+        description: null when nobody is assigned
+      standbys:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodePollingObserver'
+        type: array
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.NodePollingObserver:
+    properties:
+      name:
+        type: string
+      observerId:
+        type: string
+      rank:
+        type: integer
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.NodeSummary:
     properties:
@@ -3497,6 +3543,44 @@ paths:
           schema:
             $ref: '#/definitions/internal_api_handlers.APIError'
       summary: List packet observations originating from a node
+      tags:
+      - Nodes
+  /nodes/{nodeId}/polling:
+    get:
+      description: The observer assigned to poll the node (null when nobody is), its
+        standbys in rank order, and the time of the newest trusted reading. polled
+        is true when the node has any reading at all. Answers as for an unpolled node
+        when polling is off.
+      parameters:
+      - description: Node UUID
+        in: path
+        name: nodeId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodePolling'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+        "503":
+          description: 'The read took too long: retry after Retry-After seconds'
+          schema:
+            $ref: '#/definitions/internal_api_handlers.APIError'
+      summary: Get who polls a node
       tags:
       - Nodes
   /nodes/{nodeId}/telemetry:

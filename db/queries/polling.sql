@@ -279,3 +279,15 @@ LIMIT 1;
 
 -- name: NodeHasReadings :one
 SELECT EXISTS (SELECT 1 FROM repeater_readings WHERE target_public_key = $1);
+
+-- name: NodePollingAssignments :many
+-- Assigned observers of one target by rank. An assignment whose observer has no row is left out.
+SELECT o.id AS observer_id, a.rank::int AS rank,
+       COALESCE(NULLIF(o.display_name, ''), left(encode(o.public_key, 'hex'), 8))::text AS name
+FROM polling_assignments a
+JOIN observers o ON o.public_key = a.observer_public_key
+WHERE a.target_public_key = $1
+ORDER BY a.rank, o.id;
+
+-- name: NodeLatestTrustedReadingAt :one
+SELECT max(sampled_at)::timestamptz AS sampled_at FROM repeater_readings WHERE target_public_key = $1 AND trusted;

@@ -675,6 +675,53 @@ func (q *Queries) NodeHasReadings(ctx context.Context, targetPublicKey []byte) (
 	return exists, err
 }
 
+const nodeLatestTrustedReadingAt = `-- name: NodeLatestTrustedReadingAt :one
+SELECT max(sampled_at)::timestamptz AS sampled_at FROM repeater_readings WHERE target_public_key = $1 AND trusted
+`
+
+func (q *Queries) NodeLatestTrustedReadingAt(ctx context.Context, targetPublicKey []byte) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, nodeLatestTrustedReadingAt, targetPublicKey)
+	var sampled_at pgtype.Timestamptz
+	err := row.Scan(&sampled_at)
+	return sampled_at, err
+}
+
+const nodePollingAssignments = `-- name: NodePollingAssignments :many
+SELECT o.id AS observer_id, a.rank::int AS rank,
+       COALESCE(NULLIF(o.display_name, ''), left(encode(o.public_key, 'hex'), 8))::text AS name
+FROM polling_assignments a
+JOIN observers o ON o.public_key = a.observer_public_key
+WHERE a.target_public_key = $1
+ORDER BY a.rank, o.id
+`
+
+type NodePollingAssignmentsRow struct {
+	ObserverID uuid.UUID `json:"observer_id"`
+	Rank       int32     `json:"rank"`
+	Name       string    `json:"name"`
+}
+
+// Assigned observers of one target by rank. An assignment whose observer has no row is left out.
+func (q *Queries) NodePollingAssignments(ctx context.Context, targetPublicKey []byte) ([]NodePollingAssignmentsRow, error) {
+	rows, err := q.db.Query(ctx, nodePollingAssignments, targetPublicKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []NodePollingAssignmentsRow{}
+	for rows.Next() {
+		var i NodePollingAssignmentsRow
+		if err := rows.Scan(&i.ObserverID, &i.Rank, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const nodePublicKey = `-- name: NodePublicKey :one
 SELECT public_key FROM nodes WHERE id = $1
 `

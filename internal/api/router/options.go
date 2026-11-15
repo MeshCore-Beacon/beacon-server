@@ -39,6 +39,8 @@ type Options struct {
 	// GuestPolling answers the firmware policy and owners routes. Leave it an untyped nil when
 	// polling is not wired: a nil *polling.Service stored here is not == nil and would be called.
 	GuestPolling handlers.GuestPolling
+	// PollingEnabled is reported as features.polling in /info.
+	PollingEnabled bool
 	// APIPlanLayout is reported in the admin config's guards view.
 	APIPlanLayout string
 }

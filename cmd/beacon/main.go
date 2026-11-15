@@ -619,9 +619,10 @@ func main() {
 			"/polling": handlers.PollingAdminRouter(pollingAdmin, handlers.PollingAdminConfig{
 				Paused: resolvedPolling.Paused, Authority: resolvedPolling.Authority, ExcludedNodes: resolvedPolling.ExcludedNodes}),
 		},
-		GuestPolling:  guestPolling,
-		Guards:        guard,
-		APIPlanLayout: string(layout),
+		GuestPolling:   guestPolling,
+		PollingEnabled: resolvedPolling.Enabled,
+		Guards:         guard,
+		APIPlanLayout:  string(layout),
 	})
 
 	srv := newHTTPServer(addr, r)
