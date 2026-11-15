@@ -51,7 +51,7 @@ type Data struct {
 	Now time.Time
 	// Exists: the node or observer row is there.
 	Exists bool
-	// Polled: readings or telemetry arrived within the data window.
+	// Polled: the radio has a current source (a polling assignment, or fresh status telemetry for an observer).
 	Polled bool
 	// LastHeard is nodes.last_seen (also counting a trusted reading) or observers.last_seen; zero when never.
 	LastHeard time.Time

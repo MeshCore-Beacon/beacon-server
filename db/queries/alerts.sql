@@ -70,7 +70,9 @@ SELECT EXISTS (
 SELECT n.id, n.public_key, n.node_type, COALESCE(n.name, '')::text AS name,
        COALESCE(c.readings, 0)::int AS readings,
        COALESCE(c.battery, false)::boolean AS has_battery, COALESCE(c.temperature, false)::boolean AS has_temperature,
-       COALESCE(c.noise, false)::boolean AS has_noise, COALESCE(c.uptime, false)::boolean AS has_uptime
+       COALESCE(c.noise, false)::boolean AS has_noise, COALESCE(c.uptime, false)::boolean AS has_uptime,
+       -- Polled is a current source, not history: some observer holds the repeater as a polling assignment.
+       EXISTS (SELECT 1 FROM polling_assignments a WHERE a.target_public_key = n.public_key) AS polled
 FROM nodes n
 LEFT JOIN LATERAL (
     SELECT count(*) AS readings, bool_or(r.battery_mv IS NOT NULL) AS battery, bool_or(r.temperature_c IS NOT NULL) AS temperature,
@@ -83,7 +85,9 @@ WHERE n.public_key = ANY(sqlc.arg(keys)::bytea[]);
 -- name: AlertObserverCaps :many
 SELECT o.id, o.public_key, COALESCE(o.display_name, '')::text AS name,
        COALESCE(c.battery, false)::boolean AS has_battery, COALESCE(c.noise, false)::boolean AS has_noise,
-       COALESCE(c.uptime, false)::boolean AS has_uptime
+       COALESCE(c.uptime, false)::boolean AS has_uptime,
+       -- Polled is a current source, not history: status telemetry arrived since fresh_since.
+       EXISTS (SELECT 1 FROM observer_telemetry f WHERE f.observer_id = o.id AND f.reported_at >= sqlc.arg(fresh_since)) AS polled
 FROM observers o
 LEFT JOIN LATERAL (
     SELECT bool_or(t.battery_voltage_mv IS NOT NULL) AS battery, bool_or(t.noise_floor_db IS NOT NULL) AS noise,

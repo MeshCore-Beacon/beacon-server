@@ -7766,7 +7766,7 @@ const docTemplate = `{
                     "example": "Hilltop"
                 },
                 "polled": {
-                    "description": "Polled: Beacon has trusted telemetry for this radio now. It is what offers the telemetry kinds and the 3 and 6 hour\ngone_quiet thresholds for a repeater (observers always have those).",
+                    "description": "Polled: the radio has a current source: a repeater is assigned to an observer that polls it, an observer has sent\nstatus telemetry in the last day. Old readings alone do not count. It is what offers the telemetry kinds and the 3 and 6 hour\ngone_quiet thresholds for a repeater (observers always have those).",
                     "type": "boolean"
                 },
                 "publicKey": {

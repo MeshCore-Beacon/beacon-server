@@ -18,6 +18,7 @@ import (
 	mailer "github.com/MeshCore-Beacon/beacon-server/internal/mail"
 	"github.com/MeshCore-Beacon/beacon-server/internal/users"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 type outboxRow struct {
@@ -68,6 +69,7 @@ func TestAlertEvaluationPassPostgres(t *testing.T) {
 	}
 	insertReading(t, ctx, s, rep, now.Add(-45*time.Hour), 3450, nil)
 	insertReading(t, ctx, s, rep, now.Add(-44*time.Hour), 3400, nil)
+	assignPoller(t, ctx, s, rep)
 	var obsID uuid.UUID
 	if err := pool.QueryRow(ctx, `INSERT INTO observers (public_key, display_name, last_seen, last_status_at) VALUES ($1, 'North', $2, $3) RETURNING id`,
 		obsKey, now, now.Add(-3*time.Hour)).Scan(&obsID); err != nil {
@@ -640,5 +642,97 @@ func TestAlertClockNeedsConsecutiveAdvertsPostgres(t *testing.T) {
 	}
 	if got := run(0); got != "ok" {
 		t.Fatalf("a normal advert should recover: %s", got)
+	}
+}
+
+func ruleStateOf(t *testing.T, ctx context.Context, pool interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, kind string) string {
+	t.Helper()
+	var st string
+	if err := pool.QueryRow(ctx, `SELECT state FROM user_alert_rules WHERE kind = $1`, kind).Scan(&st); err != nil {
+		t.Fatal(err)
+	}
+	return st
+}
+
+// Readings from days ago do not make a radio polled: it needs a polling assignment (a repeater) or fresh status
+// telemetry (an observer). The overview's flag and the evaluation use the same answer.
+func TestAlertPolledNeedsACurrentSourcePostgres(t *testing.T) {
+	ctx, pool, s := userStore(t)
+	svc := alertSvc(s)
+	u := newUser(t, ctx, s, "alice")
+	rep, obsKey := atlasKey(1), atlasKey(2)
+	insertNode(t, ctx, s, rep, 2, "Hilltop")
+	insertReading(t, ctx, s, rep, time.Now().Add(-47*time.Hour), 3000, nil)
+	insertReading(t, ctx, s, rep, time.Now().Add(-48*time.Hour), 3000, nil)
+	var obsID uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO observers (public_key, display_name, last_seen, last_status_at) VALUES ($1, 'North', now(), now()) RETURNING id`, obsKey).Scan(&obsID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO observer_telemetry (id, observer_id, reported_at, battery_voltage_mv, noise_floor_db, uptime_seconds)
+		VALUES (1, $1, now() - interval '30 hours', 3000, -100, 5000), (2, $1, now() - interval '31 hours', 3000, -100, 4000)`, obsID); err != nil {
+		t.Fatal(err)
+	}
+	pinAtlas(t, ctx, s, u, 0, api.StoredPin{Kind: "node", Key: rep}, api.StoredPin{Kind: "observer", Key: obsKey})
+	for _, r := range []struct {
+		kind string
+		key  []byte
+		tk   string
+	}{{"battery_low", rep, "node"}, {"noise_high", obsKey, "observer"}} {
+		th := 3500
+		if r.kind == "noise_high" {
+			th = -130
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO user_alert_rules (user_id, target_kind, target_public_key, kind, threshold, cursor_at)
+			VALUES ($1, $2, $3, $4, $5, now() - interval '3 days')`, u.ID, r.tk, r.key, r.kind, th); err != nil {
+			t.Fatal(err)
+		}
+	}
+	task := alerts.NewTask(AlertEval{s}, time.Now)
+	polled := func() (node, observer bool) {
+		t.Helper()
+		ov, err := svc.Overview(ctx, u.ID)
+		if err != nil || len(ov.Targets) != 2 {
+			t.Fatalf("%+v %v", ov, err)
+		}
+		return ov.Targets[0].Caps.Polled, ov.Targets[1].Caps.Polled
+	}
+	pass := func() (string, string) {
+		t.Helper()
+		if err := task.Run(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return ruleStateOf(t, ctx, pool, "battery_low"), ruleStateOf(t, ctx, pool, "noise_high")
+	}
+
+	// Only history: not polled, and the rules read as inactive.
+	if n, o := polled(); n || o {
+		t.Fatalf("history alone made them polled: %v %v", n, o)
+	}
+	if a, b := pass(); a != "inactive" || b != "inactive" {
+		t.Fatalf("rules without a source: %s %s", a, b)
+	}
+	// A polling assignment and a fresh telemetry row bring both back.
+	assignPoller(t, ctx, s, rep)
+	if _, err := pool.Exec(ctx, `INSERT INTO observer_telemetry (id, observer_id, reported_at, battery_voltage_mv, noise_floor_db, uptime_seconds)
+		VALUES (3, $1, now() - interval '5 minutes', 3000, -60, 6000), (4, $1, now() - interval '10 minutes', 3000, -60, 5900)`, obsID); err != nil {
+		t.Fatal(err)
+	}
+	if n, o := polled(); !n || !o {
+		t.Fatalf("a current source is not polled: %v %v", n, o)
+	}
+	if a, b := pass(); a != "firing" || b != "firing" {
+		t.Fatalf("rules with a source: %s %s", a, b)
+	}
+	// Taking the assignment away makes the repeater's rule inactive again.
+	if _, err := pool.Exec(ctx, `DELETE FROM polling_assignments`); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := polled(); n {
+		t.Fatal("still polled without an assignment")
+	}
+	if a, _ := pass(); a != "inactive" {
+		t.Fatalf("rule after the source went: %s", a)
 	}
 }

@@ -24,7 +24,8 @@ type AlertTarget struct {
 	Kind      string  `json:"kind" enums:"node,observer"`
 	PublicKey string  `json:"publicKey"`
 	Name      string  `json:"name" example:"Hilltop"`
-	// Polled: Beacon has trusted telemetry for this radio now. It is what offers the telemetry kinds and the 3 and 6 hour
+	// Polled: the radio has a current source: a repeater is assigned to an observer that polls it, an observer has sent
+	// status telemetry in the last day. Old readings alone do not count. It is what offers the telemetry kinds and the 3 and 6 hour
 	// gone_quiet thresholds for a repeater (observers always have those).
 	Polled    bool     `json:"polled"`
 	Available []string `json:"available"`

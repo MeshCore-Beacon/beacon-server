@@ -36,6 +36,14 @@ func insertNode(t *testing.T, ctx context.Context, s *Store, key []byte, nodeTyp
 	}
 }
 
+// assignPoller gives the repeater a polling assignment, which is what makes it polled.
+func assignPoller(t *testing.T, ctx context.Context, s *Store, target []byte) {
+	t.Helper()
+	if _, err := s.pool.Exec(ctx, `INSERT INTO polling_assignments (target_public_key, observer_public_key, rank, assigned_at) VALUES ($1, $2, 0, now())`, target, atlasKey(0xee)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func insertReading(t *testing.T, ctx context.Context, s *Store, target []byte, at time.Time, battery int, temp *float64) {
 	t.Helper()
 	obs := atlasKey(0xee)
@@ -54,6 +62,7 @@ func TestAlertRulesPostgres(t *testing.T) {
 	insertNode(t, ctx, s, rep, 2, "Hilltop")
 	insertNode(t, ctx, s, comp, 1, "Phone")
 	insertReading(t, ctx, s, rep, time.Now().Add(-time.Hour), 3900, nil)
+	assignPoller(t, ctx, s, rep)
 	pinAtlas(t, ctx, s, u, 0,
 		api.StoredPin{Kind: "node", Key: rep, Name: "My hill"},
 		api.StoredPin{Kind: "node", Key: comp},

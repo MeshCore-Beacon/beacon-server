@@ -8,6 +8,7 @@ package alerts
 import (
 	"fmt"
 	"slices"
+	"time"
 )
 
 // Alert kinds, in the order clients list them.
@@ -40,8 +41,12 @@ const (
 	nodeTypeRoomServer = 3
 )
 
-// DataWindow is how far back readings count as "the radio is being polled" and which readings describe it.
-const DataWindow = 14 * 24 * 3600 // seconds
+// DataWindow is how far back readings are looked at (seconds). It decides which readings describe the radio, not
+// whether the radio is polled.
+const DataWindow = 14 * 24 * 3600
+
+// ObserverFresh is how recent an observer's status telemetry must be for it to count as a current source.
+const ObserverFresh = 24 * time.Hour
 
 // Caps is what a radio is and what Beacon has recently seen it report.
 type Caps struct {
@@ -51,7 +56,8 @@ type Caps struct {
 	Observer bool
 	HasNode  bool
 	NodeType int16 // nodes only
-	// Polled: trusted readings (nodes) or telemetry (observers) arrived in the data window.
+	// Polled: the radio has a current source: a polling assignment (nodes) or fresh status telemetry (observers).
+	// The data flags below only count while it does, so readings from before the source went do not offer a kind.
 	Polled                              bool
 	Battery, Temperature, Noise, Uptime bool
 	ObsBattery, ObsNoise, ObsUptime     bool

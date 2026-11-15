@@ -25,11 +25,15 @@ ORDER BY r.id
 LIMIT sqlc.arg(row_limit);
 
 -- name: AlertNodesData :many
-SELECT public_key, COALESCE(name, '')::text AS name, last_seen, last_advert_at, device_clock_drift_seconds, prev_clock_drift_seconds
+-- polled is the same test as the overview's (AlertNodeCaps): a current polling assignment.
+SELECT public_key, COALESCE(name, '')::text AS name, last_seen, last_advert_at, device_clock_drift_seconds, prev_clock_drift_seconds,
+       EXISTS (SELECT 1 FROM polling_assignments a WHERE a.target_public_key = nodes.public_key) AS polled
 FROM nodes WHERE public_key = ANY(sqlc.arg(keys)::bytea[]);
 
 -- name: AlertObserversData :many
-SELECT id, public_key, COALESCE(display_name, '')::text AS name, last_seen, last_status_at
+-- polled is the same test as the overview's (AlertObserverCaps): status telemetry within fresh_since.
+SELECT id, public_key, COALESCE(display_name, '')::text AS name, last_seen, last_status_at,
+       EXISTS (SELECT 1 FROM observer_telemetry f WHERE f.observer_id = observers.id AND f.reported_at >= sqlc.arg(fresh_since)) AS polled
 FROM observers WHERE public_key = ANY(sqlc.arg(keys)::bytea[]);
 
 -- name: AlertNodeReadings :many

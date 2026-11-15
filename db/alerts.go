@@ -47,6 +47,7 @@ type radioCaps struct {
 
 func loadRadioCaps(ctx context.Context, q sqlc.Querier, keys [][]byte, now time.Time) (radioCaps, error) {
 	since := ts(now.Add(-alerts.DataWindow * time.Second))
+	fresh := ts(now.Add(-alerts.ObserverFresh))
 	rc := radioCaps{node: map[string]sqlc.AlertNodeCapsRow{}, observer: map[string]sqlc.AlertObserverCapsRow{}}
 	nodes, err := q.AlertNodeCaps(ctx, sqlc.AlertNodeCapsParams{Since: since, Keys: keys})
 	if err != nil {
@@ -55,7 +56,7 @@ func loadRadioCaps(ctx context.Context, q sqlc.Querier, keys [][]byte, now time.
 	for _, n := range nodes {
 		rc.node[hex.EncodeToString(n.PublicKey)] = n
 	}
-	obs, err := q.AlertObserverCaps(ctx, sqlc.AlertObserverCapsParams{Since: since, Keys: keys})
+	obs, err := q.AlertObserverCaps(ctx, sqlc.AlertObserverCapsParams{Since: since, FreshSince: fresh, Keys: keys})
 	if err != nil {
 		return rc, err
 	}
@@ -71,10 +72,14 @@ func loadRadioCaps(ctx context.Context, q sqlc.Querier, keys [][]byte, now time.
 func (rc radioCaps) pick(key, want string) (id uuid.UUID, kind string, c alerts.Caps, name string) {
 	n, isNode := rc.node[key]
 	o, isObs := rc.observer[key]
+	// What a radio reports only counts while it has a current source (the same test the evaluation applies).
+	nodeCaps := alerts.Caps{HasNode: true, NodeType: n.NodeType, Polled: n.Polled, Battery: n.Polled && n.HasBattery,
+		Temperature: n.Polled && n.HasTemperature, Noise: n.Polled && n.HasNoise, Uptime: n.Polled && n.HasUptime}
+	obsCaps := alerts.Caps{Observer: true, Polled: o.Polled, Battery: o.Polled && o.HasBattery, Noise: o.Polled && o.HasNoise, Uptime: o.Polled && o.HasUptime}
 	if isNode && isObs {
-		c = alerts.Caps{Observer: true, HasNode: true, NodeType: n.NodeType, Polled: n.Readings > 0 || o.HasBattery || o.HasNoise || o.HasUptime,
-			Battery: n.HasBattery || o.HasBattery, Temperature: n.HasTemperature, Noise: n.HasNoise || o.HasNoise, Uptime: n.HasUptime || o.HasUptime,
-			ObsBattery: o.HasBattery, ObsNoise: o.HasNoise, ObsUptime: o.HasUptime}
+		c = alerts.Caps{Observer: true, HasNode: true, NodeType: n.NodeType, Polled: n.Polled || o.Polled,
+			Battery: nodeCaps.Battery || obsCaps.Battery, Temperature: nodeCaps.Temperature, Noise: nodeCaps.Noise || obsCaps.Noise,
+			Uptime: nodeCaps.Uptime || obsCaps.Uptime, ObsBattery: obsCaps.Battery, ObsNoise: obsCaps.Noise, ObsUptime: obsCaps.Uptime}
 		if want == alerts.TargetObserver {
 			return o.ID, alerts.TargetObserver, c, o.Name
 		}
@@ -83,11 +88,9 @@ func (rc radioCaps) pick(key, want string) (id uuid.UUID, kind string, c alerts.
 	asObserver := (want == alerts.TargetObserver && isObs) || (!isNode && isObs)
 	switch {
 	case asObserver:
-		return o.ID, alerts.TargetObserver, alerts.Caps{Observer: true, Polled: o.HasBattery || o.HasNoise || o.HasUptime,
-			Battery: o.HasBattery, Noise: o.HasNoise, Uptime: o.HasUptime}, o.Name
+		return o.ID, alerts.TargetObserver, obsCaps, o.Name
 	case isNode:
-		return n.ID, alerts.TargetNode, alerts.Caps{HasNode: true, NodeType: n.NodeType, Polled: n.Readings > 0, Battery: n.HasBattery,
-			Temperature: n.HasTemperature, Noise: n.HasNoise, Uptime: n.HasUptime}, n.Name
+		return n.ID, alerts.TargetNode, nodeCaps, n.Name
 	}
 	return uuid.Nil, want, alerts.Caps{Observer: want == alerts.TargetObserver}, ""
 }

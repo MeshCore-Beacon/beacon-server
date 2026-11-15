@@ -16,7 +16,9 @@ const alertNodeCaps = `-- name: AlertNodeCaps :many
 SELECT n.id, n.public_key, n.node_type, COALESCE(n.name, '')::text AS name,
        COALESCE(c.readings, 0)::int AS readings,
        COALESCE(c.battery, false)::boolean AS has_battery, COALESCE(c.temperature, false)::boolean AS has_temperature,
-       COALESCE(c.noise, false)::boolean AS has_noise, COALESCE(c.uptime, false)::boolean AS has_uptime
+       COALESCE(c.noise, false)::boolean AS has_noise, COALESCE(c.uptime, false)::boolean AS has_uptime,
+       -- Polled is a current source, not history: some observer holds the repeater as a polling assignment.
+       EXISTS (SELECT 1 FROM polling_assignments a WHERE a.target_public_key = n.public_key) AS polled
 FROM nodes n
 LEFT JOIN LATERAL (
     SELECT count(*) AS readings, bool_or(r.battery_mv IS NOT NULL) AS battery, bool_or(r.temperature_c IS NOT NULL) AS temperature,
@@ -42,6 +44,7 @@ type AlertNodeCapsRow struct {
 	HasTemperature bool      `json:"has_temperature"`
 	HasNoise       bool      `json:"has_noise"`
 	HasUptime      bool      `json:"has_uptime"`
+	Polled         bool      `json:"polled"`
 }
 
 // What each of the nodes is and what a polled one reports, over the readings since the cutoff.
@@ -64,6 +67,7 @@ func (q *Queries) AlertNodeCaps(ctx context.Context, arg AlertNodeCapsParams) ([
 			&i.HasTemperature,
 			&i.HasNoise,
 			&i.HasUptime,
+			&i.Polled,
 		); err != nil {
 			return nil, err
 		}
@@ -78,20 +82,23 @@ func (q *Queries) AlertNodeCaps(ctx context.Context, arg AlertNodeCapsParams) ([
 const alertObserverCaps = `-- name: AlertObserverCaps :many
 SELECT o.id, o.public_key, COALESCE(o.display_name, '')::text AS name,
        COALESCE(c.battery, false)::boolean AS has_battery, COALESCE(c.noise, false)::boolean AS has_noise,
-       COALESCE(c.uptime, false)::boolean AS has_uptime
+       COALESCE(c.uptime, false)::boolean AS has_uptime,
+       -- Polled is a current source, not history: status telemetry arrived since fresh_since.
+       EXISTS (SELECT 1 FROM observer_telemetry f WHERE f.observer_id = o.id AND f.reported_at >= $1) AS polled
 FROM observers o
 LEFT JOIN LATERAL (
     SELECT bool_or(t.battery_voltage_mv IS NOT NULL) AS battery, bool_or(t.noise_floor_db IS NOT NULL) AS noise,
            bool_or(t.uptime_seconds IS NOT NULL) AS uptime
     FROM observer_telemetry t
-    WHERE t.observer_id = o.id AND t.reported_at >= $1
+    WHERE t.observer_id = o.id AND t.reported_at >= $2
 ) c ON true
-WHERE o.public_key = ANY($2::bytea[])
+WHERE o.public_key = ANY($3::bytea[])
 `
 
 type AlertObserverCapsParams struct {
-	Since pgtype.Timestamptz `json:"since"`
-	Keys  [][]byte           `json:"keys"`
+	FreshSince pgtype.Timestamptz `json:"fresh_since"`
+	Since      pgtype.Timestamptz `json:"since"`
+	Keys       [][]byte           `json:"keys"`
 }
 
 type AlertObserverCapsRow struct {
@@ -101,10 +108,11 @@ type AlertObserverCapsRow struct {
 	HasBattery bool      `json:"has_battery"`
 	HasNoise   bool      `json:"has_noise"`
 	HasUptime  bool      `json:"has_uptime"`
+	Polled     bool      `json:"polled"`
 }
 
 func (q *Queries) AlertObserverCaps(ctx context.Context, arg AlertObserverCapsParams) ([]AlertObserverCapsRow, error) {
-	rows, err := q.db.Query(ctx, alertObserverCaps, arg.Since, arg.Keys)
+	rows, err := q.db.Query(ctx, alertObserverCaps, arg.FreshSince, arg.Since, arg.Keys)
 	if err != nil {
 		return nil, err
 	}
@@ -119,6 +127,7 @@ func (q *Queries) AlertObserverCaps(ctx context.Context, arg AlertObserverCapsPa
 			&i.HasBattery,
 			&i.HasNoise,
 			&i.HasUptime,
+			&i.Polled,
 		); err != nil {
 			return nil, err
 		}

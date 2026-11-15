@@ -33,11 +33,13 @@ type Querier interface {
 	AlertNodeDayAgo(ctx context.Context, arg AlertNodeDayAgoParams) ([]AlertNodeDayAgoRow, error)
 	// The newest trusted readings of each repeater within the window, at most 12 each.
 	AlertNodeReadings(ctx context.Context, arg AlertNodeReadingsParams) ([]AlertNodeReadingsRow, error)
+	// polled is the same test as the overview's (AlertNodeCaps): a current polling assignment.
 	AlertNodesData(ctx context.Context, keys [][]byte) ([]AlertNodesDataRow, error)
 	AlertObserverCaps(ctx context.Context, arg AlertObserverCapsParams) ([]AlertObserverCapsRow, error)
 	AlertObserverDayAgo(ctx context.Context, arg AlertObserverDayAgoParams) ([]AlertObserverDayAgoRow, error)
 	AlertObserverTelemetry(ctx context.Context, arg AlertObserverTelemetryParams) ([]AlertObserverTelemetryRow, error)
-	AlertObserversData(ctx context.Context, keys [][]byte) ([]AlertObserversDataRow, error)
+	// polled is the same test as the overview's (AlertObserverCaps): status telemetry within fresh_since.
+	AlertObserversData(ctx context.Context, arg AlertObserversDataParams) ([]AlertObserversDataRow, error)
 	// The next enabled rules of live users after the id, with the name the user gave the pin and, for a back_online
 	// rule, when the radio's gone_quiet rule last recovered and whether that rule is on.
 	AlertRuleBatch(ctx context.Context, arg AlertRuleBatchParams) ([]AlertRuleBatchRow, error)

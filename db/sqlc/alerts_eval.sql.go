@@ -115,7 +115,8 @@ func (q *Queries) AlertNodeReadings(ctx context.Context, arg AlertNodeReadingsPa
 }
 
 const alertNodesData = `-- name: AlertNodesData :many
-SELECT public_key, COALESCE(name, '')::text AS name, last_seen, last_advert_at, device_clock_drift_seconds, prev_clock_drift_seconds
+SELECT public_key, COALESCE(name, '')::text AS name, last_seen, last_advert_at, device_clock_drift_seconds, prev_clock_drift_seconds,
+       EXISTS (SELECT 1 FROM polling_assignments a WHERE a.target_public_key = nodes.public_key) AS polled
 FROM nodes WHERE public_key = ANY($1::bytea[])
 `
 
@@ -126,8 +127,10 @@ type AlertNodesDataRow struct {
 	LastAdvertAt            pgtype.Timestamptz `json:"last_advert_at"`
 	DeviceClockDriftSeconds *int64             `json:"device_clock_drift_seconds"`
 	PrevClockDriftSeconds   *int64             `json:"prev_clock_drift_seconds"`
+	Polled                  bool               `json:"polled"`
 }
 
+// polled is the same test as the overview's (AlertNodeCaps): a current polling assignment.
 func (q *Queries) AlertNodesData(ctx context.Context, keys [][]byte) ([]AlertNodesDataRow, error) {
 	rows, err := q.db.Query(ctx, alertNodesData, keys)
 	if err != nil {
@@ -144,6 +147,7 @@ func (q *Queries) AlertNodesData(ctx context.Context, keys [][]byte) ([]AlertNod
 			&i.LastAdvertAt,
 			&i.DeviceClockDriftSeconds,
 			&i.PrevClockDriftSeconds,
+			&i.Polled,
 		); err != nil {
 			return nil, err
 		}
@@ -254,9 +258,15 @@ func (q *Queries) AlertObserverTelemetry(ctx context.Context, arg AlertObserverT
 }
 
 const alertObserversData = `-- name: AlertObserversData :many
-SELECT id, public_key, COALESCE(display_name, '')::text AS name, last_seen, last_status_at
-FROM observers WHERE public_key = ANY($1::bytea[])
+SELECT id, public_key, COALESCE(display_name, '')::text AS name, last_seen, last_status_at,
+       EXISTS (SELECT 1 FROM observer_telemetry f WHERE f.observer_id = observers.id AND f.reported_at >= $1) AS polled
+FROM observers WHERE public_key = ANY($2::bytea[])
 `
+
+type AlertObserversDataParams struct {
+	FreshSince pgtype.Timestamptz `json:"fresh_since"`
+	Keys       [][]byte           `json:"keys"`
+}
 
 type AlertObserversDataRow struct {
 	ID           uuid.UUID          `json:"id"`
@@ -264,10 +274,12 @@ type AlertObserversDataRow struct {
 	Name         string             `json:"name"`
 	LastSeen     pgtype.Timestamptz `json:"last_seen"`
 	LastStatusAt pgtype.Timestamptz `json:"last_status_at"`
+	Polled       bool               `json:"polled"`
 }
 
-func (q *Queries) AlertObserversData(ctx context.Context, keys [][]byte) ([]AlertObserversDataRow, error) {
-	rows, err := q.db.Query(ctx, alertObserversData, keys)
+// polled is the same test as the overview's (AlertObserverCaps): status telemetry within fresh_since.
+func (q *Queries) AlertObserversData(ctx context.Context, arg AlertObserversDataParams) ([]AlertObserversDataRow, error) {
+	rows, err := q.db.Query(ctx, alertObserversData, arg.FreshSince, arg.Keys)
 	if err != nil {
 		return nil, err
 	}
@@ -281,6 +293,7 @@ func (q *Queries) AlertObserversData(ctx context.Context, keys [][]byte) ([]Aler
 			&i.Name,
 			&i.LastSeen,
 			&i.LastStatusAt,
+			&i.Polled,
 		); err != nil {
 			return nil, err
 		}

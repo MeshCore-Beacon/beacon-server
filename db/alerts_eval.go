@@ -127,7 +127,7 @@ func (a AlertEval) LoadTargets(ctx context.Context, rules []alerts.RuleRow, now 
 		}
 		for _, n := range nodes {
 			td := alerts.TargetData{Name: n.Name}
-			td.Exists, td.LastHeard, td.AdvertAt = true, tsTime(n.LastSeen), tsTime(n.LastAdvertAt)
+			td.Exists, td.Polled, td.LastHeard, td.AdvertAt = true, n.Polled, tsTime(n.LastSeen), tsTime(n.LastAdvertAt)
 			td.DriftSec, td.PrevDriftSec = n.DeviceClockDriftSeconds, n.PrevClockDriftSeconds
 			out[alerts.TargetID(alerts.TargetNode, n.PublicKey)] = td
 		}
@@ -147,7 +147,6 @@ func (a AlertEval) LoadTargets(ctx context.Context, rules []alerts.RuleRow, now 
 			}
 			rd.NoiseDBm = ip32(r.NoiseFloor)
 			td.Readings = append(td.Readings, rd)
-			td.Polled = true
 			if rd.At.After(td.LastHeard) {
 				td.LastHeard = rd.At // a trusted reading counts as hearing the repeater
 			}
@@ -169,7 +168,7 @@ func (a AlertEval) LoadTargets(ctx context.Context, rules []alerts.RuleRow, now 
 	}
 
 	if len(obsKeys) > 0 {
-		obs, err := a.q.AlertObserversData(ctx, obsKeys)
+		obs, err := a.q.AlertObserversData(ctx, sqlc.AlertObserversDataParams{Keys: obsKeys, FreshSince: ts(now.Add(-alerts.ObserverFresh))})
 		if err != nil {
 			return nil, err
 		}
@@ -178,7 +177,7 @@ func (a AlertEval) LoadTargets(ctx context.Context, rules []alerts.RuleRow, now 
 		for _, o := range obs {
 			id := alerts.TargetID(alerts.TargetObserver, o.PublicKey)
 			td := alerts.TargetData{Name: o.Name}
-			td.Exists, td.LastHeard, td.StatusAt = true, tsTime(o.LastSeen), tsTime(o.LastStatusAt)
+			td.Exists, td.Polled, td.LastHeard, td.StatusAt = true, o.Polled, tsTime(o.LastSeen), tsTime(o.LastStatusAt)
 			out[id] = td
 			byID[o.ID] = id
 			ids = append(ids, o.ID)
@@ -196,7 +195,6 @@ func (a AlertEval) LoadTargets(ctx context.Context, rules []alerts.RuleRow, now 
 					rd.NoiseDBm = round(float64(*r.NoiseFloorDb))
 				}
 				td.Readings = append(td.Readings, rd)
-				td.Polled = true
 				out[id] = td
 			}
 			var fallIDs []uuid.UUID

@@ -236,18 +236,18 @@ func (mr *MockQuerierMockRecorder) AlertObserverTelemetry(ctx, arg any) *gomock.
 }
 
 // AlertObserversData mocks base method.
-func (m *MockQuerier) AlertObserversData(ctx context.Context, keys [][]byte) ([]db.AlertObserversDataRow, error) {
+func (m *MockQuerier) AlertObserversData(ctx context.Context, arg db.AlertObserversDataParams) ([]db.AlertObserversDataRow, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "AlertObserversData", ctx, keys)
+	ret := m.ctrl.Call(m, "AlertObserversData", ctx, arg)
 	ret0, _ := ret[0].([]db.AlertObserversDataRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // AlertObserversData indicates an expected call of AlertObserversData.
-func (mr *MockQuerierMockRecorder) AlertObserversData(ctx, keys any) *gomock.Call {
+func (mr *MockQuerierMockRecorder) AlertObserversData(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AlertObserversData", reflect.TypeOf((*MockQuerier)(nil).AlertObserversData), ctx, keys)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AlertObserversData", reflect.TypeOf((*MockQuerier)(nil).AlertObserversData), ctx, arg)
 }
 
 // AlertRuleBatch mocks base method.
