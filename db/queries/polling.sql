@@ -202,7 +202,7 @@ ORDER BY cl.observer_public_key;
 
 -- name: PollingOwnerRows :many
 -- assigned counts the target's assignment rows. latest_ts only trusts readings from an assigned observer with
--- advert evidence, so an observer Beacon has never heard the repeater through cannot stand others down. A target the
+-- advert evidence (the newest per assignee, then the newest of those), so an observer Beacon has never heard the repeater through cannot stand others down. A target the
 -- observer was handed as a requested one is listed even before its claim names it (that is how it learns of it);
 -- claimed_requested is true when the claim names it as requested; target_requested when a request is in use for it.
 -- accepts_requests and request_slots are the claim's, for polling.OfferSeats. The observer's flags and the password
@@ -216,10 +216,12 @@ WITH mine AS (
 )
 SELECT m.target_public_key::bytea AS target_public_key, COALESCE(a.rank, -1)::int AS rank,
        (SELECT count(*) FROM polling_assignments x WHERE x.target_public_key = m.target_public_key)::int AS assigned,
-       (SELECT r.sampled_at FROM repeater_readings r
-        JOIN polling_assignments t ON t.target_public_key = r.target_public_key AND t.observer_public_key = r.observer_public_key
-        WHERE r.target_public_key = m.target_public_key AND t.evidence_count > 0
-        ORDER BY r.sampled_at DESC LIMIT 1)::timestamptz AS latest_ts,
+       (SELECT max(l.sampled_at) FROM polling_assignments t
+        CROSS JOIN LATERAL (
+            SELECT r.sampled_at FROM repeater_readings r
+            WHERE r.target_public_key = t.target_public_key AND r.observer_public_key = t.observer_public_key
+            ORDER BY r.sampled_at DESC LIMIT 1) l
+        WHERE t.target_public_key = m.target_public_key AND t.evidence_count > 0)::timestamptz AS latest_ts,
        COALESCE(a.requested, false)::boolean AS requested,
        COALESCE(pc.requested, false)::boolean AS claimed_requested,
        EXISTS (SELECT 1 FROM polling_targets pt
@@ -327,10 +329,12 @@ WITH t AS (
     LIMIT sqlc.arg(row_limit)
 )
 SELECT p.target_public_key::bytea AS target_public_key,
-       (SELECT r.sampled_at FROM repeater_readings r
-        JOIN polling_assignments x ON x.target_public_key = r.target_public_key AND x.observer_public_key = r.observer_public_key
-        WHERE r.target_public_key = p.target_public_key AND x.evidence_count > 0
-        ORDER BY r.sampled_at DESC LIMIT 1)::timestamptz AS latest_trusted,
+       (SELECT max(l.sampled_at) FROM polling_assignments x
+        CROSS JOIN LATERAL (
+            SELECT r.sampled_at FROM repeater_readings r
+            WHERE r.target_public_key = x.target_public_key AND r.observer_public_key = x.observer_public_key
+            ORDER BY r.sampled_at DESC LIMIT 1) l
+        WHERE x.target_public_key = p.target_public_key AND x.evidence_count > 0)::timestamptz AS latest_trusted,
        (SELECT r.sampled_at FROM repeater_readings r WHERE r.target_public_key = p.target_public_key
         ORDER BY r.sampled_at DESC LIMIT 1)::timestamptz AS latest_any
 FROM picked p
