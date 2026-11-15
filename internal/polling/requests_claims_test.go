@@ -58,6 +58,27 @@ func (s *claimStore) RecordServedVersions(_ context.Context, observer []byte, ve
 	return nil
 }
 
+// ReplacePollingClaimReporting runs the reports the way the store does, one target state at a time.
+func (s *claimStore) ReplacePollingClaimReporting(ctx context.Context, c Claim, _ uuid.UUID, _ time.Time, report func(ClaimNode, *TargetState)) (bool, error) {
+	for _, n := range c.Nodes {
+		if !n.Requested {
+			continue
+		}
+		if err := s.MutateRequestTarget(ctx, n.Target, uuid.Nil, func(st *TargetState) error { report(n, st); return nil }); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+// reportClaim applies a claim's reports as HandleClaim does.
+func reportClaim(ctx context.Context, svc *Service, c Claim, now time.Time) {
+	var ignored [][]byte
+	if _, err := svc.reqs.ReplacePollingClaimReporting(ctx, c, uuid.Nil, now, claimReport(c, now, &ignored)); err != nil {
+		panic(err)
+	}
+}
+
 // hold records that the observer was handed the target as a requested one, at the rank.
 func (s *claimStore) hold(target, observer []byte, rank int) {
 	st := s.states[string(target)]
@@ -119,11 +140,11 @@ func TestClaimLoginFailedOnlyCountsFromThePoller(t *testing.T) {
 
 	// An hour after the password was set, so the grace is over.
 	hour := claimNow.Add(time.Hour)
-	svc.handleRequestedStates(ctx, claimOf(standby, failed), hour)
+	reportClaim(ctx, svc, claimOf(standby, failed), hour)
 	if got := statusOf(st, target, 0); got == StatusLoginFailed {
 		t.Fatal("a standby's login_failed counted")
 	}
-	svc.handleRequestedStates(ctx, claimOf(poller, failed), hour)
+	reportClaim(ctx, svc, claimOf(poller, failed), hour)
 	if got := statusOf(st, target, 0); got != StatusLoginFailed {
 		t.Fatalf("the poller's login_failed was ignored: %s", got)
 	}
@@ -143,19 +164,19 @@ func TestClaimLoginFailedGraceAfterAVerChange(t *testing.T) {
 	ok := ClaimNode{Target: target, Requested: true, State: "ok"}
 
 	hour := claimNow.Add(time.Hour)
-	svc.handleRequestedStates(ctx, claimOf(poller, failed), hour)
+	reportClaim(ctx, svc, claimOf(poller, failed), hour)
 	if got := st.states[string(target)]; got.Requests[0].Status != StatusLoginFailed || got.Ver != 2 {
 		t.Fatalf("first failure: status %s ver %d", got.Requests[0].Status, got.Ver)
 	}
 	// The device has not fetched the new ver yet: its repeated login_failed is ignored for 30 minutes...
 	later := hour.Add(5 * time.Minute)
-	svc.handleRequestedStates(ctx, claimOf(poller, failed), later)
+	reportClaim(ctx, svc, claimOf(poller, failed), later)
 	if statusOf(st, target, 1) == StatusLoginFailed {
 		t.Fatal("login_failed inside the grace counted")
 	}
 	// ...unless a claim showed another state since the change.
-	svc.handleRequestedStates(ctx, claimOf(poller, ok), later.Add(time.Minute))
-	svc.handleRequestedStates(ctx, claimOf(poller, failed), later.Add(2*time.Minute))
+	reportClaim(ctx, svc, claimOf(poller, ok), later.Add(time.Minute))
+	reportClaim(ctx, svc, claimOf(poller, failed), later.Add(2*time.Minute))
 	if statusOf(st, target, 1) != StatusLoginFailed {
 		t.Fatal("login_failed after another state was ignored")
 	}
@@ -186,7 +207,7 @@ func TestClaimAdminStopDeletesThePasswordOnce(t *testing.T) {
 	st.hold(target, a, 2)
 
 	// Any observer's report counts, a standby's too.
-	svc.handleRequestedStates(ctx, claimOf(b, stop), claimNow)
+	reportClaim(ctx, svc, claimOf(b, stop), claimNow)
 	r := st.states[string(target)].Requests[0]
 	if r.Status != StatusAdminStopped || r.HasPassword || r.PasswordCT != nil {
 		t.Fatalf("admin password kept: %+v", r)
@@ -195,12 +216,12 @@ func TestClaimAdminStopDeletesThePasswordOnce(t *testing.T) {
 		t.Fatal("stop not recorded")
 	}
 	// The same observer repeating its report must not strike the next user's password.
-	svc.handleRequestedStates(ctx, claimOf(b, stop), claimNow.Add(time.Minute))
+	reportClaim(ctx, svc, claimOf(b, stop), claimNow.Add(time.Minute))
 	if got := statusOf(st, target, 1); got == StatusAdminStopped {
 		t.Fatal("a repeat report stopped the next password")
 	}
 	// Another observer that also got admin on it does.
-	svc.handleRequestedStates(ctx, claimOf(a, stop), claimNow.Add(2*time.Minute))
+	reportClaim(ctx, svc, claimOf(a, stop), claimNow.Add(2*time.Minute))
 	if got := statusOf(st, target, 1); got != StatusAdminStopped {
 		t.Fatalf("second observer's report: %s", got)
 	}
@@ -211,7 +232,7 @@ func TestClaimAdminStopWithBlankLoginBlocksThem(t *testing.T) {
 	svc, st, sealer := claimService(t)
 	target, _ := requestedTarget(t, st, sealer, 1, "", 0)
 	st.hold(target, bytes.Repeat([]byte{0xA}, 32), 0)
-	svc.handleRequestedStates(ctx, claimOf(bytes.Repeat([]byte{0xA}, 32), ClaimNode{Target: target, Requested: true, State: "admin_stop"}), claimNow)
+	reportClaim(ctx, svc, claimOf(bytes.Repeat([]byte{0xA}, 32), ClaimNode{Target: target, Requested: true, State: "admin_stop"}), claimNow)
 	s := st.states[string(target)]
 	if !s.NoPasswordBlocked || s.Requests[0].Status != StatusAdminStopped {
 		t.Fatalf("%+v", s)
@@ -225,7 +246,7 @@ func TestClaimIgnoresTargetsItDoesNotHoldAsRequested(t *testing.T) {
 	o := bytes.Repeat([]byte{0xA}, 32)
 	st.hold(target, o, 0)
 	// A local target of the same key (requested not set) must not touch the requests.
-	svc.handleRequestedStates(ctx, claimOf(o, ClaimNode{Target: target, State: "login_failed"}, ClaimNode{Target: target, State: "admin_stop"}), claimNow)
+	reportClaim(ctx, svc, claimOf(o, ClaimNode{Target: target, State: "login_failed"}, ClaimNode{Target: target, State: "admin_stop"}), claimNow)
 	if got := statusOf(st, target, 0); got != StatusWaiting || len(st.states[string(target)].AdminStops) != 0 {
 		t.Fatalf("status %s", got)
 	}
@@ -404,7 +425,7 @@ func TestClaimReportsFromObserversNotHoldingTheTargetAreIgnored(t *testing.T) {
 	st.hold(target, holder, 0)
 	hour := claimNow.Add(time.Hour)
 	for _, state := range []string{"admin_stop", "login_failed", "no_reply", "not_direct", "ok"} {
-		svc.handleRequestedStates(ctx, claimOf(stranger, ClaimNode{Target: target, Requested: true, State: state}), hour)
+		reportClaim(ctx, svc, claimOf(stranger, ClaimNode{Target: target, Requested: true, State: state}), hour)
 	}
 	s := st.states[string(target)]
 	r := s.Requests[0]
@@ -415,7 +436,7 @@ func TestClaimReportsFromObserversNotHoldingTheTargetAreIgnored(t *testing.T) {
 		t.Fatalf("state changed: %+v", s)
 	}
 	// The holder's report still lands.
-	svc.handleRequestedStates(ctx, claimOf(holder, ClaimNode{Target: target, Requested: true, State: "admin_stop"}), hour)
+	reportClaim(ctx, svc, claimOf(holder, ClaimNode{Target: target, Requested: true, State: "admin_stop"}), hour)
 	if st.states[string(target)].Requests[0].Status != StatusAdminStopped {
 		t.Fatal("the holder's admin_stop was ignored")
 	}

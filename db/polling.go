@@ -90,10 +90,34 @@ func (s *Store) pollTx(ctx context.Context, fn func(q *sqlc.Queries) error) erro
 // ReplacePollingClaim stores the claim as the observer's whole candidate list. A claim that is not newer than the
 // stored one, or arrives within polling.ClaimMinInterval of it, changes nothing and reports applied=false.
 func (s *Store) ReplacePollingClaim(ctx context.Context, c polling.Claim, observerID uuid.UUID, receivedAt time.Time) (bool, error) {
+	return s.ReplacePollingClaimReporting(ctx, c, observerID, receivedAt, nil)
+}
+
+// ReplacePollingClaimReporting is ReplacePollingClaim that also runs report, in the same transaction, on the state of
+// each target the claim names as requested. If a report cannot be stored the claim is not stored either, so the
+// device's next claim repeats it, and no election sees the new claim before its reports.
+func (s *Store) ReplacePollingClaimReporting(ctx context.Context, c polling.Claim, observerID uuid.UUID, receivedAt time.Time,
+	report func(polling.ClaimNode, *polling.TargetState)) (bool, error) {
 	applied := false
 	err := s.pollTx(ctx, func(q *sqlc.Queries) error {
+		applied = false
 		// A claim can change the observer's capacity, so it waits for any election that decides on its seats.
 		if err := q.LockPollingSeats(ctx, c.Observer); err != nil {
+			return err
+		}
+		var reported []polling.ClaimNode
+		if report != nil {
+			for _, n := range c.Nodes {
+				if n.Requested {
+					reported = append(reported, n)
+				}
+			}
+		}
+		keys := make([][]byte, len(reported))
+		for i, n := range reported {
+			keys[i] = n.Target
+		}
+		if err := lockTargets(ctx, q, keys); err != nil {
 			return err
 		}
 		n, err := q.UpsertPollingClaim(ctx, sqlc.UpsertPollingClaimParams{
@@ -119,9 +143,32 @@ func (s *Store) ReplacePollingClaim(ctx context.Context, c polling.Claim, observ
 				return err
 			}
 		}
+		for _, n := range reported {
+			if err := mutateRequestTarget(ctx, q, n.Target, uuid.Nil, func(st *polling.TargetState) error {
+				report(n, st)
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	return applied, err
+}
+
+// lockTargets takes the target locks in key order.
+func lockTargets(ctx context.Context, q *sqlc.Queries, targets [][]byte) error {
+	sorted := append([][]byte(nil), targets...)
+	sort.Slice(sorted, func(i, j int) bool { return bytes.Compare(sorted[i], sorted[j]) < 0 })
+	for i, t := range sorted {
+		if i > 0 && bytes.Equal(t, sorted[i-1]) {
+			continue
+		}
+		if err := q.LockPollingTarget(ctx, t); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // PollingClaimReceivedAt returns when Beacon received the observer's stored claim, nil when it has none.
@@ -315,14 +362,7 @@ func lockSeatsAndTargets(ctx context.Context, q *sqlc.Queries, target []byte, re
 	if err != nil {
 		return nil, err
 	}
-	targets := append([][]byte{target}, held...)
-	sort.Slice(targets, func(i, j int) bool { return bytes.Compare(targets[i], targets[j]) < 0 })
-	for _, t := range targets {
-		if err := q.LockPollingTarget(ctx, t); err != nil {
-			return nil, err
-		}
-	}
-	return locked, nil
+	return locked, lockTargets(ctx, q, append([][]byte{target}, held...))
 }
 
 func electTarget(ctx context.Context, q *sqlc.Queries, target []byte, locked map[string]bool, receivedAfter, evidenceSince, at time.Time,

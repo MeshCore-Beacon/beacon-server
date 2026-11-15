@@ -20,37 +20,26 @@ type RequestedPassword struct {
 }
 
 // RequestedStore is what requested targets need besides the election: the password in use and the claim-driven
-// state changes, which run through MutateRequestTarget so they are judged under the target's lock.
+// state changes, which are judged under the target's lock.
 type RequestedStore interface {
 	RequestedPasswords(ctx context.Context, targets [][]byte) (map[string]RequestedPassword, error)
 	MutateRequestTarget(ctx context.Context, target []byte, userID uuid.UUID, fn func(*TargetState) error) error
+	// ReplacePollingClaimReporting stores the claim and, in the same transaction, runs report on the state of each
+	// target it names as requested. Nothing is stored when a report cannot be.
+	ReplacePollingClaimReporting(ctx context.Context, c Claim, observerID uuid.UUID, receivedAt time.Time,
+		report func(ClaimNode, *TargetState)) (bool, error)
 	// RecordServedVersions stores the password version (keyed by target) the observer was just answered with.
 	RecordServedVersions(ctx context.Context, observer []byte, vers map[string]int64, at time.Time) error
 }
 
-// handleRequestedStates applies what a stored claim says about the requested targets it holds: the poller's
-// login_failed, an admin_stop from any observer handed the target, and any other state (which ends the login_failed
-// grace). A report from an observer that was not handed the target is ignored and only counted in a debug line.
-// Nothing here can fail the claim; a failure is logged and the next claim repeats the report.
-func (s *Service) handleRequestedStates(ctx context.Context, c Claim, now time.Time) {
-	if s.reqs == nil {
-		return
-	}
-	obs := short(c.Observer)
-	for _, n := range c.Nodes {
-		if !n.Requested {
-			continue
-		}
-		accepted := false
-		err := s.reqs.MutateRequestTarget(ctx, n.Target, uuid.Nil, func(st *TargetState) error {
-			accepted = st.ApplyReport(c.Observer, n.State, now)
-			return nil
-		})
-		switch {
-		case err != nil:
-			s.log.Warn("requested target state", "observer", obs, "target", short(n.Target), "err", err)
-		case !accepted:
-			s.log.Debug("requested target report ignored", "observer", obs, "target", short(n.Target))
+// claimReport applies what a claim says about a requested target it holds: the poller's login_failed, an admin_stop
+// from any observer handed the target, and any other state (which ends the login_failed grace). A report from an
+// observer that was not handed the target is ignored and added to ignored.
+func claimReport(c Claim, now time.Time, ignored *[][]byte) func(ClaimNode, *TargetState) {
+	*ignored = nil
+	return func(n ClaimNode, st *TargetState) {
+		if !st.ApplyReport(c.Observer, n.State, now) {
+			*ignored = append(*ignored, n.Target)
 		}
 	}
 }

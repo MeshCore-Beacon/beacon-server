@@ -156,7 +156,15 @@ func (s *Service) HandleClaim(ctx context.Context, topicPubkeyHex string, raw []
 		s.log.Warn("polling observer id", "observer", obs, "err", err)
 		return
 	}
-	applied, err := s.store.ReplacePollingClaim(ctx, c, id, now)
+	// With requests on, the claim's reports are stored with it, so a failed one leaves the claim out and the
+	// device's next claim, which repeats it, is taken.
+	var applied bool
+	var ignored [][]byte
+	if s.reqs != nil {
+		applied, err = s.reqs.ReplacePollingClaimReporting(ctx, c, id, now, claimReport(c, now, &ignored))
+	} else {
+		applied, err = s.store.ReplacePollingClaim(ctx, c, id, now)
+	}
 	if err != nil {
 		s.log.Warn("polling claim store", "observer", obs, "err", err)
 		return
@@ -164,7 +172,9 @@ func (s *Service) HandleClaim(ctx context.Context, topicPubkeyHex string, raw []
 	if !applied {
 		return
 	}
-	s.handleRequestedStates(ctx, c, now)
+	for _, t := range ignored {
+		s.log.Debug("requested target report ignored", "observer", obs, "target", short(t))
+	}
 	for _, n := range c.Nodes {
 		targets[string(n.Target)] = n.Target
 	}
