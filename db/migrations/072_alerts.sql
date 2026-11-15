@@ -54,6 +54,7 @@ CREATE TABLE alert_outbox (
     delivered_at timestamp with time zone
 );
 CREATE INDEX idx_alert_outbox_pending ON alert_outbox USING btree (created_at) WHERE delivered_at IS NULL;
+CREATE INDEX idx_alert_outbox_delivered ON alert_outbox USING btree (delivered_at) WHERE delivered_at IS NOT NULL;
 
 -- The status a request was last announced at, so a request needing attention is announced once.
 ALTER TABLE telemetry_requests ADD COLUMN attention_status text;

@@ -553,6 +553,11 @@ func main() {
 		alertsSvc = alerts.NewService(maintStore, alertDelivery, time.Now)
 	}
 	slog.Info("alerts", "component", "startup", "delivery", resolvedAlerts.Delivery, "enabled", alertsSvc != nil)
+	alertSender, err := newAlertSender(alertDelivery, usersService, maintStore, resolvedAccounts.PublicURL, os.Getenv("BEACON_PUSH_CREDENTIALS"))
+	if err != nil {
+		slog.Error("invalid push credentials", "component", "startup", "error", err)
+		os.Exit(1)
+	}
 	if resolvedAccounts.Enabled {
 		meMounts = append(meMounts, handlers.RequestRoutes(requestsSvc), handlers.AlertRoutes(alertsSvc))
 	}
@@ -677,8 +682,8 @@ func main() {
 			tasks = append(tasks, background.UsersTasks(maintStore)...)
 		}
 	}
-	if alertsSvc != nil && mode.Jobs {
-		tasks = append(tasks, background.AlertTasks(db.AlertEval{Store: maintStore})...)
+	if alertSender != nil && mode.Jobs {
+		tasks = append(tasks, background.AlertTasks(db.AlertEval{Store: maintStore}, alertSender)...)
 	}
 	if pollingSvc != nil && mode.Jobs {
 		tasks = append(tasks, background.PollingTasks(pollingSvc, background.NewPollingMaint(maintStore), resolvedPolling)...)

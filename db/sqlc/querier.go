@@ -53,6 +53,7 @@ type Querier interface {
 	// in id order, that lack one. Rows that already carry a type are never touched. Returns how many
 	// untyped rows it picked, how many it typed, and the last picked id (0 when it picked none).
 	BackfillObservationPayloadTypes(ctx context.Context, arg BackfillObservationPayloadTypesParams) (BackfillObservationPayloadTypesRow, error)
+	BumpAlertAttempts(ctx context.Context, ids []int64) error
 	BumpUserAtlas(ctx context.Context, arg BumpUserAtlasParams) (int64, error)
 	// Exact check of messages in (after_id, through_id]: pairs the definition has and the table lacks (counting
 	// observations up to obs_through only), and table pairs no stored observation backs.
@@ -93,8 +94,10 @@ type Querier interface {
 	DeleteAllChannelMembers(ctx context.Context) error
 	DeleteChannelConfigScopes(ctx context.Context) error
 	DeleteChannelMembersNotIn(ctx context.Context, arg DeleteChannelMembersNotInParams) error
+	DeleteDevicesByToken(ctx context.Context, pushToken string) error
 	// A token belongs to one session: a device signing in again takes it over.
 	DeleteDevicesWithToken(ctx context.Context, arg DeleteDevicesWithTokenParams) error
+	DeleteExhaustedAlerts(ctx context.Context, maxAttempts int16) (int64, error)
 	DeleteExpiredPollingClaims(ctx context.Context, receivedAt pgtype.Timestamptz) error
 	DeleteExpiredPortalStates(ctx context.Context, cutoff pgtype.Timestamptz) error
 	DeleteExpiredRepeaterReadings(ctx context.Context, receivedAt pgtype.Timestamptz) error
@@ -163,6 +166,8 @@ type Querier interface {
 	EnsurePollingTarget(ctx context.Context, targetPublicKey []byte) error
 	// Creates the empty Atlas row (revision 0) so a first write has a row to lock.
 	EnsureUserAtlas(ctx context.Context, userID uuid.UUID) error
+	// Drops what was not delivered within its window, and what was delivered long ago.
+	ExpireAlertOutbox(ctx context.Context, arg ExpireAlertOutboxParams) (int64, error)
 	// Every site of every message in (after_id, through_id]: the backfill and the reconcile's message part.
 	FillChannelMessageIATAsByMessages(ctx context.Context, arg FillChannelMessageIATAsByMessagesParams) (int64, error)
 	// The site of every group-text observation in (after_id, through_id] whose packet has a message.
@@ -609,6 +614,7 @@ type Querier interface {
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error)
 	ListZoneBoundaries(ctx context.Context) ([]MeshmapperZoneBoundary, error)
 	ListZoneLists(ctx context.Context) ([]MeshmapperZoneList, error)
+	LiveUserDevices(ctx context.Context, userIds []uuid.UUID) ([]LiveUserDevicesRow, error)
 	// Serializes one observer's reading inserts until the transaction ends, so its rate and budget checks see each
 	// other. Class 25191, beside the target class and the (25189, n) job locks.
 	LockPollingObserver(ctx context.Context, observerPublicKey []byte) error
@@ -623,6 +629,7 @@ type Querier interface {
 	LockUserCredentials(ctx context.Context, id uuid.UUID) (LockUserCredentialsRow, error)
 	// Serializes one user's request creation (the limit) without blocking the foreign-key checks on their rows.
 	LockUserForRequests(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	MarkAlertsDelivered(ctx context.Context, arg MarkAlertsDeliveredParams) error
 	// Hours whose raw rows cleanup already started deleting can never be rolled completely.
 	// Readers report the new status, so the revision moves too.
 	MarkPartialRollupHours(ctx context.Context) error
@@ -652,6 +659,7 @@ type Querier interface {
 	PacketSitesTotalBytes(ctx context.Context) (int64, error)
 	// Who a live token belongs to, without using it.
 	PeekUserToken(ctx context.Context, arg PeekUserTokenParams) (uuid.UUID, error)
+	PendingAlerts(ctx context.Context, arg PendingAlertsParams) ([]PendingAlertsRow, error)
 	PollingAdminRequestCounts(ctx context.Context, targets [][]byte) ([]PollingAdminRequestCountsRow, error)
 	// Each live candidate and each assigned observer of the given targets. rank is -1 for an unassigned candidate.
 	// Claim fields come only from a live claim, so an assignment left over from an expired one shows them empty.

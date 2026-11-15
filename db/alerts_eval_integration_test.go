@@ -5,6 +5,10 @@ package db
 
 import (
 	"context"
+	"encoding/hex"
+	"errors"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -248,4 +252,149 @@ func TestAlertApplySkipsEditedRulesPostgres(t *testing.T) {
 	if st != "unknown" || n != 0 {
 		t.Fatalf("a stale evaluation overwrote an edit: state %s, %d notices", st, n)
 	}
+}
+
+type recMail struct{ got []string }
+
+func (m *recMail) TryEnqueue(_ uuid.UUID, kind, to, subject, text string) bool {
+	m.got = append(m.got, to+"|"+subject+"|"+text)
+	return true
+}
+
+type recPush struct {
+	sent []alerts.PushMessage
+	gone map[string]bool
+}
+
+func (p *recPush) Send(_ context.Context, m alerts.PushMessage) error {
+	if p.gone[m.Token] {
+		return alerts.ErrUnregistered
+	}
+	p.sent = append(p.sent, m)
+	return nil
+}
+
+func queueNotice(t *testing.T, ctx context.Context, s *Store, user uuid.UUID, pass uuid.UUID, kind, name string, created time.Time) {
+	t.Helper()
+	if _, err := s.pool.Exec(ctx, `INSERT INTO alert_outbox (user_id, pass_id, target_kind, target_public_key, name, alert_kind, value, created_at)
+		VALUES ($1, $2, 'node', $3, $4, $5, 30, $6)`, user, pass, atlasKey(1), name, kind, created); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAlertEmailDeliveryPostgres(t *testing.T) {
+	ctx, pool, s := userStore(t)
+	alice := newUser(t, ctx, s, "alice")
+	if err := s.SetUserEmailVerified(ctx, alice.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	bob := newUser(t, ctx, s, "bob") // address not verified
+	pass := uuid.New()
+	now := time.Now()
+	queueNotice(t, ctx, s, alice.ID, pass, "gone_quiet", "Hilltop", now)
+	queueNotice(t, ctx, s, alice.ID, pass, "rebooted", "Hilltop", now)
+	queueNotice(t, ctx, s, alice.ID, uuid.New(), "rebooted", "Old news", now.Add(-3*time.Hour)) // older than two hours: dropped
+	queueNotice(t, ctx, s, bob.ID, pass, "rebooted", "Hilltop", now)
+	pu, _ := url.Parse("https://beacon.example.org")
+	m := &recMail{}
+	sender := alerts.NewSender(AlertEval{s}, "email", m, nil, pu, nil)
+	if err := sender.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.got) != 1 || !strings.HasPrefix(m.got[0], alice.Email+"|Beacon: 2 alerts|") || strings.Contains(m.got[0], "Old news") {
+		t.Fatalf("%q", m.got)
+	}
+	var pending, total int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE delivered_at IS NULL), count(*) FROM alert_outbox`).Scan(&pending, &total)
+	if pending != 0 || total != 3 { // the expired row is gone, the others marked delivered (Bob has no verified address)
+		t.Fatalf("pending %d total %d", pending, total)
+	}
+	// Nothing is sent twice.
+	if err := sender.Run(ctx); err != nil || len(m.got) != 1 {
+		t.Fatalf("second run: %v, %d mails", err, len(m.got))
+	}
+}
+
+func TestAlertPushDeliveryPostgres(t *testing.T) {
+	ctx, pool, s := userStore(t)
+	alice := newUser(t, ctx, s, "alice")
+	live, ended := newSession(t, ctx, s, alice, "app", 1), newSession(t, ctx, s, alice, "app", 2)
+	svc := alertSvc(s)
+	if err := svc.RegisterDevice(ctx, alice.ID, live.ID, "ios", "live-token"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RegisterDevice(ctx, alice.ID, ended.ID, "android", "ended-token"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EndSession(ctx, alice.ID, ended.ID); err != nil {
+		t.Fatal(err)
+	}
+	queueNotice(t, ctx, s, alice.ID, uuid.New(), "battery_low", "Hilltop", time.Now())
+	p := &recPush{}
+	if err := alerts.NewSender(AlertEval{s}, "push", nil, p, nil, nil).Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.sent) != 1 || p.sent[0].Token != "live-token" || p.sent[0].Data["targetKind"] != "node" || p.sent[0].Data["publicKey"] != hex.EncodeToString(atlasKey(1)) {
+		t.Fatalf("%+v", p.sent)
+	}
+
+	// An unregistered token is deleted, and a notice no device took is retried until it is dropped.
+	queueNotice(t, ctx, s, alice.ID, uuid.New(), "rebooted", "Hilltop", time.Now())
+	p = &recPush{gone: map[string]bool{"live-token": true}}
+	if err := alerts.NewSender(AlertEval{s}, "push", nil, p, nil, nil).Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM user_devices WHERE push_token = 'live-token'`).Scan(&n)
+	if n != 0 {
+		t.Fatal("the unregistered token was kept")
+	}
+}
+
+func TestAlertOutboxRetriesThenDropsPostgres(t *testing.T) {
+	ctx, pool, s := userStore(t)
+	alice := newUser(t, ctx, s, "alice")
+	sess := newSession(t, ctx, s, alice, "app", 1)
+	if err := alertSvc(s).RegisterDevice(ctx, alice.ID, sess.ID, "ios", "flaky"); err != nil {
+		t.Fatal(err)
+	}
+	queueNotice(t, ctx, s, alice.ID, uuid.New(), "rebooted", "Hilltop", time.Now())
+	p := &failPush{}
+	sender := alerts.NewSender(AlertEval{s}, "push", nil, p, nil, nil)
+	for i := 0; i < alerts.MaxAttempts; i++ {
+		if err := sender.Run(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var n int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM alert_outbox`).Scan(&n)
+	if n != 0 || p.calls != alerts.MaxAttempts {
+		t.Fatalf("%d rows left after %d attempts", n, p.calls)
+	}
+}
+
+type failPush struct{ calls int }
+
+func (p *failPush) Send(context.Context, alerts.PushMessage) error {
+	p.calls++
+	return errors.New("push service answered 500")
+}
+
+func TestAlertSendGuardPostgres(t *testing.T) {
+	ctx, _, s := userStore(t)
+	a := AlertEval{s}
+	l1, ok, err := a.BeginSendLock(ctx)
+	if err != nil || !ok {
+		t.Fatal(err)
+	}
+	if _, ok, _ := a.BeginSendLock(ctx); ok {
+		t.Fatal("two senders")
+	}
+	// The send guard is independent of the evaluation guard.
+	l2, ok, err := a.BeginEvalLock(ctx)
+	if err != nil || !ok {
+		t.Fatalf("eval guard blocked by the send guard: %v", err)
+	}
+	l2.Close(ctx)
+	l1.Close(ctx)
 }

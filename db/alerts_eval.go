@@ -299,3 +299,64 @@ func (a AlertEval) AnnounceAttention(ctx context.Context, passID uuid.UUID) erro
 		return q.MarkRequestAttention(ctx, sqlc.MarkRequestAttentionParams{Ids: ids, Statuses: statuses})
 	})
 }
+
+// ---- delivery ----
+
+var _ alerts.SendStore = AlertEval{}
+
+func (a AlertEval) BeginSendLock(ctx context.Context) (alerts.Unlocker, bool, error) {
+	return a.beginAlertsLock(ctx, func(q *sqlc.Queries) (bool, error) { return q.TryAlertsSendLock(ctx) },
+		func(q *sqlc.Queries, c context.Context) error { return q.AlertsSendUnlock(c) })
+}
+
+func (a AlertEval) Expire(ctx context.Context, undeliveredBefore, deliveredBefore time.Time) (int64, error) {
+	return a.q.ExpireAlertOutbox(ctx, sqlc.ExpireAlertOutboxParams{UndeliveredBefore: ts(undeliveredBefore), DeliveredBefore: ts(deliveredBefore)})
+}
+
+func (a AlertEval) Pending(ctx context.Context, notBefore time.Time, limit int) ([]alerts.OutboxRow, error) {
+	rows, err := a.q.PendingAlerts(ctx, sqlc.PendingAlertsParams{NotBefore: ts(notBefore), RowLimit: int32(limit)})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]alerts.OutboxRow, len(rows))
+	for i, r := range rows {
+		out[i] = alerts.OutboxRow{ID: r.ID, UserID: r.UserID, Pass: r.PassID, TargetKind: r.TargetKind, Key: r.TargetPublicKey,
+			Name: r.Name, Kind: r.AlertKind, Detail: r.Detail, Value: r.Value, Attempts: int(r.Attempts), Email: r.Email, EmailVerified: r.EmailVerified}
+	}
+	return out, nil
+}
+
+func (a AlertEval) Devices(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID][]alerts.Device, error) {
+	rows, err := a.q.LiveUserDevices(ctx, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := map[uuid.UUID][]alerts.Device{}
+	for _, r := range rows {
+		out[r.UserID] = append(out[r.UserID], alerts.Device{Platform: r.Platform, Token: r.PushToken})
+	}
+	return out, nil
+}
+
+func (a AlertEval) Finish(ctx context.Context, delivered, retry []int64, now time.Time, maxAttempts int) error {
+	return a.pollTx(ctx, func(q *sqlc.Queries) error {
+		if len(delivered) > 0 {
+			if err := q.MarkAlertsDelivered(ctx, sqlc.MarkAlertsDeliveredParams{At: ts(now), Ids: delivered}); err != nil {
+				return err
+			}
+		}
+		if len(retry) > 0 {
+			if err := q.BumpAlertAttempts(ctx, retry); err != nil {
+				return err
+			}
+			if _, err := q.DeleteExhaustedAlerts(ctx, int16(maxAttempts)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (a AlertEval) RemoveDeviceToken(ctx context.Context, token string) error {
+	return a.q.DeleteDevicesByToken(ctx, token)
+}
