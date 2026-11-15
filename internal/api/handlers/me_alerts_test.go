@@ -229,3 +229,20 @@ func TestAlertsOffAnswers404(t *testing.T) {
 		t.Errorf("signed out should still be 401: %d", w.Code)
 	}
 }
+
+func TestDeviceRegistrationIsRateLimitedPerUser(t *testing.T) {
+	h := alertsServer(&fakeAlerts{})
+	app := []reqOpt{bearer("app-token"), csrf}
+	body := `{"platform":"ios","pushToken":"tok"}`
+	limited := 0
+	for i := 0; i < 12; i++ {
+		// A different address each time: the limit follows the user.
+		w := call(h, "POST", "/me/devices", body, append(app, func(r *http.Request) { r.RemoteAddr = "10.0.0." + string(rune('1'+i)) + ":1" })...)
+		if w.Code == http.StatusTooManyRequests {
+			limited++
+		}
+	}
+	if limited != 2 {
+		t.Fatalf("%d of 12 registrations limited, want 2", limited)
+	}
+}

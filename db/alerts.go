@@ -198,6 +198,7 @@ func (s *Store) RegisterDevice(ctx context.Context, userID, sessionID uuid.UUID,
 		if err := q.UpsertUserDevice(ctx, sqlc.UpsertUserDeviceParams{SessionID: sessionID, UserID: userID, Platform: platform, PushToken: token}); err != nil {
 			return err
 		}
+		// Crosses users on purpose: a phone belongs to one account, so the previous user's alerts never reach its next user.
 		return q.DeleteDevicesWithToken(ctx, sqlc.DeleteDevicesWithTokenParams{PushToken: token, SessionID: sessionID})
 	})
 	var pgErr *pgconn.PgError

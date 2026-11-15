@@ -6,7 +6,9 @@ package db
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -240,5 +242,33 @@ func TestUserDevicesPostgres(t *testing.T) {
 	}
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM user_devices`).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("%d devices after account deletion", n)
+	}
+}
+
+// One phone belongs to one account: a token registered by a new user leaves the previous user's session, and no
+// answer carries a token.
+func TestDeviceTokenMovesAcrossUsersPostgres(t *testing.T) {
+	ctx, pool, s := userStore(t)
+	svc := alertSvc(s)
+	alice, bob := newUser(t, ctx, s, "alice"), newUser(t, ctx, s, "bob")
+	sa, sb := newSession(t, ctx, s, alice, "app", 1), newSession(t, ctx, s, bob, "app", 2)
+	const token = "possession-secret-token"
+	if err := svc.RegisterDevice(ctx, alice.ID, sa.ID, "android", token); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RegisterDevice(ctx, bob.ID, sb.ID, "android", token); err != nil {
+		t.Fatal(err)
+	}
+	var owner uuid.UUID
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*), min(user_id::text)::uuid FROM user_devices WHERE push_token = $1`, token).Scan(&n, &owner); err != nil || n != 1 || owner != bob.ID {
+		t.Fatalf("%d registrations, owner %v: %v", n, owner, err)
+	}
+	if ov, _ := svc.Overview(ctx, alice.ID); ov.HasDevice {
+		t.Fatal("the previous user still has the phone")
+	}
+	ov, _ := svc.Overview(ctx, bob.ID)
+	if b, _ := json.Marshal(ov); strings.Contains(string(b), token) || !ov.HasDevice {
+		t.Fatalf("overview %s", b)
 	}
 }

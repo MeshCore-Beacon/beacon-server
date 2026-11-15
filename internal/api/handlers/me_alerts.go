@@ -9,6 +9,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -44,7 +45,8 @@ func AlertRoutes(svc AlertsService) MeMount {
 		r.Get("/alerts", getAlerts(svc))
 		r.With(writes).Put("/alerts/rules", putAlertRule(svc))
 		r.With(writes).Delete("/alerts/rules/{id}", deleteAlertRule(svc))
-		r.With(writes).Post("/devices", postDevice(svc))
+		// A push token is a possession secret, so registering is limited per user as well as per address.
+		r.With(writes, mw.RateLimitUser(10, 10*time.Minute)).Post("/devices", postDevice(svc))
 		r.With(writes).Delete("/devices", deleteDevice(svc))
 	}
 }
