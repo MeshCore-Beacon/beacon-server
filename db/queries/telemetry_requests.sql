@@ -88,6 +88,17 @@ ON CONFLICT (target_public_key, observer_public_key) DO UPDATE SET seen_at = EXC
 -- The observers handed this target as a requested one, with their rank (0 polls).
 SELECT observer_public_key, rank FROM polling_assignments WHERE target_public_key = $1 AND requested;
 
+-- name: ListRequestedAssigneeReadings :many
+-- When each observer handed this target as a requested one stored its newest trusted reading of it.
+SELECT a.observer_public_key, l.received_at
+FROM polling_assignments a
+CROSS JOIN LATERAL (
+    SELECT r.received_at FROM repeater_readings r
+    WHERE r.target_public_key = a.target_public_key AND r.observer_public_key = a.observer_public_key AND r.trusted
+    ORDER BY r.sampled_at DESC LIMIT 1
+) l
+WHERE a.target_public_key = $1 AND a.requested;
+
 -- name: ListTargetAdminStops :many
 SELECT observer_public_key FROM polling_admin_stops WHERE target_public_key = $1;
 

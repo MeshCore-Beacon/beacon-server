@@ -3917,6 +3917,21 @@ func (mr *MockQuerierMockRecorder) ListRequestedAssignedTargets(ctx, observers a
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListRequestedAssignedTargets", reflect.TypeOf((*MockQuerier)(nil).ListRequestedAssignedTargets), ctx, observers)
 }
 
+// ListRequestedAssigneeReadings mocks base method.
+func (m *MockQuerier) ListRequestedAssigneeReadings(ctx context.Context, targetPublicKey []byte) ([]db.ListRequestedAssigneeReadingsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListRequestedAssigneeReadings", ctx, targetPublicKey)
+	ret0, _ := ret[0].([]db.ListRequestedAssigneeReadingsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListRequestedAssigneeReadings indicates an expected call of ListRequestedAssigneeReadings.
+func (mr *MockQuerierMockRecorder) ListRequestedAssigneeReadings(ctx, targetPublicKey any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListRequestedAssigneeReadings", reflect.TypeOf((*MockQuerier)(nil).ListRequestedAssigneeReadings), ctx, targetPublicKey)
+}
+
 // ListRequestedAssignees mocks base method.
 func (m *MockQuerier) ListRequestedAssignees(ctx context.Context, targetPublicKey []byte) ([]db.ListRequestedAssigneesRow, error) {
 	m.ctrl.T.Helper()

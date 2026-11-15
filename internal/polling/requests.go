@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/MeshCore-Beacon/beacon-server/internal/config"
 	"github.com/google/uuid"
 )
 
@@ -139,6 +140,10 @@ type TargetState struct {
 	// ServedVer is the password version each observer was last answered with; a report from it is about that one.
 	ServedVer map[string]int64
 	OtherSeen map[string]time.Time
+	// LastReading is when each observer handed the target stored its newest trusted reading of it. WorkingPollFor
+	// is how long such a reading shows a working login (see WorkingPoll); zero turns that check off.
+	LastReading    map[string]time.Time
+	WorkingPollFor time.Duration
 	// NewAdminStops and TouchedOther are what ApplyReport added, for the store to write.
 	NewAdminStops [][]byte
 	TouchedOther  map[string]time.Time
@@ -388,6 +393,24 @@ func LoginFailedCounts(now, verChangedAt time.Time, otherStateSeenAt *time.Time)
 	return otherStateSeenAt != nil && otherStateSeenAt.After(verChangedAt)
 }
 
+// WorkingPoll says whether the observer's newest trusted reading shows the option in use working: stored after the
+// option became current and recent enough that its polls have not stopped since. Some firmware keeps claiming
+// login_failed after a refused password gives way to a blank option, even while blank polls succeed.
+func WorkingPoll(now, verChangedAt time.Time, lastReading *time.Time, fresh time.Duration) bool {
+	return fresh > 0 && !verChangedAt.IsZero() && lastReading != nil &&
+		lastReading.After(verChangedAt) && now.Sub(*lastReading) <= fresh
+}
+
+// WorkingPollFresh is how long a reading counts as a working poll: two of the longest poll windows, so one late
+// poll does not end it.
+func WorkingPollFresh(cfg config.ResolvedPolling) time.Duration {
+	directS := int(cfg.DirectWindow / time.Second)
+	if directS <= 0 {
+		directS = 3600
+	}
+	return 2 * time.Duration(oneHop(directS)) * time.Second
+}
+
 // Requested reports whether the target is currently requested: a request's option is in use.
 func (t *TargetState) Requested() bool { return t.ActiveID != uuid.Nil }
 
@@ -434,7 +457,12 @@ func (t *TargetState) ApplyReport(observer []byte, state string, now time.Time) 
 		if at, ok := t.OtherSeen[string(observer)]; ok {
 			seen = &at
 		}
-		if LoginFailedCounts(now, t.VerChangedAt, seen) {
+		var read *time.Time
+		if at, ok := t.LastReading[string(observer)]; ok {
+			read = &at
+		}
+		// A working poll is better evidence than the claim's flag.
+		if LoginFailedCounts(now, t.VerChangedAt, seen) && !WorkingPoll(now, t.VerChangedAt, read, t.WorkingPollFor) {
 			t.LoginFailed(now)
 		}
 	default:

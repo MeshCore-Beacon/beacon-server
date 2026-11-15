@@ -70,7 +70,7 @@ func (s *claimStore) ReplacePollingClaimReporting(ctx context.Context, c Claim, 
 // reportClaim applies a claim's reports as HandleClaim does.
 func reportClaim(ctx context.Context, svc *Service, c Claim, now time.Time) {
 	var ignored [][]byte
-	if _, err := svc.reqs.ReplacePollingClaimReporting(ctx, c, uuid.Nil, now, claimReport(c, now, &ignored)); err != nil {
+	if _, err := svc.reqs.ReplacePollingClaimReporting(ctx, c, uuid.Nil, now, claimReport(c, now, WorkingPollFresh(svc.cfg), &ignored)); err != nil {
 		panic(err)
 	}
 }

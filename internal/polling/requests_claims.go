@@ -34,9 +34,10 @@ type RequestedStore interface {
 // claimReport applies what a claim says about a requested target it holds: the poller's login_failed, an admin_stop
 // from any observer handed the target, and any other state (which ends the login_failed grace). A report from an
 // observer that was not handed the target is ignored and added to ignored.
-func claimReport(c Claim, now time.Time, ignored *[][]byte) func(ClaimNode, *TargetState) {
+func claimReport(c Claim, now time.Time, fresh time.Duration, ignored *[][]byte) func(ClaimNode, *TargetState) {
 	*ignored = nil
 	return func(n ClaimNode, st *TargetState) {
+		st.WorkingPollFor = fresh
 		if !st.ApplyReport(c.Observer, n.State, now) {
 			*ignored = append(*ignored, n.Target)
 		}

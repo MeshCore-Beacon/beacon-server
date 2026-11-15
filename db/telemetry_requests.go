@@ -161,6 +161,14 @@ func loadReportContext(ctx context.Context, q *sqlc.Queries, target []byte, st *
 	for _, h := range holders {
 		st.Holders[string(h.ObserverPublicKey)] = int(h.Rank)
 	}
+	reads, err := q.ListRequestedAssigneeReadings(ctx, target)
+	if err != nil {
+		return err
+	}
+	st.LastReading = make(map[string]time.Time, len(reads))
+	for _, r := range reads {
+		st.LastReading[string(r.ObserverPublicKey)] = r.ReceivedAt.Time
+	}
 	stops, err := q.ListTargetAdminStops(ctx, target)
 	if err != nil {
 		return err

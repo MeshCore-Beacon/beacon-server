@@ -161,7 +161,7 @@ func (s *Service) HandleClaim(ctx context.Context, topicPubkeyHex string, raw []
 	var applied bool
 	var ignored [][]byte
 	if s.reqs != nil {
-		applied, err = s.reqs.ReplacePollingClaimReporting(ctx, c, id, now, claimReport(c, now, &ignored))
+		applied, err = s.reqs.ReplacePollingClaimReporting(ctx, c, id, now, claimReport(c, now, WorkingPollFresh(s.cfg), &ignored))
 	} else {
 		applied, err = s.store.ReplacePollingClaim(ctx, c, id, now)
 	}

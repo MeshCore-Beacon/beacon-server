@@ -207,6 +207,43 @@ func (q *Queries) ListPollingAdminStops(ctx context.Context) ([]PollingAdminStop
 	return items, nil
 }
 
+const listRequestedAssigneeReadings = `-- name: ListRequestedAssigneeReadings :many
+SELECT a.observer_public_key, l.received_at
+FROM polling_assignments a
+CROSS JOIN LATERAL (
+    SELECT r.received_at FROM repeater_readings r
+    WHERE r.target_public_key = a.target_public_key AND r.observer_public_key = a.observer_public_key AND r.trusted
+    ORDER BY r.sampled_at DESC LIMIT 1
+) l
+WHERE a.target_public_key = $1 AND a.requested
+`
+
+type ListRequestedAssigneeReadingsRow struct {
+	ObserverPublicKey []byte             `json:"observer_public_key"`
+	ReceivedAt        pgtype.Timestamptz `json:"received_at"`
+}
+
+// When each observer handed this target as a requested one stored its newest trusted reading of it.
+func (q *Queries) ListRequestedAssigneeReadings(ctx context.Context, targetPublicKey []byte) ([]ListRequestedAssigneeReadingsRow, error) {
+	rows, err := q.db.Query(ctx, listRequestedAssigneeReadings, targetPublicKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRequestedAssigneeReadingsRow{}
+	for rows.Next() {
+		var i ListRequestedAssigneeReadingsRow
+		if err := rows.Scan(&i.ObserverPublicKey, &i.ReceivedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRequestedAssignees = `-- name: ListRequestedAssignees :many
 SELECT observer_public_key, rank FROM polling_assignments WHERE target_public_key = $1 AND requested
 `

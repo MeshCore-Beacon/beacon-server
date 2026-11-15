@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/MeshCore-Beacon/beacon-server/internal/config"
 	"github.com/google/uuid"
 )
 
@@ -362,6 +363,54 @@ func TestLoginFailedCounts(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+func TestWorkingPoll(t *testing.T) {
+	changed, fresh := rt0, 4*time.Hour
+	now := changed.Add(2 * time.Hour)
+	cases := []struct {
+		name    string
+		changed time.Time
+		read    *time.Time
+		fresh   time.Duration
+		want    bool
+	}{
+		{"reading since the change", changed, ptr(changed.Add(time.Hour)), fresh, true},
+		{"reading before the change", changed, ptr(changed.Add(-time.Minute)), fresh, false},
+		{"no reading", changed, nil, fresh, false},
+		{"reading too old", changed.Add(-5 * time.Hour), ptr(now.Add(-fresh - time.Minute)), fresh, false},
+		{"never changed", time.Time{}, ptr(now), fresh, false},
+		{"check off", changed, ptr(changed.Add(time.Hour)), 0, false},
+	}
+	for _, c := range cases {
+		if got := WorkingPoll(now, c.changed, c.read, c.fresh); got != c.want {
+			t.Errorf("%s: %v", c.name, got)
+		}
+	}
+	if got := WorkingPollFresh(config.ResolvedPolling{}); got != 4*time.Hour {
+		t.Errorf("default freshness %v", got)
+	}
+}
+
+// A login_failed claim from the poller does not fail an option its own recent reading shows working.
+func TestApplyReportTrustsAWorkingPoll(t *testing.T) {
+	poller := []byte{1}
+	for _, read := range []bool{true, false} {
+		st := &TargetState{}
+		a := req(0, false)
+		if err := st.Create(a, rt0); err != nil {
+			t.Fatal(err)
+		}
+		st.Holders = map[string]int{string(poller): 0}
+		st.WorkingPollFor = 4 * time.Hour
+		if read {
+			st.LastReading = map[string]time.Time{string(poller): rt0.Add(20 * time.Minute)}
+		}
+		st.ApplyReport(poller, "login_failed", rt0.Add(40*time.Minute))
+		if failed := st.Requests[0].Status == StatusLoginFailed; failed == read {
+			t.Errorf("reading=%v: status %s", read, st.Requests[0].Status)
+		}
+	}
+}
 
 func TestReasonCodes(t *testing.T) {
 	for _, tc := range []struct {

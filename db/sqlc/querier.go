@@ -611,6 +611,8 @@ type Querier interface {
 	// The targets that hold a requested assignment of any of the observers: the ones a seat decision may take a seat
 	// from, locked with the election in key order.
 	ListRequestedAssignedTargets(ctx context.Context, observers [][]byte) ([][]byte, error)
+	// When each observer handed this target as a requested one stored its newest trusted reading of it.
+	ListRequestedAssigneeReadings(ctx context.Context, targetPublicKey []byte) ([]ListRequestedAssigneeReadingsRow, error)
 	// The observers handed this target as a requested one, with their rank (0 polls).
 	ListRequestedAssignees(ctx context.Context, targetPublicKey []byte) ([]ListRequestedAssigneesRow, error)
 	// Leading index equalities and the time/ID boundary bound both custom and generic plans.
