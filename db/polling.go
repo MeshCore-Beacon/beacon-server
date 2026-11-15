@@ -32,11 +32,9 @@ import (
 // locks: requested elections (every accepting observer) and claims (their own). Target locks come before any write
 // to the target's assignments or requests. Reading-insert locks (LockPollingObserver) are taken alone.
 //
-// What holds after every committed transaction:
-//   - an observer holds no more requested assignments than polling.RequestCapacity of its claim;
-//   - a target's ranks are 0..n-1 and rank 0 polls;
-//   - a waiting or active request is active exactly when its target has an assignment (mutateRequestTarget);
-//   - local (not requested) assignments use no requested seat.
+// After every committed transaction a target's ranks are 0..n-1, a waiting or active request is active exactly when
+// its target has an assignment, and local assignments use no requested seat. Only the election that follows restores
+// the capacity limit after a claim lowers it, and a usable rank 0 after its observer is blocked or unapproved.
 
 // ObserverID returns the observer's row id, creating the row when it is new.
 func (s *Store) ObserverID(ctx context.Context, pubkey []byte) (uuid.UUID, error) {
