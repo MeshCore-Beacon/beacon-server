@@ -34,6 +34,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/ingest"
 	"github.com/MeshCore-Beacon/beacon-server/internal/keystore"
 	"github.com/MeshCore-Beacon/beacon-server/internal/logging"
+	"github.com/MeshCore-Beacon/beacon-server/internal/mail"
 	"github.com/MeshCore-Beacon/beacon-server/internal/meshmapper"
 	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
 	"github.com/MeshCore-Beacon/beacon-server/internal/obscount"
@@ -41,6 +42,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/polling"
 	"github.com/MeshCore-Beacon/beacon-server/internal/presence"
 	"github.com/MeshCore-Beacon/beacon-server/internal/scopestore"
+	"github.com/MeshCore-Beacon/beacon-server/internal/users"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -462,8 +464,22 @@ func main() {
 	}
 	slog.Info("accounts", "component", "startup", "enabled", resolvedAccounts.Enabled, "public_host", accountsHost)
 	accountsMode := "off"
+	// Left an untyped nil while accounts are off: a nil *users.Service stored in the interface would be called.
+	var accountsSvc handlers.AccountsService
+	var usersService *users.Service
+	var authOptions handlers.AuthOptions
 	if resolvedAccounts.Enabled {
 		accountsMode = "local"
+		sender := mail.NewSMTP(resolvedAccounts.SMTPHost, resolvedAccounts.SMTPPort, resolvedAccounts.SMTPUsername,
+			resolvedAccounts.SMTPPassword, resolvedAccounts.SMTPFrom, resolvedAccounts.SMTPStartTLS)
+		usersService = users.NewService(maintStore, sender, resolvedAccounts, time.Now, slog.Default())
+		accountsSvc = usersService
+		authOptions = handlers.AuthOptions{
+			Enabled: true, CookieSecure: resolvedAccounts.CookieSecure,
+			PublicOrigin:   resolvedAccounts.PublicURL.Scheme + "://" + resolvedAccounts.PublicURL.Host,
+			AllowedOrigins: cfg.CORS.AllowedOrigins, ReadOnly: resolved.ReadOnly,
+		}
+		slog.Info("accounts mode", "component", "startup", "mode", accountsMode, "registration_open", resolvedAccounts.RegistrationOpen)
 	}
 
 	// ── Repeater polling ─────────────────────────────────────────────────────
@@ -601,6 +617,14 @@ func main() {
 	if pgTask != nil {
 		tasks = append(tasks, *pgTask)
 	}
+	if usersService != nil {
+		// The mail worker stops with ctx, then sends what is queued; shutdown waits for it.
+		mailDone := usersService.Start(ctx)
+		backgroundJobs.Go(func() { <-mailDone })
+		if mode.Jobs {
+			tasks = append(tasks, background.UsersTasks(maintStore)...)
+		}
+	}
 	if pollingSvc != nil && mode.Jobs {
 		tasks = append(tasks, background.PollingTasks(pollingSvc, background.NewPollingMaint(maintStore), resolvedPolling)...)
 	}
@@ -624,6 +648,10 @@ func main() {
 	if resolvedPolling.Enabled && !resolved.ReadOnly {
 		pollingAdmin = maintStore
 	}
+	var usersAdmin handlers.UsersAdminStore // nil answers 503
+	if usersService != nil {
+		usersAdmin = maintStore
+	}
 	r := router.New(h, reader, []*ingest.Worker{broker1, broker2}, router.Options{
 		MaxConnsPerIP:        resolved.MaxConnsPerIP,
 		MaxConnectsPerMinute: resolved.MaxConnectsPerMinute,
@@ -640,12 +668,14 @@ func main() {
 			"/accounts": handlers.AccountsRouter(maintStore),
 			"/backup":   handlers.BackupRouter(backupOpts, ctx),
 			"/db":       handlers.DBAdminRouter(maintStore, pgSource),
+			"/users":    handlers.UsersAdminRouter(usersAdmin, resolved.ReadOnly),
 			"/polling": handlers.PollingAdminRouter(pollingAdmin, handlers.PollingAdminConfig{
 				Paused: resolvedPolling.Paused, Authority: resolvedPolling.Authority, ExcludedNodes: resolvedPolling.ExcludedNodes}),
 		},
 		GuestPolling:   guestPolling,
 		PollingEnabled: resolvedPolling.Enabled,
 		AccountsMode:   accountsMode, RegistrationOpen: resolvedAccounts.RegistrationOpen,
+		Accounts: accountsSvc, AuthOptions: authOptions,
 		Guards:        guard,
 		APIPlanLayout: string(layout),
 	})

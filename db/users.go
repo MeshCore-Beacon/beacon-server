@@ -312,11 +312,15 @@ func (s *Store) DeleteUserTokens(ctx context.Context, userID uuid.UUID, kind use
 	return s.q.DeleteUserTokens(ctx, sqlc.DeleteUserTokensParams{UserID: userID, Kind: string(kind)})
 }
 
-// DeleteExpiredAuth deletes sessions and tokens that ended, expired or were used more than a week before now.
+// DeleteExpiredAuth deletes sessions and tokens that ended, expired or were used more than a week before now, and
+// sign-ups older than that which nobody confirmed and which have no live verify link.
 func (s *Store) DeleteExpiredAuth(ctx context.Context, now time.Time) error {
 	cutoff := ts(now.Add(-authRetention))
 	if err := s.q.DeleteExpiredUserSessions(ctx, cutoff); err != nil {
 		return err
 	}
-	return s.q.DeleteExpiredUserTokens(ctx, cutoff)
+	if err := s.q.DeleteExpiredUserTokens(ctx, cutoff); err != nil {
+		return err
+	}
+	return s.q.DeleteStaleUnverifiedUsers(ctx, sqlc.DeleteStaleUnverifiedUsersParams{Cutoff: cutoff, Now: ts(now)})
 }

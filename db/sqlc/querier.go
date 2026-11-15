@@ -109,6 +109,9 @@ type Querier interface {
 	DeleteRollupHour(ctx context.Context, hour pgtype.Timestamptz) error
 	// Dirty hours that can no longer be re-rolled.
 	DeleteStaleDirtyHours(ctx context.Context) error
+	// A sign-up nobody confirmed holds its username and address; once it is old and has no live verify link left it
+	// is removed so both can be used again.
+	DeleteStaleUnverifiedUsers(ctx context.Context, arg DeleteStaleUnverifiedUsersParams) error
 	DeleteUser(ctx context.Context, id uuid.UUID) (int64, error)
 	DeleteUserTokens(ctx context.Context, arg DeleteUserTokensParams) error
 	EndAllUserSessions(ctx context.Context, userID uuid.UUID) error

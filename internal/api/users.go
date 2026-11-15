@@ -4,7 +4,11 @@
 package api
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/MeshCore-Beacon/beacon-server/internal/users"
+	"github.com/google/uuid"
 )
 
 // User is a signed-in person as clients see them. The password hash never appears in any response type.
@@ -143,4 +147,36 @@ type ChangeEmailRequest struct {
 // DeleteMeRequest confirms an account deletion. Portal mode will later accept a confirmUsername field here.
 type DeleteMeRequest struct {
 	CurrentPassword string `json:"currentPassword"`
+}
+
+// UserCursor is a boundary in (created_at DESC, id DESC) order for the operator's user list.
+type UserCursor struct {
+	CreatedAt time.Time
+	ID        uuid.UUID
+}
+
+func (c UserCursor) String() string { return fmt.Sprintf("v1:%d:%s", c.CreatedAt.UnixMicro(), c.ID) }
+
+// ParseUserCursor parses the opaque cursor returned by the user list.
+func ParseUserCursor(raw string) (*UserCursor, error) {
+	at, id, err := parseUUIDCursor(raw)
+	if err != nil {
+		return nil, err
+	}
+	return &UserCursor{CreatedAt: at, ID: id}, nil
+}
+
+// AdminUserList is one page of users, newest first. NextCursor is empty on the last page.
+type AdminUserList struct {
+	Items      []AdminUser `json:"items"`
+	NextCursor string      `json:"nextCursor,omitempty"`
+}
+
+type AdminUserResponse struct {
+	User AdminUser `json:"user"`
+}
+
+// SetUserDisabledRequest disables (true) or re-enables (false) a user.
+type SetUserDisabledRequest struct {
+	Disabled bool `json:"disabled"`
 }

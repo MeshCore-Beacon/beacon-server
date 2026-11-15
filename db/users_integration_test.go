@@ -699,3 +699,40 @@ func TestUserLatestTokenPostgres(t *testing.T) {
 		t.Fatalf("expired: %v", err)
 	}
 }
+
+func TestUserDeleteStaleUnverifiedPostgres(t *testing.T) {
+	ctx, pool, s := userStore(t)
+	now := time.Now()
+	old := now.Add(-10 * 24 * time.Hour)
+	mk := func(name string, created time.Time, verified bool) users.User {
+		u := newUser(t, ctx, s, name)
+		if _, err := pool.Exec(ctx, `UPDATE users SET created_at = $2 WHERE id = $1`, u.ID, created); err != nil {
+			t.Fatal(err)
+		}
+		if verified {
+			if err := s.SetUserEmailVerified(ctx, u.ID, created); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return u
+	}
+	stale := mk("stale", old, false)
+	withLink := mk("withlink", old, false)
+	fresh := mk("fresh", now.Add(-time.Hour), false)
+	verified := mk("verified", old, true)
+	if err := s.CreateToken(ctx, withLink.ID, users.TokenVerify, []byte("live"), []byte(`{}`), now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteExpiredAuth(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct {
+		u    users.User
+		kept bool
+	}{"stale": {stale, false}, "withlink": {withLink, true}, "fresh": {fresh, true}, "verified": {verified, true}} {
+		_, err := s.UserByID(ctx, c.u.ID)
+		if c.kept && err != nil || !c.kept && !errors.Is(err, users.ErrNotFound) {
+			t.Errorf("%s: kept=%v err=%v", name, c.kept, err)
+		}
+	}
+}

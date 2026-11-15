@@ -694,6 +694,20 @@ func (mr *MockQuerierMockRecorder) DeleteStaleDirtyHours(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteStaleDirtyHours", reflect.TypeOf((*MockQuerier)(nil).DeleteStaleDirtyHours), ctx)
 }
 
+// DeleteStaleUnverifiedUsers mocks base method.
+func (m *MockQuerier) DeleteStaleUnverifiedUsers(ctx context.Context, arg db.DeleteStaleUnverifiedUsersParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteStaleUnverifiedUsers", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteStaleUnverifiedUsers indicates an expected call of DeleteStaleUnverifiedUsers.
+func (mr *MockQuerierMockRecorder) DeleteStaleUnverifiedUsers(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteStaleUnverifiedUsers", reflect.TypeOf((*MockQuerier)(nil).DeleteStaleUnverifiedUsers), ctx, arg)
+}
+
 // DeleteUser mocks base method.
 func (m *MockQuerier) DeleteUser(ctx context.Context, id uuid.UUID) (int64, error) {
 	m.ctrl.T.Helper()
