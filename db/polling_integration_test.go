@@ -1317,12 +1317,10 @@ func TestRepeaterReadingTrustedAtInsertPostgres(t *testing.T) {
 
 func TestRepeaterReadingTrustMigrationBackfillPostgres(t *testing.T) {
 	ctx, pool, _ := pollStore(t)
-	const name = "065_repeater_reading_trust.sql"
-	// The helper cannot stop at a migration, so undo 065 and run it again over existing rows.
-	for _, q := range []string{`DROP INDEX idx_repeater_readings_trusted`, `ALTER TABLE repeater_readings DROP COLUMN trusted`} {
-		if _, err := pool.Exec(ctx, q); err != nil {
-			t.Fatal(err)
-		}
+	const name, indexName = "065_repeater_reading_trust.sql", "066_repeater_reading_trust_index.sql"
+	// The helper cannot stop at a migration, so undo 065 (dropping the column takes its index too) and run it again over existing rows.
+	if _, err := pool.Exec(ctx, `ALTER TABLE repeater_readings DROP COLUMN trusted`); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `DELETE FROM schema_migrations WHERE filename = $1`, name); err != nil {
 		t.Fatal(err)
@@ -1345,6 +1343,29 @@ VALUES ($1, $2, $3, $3, 'status', $4)`, pollKey(0xA), k, now, i); err != nil {
 	if !readingTrusted(t, ctx, pool, a) || readingTrusted(t, ctx, pool, b) {
 		t.Fatal("backfill marked the wrong readings")
 	}
+	// 065 only backfills: the index is 066's, built concurrently so it never holds the table lock.
+	if trustedIndexValid(t, ctx, pool) {
+		t.Fatal("065 built the trusted index")
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM schema_migrations WHERE filename = $1`, indexName); err != nil {
+		t.Fatal(err)
+	}
+	if err := RunMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	if !trustedIndexValid(t, ctx, pool) {
+		t.Fatal("066 did not build a valid trusted index")
+	}
+}
+
+func trustedIndexValid(t *testing.T, ctx context.Context, pool *pgxpool.Pool) bool {
+	t.Helper()
+	var valid bool
+	err := pool.QueryRow(ctx, `SELECT coalesce(bool_and(indisvalid AND indisready), false) FROM pg_index WHERE indexrelid = to_regclass('idx_repeater_readings_trusted')`).Scan(&valid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return valid
 }
 
 func TestNodeReadingsPostgres(t *testing.T) {

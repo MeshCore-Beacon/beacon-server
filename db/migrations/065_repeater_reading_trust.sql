@@ -10,5 +10,3 @@ WHERE EXISTS (
     SELECT 1 FROM polling_assignments a
     WHERE a.target_public_key = r.target_public_key AND a.observer_public_key = r.observer_public_key AND a.evidence_count > 0
 );
-
-CREATE INDEX idx_repeater_readings_trusted ON repeater_readings USING btree (target_public_key, sampled_at DESC) WHERE trusted;
