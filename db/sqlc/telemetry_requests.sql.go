@@ -611,6 +611,30 @@ func (q *Queries) RequestedPasswords(ctx context.Context, targets [][]byte) ([]R
 	return items, nil
 }
 
+const targetStillOffline = `-- name: TargetStillOffline :one
+SELECT EXISTS (
+    SELECT 1
+    FROM telemetry_requests r
+    LEFT JOIN nodes n ON n.public_key = r.target_public_key
+    WHERE r.status <> 'disabled' AND r.target_public_key = $1
+    GROUP BY r.target_public_key, n.last_seen
+    HAVING GREATEST(max(r.enabled_at), COALESCE(n.last_seen, '-infinity'::timestamptz)) < $2::timestamptz
+)::boolean AS offline
+`
+
+type TargetStillOfflineParams struct {
+	TargetPublicKey []byte             `json:"target_public_key"`
+	Cutoff          pgtype.Timestamptz `json:"cutoff"`
+}
+
+// OfflineRequestTargets for one target, asked again under the target's lock before its requests are disabled.
+func (q *Queries) TargetStillOffline(ctx context.Context, arg TargetStillOfflineParams) (bool, error) {
+	row := q.db.QueryRow(ctx, targetStillOffline, arg.TargetPublicKey, arg.Cutoff)
+	var offline bool
+	err := row.Scan(&offline)
+	return offline, err
+}
+
 const telemetryRequestTarget = `-- name: TelemetryRequestTarget :one
 SELECT target_public_key FROM telemetry_requests WHERE id = $1 AND user_id = $2
 `

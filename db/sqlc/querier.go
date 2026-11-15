@@ -817,6 +817,8 @@ type Querier interface {
 	// The ORDER BY ... LIMIT keeps every lateral a per-front index range scan (never flattened into a join).
 	// The cap is far above any front's 2-minute volume (the busiest site: about 150 entries) and only bounds the gauge.
 	SweepPacketSitesFronts(ctx context.Context, lookback pgtype.Interval) (SweepPacketSitesFrontsRow, error)
+	// OfflineRequestTargets for one target, asked again under the target's lock before its requests are disabled.
+	TargetStillOffline(ctx context.Context, arg TargetStillOfflineParams) (bool, error)
 	TelemetryRequestTarget(ctx context.Context, arg TelemetryRequestTargetParams) ([]byte, error)
 	// Write-through for a cached keyed channel: the UpsertChannel conflict update, by id.
 	// No row (deleted or re-keyed since cached) sends the caller back to UpsertChannel.

@@ -309,16 +309,29 @@ func (s *Store) DisableOfflineRequests(ctx context.Context, cutoff, now time.Tim
 	if err != nil {
 		return 0, err
 	}
+	disabled := 0
 	for _, t := range targets {
-		err := s.MutateRequestTarget(ctx, t, uuid.Nil, func(st *polling.TargetState) error {
-			st.Disable(reason, now)
-			return nil
+		// The list is stale by now: a request created or re-enabled since restarts the interval, so each target is
+		// checked again under its lock before anything is disabled.
+		err := s.pollTx(ctx, func(q *sqlc.Queries) error {
+			if err := q.LockPollingTarget(ctx, t); err != nil {
+				return err
+			}
+			offline, err := q.TargetStillOffline(ctx, sqlc.TargetStillOfflineParams{TargetPublicKey: t, Cutoff: ts(cutoff)})
+			if err != nil || !offline {
+				return err
+			}
+			disabled++
+			return mutateRequestTarget(ctx, q, t, uuid.Nil, func(st *polling.TargetState) error {
+				st.Disable(reason, now)
+				return nil
+			})
 		})
 		if err != nil {
 			return 0, err
 		}
 	}
-	return len(targets), nil
+	return disabled, nil
 }
 
 // ListPollingAdminStops lists every recorded admin stop, newest first.

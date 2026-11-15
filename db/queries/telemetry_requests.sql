@@ -126,6 +126,17 @@ WHERE r.status <> 'disabled'
 GROUP BY r.target_public_key, n.last_seen
 HAVING GREATEST(max(r.enabled_at), COALESCE(n.last_seen, '-infinity'::timestamptz)) < sqlc.arg(cutoff)::timestamptz;
 
+-- name: TargetStillOffline :one
+-- OfflineRequestTargets for one target, asked again under the target's lock before its requests are disabled.
+SELECT EXISTS (
+    SELECT 1
+    FROM telemetry_requests r
+    LEFT JOIN nodes n ON n.public_key = r.target_public_key
+    WHERE r.status <> 'disabled' AND r.target_public_key = sqlc.arg(target_public_key)
+    GROUP BY r.target_public_key, n.last_seen
+    HAVING GREATEST(max(r.enabled_at), COALESCE(n.last_seen, '-infinity'::timestamptz)) < sqlc.arg(cutoff)::timestamptz
+)::boolean AS offline;
+
 -- name: PollingAdminRequestCounts :many
 SELECT r.target_public_key::bytea AS target_public_key, count(*)::int AS requests,
        bool_or(t.active_request_id IS NOT NULL)::boolean AS requested

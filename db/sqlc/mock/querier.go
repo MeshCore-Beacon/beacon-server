@@ -5484,6 +5484,21 @@ func (mr *MockQuerierMockRecorder) SweepPacketSitesFronts(ctx, lookback any) *go
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SweepPacketSitesFronts", reflect.TypeOf((*MockQuerier)(nil).SweepPacketSitesFronts), ctx, lookback)
 }
 
+// TargetStillOffline mocks base method.
+func (m *MockQuerier) TargetStillOffline(ctx context.Context, arg db.TargetStillOfflineParams) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TargetStillOffline", ctx, arg)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// TargetStillOffline indicates an expected call of TargetStillOffline.
+func (mr *MockQuerierMockRecorder) TargetStillOffline(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TargetStillOffline", reflect.TypeOf((*MockQuerier)(nil).TargetStillOffline), ctx, arg)
+}
+
 // TelemetryRequestTarget mocks base method.
 func (m *MockQuerier) TelemetryRequestTarget(ctx context.Context, arg db.TelemetryRequestTargetParams) ([]byte, error) {
 	m.ctrl.T.Helper()

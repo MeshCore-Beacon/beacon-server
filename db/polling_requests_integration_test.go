@@ -15,10 +15,12 @@ import (
 	"testing"
 	"time"
 
+	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
 	"github.com/MeshCore-Beacon/beacon-server/internal/config"
 	"github.com/MeshCore-Beacon/beacon-server/internal/polling"
 	"github.com/MeshCore-Beacon/beacon-server/internal/users"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -627,5 +629,61 @@ func TestRequestedAdminStopIsTiedToThePasswordServedPostgres(t *testing.T) {
 	// o1 was never given B either, but it was excluded by its own stop; a fresh answer tells o2 nothing new.
 	if e, ok := w.owners(o2, 0xA1); ok {
 		t.Fatalf("an observer given admin access is offered B: %+v", e)
+	}
+}
+
+// offlineGap pauses the offline sweep after it has picked its targets.
+type offlineGap struct {
+	sqlc.Querier
+	arrived chan struct{}
+	release chan struct{}
+}
+
+func (g offlineGap) OfflineRequestTargets(ctx context.Context, cutoff pgtype.Timestamptz) ([][]byte, error) {
+	r, err := g.Querier.OfflineRequestTargets(ctx, cutoff)
+	g.arrived <- struct{}{}
+	<-g.release
+	return r, err
+}
+
+// A request created after the sweep chose its repeater is not offline, and must not be disabled.
+func TestRequestedOfflineSweepRechecksUnderTheLockPostgres(t *testing.T) {
+	w := newReqWorld(t, "")
+	ctx, s, pool := w.ctx, w.s, w.pool
+	alice, bob := newUser(t, ctx, s, "alice"), newUser(t, ctx, s, "bob")
+	node := w.node(0xA1)
+	old, err := w.reqs.Create(ctx, alice.ID, node, []byte("pw"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE telemetry_requests SET enabled_at = $1`, w.now.Add(-9*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE nodes SET last_seen = $1`, w.now.Add(-10*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	g := offlineGap{Querier: s.q, arrived: make(chan struct{}, 1), release: make(chan struct{})}
+	s.q = g
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.DisableOfflineRequests(ctx, w.now.Add(-7*24*time.Hour), w.now, "offline")
+		done <- err
+	}()
+	<-g.arrived
+	fresh, err := w.reqs.Create(ctx, bob.ID, node, []byte("pw2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	close(g.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range []struct {
+		u  uuid.UUID
+		id uuid.UUID
+	}{{alice.ID, old.ID}, {bob.ID, fresh.ID}} {
+		if got := w.status(r.u, r.id); got.Status == polling.StatusDisabled {
+			t.Fatalf("disabled a repeater that a new request made current: %+v", got)
+		}
 	}
 }
