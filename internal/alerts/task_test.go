@@ -210,8 +210,8 @@ func (b *bigEval) BeginEvalLock(context.Context) (Unlocker, bool, error) {
 	return fakeLock{&closed}, true, nil
 }
 
-func (b *bigEval) BeginPass(context.Context, uuid.UUID) error  { return nil }
-func (b *bigEval) FinishPass(context.Context, uuid.UUID) error { return nil }
+func (b *bigEval) BeginPass(context.Context, uuid.UUID) error    { return nil }
+func (b *bigEval) FinishPass(context.Context, uuid.UUID) error   { return nil }
 func (b *bigEval) LoadCursor(context.Context) (uuid.UUID, error) { return b.cursor, nil }
 func (b *bigEval) SaveCursor(_ context.Context, id uuid.UUID) error {
 	b.cursor = id
