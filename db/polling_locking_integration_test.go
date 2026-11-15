@@ -391,3 +391,39 @@ func TestDeletingRequestHasIndexedReverseReferencePostgres(t *testing.T) {
 		t.Fatalf("the reverse reference has no index:\n%s", plan)
 	}
 }
+
+// A target whose requests are gone keeps its assignment until its next election; it must not take the seat the
+// answer owes a target that is still requested.
+func TestOwnersOfferSkipsWithdrawnTargetsPostgres(t *testing.T) {
+	w := newReqWorld(t, "")
+	o := newReqDevice(1)
+	oid := pollObserver(t, w.ctx, w.s, o.pub)
+	var people []uuid.UUID
+	for i, k := range []byte{0xA1, 0xA2, 0xA3} {
+		pollHearAdvert(t, w.ctx, w.pool, pollKey(k), oid, w.now.Add(-time.Hour), 5)
+		people = append(people, newUser(t, w.ctx, w.s, fmt.Sprint("u", i)).ID)
+	}
+	w.claim(o, 2)
+	for i, k := range []byte{0xA1, 0xA2} {
+		if _, err := w.reqs.Create(w.ctx, people[i], w.node(k), []byte("pw")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Account deletion runs no election, so A1 keeps its assignment for now.
+	if err := w.s.DeleteUser(w.ctx, people[0]); err != nil {
+		t.Fatal(err)
+	}
+	w.now = w.now.Add(time.Minute)
+	if _, err := w.reqs.Create(w.ctx, people[2], w.node(0xA3), []byte("pw")); err != nil {
+		t.Fatal(err)
+	}
+	a, err := w.svc.Owners(w.ctx, polling.Caller{Observer: o.pub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, has2 := a.Nodes[fmt.Sprintf("%x", pollKey(0xA2))]
+	_, has3 := a.Nodes[fmt.Sprintf("%x", pollKey(0xA3))]
+	if !has2 || !has3 {
+		t.Fatalf("assignments %v but owners lists %d entries (A2 %v, A3 %v)", assignedTargets(t, w), len(a.Nodes), has2, has3)
+	}
+}

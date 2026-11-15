@@ -244,7 +244,7 @@ func TestOfferSeatsCountsWithdrawnTargetsAsFree(t *testing.T) {
 		{Target: key(5), Rank: 0},                                          // local
 	}
 	for i := range rows {
-		rows[i].AcceptsRequests = true
+		rows[i].AcceptsRequests, rows[i].TargetRequested = true, true
 	}
 	OfferSeats(rows)
 	got := []bool{rows[0].PWOK, rows[1].PWOK, rows[2].PWOK, rows[3].PWOK, rows[4].PWOK}
@@ -262,5 +262,14 @@ func TestOfferSeatsCountsWithdrawnTargetsAsFree(t *testing.T) {
 	}
 	if OfferSeats(rows); rows[0].PWOK || rows[3].PWOK {
 		t.Fatal("a claim that takes no requests is offered none")
+	}
+	// A held target whose requests are gone is withdrawn, and frees its seat for the new poller.
+	for i := range rows {
+		rows[i].AcceptsRequests, rows[i].RequestSlots = true, 0
+	}
+	rows[0].TargetRequested = false
+	rows[1].ClaimedRequested = false
+	if OfferSeats(rows); rows[0].PWOK || !rows[3].PWOK || rows[2].PWOK {
+		t.Fatalf("withdrawn target kept its seat: %+v", rows)
 	}
 }
