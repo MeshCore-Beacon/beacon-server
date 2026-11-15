@@ -55,6 +55,8 @@ type PortalStore interface {
 	UpsertPortalUser(ctx context.Context, subject, username, displayName string) (User, error)
 }
 
+const portalUserAgent = "Beacon-Portal-SignIn/1"
+
 // Portal signs users in through the configured portal. Beacon is the client of the portal's token endpoint.
 type Portal struct {
 	svc    *Service
@@ -189,6 +191,8 @@ func (p *Portal) exchange(ctx context.Context, code, verifier string) (portalUse
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	// A stable name the portal can allow; Go's default agent would be refused as a generic script.
+	req.Header.Set("User-Agent", portalUserAgent)
 	resp, err := p.client.Do(req)
 	if err != nil {
 		// The error text can carry the URL; only its kind is logged.

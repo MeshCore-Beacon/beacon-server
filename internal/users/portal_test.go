@@ -61,6 +61,7 @@ func (p *portalStore) UpsertPortalUser(ctx context.Context, subject, username, d
 }
 
 type portalEnv struct {
+	agent string
 	*env
 	p      *Portal
 	ps     *portalStore
@@ -84,6 +85,7 @@ func newPortalEnv(t *testing.T) *portalEnv {
 		var body map[string]string
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		e.calls = append(e.calls, body)
+		e.agent = r.Header.Get("User-Agent")
 		e.handle(w, body)
 	}))
 	t.Cleanup(e.srv.Close)
@@ -439,5 +441,17 @@ func TestPortalSubjectRefused(t *testing.T) {
 				t.Fatal("user created")
 			}
 		})
+	}
+}
+
+// The portal's scrape blocking allows callers by the first product token of their User-Agent.
+func TestPortalTokenCallNamesItself(t *testing.T) {
+	e := newPortalEnv(t)
+	cookie, state, _ := e.begin("/")
+	if _, _, err := e.p.Callback(context.Background(), cookie, state, "code-1", SessionMeta{}); err != nil {
+		t.Fatalf("callback: %v", err)
+	}
+	if e.agent != "Beacon-Portal-SignIn/1" {
+		t.Fatalf("User-Agent = %q", e.agent)
 	}
 }
