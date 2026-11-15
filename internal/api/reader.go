@@ -101,6 +101,11 @@ type Reader interface {
 	// GetObserverTelemetryBucketed returns telemetry points for an observer bucketed into N-hour intervals.
 	GetObserverTelemetryBucketed(ctx context.Context, observerID uuid.UUID, since, until time.Time, bucketHours int32) ([]ObserverTelemetryPoint, error)
 
+	// GetNodeReadings returns a node's repeater readings in [since, until) ascending (until open when zero), led by the
+	// newest status reading before since as a counter baseline. Untrusted readings are left out unless includeUntrusted,
+	// and counted. polled reports whether the node has any reading at all. Returns pgx.ErrNoRows for an unknown node.
+	GetNodeReadings(ctx context.Context, nodeID uuid.UUID, since, until time.Time, includeUntrusted bool) (readings []NodeReading, polled bool, untrusted int, err error)
+
 	// GetObserverActivity returns bucketed heard-activity for an observer over the trailing window.
 	// interval >= 1h is served from the hourly rollup. Returns pgx.ErrNoRows for an unknown observer.
 	// Range and Interval on the result are left empty for the handler to fill.

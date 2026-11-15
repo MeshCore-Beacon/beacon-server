@@ -46,6 +46,27 @@ func (q *Queries) CorroborateReadings(ctx context.Context, arg CorroborateReadin
 	return result.RowsAffected(), nil
 }
 
+const countUntrustedNodeReadings = `-- name: CountUntrustedNodeReadings :one
+SELECT count(*)::int FROM repeater_readings
+WHERE target_public_key = $1
+  AND sampled_at >= $2::timestamptz
+  AND ($3::timestamptz IS NULL OR sampled_at < $3::timestamptz)
+  AND NOT trusted
+`
+
+type CountUntrustedNodeReadingsParams struct {
+	TargetPublicKey []byte             `json:"target_public_key"`
+	Since           pgtype.Timestamptz `json:"since"`
+	Until           pgtype.Timestamptz `json:"until"`
+}
+
+func (q *Queries) CountUntrustedNodeReadings(ctx context.Context, arg CountUntrustedNodeReadingsParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countUntrustedNodeReadings, arg.TargetPublicKey, arg.Since, arg.Until)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const currentPollingPoller = `-- name: CurrentPollingPoller :one
 SELECT observer_public_key FROM polling_assignments WHERE target_public_key = $1 AND rank = 0
 `
@@ -317,6 +338,153 @@ func (q *Queries) InsertRepeaterReading(ctx context.Context, arg InsertRepeaterR
 	return result.RowsAffected(), nil
 }
 
+const latestNodeStatusReadingBefore = `-- name: LatestNodeStatusReadingBefore :many
+SELECT sampled_at, trusted, battery_mv, temperature_c, noise_floor, last_rssi, last_snr, uptime_secs, tx_queue,
+       tx_air_secs, rx_air_secs, packets_recv, packets_sent, recv_errors
+FROM repeater_readings
+WHERE target_public_key = $1
+  AND sampled_at < $2::timestamptz
+  AND method = 'status'
+  AND (trusted OR $3::boolean)
+ORDER BY sampled_at DESC, id DESC
+LIMIT 1
+`
+
+type LatestNodeStatusReadingBeforeParams struct {
+	TargetPublicKey  []byte             `json:"target_public_key"`
+	Since            pgtype.Timestamptz `json:"since"`
+	IncludeUntrusted bool               `json:"include_untrusted"`
+}
+
+type LatestNodeStatusReadingBeforeRow struct {
+	SampledAt    pgtype.Timestamptz `json:"sampled_at"`
+	Trusted      bool               `json:"trusted"`
+	BatteryMv    *int32             `json:"battery_mv"`
+	TemperatureC *float32           `json:"temperature_c"`
+	NoiseFloor   *int32             `json:"noise_floor"`
+	LastRssi     *int32             `json:"last_rssi"`
+	LastSnr      *float32           `json:"last_snr"`
+	UptimeSecs   *int64             `json:"uptime_secs"`
+	TxQueue      *int32             `json:"tx_queue"`
+	TxAirSecs    *int64             `json:"tx_air_secs"`
+	RxAirSecs    *int64             `json:"rx_air_secs"`
+	PacketsRecv  *int64             `json:"packets_recv"`
+	PacketsSent  *int64             `json:"packets_sent"`
+	RecvErrors   *int64             `json:"recv_errors"`
+}
+
+// The newest status reading before since: the baseline for the first counter increments in range.
+func (q *Queries) LatestNodeStatusReadingBefore(ctx context.Context, arg LatestNodeStatusReadingBeforeParams) ([]LatestNodeStatusReadingBeforeRow, error) {
+	rows, err := q.db.Query(ctx, latestNodeStatusReadingBefore, arg.TargetPublicKey, arg.Since, arg.IncludeUntrusted)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LatestNodeStatusReadingBeforeRow{}
+	for rows.Next() {
+		var i LatestNodeStatusReadingBeforeRow
+		if err := rows.Scan(
+			&i.SampledAt,
+			&i.Trusted,
+			&i.BatteryMv,
+			&i.TemperatureC,
+			&i.NoiseFloor,
+			&i.LastRssi,
+			&i.LastSnr,
+			&i.UptimeSecs,
+			&i.TxQueue,
+			&i.TxAirSecs,
+			&i.RxAirSecs,
+			&i.PacketsRecv,
+			&i.PacketsSent,
+			&i.RecvErrors,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNodeReadings = `-- name: ListNodeReadings :many
+SELECT sampled_at, trusted, battery_mv, temperature_c, noise_floor, last_rssi, last_snr, uptime_secs, tx_queue,
+       tx_air_secs, rx_air_secs, packets_recv, packets_sent, recv_errors
+FROM repeater_readings
+WHERE target_public_key = $1
+  AND sampled_at >= $2::timestamptz
+  AND ($3::timestamptz IS NULL OR sampled_at < $3::timestamptz)
+  AND (trusted OR $4::boolean)
+ORDER BY sampled_at ASC, id ASC
+`
+
+type ListNodeReadingsParams struct {
+	TargetPublicKey  []byte             `json:"target_public_key"`
+	Since            pgtype.Timestamptz `json:"since"`
+	Until            pgtype.Timestamptz `json:"until"`
+	IncludeUntrusted bool               `json:"include_untrusted"`
+}
+
+type ListNodeReadingsRow struct {
+	SampledAt    pgtype.Timestamptz `json:"sampled_at"`
+	Trusted      bool               `json:"trusted"`
+	BatteryMv    *int32             `json:"battery_mv"`
+	TemperatureC *float32           `json:"temperature_c"`
+	NoiseFloor   *int32             `json:"noise_floor"`
+	LastRssi     *int32             `json:"last_rssi"`
+	LastSnr      *float32           `json:"last_snr"`
+	UptimeSecs   *int64             `json:"uptime_secs"`
+	TxQueue      *int32             `json:"tx_queue"`
+	TxAirSecs    *int64             `json:"tx_air_secs"`
+	RxAirSecs    *int64             `json:"rx_air_secs"`
+	PacketsRecv  *int64             `json:"packets_recv"`
+	PacketsSent  *int64             `json:"packets_sent"`
+	RecvErrors   *int64             `json:"recv_errors"`
+}
+
+// Readings of one target in [since, until) ascending; until is open when NULL. Untrusted ones only when asked for.
+func (q *Queries) ListNodeReadings(ctx context.Context, arg ListNodeReadingsParams) ([]ListNodeReadingsRow, error) {
+	rows, err := q.db.Query(ctx, listNodeReadings,
+		arg.TargetPublicKey,
+		arg.Since,
+		arg.Until,
+		arg.IncludeUntrusted,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListNodeReadingsRow{}
+	for rows.Next() {
+		var i ListNodeReadingsRow
+		if err := rows.Scan(
+			&i.SampledAt,
+			&i.Trusted,
+			&i.BatteryMv,
+			&i.TemperatureC,
+			&i.NoiseFloor,
+			&i.LastRssi,
+			&i.LastSnr,
+			&i.UptimeSecs,
+			&i.TxQueue,
+			&i.TxAirSecs,
+			&i.RxAirSecs,
+			&i.PacketsRecv,
+			&i.PacketsSent,
+			&i.RecvErrors,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrphanPollingTargets = `-- name: ListOrphanPollingTargets :many
 SELECT DISTINCT a.target_public_key FROM polling_assignments a
 WHERE NOT EXISTS (
@@ -494,6 +662,28 @@ SELECT pg_advisory_xact_lock(25190, hashtext(current_schema() || encode($1::byte
 func (q *Queries) LockPollingTarget(ctx context.Context, targetPublicKey []byte) error {
 	_, err := q.db.Exec(ctx, lockPollingTarget, targetPublicKey)
 	return err
+}
+
+const nodeHasReadings = `-- name: NodeHasReadings :one
+SELECT EXISTS (SELECT 1 FROM repeater_readings WHERE target_public_key = $1)
+`
+
+func (q *Queries) NodeHasReadings(ctx context.Context, targetPublicKey []byte) (bool, error) {
+	row := q.db.QueryRow(ctx, nodeHasReadings, targetPublicKey)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const nodePublicKey = `-- name: NodePublicKey :one
+SELECT public_key FROM nodes WHERE id = $1
+`
+
+func (q *Queries) NodePublicKey(ctx context.Context, id uuid.UUID) ([]byte, error) {
+	row := q.db.QueryRow(ctx, nodePublicKey, id)
+	var public_key []byte
+	err := row.Scan(&public_key)
+	return public_key, err
 }
 
 const pollingAdminTargetRows = `-- name: PollingAdminTargetRows :many

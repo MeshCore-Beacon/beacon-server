@@ -243,3 +243,39 @@ LEFT JOIN (
 LEFT JOIN polling_assignments a ON a.target_public_key = k.target_public_key AND a.observer_public_key = k.observer_public_key
 LEFT JOIN polling_observers po ON po.observer_public_key = k.observer_public_key
 ORDER BY k.target_public_key, COALESCE(a.rank, 32767), k.observer_public_key;
+
+-- name: NodePublicKey :one
+SELECT public_key FROM nodes WHERE id = $1;
+
+-- name: ListNodeReadings :many
+-- Readings of one target in [since, until) ascending; until is open when NULL. Untrusted ones only when asked for.
+SELECT sampled_at, trusted, battery_mv, temperature_c, noise_floor, last_rssi, last_snr, uptime_secs, tx_queue,
+       tx_air_secs, rx_air_secs, packets_recv, packets_sent, recv_errors
+FROM repeater_readings
+WHERE target_public_key = @target_public_key
+  AND sampled_at >= @since::timestamptz
+  AND (sqlc.narg(until)::timestamptz IS NULL OR sampled_at < sqlc.narg(until)::timestamptz)
+  AND (trusted OR @include_untrusted::boolean)
+ORDER BY sampled_at ASC, id ASC;
+
+-- name: CountUntrustedNodeReadings :one
+SELECT count(*)::int FROM repeater_readings
+WHERE target_public_key = @target_public_key
+  AND sampled_at >= @since::timestamptz
+  AND (sqlc.narg(until)::timestamptz IS NULL OR sampled_at < sqlc.narg(until)::timestamptz)
+  AND NOT trusted;
+
+-- name: LatestNodeStatusReadingBefore :many
+-- The newest status reading before since: the baseline for the first counter increments in range.
+SELECT sampled_at, trusted, battery_mv, temperature_c, noise_floor, last_rssi, last_snr, uptime_secs, tx_queue,
+       tx_air_secs, rx_air_secs, packets_recv, packets_sent, recv_errors
+FROM repeater_readings
+WHERE target_public_key = @target_public_key
+  AND sampled_at < @since::timestamptz
+  AND method = 'status'
+  AND (trusted OR @include_untrusted::boolean)
+ORDER BY sampled_at DESC, id DESC
+LIMIT 1;
+
+-- name: NodeHasReadings :one
+SELECT EXISTS (SELECT 1 FROM repeater_readings WHERE target_public_key = $1);

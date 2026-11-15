@@ -140,6 +140,10 @@ func (s *stubReader) GetObserverScopes(_ context.Context, _ uuid.UUID) ([]string
 	return nil, nil
 }
 
+func (s *stubReader) GetNodeReadings(_ context.Context, _ uuid.UUID, _, _ time.Time, _ bool) ([]api.NodeReading, bool, int, error) {
+	return nil, false, 0, nil
+}
+
 func (s *stubReader) GetObserverTelemetry(_ context.Context, _ uuid.UUID, _, _ time.Time, _ int64) (*api.ObserverTelemetry, error) {
 	return nil, nil
 }

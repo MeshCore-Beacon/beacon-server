@@ -426,3 +426,59 @@ func (l *PollingElectionLock) Close(ctx context.Context) {
 	}
 	l.conn.Release()
 }
+
+func nodeReading(r sqlc.ListNodeReadingsRow) api.NodeReading {
+	return api.NodeReading{
+		SampledAt: r.SampledAt.Time, Trusted: r.Trusted,
+		BatteryMV: r.BatteryMv, TemperatureC: r.TemperatureC, NoiseFloorDB: r.NoiseFloor, LastRSSIDB: r.LastRssi,
+		LastSNRDB: r.LastSnr, UptimeSeconds: r.UptimeSecs, QueueLength: r.TxQueue,
+		AirtimeTxSecs: r.TxAirSecs, AirtimeRxSecs: r.RxAirSecs, PacketsReceived: r.PacketsRecv,
+		PacketsSent: r.PacketsSent, ReceiveErrors: r.RecvErrors,
+	}
+}
+
+// GetNodeReadings returns the node's readings in [since, until) ascending, preceded by the newest status reading
+// before since as a counter baseline. until is open when zero. Untrusted readings are left out unless asked for and
+// counted instead. An unknown node returns pgx.ErrNoRows.
+func (s *Store) GetNodeReadings(ctx context.Context, nodeID uuid.UUID, since, until time.Time, includeUntrusted bool) ([]api.NodeReading, bool, int, error) {
+	key, err := s.q.NodePublicKey(ctx, nodeID)
+	if err != nil {
+		return nil, false, 0, err
+	}
+	polled, err := s.q.NodeHasReadings(ctx, key)
+	if err != nil || !polled {
+		return []api.NodeReading{}, false, 0, err
+	}
+	from, to := ts(since), pgtype.Timestamptz{}
+	if !until.IsZero() {
+		to = ts(until)
+	}
+	base, err := s.q.LatestNodeStatusReadingBefore(ctx, sqlc.LatestNodeStatusReadingBeforeParams{
+		TargetPublicKey: key, Since: from, IncludeUntrusted: includeUntrusted,
+	})
+	if err != nil {
+		return nil, false, 0, err
+	}
+	rows, err := s.q.ListNodeReadings(ctx, sqlc.ListNodeReadingsParams{
+		TargetPublicKey: key, Since: from, Until: to, IncludeUntrusted: includeUntrusted,
+	})
+	if err != nil {
+		return nil, false, 0, err
+	}
+	untrusted := 0
+	if !includeUntrusted {
+		n, err := s.q.CountUntrustedNodeReadings(ctx, sqlc.CountUntrustedNodeReadingsParams{TargetPublicKey: key, Since: from, Until: to})
+		if err != nil {
+			return nil, false, 0, err
+		}
+		untrusted = int(n)
+	}
+	out := make([]api.NodeReading, 0, len(base)+len(rows))
+	for _, r := range base {
+		out = append(out, nodeReading(sqlc.ListNodeReadingsRow(r)))
+	}
+	for _, r := range rows {
+		out = append(out, nodeReading(r))
+	}
+	return out, true, untrusted, nil
+}

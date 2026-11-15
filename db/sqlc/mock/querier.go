@@ -205,6 +205,21 @@ func (mr *MockQuerierMockRecorder) CountChannelMessagesSentSince(ctx, arg any) *
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountChannelMessagesSentSince", reflect.TypeOf((*MockQuerier)(nil).CountChannelMessagesSentSince), ctx, arg)
 }
 
+// CountUntrustedNodeReadings mocks base method.
+func (m *MockQuerier) CountUntrustedNodeReadings(ctx context.Context, arg db.CountUntrustedNodeReadingsParams) (int32, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CountUntrustedNodeReadings", ctx, arg)
+	ret0, _ := ret[0].(int32)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CountUntrustedNodeReadings indicates an expected call of CountUntrustedNodeReadings.
+func (mr *MockQuerierMockRecorder) CountUntrustedNodeReadings(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountUntrustedNodeReadings", reflect.TypeOf((*MockQuerier)(nil).CountUntrustedNodeReadings), ctx, arg)
+}
+
 // CreateAccount mocks base method.
 func (m *MockQuerier) CreateAccount(ctx context.Context, name string) (db.Account, error) {
 	m.ctrl.T.Helper()
@@ -1817,6 +1832,21 @@ func (mr *MockQuerierMockRecorder) InsertRepeaterReading(ctx, arg any) *gomock.C
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertRepeaterReading", reflect.TypeOf((*MockQuerier)(nil).InsertRepeaterReading), ctx, arg)
 }
 
+// LatestNodeStatusReadingBefore mocks base method.
+func (m *MockQuerier) LatestNodeStatusReadingBefore(ctx context.Context, arg db.LatestNodeStatusReadingBeforeParams) ([]db.LatestNodeStatusReadingBeforeRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LatestNodeStatusReadingBefore", ctx, arg)
+	ret0, _ := ret[0].([]db.LatestNodeStatusReadingBeforeRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// LatestNodeStatusReadingBefore indicates an expected call of LatestNodeStatusReadingBefore.
+func (mr *MockQuerierMockRecorder) LatestNodeStatusReadingBefore(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LatestNodeStatusReadingBefore", reflect.TypeOf((*MockQuerier)(nil).LatestNodeStatusReadingBefore), ctx, arg)
+}
+
 // ListAccounts mocks base method.
 func (m *MockQuerier) ListAccounts(ctx context.Context) ([]db.Account, error) {
 	m.ctrl.T.Helper()
@@ -2325,6 +2355,21 @@ func (m *MockQuerier) ListNodeObservations(ctx context.Context, arg db.ListNodeO
 func (mr *MockQuerierMockRecorder) ListNodeObservations(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListNodeObservations", reflect.TypeOf((*MockQuerier)(nil).ListNodeObservations), ctx, arg)
+}
+
+// ListNodeReadings mocks base method.
+func (m *MockQuerier) ListNodeReadings(ctx context.Context, arg db.ListNodeReadingsParams) ([]db.ListNodeReadingsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListNodeReadings", ctx, arg)
+	ret0, _ := ret[0].([]db.ListNodeReadingsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListNodeReadings indicates an expected call of ListNodeReadings.
+func (mr *MockQuerierMockRecorder) ListNodeReadings(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListNodeReadings", reflect.TypeOf((*MockQuerier)(nil).ListNodeReadings), ctx, arg)
 }
 
 // ListNodes mocks base method.
@@ -3042,6 +3087,36 @@ func (m *MockQuerier) NextChannelMessageID(ctx context.Context, afterID int64) (
 func (mr *MockQuerierMockRecorder) NextChannelMessageID(ctx, afterID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NextChannelMessageID", reflect.TypeOf((*MockQuerier)(nil).NextChannelMessageID), ctx, afterID)
+}
+
+// NodeHasReadings mocks base method.
+func (m *MockQuerier) NodeHasReadings(ctx context.Context, targetPublicKey []byte) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "NodeHasReadings", ctx, targetPublicKey)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// NodeHasReadings indicates an expected call of NodeHasReadings.
+func (mr *MockQuerierMockRecorder) NodeHasReadings(ctx, targetPublicKey any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NodeHasReadings", reflect.TypeOf((*MockQuerier)(nil).NodeHasReadings), ctx, targetPublicKey)
+}
+
+// NodePublicKey mocks base method.
+func (m *MockQuerier) NodePublicKey(ctx context.Context, id uuid.UUID) ([]byte, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "NodePublicKey", ctx, id)
+	ret0, _ := ret[0].([]byte)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// NodePublicKey indicates an expected call of NodePublicKey.
+func (mr *MockQuerierMockRecorder) NodePublicKey(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NodePublicKey", reflect.TypeOf((*MockQuerier)(nil).NodePublicKey), ctx, id)
 }
 
 // ObservationIDAbove mocks base method.

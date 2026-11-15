@@ -5,6 +5,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -563,3 +564,121 @@ func TestGetNodeActivity_Shape(t *testing.T) {
 		t.Errorf("windows %v, want 168h then the 24h default", windows)
 	}
 }
+
+func nodeTelemetryGet(t *testing.T, sr stubReader, query string) *httptest.ResponseRecorder {
+	t.Helper()
+	r := chi.NewRouter()
+	r.Get("/nodes/{nodeId}/telemetry", getNodeTelemetry(sr))
+	req := httptest.NewRequest(http.MethodGet, "/nodes/"+uuid.NewString()+"/telemetry"+query, nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func TestGetNodeTelemetry_Defaults(t *testing.T) {
+	var since time.Time
+	sr := stubReader{getNodeReadings: func(_ context.Context, _ uuid.UUID, s, _ time.Time, inc bool) ([]api.NodeReading, bool, int, error) {
+		since = s
+		if inc {
+			t.Error("includeUntrusted set without include=untrusted")
+		}
+		return []api.NodeReading{{SampledAt: time.Now().Add(-time.Hour), Trusted: true, BatteryMV: ptrOf(int32(4100))}}, true, 3, nil
+	}}
+	w := nodeTelemetryGet(t, sr, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body)
+	}
+	var got api.NodeTelemetry
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Range != "168h" || got.Interval != "6h" || !got.Polled || got.UntrustedReadings != 3 || len(got.Points) != 1 {
+		t.Errorf("got %+v", got)
+	}
+	if d := time.Since(since); d < 168*time.Hour || d > 168*time.Hour+time.Minute {
+		t.Errorf("since is %v ago, want 168h", d)
+	}
+}
+
+func TestGetNodeTelemetry_AllowedParams(t *testing.T) {
+	for _, rng := range []string{"24h", "168h", "720h"} {
+		for _, iv := range []string{"1h", "6h", "24h"} {
+			w := nodeTelemetryGet(t, stubReader{}, "?range="+rng+"&interval="+iv)
+			var got api.NodeTelemetry
+			if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &got) != nil || got.Range != rng || got.Interval != iv {
+				t.Errorf("%s/%s: %d %s", rng, iv, w.Code, w.Body)
+			}
+		}
+	}
+}
+
+func TestGetNodeTelemetry_DefaultInterval(t *testing.T) {
+	for rng, want := range map[string]string{"24h": "1h", "168h": "6h", "720h": "24h"} {
+		var got api.NodeTelemetry
+		w := nodeTelemetryGet(t, stubReader{}, "?range="+rng)
+		if json.Unmarshal(w.Body.Bytes(), &got) != nil || got.Interval != want {
+			t.Errorf("range %s: interval %q, want %s", rng, got.Interval, want)
+		}
+	}
+}
+
+func TestGetNodeTelemetry_IncludeUntrusted(t *testing.T) {
+	var inc bool
+	sr := stubReader{getNodeReadings: func(_ context.Context, _ uuid.UUID, _, _ time.Time, i bool) ([]api.NodeReading, bool, int, error) {
+		inc = i
+		return nil, true, 0, nil
+	}}
+	if w := nodeTelemetryGet(t, sr, "?include=untrusted"); w.Code != http.StatusOK || !inc {
+		t.Errorf("status %d, includeUntrusted %v", w.Code, inc)
+	}
+	if w := nodeTelemetryGet(t, sr, "?include=everything"); w.Code != http.StatusBadRequest {
+		t.Errorf("bad include: status %d", w.Code)
+	}
+}
+
+func TestGetNodeTelemetry_BadParams(t *testing.T) {
+	for _, q := range []string{"?range=48h", "?range=abc", "?interval=2h", "?interval=1d", "?range=24h&interval=7h"} {
+		if w := nodeTelemetryGet(t, stubReader{}, q); w.Code != http.StatusBadRequest {
+			t.Errorf("%s: status %d, want 400", q, w.Code)
+		}
+	}
+	r := chi.NewRouter()
+	r.Get("/nodes/{nodeId}/telemetry", getNodeTelemetry(stubReader{}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/nodes/nope/telemetry", nil))
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("bad id: status %d", w.Code)
+	}
+}
+
+func TestGetNodeTelemetry_UnknownNode(t *testing.T) {
+	sr := stubReader{getNodeReadings: func(context.Context, uuid.UUID, time.Time, time.Time, bool) ([]api.NodeReading, bool, int, error) {
+		return nil, false, 0, pgx.ErrNoRows
+	}}
+	if w := nodeTelemetryGet(t, sr, ""); w.Code != http.StatusNotFound {
+		t.Errorf("status %d, want 404", w.Code)
+	}
+}
+
+func TestGetNodeTelemetry_NeverPolled(t *testing.T) {
+	w := nodeTelemetryGet(t, stubReader{}, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d", w.Code)
+	}
+	for _, want := range []string{`"polled":false`, `"points":[]`, `"untrustedReadings":0`} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Errorf("missing %s in %s", want, w.Body)
+		}
+	}
+}
+
+func TestGetNodeTelemetry_StoreError(t *testing.T) {
+	sr := stubReader{getNodeReadings: func(context.Context, uuid.UUID, time.Time, time.Time, bool) ([]api.NodeReading, bool, int, error) {
+		return nil, false, 0, errors.New("boom")
+	}}
+	if w := nodeTelemetryGet(t, sr, ""); w.Code != http.StatusInternalServerError {
+		t.Errorf("status %d, want 500", w.Code)
+	}
+}
+
+func ptrOf[T any](v T) *T { return &v }

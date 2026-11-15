@@ -43,6 +43,7 @@ type Querier interface {
 	CorroborateReadings(ctx context.Context, arg CorroborateReadingsParams) (int64, error)
 	// How many messages were sent at or after since, counted to at most row_limit: idx_channel_messages_sent alone.
 	CountChannelMessagesSentSince(ctx context.Context, arg CountChannelMessagesSentSinceParams) (int64, error)
+	CountUntrustedNodeReadings(ctx context.Context, arg CountUntrustedNodeReadingsParams) (int32, error)
 	CreateAccount(ctx context.Context, name string) (Account, error)
 	CurrentPollingPoller(ctx context.Context, targetPublicKey []byte) ([]byte, error)
 	// Lock the current row before deciding the outcome, including when another
@@ -292,6 +293,8 @@ type Querier interface {
 	// Run under LockPollingObserver. Inserts nothing when this observer stored a reading of the target by the same
 	// method received after recent_after, or budget readings of any target received after budget_after.
 	InsertRepeaterReading(ctx context.Context, arg InsertRepeaterReadingParams) (int64, error)
+	// The newest status reading before since: the baseline for the first counter increments in range.
+	LatestNodeStatusReadingBefore(ctx context.Context, arg LatestNodeStatusReadingBeforeParams) ([]LatestNodeStatusReadingBeforeRow, error)
 	ListAccounts(ctx context.Context) ([]Account, error)
 	// The original all-channel message statement, before the channel read model: no page runs it
 	// (planpolicy.VerificationOnly); tests compare message pages with it.
@@ -384,6 +387,8 @@ type Querier interface {
 	// @cursor is the previous page's last observation id (0 starts at the top); its packet gives its place in this
 	// order. A cursor whose observation is gone matches nothing, which ends the list.
 	ListNodeObservations(ctx context.Context, arg ListNodeObservationsParams) ([]ListNodeObservationsRow, error)
+	// Readings of one target in [since, until) ascending; until is open when NULL. Untrusted ones only when asked for.
+	ListNodeReadings(ctx context.Context, arg ListNodeReadingsParams) ([]ListNodeReadingsRow, error)
 	// Limit the filtered node page before enriching IATA membership and neighbours.
 	ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNodesRow, error)
 	// ListNodes by name, type, neighbour count or last seen, keyset-paged, in the web table's order: unnamed
@@ -520,6 +525,8 @@ type Querier interface {
 	MinObservationID(ctx context.Context) (int64, error)
 	// The first message id above after_id, or 0 when there is none.
 	NextChannelMessageID(ctx context.Context, afterID int64) (int64, error)
+	NodeHasReadings(ctx context.Context, targetPublicKey []byte) (bool, error)
+	NodePublicKey(ctx context.Context, id uuid.UUID) ([]byte, error)
 	// The id skip + 1 observations above after_id: (after_id, id] holds exactly skip + 1 of them. 0 when fewer remain.
 	ObservationIDAbove(ctx context.Context, arg ObservationIDAboveParams) (int64, error)
 	// The id that bounds the newest n observations at or below through_id from below: (id, through_id] holds exactly n

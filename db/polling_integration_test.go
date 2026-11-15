@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -18,6 +19,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/config"
 	"github.com/MeshCore-Beacon/beacon-server/internal/polling"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -1342,5 +1344,84 @@ VALUES ($1, $2, $3, $3, 'status', $4)`, pollKey(0xA), k, now, i); err != nil {
 	}
 	if !readingTrusted(t, ctx, pool, a) || readingTrusted(t, ctx, pool, b) {
 		t.Fatal("backfill marked the wrong readings")
+	}
+}
+
+func TestNodeReadingsPostgres(t *testing.T) {
+	ctx, pool, s := pollStore(t)
+	obs := pollKey(1)
+	oid := pollObserver(t, ctx, s, obs)
+	target := pollKey(0xA)
+	nodeID := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO nodes (id, public_key, node_type, name) VALUES ($1, $2, 2, 'rep')`, nodeID, target); err != nil {
+		t.Fatal(err)
+	}
+	bare := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO nodes (id, public_key, node_type, name) VALUES ($1, $2, 2, 'bare')`, bare, pollKey(0xB)); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC().Truncate(time.Second)
+	since := now.Add(-24 * time.Hour)
+	add := func(at time.Time, method string, trusted bool, tag int, battery int, recv *int64) {
+		t.Helper()
+		_, err := pool.Exec(ctx, `INSERT INTO repeater_readings (target_public_key, observer_public_key, observer_id, sampled_at, received_at, method, tag, battery_mv, packets_recv, uptime_secs, trusted)
+			VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8, $9, $10)`,
+			target, obs, oid, at, method, tag, battery, recv, recv, trusted)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	n := func(v int64) *int64 { return &v }
+	add(since.Add(-30*time.Hour), "status", true, 1, 3900, n(10)) // older baseline, not the newest
+	add(since.Add(-2*time.Hour), "status", true, 2, 3950, n(100)) // the baseline
+	add(since.Add(-1*time.Hour), "telemetry", true, 3, 3960, nil) // telemetry never a baseline
+	add(since.Add(1*time.Hour), "status", true, 4, 4000, n(200))
+	add(since.Add(2*time.Hour), "telemetry", false, 5, 4100, nil) // untrusted
+	add(since.Add(3*time.Hour), "status", false, 6, 4200, n(300)) // untrusted
+	add(since.Add(4*time.Hour), "telemetry", true, 7, 4300, nil)
+
+	got, polled, untrusted, err := s.GetNodeReadings(ctx, nodeID, since, time.Time{}, false)
+	if err != nil || !polled || untrusted != 2 {
+		t.Fatalf("default: polled=%v untrusted=%d err=%v", polled, untrusted, err)
+	}
+	var batt []int32
+	for _, r := range got {
+		if !r.Trusted {
+			t.Errorf("untrusted reading returned by default: %+v", r)
+		}
+		batt = append(batt, *r.BatteryMV)
+	}
+	if fmt.Sprint(batt) != "[3950 4000 4300]" {
+		t.Errorf("batteries = %v, want baseline then the two trusted in-range readings", batt)
+	}
+
+	got, _, untrusted, err = s.GetNodeReadings(ctx, nodeID, since, time.Time{}, true)
+	if err != nil || untrusted != 0 || len(got) != 5 {
+		t.Fatalf("include: n=%d untrusted=%d err=%v", len(got), untrusted, err)
+	}
+	if !sort.SliceIsSorted(got, func(i, j int) bool { return got[i].SampledAt.Before(got[j].SampledAt) }) {
+		t.Error("readings not ascending")
+	}
+
+	// until bounds the range
+	got, _, _, err = s.GetNodeReadings(ctx, nodeID, since, since.Add(2*time.Hour), true)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("until: n=%d err=%v", len(got), err)
+	}
+
+	// polled counts readings outside the range too
+	_, polled, _, err = s.GetNodeReadings(ctx, nodeID, now.Add(time.Hour), time.Time{}, false)
+	if err != nil || !polled {
+		t.Fatalf("out of range: polled=%v err=%v", polled, err)
+	}
+
+	got, polled, untrusted, err = s.GetNodeReadings(ctx, bare, since, time.Time{}, false)
+	if err != nil || polled || untrusted != 0 || len(got) != 0 {
+		t.Fatalf("never polled: %v %v %d %v", got, polled, untrusted, err)
+	}
+
+	if _, _, _, err = s.GetNodeReadings(ctx, uuid.New(), since, time.Time{}, false); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("unknown node err = %v, want pgx.ErrNoRows", err)
 	}
 }

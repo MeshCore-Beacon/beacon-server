@@ -277,6 +277,11 @@ func (cr *CachedReader) GetObserverTelemetry(ctx context.Context, observerID uui
 	return cr.inner.GetObserverTelemetry(ctx, observerID, since, until, afterID)
 }
 
+// GetNodeReadings implements [api.Reader].
+func (cr *CachedReader) GetNodeReadings(ctx context.Context, nodeID uuid.UUID, since, until time.Time, includeUntrusted bool) ([]api.NodeReading, bool, int, error) {
+	return cr.inner.GetNodeReadings(ctx, nodeID, since, until, includeUntrusted)
+}
+
 // GetObserverTelemetryBucketed implements [api.Reader].
 func (cr *CachedReader) GetObserverTelemetryBucketed(ctx context.Context, observerID uuid.UUID, since, until time.Time, bucketHours int32) ([]api.ObserverTelemetryPoint, error) {
 	return cr.inner.GetObserverTelemetryBucketed(ctx, observerID, since, until, bucketHours)

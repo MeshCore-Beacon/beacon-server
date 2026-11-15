@@ -1906,6 +1906,90 @@
                 }
             }
         },
+        "/nodes/{nodeId}/telemetry": {
+            "get": {
+                "description": "Repeater readings bucketed into UTC windows. Counters are increments within the bucket, uptimeSeconds is the bucket maximum, the rest are averages; a field is omitted when no reading in the bucket carried it. Untrusted readings are left out unless include=untrusted, and counted in untrustedReadings. polled is true when the node has any reading at all.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Nodes"
+                ],
+                "summary": "Get a polled node's telemetry history",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Node UUID",
+                        "name": "nodeId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "24h",
+                            "168h",
+                            "720h"
+                        ],
+                        "type": "string",
+                        "description": "Window: 24h, 168h (default) or 720h",
+                        "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "1h",
+                            "6h",
+                            "24h"
+                        ],
+                        "type": "string",
+                        "description": "Bucket size: 1h, 6h or 24h. Defaults to 1h for 24h, 6h for 168h, 24h for 720h",
+                        "name": "interval",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "untrusted"
+                        ],
+                        "type": "string",
+                        "description": "untrusted to include readings from observers without advert evidence for the node",
+                        "name": "include",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeTelemetry"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "503": {
+                        "description": "The read took too long: retry after Retry-After seconds",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
         "/observers": {
             "get": {
                 "produces": [
@@ -5425,6 +5509,79 @@
                 "stale": {
                     "description": "Stale is true when the node hasn't been seen (last_seen) within the configured\nstaleness window (default 24h; internal/config.ResolvedConfig.NodeStaleThreshold).\nApplies to every node type, unlike ClockDriftSeconds/ClockOutOfSync on Node, which\nare repeater/room-server only.",
                     "type": "boolean"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.NodeTelemetry": {
+            "type": "object",
+            "properties": {
+                "interval": {
+                    "type": "string"
+                },
+                "points": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeTelemetryPoint"
+                    }
+                },
+                "polled": {
+                    "description": "any reading has ever been stored for the node",
+                    "type": "boolean"
+                },
+                "range": {
+                    "type": "string"
+                },
+                "untrustedReadings": {
+                    "description": "readings in range left out because include=untrusted was not set",
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.NodeTelemetryPoint": {
+            "type": "object",
+            "properties": {
+                "airtimeRxSecs": {
+                    "type": "number"
+                },
+                "airtimeTxSecs": {
+                    "type": "number"
+                },
+                "batteryMv": {
+                    "type": "integer"
+                },
+                "lastRssiDb": {
+                    "type": "integer"
+                },
+                "lastSnrDb": {
+                    "type": "number"
+                },
+                "noiseFloorDb": {
+                    "type": "integer"
+                },
+                "packetsReceived": {
+                    "type": "integer"
+                },
+                "packetsSent": {
+                    "type": "integer"
+                },
+                "queueLength": {
+                    "type": "integer"
+                },
+                "readings": {
+                    "type": "integer"
+                },
+                "receiveErrors": {
+                    "type": "integer"
+                },
+                "t": {
+                    "description": "epoch ms, bucket start",
+                    "type": "integer"
+                },
+                "temperatureC": {
+                    "type": "number"
+                },
+                "uptimeSeconds": {
+                    "type": "integer"
                 }
             }
         },
