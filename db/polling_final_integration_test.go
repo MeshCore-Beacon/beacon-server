@@ -176,3 +176,31 @@ func TestRequestedCleanupKeepsANewAssignmentPostgres(t *testing.T) {
 		t.Fatal("cleanup removed a requested target while its accepting claim is live")
 	}
 }
+
+// An instance that cannot record what it served must fail the owners request, not answer without the requested
+// target: the firmware reads an omitted requested target as withdrawn.
+func TestRequestedOwnersOnAReadOnlyStoreFailsPostgres(t *testing.T) {
+	w := newReqWorld(t, "")
+	ctx, s := w.ctx, w.s
+	alice := newUser(t, ctx, s, "alice")
+	o := newReqDevice(1)
+	node := w.node(0xA1)
+	pollHearAdvert(t, ctx, w.pool, pollKey(0xA1), pollObserver(t, ctx, s, o.pub), w.now.Add(-time.Hour), 5)
+	w.claim(o, 1)
+	if _, err := w.reqs.Create(ctx, alice.ID, node, []byte("A")); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := w.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SET TRANSACTION READ ONLY`); err != nil {
+		t.Fatal(err)
+	}
+	s.q = sqlc.New(tx)
+	a, err := w.svc.Owners(ctx, polling.Caller{Observer: o.pub})
+	if err == nil {
+		t.Fatalf("answered 200 with %d nodes although the served versions could not be recorded", len(a.Nodes))
+	}
+}

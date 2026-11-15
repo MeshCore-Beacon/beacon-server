@@ -279,7 +279,9 @@ func (s *Service) Owners(ctx context.Context, c Caller) (OwnersAnswer, error) {
 		}
 	}
 	ans := BuildOwners(rows, p)
-	s.addEnvelopes(ctx, c.Observer, rows, ans.Nodes)
+	if err := s.addEnvelopes(ctx, c.Observer, rows, ans.Nodes); err != nil {
+		return OwnersAnswer{}, err
+	}
 	return ans, nil
 }
 

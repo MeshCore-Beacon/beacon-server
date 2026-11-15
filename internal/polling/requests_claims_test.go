@@ -249,7 +249,9 @@ func newDevice(t *testing.T) device {
 func ownersFor(t *testing.T, svc *Service, d device, rows []OwnerRow) map[string]OwnerEntry {
 	t.Helper()
 	nodes := BuildOwners(rows, DisabledPolicy()).Nodes
-	svc.addEnvelopes(context.Background(), d.pub, rows, nodes)
+	if err := svc.addEnvelopes(context.Background(), d.pub, rows, nodes); err != nil {
+		t.Fatal(err)
+	}
 	return nodes
 }
 
@@ -334,11 +336,11 @@ func TestOwnersLeavesOutTargetsWhoseEnvelopeFails(t *testing.T) {
 	if _, ok := ownersFor(t, svc, d, rows)[hex.EncodeToString(target)]; ok {
 		t.Fatal("entry kept")
 	}
-	// A store failure drops every requested entry too.
+	// A store failure fails the answer: dropping the entry would make the device forget the target.
 	st.passwrds[string(target)] = RequestedPassword{RequestID: id, Ver: 1, CT: ct, Nonce: nonce}
 	st.pwErr = errors.New("db down")
-	if _, ok := ownersFor(t, svc, d, rows)[hex.EncodeToString(target)]; ok {
-		t.Fatal("entry kept on a store error")
+	if err := svc.addEnvelopes(context.Background(), d.pub, rows, BuildOwners(rows, DisabledPolicy()).Nodes); err == nil {
+		t.Fatal("a store error answered 200")
 	}
 	// A bad observer key cannot be sealed to.
 	st.pwErr = nil

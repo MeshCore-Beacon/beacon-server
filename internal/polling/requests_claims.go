@@ -59,7 +59,7 @@ func (s *Service) handleRequestedStates(ctx context.Context, c Claim, now time.T
 // built on every answer. An entry that cannot get its envelope is left out: an entry without pw tells the device to
 // try a blank or hello login, which a repeater may answer with admin access, and a requested target missing from
 // an answer is dropped by the device and offered again on the next one.
-func (s *Service) addEnvelopes(ctx context.Context, observer []byte, rows []OwnerRow, nodes map[string]OwnerEntry) {
+func (s *Service) addEnvelopes(ctx context.Context, observer []byte, rows []OwnerRow, nodes map[string]OwnerEntry) error {
 	var targets [][]byte
 	for _, r := range rows {
 		if r.Requested && r.PWOK && r.Rank >= 0 && !r.Excluded {
@@ -67,22 +67,19 @@ func (s *Service) addEnvelopes(ctx context.Context, observer []byte, rows []Owne
 		}
 	}
 	if len(targets) == 0 {
-		return
+		return nil
 	}
 	drop := func(t []byte) { delete(nodes, hex.EncodeToString(t)) }
 	if s.reqs == nil || s.sealer == nil {
 		for _, t := range targets {
 			drop(t)
 		}
-		return
+		return nil
 	}
 	pws, err := s.reqs.RequestedPasswords(ctx, targets)
 	if err != nil {
 		s.log.Warn("requested passwords", "observer", short(observer), "err", err)
-		for _, t := range targets {
-			drop(t)
-		}
-		return
+		return err // an omitted requested target reads as withdrawn, so the answer fails instead
 	}
 	served := map[string]int64{}
 	for _, t := range targets {
@@ -114,11 +111,10 @@ func (s *Service) addEnvelopes(ctx context.Context, observer []byte, rows []Owne
 		nodes[key] = e
 	}
 	// A report from this observer is judged against what it was just given. Without the record the entries could
-	// not be told apart later, so none of them is sent.
+	// not be told apart later; leaving them out would make the device drop them, so the answer fails (503) instead.
 	if err := s.reqs.RecordServedVersions(ctx, observer, served, s.now()); err != nil {
 		s.log.Warn("served versions", "observer", short(observer), "err", err)
-		for t := range served {
-			drop([]byte(t))
-		}
+		return err
 	}
+	return nil
 }
