@@ -19,8 +19,12 @@ const foreignKeyViolation = "23503"
 
 // UserAtlas reads the user's Atlas with ids resolved now. A user with none reads as revision 0, 24h, no pins.
 func (s *Store) UserAtlas(ctx context.Context, userID uuid.UUID) (api.Atlas, error) {
+	return readUserAtlas(ctx, s.q, userID)
+}
+
+func readUserAtlas(ctx context.Context, q sqlc.Querier, userID uuid.UUID) (api.Atlas, error) {
 	rng, rev := "24h", int64(0)
-	rows, err := s.q.ReadUserAtlas(ctx, userID)
+	rows, err := q.ReadUserAtlas(ctx, userID)
 	if err != nil {
 		return api.Atlas{}, err
 	}
@@ -40,14 +44,14 @@ func (s *Store) UserAtlas(ctx context.Context, userID uuid.UUID) (api.Atlas, err
 	}
 	nodeIDs, observerIDs := map[string]uuid.UUID{}, map[string]uuid.UUID{}
 	if len(keys) > 0 {
-		ns, err := s.q.NodeIDsByKeys(ctx, keys)
+		ns, err := q.NodeIDsByKeys(ctx, keys)
 		if err != nil {
 			return api.Atlas{}, err
 		}
 		for _, n := range ns {
 			nodeIDs[hex.EncodeToString(n.PublicKey)] = n.ID
 		}
-		os, err := s.q.ObserverIDsByKeys(ctx, keys)
+		os, err := q.ObserverIDsByKeys(ctx, keys)
 		if err != nil {
 			return api.Atlas{}, err
 		}
@@ -74,9 +78,10 @@ func (s *Store) ObserverKeysByIDs(ctx context.Context, ids []uuid.UUID) (map[uui
 	return out, nil
 }
 
-// ReplaceUserAtlas replaces the user's whole Atlas when base is the stored revision and reports the new revision.
-// ok is false, and nothing changes, when the revision differs. A user that no longer exists gives users.ErrNotFound.
-func (s *Store) ReplaceUserAtlas(ctx context.Context, userID uuid.UUID, base int64, rng string, pins []api.StoredPin) (rev int64, ok bool, err error) {
+// ReplaceUserAtlas replaces the user's whole Atlas when base is the stored revision and returns the document it
+// committed, read in the same transaction under the Atlas lock. ok is false, and nothing changes, when the revision
+// differs. A user that no longer exists gives users.ErrNotFound.
+func (s *Store) ReplaceUserAtlas(ctx context.Context, userID uuid.UUID, base int64, rng string, pins []api.StoredPin) (doc api.Atlas, ok bool, err error) {
 	err = s.pollTx(ctx, func(q *sqlc.Queries) error {
 		if err := q.EnsureUserAtlas(ctx, userID); err != nil {
 			return err
@@ -105,13 +110,18 @@ func (s *Store) ReplaceUserAtlas(ctx context.Context, userID uuid.UUID, base int
 		if err := q.DeleteUnpinnedAlertRules(ctx, userID); err != nil {
 			return err
 		}
-		rev, err = q.BumpUserAtlas(ctx, sqlc.BumpUserAtlasParams{UserID: userID, Range: rng})
-		ok = err == nil
-		return err
+		if _, err := q.BumpUserAtlas(ctx, sqlc.BumpUserAtlasParams{UserID: userID, Range: rng}); err != nil {
+			return err
+		}
+		if doc, err = readUserAtlas(ctx, q, userID); err != nil {
+			return err
+		}
+		ok = true
+		return nil
 	})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation {
-		return 0, false, users.ErrNotFound
+		return api.Atlas{}, false, users.ErrNotFound
 	}
-	return rev, ok, err
+	return doc, ok, err
 }

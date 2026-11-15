@@ -47,9 +47,9 @@ func TestUserAtlasPostgres(t *testing.T) {
 		{Kind: "node", Key: atlasKey(1), Name: "hill", Tiles: tiles, View: "heard"},
 		{Kind: "node", Key: atlasKey(3), Name: "unknown"},
 	}
-	rev, ok, err := s.ReplaceUserAtlas(ctx, u.ID, 0, "3d", pins)
-	if err != nil || !ok || rev != 1 {
-		t.Fatalf("first write: %d %v %v", rev, ok, err)
+	doc, ok, err := s.ReplaceUserAtlas(ctx, u.ID, 0, "3d", pins)
+	if err != nil || !ok || doc.Revision != 1 || doc.Range != "3d" || len(doc.Pins) != 3 {
+		t.Fatalf("first write: %+v %v %v", doc, ok, err)
 	}
 	a, err = s.UserAtlas(ctx, u.ID)
 	if err != nil || a.Revision != 1 || a.Range != "3d" || len(a.Pins) != 3 {

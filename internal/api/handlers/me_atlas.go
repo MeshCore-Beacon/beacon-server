@@ -21,7 +21,8 @@ type AtlasStore interface {
 	UserAtlas(ctx context.Context, userID uuid.UUID) (api.Atlas, error)
 	ObserverKeysByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID][]byte, error)
 	// ReplaceUserAtlas reports ok=false when base is not the stored revision.
-	ReplaceUserAtlas(ctx context.Context, userID uuid.UUID, base int64, rng string, pins []api.StoredPin) (rev int64, ok bool, err error)
+	// On success it returns the document it committed, built in the same transaction.
+	ReplaceUserAtlas(ctx context.Context, userID uuid.UUID, base int64, rng string, pins []api.StoredPin) (doc api.Atlas, ok bool, err error)
 }
 
 // A full Atlas with long names is a few KiB more than the usual body limit.
@@ -93,7 +94,7 @@ func putAtlas(store AtlasStore) http.HandlerFunc {
 			respondError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
-		_, ok, err := store.ReplaceUserAtlas(r.Context(), u.ID, in.BaseRevision, rng, pins)
+		doc, ok, err := store.ReplaceUserAtlas(r.Context(), u.ID, in.BaseRevision, rng, pins)
 		if errors.Is(err, users.ErrNotFound) {
 			respondCode(w, http.StatusUnauthorized, "not_signed_in", "Sign in first.")
 			return
@@ -102,18 +103,19 @@ func putAtlas(store AtlasStore) http.HandlerFunc {
 			respondError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
+		if ok {
+			respond(w, http.StatusOK, doc)
+			return
+		}
+		// A conflict reads the stored Atlas fresh.
 		cur, err := store.UserAtlas(r.Context(), u.ID)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
-		if !ok {
-			respond(w, http.StatusConflict, api.AtlasConflict{
-				Error:   api.AtlasConflictError{Code: "atlas_conflict", Message: "The Atlas was changed elsewhere."},
-				Current: cur,
-			})
-			return
-		}
-		respond(w, http.StatusOK, cur)
+		respond(w, http.StatusConflict, api.AtlasConflict{
+			Error:   api.AtlasConflictError{Code: "atlas_conflict", Message: "The Atlas was changed elsewhere."},
+			Current: cur,
+		})
 	}
 }

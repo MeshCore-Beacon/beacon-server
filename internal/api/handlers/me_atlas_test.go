@@ -25,6 +25,8 @@ type fakeAtlas struct {
 	pins      []api.StoredPin
 	observers map[uuid.UUID][]byte
 	err       error
+	// other is another device saving right after the next committed PUT.
+	other bool
 }
 
 func (f *fakeAtlas) UserAtlas(context.Context, uuid.UUID) (api.Atlas, error) {
@@ -42,16 +44,20 @@ func (f *fakeAtlas) ObserverKeysByIDs(context.Context, []uuid.UUID) (map[uuid.UU
 	return f.observers, nil
 }
 
-func (f *fakeAtlas) ReplaceUserAtlas(_ context.Context, _ uuid.UUID, base int64, rng string, pins []api.StoredPin) (int64, bool, error) {
+func (f *fakeAtlas) ReplaceUserAtlas(_ context.Context, _ uuid.UUID, base int64, rng string, pins []api.StoredPin) (api.Atlas, bool, error) {
 	if f.err != nil {
-		return 0, false, f.err
+		return api.Atlas{}, false, f.err
 	}
 	if base != f.rev {
-		return 0, false, nil
+		return api.Atlas{}, false, nil
 	}
 	f.rev++
 	f.rng, f.pins = rng, pins
-	return f.rev, true, nil
+	doc := api.ResolveAtlas(rng, f.rev, pins, nil, nil)
+	if f.other {
+		f.rev++
+	}
+	return doc, true, nil
 }
 
 func atlasServer(svc AccountsService, a AtlasStore, opts AuthOptions) chi.Router {
@@ -183,3 +189,14 @@ func mustKey(t *testing.T, s string) []byte {
 }
 
 func jsonUnmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }
+
+// The success answer is the document the PUT committed, not a later read another device's save may have changed.
+func TestMeAtlasPutAnswersWhatItCommitted(t *testing.T) {
+	a := &fakeAtlas{other: true}
+	h := atlasServer(&fakeAccounts{}, a, accountsOpts())
+	w := call(h, "PUT", "/me/atlas", `{"baseRevision":0,"range":"3d","pins":[]}`, cookie("web-token"), csrf)
+	b := jsonBody(t, w)
+	if w.Code != 200 || b["revision"] != float64(1) || b["range"] != "3d" {
+		t.Fatalf("put: %d %s", w.Code, w.Body)
+	}
+}
