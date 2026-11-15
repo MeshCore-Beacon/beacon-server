@@ -149,12 +149,22 @@ func TestAlertsDelivery(t *testing.T) {
 		delivery, mode, want string
 		err                  bool
 	}{
-		{"", "local", "off", false}, {"off", "off", "off", false}, {"push", "portal", "push", false}, {"push", "local", "push", false},
+		{"", "local", "off", false}, {"", "off", "off", false}, {"off", "off", "off", false},
+		{"push", "off", "", true}, {"email", "off", "", true}, {"push", "", "", true}, {"push", "portal", "push", false}, {"push", "local", "push", false},
 		{"email", "local", "email", false}, {"email", "portal", "", true}, {"sms", "local", "", true},
 	} {
 		r, err := AlertsConfig{Delivery: tc.delivery}.Resolve(tc.mode)
 		if (err != nil) != tc.err || r.Delivery != tc.want {
 			t.Errorf("%+v: %q %v", tc, r.Delivery, err)
 		}
+	}
+}
+
+// Email alerts need local accounts with an SMTP host; accounts validation already refuses local mode without one.
+func TestAlertsEmailNeedsSMTPHost(t *testing.T) {
+	a := localAccounts()
+	a.SMTP.Host = ""
+	if _, err := a.Resolve(""); err == nil || !strings.Contains(err.Error(), "accounts.smtp.host") {
+		t.Fatalf("local accounts without smtp host: %v", err)
 	}
 }

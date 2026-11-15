@@ -21,9 +21,9 @@ import (
 
 func TestAlertSenderNeedsSomethingToSendWith(t *testing.T) {
 	pu, _ := url.Parse("https://beacon.example.org")
-	// Push with no credentials: the server starts, and no task is built, so nothing evaluates or tries to send.
+	// Push with no credentials is a startup error naming the setting and the variable.
 	s, err := newAlertSender("push", nil, nil, pu, "")
-	if err != nil || s != nil {
+	if err == nil || s != nil || !strings.Contains(err.Error(), "alerts.delivery") || !strings.Contains(err.Error(), "BEACON_PUSH_CREDENTIALS") {
 		t.Fatalf("push without credentials: %v %v", s, err)
 	}
 	if tasks := background.AlertTasks(nil, s); len(tasks) != 0 {

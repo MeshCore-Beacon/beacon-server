@@ -555,7 +555,7 @@ func main() {
 	slog.Info("alerts", "component", "startup", "delivery", resolvedAlerts.Delivery, "enabled", alertsSvc != nil)
 	alertSender, err := newAlertSender(alertDelivery, usersService, maintStore, resolvedAccounts.PublicURL, os.Getenv("BEACON_PUSH_CREDENTIALS"))
 	if err != nil {
-		slog.Error("invalid push credentials", "component", "startup", "error", err)
+		slog.Error("invalid alert delivery", "component", "startup", "error", err)
 		os.Exit(1)
 	}
 	if resolvedAccounts.Enabled {

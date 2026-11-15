@@ -455,7 +455,7 @@ cache:
 
 # Alerts on Atlas radios (gone quiet, low battery, reboots and more). Needs accounts. Off by default.
 #alerts:
-#  delivery: off               # off, push or email
-#                              # push: BEACON_PUSH_CREDENTIALS names the Google service-account JSON file of the app's
-#                              #   Firebase project; without it rules can be set but nothing is sent
-#                              # email: needs accounts.mode local and its smtp setup
+#  delivery: off               # off, push or email; anything but off needs accounts.mode local or portal
+#                              # push: BEACON_PUSH_CREDENTIALS must name the Google service-account JSON file of the
+#                              #   app's Firebase project; without it the server refuses to start
+#                              # email: needs accounts.mode local with accounts.smtp.host set (not portal)

@@ -4,6 +4,7 @@
 package main
 
 import (
+	"errors"
 	"log/slog"
 	"net/url"
 
@@ -12,9 +13,9 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/users"
 )
 
-// newAlertSender builds the outbox sender for the delivery mode, or nil when nothing can be sent: delivery off,
-// email without the account mail queue, or push without credentials. With a nil sender no alert rule is evaluated
-// and nothing tries to send; the routes and rules still work. The credentials path is never logged.
+// newAlertSender builds the outbox sender for the delivery mode, or nil when nothing can be sent: delivery off
+// or email without the account mail queue. Push without credentials is an error, so a server never advertises
+// alerts it cannot send. The credentials path is never logged.
 func newAlertSender(delivery string, svc *users.Service, store *db.Store, publicURL *url.URL, credentialsPath string) (*alerts.Sender, error) {
 	switch delivery {
 	case "email":
@@ -25,8 +26,7 @@ func newAlertSender(delivery string, svc *users.Service, store *db.Store, public
 		return alerts.NewSender(db.AlertEval{Store: store}, "email", svc, nil, publicURL, nil), nil
 	case "push":
 		if credentialsPath == "" {
-			slog.Warn("alerts.delivery is push but BEACON_PUSH_CREDENTIALS is not set: alert rules can be stored, nothing is evaluated or sent", "component", "startup")
-			return nil, nil
+			return nil, errors.New("alerts.delivery is push but BEACON_PUSH_CREDENTIALS is not set: set it to the Google service-account key file, or set alerts.delivery to off")
 		}
 		fcm, err := alerts.LoadFCM(credentialsPath)
 		if err != nil {

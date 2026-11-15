@@ -24,6 +24,13 @@ func (a AlertsConfig) Resolve(accountsMode string) (ResolvedAlerts, error) {
 	switch a.Delivery {
 	case "", "off":
 		return ResolvedAlerts{Delivery: "off"}, nil
+	case "push", "email":
+		// Rules hang on a user's Atlas, so with accounts off nothing could ever be sent.
+		if accountsMode == "" || accountsMode == "off" {
+			return ResolvedAlerts{}, fmt.Errorf("alerts.delivery %s needs accounts.mode local or portal", a.Delivery)
+		}
+	}
+	switch a.Delivery {
 	case "push":
 		return ResolvedAlerts{Delivery: "push"}, nil
 	case "email":
