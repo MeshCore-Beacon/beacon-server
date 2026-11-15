@@ -46,7 +46,7 @@ func TestLookupErrors(t *testing.T) {
 			return ObserversRouter(stubReader{getObserver: func(context.Context, uuid.UUID) (*api.Observer, error) { return nil, err }})
 		}, "/" + id, http.StatusNotFound},
 		{"node", func(err error) http.Handler {
-			return NodesRouter(stubReader{getNode: func(context.Context, uuid.UUID) (*api.Node, error) { return nil, err }})
+			return NodesRouter(stubReader{getNode: func(context.Context, uuid.UUID) (*api.Node, error) { return nil, err }}, true)
 		}, "/" + id, http.StatusNotFound},
 		{"packet", func(err error) http.Handler {
 			return PacketsRouter(stubReader{getPacket: func(context.Context, []byte) (*api.Packet, error) { return nil, err }})
@@ -86,7 +86,7 @@ func TestRegionFilterErrors(t *testing.T) {
 		reader := stubReader{getRegionBySlug: func(context.Context, string) (*api.Region, error) { return nil, tc.err }}
 		for name, h := range map[string]http.Handler{
 			"packets": PacketsRouter(reader),
-			"nodes":   NodesRouter(reader),
+			"nodes":   NodesRouter(reader, true),
 			"traces":  TracesRouter(reader),
 		} {
 			t.Run(name+"/"+tc.err.Error(), func(t *testing.T) {

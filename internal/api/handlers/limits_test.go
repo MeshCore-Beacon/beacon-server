@@ -107,7 +107,7 @@ func TestListLimits(t *testing.T) {
 		},
 	}
 	router := chi.NewRouter()
-	router.Mount("/nodes", NodesRouter(reader))
+	router.Mount("/nodes", NodesRouter(reader, true))
 	router.Mount("/observers", ObserversRouter(reader))
 	router.Mount("/packets", PacketsRouter(reader))
 	router.Mount("/channels", ChannelsRouter(reader))

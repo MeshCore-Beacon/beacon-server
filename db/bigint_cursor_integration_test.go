@@ -175,7 +175,7 @@ func TestBigintCursorsPostgres(t *testing.T) {
 	// Ingest stores every observation with its payload type; the adverts page reads it.
 	mustExec(t, ctx, tx, "UPDATE packet_observations po SET payload_type = p.payload_type FROM packets p WHERE p.packet_hash = po.packet_hash AND po.payload_type IS NULL")
 	store := &Store{q: sqlc.New(tx)}
-	observers, nodes, messages, packets := handlers.ObserversRouter(store), handlers.NodesRouter(store), handlers.MessagesRouter(store), handlers.PacketsRouter(store)
+	observers, nodes, messages, packets := handlers.ObserversRouter(store), handlers.NodesRouter(store, true), handlers.MessagesRouter(store), handlers.PacketsRouter(store)
 
 	t.Run("observer adverts", func(t *testing.T) {
 		want := queryInt64s(t, ctx, tx, `SELECT po.id FROM packet_observations po JOIN packets p USING (packet_hash) WHERE p.payload_type = 4 ORDER BY po.id`)

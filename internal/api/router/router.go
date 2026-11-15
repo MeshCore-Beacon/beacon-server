@@ -142,7 +142,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 				r.Use(guards.Middleware(opts.Guards))
 			}
 			r.Mount("/packets", handlers.PacketsRouter(reader))
-			r.Mount("/nodes", handlers.NodesRouter(reader))
+			r.Mount("/nodes", handlers.NodesRouter(reader, opts.PollingEnabled))
 			r.Mount("/brokers", handlers.BrokersRouter(workers))
 			r.Mount("/observers", handlers.ObserversRouter(reader))
 			r.Mount("/channels", handlers.ChannelsRouter(reader))

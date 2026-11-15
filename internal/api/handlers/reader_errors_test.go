@@ -25,7 +25,7 @@ func readerRoutes(reader api.Reader) http.Handler {
 	m.Mount("/channels", ChannelsRouter(reader))
 	m.Mount("/iatas", IATAsRouter(reader))
 	m.Mount("/messages", MessagesRouter(reader))
-	m.Mount("/nodes", NodesRouter(reader))
+	m.Mount("/nodes", NodesRouter(reader, true))
 	m.Mount("/observers", ObserversRouter(reader))
 	m.Mount("/packets", PacketsRouter(reader))
 	m.Mount("/regions", RegionsRouter(reader))

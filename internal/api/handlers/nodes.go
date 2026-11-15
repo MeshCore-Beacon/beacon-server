@@ -4,6 +4,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/hex"
 	"errors"
 	"net/http"
@@ -25,18 +26,48 @@ import (
 // GET  /nodes/{nodeId}/activity     → getNodeActivity
 // GET  /nodes/{nodeId}/telemetry    → getNodeTelemetry
 // GET  /nodes/{nodeId}/polling      → getNodePolling
-func NodesRouter(reader api.Reader) http.Handler {
+//
+// With pollingEnabled false the telemetry and polling routes answer as for a node nobody polls,
+// without reading the readings or assignments.
+func NodesRouter(reader api.Reader, pollingEnabled bool) http.Handler {
 	r := chi.NewRouter()
+	telemetryReader := reader
+	if !pollingEnabled {
+		telemetryReader = unpolledReader{reader}
+	}
 	r.Get("/", listNodes(reader))
 	r.Route("/{nodeId}", func(r chi.Router) {
 		r.Get("/", getNode(reader))
 		r.Get("/observations", listNodeObservations(reader))
 		r.Get("/activity", getNodeActivity(reader))
-		r.Get("/telemetry", getNodeTelemetry(reader))
-		r.Get("/polling", getNodePolling(reader))
+		r.Get("/telemetry", getNodeTelemetry(telemetryReader))
+		r.Get("/polling", getNodePolling(telemetryReader))
 		r.Get("/neighbors", listNodeNeighbors(reader))
 	})
 	return r
+}
+
+// unpolledReader answers the two polling reads as for a node with no readings. It still looks the
+// node up, so an unknown node stays a 404.
+type unpolledReader struct{ api.Reader }
+
+func (u unpolledReader) exists(ctx context.Context, nodeID uuid.UUID) error {
+	node, err := u.Reader.GetNode(ctx, nodeID)
+	if err == nil && node == nil {
+		return pgx.ErrNoRows
+	}
+	return err
+}
+
+func (u unpolledReader) GetNodeReadings(ctx context.Context, nodeID uuid.UUID, _, _ time.Time, _ bool) ([]api.NodeReading, bool, int, error) {
+	return nil, false, 0, u.exists(ctx, nodeID)
+}
+
+func (u unpolledReader) GetNodePolling(ctx context.Context, nodeID uuid.UUID) (*api.NodePolling, error) {
+	if err := u.exists(ctx, nodeID); err != nil {
+		return nil, err
+	}
+	return &api.NodePolling{}, nil
 }
 
 // listNodes godoc
@@ -383,7 +414,7 @@ var nodeTelemetryIntervals = map[string]time.Duration{"1h": time.Hour, "6h": 6 *
 // getNodeTelemetry godoc
 //
 //	@Summary		Get a polled node's telemetry history
-//	@Description	Repeater readings bucketed into UTC windows. Counters are increments within the bucket, uptimeSeconds is the bucket maximum, the rest are averages; a field is omitted when no reading in the bucket carried it. Untrusted readings are left out unless include=untrusted, and counted in untrustedReadings. polled is true when the node has any reading at all.
+//	@Description	Repeater readings bucketed into UTC windows. Counters are increments within the bucket, uptimeSeconds is the bucket maximum, the rest are averages; a field is omitted when no reading in the bucket carried it. Untrusted readings are left out unless include=untrusted, and counted in untrustedReadings. polled is true when the node has any reading at all. Answers as for an unpolled node when polling is off.
 //	@Tags			Nodes
 //	@Produce		json
 //	@Param			nodeId		path		string	true	"Node UUID"

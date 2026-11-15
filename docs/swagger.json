@@ -1961,7 +1961,7 @@
         },
         "/nodes/{nodeId}/telemetry": {
             "get": {
-                "description": "Repeater readings bucketed into UTC windows. Counters are increments within the bucket, uptimeSeconds is the bucket maximum, the rest are averages; a field is omitted when no reading in the bucket carried it. Untrusted readings are left out unless include=untrusted, and counted in untrustedReadings. polled is true when the node has any reading at all.",
+                "description": "Repeater readings bucketed into UTC windows. Counters are increments within the bucket, uptimeSeconds is the bucket maximum, the rest are averages; a field is omitted when no reading in the bucket carried it. Untrusted readings are left out unless include=untrusted, and counted in untrustedReadings. polled is true when the node has any reading at all. Answers as for an unpolled node when polling is off.",
                 "produces": [
                     "application/json"
                 ],
