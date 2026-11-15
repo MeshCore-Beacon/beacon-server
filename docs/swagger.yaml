@@ -437,6 +437,14 @@ definitions:
     required:
     - name
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.CreateTelemetryRequest:
+    properties:
+      nodeId:
+        example: 3f2b8c1e-6a52-4d0e-9b57-0d3d2b6a1c11
+        type: string
+      password:
+        type: string
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.CrossIATAHop:
     properties:
       fromIata:
@@ -2281,6 +2289,70 @@ definitions:
         example: check_email
         type: string
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.TelemetryRequest:
+    properties:
+      createdAt:
+        example: 1794700000000
+        type: integer
+      hasPassword:
+        type: boolean
+      id:
+        type: string
+      latestReadingAt:
+        description: LatestReadingAt is epoch ms of the newest trusted reading, null
+          when none.
+        example: 1794703600000
+        type: integer
+      node:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TelemetryRequestNode'
+      poller:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TelemetryRequestPoller'
+      status:
+        enum:
+        - waiting
+        - active
+        - login_failed
+        - admin_stopped
+        - disabled
+        type: string
+      statusReason:
+        example: No observer can reach this repeater yet.
+        type: string
+      updatedAt:
+        example: 1794700000000
+        type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.TelemetryRequestList:
+    properties:
+      limit:
+        description: Limit is how many requests one user may hold.
+        example: 3
+        type: integer
+      requests:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TelemetryRequest'
+        type: array
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.TelemetryRequestNode:
+    properties:
+      id:
+        example: 3f2b8c1e-6a52-4d0e-9b57-0d3d2b6a1c11
+        type: string
+      name:
+        example: Hilltop
+        type: string
+      publicKey:
+        example: 0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.TelemetryRequestPoller:
+    properties:
+      name:
+        example: North Ridge
+        type: string
+      observerId:
+        type: string
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.TokenRequest:
     properties:
       token:
@@ -2472,6 +2544,13 @@ definitions:
   github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateMeRequest:
     properties:
       displayName:
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateTelemetryRequest:
+    properties:
+      enabled:
+        type: boolean
+      password:
         type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.User:
@@ -4680,6 +4759,260 @@ paths:
       security:
       - UserSession: []
       summary: End one session
+      tags:
+      - Accounts
+  /me/telemetry-requests:
+    get:
+      description: Oldest first. The password is never returned; hasPassword says
+        whether one is set. 404 requests_disabled when the server has requests off.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TelemetryRequestList'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - UserSession: []
+      summary: The user's telemetry requests
+      tags:
+      - Accounts
+    post:
+      consumes:
+      - application/json
+      description: 'The password is optional, 1 to 15 bytes with no zero byte, and
+        is shared with volunteer observers: a guest password only, never an admin
+        password. It is sealed before storage and never returned. Answers 201 with
+        the request.'
+      parameters:
+      - description: Body at most 4 KiB
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.CreateTelemetryRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TelemetryRequest'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "409":
+          description: request_limit, already_requested or no_password_blocked
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "413":
+          description: Request Entity Too Large
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "415":
+          description: Unsupported Media Type
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "422":
+          description: invalid_input, not_a_repeater or password_invalid
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - UserSession: []
+      summary: Ask for a repeater to be polled
+      tags:
+      - Accounts
+  /me/telemetry-requests/{id}:
+    delete:
+      description: Deletes the request and its stored password. When it was the last
+        request for the repeater, observers stop polling it.
+      parameters:
+      - description: Request UUID
+        format: uuid
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: Removed
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - UserSession: []
+      summary: Remove a telemetry request
+      tags:
+      - Accounts
+    patch:
+      consumes:
+      - application/json
+      description: password sets a new guest password, or removes it when null; enabled
+        true starts a disabled request again. At least one is required. A new password
+        clears a failed or admin-stopped state. Answers 200 with the request.
+      parameters:
+      - description: Request UUID
+        format: uuid
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Body at most 4 KiB
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.UpdateTelemetryRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.TelemetryRequest'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "409":
+          description: no_password_blocked
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "413":
+          description: Request Entity Too Large
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "415":
+          description: Unsupported Media Type
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "422":
+          description: invalid_input or password_invalid
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - UserSession: []
+      summary: Change a telemetry request
       tags:
       - Accounts
   /messages:

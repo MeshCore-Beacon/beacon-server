@@ -492,6 +492,12 @@ type PacketSite struct {
 	ScopeID      *int32             `json:"scope_id"`
 }
 
+type PollingAdminStop struct {
+	TargetPublicKey   []byte             `json:"target_public_key"`
+	ObserverPublicKey []byte             `json:"observer_public_key"`
+	ReportedAt        pgtype.Timestamptz `json:"reported_at"`
+}
+
 type PollingAssignment struct {
 	TargetPublicKey   []byte             `json:"target_public_key"`
 	ObserverPublicKey []byte             `json:"observer_public_key"`
@@ -499,6 +505,7 @@ type PollingAssignment struct {
 	EvidenceSnr       *float32           `json:"evidence_snr"`
 	EvidenceCount     int32              `json:"evidence_count"`
 	AssignedAt        pgtype.Timestamptz `json:"assigned_at"`
+	Requested         bool               `json:"requested"`
 }
 
 type PollingCandidate struct {
@@ -533,11 +540,25 @@ type PollingObserver struct {
 	Note              string `json:"note"`
 }
 
+type PollingOtherState struct {
+	TargetPublicKey   []byte             `json:"target_public_key"`
+	ObserverPublicKey []byte             `json:"observer_public_key"`
+	SeenAt            pgtype.Timestamptz `json:"seen_at"`
+}
+
 type PollingState struct {
 	ID            bool               `json:"id"`
 	Paused        bool               `json:"paused"`
 	PausedUntil   pgtype.Timestamptz `json:"paused_until"`
 	ExcludedNodes [][]byte           `json:"excluded_nodes"`
+}
+
+type PollingTarget struct {
+	TargetPublicKey   []byte             `json:"target_public_key"`
+	ActiveRequestID   pgtype.UUID        `json:"active_request_id"`
+	Ver               int64              `json:"ver"`
+	VerChangedAt      pgtype.Timestamptz `json:"ver_changed_at"`
+	NoPasswordBlocked bool               `json:"no_password_blocked"`
 }
 
 type ReconfirmAmb struct {
@@ -618,6 +639,20 @@ type RollupOb struct {
 	RouteType      int16              `json:"route_type"`
 	OriginPubkey   []byte             `json:"origin_pubkey"`
 	ScopeID        *int32             `json:"scope_id"`
+}
+
+type TelemetryRequest struct {
+	ID              uuid.UUID          `json:"id"`
+	UserID          uuid.UUID          `json:"user_id"`
+	TargetPublicKey []byte             `json:"target_public_key"`
+	Status          string             `json:"status"`
+	StatusReason    string             `json:"status_reason"`
+	PasswordCt      []byte             `json:"password_ct"`
+	PasswordNonce   []byte             `json:"password_nonce"`
+	PasswordFailed  bool               `json:"password_failed"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	EnabledAt       pgtype.Timestamptz `json:"enabled_at"`
 }
 
 type TraceIata struct {

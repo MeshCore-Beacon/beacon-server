@@ -1,0 +1,318 @@
+// Copyright 2026 Beacon Contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+package polling
+
+import (
+	"errors"
+	"sort"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// RequestStatus is where a telemetry request stands, as the profile shows it.
+type RequestStatus string
+
+const (
+	StatusWaiting      RequestStatus = "waiting"
+	StatusActive       RequestStatus = "active"
+	StatusLoginFailed  RequestStatus = "login_failed"
+	StatusAdminStopped RequestStatus = "admin_stopped"
+	StatusDisabled     RequestStatus = "disabled"
+)
+
+// Plain sentences shown to the user next to a status.
+const (
+	ReasonNoObserver   = "No observer can reach this repeater yet."
+	ReasonNoSeat       = "Every observer that can reach this repeater is already polling its maximum."
+	ReasonLoginFailed  = "The repeater did not accept this guest password. Enter a new one."
+	ReasonBlankFailed  = "The repeater did not accept a blank or hello login. Enter a guest password."
+	ReasonAdminStopped = "The repeater gave admin access to this password, so Beacon deleted it. Enter a guest password, never an admin one."
+	ReasonBlankBlocked = "This repeater gives admin access to a blank login, so Beacon will not poll it without a guest password."
+)
+
+var (
+	ErrRequestLimit      = errors.New("polling: request limit reached")
+	ErrAlreadyRequested  = errors.New("polling: already requested")
+	ErrNotARepeater      = errors.New("polling: not a repeater or room server")
+	ErrPasswordInvalid   = errors.New("polling: password must be 1 to 15 bytes with no zero byte")
+	ErrNoPasswordBlocked = errors.New("polling: this repeater grants admin to a blank login")
+	ErrRequestNotFound   = errors.New("polling: request not found")
+	ErrRequestsDisabled  = errors.New("polling: telemetry requests are off")
+)
+
+// LoginFailedGrace is how long after a password change a login_failed report is ignored, unless the observer has
+// shown another state since.
+const LoginFailedGrace = 30 * time.Minute
+
+const blankKey = "blank"
+
+// Request is one user's request for one repeater. The password is only ever held sealed.
+type Request struct {
+	ID             uuid.UUID
+	UserID         uuid.UUID
+	Status         RequestStatus
+	Reason         string
+	HasPassword    bool
+	PasswordCT     []byte
+	PasswordNonce  []byte
+	PasswordFailed bool
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	// EnabledAt is when the request was created or last re-enabled; the offline rule counts from here.
+	EnabledAt time.Time
+}
+
+// TargetState is everything the state rules need about one repeater: all its requests and its shared counters. The
+// methods are the rules; they change this value only, and the store persists the difference.
+type TargetState struct {
+	Target            []byte
+	Requests          []Request
+	ActiveID          uuid.UUID // the request whose password is in use; Nil when the target is not requested
+	Ver               int64
+	VerChangedAt      time.Time
+	NoPasswordBlocked bool
+	// UserRequests is how many requests the acting user holds across all repeaters, for the limit.
+	UserRequests int
+	// Deleted lists requests removed from Requests, for the store to delete.
+	Deleted []uuid.UUID
+}
+
+func (t *TargetState) find(id uuid.UUID) *Request {
+	for i := range t.Requests {
+		if t.Requests[i].ID == id {
+			return &t.Requests[i]
+		}
+	}
+	return nil
+}
+
+func (t *TargetState) usable(r Request) bool {
+	if r.Status == StatusAdminStopped || r.Status == StatusDisabled || r.PasswordFailed {
+		return false
+	}
+	return r.HasPassword || !t.NoPasswordBlocked
+}
+
+// pick is the oldest request whose option is usable. Requests with no password are one shared option, so the
+// oldest of them stands for it.
+func (t *TargetState) pick() (uuid.UUID, bool) {
+	var best *Request
+	for i := range t.Requests {
+		r := &t.Requests[i]
+		if !t.usable(*r) {
+			continue
+		}
+		if best == nil || r.CreatedAt.Before(best.CreatedAt) || (r.CreatedAt.Equal(best.CreatedAt) && r.ID.String() < best.ID.String()) {
+			best = r
+		}
+	}
+	if best == nil {
+		return uuid.Nil, false
+	}
+	return best.ID, true
+}
+
+// activeKey names the password option in use: a request id for a password, "blank" for the shared blank or hello
+// login, "" for none.
+func (t *TargetState) activeKey() string {
+	r := t.find(t.ActiveID)
+	switch {
+	case r == nil:
+		return ""
+	case !r.HasPassword:
+		return blankKey
+	}
+	return r.ID.String()
+}
+
+// Settle chooses the request in use after a change and raises ver when the password in use is not the one named by
+// old (taken from activeKey before the change). force raises it for an edit of the password already in use.
+func (t *TargetState) Settle(now time.Time, old string, force bool) {
+	id, ok := t.pick()
+	if !ok {
+		id = uuid.Nil
+	}
+	t.ActiveID = id
+	key := t.activeKey()
+	if key != old || (force && key != "") {
+		t.Ver++
+		t.VerChangedAt = now
+	}
+}
+
+func blankOption(r Request) bool { return !r.HasPassword }
+
+// Create adds a request. The caller has checked the user's limit.
+func (t *TargetState) Create(r Request, now time.Time) error {
+	for _, x := range t.Requests {
+		if x.UserID == r.UserID {
+			return ErrAlreadyRequested
+		}
+	}
+	if !r.HasPassword && t.NoPasswordBlocked {
+		return ErrNoPasswordBlocked
+	}
+	old := t.activeKey()
+	r.Status, r.Reason, r.PasswordFailed, r.UpdatedAt = StatusWaiting, ReasonNoObserver, false, now
+	t.Requests = append(t.Requests, r)
+	t.Settle(now, old, false)
+	return nil
+}
+
+// SetPassword replaces a request's sealed password; nil ct removes it (a blank login). A failed or admin-stopped
+// request starts again.
+func (t *TargetState) SetPassword(id uuid.UUID, ct, nonce []byte, now time.Time) error {
+	r := t.find(id)
+	if r == nil {
+		return ErrRequestNotFound
+	}
+	if ct == nil && t.NoPasswordBlocked {
+		return ErrNoPasswordBlocked
+	}
+	old := t.activeKey()
+	r.PasswordCT, r.PasswordNonce, r.HasPassword = ct, nonce, ct != nil
+	r.PasswordFailed, r.UpdatedAt = false, now
+	if r.Status == StatusLoginFailed || r.Status == StatusAdminStopped {
+		r.Status, r.Reason = StatusWaiting, ReasonNoObserver
+	}
+	next, _ := t.pick()
+	t.Settle(now, old, next == id)
+	return nil
+}
+
+// Remove deletes a request. It reports false when there is none.
+func (t *TargetState) Remove(id uuid.UUID, now time.Time) bool {
+	for i, r := range t.Requests {
+		if r.ID != id {
+			continue
+		}
+		old := t.activeKey()
+		t.Requests = append(t.Requests[:i:i], t.Requests[i+1:]...)
+		t.Deleted = append(t.Deleted, id)
+		t.Settle(now, old, false)
+		return true
+	}
+	return false
+}
+
+// LoginFailed records that the poller was refused: the option in use failed, and the next one takes over. It
+// reports false when nothing was in use.
+func (t *TargetState) LoginFailed(now time.Time) bool {
+	cur := t.find(t.ActiveID)
+	if cur == nil {
+		return false
+	}
+	old := t.activeKey()
+	if cur.HasPassword {
+		fail(cur, ReasonLoginFailed, now)
+	} else {
+		for i := range t.Requests {
+			if blankOption(t.Requests[i]) && t.usable(t.Requests[i]) {
+				fail(&t.Requests[i], ReasonBlankFailed, now)
+			}
+		}
+	}
+	t.Settle(now, old, false)
+	return true
+}
+
+func fail(r *Request, reason string, now time.Time) {
+	r.PasswordFailed, r.Status, r.Reason, r.UpdatedAt = true, StatusLoginFailed, reason, now
+}
+
+// AdminStop records that a repeater answered the login with admin access. A password in use is deleted and its
+// request stopped; with none in use the repeater accepts a blank login as admin, so blank logins are blocked. It
+// reports false when the target is not requested.
+func (t *TargetState) AdminStop(now time.Time) bool {
+	cur := t.find(t.ActiveID)
+	if cur == nil {
+		return false
+	}
+	old := t.activeKey()
+	if cur.HasPassword {
+		cur.PasswordCT, cur.PasswordNonce, cur.HasPassword = nil, nil, false
+		cur.Status, cur.Reason, cur.PasswordFailed, cur.UpdatedAt = StatusAdminStopped, ReasonAdminStopped, false, now
+	} else {
+		t.NoPasswordBlocked = true
+		for i := range t.Requests {
+			r := &t.Requests[i]
+			if blankOption(*r) && r.Status != StatusAdminStopped {
+				r.Status, r.Reason, r.PasswordFailed, r.UpdatedAt = StatusAdminStopped, ReasonBlankBlocked, false, now
+			}
+		}
+	}
+	t.Settle(now, old, false)
+	return true
+}
+
+// Disable stops every request of the target, for a repeater nobody hears any more.
+func (t *TargetState) Disable(reason string, now time.Time) {
+	old := t.activeKey()
+	for i := range t.Requests {
+		r := &t.Requests[i]
+		if r.Status != StatusDisabled {
+			r.Status, r.Reason, r.UpdatedAt = StatusDisabled, reason, now
+		}
+	}
+	t.Settle(now, old, false)
+}
+
+// Enable starts a disabled request again. Any other request is left as it is.
+func (t *TargetState) Enable(id uuid.UUID, now time.Time) error {
+	r := t.find(id)
+	if r == nil {
+		return ErrRequestNotFound
+	}
+	if r.Status != StatusDisabled {
+		return nil
+	}
+	old := t.activeKey()
+	r.Status, r.Reason, r.EnabledAt, r.UpdatedAt = StatusWaiting, ReasonNoObserver, now, now
+	t.Settle(now, old, false)
+	return nil
+}
+
+// SetAssigned follows the poll: the requests that are waiting or active become active when an observer polls the
+// target and waiting, with the reason, when none does. It reports whether anything changed.
+func (t *TargetState) SetAssigned(assigned bool, reason string) bool {
+	changed := false
+	for i := range t.Requests {
+		r := &t.Requests[i]
+		if r.Status != StatusWaiting && r.Status != StatusActive {
+			continue
+		}
+		status, why := StatusActive, ""
+		if !assigned {
+			status, why = StatusWaiting, reason
+		}
+		if r.Status != status || r.Reason != why {
+			r.Status, r.Reason = status, why
+			changed = true
+		}
+	}
+	return changed
+}
+
+// LoginFailedCounts says whether a login_failed report from the poller counts. After a ver change it is ignored
+// until the observer has shown another state since, or the grace has passed.
+func LoginFailedCounts(now, verChangedAt time.Time, otherStateSeenAt *time.Time) bool {
+	if verChangedAt.IsZero() || now.Sub(verChangedAt) >= LoginFailedGrace {
+		return true
+	}
+	return otherStateSeenAt != nil && otherStateSeenAt.After(verChangedAt)
+}
+
+// Requested reports whether the target is currently requested: a request's option is in use.
+func (t *TargetState) Requested() bool { return t.ActiveID != uuid.Nil }
+
+// byAge sorts oldest first, ties by id, so every reader orders requests the same way.
+func byAge(rs []Request) {
+	sort.SliceStable(rs, func(i, j int) bool {
+		if !rs[i].CreatedAt.Equal(rs[j].CreatedAt) {
+			return rs[i].CreatedAt.Before(rs[j].CreatedAt)
+		}
+		return rs[i].ID.String() < rs[j].ID.String()
+	})
+}

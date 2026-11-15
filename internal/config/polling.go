@@ -24,6 +24,10 @@ type PollingConfig struct {
 	ExcludedNodes    []string `yaml:"excluded_nodes"` // 64 hex each
 	Paused           bool     `yaml:"paused"`
 	Authority        string   `yaml:"authority"` // evidence (default) or approved
+	// RequestsPerUser is how many telemetry requests one user may hold; unset is 3, 0 turns requests off.
+	RequestsPerUser    *int   `yaml:"requests_per_user"`
+	OfflineDisableDays int    `yaml:"offline_disable_days"` // default 7
+	RequestObservers   string `yaml:"request_observers"`    // all (default) or approved
 }
 
 // ResolvedPolling is PollingConfig with defaults applied and values parsed.
@@ -38,7 +42,23 @@ type ResolvedPolling struct {
 	ExcludedNodes    [][]byte
 	Paused           bool
 	Authority        string
+	// RequestsPerUser is 0 when requests are off.
+	RequestsPerUser    int
+	OfflineDisableDays int
+	RequestObservers   string
 }
+
+// Who may take a requested repeater: any observer that opted in, or only operator-approved ones.
+const (
+	RequestObserversAll      = "all"
+	RequestObserversApproved = "approved"
+)
+
+const (
+	defaultRequestsPerUser = 3
+	maxRequestsPerUser     = 20
+	maxOfflineDisableDays  = 365
+)
 
 // Who may be elected poller: anyone with a live claim, ranked on advert evidence, or only operator-approved
 // observers. Evidence is reported by the observer itself, so approval is the setting that keeps strangers out.
@@ -68,6 +88,18 @@ func (p PollingConfig) Resolve() (ResolvedPolling, error) {
 	}
 	if r.Authority == "" {
 		r.Authority = PollingAuthorityEvidence
+	}
+	r.RequestsPerUser = defaultRequestsPerUser
+	if p.RequestsPerUser != nil {
+		r.RequestsPerUser = *p.RequestsPerUser
+	}
+	r.OfflineDisableDays = p.OfflineDisableDays
+	if r.OfflineDisableDays == 0 {
+		r.OfflineDisableDays = 7
+	}
+	r.RequestObservers = p.RequestObservers
+	if r.RequestObservers == "" {
+		r.RequestObservers = RequestObserversAll
 	}
 	if r.DirectWindow == 0 {
 		r.DirectWindow = time.Hour
@@ -113,6 +145,15 @@ func (p PollingConfig) Resolve() (ResolvedPolling, error) {
 	}
 	if r.Authority != PollingAuthorityEvidence && r.Authority != PollingAuthorityApproved {
 		return ResolvedPolling{}, fmt.Errorf("polling.authority must be evidence or approved")
+	}
+	if r.RequestsPerUser < 0 || r.RequestsPerUser > maxRequestsPerUser {
+		return ResolvedPolling{}, fmt.Errorf("polling.requests_per_user must be between 0 and %d", maxRequestsPerUser)
+	}
+	if r.OfflineDisableDays < 1 || r.OfflineDisableDays > maxOfflineDisableDays {
+		return ResolvedPolling{}, fmt.Errorf("polling.offline_disable_days must be between 1 and %d", maxOfflineDisableDays)
+	}
+	if r.RequestObservers != RequestObserversAll && r.RequestObservers != RequestObserversApproved {
+		return ResolvedPolling{}, fmt.Errorf("polling.request_observers must be all or approved")
 	}
 	if len(p.ExcludedNodes) > maxPollingExcludedNodes {
 		return ResolvedPolling{}, fmt.Errorf("polling.excluded_nodes: at most %d entries", maxPollingExcludedNodes)

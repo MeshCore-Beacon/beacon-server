@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api/handlers"
+	"github.com/MeshCore-Beacon/beacon-server/internal/polling"
 	"github.com/MeshCore-Beacon/beacon-server/internal/users"
 	"github.com/google/uuid"
 )
@@ -113,5 +114,62 @@ func TestLoginRequestLogCarriesNoCredentials(t *testing.T) {
 		if strings.Contains(logged, secret) {
 			t.Fatalf("%q in the log: %s", secret, logged)
 		}
+	}
+}
+
+type routedRequests struct {
+	handlers.RequestsService
+}
+
+func (routedRequests) Create(_ context.Context, _, _ uuid.UUID, _ []byte) (polling.RequestRow, error) {
+	return polling.RequestRow{ID: uuid.New(), Target: make([]byte, 32), Status: polling.StatusWaiting}, nil
+}
+
+func requestsRouter(svc handlers.RequestsService) http.Handler {
+	opts := Options{AccountsMode: "local", TelemetryRequests: svc != nil,
+		Accounts:    routedAccounts{user: users.User{ID: uuid.New(), Username: "ridge", Email: "ridge@example.org", CreatedAt: time.Now()}},
+		AuthOptions: handlers.AuthOptions{Enabled: true, CookieSecure: true, PublicOrigin: "https://beacon.example.org"},
+		MeMounts:    []handlers.MeMount{handlers.RequestRoutes(svc)}}
+	return New(nil, nil, nil, opts)
+}
+
+func TestTelemetryRequestsFlagAndRoutes(t *testing.T) {
+	for _, on := range []bool{false, true} {
+		var svc handlers.RequestsService
+		if on {
+			svc = routedRequests{}
+		}
+		h := requestsRouter(svc)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/info", nil))
+		if want := `"telemetryRequests":` + map[bool]string{false: "false", true: "true"}[on]; !strings.Contains(w.Body.String(), want) {
+			t.Errorf("on=%v info: %s", on, w.Body)
+		}
+		r := httptest.NewRequest("POST", "/api/v1/me/telemetry-requests", strings.NewReader(`{"nodeId":"`+uuid.NewString()+`"}`))
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("X-Beacon-CSRF", "1")
+		r.AddCookie(&http.Cookie{Name: "beacon_session", Value: "live"})
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if on && w.Code != 201 || !on && (w.Code != 404 || !strings.Contains(w.Body.String(), "requests_disabled")) {
+			t.Errorf("on=%v create: %d %s", on, w.Code, w.Body)
+		}
+	}
+}
+
+func TestRequestPasswordIsNotLogged(t *testing.T) {
+	var out bytes.Buffer
+	prev, writer, flags := slog.Default(), log.Writer(), log.Flags()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&out, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev); log.SetOutput(writer); log.SetFlags(flags) })
+	h := requestsRouter(routedRequests{})
+	r := httptest.NewRequest("POST", "/api/v1/me/telemetry-requests", strings.NewReader(`{"nodeId":"`+uuid.NewString()+`","password":"guestpw-123"}`))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("X-Beacon-CSRF", "1")
+	r.AddCookie(&http.Cookie{Name: "beacon_session", Value: "live"})
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 201 || !strings.Contains(out.String(), "request complete") || strings.Contains(out.String(), "guestpw-123") || strings.Contains(w.Body.String(), "guestpw-123") {
+		t.Fatalf("%d log=%q body=%s", w.Code, out.String(), w.Body)
 	}
 }

@@ -166,6 +166,12 @@ func (s *Store) SetUserDisabled(ctx context.Context, id uuid.UUID, at *time.Time
 
 // DeleteUser relies on the ON DELETE CASCADE of every table that belongs to a user.
 func (s *Store) DeleteUser(ctx context.Context, id uuid.UUID) error {
+	// Requests go through the state rules first, so a repeater other users requested keeps being polled.
+	if s.pool != nil {
+		if err := s.removeUserRequests(ctx, id); err != nil {
+			return err
+		}
+	}
 	return affected(s.q.DeleteUser(ctx, id))
 }
 

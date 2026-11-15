@@ -507,6 +507,27 @@ func main() {
 		}
 	}
 
+	// Telemetry requests sit on polling and accounts and seal guest passwords under BEACON_SECRET_KEY.
+	requestSealer, requestsOff, err := telemetryRequestsSealer(resolvedPolling, resolvedAccounts.Enabled, os.Getenv("BEACON_SECRET_KEY"))
+	if err != nil {
+		slog.Error("invalid secret key", "component", "startup", "error", err)
+		os.Exit(1)
+	}
+	var requestsSvc handlers.RequestsService // an untyped nil answers 404 requests_disabled
+	if requestSealer != nil {
+		var elector polling.Elector
+		if pollingSvc != nil {
+			elector = pollingSvc
+		}
+		requestsSvc = polling.NewRequestService(maintStore, requestSealer, elector, resolvedPolling.RequestsPerUser, time.Now, slog.Default())
+		slog.Info("telemetry requests", "component", "startup", "per_user", resolvedPolling.RequestsPerUser)
+	} else if requestsOff != "" {
+		slog.Info("telemetry requests are off", "component", "startup", "reason", requestsOff)
+	}
+	if resolvedAccounts.Enabled {
+		meMounts = append(meMounts, handlers.RequestRoutes(requestsSvc))
+	}
+
 	if cr, ok := reader.(*cache.CachedReader); ok {
 		if scopeImporter != nil {
 			scopeImporter.SetCacheInvalidator(cr.InvalidateScopeNames)
@@ -677,7 +698,7 @@ func main() {
 		GuestPolling:   guestPolling,
 		PollingEnabled: resolvedPolling.Enabled,
 		AccountsMode:   accountsMode, RegistrationOpen: resolvedAccounts.RegistrationOpen,
-		Accounts: accountsSvc, AuthOptions: authOptions, MeMounts: meMounts,
+		Accounts: accountsSvc, AuthOptions: authOptions, MeMounts: meMounts, TelemetryRequests: requestsSvc != nil,
 		Guards:        guard,
 		APIPlanLayout: string(layout),
 	})

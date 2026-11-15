@@ -80,7 +80,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 		Mobile: api.AdminMobileConfig{MinAppVersion: opts.MinAppVersion},
 		Web:    api.AdminWebConfig{MinWebVersion: opts.MinWebVersion},
 	}
-	features := api.InfoFeatures{Polling: opts.PollingEnabled, Accounts: "off"}
+	features := api.InfoFeatures{Polling: opts.PollingEnabled, Accounts: "off", TelemetryRequests: opts.TelemetryRequests}
 	if opts.AccountsMode == "local" {
 		features.Accounts, features.Registration = "local", opts.RegistrationOpen
 	}

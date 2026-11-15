@@ -34,6 +34,32 @@ func TestPollingDefaults(t *testing.T) {
 	}
 }
 
+func TestPollingRequestSettings(t *testing.T) {
+	r, err := PollingConfig{}.Resolve()
+	if err != nil || r.RequestsPerUser != 3 || r.OfflineDisableDays != 7 || r.RequestObservers != RequestObserversAll {
+		t.Fatalf("defaults: %+v %v", r, err)
+	}
+	// An explicit 0 turns requests off; it is not the default.
+	zero, five := 0, 5
+	if r, err = (PollingConfig{RequestsPerUser: &zero}).Resolve(); err != nil || r.RequestsPerUser != 0 {
+		t.Errorf("zero: %+v %v", r, err)
+	}
+	r, err = PollingConfig{RequestsPerUser: &five, OfflineDisableDays: 30, RequestObservers: "approved"}.Resolve()
+	if err != nil || r.RequestsPerUser != 5 || r.OfflineDisableDays != 30 || r.RequestObservers != RequestObserversApproved {
+		t.Errorf("set: %+v %v", r, err)
+	}
+	neg, big := -1, 21
+	for name, c := range map[string]PollingConfig{
+		"negative limit": {RequestsPerUser: &neg}, "huge limit": {RequestsPerUser: &big},
+		"negative days": {OfflineDisableDays: -1}, "huge days": {OfflineDisableDays: 366},
+		"observers unknown": {RequestObservers: "some"}, "observers case": {RequestObservers: "All"},
+	} {
+		if _, err := c.Resolve(); err == nil {
+			t.Errorf("%s: expected error", name)
+		}
+	}
+}
+
 func TestPollingAcceptsAuthority(t *testing.T) {
 	for _, a := range []string{PollingAuthorityEvidence, PollingAuthorityApproved} {
 		r, err := PollingConfig{Authority: a}.Resolve()
