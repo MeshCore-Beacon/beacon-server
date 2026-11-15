@@ -477,6 +477,10 @@ func getNodePolling(reader api.Reader) http.HandlerFunc {
 			respondReaderError(w, err, "internal server error")
 			return
 		}
+		if out == nil {
+			respondError(w, http.StatusNotFound, "node not found")
+			return
+		}
 		if out.Standbys == nil {
 			out.Standbys = []api.NodePollingObserver{}
 		}

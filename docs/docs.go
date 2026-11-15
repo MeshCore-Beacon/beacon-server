@@ -5674,6 +5674,10 @@ const docTemplate = `{
                 "batteryMv": {
                     "type": "integer"
                 },
+                "counterSpanSecs": {
+                    "description": "Seconds of elapsed time the counter increments cover; divide an increment by it for a rate.\nOmitted, along with the counters, when no increment in the bucket could be placed in time.",
+                    "type": "integer"
+                },
                 "lastRssiDb": {
                     "type": "integer"
                 },

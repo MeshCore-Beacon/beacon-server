@@ -600,6 +600,27 @@ func TestGetNodeTelemetry_Defaults(t *testing.T) {
 	}
 }
 
+func TestGetNodeTelemetry_CounterSpanInJSON(t *testing.T) {
+	status := func(ago time.Duration, secs int64) api.NodeReading {
+		return api.NodeReading{SampledAt: time.Now().Add(-ago), Trusted: true, UptimeSeconds: ptrOf(1_000_000 + secs),
+			AirtimeTxSecs: ptrOf(secs / 20), AirtimeRxSecs: ptrOf(secs / 10), PacketsReceived: ptrOf(secs / 100),
+			PacketsSent: ptrOf(secs / 360), ReceiveErrors: ptrOf(secs / 3600)}
+	}
+	serve := func(rs ...api.NodeReading) string {
+		return nodeTelemetryGet(t, stubReader{getNodeReadings: func(context.Context, uuid.UUID, time.Time, time.Time, bool) ([]api.NodeReading, bool, int, error) {
+			return rs, true, 0, nil
+		}}, "?range=24h&interval=24h").Body.String()
+	}
+	// Both polls land in the same 24h bucket only if today has room, so read the span rather than count points.
+	if body := serve(status(7*time.Hour, 0), status(time.Hour, 21600)); !strings.Contains(body, `"counterSpanSecs":21600`) {
+		t.Errorf("status bucket: %s, want counterSpanSecs 21600", body)
+	}
+	body := serve(api.NodeReading{SampledAt: time.Now().Add(-time.Hour), Trusted: true, BatteryMV: ptrOf(int32(4100))})
+	if strings.Contains(body, "counterSpanSecs") || strings.Contains(body, "airtimeRxSecs") {
+		t.Errorf("telemetry-only bucket: %s, want no span or counters", body)
+	}
+}
+
 func TestGetNodeTelemetry_AllowedParams(t *testing.T) {
 	for _, rng := range []string{"24h", "168h", "720h"} {
 		for _, iv := range []string{"1h", "6h", "24h"} {

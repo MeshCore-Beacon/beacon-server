@@ -37,7 +37,7 @@ type NodeReading struct {
 }
 
 // NodeTelemetryPoint is one bucket of a node's readings. Counters are increments within the
-// bucket, uptime is the bucket maximum, the rest are averages. A field is omitted when no
+// bucket, covering counterSpanSecs of elapsed time, uptime is the bucket maximum, the rest are averages. A field is omitted when no
 // reading in the bucket carried it.
 type NodeTelemetryPoint struct {
 	T               int64    `json:"t"` // epoch ms, bucket start
@@ -54,6 +54,9 @@ type NodeTelemetryPoint struct {
 	PacketsReceived *int64   `json:"packetsReceived,omitempty"`
 	PacketsSent     *int64   `json:"packetsSent,omitempty"`
 	ReceiveErrors   *int64   `json:"receiveErrors,omitempty"`
+	// Seconds of elapsed time the counter increments cover; divide an increment by it for a rate.
+	// Omitted, along with the counters, when no increment in the bucket could be placed in time.
+	CounterSpanSecs *int64 `json:"counterSpanSecs,omitempty"`
 }
 
 // NodeTelemetry is the telemetry response for a polled node.
@@ -83,6 +86,7 @@ type nodeBucket struct {
 	snr, qlen                  mean
 	uptime                     *int64
 	tx, rx, recv, sent, errs   incSum
+	spanMS                     int64
 }
 
 // BucketNodeReadings folds readings (ascending, with any before since serving only as counter
@@ -95,8 +99,11 @@ func BucketNodeReadings(readings []NodeReading, since time.Time, size time.Durat
 	recv := counter{rate: packetRate, maxGap: maxGap}
 	sent := counter{rate: packetRate, maxGap: maxGap}
 
+	counters := []*counter{&tx, &rx, &errs, &recv, &sent}
 	var lastUptime *int64
 	var lastT int64
+	var statusT int64 // previous status reading that served as the counters' baseline
+	var hasStatus bool
 	var buckets []*nodeBucket
 	for i := range readings {
 		r := &readings[i]
@@ -117,6 +124,10 @@ func BucketNodeReadings(readings []NodeReading, since time.Time, size time.Durat
 		dErr := errs.add(i64f(r.ReceiveErrors), t, rebooted)
 		dRecv := recv.add(i64f(r.PacketsReceived), t, rebooted)
 		dSent := sent.add(i64f(r.PacketsSent), t, rebooted)
+		spanMS := statusSpanMS(counters, t, statusT, hasStatus, rebooted, r.UptimeSeconds)
+		if movedBaseline(counters) {
+			statusT, hasStatus = t, true
+		}
 		if r.SampledAt.Before(since) {
 			continue
 		}
@@ -127,6 +138,7 @@ func BucketNodeReadings(readings []NodeReading, since time.Time, size time.Durat
 		}
 		cur := buckets[len(buckets)-1]
 		cur.readings++
+		cur.spanMS += spanMS
 		cur.tx.take(dTx, r.AirtimeTxSecs != nil)
 		cur.rx.take(dRx, r.AirtimeRxSecs != nil)
 		cur.errs.take(dErr, r.ReceiveErrors != nil)
@@ -152,6 +164,11 @@ func BucketNodeReadings(readings []NodeReading, since time.Time, size time.Durat
 		p.QueueLength = roundedMean32(cur.qlen)
 		p.TemperatureC = tenthsMean(cur.temp)
 		p.LastSNRDB = tenthsMean(cur.snr)
+		if cur.spanMS < 1000 {
+			out = append(out, p) // an increment with no span cannot become a rate
+			continue
+		}
+		p.CounterSpanSecs = ptr(cur.spanMS / 1000)
 		if cur.tx.has {
 			p.AirtimeTxSecs = ptr(cur.tx.sum)
 		}
@@ -170,6 +187,37 @@ func BucketNodeReadings(readings []NodeReading, since time.Time, size time.Durat
 		out = append(out, p)
 	}
 	return out
+}
+
+// statusSpanMS is the time a status reading's increments cover, following what the counters
+// decided: none unless some counter counted an increment. After a reboot the counters run from
+// boot, so the span is the uptime, no longer than the gap.
+func statusSpanMS(cs []*counter, t, prevT int64, hasPrev, rebooted bool, uptime *int64) int64 {
+	if !hasPrev {
+		return 0
+	}
+	for _, c := range cs {
+		if c.outcome != outcomeAccepted {
+			continue
+		}
+		gap := t - prevT
+		if rebooted && uptime != nil && *uptime*1000 < gap {
+			return *uptime * 1000
+		}
+		return gap
+	}
+	return 0
+}
+
+// movedBaseline reports whether any counter took this reading as its new baseline. A reading
+// every counter rejected leaves the baselines, so the next increment covers the longer gap.
+func movedBaseline(cs []*counter) bool {
+	for _, c := range cs {
+		if c.outcome == outcomeSeeded || c.outcome == outcomeAccepted || c.outcome == outcomeResynced {
+			return true
+		}
+	}
+	return false
 }
 
 func roundedMean32(m mean) *int32 {

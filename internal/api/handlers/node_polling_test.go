@@ -72,3 +72,10 @@ func TestGetNodePolling_Errors(t *testing.T) {
 		t.Errorf("bad id: %d", w.Code)
 	}
 }
+
+func TestGetNodePolling_NilResultIsNotFound(t *testing.T) {
+	sr := stubReader{getNodePolling: func(context.Context, uuid.UUID) (*api.NodePolling, error) { return nil, nil }}
+	if w := nodePollingGet(t, sr, uuid.NewString()); w.Code != http.StatusNotFound {
+		t.Errorf("nil result: %d, want 404", w.Code)
+	}
+}
