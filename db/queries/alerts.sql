@@ -3,7 +3,8 @@ SELECT id, target_kind, target_public_key, kind, threshold, threshold_high, enab
 FROM user_alert_rules WHERE user_id = $1 ORDER BY created_at, id;
 
 -- name: UserAlertRuleKinds :many
-SELECT kind FROM user_alert_rules WHERE user_id = $1 AND target_public_key = $2;
+-- Only enabled rules: back_online needs a gone_quiet rule that is on.
+SELECT kind FROM user_alert_rules WHERE user_id = $1 AND target_public_key = $2 AND enabled;
 
 -- name: UserHasAtlasPin :one
 SELECT EXISTS (SELECT 1 FROM user_atlas_pins WHERE user_id = $1 AND public_key = $2);
@@ -63,7 +64,7 @@ SELECT EXISTS (
 
 -- name: AlertNodeCaps :many
 -- What each of the nodes is and what a polled one reports, over the readings since the cutoff.
-SELECT n.public_key, n.node_type, COALESCE(n.name, '')::text AS name,
+SELECT n.id, n.public_key, n.node_type, COALESCE(n.name, '')::text AS name,
        COALESCE(c.readings, 0)::int AS readings,
        COALESCE(c.battery, false)::boolean AS has_battery, COALESCE(c.temperature, false)::boolean AS has_temperature,
        COALESCE(c.noise, false)::boolean AS has_noise, COALESCE(c.uptime, false)::boolean AS has_uptime
@@ -77,7 +78,7 @@ LEFT JOIN LATERAL (
 WHERE n.public_key = ANY(sqlc.arg(keys)::bytea[]);
 
 -- name: AlertObserverCaps :many
-SELECT o.public_key, COALESCE(o.display_name, '')::text AS name,
+SELECT o.id, o.public_key, COALESCE(o.display_name, '')::text AS name,
        COALESCE(c.battery, false)::boolean AS has_battery, COALESCE(c.noise, false)::boolean AS has_noise,
        COALESCE(c.uptime, false)::boolean AS has_uptime
 FROM observers o

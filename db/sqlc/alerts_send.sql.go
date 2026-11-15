@@ -111,9 +111,12 @@ func (q *Queries) MarkAlertsDelivered(ctx context.Context, arg MarkAlertsDeliver
 
 const pendingAlerts = `-- name: PendingAlerts :many
 SELECT o.id, o.user_id, o.pass_id, o.target_kind, o.target_public_key, o.name, o.alert_kind, COALESCE(o.value, 0)::bigint AS value,
-       o.detail, o.attempts, u.email, (u.email_verified_at IS NOT NULL)::boolean AS email_verified
+       o.detail, o.attempts, u.email, (u.email_verified_at IS NOT NULL)::boolean AS email_verified,
+       COALESCE(CASE WHEN o.target_kind = 'observer' THEN ob.id ELSE n.id END, '00000000-0000-0000-0000-000000000000'::uuid)::uuid AS target_id
 FROM alert_outbox o
 JOIN users u ON u.id = o.user_id AND u.disabled_at IS NULL
+LEFT JOIN nodes n ON o.target_kind = 'node' AND n.public_key = o.target_public_key
+LEFT JOIN observers ob ON o.target_kind = 'observer' AND ob.public_key = o.target_public_key
 WHERE o.delivered_at IS NULL AND o.created_at >= $1
 ORDER BY o.user_id, o.pass_id, o.id
 LIMIT $2
@@ -137,6 +140,7 @@ type PendingAlertsRow struct {
 	Attempts        int16     `json:"attempts"`
 	Email           string    `json:"email"`
 	EmailVerified   bool      `json:"email_verified"`
+	TargetID        uuid.UUID `json:"target_id"`
 }
 
 func (q *Queries) PendingAlerts(ctx context.Context, arg PendingAlertsParams) ([]PendingAlertsRow, error) {
@@ -161,6 +165,7 @@ func (q *Queries) PendingAlerts(ctx context.Context, arg PendingAlertsParams) ([
 			&i.Attempts,
 			&i.Email,
 			&i.EmailVerified,
+			&i.TargetID,
 		); err != nil {
 			return nil, err
 		}

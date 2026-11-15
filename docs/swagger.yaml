@@ -220,6 +220,11 @@ definitions:
         items:
           type: string
         type: array
+      id:
+        description: ID is the node's or observer's id as used by /nodes/{id} and
+          /observers/{id}; null when the radio no longer exists.
+        format: uuid
+        type: string
       kind:
         enum:
         - node
@@ -228,6 +233,11 @@ definitions:
       name:
         example: Hilltop
         type: string
+      polled:
+        description: |-
+          Polled: Beacon has trusted telemetry for this radio now. It is what offers the telemetry kinds and the 3 and 6 hour
+          gone_quiet thresholds for a repeater (observers always have those).
+        type: boolean
       publicKey:
         type: string
       rules:
@@ -237,8 +247,15 @@ definitions:
       unavailable:
         additionalProperties:
           type: string
-        description: Unavailable maps a kind to the reason this radio cannot have
-          it.
+        description: Unavailable maps a kind to the English reason this radio cannot
+          have it.
+        type: object
+      unavailableCodes:
+        additionalProperties:
+          type: string
+        description: |-
+          UnavailableCodes maps the same kinds to a stable code for the reason: observer_no_data, repeaters_only, not_polled,
+          no_data, observer_no_clock, clock_repeaters_only.
         type: object
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.AlertTargetRef:
@@ -2797,6 +2814,11 @@ definitions:
       message:
         description: e.g. "channel not found"
         type: string
+      reasonCode:
+        description: |-
+          ReasonCode is a stable snake_case code for the reason behind the message, when the error has one
+          (422 kind_unavailable); omitted otherwise.
+        type: string
     type: object
   internal_api_handlers.BrokerStatus:
     properties:
@@ -4822,8 +4844,8 @@ paths:
       - application/json
       description: Upserts the rule for (target, kind). A change of thresholds, or
         turning a rule on, starts its state again. Thresholds are in the kind's own
-        unit (see api.AlertRule). Answers 200 with the rule. back_online needs a gone_quiet
-        rule on the same radio.
+        unit (see api.AlertRule). Answers 200 with the rule. back_online needs an
+        enabled gone_quiet rule on the same radio.
       parameters:
       - description: Body at most 4 KiB
         in: body

@@ -30,6 +30,8 @@ type fakeAlerts struct {
 	removed  bool
 }
 
+var alertNodeID = uuid.MustParse("22222222-2222-2222-2222-222222222222")
+
 var alertKey = strings.Repeat("ab", 32)
 
 func (f *fakeAlerts) Overview(context.Context, uuid.UUID) (alerts.Overview, error) {
@@ -39,10 +41,11 @@ func (f *fakeAlerts) Overview(context.Context, uuid.UUID) (alerts.Overview, erro
 	th := 3500
 	sent := time.UnixMilli(1794703600000)
 	return alerts.Overview{Delivery: "push", HasDevice: true, Targets: []alerts.TargetView{{
-		TargetInfo: alerts.TargetInfo{Kind: "node", PublicKey: alertKey, Name: "Hilltop", Rules: []alerts.StoredRule{{
+		TargetInfo: alerts.TargetInfo{ID: alertNodeID, Kind: "node", PublicKey: alertKey, Name: "Hilltop", Caps: alerts.Caps{Polled: true}, Rules: []alerts.StoredRule{{
 			ID: uuid.MustParse("11111111-1111-1111-1111-111111111111"), Kind: "battery_low", Threshold: &th, Enabled: true,
 			State: "ok", StateChangedAt: time.UnixMilli(1794700000000), LastSentAt: &sent}}},
 		Available: []string{"gone_quiet", "battery_low"}, Unavailable: map[string]string{"temperature": "This repeater does not report a temperature."},
+		UnavailableCodes: map[string]string{"temperature": "no_data"},
 	}, {TargetInfo: alerts.TargetInfo{Kind: "observer", PublicKey: strings.Repeat("cd", 32), Name: "North", Rules: []alerts.StoredRule{}}}}}, nil
 }
 
@@ -102,8 +105,15 @@ func TestMeAlertsShapes(t *testing.T) {
 		rule["lastSentAt"] != float64(1794703600000) {
 		t.Fatalf("shape: %s", w.Body)
 	}
+	if t0["id"] != alertNodeID.String() || t0["polled"] != true || t0["unavailableCodes"].(map[string]any)["temperature"] != "no_data" {
+		t.Fatalf("id, polled, codes: %s", w.Body)
+	}
+	// A radio that no longer exists has a null id and is not polled.
+	if id, ok := t1["id"]; !ok || id != nil || t1["polled"] != false {
+		t.Fatalf("unknown radio: %v", t1)
+	}
 	// Empty collections are arrays and objects, never null.
-	if _, ok := t1["available"].([]any); !ok || t1["rules"] == nil || t1["unavailable"] == nil {
+	if _, ok := t1["available"].([]any); !ok || t1["rules"] == nil || t1["unavailable"] == nil || t1["unavailableCodes"] == nil {
 		t.Fatalf("empty target: %v", t1)
 	}
 }
@@ -165,9 +175,19 @@ func TestMeAlertErrors(t *testing.T) {
 			t.Error("internal error leaked")
 		}
 	}
-	w := call(alertsServer(&fakeAlerts{err: &alerts.KindUnavailable{Reason: "Nope."}}), "PUT", "/me/alerts/rules", body, c...)
+	w := call(alertsServer(&fakeAlerts{err: &alerts.KindUnavailable{Reason: "Nope.", Code: "not_polled"}}), "PUT", "/me/alerts/rules", body, c...)
 	if !strings.Contains(w.Body.String(), "Nope.") {
 		t.Errorf("reason not in the message: %s", w.Body)
+	}
+	// The code rides next to the usual code and message; other errors carry no reasonCode.
+	var e struct{ Error map[string]string }
+	_ = json.Unmarshal(w.Body.Bytes(), &e)
+	if e.Error["code"] != "kind_unavailable" || e.Error["message"] != "Nope." || e.Error["reasonCode"] != "not_polled" || len(e.Error) != 3 {
+		t.Errorf("error body: %s", w.Body)
+	}
+	w = call(alertsServer(&fakeAlerts{err: alerts.ErrNotOnAtlas}), "PUT", "/me/alerts/rules", body, c...)
+	if strings.Contains(w.Body.String(), "reasonCode") {
+		t.Errorf("reasonCode on another error: %s", w.Body)
 	}
 }
 

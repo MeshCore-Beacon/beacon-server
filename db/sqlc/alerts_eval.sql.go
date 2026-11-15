@@ -294,7 +294,7 @@ const alertRuleBatch = `-- name: AlertRuleBatch :many
 SELECT r.id, r.user_id, r.target_kind, r.target_public_key, r.kind, r.threshold, r.threshold_high, r.state,
        r.last_sent_at, r.cursor_at, r.streak, r.version,
        COALESCE((SELECT p.name FROM user_atlas_pins p WHERE p.user_id = r.user_id AND p.public_key = r.target_public_key LIMIT 1), '')::text AS pin_name,
-       g.recovered_at AS sibling_recovered_at
+       g.recovered_at AS sibling_recovered_at, COALESCE(g.enabled, false)::boolean AS sibling_enabled
 FROM user_alert_rules r
 JOIN users u ON u.id = r.user_id AND u.disabled_at IS NULL
 LEFT JOIN user_alert_rules g ON r.kind = 'back_online' AND g.user_id = r.user_id AND g.target_public_key = r.target_public_key AND g.kind = 'gone_quiet'
@@ -323,10 +323,11 @@ type AlertRuleBatchRow struct {
 	Version            int64              `json:"version"`
 	PinName            string             `json:"pin_name"`
 	SiblingRecoveredAt pgtype.Timestamptz `json:"sibling_recovered_at"`
+	SiblingEnabled     bool               `json:"sibling_enabled"`
 }
 
 // The next enabled rules of live users after the id, with the name the user gave the pin and, for a back_online
-// rule, when the radio's gone_quiet rule last recovered.
+// rule, when the radio's gone_quiet rule last recovered and whether that rule is on.
 func (q *Queries) AlertRuleBatch(ctx context.Context, arg AlertRuleBatchParams) ([]AlertRuleBatchRow, error) {
 	rows, err := q.db.Query(ctx, alertRuleBatch, arg.AfterID, arg.RowLimit)
 	if err != nil {
@@ -351,6 +352,7 @@ func (q *Queries) AlertRuleBatch(ctx context.Context, arg AlertRuleBatchParams) 
 			&i.Version,
 			&i.PinName,
 			&i.SiblingRecoveredAt,
+			&i.SiblingEnabled,
 		); err != nil {
 			return nil, err
 		}

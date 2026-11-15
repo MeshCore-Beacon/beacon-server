@@ -72,6 +72,9 @@ func isQueryTimeout(err error) bool {
 type APIError struct {
 	Code    string `json:"code"`    // e.g. "not_found", "bad_request"
 	Message string `json:"message"` // e.g. "channel not found"
+	// ReasonCode is a stable snake_case code for the reason behind the message, when the error has one
+	// (422 kind_unavailable); omitted otherwise.
+	ReasonCode string `json:"reasonCode,omitempty"`
 }
 
 // respond writes a JSON response with the given status code and data.

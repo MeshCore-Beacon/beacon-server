@@ -19,13 +19,21 @@ type AlertRule struct {
 
 // AlertTarget is one Atlas pin with the alert kinds its radio can have and its rules.
 type AlertTarget struct {
-	Kind      string   `json:"kind" enums:"node,observer"`
-	PublicKey string   `json:"publicKey"`
-	Name      string   `json:"name" example:"Hilltop"`
+	// ID is the node's or observer's id as used by /nodes/{id} and /observers/{id}; null when the radio no longer exists.
+	ID        *string `json:"id" format:"uuid"`
+	Kind      string  `json:"kind" enums:"node,observer"`
+	PublicKey string  `json:"publicKey"`
+	Name      string  `json:"name" example:"Hilltop"`
+	// Polled: Beacon has trusted telemetry for this radio now. It is what offers the telemetry kinds and the 3 and 6 hour
+	// gone_quiet thresholds for a repeater (observers always have those).
+	Polled    bool     `json:"polled"`
 	Available []string `json:"available"`
-	// Unavailable maps a kind to the reason this radio cannot have it.
+	// Unavailable maps a kind to the English reason this radio cannot have it.
 	Unavailable map[string]string `json:"unavailable"`
-	Rules       []AlertRule       `json:"rules"`
+	// UnavailableCodes maps the same kinds to a stable code for the reason: observer_no_data, repeaters_only, not_polled,
+	// no_data, observer_no_clock, clock_repeaters_only.
+	UnavailableCodes map[string]string `json:"unavailableCodes"`
+	Rules            []AlertRule       `json:"rules"`
 }
 
 // AlertsResponse is GET /me/alerts: one target per Atlas pin, in Atlas order.

@@ -34,6 +34,8 @@ type RuleRow struct {
 	Version            int64
 	PinName            string
 	SiblingRecoveredAt time.Time
+	// SiblingEnabled: the radio has an enabled gone_quiet rule (read for back_online).
+	SiblingEnabled bool
 }
 
 // TargetData is what is known about one radio; Now and the sibling time are filled per rule.
@@ -146,7 +148,7 @@ func evaluateBatch(rows []RuleRow, targets map[string]TargetData, now time.Time)
 	for _, row := range rows {
 		td := targets[TargetID(row.TargetKind, row.Key)]
 		d := td.Data
-		d.Now, d.SiblingRecoveredAt = now, row.SiblingRecoveredAt
+		d.Now, d.SiblingRecoveredAt, d.SiblingEnabled = now, row.SiblingRecoveredAt, row.SiblingEnabled
 		out := Evaluate(Rule{Kind: row.Kind, Threshold: row.Threshold, High: row.High, State: row.State,
 			LastSentAt: row.LastSentAt, Cursor: row.Cursor, Streak: row.Streak}, d)
 		if out.State == row.State && !out.Notify && !out.Recovered && out.Streak == row.Streak && out.Cursor.Equal(row.Cursor) {

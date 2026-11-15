@@ -33,6 +33,8 @@ type StoredRule struct {
 
 // TargetInfo is one Atlas pin with what is known about the radio and its rules.
 type TargetInfo struct {
+	// ID is the node's or observer's id, uuid.Nil when the radio no longer exists.
+	ID        uuid.UUID
 	Kind      string // node or observer
 	PublicKey string // lower-case hex
 	Name      string
@@ -86,8 +88,9 @@ func (s *Service) Delivery() string { return s.delivery }
 // TargetView is a target with the kinds it can have.
 type TargetView struct {
 	TargetInfo
-	Available   []string
-	Unavailable map[string]string
+	Available        []string
+	Unavailable      map[string]string
+	UnavailableCodes map[string]string
 }
 
 // Overview is the answer to GET /me/alerts.
@@ -108,8 +111,8 @@ func (s *Service) Overview(ctx context.Context, userID uuid.UUID) (Overview, err
 	}
 	out := Overview{Delivery: s.delivery, HasDevice: dev, Targets: make([]TargetView, 0, len(targets))}
 	for _, t := range targets {
-		av, un := Availability(t.Caps)
-		out.Targets = append(out.Targets, TargetView{TargetInfo: t, Available: av, Unavailable: un})
+		av, un, codes := Availability(t.Caps)
+		out.Targets = append(out.Targets, TargetView{TargetInfo: t, Available: av, Unavailable: un, UnavailableCodes: codes})
 	}
 	return out, nil
 }

@@ -145,7 +145,7 @@ func TestEvaluateBatchRecoveryThenBackOnline(t *testing.T) {
 		t.Fatalf("gone_quiet recovery: %+v %+v", ups, notes)
 	}
 	// The next evaluation of the back_online rule sees the stored recovery time.
-	bo.SiblingRecoveredAt = now
+	bo.SiblingRecoveredAt, bo.SiblingEnabled = now, true
 	ups, notes = evaluateBatch([]RuleRow{bo}, targets, now.Add(5*time.Minute))
 	if len(notes) != 1 || notes[0].Kind != KindBackOnline || len(ups) != 1 {
 		t.Fatalf("back online: %+v %+v", ups, notes)

@@ -81,6 +81,13 @@ func TestAlertRulesPostgres(t *testing.T) {
 		t.Fatalf("threshold: %v", err)
 	}
 
+	// A disabled gone_quiet does not count either.
+	if _, err = svc.PutRule(ctx, u.ID, alerts.RuleInput{TargetKind: "node", PublicKey: rep, Kind: "gone_quiet", Threshold: ipp(6), Enabled: false}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = svc.PutRule(ctx, u.ID, alerts.RuleInput{TargetKind: "node", PublicKey: rep, Kind: "back_online", Enabled: true}); !errors.As(err, &na) || na.Code != alerts.CodeNeedsGoneQuiet {
+		t.Fatalf("back online with a disabled gone quiet: %v", err)
+	}
 	gq, err := svc.PutRule(ctx, u.ID, alerts.RuleInput{TargetKind: "node", PublicKey: rep, Kind: "gone_quiet", Threshold: ipp(6), Enabled: true})
 	if err != nil || gq.State != "unknown" || gq.Threshold == nil || *gq.Threshold != 6 {
 		t.Fatalf("gone quiet: %+v %v", gq, err)
@@ -117,6 +124,13 @@ func TestAlertRulesPostgres(t *testing.T) {
 	hill := ov.Targets[0]
 	if hill.PublicKey != hex.EncodeToString(rep) || hill.Name != "My hill" || hill.Kind != "node" || len(hill.Rules) != 3 {
 		t.Fatalf("first target: %+v", hill)
+	}
+	if hill.ID != nodeIDOf(t, ctx, s, rep) || !hill.Caps.Polled || hill.UnavailableCodes["temperature"] != alerts.CodeNoData {
+		t.Fatalf("id, polled, code: %+v", hill)
+	}
+	if ov.Targets[1].ID == uuid.Nil || ov.Targets[1].Caps.Polled || ov.Targets[1].UnavailableCodes["battery_low"] != alerts.CodeRepeatersOnly ||
+		ov.Targets[2].ID != uuid.Nil || ov.Targets[2].Caps.Polled {
+		t.Fatalf("other targets: %+v %+v", ov.Targets[1], ov.Targets[2])
 	}
 	if hill.Unavailable["temperature"] == "" || !contains(hill.Available, "battery_low") || !contains(hill.Available, "clock") {
 		t.Fatalf("availability: %v %v", hill.Available, hill.Unavailable)
@@ -156,6 +170,15 @@ func TestAlertRulesPostgres(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM user_alert_rules`).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("%d rules after account deletion", n)
 	}
+}
+
+func nodeIDOf(t *testing.T, ctx context.Context, s *Store, key []byte) uuid.UUID {
+	t.Helper()
+	var id uuid.UUID
+	if err := s.pool.QueryRow(ctx, `SELECT id FROM nodes WHERE public_key = $1`, key).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
 }
 
 func contains(l []string, s string) bool {

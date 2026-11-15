@@ -58,7 +58,8 @@ func alertError(w http.ResponseWriter, err error) {
 	case errors.Is(err, alerts.ErrNotOnAtlas):
 		respondCode(w, http.StatusConflict, "not_on_atlas", "Rules exist only for radios on your Atlas.")
 	case errors.As(err, &unavailable):
-		respondCode(w, http.StatusUnprocessableEntity, "kind_unavailable", unavailable.Reason)
+		respond(w, http.StatusUnprocessableEntity, map[string]APIError{"error": {Code: "kind_unavailable", Message: unavailable.Reason,
+			ReasonCode: unavailable.Code}})
 	case errors.As(err, &bad):
 		respondCode(w, http.StatusUnprocessableEntity, "invalid_threshold", bad.Message)
 	case errors.Is(err, alerts.ErrBadDevice):
@@ -102,13 +103,20 @@ func getAlerts(svc AlertsService) http.HandlerFunc {
 		}
 		out := api.AlertsResponse{Delivery: ov.Delivery, HasDevice: ov.HasDevice, Targets: make([]api.AlertTarget, 0, len(ov.Targets))}
 		for _, t := range ov.Targets {
-			at := api.AlertTarget{Kind: t.Kind, PublicKey: t.PublicKey, Name: t.Name, Available: t.Available,
-				Unavailable: t.Unavailable, Rules: make([]api.AlertRule, 0, len(t.Rules))}
+			at := api.AlertTarget{Kind: t.Kind, PublicKey: t.PublicKey, Name: t.Name, Polled: t.Caps.Polled, Available: t.Available,
+				Unavailable: t.Unavailable, UnavailableCodes: t.UnavailableCodes, Rules: make([]api.AlertRule, 0, len(t.Rules))}
 			if at.Available == nil {
 				at.Available = []string{}
 			}
 			if at.Unavailable == nil {
 				at.Unavailable = map[string]string{}
+			}
+			if at.UnavailableCodes == nil {
+				at.UnavailableCodes = map[string]string{}
+			}
+			if t.ID != uuid.Nil {
+				id := t.ID.String()
+				at.ID = &id
 			}
 			for _, rule := range t.Rules {
 				at.Rules = append(at.Rules, alertRule(rule))
@@ -121,7 +129,7 @@ func getAlerts(svc AlertsService) http.HandlerFunc {
 
 // putAlertRule godoc
 // @Summary Create or change an alert rule
-// @Description Upserts the rule for (target, kind). A change of thresholds, or turning a rule on, starts its state again. Thresholds are in the kind's own unit (see api.AlertRule). Answers 200 with the rule. back_online needs a gone_quiet rule on the same radio.
+// @Description Upserts the rule for (target, kind). A change of thresholds, or turning a rule on, starts its state again. Thresholds are in the kind's own unit (see api.AlertRule). Answers 200 with the rule. back_online needs an enabled gone_quiet rule on the same radio.
 // @Tags Accounts
 // @Accept json
 // @Produce json

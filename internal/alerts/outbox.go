@@ -29,6 +29,7 @@ const (
 type OutboxRow struct {
 	ID            int64
 	UserID, Pass  uuid.UUID
+	TargetID      uuid.UUID // the radio's node or observer id, uuid.Nil when unknown
 	TargetKind    string
 	Key           []byte
 	Name          string
@@ -190,6 +191,9 @@ func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow) (delivered, ret
 			Title: SanitizeName(r.Name, r.Key),
 			Body:  Sentence(r.Kind, SanitizeName(r.Name, r.Key), r.Value, r.Detail),
 			Data:  map[string]string{"targetKind": r.TargetKind, "publicKey": hex.EncodeToString(r.Key)},
+		}
+		if r.TargetID != uuid.Nil {
+			msg.Data["id"] = r.TargetID.String()
 		}
 		ok := false
 		for _, d := range devs {

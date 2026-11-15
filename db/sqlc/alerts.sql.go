@@ -13,7 +13,7 @@ import (
 )
 
 const alertNodeCaps = `-- name: AlertNodeCaps :many
-SELECT n.public_key, n.node_type, COALESCE(n.name, '')::text AS name,
+SELECT n.id, n.public_key, n.node_type, COALESCE(n.name, '')::text AS name,
        COALESCE(c.readings, 0)::int AS readings,
        COALESCE(c.battery, false)::boolean AS has_battery, COALESCE(c.temperature, false)::boolean AS has_temperature,
        COALESCE(c.noise, false)::boolean AS has_noise, COALESCE(c.uptime, false)::boolean AS has_uptime
@@ -33,14 +33,15 @@ type AlertNodeCapsParams struct {
 }
 
 type AlertNodeCapsRow struct {
-	PublicKey      []byte `json:"public_key"`
-	NodeType       int16  `json:"node_type"`
-	Name           string `json:"name"`
-	Readings       int32  `json:"readings"`
-	HasBattery     bool   `json:"has_battery"`
-	HasTemperature bool   `json:"has_temperature"`
-	HasNoise       bool   `json:"has_noise"`
-	HasUptime      bool   `json:"has_uptime"`
+	ID             uuid.UUID `json:"id"`
+	PublicKey      []byte    `json:"public_key"`
+	NodeType       int16     `json:"node_type"`
+	Name           string    `json:"name"`
+	Readings       int32     `json:"readings"`
+	HasBattery     bool      `json:"has_battery"`
+	HasTemperature bool      `json:"has_temperature"`
+	HasNoise       bool      `json:"has_noise"`
+	HasUptime      bool      `json:"has_uptime"`
 }
 
 // What each of the nodes is and what a polled one reports, over the readings since the cutoff.
@@ -54,6 +55,7 @@ func (q *Queries) AlertNodeCaps(ctx context.Context, arg AlertNodeCapsParams) ([
 	for rows.Next() {
 		var i AlertNodeCapsRow
 		if err := rows.Scan(
+			&i.ID,
 			&i.PublicKey,
 			&i.NodeType,
 			&i.Name,
@@ -74,7 +76,7 @@ func (q *Queries) AlertNodeCaps(ctx context.Context, arg AlertNodeCapsParams) ([
 }
 
 const alertObserverCaps = `-- name: AlertObserverCaps :many
-SELECT o.public_key, COALESCE(o.display_name, '')::text AS name,
+SELECT o.id, o.public_key, COALESCE(o.display_name, '')::text AS name,
        COALESCE(c.battery, false)::boolean AS has_battery, COALESCE(c.noise, false)::boolean AS has_noise,
        COALESCE(c.uptime, false)::boolean AS has_uptime
 FROM observers o
@@ -93,11 +95,12 @@ type AlertObserverCapsParams struct {
 }
 
 type AlertObserverCapsRow struct {
-	PublicKey  []byte `json:"public_key"`
-	Name       string `json:"name"`
-	HasBattery bool   `json:"has_battery"`
-	HasNoise   bool   `json:"has_noise"`
-	HasUptime  bool   `json:"has_uptime"`
+	ID         uuid.UUID `json:"id"`
+	PublicKey  []byte    `json:"public_key"`
+	Name       string    `json:"name"`
+	HasBattery bool      `json:"has_battery"`
+	HasNoise   bool      `json:"has_noise"`
+	HasUptime  bool      `json:"has_uptime"`
 }
 
 func (q *Queries) AlertObserverCaps(ctx context.Context, arg AlertObserverCapsParams) ([]AlertObserverCapsRow, error) {
@@ -110,6 +113,7 @@ func (q *Queries) AlertObserverCaps(ctx context.Context, arg AlertObserverCapsPa
 	for rows.Next() {
 		var i AlertObserverCapsRow
 		if err := rows.Scan(
+			&i.ID,
 			&i.PublicKey,
 			&i.Name,
 			&i.HasBattery,
@@ -333,7 +337,7 @@ func (q *Queries) UpsertUserDevice(ctx context.Context, arg UpsertUserDevicePara
 }
 
 const userAlertRuleKinds = `-- name: UserAlertRuleKinds :many
-SELECT kind FROM user_alert_rules WHERE user_id = $1 AND target_public_key = $2
+SELECT kind FROM user_alert_rules WHERE user_id = $1 AND target_public_key = $2 AND enabled
 `
 
 type UserAlertRuleKindsParams struct {
@@ -341,6 +345,7 @@ type UserAlertRuleKindsParams struct {
 	TargetPublicKey []byte    `json:"target_public_key"`
 }
 
+// Only enabled rules: back_online needs a gone_quiet rule that is on.
 func (q *Queries) UserAlertRuleKinds(ctx context.Context, arg UserAlertRuleKindsParams) ([]string, error) {
 	rows, err := q.db.Query(ctx, userAlertRuleKinds, arg.UserID, arg.TargetPublicKey)
 	if err != nil {

@@ -56,8 +56,24 @@ func (c Caps) repeaterLike() bool {
 	return c.Observer || c.NodeType == nodeTypeRepeater || c.NodeType == nodeTypeRoomServer
 }
 
-// KindUnavailable says why a kind cannot be used on a radio.
-type KindUnavailable struct{ Reason string }
+// Reason codes: a stable snake_case code for each reason a kind can be unavailable, so clients can translate it.
+const (
+	CodeObserverNoData     = "observer_no_data"     // an observer does not report this value
+	CodeRepeatersOnly      = "repeaters_only"       // only repeaters report this value
+	CodeNotPolled          = "not_polled"           // Beacon is not polling this repeater
+	CodeNoData             = "no_data"              // a polled repeater does not report this value
+	CodeObserverNoClock    = "observer_no_clock"    // observers have no clock drift value
+	CodeClockRepeatersOnly = "clock_repeaters_only" // only repeaters and room servers report a clock
+	CodeNeedsGoneQuiet     = "needs_gone_quiet"     // back_online needs an enabled gone_quiet rule (rule errors only)
+	CodeNotApplicable      = "not_applicable"       // the kind has nothing to do with this radio (rule errors only)
+)
+
+// ReasonCodes is every code the server can emit.
+var ReasonCodes = []string{CodeObserverNoData, CodeRepeatersOnly, CodeNotPolled, CodeNoData, CodeObserverNoClock,
+	CodeClockRepeatersOnly, CodeNeedsGoneQuiet, CodeNotApplicable}
+
+// KindUnavailable says why a kind cannot be used on a radio. Code is the stable form of Reason.
+type KindUnavailable struct{ Reason, Code string }
 
 func (e *KindUnavailable) Error() string { return e.Reason }
 
@@ -66,51 +82,52 @@ type InvalidThreshold struct{ Message string }
 
 func (e *InvalidThreshold) Error() string { return e.Message }
 
-// Availability lists the kinds the radio can have, in display order, and the reason for each that it cannot.
-func Availability(c Caps) (available []string, unavailable map[string]string) {
-	unavailable = map[string]string{}
+// Availability lists the kinds the radio can have, in display order, the reason for each that it cannot, and the
+// stable code of each reason (same keys).
+func Availability(c Caps) (available []string, unavailable, codes map[string]string) {
+	unavailable, codes = map[string]string{}, map[string]string{}
 	for _, k := range Kinds {
-		ok, why, relevant := kindStatus(c, k)
+		ok, code, why, relevant := kindStatus(c, k)
 		switch {
 		case ok:
 			available = append(available, k)
 		case relevant:
-			unavailable[k] = why
+			unavailable[k], codes[k] = why, code
 		}
 	}
-	return available, unavailable
+	return available, unavailable, codes
 }
 
-// kindStatus: ok when the kind can be used; otherwise why not, and whether the radio's user should hear about it
+// kindStatus: ok when the kind can be used; otherwise the reason code and text, and whether the radio's user should hear about it
 // (a kind that has nothing to do with the radio is left out of both lists).
-func kindStatus(c Caps, kind string) (ok bool, why string, relevant bool) {
-	data := func(has bool, what string) (bool, string, bool) {
+func kindStatus(c Caps, kind string) (ok bool, code, why string, relevant bool) {
+	data := func(has bool, what string) (bool, string, string, bool) {
 		switch {
 		case has:
-			return true, "", true
+			return true, "", "", true
 		case c.Observer:
-			return false, "This observer does not report " + what + ".", true
+			return false, CodeObserverNoData, "This observer does not report " + what + ".", true
 		case !c.repeaterLike():
-			return false, "Only repeaters report " + what + ".", true
+			return false, CodeRepeatersOnly, "Only repeaters report " + what + ".", true
 		case !c.Polled:
-			return false, "Beacon is not polling this repeater. Request telemetry for it first.", true
+			return false, CodeNotPolled, "Beacon is not polling this repeater. Request telemetry for it first.", true
 		default:
-			return false, "This repeater does not report " + what + ".", true
+			return false, CodeNoData, "This repeater does not report " + what + ".", true
 		}
 	}
 	switch kind {
 	case KindGoneQuiet, KindBackOnline:
-		return true, "", true
+		return true, "", "", true
 	case KindObserverOff:
-		return c.Observer, "", c.Observer
+		return c.Observer, "", "", c.Observer
 	case KindClock:
 		if c.Observer {
-			return false, "Observers have no clock drift value.", true
+			return false, CodeObserverNoClock, "Observers have no clock drift value.", true
 		}
 		if !c.repeaterLike() {
-			return false, "Only repeaters and room servers report their clock.", true
+			return false, CodeClockRepeatersOnly, "Only repeaters and room servers report their clock.", true
 		}
-		return true, "", true
+		return true, "", "", true
 	case KindBatteryLow, KindBatteryFalling:
 		return data(c.Battery, "a battery level")
 	case KindRebooted:
@@ -120,7 +137,7 @@ func kindStatus(c Caps, kind string) (ok bool, why string, relevant bool) {
 	case KindNoiseHigh:
 		return data(c.Noise, "a noise floor")
 	}
-	return false, "", false
+	return false, "", "", false
 }
 
 var (
@@ -153,20 +170,20 @@ func between(v, lo, hi int, what string) error {
 
 // ValidateRule checks a rule for the radio and returns the thresholds to store. A rule that is being turned off is
 // only checked for shape, so a rule whose data went away can still be switched off. hasGoneQuiet says whether the
-// radio has a gone_quiet rule, which back_online needs.
+// radio has an enabled gone_quiet rule, which back_online needs.
 func ValidateRule(c Caps, kind string, th, high *int, enabled, hasGoneQuiet bool) (*int, *int, error) {
 	if !slices.Contains(Kinds, kind) {
 		return nil, nil, &InvalidThreshold{Message: "Unknown alert kind."}
 	}
 	if enabled {
-		if ok, why, _ := kindStatus(c, kind); !ok {
+		if ok, code, why, _ := kindStatus(c, kind); !ok {
 			if why == "" {
-				why = "This alert does not apply to this radio."
+				code, why = CodeNotApplicable, "This alert does not apply to this radio."
 			}
-			return nil, nil, &KindUnavailable{Reason: why}
+			return nil, nil, &KindUnavailable{Reason: why, Code: code}
 		}
 		if kind == KindBackOnline && !hasGoneQuiet {
-			return nil, nil, &KindUnavailable{Reason: "Turn on the gone-quiet alert for this radio first."}
+			return nil, nil, &KindUnavailable{Reason: "Turn on the gone-quiet alert for this radio first.", Code: CodeNeedsGoneQuiet}
 		}
 	}
 	none := func() error {

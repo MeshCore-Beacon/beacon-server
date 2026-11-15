@@ -39,7 +39,7 @@ type Querier interface {
 	AlertObserverTelemetry(ctx context.Context, arg AlertObserverTelemetryParams) ([]AlertObserverTelemetryRow, error)
 	AlertObserversData(ctx context.Context, keys [][]byte) ([]AlertObserversDataRow, error)
 	// The next enabled rules of live users after the id, with the name the user gave the pin and, for a back_online
-	// rule, when the radio's gone_quiet rule last recovered.
+	// rule, when the radio's gone_quiet rule last recovered and whether that rule is on.
 	AlertRuleBatch(ctx context.Context, arg AlertRuleBatchParams) ([]AlertRuleBatchRow, error)
 	AlertsEvalUnlock(ctx context.Context) error
 	AlertsSendUnlock(ctx context.Context) error
@@ -914,6 +914,7 @@ type Querier interface {
 	// ============================================================
 	UpsertTransportScope(ctx context.Context, arg UpsertTransportScopeParams) error
 	UpsertUserDevice(ctx context.Context, arg UpsertUserDeviceParams) error
+	// Only enabled rules: back_online needs a gone_quiet rule that is on.
 	UserAlertRuleKinds(ctx context.Context, arg UserAlertRuleKindsParams) ([]string, error)
 	UserByEmail(ctx context.Context, email string) (User, error)
 	UserByID(ctx context.Context, id uuid.UUID) (User, error)

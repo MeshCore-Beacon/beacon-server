@@ -202,6 +202,21 @@ func TestPushMessagePerNoticePerDevice(t *testing.T) {
 	}
 }
 
+func TestPushCarriesTargetIDWhenKnown(t *testing.T) {
+	id := uuid.New()
+	known, unknown := row(1, userA, passOne, KindBatteryLow, "Hilltop", 3400), row(2, userA, passOne, KindBatteryLow, "Gone", 3400)
+	known.TargetID = id
+	f := &fakeSend{rows: []OutboxRow{known, unknown}, devices: map[uuid.UUID][]Device{userA: {{"ios", "tok-1"}}}}
+	p := &fakePush{}
+	_ = NewSender(f, "push", nil, p, nil, nil).Run(context.Background())
+	if len(p.sent) != 2 || p.sent[0].Data["id"] != id.String() || len(p.sent[0].Data) != 3 {
+		t.Fatalf("%+v", p.sent[0])
+	}
+	if _, ok := p.sent[1].Data["id"]; ok || len(p.sent[1].Data) != 2 {
+		t.Fatalf("unknown radio carries an id: %+v", p.sent[1])
+	}
+}
+
 func TestPushObserverTargetKind(t *testing.T) {
 	r := row(1, userA, passOne, KindObserverOff, "North", 120)
 	r.TargetKind = "observer"

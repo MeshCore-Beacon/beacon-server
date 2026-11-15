@@ -210,23 +210,28 @@ func TestEvaluateBackOnlinePairing(t *testing.T) {
 		return Rule{Kind: KindBackOnline, State: StateOK, Cursor: ago(cursor), LastSentAt: sent}
 	}
 	// The sibling recovered after the rule last looked: notify once, and move the cursor.
-	o := Evaluate(r(time.Hour, time.Time{}), Data{Now: now, Exists: true, SiblingRecoveredAt: ago(10 * time.Minute)})
+	o := Evaluate(r(time.Hour, time.Time{}), Data{Now: now, Exists: true, SiblingEnabled: true, SiblingRecoveredAt: ago(10 * time.Minute)})
 	if !o.Notify || o.State != StateOK || !o.Cursor.Equal(ago(10*time.Minute)) {
 		t.Fatalf("%+v", o)
 	}
 	// The same recovery is not announced twice.
-	o = Evaluate(r(10*time.Minute, time.Time{}), Data{Now: now, Exists: true, SiblingRecoveredAt: ago(10 * time.Minute)})
+	o = Evaluate(r(10*time.Minute, time.Time{}), Data{Now: now, Exists: true, SiblingEnabled: true, SiblingRecoveredAt: ago(10 * time.Minute)})
 	if o.Notify {
 		t.Fatal("announced twice")
 	}
 	// No recovery, nothing; a recovery from before the rule was made is history.
-	if Evaluate(r(time.Hour, time.Time{}), Data{Now: now, Exists: true}).Notify || Evaluate(r(time.Hour, time.Time{}), Data{Now: now, Exists: true, SiblingRecoveredAt: ago(2 * time.Hour)}).Notify {
+	if Evaluate(r(time.Hour, time.Time{}), Data{Now: now, Exists: true, SiblingEnabled: true}).Notify || Evaluate(r(time.Hour, time.Time{}), Data{Now: now, Exists: true, SiblingEnabled: true, SiblingRecoveredAt: ago(2 * time.Hour)}).Notify {
 		t.Fatal("notified without a new recovery")
 	}
 	// The six hour limit still applies, and the cursor still moves.
-	o = Evaluate(r(time.Hour, ago(time.Hour)), Data{Now: now, Exists: true, SiblingRecoveredAt: ago(10 * time.Minute)})
+	o = Evaluate(r(time.Hour, ago(time.Hour)), Data{Now: now, Exists: true, SiblingEnabled: true, SiblingRecoveredAt: ago(10 * time.Minute)})
 	if o.Notify || !o.Cursor.Equal(ago(10*time.Minute)) {
 		t.Fatalf("%+v", o)
+	}
+	// A gone_quiet partner that is off or deleted makes the rule inactive, even with a recovery on record.
+	o = Evaluate(r(time.Hour, time.Time{}), Data{Now: now, Exists: true, SiblingRecoveredAt: ago(10 * time.Minute)})
+	if o.State != StateInactive || o.Notify {
+		t.Fatalf("partner off: %+v", o)
 	}
 	// With the radio's row gone the rule has nothing to say but is not an error.
 	if o := Evaluate(r(time.Hour, time.Time{}), Data{Now: now}); o.Notify {

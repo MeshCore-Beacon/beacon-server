@@ -66,6 +66,8 @@ type Data struct {
 	AdvertAt time.Time
 	// SiblingRecoveredAt is when the radio's gone_quiet rule last went from firing to ok.
 	SiblingRecoveredAt time.Time
+	// SiblingEnabled: the radio has an enabled gone_quiet rule, which a back_online rule needs.
+	SiblingEnabled bool
 }
 
 // Outcome is what the evaluation decided.
@@ -209,7 +211,11 @@ func Evaluate(r Rule, d Data) Outcome {
 			out = set(false, 0)
 		}
 	case KindBackOnline:
-		// Never firing itself: it announces the moment the radio's gone_quiet rule recovered.
+		// Never firing itself: it announces the moment the radio's gone_quiet rule recovered. Without an enabled
+		// gone_quiet partner there is nothing to announce.
+		if !d.SiblingEnabled {
+			return inactive()
+		}
 		o.State = StateOK
 		if d.SiblingRecoveredAt.After(r.Cursor) {
 			o.Cursor = d.SiblingRecoveredAt

@@ -67,19 +67,19 @@ func loadRadioCaps(ctx context.Context, q sqlc.Querier, keys [][]byte, now time.
 
 // pick returns the capabilities and display name for the radio, reading it as the requested kind when a row of that
 // kind exists and otherwise as the other kind.
-func (rc radioCaps) pick(key, want string) (kind string, c alerts.Caps, name string) {
+func (rc radioCaps) pick(key, want string) (id uuid.UUID, kind string, c alerts.Caps, name string) {
 	n, isNode := rc.node[key]
 	o, isObs := rc.observer[key]
 	asObserver := (want == alerts.TargetObserver && isObs) || (!isNode && isObs)
 	switch {
 	case asObserver:
-		return alerts.TargetObserver, alerts.Caps{Observer: true, Polled: o.HasBattery || o.HasNoise || o.HasUptime,
+		return o.ID, alerts.TargetObserver, alerts.Caps{Observer: true, Polled: o.HasBattery || o.HasNoise || o.HasUptime,
 			Battery: o.HasBattery, Noise: o.HasNoise, Uptime: o.HasUptime}, o.Name
 	case isNode:
-		return alerts.TargetNode, alerts.Caps{NodeType: n.NodeType, Polled: n.Readings > 0, Battery: n.HasBattery,
+		return n.ID, alerts.TargetNode, alerts.Caps{NodeType: n.NodeType, Polled: n.Readings > 0, Battery: n.HasBattery,
 			Temperature: n.HasTemperature, Noise: n.HasNoise, Uptime: n.HasUptime}, n.Name
 	}
-	return want, alerts.Caps{Observer: want == alerts.TargetObserver}, ""
+	return uuid.Nil, want, alerts.Caps{Observer: want == alerts.TargetObserver}, ""
 }
 
 // Targets returns one entry per Atlas pin, in Atlas order. An observer pin whose key has a node row reads as a node,
@@ -121,7 +121,7 @@ func (s *Store) Targets(ctx context.Context, userID uuid.UUID, now time.Time) ([
 		if _, isNode := rc.node[k]; isNode && p.Kind == "observer" {
 			want = alerts.TargetNode
 		}
-		kind, caps, name := rc.pick(k, want)
+		id, kind, caps, name := rc.pick(k, want)
 		if p.Name != "" {
 			name = p.Name
 		}
@@ -129,7 +129,7 @@ func (s *Store) Targets(ctx context.Context, userID uuid.UUID, now time.Time) ([
 		if r == nil {
 			r = []alerts.StoredRule{}
 		}
-		out = append(out, alerts.TargetInfo{Kind: kind, PublicKey: k, Name: name, Caps: caps, Rules: r})
+		out = append(out, alerts.TargetInfo{ID: id, Kind: kind, PublicKey: k, Name: name, Caps: caps, Rules: r})
 	}
 	return out, nil
 }
@@ -160,7 +160,7 @@ func (s *Store) PutRule(ctx context.Context, userID uuid.UUID, in alerts.RuleInp
 		if err != nil {
 			return err
 		}
-		kind, caps, _ := rc.pick(hex.EncodeToString(in.PublicKey), in.TargetKind)
+		_, kind, caps, _ := rc.pick(hex.EncodeToString(in.PublicKey), in.TargetKind)
 		kinds, err := q.UserAlertRuleKinds(ctx, sqlc.UserAlertRuleKindsParams{UserID: userID, TargetPublicKey: in.PublicKey})
 		if err != nil {
 			return err

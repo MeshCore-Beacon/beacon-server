@@ -82,7 +82,7 @@ func (a AlertEval) RuleBatch(ctx context.Context, after uuid.UUID, limit int) ([
 		out[i] = alerts.RuleRow{ID: r.ID, UserID: r.UserID, TargetKind: r.TargetKind, Key: r.TargetPublicKey, Kind: r.Kind,
 			Threshold: i32p(r.Threshold), High: i32p(r.ThresholdHigh), State: alerts.State(r.State),
 			LastSentAt: tsTime(r.LastSentAt), Cursor: tsTime(r.CursorAt), Streak: int(r.Streak), Version: r.Version,
-			PinName: r.PinName, SiblingRecoveredAt: tsTime(r.SiblingRecoveredAt)}
+			PinName: r.PinName, SiblingRecoveredAt: tsTime(r.SiblingRecoveredAt), SiblingEnabled: r.SiblingEnabled}
 	}
 	return out, nil
 }
@@ -320,7 +320,7 @@ func (a AlertEval) Pending(ctx context.Context, notBefore time.Time, limit int) 
 	}
 	out := make([]alerts.OutboxRow, len(rows))
 	for i, r := range rows {
-		out[i] = alerts.OutboxRow{ID: r.ID, UserID: r.UserID, Pass: r.PassID, TargetKind: r.TargetKind, Key: r.TargetPublicKey,
+		out[i] = alerts.OutboxRow{ID: r.ID, TargetID: r.TargetID, UserID: r.UserID, Pass: r.PassID, TargetKind: r.TargetKind, Key: r.TargetPublicKey,
 			Name: r.Name, Kind: r.AlertKind, Detail: r.Detail, Value: r.Value, Attempts: int(r.Attempts), Email: r.Email, EmailVerified: r.EmailVerified}
 	}
 	return out, nil

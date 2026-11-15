@@ -19,7 +19,7 @@ var (
 )
 
 func TestAvailability(t *testing.T) {
-	av, un := Availability(polledRepeater)
+	av, un, _ := Availability(polledRepeater)
 	if want := []string{"gone_quiet", "back_online", "clock", "battery_low", "battery_falling", "rebooted", "noise_high"}; !slices.Equal(av, want) {
 		t.Fatalf("polled repeater: %v", av)
 	}
@@ -27,7 +27,7 @@ func TestAvailability(t *testing.T) {
 		t.Fatalf("%v", un)
 	}
 
-	av, un = Availability(plainRepeater)
+	av, un, _ = Availability(plainRepeater)
 	if want := []string{"gone_quiet", "back_online", "clock"}; !slices.Equal(av, want) {
 		t.Fatalf("unpolled repeater: %v", av)
 	}
@@ -37,12 +37,12 @@ func TestAvailability(t *testing.T) {
 		}
 	}
 
-	av, un = Availability(companion)
+	av, un, _ = Availability(companion)
 	if want := []string{"gone_quiet", "back_online"}; !slices.Equal(av, want) || un["clock"] == "" || un["battery_low"] == "" {
 		t.Fatalf("companion: %v %v", av, un)
 	}
 
-	av, un = Availability(observerCaps)
+	av, un, _ = Availability(observerCaps)
 	if want := []string{"gone_quiet", "back_online", "battery_low", "battery_falling", "rebooted", "noise_high", "observer_offline"}; !slices.Equal(av, want) {
 		t.Fatalf("observer: %v", av)
 	}
@@ -53,9 +53,60 @@ func TestAvailability(t *testing.T) {
 	if _, ok := un["observer_offline"]; ok || slices.Contains(av, "observer_offline") != true {
 		t.Fatal("observer_offline")
 	}
-	_, un = Availability(polledRepeater)
+	_, un, _ = Availability(polledRepeater)
 	if _, ok := un["observer_offline"]; ok {
 		t.Fatal("observer_offline listed for a node")
+	}
+}
+
+func TestAvailabilityCodes(t *testing.T) {
+	check := func(name string, c Caps, want map[string]string) {
+		t.Helper()
+		_, un, codes := Availability(c)
+		if len(codes) != len(un) {
+			t.Fatalf("%s: %d codes for %d reasons", name, len(codes), len(un))
+		}
+		for k, code := range want {
+			if codes[k] != code {
+				t.Errorf("%s %s: code %q, want %q", name, k, codes[k], code)
+			}
+		}
+		for k := range un {
+			if codes[k] == "" {
+				t.Errorf("%s %s: no code", name, k)
+			}
+		}
+	}
+	check("polled", polledRepeater, map[string]string{"temperature": CodeNoData})
+	check("plain", plainRepeater, map[string]string{"battery_low": CodeNotPolled, "noise_high": CodeNotPolled, "temperature": CodeNotPolled})
+	check("companion", companion, map[string]string{"battery_low": CodeRepeatersOnly, "clock": CodeClockRepeatersOnly})
+	check("observer", observerCaps, map[string]string{"temperature": CodeObserverNoData, "clock": CodeObserverNoClock})
+	// Every code the server can emit is in the list clients are told about.
+	for _, c := range []string{CodeNoData, CodeNotPolled, CodeRepeatersOnly, CodeClockRepeatersOnly, CodeObserverNoData,
+		CodeObserverNoClock, CodeNeedsGoneQuiet, CodeNotApplicable} {
+		if !slices.Contains(ReasonCodes, c) {
+			t.Errorf("%s missing from ReasonCodes", c)
+		}
+	}
+}
+
+func TestValidateRuleReasonCodes(t *testing.T) {
+	code := func(c Caps, kind string, gq bool) string {
+		_, _, err := ValidateRule(c, kind, nil, nil, true, gq)
+		var na *KindUnavailable
+		if !errors.As(err, &na) {
+			t.Fatalf("%s: %v", kind, err)
+		}
+		return na.Code
+	}
+	if got := code(plainRepeater, "back_online", false); got != CodeNeedsGoneQuiet {
+		t.Errorf("back_online: %q", got)
+	}
+	if got := code(plainRepeater, "battery_low", false); got != CodeNotPolled {
+		t.Errorf("battery_low: %q", got)
+	}
+	if got := code(polledRepeater, "observer_offline", false); got != CodeNotApplicable {
+		t.Errorf("observer_offline: %q", got)
 	}
 }
 

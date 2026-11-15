@@ -329,6 +329,7 @@ func TestAlertPushDeliveryPostgres(t *testing.T) {
 	if err := s.EndSession(ctx, alice.ID, ended.ID); err != nil {
 		t.Fatal(err)
 	}
+	insertNode(t, ctx, s, atlasKey(1), 2, "Hilltop")
 	queueNotice(t, ctx, s, alice.ID, uuid.New(), "battery_low", "Hilltop", time.Now())
 	p := &recPush{}
 	if err := alerts.NewSender(AlertEval{s}, "push", nil, p, nil, nil).Run(ctx); err != nil {
@@ -336,6 +337,9 @@ func TestAlertPushDeliveryPostgres(t *testing.T) {
 	}
 	if len(p.sent) != 1 || p.sent[0].Token != "live-token" || p.sent[0].Data["targetKind"] != "node" || p.sent[0].Data["publicKey"] != hex.EncodeToString(atlasKey(1)) {
 		t.Fatalf("%+v", p.sent)
+	}
+	if id := p.sent[0].Data["id"]; id != nodeIDOf(t, ctx, s, atlasKey(1)).String() || len(p.sent[0].Data) != 3 {
+		t.Fatalf("id: %+v", p.sent[0].Data)
 	}
 
 	// An unregistered token is deleted, and a notice no device took is retried until it is dropped.
@@ -397,4 +401,50 @@ func TestAlertSendGuardPostgres(t *testing.T) {
 	}
 	l2.Close(ctx)
 	l1.Close(ctx)
+}
+
+func TestAlertBackOnlineNeedsEnabledGoneQuietPostgres(t *testing.T) {
+	ctx, pool, s := userStore(t)
+	svc := alertSvc(s)
+	alice := newUser(t, ctx, s, "alice")
+	rep := atlasKey(1)
+	insertNode(t, ctx, s, rep, 2, "Hilltop")
+	pinAtlas(t, ctx, s, alice, 0, api.StoredPin{Kind: "node", Key: rep})
+	put := func(kind string, th *int, enabled bool) {
+		t.Helper()
+		if _, err := svc.PutRule(ctx, alice.ID, alerts.RuleInput{TargetKind: "node", PublicKey: rep, Kind: kind, Threshold: th, Enabled: enabled}); err != nil {
+			t.Fatalf("%s: %v", kind, err)
+		}
+	}
+	put("gone_quiet", ipp(12), true)
+	put("back_online", nil, true)
+	run := func() {
+		t.Helper()
+		if err := alerts.NewTask(AlertEval{s}, time.Now).Run(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run()
+	if st := ruleState(t, ctx, s, alice.ID, rep, "back_online"); st != "ok" {
+		t.Fatalf("with its partner on: %s", st)
+	}
+	// The partner is switched off: back_online reads inactive. Off, not deleted.
+	put("gone_quiet", ipp(12), false)
+	run()
+	if st := ruleState(t, ctx, s, alice.ID, rep, "back_online"); st != "inactive" {
+		t.Fatalf("partner off: %s", st)
+	}
+	// Back on, it reads again; deleted, it is inactive again.
+	put("gone_quiet", ipp(12), true)
+	run()
+	if st := ruleState(t, ctx, s, alice.ID, rep, "back_online"); st != "ok" {
+		t.Fatalf("partner back on: %s", st)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM user_alert_rules WHERE user_id = $1 AND kind = 'gone_quiet'`, alice.ID); err != nil {
+		t.Fatal(err)
+	}
+	run()
+	if st := ruleState(t, ctx, s, alice.ID, rep, "back_online"); st != "inactive" {
+		t.Fatalf("partner deleted: %s", st)
+	}
 }

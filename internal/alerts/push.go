@@ -25,8 +25,8 @@ import (
 	"time"
 )
 
-// PushMessage is one notification for one device. Data carries targetKind and publicKey so the app can open the
-// radio.
+// PushMessage is one notification for one device. Data carries targetKind, publicKey and, when the radio is known,
+// its id so the app can open the radio.
 type PushMessage struct {
 	Token, Title, Body string
 	Data               map[string]string

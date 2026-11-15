@@ -2974,7 +2974,7 @@ const docTemplate = `{
                         "UserSession": []
                     }
                 ],
-                "description": "Upserts the rule for (target, kind). A change of thresholds, or turning a rule on, starts its state again. Thresholds are in the kind's own unit (see api.AlertRule). Answers 200 with the rule. back_online needs a gone_quiet rule on the same radio.",
+                "description": "Upserts the rule for (target, kind). A change of thresholds, or turning a rule on, starts its state again. Thresholds are in the kind's own unit (see api.AlertRule). Answers 200 with the rule. back_online needs an enabled gone_quiet rule on the same radio.",
                 "consumes": [
                     "application/json"
                 ],
@@ -7749,6 +7749,11 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "id": {
+                    "description": "ID is the node's or observer's id as used by /nodes/{id} and /observers/{id}; null when the radio no longer exists.",
+                    "type": "string",
+                    "format": "uuid"
+                },
                 "kind": {
                     "type": "string",
                     "enum": [
@@ -7760,6 +7765,10 @@ const docTemplate = `{
                     "type": "string",
                     "example": "Hilltop"
                 },
+                "polled": {
+                    "description": "Polled: Beacon has trusted telemetry for this radio now. It is what offers the telemetry kinds and the 3 and 6 hour\ngone_quiet thresholds for a repeater (observers always have those).",
+                    "type": "boolean"
+                },
                 "publicKey": {
                     "type": "string"
                 },
@@ -7770,7 +7779,14 @@ const docTemplate = `{
                     }
                 },
                 "unavailable": {
-                    "description": "Unavailable maps a kind to the reason this radio cannot have it.",
+                    "description": "Unavailable maps a kind to the English reason this radio cannot have it.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "unavailableCodes": {
+                    "description": "UnavailableCodes maps the same kinds to a stable code for the reason: observer_no_data, repeaters_only, not_polled,\nno_data, observer_no_clock, clock_repeaters_only.",
                     "type": "object",
                     "additionalProperties": {
                         "type": "string"
@@ -11427,6 +11443,10 @@ const docTemplate = `{
                 },
                 "message": {
                     "description": "e.g. \"channel not found\"",
+                    "type": "string"
+                },
+                "reasonCode": {
+                    "description": "ReasonCode is a stable snake_case code for the reason behind the message, when the error has one\n(422 kind_unavailable); omitted otherwise.",
                     "type": "string"
                 }
             }
