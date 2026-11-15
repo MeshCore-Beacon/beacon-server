@@ -36,6 +36,15 @@ func (q *Queries) CountUserRequests(ctx context.Context, userID uuid.UUID) (int3
 	return column_1, err
 }
 
+const deleteOldServedVersions = `-- name: DeleteOldServedVersions :exec
+DELETE FROM polling_served_versions WHERE served_at < $1
+`
+
+func (q *Queries) DeleteOldServedVersions(ctx context.Context, servedAt pgtype.Timestamptz) error {
+	_, err := q.db.Exec(ctx, deleteOldServedVersions, servedAt)
+	return err
+}
+
 const deletePollingAdminStop = `-- name: DeletePollingAdminStop :execrows
 DELETE FROM polling_admin_stops WHERE target_public_key = $1 AND observer_public_key = $2
 `
@@ -330,6 +339,35 @@ func (q *Queries) ListTargetRequests(ctx context.Context, targetPublicKey []byte
 	return items, nil
 }
 
+const listTargetServedVersions = `-- name: ListTargetServedVersions :many
+SELECT observer_public_key, ver FROM polling_served_versions WHERE target_public_key = $1
+`
+
+type ListTargetServedVersionsRow struct {
+	ObserverPublicKey []byte `json:"observer_public_key"`
+	Ver               int64  `json:"ver"`
+}
+
+func (q *Queries) ListTargetServedVersions(ctx context.Context, targetPublicKey []byte) ([]ListTargetServedVersionsRow, error) {
+	rows, err := q.db.Query(ctx, listTargetServedVersions, targetPublicKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTargetServedVersionsRow{}
+	for rows.Next() {
+		var i ListTargetServedVersionsRow
+		if err := rows.Scan(&i.ObserverPublicKey, &i.Ver); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUserTelemetryRequests = `-- name: ListUserTelemetryRequests :many
 SELECT r.id, r.target_public_key, r.status, r.status_reason, (r.password_ct IS NOT NULL)::boolean AS has_password,
        r.created_at, r.updated_at,
@@ -485,6 +523,32 @@ func (q *Queries) PollingTargetExists(ctx context.Context, targetPublicKey []byt
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
+}
+
+const recordServedVersion = `-- name: RecordServedVersion :exec
+INSERT INTO polling_served_versions AS s (target_public_key, observer_public_key, ver, served_at)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (target_public_key, observer_public_key) DO UPDATE SET ver = EXCLUDED.ver, served_at = EXCLUDED.served_at
+WHERE s.ver <> EXCLUDED.ver OR s.served_at < EXCLUDED.served_at - interval '1 hour'
+`
+
+type RecordServedVersionParams struct {
+	TargetPublicKey   []byte             `json:"target_public_key"`
+	ObserverPublicKey []byte             `json:"observer_public_key"`
+	Ver               int64              `json:"ver"`
+	ServedAt          pgtype.Timestamptz `json:"served_at"`
+}
+
+// Written on every owners answer that lists the target, so it only touches the row when the version changed or the
+// last write is an hour old.
+func (q *Queries) RecordServedVersion(ctx context.Context, arg RecordServedVersionParams) error {
+	_, err := q.db.Exec(ctx, recordServedVersion,
+		arg.TargetPublicKey,
+		arg.ObserverPublicKey,
+		arg.Ver,
+		arg.ServedAt,
+	)
+	return err
 }
 
 const requestNode = `-- name: RequestNode :one

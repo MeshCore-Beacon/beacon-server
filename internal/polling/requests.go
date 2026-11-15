@@ -136,7 +136,9 @@ type TargetState struct {
 	// last showed a state other than login_failed.
 	Holders    map[string]int
 	AdminStops map[string]bool
-	OtherSeen  map[string]time.Time
+	// ServedVer is the password version each observer was last answered with; a report from it is about that one.
+	ServedVer map[string]int64
+	OtherSeen map[string]time.Time
 	// NewAdminStops and TouchedOther are what ApplyReport added, for the store to write.
 	NewAdminStops [][]byte
 	TouchedOther  map[string]time.Time
@@ -399,6 +401,11 @@ func (t *TargetState) ApplyReport(observer []byte, state string, now time.Time) 
 		}
 		t.AdminStops[string(observer)] = true
 		t.NewAdminStops = append(t.NewAdminStops, append([]byte(nil), observer...))
+		// The report is about the password the observer was given. When another one is in use now, that one was
+		// never tried by it and stays; the stop is still recorded against the observer.
+		if v, ok := t.ServedVer[string(observer)]; ok && v != t.Ver {
+			return true
+		}
 		t.AdminStop(now)
 	case "login_failed":
 		if rank != 0 {

@@ -130,6 +130,7 @@ type Querier interface {
 	DeleteOldPackets(ctx context.Context, arg DeleteOldPacketsParams) (int64, error)
 	// Bumps coverage when hours go, so cached responses that included them are not reused.
 	DeleteOldRollups(ctx context.Context, cutoff pgtype.Timestamptz) error
+	DeleteOldServedVersions(ctx context.Context, servedAt pgtype.Timestamptz) error
 	// Deletes telemetry rows older than the given cutoff. Called by the cleanup goroutine.
 	DeleteOldTelemetry(ctx context.Context, reportedAt pgtype.Timestamptz) error
 	// Keeps the trace IATA filter in step with packet retention.
@@ -597,6 +598,7 @@ type Querier interface {
 	ListTargetAdminStops(ctx context.Context, targetPublicKey []byte) ([][]byte, error)
 	ListTargetOtherStates(ctx context.Context, targetPublicKey []byte) ([]ListTargetOtherStatesRow, error)
 	ListTargetRequests(ctx context.Context, targetPublicKey []byte) ([]ListTargetRequestsRow, error)
+	ListTargetServedVersions(ctx context.Context, targetPublicKey []byte) ([]ListTargetServedVersionsRow, error)
 	// ============================================================
 	// TRACES
 	// ============================================================
@@ -701,6 +703,9 @@ type Querier interface {
 	ReconfirmRoutesBatch(ctx context.Context, arg ReconfirmRoutesBatchParams) (ReconfirmRoutesBatchRow, error)
 	// Key of the last route in a slice that timed out: the caller passes the slice's row count - 1.
 	ReconfirmSliceEnd(ctx context.Context, arg ReconfirmSliceEndParams) (ReconfirmSliceEndRow, error)
+	// Written on every owners answer that lists the target, so it only touches the row when the version changed or the
+	// last write is an hour old.
+	RecordServedVersion(ctx context.Context, arg RecordServedVersionParams) error
 	// One hearing of a TRACE packet: trace_iatas refreshes at most hourly and the tag's heard
 	// window widens (the first hearing replaces the packet's provisional times). Packet counts
 	// and payloads come from UpsertPacket.

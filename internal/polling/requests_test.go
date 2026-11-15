@@ -387,3 +387,35 @@ func TestReasonCodes(t *testing.T) {
 		t.Error("offline wording")
 	}
 }
+
+func TestAdminStopAppliesToTheVersionServed(t *testing.T) {
+	a, b := req(0, true), req(1, true)
+	st := newState(a, b)
+	o1, o2 := []byte{1}, []byte{2}
+	st.Holders = map[string]int{string(o1): 0, string(o2): 1}
+	st.ServedVer = map[string]int64{string(o1): st.Ver, string(o2): st.Ver}
+	if !st.ApplyReport(o1, "admin_stop", rt0) || st.get(a.ID).HasPassword {
+		t.Fatalf("the password served was kept: %+v", st.get(a.ID))
+	}
+	if st.ActiveID != b.ID {
+		t.Fatal("the fallback is not in use")
+	}
+	// o2 was given the old version: its stop is recorded and the fallback stays.
+	if !st.ApplyReport(o2, "admin_stop", rt0) {
+		t.Fatal("report refused")
+	}
+	if r := st.get(b.ID); !r.HasPassword || r.Status == StatusAdminStopped {
+		t.Fatalf("fallback destroyed: %+v", r)
+	}
+	if len(st.NewAdminStops) != 2 {
+		t.Fatalf("%d stops recorded", len(st.NewAdminStops))
+	}
+	// Once it was served the new version, a stop does apply.
+	o3 := []byte{3}
+	st.Holders[string(o3)] = 2
+	st.ServedVer[string(o3)] = st.Ver
+	st.ApplyReport(o3, "admin_stop", rt0)
+	if st.get(b.ID).HasPassword {
+		t.Fatal("a stop on the current version did not delete it")
+	}
+}

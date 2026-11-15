@@ -44,6 +44,20 @@ func (s *claimStore) RequestedPasswords(_ context.Context, targets [][]byte) (ma
 	return out, s.pwErr
 }
 
+func (s *claimStore) RecordServedVersions(_ context.Context, observer []byte, vers map[string]int64, _ time.Time) error {
+	for t, v := range vers {
+		st := s.states[t]
+		if st == nil {
+			continue
+		}
+		if st.ServedVer == nil {
+			st.ServedVer = map[string]int64{}
+		}
+		st.ServedVer[string(observer)] = v
+	}
+	return nil
+}
+
 // hold records that the observer was handed the target as a requested one, at the rank.
 func (s *claimStore) hold(target, observer []byte, rank int) {
 	st := s.states[string(target)]

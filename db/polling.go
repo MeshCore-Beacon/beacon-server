@@ -463,6 +463,9 @@ func (s *Store) DeleteExpiredPolling(ctx context.Context, claimsBefore, readings
 			return err
 		}
 	}
+	if err := s.q.DeleteOldServedVersions(ctx, ts(claimsBefore)); err != nil {
+		return err
+	}
 	return s.q.DeleteExpiredRepeaterReadings(ctx, ts(readingsBefore))
 }
 

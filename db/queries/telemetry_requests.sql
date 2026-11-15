@@ -99,6 +99,20 @@ SELECT observer_public_key, rank FROM polling_assignments WHERE target_public_ke
 -- name: ListTargetAdminStops :many
 SELECT observer_public_key FROM polling_admin_stops WHERE target_public_key = $1;
 
+-- name: ListTargetServedVersions :many
+SELECT observer_public_key, ver FROM polling_served_versions WHERE target_public_key = $1;
+
+-- name: RecordServedVersion :exec
+-- Written on every owners answer that lists the target, so it only touches the row when the version changed or the
+-- last write is an hour old.
+INSERT INTO polling_served_versions AS s (target_public_key, observer_public_key, ver, served_at)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (target_public_key, observer_public_key) DO UPDATE SET ver = EXCLUDED.ver, served_at = EXCLUDED.served_at
+WHERE s.ver <> EXCLUDED.ver OR s.served_at < EXCLUDED.served_at - interval '1 hour';
+
+-- name: DeleteOldServedVersions :exec
+DELETE FROM polling_served_versions WHERE served_at < $1;
+
 -- name: ListTargetOtherStates :many
 SELECT observer_public_key, seen_at FROM polling_other_states WHERE target_public_key = $1;
 

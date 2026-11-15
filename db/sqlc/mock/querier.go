@@ -922,6 +922,20 @@ func (mr *MockQuerierMockRecorder) DeleteOldRollups(ctx, cutoff any) *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldRollups", reflect.TypeOf((*MockQuerier)(nil).DeleteOldRollups), ctx, cutoff)
 }
 
+// DeleteOldServedVersions mocks base method.
+func (m *MockQuerier) DeleteOldServedVersions(ctx context.Context, servedAt pgtype.Timestamptz) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteOldServedVersions", ctx, servedAt)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteOldServedVersions indicates an expected call of DeleteOldServedVersions.
+func (mr *MockQuerierMockRecorder) DeleteOldServedVersions(ctx, servedAt any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOldServedVersions", reflect.TypeOf((*MockQuerier)(nil).DeleteOldServedVersions), ctx, servedAt)
+}
+
 // DeleteOldTelemetry mocks base method.
 func (m *MockQuerier) DeleteOldTelemetry(ctx context.Context, reportedAt pgtype.Timestamptz) error {
 	m.ctrl.T.Helper()
@@ -3861,6 +3875,21 @@ func (mr *MockQuerierMockRecorder) ListTargetRequests(ctx, targetPublicKey any) 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListTargetRequests", reflect.TypeOf((*MockQuerier)(nil).ListTargetRequests), ctx, targetPublicKey)
 }
 
+// ListTargetServedVersions mocks base method.
+func (m *MockQuerier) ListTargetServedVersions(ctx context.Context, targetPublicKey []byte) ([]db.ListTargetServedVersionsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListTargetServedVersions", ctx, targetPublicKey)
+	ret0, _ := ret[0].([]db.ListTargetServedVersionsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListTargetServedVersions indicates an expected call of ListTargetServedVersions.
+func (mr *MockQuerierMockRecorder) ListTargetServedVersions(ctx, targetPublicKey any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListTargetServedVersions", reflect.TypeOf((*MockQuerier)(nil).ListTargetServedVersions), ctx, targetPublicKey)
+}
+
 // ListTraceTags mocks base method.
 func (m *MockQuerier) ListTraceTags(ctx context.Context, arg db.ListTraceTagsParams) ([]db.ListTraceTagsRow, error) {
 	m.ctrl.T.Helper()
@@ -4661,6 +4690,20 @@ func (m *MockQuerier) ReconfirmSliceEnd(ctx context.Context, arg db.ReconfirmSli
 func (mr *MockQuerierMockRecorder) ReconfirmSliceEnd(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReconfirmSliceEnd", reflect.TypeOf((*MockQuerier)(nil).ReconfirmSliceEnd), ctx, arg)
+}
+
+// RecordServedVersion mocks base method.
+func (m *MockQuerier) RecordServedVersion(ctx context.Context, arg db.RecordServedVersionParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RecordServedVersion", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RecordServedVersion indicates an expected call of RecordServedVersion.
+func (mr *MockQuerierMockRecorder) RecordServedVersion(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecordServedVersion", reflect.TypeOf((*MockQuerier)(nil).RecordServedVersion), ctx, arg)
 }
 
 // RecordTrace mocks base method.

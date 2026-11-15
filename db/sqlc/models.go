@@ -561,6 +561,13 @@ type PollingOtherState struct {
 	SeenAt            pgtype.Timestamptz `json:"seen_at"`
 }
 
+type PollingServedVersion struct {
+	TargetPublicKey   []byte             `json:"target_public_key"`
+	ObserverPublicKey []byte             `json:"observer_public_key"`
+	Ver               int64              `json:"ver"`
+	ServedAt          pgtype.Timestamptz `json:"served_at"`
+}
+
 type PollingState struct {
 	ID            bool               `json:"id"`
 	Paused        bool               `json:"paused"`

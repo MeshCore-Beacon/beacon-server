@@ -24,6 +24,8 @@ type RequestedPassword struct {
 type RequestedStore interface {
 	RequestedPasswords(ctx context.Context, targets [][]byte) (map[string]RequestedPassword, error)
 	MutateRequestTarget(ctx context.Context, target []byte, userID uuid.UUID, fn func(*TargetState) error) error
+	// RecordServedVersions stores the password version (keyed by target) the observer was just answered with.
+	RecordServedVersions(ctx context.Context, observer []byte, vers map[string]int64, at time.Time) error
 }
 
 // handleRequestedStates applies what a stored claim says about the requested targets it holds: the poller's
@@ -82,12 +84,14 @@ func (s *Service) addEnvelopes(ctx context.Context, observer []byte, rows []Owne
 		}
 		return
 	}
+	served := map[string]int64{}
 	for _, t := range targets {
 		p, ok := pws[string(t)]
 		if !ok {
 			drop(t) // no longer requested
 			continue
 		}
+		served[string(t)] = p.Ver
 		if p.CT == nil {
 			continue // the blank or hello option: no pw
 		}
@@ -108,5 +112,13 @@ func (s *Service) addEnvelopes(ctx context.Context, observer []byte, rows []Owne
 		e := nodes[key]
 		e.PW = &env
 		nodes[key] = e
+	}
+	// A report from this observer is judged against what it was just given. Without the record the entries could
+	// not be told apart later, so none of them is sent.
+	if err := s.reqs.RecordServedVersions(ctx, observer, served, s.now()); err != nil {
+		s.log.Warn("served versions", "observer", short(observer), "err", err)
+		for t := range served {
+			drop([]byte(t))
+		}
 	}
 }

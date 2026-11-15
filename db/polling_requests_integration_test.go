@@ -226,6 +226,10 @@ func TestRequestedTargetsEndToEndPostgres(t *testing.T) {
 
 	// 6. An admin answer from any observer: the password is deleted, the stop recorded, and that observer is never
 	// offered the repeater again.
+	// o2's device fetched the new password before it logged in with it.
+	if e, ok := w.owners(o2, t1); !ok || w.opens(o2, t1, e) != "newpw" {
+		t.Fatalf("o2 was not given the new password: %+v", e)
+	}
 	w.now = w.now.Add(time.Hour)
 	w.claim(o1, 0, reqNode(pollKey(t1), true, "ok"))
 	w.claim(o2, 1, reqNode(pollKey(t1), true, "admin_stop"))
@@ -574,5 +578,54 @@ func TestRequestedSeatsTwoTargetRacePostgres(t *testing.T) {
 	}
 	if got := assignedTargets(t, w); len(got) != 1 || got[0] != hex.EncodeToString(pollKey(0xA2)) {
 		t.Fatalf("one seat, assignments %v", got)
+	}
+}
+
+// Two observers were given password A. The first reports an admin stop, which deletes A and brings in the fallback
+// B. The second's report is about A, which it was given: it is recorded and must not delete B, which nobody has
+// handed to it.
+func TestRequestedAdminStopIsTiedToThePasswordServedPostgres(t *testing.T) {
+	w := newReqWorld(t, "")
+	ctx, s := w.ctx, w.s
+	alice, bob := newUser(t, ctx, s, "alice"), newUser(t, ctx, s, "bob")
+	o1, o2 := newReqDevice(1), newReqDevice(2)
+	node := w.node(0xA1)
+	for _, d := range []reqDevice{o1, o2} {
+		pollHearAdvert(t, ctx, w.pool, pollKey(0xA1), pollObserver(t, ctx, s, d.pub), w.now.Add(-time.Hour), 5)
+	}
+	w.claim(o1, 2)
+	w.claim(o2, 2)
+	ra, err := w.reqs.Create(ctx, alice.ID, node, []byte("A"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.now = w.now.Add(time.Minute)
+	rb, err := w.reqs.Create(ctx, bob.ID, node, []byte("B"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []reqDevice{o1, o2} {
+		if e, ok := w.owners(d, 0xA1); !ok || w.opens(d, 0xA1, e) != "A" {
+			t.Fatalf("observer was not given A: %+v", e)
+		}
+	}
+	w.now = w.now.Add(time.Hour)
+	w.claim(o1, 2, reqNode(pollKey(0xA1), true, "admin_stop"))
+	if got := w.status(alice.ID, ra.ID); got.Status != polling.StatusAdminStopped || got.HasPassword {
+		t.Fatalf("first stop: %+v", got)
+	}
+	// B is in use now, and no owners answer has handed it to o2 yet.
+	w.now = w.now.Add(time.Minute)
+	w.claim(o2, 2, reqNode(pollKey(0xA1), true, "admin_stop"))
+	if got := w.status(bob.ID, rb.ID); got.Status == polling.StatusAdminStopped || !got.HasPassword {
+		t.Fatalf("B was deleted by a report about A: %+v", got)
+	}
+	stops, err := s.ListPollingAdminStops(ctx)
+	if err != nil || len(stops) != 2 {
+		t.Fatalf("stops %+v %v", stops, err)
+	}
+	// o1 was never given B either, but it was excluded by its own stop; a fresh answer tells o2 nothing new.
+	if e, ok := w.owners(o2, 0xA1); ok {
+		t.Fatalf("an observer given admin access is offered B: %+v", e)
 	}
 }

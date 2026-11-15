@@ -164,6 +164,14 @@ func loadReportContext(ctx context.Context, q *sqlc.Queries, target []byte, st *
 	for _, o := range stops {
 		st.AdminStops[string(o)] = true
 	}
+	served, err := q.ListTargetServedVersions(ctx, target)
+	if err != nil {
+		return err
+	}
+	st.ServedVer = make(map[string]int64, len(served))
+	for _, r := range served {
+		st.ServedVer[string(r.ObserverPublicKey)] = r.Ver
+	}
 	seen, err := q.ListTargetOtherStates(ctx, target)
 	if err != nil {
 		return err
@@ -281,6 +289,17 @@ func (s *Store) RequestedPasswords(ctx context.Context, targets [][]byte) (map[s
 		out[string(r.TargetPublicKey)] = polling.RequestedPassword{RequestID: r.RequestID, Ver: r.Ver, CT: r.PasswordCt, Nonce: r.PasswordNonce}
 	}
 	return out, nil
+}
+
+// RecordServedVersions notes the password version each target's entry carried in an owners answer to the observer.
+func (s *Store) RecordServedVersions(ctx context.Context, observer []byte, vers map[string]int64, at time.Time) error {
+	for target, ver := range vers {
+		if err := s.q.RecordServedVersion(ctx, sqlc.RecordServedVersionParams{
+			TargetPublicKey: []byte(target), ObserverPublicKey: observer, Ver: ver, ServedAt: ts(at)}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // DisableOfflineRequests disables the requests of every repeater no observer has heard since cutoff (and whose
