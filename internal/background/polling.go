@@ -67,7 +67,7 @@ func PollingTasks(svc *polling.Service, store PollingMaintStore, cfg config.Reso
 		}},
 		{Name: "polling_cleanup", Interval: pollingCleanupInterval, Run: func(ctx context.Context) error {
 			now := pollingNow()
-			return store.DeleteExpiredPolling(ctx, now.Add(-pollingClaimKeep), now.Add(-cfg.ReadingRetention))
+			return store.DeleteExpiredPolling(ctx, now.Add(-pollingClaimKeep), now.Add(-polling.ReadingKeep(cfg)))
 		}},
 	}
 }

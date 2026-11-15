@@ -411,6 +411,12 @@ func WorkingPollFresh(cfg config.ResolvedPolling) time.Duration {
 	return 2 * time.Duration(oneHop(directS)) * time.Second
 }
 
+// ReadingKeep is how long cleanup keeps readings: the working-poll check needs the newest one for
+// WorkingPollFresh, even when reading_retention is shorter.
+func ReadingKeep(cfg config.ResolvedPolling) time.Duration {
+	return max(cfg.ReadingRetention, WorkingPollFresh(cfg))
+}
+
 // Requested reports whether the target is currently requested: a request's option is in use.
 func (t *TargetState) Requested() bool { return t.ActiveID != uuid.Nil }
 

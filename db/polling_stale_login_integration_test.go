@@ -4,6 +4,7 @@
 package db
 
 import (
+	"log/slog"
 	"testing"
 	"time"
 
@@ -84,4 +85,27 @@ func TestStaleLoginFailedAfterWorkingPollPostgres(t *testing.T) {
 			t.Fatalf("an old reading kept the option: status=%s", got.Status)
 		}
 	})
+}
+
+// Cleanup with the shortest supported reading_retention must not delete the reading the guard needs.
+func TestStaleLoginFailedSurvivesReadingCleanupPostgres(t *testing.T) {
+	w, o, bob, read := staleLoginWorld(t)
+	cfg := config.ResolvedPolling{Enabled: true, RequestObservers: config.RequestObserversAll, DirectWindow: 2 * time.Hour, ReadingRetention: time.Hour}
+	w.svc = polling.NewService(w.s, cfg, func() time.Time { return w.now }, slog.New(slog.DiscardHandler))
+	w.svc.SetRequests(w.s, w.sealer)
+	w.now = w.now.Add(5 * time.Minute)
+	read()
+	w.now = w.now.Add(30 * time.Minute)
+	w.claim(o, 0, reqNode(pollKey(0xA1), true, "login_failed"))
+	if got := bob(); got.Status != polling.StatusActive {
+		t.Fatalf("before cleanup: %+v", got)
+	}
+	w.now = w.now.Add(31 * time.Minute)
+	if err := w.s.DeleteExpiredPolling(w.ctx, w.now.Add(-24*time.Hour), w.now.Add(-polling.ReadingKeep(cfg))); err != nil {
+		t.Fatal(err)
+	}
+	w.claim(o, 0, reqNode(pollKey(0xA1), true, "login_failed"))
+	if got := bob(); got.Status != polling.StatusActive {
+		t.Fatalf("working blank request stopped after cleanup: status=%s reason=%s", got.Status, got.Reason)
+	}
 }

@@ -141,6 +141,21 @@ func TestPollingCleanupUsesRetention(t *testing.T) {
 	}
 }
 
+func TestPollingCleanupKeepsReadingsForTheWorkingPollWindow(t *testing.T) {
+	now := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
+	old := pollingNow
+	pollingNow = func() time.Time { return now }
+	t.Cleanup(func() { pollingNow = old })
+	ms := &pollMaintStub{}
+	cfg := config.ResolvedPolling{ReadingRetention: time.Hour, DirectWindow: 2 * time.Hour}
+	if err := pollTask(t, PollingTasks(newPollSvc(&pollTargetsStore{}), ms, cfg), "polling_cleanup").Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if want := now.Add(-polling.WorkingPollFresh(cfg)); !ms.readings.Equal(want) {
+		t.Fatal("readings cutoff", ms.readings, "want", want)
+	}
+}
+
 type offlineStub struct {
 	cutoff, now time.Time
 	reason      string
