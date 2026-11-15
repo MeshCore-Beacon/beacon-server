@@ -114,7 +114,8 @@ type Querier interface {
 	// cutoff: candidates without locks, then lock SKIP LOCKED through the pkey (re-checked on the newest
 	// version) and delete. unresolved_ts is the earliest candidate left behind; window_end is the bound used.
 	DeleteGraceRoutesSlice(ctx context.Context, arg DeleteGraceRoutesSliceParams) (DeleteGraceRoutesSliceRow, error)
-	DeleteObserverTargetAssignment(ctx context.Context, arg DeleteObserverTargetAssignmentParams) error
+	// Run under LockPollingTarget. Returns the rank the row had, for RenumberTargetAssignments.
+	DeleteObserverTargetAssignment(ctx context.Context, arg DeleteObserverTargetAssignmentParams) (int16, error)
 	// Keeps the channel IATA filter in step with packet retention.
 	DeleteOldChannelIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error
 	// Deletes nodes not seen since the given cutoff. node_iatas and node_neighbors cascade-
@@ -498,7 +499,8 @@ type Querier interface {
 	ListObserverRequestedSeats(ctx context.Context, arg ListObserverRequestedSeatsParams) ([]ListObserverRequestedSeatsRow, error)
 	// Observers newest last_seen first; the cursor is the (last_seen, id) of the last row.
 	ListObservers(ctx context.Context, arg ListObserversParams) ([]ListObserversRow, error)
-	// Targets with an assignment whose candidate is gone.
+	// Targets with an assignment whose candidate is gone. A requested assignment is kept while its observer's claim
+	// accepts requests: it is made before the device lists the target, and the claim rows of an expired claim are gone.
 	ListOrphanPollingTargets(ctx context.Context) ([][]byte, error)
 	// The sites with the most packets among observations above after_id; the first-time verification pages them.
 	ListPacketSiteSamples(ctx context.Context, arg ListPacketSiteSamplesParams) ([]ListPacketSiteSamplesRow, error)
@@ -592,6 +594,9 @@ type Querier interface {
 	ListRequestCandidates(ctx context.Context, arg ListRequestCandidatesParams) ([]ListRequestCandidatesRow, error)
 	// The observers whose claim accepts requests, in key order, which is the order their seat locks are taken in.
 	ListRequestObserverKeys(ctx context.Context, receivedAt pgtype.Timestamptz) ([][]byte, error)
+	// The targets that hold a requested assignment of any of the observers: the ones a seat decision may take a seat
+	// from, locked with the election in key order.
+	ListRequestedAssignedTargets(ctx context.Context, observers [][]byte) ([][]byte, error)
 	// The observers handed this target as a requested one, with their rank (0 polls).
 	ListRequestedAssignees(ctx context.Context, targetPublicKey []byte) ([]ListRequestedAssigneesRow, error)
 	// Leading index equalities and the time/ID boundary bound both custom and generic plans.
@@ -725,6 +730,9 @@ type Querier interface {
 	RegisterRollupHours(ctx context.Context, since pgtype.Timestamptz) error
 	// Stores the same password under a newer hash, only while the hash is still the one that was verified.
 	RehashUserPassword(ctx context.Context, arg RehashUserPasswordParams) (int64, error)
+	// Closes the gap a deleted assignment of the given rank left, so the best survivor is the poller. Run under
+	// LockPollingTarget.
+	RenumberTargetAssignments(ctx context.Context, arg RenumberTargetAssignmentsParams) error
 	// rows is a JSON array of {"key": hex, "data": {...}}; unchanged rows are not rewritten.
 	// fetchedAt comes from the source's checked_at when read.
 	ReplaceRepeaters(ctx context.Context, arg ReplaceRepeatersParams) error

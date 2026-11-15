@@ -107,8 +107,8 @@ func (q *Queries) DeleteExpiredRepeaterReadings(ctx context.Context, receivedAt 
 	return err
 }
 
-const deleteObserverTargetAssignment = `-- name: DeleteObserverTargetAssignment :exec
-DELETE FROM polling_assignments WHERE target_public_key = $1 AND observer_public_key = $2
+const deleteObserverTargetAssignment = `-- name: DeleteObserverTargetAssignment :one
+DELETE FROM polling_assignments WHERE target_public_key = $1 AND observer_public_key = $2 RETURNING rank
 `
 
 type DeleteObserverTargetAssignmentParams struct {
@@ -116,9 +116,12 @@ type DeleteObserverTargetAssignmentParams struct {
 	ObserverPublicKey []byte `json:"observer_public_key"`
 }
 
-func (q *Queries) DeleteObserverTargetAssignment(ctx context.Context, arg DeleteObserverTargetAssignmentParams) error {
-	_, err := q.db.Exec(ctx, deleteObserverTargetAssignment, arg.TargetPublicKey, arg.ObserverPublicKey)
-	return err
+// Run under LockPollingTarget. Returns the rank the row had, for RenumberTargetAssignments.
+func (q *Queries) DeleteObserverTargetAssignment(ctx context.Context, arg DeleteObserverTargetAssignmentParams) (int16, error) {
+	row := q.db.QueryRow(ctx, deleteObserverTargetAssignment, arg.TargetPublicKey, arg.ObserverPublicKey)
+	var rank int16
+	err := row.Scan(&rank)
+	return rank, err
 }
 
 const deleteOrphanPollingAssignments = `-- name: DeleteOrphanPollingAssignments :exec
@@ -126,7 +129,9 @@ DELETE FROM polling_assignments a
 WHERE a.target_public_key = $1 AND NOT EXISTS (
     SELECT 1 FROM polling_candidates c
     WHERE c.target_public_key = a.target_public_key AND c.observer_public_key = a.observer_public_key
-)
+) AND NOT (a.requested AND EXISTS (
+    SELECT 1 FROM polling_claims cl WHERE cl.observer_public_key = a.observer_public_key AND cl.accepts_requests
+))
 `
 
 // Run under LockPollingTarget, so it cannot interleave with an election of the target.
@@ -562,11 +567,14 @@ SELECT DISTINCT a.target_public_key FROM polling_assignments a
 WHERE NOT EXISTS (
     SELECT 1 FROM polling_candidates c
     WHERE c.target_public_key = a.target_public_key AND c.observer_public_key = a.observer_public_key
-)
+) AND NOT (a.requested AND EXISTS (
+    SELECT 1 FROM polling_claims cl WHERE cl.observer_public_key = a.observer_public_key AND cl.accepts_requests
+))
 ORDER BY a.target_public_key
 `
 
-// Targets with an assignment whose candidate is gone.
+// Targets with an assignment whose candidate is gone. A requested assignment is kept while its observer's claim
+// accepts requests: it is made before the device lists the target, and the claim rows of an expired claim are gone.
 func (q *Queries) ListOrphanPollingTargets(ctx context.Context) ([][]byte, error) {
 	rows, err := q.db.Query(ctx, listOrphanPollingTargets)
 	if err != nil {
@@ -831,6 +839,34 @@ func (q *Queries) ListRequestObserverKeys(ctx context.Context, receivedAt pgtype
 			return nil, err
 		}
 		items = append(items, observer_public_key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRequestedAssignedTargets = `-- name: ListRequestedAssignedTargets :many
+SELECT DISTINCT target_public_key::bytea AS target_public_key FROM polling_assignments
+WHERE requested AND observer_public_key = ANY($1::bytea[])
+ORDER BY 1
+`
+
+// The targets that hold a requested assignment of any of the observers: the ones a seat decision may take a seat
+// from, locked with the election in key order.
+func (q *Queries) ListRequestedAssignedTargets(ctx context.Context, observers [][]byte) ([][]byte, error) {
+	rows, err := q.db.Query(ctx, listRequestedAssignedTargets, observers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := [][]byte{}
+	for rows.Next() {
+		var target_public_key []byte
+		if err := rows.Scan(&target_public_key); err != nil {
+			return nil, err
+		}
+		items = append(items, target_public_key)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -1193,6 +1229,22 @@ func (q *Queries) PollingOwnerRows(ctx context.Context, arg PollingOwnerRowsPara
 		return nil, err
 	}
 	return items, nil
+}
+
+const renumberTargetAssignments = `-- name: RenumberTargetAssignments :exec
+UPDATE polling_assignments SET rank = rank - 1 WHERE target_public_key = $1 AND rank > $2
+`
+
+type RenumberTargetAssignmentsParams struct {
+	TargetPublicKey []byte `json:"target_public_key"`
+	Rank            int16  `json:"rank"`
+}
+
+// Closes the gap a deleted assignment of the given rank left, so the best survivor is the poller. Run under
+// LockPollingTarget.
+func (q *Queries) RenumberTargetAssignments(ctx context.Context, arg RenumberTargetAssignmentsParams) error {
+	_, err := q.db.Exec(ctx, renumberTargetAssignments, arg.TargetPublicKey, arg.Rank)
+	return err
 }
 
 const setPollingObserver = `-- name: SetPollingObserver :exec

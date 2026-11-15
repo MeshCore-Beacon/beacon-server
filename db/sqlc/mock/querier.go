@@ -837,11 +837,12 @@ func (mr *MockQuerierMockRecorder) DeleteGraceRoutesSlice(ctx, arg any) *gomock.
 }
 
 // DeleteObserverTargetAssignment mocks base method.
-func (m *MockQuerier) DeleteObserverTargetAssignment(ctx context.Context, arg db.DeleteObserverTargetAssignmentParams) error {
+func (m *MockQuerier) DeleteObserverTargetAssignment(ctx context.Context, arg db.DeleteObserverTargetAssignmentParams) (int16, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "DeleteObserverTargetAssignment", ctx, arg)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret0, _ := ret[0].(int16)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // DeleteObserverTargetAssignment indicates an expected call of DeleteObserverTargetAssignment.
@@ -3800,6 +3801,21 @@ func (mr *MockQuerierMockRecorder) ListRequestObserverKeys(ctx, receivedAt any) 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListRequestObserverKeys", reflect.TypeOf((*MockQuerier)(nil).ListRequestObserverKeys), ctx, receivedAt)
 }
 
+// ListRequestedAssignedTargets mocks base method.
+func (m *MockQuerier) ListRequestedAssignedTargets(ctx context.Context, observers [][]byte) ([][]byte, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListRequestedAssignedTargets", ctx, observers)
+	ret0, _ := ret[0].([][]byte)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListRequestedAssignedTargets indicates an expected call of ListRequestedAssignedTargets.
+func (mr *MockQuerierMockRecorder) ListRequestedAssignedTargets(ctx, observers any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListRequestedAssignedTargets", reflect.TypeOf((*MockQuerier)(nil).ListRequestedAssignedTargets), ctx, observers)
+}
+
 // ListRequestedAssignees mocks base method.
 func (m *MockQuerier) ListRequestedAssignees(ctx context.Context, targetPublicKey []byte) ([]db.ListRequestedAssigneesRow, error) {
 	m.ctrl.T.Helper()
@@ -4805,6 +4821,20 @@ func (m *MockQuerier) RehashUserPassword(ctx context.Context, arg db.RehashUserP
 func (mr *MockQuerierMockRecorder) RehashUserPassword(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RehashUserPassword", reflect.TypeOf((*MockQuerier)(nil).RehashUserPassword), ctx, arg)
+}
+
+// RenumberTargetAssignments mocks base method.
+func (m *MockQuerier) RenumberTargetAssignments(ctx context.Context, arg db.RenumberTargetAssignmentsParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RenumberTargetAssignments", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RenumberTargetAssignments indicates an expected call of RenumberTargetAssignments.
+func (mr *MockQuerierMockRecorder) RenumberTargetAssignments(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RenumberTargetAssignments", reflect.TypeOf((*MockQuerier)(nil).RenumberTargetAssignments), ctx, arg)
 }
 
 // ReplaceRepeaters mocks base method.

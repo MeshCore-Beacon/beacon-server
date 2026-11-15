@@ -129,8 +129,21 @@ ORDER BY q.oldest, x.target_public_key;
 -- name: OldestTargetRequest :one
 SELECT min(created_at)::timestamptz AS oldest FROM telemetry_requests WHERE target_public_key = $1;
 
--- name: DeleteObserverTargetAssignment :exec
-DELETE FROM polling_assignments WHERE target_public_key = $1 AND observer_public_key = $2;
+-- name: DeleteObserverTargetAssignment :one
+-- Run under LockPollingTarget. Returns the rank the row had, for RenumberTargetAssignments.
+DELETE FROM polling_assignments WHERE target_public_key = $1 AND observer_public_key = $2 RETURNING rank;
+
+-- name: RenumberTargetAssignments :exec
+-- Closes the gap a deleted assignment of the given rank left, so the best survivor is the poller. Run under
+-- LockPollingTarget.
+UPDATE polling_assignments SET rank = rank - 1 WHERE target_public_key = $1 AND rank > $2;
+
+-- name: ListRequestedAssignedTargets :many
+-- The targets that hold a requested assignment of any of the observers: the ones a seat decision may take a seat
+-- from, locked with the election in key order.
+SELECT DISTINCT target_public_key::bytea AS target_public_key FROM polling_assignments
+WHERE requested AND observer_public_key = ANY(sqlc.arg(observers)::bytea[])
+ORDER BY 1;
 
 -- name: CountTargetAssignments :one
 SELECT count(*)::int FROM polling_assignments WHERE target_public_key = $1;
@@ -256,12 +269,15 @@ FROM todo t WHERE r.id = t.id;
 DELETE FROM polling_claims WHERE received_at < $1;
 
 -- name: ListOrphanPollingTargets :many
--- Targets with an assignment whose candidate is gone.
+-- Targets with an assignment whose candidate is gone. A requested assignment is kept while its observer's claim
+-- accepts requests: it is made before the device lists the target, and the claim rows of an expired claim are gone.
 SELECT DISTINCT a.target_public_key FROM polling_assignments a
 WHERE NOT EXISTS (
     SELECT 1 FROM polling_candidates c
     WHERE c.target_public_key = a.target_public_key AND c.observer_public_key = a.observer_public_key
-)
+) AND NOT (a.requested AND EXISTS (
+    SELECT 1 FROM polling_claims cl WHERE cl.observer_public_key = a.observer_public_key AND cl.accepts_requests
+))
 ORDER BY a.target_public_key;
 
 -- name: DeleteOrphanPollingAssignments :exec
@@ -270,7 +286,9 @@ DELETE FROM polling_assignments a
 WHERE a.target_public_key = $1 AND NOT EXISTS (
     SELECT 1 FROM polling_candidates c
     WHERE c.target_public_key = a.target_public_key AND c.observer_public_key = a.observer_public_key
-);
+) AND NOT (a.requested AND EXISTS (
+    SELECT 1 FROM polling_claims cl WHERE cl.observer_public_key = a.observer_public_key AND cl.accepts_requests
+));
 
 -- name: DeleteExpiredRepeaterReadings :exec
 DELETE FROM repeater_readings WHERE received_at < $1;
