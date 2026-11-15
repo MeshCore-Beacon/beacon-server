@@ -23,17 +23,20 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Lock order. Every transaction that takes more than one advisory lock takes them in this order, so none can wait
-// on another that holds what it needs:
+// Lock order, for every transaction that takes more than one of these locks:
 //  1. observer seat locks (LockPollingSeats), in observer key order;
 //  2. target locks (LockPollingTarget), in target key order;
 //  3. the user's row lock (LockUserForRequests / LockUserCredentials).
 //
-// Seat locks are taken by requested elections and by claims (which may change an observer's capacity). Target locks
-// come before any write to that target's assignment rows (election, preemption, cleanup) and before a request is
-// changed. A requested election locks, in key order, its own target and every target that holds a requested
-// assignment of an observer it locked, since it may take a seat from them. Reading-insert locks
-// (LockPollingObserver) are taken alone.
+// A path that finds it needs a lock it does not hold rolls back and starts again with the whole sorted set. Seat
+// locks: requested elections (every accepting observer) and claims (their own). Target locks come before any write
+// to the target's assignments or requests. Reading-insert locks (LockPollingObserver) are taken alone.
+//
+// What holds after every committed transaction:
+//   - an observer holds no more requested assignments than polling.RequestCapacity of its claim;
+//   - a target's ranks are 0..n-1 and rank 0 polls;
+//   - a waiting or active request is active exactly when its target has an assignment (mutateRequestTarget);
+//   - local (not requested) assignments use no requested seat.
 
 // ObserverID returns the observer's row id, creating the row when it is new.
 func (s *Store) ObserverID(ctx context.Context, pubkey []byte) (uuid.UUID, error) {

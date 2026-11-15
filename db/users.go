@@ -234,36 +234,67 @@ func (s *Store) DeleteUser(ctx context.Context, id uuid.UUID) error {
 	if s.pool == nil {
 		return affected(s.q.DeleteUser(ctx, id))
 	}
-	return s.pollTx(ctx, func(q *sqlc.Queries) error {
-		return deleteLocked(ctx, q, id, "")
-	})
+	return s.deleteUser(ctx, id, "")
+}
+
+// maxDeleteRestarts bounds how often a delete starts over because the user requested another target meanwhile.
+const maxDeleteRestarts = 5
+
+// deleteUser runs deleteLocked, starting over with every target it has seen when a new one appeared.
+func (s *Store) deleteUser(ctx context.Context, id uuid.UUID, expect string) error {
+	var seen [][]byte
+	for attempt := 0; ; attempt++ {
+		err := s.pollTx(ctx, func(q *sqlc.Queries) error {
+			var err error
+			seen, err = deleteLocked(ctx, q, id, expect, seen)
+			return err
+		})
+		if errors.Is(err, errNewUserTarget) && attempt < maxDeleteRestarts {
+			continue
+		}
+		return err
+	}
 }
 
 // deleteLocked is the body of both deletes: target locks, then the user lock (with the hash check when expect is
-// set), then the requests through the state rules, then the user.
-func deleteLocked(ctx context.Context, q *sqlc.Queries, id uuid.UUID, expect string) error {
-	// Target locks come before the user lock, the order request creation takes them in.
-	if err := lockUserTargets(ctx, q, id); err != nil {
-		return err
+// set), then the requests through the state rules, then the user. When the user holds a request for a target it did
+// not lock, it returns errNewUserTarget and every target it knows of, for the next attempt to lock first.
+func deleteLocked(ctx context.Context, q *sqlc.Queries, id uuid.UUID, expect string, extra [][]byte) ([][]byte, error) {
+	locked, err := lockUserTargets(ctx, q, id, extra)
+	if err != nil {
+		return nil, err
 	}
 	lock := func() error { return lockChecked(ctx, q, id, expect) }
 	if expect == "" {
 		lock = func() error { return lockUser(ctx, q, id) } // an operator may delete a disabled user
 	}
 	if err := lock(); err != nil {
-		return err
+		return nil, err
 	}
 	if deleteGapHook != nil {
 		deleteGapHook()
 	}
-	// No request can be created for the user now; one added since the first read is locked as it is reached.
-	if err := removeUserRequestsTx(ctx, q, id); err != nil {
-		return err
+	// No request can be created for the user now, so this list is final.
+	targets, err := q.UserRequestTargets(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range targets {
+		if !locked[string(t)] {
+			all := append([][]byte(nil), targets...)
+			for k := range locked {
+				all = append(all, []byte(k))
+			}
+			return all, errNewUserTarget
+		}
+	}
+	if err := removeUserRequestsTx(ctx, q, id, targets); err != nil {
+		return nil, err
 	}
 	if expect == "" {
-		return affected(q.DeleteUser(ctx, id))
+		return nil, affected(q.DeleteUser(ctx, id))
 	}
-	return affected(q.DeleteUserIfHash(ctx, sqlc.DeleteUserIfHashParams{ID: id, PassHash: expect}))
+	return nil, affected(q.DeleteUserIfHash(ctx, sqlc.DeleteUserIfHashParams{ID: id, PassHash: expect}))
 }
 
 // escapeLike makes s match literally inside a LIKE pattern.
@@ -455,7 +486,7 @@ func (s *Store) BeginEmailChange(ctx context.Context, id uuid.UUID, expectPassHa
 // otherwise). The hash check, the removal of the user's requests through the state rules and the delete all run in
 // one transaction under the user's credential lock, so a reset cannot land between them.
 func (s *Store) DeleteUserChecked(ctx context.Context, id uuid.UUID, expectPassHash string) error {
-	return s.pollTx(ctx, func(q *sqlc.Queries) error { return deleteLocked(ctx, q, id, expectPassHash) })
+	return s.deleteUser(ctx, id, expectPassHash)
 }
 
 // RehashPassword stores newHash for the same password when the stored hash is still oldHash; false means it was
@@ -585,5 +616,5 @@ func (s *Store) DeleteExpiredAuth(ctx context.Context, now time.Time) error {
 	return s.q.DeleteStaleUnverifiedUsers(ctx, sqlc.DeleteStaleUnverifiedUsersParams{Cutoff: cutoff, Now: ts(now)})
 }
 
-// deleteGapHook runs in DeleteUserChecked after the hash check; tests use it to land a change in the gap.
+// deleteGapHook runs in both deletes after the user lock; tests use it to land a change in the gap.
 var deleteGapHook func()

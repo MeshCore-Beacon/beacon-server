@@ -232,34 +232,34 @@ func (s *Store) UserTelemetryRequests(ctx context.Context, userID uuid.UUID) ([]
 
 var _ polling.RequestStore = (*Store)(nil)
 
-// removeUserRequests deletes every request of the user through the state rules, so a repeater another user also
-// requested falls back to that user's option (and ver rises) instead of being left with no password in use.
-func (s *Store) removeUserRequests(ctx context.Context, id uuid.UUID) error {
-	return s.pollTx(ctx, func(q *sqlc.Queries) error { return removeUserRequestsTx(ctx, q, id) })
-}
+// errNewUserTarget means a request for a target not yet locked appeared before the user lock was taken.
+var errNewUserTarget = errors.New("db: the user requested a target that is not locked yet")
 
-// lockUserTargets takes the election lock of each repeater the user requested, in key order. Callers that go on to
-// take the user's lock do this first, the order request creation uses, so the two cannot deadlock.
-func lockUserTargets(ctx context.Context, q *sqlc.Queries, id uuid.UUID) error {
+// lockUserTargets takes the target lock of each repeater the user requested, and of extra, in key order, before the
+// caller takes the user's lock. It returns the set it locked.
+func lockUserTargets(ctx context.Context, q *sqlc.Queries, id uuid.UUID, extra [][]byte) (map[string]bool, error) {
 	targets, err := q.UserRequestTargets(ctx, id)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	targets = append(targets, extra...)
 	sort.Slice(targets, func(i, j int) bool { return bytes.Compare(targets[i], targets[j]) < 0 })
+	locked := make(map[string]bool, len(targets))
 	for _, t := range targets {
-		if err := q.LockPollingTarget(ctx, t); err != nil {
-			return err
+		if locked[string(t)] {
+			continue
 		}
+		if err := q.LockPollingTarget(ctx, t); err != nil {
+			return nil, err
+		}
+		locked[string(t)] = true
 	}
-	return nil
+	return locked, nil
 }
 
-// removeUserRequestsTx is removeUserRequests inside the caller's transaction.
-func removeUserRequestsTx(ctx context.Context, q *sqlc.Queries, id uuid.UUID) error {
-	targets, err := q.UserRequestTargets(ctx, id)
-	if err != nil {
-		return err
-	}
+// removeUserRequestsTx deletes every request of the user through the state rules, so a repeater another user also
+// requested falls back to that user's option (and ver rises). The caller holds the user's lock and every target's.
+func removeUserRequestsTx(ctx context.Context, q *sqlc.Queries, id uuid.UUID, targets [][]byte) error {
 	now := time.Now()
 	for _, t := range targets {
 		err := mutateRequestTarget(ctx, q, t, id, func(st *polling.TargetState) error {
