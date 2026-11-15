@@ -5,9 +5,10 @@ package background
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/MeshCore-Beacon/beacon-server/internal/polling"
 )
 
 const requestsOfflineInterval = time.Hour
@@ -22,7 +23,7 @@ type RequestsMaintStore interface {
 func RequestTasks(store RequestsMaintStore, days int) []Task {
 	return []Task{{Name: "requests_offline", Interval: requestsOfflineInterval, Run: func(ctx context.Context) error {
 		now := pollingNow()
-		reason := fmt.Sprintf("Not heard by any observer for %d days.", days)
+		reason := polling.ReasonOffline(days)
 		n, err := store.DisableOfflineRequests(ctx, now.AddDate(0, 0, -days), now, reason)
 		if n > 0 {
 			slog.Info("telemetry requests disabled for offline repeaters", "component", "background", "repeaters", n)

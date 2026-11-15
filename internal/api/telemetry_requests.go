@@ -26,14 +26,19 @@ type TelemetryRequestPoller struct {
 
 // TelemetryRequest is one request. The password is never part of it: HasPassword only says whether one is set.
 type TelemetryRequest struct {
-	ID           string                  `json:"id"`
-	Node         TelemetryRequestNode    `json:"node"`
-	Status       string                  `json:"status" enums:"waiting,active,login_failed,admin_stopped,disabled"`
-	StatusReason string                  `json:"statusReason" example:"No observer can reach this repeater yet."`
-	HasPassword  bool                    `json:"hasPassword"`
-	CreatedAt    int64                   `json:"createdAt" example:"1794700000000"`
-	UpdatedAt    int64                   `json:"updatedAt" example:"1794700000000"`
-	Poller       *TelemetryRequestPoller `json:"poller"`
+	ID           string               `json:"id"`
+	Node         TelemetryRequestNode `json:"node"`
+	Status       string               `json:"status" enums:"waiting,active,login_failed,admin_stopped,disabled"`
+	StatusReason string               `json:"statusReason" example:"No observer can reach this repeater yet."`
+	// StatusReasonCode is a stable code for the reason: no_observer, no_seat, login_failed, blank_login_failed,
+	// admin_stopped, blank_blocked, offline or other; empty when there is no reason.
+	StatusReasonCode string `json:"statusReasonCode" example:"no_observer"`
+	// StatusReasonDays is the number of days of the offline reason; omitted for any other.
+	StatusReasonDays *int                    `json:"statusReasonDays,omitempty" example:"7"`
+	HasPassword      bool                    `json:"hasPassword"`
+	CreatedAt        int64                   `json:"createdAt" example:"1794700000000"`
+	UpdatedAt        int64                   `json:"updatedAt" example:"1794700000000"`
+	Poller           *TelemetryRequestPoller `json:"poller"`
 	// LatestReadingAt is epoch ms of the newest trusted reading, null when none.
 	LatestReadingAt *int64 `json:"latestReadingAt" example:"1794703600000"`
 }
@@ -86,6 +91,11 @@ func NewTelemetryRequest(r polling.RequestRow) TelemetryRequest {
 		Node:   TelemetryRequestNode{PublicKey: hex.EncodeToString(r.Target), Name: r.NodeName},
 		Status: string(r.Status), StatusReason: r.Reason, HasPassword: r.HasPassword,
 		CreatedAt: r.CreatedAt.UnixMilli(), UpdatedAt: r.UpdatedAt.UnixMilli(),
+	}
+	code, days := polling.ReasonCode(r.Reason)
+	out.StatusReasonCode = code
+	if code == polling.CodeOffline {
+		out.StatusReasonDays = &days
 	}
 	if r.NodeID != nil {
 		s := r.NodeID.String()

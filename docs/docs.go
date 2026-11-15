@@ -10270,6 +10270,16 @@ const docTemplate = `{
                     "type": "string",
                     "example": "No observer can reach this repeater yet."
                 },
+                "statusReasonCode": {
+                    "description": "StatusReasonCode is a stable code for the reason: no_observer, no_seat, login_failed, blank_login_failed,\nadmin_stopped, blank_blocked, offline or other; empty when there is no reason.",
+                    "type": "string",
+                    "example": "no_observer"
+                },
+                "statusReasonDays": {
+                    "description": "StatusReasonDays is the number of days of the offline reason; omitted for any other.",
+                    "type": "integer",
+                    "example": 7
+                },
                 "updatedAt": {
                     "type": "integer",
                     "example": 1794700000000

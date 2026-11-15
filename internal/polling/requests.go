@@ -5,7 +5,10 @@ package polling
 
 import (
 	"errors"
+	"fmt"
+	"regexp"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -31,6 +34,56 @@ const (
 	ReasonAdminStopped = "The repeater gave admin access to this password, so Beacon deleted it. Enter a guest password, never an admin one."
 	ReasonBlankBlocked = "This repeater gives admin access to a blank login, so Beacon will not poll it without a guest password."
 )
+
+// ReasonOffline is the reason a request is disabled when no observer has heard its repeater for days days.
+func ReasonOffline(days int) string {
+	if days == 1 {
+		return "Not heard by any observer for 1 day."
+	}
+	return fmt.Sprintf("Not heard by any observer for %d days.", days)
+}
+
+var offlineReason = regexp.MustCompile(`^Not heard by any observer for ([0-9]+) days?\.$`)
+
+// Stable codes for the reasons above, for clients to translate.
+const (
+	CodeNoObserver   = "no_observer"
+	CodeNoSeat       = "no_seat"
+	CodeLoginFailed  = "login_failed"
+	CodeBlankFailed  = "blank_login_failed"
+	CodeAdminStopped = "admin_stopped"
+	CodeBlankBlocked = "blank_blocked"
+	CodeOffline      = "offline"
+	CodeOther        = "other"
+)
+
+// ReasonCode maps a stored reason to its code and, for the offline reason, the number of days. An empty reason has
+// no code.
+func ReasonCode(reason string) (code string, days int) {
+	switch reason {
+	case "":
+		return "", 0
+	case ReasonNoObserver:
+		return CodeNoObserver, 0
+	case ReasonNoSeat:
+		return CodeNoSeat, 0
+	case ReasonLoginFailed:
+		return CodeLoginFailed, 0
+	case ReasonBlankFailed:
+		return CodeBlankFailed, 0
+	case ReasonAdminStopped:
+		return CodeAdminStopped, 0
+	case ReasonBlankBlocked:
+		return CodeBlankBlocked, 0
+	}
+	if m := offlineReason.FindStringSubmatch(reason); m != nil {
+		n, err := strconv.Atoi(m[1])
+		if err == nil {
+			return CodeOffline, n
+		}
+	}
+	return CodeOther, 0
+}
 
 var (
 	ErrRequestLimit      = errors.New("polling: request limit reached")

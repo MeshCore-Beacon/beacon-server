@@ -362,3 +362,28 @@ func TestLoginFailedCounts(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+func TestReasonCodes(t *testing.T) {
+	for _, tc := range []struct {
+		reason, code string
+		days         int
+	}{
+		{"", "", 0},
+		{ReasonNoObserver, "no_observer", 0},
+		{ReasonNoSeat, "no_seat", 0},
+		{ReasonLoginFailed, "login_failed", 0},
+		{ReasonBlankFailed, "blank_login_failed", 0},
+		{ReasonAdminStopped, "admin_stopped", 0},
+		{ReasonBlankBlocked, "blank_blocked", 0},
+		{ReasonOffline(7), "offline", 7},
+		{ReasonOffline(1), "offline", 1},
+		{"something else", "other", 0},
+	} {
+		if c, d := ReasonCode(tc.reason); c != tc.code || d != tc.days {
+			t.Errorf("%q: %q %d", tc.reason, c, d)
+		}
+	}
+	if ReasonOffline(1) != "Not heard by any observer for 1 day." || ReasonOffline(7) != "Not heard by any observer for 7 days." {
+		t.Error("offline wording")
+	}
+}
