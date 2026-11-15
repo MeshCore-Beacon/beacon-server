@@ -581,6 +581,9 @@ type Querier interface {
 	// Returns the hour's status, or 'partial' if raw deletion has reached it since registration.
 	LockRollupHour(ctx context.Context, hour pgtype.Timestamptz) (string, error)
 	LockUserAtlas(ctx context.Context, userID uuid.UUID) (LockUserAtlasRow, error)
+	// Serializes session issuance and credential changes of one user until the transaction ends. NO KEY UPDATE keeps
+	// the foreign-key checks of unrelated inserts (Atlas, requests) from waiting on it.
+	LockUserCredentials(ctx context.Context, id uuid.UUID) (LockUserCredentialsRow, error)
 	// Serializes one user's request creation (the limit) without blocking the foreign-key checks on their rows.
 	LockUserForRequests(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	// Hours whose raw rows cleanup already started deleting can never be rolled completely.
@@ -648,6 +651,8 @@ type Querier interface {
 	// (and not before @since), zero-observation hours included.
 	// No observations yet means nothing to register (GREATEST would ignore the NULL MIN).
 	RegisterRollupHours(ctx context.Context, since pgtype.Timestamptz) error
+	// Stores the same password under a newer hash, only while the hash is still the one that was verified.
+	RehashUserPassword(ctx context.Context, arg RehashUserPasswordParams) (int64, error)
 	// rows is a JSON array of {"key": hex, "data": {...}}; unchanged rows are not rewritten.
 	// fetchedAt comes from the source's checked_at when read.
 	ReplaceRepeaters(ctx context.Context, arg ReplaceRepeatersParams) error

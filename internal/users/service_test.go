@@ -338,6 +338,45 @@ func (f *fakeStore) EndOldestAppSessions(_ context.Context, userID uuid.UUID, ke
 	}
 	return nil
 }
+func (f *fakeStore) IssueSession(ctx context.Context, sess Session, hash []byte, expect string, maxApp int) (Session, error) {
+	f.mu.Lock()
+	u, err := f.get(sess.UserID)
+	if err != nil || u.DisabledAt != nil || u.PassHash != expect {
+		f.mu.Unlock()
+		return Session{}, ErrNotFound
+	}
+	f.mu.Unlock()
+	if sess.Kind == "app" && maxApp > 0 {
+		f.EndOldestAppSessions(ctx, sess.UserID, maxApp-1)
+	}
+	return f.CreateSession(ctx, sess, hash)
+}
+func (f *fakeStore) ChangeCredentials(ctx context.Context, id uuid.UUID, hash string, verifiedAt *time.Time, keep uuid.UUID) error {
+	if err := f.SetUserPassword(ctx, id, hash); err != nil {
+		return err
+	}
+	if verifiedAt != nil {
+		if err := f.SetUserEmailVerified(ctx, id, *verifiedAt); err != nil {
+			return err
+		}
+	}
+	f.EndOtherSessions(ctx, id, keep)
+	for _, k := range []TokenKind{TokenVerify, TokenReset, TokenEmailChange, TokenAppCode} {
+		f.DeleteUserTokens(ctx, id, k)
+	}
+	return f.SetUserPendingEmail(ctx, id, nil)
+}
+func (f *fakeStore) RehashPassword(_ context.Context, id uuid.UUID, oldHash, newHash string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	u, err := f.get(id)
+	if err != nil || u.PassHash != oldHash {
+		return false, err
+	}
+	u.PassHash = newHash
+	f.setPassHash++
+	return true, nil
+}
 func (f *fakeStore) CreateToken(_ context.Context, userID uuid.UUID, kind TokenKind, hash, data []byte, expires time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -3615,6 +3615,21 @@ func (mr *MockQuerierMockRecorder) LockUserAtlas(ctx, userID any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockUserAtlas", reflect.TypeOf((*MockQuerier)(nil).LockUserAtlas), ctx, userID)
 }
 
+// LockUserCredentials mocks base method.
+func (m *MockQuerier) LockUserCredentials(ctx context.Context, id uuid.UUID) (db.LockUserCredentialsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LockUserCredentials", ctx, id)
+	ret0, _ := ret[0].(db.LockUserCredentialsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// LockUserCredentials indicates an expected call of LockUserCredentials.
+func (mr *MockQuerierMockRecorder) LockUserCredentials(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockUserCredentials", reflect.TypeOf((*MockQuerier)(nil).LockUserCredentials), ctx, id)
+}
+
 // LockUserForRequests mocks base method.
 func (m *MockQuerier) LockUserForRequests(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
 	m.ctrl.T.Helper()
@@ -4132,6 +4147,21 @@ func (m *MockQuerier) RegisterRollupHours(ctx context.Context, since pgtype.Time
 func (mr *MockQuerierMockRecorder) RegisterRollupHours(ctx, since any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RegisterRollupHours", reflect.TypeOf((*MockQuerier)(nil).RegisterRollupHours), ctx, since)
+}
+
+// RehashUserPassword mocks base method.
+func (m *MockQuerier) RehashUserPassword(ctx context.Context, arg db.RehashUserPasswordParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RehashUserPassword", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RehashUserPassword indicates an expected call of RehashUserPassword.
+func (mr *MockQuerierMockRecorder) RehashUserPassword(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RehashUserPassword", reflect.TypeOf((*MockQuerier)(nil).RehashUserPassword), ctx, arg)
 }
 
 // ReplaceRepeaters mocks base method.

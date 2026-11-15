@@ -155,3 +155,12 @@ WHERE u.email_verified_at IS NULL AND u.disabled_at IS NULL AND u.provider = 'lo
       SELECT 1 FROM user_tokens t
       WHERE t.user_id = u.id AND t.kind = 'verify' AND t.used_at IS NULL AND t.expires_at > sqlc.arg(now)
   );
+
+-- name: LockUserCredentials :one
+-- Serializes session issuance and credential changes of one user until the transaction ends. NO KEY UPDATE keeps
+-- the foreign-key checks of unrelated inserts (Atlas, requests) from waiting on it.
+SELECT pass_hash, disabled_at FROM users WHERE id = $1 FOR NO KEY UPDATE;
+
+-- name: RehashUserPassword :execrows
+-- Stores the same password under a newer hash, only while the hash is still the one that was verified.
+UPDATE users SET pass_hash = sqlc.arg(new_hash) WHERE id = sqlc.arg(id) AND pass_hash = sqlc.arg(old_hash);

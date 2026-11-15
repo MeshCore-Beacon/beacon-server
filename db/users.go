@@ -199,7 +199,11 @@ func (s *Store) ListUsers(ctx context.Context, search string, afterCreated time.
 }
 
 func (s *Store) CreateSession(ctx context.Context, sess users.Session, tokenHash []byte) (users.Session, error) {
-	row, err := s.q.CreateUserSession(ctx, sqlc.CreateUserSessionParams{
+	return createSession(ctx, s.q, sess, tokenHash)
+}
+
+func createSession(ctx context.Context, q sqlc.Querier, sess users.Session, tokenHash []byte) (users.Session, error) {
+	row, err := q.CreateUserSession(ctx, sqlc.CreateUserSessionParams{
 		UserID: sess.UserID, TokenHash: tokenHash, Kind: sess.Kind, Label: clipText(sess.Label, maxSessionLabel),
 		ExpiresAt: ts(sess.ExpiresAt), HardExpiresAt: optTime(sess.HardExpiresAt),
 		Ip: clipText(sess.IP, maxSessionIP), UserAgent: clipText(sess.UserAgent, maxSessionUserAgent),
@@ -212,6 +216,77 @@ func (s *Store) CreateSession(ctx context.Context, sess users.Session, tokenHash
 		LastUsedAt: row.LastUsedAt.Time, ExpiresAt: row.ExpiresAt.Time, HardExpiresAt: timePtr(row.HardExpiresAt),
 		IP: row.Ip, UserAgent: row.UserAgent,
 	}, nil
+}
+
+// IssueSession stores a session for the user only while the user is live and still has the password hash the caller
+// verified (expectPassHash), under the user's credential lock, so a session cannot slip in after a reset or password
+// change has ended the others. For an app session it first ends the oldest app sessions beyond maxApp-1, in the same
+// transaction, so concurrent exchanges cannot pass the cap. It reports users.ErrNotFound when the user is gone,
+// disabled, or the hash changed.
+func (s *Store) IssueSession(ctx context.Context, sess users.Session, tokenHash []byte, expectPassHash string, maxApp int) (users.Session, error) {
+	var out users.Session
+	err := s.pollTx(ctx, func(q *sqlc.Queries) error {
+		cur, err := q.LockUserCredentials(ctx, sess.UserID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return users.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if cur.DisabledAt.Valid || cur.PassHash != expectPassHash {
+			return users.ErrNotFound
+		}
+		if sess.Kind == "app" && maxApp > 0 {
+			if err := q.EndOldestAppSessions(ctx, sqlc.EndOldestAppSessionsParams{UserID: sess.UserID, Keep: int32(maxApp - 1)}); err != nil {
+				return err
+			}
+		}
+		out, err = createSession(ctx, q, sess, tokenHash)
+		return err
+	})
+	return out, err
+}
+
+// ChangeCredentials sets a new password hash and, in the same transaction under the user's credential lock, ends
+// the user's sessions (all of them, or all but keep), deletes every outstanding one-time token and the pending
+// email, and marks the address verified when verifiedAt is set. It reports users.ErrNotFound for a missing user.
+func (s *Store) ChangeCredentials(ctx context.Context, id uuid.UUID, hash string, verifiedAt *time.Time, keep uuid.UUID) error {
+	return s.pollTx(ctx, func(q *sqlc.Queries) error {
+		if _, err := q.LockUserCredentials(ctx, id); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return users.ErrNotFound
+			}
+			return err
+		}
+		if err := affected(q.SetUserPassword(ctx, sqlc.SetUserPasswordParams{ID: id, PassHash: hash})); err != nil {
+			return err
+		}
+		if verifiedAt != nil {
+			if err := affected(q.SetUserEmailVerified(ctx, sqlc.SetUserEmailVerifiedParams{ID: id, EmailVerifiedAt: ts(*verifiedAt)})); err != nil {
+				return err
+			}
+		}
+		if keep == uuid.Nil {
+			if err := q.EndAllUserSessions(ctx, id); err != nil {
+				return err
+			}
+		} else if err := q.EndOtherUserSessions(ctx, sqlc.EndOtherUserSessionsParams{UserID: id, ID: keep}); err != nil {
+			return err
+		}
+		for _, k := range []users.TokenKind{users.TokenVerify, users.TokenReset, users.TokenEmailChange, users.TokenAppCode} {
+			if err := q.DeleteUserTokens(ctx, sqlc.DeleteUserTokensParams{UserID: id, Kind: string(k)}); err != nil {
+				return err
+			}
+		}
+		return affected(q.SetUserPendingEmail(ctx, sqlc.SetUserPendingEmailParams{ID: id}))
+	})
+}
+
+// RehashPassword stores newHash for the same password when the stored hash is still oldHash; false means it was
+// not, and nothing changed.
+func (s *Store) RehashPassword(ctx context.Context, id uuid.UUID, oldHash, newHash string) (bool, error) {
+	n, err := s.q.RehashUserPassword(ctx, sqlc.RehashUserPasswordParams{ID: id, OldHash: oldHash, NewHash: newHash})
+	return n > 0, err
 }
 
 // SessionByTokenHash returns the live session and its user, or users.ErrNotFound when the session is missing,

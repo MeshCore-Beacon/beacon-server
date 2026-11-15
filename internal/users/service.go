@@ -30,8 +30,6 @@ type Store interface {
 	UserByLogin(ctx context.Context, login string) (User, error)
 	UserByEmail(ctx context.Context, email string) (User, error)
 	UpdateUserDisplayName(ctx context.Context, id uuid.UUID, name string) error
-	SetUserPassword(ctx context.Context, id uuid.UUID, hash string) error
-	SetUserEmailVerified(ctx context.Context, id uuid.UUID, at time.Time) error
 	SetUserPendingEmail(ctx context.Context, id uuid.UUID, email *string) error
 	ActivateUser(ctx context.Context, id uuid.UUID, username, hash string, at time.Time) error
 	LatestToken(ctx context.Context, userID uuid.UUID, kind TokenKind, now time.Time) ([]byte, error)
@@ -39,14 +37,21 @@ type Store interface {
 	ApplyPendingEmail(ctx context.Context, id uuid.UUID, expected string) error
 	TouchUserLogin(ctx context.Context, id uuid.UUID, at time.Time) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
-	CreateSession(ctx context.Context, sess Session, tokenHash []byte) (Session, error)
+	// IssueSession stores a session only while the user is live and still has the password hash the caller verified,
+	// and for an app session first ends the oldest beyond maxApp-1; ErrNotFound when the user or the hash changed.
+	IssueSession(ctx context.Context, sess Session, tokenHash []byte, expectPassHash string, maxApp int) (Session, error)
+	// ChangeCredentials sets the hash, ends the user's sessions (all but keep; all when keep is the nil uuid), deletes
+	// every outstanding one-time token and the pending email, and marks the address verified when verifiedAt is set,
+	// all serialised with IssueSession.
+	ChangeCredentials(ctx context.Context, id uuid.UUID, hash string, verifiedAt *time.Time, keep uuid.UUID) error
+	// RehashPassword stores a newer hash of the same password while the stored one is still oldHash.
+	RehashPassword(ctx context.Context, id uuid.UUID, oldHash, newHash string) (bool, error)
 	SessionByTokenHash(ctx context.Context, hash []byte, now time.Time) (Session, User, error)
 	TouchSession(ctx context.Context, id uuid.UUID, lastUsed, expires time.Time) error
 	ListSessions(ctx context.Context, userID uuid.UUID, now time.Time) ([]Session, error)
 	EndSession(ctx context.Context, userID, sessionID uuid.UUID) error
 	EndOtherSessions(ctx context.Context, userID, keep uuid.UUID) error
 	EndAllSessions(ctx context.Context, userID uuid.UUID) error
-	EndOldestAppSessions(ctx context.Context, userID uuid.UUID, keep int) error
 	CreateToken(ctx context.Context, userID uuid.UUID, kind TokenKind, hash []byte, data []byte, expires time.Time) error
 	ConsumeToken(ctx context.Context, kind TokenKind, hash []byte, now time.Time) (uuid.UUID, []byte, error)
 	DeleteUserTokens(ctx context.Context, userID uuid.UUID, kind TokenKind) error
@@ -502,7 +507,9 @@ func (s *Service) checkPassword(u User, pw string) (needsRehash bool, err error)
 
 // ---- login and sessions ----
 
-func (s *Service) createSession(ctx context.Context, u User, kind, label string, meta SessionMeta) (string, Session, error) {
+// createSession stores a session for u under the store's per-user lock, which refuses it when u's password hash is no
+// longer expectHash (a reset or password change got in after the credential was checked): ErrNotFound.
+func (s *Service) createSession(ctx context.Context, u User, expectHash, kind, label string, meta SessionMeta) (string, Session, error) {
 	now := s.now()
 	sess := Session{UserID: u.ID, Kind: kind, Label: label, IP: meta.IP, UserAgent: meta.UserAgent}
 	if kind == kindApp {
@@ -512,7 +519,11 @@ func (s *Service) createSession(ctx context.Context, u User, kind, label string,
 		sess.ExpiresAt = now.Add(webTTL)
 	}
 	plain, hash := NewToken()
-	created, err := s.store.CreateSession(ctx, sess, hash)
+	maxApp := 0
+	if kind == kindApp {
+		maxApp = maxAppSession
+	}
+	created, err := s.store.IssueSession(ctx, sess, hash, expectHash, maxApp)
 	if err != nil {
 		return "", Session{}, err
 	}
@@ -555,17 +566,26 @@ func (s *Service) Login(ctx context.Context, login, password string, meta Sessio
 	if u.EmailVerifiedAt == nil {
 		return "", Session{}, User{}, ErrEmailUnverified
 	}
+	// The session is only issued while the stored hash is the one just verified, so a reset that completes in
+	// between wins. A rehash is that hash's replacement, so it moves the expectation with it.
+	expect := u.PassHash
 	if needsRehash {
 		if h, herr := HashPassword(password); herr == nil {
-			if werr := s.store.SetUserPassword(ctx, u.ID, h); werr != nil {
+			switch done, werr := s.store.RehashPassword(ctx, u.ID, u.PassHash, h); {
+			case werr != nil:
 				s.log.Warn("password rehash not saved", "user_id", u.ID, "err", werr)
+			case done:
+				expect = h
 			}
 		}
 	}
 	if err := s.store.TouchUserLogin(ctx, u.ID, s.now()); err != nil {
 		s.log.Warn("login time not saved", "user_id", u.ID, "err", err)
 	}
-	tok, sess, err := s.createSession(ctx, u, kindWeb, meta.Label, meta)
+	tok, sess, err := s.createSession(ctx, u, expect, kindWeb, meta.Label, meta)
+	if errors.Is(err, ErrNotFound) {
+		return "", Session{}, User{}, ErrInvalidCredentials
+	}
 	if err != nil {
 		return "", Session{}, User{}, err
 	}
@@ -700,18 +720,12 @@ func (s *Service) ConfirmReset(ctx context.Context, token, newPassword string) e
 	} else if err != nil {
 		return err
 	}
-	if err := s.store.SetUserPassword(ctx, uid, hash); err != nil {
-		return err
-	}
+	var verifiedAt *time.Time
 	if u.EmailVerifiedAt == nil {
-		if err := s.store.SetUserEmailVerified(ctx, uid, s.now()); err != nil {
-			return err
-		}
+		now := s.now()
+		verifiedAt = &now
 	}
-	if err := s.store.EndAllSessions(ctx, uid); err != nil {
-		return err
-	}
-	if err := s.revokeOneTimeCredentials(ctx, uid); err != nil {
+	if err := s.store.ChangeCredentials(ctx, uid, hash, verifiedAt, uuid.Nil); err != nil {
 		return err
 	}
 	s.throttle.clear(userKey(uid))
@@ -719,17 +733,6 @@ func (s *Service) ConfirmReset(ctx context.Context, token, newPassword string) e
 	s.throttle.clear(loginKey(u.Email))
 	s.log.Info("password reset completed", "user_id", uid)
 	return nil
-}
-
-// revokeOneTimeCredentials leaves no link or code usable after a password change or reset: a pending email change
-// and every outstanding one-time token of the user goes.
-func (s *Service) revokeOneTimeCredentials(ctx context.Context, id uuid.UUID) error {
-	for _, k := range []TokenKind{TokenVerify, TokenReset, TokenEmailChange, TokenAppCode} {
-		if err := s.store.DeleteUserTokens(ctx, id, k); err != nil {
-			return err
-		}
-	}
-	return s.store.SetUserPendingEmail(ctx, id, nil)
 }
 
 // ---- profile ----
@@ -745,13 +748,7 @@ func (s *Service) ChangePassword(ctx context.Context, u User, keepSession uuid.U
 	if err != nil {
 		return err
 	}
-	if err := s.store.SetUserPassword(ctx, u.ID, hash); err != nil {
-		return err
-	}
-	if err := s.store.EndOtherSessions(ctx, u.ID, keepSession); err != nil {
-		return err
-	}
-	if err := s.revokeOneTimeCredentials(ctx, u.ID); err != nil {
+	if err := s.store.ChangeCredentials(ctx, u.ID, hash, nil, keepSession); err != nil {
 		return err
 	}
 	s.log.Info("password changed", "user_id", u.ID)
@@ -864,12 +861,13 @@ func (s *Service) ExchangeAppCode(ctx context.Context, code, codeVerifier string
 	if err != nil {
 		return fail(err)
 	}
-	// Keep one slot free for the session about to be created.
-	if err := s.store.EndOldestAppSessions(ctx, uid, maxAppSession-1); err != nil {
-		return fail(err)
-	}
 	label := cleanLabel(d.DeviceLabel)
-	tok, sess, err := s.createSession(ctx, u, kindApp, label, meta)
+	// The store keeps a slot free and issues the session under the user's lock, refusing it when a reset or password
+	// change completed after the user was read.
+	tok, sess, err := s.createSession(ctx, u, u.PassHash, kindApp, label, meta)
+	if errors.Is(err, ErrNotFound) {
+		return fail(ErrTokenInvalid)
+	}
 	if err != nil {
 		return fail(err)
 	}

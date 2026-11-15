@@ -478,6 +478,24 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, e
 	return items, nil
 }
 
+const lockUserCredentials = `-- name: LockUserCredentials :one
+SELECT pass_hash, disabled_at FROM users WHERE id = $1 FOR NO KEY UPDATE
+`
+
+type LockUserCredentialsRow struct {
+	PassHash   string             `json:"pass_hash"`
+	DisabledAt pgtype.Timestamptz `json:"disabled_at"`
+}
+
+// Serializes session issuance and credential changes of one user until the transaction ends. NO KEY UPDATE keeps
+// the foreign-key checks of unrelated inserts (Atlas, requests) from waiting on it.
+func (q *Queries) LockUserCredentials(ctx context.Context, id uuid.UUID) (LockUserCredentialsRow, error) {
+	row := q.db.QueryRow(ctx, lockUserCredentials, id)
+	var i LockUserCredentialsRow
+	err := row.Scan(&i.PassHash, &i.DisabledAt)
+	return i, err
+}
+
 const peekUserToken = `-- name: PeekUserToken :one
 SELECT user_id FROM user_tokens
 WHERE token_hash = $1 AND kind = $2 AND used_at IS NULL AND expires_at > $3
@@ -495,6 +513,25 @@ func (q *Queries) PeekUserToken(ctx context.Context, arg PeekUserTokenParams) (u
 	var user_id uuid.UUID
 	err := row.Scan(&user_id)
 	return user_id, err
+}
+
+const rehashUserPassword = `-- name: RehashUserPassword :execrows
+UPDATE users SET pass_hash = $1 WHERE id = $2 AND pass_hash = $3
+`
+
+type RehashUserPasswordParams struct {
+	NewHash string    `json:"new_hash"`
+	ID      uuid.UUID `json:"id"`
+	OldHash string    `json:"old_hash"`
+}
+
+// Stores the same password under a newer hash, only while the hash is still the one that was verified.
+func (q *Queries) RehashUserPassword(ctx context.Context, arg RehashUserPasswordParams) (int64, error) {
+	result, err := q.db.Exec(ctx, rehashUserPassword, arg.NewHash, arg.ID, arg.OldHash)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setUserDisabled = `-- name: SetUserDisabled :execrows
