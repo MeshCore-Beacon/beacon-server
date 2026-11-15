@@ -117,10 +117,11 @@ SELECT observer_public_key FROM polling_claims WHERE accepts_requests AND receiv
 SELECT pg_advisory_xact_lock(25192, hashtext(current_schema() || encode(sqlc.arg(observer_public_key)::bytea, 'hex')));
 
 -- name: ListObserverRequestedSeats :many
--- The observer's requested assignments to targets other than the one given, with the age of each target's oldest
--- request, oldest first.
+-- The observer's requested assignments to other targets that are still requested, with the age of each target's
+-- oldest request, oldest first. A withdrawn target's assignment waits for its own election and holds no seat.
 SELECT x.target_public_key::bytea AS target_public_key, q.oldest::timestamptz AS oldest
 FROM polling_assignments x
+JOIN polling_targets pt ON pt.target_public_key = x.target_public_key AND pt.active_request_id IS NOT NULL
 JOIN LATERAL (SELECT min(r.created_at) AS oldest FROM telemetry_requests r WHERE r.target_public_key = x.target_public_key) q ON true
 WHERE x.observer_public_key = sqlc.arg(observer_public_key) AND x.requested
   AND x.target_public_key <> sqlc.arg(target_public_key) AND q.oldest IS NOT NULL
@@ -167,8 +168,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7);
 -- Observers that could take a requested target: a live claim that accepts requests and zero-hop advert evidence for
 -- the target since first_heard_at (missing signal 0/0 left out). They need not name the target in their claim: a
 -- device learns of a requested target from the owners answer. held counts the requested targets the claim names;
--- seats_elsewhere counts this observer's requested assignments to other targets whose oldest request is older than
--- this target's, so seats go to the oldest requests first.
+-- seats_elsewhere counts this observer's requested assignments to other still-requested targets whose oldest request
+-- is older than this target's, so seats go to the oldest requests first.
 WITH me AS (
     SELECT min(created_at) AS oldest FROM telemetry_requests WHERE target_public_key = sqlc.arg(target_public_key)
 ), ev AS (
@@ -187,6 +188,7 @@ SELECT cl.observer_public_key, c.claimed_snr, COALESCE(c.state, '')::text AS sta
        EXISTS (SELECT 1 FROM polling_admin_stops s
                WHERE s.target_public_key = sqlc.arg(target_public_key) AND s.observer_public_key = cl.observer_public_key) AS admin_stopped,
        (SELECT count(*) FROM polling_assignments x
+        JOIN polling_targets pt ON pt.target_public_key = x.target_public_key AND pt.active_request_id IS NOT NULL
         JOIN LATERAL (SELECT min(r.created_at) AS oldest FROM telemetry_requests r WHERE r.target_public_key = x.target_public_key) q ON true
         WHERE x.observer_public_key = cl.observer_public_key AND x.requested
           AND x.target_public_key <> sqlc.arg(target_public_key) AND q.oldest IS NOT NULL

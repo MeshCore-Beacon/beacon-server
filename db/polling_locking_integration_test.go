@@ -421,3 +421,37 @@ func TestOwnersOfferSkipsWithdrawnTargetsPostgres(t *testing.T) {
 		t.Fatalf("assignments %v but owners lists %d entries (A2 %v, A3 %v)", assignedTargets(t, w), len(a.Nodes), has2, has3)
 	}
 }
+
+// A target whose requests are all disabled keeps its assignment until its own election; until then its seat must
+// not count against a younger target that is still requested.
+func TestWithdrawnTargetFreesItsSeatPostgres(t *testing.T) {
+	w := newReqWorld(t, "")
+	alice, bob := newUser(t, w.ctx, w.s, "alice"), newUser(t, w.ctx, w.s, "bob")
+	o := newReqDevice(1)
+	oid := pollObserver(t, w.ctx, w.s, o.pub)
+	for _, k := range []byte{0xA2, 0xA3} {
+		pollHearAdvert(t, w.ctx, w.pool, pollKey(k), oid, w.now.Add(-time.Hour), 5)
+	}
+	w.claim(o, 1)
+	old := w.node(0xA3)
+	if _, err := w.reqs.Create(w.ctx, alice.ID, old, []byte("pw")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.pool.Exec(w.ctx, `UPDATE nodes SET last_seen = $1 WHERE public_key = $2`, w.now.Add(-10*24*time.Hour), pollKey(0xA3)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.pool.Exec(w.ctx, `UPDATE telemetry_requests SET enabled_at = $1`, w.now.Add(-9*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := w.s.DisableOfflineRequests(w.ctx, w.now.Add(-7*24*time.Hour), w.now, polling.ReasonOffline(7)); err != nil || n != 1 {
+		t.Fatalf("disabled %d, %v", n, err)
+	}
+	w.now = w.now.Add(time.Minute)
+	r, err := w.reqs.Create(w.ctx, bob.ID, w.node(0xA2), []byte("pw"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := w.status(bob.ID, r.ID); st.Status != polling.StatusActive {
+		t.Fatalf("younger request kept out by a disabled target's seat: status=%s reason=%q", st.Status, st.Reason)
+	}
+}

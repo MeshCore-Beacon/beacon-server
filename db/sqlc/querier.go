@@ -508,8 +508,8 @@ type Querier interface {
 	// $13..$18 are the ingest process's live counts (obscount): for an hour from $13 on, the whole
 	// minutes before $14 come from the counts and only [$14, slice end) is read raw.
 	ListObserverDirectory(ctx context.Context, arg ListObserverDirectoryParams) (string, error)
-	// The observer's requested assignments to targets other than the one given, with the age of each target's oldest
-	// request, oldest first.
+	// The observer's requested assignments to other targets that are still requested, with the age of each target's
+	// oldest request, oldest first. A withdrawn target's assignment waits for its own election and holds no seat.
 	ListObserverRequestedSeats(ctx context.Context, arg ListObserverRequestedSeatsParams) ([]ListObserverRequestedSeatsRow, error)
 	// Observers newest last_seen first; the cursor is the (last_seen, id) of the last row.
 	ListObservers(ctx context.Context, arg ListObserversParams) ([]ListObserversRow, error)
@@ -603,8 +603,8 @@ type Querier interface {
 	// Observers that could take a requested target: a live claim that accepts requests and zero-hop advert evidence for
 	// the target since first_heard_at (missing signal 0/0 left out). They need not name the target in their claim: a
 	// device learns of a requested target from the owners answer. held counts the requested targets the claim names;
-	// seats_elsewhere counts this observer's requested assignments to other targets whose oldest request is older than
-	// this target's, so seats go to the oldest requests first.
+	// seats_elsewhere counts this observer's requested assignments to other still-requested targets whose oldest request
+	// is older than this target's, so seats go to the oldest requests first.
 	ListRequestCandidates(ctx context.Context, arg ListRequestCandidatesParams) ([]ListRequestCandidatesRow, error)
 	// The observers whose claim accepts requests, in key order, which is the order their seat locks are taken in.
 	ListRequestObserverKeys(ctx context.Context, receivedAt pgtype.Timestamptz) ([][]byte, error)

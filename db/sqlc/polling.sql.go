@@ -541,6 +541,7 @@ func (q *Queries) ListNodeReadings(ctx context.Context, arg ListNodeReadingsPara
 const listObserverRequestedSeats = `-- name: ListObserverRequestedSeats :many
 SELECT x.target_public_key::bytea AS target_public_key, q.oldest::timestamptz AS oldest
 FROM polling_assignments x
+JOIN polling_targets pt ON pt.target_public_key = x.target_public_key AND pt.active_request_id IS NOT NULL
 JOIN LATERAL (SELECT min(r.created_at) AS oldest FROM telemetry_requests r WHERE r.target_public_key = x.target_public_key) q ON true
 WHERE x.observer_public_key = $1 AND x.requested
   AND x.target_public_key <> $2 AND q.oldest IS NOT NULL
@@ -557,8 +558,8 @@ type ListObserverRequestedSeatsRow struct {
 	Oldest          pgtype.Timestamptz `json:"oldest"`
 }
 
-// The observer's requested assignments to targets other than the one given, with the age of each target's oldest
-// request, oldest first.
+// The observer's requested assignments to other targets that are still requested, with the age of each target's
+// oldest request, oldest first. A withdrawn target's assignment waits for its own election and holds no seat.
 func (q *Queries) ListObserverRequestedSeats(ctx context.Context, arg ListObserverRequestedSeatsParams) ([]ListObserverRequestedSeatsRow, error) {
 	rows, err := q.db.Query(ctx, listObserverRequestedSeats, arg.ObserverPublicKey, arg.TargetPublicKey)
 	if err != nil {
@@ -763,6 +764,7 @@ SELECT cl.observer_public_key, c.claimed_snr, COALESCE(c.state, '')::text AS sta
        EXISTS (SELECT 1 FROM polling_admin_stops s
                WHERE s.target_public_key = $1 AND s.observer_public_key = cl.observer_public_key) AS admin_stopped,
        (SELECT count(*) FROM polling_assignments x
+        JOIN polling_targets pt ON pt.target_public_key = x.target_public_key AND pt.active_request_id IS NOT NULL
         JOIN LATERAL (SELECT min(r.created_at) AS oldest FROM telemetry_requests r WHERE r.target_public_key = x.target_public_key) q ON true
         WHERE x.observer_public_key = cl.observer_public_key AND x.requested
           AND x.target_public_key <> $1 AND q.oldest IS NOT NULL
@@ -802,8 +804,8 @@ type ListRequestCandidatesRow struct {
 // Observers that could take a requested target: a live claim that accepts requests and zero-hop advert evidence for
 // the target since first_heard_at (missing signal 0/0 left out). They need not name the target in their claim: a
 // device learns of a requested target from the owners answer. held counts the requested targets the claim names;
-// seats_elsewhere counts this observer's requested assignments to other targets whose oldest request is older than
-// this target's, so seats go to the oldest requests first.
+// seats_elsewhere counts this observer's requested assignments to other still-requested targets whose oldest request
+// is older than this target's, so seats go to the oldest requests first.
 func (q *Queries) ListRequestCandidates(ctx context.Context, arg ListRequestCandidatesParams) ([]ListRequestCandidatesRow, error) {
 	rows, err := q.db.Query(ctx, listRequestCandidates, arg.TargetPublicKey, arg.ReceivedAfter, arg.FirstHeardAt)
 	if err != nil {
