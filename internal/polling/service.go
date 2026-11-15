@@ -282,7 +282,12 @@ func (s *Service) Owners(ctx context.Context, c Caller) (OwnersAnswer, error) {
 	}
 	// Approval can be withdrawn between elections; a password goes only to an observer approved right now.
 	if s.requestsNeedApproval() {
-		if _, approved, err := s.store.PollingObserverFlags(ctx, c.Observer); err != nil || !approved {
+		_, approved, err := s.store.PollingObserverFlags(ctx, c.Observer)
+		if err != nil {
+			s.log.Warn("polling observer flags", "observer", short(c.Observer), "err", err)
+			return OwnersAnswer{}, err // a missing requested entry reads as withdrawn
+		}
+		if !approved {
 			for i := range rows {
 				rows[i].PWOK = false
 			}

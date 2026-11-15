@@ -233,3 +233,42 @@ func TestCleanupKeepsDenseRanksAndStatusPostgres(t *testing.T) {
 		})
 	}
 }
+
+type approvalReadError struct {
+	*Store
+	calls int
+}
+
+func (s *approvalReadError) PollingObserverFlags(ctx context.Context, o []byte) (bool, bool, error) {
+	s.calls++
+	if s.calls == 2 {
+		return false, false, fmt.Errorf("transient approval read failure")
+	}
+	return s.Store.PollingObserverFlags(ctx, o)
+}
+
+// A failed approval read fails the owners answer instead of withdrawing the requested entries.
+func TestOwnersApprovalReadErrorFailsAnswerPostgres(t *testing.T) {
+	w := newReqWorld(t, "approved")
+	u := newUser(t, w.ctx, w.s, "alice")
+	n := w.node(0xA1)
+	o := newReqDevice(1)
+	pollHearAdvert(t, w.ctx, w.pool, pollKey(0xA1), pollObserver(t, w.ctx, w.s, o.pub), w.now.Add(-time.Hour), 5)
+	if err := w.s.SetPollingObserver(w.ctx, o.pub, false, true, ""); err != nil {
+		t.Fatal(err)
+	}
+	w.claim(o, 1)
+	if _, err := w.reqs.Create(w.ctx, u.ID, n, []byte("pw")); err != nil {
+		t.Fatal(err)
+	}
+	st := &approvalReadError{Store: w.s}
+	svc := polling.NewService(st, config.ResolvedPolling{Enabled: true, RequestObservers: config.RequestObserversApproved}, func() time.Time { return w.now }, slog.New(slog.DiscardHandler))
+	svc.SetRequests(w.s, w.sealer)
+	a, err := svc.Owners(w.ctx, polling.Caller{Observer: o.pub})
+	if err == nil {
+		t.Fatalf("approval lookup failed but owners succeeded with %d entries", len(a.Nodes))
+	}
+	if _, ok := w.owners(o, 0xA1); !ok {
+		t.Fatal("a successful read must still offer the target")
+	}
+}
