@@ -59,6 +59,37 @@ CROSS JOIN LATERAL (
     LIMIT 12
 ) r;
 
+-- name: AlertNodeUptimes :many
+-- For each repeater and the cursor of its reboot rule: the newest trusted uptime reading at or before the cursor (the
+-- baseline), then the oldest page_size readings after it, so every reading since the cursor is reached page by page.
+SELECT t.k::bytea AS target_public_key, r.sampled_at, r.uptime_secs
+FROM unnest(sqlc.arg(keys)::bytea[]) WITH ORDINALITY AS t(k, n)
+CROSS JOIN LATERAL (SELECT (sqlc.arg(cursors)::timestamptz[])[t.n] AS c) cur
+CROSS JOIN LATERAL (
+    (SELECT b.sampled_at, b.uptime_secs FROM repeater_readings b
+     WHERE b.target_public_key = t.k AND b.trusted AND b.uptime_secs IS NOT NULL AND b.sampled_at <= cur.c
+     ORDER BY b.sampled_at DESC LIMIT 1)
+    UNION ALL
+    (SELECT a.sampled_at, a.uptime_secs FROM repeater_readings a
+     WHERE a.target_public_key = t.k AND a.trusted AND a.uptime_secs IS NOT NULL AND a.sampled_at > cur.c
+     ORDER BY a.sampled_at LIMIT sqlc.arg(page_size)::int)
+) r;
+
+-- name: AlertObserverUptimes :many
+-- The same for an observer's status telemetry.
+SELECT t.k::uuid AS observer_id, r.reported_at, r.uptime_seconds
+FROM unnest(sqlc.arg(ids)::uuid[]) WITH ORDINALITY AS t(k, n)
+CROSS JOIN LATERAL (SELECT (sqlc.arg(cursors)::timestamptz[])[t.n] AS c) cur
+CROSS JOIN LATERAL (
+    (SELECT b.reported_at, b.uptime_seconds FROM observer_telemetry b
+     WHERE b.observer_id = t.k AND b.uptime_seconds IS NOT NULL AND b.reported_at <= cur.c
+     ORDER BY b.reported_at DESC LIMIT 1)
+    UNION ALL
+    (SELECT a.reported_at, a.uptime_seconds FROM observer_telemetry a
+     WHERE a.observer_id = t.k AND a.uptime_seconds IS NOT NULL AND a.reported_at > cur.c
+     ORDER BY a.reported_at LIMIT sqlc.arg(page_size)::int)
+) r;
+
 -- name: AlertNodeDayAgo :many
 -- For each repeater, the battery reading closest to 24 hours before its newest one, within 3 hours of that mark.
 SELECT t.k::bytea AS target_public_key, r.sampled_at, r.battery_mv

@@ -114,6 +114,55 @@ func (q *Queries) AlertNodeReadings(ctx context.Context, arg AlertNodeReadingsPa
 	return items, nil
 }
 
+const alertNodeUptimes = `-- name: AlertNodeUptimes :many
+SELECT t.k::bytea AS target_public_key, r.sampled_at, r.uptime_secs
+FROM unnest($1::bytea[]) WITH ORDINALITY AS t(k, n)
+CROSS JOIN LATERAL (SELECT ($2::timestamptz[])[t.n] AS c) cur
+CROSS JOIN LATERAL (
+    (SELECT b.sampled_at, b.uptime_secs FROM repeater_readings b
+     WHERE b.target_public_key = t.k AND b.trusted AND b.uptime_secs IS NOT NULL AND b.sampled_at <= cur.c
+     ORDER BY b.sampled_at DESC LIMIT 1)
+    UNION ALL
+    (SELECT a.sampled_at, a.uptime_secs FROM repeater_readings a
+     WHERE a.target_public_key = t.k AND a.trusted AND a.uptime_secs IS NOT NULL AND a.sampled_at > cur.c
+     ORDER BY a.sampled_at LIMIT $3::int)
+) r
+`
+
+type AlertNodeUptimesParams struct {
+	Keys     [][]byte             `json:"keys"`
+	Cursors  []pgtype.Timestamptz `json:"cursors"`
+	PageSize int32                `json:"page_size"`
+}
+
+type AlertNodeUptimesRow struct {
+	TargetPublicKey []byte             `json:"target_public_key"`
+	SampledAt       pgtype.Timestamptz `json:"sampled_at"`
+	UptimeSecs      *int64             `json:"uptime_secs"`
+}
+
+// For each repeater and the cursor of its reboot rule: the newest trusted uptime reading at or before the cursor (the
+// baseline), then the oldest page_size readings after it, so every reading since the cursor is reached page by page.
+func (q *Queries) AlertNodeUptimes(ctx context.Context, arg AlertNodeUptimesParams) ([]AlertNodeUptimesRow, error) {
+	rows, err := q.db.Query(ctx, alertNodeUptimes, arg.Keys, arg.Cursors, arg.PageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AlertNodeUptimesRow{}
+	for rows.Next() {
+		var i AlertNodeUptimesRow
+		if err := rows.Scan(&i.TargetPublicKey, &i.SampledAt, &i.UptimeSecs); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const alertNodesData = `-- name: AlertNodesData :many
 SELECT public_key, COALESCE(name, '')::text AS name, last_seen, last_advert_at, device_clock_drift_seconds, prev_clock_drift_seconds,
        EXISTS (SELECT 1 FROM polling_assignments a WHERE a.target_public_key = nodes.public_key) AS polled
@@ -247,6 +296,54 @@ func (q *Queries) AlertObserverTelemetry(ctx context.Context, arg AlertObserverT
 			&i.NoiseFloorDb,
 			&i.UptimeSeconds,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const alertObserverUptimes = `-- name: AlertObserverUptimes :many
+SELECT t.k::uuid AS observer_id, r.reported_at, r.uptime_seconds
+FROM unnest($1::uuid[]) WITH ORDINALITY AS t(k, n)
+CROSS JOIN LATERAL (SELECT ($2::timestamptz[])[t.n] AS c) cur
+CROSS JOIN LATERAL (
+    (SELECT b.reported_at, b.uptime_seconds FROM observer_telemetry b
+     WHERE b.observer_id = t.k AND b.uptime_seconds IS NOT NULL AND b.reported_at <= cur.c
+     ORDER BY b.reported_at DESC LIMIT 1)
+    UNION ALL
+    (SELECT a.reported_at, a.uptime_seconds FROM observer_telemetry a
+     WHERE a.observer_id = t.k AND a.uptime_seconds IS NOT NULL AND a.reported_at > cur.c
+     ORDER BY a.reported_at LIMIT $3::int)
+) r
+`
+
+type AlertObserverUptimesParams struct {
+	Ids      []uuid.UUID          `json:"ids"`
+	Cursors  []pgtype.Timestamptz `json:"cursors"`
+	PageSize int32                `json:"page_size"`
+}
+
+type AlertObserverUptimesRow struct {
+	ObserverID    uuid.UUID          `json:"observer_id"`
+	ReportedAt    pgtype.Timestamptz `json:"reported_at"`
+	UptimeSeconds *int64             `json:"uptime_seconds"`
+}
+
+// The same for an observer's status telemetry.
+func (q *Queries) AlertObserverUptimes(ctx context.Context, arg AlertObserverUptimesParams) ([]AlertObserverUptimesRow, error) {
+	rows, err := q.db.Query(ctx, alertObserverUptimes, arg.Ids, arg.Cursors, arg.PageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AlertObserverUptimesRow{}
+	for rows.Next() {
+		var i AlertObserverUptimesRow
+		if err := rows.Scan(&i.ObserverID, &i.ReportedAt, &i.UptimeSeconds); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

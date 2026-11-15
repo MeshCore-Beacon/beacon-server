@@ -175,6 +175,21 @@ func (mr *MockQuerierMockRecorder) AlertNodeReadings(ctx, arg any) *gomock.Call 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AlertNodeReadings", reflect.TypeOf((*MockQuerier)(nil).AlertNodeReadings), ctx, arg)
 }
 
+// AlertNodeUptimes mocks base method.
+func (m *MockQuerier) AlertNodeUptimes(ctx context.Context, arg db.AlertNodeUptimesParams) ([]db.AlertNodeUptimesRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AlertNodeUptimes", ctx, arg)
+	ret0, _ := ret[0].([]db.AlertNodeUptimesRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// AlertNodeUptimes indicates an expected call of AlertNodeUptimes.
+func (mr *MockQuerierMockRecorder) AlertNodeUptimes(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AlertNodeUptimes", reflect.TypeOf((*MockQuerier)(nil).AlertNodeUptimes), ctx, arg)
+}
+
 // AlertNodesData mocks base method.
 func (m *MockQuerier) AlertNodesData(ctx context.Context, keys [][]byte) ([]db.AlertNodesDataRow, error) {
 	m.ctrl.T.Helper()
@@ -233,6 +248,21 @@ func (m *MockQuerier) AlertObserverTelemetry(ctx context.Context, arg db.AlertOb
 func (mr *MockQuerierMockRecorder) AlertObserverTelemetry(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AlertObserverTelemetry", reflect.TypeOf((*MockQuerier)(nil).AlertObserverTelemetry), ctx, arg)
+}
+
+// AlertObserverUptimes mocks base method.
+func (m *MockQuerier) AlertObserverUptimes(ctx context.Context, arg db.AlertObserverUptimesParams) ([]db.AlertObserverUptimesRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AlertObserverUptimes", ctx, arg)
+	ret0, _ := ret[0].([]db.AlertObserverUptimesRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// AlertObserverUptimes indicates an expected call of AlertObserverUptimes.
+func (mr *MockQuerierMockRecorder) AlertObserverUptimes(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AlertObserverUptimes", reflect.TypeOf((*MockQuerier)(nil).AlertObserverUptimes), ctx, arg)
 }
 
 // AlertObserversData mocks base method.

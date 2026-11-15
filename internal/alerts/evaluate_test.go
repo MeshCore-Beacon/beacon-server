@@ -17,7 +17,7 @@ func noise(at time.Duration, db int) Reading { return Reading{At: ago(at), Noise
 func temp(at time.Duration, t int) Reading   { return Reading{At: ago(at), TempTenths: &t} }
 func up(at time.Duration, s int64) Reading   { return Reading{At: ago(at), Uptime: &s} }
 
-func live(rs ...Reading) Data { return Data{Now: now, Exists: true, Polled: true, Readings: rs} }
+func live(rs ...Reading) Data { return Data{Now: now, Exists: true, Polled: true, Readings: rs, Uptimes: rs} }
 
 type step struct {
 	name   string

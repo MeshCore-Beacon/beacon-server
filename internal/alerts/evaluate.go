@@ -15,6 +15,9 @@ const (
 	StateUnknown  State = "unknown"  // not enough data yet
 )
 
+// UptimePage is how many readings after its cursor one pass reads for a reboot rule; a longer backlog takes more passes.
+const UptimePage = 200
+
 // MinResend is the shortest time between two notifications of one rule.
 const MinResend = 6 * time.Hour
 
@@ -59,6 +62,10 @@ type Data struct {
 	StatusAt time.Time
 	// Readings are the newest first.
 	Readings []Reading
+	// Uptimes are the uptime readings a reboot rule judges, newest first: the one before its cursor (the baseline)
+	// and then up to UptimePage readings after it, oldest first from the cursor, so the newest is where a full page
+	// ended and the cursor only moves through what was read.
+	Uptimes []Reading
 	// DayAgo is the battery reading closest to 24 hours before the newest battery reading, within 3 hours of it.
 	DayAgo *Reading
 	// DriftSec is the repeater's clock drift from its newest advert, at AdvertAt.
@@ -150,7 +157,7 @@ func Evaluate(r Rule, d Data) Outcome {
 		if !d.Exists || !d.Polled {
 			return inactive()
 		}
-		ups := firstN(d.Readings, len(d.Readings), func(x Reading) bool { return x.Uptime != nil })
+		ups := firstN(d.Uptimes, len(d.Uptimes), func(x Reading) bool { return x.Uptime != nil })
 		if len(ups) < 2 {
 			return keep()
 		}

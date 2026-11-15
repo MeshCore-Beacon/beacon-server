@@ -108,9 +108,19 @@ func round(v float64) *int { n := int(math.Round(v)); return &n }
 // LoadTargets reads every radio the rules name with a fixed number of queries, however many rules there are.
 func (a AlertEval) LoadTargets(ctx context.Context, rules []alerts.RuleRow, now time.Time) (map[string]alerts.TargetData, error) {
 	var nodeKeys, obsKeys, nodeFalling, obsFalling [][]byte
+	nodeReboot, obsReboot := map[string]time.Time{}, map[string]time.Time{} // the oldest cursor of a reboot rule
 	seenN, seenO, fallN, fallO := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, r := range rules {
 		k := string(r.Key)
+		if r.Kind == alerts.KindRebooted {
+			m := nodeReboot
+			if r.TargetKind == alerts.TargetObserver {
+				m = obsReboot
+			}
+			if c, ok := m[k]; !ok || r.Cursor.Before(c) {
+				m[k] = r.Cursor
+			}
+		}
 		if r.TargetKind == alerts.TargetObserver {
 			if !seenO[k] {
 				seenO[k] = true
@@ -166,6 +176,20 @@ func (a AlertEval) LoadTargets(ctx context.Context, rules []alerts.RuleRow, now 
 			}
 			out[id] = td
 		}
+		if len(nodeReboot) > 0 {
+			keys, cursors := rebootCursors(nodeReboot, now)
+			ups, err := a.q.AlertNodeUptimes(ctx, sqlc.AlertNodeUptimesParams{Keys: keys, Cursors: cursors, PageSize: alerts.UptimePage})
+			if err != nil {
+				return nil, err
+			}
+			for _, r := range ups {
+				id := alerts.TargetID(alerts.TargetNode, r.TargetPublicKey)
+				if td, ok := out[id]; ok {
+					td.Uptimes = append(td.Uptimes, alerts.Reading{At: tsTime(r.SampledAt), Uptime: r.UptimeSecs})
+					out[id] = td
+				}
+			}
+		}
 		if len(nodeFalling) > 0 {
 			days, err := a.q.AlertNodeDayAgo(ctx, sqlc.AlertNodeDayAgoParams{Keys: nodeFalling, Since: since})
 			if err != nil {
@@ -211,6 +235,31 @@ func (a AlertEval) LoadTargets(ctx context.Context, rules []alerts.RuleRow, now 
 				td.Readings = append(td.Readings, rd)
 				out[id] = td
 			}
+			if len(obsReboot) > 0 {
+				var rids []uuid.UUID
+				var rkeys [][]byte
+				for _, o := range obs {
+					if _, ok := obsReboot[string(o.PublicKey)]; ok {
+						rids, rkeys = append(rids, o.ID), append(rkeys, o.PublicKey)
+					}
+				}
+				cursors := make([]pgtype.Timestamptz, len(rkeys))
+				for i, k := range rkeys {
+					cursors[i] = ts(rebootFrom(obsReboot[string(k)], now))
+				}
+				if len(rids) > 0 {
+					ups, err := a.q.AlertObserverUptimes(ctx, sqlc.AlertObserverUptimesParams{Ids: rids, Cursors: cursors, PageSize: alerts.UptimePage})
+					if err != nil {
+						return nil, err
+					}
+					for _, r := range ups {
+						id := byID[r.ObserverID]
+						td := out[id]
+						td.Uptimes = append(td.Uptimes, alerts.Reading{At: tsTime(r.ReportedAt), Uptime: r.UptimeSeconds})
+						out[id] = td
+					}
+				}
+			}
 			var fallIDs []uuid.UUID
 			for _, k := range obsFalling {
 				for _, o := range obs {
@@ -235,9 +284,28 @@ func (a AlertEval) LoadTargets(ctx context.Context, rules []alerts.RuleRow, now 
 	}
 	for id, td := range out {
 		sort.SliceStable(td.Readings, func(i, j int) bool { return td.Readings[i].At.After(td.Readings[j].At) })
+		sort.SliceStable(td.Uptimes, func(i, j int) bool { return td.Uptimes[i].At.After(td.Uptimes[j].At) })
 		out[id] = td
 	}
 	return out, nil
+}
+
+// rebootFrom is where a reboot rule reads from: its cursor, but no further back than the data window.
+func rebootFrom(cursor, now time.Time) time.Time {
+	if floor := now.Add(-alerts.DataWindow * time.Second); cursor.Before(floor) {
+		return floor
+	}
+	return cursor
+}
+
+func rebootCursors(m map[string]time.Time, now time.Time) ([][]byte, []pgtype.Timestamptz) {
+	keys := make([][]byte, 0, len(m))
+	cursors := make([]pgtype.Timestamptz, 0, len(m))
+	for k, c := range m {
+		keys = append(keys, []byte(k))
+		cursors = append(cursors, ts(rebootFrom(c, now)))
+	}
+	return keys, cursors
 }
 
 func (a AlertEval) Apply(ctx context.Context, passID uuid.UUID, ups []alerts.Update, notes []alerts.Notice) error {

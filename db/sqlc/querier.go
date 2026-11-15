@@ -33,11 +33,16 @@ type Querier interface {
 	AlertNodeDayAgo(ctx context.Context, arg AlertNodeDayAgoParams) ([]AlertNodeDayAgoRow, error)
 	// The newest trusted readings of each repeater within the window, at most 12 each.
 	AlertNodeReadings(ctx context.Context, arg AlertNodeReadingsParams) ([]AlertNodeReadingsRow, error)
+	// For each repeater and the cursor of its reboot rule: the newest trusted uptime reading at or before the cursor (the
+	// baseline), then the oldest page_size readings after it, so every reading since the cursor is reached page by page.
+	AlertNodeUptimes(ctx context.Context, arg AlertNodeUptimesParams) ([]AlertNodeUptimesRow, error)
 	// polled is the same test as the overview's (AlertNodeCaps): a current polling assignment.
 	AlertNodesData(ctx context.Context, keys [][]byte) ([]AlertNodesDataRow, error)
 	AlertObserverCaps(ctx context.Context, arg AlertObserverCapsParams) ([]AlertObserverCapsRow, error)
 	AlertObserverDayAgo(ctx context.Context, arg AlertObserverDayAgoParams) ([]AlertObserverDayAgoRow, error)
 	AlertObserverTelemetry(ctx context.Context, arg AlertObserverTelemetryParams) ([]AlertObserverTelemetryRow, error)
+	// The same for an observer's status telemetry.
+	AlertObserverUptimes(ctx context.Context, arg AlertObserverUptimesParams) ([]AlertObserverUptimesRow, error)
 	// polled is the same test as the overview's (AlertObserverCaps): status telemetry within fresh_since.
 	AlertObserversData(ctx context.Context, arg AlertObserversDataParams) ([]AlertObserversDataRow, error)
 	// The next enabled rules of live users after the id, with the name the user gave the pin and, for a back_online
