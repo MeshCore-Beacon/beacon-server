@@ -11052,6 +11052,16 @@ const docTemplate = `{
                 },
                 "observerId": {
                     "type": "string"
+                },
+                "state": {
+                    "description": "State is what the poller's latest live claim says about this repeater: pending, ok, no_reply, login_failed,\nadmin_stop or not_direct, any other value the firmware sends (lower case, at most 32 characters), or\nnot_claimed when the claim does not list the repeater or the observer has no live claim.",
+                    "type": "string",
+                    "example": "not_direct"
+                },
+                "stateAt": {
+                    "description": "StateAt is epoch ms when that claim was received, null when the observer has no live claim.",
+                    "type": "integer",
+                    "example": 1794703600000
                 }
             }
         },

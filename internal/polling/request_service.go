@@ -6,6 +6,7 @@ package polling
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,8 +38,18 @@ type RequestRow struct {
 	NodeName    string
 	PollerID    *uuid.UUID // the observer polling it; nil when nobody is
 	PollerName  string
-	LatestAt    *time.Time // newest trusted reading
+	// PollerState is what the poller's live claim says about this repeater, or StateNotClaimed. Empty with no poller.
+	PollerState string
+	// PollerStateAt is when that claim was received; nil when the poller has no live claim.
+	PollerStateAt *time.Time
+	LatestAt      *time.Time // newest trusted reading
 }
+
+// StateNotClaimed is the poller state when its live claim does not list the repeater, or it has no live claim.
+const StateNotClaimed = "not_claimed"
+
+// ClaimState turns a state a claim carried into the one a request shows: lower case, at most 32 bytes.
+func ClaimState(s string) string { return strings.ToLower(shortText(s)) }
 
 // RequestStore is what the requests service needs from the database. MutateRequestTarget loads the target's state
 // under its lock (and the user's, when userID is set, with UserRequests filled in), runs fn and stores the
@@ -48,7 +59,8 @@ type RequestStore interface {
 	MutateRequestTarget(ctx context.Context, target []byte, userID uuid.UUID, fn func(*TargetState) error) error
 	// UserRequestTarget is ErrRequestNotFound unless the request is the user's.
 	UserRequestTarget(ctx context.Context, userID, requestID uuid.UUID) ([]byte, error)
-	UserTelemetryRequests(ctx context.Context, userID uuid.UUID) ([]RequestRow, error)
+	// UserTelemetryRequests lists the user's requests. A claim received after liveAfter is a live claim.
+	UserTelemetryRequests(ctx context.Context, userID uuid.UUID, liveAfter time.Time) ([]RequestRow, error)
 }
 
 // Elector re-assigns a requested repeater after its requests changed.
@@ -74,11 +86,11 @@ func NewRequestService(store RequestStore, sealer *Sealer, elector Elector, limi
 func (s *RequestService) Limit() int { return s.limit }
 
 func (s *RequestService) List(ctx context.Context, userID uuid.UUID) ([]RequestRow, error) {
-	return s.store.UserTelemetryRequests(ctx, userID)
+	return s.store.UserTelemetryRequests(ctx, userID, s.now().Add(-ClaimTTL))
 }
 
 func (s *RequestService) one(ctx context.Context, userID, id uuid.UUID) (RequestRow, error) {
-	rows, err := s.store.UserTelemetryRequests(ctx, userID)
+	rows, err := s.store.UserTelemetryRequests(ctx, userID, s.now().Add(-ClaimTTL))
 	if err != nil {
 		return RequestRow{}, err
 	}

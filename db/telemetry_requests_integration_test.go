@@ -101,7 +101,7 @@ func TestTelemetryRequestsPostgres(t *testing.T) {
 	if err := pool.QueryRow(ctx, `INSERT INTO nodes (public_key, node_type, name) VALUES ($1, 2, 'Hilltop') RETURNING id`, target).Scan(&nodeID); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := s.UserTelemetryRequests(ctx, alice.ID)
+	rows, err := s.UserTelemetryRequests(ctx, alice.ID, time.Now().Add(-polling.ClaimTTL))
 	if err != nil || len(rows) != 3 {
 		t.Fatalf("list: %d %v", len(rows), err)
 	}
@@ -189,5 +189,54 @@ func TestTelemetryRequestsLimitRacePostgres(t *testing.T) {
 	wg.Wait()
 	if ok.Load() != 3 || refused.Load() != 7 {
 		t.Fatalf("ok=%d refused=%d", ok.Load(), refused.Load())
+	}
+}
+
+func TestTelemetryRequestPollerStatePostgres(t *testing.T) {
+	w := newReqWorld(t, "")
+	ctx, s := w.ctx, w.s
+	alice := newUser(t, ctx, s, "alice")
+	n1, n2 := w.node(0xB1), w.node(0xB2)
+	obs := newReqDevice(5)
+	pollObserver(t, ctx, s, obs.pub)
+	for _, n := range []uuid.UUID{n1, n2} {
+		if _, err := w.reqs.Create(ctx, alice.ID, n, []byte("guest")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list := func(after time.Time) map[string]polling.RequestRow {
+		t.Helper()
+		rows, err := s.UserTelemetryRequests(ctx, alice.ID, after)
+		if err != nil || len(rows) != 2 {
+			t.Fatalf("%d %v", len(rows), err)
+		}
+		m := map[string]polling.RequestRow{}
+		for _, r := range rows {
+			m[string(r.Target)] = r
+		}
+		return m
+	}
+	live := w.now.Add(-polling.ClaimTTL)
+
+	// The observer lists B1 as not_direct and does not list B2; both are assigned to it.
+	w.claim(obs, 2, reqNode(pollKey(0xB1), true, "Not_Direct"))
+	for _, k := range []byte{0xB1, 0xB2} {
+		if _, err := w.pool.Exec(ctx, `INSERT INTO polling_assignments (target_public_key, observer_public_key, rank, assigned_at, requested)
+			VALUES ($1, $2, 0, now(), true) ON CONFLICT DO NOTHING`, pollKey(k), obs.pub); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m := list(live)
+	if a := m[string(pollKey(0xB1))]; a.PollerID == nil || a.PollerState != "not_direct" || a.PollerStateAt == nil || !a.PollerStateAt.Equal(w.now) {
+		t.Fatalf("listed target: %+v", a)
+	}
+	if b := m[string(pollKey(0xB2))]; b.PollerID == nil || b.PollerState != polling.StateNotClaimed || b.PollerStateAt == nil || !b.PollerStateAt.Equal(w.now) {
+		t.Fatalf("unlisted target: %+v", b)
+	}
+	// A claim older than the cutoff is no live claim: not_claimed and no time, even though the candidate row is still there.
+	for _, r := range list(w.now.Add(time.Minute)) {
+		if r.PollerID == nil || r.PollerState != polling.StateNotClaimed || r.PollerStateAt != nil {
+			t.Fatalf("expired claim: %+v", r)
+		}
 	}
 }
