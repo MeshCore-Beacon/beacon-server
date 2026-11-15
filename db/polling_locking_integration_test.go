@@ -359,3 +359,35 @@ func TestOfflineKeepsCredentialStopsPostgres(t *testing.T) {
 		})
 	}
 }
+
+// Deleting a request clears polling_targets.active_request_id through an index, not a scan of every target.
+func TestDeletingRequestHasIndexedReverseReferencePostgres(t *testing.T) {
+	w := newReqWorld(t, "")
+	u := newUser(t, w.ctx, w.s, "alice")
+	r := newReq(u.ID, w.now, false)
+	if err := w.s.MutateRequestTarget(w.ctx, pollKey(0xA1), u.ID, func(st *polling.TargetState) error { return st.Create(r, w.now) }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.pool.Exec(w.ctx, `INSERT INTO polling_targets(target_public_key) SELECT decode(md5(i::text)||md5(i::text),'hex') FROM generate_series(1,100000) i; ANALYZE polling_targets`); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := w.pool.Query(w.ctx, `EXPLAIN UPDATE polling_targets SET active_request_id=NULL WHERE active_request_id=$1`, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			t.Fatal(err)
+		}
+		lines = append(lines, line)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if plan := strings.Join(lines, "\n"); strings.Contains(plan, "Seq Scan") {
+		t.Fatalf("the reverse reference has no index:\n%s", plan)
+	}
+}
