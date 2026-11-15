@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -387,5 +388,56 @@ func TestSafeReturn(t *testing.T) {
 		if got := SafeReturn(in); got != want {
 			t.Errorf("%q: %q, want %q", in, got, want)
 		}
+	}
+}
+
+// Distinct portal subjects stay distinct accounts, whatever they look like.
+func TestPortalSubjectIsExact(t *testing.T) {
+	long := strings.Repeat("x", 127)
+	subjects := []string{long + "A", long + "B", " pad ", "pad", "a  b", "a b"}
+	e := newPortalEnv(t)
+	for i, sub := range subjects {
+		e.handle = func(w http.ResponseWriter, _ map[string]string) {
+			b, _ := json.Marshal(map[string]any{"user": map[string]any{"id": sub, "username": fmt.Sprintf("u%d", i)}})
+			_, _ = w.Write(b)
+		}
+		cookie, state, _ := e.begin("/")
+		if _, _, err := e.finish(cookie, state, "code"); err != nil {
+			t.Fatalf("%q: %v", sub, err)
+		}
+	}
+	if n := len(e.store.users); n != len(subjects) {
+		t.Fatalf("%d users for %d distinct subjects", n, len(subjects))
+	}
+	for _, u := range e.store.users {
+		found := false
+		for _, sub := range subjects {
+			found = found || *u.ProviderSubject == sub
+		}
+		if !found {
+			t.Fatalf("subject rewritten to %q", *u.ProviderSubject)
+		}
+	}
+}
+
+func TestPortalSubjectRefused(t *testing.T) {
+	for name, id := range map[string]string{
+		"too long":     `"` + strings.Repeat("x", 129) + `"`,
+		"control":      `"a\u0000b"`,
+		"newline":      `"a\nb"`,
+		"empty":        `""`,
+		"blank":        `"   "`,
+		"bad utf8 esc": `"\ud800"`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newPortalEnv(t)
+			cookie, state, code := portalAnswer(`{"user":{"id":` + id + `,"username":"x"}}`)(e)
+			if tok, _, err := e.finish(cookie, state, code); !errors.Is(err, ErrPortalFailed) || tok != "" {
+				t.Fatalf("%q %v", tok, err)
+			}
+			if len(e.store.users) != 0 {
+				t.Fatal("user created")
+			}
+		})
 	}
 }

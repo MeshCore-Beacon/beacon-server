@@ -227,8 +227,9 @@ func (p *Portal) exchange(ctx context.Context, code, verifier string) (portalUse
 	case digitsOnly.Match(id):
 		subject = string(id)
 	}
-	if subject = cleanText(subject, maxPortalSubject); subject == "" {
-		return portalUser{}, p.fail("portal answer has no user id")
+	// The subject is the account key, so it is kept exactly or refused, never tidied into another account's key.
+	if !validSubject(subject) {
+		return portalUser{}, p.fail("portal answer has no usable user id")
 	}
 	username := cleanText(out.User.Username, maxPortalUsername)
 	if username == "" {
@@ -239,6 +240,14 @@ func (p *Portal) exchange(ctx context.Context, code, verifier string) (portalUse
 		display = username
 	}
 	return portalUser{subject: subject, username: username, displayName: display}, nil
+}
+
+// validSubject accepts a non-blank string of at most maxPortalSubject bytes with no control characters or invalid UTF-8.
+func validSubject(s string) bool {
+	if strings.TrimSpace(s) == "" || len(s) > maxPortalSubject || !utf8.ValidString(s) {
+		return false
+	}
+	return strings.IndexFunc(s, func(r rune) bool { return unicode.IsControl(r) || r == utf8.RuneError }) < 0
 }
 
 // cleanText drops control characters, collapses whitespace and cuts to max runes.

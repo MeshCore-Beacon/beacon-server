@@ -75,7 +75,7 @@ func (f *fakeStore) CreateUser(_ context.Context, u User) (User, error) {
 		if strings.EqualFold(o.Username, u.Username) {
 			return User{}, ErrUsernameTaken
 		}
-		if o.Email == strings.ToLower(u.Email) {
+		if u.Email != "" && o.Email == strings.ToLower(u.Email) {
 			return User{}, ErrEmailTaken
 		}
 	}
