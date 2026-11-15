@@ -1267,3 +1267,80 @@ func TestPollingLockKeysPostgres(t *testing.T) {
 		t.Fatal("another schema waited for this schema's lock", err)
 	}
 }
+
+func readingTrusted(t *testing.T, ctx context.Context, pool *pgxpool.Pool, obs []byte) bool {
+	t.Helper()
+	var trusted bool
+	if err := pool.QueryRow(ctx, `SELECT trusted FROM repeater_readings WHERE observer_public_key = $1`, obs).Scan(&trusted); err != nil {
+		t.Fatal(err)
+	}
+	return trusted
+}
+
+func TestRepeaterReadingTrustedAtInsertPostgres(t *testing.T) {
+	ctx, pool, s := pollStore(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	a, b, c := pollKey(1), pollKey(2), pollKey(3)
+	ids := map[byte]uuid.UUID{}
+	for _, k := range [][]byte{a, b, c} {
+		ids[k[0]] = pollObserver(t, ctx, s, k)
+		if _, err := s.ReplacePollingClaim(ctx, pollClaim(k, now, 0xA), ids[k[0]], now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A has evidence, B is assigned without it, C has a live claim and no assignment row.
+	if err := s.ReplacePollingAssignments(ctx, pollKey(0xA), []polling.Assignment{
+		{Observer: a, Rank: 0, EvidenceCount: 3}, {Observer: b, Rank: 1},
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range [][]byte{a, b, c} {
+		if ok, err := s.InsertRepeaterReading(ctx, pollReading(k, 0xA, "status", now, nil), ids[k[0]], now); err != nil || !ok {
+			t.Fatal(ok, err)
+		}
+	}
+	for k, want := range map[byte]bool{1: true, 2: false, 3: false} {
+		if got := readingTrusted(t, ctx, pool, pollKey(k)); got != want {
+			t.Fatalf("observer %d trusted = %v, want %v", k, got, want)
+		}
+	}
+	// Removing the assignment later does not change what was stored.
+	if err := s.ReplacePollingAssignments(ctx, pollKey(0xA), nil, now); err != nil {
+		t.Fatal(err)
+	}
+	if !readingTrusted(t, ctx, pool, a) {
+		t.Fatal("stored reading lost its trust when the assignment went")
+	}
+}
+
+func TestRepeaterReadingTrustMigrationBackfillPostgres(t *testing.T) {
+	ctx, pool, _ := pollStore(t)
+	const name = "065_repeater_reading_trust.sql"
+	// The helper cannot stop at a migration, so undo 065 and run it again over existing rows.
+	for _, q := range []string{`DROP INDEX idx_repeater_readings_trusted`, `ALTER TABLE repeater_readings DROP COLUMN trusted`} {
+		if _, err := pool.Exec(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM schema_migrations WHERE filename = $1`, name); err != nil {
+		t.Fatal(err)
+	}
+	a, b := pollKey(1), pollKey(2)
+	now := time.Now().UTC().Truncate(time.Second)
+	if _, err := pool.Exec(ctx, `INSERT INTO polling_assignments (target_public_key, observer_public_key, rank, evidence_count, assigned_at)
+VALUES ($1, $2, 0, 2, $3)`, pollKey(0xA), a, now); err != nil {
+		t.Fatal(err)
+	}
+	for i, k := range [][]byte{a, b} {
+		if _, err := pool.Exec(ctx, `INSERT INTO repeater_readings (target_public_key, observer_public_key, sampled_at, received_at, method, tag)
+VALUES ($1, $2, $3, $3, 'status', $4)`, pollKey(0xA), k, now, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := RunMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	if !readingTrusted(t, ctx, pool, a) || readingTrusted(t, ctx, pool, b) {
+		t.Fatal("backfill marked the wrong readings")
+	}
+}

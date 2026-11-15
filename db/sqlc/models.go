@@ -599,6 +599,7 @@ type RepeaterReading struct {
 	PacketHash        []byte             `json:"packet_hash"`
 	Corroborated      *int16             `json:"corroborated"`
 	Client            string             `json:"client"`
+	Trusted           bool               `json:"trusted"`
 }
 
 type RollupOb struct {

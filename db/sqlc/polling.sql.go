@@ -210,7 +210,7 @@ INSERT INTO repeater_readings (
     battery_mv, temperature_c, poll_snr,
     uptime_secs, packets_recv, packets_sent, recv_flood, recv_direct, sent_flood, sent_direct,
     tx_air_secs, rx_air_secs, recv_errors, noise_floor, last_rssi, tx_queue, flood_dups, direct_dups, err_events, last_snr,
-    lpp, packet_hash, client)
+    lpp, packet_hash, client, trusted)
 SELECT
     $1, $2,
     $3, $4, $5, $6, $7,
@@ -219,7 +219,13 @@ SELECT
     $16, $17, $18, $19, $20,
     $21, $22, $23, $24, $25,
     $26, $27,
-    $28, $29, $30
+    $28, $29, $30,
+    -- Same rule as latest_ts in PollingOwnerRows, frozen at insert time.
+    EXISTS (
+        SELECT 1 FROM polling_assignments t
+        WHERE t.target_public_key = $1 AND t.observer_public_key = $2
+          AND t.evidence_count > 0
+    )
 WHERE NOT EXISTS (
     SELECT 1 FROM repeater_readings x
     WHERE x.target_public_key = $1 AND x.observer_public_key = $2

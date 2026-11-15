@@ -30,7 +30,7 @@ INSERT INTO repeater_readings (
     battery_mv, temperature_c, poll_snr,
     uptime_secs, packets_recv, packets_sent, recv_flood, recv_direct, sent_flood, sent_direct,
     tx_air_secs, rx_air_secs, recv_errors, noise_floor, last_rssi, tx_queue, flood_dups, direct_dups, err_events, last_snr,
-    lpp, packet_hash, client)
+    lpp, packet_hash, client, trusted)
 SELECT
     sqlc.arg(target_public_key), sqlc.arg(observer_public_key),
     sqlc.arg(observer_id), sqlc.arg(sampled_at), sqlc.arg(received_at), sqlc.arg(method), sqlc.arg(tag),
@@ -39,7 +39,13 @@ SELECT
     sqlc.narg(sent_flood), sqlc.narg(sent_direct), sqlc.narg(tx_air_secs), sqlc.narg(rx_air_secs), sqlc.narg(recv_errors),
     sqlc.narg(noise_floor), sqlc.narg(last_rssi), sqlc.narg(tx_queue), sqlc.narg(flood_dups), sqlc.narg(direct_dups),
     sqlc.narg(err_events), sqlc.narg(last_snr),
-    sqlc.narg(lpp), sqlc.narg(packet_hash), sqlc.arg(client)
+    sqlc.narg(lpp), sqlc.narg(packet_hash), sqlc.arg(client),
+    -- Same rule as latest_ts in PollingOwnerRows, frozen at insert time.
+    EXISTS (
+        SELECT 1 FROM polling_assignments t
+        WHERE t.target_public_key = sqlc.arg(target_public_key) AND t.observer_public_key = sqlc.arg(observer_public_key)
+          AND t.evidence_count > 0
+    )
 WHERE NOT EXISTS (
     SELECT 1 FROM repeater_readings x
     WHERE x.target_public_key = sqlc.arg(target_public_key) AND x.observer_public_key = sqlc.arg(observer_public_key)
