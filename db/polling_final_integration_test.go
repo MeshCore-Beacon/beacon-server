@@ -84,16 +84,19 @@ func TestRequestedClaimArrivesMidElectionPostgres(t *testing.T) {
 	if err := hold.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
-	// Each election gets its answer when it asks; the older target first, as the reviewer ordered them.
+	// Each election is let go as it asks. The younger one is held back a moment so that, without the fix, the older
+	// one commits its seat first and the younger one then commits the same seat. With the fix they run one at a time
+	// in either order.
 	go func() {
-		for tg := range arrived {
-			if tg == 0xA2 {
-				close(release[0xA2])
-				break
-			}
+		for range 2 {
+			tg := <-arrived
+			go func() {
+				if tg == 0xA1 {
+					time.Sleep(200 * time.Millisecond)
+				}
+				close(release[tg])
+			}()
 		}
-		time.Sleep(200 * time.Millisecond)
-		close(release[0xA1])
 	}()
 	for _, tg := range []byte{0xA2, 0xA1} {
 		if err := <-done[tg]; err != nil {
