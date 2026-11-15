@@ -66,17 +66,27 @@ func loadRadioCaps(ctx context.Context, q sqlc.Querier, keys [][]byte, now time.
 }
 
 // pick returns the capabilities and display name for the radio, reading it as the requested kind when a row of that
-// kind exists and otherwise as the other kind.
+// kind exists and otherwise as the other kind. A key with both rows gets both sets of capabilities, read as a node
+// unless the observer is asked for.
 func (rc radioCaps) pick(key, want string) (id uuid.UUID, kind string, c alerts.Caps, name string) {
 	n, isNode := rc.node[key]
 	o, isObs := rc.observer[key]
+	if isNode && isObs {
+		c = alerts.Caps{Observer: true, HasNode: true, NodeType: n.NodeType, Polled: n.Readings > 0 || o.HasBattery || o.HasNoise || o.HasUptime,
+			Battery: n.HasBattery || o.HasBattery, Temperature: n.HasTemperature, Noise: n.HasNoise || o.HasNoise, Uptime: n.HasUptime || o.HasUptime,
+			ObsBattery: o.HasBattery, ObsNoise: o.HasNoise, ObsUptime: o.HasUptime}
+		if want == alerts.TargetObserver {
+			return o.ID, alerts.TargetObserver, c, o.Name
+		}
+		return n.ID, alerts.TargetNode, c, n.Name
+	}
 	asObserver := (want == alerts.TargetObserver && isObs) || (!isNode && isObs)
 	switch {
 	case asObserver:
 		return o.ID, alerts.TargetObserver, alerts.Caps{Observer: true, Polled: o.HasBattery || o.HasNoise || o.HasUptime,
 			Battery: o.HasBattery, Noise: o.HasNoise, Uptime: o.HasUptime}, o.Name
 	case isNode:
-		return n.ID, alerts.TargetNode, alerts.Caps{NodeType: n.NodeType, Polled: n.Readings > 0, Battery: n.HasBattery,
+		return n.ID, alerts.TargetNode, alerts.Caps{HasNode: true, NodeType: n.NodeType, Polled: n.Readings > 0, Battery: n.HasBattery,
 			Temperature: n.HasTemperature, Noise: n.HasNoise, Uptime: n.HasUptime}, n.Name
 	}
 	return uuid.Nil, want, alerts.Caps{Observer: want == alerts.TargetObserver}, ""
@@ -161,6 +171,7 @@ func (s *Store) PutRule(ctx context.Context, userID uuid.UUID, in alerts.RuleInp
 			return err
 		}
 		_, kind, caps, _ := rc.pick(hex.EncodeToString(in.PublicKey), in.TargetKind)
+		kind = caps.Source(in.Kind, kind)
 		kinds, err := q.UserAlertRuleKinds(ctx, sqlc.UserAlertRuleKindsParams{UserID: userID, TargetPublicKey: in.PublicKey})
 		if err != nil {
 			return err

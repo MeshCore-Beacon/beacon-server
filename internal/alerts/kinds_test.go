@@ -189,3 +189,30 @@ func TestValidateRule(t *testing.T) {
 		})
 	}
 }
+
+func TestCapsOfAnObserverThatIsAlsoANode(t *testing.T) {
+	c := Caps{Observer: true, HasNode: true, NodeType: nodeTypeRepeater, Polled: true,
+		Battery: true, Noise: true, Uptime: true, ObsBattery: true, ObsNoise: true, ObsUptime: true}
+	avail, un, _ := Availability(c)
+	for _, k := range []string{KindObserverOff, KindClock, KindBatteryLow, KindRebooted, KindNoiseHigh} {
+		if !slices.Contains(avail, k) {
+			t.Errorf("%s missing: %v %v", k, avail, un)
+		}
+	}
+	for kind, want := range map[string]string{
+		KindObserverOff: TargetObserver, KindClock: TargetNode, KindTemperature: TargetNode, KindBatteryLow: TargetObserver,
+		KindNoiseHigh: TargetObserver, KindRebooted: TargetObserver, KindGoneQuiet: TargetNode,
+	} {
+		if got := c.Source(kind, TargetNode); got != want {
+			t.Errorf("%s reads from %s, want %s", kind, got, want)
+		}
+	}
+	c.ObsBattery = false // only the node reports a battery
+	if got := c.Source(KindBatteryLow, TargetObserver); got != TargetNode {
+		t.Errorf("battery from %s", got)
+	}
+	// A plain node or observer reads as asked.
+	if got := (Caps{NodeType: nodeTypeRepeater}).Source(KindObserverOff, TargetNode); got != TargetNode {
+		t.Errorf("plain node: %s", got)
+	}
+}

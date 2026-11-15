@@ -45,15 +45,51 @@ const DataWindow = 14 * 24 * 3600 // seconds
 
 // Caps is what a radio is and what Beacon has recently seen it report.
 type Caps struct {
+	// Observer: the key has an observer row. HasNode: it has a node row (NodeType is then its type). A radio that
+	// is both (an observer that also adverts) has the capabilities of both, with the observer's own data kept apart
+	// in the Obs fields so each alert can read from the source that has its data.
 	Observer bool
+	HasNode  bool
 	NodeType int16 // nodes only
 	// Polled: trusted readings (nodes) or telemetry (observers) arrived in the data window.
 	Polled                              bool
 	Battery, Temperature, Noise, Uptime bool
+	ObsBattery, ObsNoise, ObsUptime     bool
 }
+
+func (c Caps) isNode() bool { return c.HasNode || c.NodeType != 0 }
 
 func (c Caps) repeaterLike() bool {
 	return c.Observer || c.NodeType == nodeTypeRepeater || c.NodeType == nodeTypeRoomServer
+}
+
+// Source is the kind of row a rule of the kind reads its data from. A radio with both an observer and a node row
+// reads each alert where its data is: observer telemetry for battery, noise and uptime when the observer reports
+// them, the node for temperature and the clock, the observer for its own status. Otherwise it is the requested kind.
+func (c Caps) Source(kind, requested string) string {
+	if !c.Observer || !c.isNode() {
+		return requested
+	}
+	switch kind {
+	case KindObserverOff:
+		return TargetObserver
+	case KindClock, KindTemperature:
+		return TargetNode
+	case KindBatteryLow, KindBatteryFalling:
+		return pickSource(c.ObsBattery)
+	case KindNoiseHigh:
+		return pickSource(c.ObsNoise)
+	case KindRebooted:
+		return pickSource(c.ObsUptime)
+	}
+	return requested
+}
+
+func pickSource(observerHasIt bool) string {
+	if observerHasIt {
+		return TargetObserver
+	}
+	return TargetNode
 }
 
 // Reason codes: a stable snake_case code for each reason a kind can be unavailable, so clients can translate it.
@@ -105,7 +141,7 @@ func kindStatus(c Caps, kind string) (ok bool, code, why string, relevant bool) 
 		switch {
 		case has:
 			return true, "", "", true
-		case c.Observer:
+		case c.Observer && !c.isNode():
 			return false, CodeObserverNoData, "This observer does not report " + what + ".", true
 		case !c.repeaterLike():
 			return false, CodeRepeatersOnly, "Only repeaters report " + what + ".", true
@@ -121,10 +157,10 @@ func kindStatus(c Caps, kind string) (ok bool, code, why string, relevant bool) 
 	case KindObserverOff:
 		return c.Observer, "", "", c.Observer
 	case KindClock:
-		if c.Observer {
+		if c.Observer && !c.isNode() {
 			return false, CodeObserverNoClock, "Observers have no clock drift value.", true
 		}
-		if !c.repeaterLike() {
+		if c.NodeType != nodeTypeRepeater && c.NodeType != nodeTypeRoomServer {
 			return false, CodeClockRepeatersOnly, "Only repeaters and room servers report their clock.", true
 		}
 		return true, "", "", true

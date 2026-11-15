@@ -323,3 +323,68 @@ func TestDeviceTokenSimultaneousRegistrationsPostgres(t *testing.T) {
 		t.Fatalf("%d owners of one token: %v", n, err)
 	}
 }
+
+// A radio that is an observer and also has a node row keeps what its observer telemetry gives it, and each alert
+// reads from the source that has its data.
+func TestAlertObserverThatIsAlsoANodePostgres(t *testing.T) {
+	ctx, pool, s := userStore(t)
+	svc := alertSvc(s)
+	u := newUser(t, ctx, s, "alice")
+	key := atlasKey(5)
+	var obsID uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO observers (public_key, display_name, last_seen, last_status_at) VALUES ($1, 'North', now(), now()) RETURNING id`, key).Scan(&obsID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO observer_telemetry (id, observer_id, reported_at, battery_voltage_mv, noise_floor_db, uptime_seconds)
+		VALUES (1, $1, now(), 3900, -100, 5000)`, obsID); err != nil {
+		t.Fatal(err)
+	}
+	pinAtlas(t, ctx, s, u, 0, api.StoredPin{Kind: "observer", Key: key})
+	want := []string{"observer_offline", "battery_low", "battery_falling", "rebooted", "noise_high"}
+	check := func(when string) alerts.TargetView {
+		t.Helper()
+		ov, err := svc.Overview(ctx, u.ID)
+		if err != nil || len(ov.Targets) != 1 {
+			t.Fatalf("%s: %+v %v", when, ov, err)
+		}
+		for _, k := range want {
+			if !contains(ov.Targets[0].Available, k) {
+				t.Fatalf("%s: %s is not available: %v %v", when, k, ov.Targets[0].Available, ov.Targets[0].Unavailable)
+			}
+		}
+		return ov.Targets[0]
+	}
+	check("observer only")
+	insertNode(t, ctx, s, key, 2, "North")
+	tgt := check("after its own advert")
+	if !contains(tgt.Available, "clock") {
+		t.Fatalf("the node side lost its clock: %v", tgt.Available)
+	}
+	// The alert is created through the target as the overview lists it.
+	for _, k := range []string{"observer_offline", "battery_low"} {
+		th := 60
+		if k == "battery_low" {
+			th = 3500
+		}
+		if _, err := svc.PutRule(ctx, u.ID, alerts.RuleInput{TargetKind: tgt.Kind, PublicKey: key, Kind: k, Threshold: &th, Enabled: true}); err != nil {
+			t.Fatalf("%s through the listed target: %v", k, err)
+		}
+	}
+	// Each rule reads from the source that has its data.
+	kinds := map[string]string{}
+	rows, err := pool.Query(ctx, `SELECT kind, target_kind FROM user_alert_rules WHERE user_id = $1`, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k, tk string
+		if err := rows.Scan(&k, &tk); err != nil {
+			t.Fatal(err)
+		}
+		kinds[k] = tk
+	}
+	if kinds["observer_offline"] != "observer" || kinds["battery_low"] != "observer" {
+		t.Fatalf("sources %v", kinds)
+	}
+}
