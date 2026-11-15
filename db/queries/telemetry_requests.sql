@@ -117,12 +117,12 @@ DELETE FROM polling_served_versions WHERE served_at < $1;
 SELECT observer_public_key, seen_at FROM polling_other_states WHERE target_public_key = $1;
 
 -- name: OfflineRequestTargets :many
--- Requested targets whose node no observer has heard since cutoff and whose newest enabling is older than cutoff.
--- Requests with no node row count from the enabling alone.
+-- Targets with a waiting or active request whose node no observer has heard since cutoff and whose newest such
+-- request was enabled before it. Requests with no node row count from the enabling alone.
 SELECT r.target_public_key::bytea AS target_public_key
 FROM telemetry_requests r
 LEFT JOIN nodes n ON n.public_key = r.target_public_key
-WHERE r.status <> 'disabled'
+WHERE r.status IN ('waiting', 'active')
 GROUP BY r.target_public_key, n.last_seen
 HAVING GREATEST(max(r.enabled_at), COALESCE(n.last_seen, '-infinity'::timestamptz)) < sqlc.arg(cutoff)::timestamptz;
 
@@ -132,7 +132,7 @@ SELECT EXISTS (
     SELECT 1
     FROM telemetry_requests r
     LEFT JOIN nodes n ON n.public_key = r.target_public_key
-    WHERE r.status <> 'disabled' AND r.target_public_key = sqlc.arg(target_public_key)
+    WHERE r.status IN ('waiting', 'active') AND r.target_public_key = sqlc.arg(target_public_key)
     GROUP BY r.target_public_key, n.last_seen
     HAVING GREATEST(max(r.enabled_at), COALESCE(n.last_seen, '-infinity'::timestamptz)) < sqlc.arg(cutoff)::timestamptz
 )::boolean AS offline;

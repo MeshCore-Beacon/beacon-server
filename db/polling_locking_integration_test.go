@@ -296,3 +296,66 @@ func TestPreemptionOffersReplacementAtZeroFreeSlotsPostgres(t *testing.T) {
 		t.Fatalf("replacement carries %q", got)
 	}
 }
+
+// A failed or admin-stopped request keeps its state through the offline sweep and a later enable.
+func TestOfflineKeepsCredentialStopsPostgres(t *testing.T) {
+	for _, state := range []string{"login_failed", "admin_stop"} {
+		t.Run(state, func(t *testing.T) {
+			w := newReqWorld(t, "")
+			u := newUser(t, w.ctx, w.s, "alice")
+			n := w.node(0xA1)
+			o := newReqDevice(1)
+			pollHearAdvert(t, w.ctx, w.pool, pollKey(0xA1), pollObserver(t, w.ctx, w.s, o.pub), w.now.Add(-time.Hour), 5)
+			w.claim(o, 1)
+			r, err := w.reqs.Create(w.ctx, u.ID, n, []byte("pw"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := w.owners(o, 0xA1); !ok {
+				t.Fatal("setup")
+			}
+			w.now = w.now.Add(time.Hour)
+			w.claim(o, 0, reqNode(pollKey(0xA1), true, state))
+			want := w.status(u.ID, r.ID)
+			if _, err = w.pool.Exec(w.ctx, `UPDATE telemetry_requests SET enabled_at=$1`, w.now.Add(-9*24*time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = w.pool.Exec(w.ctx, `UPDATE nodes SET last_seen=$1`, w.now.Add(-10*24*time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = w.s.DisableOfflineRequests(w.ctx, w.now.Add(-7*24*time.Hour), w.now, polling.ReasonOffline(7)); err != nil {
+				t.Fatal(err)
+			}
+			if got := w.status(u.ID, r.ID); got.Status != want.Status || got.Reason != want.Reason {
+				t.Fatalf("offline sweep changed %s/%q to %s/%q", want.Status, want.Reason, got.Status, got.Reason)
+			}
+			if state == "admin_stop" {
+				fresh := newReqDevice(2)
+				pollHearAdvert(t, w.ctx, w.pool, pollKey(0xA1), pollObserver(t, w.ctx, w.s, fresh.pub), w.now.Add(-time.Hour), 8)
+				w.claim(fresh, 1)
+			}
+			got, err := w.reqs.Update(w.ctx, u.ID, r.ID, polling.RequestUpdate{Enable: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var failed bool
+			var active *uuid.UUID
+			if err = w.pool.QueryRow(w.ctx, `SELECT r.password_failed, t.active_request_id FROM telemetry_requests r
+				JOIN polling_targets t ON t.target_public_key = r.target_public_key WHERE r.id=$1`, r.ID).Scan(&failed, &active); err != nil {
+				t.Fatal(err)
+			}
+			if got.Status != want.Status || got.Reason != want.Reason || active != nil || failed != (state == "login_failed") {
+				t.Fatalf("enable revived a stopped credential: status=%s reason=%q hasPassword=%v failed=%v active=%v",
+					got.Status, got.Reason, got.HasPassword, failed, active)
+			}
+			if state == "admin_stop" {
+				if _, err := w.reqs.Update(w.ctx, u.ID, r.ID, polling.RequestUpdate{SetPassword: true}); err == nil {
+					t.Fatal("an admin-stopped request became a blank login")
+				}
+				if got := w.status(u.ID, r.ID); got.Status != polling.StatusAdminStopped {
+					t.Fatalf("refused blank login still changed the request: %s", got.Status)
+				}
+			}
+		})
+	}
+}

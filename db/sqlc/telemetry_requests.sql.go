@@ -452,13 +452,13 @@ const offlineRequestTargets = `-- name: OfflineRequestTargets :many
 SELECT r.target_public_key::bytea AS target_public_key
 FROM telemetry_requests r
 LEFT JOIN nodes n ON n.public_key = r.target_public_key
-WHERE r.status <> 'disabled'
+WHERE r.status IN ('waiting', 'active')
 GROUP BY r.target_public_key, n.last_seen
 HAVING GREATEST(max(r.enabled_at), COALESCE(n.last_seen, '-infinity'::timestamptz)) < $1::timestamptz
 `
 
-// Requested targets whose node no observer has heard since cutoff and whose newest enabling is older than cutoff.
-// Requests with no node row count from the enabling alone.
+// Targets with a waiting or active request whose node no observer has heard since cutoff and whose newest such
+// request was enabled before it. Requests with no node row count from the enabling alone.
 func (q *Queries) OfflineRequestTargets(ctx context.Context, cutoff pgtype.Timestamptz) ([][]byte, error) {
 	rows, err := q.db.Query(ctx, offlineRequestTargets, cutoff)
 	if err != nil {
@@ -616,7 +616,7 @@ SELECT EXISTS (
     SELECT 1
     FROM telemetry_requests r
     LEFT JOIN nodes n ON n.public_key = r.target_public_key
-    WHERE r.status <> 'disabled' AND r.target_public_key = $1
+    WHERE r.status IN ('waiting', 'active') AND r.target_public_key = $1
     GROUP BY r.target_public_key, n.last_seen
     HAVING GREATEST(max(r.enabled_at), COALESCE(n.last_seen, '-infinity'::timestamptz)) < $2::timestamptz
 )::boolean AS offline

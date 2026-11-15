@@ -227,7 +227,8 @@ func (t *TargetState) Create(r Request, now time.Time) error {
 }
 
 // SetPassword replaces a request's sealed password; nil ct removes it (a blank login). A failed or admin-stopped
-// request starts again.
+// request starts again. An admin-stopped one needs a password: a repeater that gave admin to one may do so for a
+// blank login too.
 func (t *TargetState) SetPassword(id uuid.UUID, ct, nonce []byte, now time.Time) error {
 	r := t.find(id)
 	if r == nil {
@@ -235,6 +236,9 @@ func (t *TargetState) SetPassword(id uuid.UUID, ct, nonce []byte, now time.Time)
 	}
 	if ct == nil && t.NoPasswordBlocked {
 		return ErrNoPasswordBlocked
+	}
+	if ct == nil && r.Status == StatusAdminStopped {
+		return ErrPasswordInvalid
 	}
 	old := t.activeKey()
 	r.PasswordCT, r.PasswordNonce, r.HasPassword = ct, nonce, ct != nil
@@ -312,12 +316,13 @@ func (t *TargetState) AdminStop(now time.Time) bool {
 	return true
 }
 
-// Disable stops every request of the target, for a repeater nobody hears any more.
+// Disable stops the waiting and active requests of the target, for a repeater nobody hears any more. A failed or
+// admin-stopped request keeps its state: only a new password starts it again.
 func (t *TargetState) Disable(reason string, now time.Time) {
 	old := t.activeKey()
 	for i := range t.Requests {
 		r := &t.Requests[i]
-		if r.Status != StatusDisabled {
+		if r.Status == StatusWaiting || r.Status == StatusActive {
 			r.Status, r.Reason, r.UpdatedAt = StatusDisabled, reason, now
 		}
 	}

@@ -440,3 +440,29 @@ func TestFollowAssignmentsKeepsStoppedRequests(t *testing.T) {
 		t.Fatalf("reasons: %+v", st.Requests)
 	}
 }
+
+func TestDisableKeepsCredentialStops(t *testing.T) {
+	now := time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC)
+	st := &TargetState{Requests: []Request{
+		{ID: uuid.New(), Status: StatusLoginFailed, Reason: ReasonLoginFailed, PasswordFailed: true, HasPassword: true},
+		{ID: uuid.New(), Status: StatusAdminStopped, Reason: ReasonAdminStopped},
+		{ID: uuid.New(), Status: StatusActive, HasPassword: true},
+	}}
+	st.Disable(ReasonOffline(7), now)
+	for i, want := range []RequestStatus{StatusLoginFailed, StatusAdminStopped, StatusDisabled} {
+		if st.Requests[i].Status != want {
+			t.Fatalf("request %d: %s, want %s", i, st.Requests[i].Status, want)
+		}
+	}
+	for _, r := range st.Requests[:2] {
+		if err := st.Enable(r.ID, now); err != nil || st.find(r.ID).Status != r.Status {
+			t.Fatalf("enable changed a stopped request: %v %s", err, st.find(r.ID).Status)
+		}
+	}
+	if err := st.SetPassword(st.Requests[1].ID, nil, nil, now); !errors.Is(err, ErrPasswordInvalid) || st.Requests[1].Status != StatusAdminStopped {
+		t.Fatalf("admin-stopped request became a blank login: %v %s", err, st.Requests[1].Status)
+	}
+	if err := st.SetPassword(st.Requests[1].ID, []byte("ct"), []byte("nonce"), now); err != nil || st.Requests[1].Status != StatusWaiting {
+		t.Fatalf("a new password did not restart it: %v %s", err, st.Requests[1].Status)
+	}
+}

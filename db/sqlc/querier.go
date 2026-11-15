@@ -688,8 +688,8 @@ type Querier interface {
 	ObservationIDBelow(ctx context.Context, arg ObservationIDBelowParams) (int64, error)
 	ObserverIDsByKeys(ctx context.Context, dollar_1 [][]byte) ([]ObserverIDsByKeysRow, error)
 	ObserverKeysByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]ObserverKeysByIDsRow, error)
-	// Requested targets whose node no observer has heard since cutoff and whose newest enabling is older than cutoff.
-	// Requests with no node row count from the enabling alone.
+	// Targets with a waiting or active request whose node no observer has heard since cutoff and whose newest such
+	// request was enabled before it. Requests with no node row count from the enabling alone.
 	OfflineRequestTargets(ctx context.Context, cutoff pgtype.Timestamptz) ([][]byte, error)
 	OldestMissingRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
 	OldestTargetRequest(ctx context.Context, targetPublicKey []byte) (pgtype.Timestamptz, error)
