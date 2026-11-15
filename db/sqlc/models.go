@@ -663,6 +663,23 @@ type User struct {
 	DisabledAt      pgtype.Timestamptz `json:"disabled_at"`
 }
 
+type UserAtla struct {
+	UserID    uuid.UUID          `json:"user_id"`
+	Range     string             `json:"range"`
+	Revision  int64              `json:"revision"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type UserAtlasPin struct {
+	UserID    uuid.UUID `json:"user_id"`
+	Position  int16     `json:"position"`
+	Kind      string    `json:"kind"`
+	PublicKey []byte    `json:"public_key"`
+	Name      string    `json:"name"`
+	Tiles     []string  `json:"tiles"`
+	View      *string   `json:"view"`
+}
+
 type UserSession struct {
 	ID            uuid.UUID          `json:"id"`
 	UserID        uuid.UUID          `json:"user_id"`

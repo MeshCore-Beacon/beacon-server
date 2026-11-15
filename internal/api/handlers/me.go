@@ -16,7 +16,11 @@ import (
 )
 
 // MeRouter serves /api/v1/me. Every route needs a session; it expects mw.UserAuth upstream.
-func MeRouter(svc AccountsService, opts AuthOptions) http.Handler {
+// MeMount adds routes to the signed-in router. They sit behind the session, forgery and read-only checks, and get
+// the shared write limiter.
+type MeMount func(r chi.Router, writes func(http.Handler) http.Handler)
+
+func MeRouter(svc AccountsService, opts AuthOptions, mounts ...MeMount) http.Handler {
 	if !opts.Enabled || svc == nil {
 		return accountsDisabled()
 	}
@@ -33,6 +37,11 @@ func MeRouter(svc AccountsService, opts AuthOptions) http.Handler {
 	r.Get("/sessions", listSessions(svc))
 	r.With(writes).Delete("/sessions", endOtherSessions(svc))
 	r.With(writes).Delete("/sessions/{id}", endSession(svc, opts))
+	for _, m := range mounts {
+		if m != nil {
+			m(r, writes)
+		}
+	}
 	return r
 }
 

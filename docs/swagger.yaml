@@ -212,6 +212,91 @@ definitions:
       user:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.User'
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.Atlas:
+    properties:
+      limit:
+        example: 12
+        type: integer
+      pins:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AtlasPin'
+        type: array
+      range:
+        enum:
+        - 24h
+        - 3d
+        type: string
+      revision:
+        example: 7
+        type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.AtlasConflict:
+    properties:
+      current:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.Atlas'
+      error:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AtlasConflictError'
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.AtlasConflictError:
+    properties:
+      code:
+        example: atlas_conflict
+        type: string
+      message:
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.AtlasPin:
+    properties:
+      id:
+        type: string
+        x-nullable: true
+      kind:
+        enum:
+        - node
+        - observer
+        type: string
+      name:
+        type: string
+      observerId:
+        type: string
+        x-nullable: true
+      observerPublicKey:
+        type: string
+      publicKey:
+        example: 0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a
+        type: string
+      tiles:
+        items:
+          type: string
+        type: array
+      view:
+        enum:
+        - heard
+        - observer
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.AtlasPinInput:
+    properties:
+      kind:
+        enum:
+        - node
+        - observer
+        type: string
+      name:
+        type: string
+      observerId:
+        type: string
+      observerPublicKey:
+        type: string
+      publicKey:
+        type: string
+      tiles:
+        items:
+          type: string
+        type: array
+      view:
+        type: string
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.ChangeEmailRequest:
     properties:
       currentPassword:
@@ -1815,6 +1900,21 @@ definitions:
         items:
           $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PollingTarget'
         type: array
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.PutAtlasRequest:
+    properties:
+      baseRevision:
+        example: 7
+        type: integer
+      pins:
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AtlasPinInput'
+        type: array
+      range:
+        enum:
+        - 24h
+        - 3d
+        type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.RadioPreset:
     properties:
@@ -4238,6 +4338,105 @@ paths:
       security:
       - UserSession: []
       summary: Change the display name
+      tags:
+      - Accounts
+  /me/atlas:
+    get:
+      description: 'Ids are resolved now: a node pin''s id is the node with that key,
+        and an observer pin whose key has a node row is returned as a node pin.'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.Atlas'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - UserSession: []
+      summary: The signed-in user's Atlas
+      tags:
+      - Accounts
+    put:
+      consumes:
+      - application/json
+      description: Replaces every pin when baseRevision is the stored revision and
+        returns the new document. Otherwise 409 atlas_conflict with the stored Atlas
+        under current.
+      parameters:
+      - description: Body at most 32 KiB
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PutAtlasRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.Atlas'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AtlasConflict'
+        "413":
+          description: Request Entity Too Large
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "415":
+          description: Unsupported Media Type
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - UserSession: []
+      summary: Replace the Atlas
       tags:
       - Accounts
   /me/email:

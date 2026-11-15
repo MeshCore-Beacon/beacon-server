@@ -2638,6 +2638,155 @@
                 }
             }
         },
+        "/me/atlas": {
+            "get": {
+                "security": [
+                    {
+                        "UserSession": []
+                    }
+                ],
+                "description": "Ids are resolved now: a node pin's id is the node with that key, and an observer pin whose key has a node row is returned as a node pin.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Accounts"
+                ],
+                "summary": "The signed-in user's Atlas",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.Atlas"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "UserSession": []
+                    }
+                ],
+                "description": "Replaces every pin when baseRevision is the stored revision and returns the new document. Otherwise 409 atlas_conflict with the stored Atlas under current.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Accounts"
+                ],
+                "summary": "Replace the Atlas",
+                "parameters": [
+                    {
+                        "description": "Body at most 32 KiB",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PutAtlasRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.Atlas"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AtlasConflict"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "415": {
+                        "description": "Unsupported Media Type",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/me/email": {
             "post": {
                 "security": [
@@ -6500,6 +6649,131 @@
                 }
             }
         },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.Atlas": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "example": 12
+                },
+                "pins": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AtlasPin"
+                    }
+                },
+                "range": {
+                    "type": "string",
+                    "enum": [
+                        "24h",
+                        "3d"
+                    ]
+                },
+                "revision": {
+                    "type": "integer",
+                    "example": 7
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.AtlasConflict": {
+            "type": "object",
+            "properties": {
+                "current": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.Atlas"
+                },
+                "error": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AtlasConflictError"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.AtlasConflictError": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "example": "atlas_conflict"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.AtlasPin": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "x-nullable": true
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "node",
+                        "observer"
+                    ]
+                },
+                "name": {
+                    "type": "string"
+                },
+                "observerId": {
+                    "type": "string",
+                    "x-nullable": true
+                },
+                "observerPublicKey": {
+                    "type": "string"
+                },
+                "publicKey": {
+                    "type": "string",
+                    "example": "0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a"
+                },
+                "tiles": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "view": {
+                    "type": "string",
+                    "enum": [
+                        "heard",
+                        "observer"
+                    ]
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.AtlasPinInput": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "node",
+                        "observer"
+                    ]
+                },
+                "name": {
+                    "type": "string"
+                },
+                "observerId": {
+                    "type": "string"
+                },
+                "observerPublicKey": {
+                    "type": "string"
+                },
+                "publicKey": {
+                    "type": "string"
+                },
+                "tiles": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "view": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_MeshCore-Beacon_beacon-server_internal_api.ChangeEmailRequest": {
             "type": "object",
             "properties": {
@@ -8771,6 +9045,28 @@
                     "items": {
                         "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PollingTarget"
                     }
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.PutAtlasRequest": {
+            "type": "object",
+            "properties": {
+                "baseRevision": {
+                    "type": "integer",
+                    "example": 7
+                },
+                "pins": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AtlasPinInput"
+                    }
+                },
+                "range": {
+                    "type": "string",
+                    "enum": [
+                        "24h",
+                        "3d"
+                    ]
                 }
             }
         },

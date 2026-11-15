@@ -34,6 +34,7 @@ type Querier interface {
 	// in id order, that lack one. Rows that already carry a type are never touched. Returns how many
 	// untyped rows it picked, how many it typed, and the last picked id (0 when it picked none).
 	BackfillObservationPayloadTypes(ctx context.Context, arg BackfillObservationPayloadTypesParams) (BackfillObservationPayloadTypesRow, error)
+	BumpUserAtlas(ctx context.Context, arg BumpUserAtlasParams) (int64, error)
 	// Exact check of messages in (after_id, through_id]: pairs the definition has and the table lacks (counting
 	// observations up to obs_through only), and table pairs no stored observation backs.
 	CheckChannelMessageIATAs(ctx context.Context, arg CheckChannelMessageIATAsParams) (CheckChannelMessageIATAsRow, error)
@@ -113,12 +114,15 @@ type Querier interface {
 	// is removed so both can be used again. A disabled account is never removed here.
 	DeleteStaleUnverifiedUsers(ctx context.Context, arg DeleteStaleUnverifiedUsersParams) error
 	DeleteUser(ctx context.Context, id uuid.UUID) (int64, error)
+	DeleteUserAtlasPins(ctx context.Context, userID uuid.UUID) error
 	DeleteUserTokens(ctx context.Context, arg DeleteUserTokensParams) error
 	EndAllUserSessions(ctx context.Context, userID uuid.UUID) error
 	// Ends the live app sessions beyond the newest keep.
 	EndOldestAppSessions(ctx context.Context, arg EndOldestAppSessionsParams) error
 	EndOtherUserSessions(ctx context.Context, arg EndOtherUserSessionsParams) error
 	EndUserSession(ctx context.Context, arg EndUserSessionParams) error
+	// Creates the empty Atlas row (revision 0) so a first write has a row to lock.
+	EnsureUserAtlas(ctx context.Context, userID uuid.UUID) error
 	// Every site of every message in (after_id, through_id]: the backfill and the reconcile's message part.
 	FillChannelMessageIATAsByMessages(ctx context.Context, arg FillChannelMessageIATAsByMessagesParams) (int64, error)
 	// The site of every group-text observation in (after_id, through_id] whose packet has a message.
@@ -285,6 +289,7 @@ type Querier interface {
 	GetTopNodesProbe(ctx context.Context, arg GetTopNodesProbeParams) ([]GetTopNodesProbeRow, error)
 	GetTransportScopeByName(ctx context.Context, name string) (int32, error)
 	GetTransportScopes(ctx context.Context) ([]GetTransportScopesRow, error)
+	GetUserAtlas(ctx context.Context, userID uuid.UUID) (GetUserAtlasRow, error)
 	HasLivePollingCandidate(ctx context.Context, arg HasLivePollingCandidateParams) (bool, error)
 	// Whether any observation up to @max_id lacks a payload type. A full scan, run at most once per
 	// process by the payload-type backfill.
@@ -317,6 +322,7 @@ type Querier interface {
 	// Run under LockPollingObserver. Inserts nothing when this observer stored a reading of the target by the same
 	// method received after recent_after, or budget readings of any target received after budget_after.
 	InsertRepeaterReading(ctx context.Context, arg InsertRepeaterReadingParams) (int64, error)
+	InsertUserAtlasPin(ctx context.Context, arg InsertUserAtlasPinParams) error
 	// The newest status reading before since: the baseline for the first counter increments in range.
 	LatestNodeStatusReadingBefore(ctx context.Context, arg LatestNodeStatusReadingBeforeParams) ([]LatestNodeStatusReadingBeforeRow, error)
 	// The data of the user's newest live token of a kind, for repeating a mail without minting from anything else.
@@ -533,6 +539,7 @@ type Querier interface {
 	ListUndecryptedGroupTextPackets(ctx context.Context) ([]ListUndecryptedGroupTextPacketsRow, error)
 	// Like ListUndecryptedGroupTextPackets, limited to channels that just gained a key.
 	ListUndecryptedGroupTextPacketsByHash(ctx context.Context, hashes [][]byte) ([]ListUndecryptedGroupTextPacketsByHashRow, error)
+	ListUserAtlasPins(ctx context.Context, userID uuid.UUID) ([]ListUserAtlasPinsRow, error)
 	ListUserSessions(ctx context.Context, arg ListUserSessionsParams) ([]ListUserSessionsRow, error)
 	// search is a LIKE pattern with its wildcards already escaped, or empty for everyone. The cursor is the last row of
 	// the previous page; the first page passes a far-future time and the max uuid.
@@ -547,6 +554,7 @@ type Querier interface {
 	LockPollingTarget(ctx context.Context, targetPublicKey []byte) error
 	// Returns the hour's status, or 'partial' if raw deletion has reached it since registration.
 	LockRollupHour(ctx context.Context, hour pgtype.Timestamptz) (string, error)
+	LockUserAtlas(ctx context.Context, userID uuid.UUID) (LockUserAtlasRow, error)
 	// Hours whose raw rows cleanup already started deleting can never be rolled completely.
 	// Readers report the new status, so the revision moves too.
 	MarkPartialRollupHours(ctx context.Context) error
@@ -556,6 +564,7 @@ type Querier interface {
 	// The first message id above after_id, or 0 when there is none.
 	NextChannelMessageID(ctx context.Context, afterID int64) (int64, error)
 	NodeHasReadings(ctx context.Context, targetPublicKey []byte) (bool, error)
+	NodeIDsByKeys(ctx context.Context, dollar_1 [][]byte) ([]NodeIDsByKeysRow, error)
 	NodeLatestTrustedReadingAt(ctx context.Context, targetPublicKey []byte) (pgtype.Timestamptz, error)
 	// Assigned observers of one target by rank. An assignment whose observer has no row is left out.
 	NodePollingAssignments(ctx context.Context, targetPublicKey []byte) ([]NodePollingAssignmentsRow, error)
@@ -565,6 +574,8 @@ type Querier interface {
 	// The id that bounds the newest n observations at or below through_id from below: (id, through_id] holds exactly n
 	// of them. 0 when fewer than n + 1 remain.
 	ObservationIDBelow(ctx context.Context, arg ObservationIDBelowParams) (int64, error)
+	ObserverIDsByKeys(ctx context.Context, dollar_1 [][]byte) ([]ObserverIDsByKeysRow, error)
+	ObserverKeysByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]ObserverKeysByIDsRow, error)
 	OldestMissingRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
 	PacketSitesTotalBytes(ctx context.Context) (int64, error)
 	// Who a live token belongs to, without using it.

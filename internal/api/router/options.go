@@ -50,6 +50,8 @@ type Options struct {
 	Accounts handlers.AccountsService
 	// AuthOptions configures those routes; with Enabled false they answer 404 accounts_disabled.
 	AuthOptions handlers.AuthOptions
+	// MeMounts adds routes under /me (Atlas, telemetry requests); they need accounts on.
+	MeMounts []handlers.MeMount
 	// APIPlanLayout is reported in the admin config's guards view.
 	APIPlanLayout string
 }

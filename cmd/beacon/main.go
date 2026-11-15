@@ -468,7 +468,9 @@ func main() {
 	var accountsSvc handlers.AccountsService
 	var usersService *users.Service
 	var authOptions handlers.AuthOptions
+	var meMounts []handlers.MeMount
 	if resolvedAccounts.Enabled {
+		meMounts = append(meMounts, handlers.AtlasRoutes(maintStore))
 		accountsMode = "local"
 		sender := mail.NewSMTP(resolvedAccounts.SMTPHost, resolvedAccounts.SMTPPort, resolvedAccounts.SMTPUsername,
 			resolvedAccounts.SMTPPassword, resolvedAccounts.SMTPFrom, resolvedAccounts.SMTPStartTLS)
@@ -675,7 +677,7 @@ func main() {
 		GuestPolling:   guestPolling,
 		PollingEnabled: resolvedPolling.Enabled,
 		AccountsMode:   accountsMode, RegistrationOpen: resolvedAccounts.RegistrationOpen,
-		Accounts: accountsSvc, AuthOptions: authOptions,
+		Accounts: accountsSvc, AuthOptions: authOptions, MeMounts: meMounts,
 		Guards:        guard,
 		APIPlanLayout: string(layout),
 	})

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"mime"
@@ -103,12 +104,17 @@ func accountsGate(opts AuthOptions) func(http.Handler) http.Handler {
 // decodeBody reads one JSON object of at most 4 KiB with no unknown fields, as the admin accounts handler does.
 // It answers the refusal itself and returns false.
 func decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {
+	return decodeBodyMax(w, r, dst, 4096)
+}
+
+// decodeBodyMax is decodeBody with a larger limit for the few routes that need one.
+func decodeBodyMax(w http.ResponseWriter, r *http.Request, dst any, limit int64) bool {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
 		respondError(w, http.StatusUnsupportedMediaType, "Content-Type must be application/json")
 		return false
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	err = dec.Decode(dst)
@@ -123,7 +129,7 @@ func decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {
 	if err != nil {
 		var tooBig *http.MaxBytesError
 		if errors.As(err, &tooBig) {
-			respondError(w, http.StatusRequestEntityTooLarge, "request body exceeds 4 KiB")
+			respondError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("request body exceeds %d KiB", limit/1024))
 		} else {
 			respondError(w, http.StatusBadRequest, "invalid JSON body")
 		}

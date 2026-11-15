@@ -160,6 +160,21 @@ func (mr *MockQuerierMockRecorder) BackfillObservationPayloadTypes(ctx, arg any)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BackfillObservationPayloadTypes", reflect.TypeOf((*MockQuerier)(nil).BackfillObservationPayloadTypes), ctx, arg)
 }
 
+// BumpUserAtlas mocks base method.
+func (m *MockQuerier) BumpUserAtlas(ctx context.Context, arg db.BumpUserAtlasParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "BumpUserAtlas", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// BumpUserAtlas indicates an expected call of BumpUserAtlas.
+func (mr *MockQuerierMockRecorder) BumpUserAtlas(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BumpUserAtlas", reflect.TypeOf((*MockQuerier)(nil).BumpUserAtlas), ctx, arg)
+}
+
 // CheckChannelMessageIATAs mocks base method.
 func (m *MockQuerier) CheckChannelMessageIATAs(ctx context.Context, arg db.CheckChannelMessageIATAsParams) (db.CheckChannelMessageIATAsRow, error) {
 	m.ctrl.T.Helper()
@@ -723,6 +738,20 @@ func (mr *MockQuerierMockRecorder) DeleteUser(ctx, id any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteUser", reflect.TypeOf((*MockQuerier)(nil).DeleteUser), ctx, id)
 }
 
+// DeleteUserAtlasPins mocks base method.
+func (m *MockQuerier) DeleteUserAtlasPins(ctx context.Context, userID uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteUserAtlasPins", ctx, userID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteUserAtlasPins indicates an expected call of DeleteUserAtlasPins.
+func (mr *MockQuerierMockRecorder) DeleteUserAtlasPins(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteUserAtlasPins", reflect.TypeOf((*MockQuerier)(nil).DeleteUserAtlasPins), ctx, userID)
+}
+
 // DeleteUserTokens mocks base method.
 func (m *MockQuerier) DeleteUserTokens(ctx context.Context, arg db.DeleteUserTokensParams) error {
 	m.ctrl.T.Helper()
@@ -791,6 +820,20 @@ func (m *MockQuerier) EndUserSession(ctx context.Context, arg db.EndUserSessionP
 func (mr *MockQuerierMockRecorder) EndUserSession(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EndUserSession", reflect.TypeOf((*MockQuerier)(nil).EndUserSession), ctx, arg)
+}
+
+// EnsureUserAtlas mocks base method.
+func (m *MockQuerier) EnsureUserAtlas(ctx context.Context, userID uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "EnsureUserAtlas", ctx, userID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// EnsureUserAtlas indicates an expected call of EnsureUserAtlas.
+func (mr *MockQuerierMockRecorder) EnsureUserAtlas(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EnsureUserAtlas", reflect.TypeOf((*MockQuerier)(nil).EnsureUserAtlas), ctx, userID)
 }
 
 // FillChannelMessageIATAsByMessages mocks base method.
@@ -1901,6 +1944,21 @@ func (mr *MockQuerierMockRecorder) GetTransportScopes(ctx any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTransportScopes", reflect.TypeOf((*MockQuerier)(nil).GetTransportScopes), ctx)
 }
 
+// GetUserAtlas mocks base method.
+func (m *MockQuerier) GetUserAtlas(ctx context.Context, userID uuid.UUID) (db.GetUserAtlasRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetUserAtlas", ctx, userID)
+	ret0, _ := ret[0].(db.GetUserAtlasRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetUserAtlas indicates an expected call of GetUserAtlas.
+func (mr *MockQuerierMockRecorder) GetUserAtlas(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUserAtlas", reflect.TypeOf((*MockQuerier)(nil).GetUserAtlas), ctx, userID)
+}
+
 // HasLivePollingCandidate mocks base method.
 func (m *MockQuerier) HasLivePollingCandidate(ctx context.Context, arg db.HasLivePollingCandidateParams) (bool, error) {
 	m.ctrl.T.Helper()
@@ -2046,6 +2104,20 @@ func (m *MockQuerier) InsertRepeaterReading(ctx context.Context, arg db.InsertRe
 func (mr *MockQuerierMockRecorder) InsertRepeaterReading(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertRepeaterReading", reflect.TypeOf((*MockQuerier)(nil).InsertRepeaterReading), ctx, arg)
+}
+
+// InsertUserAtlasPin mocks base method.
+func (m *MockQuerier) InsertUserAtlasPin(ctx context.Context, arg db.InsertUserAtlasPinParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InsertUserAtlasPin", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// InsertUserAtlasPin indicates an expected call of InsertUserAtlasPin.
+func (mr *MockQuerierMockRecorder) InsertUserAtlasPin(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertUserAtlasPin", reflect.TypeOf((*MockQuerier)(nil).InsertUserAtlasPin), ctx, arg)
 }
 
 // LatestNodeStatusReadingBefore mocks base method.
@@ -3173,6 +3245,21 @@ func (mr *MockQuerierMockRecorder) ListUndecryptedGroupTextPacketsByHash(ctx, ha
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListUndecryptedGroupTextPacketsByHash", reflect.TypeOf((*MockQuerier)(nil).ListUndecryptedGroupTextPacketsByHash), ctx, hashes)
 }
 
+// ListUserAtlasPins mocks base method.
+func (m *MockQuerier) ListUserAtlasPins(ctx context.Context, userID uuid.UUID) ([]db.ListUserAtlasPinsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListUserAtlasPins", ctx, userID)
+	ret0, _ := ret[0].([]db.ListUserAtlasPinsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListUserAtlasPins indicates an expected call of ListUserAtlasPins.
+func (mr *MockQuerierMockRecorder) ListUserAtlasPins(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListUserAtlasPins", reflect.TypeOf((*MockQuerier)(nil).ListUserAtlasPins), ctx, userID)
+}
+
 // ListUserSessions mocks base method.
 func (m *MockQuerier) ListUserSessions(ctx context.Context, arg db.ListUserSessionsParams) ([]db.ListUserSessionsRow, error) {
 	m.ctrl.T.Helper()
@@ -3276,6 +3363,21 @@ func (mr *MockQuerierMockRecorder) LockRollupHour(ctx, hour any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockRollupHour", reflect.TypeOf((*MockQuerier)(nil).LockRollupHour), ctx, hour)
 }
 
+// LockUserAtlas mocks base method.
+func (m *MockQuerier) LockUserAtlas(ctx context.Context, userID uuid.UUID) (db.LockUserAtlasRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LockUserAtlas", ctx, userID)
+	ret0, _ := ret[0].(db.LockUserAtlasRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// LockUserAtlas indicates an expected call of LockUserAtlas.
+func (mr *MockQuerierMockRecorder) LockUserAtlas(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockUserAtlas", reflect.TypeOf((*MockQuerier)(nil).LockUserAtlas), ctx, userID)
+}
+
 // MarkPartialRollupHours mocks base method.
 func (m *MockQuerier) MarkPartialRollupHours(ctx context.Context) error {
 	m.ctrl.T.Helper()
@@ -3365,6 +3467,21 @@ func (mr *MockQuerierMockRecorder) NodeHasReadings(ctx, targetPublicKey any) *go
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NodeHasReadings", reflect.TypeOf((*MockQuerier)(nil).NodeHasReadings), ctx, targetPublicKey)
 }
 
+// NodeIDsByKeys mocks base method.
+func (m *MockQuerier) NodeIDsByKeys(ctx context.Context, dollar_1 [][]byte) ([]db.NodeIDsByKeysRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "NodeIDsByKeys", ctx, dollar_1)
+	ret0, _ := ret[0].([]db.NodeIDsByKeysRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// NodeIDsByKeys indicates an expected call of NodeIDsByKeys.
+func (mr *MockQuerierMockRecorder) NodeIDsByKeys(ctx, dollar_1 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NodeIDsByKeys", reflect.TypeOf((*MockQuerier)(nil).NodeIDsByKeys), ctx, dollar_1)
+}
+
 // NodeLatestTrustedReadingAt mocks base method.
 func (m *MockQuerier) NodeLatestTrustedReadingAt(ctx context.Context, targetPublicKey []byte) (pgtype.Timestamptz, error) {
 	m.ctrl.T.Helper()
@@ -3438,6 +3555,36 @@ func (m *MockQuerier) ObservationIDBelow(ctx context.Context, arg db.Observation
 func (mr *MockQuerierMockRecorder) ObservationIDBelow(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ObservationIDBelow", reflect.TypeOf((*MockQuerier)(nil).ObservationIDBelow), ctx, arg)
+}
+
+// ObserverIDsByKeys mocks base method.
+func (m *MockQuerier) ObserverIDsByKeys(ctx context.Context, dollar_1 [][]byte) ([]db.ObserverIDsByKeysRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ObserverIDsByKeys", ctx, dollar_1)
+	ret0, _ := ret[0].([]db.ObserverIDsByKeysRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ObserverIDsByKeys indicates an expected call of ObserverIDsByKeys.
+func (mr *MockQuerierMockRecorder) ObserverIDsByKeys(ctx, dollar_1 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ObserverIDsByKeys", reflect.TypeOf((*MockQuerier)(nil).ObserverIDsByKeys), ctx, dollar_1)
+}
+
+// ObserverKeysByIDs mocks base method.
+func (m *MockQuerier) ObserverKeysByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]db.ObserverKeysByIDsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ObserverKeysByIDs", ctx, dollar_1)
+	ret0, _ := ret[0].([]db.ObserverKeysByIDsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ObserverKeysByIDs indicates an expected call of ObserverKeysByIDs.
+func (mr *MockQuerierMockRecorder) ObserverKeysByIDs(ctx, dollar_1 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ObserverKeysByIDs", reflect.TypeOf((*MockQuerier)(nil).ObserverKeysByIDs), ctx, dollar_1)
 }
 
 // OldestMissingRollupHour mocks base method.

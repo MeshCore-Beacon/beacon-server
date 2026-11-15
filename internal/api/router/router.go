@@ -165,7 +165,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 			r.Mount("/info", handlers.InfoRouter(info))
 			r.Mount("/ws-ticket", handlers.WSTicketRouter(tickets))
 			r.Mount("/auth", handlers.AuthRouter(opts.Accounts, opts.AuthOptions))
-			r.Mount("/me", handlers.MeRouter(opts.Accounts, opts.AuthOptions))
+			r.Mount("/me", handlers.MeRouter(opts.Accounts, opts.AuthOptions, opts.MeMounts...))
 		})
 
 		// Protect the entire subtree, including its root and unknown paths.

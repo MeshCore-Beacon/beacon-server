@@ -50,7 +50,7 @@ func accountsRouter(on bool) http.Handler {
 
 func TestAccountsOffAnswers404OnEveryAccountRoute(t *testing.T) {
 	h := accountsRouter(false)
-	for _, p := range []string{"/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/me", "/api/v1/me/sessions"} {
+	for _, p := range []string{"/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/me", "/api/v1/me/sessions", "/api/v1/me/atlas"} {
 		for _, m := range []string{"GET", "POST", "DELETE"} {
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, httptest.NewRequest(m, p, strings.NewReader(`{}`)))
