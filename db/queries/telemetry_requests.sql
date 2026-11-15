@@ -59,3 +59,56 @@ ORDER BY r.created_at, r.id;
 
 -- name: RequestNode :one
 SELECT public_key, node_type, COALESCE(name, '')::text AS name FROM nodes WHERE id = $1;
+
+-- name: RequestedPasswords :many
+-- The password in use for each requested target among $1, sealed. A target whose option in use is the blank login
+-- has no ciphertext.
+SELECT t.target_public_key::bytea AS target_public_key, t.ver, r.id AS request_id, r.password_ct, r.password_nonce
+FROM polling_targets t
+JOIN telemetry_requests r ON r.id = t.active_request_id
+WHERE t.target_public_key = ANY(sqlc.arg(targets)::bytea[]);
+
+-- name: InsertPollingAdminStop :execrows
+INSERT INTO polling_admin_stops (target_public_key, observer_public_key, reported_at) VALUES ($1, $2, $3)
+ON CONFLICT (target_public_key, observer_public_key) DO NOTHING;
+
+-- name: DeletePollingAdminStop :execrows
+DELETE FROM polling_admin_stops WHERE target_public_key = $1 AND observer_public_key = $2;
+
+-- name: ListPollingAdminStops :many
+SELECT target_public_key, observer_public_key, reported_at FROM polling_admin_stops ORDER BY reported_at DESC, target_public_key, observer_public_key;
+
+-- name: ListNoPasswordBlocked :many
+SELECT target_public_key FROM polling_targets WHERE no_password_blocked ORDER BY target_public_key;
+
+-- name: ClearNoPasswordBlocked :execrows
+-- Run under LockPollingTarget.
+UPDATE polling_targets SET no_password_blocked = false WHERE target_public_key = $1 AND no_password_blocked;
+
+-- name: PollingTargetExists :one
+SELECT EXISTS (SELECT 1 FROM polling_targets WHERE target_public_key = $1);
+
+-- name: TouchPollingOtherState :exec
+INSERT INTO polling_other_states (target_public_key, observer_public_key, seen_at) VALUES ($1, $2, $3)
+ON CONFLICT (target_public_key, observer_public_key) DO UPDATE SET seen_at = EXCLUDED.seen_at;
+
+-- name: PollingOtherStateSeen :one
+SELECT seen_at FROM polling_other_states WHERE target_public_key = $1 AND observer_public_key = $2;
+
+-- name: OfflineRequestTargets :many
+-- Requested targets whose node no observer has heard since cutoff and whose newest enabling is older than cutoff.
+-- Requests with no node row count from the enabling alone.
+SELECT r.target_public_key::bytea AS target_public_key
+FROM telemetry_requests r
+LEFT JOIN nodes n ON n.public_key = r.target_public_key
+WHERE r.status <> 'disabled'
+GROUP BY r.target_public_key, n.last_seen
+HAVING GREATEST(max(r.enabled_at), COALESCE(n.last_seen, '-infinity'::timestamptz)) < sqlc.arg(cutoff)::timestamptz;
+
+-- name: PollingAdminRequestCounts :many
+SELECT r.target_public_key::bytea AS target_public_key, count(*)::int AS requests,
+       bool_or(t.active_request_id IS NOT NULL)::boolean AS requested
+FROM telemetry_requests r
+LEFT JOIN polling_targets t ON t.target_public_key = r.target_public_key
+WHERE r.target_public_key = ANY(sqlc.arg(targets)::bytea[])
+GROUP BY r.target_public_key;

@@ -176,7 +176,7 @@ func (f *fakeStore) candidates(target []byte, after time.Time) []Candidate {
 }
 
 func (f *fakeStore) ElectPollingTarget(_ context.Context, target []byte, after, _, _ time.Time,
-	decide func([]Candidate, []byte) []Assignment) error {
+	decide func(ElectionInput) Election) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.targetsFail[hx(target)] {
@@ -188,7 +188,7 @@ func (f *fakeStore) ElectPollingTarget(_ context.Context, target []byte, after, 
 			cur = a.Observer
 		}
 	}
-	a := decide(f.candidates(target, after), cur)
+	a := decide(ElectionInput{Cands: f.candidates(target, after), Current: cur}).Assignments
 	f.electCalls[hx(target)]++
 	if len(a) == 0 {
 		delete(f.assigns, hx(target))

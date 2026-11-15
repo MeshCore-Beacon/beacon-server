@@ -140,3 +140,31 @@ func TestPollingCleanupUsesRetention(t *testing.T) {
 		t.Fatal("readings cutoff", ms.readings)
 	}
 }
+
+type offlineStub struct {
+	cutoff, now time.Time
+	reason      string
+}
+
+func (s *offlineStub) DisableOfflineRequests(_ context.Context, cutoff, now time.Time, reason string) (int, error) {
+	s.cutoff, s.now, s.reason = cutoff, now, reason
+	return 2, nil
+}
+
+func TestRequestsOfflineTask(t *testing.T) {
+	now := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	old := pollingNow
+	pollingNow = func() time.Time { return now }
+	t.Cleanup(func() { pollingNow = old })
+	st := &offlineStub{}
+	tasks := RequestTasks(st, 7)
+	if len(tasks) != 1 || tasks[0].Name != "requests_offline" || tasks[0].Interval != time.Hour {
+		t.Fatalf("%+v", tasks)
+	}
+	if err := tasks[0].Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !st.cutoff.Equal(now.AddDate(0, 0, -7)) || !st.now.Equal(now) || st.reason != "Not heard by any observer for 7 days." {
+		t.Fatalf("%+v", st)
+	}
+}

@@ -5,6 +5,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,6 +30,10 @@ type pollAdminStub struct {
 	targets   []api.PollingTarget
 	tAfter    time.Time
 	tLimit    int
+	stops     []api.PollingAdminStop
+	blocked   []string
+	found     bool
+	stopKeys  [][]byte
 }
 
 func (s *pollAdminStub) PollingTargetsAdmin(_ context.Context, after time.Time, limit int) ([]api.PollingTarget, error) {
@@ -51,6 +56,23 @@ func (s *pollAdminStub) SetPollingObserver(_ context.Context, k []byte, b, a boo
 	s.writes++
 	s.obsKey, s.obs = k, api.PollingObserverRequest{Blocked: b, Approved: a, Note: n}
 	return s.err
+}
+
+func (s *pollAdminStub) ListPollingAdminStops(context.Context) ([]api.PollingAdminStop, error) {
+	return s.stops, s.err
+}
+func (s *pollAdminStub) ListNoPasswordBlocked(context.Context) ([]string, error) {
+	return s.blocked, s.err
+}
+func (s *pollAdminStub) DeletePollingAdminStop(_ context.Context, t, o []byte) (bool, error) {
+	s.writes++
+	s.stopKeys = [][]byte{t, o}
+	return s.found, s.err
+}
+func (s *pollAdminStub) ClearNoPasswordBlocked(_ context.Context, t []byte) (bool, error) {
+	s.writes++
+	s.stopKeys = [][]byte{t}
+	return s.found, s.err
 }
 
 func pollAdminDo(h http.Handler, method, path, body, ct string) *httptest.ResponseRecorder {
@@ -269,5 +291,52 @@ func TestPollingAdminExclusionsFitWithConfig(t *testing.T) {
 	rec = pollAdminDo(h, "PUT", "/state", fmt.Sprintf(`{"paused":false,"excludedNodes":["%064x"]}`, 16), ct)
 	if rec.Code != 200 || st.writes != 1 || len(st.excluded) != 1 {
 		t.Fatal(rec.Code, st.writes, rec.Body.String())
+	}
+}
+
+func TestPollingAdminShowsBlockedTargetsAndStops(t *testing.T) {
+	st := &pollAdminStub{blocked: []string{hexKey("a")}, stops: []api.PollingAdminStop{{TargetPublicKey: hexKey("a"), ObserverPublicKey: hexKey("b"), ReportedAt: 5}}}
+	rec := pollAdminDo(PollingAdminRouter(st, PollingAdminConfig{}), "GET", "/", "", "")
+	body := rec.Body.String()
+	if rec.Code != 200 || !strings.Contains(body, `"noPasswordBlocked":["`+hexKey("a")+`"]`) || !strings.Contains(body, `"adminStops":[{"targetPublicKey":"`+hexKey("a")+`","observerPublicKey":"`+hexKey("b")+`","reportedAt":5}]`) {
+		t.Fatalf("%d %s", rec.Code, body)
+	}
+	empty := pollAdminDo(PollingAdminRouter(&pollAdminStub{}, PollingAdminConfig{}), "GET", "/", "", "")
+	if !strings.Contains(empty.Body.String(), `"noPasswordBlocked":[]`) || !strings.Contains(empty.Body.String(), `"adminStops":[]`) {
+		t.Fatalf("empty lists must be arrays: %s", empty.Body)
+	}
+}
+
+func TestPollingAdminClearRoutes(t *testing.T) {
+	st := &pollAdminStub{found: true}
+	h := PollingAdminRouter(st, PollingAdminConfig{})
+	rec := pollAdminDo(h, "PUT", "/targets/"+hexKey("a"), `{"noPasswordBlocked":false}`, "application/json")
+	if rec.Code != 200 || len(st.stopKeys) != 1 || hex.EncodeToString(st.stopKeys[0]) != hexKey("a") {
+		t.Fatalf("clear: %d %s", rec.Code, rec.Body)
+	}
+	for name, c := range map[string]struct{ path, body, ct string }{
+		"set true":  {"/targets/" + hexKey("a"), `{"noPasswordBlocked":true}`, "application/json"},
+		"bad key":   {"/targets/zz", `{"noPasswordBlocked":false}`, "application/json"},
+		"bad media": {"/targets/" + hexKey("a"), `{"noPasswordBlocked":false}`, "text/plain"},
+	} {
+		w := st.writes
+		if rec := pollAdminDo(h, "PUT", c.path, c.body, c.ct); rec.Code < 400 || st.writes != w {
+			t.Errorf("%s: %d writes %d->%d", name, rec.Code, w, st.writes)
+		}
+	}
+	rec = pollAdminDo(h, "DELETE", "/admin-stops/"+hexKey("a")+"/"+hexKey("b"), "", "")
+	if rec.Code != 204 || len(st.stopKeys) != 2 || hex.EncodeToString(st.stopKeys[1]) != hexKey("b") {
+		t.Fatalf("delete stop: %d %s", rec.Code, rec.Body)
+	}
+	st.found = false
+	if rec := pollAdminDo(h, "DELETE", "/admin-stops/"+hexKey("a")+"/"+hexKey("b"), "", ""); rec.Code != 404 {
+		t.Fatalf("unknown stop: %d", rec.Code)
+	}
+	if rec := pollAdminDo(h, "PUT", "/targets/"+hexKey("a"), `{"noPasswordBlocked":false}`, "application/json"); rec.Code != 404 {
+		t.Fatalf("unknown target: %d", rec.Code)
+	}
+	st.err = errors.New("db")
+	if rec := pollAdminDo(h, "DELETE", "/admin-stops/"+hexKey("a")+"/"+hexKey("b"), "", ""); rec.Code != 500 || strings.Contains(rec.Body.String(), "db") {
+		t.Fatalf("store error: %d %s", rec.Code, rec.Body)
 	}
 }

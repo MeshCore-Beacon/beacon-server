@@ -1800,6 +1800,12 @@ definitions:
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.PollingAdminState:
     properties:
+      adminStops:
+        description: AdminStops are observers that were given admin access by a requested
+          repeater and are never offered it again.
+        items:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PollingAdminStop'
+        type: array
       authority:
         description: 'polling.authority: evidence or approved.'
         type: string
@@ -1816,6 +1822,13 @@ definitions:
         items:
           type: string
         type: array
+      noPasswordBlocked:
+        description: |-
+          NoPasswordBlocked lists repeaters that grant admin to a blank login (64 hex each); no passwordless request is
+          accepted for them until the operator clears the flag.
+        items:
+          type: string
+        type: array
       observers:
         items:
           $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PollingObserver'
@@ -1826,6 +1839,18 @@ definitions:
       pausedUntil:
         description: epoch ms; null when not set
         type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.PollingAdminStop:
+    properties:
+      observerPublicKey:
+        description: 64 lowercase hex
+        type: string
+      reportedAt:
+        description: epoch ms
+        type: integer
+      targetPublicKey:
+        description: 64 lowercase hex
+        type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.PollingObserver:
     properties:
@@ -1876,6 +1901,12 @@ definitions:
       publicKey:
         description: 64 lowercase hex
         type: string
+      requested:
+        description: Requested is true while a telemetry request is in use for the
+          repeater; Requests counts all its requests.
+        type: boolean
+      requests:
+        type: integer
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.PollingTargetCandidate:
     properties:
@@ -1908,6 +1939,11 @@ definitions:
         items:
           $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PollingTarget'
         type: array
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.PollingTargetUpdate:
+    properties:
+      noPasswordBlocked:
+        type: boolean
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.PutAtlasRequest:
     properties:
@@ -3140,6 +3176,60 @@ paths:
       summary: Get the repeater polling settings
       tags:
       - Admin
+  /admin/polling/admin-stops/{target}/{observer}:
+    delete:
+      description: The observer may be offered the requested repeater again at the
+        next election. Its device keeps its own stop until the operator runs poll
+        enable on it. 404 when there is no such stop.
+      parameters:
+      - description: Repeater public key, 64 hex characters
+        in: path
+        name: target
+        required: true
+        type: string
+      - description: Observer public key, 64 hex characters
+        in: path
+        name: observer
+        required: true
+        type: string
+      responses:
+        "204":
+          description: Cleared
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - AdminKey: []
+      summary: Clear one admin stop
+      tags:
+      - Admin
   /admin/polling/observers/{publicKey}:
     put:
       consumes:
@@ -3292,6 +3382,74 @@ paths:
       security:
       - AdminKey: []
       summary: List polled repeaters and their observers
+      tags:
+      - Admin
+  /admin/polling/targets/{target}:
+    put:
+      consumes:
+      - application/json
+      description: Only noPasswordBlocked false is accepted. A repeater that gave
+        admin access to a blank login stays blocked until this is called; requests
+        that were stopped do not restart by themselves. 404 for a repeater Beacon
+        has no record of. Body at most 4 KiB.
+      parameters:
+      - description: Repeater public key, 64 hex characters
+        in: path
+        name: target
+        required: true
+        type: string
+      - description: 'noPasswordBlocked: false'
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PollingTargetUpdate'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PollingTargetUpdate'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "415":
+          description: Unsupported Media Type
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - AdminKey: []
+      summary: Lift the blank-login block on a requested repeater
       tags:
       - Admin
   /admin/users:

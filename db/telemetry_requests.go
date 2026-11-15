@@ -6,10 +6,12 @@ package db
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"time"
 
 	sqlc "github.com/MeshCore-Beacon/beacon-server/db/sqlc"
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 	"github.com/MeshCore-Beacon/beacon-server/internal/polling"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -200,3 +202,114 @@ func (s *Store) removeUserRequests(ctx context.Context, id uuid.UUID) error {
 	}
 	return nil
 }
+
+// RequestedPasswords returns the sealed password in use for each of the targets that is requested. A target that is
+// not requested is absent.
+func (s *Store) RequestedPasswords(ctx context.Context, targets [][]byte) (map[string]polling.RequestedPassword, error) {
+	rows, err := s.q.RequestedPasswords(ctx, targets)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]polling.RequestedPassword, len(rows))
+	for _, r := range rows {
+		out[string(r.TargetPublicKey)] = polling.RequestedPassword{RequestID: r.RequestID, Ver: r.Ver, CT: r.PasswordCt, Nonce: r.PasswordNonce}
+	}
+	return out, nil
+}
+
+// AddAdminStop records that the observer's device was given admin access by the target. It reports false when the
+// observer was already recorded.
+func (s *Store) AddAdminStop(ctx context.Context, target, observer []byte, at time.Time) (bool, error) {
+	n, err := s.q.InsertPollingAdminStop(ctx, sqlc.InsertPollingAdminStopParams{
+		TargetPublicKey: target, ObserverPublicKey: observer, ReportedAt: ts(at)})
+	return n > 0, err
+}
+
+// TouchOtherState records that the observer's claim showed a state other than login_failed for the target.
+func (s *Store) TouchOtherState(ctx context.Context, target, observer []byte, at time.Time) error {
+	return s.q.TouchPollingOtherState(ctx, sqlc.TouchPollingOtherStateParams{
+		TargetPublicKey: target, ObserverPublicKey: observer, SeenAt: ts(at)})
+}
+
+// OtherStateSeen is nil when no such state was ever recorded.
+func (s *Store) OtherStateSeen(ctx context.Context, target, observer []byte) (*time.Time, error) {
+	t, err := s.q.PollingOtherStateSeen(ctx, sqlc.PollingOtherStateSeenParams{TargetPublicKey: target, ObserverPublicKey: observer})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &t.Time, nil
+}
+
+// DisableOfflineRequests disables the requests of every repeater no observer has heard since cutoff (and whose
+// newest request was enabled before it), with the reason. It returns how many repeaters it changed.
+func (s *Store) DisableOfflineRequests(ctx context.Context, cutoff, now time.Time, reason string) (int, error) {
+	targets, err := s.q.OfflineRequestTargets(ctx, ts(cutoff))
+	if err != nil {
+		return 0, err
+	}
+	for _, t := range targets {
+		err := s.MutateRequestTarget(ctx, t, uuid.Nil, func(st *polling.TargetState) error {
+			st.Disable(reason, now)
+			return nil
+		})
+		if err != nil {
+			return 0, err
+		}
+	}
+	return len(targets), nil
+}
+
+// ListPollingAdminStops lists every recorded admin stop, newest first.
+func (s *Store) ListPollingAdminStops(ctx context.Context) ([]api.PollingAdminStop, error) {
+	rows, err := s.q.ListPollingAdminStops(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]api.PollingAdminStop, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, api.PollingAdminStop{TargetPublicKey: hex.EncodeToString(r.TargetPublicKey),
+			ObserverPublicKey: hex.EncodeToString(r.ObserverPublicKey), ReportedAt: r.ReportedAt.Time.UnixMilli()})
+	}
+	return out, nil
+}
+
+// ListNoPasswordBlocked lists the repeaters that grant admin to a blank login.
+func (s *Store) ListNoPasswordBlocked(ctx context.Context) ([]string, error) {
+	keys, err := s.q.ListNoPasswordBlocked(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, hex.EncodeToString(k))
+	}
+	return out, nil
+}
+
+// DeletePollingAdminStop clears one stop; it reports false when there was none.
+func (s *Store) DeletePollingAdminStop(ctx context.Context, target, observer []byte) (bool, error) {
+	n, err := s.q.DeletePollingAdminStop(ctx, sqlc.DeletePollingAdminStopParams{TargetPublicKey: target, ObserverPublicKey: observer})
+	return n > 0, err
+}
+
+// ClearNoPasswordBlocked lifts the blank-login block on a repeater; it reports false for an unknown repeater.
+func (s *Store) ClearNoPasswordBlocked(ctx context.Context, target []byte) (bool, error) {
+	found := false
+	err := s.pollTx(ctx, func(q *sqlc.Queries) error {
+		if err := q.LockPollingTarget(ctx, target); err != nil {
+			return err
+		}
+		var err error
+		if found, err = q.PollingTargetExists(ctx, target); err != nil || !found {
+			return err
+		}
+		_, err = q.ClearNoPasswordBlocked(ctx, target)
+		return err
+	})
+	return found, err
+}
+
+var _ polling.RequestedStore = (*Store)(nil)

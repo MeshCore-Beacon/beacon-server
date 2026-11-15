@@ -167,8 +167,8 @@ func (q *Queries) HasLivePollingCandidate(ctx context.Context, arg HasLivePollin
 }
 
 const insertPollingAssignment = `-- name: InsertPollingAssignment :exec
-INSERT INTO polling_assignments (target_public_key, observer_public_key, rank, evidence_snr, evidence_count, assigned_at)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO polling_assignments (target_public_key, observer_public_key, rank, evidence_snr, evidence_count, assigned_at, requested)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 `
 
 type InsertPollingAssignmentParams struct {
@@ -178,6 +178,7 @@ type InsertPollingAssignmentParams struct {
 	EvidenceSnr       *float32           `json:"evidence_snr"`
 	EvidenceCount     int32              `json:"evidence_count"`
 	AssignedAt        pgtype.Timestamptz `json:"assigned_at"`
+	Requested         bool               `json:"requested"`
 }
 
 func (q *Queries) InsertPollingAssignment(ctx context.Context, arg InsertPollingAssignmentParams) error {
@@ -188,6 +189,7 @@ func (q *Queries) InsertPollingAssignment(ctx context.Context, arg InsertPolling
 		arg.EvidenceSnr,
 		arg.EvidenceCount,
 		arg.AssignedAt,
+		arg.Requested,
 	)
 	return err
 }
@@ -516,7 +518,7 @@ func (q *Queries) ListOrphanPollingTargets(ctx context.Context) ([][]byte, error
 }
 
 const listPollingCandidates = `-- name: ListPollingCandidates :many
-SELECT c.observer_public_key, c.claimed_snr, c.state, c.misses,
+SELECT c.observer_public_key, c.claimed_snr, c.state, c.misses, c.requested,
        COALESCE(po.blocked, false) AS blocked, COALESCE(po.approved, false) AS approved,
        ev.n AS evidence_count, ev.mean_snr AS evidence_snr
 FROM polling_candidates c
@@ -545,6 +547,7 @@ type ListPollingCandidatesRow struct {
 	ClaimedSnr        *float32 `json:"claimed_snr"`
 	State             string   `json:"state"`
 	Misses            int16    `json:"misses"`
+	Requested         bool     `json:"requested"`
 	Blocked           bool     `json:"blocked"`
 	Approved          bool     `json:"approved"`
 	EvidenceCount     int64    `json:"evidence_count"`
@@ -566,6 +569,7 @@ func (q *Queries) ListPollingCandidates(ctx context.Context, arg ListPollingCand
 			&i.ClaimedSnr,
 			&i.State,
 			&i.Misses,
+			&i.Requested,
 			&i.Blocked,
 			&i.Approved,
 			&i.EvidenceCount,
@@ -617,11 +621,14 @@ SELECT target_public_key::bytea AS target_public_key FROM (
     WHERE cl.received_at > $1
     UNION
     SELECT a.target_public_key FROM polling_assignments a
+    UNION
+    SELECT pt.target_public_key FROM polling_targets pt WHERE pt.active_request_id IS NOT NULL
 ) t
 ORDER BY target_public_key
 `
 
-// A target with only expired claims is still listed while it has assignment rows, so the caller can clear them.
+// A target with only expired claims is still listed while it has assignment rows, so the caller can clear them. A
+// requested target is always listed, so its requests move between waiting and active.
 func (q *Queries) ListPollingTargets(ctx context.Context, receivedAt pgtype.Timestamptz) ([][]byte, error) {
 	rows, err := q.db.Query(ctx, listPollingTargets, receivedAt)
 	if err != nil {
@@ -635,6 +642,100 @@ func (q *Queries) ListPollingTargets(ctx context.Context, receivedAt pgtype.Time
 			return nil, err
 		}
 		items = append(items, target_public_key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRequestCandidates = `-- name: ListRequestCandidates :many
+WITH me AS (
+    SELECT min(created_at) AS oldest FROM telemetry_requests WHERE target_public_key = $1
+), ev AS (
+    SELECT o.observer_id, count(o.snr) AS n, COALESCE(avg(o.snr), 0)::float8 AS mean_snr
+    FROM packets p
+    JOIN packet_observations o ON o.packet_hash = p.packet_hash
+    WHERE p.origin_pubkey = $1 AND p.payload_type = 4
+      AND o.hop_count = 0 AND p.first_heard_at >= $3 AND NOT (o.snr = 0 AND o.rssi = 0)
+    GROUP BY o.observer_id
+)
+SELECT cl.observer_public_key, c.claimed_snr, COALESCE(c.state, '')::text AS state, COALESCE(c.misses, 0)::smallint AS misses,
+       COALESCE(c.requested, false)::boolean AS requested,
+       COALESCE(po.blocked, false) AS blocked, COALESCE(po.approved, false) AS approved,
+       cl.request_slots::int AS request_slots,
+       (SELECT count(*) FROM polling_candidates h WHERE h.observer_public_key = cl.observer_public_key AND h.requested)::int AS held,
+       EXISTS (SELECT 1 FROM polling_admin_stops s
+               WHERE s.target_public_key = $1 AND s.observer_public_key = cl.observer_public_key) AS admin_stopped,
+       (SELECT count(*) FROM polling_assignments x
+        JOIN LATERAL (SELECT min(r.created_at) AS oldest FROM telemetry_requests r WHERE r.target_public_key = x.target_public_key) q ON true
+        WHERE x.observer_public_key = cl.observer_public_key AND x.requested
+          AND x.target_public_key <> $1 AND q.oldest IS NOT NULL
+          AND (q.oldest, x.target_public_key) < (me.oldest, $1::bytea))::int AS seats_elsewhere,
+       ev.n AS evidence_count, ev.mean_snr AS evidence_snr
+FROM polling_claims cl
+CROSS JOIN me
+JOIN ev ON ev.observer_id = cl.observer_id AND ev.n > 0
+LEFT JOIN polling_candidates c ON c.observer_public_key = cl.observer_public_key AND c.target_public_key = $1
+LEFT JOIN polling_observers po ON po.observer_public_key = cl.observer_public_key
+WHERE cl.accepts_requests AND cl.received_at > $2
+ORDER BY cl.observer_public_key
+`
+
+type ListRequestCandidatesParams struct {
+	TargetPublicKey []byte             `json:"target_public_key"`
+	ReceivedAfter   pgtype.Timestamptz `json:"received_after"`
+	FirstHeardAt    pgtype.Timestamptz `json:"first_heard_at"`
+}
+
+type ListRequestCandidatesRow struct {
+	ObserverPublicKey []byte   `json:"observer_public_key"`
+	ClaimedSnr        *float32 `json:"claimed_snr"`
+	State             string   `json:"state"`
+	Misses            int16    `json:"misses"`
+	Requested         bool     `json:"requested"`
+	Blocked           bool     `json:"blocked"`
+	Approved          bool     `json:"approved"`
+	RequestSlots      int32    `json:"request_slots"`
+	Held              int32    `json:"held"`
+	AdminStopped      bool     `json:"admin_stopped"`
+	SeatsElsewhere    int32    `json:"seats_elsewhere"`
+	EvidenceCount     int64    `json:"evidence_count"`
+	EvidenceSnr       float64  `json:"evidence_snr"`
+}
+
+// Observers that could take a requested target: a live claim that accepts requests and zero-hop advert evidence for
+// the target since first_heard_at (missing signal 0/0 left out). They need not name the target in their claim: a
+// device learns of a requested target from the owners answer. held counts the requested targets the claim names;
+// seats_elsewhere counts this observer's requested assignments to other targets whose oldest request is older than
+// this target's, so seats go to the oldest requests first.
+func (q *Queries) ListRequestCandidates(ctx context.Context, arg ListRequestCandidatesParams) ([]ListRequestCandidatesRow, error) {
+	rows, err := q.db.Query(ctx, listRequestCandidates, arg.TargetPublicKey, arg.ReceivedAfter, arg.FirstHeardAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRequestCandidatesRow{}
+	for rows.Next() {
+		var i ListRequestCandidatesRow
+		if err := rows.Scan(
+			&i.ObserverPublicKey,
+			&i.ClaimedSnr,
+			&i.State,
+			&i.Misses,
+			&i.Requested,
+			&i.Blocked,
+			&i.Approved,
+			&i.RequestSlots,
+			&i.Held,
+			&i.AdminStopped,
+			&i.SeatsElsewhere,
+			&i.EvidenceCount,
+			&i.EvidenceSnr,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -817,6 +918,8 @@ WITH t AS (
     GROUP BY c.target_public_key
     UNION ALL
     SELECT a.target_public_key, NULL::timestamptz FROM polling_assignments a GROUP BY a.target_public_key
+    UNION ALL
+    SELECT r.target_public_key, NULL::timestamptz FROM telemetry_requests r GROUP BY r.target_public_key
 ), picked AS (
     SELECT t.target_public_key, max(t.newest_claim) AS newest_claim FROM t
     GROUP BY t.target_public_key
@@ -903,17 +1006,27 @@ func (q *Queries) PollingObserverFlags(ctx context.Context, observerPublicKey []
 }
 
 const pollingOwnerRows = `-- name: PollingOwnerRows :many
-SELECT c.target_public_key, COALESCE(a.rank, -1)::int AS rank,
-       (SELECT count(*) FROM polling_assignments x WHERE x.target_public_key = c.target_public_key)::int AS assigned,
+WITH mine AS (
+    SELECT c.target_public_key FROM polling_candidates c WHERE c.observer_public_key = $1
+    UNION
+    SELECT a.target_public_key FROM polling_assignments a
+    WHERE a.observer_public_key = $1 AND a.requested
+)
+SELECT m.target_public_key::bytea AS target_public_key, COALESCE(a.rank, -1)::int AS rank,
+       (SELECT count(*) FROM polling_assignments x WHERE x.target_public_key = m.target_public_key)::int AS assigned,
        (SELECT r.sampled_at FROM repeater_readings r
         JOIN polling_assignments t ON t.target_public_key = r.target_public_key AND t.observer_public_key = r.observer_public_key
-        WHERE r.target_public_key = c.target_public_key AND t.evidence_count > 0
-        ORDER BY r.sampled_at DESC LIMIT 1)::timestamptz AS latest_ts
-FROM polling_candidates c
-JOIN polling_claims cl ON cl.observer_public_key = c.observer_public_key
-LEFT JOIN polling_assignments a ON a.target_public_key = c.target_public_key AND a.observer_public_key = c.observer_public_key
-WHERE c.observer_public_key = $1 AND cl.received_at > $2
-ORDER BY c.target_public_key
+        WHERE r.target_public_key = m.target_public_key AND t.evidence_count > 0
+        ORDER BY r.sampled_at DESC LIMIT 1)::timestamptz AS latest_ts,
+       COALESCE(a.requested, false)::boolean AS requested,
+       COALESCE(pc.requested, false)::boolean AS claimed_requested,
+       (cl.accepts_requests AND (cl.request_slots > 0 OR COALESCE(pc.requested, false)))::boolean AS pw_ok
+FROM mine m
+JOIN polling_claims cl ON cl.observer_public_key = $1
+LEFT JOIN polling_candidates pc ON pc.observer_public_key = cl.observer_public_key AND pc.target_public_key = m.target_public_key
+LEFT JOIN polling_assignments a ON a.target_public_key = m.target_public_key AND a.observer_public_key = cl.observer_public_key
+WHERE cl.received_at > $2
+ORDER BY m.target_public_key
 `
 
 type PollingOwnerRowsParams struct {
@@ -922,14 +1035,20 @@ type PollingOwnerRowsParams struct {
 }
 
 type PollingOwnerRowsRow struct {
-	TargetPublicKey []byte             `json:"target_public_key"`
-	Rank            int32              `json:"rank"`
-	Assigned        int32              `json:"assigned"`
-	LatestTs        pgtype.Timestamptz `json:"latest_ts"`
+	TargetPublicKey  []byte             `json:"target_public_key"`
+	Rank             int32              `json:"rank"`
+	Assigned         int32              `json:"assigned"`
+	LatestTs         pgtype.Timestamptz `json:"latest_ts"`
+	Requested        bool               `json:"requested"`
+	ClaimedRequested bool               `json:"claimed_requested"`
+	PwOk             bool               `json:"pw_ok"`
 }
 
 // assigned counts the target's assignment rows. latest_ts only trusts readings from an assigned observer with
-// advert evidence, so an observer Beacon has never heard the repeater through cannot stand others down.
+// advert evidence, so an observer Beacon has never heard the repeater through cannot stand others down. A target the
+// observer was handed as a requested one is listed even before its claim names it (that is how it learns of it);
+// claimed_requested is true when the claim names it as requested. pw_ok: the claim accepts requests and has a seat
+// free or already holds this target.
 func (q *Queries) PollingOwnerRows(ctx context.Context, arg PollingOwnerRowsParams) ([]PollingOwnerRowsRow, error) {
 	rows, err := q.db.Query(ctx, pollingOwnerRows, arg.ObserverPublicKey, arg.ReceivedAt)
 	if err != nil {
@@ -944,6 +1063,9 @@ func (q *Queries) PollingOwnerRows(ctx context.Context, arg PollingOwnerRowsPara
 			&i.Rank,
 			&i.Assigned,
 			&i.LatestTs,
+			&i.Requested,
+			&i.ClaimedRequested,
+			&i.PwOk,
 		); err != nil {
 			return nil, err
 		}

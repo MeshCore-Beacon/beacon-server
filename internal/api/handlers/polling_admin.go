@@ -27,6 +27,10 @@ type PollingAdminStore interface {
 	ListPollingObservers(ctx context.Context) ([]api.PollingObserver, error)
 	SetPollingObserver(ctx context.Context, observer []byte, blocked, approved bool, note string) error
 	PollingTargetsAdmin(ctx context.Context, receivedAfter time.Time, limit int) ([]api.PollingTarget, error)
+	ListPollingAdminStops(ctx context.Context) ([]api.PollingAdminStop, error)
+	ListNoPasswordBlocked(ctx context.Context) ([]string, error)
+	DeletePollingAdminStop(ctx context.Context, target, observer []byte) (bool, error)
+	ClearNoPasswordBlocked(ctx context.Context, target []byte) (bool, error)
 }
 
 // PollingAdminConfig is what the admin routes show and check from the polling config.
@@ -47,6 +51,8 @@ func PollingAdminRouter(store PollingAdminStore, cfg PollingAdminConfig) http.Ha
 	r.Get("/targets", getPollingTargets(store))
 	r.Put("/state", a.putState)
 	r.Put("/observers/{publicKey}", putPollingObserver(store))
+	r.Put("/targets/{target}", putPollingTarget(store))
+	r.Delete("/admin-stops/{target}/{observer}", deletePollingAdminStop(store))
 	return r
 }
 
@@ -95,7 +101,21 @@ func (a pollingAdmin) state(ctx context.Context) (api.PollingAdminState, error) 
 	}
 	// A pause whose end has passed no longer pauses anything, as the policy answer already treats it.
 	effective := paused && (until == nil || until.After(time.Now()))
-	out := api.PollingAdminState{Paused: effective, ConfigPaused: a.cfg.Paused, Authority: a.cfg.Authority,
+	blocked, err := a.store.ListNoPasswordBlocked(ctx)
+	if err != nil {
+		return api.PollingAdminState{}, err
+	}
+	stops, err := a.store.ListPollingAdminStops(ctx)
+	if err != nil {
+		return api.PollingAdminState{}, err
+	}
+	if blocked == nil {
+		blocked = []string{}
+	}
+	if stops == nil {
+		stops = []api.PollingAdminStop{}
+	}
+	out := api.PollingAdminState{NoPasswordBlocked: blocked, AdminStops: stops, Paused: effective, ConfigPaused: a.cfg.Paused, Authority: a.cfg.Authority,
 		ExcludedNodes: make([]string, 0, len(excluded)), ConfigExcludedNodes: make([]string, 0, len(a.cfg.ExcludedNodes)),
 		Observers: observers}
 	for _, k := range a.cfg.ExcludedNodes {
@@ -235,5 +255,80 @@ func putPollingObserver(store PollingAdminStore) http.HandlerFunc {
 			return
 		}
 		respond(w, 200, api.PollingObserver{PublicKey: hex.EncodeToString(key), Blocked: req.Blocked, Approved: req.Approved, Note: req.Note})
+	}
+}
+
+// putPollingTarget godoc
+// @Summary Lift the blank-login block on a requested repeater
+// @Description Only noPasswordBlocked false is accepted. A repeater that gave admin access to a blank login stays blocked until this is called; requests that were stopped do not restart by themselves. 404 for a repeater Beacon has no record of. Body at most 4 KiB.
+// @Tags Admin
+// @Accept json
+// @Produce json
+// @Security AdminKey
+// @Param target path string true "Repeater public key, 64 hex characters"
+// @Param body body api.PollingTargetUpdate true "noPasswordBlocked: false"
+// @Success 200 {object} api.PollingTargetUpdate
+// @Failure 400,401,404,415,503,500 {object} map[string]APIError
+// @Router /admin/polling/targets/{target} [put]
+func putPollingTarget(store PollingAdminStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		key, err := api.ParsePollingKey(chi.URLParam(r, "target"))
+		if err != nil {
+			respondError(w, 400, "invalid repeater public key")
+			return
+		}
+		var req api.PollingTargetUpdate
+		if !decodePollingBody(w, r, &req) {
+			return
+		}
+		if req.NoPasswordBlocked {
+			respondError(w, 400, "noPasswordBlocked can only be set to false")
+			return
+		}
+		found, err := store.ClearNoPasswordBlocked(r.Context(), key)
+		if err != nil {
+			pollingFailed(w, err)
+			return
+		}
+		if !found {
+			respondError(w, 404, "no such repeater")
+			return
+		}
+		respond(w, 200, req)
+	}
+}
+
+// deletePollingAdminStop godoc
+// @Summary Clear one admin stop
+// @Description The observer may be offered the requested repeater again at the next election. Its device keeps its own stop until the operator runs poll enable on it. 404 when there is no such stop.
+// @Tags Admin
+// @Security AdminKey
+// @Param target path string true "Repeater public key, 64 hex characters"
+// @Param observer path string true "Observer public key, 64 hex characters"
+// @Success 204 "Cleared"
+// @Failure 400,401,404,503,500 {object} map[string]APIError
+// @Router /admin/polling/admin-stops/{target}/{observer} [delete]
+func deletePollingAdminStop(store PollingAdminStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		target, err := api.ParsePollingKey(chi.URLParam(r, "target"))
+		if err != nil {
+			respondError(w, 400, "invalid repeater public key")
+			return
+		}
+		observer, err := api.ParsePollingKey(chi.URLParam(r, "observer"))
+		if err != nil {
+			respondError(w, 400, "invalid observer public key")
+			return
+		}
+		found, err := store.DeletePollingAdminStop(r.Context(), target, observer)
+		if err != nil {
+			pollingFailed(w, err)
+			return
+		}
+		if !found {
+			respondError(w, 404, "no such admin stop")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}
 }

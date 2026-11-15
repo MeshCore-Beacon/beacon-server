@@ -181,7 +181,7 @@ func listPollingCandidates(ctx context.Context, q sqlc.Querier, target []byte, r
 	out := make([]polling.Candidate, 0, len(rows))
 	for _, r := range rows {
 		c := polling.Candidate{Observer: r.ObserverPublicKey, EvidenceCount: int(r.EvidenceCount),
-			ClaimedSNR: r.ClaimedSnr, State: r.State, Misses: int(r.Misses), Blocked: r.Blocked, Approved: r.Approved}
+			ClaimedSNR: r.ClaimedSnr, State: r.State, Misses: int(r.Misses), Blocked: r.Blocked, Approved: r.Approved, Requested: r.Requested}
 		if r.EvidenceCount > 0 {
 			v := r.EvidenceSnr
 			c.EvidenceSNR = &v
@@ -223,7 +223,7 @@ func replaceAssignments(ctx context.Context, q *sqlc.Queries, target []byte, a [
 		err := q.InsertPollingAssignment(ctx, sqlc.InsertPollingAssignmentParams{
 			TargetPublicKey: target, ObserverPublicKey: x.Observer, Rank: int16(x.Rank),
 			EvidenceSnr:   ptrConv(x.EvidenceSNR, func(v float64) float32 { return float32(v) }),
-			EvidenceCount: int32(x.EvidenceCount), AssignedAt: ts(at),
+			EvidenceCount: int32(x.EvidenceCount), AssignedAt: ts(at), Requested: x.Requested,
 		})
 		if err != nil {
 			return fmt.Errorf("assign %x: %w", x.Observer, err)
@@ -233,23 +233,63 @@ func replaceAssignments(ctx context.Context, q *sqlc.Queries, target []byte, a [
 }
 
 // ElectPollingTarget locks the target, reads its candidates and current poller, and stores decide's order, all in
-// one transaction, so two elections of one target cannot interleave.
+// one transaction, so two elections of one target cannot interleave. For a requested target it also reads the
+// observers that could take the request, and moves the target's requests to active or waiting with the result.
 func (s *Store) ElectPollingTarget(ctx context.Context, target []byte, receivedAfter, evidenceSince, at time.Time,
-	decide func(cands []polling.Candidate, current []byte) []polling.Assignment) error {
+	decide func(in polling.ElectionInput) polling.Election) error {
 	return s.pollTx(ctx, func(q *sqlc.Queries) error {
 		if err := q.LockPollingTarget(ctx, target); err != nil {
 			return err
 		}
-		cands, err := listPollingCandidates(ctx, q, target, receivedAfter, evidenceSince)
-		if err != nil {
+		in := polling.ElectionInput{}
+		var err error
+		if in.Cands, err = listPollingCandidates(ctx, q, target, receivedAfter, evidenceSince); err != nil {
 			return err
 		}
-		cur, err := currentPoller(ctx, q, target)
-		if err != nil {
+		if in.Current, err = currentPoller(ctx, q, target); err != nil {
 			return err
 		}
-		return replaceAssignments(ctx, q, target, decide(cands, cur), at)
+		tr, err := q.GetPollingTarget(ctx, target)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		in.Requested = err == nil && tr.ActiveRequestID.Valid
+		if in.Requested {
+			if in.RequestCands, err = listRequestCandidates(ctx, q, target, receivedAfter, evidenceSince); err != nil {
+				return err
+			}
+		}
+		el := decide(in)
+		if err := replaceAssignments(ctx, q, target, el.Assignments, at); err != nil {
+			return err
+		}
+		if !in.Requested {
+			return nil
+		}
+		return mutateRequestTarget(ctx, q, target, uuid.Nil, func(st *polling.TargetState) error {
+			st.SetAssigned(len(el.Assignments) > 0, el.WaitReason)
+			return nil
+		})
 	})
+}
+
+func listRequestCandidates(ctx context.Context, q sqlc.Querier, target []byte, receivedAfter, evidenceSince time.Time) ([]polling.Candidate, error) {
+	rows, err := q.ListRequestCandidates(ctx, sqlc.ListRequestCandidatesParams{
+		TargetPublicKey: target, FirstHeardAt: ts(evidenceSince), ReceivedAfter: ts(receivedAfter)})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]polling.Candidate, 0, len(rows))
+	for _, r := range rows {
+		ev := r.EvidenceSnr
+		out = append(out, polling.Candidate{
+			Observer: r.ObserverPublicKey, EvidenceSNR: &ev, EvidenceCount: int(r.EvidenceCount),
+			ClaimedSNR: r.ClaimedSnr, State: r.State, Misses: int(r.Misses), Blocked: r.Blocked, Approved: r.Approved,
+			Requested: r.Requested, RequestSlots: int(r.RequestSlots), Held: int(r.Held),
+			AdminStopped: r.AdminStopped, SeatsElsewhere: int(r.SeatsElsewhere),
+		})
+	}
+	return out, nil
 }
 
 func (s *Store) PollingOwnerRows(ctx context.Context, observer []byte, receivedAfter time.Time) ([]polling.OwnerRow, error) {
@@ -259,7 +299,8 @@ func (s *Store) PollingOwnerRows(ctx context.Context, observer []byte, receivedA
 	}
 	out := make([]polling.OwnerRow, 0, len(rows))
 	for _, r := range rows {
-		row := polling.OwnerRow{Target: r.TargetPublicKey, Rank: int(r.Rank), Assigned: int(r.Assigned)}
+		row := polling.OwnerRow{Target: r.TargetPublicKey, Rank: int(r.Rank), Assigned: int(r.Assigned),
+			Requested: r.Requested, ClaimedRequested: r.ClaimedRequested, PWOK: r.PwOk}
 		if r.LatestTs.Valid {
 			t := r.LatestTs.Time
 			row.LatestTS = &t
@@ -364,6 +405,15 @@ func (s *Store) PollingTargetsAdmin(ctx context.Context, receivedAfter time.Time
 	}
 	if len(keys) == 0 {
 		return out, nil
+	}
+	counts, err := s.q.PollingAdminRequestCounts(ctx, keys)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range counts {
+		if i, ok := index[string(r.TargetPublicKey)]; ok {
+			out[i].Requested, out[i].Requests = r.Requested, int(r.Requests)
+		}
 	}
 	crows, err := s.q.PollingAdminTargetRows(ctx, sqlc.PollingAdminTargetRowsParams{Targets: keys, ReceivedAfter: ts0})
 	if err != nil {

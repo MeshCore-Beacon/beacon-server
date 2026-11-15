@@ -519,6 +519,12 @@ func main() {
 		if pollingSvc != nil {
 			elector = pollingSvc
 		}
+		if pollingSvc != nil {
+			pollingSvc.SetRequests(ingestStore, requestSealer)
+		}
+		if gp, ok := guestPolling.(*polling.Service); ok && gp != pollingSvc {
+			gp.SetRequests(apiStore, requestSealer) // read-only: owners answers only read the password in use
+		}
 		requestsSvc = polling.NewRequestService(maintStore, requestSealer, elector, resolvedPolling.RequestsPerUser, time.Now, slog.Default())
 		slog.Info("telemetry requests", "component", "startup", "per_user", resolvedPolling.RequestsPerUser)
 	} else if requestsOff != "" {
@@ -650,6 +656,9 @@ func main() {
 	}
 	if pollingSvc != nil && mode.Jobs {
 		tasks = append(tasks, background.PollingTasks(pollingSvc, background.NewPollingMaint(maintStore), resolvedPolling)...)
+		if requestsSvc != nil {
+			tasks = append(tasks, background.RequestTasks(maintStore, resolvedPolling.OfflineDisableDays)...)
+		}
 	}
 	profiles := configureProfiling(ctx, pools.Maint)
 	defer profiles.Stop()

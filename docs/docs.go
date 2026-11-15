@@ -730,6 +730,86 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/polling/admin-stops/{target}/{observer}": {
+            "delete": {
+                "security": [
+                    {
+                        "AdminKey": []
+                    }
+                ],
+                "description": "The observer may be offered the requested repeater again at the next election. Its device keeps its own stop until the operator runs poll enable on it. 404 when there is no such stop.",
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Clear one admin stop",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Repeater public key, 64 hex characters",
+                        "name": "target",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Observer public key, 64 hex characters",
+                        "name": "observer",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Cleared"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/admin/polling/observers/{publicKey}": {
             "put": {
                 "security": [
@@ -929,6 +1009,106 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/polling/targets/{target}": {
+            "put": {
+                "security": [
+                    {
+                        "AdminKey": []
+                    }
+                ],
+                "description": "Only noPasswordBlocked false is accepted. A repeater that gave admin access to a blank login stays blocked until this is called; requests that were stopped do not restart by themselves. 404 for a repeater Beacon has no record of. Body at most 4 KiB.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Lift the blank-login block on a requested repeater",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Repeater public key, 64 hex characters",
+                        "name": "target",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "noPasswordBlocked: false",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PollingTargetUpdate"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PollingTargetUpdate"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "415": {
+                        "description": "Unsupported Media Type",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -9284,6 +9464,13 @@ const docTemplate = `{
         "github_com_MeshCore-Beacon_beacon-server_internal_api.PollingAdminState": {
             "type": "object",
             "properties": {
+                "adminStops": {
+                    "description": "AdminStops are observers that were given admin access by a requested repeater and are never offered it again.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PollingAdminStop"
+                    }
+                },
                 "authority": {
                     "description": "polling.authority: evidence or approved.",
                     "type": "string"
@@ -9305,6 +9492,13 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "noPasswordBlocked": {
+                    "description": "NoPasswordBlocked lists repeaters that grant admin to a blank login (64 hex each); no passwordless request is\naccepted for them until the operator clears the flag.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "observers": {
                     "type": "array",
                     "items": {
@@ -9318,6 +9512,23 @@ const docTemplate = `{
                 "pausedUntil": {
                     "description": "epoch ms; null when not set",
                     "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.PollingAdminStop": {
+            "type": "object",
+            "properties": {
+                "observerPublicKey": {
+                    "description": "64 lowercase hex",
+                    "type": "string"
+                },
+                "reportedAt": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "targetPublicKey": {
+                    "description": "64 lowercase hex",
+                    "type": "string"
                 }
             }
         },
@@ -9391,6 +9602,13 @@ const docTemplate = `{
                 "publicKey": {
                     "description": "64 lowercase hex",
                     "type": "string"
+                },
+                "requested": {
+                    "description": "Requested is true while a telemetry request is in use for the repeater; Requests counts all its requests.",
+                    "type": "boolean"
+                },
+                "requests": {
+                    "type": "integer"
                 }
             }
         },
@@ -9438,6 +9656,14 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PollingTarget"
                     }
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.PollingTargetUpdate": {
+            "type": "object",
+            "properties": {
+                "noPasswordBlocked": {
+                    "type": "boolean"
                 }
             }
         },

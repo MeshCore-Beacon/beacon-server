@@ -36,6 +36,24 @@ type PollingAdminState struct {
 	// polling.authority: evidence or approved.
 	Authority string            `json:"authority"`
 	Observers []PollingObserver `json:"observers"`
+	// NoPasswordBlocked lists repeaters that grant admin to a blank login (64 hex each); no passwordless request is
+	// accepted for them until the operator clears the flag.
+	NoPasswordBlocked []string `json:"noPasswordBlocked"`
+	// AdminStops are observers that were given admin access by a requested repeater and are never offered it again.
+	AdminStops []PollingAdminStop `json:"adminStops"`
+}
+
+// PollingAdminStop is one observer that must not take one requested repeater.
+type PollingAdminStop struct {
+	TargetPublicKey   string `json:"targetPublicKey"`   // 64 lowercase hex
+	ObserverPublicKey string `json:"observerPublicKey"` // 64 lowercase hex
+	ReportedAt        int64  `json:"reportedAt"`        // epoch ms
+}
+
+// PollingTargetUpdate replaces what the operator can change on one repeater. Only false is accepted: it lifts the
+// blank-login block.
+type PollingTargetUpdate struct {
+	NoPasswordBlocked bool `json:"noPasswordBlocked"`
 }
 
 // PollingTargetCandidate is one observer's place for a repeater: a live candidate, an assigned observer, or both.
@@ -57,6 +75,9 @@ type PollingTarget struct {
 	LatestTrustedReading *int64                   `json:"latestTrustedReading"` // epoch ms; only readings from an assigned observer with advert evidence
 	LatestReading        *int64                   `json:"latestReading"`        // epoch ms, from any observer
 	Candidates           []PollingTargetCandidate `json:"candidates"`
+	// Requested is true while a telemetry request is in use for the repeater; Requests counts all its requests.
+	Requested bool `json:"requested"`
+	Requests  int  `json:"requests"`
 }
 
 // PollingTargetList is at most 500 targets, newest claim first.

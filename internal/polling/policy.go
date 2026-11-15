@@ -201,6 +201,9 @@ type OwnerRow struct {
 	PollerHops int
 	LatestTS   *time.Time
 	Excluded   bool
+	// Requested: the observer is assigned the target as a requested one. ClaimedRequested: its claim names it as
+	// one. PWOK: the claim accepts requests and has a free seat or already holds this target.
+	Requested, ClaimedRequested, PWOK bool
 }
 
 type OwnerEntry struct {
@@ -210,6 +213,9 @@ type OwnerEntry struct {
 	StandbyRank int     `json:"standby_rank"`
 	OwnerHops   int     `json:"owner_hops"`
 	LatestTS    *string `json:"latest_ts"`
+	// Requested marks a server-requested target; PW is the password sealed to this observer, when one is in use.
+	Requested bool      `json:"requested,omitempty"`
+	PW        *Envelope `json:"pw,omitempty"`
 }
 
 type OwnersAnswer struct {
@@ -220,12 +226,16 @@ type OwnersAnswer struct {
 func BuildOwners(rows []OwnerRow, p Policy) OwnersAnswer {
 	nodes := make(map[string]OwnerEntry, len(rows))
 	for _, r := range rows {
-		e := OwnerEntry{Role: "polling", Mine: true, StandbyRank: 1}
+		// A device holding a requested target it is not assigned drops it when the answer leaves it out.
+		if (r.ClaimedRequested && !r.Requested) || (r.Requested && !r.PWOK) {
+			continue
+		}
+		e := OwnerEntry{Role: "polling", Mine: true, StandbyRank: 1, Requested: r.Requested}
 		switch {
 		case r.Excluded:
 			e = OwnerEntry{Role: "excluded", Excluded: true, StandbyRank: 1}
 		case r.Rank >= 1:
-			e = OwnerEntry{Role: "standby", StandbyRank: r.Rank}
+			e = OwnerEntry{Role: "standby", StandbyRank: r.Rank, Requested: r.Requested}
 		}
 		if r.LatestTS != nil {
 			s := r.LatestTS.UTC().Truncate(time.Second).Format(time.RFC3339)

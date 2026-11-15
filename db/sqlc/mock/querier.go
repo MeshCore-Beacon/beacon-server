@@ -205,6 +205,21 @@ func (mr *MockQuerierMockRecorder) CheckPacketSitesSlice(ctx, arg any) *gomock.C
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckPacketSitesSlice", reflect.TypeOf((*MockQuerier)(nil).CheckPacketSitesSlice), ctx, arg)
 }
 
+// ClearNoPasswordBlocked mocks base method.
+func (m *MockQuerier) ClearNoPasswordBlocked(ctx context.Context, targetPublicKey []byte) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ClearNoPasswordBlocked", ctx, targetPublicKey)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ClearNoPasswordBlocked indicates an expected call of ClearNoPasswordBlocked.
+func (mr *MockQuerierMockRecorder) ClearNoPasswordBlocked(ctx, targetPublicKey any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ClearNoPasswordBlocked", reflect.TypeOf((*MockQuerier)(nil).ClearNoPasswordBlocked), ctx, targetPublicKey)
+}
+
 // ClearRepeaters mocks base method.
 func (m *MockQuerier) ClearRepeaters(ctx context.Context) (int64, error) {
 	m.ctrl.T.Helper()
@@ -638,6 +653,21 @@ func (m *MockQuerier) DeleteOrphanPollingAssignments(ctx context.Context, target
 func (mr *MockQuerierMockRecorder) DeleteOrphanPollingAssignments(ctx, targetPublicKey any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteOrphanPollingAssignments", reflect.TypeOf((*MockQuerier)(nil).DeleteOrphanPollingAssignments), ctx, targetPublicKey)
+}
+
+// DeletePollingAdminStop mocks base method.
+func (m *MockQuerier) DeletePollingAdminStop(ctx context.Context, arg db.DeletePollingAdminStopParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeletePollingAdminStop", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeletePollingAdminStop indicates an expected call of DeletePollingAdminStop.
+func (mr *MockQuerierMockRecorder) DeletePollingAdminStop(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeletePollingAdminStop", reflect.TypeOf((*MockQuerier)(nil).DeletePollingAdminStop), ctx, arg)
 }
 
 // DeletePollingAssignments mocks base method.
@@ -2121,6 +2151,21 @@ func (mr *MockQuerierMockRecorder) InsertObserverTelemetry(ctx, arg any) *gomock
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertObserverTelemetry", reflect.TypeOf((*MockQuerier)(nil).InsertObserverTelemetry), ctx, arg)
 }
 
+// InsertPollingAdminStop mocks base method.
+func (m *MockQuerier) InsertPollingAdminStop(ctx context.Context, arg db.InsertPollingAdminStopParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "InsertPollingAdminStop", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// InsertPollingAdminStop indicates an expected call of InsertPollingAdminStop.
+func (mr *MockQuerierMockRecorder) InsertPollingAdminStop(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertPollingAdminStop", reflect.TypeOf((*MockQuerier)(nil).InsertPollingAdminStop), ctx, arg)
+}
+
 // InsertPollingAssignment mocks base method.
 func (m *MockQuerier) InsertPollingAssignment(ctx context.Context, arg db.InsertPollingAssignmentParams) error {
 	m.ctrl.T.Helper()
@@ -2717,6 +2762,21 @@ func (mr *MockQuerierMockRecorder) ListMissingRollupHours(ctx, limit any) *gomoc
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListMissingRollupHours", reflect.TypeOf((*MockQuerier)(nil).ListMissingRollupHours), ctx, limit)
 }
 
+// ListNoPasswordBlocked mocks base method.
+func (m *MockQuerier) ListNoPasswordBlocked(ctx context.Context) ([][]byte, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListNoPasswordBlocked", ctx)
+	ret0, _ := ret[0].([][]byte)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListNoPasswordBlocked indicates an expected call of ListNoPasswordBlocked.
+func (mr *MockQuerierMockRecorder) ListNoPasswordBlocked(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListNoPasswordBlocked", reflect.TypeOf((*MockQuerier)(nil).ListNoPasswordBlocked), ctx)
+}
+
 // ListNodeObservations mocks base method.
 func (m *MockQuerier) ListNodeObservations(ctx context.Context, arg db.ListNodeObservationsParams) ([]db.ListNodeObservationsRow, error) {
 	m.ctrl.T.Helper()
@@ -3152,6 +3212,21 @@ func (mr *MockQuerierMockRecorder) ListPacketsWindowScoped(ctx, arg any) *gomock
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPacketsWindowScoped", reflect.TypeOf((*MockQuerier)(nil).ListPacketsWindowScoped), ctx, arg)
 }
 
+// ListPollingAdminStops mocks base method.
+func (m *MockQuerier) ListPollingAdminStops(ctx context.Context) ([]db.PollingAdminStop, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListPollingAdminStops", ctx)
+	ret0, _ := ret[0].([]db.PollingAdminStop)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListPollingAdminStops indicates an expected call of ListPollingAdminStops.
+func (mr *MockQuerierMockRecorder) ListPollingAdminStops(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPollingAdminStops", reflect.TypeOf((*MockQuerier)(nil).ListPollingAdminStops), ctx)
+}
+
 // ListPollingCandidates mocks base method.
 func (m *MockQuerier) ListPollingCandidates(ctx context.Context, arg db.ListPollingCandidatesParams) ([]db.ListPollingCandidatesRow, error) {
 	m.ctrl.T.Helper()
@@ -3240,6 +3315,21 @@ func (m *MockQuerier) ListRepeaterSources(ctx context.Context) ([]db.MeshmapperR
 func (mr *MockQuerierMockRecorder) ListRepeaterSources(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListRepeaterSources", reflect.TypeOf((*MockQuerier)(nil).ListRepeaterSources), ctx)
+}
+
+// ListRequestCandidates mocks base method.
+func (m *MockQuerier) ListRequestCandidates(ctx context.Context, arg db.ListRequestCandidatesParams) ([]db.ListRequestCandidatesRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListRequestCandidates", ctx, arg)
+	ret0, _ := ret[0].([]db.ListRequestCandidatesRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListRequestCandidates indicates an expected call of ListRequestCandidates.
+func (mr *MockQuerierMockRecorder) ListRequestCandidates(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListRequestCandidates", reflect.TypeOf((*MockQuerier)(nil).ListRequestCandidates), ctx, arg)
 }
 
 // ListRouteEvidence mocks base method.
@@ -3704,6 +3794,21 @@ func (mr *MockQuerierMockRecorder) ObserverKeysByIDs(ctx, dollar_1 any) *gomock.
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ObserverKeysByIDs", reflect.TypeOf((*MockQuerier)(nil).ObserverKeysByIDs), ctx, dollar_1)
 }
 
+// OfflineRequestTargets mocks base method.
+func (m *MockQuerier) OfflineRequestTargets(ctx context.Context, cutoff pgtype.Timestamptz) ([][]byte, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "OfflineRequestTargets", ctx, cutoff)
+	ret0, _ := ret[0].([][]byte)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// OfflineRequestTargets indicates an expected call of OfflineRequestTargets.
+func (mr *MockQuerierMockRecorder) OfflineRequestTargets(ctx, cutoff any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OfflineRequestTargets", reflect.TypeOf((*MockQuerier)(nil).OfflineRequestTargets), ctx, cutoff)
+}
+
 // OldestMissingRollupHour mocks base method.
 func (m *MockQuerier) OldestMissingRollupHour(ctx context.Context) (pgtype.Timestamptz, error) {
 	m.ctrl.T.Helper()
@@ -3747,6 +3852,21 @@ func (m *MockQuerier) PeekUserToken(ctx context.Context, arg db.PeekUserTokenPar
 func (mr *MockQuerierMockRecorder) PeekUserToken(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PeekUserToken", reflect.TypeOf((*MockQuerier)(nil).PeekUserToken), ctx, arg)
+}
+
+// PollingAdminRequestCounts mocks base method.
+func (m *MockQuerier) PollingAdminRequestCounts(ctx context.Context, targets [][]byte) ([]db.PollingAdminRequestCountsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PollingAdminRequestCounts", ctx, targets)
+	ret0, _ := ret[0].([]db.PollingAdminRequestCountsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PollingAdminRequestCounts indicates an expected call of PollingAdminRequestCounts.
+func (mr *MockQuerierMockRecorder) PollingAdminRequestCounts(ctx, targets any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PollingAdminRequestCounts", reflect.TypeOf((*MockQuerier)(nil).PollingAdminRequestCounts), ctx, targets)
 }
 
 // PollingAdminTargetRows mocks base method.
@@ -3823,6 +3943,21 @@ func (mr *MockQuerierMockRecorder) PollingObserverFlags(ctx, observerPublicKey a
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PollingObserverFlags", reflect.TypeOf((*MockQuerier)(nil).PollingObserverFlags), ctx, observerPublicKey)
 }
 
+// PollingOtherStateSeen mocks base method.
+func (m *MockQuerier) PollingOtherStateSeen(ctx context.Context, arg db.PollingOtherStateSeenParams) (pgtype.Timestamptz, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PollingOtherStateSeen", ctx, arg)
+	ret0, _ := ret[0].(pgtype.Timestamptz)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PollingOtherStateSeen indicates an expected call of PollingOtherStateSeen.
+func (mr *MockQuerierMockRecorder) PollingOtherStateSeen(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PollingOtherStateSeen", reflect.TypeOf((*MockQuerier)(nil).PollingOtherStateSeen), ctx, arg)
+}
+
 // PollingOwnerRows mocks base method.
 func (m *MockQuerier) PollingOwnerRows(ctx context.Context, arg db.PollingOwnerRowsParams) ([]db.PollingOwnerRowsRow, error) {
 	m.ctrl.T.Helper()
@@ -3836,6 +3971,21 @@ func (m *MockQuerier) PollingOwnerRows(ctx context.Context, arg db.PollingOwnerR
 func (mr *MockQuerierMockRecorder) PollingOwnerRows(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PollingOwnerRows", reflect.TypeOf((*MockQuerier)(nil).PollingOwnerRows), ctx, arg)
+}
+
+// PollingTargetExists mocks base method.
+func (m *MockQuerier) PollingTargetExists(ctx context.Context, targetPublicKey []byte) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PollingTargetExists", ctx, targetPublicKey)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PollingTargetExists indicates an expected call of PollingTargetExists.
+func (mr *MockQuerierMockRecorder) PollingTargetExists(ctx, targetPublicKey any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PollingTargetExists", reflect.TypeOf((*MockQuerier)(nil).PollingTargetExists), ctx, targetPublicKey)
 }
 
 // PruneImportedRegions mocks base method.
@@ -3981,6 +4131,21 @@ func (m *MockQuerier) RequestNode(ctx context.Context, id uuid.UUID) (db.Request
 func (mr *MockQuerierMockRecorder) RequestNode(ctx, id any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RequestNode", reflect.TypeOf((*MockQuerier)(nil).RequestNode), ctx, id)
+}
+
+// RequestedPasswords mocks base method.
+func (m *MockQuerier) RequestedPasswords(ctx context.Context, targets [][]byte) ([]db.RequestedPasswordsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RequestedPasswords", ctx, targets)
+	ret0, _ := ret[0].([]db.RequestedPasswordsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RequestedPasswords indicates an expected call of RequestedPasswords.
+func (mr *MockQuerierMockRecorder) RequestedPasswords(ctx, targets any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RequestedPasswords", reflect.TypeOf((*MockQuerier)(nil).RequestedPasswords), ctx, targets)
 }
 
 // ResolveEndpointHashPairs mocks base method.
@@ -4716,6 +4881,20 @@ func (m *MockQuerier) TouchPackets(ctx context.Context, arg db.TouchPacketsParam
 func (mr *MockQuerierMockRecorder) TouchPackets(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TouchPackets", reflect.TypeOf((*MockQuerier)(nil).TouchPackets), ctx, arg)
+}
+
+// TouchPollingOtherState mocks base method.
+func (m *MockQuerier) TouchPollingOtherState(ctx context.Context, arg db.TouchPollingOtherStateParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TouchPollingOtherState", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// TouchPollingOtherState indicates an expected call of TouchPollingOtherState.
+func (mr *MockQuerierMockRecorder) TouchPollingOtherState(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TouchPollingOtherState", reflect.TypeOf((*MockQuerier)(nil).TouchPollingOtherState), ctx, arg)
 }
 
 // TouchUserLogin mocks base method.

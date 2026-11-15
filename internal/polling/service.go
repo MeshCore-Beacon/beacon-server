@@ -5,7 +5,9 @@ package polling
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/hex"
+	"io"
 	"log/slog"
 	"strings"
 	"time"
@@ -41,9 +43,10 @@ type Store interface {
 	HasLivePollingCandidate(ctx context.Context, observer, target []byte, receivedAfter time.Time) (bool, error)
 	ListPollingTargets(ctx context.Context, receivedAfter time.Time) ([][]byte, error)
 	// ElectPollingTarget runs decide on the target's live candidates and current poller and stores the result,
-	// atomically per target.
+	// atomically per target. For a requested target it also loads the observers that could take the request and
+	// moves its requests between waiting and active with the result.
 	ElectPollingTarget(ctx context.Context, target []byte, receivedAfter, evidenceSince, at time.Time,
-		decide func(cands []Candidate, current []byte) []Assignment) error
+		decide func(in ElectionInput) Election) error
 	PollingOwnerRows(ctx context.Context, observer []byte, receivedAfter time.Time) ([]OwnerRow, error)
 	PollingObserverFlags(ctx context.Context, observer []byte) (blocked, approved bool, err error)
 	PollingState(ctx context.Context) (paused bool, pausedUntil *time.Time, excluded [][]byte, err error)
@@ -55,10 +58,20 @@ type Service struct {
 	cfg   config.ResolvedPolling
 	now   func() time.Time
 	log   *slog.Logger
+	// reqs and sealer are set when telemetry requests are on; without them no target is ever requested.
+	reqs   RequestedStore
+	sealer *Sealer
+	rnd    io.Reader
 }
 
 func NewService(store Store, cfg config.ResolvedPolling, now func() time.Time, log *slog.Logger) *Service {
 	return &Service{store: store, cfg: cfg, now: now, log: log}
+}
+
+// SetRequests turns on requested targets: claims that report them are acted on and owners answers carry their
+// envelopes. Call it before the service takes traffic.
+func (s *Service) SetRequests(st RequestedStore, sealer *Sealer) {
+	s.reqs, s.sealer, s.rnd = st, sealer, rand.Reader
 }
 
 // short is the only form of an observer key that reaches the logs.
@@ -151,6 +164,7 @@ func (s *Service) HandleClaim(ctx context.Context, topicPubkeyHex string, raw []
 	if !applied {
 		return
 	}
+	s.handleRequestedStates(ctx, c, now)
 	for _, n := range c.Nodes {
 		targets[string(n.Target)] = n.Target
 	}
@@ -256,7 +270,9 @@ func (s *Service) Owners(ctx context.Context, c Caller) (OwnersAnswer, error) {
 			rows[i].Rank = rows[i].Assigned
 		}
 	}
-	return BuildOwners(rows, p), nil
+	ans := BuildOwners(rows, p)
+	s.addEnvelopes(ctx, c.Observer, rows, ans.Nodes)
+	return ans, nil
 }
 
 // ElectTarget recomputes the order of observers for one repeater. No candidates clears it.
@@ -265,13 +281,7 @@ func (s *Service) ElectTarget(ctx context.Context, target []byte) error {
 	return s.store.ElectPollingTarget(ctx, target, now.Add(-ClaimTTL), now.Add(-EvidenceWindow), now, s.decide)
 }
 
-// decide is Elect, limited to operator-approved observers when polling.authority is approved.
-func (s *Service) decide(cands []Candidate, current []byte) []Assignment {
-	if s.cfg.Authority == config.PollingAuthorityApproved {
-		cands = approvedOnly(cands)
-	}
-	return Elect(cands, current)
-}
+func (s *Service) decide(in ElectionInput) Election { return Decide(in, s.cfg) }
 
 // ElectAll re-elects every known target. One failure does not stop the rest; the first error is returned.
 func (s *Service) ElectAll(ctx context.Context) error {

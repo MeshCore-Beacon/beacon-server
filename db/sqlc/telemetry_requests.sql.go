@@ -12,6 +12,19 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearNoPasswordBlocked = `-- name: ClearNoPasswordBlocked :execrows
+UPDATE polling_targets SET no_password_blocked = false WHERE target_public_key = $1 AND no_password_blocked
+`
+
+// Run under LockPollingTarget.
+func (q *Queries) ClearNoPasswordBlocked(ctx context.Context, targetPublicKey []byte) (int64, error) {
+	result, err := q.db.Exec(ctx, clearNoPasswordBlocked, targetPublicKey)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countUserRequests = `-- name: CountUserRequests :one
 SELECT count(*)::int FROM telemetry_requests WHERE user_id = $1
 `
@@ -21,6 +34,23 @@ func (q *Queries) CountUserRequests(ctx context.Context, userID uuid.UUID) (int3
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const deletePollingAdminStop = `-- name: DeletePollingAdminStop :execrows
+DELETE FROM polling_admin_stops WHERE target_public_key = $1 AND observer_public_key = $2
+`
+
+type DeletePollingAdminStopParams struct {
+	TargetPublicKey   []byte `json:"target_public_key"`
+	ObserverPublicKey []byte `json:"observer_public_key"`
+}
+
+func (q *Queries) DeletePollingAdminStop(ctx context.Context, arg DeletePollingAdminStopParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deletePollingAdminStop, arg.TargetPublicKey, arg.ObserverPublicKey)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteTelemetryRequest = `-- name: DeleteTelemetryRequest :exec
@@ -64,6 +94,25 @@ func (q *Queries) GetPollingTarget(ctx context.Context, targetPublicKey []byte) 
 	return i, err
 }
 
+const insertPollingAdminStop = `-- name: InsertPollingAdminStop :execrows
+INSERT INTO polling_admin_stops (target_public_key, observer_public_key, reported_at) VALUES ($1, $2, $3)
+ON CONFLICT (target_public_key, observer_public_key) DO NOTHING
+`
+
+type InsertPollingAdminStopParams struct {
+	TargetPublicKey   []byte             `json:"target_public_key"`
+	ObserverPublicKey []byte             `json:"observer_public_key"`
+	ReportedAt        pgtype.Timestamptz `json:"reported_at"`
+}
+
+func (q *Queries) InsertPollingAdminStop(ctx context.Context, arg InsertPollingAdminStopParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertPollingAdminStop, arg.TargetPublicKey, arg.ObserverPublicKey, arg.ReportedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const insertTelemetryRequest = `-- name: InsertTelemetryRequest :exec
 INSERT INTO telemetry_requests (id, user_id, target_public_key, status, status_reason, password_ct, password_nonce,
                                 password_failed, created_at, updated_at, enabled_at)
@@ -99,6 +148,54 @@ func (q *Queries) InsertTelemetryRequest(ctx context.Context, arg InsertTelemetr
 		arg.EnabledAt,
 	)
 	return err
+}
+
+const listNoPasswordBlocked = `-- name: ListNoPasswordBlocked :many
+SELECT target_public_key FROM polling_targets WHERE no_password_blocked ORDER BY target_public_key
+`
+
+func (q *Queries) ListNoPasswordBlocked(ctx context.Context) ([][]byte, error) {
+	rows, err := q.db.Query(ctx, listNoPasswordBlocked)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := [][]byte{}
+	for rows.Next() {
+		var target_public_key []byte
+		if err := rows.Scan(&target_public_key); err != nil {
+			return nil, err
+		}
+		items = append(items, target_public_key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPollingAdminStops = `-- name: ListPollingAdminStops :many
+SELECT target_public_key, observer_public_key, reported_at FROM polling_admin_stops ORDER BY reported_at DESC, target_public_key, observer_public_key
+`
+
+func (q *Queries) ListPollingAdminStops(ctx context.Context) ([]PollingAdminStop, error) {
+	rows, err := q.db.Query(ctx, listPollingAdminStops)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PollingAdminStop{}
+	for rows.Next() {
+		var i PollingAdminStop
+		if err := rows.Scan(&i.TargetPublicKey, &i.ObserverPublicKey, &i.ReportedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listTargetRequests = `-- name: ListTargetRequests :many
@@ -230,6 +327,99 @@ func (q *Queries) LockUserForRequests(ctx context.Context, id uuid.UUID) (uuid.U
 	return id_2, err
 }
 
+const offlineRequestTargets = `-- name: OfflineRequestTargets :many
+SELECT r.target_public_key::bytea AS target_public_key
+FROM telemetry_requests r
+LEFT JOIN nodes n ON n.public_key = r.target_public_key
+WHERE r.status <> 'disabled'
+GROUP BY r.target_public_key, n.last_seen
+HAVING GREATEST(max(r.enabled_at), COALESCE(n.last_seen, '-infinity'::timestamptz)) < $1::timestamptz
+`
+
+// Requested targets whose node no observer has heard since cutoff and whose newest enabling is older than cutoff.
+// Requests with no node row count from the enabling alone.
+func (q *Queries) OfflineRequestTargets(ctx context.Context, cutoff pgtype.Timestamptz) ([][]byte, error) {
+	rows, err := q.db.Query(ctx, offlineRequestTargets, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := [][]byte{}
+	for rows.Next() {
+		var target_public_key []byte
+		if err := rows.Scan(&target_public_key); err != nil {
+			return nil, err
+		}
+		items = append(items, target_public_key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const pollingAdminRequestCounts = `-- name: PollingAdminRequestCounts :many
+SELECT r.target_public_key::bytea AS target_public_key, count(*)::int AS requests,
+       bool_or(t.active_request_id IS NOT NULL)::boolean AS requested
+FROM telemetry_requests r
+LEFT JOIN polling_targets t ON t.target_public_key = r.target_public_key
+WHERE r.target_public_key = ANY($1::bytea[])
+GROUP BY r.target_public_key
+`
+
+type PollingAdminRequestCountsRow struct {
+	TargetPublicKey []byte `json:"target_public_key"`
+	Requests        int32  `json:"requests"`
+	Requested       bool   `json:"requested"`
+}
+
+func (q *Queries) PollingAdminRequestCounts(ctx context.Context, targets [][]byte) ([]PollingAdminRequestCountsRow, error) {
+	rows, err := q.db.Query(ctx, pollingAdminRequestCounts, targets)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PollingAdminRequestCountsRow{}
+	for rows.Next() {
+		var i PollingAdminRequestCountsRow
+		if err := rows.Scan(&i.TargetPublicKey, &i.Requests, &i.Requested); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const pollingOtherStateSeen = `-- name: PollingOtherStateSeen :one
+SELECT seen_at FROM polling_other_states WHERE target_public_key = $1 AND observer_public_key = $2
+`
+
+type PollingOtherStateSeenParams struct {
+	TargetPublicKey   []byte `json:"target_public_key"`
+	ObserverPublicKey []byte `json:"observer_public_key"`
+}
+
+func (q *Queries) PollingOtherStateSeen(ctx context.Context, arg PollingOtherStateSeenParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, pollingOtherStateSeen, arg.TargetPublicKey, arg.ObserverPublicKey)
+	var seen_at pgtype.Timestamptz
+	err := row.Scan(&seen_at)
+	return seen_at, err
+}
+
+const pollingTargetExists = `-- name: PollingTargetExists :one
+SELECT EXISTS (SELECT 1 FROM polling_targets WHERE target_public_key = $1)
+`
+
+func (q *Queries) PollingTargetExists(ctx context.Context, targetPublicKey []byte) (bool, error) {
+	row := q.db.QueryRow(ctx, pollingTargetExists, targetPublicKey)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const requestNode = `-- name: RequestNode :one
 SELECT public_key, node_type, COALESCE(name, '')::text AS name FROM nodes WHERE id = $1
 `
@@ -247,6 +437,49 @@ func (q *Queries) RequestNode(ctx context.Context, id uuid.UUID) (RequestNodeRow
 	return i, err
 }
 
+const requestedPasswords = `-- name: RequestedPasswords :many
+SELECT t.target_public_key::bytea AS target_public_key, t.ver, r.id AS request_id, r.password_ct, r.password_nonce
+FROM polling_targets t
+JOIN telemetry_requests r ON r.id = t.active_request_id
+WHERE t.target_public_key = ANY($1::bytea[])
+`
+
+type RequestedPasswordsRow struct {
+	TargetPublicKey []byte    `json:"target_public_key"`
+	Ver             int64     `json:"ver"`
+	RequestID       uuid.UUID `json:"request_id"`
+	PasswordCt      []byte    `json:"password_ct"`
+	PasswordNonce   []byte    `json:"password_nonce"`
+}
+
+// The password in use for each requested target among $1, sealed. A target whose option in use is the blank login
+// has no ciphertext.
+func (q *Queries) RequestedPasswords(ctx context.Context, targets [][]byte) ([]RequestedPasswordsRow, error) {
+	rows, err := q.db.Query(ctx, requestedPasswords, targets)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RequestedPasswordsRow{}
+	for rows.Next() {
+		var i RequestedPasswordsRow
+		if err := rows.Scan(
+			&i.TargetPublicKey,
+			&i.Ver,
+			&i.RequestID,
+			&i.PasswordCt,
+			&i.PasswordNonce,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const telemetryRequestTarget = `-- name: TelemetryRequestTarget :one
 SELECT target_public_key FROM telemetry_requests WHERE id = $1 AND user_id = $2
 `
@@ -261,6 +494,22 @@ func (q *Queries) TelemetryRequestTarget(ctx context.Context, arg TelemetryReque
 	var target_public_key []byte
 	err := row.Scan(&target_public_key)
 	return target_public_key, err
+}
+
+const touchPollingOtherState = `-- name: TouchPollingOtherState :exec
+INSERT INTO polling_other_states (target_public_key, observer_public_key, seen_at) VALUES ($1, $2, $3)
+ON CONFLICT (target_public_key, observer_public_key) DO UPDATE SET seen_at = EXCLUDED.seen_at
+`
+
+type TouchPollingOtherStateParams struct {
+	TargetPublicKey   []byte             `json:"target_public_key"`
+	ObserverPublicKey []byte             `json:"observer_public_key"`
+	SeenAt            pgtype.Timestamptz `json:"seen_at"`
+}
+
+func (q *Queries) TouchPollingOtherState(ctx context.Context, arg TouchPollingOtherStateParams) error {
+	_, err := q.db.Exec(ctx, touchPollingOtherState, arg.TargetPublicKey, arg.ObserverPublicKey, arg.SeenAt)
+	return err
 }
 
 const updatePollingTarget = `-- name: UpdatePollingTarget :exec

@@ -25,6 +25,13 @@ type Candidate struct {
 	Misses        int
 	Blocked       bool
 	Approved      bool // set by the operator; only matters with polling.authority = approved
+	// Requested is true when the claim names the target as a requested one (not a local target).
+	Requested bool
+	// The rest is only read for a requested target (see ElectRequested).
+	RequestSlots   int  // free seats the claim announced
+	Held           int  // requested targets the claim names
+	AdminStopped   bool // the operator has not cleared this observer's admin stop for the target
+	SeatsElsewhere int  // requested assignments to older requested targets
 }
 
 // Assignment is one observer's place in the order for a repeater. Rank 0 polls.
@@ -33,6 +40,8 @@ type Assignment struct {
 	Rank          int
 	EvidenceSNR   *float64
 	EvidenceCount int
+	// Requested marks an assignment made for a requested target: the observer is handed its password.
+	Requested bool
 }
 
 func eligible(c Candidate) bool {
