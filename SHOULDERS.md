@@ -25,6 +25,8 @@ projects that make this possible:
 - [google/uuid](https://github.com/google/uuid): UUID generation
 - [golang.org/x/sync](https://pkg.go.dev/golang.org/x/sync): singleflight for
   collapsing concurrent cache misses
+- [golang.org/x/text](https://pkg.go.dev/golang.org/x/text): Unicode NFC normalisation
+  of passwords
 - [paulmach/orb](https://github.com/paulmach/orb): GeoJSON border geometry and
   point-in-polygon checks
 - [swaggo/http-swagger](https://github.com/swaggo/http-swagger): Swagger UI

@@ -2083,3 +2083,19 @@ func (f *fakeStore) userID(name string) uuid.UUID {
 	}
 	return uuid.Nil
 }
+
+// A password registered composed signs in typed decomposed, and the other way round.
+func TestLoginAcceptsEitherFormOfAPassword(t *testing.T) {
+	e := newEnv(t)
+	if err := e.svc.Register(bg, "ridge", "ridge@example.org", composed); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Verify(bg, tokenIn(t, e.last())); err != nil {
+		t.Fatal(err)
+	}
+	for _, pw := range []string{composed, decomposed} {
+		if _, _, _, err := e.svc.Login(bg, "ridge", pw, SessionMeta{}); err != nil {
+			t.Fatalf("%q: %v", pw, err)
+		}
+	}
+}

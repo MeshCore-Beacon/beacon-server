@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/crypto/argon2"
+	"golang.org/x/text/unicode/norm"
 )
 
 // Current argon2id parameters; a stored hash made with others is rehashed on the next login.
@@ -33,7 +34,7 @@ const (
 	minSaltOrKey      = 8
 	maxSaltOrKey      = 64
 
-	minPasswordBytes = 12
+	minPasswordChars = 12 // characters (runes) after normalisation
 	maxPasswordBytes = 128
 	minLocalPartLen  = 3
 )
@@ -45,8 +46,12 @@ func (e *PolicyError) Error() string { return e.Reason }
 
 func (e *PolicyError) Is(target error) bool { return target == ErrWeakPassword }
 
-// HashPassword returns an argon2id PHC string with a fresh random salt.
+// normalize puts a password in Unicode NFC, so one password typed composed or decomposed is one password.
+func normalize(password string) string { return norm.NFC.String(password) }
+
+// HashPassword returns an argon2id PHC string with a fresh random salt, of the password in NFC.
 func HashPassword(password string) (string, error) {
+	password = normalize(password)
 	salt := make([]byte, argonSaltLen)
 	if _, err := rand.Read(salt); err != nil {
 		return "", fmt.Errorf("users: salt: %w", err)
@@ -88,11 +93,21 @@ func VerifyPassword(hash, password string) (ok bool, needsRehash bool) {
 	if err1 != nil || err2 != nil || len(salt) < minSaltOrKey || len(salt) > maxSaltOrKey || len(want) < minSaltOrKey || len(want) > maxSaltOrKey {
 		return false, false
 	}
+	rawPassword, password := password, normalize(password)
 	got := argon2.IDKey([]byte(password), salt, t, m, uint8(p), uint32(len(want)))
+	legacy := false
 	if subtle.ConstantTimeCompare(got, want) != 1 {
-		return false, false
+		// A hash made before passwords were normalised was taken from the bytes as typed.
+		if rawPassword == password {
+			return false, false
+		}
+		got = argon2.IDKey([]byte(rawPassword), salt, t, m, uint8(p), uint32(len(want)))
+		if subtle.ConstantTimeCompare(got, want) != 1 {
+			return false, false
+		}
+		legacy = true
 	}
-	rehash := m != argonMemoryKiB || t != argonTime || p != argonThreads || len(salt) != argonSaltLen || len(want) != argonKeyLen
+	rehash := legacy || m != argonMemoryKiB || t != argonTime || p != argonThreads || len(salt) != argonSaltLen || len(want) != argonKeyLen
 	return true, rehash
 }
 
@@ -130,7 +145,8 @@ func allSameRune(s string) bool {
 // CheckPasswordPolicy returns a *PolicyError (matching ErrWeakPassword) when the password is refused.
 // Empty username or email skip the matching check.
 func CheckPasswordPolicy(password, username, email string) error {
-	if len(password) < minPasswordBytes {
+	password, username, email = normalize(password), normalize(username), normalize(email)
+	if utf8.RuneCountInString(password) < minPasswordChars {
 		return &PolicyError{"Password must be at least 12 characters."}
 	}
 	if len(password) > maxPasswordBytes {

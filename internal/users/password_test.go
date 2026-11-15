@@ -165,3 +165,55 @@ func TestTokens(t *testing.T) {
 		t.Fatal("hashes collide")
 	}
 }
+
+const (
+	composed   = "paésword-passphraseé" // é as one character
+	decomposed = "paésword-passphraseé"
+)
+
+// The same password typed composed or decomposed is one password.
+func TestPasswordsAreNormalisedToNFC(t *testing.T) {
+	h, err := HashPassword(composed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := VerifyPassword(h, decomposed); !ok {
+		t.Fatal("the decomposed form of the password was refused")
+	}
+	h, _ = HashPassword(decomposed)
+	if ok, re := VerifyPassword(h, composed); !ok || re {
+		t.Fatalf("composed against a decomposed hash: ok=%v rehash=%v", ok, re)
+	}
+	// A hash made before normalisation, from the raw decomposed bytes, still verifies and is marked for rehash.
+	salt := []byte("0123456789abcdef")
+	old := phc(argonMemoryKiB, argonTime, argonThreads, salt, argon2.IDKey([]byte(decomposed), salt, argonTime, argonMemoryKiB, argonThreads, argonKeyLen))
+	if ok, re := VerifyPassword(old, decomposed); !ok || !re {
+		t.Fatalf("legacy hash: ok=%v rehash=%v", ok, re)
+	}
+	if ok, _ := VerifyPassword(old, "something else entirely"); ok {
+		t.Fatal("wrong password verified")
+	}
+}
+
+// The minimum counts characters after normalisation, the maximum stays 128 bytes; the policy sees the normalised form.
+func TestPolicyCountsCharactersAfterNormalisation(t *testing.T) {
+	twelve := "éàùèâêîôûëïü" // 12 characters, 24 bytes
+	if err := CheckPasswordPolicy(twelve, "", ""); err != nil {
+		t.Fatalf("12 characters: %v", err)
+	}
+	decomp := "éàùèâêîôûëïü"
+	if err := CheckPasswordPolicy(decomp, "", ""); err != nil {
+		t.Fatalf("the same 12 characters decomposed: %v", err)
+	}
+	err := CheckPasswordPolicy(twelve[:len(twelve)-2], "", "")
+	var pe *PolicyError
+	if !errors.As(err, &pe) || pe.Reason != "Password must be at least 12 characters." {
+		t.Fatalf("11 characters: %v", err)
+	}
+	if err := CheckPasswordPolicy(strings.Repeat("\u00e9x", 50), "", ""); err == nil || !strings.Contains(err.Error(), "128 bytes") {
+		t.Fatalf("over 128 bytes: %v", err)
+	}
+	if err := CheckPasswordPolicy("my-zoé-passphrase", "zoé", ""); err == nil {
+		t.Fatal("a username in another normal form got through")
+	}
+}
