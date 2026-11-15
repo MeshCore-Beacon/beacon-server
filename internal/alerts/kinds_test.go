@@ -7,6 +7,7 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 )
 
 func ip(v int) *int { return &v }
@@ -214,5 +215,33 @@ func TestCapsOfAnObserverThatIsAlsoANode(t *testing.T) {
 	// A plain node or observer reads as asked.
 	if got := (Caps{NodeType: nodeTypeRepeater}).Source(KindObserverOff, TargetNode); got != TargetNode {
 		t.Errorf("plain node: %s", got)
+	}
+}
+
+// A range narrower than twice the one degree of hysteresis has no temperature a firing rule could recover at.
+func TestTemperatureRangeNeedsRoomToRecover(t *testing.T) {
+	c := Caps{NodeType: nodeTypeRepeater, Polled: true, Temperature: true}
+	for _, tc := range []struct {
+		low, high int
+		ok        bool
+	}{{0, 10, false}, {0, 19, false}, {0, 20, true}, {-50, 400, true}, {100, 100, false}} {
+		_, _, err := ValidateRule(c, KindTemperature, ip(tc.low), ip(tc.high), true, false)
+		var bad *InvalidThreshold
+		if tc.ok != (err == nil) || (!tc.ok && !errors.As(err, &bad)) {
+			t.Errorf("%d to %d: %v", tc.low, tc.high, err)
+		}
+	}
+	// One limit alone has no width, and a rule being turned off is not held to it.
+	if _, _, err := ValidateRule(c, KindTemperature, ip(0), nil, true, false); err != nil {
+		t.Errorf("low only: %v", err)
+	}
+	if _, _, err := ValidateRule(c, KindTemperature, ip(0), ip(10), false, false); err != nil {
+		t.Errorf("off: %v", err)
+	}
+	// Every range that is accepted can recover: some reading satisfies the recovery condition.
+	o := Evaluate(Rule{Kind: KindTemperature, Threshold: ip(0), High: ip(20), State: StateFiring},
+		live(temp(time.Hour, 10), temp(2*time.Hour, -5)).withNow())
+	if o.State != StateOK {
+		t.Errorf("narrowest range did not recover: %+v", o)
 	}
 }

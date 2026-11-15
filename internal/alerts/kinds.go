@@ -296,6 +296,10 @@ func ValidateRule(c Caps, kind string, th, high *int, enabled, hasGoneQuiet bool
 			if err == nil && th != nil && high != nil && *th >= *high {
 				err = &InvalidThreshold{Message: "The low limit must be below the high limit."}
 			}
+			// Recovery needs a degree of room inside each limit, so a narrower range could never recover.
+			if err == nil && enabled && th != nil && high != nil && *high-*th < 2*tempRecoverTenth {
+				err = &InvalidThreshold{Message: fmt.Sprintf("The range must be at least %d degrees wide.", 2*tempRecoverTenth/10)}
+			}
 		}
 	}
 	if err != nil {
