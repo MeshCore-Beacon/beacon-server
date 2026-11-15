@@ -612,7 +612,7 @@ func TestUserTextClippedPostgres(t *testing.T) {
 	}
 }
 
-func TestUserReplaceUnverifiedAndPeekTokenPostgres(t *testing.T) {
+func TestUserActivateAndPeekTokenPostgres(t *testing.T) {
 	ctx, _, s := userStore(t)
 	now := time.Now()
 	pending := newUser(t, ctx, s, "pending")
@@ -632,29 +632,39 @@ func TestUserReplaceUnverifiedAndPeekTokenPostgres(t *testing.T) {
 		t.Fatalf("peek of a used token: %v", err)
 	}
 	_ = s.CreateToken(ctx, pending.ID, users.TokenVerify, []byte("t2"), []byte(`{}`), now.Add(time.Hour))
+	_ = s.CreateToken(ctx, pending.ID, users.TokenReset, []byte("t3"), []byte(`{}`), now.Add(time.Hour))
 
-	if err := s.ReplaceUnverifiedUser(ctx, pending.ID, "Other", "h2"); !errors.Is(err, users.ErrUsernameTaken) {
+	if err := s.ActivateUser(ctx, pending.ID, "Other", "h2", now); !errors.Is(err, users.ErrUsernameTaken) {
 		t.Fatalf("taken username: %v", err)
 	}
-	if err := s.ReplaceUnverifiedUser(ctx, pending.ID, "fresh", "h2"); err != nil {
+	if got, _ := s.UserByID(ctx, pending.ID); got.EmailVerifiedAt != nil || got.Username != "pending" {
+		t.Fatalf("failed activation changed the user: %+v", got)
+	}
+	if err := s.ActivateUser(ctx, pending.ID, "fresh", "h2", now); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := s.UserByID(ctx, pending.ID)
-	if got.Username != "fresh" || got.DisplayName != "fresh" || got.PassHash != "h2" || got.Email != pending.Email {
+	if got.Username != "fresh" || got.DisplayName != "fresh" || got.PassHash != "h2" || got.Email != pending.Email || got.EmailVerifiedAt == nil {
 		t.Fatalf("user %+v", got)
 	}
 	if liveSessionCount(t, ctx, s, got) != 0 {
 		t.Fatal("sessions survived")
 	}
 	if _, err := s.PeekToken(ctx, users.TokenVerify, []byte("t2"), now); !errors.Is(err, users.ErrNotFound) {
-		t.Fatalf("token survived: %v", err)
+		t.Fatalf("verify token survived: %v", err)
 	}
-	// Verified users are never replaced, and nothing of theirs is deleted.
+	if _, err := s.PeekToken(ctx, users.TokenReset, []byte("t3"), now); err != nil {
+		t.Fatalf("other token kinds must stay: %v", err)
+	}
+	// A verified user is never changed, and nothing of theirs is deleted.
+	newSession(t, ctx, s, other, "web", 2)
+	if err := s.ActivateUser(ctx, pending.ID, "hijack", "h3", now); !errors.Is(err, users.ErrNotFound) {
+		t.Fatalf("verified: %v", err)
+	}
 	if err := s.SetUserEmailVerified(ctx, other.ID, now); err != nil {
 		t.Fatal(err)
 	}
-	newSession(t, ctx, s, other, "web", 2)
-	if err := s.ReplaceUnverifiedUser(ctx, other.ID, "hijack", "h3"); !errors.Is(err, users.ErrNotFound) {
+	if err := s.ActivateUser(ctx, other.ID, "hijack", "h3", now); !errors.Is(err, users.ErrNotFound) {
 		t.Fatalf("verified: %v", err)
 	}
 	if o, _ := s.UserByID(ctx, other.ID); o.Username != "other" || o.PassHash != "hash" {

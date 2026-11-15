@@ -12,6 +12,42 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const activateUser = `-- name: ActivateUser :one
+WITH activated AS (
+    UPDATE users SET username = $1, display_name = $1, pass_hash = $2,
+                     email_verified_at = $3
+    WHERE users.id = $4 AND email_verified_at IS NULL AND disabled_at IS NULL
+    RETURNING users.id
+), dropped_tokens AS (
+    DELETE FROM user_tokens WHERE kind = 'verify' AND user_id IN (SELECT id FROM activated)
+), dropped_sessions AS (
+    DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM activated)
+)
+SELECT id FROM activated
+`
+
+type ActivateUserParams struct {
+	Username   string             `json:"username"`
+	PassHash   string             `json:"pass_hash"`
+	VerifiedAt pgtype.Timestamptz `json:"verified_at"`
+	UserID     uuid.UUID          `json:"user_id"`
+}
+
+// Completes a sign-up: the username and password hash of the verified sign-up replace the row's, the address counts
+// as verified, and every verify token and session of the account goes, in one statement. No row when the user is
+// already verified, disabled or gone.
+func (q *Queries) ActivateUser(ctx context.Context, arg ActivateUserParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, activateUser,
+		arg.Username,
+		arg.PassHash,
+		arg.VerifiedAt,
+		arg.UserID,
+	)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const applyPendingEmail = `-- name: ApplyPendingEmail :execrows
 UPDATE users SET email = pending_email, pending_email = NULL, email_verified_at = now()
 WHERE id = $1 AND pending_email = $2
@@ -417,34 +453,6 @@ func (q *Queries) PeekUserToken(ctx context.Context, arg PeekUserTokenParams) (u
 	var user_id uuid.UUID
 	err := row.Scan(&user_id)
 	return user_id, err
-}
-
-const replaceUnverifiedUser = `-- name: ReplaceUnverifiedUser :one
-WITH replaced AS (
-    UPDATE users SET username = $1, display_name = $1, pass_hash = $2, created_at = now()
-    WHERE users.id = $3 AND email_verified_at IS NULL AND disabled_at IS NULL
-    RETURNING users.id
-), dropped_tokens AS (
-    DELETE FROM user_tokens WHERE user_id IN (SELECT id FROM replaced)
-), dropped_sessions AS (
-    DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM replaced)
-)
-SELECT id FROM replaced
-`
-
-type ReplaceUnverifiedUserParams struct {
-	Username string    `json:"username"`
-	PassHash string    `json:"pass_hash"`
-	UserID   uuid.UUID `json:"user_id"`
-}
-
-// Re-registration of an address whose owner never verified it: new username and hash, and every old token and
-// session of the account is deleted, in one statement. No row when the user is verified, disabled or gone.
-func (q *Queries) ReplaceUnverifiedUser(ctx context.Context, arg ReplaceUnverifiedUserParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, replaceUnverifiedUser, arg.Username, arg.PassHash, arg.UserID)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
 }
 
 const setUserDisabled = `-- name: SetUserDisabled :execrows

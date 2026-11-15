@@ -16,7 +16,9 @@ const (
 	throttleWindow = 15 * time.Minute
 	sweepEvery     = time.Minute
 	// throttleCap bounds the table so made-up login names cannot grow it without limit.
-	throttleCap = 20000
+	throttleCap = 100000
+	// fullRetry is what an attempt is told to wait when the table is full and its key cannot be recorded.
+	fullRetry = time.Minute
 )
 
 // loginKey is the key for a typed login name: the same whether it names a user, an email or nobody.
@@ -30,6 +32,7 @@ func userKey(id uuid.UUID) string { return "user:" + id.String() }
 type throttle struct {
 	mu        sync.Mutex
 	m         map[string]*attempt
+	cap       int
 	nextSweep time.Time
 }
 
@@ -39,7 +42,7 @@ type attempt struct {
 	lockedUntil time.Time
 }
 
-func newThrottle() *throttle { return &throttle{m: map[string]*attempt{}} }
+func newThrottle() *throttle { return &throttle{m: map[string]*attempt{}, cap: throttleCap} }
 
 func (a *attempt) expired(now time.Time) bool {
 	return !now.Before(a.windowStart.Add(throttleWindow)) && !now.Before(a.lockedUntil)
@@ -58,12 +61,21 @@ func (t *throttle) sweep(now time.Time) {
 	}
 }
 
-// locked reports whether id may not be tried, and for how long still.
-func (t *throttle) locked(id string, now time.Time) (time.Duration, bool) {
+// locked reports whether key may not be tried, and for how long still. A key with no entry while the table is full
+// (after a sweep) is treated as locked, because its failures could not be counted; entries already there are
+// never evicted, so a flood cannot unlock anyone.
+func (t *throttle) locked(key string, now time.Time) (time.Duration, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.sweep(now)
-	if a := t.m[id]; a != nil && now.Before(a.lockedUntil) {
+	a := t.m[key]
+	if a == nil {
+		if len(t.m) >= t.cap {
+			return fullRetry, true
+		}
+		return 0, false
+	}
+	if now.Before(a.lockedUntil) {
 		return a.lockedUntil.Sub(now), true
 	}
 	return 0, false
@@ -76,13 +88,9 @@ func (t *throttle) fail(id string, now time.Time) bool {
 	t.sweep(now)
 	a := t.m[id]
 	if a == nil {
-		if len(t.m) >= throttleCap {
-			t.nextSweep = time.Time{}
-			t.sweep(now)
-			// Still full: do not record the new key, so a flood cannot evict a lock that is already set.
-			if len(t.m) >= throttleCap {
-				return false
-			}
+		// Full: the new key is not recorded (locked reports it as throttled), so nothing is evicted.
+		if len(t.m) >= t.cap {
+			return false
 		}
 		a = &attempt{}
 		t.m[id] = a

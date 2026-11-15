@@ -182,7 +182,7 @@ func (f *fakeStore) ApplyPendingEmail(_ context.Context, id uuid.UUID, expected 
 	u.Email, u.PendingEmail, u.EmailVerifiedAt = *u.PendingEmail, nil, &now
 	return nil
 }
-func (f *fakeStore) ReplaceUnverifiedUser(_ context.Context, id uuid.UUID, username, hash string) error {
+func (f *fakeStore) ActivateUser(_ context.Context, id uuid.UUID, username, hash string, at time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	u, err := f.get(id)
@@ -194,9 +194,9 @@ func (f *fakeStore) ReplaceUnverifiedUser(_ context.Context, id uuid.UUID, usern
 			return ErrUsernameTaken
 		}
 	}
-	u.Username, u.DisplayName, u.PassHash = username, username, hash
+	u.Username, u.DisplayName, u.PassHash, u.EmailVerifiedAt = username, username, hash, &at
 	for h, t := range f.tokens {
-		if t.user == id {
+		if t.user == id && t.kind == TokenVerify {
 			delete(f.tokens, h)
 		}
 	}
@@ -536,30 +536,34 @@ func TestRegisterDuplicateEmailDoesNotReveal(t *testing.T) {
 	}
 }
 
-// The pre-registration attack: the attacker registers the victim's address first with a password of their own.
-func TestRegisterOverAnUnverifiedAddressReplacesThePendingAccount(t *testing.T) {
+// Whichever link the owner of the address opens decides the account, so a stranger who registered the address
+// first or second ends up with nothing.
+func TestPreRegistrationAttackerFirstVictimSecond(t *testing.T) {
 	e := newEnv(t)
 	const p1, p2 = "attackers long passphrase", "the real owners passphrase"
 	if err := e.svc.Register(bg, "mallory", "victim@example.org", p1); err != nil {
 		t.Fatal(err)
 	}
-	oldTok := tokenIn(t, e.last())
 	pending, _ := e.store.UserByEmail(bg, "victim@example.org")
-	oldSess, _ := e.store.CreateSession(bg, Session{UserID: pending.ID, Kind: "web", ExpiresAt: e.clk.Now().Add(time.Hour)}, []byte("old"))
-
+	sess, _ := e.store.CreateSession(bg, Session{UserID: pending.ID, Kind: "web", ExpiresAt: e.clk.Now().Add(time.Hour)}, []byte("old"))
 	if err := e.svc.Register(bg, "victim", "victim@example.org", p2); err != nil {
 		t.Fatal(err)
 	}
-	if len(e.store.users) != 1 {
-		t.Fatalf("%d users", len(e.store.users))
+	row, _ := e.store.UserByEmail(bg, "victim@example.org")
+	if len(e.store.users) != 1 || row.Username != "mallory" || row.EmailVerifiedAt != nil {
+		t.Fatalf("second sign-up changed the row: %+v", row)
 	}
-	if err := e.svc.Verify(bg, oldTok); !errors.Is(err, ErrTokenInvalid) {
-		t.Fatalf("old verify link still works: %v", err)
+	// An unverified account cannot sign in, whichever password is tried.
+	for _, pw := range []string{p1, p2} {
+		if _, _, _, err := e.svc.Login(bg, "victim@example.org", pw, SessionMeta{}); err == nil {
+			t.Fatal("unverified account signed in")
+		}
 	}
-	if e.store.sessions[oldSess.ID].ended != true {
-		t.Fatal("old session not ended")
+	msgs := e.msgs()
+	if !strings.Contains(msgs[1].Text, "account named victim") || !strings.Contains(msgs[1].Text, "did not sign up") {
+		t.Fatalf("mail: %q", msgs[1].Text)
 	}
-	if err := e.svc.Verify(bg, tokenIn(t, e.last())); err != nil {
+	if err := e.svc.Verify(bg, tokenIn(t, msgs[1])); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, _, err := e.svc.Login(bg, "victim@example.org", p1, SessionMeta{}); !errors.Is(err, ErrInvalidCredentials) {
@@ -571,18 +575,73 @@ func TestRegisterOverAnUnverifiedAddressReplacesThePendingAccount(t *testing.T) 
 	if _, _, u, err := e.svc.Login(bg, "victim@example.org", p2, SessionMeta{}); err != nil || u.Username != "victim" {
 		t.Fatalf("victim cannot sign in: %v", err)
 	}
+	if !e.store.sessions[sess.ID].ended {
+		t.Fatal("old session not ended")
+	}
+	if err := e.svc.Verify(bg, tokenIn(t, msgs[0])); !errors.Is(err, ErrTokenInvalid) {
+		t.Fatalf("attacker's link still works: %v", err)
+	}
+}
+
+func TestPreRegistrationVictimFirstAttackerSecond(t *testing.T) {
+	e := newEnv(t)
+	const p1, p2 = "the real owners passphrase", "attackers long passphrase"
+	_ = e.svc.Register(bg, "victim", "victim@example.org", p1)
+	_ = e.svc.Register(bg, "mallory", "victim@example.org", p2)
+	msgs := e.msgs()
+	if len(msgs) != 2 {
+		t.Fatalf("%d mails", len(msgs))
+	}
+	if err := e.svc.Verify(bg, tokenIn(t, msgs[0])); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, u, err := e.svc.Login(bg, "victim", p1, SessionMeta{}); err != nil || u.Username != "victim" {
+		t.Fatalf("victim cannot sign in: %v", err)
+	}
+	if _, _, _, err := e.svc.Login(bg, "victim@example.org", p2, SessionMeta{}); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("attacker's password signs in: %v", err)
+	}
+	if err := e.svc.Verify(bg, tokenIn(t, msgs[1])); !errors.Is(err, ErrTokenInvalid) {
+		t.Fatalf("attacker's link still works: %v", err)
+	}
+}
+
+func TestRegisteringAgainWithTheSameNameKeepsWorking(t *testing.T) {
+	e := newEnv(t)
+	_ = e.svc.Register(bg, "ridge", "ridge@example.org", goodPW)
+	if err := e.svc.Register(bg, "ridge", "ridge@example.org", goodPW); err != nil {
+		t.Fatalf("own pending sign-up refused: %v", err)
+	}
+	if err := e.svc.Verify(bg, tokenIn(t, e.last())); err != nil {
+		t.Fatal(err)
+	}
+	e.login("ridge")
 }
 
 func TestRegisterOverAnUnverifiedAddressStillHonoursUsernameUniqueness(t *testing.T) {
 	e := newEnv(t)
 	_ = e.svc.Register(bg, "pending", "p@example.org", goodPW)
 	e.user("taken")
+	n := len(e.msgs())
 	if err := e.svc.Register(bg, "Taken", "p@example.org", "another long passphrase"); !errors.Is(err, ErrUsernameTaken) {
 		t.Fatalf("err = %v", err)
 	}
-	u, _ := e.store.UserByEmail(bg, "p@example.org")
-	if u.Username != "pending" {
-		t.Fatalf("pending account changed: %+v", u)
+	if len(e.msgs()) != n {
+		t.Fatal("mail sent for a refused sign-up")
+	}
+}
+
+func TestVerifyFailsWhenTheUsernameWasTakenMeanwhile(t *testing.T) {
+	e := newEnv(t)
+	_ = e.svc.Register(bg, "first", "p@example.org", goodPW)
+	_ = e.svc.Register(bg, "bob", "p@example.org", "another long passphrase")
+	link := tokenIn(t, e.last())
+	e.user("bob")
+	if err := e.svc.Verify(bg, link); !errors.Is(err, ErrUsernameTaken) {
+		t.Fatalf("err = %v", err)
+	}
+	if u, _ := e.store.UserByEmail(bg, "p@example.org"); u.EmailVerifiedAt != nil {
+		t.Fatal("verified despite the failure")
 	}
 }
 
@@ -672,11 +731,12 @@ func TestResendVerification(t *testing.T) {
 	if len(e.msgs()) != 2 {
 		t.Fatal("no resend")
 	}
-	if err := e.svc.Verify(bg, first); !errors.Is(err, ErrTokenInvalid) {
-		t.Fatalf("old link still works: %v", err)
-	}
+	// Links are not cancelled by a resend (a stranger could do that to the owner); using one retires the rest.
 	if err := e.svc.Verify(bg, tokenIn(t, e.last())); err != nil {
 		t.Fatal(err)
+	}
+	if err := e.svc.Verify(bg, first); !errors.Is(err, ErrTokenInvalid) {
+		t.Fatalf("other link still works after verifying: %v", err)
 	}
 	// Verified and unknown addresses: nil, nothing sent.
 	for _, a := range []string{"ridge@example.org", "nobody@example.org"} {
@@ -1694,24 +1754,70 @@ func TestThrottleGivesKnownAndUnknownNamesTheSameAnswer(t *testing.T) {
 	}
 }
 
-func TestThrottleTableIsBounded(t *testing.T) {
+func TestThrottleTableIsBoundedAndFailsClosed(t *testing.T) {
 	th := newThrottle()
+	th.cap = 50
 	now := time.Now()
-	for i := 0; i < throttleCap*2; i++ {
-		th.fail(uuid.NewString(), now)
+	for i := 0; i < 10; i++ {
+		th.fail("victim", now)
 	}
-	if th.size() > throttleCap {
+	for i := 0; i < 200; i++ {
+		k := uuid.NewString()
+		if _, locked := th.locked(k, now); !locked && th.size() < th.cap {
+			th.fail(k, now)
+		}
+	}
+	if th.size() > th.cap {
 		t.Fatalf("size %d over the cap", th.size())
 	}
+	// Full: a key that cannot be recorded is refused for a short while, not let through uncounted.
+	wait, locked := th.locked("new-name", now)
+	if !locked || wait <= 0 || wait > time.Minute {
+		t.Fatalf("full table: locked=%v wait=%v", locked, wait)
+	}
 	// An existing lock survives the flood.
-	th2 := newThrottle()
-	for i := 0; i < throttleMax; i++ {
-		th2.fail("victim", now)
-	}
-	for i := 0; i < throttleCap*2; i++ {
-		th2.fail(uuid.NewString(), now)
-	}
-	if _, locked := th2.locked("victim", now); !locked {
+	if _, locked := th.locked("victim", now); !locked {
 		t.Fatal("flood evicted a lock")
 	}
+	// Entries expire and the table opens again.
+	if _, locked := th.locked("new-name", now.Add(31*time.Minute)); locked {
+		t.Fatal("still full after everything expired")
+	}
+}
+
+func TestLoginRefusedWhenTheThrottleTableIsFull(t *testing.T) {
+	e := newEnv(t)
+	e.user("ridge")
+	e.svc.throttle.cap = 3
+	now := e.clk.Now()
+	for _, k := range []string{"a", "b", "c"} {
+		e.svc.throttle.fail(k, now)
+	}
+	calls := 0
+	real := e.svc.verifyPW
+	e.svc.verifyPW = func(h, p string) (bool, bool) { calls++; return real(h, p) }
+	_, _, _, err := e.svc.Login(bg, "ridge", goodPW, SessionMeta{})
+	var te *TooManyAttemptsError
+	if !errors.As(err, &te) || te.RetryAfter > time.Minute || calls != 0 {
+		t.Fatalf("err = %v, comparisons = %d", err, calls)
+	}
+}
+
+func TestLoginAliasesShareOneBudget(t *testing.T) {
+	e := newEnv(t)
+	e.user("ridge")
+	names := []string{"ridge", "RIDGE@example.org"}
+	for i := 0; i < 10; i++ {
+		if _, _, _, err := e.svc.Login(bg, names[i%2], "wrong password here", SessionMeta{}); !errors.Is(err, ErrInvalidCredentials) {
+			t.Fatalf("attempt %d: %v", i, err)
+		}
+	}
+	// 5 + 5 failures through two names exhaust the one account budget; both names are refused.
+	for _, n := range names {
+		if _, _, _, err := e.svc.Login(bg, n, goodPW, SessionMeta{}); !errors.Is(err, ErrTooManyAttempts) {
+			t.Fatalf("%s: %v", n, err)
+		}
+	}
+	e.clk.Advance(15*time.Minute + time.Second)
+	e.login("ridge")
 }

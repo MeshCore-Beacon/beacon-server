@@ -31,19 +31,21 @@ UPDATE users SET pending_email = sqlc.narg(pending_email) WHERE id = sqlc.arg(id
 UPDATE users SET email = pending_email, pending_email = NULL, email_verified_at = now()
 WHERE id = $1 AND pending_email = $2;
 
--- name: ReplaceUnverifiedUser :one
--- Re-registration of an address whose owner never verified it: new username and hash, and every old token and
--- session of the account is deleted, in one statement. No row when the user is verified, disabled or gone.
-WITH replaced AS (
-    UPDATE users SET username = sqlc.arg(username), display_name = sqlc.arg(username), pass_hash = sqlc.arg(pass_hash), created_at = now()
+-- name: ActivateUser :one
+-- Completes a sign-up: the username and password hash of the verified sign-up replace the row's, the address counts
+-- as verified, and every verify token and session of the account goes, in one statement. No row when the user is
+-- already verified, disabled or gone.
+WITH activated AS (
+    UPDATE users SET username = sqlc.arg(username), display_name = sqlc.arg(username), pass_hash = sqlc.arg(pass_hash),
+                     email_verified_at = sqlc.arg(verified_at)
     WHERE users.id = sqlc.arg(user_id) AND email_verified_at IS NULL AND disabled_at IS NULL
     RETURNING users.id
 ), dropped_tokens AS (
-    DELETE FROM user_tokens WHERE user_id IN (SELECT id FROM replaced)
+    DELETE FROM user_tokens WHERE kind = 'verify' AND user_id IN (SELECT id FROM activated)
 ), dropped_sessions AS (
-    DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM replaced)
+    DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM activated)
 )
-SELECT id FROM replaced;
+SELECT id FROM activated;
 
 -- name: TouchUserLogin :execrows
 UPDATE users SET last_login_at = $2 WHERE id = $1;

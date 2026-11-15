@@ -145,11 +145,11 @@ func (s *Store) ApplyPendingEmail(ctx context.Context, id uuid.UUID, expected st
 	return affected(s.q.ApplyPendingEmail(ctx, sqlc.ApplyPendingEmailParams{ID: id, PendingEmail: &e}))
 }
 
-// ReplaceUnverifiedUser gives an unverified account a new username and password hash and deletes its tokens and
-// sessions. It reports users.ErrNotFound when the user is verified, disabled or missing, and users.ErrUsernameTaken
-// when the username belongs to another account.
-func (s *Store) ReplaceUnverifiedUser(ctx context.Context, id uuid.UUID, username, hash string) error {
-	_, err := s.q.ReplaceUnverifiedUser(ctx, sqlc.ReplaceUnverifiedUserParams{UserID: id, Username: username, PassHash: hash})
+// ActivateUser finishes a sign-up: it sets the username and password hash, marks the address verified and deletes
+// the account's verify tokens and sessions. It reports users.ErrNotFound when the user is already verified,
+// disabled or missing, and users.ErrUsernameTaken when another account has the username.
+func (s *Store) ActivateUser(ctx context.Context, id uuid.UUID, username, hash string, at time.Time) error {
+	_, err := s.q.ActivateUser(ctx, sqlc.ActivateUserParams{UserID: id, Username: username, PassHash: hash, VerifiedAt: ts(at)})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return users.ErrNotFound
 	}

@@ -10,9 +10,9 @@ import (
 
 // The texts are plain English. The link sits on its own line so mail clients make it clickable.
 
-func verifyMailText(host, link string) (subject, text string) {
+func verifyMailText(host, username, link string) (subject, text string) {
 	return "Confirm your email address for Beacon",
-		fmt.Sprintf("Welcome to Beacon at %s.\n\nConfirm your email address by opening this link within 24 hours:\n\n%s\n\nIf you did not sign up for Beacon, ignore this mail and nothing will happen.\n", host, link)
+		fmt.Sprintf("Welcome to Beacon at %s.\n\nConfirm your email address and activate the account named %s by opening this link within 24 hours:\n\n%s\n\nIf you did not sign up for Beacon, ignore this mail and nothing will happen.\n", host, username, link)
 }
 
 func emailChangeMailText(host, link string) (subject, text string) {

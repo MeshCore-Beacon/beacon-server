@@ -33,7 +33,7 @@ type Store interface {
 	SetUserPassword(ctx context.Context, id uuid.UUID, hash string) error
 	SetUserEmailVerified(ctx context.Context, id uuid.UUID, at time.Time) error
 	SetUserPendingEmail(ctx context.Context, id uuid.UUID, email *string) error
-	ReplaceUnverifiedUser(ctx context.Context, id uuid.UUID, username, hash string) error
+	ActivateUser(ctx context.Context, id uuid.UUID, username, hash string, at time.Time) error
 	PeekToken(ctx context.Context, kind TokenKind, hash []byte, now time.Time) (uuid.UUID, error)
 	ApplyPendingEmail(ctx context.Context, id uuid.UUID, expected string) error
 	TouchUserLogin(ctx context.Context, id uuid.UUID, at time.Time) error
@@ -277,8 +277,12 @@ func (s *Service) Flush(ctx context.Context) error {
 	}
 }
 
+// tokenData is what a one-time token carries. A verify token holds its own sign-up (username and password hash,
+// never the password), so what a link activates is fixed when the link is made.
 type tokenData struct {
-	Email string `json:"email,omitempty"`
+	Email    string `json:"email,omitempty"`
+	Username string `json:"username,omitempty"`
+	PassHash string `json:"passHash,omitempty"`
 }
 
 func (s *Service) newToken(ctx context.Context, userID uuid.UUID, kind TokenKind, data any, ttl time.Duration) (string, error) {
@@ -293,16 +297,15 @@ func (s *Service) newToken(ctx context.Context, userID uuid.UUID, kind TokenKind
 	return plain, nil
 }
 
-// sendVerify replaces the user's verify links with a fresh one for their current address.
-func (s *Service) sendVerify(ctx context.Context, u User) error {
-	if err := s.store.DeleteUserTokens(ctx, u.ID, TokenVerify); err != nil {
-		return err
-	}
-	tok, err := s.newToken(ctx, u.ID, TokenVerify, tokenData{Email: u.Email}, verifyTTL)
+// sendVerify mails a link that activates the sign-up (username, hash) for u's address. Older links stay valid
+// until they expire: each belongs to its own sign-up, and deleting them would let a stranger who knows the
+// address cancel the owner's link.
+func (s *Service) sendVerify(ctx context.Context, u User, username, hash string) error {
+	tok, err := s.newToken(ctx, u.ID, TokenVerify, tokenData{Email: u.Email, Username: username, PassHash: hash}, verifyTTL)
 	if err != nil {
 		return err
 	}
-	subject, text := verifyMailText(s.host(), s.link("verify", tok))
+	subject, text := verifyMailText(s.host(), username, s.link("verify", tok))
 	s.enqueue(u.ID, "verify", u.Email, subject, text)
 	return nil
 }
@@ -335,35 +338,38 @@ func (s *Service) Register(ctx context.Context, username, email, password string
 	}
 	u, err := s.store.CreateUser(ctx, User{Username: username, DisplayName: username, Email: addr, PassHash: hash, Provider: "local"})
 	switch {
-	case errors.Is(err, ErrUsernameTaken):
-		return err
-	case errors.Is(err, ErrEmailTaken):
+	case errors.Is(err, ErrUsernameTaken) || errors.Is(err, ErrEmailTaken):
+		// Either index may be reported first, so look the address up: a pending sign-up may be the owner of both.
 		existing, gerr := s.store.UserByEmail(ctx, addr)
 		if errors.Is(gerr, ErrNotFound) {
+			if errors.Is(err, ErrUsernameTaken) {
+				return err
+			}
 			return nil
 		}
 		if gerr != nil {
 			return gerr
 		}
 		if existing.EmailVerifiedAt != nil || existing.DisabledAt != nil {
+			if errors.Is(err, ErrUsernameTaken) {
+				return err
+			}
 			return nil
 		}
-		// Nobody has proved they own this address, so the new sign-up replaces the pending account. Keeping the
-		// first password would let someone pre-register another person's address.
-		switch rerr := s.store.ReplaceUnverifiedUser(ctx, existing.ID, username, hash); {
-		case errors.Is(rerr, ErrNotFound):
-			return nil
-		case rerr != nil:
-			return rerr
+		// Nobody has proved they own this address yet. The row stays as the first sign-up left it; this sign-up
+		// gets its own link, and whichever link the owner opens decides the username and password.
+		if other, oerr := s.store.UserByLogin(ctx, username); oerr == nil && other.ID != existing.ID {
+			return ErrUsernameTaken
+		} else if oerr != nil && !errors.Is(oerr, ErrNotFound) {
+			return oerr
 		}
-		existing.Username, existing.DisplayName = username, username
-		s.log.Info("pending registration replaced", "user_id", existing.ID)
-		return s.sendVerify(ctx, existing)
+		s.log.Info("pending registration added", "user_id", existing.ID)
+		return s.sendVerify(ctx, existing, username, hash)
 	case err != nil:
 		return err
 	}
 	s.log.Info("user registered", "user_id", u.ID)
-	return s.sendVerify(ctx, u)
+	return s.sendVerify(ctx, u, username, hash)
 }
 
 func (s *Service) Verify(ctx context.Context, token string) error {
@@ -375,20 +381,23 @@ func (s *Service) Verify(ctx context.Context, token string) error {
 	uid, raw, err := s.store.ConsumeToken(ctx, TokenVerify, hash, now)
 	if err == nil {
 		var d tokenData
-		if json.Unmarshal(raw, &d) != nil || d.Email == "" {
+		if json.Unmarshal(raw, &d) != nil || d.Email == "" || d.Username == "" || d.PassHash == "" {
 			return ErrTokenInvalid
 		}
 		u, err := s.store.UserByID(ctx, uid)
-		if errors.Is(err, ErrNotFound) || (err == nil && u.Email != d.Email) {
+		if errors.Is(err, ErrNotFound) || (err == nil && (u.Email != d.Email || u.EmailVerifiedAt != nil || u.DisabledAt != nil)) {
 			return ErrTokenInvalid
 		}
 		if err != nil {
 			return err
 		}
-		if u.EmailVerifiedAt == nil {
-			if err := s.store.SetUserEmailVerified(ctx, uid, now); err != nil {
-				return err
-			}
+		// The sign-up in this link wins: its username and hash replace the row's, and every other verify link and
+		// session of the account goes. A username taken meanwhile fails the link (it is spent either way).
+		switch aerr := s.store.ActivateUser(ctx, uid, d.Username, d.PassHash, now); {
+		case errors.Is(aerr, ErrNotFound):
+			return ErrTokenInvalid
+		case aerr != nil:
+			return aerr
 		}
 		s.log.Info("email verified", "user_id", uid)
 		return nil
@@ -433,32 +442,47 @@ func (s *Service) ResendVerification(ctx context.Context, email string) error {
 	if u.EmailVerifiedAt != nil || u.DisabledAt != nil {
 		return nil
 	}
-	return s.sendVerify(ctx, u)
+	return s.sendVerify(ctx, u, u.Username, u.PassHash)
 }
 
 // ---- password checks ----
 
-// checkKey verifies pw against hash behind the throttle entry for key. The throttle is read before any hashing, so
-// a throttled key costs nothing to hit. Only a wrong password counts.
-func (s *Service) checkKey(key, hash, pw string) (needsRehash bool, err error) {
+// checkKeys verifies pw against hash behind the throttle entries for keys. Every key is read before any hashing,
+// so a throttled one costs nothing to hit, and any locked key refuses the attempt. A wrong password counts against
+// every key, a right one clears them all.
+func (s *Service) checkKeys(keys []string, hash, pw string) (needsRehash bool, err error) {
 	now := s.now()
-	if wait, locked := s.throttle.locked(key, now); locked {
+	var wait time.Duration
+	locked := false
+	for _, k := range keys {
+		if w, l := s.throttle.locked(k, now); l {
+			locked = true
+			if w > wait {
+				wait = w
+			}
+		}
+	}
+	if locked {
 		return false, &TooManyAttemptsError{RetryAfter: wait}
 	}
 	ok, re := s.verifyPW(hash, pw)
 	if !ok {
-		if s.throttle.fail(key, now) {
-			s.log.Warn("password attempts throttled", "key_kind", strings.SplitN(key, ":", 2)[0])
+		for _, k := range keys {
+			if s.throttle.fail(k, now) {
+				s.log.Warn("password attempts throttled", "key_kind", strings.SplitN(k, ":", 2)[0])
+			}
 		}
 		return false, ErrInvalidCredentials
 	}
-	s.throttle.clear(key)
+	for _, k := range keys {
+		s.throttle.clear(k)
+	}
 	return re, nil
 }
 
 // checkPassword is the check for a signed-in user's own actions, throttled per user id.
 func (s *Service) checkPassword(u User, pw string) (needsRehash bool, err error) {
-	return s.checkKey(userKey(u.ID), u.PassHash, pw)
+	return s.checkKeys([]string{userKey(u.ID)}, u.PassHash, pw)
 }
 
 // ---- login and sessions ----
@@ -505,7 +529,8 @@ func (s *Service) Login(ctx context.Context, login, password string, meta Sessio
 		s.throttle.fail(key, s.now())
 		return "", Session{}, User{}, ErrInvalidCredentials
 	}
-	needsRehash, err := s.checkKey(key, u.PassHash, password)
+	// Aliases of one account (username, email) share one budget through the user key.
+	needsRehash, err := s.checkKeys([]string{key, userKey(u.ID)}, u.PassHash, password)
 	if err != nil {
 		s.log.Info("login refused", "user_id", u.ID, "reason", loginReason(err))
 		return "", Session{}, User{}, err

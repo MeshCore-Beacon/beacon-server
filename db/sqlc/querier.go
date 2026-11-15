@@ -13,6 +13,10 @@ import (
 )
 
 type Querier interface {
+	// Completes a sign-up: the username and password hash of the verified sign-up replace the row's, the address counts
+	// as verified, and every verify token and session of the account goes, in one statement. No row when the user is
+	// already verified, disabled or gone.
+	ActivateUser(ctx context.Context, arg ActivateUserParams) (uuid.UUID, error)
 	// An empty region places the channel Beacon-wide.
 	AddChannelConfigScopes(ctx context.Context, arg AddChannelConfigScopesParams) error
 	AddChannelMembers(ctx context.Context, arg AddChannelMembersParams) error
@@ -595,9 +599,6 @@ type Querier interface {
 	// rows is a JSON array of {"key": hex, "data": {...}}; unchanged rows are not rewritten.
 	// fetchedAt comes from the source's checked_at when read.
 	ReplaceRepeaters(ctx context.Context, arg ReplaceRepeatersParams) error
-	// Re-registration of an address whose owner never verified it: new username and hash, and every old token and
-	// session of the account is deleted, in one statement. No row when the user is verified, disabled or gone.
-	ReplaceUnverifiedUser(ctx context.Context, arg ReplaceUnverifiedUserParams) (uuid.UUID, error)
 	// Batch form of ResolveEndpointHashes for a page of packets. Matches the cross
 	// product of IATAs and hashes; callers pick out the pairs they asked for.
 	ResolveEndpointHashPairs(ctx context.Context, arg ResolveEndpointHashPairsParams) ([]ResolveEndpointHashPairsRow, error)
