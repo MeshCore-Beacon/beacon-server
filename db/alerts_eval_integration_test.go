@@ -736,3 +736,26 @@ func TestAlertPolledNeedsACurrentSourcePostgres(t *testing.T) {
 		t.Fatalf("rule after the source went: %s", a)
 	}
 }
+
+// The pass cursor is kept between passes and a pass that reached the end of the rules starts over next time.
+func TestAlertEvaluationCursorPostgres(t *testing.T) {
+	ctx, _, s := userStore(t)
+	a := AlertEval{s}
+	if id, err := a.LoadCursor(ctx); err != nil || id != uuid.Nil {
+		t.Fatalf("fresh cursor: %v %v", id, err)
+	}
+	want := uuid.New()
+	if err := a.SaveCursor(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	if id, err := a.LoadCursor(ctx); err != nil || id != want {
+		t.Fatalf("saved cursor: %v %v", id, err)
+	}
+	// Nothing to evaluate: the pass is at the end at once, so the cursor goes back to the start.
+	if err := alerts.NewTask(a, time.Now).Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if id, err := a.LoadCursor(ctx); err != nil || id != uuid.Nil {
+		t.Fatalf("cursor after a pass that reached the end: %v %v", id, err)
+	}
+}

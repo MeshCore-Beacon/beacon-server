@@ -72,6 +72,20 @@ func optStamp(t time.Time) pgtype.Timestamptz {
 	return ts(t)
 }
 
+const alertsCursorKey = "alerts_eval_cursor"
+
+func (a AlertEval) LoadCursor(ctx context.Context) (uuid.UUID, error) {
+	var id uuid.UUID
+	if ok, err := a.LoadState(ctx, alertsCursorKey, &id); err != nil || !ok {
+		return uuid.Nil, err
+	}
+	return id, nil
+}
+
+func (a AlertEval) SaveCursor(ctx context.Context, after uuid.UUID) error {
+	return a.SaveState(ctx, alertsCursorKey, after)
+}
+
 func (a AlertEval) RuleBatch(ctx context.Context, after uuid.UUID, limit int) ([]alerts.RuleRow, error) {
 	rows, err := a.q.AlertRuleBatch(ctx, sqlc.AlertRuleBatchParams{AfterID: after, RowLimit: int32(limit)})
 	if err != nil {

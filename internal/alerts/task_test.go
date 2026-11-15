@@ -4,7 +4,10 @@
 package alerts
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -28,6 +31,7 @@ type fakeEval struct {
 	attention   int
 	unlocked    bool
 	lastPassIDs map[uuid.UUID]bool
+	cursor      uuid.UUID
 }
 
 func (f *fakeEval) BeginEvalLock(context.Context) (Unlocker, bool, error) {
@@ -35,6 +39,12 @@ func (f *fakeEval) BeginEvalLock(context.Context) (Unlocker, bool, error) {
 		return nil, false, nil
 	}
 	return fakeLock{&f.unlocked}, true, nil
+}
+
+func (f *fakeEval) LoadCursor(context.Context) (uuid.UUID, error) { return f.cursor, nil }
+func (f *fakeEval) SaveCursor(_ context.Context, id uuid.UUID) error {
+	f.cursor = id
+	return nil
 }
 
 func (f *fakeEval) RuleBatch(_ context.Context, after uuid.UUID, limit int) ([]RuleRow, error) {
@@ -175,5 +185,58 @@ func TestSanitizeName(t *testing.T) {
 		if got := SanitizeName(in, key); got != want {
 			t.Errorf("%q: %q, want %q", in, got, want)
 		}
+	}
+}
+
+// bigEval holds many ordered rules and records the highest rule id any batch returned.
+type bigEval struct {
+	ids     [][16]byte
+	visited map[int]bool
+	cursor  uuid.UUID
+}
+
+func (b *bigEval) BeginEvalLock(context.Context) (Unlocker, bool, error) {
+	closed := false
+	return fakeLock{&closed}, true, nil
+}
+
+func (b *bigEval) LoadCursor(context.Context) (uuid.UUID, error) { return b.cursor, nil }
+func (b *bigEval) SaveCursor(_ context.Context, id uuid.UUID) error {
+	b.cursor = id
+	return nil
+}
+
+func (b *bigEval) RuleBatch(_ context.Context, after uuid.UUID, limit int) ([]RuleRow, error) {
+	i := sort.Search(len(b.ids), func(i int) bool { return bytes.Compare(b.ids[i][:], after[:]) > 0 })
+	var out []RuleRow
+	for ; i < len(b.ids) && len(out) < limit; i++ {
+		b.visited[i] = true
+		out = append(out, RuleRow{ID: b.ids[i], TargetKind: TargetNode, Key: make([]byte, 32), Kind: KindGoneQuiet, Threshold: ip(24), State: StateInactive})
+	}
+	return out, nil
+}
+
+func (b *bigEval) LoadTargets(context.Context, []RuleRow, time.Time) (map[string]TargetData, error) {
+	return map[string]TargetData{}, nil
+}
+func (b *bigEval) Apply(context.Context, uuid.UUID, []Update, []Notice) error { return nil }
+func (b *bigEval) AnnounceAttention(context.Context, uuid.UUID) error         { return nil }
+
+// A table bigger than one pass's budget is still evaluated whole: each pass carries on where the last one ended.
+func TestTaskPassesContinueWhereTheLastEnded(t *testing.T) {
+	b := &bigEval{visited: map[int]bool{}}
+	for i := 1; i <= BatchSize*maxBatches+1; i++ {
+		var id [16]byte
+		binary.BigEndian.PutUint32(id[8:], uint32(i))
+		b.ids = append(b.ids, id)
+	}
+	task := NewTask(b, func() time.Time { return now })
+	for pass := 1; pass <= 2; pass++ {
+		if err := task.Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(b.visited) != len(b.ids) {
+		t.Fatalf("%d of %d rules were reached in two passes", len(b.visited), len(b.ids))
 	}
 }

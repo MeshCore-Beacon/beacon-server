@@ -75,6 +75,10 @@ type Unlocker interface{ Close(ctx context.Context) }
 type EvalStore interface {
 	// BeginEvalLock takes the guard that lets one process evaluate at a time; ok is false when another holds it.
 	BeginEvalLock(ctx context.Context) (Unlocker, bool, error)
+	// LoadCursor and SaveCursor keep where the last pass stopped, so the next one carries on from there; the nil
+	// uuid means start at the beginning.
+	LoadCursor(ctx context.Context) (uuid.UUID, error)
+	SaveCursor(ctx context.Context, after uuid.UUID) error
 	// RuleBatch returns up to limit enabled rules of live users with an id after the given one, by id.
 	RuleBatch(ctx context.Context, after uuid.UUID, limit int) ([]RuleRow, error)
 	// LoadTargets reads the data of every radio the rules name, in a fixed number of queries.
@@ -98,7 +102,9 @@ func NewTask(store EvalStore, now func() time.Time) *Task {
 	return &Task{store: store, now: now}
 }
 
-// Run is one pass. It does nothing when another process is already evaluating.
+// Run is one pass. It does nothing when another process is already evaluating. A pass is bounded, so it starts
+// where the previous one stopped and wraps to the start only after it has reached the last rule; every enabled
+// rule is evaluated in the end however many there are.
 func (t *Task) Run(ctx context.Context) error {
 	lock, ok, err := t.store.BeginEvalLock(ctx)
 	if err != nil || !ok {
@@ -106,7 +112,16 @@ func (t *Task) Run(ctx context.Context) error {
 	}
 	defer lock.Close(ctx)
 	pass, now := uuid.New(), t.now()
-	after := uuid.Nil
+	after, err := t.store.LoadCursor(ctx)
+	if err != nil {
+		return err
+	}
+	// Where the next pass starts, saved however this one ends: rules already stored are not judged again first.
+	defer func() {
+		if err := t.store.SaveCursor(ctx, after); err != nil {
+			slog.Warn("alert cursor not saved", "component", "alerts", "err", err)
+		}
+	}()
 	var fired, evaluated int
 	for i := 0; i < maxBatches; i++ {
 		rows, err := t.store.RuleBatch(ctx, after, BatchSize)
@@ -114,6 +129,7 @@ func (t *Task) Run(ctx context.Context) error {
 			return err
 		}
 		if len(rows) == 0 {
+			after = uuid.Nil // the end: the next pass starts over
 			break
 		}
 		after = rows[len(rows)-1].ID
@@ -127,7 +143,11 @@ func (t *Task) Run(ctx context.Context) error {
 		}
 		evaluated += len(rows)
 		fired += len(notes)
-		if len(rows) < BatchSize || ctx.Err() != nil {
+		if len(rows) < BatchSize {
+			after = uuid.Nil
+			break
+		}
+		if ctx.Err() != nil {
 			break
 		}
 	}
