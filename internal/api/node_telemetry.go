@@ -13,8 +13,8 @@ import (
 // Packets a radio can't beat per second; a higher claimed rate is a garbage reading.
 const packetRate = 50.0
 
-// Counters only arrive on status readings, which a poller may take up to 24h apart. A gap
-// of two such intervals still places growth in a bucket; a longer one can't be placed, so it
+// Counters only arrive on status readings, which a poller may take up to 24h apart. A pair
+// two such intervals apart still places growth in a bucket; a longer one can't be placed, so it
 // is dropped. Independent of the bucket size, which can be much finer than the poll interval.
 const nodeCounterMaxGap = 48 * time.Hour
 
@@ -68,15 +68,97 @@ type NodeTelemetry struct {
 	Points            []NodeTelemetryPoint `json:"points"`
 }
 
-// incSum is one counter's running increment total inside a bucket.
-type incSum struct {
-	sum float64
-	has bool
+// nodeCounters are the five since-boot counters on a status reading, each with the fastest
+// rate per second it can honestly climb.
+var nodeCounters = [5]struct {
+	get func(*NodeReading) *int64
+	cap float64
+}{
+	{func(r *NodeReading) *int64 { return r.AirtimeTxSecs }, airtimeRate},
+	{func(r *NodeReading) *int64 { return r.AirtimeRxSecs }, airtimeRate},
+	{func(r *NodeReading) *int64 { return r.PacketsReceived }, packetRate},
+	{func(r *NodeReading) *int64 { return r.PacketsSent }, packetRate},
+	{func(r *NodeReading) *int64 { return r.ReceiveErrors }, errorRate},
 }
 
-func (s *incSum) take(d float64, present bool) {
-	s.sum += d
-	s.has = s.has || present
+const (
+	ctrTx = iota
+	ctrRx
+	ctrRecv
+	ctrSent
+	ctrErrs
+)
+
+func isStatusReading(r *NodeReading) bool {
+	for _, c := range nodeCounters {
+		if c.get(r) != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// counterPair is what one pair of consecutive status readings contributes.
+type counterPair struct {
+	inc    [5]int64
+	has    [5]bool
+	spanMS int64
+}
+
+// pairIncrements reads only prev and cur, so a pair gives the same answer whatever range was
+// asked for. It reports false when the pair can't be trusted to say anything.
+func pairIncrements(prev, cur *NodeReading) (counterPair, bool) {
+	var p counterPair
+	elapsed := cur.SampledAt.Sub(prev.SampledAt).Milliseconds()
+	if elapsed <= 0 || elapsed > nodeCounterMaxGap.Milliseconds() {
+		return p, false
+	}
+	rebooted := prev.UptimeSeconds != nil && cur.UptimeSeconds != nil &&
+		(*cur.UptimeSeconds < *prev.UptimeSeconds || *cur.UptimeSeconds*1000 < elapsed)
+	var drops, rises int
+	var vals [5][2]int64
+	for i, c := range nodeCounters {
+		pv, cv := c.get(prev), c.get(cur)
+		if pv == nil || cv == nil {
+			continue
+		}
+		vals[i] = [2]int64{*pv, *cv}
+		p.has[i] = true
+		if *cv < *pv {
+			drops++
+		} else {
+			rises++
+		}
+	}
+	if drops+rises == 0 {
+		return p, false
+	}
+	p.spanMS = elapsed
+	switch {
+	case rebooted && drops > 0 && rises == 0: // the counters restarted with the device
+		if up := *cur.UptimeSeconds * 1000; up < elapsed {
+			p.spanMS = up
+		}
+		for i := range p.inc {
+			p.inc[i] = vals[i][1]
+		}
+	case drops == 0: // counting on, through a reboot or not
+		for i := range p.inc {
+			p.inc[i] = vals[i][1] - vals[i][0]
+		}
+	default:
+		return p, false
+	}
+	if p.spanMS < 1000 {
+		return p, false
+	}
+	secs := float64(p.spanMS) / 1000
+	for i, c := range nodeCounters {
+		if p.has[i] && float64(p.inc[i])/secs > c.cap {
+			return p, false
+		}
+	}
+	return p, true
 }
 
 type nodeBucket struct {
@@ -85,48 +167,39 @@ type nodeBucket struct {
 	battery, temp, noise, rssi mean
 	snr, qlen                  mean
 	uptime                     *int64
-	tx, rx, recv, sent, errs   incSum
+	pairs                      int
+	inc                        [5]int64
+	carried                    [5]int // contributing pairs that had the counter
 	spanMS                     int64
 }
 
-// BucketNodeReadings folds readings (ascending, with any before since serving only as counter
-// baselines) into fixed UTC buckets of size. Buckets with no readings are not emitted.
-func BucketNodeReadings(readings []NodeReading, since time.Time, size time.Duration) []NodeTelemetryPoint {
-	maxGap := nodeCounterMaxGap.Milliseconds()
-	tx := counter{rate: airtimeRate, maxGap: maxGap}
-	rx := counter{rate: airtimeRate, maxGap: maxGap}
-	errs := counter{rate: errorRate, maxGap: maxGap}
-	recv := counter{rate: packetRate, maxGap: maxGap}
-	sent := counter{rate: packetRate, maxGap: maxGap}
+func (b *nodeBucket) addPair(p counterPair) {
+	b.pairs++
+	b.spanMS += p.spanMS
+	for i := range p.inc {
+		if p.has[i] {
+			b.inc[i] += p.inc[i]
+			b.carried[i]++
+		}
+	}
+}
 
-	counters := []*counter{&tx, &rx, &errs, &recv, &sent}
-	var lastUptime *int64
-	var lastT int64
-	var statusT int64 // previous status reading that served as the counters' baseline
-	var hasStatus bool
+// BucketNodeReadings folds readings (ascending, with any before since serving only as the first
+// pair's predecessor) into fixed UTC buckets of size. Buckets with no readings are not emitted.
+// Counter increments come from consecutive pairs of status readings, credited to the bucket of
+// the later one.
+func BucketNodeReadings(readings []NodeReading, since time.Time, size time.Duration) []NodeTelemetryPoint {
+	var prevStatus *NodeReading
 	var buckets []*nodeBucket
 	for i := range readings {
 		r := &readings[i]
-		t := r.SampledAt.UnixMilli()
-		rebooted := false
-		if r.UptimeSeconds != nil {
-			if lastUptime != nil && *r.UptimeSeconds < *lastUptime {
-				if *r.UptimeSeconds > 2*(t-lastT)/1000 {
-					continue // an old snapshot replayed, not a reboot
-				}
-				rebooted = true
+		var pair counterPair
+		var paired bool
+		if isStatusReading(r) {
+			if prevStatus != nil {
+				pair, paired = pairIncrements(prevStatus, r)
 			}
-			lastUptime, lastT = r.UptimeSeconds, t
-		}
-
-		dTx := tx.add(i64f(r.AirtimeTxSecs), t, rebooted)
-		dRx := rx.add(i64f(r.AirtimeRxSecs), t, rebooted)
-		dErr := errs.add(i64f(r.ReceiveErrors), t, rebooted)
-		dRecv := recv.add(i64f(r.PacketsReceived), t, rebooted)
-		dSent := sent.add(i64f(r.PacketsSent), t, rebooted)
-		spanMS := statusSpanMS(counters, t, statusT, hasStatus, rebooted, r.UptimeSeconds)
-		if movedBaseline(counters) {
-			statusT, hasStatus = t, true
+			prevStatus = r
 		}
 		if r.SampledAt.Before(since) {
 			continue
@@ -138,12 +211,9 @@ func BucketNodeReadings(readings []NodeReading, since time.Time, size time.Durat
 		}
 		cur := buckets[len(buckets)-1]
 		cur.readings++
-		cur.spanMS += spanMS
-		cur.tx.take(dTx, r.AirtimeTxSecs != nil)
-		cur.rx.take(dRx, r.AirtimeRxSecs != nil)
-		cur.errs.take(dErr, r.ReceiveErrors != nil)
-		cur.recv.take(dRecv, r.PacketsReceived != nil)
-		cur.sent.take(dSent, r.PacketsSent != nil)
+		if paired {
+			cur.addPair(pair)
+		}
 		cur.battery.add(i32f(r.BatteryMV))
 		cur.temp.add(f64(r.TemperatureC))
 		cur.noise.add(i32f(r.NoiseFloorDB))
@@ -164,60 +234,29 @@ func BucketNodeReadings(readings []NodeReading, since time.Time, size time.Durat
 		p.QueueLength = roundedMean32(cur.qlen)
 		p.TemperatureC = tenthsMean(cur.temp)
 		p.LastSNRDB = tenthsMean(cur.snr)
-		if cur.spanMS < 1000 {
-			out = append(out, p) // an increment with no span cannot become a rate
-			continue
-		}
-		p.CounterSpanSecs = ptr(cur.spanMS / 1000)
-		if cur.tx.has {
-			p.AirtimeTxSecs = ptr(cur.tx.sum)
-		}
-		if cur.rx.has {
-			p.AirtimeRxSecs = ptr(cur.rx.sum)
-		}
-		if cur.recv.has {
-			p.PacketsReceived = ptr(int64(cur.recv.sum))
-		}
-		if cur.sent.has {
-			p.PacketsSent = ptr(int64(cur.sent.sum))
-		}
-		if cur.errs.has {
-			p.ReceiveErrors = ptr(int64(cur.errs.sum))
+		if cur.pairs > 0 {
+			p.CounterSpanSecs = ptr(cur.spanMS / 1000)
+			// A counter missing from any contributing pair would understate its rate, so it is left out.
+			full := func(i int) bool { return cur.carried[i] == cur.pairs }
+			if full(ctrTx) {
+				p.AirtimeTxSecs = ptr(float64(cur.inc[ctrTx]))
+			}
+			if full(ctrRx) {
+				p.AirtimeRxSecs = ptr(float64(cur.inc[ctrRx]))
+			}
+			if full(ctrRecv) {
+				p.PacketsReceived = ptr(cur.inc[ctrRecv])
+			}
+			if full(ctrSent) {
+				p.PacketsSent = ptr(cur.inc[ctrSent])
+			}
+			if full(ctrErrs) {
+				p.ReceiveErrors = ptr(cur.inc[ctrErrs])
+			}
 		}
 		out = append(out, p)
 	}
 	return out
-}
-
-// statusSpanMS is the time a status reading's increments cover, following what the counters
-// decided: none unless some counter counted an increment. After a reboot the counters run from
-// boot, so the span is the uptime, no longer than the gap.
-func statusSpanMS(cs []*counter, t, prevT int64, hasPrev, rebooted bool, uptime *int64) int64 {
-	if !hasPrev {
-		return 0
-	}
-	for _, c := range cs {
-		if c.outcome != outcomeAccepted {
-			continue
-		}
-		gap := t - prevT
-		if rebooted && uptime != nil && *uptime*1000 < gap {
-			return *uptime * 1000
-		}
-		return gap
-	}
-	return 0
-}
-
-// movedBaseline reports whether any counter took this reading as its new baseline. A reading
-// every counter rejected leaves the baselines, so the next increment covers the longer gap.
-func movedBaseline(cs []*counter) bool {
-	for _, c := range cs {
-		if c.outcome == outcomeSeeded || c.outcome == outcomeAccepted || c.outcome == outcomeResynced {
-			return true
-		}
-	}
-	return false
 }
 
 func roundedMean32(m mean) *int32 {
@@ -232,14 +271,6 @@ func tenthsMean(m mean) *float32 {
 		return nil
 	}
 	return ptr(float32(math.Round(m.sum/float64(m.n)*10) / 10))
-}
-
-func i64f(v *int64) *float64 {
-	if v == nil {
-		return nil
-	}
-	f := float64(*v)
-	return &f
 }
 
 // NodePollingObserver is an observer assigned to poll a node. Rank is 0 for the poller (omitted) and 1+ for standbys.

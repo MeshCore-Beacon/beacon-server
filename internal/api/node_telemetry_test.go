@@ -82,13 +82,12 @@ func TestBucketNodeReadingsCounterIncrements(t *testing.T) {
 }
 
 func TestBucketNodeReadingsCounterReset(t *testing.T) {
-	rs := []NodeReading{
-		statusReading(1, 100000, 5000),
-		statusReading(7, 40, 40), // rebooted since the last reading
-	}
-	got := BucketNodeReadings(rs, nodeBase, 6*time.Hour)
-	if len(got) != 2 || *got[1].PacketsReceived != 40 {
-		t.Fatalf("got %+v, want second bucket packetsReceived 40", got)
+	prev := steady(1) // every counter above zero, so a restart makes them all drop
+	boot := NodeReading{SampledAt: at(7), UptimeSeconds: ptr(int64(40)), AirtimeTxSecs: ptr(int64(1)), AirtimeRxSecs: ptr(int64(2)),
+		PacketsReceived: ptr(int64(30)), PacketsSent: ptr(int64(1)), ReceiveErrors: ptr(int64(0))}
+	got := BucketNodeReadings([]NodeReading{prev, boot}, nodeBase, 6*time.Hour)
+	if len(got) != 2 || *got[1].PacketsReceived != 30 {
+		t.Fatalf("got %+v, want second bucket packetsReceived 30", got)
 	}
 	if got[0].PacketsReceived != nil {
 		t.Errorf("first reading ever has increment %d, want none", *got[0].PacketsReceived)
@@ -125,8 +124,8 @@ func TestBucketNodeReadingsRateCap(t *testing.T) {
 	// 10 million packets in six hours is garbage, not traffic.
 	rs := []NodeReading{statusReading(0, 1000, 100), statusReading(6, 22600, 10_000_000)}
 	got := BucketNodeReadings(rs, nodeBase, 6*time.Hour)
-	if last := got[len(got)-1]; last.PacketsReceived == nil || *last.PacketsReceived != 0 {
-		t.Fatalf("got %+v, want the spike rejected", got)
+	if last := got[len(got)-1]; last.PacketsReceived != nil || last.CounterSpanSecs != nil {
+		t.Fatalf("got %+v, want the spiked pair to contribute nothing, not a zero", got)
 	}
 }
 
@@ -225,8 +224,8 @@ func TestCounterSpanAfterOutage(t *testing.T) {
 }
 
 func TestCounterSpanAfterReboot(t *testing.T) {
-	rs := []NodeReading{steady(-6), steady(0)}
-	boot := steady(6)
+	rs := []NodeReading{steady(-6), steady(0), steady(6)}
+	boot := steady(12)
 	boot.UptimeSeconds = ptr(int64(3600)) // booted an hour before this poll
 	boot.AirtimeRxSecs, boot.AirtimeTxSecs = ptr(int64(360)), ptr(int64(180))
 	boot.PacketsReceived, boot.PacketsSent, boot.ReceiveErrors = ptr(int64(36)), ptr(int64(10)), ptr(int64(1))
@@ -234,21 +233,68 @@ func TestCounterSpanAfterReboot(t *testing.T) {
 	wantRate(t, got[len(got)-1], 3600)
 }
 
-func TestCounterSpanRebootCappedAtGap(t *testing.T) {
-	// Uptime longer than the gap cannot be a reboot, but a clamp still holds if it is borderline.
-	boot := steady(1)
-	boot.UptimeSeconds = ptr(int64(3000)) // below the old uptime, within twice the 1h gap
-	got := BucketNodeReadings([]NodeReading{steady(0), boot}, nodeBase.Add(-time.Hour), time.Hour)
-	last := got[len(got)-1]
-	if last.CounterSpanSecs == nil || *last.CounterSpanSecs != 3000 {
+func TestCounterSpanRestartCappedAtGap(t *testing.T) {
+	prev := steady(1)
+	boot := NodeReading{SampledAt: at(2), UptimeSeconds: ptr(int64(3000)), AirtimeTxSecs: ptr(int64(0)), AirtimeRxSecs: ptr(int64(0)),
+		PacketsReceived: ptr(int64(0)), PacketsSent: ptr(int64(0)), ReceiveErrors: ptr(int64(0))} // booted 3000s before a 3600s gap
+	got := BucketNodeReadings([]NodeReading{prev, boot}, nodeBase, time.Hour)
+	if last := got[len(got)-1]; last.CounterSpanSecs == nil || *last.CounterSpanSecs != 3000 {
 		t.Errorf("point %+v, want span 3000", last)
 	}
 	boot.UptimeSeconds = ptr(int64(3500))
-	boot.SampledAt = at(0).Add(3400 * time.Second) // uptime above the 3400s gap, still under twice it
-	got = BucketNodeReadings([]NodeReading{steady(0), boot}, nodeBase.Add(-time.Hour), time.Hour)
-	last = got[len(got)-1]
-	if last.CounterSpanSecs == nil || *last.CounterSpanSecs != 3400 {
+	boot.SampledAt = prev.SampledAt.Add(3400 * time.Second) // uptime above the gap: the gap bounds the span
+	got = BucketNodeReadings([]NodeReading{prev, boot}, nodeBase, time.Hour)
+	if last := got[len(got)-1]; last.CounterSpanSecs == nil || *last.CounterSpanSecs != 3400 {
 		t.Errorf("point %+v, want span capped at 3400", last)
+	}
+}
+
+func TestCounterSpanRebootWithSurvivingTotals(t *testing.T) {
+	// Review I2: rx grows 10000 -> 12160 over six hours (10%) and uptime falls to 3600, but the
+	// totals kept counting through the reboot, so the span is the whole gap.
+	a := NodeReading{SampledAt: at(0), UptimeSeconds: ptr(int64(1_000_000)), AirtimeRxSecs: ptr(int64(10000))}
+	b := NodeReading{SampledAt: at(6), UptimeSeconds: ptr(int64(3600)), AirtimeRxSecs: ptr(int64(12160))}
+	got := BucketNodeReadings([]NodeReading{a, b}, at(1), 6*time.Hour)
+	if len(got) != 1 {
+		t.Fatalf("points = %+v", got)
+	}
+	if got[0].AirtimeRxSecs == nil || *got[0].AirtimeRxSecs != 2160 {
+		t.Fatalf("point %+v, want rx 2160", got[0])
+	}
+	wantRate(t, got[0], 21600)
+}
+
+func TestCounterSpanMixedRebootIsInconsistent(t *testing.T) {
+	// One counter dropped and another grew across a reboot: nothing can be trusted.
+	a := NodeReading{SampledAt: at(0), UptimeSeconds: ptr(int64(1_000_000)), AirtimeRxSecs: ptr(int64(1000)), PacketsReceived: ptr(int64(100))}
+	b := NodeReading{SampledAt: at(6), UptimeSeconds: ptr(int64(60)), AirtimeRxSecs: ptr(int64(1100)), PacketsReceived: ptr(int64(5))}
+	got := BucketNodeReadings([]NodeReading{a, b}, at(1), 6*time.Hour)
+	if got[0].CounterSpanSecs != nil || got[0].AirtimeRxSecs != nil || got[0].PacketsReceived != nil {
+		t.Errorf("point %+v, want no counters", got[0])
+	}
+}
+
+func TestCounterDropWithoutRebootIsInconsistent(t *testing.T) {
+	a := NodeReading{SampledAt: at(0), UptimeSeconds: ptr(int64(1_000_000)), PacketsReceived: ptr(int64(100))}
+	b := NodeReading{SampledAt: at(6), UptimeSeconds: ptr(int64(1_021_600)), PacketsReceived: ptr(int64(50))}
+	got := BucketNodeReadings([]NodeReading{a, b}, at(1), 6*time.Hour)
+	if got[0].CounterSpanSecs != nil || got[0].PacketsReceived != nil {
+		t.Errorf("point %+v, want no counters", got[0])
+	}
+}
+
+func TestCounterRateCapHasNoTolerance(t *testing.T) {
+	// 1.5 airtime seconds per second is over the cap of 1, however the old code rounded it.
+	a := NodeReading{SampledAt: at(0), AirtimeRxSecs: ptr(int64(0))}
+	b := NodeReading{SampledAt: at(1), AirtimeRxSecs: ptr(int64(5400))}
+	got := BucketNodeReadings([]NodeReading{a, b}, at(0), 6*time.Hour)
+	if got[0].AirtimeRxSecs != nil {
+		t.Errorf("point %+v, want the pair rejected", got[0])
+	}
+	b.AirtimeRxSecs = ptr(int64(3600)) // exactly 1/s is allowed
+	got = BucketNodeReadings([]NodeReading{a, b}, at(0), 6*time.Hour)
+	if got[0].AirtimeRxSecs == nil || *got[0].AirtimeRxSecs != 3600 {
+		t.Errorf("point %+v, want 3600", got[0])
 	}
 }
 
@@ -282,25 +328,72 @@ func TestCounterSpanRejectedReadingAddsNone(t *testing.T) {
 	bad := steady(6)
 	bad.AirtimeTxSecs, bad.AirtimeRxSecs = ptr(int64(9_000_000)), ptr(int64(9_000_000))
 	bad.PacketsReceived, bad.PacketsSent, bad.ReceiveErrors = ptr(int64(9_000_000)), ptr(int64(9_000_000)), ptr(int64(9_000_000))
-	rs := []NodeReading{steady(-6), steady(0), bad, steady(12)}
+	rs := []NodeReading{steady(-6), steady(0), bad, steady(12), steady(18)}
 	got := BucketNodeReadings(rs, nodeBase, 6*time.Hour)
-	if len(got) != 3 {
-		t.Fatalf("points = %d, want 3", len(got))
+	if len(got) != 4 {
+		t.Fatalf("points = %d, want 4", len(got))
 	}
-	if got[1].CounterSpanSecs != nil || got[1].AirtimeRxSecs != nil {
-		t.Errorf("rejected reading's point %+v, want no span and no counters", got[1])
+	// Both pairs touching the bad reading contribute nothing, and nothing turns into a zero.
+	for _, p := range got[1:3] {
+		if p.CounterSpanSecs != nil || p.AirtimeRxSecs != nil || p.PacketsReceived != nil {
+			t.Errorf("point %+v, want no span and no counters", p)
+		}
 	}
-	// The baseline stays at 0h, so the next accepted increment covers 12h and so does its span.
-	wantRate(t, got[2], 43200)
+	// The next pair stands on its own, covering six hours.
+	wantRate(t, got[3], 21600)
 }
 
-func TestCounterSpanPartialRejectionKeepsSpan(t *testing.T) {
+func TestCounterPartialRejectionThenRecovery(t *testing.T) {
+	// Review I1: only rx is garbage at hour 6 and recovers at hour 12. No pair is credited with a
+	// span it did not cover, and no rejected value shows as a zero.
 	odd := steady(6)
-	odd.PacketsReceived = ptr(int64(9_000_000)) // only this counter is garbage
-	got := BucketNodeReadings([]NodeReading{steady(0), odd}, nodeBase, 6*time.Hour)
-	last := got[len(got)-1]
-	wantRate(t, last, 21600)
-	if *last.PacketsReceived != 0 {
-		t.Errorf("packetsReceived %d, want the garbage increment dropped", *last.PacketsReceived)
+	odd.AirtimeRxSecs = ptr(int64(9_000_000))
+	got := BucketNodeReadings([]NodeReading{steady(0), odd, steady(12)}, at(1), 6*time.Hour)
+	if len(got) != 2 {
+		t.Fatalf("points = %+v", got)
 	}
+	for _, p := range got {
+		if p.CounterSpanSecs != nil || p.AirtimeRxSecs != nil || p.AirtimeTxSecs != nil || p.PacketsReceived != nil {
+			t.Errorf("point %+v, want no counters", p)
+		}
+	}
+}
+
+func TestCounterMissingCounterOmittedFromBucket(t *testing.T) {
+	// Every pair in the bucket must carry a counter for it to be emitted.
+	noRx := steady(2)
+	noRx.AirtimeRxSecs = nil
+	got := BucketNodeReadings([]NodeReading{steady(0), steady(1), noRx}, at(1), 6*time.Hour)
+	p := got[0]
+	if p.CounterSpanSecs == nil || *p.CounterSpanSecs != 7200 || p.AirtimeTxSecs == nil || p.PacketsReceived == nil {
+		t.Fatalf("point %+v, want span 7200 with tx and packets", p)
+	}
+	if p.AirtimeRxSecs != nil {
+		t.Errorf("rx %v, want omitted: one pair lacked it", *p.AirtimeRxSecs)
+	}
+}
+
+func TestCounterSameResultForAnyRange(t *testing.T) {
+	// Review I3: a corrupt reading at hour 6 must not change what the readings after it show,
+	// whichever range is asked for.
+	bad := steady(6)
+	bad.AirtimeRxSecs, bad.PacketsReceived = ptr(int64(9_000_000)), ptr(int64(9_000_000))
+	rs := []NodeReading{steady(0), bad, steady(12), steady(18), steady(24)}
+	wide := BucketNodeReadings(rs, at(-1), 6*time.Hour)
+	narrow := BucketNodeReadings(rs, at(7), 6*time.Hour) // the bad reading is the only predecessor
+	byT := map[int64]NodeTelemetryPoint{}
+	for _, p := range wide {
+		byT[p.T] = p
+	}
+	for _, p := range narrow {
+		w, _ := json.Marshal(byT[p.T])
+		n, _ := json.Marshal(p)
+		if string(w) != string(n) {
+			t.Errorf("bucket %d differs by range:\n wide   %s\n narrow %s", p.T, w, n)
+		}
+	}
+	if len(narrow) != 3 {
+		t.Fatalf("narrow points = %d, want 3", len(narrow))
+	}
+	wantRate(t, narrow[1], 21600)
 }
