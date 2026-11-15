@@ -371,7 +371,28 @@ func (f *fakeStore) IssueSession(ctx context.Context, sess Session, hash []byte,
 	}
 	return f.CreateSession(ctx, sess, hash)
 }
-func (f *fakeStore) ChangeCredentials(ctx context.Context, id uuid.UUID, hash string, verifiedAt *time.Time, keep uuid.UUID) error {
+func (f *fakeStore) checked(id uuid.UUID, expect string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	u, err := f.get(id)
+	if err != nil || (expect != "" && (u.DisabledAt != nil || u.PassHash != expect)) {
+		return ErrNotFound
+	}
+	return nil
+}
+func (f *fakeStore) ChangeCredentials(ctx context.Context, id uuid.UUID, hash string, verifiedAt *time.Time, keep uuid.UUID, expect string) error {
+	if err := f.checked(id, expect); err != nil {
+		return err
+	}
+	if expect != "" && keep != uuid.Nil {
+		f.mu.Lock()
+		s, ok := f.sessions[keep]
+		live := ok && s.UserID == id && !s.ended
+		f.mu.Unlock()
+		if !live {
+			return ErrNotFound
+		}
+	}
 	if err := f.SetUserPassword(ctx, id, hash); err != nil {
 		return err
 	}
@@ -385,6 +406,22 @@ func (f *fakeStore) ChangeCredentials(ctx context.Context, id uuid.UUID, hash st
 		f.DeleteUserTokens(ctx, id, k)
 	}
 	return f.SetUserPendingEmail(ctx, id, nil)
+}
+func (f *fakeStore) BeginEmailChange(ctx context.Context, id uuid.UUID, expect, addr string, tokenHash, data []byte, expires time.Time) error {
+	if err := f.checked(id, expect); err != nil {
+		return err
+	}
+	f.DeleteUserTokens(ctx, id, TokenEmailChange)
+	if err := f.SetUserPendingEmail(ctx, id, &addr); err != nil {
+		return err
+	}
+	return f.CreateToken(ctx, id, TokenEmailChange, tokenHash, data, expires)
+}
+func (f *fakeStore) DeleteUserChecked(ctx context.Context, id uuid.UUID, expect string) error {
+	if err := f.checked(id, expect); err != nil {
+		return err
+	}
+	return f.DeleteUser(ctx, id)
 }
 func (f *fakeStore) RehashPassword(_ context.Context, id uuid.UUID, oldHash, newHash string) (bool, error) {
 	f.mu.Lock()
@@ -1677,6 +1714,7 @@ func TestLogsNeverContainSecrets(t *testing.T) {
 	rm := e.last()
 	secrets = append(secrets, tokenIn(t, rm))
 	_ = e.svc.ConfirmReset(bg, tokenIn(t, rm), resetPW)
+	u, _ = e.store.UserByID(bg, u.ID) // the reset changed the hash the code is bound to
 	code, _ := e.svc.IssueAppCode(bg, u, challengeFor(verifier), "Pixel")
 	secrets = append(secrets, code, verifier)
 	atok, _, _, err := e.svc.ExchangeAppCode(bg, code, verifier, SessionMeta{})

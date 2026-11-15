@@ -39,14 +39,19 @@ type Store interface {
 	PeekToken(ctx context.Context, kind TokenKind, hash []byte, now time.Time) (uuid.UUID, error)
 	ApplyPendingEmail(ctx context.Context, id uuid.UUID, expected string) error
 	TouchUserLogin(ctx context.Context, id uuid.UUID, at time.Time) error
-	DeleteUser(ctx context.Context, id uuid.UUID) error
 	// IssueSession stores a session only while the user is live and still has the password hash the caller verified,
 	// and for an app session first ends the oldest beyond maxApp-1; ErrNotFound when the user or the hash changed.
 	IssueSession(ctx context.Context, sess Session, tokenHash []byte, expectPassHash string, maxApp int) (Session, error)
 	// ChangeCredentials sets the hash, ends the user's sessions (all but keep; all when keep is the nil uuid), deletes
 	// every outstanding one-time token and the pending email, and marks the address verified when verifiedAt is set,
 	// all serialised with IssueSession.
-	ChangeCredentials(ctx context.Context, id uuid.UUID, hash string, verifiedAt *time.Time, keep uuid.UUID) error
+	// A non-empty expectPassHash (the hash the user's password was checked against) makes it refuse, with ErrNotFound,
+	// when the stored hash differs, the user is disabled or keep is no longer a live session.
+	ChangeCredentials(ctx context.Context, id uuid.UUID, hash string, verifiedAt *time.Time, keep uuid.UUID, expectPassHash string) error
+	// BeginEmailChange stores the pending address and its token, and DeleteUserChecked deletes the user, each only
+	// while the stored hash is still expectPassHash (ErrNotFound otherwise).
+	BeginEmailChange(ctx context.Context, id uuid.UUID, expectPassHash, addr string, tokenHash, data []byte, expires time.Time) error
+	DeleteUserChecked(ctx context.Context, id uuid.UUID, expectPassHash string) error
 	// RehashPassword stores a newer hash of the same password while the stored one is still oldHash.
 	RehashPassword(ctx context.Context, id uuid.UUID, oldHash, newHash string) (bool, error)
 	SessionByTokenHash(ctx context.Context, hash []byte, now time.Time) (Session, User, error)
@@ -742,7 +747,7 @@ func (s *Service) ConfirmReset(ctx context.Context, token, newPassword string) e
 		now := s.now()
 		verifiedAt = &now
 	}
-	if err := s.store.ChangeCredentials(ctx, uid, hash, verifiedAt, uuid.Nil); err != nil {
+	if err := s.store.ChangeCredentials(ctx, uid, hash, verifiedAt, uuid.Nil, ""); err != nil {
 		return err
 	}
 	s.throttle.clear(userKey(uid))
@@ -767,7 +772,11 @@ func (s *Service) ChangePassword(ctx context.Context, u User, keepSession uuid.U
 	if err != nil {
 		return err
 	}
-	if err := s.store.ChangeCredentials(ctx, u.ID, hash, nil, keepSession); err != nil {
+	// Under the lock the store refuses when the password changed since it was checked (a reset got in), or the
+	// session being kept has ended.
+	if err := s.store.ChangeCredentials(ctx, u.ID, hash, nil, keepSession, u.PassHash); errors.Is(err, ErrNotFound) {
+		return ErrInvalidCredentials
+	} else if err != nil {
 		return err
 	}
 	s.log.Info("password changed", "user_id", u.ID)
@@ -794,15 +803,16 @@ func (s *Service) ChangeEmail(ctx context.Context, u User, current, newEmail str
 		return err
 	}
 	owned := err == nil && other.ID != u.ID
-	// Only the newest link may work: drop the older ones before the pending address changes.
-	if err := s.store.DeleteUserTokens(ctx, u.ID, TokenEmailChange); err != nil {
-		return err
-	}
-	if err := s.store.SetUserPendingEmail(ctx, u.ID, &addr); err != nil {
-		return err
-	}
-	tok, err := s.newToken(ctx, u.ID, TokenEmailChange, tokenData{Email: addr}, emailTTL)
+	// Only the newest link may work: the store drops the older ones as it sets the pending address, and refuses when
+	// the password changed since it was checked.
+	raw, err := json.Marshal(tokenData{Email: addr})
 	if err != nil {
+		return err
+	}
+	tok, tokHash := NewToken()
+	if err := s.store.BeginEmailChange(ctx, u.ID, u.PassHash, addr, tokHash, raw, s.now().Add(emailTTL)); errors.Is(err, ErrNotFound) {
+		return ErrInvalidCredentials
+	} else if err != nil {
 		return err
 	}
 	s.log.Info("email change requested", "user_id", u.ID)
@@ -830,7 +840,9 @@ func (s *Service) DeleteAccount(ctx context.Context, u User, current string) err
 	if _, err := s.checkPassword(u, current); err != nil {
 		return err
 	}
-	if err := s.store.DeleteUser(ctx, u.ID); err != nil {
+	if err := s.store.DeleteUserChecked(ctx, u.ID, u.PassHash); errors.Is(err, ErrNotFound) {
+		return ErrInvalidCredentials
+	} else if err != nil {
 		return err
 	}
 	s.log.Info("account deleted", "user_id", u.ID)
@@ -842,6 +854,9 @@ func (s *Service) DeleteAccount(ctx context.Context, u User, current string) err
 type appCodeData struct {
 	CodeChallenge string `json:"codeChallenge"`
 	DeviceLabel   string `json:"deviceLabel"`
+	// PassHash is the user's password hash when the code was issued: a reset or password change after that makes the
+	// exchange fail, even when it had already spent the code.
+	PassHash string `json:"passHash"`
 }
 
 // IssueAppCode stores a one-time code bound to the PKCE challenge (base64url SHA-256, 43 characters).
@@ -849,7 +864,7 @@ func (s *Service) IssueAppCode(ctx context.Context, u User, codeChallenge, devic
 	if raw, err := base64.RawURLEncoding.DecodeString(codeChallenge); err != nil || len(raw) != sha256.Size {
 		return "", ErrInvalidInput
 	}
-	return s.newToken(ctx, u.ID, TokenAppCode, appCodeData{CodeChallenge: codeChallenge, DeviceLabel: cleanLabel(deviceLabel)}, appCodeTTL)
+	return s.newToken(ctx, u.ID, TokenAppCode, appCodeData{CodeChallenge: codeChallenge, DeviceLabel: cleanLabel(deviceLabel), PassHash: u.PassHash}, appCodeTTL)
 }
 
 // ExchangeAppCode burns the code first, then checks the verifier, so a wrong guess cannot be retried.
@@ -885,7 +900,10 @@ func (s *Service) ExchangeAppCode(ctx context.Context, code, codeVerifier string
 	label := cleanLabel(d.DeviceLabel)
 	// The store keeps a slot free and issues the session under the user's lock, refusing it when a reset or password
 	// change completed after the user was read.
-	tok, sess, err := s.createSession(ctx, u, u.PassHash, kindApp, label, meta)
+	if d.PassHash == "" {
+		return fail(ErrTokenInvalid)
+	}
+	tok, sess, err := s.createSession(ctx, u, d.PassHash, kindApp, label, meta)
 	if errors.Is(err, ErrNotFound) {
 		return fail(ErrTokenInvalid)
 	}

@@ -253,16 +253,40 @@ func (s *Store) IssueSession(ctx context.Context, sess users.Session, tokenHash 
 	return out, err
 }
 
+// lockChecked takes the user's credential lock and, when expectPassHash is set, refuses (users.ErrNotFound) a user
+// that is gone or disabled or whose hash is no longer the one the caller verified.
+func lockChecked(ctx context.Context, q *sqlc.Queries, id uuid.UUID, expectPassHash string) error {
+	cur, err := q.LockUserCredentials(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return users.ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if expectPassHash != "" && (cur.DisabledAt.Valid || cur.PassHash != expectPassHash) {
+		return users.ErrNotFound
+	}
+	return nil
+}
+
 // ChangeCredentials sets a new password hash and, in the same transaction under the user's credential lock, ends
 // the user's sessions (all of them, or all but keep), deletes every outstanding one-time token and the pending
-// email, and marks the address verified when verifiedAt is set. It reports users.ErrNotFound for a missing user.
-func (s *Store) ChangeCredentials(ctx context.Context, id uuid.UUID, hash string, verifiedAt *time.Time, keep uuid.UUID) error {
+// email, and marks the address verified when verifiedAt is set. With expectPassHash set (a change the user
+// authorised with their password) it refuses, with users.ErrNotFound, when the stored hash differs, the user is
+// disabled, or keep is no longer a live session; a reset passes "" because its token authorises it.
+func (s *Store) ChangeCredentials(ctx context.Context, id uuid.UUID, hash string, verifiedAt *time.Time, keep uuid.UUID, expectPassHash string) error {
 	return s.pollTx(ctx, func(q *sqlc.Queries) error {
-		if _, err := q.LockUserCredentials(ctx, id); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
+		if err := lockChecked(ctx, q, id, expectPassHash); err != nil {
+			return err
+		}
+		if expectPassHash != "" && keep != uuid.Nil {
+			live, err := q.UserSessionLive(ctx, sqlc.UserSessionLiveParams{ID: keep, UserID: id})
+			if err != nil {
+				return err
+			}
+			if !live {
 				return users.ErrNotFound
 			}
-			return err
 		}
 		if err := affected(q.SetUserPassword(ctx, sqlc.SetUserPasswordParams{ID: id, PassHash: hash})); err != nil {
 			return err
@@ -286,6 +310,37 @@ func (s *Store) ChangeCredentials(ctx context.Context, id uuid.UUID, hash string
 		}
 		return affected(q.SetUserPendingEmail(ctx, sqlc.SetUserPendingEmailParams{ID: id}))
 	})
+}
+
+// BeginEmailChange holds addr as the pending address and stores its confirmation token, replacing older ones, under
+// the user's credential lock and only while the stored hash is still expectPassHash (users.ErrNotFound otherwise).
+func (s *Store) BeginEmailChange(ctx context.Context, id uuid.UUID, expectPassHash, addr string, tokenHash, data []byte, expires time.Time) error {
+	return s.pollTx(ctx, func(q *sqlc.Queries) error {
+		if err := lockChecked(ctx, q, id, expectPassHash); err != nil {
+			return err
+		}
+		if err := q.DeleteUserTokens(ctx, sqlc.DeleteUserTokensParams{UserID: id, Kind: string(users.TokenEmailChange)}); err != nil {
+			return err
+		}
+		a := strings.ToLower(addr)
+		if err := affected(q.SetUserPendingEmail(ctx, sqlc.SetUserPendingEmailParams{ID: id, PendingEmail: &a})); err != nil {
+			return err
+		}
+		return q.CreateUserToken(ctx, sqlc.CreateUserTokenParams{
+			TokenHash: tokenHash, UserID: id, Kind: string(users.TokenEmailChange), Data: json.RawMessage(data), ExpiresAt: ts(expires)})
+	})
+}
+
+// DeleteUserChecked deletes the user only while the stored hash is still expectPassHash (users.ErrNotFound
+// otherwise). The user's requests go through the state rules first, once the hash has been checked.
+func (s *Store) DeleteUserChecked(ctx context.Context, id uuid.UUID, expectPassHash string) error {
+	if err := s.pollTx(ctx, func(q *sqlc.Queries) error { return lockChecked(ctx, q, id, expectPassHash) }); err != nil {
+		return err
+	}
+	if err := s.removeUserRequests(ctx, id); err != nil {
+		return err
+	}
+	return affected(s.q.DeleteUserIfHash(ctx, sqlc.DeleteUserIfHashParams{ID: id, PassHash: expectPassHash}))
 }
 
 // RehashPassword stores newHash for the same password when the stored hash is still oldHash; false means it was

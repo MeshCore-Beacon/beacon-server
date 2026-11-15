@@ -826,6 +826,21 @@ func (mr *MockQuerierMockRecorder) DeleteUserAtlasPins(ctx, userID any) *gomock.
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteUserAtlasPins", reflect.TypeOf((*MockQuerier)(nil).DeleteUserAtlasPins), ctx, userID)
 }
 
+// DeleteUserIfHash mocks base method.
+func (m *MockQuerier) DeleteUserIfHash(ctx context.Context, arg db.DeleteUserIfHashParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteUserIfHash", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteUserIfHash indicates an expected call of DeleteUserIfHash.
+func (mr *MockQuerierMockRecorder) DeleteUserIfHash(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteUserIfHash", reflect.TypeOf((*MockQuerier)(nil).DeleteUserIfHash), ctx, arg)
+}
+
 // DeleteUserTokens mocks base method.
 func (m *MockQuerier) DeleteUserTokens(ctx context.Context, arg db.DeleteUserTokensParams) error {
 	m.ctrl.T.Helper()
@@ -5495,4 +5510,19 @@ func (m *MockQuerier) UserSessionByTokenHash(ctx context.Context, arg db.UserSes
 func (mr *MockQuerierMockRecorder) UserSessionByTokenHash(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UserSessionByTokenHash", reflect.TypeOf((*MockQuerier)(nil).UserSessionByTokenHash), ctx, arg)
+}
+
+// UserSessionLive mocks base method.
+func (m *MockQuerier) UserSessionLive(ctx context.Context, arg db.UserSessionLiveParams) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UserSessionLive", ctx, arg)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UserSessionLive indicates an expected call of UserSessionLive.
+func (mr *MockQuerierMockRecorder) UserSessionLive(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UserSessionLive", reflect.TypeOf((*MockQuerier)(nil).UserSessionLive), ctx, arg)
 }

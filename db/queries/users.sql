@@ -172,3 +172,13 @@ SELECT pass_hash, disabled_at FROM users WHERE id = $1 FOR NO KEY UPDATE;
 -- name: RehashUserPassword :execrows
 -- Stores the same password under a newer hash, only while the hash is still the one that was verified.
 UPDATE users SET pass_hash = sqlc.arg(new_hash) WHERE id = sqlc.arg(id) AND pass_hash = sqlc.arg(old_hash);
+
+-- name: UserSessionLive :one
+SELECT EXISTS (
+    SELECT 1 FROM user_sessions
+    WHERE id = sqlc.arg(id) AND user_id = sqlc.arg(user_id) AND ended_at IS NULL AND expires_at > now()
+      AND (hard_expires_at IS NULL OR hard_expires_at > now())
+)::boolean;
+
+-- name: DeleteUserIfHash :execrows
+DELETE FROM users WHERE id = sqlc.arg(id) AND pass_hash = sqlc.arg(pass_hash);

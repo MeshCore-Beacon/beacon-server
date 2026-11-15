@@ -20,6 +20,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/config"
 	"github.com/MeshCore-Beacon/beacon-server/internal/mail"
 	"github.com/MeshCore-Beacon/beacon-server/internal/users"
+	"github.com/google/uuid"
 )
 
 // gate holds the calls that reach it until released, so a test can run another request in the gap.
@@ -41,19 +42,54 @@ func (g *gate) pause() {
 // gatedStore pauses just before a session is issued.
 type gatedStore struct {
 	*Store
-	g *gate
+	g     *gate
+	where string // the method that pauses
+}
+
+func (s gatedStore) at(name string) {
+	if s.where == name {
+		s.g.pause()
+	}
+}
+
+// UserByID is read by an app exchange right after its code is spent.
+func (s gatedStore) UserByID(ctx context.Context, id uuid.UUID) (users.User, error) {
+	s.at("UserByID")
+	return s.Store.UserByID(ctx, id)
+}
+
+func (s gatedStore) BeginEmailChange(ctx context.Context, id uuid.UUID, expect, addr string, tokenHash, data []byte, expires time.Time) error {
+	s.at("BeginEmailChange")
+	return s.Store.BeginEmailChange(ctx, id, expect, addr, tokenHash, data, expires)
+}
+
+func (s gatedStore) ChangeCredentials(ctx context.Context, id uuid.UUID, hash string, verifiedAt *time.Time, keep uuid.UUID, expect string) error {
+	if expect != "" { // a user-authorised change, not the reset that runs in the gap
+		s.at("ChangeCredentials")
+	}
+	return s.Store.ChangeCredentials(ctx, id, hash, verifiedAt, keep, expect)
+}
+
+func (s gatedStore) DeleteUserChecked(ctx context.Context, id uuid.UUID, expect string) error {
+	s.at("DeleteUserChecked")
+	return s.Store.DeleteUserChecked(ctx, id, expect)
 }
 
 // IssueSession is where the service stores a session: the gap is after the credential was checked and before the
 // store takes its lock.
 func (s gatedStore) IssueSession(ctx context.Context, sess users.Session, hash []byte, expect string, maxApp int) (users.Session, error) {
-	s.g.pause()
+	s.at("IssueSession")
 	return s.Store.IssueSession(ctx, sess, hash, expect, maxApp)
 }
 
 const serialPW = "a-long-enough-passphrase"
 
 func serialEnv(t *testing.T) (context.Context, *Store, *users.Service, *gate, users.User) {
+	t.Helper()
+	return serialEnvAt(t, "IssueSession")
+}
+
+func serialEnvAt(t *testing.T, where string) (context.Context, *Store, *users.Service, *gate, users.User) {
 	t.Helper()
 	ctx, _, s := userStore(t)
 	hash, err := users.HashPassword(serialPW)
@@ -67,7 +103,7 @@ func serialEnv(t *testing.T) (context.Context, *Store, *users.Service, *gate, us
 	}
 	pu, _ := url.Parse("https://beacon.example.org")
 	g := newGate()
-	svc := users.NewService(gatedStore{s, g}, &mail.Recorder{}, config.ResolvedAccounts{Enabled: true, PublicURL: pu, RegistrationOpen: true}, time.Now, slog.New(slog.DiscardHandler))
+	svc := users.NewService(gatedStore{s, g, where}, &mail.Recorder{}, config.ResolvedAccounts{Enabled: true, PublicURL: pu, RegistrationOpen: true}, time.Now, slog.New(slog.DiscardHandler))
 	return ctx, s, svc, g, u
 }
 

@@ -122,6 +122,7 @@ type Querier interface {
 	DeleteTelemetryRequest(ctx context.Context, id uuid.UUID) error
 	DeleteUser(ctx context.Context, id uuid.UUID) (int64, error)
 	DeleteUserAtlasPins(ctx context.Context, userID uuid.UUID) error
+	DeleteUserIfHash(ctx context.Context, arg DeleteUserIfHashParams) (int64, error)
 	DeleteUserTokens(ctx context.Context, arg DeleteUserTokensParams) error
 	EndAllUserSessions(ctx context.Context, userID uuid.UUID) error
 	// Ends the live app sessions beyond the newest keep.
@@ -868,6 +869,7 @@ type Querier interface {
 	UserRequestTargets(ctx context.Context, userID uuid.UUID) ([][]byte, error)
 	// A session is live when it is not ended, not past either expiry, and its user is not disabled.
 	UserSessionByTokenHash(ctx context.Context, arg UserSessionByTokenHashParams) (UserSessionByTokenHashRow, error)
+	UserSessionLive(ctx context.Context, arg UserSessionLiveParams) (bool, error)
 }
 
 var _ Querier = (*Queries)(nil)

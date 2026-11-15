@@ -292,6 +292,23 @@ func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) (int64, error) {
 	return result.RowsAffected(), nil
 }
 
+const deleteUserIfHash = `-- name: DeleteUserIfHash :execrows
+DELETE FROM users WHERE id = $1 AND pass_hash = $2
+`
+
+type DeleteUserIfHashParams struct {
+	ID       uuid.UUID `json:"id"`
+	PassHash string    `json:"pass_hash"`
+}
+
+func (q *Queries) DeleteUserIfHash(ctx context.Context, arg DeleteUserIfHashParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteUserIfHash, arg.ID, arg.PassHash)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteUserTokens = `-- name: DeleteUserTokens :exec
 DELETE FROM user_tokens WHERE user_id = $1 AND kind = $2
 `
@@ -818,4 +835,24 @@ func (q *Queries) UserSessionByTokenHash(ctx context.Context, arg UserSessionByT
 		&i.DisabledAt,
 	)
 	return i, err
+}
+
+const userSessionLive = `-- name: UserSessionLive :one
+SELECT EXISTS (
+    SELECT 1 FROM user_sessions
+    WHERE id = $1 AND user_id = $2 AND ended_at IS NULL AND expires_at > now()
+      AND (hard_expires_at IS NULL OR hard_expires_at > now())
+)::boolean
+`
+
+type UserSessionLiveParams struct {
+	ID     uuid.UUID `json:"id"`
+	UserID uuid.UUID `json:"user_id"`
+}
+
+func (q *Queries) UserSessionLive(ctx context.Context, arg UserSessionLiveParams) (bool, error) {
+	row := q.db.QueryRow(ctx, userSessionLive, arg.ID, arg.UserID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }
