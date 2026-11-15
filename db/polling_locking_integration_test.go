@@ -176,3 +176,22 @@ func TestAdminStopReportSurvivesTransientFailurePostgres(t *testing.T) {
 	}
 	checkAdminStopped(t, w, user, id, "after two admin-stop claims")
 }
+
+// A locally polled target rides on its local poll and takes no requested seat from anyone.
+func TestLocalAssignmentDoesNotPreemptRequestPostgres(t *testing.T) {
+	w, o, _, young, _, bob := seatWorld(t)
+	w.now = w.now.Add(time.Minute)
+	w.claim(o, 1, reqNode(pollKey(0xA2), false, "ok"))
+	if err := w.svc.ElectTarget(w.ctx, pollKey(0xA1)); err != nil {
+		t.Fatal(err)
+	}
+	if st := w.status(bob.ID, young.ID); st.Status != polling.StatusActive {
+		t.Fatalf("setup: %+v", st)
+	}
+	if err := w.svc.ElectTarget(w.ctx, pollKey(0xA2)); err != nil {
+		t.Fatal(err)
+	}
+	if st := w.status(bob.ID, young.ID); st.Status != polling.StatusActive {
+		t.Fatalf("local target took the requested seat: status=%s reason=%q assignments=%v", st.Status, st.Reason, assignedTargets(t, w))
+	}
+}

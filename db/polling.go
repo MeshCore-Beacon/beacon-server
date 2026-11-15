@@ -421,6 +421,9 @@ func preemptYoungerSeats(ctx context.Context, q *sqlc.Queries, target []byte, ch
 		return err
 	}
 	for _, a := range chosen {
+		if !a.Requested {
+			continue // a local poll takes no requested seat
+		}
 		var c *polling.Candidate
 		for i := range cands {
 			if bytes.Equal(cands[i].Observer, a.Observer) {
