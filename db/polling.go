@@ -4,6 +4,7 @@
 package db
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -237,40 +238,132 @@ func replaceAssignments(ctx context.Context, q *sqlc.Queries, target []byte, a [
 // observers that could take the request, and moves the target's requests to active or waiting with the result.
 func (s *Store) ElectPollingTarget(ctx context.Context, target []byte, receivedAfter, evidenceSince, at time.Time,
 	decide func(in polling.ElectionInput) polling.Election) error {
-	return s.pollTx(ctx, func(q *sqlc.Queries) error {
-		if err := q.LockPollingTarget(ctx, target); err != nil {
+	// A requested target shares observers' seats with other targets, so its election first takes every accepting
+	// observer's seat lock. Whether it is requested is only known under the target lock, so a first pass that finds
+	// it is, and holds no seat locks, is thrown away and run again with them.
+	seatLocks := false
+	if tr, err := s.q.GetPollingTarget(ctx, target); err == nil && tr.ActiveRequestID.Valid {
+		seatLocks = true
+	}
+	for {
+		err := s.pollTx(ctx, func(q *sqlc.Queries) error {
+			if seatLocks {
+				keys, err := q.ListRequestObserverKeys(ctx, ts(receivedAfter))
+				if err != nil {
+					return err
+				}
+				for _, k := range keys {
+					if err := q.LockPollingSeats(ctx, k); err != nil {
+						return err
+					}
+				}
+			}
+			return electTarget(ctx, q, target, seatLocks, receivedAfter, evidenceSince, at, decide)
+		})
+		if errors.Is(err, errNeedSeatLocks) {
+			seatLocks = true
+			continue
+		}
+		return err
+	}
+}
+
+var errNeedSeatLocks = errors.New("db: election needs the seat locks")
+
+func electTarget(ctx context.Context, q *sqlc.Queries, target []byte, seatLocks bool, receivedAfter, evidenceSince, at time.Time,
+	decide func(in polling.ElectionInput) polling.Election) error {
+	if err := q.LockPollingTarget(ctx, target); err != nil {
+		return err
+	}
+	in := polling.ElectionInput{}
+	var err error
+	if in.Cands, err = listPollingCandidates(ctx, q, target, receivedAfter, evidenceSince); err != nil {
+		return err
+	}
+	if in.Current, err = currentPoller(ctx, q, target); err != nil {
+		return err
+	}
+	tr, err := q.GetPollingTarget(ctx, target)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	in.Requested = err == nil && tr.ActiveRequestID.Valid
+	if in.Requested && !seatLocks {
+		return errNeedSeatLocks
+	}
+	if in.Requested {
+		if in.RequestCands, err = listRequestCandidates(ctx, q, target, receivedAfter, evidenceSince); err != nil {
 			return err
 		}
-		in := polling.ElectionInput{}
-		var err error
-		if in.Cands, err = listPollingCandidates(ctx, q, target, receivedAfter, evidenceSince); err != nil {
+	}
+	el := decide(in)
+	if err := replaceAssignments(ctx, q, target, el.Assignments, at); err != nil {
+		return err
+	}
+	if !in.Requested {
+		return nil
+	}
+	if err := mutateRequestTarget(ctx, q, target, uuid.Nil, func(st *polling.TargetState) error {
+		st.SetAssigned(len(el.Assignments) > 0, el.WaitReason)
+		return nil
+	}); err != nil {
+		return err
+	}
+	return preemptYoungerSeats(ctx, q, target, el.Assignments, in.RequestCands)
+}
+
+// preemptYoungerSeats takes back seats the new assignments need from younger requested targets of the same
+// observers, so a seat that two elections both thought free ends up with the older request. A target left with no
+// observer goes back to waiting. Runs under the seat locks, which order it against every other election.
+func preemptYoungerSeats(ctx context.Context, q *sqlc.Queries, target []byte, chosen []polling.Assignment, cands []polling.Candidate) error {
+	oldest, err := q.OldestTargetRequest(ctx, target)
+	if err != nil || !oldest.Valid {
+		return err
+	}
+	for _, a := range chosen {
+		var c *polling.Candidate
+		for i := range cands {
+			if bytes.Equal(cands[i].Observer, a.Observer) {
+				c = &cands[i]
+			}
+		}
+		if c == nil {
+			continue
+		}
+		held, err := q.ListObserverRequestedSeats(ctx, sqlc.ListObserverRequestedSeatsParams{ObserverPublicKey: a.Observer, TargetPublicKey: target})
+		if err != nil {
 			return err
 		}
-		if in.Current, err = currentPoller(ctx, q, target); err != nil {
-			return err
+		var older int
+		var younger [][]byte
+		for _, h := range held {
+			if h.Oldest.Time.Before(oldest.Time) || (h.Oldest.Time.Equal(oldest.Time) && bytes.Compare(h.TargetPublicKey, target) < 0) {
+				older++
+			} else {
+				younger = append(younger, h.TargetPublicKey)
+			}
 		}
-		tr, err := q.GetPollingTarget(ctx, target)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
+		room := max(polling.RequestCapacity(*c)-1-older, 0)
+		if len(younger) <= room {
+			continue
 		}
-		in.Requested = err == nil && tr.ActiveRequestID.Valid
-		if in.Requested {
-			if in.RequestCands, err = listRequestCandidates(ctx, q, target, receivedAfter, evidenceSince); err != nil {
+		for _, y := range younger[room:] {
+			if err := q.DeleteObserverTargetAssignment(ctx, sqlc.DeleteObserverTargetAssignmentParams{TargetPublicKey: y, ObserverPublicKey: a.Observer}); err != nil {
+				return err
+			}
+			left, err := q.CountTargetAssignments(ctx, y)
+			if err != nil {
+				return err
+			}
+			if err := mutateRequestTarget(ctx, q, y, uuid.Nil, func(st *polling.TargetState) error {
+				st.SetAssigned(left > 0, polling.ReasonNoSeat)
+				return nil
+			}); err != nil {
 				return err
 			}
 		}
-		el := decide(in)
-		if err := replaceAssignments(ctx, q, target, el.Assignments, at); err != nil {
-			return err
-		}
-		if !in.Requested {
-			return nil
-		}
-		return mutateRequestTarget(ctx, q, target, uuid.Nil, func(st *polling.TargetState) error {
-			st.SetAssigned(len(el.Assignments) > 0, el.WaitReason)
-			return nil
-		})
-	})
+	}
+	return nil
 }
 
 func listRequestCandidates(ctx context.Context, q sqlc.Querier, target []byte, receivedAfter, evidenceSince time.Time) ([]polling.Candidate, error) {

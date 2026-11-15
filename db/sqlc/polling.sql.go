@@ -46,6 +46,17 @@ func (q *Queries) CorroborateReadings(ctx context.Context, arg CorroborateReadin
 	return result.RowsAffected(), nil
 }
 
+const countTargetAssignments = `-- name: CountTargetAssignments :one
+SELECT count(*)::int FROM polling_assignments WHERE target_public_key = $1
+`
+
+func (q *Queries) CountTargetAssignments(ctx context.Context, targetPublicKey []byte) (int32, error) {
+	row := q.db.QueryRow(ctx, countTargetAssignments, targetPublicKey)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countUntrustedNodeReadings = `-- name: CountUntrustedNodeReadings :one
 SELECT count(*)::int FROM repeater_readings
 WHERE target_public_key = $1
@@ -93,6 +104,20 @@ DELETE FROM repeater_readings WHERE received_at < $1
 
 func (q *Queries) DeleteExpiredRepeaterReadings(ctx context.Context, receivedAt pgtype.Timestamptz) error {
 	_, err := q.db.Exec(ctx, deleteExpiredRepeaterReadings, receivedAt)
+	return err
+}
+
+const deleteObserverTargetAssignment = `-- name: DeleteObserverTargetAssignment :exec
+DELETE FROM polling_assignments WHERE target_public_key = $1 AND observer_public_key = $2
+`
+
+type DeleteObserverTargetAssignmentParams struct {
+	TargetPublicKey   []byte `json:"target_public_key"`
+	ObserverPublicKey []byte `json:"observer_public_key"`
+}
+
+func (q *Queries) DeleteObserverTargetAssignment(ctx context.Context, arg DeleteObserverTargetAssignmentParams) error {
+	_, err := q.db.Exec(ctx, deleteObserverTargetAssignment, arg.TargetPublicKey, arg.ObserverPublicKey)
 	return err
 }
 
@@ -491,6 +516,47 @@ func (q *Queries) ListNodeReadings(ctx context.Context, arg ListNodeReadingsPara
 	return items, nil
 }
 
+const listObserverRequestedSeats = `-- name: ListObserverRequestedSeats :many
+SELECT x.target_public_key::bytea AS target_public_key, q.oldest::timestamptz AS oldest
+FROM polling_assignments x
+JOIN LATERAL (SELECT min(r.created_at) AS oldest FROM telemetry_requests r WHERE r.target_public_key = x.target_public_key) q ON true
+WHERE x.observer_public_key = $1 AND x.requested
+  AND x.target_public_key <> $2 AND q.oldest IS NOT NULL
+ORDER BY q.oldest, x.target_public_key
+`
+
+type ListObserverRequestedSeatsParams struct {
+	ObserverPublicKey []byte `json:"observer_public_key"`
+	TargetPublicKey   []byte `json:"target_public_key"`
+}
+
+type ListObserverRequestedSeatsRow struct {
+	TargetPublicKey []byte             `json:"target_public_key"`
+	Oldest          pgtype.Timestamptz `json:"oldest"`
+}
+
+// The observer's requested assignments to targets other than the one given, with the age of each target's oldest
+// request, oldest first.
+func (q *Queries) ListObserverRequestedSeats(ctx context.Context, arg ListObserverRequestedSeatsParams) ([]ListObserverRequestedSeatsRow, error) {
+	rows, err := q.db.Query(ctx, listObserverRequestedSeats, arg.ObserverPublicKey, arg.TargetPublicKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListObserverRequestedSeatsRow{}
+	for rows.Next() {
+		var i ListObserverRequestedSeatsRow
+		if err := rows.Scan(&i.TargetPublicKey, &i.Oldest); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrphanPollingTargets = `-- name: ListOrphanPollingTargets :many
 SELECT DISTINCT a.target_public_key FROM polling_assignments a
 WHERE NOT EXISTS (
@@ -747,6 +813,31 @@ func (q *Queries) ListRequestCandidates(ctx context.Context, arg ListRequestCand
 	return items, nil
 }
 
+const listRequestObserverKeys = `-- name: ListRequestObserverKeys :many
+SELECT observer_public_key FROM polling_claims WHERE accepts_requests AND received_at > $1 ORDER BY observer_public_key
+`
+
+// The observers whose claim accepts requests, in key order, which is the order their seat locks are taken in.
+func (q *Queries) ListRequestObserverKeys(ctx context.Context, receivedAt pgtype.Timestamptz) ([][]byte, error) {
+	rows, err := q.db.Query(ctx, listRequestObserverKeys, receivedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := [][]byte{}
+	for rows.Next() {
+		var observer_public_key []byte
+		if err := rows.Scan(&observer_public_key); err != nil {
+			return nil, err
+		}
+		items = append(items, observer_public_key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockPollingObserver = `-- name: LockPollingObserver :exec
 SELECT pg_advisory_xact_lock(25191, hashtext(current_schema() || encode($1::bytea, 'hex')))
 `
@@ -755,6 +846,18 @@ SELECT pg_advisory_xact_lock(25191, hashtext(current_schema() || encode($1::byte
 // other. Class 25191, beside the target class and the (25189, n) job locks.
 func (q *Queries) LockPollingObserver(ctx context.Context, observerPublicKey []byte) error {
 	_, err := q.db.Exec(ctx, lockPollingObserver, observerPublicKey)
+	return err
+}
+
+const lockPollingSeats = `-- name: LockPollingSeats :exec
+SELECT pg_advisory_xact_lock(25192, hashtext(current_schema() || encode($1::bytea, 'hex')))
+`
+
+// Serializes the seat decisions of one observer until the transaction ends. Class 25192, beside the target class
+// (25190) and the reading-insert class (25191). Taken before the target lock, in key order, so two elections
+// cannot wait on each other.
+func (q *Queries) LockPollingSeats(ctx context.Context, observerPublicKey []byte) error {
+	_, err := q.db.Exec(ctx, lockPollingSeats, observerPublicKey)
 	return err
 }
 
@@ -836,6 +939,17 @@ func (q *Queries) NodePublicKey(ctx context.Context, id uuid.UUID) ([]byte, erro
 	var public_key []byte
 	err := row.Scan(&public_key)
 	return public_key, err
+}
+
+const oldestTargetRequest = `-- name: OldestTargetRequest :one
+SELECT min(created_at)::timestamptz AS oldest FROM telemetry_requests WHERE target_public_key = $1
+`
+
+func (q *Queries) OldestTargetRequest(ctx context.Context, targetPublicKey []byte) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, oldestTargetRequest, targetPublicKey)
+	var oldest pgtype.Timestamptz
+	err := row.Scan(&oldest)
+	return oldest, err
 }
 
 const pollingAdminTargetRows = `-- name: PollingAdminTargetRows :many

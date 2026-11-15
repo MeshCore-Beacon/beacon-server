@@ -32,8 +32,13 @@ type Election struct {
 // holds, less the older requested targets it is assigned.
 // A claim is the observer's own word, so its numbers are held to the firmware's limit of 8 targets.
 func requestSeat(c Candidate) bool {
+	return RequestCapacity(c)-c.SeatsElsewhere > 0
+}
+
+// RequestCapacity is how many requested targets the observer can hold: its free seats plus those it holds already.
+func RequestCapacity(c Candidate) int {
 	capacity := min(max(c.RequestSlots, 0), MaxRequestSlots) + min(max(c.Held, 0), MaxRequestSlots)
-	return min(capacity, MaxRequestSlots)-c.SeatsElsewhere > 0
+	return min(capacity, MaxRequestSlots)
 }
 
 // ElectRequested ranks the observers for a requested target. Only an observer with a live claim that accepts

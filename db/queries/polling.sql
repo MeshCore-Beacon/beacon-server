@@ -106,6 +106,35 @@ SELECT pg_advisory_xact_lock(25190, hashtext(current_schema() || encode(sqlc.arg
 -- other. Class 25191, beside the target class and the (25189, n) job locks.
 SELECT pg_advisory_xact_lock(25191, hashtext(current_schema() || encode(sqlc.arg(observer_public_key)::bytea, 'hex')));
 
+-- name: ListRequestObserverKeys :many
+-- The observers whose claim accepts requests, in key order, which is the order their seat locks are taken in.
+SELECT observer_public_key FROM polling_claims WHERE accepts_requests AND received_at > $1 ORDER BY observer_public_key;
+
+-- name: LockPollingSeats :exec
+-- Serializes the seat decisions of one observer until the transaction ends. Class 25192, beside the target class
+-- (25190) and the reading-insert class (25191). Taken before the target lock, in key order, so two elections
+-- cannot wait on each other.
+SELECT pg_advisory_xact_lock(25192, hashtext(current_schema() || encode(sqlc.arg(observer_public_key)::bytea, 'hex')));
+
+-- name: ListObserverRequestedSeats :many
+-- The observer's requested assignments to targets other than the one given, with the age of each target's oldest
+-- request, oldest first.
+SELECT x.target_public_key::bytea AS target_public_key, q.oldest::timestamptz AS oldest
+FROM polling_assignments x
+JOIN LATERAL (SELECT min(r.created_at) AS oldest FROM telemetry_requests r WHERE r.target_public_key = x.target_public_key) q ON true
+WHERE x.observer_public_key = sqlc.arg(observer_public_key) AND x.requested
+  AND x.target_public_key <> sqlc.arg(target_public_key) AND q.oldest IS NOT NULL
+ORDER BY q.oldest, x.target_public_key;
+
+-- name: OldestTargetRequest :one
+SELECT min(created_at)::timestamptz AS oldest FROM telemetry_requests WHERE target_public_key = $1;
+
+-- name: DeleteObserverTargetAssignment :exec
+DELETE FROM polling_assignments WHERE target_public_key = $1 AND observer_public_key = $2;
+
+-- name: CountTargetAssignments :one
+SELECT count(*)::int FROM polling_assignments WHERE target_public_key = $1;
+
 -- name: CurrentPollingPoller :one
 SELECT observer_public_key FROM polling_assignments WHERE target_public_key = $1 AND rank = 0;
 

@@ -17,6 +17,7 @@ import (
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/config"
 	"github.com/MeshCore-Beacon/beacon-server/internal/polling"
+	"github.com/MeshCore-Beacon/beacon-server/internal/users"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -491,5 +492,87 @@ func TestRequestedPasswordOnlyGoesToAnObserverApprovedNowPostgres(t *testing.T) 
 	}
 	if e, ok := w.owners(o, 0xA1); ok {
 		t.Fatalf("a password went to an observer no longer approved: %+v", e)
+	}
+}
+
+// seatWorld has one observer with one free seat that has heard two requested repeaters; the older request is for the
+// repeater whose key sorts second. Both requests exist before the observer's claim does.
+func seatWorld(t *testing.T) (w *reqWorld, o reqDevice, oldReq, newReq polling.RequestRow, alice, bob users.User) {
+	t.Helper()
+	w = newReqWorld(t, "")
+	ctx, s := w.ctx, w.s
+	alice, bob = newUser(t, ctx, s, "alice"), newUser(t, ctx, s, "bob")
+	o = newReqDevice(1)
+	nOld, nNew := w.node(0xA2), w.node(0xA1)
+	obs := pollObserver(t, ctx, s, o.pub)
+	for _, tg := range []byte{0xA1, 0xA2} {
+		pollHearAdvert(t, ctx, w.pool, pollKey(tg), obs, w.now.Add(-time.Hour), 5)
+	}
+	var err error
+	if oldReq, err = w.reqs.Create(ctx, alice.ID, nOld, []byte("old")); err != nil {
+		t.Fatal(err)
+	}
+	w.now = w.now.Add(time.Minute)
+	if newReq, err = w.reqs.Create(ctx, bob.ID, nNew, []byte("new")); err != nil {
+		t.Fatal(err)
+	}
+	w.claim(o, 1)
+	return
+}
+
+func assignedTargets(t *testing.T, w *reqWorld) []string {
+	t.Helper()
+	rows, err := w.pool.Query(w.ctx, `SELECT encode(target_public_key, 'hex') FROM polling_assignments ORDER BY 1`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, k)
+	}
+	return out
+}
+
+// Elections run in key order, so the younger request is seated first; the older request must still win the seat.
+func TestRequestedSeatsGoToOlderRequestsInOrderPostgres(t *testing.T) {
+	w, _, oldReq, newReq, alice, bob := seatWorld(t)
+	if err := w.svc.ElectAll(w.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := assignedTargets(t, w); len(got) != 1 || got[0] != hex.EncodeToString(pollKey(0xA2)) {
+		t.Fatalf("one seat, assignments %v", got)
+	}
+	if st := w.status(alice.ID, oldReq.ID); st.Status != polling.StatusActive {
+		t.Fatalf("older request: %+v", st)
+	}
+	if st := w.status(bob.ID, newReq.ID); st.Status != polling.StatusWaiting || st.Reason != polling.ReasonNoSeat {
+		t.Fatalf("younger request: %+v", st)
+	}
+}
+
+// Two elections that run at the same time must not both take the one seat. A trigger holds each assignment insert
+// open so both transactions have read their seats before either commits.
+func TestRequestedSeatsTwoTargetRacePostgres(t *testing.T) {
+	w, _, _, _, _, _ := seatWorld(t)
+	if _, err := w.pool.Exec(w.ctx, `CREATE FUNCTION slow_assign() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(0.5); RETURN NULL; END $$;
+		CREATE TRIGGER slow_assign AFTER INSERT ON polling_assignments FOR EACH ROW EXECUTE FUNCTION slow_assign()`); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 2)
+	for _, tg := range []byte{0xA1, 0xA2} {
+		go func() { errs <- w.svc.ElectTarget(w.ctx, pollKey(tg)) }()
+	}
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := assignedTargets(t, w); len(got) != 1 || got[0] != hex.EncodeToString(pollKey(0xA2)) {
+		t.Fatalf("one seat, assignments %v", got)
 	}
 }

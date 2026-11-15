@@ -79,6 +79,7 @@ type Querier interface {
 	CorroborateReadings(ctx context.Context, arg CorroborateReadingsParams) (int64, error)
 	// How many messages were sent at or after since, counted to at most row_limit: idx_channel_messages_sent alone.
 	CountChannelMessagesSentSince(ctx context.Context, arg CountChannelMessagesSentSinceParams) (int64, error)
+	CountTargetAssignments(ctx context.Context, targetPublicKey []byte) (int32, error)
 	CountUntrustedNodeReadings(ctx context.Context, arg CountUntrustedNodeReadingsParams) (int32, error)
 	CountUserRequests(ctx context.Context, userID uuid.UUID) (int32, error)
 	CreateAccount(ctx context.Context, name string) (Account, error)
@@ -110,6 +111,7 @@ type Querier interface {
 	// cutoff: candidates without locks, then lock SKIP LOCKED through the pkey (re-checked on the newest
 	// version) and delete. unresolved_ts is the earliest candidate left behind; window_end is the bound used.
 	DeleteGraceRoutesSlice(ctx context.Context, arg DeleteGraceRoutesSliceParams) (DeleteGraceRoutesSliceRow, error)
+	DeleteObserverTargetAssignment(ctx context.Context, arg DeleteObserverTargetAssignmentParams) error
 	// Keeps the channel IATA filter in step with packet retention.
 	DeleteOldChannelIATAs(ctx context.Context, lastHeard pgtype.Timestamptz) error
 	// Deletes nodes not seen since the given cutoff. node_iatas and node_neighbors cascade-
@@ -486,6 +488,9 @@ type Querier interface {
 	// $13..$18 are the ingest process's live counts (obscount): for an hour from $13 on, the whole
 	// minutes before $14 come from the counts and only [$14, slice end) is read raw.
 	ListObserverDirectory(ctx context.Context, arg ListObserverDirectoryParams) (string, error)
+	// The observer's requested assignments to targets other than the one given, with the age of each target's oldest
+	// request, oldest first.
+	ListObserverRequestedSeats(ctx context.Context, arg ListObserverRequestedSeatsParams) ([]ListObserverRequestedSeatsRow, error)
 	// Observers newest last_seen first; the cursor is the (last_seen, id) of the last row.
 	ListObservers(ctx context.Context, arg ListObserversParams) ([]ListObserversRow, error)
 	// Targets with an assignment whose candidate is gone.
@@ -580,6 +585,8 @@ type Querier interface {
 	// seats_elsewhere counts this observer's requested assignments to other targets whose oldest request is older than
 	// this target's, so seats go to the oldest requests first.
 	ListRequestCandidates(ctx context.Context, arg ListRequestCandidatesParams) ([]ListRequestCandidatesRow, error)
+	// The observers whose claim accepts requests, in key order, which is the order their seat locks are taken in.
+	ListRequestObserverKeys(ctx context.Context, receivedAt pgtype.Timestamptz) ([][]byte, error)
 	// The observers handed this target as a requested one, with their rank (0 polls).
 	ListRequestedAssignees(ctx context.Context, targetPublicKey []byte) ([]ListRequestedAssigneesRow, error)
 	// Leading index equalities and the time/ID boundary bound both custom and generic plans.
@@ -617,6 +624,10 @@ type Querier interface {
 	// Serializes one observer's reading inserts until the transaction ends, so its rate and budget checks see each
 	// other. Class 25191, beside the target class and the (25189, n) job locks.
 	LockPollingObserver(ctx context.Context, observerPublicKey []byte) error
+	// Serializes the seat decisions of one observer until the transaction ends. Class 25192, beside the target class
+	// (25190) and the reading-insert class (25191). Taken before the target lock, in key order, so two elections
+	// cannot wait on each other.
+	LockPollingSeats(ctx context.Context, observerPublicKey []byte) error
 	// Serializes elections of one target until the transaction ends. Class 25190 in the two-key space, which never
 	// meets the one-key migration lock; the schema keeps instances in other schemas apart.
 	LockPollingTarget(ctx context.Context, targetPublicKey []byte) error
@@ -655,6 +666,7 @@ type Querier interface {
 	// Requests with no node row count from the enabling alone.
 	OfflineRequestTargets(ctx context.Context, cutoff pgtype.Timestamptz) ([][]byte, error)
 	OldestMissingRollupHour(ctx context.Context) (pgtype.Timestamptz, error)
+	OldestTargetRequest(ctx context.Context, targetPublicKey []byte) (pgtype.Timestamptz, error)
 	PacketSitesTotalBytes(ctx context.Context) (int64, error)
 	// Who a live token belongs to, without using it.
 	PeekUserToken(ctx context.Context, arg PeekUserTokenParams) (uuid.UUID, error)
