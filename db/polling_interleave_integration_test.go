@@ -9,9 +9,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math/rand/v2"
 	"os"
+	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -56,34 +59,71 @@ func (d *simDevice) reconcile(a polling.OwnersAnswer) {
 			delete(d.held, k)
 		}
 	}
-	for k := range listed {
+	for _, k := range slices.Sorted(maps.Keys(listed)) {
 		if !d.held[k] && !d.local[k] && d.free() > 0 {
 			d.held[k] = true
 		}
 	}
 }
 
-// Random claims, owners fetches, elections, request and account changes, cleanup and the offline task, with the
-// seat, rank and status rules checked against the database after every step.
-func TestRequestedInterleavingsKeepInvariantsPostgres(t *testing.T) {
-	seeds := []uint64{1, 2, 3, 4, 5}
-	if s := os.Getenv("BEACON_INTERLEAVE_SEED"); s != "" {
-		n, err := strconv.ParseUint(s, 10, 64)
-		if err != nil {
-			t.Fatal(err)
+// trim drops held targets, last key first, until local and held targets fit the seats.
+func (d *simDevice) trim() {
+	for _, k := range slices.Backward(slices.Sorted(maps.Keys(d.held))) {
+		if len(d.local)+len(d.held) <= d.seats {
+			return
 		}
-		seeds = []uint64{n}
-	}
-	for _, seed := range seeds {
-		t.Run(fmt.Sprint("seed=", seed), func(t *testing.T) { runInterleaving(t, seed, 400) })
+		delete(d.held, k)
 	}
 }
 
-func runInterleaving(t *testing.T, seed uint64, steps int) {
+// Random claims, owners fetches, elections, request and account changes, cleanup, the offline task, seat and local
+// target changes, and approval and blocking, with the seat, rank and status rules checked against the database after
+// every step and seat priority after every full election. BEACON_INTERLEAVE_SEED takes a seed or a range (1-200).
+func TestRequestedInterleavingsKeepInvariantsPostgres(t *testing.T) {
+	first, last, steps := uint64(1), uint64(5), 400
+	if s := os.Getenv("BEACON_INTERLEAVE_SEED"); s != "" {
+		lo, hi, _ := strings.Cut(s, "-")
+		var err error
+		if first, err = strconv.ParseUint(lo, 10, 64); err != nil {
+			t.Fatal(err)
+		}
+		last = first
+		if hi != "" {
+			if last, err = strconv.ParseUint(hi, 10, 64); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if s := os.Getenv("BEACON_INTERLEAVE_STEPS"); s != "" {
+		var err error
+		if steps, err = strconv.Atoi(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var all interleaveSeen
+	for seed := first; seed <= last; seed++ {
+		t.Run(fmt.Sprint("seed=", seed), func(t *testing.T) { all.add(runInterleaving(t, seed, steps)) })
+	}
+	// The runs are only worth something if requests were seated, competed, and were active and stopped along the
+	// way. A single seed may miss some of these.
+	t.Logf("%+v", all)
+	if all.active == 0 || all.seated == 0 || all.stopped == 0 || all.competed == 0 {
+		t.Fatalf("the runs never reached the states they check: %+v", all)
+	}
+}
+
+type interleaveSeen struct{ steps, active, seated, stopped, competed int }
+
+func (a *interleaveSeen) add(b interleaveSeen) {
+	a.steps, a.active, a.seated, a.stopped, a.competed = a.steps+b.steps, a.active+b.active, a.seated+b.seated,
+		a.stopped+b.stopped, a.competed+b.competed
+}
+
+func runInterleaving(t *testing.T, seed uint64, steps int) interleaveSeen {
 	rng := rand.New(rand.NewPCG(seed, seed))
 	w := newReqWorld(t, "")
 	log := slog.New(failOnWarn{t})
-	cfg := config.ResolvedPolling{Enabled: true, RequestObservers: config.RequestObserversAll}
+	cfg := config.ResolvedPolling{Enabled: true, RequestObservers: config.RequestObserversApproved}
 	w.svc = polling.NewService(w.s, cfg, func() time.Time { return w.now }, log)
 	w.svc.SetRequests(w.s, w.sealer)
 	w.reqs = polling.NewRequestService(w.s, w.sealer, w.svc, 2, func() time.Time { return w.now }, log)
@@ -94,12 +134,23 @@ func runInterleaving(t *testing.T, seed uint64, steps int) {
 		nodeIDs[k] = w.node(k)
 	}
 	var devs []*simDevice
+	type heard struct {
+		target byte
+		oid    uuid.UUID
+		snr    float32
+	}
+	var evidence []heard
 	for i := 1; i <= 3; i++ {
 		d := &simDevice{dev: newReqDevice(byte(i)), seats: 1 + rng.IntN(3), local: map[string]bool{}, held: map[string]bool{}}
 		oid := pollObserver(t, w.ctx, w.s, d.dev.pub)
+		if err := w.s.SetPollingObserver(w.ctx, d.dev.pub, false, true, ""); err != nil {
+			t.Fatal(err)
+		}
 		for _, k := range targets {
 			if rng.IntN(4) > 0 {
-				pollHearAdvert(t, w.ctx, w.pool, pollKey(k), oid, w.now.Add(-time.Hour), float32(rng.IntN(10)))
+				h := heard{k, oid, float32(rng.IntN(10))}
+				evidence = append(evidence, h)
+				pollHearAdvert(t, w.ctx, w.pool, pollKey(k), oid, w.now.Add(-time.Hour), h.snr)
 			}
 		}
 		if rng.IntN(3) == 0 {
@@ -115,11 +166,11 @@ func runInterleaving(t *testing.T, seed uint64, steps int) {
 
 	claim := func(d *simDevice) {
 		var nodes []string
-		for k := range d.local {
+		for _, k := range slices.Sorted(maps.Keys(d.local)) {
 			b, _ := hex.DecodeString(k)
 			nodes = append(nodes, reqNode(b, false, "ok"))
 		}
-		for k := range d.held {
+		for _, k := range slices.Sorted(maps.Keys(d.held)) {
 			b, _ := hex.DecodeString(k)
 			state := []string{"ok", "ok", "ok", "pending", "login_failed", "admin_stop"}[rng.IntN(6)]
 			nodes = append(nodes, reqNode(b, true, state))
@@ -150,12 +201,26 @@ func runInterleaving(t *testing.T, seed uint64, steps int) {
 		}
 	}
 
+	electAll := func() {
+		t.Helper()
+		if err := w.svc.ElectAll(w.ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	trace := os.Getenv("BEACON_INTERLEAVE_TRACE") != ""
-	var seen struct{ steps, active, seated, stopped int }
+	var seen interleaveSeen
 	for step := 0; step < steps && !t.Failed(); step++ {
 		w.now = w.now.Add(time.Minute)
+		// Fresh adverts every 10 hours, so long runs do not drift into having no evidence at all.
+		if step > 0 && step%600 == 0 {
+			for _, h := range evidence {
+				pollHearAdvert(t, w.ctx, w.pool, pollKey(h.target), h.oid, w.now.Add(-time.Minute), h.snr)
+			}
+		}
 		var what string
-		switch op := rng.IntN(12); op {
+		elected := false
+		switch op := rng.IntN(15); op {
 		case 0, 1, 2:
 			d := devs[rng.IntN(len(devs))]
 			what = "claim " + hex.EncodeToString(d.dev.pub[:4])
@@ -173,9 +238,8 @@ func runInterleaving(t *testing.T, seed uint64, steps int) {
 			}
 		case 5:
 			what = "elect all"
-			if err := w.svc.ElectAll(w.ctx); err != nil {
-				t.Fatal(err)
-			}
+			electAll()
+			elected = true
 		case 6:
 			u, k := people[rng.IntN(len(people))], targets[rng.IntN(len(targets))]
 			var pw []byte
@@ -238,12 +302,53 @@ func runInterleaving(t *testing.T, seed uint64, steps int) {
 			if _, err := w.s.DisableOfflineRequests(w.ctx, w.now.Add(-7*24*time.Hour), w.now, polling.ReasonOffline(7)); err != nil {
 				t.Fatal(err)
 			}
+		case 12:
+			d := devs[rng.IntN(len(devs))]
+			d.seats = 1 + rng.IntN(3)
+			d.trim()
+			what = fmt.Sprintf("seats %s = %d", hex.EncodeToString(d.dev.pub[:4]), d.seats)
+			claim(d)
+			electAll()
+			elected = true
+		case 13:
+			d, k := devs[rng.IntN(len(devs))], hex.EncodeToString(pollKey(targets[rng.IntN(len(targets))]))
+			if d.local[k] {
+				delete(d.local, k)
+			} else {
+				d.local[k] = true
+				delete(d.held, k)
+			}
+			d.trim()
+			what = fmt.Sprintf("local %s %s=%v", hex.EncodeToString(d.dev.pub[:4]), k[:8], d.local[k])
+			claim(d)
+			electAll()
+			elected = true
+		case 14:
+			d := devs[rng.IntN(len(devs))]
+			flags := [][2]bool{{false, true}, {false, true}, {false, false}, {true, false}}[rng.IntN(4)]
+			what = fmt.Sprintf("flags %s blocked=%v approved=%v", hex.EncodeToString(d.dev.pub[:4]), flags[0], flags[1])
+			if err := w.s.SetPollingObserver(w.ctx, d.dev.pub, flags[0], flags[1], ""); err != nil {
+				t.Fatal(err)
+			}
+			// The device repeats the claims refused while it was blocked.
+			if !flags[0] {
+				claim(d)
+			}
+			electAll()
+			elected = true
 		}
 		if trace {
 			t.Logf("step %d: %s", step, what)
 		}
 		if msg := checkRequestInvariants(t, w); msg != "" {
 			t.Fatalf("seed %d step %d (%s): %s", seed, step, what, msg)
+		}
+		if elected {
+			msg, competed := checkOlderHoldsSeat(t, w)
+			if msg != "" {
+				t.Fatalf("seed %d step %d (%s): %s", seed, step, what, msg)
+			}
+			seen.competed += competed
 		}
 		var active, seated, stopped int
 		if err := w.pool.QueryRow(w.ctx, `SELECT (SELECT count(*) FROM telemetry_requests WHERE status = 'active'),
@@ -256,11 +361,8 @@ func runInterleaving(t *testing.T, seed uint64, steps int) {
 		seen.seated += seated
 		seen.stopped += stopped
 	}
-	// The run is only worth something if requests were seated, active and stopped along the way.
 	t.Logf("%+v", seen)
-	if seen.active == 0 || seen.seated == 0 || seen.stopped == 0 {
-		t.Fatalf("the run never reached the states it checks: %+v", seen)
-	}
+	return seen
 }
 
 // checkDeviceHolds compares what a device with a live claim holds after an owners answer with the requested
@@ -286,13 +388,70 @@ func checkDeviceHolds(t *testing.T, w *reqWorld, d *simDevice) string {
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if len(want) == 0 {
-		return ""
-	}
 	if fmt.Sprint(want) != fmt.Sprint(d.held) {
 		return fmt.Sprintf("device holds %v, assigned %v", d.held, want)
 	}
 	return ""
+}
+
+// checkOlderHoldsSeat runs after a full election. A requested target left without an observer must not be one that
+// an eligible observer could take: each such observer's seats all go to older requests. It also returns how many
+// such contests over a real seat it saw.
+func checkOlderHoldsSeat(t *testing.T, w *reqWorld) (string, int) {
+	t.Helper()
+	rows, err := w.pool.Query(w.ctx, `
+	WITH age AS (
+	    SELECT target_public_key, min(created_at) AS oldest FROM telemetry_requests GROUP BY target_public_key
+	), waiting AS (
+	    SELECT pt.target_public_key, age.oldest FROM polling_targets pt JOIN age USING (target_public_key)
+	    WHERE pt.active_request_id IS NOT NULL
+	      AND NOT EXISTS (SELECT 1 FROM polling_assignments a WHERE a.target_public_key = pt.target_public_key)
+	), able AS (
+	    SELECT wt.target_public_key, wt.oldest, cl.observer_public_key,
+	           least(8, least(cl.request_slots, 8) + (SELECT least(count(*), 8) FROM polling_candidates c
+	                WHERE c.observer_public_key = cl.observer_public_key AND c.requested)) AS capacity
+	    FROM waiting wt
+	    JOIN polling_claims cl ON cl.accepts_requests AND cl.received_at > $1
+	    JOIN polling_observers po ON po.observer_public_key = cl.observer_public_key AND po.approved AND NOT po.blocked
+	    WHERE EXISTS (SELECT 1 FROM packets p JOIN packet_observations o ON o.packet_hash = p.packet_hash
+	                  WHERE p.origin_pubkey = wt.target_public_key AND p.payload_type = 4 AND o.hop_count = 0
+	                    AND o.observer_id = cl.observer_id AND p.first_heard_at >= $2)
+	      AND NOT EXISTS (SELECT 1 FROM polling_admin_stops s
+	                      WHERE s.target_public_key = wt.target_public_key AND s.observer_public_key = cl.observer_public_key)
+	      AND NOT EXISTS (SELECT 1 FROM polling_candidates c WHERE c.observer_public_key = cl.observer_public_key
+	                      AND c.target_public_key = wt.target_public_key AND c.state IN ('admin_stop', 'not_direct'))
+	)
+	SELECT encode(b.target_public_key, 'hex'), encode(b.observer_public_key, 'hex'), b.capacity::int,
+	       count(*) FILTER (WHERE (age.oldest, x.target_public_key) < (b.oldest, b.target_public_key))::int AS older,
+	       count(*) FILTER (WHERE (age.oldest, x.target_public_key) > (b.oldest, b.target_public_key))::int AS younger
+	FROM able b
+	LEFT JOIN polling_assignments x ON x.observer_public_key = b.observer_public_key AND x.requested
+	LEFT JOIN age ON age.target_public_key = x.target_public_key
+	GROUP BY b.target_public_key, b.observer_public_key, b.oldest, b.capacity`,
+		w.now.Add(-polling.ClaimTTL), w.now.Add(-polling.EvidenceWindow))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	contests := 0
+	for rows.Next() {
+		var target, observer string
+		var capacity, older, younger int
+		if err := rows.Scan(&target, &observer, &capacity, &older, &younger); err != nil {
+			t.Fatal(err)
+		}
+		if younger > 0 || older < capacity {
+			return fmt.Sprintf("%s waits while %s holds %d older and %d younger of %d seats",
+				target[:8], observer[:8], older, younger, capacity), contests
+		}
+		if capacity > 0 {
+			contests++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return "", contests
 }
 
 // checkRequestInvariants returns what is broken, or "".
