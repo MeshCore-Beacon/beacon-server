@@ -164,8 +164,21 @@ func TestEmailWithoutAVerifiedAddressDropsAndFullQueueRetries(t *testing.T) {
 	f.rows = []OutboxRow{row(7, userA, passOne, KindRebooted, "A", 1)}
 	m.full = true
 	_ = NewSender(f, "email", m, nil, publicURL, nil).Run(context.Background())
-	if len(f.retry) != 1 || f.retry[0] != 7 || len(f.delivered) != 0 {
+	// A refused mail stays pending: no attempt is spent on it.
+	if len(f.retry) != 0 || len(f.delivered) != 0 {
 		t.Fatalf("delivered %v retry %v", f.delivered, f.retry)
+	}
+}
+
+func TestEmailPassIsCapped(t *testing.T) {
+	f := &fakeSend{}
+	for i := 1; i <= MaxMailsPerPass+5; i++ {
+		f.rows = append(f.rows, row(int64(i), uuid.New(), passOne, KindRebooted, "A", 1))
+	}
+	m := &fakeMail{}
+	_ = NewSender(f, "email", m, nil, publicURL, nil).Run(context.Background())
+	if len(m.got) != MaxMailsPerPass || len(f.delivered) != MaxMailsPerPass || len(f.retry) != 0 {
+		t.Fatalf("mails %d delivered %d retry %d", len(m.got), len(f.delivered), len(f.retry))
 	}
 }
 

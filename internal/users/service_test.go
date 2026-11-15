@@ -2054,3 +2054,26 @@ func (f *fakeStore) userID(name string) uuid.UUID {
 	}
 	return uuid.Nil
 }
+
+// A burst of alert mail must not crowd out account mail: alerts stop at half the queue.
+func TestAlertMailKeepsRoomForAccountMail(t *testing.T) {
+	pu, _ := url.Parse("https://beacon.example.org")
+	clk := &clock{t: time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)}
+	svc := NewService(newFakeStore(clk), &mail.Recorder{}, config.ResolvedAccounts{Enabled: true, PublicURL: pu}, clk.Now, slog.New(slog.DiscardHandler))
+	id := uuid.New()
+	// The worker is not started, so the queue only fills.
+	for i := 0; i < mailQueueSize/2; i++ {
+		if !svc.TryEnqueue(id, "alert", "a@example.org", "s", "t") {
+			t.Fatalf("alert %d refused before the queue is half full", i)
+		}
+	}
+	if svc.TryEnqueue(id, "alert", "a@example.org", "s", "t") {
+		t.Fatal("alert queued past half the queue")
+	}
+	for i := 0; i < mailQueueSize/2; i++ {
+		svc.enqueue(id, "verify", "a@example.org", "s", "t")
+	}
+	if len(svc.mailq) != mailQueueSize {
+		t.Fatalf("account mail did not fill the reserved half: %d", len(svc.mailq))
+	}
+}

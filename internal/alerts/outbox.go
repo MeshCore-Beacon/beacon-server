@@ -56,6 +56,9 @@ type SendStore interface {
 	RemoveDeviceToken(ctx context.Context, token string) error
 }
 
+// MaxMailsPerPass caps the alert mails queued in one run, well under the share of the mail queue alerts may use.
+const MaxMailsPerPass = 16
+
 // MailQueue is the existing mail queue. TryEnqueue reports false when it is full and the mail was not queued.
 type MailQueue interface {
 	TryEnqueue(userID uuid.UUID, kind, to, subject, text string) bool
@@ -118,7 +121,7 @@ func (s *Sender) Run(ctx context.Context) error {
 }
 
 // sendEmail sends one message for each user and pass. A user with no verified address has nothing to send to and
-// the notices are dropped; a full mail queue leaves them for the next run.
+// the notices are dropped; a refused or capped mail leaves its notices pending for the next run.
 func (s *Sender) sendEmail(rows []OutboxRow) (delivered, retry []int64) {
 	type group struct {
 		first   OutboxRow
@@ -138,17 +141,22 @@ func (s *Sender) sendEmail(rows []OutboxRow) (delivered, retry []int64) {
 		g.ids = append(g.ids, r.ID)
 		g.notices = append(g.notices, EmailNotice{Kind: r.Kind, Name: r.Name, Detail: r.Detail, Value: r.Value})
 	}
+	queued := 0
 	for _, g := range groups {
 		if g.first.Email == "" || !g.first.EmailVerified {
 			delivered = append(delivered, g.ids...)
 			continue
 		}
-		subject, text := ComposeEmail(g.notices, s.atlasURL)
-		if s.mail.TryEnqueue(g.first.UserID, "alert", g.first.Email, subject, text) {
-			delivered = append(delivered, g.ids...)
-		} else {
-			retry = append(retry, g.ids...)
+		if queued >= MaxMailsPerPass {
+			continue
 		}
+		subject, text := ComposeEmail(g.notices, s.atlasURL)
+		if !s.mail.TryEnqueue(g.first.UserID, "alert", g.first.Email, subject, text) {
+			// The queue is at the alert share: leave the rest for the next pass without spending an attempt.
+			break
+		}
+		queued++
+		delivered = append(delivered, g.ids...)
 	}
 	return delivered, retry
 }

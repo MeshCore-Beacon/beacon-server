@@ -230,9 +230,13 @@ func (s *Service) enqueue(userID uuid.UUID, kind, to, subject, text string) {
 	}
 }
 
-// TryEnqueue queues a mail for the one mail worker without waiting and reports whether it was queued; false means
-// the queue is full and the caller should try again later.
+// TryEnqueue queues alert mail for the one mail worker without waiting and reports whether it was queued. It only
+// succeeds while the queue is under half full, so the other half stays for account mail; false means try again
+// later.
 func (s *Service) TryEnqueue(userID uuid.UUID, kind, to, subject, text string) bool {
+	if len(s.mailq) >= mailQueueSize/2 {
+		return false
+	}
 	q := queuedMail{userID: userID, kind: kind, msg: mailer.Message{To: to, Subject: subject, Text: text}}
 	select {
 	case s.mailq <- q:
