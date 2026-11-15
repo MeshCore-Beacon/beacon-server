@@ -147,18 +147,18 @@ func (q *Queries) DeleteAlertRule(ctx context.Context, arg DeleteAlertRuleParams
 	return result.RowsAffected(), nil
 }
 
-const deleteDevicesWithToken = `-- name: DeleteDevicesWithToken :exec
-DELETE FROM user_devices WHERE push_token = $1 AND session_id <> $2
+const deleteSessionDeviceOtherToken = `-- name: DeleteSessionDeviceOtherToken :exec
+DELETE FROM user_devices WHERE session_id = $1 AND push_token <> $2
 `
 
-type DeleteDevicesWithTokenParams struct {
-	PushToken string    `json:"push_token"`
+type DeleteSessionDeviceOtherTokenParams struct {
 	SessionID uuid.UUID `json:"session_id"`
+	PushToken string    `json:"push_token"`
 }
 
-// A token belongs to one session: a device signing in again takes it over.
-func (q *Queries) DeleteDevicesWithToken(ctx context.Context, arg DeleteDevicesWithTokenParams) error {
-	_, err := q.db.Exec(ctx, deleteDevicesWithToken, arg.PushToken, arg.SessionID)
+// A session has one device: registering a new token replaces the old one.
+func (q *Queries) DeleteSessionDeviceOtherToken(ctx context.Context, arg DeleteSessionDeviceOtherTokenParams) error {
+	_, err := q.db.Exec(ctx, deleteSessionDeviceOtherToken, arg.SessionID, arg.PushToken)
 	return err
 }
 
@@ -316,7 +316,8 @@ func (q *Queries) UpsertAlertRule(ctx context.Context, arg UpsertAlertRuleParams
 const upsertUserDevice = `-- name: UpsertUserDevice :exec
 INSERT INTO user_devices (session_id, user_id, platform, push_token)
 VALUES ($1, $2, $3, $4)
-ON CONFLICT (session_id) DO UPDATE SET platform = EXCLUDED.platform, push_token = EXCLUDED.push_token, updated_at = now()
+ON CONFLICT (push_token) DO UPDATE
+    SET session_id = EXCLUDED.session_id, user_id = EXCLUDED.user_id, platform = EXCLUDED.platform, updated_at = now()
 `
 
 type UpsertUserDeviceParams struct {
@@ -326,6 +327,8 @@ type UpsertUserDeviceParams struct {
 	PushToken string    `json:"push_token"`
 }
 
+// The token is unique, so a registration for a token another session holds moves that row (crossing users on
+// purpose: a phone belongs to one account, so the previous user's alerts never reach its next user).
 func (q *Queries) UpsertUserDevice(ctx context.Context, arg UpsertUserDeviceParams) error {
 	_, err := q.db.Exec(ctx, upsertUserDevice,
 		arg.SessionID,

@@ -194,13 +194,20 @@ func (s *Store) DeleteRule(ctx context.Context, userID, id uuid.UUID) (bool, err
 }
 
 func (s *Store) RegisterDevice(ctx context.Context, userID, sessionID uuid.UUID, platform, token string) error {
-	err := s.pollTx(ctx, func(q *sqlc.Queries) error {
-		if err := q.UpsertUserDevice(ctx, sqlc.UpsertUserDeviceParams{SessionID: sessionID, UserID: userID, Platform: platform, PushToken: token}); err != nil {
-			return err
+	var err error
+	// Two registrations of one session race on its primary key (different tokens); the loser runs again.
+	for range 3 {
+		err = s.pollTx(ctx, func(q *sqlc.Queries) error {
+			if err := q.DeleteSessionDeviceOtherToken(ctx, sqlc.DeleteSessionDeviceOtherTokenParams{SessionID: sessionID, PushToken: token}); err != nil {
+				return err
+			}
+			return q.UpsertUserDevice(ctx, sqlc.UpsertUserDeviceParams{SessionID: sessionID, UserID: userID, Platform: platform, PushToken: token})
+		})
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != uniqueViolation {
+			break
 		}
-		// Crosses users on purpose: a phone belongs to one account, so the previous user's alerts never reach its next user.
-		return q.DeleteDevicesWithToken(ctx, sqlc.DeleteDevicesWithTokenParams{PushToken: token, SessionID: sessionID})
-	})
+	}
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation {
 		return users.ErrNotFound

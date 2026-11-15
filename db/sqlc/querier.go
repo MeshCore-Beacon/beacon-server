@@ -95,8 +95,6 @@ type Querier interface {
 	DeleteChannelConfigScopes(ctx context.Context) error
 	DeleteChannelMembersNotIn(ctx context.Context, arg DeleteChannelMembersNotInParams) error
 	DeleteDevicesByToken(ctx context.Context, pushToken string) error
-	// A token belongs to one session: a device signing in again takes it over.
-	DeleteDevicesWithToken(ctx context.Context, arg DeleteDevicesWithTokenParams) error
 	DeleteExhaustedAlerts(ctx context.Context, maxAttempts int16) (int64, error)
 	DeleteExpiredPollingClaims(ctx context.Context, receivedAt pgtype.Timestamptz) error
 	DeleteExpiredPortalStates(ctx context.Context, cutoff pgtype.Timestamptz) error
@@ -143,6 +141,8 @@ type Querier interface {
 	DeleteRegionIATAsNotIn(ctx context.Context, arg DeleteRegionIATAsNotInParams) error
 	DeleteRepeaterSource(ctx context.Context, source string) error
 	DeleteRollupHour(ctx context.Context, hour pgtype.Timestamptz) error
+	// A session has one device: registering a new token replaces the old one.
+	DeleteSessionDeviceOtherToken(ctx context.Context, arg DeleteSessionDeviceOtherTokenParams) error
 	// Dirty hours that can no longer be re-rolled.
 	DeleteStaleDirtyHours(ctx context.Context) error
 	// A sign-up nobody confirmed holds its username and address; once it is old and has no live verify link left it
@@ -913,6 +913,8 @@ type Querier interface {
 	// TRANSPORT CODES
 	// ============================================================
 	UpsertTransportScope(ctx context.Context, arg UpsertTransportScopeParams) error
+	// The token is unique, so a registration for a token another session holds moves that row (crossing users on
+	// purpose: a phone belongs to one account, so the previous user's alerts never reach its next user).
 	UpsertUserDevice(ctx context.Context, arg UpsertUserDeviceParams) error
 	// Only enabled rules: back_online needs a gone_quiet rule that is on.
 	UserAlertRuleKinds(ctx context.Context, arg UserAlertRuleKindsParams) ([]string, error)

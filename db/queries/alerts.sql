@@ -44,14 +44,17 @@ DELETE FROM user_alert_rules r
 WHERE r.user_id = $1
   AND NOT EXISTS (SELECT 1 FROM user_atlas_pins p WHERE p.user_id = r.user_id AND p.public_key = r.target_public_key);
 
+-- name: DeleteSessionDeviceOtherToken :exec
+-- A session has one device: registering a new token replaces the old one.
+DELETE FROM user_devices WHERE session_id = $1 AND push_token <> $2;
+
 -- name: UpsertUserDevice :exec
+-- The token is unique, so a registration for a token another session holds moves that row (crossing users on
+-- purpose: a phone belongs to one account, so the previous user's alerts never reach its next user).
 INSERT INTO user_devices (session_id, user_id, platform, push_token)
 VALUES ($1, $2, $3, $4)
-ON CONFLICT (session_id) DO UPDATE SET platform = EXCLUDED.platform, push_token = EXCLUDED.push_token, updated_at = now();
-
--- name: DeleteDevicesWithToken :exec
--- A token belongs to one session: a device signing in again takes it over.
-DELETE FROM user_devices WHERE push_token = $1 AND session_id <> $2;
+ON CONFLICT (push_token) DO UPDATE
+    SET session_id = EXCLUDED.session_id, user_id = EXCLUDED.user_id, platform = EXCLUDED.platform, updated_at = now();
 
 -- name: DeleteUserDevice :exec
 DELETE FROM user_devices WHERE session_id = $1 AND user_id = $2;

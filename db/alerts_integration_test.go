@@ -295,3 +295,31 @@ func TestDeviceTokenMovesAcrossUsersPostgres(t *testing.T) {
 		t.Fatalf("overview %s", b)
 	}
 }
+
+// Two registrations of one token that overlap in time leave one owner. Triggers hold each insert and delete open so
+// both transactions are in flight before either one commits.
+func TestDeviceTokenSimultaneousRegistrationsPostgres(t *testing.T) {
+	ctx, pool, s := userStore(t)
+	svc := alertSvc(s)
+	alice, bob := newUser(t, ctx, s, "alice"), newUser(t, ctx, s, "bob")
+	sa, sb := newSession(t, ctx, s, alice, "app", 1), newSession(t, ctx, s, bob, "app", 2)
+	if _, err := pool.Exec(ctx, `CREATE FUNCTION slow_device() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(0.5); RETURN NULL; END $$;
+		CREATE TRIGGER slow_device AFTER INSERT ON user_devices FOR EACH ROW EXECUTE FUNCTION slow_device();
+		CREATE TRIGGER slow_device_del AFTER DELETE ON user_devices FOR EACH STATEMENT EXECUTE FUNCTION slow_device()`); err != nil {
+		t.Fatal(err)
+	}
+	const token = "shared-phone-token"
+	errs := make(chan error, 2)
+	for _, r := range []struct{ u, s uuid.UUID }{{alice.ID, sa.ID}, {bob.ID, sb.ID}} {
+		go func() { errs <- svc.RegisterDevice(ctx, r.u, r.s, "android", token) }()
+	}
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM user_devices WHERE push_token = $1`, token).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("%d owners of one token: %v", n, err)
+	}
+}

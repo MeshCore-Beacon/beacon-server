@@ -706,20 +706,6 @@ func (mr *MockQuerierMockRecorder) DeleteDevicesByToken(ctx, pushToken any) *gom
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteDevicesByToken", reflect.TypeOf((*MockQuerier)(nil).DeleteDevicesByToken), ctx, pushToken)
 }
 
-// DeleteDevicesWithToken mocks base method.
-func (m *MockQuerier) DeleteDevicesWithToken(ctx context.Context, arg db.DeleteDevicesWithTokenParams) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteDevicesWithToken", ctx, arg)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// DeleteDevicesWithToken indicates an expected call of DeleteDevicesWithToken.
-func (mr *MockQuerierMockRecorder) DeleteDevicesWithToken(ctx, arg any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteDevicesWithToken", reflect.TypeOf((*MockQuerier)(nil).DeleteDevicesWithToken), ctx, arg)
-}
-
 // DeleteExhaustedAlerts mocks base method.
 func (m *MockQuerier) DeleteExhaustedAlerts(ctx context.Context, maxAttempts int16) (int64, error) {
 	m.ctrl.T.Helper()
@@ -1046,6 +1032,20 @@ func (m *MockQuerier) DeleteRollupHour(ctx context.Context, hour pgtype.Timestam
 func (mr *MockQuerierMockRecorder) DeleteRollupHour(ctx, hour any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteRollupHour", reflect.TypeOf((*MockQuerier)(nil).DeleteRollupHour), ctx, hour)
+}
+
+// DeleteSessionDeviceOtherToken mocks base method.
+func (m *MockQuerier) DeleteSessionDeviceOtherToken(ctx context.Context, arg db.DeleteSessionDeviceOtherTokenParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteSessionDeviceOtherToken", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteSessionDeviceOtherToken indicates an expected call of DeleteSessionDeviceOtherToken.
+func (mr *MockQuerierMockRecorder) DeleteSessionDeviceOtherToken(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteSessionDeviceOtherToken", reflect.TypeOf((*MockQuerier)(nil).DeleteSessionDeviceOtherToken), ctx, arg)
 }
 
 // DeleteStaleDirtyHours mocks base method.
