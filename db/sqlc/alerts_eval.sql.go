@@ -211,9 +211,14 @@ func (q *Queries) AlertNodeUptimes(ctx context.Context, arg AlertNodeUptimesPara
 
 const alertNodesData = `-- name: AlertNodesData :many
 SELECT public_key, COALESCE(name, '')::text AS name, last_seen, last_advert_at, device_clock_drift_seconds, prev_clock_drift_seconds,
-       EXISTS (SELECT 1 FROM polling_assignments a WHERE a.target_public_key = nodes.public_key) AS polled
-FROM nodes WHERE public_key = ANY($1::bytea[])
+       ($1::boolean AND EXISTS (SELECT 1 FROM polling_assignments a WHERE a.target_public_key = nodes.public_key))::boolean AS polled
+FROM nodes WHERE public_key = ANY($2::bytea[])
 `
+
+type AlertNodesDataParams struct {
+	PollingEnabled bool     `json:"polling_enabled"`
+	Keys           [][]byte `json:"keys"`
+}
 
 type AlertNodesDataRow struct {
 	PublicKey               []byte             `json:"public_key"`
@@ -225,9 +230,9 @@ type AlertNodesDataRow struct {
 	Polled                  bool               `json:"polled"`
 }
 
-// polled is the same test as the overview's (AlertNodeCaps): a current polling assignment.
-func (q *Queries) AlertNodesData(ctx context.Context, keys [][]byte) ([]AlertNodesDataRow, error) {
-	rows, err := q.db.Query(ctx, alertNodesData, keys)
+// polled is the same test as the overview's (AlertNodeCaps): a current polling assignment while polling is on.
+func (q *Queries) AlertNodesData(ctx context.Context, arg AlertNodesDataParams) ([]AlertNodesDataRow, error) {
+	rows, err := q.db.Query(ctx, alertNodesData, arg.PollingEnabled, arg.Keys)
 	if err != nil {
 		return nil, err
 	}

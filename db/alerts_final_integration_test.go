@@ -81,3 +81,42 @@ func TestAlertClockBreachBetweenPassesPostgres(t *testing.T) {
 		t.Fatalf("the breach was announced again: %d notices", n)
 	}
 }
+
+// With polling switched off the assignment rows that remain are no current source: repeater telemetry kinds are
+// unavailable (not_polled) and their rules read inactive. Observer status alerts do not depend on it.
+func TestAlertTelemetryStopsWhenPollingIsOffPostgres(t *testing.T) {
+	ctx, pool, s := userStore(t)
+	svc := alertSvc(s)
+	u := newUser(t, ctx, s, "alice")
+	rep := atlasKey(1)
+	insertNode(t, ctx, s, rep, 2, "Hilltop")
+	insertReading(t, ctx, s, rep, time.Now().Add(-10*time.Minute), 3000, nil)
+	insertReading(t, ctx, s, rep, time.Now().Add(-20*time.Minute), 3000, nil)
+	assignPoller(t, ctx, s, rep)
+	pinAtlas(t, ctx, s, u, 0, api.StoredPin{Kind: "node", Key: rep})
+	if _, err := pool.Exec(ctx, `INSERT INTO user_alert_rules (user_id, target_kind, target_public_key, kind, threshold, cursor_at)
+		VALUES ($1, 'node', $2, 'battery_low', 3500, now() - interval '3 days')`, u.ID, rep); err != nil {
+		t.Fatal(err)
+	}
+	task := alerts.NewTask(AlertEval{s}, time.Now)
+	if err := task.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := ruleStateOf(t, ctx, pool, "battery_low"); got != "firing" {
+		t.Fatalf("with polling on: %s", got)
+	}
+	s.SetPollingEnabled(false)
+	ov, err := svc.Overview(ctx, u.ID)
+	if err != nil || len(ov.Targets) != 1 || ov.Targets[0].Caps.Polled {
+		t.Fatalf("still polled with polling off: %+v %v", ov, err)
+	}
+	if got := ov.Targets[0].UnavailableCodes["battery_low"]; got != alerts.CodeNotPolled {
+		t.Fatalf("battery_low with polling off: code %q, available %v", got, ov.Targets[0].Available)
+	}
+	if err := task.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := ruleStateOf(t, ctx, pool, "battery_low"); got != "inactive" {
+		t.Fatalf("rule with polling off: %s", got)
+	}
+}

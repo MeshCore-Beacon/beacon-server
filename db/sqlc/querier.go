@@ -39,8 +39,8 @@ type Querier interface {
 	// For each repeater and the cursor of its reboot rule: the newest trusted uptime reading at or before the cursor (the
 	// baseline), then the oldest page_size readings after it, so every reading since the cursor is reached page by page.
 	AlertNodeUptimes(ctx context.Context, arg AlertNodeUptimesParams) ([]AlertNodeUptimesRow, error)
-	// polled is the same test as the overview's (AlertNodeCaps): a current polling assignment.
-	AlertNodesData(ctx context.Context, keys [][]byte) ([]AlertNodesDataRow, error)
+	// polled is the same test as the overview's (AlertNodeCaps): a current polling assignment while polling is on.
+	AlertNodesData(ctx context.Context, arg AlertNodesDataParams) ([]AlertNodesDataRow, error)
 	AlertObserverCaps(ctx context.Context, arg AlertObserverCapsParams) ([]AlertObserverCapsRow, error)
 	AlertObserverDayAgo(ctx context.Context, arg AlertObserverDayAgoParams) ([]AlertObserverDayAgoRow, error)
 	AlertObserverTelemetry(ctx context.Context, arg AlertObserverTelemetryParams) ([]AlertObserverTelemetryRow, error)

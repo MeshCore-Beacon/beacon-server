@@ -40,10 +40,16 @@ type Store struct {
 	cmiProgress         FillProgress    // the cmi backfill's progress log, across sessions
 	hopStats            hopStatsCache   // known_routes hop statistics for the global hop page; see hopGroupSmall
 
+	pollingOff atomic.Bool // see SetPollingEnabled
+
 	obsCounts *obscount.Counts // see WithObservationCounts; nil: the directory reads raw rows
 
 	obsActivity *obscount.Activity // see WithObservationActivity; nil: activity reads raw rows
 }
+
+// SetPollingEnabled tells the store whether polling is on. With it off, assignment rows left from before no longer
+// make a repeater polled for the alerts: its telemetry rules read inactive.
+func (s *Store) SetPollingEnabled(on bool) { s.pollingOff.Store(!on) }
 
 // New creates a Store whose statements run on dbtx (a pool, or a PlanRouter for the API).
 // pool serves the work that needs a dedicated connection; the API store passes nil.

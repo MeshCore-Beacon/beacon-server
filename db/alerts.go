@@ -45,11 +45,11 @@ type radioCaps struct {
 	observer map[string]sqlc.AlertObserverCapsRow
 }
 
-func loadRadioCaps(ctx context.Context, q sqlc.Querier, keys [][]byte, now time.Time) (radioCaps, error) {
+func loadRadioCaps(ctx context.Context, q sqlc.Querier, keys [][]byte, now time.Time, pollingOn bool) (radioCaps, error) {
 	since := ts(now.Add(-alerts.DataWindow * time.Second))
 	fresh := ts(now.Add(-alerts.ObserverFresh))
 	rc := radioCaps{node: map[string]sqlc.AlertNodeCapsRow{}, observer: map[string]sqlc.AlertObserverCapsRow{}}
-	nodes, err := q.AlertNodeCaps(ctx, sqlc.AlertNodeCapsParams{Since: since, Keys: keys})
+	nodes, err := q.AlertNodeCaps(ctx, sqlc.AlertNodeCapsParams{Since: since, Keys: keys, PollingEnabled: pollingOn})
 	if err != nil {
 		return rc, err
 	}
@@ -109,7 +109,7 @@ func (s *Store) Targets(ctx context.Context, userID uuid.UUID, now time.Time) ([
 	for i, p := range pins {
 		keys[i] = p.PublicKey
 	}
-	rc, err := loadRadioCaps(ctx, s.q, keys, now)
+	rc, err := loadRadioCaps(ctx, s.q, keys, now, !s.pollingOff.Load())
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +169,7 @@ func (s *Store) PutRule(ctx context.Context, userID uuid.UUID, in alerts.RuleInp
 		if !pinned {
 			return alerts.ErrNotOnAtlas
 		}
-		rc, err := loadRadioCaps(ctx, q, [][]byte{in.PublicKey}, now)
+		rc, err := loadRadioCaps(ctx, q, [][]byte{in.PublicKey}, now, !s.pollingOff.Load())
 		if err != nil {
 			return err
 		}

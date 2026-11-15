@@ -150,7 +150,7 @@ func (a AlertEval) LoadTargets(ctx context.Context, rules []alerts.RuleRow, now 
 	since := ts(now.Add(-alerts.DataWindow * time.Second))
 
 	if len(nodeKeys) > 0 {
-		nodes, err := a.q.AlertNodesData(ctx, nodeKeys)
+		nodes, err := a.q.AlertNodesData(ctx, sqlc.AlertNodesDataParams{Keys: nodeKeys, PollingEnabled: !a.pollingOff.Load()})
 		if err != nil {
 			return nil, err
 		}

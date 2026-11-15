@@ -504,6 +504,7 @@ func main() {
 		slog.Error("invalid polling configuration", "component", "startup", "error", err)
 		os.Exit(1)
 	}
+	maintStore.SetPollingEnabled(resolvedPolling.Enabled) // alerts read it: with polling off, telemetry rules go inactive
 	slog.Info("repeater polling", "component", "startup", "enabled", resolvedPolling.Enabled, "mqtt_hosts", len(resolvedPolling.MQTTHosts), "hosts", resolvedPolling.MQTTHosts)
 	var pollingSvc *polling.Service
 	var guestPolling handlers.GuestPolling // stays an untyped nil unless polling is on

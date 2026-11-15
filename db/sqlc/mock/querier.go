@@ -206,18 +206,18 @@ func (mr *MockQuerierMockRecorder) AlertNodeUptimes(ctx, arg any) *gomock.Call {
 }
 
 // AlertNodesData mocks base method.
-func (m *MockQuerier) AlertNodesData(ctx context.Context, keys [][]byte) ([]db.AlertNodesDataRow, error) {
+func (m *MockQuerier) AlertNodesData(ctx context.Context, arg db.AlertNodesDataParams) ([]db.AlertNodesDataRow, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "AlertNodesData", ctx, keys)
+	ret := m.ctrl.Call(m, "AlertNodesData", ctx, arg)
 	ret0, _ := ret[0].([]db.AlertNodesDataRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // AlertNodesData indicates an expected call of AlertNodesData.
-func (mr *MockQuerierMockRecorder) AlertNodesData(ctx, keys any) *gomock.Call {
+func (mr *MockQuerierMockRecorder) AlertNodesData(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AlertNodesData", reflect.TypeOf((*MockQuerier)(nil).AlertNodesData), ctx, keys)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AlertNodesData", reflect.TypeOf((*MockQuerier)(nil).AlertNodesData), ctx, arg)
 }
 
 // AlertObserverCaps mocks base method.

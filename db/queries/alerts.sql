@@ -71,8 +71,8 @@ SELECT n.id, n.public_key, n.node_type, COALESCE(n.name, '')::text AS name,
        COALESCE(c.readings, 0)::int AS readings,
        COALESCE(c.battery, false)::boolean AS has_battery, COALESCE(c.temperature, false)::boolean AS has_temperature,
        COALESCE(c.noise, false)::boolean AS has_noise, COALESCE(c.uptime, false)::boolean AS has_uptime,
-       -- Polled is a current source, not history: some observer holds the repeater as a polling assignment.
-       EXISTS (SELECT 1 FROM polling_assignments a WHERE a.target_public_key = n.public_key) AS polled
+       -- Polled is a current source, not history: some observer holds the repeater as a polling assignment, and polling is on.
+       (sqlc.arg(polling_enabled)::boolean AND EXISTS (SELECT 1 FROM polling_assignments a WHERE a.target_public_key = n.public_key))::boolean AS polled
 FROM nodes n
 LEFT JOIN LATERAL (
     SELECT count(*) AS readings, bool_or(r.battery_mv IS NOT NULL) AS battery, bool_or(r.temperature_c IS NOT NULL) AS temperature,

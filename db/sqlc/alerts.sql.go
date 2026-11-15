@@ -17,21 +17,22 @@ SELECT n.id, n.public_key, n.node_type, COALESCE(n.name, '')::text AS name,
        COALESCE(c.readings, 0)::int AS readings,
        COALESCE(c.battery, false)::boolean AS has_battery, COALESCE(c.temperature, false)::boolean AS has_temperature,
        COALESCE(c.noise, false)::boolean AS has_noise, COALESCE(c.uptime, false)::boolean AS has_uptime,
-       -- Polled is a current source, not history: some observer holds the repeater as a polling assignment.
-       EXISTS (SELECT 1 FROM polling_assignments a WHERE a.target_public_key = n.public_key) AS polled
+       -- Polled is a current source, not history: some observer holds the repeater as a polling assignment, and polling is on.
+       ($1::boolean AND EXISTS (SELECT 1 FROM polling_assignments a WHERE a.target_public_key = n.public_key))::boolean AS polled
 FROM nodes n
 LEFT JOIN LATERAL (
     SELECT count(*) AS readings, bool_or(r.battery_mv IS NOT NULL) AS battery, bool_or(r.temperature_c IS NOT NULL) AS temperature,
            bool_or(r.noise_floor IS NOT NULL) AS noise, bool_or(r.uptime_secs IS NOT NULL) AS uptime
     FROM repeater_readings r
-    WHERE r.target_public_key = n.public_key AND r.trusted AND r.sampled_at >= $1
+    WHERE r.target_public_key = n.public_key AND r.trusted AND r.sampled_at >= $2
 ) c ON true
-WHERE n.public_key = ANY($2::bytea[])
+WHERE n.public_key = ANY($3::bytea[])
 `
 
 type AlertNodeCapsParams struct {
-	Since pgtype.Timestamptz `json:"since"`
-	Keys  [][]byte           `json:"keys"`
+	PollingEnabled bool               `json:"polling_enabled"`
+	Since          pgtype.Timestamptz `json:"since"`
+	Keys           [][]byte           `json:"keys"`
 }
 
 type AlertNodeCapsRow struct {
@@ -49,7 +50,7 @@ type AlertNodeCapsRow struct {
 
 // What each of the nodes is and what a polled one reports, over the readings since the cutoff.
 func (q *Queries) AlertNodeCaps(ctx context.Context, arg AlertNodeCapsParams) ([]AlertNodeCapsRow, error) {
-	rows, err := q.db.Query(ctx, alertNodeCaps, arg.Since, arg.Keys)
+	rows, err := q.db.Query(ctx, alertNodeCaps, arg.PollingEnabled, arg.Since, arg.Keys)
 	if err != nil {
 		return nil, err
 	}
