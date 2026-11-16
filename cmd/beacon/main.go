@@ -567,6 +567,7 @@ func main() {
 	alertSender, err := newAlertSender(alertDelivery, accountMailer, maintStore, resolvedAccounts.PublicURL, os.Getenv("BEACON_PUSH_CREDENTIALS"))
 	if alertSender != nil {
 		alertSender.SetInstanceName(resolvedAccounts.InstanceName)
+		alertSender.SetTemperatureUnit(resolvedDisplay.TemperatureUnit)
 	}
 	if err != nil {
 		slog.Error("invalid alert delivery", "component", "startup", "error", err)

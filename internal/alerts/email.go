@@ -16,8 +16,8 @@ type EmailNotice struct {
 
 // ComposeEmail builds one message for everything one evaluation pass produced for a user: the subject counts the
 // alerts, each alert is one plain line, and the last line links to the Atlas. Names are sanitised again here, so a
-// name can never add a header or a line.
-func ComposeEmail(name string, notices []EmailNotice, atlasURL string) (subject, text string) {
+// name can never add a header or a line. tempUnit is the instance temperature unit ("f" or "c").
+func ComposeEmail(name string, notices []EmailNotice, atlasURL, tempUnit string) (subject, text string) {
 	n := len(notices)
 	if n == 1 {
 		subject = name + ": 1 alert"
@@ -26,7 +26,7 @@ func ComposeEmail(name string, notices []EmailNotice, atlasURL string) (subject,
 	}
 	var b strings.Builder
 	for _, x := range notices {
-		b.WriteString(Sentence(x.Kind, SanitizeName(x.Name, nil), x.Value, x.Detail))
+		b.WriteString(Sentence(x.Kind, SanitizeName(x.Name, nil), x.Value, x.Detail, tempUnit))
 		b.WriteString("\n")
 	}
 	b.WriteString("\nOpen your Atlas:\n")
