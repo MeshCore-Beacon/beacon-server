@@ -55,6 +55,15 @@ func TestPacketVariantDemandTracksConfigureAndRemove(t *testing.T) {
 	waitVariantDemand(t, h, [3]bool{})
 	h.Configure(c, ClientOptions{IncludeObserverKey: true})
 	waitVariantDemand(t, h, [3]bool{false, true, false})
+	h.Configure(c, ClientOptions{ResolvePath: true, IncludeObserverKey: true})
+	waitVariantDemand(t, h, [3]bool{false, false, true})
+	h.Remove(c)
+	waitVariantDemand(t, h, [3]bool{})
+	d := h.NewClient()
+	h.Configure(d, ClientOptions{ResolvePath: true})
+	waitVariantDemand(t, h, [3]bool{true, false, false})
+	h.Remove(d)
+	waitVariantDemand(t, h, [3]bool{})
 }
 
 func TestPreviouslyBuiltVariantRespectsLaterConfigureAndRemove(t *testing.T) {
