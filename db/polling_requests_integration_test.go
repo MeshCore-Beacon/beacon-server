@@ -394,7 +394,7 @@ func TestRequestedAdminStateAndOfflinePostgres(t *testing.T) {
 	if n, err := s.DisableOfflineRequests(ctx, cutoff, w.now, "Not heard for 7 days."); err != nil || n != 1 {
 		t.Fatalf("disabled %d %v", n, err)
 	}
-	rows, _ := s.UserTelemetryRequests(ctx, bob.ID)
+	rows, _ := s.UserTelemetryRequests(ctx, bob.ID, w.now.Add(-polling.ClaimTTL))
 	if len(rows) != 1 || rows[0].Status != polling.StatusDisabled || rows[0].Reason != "Not heard for 7 days." {
 		t.Fatalf("%+v", rows)
 	}
