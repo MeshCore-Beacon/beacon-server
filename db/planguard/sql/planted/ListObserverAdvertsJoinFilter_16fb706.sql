@@ -2,7 +2,7 @@
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
 -- name: ListObserverAdvertsJoinFilter :many
-SELECT 
+SELECT
   po.id,
   encode(po.packet_hash, 'hex') AS packet_hash_hex,
   p.payload_type,

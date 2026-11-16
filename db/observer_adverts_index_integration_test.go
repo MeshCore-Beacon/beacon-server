@@ -78,7 +78,7 @@ func advertsPool(t *testing.T) (context.Context, *pgxpool.Pool) {
 // observation carried its own (frozen as db/planguard/sql/planted/ListObserverAdvertsJoinFilter_16fb706.sql). It is
 // the oracle: the observation-typed statement must return its rows.
 const joinFilterAdvertsSQL = `-- name: ListObserverAdvertsJoinFilter :many
-SELECT 
+SELECT
   po.id,
   encode(po.packet_hash, 'hex') AS packet_hash_hex,
   p.payload_type,
