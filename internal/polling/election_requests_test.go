@@ -105,18 +105,26 @@ func TestDecideRequestObserversApproved(t *testing.T) {
 	}
 }
 
-func TestDecideRequestsGoOnlyToApprovedObserversByDefault(t *testing.T) {
+func TestDecideRequestsNeedApprovalUnlessResolvedToAll(t *testing.T) {
 	ok := rcand('A', 1)
 	ok.Approved = true
 	in := ElectionInput{Requested: true, RequestCands: []Candidate{rcand('B', 9), ok}}
-	// The zero config and the resolved default both mean approved; only an explicit all lifts it.
-	for name, cfg := range map[string]config.ResolvedPolling{"unset": {}, "approved": {RequestObservers: config.RequestObserversApproved}} {
+	// The gate is closed unless the resolved value is all: an unresolved or unknown value needs approval.
+	for name, cfg := range map[string]config.ResolvedPolling{
+		"unresolved": {}, "approved": {RequestObservers: config.RequestObserversApproved}, "unknown": {RequestObservers: "some"},
+	} {
 		if got := string(order(Decide(in, cfg).Assignments)); got != "A" {
 			t.Errorf("%s: %q", name, got)
 		}
 	}
-	if got := string(order(Decide(in, allObservers).Assignments)); got != "BA" {
-		t.Errorf("all: %q", got)
+	resolved, err := config.PollingConfig{}.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, cfg := range map[string]config.ResolvedPolling{"resolved default": resolved, "all": allObservers} {
+		if got := string(order(Decide(in, cfg).Assignments)); got != "BA" {
+			t.Errorf("%s: %q", name, got)
+		}
 	}
 	// Evidence is still required with all.
 	noEv := rcand('C', 1)
