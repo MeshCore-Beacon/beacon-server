@@ -58,6 +58,11 @@ jobs:
       - name: Test
         run: go test ./...
 
+      - name: Verify empty-region list reads against legacy IATA data
+        env:
+          BEACON_TEST_POSTGRES_DSN: postgres://postgres:backup-ci-only@127.0.0.1:5432/postgres?sslmode=disable
+        run: go test ./db -run '^TestEmptyRegionListFiltersPostgres$' -count=1 -v
+
       - name: Verify scope refresh concurrency
         run: go test -race ./internal/meshmapper ./internal/scopestore && go test -race ./db -run '^TestChannelIDCache'
 

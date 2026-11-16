@@ -58,7 +58,7 @@ func getStatsSeries(reader api.Reader, maxWindow time.Duration) http.HandlerFunc
 			}
 			iatas = append(iatas, regionIATAs...)
 			if len(iatas) == 0 {
-				iatas = []string{""} // an empty region matches nothing, not everything
+				iatas = []string{emptyRegionIATA} // an empty region matches nothing, not everything
 			}
 		}
 		series, err := reader.GetStatsSeries(ctx, since, until, iatas)

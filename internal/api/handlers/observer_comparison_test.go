@@ -56,7 +56,7 @@ func TestObserverComparisonHTTP(t *testing.T) {
 		{"global", "", nil, 200, nil},
 		{"IATA", "&iatas=yvr,yyj", nil, 200, []string{"YVR", "YYJ"}},
 		{"region", "&region=coast", nil, 200, []string{"YVR"}},
-		{"empty region", "&region=empty", nil, 200, []string{""}},
+		{"empty region", "&region=empty", nil, 200, []string{emptyRegionIATA}},
 		{"unknown observer", "", pgx.ErrNoRows, 404, nil},
 		{"timeout", "", context.DeadlineExceeded, 503, nil},
 		{"database failure", "", errors.New("private database detail"), 500, nil},

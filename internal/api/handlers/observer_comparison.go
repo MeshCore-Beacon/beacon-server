@@ -69,7 +69,7 @@ func getObserverComparison(reader api.Reader) http.HandlerFunc {
 			iatas = append(iatas, regionIATAs...)
 			if len(iatas) == 0 {
 				// An empty selected region must not silently become a global query.
-				iatas = []string{""}
+				iatas = []string{emptyRegionIATA}
 			}
 		}
 		comparison, err := reader.GetObserverComparison(ctx, a, b, time.UnixMilli(since), time.UnixMilli(until), iatas)

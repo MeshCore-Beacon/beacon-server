@@ -94,7 +94,7 @@ func listObservers(reader api.Reader) http.HandlerFunc {
 				respondRegionError(w, err)
 				return
 			}
-			iatas = append(iatas, regionIATAs...)
+			iatas = appendRegionIATAs(iatas, regionIATAs)
 		}
 		observers, err := reader.ListObservers(r.Context(), iatas, observerType, broker, status, name, scope, cursor, pageCursor, limit)
 		if err != nil {

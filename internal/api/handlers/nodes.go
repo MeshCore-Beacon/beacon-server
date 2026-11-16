@@ -102,7 +102,7 @@ func listLatestNodeReadings(reader api.Reader) http.HandlerFunc {
 				respondRegionError(w, err)
 				return
 			}
-			iatas = append(iatas, regionIATAs...)
+			iatas = appendRegionIATAs(iatas, regionIATAs)
 		}
 		now := time.Now()
 		items, err := reader.ListLatestNodeReadings(r.Context(), iatas, now.Add(-latestReadingsWindow))
@@ -219,7 +219,7 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 				respondRegionError(w, err)
 				return
 			}
-			iatas = append(iatas, regionIATAs...)
+			iatas = appendRegionIATAs(iatas, regionIATAs)
 		}
 		name := r.URL.Query().Get("name")
 		scope := r.URL.Query().Get("scope")

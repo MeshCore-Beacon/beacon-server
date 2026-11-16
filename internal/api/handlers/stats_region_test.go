@@ -70,7 +70,7 @@ func TestStatsEmptyRegionMatchesNothing(t *testing.T) {
 			region string
 			want   []string
 		}{
-			{"empty", []string{""}},
+			{"empty", []string{emptyRegionIATA}},
 			{"west", []string{"YVR"}},
 		} {
 			var got []string

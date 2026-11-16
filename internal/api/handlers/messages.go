@@ -154,7 +154,7 @@ func listMessagesBackfill(reader api.Reader) http.HandlerFunc {
 				respondRegionError(w, err)
 				return
 			}
-			iatas = append(iatas, regionIATAs...)
+			iatas = appendRegionIATAs(iatas, regionIATAs)
 		}
 		scope := r.URL.Query().Get("scope")
 		messages, err := reader.ListMessagesAfterID(r.Context(), afterID, iatas, scope, limit)
