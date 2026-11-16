@@ -261,6 +261,11 @@ scopes:
   - name: "#west"
     region: western-canada
 
+# Units clients show. Any other value stops startup.
+display:
+  temperature_unit: c   # c or f
+  distance_unit: metric # metric or imperial
+
 telemetry:
   retention: 744h   # 31 days
   resolution: 1h    # store one snapshot per observer per hour
