@@ -35,7 +35,7 @@ func readUserAtlas(ctx context.Context, q sqlc.Querier, userID uuid.UUID) (api.A
 		if r.Kind == nil { // the header row of an Atlas with no pins
 			continue
 		}
-		p := api.StoredPin{Kind: *r.Kind, Key: r.PublicKey, Name: *r.Name, Tiles: r.Tiles}
+		p := api.StoredPin{Kind: *r.Kind, Key: r.PublicKey, Name: *r.Name, Tiles: r.Tiles, TelemetryTiles: r.TelemetryTiles}
 		if r.View != nil {
 			p.View = *r.View
 		}
@@ -97,7 +97,7 @@ func (s *Store) ReplaceUserAtlas(ctx context.Context, userID uuid.UUID, base int
 			return err
 		}
 		for i, p := range pins {
-			arg := sqlc.InsertUserAtlasPinParams{UserID: userID, Position: int16(i), Kind: p.Kind, PublicKey: p.Key, Name: p.Name, Tiles: p.Tiles}
+			arg := sqlc.InsertUserAtlasPinParams{UserID: userID, Position: int16(i), Kind: p.Kind, PublicKey: p.Key, Name: p.Name, Tiles: p.Tiles, TelemetryTiles: p.TelemetryTiles}
 			if p.View != "" {
 				v := p.View
 				arg.View = &v
