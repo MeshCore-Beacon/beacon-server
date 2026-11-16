@@ -44,7 +44,7 @@ func TestUserAtlasPostgres(t *testing.T) {
 	tiles := []string{"airtime", "battery", "types", "noise"}
 	pins := []api.StoredPin{
 		{Kind: "observer", Key: atlasKey(2), Name: "north", Tiles: tiles},
-		{Kind: "node", Key: atlasKey(1), Name: "hill", Tiles: tiles, View: "heard"},
+		{Kind: "node", Key: atlasKey(1), Name: "hill", Tiles: tiles, View: "telemetry", TelemetryTiles: []string{"battery", "noise", "uptime", "packets"}},
 		{Kind: "node", Key: atlasKey(3), Name: "unknown"},
 	}
 	doc, ok, err := s.ReplaceUserAtlas(ctx, u.ID, 0, "3d", pins)
@@ -58,10 +58,10 @@ func TestUserAtlasPostgres(t *testing.T) {
 	if a.Pins[0].Kind != "observer" || a.Pins[0].ObserverID == nil || *a.Pins[0].ObserverID != obs2.String() || len(a.Pins[0].Tiles) != 4 {
 		t.Errorf("observer pin: %+v", a.Pins[0])
 	}
-	if p := a.Pins[1]; p.ID == nil || *p.ID != nodeID.String() || p.ObserverID == nil || *p.ObserverID != obsID.String() || p.View != "heard" {
+	if p := a.Pins[1]; p.ID == nil || *p.ID != nodeID.String() || p.ObserverID == nil || *p.ObserverID != obsID.String() || p.View != "telemetry" || strings.Join(p.TelemetryTiles, ",") != "battery,noise,uptime,packets" || strings.Join(p.Tiles, ",") != strings.Join(tiles, ",") {
 		t.Errorf("node that is also an observer: %+v", p)
 	}
-	if p := a.Pins[2]; p.ID != nil || p.ObserverID != nil || p.Tiles != nil {
+	if p := a.Pins[2]; p.ID != nil || p.ObserverID != nil || p.Tiles != nil || p.TelemetryTiles != nil {
 		t.Errorf("unknown node: %+v", p)
 	}
 
@@ -199,5 +199,25 @@ func TestUserAtlasReadIsOneSnapshotPostgres(t *testing.T) {
 	}
 	if got, want := r.a.Pins[0].Name, map[int64]string{1: "old", 2: "new"}[r.a.Revision]; got != want || (r.a.Revision == 1) != (r.a.Range == "24h") {
 		t.Fatalf("revision %d range %s with pin %q", r.a.Revision, r.a.Range, got)
+	}
+}
+
+// A pin stored before the Telemetry view existed reads back unchanged, and the new view value is accepted.
+func TestUserAtlasLegacyPinPostgres(t *testing.T) {
+	ctx, pool, s := userStore(t)
+	u := newUser(t, ctx, s, "legacy")
+	if _, err := pool.Exec(ctx, `INSERT INTO user_atlas (user_id, revision) VALUES ($1, 1)`, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO user_atlas_pins (user_id, position, kind, public_key, name, tiles, view)
+		VALUES ($1, 0, 'node', $2, 'old', ARRAY['airtime','battery','types','noise'], 'observer')`, u.ID, atlasKey(1)); err != nil {
+		t.Fatal(err)
+	}
+	a, err := s.UserAtlas(ctx, u.ID)
+	if err != nil || len(a.Pins) != 1 || a.Pins[0].View != "observer" || a.Pins[0].TelemetryTiles != nil || len(a.Pins[0].Tiles) != 4 {
+		t.Fatalf("legacy pin: %+v %v", a, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE user_atlas_pins SET view = 'bogus' WHERE user_id = $1`, u.ID); err == nil {
+		t.Error("an unknown view is still refused")
 	}
 }
