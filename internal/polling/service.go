@@ -298,7 +298,7 @@ func (s *Service) Owners(ctx context.Context, c Caller) (OwnersAnswer, error) {
 	return ans, nil
 }
 
-// requestsNeedApproval is true unless the operator set polling.request_observers to all.
+// requestsNeedApproval is true unless polling.request_observers resolved to all; an unresolved or unknown value needs approval.
 func (s *Service) requestsNeedApproval() bool {
 	return s.cfg.Authority == config.PollingAuthorityApproved || s.cfg.RequestObservers != config.RequestObserversAll
 }
