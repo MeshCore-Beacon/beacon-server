@@ -776,13 +776,14 @@ type UserAtla struct {
 }
 
 type UserAtlasPin struct {
-	UserID    uuid.UUID `json:"user_id"`
-	Position  int16     `json:"position"`
-	Kind      string    `json:"kind"`
-	PublicKey []byte    `json:"public_key"`
-	Name      string    `json:"name"`
-	Tiles     []string  `json:"tiles"`
-	View      *string   `json:"view"`
+	UserID         uuid.UUID `json:"user_id"`
+	Position       int16     `json:"position"`
+	Kind           string    `json:"kind"`
+	PublicKey      []byte    `json:"public_key"`
+	Name           string    `json:"name"`
+	Tiles          []string  `json:"tiles"`
+	View           *string   `json:"view"`
+	TelemetryTiles []string  `json:"telemetry_tiles"`
 }
 
 type UserDevice struct {
