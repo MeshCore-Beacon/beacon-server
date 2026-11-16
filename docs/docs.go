@@ -8360,6 +8360,13 @@ const docTemplate = `{
         "github_com_MeshCore-Beacon_beacon-server_internal_api.Info": {
             "type": "object",
             "properties": {
+                "buildRevision": {
+                    "type": "string"
+                },
+                "buildVersion": {
+                    "description": "Optional artifact identity; the API compatibility version above is separate.",
+                    "type": "string"
+                },
                 "features": {
                     "description": "Features tells clients which optional parts of the API this server offers.",
                     "allOf": [

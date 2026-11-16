@@ -53,6 +53,7 @@ import (
 // version is set at build time via -ldflags "-X main.version=vX.Y.Z".
 // Falls back to "dev" when built without the flag.
 var version = "dev"
+var revision = ""
 
 //	@title			MeshCore Beacon API
 //	@version		2.2.0
@@ -735,6 +736,8 @@ func main() {
 		MinAppVersion: api.AppFloor(cfg.Mobile.MinAppVersion, cfg.WebSocket.RequireOrigin),
 		MinWebVersion: api.HigherVersion(api.MinWebVersion, cfg.Web.MinWebVersion),
 		ServerVersion: docs.SwaggerInfo.Version,
+		BuildVersion:  version,
+		BuildRevision: revision,
 		AdminRoutes: map[string]http.Handler{
 			"/accounts": handlers.AccountsRouter(maintStore),
 			"/backup":   handlers.BackupRouter(backupOpts, ctx),

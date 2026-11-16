@@ -33,6 +33,9 @@ type Info struct {
 	// MinWebVersion is the oldest allowed Beacon Web version (X.Y.Z); null means no requirement.
 	MinWebVersion *string `json:"minWebVersion" example:"2.0.3"`
 	ServerVersion string  `json:"serverVersion" example:"2.0.2"`
+	// Optional artifact identity; the API compatibility version above is separate.
+	BuildVersion  string `json:"buildVersion,omitempty"`
+	BuildRevision string `json:"buildRevision,omitempty"`
 	// Features tells clients which optional parts of the API this server offers.
 	Features InfoFeatures `json:"features"`
 }
