@@ -4591,6 +4591,69 @@ const docTemplate = `{
                 }
             }
         },
+        "/nodes/telemetry/latest": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Nodes"
+                ],
+                "summary": "Latest battery and temperature of every polled node",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by single IATA code (case-insensitive)",
+                        "name": "iata",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by multiple IATA codes, comma-separated e.g. YVR,YYJ",
+                        "name": "iatas",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by region ID, expands to member IATAs",
+                        "name": "regionId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by region slug, expands to member IATAs",
+                        "name": "region",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeLatestReadings"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    },
+                    "503": {
+                        "description": "The read took too long: retry after Retry-After seconds",
+                        "schema": {
+                            "$ref": "#/definitions/internal_api_handlers.APIError"
+                        }
+                    }
+                }
+            }
+        },
         "/nodes/{nodeId}": {
             "get": {
                 "produces": [
@@ -8405,6 +8468,14 @@ const docTemplate = `{
         "github_com_MeshCore-Beacon_beacon-server_internal_api.Info": {
             "type": "object",
             "properties": {
+                "display": {
+                    "description": "Display holds the instance-wide units clients show.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.InfoDisplay"
+                        }
+                    ]
+                },
                 "features": {
                     "description": "Features tells clients which optional parts of the API this server offers.",
                     "allOf": [
@@ -8429,6 +8500,27 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.InfoDisplay": {
+            "type": "object",
+            "properties": {
+                "distanceUnit": {
+                    "type": "string",
+                    "enum": [
+                        "metric",
+                        "imperial"
+                    ],
+                    "example": "metric"
+                },
+                "temperatureUnit": {
+                    "type": "string",
+                    "enum": [
+                        "c",
+                        "f"
+                    ],
+                    "example": "c"
+                }
+            }
+        },
         "github_com_MeshCore-Beacon_beacon-server_internal_api.InfoFeatures": {
             "type": "object",
             "properties": {
@@ -8450,6 +8542,11 @@ const docTemplate = `{
                 },
                 "atlasTelemetry": {
                     "description": "AtlasTelemetry is true when the server accepts the telemetry view and telemetryTiles on Atlas pins and the 72h\nnode telemetry range. Always true on this version.",
+                    "type": "boolean",
+                    "example": true
+                },
+                "mapTelemetry": {
+                    "description": "MapTelemetry is true when the server returns recent telemetry readings for map labels. Always true on this version.",
                     "type": "boolean",
                     "example": true
                 },
@@ -8860,6 +8957,39 @@ const docTemplate = `{
                 "lastHeard": {
                     "description": "epoch ms",
                     "type": "integer"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.NodeLatestReading": {
+            "type": "object",
+            "properties": {
+                "batteryMv": {
+                    "type": "integer"
+                },
+                "nodeId": {
+                    "type": "string"
+                },
+                "sampledAt": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "temperatureC": {
+                    "type": "number"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.NodeLatestReadings": {
+            "type": "object",
+            "properties": {
+                "generatedAt": {
+                    "description": "epoch ms",
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.NodeLatestReading"
+                    }
                 }
             }
         },
