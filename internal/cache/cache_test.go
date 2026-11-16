@@ -211,6 +211,9 @@ func (s *stubReader) ListNodes(_ context.Context, _ int16, _ []string, _, _ *boo
 	return api.NodePage{}, nil
 }
 
+func (s *stubReader) ListLatestNodeReadings(context.Context, []string, time.Time) ([]api.NodeLatestReading, error) {
+	return nil, nil
+}
 func (s *stubReader) ListNodesSorted(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ api.NodeSort, _ *api.NodeSortCursor, _ int32, _ bool) (api.NodePage, error) {
 	return api.NodePage{}, nil
 }
