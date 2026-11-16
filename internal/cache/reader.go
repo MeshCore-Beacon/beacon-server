@@ -16,39 +16,43 @@ import (
 )
 
 const (
-	keyIATAs                   = "beacon:iatas"
-	keyIATAPrefix              = "beacon:iata:"
-	keyIATABorderPrefix        = "beacon:iata:border:"
-	keyRegions                 = "beacon:regions:detail" // renamed when items gained detail, so no old summary list is read
-	keyRegionPrefix            = "beacon:region:"
-	keyRegionSlugPrefix        = "beacon:region:slug:"
-	keyScopeNames              = "beacon:scope:names"
-	keyScopeStats              = "beacon:scope:stats"
-	keyScopeByNamePrefix       = "beacon:scope:name:"
-	keyStatsOverviewPrefix     = "beacon:stats:overview:"
-	keyStatsObservationsPrefix = "beacon:stats:observations:"
-	keySignalStatsPrefix       = "beacon:stats:signal:"
-	keyStatsSeriesPrefix       = "beacon:stats:series:"
-	keyPathStatsPrefix         = "beacon:stats:paths:"
-	keyStatsBreakdownPrefix    = "beacon:stats:breakdown:"
-	keyStatsTopNodesPrefix     = "beacon:stats:top-nodes:"
-	keyStatsTopObsPrefix       = "beacon:stats:top-observers:"
-	keyStatsTopAdvPrefix       = "beacon:stats:top-advertisers:"
-	keyStatsClockDriftPrefix   = "beacon:stats:clock-drift:"
-	keyStatsTopTalkersPrefix   = "beacon:stats:top-talkers:"
-	keyStatsNodeTypes          = "beacon:stats:node-types:"
-	keyRadioPresetsPrefix      = "beacon:radio-presets:"
-	keyNodePrefix              = "beacon:node:"
-	keyNodeNeighborsPrefix     = "beacon:node:neighbors:"
-	keyNodeActivityPrefix      = "beacon:node:activity:"
-	keyNodesByIDsPrefix        = "beacon:nodes:ids:"
-	keyObserverPrefix          = "beacon:observer:"
-	keyObserverScopesPrefix    = "beacon:observer:scopes:"
-	keyObserverActivityPrefix  = "beacon:observer:activity:"
+	keyIATAs                    = "beacon:iatas"
+	keyIATAPrefix               = "beacon:iata:"
+	keyIATABorderPrefix         = "beacon:iata:border:"
+	keyRegions                  = "beacon:regions:detail" // renamed when items gained detail, so no old summary list is read
+	keyRegionPrefix             = "beacon:region:"
+	keyRegionSlugPrefix         = "beacon:region:slug:"
+	keyScopeNames               = "beacon:scope:names"
+	keyScopeStats               = "beacon:scope:stats"
+	keyScopeByNamePrefix        = "beacon:scope:name:"
+	keyStatsOverviewPrefix      = "beacon:stats:overview:"
+	keyStatsObservationsPrefix  = "beacon:stats:observations:"
+	keySignalStatsPrefix        = "beacon:stats:signal:"
+	keyStatsSeriesPrefix        = "beacon:stats:series:"
+	keyPathStatsPrefix          = "beacon:stats:paths:"
+	keyStatsBreakdownPrefix     = "beacon:stats:breakdown:"
+	keyStatsTopNodesPrefix      = "beacon:stats:top-nodes:"
+	keyStatsTopObsPrefix        = "beacon:stats:top-observers:"
+	keyStatsTopAdvPrefix        = "beacon:stats:top-advertisers:"
+	keyStatsClockDriftPrefix    = "beacon:stats:clock-drift:"
+	keyStatsTopTalkersPrefix    = "beacon:stats:top-talkers:"
+	keyStatsNodeTypes           = "beacon:stats:node-types:"
+	keyRadioPresetsPrefix       = "beacon:radio-presets:"
+	keyNodePrefix               = "beacon:node:"
+	keyNodeNeighborsPrefix      = "beacon:node:neighbors:"
+	keyNodeActivityPrefix       = "beacon:node:activity:"
+	keyNodeLatestReadingsPrefix = "beacon:nodes:latest-readings:"
+	keyNodesByIDsPrefix         = "beacon:nodes:ids:"
+	keyObserverPrefix           = "beacon:observer:"
+	keyObserverScopesPrefix     = "beacon:observer:scopes:"
+	keyObserverActivityPrefix   = "beacon:observer:activity:"
 )
 
 // observerActivityTTL is deliberately short: activity is a live chart, not reference data.
 const observerActivityTTL = 60 * time.Second
+
+// latestReadingsTTL keeps the map labels fresh without a query per request.
+const latestReadingsTTL = 60 * time.Second
 
 // CachedReader wraps an api.Reader with a Redis caching layer.
 // It implements api.Reader and is a drop-in replacement for db.Store
@@ -341,6 +345,16 @@ func (cr *CachedReader) ListMessagesAfterID(ctx context.Context, afterID int64, 
 // ListNodes implements [api.Reader].
 func (cr *CachedReader) ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
 	return cr.inner.ListNodes(ctx, nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, cursor, pageCursor, limit, includeNeighbors)
+}
+
+// ListLatestNodeReadings implements [api.Reader]. The key leaves out since, which the handler derives from the clock.
+func (cr *CachedReader) ListLatestNodeReadings(ctx context.Context, iatas []string, since time.Time) ([]api.NodeLatestReading, error) {
+	sorted := append([]string(nil), iatas...)
+	sort.Strings(sorted)
+	key := keyNodeLatestReadingsPrefix + strings.Join(sorted, ",")
+	return getOrSet(ctx, cr.c, key, latestReadingsTTL, func(ctx context.Context) ([]api.NodeLatestReading, error) {
+		return cr.inner.ListLatestNodeReadings(ctx, iatas, since)
+	})
 }
 
 // ListNodesSorted implements [api.Reader].
