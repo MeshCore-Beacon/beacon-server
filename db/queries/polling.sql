@@ -417,10 +417,11 @@ SELECT max(sampled_at)::timestamptz AS sampled_at FROM repeater_readings WHERE t
 
 -- name: LatestNodeReadings :many
 -- Newest trusted battery and temperature per polled node since a time, driven by polled targets, not all nodes.
+-- The received_at bound lets the BRIN index prune the history scan for readings of unassigned targets.
 WITH targets AS (
   SELECT target_public_key FROM polling_assignments
   UNION
-  SELECT DISTINCT target_public_key FROM repeater_readings WHERE trusted AND sampled_at >= @since::timestamptz
+  SELECT DISTINCT target_public_key FROM repeater_readings WHERE trusted AND sampled_at >= @since::timestamptz AND received_at >= @since::timestamptz
 )
 SELECT n.id AS node_id, b.battery_mv, t.temperature_c,
        GREATEST(b.sampled_at, t.sampled_at)::timestamptz AS sampled_at

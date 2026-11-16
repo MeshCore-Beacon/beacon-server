@@ -394,6 +394,7 @@ type Querier interface {
 	InsertTelemetryRequest(ctx context.Context, arg InsertTelemetryRequestParams) error
 	InsertUserAtlasPin(ctx context.Context, arg InsertUserAtlasPinParams) error
 	// Newest trusted battery and temperature per polled node since a time, driven by polled targets, not all nodes.
+	// The received_at bound lets the BRIN index prune the history scan for readings of unassigned targets.
 	LatestNodeReadings(ctx context.Context, arg LatestNodeReadingsParams) ([]LatestNodeReadingsRow, error)
 	// The newest status reading before since: the baseline for the first counter increments in range.
 	LatestNodeStatusReadingBefore(ctx context.Context, arg LatestNodeStatusReadingBeforeParams) ([]LatestNodeStatusReadingBeforeRow, error)

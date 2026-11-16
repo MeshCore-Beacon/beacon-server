@@ -10,6 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/MeshCore-Beacon/beacon-server/internal/api"
 )
 
 func latestNode(t *testing.T, ctx context.Context, pool *pgxpool.Pool, key byte, iata string) uuid.UUID {
@@ -42,6 +44,8 @@ func TestListLatestNodeReadingsPostgres(t *testing.T) {
 	b := latestNode(t, ctx, pool, 0xB, "YVR")
 	c := latestNode(t, ctx, pool, 0xC, "YYZ")
 	d := latestNode(t, ctx, pool, 0xD, "YVR")
+	e := latestNode(t, ctx, pool, 0xE, "YVR")
+	f := latestNode(t, ctx, pool, 0xF, "YVR")
 	bat := func(v int32) *int32 { return &v }
 	tmp := func(v float32) *float32 { return &v }
 
@@ -55,17 +59,35 @@ func TestListLatestNodeReadingsPostgres(t *testing.T) {
 	latestReading(t, ctx, pool, 0xC, now.Add(-10*time.Minute), 1, true, bat(3900), nil)
 	// D: trusted readings that carry neither value.
 	latestReading(t, ctx, pool, 0xD, now.Add(-10*time.Minute), 1, true, nil, nil)
-	_ = b
+	// E: recent trusted battery, temperature older than the window: battery only.
+	latestReading(t, ctx, pool, 0xE, now.Add(-time.Hour), 1, true, bat(3800), nil)
+	latestReading(t, ctx, pool, 0xE, now.Add(-9*24*time.Hour), 2, true, nil, tmp(-4))
+	// F: recent trusted temperature, battery older than the window: temperature only.
+	latestReading(t, ctx, pool, 0xF, now.Add(-time.Hour), 1, true, nil, tmp(7.5))
+	latestReading(t, ctx, pool, 0xF, now.Add(-9*24*time.Hour), 2, true, bat(3600), nil)
 
 	since := now.Add(-7 * 24 * time.Hour)
 	got, err := s.ListLatestNodeReadings(ctx, []string{"YVR"}, since)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].NodeID != a {
+	byID := map[uuid.UUID]api.NodeLatestReading{}
+	for _, r := range got {
+		byID[r.NodeID] = r
+	}
+	if len(got) != 3 || byID[a].NodeID != a || byID[e].NodeID != e || byID[f].NodeID != f {
 		t.Fatalf("YVR items: %+v", got)
 	}
-	r := got[0]
+	if _, ok := byID[b]; ok {
+		t.Errorf("node B outside the window was returned")
+	}
+	if r := byID[e]; r.BatteryMV == nil || *r.BatteryMV != 3800 || r.TemperatureC != nil {
+		t.Errorf("E should have battery only: %+v", r)
+	}
+	if r := byID[f]; r.TemperatureC == nil || *r.TemperatureC != 7.5 || r.BatteryMV != nil {
+		t.Errorf("F should have temperature only: %+v", r)
+	}
+	r := byID[a]
 	if r.BatteryMV == nil || *r.BatteryMV != 4080 || r.TemperatureC == nil || *r.TemperatureC != 1.5 {
 		t.Errorf("values: %+v", r)
 	}
@@ -81,7 +103,7 @@ func TestListLatestNodeReadingsPostgres(t *testing.T) {
 	for _, r := range got {
 		ids[r.NodeID] = true
 	}
-	if len(got) != 2 || !ids[a] || !ids[c] || ids[d] {
+	if len(got) != 4 || !ids[a] || !ids[c] || !ids[e] || !ids[f] || ids[d] || ids[b] {
 		t.Fatalf("all items: %+v", got)
 	}
 }

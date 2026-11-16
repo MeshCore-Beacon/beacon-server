@@ -14,9 +14,8 @@ type EmailNotice struct {
 	Value              int64
 }
 
-// ComposeEmail builds one message for everything one evaluation pass produced for a user: the subject counts the
-// alerts, each alert is one plain line, and the last line links to the Atlas. Names are sanitised again here, so a
-// name can never add a header or a line. tempUnit is the instance temperature unit ("f" or "c").
+// ComposeEmail builds one message per user per evaluation pass: the subject counts the alerts, each is one plain
+// line, and the last links to the Atlas. Names are sanitised again here. tempUnit is the instance unit ("f" or "c").
 func ComposeEmail(name string, notices []EmailNotice, atlasURL, tempUnit string) (subject, text string) {
 	n := len(notices)
 	if n == 1 {

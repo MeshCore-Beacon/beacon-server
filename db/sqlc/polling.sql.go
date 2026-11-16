@@ -391,7 +391,7 @@ const latestNodeReadings = `-- name: LatestNodeReadings :many
 WITH targets AS (
   SELECT target_public_key FROM polling_assignments
   UNION
-  SELECT DISTINCT target_public_key FROM repeater_readings WHERE trusted AND sampled_at >= $1::timestamptz
+  SELECT DISTINCT target_public_key FROM repeater_readings WHERE trusted AND sampled_at >= $1::timestamptz AND received_at >= $1::timestamptz
 )
 SELECT n.id AS node_id, b.battery_mv, t.temperature_c,
        GREATEST(b.sampled_at, t.sampled_at)::timestamptz AS sampled_at
@@ -425,6 +425,7 @@ type LatestNodeReadingsRow struct {
 }
 
 // Newest trusted battery and temperature per polled node since a time, driven by polled targets, not all nodes.
+// The received_at bound lets the BRIN index prune the history scan for readings of unassigned targets.
 func (q *Queries) LatestNodeReadings(ctx context.Context, arg LatestNodeReadingsParams) ([]LatestNodeReadingsRow, error) {
 	rows, err := q.db.Query(ctx, latestNodeReadings, arg.Since, arg.Iatas)
 	if err != nil {
