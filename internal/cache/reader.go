@@ -41,7 +41,7 @@ const (
 	keyNodePrefix               = "beacon:node:"
 	keyNodeNeighborsPrefix      = "beacon:node:neighbors:"
 	keyNodeActivityPrefix       = "beacon:node:activity:"
-	keyNodeLatestReadingsPrefix = "beacon:nodes:latest-readings:"
+	keyNodeLatestReadingsPrefix = "beacon:nodes:latest-readings-v2:"
 	keyNodesByIDsPrefix         = "beacon:nodes:ids:"
 	keyObserverPrefix           = "beacon:observer:"
 	keyObserverScopesPrefix     = "beacon:observer:scopes:"
@@ -349,9 +349,11 @@ func (cr *CachedReader) ListNodes(ctx context.Context, nodeType int16, iatas []s
 
 // ListLatestNodeReadings implements [api.Reader]. The key leaves out since, which the handler derives from the clock.
 func (cr *CachedReader) ListLatestNodeReadings(ctx context.Context, iatas []string, since time.Time) ([]api.NodeLatestReading, error) {
-	sorted := append([]string(nil), iatas...)
+	sorted := append([]string{}, iatas...)
 	sort.Strings(sorted)
-	key := keyNodeLatestReadingsPrefix + strings.Join(sorted, ",")
+	// [] is global; [""] matches nothing. JSON also preserves literal comma boundaries.
+	segment, _ := json.Marshal(sorted)
+	key := keyNodeLatestReadingsPrefix + string(segment)
 	return getOrSet(ctx, cr.c, key, latestReadingsTTL, func(ctx context.Context) ([]api.NodeLatestReading, error) {
 		return cr.inner.ListLatestNodeReadings(ctx, iatas, since)
 	})
