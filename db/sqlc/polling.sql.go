@@ -387,6 +387,70 @@ func (q *Queries) InsertRepeaterReading(ctx context.Context, arg InsertRepeaterR
 	return result.RowsAffected(), nil
 }
 
+const latestNodeReadings = `-- name: LatestNodeReadings :many
+WITH targets AS (
+  SELECT target_public_key FROM polling_assignments
+  UNION
+  SELECT DISTINCT target_public_key FROM repeater_readings WHERE trusted AND sampled_at >= $1::timestamptz AND received_at >= $1::timestamptz
+)
+SELECT n.id AS node_id, b.battery_mv, t.temperature_c,
+       GREATEST(b.sampled_at, t.sampled_at)::timestamptz AS sampled_at
+FROM targets tg
+JOIN nodes n ON n.public_key = tg.target_public_key
+LEFT JOIN LATERAL (
+  SELECT r.battery_mv, r.sampled_at FROM repeater_readings r
+  WHERE r.target_public_key = n.public_key AND r.trusted AND r.battery_mv IS NOT NULL AND r.sampled_at >= $1::timestamptz
+  ORDER BY r.sampled_at DESC, r.id DESC LIMIT 1
+) b ON true
+LEFT JOIN LATERAL (
+  SELECT r.temperature_c, r.sampled_at FROM repeater_readings r
+  WHERE r.target_public_key = n.public_key AND r.trusted AND r.temperature_c IS NOT NULL AND r.sampled_at >= $1::timestamptz
+  ORDER BY r.sampled_at DESC, r.id DESC LIMIT 1
+) t ON true
+WHERE (b.sampled_at IS NOT NULL OR t.sampled_at IS NOT NULL)
+  AND (COALESCE(cardinality($2::bpchar[]), 0) = 0 OR n.id IN (SELECT node_id FROM node_iatas WHERE iata = ANY($2::bpchar[])))
+ORDER BY n.id
+`
+
+type LatestNodeReadingsParams struct {
+	Since pgtype.Timestamptz `json:"since"`
+	Iatas []string           `json:"iatas"`
+}
+
+type LatestNodeReadingsRow struct {
+	NodeID       uuid.UUID          `json:"node_id"`
+	BatteryMv    *int32             `json:"battery_mv"`
+	TemperatureC *float32           `json:"temperature_c"`
+	SampledAt    pgtype.Timestamptz `json:"sampled_at"`
+}
+
+// Newest trusted battery and temperature per polled node since a time, driven by polled targets, not all nodes.
+// The received_at bound lets the BRIN index prune the history scan for readings of unassigned targets.
+func (q *Queries) LatestNodeReadings(ctx context.Context, arg LatestNodeReadingsParams) ([]LatestNodeReadingsRow, error) {
+	rows, err := q.db.Query(ctx, latestNodeReadings, arg.Since, arg.Iatas)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LatestNodeReadingsRow{}
+	for rows.Next() {
+		var i LatestNodeReadingsRow
+		if err := rows.Scan(
+			&i.NodeID,
+			&i.BatteryMv,
+			&i.TemperatureC,
+			&i.SampledAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const latestNodeStatusReadingBefore = `-- name: LatestNodeStatusReadingBefore :many
 SELECT sampled_at, method, trusted, battery_mv, temperature_c, noise_floor, last_rssi, last_snr, uptime_secs, tx_queue,
        tx_air_secs, rx_air_secs, packets_recv, packets_sent, recv_errors

@@ -786,3 +786,16 @@ func (s *Store) GetNodePolling(ctx context.Context, nodeID uuid.UUID) (*api.Node
 	}
 	return out, nil
 }
+
+// ListLatestNodeReadings returns each polled node's newest trusted battery and temperature since the given time.
+func (s *Store) ListLatestNodeReadings(ctx context.Context, iatas []string, since time.Time) ([]api.NodeLatestReading, error) {
+	rows, err := s.q.LatestNodeReadings(ctx, sqlc.LatestNodeReadingsParams{Since: ts(since), Iatas: iatas})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]api.NodeLatestReading, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, api.NodeLatestReading{NodeID: r.NodeID, SampledAt: r.SampledAt.Time.UnixMilli(), BatteryMV: r.BatteryMv, TemperatureC: r.TemperatureC})
+	}
+	return out, nil
+}
