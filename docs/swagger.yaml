@@ -372,6 +372,21 @@ definitions:
       publicKey:
         example: 0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a
         type: string
+      telemetryTiles:
+        description: TelemetryTiles are the four tiles of a node pin's Telemetry view;
+          absent means the client's default.
+        items:
+          enum:
+          - battery
+          - noise
+          - uptime
+          - airtime
+          - temperature
+          - packets
+          - signal
+          - errors
+          type: string
+        type: array
       tiles:
         items:
           type: string
@@ -380,6 +395,7 @@ definitions:
         enum:
         - heard
         - observer
+        - telemetry
         type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.AtlasPinInput:
@@ -397,11 +413,22 @@ definitions:
         type: string
       publicKey:
         type: string
+      telemetryTiles:
+        description: |-
+          TelemetryTiles is four distinct ids from battery, noise, uptime, airtime, temperature, packets, signal, errors.
+          Node pins only.
+        items:
+          type: string
+        type: array
       tiles:
         items:
           type: string
         type: array
       view:
+        enum:
+        - heard
+        - observer
+        - telemetry
         type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.ChangeEmailRequest:
@@ -674,6 +701,12 @@ definitions:
         type: string
       alerts:
         example: false
+        type: boolean
+      atlasTelemetry:
+        description: |-
+          AtlasTelemetry is true when the server accepts the telemetry view and telemetryTiles on Atlas pins and the 72h
+          node telemetry range. Always true on this version.
+        example: true
         type: boolean
       polling:
         example: true
@@ -2549,6 +2582,18 @@ definitions:
         type: string
       observerId:
         type: string
+      state:
+        description: |-
+          State is what the poller's latest live claim says about this repeater: pending, ok, no_reply, login_failed,
+          admin_stop or not_direct, any other value the firmware sends (lower case, at most 32 characters), or
+          not_claimed when the claim does not list the repeater or the observer has no live claim.
+        example: not_direct
+        type: string
+      stateAt:
+        description: StateAt is epoch ms when that claim was received, null when the
+          observer has no live claim.
+        example: 1794703600000
+        type: integer
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.TokenRequest:
     properties:
@@ -6145,16 +6190,17 @@ paths:
         name: nodeId
         required: true
         type: string
-      - description: 'Window: 24h, 168h (default) or 720h'
+      - description: 'Window: 24h, 72h, 168h (default) or 720h'
         enum:
         - 24h
+        - 72h
         - 168h
         - 720h
         in: query
         name: range
         type: string
-      - description: 'Bucket size: 1h, 6h or 24h. Defaults to 1h for 24h, 6h for 168h,
-          24h for 720h'
+      - description: 'Bucket size: 1h, 6h or 24h. Defaults to 1h for 24h and 72h,
+          6h for 168h, 24h for 720h'
         enum:
         - 1h
         - 6h

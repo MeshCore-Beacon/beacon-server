@@ -28,6 +28,11 @@ var atlasTiles = map[string]bool{
 	"snr": true, "rssi": true, "noise": true, "queue": true, "errors": true,
 }
 
+var atlasTelemetryTiles = map[string]bool{
+	"battery": true, "noise": true, "uptime": true, "airtime": true,
+	"temperature": true, "packets": true, "signal": true, "errors": true,
+}
+
 // AtlasPin is one pin as a client reads it. A node pin carries publicKey, id and observerId; an observer pin
 // carries observerPublicKey and observerId (null when the observer row is gone).
 type AtlasPin struct {
@@ -38,7 +43,9 @@ type AtlasPin struct {
 	ObserverID        *string  `json:"observerId" extensions:"x-nullable"`
 	Name              string   `json:"name"`
 	Tiles             []string `json:"tiles,omitempty"`
-	View              string   `json:"view,omitempty" enums:"heard,observer"`
+	View              string   `json:"view,omitempty" enums:"heard,observer,telemetry"`
+	// TelemetryTiles are the four tiles of a node pin's Telemetry view; absent means the client's default.
+	TelemetryTiles []string `json:"telemetryTiles,omitempty" enums:"battery,noise,uptime,airtime,temperature,packets,signal,errors"`
 }
 
 // MarshalJSON leaves out the fields that do not belong to the pin's kind.
@@ -48,6 +55,9 @@ func (p AtlasPin) MarshalJSON() ([]byte, error) {
 		m["publicKey"], m["id"] = p.PublicKey, p.ID
 		if p.View != "" {
 			m["view"] = p.View
+		}
+		if len(p.TelemetryTiles) > 0 {
+			m["telemetryTiles"] = p.TelemetryTiles
 		}
 	} else {
 		m["observerPublicKey"] = p.ObserverPublicKey
@@ -85,7 +95,10 @@ type AtlasPinInput struct {
 	ObserverPublicKey string   `json:"observerPublicKey"`
 	Name              string   `json:"name"`
 	Tiles             []string `json:"tiles"`
-	View              *string  `json:"view"`
+	View              *string  `json:"view" enums:"heard,observer,telemetry"`
+	// TelemetryTiles is four distinct ids from battery, noise, uptime, airtime, temperature, packets, signal, errors.
+	// Node pins only.
+	TelemetryTiles []string `json:"telemetryTiles"`
 }
 
 // PutAtlasRequest replaces the whole Atlas when BaseRevision is the stored revision.
@@ -102,6 +115,8 @@ type StoredPin struct {
 	Name  string
 	Tiles []string
 	View  string
+	// TelemetryTiles is set on node pins only.
+	TelemetryTiles []string
 }
 
 // AtlasInvalid is a validation failure; the message names the pin.
@@ -199,9 +214,25 @@ func ValidateAtlasPut(req PutAtlasRequest, observerKeys map[uuid.UUID][]byte) (s
 			}
 			sp.Tiles = in.Tiles
 		}
+		if in.TelemetryTiles != nil {
+			if in.Kind != PinNode {
+				return "", nil, bad("telemetryTiles is only for node pins")
+			}
+			if len(in.TelemetryTiles) != 4 {
+				return "", nil, bad("telemetryTiles must be exactly four")
+			}
+			dup := map[string]bool{}
+			for _, t := range in.TelemetryTiles {
+				if !atlasTelemetryTiles[t] || dup[t] {
+					return "", nil, bad("telemetryTiles must be four distinct known ids")
+				}
+				dup[t] = true
+			}
+			sp.TelemetryTiles = in.TelemetryTiles
+		}
 		if in.View != nil {
-			if *in.View != "heard" && *in.View != "observer" {
-				return "", nil, bad("view must be heard or observer")
+			if *in.View != "heard" && *in.View != "observer" && *in.View != "telemetry" {
+				return "", nil, bad("view must be heard, observer or telemetry")
 			}
 			if in.Kind == PinNode {
 				sp.View = *in.View
@@ -240,7 +271,7 @@ func ResolveAtlas(rng string, revision int64, stored []StoredPin, nodeIDs, obser
 		switch {
 		case p.Kind == PinNode:
 			pins = append(pins, AtlasPin{Kind: PinNode, PublicKey: k, ID: idStr(nodeIDs, k), ObserverID: idStr(observerIDs, k),
-				Name: p.Name, Tiles: p.Tiles, View: p.View})
+				Name: p.Name, Tiles: p.Tiles, View: p.View, TelemetryTiles: p.TelemetryTiles})
 		default:
 			if _, isNode := nodeIDs[k]; isNode {
 				if nodePinned[k] {
