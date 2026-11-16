@@ -351,6 +351,15 @@ func (s *Store) GetNodeActivity(ctx context.Context, nodeID uuid.UUID, window ti
 		}
 	}
 	activity.RawFrom = new(tailStart.UnixMilli())
+	if watermark.Valid {
+		pending, err := s.q.NodeActivityPending(ctx, sqlc.NodeActivityPendingParams{Since: ts(since), RolledUntil: ts(tailStart)})
+		if err != nil {
+			return nil, err
+		}
+		if pending {
+			return nil, api.ErrPagesNotReady
+		}
+	}
 	rawFrom := tailStart
 	if since.After(rawFrom) {
 		rawFrom = since

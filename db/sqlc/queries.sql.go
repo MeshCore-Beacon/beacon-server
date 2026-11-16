@@ -6457,6 +6457,25 @@ func (q *Queries) ListZoneLists(ctx context.Context) ([]MeshmapperZoneList, erro
 	return items, nil
 }
 
+const nodeActivityPending = `-- name: NodeActivityPending :one
+SELECT EXISTS(SELECT 1 FROM analytics_dirty_hours
+ WHERE hour >= $1::timestamptz AND hour < $2::timestamptz)::boolean
+`
+
+type NodeActivityPendingParams struct {
+	Since       pgtype.Timestamptz `json:"since"`
+	RolledUntil pgtype.Timestamptz `json:"rolled_until"`
+}
+
+// A freshly added activity family is empty until the queued completed hours
+// are rebuilt. Do not present that period as measured zero traffic.
+func (q *Queries) NodeActivityPending(ctx context.Context, arg NodeActivityPendingParams) (bool, error) {
+	row := q.db.QueryRow(ctx, nodeActivityPending, arg.Since, arg.RolledUntil)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const pruneImportedRegions = `-- name: PruneImportedRegions :many
 DELETE FROM regions WHERE imported AND NOT (slug = ANY($1::text[])) RETURNING slug
 `

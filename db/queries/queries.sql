@@ -2797,3 +2797,13 @@ ON CONFLICT (country) DO UPDATE SET
 -- name: PruneZoneBoundaries :many
 -- Drops imports for IATAs no longer configured, so their manual border returns.
 DELETE FROM meshmapper_zone_boundaries WHERE NOT (iata = ANY(@keep::text[])) RETURNING iata;
+
+-- name: NodeActivityPending :one
+-- A freshly added activity family is empty until the queued completed hours
+-- are rebuilt. Do not present that period as measured zero traffic.
+SELECT EXISTS(SELECT 1 FROM analytics_dirty_hours
+ WHERE hour >= @since::timestamptz AND hour < @rolled_until::timestamptz)::boolean;
+
+-- ============================================================
+-- NODE IATAS
+-- ============================================================

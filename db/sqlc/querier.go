@@ -677,6 +677,9 @@ type Querier interface {
 	MinObservationID(ctx context.Context) (int64, error)
 	// The first message id above after_id, or 0 when there is none.
 	NextChannelMessageID(ctx context.Context, afterID int64) (int64, error)
+	// A freshly added activity family is empty until the queued completed hours
+	// are rebuilt. Do not present that period as measured zero traffic.
+	NodeActivityPending(ctx context.Context, arg NodeActivityPendingParams) (bool, error)
 	NodeHasReadings(ctx context.Context, targetPublicKey []byte) (bool, error)
 	NodeIDsByKeys(ctx context.Context, dollar_1 [][]byte) ([]NodeIDsByKeysRow, error)
 	NodeLatestTrustedReadingAt(ctx context.Context, targetPublicKey []byte) (pgtype.Timestamptz, error)
