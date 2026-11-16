@@ -320,7 +320,7 @@ func TestSentences(t *testing.T) {
 		{KindRequestAttention, "admin_stopped", 0, "Telemetry request for N: the password gave admin access and was deleted. Enter a guest password."},
 		{KindRequestAttention, "disabled", 0, "Telemetry request for N was turned off: no observer has heard the repeater for days."},
 	} {
-		if got := Sentence(tc.kind, "N", tc.value, tc.detail); got != tc.want {
+		if got := Sentence(tc.kind, "N", tc.value, tc.detail, "c"); got != tc.want {
 			t.Errorf("%s: %q, want %q", tc.kind, got, tc.want)
 		}
 	}
@@ -372,7 +372,7 @@ func TestEmailSubjectUsesInstanceName(t *testing.T) {
 	if len(m.got) != 1 || m.got[0].subject != "Beacon - Ottawa: 1 alert" {
 		t.Fatalf("%+v", m.got)
 	}
-	sub, _ := ComposeEmail("Réseau", []EmailNotice{{Kind: KindRebooted, Name: "A"}, {Kind: KindRebooted, Name: "B"}}, "u")
+	sub, _ := ComposeEmail("Réseau", []EmailNotice{{Kind: KindRebooted, Name: "A"}, {Kind: KindRebooted, Name: "B"}}, "u", "c")
 	if sub != "Réseau: 2 alerts" {
 		t.Fatal(sub)
 	}

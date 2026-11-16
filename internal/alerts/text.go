@@ -11,8 +11,9 @@ import (
 // Notice texts hold only the radio's sanitised name, a figure and fixed words: nothing secret, nothing a radio can
 // shape beyond its capped name.
 
-// Sentence is the one-sentence description of an alert, starting with the radio's name.
-func Sentence(kind, name string, value int64, detail string) string {
+// Sentence is the one-sentence description of an alert, starting with the radio's name. tempUnit "f" reads
+// temperatures in Fahrenheit; anything else is Celsius.
+func Sentence(kind, name string, value int64, detail, tempUnit string) string {
 	switch kind {
 	case KindGoneQuiet:
 		return fmt.Sprintf("%s has not been heard for %s.", name, plural(value, "hour"))
@@ -25,6 +26,9 @@ func Sentence(kind, name string, value int64, detail string) string {
 	case KindRebooted:
 		return fmt.Sprintf("%s rebooted.", name)
 	case KindTemperature:
+		if tempUnit == "f" {
+			return fmt.Sprintf("%s temperature is %.1f F, outside your limits.", name, float64(value)/10*9/5+32)
+		}
 		return fmt.Sprintf("%s temperature is %.1f C, outside your limits.", name, float64(value)/10)
 	case KindNoiseHigh:
 		return fmt.Sprintf("%s noise floor is high: %d dBm.", name, value)
