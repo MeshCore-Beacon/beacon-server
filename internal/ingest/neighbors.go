@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
 )
 
 // neighborReportEntry is one entry in the "neighbors" array of a /neighbors report.
@@ -31,12 +32,26 @@ type neighborReport struct {
 // region scope, plus a snapshot of its zero-hop neighbors and (best-effort) their
 // OTA-queried region scopes. See the package doc comment for the full pipeline.
 func (w *Worker) handleNeighbors(ctx context.Context, iata, pubkeyHex string, raw []byte) {
+	if len(raw) > maxEnvelopeBytes {
+		metrics.IngestRejected.WithLabelValues("envelope_size").Inc()
+		return
+	}
 	var report neighborReport
 	if err := json.Unmarshal(raw, &report); err != nil {
 		w.log.Warn(fmt.Sprintf("malformed neighbors envelope from %s", pubkeyHex), "error", err)
 		return
 	}
 
+	if len(report.Neighbors) > maxNeighbors || len(report.Self.Scopes) > 256 {
+		metrics.IngestRejected.WithLabelValues("neighbor_shape").Inc()
+		return
+	}
+	for _, n := range report.Neighbors {
+		if len(n.PubKey) != 64 || len(n.Scopes) > 256 || len(n.Status) > 32 {
+			metrics.IngestRejected.WithLabelValues("neighbor_shape").Inc()
+			return
+		}
+	}
 	pubkey, err := hex.DecodeString(pubkeyHex)
 	if err != nil {
 		w.log.Warn(fmt.Sprintf("invalid pubkey hex in neighbors from %s", pubkeyHex), "error", err)
