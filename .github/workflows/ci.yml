@@ -58,6 +58,11 @@ jobs:
       - name: Test
         run: go test ./...
 
+      - name: Verify signal-presence regression
+        env:
+          BEACON_TEST_POSTGRES_DSN: postgres://postgres:backup-ci-only@127.0.0.1:5432/postgres?sslmode=disable
+        run: go test ./db -timeout 10m -run '^Test(SignalValidity|ObserverActivityLiveCountsMatchRaw)' -count=1 -v
+
       - name: Verify scope refresh concurrency
         run: go test -race ./internal/meshmapper ./internal/scopestore && go test -race ./db -run '^TestChannelIDCache'
 

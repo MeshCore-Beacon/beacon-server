@@ -85,7 +85,7 @@ type nodeUpdateEvent struct {
 //
 // siteRecorded says an earlier Add for this hearing found the stored message, so its site is already recorded.
 // packetKnown says the packet was stored before this hearing.
-func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshcore.Packet, iata string, packetHash []byte, radio RadioSettings, scopeID *int32, matchedScope *string, observerPubkey []byte, rxSNR float32, siteRecorded, packetKnown bool) {
+func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshcore.Packet, iata string, packetHash []byte, radio RadioSettings, scopeID *int32, matchedScope *string, observerPubkey []byte, rxSNR *float32, siteRecorded, packetKnown bool) {
 	if packet.PayloadType() == meshcore.PayloadTypeAdvert {
 		advert, err := meshcore.AdvertFromBytes(packet.Payload)
 		if err != nil {
@@ -152,7 +152,7 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 			observerNodeID, oErr := w.db.GetNodeByPubkey(ctx, observerPubkey)
 			if oErr == nil && observerNodeID != nodeID {
 				snr := rxSNR
-				if err := w.db.UpsertNodeNeighbor(ctx, observerNodeID, nodeID, iata, &snr, nil); err != nil {
+				if err := w.db.UpsertNodeNeighbor(ctx, observerNodeID, nodeID, iata, snr, nil); err != nil {
 					w.log.Error("failed to upsert observer-advert neighbor", "error", err)
 				}
 			}
