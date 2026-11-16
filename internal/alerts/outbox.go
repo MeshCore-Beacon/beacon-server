@@ -87,6 +87,7 @@ type Sender struct {
 	push     PushSender
 	atlasURL string
 	name     string // the instance name for mail subjects
+	tempUnit string // the instance temperature unit: "f" or "c"
 	now      func() time.Time
 }
 
@@ -168,7 +169,7 @@ func (s *Sender) sendEmail(ctx context.Context, rows []OutboxRow) (delivered, re
 		if sent >= MaxMailsPerPass || ctx.Err() != nil {
 			continue
 		}
-		subject, text := ComposeEmail(s.name, g.notices, s.atlasURL)
+		subject, text := ComposeEmail(s.name, g.notices, s.atlasURL, s.tempUnit)
 		sctx, cancel := context.WithTimeout(ctx, MailSendTimeout)
 		err := s.mail.Send(sctx, mailer.Message{To: g.first.Email, Subject: subject, Text: text})
 		cancel()
@@ -181,6 +182,11 @@ func (s *Sender) sendEmail(ctx context.Context, rows []OutboxRow) (delivered, re
 		delivered = append(delivered, g.ids...)
 	}
 	return delivered, retry
+}
+
+// SetTemperatureUnit sets the unit alert text gives temperatures in: "f" or "c" (anything else reads as c).
+func (s *Sender) SetTemperatureUnit(unit string) {
+	s.tempUnit = unit
 }
 
 // SetInstanceName sets the name alert mail subjects carry; blank keeps "Beacon".
@@ -226,7 +232,7 @@ func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow, now time.Time) 
 		}
 		msg := PushMessage{
 			Title: SanitizeName(r.Name, r.Key),
-			Body:  Sentence(r.Kind, SanitizeName(r.Name, r.Key), r.Value, r.Detail),
+			Body:  Sentence(r.Kind, SanitizeName(r.Name, r.Key), r.Value, r.Detail, s.tempUnit),
 			Data:  map[string]string{"targetKind": r.TargetKind, "publicKey": hex.EncodeToString(r.Key)},
 		}
 		if r.TargetID != uuid.Nil {
