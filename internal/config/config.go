@@ -57,6 +57,7 @@ type Config struct {
 	Polling     PollingConfig         `yaml:"polling"`
 	Accounts    AccountsConfig        `yaml:"accounts"`
 	Alerts      AlertsConfig          `yaml:"alerts"`
+	Display     DisplayConfig         `yaml:"display"`
 }
 
 // ReadModelsConfig switches serving pages from each read model and paces their one-off backfills.
@@ -660,6 +661,9 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	if _, err := cfg.Polling.Resolve(); err != nil {
+		return nil, err
+	}
+	if _, err := cfg.Display.Resolve(); err != nil {
 		return nil, err
 	}
 	if _, err := cfg.Accounts.Resolve(""); err != nil {

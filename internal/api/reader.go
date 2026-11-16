@@ -129,6 +129,10 @@ type Reader interface {
 	// cursor is last_seen epoch ms of the last node; pageCursor wins over it.
 	ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *NodeCursor, limit int32, includeNeighbors bool) (NodePage, error)
 
+	// ListLatestNodeReadings returns each polled node's newest trusted battery and temperature at or after since,
+	// limited to nodes heard in iatas (all when empty). Nodes with neither value are left out.
+	ListLatestNodeReadings(ctx context.Context, iatas []string, since time.Time) ([]NodeLatestReading, error)
+
 	// ListNodesSorted is ListNodes in sort's order, paged by the previous page's cursor (nil for
 	// the first page). Unnamed nodes come last in either name order; ties go newest first.
 	ListNodesSorted(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, sort NodeSort, pageCursor *NodeSortCursor, limit int32, includeNeighbors bool) (NodePage, error)
