@@ -4885,11 +4885,12 @@ const docTemplate = `{
                     {
                         "enum": [
                             "24h",
+                            "72h",
                             "168h",
                             "720h"
                         ],
                         "type": "string",
-                        "description": "Window: 24h, 168h (default) or 720h",
+                        "description": "Window: 24h, 72h, 168h (default) or 720h",
                         "name": "range",
                         "in": "query"
                     },
@@ -4900,7 +4901,7 @@ const docTemplate = `{
                             "24h"
                         ],
                         "type": "string",
-                        "description": "Bucket size: 1h, 6h or 24h. Defaults to 1h for 24h, 6h for 168h, 24h for 720h",
+                        "description": "Bucket size: 1h, 6h or 24h. Defaults to 1h for 24h and 72h, 6h for 168h, 24h for 720h",
                         "name": "interval",
                         "in": "query"
                     },
@@ -7960,6 +7961,23 @@ const docTemplate = `{
                     "type": "string",
                     "example": "0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a0f3a"
                 },
+                "telemetryTiles": {
+                    "description": "TelemetryTiles are the four tiles of a node pin's Telemetry view; absent means the client's default.",
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "battery",
+                            "noise",
+                            "uptime",
+                            "airtime",
+                            "temperature",
+                            "packets",
+                            "signal",
+                            "errors"
+                        ]
+                    }
+                },
                 "tiles": {
                     "type": "array",
                     "items": {
@@ -7970,7 +7988,8 @@ const docTemplate = `{
                     "type": "string",
                     "enum": [
                         "heard",
-                        "observer"
+                        "observer",
+                        "telemetry"
                     ]
                 }
             }
@@ -7997,6 +8016,13 @@ const docTemplate = `{
                 "publicKey": {
                     "type": "string"
                 },
+                "telemetryTiles": {
+                    "description": "TelemetryTiles is four distinct ids from battery, noise, uptime, airtime, temperature, packets, signal, errors.\nNode pins only.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "tiles": {
                     "type": "array",
                     "items": {
@@ -8004,7 +8030,12 @@ const docTemplate = `{
                     }
                 },
                 "view": {
-                    "type": "string"
+                    "type": "string",
+                    "enum": [
+                        "heard",
+                        "observer",
+                        "telemetry"
+                    ]
                 }
             }
         },
@@ -8402,6 +8433,11 @@ const docTemplate = `{
                 "alerts": {
                     "type": "boolean",
                     "example": false
+                },
+                "atlasTelemetry": {
+                    "description": "AtlasTelemetry is true when the server accepts the telemetry view and telemetryTiles on Atlas pins and the 72h\nnode telemetry range. Always true on this version.",
+                    "type": "boolean",
+                    "example": true
                 },
                 "polling": {
                     "type": "boolean",
@@ -11052,6 +11088,16 @@ const docTemplate = `{
                 },
                 "observerId": {
                     "type": "string"
+                },
+                "state": {
+                    "description": "State is what the poller's latest live claim says about this repeater: pending, ok, no_reply, login_failed,\nadmin_stop or not_direct, any other value the firmware sends (lower case, at most 32 characters), or\nnot_claimed when the claim does not list the repeater or the observer has no live claim.",
+                    "type": "string",
+                    "example": "not_direct"
+                },
+                "stateAt": {
+                    "description": "StateAt is epoch ms when that claim was received, null when the observer has no live claim.",
+                    "type": "integer",
+                    "example": 1794703600000
                 }
             }
         },

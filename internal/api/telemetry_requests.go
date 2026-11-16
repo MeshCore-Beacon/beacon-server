@@ -22,6 +22,12 @@ type TelemetryRequestNode struct {
 type TelemetryRequestPoller struct {
 	ObserverID string `json:"observerId"`
 	Name       string `json:"name" example:"North Ridge"`
+	// State is what the poller's latest live claim says about this repeater: pending, ok, no_reply, login_failed,
+	// admin_stop or not_direct, any other value the firmware sends (lower case, at most 32 characters), or
+	// not_claimed when the claim does not list the repeater or the observer has no live claim.
+	State string `json:"state" example:"not_direct"`
+	// StateAt is epoch ms when that claim was received, null when the observer has no live claim.
+	StateAt *int64 `json:"stateAt" example:"1794703600000"`
 }
 
 // TelemetryRequest is one request. The password is never part of it: HasPassword only says whether one is set.
@@ -102,7 +108,11 @@ func NewTelemetryRequest(r polling.RequestRow) TelemetryRequest {
 		out.Node.ID = &s
 	}
 	if r.PollerID != nil {
-		out.Poller = &TelemetryRequestPoller{ObserverID: r.PollerID.String(), Name: r.PollerName}
+		out.Poller = &TelemetryRequestPoller{ObserverID: r.PollerID.String(), Name: r.PollerName, State: r.PollerState}
+		if r.PollerStateAt != nil {
+			ms := r.PollerStateAt.UnixMilli()
+			out.Poller.StateAt = &ms
+		}
 	}
 	if r.LatestAt != nil {
 		ms := r.LatestAt.UnixMilli()
