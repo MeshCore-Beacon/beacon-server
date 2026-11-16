@@ -105,15 +105,23 @@ func TestDecideRequestObserversApproved(t *testing.T) {
 	}
 }
 
-func TestDecideRequestsGoOnlyToApprovedObserversWhenApproved(t *testing.T) {
+func TestDecideRequestsNeedApprovalUnlessResolvedToAll(t *testing.T) {
 	ok := rcand('A', 1)
 	ok.Approved = true
 	in := ElectionInput{Requested: true, RequestCands: []Candidate{rcand('B', 9), ok}}
-	// Approval is only enforced when set explicitly; the default and the zero config mean all.
-	if got := string(order(Decide(in, config.ResolvedPolling{RequestObservers: config.RequestObserversApproved}).Assignments)); got != "A" {
-		t.Errorf("approved: %q", got)
+	// The gate is closed unless the resolved value is all: an unresolved or unknown value needs approval.
+	for name, cfg := range map[string]config.ResolvedPolling{
+		"unresolved": {}, "approved": {RequestObservers: config.RequestObserversApproved}, "unknown": {RequestObservers: "some"},
+	} {
+		if got := string(order(Decide(in, cfg).Assignments)); got != "A" {
+			t.Errorf("%s: %q", name, got)
+		}
 	}
-	for name, cfg := range map[string]config.ResolvedPolling{"unset": {}, "all": allObservers} {
+	resolved, err := config.PollingConfig{}.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, cfg := range map[string]config.ResolvedPolling{"resolved default": resolved, "all": allObservers} {
 		if got := string(order(Decide(in, cfg).Assignments)); got != "BA" {
 			t.Errorf("%s: %q", name, got)
 		}
