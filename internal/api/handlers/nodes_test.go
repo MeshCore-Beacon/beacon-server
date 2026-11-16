@@ -703,3 +703,86 @@ func TestGetNodeTelemetry_StoreError(t *testing.T) {
 }
 
 func ptrOf[T any](v T) *T { return &v }
+
+func latestGet(t *testing.T, sr stubReader, polling bool, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	m := chi.NewRouter()
+	m.Mount("/nodes", NodesRouter(sr, polling))
+	w := httptest.NewRecorder()
+	m.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+	return w
+}
+
+func TestListLatestNodeReadings_Shape(t *testing.T) {
+	id := uuid.New()
+	bat, temp := int32(4080), float32(1.5)
+	var gotSince time.Time
+	var gotIATAs []string
+	sr := stubReader{listLatestNodeReadings: func(_ context.Context, iatas []string, since time.Time) ([]api.NodeLatestReading, error) {
+		gotSince, gotIATAs = since, iatas
+		return []api.NodeLatestReading{{NodeID: id, SampledAt: 1794702630000, BatteryMV: &bat, TemperatureC: &temp}}, nil
+	}}
+	before := time.Now()
+	w := latestGet(t, sr, true, "/nodes/telemetry/latest?iatas=yvr,YYJ")
+	if w.Code != http.StatusOK {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	var got struct {
+		GeneratedAt int64 `json:"generatedAt"`
+		Items       []json.RawMessage
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || len(got.Items) != 1 {
+		t.Fatal(err, w.Body)
+	}
+	if d := time.UnixMilli(got.GeneratedAt).Sub(before); d < -time.Second || d > time.Second {
+		t.Errorf("generatedAt off by %v", d)
+	}
+	want := `{"nodeId":"` + id.String() + `","sampledAt":1794702630000,"batteryMv":4080,"temperatureC":1.5}`
+	if string(got.Items[0]) != want {
+		t.Errorf("item %s\nwant %s", got.Items[0], want)
+	}
+	if d := gotSince.Sub(before.Add(-168 * time.Hour)); d < -time.Second || d > time.Second {
+		t.Errorf("since %v is not about 168h ago", gotSince)
+	}
+	if len(gotIATAs) != 2 || gotIATAs[0] != "YVR" || gotIATAs[1] != "YYJ" {
+		t.Errorf("iatas %v", gotIATAs)
+	}
+}
+
+func TestListLatestNodeReadings_EmptyIsArray(t *testing.T) {
+	w := latestGet(t, stubReader{}, true, "/nodes/telemetry/latest")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"items":[]`) {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+}
+
+func TestListLatestNodeReadings_PollingOff(t *testing.T) {
+	called := false
+	sr := stubReader{listLatestNodeReadings: func(context.Context, []string, time.Time) ([]api.NodeLatestReading, error) {
+		called = true
+		return nil, nil
+	}}
+	w := latestGet(t, sr, false, "/nodes/telemetry/latest")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"items":[]`) || called {
+		t.Fatalf("%d %s called=%v", w.Code, w.Body, called)
+	}
+}
+
+func TestListLatestNodeReadings_ReaderError(t *testing.T) {
+	sr := stubReader{listLatestNodeReadings: func(context.Context, []string, time.Time) ([]api.NodeLatestReading, error) {
+		return nil, errors.New("boom")
+	}}
+	if w := latestGet(t, sr, true, "/nodes/telemetry/latest"); w.Code != http.StatusInternalServerError {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+}
+
+func TestNodesRouter_TelemetryPathsUnchanged(t *testing.T) {
+	// The bare path still goes to /{nodeId}, which rejects a non-uuid id as before.
+	if w := latestGet(t, stubReader{}, true, "/nodes/telemetry"); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "invalid node ID") {
+		t.Errorf("bare telemetry: %d %s", w.Code, w.Body)
+	}
+	if w := latestGet(t, stubReader{}, true, "/nodes/"+uuid.NewString()+"/telemetry"); w.Code != http.StatusOK {
+		t.Errorf("node telemetry: %d %s", w.Code, w.Body)
+	}
+}
