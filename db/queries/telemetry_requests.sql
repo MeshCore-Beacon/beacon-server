@@ -40,21 +40,28 @@ SELECT DISTINCT target_public_key FROM telemetry_requests WHERE user_id = $1;
 
 -- name: ListUserTelemetryRequests :many
 -- A user's requests, oldest first, with the node's current id and name, the observer that polls the repeater and
--- the newest trusted reading. No password column is read; poller_id is the nil uuid when nobody polls it.
+-- the newest trusted reading. No password column is read; poller_id is the nil uuid when nobody polls it. The
+-- poller's own claim is live when received after received_after: poller_claim_at is null without one, and
+-- poller_claimed says whether that claim lists the repeater (poller_state is its state then).
 SELECT r.id, r.target_public_key, r.status, r.status_reason, (r.password_ct IS NOT NULL)::boolean AS has_password,
        r.created_at, r.updated_at,
        n.id AS node_id, COALESCE(n.name, '')::text AS node_name,
        COALESCE(p.observer_id, '00000000-0000-0000-0000-000000000000'::uuid) AS poller_id, COALESCE(p.name, '')::text AS poller_name,
+       p.claim_at::timestamptz AS poller_claim_at, COALESCE(p.claimed, false)::boolean AS poller_claimed,
+       COALESCE(p.state, '')::text AS poller_state,
        (SELECT max(x.sampled_at) FROM repeater_readings x WHERE x.target_public_key = r.target_public_key AND x.trusted)::timestamptz AS latest_reading_at
 FROM telemetry_requests r
 LEFT JOIN nodes n ON n.public_key = r.target_public_key
 LEFT JOIN LATERAL (
-    SELECT o.id AS observer_id, COALESCE(NULLIF(o.display_name, ''), left(encode(o.public_key, 'hex'), 8)) AS name
+    SELECT o.id AS observer_id, COALESCE(NULLIF(o.display_name, ''), left(encode(o.public_key, 'hex'), 8)) AS name,
+           cl.received_at AS claim_at, (c.observer_public_key IS NOT NULL) AS claimed, c.state
     FROM polling_assignments a JOIN observers o ON o.public_key = a.observer_public_key
+    LEFT JOIN polling_claims cl ON cl.observer_public_key = a.observer_public_key AND cl.received_at > sqlc.arg(received_after)
+    LEFT JOIN polling_candidates c ON c.observer_public_key = cl.observer_public_key AND c.target_public_key = a.target_public_key
     WHERE a.target_public_key = r.target_public_key AND a.rank = 0
     LIMIT 1
 ) p ON true
-WHERE r.user_id = $1
+WHERE r.user_id = sqlc.arg(user_id)
 ORDER BY r.created_at, r.id;
 
 -- name: RequestNode :one

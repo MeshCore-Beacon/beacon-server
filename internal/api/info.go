@@ -52,6 +52,9 @@ type InfoFeatures struct {
 	AlertDelivery string `json:"alertDelivery,omitempty" enums:"push,email"`
 	// PortalURL is the sign-in portal's base URL; set only when accounts is "portal".
 	PortalURL string `json:"portalUrl,omitempty" example:"https://portal.example.org"`
+	// AtlasTelemetry is true when the server accepts the telemetry view and telemetryTiles on Atlas pins and the 72h
+	// node telemetry range. Always true on this version.
+	AtlasTelemetry bool `json:"atlasTelemetry" example:"true"`
 }
 
 // WSTicket lets a client that sends no Origin open /ws, in the X-Beacon-Ticket header.
