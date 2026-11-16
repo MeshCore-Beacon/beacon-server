@@ -50,16 +50,22 @@ type RouteEvidenceQuery struct {
 	Until  time.Time
 	Cursor *RouteEvidenceCursor
 	Limit  int32
+	// Optional exact representation copied from a prior response or cursor.
+	HashSize  int16
+	PathBytes string
 }
 
-// RouteEvidenceCursor binds the precise (heard_at DESC,id DESC) boundary to its route/window.
+// RouteEvidenceCursor pins the route, window and exact representation as well as
+// the precise (heard_at DESC,id DESC) boundary. Legacy v1 cursors have no path pin.
 type RouteEvidenceCursor struct {
-	IATA    string
-	PathKey string
-	Since   time.Time
-	Until   time.Time
-	HeardAt time.Time
-	ID      int64
+	IATA      string
+	PathKey   string
+	Since     time.Time
+	Until     time.Time
+	HeardAt   time.Time
+	ID        int64
+	HashSize  int16
+	PathBytes string
 }
 
 func ValidRouteEvidenceKey(iata, key string) bool {
@@ -79,20 +85,32 @@ func ValidRouteEvidenceWindow(since, until time.Time) bool {
 	return !since.Before(time.Unix(0, 0)) && until.After(since) && until.Sub(since) <= MaxRouteEvidenceWindow
 }
 
+func ValidRouteEvidencePath(width int16, path string) bool {
+	if width < 1 || width > 3 || len(path) < 4*int(width) || len(path) > 126*int(width) || len(path)%(2*int(width)) != 0 {
+		return false
+	}
+	_, err := hex.DecodeString(path)
+	return err == nil && path == strings.ToLower(path)
+}
+
 func (c RouteEvidenceCursor) String() string {
-	return fmt.Sprintf("v1:%s:%s:%d:%d:%d:%d", c.IATA, c.PathKey, c.Since.UnixMilli(), c.Until.UnixMilli(), c.HeardAt.UnixMicro(), c.ID)
+	value := fmt.Sprintf("%s:%s:%d:%d:%d:%d", c.IATA, c.PathKey, c.Since.UnixMilli(), c.Until.UnixMilli(), c.HeardAt.UnixMicro(), c.ID)
+	if c.HashSize != 0 || c.PathBytes != "" {
+		return fmt.Sprintf("v2:%s:%d:%s", value, c.HashSize, c.PathBytes)
+	}
+	return "v1:" + value
 }
 
 func ParseRouteEvidenceCursor(raw string) (*RouteEvidenceCursor, error) {
-	if len(raw) > 200 {
+	if len(raw) > 512 {
 		return nil, ErrRouteEvidenceInput
 	}
 	p := strings.Split(raw, ":")
-	if len(p) != 7 || p[0] != "v1" || !ValidRouteEvidenceKey(p[1], p[2]) {
+	if !((len(p) == 7 && p[0] == "v1") || (len(p) == 9 && p[0] == "v2")) || !ValidRouteEvidenceKey(p[1], p[2]) {
 		return nil, ErrRouteEvidenceInput
 	}
 	values := [4]int64{}
-	for i, s := range p[3:] {
+	for i, s := range p[3:7] {
 		n, err := strconv.ParseInt(s, 10, 64)
 		if err != nil || n < 0 || strconv.FormatInt(n, 10) != s {
 			return nil, ErrRouteEvidenceInput
@@ -104,6 +122,13 @@ func ParseRouteEvidenceCursor(raw string) (*RouteEvidenceCursor, error) {
 		return nil, ErrRouteEvidenceInput
 	}
 	c := &RouteEvidenceCursor{IATA: p[1], PathKey: p[2], Since: time.UnixMilli(values[0]).UTC(), Until: time.UnixMilli(values[1]).UTC(), HeardAt: time.UnixMicro(values[2]).UTC(), ID: values[3]}
+	if p[0] == "v2" {
+		width, err := strconv.ParseInt(p[7], 10, 16)
+		if err != nil || strconv.FormatInt(width, 10) != p[7] || !ValidRouteEvidencePath(int16(width), p[8]) {
+			return nil, ErrRouteEvidenceInput
+		}
+		c.HashSize, c.PathBytes = int16(width), p[8]
+	}
 	if !ValidRouteEvidenceWindow(c.Since, c.Until) || c.HeardAt.Before(c.Since) || !c.HeardAt.Before(c.Until) {
 		return nil, ErrRouteEvidenceInput
 	}

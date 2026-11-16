@@ -23,3 +23,23 @@ func TestRouteEvidenceCursor(t *testing.T) {
 		}
 	}
 }
+
+func TestRouteEvidencePinnedCursor(t *testing.T) {
+	c := RouteEvidenceCursor{IATA: "YOW", PathKey: strings.Repeat("a", 32), Since: time.UnixMilli(1000).UTC(), Until: time.UnixMilli(3000).UTC(), HeardAt: time.UnixMicro(2000123).UTC(), ID: 9, HashSize: 3, PathBytes: strings.Repeat("aabbcc", 63)}
+	got, err := ParseRouteEvidenceCursor(c.String())
+	if err != nil || *got != c || !strings.HasPrefix(c.String(), "v2:") {
+		t.Fatalf("pinned cursor round-trip: %+v %v", got, err)
+	}
+	for _, bad := range []string{
+		strings.Replace(c.String(), ":3:", ":4:", 1),
+		strings.Replace(c.String(), ":3:", ":03:", 1),
+		c.String() + "00",
+		strings.TrimSuffix(c.String(), c.PathBytes) + "aabbcc",
+		strings.ToUpper(c.String()),
+		strings.TrimSuffix(c.String(), c.PathBytes) + "zzzzzzzzzzzz",
+	} {
+		if _, err := ParseRouteEvidenceCursor(bad); err == nil {
+			t.Errorf("accepted invalid pinned cursor %q", bad)
+		}
+	}
+}

@@ -39,6 +39,16 @@ func (s *Store) GetRouteEvidence(ctx context.Context, iata, key string, query ap
 		if c.IATA != iata || c.PathKey != key || !c.Since.Equal(query.Since) || !c.Until.Equal(query.Until) || c.ID <= 0 || c.HeardAt.Before(query.Since) || !c.HeardAt.Before(query.Until) {
 			return nil, api.ErrRouteEvidenceInput
 		}
+		if c.HashSize != 0 || c.PathBytes != "" {
+			if (query.HashSize != 0 || query.PathBytes != "") && (query.HashSize != c.HashSize || query.PathBytes != c.PathBytes) {
+				return nil, api.ErrRouteEvidenceInput
+			}
+			query.HashSize, query.PathBytes = c.HashSize, c.PathBytes
+		}
+	}
+	pinned := query.HashSize != 0 || query.PathBytes != ""
+	if pinned && !api.ValidRouteEvidencePath(query.HashSize, query.PathBytes) {
+		return nil, api.ErrRouteEvidenceInput
 	}
 	keyBytes, _ := hex.DecodeString(key)
 	row, err := s.q.GetRouteEvidenceRoute(ctx, sqlc.GetRouteEvidenceRouteParams{Iata: iata, PathKey: keyBytes})
@@ -49,10 +59,35 @@ func (s *Store) GetRouteEvidence(ctx context.Context, iata, key string, query ap
 	if err != nil {
 		return nil, err
 	}
+	width, path, valid := savedRoutePath(row.HashPrefix, row.HopCount)
+	if pinned {
+		selected, _ := hex.DecodeString(query.PathBytes)
+		hops := len(selected) / int(query.HashSize)
+		if hops != len(row.NodeIds) || hops != int(row.HopCount) {
+			return nil, api.ErrRouteEvidenceInput
+		}
+		prefixes := make([][]byte, hops)
+		for i, id := range row.NodeIds {
+			prefixes[i] = selected[i*int(query.HashSize) : (i+1)*int(query.HashSize)]
+			// A changed representation must still belong to this node chain.
+			// Reuse the already-loaded keys; never widen the evidence query.
+			if !valid || width != query.HashSize || !bytes.Equal(path, selected) {
+				node := nodes[id]
+				if node == nil {
+					return nil, api.ErrRouteEvidenceInput
+				}
+				pubkey, err := hex.DecodeString(node.PublicKey)
+				if err != nil || !bytes.HasPrefix(pubkey, prefixes[i]) {
+					return nil, api.ErrRouteEvidenceInput
+				}
+			}
+		}
+		row.HashPrefix = prefixes
+		width, path, valid = query.HashSize, selected, true
+	}
 	route := toKnownRoutes([]knownRouteRow{{ID: row.ID, NodeIds: row.NodeIds, HashPrefix: row.HashPrefix, Iata: row.Iata, HopCount: row.HopCount, FirstSeen: row.FirstSeen, LastSeen: row.LastSeen, ObservationCount: row.ObservationCount}}, nodes)[0]
 	route.PathKey = hex.EncodeToString(row.PathKey)
 	out := &api.RouteEvidence{Items: []api.RouteObservation{}, Route: route, WindowStart: query.Since.UnixMilli(), WindowEnd: query.Until.UnixMilli(), GeneratedAt: time.Now().UnixMilli(), MatchType: "saved_path_prefixes"}
-	width, path, valid := savedRoutePath(row.HashPrefix, row.HopCount)
 	if !valid {
 		return out, nil
 	}
@@ -86,7 +121,7 @@ func (s *Store) GetRouteEvidence(ctx context.Context, iata, key string, query ap
 	}
 	if out.HasMore {
 		last := rows[len(rows)-1]
-		cursor := (api.RouteEvidenceCursor{IATA: iata, PathKey: key, Since: query.Since, Until: query.Until, HeardAt: last.HeardAt.Time, ID: last.ID}).String()
+		cursor := (api.RouteEvidenceCursor{IATA: iata, PathKey: key, Since: query.Since, Until: query.Until, HeardAt: last.HeardAt.Time, ID: last.ID, HashSize: width, PathBytes: out.PathBytes}).String()
 		out.NextPageCursor = &cursor
 	}
 	return out, nil
