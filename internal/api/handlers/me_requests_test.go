@@ -65,6 +65,7 @@ func sampleRow() polling.RequestRow {
 		ID: uuid.New(), Target: bytes.Repeat([]byte{0xab}, 32), Status: polling.StatusActive, HasPassword: true,
 		CreatedAt: time.UnixMilli(1794700000000), UpdatedAt: time.UnixMilli(1794701000000),
 		NodeID: &node, NodeName: "Hilltop", PollerID: &poller, PollerName: "North Ridge", LatestAt: &at,
+		PollerState: "not_direct", PollerStateAt: &at,
 	}
 }
 
@@ -86,7 +87,8 @@ func TestMeTelemetryRequestShapes(t *testing.T) {
 	if w.Code != 200 || b["limit"] != float64(3) || got["id"] != row.ID.String() || got["status"] != "active" || got["statusReason"] != "" ||
 		got["hasPassword"] != true || got["createdAt"] != float64(1794700000000) || got["updatedAt"] != float64(1794701000000) ||
 		got["latestReadingAt"] != float64(1794703600000) || node["id"] != row.NodeID.String() || node["publicKey"] != strings.Repeat("ab", 32) ||
-		node["name"] != "Hilltop" || poller["observerId"] != row.PollerID.String() || poller["name"] != "North Ridge" {
+		node["name"] != "Hilltop" || poller["observerId"] != row.PollerID.String() || poller["name"] != "North Ridge" ||
+		poller["state"] != "not_direct" || poller["stateAt"] != float64(1794703600000) {
 		t.Fatalf("list: %d %s", w.Code, w.Body)
 	}
 	if strings.Contains(strings.ToLower(w.Body.String()), "password\"") && !strings.Contains(w.Body.String(), "hasPassword") {
@@ -99,6 +101,15 @@ func TestMeTelemetryRequestShapes(t *testing.T) {
 	got = b["requests"].([]any)[0].(map[string]any)
 	if got["poller"] != nil || got["latestReadingAt"] != nil || got["node"].(map[string]any)["id"] != nil || got["statusReason"] != polling.ReasonNoObserver {
 		t.Fatalf("nulls: %v", got)
+	}
+	// A poller with no live claim reports not_claimed and a null stateAt, in the key set either way.
+	pid := uuid.New()
+	f.rows = []polling.RequestRow{{ID: uuid.New(), Target: bytes.Repeat([]byte{1}, 32), Status: polling.StatusActive,
+		PollerID: &pid, PollerName: "North Ridge", PollerState: polling.StateNotClaimed}}
+	got = jsonBody(t, call(h, "GET", "/me/telemetry-requests", "", c...))["requests"].([]any)[0].(map[string]any)
+	pl := got["poller"].(map[string]any)
+	if v, ok := pl["stateAt"]; !ok || v != nil || pl["state"] != "not_claimed" {
+		t.Fatalf("not claimed: %v", pl)
 	}
 	f.rows = nil
 	if w := call(h, "GET", "/me/telemetry-requests", "", c...); w.Code != 200 || !strings.Contains(w.Body.String(), `"requests":[]`) {
