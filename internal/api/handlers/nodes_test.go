@@ -622,7 +622,7 @@ func TestGetNodeTelemetry_CounterSpanInJSON(t *testing.T) {
 }
 
 func TestGetNodeTelemetry_AllowedParams(t *testing.T) {
-	for _, rng := range []string{"24h", "168h", "720h"} {
+	for _, rng := range []string{"24h", "72h", "168h", "720h"} {
 		for _, iv := range []string{"1h", "6h", "24h"} {
 			w := nodeTelemetryGet(t, stubReader{}, "?range="+rng+"&interval="+iv)
 			var got api.NodeTelemetry
@@ -634,7 +634,7 @@ func TestGetNodeTelemetry_AllowedParams(t *testing.T) {
 }
 
 func TestGetNodeTelemetry_DefaultInterval(t *testing.T) {
-	for rng, want := range map[string]string{"24h": "1h", "168h": "6h", "720h": "24h"} {
+	for rng, want := range map[string]string{"24h": "1h", "72h": "1h", "168h": "6h", "720h": "24h"} {
 		var got api.NodeTelemetry
 		w := nodeTelemetryGet(t, stubReader{}, "?range="+rng)
 		if json.Unmarshal(w.Body.Bytes(), &got) != nil || got.Interval != want {
@@ -658,7 +658,7 @@ func TestGetNodeTelemetry_IncludeUntrusted(t *testing.T) {
 }
 
 func TestGetNodeTelemetry_BadParams(t *testing.T) {
-	for _, q := range []string{"?range=48h", "?range=abc", "?interval=2h", "?interval=1d", "?range=24h&interval=7h"} {
+	for _, q := range []string{"?range=48h", "?range=71h", "?range=abc", "?interval=2h", "?interval=1d", "?range=24h&interval=7h"} {
 		if w := nodeTelemetryGet(t, stubReader{}, q); w.Code != http.StatusBadRequest {
 			t.Errorf("%s: status %d, want 400", q, w.Code)
 		}

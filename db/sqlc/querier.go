@@ -640,8 +640,10 @@ type Querier interface {
 	ListUserAtlasPins(ctx context.Context, userID uuid.UUID) ([]ListUserAtlasPinsRow, error)
 	ListUserSessions(ctx context.Context, arg ListUserSessionsParams) ([]ListUserSessionsRow, error)
 	// A user's requests, oldest first, with the node's current id and name, the observer that polls the repeater and
-	// the newest trusted reading. No password column is read; poller_id is the nil uuid when nobody polls it.
-	ListUserTelemetryRequests(ctx context.Context, userID uuid.UUID) ([]ListUserTelemetryRequestsRow, error)
+	// the newest trusted reading. No password column is read; poller_id is the nil uuid when nobody polls it. The
+	// poller's own claim is live when received after received_after: poller_claim_at is null without one, and
+	// poller_claimed says whether that claim lists the repeater (poller_state is its state then).
+	ListUserTelemetryRequests(ctx context.Context, arg ListUserTelemetryRequestsParams) ([]ListUserTelemetryRequestsRow, error)
 	// search is a LIKE pattern with its wildcards already escaped, or empty for everyone. The cursor is the last row of
 	// the previous page; the first page passes a far-future time and the max uuid.
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error)
