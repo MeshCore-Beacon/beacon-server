@@ -9651,6 +9651,9 @@ const docTemplate = `{
                     "description": "matched transport scope name e.g. \"#bc\"",
                     "type": "string"
                 },
+                "traceQuality": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality"
+                },
                 "transportCodes": {
                     "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PacketTransportCodes"
                 }
@@ -9781,6 +9784,13 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "sourceBroker": {
+                    "type": "string"
+                },
+                "traceQuality": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality"
+                },
+                "wirePathBytes": {
+                    "description": "Exact on-air TRACE SNR bytes, before the display path substitution.",
                     "type": "string"
                 }
             }
@@ -11200,6 +11210,9 @@ const docTemplate = `{
                     "description": "hex-encoded packet hash",
                     "type": "string"
                 },
+                "quality": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality"
+                },
                 "rawPath": {
                     "description": "hops as received in the packet",
                     "type": "array",
@@ -11253,6 +11266,9 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "quality": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality"
                 },
                 "snrValues": {
                     "description": "SNR per hop from the most complete observation",
@@ -11431,6 +11447,21 @@ const docTemplate = `{
                 "ticket": {
                     "type": "string",
                     "example": "AAABmZ1s4CgLBvU1n1yN3v8hQm9YtVq2"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality": {
+            "type": "object",
+            "properties": {
+                "reasons": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "status": {
+                    "description": "supported, suspect, or ambiguous; supported is not authenticated",
+                    "type": "string"
                 }
             }
         },

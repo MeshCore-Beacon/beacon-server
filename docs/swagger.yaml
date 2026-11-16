@@ -1571,6 +1571,8 @@ definitions:
       scope:
         description: matched transport scope name e.g. "#bc"
         type: string
+      traceQuality:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality'
       transportCodes:
         $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PacketTransportCodes'
     type: object
@@ -1669,6 +1671,11 @@ definitions:
       snr:
         type: number
       sourceBroker:
+        type: string
+      traceQuality:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality'
+      wirePathBytes:
+        description: Exact on-air TRACE SNR bytes, before the display path substitution.
         type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.PacketObservationSummary:
@@ -2646,6 +2653,8 @@ definitions:
       packetHash:
         description: hex-encoded packet hash
         type: string
+      quality:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality'
       rawPath:
         description: hops as received in the packet
         items:
@@ -2685,6 +2694,8 @@ definitions:
         items:
           type: string
         type: array
+      quality:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality'
       snrValues:
         description: SNR per hop from the most complete observation
         items:
@@ -2805,6 +2816,16 @@ definitions:
         type: integer
       ticket:
         example: AAABmZ1s4CgLBvU1n1yN3v8hQm9YtVq2
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_tracequality.Quality:
+    properties:
+      reasons:
+        items:
+          type: string
+        type: array
+      status:
+        description: supported, suspect, or ambiguous; supported is not authenticated
         type: string
     type: object
   internal_api_handlers.APIError:
