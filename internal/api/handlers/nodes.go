@@ -329,7 +329,7 @@ func listNodeObservations(reader api.Reader) http.HandlerFunc {
 //	@Tags		Nodes
 //	@Produce	json
 //	@Param		nodeId	path		string	true	"Node UUID"
-//	@Param		range	query		string	false	"Trailing window as a Go duration, max 720h (default 24h)"
+//	@Param		range	query		string	false	"Trailing hourly window as a Go duration, from 1h to 720h (default 24h)"
 //	@Success	200		{object}	api.NodeActivity
 //	@Failure	400		{object}	handlers.APIError
 //	@Failure	404		{object}	handlers.APIError
@@ -348,8 +348,8 @@ func getNodeActivity(reader api.Reader) http.HandlerFunc {
 			rangeParam = "24h"
 		}
 		window, err := time.ParseDuration(rangeParam)
-		if err != nil || window <= 0 || window > 720*time.Hour {
-			respondError(w, http.StatusBadRequest, "invalid range, use a duration up to 720h e.g. 24h, 168h, 720h")
+		if err != nil || window < time.Hour || window > 720*time.Hour {
+			respondError(w, http.StatusBadRequest, "invalid range, use a duration from 1h to 720h e.g. 24h, 168h, 720h")
 			return
 		}
 		activity, err := reader.GetNodeActivity(r.Context(), nodeID, window)

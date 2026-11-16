@@ -4662,7 +4662,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Trailing window as a Go duration, max 720h (default 24h)",
+                        "description": "Trailing hourly window as a Go duration, from 1h to 720h (default 24h)",
                         "name": "range",
                         "in": "query"
                     }
