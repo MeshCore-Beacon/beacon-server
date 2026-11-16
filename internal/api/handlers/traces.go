@@ -54,19 +54,28 @@ func listTraceTags(reader api.Reader) http.HandlerFunc {
 		}
 		var since, until, cursor time.Time
 		if v := r.URL.Query().Get("since"); v != "" {
-			if ms, err := strconv.ParseInt(v, 10, 64); err == nil {
-				since = time.UnixMilli(ms)
+			ms, err := strconv.ParseInt(v, 10, 64)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "since must be epoch milliseconds")
+				return
 			}
+			since = time.UnixMilli(ms)
 		}
 		if v := r.URL.Query().Get("until"); v != "" {
-			if ms, err := strconv.ParseInt(v, 10, 64); err == nil {
-				until = time.UnixMilli(ms)
+			ms, err := strconv.ParseInt(v, 10, 64)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "until must be epoch milliseconds")
+				return
 			}
+			until = time.UnixMilli(ms)
 		}
 		if v := r.URL.Query().Get("cursor"); v != "" {
-			if ms, err := strconv.ParseInt(v, 10, 64); err == nil {
-				cursor = time.UnixMilli(ms)
+			ms, err := strconv.ParseInt(v, 10, 64)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "cursor must be epoch milliseconds")
+				return
 			}
+			cursor = time.UnixMilli(ms)
 		}
 		// cursorTag breaks ties within the cursor's millisecond.
 		cursorTag := strings.ToLower(r.URL.Query().Get("cursorTag"))
