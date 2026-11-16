@@ -47,18 +47,19 @@ func (q *Queries) EnsureUserAtlas(ctx context.Context, userID uuid.UUID) error {
 }
 
 const insertUserAtlasPin = `-- name: InsertUserAtlasPin :exec
-INSERT INTO user_atlas_pins (user_id, position, kind, public_key, name, tiles, view)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO user_atlas_pins (user_id, position, kind, public_key, name, tiles, view, telemetry_tiles)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type InsertUserAtlasPinParams struct {
-	UserID    uuid.UUID `json:"user_id"`
-	Position  int16     `json:"position"`
-	Kind      string    `json:"kind"`
-	PublicKey []byte    `json:"public_key"`
-	Name      string    `json:"name"`
-	Tiles     []string  `json:"tiles"`
-	View      *string   `json:"view"`
+	UserID         uuid.UUID `json:"user_id"`
+	Position       int16     `json:"position"`
+	Kind           string    `json:"kind"`
+	PublicKey      []byte    `json:"public_key"`
+	Name           string    `json:"name"`
+	Tiles          []string  `json:"tiles"`
+	View           *string   `json:"view"`
+	TelemetryTiles []string  `json:"telemetry_tiles"`
 }
 
 func (q *Queries) InsertUserAtlasPin(ctx context.Context, arg InsertUserAtlasPinParams) error {
@@ -70,21 +71,23 @@ func (q *Queries) InsertUserAtlasPin(ctx context.Context, arg InsertUserAtlasPin
 		arg.Name,
 		arg.Tiles,
 		arg.View,
+		arg.TelemetryTiles,
 	)
 	return err
 }
 
 const listUserAtlasPins = `-- name: ListUserAtlasPins :many
-SELECT position, kind, public_key, name, tiles, view FROM user_atlas_pins WHERE user_id = $1 ORDER BY position
+SELECT position, kind, public_key, name, tiles, view, telemetry_tiles FROM user_atlas_pins WHERE user_id = $1 ORDER BY position
 `
 
 type ListUserAtlasPinsRow struct {
-	Position  int16    `json:"position"`
-	Kind      string   `json:"kind"`
-	PublicKey []byte   `json:"public_key"`
-	Name      string   `json:"name"`
-	Tiles     []string `json:"tiles"`
-	View      *string  `json:"view"`
+	Position       int16    `json:"position"`
+	Kind           string   `json:"kind"`
+	PublicKey      []byte   `json:"public_key"`
+	Name           string   `json:"name"`
+	Tiles          []string `json:"tiles"`
+	View           *string  `json:"view"`
+	TelemetryTiles []string `json:"telemetry_tiles"`
 }
 
 func (q *Queries) ListUserAtlasPins(ctx context.Context, userID uuid.UUID) ([]ListUserAtlasPinsRow, error) {
@@ -103,6 +106,7 @@ func (q *Queries) ListUserAtlasPins(ctx context.Context, userID uuid.UUID) ([]Li
 			&i.Name,
 			&i.Tiles,
 			&i.View,
+			&i.TelemetryTiles,
 		); err != nil {
 			return nil, err
 		}
@@ -218,21 +222,22 @@ func (q *Queries) ObserverKeysByIDs(ctx context.Context, dollar_1 []uuid.UUID) (
 }
 
 const readUserAtlas = `-- name: ReadUserAtlas :many
-SELECT a.range, a.revision, p.position, p.kind, p.public_key, p.name, p.tiles, p.view
+SELECT a.range, a.revision, p.position, p.kind, p.public_key, p.name, p.tiles, p.view, p.telemetry_tiles
 FROM user_atlas a LEFT JOIN user_atlas_pins p ON p.user_id = a.user_id
 WHERE a.user_id = $1
 ORDER BY p.position
 `
 
 type ReadUserAtlasRow struct {
-	Range     string   `json:"range"`
-	Revision  int64    `json:"revision"`
-	Position  *int16   `json:"position"`
-	Kind      *string  `json:"kind"`
-	PublicKey []byte   `json:"public_key"`
-	Name      *string  `json:"name"`
-	Tiles     []string `json:"tiles"`
-	View      *string  `json:"view"`
+	Range          string   `json:"range"`
+	Revision       int64    `json:"revision"`
+	Position       *int16   `json:"position"`
+	Kind           *string  `json:"kind"`
+	PublicKey      []byte   `json:"public_key"`
+	Name           *string  `json:"name"`
+	Tiles          []string `json:"tiles"`
+	View           *string  `json:"view"`
+	TelemetryTiles []string `json:"telemetry_tiles"`
 }
 
 // The header and the pins in one statement, so they come from one snapshot. A user with no Atlas gets no rows.
@@ -254,6 +259,7 @@ func (q *Queries) ReadUserAtlas(ctx context.Context, userID uuid.UUID) ([]ReadUs
 			&i.Name,
 			&i.Tiles,
 			&i.View,
+			&i.TelemetryTiles,
 		); err != nil {
 			return nil, err
 		}
