@@ -1514,7 +1514,7 @@ SELECT public_key FROM nodes WHERE id = $1;
 
 -- name: GetNodeActivityHourly :many
 -- Hours before @tail_start come from the rollup; later ones aren't rolled yet and read raw rows, found through
--- the node's packets first heard in [@packet_from, @packet_until).
+-- the node's recent packets, including older packets heard again in the raw tail.
 WITH src AS (
   SELECT a.hour AS t, a.observations, a.snr_sum, a.snr_n, a.rssi_sum, a.rssi_n, a.hop_sum, a.hop_n
   FROM analytics_hourly_node_activity a
@@ -1528,7 +1528,9 @@ WITH src AS (
   CROSS JOIN LATERAL (SELECT CASE WHEN NOT (COALESCE(po.rssi, 0) = 0 AND COALESCE(po.snr, 0) = 0) THEN po.snr END AS snr,
                              CASE WHEN NOT (COALESCE(po.rssi, 0) = 0 AND COALESCE(po.snr, 0) = 0) THEN po.rssi END AS rssi) s
   WHERE p.origin_pubkey = @origin_pubkey::bytea
-    AND p.first_heard_at >= @packet_from::timestamptz AND p.first_heard_at < @packet_until::timestamptz
+    AND (p.first_heard_at >= @packet_from::timestamptz
+         OR p.last_heard_at >= GREATEST(@since::timestamptz, @tail_start::timestamptz))
+    AND p.first_heard_at < @packet_until::timestamptz
     AND po.heard_at >= GREATEST(@since::timestamptz, @tail_start::timestamptz) AND po.heard_at < @until::timestamptz
 )
 SELECT

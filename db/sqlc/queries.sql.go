@@ -790,7 +790,9 @@ WITH src AS (
   CROSS JOIN LATERAL (SELECT CASE WHEN NOT (COALESCE(po.rssi, 0) = 0 AND COALESCE(po.snr, 0) = 0) THEN po.snr END AS snr,
                              CASE WHEN NOT (COALESCE(po.rssi, 0) = 0 AND COALESCE(po.snr, 0) = 0) THEN po.rssi END AS rssi) s
   WHERE p.origin_pubkey = $1::bytea
-    AND p.first_heard_at >= $5::timestamptz AND p.first_heard_at < $6::timestamptz
+    AND (p.first_heard_at >= $5::timestamptz
+         OR p.last_heard_at >= GREATEST($2::timestamptz, $4::timestamptz))
+    AND p.first_heard_at < $6::timestamptz
     AND po.heard_at >= GREATEST($2::timestamptz, $4::timestamptz) AND po.heard_at < $3::timestamptz
 )
 SELECT
@@ -828,7 +830,7 @@ type GetNodeActivityHourlyRow struct {
 }
 
 // Hours before @tail_start come from the rollup; later ones aren't rolled yet and read raw rows, found through
-// the node's packets first heard in [@packet_from, @packet_until).
+// the node's recent packets, including older packets heard again in the raw tail.
 func (q *Queries) GetNodeActivityHourly(ctx context.Context, arg GetNodeActivityHourlyParams) ([]GetNodeActivityHourlyRow, error) {
 	rows, err := q.db.Query(ctx, getNodeActivityHourly,
 		arg.OriginPubkey,
