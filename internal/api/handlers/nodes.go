@@ -21,6 +21,7 @@ import (
 // NodesRouter mounts all /nodes routes onto a subrouter.
 //
 // GET  /nodes                       → listNodes
+// GET  /nodes/telemetry/latest      → listLatestNodeReadings
 // GET  /nodes/{nodeId}              → getNode
 // GET  /nodes/{nodeId}/observations → listNodeObservations
 // GET  /nodes/{nodeId}/activity     → getNodeActivity
@@ -36,6 +37,7 @@ func NodesRouter(reader api.Reader, pollingEnabled bool) http.Handler {
 		telemetryReader = unpolledReader{reader}
 	}
 	r.Get("/", listNodes(reader))
+	r.Get("/telemetry/latest", listLatestNodeReadings(telemetryReader))
 	r.Route("/{nodeId}", func(r chi.Router) {
 		r.Get("/", getNode(reader))
 		r.Get("/observations", listNodeObservations(reader))
@@ -63,11 +65,56 @@ func (u unpolledReader) GetNodeReadings(ctx context.Context, nodeID uuid.UUID, _
 	return nil, false, 0, u.exists(ctx, nodeID)
 }
 
+func (u unpolledReader) ListLatestNodeReadings(context.Context, []string, time.Time) ([]api.NodeLatestReading, error) {
+	return []api.NodeLatestReading{}, nil
+}
+
 func (u unpolledReader) GetNodePolling(ctx context.Context, nodeID uuid.UUID) (*api.NodePolling, error) {
 	if err := u.exists(ctx, nodeID); err != nil {
 		return nil, err
 	}
 	return &api.NodePolling{}, nil
+}
+
+// latestReadingsWindow is how old a reading the latest readings route still returns.
+const latestReadingsWindow = 7 * 24 * time.Hour
+
+// listLatestNodeReadings godoc
+//
+//	@Summary	Latest battery and temperature of every polled node
+//	@Tags		Nodes
+//	@Produce	json
+//	@Param		iata		query		string	false	"Filter by single IATA code (case-insensitive)"
+//	@Param		iatas		query		string	false	"Filter by multiple IATA codes, comma-separated e.g. YVR,YYJ"
+//	@Param		regionId	query		int		false	"Filter by region ID, expands to member IATAs"
+//	@Param		region		query		string	false	"Filter by region slug, expands to member IATAs"
+//	@Success	200			{object}	api.NodeLatestReadings
+//	@Failure	400			{object}	handlers.APIError
+//	@Failure	500			{object}	handlers.APIError
+//	@Failure	503			{object}	handlers.APIError	"The read took too long: retry after Retry-After seconds"
+//	@Router		/nodes/telemetry/latest [get]
+func listLatestNodeReadings(reader api.Reader) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		iatas := parseIATAs(r)
+		if regionIDStr := r.URL.Query().Get("regionId"); regionIDStr != "" || r.URL.Query().Get("region") != "" {
+			regionIATAs, err := resolveRegionIATAs(r.Context(), regionIDStr, r.URL.Query().Get("region"), reader)
+			if err != nil {
+				respondRegionError(w, err)
+				return
+			}
+			iatas = append(iatas, regionIATAs...)
+		}
+		now := time.Now()
+		items, err := reader.ListLatestNodeReadings(r.Context(), iatas, now.Add(-latestReadingsWindow))
+		if err != nil {
+			respondReaderError(w, err, "internal server error")
+			return
+		}
+		if items == nil {
+			items = []api.NodeLatestReading{}
+		}
+		respond(w, http.StatusOK, api.NodeLatestReadings{GeneratedAt: now.UnixMilli(), Items: items})
+	}
 }
 
 // listNodes godoc

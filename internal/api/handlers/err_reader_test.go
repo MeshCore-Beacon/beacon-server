@@ -114,6 +114,10 @@ func (e errReader) ListNodesSorted(ctx context.Context, nodeType int16, iatas []
 	return v, e.err
 }
 
+func (e errReader) ListLatestNodeReadings(ctx context.Context, iatas []string, since time.Time) (v []api.NodeLatestReading, err error) {
+	return v, e.err
+}
+
 func (e errReader) GetNode(ctx context.Context, nodeID uuid.UUID) (v *api.Node, err error) {
 	return v, e.err
 }
