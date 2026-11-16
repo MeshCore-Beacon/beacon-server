@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,7 +85,7 @@ func (m *memRequests) UserRequestTarget(_ context.Context, userID, id uuid.UUID)
 	return nil, ErrRequestNotFound
 }
 
-func (m *memRequests) UserTelemetryRequests(_ context.Context, userID uuid.UUID) ([]RequestRow, error) {
+func (m *memRequests) UserTelemetryRequests(_ context.Context, userID uuid.UUID, _ time.Time) ([]RequestRow, error) {
 	var out []RequestRow
 	for k, st := range m.states {
 		for _, r := range st.Requests {
@@ -221,5 +222,16 @@ func TestRequestServiceUpdateAndDelete(t *testing.T) {
 	}
 	if s.Limit() != 3 {
 		t.Error("limit")
+	}
+}
+
+func TestClaimState(t *testing.T) {
+	long := strings.Repeat("x", 40)
+	for in, want := range map[string]string{
+		"not_direct": "not_direct", "OK": "ok", "Login_Failed": "login_failed", "": "", "weird\x00State": "weirdstate", long: long[:32],
+	} {
+		if got := ClaimState(in); got != want {
+			t.Errorf("ClaimState(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
