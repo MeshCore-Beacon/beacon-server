@@ -97,7 +97,7 @@ func Decide(in ElectionInput, cfg config.ResolvedPolling) Election {
 			}
 		}
 		if !hasLocal {
-			out, wait := ElectRequested(in.RequestCands, in.Current, approved || cfg.RequestObservers != config.RequestObserversAll)
+			out, wait := ElectRequested(in.RequestCands, in.Current, approved || cfg.RequestObservers == config.RequestObserversApproved)
 			return Election{Assignments: out, WaitReason: wait}
 		}
 	}

@@ -298,9 +298,9 @@ func (s *Service) Owners(ctx context.Context, c Caller) (OwnersAnswer, error) {
 	return ans, nil
 }
 
-// requestsNeedApproval is true unless the operator set polling.request_observers to all.
+// requestsNeedApproval is true when the operator set polling.request_observers to approved.
 func (s *Service) requestsNeedApproval() bool {
-	return s.cfg.Authority == config.PollingAuthorityApproved || s.cfg.RequestObservers != config.RequestObserversAll
+	return s.cfg.Authority == config.PollingAuthorityApproved || s.cfg.RequestObservers == config.RequestObserversApproved
 }
 
 // ElectTarget recomputes the order of observers for one repeater. No candidates clears it.

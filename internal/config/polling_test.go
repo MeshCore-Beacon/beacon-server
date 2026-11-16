@@ -36,11 +36,14 @@ func TestPollingDefaults(t *testing.T) {
 
 func TestPollingRequestSettings(t *testing.T) {
 	r, err := PollingConfig{}.Resolve()
-	if err != nil || r.RequestsPerUser != 3 || r.OfflineDisableDays != 7 || r.RequestObservers != RequestObserversApproved {
+	if err != nil || r.RequestsPerUser != 3 || r.OfflineDisableDays != 7 || r.RequestObservers != RequestObserversAll {
 		t.Fatalf("defaults: %+v %v", r, err)
 	}
 	if r, err = (PollingConfig{RequestObservers: "all"}).Resolve(); err != nil || r.RequestObservers != RequestObserversAll {
 		t.Errorf("all stays available: %+v %v", r, err)
+	}
+	if r, err = (PollingConfig{RequestObservers: "approved"}).Resolve(); err != nil || r.RequestObservers != RequestObserversApproved {
+		t.Errorf("approved stays available: %+v %v", r, err)
 	}
 	// An explicit 0 turns requests off; it is not the default.
 	zero, five := 0, 5
