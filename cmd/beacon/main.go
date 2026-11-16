@@ -499,6 +499,12 @@ func main() {
 		slog.Info("accounts mode", "component", "startup", "mode", accountsMode, "registration_open", resolvedAccounts.RegistrationOpen)
 	}
 
+	resolvedDisplay, err := cfg.Display.Resolve()
+	if err != nil {
+		slog.Error("invalid display configuration", "component", "startup", "error", err)
+		os.Exit(1)
+	}
+
 	// ── Repeater polling ─────────────────────────────────────────────────────
 	// config.Load already validated the section. The write-side service sits on the ingest store, which has a
 	// pool for the claim and election transactions, and is not wrapped by the presence coalescer.
@@ -562,6 +568,7 @@ func main() {
 	alertSender, err := newAlertSender(alertDelivery, accountMailer, maintStore, resolvedAccounts.PublicURL, os.Getenv("BEACON_PUSH_CREDENTIALS"))
 	if alertSender != nil {
 		alertSender.SetInstanceName(resolvedAccounts.InstanceName)
+		alertSender.SetTemperatureUnit(resolvedDisplay.TemperatureUnit)
 	}
 	if err != nil {
 		slog.Error("invalid alert delivery", "component", "startup", "error", err)
@@ -746,9 +753,10 @@ func main() {
 			"/polling": handlers.PollingAdminRouter(pollingAdmin, handlers.PollingAdminConfig{
 				Paused: resolvedPolling.Paused, Authority: resolvedPolling.Authority, ExcludedNodes: resolvedPolling.ExcludedNodes}),
 		},
-		GuestPolling:   guestPolling,
-		PollingEnabled: resolvedPolling.Enabled,
-		AccountsMode:   accountsMode, RegistrationOpen: resolvedAccounts.RegistrationOpen, PortalURL: portalURL, AlertDelivery: alertDelivery,
+		GuestPolling:    guestPolling,
+		PollingEnabled:  resolvedPolling.Enabled,
+		TemperatureUnit: resolvedDisplay.TemperatureUnit, DistanceUnit: resolvedDisplay.DistanceUnit,
+		AccountsMode: accountsMode, RegistrationOpen: resolvedAccounts.RegistrationOpen, PortalURL: portalURL, AlertDelivery: alertDelivery,
 		Accounts: accountsSvc, AuthOptions: authOptions, MeMounts: meMounts, TelemetryRequests: requestsSvc != nil,
 		Guards:        guard,
 		APIPlanLayout: string(layout),

@@ -27,7 +27,7 @@ type PollingConfig struct {
 	// RequestsPerUser is how many telemetry requests one user may hold; unset is 3, 0 turns requests off.
 	RequestsPerUser    *int   `yaml:"requests_per_user"`
 	OfflineDisableDays int    `yaml:"offline_disable_days"` // default 7
-	RequestObservers   string `yaml:"request_observers"`    // approved (default) or all
+	RequestObservers   string `yaml:"request_observers"`    // all (default) or approved
 }
 
 // ResolvedPolling is PollingConfig with defaults applied and values parsed.
@@ -101,7 +101,7 @@ func (p PollingConfig) Resolve() (ResolvedPolling, error) {
 	}
 	r.RequestObservers = p.RequestObservers
 	if r.RequestObservers == "" {
-		r.RequestObservers = RequestObserversApproved
+		r.RequestObservers = RequestObserversAll
 	}
 	if r.DirectWindow == 0 {
 		r.DirectWindow = time.Hour

@@ -43,6 +43,8 @@ type Options struct {
 	GuestPolling handlers.GuestPolling
 	// PollingEnabled is reported as features.polling in /info.
 	PollingEnabled bool
+	// TemperatureUnit (c or f) and DistanceUnit (metric or imperial) are reported in /info display; empty reads as c and metric.
+	TemperatureUnit, DistanceUnit string
 	// AccountsMode is reported as features.accounts: "local" or anything else for off.
 	AccountsMode string
 	// RegistrationOpen is reported as features.registration while accounts are local.

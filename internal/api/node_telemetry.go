@@ -288,3 +288,18 @@ type NodePolling struct {
 	Poller          *NodePollingObserver  `json:"poller"`          // null when nobody is assigned
 	Standbys        []NodePollingObserver `json:"standbys"`
 }
+
+// NodeLatestReading is the newest trusted battery and temperature of one polled node. SampledAt is the later of
+// the two readings' times.
+type NodeLatestReading struct {
+	NodeID       uuid.UUID `json:"nodeId"`
+	SampledAt    int64     `json:"sampledAt"` // epoch ms
+	BatteryMV    *int32    `json:"batteryMv,omitempty"`
+	TemperatureC *float32  `json:"temperatureC,omitempty"`
+}
+
+// NodeLatestReadings is the response of the latest readings route.
+type NodeLatestReadings struct {
+	GeneratedAt int64               `json:"generatedAt"` // epoch ms
+	Items       []NodeLatestReading `json:"items"`
+}

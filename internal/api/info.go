@@ -38,6 +38,14 @@ type Info struct {
 	BuildRevision string `json:"buildRevision,omitempty"`
 	// Features tells clients which optional parts of the API this server offers.
 	Features InfoFeatures `json:"features"`
+	// Display holds the instance-wide units clients show.
+	Display InfoDisplay `json:"display"`
+}
+
+// InfoDisplay is the unit choice for this instance. Wire values stay Celsius and metres.
+type InfoDisplay struct {
+	TemperatureUnit string `json:"temperatureUnit" enums:"c,f" example:"c"`
+	DistanceUnit    string `json:"distanceUnit" enums:"metric,imperial" example:"metric"`
 }
 
 // InfoFeatures lists the optional features a server offers. Clients hide what is off.
@@ -55,6 +63,8 @@ type InfoFeatures struct {
 	// AtlasTelemetry is true when the server accepts the telemetry view and telemetryTiles on Atlas pins and the 72h
 	// node telemetry range. Always true on this version.
 	AtlasTelemetry bool `json:"atlasTelemetry" example:"true"`
+	// MapTelemetry is true when the server returns recent telemetry readings for map labels. Always true on this version.
+	MapTelemetry bool `json:"mapTelemetry" example:"true"`
 }
 
 // WSTicket lets a client that sends no Origin open /ws, in the X-Beacon-Ticket header.

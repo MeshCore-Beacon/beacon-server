@@ -80,7 +80,7 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 		Mobile: api.AdminMobileConfig{MinAppVersion: opts.MinAppVersion},
 		Web:    api.AdminWebConfig{MinWebVersion: opts.MinWebVersion},
 	}
-	features := api.InfoFeatures{Polling: opts.PollingEnabled, Accounts: "off", TelemetryRequests: opts.TelemetryRequests, AtlasTelemetry: true}
+	features := api.InfoFeatures{Polling: opts.PollingEnabled, Accounts: "off", TelemetryRequests: opts.TelemetryRequests, AtlasTelemetry: true, MapTelemetry: true}
 	switch opts.AccountsMode {
 	case "local":
 		features.Accounts, features.Registration = "local", opts.RegistrationOpen
@@ -90,7 +90,14 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 	if opts.AlertDelivery != "" {
 		features.Alerts, features.AlertDelivery = true, opts.AlertDelivery
 	}
-	info := api.Info{ServerVersion: opts.ServerVersion, Features: features, BuildVersion: opts.BuildVersion, BuildRevision: opts.BuildRevision}
+	display := api.InfoDisplay{TemperatureUnit: "c", DistanceUnit: "metric"}
+	if opts.TemperatureUnit != "" {
+		display.TemperatureUnit = opts.TemperatureUnit
+	}
+	if opts.DistanceUnit != "" {
+		display.DistanceUnit = opts.DistanceUnit
+	}
+	info := api.Info{ServerVersion: opts.ServerVersion, Features: features, Display: display, BuildVersion: opts.BuildVersion, BuildRevision: opts.BuildRevision}
 	if opts.MinAppVersion != "" {
 		info.MinAppVersion = &opts.MinAppVersion
 	}
