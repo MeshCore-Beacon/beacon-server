@@ -2777,6 +2777,21 @@ func (mr *MockQuerierMockRecorder) InsertUserAtlasPin(ctx, arg any) *gomock.Call
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertUserAtlasPin", reflect.TypeOf((*MockQuerier)(nil).InsertUserAtlasPin), ctx, arg)
 }
 
+// LatestNodeReadings mocks base method.
+func (m *MockQuerier) LatestNodeReadings(ctx context.Context, arg db.LatestNodeReadingsParams) ([]db.LatestNodeReadingsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LatestNodeReadings", ctx, arg)
+	ret0, _ := ret[0].([]db.LatestNodeReadingsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// LatestNodeReadings indicates an expected call of LatestNodeReadings.
+func (mr *MockQuerierMockRecorder) LatestNodeReadings(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LatestNodeReadings", reflect.TypeOf((*MockQuerier)(nil).LatestNodeReadings), ctx, arg)
+}
+
 // LatestNodeStatusReadingBefore mocks base method.
 func (m *MockQuerier) LatestNodeStatusReadingBefore(ctx context.Context, arg db.LatestNodeStatusReadingBeforeParams) ([]db.LatestNodeStatusReadingBeforeRow, error) {
 	m.ctrl.T.Helper()

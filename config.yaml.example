@@ -261,6 +261,11 @@ scopes:
   - name: "#west"
     region: western-canada
 
+# Units clients show. Any other value stops startup.
+display:
+  temperature_unit: c   # c or f
+  distance_unit: metric # metric or imperial
+
 telemetry:
   retention: 744h   # 31 days
   resolution: 1h    # store one snapshot per observer per hour
@@ -431,8 +436,10 @@ cache:
 #  authority: evidence         # evidence or approved; approved elects only observers you approve
 #  requests_per_user: 3        # telemetry requests one user may hold; 0 turns requests off
 #  offline_disable_days: 7     # a request is disabled when no observer has heard its repeater for this long
-#  request_observers: approved # approved (default) or all; requested repeaters, and their guest passwords, go only to
-#                              # observers you approve under /api/v1/admin/polling; all also needs advert evidence
+#  request_observers: all      # all (default) or approved. all: any observer with advert evidence for a requested
+#                              # repeater can be handed it and its guest password. approved: only observers you
+#                              # approve under /api/v1/admin/polling; advert evidence is required in both modes.
+#                              # Set approved if you want to vet observers before they receive guest passwords.
 #                              # Requests also need accounts on and BEACON_SECRET_KEY (32 random bytes, base64)
 
 # User accounts: sign-in for the web app and the mobile app. Off by default; with it off
