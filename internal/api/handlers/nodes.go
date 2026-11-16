@@ -407,7 +407,7 @@ func isHexString(s string) bool {
 }
 
 // nodeTelemetryRanges maps each allowed range to its default bucket size.
-var nodeTelemetryRanges = map[string]string{"24h": "1h", "168h": "6h", "720h": "24h"}
+var nodeTelemetryRanges = map[string]string{"24h": "1h", "72h": "1h", "168h": "6h", "720h": "24h"}
 
 var nodeTelemetryIntervals = map[string]time.Duration{"1h": time.Hour, "6h": 6 * time.Hour, "24h": 24 * time.Hour}
 
@@ -418,8 +418,8 @@ var nodeTelemetryIntervals = map[string]time.Duration{"1h": time.Hour, "6h": 6 *
 //	@Tags			Nodes
 //	@Produce		json
 //	@Param			nodeId		path		string	true	"Node UUID"
-//	@Param			range		query		string	false	"Window: 24h, 168h (default) or 720h"	Enums(24h, 168h, 720h)
-//	@Param			interval	query		string	false	"Bucket size: 1h, 6h or 24h. Defaults to 1h for 24h, 6h for 168h, 24h for 720h"	Enums(1h, 6h, 24h)
+//	@Param			range		query		string	false	"Window: 24h, 72h, 168h (default) or 720h"	Enums(24h, 72h, 168h, 720h)
+//	@Param			interval	query		string	false	"Bucket size: 1h, 6h or 24h. Defaults to 1h for 24h and 72h, 6h for 168h, 24h for 720h"	Enums(1h, 6h, 24h)
 //	@Param			include		query		string	false	"untrusted to include readings from observers without advert evidence for the node"	Enums(untrusted)
 //	@Success		200			{object}	api.NodeTelemetry
 //	@Failure		400			{object}	handlers.APIError
@@ -441,7 +441,7 @@ func getNodeTelemetry(reader api.Reader) http.HandlerFunc {
 		}
 		defaultInterval, ok := nodeTelemetryRanges[rangeParam]
 		if !ok {
-			respondError(w, http.StatusBadRequest, "invalid range, use 24h, 168h or 720h")
+			respondError(w, http.StatusBadRequest, "invalid range, use 24h, 72h, 168h or 720h")
 			return
 		}
 		intervalParam := q.Get("interval")

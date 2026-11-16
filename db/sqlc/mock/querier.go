@@ -4128,18 +4128,18 @@ func (mr *MockQuerierMockRecorder) ListUserSessions(ctx, arg any) *gomock.Call {
 }
 
 // ListUserTelemetryRequests mocks base method.
-func (m *MockQuerier) ListUserTelemetryRequests(ctx context.Context, userID uuid.UUID) ([]db.ListUserTelemetryRequestsRow, error) {
+func (m *MockQuerier) ListUserTelemetryRequests(ctx context.Context, arg db.ListUserTelemetryRequestsParams) ([]db.ListUserTelemetryRequestsRow, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListUserTelemetryRequests", ctx, userID)
+	ret := m.ctrl.Call(m, "ListUserTelemetryRequests", ctx, arg)
 	ret0, _ := ret[0].([]db.ListUserTelemetryRequestsRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ListUserTelemetryRequests indicates an expected call of ListUserTelemetryRequests.
-func (mr *MockQuerierMockRecorder) ListUserTelemetryRequests(ctx, userID any) *gomock.Call {
+func (mr *MockQuerierMockRecorder) ListUserTelemetryRequests(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListUserTelemetryRequests", reflect.TypeOf((*MockQuerier)(nil).ListUserTelemetryRequests), ctx, userID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListUserTelemetryRequests", reflect.TypeOf((*MockQuerier)(nil).ListUserTelemetryRequests), ctx, arg)
 }
 
 // ListUsers mocks base method.

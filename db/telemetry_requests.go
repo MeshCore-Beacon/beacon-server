@@ -218,8 +218,8 @@ func (s *Store) UserRequestTarget(ctx context.Context, userID, requestID uuid.UU
 }
 
 // UserTelemetryRequests lists the user's requests, oldest first. No password is read.
-func (s *Store) UserTelemetryRequests(ctx context.Context, userID uuid.UUID) ([]polling.RequestRow, error) {
-	rows, err := s.q.ListUserTelemetryRequests(ctx, userID)
+func (s *Store) UserTelemetryRequests(ctx context.Context, userID uuid.UUID, liveAfter time.Time) ([]polling.RequestRow, error) {
+	rows, err := s.q.ListUserTelemetryRequests(ctx, sqlc.ListUserTelemetryRequestsParams{UserID: userID, ReceivedAfter: ts(liveAfter)})
 	if err != nil {
 		return nil, err
 	}
@@ -237,6 +237,13 @@ func (s *Store) UserTelemetryRequests(ctx context.Context, userID uuid.UUID) ([]
 		if r.PollerID != uuid.Nil {
 			id := r.PollerID
 			row.PollerID = &id
+			row.PollerState, row.PollerStateAt = polling.StateNotClaimed, timePtr(r.PollerClaimAt)
+			if r.PollerClaimed {
+				row.PollerState = polling.ClaimState(r.PollerState)
+				if row.PollerState == "" { // a claim that sent no state has not been tried yet
+					row.PollerState = "pending"
+				}
+			}
 		}
 		out = append(out, row)
 	}
