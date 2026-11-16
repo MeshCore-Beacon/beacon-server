@@ -143,6 +143,7 @@ type statsWire struct {
 type wireInt struct{ v *int64 }
 
 func (w *wireInt) UnmarshalJSON(b []byte) error {
+	w.v = nil
 	if string(b) == "null" {
 		return nil
 	}
