@@ -48,9 +48,9 @@ type ResolvedPolling struct {
 	RequestObservers   string
 }
 
-// Who may take a requested repeater and be sent its guest password: only operator-approved observers (the default),
-// or any observer that opted in and has advert evidence. Evidence comes from packets the observer uploads itself, so
-// it alone does not say the observer can be trusted with a password.
+// Who may take a requested repeater and be sent its guest password: any observer that opted in and has advert
+// evidence (the default), or only operator-approved observers. Evidence comes from packets the observer uploads
+// itself, so it alone does not say the observer can be trusted with a password.
 const (
 	RequestObserversAll      = "all"
 	RequestObserversApproved = "approved"
