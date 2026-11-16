@@ -24,10 +24,11 @@ type revisionSource interface {
 
 // revisionMemo spares Postgres a revision read on every cached stats request.
 type revisionMemo struct {
-	mu  sync.Mutex
-	rev int64
-	at  time.Time
-	now func() time.Time
+	once sync.Once
+	gate chan struct{}
+	rev  int64
+	at   time.Time
+	now  func() time.Time
 }
 
 // get returns the analytics revision; ok is false when the inner reader can't supply one.
@@ -40,8 +41,18 @@ func (m *revisionMemo) get(ctx context.Context, inner api.Reader) (rev int64, ok
 	if m.now != nil {
 		now = m.now
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	// Serialize refreshes without trapping canceled requests behind a slow read.
+	// The owner keeps its own context; a failed read leaves the next caller free to retry.
+	m.once.Do(func() { m.gate = make(chan struct{}, 1) })
+	select {
+	case m.gate <- struct{}{}:
+		defer func() { <-m.gate }()
+	case <-ctx.Done():
+		return 0, false
+	}
+	if ctx.Err() != nil {
+		return 0, false
+	}
 	if !m.at.IsZero() && now().Sub(m.at) < revisionTTL {
 		return m.rev, true
 	}
