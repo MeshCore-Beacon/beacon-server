@@ -123,8 +123,8 @@ func TestInfoAccountsFeatures(t *testing.T) {
 
 func TestInfoFeatures(t *testing.T) {
 	for polling, want := range map[bool]string{
-		true:  `"features":{"polling":true,"accounts":"off","registration":false,"telemetryRequests":false,"alerts":false,"atlasTelemetry":true}`,
-		false: `"features":{"polling":false,"accounts":"off","registration":false,"telemetryRequests":false,"alerts":false,"atlasTelemetry":true}`,
+		true:  `"features":{"polling":true,"accounts":"off","registration":false,"telemetryRequests":false,"alerts":false,"atlasTelemetry":true,"mapTelemetry":true}`,
+		false: `"features":{"polling":false,"accounts":"off","registration":false,"telemetryRequests":false,"alerts":false,"atlasTelemetry":true,"mapTelemetry":true}`,
 	} {
 		handler := New(nil, nil, nil, Options{ServerVersion: "2.0.2", PollingEnabled: polling})
 		response := httptest.NewRecorder()
@@ -132,6 +132,23 @@ func TestInfoFeatures(t *testing.T) {
 		if body := response.Body.String(); response.Code != http.StatusOK || !strings.Contains(body, want) ||
 			!strings.Contains(body, `"minAppVersion":null`) || !strings.Contains(body, `"serverVersion":"2.0.2"`) {
 			t.Errorf("polling=%v: %d %s", polling, response.Code, body)
+		}
+	}
+}
+
+func TestInfoDisplay(t *testing.T) {
+	for name, tc := range map[string]struct {
+		opts Options
+		want string
+	}{
+		"default":  {Options{}, `"display":{"temperatureUnit":"c","distanceUnit":"metric"}`},
+		"imperial": {Options{TemperatureUnit: "f", DistanceUnit: "imperial"}, `"display":{"temperatureUnit":"f","distanceUnit":"imperial"}`},
+	} {
+		handler := New(nil, nil, nil, tc.opts)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/info", nil))
+		if body := response.Body.String(); response.Code != http.StatusOK || !strings.Contains(body, tc.want) || !strings.Contains(body, `"mapTelemetry":true`) {
+			t.Errorf("%s: %d %s", name, response.Code, body)
 		}
 	}
 }
