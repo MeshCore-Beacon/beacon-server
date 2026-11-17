@@ -216,6 +216,7 @@ iatas:
 regions:
   - slug: western-canada
     name: Western Canada
+    description: BC and Alberta   # optional, shown with the region
     display_order: 1
     center_lat: 51.0
     center_lng: -114.0
