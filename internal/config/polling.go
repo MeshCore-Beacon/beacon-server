@@ -57,7 +57,7 @@ const (
 )
 
 const (
-	defaultRequestsPerUser = 3
+	defaultRequestsPerUser = 6
 	maxRequestsPerUser     = 20
 	maxOfflineDisableDays  = 365
 )

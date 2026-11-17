@@ -473,9 +473,14 @@ func main() {
 	var accountMailer mail.Sender // nil while accounts are off
 	var authOptions handlers.AuthOptions
 	portalURL := ""
+	resolvedAtlas, err := cfg.Atlas.Resolve()
+	if err != nil {
+		slog.Error("invalid atlas configuration", "component", "startup", "error", err)
+		os.Exit(1)
+	}
 	var meMounts []handlers.MeMount
 	if resolvedAccounts.Enabled {
-		meMounts = append(meMounts, handlers.AtlasRoutes(maintStore))
+		meMounts = append(meMounts, handlers.AtlasRoutes(maintStore, resolvedAtlas.Limit))
 		accountsMode = "local"
 		var sender mail.Sender = mail.Discard{} // portal users have no address, so nothing is mailed
 		if !resolvedAccounts.Portal {
@@ -753,6 +758,7 @@ func main() {
 		GuestPolling:    guestPolling,
 		PollingEnabled:  resolvedPolling.Enabled,
 		TemperatureUnit: resolvedDisplay.TemperatureUnit, DistanceUnit: resolvedDisplay.DistanceUnit,
+		AtlasLimit:   resolvedAtlas.Limit,
 		AccountsMode: accountsMode, RegistrationOpen: resolvedAccounts.RegistrationOpen, PortalURL: portalURL, AlertDelivery: alertDelivery,
 		Accounts: accountsSvc, AuthOptions: authOptions, MeMounts: meMounts, TelemetryRequests: requestsSvc != nil,
 		Guards:        guard,

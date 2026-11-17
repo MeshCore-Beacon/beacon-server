@@ -322,7 +322,7 @@ definitions:
   github_com_MeshCore-Beacon_beacon-server_internal_api.Atlas:
     properties:
       limit:
-        example: 12
+        example: 20
         type: integer
       pins:
         items:
@@ -678,6 +678,10 @@ definitions:
         - $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.InfoFeatures'
         description: Features tells clients which optional parts of the API this server
           offers.
+      limits:
+        allOf:
+        - $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.InfoLimits'
+        description: Limits are the instance caps clients enforce before asking.
       minAppVersion:
         description: MinAppVersion is the oldest allowed app version (X.Y.Z); null
           means no requirement.
@@ -748,6 +752,14 @@ definitions:
       telemetryRequests:
         example: false
         type: boolean
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.InfoLimits:
+    properties:
+      atlas:
+        description: Atlas is the most cards one Atlas holds, in the browser or synced
+          to an account.
+        example: 20
+        type: integer
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.KnownRoute:
     properties:

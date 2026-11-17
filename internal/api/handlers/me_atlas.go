@@ -28,14 +28,14 @@ type AtlasStore interface {
 // A full Atlas with long names is a few KiB more than the usual body limit.
 const maxAtlasBody = 32 << 10
 
-// AtlasRoutes mounts GET and PUT /atlas on the /me router. A nil store mounts nothing.
-func AtlasRoutes(store AtlasStore) MeMount {
+// AtlasRoutes mounts GET and PUT /atlas on the /me router, holding at most limit pins. A nil store mounts nothing.
+func AtlasRoutes(store AtlasStore, limit int) MeMount {
 	return func(r chi.Router, writes func(http.Handler) http.Handler) {
 		if store == nil {
 			return
 		}
-		r.Get("/atlas", getAtlas(store))
-		r.With(writes).Put("/atlas", putAtlas(store))
+		r.Get("/atlas", getAtlas(store, limit))
+		r.With(writes).Put("/atlas", putAtlas(store, limit))
 	}
 }
 
@@ -48,7 +48,7 @@ func AtlasRoutes(store AtlasStore) MeMount {
 // @Success 200 {object} api.Atlas
 // @Failure 401 {object} map[string]APIError
 // @Router /me/atlas [get]
-func getAtlas(store AtlasStore) http.HandlerFunc {
+func getAtlas(store AtlasStore, limit int) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		u, _, _ := mw.UserFrom(r.Context())
 		a, err := store.UserAtlas(r.Context(), u.ID)
@@ -56,6 +56,7 @@ func getAtlas(store AtlasStore) http.HandlerFunc {
 			respondError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
+		a.Limit = limit
 		respond(w, http.StatusOK, a)
 	}
 }
@@ -72,7 +73,7 @@ func getAtlas(store AtlasStore) http.HandlerFunc {
 // @Failure 400,401,403,413,415,422,429,503 {object} map[string]APIError
 // @Failure 409 {object} api.AtlasConflict
 // @Router /me/atlas [put]
-func putAtlas(store AtlasStore) http.HandlerFunc {
+func putAtlas(store AtlasStore, limit int) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var in api.PutAtlasRequest
 		if !decodeBodyMax(w, r, &in, maxAtlasBody) {
@@ -84,7 +85,7 @@ func putAtlas(store AtlasStore) http.HandlerFunc {
 			respondError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
-		rng, pins, err := api.ValidateAtlasPut(in, keys)
+		rng, pins, err := api.ValidateAtlasPut(in, keys, limit)
 		if err != nil {
 			var bad *api.AtlasInvalid
 			if errors.As(err, &bad) {
@@ -104,6 +105,7 @@ func putAtlas(store AtlasStore) http.HandlerFunc {
 			return
 		}
 		if ok {
+			doc.Limit = limit
 			respond(w, http.StatusOK, doc)
 			return
 		}
@@ -113,6 +115,7 @@ func putAtlas(store AtlasStore) http.HandlerFunc {
 			respondError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
+		cur.Limit = limit
 		respond(w, http.StatusConflict, api.AtlasConflict{
 			Error:   api.AtlasConflictError{Code: "atlas_conflict", Message: "The Atlas was changed elsewhere."},
 			Current: cur,
