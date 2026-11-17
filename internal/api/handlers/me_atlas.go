@@ -25,7 +25,6 @@ type AtlasStore interface {
 	ReplaceUserAtlas(ctx context.Context, userID uuid.UUID, base int64, rng string, pins []api.StoredPin) (doc api.Atlas, ok bool, err error)
 }
 
-// A full Atlas with long names is a few KiB more than the usual body limit.
 // Allow 100 pins with 160-character names even when JSON uses surrogate escapes.
 const maxAtlasBody = 256 << 10
 
