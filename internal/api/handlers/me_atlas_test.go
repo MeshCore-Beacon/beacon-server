@@ -90,7 +90,7 @@ func TestMeAtlas(t *testing.T) {
 	w = call(h, "PUT", "/me/atlas", put, c...)
 	b = jsonBody(t, w)
 	pin := b["pins"].([]any)[0].(map[string]any)
-	if w.Code != 200 || b["revision"] != float64(1) || b["range"] != "3d" || pin["kind"] != "node" || pin["publicKey"] != keyA ||
+	if w.Code != 200 || b["revision"] != float64(1) || b["range"] != "3d" || b["limit"] != float64(12) || pin["kind"] != "node" || pin["publicKey"] != keyA ||
 		pin["id"] != nil || pin["observerId"] != nil || pin["view"] != "heard" {
 		t.Fatalf("put: %d %s", w.Code, w.Body)
 	}
@@ -102,7 +102,7 @@ func TestMeAtlas(t *testing.T) {
 	w = call(h, "PUT", "/me/atlas", `{"baseRevision":0,"range":"24h","pins":[]}`, c...)
 	b = jsonBody(t, w)
 	cur, _ := b["current"].(map[string]any)
-	if w.Code != 409 || errCode(t, w) != "atlas_conflict" || cur["revision"] != float64(1) || cur["range"] != "3d" || len(cur["pins"].([]any)) != 1 {
+	if w.Code != 409 || errCode(t, w) != "atlas_conflict" || cur["revision"] != float64(1) || cur["range"] != "3d" || cur["limit"] != float64(12) || len(cur["pins"].([]any)) != 1 {
 		t.Fatalf("conflict: %d %s", w.Code, w.Body)
 	}
 	if a.rev != 1 {
