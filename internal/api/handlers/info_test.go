@@ -19,8 +19,8 @@ func TestGetInfo(t *testing.T) {
 		info api.Info
 		want string
 	}{
-		{"unset", api.Info{ServerVersion: "2.0.2", Features: api.InfoFeatures{Accounts: "off"}}, `{"minAppVersion":null,"minWebVersion":null,"serverVersion":"2.0.2","features":{"polling":false,"accounts":"off","registration":false,"telemetryRequests":false,"alerts":false,"atlasTelemetry":false,"mapTelemetry":false},"display":{"temperatureUnit":"","distanceUnit":""}}`},
-		{"set", api.Info{MinAppVersion: &version, MinWebVersion: &web, ServerVersion: "2.0.2", Features: api.InfoFeatures{Polling: true, Accounts: "off"}}, `{"minAppVersion":"0.1.1","minWebVersion":"2.0.3","serverVersion":"2.0.2","features":{"polling":true,"accounts":"off","registration":false,"telemetryRequests":false,"alerts":false,"atlasTelemetry":false,"mapTelemetry":false},"display":{"temperatureUnit":"","distanceUnit":""}}`},
+		{"unset", api.Info{ServerVersion: "2.0.2", Features: api.InfoFeatures{Accounts: "off"}}, `{"minAppVersion":null,"minWebVersion":null,"serverVersion":"2.0.2","features":{"polling":false,"accounts":"off","registration":false,"telemetryRequests":false,"alerts":false,"atlasTelemetry":false,"mapTelemetry":false},"display":{"temperatureUnit":"","distanceUnit":""},"limits":{"atlas":0}}`},
+		{"set", api.Info{MinAppVersion: &version, MinWebVersion: &web, ServerVersion: "2.0.2", Features: api.InfoFeatures{Polling: true, Accounts: "off"}}, `{"minAppVersion":"0.1.1","minWebVersion":"2.0.3","serverVersion":"2.0.2","features":{"polling":true,"accounts":"off","registration":false,"telemetryRequests":false,"alerts":false,"atlasTelemetry":false,"mapTelemetry":false},"display":{"temperatureUnit":"","distanceUnit":""},"limits":{"atlas":0}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := httptest.NewRecorder()

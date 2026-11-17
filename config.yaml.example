@@ -216,6 +216,7 @@ iatas:
 regions:
   - slug: western-canada
     name: Western Canada
+    description: BC and Alberta   # optional, shown with the region
     display_order: 1
     center_lat: 51.0
     center_lng: -114.0
@@ -265,6 +266,10 @@ scopes:
 display:
   temperature_unit: c   # c or f
   distance_unit: metric # metric or imperial
+
+# How many cards one Atlas holds, in the browser or synced to an account. 1 to 100.
+atlas:
+  limit: 20
 
 telemetry:
   retention: 744h   # 31 days
@@ -434,7 +439,7 @@ cache:
 #  excluded_nodes: []          # up to 16 public keys, 64 hex characters each
 #  paused: false
 #  authority: evidence         # evidence or approved; approved elects only observers you approve
-#  requests_per_user: 3        # telemetry requests one user may hold; 0 turns requests off
+#  requests_per_user: 6        # telemetry requests one user may hold; 0 turns requests off
 #  offline_disable_days: 7     # a request is disabled when no observer has heard its repeater for this long
 #  request_observers: all      # all (default) or approved. all: any observer with advert evidence for a requested
 #                              # repeater can be handed it and its guest password. approved: only observers you

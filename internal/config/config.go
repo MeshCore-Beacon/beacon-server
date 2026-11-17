@@ -58,6 +58,7 @@ type Config struct {
 	Accounts    AccountsConfig        `yaml:"accounts"`
 	Alerts      AlertsConfig          `yaml:"alerts"`
 	Display     DisplayConfig         `yaml:"display"`
+	Atlas       AtlasConfig           `yaml:"atlas"`
 }
 
 // ReadModelsConfig switches serving pages from each read model and paces their one-off backfills.
@@ -664,6 +665,9 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	if _, err := cfg.Display.Resolve(); err != nil {
+		return nil, err
+	}
+	if _, err := cfg.Atlas.Resolve(); err != nil {
 		return nil, err
 	}
 	if _, err := cfg.Accounts.Resolve(""); err != nil {

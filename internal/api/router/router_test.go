@@ -152,3 +152,20 @@ func TestInfoDisplay(t *testing.T) {
 		}
 	}
 }
+
+func TestInfoLimits(t *testing.T) {
+	for name, tc := range map[string]struct {
+		opts Options
+		want string
+	}{
+		"default":    {Options{}, `"limits":{"atlas":20}`},
+		"configured": {Options{AtlasLimit: 35}, `"limits":{"atlas":35}`},
+	} {
+		handler := New(nil, nil, nil, tc.opts)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/info", nil))
+		if body := response.Body.String(); response.Code != http.StatusOK || !strings.Contains(body, tc.want) {
+			t.Errorf("%s: %d %s", name, response.Code, body)
+		}
+	}
+}

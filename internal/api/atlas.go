@@ -13,9 +13,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// AtlasLimit is the most pins one Atlas holds.
-const AtlasLimit = 12
-
 const maxAtlasName = 160
 
 const (
@@ -72,7 +69,7 @@ func (p AtlasPin) MarshalJSON() ([]byte, error) {
 type Atlas struct {
 	Revision int64      `json:"revision" example:"7"`
 	Range    string     `json:"range" enums:"24h,3d"`
-	Limit    int        `json:"limit" example:"12"`
+	Limit    int        `json:"limit" example:"20"`
 	Pins     []AtlasPin `json:"pins"`
 }
 
@@ -145,15 +142,15 @@ func parseKey(s string) ([]byte, bool) {
 
 // ValidateAtlasPut checks a PUT and returns the pins to store. observerKeys maps an observer id (lower case) to its
 // public key for every id the request names that exists.
-func ValidateAtlasPut(req PutAtlasRequest, observerKeys map[uuid.UUID][]byte) (string, []StoredPin, error) {
+func ValidateAtlasPut(req PutAtlasRequest, observerKeys map[uuid.UUID][]byte, limit int) (string, []StoredPin, error) {
 	if req.BaseRevision < 0 {
 		return "", nil, &AtlasInvalid{"baseRevision must not be negative"}
 	}
 	if req.Range != "24h" && req.Range != "3d" {
 		return "", nil, &AtlasInvalid{"range must be 24h or 3d"}
 	}
-	if len(req.Pins) > AtlasLimit {
-		return "", nil, &AtlasInvalid{fmt.Sprintf("at most %d pins", AtlasLimit)}
+	if len(req.Pins) > limit {
+		return "", nil, &AtlasInvalid{fmt.Sprintf("at most %d pins", limit)}
 	}
 	out := make([]StoredPin, 0, len(req.Pins))
 	seen := map[string]bool{}
@@ -285,5 +282,5 @@ func ResolveAtlas(rng string, revision int64, stored []StoredPin, nodeIDs, obser
 				Name: p.Name, Tiles: p.Tiles})
 		}
 	}
-	return Atlas{Revision: revision, Range: rng, Limit: AtlasLimit, Pins: pins}
+	return Atlas{Revision: revision, Range: rng, Pins: pins}
 }

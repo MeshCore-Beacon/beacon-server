@@ -43,6 +43,8 @@ type Options struct {
 	PollingEnabled bool
 	// TemperatureUnit (c or f) and DistanceUnit (metric or imperial) are reported in /info display; empty reads as c and metric.
 	TemperatureUnit, DistanceUnit string
+	// AtlasLimit is the most cards one Atlas holds, reported in /info limits; 0 reads as 20.
+	AtlasLimit int
 	// AccountsMode is reported as features.accounts: "local" or anything else for off.
 	AccountsMode string
 	// RegistrationOpen is reported as features.registration while accounts are local.

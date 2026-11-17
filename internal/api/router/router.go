@@ -97,7 +97,11 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 	if opts.DistanceUnit != "" {
 		display.DistanceUnit = opts.DistanceUnit
 	}
-	info := api.Info{ServerVersion: opts.ServerVersion, Features: features, Display: display}
+	limits := api.InfoLimits{Atlas: 20}
+	if opts.AtlasLimit > 0 {
+		limits.Atlas = opts.AtlasLimit
+	}
+	info := api.Info{ServerVersion: opts.ServerVersion, Features: features, Display: display, Limits: limits}
 	if opts.MinAppVersion != "" {
 		info.MinAppVersion = &opts.MinAppVersion
 	}

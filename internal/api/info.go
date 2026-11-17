@@ -37,12 +37,20 @@ type Info struct {
 	Features InfoFeatures `json:"features"`
 	// Display holds the instance-wide units clients show.
 	Display InfoDisplay `json:"display"`
+	// Limits are the instance caps clients enforce before asking.
+	Limits InfoLimits `json:"limits"`
 }
 
 // InfoDisplay is the unit choice for this instance. Wire values stay Celsius and metres.
 type InfoDisplay struct {
 	TemperatureUnit string `json:"temperatureUnit" enums:"c,f" example:"c"`
 	DistanceUnit    string `json:"distanceUnit" enums:"metric,imperial" example:"metric"`
+}
+
+// InfoLimits holds the instance caps.
+type InfoLimits struct {
+	// Atlas is the most cards one Atlas holds, in the browser or synced to an account.
+	Atlas int `json:"atlas" example:"20"`
 }
 
 // InfoFeatures lists the optional features a server offers. Clients hide what is off.

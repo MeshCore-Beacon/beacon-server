@@ -55,7 +55,7 @@ import (
 var version = "dev"
 
 //	@title			MeshCore Beacon API
-//	@version		2.2.0
+//	@version		2.3.0
 //	@description	MeshCore network observation backend. Ingests LoRa packets from MQTT brokers, stores in PostgreSQL, and streams live events via WebSocket.
 //	@description	REST requests share a configurable per-client rate limit (default 600/minute and a 600-request one-second burst cap). Exceeded limits return HTTP 429 with error.code=rate_limited and a Retry-After header in seconds. CORS preflights and WebSocket upgrades do not consume this API budget.
 //	@description	WebSocket upgrade attempts at /ws have a configurable per-client limit (default 10/minute, including failed handshakes). Rate exhaustion returns HTTP 429 with Retry-After before upgrade. An accepted socket exceeding the concurrent cap closes with code 1013 before hello; established connections remain open.
@@ -473,9 +473,14 @@ func main() {
 	var accountMailer mail.Sender // nil while accounts are off
 	var authOptions handlers.AuthOptions
 	portalURL := ""
+	resolvedAtlas, err := cfg.Atlas.Resolve()
+	if err != nil {
+		slog.Error("invalid atlas configuration", "component", "startup", "error", err)
+		os.Exit(1)
+	}
 	var meMounts []handlers.MeMount
 	if resolvedAccounts.Enabled {
-		meMounts = append(meMounts, handlers.AtlasRoutes(maintStore))
+		meMounts = append(meMounts, handlers.AtlasRoutes(maintStore, resolvedAtlas.Limit))
 		accountsMode = "local"
 		var sender mail.Sender = mail.Discard{} // portal users have no address, so nothing is mailed
 		if !resolvedAccounts.Portal {
@@ -753,6 +758,7 @@ func main() {
 		GuestPolling:    guestPolling,
 		PollingEnabled:  resolvedPolling.Enabled,
 		TemperatureUnit: resolvedDisplay.TemperatureUnit, DistanceUnit: resolvedDisplay.DistanceUnit,
+		AtlasLimit:   resolvedAtlas.Limit,
 		AccountsMode: accountsMode, RegistrationOpen: resolvedAccounts.RegistrationOpen, PortalURL: portalURL, AlertDelivery: alertDelivery,
 		Accounts: accountsSvc, AuthOptions: authOptions, MeMounts: meMounts, TelemetryRequests: requestsSvc != nil,
 		Guards:        guard,
