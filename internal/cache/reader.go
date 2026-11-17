@@ -351,7 +351,7 @@ func (cr *CachedReader) ListNodes(ctx context.Context, nodeType int16, iatas []s
 func (cr *CachedReader) ListLatestNodeReadings(ctx context.Context, iatas []string, since time.Time) ([]api.NodeLatestReading, error) {
 	sorted := append([]string{}, iatas...)
 	sort.Strings(sorted)
-	// [] is global; [""] matches nothing. JSON also preserves literal comma boundaries.
+	// [] is global; [""] keeps the blank filter distinct. JSON also preserves literal comma boundaries.
 	segment, _ := json.Marshal(sorted)
 	key := keyNodeLatestReadingsPrefix + string(segment)
 	return getOrSet(ctx, cr.c, key, latestReadingsTTL, func(ctx context.Context) ([]api.NodeLatestReading, error) {
