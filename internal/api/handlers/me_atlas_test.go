@@ -63,7 +63,7 @@ func (f *fakeAtlas) ReplaceUserAtlas(_ context.Context, _ uuid.UUID, base int64,
 func atlasServer(svc AccountsService, a AtlasStore, opts AuthOptions) chi.Router {
 	r := chi.NewRouter()
 	r.Use(mw.UserAuth(svc, SessionCookie))
-	r.Mount("/me", MeRouter(svc, opts, AtlasRoutes(a)))
+	r.Mount("/me", MeRouter(svc, opts, AtlasRoutes(a, 12)))
 	return r
 }
 
@@ -198,5 +198,22 @@ func TestMeAtlasPutAnswersWhatItCommitted(t *testing.T) {
 	b := jsonBody(t, w)
 	if w.Code != 200 || b["revision"] != float64(1) || b["range"] != "3d" {
 		t.Fatalf("put: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestMeAtlasReportsTheConfiguredLimit(t *testing.T) {
+	r := chi.NewRouter()
+	r.Use(mw.UserAuth(&fakeAccounts{}, SessionCookie))
+	r.Mount("/me", MeRouter(&fakeAccounts{}, accountsOpts(), AtlasRoutes(&fakeAtlas{}, 2)))
+	c := []reqOpt{cookie("web-token"), csrf}
+	if b := jsonBody(t, call(r, "GET", "/me/atlas", "", c...)); b["limit"] != float64(2) {
+		t.Fatalf("limit = %v; want 2", b["limit"])
+	}
+	put := `{"baseRevision":0,"range":"24h","pins":[` +
+		`{"kind":"node","publicKey":"` + strings.Repeat("a", 64) + `"},` +
+		`{"kind":"node","publicKey":"` + strings.Repeat("b", 64) + `"},` +
+		`{"kind":"node","publicKey":"` + strings.Repeat("c", 64) + `"}]}`
+	if w := call(r, "PUT", "/me/atlas", put, c...); w.Code != 422 || !strings.Contains(w.Body.String(), "at most 2 pins") {
+		t.Fatalf("over the limit: %d %s", w.Code, w.Body)
 	}
 }

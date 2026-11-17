@@ -6,6 +6,7 @@ package api
 import (
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -69,13 +70,13 @@ func TestValidateAtlasPut(t *testing.T) {
 		{"observer refs disagree", PutAtlasRequest{Range: "24h", Pins: []AtlasPinInput{{Kind: "observer", ObserverID: obs.String(), ObserverPublicKey: key(3)}}}, "different"},
 	}
 	for _, c := range cases {
-		_, _, err := ValidateAtlasPut(c.req, known)
+		_, _, err := ValidateAtlasPut(c.req, known, 12)
 		if c.want == "" && err != nil || c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)) {
 			t.Errorf("%s: err=%v want %q", c.name, err, c.want)
 		}
 	}
 	// The observer id is stored by its key.
-	_, pins, _ := ValidateAtlasPut(PutAtlasRequest{Range: "24h", Pins: []AtlasPinInput{{Kind: "observer", ObserverID: obs.String(), Name: "N"}}}, known)
+	_, pins, _ := ValidateAtlasPut(PutAtlasRequest{Range: "24h", Pins: []AtlasPinInput{{Kind: "observer", ObserverID: obs.String(), Name: "N"}}}, known, 12)
 	if hex.EncodeToString(pins[0].Key) != key(9) || pins[0].Kind != "observer" {
 		t.Fatalf("stored %+v", pins[0])
 	}
@@ -96,7 +97,7 @@ func TestResolveAtlas(t *testing.T) {
 	nodes := map[string]uuid.UUID{key(1): n1, key(3): n2, key(4): uuid.New()}
 	observers := map[string]uuid.UUID{key(1): o1, key(5): uuid.New()}
 	a := ResolveAtlas("3d", 7, stored, nodes, observers)
-	if a.Revision != 7 || a.Range != "3d" || a.Limit != 12 || len(a.Pins) != 6 {
+	if a.Revision != 7 || a.Range != "3d" || a.Limit != 0 || len(a.Pins) != 6 {
 		t.Fatalf("%+v", a)
 	}
 	p := a.Pins
@@ -120,7 +121,7 @@ func TestResolveAtlas(t *testing.T) {
 	}
 	e := ResolveAtlas("24h", 0, nil, nil, nil)
 	b, _ := json.Marshal(e)
-	if string(b) != `{"revision":0,"range":"24h","limit":12,"pins":[]}` {
+	if string(b) != `{"revision":0,"range":"24h","limit":0,"pins":[]}` {
 		t.Errorf("empty: %s", b)
 	}
 	b, _ = json.Marshal(a.Pins[0])
@@ -137,5 +138,20 @@ func TestResolveAtlas(t *testing.T) {
 	_ = json.Unmarshal(b, &m)
 	if _, has := m["publicKey"]; has || m["observerPublicKey"] != key(5) {
 		t.Errorf("observer json: %s", b)
+	}
+}
+
+func TestValidateAtlasPutUsesTheGivenLimit(t *testing.T) {
+	pins := make([]AtlasPinInput, 3)
+	for i := range pins {
+		pins[i] = AtlasPinInput{Kind: "node", PublicKey: strings.Repeat(fmt.Sprintf("%02x", i+1), 32)}
+	}
+	if _, _, err := ValidateAtlasPut(PutAtlasRequest{Range: "24h", Pins: pins}, nil, 3); err != nil {
+		t.Fatalf("3 pins at limit 3: %v", err)
+	}
+	_, _, err := ValidateAtlasPut(PutAtlasRequest{Range: "24h", Pins: pins}, nil, 2)
+	var bad *AtlasInvalid
+	if !errors.As(err, &bad) || bad.Message != "at most 2 pins" {
+		t.Fatalf("3 pins at limit 2 = %v; want at most 2 pins", err)
 	}
 }
