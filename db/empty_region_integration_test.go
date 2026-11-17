@@ -23,7 +23,22 @@ func TestEmptyRegionListFiltersPostgres(t *testing.T) {
 	if err := RunMigrations(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
-	// Fail if a schema change makes the documented four-character marker representable.
+	// Guard the measurement columns used by region-filtered readers. MeshMapper's
+	// provider catalogue has unrelated text IATAs and does not use this marker.
+	wantColumns := map[string]bool{}
+	for _, table := range []string{
+		"iata_codes", "channel_iatas", "known_routes", "node_iatas", "node_neighbors", "node_short_ids",
+		"observer_locations", "packet_observations", "region_iatas", "trace_iatas", "packet_sites", "channel_message_iatas",
+		"analytics_hourly_iata_observations", "analytics_hourly_payload_breakdown", "analytics_hourly_signal",
+		"analytics_hourly_paths", "analytics_hourly_observer_identity", "analytics_hourly_advert_hearings",
+		"analytics_hourly_scope_observers", "analytics_hourly_scope_nodes",
+	} {
+		wantColumns[table+".iata"] = false
+	}
+	wantColumns["observers.last_iata"] = false
+	for _, table := range []string{"analytics_hourly_advert_sets", "analytics_hourly_talker_sets", "analytics_hourly_packet_sets", "analytics_hourly_scope_sets"} {
+		wantColumns[table+".iatas"] = false
+	}
 	columns, err := pool.Query(ctx, `SELECT c.relname, a.attname, format_type(a.atttypid,a.atttypmod)
 FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace
 WHERE n.nspname=current_schema() AND c.relkind IN ('r','p') AND NOT a.attisdropped
@@ -32,11 +47,14 @@ AND a.attname IN ('iata','last_iata','iatas')`)
 		t.Fatal(err)
 	}
 	defer columns.Close()
-	seen := map[string]bool{}
 	for columns.Next() {
 		var table, name, kind string
 		if err := columns.Scan(&table, &name, &kind); err != nil {
 			t.Fatal(err)
+		}
+		column := table + "." + name
+		if _, required := wantColumns[column]; !required {
+			continue
 		}
 		want := "character(3)"
 		if name == "iatas" {
@@ -45,14 +63,14 @@ AND a.attname IN ('iata','last_iata','iatas')`)
 		if kind != want {
 			t.Fatalf("empty-region marker contract changed: %s.%s is %s, want %s", table, name, kind, want)
 		}
-		seen[table+"."+name] = true
+		wantColumns[column] = true
 	}
 	if err := columns.Err(); err != nil {
 		t.Fatal(err)
 	}
 	columns.Close()
-	for _, column := range []string{"iata_codes.iata", "observers.last_iata", "node_iatas.iata", "packet_observations.iata", "packet_sites.iata", "trace_iatas.iata"} {
-		if !seen[column] {
+	for column, seen := range wantColumns {
+		if !seen {
 			t.Fatalf("IATA width contract was not checked for %s", column)
 		}
 	}
@@ -69,8 +87,8 @@ INSERT INTO nodes(id,public_key,node_type,name)
  FROM generate_series(1,3) i;
 INSERT INTO node_iatas(node_id,iata)
  SELECT lpad((i+10)::text,32,'0')::uuid,iata FROM (VALUES (1,''),(2,'---'),(3,'YKF')) v(i,iata);
-INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,parsed_payload,observation_count)
- SELECT decode(lpad(i::text,16,'0'),'hex'),5,0,1,decode('','hex'),decode('01','hex'),'{}',1 FROM generate_series(1,3) i;
+INSERT INTO packets(packet_hash,payload_type,payload_version,route_type,raw_payload,raw_header,parsed_payload,observation_count,first_heard_at,last_heard_at)
+ SELECT decode(lpad(i::text,16,'0'),'hex'),5,0,1,decode('','hex'),decode('01','hex'),'{}',1,now(),now() FROM generate_series(1,3) i;
 INSERT INTO packet_observations(id,packet_hash,observer_id,iata,heard_at,path_length_byte,hash_size,hop_count,path_bytes,payload_type)
  SELECT i,decode(lpad(i::text,16,'0'),'hex'),lpad(i::text,32,'0')::uuid,iata,now(),0,1,0,decode('','hex'),5
  FROM (VALUES (1,''),(2,'---'),(3,'YKF')) v(i,iata);
