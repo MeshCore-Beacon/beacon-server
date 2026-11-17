@@ -26,7 +26,8 @@ type AtlasStore interface {
 }
 
 // A full Atlas with long names is a few KiB more than the usual body limit.
-const maxAtlasBody = 32 << 10
+// Allow 100 pins with 160-character names even when JSON uses surrogate escapes.
+const maxAtlasBody = 256 << 10
 
 // AtlasRoutes mounts GET and PUT /atlas on the /me router, holding at most limit pins. A nil store mounts nothing.
 func AtlasRoutes(store AtlasStore, limit int) MeMount {
@@ -68,7 +69,7 @@ func getAtlas(store AtlasStore, limit int) http.HandlerFunc {
 // @Accept json
 // @Produce json
 // @Security UserSession
-// @Param body body api.PutAtlasRequest true "Body at most 32 KiB"
+// @Param body body api.PutAtlasRequest true "Body at most 256 KiB"
 // @Success 200 {object} api.Atlas
 // @Failure 400,401,403,413,415,422,429,503 {object} map[string]APIError
 // @Failure 409 {object} api.AtlasConflict
