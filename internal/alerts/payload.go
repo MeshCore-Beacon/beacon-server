@@ -41,7 +41,7 @@ type notice struct {
 func NoticePayload(r OutboxRow, tempUnit string) []byte {
 	n := notice{V: 1, Kind: r.Kind, Name: SanitizeName(r.Name, r.Key), Detail: r.Detail, TargetKind: r.TargetKind,
 		PublicKey: hex.EncodeToString(r.Key), TempUnit: "c"}
-	if r.HasValue {
+	if r.HasValue && HasFigure(r.Kind) {
 		v := r.Value
 		n.Value = &v
 	}
@@ -56,6 +56,16 @@ func NoticePayload(r OutboxRow, tempUnit string) []byte {
 	enc.SetEscapeHTML(false)
 	_ = enc.Encode(n) // a struct of strings and numbers always encodes
 	return bytes.TrimSuffix(b.Bytes(), []byte("\n"))
+}
+
+// HasFigure is false for the kinds whose sentence gives no figure; their notices carry a null value whatever is
+// stored (the evaluator stores uptime for a reboot and zero for the others).
+func HasFigure(kind string) bool {
+	switch kind {
+	case KindBackOnline, KindRebooted, KindRequestAttention:
+		return false
+	}
+	return true
 }
 
 // SealNotice encrypts a notice for one device with AES-256-GCM: nonce(12) || ciphertext || tag(16), bound to this

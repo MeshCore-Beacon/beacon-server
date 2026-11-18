@@ -51,6 +51,24 @@ func TestNoticePayloadIsTheStructuredNotice(t *testing.T) {
 	}
 }
 
+// The evaluator stores a number for every notice; the kinds without a figure still send null.
+func TestNoticePayloadValuelessKindsAreNull(t *testing.T) {
+	for _, kind := range []string{KindBackOnline, KindRebooted, KindRequestAttention} {
+		var m map[string]any
+		if err := json.Unmarshal(NoticePayload(row(1, userA, passOne, kind, "A", 5400), "c"), &m); err != nil {
+			t.Fatal(err)
+		}
+		if v, ok := m["value"]; !ok || v != nil {
+			t.Errorf("%s: value %v", kind, m["value"])
+		}
+	}
+	var m map[string]any
+	_ = json.Unmarshal(NoticePayload(row(1, userA, passOne, KindGoneQuiet, "A", 0), "c"), &m)
+	if m["value"] != float64(0) {
+		t.Fatalf("a zero figure is still a figure: %v", m["value"])
+	}
+}
+
 func TestSealNoticeRoundTripsWithThePushIDBound(t *testing.T) {
 	key := bytes.Repeat([]byte{7}, 32)
 	pt := []byte(`{"v":1}`)
