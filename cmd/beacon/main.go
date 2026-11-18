@@ -557,6 +557,7 @@ func main() {
 		slog.Info("telemetry requests are off", "component", "startup", "reason", requestsOff)
 	}
 	// Alerts need accounts: rules hang on a user's Atlas.
+	warnRetiredPushCredentials(os.LookupEnv)
 	resolvedAlerts, err := cfg.Alerts.ResolveWithSecret(cfg.Accounts.Mode, os.Getenv("BEACON_PUSH_SECRET"))
 	if err != nil {
 		slog.Error("invalid alerts configuration", "component", "startup", "error", err)

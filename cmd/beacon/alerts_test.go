@@ -54,13 +54,28 @@ func TestAlertSenderPushLogsTheNoticeAndNeverTheSecret(t *testing.T) {
 		t.Fatal("push sender not built")
 	}
 	out := buf.String()
-	if strings.Count(out, "push relay (push.meshcorebeacon.ca)") != 1 || strings.Contains(out, "not the official") || strings.Contains(out, "topsecret") {
+	if strings.Count(out, "push server (push.meshcorebeacon.ca)") != 1 || strings.Contains(out, "not the official") || strings.Contains(out, "topsecret") ||
+		strings.Contains(out, "reports") || !strings.Contains(out, "never readable by the push server") {
 		t.Fatalf("%s", out)
 	}
 	buf.Reset()
 	ra.PushServer, ra.OfficialServer = "https://push.example.org", false
 	newAlertSender(ra, true, nil, nil, pu)
-	if !strings.Contains(buf.String(), "WARNING") || !strings.Contains(buf.String(), "official Beacon app will not receive") || strings.Contains(buf.String(), "topsecret") {
+	if !strings.Contains(buf.String(), "push server (push.example.org)") || strings.Contains(buf.String(), "meshcorebeacon.ca") ||
+		!strings.Contains(buf.String(), "WARNING") || !strings.Contains(buf.String(), "official Beacon app will not receive") || strings.Contains(buf.String(), "topsecret") {
 		t.Fatalf("%s", buf.String())
+	}
+}
+
+func TestRetiredPushCredentialsWarnOnce(t *testing.T) {
+	buf := captureLog(t)
+	warnRetiredPushCredentials(func(string) (string, bool) { return "", false })
+	if buf.Len() != 0 {
+		t.Fatalf("warned without the variable: %s", buf.String())
+	}
+	warnRetiredPushCredentials(func(k string) (string, bool) { return "/run/secrets/fcm.json", k == "BEACON_PUSH_CREDENTIALS" })
+	out := buf.String()
+	if strings.Count(out, "BEACON_PUSH_CREDENTIALS") != 1 || !strings.Contains(out, "2.3.0") || strings.Contains(out, "fcm.json") {
+		t.Fatalf("%s", out)
 	}
 }

@@ -14,10 +14,23 @@ import (
 )
 
 // pushNotice is logged once at startup while push is on, so operators know what the push server sees.
-const pushNotice = "Alert push notifications are delivered through the MeshCore Beacon push relay (push.meshcorebeacon.ca). " +
-	"The relay identifies this server as the sender of every notification, enforces rate limits, and records usage " +
-	"(server, time, recipient handle, size) to detect and act on abuse. Servers that abuse the relay may be rate-limited, " +
-	"suspended, or banned. Notification contents are encrypted and not readable by the relay unless a user reports a notification."
+func pushNotice(server string) string {
+	host := server
+	if u, err := url.Parse(server); err == nil && u.Host != "" {
+		host = u.Host
+	}
+	return "Alert push notifications are delivered through the MeshCore Beacon push server (" + host + "). " +
+		"The push server identifies this server as the sender of every notification, enforces rate limits, and records usage " +
+		"(server, time, recipient handle, size) to detect and act on abuse. Servers that abuse it may be rate-limited, " +
+		"suspended, or banned. Notification contents are encrypted for each device and never readable by the push server."
+}
+
+// warnRetiredPushCredentials flags BEACON_PUSH_CREDENTIALS, the Firebase key push used before the push server.
+func warnRetiredPushCredentials(lookup func(string) (string, bool)) {
+	if _, ok := lookup("BEACON_PUSH_CREDENTIALS"); ok {
+		slog.Warn("BEACON_PUSH_CREDENTIALS is unused since 2.3.0 (push goes through the push server) and can be removed", "component", "startup")
+	}
+}
 
 // alertChannels is what alerts go out by on this server: email needs the account mailer, and neither works
 // without accounts.
@@ -41,7 +54,7 @@ func newAlertSender(ra config.ResolvedAlerts, accountsOn bool, mailSender mail.S
 	}
 	var relay *alerts.Relay
 	if push {
-		slog.Warn(pushNotice, "component", "startup")
+		slog.Warn(pushNotice(ra.PushServer), "component", "startup")
 		if !ra.OfficialServer {
 			slog.Warn("WARNING: alerts.push.server is not the official MeshCore Beacon push server: the official Beacon app will not receive these notifications",
 				"component", "startup", "server", ra.PushServer)
