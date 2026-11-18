@@ -22,12 +22,14 @@ const (
 	MaxAge = 2 * time.Hour
 	// PassTimeout: the notices of an evaluation pass that never finished (the process stopped) are sent after this.
 	PassTimeout = 15 * time.Minute
-	// MaxAttempts: a notification that failed this often is dropped.
+	// MaxAttempts: a channel that failed this often for a notification gives up on it.
 	MaxAttempts = 5
 	sendBatch   = 300
 	keepSent    = 24 * time.Hour
 	// MailSendTimeout bounds one alert mail, so a slow SMTP server cannot hold the pass for long.
 	MailSendTimeout = 30 * time.Second
+	// pushPassBudget: no new push batch starts after this long into a pass; the rest waits for the next one.
+	pushPassBudget = 2 * time.Minute
 )
 
 // OutboxRow is a queued notification with what delivery needs to know about its user.
@@ -41,13 +43,15 @@ type OutboxRow struct {
 	Kind, Detail  string
 	Value         int64
 	HasValue      bool // false when the notice has no figure
-	Attempts      int
 	Email         string
 	EmailVerified bool
 	// AlertEmail and AlertPush are the user's channel switches.
 	AlertEmail, AlertPush bool
-	// EmailSent: the mail for this notice already went out, so a retry is for push only.
-	EmailSent bool
+	// EmailDue and PushDue: the channel is not done and not held back, so this pass tries it. A channel that is
+	// not due is left as it is.
+	EmailDue, PushDue bool
+	// PushAttempts is how often the push for this notice failed.
+	PushAttempts int
 }
 
 // Device is a push handle of a live app session; Session identifies the device and Key is its payload key.
@@ -63,10 +67,17 @@ type DeviceMark struct {
 	Session  uuid.UUID
 }
 
-// Retry is a notice to try again; NotBefore, when set, holds it back at least that long.
+// Retry is a notice's channel to try again; NotBefore, when set, holds it back at least that long.
 type Retry struct {
 	ID        int64
 	NotBefore time.Time
+}
+
+// Settled is what a pass decided for each channel. A notice in no list of a channel stays as it was there.
+type Settled struct {
+	IDs                   []int64 // every notice of the pass
+	EmailDone, PushDone   []int64 // nothing (more) to send on the channel
+	EmailRetry, PushRetry []Retry
 }
 
 // SendStore is what the sender needs from the database.
@@ -75,18 +86,19 @@ type SendStore interface {
 	// Expire drops undelivered notifications created before undeliveredBefore and delivered ones from before
 	// deliveredBefore.
 	Expire(ctx context.Context, undeliveredBefore, deliveredBefore time.Time) (int64, error)
-	// Pending returns undelivered notifications created at or after notBefore, and not held back for a retry
-	// after now, for live users, by user and pass.
+	// Pending returns undelivered notifications created at or after notBefore with a channel that is not done and
+	// not held back for a retry after now, for live users, by user and pass.
 	Pending(ctx context.Context, notBefore, now time.Time, limit int) ([]OutboxRow, error)
 	Devices(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID][]Device, error)
 	// DeliveredDevices returns, for each notice, the devices (sessions) it is already done for.
 	DeliveredDevices(ctx context.Context, ids []int64) (map[int64]map[uuid.UUID]bool, error)
 	MarkDevicesDelivered(ctx context.Context, marks []DeviceMark, now time.Time) error
-	// MarkEmailSent records that the mail for these notices went out.
+	// MarkEmailSent records that the mail for these notices went out, which finishes their email channel.
 	MarkEmailSent(ctx context.Context, ids []int64, now time.Time) error
-	// Finish marks the delivered rows, counts an attempt for the retried ones (holding them back with a growing
-	// delay, or until NotBefore when that is later) and drops the exhausted.
-	Finish(ctx context.Context, delivered []int64, retry []Retry, now time.Time, maxAttempts int) error
+	// Finish records the pass per channel: done channels are finished, a retried channel counts an attempt and is
+	// held back with a growing delay (or until NotBefore when that is later) and gives up after maxAttempts. A notice
+	// is delivered once both channels are done, and dropped instead when one of them gave up.
+	Finish(ctx context.Context, st Settled, now time.Time, maxAttempts int) error
 	RemoveDeviceToken(ctx context.Context, token string) error
 }
 
@@ -128,11 +140,11 @@ func NewSender(store SendStore, cfg SenderConfig) *Sender {
 	return s
 }
 
-// outcome is where one channel stands for one notice after a pass.
+// outcome is where one channel stands for one notice after a pass. A notice absent from a channel's answer was
+// not tried there (not due, capped, or the pass stopped early) and stays as it was, with no attempt counted.
 type outcome struct {
-	failed  bool
-	waiting bool      // not tried this pass (capped, or the pass stopped early): stays pending, no attempt counted
-	hold    time.Time // with failed: not before this
+	failed bool      // try again later; otherwise done
+	hold   time.Time // with failed: not before this
 }
 
 // Run drains one batch. It does nothing when another process is sending.
@@ -160,32 +172,35 @@ func (s *Sender) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var delivered []int64
-	var retry []Retry
+	var st Settled
 	for _, r := range rows {
-		e, p := email[r.ID], push[r.ID]
-		switch {
-		case e.failed || p.failed:
-			hold := e.hold
-			if p.hold.After(hold) {
-				hold = p.hold
+		st.IDs = append(st.IDs, r.ID)
+		if o, ok := email[r.ID]; ok {
+			if o.failed {
+				st.EmailRetry = append(st.EmailRetry, Retry{ID: r.ID, NotBefore: o.hold})
+			} else {
+				st.EmailDone = append(st.EmailDone, r.ID)
 			}
-			retry = append(retry, Retry{ID: r.ID, NotBefore: hold})
-		case !e.waiting && !p.waiting:
-			delivered = append(delivered, r.ID)
+		}
+		if o, ok := push[r.ID]; ok {
+			if o.failed {
+				st.PushRetry = append(st.PushRetry, Retry{ID: r.ID, NotBefore: o.hold})
+			} else {
+				st.PushDone = append(st.PushDone, r.ID)
+			}
 		}
 	}
-	return s.store.Finish(ctx, delivered, retry, now, MaxAttempts)
+	return s.store.Finish(ctx, st, now, MaxAttempts)
 }
 
 func (s *Sender) wantsEmail(r OutboxRow) bool {
-	return s.mail != nil && r.AlertEmail && r.Email != "" && r.EmailVerified && !r.EmailSent
+	return s.mail != nil && r.AlertEmail && r.Email != "" && r.EmailVerified
 }
 
-// sendEmail sends one message for each user and pass, straight through the mailer, and records a notice's mail as
-// sent only once the SMTP server accepted it. A failed send is retried later and ends the email part of the pass,
-// since the rest would meet the same server; the capped rest waits for the next pass. Rows that need no mail are
-// absent from the answer, which reads as done.
+// sendEmail sends one message for each user and pass whose mail is due, straight through the mailer, and records a
+// notice's mail as sent only once the SMTP server accepted it. A failed send is retried later and ends the email part
+// of the pass, since the rest would meet the same server; the capped rest waits for the next pass. Due rows that need
+// no mail are done; sent rows are recorded here and left out of the answer.
 func (s *Sender) sendEmail(ctx context.Context, rows []OutboxRow, now time.Time) (map[int64]outcome, error) {
 	type group struct {
 		first   OutboxRow
@@ -194,8 +209,13 @@ func (s *Sender) sendEmail(ctx context.Context, rows []OutboxRow, now time.Time)
 	}
 	var groups []*group
 	byKey := map[[2]uuid.UUID]*group{}
+	out := map[int64]outcome{}
 	for _, r := range rows {
+		if !r.EmailDue {
+			continue
+		}
 		if !s.wantsEmail(r) {
+			out[r.ID] = outcome{}
 			continue
 		}
 		k := [2]uuid.UUID{r.UserID, r.Pass}
@@ -208,15 +228,11 @@ func (s *Sender) sendEmail(ctx context.Context, rows []OutboxRow, now time.Time)
 		g.ids = append(g.ids, r.ID)
 		g.notices = append(g.notices, EmailNotice{Kind: r.Kind, Name: r.Name, Detail: r.Detail, Value: r.Value})
 	}
-	out := map[int64]outcome{}
 	var sentIDs []int64
-	sent, stopped := 0, false
+	sent := 0
 	for _, g := range groups {
-		if stopped || sent >= MaxMailsPerPass || ctx.Err() != nil {
-			for _, id := range g.ids {
-				out[id] = outcome{waiting: true}
-			}
-			continue
+		if sent >= MaxMailsPerPass || ctx.Err() != nil {
+			break
 		}
 		subject, text := ComposeEmail(s.name, g.notices, s.atlasURL, s.tempUnit)
 		sctx, cancel := context.WithTimeout(ctx, MailSendTimeout)
@@ -227,8 +243,7 @@ func (s *Sender) sendEmail(ctx context.Context, rows []OutboxRow, now time.Time)
 			for _, id := range g.ids {
 				out[id] = outcome{failed: true}
 			}
-			stopped = true
-			continue
+			break
 		}
 		sent++
 		sentIDs = append(sentIDs, g.ids...)
@@ -258,23 +273,36 @@ type pushItem struct {
 	user   uuid.UUID
 	device Device
 	msg    PushMessage
+	limit  int // the largest batch this item may go in
 }
 
-// sendPush seals each notice for each of the user's live devices that is not done with it yet and sends them in
-// batches of MaxPushBatch. A notice is done once every device is (or the user has none); while any device must
+// batchLimit halves the batch for each earlier push failure of the notice, so a batch that timed out goes again in
+// smaller pieces instead of failing the same way.
+func batchLimit(attempts int) int {
+	if attempts >= 8 {
+		return 1
+	}
+	return max(1, MaxPushBatch>>attempts)
+}
+
+// sendPush seals each due notice for each of the user's live devices that is not done with it yet and sends them in
+// batches of at most MaxPushBatch. A notice is done once every device is (or the user has none); while any device must
 // retry, so must the notice, and the retry goes only to the devices still missing it. A dead handle is deleted and
 // its device no longer counts; a message the push server refused is done for that device. A call that fails as a
-// whole retries every notice still to send, and ends the push part of the pass.
+// whole retries its batch and ends the push part of the pass. When the push server answered, every notice still to
+// send retries too, held back as long as it asked; when it did not (unreachable, or too slow to answer), the rest is
+// left for the next pass, so the notices of a slow batch cannot keep the others from ever being tried.
 func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow, now time.Time) (map[int64]outcome, error) {
 	out := map[int64]outcome{}
-	if s.push == nil {
-		return out, nil
-	}
 	seen := map[uuid.UUID]bool{}
 	var users []uuid.UUID
 	var ids []int64
 	for _, r := range rows {
-		if !r.AlertPush {
+		if !r.PushDue {
+			continue
+		}
+		out[r.ID] = outcome{} // done unless a device below says otherwise
+		if s.push == nil || !r.AlertPush {
 			continue
 		}
 		ids = append(ids, r.ID)
@@ -297,7 +325,7 @@ func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow, now time.Time) 
 	var marks []DeviceMark
 	var items []pushItem
 	for _, r := range rows {
-		if !r.AlertPush {
+		if !r.PushDue || !r.AlertPush {
 			continue
 		}
 		plain := NoticePayload(r, s.tempUnit)
@@ -311,7 +339,7 @@ func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow, now time.Time) 
 				marks = append(marks, DeviceMark{OutboxID: r.ID, Session: d.Session})
 				continue
 			}
-			items = append(items, pushItem{row: r.ID, user: r.UserID, device: d,
+			items = append(items, pushItem{row: r.ID, user: r.UserID, device: d, limit: batchLimit(r.PushAttempts),
 				msg: PushMessage{Handle: d.Token, Ciphertext: ct, CollapseKey: strconv.FormatInt(r.ID, 10)}})
 		}
 	}
@@ -323,22 +351,34 @@ func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow, now time.Time) 
 		}
 		out[id] = o
 	}
+	// wait leaves the notices of these items untried, unless they already failed this pass.
+	wait := func(rest []pushItem) {
+		for _, it := range rest {
+			if !out[it.row].failed {
+				delete(out, it.row)
+			}
+		}
+	}
 	gone := map[string]bool{}
 	dropped := 0
+	started := time.Now()
 	for i := 0; i < len(items); {
-		if ctx.Err() != nil {
-			for _, it := range items[i:] {
-				if !out[it.row].failed {
-					out[it.row] = outcome{waiting: true}
-				}
-			}
+		if ctx.Err() != nil || time.Since(started) > pushPassBudget {
+			wait(items[i:])
 			break
 		}
 		var batch []pushItem
-		for ; i < len(items) && len(batch) < MaxPushBatch; i++ {
-			if !gone[items[i].device.Token] {
-				batch = append(batch, items[i])
+		limit := MaxPushBatch
+		for ; i < len(items) && len(batch) < limit; i++ {
+			it := items[i]
+			if gone[it.device.Token] {
+				continue
 			}
+			if len(batch) >= it.limit {
+				break
+			}
+			batch = append(batch, it)
+			limit = min(limit, it.limit)
 		}
 		if len(batch) == 0 {
 			continue
@@ -351,7 +391,9 @@ func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow, now time.Time) 
 		if err != nil {
 			var pe *PushError
 			var hold time.Time
+			answered := false
 			if errors.As(err, &pe) {
+				answered = pe.Status != 0
 				if pe.RetryAfter > 0 {
 					hold = now.Add(pe.RetryAfter)
 				}
@@ -366,10 +408,14 @@ func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow, now time.Time) 
 			for _, it := range batch {
 				fail(it.row, hold)
 			}
-			for _, it := range items[i:] {
-				if !gone[it.device.Token] {
-					fail(it.row, hold)
+			if answered {
+				for _, it := range items[i:] {
+					if !gone[it.device.Token] {
+						fail(it.row, hold)
+					}
 				}
+			} else {
+				wait(items[i:])
 			}
 			break
 		}

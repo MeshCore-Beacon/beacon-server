@@ -64,9 +64,11 @@ type Querier interface {
 	// untyped rows it picked, how many it typed, and the last picked id (0 when it picked none).
 	BackfillObservationPayloadTypes(ctx context.Context, arg BackfillObservationPayloadTypesParams) (BackfillObservationPayloadTypesRow, error)
 	BeginAlertPass(ctx context.Context, passID uuid.UUID) error
-	// Counts a failed attempt and holds the notice back for a minute, doubling with each earlier failure, or until
-	// hold_until when the push server asked for longer.
-	BumpAlertAttempts(ctx context.Context, arg BumpAlertAttemptsParams) error
+	// Counts a failed mail and holds it back for a minute, doubling with each earlier failure; the last allowed failure
+	// ends the channel.
+	BumpAlertEmailAttempts(ctx context.Context, arg BumpAlertEmailAttemptsParams) error
+	// As for mail, or held until hold_until when the push server asked for longer.
+	BumpAlertPushAttempts(ctx context.Context, arg BumpAlertPushAttemptsParams) error
 	BumpUserAtlas(ctx context.Context, arg BumpUserAtlasParams) (int64, error)
 	// Exact check of messages in (after_id, through_id]: pairs the definition has and the table lacks (counting
 	// observations up to obs_through only), and table pairs no stored observation backs.
@@ -112,7 +114,8 @@ type Querier interface {
 	DeleteChannelConfigScopes(ctx context.Context) error
 	DeleteChannelMembersNotIn(ctx context.Context, arg DeleteChannelMembersNotInParams) error
 	DeleteDevicesByToken(ctx context.Context, pushToken string) error
-	DeleteExhaustedAlerts(ctx context.Context, maxAttempts int16) (int64, error)
+	// A finished notice that ran out of attempts on a channel is dropped.
+	DeleteExhaustedAlerts(ctx context.Context, arg DeleteExhaustedAlertsParams) (int64, error)
 	DeleteExpiredPollingClaims(ctx context.Context, receivedAt pgtype.Timestamptz) error
 	DeleteExpiredPortalStates(ctx context.Context, cutoff pgtype.Timestamptz) error
 	DeleteExpiredRepeaterReadings(ctx context.Context, receivedAt pgtype.Timestamptz) error
@@ -673,8 +676,11 @@ type Querier interface {
 	// Serializes one user's request creation (the limit) without blocking the foreign-key checks on their rows.
 	LockUserForRequests(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	MarkAlertDeviceDelivered(ctx context.Context, arg MarkAlertDeviceDeliveredParams) error
+	// A notice is delivered once both channels are done.
 	MarkAlertsDelivered(ctx context.Context, arg MarkAlertsDeliveredParams) error
-	MarkAlertsEmailSent(ctx context.Context, arg MarkAlertsEmailSentParams) error
+	// The mail went out (sent_at set) or none was needed.
+	MarkAlertsEmailDone(ctx context.Context, arg MarkAlertsEmailDoneParams) error
+	MarkAlertsPushDone(ctx context.Context, arg MarkAlertsPushDoneParams) error
 	// Hours whose raw rows cleanup already started deleting can never be rolled completely.
 	// Readers report the new status, so the revision moves too.
 	MarkPartialRollupHours(ctx context.Context) error
@@ -705,9 +711,10 @@ type Querier interface {
 	PacketSitesTotalBytes(ctx context.Context) (int64, error)
 	// Who a live token belongs to, without using it.
 	PeekUserToken(ctx context.Context, arg PeekUserTokenParams) (uuid.UUID, error)
-	// Notices of a finished pass (or one that started before pass_timeout_before and never finished) only, and whole
-	// user and pass groups only, so one pass's notices for a user stay in one mail: groups are taken in order
-	// while the running total stays within row_limit, and the first group is taken whatever its size.
+	// Notices of a finished pass (or one that started before pass_timeout_before and never finished) only, with a channel
+	// that is not done and is due, and whole user and pass groups only, so one pass's notices for a user stay in one mail:
+	// groups are taken in order while the running total stays within row_limit, and the first group is taken whatever
+	// its size. email_due and push_due say which channels to try.
 	PendingAlerts(ctx context.Context, arg PendingAlertsParams) ([]PendingAlertsRow, error)
 	PollingAdminRequestCounts(ctx context.Context, targets [][]byte) ([]PollingAdminRequestCountsRow, error)
 	// Each live candidate and each assigned observer of the given targets. rank is -1 for an unassigned candidate.

@@ -502,7 +502,7 @@ func TestAlertEmailStaysPendingUntilSentPostgres(t *testing.T) {
 	sender := alerts.NewSender(AlertEval{s}, alerts.SenderConfig{Mail: m, PublicURL: pu, Now: func() time.Time { return at }})
 	state := func() (pending, attempts int) {
 		t.Helper()
-		if err := pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE delivered_at IS NULL), COALESCE(max(attempts), 0) FROM alert_outbox`).Scan(&pending, &attempts); err != nil {
+		if err := pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE delivered_at IS NULL), COALESCE(max(email_attempts), 0) FROM alert_outbox`).Scan(&pending, &attempts); err != nil {
 			t.Fatal(err)
 		}
 		return
@@ -828,7 +828,7 @@ func TestAlertChannelsRetryOnlyWhatFailedPostgres(t *testing.T) {
 	}
 	var sent, delivered bool
 	var next time.Time
-	if err := pool.QueryRow(ctx, `SELECT email_sent_at IS NOT NULL, delivered_at IS NOT NULL, next_attempt_at FROM alert_outbox`).Scan(&sent, &delivered, &next); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT email_sent_at IS NOT NULL, delivered_at IS NOT NULL, push_next_attempt_at FROM alert_outbox`).Scan(&sent, &delivered, &next); err != nil {
 		t.Fatal(err)
 	}
 	if len(m.got) != 1 || p.calls != 1 || !sent || delivered || next.Before(at.Add(29*time.Minute)) {

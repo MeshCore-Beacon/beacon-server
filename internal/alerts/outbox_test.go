@@ -22,6 +22,7 @@ type fakeSend struct {
 	devices   map[uuid.UUID][]Device
 	delivered []int64
 	retry     []Retry
+	settled   Settled
 	emailSent []int64
 	removed   []string
 	reached   map[int64]map[uuid.UUID]bool
@@ -75,10 +76,38 @@ func dev(platform, handle string) Device {
 	return Device{Session: uuid.NewSHA1(uuid.NameSpaceOID, []byte(handle)), Platform: platform, Token: handle, Key: key}
 }
 
-func (f *fakeSend) Finish(_ context.Context, d []int64, r []Retry, _ time.Time, max int) error {
-	f.delivered, f.retry = d, r
+// Finish keeps what the pass decided, and reads it as the store does: delivered once both channels are done (or were
+// not due), retried when a channel is, with the later hold.
+func (f *fakeSend) Finish(_ context.Context, st Settled, _ time.Time, max int) error {
 	if max != MaxAttempts {
 		panic("attempts")
+	}
+	f.settled, f.delivered, f.retry = st, nil, nil
+	in := func(ids []int64) map[int64]bool {
+		m := map[int64]bool{}
+		for _, id := range ids {
+			m[id] = true
+		}
+		return m
+	}
+	emailDone, pushDone, sent := in(st.EmailDone), in(st.PushDone), in(f.emailSent)
+	holds := map[int64]time.Time{}
+	var order []int64
+	for _, r := range append(append([]Retry{}, st.EmailRetry...), st.PushRetry...) {
+		if _, ok := holds[r.ID]; !ok {
+			order = append(order, r.ID)
+		}
+		if r.NotBefore.After(holds[r.ID]) {
+			holds[r.ID] = r.NotBefore
+		}
+	}
+	for _, id := range order {
+		f.retry = append(f.retry, Retry{ID: id, NotBefore: holds[id]})
+	}
+	for _, r := range f.rows {
+		if (!r.EmailDue || emailDone[r.ID] || sent[r.ID]) && (!r.PushDue || pushDone[r.ID]) {
+			f.delivered = append(f.delivered, r.ID)
+		}
 	}
 	return nil
 }
@@ -158,7 +187,7 @@ func row(id int64, user, pass uuid.UUID, kind, name string, value int64) OutboxR
 	key := make([]byte, 32)
 	key[0] = byte(id)
 	return OutboxRow{ID: id, UserID: user, Pass: pass, TargetKind: "node", Key: key, Name: name, Kind: kind, Value: value, HasValue: true, Email: "a@example.org", EmailVerified: true,
-		AlertEmail: true, AlertPush: true}
+		AlertEmail: true, AlertPush: true, EmailDue: true, PushDue: true}
 }
 
 func TestEmailGroupsOnePassIntoOneMessage(t *testing.T) {
@@ -340,14 +369,14 @@ func TestPushSealsTheNoticeForEachDevice(t *testing.T) {
 	}
 }
 
-func TestPushBatchesAtMostOneHundredPerCall(t *testing.T) {
+func TestPushBatchesAtMostMaxPushBatchPerCall(t *testing.T) {
 	f := &fakeSend{devices: map[uuid.UUID][]Device{userA: {dev("ios", "h_a"), dev("android", "h_b")}}}
 	for i := 1; i <= 120; i++ {
 		f.rows = append(f.rows, row(int64(i), userA, passOne, KindRebooted, "A", 1))
 	}
 	p := &fakePush{}
 	_ = pushSender(f, p).Run(context.Background())
-	if len(p.calls) != 3 || len(p.calls[0]) != MaxPushBatch || len(p.calls[2]) != 40 || len(f.delivered) != 120 {
+	if len(p.calls) != 240/MaxPushBatch || len(p.calls[0]) != MaxPushBatch || len(f.delivered) != 120 {
 		t.Fatalf("calls %d delivered %d", len(p.calls), len(f.delivered))
 	}
 }
@@ -388,20 +417,20 @@ func TestPushResultsPerDevice(t *testing.T) {
 	}
 }
 
-func TestPushWholeCallFailureRetriesEveryNoticeAndStops(t *testing.T) {
+// A refusal from the push server retries every notice and stops: the rest would meet the same answer.
+func TestPushWholeCallRefusalRetriesEveryNoticeAndStops(t *testing.T) {
 	f := &fakeSend{devices: map[uuid.UUID][]Device{userA: {dev("ios", "h_a")}}}
 	for i := 1; i <= 150; i++ {
 		f.rows = append(f.rows, row(int64(i), userA, passOne, KindRebooted, "A", 1))
 	}
 	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
 	for _, callErr := range []error{&PushError{Status: 403, Code: "suspended", msg: "push server answered 403 suspended"},
-		&PushError{Status: 429, Code: "rate_limited", RetryAfter: time.Hour, msg: "push server answered 429"}, errors.New("network")} {
+		&PushError{Status: 429, Code: "rate_limited", RetryAfter: time.Hour, msg: "push server answered 429"}} {
 		p := &fakePush{callErr: callErr}
 		s := NewSender(f, SenderConfig{Push: p, PushID: "inst_abc", Now: func() time.Time { return now }})
 		if err := s.Run(context.Background()); err != nil {
 			t.Fatal(err)
 		}
-		// One call only: the rest would meet the same answer.
 		if len(p.calls) != 1 || len(f.delivered) != 0 || len(f.retry) != 150 {
 			t.Fatalf("%v: calls %d delivered %d retry %d", callErr, len(p.calls), len(f.delivered), len(f.retry))
 		}
@@ -409,6 +438,68 @@ func TestPushWholeCallFailureRetriesEveryNoticeAndStops(t *testing.T) {
 		if errors.As(callErr, &pe) && pe.RetryAfter > 0 && !f.retry[149].NotBefore.Equal(now.Add(time.Hour)) {
 			t.Fatalf("not held back: %+v", f.retry[149])
 		}
+	}
+}
+
+// A call with no answer (unreachable, or it timed out after sending part of the batch) retries only its batch; the
+// rest is left untried, so the next pass reaches it while the batch waits out its delay.
+func TestPushCallWithoutAnAnswerRetriesOnlyItsBatch(t *testing.T) {
+	f := &fakeSend{devices: map[uuid.UUID][]Device{userA: {dev("ios", "h_a")}}}
+	for i := 1; i <= 50; i++ {
+		f.rows = append(f.rows, row(int64(i), userA, passOne, KindRebooted, "A", 1))
+	}
+	for _, callErr := range []error{&PushError{msg: "push server unreachable"}, errors.New("network")} {
+		p := &fakePush{callErr: callErr}
+		if err := pushSender(f, p).Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if len(p.calls) != 1 || len(f.retry) != MaxPushBatch || f.retry[0].ID != 1 || len(f.delivered) != 0 ||
+			len(f.settled.PushDone) != 0 || len(f.settled.PushRetry) != MaxPushBatch {
+			t.Fatalf("%v: calls %d retry %d settled %+v", callErr, len(p.calls), len(f.retry), f.settled)
+		}
+	}
+}
+
+// Each earlier push failure halves the batch a notice goes in, down to one.
+func TestPushBatchShrinksAfterFailures(t *testing.T) {
+	if batchLimit(0) != MaxPushBatch || batchLimit(1) != MaxPushBatch/2 || batchLimit(2) != MaxPushBatch/4 || batchLimit(10) != 1 {
+		t.Fatal(batchLimit(0), batchLimit(1), batchLimit(2), batchLimit(10))
+	}
+	f := &fakeSend{devices: map[uuid.UUID][]Device{userA: {dev("ios", "h_a")}}}
+	for i := 1; i <= 30; i++ {
+		r := row(int64(i), userA, passOne, KindRebooted, "A", 1)
+		if i <= 12 {
+			r.PushAttempts = 1
+		}
+		f.rows = append(f.rows, r)
+	}
+	p := &fakePush{}
+	_ = pushSender(f, p).Run(context.Background())
+	var sizes []int
+	for _, c := range p.calls {
+		sizes = append(sizes, len(c))
+	}
+	// A batch takes the smallest limit of what it holds: 10, then 2 retried and 8 fresh, then the last 10 fresh.
+	if len(sizes) != 3 || sizes[0] != MaxPushBatch/2 || sizes[1] != MaxPushBatch/2 || sizes[2] != 10 || len(f.delivered) != 30 {
+		t.Fatalf("batches %v delivered %d", sizes, len(f.delivered))
+	}
+}
+
+// Mail and push retry apart: a failing push server neither holds back the mail nor counts against it, and the capped
+// mails stay untried.
+func TestEmailCapAndPushFailureAreIndependent(t *testing.T) {
+	f := &fakeSend{devices: map[uuid.UUID][]Device{}}
+	for i := 1; i <= MaxMailsPerPass+4; i++ {
+		u := uuid.New()
+		f.rows = append(f.rows, row(int64(i), u, passOne, KindRebooted, "A", 1))
+		f.devices[u] = []Device{dev("ios", "h_"+u.String())}
+	}
+	m, p := &fakeMail{}, &fakePush{callErr: &PushError{Status: 429, Code: "rate_limited", RetryAfter: 6 * time.Hour, msg: "429"}}
+	_ = NewSender(f, SenderConfig{Mail: m, Push: p, PushID: "inst_abc", PublicURL: publicURL}).Run(context.Background())
+	st := f.settled
+	if len(m.got) != MaxMailsPerPass || len(f.emailSent) != MaxMailsPerPass || len(st.EmailRetry) != 0 || len(st.EmailDone) != 0 ||
+		len(st.PushRetry) != MaxMailsPerPass+4 || len(st.PushDone) != 0 {
+		t.Fatalf("mails %d sent %d settled %+v", len(m.got), len(f.emailSent), st)
 	}
 }
 
@@ -448,7 +539,7 @@ func TestRetryingOneChannelNeverRepeatsTheOther(t *testing.T) {
 	if len(m.got) != 1 || len(f.emailSent) != 1 || len(f.retry) != 1 || len(f.delivered) != 0 {
 		t.Fatalf("mails %d emailSent %v retry %v delivered %v", len(m.got), f.emailSent, f.retry, f.delivered)
 	}
-	f.rows[0].EmailSent = true
+	f.rows[0].EmailDue = false
 	p.answer = nil
 	_ = s.Run(context.Background())
 	if len(m.got) != 1 || len(p.sent()) != 2 || len(f.delivered) != 1 {

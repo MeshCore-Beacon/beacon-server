@@ -430,8 +430,8 @@ func (a AlertEval) Pending(ctx context.Context, notBefore, now time.Time, limit 
 	out := make([]alerts.OutboxRow, len(rows))
 	for i, r := range rows {
 		out[i] = alerts.OutboxRow{ID: r.ID, TargetID: r.TargetID, UserID: r.UserID, Pass: r.PassID, TargetKind: r.TargetKind, Key: r.TargetPublicKey,
-			Name: r.Name, Kind: r.AlertKind, Detail: r.Detail, Attempts: int(r.Attempts), Email: r.Email, EmailVerified: r.EmailVerified,
-			AlertEmail: r.AlertEmail, AlertPush: r.AlertPush, EmailSent: r.EmailSent}
+			Name: r.Name, Kind: r.AlertKind, Detail: r.Detail, Email: r.Email, EmailVerified: r.EmailVerified,
+			AlertEmail: r.AlertEmail, AlertPush: r.AlertPush, EmailDue: r.EmailDue, PushDue: r.PushDue, PushAttempts: int(r.PushAttempts)}
 		if r.Value != nil {
 			out[i].Value, out[i].HasValue = *r.Value, true
 		}
@@ -484,41 +484,52 @@ func (a AlertEval) MarkEmailSent(ctx context.Context, ids []int64, now time.Time
 	if len(ids) == 0 {
 		return nil
 	}
-	return a.q.MarkAlertsEmailSent(ctx, sqlc.MarkAlertsEmailSentParams{At: ts(now), Ids: ids})
+	return a.q.MarkAlertsEmailDone(ctx, sqlc.MarkAlertsEmailDoneParams{At: ts(now), Sent: true, Ids: ids})
 }
 
-func (a AlertEval) Finish(ctx context.Context, delivered []int64, retry []alerts.Retry, now time.Time, maxAttempts int) error {
-	return a.pollTx(ctx, func(q *sqlc.Queries) error {
-		if len(delivered) > 0 {
-			if err := q.MarkAlertsDelivered(ctx, sqlc.MarkAlertsDeliveredParams{At: ts(now), Ids: delivered}); err != nil {
-				return err
-			}
-		}
-		if len(retry) > 0 {
-			// One update per hold time; a hold before now is no hold.
-			byHold := map[time.Time][]int64{}
-			var holds []time.Time
-			for _, r := range retry {
-				h := r.NotBefore
-				if h.Before(now) {
-					h = now
-				}
-				if byHold[h] == nil {
-					holds = append(holds, h)
-				}
-				byHold[h] = append(byHold[h], r.ID)
-			}
-			for _, h := range holds {
-				if err := q.BumpAlertAttempts(ctx, sqlc.BumpAlertAttemptsParams{At: ts(now), HoldUntil: ts(h), Ids: byHold[h]}); err != nil {
-					return err
-				}
-			}
-			if _, err := q.DeleteExhaustedAlerts(ctx, int16(maxAttempts)); err != nil {
-				return err
-			}
-		}
+func (a AlertEval) Finish(ctx context.Context, st alerts.Settled, now time.Time, maxAttempts int) error {
+	if len(st.IDs) == 0 {
 		return nil
+	}
+	return a.pollTx(ctx, func(q *sqlc.Queries) error {
+		if len(st.EmailDone) > 0 {
+			if err := q.MarkAlertsEmailDone(ctx, sqlc.MarkAlertsEmailDoneParams{At: ts(now), Ids: st.EmailDone}); err != nil {
+				return err
+			}
+		}
+		if len(st.PushDone) > 0 {
+			if err := q.MarkAlertsPushDone(ctx, sqlc.MarkAlertsPushDoneParams{At: ts(now), Ids: st.PushDone}); err != nil {
+				return err
+			}
+		}
+		for h, ids := range byHold(st.EmailRetry, now) {
+			if err := q.BumpAlertEmailAttempts(ctx, sqlc.BumpAlertEmailAttemptsParams{At: ts(now), HoldUntil: ts(h), MaxAttempts: int32(maxAttempts), Ids: ids}); err != nil {
+				return err
+			}
+		}
+		for h, ids := range byHold(st.PushRetry, now) {
+			if err := q.BumpAlertPushAttempts(ctx, sqlc.BumpAlertPushAttemptsParams{At: ts(now), HoldUntil: ts(h), MaxAttempts: int32(maxAttempts), Ids: ids}); err != nil {
+				return err
+			}
+		}
+		if _, err := q.DeleteExhaustedAlerts(ctx, sqlc.DeleteExhaustedAlertsParams{Ids: st.IDs, MaxAttempts: int32(maxAttempts)}); err != nil {
+			return err
+		}
+		return q.MarkAlertsDelivered(ctx, sqlc.MarkAlertsDeliveredParams{At: ts(now), Ids: st.IDs})
 	})
+}
+
+// byHold groups retries by hold time, so each gets one update; a hold before now is no hold.
+func byHold(retry []alerts.Retry, now time.Time) map[time.Time][]int64 {
+	out := map[time.Time][]int64{}
+	for _, r := range retry {
+		h := r.NotBefore
+		if h.Before(now) {
+			h = now
+		}
+		out[h] = append(out[h], r.ID)
+	}
+	return out
 }
 
 func (a AlertEval) RemoveDeviceToken(ctx context.Context, token string) error {

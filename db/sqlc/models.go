@@ -19,20 +19,24 @@ type Account struct {
 }
 
 type AlertOutbox struct {
-	ID              int64              `json:"id"`
-	UserID          uuid.UUID          `json:"user_id"`
-	PassID          uuid.UUID          `json:"pass_id"`
-	TargetKind      string             `json:"target_kind"`
-	TargetPublicKey []byte             `json:"target_public_key"`
-	Name            string             `json:"name"`
-	AlertKind       string             `json:"alert_kind"`
-	Value           *int64             `json:"value"`
-	Detail          string             `json:"detail"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	Attempts        int16              `json:"attempts"`
-	DeliveredAt     pgtype.Timestamptz `json:"delivered_at"`
-	NextAttemptAt   pgtype.Timestamptz `json:"next_attempt_at"`
-	EmailSentAt     pgtype.Timestamptz `json:"email_sent_at"`
+	ID                 int64              `json:"id"`
+	UserID             uuid.UUID          `json:"user_id"`
+	PassID             uuid.UUID          `json:"pass_id"`
+	TargetKind         string             `json:"target_kind"`
+	TargetPublicKey    []byte             `json:"target_public_key"`
+	Name               string             `json:"name"`
+	AlertKind          string             `json:"alert_kind"`
+	Value              *int64             `json:"value"`
+	Detail             string             `json:"detail"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	DeliveredAt        pgtype.Timestamptz `json:"delivered_at"`
+	EmailSentAt        pgtype.Timestamptz `json:"email_sent_at"`
+	EmailAttempts      int16              `json:"email_attempts"`
+	EmailNextAttemptAt pgtype.Timestamptz `json:"email_next_attempt_at"`
+	EmailDoneAt        pgtype.Timestamptz `json:"email_done_at"`
+	PushAttempts       int16              `json:"push_attempts"`
+	PushNextAttemptAt  pgtype.Timestamptz `json:"push_next_attempt_at"`
+	PushDoneAt         pgtype.Timestamptz `json:"push_done_at"`
 }
 
 type AlertOutboxDevice struct {

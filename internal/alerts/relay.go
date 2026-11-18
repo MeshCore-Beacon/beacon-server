@@ -19,12 +19,15 @@ import (
 )
 
 const (
-	// MaxPushBatch is the most messages one send call carries.
-	MaxPushBatch = 100
+	// MaxPushBatch is the most messages one send call carries. The push server hands them to FCM one after another
+	// before it answers, so a batch has to fit sendCallLimit even when FCM is slow.
+	MaxPushBatch = 20
 	// PushTTL is how long the push server keeps trying a notification.
 	PushTTL       = 24 * time.Hour
 	HelloInterval = time.Hour
 	pushCallLimit = 15 * time.Second
+	// sendCallLimit bounds one /v1/send call; it stays under the push server's 60-second write deadline.
+	sendCallLimit = 50 * time.Second
 	maxPushReply  = 64 << 10
 	maxRetryAfter = 6 * time.Hour
 )
@@ -83,7 +86,7 @@ type Relay struct {
 // that never follows redirects.
 func NewRelay(base, pushID, secret string, client *http.Client) *Relay {
 	if client == nil {
-		client = &http.Client{Timeout: pushCallLimit, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		client = &http.Client{Timeout: sendCallLimit, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
 	return &Relay{base: strings.TrimRight(base, "/"), pushID: pushID, secret: secret, client: client, now: time.Now}
 }
@@ -91,12 +94,12 @@ func NewRelay(base, pushID, secret string, client *http.Client) *Relay {
 // PushID is this server's Push ID.
 func (r *Relay) PushID() string { return r.pushID }
 
-func (r *Relay) post(ctx context.Context, path string, body any) (int, http.Header, []byte, error) {
+func (r *Relay) post(ctx context.Context, path string, limit time.Duration, body any) (int, http.Header, []byte, error) {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return 0, nil, nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, pushCallLimit)
+	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.base+path, bytes.NewReader(raw))
 	if err != nil {
@@ -106,7 +109,8 @@ func (r *Relay) post(ctx context.Context, path string, body any) (int, http.Head
 	req.Header.Set("Authorization", "Bearer "+r.pushID+"."+r.secret)
 	resp, err := r.client.Do(req)
 	if err != nil {
-		// The transport error names only the address, never the header.
+		// The transport error names only the address, never the header. A timeout lands here too: Status 0 means the
+		// outcome is unknown, and some of the batch may have gone out.
 		return 0, nil, nil, &PushError{msg: "push server unreachable"}
 	}
 	defer resp.Body.Close()
@@ -152,7 +156,7 @@ func (r *Relay) Send(ctx context.Context, msgs []PushMessage) ([]PushResult, err
 		wire[i] = wireMessage{Handle: m.Handle, Ciphertext: base64.StdEncoding.EncodeToString(m.Ciphertext), CollapseKey: m.CollapseKey,
 			TTLSeconds: int(PushTTL / time.Second)}
 	}
-	status, h, reply, err := r.post(ctx, "/v1/send", map[string]any{"messages": wire})
+	status, h, reply, err := r.post(ctx, "/v1/send", sendCallLimit, map[string]any{"messages": wire})
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +212,7 @@ type Hello struct {
 
 // Hello posts to /v1/hello.
 func (r *Relay) Hello(ctx context.Context) (Hello, error) {
-	status, h, reply, err := r.post(ctx, "/v1/hello", map[string]any{})
+	status, h, reply, err := r.post(ctx, "/v1/hello", pushCallLimit, map[string]any{})
 	if err != nil {
 		return Hello{}, err
 	}
