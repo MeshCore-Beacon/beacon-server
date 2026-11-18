@@ -422,9 +422,9 @@ cache:
 # can raise it, never lower it. Strict X.Y.Z (no v, no suffix); anything else
 # prevents startup. Default: empty, the built-in floor only.
 #mobile:
-#  min_app_version: "0.1.1"   # BEACON Mobile
+#  min_app_version: "2.3.0"   # BEACON Mobile; built-in floor: 2.3.0
 #web:
-#  min_web_version: "2.0.3"   # Beacon Web
+#  min_web_version: "2.3.0"   # Beacon Web; built-in floor: 2.3.0
 
 # Repeater polling: asks repeaters for telemetry over MQTT. Disabled by default.
 # Bounds follow the firmware clamps. Zero or omitted values use the defaults.
