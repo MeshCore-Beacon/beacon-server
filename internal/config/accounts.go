@@ -8,6 +8,8 @@ import (
 	"net/mail"
 	"net/url"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // AccountsConfig controls user accounts. Off by default; with it off no account route is served.
@@ -15,8 +17,11 @@ type AccountsConfig struct {
 	Mode         string       `yaml:"mode"`         // "off" (default), "local" or "portal"
 	PublicURL    string       `yaml:"public_url"`   // where users reach the web app; used in mailed links
 	Registration string       `yaml:"registration"` // "open" (default) or "closed"
-	SMTP         SMTPConfig   `yaml:"smtp"`
 	Portal       PortalConfig `yaml:"portal"`
+	// Mail is the top-level mail block; Load copies it in, since account mail is sent through it.
+	Mail MailConfig `yaml:"-"`
+	// MovedSMTP catches the old accounts.smtp block so startup can say where it went.
+	MovedSMTP *yaml.Node `yaml:"smtp"`
 }
 
 // PortalConfig is the sign-in portal used when mode is portal. The client secret is never in YAML: it comes from
@@ -26,8 +31,9 @@ type PortalConfig struct {
 	ClientID string `yaml:"client_id"` // this instance's client id at the portal
 }
 
-// SMTPConfig is the outgoing mail server. The password is never in YAML: it comes from BEACON_SMTP_PASSWORD.
-type SMTPConfig struct {
+// MailConfig is the top-level mail block: the outgoing mail server for account mail and email alerts. The password
+// is never in YAML: it comes from BEACON_SMTP_PASSWORD.
+type MailConfig struct {
 	Host     string `yaml:"host"`
 	Port     int    `yaml:"port"` // default 587
 	Username string `yaml:"username"`
@@ -70,6 +76,9 @@ func (a AccountsConfig) ResolveWithSecrets(smtpPassword, portalSecret string) (R
 }
 
 func (a AccountsConfig) resolve(smtpPassword, portalSecret string, needSecret bool) (ResolvedAccounts, error) {
+	if a.MovedSMTP != nil {
+		return ResolvedAccounts{}, fmt.Errorf("accounts.smtp has moved: put those settings in a top-level mail block")
+	}
 	switch a.Mode {
 	case "", "off":
 		return ResolvedAccounts{}, nil
@@ -81,11 +90,11 @@ func (a AccountsConfig) resolve(smtpPassword, portalSecret string, needSecret bo
 	r := ResolvedAccounts{
 		Enabled:      true,
 		Portal:       portal,
-		SMTPHost:     strings.TrimSpace(a.SMTP.Host),
-		SMTPPort:     a.SMTP.Port,
-		SMTPUsername: a.SMTP.Username,
+		SMTPHost:     strings.TrimSpace(a.Mail.Host),
+		SMTPPort:     a.Mail.Port,
+		SMTPUsername: a.Mail.Username,
 		SMTPPassword: smtpPassword,
-		SMTPFrom:     strings.TrimSpace(a.SMTP.From),
+		SMTPFrom:     strings.TrimSpace(a.Mail.From),
 		SMTPStartTLS: true,
 	}
 	switch a.Registration {
@@ -95,14 +104,14 @@ func (a AccountsConfig) resolve(smtpPassword, portalSecret string, needSecret bo
 	default:
 		return ResolvedAccounts{}, fmt.Errorf("accounts.registration must be open or closed")
 	}
-	if a.SMTP.StartTLS != nil {
-		r.SMTPStartTLS = *a.SMTP.StartTLS
+	if a.Mail.StartTLS != nil {
+		r.SMTPStartTLS = *a.Mail.StartTLS
 	}
 	if r.SMTPPort == 0 {
 		r.SMTPPort = 587
 	}
 	if !portal && (r.SMTPPort < 1 || r.SMTPPort > 65535) {
-		return ResolvedAccounts{}, fmt.Errorf("accounts.smtp.port must be between 1 and 65535")
+		return ResolvedAccounts{}, fmt.Errorf("mail.port must be between 1 and 65535")
 	}
 
 	u, err := parsePublicURL(a.PublicURL, a.Mode)
@@ -134,13 +143,13 @@ func (a AccountsConfig) resolve(smtpPassword, portalSecret string, needSecret bo
 	}
 
 	if r.SMTPHost == "" {
-		return ResolvedAccounts{}, fmt.Errorf("accounts.smtp.host: required when accounts.mode is local")
+		return ResolvedAccounts{}, fmt.Errorf("mail.host: required when accounts.mode is local")
 	}
 	if r.SMTPFrom == "" {
-		return ResolvedAccounts{}, fmt.Errorf("accounts.smtp.from: required when accounts.mode is local")
+		return ResolvedAccounts{}, fmt.Errorf("mail.from: required when accounts.mode is local")
 	}
 	if _, err := mail.ParseAddress(r.SMTPFrom); err != nil {
-		return ResolvedAccounts{}, fmt.Errorf("accounts.smtp.from: not a valid address")
+		return ResolvedAccounts{}, fmt.Errorf("mail.from: not a valid address")
 	}
 	return r, nil
 }

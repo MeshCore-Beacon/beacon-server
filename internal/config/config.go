@@ -55,6 +55,7 @@ type Config struct {
 	Planguard   PlanguardConfig       `yaml:"planguard"`
 	ReadModels  ReadModelsConfig      `yaml:"readmodels"`
 	Polling     PollingConfig         `yaml:"polling"`
+	Mail        MailConfig            `yaml:"mail"`
 	Accounts    AccountsConfig        `yaml:"accounts"`
 	Alerts      AlertsConfig          `yaml:"alerts"`
 	Display     DisplayConfig         `yaml:"display"`
@@ -586,6 +587,7 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, err
 	}
+	cfg.Accounts.Mail = cfg.Mail
 	if value, set := os.LookupEnv("BEACON_API_KEY"); set {
 		cfg.Auth.APIKey = value
 	}

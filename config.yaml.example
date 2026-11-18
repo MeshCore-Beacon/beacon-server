@@ -447,18 +447,21 @@ cache:
 #                              # Set approved if you want to vet observers before they receive guest passwords.
 #                              # Requests also need accounts on and BEACON_SECRET_KEY (32 random bytes, base64)
 
+# Outgoing mail: the SMTP server Beacon sends account mail (sign-up, password reset) and email alerts
+# through. Required when accounts.mode is local. The password comes from BEACON_SMTP_PASSWORD.
+#mail:
+#  host: ""                    # e.g. smtp.example.org
+#  port: 587                   # default: 587
+#  username: ""                # empty means no auth
+#  from: ""                    # e.g. "Beacon <no-reply@example.org>"
+#  starttls: true              # default: true; the send fails if the server lacks STARTTLS
+
 # User accounts: sign-in for the web app and the mobile app. Off by default; with it off
-# no account route is served. The SMTP password comes from BEACON_SMTP_PASSWORD.
+# no account route is served. Mode local sends mail through the mail block above.
 #accounts:
 #  mode: off                   # off, local or portal
 #  public_url: ""              # https URL of the web app, no path; used in mailed links and as the portal callback
 #  registration: open          # open or closed
-#  smtp:
-#    host: ""                  # required when mode is local
-#    port: 587                 # default: 587
-#    username: ""              # empty means no auth
-#    from: ""                  # required, e.g. "Beacon <no-reply@example.org>"
-#    starttls: true            # default: true; the send fails if the server lacks STARTTLS
 #  # mode portal: users sign in through a portal; no passwords, no registration, no SMTP needed.
 #  # The client secret comes from BEACON_PORTAL_SECRET.
 #  portal:
@@ -470,4 +473,4 @@ cache:
 #  delivery: off               # off, push or email; anything but off needs accounts.mode local or portal
 #                              # push: BEACON_PUSH_CREDENTIALS must name the Google service-account JSON file of the
 #                              #   app's Firebase project; without it the server refuses to start
-#                              # email: needs accounts.mode local with accounts.smtp.host set (not portal)
+#                              # email: needs accounts.mode local and the mail block (not portal)

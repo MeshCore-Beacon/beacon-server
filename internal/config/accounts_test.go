@@ -12,7 +12,7 @@ func localAccounts() AccountsConfig {
 	return AccountsConfig{
 		Mode:      "local",
 		PublicURL: "https://beacon.example.org",
-		SMTP:      SMTPConfig{Host: "smtp.example.org", From: "Beacon <no-reply@example.org>"},
+		Mail:      MailConfig{Host: "smtp.example.org", From: "Beacon <no-reply@example.org>"},
 	}
 }
 
@@ -43,8 +43,8 @@ func TestAccountsExplicitValues(t *testing.T) {
 	no := false
 	c := localAccounts()
 	c.Registration = "closed"
-	c.SMTP.Port = 2525
-	c.SMTP.StartTLS = &no
+	c.Mail.Port = 2525
+	c.Mail.StartTLS = &no
 	r, err := c.Resolve("")
 	if err != nil {
 		t.Fatal(err)
@@ -67,10 +67,10 @@ func TestAccountsRejects(t *testing.T) {
 		"path":                 {func(c *AccountsConfig) { c.PublicURL = "https://beacon.example.org/app" }, "accounts.public_url"},
 		"query":                {func(c *AccountsConfig) { c.PublicURL = "https://beacon.example.org/?a=b" }, "accounts.public_url"},
 		"http remote":          {func(c *AccountsConfig) { c.PublicURL = "http://beacon.example.org" }, "accounts.public_url"},
-		"no smtp host":         {func(c *AccountsConfig) { c.SMTP.Host = "" }, "accounts.smtp.host"},
-		"no smtp from":         {func(c *AccountsConfig) { c.SMTP.From = "" }, "accounts.smtp.from"},
-		"bad smtp from":        {func(c *AccountsConfig) { c.SMTP.From = "not an address" }, "accounts.smtp.from"},
-		"bad port":             {func(c *AccountsConfig) { c.SMTP.Port = 70000 }, "accounts.smtp.port"},
+		"no smtp host":         {func(c *AccountsConfig) { c.Mail.Host = "" }, "mail.host"},
+		"no smtp from":         {func(c *AccountsConfig) { c.Mail.From = "" }, "mail.from"},
+		"bad smtp from":        {func(c *AccountsConfig) { c.Mail.From = "not an address" }, "mail.from"},
+		"bad port":             {func(c *AccountsConfig) { c.Mail.Port = 70000 }, "mail.port"},
 	} {
 		c := localAccounts()
 		tc.mut(&c)
@@ -96,7 +96,7 @@ func TestAccountsLocalhostHTTP(t *testing.T) {
 
 func TestAccountsOffIgnoresRest(t *testing.T) {
 	// A half-filled section is fine while accounts are off.
-	if _, err := (AccountsConfig{SMTP: SMTPConfig{Host: "x"}}).Resolve(""); err != nil {
+	if _, err := (AccountsConfig{Mail: MailConfig{Host: "x"}}).Resolve(""); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -163,8 +163,42 @@ func TestAlertsDelivery(t *testing.T) {
 // Email alerts need local accounts with an SMTP host; accounts validation already refuses local mode without one.
 func TestAlertsEmailNeedsSMTPHost(t *testing.T) {
 	a := localAccounts()
-	a.SMTP.Host = ""
-	if _, err := a.Resolve(""); err == nil || !strings.Contains(err.Error(), "accounts.smtp.host") {
+	a.Mail.Host = ""
+	if _, err := a.Resolve(""); err == nil || !strings.Contains(err.Error(), "mail.host") {
 		t.Fatalf("local accounts without smtp host: %v", err)
+	}
+}
+
+// The mail block is top-level; Load hands it to accounts.
+func TestAccountsMailFromTopLevelBlock(t *testing.T) {
+	cfg, err := loadText(t, `mail:
+  host: smtp.example.org
+  port: 2525
+  from: "Beacon <no-reply@example.org>"
+accounts:
+  mode: local
+  public_url: https://beacon.example.org
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := cfg.Accounts.Resolve("pw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.SMTPHost != "smtp.example.org" || r.SMTPPort != 2525 || r.SMTPPassword != "pw" {
+		t.Fatalf("%+v", r)
+	}
+}
+
+// The old accounts.smtp block is refused with a pointer to its new place, even with accounts off.
+func TestAccountsOldSMTPBlockRefused(t *testing.T) {
+	_, err := loadText(t, `accounts:
+  mode: off
+  smtp:
+    host: smtp.example.org
+`)
+	if err == nil || !strings.Contains(err.Error(), "top-level mail block") {
+		t.Fatalf("old accounts.smtp: %v", err)
 	}
 }
