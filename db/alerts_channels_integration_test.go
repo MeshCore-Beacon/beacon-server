@@ -296,3 +296,60 @@ func TestAlertPushRateLimitHoldsWithoutAttemptsPostgres(t *testing.T) {
 		})
 	}
 }
+
+// Upgrading from 084: the shared attempts and hold came from push, so unsent mail starts fresh and due now, sent
+// mail stays done, and push keeps its count and hold.
+func TestAlertOutboxChannelMigrationPostgres(t *testing.T) {
+	ctx, pool, s := userStore(t)
+	// Back to the 084 shape, so 085 runs again on it.
+	if _, err := pool.Exec(ctx, `DELETE FROM schema_migrations WHERE filename = '085_alert_outbox_channel_retries.sql';
+		ALTER TABLE alert_outbox DROP COLUMN email_attempts, DROP COLUMN email_next_attempt_at, DROP COLUMN email_done_at,
+			DROP COLUMN push_attempts, DROP COLUMN push_next_attempt_at, DROP COLUMN push_done_at,
+			ADD COLUMN attempts smallint NOT NULL DEFAULT 0, ADD COLUMN next_attempt_at timestamp with time zone`); err != nil {
+		t.Fatal(err)
+	}
+	alice := newUser(t, ctx, s, "alice")
+	now := time.Now()
+	seed := func(attempts int, next time.Time, emailSent, delivered *time.Time) int64 {
+		t.Helper()
+		var id int64
+		if err := pool.QueryRow(ctx, `INSERT INTO alert_outbox (user_id, pass_id, target_kind, target_public_key, alert_kind, value,
+			attempts, next_attempt_at, email_sent_at, delivered_at) VALUES ($1, $2, 'node', $3, 'rebooted', 0, $4, $5, $6, $7) RETURNING id`,
+			alice.ID, uuid.New(), atlasKey(1), attempts, next, emailSent, delivered).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	unmailed := seed(4, now.Add(6*time.Hour), nil, nil)
+	mailed := seed(2, now.Add(time.Hour), &now, nil)
+	done := seed(0, time.Time{}, &now, &now)
+	if err := RunMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	type st struct {
+		emailAttempts, pushAttempts int
+		emailNext, pushNext         *time.Time
+		emailDone, pushDone         bool
+	}
+	read := func(id int64) st {
+		t.Helper()
+		var r st
+		if err := pool.QueryRow(ctx, `SELECT email_attempts, push_attempts, email_next_attempt_at, push_next_attempt_at,
+			email_done_at IS NOT NULL, push_done_at IS NOT NULL FROM alert_outbox WHERE id = $1`, id).
+			Scan(&r.emailAttempts, &r.pushAttempts, &r.emailNext, &r.pushNext, &r.emailDone, &r.pushDone); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	u := read(unmailed)
+	if u.emailAttempts != 0 || (u.emailNext != nil && u.emailNext.After(time.Now())) || u.emailDone ||
+		u.pushAttempts != 4 || u.pushNext == nil || u.pushNext.Sub(now) < 5*time.Hour || u.pushDone {
+		t.Fatalf("unmailed: %+v", u)
+	}
+	if m := read(mailed); !m.emailDone || m.pushAttempts != 2 || m.pushDone {
+		t.Fatalf("mailed: %+v", m)
+	}
+	if d := read(done); !d.emailDone || !d.pushDone {
+		t.Fatalf("delivered: %+v", d)
+	}
+}

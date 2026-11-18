@@ -11,8 +11,8 @@ ALTER TABLE alert_outbox
     ADD COLUMN push_next_attempt_at timestamp with time zone,
     ADD COLUMN push_done_at timestamp with time zone;
 
-UPDATE alert_outbox SET email_attempts = attempts, push_attempts = attempts,
-    email_next_attempt_at = next_attempt_at, push_next_attempt_at = next_attempt_at, email_done_at = email_sent_at
+-- The shared count and hold may all have come from push, so unsent mail starts with none and is due at once.
+UPDATE alert_outbox SET push_attempts = attempts, push_next_attempt_at = next_attempt_at, email_done_at = email_sent_at
 WHERE delivered_at IS NULL;
 UPDATE alert_outbox SET email_done_at = delivered_at, push_done_at = delivered_at WHERE delivered_at IS NOT NULL;
 
