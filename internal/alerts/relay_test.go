@@ -22,6 +22,7 @@ type sendBody struct {
 		Ciphertext  string `json:"ciphertext"`
 		CollapseKey string `json:"collapseKey"`
 		TTLSeconds  int    `json:"ttlSeconds"`
+		ID          string `json:"id"`
 	} `json:"messages"`
 }
 
@@ -43,28 +44,31 @@ func TestRelaySendPostsTheBatchAndMapsEachResult(t *testing.T) {
 		w.Header().Set("Retry-After", "30")
 		_, _ = io.WriteString(w, `{"results":[{"messageId":"m_1","status":"ok"},{"messageId":"m_2","status":"invalid_handle"},
 			{"messageId":"m_3","status":"rate_limited"},{"messageId":"m_4","status":"failed"},{"messageId":"m_5","status":"too_large"},
-			{"messageId":"m_6","status":"invalid"},{"messageId":"m_7","status":"something_new"}]}`)
+			{"messageId":"m_6","status":"invalid"},{"messageId":"m_7","status":"something_new"},
+			{"status":"rate_limited","retryAfterSeconds":5},{"status":"failed","retryAfterSeconds":90}]}`)
 	})
-	msgs := make([]PushMessage, 7)
+	msgs := make([]PushMessage, 9)
 	for i := range msgs {
-		msgs[i] = PushMessage{Handle: "h_" + string(rune('a'+i)), Ciphertext: []byte{byte(i), 0xff}, CollapseKey: "42"}
+		msgs[i] = PushMessage{Handle: "h_" + string(rune('a'+i)), Ciphertext: []byte{byte(i), 0xff}, CollapseKey: "42", ID: "42:s" + string(rune('a'+i))}
 	}
 	res, err := r.Send(context.Background(), msgs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Messages) != 7 || got.Messages[0].Handle != "h_a" || got.Messages[0].CollapseKey != "42" || got.Messages[0].TTLSeconds != 86400 ||
+	if len(got.Messages) != 9 || got.Messages[0].Handle != "h_a" || got.Messages[0].CollapseKey != "42" || got.Messages[0].TTLSeconds != 86400 ||
+		got.Messages[1].ID != "42:sb" ||
 		got.Messages[1].Ciphertext != base64.StdEncoding.EncodeToString([]byte{1, 0xff}) {
 		t.Fatalf("%+v", got)
 	}
-	want := []PushStatus{PushDelivered, PushGone, PushRetry, PushRetry, PushDropped, PushDropped, PushRetry}
+	want := []PushStatus{PushDelivered, PushGone, PushRetry, PushRetry, PushDropped, PushDropped, PushRetry, PushRetry, PushRetry}
 	for i, w := range want {
 		if res[i].Status != w {
 			t.Errorf("result %d: %v, want %v", i, res[i].Status, w)
 		}
 	}
-	if res[2].RetryAfter != 30*time.Second {
-		t.Fatalf("retry after %v", res[2].RetryAfter)
+	// The header covers an item without its own wait; an item's own wait wins, also on a failure after an FCM outage.
+	if res[2].RetryAfter != 30*time.Second || res[3].RetryAfter != 0 || res[7].RetryAfter != 5*time.Second || res[8].RetryAfter != 90*time.Second {
+		t.Fatalf("retry after %v %v %v %v", res[2].RetryAfter, res[3].RetryAfter, res[7].RetryAfter, res[8].RetryAfter)
 	}
 }
 

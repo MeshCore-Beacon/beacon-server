@@ -340,7 +340,8 @@ func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow, now time.Time) 
 				continue
 			}
 			items = append(items, pushItem{row: r.ID, user: r.UserID, device: d, limit: batchLimit(r.PushAttempts),
-				msg: PushMessage{Handle: d.Token, Ciphertext: ct, CollapseKey: strconv.FormatInt(r.ID, 10)}})
+				msg: PushMessage{Handle: d.Token, Ciphertext: ct, CollapseKey: strconv.FormatInt(r.ID, 10),
+					ID: strconv.FormatInt(r.ID, 10) + ":" + d.Session.String()}})
 		}
 	}
 	fail := func(id int64, hold time.Time) {

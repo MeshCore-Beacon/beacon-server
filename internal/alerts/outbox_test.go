@@ -352,7 +352,8 @@ func TestPushSealsTheNoticeForEachDevice(t *testing.T) {
 		t.Fatal(err)
 	}
 	sent := p.sent()
-	if len(p.calls) != 1 || len(sent) != 2 || sent[0].Handle != "h_one" || sent[1].Handle != "h_two" || sent[0].CollapseKey != "41" {
+	if len(p.calls) != 1 || len(sent) != 2 || sent[0].Handle != "h_one" || sent[1].Handle != "h_two" || sent[0].CollapseKey != "41" ||
+		sent[0].ID != "41:"+ios.Session.String() || sent[1].ID != "41:"+android.Session.String() {
 		t.Fatalf("%+v", p.calls)
 	}
 	var got map[string]any

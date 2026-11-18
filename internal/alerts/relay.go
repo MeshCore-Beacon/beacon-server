@@ -32,11 +32,13 @@ const (
 	maxRetryAfter = 6 * time.Hour
 )
 
-// PushMessage is one sealed notice for one device handle.
+// PushMessage is one sealed notice for one device handle. ID is the same on every retry of the notice for the
+// device, so the push server can answer a repeat without sending it again.
 type PushMessage struct {
 	Handle      string
 	Ciphertext  []byte
 	CollapseKey string
+	ID          string
 }
 
 // PushStatus is what became of one message.
@@ -141,6 +143,7 @@ type wireMessage struct {
 	Ciphertext  string `json:"ciphertext"`
 	CollapseKey string `json:"collapseKey,omitempty"`
 	TTLSeconds  int    `json:"ttlSeconds"`
+	ID          string `json:"id,omitempty"`
 }
 
 // Send posts one batch to /v1/send.
@@ -154,7 +157,7 @@ func (r *Relay) Send(ctx context.Context, msgs []PushMessage) ([]PushResult, err
 	wire := make([]wireMessage, len(msgs))
 	for i, m := range msgs {
 		wire[i] = wireMessage{Handle: m.Handle, Ciphertext: base64.StdEncoding.EncodeToString(m.Ciphertext), CollapseKey: m.CollapseKey,
-			TTLSeconds: int(PushTTL / time.Second)}
+			TTLSeconds: int(PushTTL / time.Second), ID: m.ID}
 	}
 	status, h, reply, err := r.post(ctx, "/v1/send", sendCallLimit, map[string]any{"messages": wire})
 	if err != nil {
@@ -165,7 +168,8 @@ func (r *Relay) Send(ctx context.Context, msgs []PushMessage) ([]PushResult, err
 	}
 	var out struct {
 		Results []struct {
-			Status string `json:"status"`
+			Status            string `json:"status"`
+			RetryAfterSeconds int64  `json:"retryAfterSeconds"`
 		} `json:"results"`
 	}
 	if json.Unmarshal(reply, &out) != nil || len(out.Results) != len(msgs) {
@@ -174,6 +178,11 @@ func (r *Relay) Send(ctx context.Context, msgs []PushMessage) ([]PushResult, err
 	wait := retryAfter(h.Get("Retry-After"), r.now())
 	res := make([]PushResult, len(msgs))
 	for i, x := range out.Results {
+		// A wait given for the item beats the header, which carries the longest in the batch.
+		itemWait := wait
+		if x.RetryAfterSeconds > 0 {
+			itemWait = min(time.Duration(x.RetryAfterSeconds)*time.Second, maxRetryAfter)
+		}
 		switch x.Status {
 		case "ok":
 			res[i] = PushResult{Status: PushDelivered}
@@ -182,9 +191,12 @@ func (r *Relay) Send(ctx context.Context, msgs []PushMessage) ([]PushResult, err
 		case "too_large", "invalid":
 			res[i] = PushResult{Status: PushDropped}
 		case "rate_limited":
-			res[i] = PushResult{Status: PushRetry, RetryAfter: wait}
+			res[i] = PushResult{Status: PushRetry, RetryAfter: itemWait}
 		default: // failed, and anything newer than this server
 			res[i] = PushResult{Status: PushRetry}
+			if x.RetryAfterSeconds > 0 {
+				res[i].RetryAfter = itemWait
+			}
 		}
 	}
 	return res, nil
