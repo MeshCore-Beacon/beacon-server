@@ -123,8 +123,8 @@ func TestInfoAccountsFeatures(t *testing.T) {
 
 func TestInfoFeatures(t *testing.T) {
 	for polling, want := range map[bool]string{
-		true:  `"features":{"polling":true,"accounts":"off","registration":false,"telemetryRequests":false,"alerts":false,"atlasTelemetry":true,"mapTelemetry":true}`,
-		false: `"features":{"polling":false,"accounts":"off","registration":false,"telemetryRequests":false,"alerts":false,"atlasTelemetry":true,"mapTelemetry":true}`,
+		true:  `"features":{"polling":true,"accounts":"off","registration":false,"telemetryRequests":false,"alerts":false,"alertChannels":{"email":false,"push":false},"atlasTelemetry":true,"mapTelemetry":true}`,
+		false: `"features":{"polling":false,"accounts":"off","registration":false,"telemetryRequests":false,"alerts":false,"alertChannels":{"email":false,"push":false},"atlasTelemetry":true,"mapTelemetry":true}`,
 	} {
 		handler := New(nil, nil, nil, Options{ServerVersion: "2.0.2", PollingEnabled: polling})
 		response := httptest.NewRecorder()

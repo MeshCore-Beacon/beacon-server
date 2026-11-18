@@ -468,9 +468,19 @@ cache:
 #    url: ""                   # https base URL of the portal
 #    client_id: ""             # this instance's client id at the portal
 
-# Alerts on Atlas radios (gone quiet, low battery, reboots and more). Needs accounts. Off by default.
-#alerts:
-#  delivery: off               # off, push or email; anything but off needs accounts.mode local or portal
-#                              # push: BEACON_PUSH_CREDENTIALS must name the Google service-account JSON file of the
-#                              #   app's Firebase project; without it the server refuses to start
-#                              # email: needs accounts.mode local and the mail block (not portal)
+# Alerts on Atlas radios (gone quiet, low battery, reboots and more). Both channels need accounts
+# (local or portal); each user picks which ones reach them.
+alerts:
+  email:
+    # Send alerts by email. Needs accounts.mode: local and the top-level mail block.
+    enabled: false
+  push:
+    # Send alerts as push notifications to the Beacon app.
+    enabled: false
+    # Your Push ID, from registering this server at https://push.meshcorebeacon.ca/register.
+    # The matching Push secret goes in BEACON_PUSH_SECRET in .env, never here.
+    id: ""
+    # The push server. You must use the official MeshCore Beacon push server:
+    # the Beacon app only receives notifications sent through it. Only change
+    # this if the project announces a new address.
+    server: https://push.meshcorebeacon.ca

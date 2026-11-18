@@ -32,6 +32,7 @@ type AlertOutbox struct {
 	Attempts        int16              `json:"attempts"`
 	DeliveredAt     pgtype.Timestamptz `json:"delivered_at"`
 	NextAttemptAt   pgtype.Timestamptz `json:"next_attempt_at"`
+	EmailSentAt     pgtype.Timestamptz `json:"email_sent_at"`
 }
 
 type AlertOutboxDevice struct {
@@ -747,6 +748,8 @@ type User struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	LastLoginAt     pgtype.Timestamptz `json:"last_login_at"`
 	DisabledAt      pgtype.Timestamptz `json:"disabled_at"`
+	AlertEmail      bool               `json:"alert_email"`
+	AlertPush       bool               `json:"alert_push"`
 }
 
 type UserAlertRule struct {
@@ -787,11 +790,12 @@ type UserAtlasPin struct {
 }
 
 type UserDevice struct {
-	SessionID uuid.UUID          `json:"session_id"`
-	UserID    uuid.UUID          `json:"user_id"`
-	Platform  string             `json:"platform"`
-	PushToken string             `json:"push_token"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	SessionID  uuid.UUID          `json:"session_id"`
+	UserID     uuid.UUID          `json:"user_id"`
+	Platform   string             `json:"platform"`
+	PushToken  string             `json:"push_token"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	PayloadKey []byte             `json:"payload_key"`
 }
 
 type UserSession struct {

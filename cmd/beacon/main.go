@@ -557,26 +557,21 @@ func main() {
 		slog.Info("telemetry requests are off", "component", "startup", "reason", requestsOff)
 	}
 	// Alerts need accounts: rules hang on a user's Atlas.
-	resolvedAlerts, err := cfg.Alerts.Resolve(cfg.Accounts.Mode)
+	resolvedAlerts, err := cfg.Alerts.ResolveWithSecret(cfg.Accounts.Mode, os.Getenv("BEACON_PUSH_SECRET"))
 	if err != nil {
 		slog.Error("invalid alerts configuration", "component", "startup", "error", err)
 		os.Exit(1)
 	}
-	alertDelivery := ""
+	alertEmail, alertPush := alertChannels(resolvedAlerts, resolvedAccounts.Enabled, accountMailer)
 	var alertsSvc handlers.AlertsService // an untyped nil answers 404 alerts_disabled
-	if resolvedAccounts.Enabled && resolvedAlerts.Delivery != "off" {
-		alertDelivery = resolvedAlerts.Delivery
-		alertsSvc = alerts.NewService(maintStore, alertDelivery, time.Now)
+	if alertEmail || alertPush {
+		alertsSvc = alerts.NewService(maintStore, alerts.ServerChannels{Email: alertEmail, Push: alertPush, Portal: resolvedAccounts.Portal}, time.Now)
 	}
-	slog.Info("alerts", "component", "startup", "delivery", resolvedAlerts.Delivery, "enabled", alertsSvc != nil)
-	alertSender, err := newAlertSender(alertDelivery, accountMailer, maintStore, resolvedAccounts.PublicURL, os.Getenv("BEACON_PUSH_CREDENTIALS"))
+	slog.Info("alerts", "component", "startup", "email", alertEmail, "push", alertPush, "enabled", alertsSvc != nil)
+	alertSender, pushRelay := newAlertSender(resolvedAlerts, resolvedAccounts.Enabled, accountMailer, maintStore, resolvedAccounts.PublicURL)
 	if alertSender != nil {
 		alertSender.SetInstanceName(resolvedAccounts.InstanceName)
 		alertSender.SetTemperatureUnit(resolvedDisplay.TemperatureUnit)
-	}
-	if err != nil {
-		slog.Error("invalid alert delivery", "component", "startup", "error", err)
-		os.Exit(1)
 	}
 	if resolvedAccounts.Enabled {
 		meMounts = append(meMounts, handlers.RequestRoutes(requestsSvc), handlers.AlertRoutes(alertsSvc))
@@ -704,6 +699,9 @@ func main() {
 	}
 	if alertSender != nil && mode.Jobs {
 		tasks = append(tasks, background.AlertTasks(db.AlertEval{Store: maintStore}, alertSender)...)
+		if pushRelay != nil {
+			backgroundJobs.Go(func() { alerts.RunHello(ctx, pushRelay) })
+		}
 	}
 	if pollingSvc != nil && mode.Jobs {
 		tasks = append(tasks, background.PollingTasks(pollingSvc, background.NewPollingMaint(maintStore), resolvedPolling)...)
@@ -759,7 +757,8 @@ func main() {
 		PollingEnabled:  resolvedPolling.Enabled,
 		TemperatureUnit: resolvedDisplay.TemperatureUnit, DistanceUnit: resolvedDisplay.DistanceUnit,
 		AtlasLimit:   resolvedAtlas.Limit,
-		AccountsMode: accountsMode, RegistrationOpen: resolvedAccounts.RegistrationOpen, PortalURL: portalURL, AlertDelivery: alertDelivery,
+		AccountsMode: accountsMode, RegistrationOpen: resolvedAccounts.RegistrationOpen, PortalURL: portalURL,
+		AlertEmail: alertEmail, AlertPush: alertPush, PushServer: resolvedAlerts.PushServer, PushID: resolvedAlerts.PushID, PushSecret: resolvedAlerts.PushSecret,
 		Accounts: accountsSvc, AuthOptions: authOptions, MeMounts: meMounts, TelemetryRequests: requestsSvc != nil,
 		Guards:        guard,
 		APIPlanLayout: string(layout),

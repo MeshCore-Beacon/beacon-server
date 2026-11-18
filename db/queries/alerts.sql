@@ -49,12 +49,25 @@ WHERE r.user_id = $1
 DELETE FROM user_devices WHERE session_id = $1 AND push_token <> $2;
 
 -- name: UpsertUserDevice :exec
--- The token is unique, so a registration for a token another session holds moves that row (crossing users on
+-- The handle is unique, so a registration for a handle another session holds moves that row (crossing users on
 -- purpose: a phone belongs to one account, so the previous user's alerts never reach its next user).
-INSERT INTO user_devices (session_id, user_id, platform, push_token)
-VALUES ($1, $2, $3, $4)
+INSERT INTO user_devices (session_id, user_id, platform, push_token, payload_key)
+VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (push_token) DO UPDATE
-    SET session_id = EXCLUDED.session_id, user_id = EXCLUDED.user_id, platform = EXCLUDED.platform, updated_at = now();
+    SET session_id = EXCLUDED.session_id, user_id = EXCLUDED.user_id, platform = EXCLUDED.platform,
+        payload_key = EXCLUDED.payload_key, updated_at = now();
+
+-- name: TurnOnAlertPush :exec
+UPDATE users SET alert_push = true WHERE id = $1;
+
+-- name: UserAlertChannels :one
+SELECT alert_email, alert_push, (email IS NOT NULL AND email <> '')::boolean AS has_email,
+       (email_verified_at IS NOT NULL)::boolean AS email_verified
+FROM users WHERE id = $1;
+
+-- name: SetUserAlertChannels :execrows
+UPDATE users SET alert_email = COALESCE(sqlc.narg(alert_email), alert_email), alert_push = COALESCE(sqlc.narg(alert_push), alert_push)
+WHERE id = sqlc.arg(id);
 
 -- name: DeleteUserDevice :exec
 DELETE FROM user_devices WHERE session_id = $1 AND user_id = $2;

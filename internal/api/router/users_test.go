@@ -186,15 +186,57 @@ func TestPortalModeReportsItsURL(t *testing.T) {
 }
 
 func TestAlertFeatures(t *testing.T) {
-	for delivery, want := range map[string]string{"": `"alerts":false`, "push": `"alertDelivery":"push"`, "email": `"alertDelivery":"email"`} {
-		h := New(nil, nil, nil, Options{AlertDelivery: delivery})
+	for _, tc := range []struct {
+		opts Options
+		want []string
+		not  []string
+	}{
+		{Options{}, []string{`"alerts":false`, `"alertChannels":{"email":false,"push":false}`}, []string{`"push":{`}},
+		{Options{AlertEmail: true}, []string{`"alerts":true`, `"alertChannels":{"email":true,"push":false}`}, []string{`"push":{`}},
+		{Options{AlertPush: true, PushServer: "https://push.meshcorebeacon.ca", PushID: "inst_abc"},
+			[]string{`"alerts":true`, `"alertChannels":{"email":false,"push":true}`, `"push":{"server":"https://push.meshcorebeacon.ca","pushId":"inst_abc"}`}, nil},
+	} {
+		h := New(nil, nil, nil, tc.opts)
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/info", nil))
-		if !strings.Contains(w.Body.String(), want) || (delivery != "" && !strings.Contains(w.Body.String(), `"alerts":true`)) {
-			t.Errorf("%q: %s", delivery, w.Body)
+		for _, want := range tc.want {
+			if !strings.Contains(w.Body.String(), want) {
+				t.Errorf("%+v: no %s in %s", tc.opts, want, w.Body)
+			}
 		}
-		if delivery == "" && strings.Contains(w.Body.String(), "alertDelivery") {
-			t.Errorf("alertDelivery present while off: %s", w.Body)
+		for _, not := range tc.not {
+			if strings.Contains(w.Body.String(), not) {
+				t.Errorf("%+v: %s in %s", tc.opts, not, w.Body)
+			}
 		}
+	}
+}
+
+// The domain check sits outside /api/v1 and is there only while push is on.
+func TestPushDomainCheckRoute(t *testing.T) {
+	off := New(nil, nil, nil, Options{})
+	w := httptest.NewRecorder()
+	off.ServeHTTP(w, httptest.NewRequest("GET", "/.well-known/beacon-push?challenge=abc", nil))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("push off: %d", w.Code)
+	}
+	on := New(nil, nil, nil, Options{AlertPush: true, PushServer: "https://push.meshcorebeacon.ca", PushID: "inst_abc", PushSecret: "s"})
+	limited := 0
+	for i := 0; i < 40; i++ {
+		w := httptest.NewRecorder()
+		on.ServeHTTP(w, httptest.NewRequest("GET", "/.well-known/beacon-push?challenge=abc", nil))
+		switch w.Code {
+		case http.StatusOK:
+			if !strings.Contains(w.Body.String(), `"pushId":"inst_abc"`) {
+				t.Fatalf("%s", w.Body)
+			}
+		case http.StatusTooManyRequests:
+			limited++
+		default:
+			t.Fatalf("%d %s", w.Code, w.Body)
+		}
+	}
+	if limited == 0 {
+		t.Fatal("not rate limited per address")
 	}
 }

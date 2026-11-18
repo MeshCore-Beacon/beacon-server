@@ -166,7 +166,7 @@ const createUser = `-- name: CreateUser :one
 INSERT INTO users (username, display_name, email, pass_hash, provider, provider_subject, email_verified_at)
 VALUES ($1, $2, $3, $4, $5,
         $6, $7)
-RETURNING id, username, display_name, email, pending_email, pass_hash, email_verified_at, provider, provider_subject, created_at, last_login_at, disabled_at
+RETURNING id, username, display_name, email, pending_email, pass_hash, email_verified_at, provider, provider_subject, created_at, last_login_at, disabled_at, alert_email, alert_push
 `
 
 type CreateUserParams struct {
@@ -203,6 +203,8 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.CreatedAt,
 		&i.LastLoginAt,
 		&i.DisabledAt,
+		&i.AlertEmail,
+		&i.AlertPush,
 	)
 	return i, err
 }
@@ -519,7 +521,7 @@ func (q *Queries) ListUserSessions(ctx context.Context, arg ListUserSessionsPara
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, username, display_name, email, pending_email, pass_hash, email_verified_at, provider, provider_subject, created_at, last_login_at, disabled_at FROM users
+SELECT id, username, display_name, email, pending_email, pass_hash, email_verified_at, provider, provider_subject, created_at, last_login_at, disabled_at, alert_email, alert_push FROM users
 WHERE ($1::text = '' OR lower(username) LIKE $1::text OR email LIKE $1::text)
   AND (created_at, id) < ($2::timestamptz, $3::uuid)
 ORDER BY created_at DESC, id DESC
@@ -562,6 +564,8 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, e
 			&i.CreatedAt,
 			&i.LastLoginAt,
 			&i.DisabledAt,
+			&i.AlertEmail,
+			&i.AlertPush,
 		); err != nil {
 			return nil, err
 		}
@@ -612,7 +616,7 @@ func (q *Queries) PeekUserToken(ctx context.Context, arg PeekUserTokenParams) (u
 
 const refreshPortalUser = `-- name: RefreshPortalUser :one
 UPDATE users SET username = $1, display_name = $2
-WHERE id = $3 RETURNING id, username, display_name, email, pending_email, pass_hash, email_verified_at, provider, provider_subject, created_at, last_login_at, disabled_at
+WHERE id = $3 RETURNING id, username, display_name, email, pending_email, pass_hash, email_verified_at, provider, provider_subject, created_at, last_login_at, disabled_at, alert_email, alert_push
 `
 
 type RefreshPortalUserParams struct {
@@ -637,6 +641,8 @@ func (q *Queries) RefreshPortalUser(ctx context.Context, arg RefreshPortalUserPa
 		&i.CreatedAt,
 		&i.LastLoginAt,
 		&i.DisabledAt,
+		&i.AlertEmail,
+		&i.AlertPush,
 	)
 	return i, err
 }
@@ -781,7 +787,7 @@ func (q *Queries) UpdateUserDisplayName(ctx context.Context, arg UpdateUserDispl
 }
 
 const userByEmail = `-- name: UserByEmail :one
-SELECT id, username, display_name, email, pending_email, pass_hash, email_verified_at, provider, provider_subject, created_at, last_login_at, disabled_at FROM users WHERE email = $1 AND email <> ''
+SELECT id, username, display_name, email, pending_email, pass_hash, email_verified_at, provider, provider_subject, created_at, last_login_at, disabled_at, alert_email, alert_push FROM users WHERE email = $1 AND email <> ''
 `
 
 func (q *Queries) UserByEmail(ctx context.Context, email string) (User, error) {
@@ -800,12 +806,14 @@ func (q *Queries) UserByEmail(ctx context.Context, email string) (User, error) {
 		&i.CreatedAt,
 		&i.LastLoginAt,
 		&i.DisabledAt,
+		&i.AlertEmail,
+		&i.AlertPush,
 	)
 	return i, err
 }
 
 const userByID = `-- name: UserByID :one
-SELECT id, username, display_name, email, pending_email, pass_hash, email_verified_at, provider, provider_subject, created_at, last_login_at, disabled_at FROM users WHERE id = $1
+SELECT id, username, display_name, email, pending_email, pass_hash, email_verified_at, provider, provider_subject, created_at, last_login_at, disabled_at, alert_email, alert_push FROM users WHERE id = $1
 `
 
 func (q *Queries) UserByID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -824,12 +832,14 @@ func (q *Queries) UserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.CreatedAt,
 		&i.LastLoginAt,
 		&i.DisabledAt,
+		&i.AlertEmail,
+		&i.AlertPush,
 	)
 	return i, err
 }
 
 const userByProviderSubject = `-- name: UserByProviderSubject :one
-SELECT id, username, display_name, email, pending_email, pass_hash, email_verified_at, provider, provider_subject, created_at, last_login_at, disabled_at FROM users WHERE provider = $1 AND provider_subject = $2
+SELECT id, username, display_name, email, pending_email, pass_hash, email_verified_at, provider, provider_subject, created_at, last_login_at, disabled_at, alert_email, alert_push FROM users WHERE provider = $1 AND provider_subject = $2
 `
 
 type UserByProviderSubjectParams struct {
@@ -853,12 +863,14 @@ func (q *Queries) UserByProviderSubject(ctx context.Context, arg UserByProviderS
 		&i.CreatedAt,
 		&i.LastLoginAt,
 		&i.DisabledAt,
+		&i.AlertEmail,
+		&i.AlertPush,
 	)
 	return i, err
 }
 
 const userByUsername = `-- name: UserByUsername :one
-SELECT id, username, display_name, email, pending_email, pass_hash, email_verified_at, provider, provider_subject, created_at, last_login_at, disabled_at FROM users WHERE lower(username) = lower($1)
+SELECT id, username, display_name, email, pending_email, pass_hash, email_verified_at, provider, provider_subject, created_at, last_login_at, disabled_at, alert_email, alert_push FROM users WHERE lower(username) = lower($1)
 `
 
 func (q *Queries) UserByUsername(ctx context.Context, lower string) (User, error) {
@@ -877,6 +889,8 @@ func (q *Queries) UserByUsername(ctx context.Context, lower string) (User, error
 		&i.CreatedAt,
 		&i.LastLoginAt,
 		&i.DisabledAt,
+		&i.AlertEmail,
+		&i.AlertPush,
 	)
 	return i, err
 }

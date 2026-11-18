@@ -430,7 +430,11 @@ func (a AlertEval) Pending(ctx context.Context, notBefore, now time.Time, limit 
 	out := make([]alerts.OutboxRow, len(rows))
 	for i, r := range rows {
 		out[i] = alerts.OutboxRow{ID: r.ID, TargetID: r.TargetID, UserID: r.UserID, Pass: r.PassID, TargetKind: r.TargetKind, Key: r.TargetPublicKey,
-			Name: r.Name, Kind: r.AlertKind, Detail: r.Detail, Value: r.Value, Attempts: int(r.Attempts), Email: r.Email, EmailVerified: r.EmailVerified}
+			Name: r.Name, Kind: r.AlertKind, Detail: r.Detail, Attempts: int(r.Attempts), Email: r.Email, EmailVerified: r.EmailVerified,
+			AlertEmail: r.AlertEmail, AlertPush: r.AlertPush, EmailSent: r.EmailSent}
+		if r.Value != nil {
+			out[i].Value, out[i].HasValue = *r.Value, true
+		}
 	}
 	return out, nil
 }
@@ -442,7 +446,7 @@ func (a AlertEval) Devices(ctx context.Context, userIDs []uuid.UUID) (map[uuid.U
 	}
 	out := map[uuid.UUID][]alerts.Device{}
 	for _, r := range rows {
-		out[r.UserID] = append(out[r.UserID], alerts.Device{Session: r.SessionID, Platform: r.Platform, Token: r.PushToken})
+		out[r.UserID] = append(out[r.UserID], alerts.Device{Session: r.SessionID, Platform: r.Platform, Token: r.PushToken, Key: r.PayloadKey})
 	}
 	return out, nil
 }
@@ -476,7 +480,14 @@ func (a AlertEval) MarkDevicesDelivered(ctx context.Context, marks []alerts.Devi
 	})
 }
 
-func (a AlertEval) Finish(ctx context.Context, delivered, retry []int64, now time.Time, maxAttempts int) error {
+func (a AlertEval) MarkEmailSent(ctx context.Context, ids []int64, now time.Time) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return a.q.MarkAlertsEmailSent(ctx, sqlc.MarkAlertsEmailSentParams{At: ts(now), Ids: ids})
+}
+
+func (a AlertEval) Finish(ctx context.Context, delivered []int64, retry []alerts.Retry, now time.Time, maxAttempts int) error {
 	return a.pollTx(ctx, func(q *sqlc.Queries) error {
 		if len(delivered) > 0 {
 			if err := q.MarkAlertsDelivered(ctx, sqlc.MarkAlertsDeliveredParams{At: ts(now), Ids: delivered}); err != nil {
@@ -484,8 +495,23 @@ func (a AlertEval) Finish(ctx context.Context, delivered, retry []int64, now tim
 			}
 		}
 		if len(retry) > 0 {
-			if err := q.BumpAlertAttempts(ctx, sqlc.BumpAlertAttemptsParams{At: ts(now), Ids: retry}); err != nil {
-				return err
+			// One update per hold time; a hold before now is no hold.
+			byHold := map[time.Time][]int64{}
+			var holds []time.Time
+			for _, r := range retry {
+				h := r.NotBefore
+				if h.Before(now) {
+					h = now
+				}
+				if byHold[h] == nil {
+					holds = append(holds, h)
+				}
+				byHold[h] = append(byHold[h], r.ID)
+			}
+			for _, h := range holds {
+				if err := q.BumpAlertAttempts(ctx, sqlc.BumpAlertAttemptsParams{At: ts(now), HoldUntil: ts(h), Ids: byHold[h]}); err != nil {
+					return err
+				}
 			}
 			if _, err := q.DeleteExhaustedAlerts(ctx, int16(maxAttempts)); err != nil {
 				return err

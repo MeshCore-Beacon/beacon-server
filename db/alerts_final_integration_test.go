@@ -135,7 +135,7 @@ func TestAlertMailWaitsForTheFinishedPassPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := &recMail{}
-	sender := alerts.NewSender(AlertEval{s}, "email", m, nil, nil, nil)
+	sender := alerts.NewSender(AlertEval{s}, alerts.SenderConfig{Mail: m})
 	queueNotice(t, ctx, s, u.ID, pass, "battery_low", "Hill", time.Now())
 	if err := sender.Run(ctx); err != nil {
 		t.Fatal(err)

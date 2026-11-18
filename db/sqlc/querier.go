@@ -64,7 +64,8 @@ type Querier interface {
 	// untyped rows it picked, how many it typed, and the last picked id (0 when it picked none).
 	BackfillObservationPayloadTypes(ctx context.Context, arg BackfillObservationPayloadTypesParams) (BackfillObservationPayloadTypesRow, error)
 	BeginAlertPass(ctx context.Context, passID uuid.UUID) error
-	// Counts a failed attempt and holds the notice back for a minute, doubling with each earlier failure.
+	// Counts a failed attempt and holds the notice back for a minute, doubling with each earlier failure, or until
+	// hold_until when the push server asked for longer.
 	BumpAlertAttempts(ctx context.Context, arg BumpAlertAttemptsParams) error
 	BumpUserAtlas(ctx context.Context, arg BumpUserAtlasParams) (int64, error)
 	// Exact check of messages in (after_id, through_id]: pairs the definition has and the table lacks (counting
@@ -673,6 +674,7 @@ type Querier interface {
 	LockUserForRequests(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	MarkAlertDeviceDelivered(ctx context.Context, arg MarkAlertDeviceDeliveredParams) error
 	MarkAlertsDelivered(ctx context.Context, arg MarkAlertsDeliveredParams) error
+	MarkAlertsEmailSent(ctx context.Context, arg MarkAlertsEmailSentParams) error
 	// Hours whose raw rows cleanup already started deleting can never be rolled completely.
 	// Readers report the new status, so the revision moves too.
 	MarkPartialRollupHours(ctx context.Context) error
@@ -841,6 +843,7 @@ type Querier interface {
 	SetPollingObserver(ctx context.Context, arg SetPollingObserverParams) error
 	SetPollingState(ctx context.Context, arg SetPollingStateParams) error
 	SetRollupHourPartial(ctx context.Context, hour pgtype.Timestamptz) error
+	SetUserAlertChannels(ctx context.Context, arg SetUserAlertChannelsParams) (int64, error)
 	SetUserDisabled(ctx context.Context, arg SetUserDisabledParams) (int64, error)
 	SetUserEmailVerified(ctx context.Context, arg SetUserEmailVerifiedParams) (int64, error)
 	SetUserPassword(ctx context.Context, arg SetUserPasswordParams) (int64, error)
@@ -879,6 +882,7 @@ type Querier interface {
 	// An hour [H, H+1h) is eligible once now() >= H + 95 min (ingest clamps heard_at to ±30 min).
 	// ============================================================
 	TryRollupLock(ctx context.Context) (bool, error)
+	TurnOnAlertPush(ctx context.Context, id uuid.UUID) error
 	// Records the observer's own OTA-reported region scope, from the "self"
 	// field of a /neighbors report. Always known (not queried OTA), so this
 	// unconditionally overwrites, unlike the neighbor-side region_scope.
@@ -968,9 +972,10 @@ type Querier interface {
 	// TRANSPORT CODES
 	// ============================================================
 	UpsertTransportScope(ctx context.Context, arg UpsertTransportScopeParams) error
-	// The token is unique, so a registration for a token another session holds moves that row (crossing users on
+	// The handle is unique, so a registration for a handle another session holds moves that row (crossing users on
 	// purpose: a phone belongs to one account, so the previous user's alerts never reach its next user).
 	UpsertUserDevice(ctx context.Context, arg UpsertUserDeviceParams) error
+	UserAlertChannels(ctx context.Context, id uuid.UUID) (UserAlertChannelsRow, error)
 	// Only enabled rules: back_online needs a gone_quiet rule that is on.
 	UserAlertRuleKinds(ctx context.Context, arg UserAlertRuleKindsParams) ([]string, error)
 	UserByEmail(ctx context.Context, email string) (User, error)

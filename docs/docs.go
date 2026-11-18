@@ -2931,7 +2931,7 @@ const docTemplate = `{
                         "UserSession": []
                     }
                 ],
-                "description": "One target per Atlas pin, in Atlas order, with the kinds its radio can have, the reason for each it cannot, and its rules. hasDevice says whether an app session has a push token (push mode). 404 alerts_disabled when the server has alerts off.",
+                "description": "The user's channels (email and push: whether each is available, the user's switch, the reason email is not available, whether an app registered a device), and one target per Atlas pin, in Atlas order, with the kinds its radio can have, the reason for each it cannot, and its rules. 404 alerts_disabled when the server has alerts off.",
                 "produces": [
                     "application/json"
                 ],
@@ -2957,6 +2957,126 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/me/alerts/channels": {
+            "put": {
+                "security": [
+                    {
+                        "UserSession": []
+                    }
+                ],
+                "description": "Sets the user's email and push switches; an absent one is left as it is. A switch can be on while its channel is not available (see GET /me/alerts); it takes effect once it is. Registering a device turns push on. Answers 200 with the channels.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Accounts"
+                ],
+                "summary": "Turn alert channels on or off",
+                "parameters": [
+                    {
+                        "description": "Body at most 4 KiB",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PutAlertChannelsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AlertChannels"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "alerts_disabled",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "415": {
+                        "description": "Unsupported Media Type",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "invalid_input: neither email nor push given",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "$ref": "#/definitions/internal_api_handlers.APIError"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -3334,14 +3454,14 @@ const docTemplate = `{
                         "UserSession": []
                     }
                 ],
-                "description": "Bearer sessions only (the app); a cookie session gets 403 app_session_required. Replaces the token of this session, and a token another session held moves here. Ending the session ends delivery to it.",
+                "description": "Bearer sessions only (the app); a cookie session gets 403 app_session_required. pushToken is the device handle from the push server named in /info features.push, and payloadKey the device's AES-256 key (standard base64, 32 bytes). Replaces this session's device, and a handle another session held moves here. Turns the user's push switch on. Ending the session ends delivery to it. 404 push_disabled when the server does not send push notifications.",
                 "consumes": [
                     "application/json"
                 ],
                 "tags": [
                     "Accounts"
                 ],
-                "summary": "Register this app session's push token",
+                "summary": "Register this app session's device for push",
                 "parameters": [
                     {
                         "description": "Body at most 4 KiB",
@@ -3385,7 +3505,7 @@ const docTemplate = `{
                         }
                     },
                     "404": {
-                        "description": "alerts_disabled",
+                        "description": "alerts_disabled or push_disabled",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -3449,7 +3569,7 @@ const docTemplate = `{
                 "tags": [
                     "Accounts"
                 ],
-                "summary": "Remove this session's push token",
+                "summary": "Remove this session's device",
                 "responses": {
                     "204": {
                         "description": "Removed, or there was none"
@@ -7755,6 +7875,51 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.AlertChannels": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AlertEmailChannel"
+                },
+                "push": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AlertPushChannel"
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.AlertEmailChannel": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "reason": {
+                    "type": "string",
+                    "enum": [
+                        "",
+                        "server_off",
+                        "portal_account",
+                        "unverified_email"
+                    ]
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.AlertPushChannel": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "hasDevice": {
+                    "type": "boolean"
+                }
+            }
+        },
         "github_com_MeshCore-Beacon_beacon-server_internal_api.AlertRule": {
             "type": "object",
             "properties": {
@@ -7877,15 +8042,8 @@ const docTemplate = `{
         "github_com_MeshCore-Beacon_beacon-server_internal_api.AlertsResponse": {
             "type": "object",
             "properties": {
-                "delivery": {
-                    "type": "string",
-                    "enum": [
-                        "push",
-                        "email"
-                    ]
-                },
-                "hasDevice": {
-                    "type": "boolean"
+                "channels": {
+                    "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AlertChannels"
                 },
                 "targets": {
                     "type": "array",
@@ -8494,6 +8652,19 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.InfoAlertChannels": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "push": {
+                    "type": "boolean",
+                    "example": false
+                }
+            }
+        },
         "github_com_MeshCore-Beacon_beacon-server_internal_api.InfoDisplay": {
             "type": "object",
             "properties": {
@@ -8522,15 +8693,16 @@ const docTemplate = `{
                     "type": "string",
                     "example": "off"
                 },
-                "alertDelivery": {
-                    "description": "AlertDelivery is \"push\" or \"email\" while alerts is true.",
-                    "type": "string",
-                    "enum": [
-                        "push",
-                        "email"
+                "alertChannels": {
+                    "description": "AlertChannels says which channels the server sends alerts by.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.InfoAlertChannels"
+                        }
                     ]
                 },
                 "alerts": {
+                    "description": "Alerts is true when the server sends alerts by at least one channel.",
                     "type": "boolean",
                     "example": false
                 },
@@ -8553,6 +8725,14 @@ const docTemplate = `{
                     "type": "string",
                     "example": "https://portal.example.org"
                 },
+                "push": {
+                    "description": "Push names the push server the app gets a device handle from, and this server's Push ID there; set only while\nalertChannels.push is true.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.InfoPush"
+                        }
+                    ]
+                },
                 "registration": {
                     "description": "Registration is true when new sign-ups are open; only meaningful when accounts is \"local\".",
                     "type": "boolean",
@@ -8571,6 +8751,19 @@ const docTemplate = `{
                     "description": "Atlas is the most cards one Atlas holds, in the browser or synced to an account.",
                     "type": "integer",
                     "example": 20
+                }
+            }
+        },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.InfoPush": {
+            "type": "object",
+            "properties": {
+                "pushId": {
+                    "type": "string",
+                    "example": "inst_7f3k2m9qxa"
+                },
+                "server": {
+                    "type": "string",
+                    "example": "https://push.meshcorebeacon.ca"
                 }
             }
         },
@@ -10540,6 +10733,17 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_MeshCore-Beacon_beacon-server_internal_api.PutAlertChannelsRequest": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "boolean"
+                },
+                "push": {
+                    "type": "boolean"
+                }
+            }
+        },
         "github_com_MeshCore-Beacon_beacon-server_internal_api.PutAlertRuleRequest": {
             "type": "object",
             "properties": {
@@ -10655,6 +10859,10 @@ const docTemplate = `{
         "github_com_MeshCore-Beacon_beacon-server_internal_api.RegisterDeviceRequest": {
             "type": "object",
             "properties": {
+                "payloadKey": {
+                    "type": "string",
+                    "example": "q83vEjRWeJq83vEjRWeJq83vEjRWeJq83vEjRWeJq8M="
+                },
                 "platform": {
                     "type": "string",
                     "enum": [
@@ -10663,7 +10871,8 @@ const docTemplate = `{
                     ]
                 },
                 "pushToken": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "h_3k9x2m7q"
                 }
             }
         },

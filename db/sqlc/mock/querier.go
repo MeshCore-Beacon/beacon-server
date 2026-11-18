@@ -4347,6 +4347,20 @@ func (mr *MockQuerierMockRecorder) MarkAlertsDelivered(ctx, arg any) *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkAlertsDelivered", reflect.TypeOf((*MockQuerier)(nil).MarkAlertsDelivered), ctx, arg)
 }
 
+// MarkAlertsEmailSent mocks base method.
+func (m *MockQuerier) MarkAlertsEmailSent(ctx context.Context, arg db.MarkAlertsEmailSentParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MarkAlertsEmailSent", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// MarkAlertsEmailSent indicates an expected call of MarkAlertsEmailSent.
+func (mr *MockQuerierMockRecorder) MarkAlertsEmailSent(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkAlertsEmailSent", reflect.TypeOf((*MockQuerier)(nil).MarkAlertsEmailSent), ctx, arg)
+}
+
 // MarkPartialRollupHours mocks base method.
 func (m *MockQuerier) MarkPartialRollupHours(ctx context.Context) error {
 	m.ctrl.T.Helper()
@@ -5584,6 +5598,21 @@ func (mr *MockQuerierMockRecorder) SetRollupHourPartial(ctx, hour any) *gomock.C
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetRollupHourPartial", reflect.TypeOf((*MockQuerier)(nil).SetRollupHourPartial), ctx, hour)
 }
 
+// SetUserAlertChannels mocks base method.
+func (m *MockQuerier) SetUserAlertChannels(ctx context.Context, arg db.SetUserAlertChannelsParams) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetUserAlertChannels", ctx, arg)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SetUserAlertChannels indicates an expected call of SetUserAlertChannels.
+func (mr *MockQuerierMockRecorder) SetUserAlertChannels(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetUserAlertChannels", reflect.TypeOf((*MockQuerier)(nil).SetUserAlertChannels), ctx, arg)
+}
+
 // SetUserDisabled mocks base method.
 func (m *MockQuerier) SetUserDisabled(ctx context.Context, arg db.SetUserDisabledParams) (int64, error) {
 	m.ctrl.T.Helper()
@@ -5878,6 +5907,20 @@ func (m *MockQuerier) TryRollupLock(ctx context.Context) (bool, error) {
 func (mr *MockQuerierMockRecorder) TryRollupLock(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TryRollupLock", reflect.TypeOf((*MockQuerier)(nil).TryRollupLock), ctx)
+}
+
+// TurnOnAlertPush mocks base method.
+func (m *MockQuerier) TurnOnAlertPush(ctx context.Context, id uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TurnOnAlertPush", ctx, id)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// TurnOnAlertPush indicates an expected call of TurnOnAlertPush.
+func (mr *MockQuerierMockRecorder) TurnOnAlertPush(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TurnOnAlertPush", reflect.TypeOf((*MockQuerier)(nil).TurnOnAlertPush), ctx, id)
 }
 
 // UpdateObserverRegionScope mocks base method.
@@ -6282,6 +6325,21 @@ func (m *MockQuerier) UpsertUserDevice(ctx context.Context, arg db.UpsertUserDev
 func (mr *MockQuerierMockRecorder) UpsertUserDevice(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertUserDevice", reflect.TypeOf((*MockQuerier)(nil).UpsertUserDevice), ctx, arg)
+}
+
+// UserAlertChannels mocks base method.
+func (m *MockQuerier) UserAlertChannels(ctx context.Context, id uuid.UUID) (db.UserAlertChannelsRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UserAlertChannels", ctx, id)
+	ret0, _ := ret[0].(db.UserAlertChannelsRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UserAlertChannels indicates an expected call of UserAlertChannels.
+func (mr *MockQuerierMockRecorder) UserAlertChannels(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UserAlertChannels", reflect.TypeOf((*MockQuerier)(nil).UserAlertChannels), ctx, id)
 }
 
 // UserAlertRuleKinds mocks base method.

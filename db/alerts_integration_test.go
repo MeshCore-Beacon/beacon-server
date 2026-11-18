@@ -5,6 +5,7 @@ package db
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -20,7 +21,12 @@ import (
 
 func ipp(v int) *int { return &v }
 
-func alertSvc(s *Store) *alerts.Service { return alerts.NewService(s, "push", time.Now) }
+func alertSvc(s *Store) *alerts.Service {
+	return alerts.NewService(s, alerts.ServerChannels{Email: true, Push: true}, time.Now)
+}
+
+// testPayloadKey is an all-zero device key.
+var testPayloadKey = base64.StdEncoding.EncodeToString(make([]byte, alerts.PayloadKeySize))
 
 func pinAtlas(t *testing.T, ctx context.Context, s *Store, u users.User, base int64, pins ...api.StoredPin) {
 	t.Helper()
@@ -127,7 +133,7 @@ func TestAlertRulesPostgres(t *testing.T) {
 	}
 
 	ov, err := svc.Overview(ctx, u.ID)
-	if err != nil || ov.Delivery != "push" || ov.HasDevice || len(ov.Targets) != 3 {
+	if err != nil || ov.Channels.Email.Reason != "unverified_email" || !ov.Channels.Push.Available || ov.Channels.Push.HasDevice || len(ov.Targets) != 3 {
 		t.Fatalf("overview: %+v %v", ov, err)
 	}
 	hill := ov.Targets[0]
@@ -230,17 +236,17 @@ func TestUserDevicesPostgres(t *testing.T) {
 	s1 := newSession(t, ctx, s, u, "app", 1)
 	s2 := newSession(t, ctx, s, u, "app", 2)
 
-	if err := svc.RegisterDevice(ctx, u.ID, s1.ID, "ios", "token-A"); err != nil {
+	if err := svc.RegisterDevice(ctx, u.ID, s1.ID, "ios", "h_token-A", testPayloadKey); err != nil {
 		t.Fatal(err)
 	}
-	if ov, _ := svc.Overview(ctx, u.ID); !ov.HasDevice {
+	if ov, _ := svc.Overview(ctx, u.ID); !ov.Channels.Push.HasDevice {
 		t.Fatal("no device after registering")
 	}
 	// A new token for the same session replaces the old one; the same token on another session moves.
-	if err := svc.RegisterDevice(ctx, u.ID, s1.ID, "ios", "token-B"); err != nil {
+	if err := svc.RegisterDevice(ctx, u.ID, s1.ID, "ios", "h_token-B", testPayloadKey); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.RegisterDevice(ctx, u.ID, s2.ID, "android", "token-B"); err != nil {
+	if err := svc.RegisterDevice(ctx, u.ID, s2.ID, "android", "h_token-B", testPayloadKey); err != nil {
 		t.Fatal(err)
 	}
 	var n int
@@ -248,7 +254,7 @@ func TestUserDevicesPostgres(t *testing.T) {
 		t.Fatalf("%d device rows, want 1: %v", n, err)
 	}
 	for _, bad := range [][2]string{{"windows", "x"}, {"ios", ""}, {"ios", "with space"}, {"ios", "a\nb"}} {
-		if err := svc.RegisterDevice(ctx, u.ID, s1.ID, bad[0], bad[1]); !errors.Is(err, alerts.ErrBadDevice) {
+		if err := svc.RegisterDevice(ctx, u.ID, s1.ID, bad[0], bad[1], testPayloadKey); !errors.Is(err, alerts.ErrBadDevice) {
 			t.Errorf("%q: %v", bad, err)
 		}
 	}
@@ -256,7 +262,7 @@ func TestUserDevicesPostgres(t *testing.T) {
 	if err := s.EndSession(ctx, u.ID, s2.ID); err != nil {
 		t.Fatal(err)
 	}
-	if ov, _ := svc.Overview(ctx, u.ID); ov.HasDevice {
+	if ov, _ := svc.Overview(ctx, u.ID); ov.Channels.Push.HasDevice {
 		t.Fatal("an ended session still counts as a device")
 	}
 	// Removing is quiet when there is nothing to remove, and cascades with the session and the account.
@@ -266,7 +272,7 @@ func TestUserDevicesPostgres(t *testing.T) {
 	if err := svc.RemoveDevice(ctx, u.ID, s1.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.RegisterDevice(ctx, u.ID, s1.ID, "ios", "token-C"); err != nil {
+	if err := svc.RegisterDevice(ctx, u.ID, s1.ID, "ios", "h_token-C", testPayloadKey); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DeleteUser(ctx, u.ID); err != nil {
@@ -284,11 +290,11 @@ func TestDeviceTokenMovesAcrossUsersPostgres(t *testing.T) {
 	svc := alertSvc(s)
 	alice, bob := newUser(t, ctx, s, "alice"), newUser(t, ctx, s, "bob")
 	sa, sb := newSession(t, ctx, s, alice, "app", 1), newSession(t, ctx, s, bob, "app", 2)
-	const token = "possession-secret-token"
-	if err := svc.RegisterDevice(ctx, alice.ID, sa.ID, "android", token); err != nil {
+	const token = "h_possession-secret-token"
+	if err := svc.RegisterDevice(ctx, alice.ID, sa.ID, "android", token, testPayloadKey); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.RegisterDevice(ctx, bob.ID, sb.ID, "android", token); err != nil {
+	if err := svc.RegisterDevice(ctx, bob.ID, sb.ID, "android", token, testPayloadKey); err != nil {
 		t.Fatal(err)
 	}
 	var owner uuid.UUID
@@ -296,11 +302,11 @@ func TestDeviceTokenMovesAcrossUsersPostgres(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*), min(user_id::text)::uuid FROM user_devices WHERE push_token = $1`, token).Scan(&n, &owner); err != nil || n != 1 || owner != bob.ID {
 		t.Fatalf("%d registrations, owner %v: %v", n, owner, err)
 	}
-	if ov, _ := svc.Overview(ctx, alice.ID); ov.HasDevice {
+	if ov, _ := svc.Overview(ctx, alice.ID); ov.Channels.Push.HasDevice {
 		t.Fatal("the previous user still has the phone")
 	}
 	ov, _ := svc.Overview(ctx, bob.ID)
-	if b, _ := json.Marshal(ov); strings.Contains(string(b), token) || !ov.HasDevice {
+	if b, _ := json.Marshal(ov); strings.Contains(string(b), token) || !ov.Channels.Push.HasDevice {
 		t.Fatalf("overview %s", b)
 	}
 }
@@ -317,10 +323,10 @@ func TestDeviceTokenSimultaneousRegistrationsPostgres(t *testing.T) {
 		CREATE TRIGGER slow_device_del AFTER DELETE ON user_devices FOR EACH STATEMENT EXECUTE FUNCTION slow_device()`); err != nil {
 		t.Fatal(err)
 	}
-	const token = "shared-phone-token"
+	const token = "h_shared-phone-token"
 	errs := make(chan error, 2)
 	for _, r := range []struct{ u, s uuid.UUID }{{alice.ID, sa.ID}, {bob.ID, sb.ID}} {
-		go func() { errs <- svc.RegisterDevice(ctx, r.u, r.s, "android", token) }()
+		go func() { errs <- svc.RegisterDevice(ctx, r.u, r.s, "android", token, testPayloadKey) }()
 	}
 	for range 2 {
 		if err := <-errs; err != nil {
@@ -395,5 +401,42 @@ func TestAlertObserverThatIsAlsoANodePostgres(t *testing.T) {
 	}
 	if kinds["observer_offline"] != "observer" || kinds["battery_low"] != "observer" {
 		t.Fatalf("sources %v", kinds)
+	}
+}
+
+// The switches start on, change one at a time, and a device registration turns push back on.
+func TestAlertChannelsPostgres(t *testing.T) {
+	ctx, _, s := userStore(t)
+	svc := alertSvc(s)
+	u := newUser(t, ctx, s, "alice")
+	ch, err := svc.Channels(ctx, u.ID)
+	if err != nil || !ch.Email.Enabled || !ch.Push.Enabled || ch.Email.Available || ch.Email.Reason != "unverified_email" {
+		t.Fatalf("defaults: %+v %v", ch, err)
+	}
+	if err := s.SetUserEmailVerified(ctx, u.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	off := false
+	ch, err = svc.SetChannels(ctx, u.ID, nil, &off)
+	if err != nil || ch.Push.Enabled || !ch.Email.Enabled || !ch.Email.Available || ch.Email.Reason != "" {
+		t.Fatalf("push off: %+v %v", ch, err)
+	}
+	ch, err = svc.SetChannels(ctx, u.ID, &off, nil)
+	if err != nil || ch.Push.Enabled || ch.Email.Enabled {
+		t.Fatalf("both off: %+v %v", ch, err)
+	}
+	sess := newSession(t, ctx, s, u, "app", 1)
+	if err := svc.RegisterDevice(ctx, u.ID, sess.ID, "ios", "h_phone", testPayloadKey); err != nil {
+		t.Fatal(err)
+	}
+	if ch, _ = svc.Channels(ctx, u.ID); !ch.Push.Enabled || !ch.Push.HasDevice || ch.Email.Enabled {
+		t.Fatalf("after registering: %+v", ch)
+	}
+	devs, err := AlertEval{s}.Devices(ctx, []uuid.UUID{u.ID})
+	if err != nil || len(devs[u.ID]) != 1 || len(devs[u.ID][0].Key) != alerts.PayloadKeySize {
+		t.Fatalf("devices: %+v %v", devs, err)
+	}
+	if _, err := svc.SetChannels(ctx, uuid.New(), &off, nil); !errors.Is(err, users.ErrNotFound) {
+		t.Fatalf("unknown user: %v", err)
 	}
 }

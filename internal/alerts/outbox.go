@@ -5,10 +5,10 @@ package alerts
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"log/slog"
 	"net/url"
+	"strconv"
 	"time"
 
 	mailer "github.com/MeshCore-Beacon/beacon-server/internal/mail"
@@ -40,21 +40,33 @@ type OutboxRow struct {
 	Name          string
 	Kind, Detail  string
 	Value         int64
+	HasValue      bool // false when the notice has no figure
 	Attempts      int
 	Email         string
 	EmailVerified bool
+	// AlertEmail and AlertPush are the user's channel switches.
+	AlertEmail, AlertPush bool
+	// EmailSent: the mail for this notice already went out, so a retry is for push only.
+	EmailSent bool
 }
 
-// Device is a registered push token of a live app session; Session identifies the device.
+// Device is a push handle of a live app session; Session identifies the device and Key is its payload key.
 type Device struct {
 	Session         uuid.UUID
 	Platform, Token string
+	Key             []byte
 }
 
-// DeviceMark records that a push notice reached one device.
+// DeviceMark records that a push notice is done for one device.
 type DeviceMark struct {
 	OutboxID int64
 	Session  uuid.UUID
+}
+
+// Retry is a notice to try again; NotBefore, when set, holds it back at least that long.
+type Retry struct {
+	ID        int64
+	NotBefore time.Time
 }
 
 // SendStore is what the sender needs from the database.
@@ -67,42 +79,60 @@ type SendStore interface {
 	// after now, for live users, by user and pass.
 	Pending(ctx context.Context, notBefore, now time.Time, limit int) ([]OutboxRow, error)
 	Devices(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID][]Device, error)
-	// DeliveredDevices returns, for each notice, the devices (sessions) it already reached.
+	// DeliveredDevices returns, for each notice, the devices (sessions) it is already done for.
 	DeliveredDevices(ctx context.Context, ids []int64) (map[int64]map[uuid.UUID]bool, error)
 	MarkDevicesDelivered(ctx context.Context, marks []DeviceMark, now time.Time) error
+	// MarkEmailSent records that the mail for these notices went out.
+	MarkEmailSent(ctx context.Context, ids []int64, now time.Time) error
 	// Finish marks the delivered rows, counts an attempt for the retried ones (holding them back with a growing
-	// delay) and drops the exhausted.
-	Finish(ctx context.Context, delivered, retry []int64, now time.Time, maxAttempts int) error
+	// delay, or until NotBefore when that is later) and drops the exhausted.
+	Finish(ctx context.Context, delivered []int64, retry []Retry, now time.Time, maxAttempts int) error
 	RemoveDeviceToken(ctx context.Context, token string) error
 }
 
 // MaxMailsPerPass caps the alert mails sent in one run.
 const MaxMailsPerPass = 16
 
-// Sender drains the outbox by email or by push. Evaluation never waits on it.
+// SenderConfig picks the channels: email when Mail is set, push when Push is set.
+type SenderConfig struct {
+	Mail   mailer.Sender
+	Push   PushSender
+	PushID string // binds each sealed notice to this server
+	// PublicURL is the web app's address, for the Atlas link in mail.
+	PublicURL *url.URL
+	Now       func() time.Time
+}
+
+// Sender drains the outbox by email and by push in one pass. Evaluation never waits on it.
 type Sender struct {
 	store    SendStore
-	delivery string
 	mail     mailer.Sender
 	push     PushSender
+	pushID   string
 	atlasURL string
 	name     string // the instance name for mail subjects
 	tempUnit string // the instance temperature unit: "f" or "c"
 	now      func() time.Time
 }
 
-// NewSender builds the sender for one delivery mode. publicURL is the web app's address, for the Atlas link.
-func NewSender(store SendStore, delivery string, mail mailer.Sender, push PushSender, publicURL *url.URL, now func() time.Time) *Sender {
-	if now == nil {
-		now = time.Now
+func NewSender(store SendStore, cfg SenderConfig) *Sender {
+	s := &Sender{store: store, mail: cfg.Mail, push: cfg.Push, pushID: cfg.PushID, name: "Beacon", now: cfg.Now}
+	if s.now == nil {
+		s.now = time.Now
 	}
-	s := &Sender{store: store, delivery: delivery, mail: mail, push: push, name: "Beacon", now: now}
-	if publicURL != nil {
-		u := *publicURL
+	if cfg.PublicURL != nil {
+		u := *cfg.PublicURL
 		u.Path, u.RawQuery = "/", "tab=Atlas"
 		s.atlasURL = u.String()
 	}
 	return s
+}
+
+// outcome is where one channel stands for one notice after a pass.
+type outcome struct {
+	failed  bool
+	waiting bool      // not tried this pass (capped, or the pass stopped early): stays pending, no attempt counted
+	hold    time.Time // with failed: not before this
 }
 
 // Run drains one batch. It does nothing when another process is sending.
@@ -122,26 +152,41 @@ func (s *Sender) Run(ctx context.Context) error {
 	if err != nil || len(rows) == 0 {
 		return err
 	}
-	var delivered, retry []int64
-	switch s.delivery {
-	case "email":
-		delivered, retry = s.sendEmail(ctx, rows)
-	case "push":
-		delivered, retry, err = s.sendPush(ctx, rows, now)
-		if err != nil {
-			return err
+	email, err := s.sendEmail(ctx, rows, now)
+	if err != nil {
+		return err
+	}
+	push, err := s.sendPush(ctx, rows, now)
+	if err != nil {
+		return err
+	}
+	var delivered []int64
+	var retry []Retry
+	for _, r := range rows {
+		e, p := email[r.ID], push[r.ID]
+		switch {
+		case e.failed || p.failed:
+			hold := e.hold
+			if p.hold.After(hold) {
+				hold = p.hold
+			}
+			retry = append(retry, Retry{ID: r.ID, NotBefore: hold})
+		case !e.waiting && !p.waiting:
+			delivered = append(delivered, r.ID)
 		}
-	default:
-		return nil
 	}
 	return s.store.Finish(ctx, delivered, retry, now, MaxAttempts)
 }
 
-// sendEmail sends one message for each user and pass, straight through the mailer, and reports a notice delivered
-// only once the SMTP server accepted it. A user with no verified address has nothing to send to and the notices are
-// dropped. A failed send is retried later (with a delay and an attempt counted) and ends the run, since the rest
-// would meet the same server; the capped rest stays pending without an attempt.
-func (s *Sender) sendEmail(ctx context.Context, rows []OutboxRow) (delivered, retry []int64) {
+func (s *Sender) wantsEmail(r OutboxRow) bool {
+	return s.mail != nil && r.AlertEmail && r.Email != "" && r.EmailVerified && !r.EmailSent
+}
+
+// sendEmail sends one message for each user and pass, straight through the mailer, and records a notice's mail as
+// sent only once the SMTP server accepted it. A failed send is retried later and ends the email part of the pass,
+// since the rest would meet the same server; the capped rest waits for the next pass. Rows that need no mail are
+// absent from the answer, which reads as done.
+func (s *Sender) sendEmail(ctx context.Context, rows []OutboxRow, now time.Time) (map[int64]outcome, error) {
 	type group struct {
 		first   OutboxRow
 		ids     []int64
@@ -150,6 +195,9 @@ func (s *Sender) sendEmail(ctx context.Context, rows []OutboxRow) (delivered, re
 	var groups []*group
 	byKey := map[[2]uuid.UUID]*group{}
 	for _, r := range rows {
+		if !s.wantsEmail(r) {
+			continue
+		}
 		k := [2]uuid.UUID{r.UserID, r.Pass}
 		g := byKey[k]
 		if g == nil {
@@ -160,13 +208,14 @@ func (s *Sender) sendEmail(ctx context.Context, rows []OutboxRow) (delivered, re
 		g.ids = append(g.ids, r.ID)
 		g.notices = append(g.notices, EmailNotice{Kind: r.Kind, Name: r.Name, Detail: r.Detail, Value: r.Value})
 	}
-	sent := 0
+	out := map[int64]outcome{}
+	var sentIDs []int64
+	sent, stopped := 0, false
 	for _, g := range groups {
-		if g.first.Email == "" || !g.first.EmailVerified {
-			delivered = append(delivered, g.ids...)
-			continue
-		}
-		if sent >= MaxMailsPerPass || ctx.Err() != nil {
+		if stopped || sent >= MaxMailsPerPass || ctx.Err() != nil {
+			for _, id := range g.ids {
+				out[id] = outcome{waiting: true}
+			}
 			continue
 		}
 		subject, text := ComposeEmail(s.name, g.notices, s.atlasURL, s.tempUnit)
@@ -175,13 +224,21 @@ func (s *Sender) sendEmail(ctx context.Context, rows []OutboxRow) (delivered, re
 		cancel()
 		if err != nil {
 			slog.Warn("alert mail not sent", "component", "alerts", "user_id", g.first.UserID, "err", err)
-			retry = append(retry, g.ids...)
-			break
+			for _, id := range g.ids {
+				out[id] = outcome{failed: true}
+			}
+			stopped = true
+			continue
 		}
 		sent++
-		delivered = append(delivered, g.ids...)
+		sentIDs = append(sentIDs, g.ids...)
 	}
-	return delivered, retry
+	if len(sentIDs) > 0 {
+		if err := s.store.MarkEmailSent(ctx, sentIDs, now); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 // SetTemperatureUnit sets the unit alert text gives temperatures in: "f" or "c" (anything else reads as c).
@@ -196,76 +253,154 @@ func (s *Sender) SetInstanceName(name string) {
 	}
 }
 
-// sendPush sends each notice to each of the user's live devices that has not got it yet, and records every device
-// it reached. A notice is delivered once every device has it (or the user has none); while any device failed it is
-// retried, and the retry goes only to the devices still missing it. An unregistered token is deleted and its device
-// no longer counts.
-func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow, now time.Time) (delivered, retry []int64, err error) {
+type pushItem struct {
+	row    int64
+	user   uuid.UUID
+	device Device
+	msg    PushMessage
+}
+
+// sendPush seals each notice for each of the user's live devices that is not done with it yet and sends them in
+// batches of MaxPushBatch. A notice is done once every device is (or the user has none); while any device must
+// retry, so must the notice, and the retry goes only to the devices still missing it. A dead handle is deleted and
+// its device no longer counts; a message the push server refused is done for that device. A call that fails as a
+// whole retries every notice still to send, and ends the push part of the pass.
+func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow, now time.Time) (map[int64]outcome, error) {
+	out := map[int64]outcome{}
+	if s.push == nil {
+		return out, nil
+	}
 	seen := map[uuid.UUID]bool{}
 	var users []uuid.UUID
-	ids := make([]int64, len(rows))
-	for i, r := range rows {
-		ids[i] = r.ID
+	var ids []int64
+	for _, r := range rows {
+		if !r.AlertPush {
+			continue
+		}
+		ids = append(ids, r.ID)
 		if !seen[r.UserID] {
 			seen[r.UserID] = true
 			users = append(users, r.UserID)
 		}
 	}
+	if len(ids) == 0 {
+		return out, nil
+	}
 	devices, err := s.store.Devices(ctx, users)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	reached, err := s.store.DeliveredDevices(ctx, ids)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	var marks []DeviceMark
-	gone := map[string]bool{}
+	var items []pushItem
 	for _, r := range rows {
-		if ctx.Err() != nil {
-			break
-		}
-		devs := devices[r.UserID]
-		if len(devs) == 0 {
-			delivered = append(delivered, r.ID) // no app signed in: nobody to tell
+		if !r.AlertPush {
 			continue
 		}
-		msg := PushMessage{
-			Title: SanitizeName(r.Name, r.Key),
-			Body:  Sentence(r.Kind, SanitizeName(r.Name, r.Key), r.Value, r.Detail, s.tempUnit),
-			Data:  map[string]string{"targetKind": r.TargetKind, "publicKey": hex.EncodeToString(r.Key)},
-		}
-		if r.TargetID != uuid.Nil {
-			msg.Data["id"] = r.TargetID.String()
-		}
-		failed := false
-		for _, d := range devs {
-			if gone[d.Token] || reached[r.ID][d.Session] {
+		plain := NoticePayload(r, s.tempUnit)
+		for _, d := range devices[r.UserID] {
+			if reached[r.ID][d.Session] {
 				continue
 			}
-			msg.Token = d.Token
-			switch err := s.push.Send(ctx, msg); {
-			case err == nil:
+			ct, err := SealNotice(d.Key, s.pushID, plain)
+			if err != nil {
+				slog.Warn("push notice not sealed", "component", "alerts", "user_id", r.UserID, "err", err)
 				marks = append(marks, DeviceMark{OutboxID: r.ID, Session: d.Session})
-			case errors.Is(err, ErrUnregistered):
-				gone[d.Token] = true
-				if derr := s.store.RemoveDeviceToken(ctx, d.Token); derr != nil {
-					slog.Warn("push token not removed", "component", "alerts", "user_id", r.UserID, "err", derr)
+				continue
+			}
+			items = append(items, pushItem{row: r.ID, user: r.UserID, device: d,
+				msg: PushMessage{Handle: d.Token, Ciphertext: ct, CollapseKey: strconv.FormatInt(r.ID, 10)}})
+		}
+	}
+	fail := func(id int64, hold time.Time) {
+		o := out[id]
+		o.failed = true
+		if hold.After(o.hold) {
+			o.hold = hold
+		}
+		out[id] = o
+	}
+	gone := map[string]bool{}
+	dropped := 0
+	for i := 0; i < len(items); {
+		if ctx.Err() != nil {
+			for _, it := range items[i:] {
+				if !out[it.row].failed {
+					out[it.row] = outcome{waiting: true}
 				}
-			default:
-				failed = true
-				// err carries no token or credential, only a status.
-				slog.Warn("push not sent", "component", "alerts", "user_id", r.UserID, "err", err)
+			}
+			break
+		}
+		var batch []pushItem
+		for ; i < len(items) && len(batch) < MaxPushBatch; i++ {
+			if !gone[items[i].device.Token] {
+				batch = append(batch, items[i])
 			}
 		}
-		if failed {
-			retry = append(retry, r.ID)
-		} else {
-			delivered = append(delivered, r.ID)
+		if len(batch) == 0 {
+			continue
+		}
+		msgs := make([]PushMessage, len(batch))
+		for j, it := range batch {
+			msgs[j] = it.msg
+		}
+		res, err := s.push.Send(ctx, msgs)
+		if err != nil {
+			var pe *PushError
+			var hold time.Time
+			if errors.As(err, &pe) {
+				if pe.RetryAfter > 0 {
+					hold = now.Add(pe.RetryAfter)
+				}
+				if pe.Suspended() {
+					slog.Error("push server refused this server: alert push notifications will be retried", "component", "alerts", "err", err)
+				} else {
+					slog.Warn("alert push not sent", "component", "alerts", "err", err)
+				}
+			} else {
+				slog.Warn("alert push not sent", "component", "alerts", "err", err)
+			}
+			for _, it := range batch {
+				fail(it.row, hold)
+			}
+			for _, it := range items[i:] {
+				if !gone[it.device.Token] {
+					fail(it.row, hold)
+				}
+			}
+			break
+		}
+		for j, it := range batch {
+			switch res[j].Status {
+			case PushDelivered:
+				marks = append(marks, DeviceMark{OutboxID: it.row, Session: it.device.Session})
+			case PushDropped:
+				dropped++
+				marks = append(marks, DeviceMark{OutboxID: it.row, Session: it.device.Session})
+			case PushGone:
+				if !gone[it.device.Token] {
+					gone[it.device.Token] = true
+					if err := s.store.RemoveDeviceToken(ctx, it.device.Token); err != nil {
+						slog.Warn("push device not removed", "component", "alerts", "user_id", it.user, "err", err)
+					}
+				}
+			default:
+				var hold time.Time
+				if res[j].RetryAfter > 0 {
+					hold = now.Add(res[j].RetryAfter)
+				}
+				fail(it.row, hold)
+			}
 		}
 	}
-	if err := s.store.MarkDevicesDelivered(ctx, marks, now); err != nil {
-		return nil, nil, err
+	if dropped > 0 {
+		slog.Warn("push server refused alert notices as invalid or too large", "component", "alerts", "count", dropped)
 	}
-	return delivered, retry, nil
+	if err := s.store.MarkDevicesDelivered(ctx, marks, now); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

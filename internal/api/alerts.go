@@ -37,11 +37,38 @@ type AlertTarget struct {
 	Rules            []AlertRule       `json:"rules"`
 }
 
-// AlertsResponse is GET /me/alerts: one target per Atlas pin, in Atlas order.
+// AlertEmailChannel is the email channel for the user. Available: the server sends alert mail and the user has a
+// verified address. Enabled is the user's switch. Reason says why it is not available, and is empty when it is.
+type AlertEmailChannel struct {
+	Available bool   `json:"available"`
+	Enabled   bool   `json:"enabled"`
+	Reason    string `json:"reason" enums:",server_off,portal_account,unverified_email"`
+}
+
+// AlertPushChannel is the push channel for the user. Available: the server sends push notifications. Enabled is the
+// user's switch; hasDevice says whether an app session registered a device. Push reaches the user only with both.
+type AlertPushChannel struct {
+	Available bool `json:"available"`
+	Enabled   bool `json:"enabled"`
+	HasDevice bool `json:"hasDevice"`
+}
+
+// AlertChannels is how the user's alerts reach them.
+type AlertChannels struct {
+	Email AlertEmailChannel `json:"email"`
+	Push  AlertPushChannel  `json:"push"`
+}
+
+// AlertsResponse is GET /me/alerts: the user's channels, and one target per Atlas pin, in Atlas order.
 type AlertsResponse struct {
-	Delivery  string        `json:"delivery" enums:"push,email"`
-	HasDevice bool          `json:"hasDevice"`
-	Targets   []AlertTarget `json:"targets"`
+	Channels AlertChannels `json:"channels"`
+	Targets  []AlertTarget `json:"targets"`
+}
+
+// PutAlertChannelsRequest turns the user's channels on or off; an absent one is left as it is. At least one is needed.
+type PutAlertChannelsRequest struct {
+	Email *bool `json:"email"`
+	Push  *bool `json:"push"`
 }
 
 // AlertTargetRef names a radio.
@@ -59,8 +86,11 @@ type PutAlertRuleRequest struct {
 	Enabled       *bool          `json:"enabled"`
 }
 
-// RegisterDeviceRequest registers the push token of this app session.
+// RegisterDeviceRequest registers this app session's device. PushToken is the device handle the push server gave the
+// app (it starts with h_). PayloadKey is the AES-256 key the app generated for this device, as standard base64 of
+// exactly 32 bytes; the server seals each notice for the device with it.
 type RegisterDeviceRequest struct {
-	Platform  string `json:"platform" enums:"ios,android"`
-	PushToken string `json:"pushToken"`
+	Platform   string `json:"platform" enums:"ios,android"`
+	PushToken  string `json:"pushToken" example:"h_3k9x2m7q"`
+	PayloadKey string `json:"payloadKey" example:"q83vEjRWeJq83vEjRWeJq83vEjRWeJq83vEjRWeJq8M="`
 }

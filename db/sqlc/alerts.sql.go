@@ -247,6 +247,34 @@ func (q *Queries) ListUserAlertRules(ctx context.Context, userID uuid.UUID) ([]L
 	return items, nil
 }
 
+const setUserAlertChannels = `-- name: SetUserAlertChannels :execrows
+UPDATE users SET alert_email = COALESCE($1, alert_email), alert_push = COALESCE($2, alert_push)
+WHERE id = $3
+`
+
+type SetUserAlertChannelsParams struct {
+	AlertEmail *bool     `json:"alert_email"`
+	AlertPush  *bool     `json:"alert_push"`
+	ID         uuid.UUID `json:"id"`
+}
+
+func (q *Queries) SetUserAlertChannels(ctx context.Context, arg SetUserAlertChannelsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setUserAlertChannels, arg.AlertEmail, arg.AlertPush, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const turnOnAlertPush = `-- name: TurnOnAlertPush :exec
+UPDATE users SET alert_push = true WHERE id = $1
+`
+
+func (q *Queries) TurnOnAlertPush(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, turnOnAlertPush, id)
+	return err
+}
+
 const upsertAlertRule = `-- name: UpsertAlertRule :one
 INSERT INTO user_alert_rules (user_id, target_kind, target_public_key, kind, threshold, threshold_high, enabled)
 VALUES ($1, $2, $3, $4, $5,
@@ -324,20 +352,22 @@ func (q *Queries) UpsertAlertRule(ctx context.Context, arg UpsertAlertRuleParams
 }
 
 const upsertUserDevice = `-- name: UpsertUserDevice :exec
-INSERT INTO user_devices (session_id, user_id, platform, push_token)
-VALUES ($1, $2, $3, $4)
+INSERT INTO user_devices (session_id, user_id, platform, push_token, payload_key)
+VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (push_token) DO UPDATE
-    SET session_id = EXCLUDED.session_id, user_id = EXCLUDED.user_id, platform = EXCLUDED.platform, updated_at = now()
+    SET session_id = EXCLUDED.session_id, user_id = EXCLUDED.user_id, platform = EXCLUDED.platform,
+        payload_key = EXCLUDED.payload_key, updated_at = now()
 `
 
 type UpsertUserDeviceParams struct {
-	SessionID uuid.UUID `json:"session_id"`
-	UserID    uuid.UUID `json:"user_id"`
-	Platform  string    `json:"platform"`
-	PushToken string    `json:"push_token"`
+	SessionID  uuid.UUID `json:"session_id"`
+	UserID     uuid.UUID `json:"user_id"`
+	Platform   string    `json:"platform"`
+	PushToken  string    `json:"push_token"`
+	PayloadKey []byte    `json:"payload_key"`
 }
 
-// The token is unique, so a registration for a token another session holds moves that row (crossing users on
+// The handle is unique, so a registration for a handle another session holds moves that row (crossing users on
 // purpose: a phone belongs to one account, so the previous user's alerts never reach its next user).
 func (q *Queries) UpsertUserDevice(ctx context.Context, arg UpsertUserDeviceParams) error {
 	_, err := q.db.Exec(ctx, upsertUserDevice,
@@ -345,8 +375,34 @@ func (q *Queries) UpsertUserDevice(ctx context.Context, arg UpsertUserDevicePara
 		arg.UserID,
 		arg.Platform,
 		arg.PushToken,
+		arg.PayloadKey,
 	)
 	return err
+}
+
+const userAlertChannels = `-- name: UserAlertChannels :one
+SELECT alert_email, alert_push, (email IS NOT NULL AND email <> '')::boolean AS has_email,
+       (email_verified_at IS NOT NULL)::boolean AS email_verified
+FROM users WHERE id = $1
+`
+
+type UserAlertChannelsRow struct {
+	AlertEmail    bool `json:"alert_email"`
+	AlertPush     bool `json:"alert_push"`
+	HasEmail      bool `json:"has_email"`
+	EmailVerified bool `json:"email_verified"`
+}
+
+func (q *Queries) UserAlertChannels(ctx context.Context, id uuid.UUID) (UserAlertChannelsRow, error) {
+	row := q.db.QueryRow(ctx, userAlertChannels, id)
+	var i UserAlertChannelsRow
+	err := row.Scan(
+		&i.AlertEmail,
+		&i.AlertPush,
+		&i.HasEmail,
+		&i.EmailVerified,
+	)
+	return i, err
 }
 
 const userAlertRuleKinds = `-- name: UserAlertRuleKinds :many

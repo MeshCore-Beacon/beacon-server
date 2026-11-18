@@ -177,6 +177,36 @@ definitions:
       snr:
         type: number
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.AlertChannels:
+    properties:
+      email:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AlertEmailChannel'
+      push:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AlertPushChannel'
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.AlertEmailChannel:
+    properties:
+      available:
+        type: boolean
+      enabled:
+        type: boolean
+      reason:
+        enum:
+        - ""
+        - server_off
+        - portal_account
+        - unverified_email
+        type: string
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.AlertPushChannel:
+    properties:
+      available:
+        type: boolean
+      enabled:
+        type: boolean
+      hasDevice:
+        type: boolean
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.AlertRule:
     properties:
       enabled:
@@ -272,13 +302,8 @@ definitions:
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.AlertsResponse:
     properties:
-      delivery:
-        enum:
-        - push
-        - email
-        type: string
-      hasDevice:
-        type: boolean
+      channels:
+        $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AlertChannels'
       targets:
         items:
           $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AlertTarget'
@@ -696,6 +721,15 @@ definitions:
         example: 2.0.2
         type: string
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.InfoAlertChannels:
+    properties:
+      email:
+        example: false
+        type: boolean
+      push:
+        example: false
+        type: boolean
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.InfoDisplay:
     properties:
       distanceUnit:
@@ -716,13 +750,12 @@ definitions:
       accounts:
         example: "off"
         type: string
-      alertDelivery:
-        description: AlertDelivery is "push" or "email" while alerts is true.
-        enum:
-        - push
-        - email
-        type: string
+      alertChannels:
+        allOf:
+        - $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.InfoAlertChannels'
+        description: AlertChannels says which channels the server sends alerts by.
       alerts:
+        description: Alerts is true when the server sends alerts by at least one channel.
         example: false
         type: boolean
       atlasTelemetry:
@@ -744,6 +777,12 @@ definitions:
           is "portal".
         example: https://portal.example.org
         type: string
+      push:
+        allOf:
+        - $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.InfoPush'
+        description: |-
+          Push names the push server the app gets a device handle from, and this server's Push ID there; set only while
+          alertChannels.push is true.
       registration:
         description: Registration is true when new sign-ups are open; only meaningful
           when accounts is "local".
@@ -760,6 +799,15 @@ definitions:
           to an account.
         example: 20
         type: integer
+    type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.InfoPush:
+    properties:
+      pushId:
+        example: inst_7f3k2m9qxa
+        type: string
+      server:
+        example: https://push.meshcorebeacon.ca
+        type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.KnownRoute:
     properties:
@@ -2156,6 +2204,13 @@ definitions:
       noPasswordBlocked:
         type: boolean
     type: object
+  github_com_MeshCore-Beacon_beacon-server_internal_api.PutAlertChannelsRequest:
+    properties:
+      email:
+        type: boolean
+      push:
+        type: boolean
+    type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.PutAlertRuleRequest:
     properties:
       enabled:
@@ -2235,12 +2290,16 @@ definitions:
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.RegisterDeviceRequest:
     properties:
+      payloadKey:
+        example: q83vEjRWeJq83vEjRWeJq83vEjRWeJq83vEjRWeJq8M=
+        type: string
       platform:
         enum:
         - ios
         - android
         type: string
       pushToken:
+        example: h_3k9x2m7q
         type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.RegisterRequest:
@@ -4914,10 +4973,11 @@ paths:
       - Accounts
   /me/alerts:
     get:
-      description: One target per Atlas pin, in Atlas order, with the kinds its radio
-        can have, the reason for each it cannot, and its rules. hasDevice says whether
-        an app session has a push token (push mode). 404 alerts_disabled when the
-        server has alerts off.
+      description: 'The user''s channels (email and push: whether each is available,
+        the user''s switch, the reason email is not available, whether an app registered
+        a device), and one target per Atlas pin, in Atlas order, with the kinds its
+        radio can have, the reason for each it cannot, and its rules. 404 alerts_disabled
+        when the server has alerts off.'
       produces:
       - application/json
       responses:
@@ -4940,6 +5000,87 @@ paths:
       security:
       - UserSession: []
       summary: The user's alerts
+      tags:
+      - Accounts
+  /me/alerts/channels:
+    put:
+      consumes:
+      - application/json
+      description: Sets the user's email and push switches; an absent one is left
+        as it is. A switch can be on while its channel is not available (see GET /me/alerts);
+        it takes effect once it is. Registering a device turns push on. Answers 200
+        with the channels.
+      parameters:
+      - description: Body at most 4 KiB
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.PutAlertChannelsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_MeshCore-Beacon_beacon-server_internal_api.AlertChannels'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "404":
+          description: alerts_disabled
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "413":
+          description: Request Entity Too Large
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "415":
+          description: Unsupported Media Type
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "422":
+          description: 'invalid_input: neither email nor push given'
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "429":
+          description: Too Many Requests
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              $ref: '#/definitions/internal_api_handlers.APIError'
+            type: object
+      security:
+      - UserSession: []
+      summary: Turn alert channels on or off
       tags:
       - Accounts
   /me/alerts/rules:
@@ -5218,15 +5359,18 @@ paths:
             type: object
       security:
       - UserSession: []
-      summary: Remove this session's push token
+      summary: Remove this session's device
       tags:
       - Accounts
     post:
       consumes:
       - application/json
       description: Bearer sessions only (the app); a cookie session gets 403 app_session_required.
-        Replaces the token of this session, and a token another session held moves
-        here. Ending the session ends delivery to it.
+        pushToken is the device handle from the push server named in /info features.push,
+        and payloadKey the device's AES-256 key (standard base64, 32 bytes). Replaces
+        this session's device, and a handle another session held moves here. Turns
+        the user's push switch on. Ending the session ends delivery to it. 404 push_disabled
+        when the server does not send push notifications.
       parameters:
       - description: Body at most 4 KiB
         in: body
@@ -5256,7 +5400,7 @@ paths:
               $ref: '#/definitions/internal_api_handlers.APIError'
             type: object
         "404":
-          description: alerts_disabled
+          description: alerts_disabled or push_disabled
           schema:
             additionalProperties:
               $ref: '#/definitions/internal_api_handlers.APIError'
@@ -5293,7 +5437,7 @@ paths:
             type: object
       security:
       - UserSession: []
-      summary: Register this app session's push token
+      summary: Register this app session's device for push
       tags:
       - Accounts
   /me/email:

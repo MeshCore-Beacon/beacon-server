@@ -27,7 +27,9 @@ type fakeAlerts struct {
 	sessions []uuid.UUID
 	platform string
 	token    string
+	key      string
 	removed  bool
+	channels [2]*bool
 }
 
 var alertNodeID = uuid.MustParse("22222222-2222-2222-2222-222222222222")
@@ -40,7 +42,8 @@ func (f *fakeAlerts) Overview(context.Context, uuid.UUID) (alerts.Overview, erro
 	}
 	th := 3500
 	sent := time.UnixMilli(1794703600000)
-	return alerts.Overview{Delivery: "push", HasDevice: true, Targets: []alerts.TargetView{{
+	return alerts.Overview{Channels: alerts.Channels{Email: alerts.EmailChannel{Enabled: true, Reason: "unverified_email"},
+		Push: alerts.PushChannel{Available: true, Enabled: true, HasDevice: true}}, Targets: []alerts.TargetView{{
 		TargetInfo: alerts.TargetInfo{ID: alertNodeID, Kind: "node", PublicKey: alertKey, Name: "Hilltop", Caps: alerts.Caps{Polled: true}, Rules: []alerts.StoredRule{{
 			ID: uuid.MustParse("11111111-1111-1111-1111-111111111111"), Kind: "battery_low", Threshold: &th, Enabled: true,
 			State: "ok", StateChangedAt: time.UnixMilli(1794700000000), LastSentAt: &sent}}},
@@ -63,9 +66,18 @@ func (f *fakeAlerts) DeleteRule(_ context.Context, _, id uuid.UUID) error {
 	return f.err
 }
 
-func (f *fakeAlerts) RegisterDevice(_ context.Context, _, session uuid.UUID, platform, token string) error {
-	f.sessions, f.platform, f.token = append(f.sessions, session), platform, token
+func (f *fakeAlerts) RegisterDevice(_ context.Context, _, session uuid.UUID, platform, token, key string) error {
+	f.sessions, f.platform, f.token, f.key = append(f.sessions, session), platform, token, key
 	return f.err
+}
+
+func (f *fakeAlerts) SetChannels(_ context.Context, _ uuid.UUID, email, push *bool) (alerts.Channels, error) {
+	f.channels = [2]*bool{email, push}
+	if f.err != nil {
+		return alerts.Channels{}, f.err
+	}
+	return alerts.Channels{Email: alerts.EmailChannel{Available: true, Enabled: email != nil && *email},
+		Push: alerts.PushChannel{Available: true, Enabled: push != nil && *push}}, nil
 }
 
 func (f *fakeAlerts) RemoveDevice(_ context.Context, _, _ uuid.UUID) error {
@@ -98,7 +110,16 @@ func TestMeAlertsShapes(t *testing.T) {
 	targets := got["targets"].([]any)
 	t0, t1 := targets[0].(map[string]any), targets[1].(map[string]any)
 	rule := t0["rules"].([]any)[0].(map[string]any)
-	if got["delivery"] != "push" || got["hasDevice"] != true || t0["kind"] != "node" || t0["publicKey"] != alertKey || t0["name"] != "Hilltop" ||
+	ch := got["channels"].(map[string]any)
+	email, push := ch["email"].(map[string]any), ch["push"].(map[string]any)
+	if email["available"] != false || email["enabled"] != true || email["reason"] != "unverified_email" ||
+		push["available"] != true || push["enabled"] != true || push["hasDevice"] != true || len(push) != 3 {
+		t.Fatalf("channels: %s", w.Body)
+	}
+	if _, ok := got["delivery"]; ok {
+		t.Fatalf("delivery is gone: %s", w.Body)
+	}
+	if t0["kind"] != "node" || t0["publicKey"] != alertKey || t0["name"] != "Hilltop" ||
 		len(t0["available"].([]any)) != 2 || t0["unavailable"].(map[string]any)["temperature"] == nil ||
 		rule["id"] != "11111111-1111-1111-1111-111111111111" || rule["kind"] != "battery_low" || rule["threshold"] != float64(3500) ||
 		rule["thresholdHigh"] != nil || rule["enabled"] != true || rule["state"] != "ok" || rule["stateChangedAt"] != float64(1794700000000) ||
@@ -212,8 +233,9 @@ func TestMeDevices(t *testing.T) {
 	f := &fakeAlerts{}
 	h := alertsServer(f)
 	app := []reqOpt{bearer("app-token"), csrf}
-	body := `{"platform":"android","pushToken":"tok-123"}`
-	if w := call(h, "POST", "/me/devices", body, app...); w.Code != 204 || f.platform != "android" || f.token != "tok-123" || f.sessions[0] != otherSess.ID {
+	body := `{"platform":"android","pushToken":"h_123","payloadKey":"AAAA"}`
+	if w := call(h, "POST", "/me/devices", body, app...); w.Code != 204 || f.platform != "android" || f.token != "h_123" || f.key != "AAAA" ||
+		f.sessions[0] != otherSess.ID {
 		t.Fatalf("%d %+v", w.Code, f)
 	}
 	if w := call(h, "DELETE", "/me/devices", "", app...); w.Code != 204 || !f.removed {
@@ -230,7 +252,11 @@ func TestMeDevices(t *testing.T) {
 	if w := call(h, "POST", "/me/devices", body, app...); w.Code != 422 || errCode(t, w) != "invalid_input" {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
-	if w := call(h, "POST", "/me/devices", body, bearer("app-token")); w.Code != 204 && w.Code != 422 {
+	f.err = alerts.ErrPushOff
+	if w := call(h, "POST", "/me/devices", body, app...); w.Code != 404 || errCode(t, w) != "push_disabled" {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	if w := call(h, "POST", "/me/devices", body, bearer("app-token")); w.Code != 204 && w.Code != 404 {
 		// bearer sessions need no forgery header
 		t.Fatalf("%d", w.Code)
 	}
@@ -239,7 +265,7 @@ func TestMeDevices(t *testing.T) {
 func TestAlertsOffAnswers404(t *testing.T) {
 	h := alertsServer(nil)
 	c := []reqOpt{cookie("web-token"), csrf}
-	for _, rc := range []struct{ m, p string }{{"GET", "/me/alerts"}, {"PUT", "/me/alerts/rules"}, {"DELETE", "/me/alerts/rules/x"}, {"POST", "/me/devices"}} {
+	for _, rc := range []struct{ m, p string }{{"GET", "/me/alerts"}, {"PUT", "/me/alerts/rules"}, {"DELETE", "/me/alerts/rules/x"}, {"PUT", "/me/alerts/channels"}, {"POST", "/me/devices"}} {
 		w := call(h, rc.m, rc.p, `{}`, c...)
 		if w.Code != http.StatusNotFound || errCode(t, w) != "alerts_disabled" {
 			t.Errorf("%s %s: %d %s", rc.m, rc.p, w.Code, w.Body)
@@ -264,5 +290,32 @@ func TestDeviceRegistrationIsRateLimitedPerUser(t *testing.T) {
 	}
 	if limited != 2 {
 		t.Fatalf("%d of 12 registrations limited, want 2", limited)
+	}
+}
+
+func TestMeAlertChannelsPut(t *testing.T) {
+	f := &fakeAlerts{}
+	h := alertsServer(f)
+	c := []reqOpt{cookie("web-token"), csrf}
+	w := call(h, "PUT", "/me/alerts/channels", `{"email":false,"push":true}`, c...)
+	if w.Code != 200 || f.channels[0] == nil || *f.channels[0] || f.channels[1] == nil || !*f.channels[1] {
+		t.Fatalf("%d %s %v", w.Code, w.Body, f.channels)
+	}
+	var got map[string]map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &got)
+	if got["email"]["enabled"] != false || got["push"]["enabled"] != true || got["email"]["reason"] != "" {
+		t.Fatalf("%s", w.Body)
+	}
+	// One switch alone leaves the other.
+	call(h, "PUT", "/me/alerts/channels", `{"push":false}`, c...)
+	if f.channels[0] != nil || f.channels[1] == nil || *f.channels[1] {
+		t.Fatalf("%v", f.channels)
+	}
+	f.err = alerts.ErrNoChannel
+	if w := call(h, "PUT", "/me/alerts/channels", `{}`, c...); w.Code != 422 || errCode(t, w) != "invalid_input" {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	if w := call(h, "PUT", "/me/alerts/channels", `{"email":true}`, cookie("web-token")); w.Code != 403 {
+		t.Fatalf("no forgery header: %d", w.Code)
 	}
 }

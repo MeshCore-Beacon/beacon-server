@@ -144,22 +144,6 @@ func TestAccountsPortalRejects(t *testing.T) {
 	}
 }
 
-func TestAlertsDelivery(t *testing.T) {
-	for _, tc := range []struct {
-		delivery, mode, want string
-		err                  bool
-	}{
-		{"", "local", "off", false}, {"", "off", "off", false}, {"off", "off", "off", false},
-		{"push", "off", "", true}, {"email", "off", "", true}, {"push", "", "", true}, {"push", "portal", "push", false}, {"push", "local", "push", false},
-		{"email", "local", "email", false}, {"email", "portal", "", true}, {"sms", "local", "", true},
-	} {
-		r, err := AlertsConfig{Delivery: tc.delivery}.Resolve(tc.mode)
-		if (err != nil) != tc.err || r.Delivery != tc.want {
-			t.Errorf("%+v: %q %v", tc, r.Delivery, err)
-		}
-	}
-}
-
 // Email alerts need local accounts with an SMTP host; accounts validation already refuses local mode without one.
 func TestAlertsEmailNeedsSMTPHost(t *testing.T) {
 	a := localAccounts()

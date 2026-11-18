@@ -4,57 +4,63 @@
 package main
 
 import (
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/x509"
-	"encoding/json"
-	"encoding/pem"
+	"bytes"
+	"log/slog"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/background"
+	"github.com/MeshCore-Beacon/beacon-server/internal/config"
+	"github.com/MeshCore-Beacon/beacon-server/internal/mail"
 )
 
-func TestAlertSenderNeedsSomethingToSendWith(t *testing.T) {
+func captureLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &buf
+}
+
+func TestAlertSenderNeedsAChannel(t *testing.T) {
 	pu, _ := url.Parse("https://beacon.example.org")
-	// Push with no credentials is a startup error naming the setting and the variable.
-	s, err := newAlertSender("push", nil, nil, pu, "")
-	if err == nil || s != nil || !strings.Contains(err.Error(), "alerts.delivery") || !strings.Contains(err.Error(), "BEACON_PUSH_CREDENTIALS") {
-		t.Fatalf("push without credentials: %v %v", s, err)
+	s, r := newAlertSender(config.ResolvedAlerts{}, true, mail.Discard{}, nil, pu)
+	if s != nil || r != nil {
+		t.Fatal("a sender with no channel")
 	}
 	if tasks := background.AlertTasks(nil, s); len(tasks) != 0 {
 		t.Fatalf("tasks without a sender: %d", len(tasks))
 	}
-	if s, err := newAlertSender("off", nil, nil, pu, ""); err != nil || s != nil {
-		t.Fatalf("off: %v %v", s, err)
+	// Email without a mailer, or anything without accounts, sends nothing.
+	if s, _ := newAlertSender(config.ResolvedAlerts{Email: true}, true, nil, nil, pu); s != nil {
+		t.Fatal("email without a mailer")
 	}
-	if s, err := newAlertSender("email", nil, nil, pu, ""); err != nil || s != nil {
-		t.Fatalf("email without a mailer: %v %v", s, err)
+	if s, _ := newAlertSender(config.ResolvedAlerts{Email: true, Push: true, PushID: "inst_abc", PushSecret: "x"}, false, mail.Discard{}, nil, pu); s != nil {
+		t.Fatal("alerts without accounts")
+	}
+	if s, r := newAlertSender(config.ResolvedAlerts{Email: true}, true, mail.Discard{}, nil, pu); s == nil || r != nil {
+		t.Fatal("email only")
 	}
 }
 
-func TestAlertSenderPushCredentials(t *testing.T) {
+func TestAlertSenderPushLogsTheNoticeAndNeverTheSecret(t *testing.T) {
 	pu, _ := url.Parse("https://beacon.example.org")
-	dir := t.TempDir()
-	bad := filepath.Join(dir, "bad.json")
-	if err := os.WriteFile(bad, []byte("do-not-print-this"), 0o600); err != nil {
-		t.Fatal(err)
+	buf := captureLog(t)
+	ra := config.ResolvedAlerts{Push: true, PushServer: config.OfficialPushServer, PushID: "inst_abc", PushSecret: "topsecret", OfficialServer: true}
+	s, r := newAlertSender(ra, true, nil, nil, pu)
+	if s == nil || r == nil || r.PushID() != "inst_abc" {
+		t.Fatal("push sender not built")
 	}
-	if _, err := newAlertSender("push", nil, nil, pu, bad); err == nil || strings.Contains(err.Error(), "do-not-print-this") || strings.Contains(err.Error(), dir) {
-		t.Fatalf("%v", err)
+	out := buf.String()
+	if strings.Count(out, "push relay (push.meshcorebeacon.ca)") != 1 || strings.Contains(out, "not the official") || strings.Contains(out, "topsecret") {
+		t.Fatalf("%s", out)
 	}
-	key, _ := rsa.GenerateKey(rand.Reader, 2048)
-	der, _ := x509.MarshalPKCS8PrivateKey(key)
-	good := filepath.Join(dir, "good.json")
-	body, _ := json.Marshal(map[string]string{"project_id": "p", "client_email": "e@p.iam", "private_key": string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))})
-	if err := os.WriteFile(good, body, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	s, err := newAlertSender("push", nil, nil, pu, good)
-	if err != nil || s == nil {
-		t.Fatalf("%v %v", s, err)
+	buf.Reset()
+	ra.PushServer, ra.OfficialServer = "https://push.example.org", false
+	newAlertSender(ra, true, nil, nil, pu)
+	if !strings.Contains(buf.String(), "WARNING") || !strings.Contains(buf.String(), "official Beacon app will not receive") || strings.Contains(buf.String(), "topsecret") {
+		t.Fatalf("%s", buf.String())
 	}
 }

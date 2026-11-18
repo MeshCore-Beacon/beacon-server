@@ -9,8 +9,9 @@ WHERE (delivered_at IS NULL AND created_at < sqlc.arg(undelivered_before))
 -- user and pass groups only, so one pass's notices for a user stay in one mail: groups are taken in order
 -- while the running total stays within row_limit, and the first group is taken whatever its size.
 WITH p AS (
-    SELECT o.id, o.user_id, o.pass_id, o.target_kind, o.target_public_key, o.name, o.alert_kind, COALESCE(o.value, 0)::bigint AS value,
+    SELECT o.id, o.user_id, o.pass_id, o.target_kind, o.target_public_key, o.name, o.alert_kind, o.value,
            o.detail, o.attempts, u.email, (u.email_verified_at IS NOT NULL)::boolean AS email_verified,
+           u.alert_email, u.alert_push, (o.email_sent_at IS NOT NULL)::boolean AS email_sent,
            COALESCE(CASE WHEN o.target_kind = 'observer' THEN ob.id ELSE n.id END, '00000000-0000-0000-0000-000000000000'::uuid)::uuid AS target_id
     FROM alert_outbox o
     JOIN users u ON u.id = o.user_id AND u.disabled_at IS NULL
@@ -25,7 +26,7 @@ WITH p AS (
     FROM p GROUP BY user_id, pass_id
 )
 SELECT p.id, p.user_id, p.pass_id, p.target_kind, p.target_public_key, p.name, p.alert_kind, p.value,
-       p.detail, p.attempts, p.email, p.email_verified, p.target_id
+       p.detail, p.attempts, p.email, p.email_verified, p.alert_email, p.alert_push, p.email_sent, p.target_id
 FROM p JOIN g ON g.user_id = p.user_id AND g.pass_id = p.pass_id
 WHERE g.running <= sqlc.arg(row_limit)::bigint OR g.running = g.n
 ORDER BY p.user_id, p.pass_id, p.id;
@@ -40,7 +41,7 @@ UPDATE alert_passes SET finished_at = now() WHERE pass_id = $1;
 DELETE FROM alert_passes WHERE started_at < $1;
 
 -- name: LiveUserDevices :many
-SELECT d.session_id, d.user_id, d.platform, d.push_token
+SELECT d.session_id, d.user_id, d.platform, d.push_token, d.payload_key
 FROM user_devices d JOIN user_sessions s ON s.id = d.session_id
 WHERE d.user_id = ANY(sqlc.arg(user_ids)::uuid[])
   AND s.ended_at IS NULL AND s.expires_at > now() AND (s.hard_expires_at IS NULL OR s.hard_expires_at > now());
@@ -49,9 +50,14 @@ WHERE d.user_id = ANY(sqlc.arg(user_ids)::uuid[])
 UPDATE alert_outbox SET delivered_at = sqlc.arg(at) WHERE id = ANY(sqlc.arg(ids)::bigint[]);
 
 -- name: BumpAlertAttempts :exec
--- Counts a failed attempt and holds the notice back for a minute, doubling with each earlier failure.
-UPDATE alert_outbox SET attempts = attempts + 1, next_attempt_at = sqlc.arg(at)::timestamptz + interval '1 minute' * power(2, attempts)
+-- Counts a failed attempt and holds the notice back for a minute, doubling with each earlier failure, or until
+-- hold_until when the push server asked for longer.
+UPDATE alert_outbox SET attempts = attempts + 1,
+    next_attempt_at = GREATEST(sqlc.arg(at)::timestamptz + interval '1 minute' * power(2, attempts), sqlc.arg(hold_until)::timestamptz)
 WHERE id = ANY(sqlc.arg(ids)::bigint[]);
+
+-- name: MarkAlertsEmailSent :exec
+UPDATE alert_outbox SET email_sent_at = sqlc.arg(at) WHERE id = ANY(sqlc.arg(ids)::bigint[]) AND email_sent_at IS NULL;
 
 -- name: DeleteExhaustedAlerts :execrows
 DELETE FROM alert_outbox WHERE delivered_at IS NULL AND attempts >= sqlc.arg(max_attempts);

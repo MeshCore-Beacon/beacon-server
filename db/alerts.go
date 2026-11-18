@@ -13,6 +13,7 @@ import (
 	"github.com/MeshCore-Beacon/beacon-server/internal/alerts"
 	"github.com/MeshCore-Beacon/beacon-server/internal/users"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -207,7 +208,7 @@ func (s *Store) DeleteRule(ctx context.Context, userID, id uuid.UUID) (bool, err
 	return n > 0, err
 }
 
-func (s *Store) RegisterDevice(ctx context.Context, userID, sessionID uuid.UUID, platform, token string) error {
+func (s *Store) RegisterDevice(ctx context.Context, userID, sessionID uuid.UUID, platform, token string, key []byte) error {
 	var err error
 	// Two registrations of one session race on its primary key (different tokens); the loser runs again.
 	for range 3 {
@@ -215,7 +216,11 @@ func (s *Store) RegisterDevice(ctx context.Context, userID, sessionID uuid.UUID,
 			if err := q.DeleteSessionDeviceOtherToken(ctx, sqlc.DeleteSessionDeviceOtherTokenParams{SessionID: sessionID, PushToken: token}); err != nil {
 				return err
 			}
-			return q.UpsertUserDevice(ctx, sqlc.UpsertUserDeviceParams{SessionID: sessionID, UserID: userID, Platform: platform, PushToken: token})
+			if err := q.UpsertUserDevice(ctx, sqlc.UpsertUserDeviceParams{SessionID: sessionID, UserID: userID, Platform: platform,
+				PushToken: token, PayloadKey: key}); err != nil {
+				return err
+			}
+			return q.TurnOnAlertPush(ctx, userID)
 		})
 		var pgErr *pgconn.PgError
 		if !errors.As(err, &pgErr) || pgErr.Code != uniqueViolation {
@@ -231,5 +236,24 @@ func (s *Store) RegisterDevice(ctx context.Context, userID, sessionID uuid.UUID,
 
 func (s *Store) RemoveDevice(ctx context.Context, userID, sessionID uuid.UUID) error {
 	err := s.q.DeleteUserDevice(ctx, sqlc.DeleteUserDeviceParams{SessionID: sessionID, UserID: userID})
+	return err
+}
+
+func (s *Store) UserChannels(ctx context.Context, userID uuid.UUID) (alerts.UserChannels, error) {
+	r, err := s.q.UserAlertChannels(ctx, userID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return alerts.UserChannels{}, users.ErrNotFound
+	}
+	if err != nil {
+		return alerts.UserChannels{}, err
+	}
+	return alerts.UserChannels{Email: r.AlertEmail, Push: r.AlertPush, HasEmail: r.HasEmail, EmailVerified: r.EmailVerified}, nil
+}
+
+func (s *Store) SetUserChannels(ctx context.Context, userID uuid.UUID, email, push *bool) error {
+	n, err := s.q.SetUserAlertChannels(ctx, sqlc.SetUserAlertChannelsParams{ID: userID, AlertEmail: email, AlertPush: push})
+	if err == nil && n == 0 {
+		return users.ErrNotFound
+	}
 	return err
 }

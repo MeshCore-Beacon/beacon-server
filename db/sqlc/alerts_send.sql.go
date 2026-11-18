@@ -22,18 +22,21 @@ func (q *Queries) BeginAlertPass(ctx context.Context, passID uuid.UUID) error {
 }
 
 const bumpAlertAttempts = `-- name: BumpAlertAttempts :exec
-UPDATE alert_outbox SET attempts = attempts + 1, next_attempt_at = $1::timestamptz + interval '1 minute' * power(2, attempts)
-WHERE id = ANY($2::bigint[])
+UPDATE alert_outbox SET attempts = attempts + 1,
+    next_attempt_at = GREATEST($1::timestamptz + interval '1 minute' * power(2, attempts), $2::timestamptz)
+WHERE id = ANY($3::bigint[])
 `
 
 type BumpAlertAttemptsParams struct {
-	At  pgtype.Timestamptz `json:"at"`
-	Ids []int64            `json:"ids"`
+	At        pgtype.Timestamptz `json:"at"`
+	HoldUntil pgtype.Timestamptz `json:"hold_until"`
+	Ids       []int64            `json:"ids"`
 }
 
-// Counts a failed attempt and holds the notice back for a minute, doubling with each earlier failure.
+// Counts a failed attempt and holds the notice back for a minute, doubling with each earlier failure, or until
+// hold_until when the push server asked for longer.
 func (q *Queries) BumpAlertAttempts(ctx context.Context, arg BumpAlertAttemptsParams) error {
-	_, err := q.db.Exec(ctx, bumpAlertAttempts, arg.At, arg.Ids)
+	_, err := q.db.Exec(ctx, bumpAlertAttempts, arg.At, arg.HoldUntil, arg.Ids)
 	return err
 }
 
@@ -126,17 +129,18 @@ func (q *Queries) FinishAlertPass(ctx context.Context, passID uuid.UUID) error {
 }
 
 const liveUserDevices = `-- name: LiveUserDevices :many
-SELECT d.session_id, d.user_id, d.platform, d.push_token
+SELECT d.session_id, d.user_id, d.platform, d.push_token, d.payload_key
 FROM user_devices d JOIN user_sessions s ON s.id = d.session_id
 WHERE d.user_id = ANY($1::uuid[])
   AND s.ended_at IS NULL AND s.expires_at > now() AND (s.hard_expires_at IS NULL OR s.hard_expires_at > now())
 `
 
 type LiveUserDevicesRow struct {
-	SessionID uuid.UUID `json:"session_id"`
-	UserID    uuid.UUID `json:"user_id"`
-	Platform  string    `json:"platform"`
-	PushToken string    `json:"push_token"`
+	SessionID  uuid.UUID `json:"session_id"`
+	UserID     uuid.UUID `json:"user_id"`
+	Platform   string    `json:"platform"`
+	PushToken  string    `json:"push_token"`
+	PayloadKey []byte    `json:"payload_key"`
 }
 
 func (q *Queries) LiveUserDevices(ctx context.Context, userIds []uuid.UUID) ([]LiveUserDevicesRow, error) {
@@ -153,6 +157,7 @@ func (q *Queries) LiveUserDevices(ctx context.Context, userIds []uuid.UUID) ([]L
 			&i.UserID,
 			&i.Platform,
 			&i.PushToken,
+			&i.PayloadKey,
 		); err != nil {
 			return nil, err
 		}
@@ -195,10 +200,25 @@ func (q *Queries) MarkAlertsDelivered(ctx context.Context, arg MarkAlertsDeliver
 	return err
 }
 
+const markAlertsEmailSent = `-- name: MarkAlertsEmailSent :exec
+UPDATE alert_outbox SET email_sent_at = $1 WHERE id = ANY($2::bigint[]) AND email_sent_at IS NULL
+`
+
+type MarkAlertsEmailSentParams struct {
+	At  pgtype.Timestamptz `json:"at"`
+	Ids []int64            `json:"ids"`
+}
+
+func (q *Queries) MarkAlertsEmailSent(ctx context.Context, arg MarkAlertsEmailSentParams) error {
+	_, err := q.db.Exec(ctx, markAlertsEmailSent, arg.At, arg.Ids)
+	return err
+}
+
 const pendingAlerts = `-- name: PendingAlerts :many
 WITH p AS (
-    SELECT o.id, o.user_id, o.pass_id, o.target_kind, o.target_public_key, o.name, o.alert_kind, COALESCE(o.value, 0)::bigint AS value,
+    SELECT o.id, o.user_id, o.pass_id, o.target_kind, o.target_public_key, o.name, o.alert_kind, o.value,
            o.detail, o.attempts, u.email, (u.email_verified_at IS NOT NULL)::boolean AS email_verified,
+           u.alert_email, u.alert_push, (o.email_sent_at IS NOT NULL)::boolean AS email_sent,
            COALESCE(CASE WHEN o.target_kind = 'observer' THEN ob.id ELSE n.id END, '00000000-0000-0000-0000-000000000000'::uuid)::uuid AS target_id
     FROM alert_outbox o
     JOIN users u ON u.id = o.user_id AND u.disabled_at IS NULL
@@ -213,7 +233,7 @@ WITH p AS (
     FROM p GROUP BY user_id, pass_id
 )
 SELECT p.id, p.user_id, p.pass_id, p.target_kind, p.target_public_key, p.name, p.alert_kind, p.value,
-       p.detail, p.attempts, p.email, p.email_verified, p.target_id
+       p.detail, p.attempts, p.email, p.email_verified, p.alert_email, p.alert_push, p.email_sent, p.target_id
 FROM p JOIN g ON g.user_id = p.user_id AND g.pass_id = p.pass_id
 WHERE g.running <= $1::bigint OR g.running = g.n
 ORDER BY p.user_id, p.pass_id, p.id
@@ -234,11 +254,14 @@ type PendingAlertsRow struct {
 	TargetPublicKey []byte    `json:"target_public_key"`
 	Name            string    `json:"name"`
 	AlertKind       string    `json:"alert_kind"`
-	Value           int64     `json:"value"`
+	Value           *int64    `json:"value"`
 	Detail          string    `json:"detail"`
 	Attempts        int16     `json:"attempts"`
 	Email           string    `json:"email"`
 	EmailVerified   bool      `json:"email_verified"`
+	AlertEmail      bool      `json:"alert_email"`
+	AlertPush       bool      `json:"alert_push"`
+	EmailSent       bool      `json:"email_sent"`
 	TargetID        uuid.UUID `json:"target_id"`
 }
 
@@ -272,6 +295,9 @@ func (q *Queries) PendingAlerts(ctx context.Context, arg PendingAlertsParams) ([
 			&i.Attempts,
 			&i.Email,
 			&i.EmailVerified,
+			&i.AlertEmail,
+			&i.AlertPush,
+			&i.EmailSent,
 			&i.TargetID,
 		); err != nil {
 			return nil, err

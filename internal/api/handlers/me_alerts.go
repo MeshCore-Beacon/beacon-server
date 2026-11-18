@@ -25,12 +25,13 @@ type AlertsService interface {
 	Overview(ctx context.Context, userID uuid.UUID) (alerts.Overview, error)
 	PutRule(ctx context.Context, userID uuid.UUID, in alerts.RuleInput) (alerts.StoredRule, error)
 	DeleteRule(ctx context.Context, userID, id uuid.UUID) error
-	RegisterDevice(ctx context.Context, userID, sessionID uuid.UUID, platform, token string) error
+	SetChannels(ctx context.Context, userID uuid.UUID, email, push *bool) (alerts.Channels, error)
+	RegisterDevice(ctx context.Context, userID, sessionID uuid.UUID, platform, handle, payloadKey string) error
 	RemoveDevice(ctx context.Context, userID, sessionID uuid.UUID) error
 }
 
 // AlertRoutes mounts /alerts and /devices on the /me router. A nil service answers 404 alerts_disabled.
-// A push token is never logged or returned.
+// A push handle or payload key is never logged or returned.
 func AlertRoutes(svc AlertsService) MeMount {
 	return func(r chi.Router, writes func(http.Handler) http.Handler) {
 		if svc == nil {
@@ -45,7 +46,8 @@ func AlertRoutes(svc AlertsService) MeMount {
 		r.Get("/alerts", getAlerts(svc))
 		r.With(writes).Put("/alerts/rules", putAlertRule(svc))
 		r.With(writes).Delete("/alerts/rules/{id}", deleteAlertRule(svc))
-		// A push token is a possession secret, so registering is limited per user as well as per address.
+		r.With(writes).Put("/alerts/channels", putAlertChannels(svc))
+		// A push handle is a possession secret, so registering is limited per user as well as per address.
 		r.With(writes, mw.RateLimitUser(10, 10*time.Minute)).Post("/devices", postDevice(svc))
 		r.With(writes).Delete("/devices", deleteDevice(svc))
 	}
@@ -63,7 +65,11 @@ func alertError(w http.ResponseWriter, err error) {
 	case errors.As(err, &bad):
 		respondCode(w, http.StatusUnprocessableEntity, "invalid_threshold", bad.Message)
 	case errors.Is(err, alerts.ErrBadDevice):
-		respondCode(w, http.StatusUnprocessableEntity, "invalid_input", "Check the platform and the push token.")
+		respondCode(w, http.StatusUnprocessableEntity, "invalid_input", "Check the platform, the push token and the payload key.")
+	case errors.Is(err, alerts.ErrPushOff):
+		respondCode(w, http.StatusNotFound, "push_disabled", "Push notifications are not enabled on this server.")
+	case errors.Is(err, alerts.ErrNoChannel):
+		respondCode(w, http.StatusUnprocessableEntity, "invalid_input", "Give email, push or both.")
 	case errors.Is(err, alerts.ErrRuleMissing):
 		respondCode(w, http.StatusNotFound, "not_found", "No such rule.")
 	case errors.Is(err, users.ErrNotFound):
@@ -71,6 +77,13 @@ func alertError(w http.ResponseWriter, err error) {
 	default:
 		slog.Error("alerts request failed", "component", "api", "error", err)
 		respondError(w, http.StatusInternalServerError, "internal error")
+	}
+}
+
+func alertChannels(c alerts.Channels) api.AlertChannels {
+	return api.AlertChannels{
+		Email: api.AlertEmailChannel{Available: c.Email.Available, Enabled: c.Email.Enabled, Reason: c.Email.Reason},
+		Push:  api.AlertPushChannel{Available: c.Push.Available, Enabled: c.Push.Enabled, HasDevice: c.Push.HasDevice},
 	}
 }
 
@@ -86,7 +99,7 @@ func alertRule(r alerts.StoredRule) api.AlertRule {
 
 // getAlerts godoc
 // @Summary The user's alerts
-// @Description One target per Atlas pin, in Atlas order, with the kinds its radio can have, the reason for each it cannot, and its rules. hasDevice says whether an app session has a push token (push mode). 404 alerts_disabled when the server has alerts off.
+// @Description The user's channels (email and push: whether each is available, the user's switch, the reason email is not available, whether an app registered a device), and one target per Atlas pin, in Atlas order, with the kinds its radio can have, the reason for each it cannot, and its rules. 404 alerts_disabled when the server has alerts off.
 // @Tags Accounts
 // @Produce json
 // @Security UserSession
@@ -101,7 +114,7 @@ func getAlerts(svc AlertsService) http.HandlerFunc {
 			alertError(w, err)
 			return
 		}
-		out := api.AlertsResponse{Delivery: ov.Delivery, HasDevice: ov.HasDevice, Targets: make([]api.AlertTarget, 0, len(ov.Targets))}
+		out := api.AlertsResponse{Channels: alertChannels(ov.Channels), Targets: make([]api.AlertTarget, 0, len(ov.Targets))}
 		for _, t := range ov.Targets {
 			at := api.AlertTarget{Kind: t.Kind, PublicKey: t.PublicKey, Name: t.Name, Polled: t.Caps.Polled, Available: t.Available,
 				Unavailable: t.Unavailable, UnavailableCodes: t.UnavailableCodes, Rules: make([]api.AlertRule, 0, len(t.Rules))}
@@ -188,7 +201,36 @@ func deleteAlertRule(svc AlertsService) http.HandlerFunc {
 	}
 }
 
-// appSessionOnly refuses a cookie session: a push token belongs to an app, which signs in with a bearer token.
+// putAlertChannels godoc
+// @Summary Turn alert channels on or off
+// @Description Sets the user's email and push switches; an absent one is left as it is. A switch can be on while its channel is not available (see GET /me/alerts); it takes effect once it is. Registering a device turns push on. Answers 200 with the channels.
+// @Tags Accounts
+// @Accept json
+// @Produce json
+// @Security UserSession
+// @Param body body api.PutAlertChannelsRequest true "Body at most 4 KiB"
+// @Success 200 {object} api.AlertChannels
+// @Failure 400,401,403,413,415,429,503 {object} map[string]APIError
+// @Failure 404 {object} map[string]APIError "alerts_disabled"
+// @Failure 422 {object} map[string]APIError "invalid_input: neither email nor push given"
+// @Router /me/alerts/channels [put]
+func putAlertChannels(svc AlertsService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var in api.PutAlertChannelsRequest
+		if !decodeBody(w, r, &in) {
+			return
+		}
+		u, _, _ := mw.UserFrom(r.Context())
+		ch, err := svc.SetChannels(r.Context(), u.ID, in.Email, in.Push)
+		if err != nil {
+			alertError(w, err)
+			return
+		}
+		respond(w, http.StatusOK, alertChannels(ch))
+	}
+}
+
+// appSessionOnly refuses a cookie session: a push handle belongs to an app, which signs in with a bearer token.
 func appSessionOnly(w http.ResponseWriter, r *http.Request) bool {
 	if mw.SessionViaCookie(r.Context()) {
 		respondCode(w, http.StatusForbidden, "app_session_required", "Only the app registers a device.")
@@ -198,15 +240,15 @@ func appSessionOnly(w http.ResponseWriter, r *http.Request) bool {
 }
 
 // postDevice godoc
-// @Summary Register this app session's push token
-// @Description Bearer sessions only (the app); a cookie session gets 403 app_session_required. Replaces the token of this session, and a token another session held moves here. Ending the session ends delivery to it.
+// @Summary Register this app session's device for push
+// @Description Bearer sessions only (the app); a cookie session gets 403 app_session_required. pushToken is the device handle from the push server named in /info features.push, and payloadKey the device's AES-256 key (standard base64, 32 bytes). Replaces this session's device, and a handle another session held moves here. Turns the user's push switch on. Ending the session ends delivery to it. 404 push_disabled when the server does not send push notifications.
 // @Tags Accounts
 // @Accept json
 // @Security UserSession
 // @Param body body api.RegisterDeviceRequest true "Body at most 4 KiB"
 // @Success 204 "Registered"
 // @Failure 400,401,403,413,415,429,503 {object} map[string]APIError
-// @Failure 404 {object} map[string]APIError "alerts_disabled"
+// @Failure 404 {object} map[string]APIError "alerts_disabled or push_disabled"
 // @Failure 422 {object} map[string]APIError "invalid_input"
 // @Router /me/devices [post]
 func postDevice(svc AlertsService) http.HandlerFunc {
@@ -219,7 +261,7 @@ func postDevice(svc AlertsService) http.HandlerFunc {
 			return
 		}
 		u, s, _ := mw.UserFrom(r.Context())
-		if err := svc.RegisterDevice(r.Context(), u.ID, s.ID, in.Platform, in.PushToken); err != nil {
+		if err := svc.RegisterDevice(r.Context(), u.ID, s.ID, in.Platform, in.PushToken, in.PayloadKey); err != nil {
 			alertError(w, err)
 			return
 		}
@@ -228,7 +270,7 @@ func postDevice(svc AlertsService) http.HandlerFunc {
 }
 
 // deleteDevice godoc
-// @Summary Remove this session's push token
+// @Summary Remove this session's device
 // @Tags Accounts
 // @Security UserSession
 // @Success 204 "Removed, or there was none"

@@ -8,6 +8,7 @@ package router
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -87,8 +88,10 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 	case "portal":
 		features.Accounts, features.PortalURL = "portal", opts.PortalURL
 	}
-	if opts.AlertDelivery != "" {
-		features.Alerts, features.AlertDelivery = true, opts.AlertDelivery
+	features.AlertChannels = api.InfoAlertChannels{Email: opts.AlertEmail, Push: opts.AlertPush}
+	features.Alerts = opts.AlertEmail || opts.AlertPush
+	if opts.AlertPush {
+		features.Push = &api.InfoPush{Server: opts.PushServer, PushID: opts.PushID}
 	}
 	display := api.InfoDisplay{TemperatureUnit: "c", DistanceUnit: "metric"}
 	if opts.TemperatureUnit != "" {
@@ -149,6 +152,10 @@ func New(h *hub.Hub, reader api.Reader, workers []*ingest.Worker, opts Options) 
 		r.Use(mw.RateLimit(config.ResolvedRateLimitConfig{Enabled: true, RequestsPerMinute: 240, Burst: 240}))
 		r.Mount("/api/guest-polling", handlers.GuestPollingRouter(opts.GuestPolling))
 	})
+	// The push server checks this server's address here; it exists only while push is on.
+	if opts.AlertPush && opts.PushID != "" && opts.PushSecret != "" {
+		r.With(mw.RateLimitRoute(30, time.Minute)).Get("/.well-known/beacon-push", handlers.PushDomainCheck(opts.PushID, opts.PushSecret))
+	}
 	// The retired key routes always answer 404: they do no work and never read the body, so they need no limiter.
 	r.Post("/api/guest-keys", handlers.GuestKeysGone())
 	r.Get("/api/shared-guest/key", handlers.GuestKeysGone())
