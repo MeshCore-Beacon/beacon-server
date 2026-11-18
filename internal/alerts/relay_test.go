@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type sendBody struct {
@@ -66,9 +68,9 @@ func TestRelaySendPostsTheBatchAndMapsEachResult(t *testing.T) {
 			t.Errorf("result %d: %v, want %v", i, res[i].Status, w)
 		}
 	}
-	// The header covers an item without its own wait; an item's own wait wins, also on a failure after an FCM outage.
-	if res[2].RetryAfter != 30*time.Second || res[3].RetryAfter != 0 || res[7].RetryAfter != 5*time.Second || res[8].RetryAfter != 90*time.Second {
-		t.Fatalf("retry after %v %v %v %v", res[2].RetryAfter, res[3].RetryAfter, res[7].RetryAfter, res[8].RetryAfter)
+	// The header covers an item without its own wait, a failure too; an item's own wait wins.
+	if res[2].RetryAfter != 30*time.Second || res[3].RetryAfter != 30*time.Second || res[6].RetryAfter != 30*time.Second || res[7].RetryAfter != 5*time.Second || res[8].RetryAfter != 90*time.Second {
+		t.Fatalf("retry after %v %v %v %v %v", res[2].RetryAfter, res[3].RetryAfter, res[6].RetryAfter, res[7].RetryAfter, res[8].RetryAfter)
 	}
 }
 
@@ -163,5 +165,39 @@ func TestRelayRateLimitWithoutAWait(t *testing.T) {
 	res, err := r.Send(context.Background(), []PushMessage{{Handle: "h_x", Ciphertext: []byte{1}}})
 	if err != nil || res[0].Status != PushLimited || res[0].RetryAfter != time.Minute {
 		t.Fatalf("%+v %v", res, err)
+	}
+}
+
+// A 200 whose body is cut short or unreadable is an answer we do not have: the outcome is unknown, as for a timeout.
+func TestRelayIncompleteAnswerIsUnknown(t *testing.T) {
+	for name, h := range map[string]http.HandlerFunc{
+		"cut json": func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, `{"results":[{"status":"ok"}`) },
+		"short body": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Length", "500")
+			_, _ = io.WriteString(w, `{"results":[{"status":"ok"}]}`)
+		},
+		"wrong count": func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, `{"results":[]}`) },
+	} {
+		r := relayServer(t, h)
+		_, err := r.Send(context.Background(), []PushMessage{{Handle: "h_x", Ciphertext: []byte{1}}})
+		var pe *PushError
+		if !errors.As(err, &pe) || pe.Status != 0 {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// Through the sender: a cut 200 retries only the batch it carried; the rest stays pending with no attempt.
+func TestPushIncompleteAnswerRetriesOnlyItsBatch(t *testing.T) {
+	r := relayServer(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, `{"results":[{"status":"o`) })
+	f := &fakeSend{devices: map[uuid.UUID][]Device{userA: {dev("ios", "h_a")}}}
+	for i := 1; i <= 150; i++ {
+		f.rows = append(f.rows, row(int64(i), userA, passOne, KindRebooted, "A", 1))
+	}
+	if err := pushSender(f, r).Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if st := f.settled; len(st.PushRetry) != MaxPushBatch || len(st.PushHold) != 0 || len(st.PushDone) != 0 {
+		t.Fatalf("retry %d hold %d done %d", len(st.PushRetry), len(st.PushHold), len(st.PushDone))
 	}
 }

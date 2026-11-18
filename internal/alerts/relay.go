@@ -122,9 +122,15 @@ func (r *Relay) post(ctx context.Context, path string, limit time.Duration, body
 		return 0, nil, nil, &PushError{msg: "push server unreachable"}
 	}
 	defer resp.Body.Close()
-	reply, _ := io.ReadAll(io.LimitReader(resp.Body, maxPushReply))
+	reply, err := io.ReadAll(io.LimitReader(resp.Body, maxPushReply))
+	if err != nil && resp.StatusCode == http.StatusOK {
+		return 0, nil, nil, errIncomplete
+	}
 	return resp.StatusCode, resp.Header, reply, nil
 }
+
+// errIncomplete is a 200 we could not read in full: like a timeout, the outcome is unknown (Status 0).
+var errIncomplete = &PushError{msg: "push server answer incomplete"}
 
 func (r *Relay) refused(status int, h http.Header, reply []byte) *PushError {
 	var e struct {
@@ -179,7 +185,7 @@ func (r *Relay) Send(ctx context.Context, msgs []PushMessage) ([]PushResult, err
 		} `json:"results"`
 	}
 	if json.Unmarshal(reply, &out) != nil || len(out.Results) != len(msgs) {
-		return nil, &PushError{Status: status, msg: "push server answered with an unreadable reply"}
+		return nil, errIncomplete
 	}
 	wait := retryAfter(h.Get("Retry-After"), r.now())
 	res := make([]PushResult, len(msgs))
@@ -202,10 +208,7 @@ func (r *Relay) Send(ctx context.Context, msgs []PushMessage) ([]PushResult, err
 			}
 			res[i] = PushResult{Status: PushLimited, RetryAfter: itemWait}
 		default: // failed, and anything newer than this server
-			res[i] = PushResult{Status: PushRetry}
-			if x.RetryAfterSeconds > 0 {
-				res[i].RetryAfter = itemWait
-			}
+			res[i] = PushResult{Status: PushRetry, RetryAfter: itemWait}
 		}
 	}
 	return res, nil
