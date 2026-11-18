@@ -83,11 +83,11 @@ func TestAlertPushQuotaHoldNeverHoldsMailPostgres(t *testing.T) {
 		}
 		at = at.Add(time.Minute)
 	}
-	var pushHeld, emailDone int
-	_ = pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE push_next_attempt_at > $1), count(*) FILTER (WHERE email_done_at IS NOT NULL)
-		FROM alert_outbox WHERE delivered_at IS NULL`, at.Add(5*time.Hour)).Scan(&pushHeld, &emailDone)
-	if mailedUsers(m) != n || pushHeld != n || emailDone != n || p.calls != 1 {
-		t.Fatalf("mailed %d of %d, push held %d, email done %d, push calls %d", mailedUsers(m), n, pushHeld, emailDone, p.calls)
+	var pushHeld, emailDone, attempts int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE push_next_attempt_at > $1), count(*) FILTER (WHERE email_done_at IS NOT NULL),
+		COALESCE(max(push_attempts), 0) FROM alert_outbox WHERE delivered_at IS NULL`, at.Add(5*time.Hour)).Scan(&pushHeld, &emailDone, &attempts)
+	if mailedUsers(m) != n || pushHeld != n || emailDone != n || p.calls != 1 || attempts != 0 {
+		t.Fatalf("mailed %d of %d, push held %d, email done %d, push calls %d, push attempts %d", mailedUsers(m), n, pushHeld, emailDone, p.calls, attempts)
 	}
 }
 
@@ -145,11 +145,11 @@ func TestAlertPushSlowRelayDeliversEverythingPostgres(t *testing.T) {
 	for range notices {
 		queueNotice(t, ctx, s, alice.ID, pass, "rebooted", "Hilltop", time.Now())
 	}
-	relay := &slowRelay{perMessage: 20 * time.Millisecond, handed: map[string]int{}}
+	relay := &slowRelay{perMessage: 2 * time.Millisecond, handed: map[string]int{}}
 	srv := httptest.NewServer(relay)
 	defer srv.Close()
-	// A full batch needs 400 ms, half of one 200 ms.
-	client := &http.Client{Timeout: 300 * time.Millisecond}
+	// A full batch needs over 200 ms, half of one about 100 ms.
+	client := &http.Client{Timeout: 170 * time.Millisecond}
 	at := time.Now()
 	sender := alerts.NewSender(AlertEval{s}, alerts.SenderConfig{Push: alerts.NewRelay(srv.URL, "inst_test", "secret", client),
 		PushID: "inst_test", Now: func() time.Time { return at }})
@@ -202,5 +202,97 @@ func TestAlertValuelessNoticesSendNullPostgres(t *testing.T) {
 	}
 	if len(got) != 4 || got["request_attention"] != nil || got["rebooted"] != nil || got["back_online"] != nil || got["gone_quiet"] != float64(30) {
 		t.Fatalf("values %v", got)
+	}
+}
+
+// rateRelay answers /v1/send like a push server over its quota: every item rate_limited with its own wait, or the
+// whole call 429 with a Retry-After header.
+type rateRelay struct {
+	itemWait  int // seconds; 0 answers 429 instead
+	callAfter string
+	calls     int
+}
+
+func (r *rateRelay) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	r.calls++
+	var body struct {
+		Messages []json.RawMessage `json:"messages"`
+	}
+	_ = json.NewDecoder(req.Body).Decode(&body)
+	if r.itemWait == 0 {
+		w.Header().Set("Retry-After", r.callAfter)
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"code":"rate_limited","message":"daily quota"}}`))
+		return
+	}
+	results := make([]map[string]any, len(body.Messages))
+	for i := range results {
+		results[i] = map[string]any{"status": "rate_limited", "retryAfterSeconds": r.itemWait}
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"results": results})
+}
+
+// A rate-limited push, per item or for the whole call, waits as long as the push server asked and never counts an
+// attempt: run after run it is held, not used up, while the mail goes out at once. Only MaxAge ends it.
+func TestAlertPushRateLimitHoldsWithoutAttemptsPostgres(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		relay *rateRelay
+		wait  time.Duration
+	}{
+		{"per item", &rateRelay{itemWait: 900}, 15 * time.Minute},
+		{"whole call", &rateRelay{callAfter: "600"}, 10 * time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, s := userStore(t)
+			mailAndPushUsers(t, ctx, s, 3)
+			srv := httptest.NewServer(tc.relay)
+			defer srv.Close()
+			pu, _ := url.Parse("https://beacon.example.org")
+			m := &recMail{}
+			at := time.Now()
+			sender := alerts.NewSender(AlertEval{s}, alerts.SenderConfig{Mail: m, Push: alerts.NewRelay(srv.URL, "inst_test", "secret", nil),
+				PushID: "inst_test", PublicURL: pu, Now: func() time.Time { return at }})
+			state := func() (pending, attempts int, next time.Time) {
+				t.Helper()
+				if err := pool.QueryRow(ctx, `SELECT count(*), COALESCE(max(push_attempts), 0), COALESCE(min(push_next_attempt_at), 'epoch')
+					FROM alert_outbox WHERE delivered_at IS NULL`).Scan(&pending, &attempts, &next); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if err := sender.Run(ctx); err != nil {
+				t.Fatal(err)
+			}
+			pending, attempts, next := state()
+			if len(m.got) != 3 || pending != 3 || attempts != 0 || next.Sub(at) < tc.wait-time.Second || next.Sub(at) > tc.wait+time.Second {
+				t.Fatalf("mails %d pending %d attempts %d held %v", len(m.got), pending, attempts, next.Sub(at))
+			}
+			// Inside the hold nothing is tried; past it, again and again, more often than MaxAttempts, it is held anew.
+			at = at.Add(time.Minute)
+			if err := sender.Run(ctx); err != nil || tc.relay.calls != 1 {
+				t.Fatalf("tried inside the hold: %v %d", err, tc.relay.calls)
+			}
+			for range alerts.MaxAttempts + 1 {
+				at = at.Add(tc.wait)
+				if err := sender.Run(ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
+			pending, attempts, _ = state()
+			if pending != 3 || attempts != 0 || tc.relay.calls != alerts.MaxAttempts+2 || len(m.got) != 3 {
+				t.Fatalf("pending %d attempts %d calls %d mails %d", pending, attempts, tc.relay.calls, len(m.got))
+			}
+			// MaxAge still drops it.
+			at = at.Add(alerts.MaxAge)
+			if err := sender.Run(ctx); err != nil {
+				t.Fatal(err)
+			}
+			var left int
+			_ = pool.QueryRow(ctx, `SELECT count(*) FROM alert_outbox`).Scan(&left)
+			if left != 0 {
+				t.Fatalf("%d rows past MaxAge", left)
+			}
+		})
 	}
 }

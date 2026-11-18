@@ -60,7 +60,7 @@ func TestRelaySendPostsTheBatchAndMapsEachResult(t *testing.T) {
 		got.Messages[1].Ciphertext != base64.StdEncoding.EncodeToString([]byte{1, 0xff}) {
 		t.Fatalf("%+v", got)
 	}
-	want := []PushStatus{PushDelivered, PushGone, PushRetry, PushRetry, PushDropped, PushDropped, PushRetry, PushRetry, PushRetry}
+	want := []PushStatus{PushDelivered, PushGone, PushLimited, PushRetry, PushDropped, PushDropped, PushRetry, PushLimited, PushRetry}
 	for i, w := range want {
 		if res[i].Status != w {
 			t.Errorf("result %d: %v, want %v", i, res[i].Status, w)
@@ -83,6 +83,7 @@ func TestRelaySendWholeCallFailures(t *testing.T) {
 		{http.StatusForbidden, `{"error":{"code":"suspended","message":"x"}}`, "", true, 0},
 		{http.StatusForbidden, `{"error":{"code":"banned","message":"x"}}`, "", true, 0},
 		{http.StatusTooManyRequests, `{"error":{"code":"rate_limited","message":"x"}}`, "120", false, 2 * time.Minute},
+		{http.StatusTooManyRequests, `{"error":{"code":"rate_limited","message":"x"}}`, "", false, 0},
 		{http.StatusBadGateway, `oops`, "", false, 0},
 		{http.StatusUnauthorized, `{"error":{"code":"unauthorized","message":"x"}}`, "", false, 0},
 	} {
@@ -95,7 +96,8 @@ func TestRelaySendWholeCallFailures(t *testing.T) {
 		})
 		_, err := r.Send(context.Background(), []PushMessage{{Handle: "h_secret_handle", Ciphertext: []byte{1}}})
 		var pe *PushError
-		if !errors.As(err, &pe) || pe.Status != tc.status || pe.Suspended() != tc.suspended || pe.RetryAfter != tc.after {
+		if !errors.As(err, &pe) || pe.Status != tc.status || pe.Suspended() != tc.suspended || pe.RetryAfter != tc.after ||
+			pe.Limited() != (tc.status == http.StatusTooManyRequests) {
 			t.Fatalf("%d: %v", tc.status, err)
 		}
 		if strings.Contains(err.Error(), "s3cret") || strings.Contains(err.Error(), "h_secret_handle") {
@@ -150,5 +152,16 @@ func TestRetryAfterParsing(t *testing.T) {
 		if got := retryAfter(in, now); got != want {
 			t.Errorf("%q: %v, want %v", in, got, want)
 		}
+	}
+}
+
+// A rate limit with no wait in the item or the header still waits a minute.
+func TestRelayRateLimitWithoutAWait(t *testing.T) {
+	r := relayServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"results":[{"status":"rate_limited"}]}`)
+	})
+	res, err := r.Send(context.Background(), []PushMessage{{Handle: "h_x", Ciphertext: []byte{1}}})
+	if err != nil || res[0].Status != PushLimited || res[0].RetryAfter != time.Minute {
+		t.Fatalf("%+v %v", res, err)
 	}
 }

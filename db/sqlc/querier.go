@@ -365,6 +365,8 @@ type Querier interface {
 	// Whether any observation up to @max_id lacks a payload type. A full scan, run at most once per
 	// process by the payload-type backfill.
 	HasUntypedObservations(ctx context.Context, maxID int64) (bool, error)
+	// A rate-limited push waits until hold_until; no attempt is counted.
+	HoldAlertPush(ctx context.Context, arg HoldAlertPushParams) error
 	InsertAlertNotices(ctx context.Context, arg InsertAlertNoticesParams) error
 	// ============================================================
 	// CHANNEL MESSAGES

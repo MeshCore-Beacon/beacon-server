@@ -74,6 +74,11 @@ UPDATE alert_outbox SET push_attempts = push_attempts + 1,
     push_done_at = CASE WHEN push_attempts + 1 >= sqlc.arg(max_attempts)::int THEN sqlc.arg(at) ELSE push_done_at END
 WHERE id = ANY(sqlc.arg(ids)::bigint[]) AND push_done_at IS NULL;
 
+-- name: HoldAlertPush :exec
+-- A rate-limited push waits until hold_until; no attempt is counted.
+UPDATE alert_outbox SET push_next_attempt_at = sqlc.arg(hold_until)::timestamptz
+WHERE id = ANY(sqlc.arg(ids)::bigint[]) AND push_done_at IS NULL;
+
 -- name: DeleteExhaustedAlerts :execrows
 -- A finished notice that ran out of attempts on a channel is dropped.
 DELETE FROM alert_outbox

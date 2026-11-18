@@ -78,6 +78,8 @@ type Settled struct {
 	IDs                   []int64 // every notice of the pass
 	EmailDone, PushDone   []int64 // nothing (more) to send on the channel
 	EmailRetry, PushRetry []Retry
+	// PushHold: the push was rate limited, so it waits until NotBefore without counting an attempt.
+	PushHold []Retry
 }
 
 // SendStore is what the sender needs from the database.
@@ -96,8 +98,9 @@ type SendStore interface {
 	// MarkEmailSent records that the mail for these notices went out, which finishes their email channel.
 	MarkEmailSent(ctx context.Context, ids []int64, now time.Time) error
 	// Finish records the pass per channel: done channels are finished, a retried channel counts an attempt and is
-	// held back with a growing delay (or until NotBefore when that is later) and gives up after maxAttempts. A notice
-	// is delivered once both channels are done, and dropped instead when one of them gave up.
+	// held back with a growing delay (or until NotBefore when that is later) and gives up after maxAttempts, and a
+	// held push waits until NotBefore with no attempt counted. A notice is delivered once both channels are done, and
+	// dropped instead when one of them gave up.
 	Finish(ctx context.Context, st Settled, now time.Time, maxAttempts int) error
 	RemoveDeviceToken(ctx context.Context, token string) error
 }
@@ -143,8 +146,9 @@ func NewSender(store SendStore, cfg SenderConfig) *Sender {
 // outcome is where one channel stands for one notice after a pass. A notice absent from a channel's answer was
 // not tried there (not due, capped, or the pass stopped early) and stays as it was, with no attempt counted.
 type outcome struct {
-	failed bool      // try again later; otherwise done
-	hold   time.Time // with failed: not before this
+	failed  bool      // try again later, counting an attempt; otherwise done
+	limited bool      // rate limited: wait for hold, no attempt counted (failed wins when both)
+	hold    time.Time // with failed or limited: not before this
 }
 
 // Run drains one batch. It does nothing when another process is sending.
@@ -183,9 +187,12 @@ func (s *Sender) Run(ctx context.Context) error {
 			}
 		}
 		if o, ok := push[r.ID]; ok {
-			if o.failed {
+			switch {
+			case o.failed:
 				st.PushRetry = append(st.PushRetry, Retry{ID: r.ID, NotBefore: o.hold})
-			} else {
+			case o.limited:
+				st.PushHold = append(st.PushHold, Retry{ID: r.ID, NotBefore: o.hold})
+			default:
 				st.PushDone = append(st.PushDone, r.ID)
 			}
 		}
@@ -277,7 +284,7 @@ type pushItem struct {
 }
 
 // batchLimit halves the batch for each earlier push failure of the notice, so a batch that timed out goes again in
-// smaller pieces instead of failing the same way.
+// smaller pieces instead of failing the same way. A rate limit is not a failure and does not shrink it.
 func batchLimit(attempts int) int {
 	if attempts >= 8 {
 		return 1
@@ -288,10 +295,12 @@ func batchLimit(attempts int) int {
 // sendPush seals each due notice for each of the user's live devices that is not done with it yet and sends them in
 // batches of at most MaxPushBatch. A notice is done once every device is (or the user has none); while any device must
 // retry, so must the notice, and the retry goes only to the devices still missing it. A dead handle is deleted and
-// its device no longer counts; a message the push server refused is done for that device. A call that fails as a
-// whole retries its batch and ends the push part of the pass. When the push server answered, every notice still to
-// send retries too, held back as long as it asked; when it did not (unreachable, or too slow to answer), the rest is
-// left for the next pass, so the notices of a slow batch cannot keep the others from ever being tried.
+// its device no longer counts; a message the push server refused is done for that device. A rate-limited message
+// waits as long as asked without counting an attempt, so a server over its quota keeps its notices until the quota
+// resets or MaxAge passes. A call that fails as a whole retries its batch and ends the push part of the pass. When
+// the push server answered, every notice still to send waits too (held, for a rate limit; retried otherwise); when it
+// did not (unreachable, or too slow to answer), the rest is left for the next pass, so the notices of a slow batch
+// cannot keep the others from ever being tried.
 func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow, now time.Time) (map[int64]outcome, error) {
 	out := map[int64]outcome{}
 	seen := map[uuid.UUID]bool{}
@@ -352,10 +361,18 @@ func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow, now time.Time) 
 		}
 		out[id] = o
 	}
-	// wait leaves the notices of these items untried, unless they already failed this pass.
+	limit := func(id int64, hold time.Time) {
+		o := out[id]
+		o.limited = true
+		if hold.After(o.hold) {
+			o.hold = hold
+		}
+		out[id] = o
+	}
+	// wait leaves the notices of these items untried, unless they already failed or were held this pass.
 	wait := func(rest []pushItem) {
 		for _, it := range rest {
-			if !out[it.row].failed {
+			if o := out[it.row]; !o.failed && !o.limited {
 				delete(out, it.row)
 			}
 		}
@@ -369,8 +386,8 @@ func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow, now time.Time) 
 			break
 		}
 		var batch []pushItem
-		limit := MaxPushBatch
-		for ; i < len(items) && len(batch) < limit; i++ {
+		size := MaxPushBatch
+		for ; i < len(items) && len(batch) < size; i++ {
 			it := items[i]
 			if gone[it.device.Token] {
 				continue
@@ -379,7 +396,7 @@ func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow, now time.Time) 
 				break
 			}
 			batch = append(batch, it)
-			limit = min(limit, it.limit)
+			size = min(size, it.limit)
 		}
 		if len(batch) == 0 {
 			continue
@@ -397,6 +414,21 @@ func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow, now time.Time) 
 				answered = pe.Status != 0
 				if pe.RetryAfter > 0 {
 					hold = now.Add(pe.RetryAfter)
+				}
+				if pe.Limited() {
+					if hold.IsZero() {
+						hold = now.Add(defaultLimitWait)
+					}
+					slog.Warn("push server rate limited this server: alert push notifications wait", "component", "alerts", "until", hold)
+					for _, it := range batch {
+						limit(it.row, hold)
+					}
+					for _, it := range items[i:] {
+						if !gone[it.device.Token] {
+							limit(it.row, hold)
+						}
+					}
+					break
 				}
 				if pe.Suspended() {
 					slog.Error("push server refused this server: alert push notifications will be retried", "component", "alerts", "err", err)
@@ -427,6 +459,12 @@ func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow, now time.Time) 
 			case PushDropped:
 				dropped++
 				marks = append(marks, DeviceMark{OutboxID: it.row, Session: it.device.Session})
+			case PushLimited:
+				wait := res[j].RetryAfter
+				if wait <= 0 {
+					wait = defaultLimitWait
+				}
+				limit(it.row, now.Add(wait))
 			case PushGone:
 				if !gone[it.device.Token] {
 					gone[it.device.Token] = true

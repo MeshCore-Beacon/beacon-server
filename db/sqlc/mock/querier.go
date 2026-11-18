@@ -2617,6 +2617,20 @@ func (mr *MockQuerierMockRecorder) HasUntypedObservations(ctx, maxID any) *gomoc
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HasUntypedObservations", reflect.TypeOf((*MockQuerier)(nil).HasUntypedObservations), ctx, maxID)
 }
 
+// HoldAlertPush mocks base method.
+func (m *MockQuerier) HoldAlertPush(ctx context.Context, arg db.HoldAlertPushParams) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "HoldAlertPush", ctx, arg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// HoldAlertPush indicates an expected call of HoldAlertPush.
+func (mr *MockQuerierMockRecorder) HoldAlertPush(ctx, arg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HoldAlertPush", reflect.TypeOf((*MockQuerier)(nil).HoldAlertPush), ctx, arg)
+}
+
 // InsertAlertNotices mocks base method.
 func (m *MockQuerier) InsertAlertNotices(ctx context.Context, arg db.InsertAlertNoticesParams) error {
 	m.ctrl.T.Helper()

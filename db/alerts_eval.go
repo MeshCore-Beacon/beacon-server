@@ -512,6 +512,11 @@ func (a AlertEval) Finish(ctx context.Context, st alerts.Settled, now time.Time,
 				return err
 			}
 		}
+		for h, ids := range byHold(st.PushHold, now) {
+			if err := q.HoldAlertPush(ctx, sqlc.HoldAlertPushParams{HoldUntil: ts(h), Ids: ids}); err != nil {
+				return err
+			}
+		}
 		if _, err := q.DeleteExhaustedAlerts(ctx, sqlc.DeleteExhaustedAlertsParams{Ids: st.IDs, MaxAttempts: int32(maxAttempts)}); err != nil {
 			return err
 		}

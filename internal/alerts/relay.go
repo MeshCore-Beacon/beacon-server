@@ -19,17 +19,19 @@ import (
 )
 
 const (
-	// MaxPushBatch is the most messages one send call carries. The push server hands them to FCM one after another
-	// before it answers, so a batch has to fit sendCallLimit even when FCM is slow.
-	MaxPushBatch = 20
+	// MaxPushBatch is the most messages one send call carries. The push server answers within about 20 seconds
+	// whatever the size: what it did not start in time comes back rate_limited.
+	MaxPushBatch = 100
 	// PushTTL is how long the push server keeps trying a notification.
 	PushTTL       = 24 * time.Hour
 	HelloInterval = time.Hour
 	pushCallLimit = 15 * time.Second
-	// sendCallLimit bounds one /v1/send call; it stays under the push server's 60-second write deadline.
-	sendCallLimit = 50 * time.Second
-	maxPushReply  = 64 << 10
-	maxRetryAfter = 6 * time.Hour
+	// sendCallLimit bounds one /v1/send call, with room over the push server's own answer time.
+	sendCallLimit = 30 * time.Second
+	// defaultLimitWait holds a rate-limited push that came with no wait.
+	defaultLimitWait = time.Minute
+	maxPushReply     = 64 << 10
+	maxRetryAfter    = 6 * time.Hour
 )
 
 // PushMessage is one sealed notice for one device handle. ID is the same on every retry of the notice for the
@@ -49,6 +51,7 @@ const (
 	PushRetry                       // try again later
 	PushGone                        // the handle is dead: delete the device
 	PushDropped                     // the message itself was refused: never resend it
+	PushLimited                     // not sent because of a limit: wait RetryAfter, not a failed attempt
 )
 
 // PushResult is the outcome of one message; RetryAfter is set when the server asked to wait.
@@ -73,6 +76,9 @@ type PushError struct {
 }
 
 func (e *PushError) Error() string { return e.msg }
+
+// Limited is true when the whole call was refused for a rate limit: hold the push, it is not a failed attempt.
+func (e *PushError) Limited() bool { return e.Status == http.StatusTooManyRequests }
 
 // Suspended is true when the push server has suspended or banned this server.
 func (e *PushError) Suspended() bool { return e.Code == "suspended" || e.Code == "banned" }
@@ -191,7 +197,10 @@ func (r *Relay) Send(ctx context.Context, msgs []PushMessage) ([]PushResult, err
 		case "too_large", "invalid":
 			res[i] = PushResult{Status: PushDropped}
 		case "rate_limited":
-			res[i] = PushResult{Status: PushRetry, RetryAfter: itemWait}
+			if itemWait <= 0 {
+				itemWait = defaultLimitWait
+			}
+			res[i] = PushResult{Status: PushLimited, RetryAfter: itemWait}
 		default: // failed, and anything newer than this server
 			res[i] = PushResult{Status: PushRetry}
 			if x.RetryAfterSeconds > 0 {

@@ -168,6 +168,22 @@ func (q *Queries) FinishAlertPass(ctx context.Context, passID uuid.UUID) error {
 	return err
 }
 
+const holdAlertPush = `-- name: HoldAlertPush :exec
+UPDATE alert_outbox SET push_next_attempt_at = $1::timestamptz
+WHERE id = ANY($2::bigint[]) AND push_done_at IS NULL
+`
+
+type HoldAlertPushParams struct {
+	HoldUntil pgtype.Timestamptz `json:"hold_until"`
+	Ids       []int64            `json:"ids"`
+}
+
+// A rate-limited push waits until hold_until; no attempt is counted.
+func (q *Queries) HoldAlertPush(ctx context.Context, arg HoldAlertPushParams) error {
+	_, err := q.db.Exec(ctx, holdAlertPush, arg.HoldUntil, arg.Ids)
+	return err
+}
+
 const liveUserDevices = `-- name: LiveUserDevices :many
 SELECT d.session_id, d.user_id, d.platform, d.push_token, d.payload_key
 FROM user_devices d JOIN user_sessions s ON s.id = d.session_id
