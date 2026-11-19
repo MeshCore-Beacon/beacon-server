@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -138,6 +139,33 @@ func (f *fakeRetainer) SaveState(_ context.Context, key string, v any) error {
 func (f *fakeRetainer) ReconfirmNeighbors(context.Context) error {
 	f.neighbors++
 	return f.neighErr
+}
+
+func TestRouteRetentionReportsCompletedNeighbors(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprintf("neighbor error %t", fail), func(t *testing.T) {
+			store := newFakeRetainer()
+			if fail {
+				store.neighErr = errors.New("neighbor cleanup failed")
+			}
+			records := captureLogs(t)
+			err := RouteRetentionTask(store, 24*time.Hour, time.Hour, 3, time.Hour).Run(t.Context())
+			if !errors.Is(err, store.neighErr) || store.neighbors != 1 {
+				t.Fatalf("neighbor calls %d, err %v", store.neighbors, err)
+			}
+			for _, line := range records() {
+				if line["msg"] == "route retention" {
+					if fail || line["level"] != "INFO" || line["neighbors_reconfirmed"] != true {
+						t.Fatalf("unexpected completion: %v", line)
+					}
+					return
+				}
+			}
+			if !fail {
+				t.Fatal("missing retention completion")
+			}
+		})
+	}
 }
 
 func (f *fakeRetainer) put(t *testing.T, s routesGraceState) {

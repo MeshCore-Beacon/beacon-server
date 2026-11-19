@@ -18,6 +18,7 @@ import (
 type reconfirmStore struct {
 	budgets []int
 	err     error
+	result  db.ReconfirmResult
 }
 
 func (s *reconfirmStore) ReconfirmSweep(ctx context.Context, budget int) (db.ReconfirmResult, error) {
@@ -25,7 +26,35 @@ func (s *reconfirmStore) ReconfirmSweep(ctx context.Context, budget int) (db.Rec
 		return db.ReconfirmResult{}, errors.New("sweep given a per-call deadline")
 	}
 	s.budgets = append(s.budgets, budget)
-	return db.ReconfirmResult{Scanned: int64(budget)}, s.err
+	result := s.result
+	result.Scanned = int64(budget)
+	return result, s.err
+}
+
+func TestReconfirmSummaryLevel(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		result db.ReconfirmResult
+		err    error
+		level  string
+	}{
+		{"ordinary slice", db.ReconfirmResult{}, nil, "DEBUG"},
+		{"cycle finished", db.ReconfirmResult{Wrapped: true}, nil, "INFO"},
+		{"smaller retry", db.ReconfirmResult{TimedOut: 1}, nil, "INFO"},
+		{"error after timeouts", db.ReconfirmResult{TimedOut: 2}, errors.New("cursor write failed"), "INFO"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			records := captureLogs(t)
+			store := &reconfirmStore{result: tc.result, err: tc.err}
+			if err := ReconfirmTask(store, 12000, ReconfirmTick).Run(t.Context()); !errors.Is(err, tc.err) {
+				t.Fatal(err)
+			}
+			got := records()
+			if len(got) != 1 || got[0]["level"] != tc.level || got[0]["timed_out"] != float64(tc.result.TimedOut) || got[0]["completed"] != (tc.err == nil) {
+				t.Fatalf("summary: %v", got)
+			}
+		})
+	}
 }
 
 func TestReconfirmTaskPacing(t *testing.T) {
