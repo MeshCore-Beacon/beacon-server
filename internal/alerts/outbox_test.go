@@ -17,19 +17,20 @@ import (
 )
 
 type fakeSend struct {
-	locked    bool
-	rows      []OutboxRow
-	devices   map[uuid.UUID][]Device
-	delivered []int64
-	retry     []Retry
-	settled   Settled
-	emailSent []int64
-	removed   []string
-	reached   map[int64]map[uuid.UUID]bool
-	marks     []DeviceMark
-	expired   int
-	expiredAt [2]time.Time
-	notBefore time.Time
+	locked       bool
+	rows         []OutboxRow
+	devices      map[uuid.UUID][]Device
+	delivered    []int64
+	retry        []Retry
+	settled      Settled
+	emailSent    []int64
+	removed      []string
+	reached      map[int64]map[uuid.UUID]bool
+	marks        []DeviceMark
+	expired      int
+	expiredAt    [2]time.Time
+	notBefore    time.Time
+	historyReads int
 }
 
 func (f *fakeSend) BeginSendLock(context.Context) (Unlocker, bool, error) {
@@ -56,6 +57,7 @@ func (f *fakeSend) Devices(context.Context, []uuid.UUID) (map[uuid.UUID][]Device
 }
 
 func (f *fakeSend) DeliveredDevices(context.Context, []int64) (map[int64]map[uuid.UUID]bool, error) {
+	f.historyReads++
 	return f.reached, nil
 }
 
@@ -368,6 +370,40 @@ func TestPushSealsTheNoticeForEachDevice(t *testing.T) {
 	if len(f.delivered) != 1 || len(f.retry) != 0 || len(f.marks) != 2 {
 		t.Fatalf("delivered %v retry %v marks %v", f.delivered, f.retry, f.marks)
 	}
+}
+
+func TestPushWithoutDevicesSettlesOnlyDueRowsWithoutReadingHistory(t *testing.T) {
+	f := &fakeSend{rows: []OutboxRow{
+		row(1, userA, passOne, KindBatteryLow, "Hilltop", 3400),
+		row(2, userB, passOne, KindRebooted, "Ridge", 1),
+	}}
+	f.rows[1].PushDue = false
+	p := &fakePush{}
+	if err := pushSender(f, p).Run(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.settled.PushDone) != 1 || f.settled.PushDone[0] != 1 || len(f.retry) != 0 {
+		t.Fatalf("unexpected settlement: %+v", f.settled)
+	}
+	if f.historyReads != 0 || len(p.calls) != 0 {
+		t.Fatalf("no devices: %d history reads, %d push calls", f.historyReads, len(p.calls))
+	}
+}
+
+func BenchmarkPushWithoutDevices(b *testing.B) {
+	f := &fakeSend{}
+	for i := range sendBatch {
+		f.rows = append(f.rows, row(int64(i+1), userA, passOne, KindBatteryLow, "Hilltop", 3400))
+	}
+	s := pushSender(f, &fakePush{})
+	now := time.Now()
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := s.sendPush(b.Context(), f.rows, now); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.ReportMetric(float64(f.historyReads)/float64(b.N), "history_reads/op")
 }
 
 func TestPushBatchesAtMostMaxPushBatchPerCall(t *testing.T) {

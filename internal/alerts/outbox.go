@@ -327,6 +327,9 @@ func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow, now time.Time) 
 	if err != nil {
 		return nil, err
 	}
+	if len(devices) == 0 {
+		return out, nil
+	}
 	reached, err := s.store.DeliveredDevices(ctx, ids)
 	if err != nil {
 		return nil, err
