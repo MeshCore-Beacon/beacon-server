@@ -50,6 +50,7 @@ func TestNodeActivityMatchesRawPostgres(t *testing.T) {
 		hear([][]byte{{0xa1}, {0xb1}, nil}[rng.IntN(3)], first, at)
 	}
 	hear([]byte{0xa1}, now.Add(-5*time.Hour), now.Add(-10*time.Minute)) // a late repeat of an older packet
+	hear([]byte{0xa1}, now.Add(-30*time.Hour), now.Add(-5*time.Minute)) // retained packet heard by a new observer much later
 	for _, origin := range [][]byte{{0xa1}, {0xb1}} {
 		hear(origin, now.Truncate(time.Microsecond), now.Truncate(time.Microsecond)) // inside even the shortest window
 	}
