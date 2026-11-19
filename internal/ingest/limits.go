@@ -3,7 +3,7 @@
 
 package ingest
 
-// Bounds apply to JSON envelopes, not LoRa payloads. Oversized reports are
-// rejected before queue admission; a neighbor snapshot is accepted whole or not at all.
+// Bounds apply to JSON envelopes, not LoRa payloads. An oversized message is refused before it
+// is queued; a neighbor report keeps its first maxNeighbors entries.
 const maxEnvelopeBytes = 64 << 10
 const maxNeighbors = 256

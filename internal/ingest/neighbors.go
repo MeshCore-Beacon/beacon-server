@@ -43,16 +43,18 @@ func (w *Worker) handleNeighbors(ctx context.Context, iata, pubkeyHex string, ra
 		return
 	}
 
-	if len(report.Neighbors) > maxNeighbors || len(report.Self.Scopes) > 256 {
-		metrics.IngestRejected.WithLabelValues("neighbor_shape").Inc()
-		return
+	// Entries past the cap or without a full key are skipped; the rest of the report still counts.
+	skipped := 0
+	if len(report.Neighbors) > maxNeighbors {
+		skipped = len(report.Neighbors) - maxNeighbors
+		report.Neighbors = report.Neighbors[:maxNeighbors]
 	}
-	for _, n := range report.Neighbors {
-		if len(n.PubKey) != 64 || len(n.Scopes) > 256 || len(n.Status) > 32 {
-			metrics.IngestRejected.WithLabelValues("neighbor_shape").Inc()
-			return
+	defer func() {
+		if skipped > 0 {
+			metrics.IngestRejected.WithLabelValues("neighbor_shape").Add(float64(skipped))
+			w.log.Warn(fmt.Sprintf("skipped malformed neighbor entries from %s", pubkeyHex), "count", skipped)
 		}
-	}
+	}()
 	pubkey, err := hex.DecodeString(pubkeyHex)
 	if err != nil {
 		w.log.Warn(fmt.Sprintf("invalid pubkey hex in neighbors from %s", pubkeyHex), "error", err)
@@ -87,8 +89,8 @@ func (w *Worker) handleNeighbors(ctx context.Context, iata, pubkeyHex string, ra
 
 	for _, n := range report.Neighbors {
 		neighborPubkey, err := hex.DecodeString(n.PubKey)
-		if err != nil {
-			w.log.Warn(fmt.Sprintf("invalid neighbor pubkey hex %q from %s", n.PubKey, pubkeyHex), "error", err)
+		if err != nil || len(neighborPubkey) != 32 {
+			skipped++
 			continue
 		}
 		neighborNodeID, err := w.db.GetNodeByPubkey(ctx, neighborPubkey)
