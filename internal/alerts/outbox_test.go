@@ -599,6 +599,48 @@ func TestPushRateLimitHoldsWithoutAnAttempt(t *testing.T) {
 	}
 }
 
+func TestPushWaitStartsAtRelayReply(t *testing.T) {
+	start := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	reply := start.Add(90 * time.Second)
+	for _, tc := range []struct {
+		name string
+		item PushResult
+		err  error
+		hold bool
+		wait time.Duration
+	}{
+		{"item limited", PushResult{Status: PushLimited, RetryAfter: 30 * time.Second}, nil, true, 30 * time.Second},
+		{"item fallback", PushResult{Status: PushLimited}, nil, true, defaultLimitWait},
+		{"item failed", PushResult{Status: PushRetry, RetryAfter: time.Minute}, nil, false, time.Minute},
+		{"batch limited", PushResult{}, &PushError{Status: 429, RetryAfter: time.Minute}, true, time.Minute},
+		{"batch fallback", PushResult{}, &PushError{Status: 429}, true, defaultLimitWait},
+		{"batch failed", PushResult{}, &PushError{Status: 503, RetryAfter: 20 * time.Second}, false, 20 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeSend{rows: []OutboxRow{row(1, userA, passOne, KindGoneQuiet, "Hilltop", 30)},
+				devices: map[uuid.UUID][]Device{userA: {dev("android", "h_fixture")}}}
+			p := &fakePush{answer: map[string]PushResult{"h_fixture": tc.item}, callErr: tc.err}
+			s := pushSender(f, p)
+			s.now = func() time.Time {
+				if len(p.calls) == 0 {
+					return start
+				}
+				return reply
+			}
+			if err := s.Run(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			got := f.settled.PushRetry
+			if tc.hold {
+				got = f.settled.PushHold
+			}
+			if len(got) != 1 || !got[0].NotBefore.Equal(reply.Add(tc.wait)) {
+				t.Fatalf("settlement %v, want deadline %v", got, reply.Add(tc.wait))
+			}
+		})
+	}
+}
+
 // A whole call refused with 429 holds every notice still to send, with no attempt counted, and stops.
 func TestPushWholeCallRateLimitHoldsEverything(t *testing.T) {
 	now := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)

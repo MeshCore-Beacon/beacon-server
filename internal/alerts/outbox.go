@@ -406,6 +406,8 @@ func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow, now time.Time) 
 			msgs[j] = it.msg
 		}
 		res, err := s.push.Send(ctx, msgs)
+		// Retry-After starts at the relay's reply, even when mail or earlier batches took time.
+		receivedAt := s.now()
 		if err != nil {
 			var pe *PushError
 			var hold time.Time
@@ -413,11 +415,11 @@ func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow, now time.Time) 
 			if errors.As(err, &pe) {
 				answered = pe.Status != 0
 				if pe.RetryAfter > 0 {
-					hold = now.Add(pe.RetryAfter)
+					hold = receivedAt.Add(pe.RetryAfter)
 				}
 				if pe.Limited() {
 					if hold.IsZero() {
-						hold = now.Add(defaultLimitWait)
+						hold = receivedAt.Add(defaultLimitWait)
 					}
 					slog.Warn("push server rate limited this server: alert push notifications wait", "component", "alerts", "until", hold)
 					for _, it := range batch {
@@ -464,7 +466,7 @@ func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow, now time.Time) 
 				if wait <= 0 {
 					wait = defaultLimitWait
 				}
-				limit(it.row, now.Add(wait))
+				limit(it.row, receivedAt.Add(wait))
 			case PushGone:
 				if !gone[it.device.Token] {
 					gone[it.device.Token] = true
@@ -475,7 +477,7 @@ func (s *Sender) sendPush(ctx context.Context, rows []OutboxRow, now time.Time) 
 			default:
 				var hold time.Time
 				if res[j].RetryAfter > 0 {
-					hold = now.Add(res[j].RetryAfter)
+					hold = receivedAt.Add(res[j].RetryAfter)
 				}
 				fail(it.row, hold)
 			}
