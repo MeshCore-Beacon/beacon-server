@@ -243,7 +243,8 @@ type Querier interface {
 	// adverts as (sender, forwarder) but traces as (receiver, sender). Callers normalise.
 	GetNeighborLinks(ctx context.Context, arg GetNeighborLinksParams) ([]GetNeighborLinksRow, error)
 	// Hours before @tail_start come from the rollup; later ones aren't rolled yet and read raw rows, found through
-	// the node's recent packets, including older packets heard again in the raw tail.
+	// the node's packets first heard in [@packet_from, @packet_until) and through its older packets heard again
+	// since @late_from. Each branch reads one range of an (origin_pubkey, time) index, and no packet is in both.
 	GetNodeActivityHourly(ctx context.Context, arg GetNodeActivityHourlyParams) ([]GetNodeActivityHourlyRow, error)
 	GetNodeByID(ctx context.Context, id uuid.UUID) (GetNodeByIDRow, error)
 	GetNodeByPubkey(ctx context.Context, publicKey []byte) (uuid.UUID, error)

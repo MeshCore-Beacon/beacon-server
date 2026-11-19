@@ -113,6 +113,7 @@ statements:
   GetPathStats: {sqlc: GetPathStats, plan: custom}
   GetStatsSeries: {sqlc: GetStatsSeries, group: stats_adverts, plan: custom}
   GetObserverComparison: {sqlc: GetObserverComparison, plan: custom}
+  GetNodeActivityHourly: {sqlc: GetNodeActivityHourly, plan: custom}
   ListTraceTags: {sqlc: ListTraceTags, group: stats_adverts, plan: custom}
   # One observer's adverts and telemetry pages.
   ListObserverAdverts: {sqlc: ListObserverAdverts, group: stats_adverts, plan: cached, admission: observer_page}
@@ -277,6 +278,20 @@ resolvers:
   cmp_busy1_site: "SELECT iata FROM packet_observations WHERE id > (SELECT max(id) FROM packet_observations) - 200000 AND observer_id = (SELECT observer_id FROM packet_observations WHERE id > (SELECT max(id) FROM packet_observations) - 200000 GROUP BY 1 ORDER BY count(*) DESC, observer_id LIMIT 1) ORDER BY id DESC LIMIT 1"
   cmp_unknown: "SELECT md5('observer comparison: no such observer')::uuid WHERE NOT EXISTS (SELECT 1 FROM observers WHERE id = md5('observer comparison: no such observer')::uuid)"
   cmp_until: "SELECT max(heard_at) FROM packet_observations"
+  # Node activity: the busiest and the quietest origin among the newest packets, and the windows the store derives
+  # from now (na_until): the raw tail from the last rolled hour, or the last 24 hours when nothing is rolled.
+  na_busy: "SELECT origin_pubkey FROM (SELECT origin_pubkey FROM packets WHERE origin_pubkey IS NOT NULL ORDER BY last_heard_at DESC LIMIT 20000) r GROUP BY 1 ORDER BY count(*) DESC, origin_pubkey LIMIT 1"
+  na_quiet: "SELECT origin_pubkey FROM (SELECT origin_pubkey FROM packets WHERE origin_pubkey IS NOT NULL ORDER BY last_heard_at DESC LIMIT 20000) r GROUP BY 1 ORDER BY count(*), origin_pubkey LIMIT 1"
+  na_until: "SELECT max(last_heard_at) FROM packets"
+  na_puntil: "SELECT max(last_heard_at) + interval '30 minutes' FROM packets"
+  na_since_1d: "SELECT date_trunc('hour', max(last_heard_at) - interval '23 hours', 'UTC') FROM packets"
+  na_since_3d: "SELECT date_trunc('hour', max(last_heard_at) - interval '71 hours', 'UTC') FROM packets"
+  na_tail: "SELECT date_trunc('hour', max(last_heard_at) - interval '95 minutes', 'UTC') FROM packets"
+  na_tail_pfrom: "SELECT date_trunc('hour', max(last_heard_at) - interval '95 minutes', 'UTC') - interval '6 hours' FROM packets"
+  na_tail_lfrom: "SELECT date_trunc('hour', max(last_heard_at) - interval '95 minutes', 'UTC') - interval '30 minutes' FROM packets"
+  na_unrolled: "SELECT max(last_heard_at) - interval '24 hours' FROM packets"
+  na_unrolled_pfrom: "SELECT max(last_heard_at) - interval '30 hours' FROM packets"
+  na_unrolled_lfrom: "SELECT max(last_heard_at) - interval '24 hours 30 minutes' FROM packets"
   cmp_since_1d: "SELECT max(heard_at) - interval '1 day' FROM packet_observations"
   cmp_since_7d: "SELECT max(heard_at) - interval '7 days' FROM packet_observations"
   # The adverts and telemetry roles are picked among the newest 5,000,000 observation ids (200,000 telemetry ids, about
@@ -2792,6 +2807,55 @@ entries:
       budget: {buffers: 520, planning_ms: 10}
     note: "measured: 3 / 3 B (custom / generic); budget: gate <= 10 B/row + 10"
 
+  # Node activity: the raw tail reads the node's packets from two ranges, those first heard since six hours before
+  # the tail through idx_packets_origin and older ones heard again since through idx_packets_origin_last_heard, with
+  # one idx_observations_packet probe per packet; never all of the node's packets, never the tail of every node.
+  # No budgets: not yet measured on the local copy.
+  - id: nodeactivity.busy_24h
+    stmt: GetNodeActivityHourly
+    shape: "the busiest origin, 24 h, hours rolled to 95 minutes ago"
+    params: [{r: na_busy}, {r: na_since_1d}, {r: na_until}, {r: na_tail}, {r: na_tail_pfrom}, {r: na_puntil}, {r: na_tail_lfrom}]
+    expect:
+      driver: [{relation: packets, alias: p, index: idx_packets_origin, nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["origin_pubkey =", "first_heard_at >="]},
+               {relation: packets, alias: lp, index: idx_packets_origin_last_heard, nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["origin_pubkey =", "last_heard_at >="]},
+               {relation: packet_observations, alias: po, index: idx_observations_packet, nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["packet_hash ="]},
+               {relation: packet_observations, alias: lo, index: idx_observations_packet, nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["packet_hash ="]}]
+  - id: nodeactivity.busy_72h
+    stmt: GetNodeActivityHourly
+    shape: "the busiest origin, 72 h, hours rolled to 95 minutes ago"
+    params: [{r: na_busy}, {r: na_since_3d}, {r: na_until}, {r: na_tail}, {r: na_tail_pfrom}, {r: na_puntil}, {r: na_tail_lfrom}]
+    expect:
+      driver: [{relation: packets, alias: p, index: idx_packets_origin, nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["origin_pubkey =", "first_heard_at >="]},
+               {relation: packets, alias: lp, index: idx_packets_origin_last_heard, nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["origin_pubkey =", "last_heard_at >="]},
+               {relation: packet_observations, alias: po, index: idx_observations_packet, nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["packet_hash ="]},
+               {relation: packet_observations, alias: lo, index: idx_observations_packet, nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["packet_hash ="]}]
+  - id: nodeactivity.busy_24h_unrolled
+    stmt: GetNodeActivityHourly
+    shape: "the busiest origin, 24 h, nothing rolled: a 24 h raw tail"
+    params: [{r: na_busy}, {r: na_since_1d}, {r: na_until}, {r: na_unrolled}, {r: na_unrolled_pfrom}, {r: na_puntil}, {r: na_unrolled_lfrom}]
+    expect:
+      driver: [{relation: packets, alias: p, index: idx_packets_origin, nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["origin_pubkey =", "first_heard_at >="]},
+               {relation: packets, alias: lp, index: idx_packets_origin_last_heard, nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["origin_pubkey =", "last_heard_at >="]},
+               {relation: packet_observations, alias: po, index: idx_observations_packet, nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["packet_hash ="]},
+               {relation: packet_observations, alias: lo, index: idx_observations_packet, nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["packet_hash ="]}]
+  - id: nodeactivity.quiet_24h
+    stmt: GetNodeActivityHourly
+    shape: "the quietest origin, 24 h, hours rolled to 95 minutes ago"
+    params: [{r: na_quiet}, {r: na_since_1d}, {r: na_until}, {r: na_tail}, {r: na_tail_pfrom}, {r: na_puntil}, {r: na_tail_lfrom}]
+    expect:
+      driver: [{relation: packets, alias: p, index: idx_packets_origin, nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["origin_pubkey =", "first_heard_at >="]},
+               {relation: packets, alias: lp, index: idx_packets_origin_last_heard, nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["origin_pubkey =", "last_heard_at >="]},
+               {relation: packet_observations, alias: po, index: idx_observations_packet, nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["packet_hash ="]},
+               {relation: packet_observations, alias: lo, index: idx_observations_packet, nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["packet_hash ="]}]
+  - id: nodeactivity.quiet_72h
+    stmt: GetNodeActivityHourly
+    shape: "the quietest origin, 72 h, hours rolled to 95 minutes ago"
+    params: [{r: na_quiet}, {r: na_since_3d}, {r: na_until}, {r: na_tail}, {r: na_tail_pfrom}, {r: na_puntil}, {r: na_tail_lfrom}]
+    expect:
+      driver: [{relation: packets, alias: p, index: idx_packets_origin, nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["origin_pubkey =", "first_heard_at >="]},
+               {relation: packets, alias: lp, index: idx_packets_origin_last_heard, nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["origin_pubkey =", "last_heard_at >="]},
+               {relation: packet_observations, alias: po, index: idx_observations_packet, nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["packet_hash ="]},
+               {relation: packet_observations, alias: lo, index: idx_observations_packet, nodes: ["Index Scan", "Bitmap Heap Scan"], index_cond: ["packet_hash ="]}]
   # Observer comparison: each observer's receptions in the window from idx_observations_observer, then one packets_pkey
   # probe per heard packet; never a walk of the window through idx_observations_heard, never a scan of all packets.
   - id: obscmp.busy_24h_all

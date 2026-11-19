@@ -26,7 +26,13 @@ func TestNodeActivityMatchesRawPostgres(t *testing.T) {
   ('00000000-0000-0000-0000-0000000000b1','\xb1',2,'b'), ('00000000-0000-0000-0000-0000000000c1','\xc1',2,'quiet')`); err != nil {
 		t.Fatal(err)
 	}
-	now := time.Now().UTC()
+	// The store reads the clock once, here: at is its now, and the newest rows are heard a millisecond before it,
+	// in the same hour, so a run that crosses an hour boundary sees the same windows.
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	if at.Sub(at.Truncate(time.Hour)) < time.Millisecond {
+		at = at.Add(2 * time.Millisecond)
+	}
+	now := at.Add(-time.Millisecond)
 	rng := rand.New(rand.NewPCG(3, 7))
 	hear := func(origin []byte, first, heard time.Time) {
 		t.Helper()
@@ -103,7 +109,7 @@ func TestNodeActivityMatchesRawPostgres(t *testing.T) {
 	}
 	check := func(label string, node uuid.UUID, pubkey []byte, window time.Duration, covered func(a *api.NodeActivity) time.Time) *api.NodeActivity {
 		t.Helper()
-		a, err := store.GetNodeActivity(ctx, node, window)
+		a, err := store.nodeActivityAt(ctx, node, window, at)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -129,8 +135,8 @@ func TestNodeActivityMatchesRawPostgres(t *testing.T) {
 
 	// Roll every eligible hour; the rest stays a raw tail.
 	if _, err := tx.Exec(ctx, `INSERT INTO analytics_rollup_hours (hour, status)
-		SELECT h, 'missing' FROM generate_series(date_trunc('hour', now() - INTERVAL '41 hours', 'UTC'),
-		  date_trunc('hour', now() - INTERVAL '95 minutes', 'UTC'), INTERVAL '1 hour') h`); err != nil {
+		SELECT h, 'missing' FROM generate_series(date_trunc('hour', $1::timestamptz - INTERVAL '41 hours', 'UTC'),
+		  date_trunc('hour', $1::timestamptz - INTERVAL '95 minutes', 'UTC'), INTERVAL '1 hour') h`, at); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := tx.Query(ctx, "SELECT hour FROM analytics_rollup_hours ORDER BY hour")
@@ -175,7 +181,7 @@ func TestNodeActivityMatchesRawPostgres(t *testing.T) {
 		SELECT count(*) FILTER (WHERE heard_at >= $1) FROM gone`, rolledUntil).Scan(&tailGone); err != nil {
 		t.Fatal(err)
 	}
-	rolledOnly, err := store.GetNodeActivity(ctx, nodeA, 48*time.Hour)
+	rolledOnly, err := store.nodeActivityAt(ctx, nodeA, 48*time.Hour, at)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,11 +189,11 @@ func TestNodeActivityMatchesRawPostgres(t *testing.T) {
 		t.Fatalf("after deleting the raw rows, %d in the tail: %d observations, had %d", tailGone, rolledOnly.Summary.Observations, before)
 	}
 
-	quiet, err := store.GetNodeActivity(ctx, uuid.MustParse("00000000-0000-0000-0000-0000000000c1"), 24*time.Hour)
+	quiet, err := store.nodeActivityAt(ctx, uuid.MustParse("00000000-0000-0000-0000-0000000000c1"), 24*time.Hour, at)
 	if err != nil || quiet.Points == nil || len(quiet.Points) != 0 || quiet.Latest != nil || quiet.Summary != (api.NodeActivitySummary{}) {
 		t.Fatalf("quiet node: %+v, %v", quiet, err)
 	}
-	if _, err := store.GetNodeActivity(ctx, uuid.New(), 24*time.Hour); !errors.Is(err, pgx.ErrNoRows) {
+	if _, err := store.nodeActivityAt(ctx, uuid.New(), 24*time.Hour, at); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("unknown node: %v, want pgx.ErrNoRows", err)
 	}
 }

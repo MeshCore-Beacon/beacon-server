@@ -323,14 +323,22 @@ func abs(n int64) int64 {
 // 30 minutes either side of the server time a packet is stored at, and the rest allows for late repeats.
 const nodeActivityPacketLead = 6 * time.Hour
 
+// nodeActivityLateSlack is how far a hearing's heard_at can run ahead of the server time its packet's last_heard_at
+// was set from: an older packet heard in the raw tail was last heard no earlier than the tail's start less this.
+const nodeActivityLateSlack = 30 * time.Minute
+
 // GetNodeActivity returns hourly heard-activity for the packets a node originated: the hourly rollup plus raw
 // rows for the unrolled tail. Range is left empty for the handler to fill.
 func (s *Store) GetNodeActivity(ctx context.Context, nodeID uuid.UUID, window time.Duration) (*api.NodeActivity, error) {
+	return s.nodeActivityAt(ctx, nodeID, window, time.Now().UTC())
+}
+
+// nodeActivityAt is GetNodeActivity as of now, which tests hold still.
+func (s *Store) nodeActivityAt(ctx context.Context, nodeID uuid.UUID, window time.Duration, now time.Time) (*api.NodeActivity, error) {
 	pubkey, err := s.q.GetNodePublicKey(ctx, nodeID)
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now().UTC()
 	until := now
 	since := until.Add(-window)
 	if !since.Equal(since.Truncate(time.Hour)) {
@@ -361,6 +369,7 @@ func (s *Store) GetNodeActivity(ctx context.Context, nodeID uuid.UUID, window ti
 		Until:        ts(until),
 		TailStart:    ts(tailStart),
 		PacketFrom:   ts(rawFrom.Add(-nodeActivityPacketLead)),
+		LateFrom:     ts(rawFrom.Add(-nodeActivityLateSlack)),
 		PacketUntil:  ts(until.Add(30 * time.Minute)),
 	})
 	if err != nil {

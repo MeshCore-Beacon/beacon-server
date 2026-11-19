@@ -790,10 +790,18 @@ WITH src AS (
   CROSS JOIN LATERAL (SELECT CASE WHEN NOT (COALESCE(po.rssi, 0) = 0 AND COALESCE(po.snr, 0) = 0) THEN po.snr END AS snr,
                              CASE WHEN NOT (COALESCE(po.rssi, 0) = 0 AND COALESCE(po.snr, 0) = 0) THEN po.rssi END AS rssi) s
   WHERE p.origin_pubkey = $1::bytea
-    AND (p.first_heard_at >= $5::timestamptz
-         OR p.last_heard_at >= GREATEST($2::timestamptz, $4::timestamptz))
-    AND p.first_heard_at < $6::timestamptz
+    AND p.first_heard_at >= $5::timestamptz AND p.first_heard_at < $6::timestamptz
     AND po.heard_at >= GREATEST($2::timestamptz, $4::timestamptz) AND po.heard_at < $3::timestamptz
+  UNION ALL
+  SELECT lo.heard_at, 1::bigint, ls.snr::double precision, (ls.snr IS NOT NULL)::int::bigint,
+         ls.rssi::bigint, (ls.rssi IS NOT NULL)::int::bigint, lo.hop_count::bigint, 1::bigint
+  FROM packets lp
+  JOIN packet_observations lo ON lo.packet_hash = lp.packet_hash
+  CROSS JOIN LATERAL (SELECT CASE WHEN NOT (COALESCE(lo.rssi, 0) = 0 AND COALESCE(lo.snr, 0) = 0) THEN lo.snr END AS snr,
+                             CASE WHEN NOT (COALESCE(lo.rssi, 0) = 0 AND COALESCE(lo.snr, 0) = 0) THEN lo.rssi END AS rssi) ls
+  WHERE lp.origin_pubkey = $1::bytea
+    AND lp.last_heard_at >= $7::timestamptz AND lp.first_heard_at < $5::timestamptz
+    AND lo.heard_at >= GREATEST($2::timestamptz, $4::timestamptz) AND lo.heard_at < $3::timestamptz
 )
 SELECT
   date_trunc('hour', t, 'UTC')::timestamptz AS bucket,
@@ -816,6 +824,7 @@ type GetNodeActivityHourlyParams struct {
 	TailStart    pgtype.Timestamptz `json:"tail_start"`
 	PacketFrom   pgtype.Timestamptz `json:"packet_from"`
 	PacketUntil  pgtype.Timestamptz `json:"packet_until"`
+	LateFrom     pgtype.Timestamptz `json:"late_from"`
 }
 
 type GetNodeActivityHourlyRow struct {
@@ -830,7 +839,8 @@ type GetNodeActivityHourlyRow struct {
 }
 
 // Hours before @tail_start come from the rollup; later ones aren't rolled yet and read raw rows, found through
-// the node's recent packets, including older packets heard again in the raw tail.
+// the node's packets first heard in [@packet_from, @packet_until) and through its older packets heard again
+// since @late_from. Each branch reads one range of an (origin_pubkey, time) index, and no packet is in both.
 func (q *Queries) GetNodeActivityHourly(ctx context.Context, arg GetNodeActivityHourlyParams) ([]GetNodeActivityHourlyRow, error) {
 	rows, err := q.db.Query(ctx, getNodeActivityHourly,
 		arg.OriginPubkey,
@@ -839,6 +849,7 @@ func (q *Queries) GetNodeActivityHourly(ctx context.Context, arg GetNodeActivity
 		arg.TailStart,
 		arg.PacketFrom,
 		arg.PacketUntil,
+		arg.LateFrom,
 	)
 	if err != nil {
 		return nil, err
