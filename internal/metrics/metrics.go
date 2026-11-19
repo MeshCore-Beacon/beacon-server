@@ -79,6 +79,12 @@ var (
 		Help: "Messages dropped because the ingest queue was full.",
 	})
 
+	// IngestRejected counts input refused before it is processed.
+	IngestRejected = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "beacon_ingest_rejected_total",
+		Help: "Input rejected before processing, by reason (envelope_size, neighbor_shape).",
+	}, []string{"reason"})
+
 	// StreamDropped counts live events dropped before reaching a client.
 	StreamDropped = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "beacon_stream_dropped_total",
@@ -317,7 +323,7 @@ func init() {
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		GuardWouldRefuse, GuardRefused, GuardDB, DBTime, HTTPRequest, PoolAcquire,
-		IngestQueueDepth, IngestDropped, StreamDropped, JobDuration, JobRows, IndexBytes, IndexBloat,
+		IngestQueueDepth, IngestDropped, IngestRejected, StreamDropped, JobDuration, JobRows, IndexBytes, IndexBloat,
 		PlanguardFailures, setGauge{PlanguardLastRun, &planguardEnabled}, pgActivity, sequences, APIUnavailable, ReadModelRepaired, ReadModelTrusted, watermarks,
 		PacketSitesFrontLive, PacketSitesSweepPlanOK, PacketSitesBytes, sweepAge,
 	)
