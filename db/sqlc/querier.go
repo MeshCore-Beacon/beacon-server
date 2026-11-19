@@ -743,6 +743,8 @@ type Querier interface {
 	ReadUserAtlas(ctx context.Context, userID uuid.UUID) ([]ReadUserAtlasRow, error)
 	// Delete node_neighbors where the neighbor has departed from node_short_ids
 	// for that IATA, or where its prefix_4 is now ambiguous.
+	// Check each distinct regional neighbor once. Keep the one-row lookup correlated:
+	// a flattened anti-join can rescan the whole identity catalogue for each edge.
 	ReconfirmNeighbors(ctx context.Context) error
 	// The next batch_size routes after the cursor in pkey order: deletes those with a departed hop
 	// node or a hop prefix matching >1 node in that IATA (length-aware, reconfirm_amb). Writes no stamp.

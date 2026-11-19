@@ -2610,16 +2610,25 @@ OFFSET @offset_rows LIMIT 1;
 -- name: ReconfirmNeighbors :exec
 -- Delete node_neighbors where the neighbor has departed from node_short_ids
 -- for that IATA, or where its prefix_4 is now ambiguous.
-DELETE FROM node_neighbors nn
-WHERE NOT EXISTS (
-    SELECT 1 FROM node_short_ids ns
-    WHERE ns.node_id = nn.neighbor_id AND ns.iata = nn.iata
-      AND NOT EXISTS (
-          SELECT 1 FROM node_short_ids other
-          WHERE other.iata = ns.iata AND other.prefix_4 = ns.prefix_4
-            AND other.node_id <> ns.node_id
-      )
-);
+-- Check each distinct regional neighbor once. Keep the one-row lookup correlated:
+-- a flattened anti-join can rescan the whole identity catalogue for each edge.
+WITH invalid AS MATERIALIZED (
+    SELECT e.iata, e.neighbor_id
+    FROM (SELECT DISTINCT iata, neighbor_id FROM node_neighbors) e
+    LEFT JOIN LATERAL (
+        SELECT s.node_id FROM node_short_ids s
+        WHERE s.iata = e.iata AND s.node_id = e.neighbor_id
+          AND NOT EXISTS (
+              SELECT 1 FROM node_short_ids peer
+              WHERE peer.iata = s.iata AND peer.prefix_4 = s.prefix_4
+                AND peer.node_id <> s.node_id
+          )
+        LIMIT 1
+    ) valid ON true
+    WHERE valid.node_id IS NULL
+)
+DELETE FROM node_neighbors nn USING invalid
+WHERE nn.iata = invalid.iata AND nn.neighbor_id = invalid.neighbor_id;
 
 -- name: CreateAccount :one
 INSERT INTO accounts (name) VALUES (sqlc.arg(name))
