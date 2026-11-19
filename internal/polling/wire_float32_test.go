@@ -34,3 +34,17 @@ func TestParseReadingsDropsSNRThatOverflowsStoredFloat32(t *testing.T) {
 		}
 	}
 }
+
+func TestFiniteKeepsTheLargestFloat32(t *testing.T) {
+	// 3.4028235e38 is how the largest float32 prints; as a float64 it is a hair above MaxFloat32.
+	for _, v := range []float64{3.4028235e38, -3.4028235e38, 12.5} {
+		if finite(&v) == nil {
+			t.Errorf("%g was dropped", v)
+		}
+	}
+	for _, v := range []float64{1e100, -1e39} {
+		if finite(&v) != nil {
+			t.Errorf("%g was kept", v)
+		}
+	}
+}

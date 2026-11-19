@@ -382,7 +382,7 @@ func parseReading(rw readingWire, ver int, obs []byte, client string) (Reading, 
 
 func finite(f *float64) *float64 {
 	// Reading floats are stored as PostgreSQL real; float64-finite is not enough.
-	if f == nil || math.IsNaN(*f) || math.Abs(*f) > math.MaxFloat32 {
+	if f == nil || math.IsNaN(*f) || math.IsInf(float64(float32(*f)), 0) {
 		return nil
 	}
 	return f
