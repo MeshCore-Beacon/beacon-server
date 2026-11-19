@@ -79,6 +79,12 @@ var (
 		Help: "Messages dropped because the ingest queue was full.",
 	})
 
+	// StreamDropped counts live events dropped before reaching a client.
+	StreamDropped = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "beacon_stream_dropped_total",
+		Help: "Live events dropped, by queue (global, client, repeat).",
+	}, []string{"queue"})
+
 	// JobDuration is the duration of each background job run.
 	JobDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "beacon_job_duration_seconds",
@@ -311,7 +317,7 @@ func init() {
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		GuardWouldRefuse, GuardRefused, GuardDB, DBTime, HTTPRequest, PoolAcquire,
-		IngestQueueDepth, IngestDropped, JobDuration, JobRows, IndexBytes, IndexBloat,
+		IngestQueueDepth, IngestDropped, StreamDropped, JobDuration, JobRows, IndexBytes, IndexBloat,
 		PlanguardFailures, setGauge{PlanguardLastRun, &planguardEnabled}, pgActivity, sequences, APIUnavailable, ReadModelRepaired, ReadModelTrusted, watermarks,
 		PacketSitesFrontLive, PacketSitesSweepPlanOK, PacketSitesBytes, sweepAge,
 	)
