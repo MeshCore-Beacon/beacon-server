@@ -47,7 +47,7 @@ func getPathStats(reader api.Reader) http.HandlerFunc {
 			}
 			iatas = append(iatas, regionIATAs...)
 			if len(iatas) == 0 {
-				iatas = []string{""}
+				iatas = []string{emptyRegionIATA}
 			}
 		}
 		stats, err := reader.GetPathStats(ctx, since, until, iatas)

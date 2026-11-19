@@ -44,7 +44,7 @@ func TestPathsFiltersErrorsAndCancellation(t *testing.T) {
 		status      int
 	}{
 		{"global", "", nil, nil, 200}, {"IATAs", "&iatas=yvr,yyj", []string{"YVR", "YYJ"}, nil, 200},
-		{"region", "&region=west", []string{"YVR"}, nil, 200}, {"empty region", "&region=empty", []string{""}, nil, 200},
+		{"region", "&region=west", []string{"YVR"}, nil, 200}, {"empty region", "&region=empty", []string{emptyRegionIATA}, nil, 200},
 		{"missing region", "&region=missing", nil, nil, 400}, {"timeout", "", nil, context.DeadlineExceeded, 503},
 		{"database error", "", nil, errors.New("private detail"), 500},
 	} {

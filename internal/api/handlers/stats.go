@@ -91,7 +91,7 @@ func getStatsOverview(reader api.Reader) http.HandlerFunc {
 			}
 			iatas = append(iatas, regionIATAs...)
 			if len(iatas) == 0 {
-				iatas = []string{""} // an empty region matches nothing, not everything
+				iatas = []string{emptyRegionIATA} // an empty region matches nothing, not everything
 			}
 		}
 		overview, err := reader.GetStatsOverview(r.Context(), iatas)
@@ -128,7 +128,7 @@ func getStatsObservations(reader api.Reader) http.HandlerFunc {
 			}
 			iatas = append(iatas, regionIATAs...)
 			if len(iatas) == 0 {
-				iatas = []string{""} // an empty region matches nothing, not everything
+				iatas = []string{emptyRegionIATA} // an empty region matches nothing, not everything
 			}
 		}
 		since, err := parseSince(r)
@@ -169,7 +169,7 @@ func getStatsPayloadBreakdown(reader api.Reader) http.HandlerFunc {
 			}
 			iatas = append(iatas, regionIATAs...)
 			if len(iatas) == 0 {
-				iatas = []string{""} // an empty region matches nothing, not everything
+				iatas = []string{emptyRegionIATA} // an empty region matches nothing, not everything
 			}
 		}
 		since, err := parseSince(r)
@@ -212,7 +212,7 @@ func getStatsTopNodes(reader api.Reader) http.HandlerFunc {
 			}
 			iatas = append(iatas, regionIATAs...)
 			if len(iatas) == 0 {
-				iatas = []string{""} // an empty region matches nothing, not everything
+				iatas = []string{emptyRegionIATA} // an empty region matches nothing, not everything
 			}
 		}
 		limit, err := parseLimit(r, 10)
@@ -259,7 +259,7 @@ func getStatsTopObservers(reader api.Reader) http.HandlerFunc {
 			}
 			iatas = append(iatas, regionIATAs...)
 			if len(iatas) == 0 {
-				iatas = []string{""} // an empty region matches nothing, not everything
+				iatas = []string{emptyRegionIATA} // an empty region matches nothing, not everything
 			}
 		}
 		since, err := parseSince(r)
@@ -309,7 +309,7 @@ func getStatsTopAdvertisers(reader api.Reader) http.HandlerFunc {
 			}
 			iatas = append(iatas, regionIATAs...)
 			if len(iatas) == 0 {
-				iatas = []string{""} // an empty region matches nothing, not everything
+				iatas = []string{emptyRegionIATA} // an empty region matches nothing, not everything
 			}
 		}
 		since, err := parseSince(r)
@@ -360,7 +360,7 @@ func getStatsClockDrift(reader api.Reader) http.HandlerFunc {
 			}
 			iatas = append(iatas, regionIATAs...)
 			if len(iatas) == 0 {
-				iatas = []string{""} // an empty region matches nothing, not everything
+				iatas = []string{emptyRegionIATA} // an empty region matches nothing, not everything
 			}
 		}
 		limit, err := parseLimit(r, 10)
@@ -402,7 +402,7 @@ func getStatsTopTalkers(reader api.Reader) http.HandlerFunc {
 			}
 			iatas = append(iatas, regionIATAs...)
 			if len(iatas) == 0 {
-				iatas = []string{""} // an empty region matches nothing, not everything
+				iatas = []string{emptyRegionIATA} // an empty region matches nothing, not everything
 			}
 		}
 		since, err := parseSince(r)
@@ -449,7 +449,7 @@ func getStatsRadioPresets(reader api.Reader) http.HandlerFunc {
 			}
 			iatas = append(iatas, regionIATAs...)
 			if len(iatas) == 0 {
-				iatas = []string{""} // an empty region matches nothing, not everything
+				iatas = []string{emptyRegionIATA} // an empty region matches nothing, not everything
 			}
 		}
 		presets, err := reader.GetRadioPresets(r.Context(), preset, iatas)
@@ -536,7 +536,7 @@ func getStatsNodeTypes(reader api.Reader) http.HandlerFunc {
 			}
 			iatas = append(iatas, regionIATAs...)
 			if len(iatas) == 0 {
-				iatas = []string{""} // an empty region matches nothing, not everything
+				iatas = []string{emptyRegionIATA} // an empty region matches nothing, not everything
 			}
 		}
 		result, err := reader.GetStatsNodeTypes(r.Context(), iatas)

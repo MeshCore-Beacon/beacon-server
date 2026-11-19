@@ -120,7 +120,7 @@ func listPackets(reader api.Reader) http.HandlerFunc {
 				respondRegionError(w, err)
 				return
 			}
-			iatas = append(iatas, regionIATAs...)
+			iatas = appendRegionIATAs(iatas, regionIATAs)
 		}
 		scopes := parseCSVOrSingle(r, "scopes", "scope")
 		var packets api.PacketPage
@@ -209,7 +209,7 @@ func listPacketsBackfill(reader api.Reader) http.HandlerFunc {
 				respondRegionError(w, err)
 				return
 			}
-			iatas = append(iatas, regionIATAs...)
+			iatas = appendRegionIATAs(iatas, regionIATAs)
 		}
 		scope := r.URL.Query().Get("scope")
 		packets, err := reader.ListPacketsAfterID(r.Context(), afterID, payloadType, routeType, iatas, scope, limit)
