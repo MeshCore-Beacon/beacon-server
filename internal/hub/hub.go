@@ -160,10 +160,8 @@ func scopeMatches(s Scope, e Event) bool {
 
 // Hub is the central event broker.
 type Hub struct {
-	subscribe   chan subscribeMsg
-	unsubscribe chan unsubscribeMsg
-	remove      chan *Client
-	broadcast   chan Event
+	control   chan controlMsg
+	broadcast chan Event
 
 	// observerKeyClients counts registered clients with IncludeObserverKey set.
 	observerKeyClients atomic.Int64
@@ -175,37 +173,26 @@ type Hub struct {
 	sent            *sentPaths
 }
 
-// subscribeMsg carries a client registration, a scope subscription, or a
-// configure request — all three go through this single
-// channel, not separate ones, specifically so that Go's same-channel FIFO
-// guarantee orders them relative to NewClient's registration message. A
-// separate "configure" channel raced against registration: select() has no
-// cross-channel ordering guarantee, so a configure sent immediately after
-// NewClient could be (and empirically was, ~50% of the time) processed by
-// Run() before the registration message, silently no-oping since the client
-// wasn't in the clients map yet.
-type subscribeMsg struct {
+// controlMsg keeps every client operation on one FIFO queue. Separate channels
+// let removal overtake registration, or unsubscribe overtake subscribe, because
+// select has no cross-channel ordering guarantee.
+type controlMsg struct {
 	client         *Client
 	scope          Scope
 	subscriptionID string
 
-	isConfigure bool
-	options     ClientOptions
-}
-
-type unsubscribeMsg struct {
-	client         *Client
-	subscriptionID string
+	isConfigure   bool
+	isUnsubscribe bool
+	isRemove      bool
+	options       ClientOptions
 }
 
 // New creates a Hub. Call Run() in a goroutine before using it.
 func New() *Hub {
 	return &Hub{
-		subscribe:   make(chan subscribeMsg, 64),
-		unsubscribe: make(chan unsubscribeMsg, 64),
-		remove:      make(chan *Client, 64),
-		broadcast:   make(chan Event, 512),
-		sent:        newSentPaths(sentPathsTTL, sentPathsMax),
+		control:   make(chan controlMsg, 64),
+		broadcast: make(chan Event, 512),
+		sent:      newSentPaths(sentPathsTTL, sentPathsMax),
 	}
 }
 
@@ -219,27 +206,27 @@ func (h *Hub) NewClient() *Client {
 	}
 	// We don't add it to the map here; we send it through the channel so
 	// Run() is the only goroutine that touches the client map.
-	h.subscribe <- subscribeMsg{client: c}
+	h.control <- controlMsg{client: c}
 	return c
 }
 
 // AddScope appends a subscription scope to a client. Called by the WS handler
 // when it receives a "subscribe" message from the client.
 func (h *Hub) AddScope(c *Client, id string, s Scope) {
-	h.subscribe <- subscribeMsg{client: c, scope: s, subscriptionID: id}
+	h.control <- controlMsg{client: c, scope: s, subscriptionID: id}
 }
 
 // RemoveScope removes a single subscription by ID. Called by the WS handler
 // when it receives an "unsubscribe" message from the client. Silently ignored
 // if the ID is not found.
 func (h *Hub) RemoveScope(c *Client, id string) {
-	h.unsubscribe <- unsubscribeMsg{client: c, subscriptionID: id}
+	h.control <- controlMsg{client: c, subscriptionID: id, isUnsubscribe: true}
 }
 
 // Configure replaces a client's connection-wide options. Unlike scopes, it is
 // not additive.
 func (h *Hub) Configure(c *Client, opts ClientOptions) {
-	h.subscribe <- subscribeMsg{client: c, isConfigure: true, options: opts}
+	h.control <- controlMsg{client: c, isConfigure: true, options: opts}
 }
 
 // ObserverKeyWanted lets ingest skip the key variants when nobody wants them.
@@ -261,7 +248,7 @@ func (h *Hub) MarkSent(packetHash, observerID, path []byte) bool {
 // Remove deregisters a client and closes its Send channel.
 // Safe to call from any goroutine (e.g. the WS handler's defer).
 func (h *Hub) Remove(c *Client) {
-	h.remove <- c
+	h.control <- controlMsg{client: c, isRemove: true}
 }
 
 // Broadcast enqueues an event for fan-out. Safe to call from any goroutine.
@@ -312,8 +299,25 @@ func (h *Hub) Run() {
 	for {
 		select {
 
-		case msg := <-h.subscribe:
+		case msg := <-h.control:
 			switch {
+			case msg.isRemove:
+				c := msg.client
+				if _, ok := clients[c]; ok {
+					delete(clients, c)
+					if c.IncludeObserverKey {
+						h.observerKeyClients.Add(-1)
+					}
+					if c.IncludeRepeats {
+						h.repeatClients.Add(-1)
+					}
+					close(c.Send)
+					close(c.laggedCH)
+				}
+			case msg.isUnsubscribe:
+				if _, ok := clients[msg.client]; ok {
+					delete(msg.client.subscriptions, msg.subscriptionID)
+				}
 			case msg.subscriptionID == "" && !msg.isConfigure:
 				// Registration with no scope yet (NewClient path).
 				clients[msg.client] = struct{}{}
@@ -343,24 +347,6 @@ func (h *Hub) Run() {
 				if _, ok := clients[msg.client]; ok {
 					msg.client.subscriptions[msg.subscriptionID] = msg.scope
 				}
-			}
-
-		case msg := <-h.unsubscribe:
-			if _, ok := clients[msg.client]; ok {
-				delete(msg.client.subscriptions, msg.subscriptionID)
-			}
-
-		case c := <-h.remove:
-			if _, ok := clients[c]; ok {
-				delete(clients, c)
-				if c.IncludeObserverKey {
-					h.observerKeyClients.Add(-1)
-				}
-				if c.IncludeRepeats {
-					h.repeatClients.Add(-1)
-				}
-				close(c.Send)
-				close(c.laggedCH)
 			}
 
 		case evt := <-h.broadcast:
