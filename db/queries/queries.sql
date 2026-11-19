@@ -1322,14 +1322,19 @@ ON CONFLICT (public_key) DO UPDATE SET
 RETURNING *;
 
 -- name: RecordClockDrift :exec
--- Keeps the drift of the node's last 16 adverts: the new one in, the older ones beyond 15 out.
+-- Keep 16 adverts, including the INSERT's row. Sibling CTEs share a snapshot:
+-- the table scan alone cannot see the new row. A conflict returns no extra row.
 WITH ins AS (
     INSERT INTO node_clock_drifts (node_id, advert_at, drift_seconds) VALUES (@node_id, now(), @drift_seconds)
     ON CONFLICT (node_id, advert_at) DO NOTHING
+    RETURNING advert_at
+), recent AS (
+    SELECT advert_at FROM node_clock_drifts WHERE node_id = @node_id
+    UNION ALL SELECT advert_at FROM ins
 )
 DELETE FROM node_clock_drifts x
 WHERE x.node_id = @node_id
-  AND x.advert_at < (SELECT d.advert_at FROM node_clock_drifts d WHERE d.node_id = @node_id ORDER BY d.advert_at DESC OFFSET 15 LIMIT 1);
+  AND x.advert_at < (SELECT advert_at FROM recent ORDER BY advert_at DESC OFFSET 15 LIMIT 1);
 
 -- name: SetNodeMultibytePaths :exec
 UPDATE nodes SET supports_multibyte_paths = TRUE

@@ -750,7 +750,8 @@ type Querier interface {
 	ReconfirmRoutesBatch(ctx context.Context, arg ReconfirmRoutesBatchParams) (ReconfirmRoutesBatchRow, error)
 	// Key of the last route in a slice that timed out: the caller passes the slice's row count - 1.
 	ReconfirmSliceEnd(ctx context.Context, arg ReconfirmSliceEndParams) (ReconfirmSliceEndRow, error)
-	// Keeps the drift of the node's last 16 adverts: the new one in, the older ones beyond 15 out.
+	// Keep 16 adverts, including the INSERT's row. Sibling CTEs share a snapshot:
+	// the table scan alone cannot see the new row. A conflict returns no extra row.
 	RecordClockDrift(ctx context.Context, arg RecordClockDriftParams) error
 	// Written on every owners answer that lists the target, so it only touches the row when the version changed or the
 	// last write is an hour old.
