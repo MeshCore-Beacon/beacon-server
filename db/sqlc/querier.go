@@ -748,7 +748,7 @@ type Querier interface {
 	// node or a hop prefix matching >1 node in that IATA (length-aware, reconfirm_amb). Writes no stamp.
 	// The DELETE re-checks the newest row version. An empty last_iata means the walk passed the end.
 	ReconfirmRoutesBatch(ctx context.Context, arg ReconfirmRoutesBatchParams) (ReconfirmRoutesBatchRow, error)
-	// Key of the last route in a slice that timed out: the caller passes the slice's row count - 1.
+	// Count the bounded slice and return its last key. A short slice ends the cycle.
 	ReconfirmSliceEnd(ctx context.Context, arg ReconfirmSliceEndParams) (ReconfirmSliceEndRow, error)
 	// Keeps the drift of the node's last 16 adverts: the new one in, the older ones beyond 15 out.
 	RecordClockDrift(ctx context.Context, arg RecordClockDriftParams) error
