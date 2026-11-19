@@ -2619,21 +2619,25 @@ ORDER BY slice.iata DESC, slice.path_key DESC LIMIT 1;
 -- name: ReconfirmNeighbors :exec
 -- Delete node_neighbors where the neighbor has departed from node_short_ids
 -- for that IATA, or where its prefix_4 is now ambiguous.
-DELETE FROM node_neighbors nn
-WHERE NOT EXISTS (
-    SELECT 1 FROM node_short_ids ns
-    WHERE ns.node_id = nn.neighbor_id
-      AND ns.iata = nn.iata
+-- Check each distinct regional neighbor once. Keep the one-row lookup correlated:
+-- a flattened anti-join can rescan the whole identity catalogue for each edge.
+WITH invalid AS MATERIALIZED (
+    SELECT e.iata, e.neighbor_id
+    FROM (SELECT DISTINCT iata, neighbor_id FROM node_neighbors) e
+    LEFT JOIN LATERAL (
+        SELECT s.node_id FROM node_short_ids s
+        WHERE s.iata = e.iata AND s.node_id = e.neighbor_id
+          AND NOT EXISTS (
+              SELECT 1 FROM node_short_ids peer
+              WHERE peer.iata = s.iata AND peer.prefix_4 = s.prefix_4
+                AND peer.node_id <> s.node_id
+          )
+        LIMIT 1
+    ) valid ON true
+    WHERE valid.node_id IS NULL
 )
-OR (
-    SELECT COUNT(*) FROM node_short_ids ns
-    WHERE ns.iata = nn.iata
-      AND ns.prefix_4 = (
-          SELECT prefix_4 FROM node_short_ids
-          WHERE node_id = nn.neighbor_id
-            AND iata = nn.iata
-      )
-) > 1;
+DELETE FROM node_neighbors nn USING invalid
+WHERE nn.iata = invalid.iata AND nn.neighbor_id = invalid.neighbor_id;
 
 -- name: CreateAccount :one
 INSERT INTO accounts (name) VALUES (sqlc.arg(name))
