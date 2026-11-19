@@ -6226,7 +6226,7 @@ const docTemplate = `{
         },
         "/routes/{iata}/{pathKey}/observations": {
             "get": {
-                "description": "Matches the saved IATA, complete path bytes and hash width. Excludes TRACE and unclassified reports; other widths and search-result subsegments are not included. Byte matches do not prove hop identities or delivery. The route and its historical counter can outlive raw evidence. Cursors retain full timestamp precision and pin route/window scope.",
+                "description": "Matches the saved IATA, complete path bytes and hash width. Excludes TRACE and unclassified reports; other widths and search-result subsegments are not included. Byte matches do not prove hop identities or delivery. The route and its historical counter can outlive raw evidence. Cursors retain full timestamp precision and pin the route, the window and the path representation the first page matched.",
                 "produces": [
                     "application/json"
                 ],
@@ -6269,7 +6269,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Opaque precise cursor from nextPageCursor; window is pinned",
+                        "description": "Opaque precise cursor from nextPageCursor; route, window and path are pinned",
                         "name": "pageCursor",
                         "in": "query"
                     },
