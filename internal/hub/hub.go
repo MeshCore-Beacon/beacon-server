@@ -192,6 +192,9 @@ type controlMsg struct {
 	options       ClientOptions
 }
 
+// gapNoticeInterval is the least time between two notices of events lost to a full broadcast queue.
+var gapNoticeInterval = 5 * time.Second
+
 // New creates a Hub. Call Run() in a goroutine before using it.
 func New() *Hub {
 	return &Hub{
@@ -301,6 +304,7 @@ func (h *Hub) Broadcast(e Event) {
 	select {
 	case h.broadcast <- e:
 	default:
+		slog.Warn("hub: broadcast channel full, dropping event", "component", "hub")
 		metrics.StreamDropped.WithLabelValues("global").Inc()
 		h.pendingGap.Add(1)
 		select {
@@ -347,6 +351,25 @@ func (h *Hub) Run() {
 	// broadcast — fine at the scale Beacon targets.
 	clients := make(map[*Client]struct{})
 
+	var lastGap time.Time
+	var gapDue <-chan time.Time
+	// notifyGap tells every subscribed client that the full broadcast queue lost events.
+	notifyGap := func() {
+		dropped := int(h.pendingGap.Swap(0))
+		if dropped == 0 {
+			return
+		}
+		lastGap = time.Now()
+		for c := range clients {
+			if len(c.subscriptions) == 0 {
+				continue
+			}
+			select {
+			case c.laggedCH <- LaggedNotification{DroppedCount: dropped}:
+			default:
+			}
+		}
+	}
 	for {
 		select {
 
@@ -396,13 +419,19 @@ func (h *Hub) Run() {
 			}
 
 		case <-h.gapNotify:
-			dropped := int(h.pendingGap.Swap(0))
-			for c := range clients {
-				select {
-				case c.laggedCH <- LaggedNotification{DroppedCount: dropped}:
-				default:
+			// Each notice makes clients refetch, so a burst of drops gets one now and one more once the interval is up.
+			if wait := gapNoticeInterval - time.Since(lastGap); wait > 0 {
+				if gapDue == nil {
+					gapDue = time.After(wait)
 				}
+				continue
 			}
+			notifyGap()
+
+		case <-gapDue:
+			gapDue = nil
+			notifyGap()
+
 		case evt := <-h.broadcast:
 			for c := range clients {
 				if (evt.Repeat && !c.IncludeRepeats) || !c.matches(evt) {
