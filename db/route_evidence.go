@@ -113,11 +113,11 @@ func (s *Store) GetRouteEvidence(ctx context.Context, iata, key string, query ap
 		if r.PayloadType != nil {
 			payload = *r.PayloadType
 		}
-		snr := r.Snr
+		rssi, snr := storedSignal(r.Rssi, r.Snr)
 		if snr != nil && (math.IsNaN(float64(*snr)) || math.IsInf(float64(*snr), 0)) {
 			snr = nil
 		}
-		out.Items = append(out.Items, api.RouteObservation{ID: r.ID, PacketHash: hex.EncodeToString(r.PacketHash), ObserverID: r.ObserverID, ObserverName: r.ObserverName, HeardAt: r.HeardAt.Time.UnixMilli(), PayloadType: payload, PayloadTypeName: api.PayloadTypeName(payload), RSSI: r.Rssi, SNR: snr})
+		out.Items = append(out.Items, api.RouteObservation{ID: r.ID, PacketHash: hex.EncodeToString(r.PacketHash), ObserverID: r.ObserverID, ObserverName: r.ObserverName, HeardAt: r.HeardAt.Time.UnixMilli(), PayloadType: payload, PayloadTypeName: api.PayloadTypeName(payload), RSSI: rssi, SNR: snr})
 	}
 	if out.HasMore {
 		last := rows[len(rows)-1]

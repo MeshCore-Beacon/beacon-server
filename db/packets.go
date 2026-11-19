@@ -472,9 +472,8 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 				HashSize: v.HashSize,
 				HopCount: v.HopCount,
 			},
-			RSSI: v.Rssi,
-			SNR:  v.Snr,
 		}
+		obs.RSSI, obs.SNR = storedSignal(v.Rssi, v.Snr)
 		if v.SourceBroker != nil {
 			obs.SourceBroker = *v.SourceBroker
 		}
@@ -629,6 +628,7 @@ func (s *Store) ListNodeObservations(ctx context.Context, nodeID uuid.UUID, curs
 	}
 	items := make([]api.PacketObservationSummary, 0, len(rows))
 	for _, v := range rows {
+		rssi, snr := storedSignal(v.Rssi, v.Snr)
 		items = append(items, api.PacketObservationSummary{
 			ID:              v.ID,
 			PacketHash:      v.PacketHashHex,
@@ -636,8 +636,8 @@ func (s *Store) ListNodeObservations(ctx context.Context, nodeID uuid.UUID, curs
 			PayloadTypeName: api.PayloadTypeName(v.PayloadType),
 			IATA:            v.Iata,
 			HeardAt:         v.HeardAt.Time.UnixMilli(),
-			RSSI:            v.Rssi,
-			SNR:             v.Snr,
+			RSSI:            rssi,
+			SNR:             snr,
 			HopCount:        &v.HopCount,
 		})
 	}

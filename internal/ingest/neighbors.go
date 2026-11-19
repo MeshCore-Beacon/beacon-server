@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"math"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
 )
@@ -104,10 +103,8 @@ func (w *Worker) handleNeighbors(ctx context.Context, iata, pubkeyHex string, ra
 			continue // don't record a node as its own neighbor
 		}
 
-		snr := n.SNR
-		if snr != nil && (math.IsNaN(float64(*snr)) || math.IsInf(float64(*snr), 0) || *snr < -50 || *snr > 50) {
-			snr = nil
-		}
+		// The report carries no RSSI, so a 0 here is a reading and a missing field is not.
+		snr := validSNR(n.SNR)
 
 		// OTA region scope queries are unreliable (per the firmware author, even
 		// the mobile app sees this) -- only "responded" is a trustworthy read.

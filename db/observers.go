@@ -522,6 +522,7 @@ func AdvertPage(rows []sqlc.ListObserverAdvertsRow, limit int32) api.Page[api.Ad
 	}
 	items := make([]api.AdvertObservation, 0, len(rows))
 	for _, v := range rows {
+		rssi, snr := storedSignal(v.Rssi, v.Snr)
 		items = append(items, api.AdvertObservation{
 			PacketObservationSummary: api.PacketObservationSummary{
 				ID:              v.ID,
@@ -530,8 +531,8 @@ func AdvertPage(rows []sqlc.ListObserverAdvertsRow, limit int32) api.Page[api.Ad
 				PayloadTypeName: api.PayloadTypeName(v.PayloadType),
 				IATA:            v.Iata,
 				HeardAt:         v.HeardAt.Time.UnixMilli(),
-				RSSI:            v.Rssi,
-				SNR:             v.Snr,
+				RSSI:            rssi,
+				SNR:             snr,
 				HopCount:        &v.HopCount,
 			},
 			NodeName:      v.NodeName,

@@ -312,6 +312,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		w.log.Warn(fmt.Sprintf("malformed packet envelope from %s/%s", iata, pubkeyHex))
 		return
 	}
+	rxRSSI, rxSNR := observationSignal(envelope.RSSI, envelope.SNR)
 	hexBytes, err := hex.DecodeString(strings.ReplaceAll(envelope.Raw, " ", ""))
 	if err != nil {
 		w.log.Warn(fmt.Sprintf("invalid hex from %s/%s", iata, pubkeyHex), "error", err)
@@ -676,7 +677,6 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 						responderNodeID, rErr := w.db.GetNodeByPubkey(ctx, resp.PubKey)
 						// don't insert our own node as a neighbor
 						if oErr == nil && rErr == nil && observerNodeID != responderNodeID {
-							rxSNR := signalSNR(envelope.SNR)
 							if err := w.db.UpsertNodeNeighbor(ctx, observerNodeID, responderNodeID, iata, rxSNR, nil); err != nil {
 								w.log.Error("failed to upsert observer-discover neighbor", "error", err)
 							}
@@ -772,8 +772,8 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		HashSize:          packet.PathHashSize(),
 		HopCount:          packet.PathHashCount(),
 		PathBytes:         packet.Path,
-		RSSI:              signalRSSI(envelope.RSSI),
-		SNR:               signalSNR(envelope.SNR),
+		RSSI:              rxRSSI,
+		SNR:               rxSNR,
 		PropagationTimeMs: 0, // TODO: figure out how to calculate this
 		RadioFreqMHz:      radio.FreqMHz,
 		SpreadFactor:      radio.SF,
@@ -871,7 +871,7 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 
 	if inserted || repeat {
 		if inserted {
-			w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio, scopeID, matchedScope, pubkeyBytes, signalSNR(envelope.SNR), siteRecorded, !isNew)
+			w.handlePayloadTypeSideEffects(ctx, packet, iata, packetHash[:], radio, scopeID, matchedScope, pubkeyBytes, rxSNR, siteRecorded, !isNew)
 		}
 		// Resolve after advert updates; suppressed copies need no endpoint lookup.
 		var resolvedSource, resolvedDestination *api.ResolvedHop
