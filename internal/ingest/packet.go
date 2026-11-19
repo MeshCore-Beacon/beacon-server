@@ -831,8 +831,11 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 	// byte per hop instead, so for TRACE we resolve against the trace payload's own
 	// PathHashes (the path being probed) rather than treating SNR bytes as hashes.
 	hashes := packet.PathHashes()
+	routeHashes := hashes
 	if packet.PayloadType() == meshcore.PayloadTypeTrace {
 		hashes = traceRawHashes
+		// Only the hops that added an SNR byte carried the packet; the rest are still just asked for.
+		routeHashes = hashes[:min(len(hashes), len(packet.Path))]
 	}
 	resolved, err := w.db.ResolvePathHashes(ctx, iata, hashes)
 	if err != nil {
@@ -844,11 +847,11 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 			resolvedIDs = append(resolvedIDs, e.NodeID)
 		}
 	}
-	if len(hashes) > 0 && resolved != nil {
+	if len(routeHashes) > 0 && resolved != nil {
 		allHigh := true
-		nodeIDs := make([]uuid.UUID, 0, len(hashes))
-		hashPrefixes := make([][]byte, 0, len(hashes))
-		for _, hash := range hashes {
+		nodeIDs := make([]uuid.UUID, 0, len(routeHashes))
+		hashPrefixes := make([][]byte, 0, len(routeHashes))
+		for _, hash := range routeHashes {
 			key := hex.EncodeToString(hash)
 			entries := resolved[key]
 			if len(entries) != 1 {
