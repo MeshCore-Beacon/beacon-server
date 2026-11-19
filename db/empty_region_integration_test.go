@@ -23,8 +23,7 @@ func TestEmptyRegionListFiltersPostgres(t *testing.T) {
 	if err := RunMigrations(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
-	// Guard the measurement columns used by region-filtered readers. MeshMapper's
-	// provider catalogue has unrelated text IATAs and does not use this marker.
+	// Guard the IATA columns the region-filtered readers use. Imported catalogues keep text IATAs and never see the marker.
 	wantColumns := map[string]bool{}
 	for _, table := range []string{
 		"iata_codes", "channel_iatas", "known_routes", "node_iatas", "node_neighbors", "node_short_ids",
