@@ -8,17 +8,18 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/metrics"
 )
 
 // neighborReportEntry is one entry in the "neighbors" array of a /neighbors report.
 type neighborReportEntry struct {
-	PubKey       string  `json:"pubkey"`
-	SNR          float32 `json:"snr"`
-	HeardSecsAgo int64   `json:"heard_secs_ago"`
-	Scopes       string  `json:"scopes"`
-	Status       string  `json:"status"` // "responded" or "timeout"
+	PubKey       string   `json:"pubkey"`
+	SNR          *float32 `json:"snr"`
+	HeardSecsAgo int64    `json:"heard_secs_ago"`
+	Scopes       string   `json:"scopes"`
+	Status       string   `json:"status"` // "responded" or "timeout"
 }
 
 // neighborReport is the JSON payload for an observer /neighbors message.
@@ -104,6 +105,9 @@ func (w *Worker) handleNeighbors(ctx context.Context, iata, pubkeyHex string, ra
 		}
 
 		snr := n.SNR
+		if snr != nil && (math.IsNaN(float64(*snr)) || math.IsInf(float64(*snr), 0) || *snr < -50 || *snr > 50) {
+			snr = nil
+		}
 
 		// OTA region scope queries are unreliable (per the firmware author, even
 		// the mobile app sees this) -- only "responded" is a trustworthy read.
@@ -116,7 +120,7 @@ func (w *Worker) handleNeighbors(ctx context.Context, iata, pubkeyHex string, ra
 			regionScope = &scope
 		}
 
-		if err := w.db.UpsertNodeNeighbor(ctx, observerNodeID, neighborNodeID, iata, &snr, regionScope); err != nil {
+		if err := w.db.UpsertNodeNeighbor(ctx, observerNodeID, neighborNodeID, iata, snr, regionScope); err != nil {
 			w.log.Error(fmt.Sprintf("db: upsert neighbor failed for %s -> %s", pubkeyHex, n.PubKey), "error", err)
 		}
 	}
