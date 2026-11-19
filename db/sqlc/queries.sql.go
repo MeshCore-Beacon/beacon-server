@@ -6586,28 +6586,33 @@ func (q *Queries) ReconfirmRoutesBatch(ctx context.Context, arg ReconfirmRoutesB
 }
 
 const reconfirmSliceEnd = `-- name: ReconfirmSliceEnd :one
-SELECT r.iata, r.path_key FROM known_routes r
-WHERE (r.iata, r.path_key) > ($1::bpchar, $2::bytea)
-ORDER BY r.iata, r.path_key
-OFFSET $3 LIMIT 1
+SELECT slice.iata, slice.path_key, (count(*) OVER ())::bigint AS skipped
+FROM (
+    SELECT r.iata, r.path_key FROM known_routes r
+    WHERE (r.iata, r.path_key) > ($1::bpchar, $2::bytea)
+    ORDER BY r.iata, r.path_key
+    LIMIT $3::int
+) AS slice
+ORDER BY slice.iata DESC, slice.path_key DESC LIMIT 1
 `
 
 type ReconfirmSliceEndParams struct {
-	AfterIata  string `json:"after_iata"`
-	AfterKey   []byte `json:"after_key"`
-	OffsetRows int32  `json:"offset_rows"`
+	AfterIata string `json:"after_iata"`
+	AfterKey  []byte `json:"after_key"`
+	BatchSize int32  `json:"batch_size"`
 }
 
 type ReconfirmSliceEndRow struct {
 	Iata    string `json:"iata"`
 	PathKey []byte `json:"path_key"`
+	Skipped int64  `json:"skipped"`
 }
 
-// Key of the last route in a slice that timed out: the caller passes the slice's row count - 1.
+// Count the bounded slice and return its last key. A short slice ends the cycle.
 func (q *Queries) ReconfirmSliceEnd(ctx context.Context, arg ReconfirmSliceEndParams) (ReconfirmSliceEndRow, error) {
-	row := q.db.QueryRow(ctx, reconfirmSliceEnd, arg.AfterIata, arg.AfterKey, arg.OffsetRows)
+	row := q.db.QueryRow(ctx, reconfirmSliceEnd, arg.AfterIata, arg.AfterKey, arg.BatchSize)
 	var i ReconfirmSliceEndRow
-	err := row.Scan(&i.Iata, &i.PathKey)
+	err := row.Scan(&i.Iata, &i.PathKey, &i.Skipped)
 	return i, err
 }
 

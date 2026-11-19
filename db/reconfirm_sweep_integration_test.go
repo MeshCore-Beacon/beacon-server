@@ -344,6 +344,34 @@ FROM generate_series(1, 25) i;`)
 	}
 }
 
+func TestReconfirmCountsOnlyRemainingRowsOnSkipPostgres(t *testing.T) {
+	ctx, pool, store := reconfirmPool(t)
+	// Both routes should be deleted. A lock on the first makes both attempts time out.
+	if _, err := pool.Exec(ctx, "UPDATE known_routes SET node_ids=ARRAY['00000000-0000-0000-0000-000000000099'::uuid]"); err != nil {
+		t.Fatal(err)
+	}
+	busy, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer busy.Rollback(context.Background())
+	if _, err := busy.Exec(ctx, "SELECT 1 FROM known_routes WHERE path_key=int4send(1) FOR UPDATE"); err != nil {
+		t.Fatal(err)
+	}
+	setReconfirmHooks(t, 100, 150*time.Millisecond)
+	res, err := store.ReconfirmSweep(ctx, 100)
+	if err != nil || !res.Wrapped || res.TimedOut != 2 || res.Skipped != 2 || res.Deleted != 0 {
+		t.Fatalf("locked final two routes: %+v, err %v", res, err)
+	}
+	if err := busy.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	res, err = store.ReconfirmSweep(ctx, 100)
+	if err != nil || !res.Wrapped || res.Deleted != 2 || res.Skipped != 0 {
+		t.Fatalf("unlocked next cycle: %+v, err %v", res, err)
+	}
+}
+
 func TestReconfirmReleasesEarlierBatchPostgres(t *testing.T) {
 	ctx, pool, store := reconfirmPool(t)
 	if _, err := pool.Exec(ctx, `UPDATE known_routes SET node_ids=ARRAY[md5('departed')::uuid] WHERE path_key=int4send(2)`); err != nil {

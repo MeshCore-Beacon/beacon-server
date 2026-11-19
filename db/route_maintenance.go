@@ -218,15 +218,15 @@ func (s *Store) ReconfirmSweep(ctx context.Context, budget int) (res ReconfirmRe
 			row, next, err = reconfirmBatch(ctx, conn, cur, n)
 			if err != nil && isStatementTimeout(err) && ctx.Err() == nil {
 				res.TimedOut++
-				next, wrapped, err := skipReconfirmSlice(ctx, q, cur, n)
+				next, skipped, err := skipReconfirmSlice(ctx, q, cur, n)
 				if err != nil {
 					return res, err
 				}
-				slog.Warn("reconfirm slice skipped after statement timeouts", "component", "db", "iata", cur.IATA, "rows", n)
-				res.Skipped += int64(n)
+				slog.Warn("reconfirm slice skipped after statement timeouts", "component", "db", "iata", cur.IATA, "rows", skipped)
+				res.Skipped += skipped
 				remaining -= n
 				cur = next
-				if wrapped {
+				if skipped < int64(n) {
 					res.Wrapped = true
 					return res, nil
 				}
@@ -280,20 +280,19 @@ func reconfirmBatch(ctx context.Context, conn *pgxpool.Conn, cur reconfirmCursor
 	return row, next, nil
 }
 
-// skipReconfirmSlice saves the cursor past the n routes after cur, without a statement timeout.
-// wrapped reports that fewer than n routes were left.
-func skipReconfirmSlice(ctx context.Context, q *sqlc.Queries, cur reconfirmCursor, n int) (reconfirmCursor, bool, error) {
+// skipReconfirmSlice saves the cursor past at most n routes and returns how many were passed.
+func skipReconfirmSlice(ctx context.Context, q *sqlc.Queries, cur reconfirmCursor, n int) (reconfirmCursor, int64, error) {
 	iata, key := cur.position()
-	end, err := q.ReconfirmSliceEnd(ctx, sqlc.ReconfirmSliceEndParams{AfterIata: iata, AfterKey: key, OffsetRows: int32(n - 1)})
-	next, wrapped := cur.at(end.Iata, end.PathKey), false
-	if errors.Is(err, pgx.ErrNoRows) {
-		next, wrapped, err = cur.wrapped(time.Now()), true, nil
+	end, err := q.ReconfirmSliceEnd(ctx, sqlc.ReconfirmSliceEndParams{AfterIata: iata, AfterKey: key, BatchSize: int32(n)})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return cur, 0, err
 	}
-	if err != nil {
-		return cur, false, err
+	next := cur.at(end.Iata, end.PathKey)
+	if end.Skipped < int64(n) {
+		next = cur.wrapped(time.Now())
 	}
 	if err := saveState(ctx, q, ReconfirmCursorKey, next); err != nil {
-		return cur, false, err
+		return cur, 0, err
 	}
-	return next, wrapped, nil
+	return next, end.Skipped, nil
 }

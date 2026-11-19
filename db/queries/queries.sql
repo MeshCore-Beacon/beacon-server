@@ -2606,11 +2606,15 @@ SELECT (SELECT count(*) FROM batch) AS scanned,
        coalesce((SELECT path_key FROM batch ORDER BY iata DESC, path_key DESC LIMIT 1), ''::bytea)::bytea AS last_key;
 
 -- name: ReconfirmSliceEnd :one
--- Key of the last route in a slice that timed out: the caller passes the slice's row count - 1.
-SELECT r.iata, r.path_key FROM known_routes r
-WHERE (r.iata, r.path_key) > (@after_iata::bpchar, @after_key::bytea)
-ORDER BY r.iata, r.path_key
-OFFSET @offset_rows LIMIT 1;
+-- Count the bounded slice and return its last key. A short slice ends the cycle.
+SELECT slice.iata, slice.path_key, (count(*) OVER ())::bigint AS skipped
+FROM (
+    SELECT r.iata, r.path_key FROM known_routes r
+    WHERE (r.iata, r.path_key) > (@after_iata::bpchar, @after_key::bytea)
+    ORDER BY r.iata, r.path_key
+    LIMIT @batch_size::int
+) AS slice
+ORDER BY slice.iata DESC, slice.path_key DESC LIMIT 1;
 
 -- name: ReconfirmNeighbors :exec
 -- Delete node_neighbors where the neighbor has departed from node_short_ids
