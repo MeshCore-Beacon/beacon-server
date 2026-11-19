@@ -122,6 +122,9 @@ type AppCodeResponse struct {
 type AppTokenRequest struct {
 	Code         string `json:"code"`
 	CodeVerifier string `json:"codeVerifier"`
+	// DeviceLabel names the app's device, e.g. "Beacon app on iPhone". Optional: when empty the session keeps the
+	// label of the browser that issued the code.
+	DeviceLabel string `json:"deviceLabel,omitempty" example:"Beacon app on iPhone"`
 }
 
 type AppTokenResponse struct {

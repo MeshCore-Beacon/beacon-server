@@ -489,7 +489,7 @@ func appCode(svc AccountsService) http.HandlerFunc {
 // @Tags Accounts
 // @Accept json
 // @Produce json
-// @Param body body api.AppTokenRequest true "Code and PKCE verifier; body at most 4 KiB"
+// @Param body body api.AppTokenRequest true "Code, PKCE verifier and optional device label; body at most 4 KiB"
 // @Success 200 {object} api.AppTokenResponse
 // @Failure 400,413,415,429,503 {object} map[string]APIError
 // @Router /auth/app/token [post]
@@ -499,7 +499,7 @@ func appToken(svc AccountsService) http.HandlerFunc {
 		if !decodeBody(w, r, &in) {
 			return
 		}
-		meta := users.SessionMeta{IP: clientIP(r), UserAgent: r.Header.Get("User-Agent")}
+		meta := users.SessionMeta{IP: clientIP(r), UserAgent: r.Header.Get("User-Agent"), Label: in.DeviceLabel}
 		token, s, u, err := svc.ExchangeAppCode(r.Context(), in.Code, in.CodeVerifier, meta)
 		if err != nil {
 			userError(w, err)

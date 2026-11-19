@@ -1622,6 +1622,29 @@ func TestAppCodeFlow(t *testing.T) {
 	}
 }
 
+func TestAppCodeLabelFromTheApp(t *testing.T) {
+	e := newEnv(t)
+	u := e.user("ridge")
+	for _, c := range []struct{ sent, want string }{
+		{"Beacon app on iPhone", "Beacon app on iPhone"},
+		{"  ", "Firefox on iOS"},
+		{"", "Firefox on iOS"},
+	} {
+		code, err := e.svc.IssueAppCode(bg, u, challengeFor(verifier), "Firefox on iOS")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, sess, _, err := e.svc.ExchangeAppCode(bg, code, verifier, SessionMeta{Label: c.sent})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sess.Label != c.want {
+			t.Fatalf("sent %q: label %q, want %q", c.sent, sess.Label, c.want)
+		}
+	}
+	_ = e.msgs()
+}
+
 func TestAppCodeSignInMailFailureDoesNotFailSignIn(t *testing.T) {
 	e := newEnv(t)
 	u := e.user("ridge")

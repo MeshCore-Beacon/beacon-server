@@ -1525,7 +1525,7 @@ const docTemplate = `{
                 "summary": "Exchange an app code for a session token",
                 "parameters": [
                     {
-                        "description": "Code and PKCE verifier; body at most 4 KiB",
+                        "description": "Code, PKCE verifier and optional device label; body at most 4 KiB",
                         "name": "body",
                         "in": "body",
                         "required": true,
@@ -8088,6 +8088,11 @@ const docTemplate = `{
                 },
                 "codeVerifier": {
                     "type": "string"
+                },
+                "deviceLabel": {
+                    "description": "DeviceLabel names the app's device, e.g. \"Beacon app on iPhone\". Optional: when empty the session keeps the\nlabel of the browser that issued the code.",
+                    "type": "string",
+                    "example": "Beacon app on iPhone"
                 }
             }
         },
@@ -8705,6 +8710,11 @@ const docTemplate = `{
                     "description": "Alerts is true when the server sends alerts by at least one channel.",
                     "type": "boolean",
                     "example": false
+                },
+                "appDeviceLabel": {
+                    "description": "AppDeviceLabel is true when POST /auth/app/token takes a deviceLabel. Always true on this version.",
+                    "type": "boolean",
+                    "example": true
                 },
                 "atlasTelemetry": {
                     "description": "AtlasTelemetry is true when the server accepts the telemetry view and telemetryTiles on Atlas pins and the 72h\nnode telemetry range. Always true on this version.",

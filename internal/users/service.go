@@ -953,7 +953,11 @@ func (s *Service) ExchangeAppCode(ctx context.Context, code, codeVerifier string
 	if err != nil {
 		return fail(err)
 	}
+	// The app names its own device; the label the browser sent with the code is the fallback for apps that do not.
 	label := cleanLabel(d.DeviceLabel)
+	if strings.TrimSpace(meta.Label) != "" {
+		label = cleanLabel(meta.Label)
+	}
 	// The store keeps a slot free and issues the session under the user's lock, refusing it when a reset or password
 	// change completed after the user was read.
 	if d.PassHash == "" {

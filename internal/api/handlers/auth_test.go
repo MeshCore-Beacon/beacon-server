@@ -248,6 +248,14 @@ func TestAuthRoutesSuccessShapes(t *testing.T) {
 	if b["expiresAt"] != float64(1797292000000) || b["user"].(map[string]any)["username"] != "ridge" {
 		t.Fatalf("app token body %s", w.Body)
 	}
+	if f.meta.Label != "" {
+		t.Fatalf("no deviceLabel sent, label %q", f.meta.Label)
+	}
+	w = call(h, "POST", "/auth/app/token", `{"code":"c","codeVerifier":"v","deviceLabel":"Beacon app on iPhone"}`)
+	check("app token with label", w, 200, "token", "app-token")
+	if f.meta.Label != "Beacon app on iPhone" {
+		t.Fatalf("label %q", f.meta.Label)
+	}
 }
 
 func TestLoginSetsTheCookieWithItsAttributes(t *testing.T) {

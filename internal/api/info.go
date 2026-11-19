@@ -74,6 +74,8 @@ type InfoFeatures struct {
 	AtlasTelemetry bool `json:"atlasTelemetry" example:"true"`
 	// MapTelemetry is true when the server returns recent telemetry readings for map labels. Always true on this version.
 	MapTelemetry bool `json:"mapTelemetry" example:"true"`
+	// AppDeviceLabel is true when POST /auth/app/token takes a deviceLabel. Always true on this version.
+	AppDeviceLabel bool `json:"appDeviceLabel" example:"true"`
 }
 
 // InfoAlertChannels is the alert channels a server offers.

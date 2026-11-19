@@ -334,6 +334,12 @@ definitions:
         type: string
       codeVerifier:
         type: string
+      deviceLabel:
+        description: |-
+          DeviceLabel names the app's device, e.g. "Beacon app on iPhone". Optional: when empty the session keeps the
+          label of the browser that issued the code.
+        example: Beacon app on iPhone
+        type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.AppTokenResponse:
     properties:
@@ -757,6 +763,11 @@ definitions:
       alerts:
         description: Alerts is true when the server sends alerts by at least one channel.
         example: false
+        type: boolean
+      appDeviceLabel:
+        description: AppDeviceLabel is true when POST /auth/app/token takes a deviceLabel.
+          Always true on this version.
+        example: true
         type: boolean
       atlasTelemetry:
         description: |-
@@ -4027,7 +4038,8 @@ paths:
       description: 'The code is used up before the verifier is checked, so a wrong
         verifier needs a new code. The token is for the Authorization: Bearer header.'
       parameters:
-      - description: Code and PKCE verifier; body at most 4 KiB
+      - description: Code, PKCE verifier and optional device label; body at most 4
+          KiB
         in: body
         name: body
         required: true
