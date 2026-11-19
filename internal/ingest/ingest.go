@@ -447,15 +447,12 @@ func (w *Worker) broadcast(eventType hub.EventType, iata string, payloadType uin
 	})
 }
 
-// broadcastPacketObservation marshals evt once as-is (the default
-// payload every packetObservation subscriber gets) and once with
-// resolvedPath populated (delivered only to connections that opted in via
-// the "configure" WS message; see hub.Client.ResolvePath). resolvedPath is
-// passed in rather than computed here because the caller already has the
-// path-hash resolution results in hand from other per-packet work (known
-// route detection, capability detection) — this adds no extra DB calls.
-// Repeats go through the hub's drop-first path.
-func (w *Worker) broadcastPacketObservation(iata string, payloadType uint8, evt packetObservationEvent, resolvedPath []api.ResolvedHop, observerKey string, repeat bool) {
+// broadcastPacketObservation always keeps a base payload for safe fallback, but
+// shapes and marshals optional variants only when clients request them. The caller
+// still resolves hashes for route/capability detection; this adds no DB calls.
+// A configure after this snapshot may receive the base fields for an in-flight
+// event, never fields that the connection didn't request. Repeats stay drop-first.
+func (w *Worker) broadcastPacketObservation(iata string, payloadType uint8, evt packetObservationEvent, hashes [][]byte, resolved map[string][]api.ResolvedPathEntry, observerKey string, repeat bool) {
 	base, err := json.Marshal(evt)
 	if err != nil {
 		w.log.Error("failed to marshal packetObservation event", "error", err)
@@ -469,18 +466,24 @@ func (w *Worker) broadcastPacketObservation(iata string, payloadType uint8, evt 
 		RouteType:   evt.Packet.RouteType,
 		ObserverID:  evt.Observation.ObserverID,
 	}
-	evt.Observation.ResolvedPath = resolvedPath
-	if out.PayloadResolved, err = json.Marshal(evt); err != nil {
-		w.log.Error("failed to marshal packetObservation event (resolved variant)", "error", err)
-		out.PayloadResolved = nil
-	}
-	if w.hub.ObserverKeyWanted() {
-		evt.Observation.ObserverPublicKey = observerKey
-		if out.PayloadResolvedWithKey, err = json.Marshal(evt); err != nil {
-			w.log.Error("failed to marshal packetObservation event (resolved key variant)", "error", err)
-			out.PayloadResolvedWithKey = nil
+	wantResolved, wantKey, wantBoth := w.hub.PacketVariantsWanted()
+	if wantResolved || wantBoth {
+		evt.Observation.ResolvedPath = api.BuildResolvedPath(hashes, resolved)
+		if wantResolved {
+			if out.PayloadResolved, err = json.Marshal(evt); err != nil {
+				w.log.Error("failed to marshal packetObservation event (resolved variant)", "error", err)
+			}
 		}
+		if wantBoth {
+			evt.Observation.ObserverPublicKey = observerKey
+			if out.PayloadResolvedWithKey, err = json.Marshal(evt); err != nil {
+				w.log.Error("failed to marshal packetObservation event (resolved key variant)", "error", err)
+			}
+		}
+	}
+	if wantKey {
 		evt.Observation.ResolvedPath = nil
+		evt.Observation.ObserverPublicKey = observerKey
 		if out.PayloadWithKey, err = json.Marshal(evt); err != nil {
 			w.log.Error("failed to marshal packetObservation event (key variant)", "error", err)
 			out.PayloadWithKey = nil

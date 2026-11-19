@@ -163,8 +163,9 @@ type Hub struct {
 	control   chan controlMsg
 	broadcast chan Event
 
-	// observerKeyClients counts registered clients with IncludeObserverKey set.
-	observerKeyClients atomic.Int64
+	// variantClients is owned by Run; variantDemand publishes one coherent snapshot to ingest.
+	variantClients [4]int
+	variantDemand  atomic.Uint32
 	// repeatClients counts registered clients with IncludeRepeats set.
 	repeatClients atomic.Int64
 	// repeatDrops counts repeats refused because the broadcast channel was busy.
@@ -231,7 +232,46 @@ func (h *Hub) Configure(c *Client, opts ClientOptions) {
 
 // ObserverKeyWanted lets ingest skip the key variants when nobody wants them.
 func (h *Hub) ObserverKeyWanted() bool {
-	return h.observerKeyClients.Load() > 0
+	_, key, both := h.PacketVariantsWanted()
+	return key || both
+}
+
+// PacketVariantsWanted reports demand for the resolved-only, key-only and combined
+// payloads. Separate resolved and keyed clients do not imply demand for the combination.
+func (h *Hub) PacketVariantsWanted() (resolved, key, both bool) {
+	mask := h.variantDemand.Load()
+	return mask&(1<<1) != 0, mask&(1<<2) != 0, mask&(1<<3) != 0
+}
+
+func packetVariant(resolvePath, observerKey bool) int {
+	i := 0
+	if resolvePath {
+		i |= 1
+	}
+	if observerKey {
+		i |= 2
+	}
+	return i
+}
+
+// replacePacketVariant runs only inside Run. -1 denotes an absent client.
+func (h *Hub) replacePacketVariant(old, next int) {
+	if old == next {
+		return
+	}
+	if old >= 0 {
+		h.variantClients[old]--
+	}
+	if next >= 0 {
+		h.variantClients[next]++
+	}
+	var mask uint32
+	for i := 1; i < len(h.variantClients); i++ {
+		if h.variantClients[i] > 0 {
+			mask |= 1 << i
+		}
+	}
+	h.variantDemand.Store(mask)
 }
 
 // RepeatsWanted lets ingest skip broadcasting repeats when nobody wants them.
@@ -305,9 +345,7 @@ func (h *Hub) Run() {
 				c := msg.client
 				if _, ok := clients[c]; ok {
 					delete(clients, c)
-					if c.IncludeObserverKey {
-						h.observerKeyClients.Add(-1)
-					}
+					h.replacePacketVariant(packetVariant(c.ResolvePath, c.IncludeObserverKey), -1)
 					if c.IncludeRepeats {
 						h.repeatClients.Add(-1)
 					}
@@ -320,17 +358,14 @@ func (h *Hub) Run() {
 				}
 			case msg.subscriptionID == "" && !msg.isConfigure:
 				// Registration with no scope yet (NewClient path).
-				clients[msg.client] = struct{}{}
+				if _, exists := clients[msg.client]; !exists {
+					clients[msg.client] = struct{}{}
+					h.replacePacketVariant(-1, packetVariant(msg.client.ResolvePath, msg.client.IncludeObserverKey))
+				}
 			case msg.isConfigure:
 				// Configure path — client must already be registered.
 				if _, ok := clients[msg.client]; ok {
-					if msg.client.IncludeObserverKey != msg.options.IncludeObserverKey {
-						if msg.options.IncludeObserverKey {
-							h.observerKeyClients.Add(1)
-						} else {
-							h.observerKeyClients.Add(-1)
-						}
-					}
+					h.replacePacketVariant(packetVariant(msg.client.ResolvePath, msg.client.IncludeObserverKey), packetVariant(msg.options.ResolvePath, msg.options.IncludeObserverKey))
 					if msg.client.IncludeRepeats != msg.options.IncludeRepeats {
 						if msg.options.IncludeRepeats {
 							h.repeatClients.Add(1)

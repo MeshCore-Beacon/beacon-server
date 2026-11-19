@@ -920,10 +920,9 @@ func (w *Worker) handlePacket(ctx context.Context, iata, pubkeyHex string, raw [
 		if matchedScope != nil {
 			evt.Packet.Scope = matchedScope
 		}
-		resolvedPath := api.BuildResolvedPath(hashes, resolved)
 		evt.Observation.ResolvedSource = resolvedSource
 		evt.Observation.ResolvedDestination = resolvedDestination
-		w.broadcastPacketObservation(iata, packet.PayloadType(), evt, resolvedPath, hex.EncodeToString(pubkeyBytes), repeat)
+		w.broadcastPacketObservation(iata, packet.PayloadType(), evt, hashes, resolved, hex.EncodeToString(pubkeyBytes), repeat)
 	}
 }
 

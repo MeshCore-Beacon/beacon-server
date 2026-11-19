@@ -67,6 +67,7 @@ func TestAdvertSummaryLive(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				go w.hub.Run()
+				requireResolvedVariant(t, w.hub)
 				client := w.hub.NewClient()
 				w.hub.AddScope(client, "summary", hub.Scope{Events: []hub.EventType{hub.EventPacketObservation, hub.EventObserverStatus}})
 
@@ -162,6 +163,7 @@ func TestPacketReferenceSummaryLive(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			go w.hub.Run()
+			requireResolvedVariant(t, w.hub)
 			client := w.hub.NewClient()
 			w.hub.AddScope(client, "summary", hub.Scope{Events: []hub.EventType{hub.EventPacketObservation, hub.EventObserverStatus}})
 			defer w.hub.Remove(client)
