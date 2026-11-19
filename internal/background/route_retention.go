@@ -91,12 +91,12 @@ func routeRetentionTask(store routeRetainer, retention, grace time.Duration, min
 				return fmt.Errorf("route grace state: %w", err)
 			}
 			metrics.JobRows.WithLabelValues("route_retention").Add(float64(expired + deleted))
-			slog.Debug("route retention", "component", "background", "expired", expired,
-				"grace_candidates", candidates, "grace_deleted", deleted, "full_pass", full, "watermark", watermark)
-
 			if err := store.ReconfirmNeighbors(ctx); err != nil {
 				return fmt.Errorf("neighbors: %w", err)
 			}
+			slog.Info("route retention", "component", "background", "expired", expired,
+				"grace_candidates", candidates, "grace_deleted", deleted, "full_pass", full, "watermark", watermark,
+				"neighbors_reconfirmed", true)
 			return nil
 		},
 	}

@@ -163,12 +163,17 @@ func ReconfirmTask(store routeReconfirmer, rowsPerHour int, tick time.Duration) 
 		Interval: tick,
 		Run: func(ctx context.Context) error {
 			res, err := store.ReconfirmSweep(ctx, budget)
+			level := slog.LevelDebug
+			if res.TimedOut > 0 || res.Wrapped {
+				level = slog.LevelInfo
+			}
+			slog.Log(ctx, level, "route reconfirm", "component", "background", "scanned", res.Scanned,
+				"deleted", res.Deleted, "skipped", res.Skipped, "timed_out", res.TimedOut, "wrapped", res.Wrapped,
+				"completed", err == nil)
 			if err != nil {
 				return fmt.Errorf("routes: %w", err)
 			}
 			metrics.JobRows.WithLabelValues("reconfirm").Add(float64(res.Deleted))
-			slog.Debug("route reconfirm", "component", "background", "scanned", res.Scanned,
-				"deleted", res.Deleted, "skipped", res.Skipped, "timed_out", res.TimedOut, "wrapped", res.Wrapped)
 			return nil
 		},
 	}
