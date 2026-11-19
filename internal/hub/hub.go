@@ -426,6 +426,8 @@ func (h *Hub) Run() {
 				}
 				continue
 			}
+			// an armed timer would send a second notice right behind this one
+			gapDue = nil
 			notifyGap()
 
 		case <-gapDue:
@@ -444,21 +446,25 @@ func (h *Hub) Run() {
 				default:
 					// Evict the oldest so the newest still goes out.
 					dropped := 1
+					lost := 0
 					select {
 					case <-c.Send:
+						lost++
 					default:
 					}
 					select {
 					case c.Send <- outEvt:
 					default:
 						dropped++
+						lost++
 					}
 					select {
 					case c.laggedCH <- LaggedNotification{DroppedCount: dropped}:
 					default:
 						// laggedCh itself full; write pump will catch up on next drain
 					}
-					metrics.StreamDropped.WithLabelValues("client").Add(float64(dropped))
+					// the reader may have drained the buffer in between, and then nothing was lost
+					metrics.StreamDropped.WithLabelValues("client").Add(float64(lost))
 					slog.Warn(fmt.Sprintf("hub: client send buffer full, dropped event type=%s", evt.Type), "component", "hub")
 				}
 			}
