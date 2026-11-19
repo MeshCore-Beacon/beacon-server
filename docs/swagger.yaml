@@ -5264,7 +5264,7 @@ paths:
         returns the new document. Otherwise 409 atlas_conflict with the stored Atlas
         under current.
       parameters:
-      - description: Body at most 32 KiB
+      - description: Body at most 256 KiB
         in: body
         name: body
         required: true

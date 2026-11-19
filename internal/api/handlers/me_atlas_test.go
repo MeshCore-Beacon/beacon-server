@@ -217,3 +217,38 @@ func TestMeAtlasReportsTheConfiguredLimit(t *testing.T) {
 		t.Fatalf("over the limit: %d %s", w.Code, w.Body)
 	}
 }
+
+func TestMeAtlasAcceptsMaximumEscapedDocument(t *testing.T) {
+	a := &fakeAtlas{}
+	r := chi.NewRouter()
+	r.Use(mw.UserAuth(&fakeAccounts{}, SessionCookie))
+	r.Mount("/me", MeRouter(&fakeAccounts{}, accountsOpts(), AtlasRoutes(a, 100)))
+	c := []reqOpt{cookie("web-token"), csrf}
+	// Each valid supplementary-plane character occupies 12 JSON bytes when escaped.
+	name := strings.Repeat(`\ud83d\ude00`, 160)
+	pins := make([]string, 101)
+	for i := range pins {
+		pins[i] = fmt.Sprintf(`{"kind":"node","publicKey":"%064x","name":"%s","tiles":["airtime","battery","uptime","types"],"view":"telemetry","telemetryTiles":["battery","noise","uptime","packets"]}`, i+1, name)
+	}
+	body := func(count int) string {
+		return `{"baseRevision":0,"range":"24h","pins":[` + strings.Join(pins[:count], ",") + "]}"
+	}
+	valid := body(100)
+	if len(valid) <= 32<<10 || len(valid) >= 256<<10 {
+		t.Fatalf("fixture body size %d is outside the intended regression window", len(valid))
+	}
+	w := call(r, "PUT", "/me/atlas", valid, c...)
+	b := jsonBody(t, w)
+	if w.Code != 200 || b["limit"] != float64(100) || len(b["pins"].([]any)) != 100 {
+		t.Fatalf("maximum document: %d %s", w.Code, w.Body)
+	}
+	if w := call(r, "PUT", "/me/atlas", body(101), c...); w.Code != 422 || !strings.Contains(w.Body.String(), "at most 100 pins") {
+		t.Fatalf("pin limit: %d %s", w.Code, w.Body)
+	}
+	if w := call(r, "PUT", "/me/atlas", strings.Repeat(" ", 256<<10)+valid, c...); w.Code != 413 {
+		t.Fatalf("body limit: %d %s", w.Code, w.Body)
+	}
+	if a.rev != 1 {
+		t.Fatal("rejected request changed the Atlas")
+	}
+}

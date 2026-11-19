@@ -3350,7 +3350,7 @@ const docTemplate = `{
                 "summary": "Replace the Atlas",
                 "parameters": [
                     {
-                        "description": "Body at most 32 KiB",
+                        "description": "Body at most 256 KiB",
                         "name": "body",
                         "in": "body",
                         "required": true,
