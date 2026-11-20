@@ -10169,6 +10169,10 @@ const docTemplate = `{
                 },
                 "sourceBroker": {
                     "type": "string"
+                },
+                "wirePathBytes": {
+                    "description": "WirePathBytes is the path field as it was on air (hex), sent only for a TRACE, whose pathBytes carry the\npayload's hop hashes instead: the per-hop SNR bytes, empty when no hop had been reached.",
+                    "type": "string"
                 }
             }
         },

@@ -1820,6 +1820,11 @@ definitions:
         type: number
       sourceBroker:
         type: string
+      wirePathBytes:
+        description: |-
+          WirePathBytes is the path field as it was on air (hex), sent only for a TRACE, whose pathBytes carry the
+          payload's hop hashes instead: the per-hop SNR bytes, empty when no hop had been reached.
+        type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.PacketObservationSummary:
     properties:

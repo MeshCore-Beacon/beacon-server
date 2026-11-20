@@ -514,6 +514,9 @@ func (s *Store) GetPacket(ctx context.Context, packetHash []byte) (*api.Packet, 
 			}
 			pb := hex.EncodeToString(traceHashBytes)
 			obs.PathBytes = &pb
+			// The frame is rebuilt from the bytes that were in the path slot, which pathBytes no longer holds.
+			wire := hex.EncodeToString(v.PathBytes)
+			obs.WirePathBytes = &wire
 			obs.PathLength.HashSize = int16(len(traceRawHashes[0]))
 			obs.PathLength.HopCount = int16(len(traceRawHashes))
 		} else if v.PathBytes != nil {
