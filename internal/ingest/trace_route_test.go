@@ -6,6 +6,7 @@ package ingest
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"testing"
 
 	"github.com/MeshCore-Beacon/beacon-server/internal/api"
@@ -70,5 +71,32 @@ func TestTraceKnownRouteStopsAtTheLastHopReached(t *testing.T) {
 				t.Fatalf("known routes %q, want %q", got, want)
 			}
 		})
+	}
+}
+
+// The live event is not rewritten for a TRACE: its pathBytes are the SNR bytes that were on air.
+func TestLiveTracePathBytesAreTheWireBytes(t *testing.T) {
+	r := newRepeatHarness(t, false)
+	r.db.observationInserted = true
+	payload, err := (&meshcore.Trace{Tag: 0x44332211, PathHashes: []byte{0xa1, 0xb2, 0xc3}}).ToBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkt := &meshcore.Packet{Header: meshcore.MakeHeader(meshcore.RouteTypeDirect, meshcore.PayloadTypeTrace, 0),
+		PathLength: 2, Path: []byte{0x28, 0xf4}, Payload: payload}
+	r.w.handlePacket(r.ctx, "YOW", "0102", packetEnvelope(t, pkt))
+	select {
+	case evt := <-r.client.Send:
+		var got struct {
+			Observation map[string]json.RawMessage `json:"observation"`
+		}
+		if err := json.Unmarshal(evt.Payload, &got); err != nil {
+			t.Fatal(err)
+		}
+		if _, sent := got.Observation["wirePathBytes"]; sent || string(got.Observation["pathBytes"]) != `"28f4"` {
+			t.Fatalf("observation %s", evt.Payload)
+		}
+	case <-r.ctx.Done():
+		t.Fatal("no event")
 	}
 }
