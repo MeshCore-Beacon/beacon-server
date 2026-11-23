@@ -23,6 +23,8 @@ type RequestNode struct {
 	PublicKey []byte
 	NodeType  int16
 	Name      string
+	// IsObserver is true when an observer has the same key; it reports its own telemetry.
+	IsObserver bool
 }
 
 // RequestRow is a request as the profile shows it. It carries no password.
@@ -56,6 +58,8 @@ func ClaimState(s string) string { return strings.ToLower(shortText(s)) }
 // difference; an error from fn stores nothing.
 type RequestStore interface {
 	RequestNode(ctx context.Context, nodeID uuid.UUID) (RequestNode, error)
+	// IsObserverKey reports whether an observer has this public key.
+	IsObserverKey(ctx context.Context, key []byte) (bool, error)
 	MutateRequestTarget(ctx context.Context, target []byte, userID uuid.UUID, fn func(*TargetState) error) error
 	// UserRequestTarget is ErrRequestNotFound unless the request is the user's.
 	UserRequestTarget(ctx context.Context, userID, requestID uuid.UUID) ([]byte, error)
@@ -125,6 +129,9 @@ func (s *RequestService) Create(ctx context.Context, userID, nodeID uuid.UUID, p
 	if node.NodeType != nodeTypeRepeater && node.NodeType != nodeTypeRoomServer {
 		return RequestRow{}, ErrNotARepeater
 	}
+	if node.IsObserver {
+		return RequestRow{}, ErrObserverNode
+	}
 	now := s.now()
 	r := Request{ID: uuid.New(), UserID: userID, CreatedAt: now, EnabledAt: now}
 	if password != nil {
@@ -167,6 +174,15 @@ func (s *RequestService) Update(ctx context.Context, userID, id uuid.UUID, u Req
 	target, err := s.store.UserRequestTarget(ctx, userID, id)
 	if err != nil {
 		return RequestRow{}, err
+	}
+	if u.Enable {
+		obs, err := s.store.IsObserverKey(ctx, target)
+		if err != nil {
+			return RequestRow{}, err
+		}
+		if obs {
+			return RequestRow{}, ErrObserverNode
+		}
 	}
 	now := s.now()
 	err = s.store.MutateRequestTarget(ctx, target, userID, func(st *TargetState) error {

@@ -276,7 +276,7 @@ func (s *Service) Owners(ctx context.Context, c Caller) (OwnersAnswer, error) {
 		excluded[strings.ToLower(e)] = true
 	}
 	for i := range rows {
-		rows[i].Excluded = excluded[hex.EncodeToString(rows[i].Target)]
+		rows[i].Excluded = excluded[hex.EncodeToString(rows[i].Target)] || rows[i].TargetIsObserver
 		// No row of our own while the target has a poller: wait last in line. Only a target nobody holds fails open.
 		if rows[i].Rank < 0 && rows[i].Assigned > 0 {
 			rows[i].Rank = rows[i].Assigned

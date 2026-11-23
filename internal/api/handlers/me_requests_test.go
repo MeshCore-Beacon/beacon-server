@@ -182,6 +182,7 @@ func TestMeTelemetryRequestErrors(t *testing.T) {
 		{polling.ErrAlreadyRequested, 409, "already_requested"},
 		{polling.ErrNoPasswordBlocked, 409, "no_password_blocked"},
 		{polling.ErrNotARepeater, 422, "not_a_repeater"},
+		{polling.ErrObserverNode, 422, "observer_node"},
 		{polling.ErrPasswordInvalid, 422, "password_invalid"},
 		{polling.ErrRequestNotFound, 404, "not_found"},
 		{fmt.Errorf("wrapped: %w", polling.ErrRequestLimit), 409, "request_limit"},
@@ -191,8 +192,13 @@ func TestMeTelemetryRequestErrors(t *testing.T) {
 			t.Errorf("%v: %d %s", k.err, w.Code, w.Body)
 		}
 	}
+	f.err = polling.ErrObserverNode
+	w := call(h, "PATCH", "/me/telemetry-requests/"+uuid.NewString(), `{"enabled":true}`, c...)
+	if w.Code != 422 || errCode(t, w) != "observer_node" || !strings.Contains(w.Body.String(), "Observers report their own telemetry.") {
+		t.Errorf("enable an observer: %d %s", w.Code, w.Body)
+	}
 	f.err = errors.New("db down: password=hunter2")
-	w := call(h, "POST", "/me/telemetry-requests", body, c...)
+	w = call(h, "POST", "/me/telemetry-requests", body, c...)
 	if w.Code != 500 || strings.Contains(w.Body.String(), "hunter2") || strings.Contains(w.Body.String(), "db down") {
 		t.Errorf("internal: %d %s", w.Code, w.Body)
 	}

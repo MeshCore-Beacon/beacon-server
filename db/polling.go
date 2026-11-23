@@ -369,9 +369,15 @@ func electTarget(ctx context.Context, q *sqlc.Queries, target []byte, locked map
 		return err
 	}
 	in := polling.ElectionInput{}
-	var err error
-	if in.Cands, err = listPollingCandidates(ctx, q, target, receivedAfter, evidenceSince); err != nil {
+	// An observer reports its own telemetry: it gets no candidates, so any assignments it has are cleared.
+	observer, err := q.IsObserverKey(ctx, target)
+	if err != nil {
 		return err
+	}
+	if !observer {
+		if in.Cands, err = listPollingCandidates(ctx, q, target, receivedAfter, evidenceSince); err != nil {
+			return err
+		}
 	}
 	if in.Current, err = currentPoller(ctx, q, target); err != nil {
 		return err
@@ -384,7 +390,7 @@ func electTarget(ctx context.Context, q *sqlc.Queries, target []byte, locked map
 	if in.Requested && locked == nil {
 		return errNeedSeatLocks
 	}
-	if in.Requested {
+	if in.Requested && !observer {
 		if in.RequestCands, err = listRequestCandidates(ctx, q, target, receivedAfter, evidenceSince); err != nil {
 			return err
 		}
@@ -503,7 +509,7 @@ func (s *Store) PollingOwnerRows(ctx context.Context, observer []byte, receivedA
 		row := polling.OwnerRow{Target: r.TargetPublicKey, Rank: int(r.Rank), Assigned: int(r.Assigned),
 			Requested: r.Requested, ClaimedRequested: r.ClaimedRequested,
 			TargetRequested: r.TargetRequested, AcceptsRequests: r.AcceptsRequests, RequestSlots: int(r.RequestSlots),
-			ObserverApproved: r.ObserverApproved, ObserverBlocked: r.ObserverBlocked}
+			ObserverApproved: r.ObserverApproved, ObserverBlocked: r.ObserverBlocked, TargetIsObserver: r.TargetIsObserver}
 		if r.RequestID.Valid && r.PasswordVer != nil {
 			row.Password = &polling.RequestedPassword{RequestID: r.RequestID.Bytes, Ver: *r.PasswordVer, CT: r.PasswordCt, Nonce: r.PasswordNonce}
 		}

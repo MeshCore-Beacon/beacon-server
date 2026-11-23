@@ -159,6 +159,13 @@ func TestPollingCleanupKeepsReadingsForTheWorkingPollWindow(t *testing.T) {
 type offlineStub struct {
 	cutoff, now time.Time
 	reason      string
+	obsNow      time.Time
+	obsReason   string
+}
+
+func (s *offlineStub) DisableObserverRequests(_ context.Context, now time.Time, reason string) (int, error) {
+	s.obsNow, s.obsReason = now, reason
+	return 1, nil
 }
 
 func (s *offlineStub) DisableOfflineRequests(_ context.Context, cutoff, now time.Time, reason string) (int, error) {
@@ -181,5 +188,8 @@ func TestRequestsOfflineTask(t *testing.T) {
 	}
 	if !st.cutoff.Equal(now.AddDate(0, 0, -7)) || !st.now.Equal(now) || st.reason != "Not heard by any observer for 7 days." {
 		t.Fatalf("%+v", st)
+	}
+	if !st.obsNow.Equal(now) || st.obsReason != polling.ReasonObserver {
+		t.Fatalf("observer sweep: %+v", st)
 	}
 }

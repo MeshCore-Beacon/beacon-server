@@ -159,6 +159,17 @@ func (q *Queries) InsertTelemetryRequest(ctx context.Context, arg InsertTelemetr
 	return err
 }
 
+const isObserverKey = `-- name: IsObserverKey :one
+SELECT EXISTS (SELECT 1 FROM observers WHERE public_key = $1)
+`
+
+func (q *Queries) IsObserverKey(ctx context.Context, publicKey []byte) (bool, error) {
+	row := q.db.QueryRow(ctx, isObserverKey, publicKey)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const listNoPasswordBlocked = `-- name: ListNoPasswordBlocked :many
 SELECT target_public_key FROM polling_targets WHERE no_password_blocked ORDER BY target_public_key
 `
@@ -503,6 +514,35 @@ func (q *Queries) LockUserForRequests(ctx context.Context, id uuid.UUID) (uuid.U
 	return id_2, err
 }
 
+const observerRequestTargets = `-- name: ObserverRequestTargets :many
+SELECT DISTINCT r.target_public_key::bytea AS target_public_key
+FROM telemetry_requests r
+WHERE r.status IN ('waiting', 'active')
+  AND EXISTS (SELECT 1 FROM observers o WHERE o.public_key = r.target_public_key)
+ORDER BY 1
+`
+
+// Targets with a waiting or active request that are observers, which report their own telemetry.
+func (q *Queries) ObserverRequestTargets(ctx context.Context) ([][]byte, error) {
+	rows, err := q.db.Query(ctx, observerRequestTargets)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := [][]byte{}
+	for rows.Next() {
+		var target_public_key []byte
+		if err := rows.Scan(&target_public_key); err != nil {
+			return nil, err
+		}
+		items = append(items, target_public_key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const offlineRequestTargets = `-- name: OfflineRequestTargets :many
 SELECT r.target_public_key::bytea AS target_public_key
 FROM telemetry_requests r
@@ -607,20 +647,44 @@ func (q *Queries) RecordServedVersion(ctx context.Context, arg RecordServedVersi
 }
 
 const requestNode = `-- name: RequestNode :one
-SELECT public_key, node_type, COALESCE(name, '')::text AS name FROM nodes WHERE id = $1
+SELECT n.public_key, n.node_type, COALESCE(n.name, '')::text AS name,
+       EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer
+FROM nodes n WHERE n.id = $1
 `
 
 type RequestNodeRow struct {
-	PublicKey []byte `json:"public_key"`
-	NodeType  int16  `json:"node_type"`
-	Name      string `json:"name"`
+	PublicKey  []byte `json:"public_key"`
+	NodeType   int16  `json:"node_type"`
+	Name       string `json:"name"`
+	IsObserver bool   `json:"is_observer"`
 }
 
 func (q *Queries) RequestNode(ctx context.Context, id uuid.UUID) (RequestNodeRow, error) {
 	row := q.db.QueryRow(ctx, requestNode, id)
 	var i RequestNodeRow
-	err := row.Scan(&i.PublicKey, &i.NodeType, &i.Name)
+	err := row.Scan(
+		&i.PublicKey,
+		&i.NodeType,
+		&i.Name,
+		&i.IsObserver,
+	)
 	return i, err
+}
+
+const targetStillObserverRequested = `-- name: TargetStillObserverRequested :one
+SELECT EXISTS (
+    SELECT 1 FROM telemetry_requests r
+    WHERE r.target_public_key = $1 AND r.status IN ('waiting', 'active')
+      AND EXISTS (SELECT 1 FROM observers o WHERE o.public_key = r.target_public_key)
+)::boolean AS observer
+`
+
+// ObserverRequestTargets for one target, asked again under the target's lock.
+func (q *Queries) TargetStillObserverRequested(ctx context.Context, targetPublicKey []byte) (bool, error) {
+	row := q.db.QueryRow(ctx, targetStillObserverRequested, targetPublicKey)
+	var observer bool
+	err := row.Scan(&observer)
+	return observer, err
 }
 
 const targetStillOffline = `-- name: TargetStillOffline :one

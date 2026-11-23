@@ -18,11 +18,12 @@ import (
 
 // memRequests is an in-memory RequestStore that applies the same mutate contract as the database one.
 type memRequests struct {
-	nodes   map[uuid.UUID]RequestNode
-	states  map[string]*TargetState
-	owners  map[uuid.UUID][]byte // request id -> target
-	elected [][]byte
-	failFn  error
+	nodes     map[uuid.UUID]RequestNode
+	states    map[string]*TargetState
+	owners    map[uuid.UUID][]byte // request id -> target
+	elected   [][]byte
+	failFn    error
+	observers map[string]bool
 }
 
 func newMem() *memRequests {
@@ -35,6 +36,10 @@ func (m *memRequests) RequestNode(_ context.Context, id uuid.UUID) (RequestNode,
 		return RequestNode{}, ErrRequestNotFound
 	}
 	return n, nil
+}
+
+func (m *memRequests) IsObserverKey(_ context.Context, key []byte) (bool, error) {
+	return m.observers[string(key)], nil
 }
 
 func (m *memRequests) userCount(u uuid.UUID) int {
@@ -233,5 +238,45 @@ func TestClaimState(t *testing.T) {
 		if got := ClaimState(in); got != want {
 			t.Errorf("ClaimState(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestRequestServiceRefusesObservers(t *testing.T) {
+	ctx := context.Background()
+	s, m, _ := testRequestService(t, 3)
+	user := uuid.New()
+	obs := m.addNode(2, 5)
+	n := m.nodes[obs]
+	n.IsObserver = true
+	m.nodes[obs] = n
+	if _, err := s.Create(ctx, user, obs, nil); !errors.Is(err, ErrObserverNode) {
+		t.Fatalf("create on an observer: %v", err)
+	}
+	if len(m.states) != 0 || len(m.elected) != 0 {
+		t.Fatal("refused create stored or elected something")
+	}
+
+	// A request made before the node became an observer cannot be enabled again.
+	node := m.addNode(2, 6)
+	target := bytes.Repeat([]byte{6}, 32)
+	row, err := s.Create(ctx, user, node, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.states[string(target)].Disable(ReasonObserver, time.Now())
+	m.observers = map[string]bool{string(target): true}
+	m.elected = nil
+	if _, err := s.Update(ctx, user, row.ID, RequestUpdate{Enable: true}); !errors.Is(err, ErrObserverNode) {
+		t.Fatalf("enable on an observer: %v", err)
+	}
+	if st := m.states[string(target)].Requests[0]; st.Status != StatusDisabled || len(m.elected) != 0 {
+		t.Fatalf("refused enable changed the request: %+v", st)
+	}
+	// A password change alone is still allowed.
+	if _, err := s.Update(ctx, user, row.ID, RequestUpdate{SetPassword: true, Password: []byte("pw")}); err != nil {
+		t.Fatalf("password on an observer's request: %v", err)
+	}
+	if code, _ := ReasonCode(ReasonObserver); code != CodeObserver {
+		t.Fatalf("observer reason code: %q", code)
 	}
 }

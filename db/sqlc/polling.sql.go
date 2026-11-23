@@ -779,6 +779,7 @@ SELECT target_public_key::bytea AS target_public_key FROM (
     SELECT c.target_public_key FROM polling_candidates c
     JOIN polling_claims cl ON cl.observer_public_key = c.observer_public_key
     WHERE cl.received_at > $1
+      AND NOT EXISTS (SELECT 1 FROM observers o WHERE o.public_key = c.target_public_key)
     UNION
     SELECT a.target_public_key FROM polling_assignments a
     UNION
@@ -788,7 +789,8 @@ ORDER BY target_public_key
 `
 
 // A target with only expired claims is still listed while it has assignment rows, so the caller can clear them. A
-// requested target is always listed, so its requests move between waiting and active.
+// requested target is always listed, so its requests move between waiting and active. Observers are never polled, so
+// a claim alone does not list one; its leftover assignments still do, so they get cleared.
 func (q *Queries) ListPollingTargets(ctx context.Context, receivedAt pgtype.Timestamptz) ([][]byte, error) {
 	rows, err := q.db.Query(ctx, listPollingTargets, receivedAt)
 	if err != nil {
@@ -1265,7 +1267,8 @@ SELECT m.target_public_key::bytea AS target_public_key, COALESCE(a.rank, -1)::in
                WHERE pt.target_public_key = m.target_public_key AND pt.active_request_id IS NOT NULL) AS target_requested,
        cl.accepts_requests, cl.request_slots::int AS request_slots,
        COALESCE(po.approved, false)::boolean AS observer_approved, COALESCE(po.blocked, false)::boolean AS observer_blocked,
-       pr.id AS request_id, pt.ver AS password_ver, pr.password_ct, pr.password_nonce
+       pr.id AS request_id, pt.ver AS password_ver, pr.password_ct, pr.password_nonce,
+       EXISTS (SELECT 1 FROM observers o WHERE o.public_key = m.target_public_key) AS target_is_observer
 FROM mine m
 JOIN polling_claims cl ON cl.observer_public_key = $1
 LEFT JOIN polling_observers po ON po.observer_public_key = cl.observer_public_key
@@ -1299,6 +1302,7 @@ type PollingOwnerRowsRow struct {
 	PasswordVer      *int64             `json:"password_ver"`
 	PasswordCt       []byte             `json:"password_ct"`
 	PasswordNonce    []byte             `json:"password_nonce"`
+	TargetIsObserver bool               `json:"target_is_observer"`
 }
 
 // assigned counts the target's assignment rows. latest_ts only trusts readings from an assigned observer with
@@ -1333,6 +1337,7 @@ func (q *Queries) PollingOwnerRows(ctx context.Context, arg PollingOwnerRowsPara
 			&i.PasswordVer,
 			&i.PasswordCt,
 			&i.PasswordNonce,
+			&i.TargetIsObserver,
 		); err != nil {
 			return nil, err
 		}

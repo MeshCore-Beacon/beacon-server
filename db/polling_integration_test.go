@@ -653,7 +653,8 @@ func TestPollingObserverIndexesPostgres(t *testing.T) {
 func TestPollingElectionConcurrentPostgres(t *testing.T) {
 	ctx, pool, s := pollStore(t)
 	svc := polling.NewService(s, config.ResolvedPolling{Enabled: true}, time.Now, slog.New(slog.DiscardHandler))
-	x := pollKey(0xA)
+	// Clear of the observer keys below: an observer is never a polling target.
+	x := pollKey(0xF0)
 	now := time.Now().UTC().Truncate(time.Second)
 	claim := func(b byte) error {
 		o := pollKey(b)
@@ -661,7 +662,7 @@ func TestPollingElectionConcurrentPostgres(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		_, err = s.ReplacePollingClaim(ctx, pollClaim(o, now, 0xA), id, now)
+		_, err = s.ReplacePollingClaim(ctx, pollClaim(o, now, 0xF0), id, now)
 		return err
 	}
 	for b := byte(1); b <= 4; b++ {

@@ -16,10 +16,11 @@ const requestsOfflineInterval = time.Hour
 // RequestsMaintStore is what the offline rule needs; *db.Store satisfies it.
 type RequestsMaintStore interface {
 	DisableOfflineRequests(ctx context.Context, cutoff, now time.Time, reason string) (int, error)
+	DisableObserverRequests(ctx context.Context, now time.Time, reason string) (int, error)
 }
 
-// RequestTasks disables telemetry requests for repeaters no observer has heard for days days. The user starts a
-// disabled request again by hand.
+// RequestTasks disables telemetry requests for repeaters no observer has heard for days days, and for repeaters that
+// are observers. The user starts a disabled request again by hand.
 func RequestTasks(store RequestsMaintStore, days int) []Task {
 	return []Task{{Name: "requests_offline", Interval: requestsOfflineInterval, Run: func(ctx context.Context) error {
 		now := pollingNow()
@@ -27,6 +28,13 @@ func RequestTasks(store RequestsMaintStore, days int) []Task {
 		n, err := store.DisableOfflineRequests(ctx, now.AddDate(0, 0, -days), now, reason)
 		if n > 0 {
 			slog.Info("telemetry requests disabled for offline repeaters", "component", "background", "repeaters", n)
+		}
+		if err != nil {
+			return err
+		}
+		n, err = store.DisableObserverRequests(ctx, now, polling.ReasonObserver)
+		if n > 0 {
+			slog.Info("telemetry requests disabled for observers", "component", "background", "repeaters", n)
 		}
 		return err
 	}}}

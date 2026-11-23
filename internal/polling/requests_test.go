@@ -425,6 +425,7 @@ func TestReasonCodes(t *testing.T) {
 		{ReasonAdminStopped, "admin_stopped", 0},
 		{ReasonBlankBlocked, "blank_blocked", 0},
 		{ReasonOffline(7), "offline", 7},
+		{ReasonObserver, "observer", 0},
 		{ReasonOffline(1), "offline", 1},
 		{"something else", "other", 0},
 	} {

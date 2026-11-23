@@ -205,7 +205,12 @@ func (s *Store) RequestNode(ctx context.Context, nodeID uuid.UUID) (polling.Requ
 	if err != nil {
 		return polling.RequestNode{}, err
 	}
-	return polling.RequestNode{PublicKey: r.PublicKey, NodeType: r.NodeType, Name: r.Name}, nil
+	return polling.RequestNode{PublicKey: r.PublicKey, NodeType: r.NodeType, Name: r.Name, IsObserver: r.IsObserver}, nil
+}
+
+// IsObserverKey reports whether an observer has this public key.
+func (s *Store) IsObserverKey(ctx context.Context, key []byte) (bool, error) {
+	return s.q.IsObserverKey(ctx, key)
 }
 
 // UserRequestTarget returns the repeater of the user's request; anyone else's is polling.ErrRequestNotFound.
@@ -325,6 +330,37 @@ func (s *Store) DisableOfflineRequests(ctx context.Context, cutoff, now time.Tim
 			}
 			offline, err := q.TargetStillOffline(ctx, sqlc.TargetStillOfflineParams{TargetPublicKey: t, Cutoff: ts(cutoff)})
 			if err != nil || !offline {
+				return err
+			}
+			disabled++
+			return mutateRequestTarget(ctx, q, t, uuid.Nil, func(st *polling.TargetState) error {
+				st.Disable(reason, now)
+				return nil
+			})
+		})
+		if err != nil {
+			return 0, err
+		}
+	}
+	return disabled, nil
+}
+
+// DisableObserverRequests disables the waiting and active requests of every repeater that is also an observer, with
+// the reason. It returns how many repeaters it changed.
+func (s *Store) DisableObserverRequests(ctx context.Context, now time.Time, reason string) (int, error) {
+	targets, err := s.q.ObserverRequestTargets(ctx)
+	if err != nil {
+		return 0, err
+	}
+	disabled := 0
+	for _, t := range targets {
+		// Checked again under the lock: the observer may have aged out or the requests changed since the list.
+		err := s.pollTx(ctx, func(q *sqlc.Queries) error {
+			if err := q.LockPollingTarget(ctx, t); err != nil {
+				return err
+			}
+			still, err := q.TargetStillObserverRequested(ctx, t)
+			if err != nil || !still {
 				return err
 			}
 			disabled++

@@ -56,6 +56,8 @@ func requestError(w http.ResponseWriter, err error) {
 		respondCode(w, http.StatusConflict, "no_password_blocked", "This repeater gives admin access to a blank login. Enter a guest password.")
 	case errors.Is(err, polling.ErrNotARepeater):
 		respondCode(w, http.StatusUnprocessableEntity, "not_a_repeater", "Only repeaters and room servers can be requested.")
+	case errors.Is(err, polling.ErrObserverNode):
+		respondCode(w, http.StatusUnprocessableEntity, "observer_node", "Observers report their own telemetry.")
 	case errors.Is(err, polling.ErrPasswordInvalid):
 		respondCode(w, http.StatusUnprocessableEntity, "password_invalid", "The password must be 1 to 15 bytes and contain no zero byte.")
 	case errors.Is(err, polling.ErrRequestNotFound):
@@ -102,7 +104,7 @@ func listRequests(svc RequestsService) http.HandlerFunc {
 // @Success 201 {object} api.TelemetryRequest
 // @Failure 400,401,403,404,413,415,429,503 {object} map[string]APIError
 // @Failure 409 {object} map[string]APIError "request_limit, already_requested or no_password_blocked"
-// @Failure 422 {object} map[string]APIError "invalid_input, not_a_repeater or password_invalid"
+// @Failure 422 {object} map[string]APIError "invalid_input, not_a_repeater, observer_node or password_invalid"
 // @Router /me/telemetry-requests [post]
 func createRequest(svc RequestsService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -145,7 +147,7 @@ func passwordBytes(p *string) []byte {
 // @Success 200 {object} api.TelemetryRequest
 // @Failure 400,401,403,404,413,415,429,503 {object} map[string]APIError
 // @Failure 409 {object} map[string]APIError "no_password_blocked"
-// @Failure 422 {object} map[string]APIError "invalid_input or password_invalid"
+// @Failure 422 {object} map[string]APIError "invalid_input, observer_node or password_invalid"
 // @Router /me/telemetry-requests/{id} [patch]
 func updateRequest(svc RequestsService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

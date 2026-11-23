@@ -65,7 +65,28 @@ WHERE r.user_id = sqlc.arg(user_id)
 ORDER BY r.created_at, r.id;
 
 -- name: RequestNode :one
-SELECT public_key, node_type, COALESCE(name, '')::text AS name FROM nodes WHERE id = $1;
+SELECT n.public_key, n.node_type, COALESCE(n.name, '')::text AS name,
+       EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer
+FROM nodes n WHERE n.id = $1;
+
+-- name: IsObserverKey :one
+SELECT EXISTS (SELECT 1 FROM observers WHERE public_key = $1);
+
+-- name: ObserverRequestTargets :many
+-- Targets with a waiting or active request that are observers, which report their own telemetry.
+SELECT DISTINCT r.target_public_key::bytea AS target_public_key
+FROM telemetry_requests r
+WHERE r.status IN ('waiting', 'active')
+  AND EXISTS (SELECT 1 FROM observers o WHERE o.public_key = r.target_public_key)
+ORDER BY 1;
+
+-- name: TargetStillObserverRequested :one
+-- ObserverRequestTargets for one target, asked again under the target's lock.
+SELECT EXISTS (
+    SELECT 1 FROM telemetry_requests r
+    WHERE r.target_public_key = $1 AND r.status IN ('waiting', 'active')
+      AND EXISTS (SELECT 1 FROM observers o WHERE o.public_key = r.target_public_key)
+)::boolean AS observer;
 
 -- name: InsertPollingAdminStop :execrows
 INSERT INTO polling_admin_stops (target_public_key, observer_public_key, reported_at) VALUES ($1, $2, $3)

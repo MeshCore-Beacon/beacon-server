@@ -4138,7 +4138,7 @@ const docTemplate = `{
                         }
                     },
                     "422": {
-                        "description": "invalid_input, not_a_repeater or password_invalid",
+                        "description": "invalid_input, not_a_repeater, observer_node or password_invalid",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -4347,7 +4347,7 @@ const docTemplate = `{
                         }
                     },
                     "422": {
-                        "description": "invalid_input or password_invalid",
+                        "description": "invalid_input, observer_node or password_invalid",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -11402,7 +11402,7 @@ const docTemplate = `{
                     "example": "No observer can reach this repeater yet."
                 },
                 "statusReasonCode": {
-                    "description": "StatusReasonCode is a stable code for the reason: no_observer, no_seat, login_failed, blank_login_failed,\nadmin_stopped, blank_blocked, offline or other; empty when there is no reason.",
+                    "description": "StatusReasonCode is a stable code for the reason: no_observer, no_seat, login_failed, blank_login_failed,\nadmin_stopped, blank_blocked, offline, observer or other; empty when there is no reason.",
                     "type": "string",
                     "example": "no_observer"
                 },

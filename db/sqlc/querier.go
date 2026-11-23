@@ -400,6 +400,7 @@ type Querier interface {
 	InsertRepeaterReading(ctx context.Context, arg InsertRepeaterReadingParams) (int64, error)
 	InsertTelemetryRequest(ctx context.Context, arg InsertTelemetryRequestParams) error
 	InsertUserAtlasPin(ctx context.Context, arg InsertUserAtlasPinParams) error
+	IsObserverKey(ctx context.Context, publicKey []byte) (bool, error)
 	// Newest trusted battery and temperature per polled node since a time, driven by polled targets, not all nodes.
 	// The received_at bound lets the BRIN index prune the history scan for readings of unassigned targets.
 	LatestNodeReadings(ctx context.Context, arg LatestNodeReadingsParams) ([]LatestNodeReadingsRow, error)
@@ -600,7 +601,8 @@ type Querier interface {
 	ListPollingCandidates(ctx context.Context, arg ListPollingCandidatesParams) ([]ListPollingCandidatesRow, error)
 	ListPollingObservers(ctx context.Context) ([]PollingObserver, error)
 	// A target with only expired claims is still listed while it has assignment rows, so the caller can clear them. A
-	// requested target is always listed, so its requests move between waiting and active.
+	// requested target is always listed, so its requests move between waiting and active. Observers are never polled, so
+	// a claim alone does not list one; its leftover assignments still do, so they get cleared.
 	ListPollingTargets(ctx context.Context, receivedAt pgtype.Timestamptz) ([][]byte, error)
 	// Every region with its members, for reconciling imported MeshMapper groups.
 	ListRegionState(ctx context.Context) ([]ListRegionStateRow, error)
@@ -706,6 +708,8 @@ type Querier interface {
 	ObservationIDBelow(ctx context.Context, arg ObservationIDBelowParams) (int64, error)
 	ObserverIDsByKeys(ctx context.Context, dollar_1 [][]byte) ([]ObserverIDsByKeysRow, error)
 	ObserverKeysByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]ObserverKeysByIDsRow, error)
+	// Targets with a waiting or active request that are observers, which report their own telemetry.
+	ObserverRequestTargets(ctx context.Context) ([][]byte, error)
 	// Targets with a waiting or active request whose node no observer has heard since cutoff and whose newest such
 	// request was enabled before it. Requests with no node row count from the enabling alone.
 	OfflineRequestTargets(ctx context.Context, cutoff pgtype.Timestamptz) ([][]byte, error)
@@ -868,6 +872,8 @@ type Querier interface {
 	// The ORDER BY ... LIMIT keeps every lateral a per-front index range scan (never flattened into a join).
 	// The cap is far above any front's 2-minute volume (the busiest site: about 150 entries) and only bounds the gauge.
 	SweepPacketSitesFronts(ctx context.Context, lookback pgtype.Interval) (SweepPacketSitesFrontsRow, error)
+	// ObserverRequestTargets for one target, asked again under the target's lock.
+	TargetStillObserverRequested(ctx context.Context, targetPublicKey []byte) (bool, error)
 	// OfflineRequestTargets for one target, asked again under the target's lock before its requests are disabled.
 	TargetStillOffline(ctx context.Context, arg TargetStillOfflineParams) (bool, error)
 	TelemetryRequestTarget(ctx context.Context, arg TelemetryRequestTargetParams) ([]byte, error)

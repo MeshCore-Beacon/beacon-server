@@ -202,6 +202,8 @@ type OwnerRow struct {
 	PollerHops int
 	LatestTS   *time.Time
 	Excluded   bool
+	// TargetIsObserver: the target is an observer, which reports its own telemetry and is never polled.
+	TargetIsObserver bool
 	// Requested: the observer is assigned the target as a requested one. ClaimedRequested: its claim names it as
 	// one. PWOK: the entry may be offered (OfferSeats).
 	Requested, ClaimedRequested, PWOK bool

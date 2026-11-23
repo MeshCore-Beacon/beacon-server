@@ -37,7 +37,7 @@ type TelemetryRequest struct {
 	Status       string               `json:"status" enums:"waiting,active,login_failed,admin_stopped,disabled"`
 	StatusReason string               `json:"statusReason" example:"No observer can reach this repeater yet."`
 	// StatusReasonCode is a stable code for the reason: no_observer, no_seat, login_failed, blank_login_failed,
-	// admin_stopped, blank_blocked, offline or other; empty when there is no reason.
+	// admin_stopped, blank_blocked, offline, observer or other; empty when there is no reason.
 	StatusReasonCode string `json:"statusReasonCode" example:"no_observer"`
 	// StatusReasonDays is the number of days of the offline reason; omitted for any other.
 	StatusReasonDays *int                    `json:"statusReasonDays,omitempty" example:"7"`

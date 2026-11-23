@@ -34,6 +34,7 @@ const (
 	ReasonBlankFailed  = "The repeater did not accept a blank or hello login. Enter a guest password."
 	ReasonAdminStopped = "The repeater gave admin access to this password, so Beacon deleted it. Enter a guest password, never an admin one."
 	ReasonBlankBlocked = "This repeater gives admin access to a blank login, so Beacon will not poll it without a guest password."
+	ReasonObserver     = "This node is an observer and reports its own telemetry."
 )
 
 // ReasonOffline is the reason a request is disabled when no observer has heard its repeater for days days.
@@ -55,6 +56,7 @@ const (
 	CodeAdminStopped = "admin_stopped"
 	CodeBlankBlocked = "blank_blocked"
 	CodeOffline      = "offline"
+	CodeObserver     = "observer"
 	CodeOther        = "other"
 )
 
@@ -76,6 +78,8 @@ func ReasonCode(reason string) (code string, days int) {
 		return CodeAdminStopped, 0
 	case ReasonBlankBlocked:
 		return CodeBlankBlocked, 0
+	case ReasonObserver:
+		return CodeObserver, 0
 	}
 	if m := offlineReason.FindStringSubmatch(reason); m != nil {
 		n, err := strconv.Atoi(m[1])
@@ -94,6 +98,7 @@ var (
 	ErrNoPasswordBlocked = errors.New("polling: this repeater grants admin to a blank login")
 	ErrRequestNotFound   = errors.New("polling: request not found")
 	ErrRequestsDisabled  = errors.New("polling: telemetry requests are off")
+	ErrObserverNode      = errors.New("polling: the node is an observer")
 )
 
 // LoginFailedGrace is how long after a password change a login_failed report is ignored, unless the observer has

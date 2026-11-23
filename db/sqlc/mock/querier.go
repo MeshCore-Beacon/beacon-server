@@ -2805,6 +2805,21 @@ func (mr *MockQuerierMockRecorder) InsertUserAtlasPin(ctx, arg any) *gomock.Call
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InsertUserAtlasPin", reflect.TypeOf((*MockQuerier)(nil).InsertUserAtlasPin), ctx, arg)
 }
 
+// IsObserverKey mocks base method.
+func (m *MockQuerier) IsObserverKey(ctx context.Context, publicKey []byte) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsObserverKey", ctx, publicKey)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// IsObserverKey indicates an expected call of IsObserverKey.
+func (mr *MockQuerierMockRecorder) IsObserverKey(ctx, publicKey any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsObserverKey", reflect.TypeOf((*MockQuerier)(nil).IsObserverKey), ctx, publicKey)
+}
+
 // LatestNodeReadings mocks base method.
 func (m *MockQuerier) LatestNodeReadings(ctx context.Context, arg db.LatestNodeReadingsParams) ([]db.LatestNodeReadingsRow, error) {
 	m.ctrl.T.Helper()
@@ -4626,6 +4641,21 @@ func (mr *MockQuerierMockRecorder) ObserverKeysByIDs(ctx, dollar_1 any) *gomock.
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ObserverKeysByIDs", reflect.TypeOf((*MockQuerier)(nil).ObserverKeysByIDs), ctx, dollar_1)
 }
 
+// ObserverRequestTargets mocks base method.
+func (m *MockQuerier) ObserverRequestTargets(ctx context.Context) ([][]byte, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ObserverRequestTargets", ctx)
+	ret0, _ := ret[0].([][]byte)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ObserverRequestTargets indicates an expected call of ObserverRequestTargets.
+func (mr *MockQuerierMockRecorder) ObserverRequestTargets(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ObserverRequestTargets", reflect.TypeOf((*MockQuerier)(nil).ObserverRequestTargets), ctx)
+}
+
 // OfflineRequestTargets mocks base method.
 func (m *MockQuerier) OfflineRequestTargets(ctx context.Context, cutoff pgtype.Timestamptz) ([][]byte, error) {
 	m.ctrl.T.Helper()
@@ -5728,6 +5758,21 @@ func (m *MockQuerier) SweepPacketSitesFronts(ctx context.Context, lookback pgtyp
 func (mr *MockQuerierMockRecorder) SweepPacketSitesFronts(ctx, lookback any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SweepPacketSitesFronts", reflect.TypeOf((*MockQuerier)(nil).SweepPacketSitesFronts), ctx, lookback)
+}
+
+// TargetStillObserverRequested mocks base method.
+func (m *MockQuerier) TargetStillObserverRequested(ctx context.Context, targetPublicKey []byte) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TargetStillObserverRequested", ctx, targetPublicKey)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// TargetStillObserverRequested indicates an expected call of TargetStillObserverRequested.
+func (mr *MockQuerierMockRecorder) TargetStillObserverRequested(ctx, targetPublicKey any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TargetStillObserverRequested", reflect.TypeOf((*MockQuerier)(nil).TargetStillObserverRequested), ctx, targetPublicKey)
 }
 
 // TargetStillOffline mocks base method.
