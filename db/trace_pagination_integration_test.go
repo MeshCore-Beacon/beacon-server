@@ -38,6 +38,7 @@ func TestTraceTagPaginationPostgres(t *testing.T) {
 	}
 	defer tx.Rollback(context.Background())
 	applyBaseline(t, ctx, tx)
+	applyMigrationsTx(t, ctx, tx, "088_trace_summary_reached_hops.sql")
 	if _, err := tx.Exec(ctx, `INSERT INTO transport_scopes (id,name,transport_key,key_fingerprint) VALUES
  (1,'scope-one',decode(repeat('01',16),'hex'),decode(repeat('01',8),'hex')),
  (2,'scope-two',decode(repeat('02',16),'hex'),decode(repeat('02',8),'hex'))`); err != nil {
@@ -195,15 +196,27 @@ func TestTraceSummaryLongestReachedPostgres(t *testing.T) {
 	}
 	check()
 
+	// A writer from before this migration still supplies the requested length.
+	// Its five-hop plan with only one reading must not displace three reached hops.
+	if _, err := pool.Exec(ctx, `INSERT INTO trace_tags(trace_tag, first_heard_at, last_heard_at, best_payload, best_path_len)
+		VALUES ($1, now(), now(), '{"pathHashes":["a1","b2","c3","d4","e5"],"snrValues":[0]}', 5)
+		ON CONFLICT (trace_tag) DO UPDATE SET best_payload=EXCLUDED.best_payload, best_path_len=EXCLUDED.best_path_len
+		WHERE EXCLUDED.best_path_len > trace_tags.best_path_len`, tag); err != nil {
+		t.Fatal(err)
+	}
+	check()
+
 	// Recreate the old score for this tag and a summary whose best packet has expired.
+	if _, err := pool.Exec(ctx, `DELETE FROM schema_migrations WHERE filename='088_trace_summary_reached_hops.sql';
+		DROP TRIGGER score_trace_observation ON trace_tags;
+		DROP FUNCTION set_trace_reached_hops(), trace_reached_hops(jsonb)`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pool.Exec(ctx, `UPDATE trace_tags SET best_payload=(SELECT parsed_payload FROM packets WHERE packet_hash=$1), best_path_len=5 WHERE trace_tag=$2`, []byte{3}, tag); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO trace_tags(trace_tag,first_heard_at,last_heard_at,packet_count,best_payload,best_path_len)
 		VALUES ('\xaa',now(),now(),7,$1::jsonb,4)`, best); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, `DELETE FROM schema_migrations WHERE filename='088_trace_summary_reached_hops.sql'; DROP FUNCTION trace_reached_hops(jsonb)`); err != nil {
 		t.Fatal(err)
 	}
 	if err := RunMigrations(ctx, pool); err != nil {

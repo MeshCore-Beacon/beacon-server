@@ -12,6 +12,19 @@ LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
     ) END
 $$;
 
+-- Older ingest binaries supply the requested length explicitly. Normalize it
+-- before ON CONFLICT compares the incoming score with the saved observation.
+CREATE FUNCTION set_trace_reached_hops() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    NEW.best_path_len := trace_reached_hops(NEW.best_payload);
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER score_trace_observation BEFORE INSERT ON trace_tags
+FOR EACH ROW WHEN (NEW.best_payload IS NOT NULL) EXECUTE FUNCTION set_trace_reached_hops();
+
 -- The summary may outlive its packets. Keep its saved observation on an equal score,
 -- or replace it with a retained packet that reached more hops.
 WITH candidates AS (

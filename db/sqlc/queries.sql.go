@@ -8432,9 +8432,8 @@ ON CONFLICT (packet_hash) DO UPDATE SET
 RETURNING packet_hash, payload_type, payload_version, route_type, transport_codes_present, region_code, sub_region_code, origin_pubkey, raw_payload, raw_header, parsed_payload, decrypted, channel_hash, first_heard_at, last_heard_at, trace_tag, scope_id, (xmax = 0)
 AS inserted
 ), trace AS (
-  INSERT INTO trace_tags (trace_tag, first_heard_at, last_heard_at, packet_count, trace_type, scope_id, best_payload, best_path_len)
-  SELECT u.trace_tag, u.first_heard_at, u.last_heard_at, 1, u.parsed_payload->>'type', u.scope_id, u.parsed_payload,
-         trace_reached_hops(u.parsed_payload)
+  INSERT INTO trace_tags (trace_tag, first_heard_at, last_heard_at, packet_count, trace_type, scope_id, best_payload)
+  SELECT u.trace_tag, u.first_heard_at, u.last_heard_at, 1, u.parsed_payload->>'type', u.scope_id, u.parsed_payload
   FROM up u
   WHERE u.inserted AND u.trace_tag IS NOT NULL
   ON CONFLICT (trace_tag) DO UPDATE SET
