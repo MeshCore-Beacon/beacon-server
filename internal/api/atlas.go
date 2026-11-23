@@ -68,7 +68,7 @@ func (p AtlasPin) MarshalJSON() ([]byte, error) {
 // Atlas is the answer to GET and PUT /me/atlas.
 type Atlas struct {
 	Revision int64      `json:"revision" example:"7"`
-	Range    string     `json:"range" enums:"24h,3d"`
+	Range    string     `json:"range" enums:"24h,3d,7d"`
 	Limit    int        `json:"limit" example:"20"`
 	Pins     []AtlasPin `json:"pins"`
 }
@@ -101,7 +101,7 @@ type AtlasPinInput struct {
 // PutAtlasRequest replaces the whole Atlas when BaseRevision is the stored revision.
 type PutAtlasRequest struct {
 	BaseRevision int64           `json:"baseRevision" example:"7"`
-	Range        string          `json:"range" enums:"24h,3d"`
+	Range        string          `json:"range" enums:"24h,3d,7d"`
 	Pins         []AtlasPinInput `json:"pins"`
 }
 
@@ -146,8 +146,8 @@ func ValidateAtlasPut(req PutAtlasRequest, observerKeys map[uuid.UUID][]byte, li
 	if req.BaseRevision < 0 {
 		return "", nil, &AtlasInvalid{"baseRevision must not be negative"}
 	}
-	if req.Range != "24h" && req.Range != "3d" {
-		return "", nil, &AtlasInvalid{"range must be 24h or 3d"}
+	if req.Range != "24h" && req.Range != "3d" && req.Range != "7d" {
+		return "", nil, &AtlasInvalid{"range must be 24h, 3d or 7d"}
 	}
 	if len(req.Pins) > limit {
 		return "", nil, &AtlasInvalid{fmt.Sprintf("at most %d pins", limit)}

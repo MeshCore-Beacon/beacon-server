@@ -145,6 +145,19 @@ func TestMeAtlas(t *testing.T) {
 	if w := call(h, "PUT", "/me/atlas", `{"baseRevision":3,"range":"24h","pins":[],"x":1}`, c...); w.Code != 400 {
 		t.Fatalf("unknown field: %d", w.Code)
 	}
+
+	// 7d saves and reads back; a range the server does not know is 422.
+	w = call(h, "PUT", "/me/atlas", `{"baseRevision":3,"range":"7d","pins":[]}`, c...)
+	if b = jsonBody(t, w); w.Code != 200 || b["revision"] != float64(4) || b["range"] != "7d" {
+		t.Fatalf("7d put: %d %s", w.Code, w.Body)
+	}
+	w = call(h, "GET", "/me/atlas", "", c...)
+	if b = jsonBody(t, w); w.Code != 200 || b["revision"] != float64(4) || b["range"] != "7d" {
+		t.Fatalf("7d get: %d %s", w.Code, w.Body)
+	}
+	if w := call(h, "PUT", "/me/atlas", `{"baseRevision":4,"range":"30d","pins":[]}`, c...); w.Code != 422 || !strings.Contains(w.Body.String(), "range must be 24h, 3d or 7d") {
+		t.Fatalf("bad range: %d %s", w.Code, w.Body)
+	}
 }
 
 func TestMeAtlasGuards(t *testing.T) {

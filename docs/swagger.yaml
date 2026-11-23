@@ -363,6 +363,7 @@ definitions:
         enum:
         - 24h
         - 3d
+        - 7d
         type: string
       revision:
         example: 7
@@ -767,6 +768,11 @@ definitions:
       appDeviceLabel:
         description: AppDeviceLabel is true when POST /auth/app/token takes a deviceLabel.
           Always true on this version.
+        example: true
+        type: boolean
+      atlas7d:
+        description: Atlas7d is true when the server accepts the 7d Atlas range. Always
+          true on this version.
         example: true
         type: boolean
       atlasTelemetry:
@@ -2253,6 +2259,7 @@ definitions:
         enum:
         - 24h
         - 3d
+        - 7d
         type: string
     type: object
   github_com_MeshCore-Beacon_beacon-server_internal_api.RadioPreset:

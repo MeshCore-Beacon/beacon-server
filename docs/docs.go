@@ -8127,7 +8127,8 @@ const docTemplate = `{
                     "type": "string",
                     "enum": [
                         "24h",
-                        "3d"
+                        "3d",
+                        "7d"
                     ]
                 },
                 "revision": {
@@ -8713,6 +8714,11 @@ const docTemplate = `{
                 },
                 "appDeviceLabel": {
                     "description": "AppDeviceLabel is true when POST /auth/app/token takes a deviceLabel. Always true on this version.",
+                    "type": "boolean",
+                    "example": true
+                },
+                "atlas7d": {
+                    "description": "Atlas7d is true when the server accepts the 7d Atlas range. Always true on this version.",
                     "type": "boolean",
                     "example": true
                 },
@@ -10795,7 +10801,8 @@ const docTemplate = `{
                     "type": "string",
                     "enum": [
                         "24h",
-                        "3d"
+                        "3d",
+                        "7d"
                     ]
                 }
             }

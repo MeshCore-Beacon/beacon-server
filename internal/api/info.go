@@ -72,6 +72,8 @@ type InfoFeatures struct {
 	// AtlasTelemetry is true when the server accepts the telemetry view and telemetryTiles on Atlas pins and the 72h
 	// node telemetry range. Always true on this version.
 	AtlasTelemetry bool `json:"atlasTelemetry" example:"true"`
+	// Atlas7d is true when the server accepts the 7d Atlas range. Always true on this version.
+	Atlas7d bool `json:"atlas7d" example:"true"`
 	// MapTelemetry is true when the server returns recent telemetry readings for map labels. Always true on this version.
 	MapTelemetry bool `json:"mapTelemetry" example:"true"`
 	// AppDeviceLabel is true when POST /auth/app/token takes a deviceLabel. Always true on this version.
