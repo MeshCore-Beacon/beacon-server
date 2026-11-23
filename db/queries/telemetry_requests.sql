@@ -65,27 +65,32 @@ WHERE r.user_id = sqlc.arg(user_id)
 ORDER BY r.created_at, r.id;
 
 -- name: RequestNode :one
+-- An observer counts only while it sends status (status_after): rows are never deleted and a status can be spoofed.
 SELECT n.public_key, n.node_type, COALESCE(n.name, '')::text AS name,
-       EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer
-FROM nodes n WHERE n.id = $1;
+       EXISTS (SELECT 1 FROM observers o
+               WHERE o.public_key = n.public_key AND o.last_status_at >= sqlc.arg(status_after)) AS is_observer
+FROM nodes n WHERE n.id = sqlc.arg(id);
 
 -- name: IsObserverKey :one
-SELECT EXISTS (SELECT 1 FROM observers WHERE public_key = $1);
+-- An observer that sent status since status_after, as in RequestNode.
+SELECT EXISTS (SELECT 1 FROM observers WHERE public_key = sqlc.arg(public_key) AND last_status_at >= sqlc.arg(status_after));
 
 -- name: ObserverRequestTargets :many
--- Targets with a waiting or active request that are observers, which report their own telemetry.
+-- Targets with a waiting or active request that are observers which sent status since status_after.
 SELECT DISTINCT r.target_public_key::bytea AS target_public_key
 FROM telemetry_requests r
 WHERE r.status IN ('waiting', 'active')
-  AND EXISTS (SELECT 1 FROM observers o WHERE o.public_key = r.target_public_key)
+  AND EXISTS (SELECT 1 FROM observers o
+              WHERE o.public_key = r.target_public_key AND o.last_status_at >= sqlc.arg(status_after))
 ORDER BY 1;
 
 -- name: TargetStillObserverRequested :one
 -- ObserverRequestTargets for one target, asked again under the target's lock.
 SELECT EXISTS (
     SELECT 1 FROM telemetry_requests r
-    WHERE r.target_public_key = $1 AND r.status IN ('waiting', 'active')
-      AND EXISTS (SELECT 1 FROM observers o WHERE o.public_key = r.target_public_key)
+    WHERE r.target_public_key = sqlc.arg(target_public_key) AND r.status IN ('waiting', 'active')
+      AND EXISTS (SELECT 1 FROM observers o
+                  WHERE o.public_key = r.target_public_key AND o.last_status_at >= sqlc.arg(status_after))
 )::boolean AS observer;
 
 -- name: InsertPollingAdminStop :execrows

@@ -42,6 +42,11 @@ func (s *Store) ObserverID(ctx context.Context, pubkey []byte) (uuid.UUID, error
 	return id, err
 }
 
+// observerStatusAfter is the oldest status that still makes a key an observer, which is never polled.
+func observerStatusAfter(now time.Time) pgtype.Timestamptz {
+	return ts(now.Add(-polling.ObserverActiveWindow))
+}
+
 // clipText cuts s to at most n bytes on a rune boundary and drops NULs, which text columns refuse.
 func clipText(s string, n int) string {
 	s = strings.ReplaceAll(s, "\x00", "")
@@ -231,7 +236,7 @@ func (s *Store) HasLivePollingCandidate(ctx context.Context, observer, target []
 // ListPollingTargets lists targets with a live candidate or any assignment row, so assignments of
 // targets whose claims all expired are still reachable to be cleared.
 func (s *Store) ListPollingTargets(ctx context.Context, receivedAfter time.Time) ([][]byte, error) {
-	return s.q.ListPollingTargets(ctx, ts(receivedAfter))
+	return s.q.ListPollingTargets(ctx, sqlc.ListPollingTargetsParams{ReceivedAfter: ts(receivedAfter), StatusAfter: observerStatusAfter(time.Now())})
 }
 
 func (s *Store) ListPollingCandidates(ctx context.Context, target []byte, receivedAfter, evidenceSince time.Time) ([]polling.Candidate, error) {
@@ -370,7 +375,7 @@ func electTarget(ctx context.Context, q *sqlc.Queries, target []byte, locked map
 	}
 	in := polling.ElectionInput{}
 	// An observer reports its own telemetry: it gets no candidates, so any assignments it has are cleared.
-	observer, err := q.IsObserverKey(ctx, target)
+	observer, err := q.IsObserverKey(ctx, sqlc.IsObserverKeyParams{PublicKey: target, StatusAfter: observerStatusAfter(at)})
 	if err != nil {
 		return err
 	}
@@ -500,7 +505,8 @@ func listRequestCandidates(ctx context.Context, q sqlc.Querier, target []byte, r
 }
 
 func (s *Store) PollingOwnerRows(ctx context.Context, observer []byte, receivedAfter time.Time) ([]polling.OwnerRow, error) {
-	rows, err := s.q.PollingOwnerRows(ctx, sqlc.PollingOwnerRowsParams{ObserverPublicKey: observer, ReceivedAt: ts(receivedAfter)})
+	rows, err := s.q.PollingOwnerRows(ctx, sqlc.PollingOwnerRowsParams{ObserverPublicKey: observer, ReceivedAt: ts(receivedAfter),
+		StatusAfter: observerStatusAfter(time.Now())})
 	if err != nil {
 		return nil, err
 	}

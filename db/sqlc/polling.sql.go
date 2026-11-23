@@ -779,7 +779,8 @@ SELECT target_public_key::bytea AS target_public_key FROM (
     SELECT c.target_public_key FROM polling_candidates c
     JOIN polling_claims cl ON cl.observer_public_key = c.observer_public_key
     WHERE cl.received_at > $1
-      AND NOT EXISTS (SELECT 1 FROM observers o WHERE o.public_key = c.target_public_key)
+      AND NOT EXISTS (SELECT 1 FROM observers o
+                      WHERE o.public_key = c.target_public_key AND o.last_status_at >= $2)
     UNION
     SELECT a.target_public_key FROM polling_assignments a
     UNION
@@ -788,11 +789,16 @@ SELECT target_public_key::bytea AS target_public_key FROM (
 ORDER BY target_public_key
 `
 
+type ListPollingTargetsParams struct {
+	ReceivedAfter pgtype.Timestamptz `json:"received_after"`
+	StatusAfter   pgtype.Timestamptz `json:"status_after"`
+}
+
 // A target with only expired claims is still listed while it has assignment rows, so the caller can clear them. A
-// requested target is always listed, so its requests move between waiting and active. Observers are never polled, so
-// a claim alone does not list one; its leftover assignments still do, so they get cleared.
-func (q *Queries) ListPollingTargets(ctx context.Context, receivedAt pgtype.Timestamptz) ([][]byte, error) {
-	rows, err := q.db.Query(ctx, listPollingTargets, receivedAt)
+// requested target is always listed, so its requests move between waiting and active. An observer that sent status
+// since status_after is never polled, so a claim alone does not list one; leftover assignments still do, to clear them.
+func (q *Queries) ListPollingTargets(ctx context.Context, arg ListPollingTargetsParams) ([][]byte, error) {
+	rows, err := q.db.Query(ctx, listPollingTargets, arg.ReceivedAfter, arg.StatusAfter)
 	if err != nil {
 		return nil, err
 	}
@@ -1248,10 +1254,10 @@ func (q *Queries) PollingObserverFlags(ctx context.Context, observerPublicKey []
 
 const pollingOwnerRows = `-- name: PollingOwnerRows :many
 WITH mine AS (
-    SELECT c.target_public_key FROM polling_candidates c WHERE c.observer_public_key = $1
+    SELECT c.target_public_key FROM polling_candidates c WHERE c.observer_public_key = $2
     UNION
     SELECT a.target_public_key FROM polling_assignments a
-    WHERE a.observer_public_key = $1 AND a.requested
+    WHERE a.observer_public_key = $2 AND a.requested
 )
 SELECT m.target_public_key::bytea AS target_public_key, COALESCE(a.rank, -1)::int AS rank,
        (SELECT count(*) FROM polling_assignments x WHERE x.target_public_key = m.target_public_key)::int AS assigned,
@@ -1268,20 +1274,22 @@ SELECT m.target_public_key::bytea AS target_public_key, COALESCE(a.rank, -1)::in
        cl.accepts_requests, cl.request_slots::int AS request_slots,
        COALESCE(po.approved, false)::boolean AS observer_approved, COALESCE(po.blocked, false)::boolean AS observer_blocked,
        pr.id AS request_id, pt.ver AS password_ver, pr.password_ct, pr.password_nonce,
-       EXISTS (SELECT 1 FROM observers o WHERE o.public_key = m.target_public_key) AS target_is_observer
+       EXISTS (SELECT 1 FROM observers o
+               WHERE o.public_key = m.target_public_key AND o.last_status_at >= $1) AS target_is_observer
 FROM mine m
-JOIN polling_claims cl ON cl.observer_public_key = $1
+JOIN polling_claims cl ON cl.observer_public_key = $2
 LEFT JOIN polling_observers po ON po.observer_public_key = cl.observer_public_key
 LEFT JOIN polling_candidates pc ON pc.observer_public_key = cl.observer_public_key AND pc.target_public_key = m.target_public_key
 LEFT JOIN polling_assignments a ON a.target_public_key = m.target_public_key AND a.observer_public_key = cl.observer_public_key
 LEFT JOIN polling_targets pt ON pt.target_public_key = m.target_public_key
     AND a.requested AND cl.accepts_requests AND NOT COALESCE(po.blocked, false)
 LEFT JOIN telemetry_requests pr ON pr.id = pt.active_request_id
-WHERE cl.received_at > $2
+WHERE cl.received_at > $3
 ORDER BY m.target_public_key
 `
 
 type PollingOwnerRowsParams struct {
+	StatusAfter       pgtype.Timestamptz `json:"status_after"`
 	ObserverPublicKey []byte             `json:"observer_public_key"`
 	ReceivedAt        pgtype.Timestamptz `json:"received_at"`
 }
@@ -1313,7 +1321,7 @@ type PollingOwnerRowsRow struct {
 // in use come from the same statement, so an answer never pairs a password with an approval it did not exist under.
 // The password is only read for a requested assignment of an unblocked observer whose claim accepts requests.
 func (q *Queries) PollingOwnerRows(ctx context.Context, arg PollingOwnerRowsParams) ([]PollingOwnerRowsRow, error) {
-	rows, err := q.db.Query(ctx, pollingOwnerRows, arg.ObserverPublicKey, arg.ReceivedAt)
+	rows, err := q.db.Query(ctx, pollingOwnerRows, arg.StatusAfter, arg.ObserverPublicKey, arg.ReceivedAt)
 	if err != nil {
 		return nil, err
 	}

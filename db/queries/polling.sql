@@ -65,13 +65,14 @@ SELECT EXISTS (
 
 -- name: ListPollingTargets :many
 -- A target with only expired claims is still listed while it has assignment rows, so the caller can clear them. A
--- requested target is always listed, so its requests move between waiting and active. Observers are never polled, so
--- a claim alone does not list one; its leftover assignments still do, so they get cleared.
+-- requested target is always listed, so its requests move between waiting and active. An observer that sent status
+-- since status_after is never polled, so a claim alone does not list one; leftover assignments still do, to clear them.
 SELECT target_public_key::bytea AS target_public_key FROM (
     SELECT c.target_public_key FROM polling_candidates c
     JOIN polling_claims cl ON cl.observer_public_key = c.observer_public_key
-    WHERE cl.received_at > $1
-      AND NOT EXISTS (SELECT 1 FROM observers o WHERE o.public_key = c.target_public_key)
+    WHERE cl.received_at > sqlc.arg(received_after)
+      AND NOT EXISTS (SELECT 1 FROM observers o
+                      WHERE o.public_key = c.target_public_key AND o.last_status_at >= sqlc.arg(status_after))
     UNION
     SELECT a.target_public_key FROM polling_assignments a
     UNION
@@ -233,7 +234,8 @@ SELECT m.target_public_key::bytea AS target_public_key, COALESCE(a.rank, -1)::in
        cl.accepts_requests, cl.request_slots::int AS request_slots,
        COALESCE(po.approved, false)::boolean AS observer_approved, COALESCE(po.blocked, false)::boolean AS observer_blocked,
        pr.id AS request_id, pt.ver AS password_ver, pr.password_ct, pr.password_nonce,
-       EXISTS (SELECT 1 FROM observers o WHERE o.public_key = m.target_public_key) AS target_is_observer
+       EXISTS (SELECT 1 FROM observers o
+               WHERE o.public_key = m.target_public_key AND o.last_status_at >= sqlc.arg(status_after)) AS target_is_observer
 FROM mine m
 JOIN polling_claims cl ON cl.observer_public_key = sqlc.arg(observer_public_key)
 LEFT JOIN polling_observers po ON po.observer_public_key = cl.observer_public_key

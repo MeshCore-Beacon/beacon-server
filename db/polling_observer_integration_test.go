@@ -16,7 +16,7 @@ func TestPollingObserverTargetsPostgres(t *testing.T) {
 	// Observers report their own telemetry: no request, no election and no owners entry polls one.
 	w := newReqWorld(t, "")
 	ctx, s, pool := w.ctx, w.s, w.pool
-	alice, bob := newUser(t, ctx, s, "alice"), newUser(t, ctx, s, "bob")
+	alice, bob, carol := newUser(t, ctx, s, "alice"), newUser(t, ctx, s, "bob"), newUser(t, ctx, s, "carol")
 	o := newReqDevice(1)
 	requested, local := byte(0xA1), byte(0xA2)
 	n1 := w.node(requested)
@@ -40,14 +40,37 @@ func TestPollingObserverTargetsPostgres(t *testing.T) {
 		t.Fatalf("local before: %+v", e)
 	}
 
-	// Both repeaters start reporting as observers.
-	pollObserver(t, ctx, s, pollKey(requested))
-	pollObserver(t, ctx, s, pollKey(local))
+	// Both repeaters start sending observer status. A third stopped over a week ago and is polled as before.
+	statusAt := func(k byte, at time.Time) {
+		t.Helper()
+		pollObserver(t, ctx, s, pollKey(k))
+		if _, err := pool.Exec(ctx, `UPDATE observers SET last_status_at = $2 WHERE public_key = $1`, pollKey(k), at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	statusAt(requested, w.now.Add(-time.Hour))
+	statusAt(local, w.now)
+	stale := byte(0xA3)
+	n3 := w.node(stale)
+	pollHearAdvert(t, ctx, pool, pollKey(stale), pollObserver(t, ctx, s, o.pub), heard, 9)
+	statusAt(stale, w.now.Add(-polling.ObserverActiveWindow-time.Hour))
+	r3, err := w.reqs.Create(ctx, bob.ID, n3, nil)
+	if err != nil {
+		t.Fatalf("create on a stale observer: %v", err)
+	}
+	if got := w.status(bob.ID, r3.ID); got.Status != polling.StatusActive {
+		t.Fatalf("stale observer not elected: %+v", got)
+	}
+	// A key with an observer row that never sent status is not an observer either.
+	pollObserver(t, ctx, s, pollKey(0xA4))
+	if _, err := w.reqs.Create(ctx, alice.ID, w.node(0xA4), nil); err != nil {
+		t.Fatalf("create on a key that never sent status: %v", err)
+	}
 
 	if _, err := w.reqs.Create(ctx, bob.ID, n1, nil); !errors.Is(err, polling.ErrObserverNode) {
 		t.Fatalf("create on an observer: %v", err)
 	}
-	if _, err := w.reqs.Create(ctx, bob.ID, n2, nil); !errors.Is(err, polling.ErrObserverNode) {
+	if _, err := w.reqs.Create(ctx, carol.ID, n2, nil); !errors.Is(err, polling.ErrObserverNode) {
 		t.Fatalf("create on a local observer: %v", err)
 	}
 
@@ -56,8 +79,13 @@ func TestPollingObserverTargetsPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	var n int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM polling_assignments`).Scan(&n); err != nil || n != 0 {
+	observerRows := `SELECT count(*) FROM polling_assignments WHERE target_public_key = ANY($1)`
+	both := [][]byte{pollKey(requested), pollKey(local)}
+	if err := pool.QueryRow(ctx, observerRows, both).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("assignments left: %d %v", n, err)
+	}
+	if e, ok := w.owners(o, stale); !ok || e.Role != "polling" {
+		t.Fatalf("stale observer not polled: %+v %v", e, ok)
 	}
 	if e, ok := w.owners(o, requested); ok {
 		t.Fatalf("requested observer still handed out: %+v", e)
@@ -68,7 +96,7 @@ func TestPollingObserverTargetsPostgres(t *testing.T) {
 	// A new claim re-elects through HandleClaim and still assigns nothing.
 	w.now = w.now.Add(time.Minute)
 	w.claim(o, 2, reqNode(pollKey(local), false, "ok"))
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM polling_assignments`).Scan(&n); err != nil || n != 0 {
+	if err := pool.QueryRow(ctx, observerRows, both).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("assignments after a claim: %d %v", n, err)
 	}
 	targets, err := s.ListPollingTargets(ctx, w.now.Add(-polling.ClaimTTL))
@@ -97,5 +125,17 @@ func TestPollingObserverTargetsPostgres(t *testing.T) {
 	}
 	if got := w.status(alice.ID, r1.ID); got.Status != polling.StatusDisabled {
 		t.Fatalf("refused enable changed it: %+v", got)
+	}
+	if got := w.status(bob.ID, r3.ID); got.Status != polling.StatusActive {
+		t.Fatalf("the sweep touched a stale observer: %+v", got)
+	}
+
+	// Once its status is a week old it is polled again: the user re-enables the request by hand.
+	statusAt(requested, w.now.Add(-polling.ObserverActiveWindow-time.Minute))
+	if _, err := w.reqs.Update(ctx, alice.ID, r1.ID, polling.RequestUpdate{Enable: true}); err != nil {
+		t.Fatalf("enable after the observer went quiet: %v", err)
+	}
+	if got := w.status(alice.ID, r1.ID); got.Status != polling.StatusActive {
+		t.Fatalf("not elected after the observer went quiet: %+v", got)
 	}
 }

@@ -160,11 +160,17 @@ func (q *Queries) InsertTelemetryRequest(ctx context.Context, arg InsertTelemetr
 }
 
 const isObserverKey = `-- name: IsObserverKey :one
-SELECT EXISTS (SELECT 1 FROM observers WHERE public_key = $1)
+SELECT EXISTS (SELECT 1 FROM observers WHERE public_key = $1 AND last_status_at >= $2)
 `
 
-func (q *Queries) IsObserverKey(ctx context.Context, publicKey []byte) (bool, error) {
-	row := q.db.QueryRow(ctx, isObserverKey, publicKey)
+type IsObserverKeyParams struct {
+	PublicKey   []byte             `json:"public_key"`
+	StatusAfter pgtype.Timestamptz `json:"status_after"`
+}
+
+// An observer that sent status since status_after, as in RequestNode.
+func (q *Queries) IsObserverKey(ctx context.Context, arg IsObserverKeyParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isObserverKey, arg.PublicKey, arg.StatusAfter)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
@@ -518,13 +524,14 @@ const observerRequestTargets = `-- name: ObserverRequestTargets :many
 SELECT DISTINCT r.target_public_key::bytea AS target_public_key
 FROM telemetry_requests r
 WHERE r.status IN ('waiting', 'active')
-  AND EXISTS (SELECT 1 FROM observers o WHERE o.public_key = r.target_public_key)
+  AND EXISTS (SELECT 1 FROM observers o
+              WHERE o.public_key = r.target_public_key AND o.last_status_at >= $1)
 ORDER BY 1
 `
 
-// Targets with a waiting or active request that are observers, which report their own telemetry.
-func (q *Queries) ObserverRequestTargets(ctx context.Context) ([][]byte, error) {
-	rows, err := q.db.Query(ctx, observerRequestTargets)
+// Targets with a waiting or active request that are observers which sent status since status_after.
+func (q *Queries) ObserverRequestTargets(ctx context.Context, statusAfter pgtype.Timestamptz) ([][]byte, error) {
+	rows, err := q.db.Query(ctx, observerRequestTargets, statusAfter)
 	if err != nil {
 		return nil, err
 	}
@@ -648,9 +655,15 @@ func (q *Queries) RecordServedVersion(ctx context.Context, arg RecordServedVersi
 
 const requestNode = `-- name: RequestNode :one
 SELECT n.public_key, n.node_type, COALESCE(n.name, '')::text AS name,
-       EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer
-FROM nodes n WHERE n.id = $1
+       EXISTS (SELECT 1 FROM observers o
+               WHERE o.public_key = n.public_key AND o.last_status_at >= $1) AS is_observer
+FROM nodes n WHERE n.id = $2
 `
+
+type RequestNodeParams struct {
+	StatusAfter pgtype.Timestamptz `json:"status_after"`
+	ID          uuid.UUID          `json:"id"`
+}
 
 type RequestNodeRow struct {
 	PublicKey  []byte `json:"public_key"`
@@ -659,8 +672,9 @@ type RequestNodeRow struct {
 	IsObserver bool   `json:"is_observer"`
 }
 
-func (q *Queries) RequestNode(ctx context.Context, id uuid.UUID) (RequestNodeRow, error) {
-	row := q.db.QueryRow(ctx, requestNode, id)
+// An observer counts only while it sends status (status_after): rows are never deleted and a status can be spoofed.
+func (q *Queries) RequestNode(ctx context.Context, arg RequestNodeParams) (RequestNodeRow, error) {
+	row := q.db.QueryRow(ctx, requestNode, arg.StatusAfter, arg.ID)
 	var i RequestNodeRow
 	err := row.Scan(
 		&i.PublicKey,
@@ -675,13 +689,19 @@ const targetStillObserverRequested = `-- name: TargetStillObserverRequested :one
 SELECT EXISTS (
     SELECT 1 FROM telemetry_requests r
     WHERE r.target_public_key = $1 AND r.status IN ('waiting', 'active')
-      AND EXISTS (SELECT 1 FROM observers o WHERE o.public_key = r.target_public_key)
+      AND EXISTS (SELECT 1 FROM observers o
+                  WHERE o.public_key = r.target_public_key AND o.last_status_at >= $2)
 )::boolean AS observer
 `
 
+type TargetStillObserverRequestedParams struct {
+	TargetPublicKey []byte             `json:"target_public_key"`
+	StatusAfter     pgtype.Timestamptz `json:"status_after"`
+}
+
 // ObserverRequestTargets for one target, asked again under the target's lock.
-func (q *Queries) TargetStillObserverRequested(ctx context.Context, targetPublicKey []byte) (bool, error) {
-	row := q.db.QueryRow(ctx, targetStillObserverRequested, targetPublicKey)
+func (q *Queries) TargetStillObserverRequested(ctx context.Context, arg TargetStillObserverRequestedParams) (bool, error) {
+	row := q.db.QueryRow(ctx, targetStillObserverRequested, arg.TargetPublicKey, arg.StatusAfter)
 	var observer bool
 	err := row.Scan(&observer)
 	return observer, err

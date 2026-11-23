@@ -198,7 +198,7 @@ func loadReportContext(ctx context.Context, q *sqlc.Queries, target []byte, st *
 
 // RequestNode returns the node a request names; an unknown id is polling.ErrRequestNotFound.
 func (s *Store) RequestNode(ctx context.Context, nodeID uuid.UUID) (polling.RequestNode, error) {
-	r, err := s.q.RequestNode(ctx, nodeID)
+	r, err := s.q.RequestNode(ctx, sqlc.RequestNodeParams{ID: nodeID, StatusAfter: observerStatusAfter(time.Now())})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return polling.RequestNode{}, polling.ErrRequestNotFound
 	}
@@ -208,9 +208,9 @@ func (s *Store) RequestNode(ctx context.Context, nodeID uuid.UUID) (polling.Requ
 	return polling.RequestNode{PublicKey: r.PublicKey, NodeType: r.NodeType, Name: r.Name, IsObserver: r.IsObserver}, nil
 }
 
-// IsObserverKey reports whether an observer has this public key.
+// IsObserverKey reports whether an observer with this public key sent status within polling.ObserverActiveWindow.
 func (s *Store) IsObserverKey(ctx context.Context, key []byte) (bool, error) {
-	return s.q.IsObserverKey(ctx, key)
+	return s.q.IsObserverKey(ctx, sqlc.IsObserverKeyParams{PublicKey: key, StatusAfter: observerStatusAfter(time.Now())})
 }
 
 // UserRequestTarget returns the repeater of the user's request; anyone else's is polling.ErrRequestNotFound.
@@ -345,10 +345,11 @@ func (s *Store) DisableOfflineRequests(ctx context.Context, cutoff, now time.Tim
 	return disabled, nil
 }
 
-// DisableObserverRequests disables the waiting and active requests of every repeater that is also an observer, with
-// the reason. It returns how many repeaters it changed.
+// DisableObserverRequests disables the waiting and active requests of every repeater that is also an observer with
+// recent status, with the reason. It returns how many repeaters it changed.
 func (s *Store) DisableObserverRequests(ctx context.Context, now time.Time, reason string) (int, error) {
-	targets, err := s.q.ObserverRequestTargets(ctx)
+	since := observerStatusAfter(now)
+	targets, err := s.q.ObserverRequestTargets(ctx, since)
 	if err != nil {
 		return 0, err
 	}
@@ -359,7 +360,7 @@ func (s *Store) DisableObserverRequests(ctx context.Context, now time.Time, reas
 			if err := q.LockPollingTarget(ctx, t); err != nil {
 				return err
 			}
-			still, err := q.TargetStillObserverRequested(ctx, t)
+			still, err := q.TargetStillObserverRequested(ctx, sqlc.TargetStillObserverRequestedParams{TargetPublicKey: t, StatusAfter: since})
 			if err != nil || !still {
 				return err
 			}

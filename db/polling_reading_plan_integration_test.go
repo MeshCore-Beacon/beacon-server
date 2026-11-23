@@ -60,8 +60,8 @@ func TestOwnersLatestReadingBoundedPostgres(t *testing.T) {
 		sql  string
 		args []any
 	}{
-		{"owners", namedQuery(t, "queries/polling.sql", "PollingOwnerRows", "observer_public_key", "received_at"),
-			[]any{o.pub, w.now.Add(-polling.ClaimTTL)}},
+		{"owners", namedQuery(t, "queries/polling.sql", "PollingOwnerRows", "observer_public_key", "received_at", "status_after"),
+			[]any{o.pub, w.now.Add(-polling.ClaimTTL), w.now.Add(-polling.ObserverActiveWindow)}},
 		{"admin", namedQuery(t, "queries/polling.sql", "PollingAdminTargets", "received_after", "row_limit"),
 			[]any{w.now.Add(-polling.ClaimTTL), 50}},
 	}

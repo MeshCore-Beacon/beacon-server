@@ -23,7 +23,7 @@ type RequestNode struct {
 	PublicKey []byte
 	NodeType  int16
 	Name      string
-	// IsObserver is true when an observer has the same key; it reports its own telemetry.
+	// IsObserver is true when an observer with the same key sent status within ObserverActiveWindow.
 	IsObserver bool
 }
 
@@ -58,7 +58,7 @@ func ClaimState(s string) string { return strings.ToLower(shortText(s)) }
 // difference; an error from fn stores nothing.
 type RequestStore interface {
 	RequestNode(ctx context.Context, nodeID uuid.UUID) (RequestNode, error)
-	// IsObserverKey reports whether an observer has this public key.
+	// IsObserverKey reports whether an observer with this key sent status within ObserverActiveWindow.
 	IsObserverKey(ctx context.Context, key []byte) (bool, error)
 	MutateRequestTarget(ctx context.Context, target []byte, userID uuid.UUID, fn func(*TargetState) error) error
 	// UserRequestTarget is ErrRequestNotFound unless the request is the user's.

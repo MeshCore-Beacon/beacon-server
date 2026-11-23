@@ -37,6 +37,10 @@ const (
 	ReasonObserver     = "This node is an observer and reports its own telemetry."
 )
 
+// ObserverActiveWindow is how recently an observer must have sent status to count as one. Rows are never deleted, so
+// a former or spoofed observer would otherwise stay unpollable for good.
+const ObserverActiveWindow = 7 * 24 * time.Hour
+
 // ReasonOffline is the reason a request is disabled when no observer has heard its repeater for days days.
 func ReasonOffline(days int) string {
 	if days == 1 {

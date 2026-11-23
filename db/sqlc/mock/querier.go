@@ -2806,18 +2806,18 @@ func (mr *MockQuerierMockRecorder) InsertUserAtlasPin(ctx, arg any) *gomock.Call
 }
 
 // IsObserverKey mocks base method.
-func (m *MockQuerier) IsObserverKey(ctx context.Context, publicKey []byte) (bool, error) {
+func (m *MockQuerier) IsObserverKey(ctx context.Context, arg db.IsObserverKeyParams) (bool, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "IsObserverKey", ctx, publicKey)
+	ret := m.ctrl.Call(m, "IsObserverKey", ctx, arg)
 	ret0, _ := ret[0].(bool)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // IsObserverKey indicates an expected call of IsObserverKey.
-func (mr *MockQuerierMockRecorder) IsObserverKey(ctx, publicKey any) *gomock.Call {
+func (mr *MockQuerierMockRecorder) IsObserverKey(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsObserverKey", reflect.TypeOf((*MockQuerier)(nil).IsObserverKey), ctx, publicKey)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsObserverKey", reflect.TypeOf((*MockQuerier)(nil).IsObserverKey), ctx, arg)
 }
 
 // LatestNodeReadings mocks base method.
@@ -3871,18 +3871,18 @@ func (mr *MockQuerierMockRecorder) ListPollingObservers(ctx any) *gomock.Call {
 }
 
 // ListPollingTargets mocks base method.
-func (m *MockQuerier) ListPollingTargets(ctx context.Context, receivedAt pgtype.Timestamptz) ([][]byte, error) {
+func (m *MockQuerier) ListPollingTargets(ctx context.Context, arg db.ListPollingTargetsParams) ([][]byte, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListPollingTargets", ctx, receivedAt)
+	ret := m.ctrl.Call(m, "ListPollingTargets", ctx, arg)
 	ret0, _ := ret[0].([][]byte)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ListPollingTargets indicates an expected call of ListPollingTargets.
-func (mr *MockQuerierMockRecorder) ListPollingTargets(ctx, receivedAt any) *gomock.Call {
+func (mr *MockQuerierMockRecorder) ListPollingTargets(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPollingTargets", reflect.TypeOf((*MockQuerier)(nil).ListPollingTargets), ctx, receivedAt)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPollingTargets", reflect.TypeOf((*MockQuerier)(nil).ListPollingTargets), ctx, arg)
 }
 
 // ListRegionState mocks base method.
@@ -4642,18 +4642,18 @@ func (mr *MockQuerierMockRecorder) ObserverKeysByIDs(ctx, dollar_1 any) *gomock.
 }
 
 // ObserverRequestTargets mocks base method.
-func (m *MockQuerier) ObserverRequestTargets(ctx context.Context) ([][]byte, error) {
+func (m *MockQuerier) ObserverRequestTargets(ctx context.Context, statusAfter pgtype.Timestamptz) ([][]byte, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ObserverRequestTargets", ctx)
+	ret := m.ctrl.Call(m, "ObserverRequestTargets", ctx, statusAfter)
 	ret0, _ := ret[0].([][]byte)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ObserverRequestTargets indicates an expected call of ObserverRequestTargets.
-func (mr *MockQuerierMockRecorder) ObserverRequestTargets(ctx any) *gomock.Call {
+func (mr *MockQuerierMockRecorder) ObserverRequestTargets(ctx, statusAfter any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ObserverRequestTargets", reflect.TypeOf((*MockQuerier)(nil).ObserverRequestTargets), ctx)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ObserverRequestTargets", reflect.TypeOf((*MockQuerier)(nil).ObserverRequestTargets), ctx, statusAfter)
 }
 
 // OfflineRequestTargets mocks base method.
@@ -5069,18 +5069,18 @@ func (mr *MockQuerierMockRecorder) ReplaceRepeaters(ctx, arg any) *gomock.Call {
 }
 
 // RequestNode mocks base method.
-func (m *MockQuerier) RequestNode(ctx context.Context, id uuid.UUID) (db.RequestNodeRow, error) {
+func (m *MockQuerier) RequestNode(ctx context.Context, arg db.RequestNodeParams) (db.RequestNodeRow, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "RequestNode", ctx, id)
+	ret := m.ctrl.Call(m, "RequestNode", ctx, arg)
 	ret0, _ := ret[0].(db.RequestNodeRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // RequestNode indicates an expected call of RequestNode.
-func (mr *MockQuerierMockRecorder) RequestNode(ctx, id any) *gomock.Call {
+func (mr *MockQuerierMockRecorder) RequestNode(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RequestNode", reflect.TypeOf((*MockQuerier)(nil).RequestNode), ctx, id)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RequestNode", reflect.TypeOf((*MockQuerier)(nil).RequestNode), ctx, arg)
 }
 
 // ResetRequestAttention mocks base method.
@@ -5761,18 +5761,18 @@ func (mr *MockQuerierMockRecorder) SweepPacketSitesFronts(ctx, lookback any) *go
 }
 
 // TargetStillObserverRequested mocks base method.
-func (m *MockQuerier) TargetStillObserverRequested(ctx context.Context, targetPublicKey []byte) (bool, error) {
+func (m *MockQuerier) TargetStillObserverRequested(ctx context.Context, arg db.TargetStillObserverRequestedParams) (bool, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "TargetStillObserverRequested", ctx, targetPublicKey)
+	ret := m.ctrl.Call(m, "TargetStillObserverRequested", ctx, arg)
 	ret0, _ := ret[0].(bool)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // TargetStillObserverRequested indicates an expected call of TargetStillObserverRequested.
-func (mr *MockQuerierMockRecorder) TargetStillObserverRequested(ctx, targetPublicKey any) *gomock.Call {
+func (mr *MockQuerierMockRecorder) TargetStillObserverRequested(ctx, arg any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TargetStillObserverRequested", reflect.TypeOf((*MockQuerier)(nil).TargetStillObserverRequested), ctx, targetPublicKey)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TargetStillObserverRequested", reflect.TypeOf((*MockQuerier)(nil).TargetStillObserverRequested), ctx, arg)
 }
 
 // TargetStillOffline mocks base method.
