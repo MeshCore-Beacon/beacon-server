@@ -8434,8 +8434,7 @@ AS inserted
 ), trace AS (
   INSERT INTO trace_tags (trace_tag, first_heard_at, last_heard_at, packet_count, trace_type, scope_id, best_payload, best_path_len)
   SELECT u.trace_tag, u.first_heard_at, u.last_heard_at, 1, u.parsed_payload->>'type', u.scope_id, u.parsed_payload,
-         CASE WHEN jsonb_typeof(u.parsed_payload->'pathHashes') = 'array'
-              THEN jsonb_array_length(u.parsed_payload->'pathHashes') ELSE 0 END
+         trace_reached_hops(u.parsed_payload)
   FROM up u
   WHERE u.inserted AND u.trace_tag IS NOT NULL
   ON CONFLICT (trace_tag) DO UPDATE SET
@@ -8490,7 +8489,7 @@ type UpsertPacketRow struct {
 // PACKETS
 // ============================================================
 // A new TRACE packet adds itself to its tag summary in the same statement, so the summary
-// can't miss a stored packet. 'TRACE' > 'PING'; the longest path keeps the best payload.
+// can't miss a stored packet. 'TRACE' > 'PING'; keep the payload with the most reached hops.
 func (q *Queries) UpsertPacket(ctx context.Context, arg UpsertPacketParams) (UpsertPacketRow, error) {
 	row := q.db.QueryRow(ctx, upsertPacket,
 		arg.PacketHash,

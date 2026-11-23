@@ -161,6 +161,62 @@ func TestTraceTagPaginationPostgres(t *testing.T) {
 	}
 }
 
+func TestTraceSummaryLongestReachedPostgres(t *testing.T) {
+	ctx, pool := schemaPool(t)
+	if err := RunMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	store := New(pool, pool, 0, 0)
+	tag := []byte{0xad, 0, 0, 1}
+	add := func(hash byte, payload string) {
+		t.Helper()
+		_, err := store.UpsertPacket(ctx, ingest.UpsertPacketParams{PacketHash: []byte{hash}, TraceTag: tag,
+			PayloadType: 9, RouteType: 1, RawPayload: []byte{0}, RawHeader: []byte{0}, ParsedPayload: json.RawMessage(payload)})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	best := `{"type":"TRACE","pathHashes":["a1","b2","c3","d4"],"snrValues":[-1,0,3]}`
+	add(1, `{"type":"TRACE","pathHashes":["a1","b2","c3","d4"],"snrValues":[-1]}`)
+	add(2, best)
+	add(2, best) // duplicate broker hearing
+	add(3, `{"type":"TRACE","pathHashes":["a1","b2","c3","d4","e5"],"snrValues":[1,2]}`)
+	add(4, `{"type":"TRACE","pathHashes":["a1","b2"],"snrValues":[1,2,3,4]}`)
+	check := func() {
+		t.Helper()
+		rows, err := store.ListTraceTags(ctx, nil, "", "", time.Time{}, time.Time{}, time.Time{}, "", 10)
+		if err != nil || len(rows) != 1 {
+			t.Fatalf("tag list: %v, %v", rows, err)
+		}
+		r := rows[0]
+		if r.PacketCount != 4 || len(r.PathHashes) != 4 || len(r.SNRValues) != 3 || r.SNRValues[1] != 0 || r.SNRValues[2] != 3 {
+			t.Fatalf("want three reached hops from packet 2, got %+v", r)
+		}
+	}
+	check()
+
+	// Recreate the old score for this tag and a summary whose best packet has expired.
+	if _, err := pool.Exec(ctx, `UPDATE trace_tags SET best_payload=(SELECT parsed_payload FROM packets WHERE packet_hash=$1), best_path_len=5 WHERE trace_tag=$2`, []byte{3}, tag); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO trace_tags(trace_tag,first_heard_at,last_heard_at,packet_count,best_payload,best_path_len)
+		VALUES ('\xaa',now(),now(),7,$1::jsonb,4)`, best); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM schema_migrations WHERE filename='088_trace_summary_reached_hops.sql'; DROP FUNCTION trace_reached_hops(jsonb)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := RunMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	var repaired, expired bool
+	if err := pool.QueryRow(ctx, `SELECT
+		EXISTS (SELECT 1 FROM trace_tags WHERE trace_tag=$1 AND best_payload=$2::jsonb AND best_path_len=3 AND packet_count=4),
+		EXISTS (SELECT 1 FROM trace_tags WHERE trace_tag='\xaa' AND best_payload=$2::jsonb AND best_path_len=3 AND packet_count=7)`, tag, best).Scan(&repaired, &expired); err != nil || !repaired || !expired {
+		t.Fatalf("retained packet repaired %t, expired evidence preserved %t, err %v", repaired, expired, err)
+	}
+}
+
 // Storing a TRACE packet records its contribution even if the hearing write that follows
 // is lost; the next hearing replaces the packet's provisional times.
 func TestTraceSummarySurvivesMissedHearingPostgres(t *testing.T) {
