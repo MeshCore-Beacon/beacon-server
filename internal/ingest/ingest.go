@@ -155,6 +155,8 @@ type DB interface {
 
 	// IsObserverByPubkey returns true if the given public key belongs to a known observer.
 	IsObserverByPubkey(ctx context.Context, pubkey []byte) bool
+	// IsPollerByPubkey returns true if the given public key has a polling claim.
+	IsPollerByPubkey(ctx context.Context, pubkey []byte) bool
 
 	// GetObserverScopes returns the list of scope names associated with the given observer.
 	GetObserverScopes(ctx context.Context, observerID uuid.UUID) ([]string, error)

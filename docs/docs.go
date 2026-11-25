@@ -4636,6 +4636,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "boolean",
+                        "description": "Filter by poller role (true/false); omit for no filter",
+                        "name": "poller",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
                         "description": "Include each node's known neighbor IDs (neighborIds field). Bare ?neighbors or ?neighbors=true enables it; omit/false for none",
                         "name": "neighbors",
                         "in": "query"
@@ -8979,6 +8985,10 @@ const docTemplate = `{
                     "description": "true if this node is also a known observer",
                     "type": "boolean"
                 },
+                "isPoller": {
+                    "description": "true if this node is an observer with a current polling claim",
+                    "type": "boolean"
+                },
                 "knownNeighborCount": {
                     "type": "integer"
                 },
@@ -9346,6 +9356,10 @@ const docTemplate = `{
                 },
                 "isObserver": {
                     "description": "true if this node is also a known observer",
+                    "type": "boolean"
+                },
+                "isPoller": {
+                    "description": "true if this node is an observer with a current polling claim",
                     "type": "boolean"
                 },
                 "knownNeighborCount": {

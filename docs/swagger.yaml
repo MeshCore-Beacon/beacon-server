@@ -968,6 +968,9 @@ definitions:
       isObserver:
         description: true if this node is also a known observer
         type: boolean
+      isPoller:
+        description: true if this node is an observer with a current polling claim
+        type: boolean
       knownNeighborCount:
         type: integer
       lastAdvertAt:
@@ -1231,6 +1234,9 @@ definitions:
         type: string
       isObserver:
         description: true if this node is also a known observer
+        type: boolean
+      isPoller:
+        description: true if this node is an observer with a current polling claim
         type: boolean
       knownNeighborCount:
         type: integer
@@ -6132,6 +6138,10 @@ paths:
       - description: Filter by multibyte trace support (true/false); omit for no filter
         in: query
         name: supportsMultibyteTraces
+        type: boolean
+      - description: Filter by poller role (true/false); omit for no filter
+        in: query
+        name: poller
         type: boolean
       - description: Include each node's known neighbor IDs (neighborIds field). Bare
           ?neighbors or ?neighbors=true enables it; omit/false for none

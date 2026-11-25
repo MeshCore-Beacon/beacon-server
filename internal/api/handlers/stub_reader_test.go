@@ -41,8 +41,8 @@ type stubReader struct {
 	getObserverActivity          func(ctx context.Context, observerID uuid.UUID, window, interval time.Duration, until time.Time) (*api.ObserverActivity, error)
 	getObserverScopes            func(ctx context.Context, observerID uuid.UUID) ([]string, error)
 	listObserverAdverts          func(ctx context.Context, observerID uuid.UUID, cursor int64, limit int32) (api.Page[api.AdvertObservation], error)
-	listNodes                    func(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (api.NodePage, error)
-	listNodesSorted              func(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, sort api.NodeSort, pageCursor *api.NodeSortCursor, limit int32, includeNeighbors bool) (api.NodePage, error)
+	listNodes                    func(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces, poller *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (api.NodePage, error)
+	listNodesSorted              func(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces, poller *bool, pubkey []byte, pubkeyPrefix, name, scope string, sort api.NodeSort, pageCursor *api.NodeSortCursor, limit int32, includeNeighbors bool) (api.NodePage, error)
 	getNode                      func(ctx context.Context, nodeID uuid.UUID) (*api.Node, error)
 	getNodeNeighbors             func(ctx context.Context, nodeID uuid.UUID) ([]api.NodeNeighbor, error)
 	getNodeActivity              func(ctx context.Context, nodeID uuid.UUID, window time.Duration) (*api.NodeActivity, error)
@@ -241,16 +241,16 @@ func (s stubReader) ListObserverAdverts(ctx context.Context, observerID uuid.UUI
 	return api.Page[api.AdvertObservation]{}, nil
 }
 
-func (s stubReader) ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
+func (s stubReader) ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces, poller *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
 	if s.listNodes != nil {
-		return s.listNodes(ctx, nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, cursor, pageCursor, limit, includeNeighbors)
+		return s.listNodes(ctx, nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, poller, pubkey, pubkeyPrefix, name, scope, cursor, pageCursor, limit, includeNeighbors)
 	}
 	return api.NodePage{}, nil
 }
 
-func (s stubReader) ListNodesSorted(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, sort api.NodeSort, pageCursor *api.NodeSortCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
+func (s stubReader) ListNodesSorted(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces, poller *bool, pubkey []byte, pubkeyPrefix, name, scope string, sort api.NodeSort, pageCursor *api.NodeSortCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
 	if s.listNodesSorted != nil {
-		return s.listNodesSorted(ctx, nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, sort, pageCursor, limit, includeNeighbors)
+		return s.listNodesSorted(ctx, nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, poller, pubkey, pubkeyPrefix, name, scope, sort, pageCursor, limit, includeNeighbors)
 	}
 	return api.NodePage{}, nil
 }

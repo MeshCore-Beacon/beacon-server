@@ -14,6 +14,9 @@ WHERE EXCLUDED.claimed_at > polling_claims.claimed_at AND polling_claims.receive
 -- name: PollingClaimReceivedAt :one
 SELECT received_at FROM polling_claims WHERE observer_public_key = $1;
 
+-- name: IsPollerKey :one
+SELECT EXISTS (SELECT 1 FROM polling_claims WHERE observer_public_key = $1);
+
 -- name: DeletePollingCandidates :exec
 DELETE FROM polling_candidates WHERE observer_public_key = $1;
 

@@ -387,6 +387,17 @@ func (q *Queries) InsertRepeaterReading(ctx context.Context, arg InsertRepeaterR
 	return result.RowsAffected(), nil
 }
 
+const isPollerKey = `-- name: IsPollerKey :one
+SELECT EXISTS (SELECT 1 FROM polling_claims WHERE observer_public_key = $1)
+`
+
+func (q *Queries) IsPollerKey(ctx context.Context, observerPublicKey []byte) (bool, error) {
+	row := q.db.QueryRow(ctx, isPollerKey, observerPublicKey)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const latestNodeReadings = `-- name: LatestNodeReadings :many
 WITH targets AS (
   SELECT target_public_key FROM polling_assignments

@@ -133,7 +133,7 @@ func TestListNodes_OK(t *testing.T) {
 	nodeID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	r := chi.NewRouter()
 	r.Get("/nodes", listNodes(stubReader{
-		listNodes: func(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
+		listNodes: func(_ context.Context, _ int16, _ []string, _, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
 			return api.NodePage{Page: api.Page[api.NodeSummary]{Items: []api.NodeSummary{{ID: nodeID}}}}, nil
 		},
 	}))
@@ -151,7 +151,7 @@ func TestListNodes_NeighborsParam_PassedThrough(t *testing.T) {
 	var gotIncludeNeighbors bool
 	r := chi.NewRouter()
 	r.Get("/nodes", listNodes(stubReader{
-		listNodes: func(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, includeNeighbors bool) (api.NodePage, error) {
+		listNodes: func(_ context.Context, _ int16, _ []string, _, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, includeNeighbors bool) (api.NodePage, error) {
 			gotIncludeNeighbors = includeNeighbors
 			return api.NodePage{Page: api.Page[api.NodeSummary]{Items: []api.NodeSummary{{ID: nodeID, NeighborIDs: []uuid.UUID{neighborID}}}}}, nil
 		},
@@ -185,7 +185,7 @@ func TestListNodes_NeighborsParam_BareFlagMeansTrue(t *testing.T) {
 	var gotIncludeNeighbors bool
 	r := chi.NewRouter()
 	r.Get("/nodes", listNodes(stubReader{
-		listNodes: func(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, includeNeighbors bool) (api.NodePage, error) {
+		listNodes: func(_ context.Context, _ int16, _ []string, _, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, includeNeighbors bool) (api.NodePage, error) {
 			gotIncludeNeighbors = includeNeighbors
 			return api.NodePage{}, nil
 		},
@@ -205,7 +205,7 @@ func TestListNodes_PubkeyPrefixParam_PassedThrough(t *testing.T) {
 	var gotPubkeyPrefix string
 	r := chi.NewRouter()
 	r.Get("/nodes", listNodes(stubReader{
-		listNodes: func(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, pubkeyPrefix, _, _ string, _ int64, _ *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
+		listNodes: func(_ context.Context, _ int16, _ []string, _, _, _ *bool, _ []byte, pubkeyPrefix, _, _ string, _ int64, _ *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
 			gotPubkeyPrefix = pubkeyPrefix
 			return api.NodePage{}, nil
 		},
@@ -342,7 +342,7 @@ func TestNodesCursorPrecedence(t *testing.T) {
 	var gotPage *api.NodeCursor
 	next := "v1:1:0b7e2c4a-5f1d-4c3e-9a2b-8d6f1e0c3a57"
 	reader := stubReader{
-		listNodes: func(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, cursor int64, pageCursor *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
+		listNodes: func(_ context.Context, _ int16, _ []string, _, _, _ *bool, _ []byte, _, _, _ string, cursor int64, pageCursor *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
 			called, gotCursor, gotPage = true, cursor, pageCursor
 			return api.NodePage{Page: api.Page[api.NodeSummary]{Items: []api.NodeSummary{}}, NextPageCursor: &next}, nil
 		},
@@ -383,11 +383,11 @@ func TestListNodes_Sort(t *testing.T) {
 	var gotCursor *api.NodeSortCursor
 	var defaultCalls int
 	reader := stubReader{
-		listNodes: func(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
+		listNodes: func(_ context.Context, _ int16, _ []string, _, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
 			defaultCalls++
 			return api.NodePage{}, nil
 		},
-		listNodesSorted: func(_ context.Context, _ int16, _ []string, _, _ *bool, _ []byte, _, _, _ string, sort api.NodeSort, cursor *api.NodeSortCursor, _ int32, _ bool) (api.NodePage, error) {
+		listNodesSorted: func(_ context.Context, _ int16, _ []string, _, _, _ *bool, _ []byte, _, _, _ string, sort api.NodeSort, cursor *api.NodeSortCursor, _ int32, _ bool) (api.NodePage, error) {
 			gotSort, gotCursor = sort, cursor
 			return api.NodePage{}, nil
 		},
@@ -784,5 +784,58 @@ func TestNodesRouter_TelemetryPathsUnchanged(t *testing.T) {
 	}
 	if w := latestGet(t, stubReader{}, true, "/nodes/"+uuid.NewString()+"/telemetry"); w.Code != http.StatusOK {
 		t.Errorf("node telemetry: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestListNodes_PollerParam(t *testing.T) {
+	yes, no := true, false
+	for _, tc := range []struct {
+		query string
+		want  *bool
+	}{
+		{"", nil},
+		{"?poller=true", &yes},
+		{"?poller=false", &no},
+	} {
+		for _, sorted := range []bool{false, true} {
+			var got *bool
+			called := false
+			r := chi.NewRouter()
+			r.Get("/nodes", listNodes(stubReader{
+				listNodes: func(_ context.Context, _ int16, _ []string, _, _, poller *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
+					got, called = poller, true
+					return api.NodePage{}, nil
+				},
+				listNodesSorted: func(_ context.Context, _ int16, _ []string, _, _, poller *bool, _ []byte, _, _, _ string, _ api.NodeSort, _ *api.NodeSortCursor, _ int32, _ bool) (api.NodePage, error) {
+					got, called = poller, true
+					return api.NodePage{}, nil
+				},
+			}))
+			url := "/nodes" + tc.query
+			if sorted {
+				url += map[bool]string{true: "&", false: "?"}[tc.query != ""] + "sort=name"
+			}
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, url, nil))
+			if w.Code != http.StatusOK || !called {
+				t.Fatalf("%s: status %d, called %v", url, w.Code, called)
+			}
+			if (got == nil) != (tc.want == nil) || (got != nil && *got != *tc.want) {
+				t.Errorf("%s: poller = %v, want %v", url, got, tc.want)
+			}
+		}
+	}
+}
+
+func TestListNodes_InvalidPoller(t *testing.T) {
+	r := chi.NewRouter()
+	r.Get("/nodes", listNodes(stubReader{}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/nodes?poller=banana", nil))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "invalid poller value") {
+		t.Errorf("body = %s", w.Body.String())
 	}
 }

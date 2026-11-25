@@ -37,7 +37,7 @@ func TestListNodesSortedPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(context.Background())
-	for _, table := range []string{"nodes", "node_iatas", "node_neighbors", "observers", "transport_scopes"} {
+	for _, table := range []string{"nodes", "node_iatas", "node_neighbors", "observers", "polling_claims", "transport_scopes"} {
 		if _, err := tx.Exec(ctx, "CREATE TEMP TABLE "+table+" (LIKE public."+table+" INCLUDING ALL) ON COMMIT DROP"); err != nil {
 			t.Fatal(err)
 		}
@@ -102,7 +102,34 @@ func TestListNodesSortedPostgres(t *testing.T) {
 	if _, err := tx.Exec(ctx, `ANALYZE nodes; ANALYZE node_iatas; ANALYZE node_neighbors`); err != nil {
 		t.Fatal(err)
 	}
+	pollerID := all[0]
+	if _, err := tx.Exec(ctx, `INSERT INTO observers (id, public_key) SELECT id, public_key FROM nodes WHERE id = $1`, pollerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO polling_claims (observer_public_key, observer_id, claimed_at, received_at) SELECT public_key, id, now(), now() FROM nodes WHERE id = $1`, pollerID); err != nil {
+		t.Fatal(err)
+	}
 	store := &Store{q: sqlc.New(tx), staleThreshold: 24 * time.Hour}
+
+	// The poller filter is a tristate: only the claimed node, everyone else, or all.
+	yes, no := true, false
+	for _, tc := range []struct {
+		poller *bool
+		want   int
+	}{{&yes, 1}, {&no, len(all) - 1}, {nil, len(all)}} {
+		page, err := store.ListNodesSorted(ctx, 0, nil, nil, nil, tc.poller, nil, "", "", "", api.NodeSort{By: api.NodeSortLastSeen}, nil, 1000, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Items) != tc.want {
+			t.Fatalf("poller=%v: %d nodes, want %d", tc.poller, len(page.Items), tc.want)
+		}
+		for _, n := range page.Items {
+			if n.IsPoller != (n.ID == pollerID) {
+				t.Fatalf("poller=%v: wrong IsPoller on %s", tc.poller, n.ID)
+			}
+		}
+	}
 
 	// The same orders written plainly, over the same filters.
 	want := func(sort api.NodeSort, nodeType int16, iatas []string, scope string) []uuid.UUID {
@@ -132,7 +159,7 @@ ORDER BY `+key+`, n.last_seen DESC, n.id`, nodeType, iatas, scope)
 		var got []uuid.UUID
 		var cursor *api.NodeSortCursor
 		for {
-			page, err := store.ListNodesSorted(ctx, nodeType, iatas, nil, nil, nil, "", "", scope, sort, cursor, limit, false)
+			page, err := store.ListNodesSorted(ctx, nodeType, iatas, nil, nil, nil, nil, "", "", scope, sort, cursor, limit, false)
 			if err != nil {
 				t.Fatal(err)
 			}

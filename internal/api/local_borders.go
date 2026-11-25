@@ -26,16 +26,16 @@ type localBorderReader struct {
 	local *borders.Live
 }
 
-func (r *localBorderReader) ListNodes(ctx context.Context, nodeType int16, iatas []string, paths, traces *bool, pubkey []byte, prefix, name, scope string, cursor int64, pageCursor *NodeCursor, limit int32, neighbors bool) (NodePage, error) {
-	page, err := r.Reader.ListNodes(ctx, nodeType, iatas, paths, traces, pubkey, prefix, name, scope, cursor, pageCursor, limit, neighbors)
+func (r *localBorderReader) ListNodes(ctx context.Context, nodeType int16, iatas []string, paths, traces, poller *bool, pubkey []byte, prefix, name, scope string, cursor int64, pageCursor *NodeCursor, limit int32, neighbors bool) (NodePage, error) {
+	page, err := r.Reader.ListNodes(ctx, nodeType, iatas, paths, traces, poller, pubkey, prefix, name, scope, cursor, pageCursor, limit, neighbors)
 	if err != nil {
 		return page, err
 	}
 	return r.markForeign(page), nil
 }
 
-func (r *localBorderReader) ListNodesSorted(ctx context.Context, nodeType int16, iatas []string, paths, traces *bool, pubkey []byte, prefix, name, scope string, sort NodeSort, pageCursor *NodeSortCursor, limit int32, neighbors bool) (NodePage, error) {
-	page, err := r.Reader.ListNodesSorted(ctx, nodeType, iatas, paths, traces, pubkey, prefix, name, scope, sort, pageCursor, limit, neighbors)
+func (r *localBorderReader) ListNodesSorted(ctx context.Context, nodeType int16, iatas []string, paths, traces, poller *bool, pubkey []byte, prefix, name, scope string, sort NodeSort, pageCursor *NodeSortCursor, limit int32, neighbors bool) (NodePage, error) {
+	page, err := r.Reader.ListNodesSorted(ctx, nodeType, iatas, paths, traces, poller, pubkey, prefix, name, scope, sort, pageCursor, limit, neighbors)
 	if err != nil {
 		return page, err
 	}

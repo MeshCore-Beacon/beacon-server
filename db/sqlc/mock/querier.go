@@ -2820,6 +2820,21 @@ func (mr *MockQuerierMockRecorder) IsObserverKey(ctx, arg any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsObserverKey", reflect.TypeOf((*MockQuerier)(nil).IsObserverKey), ctx, arg)
 }
 
+// IsPollerKey mocks base method.
+func (m *MockQuerier) IsPollerKey(ctx context.Context, observerPublicKey []byte) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsPollerKey", ctx, observerPublicKey)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// IsPollerKey indicates an expected call of IsPollerKey.
+func (mr *MockQuerierMockRecorder) IsPollerKey(ctx, observerPublicKey any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsPollerKey", reflect.TypeOf((*MockQuerier)(nil).IsPollerKey), ctx, observerPublicKey)
+}
+
 // LatestNodeReadings mocks base method.
 func (m *MockQuerier) LatestNodeReadings(ctx context.Context, arg db.LatestNodeReadingsParams) ([]db.LatestNodeReadingsRow, error) {
 	m.ctrl.T.Helper()
