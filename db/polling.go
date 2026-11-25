@@ -37,15 +37,15 @@ import (
 // the capacity limit after a claim lowers it, and a usable rank 0 after its observer is blocked or unapproved.
 
 // ObserverID returns the observer's row id, creating the row when it is new.
+func (s *Store) ObserverID(ctx context.Context, pubkey []byte) (uuid.UUID, error) {
+	id, _, err := s.UpsertObserver(ctx, pubkey, "")
+	return id, err
+}
+
 // IsPollerByPubkey reports whether the node has a polling claim; false on error.
 func (s *Store) IsPollerByPubkey(ctx context.Context, pubkey []byte) bool {
 	ok, err := s.q.IsPollerKey(ctx, pubkey)
 	return err == nil && ok
-}
-
-func (s *Store) ObserverID(ctx context.Context, pubkey []byte) (uuid.UUID, error) {
-	id, _, err := s.UpsertObserver(ctx, pubkey, "")
-	return id, err
 }
 
 // observerStatusAfter is the oldest status that still makes a key an observer, which is never polled.
