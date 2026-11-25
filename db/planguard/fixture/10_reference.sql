@@ -77,6 +77,7 @@ FROM (VALUES ('1410', 'RTM'), ('1410', 'AMS'), ('3d67', 'RTM'), ('3d67', 'EIN'),
 INSERT INTO nodes (id, public_key, node_type, name, last_advert_at, first_seen, last_seen, device_clock_drift_seconds)
 SELECT md5('node' || n.rank)::uuid,
        CASE WHEN pr.hx IS NOT NULL THEN decode(pr.hx || substr(md5('node-key' || n.rank) || md5('node-key2' || n.rank), 5), 'hex')
+            WHEN pc.rank IS NOT NULL THEN decode(md5('observer-key' || pc.rank) || md5('observer-key2' || pc.rank), 'hex')
             ELSE decode(md5('node-key' || n.rank) || md5('node-key2' || n.rank), 'hex') END,
        n.node_type, 'node_' || n.rank,
        timestamptz '2026-10-18 17:00+00' - (random() * 72) * interval '1 hour',
@@ -86,7 +87,17 @@ SELECT md5('node' || n.rank)::uuid,
             WHEN n.has_drift THEN floor(random() * 121)::int - 60 END
 FROM planguard_src.node_rank n
 LEFT JOIN planguard_src.prefix_relay pr
-  ON n.node_type = 2 AND pr.k = n.rank - (SELECT min(rank) FROM planguard_src.node_rank WHERE node_type = 2) + 1;
+  ON n.node_type = 2 AND pr.k = n.rank - (SELECT min(rank) FROM planguard_src.node_rank WHERE node_type = 2) + 1
+-- The first 48 observers (po_observer ranks) are also repeater nodes, as in production: 48 repeaters after the
+-- prefix relays carry their keys.
+LEFT JOIN planguard_src.po_observer pc
+  ON n.node_type = 2 AND pc.rank <= 48 AND pc.rank = n.rank - (SELECT min(rank) FROM planguard_src.node_rank WHERE node_type = 2) + 1 - 16;
+
+-- Polling claims: those 48 observers, keyed by their node's public key, so a few dozen nodes are pollers.
+INSERT INTO polling_claims (observer_public_key, observer_id, claimed_at, received_at)
+SELECT decode(md5('observer-key' || o.rank) || md5('observer-key2' || o.rank), 'hex'), md5('observer' || o.rank)::uuid,
+       timestamptz '2026-10-18 16:00+00', timestamptz '2026-10-18 16:00+00'
+FROM planguard_src.po_observer o WHERE o.rank <= 48;
 
 -- node_iatas: 1/20 of the copy's nodes per region, at least 8 nodes in every region that has routes; a node is
 -- heard in about five regions. The planted prefix relays are heard at their home region.

@@ -3155,6 +3155,42 @@ entries:
     expect:
       budget: {buffers: 15000, planning_ms: 60}
     note: "measured: - / - B (custom / generic); budget: class budget"
+  - id: sm.nodes.poller_true
+    stmt: ListNodes
+    shape: "ListNodes poller only"
+    params: [{raw: "0"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "'infinity'::timestamptz"}, {raw: "50"}, {raw: "''"}, {raw: "false"}, {raw: "''"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}, {raw: "'true'"}]
+    tiers: [fixture, prod]
+    note: "fixture and prod only: the local copy's overlay has no polling_claims, so no budget is measured"
+  - id: sm.nodes.poller_false
+    stmt: ListNodes
+    shape: "ListNodes non-pollers only"
+    params: [{raw: "0"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "'infinity'::timestamptz"}, {raw: "50"}, {raw: "''"}, {raw: "false"}, {raw: "''"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}, {raw: "'false'"}]
+    tiers: [fixture, prod]
+    note: "fixture and prod only: the local copy's overlay has no polling_claims, so no budget is measured"
+  - id: sm.nodes.poller_true_type2
+    stmt: ListNodes
+    shape: "ListNodes poller only, type 2"
+    params: [{raw: "2"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "'infinity'::timestamptz"}, {raw: "50"}, {raw: "''"}, {raw: "false"}, {raw: "''"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}, {raw: "'true'"}]
+    tiers: [fixture, prod]
+    note: "fixture and prod only: the local copy's overlay has no polling_claims, so no budget is measured"
+  - id: sm.nodes_sorted.poller_true
+    stmt: ListNodesSorted
+    shape: "ListNodesSorted name, poller only"
+    params: [{raw: "false"}, {raw: "false"}, {raw: "'name'"}, {raw: "0"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "''"}, {raw: "''"}, {raw: "'true'"}, {raw: "false"}, {raw: "0"}, {raw: "''"}, {raw: "0"}, {raw: "0"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}, {raw: "200"}]
+    tiers: [fixture, prod]
+    note: "fixture and prod only, as sm.nodes_sorted.name"
+  - id: sm.nodes_sorted.poller_false
+    stmt: ListNodesSorted
+    shape: "ListNodesSorted name, non-pollers only"
+    params: [{raw: "false"}, {raw: "false"}, {raw: "'name'"}, {raw: "0"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "''"}, {raw: "''"}, {raw: "'false'"}, {raw: "false"}, {raw: "0"}, {raw: "''"}, {raw: "0"}, {raw: "0"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}, {raw: "200"}]
+    tiers: [fixture, prod]
+    note: "fixture and prod only, as sm.nodes_sorted.name"
+  - id: sm.nodes_sorted.poller_true_type2
+    stmt: ListNodesSorted
+    shape: "ListNodesSorted name, poller only, type 2"
+    params: [{raw: "false"}, {raw: "false"}, {raw: "'name'"}, {raw: "2"}, {raw: "NULL::bpchar[]"}, {raw: "'any'"}, {raw: "'any'"}, {raw: "NULL::bytea"}, {raw: "''"}, {raw: "''"}, {raw: "''"}, {raw: "'true'"}, {raw: "false"}, {raw: "0"}, {raw: "''"}, {raw: "0"}, {raw: "0"}, {raw: "'00000000-0000-0000-0000-000000000000'::uuid"}, {raw: "200"}]
+    tiers: [fixture, prod]
+    note: "fixture and prod only, as sm.nodes_sorted.name"
   - id: sm.nodes_sorted.name
     stmt: ListNodesSorted
     shape: "ListNodesSorted name"
