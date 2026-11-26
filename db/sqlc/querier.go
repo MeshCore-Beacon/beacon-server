@@ -984,7 +984,7 @@ type Querier interface {
 	// PACKETS
 	// ============================================================
 	// A new TRACE packet adds itself to its tag summary in the same statement, so the summary
-	// can't miss a stored packet. 'TRACE' > 'PING'; the longest path keeps the best payload.
+	// can't miss a stored packet. 'TRACE' > 'PING'; keep the payload with the most reached hops.
 	UpsertPacket(ctx context.Context, arg UpsertPacketParams) (UpsertPacketRow, error)
 	// Applies only a claim newer than the stored one and received at least the claim interval after it, checked in
 	// this statement so concurrent claims cannot both pass. Zero rows means it was ignored.
