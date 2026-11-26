@@ -153,10 +153,8 @@ type DB interface {
 	// GetObserverRadio returns the current radio settings for the given observer.
 	GetObserverRadio(ctx context.Context, observerID uuid.UUID) (RadioSettings, error)
 
-	// IsObserverByPubkey returns true if the given public key belongs to a known observer.
-	IsObserverByPubkey(ctx context.Context, pubkey []byte) bool
-	// IsPollerByPubkey returns true if the given public key has a polling claim.
-	IsPollerByPubkey(ctx context.Context, pubkey []byte) bool
+	// AdvertRoles reports observer registration and polling claim presence for the advertised key.
+	AdvertRoles(ctx context.Context, pubkey []byte) (isObserver, isPoller bool)
 
 	// GetObserverScopes returns the list of scope names associated with the given observer.
 	GetObserverScopes(ctx context.Context, observerID uuid.UUID) ([]string, error)

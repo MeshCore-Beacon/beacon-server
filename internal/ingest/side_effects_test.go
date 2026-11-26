@@ -334,16 +334,19 @@ func TestHandlePacket_Trace_RecordsTrace(t *testing.T) {
 	}
 }
 
-func TestAdvertNodeEventCarriesIsPoller(t *testing.T) {
-	for _, poller := range []bool{true, false} {
+func TestAdvertNodeEventCarriesRoles(t *testing.T) {
+	for _, roles := range []struct{ observer, poller bool }{{}, {true, false}, {true, true}, {false, true}} {
 		w, db := newTestWorker()
-		db.isPoller = poller
+		db.isObserver, db.isPoller = roles.observer, roles.poller
 		go w.hub.Run()
 		client := w.hub.NewClient()
 		w.hub.AddScope(client, "poller", hub.Scope{Events: []hub.EventType{hub.EventNodeUpdate, hub.EventObserverStatus}})
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		waitForSummarySubscriber(t, ctx, w.hub, client)
 		w.handlePayloadTypeSideEffects(ctx, buildAdvertPacket(t, false), "AAA", []byte{1}, RadioSettings{}, nil, nil, nil, snrTestValue(0), false, false)
+		if db.advertRoleReads != 1 {
+			t.Fatalf("expected one role lookup per advert, got %d", db.advertRoleReads)
+		}
 		func() {
 			for {
 				select {
@@ -355,8 +358,8 @@ func TestAdvertNodeEventCarriesIsPoller(t *testing.T) {
 					if err := json.Unmarshal(event.Payload, &payload); err != nil {
 						t.Fatal(err)
 					}
-					if got, ok := payload["isPoller"]; !ok || got != poller {
-						t.Fatalf("isPoller = %v (present=%v), want %v: %s", got, ok, poller, event.Payload)
+					if payload["isObserver"] != roles.observer || payload["isPoller"] != roles.poller {
+						t.Fatalf("wrong advert roles for %+v: %s", roles, event.Payload)
 					}
 					return
 				case <-ctx.Done():

@@ -1597,6 +1597,21 @@ func (mr *MockQuerierMockRecorder) GetAccount(ctx, id any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAccount", reflect.TypeOf((*MockQuerier)(nil).GetAccount), ctx, id)
 }
 
+// GetAdvertRoles mocks base method.
+func (m *MockQuerier) GetAdvertRoles(ctx context.Context, publicKey []byte) (db.GetAdvertRolesRow, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetAdvertRoles", ctx, publicKey)
+	ret0, _ := ret[0].(db.GetAdvertRolesRow)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetAdvertRoles indicates an expected call of GetAdvertRoles.
+func (mr *MockQuerierMockRecorder) GetAdvertRoles(ctx, publicKey any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAdvertRoles", reflect.TypeOf((*MockQuerier)(nil).GetAdvertRoles), ctx, publicKey)
+}
+
 // GetAnalyticsRevision mocks base method.
 func (m *MockQuerier) GetAnalyticsRevision(ctx context.Context) (int64, error) {
 	m.ctrl.T.Helper()

@@ -175,6 +175,23 @@ func (q *Queries) DeletePollingCandidates(ctx context.Context, observerPublicKey
 	return err
 }
 
+const getAdvertRoles = `-- name: GetAdvertRoles :one
+SELECT EXISTS (SELECT 1 FROM observers WHERE public_key = $1::bytea) AS is_observer,
+       EXISTS (SELECT 1 FROM polling_claims WHERE observer_public_key = $1::bytea) AS is_poller
+`
+
+type GetAdvertRolesRow struct {
+	IsObserver bool `json:"is_observer"`
+	IsPoller   bool `json:"is_poller"`
+}
+
+func (q *Queries) GetAdvertRoles(ctx context.Context, publicKey []byte) (GetAdvertRolesRow, error) {
+	row := q.db.QueryRow(ctx, getAdvertRoles, publicKey)
+	var i GetAdvertRolesRow
+	err := row.Scan(&i.IsObserver, &i.IsPoller)
+	return i, err
+}
+
 const getPollingState = `-- name: GetPollingState :one
 SELECT paused, paused_until, excluded_nodes FROM polling_state WHERE id
 `

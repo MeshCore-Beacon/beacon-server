@@ -171,8 +171,7 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 			w.log.Error(fmt.Sprintf("failed to upsert node short ID for %s", hex.EncodeToString(prefix4)), "error", err)
 		}
 		pubkeyHex := hex.EncodeToString(advert.PublicKey.PublicKeyBytes())
-		isObserver := w.db.IsObserverByPubkey(ctx, advert.PublicKey.PublicKeyBytes())
-		isPoller := w.db.IsPollerByPubkey(ctx, advert.PublicKey.PublicKeyBytes())
+		isObserver, isPoller := w.db.AdvertRoles(ctx, advert.PublicKey.PublicKeyBytes())
 		var defaultScope *string
 		if matchedScope != nil {
 			defaultScope = matchedScope
