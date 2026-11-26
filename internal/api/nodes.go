@@ -109,6 +109,7 @@ type NodeSummary struct {
 	NodeTypeName       string      `json:"nodeTypeName"`
 	Name               *string     `json:"name,omitempty"`
 	IsObserver         bool        `json:"isObserver"`             // true if this node is also a known observer
+	IsPoller           bool        `json:"isPoller"`               // true if this node is an observer with a current polling claim
 	ObserverID         *uuid.UUID  `json:"observerId,omitempty"`   // UUID of the associated observer row, if any
 	Latitude           *float64    `json:"lat,omitempty"`          // decimal degrees, from advert AppData
 	Longitude          *float64    `json:"lng,omitempty"`          // decimal degrees, from advert AppData

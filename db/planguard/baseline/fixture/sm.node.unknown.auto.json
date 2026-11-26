@@ -3,6 +3,7 @@
  "  Index Scan on nodes n using nodes_pkey scan=Forward",
  "  Index Scan on transport_scopes ts using transport_scopes_pkey scan=Forward",
  "  Index Only Scan on observers o using observers_public_key_key scan=Forward [SubPlan]",
+ "  Index Only Scan on polling_claims c using polling_claims_pkey scan=Forward [SubPlan]",
  "  Limit [SubPlan]",
  "    Index Scan on observers o_1 using observers_public_key_key scan=Forward",
  "  Aggregate partial=Simple [SubPlan]",

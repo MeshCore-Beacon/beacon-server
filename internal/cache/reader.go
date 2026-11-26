@@ -343,8 +343,8 @@ func (cr *CachedReader) ListMessagesAfterID(ctx context.Context, afterID int64, 
 }
 
 // ListNodes implements [api.Reader].
-func (cr *CachedReader) ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
-	return cr.inner.ListNodes(ctx, nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, cursor, pageCursor, limit, includeNeighbors)
+func (cr *CachedReader) ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces, poller *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
+	return cr.inner.ListNodes(ctx, nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, poller, pubkey, pubkeyPrefix, name, scope, cursor, pageCursor, limit, includeNeighbors)
 }
 
 // ListLatestNodeReadings implements [api.Reader]. The key leaves out since, which the handler derives from the clock.
@@ -360,8 +360,8 @@ func (cr *CachedReader) ListLatestNodeReadings(ctx context.Context, iatas []stri
 }
 
 // ListNodesSorted implements [api.Reader].
-func (cr *CachedReader) ListNodesSorted(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, sort api.NodeSort, pageCursor *api.NodeSortCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
-	return cr.inner.ListNodesSorted(ctx, nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, sort, pageCursor, limit, includeNeighbors)
+func (cr *CachedReader) ListNodesSorted(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces, poller *bool, pubkey []byte, pubkeyPrefix, name, scope string, sort api.NodeSort, pageCursor *api.NodeSortCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
+	return cr.inner.ListNodesSorted(ctx, nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, poller, pubkey, pubkeyPrefix, name, scope, sort, pageCursor, limit, includeNeighbors)
 }
 
 // ListNodeObservations implements [api.Reader].

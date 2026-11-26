@@ -114,7 +114,7 @@ func uuidKeysetCursor(cursor int64, at *time.Time, id uuid.UUID) (pgtype.Timesta
 }
 
 // listNodesParams builds the statement's arguments for one ListNodes request.
-func listNodesParams(nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) sqlc.ListNodesParams {
+func listNodesParams(nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces, poller *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) sqlc.ListNodesParams {
 	var (
 		at *time.Time
 		id uuid.UUID
@@ -136,11 +136,12 @@ func listNodesParams(nodeType int16, iatas []string, supportsMultibytePaths, sup
 		Column10: includeNeighbors,
 		Column11: pubkeyPrefix,
 		Column12: cursorID,
+		Column13: tristate(poller),
 	}
 }
 
-func (s *Store) ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
-	rows, err := s.q.ListNodes(ctx, listNodesParams(nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, cursor, pageCursor, limit, includeNeighbors))
+func (s *Store) ListNodes(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces, poller *bool, pubkey []byte, pubkeyPrefix, name, scope string, cursor int64, pageCursor *api.NodeCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
+	rows, err := s.q.ListNodes(ctx, listNodesParams(nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, poller, pubkey, pubkeyPrefix, name, scope, cursor, pageCursor, limit, includeNeighbors))
 	if err != nil {
 		return api.NodePage{}, err
 	}
@@ -163,7 +164,7 @@ func (s *Store) ListNodes(ctx context.Context, nodeType int16, iatas []string, s
 	return page, nil
 }
 
-func (s *Store) ListNodesSorted(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces *bool, pubkey []byte, pubkeyPrefix, name, scope string, sort api.NodeSort, pageCursor *api.NodeSortCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
+func (s *Store) ListNodesSorted(ctx context.Context, nodeType int16, iatas []string, supportsMultibytePaths, supportsMultibyteTraces, poller *bool, pubkey []byte, pubkeyPrefix, name, scope string, sort api.NodeSort, pageCursor *api.NodeSortCursor, limit int32, includeNeighbors bool) (api.NodePage, error) {
 	params := sqlc.ListNodesSortedParams{
 		IncludeNeighbors: includeNeighbors,
 		Descending:       sort.Descending,
@@ -172,6 +173,7 @@ func (s *Store) ListNodesSorted(ctx context.Context, nodeType int16, iatas []str
 		Iatas:            iatas,
 		MultibytePaths:   tristate(supportsMultibytePaths),
 		MultibyteTraces:  tristate(supportsMultibyteTraces),
+		Poller:           tristate(poller),
 		Pubkey:           pubkey,
 		Name:             name,
 		Scope:            scope,
@@ -196,7 +198,7 @@ func (s *Store) ListNodesSorted(ctx context.Context, nodeType int16, iatas []str
 		items = append(items, s.nodeSummary(sqlc.ListNodesRow{
 			ID: v.ID, PublicKey: v.PublicKey, NodeType: v.NodeType, Name: v.Name, Latitude: v.Latitude,
 			Longitude: v.Longitude, LastSeen: v.LastSeen, RadioFreqMhz: v.RadioFreqMhz, RadioSf: v.RadioSf,
-			RadioBwKhz: v.RadioBwKhz, DefaultScopeName: v.DefaultScopeName, Iatas: v.Iatas, IsObserver: v.IsObserver,
+			RadioBwKhz: v.RadioBwKhz, DefaultScopeName: v.DefaultScopeName, Iatas: v.Iatas, IsObserver: v.IsObserver, IsPoller: v.IsPoller,
 			ObserverID: v.ObserverID, KnownNeighborCount: v.KnownNeighborCount, NeighborIds: v.NeighborIds,
 		}))
 	}
@@ -220,6 +222,7 @@ func (s *Store) nodeSummary(v sqlc.ListNodesRow) api.NodeSummary {
 		Latitude:           v.Latitude,
 		Longitude:          v.Longitude,
 		IsObserver:         v.IsObserver,
+		IsPoller:           v.IsPoller,
 		ObserverID:         nullableUUID(v.ObserverID),
 		DefaultScope:       v.DefaultScopeName,
 		KnownNeighborCount: v.KnownNeighborCount,
@@ -255,6 +258,7 @@ func (s *Store) GetNode(ctx context.Context, nodeID uuid.UUID) (*api.Node, error
 			Latitude:           row.Latitude,
 			Longitude:          row.Longitude,
 			IsObserver:         row.IsObserver,
+			IsPoller:           row.IsPoller,
 			ObserverID:         nullableUUID(row.ObserverID),
 			DefaultScope:       row.DefaultScopeName,
 			KnownNeighborCount: row.KnownNeighborCount,

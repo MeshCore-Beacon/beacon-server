@@ -881,6 +881,7 @@ func (q *Queries) GetNodeActivityHourly(ctx context.Context, arg GetNodeActivity
 const getNodeByID = `-- name: GetNodeByID :one
 SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.location_source, n.last_advert_at, n.supports_multibyte_paths, n.supports_multibyte_traces, n.default_scope_id, n.min_firmware_version, n.first_seen, n.last_seen, n.radio_freq_mhz, n.radio_sf, n.radio_bw_khz, n.metadata, n.device_clock_drift_seconds, n.prev_clock_drift_seconds, ts.name AS default_scope_name,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
+  EXISTS (SELECT 1 FROM polling_claims c WHERE c.observer_public_key = n.public_key) AS is_poller,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
   (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
    FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas,
@@ -918,6 +919,7 @@ type GetNodeByIDRow struct {
 	PrevClockDriftSeconds   *int64             `json:"prev_clock_drift_seconds"`
 	DefaultScopeName        *string            `json:"default_scope_name"`
 	IsObserver              bool               `json:"is_observer"`
+	IsPoller                bool               `json:"is_poller"`
 	ObserverID              uuid.UUID          `json:"observer_id"`
 	Iatas                   []byte             `json:"iatas"`
 	KnownNeighborCount      int64              `json:"known_neighbor_count"`
@@ -950,6 +952,7 @@ func (q *Queries) GetNodeByID(ctx context.Context, id uuid.UUID) (GetNodeByIDRow
 		&i.PrevClockDriftSeconds,
 		&i.DefaultScopeName,
 		&i.IsObserver,
+		&i.IsPoller,
 		&i.ObserverID,
 		&i.Iatas,
 		&i.KnownNeighborCount,
@@ -4410,6 +4413,11 @@ WHERE
   AND (n.last_seen, n.id) < ($7::timestamptz, $12::uuid)
   AND ($9::text = '' OR ts.name = $9::text)
   AND ($11::text = '' OR encode(n.public_key, 'hex') ILIKE $11 || '%')
+  AND (
+    $13::text = 'any'
+    OR ($13::text = 'true' AND EXISTS (SELECT 1 FROM polling_claims c WHERE c.observer_public_key = n.public_key))
+    OR ($13::text = 'false' AND NOT EXISTS (SELECT 1 FROM polling_claims c WHERE c.observer_public_key = n.public_key))
+  )
 ORDER BY n.last_seen DESC, n.id DESC
 LIMIT $8
 )
@@ -4418,6 +4426,7 @@ SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_
   (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
    FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
+  EXISTS (SELECT 1 FROM polling_claims c WHERE c.observer_public_key = n.public_key) AS is_poller,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
   (SELECT COUNT(DISTINCT nn.neighbor_id) FROM node_neighbors nn WHERE nn.node_id = n.id)::bigint AS known_neighbor_count,
   (CASE WHEN $10::bool THEN
@@ -4440,6 +4449,7 @@ type ListNodesParams struct {
 	Column10 bool               `json:"column_10"`
 	Column11 string             `json:"column_11"`
 	Column12 uuid.UUID          `json:"column_12"`
+	Column13 string             `json:"column_13"`
 }
 
 type ListNodesRow struct {
@@ -4456,6 +4466,7 @@ type ListNodesRow struct {
 	DefaultScopeName   *string            `json:"default_scope_name"`
 	Iatas              []byte             `json:"iatas"`
 	IsObserver         bool               `json:"is_observer"`
+	IsPoller           bool               `json:"is_poller"`
 	ObserverID         uuid.UUID          `json:"observer_id"`
 	KnownNeighborCount int64              `json:"known_neighbor_count"`
 	NeighborIds        []uuid.UUID        `json:"neighbor_ids"`
@@ -4476,6 +4487,7 @@ func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNod
 		arg.Column10,
 		arg.Column11,
 		arg.Column12,
+		arg.Column13,
 	)
 	if err != nil {
 		return nil, err
@@ -4498,6 +4510,7 @@ func (q *Queries) ListNodes(ctx context.Context, arg ListNodesParams) ([]ListNod
 			&i.DefaultScopeName,
 			&i.Iatas,
 			&i.IsObserver,
+			&i.IsPoller,
 			&i.ObserverID,
 			&i.KnownNeighborCount,
 			&i.NeighborIds,
@@ -4550,27 +4563,33 @@ WHERE
   AND ($9::text = '' OR n.name ILIKE '%' || $9::text || '%')
   AND ($10::text = '' OR ts.name = $10::text)
   AND ($11::text = '' OR encode(n.public_key, 'hex') ILIKE $11::text || '%')
+  AND (
+    $12::text = 'any'
+    OR ($12::text = 'true' AND EXISTS (SELECT 1 FROM polling_claims c WHERE c.observer_public_key = n.public_key))
+    OR ($12::text = 'false' AND NOT EXISTS (SELECT 1 FROM polling_claims c WHERE c.observer_public_key = n.public_key))
+  )
 ), page AS (
 SELECT id, public_key, node_type, name, latitude, longitude, last_seen, radio_freq_mhz, radio_sf, radio_bw_khz, default_scope_name, k_null, k_text, k_num, k_seen FROM keyed
-WHERE NOT $12::bool
-  OR k_null > $13::int
-  OR (k_null = $13::int AND (
-    ($2::bool AND k_text < $14::text)
-    OR (NOT $2::bool AND k_text > $14::text)
-    OR (k_text = $14::text AND (
-      k_num > $15::bigint OR (k_num = $15::bigint AND (
-        k_seen > $16::bigint OR (k_seen = $16::bigint AND id > $17::uuid)))))))
+WHERE NOT $13::bool
+  OR k_null > $14::int
+  OR (k_null = $14::int AND (
+    ($2::bool AND k_text < $15::text)
+    OR (NOT $2::bool AND k_text > $15::text)
+    OR (k_text = $15::text AND (
+      k_num > $16::bigint OR (k_num = $16::bigint AND (
+        k_seen > $17::bigint OR (k_seen = $17::bigint AND id > $18::uuid)))))))
 ORDER BY k_null,
   CASE WHEN NOT $2::bool THEN k_text END,
   CASE WHEN $2::bool THEN k_text END DESC,
   k_num, k_seen, id
-LIMIT $18
+LIMIT $19
 )
 SELECT n.id, n.public_key, n.node_type, n.name, n.latitude, n.longitude, n.last_seen,
   n.radio_freq_mhz, n.radio_sf, n.radio_bw_khz, n.default_scope_name, n.k_null, n.k_text::text AS k_text, n.k_num, n.k_seen,
   (SELECT json_agg(json_build_object('iata', ni.iata, 'lastHeard', (extract(epoch from ni.last_heard) * 1000)::bigint) ORDER BY ni.last_heard DESC)
    FROM node_iatas ni WHERE ni.node_id = n.id) AS iatas,
   EXISTS (SELECT 1 FROM observers o WHERE o.public_key = n.public_key) AS is_observer,
+  EXISTS (SELECT 1 FROM polling_claims c WHERE c.observer_public_key = n.public_key) AS is_poller,
   (SELECT o.id FROM observers o WHERE o.public_key = n.public_key LIMIT 1) AS observer_id,
   (SELECT COUNT(DISTINCT nn.neighbor_id) FROM node_neighbors nn WHERE nn.node_id = n.id)::bigint AS known_neighbor_count,
   (CASE WHEN $1::bool THEN
@@ -4595,6 +4614,7 @@ type ListNodesSortedParams struct {
 	Name             string    `json:"name"`
 	Scope            string    `json:"scope"`
 	PubkeyPrefix     string    `json:"pubkey_prefix"`
+	Poller           string    `json:"poller"`
 	HasCursor        bool      `json:"has_cursor"`
 	CursorNull       int32     `json:"cursor_null"`
 	CursorText       string    `json:"cursor_text"`
@@ -4622,6 +4642,7 @@ type ListNodesSortedRow struct {
 	KSeen              int64              `json:"k_seen"`
 	Iatas              []byte             `json:"iatas"`
 	IsObserver         bool               `json:"is_observer"`
+	IsPoller           bool               `json:"is_poller"`
 	ObserverID         uuid.UUID          `json:"observer_id"`
 	KnownNeighborCount int64              `json:"known_neighbor_count"`
 	NeighborIds        []uuid.UUID        `json:"neighbor_ids"`
@@ -4642,6 +4663,7 @@ func (q *Queries) ListNodesSorted(ctx context.Context, arg ListNodesSortedParams
 		arg.Name,
 		arg.Scope,
 		arg.PubkeyPrefix,
+		arg.Poller,
 		arg.HasCursor,
 		arg.CursorNull,
 		arg.CursorText,
@@ -4675,6 +4697,7 @@ func (q *Queries) ListNodesSorted(ctx context.Context, arg ListNodesSortedParams
 			&i.KSeen,
 			&i.Iatas,
 			&i.IsObserver,
+			&i.IsPoller,
 			&i.ObserverID,
 			&i.KnownNeighborCount,
 			&i.NeighborIds,

@@ -645,6 +645,30 @@ func TestIsObserverByPubkey_NotFound(t *testing.T) {
 	}
 }
 
+func TestIsPollerByPubkey(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ret  bool
+		err  error
+		want bool
+	}{
+		{"found", true, nil, true},
+		{"not found", false, nil, false},
+		{"error", true, errors.New("boom"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			mock := mockdb.NewMockQuerier(ctrl)
+			pubkey := []byte{0x01, 0x02}
+			mock.EXPECT().IsPollerKey(gomock.Any(), pubkey).Return(tc.ret, tc.err)
+			store := &Store{q: mock}
+			if got := store.IsPollerByPubkey(context.Background(), pubkey); got != tc.want {
+				t.Errorf("IsPollerByPubkey = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func activityObserver(sf, cr *int16, bw, freq *float32) sqlc.Observer {
 	return sqlc.Observer{
 		ID:           uuid.MustParse("00000000-0000-0000-0000-000000000001"),

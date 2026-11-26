@@ -134,6 +134,7 @@ func listLatestNodeReadings(reader api.Reader) http.HandlerFunc {
 //	@Param		pubkeyPrefix			query		string	false	"Partial public key match: hex prefix, case-insensitive"
 //	@Param		supportsMultibytePaths	query		bool	false	"Filter by multibyte path support (true/false); omit for no filter"
 //	@Param		supportsMultibyteTraces	query		bool	false	"Filter by multibyte trace support (true/false); omit for no filter"
+//	@Param		poller	query		bool	false	"Filter by poller role (true/false); omit for no filter"
 //	@Param		neighbors				query		bool	false	"Include each node's known neighbor IDs (neighborIds field). Bare ?neighbors or ?neighbors=true enables it; omit/false for none"
 //	@Param		cursor					query		int		false	"last_seen epoch ms of last item for pagination"
 //	@Param		pageCursor				query		string	false	"Opaque nextPageCursor from a previous response; keeps millisecond ties. Wins over cursor when both are sent"
@@ -241,6 +242,15 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 			}
 			supportsMultibyteTraces = &b
 		}
+		var poller *bool
+		if v := r.URL.Query().Get("poller"); v != "" {
+			b, err := strconv.ParseBool(v)
+			if err != nil {
+				respondError(w, http.StatusBadRequest, "invalid poller value")
+				return
+			}
+			poller = &b
+		}
 		var includeNeighbors bool
 		if vals, ok := r.URL.Query()["neighbors"]; ok {
 			v := vals[0] // bare `?neighbors` (no `=`) parses as ""
@@ -257,13 +267,13 @@ func listNodes(reader api.Reader) http.HandlerFunc {
 		}
 		var nodes api.NodePage
 		if sorted {
-			nodes, err = reader.ListNodesSorted(r.Context(), nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, sort, sortCursor, limit, includeNeighbors)
+			nodes, err = reader.ListNodesSorted(r.Context(), nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, poller, pubkey, pubkeyPrefix, name, scope, sort, sortCursor, limit, includeNeighbors)
 			nodes.Sort, nodes.Order = sort.By, "asc"
 			if sort.Descending {
 				nodes.Order = "desc"
 			}
 		} else {
-			nodes, err = reader.ListNodes(r.Context(), nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, pubkey, pubkeyPrefix, name, scope, cursor, pageCursor, limit, includeNeighbors)
+			nodes, err = reader.ListNodes(r.Context(), nodeType, iatas, supportsMultibytePaths, supportsMultibyteTraces, poller, pubkey, pubkeyPrefix, name, scope, cursor, pageCursor, limit, includeNeighbors)
 			nodes.Sort, nodes.Order = "lastSeen", "desc"
 		}
 		if err != nil {

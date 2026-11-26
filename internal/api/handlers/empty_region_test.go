@@ -44,11 +44,11 @@ func TestListReadsKeepEmptyRegionFiltered(t *testing.T) {
 			}
 			return nil, pgx.ErrNoRows
 		},
-		listNodes: func(_ context.Context, _ int16, iatas []string, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
+		listNodes: func(_ context.Context, _ int16, iatas []string, _, _, _ *bool, _ []byte, _, _, _ string, _ int64, _ *api.NodeCursor, _ int32, _ bool) (api.NodePage, error) {
 			record(iatas)
 			return api.NodePage{}, nil
 		},
-		listNodesSorted: func(_ context.Context, _ int16, iatas []string, _, _ *bool, _ []byte, _, _, _ string, _ api.NodeSort, _ *api.NodeSortCursor, _ int32, _ bool) (api.NodePage, error) {
+		listNodesSorted: func(_ context.Context, _ int16, iatas []string, _, _, _ *bool, _ []byte, _, _, _ string, _ api.NodeSort, _ *api.NodeSortCursor, _ int32, _ bool) (api.NodePage, error) {
 			record(iatas)
 			return api.NodePage{}, nil
 		},

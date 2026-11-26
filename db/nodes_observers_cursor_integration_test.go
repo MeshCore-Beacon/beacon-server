@@ -56,6 +56,7 @@ func keysetTx(t *testing.T) (context.Context, pgx.Tx, *Store) {
 	ctx, tx := retentionTx(t)
 	applyBaseline(t, ctx, tx)
 	applyMigrationsTx(t, ctx, tx, smallTableMigrations...)
+	applyMigrationsTx(t, ctx, tx, "064_polling.sql") // ListNodes reads polling_claims
 	mustExec(t, ctx, tx, keysetFixture)
 	// enable_seqscan = off pushes every plan past jit_above_cost; JIT-compiling thousands of queries times out on
 	// servers built with LLVM.
@@ -132,7 +133,7 @@ func legacyNodeRows(t *testing.T, ctx context.Context, tx pgx.Tx, sql string, sh
 
 func newNodeRows(t *testing.T, ctx context.Context, s *Store, sh nodeShape, cursor int64, pc *api.NodeCursor, limit int32) []sqlc.ListNodesRow {
 	t.Helper()
-	rows, err := s.q.ListNodes(ctx, listNodesParams(sh.nodeType, sh.iatas, nil, nil, nil, sh.prefix, sh.nameFilter, sh.scope, cursor, pc, limit, sh.withNeighbours))
+	rows, err := s.q.ListNodes(ctx, listNodesParams(sh.nodeType, sh.iatas, nil, nil, nil, nil, sh.prefix, sh.nameFilter, sh.scope, cursor, pc, limit, sh.withNeighbours))
 	if err != nil {
 		t.Fatalf("%s: %v", sh.name, err)
 	}
@@ -214,7 +215,7 @@ func TestNodesPageCursorTiesPostgres(t *testing.T) {
 	}
 	none := nodeShape{name: "unfiltered"}
 	for _, limit := range limits {
-		page1, err := s.ListNodes(ctx, 0, nil, nil, nil, nil, "", "", "", 0, nil, int32(limit), false)
+		page1, err := s.ListNodes(ctx, 0, nil, nil, nil, nil, nil, "", "", "", 0, nil, int32(limit), false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -274,7 +275,7 @@ func TestNodesPageCursorTiesPostgres(t *testing.T) {
 	var cursor int64
 	var pageCursor *api.NodeCursor
 	for range len(all) + 2 {
-		page, err := s.ListNodes(ctx, 0, nil, nil, nil, nil, "", "", "", cursor, pageCursor, 1, false)
+		page, err := s.ListNodes(ctx, 0, nil, nil, nil, nil, nil, "", "", "", cursor, pageCursor, 1, false)
 		if err != nil {
 			t.Fatal(err)
 		}

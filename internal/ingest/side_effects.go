@@ -70,6 +70,7 @@ type nodeUpdateEvent struct {
 	Lat          **float64      `json:"lat,omitempty"` // Omitted keeps the client's position; explicit null clears it.
 	Lng          **float64      `json:"lng,omitempty"`
 	IsObserver   bool           `json:"isObserver"`
+	IsPoller     bool           `json:"isPoller"`
 	IATAs        []api.NodeIATA `json:"iatas"`
 	DefaultScope *string        `json:"defaultScope,omitempty"`
 	Radio        *string        `json:"radio,omitempty"`
@@ -171,6 +172,7 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 		}
 		pubkeyHex := hex.EncodeToString(advert.PublicKey.PublicKeyBytes())
 		isObserver := w.db.IsObserverByPubkey(ctx, advert.PublicKey.PublicKeyBytes())
+		isPoller := w.db.IsPollerByPubkey(ctx, advert.PublicKey.PublicKeyBytes())
 		var defaultScope *string
 		if matchedScope != nil {
 			defaultScope = matchedScope
@@ -188,6 +190,7 @@ func (w *Worker) handlePayloadTypeSideEffects(ctx context.Context, packet *meshc
 			NodeTypeName: api.NodeTypeName(int16(advert.Type())),
 			IATA:         iata,
 			IsObserver:   isObserver,
+			IsPoller:     isPoller,
 			IATAs:        []api.NodeIATA{{IATA: iata, LastHeard: time.Now().UnixMilli()}},
 			DefaultScope: defaultScope,
 			Radio:        radioStr,
