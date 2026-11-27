@@ -35,9 +35,10 @@ type PollingAdminStore interface {
 
 // PollingAdminConfig is what the admin routes show and check from the polling config.
 type PollingAdminConfig struct {
-	Paused        bool     // polling.paused
-	Authority     string   // polling.authority
-	ExcludedNodes [][]byte // polling.excluded_nodes
+	Paused         bool          // polling.paused
+	Authority      string        // polling.authority
+	EvidenceWindow time.Duration // polling.evidence_window
+	ExcludedNodes  [][]byte      // polling.excluded_nodes
 }
 
 // PollingAdminRouter must be mounted inside the authenticated admin subtree.
@@ -116,7 +117,8 @@ func (a pollingAdmin) state(ctx context.Context) (api.PollingAdminState, error) 
 		stops = []api.PollingAdminStop{}
 	}
 	out := api.PollingAdminState{NoPasswordBlocked: blocked, AdminStops: stops, Paused: effective, ConfigPaused: a.cfg.Paused, Authority: a.cfg.Authority,
-		ExcludedNodes: make([]string, 0, len(excluded)), ConfigExcludedNodes: make([]string, 0, len(a.cfg.ExcludedNodes)),
+		EvidenceWindowSeconds: int64(a.cfg.EvidenceWindow / time.Second),
+		ExcludedNodes:         make([]string, 0, len(excluded)), ConfigExcludedNodes: make([]string, 0, len(a.cfg.ExcludedNodes)),
 		Observers: observers}
 	for _, k := range a.cfg.ExcludedNodes {
 		out.ConfigExcludedNodes = append(out.ConfigExcludedNodes, hex.EncodeToString(k))

@@ -20,7 +20,6 @@ const (
 	ClaimTTL       = 3900 * time.Second
 	ClaimFutureMax = 10 * time.Minute
 	ReadingMaxAge  = 2 * time.Hour
-	EvidenceWindow = 24 * time.Hour
 	// Firmware claims at most once a minute and polls at most every 30 minutes.
 	ClaimMinInterval   = 30 * time.Second
 	ReadingMinInterval = 5 * time.Minute
@@ -306,7 +305,15 @@ func (s *Service) requestsNeedApproval() bool {
 // ElectTarget recomputes the order of observers for one repeater. No candidates clears it.
 func (s *Service) ElectTarget(ctx context.Context, target []byte) error {
 	now := s.now()
-	return s.store.ElectPollingTarget(ctx, target, now.Add(-ClaimTTL), now.Add(-EvidenceWindow), now, s.decide)
+	return s.store.ElectPollingTarget(ctx, target, now.Add(-ClaimTTL), now.Add(-s.evidenceWindow()), now, s.decide)
+}
+
+// evidenceWindow is polling.evidence_window, or its default for a config that was not resolved.
+func (s *Service) evidenceWindow() time.Duration {
+	if s.cfg.EvidenceWindow > 0 {
+		return s.cfg.EvidenceWindow
+	}
+	return config.DefaultEvidenceWindow
 }
 
 func (s *Service) decide(in ElectionInput) Election { return Decide(in, s.cfg) }

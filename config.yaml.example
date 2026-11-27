@@ -447,6 +447,8 @@ cache:
 #  paused: false               # true tells every observer to stop polling, without turning the feature off
 #  authority: evidence         # who can be chosen to poll. evidence: any observer, ranked by how well Beacon
 #                              # has heard the repeater through it. approved: only observers you approve
+#  evidence_window: 168h       # how far back a repeater's zero-hop adverts count as proof an observer hears
+#                              # it; 24h to 720h. Adverts older than packets.retention are gone either way
 #
 #  # Telemetry requests: signed-in users ask for a repeater to be polled. They also need accounts on
 #  # and BEACON_SECRET_KEY in .env (32 random bytes in base64, from: openssl rand -base64 32).

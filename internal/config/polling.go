@@ -28,6 +28,8 @@ type PollingConfig struct {
 	RequestsPerUser    *int   `yaml:"requests_per_user"`
 	OfflineDisableDays int    `yaml:"offline_disable_days"` // default 7
 	RequestObservers   string `yaml:"request_observers"`    // all (default) or approved
+	// EvidenceWindow is how far back zero-hop adverts count as evidence that an observer hears a repeater.
+	EvidenceWindow duration `yaml:"evidence_window"` // default 168h
 }
 
 // ResolvedPolling is PollingConfig with defaults applied and values parsed.
@@ -46,6 +48,7 @@ type ResolvedPolling struct {
 	RequestsPerUser    int
 	OfflineDisableDays int
 	RequestObservers   string
+	EvidenceWindow     time.Duration
 }
 
 // Who may take a requested repeater and be sent its guest password: any observer that opted in and has advert
@@ -54,6 +57,12 @@ type ResolvedPolling struct {
 const (
 	RequestObserversAll      = "all"
 	RequestObserversApproved = "approved"
+)
+
+// Adverts older than packets.retention are gone, so a window past it adds nothing.
+const (
+	DefaultEvidenceWindow = 7 * 24 * time.Hour
+	maxEvidenceWindow     = 30 * 24 * time.Hour
 )
 
 const (
@@ -102,6 +111,10 @@ func (p PollingConfig) Resolve() (ResolvedPolling, error) {
 	r.RequestObservers = p.RequestObservers
 	if r.RequestObservers == "" {
 		r.RequestObservers = RequestObserversAll
+	}
+	r.EvidenceWindow = p.EvidenceWindow.Duration
+	if r.EvidenceWindow == 0 {
+		r.EvidenceWindow = DefaultEvidenceWindow
 	}
 	if r.DirectWindow == 0 {
 		r.DirectWindow = time.Hour
@@ -156,6 +169,9 @@ func (p PollingConfig) Resolve() (ResolvedPolling, error) {
 	}
 	if r.RequestObservers != RequestObserversAll && r.RequestObservers != RequestObserversApproved {
 		return ResolvedPolling{}, fmt.Errorf("polling.request_observers must be all or approved")
+	}
+	if r.EvidenceWindow < 24*time.Hour || r.EvidenceWindow > maxEvidenceWindow {
+		return ResolvedPolling{}, fmt.Errorf("polling.evidence_window must be between 24h and 720h")
 	}
 	if len(p.ExcludedNodes) > maxPollingExcludedNodes {
 		return ResolvedPolling{}, fmt.Errorf("polling.excluded_nodes: at most %d entries", maxPollingExcludedNodes)

@@ -290,11 +290,14 @@ SELECT
     $21, $22, $23, $24, $25,
     $26, $27,
     $28, $29, $30,
-    -- Same rule as latest_ts in PollingOwnerRows, frozen at insert time.
+    -- Same rule as latest_ts in PollingOwnerRows, frozen at insert time: the observer's assignment has advert
+    -- evidence, or it is a local one and no assignee of the target has any.
     EXISTS (
         SELECT 1 FROM polling_assignments t
         WHERE t.target_public_key = $1 AND t.observer_public_key = $2
-          AND t.evidence_count > 0
+          AND (t.evidence_count > 0 OR (NOT t.requested AND NOT EXISTS (
+                SELECT 1 FROM polling_assignments e
+                WHERE e.target_public_key = t.target_public_key AND e.evidence_count > 0)))
     )
 WHERE NOT EXISTS (
     SELECT 1 FROM repeater_readings x
@@ -1288,7 +1291,10 @@ SELECT p.target_public_key::bytea AS target_public_key,
             SELECT r.sampled_at FROM repeater_readings r
             WHERE r.target_public_key = x.target_public_key AND r.observer_public_key = x.observer_public_key
             ORDER BY r.sampled_at DESC LIMIT 1) l
-        WHERE x.target_public_key = p.target_public_key AND x.evidence_count > 0)::timestamptz AS latest_trusted,
+        WHERE x.target_public_key = p.target_public_key
+          AND (x.evidence_count > 0 OR (NOT x.requested AND NOT EXISTS (
+                SELECT 1 FROM polling_assignments e
+                WHERE e.target_public_key = x.target_public_key AND e.evidence_count > 0))))::timestamptz AS latest_trusted,
        (SELECT r.sampled_at FROM repeater_readings r WHERE r.target_public_key = p.target_public_key
         ORDER BY r.sampled_at DESC LIMIT 1)::timestamptz AS latest_any
 FROM picked p
@@ -1377,7 +1383,10 @@ SELECT m.target_public_key::bytea AS target_public_key, COALESCE(a.rank, -1)::in
             SELECT r.sampled_at FROM repeater_readings r
             WHERE r.target_public_key = t.target_public_key AND r.observer_public_key = t.observer_public_key
             ORDER BY r.sampled_at DESC LIMIT 1) l
-        WHERE t.target_public_key = m.target_public_key AND t.evidence_count > 0)::timestamptz AS latest_ts,
+        WHERE t.target_public_key = m.target_public_key
+          AND (t.evidence_count > 0 OR (NOT t.requested AND NOT EXISTS (
+                SELECT 1 FROM polling_assignments e
+                WHERE e.target_public_key = t.target_public_key AND e.evidence_count > 0))))::timestamptz AS latest_ts,
        COALESCE(a.requested, false)::boolean AS requested,
        COALESCE(pc.requested, false)::boolean AS claimed_requested,
        EXISTS (SELECT 1 FROM polling_targets pt
@@ -1425,7 +1434,8 @@ type PollingOwnerRowsRow struct {
 }
 
 // assigned counts the target's assignment rows. latest_ts only trusts readings from an assigned observer with
-// advert evidence (the newest per assignee, then the newest of those), so an observer Beacon has never heard the repeater through cannot stand others down. A target the
+// advert evidence (the newest per assignee, then the newest of those), so an observer Beacon has never heard the
+// repeater through cannot stand down one it has. When no assignee has evidence, local assignees count. A target the
 // observer was handed as a requested one is listed even before its claim names it (that is how it learns of it);
 // claimed_requested is true when the claim names it as requested; target_requested when a request is in use for it.
 // accepts_requests and request_slots are the claim's, for polling.OfferSeats. The observer's flags and the password

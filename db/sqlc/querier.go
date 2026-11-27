@@ -741,7 +741,8 @@ type Querier interface {
 	PollingElectionUnlock(ctx context.Context) error
 	PollingObserverFlags(ctx context.Context, observerPublicKey []byte) (PollingObserverFlagsRow, error)
 	// assigned counts the target's assignment rows. latest_ts only trusts readings from an assigned observer with
-	// advert evidence (the newest per assignee, then the newest of those), so an observer Beacon has never heard the repeater through cannot stand others down. A target the
+	// advert evidence (the newest per assignee, then the newest of those), so an observer Beacon has never heard the
+	// repeater through cannot stand down one it has. When no assignee has evidence, local assignees count. A target the
 	// observer was handed as a requested one is listed even before its claim names it (that is how it learns of it);
 	// claimed_requested is true when the claim names it as requested; target_requested when a request is in use for it.
 	// accepts_requests and request_slots are the claim's, for polling.OfferSeats. The observer's flags and the password

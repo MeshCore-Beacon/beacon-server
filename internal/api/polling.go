@@ -34,8 +34,10 @@ type PollingAdminState struct {
 	// polling.excluded_nodes in config; the policy excludes the union of both lists, at most 16 distinct.
 	ConfigExcludedNodes []string `json:"configExcludedNodes"`
 	// polling.authority: evidence or approved.
-	Authority string            `json:"authority"`
-	Observers []PollingObserver `json:"observers"`
+	Authority string `json:"authority"`
+	// polling.evidence_window in seconds: how far back zero-hop adverts count as advert evidence.
+	EvidenceWindowSeconds int64             `json:"evidenceWindowSeconds"`
+	Observers             []PollingObserver `json:"observers"`
 	// NoPasswordBlocked lists repeaters that grant admin to a blank login (64 hex each); no passwordless request is
 	// accepted for them until the operator clears the flag.
 	NoPasswordBlocked []string `json:"noPasswordBlocked"`

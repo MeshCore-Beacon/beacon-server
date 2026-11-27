@@ -757,7 +757,8 @@ func main() {
 			"/db":       handlers.DBAdminRouter(maintStore, pgSource),
 			"/users":    handlers.UsersAdminRouter(usersAdmin, resolved.ReadOnly),
 			"/polling": handlers.PollingAdminRouter(pollingAdmin, handlers.PollingAdminConfig{
-				Paused: resolvedPolling.Paused, Authority: resolvedPolling.Authority, ExcludedNodes: resolvedPolling.ExcludedNodes}),
+				Paused: resolvedPolling.Paused, Authority: resolvedPolling.Authority,
+				EvidenceWindow: resolvedPolling.EvidenceWindow, ExcludedNodes: resolvedPolling.ExcludedNodes}),
 		},
 		GuestPolling:    guestPolling,
 		PollingEnabled:  resolvedPolling.Enabled,

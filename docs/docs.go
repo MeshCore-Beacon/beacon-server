@@ -10756,6 +10756,10 @@ const docTemplate = `{
                     "description": "polling.paused in config, which pauses regardless",
                     "type": "boolean"
                 },
+                "evidenceWindowSeconds": {
+                    "description": "polling.evidence_window in seconds: how far back zero-hop adverts count as advert evidence.",
+                    "type": "integer"
+                },
                 "excludedNodes": {
                     "type": "array",
                     "items": {

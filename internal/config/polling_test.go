@@ -32,6 +32,21 @@ func TestPollingDefaults(t *testing.T) {
 	if r.Authority != PollingAuthorityEvidence {
 		t.Fatalf("authority = %q", r.Authority)
 	}
+	if r.EvidenceWindow != 168*time.Hour {
+		t.Fatalf("evidence window = %s", r.EvidenceWindow)
+	}
+}
+
+func TestPollingEvidenceWindow(t *testing.T) {
+	r, err := PollingConfig{EvidenceWindow: duration{336 * time.Hour}}.Resolve()
+	if err != nil || r.EvidenceWindow != 336*time.Hour {
+		t.Fatal(r.EvidenceWindow, err)
+	}
+	for _, d := range []time.Duration{23 * time.Hour, 721 * time.Hour} {
+		if _, err := (PollingConfig{EvidenceWindow: duration{d}}).Resolve(); err == nil {
+			t.Fatalf("%s accepted", d)
+		}
+	}
 }
 
 func TestPollingRequestSettings(t *testing.T) {

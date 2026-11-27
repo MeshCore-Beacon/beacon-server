@@ -1318,6 +1318,75 @@ func TestRepeaterReadingTrustedAtInsertPostgres(t *testing.T) {
 	}
 }
 
+// A repeater nobody has advert evidence for: local assignees are trusted, a requested one is not.
+func TestRepeaterReadingTrustedWithoutEvidencePostgres(t *testing.T) {
+	ctx, pool, s := pollStore(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	a, b, c := pollKey(1), pollKey(2), pollKey(3)
+	ids := map[byte]uuid.UUID{}
+	for _, k := range [][]byte{a, b, c} {
+		ids[k[0]] = pollObserver(t, ctx, s, k)
+		if _, err := s.ReplacePollingClaim(ctx, pollClaim(k, now, 0xA), ids[k[0]], now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.ReplacePollingAssignments(ctx, pollKey(0xA), []polling.Assignment{
+		{Observer: a, Rank: 0}, {Observer: b, Rank: 1, Requested: true},
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range [][]byte{a, b, c} {
+		if ok, err := s.InsertRepeaterReading(ctx, pollReading(k, 0xA, "status", now, nil), ids[k[0]], now); err != nil || !ok {
+			t.Fatal(ok, err)
+		}
+	}
+	for k, want := range map[byte]bool{1: true, 2: false, 3: false} {
+		if got := readingTrusted(t, ctx, pool, pollKey(k)); got != want {
+			t.Fatalf("observer %d trusted = %v, want %v", k, got, want)
+		}
+	}
+	rows, err := s.PollingOwnerRows(ctx, a, now.Add(-time.Hour))
+	if err != nil || len(rows) != 1 || rows[0].LatestTS == nil {
+		t.Fatalf("local poller's reading did not count as latest: %+v %v", rows, err)
+	}
+}
+
+// 088 trusts stored readings of local assignees where no assignee has evidence, and nothing else.
+func TestRepeaterReadingTrustLocalBackfillPostgres(t *testing.T) {
+	ctx, pool, s := pollStore(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	a, b, c := pollKey(1), pollKey(2), pollKey(3)
+	if err := s.ReplacePollingAssignments(ctx, pollKey(0xA), []polling.Assignment{{Observer: a, Rank: 0}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReplacePollingAssignments(ctx, pollKey(0xB), []polling.Assignment{
+		{Observer: b, Rank: 0, EvidenceCount: 2}, {Observer: c, Rank: 1},
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range []struct {
+		obs    []byte
+		target byte
+	}{{a, 0xA}, {b, 0xA}, {c, 0xB}} {
+		if _, err := pool.Exec(ctx, `INSERT INTO repeater_readings (target_public_key, observer_public_key, sampled_at, received_at, method, tag, trusted)
+			VALUES ($1, $2, $3, $3, 'status', 1, false)`, pollKey(r.target), r.obs, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sql, err := migrationFiles.ReadFile("migrations/088_repeater_reading_trust_local.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, string(sql)); err != nil {
+		t.Fatal(err)
+	}
+	for k, want := range map[byte]bool{1: true, 2: false, 3: false} {
+		if got := readingTrusted(t, ctx, pool, pollKey(k)); got != want {
+			t.Fatalf("observer %d trusted = %v, want %v", k, got, want)
+		}
+	}
+}
+
 func TestRepeaterReadingTrustMigrationBackfillPostgres(t *testing.T) {
 	ctx, pool, _ := pollStore(t)
 	const name, indexName = "065_repeater_reading_trust.sql", "066_repeater_reading_trust_index.sql"
