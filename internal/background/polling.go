@@ -65,9 +65,15 @@ func PollingTasks(svc *polling.Service, store PollingMaintStore, cfg config.Reso
 			_, err := store.CorroborateReadings(ctx, pollingNow().Add(-pollingCorroborateWindow), pollingCorroborateBatch)
 			return err
 		}},
-		{Name: "polling_cleanup", Interval: pollingCleanupInterval, Run: func(ctx context.Context) error {
-			now := pollingNow()
-			return store.DeleteExpiredPolling(ctx, now.Add(-pollingClaimKeep), now.Add(-polling.ReadingKeep(cfg)))
-		}},
+		PollingCleanupTask(store, cfg),
 	}
+}
+
+// PollingCleanupTask expires old claims and readings. It also runs with polling off, so what an earlier run
+// stored, and the Poller tags that hang on it, still age out.
+func PollingCleanupTask(store PollingMaintStore, cfg config.ResolvedPolling) Task {
+	return Task{Name: "polling_cleanup", Interval: pollingCleanupInterval, Run: func(ctx context.Context) error {
+		now := pollingNow()
+		return store.DeleteExpiredPolling(ctx, now.Add(-pollingClaimKeep), now.Add(-polling.ReadingKeep(cfg)))
+	}}
 }

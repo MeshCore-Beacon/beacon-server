@@ -126,6 +126,24 @@ func TestPollingCorroborateAndCleanupArguments(t *testing.T) {
 	}
 }
 
+func TestPollingCleanupTaskRunsWithoutAService(t *testing.T) {
+	now := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
+	old := pollingNow
+	pollingNow = func() time.Time { return now }
+	t.Cleanup(func() { pollingNow = old })
+	ms := &pollMaintStub{}
+	task := PollingCleanupTask(ms, config.ResolvedPolling{ReadingRetention: 744 * time.Hour})
+	if task.Name != "polling_cleanup" || task.Interval != time.Hour {
+		t.Fatal(task.Name, task.Interval)
+	}
+	if err := task.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !ms.claims.Equal(now.Add(-24*time.Hour)) || !ms.readings.Equal(now.Add(-744*time.Hour)) {
+		t.Fatal("cutoffs", ms.claims, ms.readings)
+	}
+}
+
 func TestPollingCleanupUsesRetention(t *testing.T) {
 	now := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
 	old := pollingNow

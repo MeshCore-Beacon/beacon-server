@@ -709,6 +709,8 @@ func main() {
 		if requestsSvc != nil {
 			tasks = append(tasks, background.RequestTasks(maintStore, resolvedPolling.OfflineDisableDays)...)
 		}
+	} else if mode.Jobs {
+		tasks = append(tasks, background.PollingCleanupTask(background.NewPollingMaint(maintStore), resolvedPolling))
 	}
 	profiles := configureProfiling(ctx, pools.Maint)
 	defer profiles.Stop()
