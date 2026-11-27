@@ -129,8 +129,8 @@ func TestLoad_InvalidYAML(t *testing.T) {
 
 func TestResolve_Defaults(t *testing.T) {
 	r := Resolve(&Config{})
-	if r.TelemetryResolution != time.Hour {
-		t.Errorf("expected TelemetryResolution 1h, got %v", r.TelemetryResolution)
+	if r.TelemetryResolution != 15*time.Minute {
+		t.Errorf("expected TelemetryResolution 15m, got %v", r.TelemetryResolution)
 	}
 	if r.TelemetryRetention != 31*24*time.Hour {
 		t.Errorf("expected TelemetryRetention 744h, got %v", r.TelemetryRetention)

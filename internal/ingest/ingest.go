@@ -78,9 +78,15 @@ type Config struct {
 
 	// TelemetryResolution controls how frequently telemetry snapshots are stored.
 	// Status messages within the same window are deduplicated via ON CONFLICT.
-	// Defaults to 1 hour if zero.
+	// Defaults to DefaultTelemetryResolution if zero.
 	TelemetryResolution time.Duration
+
+	// Uptimes is shared by the workers of every broker; nil gives the worker its own.
+	Uptimes *UptimeTracker
 }
+
+// DefaultTelemetryResolution is how often an observer's status is stored as a telemetry snapshot.
+const DefaultTelemetryResolution = 15 * time.Minute
 
 // DB is the minimal database interface the ingest pipeline depends on.
 // Wire in your real *pgxpool.Pool implementation here.
@@ -238,11 +244,16 @@ type Worker struct {
 	onNodeUpsert     func(ctx context.Context, nodeID uuid.UUID)
 	onObserverUpsert func(ctx context.Context, observerID uuid.UUID)
 	polling          PollingSink // nil when repeater polling is off
+	uptimes          *UptimeTracker
 }
 
 // New creates an ingest Worker. Call Start() to connect and begin processing.
 func New(cfg Config, db DB, h *hub.Hub, keys ChannelKeyStore, scopes ScopeStore) *Worker {
-	return &Worker{cfg: cfg, db: db, hub: h, keys: keys, scopes: scopes,
+	uptimes := cfg.Uptimes
+	if uptimes == nil {
+		uptimes = NewUptimeTracker()
+	}
+	return &Worker{cfg: cfg, db: db, hub: h, keys: keys, scopes: scopes, uptimes: uptimes,
 		log: slog.Default().With("component", "ingest", "broker", cfg.BrokerName)}
 }
 

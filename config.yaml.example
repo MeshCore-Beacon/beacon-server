@@ -273,7 +273,13 @@ atlas:
 
 telemetry:
   retention: 744h   # 31 days
-  resolution: 1h    # store one snapshot per observer per hour
+  # How often an observer's status is stored as a snapshot (default 15m). Observers report
+  # every 5 minutes by default; reports inside one window are dropped, except the first after
+  # a reboot. Observer alerts and charts read these snapshots:
+  #   - battery and noise alerts need two snapshots in a row, so they react after about two windows
+  #   - a shorter window stores more rows (5m is about 3x the rows of 15m, 1h about a quarter)
+  #   - below the observers' report interval nothing more is stored
+  resolution: 15m
 
 # Optional authenticated database/config downloads. Disabled unless explicitly enabled.
 # Requires auth.api_key, a supported PostgreSQL URL and a compatible pg_dump client.

@@ -254,16 +254,17 @@ func (w *Worker) handleStatus(ctx context.Context, pubkeyHex string, raw []byte)
 		return
 	}
 	// Store a telemetry snapshot at the configured resolution. Partial stats are
-	// skipped rather than written as zeros that would win the hourly dedup and
+	// skipped rather than written as zeros that would win the window's dedup and
 	// pollute the telemetry aggregates.
 	if !envelope.Stats.usable() {
 		w.log.Debug("status has no usable stats; skipping telemetry insert")
 	} else {
 		resolution := w.cfg.TelemetryResolution
 		if resolution == 0 {
-			resolution = time.Hour
+			resolution = DefaultTelemetryResolution
 		}
-		reportedAt := time.Now().Truncate(resolution)
+		// A reboot is stored at once, not held for the next window: alerts read these rows.
+		reportedAt := w.uptimes.SnapshotTime(pubkeyHex, envelope.Stats.UptimeSeconds, time.Now().Truncate(time.Second), resolution)
 		batteryMV := int32(envelope.Stats.BatteryMV)
 		txAirSecs := float32(envelope.Stats.TxAirSecs)
 		rxAirSecs := float32(envelope.Stats.RxAirSecs)
