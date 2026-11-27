@@ -464,17 +464,12 @@ cache:
 # User accounts: sign-in for the web app and the mobile app. Off by default; with it off
 # no account route is served. Mode local sends mail through the mail block above.
 #accounts:
-#  mode: off                   # off, local or portal
-#  public_url: ""              # https URL of the web app, no path; used in mailed links and as the portal callback
+#  mode: off                   # off, or local for sign-up with username, email and password
+#  public_url: ""              # https URL of the web app, no path; used in mailed links
 #  registration: open          # open: anyone can sign up. closed: no new sign-ups, existing users still sign in
-#  # mode portal: users sign in through a portal; no passwords, no registration, no SMTP needed.
-#  # The client secret comes from BEACON_PORTAL_SECRET.
-#  portal:
-#    url: ""                   # https base URL of the portal
-#    client_id: ""             # this instance's client id at the portal
 
-# Alerts on Atlas radios (gone quiet, low battery, reboots and more). Both channels need accounts
-# (local or portal); each user picks which ones reach them.
+# Alerts on Atlas radios (gone quiet, low battery, reboots and more). Both channels need accounts;
+# each user picks which ones reach them.
 alerts:
   email:
     # Send alerts by email. Needs accounts.mode: local and the top-level mail block.
