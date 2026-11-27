@@ -8275,7 +8275,8 @@ const docTemplate = `{
                     "enum": [
                         "heard",
                         "observer",
-                        "telemetry"
+                        "telemetry",
+                        "poller"
                     ]
                 }
             }
@@ -8320,7 +8321,8 @@ const docTemplate = `{
                     "enum": [
                         "heard",
                         "observer",
-                        "telemetry"
+                        "telemetry",
+                        "poller"
                     ]
                 }
             }
@@ -8778,6 +8780,11 @@ const docTemplate = `{
                 },
                 "atlas7d": {
                     "description": "Atlas7d is true when the server accepts the 7d Atlas range. Always true on this version.",
+                    "type": "boolean",
+                    "example": true
+                },
+                "atlasPoller": {
+                    "description": "AtlasPoller is true when the server accepts the poller view on Atlas pins. Always true on this version.",
                     "type": "boolean",
                     "example": true
                 },
