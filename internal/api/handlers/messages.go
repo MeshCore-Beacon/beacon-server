@@ -85,6 +85,14 @@ func listMessages(reader api.Reader) http.HandlerFunc {
 			cursor = c
 		}
 		iatas := parseIATAs(r)
+		if regionIDStr := r.URL.Query().Get("regionId"); regionIDStr != "" || r.URL.Query().Get("region") != "" {
+			regionIATAs, err := resolveRegionIATAs(r.Context(), regionIDStr, r.URL.Query().Get("region"), reader)
+			if err != nil {
+				respondRegionError(w, err)
+				return
+			}
+			iatas = appendRegionIATAs(iatas, regionIATAs)
+		}
 		scope := r.URL.Query().Get("scope")
 		var messages api.Page[api.ChannelMessage]
 		if channelHashParam != "" {

@@ -76,6 +76,14 @@ func TestListReadsKeepEmptyRegionFiltered(t *testing.T) {
 			record(iatas)
 			return nil, nil
 		},
+		listChannelMessages: func(_ context.Context, _ *int32, _ time.Time, _ int32, iatas []string, _ string, _ int64) (api.Page[api.ChannelMessage], error) {
+			record(iatas)
+			return api.Page[api.ChannelMessage]{}, nil
+		},
+		listChannelMessagesByHash: func(_ context.Context, _ []byte, _ time.Time, _ int32, iatas []string, _ string, _ int64) (api.Page[api.ChannelMessage], error) {
+			record(iatas)
+			return api.Page[api.ChannelMessage]{}, nil
+		},
 		listTraceTags: func(_ context.Context, iatas []string, _, _ string, _, _, _ time.Time, _ string, _ int32) ([]api.TraceTagSummary, error) {
 			record(iatas)
 			return nil, nil
@@ -93,6 +101,10 @@ func TestListReadsKeepEmptyRegionFiltered(t *testing.T) {
 		{"/packets?hashPrefix=abcd", listPackets},
 		{"/packets/backfill?afterObservationId=1", listPacketsBackfill},
 		{"/messages/backfill?afterId=1", listMessagesBackfill},
+		{"/messages", listMessages},
+		{"/messages?channelID=3", listMessages},
+		{"/messages?channelHash=ab", listMessages},
+		{"/channels/3/messages", listChannelMessages},
 		{"/traces", listTraceTags},
 	} {
 		t.Run(endpoint.path, func(t *testing.T) {
